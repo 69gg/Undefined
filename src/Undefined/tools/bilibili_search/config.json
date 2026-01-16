@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "bilibili_search",
+        "description": "搜索 Bilibili 视频、番剧、用户等。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "msg": {
+                    "type": "string",
+                    "description": "搜索内容"
+                },
+                "n": {
+                    "type": "integer",
+                    "description": "返回数据数量 (默认5)"
+                }
+            },
+            "required": ["msg"]
+        }
+    }
+}

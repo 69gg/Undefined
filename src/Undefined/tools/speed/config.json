@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "speed",
+        "description": "网站测速工具，测试指定网站的GET请求响应时间（毫秒），帮助监测网站性能。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "需要测速的网站链接，例如：https://www.example.com"
+                }
+            },
+            "required": ["url"]
+        }
+    }
+}

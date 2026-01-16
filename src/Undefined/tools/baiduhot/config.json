@@ -1,0 +1,18 @@
+{
+    "type": "function",
+    "function": {
+        "name": "baiduhot",
+        "description": "获取百度热搜排行榜，实时返回百度搜索引擎上的热门搜索词和趋势。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "返回的热搜数量，默认10",
+                    "default": 10
+                }
+            },
+            "required": []
+        }
+    }
+}

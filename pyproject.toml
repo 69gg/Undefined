@@ -1,0 +1,61 @@
+[project]
+name = "Undefined"
+version = "1.0.0"
+description = "A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture."
+readme = "README.md"
+authors = [
+  { name = "Null", email = "pylindex@qq.com"  }
+]
+requires-python = ">=3.12, <=3.13"
+dependencies = [
+    "websockets>=12.0",
+    "httpx>=0.27.0",
+    "python-dotenv>=1.0.0",
+    "tiktoken>=0.7.0",
+    "chardet>=5.2.0",
+    "langchain-community>=0.3.0",
+    "crawl4ai>=0.3.0",
+    "matplotlib",
+    "pillow",
+    "imgkit",
+    "markdown>=3.10",
+    "types-markdown>=3.10.0.20251106",
+    "aiofiles>=25.1.0",
+    "markdown-it-py[plugins]>=4.0.0",
+    "mdit-py-plugins>=0.5.0",
+    "python-markdown-math>=0.9",
+    "linkify-it-py>=2.0.3",
+    "pymdown-extensions>=10.20",
+    "playwright>=1.57.0",
+    "aiohttp>=3.13.2",
+    "types-aiofiles>=25.1.0.20251011",
+]
+
+[project.urls]
+Homepage = "https://www.pylindex.top"
+Repository = "https://github.com/69gg/Undefined"
+Issues = "https://github.com/69gg/Undefined/issues"
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.8.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=5.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/Undefined"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

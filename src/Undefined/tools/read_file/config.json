@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "read_file",
+        "description": "读取文件内容。路径是相对于当前工作目录的。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "文件路径（相对于当前工作目录）"
+                }
+            },
+            "required": ["file_path"]
+        }
+    }
+}

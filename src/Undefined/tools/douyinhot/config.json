@@ -1,0 +1,18 @@
+{
+    "type": "function",
+    "function": {
+        "name": "douyinhot",
+        "description": "获取抖音热榜，实时返回抖音平台上的热门视频、话题和排行榜数据。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "返回的热榜数量，默认10",
+                    "default": 10
+                }
+            },
+            "required": []
+        }
+    }
+}

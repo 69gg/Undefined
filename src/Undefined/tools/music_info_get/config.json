@@ -1,0 +1,22 @@
+{
+    "type": "function",
+    "function": {
+        "name": "music_info_get",
+        "description": "获取音乐详细信息 (通过 ID)。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "歌曲 ID"
+                },
+                "type": {
+                    "type": "string",
+                    "description": "音乐平台 (wy, qq, kw, mg, qi)",
+                    "enum": ["wy", "qq", "kw", "mg", "qi"]
+                }
+            },
+            "required": ["id", "type"]
+        }
+    }
+}

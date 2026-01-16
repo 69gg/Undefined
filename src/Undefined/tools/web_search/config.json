@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "web_search",
+        "description": "使用 SearXNG 搜索引擎进行网页搜索，获取互联网上的信息。用于回答需要最新信息或你不确定的问题。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "搜索关键词"
+                },
+                "num_results": {
+                    "type": "integer",
+                    "description": "返回结果数量（默认为 5）"
+                }
+            },
+            "required": ["query"]
+        }
+    }
+}

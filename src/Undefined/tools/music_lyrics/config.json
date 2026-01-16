@@ -1,0 +1,22 @@
+{
+    "type": "function",
+    "function": {
+        "name": "music_lyrics",
+        "description": "获取歌曲歌词。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "歌曲 ID"
+                },
+                "msg": {
+                    "type": "string",
+                    "description": "音乐平台 (qq, wy, kw, qi)",
+                    "enum": ["qq", "wy", "kw", "qi"]
+                }
+            },
+            "required": ["id", "msg"]
+        }
+    }
+}

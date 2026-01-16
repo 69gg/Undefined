@@ -1,0 +1,22 @@
+{
+    "type": "function",
+    "function": {
+        "name": "base64",
+        "description": "Base64加密与解密工具，支持对字符串进行Base64编码（加密）和解码（解密）操作。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "需要加密或解密的字符串"
+                },
+                "operation": {
+                    "type": "string",
+                    "description": "操作类型：encode（加密）或 decode（解密）",
+                    "enum": ["encode", "decode"]
+                }
+            },
+            "required": ["text", "operation"]
+        }
+    }
+}

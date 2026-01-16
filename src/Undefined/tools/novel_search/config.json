@@ -1,0 +1,25 @@
+{
+    "type": "function",
+    "function": {
+        "name": "novel_search",
+        "description": "小说搜索与阅读。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "小说名 (搜索用)"
+                },
+                "href": {
+                    "type": "string",
+                    "description": "章节链接/ID (阅读用)"
+                },
+                "num": {
+                    "type": "string",
+                    "description": "页码 (阅读用)"
+                }
+            },
+            "required": []
+        }
+    }
+}

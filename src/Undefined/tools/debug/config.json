@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "debug",
+        "description": "记录调试信息，用于输出决策过程、思维路径、工具调用和结果等。仅在调试模式下使用（通过 debug:on 启用）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "调试信息内容，包括触发条件判断、上下文分析、最终决策理由等"
+                }
+            },
+            "required": ["content"]
+        }
+    }
+}

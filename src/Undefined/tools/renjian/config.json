@@ -1,0 +1,12 @@
+{
+    "type": "function",
+    "function": {
+        "name": "renjian",
+        "description": "随机返回“在人间凑数的日子”中的幽默句子，带给用户轻松幽默的日常感悟。",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    }
+}

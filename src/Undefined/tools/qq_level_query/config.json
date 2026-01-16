@@ -1,0 +1,29 @@
+{
+    "type": "function",
+    "function": {
+        "name": "qq_level_query",
+        "description": "查询 QQ 等级信息（需要提供 Cookie）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "qq": {
+                    "type": "integer",
+                    "description": "要查询等级的 QQ 号"
+                },
+                "uin": {
+                    "type": "integer",
+                    "description": "提供 Cookie 的 QQ 号 (uin)"
+                },
+                "skey": {
+                    "type": "string",
+                    "description": "Cookie 中的 skey"
+                },
+                "pskey": {
+                    "type": "string",
+                    "description": "Cookie 中的 pskey (需 vip.qq.com 域)"
+                }
+            },
+            "required": ["qq", "uin", "skey", "pskey"]
+        }
+    }
+}

@@ -1,0 +1,25 @@
+{
+    "type": "function",
+    "function": {
+        "name": "search_file_content",
+        "description": "在文件中搜索内容。支持正则表达式。路径是相对于当前工作目录的。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "搜索模式（正则表达式）"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "搜索路径（相对于当前工作目录，默认为根目录）"
+                },
+                "include": {
+                    "type": "string",
+                    "description": "文件过滤模式（如 *.py）"
+                }
+            },
+            "required": ["pattern"]
+        }
+    }
+}

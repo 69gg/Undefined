@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "net_check",
+        "description": "全方位网络检测工具，支持DNS解析、ICMP Ping、HTTP/HTTPS请求等多维度检测。返回域名解析结果、延迟数据、网站响应状态和证书有效期等信息。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "host": {
+                    "type": "string",
+                    "description": "要检测的域名或IP，例如：example.com"
+                }
+            },
+            "required": ["host"]
+        }
+    }
+}

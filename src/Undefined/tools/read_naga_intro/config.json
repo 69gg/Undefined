@@ -1,0 +1,12 @@
+{
+    "type": "function",
+    "function": {
+        "name": "read_naga_intro",
+        "description": "读取 NagaAgent 项目的介绍文档，获取项目概述、技术架构、项目结构、构建运行方法等核心信息。当用户询问关于 NagaAgent 项目的任何问题时，应优先使用此工具获取项目上下文，而不是直接阅读代码文件。这样可以节省时间和 token，快速提供准确的项目信息。",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    }
+}

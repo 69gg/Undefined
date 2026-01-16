@@ -1,0 +1,24 @@
+{
+    "type": "function",
+    "function": {
+        "name": "horoscope",
+        "description": "获取指定星座的运势信息，支持今日、本周、本月和本年的运势查询。返回综合运势、健康、爱情、财运、工作等详细运势信息，包括运势评分、运势描述、幸运色、幸运数字等。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "constellation": {
+                    "type": "string",
+                    "description": "星座名称（中文或英文）",
+                    "enum": ["白羊座", "金牛座", "双子座", "巨蟹座", "狮子座", "处女座", "天秤座", "天蝎座", "射手座", "摩羯座", "水瓶座", "双鱼座", "aries", "taurus", "gemini", "cancer", "leo", "virgo", "libra", "scorpio", "sagittarius", "capricorn", "aquarius", "pisces"]
+                },
+                "time_type": {
+                    "type": "string",
+                    "description": "运势时间类型",
+                    "enum": ["today", "week", "month", "year", "今日", "本周", "本月", "本年"],
+                    "default": "today"
+                }
+            },
+            "required": ["constellation"]
+        }
+    }
+}

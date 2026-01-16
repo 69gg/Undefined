@@ -1,0 +1,12 @@
+{
+    "type": "function",
+    "function": {
+        "name": "history",
+        "description": "获取历史上的今天，返回每一天的历史事件和重要纪念日。",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    }
+}

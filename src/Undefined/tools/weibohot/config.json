@@ -1,0 +1,18 @@
+{
+    "type": "function",
+    "function": {
+        "name": "weibohot",
+        "description": "获取微博热搜排行榜，实时返回当前热门话题和趋势。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "返回的热搜数量，默认10",
+                    "default": 10
+                }
+            },
+            "required": []
+        }
+    }
+}

@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "end",
+        "description": "结束对话。发送完所有消息后，必须且只能调用一次此工具来结束对话。如果这次做了什么或以后可能要做什么，必须填写summary参数记录下来。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "description": "记录这次做了什么或以后可能要做什么。如果只是end了不做事，不需要填写。如果做了什么或以后可能要做什么，必须填写。最多保留100条记录。"
+                }
+            },
+            "required": []
+        }
+    }
+}

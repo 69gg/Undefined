@@ -1,0 +1,22 @@
+{
+    "type": "function",
+    "function": {
+        "name": "hash",
+        "description": "字符串哈希加密工具，支持MD4、MD5、SHA1、SHA256、SHA512五种加密算法。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "需要加密的字符串"
+                },
+                "algorithm": {
+                    "type": "string",
+                    "description": "加密算法",
+                    "enum": ["md4", "md5", "sha1", "sha256", "sha512"]
+                }
+            },
+            "required": ["text", "algorithm"]
+        }
+    }
+}

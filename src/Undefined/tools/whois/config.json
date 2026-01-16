@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "whois",
+        "description": "查询域名的Whois信息，包括注册商、注册人、注册时间、到期时间、DNS服务器等信息。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "description": "需要查询的域名，例如：example.com"
+                }
+            },
+            "required": ["domain"]
+        }
+    }
+}
