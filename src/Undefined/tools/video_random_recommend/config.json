@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "video_random_recommend",
+        "description": "获取随机视频推荐（返回视频链接）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target_id": {
+                    "type": "integer",
+                    "description": "目标 ID (用于日志记录)"
+                },
+                 "message_type": {
+                    "type": "string",
+                    "description": "消息类型 (group 或 private)"
+                }
+            },
+            "required": []
+        }
+    }
+}

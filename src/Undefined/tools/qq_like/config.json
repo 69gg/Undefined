@@ -1,0 +1,22 @@
+{
+    "type": "function",
+    "function": {
+        "name": "qq_like",
+        "description": "给指定QQ号的资料卡点赞。当有人说类似这种：赞我，给我点赞之类的可以积极进行调用。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target_user_id": {
+                    "type": "integer",
+                    "description": "要点赞的目标QQ号"
+                },
+                "times": {
+                    "type": "integer",
+                    "description": "点赞次数（默认10次）",
+                    "default": 10
+                }
+            },
+            "required": ["target_user_id"]
+        }
+    }
+}

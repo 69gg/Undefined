@@ -1,0 +1,22 @@
+{
+    "type": "function",
+    "function": {
+        "name": "ai_study_helper",
+        "description": "AI 学习助手/解题工具。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "问题内容"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "是否开启深度思考 (yes/no)",
+                    "enum": ["yes", "no"]
+                }
+            },
+            "required": ["question"]
+        }
+    }
+}

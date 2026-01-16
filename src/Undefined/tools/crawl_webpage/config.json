@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "crawl_webpage",
+        "description": "获取指定网页的内容，返回结构化的 Markdown 格式文本。支持获取网页的标题、正文、链接等信息。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "要获取的网页 URL"
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "description": "返回的最大字符数（默认为 4096）"
+                }
+            },
+            "required": ["url"]
+        }
+    }
+}

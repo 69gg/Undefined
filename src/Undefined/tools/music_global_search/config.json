@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "music_global_search",
+        "description": "全网音乐搜索。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "msg": {
+                    "type": "string",
+                    "description": "歌曲名称"
+                },
+                "n": {
+                    "type": "integer",
+                    "description": "序号 (可选)"
+                }
+            },
+            "required": ["msg"]
+        }
+    }
+}

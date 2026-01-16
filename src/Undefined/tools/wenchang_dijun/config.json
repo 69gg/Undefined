@@ -1,0 +1,12 @@
+{
+    "type": "function",
+    "function": {
+        "name": "wenchang_dijun",
+        "description": "文昌帝君灵签抽签工具，随机抽取文昌帝君签文，适用于求签、运势查询和文化应用。返回签文、诗句、签号和签文图片。",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    }
+}

@@ -1,0 +1,12 @@
+{
+    "type": "function",
+    "function": {
+        "name": "gold_price",
+        "description": "获取今日黄金价格，包括银行投资金条价格、黄金回收价格和贵金属品牌价格。",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    }
+}

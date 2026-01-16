@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "send_private_message",
+        "description": "发送私聊消息给指定用户。只能在群聊中使用，用于给特定用户发送私聊消息。最后必须调用 end 工具结束对话。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "user_id": {
+                    "type": "integer",
+                    "description": "目标用户的 QQ 号"
+                },
+                "message": {
+                    "type": "string",
+                    "description": "要发送的私聊消息内容"
+                }
+            },
+            "required": ["user_id", "message"]
+        }
+    }
+}

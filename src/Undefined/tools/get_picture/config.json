@@ -1,0 +1,45 @@
+{
+    "type": "function",
+    "function": {
+        "name": "get_picture",
+        "description": "获取指定数量的指定类型的图片并发送到群聊或指定私聊。支持白丝、黑丝、头像、JK、二次元、小姐姐、壁纸、原神、历史上的今天、4K图片、美腿十一种类型。二次元类型支持选择手机端或PC端。4K图片支持选择二次元或风景。默认获取二次元图片，默认使用PC端。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "message_type": {
+                    "type": "string",
+                    "description": "消息类型",
+                    "enum": ["group", "private"]
+                },
+                "target_id": {
+                    "type": "integer",
+                    "description": "目标 ID（群聊为群号，私聊为用户 QQ 号）"
+                },
+                "picture_type": {
+                    "type": "string",
+                    "description": "图片类型",
+                    "enum": ["baisi", "heisi", "head", "jk", "acg", "meinvpic", "wallpaper", "ys", "historypic", "random4kPic"],
+                    "default": "acg"
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "获取图片的数量",
+                    "default": 1
+                },
+                "device": {
+                    "type": "string",
+                    "description": "设备类型（仅 acg 类型支持）",
+                    "enum": ["pc", "wap"],
+                    "default": "pc"
+                },
+                "fourk_type": {
+                    "type": "string",
+                    "description": "4K图片类型（仅 random4kPic 类型支持）",
+                    "enum": ["acg", "wallpaper"],
+                    "default": "acg"
+                }
+            },
+            "required": ["message_type", "target_id"]
+        }
+    }
+}

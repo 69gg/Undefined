@@ -1,0 +1,34 @@
+{
+    "type": "function",
+    "function": {
+        "name": "ai_draw_one",
+        "description": "AI 绘图工具 (DrawOne)。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "绘图提示词"
+                },
+                "model": {
+                    "type": "string",
+                    "description": "绘图模型 (例如: anylora, anything-v5, etc. 可选)"
+                },
+                "size": {
+                    "type": "string",
+                    "description": "比例 (例如 2:3)"
+                },
+                "target_id": {
+                    "type": "integer",
+                    "description": "发送目标的 ID"
+                },
+                "message_type": {
+                    "type": "string",
+                    "description": "消息类型 (group 或 private)",
+                    "enum": ["group", "private"]
+                }
+            },
+            "required": ["prompt", "target_id", "message_type"]
+        }
+    }
+}

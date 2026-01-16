@@ -1,0 +1,30 @@
+{
+    "type": "function",
+    "function": {
+        "name": "get_recent_messages",
+        "description": "获取指定聊天的历史消息。用于查看对话历史，了解上下文。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "type": "string",
+                    "description": "聊天ID（群号或QQ号）"
+                },
+                "type": {
+                    "type": "string",
+                    "description": "聊天类型（group 或 private）",
+                    "enum": ["group", "private"]
+                },
+                "start": {
+                    "type": "integer",
+                    "description": "起始位置（从最新消息往前数），默认为 0（最新消息）"
+                },
+                "end": {
+                    "type": "integer",
+                    "description": "结束位置（从最新消息往前数），默认为 10"
+                }
+            },
+            "required": ["chat_id", "type"]
+        }
+    }
+}

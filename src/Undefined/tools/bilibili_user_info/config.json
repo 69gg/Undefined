@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "bilibili_user_info",
+        "description": "查询 Bilibili 用户信息。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "mid": {
+                    "type": "integer",
+                    "description": "用户 UID (mid)"
+                }
+            },
+            "required": ["mid"]
+        }
+    }
+}

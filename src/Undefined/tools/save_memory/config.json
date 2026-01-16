@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "save_memory",
+        "description": "保存一条记忆。当你觉得某些信息值得记住（比如用户的偏好、重要的事情、约定等），可以调用此工具保存。就事论事，就人论人，不做会话隔离。上限100条，超出上限会自动移除最旧的记忆。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "fact": {
+                    "type": "string",
+                    "description": "要记住的内容（简短、具体、有价值的信息）"
+                }
+            },
+            "required": ["fact"]
+        }
+    }
+}

@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "glob",
+        "description": "查找匹配模式的文件。路径是相对于当前工作目录的。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "文件模式（如 **/*.py, code/**/*.py）"
+                }
+            },
+            "required": ["pattern"]
+        }
+    }
+}

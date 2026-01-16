@@ -1,0 +1,30 @@
+{
+    "type": "function",
+    "function": {
+        "name": "get_messages_by_time",
+        "description": "根据时间范围检索消息。用于查找特定时间段内的聊天记录。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "type": "string",
+                    "description": "聊天ID（群号或QQ号）"
+                },
+                "type": {
+                    "type": "string",
+                    "description": "聊天类型（group 或 private）",
+                    "enum": ["group", "private"]
+                },
+                "start_time": {
+                    "type": "string",
+                    "description": "开始时间（格式：YYYY-MM-DD HH:MM:SS，例如：2025-12-29 10:00:00）"
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": "结束时间（格式：YYYY-MM-DD HH:MM:SS，例如：2025-12-29 12:00:00）"
+                }
+            },
+            "required": ["chat_id", "type", "start_time", "end_time"]
+        }
+    }
+}

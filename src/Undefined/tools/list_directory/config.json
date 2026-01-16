@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "list_directory",
+        "description": "列出目录内容。路径是相对于当前工作目录的。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "目录路径（相对于当前工作目录，默认为根目录）"
+                }
+            },
+            "required": []
+        }
+    }
+}

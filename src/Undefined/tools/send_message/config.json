@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "send_message",
+        "description": "发送群聊消息。可以在回答过程中多次调用，用于发送中间结果、进展信息或最终答案。最后必须调用 end 工具结束对话。注意：群号已自动设置，无需传递 group_id 参数。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "要发送的消息内容"
+                },
+                "at_user": {
+                    "type": "integer",
+                    "description": "要 @ 的用户 QQ 号（可选）"
+                }
+            },
+            "required": ["message"]
+        }
+    }
+}

@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "get_forward_msg",
+        "description": "获取合并转发消息的详情内容。当你在聊天记录中看到 [合并转发: ID] 时，可以使用此工具获取其包含的具体消息列表。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string",
+                    "description": "合并转发消息的 ID"
+                }
+            },
+            "required": ["message_id"]
+        }
+    }
+}

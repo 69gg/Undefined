@@ -1,0 +1,3 @@
+[submodule "code/NagaAgent"]
+	path = code/NagaAgent
+	url = https://github.com/Xxiii8322766509/NagaAgent.git

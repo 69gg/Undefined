@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "news_tencent",
+        "description": "获取腾讯新闻头条。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "page": {
+                    "type": "integer",
+                    "description": "新闻数量 (1-10)"
+                }
+            },
+            "required": []
+        }
+    }
+}

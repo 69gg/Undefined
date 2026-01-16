@@ -1,0 +1,43 @@
+{
+    "type": "function",
+    "function": {
+        "name": "minecraft_skin",
+        "description": "获取 Minecraft 玩家皮肤/头像。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "正版 ID"
+                },
+                "type": {
+                    "type": "string",
+                    "description": "渲染部位 (头像, 头颅, 身体, 皮肤, 披风)",
+                    "enum": ["头像", "头颅", "身体", "皮肤", "披风"]
+                },
+                "overlay": {
+                    "type": "boolean",
+                    "description": "是否渲染多层皮肤"
+                },
+                "size": {
+                    "type": "integer",
+                    "description": "头像大小 (1-512)"
+                },
+                "scale": {
+                    "type": "integer",
+                    "description": "体型大小 (1-10)"
+                },
+                "target_id": {
+                    "type": "integer",
+                    "description": "发送目标的 ID (群号或 QQ 号)"
+                },
+                "message_type": {
+                    "type": "string",
+                    "description": "消息类型 (group 或 private)",
+                    "enum": ["group", "private"]
+                }
+            },
+            "required": ["name", "target_id", "message_type"]
+        }
+    }
+}

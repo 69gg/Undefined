@@ -1,0 +1,47 @@
+Undefind命令模块 使用帮助帮助
+
+可用命令：
+
+/bugfix <QQ号1> [QQ号2] ... <开始时间> <结束时间>
+  分析与指定用户在指定时间段的对话，生成 Bug 修复报告
+  支持指定多个目标 QQ，空格分隔
+  时间格式：YYYY/MM/DD/HH:MM
+  结束时间可以用 now 表示当前时间
+  示例：/bugfix 123456 2024/12/01/09:00 now
+  (仅限管理员)
+
+/addadmin <QQ号>
+  添加管理员
+  (仅限超级管理员)
+
+/rmadmin <QQ号>
+  移除管理员
+  (仅限超级管理员)
+
+/delfaq <ID>
+  删除指定 FAQ
+  (仅限管理员)
+
+/searchfaq <关键词>
+  搜索 FAQ
+  (公开可用)
+
+/lsfaq
+  列出当前群组的所有 FAQ 条目
+  (公开可用)
+
+/viewfaq <ID>
+  查看指定 ID 的 FAQ 详细内容
+  示例：/viewfaq 20241205-001
+  (公开可用)
+
+/lsadmin
+  查看当前机器人管理员列表
+  (公开可用)
+
+/help
+  显示本帮助信息
+  (公开可用)
+
+© 由 Null(qq:1708213363) <pylindex@qq.com> 编写 版权所有
+开源链接：https://github.com/69gg/Undefined

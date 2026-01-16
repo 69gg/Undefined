@@ -1,0 +1,22 @@
+{
+    "type": "function",
+    "function": {
+        "name": "weather_query",
+        "description": "查询指定城市的天气实况、未来预报或生活指数（如穿衣、洗车、运动建议等）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "城市名称，例如 '北京', 'shanghai'。"
+                },
+                "query_type": {
+                    "type": "string",
+                    "enum": ["now", "forecast", "life"],
+                    "description": "查询类型: 'now'(实况天气, 默认), 'forecast'(未来天气预报), 'life'(生活指数/建议)。"
+                }
+            },
+            "required": ["location"]
+        }
+    }
+}

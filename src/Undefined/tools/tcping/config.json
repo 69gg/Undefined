@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "tcping",
+        "description": "TCPing测试工具，使用TCP协议测试指定IP或域名的端口延迟，即使目标端口禁Ping也能检测。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string",
+                    "description": "需要tcping的IP或域名（不需要加http或https）"
+                },
+                "port": {
+                    "type": "integer",
+                    "description": "需要tcping的端口（1-65535）"
+                }
+            },
+            "required": ["address", "port"]
+        }
+    }
+}

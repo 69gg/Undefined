@@ -1,0 +1,26 @@
+{
+    "type": "function",
+    "function": {
+        "name": "render_html",
+        "description": "将 HTML 内容渲染为图片并发送到指定目标（群聊或私聊）。支持完整的 HTML 文档，包括内联 CSS 和样式。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "html_content": {
+                    "type": "string",
+                    "description": "要渲染的 HTML 内容。必须是完整的 HTML 文档（包含 <!DOCTYPE html>、<html>、<head>、<body> 标签）。"
+                },
+                "target_id": {
+                    "type": "integer",
+                    "description": "目标 ID（群号或用户 QQ 号）"
+                },
+                "message_type": {
+                    "type": "string",
+                    "description": "消息类型",
+                    "enum": ["group", "private"]
+                }
+            },
+            "required": ["html_content", "target_id", "message_type"]
+        }
+    }
+}
