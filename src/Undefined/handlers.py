@@ -552,6 +552,7 @@ class MessageHandler:
                 send_like_callback=send_like_callback,
                 sender=self.sender,
                 history_manager=self.history_manager,
+                onebot_client=self.onebot,
             )
         except Exception as e:
             logger.error(f"自动回复处理出错: {e}")
@@ -603,6 +604,7 @@ class MessageHandler:
                 send_like_callback=send_like_callback,
                 sender=self.sender,
                 history_manager=self.history_manager,
+                onebot_client=self.onebot,
             )
             # 如果 AI 直接返回了文本（没有调用工具），自动发送
             if result:
