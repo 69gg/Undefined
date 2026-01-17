@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "info_agent",
+        "description": "信息查询助手，提供天气、热搜、新闻、历史、网络诊断、编码工具等各类实用信息查询功能。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "用户的查询需求，例如：'北京天气'、'今日热搜'、'查询 qq123456 的等级'"
+                }
+            },
+            "required": ["prompt"]
+        }
+    }
+}

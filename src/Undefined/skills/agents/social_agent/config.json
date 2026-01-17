@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "social_agent",
+        "description": "社交媒体助手，提供 Bilibili、音乐等社交媒体内容的搜索和查询功能。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "用户的搜索需求，例如：'搜索 Python 教学视频'、'找周杰伦的稻香歌词'"
+                }
+            },
+            "required": ["prompt"]
+        }
+    }
+}

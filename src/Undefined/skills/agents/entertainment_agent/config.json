@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "entertainment_agent",
+        "description": "娱乐助手，提供 AI 绘画、学习答疑、星座运势、Minecraft 皮肤、小说阅读等娱乐功能。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "用户的娱乐需求，例如：'画一只可爱的猫咪'、'白羊座今日运势'、'搜索斗破苍穹'"
+                }
+            },
+            "required": ["prompt"]
+        }
+    }
+}
