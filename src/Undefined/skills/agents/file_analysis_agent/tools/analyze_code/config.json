@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "analyze_code",
+        "description": "分析代码文件，提取代码结构、统计信息、注释等。支持 py, js, ts, c, java, go, rs, php, rb 等编程语言。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "本地文件路径"
+                }
+            },
+            "required": ["file_path"]
+        }
+    }
+}

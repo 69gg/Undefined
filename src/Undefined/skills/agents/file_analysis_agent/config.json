@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "file_analysis_agent",
+        "description": "文件分析助手，支持解析各种文件格式：文档（PDF、Word、PPT、Excel）、代码、压缩包、图片、音频、视频等。参数为 URL 或 file_id（QQ 内的文件 ID）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_source": {
+                    "type": "string",
+                    "description": "文件源，可以是 URL 或 QQ 的 file_id"
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "额外的分析需求，例如：'提取所有邮件地址'、'统计代码行数'、'解压并查看内容'"
+                }
+            },
+            "required": ["file_source"]
+        }
+    }
+}

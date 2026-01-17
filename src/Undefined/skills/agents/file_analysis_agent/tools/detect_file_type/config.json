@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "detect_file_type",
+        "description": "检测文件类型。Linux 系统使用 file 命令，非 Linux 系统使用魔数检测。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "本地文件路径"
+                }
+            },
+            "required": ["file_path"]
+        }
+    }
+}

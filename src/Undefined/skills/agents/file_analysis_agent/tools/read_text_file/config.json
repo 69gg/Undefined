@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "read_text_file",
+        "description": "读取文本文件内容，自动检测文件编码。支持 txt, md, log, rst, json, yaml, xml, html, css, js, py 等纯文本格式。大文件可限制读取行数。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "本地文件路径"
+                },
+                "max_lines": {
+                    "type": "number",
+                    "description": "最大读取行数，默认读取全部"
+                }
+            },
+            "required": ["file_path"]
+        }
+    }
+}

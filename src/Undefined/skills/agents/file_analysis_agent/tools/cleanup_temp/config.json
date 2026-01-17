@@ -1,0 +1,16 @@
+{
+    "type": "function",
+    "function": {
+        "name": "cleanup_temp",
+        "description": "清理指定的临时目录。用于在文件分析完成后删除临时下载的文件。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_uuid": {
+                    "type": "string",
+                    "description": "任务 UUID（临时目录名），留空则清理所有 temp 目录"
+                }
+            }
+        }
+    }
+}

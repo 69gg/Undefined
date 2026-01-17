@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "extract_xlsx",
+        "description": "提取 Microsoft Excel 工作簿 (.xlsx, .xls, .csv) 的表格数据，包括工作表列表和内容预览。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "本地 Excel 或 CSV 文件路径"
+                }
+            },
+            "required": ["file_path"]
+        }
+    }
+}
