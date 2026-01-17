@@ -31,13 +31,8 @@
 
 - **Skills 架构**：全新设计的技能系统，将基础工具（Tools）与智能代理（Agents）分层管理，支持自动发现与注册。
 - **并行工具执行**：无论是主 AI 还是子 Agent，均支持 `asyncio` 并发工具调用，大幅提升多任务处理速度（如同时读取多个文件或搜索多个关键词）。
-- **智能 Agent 矩阵**：内置五大专业 Agent，分工协作处理复杂任务：
-  - `CodeAnalysisAgent`：代码库分析、文件操作、全局搜索
-  - `WebAgent`：智能联网搜索、网页内容抓取与总结
-  - `SocialAgent`：Bilibili 视频解析、音乐搜索、社交媒体互动
-  - `EntertainmentAgent`：AI 绘图、小说生成、趣味互动
-  - `InfoAgent`：天气查询、热搜榜单、实用工具
-- **思维链支持**：支持 `Thinking` 模式，提升复杂逻辑推理能力。
+- **智能 Agent 矩阵**：内置多个专业 Agent，分工协作处理复杂任务。
+- **思维链支持**：支持开启思维链，提升复杂逻辑推理能力。
 - **高并发架构**：基于 `asyncio` 全异步设计，支持多队列消息处理与工具并发执行，轻松应对高并发场景。
 - **安全防护**：内置独立的安全模型，实时检测注入攻击与恶意内容。
 - **OneBot 协议**：完美兼容 OneBot V11 协议，支持多种前端实现（如 NapCat）。
@@ -53,7 +48,7 @@
 下载 Release 中的 `.whl` 文件，然后运行：
 
 ```bash
-pip install /path/to/Undefined-2.0.0-py3-none-any.whl
+pip install /path/to/Undefined-x.x.x-py3-none-any.whl
 # 还需要安装浏览器内核（如果尚未安装）
 playwright install
 ```
@@ -62,8 +57,8 @@ playwright install
 
 1.  创建一个文件夹作为机器人的**工作目录**。
 2.  克隆 [_NagaAgent_ 仓库](https://github.com/Xxiii8322766509/NagaAgent) 至 `./code/NagaAgent`。
-3.  在该目录下创建一个 `.env` 文件，填入您的配置信息（参考下方配置说明或于 Github 中打开 `.env.example` 查看注释）。
-4.  在该目录下打开终端，直接输入命令启动：
+3.  在工作目录下创建一个 `.env` 文件，填入您的配置信息（参考下方配置说明或于 Github 中打开 `.env.example` 查看注释）。
+4.  在工作目录下打开终端，直接输入命令启动：
 
 ```bash
 Undefined
