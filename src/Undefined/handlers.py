@@ -21,6 +21,7 @@ from .onebot import (
 from .rate_limit import RateLimiter
 from .utils.common import extract_text, parse_message_content_for_history
 from .utils.history import MessageHistoryManager
+from .utils.scheduler import TaskScheduler
 from .utils.sender import MessageSender
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,9 @@ class MessageHandler:
         # 初始化 Utils
         self.history_manager = MessageHistoryManager()
         self.sender = MessageSender(onebot, self.history_manager, config.bot_qq)
+
+        # 初始化定时任务调度器
+        self.scheduler = TaskScheduler(ai, self)
 
         # AI 请求队列（四个队列）
         self._superadmin_queue: asyncio.Queue[dict[str, Any]] = (
