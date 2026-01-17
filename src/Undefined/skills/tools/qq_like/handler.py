@@ -50,7 +50,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         
         # 根据错误消息提供更友好的提示
         if "SVIP 上限" in error_msg:
-            return f"点赞失败：今日给同一好友的点赞数已达SVIP上限"
+            return "点赞失败：今日给同一好友的点赞数已达SVIP上限"
         elif "点赞失败" in error_msg:
             return f"点赞失败：{error_msg}"
         else:

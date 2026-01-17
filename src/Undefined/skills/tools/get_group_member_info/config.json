@@ -1,0 +1,38 @@
+{
+    "type": "function",
+    "function": {
+        "name": "get_group_member_info",
+        "description": "获取群聊成员的详细信息。可以指定要获取的字段和字段数目，支持获取：群昵称、QQ昵称、QQ号(cqid)、加群时间、入群时间戳、等级、活跃度、最后发言时间、最后活跃时间戳、历史消息数量等。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "群号"
+                },
+                "user_id": {
+                    "type": "integer",
+                    "description": "群成员的QQ号"
+                },
+                "fields": {
+                    "type": "array",
+                    "description": "指定要获取的字段列表。可选字段：nickname(QQ昵称)、card(群昵称)、user_id(QQ号)、join_time(加群时间)、last_sent_time(最后发言时间)、level(等级)、role(角色)、unfriendly(是否不友好)、title(头衔)、title_expire_time(头衔过期时间)、shut_up_timestamp(禁言截止时间)",
+                    "items": {
+                        "type": "string",
+                        "enum": ["nickname", "card", "user_id", "join_time", "last_sent_time", "level", "role", "unfriendly", "title", "title_expire_time", "shut_up_timestamp"]
+                    }
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "限制返回的字段数量（当 fields 未指定时有效），默认返回所有字段"
+                },
+                "no_cache": {
+                    "type": "boolean",
+                    "description": "是否不使用缓存获取最新信息，默认 false",
+                    "default": false
+                }
+            },
+            "required": ["group_id", "user_id"]
+        }
+    }
+}

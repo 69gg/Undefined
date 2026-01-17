@@ -14,23 +14,24 @@ logger = logging.getLogger(__name__)
 
 class OneBotClient:
     """OneBot v11 WebSocket 客户端"""
-    
+
     def __init__(self, ws_url: str, token: str = ""):
         self.ws_url = ws_url
         self.token = token
         self.ws: ClientConnection | None = None
         self._message_id = 0
         self._pending_responses: dict[str, asyncio.Future[dict[str, Any]]] = {}
-        self._message_handler: Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None = None
+        self._message_handler: (
+            Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None
+        ) = None
         self._running = False
-    
+
     def set_message_handler(
-        self, 
-        handler: Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
+        self, handler: Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
     ) -> None:
         """设置消息处理器"""
         self._message_handler = handler
-    
+
     async def connect(self) -> None:
         """连接到 OneBot WebSocket"""
         # 构建带 token 的 URL
@@ -38,14 +39,14 @@ class OneBotClient:
         if self.token:
             separator = "&" if "?" in url else "?"
             url = f"{url}{separator}access_token={self.token}"
-        
+
         logger.info(f"正在连接到 {self.ws_url}")
-        
+
         # 同时在请求头中传递 token（兼容不同实现）
         extra_headers = {}
         if self.token:
             extra_headers["Authorization"] = f"Bearer {self.token}"
-        
+
         self.ws = await websockets.connect(
             url,
             ping_interval=20,
@@ -53,48 +54,52 @@ class OneBotClient:
             additional_headers=extra_headers if extra_headers else None,
         )
         logger.info("WebSocket 连接成功")
-    
+
     async def disconnect(self) -> None:
         """断开连接"""
         self._running = False
         if self.ws:
             await self.ws.close()
             self.ws = None
-    
-    async def _call_api(self, action: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+
+    async def _call_api(
+        self, action: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """调用 OneBot API"""
         if not self.ws:
             raise RuntimeError("WebSocket 未连接")
-        
+
         self._message_id += 1
         echo = str(self._message_id)  # 使用字符串类型
-        
+
         request = {
             "action": action,
             "params": params or {},
             "echo": echo,
         }
-        
+
         logger.debug(f"API 调用: {action}, params={params}, echo={echo}")
-        
+
         # 创建 Future 等待响应
         future: asyncio.Future[dict[str, Any]] = asyncio.Future()
         self._pending_responses[echo] = future
-        
+
         try:
             await self.ws.send(json.dumps(request))
             logger.debug(f"API 请求已发送: {action}")
             # 等待响应，超时 30 秒
             response = await asyncio.wait_for(future, timeout=30.0)
-            
+
             # 检查响应状态
             status = response.get("status")
             if status == "failed":
                 retcode = response.get("retcode", -1)
                 msg = response.get("message", "未知错误")
-                logger.error(f"API 调用失败: {action}, retcode={retcode}, message={msg}")
+                logger.error(
+                    f"API 调用失败: {action}, retcode={retcode}, message={msg}"
+                )
                 raise RuntimeError(f"API 调用失败: {msg} (retcode={retcode})")
-            
+
             logger.debug(f"API 响应: {action}, status={status}")
             return response
         except asyncio.TimeoutError:
@@ -102,34 +107,44 @@ class OneBotClient:
             raise
         finally:
             self._pending_responses.pop(echo, None)
-    
-    async def send_group_message(self, group_id: int, message: str | list[dict[str, Any]]) -> dict[str, Any]:
+
+    async def send_group_message(
+        self, group_id: int, message: str | list[dict[str, Any]]
+    ) -> dict[str, Any]:
         """发送群消息"""
-        return await self._call_api("send_group_msg", {
-            "group_id": group_id,
-            "message": message,
-        })
-    
-    async def send_private_message(self, user_id: int, message: str | list[dict[str, Any]]) -> dict[str, Any]:
+        return await self._call_api(
+            "send_group_msg",
+            {
+                "group_id": group_id,
+                "message": message,
+            },
+        )
+
+    async def send_private_message(
+        self, user_id: int, message: str | list[dict[str, Any]]
+    ) -> dict[str, Any]:
         """发送私聊消息"""
-        return await self._call_api("send_private_msg", {
-            "user_id": user_id,
-            "message": message,
-        })
-    
+        return await self._call_api(
+            "send_private_msg",
+            {
+                "user_id": user_id,
+                "message": message,
+            },
+        )
+
     async def get_group_msg_history(
-        self, 
-        group_id: int, 
+        self,
+        group_id: int,
         message_seq: int | None = None,
         count: int = 500,
     ) -> list[dict[str, Any]]:
         """获取群消息历史
-        
+
         Args:
             group_id: 群号
             message_seq: 起始消息序号，None 表示从最新消息开始
             count: 获取的消息数量
-        
+
         Returns:
             消息列表
         """
@@ -139,29 +154,29 @@ class OneBotClient:
         }
         if message_seq is not None:
             params["message_seq"] = message_seq
-        
+
         result = await self._call_api("get_group_msg_history", params)
-        
+
         # 安全获取消息列表
         if result is None:
             logger.warning("get_group_msg_history 返回 None")
             return []
-        
+
         data = result.get("data")
         if data is None:
             logger.warning(f"get_group_msg_history 响应无 data 字段: {result}")
             return []
-        
+
         messages: list[dict[str, Any]] = data.get("messages", [])
         logger.debug(f"获取到 {len(messages)} 条历史消息")
         return messages
-    
+
     async def get_image(self, file: str) -> str:
         """获取图片信息
-        
+
         Args:
             file: 图片文件名或 URL
-        
+
         Returns:
             图片的本地路径或 URL
         """
@@ -169,13 +184,13 @@ class OneBotClient:
         data: dict[str, str] = result.get("data", {})
         url: str = data.get("url", "") or data.get("file", "")
         return url
-    
+
     async def get_group_info(self, group_id: int) -> dict[str, Any] | None:
         """获取群信息
-        
+
         Args:
             group_id: 群号
-        
+
         Returns:
             群信息字典，包含 group_name 等字段
         """
@@ -186,13 +201,13 @@ class OneBotClient:
         except Exception as e:
             logger.error(f"获取群信息失败: {e}")
             return None
-    
+
     async def get_stranger_info(self, user_id: int) -> dict[str, Any] | None:
         """获取陌生人信息
-        
+
         Args:
             user_id: 用户QQ号
-        
+
         Returns:
             用户信息字典，包含 nickname 等字段
         """
@@ -203,6 +218,49 @@ class OneBotClient:
         except Exception as e:
             logger.error(f"获取陌生人信息失败: {e}")
             return None
+
+    async def get_group_member_info(
+        self, group_id: int, user_id: int, no_cache: bool = False
+    ) -> dict[str, Any] | None:
+        """获取群成员信息
+
+        Args:
+            group_id: 群号
+            user_id: 群成员QQ号
+            no_cache: 是否不使用缓存（默认 false）
+
+        Returns:
+            群成员信息字典，包含群昵称、QQ昵称、加群时间、等级、最后发言时间等字段
+        """
+        try:
+            result = await self._call_api(
+                "get_group_member_info",
+                {"group_id": group_id, "user_id": user_id, "no_cache": no_cache},
+            )
+            data: dict[str, Any] = result.get("data", {})
+            return data
+        except Exception as e:
+            logger.error(f"获取群成员信息失败: {e}")
+            return None
+
+    async def get_group_member_list(self, group_id: int) -> list[dict[str, Any]]:
+        """获取群成员列表
+
+        Args:
+            group_id: 群号
+
+        Returns:
+            群成员信息列表
+        """
+        try:
+            result = await self._call_api(
+                "get_group_member_list", {"group_id": group_id}
+            )
+            data: list[dict[str, Any]] = result.get("data", [])
+            return data
+        except Exception as e:
+            logger.error(f"获取群成员列表失败: {e}")
+            return []
 
     async def get_forward_msg(self, id: str) -> list[dict[str, Any]]:
         """获取合并转发消息详情
@@ -243,10 +301,12 @@ class OneBotClient:
         except Exception as e:
             logger.error(f"获取消息详情失败: {e}")
             return None
-    
-    async def send_forward_msg(self, group_id: int, messages: list[dict[str, Any]]) -> dict[str, Any]:
+
+    async def send_forward_msg(
+        self, group_id: int, messages: list[dict[str, Any]]
+    ) -> dict[str, Any]:
         """发送合并转发消息到群聊
-        
+
         Args:
             group_id: 群号
             messages: 消息节点列表，每个节点格式为:
@@ -259,48 +319,50 @@ class OneBotClient:
                         "time": "时间戳（可选）"
                     }
                 }
-        
+
         Returns:
             API 响应
         """
-        return await self._call_api("send_forward_msg", {
-            "group_id": group_id,
-            "messages": messages
-        })
-    
+        return await self._call_api(
+            "send_forward_msg", {"group_id": group_id, "messages": messages}
+        )
+
     async def send_like(self, user_id: int, times: int = 1) -> dict[str, Any]:
         """给用户点赞
-        
+
         Args:
             user_id: 对方 QQ 号
             times: 赞的次数（默认1次）
-        
+
         Returns:
             API 响应
         """
-        return await self._call_api("send_like", {
-            "user_id": user_id,
-            "times": times
-        })
-    
+        return await self._call_api("send_like", {"user_id": user_id, "times": times})
+
     async def run(self) -> None:
         """运行消息接收循环"""
         if not self.ws:
             raise RuntimeError("WebSocket 未连接")
-        
+
         self._running = True
         self._tasks: set[asyncio.Task[None]] = set()
         logger.info("开始接收消息...")
-        
+
         try:
             while self._running:
+                raw_message = ""
                 try:
-                    raw_message = await self.ws.recv()
+                    message_data = await self.ws.recv()
+                    raw_message = (
+                        message_data.decode("utf-8")
+                        if isinstance(message_data, bytes)
+                        else message_data
+                    )
                     data = json.loads(raw_message)
                     # 处理消息（不阻塞接收循环）
                     await self._dispatch_message(data)
-                except json.JSONDecodeError:
-                    logger.error(f"无法解析消息: {raw_message!r}")
+                except json.JSONDecodeError as e:
+                    logger.error(f"无法解析消息: {raw_message!r}, error: {e}")
                 except websockets.ConnectionClosed:
                     logger.warning("WebSocket 连接已关闭")
                     break
@@ -311,7 +373,7 @@ class OneBotClient:
             # 等待所有后台任务完成
             if self._tasks:
                 await asyncio.gather(*self._tasks, return_exceptions=True)
-    
+
     async def _dispatch_message(self, data: dict[str, Any]) -> None:
         """分发消息（API响应同步处理，事件异步处理）"""
         # 检查是否是 API 响应（需要立即处理）
@@ -323,9 +385,11 @@ class OneBotClient:
                 self._pending_responses[echo_str].set_result(data)
                 return
             else:
-                logger.debug(f"收到未知 echo 响应: {echo_str}, 待处理: {list(self._pending_responses.keys())}")
+                logger.debug(
+                    f"收到未知 echo 响应: {echo_str}, 待处理: {list(self._pending_responses.keys())}"
+                )
                 return
-        
+
         # 事件类型的消息异步处理，不阻塞接收循环
         post_type = data.get("post_type")
         if post_type == "message":
@@ -345,7 +409,9 @@ class OneBotClient:
                 target_id = data.get("target_id", 0)
                 sender_id = data.get("user_id", 0)
                 group_id = data.get("group_id", 0)
-                logger.info(f"收到拍一拍: sender={sender_id}, target={target_id}, group={group_id}")
+                logger.info(
+                    f"收到拍一拍: sender={sender_id}, target={target_id}, group={group_id}"
+                )
                 if self._message_handler:
                     # 将 poke 事件转换为类似消息的格式，方便 handler 处理
                     poke_event = {
@@ -361,10 +427,14 @@ class OneBotClient:
                     self._tasks.add(task)
                     task.add_done_callback(self._tasks.discard)
             else:
-                logger.debug(f"收到通知事件: notice_type={notice_type}, sub_type={sub_type}")
+                logger.debug(
+                    f"收到通知事件: notice_type={notice_type}, sub_type={sub_type}"
+                )
         elif post_type:
-            logger.debug(f"收到事件: post_type={post_type}, meta={data.get('meta_event_type', '')}")
-    
+            logger.debug(
+                f"收到事件: post_type={post_type}, meta={data.get('meta_event_type', '')}"
+            )
+
     async def _safe_handle_message(self, data: dict[str, Any]) -> None:
         """安全地处理消息（捕获异常）"""
         try:
@@ -372,11 +442,11 @@ class OneBotClient:
                 await self._message_handler(data)
         except Exception as e:
             logger.exception(f"处理消息时出错: {e}")
-    
+
     async def run_with_reconnect(self, reconnect_interval: float = 5.0) -> None:
         """带自动重连的运行"""
         self._should_stop = False
-        
+
         while not self._should_stop:
             try:
                 await self.connect()
@@ -385,13 +455,13 @@ class OneBotClient:
                 logger.warning(f"WebSocket 连接关闭: {e}")
             except Exception as e:
                 logger.error(f"连接错误: {e}")
-            
+
             if self._should_stop:
                 break
-            
+
             logger.info(f"{reconnect_interval} 秒后重连...")
             await asyncio.sleep(reconnect_interval)
-    
+
     def stop(self) -> None:
         """停止运行"""
         self._should_stop = True
