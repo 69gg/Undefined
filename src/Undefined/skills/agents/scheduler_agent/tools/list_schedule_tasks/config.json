@@ -1,0 +1,11 @@
+{
+    "type": "function",
+    "function": {
+        "name": "list_schedule_tasks",
+        "description": "列出所有已创建的定时任务，包括任务 ID、名称、工具、表达式、执行次数等信息。",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
+    }
+}

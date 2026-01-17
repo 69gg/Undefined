@@ -3,9 +3,8 @@
 用于定时执行 AI 工具
 """
 
-import asyncio
 import logging
-from typing import Any, Callable, Coroutine
+from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -27,7 +26,7 @@ class TaskScheduler:
         self.ai = ai_client
         self.message_handler = message_handler
         self.tasks: dict[str, Any] = {}
-        
+
         # 确保 scheduler 在 event loop 中运行
         if not self.scheduler.running:
             self.scheduler.start()
@@ -41,6 +40,8 @@ class TaskScheduler:
         cron_expression: str,
         target_id: int | None = None,
         target_type: str = "group",
+        task_name: str | None = None,
+        max_executions: int | None = None,
     ) -> bool:
         """添加定时任务
 
@@ -51,37 +52,92 @@ class TaskScheduler:
             cron_expression: crontab 表达式 (分 时 日 月 周)
             target_id: 结果发送目标 ID
             target_type: 结果发送目标类型 (group/private)
+            task_name: 任务名称（用于标识，可读名称）
+            max_executions: 最大执行次数（None 表示无限）
 
         Returns:
             是否添加成功
         """
         try:
-            # 解析 crontab
-            # 注意：apscheduler 的 CronTrigger 参数顺序是: year, month, day, week, day_of_week, hour, minute, second
-            # 标准 crontab 是: minute hour day month day_of_week
-            # 这里我们使用 from_crontab 方法
             trigger = CronTrigger.from_crontab(cron_expression)
 
             self.scheduler.add_job(
                 self._execute_tool_wrapper,
                 trigger=trigger,
                 id=task_id,
-                args=[tool_name, tool_args, target_id, target_type],
+                args=[task_id, tool_name, tool_args, target_id, target_type],
                 replace_existing=True,
             )
-            
+
             self.tasks[task_id] = {
                 "tool_name": tool_name,
                 "tool_args": tool_args,
                 "cron": cron_expression,
                 "target_id": target_id,
-                "target_type": target_type
+                "target_type": target_type,
+                "task_name": task_name or "",
+                "max_executions": max_executions,
+                "current_executions": 0,
             }
-            
-            logger.info(f"添加定时任务成功: {task_id} -> {tool_name} ({cron_expression})")
+
+            logger.info(
+                f"添加定时任务成功: {task_id} -> {tool_name} ({cron_expression})"
+            )
             return True
         except Exception as e:
             logger.error(f"添加定时任务失败: {e}")
+            return False
+
+    def update_task(
+        self,
+        task_id: str,
+        cron_expression: str | None = None,
+        tool_name: str | None = None,
+        tool_args: dict[str, Any] | None = None,
+        task_name: str | None = None,
+        max_executions: int | None = None,
+    ) -> bool:
+        """修改定时任务（不支持修改 task_id）
+
+        Args:
+            task_id: 要修改的任务 ID
+            cron_expression: 新的 crontab 表达式
+            tool_name: 新的工具名称
+            tool_args: 新的工具参数
+            task_name: 新的任务名称
+            max_executions: 新的最大执行次数
+
+        Returns:
+            是否修改成功
+        """
+        if task_id not in self.tasks:
+            logger.warning(f"修改定时任务失败: 任务不存在 {task_id}")
+            return False
+
+        try:
+            task_info = self.tasks[task_id]
+
+            if cron_expression is not None:
+                trigger = CronTrigger.from_crontab(cron_expression)
+                self.scheduler.reschedule_job(task_id, trigger=trigger)
+                task_info["cron"] = cron_expression
+
+            if tool_name is not None:
+                task_info["tool_name"] = tool_name
+
+            if tool_args is not None:
+                task_info["tool_args"] = tool_args
+
+            if task_name is not None:
+                task_info["task_name"] = task_name
+
+            if max_executions is not None:
+                task_info["max_executions"] = max_executions
+
+            logger.info(f"修改定时任务成功: {task_id}")
+            return True
+        except Exception as e:
+            logger.error(f"修改定时任务失败: {e}")
             return False
 
     def remove_task(self, task_id: str) -> bool:
@@ -102,6 +158,7 @@ class TaskScheduler:
 
     async def _execute_tool_wrapper(
         self,
+        task_id: str,
         tool_name: str,
         tool_args: dict[str, Any],
         target_id: int | None,
@@ -109,44 +166,56 @@ class TaskScheduler:
     ) -> None:
         """任务执行包装器"""
         logger.info(f"开始执行定时任务: tool={tool_name}, args={tool_args}")
-        
+
         try:
-            # 构造上下文 (模拟 ai.ask 中的 context)
-            # 注意：定时任务中很多回调可能需要特殊处理，因为没有实时的用户触发
-            
             context = {
                 "scheduler": self,
                 "ai_client": self.ai,
-                # 添加 sender 以便工具可以使用发送功能 (如果工具做了适配)
                 "sender": self.message_handler.sender,
                 "onebot_client": self.message_handler.onebot,
-                # 某些工具可能需要 history_manager
                 "history_manager": self.message_handler.history_manager,
             }
-            
-            # 使用 ai_client 的方法来执行工具 (可以直接复用 _execute_tool)
-            # 但是 _execute_tool 是内部方法，也许最好公开或者直接调用 registry
-            
+
             result = await self.ai._execute_tool(tool_name, tool_args, context)
-            
-            # 如果有结果且指定了发送目标，则发送结果
+
             if result and target_id:
                 msg = f"【定时任务执行结果】\n工具: {tool_name}\n结果:\n{result}"
                 if target_type == "group":
                     await self.message_handler.sender.send_group_message(target_id, msg)
                 else:
-                    await self.message_handler.sender.send_private_message(target_id, msg)
-                    
+                    await self.message_handler.sender.send_private_message(
+                        target_id, msg
+                    )
+
             logger.info(f"定时任务执行完成: {tool_name}")
-            
+
+            if task_id in self.tasks:
+                task_info = self.tasks[task_id]
+                task_info["current_executions"] = (
+                    task_info.get("current_executions", 0) + 1
+                )
+
+                max_executions = task_info.get("max_executions")
+                current_executions = task_info.get("current_executions", 0)
+
+                if max_executions is not None and current_executions >= max_executions:
+                    self.remove_task(task_id)
+                    logger.info(
+                        f"定时任务 {task_id} 已达到最大执行次数 {max_executions}，已自动删除"
+                    )
+
         except Exception as e:
             logger.exception(f"定时任务执行出错: {e}")
             if target_id:
                 try:
                     err_msg = f"【定时任务执行失败】\n工具: {tool_name}\n错误: {e}"
                     if target_type == "group":
-                        await self.message_handler.sender.send_group_message(target_id, err_msg)
+                        await self.message_handler.sender.send_group_message(
+                            target_id, err_msg
+                        )
                     else:
-                        await self.message_handler.sender.send_private_message(target_id, err_msg)
+                        await self.message_handler.sender.send_private_message(
+                            target_id, err_msg
+                        )
                 except Exception:
                     pass

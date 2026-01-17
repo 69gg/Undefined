@@ -1,0 +1,19 @@
+{
+    "type": "function",
+    "function": {
+        "name": "delete_schedule_task",
+        "description": "删除指定的定时任务。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "要删除的任务 ID。可通过 list_schedule_tasks 查看所有任务及其 ID。"
+                }
+            },
+            "required": [
+                "task_id"
+            ]
+        }
+    }
+}

@@ -1,11 +1,15 @@
 {
     "type": "function",
     "function": {
-        "name": "schedule_task",
-        "description": "[已废弃] 请使用 scheduler_agent 代替。创建一个定时执行的任务。支持 crontab 语法。可以指定要调用的工具及其参数。",
+        "name": "create_schedule_task",
+        "description": "创建一个定时执行的任务。支持 crontab 语法。可以指定要调用的工具及其参数、执行次数限制。",
         "parameters": {
             "type": "object",
             "properties": {
+                "task_name": {
+                    "type": "string",
+                    "description": "任务名称（用于标识，建议使用有意义的名称）"
+                },
                 "cron_expression": {
                     "type": "string",
                     "description": "crontab 表达式 (分 时 日 月 周)。例如 '* * * * *' 表示每分钟执行，'30 8 * * *' 表示每天 8:30 执行。"
@@ -17,6 +21,10 @@
                 "tool_args": {
                     "type": "object",
                     "description": "调用工具时传递的参数对象 (JSON)。"
+                },
+                "max_executions": {
+                    "type": "integer",
+                    "description": "最大执行次数（可选）。设置为 1 表示执行一次后自动删除，设置为 N 表示执行 N 次后自动删除，不设置则无限执行。"
                 }
             },
             "required": [
