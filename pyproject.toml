@@ -1,6 +1,6 @@
 [project]
 name = "Undefined"
-version = "1.1.0"
+version = "2.0.0"
 description = "A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture."
 readme = "README.md"
 authors = [
@@ -43,6 +43,9 @@ dependencies = [
 Homepage = "https://www.pylindex.top"
 Repository = "https://github.com/69gg/Undefined"
 Issues = "https://github.com/69gg/Undefined/issues"
+
+[project.scripts]
+Undefined = "Undefined.main:run"
 
 [project.optional-dependencies]
 dev = [

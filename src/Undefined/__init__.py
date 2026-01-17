@@ -1,3 +1,3 @@
-"""QQ机器人 - Bug修复分析与FAQ生成工具"""
+"""Undefined - A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture."""
 
-__version__ = "1.1.0"
+__version__ = "2.0.0"
