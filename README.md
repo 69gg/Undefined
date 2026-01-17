@@ -44,12 +44,38 @@
 
 ## 安装与部署
 
-### 环境要求
+### 方式一：使用 pip 安装（推荐）
 
-- Python 3.12
-- [uv](https://github.com/astral-sh/uv)
+如果您只是想使用机器人，推荐直接从 Release 下载安装包或通过 pip 安装。
 
-### 1. 克隆项目
+#### 1. 安装
+
+下载 Release 中的 `.whl` 文件，然后运行：
+
+```bash
+pip install /path/to/Undefined-2.0.0-py3-none-any.whl
+# 还需要安装浏览器内核（如果尚未安装）
+playwright install
+```
+
+#### 2. 配置与运行
+
+1.  创建一个文件夹作为机器人的**工作目录**。
+2.  克隆 [_NagaAgent_ 仓库](https://github.com/Xxiii8322766509/NagaAgent) 至 `./code/NagaAgent`。
+3.  在该目录下创建一个 `.env` 文件，填入您的配置信息（参考下方配置说明或于 Github 中打开 `.env.example` 查看注释）。
+4.  在该目录下打开终端，直接输入命令启动：
+
+```bash
+Undefined
+```
+
+> **注意**：程序会自动读取当前运行目录下的 `.env` 文件作为配置。
+
+### 方式二：源码部署（开发）
+
+如果您想进行二次开发或调试，请使用此方式。
+
+#### 1. 克隆项目
 
 由于项目中使用了 `NagaAgent` 作为子模块，请使用以下命令克隆项目：
 
@@ -64,7 +90,7 @@ cd Undefined
 git submodule update --init --recursive
 ```
 
-### 2. 安装依赖
+#### 2. 安装依赖
 
 推荐使用 `uv` 进行依赖管理：
 
@@ -72,7 +98,7 @@ git submodule update --init --recursive
 uv sync
 ```
 
-### 3. 配置环境
+#### 3. 配置环境
 
 复制所有的示例配置文件（.env.example -> .env）并填写你的配置信息。
 
@@ -80,7 +106,16 @@ uv sync
 cp .env.example .env
 ```
 
-配置说明：
+#### 4. 启动运行
+
+```bash
+uv run -m Undefined
+```
+
+### 配置说明（通用）
+
+无论使用哪种方式，都需要配置 `.env` 文件：
+
 - **基础配置**：`BOT_QQ`, `SUPERADMIN_QQ`, `ONEBOT_WS_URL`
 - **模型配置**：
   - `CHAT_MODEL_*`：主对话模型
@@ -90,12 +125,6 @@ cp .env.example .env
 - **功能配置**：`LOG_LEVEL` 等
 
 > 启动项目需要 OneBot 实例，推荐使用 [NapCat](https://napneko.github.io/)。
-
-## 启动运行
-
-```bash
-uv run -m Undefined
-```
 
 ## 使用说明
 
