@@ -789,6 +789,7 @@ class AIClient:
         send_like_callback: Callable[[int, int], Awaitable[None]] | None = None,
         sender: Any = None,
         history_manager: Any = None,
+        onebot_client: Any = None,
     ) -> str:
         """使用 AI 回答问题，支持工具调用
 
@@ -802,6 +803,7 @@ class AIClient:
             send_like_callback: 点赞回调函数
             sender: 消息发送器实例
             history_manager: 历史记录管理器实例
+            onebot_client: OneBot 客户端实例
 
         Returns:
             AI 的回答（如果使用了 send_message 工具，则返回空字符串）
@@ -935,6 +937,7 @@ class AIClient:
             "conversation_ended": False,
             "sender": sender,
             "history_manager": history_manager,
+            "onebot_client": onebot_client,
         }
 
         # 工具调用循环
