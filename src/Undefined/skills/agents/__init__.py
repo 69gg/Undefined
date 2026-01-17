@@ -29,7 +29,7 @@ class AgentRegistry:
         self._agents_handlers = {}
 
         if not self.agents_dir.exists():
-            logger.warning(f"Agents directory does not exist: {self.agents_dir}")
+            logger.warning(f"Agent 目录不存在: {self.agents_dir}")
             return
 
         for item in self.agents_dir.iterdir():
@@ -38,7 +38,7 @@ class AgentRegistry:
 
         agent_names = list(self._agents_handlers.keys())
         logger.info(
-            f"Successfully loaded {len(self._agents_schema)} agents: {', '.join(agent_names)}"
+            f"成功加载了 {len(self._agents_schema)} 个 Agent: {', '.join(agent_names)}"
         )
 
     def _load_agent_from_dir(self, agent_dir: Path) -> None:
@@ -56,9 +56,7 @@ class AgentRegistry:
                 config = json.load(f)
 
             if "function" not in config or "name" not in config.get("function", {}):
-                logger.error(
-                    f"Invalid agent config in {agent_dir}: missing function.name"
-                )
+                logger.error(f"Agent 配置无效 {agent_dir}: 缺少 function.name")
                 return
 
             agent_name = config["function"]["name"]
@@ -67,23 +65,23 @@ class AgentRegistry:
                 f"agents.{agent_name}", handler_path
             )
             if spec is None or spec.loader is None:
-                logger.error(f"Failed to load agent handler spec from {handler_path}")
+                logger.error(f"从 {handler_path} 加载 Agent 处理器 spec 失败")
                 return
 
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
 
             if not hasattr(module, "execute"):
-                logger.error(f"Agent handler in {agent_dir} missing 'execute' function")
+                logger.error(f"Agent {agent_dir} 的处理器缺少 'execute' 函数")
                 return
 
             self._agents_schema.append(config)
             self._agents_handlers[agent_name] = module.execute
 
-            logger.debug(f"Loaded agent: {agent_name}")
+            logger.debug(f"已加载 Agent: {agent_name}")
 
         except Exception as e:
-            logger.error(f"Failed to load agent from {agent_dir}: {e}")
+            logger.error(f"从 {agent_dir} 加载 Agent 失败: {e}")
 
     def get_agents_schema(self) -> List[Dict[str, Any]]:
         """获取所有 agent 的 schema 定义（用于 OpenAI function calling）"""
@@ -95,13 +93,13 @@ class AgentRegistry:
         """执行 agent"""
         handler = self._agents_handlers.get(agent_name)
         if not handler:
-            return f"Agent not found: {agent_name}"
+            return f"未找到 Agent: {agent_name}"
 
         try:
             if hasattr(handler, "__call__"):
                 result = await handler(args, context)
                 return str(result)
-            return f"Invalid handler for agent: {agent_name}"
+            return f"Agent 处理器无效: {agent_name}"
         except Exception as e:
-            logger.exception(f"Error executing agent {agent_name}")
-            return f"Error executing agent {agent_name}: {str(e)}"
+            logger.exception(f"执行 Agent {agent_name} 时出错")
+            return f"执行 Agent {agent_name} 时出错: {str(e)}"

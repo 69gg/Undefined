@@ -7,28 +7,34 @@ import logging
 logger = logging.getLogger(__name__)
 
 MAGIC_NUMBERS: dict[bytes, str] = {
+    # 常用压缩格式
     b"\x50\x4b\x03\x04": "ZIP Archive",
     b"\x50\x4b\x05\x06": "ZIP Archive (empty)",
     b"\x50\x4b\x07\x08": "ZIP Archive (spanned)",
+    # 文档格式
     b"\x25\x50\x44\x46": "PDF Document",
     b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1": "Microsoft Office Document (OLE)",
     b"\x50\x4b\x03\x04\x14\x00\x06\x00": "OpenDocument Format",
+    # 图片格式
     b"\xff\xd8\xff": "JPEG Image",
     b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a": "PNG Image",
     b"GIF8": "GIF Image",
     b"\x49\x49\x2a\x00": "TIFF Image (little-endian)",
     b"\x4d\x4d\x00\x2a": "TIFF Image (big-endian)",
     b"\x42\x4d": "BMP Image",
+    # 音频格式
     b"\x49\x44\x33": "MP3 Audio (ID3)",
     b"\xff\xfb": "MP3 Audio (MPEG)",
     b"\xff\xfa": "MP3 Audio (MPEG)",
     b"\xff\xf3": "MP3 Audio (MPEG)",
     b"\xff\xf2": "MP3 Audio (MPEG)",
+    # 视频格式
     b"\x1a\x45\xdf\xa3": "WebM/Matroska Video",
     b"\x00\x00\x00\x18ftypmp42": "MP4 Video (isom)",
     b"\x00\x00\x00\x1cftypisom": "MP4 Video (isom)",
     b"\x00\x00\x00\x20ftypmp41": "MP4 Video (isom)",
     b"\x52\x49\x46\x46": "AVI/RIFF Video",
+    # 其他压缩格式
     b"\x1f\x8b": "GZIP Archive",
     b"\xfd7zXZ": "XZ Archive",
     b"BZh": "BZIP2 Archive",
@@ -133,6 +139,21 @@ EXTENSION_MAP: dict[str, str] = {
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """执行文件类型检测
+
+    检测流程：
+    1. Linux 系统优先使用 `file` 命令
+    2. 其他系统或 file 命令失败时，使用文件头魔数 (Magic Number) 检测
+    3. 最后尝试使用文件扩展名检测
+    4. 如果都失败，返回 Unknown
+
+    参数:
+        args: 工具参数
+        context: 执行上下文
+
+    返回:
+        检测结果描述
+    """
     file_path: str = args.get("file_path", "")
     path = Path(file_path)
 

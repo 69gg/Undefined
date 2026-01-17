@@ -4,39 +4,49 @@ from playwright.async_api import async_playwright
 
 from typing import Any
 
+
 async def render_markdown_to_html(md_text: str) -> str:
     # 定义同步的解析逻辑
     def _parse() -> str:
         extensions = [
-            'toc', 'tables', 'fenced_code', 'codehilite', 'md_in_html', 'attr_list',
-            'pymdownx.superfences', 
-            'pymdownx.arithmatex', 
-            'pymdownx.tasklist', 
-            'pymdownx.tilde', 
-            'pymdownx.emoji'
+            "toc",
+            "tables",
+            "fenced_code",
+            "codehilite",
+            "md_in_html",
+            "attr_list",
+            "pymdownx.superfences",
+            "pymdownx.arithmatex",
+            "pymdownx.tasklist",
+            "pymdownx.tilde",
+            "pymdownx.emoji",
         ]
 
         extension_configs: dict[str, dict[str, Any]] = {
             "pymdownx.superfences": {
                 "custom_fences": [
                     {
-                        'name': 'mermaid',
-                        'class': 'mermaid',
-                        'format': lambda source, language, css_class, options, md, **kwargs: \
-                                 f'<pre class="{css_class}">{source}</pre>'
+                        "name": "mermaid",
+                        "class": "mermaid",
+                        "format": lambda source,
+                        language,
+                        css_class,
+                        options,
+                        md,
+                        **kwargs: f'<pre class="{css_class}">{source}</pre>',
                     }
                 ]
             },
             "pymdownx.arithmatex": {
                 "generic": True,
-            }
+            },
         }
 
-        return str(markdown.markdown(
-            md_text, 
-            extensions=extensions, 
-            extension_configs=extension_configs
-        ))
+        return str(
+            markdown.markdown(
+                md_text, extensions=extensions, extension_configs=extension_configs
+            )
+        )
 
     # 使用 to_thread 在独立的线程中运行同步的 markdown 解析，避免阻塞主循环
     html_content = await asyncio.to_thread(_parse)
@@ -78,11 +88,14 @@ async def render_markdown_to_html(md_text: str) -> str:
     """
     return full_html
 
+
 async def render_html_to_image(html_content: str, output_path: str) -> None:
     """
     将 HTML 字符串转换为 PNG 图片
-    :param html_content: 完整的 HTML 字符串
-    :param output_path: 输出图片路径 (例如 'result.png')
+
+    参数:
+        html_content: 完整的 HTML 字符串
+        output_path: 输出图片路径 (例如 'result.png')
     """
     async with async_playwright() as p:
         # 启动无头浏览器
@@ -97,7 +110,7 @@ async def render_html_to_image(html_content: str, output_path: str) -> None:
         # --- 关键：等待渲染完成 ---
         # 1. 等待网络空闲（确保 CDN 上的 MathJax/Mermaid 脚本加载完）
         await page.wait_for_load_state("networkidle")
-        
+
         # 2. 如果有 Mermaid，给它一点时间执行 JS 绘图
         # 如果页面里没有 mermaid 脚本，这行会很快跳过
         await asyncio.sleep(1)  # 等待 1 秒钟让 Mermaid 渲染完成

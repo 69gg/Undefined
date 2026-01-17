@@ -36,9 +36,11 @@ def setup_logging() -> None:
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
 
-    # 文件处理器（轮转）
+    # 日志文件配置
     log_file_path = os.getenv("LOG_FILE_PATH", "logs/bot.log")
-    log_max_size = int(os.getenv("LOG_MAX_SIZE_MB", "10")) * 1024 * 1024  # MB -> bytes
+    log_max_size = (
+        int(os.getenv("LOG_MAX_SIZE_MB", "10")) * 1024 * 1024
+    )  # 兆字节 -> 字节
     log_backup_count = int(os.getenv("LOG_BACKUP_COUNT", "5"))
 
     # 确保日志目录存在

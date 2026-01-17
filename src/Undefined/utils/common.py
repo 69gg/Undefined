@@ -6,21 +6,22 @@ from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
+
 def extract_text(message_content: list[dict[str, Any]], bot_qq: int = 0) -> str:
     """提取消息中的文本内容
-    
-    Args:
+
+    参数:
         message_content: 消息内容列表
         bot_qq: 机器人 QQ 号（用于过滤 @ 机器人的内容），默认为 0（不过滤）
-    
-    Returns:
+
+    返回:
         提取的文本
     """
     texts: list[str] = []
     for segment in message_content:
         type_ = segment.get("type", "")
         data = segment.get("data", {})
-        
+
         if type_ == "text":
             texts.append(data.get("text", ""))
         elif type_ == "at":
@@ -32,109 +33,109 @@ def extract_text(message_content: list[dict[str, Any]], bot_qq: int = 0) -> str:
         elif type_ == "image":
             file = data.get("file", "") or data.get("url", "")
             texts.append(f"[图片: {file}]")
-                
+
     return "".join(texts).strip()
 
 
 async def parse_message_content_for_history(
-    message_content: list[dict[str, Any]], 
+    message_content: list[dict[str, Any]],
     bot_qq: int,
-    get_msg_func: Callable[[int], Awaitable[dict[str, Any] | None]] | None = None
+    get_msg_func: Callable[[int], Awaitable[dict[str, Any] | None]] | None = None,
 ) -> str:
     """解析消息内容用于历史记录（支持合并转发和 @ 格式化）
-    
-    Args:
+
+    参数:
         message_content: 消息内容列表
         bot_qq: 机器人 QQ 号
         get_msg_func: 获取消息详情的异步函数（可选，用于处理回复引用）
-    
-    Returns:
+
+    返回:
         解析后的文本
     """
     texts: list[str] = []
     for segment in message_content:
         type_ = segment.get("type")
         data = segment.get("data", {})
-        
+
         if type_ == "text":
             texts.append(data.get("text", ""))
-        
+
         elif type_ == "at":
             qq = data.get("qq", "")
             # 仅当 @ 的不是机器人时才显示，且使用指定格式
             if str(qq) != str(bot_qq):
                 texts.append(f"[@ {qq}]")
-        
+
         elif type_ == "image":
             file = data.get("file", "") or data.get("url", "")
             texts.append(f"[图片: {file}]")
-        
+
         elif type_ == "forward":
             msg_id = data.get("id")
             if msg_id:
                 texts.append(f"[合并转发: {msg_id}]")
-        
+
         elif type_ == "reply":
-             msg_id = data.get("id")
-             if msg_id and get_msg_func:
-                 try:
-                     # 尝试获取引用的消息内容
-                     reply_msg = await get_msg_func(int(msg_id))
-                     if reply_msg:
-                         sender = reply_msg.get("sender", {}).get("nickname", "未知")
-                         content = reply_msg.get("message", [])
-                         # 使用 extract_text 解析引用内容
-                         quote_text = extract_text(content, bot_qq)
-                         texts.append(f'<quote sender="{sender}">{quote_text}</quote>\n')
-                 except Exception as e:
-                     logger.warning(f"获取回复消息失败: {e}")
-        
+            msg_id = data.get("id")
+            if msg_id and get_msg_func:
+                try:
+                    # 尝试获取引用的消息内容
+                    reply_msg = await get_msg_func(int(msg_id))
+                    if reply_msg:
+                        sender = reply_msg.get("sender", {}).get("nickname", "未知")
+                        content = reply_msg.get("message", [])
+                        # 使用 extract_text 解析引用内容
+                        quote_text = extract_text(content, bot_qq)
+                        texts.append(f'<quote sender="{sender}">{quote_text}</quote>\n')
+                except Exception as e:
+                    logger.warning(f"获取回复消息失败: {e}")
+
         elif type_ == "face":
             texts.append("[表情]")
-            
+
     return "".join(texts).strip()
 
 
 def message_to_segments(message: str) -> list[dict[str, Any]]:
     """将包含 CQ 码的字符串转换为 OneBot 消息段数组
-    
-    Args:
+
+    参数:
         message: 包含 CQ 码的字符串
-    
-    Returns:
+
+    返回:
         消息段列表
     """
     segments = []
     # 匹配 CQ 码的正则
     # [CQ:type,arg1=val1,arg2=val2]
-    cq_pattern = re.compile(r'\[CQ:([a-zA-Z0-9_-]+),?([^\]]*)\]')
-    
+    cq_pattern = re.compile(r"\[CQ:([a-zA-Z0-9_-]+),?([^\]]*)\]")
+
     last_pos = 0
     for match in cq_pattern.finditer(message):
         # 处理 CQ 码之前的文本
-        text_part = message[last_pos:match.start()]
+        text_part = message[last_pos : match.start()]
         if text_part:
             segments.append({"type": "text", "data": {"text": text_part}})
-        
+
         # 处理 CQ 码
         cq_type = match.group(1)
         cq_args_str = match.group(2)
-        
+
         # 解析参数
         data = {}
         if cq_args_str:
-            for arg_pair in cq_args_str.split(','):
-                if '=' in arg_pair:
-                    k, v = arg_pair.split('=', 1)
+            for arg_pair in cq_args_str.split(","):
+                if "=" in arg_pair:
+                    k, v = arg_pair.split("=", 1)
                     # 注意：这里假设输入的 CQ 码已经是经过 OneBot 转义的格式
                     data[k.strip()] = v.strip()
-        
+
         segments.append({"type": cq_type, "data": data})
         last_pos = match.end()
-        
+
     # 处理剩余的文本
     remaining_text = message[last_pos:]
     if remaining_text:
         segments.append({"type": "text", "data": {"text": remaining_text}})
-        
+
     return segments

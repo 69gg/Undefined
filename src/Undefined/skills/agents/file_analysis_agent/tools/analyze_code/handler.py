@@ -235,6 +235,15 @@ def _is_comment(line: str, language: str) -> bool:
 
 
 def _extract_imports(content: str, language: str) -> list[str]:
+    """从代码中提取导入的模块
+
+    参数:
+        content: 代码内容
+        language: 编程语言
+
+    返回:
+        导入的模块列表
+    """
     imports: list[str] = []
     patterns: list[tuple[str, str]] = [
         (r"^import\s+([\w.]+)", "Python"),
@@ -264,6 +273,15 @@ def _extract_imports(content: str, language: str) -> list[str]:
 
 
 def _extract_functions(content: str, language: str) -> list[str]:
+    """从代码中提取函数定义
+
+    参数:
+        content: 代码内容
+        language: 编程语言
+
+    返回:
+        函数名列表
+    """
     functions: list[str] = []
     patterns: dict[str, str] = {
         "Python": r"def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
@@ -296,6 +314,15 @@ def _extract_functions(content: str, language: str) -> list[str]:
 
 
 def _extract_classes(content: str, language: str) -> list[str]:
+    """从代码中提取类定义
+
+    参数:
+        content: 代码内容
+        language: 编程语言
+
+    返回:
+        类名列表
+    """
     classes: list[str] = []
     patterns: dict[str, str] = {
         "Python": r"^class\s+([a-zA-Z_][a-zA-Z0-9_]*)",
@@ -326,6 +353,15 @@ def _extract_classes(content: str, language: str) -> list[str]:
 
 
 def _extract_comment_blocks(content: str, language: str) -> list[str]:
+    """提取代码中的块注释
+
+    参数:
+        content: 代码内容
+        language: 编程语言
+
+    返回:
+        注释块列表
+    """
     blocks: list[str] = []
 
     if language not in COMMENT_PATTERNS:
@@ -348,24 +384,44 @@ def _extract_comment_blocks(content: str, language: str) -> list[str]:
                 current_block = [line]
         else:
             current_block.append(line)
+            # 处理块注释结束
             if end_delim:
                 if line_lower.endswith(end_delim) or end_delim in line_lower:
                     in_block = False
-                    block_content = "\n".join(current_block)
-                    if len(block_content) > 20:
-                        blocks.append(block_content)
+                    _add_block_if_valid(blocks, current_block)
                     current_block = []
+            # 处理单行注释连续出现的情况（伪块注释）
             else:
                 if line.strip().startswith("#") or line.strip().startswith("//"):
+                    # 继续收集连续的单行注释
+                    pass
+                else:
+                    # 单行注释中断，保存之前的块
+                    # 注意：当前行不是注释，所以不应该加入 current_block，而是应该处理掉之前的 block
+                    # 但上面的逻辑已经 append 了，这实际上是把非注释行也加进去了，这是个小 bug
+                    # 为了保持原有逻辑大致不变但简化复杂度，我们这里做个修正：
+                    # 如果是单行注释模式，current_block 实际上在上一行结束时就应该判断是否继续
+                    # 这里的原始逻辑其实是把当前非注释行也加进去了然后结束。
+                    # 我们简化一下：遇到非注释行，结束块。
+                    current_block.pop()  # 移除刚才加进去的非注释行
                     in_block = False
-                    block_content = "\n".join(current_block)
-                    if len(block_content) > 20:
-                        blocks.append(block_content)
+                    _add_block_if_valid(blocks, current_block)
                     current_block = []
 
+    # 处理文件末尾遗留的块
     if current_block:
-        block_content = "\n".join(current_block)
-        if len(block_content) > 20:
-            blocks.append(block_content)
+        _add_block_if_valid(blocks, current_block)
 
     return blocks
+
+
+def _add_block_if_valid(blocks: list[str], current_block: list[str]) -> None:
+    """如果块内容有效且长度足够，则添加到列表
+
+    参数:
+        blocks: 目标列表
+        current_block: 当前块内容
+    """
+    block_content = "\n".join(current_block)
+    if len(block_content) > 20:
+        blocks.append(block_content)

@@ -1,4 +1,4 @@
-# Agents Directory
+# Agent 目录 (Agents Directory)
 
 AI Agent 目录，每个 Agent 是一个工具集合。
 
@@ -41,7 +41,7 @@ AGENT_MODEL_THINKING_BUDGET_TOKENS=0    # thinking budget tokens
 | `AGENT_MODEL_NAME` | Agent 模型名称 | 无（必填） |
 | `AGENT_MODEL_MAX_TOKENS` | 单次响应最大 token 数 | 4096 |
 | `AGENT_MODEL_THINKING_ENABLED` | 是否启用思维链 | false |
-| `AGENT_MODEL_THINKING_BUDGET_TOKENS` | 思维链预算 | 0 |
+| `AGENT_MODEL_THINKING_BUDGET_TOKENS` | 思维链预算 token 数量 | 0 |
 
 ## 核心文件说明
 

@@ -7,6 +7,62 @@ import aiofiles
 logger = logging.getLogger(__name__)
 
 
+# 媒体类型的 MIME 映射表
+MIME_TYPES_MAP = {
+    "image": {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".bmp": "image/bmp",
+        ".webp": "image/webp",
+        ".svg": "image/svg+xml",
+        ".ico": "image/x-icon",
+    },
+    "audio": {
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".flac": "audio/flac",
+        ".aac": "audio/aac",
+        ".m4a": "audio/mp4",
+        ".ogg": "audio/ogg",
+        ".wma": "audio/x-ms-wma",
+    },
+    "video": {
+        ".mp4": "video/mp4",
+        ".avi": "video/x-msvideo",
+        ".mov": "video/quicktime",
+        ".mkv": "video/x-matroska",
+        ".webm": "video/webm",
+        ".flv": "video/x-flv",
+        ".wmv": "video/x-ms-wmv",
+    },
+}
+
+# 默认 MIME 类型
+DEFAULT_MIMES = {
+    "image": "image/jpeg",
+    "audio": "audio/mpeg",
+    "video": "video/mp4",
+}
+
+# 扩展名分组
+EXTENSION_GROUPS = {
+    "image": [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".bmp",
+        ".webp",
+        ".svg",
+        ".ico",
+    ],
+    "audio": [".mp3", ".wav", ".flac", ".aac", ".m4a", ".ogg", ".wma"],
+    "video": [".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv"],
+}
+
+
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     file_path: str = args.get("file_path", "")
     media_type: str = args.get("media_type", "auto")
@@ -80,75 +136,43 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
 
 def _detect_media_type(path: Path, media_type: str) -> str:
+    """根据文件扩展名检测媒体类型
+
+    参数:
+        path: 文件路径
+        media_type: 用户指定的媒体类型（如果是 "auto" 则自动检测）
+
+    返回:
+        检测到的媒体类型 ("image", "audio", "video" 或默认 "image")
+    """
     if media_type != "auto":
         return media_type
 
     suffix = path.suffix.lower()
 
-    image_extensions = [
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".gif",
-        ".bmp",
-        ".webp",
-        ".svg",
-        ".ico",
-    ]
-    audio_extensions = [".mp3", ".wav", ".flac", ".aac", ".m4a", ".ogg", ".wma"]
-    video_extensions = [".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv"]
-
-    if suffix in image_extensions:
+    if suffix in EXTENSION_GROUPS["image"]:
         return "image"
-    elif suffix in audio_extensions:
+    elif suffix in EXTENSION_GROUPS["audio"]:
         return "audio"
-    elif suffix in video_extensions:
+    elif suffix in EXTENSION_GROUPS["video"]:
         return "video"
     else:
         return "image"
 
 
 def _get_mime_type(media_type: str, path: Path) -> str:
-    mime_types = {
-        "image": {
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".png": "image/png",
-            ".gif": "image/gif",
-            ".bmp": "image/bmp",
-            ".webp": "image/webp",
-            ".svg": "image/svg+xml",
-            ".ico": "image/x-icon",
-        },
-        "audio": {
-            ".mp3": "audio/mpeg",
-            ".wav": "audio/wav",
-            ".flac": "audio/flac",
-            ".aac": "audio/aac",
-            ".m4a": "audio/mp4",
-            ".ogg": "audio/ogg",
-            ".wma": "audio/x-ms-wma",
-        },
-        "video": {
-            ".mp4": "video/mp4",
-            ".avi": "video/x-msvideo",
-            ".mov": "video/quicktime",
-            ".mkv": "video/x-matroska",
-            ".webm": "video/webm",
-            ".flv": "video/x-flv",
-            ".wmv": "video/x-ms-wmv",
-        },
-    }
+    """获取文件的 MIME 类型
 
+    参数:
+        media_type: 媒体类型
+        path: 文件路径
+
+    返回:
+        MIME 类型字符串
+    """
     suffix = path.suffix.lower()
 
-    if media_type in mime_types and suffix in mime_types[media_type]:
-        return mime_types[media_type][suffix]
+    if media_type in MIME_TYPES_MAP and suffix in MIME_TYPES_MAP[media_type]:
+        return MIME_TYPES_MAP[media_type][suffix]
 
-    default_mimes = {
-        "image": "image/jpeg",
-        "audio": "audio/mpeg",
-        "video": "video/mp4",
-    }
-
-    return default_mimes.get(media_type, "application/octet-stream")
+    return DEFAULT_MIMES.get(media_type, "application/octet-stream")

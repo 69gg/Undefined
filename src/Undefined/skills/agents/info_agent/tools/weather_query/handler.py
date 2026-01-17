@@ -22,7 +22,7 @@ async def fetch_data(url: str, params: Dict[str, Any]) -> Dict[str, Any]:
         async with session.get(url, params=params) as response:
             if response.status != 200:
                 error_text = await response.text()
-                logger.error(f"Weather API error: {response.status} - {error_text}")
+                logger.error(f"天气 API 错误: {response.status} - {error_text}")
                 return {"error": f"API请求失败: {response.status}"}
             json_data = await response.json()
             return cast(Dict[str, Any], json_data)
@@ -77,7 +77,7 @@ async def get_weather_now(location: str) -> str:
 
 async def get_weather_forecast(location: str) -> str:
     url = f"{BASE_URL}/weather/daily.json"
-    # start=0 includes today. days=5 for requested range.
+    # start=0 包括今天。days=5 为请求的范围。
     data = await fetch_data(url, {"location": location, "start": "0", "days": "5"})
 
     if "error" in data:
@@ -199,9 +199,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         elif query_type == "life":
             return await get_life_suggestion(location)
         else:
-            # Default to current weather
+            # 默认为当前天气
             return await get_weather_now(location)
 
     except Exception as e:
-        logger.exception(f"Error in weather_query tool: {e}")
+        logger.exception(f"天气查询工具出错: {e}")
         return f"查询出错: {str(e)}"

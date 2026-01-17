@@ -21,7 +21,7 @@ class AgentToolRegistry:
     def load_tools(self) -> None:
         """加载 agent 专属工具"""
         if not self.tools_dir.exists():
-            logger.warning(f"Agent tools directory does not exist: {self.tools_dir}")
+            logger.warning(f"Agent 工具目录不存在: {self.tools_dir}")
             return
 
         for item in self.tools_dir.iterdir():
@@ -29,7 +29,7 @@ class AgentToolRegistry:
                 self._load_tool_from_dir(item)
 
         logger.info(
-            f"Agent loaded {len(self._tools_schema)} tools: {list(self._tools_handlers.keys())}"
+            f"Agent 加载了 {len(self._tools_schema)} 个工具: {list(self._tools_handlers.keys())}"
         )
 
     def _load_tool_from_dir(self, tool_dir: Path) -> None:
@@ -65,7 +65,7 @@ class AgentToolRegistry:
             self._tools_handlers[tool_name] = module.execute
 
         except Exception as e:
-            logger.error(f"Failed to load tool from {tool_dir}: {e}")
+            logger.error(f"从 {tool_dir} 加载工具失败: {e}")
 
     def get_tools_schema(self) -> list[dict[str, Any]]:
         """获取工具 schema"""
@@ -77,7 +77,7 @@ class AgentToolRegistry:
         """执行工具"""
         handler = self._tools_handlers.get(tool_name)
         if not handler:
-            return f"Tool not found: {tool_name}"
+            return f"未找到工具: {tool_name}"
 
         try:
             if asyncio.iscoroutinefunction(handler):
@@ -86,8 +86,8 @@ class AgentToolRegistry:
                 result = handler(args, context)
             return str(result)
         except Exception as e:
-            logger.exception(f"Error executing tool {tool_name}")
-            return f"Error executing tool {tool_name}: {str(e)}"
+            logger.exception(f"执行工具 {tool_name} 时出错")
+            return f"执行工具 {tool_name} 时出错: {str(e)}"
 
 
 async def _load_prompt() -> str:
@@ -121,7 +121,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "AI client 未在上下文中提供"
 
     agent_config = ai_client.agent_config
-
 
     system_prompt: str = await _load_prompt()
 
@@ -183,7 +182,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 function_name: str = function.get("name", "")
                 function_args_str: str = function.get("arguments", "{}")
 
-                logger.info(f"Agent preparing tool: {function_name}")
+                logger.info(f"Agent 正在准备工具: {function_name}")
 
                 try:
                     function_args: dict[str, Any] = json.loads(function_args_str)
@@ -197,14 +196,14 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
             # 并发执行
             if tool_tasks:
-                logger.info(f"Agent executing {len(tool_tasks)} tools in parallel")
+                logger.info(f"Agent 正在并发执行 {len(tool_tasks)} 个工具")
                 results = await asyncio.gather(*tool_tasks, return_exceptions=True)
 
                 for i, tool_result in enumerate(results):
                     call_id = tool_call_ids[i]
                     content_str: str = ""
                     if isinstance(tool_result, Exception):
-                        content_str = f"Error: {str(tool_result)}"
+                        content_str = f"错误: {str(tool_result)}"
                     else:
                         content_str = str(tool_result)
 
@@ -217,7 +216,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                     )
 
         except Exception as e:
-            logger.exception(f"Agent execution failed: {e}")
+            logger.exception(f"Agent 执行失败: {e}")
             return f"处理失败: {e}"
 
     return "达到最大迭代次数"

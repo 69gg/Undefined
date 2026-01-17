@@ -15,16 +15,26 @@ logger = logging.getLogger(__name__)
 class TaskScheduler:
     """任务调度器"""
 
-    def __init__(self, ai_client: Any, message_handler: Any) -> None:
+    def __init__(
+        self,
+        ai_client: Any,
+        sender: Any,
+        onebot_client: Any,
+        history_manager: Any,
+    ) -> None:
         """初始化调度器
 
-        Args:
+        参数:
             ai_client: AI 客户端实例 (AIClient)
-            message_handler: 消息处理器实例 (MessageHandler)
+            sender: 消息发送器实例 (MessageSender)
+            onebot_client: OneBot 客户端实例
+            history_manager: 历史记录管理器
         """
         self.scheduler = AsyncIOScheduler()
         self.ai = ai_client
-        self.message_handler = message_handler
+        self.sender = sender
+        self.onebot = onebot_client
+        self.history_manager = history_manager
         self.tasks: dict[str, Any] = {}
 
         # 确保 scheduler 在 event loop 中运行
@@ -45,7 +55,7 @@ class TaskScheduler:
     ) -> bool:
         """添加定时任务
 
-        Args:
+        参数:
             task_id: 任务唯一标识（用户指定或自动生成）
             tool_name: 要执行的工具名称
             tool_args: 工具参数
@@ -55,7 +65,7 @@ class TaskScheduler:
             task_name: 任务名称（用于标识，可读名称）
             max_executions: 最大执行次数（None 表示无限）
 
-        Returns:
+        返回:
             是否添加成功
         """
         try:
@@ -99,7 +109,7 @@ class TaskScheduler:
     ) -> bool:
         """修改定时任务（不支持修改 task_id）
 
-        Args:
+        参数:
             task_id: 要修改的任务 ID
             cron_expression: 新的 crontab 表达式
             tool_name: 新的工具名称
@@ -107,7 +117,7 @@ class TaskScheduler:
             task_name: 新的任务名称
             max_executions: 新的最大执行次数
 
-        Returns:
+        返回:
             是否修改成功
         """
         if task_id not in self.tasks:
@@ -171,9 +181,9 @@ class TaskScheduler:
             context = {
                 "scheduler": self,
                 "ai_client": self.ai,
-                "sender": self.message_handler.sender,
-                "onebot_client": self.message_handler.onebot,
-                "history_manager": self.message_handler.history_manager,
+                "sender": self.sender,
+                "onebot_client": self.onebot,
+                "history_manager": self.history_manager,
             }
 
             result = await self.ai._execute_tool(tool_name, tool_args, context)
@@ -181,11 +191,9 @@ class TaskScheduler:
             if result and target_id:
                 msg = f"【定时任务执行结果】\n工具: {tool_name}\n结果:\n{result}"
                 if target_type == "group":
-                    await self.message_handler.sender.send_group_message(target_id, msg)
+                    await self.sender.send_group_message(target_id, msg)
                 else:
-                    await self.message_handler.sender.send_private_message(
-                        target_id, msg
-                    )
+                    await self.sender.send_private_message(target_id, msg)
 
             logger.info(f"定时任务执行完成: {tool_name}")
 
@@ -210,12 +218,8 @@ class TaskScheduler:
                 try:
                     err_msg = f"【定时任务执行失败】\n工具: {tool_name}\n错误: {e}"
                     if target_type == "group":
-                        await self.message_handler.sender.send_group_message(
-                            target_id, err_msg
-                        )
+                        await self.sender.send_group_message(target_id, err_msg)
                     else:
-                        await self.message_handler.sender.send_private_message(
-                            target_id, err_msg
-                        )
+                        await self.sender.send_private_message(target_id, err_msg)
                 except Exception:
                     pass

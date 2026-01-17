@@ -22,11 +22,11 @@ FIELD_MAPPING = {
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """获取群聊成员的详细信息
 
-    Args:
+    参数:
         args: 工具参数，包含 group_id、user_id、fields、limit、no_cache
         context: 工具上下文，包含 onebot_client 等回调函数
 
-    Returns:
+    返回:
         群成员详细信息描述
     """
     group_id = args.get("group_id")

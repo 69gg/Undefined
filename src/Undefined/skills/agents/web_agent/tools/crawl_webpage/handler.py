@@ -4,38 +4,45 @@ import os
 
 logger = logging.getLogger(__name__)
 
+
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     url = args.get("url", "")
     if not url:
         return "URL 不能为空"
-    
-    # Check availability from context flag or try import
+
+    # 从 context 标志检查可用性或尝试导入
     if not context.get("crawl4ai_available", False):
         return "网页获取功能未启用（crawl4ai 未安装）"
-    
+
     try:
         from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
-        
+
         try:
             from crawl4ai import ProxyConfig
+
             _PROXY_CONFIG_AVAILABLE = True
         except ImportError:
             _PROXY_CONFIG_AVAILABLE = False
-            
+
     except ImportError:
-         return "网页获取功能未启用（crawl4ai 未安装）"
+        return "网页获取功能未启用（crawl4ai 未安装）"
 
     max_chars = args.get("max_chars", 4096)
-    
+
     try:
         use_proxy = os.getenv("USE_PROXY", "true").lower() == "true"
-        proxy = os.getenv("http_proxy") or os.getenv("https_proxy") or os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
+        proxy = (
+            os.getenv("http_proxy")
+            or os.getenv("https_proxy")
+            or os.getenv("HTTP_PROXY")
+            or os.getenv("HTTPS_PROXY")
+        )
 
         browser_config = BrowserConfig(
             headless=True,
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             viewport_width=1280,
-            viewport_height=720
+            viewport_height=720,
         )
 
         run_config_kwargs = {
@@ -56,7 +63,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             logger.warning("USE_PROXY=true 但未找到代理配置，将不使用代理")
 
         run_config = CrawlerRunConfig(**run_config_kwargs)
-        
+
         async with AsyncWebCrawler(config=browser_config) as crawler:
             result = await crawler.arun(url=url, config=run_config)
 
@@ -64,10 +71,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 content = "# 网页解析结果\n\n"
                 content += f"**URL**: {result.url}\n\n"
 
-                if hasattr(result, 'title') and result.title:
+                if hasattr(result, "title") and result.title:
                     content += f"**标题**: {result.title}\n\n"
 
-                if hasattr(result, 'description') and result.description:
+                if hasattr(result, "description") and result.description:
                     content += f"**描述**: {result.description}\n\n"
 
                 content += "---\n\n## 内容\n\n"
@@ -79,7 +86,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 content += markdown_text
                 return content
             else:
-                error_msg = getattr(result, 'error_message', '未知错误')
+                error_msg = getattr(result, "error_message", "未知错误")
                 logger.error(f"抓取失败: {error_msg}")
                 return f"网页抓取失败: {error_msg}"
 
