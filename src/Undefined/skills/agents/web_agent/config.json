@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "web_agent",
+        "description": "网络搜索助手，提供网页搜索和网页内容获取功能，用于获取互联网上的最新信息。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "用户的搜索需求，例如：'搜索 Python 异步编程的最新发展'、'获取 https://example.com 的内容'"
+                }
+            },
+            "required": ["prompt"]
+        }
+    }
+}

@@ -2,7 +2,8 @@
 AI 模型调用封装"""
 
 import importlib.util
-from .tools import ToolRegistry
+from .skills.tools import ToolRegistry
+from .skills.agents import AgentRegistry
 import base64
 import logging
 import os
@@ -14,7 +15,7 @@ from pathlib import Path
 import aiofiles
 import httpx
 
-from .config import ChatModelConfig, VisionModelConfig
+from .config import ChatModelConfig, VisionModelConfig, AgentModelConfig
 from .memory import MemoryStorage
 
 with open("res/prompts/injection_detector.txt", "r", encoding="utf-8") as f:
@@ -65,10 +66,12 @@ class AIClient:
         self,
         chat_config: ChatModelConfig,
         vision_config: VisionModelConfig,
+        agent_config: AgentModelConfig,
         memory_storage: Optional[MemoryStorage] = None,
     ) -> None:
         self.chat_config = chat_config
         self.vision_config = vision_config
+        self.agent_config = agent_config
         self.memory_storage = memory_storage
         self._http_client = httpx.AsyncClient(timeout=120.0)
         self._tokenizer: Optional[Any] = None
@@ -91,7 +94,10 @@ class AIClient:
         self.current_user_id: Optional[int] = None
 
         # 初始化工具注册表
-        self.tool_registry = ToolRegistry(Path(__file__).parent / "tools")
+        self.tool_registry = ToolRegistry(Path(__file__).parent / "skills" / "tools")
+
+        # 初始化 Agent 注册表
+        self.agent_registry = AgentRegistry(Path(__file__).parent / "skills" / "agents")
 
         # 初始化搜索 wrapper
         self._search_wrapper: Optional[Any] = None
@@ -1071,12 +1077,14 @@ class AIClient:
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     def _get_openai_tools(self) -> list[dict[str, Any]]:
-        """获取标准 OpenAI 格式的工具定义
+        """获取标准 OpenAI 格式的工具定义（包括 tools 和 agents）
 
         Returns:
             工具定义列表
         """
-        return self.tool_registry.get_tools_schema()
+        tools = self.tool_registry.get_tools_schema()
+        agents = self.agent_registry.get_agents_schema()
+        return tools + agents
 
     async def _execute_tool(
         self,
@@ -1084,16 +1092,26 @@ class AIClient:
         function_args: dict[str, Any],
         context: dict[str, Any],
     ) -> str:
-        """执行工具
+        """执行工具或 Agent
 
         Args:
-            function_name: 工具名称
+            function_name: 工具或 Agent 名称
             function_args: 工具参数
             context: 执行上下文
 
         Returns:
-            工具执行结果
+            执行结果
         """
+        # 首先尝试作为 Agent 执行
+        agents_schema = self.agent_registry.get_agents_schema()
+        agent_names = [s.get("function", {}).get("name") for s in agents_schema]
+
+        if function_name in agent_names:
+            return await self.agent_registry.execute_agent(
+                function_name, function_args, context
+            )
+
+        # 否则作为工具执行
         return await self.tool_registry.execute_tool(
             function_name, function_args, context
         )
