@@ -4,12 +4,12 @@ from typing import Any, Dict
 def _resolve_chat_id(chat_id: str, msg_type: str, history_manager: Any) -> str:
     """将群名/用户名转换为对应的 ID
 
-    Args:
+    参数:
         chat_id: 群名、用户名或群号/用户ID
         msg_type: "group" 或 "private"
         history_manager: 历史记录管理器实例
 
-    Returns:
+    返回:
         解析后的群号或用户ID
     """
     if chat_id.isdigit():

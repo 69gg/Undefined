@@ -10,11 +10,12 @@ logger = logging.getLogger(__name__)
 
 # 历史记录文件路径
 HISTORY_DIR = os.path.join("data", "history")
-MAX_HISTORY = 10000  # 统一 10k 限制
+MAX_HISTORY = 10000  # 统一 10000 条限制
+
 
 class MessageHistoryManager:
     """消息历史管理器"""
-    
+
     def __init__(self) -> None:
         self._message_history: dict[str, list[dict[str, Any]]] = {}
         self._private_message_history: dict[str, list[dict[str, Any]]] = {}
@@ -35,7 +36,9 @@ class MessageHistoryManager:
         """保存历史记录到文件（最多 10000 条）"""
         try:
             # 只保留最近的 MAX_HISTORY 条
-            truncated_history = history[-MAX_HISTORY:] if len(history) > MAX_HISTORY else history
+            truncated_history = (
+                history[-MAX_HISTORY:] if len(history) > MAX_HISTORY else history
+            )
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(truncated_history, f, ensure_ascii=False, indent=2)
         except Exception as e:
@@ -51,7 +54,9 @@ class MessageHistoryManager:
                         # 兼容旧格式：补充缺失的字段
                         for msg in history:
                             if "type" not in msg:
-                                msg["type"] = "private" if "private" in path else "group"
+                                msg["type"] = (
+                                    "private" if "private" in path else "group"
+                                )
                             if "chat_id" not in msg:
                                 if "group_" in path:
                                     msg["chat_id"] = msg.get("user_id", "")
@@ -65,7 +70,11 @@ class MessageHistoryManager:
                                 else:
                                     msg["chat_name"] = f"QQ用户{msg.get('chat_id', '')}"
                         # 只保留最近的 MAX_HISTORY 条
-                        return history[-MAX_HISTORY:] if len(history) > MAX_HISTORY else history
+                        return (
+                            history[-MAX_HISTORY:]
+                            if len(history) > MAX_HISTORY
+                            else history
+                        )
         except Exception as e:
             logger.error(f"加载历史记录失败 {path}: {e}")
         return []
@@ -82,8 +91,12 @@ class MessageHistoryManager:
                 try:
                     group_id_str = filename[6:-5]  # 提取群号
                     path = os.path.join(HISTORY_DIR, filename)
-                    self._message_history[group_id_str] = self._load_history_from_file(path)
-                    logger.info(f"加载群 {group_id_str} 历史消息: {len(self._message_history[group_id_str])} 条")
+                    self._message_history[group_id_str] = self._load_history_from_file(
+                        path
+                    )
+                    logger.info(
+                        f"加载群 {group_id_str} 历史消息: {len(self._message_history[group_id_str])} 条"
+                    )
                 except Exception as e:
                     logger.error(f"加载群历史失败 {filename}: {e}")
 
@@ -93,8 +106,12 @@ class MessageHistoryManager:
                 try:
                     user_id_str = filename[8:-5]  # 提取用户ID
                     path = os.path.join(HISTORY_DIR, filename)
-                    self._private_message_history[user_id_str] = self._load_history_from_file(path)
-                    logger.info(f"加载私聊 {user_id_str} 历史消息: {len(self._private_message_history[user_id_str])} 条")
+                    self._private_message_history[user_id_str] = (
+                        self._load_history_from_file(path)
+                    )
+                    logger.info(
+                        f"加载私聊 {user_id_str} 历史消息: {len(self._private_message_history[user_id_str])} 条"
+                    )
                 except Exception as e:
                     logger.error(f"加载私聊历史失败 {filename}: {e}")
 
@@ -110,26 +127,32 @@ class MessageHistoryManager:
         """保存群消息到历史记录"""
         group_id_str = str(group_id)
         sender_id_str = str(sender_id)
-        
+
         if group_id_str not in self._message_history:
             self._message_history[group_id_str] = []
-        
+
         display_name = sender_card or sender_nickname or sender_id_str
-        
-        self._message_history[group_id_str].append({
-            "type": "group",
-            "chat_id": group_id_str,
-            "chat_name": group_name or f"群{group_id_str}",
-            "user_id": sender_id_str,
-            "display_name": display_name,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "message": text_content,
-        })
-        
+
+        self._message_history[group_id_str].append(
+            {
+                "type": "group",
+                "chat_id": group_id_str,
+                "chat_name": group_name or f"群{group_id_str}",
+                "user_id": sender_id_str,
+                "display_name": display_name,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "message": text_content,
+            }
+        )
+
         if len(self._message_history[group_id_str]) > MAX_HISTORY:
-            self._message_history[group_id_str] = self._message_history[group_id_str][-MAX_HISTORY:]
-        
-        self._save_history_to_file(self._message_history[group_id_str], self._get_group_history_path(group_id))
+            self._message_history[group_id_str] = self._message_history[group_id_str][
+                -MAX_HISTORY:
+            ]
+
+        self._save_history_to_file(
+            self._message_history[group_id_str], self._get_group_history_path(group_id)
+        )
 
     def add_private_message(
         self,
@@ -140,24 +163,31 @@ class MessageHistoryManager:
     ) -> None:
         """保存私聊消息到历史记录"""
         user_id_str = str(user_id)
-        
+
         if user_id_str not in self._private_message_history:
             self._private_message_history[user_id_str] = []
-        
-        self._private_message_history[user_id_str].append({
-            "type": "private",
-            "chat_id": user_id_str,
-            "chat_name": user_name or f"QQ用户{user_id_str}",
-            "user_id": user_id_str,
-            "display_name": display_name or user_name or user_id_str,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "message": text_content,
-        })
-        
+
+        self._private_message_history[user_id_str].append(
+            {
+                "type": "private",
+                "chat_id": user_id_str,
+                "chat_name": user_name or f"QQ用户{user_id_str}",
+                "user_id": user_id_str,
+                "display_name": display_name or user_name or user_id_str,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "message": text_content,
+            }
+        )
+
         if len(self._private_message_history[user_id_str]) > MAX_HISTORY:
-            self._private_message_history[user_id_str] = self._private_message_history[user_id_str][-MAX_HISTORY:]
-        
-        self._save_history_to_file(self._private_message_history[user_id_str], self._get_private_history_path(user_id))
+            self._private_message_history[user_id_str] = self._private_message_history[
+                user_id_str
+            ][-MAX_HISTORY:]
+
+        self._save_history_to_file(
+            self._private_message_history[user_id_str],
+            self._get_private_history_path(user_id),
+        )
 
     def get_recent(
         self,
@@ -177,23 +207,23 @@ class MessageHistoryManager:
             history = self._private_message_history[chat_id]
         else:
             return []
-        
+
         total = len(history)
         if total == 0:
             return []
-        
+
         actual_start = total - end
         actual_end = total - start
-        
+
         if actual_start < 0:
             actual_start = 0
         if actual_end > total:
             actual_end = total
         if actual_start >= actual_end:
             return []
-        
+
         return history[actual_start:actual_end]
-    
+
     def get_recent_private(self, user_id: int, count: int) -> list[dict[str, Any]]:
         """获取最近的私聊消息"""
         user_id_str = str(user_id)
@@ -210,15 +240,18 @@ class MessageHistoryManager:
         """修改群聊历史记录中指定用户的最后一条消息"""
         group_id_str = str(group_id)
         sender_id_str = str(sender_id)
-        
+
         if group_id_str not in self._message_history:
             return
-        
+
         for i in range(len(self._message_history[group_id_str]) - 1, -1, -1):
             msg = self._message_history[group_id_str][i]
             if msg.get("user_id") == sender_id_str:
                 msg["message"] = new_message
-                self._save_history_to_file(self._message_history[group_id_str], self._get_group_history_path(group_id))
+                self._save_history_to_file(
+                    self._message_history[group_id_str],
+                    self._get_group_history_path(group_id),
+                )
                 logger.info(f"已修改群聊 {group_id} 用户 {sender_id} 的最后一条消息")
                 break
 
@@ -229,11 +262,14 @@ class MessageHistoryManager:
     ) -> None:
         """修改私聊历史记录中最后一条消息"""
         user_id_str = str(user_id)
-        
+
         if user_id_str not in self._private_message_history:
             return
-        
+
         if self._private_message_history[user_id_str]:
             self._private_message_history[user_id_str][-1]["message"] = new_message
-            self._save_history_to_file(self._private_message_history[user_id_str], self._get_private_history_path(user_id))
+            self._save_history_to_file(
+                self._private_message_history[user_id_str],
+                self._get_private_history_path(user_id),
+            )
             logger.info(f"已修改私聊用户 {user_id} 的最后一条消息")

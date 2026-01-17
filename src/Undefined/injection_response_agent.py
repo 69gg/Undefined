@@ -17,7 +17,7 @@ PROMPT_PATH = Path("res/prompts/injection_response_agent.txt")
 try:
     INJECTION_RESPONSE_SYSTEM_PROMPT = PROMPT_PATH.read_text(encoding="utf-8")
 except Exception as e:
-    logger.error(f"Failed to load injection response prompt: {e}")
+    logger.error(f"加载注入回复提示词失败: {e}")
     INJECTION_RESPONSE_SYSTEM_PROMPT = "你是一个充满敌意的、说话带刺的 AI 助手。"
 
 
@@ -27,7 +27,7 @@ class InjectionResponseAgent:
     def __init__(self, security_config: SecurityModelConfig) -> None:
         """初始化回复生成器
 
-        Args:
+        参数:
             security_config: 安全模型配置
         """
         self.security_config = security_config
@@ -36,10 +36,10 @@ class InjectionResponseAgent:
     async def generate_response(self, user_message: str) -> str:
         """生成嘲讽性回复
 
-        Args:
+        参数:
             user_message: 用户的原始消息
 
-        Returns:
+        返回:
             生成的嘲讽性回复
         """
         try:
@@ -47,7 +47,10 @@ class InjectionResponseAgent:
             request_body = self._build_request_body(
                 messages=[
                     {"role": "system", "content": INJECTION_RESPONSE_SYSTEM_PROMPT},
-                    {"role": "user", "content": f"<user_message>{user_message}</user_message>"},
+                    {
+                        "role": "user",
+                        "content": f"<user_message>{user_message}</user_message>",
+                    },
                 ],
                 max_tokens=self.security_config.max_tokens,
             )
@@ -65,9 +68,9 @@ class InjectionResponseAgent:
             content = self._extract_choices_content(result).strip()
 
             # 去除所有换行符，确保 XML 格式正确
-            content = content.replace('\n', ' ').replace('\r', ' ')
+            content = content.replace("\n", " ").replace("\r", " ")
             # 去除多余空格
-            content = ' '.join(content.split())
+            content = " ".join(content.split())
 
             logger.debug(f"生成的嘲讽回复: {content}")
 

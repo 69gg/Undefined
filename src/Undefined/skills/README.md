@@ -1,4 +1,4 @@
-# Skills Directory
+# 技能目录 (Skills Directory)
 
 技能目录，包含基础工具（tools）和工具集合（agents）。
 

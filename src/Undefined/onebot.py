@@ -140,12 +140,12 @@ class OneBotClient:
     ) -> list[dict[str, Any]]:
         """获取群消息历史
 
-        Args:
+        参数:
             group_id: 群号
             message_seq: 起始消息序号，None 表示从最新消息开始
             count: 获取的消息数量
 
-        Returns:
+        返回:
             消息列表
         """
         params: dict[str, Any] = {
@@ -174,10 +174,10 @@ class OneBotClient:
     async def get_image(self, file: str) -> str:
         """获取图片信息
 
-        Args:
+        参数:
             file: 图片文件名或 URL
 
-        Returns:
+        返回:
             图片的本地路径或 URL
         """
         result = await self._call_api("get_image", {"file": file})
@@ -188,10 +188,10 @@ class OneBotClient:
     async def get_group_info(self, group_id: int) -> dict[str, Any] | None:
         """获取群信息
 
-        Args:
+        参数:
             group_id: 群号
 
-        Returns:
+        返回:
             群信息字典，包含 group_name 等字段
         """
         try:
@@ -205,10 +205,10 @@ class OneBotClient:
     async def get_stranger_info(self, user_id: int) -> dict[str, Any] | None:
         """获取陌生人信息
 
-        Args:
+        参数:
             user_id: 用户QQ号
 
-        Returns:
+        返回:
             用户信息字典，包含 nickname 等字段
         """
         try:
@@ -224,12 +224,12 @@ class OneBotClient:
     ) -> dict[str, Any] | None:
         """获取群成员信息
 
-        Args:
+        参数:
             group_id: 群号
             user_id: 群成员QQ号
             no_cache: 是否不使用缓存（默认 false）
 
-        Returns:
+        返回:
             群成员信息字典，包含群昵称、QQ昵称、加群时间、等级、最后发言时间等字段
         """
         try:
@@ -246,10 +246,10 @@ class OneBotClient:
     async def get_group_member_list(self, group_id: int) -> list[dict[str, Any]]:
         """获取群成员列表
 
-        Args:
+        参数:
             group_id: 群号
 
-        Returns:
+        返回:
             群成员信息列表
         """
         try:
@@ -265,16 +265,16 @@ class OneBotClient:
     async def get_forward_msg(self, id: str) -> list[dict[str, Any]]:
         """获取合并转发消息详情
 
-        Args:
+        参数:
             id: 合并转发 ID
 
-        Returns:
+        返回:
             消息节点列表
         """
         try:
             result = await self._call_api("get_forward_msg", {"message_id": id})
             data = result.get("data", {})
-            # data 可能是 dict (包含 messages) 或 list (直接是 nodes)
+            # data 可能是字典（包含 messages）或列表（直接是 nodes）
             if isinstance(data, dict):
                 messages: list[dict[str, Any]] = data.get("messages", [])
                 return messages
@@ -289,10 +289,10 @@ class OneBotClient:
     async def get_msg(self, message_id: int) -> dict[str, Any] | None:
         """获取单条消息详情
 
-        Args:
+        参数:
             message_id: 消息 ID
 
-        Returns:
+        返回:
             消息详情字典
         """
         try:
@@ -307,7 +307,7 @@ class OneBotClient:
     ) -> dict[str, Any]:
         """发送合并转发消息到群聊
 
-        Args:
+        参数:
             group_id: 群号
             messages: 消息节点列表，每个节点格式为:
                 {
@@ -320,7 +320,7 @@ class OneBotClient:
                     }
                 }
 
-        Returns:
+        返回:
             API 响应
         """
         return await self._call_api(
@@ -330,11 +330,11 @@ class OneBotClient:
     async def send_like(self, user_id: int, times: int = 1) -> dict[str, Any]:
         """给用户点赞
 
-        Args:
+        参数:
             user_id: 对方 QQ 号
             times: 赞的次数（默认1次）
 
-        Returns:
+        返回:
             API 响应
         """
         return await self._call_api("send_like", {"user_id": user_id, "times": times})

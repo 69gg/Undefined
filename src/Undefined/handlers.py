@@ -1,6 +1,5 @@
 """消息处理和命令分发"""
 
-import asyncio
 import logging
 import os
 import random
@@ -12,6 +11,7 @@ from .ai import AIClient
 from .config import Config
 from .faq import FAQStorage, extract_faq_title
 from .injection_response_agent import InjectionResponseAgent
+from .services.queue_manager import QueueManager
 from .onebot import (
     OneBotClient,
     get_message_content,
@@ -53,30 +53,11 @@ class MessageHandler:
         self.sender = MessageSender(onebot, self.history_manager, config.bot_qq)
 
         # 初始化定时任务调度器
-        self.scheduler = TaskScheduler(ai, self)
+        self.scheduler = TaskScheduler(ai, self.sender, onebot, self.history_manager)
 
-        # AI 请求队列（四个队列）
-        self._superadmin_queue: asyncio.Queue[dict[str, Any]] = (
-            asyncio.Queue()
-        )  # 超级管理员私聊队列（最高优先级）
-        self._private_queue: asyncio.Queue[dict[str, Any]] = (
-            asyncio.Queue()
-        )  # 普通私聊队列（高优先级）
-        self._group_mention_queue: asyncio.Queue[dict[str, Any]] = (
-            asyncio.Queue()
-        )  # 群聊被@队列（中等优先级）
-        self._group_normal_queue: asyncio.Queue[dict[str, Any]] = (
-            asyncio.Queue()
-        )  # 群聊普通队列（最低优先级）
-        # AI 请求间隔（秒）
-        self.ai_request_interval = 1.0
-        # 队列处理任务
-        self._queue_processor_task: asyncio.Task[None] | None = None
-
-        # 启动队列处理任务
-        self._queue_processor_task = asyncio.create_task(
-            self._process_ai_request_queue()
-        )
+        # 初始化队列管理器
+        self.queue_manager = QueueManager()
+        self.queue_manager.start(self._handle_queue_request)
 
     async def handle_message(self, event: dict[str, Any]) -> None:
         """处理收到的消息事件"""
@@ -377,123 +358,16 @@ class MessageHandler:
             group_name=group_name,
         )
 
-    def _trim_queue_if_needed(self) -> None:
-        """如果群聊普通队列超过10个，仅保留最新的2个"""
-        queue_size = self._group_normal_queue.qsize()
-        if queue_size > 10:
-            logger.info(f"群聊普通队列长度 {queue_size} 超过10，仅保留最新的2个")
-            # 取出所有元素
-            all_requests: list[dict[str, Any]] = []
-            while not self._group_normal_queue.empty():
-                all_requests.append(self._group_normal_queue.get_nowait())
-            # 只保留最新的2个
-            latest_requests = all_requests[-2:]
-            # 放回队列
-            for req in latest_requests:
-                self._group_normal_queue.put_nowait(req)
-            logger.info(
-                f"群聊普通队列已修剪，当前长度: {self._group_normal_queue.qsize()}"
-            )
+    async def _handle_queue_request(self, request: dict[str, Any]) -> None:
+        """处理来自 QueueManager 的请求"""
+        request_type = request.get("type", "unknown")
 
-    async def _process_ai_request_queue(self) -> None:
-        """处理 AI 请求队列"""
-        logger.info("AI 请求队列处理任务已启动")
-
-        queues = [
-            self._superadmin_queue,
-            self._private_queue,
-            self._group_mention_queue,
-            self._group_normal_queue,
-        ]
-        queue_names = ["超级管理员私聊", "私聊", "群聊被@", "群聊普通"]
-
-        current_queue_idx = 0
-        current_queue_processed = 0
-        last_transfer_to_normal = False
-        transfer_count = 0
-
-        try:
-            while True:
-                try:
-                    current_queue = queues[current_queue_idx]
-
-                    if current_queue.empty():
-                        all_empty = all(q.empty() for q in queues)
-                        if all_empty:
-                            await asyncio.sleep(0.2)
-                            continue
-
-                        current_queue_idx = (current_queue_idx + 1) % 4
-                        current_queue_processed = 0
-                        transfer_count += 1
-                        continue
-
-                    request = await current_queue.get()
-                    request_type = request.get("type", "unknown")
-
-                    logger.info(
-                        f"开始处理{queue_names[current_queue_idx]}请求: {request_type}, 队列剩余: {current_queue.qsize()}"
-                    )
-
-                    try:
-                        if request_type == "auto_reply":
-                            await self._execute_auto_reply(request)
-                        elif request_type == "private_reply":
-                            await self._execute_private_reply(request)
-                        else:
-                            logger.warning(f"未知的请求类型: {request_type}")
-                    except Exception as e:
-                        logger.exception(f"处理 AI 请求失败: {e}")
-                    finally:
-                        current_queue.task_done()
-
-                    current_queue_processed += 1
-
-                    if current_queue_processed >= 2:
-                        next_queue_idx = (current_queue_idx + 1) % 4
-                        logger.info(
-                            f"{queue_names[current_queue_idx]}队列已处理2条，转移到{queue_names[next_queue_idx]}队列"
-                        )
-
-                        if next_queue_idx == 3:
-                            last_transfer_to_normal = True
-                        else:
-                            last_transfer_to_normal = False
-
-                        current_queue_idx = next_queue_idx
-                        current_queue_processed = 0
-                        transfer_count += 1
-
-                    if (
-                        transfer_count > 0
-                        and transfer_count % 2 == 0
-                        and not last_transfer_to_normal
-                    ):
-                        if not self._group_normal_queue.empty():
-                            normal_request = await self._group_normal_queue.get()
-                            normal_type = normal_request.get("type", "unknown")
-                            logger.info(f"强制处理群聊普通请求: {normal_type}")
-                            try:
-                                if normal_type == "auto_reply":
-                                    await self._execute_auto_reply(normal_request)
-                                else:
-                                    logger.warning(f"未知的请求类型: {normal_type}")
-                            except Exception as e:
-                                logger.exception(f"处理群聊普通请求失败: {e}")
-                            finally:
-                                self._group_normal_queue.task_done()
-                        transfer_count = 0
-
-                    await asyncio.sleep(self.ai_request_interval)
-
-                except asyncio.CancelledError:
-                    logger.info("AI 请求队列处理任务被取消")
-                    break
-                except Exception as e:
-                    logger.exception(f"队列处理循环出错: {e}")
-                    await asyncio.sleep(1.0)
-        finally:
-            logger.info("AI 请求队列处理任务已退出")
+        if request_type == "auto_reply":
+            await self._execute_auto_reply(request)
+        elif request_type == "private_reply":
+            await self._execute_private_reply(request)
+        else:
+            logger.warning(f"未知的请求类型: {request_type}")
 
     async def _execute_auto_reply(self, request: dict[str, Any]) -> None:
         """执行自动回复请求"""
@@ -614,7 +488,7 @@ class MessageHandler:
             if result:
                 logger.info(f"AI 直接返回文本，自动发送私聊消息: {result[:50]}...")
                 await self.sender.send_private_message(user_id, result)
-                # sender 内部已经自动保存历史
+                # sender 内部已自动保存历史
         except Exception as e:
             logger.error(f"私聊回复处理出错: {e}")
 
@@ -677,10 +551,8 @@ class MessageHandler:
 
 简单说：像个极度安静的群友。被@或明确提到才回应，NagaAgent技术问题尽量回复，其他几乎不理。"""
 
-        self._trim_queue_if_needed()
-
         if is_at_bot:
-            await self._group_mention_queue.put(
+            await self.queue_manager.add_group_mention_request(
                 {
                     "type": "auto_reply",
                     "group_id": group_id,
@@ -689,12 +561,9 @@ class MessageHandler:
                     "full_question": full_question,
                     "is_at_bot": is_at_bot,
                 }
-            )
-            logger.debug(
-                f"AI 请求已加入群聊被@队列，当前队列长度: {self._group_mention_queue.qsize()}"
             )
         else:
-            await self._group_normal_queue.put(
+            await self.queue_manager.add_group_normal_request(
                 {
                     "type": "auto_reply",
                     "group_id": group_id,
@@ -703,9 +572,6 @@ class MessageHandler:
                     "full_question": full_question,
                     "is_at_bot": is_at_bot,
                 }
-            )
-            logger.debug(
-                f"AI 请求已加入群聊普通队列，当前队列长度: {self._group_normal_queue.qsize()}"
             )
 
     async def _handle_private_reply(
@@ -749,28 +615,22 @@ class MessageHandler:
         is_superadmin = user_id == self.config.superadmin_qq
 
         if is_superadmin:
-            await self._superadmin_queue.put(
+            await self.queue_manager.add_superadmin_request(
                 {
                     "type": "private_reply",
                     "user_id": user_id,
                     "text": text,
                     "full_question": full_question,
                 }
-            )
-            logger.debug(
-                f"超级管理员私聊 AI 请求已加入超级管理员队列，当前队列长度: {self._superadmin_queue.qsize()}"
             )
         else:
-            await self._private_queue.put(
+            await self.queue_manager.add_private_request(
                 {
                     "type": "private_reply",
                     "user_id": user_id,
                     "text": text,
                     "full_question": full_question,
                 }
-            )
-            logger.debug(
-                f"私聊 AI 请求已加入私聊队列，当前队列长度: {self._private_queue.qsize()}"
             )
 
     async def _send_image(
@@ -778,7 +638,7 @@ class MessageHandler:
     ) -> None:
         """发送图片或音频到指定目标（群聊或私聊）
 
-        Args:
+        参数:
             target_id: 目标 ID（群号或用户 QQ 号）
             message_type: 消息类型（group 或 private）
             image_path: 媒体文件路径
@@ -1317,10 +1177,5 @@ class MessageHandler:
     async def close(self) -> None:
         """关闭消息处理器，取消队列处理任务"""
         logger.info("正在关闭消息处理器...")
-        if self._queue_processor_task and not self._queue_processor_task.done():
-            self._queue_processor_task.cancel()
-            try:
-                await self._queue_processor_task
-            except asyncio.CancelledError:
-                logger.info("队列处理任务已取消")
+        await self.queue_manager.stop()
         logger.info("消息处理器已关闭")

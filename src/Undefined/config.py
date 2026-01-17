@@ -24,7 +24,7 @@ class ChatModelConfig:
     model_name: str
     max_tokens: int
     thinking_enabled: bool = False  # 是否启用 thinking
-    thinking_budget_tokens: int = 20000  # thinking budget tokens
+    thinking_budget_tokens: int = 20000  # 思维预算 token 数量
 
 
 @dataclass
@@ -35,7 +35,7 @@ class VisionModelConfig:
     api_key: str
     model_name: str
     thinking_enabled: bool = False  # 是否启用 thinking
-    thinking_budget_tokens: int = 20000  # thinking budget tokens
+    thinking_budget_tokens: int = 20000  # 思维预算 token 数量
 
 
 @dataclass
@@ -47,7 +47,7 @@ class SecurityModelConfig:
     model_name: str
     max_tokens: int
     thinking_enabled: bool = False  # 是否启用 thinking
-    thinking_budget_tokens: int = 0  # thinking budget tokens
+    thinking_budget_tokens: int = 0  # 思维预算 token 数量
 
 
 @dataclass
@@ -59,7 +59,7 @@ class AgentModelConfig:
     model_name: str
     max_tokens: int = 4096
     thinking_enabled: bool = False  # 是否启用 thinking
-    thinking_budget_tokens: int = 0  # thinking budget tokens
+    thinking_budget_tokens: int = 0  # 思维预算 token 数量
 
 
 def load_local_admins() -> list[int]:
@@ -109,7 +109,7 @@ class Config:
     chat_model: ChatModelConfig
     vision_model: VisionModelConfig
     security_model: SecurityModelConfig  # 安全模型（防注入检测和回复生成）
-    agent_model: AgentModelConfig  # Agent 模型（用于执行 agents）
+    agent_model: AgentModelConfig  # Agent 模型（用于执行各种 Agent）
     log_file_path: str
     log_max_size: int
     log_backup_count: int
@@ -291,10 +291,10 @@ class Config:
     def add_admin(self, qq: int) -> bool:
         """添加管理员（保存到本地配置）
 
-        Args:
+        参数:
             qq: 要添加的 QQ 号
 
-        Returns:
+        返回:
             是否添加成功（已存在返回 False）
         """
         if qq in self.admin_qqs:
@@ -313,10 +313,10 @@ class Config:
     def remove_admin(self, qq: int) -> bool:
         """移除管理员（从本地配置中移除）
 
-        Args:
+        参数:
             qq: 要移除的 QQ 号
 
-        Returns:
+        返回:
             是否移除成功
         """
         # 不能移除超级管理员
@@ -339,10 +339,10 @@ class Config:
     def is_superadmin(self, qq: int) -> bool:
         """检查是否为超级管理员
 
-        Args:
+        参数:
             qq: QQ 号
 
-        Returns:
+        返回:
             是否为超级管理员
         """
         return qq == self.superadmin_qq
@@ -350,10 +350,10 @@ class Config:
     def is_admin(self, qq: int) -> bool:
         """检查是否为管理员
 
-        Args:
+        参数:
             qq: QQ 号
 
-        Returns:
+        返回:
             是否为管理员
         """
         return qq in self.admin_qqs

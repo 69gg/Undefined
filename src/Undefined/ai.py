@@ -158,7 +158,7 @@ class AIClient:
     ) -> dict[str, Any]:
         """构建 API 请求体，支持 thinking 参数
 
-        Args:
+        参数:
             model_config: 模型配置
             messages: 消息列表
             max_tokens: 最大 token 数
@@ -166,7 +166,7 @@ class AIClient:
             tool_choice: 工具选择策略
             **kwargs: 其他参数
 
-        Returns:
+        返回:
             请求体字典
         """
         body: dict[str, Any] = {
@@ -199,13 +199,13 @@ class AIClient:
         1. {"choices": [...]}
         2. {"data": {"choices": [...]}}
 
-        Args:
+        参数:
             result: API 响应字典
 
-        Returns:
+        返回:
             提取的 content 文本
 
-        Raises:
+        引发:
             KeyError: 如果无法找到有效的 choices 数据
         """
         logger.debug(f"提取 choices 内容，响应结构: {list(result.keys())}")
@@ -278,11 +278,11 @@ class AIClient:
     ) -> bool:
         """检测消息是否包含提示词注入攻击
 
-        Args:
+        参数:
             text: 消息文本内容
             message_content: 完整的消息内容（包含图片、at 等结构化信息）
 
-        Returns:
+        返回:
             True 表示检测到注入，False 表示安全
         """
         try:
@@ -364,11 +364,11 @@ class AIClient:
     def _detect_media_type(self, media_url: str, specified_type: str = "auto") -> str:
         """检测媒体类型
 
-        Args:
+        参数:
             media_url: 媒体URL或文件路径
             specified_type: 指定的媒体类型（image/audio/video/auto）
 
-        Returns:
+        返回:
             检测到的媒体类型（image/audio/video）
         """
         if specified_type and specified_type != "auto":
@@ -418,11 +418,11 @@ class AIClient:
     def _get_media_mime_type(self, media_type: str, file_path: str = "") -> str:
         """获取媒体类型的MIME类型
 
-        Args:
+        参数:
             media_type: 媒体类型（image/audio/video）
             file_path: 文件路径（可选，用于更精确的MIME类型检测）
 
-        Returns:
+        返回:
             MIME类型字符串
         """
         if file_path:
@@ -446,12 +446,12 @@ class AIClient:
     ) -> dict[str, str]:
         """使用全模态模型分析媒体内容（图像、音频、视频，带缓存）
 
-        Args:
+        参数:
             media_url: 媒体文件 URL、file_id 或 base64 数据
             media_type: 媒体类型（image/audio/video/auto），默认为auto（自动检测）
             prompt_extra: 额外的分析指令（如"提取图中所有手机号"）
 
-        Returns:
+        返回:
             包含 description 和其他字段（ocr_text/transcript/subtitles）的字典
         """
         # 检测媒体类型
@@ -591,11 +591,11 @@ class AIClient:
     ) -> dict[str, str]:
         """使用全模态模型描述图片（带缓存，向后兼容方法）
 
-        Args:
+        参数:
             image_url: 图片 URL 或 base64 数据
             prompt_extra: 额外的分析指令（如"提取图中所有手机号"）
 
-        Returns:
+        返回:
             包含 description 和 ocr_text 的字典
         """
         # 调用新的多模态分析方法
@@ -608,11 +608,11 @@ class AIClient:
     async def summarize_chat(self, messages: str, context: str = "") -> str:
         """总结聊天记录
 
-        Args:
+        参数:
             messages: 聊天记录文本
             context: 额外上下文（如之前的分段总结）
 
-        Returns:
+        返回:
             总结文本
         """
         async with aiofiles.open(
@@ -653,10 +653,10 @@ class AIClient:
     async def merge_summaries(self, summaries: list[str]) -> str:
         """合并多个分段总结
 
-        Args:
+        参数:
             summaries: 分段总结列表
 
-        Returns:
+        返回:
             合并后的最终总结
         """
         if len(summaries) == 1:
@@ -702,11 +702,11 @@ class AIClient:
     def split_messages_by_tokens(self, messages: str, max_tokens: int) -> list[str]:
         """按 token 数量分割消息
 
-        Args:
+        参数:
             messages: 完整消息文本
             max_tokens: 每段最大 token 数
 
-        Returns:
+        返回:
             分割后的消息列表
         """
         # 预留一些空间给系统提示和响应
@@ -736,10 +736,10 @@ class AIClient:
     async def generate_title(self, summary: str) -> str:
         """根据总结生成标题
 
-        Args:
+        参数:
             summary: 分析报告摘要
 
-        Returns:
+        返回:
             生成的标题
         """
         prompt = """请根据以下 Bug 修复分析报告，生成一个简短、准确的标题（不超过 20 字），用于 FAQ 索引。
@@ -793,7 +793,7 @@ class AIClient:
     ) -> str:
         """使用 AI 回答问题，支持工具调用
 
-        Args:
+        参数:
             question: 用户问题
             context: 额外上下文
             send_message_callback: 发送消息回调函数
@@ -805,7 +805,7 @@ class AIClient:
             history_manager: 历史记录管理器实例
             onebot_client: OneBot 客户端实例
 
-        Returns:
+        返回:
             AI 的回答（如果使用了 send_message 工具，则返回空字符串）
         """
         async with aiofiles.open(
@@ -1045,7 +1045,7 @@ class AIClient:
 
                         if isinstance(result, Exception):
                             logger.error(f"工具执行异常 (call_id={call_id}): {result}")
-                            content_str = f"Execution failed: {str(result)}"
+                            content_str = f"执行失败: {str(result)}"
                         else:
                             content_str = str(result)
 
@@ -1079,7 +1079,7 @@ class AIClient:
     def _get_openai_tools(self) -> list[dict[str, Any]]:
         """获取标准 OpenAI 格式的工具定义（包括 tools 和 agents）
 
-        Returns:
+        返回:
             工具定义列表
         """
         tools = self.tool_registry.get_tools_schema()
@@ -1094,12 +1094,12 @@ class AIClient:
     ) -> str:
         """执行工具或 Agent
 
-        Args:
+        参数:
             function_name: 工具或 Agent 名称
             function_args: 工具参数
             context: 执行上下文
 
-        Returns:
+        返回:
             执行结果
         """
         # 首先尝试作为 Agent 执行
