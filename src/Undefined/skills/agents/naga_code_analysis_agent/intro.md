@@ -1,4 +1,6 @@
-# 代码分析助手
+# NagaAgent代码分析助手
+
+该助手提供了针对NagaAgent的代码读取和分析能力，仅当涉及NagaAgent时调用。
 
 ## 能力
 
