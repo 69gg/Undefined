@@ -1,0 +1,29 @@
+{
+    "type": "function",
+    "function": {
+        "name": "schedule_task",
+        "description": "创建一个定时执行的任务。支持 crontab 语法。可以指定要调用的工具及其参数。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "cron_expression": {
+                    "type": "string",
+                    "description": "crontab 表达式 (分 时 日 月 周)。例如 '* * * * *' 表示每分钟执行，'30 8 * * *' 表示每天 8:30 执行。"
+                },
+                "tool_name": {
+                    "type": "string",
+                    "description": "要定时调用的工具名称，例如 'get_current_time', 'send_message' 等。"
+                },
+                "tool_args": {
+                    "type": "object",
+                    "description": "调用工具时传递的参数对象 (JSON)。"
+                }
+            },
+            "required": [
+                "cron_expression",
+                "tool_name",
+                "tool_args"
+            ]
+        }
+    }
+}

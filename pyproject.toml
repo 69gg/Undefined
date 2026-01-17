@@ -1,6 +1,6 @@
 [project]
 name = "Undefined"
-version = "1.0.0"
+version = "1.1.0"
 description = "A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture."
 readme = "README.md"
 authors = [
@@ -29,6 +29,8 @@ dependencies = [
     "playwright>=1.57.0",
     "aiohttp>=3.13.2",
     "types-aiofiles>=25.1.0.20251011",
+    "APScheduler>=3.10.0",
+    "croniter>=2.0.0",
 ]
 
 [project.urls]
