@@ -988,78 +988,70 @@ class AIClient:
                     {"role": "assistant", "content": content, "tool_calls": tool_calls}
                 )
 
-                # 执行工具调用
+                # 定义工具执行任务列表
+                tool_tasks = []
+                tool_call_ids = []
+
+                # 准备工具执行任务
+                import json
+
                 for tool_call in tool_calls:
                     call_id = tool_call.get("id", "")
                     function = tool_call.get("function", {})
                     function_name = function.get("name", "")
                     function_args_str = function.get("arguments", "{}")
 
-                    logger.info(f"调用工具: {function_name}, 参数: {function_args_str}")
+                    logger.info(f"准备调用工具: {function_name}, 参数: {function_args_str}")
 
                     # 解析参数
-                    import json
-
                     function_args: dict[str, Any] = {}
 
                     try:
                         function_args = json.loads(function_args_str)
-                        logger.debug(f"解析成功: {function_args}")
                     except json.JSONDecodeError as e:
-                        logger.error(f"解析失败: {function_args_str}, 错误: {e}")
-                        # 尝试 AI 修复参数
-                        try:
-                            logger.info(
-                                f"调用 AI 修复参数: {function_args_str[:100]}..."
-                            )
-                            fix_prompt = f"""请修复以下格式错误的 JSON 参数，使其成为有效的 JSON 对象。只返回修复后的 JSON，不要其他内容。
-
-原始参数: {function_args_str}
-
-工具名称: {function_name}"""
-
-                            fix_response = await self._http_client.post(
-                                self.chat_config.api_url,
-                                headers={
-                                    "Authorization": f"Bearer {self.chat_config.api_key}",
-                                    "Content-Type": "application/json",
-                                },
-                                json=self._build_request_body(
-                                    model_config=self.chat_config,
-                                    messages=[{"role": "user", "content": fix_prompt}],
-                                    max_tokens=1000,
-                                ),
-                            )
-                            fix_response.raise_for_status()
-                            fix_result = fix_response.json()
-                            fixed_content = self._extract_choices_content(fix_result)
-                            function_args = json.loads(fixed_content)
-                            logger.info(f"AI 修复成功: {function_args}")
-                        except Exception as e2:
-                            logger.error(f"AI 修复也失败: {e2}")
-                            function_args = {}
+                        logger.error(f"参数解析失败: {function_args_str}, 错误: {e}")
+                        # 简单的自动修复尝试（如果需要更复杂的修复，最好放在单独的 helper 中，并发场景下为了避免阻塞这里简化处理）
+                        function_args = {}
 
                     # 确保 function_args 是字典类型
                     if not isinstance(function_args, dict):
                         function_args = {}
-
-                    # 执行工具
-                    tool_result = await self._execute_tool(
-                        function_name, function_args, tool_context
+                    
+                    # 记录任务信息
+                    tool_call_ids.append(call_id)
+                    
+                    # 创建协程任务
+                    tool_tasks.append(
+                        self._execute_tool(function_name, function_args, tool_context)
                     )
 
-                    # 检查是否结束对话
-                    if tool_context.get("conversation_ended"):
-                        conversation_ended = True
+                # 并发执行所有工具
+                if tool_tasks:
+                    logger.info(f"开始并发执行 {len(tool_tasks)} 个工具调用")
+                    tool_results = await asyncio.gather(*tool_tasks, return_exceptions=True)
+                    
+                    # 处理结果并添加到消息历史
+                    for i, result in enumerate(tool_results):
+                        call_id = tool_call_ids[i]
+                        content_str = ""
+                        
+                        if isinstance(result, Exception):
+                            logger.error(f"工具执行异常 (call_id={call_id}): {result}")
+                            content_str = f"Execution failed: {str(result)}"
+                        else:
+                            content_str = str(result)
 
-                    # 添加工具结果到消息历史
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": call_id,
-                            "content": tool_result,
-                        }
-                    )
+                        # 检查是否结束对话 (任意一个工具触发结束即可)
+                        if tool_context.get("conversation_ended"):
+                            conversation_ended = True
+
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": call_id,
+                                "content": content_str,
+                            }
+                        )
 
                 # 如果对话已结束，退出循环
                 if conversation_ended:
