@@ -13,6 +13,7 @@ from typing import Any, Callable, Awaitable, Optional
 from pathlib import Path
 
 import aiofiles
+import asyncio
 import httpx
 
 from .config import ChatModelConfig, VisionModelConfig, AgentModelConfig
@@ -1001,7 +1002,9 @@ class AIClient:
                     function_name = function.get("name", "")
                     function_args_str = function.get("arguments", "{}")
 
-                    logger.info(f"准备调用工具: {function_name}, 参数: {function_args_str}")
+                    logger.info(
+                        f"准备调用工具: {function_name}, 参数: {function_args_str}"
+                    )
 
                     # 解析参数
                     function_args: dict[str, Any] = {}
@@ -1016,10 +1019,10 @@ class AIClient:
                     # 确保 function_args 是字典类型
                     if not isinstance(function_args, dict):
                         function_args = {}
-                    
+
                     # 记录任务信息
                     tool_call_ids.append(call_id)
-                    
+
                     # 创建协程任务
                     tool_tasks.append(
                         self._execute_tool(function_name, function_args, tool_context)
@@ -1028,13 +1031,15 @@ class AIClient:
                 # 并发执行所有工具
                 if tool_tasks:
                     logger.info(f"开始并发执行 {len(tool_tasks)} 个工具调用")
-                    tool_results = await asyncio.gather(*tool_tasks, return_exceptions=True)
-                    
+                    tool_results = await asyncio.gather(
+                        *tool_tasks, return_exceptions=True
+                    )
+
                     # 处理结果并添加到消息历史
                     for i, result in enumerate(tool_results):
                         call_id = tool_call_ids[i]
                         content_str = ""
-                        
+
                         if isinstance(result, Exception):
                             logger.error(f"工具执行异常 (call_id={call_id}): {result}")
                             content_str = f"Execution failed: {str(result)}"
