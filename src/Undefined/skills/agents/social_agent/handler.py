@@ -124,7 +124,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     agent_config = ai_client.agent_config
 
-    import httpx
 
     system_prompt: str = await _load_prompt()
 
@@ -199,14 +198,14 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 logger.info(f"Agent executing {len(tool_tasks)} tools in parallel")
                 results = await asyncio.gather(*tool_tasks, return_exceptions=True)
 
-                for i, result in enumerate(results):
+                for i, tool_result in enumerate(results):
                     call_id = tool_call_ids[i]
-                    content_str = ""
-                    if isinstance(result, Exception):
-                        content_str = f"Error: {str(result)}"
+                    content_str: str = ""
+                    if isinstance(tool_result, Exception):
+                        content_str = f"Error: {str(tool_result)}"
                     else:
-                        content_str = str(result)
-                    
+                        content_str = str(tool_result)
+
                     messages.append(
                         {
                             "role": "tool",

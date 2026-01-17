@@ -1,7 +1,6 @@
 """消息发送管理"""
 
 import logging
-from typing import Any
 
 from ..onebot import OneBotClient
 from .history import MessageHistoryManager
