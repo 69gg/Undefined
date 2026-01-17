@@ -62,6 +62,8 @@ AGENT_MODEL_THINKING_BUDGET_TOKENS=0    # thinking budget tokens
 - 使用方式和参数说明
 - 返回格式
 
+**这是主 AI 看到的核心描述**，系统会自动将 `intro.md` 的内容作为 Agent 的 description 传递给 AI。
+
 示例：
 ```markdown
 # XXX 助手
@@ -92,12 +94,16 @@ Agent 内部的系统提示词，**从文件加载**，指导 Agent 如何选择
 ### config.json
 Agent 的 OpenAI function calling 定义。
 
+**注意**：description 字段可选，不建议手动填写。系统会自动从 `intro.md` 读取内容作为 description 传递给 AI。
+
+现有配置中的 description 仅用于向后兼容，未来将逐步移除。
+
 ```json
 {
     "type": "function",
     "function": {
         "name": "agent_name",
-        "description": "Agent 描述",
+        "description": "Agent 描述（可选，将自动从 intro.md 覆盖）",
         "parameters": {
             "type": "object",
             "properties": {
