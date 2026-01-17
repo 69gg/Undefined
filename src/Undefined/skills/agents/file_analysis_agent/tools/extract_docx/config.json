@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "extract_docx",
+        "description": "提取 Microsoft Word 文档 (.docx) 的文本内容和基本元数据。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "本地 Word 文档路径"
+                }
+            },
+            "required": ["file_path"]
+        }
+    }
+}

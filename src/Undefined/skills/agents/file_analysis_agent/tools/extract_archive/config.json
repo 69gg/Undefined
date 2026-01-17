@@ -1,0 +1,25 @@
+{
+    "type": "function",
+    "function": {
+        "name": "extract_archive",
+        "description": "提取压缩包文件内容。支持 zip, tar, gz, bz2, xz, 7z, rar 等格式。支持列出文件列表或解压到临时目录。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "本地压缩包路径"
+                },
+                "action": {
+                    "type": "string",
+                    "description": "操作类型：'list'（列出文件列表）或 'extract'（解压到临时目录），默认为 'list'"
+                },
+                "extract_path": {
+                    "type": "string",
+                    "description": "解压目标路径（可选），默认为临时目录"
+                }
+            },
+            "required": ["file_path"]
+        }
+    }
+}

@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "extract_pptx",
+        "description": "提取 Microsoft PowerPoint 演示文稿 (.pptx) 的文本内容，包括幻灯片文本和基本结构。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "本地 PowerPoint 文件路径"
+                }
+            },
+            "required": ["file_path"]
+        }
+    }
+}

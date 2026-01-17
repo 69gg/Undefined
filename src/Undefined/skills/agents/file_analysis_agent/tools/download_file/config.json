@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "download_file",
+        "description": "下载文件到临时目录。支持 URL 或 QQ 的 file_id。对于 URL 会先尝试获取文件大小，获取失败则拒绝下载。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_source": {
+                    "type": "string",
+                    "description": "文件源：URL 或 QQ 的 file_id"
+                },
+                "max_size_mb": {
+                    "type": "number",
+                    "description": "最大允许的文件大小（MB），默认 100MB"
+                }
+            },
+            "required": ["file_source"]
+        }
+    }
+}

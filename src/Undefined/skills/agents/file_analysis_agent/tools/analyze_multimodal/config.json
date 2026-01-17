@@ -1,0 +1,25 @@
+{
+    "type": "function",
+    "function": {
+        "name": "analyze_multimodal",
+        "description": "使用多模态 AI 模型分析图像、音频或视频内容。自动检测媒体类型并使用相应的分析提示词。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "本地媒体文件路径"
+                },
+                "media_type": {
+                    "type": "string",
+                    "description": "媒体类型：'image'、'audio'、'video' 或 'auto'（自动检测），默认为 'auto'"
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "额外的分析指令，例如'提取图中所有手机号'、'转写音频内容'"
+                }
+            },
+            "required": ["file_path"]
+        }
+    }
+}

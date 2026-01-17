@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "extract_pdf",
+        "description": "提取 PDF 文档的文本内容和元数据。使用 PyMuPDF (fitz) 解析，支持获取页数、作者、标题等信息。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "本地 PDF 文件路径"
+                },
+                "extract_images": {
+                    "type": "boolean",
+                    "description": "是否提取图片（会返回图片数量和位置信息），默认为 false"
+                }
+            },
+            "required": ["file_path"]
+        }
+    }
+}
