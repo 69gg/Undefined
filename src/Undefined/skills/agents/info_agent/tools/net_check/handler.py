@@ -1,35 +1,36 @@
 from typing import Any, Dict
 import logging
 import httpx
+import os
 
 logger = logging.getLogger(__name__)
 
-API_TOKEN = "fb867ba5f888a079"
+API_TOKEN = os.getenv("XXAPI_API_TOKEN", "")
+
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     host = args.get("host")
-    
+
     if not host:
         return "❌ 主机地址不能为空"
-    
+
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            params = {
-                "host": host,
-                "key": API_TOKEN
-            }
+            params = {"host": host, "key": API_TOKEN}
             logger.info(f"网络检测: {host}")
-            
-            response = await client.get("https://v2.xxapi.cn/api/netCheck", params=params)
+
+            response = await client.get(
+                "https://v2.xxapi.cn/api/netCheck", params=params
+            )
             response.raise_for_status()
             data = response.json()
-            
+
             if data.get("code") != 200:
                 return f"网络检测失败: {data.get('msg')}"
-            
+
             check_data = data.get("data", {})
             result = f"【{host} 网络检测报告】\n\n"
-            
+
             # DNS 解析结果
             dns = check_data.get("dns", {})
             if dns:
@@ -47,7 +48,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 if dns_time:
                     result += f"查询耗时：{dns_time}\n"
                 result += "\n"
-            
+
             # ICMP Ping 检测
             ping = check_data.get("ping", {})
             if ping:
@@ -62,7 +63,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                     if ip:
                         result += f"IP地址：{ip}\n"
                 result += "\n"
-            
+
             # HTTP 检测
             http = check_data.get("http", {})
             if http:
@@ -80,7 +81,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 if final_url:
                     result += f"最终URL：{final_url}\n"
                 result += "\n"
-            
+
             # HTTPS 检测
             https = check_data.get("https", {})
             if https:
@@ -103,9 +104,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 not_after = https.get("not_after", "")
                 if not_after:
                     result += f"证书到期时间：{not_after}\n"
-            
+
             return result
-            
+
     except httpx.TimeoutException:
         return "请求超时，请稍后重试"
     except httpx.HTTPStatusError as e:
