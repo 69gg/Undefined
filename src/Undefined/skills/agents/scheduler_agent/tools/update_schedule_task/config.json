@@ -1,0 +1,39 @@
+{
+    "type": "function",
+    "function": {
+        "name": "update_schedule_task",
+        "description": "修改已存在的定时任务。可修改 crontab 表达式、工具名称、工具参数、任务名称、最大执行次数。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "要修改的任务 ID。可通过 list_schedule_tasks 查看所有任务及其 ID。"
+                },
+                "cron_expression": {
+                    "type": "string",
+                    "description": "新的 crontab 表达式 (分 时 日 月 周)。"
+                },
+                "tool_name": {
+                    "type": "string",
+                    "description": "新的工具名称。"
+                },
+                "tool_args": {
+                    "type": "object",
+                    "description": "新的工具参数 (JSON)。"
+                },
+                "task_name": {
+                    "type": "string",
+                    "description": "新的任务名称。"
+                },
+                "max_executions": {
+                    "type": "integer",
+                    "description": "新的最大执行次数（可选）。设置为 1 表示执行一次后自动删除，设置为 N 表示执行 N 次后自动删除，不设置则保持原值。"
+                }
+            },
+            "required": [
+                "task_id"
+            ]
+        }
+    }
+}

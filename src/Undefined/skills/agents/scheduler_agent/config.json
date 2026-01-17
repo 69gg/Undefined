@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "scheduler_agent",
+        "description": "定时任务管理助手。提供创建、删除、修改、查看定时任务的功能，支持 crontab 语法和执行次数限制。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "用户的定时任务管理需求，例如：'创建一个每天早上8点执行的任务'、'删除所有任务'、'查看当前有哪些定时任务'"
+                }
+            },
+            "required": ["prompt"]
+        }
+    }
+}

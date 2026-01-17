@@ -2,16 +2,6 @@
 
 AI Agent 目录，每个 Agent 是一个工具集合。
 
-## Agent 列表
-
-| Agent | 功能 | 子工具数 |
-|-------|------|---------|
-| code_analysis_agent | 代码分析 | 5 |
-| web_agent | 网络搜索 | 2 |
-| social_agent | 社交媒体 | 6 |
-| entertainment_agent | 娱乐功能 | 6 |
-| info_agent | 信息查询 | 15 |
-
 ## Agent 结构
 
 每个 Agent 是一个目录，包含：
@@ -103,7 +93,7 @@ Agent 的 OpenAI function calling 定义。
     "type": "function",
     "function": {
         "name": "agent_name",
-        "description": "Agent 描述（可选，将自动从 intro.md 覆盖）",
+        "description": "Agent 描述（无需填写，将自动从 intro.md 覆盖）",
         "parameters": {
             "type": "object",
             "properties": {
@@ -143,6 +133,7 @@ mkdir -p skills/agents/my_agent/tools
 ```bash
 mv skills/tools/my_tool skills/agents/my_agent/tools/
 ```
+或添加工具。
 
 ### 4. 自动发现
 重启后 `AgentRegistry` 会自动发现并加载新 Agent。
