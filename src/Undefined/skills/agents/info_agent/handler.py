@@ -172,30 +172,48 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 {"role": "assistant", "content": content, "tool_calls": tool_calls}
             )
 
+            # 准备并发执行工具
+            tool_tasks = []
+            tool_call_ids = []
+
             for tool_call in tool_calls:
                 call_id: str = tool_call.get("id", "")
                 function: dict[str, Any] = tool_call.get("function", {})
                 function_name: str = function.get("name", "")
                 function_args_str: str = function.get("arguments", "{}")
 
-                logger.info(f"Agent calling tool: {function_name}")
+                logger.info(f"Agent preparing tool: {function_name}")
 
                 try:
                     function_args: dict[str, Any] = json.loads(function_args_str)
                 except json.JSONDecodeError:
                     function_args = {}
 
-                tool_result: str = await tool_registry.execute_tool(
-                    function_name, function_args, context
+                tool_call_ids.append(call_id)
+                tool_tasks.append(
+                    tool_registry.execute_tool(function_name, function_args, context)
                 )
 
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "content": tool_result,
-                    }
-                )
+            # 并发执行
+            if tool_tasks:
+                logger.info(f"Agent executing {len(tool_tasks)} tools in parallel")
+                results = await asyncio.gather(*tool_tasks, return_exceptions=True)
+
+                for i, result in enumerate(results):
+                    call_id = tool_call_ids[i]
+                    content_str = ""
+                    if isinstance(result, Exception):
+                        content_str = f"Error: {str(result)}"
+                    else:
+                        content_str = str(result)
+                    
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": content_str,
+                        }
+                    )
 
         except Exception as e:
             logger.exception(f"Agent execution failed: {e}")
