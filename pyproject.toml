@@ -45,7 +45,7 @@ Repository = "https://github.com/69gg/Undefined"
 Issues = "https://github.com/69gg/Undefined/issues"
 
 [project.scripts]
-Undefined-bot = "Undefined.main:run"
+Undefined = "Undefined.main:run"
 
 [project.optional-dependencies]
 dev = [

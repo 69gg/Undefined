@@ -45,11 +45,21 @@
 
 #### 1. 安装
 
-下载 Release 中的 `.whl` 文件，然后运行：
+直接通过 PyPI 安装：
 
 ```bash
-pip install /path/to/Undefined-x.x.x-py3-none-any.whl
-# 还需要安装浏览器内核（如果尚未安装）
+pip install Undefined-bot
+```
+
+或者下载 Release 中的 `.whl` 文件运行：
+
+```bash
+pip install /path/to/Undefined_bot-x.x.x-py3-none-any.whl
+```
+
+还需要安装浏览器内核（如果尚未安装）：
+
+```bash
 playwright install
 ```
 
