@@ -33,15 +33,24 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 1. 提取 Tag 原始手动注释
-          TAG_CONTENT=$(git tag -l --format='%(contents)' ${{ github.ref_name }})
+          # 1. 检查是否为注解标签 (Annotated Tag)
+          # 如果是轻量标签 (Lightweight Tag)，git cat-file -t 会返回 "commit"
+          # 如果是注解标签，则返回 "tag"
+          TAG_TYPE=$(git cat-file -t ${{ github.ref_name }})
+          TAG_CONTENT=""
           
-          # 2. 获取上一个 Tag (如果不存在则获取第一个 commit)
+          if [ "$TAG_TYPE" = "tag" ]; then
+            # 仅提取真正的 Tag Message
+            TAG_CONTENT=$(git tag -l --format='%(contents)' ${{ github.ref_name }})
+          fi
+          
+          # 2. 获取上一个 Tag
           PREV_TAG=$(git describe --tags --abbrev=0 ${{ github.ref_name }}^ 2>/dev/null || git rev-list --max-parents=0 HEAD)
           
           # 3. 初始化 tag_message.txt
           if [ -n "$TAG_CONTENT" ]; then
-            echo "$TAG_CONTENT" > tag_message.txt
+            # 移除 PGP 签名（如果存在）并写入
+            echo "$TAG_CONTENT" | sed '/-----BEGIN PGP SIGNATURE-----/,/-----END PGP SIGNATURE-----/d' > tag_message.txt
             echo -e "\n---\n" >> tag_message.txt
           else
             touch tag_message.txt
