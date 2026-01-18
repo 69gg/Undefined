@@ -7,11 +7,13 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build-and-release:
     name: Build and Release
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -88,3 +90,6 @@ jobs:
             --title "Undefined ${{ github.ref_name }}" \
             --notes-file tag_message.txt \
             --generate-notes
+
+      - name: Publish to PyPI
+        run: uv publish
