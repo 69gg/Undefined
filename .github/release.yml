@@ -1,9 +1,9 @@
 changelog:
   exclude:
-    - labels:
-        - ignore-for-release
-    - authors:
-        - "github-actions"
+    labels:
+      - ignore-for-release
+    authors:
+      - github-actions
   categories:
     - title: "🚀 New Features | 新功能"
       labels:

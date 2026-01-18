@@ -33,10 +33,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 提取 Tag 注释信息 (格式：%(contents) 会包含 -m 的所有内容)
-          TAG_MSG=$(git tag -l --format='%(contents)' ${{ github.ref_name }})
+          # 将 Tag 注释安全地存入临时文件，避免 Shell 引用问题
+          git tag -l --format='%(contents)' ${{ github.ref_name }} > tag_message.txt
           
           # 创建 Release
-          # --notes "$TAG_MSG" 将手动注释放入 Release 说明
-          # --generate-notes 会自动在手动注释下方追加自动生成的变更日志
-          gh release create ${{ github.ref_name }} dist/* --notes "$TAG_MSG" --generate-notes
+          # --title 指定发布标题为 "Undefined vxxx"
+          # --notes-file 会读取文件内容作为 Release 说明
+          # --generate-notes 会自动追加变更日志
+          gh release create ${{ github.ref_name }} dist/* \
+            --title "Undefined ${{ github.ref_name }}" \
+            --notes-file tag_message.txt \
+            --generate-notes
