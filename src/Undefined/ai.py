@@ -1118,6 +1118,16 @@ class AIClient:
                                 f"[工具响应] {fname} (ID={call_id}) 返回内容长度: {len(content_str)}"
                             )
 
+                        # 添加 tool response 消息到历史（OpenAI API 协议要求）
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": call_id,
+                                "name": fname,
+                                "content": content_str,
+                            }
+                        )
+
                         # 检查是否结束对话 (任意一个工具触发结束即可)
                         if tool_context.get("conversation_ended"):
                             conversation_ended = True
