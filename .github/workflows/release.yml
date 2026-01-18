@@ -16,7 +16,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 必须拉取完整历史才能读取 Tag 注释
+          fetch-depth: 0
+
+      - name: Fetch tags
+        run: git fetch --tags --force
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
