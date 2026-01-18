@@ -33,13 +33,27 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 将 Tag 注释安全地存入临时文件，避免 Shell 引用问题
+          # 1. 提取 Tag 原始手动注释
           git tag -l --format='%(contents)' ${{ github.ref_name }} > tag_message.txt
           
-          # 创建 Release
-          # --title 指定发布标题为 "Undefined vxxx"
-          # --notes-file 会读取文件内容作为 Release 说明
-          # --generate-notes 会自动追加变更日志
+          # 2. 获取上一个 Tag (如果不存在则获取第一个 commit)
+          PREV_TAG=$(git describe --tags --abbrev=0 ${{ github.ref_name }}^ 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          
+          # 3. 自动生成基于 Commit 的详细列表 (Angular 规范分类)
+          echo -e "\n## 📝 Detailed Changes\n" >> tag_message.txt
+          
+          echo -e "### 🚀 Features" >> tag_message.txt
+          git log ${PREV_TAG}..${{ github.ref_name }} --grep="^feat" --pretty=format:"* %s (%h)" >> tag_message.txt || true
+          echo -e "\n" >> tag_message.txt
+          
+          echo -e "### 🐛 Bug Fixes" >> tag_message.txt
+          git log ${PREV_TAG}..${{ github.ref_name }} --grep="^fix" --pretty=format:"* %s (%h)" >> tag_message.txt || true
+          echo -e "\n" >> tag_message.txt
+          
+          echo -e "### 🛠 Maintenance & Others" >> tag_message.txt
+          git log ${PREV_TAG}..${{ github.ref_name }} --grep="^feat\|^fix" --invert-grep --pretty=format:"* %s (%h)" >> tag_message.txt || true
+          
+          # 4. 创建 Release
           gh release create ${{ github.ref_name }} dist/* \
             --title "Undefined ${{ github.ref_name }}" \
             --notes-file tag_message.txt \
