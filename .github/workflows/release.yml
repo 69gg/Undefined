@@ -39,10 +39,15 @@ jobs:
           TAG_TYPE=$(git cat-file -t ${{ github.ref_name }})
           TAG_CONTENT=""
           
-          if [ "$TAG_TYPE" = "tag" ]; then
-            # 仅提取真正的 Tag Message
-            TAG_CONTENT=$(git tag -l --format='%(contents)' ${{ github.ref_name }})
-          fi
+           if [ "$TAG_TYPE" = "tag" ]; then
+             # 精确提取 Tag Message (仅内容，不包含tagger信息)
+             TAG_CONTENT=$(git tag -l --format='%(contents:subject)' ${{ github.ref_name }})
+             
+             # 如果subject为空，尝试获取body
+             if [ -z "$TAG_CONTENT" ]; then
+               TAG_CONTENT=$(git tag -l --format='%(contents:body)' ${{ github.ref_name }})
+             fi
+           fi
           
           # 2. 获取上一个 Tag
           PREV_TAG=$(git describe --tags --abbrev=0 ${{ github.ref_name }}^ 2>/dev/null || git rev-list --max-parents=0 HEAD)
