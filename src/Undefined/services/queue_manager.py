@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from typing import Any, Callable, Coroutine
 
 logger = logging.getLogger(__name__)
@@ -43,54 +44,49 @@ class QueueManager:
         self._request_handler = request_handler
         if self._processor_task is None or self._processor_task.done():
             self._processor_task = asyncio.create_task(self._process_queue_loop())
-            logger.info("QueueManager: 队列处理任务已启动")
+            logger.info("[队列服务] 队列处理主循环已启动")
 
     async def stop(self) -> None:
         """停止队列处理任务"""
         if self._processor_task and not self._processor_task.done():
+            logger.info("[队列服务] 正在停止队列处理任务...")
             self._processor_task.cancel()
             try:
                 await self._processor_task
             except asyncio.CancelledError:
                 pass
             self._processor_task = None
-            logger.info("QueueManager: 队列处理任务已停止")
+            logger.info("[队列服务] 队列处理任务已停止")
 
     async def add_superadmin_request(self, request: dict[str, Any]) -> None:
         """添加超级管理员请求"""
         await self._superadmin_queue.put(request)
-        logger.debug(
-            f"QueueManager: 已加入超级管理员队列，当前长度: {self._superadmin_queue.qsize()}"
+        logger.info(
+            f"[队列入队] 超级管理员私聊: 队列长度={self._superadmin_queue.qsize()}"
         )
 
     async def add_private_request(self, request: dict[str, Any]) -> None:
         """添加普通私聊请求"""
         await self._private_queue.put(request)
-        logger.debug(
-            f"QueueManager: 已加入私聊队列，当前长度: {self._private_queue.qsize()}"
-        )
+        logger.info(f"[队列入队] 普通私聊: 队列长度={self._private_queue.qsize()}")
 
     async def add_group_mention_request(self, request: dict[str, Any]) -> None:
         """添加群聊被@请求"""
         await self._group_mention_queue.put(request)
-        logger.debug(
-            f"QueueManager: 已加入群聊被@队列，当前长度: {self._group_mention_queue.qsize()}"
-        )
+        logger.info(f"[队列入队] 群聊被@: 队列长度={self._group_mention_queue.qsize()}")
 
     async def add_group_normal_request(self, request: dict[str, Any]) -> None:
         """添加群聊普通请求 (会自动裁剪)"""
         self._trim_normal_queue()
         await self._group_normal_queue.put(request)
-        logger.debug(
-            f"QueueManager: 已加入群聊普通队列，当前长度: {self._group_normal_queue.qsize()}"
-        )
+        logger.info(f"[队列入队] 群聊普通: 队列长度={self._group_normal_queue.qsize()}")
 
     def _trim_normal_queue(self) -> None:
         """如果群聊普通队列超过10个，仅保留最新的2个"""
         queue_size = self._group_normal_queue.qsize()
         if queue_size > 10:
             logger.info(
-                f"QueueManager: 群聊普通队列长度 {queue_size} 超过10，仅保留最新的2个"
+                f"[队列修剪] 群聊普通队列长度 {queue_size} 超过阈值(10)，正在修剪..."
             )
             # 取出所有元素
             all_requests: list[dict[str, Any]] = []
@@ -101,9 +97,7 @@ class QueueManager:
             # 放回队列
             for req in latest_requests:
                 self._group_normal_queue.put_nowait(req)
-            logger.info(
-                f"QueueManager: 群聊普通队列已修剪，当前长度: {self._group_normal_queue.qsize()}"
-            )
+            logger.info(f"[队列修剪] 修剪完成，保留最新 {len(latest_requests)} 个请求")
 
     async def _process_queue_loop(self) -> None:
         """队列处理主循环"""
@@ -140,15 +134,20 @@ class QueueManager:
                     request_type = request.get("type", "unknown")
 
                     logger.info(
-                        f"QueueManager: 开始处理{queue_names[current_queue_idx]}请求: {request_type}, "
-                        f"队列剩余: {current_queue.qsize()}"
+                        f"[队列处理] 正在处理 {queue_names[current_queue_idx]} 请求: {request_type} "
+                        f"(剩余={current_queue.qsize()})"
                     )
 
                     try:
+                        start_time = time.perf_counter()
                         if self._request_handler:
                             await self._request_handler(request)
+                        duration = time.perf_counter() - start_time
+                        logger.info(
+                            f"[队列处理] {queue_names[current_queue_idx]} 请求处理完成, 耗时={duration:.2f}s"
+                        )
                     except Exception as e:
-                        logger.exception(f"QueueManager: 处理请求失败: {e}")
+                        logger.exception(f"[队列处理] 处理请求失败: {e}")
                     finally:
                         current_queue.task_done()
 

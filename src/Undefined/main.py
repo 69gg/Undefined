@@ -59,7 +59,8 @@ def setup_logging() -> None:
     root_logger.addHandler(file_handler)
 
     logging.info(
-        f"日志文件: {log_file_path} (最大 {log_max_size // 1024 // 1024}MB, 保留 {log_backup_count} 份)"
+        f"[启动] 日志系统初始化完成。级别: {log_level}, 文件: {log_file_path} "
+        f"(最大 {log_max_size // 1024 // 1024}MB, 保留 {log_backup_count} 份)"
     )
 
 
@@ -67,43 +68,53 @@ async def main() -> None:
     """主函数"""
     setup_logging()
     logger = logging.getLogger(__name__)
+    logger.info("[启动] 正在初始化 Undefined 机器人...")
 
     try:
         config = get_config()
-        logger.info(f"机器人 QQ: {config.bot_qq}")
-        logger.info(f"超级管理员: {config.superadmin_qq}")
-        logger.info(f"管理员 QQ: {config.admin_qqs}")
+        logger.info(f"[配置] 机器人 QQ: {config.bot_qq}")
+        logger.info(f"[配置] 超级管理员: {config.superadmin_qq}")
+        logger.info(f"[配置] 管理员 QQ 列表: {config.admin_qqs}")
     except ValueError as e:
-        logger.error(f"配置错误: {e}")
+        logger.error(f"[配置错误] 加载配置失败: {e}")
         sys.exit(1)
 
     # 初始化组件
-    onebot = OneBotClient(config.onebot_ws_url, config.onebot_token)
-    memory_storage = MemoryStorage(max_memories=100)
-    task_storage = ScheduledTaskStorage()
-    end_summary_storage = EndSummaryStorage()
-    ai = AIClient(
-        config.chat_model,
-        config.vision_model,
-        config.agent_model,
-        memory_storage,
-        end_summary_storage,
-    )
-    faq_storage = FAQStorage()
+    logger.info("[初始化] 正在加载核心组件...")
+    try:
+        onebot = OneBotClient(config.onebot_ws_url, config.onebot_token)
+        memory_storage = MemoryStorage(max_memories=100)
+        task_storage = ScheduledTaskStorage()
+        end_summary_storage = EndSummaryStorage()
+        ai = AIClient(
+            config.chat_model,
+            config.vision_model,
+            config.agent_model,
+            memory_storage,
+            end_summary_storage,
+        )
+        faq_storage = FAQStorage()
 
-    handler = MessageHandler(config, onebot, ai, faq_storage, task_storage)
-    onebot.set_message_handler(handler.handle_message)
+        handler = MessageHandler(config, onebot, ai, faq_storage, task_storage)
+        onebot.set_message_handler(handler.handle_message)
+        logger.info("[初始化] 核心组件加载完成")
+    except Exception as e:
+        logger.exception(f"[初始化错误] 组件初始化期间发生异常: {e}")
+        sys.exit(1)
 
-    logger.info("启动机器人...")
+    logger.info("[启动] 机器人已准备就绪，开始连接 OneBot 服务...")
 
     try:
         await onebot.run_with_reconnect()
     except KeyboardInterrupt:
-        logger.info("收到退出信号")
+        logger.info("[退出] 收到退出信号 (Ctrl+C)")
+    except Exception as e:
+        logger.exception(f"[异常] 运行期间发生未捕获的错误: {e}")
     finally:
+        logger.info("[清理] 正在关闭机器人并释放资源...")
         await onebot.disconnect()
         await ai.close()
-        logger.info("机器人已停止")
+        logger.info("[退出] 机器人已停止运行")
 
 
 def run() -> None:

@@ -34,7 +34,6 @@ logger = logging.getLogger(__name__)
 with open("res/prepared_messages/help_message.txt", "r", encoding="utf-8") as f:
     HELP_MESSAGE = f.read()
 
-
 class MessageHandler:
     """消息处理器"""
 
@@ -78,13 +77,13 @@ class MessageHandler:
             if target_id != self.config.bot_qq:
                 return
 
-            logger.info(f"拍一拍事件完整数据: {event}")
             poke_group_id: int = event.get("group_id", 0)
             poke_sender_id: int = event.get("user_id", 0)
 
             logger.info(
-                f"收到拍一拍事件: group={poke_group_id}, sender={poke_sender_id}"
+                f"[通知事件] 收到拍一拍: group={poke_group_id}, sender={poke_sender_id}"
             )
+            logger.debug(f"[通知详情] 拍一拍完整数据: {event}")
 
             # 如果 group_id 为 0，说明是私聊拍一拍
             if poke_group_id == 0:
@@ -118,6 +117,16 @@ class MessageHandler:
             private_sender: dict[str, Any] = event.get("sender", {})
             private_sender_nickname: str = private_sender.get("nickname", "")
 
+            # 获取私聊用户昵称
+            user_name = private_sender_nickname
+            if not user_name:
+                try:
+                    user_info = await self.onebot.get_stranger_info(private_sender_id)
+                    if user_info:
+                        user_name = user_info.get("nickname", "")
+                except Exception as e:
+                    logger.warning(f"获取用户昵称失败: {e}")
+
             # 处理图片：在历史记录中仅保留占位符，由 AI 决定是否分析
             processed_message_content = []
             for segment in private_message_content:
@@ -135,23 +144,36 @@ class MessageHandler:
             # 从处理后的内容中提取文本
             text = extract_text(processed_message_content, self.config.bot_qq)
             logger.info(
-                f"收到私聊消息: sender={private_sender_id}, text={text[:50]}..."
+                f"[私聊消息] 发送者={private_sender_id} ({user_name}) | 内容: {text[:100]}"
             )
 
-            # 获取私聊用户昵称
-            user_name = private_sender_nickname
-            if not user_name:
-                try:
-                    user_info = await self.onebot.get_stranger_info(private_sender_id)
-                    if user_info:
-                        user_name = user_info.get("nickname", "")
-                except Exception as e:
-                    logger.warning(f"获取用户昵称失败: {e}")
+            # 处理图片：在历史记录中仅保留占位符，由 AI 决定是否分析
+            processed_message_content = []
+            for segment in private_message_content:
+                if segment.get("type") == "image":
+                    file = segment.get("data", {}).get("file", "") or segment.get(
+                        "data", {}
+                    ).get("url", "")
+                    text_repr = f"[图片: {file}]"
+                    processed_message_content.append(
+                        {"type": "text", "data": {"text": text_repr}}
+                    )
+                else:
+                    processed_message_content.append(segment)
+
+            # 从处理后的内容中提取文本
+            text = extract_text(processed_message_content, self.config.bot_qq)
+            logger.info(
+                f"[私聊消息] 发送者={private_sender_id} ({user_name}) | 内容: {text[:100]}"
+            )
 
             # 保存私聊消息到历史记录（保存处理后的内容）
             # 使用新的 utils
             parsed_content = await parse_message_content_for_history(
                 processed_message_content, self.config.bot_qq, self.onebot.get_msg
+            )
+            logger.debug(
+                f"[历史记录] 保存私聊记录: user={private_sender_id}, content={parsed_content[:50]}..."
             )
             self.history_manager.add_private_message(
                 user_id=private_sender_id,
@@ -181,14 +203,22 @@ class MessageHandler:
         sender_id: int = get_message_sender_id(event)
         message_content: list[dict[str, Any]] = get_message_content(event)
 
-        # 提取文本内容
-        text = extract_text(message_content, self.config.bot_qq)
-        logger.info(f"[群消息] 群:{group_id} | 发送者:{sender_id} | 内容:{text[:100]}")
-
         # 获取发送者昵称信息
         group_sender: dict[str, Any] = event.get("sender", {})
         sender_card: str = group_sender.get("card", "")
         sender_nickname: str = group_sender.get("nickname", "")
+
+        # 提取文本内容
+        text = extract_text(message_content, self.config.bot_qq)
+        logger.info(
+            f"[群消息] 群:{group_id} | 发送者:{sender_id} ({sender_card or sender_nickname}) | 内容: {text[:100]}"
+        )
+
+        # 提取文本内容
+        text = extract_text(message_content, self.config.bot_qq)
+        logger.info(
+            f"[群消息] 群:{group_id} | 发送者:{sender_id} ({sender_card or sender_nickname}) | 内容: {text[:100]}"
+        )
 
         # 处理图片：在历史记录中仅保留占位符
         processed_message_content = []
@@ -217,6 +247,9 @@ class MessageHandler:
         # 使用新的 utils
         parsed_content = await parse_message_content_for_history(
             processed_message_content, self.config.bot_qq, self.onebot.get_msg
+        )
+        logger.debug(
+            f"[历史记录] 保存群聊记录: group={group_id}, sender={sender_id}, content={parsed_content[:50]}..."
         )
         self.history_manager.add_group_message(
             group_id=group_id,
@@ -267,14 +300,15 @@ class MessageHandler:
             command = self._parse_command(text)
 
             if command:
-                # 有命令，执行命令
-                logger.info(f"解析到命令: {command['name']}, args={command['args']}")
-
                 # 分发命令
                 cmd_name: str = command["name"]
                 cmd_args: list[str] = command["args"]
 
-                logger.info(f"执行命令: /{cmd_name} {' '.join(cmd_args)}")
+                # 有命令，执行命令
+                logger.info(f"[命令解析] 解析到命令: /{cmd_name} | 参数: {cmd_args}")
+
+                # 有命令，执行命令
+                logger.info(f"[命令解析] 解析到命令: /{cmd_name} | 参数: {cmd_args}")
 
                 try:
                     # 公开命令 - 无权限限制但有速率限制
@@ -306,6 +340,9 @@ class MessageHandler:
                     # 管理员命令
                     elif cmd_name == "delfaq":
                         if not self.config.is_admin(sender_id):
+                            logger.warning(
+                                f"[权限控制] 非管理员 {sender_id} 尝试执行 /{cmd_name}"
+                            )
                             await self.sender.send_group_message(
                                 group_id, "⚠️ 权限不足：只有管理员可以使用此命令"
                             )
@@ -315,6 +352,9 @@ class MessageHandler:
                         )
                     elif cmd_name == "bugfix":
                         if not self.config.is_admin(sender_id):
+                            logger.warning(
+                                f"[权限控制] 非管理员 {sender_id} 尝试执行 /{cmd_name}"
+                            )
                             await self.sender.send_group_message(
                                 group_id, "⚠️ 权限不足：只有管理员可以使用此命令"
                             )
@@ -331,6 +371,9 @@ class MessageHandler:
                     # 超级管理员命令
                     elif cmd_name == "addadmin":
                         if not self.config.is_superadmin(sender_id):
+                            logger.warning(
+                                f"[权限控制] 非超级管理员 {sender_id} 尝试执行 /{cmd_name}"
+                            )
                             await self.sender.send_group_message(
                                 group_id, "⚠️ 权限不足：只有超级管理员可以使用此命令"
                             )
@@ -338,6 +381,9 @@ class MessageHandler:
                         await self._handle_addadmin(group_id, cmd_args)
                     elif cmd_name == "rmadmin":
                         if not self.config.is_superadmin(sender_id):
+                            logger.warning(
+                                f"[权限控制] 非超级管理员 {sender_id} 尝试执行 /{cmd_name}"
+                            )
                             await self.sender.send_group_message(
                                 group_id, "⚠️ 权限不足：只有超级管理员可以使用此命令"
                             )
@@ -345,13 +391,14 @@ class MessageHandler:
                         await self._handle_rmadmin(group_id, cmd_args)
 
                     else:
+                        logger.info(f"[命令执行] 未知命令: /{cmd_name}")
                         await self.sender.send_group_message(
                             group_id,
                             f"❌ 未知命令: {cmd_name}\n使用 /help 查看可用命令",
                         )
-                    logger.info(f"命令执行完成: /{cmd_name}")
+                    logger.info(f"[命令执行] /{cmd_name} 执行完成")
                 except Exception as e:
-                    logger.exception(f"命令执行失败: {e}")
+                    logger.exception(f"[命令错误] 执行 /{cmd_name} 失败: {e}")
                     await self.sender.send_group_message(
                         group_id, f"❌ 命令执行失败: {e}"
                     )
@@ -519,13 +566,13 @@ class MessageHandler:
         is_at_bot = is_poke or self._is_at_bot(message_content)
 
         if sender_id != self.config.superadmin_qq:
-            logger.info(
-                f"对群聊消息进行注入检测: group_id={group_id}, sender_id={sender_id}, text={text[:50]}..."
+            logger.debug(
+                f"[安全检测] 正在进行注入检测: group={group_id}, user={sender_id}, text={text[:50]}..."
             )
             is_injection = await self.ai.detect_injection(text, message_content)
             if is_injection:
                 logger.warning(
-                    f"检测到提示词注入攻击: group_id={group_id}, sender_id={sender_id}, text={text[:100]}..."
+                    f"[安全警告] 检测到提示词注入攻击: group={group_id}, user={sender_id}, text={text[:200]}"
                 )
                 self.history_manager.modify_last_group_message(
                     group_id, sender_id, "<这句话检测到用户进行注入，已删除>"
@@ -536,6 +583,10 @@ class MessageHandler:
                         group_id, text, sender_id=sender_id
                     )
                 return
+            else:
+                logger.debug(
+                    f"[安全检测] 注入检测通过: group={group_id}, user={sender_id}"
+                )
 
         prompt_prefix = ""
         if is_poke:

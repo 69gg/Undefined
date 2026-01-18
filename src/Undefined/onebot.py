@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 from typing import Any, Callable, Coroutine
 from datetime import datetime
 
@@ -40,27 +41,33 @@ class OneBotClient:
             separator = "&" if "?" in url else "?"
             url = f"{url}{separator}access_token={self.token}"
 
-        logger.info(f"正在连接到 {self.ws_url}")
+        logger.info(f"[WebSocket] 正在连接到 {self.ws_url}...")
 
         # 同时在请求头中传递 token（兼容不同实现）
         extra_headers = {}
         if self.token:
             extra_headers["Authorization"] = f"Bearer {self.token}"
 
-        self.ws = await websockets.connect(
-            url,
-            ping_interval=20,
-            ping_timeout=20,
-            additional_headers=extra_headers if extra_headers else None,
-        )
-        logger.info("WebSocket 连接成功")
+        try:
+            self.ws = await websockets.connect(
+                url,
+                ping_interval=20,
+                ping_timeout=20,
+                additional_headers=extra_headers if extra_headers else None,
+            )
+            logger.info("[WebSocket] 连接成功")
+        except Exception as e:
+            logger.error(f"[WebSocket] 连接失败: {e}")
+            raise
 
     async def disconnect(self) -> None:
         """断开连接"""
         self._running = False
         if self.ws:
+            logger.info("[WebSocket] 正在主动断开连接...")
             await self.ws.close()
             self.ws = None
+            logger.info("[WebSocket] 连接已断开")
 
     async def _call_api(
         self, action: str, params: dict[str, Any] | None = None
@@ -78,29 +85,35 @@ class OneBotClient:
             "echo": echo,
         }
 
-        logger.info(f"[API请求] {action} | 参数:{params}")
+        logger.debug(f"[API请求] {action} (ID={echo}) | 参数: {params}")
 
         # 创建 Future 等待响应
         future: asyncio.Future[dict[str, Any]] = asyncio.Future()
         self._pending_responses[echo] = future
 
+        start_time = time.perf_counter()
+
         try:
             await self.ws.send(json.dumps(request))
             # 等待响应，超时 30 秒
             response = await asyncio.wait_for(future, timeout=30.0)
+            duration = time.perf_counter() - start_time
 
             # 检查响应状态
             status = response.get("status")
             if status == "failed":
                 retcode = response.get("retcode", -1)
                 msg = response.get("message", "未知错误")
-                logger.error(f"[API失败] {action} | retcode={retcode} | message={msg}")
+                logger.error(
+                    f"[API失败] {action} (ID={echo}) | 耗时={duration:.2f}s | retcode={retcode} | message={msg}"
+                )
                 raise RuntimeError(f"API 调用失败: {msg} (retcode={retcode})")
 
-            logger.info(f"[API响应] {action} 成功")
+            logger.info(f"[API成功] {action} (ID={echo}) | 耗时={duration:.2f}s")
             return response
         except asyncio.TimeoutError:
-            logger.error(f"API 调用超时: {action}, echo={echo}")
+            duration = time.perf_counter() - start_time
+            logger.error(f"[API超时] {action} (ID={echo}) | 耗时={duration:.2f}s")
             raise
         finally:
             self._pending_responses.pop(echo, None)
@@ -343,7 +356,7 @@ class OneBotClient:
 
         self._running = True
         self._tasks: set[asyncio.Task[None]] = set()
-        logger.info("开始接收消息...")
+        logger.info("[WebSocket] 消息接收循环已启动")
 
         try:
             while self._running:
@@ -359,17 +372,23 @@ class OneBotClient:
                     # 处理消息（不阻塞接收循环）
                     await self._dispatch_message(data)
                 except json.JSONDecodeError as e:
-                    logger.error(f"无法解析消息: {raw_message!r}, error: {e}")
+                    logger.error(
+                        f"[WebSocket] 无法解析 JSON 消息: {raw_message!r}, 错误: {e}"
+                    )
                 except websockets.ConnectionClosed:
-                    logger.warning("WebSocket 连接已关闭")
+                    logger.warning("[WebSocket] 连接已关闭，接收循环结束")
                     break
                 except Exception as e:
-                    logger.exception(f"处理消息时出错: {e}")
+                    logger.exception(f"[WebSocket] 接收消息时发生异常: {e}")
         finally:
             self._running = False
             # 等待所有后台任务完成
             if self._tasks:
+                logger.debug(
+                    f"[WebSocket] 正在等待 {len(self._tasks)} 个异步任务完成..."
+                )
                 await asyncio.gather(*self._tasks, return_exceptions=True)
+            logger.info("[WebSocket] 接收循环已停止")
 
     async def _dispatch_message(self, data: dict[str, Any]) -> None:
         """分发消息（API响应同步处理，事件异步处理）"""

@@ -4,6 +4,7 @@
 """
 
 import logging
+import time
 from typing import Any, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -47,7 +48,7 @@ class TaskScheduler:
         # 确保 scheduler 在 event loop 中运行
         if not self.scheduler.running:
             self.scheduler.start()
-            logger.info("任务调度器已启动")
+            logger.info("[任务调度] 任务调度服务已启动")
 
         # 恢复已有的任务
         self._recover_tasks()
@@ -55,6 +56,7 @@ class TaskScheduler:
     def _recover_tasks(self) -> None:
         """从存储中恢复任务并添加到调度器"""
         if not self.tasks:
+            logger.info("[任务调度] 没有需要恢复的定时任务")
             return
 
         count = 0
@@ -75,8 +77,9 @@ class TaskScheduler:
                     replace_existing=True,
                 )
                 count += 1
+                logger.debug(f"[任务调度] 已恢复任务: {task_id} ({info['tool_name']})")
             except Exception as e:
-                logger.error(f"恢复定时任务 {task_id} 失败: {e}")
+                logger.error(f"[任务调度错误] 恢复定时任务 {task_id} 失败: {e}")
                 # 如果任务恢复失败（如格式错误），保留在 self.tasks 中还是删除？
                 # 目前保留，由用户或后续逻辑处理
 
@@ -225,7 +228,8 @@ class TaskScheduler:
         target_type: str,
     ) -> None:
         """任务执行包装器"""
-        logger.info(f"开始执行定时任务: tool={tool_name}, args={tool_args}")
+        logger.info(f"[任务触发] 定时任务开始执行: ID={task_id}, 工具={tool_name}")
+        logger.debug(f"[任务详情] 参数={tool_args}, 目标={target_id}({target_type})")
 
         try:
             context = {
@@ -236,7 +240,9 @@ class TaskScheduler:
                 "history_manager": self.history_manager,
             }
 
+            start_time = time.perf_counter()
             result = await self.ai._execute_tool(tool_name, tool_args, context)
+            duration = time.perf_counter() - start_time
 
             if result and target_id:
                 msg = f"【定时任务执行结果】\n工具: {tool_name}\n结果:\n{result}"
@@ -245,7 +251,9 @@ class TaskScheduler:
                 else:
                     await self.sender.send_private_message(target_id, msg)
 
-            logger.info(f"定时任务执行完成: {tool_name}")
+            logger.info(
+                f"[任务完成] 定时任务执行成功: ID={task_id}, 耗时={duration:.2f}s"
+            )
 
             if task_id in self.tasks:
                 task_info = self.tasks[task_id]

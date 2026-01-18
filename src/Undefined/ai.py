@@ -132,14 +132,20 @@ class AIClient:
         if _TIKTOKEN_AVAILABLE:
             try:
                 self._tokenizer = tiktoken.encoding_for_model("gpt-4")
-                logger.info("tiktoken tokenizer 加载成功")
+                logger.info("[初始化] tiktoken tokenizer 加载成功")
             except Exception as e:
-                logger.warning(f"tiktoken tokenizer 加载失败: {e}，将使用字符估算")
+                logger.warning(
+                    f"[初始化] tiktoken tokenizer 加载失败: {e}，将使用字符估算"
+                )
                 self._tokenizer = None
+
+        logger.info("[初始化] AIClient 初始化完成")
 
     async def close(self) -> None:
         """关闭 HTTP 客户端"""
+        logger.info("[清理] 正在关闭 AIClient HTTP 客户端...")
         await self._http_client.aclose()
+        logger.info("[清理] AIClient 已关闭")
 
     def count_tokens(self, text: str) -> int:
         """计算文本的 token 数量
@@ -467,14 +473,10 @@ class AIClient:
         返回:
             包含 description 和其他字段（ocr_text/transcript/subtitles）的字典
         """
+        start_time = time.perf_counter()
         # 检测媒体类型
         detected_type = self._detect_media_type(media_url, media_type)
-
-        # 缓存键包含媒体类型和prompt_extra
-        cache_key = f"{media_url}_{detected_type}_{prompt_extra}"
-        if cache_key in self._media_analysis_cache:
-            logger.debug(f"使用缓存的媒体分析: {media_url[:50]}... ({detected_type})")
-            return self._media_analysis_cache[cache_key]
+        logger.info(f"[媒体分析] 开始分析 {detected_type}: {media_url[:50]}...")
 
         # 构建媒体内容
         if media_url.startswith("data:") or media_url.startswith("http"):
@@ -549,6 +551,8 @@ class AIClient:
             )
             response.raise_for_status()
             result = response.json()
+            duration = time.perf_counter() - start_time
+            logger.info(f"[媒体分析] API 调用完成, 耗时={duration:.2f}s")
             logger.debug(f"媒体分析 API 响应: {result}")
             content = self._extract_choices_content(result)
 
@@ -628,6 +632,7 @@ class AIClient:
         返回:
             总结文本
         """
+        start_time = time.perf_counter()
         async with aiofiles.open(
             "res/prompts/summarize.txt", "r", encoding="utf-8"
         ) as f:
@@ -655,12 +660,17 @@ class AIClient:
             )
             response.raise_for_status()
             result = response.json()
-            logger.debug(f"总结聊天 API 响应: {result}")
+            duration = time.perf_counter() - start_time
+            logger.info(f"[总结] 聊天记录总结完成, 耗时={duration:.2f}s")
+            logger.debug(f"[总结] API 响应: {result}")
             content: str = self._extract_choices_content(result)
             return content
 
         except Exception as e:
-            logger.exception(f"总结失败: {e}")
+            duration = time.perf_counter() - start_time
+            logger.exception(
+                f"[总结] 聊天记录总结失败, 耗时={duration:.2f}s, 错误: {e}"
+            )
             return f"总结失败: {e}"
 
     async def merge_summaries(self, summaries: list[str]) -> str:
@@ -848,7 +858,8 @@ class AIClient:
                         "content": f"【这是你之前想要记住的东西】\n{memory_text}\n\n注意：以上是你之前主动保存的记忆，用于帮助你更好地理解用户和上下文。就事论事，就人论人，不做会话隔离。",
                     }
                 )
-                logger.debug(f"已注入 {len(memories)} 条记忆到 prompt")
+                logger.info(f"[AI会话] 已注入 {len(memories)} 条长期记忆")
+                logger.debug(f"[AI会话] 记忆内容: {memory_text}")
 
         # 0.1 注入end记录到 prompt
         if self._end_summaries:
@@ -859,7 +870,9 @@ class AIClient:
                     "content": f"【这是你之前end时记录的事情】\n{summary_text}\n\n注意：以上是你之前在end时记录的事情，用于帮助你记住之前做了什么或以后可能要做什么。",
                 }
             )
-            logger.debug(f"已注入 {len(self._end_summaries)} 条end记录到 prompt")
+            logger.info(
+                f"[AI会话] 已注入 {len(self._end_summaries)} 条短期回忆 (end 摘要)"
+            )
 
         # 1. 自动预先获取部分历史消息作为上下文，放在当前问题之前
         if get_recent_messages_callback:
@@ -1013,6 +1026,9 @@ class AIClient:
 
                 # 如果没有工具调用，返回最终答案
                 if not tool_calls:
+                    logger.info(
+                        f"[AI回复] 会话结束，返回最终内容 (长度={len(content)})"
+                    )
                     return content
 
                 # 添加助手响应到消息历史
@@ -1023,6 +1039,7 @@ class AIClient:
                 # 定义工具执行任务列表
                 tool_tasks = []
                 tool_call_ids = []
+                tool_names = []
 
                 # 准备工具执行任务
                 import json
@@ -1033,8 +1050,9 @@ class AIClient:
                     function_name = function.get("name", "")
                     function_args_str = function.get("arguments", "{}")
 
-                    logger.info(
-                        f"准备调用工具: {function_name}, 参数: {function_args_str}"
+                    logger.info(f"[工具准备] 准备调用: {function_name} (ID={call_id})")
+                    logger.debug(
+                        f"[工具参数] {function_name} 参数: {function_args_str}"
                     )
 
                     # 解析参数
@@ -1043,8 +1061,10 @@ class AIClient:
                     try:
                         function_args = json.loads(function_args_str)
                     except json.JSONDecodeError as e:
-                        logger.error(f"参数解析失败: {function_args_str}, 错误: {e}")
-                        # 简单的自动修复尝试（如果需要更复杂的修复，最好放在单独的 helper 中，并发场景下为了避免阻塞这里简化处理）
+                        logger.error(
+                            f"[工具错误] 参数解析失败: {function_args_str}, 错误: {e}"
+                        )
+                        # 简单的自动修复尝试
                         function_args = {}
 
                     # 确保 function_args 是字典类型
@@ -1053,6 +1073,7 @@ class AIClient:
 
                     # 记录任务信息
                     tool_call_ids.append(call_id)
+                    tool_names.append(function_name)
 
                     # 创建协程任务
                     tool_tasks.append(
@@ -1061,7 +1082,9 @@ class AIClient:
 
                 # 并发执行所有工具
                 if tool_tasks:
-                    logger.info(f"开始并发执行 {len(tool_tasks)} 个工具调用")
+                    logger.info(
+                        f"[工具执行] 开始并发执行 {len(tool_tasks)} 个工具调用: {', '.join(tool_names)}"
+                    )
                     tool_results = await asyncio.gather(
                         *tool_tasks, return_exceptions=True
                     )
@@ -1069,25 +1092,24 @@ class AIClient:
                     # 处理结果并添加到消息历史
                     for i, result in enumerate(tool_results):
                         call_id = tool_call_ids[i]
+                        fname = tool_names[i]
                         content_str = ""
 
                         if isinstance(result, Exception):
-                            logger.error(f"工具执行异常 (call_id={call_id}): {result}")
+                            logger.error(
+                                f"[工具异常] {fname} (ID={call_id}) 执行抛出异常: {result}"
+                            )
                             content_str = f"执行失败: {str(result)}"
                         else:
                             content_str = str(result)
+                            logger.debug(
+                                f"[工具响应] {fname} (ID={call_id}) 返回内容长度: {len(content_str)}"
+                            )
 
                         # 检查是否结束对话 (任意一个工具触发结束即可)
                         if tool_context.get("conversation_ended"):
                             conversation_ended = True
-
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": call_id,
-                                "content": content_str,
-                            }
-                        )
+                            logger.info(f"[会话状态] 工具 {fname} 触发了会话结束标记")
 
                 # 如果对话已结束，退出循环
                 if conversation_ended:

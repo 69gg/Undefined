@@ -47,6 +47,9 @@ class AgentRegistry:
         handler_path = agent_dir / "handler.py"
 
         if not config_path.exists() or not handler_path.exists():
+            logger.debug(
+                f"[Agent加载] 目录 {agent_dir} 缺少 config.json 或 handler.py，跳过"
+            )
             return
 
         import importlib.util
@@ -56,10 +59,13 @@ class AgentRegistry:
                 config = json.load(f)
 
             if "function" not in config or "name" not in config.get("function", {}):
-                logger.error(f"Agent 配置无效 {agent_dir}: 缺少 function.name")
+                logger.error(
+                    f"[Agent错误] Agent 配置无效 {agent_dir}: 缺少 function.name"
+                )
                 return
 
             agent_name = config["function"]["name"]
+            logger.debug(f"[Agent加载] 正在从 {agent_dir} 加载 Agent: {agent_name}")
 
             spec = importlib.util.spec_from_file_location(
                 f"agents.{agent_name}", handler_path
@@ -96,10 +102,15 @@ class AgentRegistry:
             return f"未找到 Agent: {agent_name}"
 
         try:
+            import asyncio
+
+            start_time = asyncio.get_event_loop().time()
             if hasattr(handler, "__call__"):
                 result = await handler(args, context)
+                duration = asyncio.get_event_loop().time() - start_time
+                logger.info(f"[Agent执行] {agent_name} 执行成功, 耗时={duration:.4f}s")
                 return str(result)
             return f"Agent 处理器无效: {agent_name}"
         except Exception as e:
-            logger.exception(f"执行 Agent {agent_name} 时出错")
+            logger.exception(f"[Agent异常] 执行 Agent {agent_name} 时出错")
             return f"执行 Agent {agent_name} 时出错: {str(e)}"

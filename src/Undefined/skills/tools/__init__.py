@@ -46,6 +46,9 @@ class ToolRegistry:
         handler_path = tool_dir / "handler.py"
 
         if not config_path.exists() or not handler_path.exists():
+            logger.debug(
+                f"[工具加载] 目录 {tool_dir} 缺少 config.json 或 handler.py，跳过"
+            )
             return
 
         # 加载配置
@@ -55,13 +58,14 @@ class ToolRegistry:
 
             # 基本验证
             if "name" not in config.get("function", {}):
-                logger.error(f"工具配置无效 {tool_dir}: 缺少 function.name")
+                logger.error(f"[工具错误] 工具配置无效 {tool_dir}: 缺少 function.name")
                 return
 
             tool_name = config["function"]["name"]
+            logger.debug(f"[工具加载] 正在从 {tool_dir} 加载工具: {tool_name}")
 
         except Exception as e:
-            logger.error(f"从 {tool_dir} 加载工具配置失败: {e}")
+            logger.error(f"[工具错误] 从 {tool_dir} 加载工具配置失败: {e}")
             return
 
         # 加载处理器
@@ -100,6 +104,7 @@ class ToolRegistry:
 
         try:
             # 检查处理器是否为协程
+            start_time = asyncio.get_event_loop().time()
             if asyncio.iscoroutinefunction(handler):
                 result = await handler(args, context)
             else:
@@ -107,7 +112,9 @@ class ToolRegistry:
                 # 注意：我们的类型提示是 Awaitable，所以这只是为了安全
                 result = handler(args, context)
 
+            duration = asyncio.get_event_loop().time() - start_time
+            logger.info(f"[工具执行] {tool_name} 执行成功, 耗时={duration:.4f}s")
             return str(result)
         except Exception as e:
-            logger.exception(f"执行工具 {tool_name} 时出错")
+            logger.exception(f"[工具异常] 执行工具 {tool_name} 时出错")
             return f"执行工具 {tool_name} 时出错: {str(e)}"

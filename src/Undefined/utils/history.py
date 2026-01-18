@@ -41,8 +41,9 @@ class MessageHistoryManager:
             )
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(truncated_history, f, ensure_ascii=False, indent=2)
+            logger.debug(f"[历史记录] 已成功保存历史到 {path}")
         except Exception as e:
-            logger.error(f"保存历史记录失败 {path}: {e}")
+            logger.error(f"[历史记录错误] 保存历史记录失败 {path}: {e}")
 
     def _load_history_from_file(self, path: str) -> list[dict[str, Any]]:
         """从文件加载历史记录"""
@@ -86,6 +87,7 @@ class MessageHistoryManager:
             return
 
         # 加载群消息历史
+        group_count = 0
         for filename in os.listdir(HISTORY_DIR):
             if filename.startswith("group_") and filename.endswith(".json"):
                 try:
@@ -94,13 +96,17 @@ class MessageHistoryManager:
                     self._message_history[group_id_str] = self._load_history_from_file(
                         path
                     )
-                    logger.info(
-                        f"加载群 {group_id_str} 历史消息: {len(self._message_history[group_id_str])} 条"
+                    group_count += 1
+                    logger.debug(
+                        f"[历史记录] 已加载群 {group_id_str} 历史消息: {len(self._message_history[group_id_str])} 条"
                     )
                 except Exception as e:
-                    logger.error(f"加载群历史失败 {filename}: {e}")
+                    logger.error(f"[历史记录错误] 加载群历史失败 {filename}: {e}")
+
+        logger.info(f"[历史记录] 共加载了 {group_count} 个群聊的历史记录")
 
         # 加载私聊消息历史
+        private_count = 0
         for filename in os.listdir(HISTORY_DIR):
             if filename.startswith("private_") and filename.endswith(".json"):
                 try:
@@ -109,11 +115,14 @@ class MessageHistoryManager:
                     self._private_message_history[user_id_str] = (
                         self._load_history_from_file(path)
                     )
-                    logger.info(
-                        f"加载私聊 {user_id_str} 历史消息: {len(self._private_message_history[user_id_str])} 条"
+                    private_count += 1
+                    logger.debug(
+                        f"[历史记录] 已加载私聊 {user_id_str} 历史消息: {len(self._private_message_history[user_id_str])} 条"
                     )
                 except Exception as e:
-                    logger.error(f"加载私聊历史失败 {filename}: {e}")
+                    logger.error(f"[历史记录错误] 加载私聊历史失败 {filename}: {e}")
+
+        logger.info(f"[历史记录] 共加载了 {private_count} 个私聊会话的历史记录")
 
     def add_group_message(
         self,

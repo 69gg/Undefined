@@ -32,6 +32,7 @@ class MessageSender:
             # 解析消息以便正确处理 CQ 码（如图片）
             segments = message_to_segments(message)
             history_content = extract_text(segments, self.bot_qq)
+            logger.debug(f"[历史记录] 正在保存 Bot 群聊回复: group={group_id}")
 
             self.history_manager.add_group_message(
                 group_id=group_id,
@@ -48,15 +49,19 @@ class MessageSender:
             return
 
         # 按行分割
+        logger.info(f"[消息分段] 消息过长 ({len(message)} 字符)，正在自动分段发送...")
         lines = message.split("\n")
         current_chunk: list[str] = []
         current_length = 0
+        chunk_count = 0
 
         for line in lines:
             line_length = len(line) + 1
 
             if current_length + line_length > MAX_MESSAGE_LENGTH and current_chunk:
+                chunk_count += 1
                 chunk_text = "\n".join(current_chunk)
+                logger.debug(f"[消息分段] 发送第 {chunk_count} 段")
                 await self.onebot.send_group_message(
                     group_id, message_to_segments(chunk_text)
                 )
@@ -67,10 +72,14 @@ class MessageSender:
             current_length += line_length
 
         if current_chunk:
+            chunk_count += 1
             chunk_text = "\n".join(current_chunk)
+            logger.debug(f"[消息分段] 发送第 {chunk_count} 段 (最后一段)")
             await self.onebot.send_group_message(
                 group_id, message_to_segments(chunk_text)
             )
+
+        logger.info(f"[消息分段] 已完成 {chunk_count} 段消息的发送")
 
     async def send_private_message(
         self, user_id: int, message: str, auto_history: bool = True
@@ -82,6 +91,7 @@ class MessageSender:
             # 解析消息以便正确处理 CQ 码
             segments = message_to_segments(message)
             history_content = extract_text(segments, self.bot_qq)
+            logger.debug(f"[历史记录] 正在保存 Bot 私聊回复: user={user_id}")
 
             self.history_manager.add_private_message(
                 user_id=user_id,
@@ -97,15 +107,19 @@ class MessageSender:
             return
 
         # 按行分割
+        logger.info(f"[消息分段] 消息过长 ({len(message)} 字符)，正在自动分段发送...")
         lines = message.split("\n")
         current_chunk: list[str] = []
         current_length = 0
+        chunk_count = 0
 
         for line in lines:
             line_length = len(line) + 1
 
             if current_length + line_length > MAX_MESSAGE_LENGTH and current_chunk:
+                chunk_count += 1
                 chunk_text = "\n".join(current_chunk)
+                logger.debug(f"[消息分段] 发送第 {chunk_count} 段")
                 await self.onebot.send_private_message(
                     user_id, message_to_segments(chunk_text)
                 )
@@ -116,7 +130,11 @@ class MessageSender:
             current_length += line_length
 
         if current_chunk:
+            chunk_count += 1
             chunk_text = "\n".join(current_chunk)
+            logger.debug(f"[消息分段] 发送第 {chunk_count} 段 (最后一段)")
             await self.onebot.send_private_message(
                 user_id, message_to_segments(chunk_text)
             )
+
+        logger.info(f"[消息分段] 已完成 {chunk_count} 段消息的发送")
