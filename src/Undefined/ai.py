@@ -5,6 +5,7 @@ import importlib.util
 from .skills.tools import ToolRegistry
 from .skills.agents import AgentRegistry
 import base64
+import json
 import logging
 import os
 from collections import deque
@@ -477,6 +478,9 @@ class AIClient:
         # 检测媒体类型
         detected_type = self._detect_media_type(media_url, media_type)
         logger.info(f"[媒体分析] 开始分析 {detected_type}: {media_url[:50]}...")
+
+        # 生成缓存键
+        cache_key = f"{detected_type}:{media_url[:100]}:{prompt_extra}"
 
         # 构建媒体内容
         if media_url.startswith("data:") or media_url.startswith("http"):
@@ -981,21 +985,32 @@ class AIClient:
 
             try:
                 # 调用 LLM
+                request_body = self._build_request_body(
+                    model_config=self.chat_config,
+                    messages=messages,
+                    max_tokens=8192,
+                    tools=tools,
+                    tool_choice="auto",
+                )
+                logger.debug(
+                    f"[AI请求] 请求体: {json.dumps(request_body, ensure_ascii=False, indent=2)}"
+                )
+
                 response = await self._http_client.post(
                     self.chat_config.api_url,
                     headers={
                         "Authorization": f"Bearer {self.chat_config.api_key}",
                         "Content-Type": "application/json",
                     },
-                    json=self._build_request_body(
-                        model_config=self.chat_config,
-                        messages=messages,
-                        max_tokens=8192,
-                        tools=tools,
-                        tool_choice="auto",
-                    ),
+                    json=request_body,
                 )
-                response.raise_for_status()
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError:
+                    logger.error(
+                        f"[AI请求失败] HTTP {response.status_code}, 响应内容: {response.text}"
+                    )
+                    raise
                 result = response.json()
 
                 # 记录响应指标
@@ -1040,9 +1055,6 @@ class AIClient:
                 tool_tasks = []
                 tool_call_ids = []
                 tool_names = []
-
-                # 准备工具执行任务
-                import json
 
                 for tool_call in tool_calls:
                     call_id = tool_call.get("id", "")
