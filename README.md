@@ -16,7 +16,7 @@
       </p>
     </td>
     <td width="30%">
-      <img src="./data/img/head.jpg" width="100%" alt="Undefined" />
+      <img src="https://raw.githubusercontent.com/69gg/Undefined/main/data/img/head.jpg" width="100%" alt="Undefined" />
     </td>
   </tr>
 </table>
