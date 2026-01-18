@@ -1,5 +1,5 @@
 [project]
-name = "Undefined"
+name = "Undefined-bot"
 version = "2.1.0"
 description = "A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture."
 readme = "README.md"
@@ -45,7 +45,7 @@ Repository = "https://github.com/69gg/Undefined"
 Issues = "https://github.com/69gg/Undefined/issues"
 
 [project.scripts]
-Undefined = "Undefined.main:run"
+Undefined-bot = "Undefined.main:run"
 
 [project.optional-dependencies]
 dev = [
