@@ -7,7 +7,8 @@
 3. **星座运势** → horoscope
 4. **Minecraft 皮肤** → minecraft_skin
 5. **小说阅读** → novel_search
-6. **人间评分** → renjian
+6. **人间小句** → renjian
+7. **文昌帝君** → wenchang_dijun
 
 注意事项：
 - 对于 AI 生成的内容，可以适当调整参数获得更好效果
