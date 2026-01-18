@@ -15,6 +15,7 @@ from .faq import FAQStorage
 from .handlers import MessageHandler
 from .memory import MemoryStorage
 from .scheduled_task_storage import ScheduledTaskStorage
+from .end_summary_storage import EndSummaryStorage
 from .onebot import OneBotClient
 
 
@@ -80,8 +81,13 @@ async def main() -> None:
     onebot = OneBotClient(config.onebot_ws_url, config.onebot_token)
     memory_storage = MemoryStorage(max_memories=100)
     task_storage = ScheduledTaskStorage()
+    end_summary_storage = EndSummaryStorage()
     ai = AIClient(
-        config.chat_model, config.vision_model, config.agent_model, memory_storage
+        config.chat_model,
+        config.vision_model,
+        config.agent_model,
+        memory_storage,
+        end_summary_storage,
     )
     faq_storage = FAQStorage()
 

@@ -19,6 +19,7 @@ import httpx
 
 from .config import ChatModelConfig, VisionModelConfig, AgentModelConfig
 from .memory import MemoryStorage
+from .end_summary_storage import EndSummaryStorage
 
 with open("res/prompts/injection_detector.txt", "r", encoding="utf-8") as f:
     INJECTION_DETECTION_SYSTEM_PROMPT = f.read()
@@ -70,11 +71,13 @@ class AIClient:
         vision_config: VisionModelConfig,
         agent_config: AgentModelConfig,
         memory_storage: Optional[MemoryStorage] = None,
+        end_summary_storage: Optional[EndSummaryStorage] = None,
     ) -> None:
         self.chat_config = chat_config
         self.vision_config = vision_config
         self.agent_config = agent_config
         self.memory_storage = memory_storage
+        self._end_summary_storage = end_summary_storage or EndSummaryStorage()
         self._http_client = httpx.AsyncClient(timeout=120.0)
         self._tokenizer: Optional[Any] = None
         # 记录最近发送的 50 条消息内容，用于去重
@@ -89,8 +92,11 @@ class AIClient:
         self._send_image_callback: Optional[
             Callable[[int, str, str], Awaitable[None]]
         ] = None
-        # end记录，最多保留100条
-        self._end_summaries: deque[str] = deque(maxlen=100)
+
+        # 从存储加载 end 摘要，最多保留 100 条
+        loaded_summaries = self._end_summary_storage.load()
+        self._end_summaries: deque[str] = deque(loaded_summaries, maxlen=100)
+
         # 当前群聊ID和用户ID（用于send_message工具）
         self.current_group_id: Optional[int] = None
         self.current_user_id: Optional[int] = None
@@ -938,6 +944,7 @@ class AIClient:
             "send_image_callback": self._send_image_callback,
             "recent_replies": self.recent_replies,
             "end_summaries": self._end_summaries,
+            "end_summary_storage": self._end_summary_storage,
             "memory_storage": self.memory_storage,
             "search_wrapper": self._search_wrapper,
             "ai_client": self,
