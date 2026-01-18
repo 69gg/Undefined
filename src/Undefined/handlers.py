@@ -434,6 +434,7 @@ class MessageHandler:
                 sender=self.sender,
                 history_manager=self.history_manager,
                 onebot_client=self.onebot,
+                scheduler=self.scheduler,
             )
         except Exception as e:
             logger.error(f"自动回复处理出错: {e}")
@@ -486,6 +487,7 @@ class MessageHandler:
                 sender=self.sender,
                 history_manager=self.history_manager,
                 onebot_client=self.onebot,
+                scheduler=self.scheduler,
             )
             # 如果 AI 直接返回了文本（没有调用工具），自动发送
             if result:

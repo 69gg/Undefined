@@ -797,6 +797,7 @@ class AIClient:
         sender: Any = None,
         history_manager: Any = None,
         onebot_client: Any = None,
+        scheduler: Any = None,
     ) -> str:
         """使用 AI 回答问题，支持工具调用
 
@@ -945,6 +946,7 @@ class AIClient:
             "sender": sender,
             "history_manager": history_manager,
             "onebot_client": onebot_client,
+            "scheduler": scheduler,
         }
 
         # 工具调用循环
