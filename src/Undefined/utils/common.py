@@ -139,3 +139,48 @@ def message_to_segments(message: str) -> list[dict[str, Any]]:
         segments.append({"type": "text", "data": {"text": remaining_text}})
 
     return segments
+
+
+def matches_xinliweiyuan(text: str) -> bool:
+    """判断文本是否匹配心理委员触发规则
+
+    规则:
+    1. 单独“心理委员” (可选加标点/空格)
+    2. 前后（同时仅1）添加 5 个字以内（标点/空格不计入字数）
+    """
+    keyword = "心理委员"
+    if keyword not in text:
+        return False
+
+    # 分割文本，找到关键字的位置
+    parts = text.split(keyword)
+    # 如果出现多次关键词，只要其中一个位置满足条件即可触发
+    # 但为了简单和符合直觉，我们检查是否【任何】一种分割方式满足条件
+    # 通常文本里只会有一个“心理委员”用于触发
+
+    # 标点符号和空白字符正则
+    # \s 匹配空白，[^\w\s] 在大多数情况下匹配标点（但在 Python 3 中 \w 包含中文）
+    # 我们直接定义非“字”的模式：空白、常见标点
+    punc_pattern = r'[ \t\n\r\f\v\s!"#$%&\'()*+,\-./:;<=>?@\[\\\]^_`{|}~，。！？、；：""\'\'（）【】「」《》—…·]'
+
+    def count_real_chars(s: str) -> int:
+        """移除标点和空格后的长度"""
+        return len(re.sub(punc_pattern, "", s))
+
+    # 遍历所有可能的分割（以防文本中有多个“心理委员”）
+    for i in range(len(parts) - 1):
+        prefix = keyword.join(parts[: i + 1])
+        suffix = keyword.join(parts[i + 1 :])
+
+        prefix_count = count_real_chars(prefix)
+        suffix_count = count_real_chars(suffix)
+
+        # 同时仅1：不能前后都有字（标点不计）
+        if prefix_count > 0 and suffix_count > 0:
+            continue
+
+        # 字数限制：添加的部分总字数 <= 5
+        if (prefix_count + suffix_count) <= 5:
+            return True
+
+    return False

@@ -19,7 +19,11 @@ from .onebot import (
     parse_message_time,
 )
 from .rate_limit import RateLimiter
-from .utils.common import extract_text, parse_message_content_for_history
+from .utils.common import (
+    extract_text,
+    parse_message_content_for_history,
+    matches_xinliweiyuan,
+)
 from .utils.history import MessageHistoryManager
 from .utils.scheduler import TaskScheduler
 from .utils.sender import MessageSender
@@ -228,7 +232,7 @@ class MessageHandler:
             return
 
         # 关键词自动回复：心理委员 (使用原始消息内容提取文本，保证关键词触发不受影响)
-        if "心理委员" in text:
+        if matches_xinliweiyuan(text):
             rand_val = random.random()
             if rand_val < 0.1:  # 10% 发送图片
                 image_path = os.path.abspath("data/img/xlwy.jpg")
