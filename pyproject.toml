@@ -1,6 +1,6 @@
 [project]
 name = "Undefined"
-version = "2.0.0"
+version = "2.1.0"
 description = "A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture."
 readme = "README.md"
 authors = [
