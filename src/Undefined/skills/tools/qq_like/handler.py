@@ -41,9 +41,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         await send_like_callback(target_user_id, times)
 
         if times == 1:
-            return f"✅ 已给 QQ{target_user_id} 点赞，记得发信息说明并让ta给你点赞！（比如：赞了～记得回赞～）"
+            return f"✅ 已给 QQ{target_user_id} 点赞。"
         else:
-            return f"✅ 已给 QQ{target_user_id} 点赞 {times} 次，记得发信息说明并让ta给你点赞！（比如：赞了～记得回赞～）"
+            return f"✅ 已给 QQ{target_user_id} 点赞 {times} 次。"
 
     except Exception as e:
         logger.exception(f"点赞失败: {e}")

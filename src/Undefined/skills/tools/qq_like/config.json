@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "qq_like",
-        "description": "给指定QQ号的资料卡点赞。当有人说类似这种：赞我，给我点赞之类的可以积极进行调用。",
+        "description": "给指定QQ号的资料卡点赞。当有人说类似这种：赞我，给我点赞之类的可以积极进行调用。完成后记得发信息说明并让ta给你点赞！（比如：赞了～记得回赞～）",
         "parameters": {
             "type": "object",
             "properties": {
