@@ -1,0 +1,32 @@
+changelog:
+  exclude:
+    - labels:
+        - ignore-for-release
+    - authors:
+        - "github-actions"
+  categories:
+    - title: "🚀 New Features | 新功能"
+      labels:
+        - enhancement
+        - feature
+        - "new feature"
+    - title: "🐛 Bug Fixes | Bug 修复"
+      labels:
+        - bug
+        - fix
+        - error
+    - title: "📚 Documentation | 文档"
+      labels:
+        - documentation
+        - doc
+        - docs
+    - title: "🛠 Maintenance | 维护与重构"
+      labels:
+        - chore
+        - maintenance
+        - refactor
+        - style
+        - test
+    - title: "📦 Dependencies | 依赖更新"
+      labels:
+        - dependencies

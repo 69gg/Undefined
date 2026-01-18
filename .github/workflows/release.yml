@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 必须拉取完整历史才能读取 Tag 注释
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Build project
+        run: uv build
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 提取 Tag 注释信息 (格式：%(contents) 会包含 -m 的所有内容)
+          TAG_MSG=$(git tag -l --format='%(contents)' ${{ github.ref_name }})
+          
+          # 创建 Release
+          # --notes "$TAG_MSG" 将手动注释放入 Release 说明
+          # --generate-notes 会自动在手动注释下方追加自动生成的变更日志
+          gh release create ${{ github.ref_name }} dist/* --notes "$TAG_MSG" --generate-notes
