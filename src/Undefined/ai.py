@@ -13,6 +13,7 @@ from typing import Any, Callable, Awaitable, Optional
 from pathlib import Path
 
 import aiofiles
+import time
 import asyncio
 import httpx
 
@@ -285,6 +286,7 @@ class AIClient:
         返回:
             True 表示检测到注入，False 表示安全
         """
+        start_time = time.perf_counter()
         try:
             # 将消息内容用 XML 包装
             if message_content:
@@ -352,12 +354,17 @@ class AIClient:
             result = response.json()
             content = self._extract_choices_content(result).strip()
 
-            logger.debug(f"注入检测结果: {content}")
+            duration = time.perf_counter() - start_time
+            is_injection = "INJECTION_DETECTED".lower() in content.lower()
+            logger.info(
+                f"[安全检测] 注入检测完成: 判定={'有风险' if is_injection else '安全'}, 耗时={duration:.2f}s"
+            )
 
             # 如果返回 INJECTION_DETECTED，则判定为注入
-            return "INJECTION_DETECTED".lower() in content.lower()
+            return is_injection
         except Exception as e:
-            logger.exception(f"注入检测失败: {e}")
+            duration = time.perf_counter() - start_time
+            logger.exception(f"[安全检测] 注入检测失败: {e}, 耗时={duration:.2f}s")
             # 检测失败时，为了安全起见，返回 True（判定为注入）
             return True
 
@@ -947,7 +954,8 @@ class AIClient:
 
         while iteration < max_iterations:
             iteration += 1
-            logger.debug(f"ask 迭代 {iteration}/{max_iterations}")
+            iter_start_time = time.perf_counter()
+            logger.info(f"[AI决策] 开始第 {iteration} 轮迭代...")
 
             try:
                 # 调用 LLM
@@ -967,7 +975,18 @@ class AIClient:
                 )
                 response.raise_for_status()
                 result = response.json()
-                logger.debug(f"ask API 响应: {result}")
+
+                # 记录响应指标
+                usage = result.get("usage", {})
+                prompt_tokens = usage.get("prompt_tokens", 0)
+                completion_tokens = usage.get("completion_tokens", 0)
+                total_tokens = usage.get("total_tokens", 0)
+                iter_duration = time.perf_counter() - iter_start_time
+
+                logger.info(
+                    f"[AI响应] 迭代 {iteration} 完成: 耗时={iter_duration:.2f}s, "
+                    f"Tokens={total_tokens} (P:{prompt_tokens} + C:{completion_tokens})"
+                )
 
                 # 提取响应
                 choice = result.get("choices", [{}])[0]
@@ -1102,16 +1121,42 @@ class AIClient:
         返回:
             执行结果
         """
+        start_time = time.perf_counter()
+
         # 首先尝试作为 Agent 执行
         agents_schema = self.agent_registry.get_agents_schema()
         agent_names = [s.get("function", {}).get("name") for s in agents_schema]
 
-        if function_name in agent_names:
-            return await self.agent_registry.execute_agent(
-                function_name, function_args, context
-            )
+        is_agent = function_name in agent_names
+        exec_type = "Agent" if is_agent else "Tool"
 
-        # 否则作为工具执行
-        return await self.tool_registry.execute_tool(
-            function_name, function_args, context
+        logger.info(
+            f"[{exec_type}调用] 准备执行 {function_name}, 参数: {function_args}"
         )
+
+        try:
+            if is_agent:
+                result = await self.agent_registry.execute_agent(
+                    function_name, function_args, context
+                )
+            else:
+                # 否则作为工具执行
+                result = await self.tool_registry.execute_tool(
+                    function_name, function_args, context
+                )
+
+            duration = time.perf_counter() - start_time
+            # 结果摘要，如果是字符串则截取
+            res_summary = (
+                str(result)[:100] + "..." if len(str(result)) > 100 else str(result)
+            )
+            logger.info(
+                f"[{exec_type}结果] {function_name} 执行成功, 耗时={duration:.2f}s, 结果: {res_summary}"
+            )
+            return result
+        except Exception as e:
+            duration = time.perf_counter() - start_time
+            logger.error(
+                f"[{exec_type}错误] {function_name} 执行失败, 耗时={duration:.2f}s, 错误: {e}"
+            )
+            raise

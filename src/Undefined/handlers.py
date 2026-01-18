@@ -173,6 +173,10 @@ class MessageHandler:
         sender_id: int = get_message_sender_id(event)
         message_content: list[dict[str, Any]] = get_message_content(event)
 
+        # 提取文本内容
+        text = extract_text(message_content, self.config.bot_qq)
+        logger.info(f"[群消息] 群:{group_id} | 发送者:{sender_id} | 内容:{text[:100]}")
+
         # 获取发送者昵称信息
         group_sender: dict[str, Any] = event.get("sender", {})
         sender_card: str = group_sender.get("card", "")
@@ -220,7 +224,6 @@ class MessageHandler:
             return
 
         # 关键词自动回复：心理委员 (使用原始消息内容提取文本，保证关键词触发不受影响)
-        text = extract_text(message_content, self.config.bot_qq)
         if "心理委员" in text:
             rand_val = random.random()
             if rand_val < 0.1:  # 10% 发送图片
@@ -246,7 +249,7 @@ class MessageHandler:
             return
 
         # 提取文本内容
-        text = extract_text(message_content, self.config.bot_qq)
+        # (已在上方提取用于日志记录)
 
         # 检查是否 @ 了机器人
         is_at_bot = self._is_at_bot(message_content)
@@ -552,6 +555,7 @@ class MessageHandler:
 简单说：像个极度安静的群友。被@或明确提到才回应，NagaAgent技术问题尽量回复，其他几乎不理。"""
 
         if is_at_bot:
+            logger.info(f"[自动回复] 触发原因: {'拍一拍' if is_poke else '@机器人'}")
             await self.queue_manager.add_group_mention_request(
                 {
                     "type": "auto_reply",
@@ -563,6 +567,7 @@ class MessageHandler:
                 }
             )
         else:
+            logger.info("[自动回复] 投递至普通请求队列 (非 @ 消息)")
             await self.queue_manager.add_group_normal_request(
                 {
                     "type": "auto_reply",

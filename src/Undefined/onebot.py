@@ -78,7 +78,7 @@ class OneBotClient:
             "echo": echo,
         }
 
-        logger.debug(f"API 调用: {action}, params={params}, echo={echo}")
+        logger.info(f"[API请求] {action} | 参数:{params}")
 
         # 创建 Future 等待响应
         future: asyncio.Future[dict[str, Any]] = asyncio.Future()
@@ -86,7 +86,6 @@ class OneBotClient:
 
         try:
             await self.ws.send(json.dumps(request))
-            logger.debug(f"API 请求已发送: {action}")
             # 等待响应，超时 30 秒
             response = await asyncio.wait_for(future, timeout=30.0)
 
@@ -95,12 +94,10 @@ class OneBotClient:
             if status == "failed":
                 retcode = response.get("retcode", -1)
                 msg = response.get("message", "未知错误")
-                logger.error(
-                    f"API 调用失败: {action}, retcode={retcode}, message={msg}"
-                )
+                logger.error(f"[API失败] {action} | retcode={retcode} | message={msg}")
                 raise RuntimeError(f"API 调用失败: {msg} (retcode={retcode})")
 
-            logger.debug(f"API 响应: {action}, status={status}")
+            logger.info(f"[API响应] {action} 成功")
             return response
         except asyncio.TimeoutError:
             logger.error(f"API 调用超时: {action}, echo={echo}")
@@ -446,20 +443,25 @@ class OneBotClient:
     async def run_with_reconnect(self, reconnect_interval: float = 5.0) -> None:
         """带自动重连的运行"""
         self._should_stop = False
+        reconnect_count = 0
 
         while not self._should_stop:
             try:
+                if reconnect_count > 0:
+                    logger.info(f"[WebSocket] 正在尝试第 {reconnect_count} 次重连...")
                 await self.connect()
+                reconnect_count = 0  # 连接成功重置计数
                 await self.run()
             except websockets.ConnectionClosed as e:
-                logger.warning(f"WebSocket 连接关闭: {e}")
+                logger.warning(f"[WebSocket] 连接已断开: {e}")
             except Exception as e:
-                logger.error(f"连接错误: {e}")
+                logger.error(f"[WebSocket] 发生错误: {e}")
 
             if self._should_stop:
                 break
 
-            logger.info(f"{reconnect_interval} 秒后重连...")
+            reconnect_count += 1
+            logger.info(f"{reconnect_interval} 秒后尝试重连...")
             await asyncio.sleep(reconnect_interval)
 
     def stop(self) -> None:

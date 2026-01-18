@@ -12,11 +12,11 @@
       </div>
       <h3>项目简介</h3>
       <p>
-        <strong>Undefined</strong> 是一个功能强大的 QQ 机器人平台，采用全新的 <strong>自研 Skills</strong> 架构。基于现代 Python 异步技术栈构建，它不仅提供基础的对话能力，更通过内置的五大智能 Agent 实现了代码分析、网络搜索、娱乐互动等多模态能力。
+        <strong>Undefined</strong> 是一个功能强大的 QQ 机器人平台，采用全新的 <strong>自研 Skills</strong> 架构。基于现代 Python 异步技术栈构建，它不仅提供基础的对话能力，更通过内置的多个智能 Agent 实现了代码分析、网络搜索、娱乐互动等多模态综合能力。
       </p>
     </td>
     <td width="30%">
-      <img src="./data/img/head.jpg" width="100%" alt="MuLi" />
+      <img src="./data/img/head.jpg" width="100%" alt="Undefined" />
     </td>
   </tr>
 </table>
