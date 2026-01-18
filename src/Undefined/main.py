@@ -14,6 +14,7 @@ from .config import get_config
 from .faq import FAQStorage
 from .handlers import MessageHandler
 from .memory import MemoryStorage
+from .scheduled_task_storage import ScheduledTaskStorage
 from .onebot import OneBotClient
 
 
@@ -78,12 +79,13 @@ async def main() -> None:
     # 初始化组件
     onebot = OneBotClient(config.onebot_ws_url, config.onebot_token)
     memory_storage = MemoryStorage(max_memories=100)
+    task_storage = ScheduledTaskStorage()
     ai = AIClient(
         config.chat_model, config.vision_model, config.agent_model, memory_storage
     )
     faq_storage = FAQStorage()
 
-    handler = MessageHandler(config, onebot, ai, faq_storage)
+    handler = MessageHandler(config, onebot, ai, faq_storage, task_storage)
     onebot.set_message_handler(handler.handle_message)
 
     logger.info("启动机器人...")

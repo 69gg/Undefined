@@ -23,6 +23,7 @@ from .utils.common import extract_text, parse_message_content_for_history
 from .utils.history import MessageHistoryManager
 from .utils.scheduler import TaskScheduler
 from .utils.sender import MessageSender
+from .scheduled_task_storage import ScheduledTaskStorage
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class MessageHandler:
         onebot: OneBotClient,
         ai: AIClient,
         faq_storage: FAQStorage,
+        task_storage: ScheduledTaskStorage,
     ) -> None:
         self.config = config
         self.onebot = onebot
@@ -53,7 +55,9 @@ class MessageHandler:
         self.sender = MessageSender(onebot, self.history_manager, config.bot_qq)
 
         # 初始化定时任务调度器
-        self.scheduler = TaskScheduler(ai, self.sender, onebot, self.history_manager)
+        self.scheduler = TaskScheduler(
+            ai, self.sender, onebot, self.history_manager, task_storage
+        )
 
         # 初始化队列管理器
         self.queue_manager = QueueManager()

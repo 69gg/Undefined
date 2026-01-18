@@ -4,10 +4,12 @@
 """
 
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+
+from ..scheduled_task_storage import ScheduledTaskStorage
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +23,7 @@ class TaskScheduler:
         sender: Any,
         onebot_client: Any,
         history_manager: Any,
+        task_storage: Optional[ScheduledTaskStorage] = None,
     ) -> None:
         """初始化调度器
 
@@ -29,18 +32,56 @@ class TaskScheduler:
             sender: 消息发送器实例 (MessageSender)
             onebot_client: OneBot 客户端实例
             history_manager: 历史记录管理器
+            task_storage: 任务持久化存储器
         """
         self.scheduler = AsyncIOScheduler()
         self.ai = ai_client
         self.sender = sender
         self.onebot = onebot_client
         self.history_manager = history_manager
-        self.tasks: dict[str, Any] = {}
+        self.storage = task_storage or ScheduledTaskStorage()
+
+        # 从存储加载任务
+        self.tasks: dict[str, Any] = self.storage.load_tasks()
 
         # 确保 scheduler 在 event loop 中运行
         if not self.scheduler.running:
             self.scheduler.start()
             logger.info("任务调度器已启动")
+
+        # 恢复已有的任务
+        self._recover_tasks()
+
+    def _recover_tasks(self) -> None:
+        """从存储中恢复任务并添加到调度器"""
+        if not self.tasks:
+            return
+
+        count = 0
+        for task_id, info in list(self.tasks.items()):
+            try:
+                trigger = CronTrigger.from_crontab(info["cron"])
+                self.scheduler.add_job(
+                    self._execute_tool_wrapper,
+                    trigger=trigger,
+                    id=task_id,
+                    args=[
+                        task_id,
+                        info["tool_name"],
+                        info["tool_args"],
+                        info["target_id"],
+                        info["target_type"],
+                    ],
+                    replace_existing=True,
+                )
+                count += 1
+            except Exception as e:
+                logger.error(f"恢复定时任务 {task_id} 失败: {e}")
+                # 如果任务恢复失败（如格式错误），保留在 self.tasks 中还是删除？
+                # 目前保留，由用户或后续逻辑处理
+
+        if count > 0:
+            logger.info(f"成功恢复 {count} 个定时任务")
 
     def add_task(
         self,
@@ -80,6 +121,7 @@ class TaskScheduler:
             )
 
             self.tasks[task_id] = {
+                "task_id": task_id,
                 "tool_name": tool_name,
                 "tool_args": tool_args,
                 "cron": cron_expression,
@@ -89,6 +131,9 @@ class TaskScheduler:
                 "max_executions": max_executions,
                 "current_executions": 0,
             }
+
+            # 持久化保存
+            self.storage.save_all(self.tasks)
 
             logger.info(
                 f"添加定时任务成功: {task_id} -> {tool_name} ({cron_expression})"
@@ -144,6 +189,9 @@ class TaskScheduler:
             if max_executions is not None:
                 task_info["max_executions"] = max_executions
 
+            # 持久化保存
+            self.storage.save_all(self.tasks)
+
             logger.info(f"修改定时任务成功: {task_id}")
             return True
         except Exception as e:
@@ -156,6 +204,8 @@ class TaskScheduler:
             self.scheduler.remove_job(task_id)
             if task_id in self.tasks:
                 del self.tasks[task_id]
+                # 持久化保存
+                self.storage.save_all(self.tasks)
             logger.info(f"移除定时任务成功: {task_id}")
             return True
         except Exception as e:
@@ -202,6 +252,9 @@ class TaskScheduler:
                 task_info["current_executions"] = (
                     task_info.get("current_executions", 0) + 1
                 )
+
+                # 持久化保存执行次数
+                self.storage.save_all(self.tasks)
 
                 max_executions = task_info.get("max_executions")
                 current_executions = task_info.get("current_executions", 0)
