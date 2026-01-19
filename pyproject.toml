@@ -1,12 +1,12 @@
 [project]
 name = "Undefined-bot"
-version = "2.2.1"
+version = "2.2.2"
 description = "A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture."
 readme = "README.md"
 authors = [
   { name = "Null", email = "pylindex@qq.com"  }
 ]
-requires-python = ">=3.12, <=3.13"
+requires-python = ">=3.10"
 dependencies = [
     "websockets>=12.0",
     "httpx>=0.27.0",
@@ -40,7 +40,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://www.pylindex.top"
+#Homepage = "https://www.pylindex.top"
 Repository = "https://github.com/69gg/Undefined"
 Issues = "https://github.com/69gg/Undefined/issues"
 
