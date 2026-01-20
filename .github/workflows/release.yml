@@ -31,6 +31,15 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
+      - name: Install dependencies
+        run: uv sync --group ci
+
+      - name: Run ruff check
+        run: uv run ruff check .
+
+      - name: Run mypy check
+        run: uv run mypy src/Undefined
+
       - name: Build project
         run: uv build
 
