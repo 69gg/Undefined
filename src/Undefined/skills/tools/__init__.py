@@ -40,7 +40,39 @@ class ToolRegistry:
             f"成功加载了 {len(self._tools_schema)} 个工具: {', '.join(tool_names)}"
         )
 
-    def _load_tool_from_dir(self, tool_dir: Path) -> None:
+        # 加载 Skills (toolsets)
+        self.toolsets_dir = self.tools_dir.parent / "toolsets"
+        self.load_toolsets()
+
+    def load_toolsets(self) -> None:
+        """从 toolsets 目录发现并加载工具集。
+
+        目录结构: toolsets/{skill_name}/{category}/{tool_name}
+        注册名称: {skill_name}.{tool_name}
+        """
+        if not self.toolsets_dir.exists():
+            logger.debug(f"Toolsets directory not found: {self.toolsets_dir}")
+            return
+
+        for skill_dir in self.toolsets_dir.iterdir():
+            if not skill_dir.is_dir() or skill_dir.name.startswith("_"):
+                continue
+
+            skill_name = skill_dir.name
+
+            # 遍历分类目录
+            for category_dir in skill_dir.iterdir():
+                if not category_dir.is_dir() or category_dir.name.startswith("_"):
+                    continue
+
+                # 遍历工具目录
+                for tool_dir in category_dir.iterdir():
+                    if not tool_dir.is_dir() or tool_dir.name.startswith("_"):
+                        continue
+
+                    self._load_tool_from_dir(tool_dir, prefix=f"{skill_name}.")
+
+    def _load_tool_from_dir(self, tool_dir: Path, prefix: str = "") -> None:
         """从目录加载单个工具。"""
         config_path = tool_dir / "config.json"
         handler_path = tool_dir / "handler.py"
@@ -61,7 +93,13 @@ class ToolRegistry:
                 logger.error(f"[工具错误] 工具配置无效 {tool_dir}: 缺少 function.name")
                 return
 
-            tool_name = config["function"]["name"]
+            original_tool_name = config["function"]["name"]
+            tool_name = f"{prefix}{original_tool_name}"
+
+            # 如果有前缀，更新 name
+            if prefix:
+                config["function"]["name"] = tool_name
+
             logger.debug(f"[工具加载] 正在从 {tool_dir} 加载工具: {tool_name}")
 
         except Exception as e:
@@ -70,9 +108,11 @@ class ToolRegistry:
 
         # 加载处理器
         try:
-            spec = importlib.util.spec_from_file_location(
-                f"tools.{tool_name}", handler_path
+            # 使用唯一名称注册模块，避免冲突
+            module_name = (
+                f"skills.toolsets.{tool_name}" if prefix else f"tools.{tool_name}"
             )
+            spec = importlib.util.spec_from_file_location(module_name, handler_path)
             if spec is None or spec.loader is None:
                 logger.error(f"从 {handler_path} 加载工具处理器 spec 失败")
                 return
