@@ -59,11 +59,14 @@ class ToolRegistry:
                 continue
 
             skill_name = skill_dir.name
+            logger.info(f"发现 Skill.toolsets: {skill_name}")
 
             # 遍历分类目录
             for category_dir in skill_dir.iterdir():
                 if not category_dir.is_dir() or category_dir.name.startswith("_"):
                     continue
+
+                logger.debug(f"发现 Skill 分类: {category_dir.name} (归属于 {skill_name})")
 
                 # 遍历工具目录
                 for tool_dir in category_dir.iterdir():

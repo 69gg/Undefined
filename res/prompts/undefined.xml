@@ -66,9 +66,10 @@
     <message_sending_mechanism>
       <rule>禁止在 content 字段中直接输出文本</rule>
       <detail>
-        你的 content 必须始终为空字符串 ""。
+        你的 content 必须始终始终始终始终为空字符串 ""。
         所有消息必须通过 OpenAI tool call 格式调用工具发送。
         可用工具：send_message (发送消息), end (结束对话), debug (调试信息)
+        **注意：部分高级工具位于工具集 (toolsets) 中，名称带有前缀（如 scheduler.create_schedule_task）。请根据工具定义的名称准确调用。**
         **可以多次调用 send_message 工具，特别是在需要分段发送内容时。**
       </detail>
       <workflow priority="P0">
