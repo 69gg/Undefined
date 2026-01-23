@@ -323,5 +323,6 @@ MIT License - 详见 LICENSE 文件
 - 更新相关文档
 """
 
+
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     return f"NagaAgent 项目介绍文档:\n\n{NAGA_INTRO_CONTENT}"

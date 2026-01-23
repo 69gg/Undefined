@@ -4,27 +4,28 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     domain = args.get("domain")
-    
+
     if not domain:
         return "❌ 域名不能为空"
-    
+
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             params = {"domain": domain}
             logger.info(f"查询Whois信息: {domain}")
-            
+
             response = await client.get("https://v2.xxapi.cn/api/whois", params=params)
             response.raise_for_status()
             data = response.json()
-            
+
             if data.get("code") != 200:
                 return f"查询Whois失败: {data.get('msg')}"
-            
+
             whois_data = data.get("data", {})
             result = f"【{domain} Whois信息】\n\n"
-            
+
             domain_name = whois_data.get("Domain Name", "")
             registrar = whois_data.get("Sponsoring Registrar", "")
             registrar_url = whois_data.get("Registrar URL", "")
@@ -33,7 +34,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             registration_time = whois_data.get("Registration Time", "")
             expiration_time = whois_data.get("Expiration Time", "")
             dns_servers = whois_data.get("DNS Serve", [])
-            
+
             if domain_name:
                 result += f"域名: {domain_name}\n"
             if registrar:
@@ -50,9 +51,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 result += f"到期时间: {expiration_time}\n"
             if dns_servers:
                 result += f"DNS服务器: {', '.join(dns_servers)}\n"
-            
+
             return result
-            
+
     except httpx.TimeoutException:
         return "请求超时，请稍后重试"
     except httpx.HTTPStatusError as e:

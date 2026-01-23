@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 with open("res/prepared_messages/help_message.txt", "r", encoding="utf-8") as f:
     HELP_MESSAGE = f.read()
 
+
 class MessageHandler:
     """消息处理器"""
 

@@ -14,20 +14,20 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     content = args.get("content", "")
     if not content:
         return "调试内容不能为空"
-    
+
     # 确保目录存在
     DEBUG_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     # 生成 UUID 作为文件名
     file_uuid = uuid.uuid4()
     filename = f"{file_uuid}.txt"
     filepath = DEBUG_DIR / filename
-    
+
     # 保存到文件
     try:
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
-        
+
         logger.info(f"调试信息已保存到: {filepath}")
         return f"调试信息已保存（UUID: {file_uuid}）"
     except Exception as e:

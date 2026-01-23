@@ -124,7 +124,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     agent_config = ai_client.agent_config
 
-
     system_prompt: str = await _load_prompt()
 
     messages: list[dict[str, Any]] = [

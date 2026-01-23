@@ -36,6 +36,7 @@ TYPE_NAMES = {
     "meitui": "美腿",
 }
 
+
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     message_type = args.get("message_type")
     target_id = args.get("target_id")
@@ -43,7 +44,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     count = args.get("count", 1)
     device = args.get("device", "pc")
     fourk_type = args.get("fourk_type", "acg")
-    
+
     # 参数验证
     if not message_type:
         return "❌ 消息类型不能为空"
@@ -63,32 +64,34 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "❌ 设备类型必须是 pc（电脑端）或 wap（手机端）"
     if picture_type == "random4kPic" and fourk_type not in ["acg", "wallpaper"]:
         return "❌ 4K图片类型必须是 acg（二次元）或 wallpaper（风景）"
-    
+
     # 获取发送图片回调
     send_image_callback = context.get("send_image_callback")
     if not send_image_callback:
         return "发送图片回调未设置"
-    
+
     # 构造请求参数
     params: Dict[str, Any] = {"return": "json"}
     if picture_type == "acg":
         params["type"] = device
     elif picture_type == "random4kPic":
         params["type"] = fourk_type
-    
+
     # 获取图片
     success_count = 0
     fail_count = 0
     local_image_paths: list[str] = []
-    
+
     # 创建图片保存目录
     img_dir = Path.cwd() / "img"
     img_dir.mkdir(exist_ok=True)
-    
+
     async with httpx.AsyncClient(timeout=10.0) as client:
         for i in range(count):
             try:
-                logger.info(f"正在获取第 {i+1}/{count} 张 {TYPE_NAMES[picture_type]} 图片...")
+                logger.info(
+                    f"正在获取第 {i + 1}/{count} 张 {TYPE_NAMES[picture_type]} 图片..."
+                )
                 response = await client.get(API_URLS[picture_type], params=params)
                 response.raise_for_status()
 
@@ -142,7 +145,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                     success_count += 1
 
             except httpx.TimeoutException:
-                logger.error(f"获取图片超时: {picture_type} 第 {i+1} 张")
+                logger.error(f"获取图片超时: {picture_type} 第 {i + 1} 张")
                 fail_count += 1
             except httpx.HTTPStatusError as e:
                 logger.error(f"HTTP 错误: {e}")
@@ -150,41 +153,54 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             except Exception as e:
                 logger.exception(f"获取图片失败: {e}")
                 fail_count += 1
-    
+
     # 如果没有获取到任何图片
     if success_count == 0:
         return f"获取 {TYPE_NAMES[picture_type]} 图片失败，请稍后重试"
-    
+
     # 发送图片
     for idx, image_path in enumerate(local_image_paths, 1):
         try:
-            logger.info(f"正在发送第 {idx}/{success_count} 张图片到 {message_type} {target_id}")
+            logger.info(
+                f"正在发送第 {idx}/{success_count} 张图片到 {message_type} {target_id}"
+            )
             logger.info(f"图片路径: {image_path}")
             await send_image_callback(target_id, message_type, image_path)
             logger.info(f"图片 {idx} 发送成功")
-            
+
             # 删除本地图片文件
             try:
                 Path(image_path).unlink()
                 logger.info(f"已删除本地图片: {image_path}")
             except Exception as e:
                 logger.warning(f"删除图片文件失败: {e}")
-            
+
             # 避免发送过快
             await asyncio.sleep(0.5)
         except Exception as e:
             logger.exception(f"发送图片失败: {e}")
             fail_count += 1
-    
+
     # 返回结果
     device_text = f"（{device}端）" if picture_type == "acg" else ""
     fourk_text = f"（{fourk_type}）" if picture_type == "random4kPic" else ""
-    
+
     # 中文数字映射
-    cn_nums = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五", 6: "六", 7: "七", 8: "八", 9: "九", 10: "十"}
+    cn_nums = {
+        1: "一",
+        2: "二",
+        3: "三",
+        4: "四",
+        5: "五",
+        6: "六",
+        7: "七",
+        8: "八",
+        9: "九",
+        10: "十",
+    }
     success_cn = cn_nums.get(success_count, str(success_count))
     fail_cn = cn_nums.get(fail_count, str(fail_count))
-    
+
     if fail_count == 0:
         return f"✅ 已成功发送 {success_cn} 张 {TYPE_NAMES[picture_type]} 图片{device_text}{fourk_text}到 {message_type} {target_id}"
     else:
