@@ -33,6 +33,9 @@ async def debug_notices(group_id: int) -> None:
     client = OneBotClient(ws_url, token)
     try:
         await client.connect()
+        # 启动接收循环任务以便接收 API 响应
+        asyncio.create_task(client.run())
+
         # 直接调用 _call_api 捕获原始响应
         raw_result = await client._call_api("_get_group_notice", {"group_id": group_id})
 
@@ -62,6 +65,7 @@ async def debug_notices(group_id: int) -> None:
     except Exception as e:
         print(f"\n执行过程中发生错误: {e}")
     finally:
+        client.stop()
         await client.disconnect()
 
 
