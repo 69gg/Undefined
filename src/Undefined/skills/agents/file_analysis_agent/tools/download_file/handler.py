@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Dict
 import logging
 import httpx
+import aiofiles
 
 logger = logging.getLogger(__name__)
 
@@ -101,15 +102,36 @@ async def _download_from_file_id(
 
         logger.info(f"获取到 URL: {url}")
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.get(url, timeout=120.0)
-            response.raise_for_status()
+        # 检查是否为 HTTP/HTTPS URL
+        is_http_url = url.startswith("http://") or url.startswith("https://")
 
-            filename = f"file_{file_id}"
+        if is_http_url:
+            # 使用 httpx 下载远程文件
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.get(url, timeout=120.0)
+                response.raise_for_status()
+
+                filename = f"file_{file_id}"
+                file_path = temp_dir / filename
+                file_path.write_bytes(response.content)
+
+                logger.info(f"文件已保存到: {file_path}")
+                return str(file_path)
+        else:
+            # 处理本地文件路径
+            local_path = Path(url)
+            if not local_path.exists():
+                return f"错误：本地文件不存在: {url}"
+
+            # 使用 aiofiles 读取本地文件
+            async with aiofiles.open(local_path, "rb") as f:
+                content = await f.read()
+
+            filename = local_path.name
             file_path = temp_dir / filename
-            file_path.write_bytes(response.content)
+            file_path.write_bytes(content)
 
-            logger.info(f"文件已保存到: {file_path}")
+            logger.info(f"本地文件已复制到: {file_path}")
             return str(file_path)
 
     except Exception as e:
