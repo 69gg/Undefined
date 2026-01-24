@@ -27,7 +27,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
         render_html_to_image = context.get("render_html_to_image")
         if not render_html_to_image:
-             return "错误：渲染函数 (render_html_to_image) 未在上下文中提供，请检查 AIClient 配置。"
+            return "错误：渲染函数 (render_html_to_image) 未在上下文中提供，请检查 AIClient 配置。"
 
         await render_html_to_image(html_content, str(filepath))
 
@@ -41,4 +41,3 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     except Exception as e:
         logger.exception(f"HTML 渲染并发送图片失败: {e}")
         return f"HTML 渲染失败: {e}"
-
