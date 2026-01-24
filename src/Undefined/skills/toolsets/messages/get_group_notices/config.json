@@ -1,0 +1,11 @@
+{
+    "type": "function",
+    "function": {
+        "name": "messages.get_group_notices",
+        "description": "获取当前群聊的公告列表。可以查看群聊中的最新公告信息。",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
+    }
+}
