@@ -63,24 +63,27 @@ class ToolRegistry(BaseRegistry):
                 toolset_by_category[category] = []
             toolset_by_category[category].append(name)
 
-        logger.info("=" * 60)
-        if include_mcp:
-            logger.info("工具加载完成统计")
-        else:
-            logger.info("工具加载完成统计（MCP 工具待初始化）")
-        logger.info(
-            f"  - 基础工具 ({len(basic_tools)} 个): {', '.join(basic_tools) if basic_tools else '无'}"
-        )
-        if toolset_by_category:
-            logger.info(f"  - 工具集工具 ({len(toolset_tools)} 个):")
-            for category, tools in sorted(toolset_by_category.items()):
-                logger.info(f"    [{category}] ({len(tools)} 个): {', '.join(tools)}")
         if mcp_tools and include_mcp:
+            logger.info("=" * 60)
+            if include_mcp:
+                logger.info("工具加载完成统计")
+            else:
+                logger.info("工具加载完成统计（MCP 工具待初始化）")
+            logger.info(
+                f"  - 基础工具 ({len(basic_tools)} 个): {', '.join(basic_tools) if basic_tools else '无'}"
+            )
+            if toolset_by_category:
+                logger.info(f"  - 工具集工具 ({len(toolset_tools)} 个):")
+                for category, tools in sorted(toolset_by_category.items()):
+                    logger.info(
+                        f"    [{category}] ({len(tools)} 个): {', '.join(tools)}"
+                    )
+            # if mcp_tools and include_mcp:
             logger.info(f"  - MCP 工具 ({len(mcp_tools)} 个): {', '.join(mcp_tools)}")
-        elif not include_mcp and hasattr(self, "_mcp_registry") and self._mcp_registry:
-            logger.info("  - MCP 工具: (等待异步初始化...)")
-        logger.info(f"  - 总计: {len(tool_names)} 个工具")
-        logger.info("=" * 60)
+            # elif not include_mcp and hasattr(self, "_mcp_registry") and self._mcp_registry:
+            # logger.info("  - MCP 工具: (等待异步初始化...)")
+            logger.info(f"  - 总计: {len(tool_names)} 个工具")
+            logger.info("=" * 60)
 
     def _load_toolsets_recursive(self) -> None:
         """从 toolsets 目录发现并加载工具集。
