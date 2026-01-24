@@ -1,0 +1,19 @@
+{
+    "type": "function",
+    "function": {
+        "name": "memory.delete",
+        "description": "根据 UUID 删除一条记忆。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "uuid": {
+                    "type": "string",
+                    "description": "要删除的记忆的 UUID"
+                }
+            },
+            "required": [
+                "uuid"
+            ]
+        }
+    }
+}
