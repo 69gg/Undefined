@@ -1,12 +1,12 @@
-# NagaAgent 机器人工具系统
+# 基础工具 (Basic Tools)
 
-本项目采用模块化工具架构，所有工具都位于 `src/Undefined/tools/` 目录下。每个工具都是一个独立的文件夹，包含配置和实现逻辑。
+本项目采用模块化工具架构，所有基础工具都位于 `src/Undefined/skills/tools/` 目录下。每个工具都是一个独立的文件夹，包含配置和实现逻辑。
 
 ## 目录结构
 
 ```text
-tools/
-├── __init__.py          # 工具注册表 (ToolRegistry)
+skills/tools/
+├── __init__.py          # 工具注册表
 ├── README.md            # 本说明文件
 └── tool_name/           # 工具名称
     ├── config.json      # 工具定义 (OpenAI 格式)
@@ -16,7 +16,7 @@ tools/
 ## 如何添加一个新工具
 
 ### 1. 创建工具目录
-在 `src/Undefined/tools/` 下创建一个新文件夹，例如 `my_new_tool`。
+在 `src/Undefined/skills/tools/` 下创建一个新文件夹，例如 `my_new_tool`。
 
 ### 2. 编写 `config.json`
 该文件定义了工具的名称、描述和参数结构（遵循 OpenAI function calling 格式）。
@@ -64,14 +64,14 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
 | 键名 | 类型 | 说明 |
 | :--- | :--- | :--- |
-| `send_message_callback` | `Callable` | 发送群消息的回调 |
-| `send_private_message_callback` | `Callable` | 发送私聊消息的回调 |
+| `sender` | `MessageSender` | **推荐**：统一消息发送接口（自动记录历史） |
+| `history_manager` | `MessageHistoryManager` | 统一历史记录管理器 |
+| `send_message_callback` | `Callable` | 发送群消息的回调 (建议使用 sender) |
+| `send_private_message_callback` | `Callable` | 发送私聊消息的回调 (建议使用 sender) |
 | `send_image_callback` | `Callable` | 发送图片的回调 |
-| `get_recent_messages_callback` | `Callable` | 获取历史消息的回调 |
+| `get_recent_messages_callback` | `Callable` | 获取历史消息的回调 (建议使用 history_manager) |
 | `memory_storage` | `MemoryStorage` | 记忆存储实例 |
 | `ai_client` | `AIClient` | AI 客户端实例（用于调用图片描述等） |
-| `sender` | `MessageSender` | 统一消息发送接口（自动记录历史） |
-| `history_manager` | `MessageHistoryManager` | 统一历史记录管理器 |
 | `base_path` | `Path` | 默认的基础路径 (通常锁定在 `code/NagaAgent`) |
 
 ## 自动发现
