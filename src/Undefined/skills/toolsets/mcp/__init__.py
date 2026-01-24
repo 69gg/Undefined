@@ -132,8 +132,9 @@ class MCPToolSetRegistry:
             parameters = tool.inputSchema if hasattr(tool, "inputSchema") else {}
 
             # FastMCP 会自动为工具添加服务器名称前缀，格式为 {server_name}_{tool_name}
-            # 但我们需要转换为 mcp.{server_name}.{tool_name} 格式
-            full_tool_name = f"mcp.{tool_name}"
+            # 我们需要转换为 mcp.{server_name}.{tool_name} 格式（用点代替下划线）
+            # 例如: context7_resolve-library-id → mcp.context7.resolve-library-id
+            full_tool_name = f"mcp.{tool_name.replace('_', '.', 1)}"
 
             # 构建 OpenAI function calling 格式的 schema
             schema = {
