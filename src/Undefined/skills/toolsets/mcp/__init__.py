@@ -79,6 +79,17 @@ class MCPToolSetRegistry:
             self._is_initialized = True
             return
 
+        # 验证配置格式
+        invalid_configs = [i for i, s in enumerate(servers) if not isinstance(s, dict)]
+        if invalid_configs:
+            logger.error(
+                f"MCP 配置格式错误: mcpServers 数组中的索引 {invalid_configs} 不是有效的字典对象。"
+                f"请确保每个元素都是包含 name、command、args 字段的字典。"
+            )
+            logger.info("MCP 工具集初始化已终止")
+            self._is_initialized = True
+            return
+
         logger.info(f"开始初始化 {len(servers)} 个 MCP 服务器...")
 
         for server_config in servers:
@@ -99,9 +110,20 @@ class MCPToolSetRegistry:
         参数:
             server_config: 服务器配置，包含 name、command、args 等字段
         """
+        # 验证配置格式
+        if not isinstance(server_config, dict):
+            logger.error(
+                f"MCP 服务器配置格式错误: 期望字典对象，实际收到 {type(server_config).__name__}。"
+                f"请检查 config/mcp.json 文件，mcpServers 数组中的每个元素应该是字典对象。"
+            )
+            return
+
         server_name = server_config.get("name")
         if not server_name:
-            logger.error("MCP 服务器配置缺少 name 字段")
+            logger.error(
+                "MCP 服务器配置缺少 name 字段。"
+                '正确的配置格式: {"name": "server_name", "command": "...", "args": [...]}'
+            )
             return
 
         try:
