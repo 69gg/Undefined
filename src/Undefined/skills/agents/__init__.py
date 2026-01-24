@@ -32,4 +32,3 @@ class AgentRegistry(BaseRegistry):
     ) -> str:
         """执行 agent"""
         return await self.execute(agent_name, args, context)
-

@@ -16,7 +16,7 @@ class ToolRegistry(BaseRegistry):
             tools_path = Path(tools_dir)
 
         super().__init__(tools_path)
-        
+
         # 自动加载
         self.load_tools()
 
@@ -45,7 +45,9 @@ class ToolRegistry(BaseRegistry):
 
         logger.info("=" * 60)
         logger.info("工具加载完成统计")
-        logger.info(f"  - 基础工具 ({len(basic_tools)} 个): {', '.join(basic_tools) if basic_tools else '无'}")
+        logger.info(
+            f"  - 基础工具 ({len(basic_tools)} 个): {', '.join(basic_tools) if basic_tools else '无'}"
+        )
         if toolset_by_category:
             logger.info(f"  - 工具集工具 ({len(toolset_tools)} 个):")
             for category, tools in sorted(toolset_by_category.items()):
@@ -55,7 +57,7 @@ class ToolRegistry(BaseRegistry):
 
     def _load_toolsets_recursive(self) -> None:
         """从 toolsets 目录发现并加载工具集。
-        
+
         目录结构: toolsets/{category}/{tool_name}
         注册名称: {category}.{tool_name}
         """
@@ -74,7 +76,7 @@ class ToolRegistry(BaseRegistry):
             for tool_dir in category_dir.iterdir():
                 if not tool_dir.is_dir() or tool_dir.name.startswith("_"):
                     continue
-                
+
                 # 使用基类方法加载，指定前缀
                 self._load_item_from_dir(tool_dir, prefix=f"{category_name}.")
 
@@ -89,4 +91,3 @@ class ToolRegistry(BaseRegistry):
     ) -> str:
         """根据名称执行工具。"""
         return await self.execute(tool_name, args, context)
-
