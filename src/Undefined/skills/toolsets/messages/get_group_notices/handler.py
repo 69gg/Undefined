@@ -25,16 +25,38 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
         lines = [f"群 {group_id} 公告列表："]
         for i, notice in enumerate(notices[:5]):  # 最多显示 5 条
-            # 公告字段可能因实现不同而异，通常包含 content, sender_id, pub_time 等
-            content = notice.get("content", notice.get("text", "无内容"))
-            sender_id = notice.get("sender_id", notice.get("uin", "未知"))
-            pub_time_ts = notice.get("pub_time", notice.get("time", 0))
+            # 尝试多种可能的字段名
+            # 内容
+            content = notice.get("content") or notice.get("text")
+            if not content and isinstance(notice.get("message"), dict):
+                content = notice["message"].get("text") or notice["message"].get(
+                    "content"
+                )
+            if not content:
+                content = "无内容"
+
+            # 发送者
+            sender_id = (
+                notice.get("sender_id")
+                or notice.get("uin")
+                or notice.get("user_id", "未知")
+            )
+
+            # 时间
+            pub_time_ts = (
+                notice.get("pub_time")
+                or notice.get("publish_time")
+                or notice.get("time", 0)
+            )
 
             pub_time = "未知时间"
             if pub_time_ts:
-                pub_time = datetime.fromtimestamp(pub_time_ts).strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
+                try:
+                    pub_time = datetime.fromtimestamp(int(pub_time_ts)).strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    )
+                except (ValueError, TypeError):
+                    pub_time = str(pub_time_ts)
 
             lines.append(f"{i + 1}. [{pub_time}] 发布者({sender_id}):\n{content}")
             lines.append("-" * 20)

@@ -371,9 +371,16 @@ class OneBotClient:
         """
         try:
             result = await self._call_api("_get_group_notice", {"group_id": group_id})
-            data = result.get("data", [])
+            data = result.get("data")
             if isinstance(data, list):
                 return data
+            elif isinstance(data, dict):
+                # 尝试获取常见的列表字段
+                notices = data.get("notices")
+                if notices is None:
+                    notices = data.get("list")
+                if isinstance(notices, list):
+                    return notices
             return []
         except Exception as e:
             logger.error(f"获取群公告失败: {e}")
