@@ -109,6 +109,40 @@ AI 可以使用：
 - `mcp.github.get_repository`：获取仓库信息
 - `mcp.github.list_issues`：列出 Issues
 
+### 5. 代码文档查询 (Context7)
+
+```json
+{
+  "mcpServers": {
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp"]
+    }
+  }
+}
+```
+
+AI 可以使用：
+- `mcp.context7.resolve-library-id`：解析库名称获取库 ID
+- `mcp.context7.query-docs`：查询库的文档和代码示例
+
+### 6. 烹饪食谱查询 (HowToCook)
+
+```json
+{
+  "mcpServers": {
+    "howtocook": {
+      "command": "npx",
+      "args": ["-y", "howtocook-mcp"]
+    }
+  }
+}
+```
+
+AI 可以使用：
+- `mcp.howtocook.get_recipe`：获取烹饪食谱
+- `mcp.howtocook.search_ingredients`：搜索食材
+
 ## 注意事项
 
 1. **依赖安装**：使用 MCP 功能需要安装 `fastmcp` 库
