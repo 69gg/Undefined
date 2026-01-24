@@ -2,7 +2,6 @@ from typing import Any, Dict
 import logging
 from pathlib import Path
 import uuid
-from Undefined.render import render_markdown_to_html, render_html_to_image
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +24,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         filename = f"render_{uuid.uuid4().hex[:16]}.png"
         filepath = Path.cwd() / "img" / filename
         filepath.parent.mkdir(exist_ok=True)
+        
+        render_markdown_to_html = context.get("render_markdown_to_html")
+        render_html_to_image = context.get("render_html_to_image")
+        
+        if not render_markdown_to_html or not render_html_to_image:
+             return "错误：渲染函数 (render_markdown/render_html) 未在上下文中提供。"
 
         try:
             html_content = await render_markdown_to_html(content)
@@ -61,3 +66,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     except Exception as e:
         logger.exception(f"渲染并发送 Markdown 图片失败: {e}")
         return f"渲染失败: {e}"
+

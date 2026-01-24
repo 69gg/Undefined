@@ -2,7 +2,6 @@ from typing import Any, Dict
 import logging
 from pathlib import Path
 import uuid
-from Undefined.render import render_html_to_image
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +25,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         filepath = Path.cwd() / "img" / filename
         filepath.parent.mkdir(exist_ok=True)
 
+        render_html_to_image = context.get("render_html_to_image")
+        if not render_html_to_image:
+             return "错误：渲染函数 (render_html_to_image) 未在上下文中提供，请检查 AIClient 配置。"
+
         await render_html_to_image(html_content, str(filepath))
 
         send_image_callback = context.get("send_image_callback")
@@ -38,3 +41,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     except Exception as e:
         logger.exception(f"HTML 渲染并发送图片失败: {e}")
         return f"HTML 渲染失败: {e}"
+

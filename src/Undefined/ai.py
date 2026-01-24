@@ -818,6 +818,7 @@ class AIClient:
         history_manager: Any = None,
         onebot_client: Any = None,
         scheduler: Any = None,
+        extra_context: dict[str, Any] | None = None,
     ) -> str:
         """使用 AI 回答问题，支持工具调用
 
@@ -832,6 +833,7 @@ class AIClient:
             sender: 消息发送器实例
             history_manager: 历史记录管理器实例
             onebot_client: OneBot 客户端实例
+            extra_context: 额外的上下文数据（注入到工具执行环境中）
 
         返回:
             AI 的回答（如果使用了 send_message 工具，则返回空字符串）
@@ -972,6 +974,10 @@ class AIClient:
             "onebot_client": onebot_client,
             "scheduler": scheduler,
         }
+
+        # 合并额外上下文
+        if extra_context:
+            tool_context.update(extra_context)
 
         # 工具调用循环
         max_iterations = 1000  # 防止无限循环

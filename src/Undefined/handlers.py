@@ -27,7 +27,9 @@ from .utils.common import (
 from .utils.history import MessageHistoryManager
 from .utils.scheduler import TaskScheduler
 from .utils.sender import MessageSender
+
 from .scheduled_task_storage import ScheduledTaskStorage
+from .render import render_html_to_image, render_markdown_to_html
 
 logger = logging.getLogger(__name__)
 
@@ -491,6 +493,10 @@ class MessageHandler:
                 history_manager=self.history_manager,
                 onebot_client=self.onebot,
                 scheduler=self.scheduler,
+                extra_context={
+                    "render_html_to_image": render_html_to_image,
+                    "render_markdown_to_html": render_markdown_to_html,
+                },
             )
         except Exception as e:
             logger.error(f"自动回复处理出错: {e}")
@@ -544,6 +550,10 @@ class MessageHandler:
                 history_manager=self.history_manager,
                 onebot_client=self.onebot,
                 scheduler=self.scheduler,
+                extra_context={
+                    "render_html_to_image": render_html_to_image,
+                    "render_markdown_to_html": render_markdown_to_html,
+                },
             )
             # 如果 AI 直接返回了文本（没有调用工具），自动发送
             if result:

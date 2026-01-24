@@ -102,3 +102,34 @@ skills/
 5. 添加 `handler.py`（Agent 执行逻辑）
 6. 在 `tools/` 子目录中添加子工具（可选）
 7. 自动被 `AgentRegistry` 发现和注册
+
+## 最佳实践与移植指南
+
+为了确保技能目录 (`skills/`) 的可移植性（例如直接移动到其他项目中使用），请遵循以下准则：
+
+1.  **避免外部依赖**:
+    -   尽量不要在 `handler.py` 中引用 `skills/` 目录之外的本地模块（如 `from Undefined.xxx import`）。
+    -   如果是通用库（如 `httpx`, `pillow`），直接引用即可。
+
+2.  **使用 Context 注入依赖**:
+    -   如果你需要使用外部项目的功能（如数据库连接、特殊的渲染函数），请通过 `execute` 函数的 `context` 参数传入。
+    -   主程序（`handlers.py` 或 `ai.py`）负责在调用 `execute_tool` 时将这些依赖放入 `context` 或 `extra_context`。
+
+    ```python
+    # 错误的做法
+    from MyProject.utils import heavy_function
+
+    async def execute(args, context):
+        await heavy_function()
+
+    # 正确的做法
+    async def execute(args, context):
+        heavy_func = context.get("heavy_function")
+        if not heavy_func:
+            return "依赖未注入"
+        await heavy_func()
+    ```
+
+3.  **统一的加载机制**:
+    -   所有工具和 Agent 均通过继承 `BaseRegistry` 的加载器自动加载。
+    -   保持目录结构（`config.json` + `handler.py`）的一致性。
