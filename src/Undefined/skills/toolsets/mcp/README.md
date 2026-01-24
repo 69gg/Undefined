@@ -27,13 +27,12 @@ MCP 工具的命名格式为：`mcp.{server_name}.{tool_name}`
 
 ```json
 {
-  "mcpServers": [
-    {
-      "name": "server_name",
+  "mcpServers": {
+    "server_name": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-name", "arg1", "arg2"]
     }
-  ]
+  }
 }
 ```
 
@@ -47,13 +46,12 @@ MCP 工具的命名格式为：`mcp.{server_name}.{tool_name}`
 
 ```json
 {
-  "mcpServers": [
-    {
-      "name": "filesystem",
+  "mcpServers": {
+    "filesystem": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/data"]
     }
-  ]
+  }
 }
 ```
 
@@ -66,13 +64,12 @@ AI 可以使用：
 
 ```json
 {
-  "mcpServers": [
-    {
-      "name": "brave-search",
+  "mcpServers": {
+    "brave-search": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-brave-search"]
     }
-  ]
+  }
 }
 ```
 
@@ -83,13 +80,12 @@ AI 可以使用：
 
 ```json
 {
-  "mcpServers": [
-    {
-      "name": "sqlite",
+  "mcpServers": {
+    "sqlite": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-sqlite", "--db-path", "/path/to/db.sqlite"]
     }
-  ]
+  }
 }
 ```
 
@@ -100,13 +96,12 @@ AI 可以使用：
 
 ```json
 {
-  "mcpServers": [
-    {
-      "name": "github",
+  "mcpServers": {
+    "github": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"]
     }
-  ]
+  }
 }
 ```
 

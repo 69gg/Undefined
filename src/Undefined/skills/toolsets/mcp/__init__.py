@@ -72,27 +72,28 @@ class MCPToolSetRegistry:
         self._server_tools = {}
 
         config = self.load_mcp_config()
-        servers = config.get("mcpServers", [])
+        mcp_servers = config.get("mcpServers", {})
 
-        if not servers:
+        if not mcp_servers:
             logger.info("未配置 MCP 服务器")
             self._is_initialized = True
             return
 
-        # 验证配置格式
-        invalid_configs = [i for i, s in enumerate(servers) if not isinstance(s, dict)]
-        if invalid_configs:
+        # FastMCP 配置格式: mcpServers 是一个对象，键为服务器名称，值为配置
+        if not isinstance(mcp_servers, dict):
             logger.error(
-                f"MCP 配置格式错误: mcpServers 数组中的索引 {invalid_configs} 不是有效的字典对象。"
-                f"请确保每个元素都是包含 name、command、args 字段的字典。"
+                f"MCP 配置格式错误: mcpServers 应该是一个对象（字典），实际类型为 {type(mcp_servers).__name__}。"
+                '正确的格式: {"mcpServers": {"server_name": {"command": "...", "args": [...]}}}'
             )
-            logger.info("MCP 工具集初始化已终止")
             self._is_initialized = True
             return
 
-        logger.info(f"开始初始化 {len(servers)} 个 MCP 服务器...")
+        logger.info(f"开始初始化 {len(mcp_servers)} 个 MCP 服务器...")
 
-        for server_config in servers:
+        for server_name, server_config in mcp_servers.items():
+            # 将服务器名称添加到配置中
+            if isinstance(server_config, dict):
+                server_config["name"] = server_name
             await self._initialize_server(server_config)
 
         total_tools = len(self._tools_handlers)
@@ -114,7 +115,7 @@ class MCPToolSetRegistry:
         if not isinstance(server_config, dict):
             logger.error(
                 f"MCP 服务器配置格式错误: 期望字典对象，实际收到 {type(server_config).__name__}。"
-                f"请检查 config/mcp.json 文件，mcpServers 数组中的每个元素应该是字典对象。"
+                f"请检查 config/mcp.json 文件，mcpServers 对象的值应该是字典对象。"
             )
             return
 
@@ -122,7 +123,7 @@ class MCPToolSetRegistry:
         if not server_name:
             logger.error(
                 "MCP 服务器配置缺少 name 字段。"
-                '正确的配置格式: {"name": "server_name", "command": "...", "args": [...]}'
+                '正确的配置格式: {"mcpServers": {"server_name": {"command": "...", "args": [...]}}}'
             )
             return
 
