@@ -135,26 +135,37 @@ class MCPToolSetRegistry:
             # 构建工具参数 schema
             parameters = tool.inputSchema if hasattr(tool, "inputSchema") else {}
 
-            # FastMCP 使用 server_name_tool_name 格式调用工具
-            # 我们需要转换为 mcp.server_name.tool_name 格式
-            # 遍历服务器配置，找到匹配的服务器名称
+            # FastMCP 的行为：
+            # - 单服务器：工具名不带前缀（如 resolve-library-id）
+            # - 多服务器：工具名带服务器前缀（如 context7_resolve-library-id）
             server_name = None
+            actual_tool_name = tool_name
+
+            # 检查工具名是否包含服务器前缀
             for name in self._mcp_servers.keys():
-                # 检查工具名是否以服务器名开头
                 if tool_name.startswith(f"{name}_"):
                     server_name = name
                     # 提取实际的工具名（去掉服务器前缀）
-                    tool_name = tool_name[len(name) + 1 :]
+                    actual_tool_name = tool_name[len(name) + 1 :]
                     break
 
-            if server_name:
-                full_tool_name = f"mcp.{server_name}.{tool_name}"
-                # 调用 FastMCP 时需要使用原始的 server_name_tool_name 格式
-                original_tool_name = f"{server_name}_{tool_name}"
-            else:
-                # 如果没有找到服务器前缀，直接使用 mcp. 前缀
-                full_tool_name = f"mcp.{tool_name}"
+            # 如果只有一个服务器且工具名没有前缀，使用该服务器名
+            if server_name is None and len(self._mcp_servers) == 1:
+                server_name = list(self._mcp_servers.keys())[0]
+                # FastMCP 调用时使用原始工具名（不带前缀）
                 original_tool_name = tool_name
+            elif server_name:
+                # 多服务器，工具名已包含前缀
+                original_tool_name = tool_name
+            else:
+                # 无法确定服务器，直接使用原始工具名
+                original_tool_name = tool_name
+
+            # 构建完整的工具名称：mcp.{server_name}.{tool_name}
+            if server_name:
+                full_tool_name = f"mcp.{server_name}.{actual_tool_name}"
+            else:
+                full_tool_name = f"mcp.{actual_tool_name}"
 
             # 构建 OpenAI function calling 格式的 schema
             schema = {
@@ -170,7 +181,7 @@ class MCPToolSetRegistry:
             async def handler(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 """MCP 工具处理器"""
                 try:
-                    # 调用 MCP 工具（使用 FastMCP 期望的格式：server_name_tool_name）
+                    # 调用 MCP 工具（使用 FastMCP 期望的工具名）
                     result = await self._mcp_client.call_tool(original_tool_name, args)
 
                     # 解析结果
@@ -192,7 +203,9 @@ class MCPToolSetRegistry:
             self._tools_schema.append(schema)
             self._tools_handlers[full_tool_name] = handler
 
-            logger.debug(f"已注册 MCP 工具: {full_tool_name}")
+            logger.debug(
+                f"已注册 MCP 工具: {full_tool_name} (原始: {original_tool_name})"
+            )
 
         except Exception as e:
             logger.error(f"注册 MCP 工具失败 [{tool.name}]: {e}")
