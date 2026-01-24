@@ -27,12 +27,10 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.12
+          cache-dependency-glob: "uv.lock"
 
       - name: Install dependencies
-        run: uv sync --group ci
+        run: uv sync --group ci -p 3.12
 
       - name: Run ruff check
         run: uv run ruff check .

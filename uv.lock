@@ -5773,7 +5773,7 @@ wheels = [
 
 [[package]]
 name = "undefined-bot"
-version = "2.2.6"
+version = "2.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -5788,6 +5788,7 @@ dependencies = [
     { name = "langchain-community", version = "0.3.31", source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/" }, marker = "python_full_version < '3.11'" },
     { name = "langchain-community", version = "0.4.1", source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/" }, marker = "python_full_version >= '3.11'" },
     { name = "linkify-it-py" },
+    { name = "lxml" },
     { name = "markdown" },
     { name = "markdown-it-py", extra = ["plugins"] },
     { name = "matplotlib" },
@@ -5846,6 +5847,7 @@ requires-dist = [
     { name = "imgkit" },
     { name = "langchain-community", specifier = ">=0.3.0" },
     { name = "linkify-it-py", specifier = ">=2.0.3" },
+    { name = "lxml", specifier = ">=5.4.0" },
     { name = "markdown", specifier = ">=3.10" },
     { name = "markdown-it-py", extras = ["plugins"], specifier = ">=4.0.0" },
     { name = "matplotlib" },
