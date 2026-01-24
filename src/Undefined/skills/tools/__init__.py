@@ -1,8 +1,11 @@
 import logging
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, TYPE_CHECKING
 
 from ..registry import BaseRegistry
+
+if TYPE_CHECKING:
+    from ..toolsets.mcp import MCPToolSetRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -17,11 +20,14 @@ class ToolRegistry(BaseRegistry):
 
         super().__init__(tools_path)
 
+        # 初始化 MCP 工具集注册表
+        self._mcp_registry: MCPToolSetRegistry | None = None
+
         # 自动加载
         self.load_tools()
 
     def load_tools(self) -> None:
-        """从 tools 目录发现并加载工具，同时也加载 toolsets。"""
+        """从 tools 目录发现并加载工具，同时也加载 toolsets 和 MCP 工具集。"""
         # 1. 加载 tools 目录下的非分类工具
         self.load_items()
 
@@ -30,10 +36,16 @@ class ToolRegistry(BaseRegistry):
         self.toolsets_dir = self.base_dir.parent / "toolsets"
         self._load_toolsets_recursive()
 
-        # 3. 输出详细的工具列表
+        # 3. 加载 MCP 工具集（创建注册表，但不初始化）
+        self._load_mcp_toolsets()
+
+        # 4. 输出详细的工具列表
         tool_names = list(self._items_handlers.keys())
         basic_tools = [name for name in tool_names if "." not in name]
-        toolset_tools = [name for name in tool_names if "." in name]
+        toolset_tools = [
+            name for name in tool_names if "." in name and not name.startswith("mcp.")
+        ]
+        mcp_tools = [name for name in tool_names if name.startswith("mcp.")]
 
         # 按 toolsets 分类整理
         toolset_by_category: Dict[str, List[str]] = {}
@@ -52,6 +64,8 @@ class ToolRegistry(BaseRegistry):
             logger.info(f"  - 工具集工具 ({len(toolset_tools)} 个):")
             for category, tools in sorted(toolset_by_category.items()):
                 logger.info(f"    [{category}] ({len(tools)} 个): {', '.join(tools)}")
+        if mcp_tools:
+            logger.info(f"  - MCP 工具 ({len(mcp_tools)} 个): {', '.join(mcp_tools)}")
         logger.info(f"  - 总计: {len(tool_names)} 个工具")
         logger.info("=" * 60)
 
@@ -79,6 +93,50 @@ class ToolRegistry(BaseRegistry):
 
                 # 使用基类方法加载，指定前缀
                 self._load_item_from_dir(tool_dir, prefix=f"{category_name}.")
+
+    def _load_mcp_toolsets(self) -> None:
+        """加载 MCP 工具集（创建注册表，但不初始化）"""
+        try:
+            from ..toolsets.mcp import MCPToolSetRegistry
+
+            # 创建 MCP 工具集注册表
+            self._mcp_registry = MCPToolSetRegistry()
+            logger.info("MCP 工具集注册表已创建（待初始化）")
+
+        except ImportError as e:
+            logger.warning(f"无法导入 MCP 工具集注册表: {e}")
+            self._mcp_registry = None
+
+    async def initialize_mcp_toolsets(self) -> None:
+        """异步初始化 MCP 工具集
+
+        需要在 AIClient 初始化后调用。
+        """
+        if hasattr(self, "_mcp_registry") and self._mcp_registry:
+            try:
+                await self._mcp_registry.initialize()
+
+                # 将 MCP 工具添加到主注册表
+                for schema in self._mcp_registry.get_tools_schema():
+                    self._items_schema.append(schema)
+
+                for tool_name, handler in self._mcp_registry._tools_handlers.items():
+                    self._items_handlers[tool_name] = handler
+
+                logger.info(
+                    f"MCP 工具集已集成到主注册表，共 {len(self._mcp_registry._tools_handlers)} 个工具"
+                )
+
+            except Exception as e:
+                logger.exception(f"初始化 MCP 工具集失败: {e}")
+
+    async def close_mcp_toolsets(self) -> None:
+        """关闭 MCP 工具集连接"""
+        if hasattr(self, "_mcp_registry") and self._mcp_registry:
+            try:
+                await self._mcp_registry.close()
+            except Exception as e:
+                logger.warning(f"关闭 MCP 工具集时出错: {e}")
 
     # --- 兼容性别名 ---
 

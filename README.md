@@ -33,6 +33,7 @@
 - **并行工具执行**：无论是主 AI 还是子 Agent，均支持 `asyncio` 并发工具调用，大幅提升多任务处理速度（如同时读取多个文件或搜索多个关键词）。
 - **智能 Agent 矩阵**：内置多个专业 Agent，分工协作处理复杂任务。
 - **定时任务系统**：支持 Crontab 语法的强大定时任务系统，可自动执行各种操作（如定时提醒、定时搜索）。
+- **MCP 协议支持**：支持通过 MCP (Model Context Protocol) 连接外部工具和数据源，扩展 AI 能力。
 - **思维链支持**：支持开启思维链，提升复杂逻辑推理能力。
 - **高并发架构**：基于 `asyncio` 全异步设计，支持多队列消息处理与工具并发执行，轻松应对高并发场景。
 - **安全防护**：内置独立的安全模型，实时检测注入攻击与恶意内容。
@@ -208,6 +209,38 @@ Undefined 采用模块化的 **Skills** 架构，扩展非常简单：
 - **添加 Agent**: 在 `skills/agents/` 下新建目录，定义 `intro.md` 和 `prompt.md`。
 
 详细开发指南请参考 [src/Undefined/skills/README.md](src/Undefined/skills/README.md)。
+
+### MCP 支持
+
+Undefined 支持 MCP (Model Context Protocol) 协议，可以连接外部 MCP 服务器来扩展 AI 的工具能力。
+
+#### 配置 MCP
+
+1. 复制 MCP 配置示例文件：
+   ```bash
+   cp config/mcp.json.example config/mcp.json
+   ```
+
+2. 编辑 `config/mcp.json` ，根据 MCP 服务器说明使用标准格式添加你需要的 MCP 服务器
+
+3. 在 `.env` 中设置 MCP 配置文件路径（可选，默认为 `config/mcp.json`）：
+   ```env
+   MCP_CONFIG_PATH=config/mcp.json
+   ```
+
+#### 使用 MCP 工具
+
+配置完成后，AI 会自动加载 MCP 工具，工具名称格式为 `mcp.{server_name}.{tool_name}`。
+
+例如，配置了 `filesystem` 服务器后，AI 可以使用 `mcp.filesystem.read_file` 等工具。
+
+#### 默认可用的 MCP 服务器
+
+> 需确保本地安装了`nodejs`以及`npm`
+
+- [@upstash/context7-mcp](https://github.com/upstash/context7)：Up-to-date Code Docs For Any Prompt
+
+> 更多服务器请自行添加
 
 ## 致谢与友链
 
