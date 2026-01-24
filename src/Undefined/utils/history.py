@@ -132,6 +132,8 @@ class MessageHistoryManager:
         sender_card: str = "",
         sender_nickname: str = "",
         group_name: str = "",
+        role: str = "member",
+        title: str = "",
     ) -> None:
         """保存群消息到历史记录"""
         group_id_str = str(group_id)
@@ -149,6 +151,8 @@ class MessageHistoryManager:
                 "chat_name": group_name or f"群{group_id_str}",
                 "user_id": sender_id_str,
                 "display_name": display_name,
+                "role": role,
+                "title": title,
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "message": text_content,
             }
