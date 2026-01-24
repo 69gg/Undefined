@@ -142,16 +142,19 @@ uv run -m Undefined
 机器人通过自然语言自动调用相应的 Agent 完成任务：
 
 #### 1. 网络与信息
+
 - "搜索一下最近的 AI 新闻"
 - "看看今天的微博热搜"
 - "查询北京明天的天气"
 
 #### 2. 代码与开发
+
 - "分析一下当前项目的目录结构"
 - "读取 src/main.py 的内容并解释"
 - "在代码库中搜索 'AgentRegistry'"
 
 #### 3. 娱乐与社交
+
 - "搜一首周杰伦的歌"
 - "找一下 B 站关于 Python 的教程"
 - "画一只赛博朋克风格的猫"
@@ -170,6 +173,7 @@ uv run -m Undefined
 ### 消息优先级
 
 系统采用多级优先队列设计：
+
 1. **最高**：超级管理员私聊
 2. **高**：普通私聊
 3. **中**：群聊被 @
@@ -181,7 +185,8 @@ uv run -m Undefined
 src/Undefined/
 ├── skills/
 │   ├── agents/    # 智能体集合 (Web, Code, Social...)
-│   └── tools/     # 基础工具 (SendMsg, Render...)
+│   ├── tools/     # 基础工具 (SendMsg, GetHistory...)
+│   └── toolsets/  # 工具集合 (Render, Scheduler...)
 ├── config.py      # 配置管理
 ├── handlers.py    # 消息处理器
 └── ai.py          # AI 核心逻辑
@@ -191,8 +196,11 @@ src/Undefined/
 
 Undefined 采用模块化的 **Skills** 架构，扩展非常简单：
 
-- **添加工具**: 在 `skills/tools/` 下新建目录，添加 `config.json` 和 `handler.py`。
+- **添加工具 (Tools)**: 在 `skills/tools/` 下新建目录，添加 `config.json` 和 `handler.py`。
+- **添加工具集合 (Toolsets)**: 在 `skills/toolsets/` 下新建分类目录，再创建工具目录，添加 `config.json` 和 `handler.py`。工具注册名称为 `{category}.{tool_name}`。
 - **添加 Agent**: 在 `skills/agents/` 下新建目录，定义 `intro.md` 和 `prompt.md`。
+
+详细开发指南请参考 [src/Undefined/skills/README.md](src/Undefined/skills/README.md)。
 
 ## 致谢与友链
 

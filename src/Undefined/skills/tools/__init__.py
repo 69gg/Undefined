@@ -47,33 +47,26 @@ class ToolRegistry:
     def load_toolsets(self) -> None:
         """从 toolsets 目录发现并加载工具集。
 
-        目录结构: toolsets/{skill_name}/{category}/{tool_name}
-        注册名称: {skill_name}.{tool_name}
+        目录结构: toolsets/{category}/{tool_name}
+        注册名称: {category}.{tool_name}
         """
         if not self.toolsets_dir.exists():
             logger.debug(f"Toolsets directory not found: {self.toolsets_dir}")
             return
 
-        for skill_dir in self.toolsets_dir.iterdir():
-            if not skill_dir.is_dir() or skill_dir.name.startswith("_"):
+        for category_dir in self.toolsets_dir.iterdir():
+            if not category_dir.is_dir() or category_dir.name.startswith("_"):
                 continue
 
-            skill_name = skill_dir.name
-            logger.info(f"发现 Skill.toolsets: {skill_name}")
+            category_name = category_dir.name
+            logger.info(f"发现 toolsets 分类: {category_name}")
 
-            # 遍历分类目录
-            for category_dir in skill_dir.iterdir():
-                if not category_dir.is_dir() or category_dir.name.startswith("_"):
+            # 遍历该分类下的工具目录
+            for tool_dir in category_dir.iterdir():
+                if not tool_dir.is_dir() or tool_dir.name.startswith("_"):
                     continue
 
-                logger.debug(f"发现 Skill 分类: {category_dir.name} (归属于 {skill_name})")
-
-                # 遍历工具目录
-                for tool_dir in category_dir.iterdir():
-                    if not tool_dir.is_dir() or tool_dir.name.startswith("_"):
-                        continue
-
-                    self._load_tool_from_dir(tool_dir, prefix=f"{skill_name}.")
+                self._load_tool_from_dir(tool_dir, prefix=f"{category_name}.")
 
     def _load_tool_from_dir(self, tool_dir: Path, prefix: str = "") -> None:
         """从目录加载单个工具。"""

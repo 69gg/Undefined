@@ -142,3 +142,35 @@ mv skills/tools/my_tool skills/agents/my_agent/tools/
 
 `AgentRegistry` 会自动发现 `skills/agents/` 下的所有 Agent 并加载。
 每个 Agent 内部的子工具由 `AgentToolRegistry` 自动发现。
+
+## 现有 Agents
+
+### web_agent（网络搜索助手）
+- **功能**：网页搜索和网页内容获取
+- **适用场景**：获取互联网最新信息、搜索新闻、爬取网页内容
+- **子工具**：`search_web`, `fetch_web`
+
+### file_analysis_agent（文件分析助手）
+- **功能**：分析代码、PDF、Docx、Xlsx 等多种格式文件
+- **适用场景**：代码分析、文档解析、文件内容提取
+- **子工具**：`read_file`, `analyze_code`, `analyze_pdf`, `analyze_docx`, `analyze_xlsx`
+
+### naga_code_analysis_agent（NagaAgent 代码分析助手）
+- **功能**：专门用于分析 NagaAgent 框架及当前项目的源码
+- **适用场景**：深入分析 NagaAgent 架构、项目代码审查
+- **子工具**：`read_file`, `search_code`, `analyze_structure`
+
+### info_agent（信息查询助手）
+- **功能**：查询天气、热搜、快递、WHOIS 等信息
+- **适用场景**：天气查询、热点新闻、快递追踪、域名查询
+- **子工具**：`get_weather`, `get_hot_search`, `query_express`, `whois_query`
+
+### social_agent（社交娱乐助手）
+- **功能**：B 站搜索、音乐搜索及点歌
+- **适用场景**：搜索 B 站视频、音乐搜索、点歌服务
+- **子工具**：`search_bilibili`, `search_music`, `play_music`
+
+### entertainment_agent（娱乐助手）
+- **功能**：运势查询、笑话、占卜等娱乐功能
+- **适用场景**：查看运势、获取娱乐内容
+- **子工具**：`get_horoscope`, `get_joke`, `fortune_telling`
