@@ -39,7 +39,15 @@ class ToolRegistry(BaseRegistry):
         # 3. 加载 MCP 工具集（创建注册表，但不初始化）
         self._load_mcp_toolsets()
 
-        # 4. 输出详细的工具列表
+        # 4. 输出工具列表（不包含 MCP 工具，因为 MCP 还未初始化）
+        self._log_tools_summary(include_mcp=False)
+
+    def _log_tools_summary(self, include_mcp: bool = True) -> None:
+        """输出工具加载统计
+
+        参数:
+            include_mcp: 是否包含 MCP 工具
+        """
         tool_names = list(self._items_handlers.keys())
         basic_tools = [name for name in tool_names if "." not in name]
         toolset_tools = [
@@ -56,7 +64,10 @@ class ToolRegistry(BaseRegistry):
             toolset_by_category[category].append(name)
 
         logger.info("=" * 60)
-        logger.info("工具加载完成统计")
+        if include_mcp:
+            logger.info("工具加载完成统计")
+        else:
+            logger.info("工具加载完成统计（MCP 工具待初始化）")
         logger.info(
             f"  - 基础工具 ({len(basic_tools)} 个): {', '.join(basic_tools) if basic_tools else '无'}"
         )
@@ -64,8 +75,10 @@ class ToolRegistry(BaseRegistry):
             logger.info(f"  - 工具集工具 ({len(toolset_tools)} 个):")
             for category, tools in sorted(toolset_by_category.items()):
                 logger.info(f"    [{category}] ({len(tools)} 个): {', '.join(tools)}")
-        if mcp_tools:
+        if mcp_tools and include_mcp:
             logger.info(f"  - MCP 工具 ({len(mcp_tools)} 个): {', '.join(mcp_tools)}")
+        elif not include_mcp and hasattr(self, "_mcp_registry") and self._mcp_registry:
+            logger.info("  - MCP 工具: (等待异步初始化...)")
         logger.info(f"  - 总计: {len(tool_names)} 个工具")
         logger.info("=" * 60)
 
@@ -126,6 +139,9 @@ class ToolRegistry(BaseRegistry):
                 logger.info(
                     f"MCP 工具集已集成到主注册表，共 {len(self._mcp_registry._tools_handlers)} 个工具"
                 )
+
+                # 输出包含 MCP 工具的完整统计
+                self._log_tools_summary(include_mcp=True)
 
             except Exception as e:
                 logger.exception(f"初始化 MCP 工具集失败: {e}")
