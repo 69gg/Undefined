@@ -184,45 +184,36 @@ Undefined 支持 MCP (Model Context Protocol) 协议，可以连接外部 MCP �
 
 例如，配置了 `filesystem` 服务器后，AI 可以使用 `mcp.filesystem.read_file` 等工具。
 
-#### 可用的 MCP 服务器
+#### 内置可用的 MCP 服务器
 
-> 需确保本地安装了 `nodejs` 以及 `npm`
+> 需确保本地安装了 `nodejs` 以及 `npm`。
+> 更多服务器请自行配置。
+> 推荐：可前往 [mcp.so - Find Awesome MCP Servers and Clients](https://mcp.so) 检索感兴趣的 mcp。
 
-以下是常用的 MCP 服务器示例：
-
-**文档与知识库**
 - [@upstash/context7-mcp](https://github.com/upstash/context7)：获取最新的代码库文档和示例
 - [howtocook-mcp](https://github.com/ModelCloud/howtocook-mcp)：烹饪食谱查询
 
-**文件系统与数据库**
-- [@modelcontextprotocol/server-filesystem](https://github.com/modelcontextprotocol/servers)：文件系统访问
-- [@modelcontextprotocol/server-sqlite](https://github.com/modelcontextprotocol/servers)：SQLite 数据库操作
-- [@modelcontextprotocol/server-postgres](https://github.com/modelcontextprotocol/servers)：PostgreSQL 数据库操作
-
-**搜索与网络**
-- [@modelcontextprotocol/server-brave-search](https://github.com/modelcontextprotocol/servers)：Brave 搜索引擎
-- [@modelcontextprotocol/server-puppeteer](https://github.com/modelcontextprotocol/servers)：网页抓取与自动化
-
-**代码与开发**
-- [@modelcontextprotocol/server-github](https://github.com/modelcontextprotocol/servers)：GitHub API 集成
-- [@modelcontextprotocol/server-git](https://github.com/modelcontextprotocol/servers)：Git 仓库操作
-
-**更多服务器**
-- 访问 [MCP Servers 仓库](https://github.com/modelcontextprotocol/servers) 查看完整列表
-
-#### 配置示例
+#### 配置格式
 
 ```json
 {
   "mcpServers": {
-    "context7": {
-      "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp"]
-    },
-    "howtocook": {
-      "command": "npx",
-      "args": ["-y", "howtocook-mcp"]
-    },
+    "filesystem": {
+      "command": "cmd"
+      "args": ["arg1", "arg2"]
+    }
+  }
+}
+```
+
+如需添加多个，仅需在`mcpServers`键下添加子键。
+
+<details>
+<summary>配置示例</summary>
+
+```json
+{
+  "mcpServers": {
     "filesystem": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/files"]
@@ -230,6 +221,7 @@ Undefined 支持 MCP (Model Context Protocol) 协议，可以连接外部 MCP �
   }
 }
 ```
+</details>
 
 ## 使用说明
 

@@ -105,10 +105,6 @@ AI 可以使用：
 }
 ```
 
-AI 可以使用：
-- `mcp.github.get_repository`：获取仓库信息
-- `mcp.github.list_issues`：列出 Issues
-
 ### 5. 代码文档查询 (Context7)
 
 ```json
@@ -121,10 +117,6 @@ AI 可以使用：
   }
 }
 ```
-
-AI 可以使用：
-- `mcp.context7.resolve-library-id`：解析库名称获取库 ID
-- `mcp.context7.query-docs`：查询库的文档和代码示例
 
 ### 6. 烹饪食谱查询 (HowToCook)
 
