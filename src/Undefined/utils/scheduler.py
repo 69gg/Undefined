@@ -3,6 +3,7 @@
 用于定时执行 AI 工具
 """
 
+import asyncio
 import logging
 import time
 from typing import Any, Optional
@@ -96,18 +97,22 @@ class TaskScheduler:
         target_type: str = "group",
         task_name: str | None = None,
         max_executions: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        execution_mode: str = "serial",
     ) -> bool:
         """添加定时任务
 
         参数:
             task_id: 任务唯一标识（用户指定或自动生成）
-            tool_name: 要执行的工具名称
-            tool_args: 工具参数
+            tool_name: 要执行的工具名称（单工具模式，向后兼容）
+            tool_args: 工具参数（单工具模式，向后兼容）
             cron_expression: crontab 表达式 (分 时 日 月 周)
             target_id: 结果发送目标 ID
             target_type: 结果发送目标类型 (group/private)
             task_name: 任务名称（用于标识，可读名称）
             max_executions: 最大执行次数（None 表示无限）
+            tools: 多工具调用列表，格式为 [{"tool_name": "...", "tool_args": {...}}, ...]
+            execution_mode: 执行模式，"serial" 串行执行，"parallel" 并行执行
 
         返回:
             是否添加成功
@@ -123,7 +128,7 @@ class TaskScheduler:
                 replace_existing=True,
             )
 
-            self.tasks[task_id] = {
+            task_data: dict[str, Any] = {
                 "task_id": task_id,
                 "tool_name": tool_name,
                 "tool_args": tool_args,
@@ -135,11 +140,20 @@ class TaskScheduler:
                 "current_executions": 0,
             }
 
+            # 添加多工具支持
+            if tools:
+                task_data["tools"] = tools
+            if execution_mode:
+                task_data["execution_mode"] = execution_mode
+
+            self.tasks[task_id] = task_data
+
             # 持久化保存
             self.storage.save_all(self.tasks)
 
+            tools_info = f"{len(tools)} 个工具" if tools else f"{tool_name}"
             logger.info(
-                f"添加定时任务成功: {task_id} -> {tool_name} ({cron_expression})"
+                f"添加定时任务成功: {task_id} -> {tools_info} ({cron_expression}, {execution_mode})"
             )
             return True
         except Exception as e:
@@ -154,16 +168,20 @@ class TaskScheduler:
         tool_args: dict[str, Any] | None = None,
         task_name: str | None = None,
         max_executions: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        execution_mode: str | None = None,
     ) -> bool:
         """修改定时任务（不支持修改 task_id）
 
         参数:
             task_id: 要修改的任务 ID
             cron_expression: 新的 crontab 表达式
-            tool_name: 新的工具名称
-            tool_args: 新的工具参数
+            tool_name: 新的工具名称（单工具模式）
+            tool_args: 新的工具参数（单工具模式）
             task_name: 新的任务名称
             max_executions: 新的最大执行次数
+            tools: 新的多工具调用列表（多工具模式）
+            execution_mode: 新的执行模式（"serial" 或 "parallel"）
 
         返回:
             是否修改成功
@@ -182,6 +200,9 @@ class TaskScheduler:
 
             if tool_name is not None:
                 task_info["tool_name"] = tool_name
+                # 如果修改了 tool_name，清除 tools 字段以避免冲突
+                if "tools" in task_info:
+                    del task_info["tools"]
 
             if tool_args is not None:
                 task_info["tool_args"] = tool_args
@@ -191,6 +212,16 @@ class TaskScheduler:
 
             if max_executions is not None:
                 task_info["max_executions"] = max_executions
+
+            if tools is not None:
+                task_info["tools"] = tools
+                # 如果设置了 tools，更新 tool_name 为第一个工具的名称以保持兼容性
+                if tools:
+                    task_info["tool_name"] = tools[0]["tool_name"]
+                    task_info["tool_args"] = tools[0]["tool_args"]
+
+            if execution_mode is not None:
+                task_info["execution_mode"] = execution_mode
 
             # 持久化保存
             self.storage.save_all(self.tasks)
@@ -228,8 +259,18 @@ class TaskScheduler:
         target_type: str,
     ) -> None:
         """任务执行包装器"""
-        logger.info(f"[任务触发] 定时任务开始执行: ID={task_id}, 工具={tool_name}")
-        logger.debug(f"[任务详情] 参数={tool_args}, 目标={target_id}({target_type})")
+        task_info = self.tasks.get(task_id, {})
+        tools = task_info.get("tools")
+        execution_mode = task_info.get("execution_mode", "serial")
+
+        # 兼容旧格式：如果没有 tools 字段，使用单工具模式
+        if not tools:
+            tools = [{"tool_name": tool_name, "tool_args": tool_args}]
+
+        logger.info(
+            f"[任务触发] 定时任务开始执行: ID={task_id}, 工具数={len(tools)}, 模式={execution_mode}"
+        )
+        logger.debug(f"[任务详情] 目标={target_id}({target_type})")
 
         try:
             context = {
@@ -241,20 +282,54 @@ class TaskScheduler:
             }
 
             start_time = time.perf_counter()
-            result = await self.ai._execute_tool(tool_name, tool_args, context)
+            results = []
+
+            if execution_mode == "parallel":
+                # 并行执行所有工具
+                results = await asyncio.gather(
+                    *[
+                        self.ai._execute_tool(
+                            tool["tool_name"], tool["tool_args"], context
+                        )
+                        for tool in tools
+                    ],
+                    return_exceptions=True,
+                )
+            else:
+                # 串行执行所有工具
+                for tool in tools:
+                    try:
+                        result = await self.ai._execute_tool(
+                            tool["tool_name"], tool["tool_args"], context
+                        )
+                        results.append(result)
+                    except Exception as e:
+                        logger.error(f"工具 {tool['tool_name']} 执行失败: {e}")
+                        results.append(str(e))
+
             duration = time.perf_counter() - start_time
 
-            if result and target_id:
-                msg = f"【定时任务执行结果】\n工具: {tool_name}\n结果:\n{result}"
-                if target_type == "group":
-                    await self.sender.send_group_message(target_id, msg)
+            # 将所有结果合并为一个字符串
+            combined_results = []
+            for i, (tool, result) in enumerate(zip(tools, results)):
+                if isinstance(result, Exception):
+                    combined_results.append(
+                        f"工具 {i + 1} ({tool['tool_name']}): 执行失败 - {result}"
+                    )
+                elif result:
+                    combined_results.append(
+                        f"工具 {i + 1} ({tool['tool_name']}): {result}"
+                    )
                 else:
-                    await self.sender.send_private_message(target_id, msg)
+                    combined_results.append(
+                        f"工具 {i + 1} ({tool['tool_name']}): 执行完成，无返回结果"
+                    )
 
             logger.info(
                 f"[任务完成] 定时任务执行成功: ID={task_id}, 耗时={duration:.2f}s"
             )
 
+            # 更新执行次数
             if task_id in self.tasks:
                 task_info = self.tasks[task_id]
                 task_info["current_executions"] = (
@@ -275,12 +350,3 @@ class TaskScheduler:
 
         except Exception as e:
             logger.exception(f"定时任务执行出错: {e}")
-            if target_id:
-                try:
-                    err_msg = f"【定时任务执行失败】\n工具: {tool_name}\n错误: {e}"
-                    if target_type == "group":
-                        await self.sender.send_group_message(target_id, err_msg)
-                    else:
-                        await self.sender.send_private_message(target_id, err_msg)
-                except Exception:
-                    pass

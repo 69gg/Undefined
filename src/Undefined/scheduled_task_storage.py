@@ -13,12 +13,20 @@ TASKS_FILE_PATH = Path("data/scheduled_tasks.json")
 
 
 @dataclass
+class ToolCall:
+    """工具调用配置"""
+
+    tool_name: str
+    tool_args: Dict[str, Any]
+
+
+@dataclass
 class ScheduledTask:
     """定时任务数据模型"""
 
     task_id: str
-    tool_name: str
-    tool_args: Dict[str, Any]
+    tool_name: str  # 保留用于向后兼容
+    tool_args: Dict[str, Any]  # 保留用于向后兼容
     cron: str
     target_id: Optional[int]
     target_type: str
@@ -26,15 +34,43 @@ class ScheduledTask:
     max_executions: Optional[int]
     current_executions: int = 0
     created_at: str = ""
+    # 新增字段：多工具调用支持
+    tools: Optional[list[ToolCall]] = None
+    execution_mode: str = "serial"  # serial: 串行执行, parallel: 并行执行
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
-        return asdict(self)
+        result = asdict(self)
+        # 将 ToolCall 对象转换为字典
+        if self.tools:
+            result["tools"] = [tool.__dict__ for tool in self.tools]
+        return result
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ScheduledTask":
         """从字典创建实例"""
-        return cls(**data)
+        # 处理 tools 字段
+        tools = None
+        if "tools" in data and data["tools"]:
+            tools = [ToolCall(**tool) for tool in data["tools"]]
+
+        # 兼容旧格式：如果没有 tools 字段但有 tool_name，创建单工具列表
+        if tools is None and "tool_name" in data and data["tool_name"]:
+            tools = [
+                ToolCall(
+                    tool_name=data["tool_name"], tool_args=data.get("tool_args", {})
+                )
+            ]
+
+        # 设置默认执行模式
+        execution_mode = data.get("execution_mode", "serial")
+
+        # 移除 tools 和 execution_mode，避免传递给 __init__
+        data_copy = {
+            k: v for k, v in data.items() if k not in ["tools", "execution_mode"]
+        }
+
+        return cls(**data_copy, tools=tools, execution_mode=execution_mode)
 
 
 class ScheduledTaskStorage:
