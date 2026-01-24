@@ -44,3 +44,10 @@ AGENTS.md
 .claude/
 
 config.local.json
+
+.vscode
+.ruff_cache
+dist/
+
+# MCP 配置
+config/mcp.json

@@ -54,7 +54,7 @@ async def parse_message_content_for_history(
     bot_qq: int,
     get_msg_func: Callable[[int], Awaitable[dict[str, Any] | None]] | None = None,
 ) -> str:
-    """解析消息内容用于历史记录（支持合并转发和 @ 格式化）
+    """解析消息内容用于历史记录（支持回复引用和 @ 格式化）
 
     参数:
         message_content: 消息内容列表
@@ -101,6 +101,7 @@ async def parse_message_content_for_history(
         elif type_ == "forward":
             msg_id = data.get("id")
             if msg_id:
+                # 合并转发只保存简单标记，AI 可以通过 get_forward_msg 工具查看完整内容
                 texts.append(f"[合并转发: {msg_id}]")
 
         elif type_ == "reply":

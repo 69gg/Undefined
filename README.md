@@ -23,6 +23,33 @@
 
 ### _与 [NagaAgent](https://github.com/Xxiii8322766509/NagaAgent) 进行联动！_
 
+---
+
+<details>
+<summary><b>目录</b></summary>
+
+- [立即体验](#立即体验)
+- [核心特性](#核心特性)
+- [安装与部署](#安装与部署)
+  - [方式一：使用 pip 安装（推荐）](#方式一使用-pip-安装推荐)
+  - [方式二：源码部署（开发）](#方式二源码部署开发)
+  - [配置说明（通用）](#配置说明通用)
+  - [MCP 配置](#mcp-配置)
+- [使用说明](#使用说明)
+  - [部署后的初始化](#部署后的初始化)
+  - [Agent 能力展示](#agent-能力展示)
+  - [管理员命令](#管理员命令)
+  - [消息优先级](#消息优先级)
+- [目录结构](#目录结构)
+- [扩展与开发](#扩展与开发)
+- [致谢与友链](#致谢与友链)
+  - [NagaAgent](#nagaagent)
+- [开源协议](#开源协议)
+
+</details>
+
+---
+
 ## 立即体验
 
 [点击添加官方实例QQ](https://qm.qq.com/q/cvjJoNysGA)
@@ -33,6 +60,7 @@
 - **并行工具执行**：无论是主 AI 还是子 Agent，均支持 `asyncio` 并发工具调用，大幅提升多任务处理速度（如同时读取多个文件或搜索多个关键词）。
 - **智能 Agent 矩阵**：内置多个专业 Agent，分工协作处理复杂任务。
 - **定时任务系统**：支持 Crontab 语法的强大定时任务系统，可自动执行各种操作（如定时提醒、定时搜索）。
+- **MCP 协议支持**：支持通过 MCP (Model Context Protocol) 连接外部工具和数据源，扩展 AI 能力。
 - **思维链支持**：支持开启思维链，提升复杂逻辑推理能力。
 - **高并发架构**：基于 `asyncio` 全异步设计，支持多队列消息处理与工具并发执行，轻松应对高并发场景。
 - **安全防护**：内置独立的安全模型，实时检测注入攻击与恶意内容。
@@ -131,6 +159,69 @@ uv run -m Undefined
 - **功能配置**：`LOG_LEVEL` 等
 
 > 启动项目需要 OneBot 实例，推荐使用 [NapCat](https://napneko.github.io/)。
+
+### MCP 配置
+
+Undefined 支持 MCP (Model Context Protocol) 协议，可以连接外部 MCP 服务器来扩展 AI 的工具能力。
+
+#### 配置步骤
+
+1. 复制 MCP 配置示例文件：
+   ```bash
+   cp config/mcp.json.example config/mcp.json
+   ```
+
+2. 编辑 `config/mcp.json`，根据 MCP 服务器说明使用标准格式添加你需要的 MCP 服务器
+
+3. 在 `.env` 中设置 MCP 配置文件路径（可选，默认为 `config/mcp.json`）：
+   ```env
+   MCP_CONFIG_PATH=config/mcp.json
+   ```
+
+#### 使用方式
+
+配置完成后，AI 会自动加载 MCP 工具，工具名称格式为 `mcp.{server_name}.{tool_name}`。
+
+例如，配置了 `filesystem` 服务器后，AI 可以使用 `mcp.filesystem.read_file` 等工具。
+
+#### 内置可用的 MCP 服务器
+
+> 需确保本地安装了 `nodejs` 以及 `npm`。
+> 更多服务器请自行配置。
+> 推荐：可前往 [mcp.so - Find Awesome MCP Servers and Clients](https://mcp.so) 检索感兴趣的 mcp。
+
+- [@upstash/context7-mcp](https://github.com/upstash/context7)：获取最新的代码库文档和示例
+- [howtocook-mcp](https://github.com/ModelCloud/howtocook-mcp)：烹饪食谱查询
+
+#### 配置格式
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "cmd"
+      "args": ["arg1", "arg2"]
+    }
+  }
+}
+```
+
+如需添加多个，仅需在`mcpServers`键下添加子键。
+
+<details>
+<summary>配置示例</summary>
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/files"]
+    }
+  }
+}
+```
+</details>
 
 ## 使用说明
 

@@ -140,12 +140,31 @@ class AIClient:
                 )
                 self._tokenizer = None
 
+        # 异步初始化 MCP 工具集（在后台任务中完成）
+        async def init_mcp_async() -> None:
+            try:
+                await self.tool_registry.initialize_mcp_toolsets()
+            except Exception as e:
+                logger.warning(f"异步初始化 MCP 工具集失败: {e}")
+
+        # 创建后台任务初始化 MCP
+        self._mcp_init_task = asyncio.create_task(init_mcp_async())
+
         logger.info("[初始化] AIClient 初始化完成")
 
     async def close(self) -> None:
-        """关闭 HTTP 客户端"""
+        """关闭 HTTP 客户端和 MCP 连接"""
         logger.info("[清理] 正在关闭 AIClient HTTP 客户端...")
         await self._http_client.aclose()
+
+        # 关闭 MCP 工具集连接
+        if hasattr(self, "tool_registry"):
+            await self.tool_registry.close_mcp_toolsets()
+
+        # 等待 MCP 初始化任务完成（如果还在运行）
+        if hasattr(self, "_mcp_init_task") and not self._mcp_init_task.done():
+            await self._mcp_init_task
+
         logger.info("[清理] AIClient 已关闭")
 
     def count_tokens(self, text: str) -> int:
