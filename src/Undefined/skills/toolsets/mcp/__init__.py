@@ -99,20 +99,21 @@ class MCPToolSetRegistry:
             self._mcp_client = Client(config)
 
             # 连接并初始化
-            async with self._mcp_client:
-                if not self._mcp_client.is_connected():
-                    logger.warning("无法连接到 MCP 服务器")
-                    self._is_initialized = True
-                    return
+            await self._mcp_client.__aenter__()
 
-                # 获取所有工具列表
-                tools = await self._mcp_client.list_tools()
+            if not self._mcp_client.is_connected():
+                logger.warning("无法连接到 MCP 服务器")
+                self._is_initialized = True
+                return
 
-                # 转换每个工具为 toolsets 格式
-                for tool in tools:
-                    await self._register_tool(tool)
+            # 获取所有工具列表
+            tools = await self._mcp_client.list_tools()
 
-                logger.info(f"MCP 工具集初始化完成，共加载 {len(tools)} 个工具")
+            # 转换每个工具为 toolsets 格式
+            for tool in tools:
+                await self._register_tool(tool)
+
+            logger.info(f"MCP 工具集初始化完成，共加载 {len(tools)} 个工具")
 
         except ImportError:
             logger.error("fastmcp 库未安装，MCP 功能将不可用")
@@ -249,7 +250,8 @@ class MCPToolSetRegistry:
         logger.info("正在关闭 MCP 客户端连接...")
         if self._mcp_client:
             try:
-                # FastMCP Client 使用 context manager，连接会自动关闭
+                # 手动调用 context manager 的退出方法
+                await self._mcp_client.__aexit__(None, None, None)
                 logger.debug("已关闭 MCP 客户端连接")
             except Exception as e:
                 logger.warning(f"关闭 MCP 客户端连接时出错: {e}")
