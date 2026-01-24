@@ -133,6 +133,38 @@ uv run -m Undefined
 
 > 启动项目需要 OneBot 实例，推荐使用 [NapCat](https://napneko.github.io/)。
 
+### MCP 配置
+
+Undefined 支持 MCP (Model Context Protocol) 协议，可以连接外部 MCP 服务器来扩展 AI 的工具能力。
+
+#### 配置步骤
+
+1. 复制 MCP 配置示例文件：
+   ```bash
+   cp config/mcp.json.example config/mcp.json
+   ```
+
+2. 编辑 `config/mcp.json`，根据 MCP 服务器说明使用标准格式添加你需要的 MCP 服务器
+
+3. 在 `.env` 中设置 MCP 配置文件路径（可选，默认为 `config/mcp.json`）：
+   ```env
+   MCP_CONFIG_PATH=config/mcp.json
+   ```
+
+#### 使用方式
+
+配置完成后，AI 会自动加载 MCP 工具，工具名称格式为 `mcp.{server_name}.{tool_name}`。
+
+例如，配置了 `filesystem` 服务器后，AI 可以使用 `mcp.filesystem.read_file` 等工具。
+
+#### 可用的 MCP 服务器
+
+> 需确保本地安装了 `nodejs` 以及 `npm`
+
+- [@upstash/context7-mcp](https://github.com/upstash/context7)：Up-to-date Code Docs For Any Prompt
+
+> 更多服务器请自行添加
+
 ## 使用说明
 
 ### 部署后的初始化
@@ -209,38 +241,6 @@ Undefined 采用模块化的 **Skills** 架构，扩展非常简单：
 - **添加 Agent**: 在 `skills/agents/` 下新建目录，定义 `intro.md` 和 `prompt.md`。
 
 详细开发指南请参考 [src/Undefined/skills/README.md](src/Undefined/skills/README.md)。
-
-### MCP 支持
-
-Undefined 支持 MCP (Model Context Protocol) 协议，可以连接外部 MCP 服务器来扩展 AI 的工具能力。
-
-#### 配置 MCP
-
-1. 复制 MCP 配置示例文件：
-   ```bash
-   cp config/mcp.json.example config/mcp.json
-   ```
-
-2. 编辑 `config/mcp.json` ，根据 MCP 服务器说明使用标准格式添加你需要的 MCP 服务器
-
-3. 在 `.env` 中设置 MCP 配置文件路径（可选，默认为 `config/mcp.json`）：
-   ```env
-   MCP_CONFIG_PATH=config/mcp.json
-   ```
-
-#### 使用 MCP 工具
-
-配置完成后，AI 会自动加载 MCP 工具，工具名称格式为 `mcp.{server_name}.{tool_name}`。
-
-例如，配置了 `filesystem` 服务器后，AI 可以使用 `mcp.filesystem.read_file` 等工具。
-
-#### 默认可用的 MCP 服务器
-
-> 需确保本地安装了`nodejs`以及`npm`
-
-- [@upstash/context7-mcp](https://github.com/upstash/context7)：Up-to-date Code Docs For Any Prompt
-
-> 更多服务器请自行添加
 
 ## 致谢与友链
 
