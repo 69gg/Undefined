@@ -36,6 +36,7 @@ class MCPToolSetRegistry:
             str, Callable[[Dict[str, Any], Dict[str, Any]], Awaitable[str]]
         ] = {}
         self._mcp_client: Any = None
+        self._mcp_servers: Dict[str, Any] = {}  # 保存服务器配置
         self._is_initialized: bool = False
 
     def load_mcp_config(self) -> Dict[str, Any]:
@@ -87,6 +88,9 @@ class MCPToolSetRegistry:
 
         logger.info(f"开始初始化 {len(mcp_servers)} 个 MCP 服务器...")
 
+        # 保存服务器配置
+        self._mcp_servers = mcp_servers
+
         try:
             # 延迟导入 fastmcp
             from fastmcp import Client
@@ -131,10 +135,26 @@ class MCPToolSetRegistry:
             # 构建工具参数 schema
             parameters = tool.inputSchema if hasattr(tool, "inputSchema") else {}
 
-            # FastMCP 会自动为工具添加服务器名称前缀，格式为 {server_name}_{tool_name}
-            # 我们需要转换为 mcp.{server_name}.{tool_name} 格式（用点代替下划线）
-            # 例如: context7_resolve-library-id → mcp.context7.resolve-library-id
-            full_tool_name = f"mcp.{tool_name.replace('_', '.', 1)}"
+            # FastMCP 使用 server_name_tool_name 格式调用工具
+            # 我们需要转换为 mcp.server_name.tool_name 格式
+            # 遍历服务器配置，找到匹配的服务器名称
+            server_name = None
+            for name in self._mcp_servers.keys():
+                # 检查工具名是否以服务器名开头
+                if tool_name.startswith(f"{name}_"):
+                    server_name = name
+                    # 提取实际的工具名（去掉服务器前缀）
+                    tool_name = tool_name[len(name) + 1 :]
+                    break
+
+            if server_name:
+                full_tool_name = f"mcp.{server_name}.{tool_name}"
+                # 调用 FastMCP 时需要使用原始的 server_name_tool_name 格式
+                original_tool_name = f"{server_name}_{tool_name}"
+            else:
+                # 如果没有找到服务器前缀，直接使用 mcp. 前缀
+                full_tool_name = f"mcp.{tool_name}"
+                original_tool_name = tool_name
 
             # 构建 OpenAI function calling 格式的 schema
             schema = {
@@ -150,8 +170,8 @@ class MCPToolSetRegistry:
             async def handler(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 """MCP 工具处理器"""
                 try:
-                    # 调用 MCP 工具（使用原始工具名，不包含 mcp 前缀）
-                    result = await self._mcp_client.call_tool(tool_name, args)
+                    # 调用 MCP 工具（使用 FastMCP 期望的格式：server_name_tool_name）
+                    result = await self._mcp_client.call_tool(original_tool_name, args)
 
                     # 解析结果
                     if hasattr(result, "content") and result.content:
