@@ -35,8 +35,7 @@ class MCPToolSetRegistry:
         self._tools_handlers: Dict[
             str, Callable[[Dict[str, Any], Dict[str, Any]], Awaitable[str]]
         ] = {}
-        self._mcp_clients: Dict[str, Any] = {}  # server_name -> client
-        self._server_tools: Dict[str, List[str]] = {}  # server_name -> tool_names
+        self._mcp_client: Any = None
         self._is_initialized: bool = False
 
     def load_mcp_config(self) -> Dict[str, Any]:
@@ -47,7 +46,7 @@ class MCPToolSetRegistry:
         """
         if not self.config_path.exists():
             logger.warning(f"MCP 配置文件不存在: {self.config_path}")
-            return {"mcpServers": []}
+            return {"mcpServers": {}}
 
         try:
             with open(self.config_path, "r", encoding="utf-8") as f:
@@ -56,10 +55,10 @@ class MCPToolSetRegistry:
             return cast(Dict[str, Any], config)
         except json.JSONDecodeError as e:
             logger.error(f"MCP 配置文件格式错误: {e}")
-            return {"mcpServers": []}
+            return {"mcpServers": {}}
         except Exception as e:
             logger.error(f"加载 MCP 配置失败: {e}")
-            return {"mcpServers": []}
+            return {"mcpServers": {}}
 
     async def initialize(self) -> None:
         """初始化 MCP 工具集
@@ -68,8 +67,6 @@ class MCPToolSetRegistry:
         """
         self._tools_schema = []
         self._tools_handlers = {}
-        self._mcp_clients = {}
-        self._server_tools = {}
 
         config = self.load_mcp_config()
         mcp_servers = config.get("mcpServers", {})
@@ -90,88 +87,41 @@ class MCPToolSetRegistry:
 
         logger.info(f"开始初始化 {len(mcp_servers)} 个 MCP 服务器...")
 
-        for server_name, server_config in mcp_servers.items():
-            # 将服务器名称添加到配置中
-            if isinstance(server_config, dict):
-                server_config["name"] = server_name
-            await self._initialize_server(server_config)
-
-        total_tools = len(self._tools_handlers)
-        logger.info(f"MCP 工具集初始化完成，共加载 {total_tools} 个工具")
-
-        # 输出详细统计
-        for server_name, tools in self._server_tools.items():
-            logger.info(f"  - [{server_name}] ({len(tools)} 个): {', '.join(tools)}")
-
-        self._is_initialized = True
-
-    async def _initialize_server(self, server_config: Dict[str, Any]) -> None:
-        """初始化单个 MCP 服务器
-
-        参数:
-            server_config: 服务器配置，包含 name、command、args 等字段
-        """
-        # 验证配置格式
-        if not isinstance(server_config, dict):
-            logger.error(
-                f"MCP 服务器配置格式错误: 期望字典对象，实际收到 {type(server_config).__name__}。"
-                f"请检查 config/mcp.json 文件，mcpServers 对象的值应该是字典对象。"
-            )
-            return
-
-        server_name = server_config.get("name")
-        if not server_name:
-            logger.error(
-                "MCP 服务器配置缺少 name 字段。"
-                '正确的配置格式: {"mcpServers": {"server_name": {"command": "...", "args": [...]}}}'
-            )
-            return
-
         try:
             # 延迟导入 fastmcp
             from fastmcp import Client
 
-            # 创建客户端
-            client = Client(server_config)
+            # 创建客户端，传入完整配置
+            self._mcp_client = Client(config)
 
             # 连接并初始化
-            async with client:
-                if not client.is_connected():
-                    logger.warning(f"无法连接到 MCP 服务器: {server_name}")
+            async with self._mcp_client:
+                if not self._mcp_client.is_connected():
+                    logger.warning("无法连接到 MCP 服务器")
+                    self._is_initialized = True
                     return
 
-                # 获取工具列表
-                tools = await client.list_tools()
-
-                # 保存客户端引用（用于后续调用）
-                self._mcp_clients[server_name] = client
-                self._server_tools[server_name] = []
+                # 获取所有工具列表
+                tools = await self._mcp_client.list_tools()
 
                 # 转换每个工具为 toolsets 格式
                 for tool in tools:
-                    await self._register_tool(server_name, tool, client)
+                    await self._register_tool(tool)
 
-                logger.info(
-                    f"MCP 服务器 [{server_name}] 初始化成功，加载 {len(tools)} 个工具"
-                )
+                logger.info(f"MCP 工具集初始化完成，共加载 {len(tools)} 个工具")
 
         except ImportError:
             logger.error("fastmcp 库未安装，MCP 功能将不可用")
         except Exception as e:
-            logger.exception(f"初始化 MCP 服务器 [{server_name}] 失败: {e}")
+            logger.exception(f"初始化 MCP 工具集失败: {e}")
 
-    async def _register_tool(
-        self,
-        server_name: str,
-        tool: Any,
-        client: Any,
-    ) -> None:
+        self._is_initialized = True
+
+    async def _register_tool(self, tool: Any) -> None:
         """注册单个 MCP 工具
 
         参数:
-            server_name: 服务器名称
             tool: MCP 工具对象
-            client: MCP 客户端实例
         """
         try:
             # 获取工具信息
@@ -181,15 +131,16 @@ class MCPToolSetRegistry:
             # 构建工具参数 schema
             parameters = tool.inputSchema if hasattr(tool, "inputSchema") else {}
 
-            # 构建完整的工具名称：mcp.{server_name}.{tool_name}
-            full_tool_name = f"mcp.{server_name}.{tool_name}"
+            # FastMCP 会自动为工具添加服务器名称前缀，格式为 {server_name}_{tool_name}
+            # 但我们需要转换为 mcp.{server_name}.{tool_name} 格式
+            full_tool_name = f"mcp.{tool_name}"
 
             # 构建 OpenAI function calling 格式的 schema
             schema = {
                 "type": "function",
                 "function": {
                     "name": full_tool_name,
-                    "description": f"[MCP:{server_name}] {tool_description}",
+                    "description": f"[MCP] {tool_description}",
                     "parameters": parameters,
                 },
             }
@@ -198,8 +149,8 @@ class MCPToolSetRegistry:
             async def handler(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 """MCP 工具处理器"""
                 try:
-                    # 调用 MCP 工具
-                    result = await client.call_tool(tool_name, args)
+                    # 调用 MCP 工具（使用原始工具名，不包含 mcp 前缀）
+                    result = await self._mcp_client.call_tool(tool_name, args)
 
                     # 解析结果
                     if hasattr(result, "content") and result.content:
@@ -219,12 +170,11 @@ class MCPToolSetRegistry:
             # 注册工具
             self._tools_schema.append(schema)
             self._tools_handlers[full_tool_name] = handler
-            self._server_tools[server_name].append(tool_name)
 
             logger.debug(f"已注册 MCP 工具: {full_tool_name}")
 
         except Exception as e:
-            logger.error(f"注册 MCP 工具失败 [{server_name}/{tool.name}]: {e}")
+            logger.error(f"注册 MCP 工具失败 [{tool.name}]: {e}")
 
     def get_tools_schema(self) -> List[Dict[str, Any]]:
         """获取所有 MCP 工具的 Schema"""
@@ -239,7 +189,7 @@ class MCPToolSetRegistry:
         """执行指定的 MCP 工具
 
         参数:
-            tool_name: 工具名称（格式：mcp.{server_name}.{tool_name}）
+            tool_name: 工具名称（格式：mcp.{server_name}_{tool_name}）
             args: 工具参数
             context: 执行上下文
 
@@ -261,16 +211,16 @@ class MCPToolSetRegistry:
             return f"执行 MCP 工具 {tool_name} 时出错: {str(e)}"
 
     async def close(self) -> None:
-        """关闭所有 MCP 客户端连接"""
+        """关闭 MCP 客户端连接"""
         logger.info("正在关闭 MCP 客户端连接...")
-        for server_name, client in self._mcp_clients.items():
+        if self._mcp_client:
             try:
-                # fastmcp.Client 使用 context manager，连接会自动关闭
-                logger.debug(f"已关闭 MCP 服务器 [{server_name}] 连接")
+                # FastMCP Client 使用 context manager，连接会自动关闭
+                logger.debug("已关闭 MCP 客户端连接")
             except Exception as e:
-                logger.warning(f"关闭 MCP 服务器 [{server_name}] 连接时出错: {e}")
-        self._mcp_clients.clear()
-        logger.info("MCP 客户端连接已全部关闭")
+                logger.warning(f"关闭 MCP 客户端连接时出错: {e}")
+        self._mcp_client = None
+        logger.info("MCP 客户端连接已关闭")
 
     @property
     def is_initialized(self) -> bool:
