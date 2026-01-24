@@ -33,6 +33,18 @@ def extract_text(message_content: list[dict[str, Any]], bot_qq: int = 0) -> str:
         elif type_ == "image":
             file = data.get("file", "") or data.get("url", "")
             texts.append(f"[图片: {file}]")
+        elif type_ == "file":
+            file = data.get("file", "") or data.get("url", "")
+            texts.append(f"[文件: {file}]")
+        elif type_ == "video":
+            file = data.get("file", "") or data.get("url", "")
+            texts.append(f"[视频: {file}]")
+        elif type_ == "record":
+            file = data.get("file", "") or data.get("url", "")
+            texts.append(f"[语音: {file}]")
+        elif type_ == "audio":
+            file = data.get("file", "") or data.get("url", "")
+            texts.append(f"[音频: {file}]")
 
     return "".join(texts).strip()
 
@@ -69,6 +81,22 @@ async def parse_message_content_for_history(
         elif type_ == "image":
             file = data.get("file", "") or data.get("url", "")
             texts.append(f"[图片: {file}]")
+
+        elif type_ == "file":
+            file = data.get("file", "") or data.get("url", "")
+            texts.append(f"[文件: {file}]")
+
+        elif type_ == "video":
+            file = data.get("file", "") or data.get("url", "")
+            texts.append(f"[视频: {file}]")
+
+        elif type_ == "record":
+            file = data.get("file", "") or data.get("url", "")
+            texts.append(f"[语音: {file}]")
+
+        elif type_ == "audio":
+            file = data.get("file", "") or data.get("url", "")
+            texts.append(f"[音频: {file}]")
 
         elif type_ == "forward":
             msg_id = data.get("id")
