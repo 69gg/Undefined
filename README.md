@@ -5,8 +5,9 @@
         <h1>Undefined</h1>
         <em>A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture.</em>
         <br/><br/>
-        <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.12-blue.svg" alt="Python"></a>
+        <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10+-blue.svg" alt="Python"></a>
         <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License"></a>
+        <a href="https://deepwiki.com/69gg/Undefined"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
         <br/><br/>
         <p>大鹏一日同风起，扶摇直上九万里。</p>
       </div>
