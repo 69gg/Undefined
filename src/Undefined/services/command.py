@@ -175,65 +175,75 @@ class CommandDispatcher:
 
             # 构造合并转发消息
             forward_messages = []
-            
+
             # 添加标题消息
             title_message = f"📊 Token Usage Statistics for Last {days} Days:"
-            forward_messages.append({
-                "type": "node",
-                "data": {
-                    "name": "Bot",
-                    "uin": str(self.config.bot_qq),
-                    "content": title_message
+            forward_messages.append(
+                {
+                    "type": "node",
+                    "data": {
+                        "name": "Bot",
+                        "uin": str(self.config.bot_qq),
+                        "content": title_message,
+                    },
                 }
-            })
+            )
 
             # 添加折线图
             line_chart_path = img_dir / "stats_line_chart.png"
             if line_chart_path.exists():
-                forward_messages.append({
-                    "type": "node",
-                    "data": {
-                        "name": "Bot",
-                        "uin": str(self.config.bot_qq),
-                        "content": f"[CQ:image,file={str(line_chart_path.absolute())}]"
+                forward_messages.append(
+                    {
+                        "type": "node",
+                        "data": {
+                            "name": "Bot",
+                            "uin": str(self.config.bot_qq),
+                            "content": f"[CQ:image,file={str(line_chart_path.absolute())}]",
+                        },
                     }
-                })
+                )
 
             # 添加柱状图
             bar_chart_path = img_dir / "stats_bar_chart.png"
             if bar_chart_path.exists():
-                forward_messages.append({
-                    "type": "node",
-                    "data": {
-                        "name": "Bot",
-                        "uin": str(self.config.bot_qq),
-                        "content": f"[CQ:image,file={str(bar_chart_path.absolute())}]"
+                forward_messages.append(
+                    {
+                        "type": "node",
+                        "data": {
+                            "name": "Bot",
+                            "uin": str(self.config.bot_qq),
+                            "content": f"[CQ:image,file={str(bar_chart_path.absolute())}]",
+                        },
                     }
-                })
+                )
 
             # 添加饼图
             pie_chart_path = img_dir / "stats_pie_chart.png"
             if pie_chart_path.exists():
-                forward_messages.append({
-                    "type": "node",
-                    "data": {
-                        "name": "Bot",
-                        "uin": str(self.config.bot_qq),
-                        "content": f"[CQ:image,file={str(pie_chart_path.absolute())}]"
+                forward_messages.append(
+                    {
+                        "type": "node",
+                        "data": {
+                            "name": "Bot",
+                            "uin": str(self.config.bot_qq),
+                            "content": f"[CQ:image,file={str(pie_chart_path.absolute())}]",
+                        },
                     }
-                })
+                )
 
             # 添加统计表格
             stats_table_path = img_dir / "stats_table.png"
             if stats_table_path.exists():
-                forward_messages.append({
-                    "type": "node",
-                    "data": {
-                        "name": "Bot",
-                        "uin": str(self.config.bot_qq),
-                        "content": f"[CQ:image,file={str(stats_table_path.absolute())}]"
+                forward_messages.append(
+                    {
+                        "type": "node",
+                        "data": {
+                            "name": "Bot",
+                            "uin": str(self.config.bot_qq),
+                            "content": f"[CQ:image,file={str(stats_table_path.absolute())}]",
+                        },
                     }
-                })
+                )
 
             # 添加文本摘要
             summary_text = f"""📈 Summary:
@@ -243,14 +253,16 @@ class CommandDispatcher:
   └─ Output: {summary["completion_tokens"]:,}
 • Avg Duration: {summary["avg_duration"]:.2f}s
 • Model Count: {len(summary["models"])}"""
-            forward_messages.append({
-                "type": "node",
-                "data": {
-                    "name": "Bot",
-                    "uin": str(self.config.bot_qq),
-                    "content": summary_text
+            forward_messages.append(
+                {
+                    "type": "node",
+                    "data": {
+                        "name": "Bot",
+                        "uin": str(self.config.bot_qq),
+                        "content": summary_text,
+                    },
                 }
-            })
+            )
 
             # 发送合并转发消息
             await self.onebot.send_forward_msg(group_id, forward_messages)
@@ -298,7 +310,9 @@ class CommandDispatcher:
         )
 
         # 设置标题和标签
-        ax.set_title(f"Token Usage Trend for Last {days} Days", fontsize=16, fontweight="bold")
+        ax.set_title(
+            f"Token Usage Trend for Last {days} Days", fontsize=16, fontweight="bold"
+        )
         ax.set_xlabel("Date", fontsize=12)
         ax.set_ylabel("Token Count", fontsize=12)
         ax.legend(loc="upper left", fontsize=10)
@@ -492,7 +506,9 @@ class CommandDispatcher:
                     table[(i, j)].set_facecolor("#f0f0f0")
 
         # 设置标题
-        ax.set_title("Model Usage Statistics Details", fontsize=16, fontweight="bold", pad=20)
+        ax.set_title(
+            "Model Usage Statistics Details", fontsize=16, fontweight="bold", pad=20
+        )
 
         # 调整布局
         plt.tight_layout()

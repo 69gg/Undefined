@@ -5,7 +5,6 @@ import asyncio
 import aiofiles
 import logging
 from pathlib import Path
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -126,11 +125,16 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     agent_config = ai_client.agent_config
 
     system_prompt: str = await _load_prompt()
+    agent_history = context.get("agent_history", [])
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"用户需求：{user_prompt}"},
     ]
+
+    if agent_history:
+        messages.extend(agent_history)
+
+    messages.append({"role": "user", "content": f"用户需求：{user_prompt}"})
 
     max_iterations: int = 20
     iteration: int = 0
@@ -139,46 +143,14 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         iteration += 1
 
         try:
-            response = await ai_client._http_client.post(
-                agent_config.api_url,
-                headers={
-                    "Authorization": f"Bearer {agent_config.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=ai_client._build_request_body(
-                    model_config=agent_config,
-                    messages=messages,
-                    max_tokens=agent_config.max_tokens,
-                    tools=tools if tools else None,
-                    tool_choice="auto",
-                ),
+            result = await ai_client.request_model(
+                model_config=agent_config,
+                messages=messages,
+                max_tokens=agent_config.max_tokens,
+                call_type="agent:entertainment_agent",
+                tools=tools if tools else None,
+                tool_choice="auto",
             )
-            response.raise_for_status()
-            result: dict[str, Any] = response.json()
-
-            # 记录 token 使用统计
-            usage = result.get("usage", {})
-            prompt_tokens = usage.get("prompt_tokens", 0)
-            completion_tokens = usage.get("completion_tokens", 0)
-            total_tokens = usage.get("total_tokens", 0)
-
-            # 获取 token_usage_storage
-            token_usage_storage = context.get("token_usage_storage")
-            if token_usage_storage:
-                asyncio.create_task(
-                    token_usage_storage.record(
-                        {
-                            "timestamp": datetime.now().isoformat(),
-                            "model_name": agent_config.model_name,
-                            "prompt_tokens": prompt_tokens,
-                            "completion_tokens": completion_tokens,
-                            "total_tokens": total_tokens,
-                            "duration_seconds": 0.0,
-                            "call_type": "agent:entertainment_agent",
-                            "success": True,
-                        }
-                    )
-                )
 
             choice: dict[str, Any] = result.get("choices", [{}])[0]
             message: dict[str, Any] = choice.get("message", {})

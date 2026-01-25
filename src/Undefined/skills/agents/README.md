@@ -115,6 +115,53 @@ Agent 的执行逻辑，负责：
 3. 通过 `AgentToolRegistry` 调用子工具
 4. 返回结果给主 AI
 
+## 最佳实践：统一请求与上下文
+
+为了简化 Agent 开发并确保 Token 统计一致性，建议所有 Agent 均遵循以下最佳实践：
+
+### 1. 使用 `ai_client.request_model`
+不要直接使用 `httpx` 调用 API，而是使用 `context` 中提供的 `ai_client.request_model`。它会自动：
+- 记录 Token 使用情况到系统统计中。
+- 处理重试和错误抛出。
+- 控制请求格式。
+
+### 2. 实现临时对话上下文 (Temporary Context)
+系统会在单次消息处理期间，为每个 Agent 保存一个临时的对话记录。你可以从 `context` 中获取 `agent_history` 并注入到消息列表中，提升 Agent 的连贯性。
+
+### 示例代码 (handler.py)
+
+```python
+async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    user_prompt = args.get("prompt", "")
+    ai_client = context.get("ai_client")
+    agent_config = ai_client.agent_config
+    
+    # 1. 加载提示词和临时历史
+    system_prompt = await _load_prompt()
+    agent_history = context.get("agent_history", []) # 获取临时历史
+
+    # 2. 构建消息序列
+    messages = [{"role": "system", "content": system_prompt}]
+    if agent_history:
+        messages.extend(agent_history) # 注入历史
+    messages.append({"role": "user", "content": f"用户需求：{user_prompt}"})
+
+    # 3. 使用统一接口请求模型
+    result = await ai_client.request_model(
+        model_config=agent_config,
+        messages=messages,
+        call_type="agent:your_agent_name",
+        tools=tools, # 如果有工具定义
+    )
+    
+    # 提取内容
+    content = result.get("choices", [{}])[0].get("message", {}).get("content") or ""
+    return content
+```
+
+> [!NOTE]
+> `agent_history` 仅在当前这条 QQ 消息的处理生命周期内有效，处理完后会自动丢弃，不会造成长期记忆污染。
+
 ## 添加新 Agent
 
 ### 1. 创建 Agent 目录
