@@ -1,0 +1,28 @@
+{
+    "type": "function",
+    "function": {
+        "name": "get_honor_info",
+        "description": "获取群荣誉信息，如龙王、美食之王、快乐之源等。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "群号。如果已在群聊中，通常会自动获取。"
+                },
+                "type": {
+                    "type": "string",
+                    "description": "荣誉类型：talkative(龙王), performer(群聊之星), legend(群聊之火), strong_newbie(冒泡之焰), emotion(快乐之源)。留空则获取所有。",
+                    "enum": [
+                        "all",
+                        "talkative",
+                        "performer",
+                        "legend",
+                        "strong_newbie",
+                        "emotion"
+                    ]
+                }
+            }
+        }
+    }
+}

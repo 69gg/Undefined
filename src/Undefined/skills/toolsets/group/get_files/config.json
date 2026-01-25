@@ -1,0 +1,16 @@
+{
+    "type": "function",
+    "function": {
+        "name": "get_files",
+        "description": "获取群文件列表（根目录）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "群号。如果已在群聊中，通常会自动获取。"
+                }
+            }
+        }
+    }
+}

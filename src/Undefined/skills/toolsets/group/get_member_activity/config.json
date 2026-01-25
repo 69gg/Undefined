@@ -1,0 +1,26 @@
+{
+    "type": "function",
+    "function": {
+        "name": "get_member_activity",
+        "description": "分析群成员活跃度。统计最近发言时间，识别活跃成员和长期不发言的成员（僵尸粉）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "群号。如果已在群聊中，通常会自动获取。"
+                },
+                "threshold_days": {
+                    "type": "integer",
+                    "description": "非活跃阈值（天数），默认 30 天",
+                    "default": 30
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "返回最活跃/最不活跃成员的数量，默认 10",
+                    "default": 10
+                }
+            }
+        }
+    }
+}
