@@ -22,6 +22,14 @@ jobs:
       - name: Install dependencies
         run: uv sync --group ci -p 3.12
 
+      - name: Cache Ruff
+        uses: actions/cache@v4
+        with:
+          path: .ruff_cache
+          key: ${{ runner.os }}-ruff-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-ruff-
+
       - name: Run Ruff
         run: |
           uv run ruff check .

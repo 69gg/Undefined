@@ -32,11 +32,29 @@ jobs:
       - name: Install dependencies
         run: uv sync --group ci -p 3.12
 
-      - name: Run ruff check
-        run: uv run ruff check .
+      - name: Cache Ruff
+        uses: actions/cache@v4
+        with:
+          path: .ruff_cache
+          key: ${{ runner.os }}-ruff-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-ruff-
 
-      - name: Run mypy check
-        run: uv run mypy src/Undefined
+      - name: Cache Mypy
+        uses: actions/cache@v4
+        with:
+          path: .mypy_cache
+          key: ${{ runner.os }}-mypy-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mypy-
+
+      - name: Run Ruff
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Run Mypy
+        run: uv run mypy .
 
       - name: Build project
         run: uv build
