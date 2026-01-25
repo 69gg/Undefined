@@ -95,10 +95,14 @@ class AICoordinator:
 
         if is_at_bot:
             logger.info(f"[AI] 触发原因: {'拍一拍' if is_poke else '@机器人'}")
-            await self.queue_manager.add_group_mention_request(request_data)
+            await self.queue_manager.add_group_mention_request(
+                request_data, model_name=self.config.chat_model.model_name
+            )
         else:
             logger.info("[AI] 投递至普通请求队列")
-            await self.queue_manager.add_group_normal_request(request_data)
+            await self.queue_manager.add_group_normal_request(
+                request_data, model_name=self.config.chat_model.model_name
+            )
 
     async def handle_private_reply(
         self,
@@ -137,9 +141,13 @@ class AICoordinator:
         }
 
         if user_id == self.config.superadmin_qq:
-            await self.queue_manager.add_superadmin_request(request_data)
+            await self.queue_manager.add_superadmin_request(
+                request_data, model_name=self.config.chat_model.model_name
+            )
         else:
-            await self.queue_manager.add_private_request(request_data)
+            await self.queue_manager.add_private_request(
+                request_data, model_name=self.config.chat_model.model_name
+            )
 
     async def execute_reply(self, request: dict[str, Any]) -> None:
         """执行回复请求（由 QueueManager 调用）"""

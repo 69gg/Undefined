@@ -3,32 +3,67 @@
 import asyncio
 import logging
 import time
+from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine
 
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class ModelQueue:
+    """单个模型的优先队列组"""
+
+    model_name: str
+    superadmin_queue: asyncio.Queue[dict[str, Any]] = field(
+        default_factory=asyncio.Queue
+    )
+    private_queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
+    group_mention_queue: asyncio.Queue[dict[str, Any]] = field(
+        default_factory=asyncio.Queue
+    )
+    group_normal_queue: asyncio.Queue[dict[str, Any]] = field(
+        default_factory=asyncio.Queue
+    )
+
+    def trim_normal_queue(self) -> None:
+        """如果群聊普通队列超过10个，仅保留最新的2个"""
+        queue_size = self.group_normal_queue.qsize()
+        if queue_size > 10:
+            logger.info(
+                f"[队列修剪][{self.model_name}] 群聊普通队列长度 {queue_size} 超过阈值(10)，正在修剪..."
+            )
+            # 取出所有元素
+            all_requests: list[dict[str, Any]] = []
+            while not self.group_normal_queue.empty():
+                all_requests.append(self.group_normal_queue.get_nowait())
+            # 只保留最新的2个
+            latest_requests = all_requests[-2:]
+            # 放回队列
+            for req in latest_requests:
+                self.group_normal_queue.put_nowait(req)
+            logger.info(
+                f"[队列修剪][{self.model_name}] 修剪完成，保留最新 {len(latest_requests)} 个请求"
+            )
+
+
 class QueueManager:
-    """负责 AI 请求的队列管理和调度"""
+    """负责 AI 请求的队列管理和调度
+
+    采用“站台-列车”模型：
+    1. 每个模型有独立的队列组（站台）
+    2. 每个模型每秒发车一次（列车），带走一个请求
+    3. 请求处理是异步不阻塞的（不管前一个是否结束）
+    """
 
     def __init__(self, ai_request_interval: float = 1.0) -> None:
         self.ai_request_interval = ai_request_interval
 
-        # AI 请求队列（四个队列）
-        self._superadmin_queue: asyncio.Queue[dict[str, Any]] = (
-            asyncio.Queue()
-        )  # 超级管理员私聊队列（最高优先级）
-        self._private_queue: asyncio.Queue[dict[str, Any]] = (
-            asyncio.Queue()
-        )  # 普通私聊队列（高优先级）
-        self._group_mention_queue: asyncio.Queue[dict[str, Any]] = (
-            asyncio.Queue()
-        )  # 群聊被@队列（中等优先级）
-        self._group_normal_queue: asyncio.Queue[dict[str, Any]] = (
-            asyncio.Queue()
-        )  # 群聊普通队列（最低优先级）
+        # 按模型名称区分的队列组
+        self._model_queues: dict[str, ModelQueue] = {}
 
-        self._processor_task: asyncio.Task[None] | None = None
+        # 处理任务映射 model_name -> Task
+        self._processor_tasks: dict[str, asyncio.Task[None]] = {}
+
         self._request_handler: (
             Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None
         ) = None
@@ -36,171 +71,173 @@ class QueueManager:
     def start(
         self, request_handler: Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
     ) -> None:
-        """启动队列处理任务
-
-        参数:
-            request_handler: 处理单个请求的异步回调函数
-        """
+        """启动队列处理任务"""
         self._request_handler = request_handler
-        if self._processor_task is None or self._processor_task.done():
-            self._processor_task = asyncio.create_task(self._process_queue_loop())
-            logger.info("[队列服务] 队列处理主循环已启动")
+        logger.info("[队列服务] 队列管理器已就绪")
 
     async def stop(self) -> None:
-        """停止队列处理任务"""
-        if self._processor_task and not self._processor_task.done():
-            logger.info("[队列服务] 正在停止队列处理任务...")
-            self._processor_task.cancel()
-            try:
-                await self._processor_task
-            except asyncio.CancelledError:
-                pass
-            self._processor_task = None
-            logger.info("[队列服务] 队列处理任务已停止")
+        """停止所有队列处理任务"""
+        logger.info("[队列服务] 正在停止所有队列处理任务...")
+        for name, task in self._processor_tasks.items():
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        self._processor_tasks.clear()
+        logger.info("[队列服务] 所有队列处理任务已停止")
 
-    async def add_superadmin_request(self, request: dict[str, Any]) -> None:
+    def _get_or_create_queue(self, model_name: str) -> ModelQueue:
+        """获取或创建指定模型的队列，并确保处理任务已启动"""
+        if model_name not in self._model_queues:
+            self._model_queues[model_name] = ModelQueue(model_name=model_name)
+            # 启动该模型的处理任务
+            if self._request_handler:
+                task = asyncio.create_task(self._process_model_loop(model_name))
+                self._processor_tasks[model_name] = task
+                logger.info(f"[队列服务] 已启动模型 [{model_name}] 的处理循环")
+        return self._model_queues[model_name]
+
+    async def add_superadmin_request(
+        self, request: dict[str, Any], model_name: str = "default"
+    ) -> None:
         """添加超级管理员请求"""
-        await self._superadmin_queue.put(request)
+        queue = self._get_or_create_queue(model_name)
+        await queue.superadmin_queue.put(request)
         logger.info(
-            f"[队列入队] 超级管理员私聊: 队列长度={self._superadmin_queue.qsize()}"
+            f"[队列入队][{model_name}] 超级管理员私聊: 队列长度={queue.superadmin_queue.qsize()}"
         )
 
-    async def add_private_request(self, request: dict[str, Any]) -> None:
+    async def add_private_request(
+        self, request: dict[str, Any], model_name: str = "default"
+    ) -> None:
         """添加普通私聊请求"""
-        await self._private_queue.put(request)
-        logger.info(f"[队列入队] 普通私聊: 队列长度={self._private_queue.qsize()}")
+        queue = self._get_or_create_queue(model_name)
+        await queue.private_queue.put(request)
+        logger.info(
+            f"[队列入队][{model_name}] 普通私聊: 队列长度={queue.private_queue.qsize()}"
+        )
 
-    async def add_group_mention_request(self, request: dict[str, Any]) -> None:
+    async def add_group_mention_request(
+        self, request: dict[str, Any], model_name: str = "default"
+    ) -> None:
         """添加群聊被@请求"""
-        await self._group_mention_queue.put(request)
-        logger.info(f"[队列入队] 群聊被@: 队列长度={self._group_mention_queue.qsize()}")
+        queue = self._get_or_create_queue(model_name)
+        await queue.group_mention_queue.put(request)
+        logger.info(
+            f"[队列入队][{model_name}] 群聊被@: 队列长度={queue.group_mention_queue.qsize()}"
+        )
 
-    async def add_group_normal_request(self, request: dict[str, Any]) -> None:
+    async def add_group_normal_request(
+        self, request: dict[str, Any], model_name: str = "default"
+    ) -> None:
         """添加群聊普通请求 (会自动裁剪)"""
-        self._trim_normal_queue()
-        await self._group_normal_queue.put(request)
-        logger.info(f"[队列入队] 群聊普通: 队列长度={self._group_normal_queue.qsize()}")
+        queue = self._get_or_create_queue(model_name)
+        queue.trim_normal_queue()
+        await queue.group_normal_queue.put(request)
+        logger.info(
+            f"[队列入队][{model_name}] 群聊普通: 队列长度={queue.group_normal_queue.qsize()}"
+        )
 
-    def _trim_normal_queue(self) -> None:
-        """如果群聊普通队列超过10个，仅保留最新的2个"""
-        queue_size = self._group_normal_queue.qsize()
-        if queue_size > 10:
-            logger.info(
-                f"[队列修剪] 群聊普通队列长度 {queue_size} 超过阈值(10)，正在修剪..."
-            )
-            # 取出所有元素
-            all_requests: list[dict[str, Any]] = []
-            while not self._group_normal_queue.empty():
-                all_requests.append(self._group_normal_queue.get_nowait())
-            # 只保留最新的2个
-            latest_requests = all_requests[-2:]
-            # 放回队列
-            for req in latest_requests:
-                self._group_normal_queue.put_nowait(req)
-            logger.info(f"[队列修剪] 修剪完成，保留最新 {len(latest_requests)} 个请求")
-
-    async def _process_queue_loop(self) -> None:
-        """队列处理主循环"""
+    async def _process_model_loop(self, model_name: str) -> None:
+        """单个模型的处理循环（列车调度）"""
+        model_queue = self._model_queues[model_name]
         queues = [
-            self._superadmin_queue,
-            self._private_queue,
-            self._group_mention_queue,
-            self._group_normal_queue,
+            model_queue.superadmin_queue,
+            model_queue.private_queue,
+            model_queue.group_mention_queue,
+            model_queue.group_normal_queue,
         ]
         queue_names = ["超级管理员私聊", "私聊", "群聊被@", "群聊普通"]
 
         current_queue_idx = 0
         current_queue_processed = 0
-        last_transfer_to_normal = False
-        transfer_count = 0
+
+        # 即使没有请求，列车也会每秒发车（检查一次）
+        # 这里我们使用 smart sleep: 如果处理了请求，等待剩余时间；如果空闲，等待完整时间?
+        # 需求: "列车(AI请求)每1s发车一次... 带走一个请求... 不管前面的请求有没有结束"
+        # 意味着频率固定为 1Hz
 
         try:
             while True:
-                try:
-                    current_queue = queues[current_queue_idx]
+                cycle_start_time = time.perf_counter()
 
-                    if current_queue.empty():
-                        all_empty = all(q.empty() for q in queues)
-                        if all_empty:
-                            await asyncio.sleep(0.2)
-                            continue
+                # 尝试获取一个请求
+                request = None
+                chosen_queue_idx = -1
 
-                        current_queue_idx = (current_queue_idx + 1) % 4
-                        current_queue_processed = 0
-                        transfer_count += 1
-                        continue
+                # 按照优先级和调度逻辑选择一个请求
+                # 简单逻辑：遍历优先级，找到第一个非空
+                # 原有逻辑：有防饿死机制 (current_queue_processed >= 2 切换)
+                # 为了简化且符合“带走一个请求”，我们可以沿用之前的优先级轮转逻辑，
+                # 但这必须是非阻塞的 check
 
-                    request = await current_queue.get()
+                found_request = False
+
+                # 简单的优先级轮询（保留之前的公平性逻辑会比较复杂，这里简化为严格优先级+计数轮转）
+                # 为了保持之前的“每个队列处理2个后切换”逻辑，我们需要持久化状态
+                # 但这里每次循环都是一次“发车”，所以状态要保存在循环外 (current_queue_idx 等)
+
+                # 尝试从当前关注的队列开始找
+                start_idx = current_queue_idx
+                for i in range(4):
+                    idx = (start_idx + i) % 4
+                    q = queues[idx]
+                    if not q.empty():
+                        request = await q.get()
+                        chosen_queue_idx = idx
+                        found_request = True
+                        break
+
+                if found_request and request:
                     request_type = request.get("type", "unknown")
-
                     logger.info(
-                        f"[队列处理] 正在处理 {queue_names[current_queue_idx]} 请求: {request_type} "
-                        f"(剩余={current_queue.qsize()})"
+                        f"[队列发车][{model_name}] 载入 {queue_names[chosen_queue_idx]} 请求: {request_type} "
+                        f"(当前队列剩余={queues[chosen_queue_idx].qsize()})"
                     )
 
-                    try:
-                        start_time = time.perf_counter()
-                        if self._request_handler:
-                            await self._request_handler(request)
-                        duration = time.perf_counter() - start_time
-                        logger.info(
-                            f"[队列处理] {queue_names[current_queue_idx]} 请求处理完成, 耗时={duration:.2f}s"
-                        )
-                    except Exception as e:
-                        logger.exception(f"[队列处理] 处理请求失败: {e}")
-                    finally:
-                        current_queue.task_done()
-
-                    current_queue_processed += 1
-
-                    # 调度逻辑：每个高优先级队列处理2个后切换
-                    if current_queue_processed >= 2:
-                        next_queue_idx = (current_queue_idx + 1) % 4
-                        logger.info(
-                            f"QueueManager: {queue_names[current_queue_idx]}队列已处理2条，"
-                            f"转移到{queue_names[next_queue_idx]}队列"
-                        )
-
-                        if next_queue_idx == 3:
-                            last_transfer_to_normal = True
-                        else:
-                            last_transfer_to_normal = False
-
-                        current_queue_idx = next_queue_idx
-                        current_queue_processed = 0
-                        transfer_count += 1
-
-                    # 防饿死逻辑：强制处理普通队列
-                    if (
-                        transfer_count > 0
-                        and transfer_count % 2 == 0
-                        and not last_transfer_to_normal
-                    ):
-                        if not self._group_normal_queue.empty():
-                            normal_request = await self._group_normal_queue.get()
-                            normal_type = normal_request.get("type", "unknown")
-                            logger.info(
-                                f"QueueManager: 强制处理群聊普通请求: {normal_type}"
+                    # 异步执行处理，不等待结果
+                    if self._request_handler:
+                        asyncio.create_task(
+                            self._safe_handle_request(
+                                request, model_name, queue_names[chosen_queue_idx]
                             )
-                            try:
-                                if self._request_handler:
-                                    await self._request_handler(normal_request)
-                            except Exception as e:
-                                logger.exception(
-                                    f"QueueManager: 处理群聊普通请求失败: {e}"
-                                )
-                            finally:
-                                self._group_normal_queue.task_done()
-                        transfer_count = 0
+                        )
 
-                    await asyncio.sleep(self.ai_request_interval)
+                    queues[chosen_queue_idx].task_done()
 
-                except asyncio.CancelledError:
-                    raise
-                except Exception as e:
-                    logger.exception(f"QueueManager: 队列循环异常: {e}")
-                    await asyncio.sleep(1.0)
+                    # 更新公平性计数
+                    current_queue_processed += 1
+                    if current_queue_processed >= 2:
+                        current_queue_idx = (current_queue_idx + 1) % 4
+                        current_queue_processed = 0
+                        # 注意：如果下一个队列是空的，下一次循环会自动找再下一个非空的
+                else:
+                    # 没有请求，列车空车出发
+                    pass
+
+                # 计算需要等待的时间，确保 1s 间隔
+                elapsed = time.perf_counter() - cycle_start_time
+                wait_time = max(0.0, self.ai_request_interval - elapsed)
+                await asyncio.sleep(wait_time)
+
         except asyncio.CancelledError:
-            logger.info("QueueManager: 任务被取消")
-        finally:
-            logger.info("QueueManager: 任务已退出")
+            logger.info(f"QueueManager: 模型 [{model_name}] 处理任务被取消")
+        except Exception as e:
+            logger.exception(f"QueueManager: 模型 [{model_name}] 循环异常: {e}")
+
+    async def _safe_handle_request(
+        self, request: dict[str, Any], model_name: str, queue_name: str
+    ) -> None:
+        """安全执行请求处理，捕获异常"""
+        try:
+            start_time = time.perf_counter()
+            if self._request_handler:
+                await self._request_handler(request)
+            duration = time.perf_counter() - start_time
+            logger.info(
+                f"[请求完成][{model_name}] {queue_name} 请求处理完成, 耗时={duration:.2f}s"
+            )
+        except Exception as e:
+            logger.exception(f"[请求失败][{model_name}] 处理请求失败: {e}")
