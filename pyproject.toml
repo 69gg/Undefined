@@ -1,6 +1,6 @@
 [project]
 name = "Undefined-bot"
-version = "2.3.0"
+version = "2.4.0"
 description = "A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture."
 readme = "README.md"
 authors = [
@@ -53,9 +53,10 @@ Undefined = "Undefined.main:run"
 [project.optional-dependencies]
 dev = [
     "mypy>=1.8.0",
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
-    "pytest-cov>=5.0.0",
+    "ruff",
+#    "pytest>=8.0.0",
+#    "pytest-asyncio>=0.23.0",
+#    "pytest-cov>=5.0.0",
 ]
 ci = [
     "ruff",
@@ -84,9 +85,10 @@ testpaths = ["tests"]
 [dependency-groups]
 dev = [
     "mypy>=1.8.0",
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
-    "pytest-cov>=5.0.0",
+    "ruff",
+#    "pytest>=8.0.0",
+#    "pytest-asyncio>=0.23.0",
+#    "pytest-cov>=5.0.0",
 ]
 ci = [
     "ruff",
