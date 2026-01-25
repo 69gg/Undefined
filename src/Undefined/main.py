@@ -104,6 +104,7 @@ async def main() -> None:
             config.agent_model,
             memory_storage,
             end_summary_storage,
+            bot_qq=config.bot_qq,
         )
         faq_storage = FAQStorage()
 

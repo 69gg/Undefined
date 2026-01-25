@@ -7,8 +7,12 @@ import logging
 import httpx
 from typing import Any
 from pathlib import Path
+from datetime import datetime
+import time
+import asyncio
 
 from .config import SecurityModelConfig
+from .token_usage_storage import TokenUsageStorage, TokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +36,7 @@ class InjectionResponseAgent:
         """
         self.security_config = security_config
         self._http_client = httpx.AsyncClient(timeout=120.0)
+        self._token_usage_storage = TokenUsageStorage()
 
     async def generate_response(self, user_message: str) -> str:
         """生成嘲讽性回复
@@ -42,6 +47,7 @@ class InjectionResponseAgent:
         返回:
             生成的嘲讽性回复
         """
+        start_time = time.perf_counter()
         try:
             # 构造请求
             request_body = self._build_request_body(
@@ -65,6 +71,36 @@ class InjectionResponseAgent:
             )
             response.raise_for_status()
             result = response.json()
+            duration = time.perf_counter() - start_time
+
+            # 记录 token 使用统计
+            usage = result.get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            total_tokens = usage.get("total_tokens", 0)
+
+            logger.info(
+                f"[注入回复] 生成完成, 耗时={duration:.2f}s, "
+                f"Tokens={total_tokens} (P:{prompt_tokens} + C:{completion_tokens}), "
+                f"模型={self.security_config.model_name}"
+            )
+
+            # 异步记录 token 使用
+            asyncio.create_task(
+                self._token_usage_storage.record(
+                    TokenUsage(
+                        timestamp=datetime.now().isoformat(),
+                        model_name=self.security_config.model_name,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=total_tokens,
+                        duration_seconds=duration,
+                        call_type="injection_response",
+                        success=True,
+                    )
+                )
+            )
+
             content = self._extract_choices_content(result).strip()
 
             # 去除所有换行符，确保 XML 格式正确
@@ -76,6 +112,7 @@ class InjectionResponseAgent:
 
             return content if content else "无聊。"
         except Exception as e:
+            duration = time.perf_counter() - start_time
             logger.exception(f"生成嘲讽回复失败: {e}")
             # 失败时返回默认回复
             return "有病？"

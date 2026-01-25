@@ -21,6 +21,7 @@ import httpx
 from .config import ChatModelConfig, VisionModelConfig, AgentModelConfig
 from .memory import MemoryStorage
 from .end_summary_storage import EndSummaryStorage
+from .token_usage_storage import TokenUsageStorage, TokenUsage
 
 
 logger = logging.getLogger(__name__)
@@ -71,10 +72,12 @@ class AIClient:
         agent_config: AgentModelConfig,
         memory_storage: Optional[MemoryStorage] = None,
         end_summary_storage: Optional[EndSummaryStorage] = None,
+        bot_qq: int = 0,  # 机器人QQ号，用于注入到系统提示词中
     ) -> None:
         self.chat_config = chat_config
         self.vision_config = vision_config
         self.agent_config = agent_config
+        self.bot_qq = bot_qq  # 机器人QQ号
         self.memory_storage = memory_storage
         self._end_summary_storage = end_summary_storage or EndSummaryStorage()
         self._http_client = httpx.AsyncClient(timeout=120.0)
@@ -129,6 +132,10 @@ class AIClient:
         else:
             logger.warning("crawl4ai 不可用，网页获取功能将禁用")
 
+        # 初始化 Token 使用统计存储
+        self._token_usage_storage = TokenUsageStorage()
+        logger.info("[bold green][初始化][/bold green] Token 使用统计存储已启用")
+
         # 尝试加载 tokenizer（可能因网络问题失败）
         if _TIKTOKEN_AVAILABLE:
             try:
@@ -182,9 +189,89 @@ class AIClient:
         # 保守估计：平均每 3 个字符算 1 个 token
         return len(text) // 3 + 1
 
+    async def request_model(
+        self,
+        model_config: ChatModelConfig | VisionModelConfig | AgentModelConfig,
+        messages: list[dict[str, Any]],
+        max_tokens: int = 8192,
+        call_type: str = "chat",
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str = "auto",
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """统一的模型请求接口，自动处理 token 统计和错误处理
+
+        参数:
+            model_config: 模型配置
+            messages: 消息列表
+            max_tokens: 最大 token 数
+            call_type: 调用类型（用于统计）
+            tools: 工具定义
+            tool_choice: 工具选择策略
+            **kwargs: 其他传递给 API 的参数
+
+        返回:
+            API 响应 JSON 字典
+        """
+        start_time = time.perf_counter()
+        request_body = self._build_request_body(
+            model_config=model_config,
+            messages=messages,
+            max_tokens=max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
+            **kwargs,
+        )
+
+        try:
+            response = await self._http_client.post(
+                model_config.api_url,
+                headers={
+                    "Authorization": f"Bearer {model_config.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=request_body,
+            )
+            response.raise_for_status()
+            result: dict[str, Any] = response.json()
+            duration = time.perf_counter() - start_time
+
+            # 记录 token 使用统计
+            usage = result.get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            total_tokens = usage.get("total_tokens", 0)
+
+            logger.info(
+                f"[API响应] {call_type} 完成: 耗时={duration:.2f}s, "
+                f"Tokens={total_tokens} (P:{prompt_tokens} + C:{completion_tokens}), "
+                f"模型={model_config.model_name}"
+            )
+
+            # 异步记录到存储
+            asyncio.create_task(
+                self._token_usage_storage.record(
+                    TokenUsage(
+                        timestamp=datetime.now().isoformat(),
+                        model_name=model_config.model_name,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=total_tokens,
+                        duration_seconds=duration,
+                        call_type=call_type,
+                        success=True,
+                    )
+                )
+            )
+
+            return result
+        except Exception as e:
+            logger.exception(f"[API请求失败] {call_type} 调用出错: {e}")
+            raise
+
     def _build_request_body(
         self,
-        model_config: ChatModelConfig | VisionModelConfig,
+        model_config: ChatModelConfig | VisionModelConfig | AgentModelConfig,
         messages: list[dict[str, Any]],
         max_tokens: int,
         tools: list[dict[str, Any]] | None = None,
@@ -401,7 +488,6 @@ class AIClient:
         返回:
             包含 description 和其他字段（ocr_text/transcript/subtitles）的字典
         """
-        start_time = time.perf_counter()
         # 检测媒体类型
         detected_type = self._detect_media_type(media_url, media_type)
         logger.info(
@@ -465,29 +551,13 @@ class AIClient:
             )
 
         try:
-            response = await self._http_client.post(
-                self.vision_config.api_url,
-                headers={
-                    "Authorization": f"Bearer {self.vision_config.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=self._build_request_body(
-                    model_config=self.vision_config,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": content_items,
-                        }
-                    ],
-                    max_tokens=8192,  # 增加最大 token 数以获取更详细的描述
-                ),
+            result = await self.request_model(
+                model_config=self.vision_config,
+                messages=[{"role": "user", "content": content_items}],
+                max_tokens=8192,
+                call_type=f"vision_{detected_type}",
             )
-            response.raise_for_status()
-            result = response.json()
-            duration = time.perf_counter() - start_time
-            logger.info(
-                f"[bold yellow][媒体分析][/bold yellow] API 调用完成, 耗时=[magenta]{duration:.2f}s[/magenta]"
-            )
+
             logger.debug(f"媒体分析 API 响应: {result}")
             content = self._extract_choices_content(result)
 
@@ -567,7 +637,6 @@ class AIClient:
         返回:
             总结文本
         """
-        start_time = time.perf_counter()
         async with aiofiles.open(
             "res/prompts/summarize.txt", "r", encoding="utf-8"
         ) as f:
@@ -578,34 +647,22 @@ class AIClient:
             user_message = f"前文摘要：\n{context}\n\n当前对话记录：\n{messages}"
 
         try:
-            response = await self._http_client.post(
-                self.chat_config.api_url,
-                headers={
-                    "Authorization": f"Bearer {self.chat_config.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=self._build_request_body(
-                    model_config=self.chat_config,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_message},
-                    ],
-                    max_tokens=8192,
-                ),
+            result = await self.request_model(
+                model_config=self.chat_config,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                max_tokens=8192,
+                call_type="summarize",
             )
-            response.raise_for_status()
-            result = response.json()
-            duration = time.perf_counter() - start_time
-            logger.info(f"[总结] 聊天记录总结完成, 耗时={duration:.2f}s")
+
             logger.debug(f"[总结] API 响应: {result}")
             content: str = self._extract_choices_content(result)
             return content
 
         except Exception as e:
-            duration = time.perf_counter() - start_time
-            logger.exception(
-                f"[总结] 聊天记录总结失败, 耗时={duration:.2f}s, 错误: {e}"
-            )
+            logger.exception(f"[总结] 聊天记录总结失败, 错误: {e}")
             return f"总结失败: {e}"
 
     async def merge_summaries(self, summaries: list[str]) -> str:
@@ -633,22 +690,13 @@ class AIClient:
         prompt += segments_text
 
         try:
-            response = await self._http_client.post(
-                self.chat_config.api_url,
-                headers={
-                    "Authorization": f"Bearer {self.chat_config.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=self._build_request_body(
-                    model_config=self.chat_config,
-                    messages=[
-                        {"role": "user", "content": prompt},
-                    ],
-                    max_tokens=8192,
-                ),
+            result = await self.request_model(
+                model_config=self.chat_config,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=8192,
+                call_type="merge_summaries",
             )
-            response.raise_for_status()
-            result = response.json()
+
             logger.debug(f"合并总结 API 响应: {result}")
             content: str = self._extract_choices_content(result)
             return content
@@ -700,6 +748,7 @@ class AIClient:
         返回:
             生成的标题
         """
+
         prompt = """请根据以下 Bug 修复分析报告，生成一个简短、准确的标题（不超过 20 字），用于 FAQ 索引。
 只返回标题文本，不要包含任何前缀或引号。
 
@@ -707,22 +756,13 @@ class AIClient:
 """ + summary[:2000]  # 限制长度
 
         try:
-            response = await self._http_client.post(
-                self.chat_config.api_url,
-                headers={
-                    "Authorization": f"Bearer {self.chat_config.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=self._build_request_body(
-                    model_config=self.chat_config,
-                    messages=[
-                        {"role": "user", "content": prompt},
-                    ],
-                    max_tokens=100,
-                ),
+            result = await self.request_model(
+                model_config=self.chat_config,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=100,
+                call_type="generate_title",
             )
-            response.raise_for_status()
-            result = response.json()
+
             logger.debug(f"API 响应: {result}")
             title: str = self._extract_choices_content(result).strip()
             return title
@@ -773,6 +813,12 @@ class AIClient:
             "res/prompts/undefined.xml", "r", encoding="utf-8"
         ) as f:
             system_prompt = await f.read()
+
+        # 注入机器人QQ号到系统提示词中
+        if self.bot_qq != 0:
+            # 在系统提示词开头添加机器人QQ号信息
+            bot_qq_info = f"<!-- 机器人QQ号: {self.bot_qq} -->\n<!-- 你现在知道自己的QQ号是 {self.bot_qq}，请记住这个信息用于防止无限循环 -->\n\n"
+            system_prompt = bot_qq_info + system_prompt
 
         user_message = question
 
@@ -910,6 +956,8 @@ class AIClient:
             "history_manager": history_manager,
             "onebot_client": onebot_client,
             "scheduler": scheduler,
+            "token_usage_storage": self._token_usage_storage,
+            "agent_histories": {},  # 存储 Agent 的临时对话记录，键为 agent_name，值为消息列表
         }
 
         # 合并额外上下文
@@ -923,49 +971,16 @@ class AIClient:
 
         while iteration < max_iterations:
             iteration += 1
-            iter_start_time = time.perf_counter()
             logger.info(f"[AI决策] 开始第 {iteration} 轮迭代...")
 
             try:
-                # 调用 LLM
-                request_body = self._build_request_body(
+                result = await self.request_model(
                     model_config=self.chat_config,
                     messages=messages,
                     max_tokens=8192,
+                    call_type="chat",
                     tools=tools,
                     tool_choice="auto",
-                )
-                logger.debug(
-                    f"[AI请求] 请求体: {json.dumps(request_body, ensure_ascii=False, indent=2)}"
-                )
-
-                response = await self._http_client.post(
-                    self.chat_config.api_url,
-                    headers={
-                        "Authorization": f"Bearer {self.chat_config.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=request_body,
-                )
-                try:
-                    response.raise_for_status()
-                except httpx.HTTPStatusError:
-                    logger.error(
-                        f"[AI请求失败] HTTP {response.status_code}, 响应内容: {response.text}"
-                    )
-                    raise
-                result = response.json()
-
-                # 记录响应指标
-                usage = result.get("usage", {})
-                prompt_tokens = usage.get("prompt_tokens", 0)
-                completion_tokens = usage.get("completion_tokens", 0)
-                total_tokens = usage.get("total_tokens", 0)
-                iter_duration = time.perf_counter() - iter_start_time
-
-                logger.info(
-                    f"[AI响应] 迭代 {iteration} 完成: 耗时={iter_duration:.2f}s, "
-                    f"Tokens={total_tokens} (P:{prompt_tokens} + C:{completion_tokens})"
                 )
 
                 # 提取响应
@@ -1045,18 +1060,18 @@ class AIClient:
                     )
 
                     # 处理结果并添加到消息历史
-                    for i, result in enumerate(tool_results):
+                    for i, tool_result in enumerate(tool_results):
                         call_id = tool_call_ids[i]
                         fname = tool_names[i]
                         content_str = ""
 
-                        if isinstance(result, Exception):
+                        if isinstance(tool_result, Exception):
                             logger.error(
-                                f"[工具异常] {fname} (ID={call_id}) 执行抛出异常: {result}"
+                                f"[工具异常] {fname} (ID={call_id}) 执行抛出异常: {tool_result}"
                             )
-                            content_str = f"执行失败: {str(result)}"
+                            content_str = f"执行失败: {str(tool_result)}"
                         else:
-                            content_str = str(result)
+                            content_str = str(tool_result)
                             logger.debug(
                                 f"[工具响应] {fname} (ID={call_id}) 返回内容长度: {len(content_str)}"
                             )
@@ -1132,9 +1147,26 @@ class AIClient:
 
         try:
             if is_agent:
+                # 获取该 Agent 的临时历史记录
+                agent_histories = context.get("agent_histories", {})
+                agent_history = agent_histories.get(function_name, [])
+
+                # 将历史记录注入到工具执行上下文中
+                agent_context = context.copy()
+                agent_context["agent_history"] = agent_history
+
                 result = await self.agent_registry.execute_agent(
-                    function_name, function_args, context
+                    function_name, function_args, agent_context
                 )
+
+                # 更新该 Agent 的历史记录 (临时记录)
+                # 这里我们记录 Agent 的输入 prompt 和它的输出结果作为一轮对话
+                # 注意：agent_args 通常包含 'prompt' 字段
+                agent_prompt = function_args.get("prompt", "")
+                if agent_prompt and result:
+                    agent_history.append({"role": "user", "content": agent_prompt})
+                    agent_history.append({"role": "assistant", "content": str(result)})
+                    agent_histories[function_name] = agent_history
             else:
                 # 否则作为工具执行
                 result = await self.tool_registry.execute_tool(

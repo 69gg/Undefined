@@ -66,9 +66,9 @@ class ToolRegistry(BaseRegistry):
         if mcp_tools and include_mcp:
             logger.info("=" * 60)
             if include_mcp:
-                logger.info("工具加载完成统计")
+                logger.info("工具加载完成统计 (包含 MCP)")
             else:
-                logger.info("工具加载完成统计（MCP 工具待初始化）")
+                logger.info("工具加载完成统计 (基础工具)")
             logger.info(
                 f"  - 基础工具 ({len(basic_tools)} 个): {', '.join(basic_tools) if basic_tools else '无'}"
             )

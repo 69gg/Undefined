@@ -125,11 +125,17 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     agent_config = ai_client.agent_config
 
     system_prompt: str = await _load_prompt()
+    agent_history = context.get("agent_history", [])
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"用户需求：{user_prompt}"},
     ]
+
+    # 注入该 Agent 的临时历史记录
+    if agent_history:
+        messages.extend(agent_history)
+
+    messages.append({"role": "user", "content": f"用户需求：{user_prompt}"})
 
     max_iterations: int = 20
     iteration: int = 0
@@ -138,22 +144,14 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         iteration += 1
 
         try:
-            response = await ai_client._http_client.post(
-                agent_config.api_url,
-                headers={
-                    "Authorization": f"Bearer {agent_config.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=ai_client._build_request_body(
-                    model_config=agent_config,
-                    messages=messages,
-                    max_tokens=agent_config.max_tokens,
-                    tools=tools if tools else None,
-                    tool_choice="auto",
-                ),
+            result = await ai_client.request_model(
+                model_config=agent_config,
+                messages=messages,
+                max_tokens=agent_config.max_tokens,
+                call_type="agent:web_agent",
+                tools=tools if tools else None,
+                tool_choice="auto",
             )
-            response.raise_for_status()
-            result: dict[str, Any] = response.json()
 
             choice: dict[str, Any] = result.get("choices", [{}])[0]
             message: dict[str, Any] = choice.get("message", {})

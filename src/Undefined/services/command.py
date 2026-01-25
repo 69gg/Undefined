@@ -2,6 +2,8 @@ import logging
 import re
 from datetime import datetime
 from typing import Any, Optional
+from pathlib import Path
+
 from ..config import Config
 from ..faq import FAQStorage, extract_faq_title
 from ..onebot import (
@@ -12,6 +14,15 @@ from ..onebot import (
 )
 from ..utils.sender import MessageSender
 from .security import SecurityService
+from ..token_usage_storage import TokenUsageStorage
+
+# 尝试导入 matplotlib
+try:
+    import matplotlib.pyplot as plt
+
+    _MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    _MATPLOTLIB_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +48,7 @@ class CommandDispatcher:
         self.faq_storage = faq_storage
         self.onebot = onebot
         self.security = security
+        self._token_usage_storage = TokenUsageStorage()
 
     def parse_command(self, text: str) -> Optional[dict[str, Any]]:
         """解析命令"""
@@ -53,6 +65,459 @@ class CommandDispatcher:
             "args": args_str.split() if args_str else [],
         }
 
+    def _parse_time_range(self, time_str: str) -> int:
+        """解析时间范围字符串，返回天数
+
+        参数:
+            time_str: 时间范围字符串（如 "7d", "1w", "30d"）
+
+        返回:
+            天数
+        """
+        if not time_str:
+            return 7  # 默认 7 天
+
+        time_str = time_str.lower().strip()
+
+        # 解析快捷格式
+        if time_str.endswith("d"):
+            try:
+                return int(time_str[:-1])
+            except ValueError:
+                return 7
+        elif time_str.endswith("w"):
+            try:
+                return int(time_str[:-1]) * 7
+            except ValueError:
+                return 7
+        elif time_str.endswith("m"):
+            try:
+                return int(time_str[:-1]) * 30
+            except ValueError:
+                return 7
+
+        # 尝试直接解析为数字（默认为天）
+        try:
+            return int(time_str)
+        except ValueError:
+            return 7
+
+    async def _handle_stats(self, group_id: int, args: list[str]) -> None:
+        """处理 /stats 命令，生成 token 使用统计图表
+
+        参数:
+            group_id: 群组 ID
+            args: 命令参数（时间范围，如 "7d", "1w", "30d"）
+        """
+        # 检查 matplotlib 是否可用
+        if not _MATPLOTLIB_AVAILABLE:
+            await self.sender.send_group_message(
+                group_id, "❌ 缺少必要的库，无法生成图表。请安装 matplotlib 和 pandas。"
+            )
+            return
+
+        # 解析时间范围
+        days = 7
+        if args and args[0] != "--help":
+            days = self._parse_time_range(args[0])
+
+        # 显示帮助信息
+        if args and args[0] == "--help":
+            help_text = """📊 /stats 命令帮助
+
+用法：
+  /stats [时间范围]
+
+时间范围格式：
+  7d  - 最近 7 天（默认）
+  1w  - 最近 1 周
+  30d - 最近 30 天
+  1m  - 最近 1 个月
+
+示例：
+  /stats        - 显示最近 7 天的统计
+  /stats 30d    - 显示最近 30 天的统计
+  /stats --help - 显示帮助信息
+
+生成的图表包括：
+  • 折线图：token 使用量随时间的变化趋势
+  • 柱状图：不同模型的 token 使用量对比
+  • 饼图：prompt 和 completion token 的比例
+  • 统计表格：调用次数、平均耗时等统计信息"""
+            await self.sender.send_group_message(group_id, help_text)
+            return
+
+        try:
+            # 获取统计数据
+            summary = await self._token_usage_storage.get_summary(days=days)
+
+            if summary["total_calls"] == 0:
+                await self.sender.send_group_message(
+                    group_id, f"📊 No token usage records in the last {days} days."
+                )
+                return
+
+            # 生成图表
+            img_dir = Path.cwd() / "img"
+            img_dir.mkdir(exist_ok=True)
+
+            # 1. 折线图：时间趋势
+            await self._generate_line_chart(summary, img_dir, days)
+
+            # 2. 柱状图：模型对比
+            await self._generate_bar_chart(summary, img_dir)
+
+            # 3. 饼图：输入/输出比例
+            await self._generate_pie_chart(summary, img_dir)
+
+            # 4. 统计表格
+            await self._generate_stats_table(summary, img_dir)
+
+            # 构造合并转发消息
+            forward_messages = []
+
+            # 添加标题消息
+            title_message = f"📊 Token Usage Statistics for Last {days} Days:"
+            forward_messages.append(
+                {
+                    "type": "node",
+                    "data": {
+                        "name": "Bot",
+                        "uin": str(self.config.bot_qq),
+                        "content": title_message,
+                    },
+                }
+            )
+
+            # 添加折线图
+            line_chart_path = img_dir / "stats_line_chart.png"
+            if line_chart_path.exists():
+                forward_messages.append(
+                    {
+                        "type": "node",
+                        "data": {
+                            "name": "Bot",
+                            "uin": str(self.config.bot_qq),
+                            "content": f"[CQ:image,file={str(line_chart_path.absolute())}]",
+                        },
+                    }
+                )
+
+            # 添加柱状图
+            bar_chart_path = img_dir / "stats_bar_chart.png"
+            if bar_chart_path.exists():
+                forward_messages.append(
+                    {
+                        "type": "node",
+                        "data": {
+                            "name": "Bot",
+                            "uin": str(self.config.bot_qq),
+                            "content": f"[CQ:image,file={str(bar_chart_path.absolute())}]",
+                        },
+                    }
+                )
+
+            # 添加饼图
+            pie_chart_path = img_dir / "stats_pie_chart.png"
+            if pie_chart_path.exists():
+                forward_messages.append(
+                    {
+                        "type": "node",
+                        "data": {
+                            "name": "Bot",
+                            "uin": str(self.config.bot_qq),
+                            "content": f"[CQ:image,file={str(pie_chart_path.absolute())}]",
+                        },
+                    }
+                )
+
+            # 添加统计表格
+            stats_table_path = img_dir / "stats_table.png"
+            if stats_table_path.exists():
+                forward_messages.append(
+                    {
+                        "type": "node",
+                        "data": {
+                            "name": "Bot",
+                            "uin": str(self.config.bot_qq),
+                            "content": f"[CQ:image,file={str(stats_table_path.absolute())}]",
+                        },
+                    }
+                )
+
+            # 添加文本摘要
+            summary_text = f"""📈 Summary:
+• Total Calls: {summary["total_calls"]}
+• Total Tokens: {summary["total_tokens"]:,}
+  └─ Input: {summary["prompt_tokens"]:,}
+  └─ Output: {summary["completion_tokens"]:,}
+• Avg Duration: {summary["avg_duration"]:.2f}s
+• Model Count: {len(summary["models"])}"""
+            forward_messages.append(
+                {
+                    "type": "node",
+                    "data": {
+                        "name": "Bot",
+                        "uin": str(self.config.bot_qq),
+                        "content": summary_text,
+                    },
+                }
+            )
+
+            # 发送合并转发消息
+            await self.onebot.send_forward_msg(group_id, forward_messages)
+
+        except Exception as e:
+            logger.exception(f"[Stats] 生成统计图表失败: {e}")
+            await self.sender.send_group_message(group_id, f"❌ 生成统计图表失败: {e}")
+
+    async def _generate_line_chart(
+        self, summary: dict[str, Any], img_dir: Path, days: int
+    ) -> None:
+        """生成折线图：时间趋势"""
+        daily_stats = summary["daily_stats"]
+        if not daily_stats:
+            return
+
+        # 准备数据
+        dates = sorted(daily_stats.keys())
+        tokens = [daily_stats[d]["tokens"] for d in dates]
+        prompt_tokens = [daily_stats[d]["prompt_tokens"] for d in dates]
+        completion_tokens = [daily_stats[d]["completion_tokens"] for d in dates]
+
+        # 创建图表
+        fig, ax = plt.subplots(figsize=(12, 7))
+
+        # 绘制折线
+        ax.plot(
+            dates, tokens, marker="o", linewidth=2, label="Total Token", color="#2196F3"
+        )
+        ax.plot(
+            dates,
+            prompt_tokens,
+            marker="s",
+            linewidth=2,
+            label="Input Token",
+            color="#4CAF50",
+        )
+        ax.plot(
+            dates,
+            completion_tokens,
+            marker="^",
+            linewidth=2,
+            label="Output Token",
+            color="#FF9800",
+        )
+
+        # 设置标题和标签
+        ax.set_title(
+            f"Token Usage Trend for Last {days} Days", fontsize=16, fontweight="bold"
+        )
+        ax.set_xlabel("Date", fontsize=12)
+        ax.set_ylabel("Token Count", fontsize=12)
+        ax.legend(loc="upper left", fontsize=10)
+        ax.grid(True, alpha=0.3)
+
+        # 旋转 x 轴标签
+        plt.xticks(rotation=45, ha="right")
+
+        # 调整布局
+        plt.tight_layout()
+
+        # 保存图表
+        filepath = img_dir / "stats_line_chart.png"
+        plt.savefig(filepath, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+    async def _generate_bar_chart(self, summary: dict[str, Any], img_dir: Path) -> None:
+        """生成柱状图：模型对比"""
+        models = summary["models"]
+        if not models:
+            return
+
+        # 准备数据
+        model_names = list(models.keys())
+        tokens = [models[m]["tokens"] for m in model_names]
+        prompt_tokens = [models[m]["prompt_tokens"] for m in model_names]
+        completion_tokens = [models[m]["completion_tokens"] for m in model_names]
+
+        # 创建图表
+        fig, ax = plt.subplots(figsize=(14, 8))
+
+        # 设置柱状图位置
+        x = range(len(model_names))
+        width = 0.25
+
+        # 绘制柱状图
+        bars1 = ax.bar(
+            [i - width for i in x],
+            tokens,
+            width,
+            label="Total Token",
+            color="#2196F3",
+            alpha=0.8,
+        )
+        bars2 = ax.bar(
+            x,
+            prompt_tokens,
+            width,
+            label="Input Token",
+            color="#4CAF50",
+            alpha=0.8,
+        )
+        bars3 = ax.bar(
+            [i + width for i in x],
+            completion_tokens,
+            width,
+            label="Output Token",
+            color="#FF9800",
+            alpha=0.8,
+        )
+
+        # 设置标题和标签
+        ax.set_title("Token Usage Comparison by Model", fontsize=16, fontweight="bold")
+        ax.set_xlabel("Model", fontsize=12)
+        ax.set_ylabel("Token Count", fontsize=12)
+        ax.set_xticks(x)
+        ax.set_xticklabels(model_names, rotation=45, ha="right")
+        ax.legend(loc="upper right", fontsize=10)
+        ax.grid(True, alpha=0.3, axis="y")
+
+        # 在柱子上添加数值标签
+        for bars in [bars1, bars2, bars3]:
+            for bar in bars:
+                height = bar.get_height()
+                if height > 0:
+                    ax.text(
+                        bar.get_x() + bar.get_width() / 2.0,
+                        height,
+                        f"{int(height):,}",
+                        ha="center",
+                        va="bottom",
+                        fontsize=8,
+                    )
+
+        # 调整布局
+        plt.tight_layout()
+
+        # 保存图表
+        filepath = img_dir / "stats_bar_chart.png"
+        plt.savefig(filepath, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+    async def _generate_pie_chart(self, summary: dict[str, Any], img_dir: Path) -> None:
+        """生成饼图：输入/输出比例"""
+        prompt_tokens = summary["prompt_tokens"]
+        completion_tokens = summary["completion_tokens"]
+
+        if prompt_tokens == 0 and completion_tokens == 0:
+            return
+
+        # 创建图表
+        fig, ax = plt.subplots(figsize=(12, 8))
+
+        # 准备数据
+        labels = ["Input Token", "Output Token"]
+        sizes = [prompt_tokens, completion_tokens]
+        colors = ["#4CAF50", "#FF9800"]
+        explode = (0.05, 0.05)  # 突出显示
+
+        # 绘制饼图
+        wedges, *_ = ax.pie(
+            sizes,
+            explode=explode,
+            labels=labels,
+            colors=colors,
+            autopct="%1.1f%%",
+            startangle=90,
+            textprops={"fontsize": 12},
+        )
+
+        # 设置标题
+        ax.set_title("Input/Output Token Ratio", fontsize=16, fontweight="bold", pad=20)
+
+        # 添加图例
+        ax.legend(
+            wedges,
+            [f"{labels[i]}: {sizes[i]:,}" for i in range(len(labels))],
+            loc="center left",
+            bbox_to_anchor=(1, 0, 0.5, 1),
+            fontsize=10,
+        )
+
+        # 调整布局
+        plt.tight_layout()
+
+        # 保存图表
+        filepath = img_dir / "stats_pie_chart.png"
+        plt.savefig(filepath, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+    async def _generate_stats_table(
+        self, summary: dict[str, Any], img_dir: Path
+    ) -> None:
+        """生成统计表格"""
+        models = summary["models"]
+        if not models:
+            return
+
+        # 准备数据
+        model_names = list(models.keys())
+        data = []
+        for model in model_names:
+            m = models[model]
+            data.append(
+                [
+                    model,
+                    m["calls"],
+                    f"{m['tokens']:,}",
+                    f"{m['prompt_tokens']:,}",
+                    f"{m['completion_tokens']:,}",
+                ]
+            )
+
+        # 创建图表
+        fig, ax = plt.subplots(figsize=(14, 9))
+        ax.axis("tight")
+        ax.axis("off")
+
+        # 创建表格
+        table = ax.table(
+            cellText=data,
+            colLabels=["Model", "Calls", "Total Token", "Input Token", "Output Token"],
+            cellLoc="center",
+            loc="center",
+        )
+
+        # 设置表格样式
+        table.auto_set_font_size(False)
+        table.set_fontsize(10)
+        table.scale(1.2, 1.5)
+
+        # 设置表头样式
+        for i in range(5):
+            table[(0, i)].set_facecolor("#2196F3")
+            table[(0, i)].set_text_props(weight="bold", color="white")
+
+        # 设置行样式
+        for i in range(1, len(data) + 1):
+            for j in range(5):
+                if i % 2 == 0:
+                    table[(i, j)].set_facecolor("#f0f0f0")
+
+        # 设置标题
+        ax.set_title(
+            "Model Usage Statistics Details", fontsize=16, fontweight="bold", pad=20
+        )
+
+        # 调整布局
+        plt.tight_layout()
+
+        # 保存图表
+        filepath = img_dir / "stats_table.png"
+        plt.savefig(filepath, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
     async def dispatch(
         self, group_id: int, sender_id: int, command: dict[str, Any]
     ) -> None:
@@ -66,6 +531,10 @@ class CommandDispatcher:
             # 公开命令
             if cmd_name == "help":
                 await self._handle_help(group_id)
+            elif cmd_name == "stats":
+                await self._check_rate_limit_and_handle(
+                    group_id, sender_id, self._handle_stats, group_id, cmd_args
+                )
             elif cmd_name == "lsfaq":
                 await self._check_rate_limit_and_handle(
                     group_id, sender_id, self._handle_lsfaq, group_id
