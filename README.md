@@ -157,6 +157,128 @@ Undefined 支持 **MCP (Model Context Protocol)** 协议，可以连接外部 MC
 
 ## 技术架构
 
+以下是 Undefined 的系统架构全景图：
+
+```mermaid
+graph TB
+    %% 外部实体
+    User([用户 User])
+    Admin([管理员 Admin])
+    OneBotPlatform[OneBot 协议端\n(NapCat / Lagrange)]
+    LLM_API[大模型 API\n(OpenAI / Claude / DeepSeek)]
+
+    %% 核心入口
+    subgraph Core [核心接入层]
+        Main[main.py 启动入口]
+        Config[Config 配置管理]
+        OneBotClient[OneBot Client\n(WebSocket 通信)]
+    end
+
+    %% 消息处理流
+    subgraph Processing [消息处理流]
+        MessageHandler[MessageHandler 消息分发]
+        
+        subgraph Security [安全防线]
+            SecurityService[SecurityService 注入检测]
+            SecurityModel[安全模型]
+        end
+        
+        CommandDispatcher[CommandDispatcher 指令分发]
+        
+        subgraph AI_Coordination [AI 协调与调度]
+            AICoordinator[AICoordinator 协调器]
+            
+            subgraph QueueSystem ["车站-列车" 队列系统]
+                QueueManager[QueueManager]
+                
+                subgraph ModelQueues [ModelQueue (按模型隔离)]
+                    Q_Admin[超级管理员队列]
+                    Q_Private[私聊队列]
+                    Q_Mention[群聊@队列]
+                    Q_Normal[群聊普通队列]
+                end
+                
+                DispatcherLoop((1Hz 非阻塞发车循环))
+            end
+        end
+    end
+
+    %% AI 核心与大脑
+    subgraph Brain [AI 核心能力层]
+        AIClient[AIClient 统一接口]
+        
+        subgraph Context [上下文管理]
+            HistoryManager[MessageHistoryManager]
+            MemoryStorage[Memory 长期记忆]
+        end
+        
+        subgraph SkillsSystem [Skills 技能系统]
+            ToolRegistry[ToolRegistry 工具注册]
+            AgentRegistry[AgentRegistry 代理注册]
+            
+            subgraph AtomicTools [基础工具 Tools]
+                T_End[end 结束对话]
+                T_Python[python_interpreter]
+                T_Time[get_current_time]
+            end
+            
+            subgraph IntelligentAgents [智能体 Agents]
+                A_Web[WebAgent 网络搜索]
+                A_Code[CodeAnalysisAgent 代码分析]
+                A_Info[InfoAgent 信息查询]
+                A_Social[SocialAgent 社交互动]
+            end
+            
+            subgraph Extensions [扩展]
+                MCP_Client[MCP Client]
+                Ext_MCP[外部 MCP Server]
+            end
+        end
+    end
+
+    %% 连线关系
+    User -->|发送消息| OneBotPlatform
+    Admin -->|管理指令| OneBotPlatform
+    OneBotPlatform <-->|WS Event/API| OneBotClient
+    
+    Main --> OneBotClient
+    Main --> Config
+    
+    OneBotClient -->|Event| MessageHandler
+    
+    MessageHandler -->|1.检测| SecurityService
+    SecurityService -.->|API Call| SecurityModel
+    
+    MessageHandler -->|2.指令?| CommandDispatcher
+    CommandDispatcher -->|Execute| OneBotClient
+    
+    MessageHandler -->|3.自动回复| AICoordinator
+    AICoordinator -->|构建 Context| HistoryManager
+    AICoordinator -->|入队请求| QueueManager
+    
+    QueueManager -->|分发| ModelQueues
+    ModelQueues -->|轮询取值| DispatcherLoop
+    
+    DispatcherLoop -->|异步执行| AIClient
+    
+    AIClient <-->|API Request| LLM_API
+    AIClient <-->|调用| ToolRegistry
+    ToolRegistry --> SkillsSystem
+    MCP_Client <-->|Protocol| Ext_MCP
+    
+    AtomicTools -->|Action| OneBotClient
+    IntelligentAgents -->|Recursive Call| AIClient
+    
+    AIClient -->|Reply Text| OneBotClient
+    
+    %% 样式
+    style QueueSystem fill:#e1f5fe,stroke:#01579b
+    style ModelQueues fill:#b3e5fc,stroke:#0277bd
+    style DispatcherLoop fill:#ffe0b2,stroke:#ff6f00,stroke-width:2px
+    style AIClient fill:#d1c4e9,stroke:#512da8,stroke-width:2px
+    style SkillsSystem fill:#f0f4c3,stroke:#827717
+```
+
 ### Skills 插件系统
 
 Undefined 的核心能力源自其强大的插件系统，位于 `src/Undefined/skills`：
