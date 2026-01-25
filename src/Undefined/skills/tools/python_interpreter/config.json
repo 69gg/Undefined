@@ -1,0 +1,19 @@
+{
+    "type": "function",
+    "function": {
+        "name": "python_interpreter",
+        "description": "在隔离的 Docker 容器中执行 Python 代码。适用于数学计算、数据处理和逻辑验证。无法访问网络或宿主机文件系统。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "要执行的 Python 代码。"
+                }
+            },
+            "required": [
+                "code"
+            ]
+        }
+    }
+}
