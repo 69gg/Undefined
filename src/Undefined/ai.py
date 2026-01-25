@@ -72,10 +72,12 @@ class AIClient:
         agent_config: AgentModelConfig,
         memory_storage: Optional[MemoryStorage] = None,
         end_summary_storage: Optional[EndSummaryStorage] = None,
+        bot_qq: int = 0,  # 机器人QQ号，用于注入到系统提示词中
     ) -> None:
         self.chat_config = chat_config
         self.vision_config = vision_config
         self.agent_config = agent_config
+        self.bot_qq = bot_qq  # 机器人QQ号
         self.memory_storage = memory_storage
         self._end_summary_storage = end_summary_storage or EndSummaryStorage()
         self._http_client = httpx.AsyncClient(timeout=120.0)
@@ -899,6 +901,12 @@ class AIClient:
             "res/prompts/undefined.xml", "r", encoding="utf-8"
         ) as f:
             system_prompt = await f.read()
+
+        # 注入机器人QQ号到系统提示词中
+        if self.bot_qq != 0:
+            # 在系统提示词开头添加机器人QQ号信息
+            bot_qq_info = f"<!-- 机器人QQ号: {self.bot_qq} -->\n<!-- 你现在知道自己的QQ号是 {self.bot_qq}，请记住这个信息用于防止无限循环 -->\n\n"
+            system_prompt = bot_qq_info + system_prompt
 
         user_message = question
 
