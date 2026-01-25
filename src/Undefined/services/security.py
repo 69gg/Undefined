@@ -73,7 +73,7 @@ class SecurityService:
                     },
                     {"role": "user", "content": xml_message},
                 ],
-                "max_tokens": 10,
+                "max_tokens": security_config.max_tokens,
             }
 
             # 添加 thinking 参数（如果启用）
