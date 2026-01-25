@@ -147,17 +147,13 @@ class CommandDispatcher:
             await self.sender.send_group_message(group_id, help_text)
             return
 
-        await self.sender.send_group_message(
-            group_id, f"📊 正在生成最近 {days} 天的 token 使用统计图表，请稍候..."
-        )
-
         try:
             # 获取统计数据
             summary = await self._token_usage_storage.get_summary(days=days)
 
             if summary["total_calls"] == 0:
                 await self.sender.send_group_message(
-                    group_id, f"📊 最近 {days} 天没有 token 使用记录。"
+                    group_id, f"📊 No token usage records in the last {days} days."
                 )
                 return
 
@@ -177,48 +173,87 @@ class CommandDispatcher:
             # 4. 统计表格
             await self._generate_stats_table(summary, img_dir)
 
-            # 发送图表
-            await self.sender.send_group_message(
-                group_id, f"📊 最近 {days} 天的 token 使用统计："
-            )
+            # 构造合并转发消息
+            forward_messages = []
+            
+            # 添加标题消息
+            title_message = f"📊 Token Usage Statistics for Last {days} Days:"
+            forward_messages.append({
+                "type": "node",
+                "data": {
+                    "name": "Bot",
+                    "uin": str(self.config.bot_qq),
+                    "content": title_message
+                }
+            })
 
-            # 发送折线图
+            # 添加折线图
             line_chart_path = img_dir / "stats_line_chart.png"
             if line_chart_path.exists():
-                await self.sender.send_group_message(
-                    group_id, f"[CQ:image,file={str(line_chart_path.absolute())}]"
-                )
+                forward_messages.append({
+                    "type": "node",
+                    "data": {
+                        "name": "Bot",
+                        "uin": str(self.config.bot_qq),
+                        "content": f"[CQ:image,file={str(line_chart_path.absolute())}]"
+                    }
+                })
 
-            # 发送柱状图
+            # 添加柱状图
             bar_chart_path = img_dir / "stats_bar_chart.png"
             if bar_chart_path.exists():
-                await self.sender.send_group_message(
-                    group_id, f"[CQ:image,file={str(bar_chart_path.absolute())}]"
-                )
+                forward_messages.append({
+                    "type": "node",
+                    "data": {
+                        "name": "Bot",
+                        "uin": str(self.config.bot_qq),
+                        "content": f"[CQ:image,file={str(bar_chart_path.absolute())}]"
+                    }
+                })
 
-            # 发送饼图
+            # 添加饼图
             pie_chart_path = img_dir / "stats_pie_chart.png"
             if pie_chart_path.exists():
-                await self.sender.send_group_message(
-                    group_id, f"[CQ:image,file={str(pie_chart_path.absolute())}]"
-                )
+                forward_messages.append({
+                    "type": "node",
+                    "data": {
+                        "name": "Bot",
+                        "uin": str(self.config.bot_qq),
+                        "content": f"[CQ:image,file={str(pie_chart_path.absolute())}]"
+                    }
+                })
 
-            # 发送统计表格
+            # 添加统计表格
             stats_table_path = img_dir / "stats_table.png"
             if stats_table_path.exists():
-                await self.sender.send_group_message(
-                    group_id, f"[CQ:image,file={str(stats_table_path.absolute())}]"
-                )
+                forward_messages.append({
+                    "type": "node",
+                    "data": {
+                        "name": "Bot",
+                        "uin": str(self.config.bot_qq),
+                        "content": f"[CQ:image,file={str(stats_table_path.absolute())}]"
+                    }
+                })
 
-            # 发送文本摘要
-            summary_text = f"""📈 统计摘要：
-• 总调用次数：{summary["total_calls"]}
-• 总 Token 数：{summary["total_tokens"]:,}
-  └─ 输入：{summary["prompt_tokens"]:,}
-  └─ 输出：{summary["completion_tokens"]:,}
-• 平均耗时：{summary["avg_duration"]:.2f} 秒
-• 模型数量：{len(summary["models"])}"""
-            await self.sender.send_group_message(group_id, summary_text)
+            # 添加文本摘要
+            summary_text = f"""📈 Summary:
+• Total Calls: {summary["total_calls"]}
+• Total Tokens: {summary["total_tokens"]:,}
+  └─ Input: {summary["prompt_tokens"]:,}
+  └─ Output: {summary["completion_tokens"]:,}
+• Avg Duration: {summary["avg_duration"]:.2f}s
+• Model Count: {len(summary["models"])}"""
+            forward_messages.append({
+                "type": "node",
+                "data": {
+                    "name": "Bot",
+                    "uin": str(self.config.bot_qq),
+                    "content": summary_text
+                }
+            })
+
+            # 发送合并转发消息
+            await self.onebot.send_forward_msg(group_id, forward_messages)
 
         except Exception as e:
             logger.exception(f"[Stats] 生成统计图表失败: {e}")
@@ -263,9 +298,9 @@ class CommandDispatcher:
         )
 
         # 设置标题和标签
-        ax.set_title(f"最近 {days} 天的 Token 使用趋势", fontsize=16, fontweight="bold")
-        ax.set_xlabel("日期", fontsize=12)
-        ax.set_ylabel("Token 数量", fontsize=12)
+        ax.set_title(f"Token Usage Trend for Last {days} Days", fontsize=16, fontweight="bold")
+        ax.set_xlabel("Date", fontsize=12)
+        ax.set_ylabel("Token Count", fontsize=12)
         ax.legend(loc="upper left", fontsize=10)
         ax.grid(True, alpha=0.3)
 
@@ -326,9 +361,9 @@ class CommandDispatcher:
         )
 
         # 设置标题和标签
-        ax.set_title("不同模型的 Token 使用量对比", fontsize=16, fontweight="bold")
-        ax.set_xlabel("模型", fontsize=12)
-        ax.set_ylabel("Token 数量", fontsize=12)
+        ax.set_title("Token Usage Comparison by Model", fontsize=16, fontweight="bold")
+        ax.set_xlabel("Model", fontsize=12)
+        ax.set_ylabel("Token Count", fontsize=12)
         ax.set_xticks(x)
         ax.set_xticklabels(model_names, rotation=45, ha="right")
         ax.legend(loc="upper right", fontsize=10)
@@ -368,7 +403,7 @@ class CommandDispatcher:
         fig, ax = plt.subplots(figsize=(8, 8))
 
         # 准备数据
-        labels = ["输入 Token", "输出 Token"]
+        labels = ["Input Token", "Output Token"]
         sizes = [prompt_tokens, completion_tokens]
         colors = ["#4CAF50", "#FF9800"]
         explode = (0.05, 0.05)  # 突出显示
@@ -385,7 +420,7 @@ class CommandDispatcher:
         )
 
         # 设置标题
-        ax.set_title("输入/输出 Token 比例", fontsize=16, fontweight="bold", pad=20)
+        ax.set_title("Input/Output Token Ratio", fontsize=16, fontweight="bold", pad=20)
 
         # 添加图例
         ax.legend(
@@ -435,7 +470,7 @@ class CommandDispatcher:
         # 创建表格
         table = ax.table(
             cellText=data,
-            colLabels=["模型", "调用次数", "总 Token", "输入 Token", "输出 Token"],
+            colLabels=["Model", "Calls", "Total Token", "Input Token", "Output Token"],
             cellLoc="center",
             loc="center",
         )
@@ -457,7 +492,7 @@ class CommandDispatcher:
                     table[(i, j)].set_facecolor("#f0f0f0")
 
         # 设置标题
-        ax.set_title("模型使用统计详情", fontsize=16, fontweight="bold", pad=20)
+        ax.set_title("Model Usage Statistics Details", fontsize=16, fontweight="bold", pad=20)
 
         # 调整布局
         plt.tight_layout()
