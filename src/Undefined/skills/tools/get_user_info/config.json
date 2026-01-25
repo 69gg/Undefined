@@ -1,0 +1,24 @@
+{
+    "type": "function",
+    "function": {
+        "name": "get_user_info",
+        "description": "获取 QQ 用户的详细信息，包括昵称、性别、年龄、等级、点赞数等。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "user_id": {
+                    "type": "integer",
+                    "description": "要查询的 QQ 号"
+                },
+                "no_cache": {
+                    "type": "boolean",
+                    "description": "是否不使用缓存获取最新信息，默认 false",
+                    "default": false
+                }
+            },
+            "required": [
+                "user_id"
+            ]
+        }
+    }
+}

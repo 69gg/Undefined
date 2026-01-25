@@ -1,0 +1,30 @@
+{
+    "type": "function",
+    "function": {
+        "name": "get_member_list",
+        "description": "获取群成员列表。可以指定获取的数量，或者按权限（群主、管理员、普通成员）进行筛选。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "群号。如果已在群聊中，通常会自动获取。"
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "获取的数量限制（默认返回前 20 条）",
+                    "default": 20
+                },
+                "role": {
+                    "type": "string",
+                    "description": "按权限筛选：owner(群主), admin(管理员), member(普通成员)。留空则获取所有类型的成员。",
+                    "enum": [
+                        "owner",
+                        "admin",
+                        "member"
+                    ]
+                }
+            }
+        }
+    }
+}
