@@ -40,6 +40,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
         result_parts = ["【QQ用户信息】"]
 
+        # 添加头像 URL (常用 API)
+        result_parts.append(
+            f"头像: http://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640"
+        )
+
         # 处理性别
         sex = user_info.get("sex")
         if sex == "male":
@@ -61,8 +66,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             "signature": "签名",
             "birthday": "生日",
             "location": "地区",
+            "area": "地区",
+            "level": "等级",
         }
         for field, display_name in extra_fields.items():
+            if field in FIELD_MAPPING:
+                continue
             value = user_info.get(field)
             if value is not None and value != "":
                 result_parts.append(f"{display_name}: {value}")
