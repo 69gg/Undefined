@@ -5,6 +5,9 @@ import json
 import asyncio
 import aiofiles
 import logging
+from datetime import datetime
+
+from ...token_usage_storage import TokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +159,30 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             )
             response.raise_for_status()
             result: dict[str, Any] = response.json()
+
+            # 记录 token 使用统计
+            usage = result.get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            total_tokens = usage.get("total_tokens", 0)
+
+            # 获取 token_usage_storage
+            token_usage_storage = context.get("token_usage_storage")
+            if token_usage_storage:
+                asyncio.create_task(
+                    token_usage_storage.record(
+                        TokenUsage(
+                            timestamp=datetime.now().isoformat(),
+                            model_name=agent_config.model_name,
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            total_tokens=total_tokens,
+                            duration_seconds=0.0,
+                            call_type="agent:naga_code_analysis_agent",
+                            success=True,
+                        )
+                    )
+                )
 
             choice: dict[str, Any] = result.get("choices", [{}])[0]
             message: dict[str, Any] = choice.get("message", {})

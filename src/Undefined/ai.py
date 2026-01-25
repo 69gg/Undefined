@@ -21,6 +21,7 @@ import httpx
 from .config import ChatModelConfig, VisionModelConfig, AgentModelConfig
 from .memory import MemoryStorage
 from .end_summary_storage import EndSummaryStorage
+from .token_usage_storage import TokenUsageStorage, TokenUsage
 
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,10 @@ class AIClient:
             logger.info("crawl4ai 可用，网页获取功能已启用")
         else:
             logger.warning("crawl4ai 不可用，网页获取功能将禁用")
+
+        # 初始化 Token 使用统计存储
+        self._token_usage_storage = TokenUsageStorage()
+        logger.info("[bold green][初始化][/bold green] Token 使用统计存储已启用")
 
         # 尝试加载 tokenizer（可能因网络问题失败）
         if _TIKTOKEN_AVAILABLE:
@@ -485,9 +490,36 @@ class AIClient:
             response.raise_for_status()
             result = response.json()
             duration = time.perf_counter() - start_time
+
+            # 记录 token 使用统计
+            usage = result.get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            total_tokens = usage.get("total_tokens", 0)
+
             logger.info(
-                f"[bold yellow][媒体分析][/bold yellow] API 调用完成, 耗时=[magenta]{duration:.2f}s[/magenta]"
+                f"[bold yellow][媒体分析][/bold yellow] API 调用完成, "
+                f"耗时=[magenta]{duration:.2f}s[/magenta], "
+                f"Tokens=[cyan]{total_tokens}[/cyan] (P:[cyan]{prompt_tokens}[/cyan] + C:[cyan]{completion_tokens}[/cyan]), "
+                f"模型=[cyan]{self.vision_config.model_name}[/cyan]"
             )
+
+            # 异步记录 token 使用
+            asyncio.create_task(
+                self._token_usage_storage.record(
+                    TokenUsage(
+                        timestamp=datetime.now().isoformat(),
+                        model_name=self.vision_config.model_name,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=total_tokens,
+                        duration_seconds=duration,
+                        call_type=f"vision_{detected_type}",
+                        success=True,
+                    )
+                )
+            )
+
             logger.debug(f"媒体分析 API 响应: {result}")
             content = self._extract_choices_content(result)
 
@@ -596,7 +628,35 @@ class AIClient:
             response.raise_for_status()
             result = response.json()
             duration = time.perf_counter() - start_time
-            logger.info(f"[总结] 聊天记录总结完成, 耗时={duration:.2f}s")
+
+            # 记录 token 使用统计
+            usage = result.get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            total_tokens = usage.get("total_tokens", 0)
+
+            logger.info(
+                f"[总结] 聊天记录总结完成, 耗时={duration:.2f}s, "
+                f"Tokens={total_tokens} (P:{prompt_tokens} + C:{completion_tokens}), "
+                f"模型={self.chat_config.model_name}"
+            )
+
+            # 异步记录 token 使用
+            asyncio.create_task(
+                self._token_usage_storage.record(
+                    TokenUsage(
+                        timestamp=datetime.now().isoformat(),
+                        model_name=self.chat_config.model_name,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=total_tokens,
+                        duration_seconds=duration,
+                        call_type="summarize",
+                        success=True,
+                    )
+                )
+            )
+
             logger.debug(f"[总结] API 响应: {result}")
             content: str = self._extract_choices_content(result)
             return content
@@ -619,6 +679,8 @@ class AIClient:
         """
         if len(summaries) == 1:
             return summaries[0]
+
+        start_time = time.perf_counter()
 
         # 构建分段内容
         segments = []
@@ -649,11 +711,42 @@ class AIClient:
             )
             response.raise_for_status()
             result = response.json()
+            duration = time.perf_counter() - start_time
+
+            # 记录 token 使用统计
+            usage = result.get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            total_tokens = usage.get("total_tokens", 0)
+
+            logger.info(
+                f"[合并总结] 完成, 耗时={duration:.2f}s, "
+                f"Tokens={total_tokens} (P:{prompt_tokens} + C:{completion_tokens}), "
+                f"模型={self.chat_config.model_name}"
+            )
+
+            # 异步记录 token 使用
+            asyncio.create_task(
+                self._token_usage_storage.record(
+                    TokenUsage(
+                        timestamp=datetime.now().isoformat(),
+                        model_name=self.chat_config.model_name,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=total_tokens,
+                        duration_seconds=duration,
+                        call_type="merge_summaries",
+                        success=True,
+                    )
+                )
+            )
+
             logger.debug(f"合并总结 API 响应: {result}")
             content: str = self._extract_choices_content(result)
             return content
 
         except Exception as e:
+            duration = time.perf_counter() - start_time
             logger.exception(f"合并总结失败: {e}")
             return "\n\n---\n\n".join(summaries)
 
@@ -700,6 +793,8 @@ class AIClient:
         返回:
             生成的标题
         """
+        start_time = time.perf_counter()
+
         prompt = """请根据以下 Bug 修复分析报告，生成一个简短、准确的标题（不超过 20 字），用于 FAQ 索引。
 只返回标题文本，不要包含任何前缀或引号。
 
@@ -723,11 +818,42 @@ class AIClient:
             )
             response.raise_for_status()
             result = response.json()
+            duration = time.perf_counter() - start_time
+
+            # 记录 token 使用统计
+            usage = result.get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            total_tokens = usage.get("total_tokens", 0)
+
+            logger.info(
+                f"[生成标题] 完成, 耗时={duration:.2f}s, "
+                f"Tokens={total_tokens} (P:{prompt_tokens} + C:{completion_tokens}), "
+                f"模型={self.chat_config.model_name}"
+            )
+
+            # 异步记录 token 使用
+            asyncio.create_task(
+                self._token_usage_storage.record(
+                    TokenUsage(
+                        timestamp=datetime.now().isoformat(),
+                        model_name=self.chat_config.model_name,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=total_tokens,
+                        duration_seconds=duration,
+                        call_type="generate_title",
+                        success=True,
+                    )
+                )
+            )
+
             logger.debug(f"API 响应: {result}")
             title: str = self._extract_choices_content(result).strip()
             return title
 
         except Exception as e:
+            duration = time.perf_counter() - start_time
             logger.exception(f"生成标题失败: {e}")
             return "未命名问题"
 
@@ -910,6 +1036,7 @@ class AIClient:
             "history_manager": history_manager,
             "onebot_client": onebot_client,
             "scheduler": scheduler,
+            "token_usage_storage": self._token_usage_storage,
         }
 
         # 合并额外上下文
@@ -965,7 +1092,24 @@ class AIClient:
 
                 logger.info(
                     f"[AI响应] 迭代 {iteration} 完成: 耗时={iter_duration:.2f}s, "
-                    f"Tokens={total_tokens} (P:{prompt_tokens} + C:{completion_tokens})"
+                    f"Tokens={total_tokens} (P:{prompt_tokens} + C:{completion_tokens}), "
+                    f"模型={self.chat_config.model_name}"
+                )
+
+                # 异步记录 token 使用
+                asyncio.create_task(
+                    self._token_usage_storage.record(
+                        TokenUsage(
+                            timestamp=datetime.now().isoformat(),
+                            model_name=self.chat_config.model_name,
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            total_tokens=total_tokens,
+                            duration_seconds=iter_duration,
+                            call_type="chat",
+                            success=True,
+                        )
+                    )
                 )
 
                 # 提取响应

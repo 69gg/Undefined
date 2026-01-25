@@ -2,9 +2,13 @@ import logging
 import time
 from typing import Any, Optional
 import httpx
+from datetime import datetime
+import asyncio
+
 from ..config import Config
 from ..rate_limit import RateLimiter
 from ..injection_response_agent import InjectionResponseAgent
+from ..token_usage_storage import TokenUsageStorage, TokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +24,7 @@ class SecurityService:
         self.http_client = http_client
         self.rate_limiter = RateLimiter(config)
         self.injection_response_agent = InjectionResponseAgent(config.security_model)
+        self._token_usage_storage = TokenUsageStorage()
 
     async def detect_injection(
         self, text: str, message_content: Optional[list[dict[str, Any]]] = None
@@ -82,6 +87,14 @@ class SecurityService:
             response.raise_for_status()
             result = response.json()
 
+            # 记录 token 使用统计
+            usage = result.get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            total_tokens = usage.get("total_tokens", 0)
+
+            duration = time.perf_counter() - start_time
+
             # 提取内容 (简化版提取逻辑)
             content = ""
             if "choices" in result and result["choices"]:
@@ -103,10 +116,27 @@ class SecurityService:
                         message.get("content", "") if isinstance(message, dict) else ""
                     )
 
-            duration = time.perf_counter() - start_time
             is_injection = "INJECTION_DETECTED".lower() in content.lower()
             logger.info(
-                f"[Security] 注入检测完成: 判定={'风险' if is_injection else '安全'}, 耗时={duration:.2f}s"
+                f"[Security] 注入检测完成: 判定={'风险' if is_injection else '安全'}, "
+                f"耗时={duration:.2f}s, Tokens={total_tokens} (P:{prompt_tokens} + C:{completion_tokens}), "
+                f"模型={chat_config.model_name}"
+            )
+
+            # 异步记录 token 使用
+            asyncio.create_task(
+                self._token_usage_storage.record(
+                    TokenUsage(
+                        timestamp=datetime.now().isoformat(),
+                        model_name=chat_config.model_name,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=total_tokens,
+                        duration_seconds=duration,
+                        call_type="security_check",
+                        success=True,
+                    )
+                )
             )
 
             return is_injection
