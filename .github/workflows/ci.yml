@@ -27,5 +27,13 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
 
+      - name: Cache Mypy
+        uses: actions/cache@v4
+        with:
+          path: .mypy_cache
+          key: ${{ runner.os }}-mypy-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mypy-
+
       - name: Run Mypy
         run: uv run mypy .
