@@ -164,14 +164,14 @@ graph TB
     %% 外部实体
     User([用户 User])
     Admin([管理员 Admin])
-    OneBotPlatform[OneBot 协议端\n(NapCat / Lagrange)]
-    LLM_API[大模型 API\n(OpenAI / Claude / DeepSeek)]
+    OneBotPlatform["OneBot 协议端\n(NapCat / Lagrange)"]
+    LLM_API["大模型 API\n(OpenAI / Claude / DeepSeek)"]
 
     %% 核心入口
     subgraph Core [核心接入层]
         Main[main.py 启动入口]
         Config[Config 配置管理]
-        OneBotClient[OneBot Client\n(WebSocket 通信)]
+        OneBotClient["OneBot Client\n(WebSocket 通信)"]
     end
 
     %% 消息处理流
@@ -191,14 +191,14 @@ graph TB
             subgraph QueueSystem ["车站-列车" 队列系统]
                 QueueManager[QueueManager]
                 
-                subgraph ModelQueues [ModelQueue (按模型隔离)]
+                subgraph ModelQueues ["ModelQueue (按模型隔离)"]
                     Q_Admin[超级管理员队列]
                     Q_Private[私聊队列]
-                    Q_Mention[群聊@队列]
+                    Q_Mention["群聊@队列"]
                     Q_Normal[群聊普通队列]
                 end
                 
-                DispatcherLoop((1Hz 非阻塞发车循环))
+                DispatcherLoop(("1Hz 非阻塞发车循环"))
             end
         end
     end
