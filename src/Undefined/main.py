@@ -8,6 +8,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from dotenv import load_dotenv
+from rich.logging import RichHandler
+from rich.console import Console
 
 from .ai import AIClient
 from .config import get_config
@@ -26,16 +28,26 @@ def setup_logging() -> None:
     level = getattr(logging, log_level, logging.INFO)
 
     # 日志格式
-    log_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-    formatter = logging.Formatter(log_format)
+    # 丰富日志处理器会自动处理时间戳、级别等，所以我们减短格式
+    log_format = "%(name)s: %(message)s"
+    file_log_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    file_formatter = logging.Formatter(file_log_format)
 
     # 根日志器
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
 
-    # 控制台处理器
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
+    # 控制台处理器（使用 Rich）
+    console = Console(force_terminal=True)
+    console_handler = RichHandler(
+        level=level,
+        console=console,
+        show_time=True,
+        show_path=True,
+        markup=True,
+        rich_tracebacks=True,
+    )
+    console_handler.setFormatter(logging.Formatter(log_format))
     root_logger.addHandler(console_handler)
 
     # 日志文件配置
@@ -55,12 +67,12 @@ def setup_logging() -> None:
         backupCount=log_backup_count,
         encoding="utf-8",
     )
-    file_handler.setFormatter(formatter)
+    file_handler.setFormatter(file_formatter)
     root_logger.addHandler(file_handler)
 
     logging.info(
-        f"[启动] 日志系统初始化完成。级别: {log_level}, 文件: {log_file_path} "
-        f"(最大 {log_max_size // 1024 // 1024}MB, 保留 {log_backup_count} 份)"
+        f"[bold cyan][启动][/bold cyan] 日志系统初始化完成。级别: [yellow]{log_level}[/yellow], 文件: [green]{log_file_path}[/green] "
+        f"(最大 [magenta]{log_max_size // 1024 // 1024}[/magenta]MB, 保留 [magenta]{log_backup_count}[/magenta] 份)"
     )
 
 

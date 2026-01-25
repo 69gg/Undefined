@@ -117,7 +117,9 @@ class AIClient:
                     self._search_wrapper = SearxSearchWrapper(
                         searx_host=searxng_url, k=10
                     )
-                    logger.info(f"SearxSearchWrapper 初始化成功，URL: {searxng_url}")
+                    logger.info(
+                        f"[bold green][初始化][/bold green] SearxSearchWrapper 初始化成功，URL: [cyan]{searxng_url}[/cyan]"
+                    )
                 except Exception as e:
                     logger.warning(f"SearxSearchWrapper 初始化失败: {e}")
             else:
@@ -133,7 +135,9 @@ class AIClient:
         if _TIKTOKEN_AVAILABLE:
             try:
                 self._tokenizer = tiktoken.encoding_for_model("gpt-4")
-                logger.info("[初始化] tiktoken tokenizer 加载成功")
+                logger.info(
+                    "[bold green][初始化][/bold green] tiktoken tokenizer 加载成功"
+                )
             except Exception as e:
                 logger.warning(
                     f"[初始化] tiktoken tokenizer 加载失败: {e}，将使用字符估算"
@@ -150,7 +154,7 @@ class AIClient:
         # 创建后台任务初始化 MCP
         self._mcp_init_task = asyncio.create_task(init_mcp_async())
 
-        logger.info("[初始化] AIClient 初始化完成")
+        logger.info("[bold green][初始化][/bold green] AIClient 初始化完成")
 
     async def close(self) -> None:
         """关闭 HTTP 客户端和 MCP 连接"""
@@ -388,8 +392,9 @@ class AIClient:
 
             duration = time.perf_counter() - start_time
             is_injection = "INJECTION_DETECTED".lower() in content.lower()
+            status_color = "red" if is_injection else "green"
             logger.info(
-                f"[安全检测] 注入检测完成: 判定={'有风险' if is_injection else '安全'}, 耗时={duration:.2f}s"
+                f"[bold cyan][安全检测][/bold cyan] 注入检测完成: 判定=[{status_color}]{'有风险' if is_injection else '安全'}[/{status_color}], 耗时=[magenta]{duration:.2f}s[/magenta]"
             )
 
             # 如果返回 INJECTION_DETECTED，则判定为注入
@@ -496,7 +501,9 @@ class AIClient:
         start_time = time.perf_counter()
         # 检测媒体类型
         detected_type = self._detect_media_type(media_url, media_type)
-        logger.info(f"[媒体分析] 开始分析 {detected_type}: {media_url[:50]}...")
+        logger.info(
+            f"[bold yellow][媒体分析][/bold yellow] 开始分析 [magenta]{detected_type}[/magenta]: [italic]{media_url[:50]}[/italic]..."
+        )
 
         # 生成缓存键
         cache_key = f"{detected_type}:{media_url[:100]}:{prompt_extra}"
@@ -575,7 +582,9 @@ class AIClient:
             response.raise_for_status()
             result = response.json()
             duration = time.perf_counter() - start_time
-            logger.info(f"[媒体分析] API 调用完成, 耗时={duration:.2f}s")
+            logger.info(
+                f"[bold yellow][媒体分析][/bold yellow] API 调用完成, 耗时=[magenta]{duration:.2f}s[/magenta]"
+            )
             logger.debug(f"媒体分析 API 响应: {result}")
             content = self._extract_choices_content(result)
 

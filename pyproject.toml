@@ -39,6 +39,7 @@ dependencies = [
     "rarfile>=4.2",
     "fastmcp>=2.14.4",
     "lxml>=5.4.0",
+    "rich>=14.2.0",
 ]
 
 [project.urls]
@@ -60,6 +61,9 @@ ci = [
     "ruff",
     "mypy>=1.8.0",
 ]
+
+[[tool.uv.index]]
+url = "https://pypi.org/simple"
 
 [build-system]
 requires = ["hatchling"]

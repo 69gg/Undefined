@@ -41,7 +41,9 @@ class OneBotClient:
             separator = "&" if "?" in url else "?"
             url = f"{url}{separator}access_token={self.token}"
 
-        logger.info(f"[WebSocket] 正在连接到 {self.ws_url}...")
+        logger.info(
+            f"[bold cyan][WebSocket][/bold cyan] 正在连接到 [blue]{self.ws_url}[/blue]..."
+        )
 
         # 同时在请求头中传递 token（兼容不同实现）
         extra_headers = {}
@@ -55,7 +57,7 @@ class OneBotClient:
                 ping_timeout=20,
                 additional_headers=extra_headers if extra_headers else None,
             )
-            logger.info("[WebSocket] 连接成功")
+            logger.info("[bold green][WebSocket][/bold green] 连接成功")
         except Exception as e:
             logger.error(f"[WebSocket] 连接失败: {e}")
             raise
@@ -85,7 +87,9 @@ class OneBotClient:
             "echo": echo,
         }
 
-        logger.debug(f"[API请求] {action} (ID={echo}) | 参数: {params}")
+        logger.debug(
+            f"[bold yellow][API请求][/bold yellow] [green]{action}[/green] (ID=[magenta]{echo}[/magenta]) | 参数: {params}"
+        )
 
         # 创建 Future 等待响应
         future: asyncio.Future[dict[str, Any]] = asyncio.Future()
@@ -105,11 +109,13 @@ class OneBotClient:
                 retcode = response.get("retcode", -1)
                 msg = response.get("message", "未知错误")
                 logger.error(
-                    f"[API失败] {action} (ID={echo}) | 耗时={duration:.2f}s | retcode={retcode} | message={msg}"
+                    f"[bold red][API失败][/bold red] [green]{action}[/green] (ID=[magenta]{echo}[/magenta]) | 耗时=[magenta]{duration:.2f}s[/magenta] | retcode=[red]{retcode}[/red] | message={msg}"
                 )
                 raise RuntimeError(f"API 调用失败: {msg} (retcode={retcode})")
 
-            logger.info(f"[API成功] {action} (ID={echo}) | 耗时={duration:.2f}s")
+            logger.info(
+                f"[bold green][API成功][/bold green] [green]{action}[/green] (ID=[magenta]{echo}[/magenta]) | 耗时=[magenta]{duration:.2f}s[/magenta]"
+            )
             return response
         except asyncio.TimeoutError:
             duration = time.perf_counter() - start_time
@@ -448,7 +454,9 @@ class OneBotClient:
         if post_type == "message":
             msg_type = data.get("message_type", "unknown")
             sender = data.get("sender", {}).get("user_id", "unknown")
-            logger.info(f"收到消息: type={msg_type}, sender={sender}")
+            logger.info(
+                f"[bold blue][收到消息][/bold blue] type=[yellow]{msg_type}[/yellow], sender=[blue]{sender}[/blue]"
+            )
             if self._message_handler:
                 # 创建后台任务处理消息
                 task = asyncio.create_task(self._safe_handle_message(data))
@@ -463,7 +471,7 @@ class OneBotClient:
                 sender_id = data.get("user_id", 0)
                 group_id = data.get("group_id", 0)
                 logger.info(
-                    f"收到拍一拍: sender={sender_id}, target={target_id}, group={group_id}"
+                    f"[bold magenta][收到拍一拍][/bold magenta] sender=[blue]{sender_id}[/blue], target=[blue]{target_id}[/blue], group=[blue]{group_id}[/blue]"
                 )
                 if self._message_handler:
                     # 将 poke 事件转换为类似消息的格式，方便 handler 处理

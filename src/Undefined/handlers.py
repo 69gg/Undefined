@@ -78,19 +78,22 @@ class MessageHandler:
             target_id = event.get("target_id", 0)
             # 只有拍机器人才响应
             if target_id != self.config.bot_qq:
+                logger.debug(
+                    f"[bold yellow][忽略][/bold yellow] 拍一拍目标不是机器人: target={target_id}"
+                )
                 return
 
             poke_group_id: int = event.get("group_id", 0)
             poke_sender_id: int = event.get("user_id", 0)
 
             logger.info(
-                f"[通知事件] 收到拍一拍: group={poke_group_id}, sender={poke_sender_id}"
+                f"[bold cyan][通知事件][/bold cyan] 收到拍一拍: [blue]group={poke_group_id}[/blue], [blue]sender={poke_sender_id}[/blue]"
             )
             logger.debug(f"[通知详情] 拍一拍完整数据: {event}")
 
             # 如果 group_id 为 0，说明是私聊拍一拍
             if poke_group_id == 0:
-                logger.info("私聊拍一拍，触发私聊回复")
+                logger.info("[bold magenta]私聊拍一拍[/bold magenta]，触发私聊回复")
                 await self._handle_private_reply(
                     poke_sender_id,
                     "(拍了拍你)",  # 空消息文本
@@ -100,6 +103,9 @@ class MessageHandler:
                 )
             else:
                 # 群聊拍一拍，触发群聊自动回复
+                logger.info(
+                    f"[bold magenta]群聊拍一拍[/bold magenta] (群: {poke_group_id})，触发群聊自动回复"
+                )
                 await self._handle_auto_reply(
                     poke_group_id,
                     poke_sender_id,
@@ -216,7 +222,7 @@ class MessageHandler:
         # 提取文本内容
         text = extract_text(message_content, self.config.bot_qq)
         logger.info(
-            f"[群消息] 群:{group_id} | 发送者:{sender_id} ({sender_card or sender_nickname}) | 角色:{sender_role} | 内容: {text[:100]}"
+            f"[bold blue][群消息][/bold blue] 群: [blue]{group_id}[/blue] | 发送者: [blue]{sender_id}[/blue] ({sender_card or sender_nickname}) | 角色: [yellow]{sender_role}[/yellow] | 内容: [italic]{text[:100]}[/italic]"
         )
 
         # 提取文本内容
@@ -254,7 +260,7 @@ class MessageHandler:
             processed_message_content, self.config.bot_qq, self.onebot.get_msg
         )
         logger.debug(
-            f"[历史记录] 保存群聊记录: group={group_id}, sender={sender_id}, content={parsed_content[:50]}..."
+            f"[bold grey42][历史记录][/bold grey42] 保存群聊记录: group=[blue]{group_id}[/blue], sender=[blue]{sender_id}[/blue], content=[italic]{parsed_content[:50]}[/italic]..."
         )
         self.history_manager.add_group_message(
             group_id=group_id,
@@ -312,7 +318,9 @@ class MessageHandler:
                 cmd_args: list[str] = command["args"]
 
                 # 有命令，执行命令
-                logger.info(f"[命令解析] 解析到命令: /{cmd_name} | 参数: {cmd_args}")
+                logger.info(
+                    f"[bold yellow][命令执行][/bold yellow] 解析到命令: [green]/{cmd_name}[/green] | 参数: [magenta]{cmd_args}[/magenta]"
+                )
 
                 # 有命令，执行命令
                 logger.info(f"[命令解析] 解析到命令: /{cmd_name} | 参数: {cmd_args}")
