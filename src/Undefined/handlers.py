@@ -206,15 +206,17 @@ class MessageHandler:
         sender_id: int = get_message_sender_id(event)
         message_content: list[dict[str, Any]] = get_message_content(event)
 
-        # 获取发送者昵称信息
+        # 获取发送者信息
         group_sender: dict[str, Any] = event.get("sender", {})
         sender_card: str = group_sender.get("card", "")
         sender_nickname: str = group_sender.get("nickname", "")
+        sender_role: str = group_sender.get("role", "member")
+        sender_title: str = group_sender.get("title", "")
 
         # 提取文本内容
         text = extract_text(message_content, self.config.bot_qq)
         logger.info(
-            f"[群消息] 群:{group_id} | 发送者:{sender_id} ({sender_card or sender_nickname}) | 内容: {text[:100]}"
+            f"[群消息] 群:{group_id} | 发送者:{sender_id} ({sender_card or sender_nickname}) | 角色:{sender_role} | 内容: {text[:100]}"
         )
 
         # 提取文本内容
@@ -261,6 +263,8 @@ class MessageHandler:
             sender_card=sender_card,
             sender_nickname=sender_nickname,
             group_name=group_name,
+            role=sender_role,
+            title=sender_title,
         )
 
         # 如果是 bot 自己的消息，只保存不触发回复，避免无限循环
@@ -417,6 +421,8 @@ class MessageHandler:
             message_content,
             sender_name=display_name,
             group_name=group_name,
+            sender_role=sender_role,
+            sender_title=sender_title,
         )
 
     async def _handle_queue_request(self, request: dict[str, Any]) -> None:
@@ -572,6 +578,8 @@ class MessageHandler:
         is_poke: bool = False,
         sender_name: str = "未知用户",
         group_name: str = "未知群聊",
+        sender_role: str = "member",
+        sender_title: str = "",
     ) -> None:
         """自动回复处理：根据上下文决定是否回复"""
         is_at_bot = is_poke or self._is_at_bot(message_content)
@@ -608,7 +616,7 @@ class MessageHandler:
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         location = group_name if group_name.endswith("群") else f"{group_name}群"
 
-        full_question = f"""{prompt_prefix}<message sender="{sender_name}" sender_id="{sender_id}" location="{location}" time="{current_time}">
+        full_question = f"""{prompt_prefix}<message sender="{sender_name}" sender_id="{sender_id}" group_id="{group_id}" group_name="{group_name}" location="{location}" role="{sender_role}" title="{sender_title}" time="{current_time}">
 <content>{text}</content>
 </message>
 

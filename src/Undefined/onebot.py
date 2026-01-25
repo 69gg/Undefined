@@ -349,6 +349,43 @@ class OneBotClient:
         """
         return await self._call_api("send_like", {"user_id": user_id, "times": times})
 
+    async def send_group_sign(self, group_id: int) -> dict[str, Any]:
+        """执行群打卡
+
+        参数:
+            group_id: 群号
+
+        返回:
+            API 响应
+        """
+        return await self._call_api("send_group_sign", {"group_id": group_id})
+
+    async def _get_group_notices(self, group_id: int) -> list[dict[str, Any]]:
+        """获取群公告列表（非标准 API，依赖具体实现）
+
+        参数:
+            group_id: 群号
+
+        返回:
+            公告列表
+        """
+        try:
+            result = await self._call_api("_get_group_notice", {"group_id": group_id})
+            data = result.get("data")
+            if isinstance(data, list):
+                return data
+            elif isinstance(data, dict):
+                # 尝试获取常见的列表字段
+                notices = data.get("notices")
+                if notices is None:
+                    notices = data.get("list")
+                if isinstance(notices, list):
+                    return notices
+            return []
+        except Exception as e:
+            logger.error(f"获取群公告失败: {e}")
+            return []
+
     async def run(self) -> None:
         """运行消息接收循环"""
         if not self.ws:

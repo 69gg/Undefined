@@ -1,0 +1,24 @@
+{
+    "type": "function",
+    "function": {
+        "name": "memory.update",
+        "description": "更新一条已有的记忆。需要提供该记忆的 UUID。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "uuid": {
+                    "type": "string",
+                    "description": "要更新的记忆的 UUID"
+                },
+                "fact": {
+                    "type": "string",
+                    "description": "新的记忆内容"
+                }
+            },
+            "required": [
+                "uuid",
+                "fact"
+            ]
+        }
+    }
+}

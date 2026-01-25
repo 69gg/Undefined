@@ -1,0 +1,36 @@
+{
+    "type": "function",
+    "function": {
+        "name": "notices.list",
+        "description": "综合查询群公告列表。支持按数量、全部获取、关键词搜索及时间范围筛选。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "可选。指定群号。如果不提供，则默认查询当前群。"
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "可选。返回的公告条数，默认 5。"
+                },
+                "all": {
+                    "type": "boolean",
+                    "description": "可选。是否获取该群所有的公告。设为 true 时将忽略 count 参数。"
+                },
+                "keyword": {
+                    "type": "string",
+                    "description": "可选。通过关键词筛选公告（如标题或内容中包含该词）。"
+                },
+                "start_time": {
+                    "type": "string",
+                    "description": "可选。筛选起始时间，格式：YYYY-MM-DD HH:MM:SS。"
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": "可选。筛选结束时间，格式：YYYY-MM-DD HH:MM:SS。"
+                }
+            }
+        }
+    }
+}

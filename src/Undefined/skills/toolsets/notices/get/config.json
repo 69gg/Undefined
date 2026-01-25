@@ -1,0 +1,23 @@
+{
+    "type": "function",
+    "function": {
+        "name": "notices.get",
+        "description": "根据 notice_id 获取特定群公告的详细内容。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "可选。指定群号。如果不提供，则默认查询当前群。"
+                },
+                "notice_id": {
+                    "type": "string",
+                    "description": "必填。要获取的公告 ID。"
+                }
+            },
+            "required": [
+                "notice_id"
+            ]
+        }
+    }
+}

@@ -2,9 +2,11 @@
 
 import json
 import logging
+import uuid
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,7 @@ MEMORY_FILE_PATH = Path("data/memory.json")
 class Memory:
     """单条记忆数据"""
 
+    uuid: str  # 唯一标识符
     fact: str  # 记忆内容
     created_at: str  # 创建时间
 
@@ -23,7 +26,7 @@ class Memory:
 class MemoryStorage:
     """AI 记忆存储管理器"""
 
-    def __init__(self, max_memories: int = 100) -> None:
+    def __init__(self, max_memories: int = 500) -> None:
         """初始化记忆存储
 
         参数:
@@ -42,8 +45,24 @@ class MemoryStorage:
         try:
             with open(MEMORY_FILE_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self._memories = [Memory(**item) for item in data]
+
+            needs_rewrite = False
+            loaded_memories = []
+            for item in data:
+                # 检查是否存在 uuid，如果不存在则自动生成
+                if "uuid" not in item:
+                    item["uuid"] = str(uuid.uuid4())
+                    needs_rewrite = True
+                loaded_memories.append(Memory(**item))
+
+            self._memories = loaded_memories
             logger.info(f"已加载 {len(self._memories)} 条记忆")
+
+            # 如果检测到旧格式，自动分配 UUID 并覆写
+            if needs_rewrite:
+                logger.info("检测到旧格式记录，已自动分配 UUID 并覆写存储文件")
+                self._save()
+
         except Exception as e:
             logger.warning(f"加载记忆失败: {e}")
             self._memories = []
@@ -60,27 +79,29 @@ class MemoryStorage:
         except Exception as e:
             logger.error(f"保存记忆失败: {e}")
 
-    def add(self, fact: str) -> bool:
+    def add(self, fact: str) -> Optional[str]:
         """添加一条记忆
 
         参数:
             fact: 记忆内容
 
         返回:
-            是否添加成功
+            新生成的 UUID，如果失败则返回 None
         """
         if not fact or not fact.strip():
             logger.warning("尝试添加空记忆，已忽略")
-            return False
+            return None
 
-        # 检查是否已存在相同记忆
+        # 检查是否已存在相同内容（可选，根据需求保留或移除）
         for existing in self._memories:
             if existing.fact == fact.strip():
-                logger.debug(f"记忆已存在，忽略: {fact[:50]}...")
-                return False
+                logger.debug(f"记忆内容已存在，忽略: {fact[:50]}...")
+                return existing.uuid
 
         memory = Memory(
-            fact=fact.strip(), created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            uuid=str(uuid.uuid4()),
+            fact=fact.strip(),
+            created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         )
 
         # 添加到列表末尾
@@ -93,9 +114,46 @@ class MemoryStorage:
 
         self._save()
         logger.info(
-            f"已添加记忆: {fact[:50]}... (当前 {len(self._memories)}/{self.max_memories})"
+            f"已添加记忆: {fact[:50]}... (UUID: {memory.uuid}, 当前 {len(self._memories)}/{self.max_memories})"
         )
-        return True
+        return memory.uuid
+
+    def update(self, memory_uuid: str, fact: str) -> bool:
+        """更新一条记忆
+
+        参数:
+            memory_uuid: 记忆的 UUID
+            fact: 新的消息内容
+
+        返回:
+            是否更新成功
+        """
+        for i, m in enumerate(self._memories):
+            if m.uuid == memory_uuid:
+                self._memories[i].fact = fact.strip()
+                self._save()
+                logger.info(f"已更新记忆 {memory_uuid}: {fact[:50]}...")
+                return True
+        logger.warning(f"未找到 UUID 为 {memory_uuid} 的记忆，更新失败")
+        return False
+
+    def delete(self, memory_uuid: str) -> bool:
+        """删除一条记忆
+
+        参数:
+            memory_uuid: 记忆的 UUID
+
+        返回:
+            是否删除成功
+        """
+        for i, m in enumerate(self._memories):
+            if m.uuid == memory_uuid:
+                removed = self._memories.pop(i)
+                self._save()
+                logger.info(f"已删除记忆 {memory_uuid}: {removed.fact[:50]}...")
+                return True
+        logger.warning(f"未找到 UUID 为 {memory_uuid} 的记忆，删除失败")
+        return False
 
     def get_all(self) -> list[Memory]:
         """获取所有记忆

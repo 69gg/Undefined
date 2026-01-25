@@ -923,20 +923,26 @@ class AIClient:
                     msg_type_val = msg.get("type", "group")
                     sender_name = msg.get("display_name", "未知用户")
                     sender_id = msg.get("user_id", "")
+                    chat_id = msg.get("chat_id", "")
                     chat_name = msg.get("chat_name", "未知群聊")
                     timestamp = msg.get("timestamp", "")
                     text = msg.get("message", "")
+                    role = msg.get("role", "member")
+                    title = msg.get("title", "")
 
                     if msg_type_val == "group":
                         # 确保群名以"群"结尾
                         location = (
                             chat_name if chat_name.endswith("群") else f"{chat_name}群"
                         )
+                        # 格式：包含 group_id, role, title
+                        xml_msg = f"""<message sender="{sender_name}" sender_id="{sender_id}" group_id="{chat_id}" group_name="{chat_name}" location="{location}" role="{role}" title="{title}" time="{timestamp}">
+<content>{text}</content>
+</message>"""
                     else:
                         location = "私聊"
-
-                    # 格式：XML 标准化
-                    xml_msg = f"""<message sender="{sender_name}" sender_id="{sender_id}" location="{location}" time="{timestamp}">
+                        # 私聊格式
+                        xml_msg = f"""<message sender="{sender_name}" sender_id="{sender_id}" location="{location}" time="{timestamp}">
 <content>{text}</content>
 </message>"""
                     context_lines.append(xml_msg)

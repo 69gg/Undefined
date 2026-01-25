@@ -1,0 +1,16 @@
+{
+    "type": "function",
+    "function": {
+        "name": "messages.send_group_sign",
+        "description": "在当前群聊执行打卡（签到）。仅当在群聊对话中且有打卡功能时可用。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "可选。指定打卡的群号。如果不提供，则默认在当前群聊中打卡。"
+                }
+            }
+        }
+    }
+}

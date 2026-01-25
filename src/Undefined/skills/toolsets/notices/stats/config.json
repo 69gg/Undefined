@@ -1,0 +1,16 @@
+{
+    "type": "function",
+    "function": {
+        "name": "notices.stats",
+        "description": "获取群公告的统计信息，如公告总数和最新公告时间。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "可选。指定群号。如果不提供，则默认查询当前群。"
+                }
+            }
+        }
+    }
+}
