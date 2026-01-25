@@ -274,18 +274,18 @@ class CommandDispatcher:
         completion_tokens = [daily_stats[d]["completion_tokens"] for d in dates]
 
         # 创建图表
-        fig, ax = plt.subplots(figsize=(12, 6))
+        fig, ax = plt.subplots(figsize=(12, 7))
 
         # 绘制折线
         ax.plot(
-            dates, tokens, marker="o", linewidth=2, label="总 Token", color="#2196F3"
+            dates, tokens, marker="o", linewidth=2, label="Total Token", color="#2196F3"
         )
         ax.plot(
             dates,
             prompt_tokens,
             marker="s",
             linewidth=2,
-            label="输入 Token",
+            label="Input Token",
             color="#4CAF50",
         )
         ax.plot(
@@ -293,7 +293,7 @@ class CommandDispatcher:
             completion_tokens,
             marker="^",
             linewidth=2,
-            label="输出 Token",
+            label="Output Token",
             color="#FF9800",
         )
 
@@ -328,7 +328,7 @@ class CommandDispatcher:
         completion_tokens = [models[m]["completion_tokens"] for m in model_names]
 
         # 创建图表
-        fig, ax = plt.subplots(figsize=(10, 6))
+        fig, ax = plt.subplots(figsize=(14, 8))
 
         # 设置柱状图位置
         x = range(len(model_names))
@@ -339,7 +339,7 @@ class CommandDispatcher:
             [i - width for i in x],
             tokens,
             width,
-            label="总 Token",
+            label="Total Token",
             color="#2196F3",
             alpha=0.8,
         )
@@ -347,7 +347,7 @@ class CommandDispatcher:
             x,
             prompt_tokens,
             width,
-            label="输入 Token",
+            label="Input Token",
             color="#4CAF50",
             alpha=0.8,
         )
@@ -355,7 +355,7 @@ class CommandDispatcher:
             [i + width for i in x],
             completion_tokens,
             width,
-            label="输出 Token",
+            label="Output Token",
             color="#FF9800",
             alpha=0.8,
         )
@@ -400,7 +400,7 @@ class CommandDispatcher:
             return
 
         # 创建图表
-        fig, ax = plt.subplots(figsize=(8, 8))
+        fig, ax = plt.subplots(figsize=(12, 8))
 
         # 准备数据
         labels = ["Input Token", "Output Token"]
@@ -463,7 +463,7 @@ class CommandDispatcher:
             )
 
         # 创建图表
-        fig, ax = plt.subplots(figsize=(10, 6))
+        fig, ax = plt.subplots(figsize=(14, 9))
         ax.axis("tight")
         ax.axis("off")
 
