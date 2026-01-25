@@ -60,29 +60,50 @@ class TokenUsageStorage:
         if not self.file_path.exists():
             self.file_path.touch()
 
-    async def record(self, usage: TokenUsage) -> None:
+    async def record(self, usage: TokenUsage | dict[str, Any]) -> None:
         """记录一次 token 使用
 
+
+
         参数:
-            usage: Token 使用记录
+
+            usage: Token 使用记录（TokenUsage 对象或字典）
+
         """
+
         try:
+            # 转换为字典
+
+            if isinstance(usage, TokenUsage):
+                data = usage.to_dict()
+
+            else:
+                data = usage
+
             # 使用文件锁确保并发写入安全
+
             async with aiofiles.open(self.file_path, mode="a", encoding="utf-8") as f:
                 # 获取文件锁
+
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+
                 try:
                     # 追加 JSON 行
-                    line = json.dumps(usage.to_dict(), ensure_ascii=False) + "\n"
+
+                    line = json.dumps(data, ensure_ascii=False) + "\n"
+
                     await f.write(line)
+
                 finally:
                     # 释放文件锁
+
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
             logger.debug(
-                f"[Token统计] 已记录: {usage.call_type} - "
-                f"{usage.model_name} - {usage.total_tokens} tokens"
+                f"[Token统计] 已记录: {data.get('call_type')} - "
+                f"{data.get('model_name')} - {data.get('total_tokens')} tokens"
             )
+
         except Exception as e:
             logger.error(f"[Token统计] 记录失败: {e}")
 

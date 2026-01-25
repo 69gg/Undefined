@@ -7,8 +7,6 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
-from ...token_usage_storage import TokenUsage
-
 logger = logging.getLogger(__name__)
 
 
@@ -195,16 +193,16 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             if token_usage_storage:
                 asyncio.create_task(
                     token_usage_storage.record(
-                        TokenUsage(
-                            timestamp=datetime.now().isoformat(),
-                            model_name=agent_config.model_name,
-                            prompt_tokens=prompt_tokens,
-                            completion_tokens=completion_tokens,
-                            total_tokens=total_tokens,
-                            duration_seconds=0.0,
-                            call_type="agent:file_analysis_agent",
-                            success=True,
-                        )
+                        {
+                            "timestamp": datetime.now().isoformat(),
+                            "model_name": agent_config.model_name,
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "total_tokens": total_tokens,
+                            "duration_seconds": 0.0,
+                            "call_type": "agent:file_analysis_agent",
+                            "success": True,
+                        }
                     )
                 )
 
