@@ -76,6 +76,16 @@ class SecurityService:
                 "max_tokens": 10,
             }
 
+            # 添加 thinking 参数（如果启用）
+            if security_config.thinking_enabled:
+                temp_body["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": security_config.thinking_budget_tokens,
+                }
+            else:
+                # 禁用 thinking
+                temp_body["thinking"] = {"enabled": False, "budget_tokens": 0}
+
             response = await self.http_client.post(
                 security_config.api_url,
                 headers={
