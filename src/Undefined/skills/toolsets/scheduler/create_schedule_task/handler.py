@@ -68,6 +68,15 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not scheduler:
         return "调度器未在上下文中提供"
 
+    # 优先从 context 获取（避免并发问题）
+    if target_id is None:
+        target_id = context.get("group_id") or context.get("user_id")
+        if context.get("group_id"):
+            target_type = "group"
+        elif context.get("user_id"):
+            target_type = "private"
+    
+    # 向后兼容：从 ai_client 获取
     ai_client = context.get("ai_client")
     if target_id is None and ai_client:
         if ai_client.current_group_id:

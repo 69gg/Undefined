@@ -23,8 +23,18 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     # 优先使用 sender 接口
     if sender:
-        ai_client = context.get("ai_client")
-        group_id = ai_client.current_group_id if ai_client else None
+        # 优先从 context 获取 group_id（避免并发竞态条件）
+        group_id = context.get("group_id")
+        if group_id:
+            logger.debug(f"[发送消息] 从 context 获取 group_id: {group_id}")
+        else:
+            # 向后兼容：从 ai_client 获取（已废弃）
+            ai_client = context.get("ai_client")
+            group_id = ai_client.current_group_id if ai_client else None
+            if group_id:
+                logger.warning(
+                    f"[发送消息] 从 ai_client.current_group_id 获取群号（已废弃，可能存在并发问题）: {group_id}"
+                )
 
         if group_id:
             logger.info(f"[发送消息] 准备发送到群 {group_id}: {message[:100]}")

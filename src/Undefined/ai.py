@@ -861,8 +861,22 @@ class AIClient:
         if get_recent_messages_callback:
             try:
                 # 默认获取 20 条作为背景
-                # 根据 current_group_id 和 current_user_id 确定聊天类型
-                if self.current_group_id is not None:
+                # 优先从 extra_context 获取（避免并发竞态条件）
+                if extra_context:
+                    group_id_from_ctx = extra_context.get("group_id")
+                    user_id_from_ctx = extra_context.get("user_id")
+                else:
+                    group_id_from_ctx = None
+                    user_id_from_ctx = None
+                
+                if group_id_from_ctx is not None:
+                    chat_id = str(group_id_from_ctx)
+                    msg_type = "group"
+                elif user_id_from_ctx is not None:
+                    chat_id = str(user_id_from_ctx)
+                    msg_type = "private"
+                # 向后兼容：从全局状态获取
+                elif self.current_group_id is not None:
                     chat_id = str(self.current_group_id)
                     msg_type = "group"
                 elif self.current_user_id is not None:

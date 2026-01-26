@@ -201,6 +201,8 @@ class AICoordinator:
                 extra_context={
                     "render_html_to_image": render_html_to_image,
                     "render_markdown_to_html": render_markdown_to_html,
+                    "group_id": group_id,
+                    "user_id": sender_id,
                 },
             )
         except Exception:
@@ -242,6 +244,7 @@ class AICoordinator:
                 extra_context={
                     "render_html_to_image": render_html_to_image,
                     "render_markdown_to_html": render_markdown_to_html,
+                    "user_id": user_id,
                 },
             )
             if result:
