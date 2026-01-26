@@ -4,6 +4,7 @@ AI 模型调用封装"""
 import importlib.util
 from .skills.tools import ToolRegistry
 from .skills.agents import AgentRegistry
+from .context import RequestContext
 import base64
 import json
 import logging
@@ -861,14 +862,18 @@ class AIClient:
         if get_recent_messages_callback:
             try:
                 # 默认获取 20 条作为背景
-                # 优先从 extra_context 获取（避免并发竞态条件）
-                if extra_context:
+                # 优先从 RequestContext 获取（避免并发竞态条件）
+                ctx = RequestContext.current()
+                if ctx:
+                    group_id_from_ctx = ctx.group_id
+                    user_id_from_ctx = ctx.user_id
+                elif extra_context:
                     group_id_from_ctx = extra_context.get("group_id")
                     user_id_from_ctx = extra_context.get("user_id")
                 else:
                     group_id_from_ctx = None
                     user_id_from_ctx = None
-                
+
                 if group_id_from_ctx is not None:
                     chat_id = str(group_id_from_ctx)
                     msg_type = "group"
