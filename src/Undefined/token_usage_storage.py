@@ -3,6 +3,7 @@
 用于记录和查询 AI API 调用的 token 使用情况
 """
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, asdict
@@ -10,8 +11,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
-import aiofiles
-import fcntl
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +62,7 @@ class TokenUsageStorage:
     async def record(self, usage: TokenUsage | dict[str, Any]) -> None:
         """记录一次 token 使用
 
-        使用 asyncio.to_thread 来分发阻塞的文件锁操作，避免卡死主事件循环。
+        使用统一的 io 层执行异步写操作。
 
         参数:
             usage: Token 使用记录（TokenUsage 对象或字典）
@@ -76,24 +75,12 @@ class TokenUsageStorage:
                 data = usage
 
             # 准备要写入的行
-            line = json.dumps(data, ensure_ascii=False) + "\n"
+            line = json.dumps(data, ensure_ascii=False)
 
-            # 定义同步写入函数
-            def sync_append_with_lock(file_path: Path, data_line: str) -> None:
-                # 使用标准的 open 和 fcntl.flock，这在独立的线程中执行是安全的
-                with open(file_path, mode="a", encoding="utf-8") as f:
-                    # 获取排他锁 (阻塞直到获取成功，但在独立线程中不影响主循环)
-                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                    try:
-                        f.write(data_line)
-                    finally:
-                        # 确保释放锁
-                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            # 使用统一 IO 层追加内容
+            from .utils import io
 
-            # 将阻塞任务提交到线程池执行
-            import asyncio
-
-            await asyncio.to_thread(sync_append_with_lock, self.file_path, line)
+            await io.append_line(self.file_path, line, use_lock=True)
 
             logger.debug(
                 f"[Token统计] 已记录: {data.get('call_type')} - "
@@ -110,17 +97,23 @@ class TokenUsageStorage:
         """
         records: list[TokenUsage] = []
         try:
-            async with aiofiles.open(self.file_path, mode="r", encoding="utf-8") as f:
-                async for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            data = json.loads(line)
-                            records.append(TokenUsage.from_dict(data))
-                        except json.JSONDecodeError:
-                            logger.warning(f"[Token统计] 跳过无效行: {line}")
-        except FileNotFoundError:
-            logger.info(f"[Token统计] 文件不存在: {self.file_path}")
+
+            def sync_read() -> list[TokenUsage]:
+                batch = []
+                if not self.file_path.exists():
+                    return []
+                with open(self.file_path, mode="r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            try:
+                                data = json.loads(line)
+                                batch.append(TokenUsage.from_dict(data))
+                            except json.JSONDecodeError:
+                                pass
+                return batch
+
+            records = await asyncio.to_thread(sync_read)
         except Exception as e:
             logger.error(f"[Token统计] 读取失败: {e}")
 

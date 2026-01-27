@@ -18,7 +18,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not scheduler:
         return "调度器未在上下文中提供"
 
-    success = scheduler.remove_task(task_id)
+    success = await scheduler.remove_task(task_id)
 
     if success:
         return f"定时任务 '{task_id}' 已成功删除。"

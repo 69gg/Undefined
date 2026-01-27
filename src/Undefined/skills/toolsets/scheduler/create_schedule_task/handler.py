@@ -91,7 +91,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not target_type:
         target_type = "group"
 
-    success = scheduler.add_task(
+    success = await scheduler.add_task(
         task_id=task_id,
         tool_name=tool_name or (tools[0]["tool_name"] if tools else ""),
         tool_args=tool_args or (tools[0]["tool_args"] if tools else {}),

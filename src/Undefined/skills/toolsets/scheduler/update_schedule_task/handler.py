@@ -57,7 +57,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not scheduler:
         return "调度器未在上下文中提供"
 
-    success = scheduler.update_task(
+    success = await scheduler.update_task(
         task_id=task_id,
         cron_expression=cron_expression,
         tool_name=tool_name,

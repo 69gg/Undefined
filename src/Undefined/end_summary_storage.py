@@ -18,8 +18,18 @@ class EndSummaryStorage:
         """初始化存储"""
         pass
 
+    async def save(self, summaries: List[str]) -> None:
+        """保存所有摘要到文件"""
+        try:
+            from .utils import io
+
+            await io.write_json(END_SUMMARIES_FILE_PATH, summaries, use_lock=True)
+            logger.debug(f"已保存 {len(summaries)} 条 End 摘要")
+        except Exception as e:
+            logger.error(f"保存 End 摘要数据失败: {e}")
+
     def load(self) -> List[str]:
-        """从文件加载所有摘要"""
+        """从文件加载所有摘要 (同步)"""
         if not END_SUMMARIES_FILE_PATH.exists():
             return []
 
@@ -36,13 +46,3 @@ class EndSummaryStorage:
         except Exception as e:
             logger.error(f"加载 End 摘要数据失败: {e}")
             return []
-
-    def save(self, summaries: List[str]) -> None:
-        """保存所有摘要到文件"""
-        try:
-            END_SUMMARIES_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            with open(END_SUMMARIES_FILE_PATH, "w", encoding="utf-8") as f:
-                json.dump(summaries, f, ensure_ascii=False, indent=2)
-            logger.debug(f"已保存 {len(summaries)} 条 End 摘要")
-        except Exception as e:
-            logger.error(f"保存 End 摘要数据失败: {e}")
