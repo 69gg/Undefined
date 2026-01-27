@@ -133,3 +133,7 @@ skills/
 3.  **统一的加载机制**:
     -   所有工具和 Agent 均通过继承 `BaseRegistry` 的加载器自动加载。
     -   保持目录结构（`config.json` + `handler.py`）的一致性。
+
+4.  **异步安全 I/O**:
+    -   严禁在 `handler.py` 中直接调用同步的 `open()`, `json.dump()` 或 `fcntl.flock()`。
+    -   如果需要读写本地文件，建议使用 `asyncio.to_thread` 包装阻塞操作，或参考 `src/Undefined/utils/io.py`。
