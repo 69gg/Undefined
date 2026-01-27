@@ -63,47 +63,42 @@ class TokenUsageStorage:
     async def record(self, usage: TokenUsage | dict[str, Any]) -> None:
         """记录一次 token 使用
 
-
+        使用 asyncio.to_thread 来分发阻塞的文件锁操作，避免卡死主事件循环。
 
         参数:
-
             usage: Token 使用记录（TokenUsage 对象或字典）
-
         """
-
         try:
             # 转换为字典
-
             if isinstance(usage, TokenUsage):
                 data = usage.to_dict()
-
             else:
                 data = usage
 
-            # 使用文件锁确保并发写入安全
+            # 准备要写入的行
+            line = json.dumps(data, ensure_ascii=False) + "\n"
 
-            async with aiofiles.open(self.file_path, mode="a", encoding="utf-8") as f:
-                # 获取文件锁
+            # 定义同步写入函数
+            def sync_append_with_lock(file_path: Path, data_line: str) -> None:
+                # 使用标准的 open 和 fcntl.flock，这在独立的线程中执行是安全的
+                with open(file_path, mode="a", encoding="utf-8") as f:
+                    # 获取排他锁 (阻塞直到获取成功，但在独立线程中不影响主循环)
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                    try:
+                        f.write(data_line)
+                    finally:
+                        # 确保释放锁
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            # 将阻塞任务提交到线程池执行
+            import asyncio
 
-                try:
-                    # 追加 JSON 行
-
-                    line = json.dumps(data, ensure_ascii=False) + "\n"
-
-                    await f.write(line)
-
-                finally:
-                    # 释放文件锁
-
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            await asyncio.to_thread(sync_append_with_lock, self.file_path, line)
 
             logger.debug(
                 f"[Token统计] 已记录: {data.get('call_type')} - "
                 f"{data.get('model_name')} - {data.get('total_tokens')} tokens"
             )
-
         except Exception as e:
             logger.error(f"[Token统计] 记录失败: {e}")
 
