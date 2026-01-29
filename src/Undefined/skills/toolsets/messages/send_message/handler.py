@@ -10,8 +10,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         logger.warning("[发送消息] 收到空消息请求")
         return "消息内容不能为空"
 
-    message = message.replace("\\", "")
-
     # 如果可用，使用 context.recent_replies 检查重复
     recent_replies = context.get("recent_replies")
     if recent_replies is not None and message in recent_replies:
