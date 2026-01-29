@@ -10,7 +10,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     memory_storage = context.get("memory_storage")
 
     if memory_storage:
-        success = memory_storage.update(memory_uuid, fact)
+        success = await memory_storage.update(memory_uuid, fact)
         if success:
             return f"已更新记忆 {memory_uuid}: {fact[:50]}..."
         else:

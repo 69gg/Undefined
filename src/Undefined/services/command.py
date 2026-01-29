@@ -625,7 +625,7 @@ class CommandDispatcher:
         await self.sender.send_group_message(group_id, HELP_MESSAGE)
 
     async def _handle_lsfaq(self, group_id: int) -> None:
-        faqs = self.faq_storage.list_all(group_id)
+        faqs = await self.faq_storage.list_all(group_id)
         if not faqs:
             await self.sender.send_group_message(group_id, "📭 当前群组没有保存的 FAQ")
             return
@@ -645,7 +645,7 @@ class CommandDispatcher:
             )
             return
         faq_id = args[0]
-        faq = self.faq_storage.get(group_id, faq_id)
+        faq = await self.faq_storage.get(group_id, faq_id)
         if not faq:
             await self.sender.send_group_message(group_id, f"❌ FAQ 不存在: {faq_id}")
             return
@@ -659,7 +659,7 @@ class CommandDispatcher:
             )
             return
         keyword = " ".join(args)
-        results = self.faq_storage.search(group_id, keyword)
+        results = await self.faq_storage.search(group_id, keyword)
         if not results:
             await self.sender.send_group_message(
                 group_id, f'🔍 未找到包含 "{keyword}" 的 FAQ'
@@ -681,11 +681,11 @@ class CommandDispatcher:
             )
             return
         faq_id = args[0]
-        faq = self.faq_storage.get(group_id, faq_id)
+        faq = await self.faq_storage.get(group_id, faq_id)
         if not faq:
             await self.sender.send_group_message(group_id, f"❌ FAQ 不存在: {faq_id}")
             return
-        if self.faq_storage.delete(group_id, faq_id):
+        if await self.faq_storage.delete(group_id, faq_id):
             await self.sender.send_group_message(
                 group_id, f"✅ 已删除 FAQ: [{faq_id}] {faq.title}"
             )
@@ -825,7 +825,7 @@ class CommandDispatcher:
             if not title or title == "未命名问题":
                 title = await self.ai.generate_title(summary)
 
-            faq = self.faq_storage.create(
+            faq = await self.faq_storage.create(
                 group_id=group_id,
                 target_qq=target_qqs[0],
                 start_time=time_args[0],

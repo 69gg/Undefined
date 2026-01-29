@@ -3,6 +3,7 @@
 用于记录和查询 AI API 调用的 token 使用情况
 """
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, asdict
@@ -10,8 +11,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
-import aiofiles
-import fcntl
 
 logger = logging.getLogger(__name__)
 
@@ -63,47 +62,30 @@ class TokenUsageStorage:
     async def record(self, usage: TokenUsage | dict[str, Any]) -> None:
         """记录一次 token 使用
 
-
+        使用统一的 io 层执行异步写操作。
 
         参数:
-
             usage: Token 使用记录（TokenUsage 对象或字典）
-
         """
-
         try:
             # 转换为字典
-
             if isinstance(usage, TokenUsage):
                 data = usage.to_dict()
-
             else:
                 data = usage
 
-            # 使用文件锁确保并发写入安全
+            # 准备要写入的行
+            line = json.dumps(data, ensure_ascii=False)
 
-            async with aiofiles.open(self.file_path, mode="a", encoding="utf-8") as f:
-                # 获取文件锁
+            # 使用统一 IO 层追加内容
+            from .utils import io
 
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-
-                try:
-                    # 追加 JSON 行
-
-                    line = json.dumps(data, ensure_ascii=False) + "\n"
-
-                    await f.write(line)
-
-                finally:
-                    # 释放文件锁
-
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            await io.append_line(self.file_path, line, use_lock=True)
 
             logger.debug(
                 f"[Token统计] 已记录: {data.get('call_type')} - "
                 f"{data.get('model_name')} - {data.get('total_tokens')} tokens"
             )
-
         except Exception as e:
             logger.error(f"[Token统计] 记录失败: {e}")
 
@@ -115,17 +97,23 @@ class TokenUsageStorage:
         """
         records: list[TokenUsage] = []
         try:
-            async with aiofiles.open(self.file_path, mode="r", encoding="utf-8") as f:
-                async for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            data = json.loads(line)
-                            records.append(TokenUsage.from_dict(data))
-                        except json.JSONDecodeError:
-                            logger.warning(f"[Token统计] 跳过无效行: {line}")
-        except FileNotFoundError:
-            logger.info(f"[Token统计] 文件不存在: {self.file_path}")
+
+            def sync_read() -> list[TokenUsage]:
+                batch = []
+                if not self.file_path.exists():
+                    return []
+                with open(self.file_path, mode="r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            try:
+                                data = json.loads(line)
+                                batch.append(TokenUsage.from_dict(data))
+                            except json.JSONDecodeError:
+                                pass
+                return batch
+
+            records = await asyncio.to_thread(sync_read)
         except Exception as e:
             logger.error(f"[Token统计] 读取失败: {e}")
 

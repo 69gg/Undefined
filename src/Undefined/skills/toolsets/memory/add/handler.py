@@ -9,7 +9,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     memory_storage = context.get("memory_storage")
 
     if memory_storage:
-        memory_uuid = memory_storage.add(fact)
+        memory_uuid = await memory_storage.add(fact)
         if memory_uuid:
             return f"已保存记忆: {fact[:50]}... (UUID: {memory_uuid})"
         else:

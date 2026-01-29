@@ -13,6 +13,7 @@ from rich.console import Console
 
 from .ai import AIClient
 from .config import get_config
+from .context import RequestContextFilter
 from .faq import FAQStorage
 from .handlers import MessageHandler
 from .memory import MemoryStorage
@@ -30,7 +31,7 @@ def setup_logging() -> None:
     # 日志格式
     # 丰富日志处理器会自动处理时间戳、级别等，所以我们减短格式
     log_format = "%(name)s: %(message)s"
-    file_log_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    file_log_format = "%(asctime)s [%(levelname)s] [%(request_id)s] %(name)s: %(message)s"  # Modified to include request_id
     file_formatter = logging.Formatter(file_log_format)
 
     # 根日志器
@@ -68,6 +69,7 @@ def setup_logging() -> None:
         encoding="utf-8",
     )
     file_handler.setFormatter(file_formatter)
+    file_handler.addFilter(RequestContextFilter())  # 添加请求上下文过滤器
     root_logger.addHandler(file_handler)
 
     logging.info(

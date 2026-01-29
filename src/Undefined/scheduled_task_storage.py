@@ -96,11 +96,9 @@ class ScheduledTaskStorage:
             logger.error(f"加载定时任务数据失败: {e}")
             return {}
 
-    def save_all(self, tasks: Dict[str, Any]) -> None:
+    async def save_all(self, tasks: Dict[str, Any]) -> None:
         """保存所有任务到文件"""
         try:
-            TASKS_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-
             # 确保保存的是基础类型字典
             data_to_save = {}
             for task_id, task_info in tasks.items():
@@ -112,8 +110,9 @@ class ScheduledTaskStorage:
                 else:
                     logger.warning(f"未知任务数据格式: {task_id}")
 
-            with open(TASKS_FILE_PATH, "w", encoding="utf-8") as f:
-                json.dump(data_to_save, f, ensure_ascii=False, indent=2)
+            from .utils import io
+
+            await io.write_json(TASKS_FILE_PATH, data_to_save, use_lock=True)
             logger.debug(f"已保存 {len(data_to_save)} 个定时任务")
         except Exception as e:
             logger.error(f"保存定时任务数据失败: {e}")

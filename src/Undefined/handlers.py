@@ -185,7 +185,7 @@ class MessageHandler:
             logger.debug(
                 f"[历史记录] 保存私聊记录: user={private_sender_id}, content={parsed_content[:50]}..."
             )
-            self.history_manager.add_private_message(
+            await self.history_manager.add_private_message(
                 user_id=private_sender_id,
                 text_content=parsed_content,
                 display_name=private_sender_nickname,
@@ -263,7 +263,7 @@ class MessageHandler:
         logger.debug(
             f"[bold grey42][历史记录][/bold grey42] 保存群聊记录: group=[blue]{group_id}[/blue], sender=[blue]{sender_id}[/blue], content=[italic]{parsed_content[:50]}[/italic]..."
         )
-        self.history_manager.add_group_message(
+        await self.history_manager.add_group_message(
             group_id=group_id,
             sender_id=sender_id,
             text_content=parsed_content,

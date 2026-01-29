@@ -87,7 +87,7 @@ class TaskScheduler:
         if count > 0:
             logger.info(f"成功恢复 {count} 个定时任务")
 
-    def add_task(
+    async def add_task(
         self,
         task_id: str,
         tool_name: str,
@@ -149,7 +149,7 @@ class TaskScheduler:
             self.tasks[task_id] = task_data
 
             # 持久化保存
-            self.storage.save_all(self.tasks)
+            await self.storage.save_all(self.tasks)
 
             tools_info = f"{len(tools)} 个工具" if tools else f"{tool_name}"
             logger.info(
@@ -160,7 +160,7 @@ class TaskScheduler:
             logger.error(f"添加定时任务失败: {e}")
             return False
 
-    def update_task(
+    async def update_task(
         self,
         task_id: str,
         cron_expression: str | None = None,
@@ -224,7 +224,7 @@ class TaskScheduler:
                 task_info["execution_mode"] = execution_mode
 
             # 持久化保存
-            self.storage.save_all(self.tasks)
+            await self.storage.save_all(self.tasks)
 
             logger.info(f"修改定时任务成功: {task_id}")
             return True
@@ -232,14 +232,13 @@ class TaskScheduler:
             logger.error(f"修改定时任务失败: {e}")
             return False
 
-    def remove_task(self, task_id: str) -> bool:
+    async def remove_task(self, task_id: str) -> bool:
         """移除定时任务"""
         try:
             self.scheduler.remove_job(task_id)
             if task_id in self.tasks:
                 del self.tasks[task_id]
-                # 持久化保存
-                self.storage.save_all(self.tasks)
+                await self.storage.save_all(self.tasks)
             logger.info(f"移除定时任务成功: {task_id}")
             return True
         except Exception as e:
@@ -337,13 +336,13 @@ class TaskScheduler:
                 )
 
                 # 持久化保存执行次数
-                self.storage.save_all(self.tasks)
+                await self.storage.save_all(self.tasks)
 
                 max_executions = task_info.get("max_executions")
                 current_executions = task_info.get("current_executions", 0)
 
                 if max_executions is not None and current_executions >= max_executions:
-                    self.remove_task(task_id)
+                    await self.remove_task(task_id)
                     logger.info(
                         f"定时任务 {task_id} 已达到最大执行次数 {max_executions}，已自动删除"
                     )

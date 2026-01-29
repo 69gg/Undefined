@@ -1,6 +1,5 @@
 """FAQ 存储管理"""
 
-import json
 import logging
 from dataclasses import dataclass, asdict
 from datetime import datetime
@@ -70,7 +69,7 @@ class FAQStorage:
         count = sum(1 for f in existing if f.stem.startswith(timestamp))
         return f"{timestamp}-{count + 1:03d}"
 
-    def save(self, faq: FAQ) -> str:
+    async def save(self, faq: FAQ) -> str:
         """保存 FAQ
 
         参数:
@@ -82,13 +81,14 @@ class FAQStorage:
         group_dir = self._get_group_dir(faq.group_id)
         file_path = group_dir / f"{faq.id}.json"
 
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(faq.to_dict(), f, ensure_ascii=False, indent=2)
+        from .utils import io
+
+        await io.write_json(file_path, faq.to_dict(), use_lock=True)
 
         logger.info(f"FAQ 已保存: {file_path}")
         return faq.id
 
-    def create(
+    async def create(
         self,
         group_id: int,
         target_qq: int,
@@ -120,10 +120,10 @@ class FAQStorage:
             title=title,
             content=content,
         )
-        self.save(faq)
+        await self.save(faq)
         return faq
 
-    def get(self, group_id: int, faq_id: str) -> Optional[FAQ]:
+    async def get(self, group_id: int, faq_id: str) -> Optional[FAQ]:
         """获取指定 FAQ
 
         参数:
@@ -136,18 +136,14 @@ class FAQStorage:
         group_dir = self._get_group_dir(group_id)
         file_path = group_dir / f"{faq_id}.json"
 
-        if not file_path.exists():
-            return None
+        from .utils import io
 
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+        data = await io.read_json(file_path, use_lock=False)
+        if data:
             return FAQ.from_dict(data)
-        except Exception as e:
-            logger.error(f"读取 FAQ 失败: {e}")
-            return None
+        return None
 
-    def list_all(self, group_id: int) -> list[FAQ]:
+    async def list_all(self, group_id: int) -> list[FAQ]:
         """列出群组的所有 FAQ
 
         参数:
@@ -159,17 +155,20 @@ class FAQStorage:
         group_dir = self._get_group_dir(group_id)
         faqs: list[FAQ] = []
 
+        from .utils import io
+
+        # 批量列出文件并读取
         for file_path in sorted(group_dir.glob("*.json"), reverse=True):
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                faqs.append(FAQ.from_dict(data))
+                data = await io.read_json(file_path, use_lock=False)
+                if data:
+                    faqs.append(FAQ.from_dict(data))
             except Exception as e:
                 logger.error(f"读取 FAQ 失败 {file_path}: {e}")
 
         return faqs
 
-    def search(self, group_id: int, keyword: str) -> list[FAQ]:
+    async def search(self, group_id: int, keyword: str) -> list[FAQ]:
         """搜索 FAQ
 
         根据关键词在标题和内容中搜索匹配的 FAQ
@@ -182,7 +181,7 @@ class FAQStorage:
             匹配的 FAQ 列表
         """
         keyword_lower = keyword.lower()
-        all_faqs = self.list_all(group_id)
+        all_faqs = await self.list_all(group_id)
 
         matched: list[FAQ] = []
         for faq in all_faqs:
@@ -195,7 +194,7 @@ class FAQStorage:
 
         return matched
 
-    def delete(self, group_id: int, faq_id: str) -> bool:
+    async def delete(self, group_id: int, faq_id: str) -> bool:
         """删除 FAQ
 
         参数:
@@ -208,11 +207,9 @@ class FAQStorage:
         group_dir = self._get_group_dir(group_id)
         file_path = group_dir / f"{faq_id}.json"
 
-        if file_path.exists():
-            file_path.unlink()
-            logger.info(f"FAQ 已删除: {file_path}")
-            return True
-        return False
+        from .utils import io
+
+        return await io.delete_file(file_path)
 
 
 def extract_faq_title(content: str) -> str:

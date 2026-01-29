@@ -2,6 +2,7 @@ import logging
 from datetime import datetime
 from typing import Any, Optional
 from ..config import Config
+from ..context import RequestContext
 from ..render import render_html_to_image, render_markdown_to_html
 from ..services.queue_manager import QueueManager
 from ..utils.history import MessageHistoryManager
@@ -56,7 +57,7 @@ class AICoordinator:
                 logger.warning(
                     f"[Security] 检测到注入攻击: group={group_id}, user={sender_id}"
                 )
-                self.history_manager.modify_last_group_message(
+                await self.history_manager.modify_last_group_message(
                     group_id, sender_id, "<这句话检测到用户进行注入，已删除>"
                 )
                 if is_at_bot:
@@ -116,7 +117,7 @@ class AICoordinator:
         if user_id != self.config.superadmin_qq:
             if await self.security.detect_injection(text, message_content):
                 logger.warning(f"[Security] 私聊注入攻击: user_id={user_id}")
-                self.history_manager.modify_last_private_message(
+                await self.history_manager.modify_last_private_message(
                     user_id, "<这句话检测到用户进行注入，已删除>"
                 )
                 await self._handle_injection_response(user_id, text, is_private=True)
@@ -162,92 +163,126 @@ class AICoordinator:
         sender_id = request["sender_id"]
         full_question = request["full_question"]
 
-        async def send_msg_cb(message: str, at_user: Optional[int] = None) -> None:
-            if at_user:
-                message = f"[CQ:at,qq={at_user}] {message}"
-            await self.sender.send_group_message(group_id, message)
+        # 创建请求上下文
+        async with RequestContext(
+            request_type="group",
+            group_id=group_id,
+            sender_id=sender_id,
+            user_id=sender_id,
+        ) as ctx:
+            # 存储资源到上下文
+            ctx.set_resource("sender", self.sender)
+            ctx.set_resource("history_manager", self.history_manager)
+            ctx.set_resource("onebot_client", self.onebot)
+            ctx.set_resource("scheduler", self.scheduler)
+            ctx.set_resource("render_html_to_image", render_html_to_image)
+            ctx.set_resource("render_markdown_to_html", render_markdown_to_html)
 
-        async def get_recent_cb(
-            chat_id: str, msg_type: str, start: int, end: int
-        ) -> list[dict[str, Any]]:
-            return self.history_manager.get_recent(chat_id, msg_type, start, end)
+            async def send_msg_cb(message: str, at_user: Optional[int] = None) -> None:
+                if at_user:
+                    message = f"[CQ:at,qq={at_user}] {message}"
+                await self.sender.send_group_message(group_id, message)
 
-        async def send_private_cb(uid: int, msg: str) -> None:
-            await self.sender.send_private_message(uid, msg)
+            async def get_recent_cb(
+                chat_id: str, msg_type: str, start: int, end: int
+            ) -> list[dict[str, Any]]:
+                return self.history_manager.get_recent(chat_id, msg_type, start, end)
 
-        async def send_img_cb(tid: int, mtype: str, path: str) -> None:
-            await self._send_image(tid, mtype, path)
+            async def send_private_cb(uid: int, msg: str) -> None:
+                await self.sender.send_private_message(uid, msg)
 
-        async def send_like_cb(uid: int, times: int = 1) -> None:
-            await self.onebot.send_like(uid, times)
+            async def send_img_cb(tid: int, mtype: str, path: str) -> None:
+                await self._send_image(tid, mtype, path)
 
-        try:
-            self.ai.current_group_id = group_id
-            self.ai.current_user_id = sender_id
-            self.ai._send_private_message_callback = send_private_cb
-            self.ai._send_image_callback = send_img_cb
+            async def send_like_cb(uid: int, times: int = 1) -> None:
+                await self.onebot.send_like(uid, times)
 
-            await self.ai.ask(
-                full_question,
-                send_message_callback=send_msg_cb,
-                get_recent_messages_callback=get_recent_cb,
-                get_image_url_callback=self.onebot.get_image,
-                get_forward_msg_callback=self.onebot.get_forward_msg,
-                send_like_callback=send_like_cb,
-                sender=self.sender,
-                history_manager=self.history_manager,
-                onebot_client=self.onebot,
-                scheduler=self.scheduler,
-                extra_context={
-                    "render_html_to_image": render_html_to_image,
-                    "render_markdown_to_html": render_markdown_to_html,
-                },
-            )
-        except Exception:
-            logger.exception("自动回复执行出错")
+            try:
+                # 保留旧方式（向后兼容）
+                self.ai.current_group_id = group_id
+                self.ai.current_user_id = sender_id
+                self.ai._send_private_message_callback = send_private_cb
+                self.ai._send_image_callback = send_img_cb
+
+                await self.ai.ask(
+                    full_question,
+                    send_message_callback=send_msg_cb,
+                    get_recent_messages_callback=get_recent_cb,
+                    get_image_url_callback=self.onebot.get_image,
+                    get_forward_msg_callback=self.onebot.get_forward_msg,
+                    send_like_callback=send_like_cb,
+                    sender=self.sender,
+                    history_manager=self.history_manager,
+                    onebot_client=self.onebot,
+                    scheduler=self.scheduler,
+                    extra_context={
+                        "render_html_to_image": render_html_to_image,
+                        "render_markdown_to_html": render_markdown_to_html,
+                        "group_id": group_id,
+                        "user_id": sender_id,
+                    },
+                )
+            except Exception:
+                logger.exception("自动回复执行出错")
 
     async def _execute_private_reply(self, request: dict[str, Any]) -> None:
         user_id = request["user_id"]
         full_question = request["full_question"]
 
-        async def send_msg_cb(message: str, at_user: Optional[int] = None) -> None:
-            await self.sender.send_private_message(user_id, message)
+        # 创建请求上下文
+        async with RequestContext(
+            request_type="private",
+            user_id=user_id,
+            sender_id=user_id,
+        ) as ctx:
+            # 存储资源到上下文
+            ctx.set_resource("sender", self.sender)
+            ctx.set_resource("history_manager", self.history_manager)
+            ctx.set_resource("onebot_client", self.onebot)
+            ctx.set_resource("scheduler", self.scheduler)
+            ctx.set_resource("render_html_to_image", render_html_to_image)
+            ctx.set_resource("render_markdown_to_html", render_markdown_to_html)
 
-        async def get_recent_cb(
-            chat_id: str, msg_type: str, start: int, end: int
-        ) -> list[dict[str, Any]]:
-            return self.history_manager.get_recent(chat_id, msg_type, start, end)
+            async def send_msg_cb(message: str, at_user: Optional[int] = None) -> None:
+                await self.sender.send_private_message(user_id, message)
 
-        async def send_img_cb(tid: int, mtype: str, path: str) -> None:
-            await self._send_image(tid, mtype, path)
+            async def get_recent_cb(
+                chat_id: str, msg_type: str, start: int, end: int
+            ) -> list[dict[str, Any]]:
+                return self.history_manager.get_recent(chat_id, msg_type, start, end)
 
-        async def send_like_cb(uid: int, times: int = 1) -> None:
-            await self.onebot.send_like(uid, times)
+            async def send_img_cb(tid: int, mtype: str, path: str) -> None:
+                await self._send_image(tid, mtype, path)
 
-        try:
-            self.ai.current_group_id = None
-            self.ai.current_user_id = user_id
-            self.ai._send_image_callback = send_img_cb
-            result = await self.ai.ask(
-                full_question,
-                send_message_callback=send_msg_cb,
-                get_recent_messages_callback=get_recent_cb,
-                get_image_url_callback=self.onebot.get_image,
-                get_forward_msg_callback=self.onebot.get_forward_msg,
-                send_like_callback=send_like_cb,
-                sender=self.sender,
-                history_manager=self.history_manager,
-                onebot_client=self.onebot,
-                scheduler=self.scheduler,
-                extra_context={
-                    "render_html_to_image": render_html_to_image,
-                    "render_markdown_to_html": render_markdown_to_html,
-                },
-            )
-            if result:
-                await self.sender.send_private_message(user_id, result)
-        except Exception:
-            logger.exception("私聊回复执行出错")
+            async def send_like_cb(uid: int, times: int = 1) -> None:
+                await self.onebot.send_like(uid, times)
+
+            try:
+                # 保留旧方式（向后兼容）
+                self.ai.current_group_id = None
+                self.ai.current_user_id = user_id
+                self.ai._send_image_callback = send_img_cb
+                result = await self.ai.ask(
+                    full_question,
+                    send_message_callback=send_msg_cb,
+                    get_recent_messages_callback=get_recent_cb,
+                    get_image_url_callback=self.onebot.get_image,
+                    get_forward_msg_callback=self.onebot.get_forward_msg,
+                    send_like_callback=send_like_cb,
+                    sender=self.sender,
+                    history_manager=self.history_manager,
+                    onebot_client=self.onebot,
+                    scheduler=self.scheduler,
+                    extra_context={
+                        "render_html_to_image": render_html_to_image,
+                        "render_markdown_to_html": render_markdown_to_html,
+                        "user_id": user_id,
+                    },
+                )
+                if result:
+                    await self.sender.send_private_message(user_id, result)
+            except Exception:
+                logger.exception("私聊回复执行出错")
 
     def _is_at_bot(self, content: list[dict[str, Any]]) -> bool:
         for seg in content:
@@ -267,13 +302,13 @@ class AICoordinator:
         reply = await self.security.generate_injection_response(text)
         if is_private:
             await self.sender.send_private_message(tid, reply, auto_history=False)
-            self.history_manager.add_private_message(
+            await self.history_manager.add_private_message(
                 tid, "<对注入消息的回复>", "Bot", "Bot"
             )
         else:
             msg = f"[CQ:at,qq={sender_id}] {reply}" if sender_id else reply
             await self.sender.send_group_message(tid, msg, auto_history=False)
-            self.history_manager.add_group_message(
+            await self.history_manager.add_group_message(
                 tid, self.config.bot_qq, "<对注入消息的回复>", "Bot", ""
             )
 

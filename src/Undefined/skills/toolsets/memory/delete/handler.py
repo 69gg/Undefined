@@ -9,7 +9,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     memory_storage = context.get("memory_storage")
 
     if memory_storage:
-        success = memory_storage.delete(memory_uuid)
+        success = await memory_storage.delete(memory_uuid)
         if success:
             return f"已删除记忆 {memory_uuid}"
         else:

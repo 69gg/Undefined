@@ -111,17 +111,36 @@ skills/
     -   尽量不要在 `handler.py` 中引用 `skills/` 目录之外的本地模块（如 `from Undefined.xxx import`）。
     -   如果是通用库（如 `httpx`, `pillow`），直接引用即可。
 
-2.  **使用 Context 注入依赖**:
-    -   如果你需要使用外部项目的功能（如数据库连接、特殊的渲染函数），请通过 `execute` 函数的 `context` 参数传入。
-    -   主程序（`handlers.py` 或 `ai.py`）负责在调用 `execute_tool` 时将这些依赖放入 `context` 或 `extra_context`。
+2.  **使用 RequestContext 获取请求信息**（推荐）:
+    -   使用 `RequestContext` 获取当前请求的 group_id、user_id 等信息，无需手动传递参数。
+    -   这是获取请求上下文的首选方式，支持并发隔离。
+
+    ```python
+    from Undefined.context import get_group_id, get_user_id, get_request_id
+    
+    async def execute(args, context):
+        # 优先从 args 获取（用户显式指定）
+        group_id = args.get("group_id") or get_group_id()
+        user_id = args.get("user_id") or get_user_id()
+        request_id = get_request_id()  # 自动UUID追踪
+        
+        if not group_id:
+            return "无法确定群ID"
+        
+        # 使用 group_id 进行操作...
+    ```
+
+3.  **使用 Context 注入外部依赖**:
+    -   如果需要使用外部项目的功能（如数据库连接、特殊的渲染函数），通过 `context` 参数传入。
+    -   主程序（`handlers.py` 或 `ai.py`）负责在调用时将这些依赖放入 `context`。
 
     ```python
     # 错误的做法
     from MyProject.utils import heavy_function
-
+    
     async def execute(args, context):
         await heavy_function()
-
+    
     # 正确的做法
     async def execute(args, context):
         heavy_func = context.get("heavy_function")
@@ -130,6 +149,22 @@ skills/
         await heavy_func()
     ```
 
-3.  **统一的加载机制**:
+4.  **向后兼容的获取方式**（仅在必要时使用）:
+    -   如果 `RequestContext` 不可用，可以回退到从 `context` 获取：
+    
+    ```python
+    from Undefined.context import get_group_id
+    
+    async def execute(args, context):
+        # 优先级：args > RequestContext > context > ai_client（已废弃）
+        group_id = args.get("group_id") or get_group_id() or context.get("group_id")
+    ```
+
+5.  **统一的加载机制**:
     -   所有工具和 Agent 均通过继承 `BaseRegistry` 的加载器自动加载。
     -   保持目录结构（`config.json` + `handler.py`）的一致性。
+
+6.  **异步安全 I/O**:
+    -   严禁在 `handler.py` 中直接调用同步的 `open()`, `json.dump()` 或 `fcntl.flock()`。
+    -   如果需要读写本地文件，建议使用 `asyncio.to_thread` 包装阻塞操作，或参考 `src/Undefined/utils/io.py`。
+

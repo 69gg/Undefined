@@ -55,6 +55,7 @@ class OneBotClient:
                 url,
                 ping_interval=20,
                 ping_timeout=20,
+                max_size=100 * 1024 * 1024,  # 100MB，支持大量历史消息
                 additional_headers=extra_headers if extra_headers else None,
             )
             logger.info("[bold green][WebSocket][/bold green] 连接成功")

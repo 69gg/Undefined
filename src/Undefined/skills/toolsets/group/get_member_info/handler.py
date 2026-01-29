@@ -22,9 +22,11 @@ FIELD_MAPPING = {
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """获取群聊成员的详细信息"""
     ai_client = context.get("ai_client")
-    group_id = args.get("group_id") or (
-        ai_client.current_group_id if ai_client else None
-    )
+    group_id = args.get("group_id") or context.get("group_id")
+    if not group_id:
+        # 向后兼容
+        ai_client = context.get("ai_client")
+        group_id = ai_client.current_group_id if ai_client else None
     user_id = args.get("user_id")
     fields = args.get("fields")
     no_cache = args.get("no_cache", False)

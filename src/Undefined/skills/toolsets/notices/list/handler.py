@@ -17,6 +17,10 @@ def parse_timestamp(time_str: str) -> int:
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     group_id = args.get("group_id")
     if not group_id:
+        # 优先从 context 获取（避免并发问题）
+        group_id = context.get("group_id")
+    if not group_id:
+        # 向后兼容
         ai_client = context.get("ai_client")
         group_id = ai_client.current_group_id if ai_client else None
 
