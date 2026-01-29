@@ -96,9 +96,9 @@ class AIClient:
             Callable[[int, str, str], Awaitable[None]]
         ] = None
 
-        # 从存储加载 end 摘要，最多保留 100 条
-        loaded_summaries = self._end_summary_storage.load()
-        self._end_summaries: deque[str] = deque(loaded_summaries, maxlen=100)
+        # 延迟加载 end 摘要（使用后台任务）
+        self._end_summaries: deque[str] = deque(maxlen=100)
+        self._summaries_loaded = False
 
         # 当前群聊ID和用户ID（用于send_message工具）
         self.current_group_id: Optional[int] = None
@@ -161,6 +161,14 @@ class AIClient:
         self._mcp_init_task = asyncio.create_task(init_mcp_async())
 
         logger.info("[bold green][初始化][/bold green] AIClient 初始化完成")
+
+    async def _ensure_summaries_loaded(self) -> None:
+        """确保 end 摘要已加载（延迟加载）"""
+        if not self._summaries_loaded:
+            loaded_summaries = await self._end_summary_storage.load()
+            self._end_summaries.extend(loaded_summaries)
+            self._summaries_loaded = True
+            logger.debug(f"[AI初始化] 已加载 {len(loaded_summaries)} 条 End 摘要")
 
     async def close(self) -> None:
         """关闭 HTTP 客户端和 MCP 连接"""
@@ -845,7 +853,8 @@ class AIClient:
                 logger.info(f"[AI会话] 已注入 {len(memories)} 条长期记忆")
                 logger.debug(f"[AI会话] 记忆内容: {memory_text}")
 
-        # 0.1 注入end记录到 prompt
+        # 0.1 注入end记录到 prompt（延迟加载）
+        await self._ensure_summaries_loaded()
         if self._end_summaries:
             summary_text = "\n".join([f"- {s}" for s in self._end_summaries])
             messages.append(

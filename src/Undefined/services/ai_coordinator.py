@@ -57,7 +57,7 @@ class AICoordinator:
                 logger.warning(
                     f"[Security] 检测到注入攻击: group={group_id}, user={sender_id}"
                 )
-                self.history_manager.modify_last_group_message(
+                await self.history_manager.modify_last_group_message(
                     group_id, sender_id, "<这句话检测到用户进行注入，已删除>"
                 )
                 if is_at_bot:
@@ -117,7 +117,7 @@ class AICoordinator:
         if user_id != self.config.superadmin_qq:
             if await self.security.detect_injection(text, message_content):
                 logger.warning(f"[Security] 私聊注入攻击: user_id={user_id}")
-                self.history_manager.modify_last_private_message(
+                await self.history_manager.modify_last_private_message(
                     user_id, "<这句话检测到用户进行注入，已删除>"
                 )
                 await self._handle_injection_response(user_id, text, is_private=True)
@@ -302,13 +302,13 @@ class AICoordinator:
         reply = await self.security.generate_injection_response(text)
         if is_private:
             await self.sender.send_private_message(tid, reply, auto_history=False)
-            self.history_manager.add_private_message(
+            await self.history_manager.add_private_message(
                 tid, "<对注入消息的回复>", "Bot", "Bot"
             )
         else:
             msg = f"[CQ:at,qq={sender_id}] {reply}" if sender_id else reply
             await self.sender.send_group_message(tid, msg, auto_history=False)
-            self.history_manager.add_group_message(
+            await self.history_manager.add_group_message(
                 tid, self.config.bot_qq, "<对注入消息的回复>", "Bot", ""
             )
 

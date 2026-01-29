@@ -1,6 +1,5 @@
 """End 摘要持久化存储模块"""
 
-import json
 import logging
 from pathlib import Path
 from typing import List
@@ -28,21 +27,17 @@ class EndSummaryStorage:
         except Exception as e:
             logger.error(f"保存 End 摘要数据失败: {e}")
 
-    def load(self) -> List[str]:
-        """从文件加载所有摘要 (同步)"""
-        if not END_SUMMARIES_FILE_PATH.exists():
+    async def load(self) -> List[str]:
+        """从文件加载所有摘要 (异步)"""
+        from .utils import io
+
+        data = await io.read_json(END_SUMMARIES_FILE_PATH, use_lock=False)
+
+        if data is None:
             return []
 
-        try:
-            with open(END_SUMMARIES_FILE_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, list):
-                return data
-            else:
-                logger.warning(
-                    f"End 摘要数据格式异常，期望 list，实际得到 {type(data)}"
-                )
-                return []
-        except Exception as e:
-            logger.error(f"加载 End 摘要数据失败: {e}")
+        if isinstance(data, list):
+            return data
+        else:
+            logger.warning(f"End 摘要数据格式异常，期望 list，实际得到 {type(data)}")
             return []

@@ -34,7 +34,7 @@ class MessageSender:
             history_content = extract_text(segments, self.bot_qq)
             logger.debug(f"[历史记录] 正在保存 Bot 群聊回复: group={group_id}")
 
-            self.history_manager.add_group_message(
+            await self.history_manager.add_group_message(
                 group_id=group_id,
                 sender_id=self.bot_qq,
                 text_content=history_content,
@@ -93,7 +93,7 @@ class MessageSender:
             history_content = extract_text(segments, self.bot_qq)
             logger.debug(f"[历史记录] 正在保存 Bot 私聊回复: user={user_id}")
 
-            self.history_manager.add_private_message(
+            await self.history_manager.add_private_message(
                 user_id=user_id,
                 text_content=history_content,
                 display_name="Bot",
