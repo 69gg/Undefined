@@ -4,6 +4,7 @@ AI 模型调用封装"""
 import importlib.util
 from .skills.tools import ToolRegistry
 from .skills.agents import AgentRegistry
+from .skills.agents.intro_generator import AgentIntroGenConfig, AgentIntroGenerator
 from .context import RequestContext
 import base64
 import json
@@ -13,6 +14,7 @@ from collections import deque
 from datetime import datetime
 from typing import Any, Callable, Awaitable, Optional
 from pathlib import Path
+from contextvars import ContextVar
 
 import aiofiles
 import time
@@ -110,6 +112,62 @@ class AIClient:
         # 初始化 Agent 注册表
         self.agent_registry = AgentRegistry(Path(__file__).parent / "skills" / "agents")
 
+        # 启动 Agent intro 自动生成（启动时队列）
+        intro_autogen_enabled = os.getenv(
+            "AGENT_INTRO_AUTOGEN_ENABLED", "true"
+        ).lower() not in {
+            "0",
+            "false",
+            "no",
+        }
+        try:
+            intro_queue_interval = float(
+                os.getenv("AGENT_INTRO_AUTOGEN_QUEUE_INTERVAL", "1.0")
+            )
+        except ValueError:
+            intro_queue_interval = 1.0
+        try:
+            intro_max_tokens = int(os.getenv("AGENT_INTRO_AUTOGEN_MAX_TOKENS", "700"))
+        except ValueError:
+            intro_max_tokens = 700
+        intro_cache_path = Path(
+            os.getenv("AGENT_INTRO_HASH_PATH", ".cache/agent_intro_hashes.json")
+        )
+        self._agent_intro_generator = AgentIntroGenerator(
+            self.agent_registry.base_dir,
+            self,
+            AgentIntroGenConfig(
+                enabled=intro_autogen_enabled,
+                queue_interval_seconds=intro_queue_interval,
+                max_tokens=intro_max_tokens,
+                cache_path=intro_cache_path,
+            ),
+        )
+        self._agent_intro_task = asyncio.create_task(
+            self._agent_intro_generator.start()
+        )
+
+        # 启动 skills 热重载（可通过环境变量关闭）
+        hot_reload_enabled = os.getenv("SKILLS_HOT_RELOAD", "true").lower() not in {
+            "0",
+            "false",
+            "no",
+        }
+        if hot_reload_enabled:
+            try:
+                interval = float(os.getenv("SKILLS_HOT_RELOAD_INTERVAL", "2.0"))
+                debounce = float(os.getenv("SKILLS_HOT_RELOAD_DEBOUNCE", "0.5"))
+            except ValueError:
+                interval = 2.0
+                debounce = 0.5
+            self.tool_registry.start_hot_reload(interval=interval, debounce=debounce)
+            self.agent_registry.start_hot_reload(interval=interval, debounce=debounce)
+
+        # Agent MCP 注册表（按调用上下文隔离）
+        self._agent_mcp_registry_var: ContextVar[dict[str, Any] | None] = ContextVar(
+            "agent_mcp_registry_var", default=None
+        )
+
         # 初始化搜索 wrapper
         self._search_wrapper: Optional[Any] = None
         if _SEARX_AVAILABLE:
@@ -178,10 +236,16 @@ class AIClient:
         # 关闭 MCP 工具集连接
         if hasattr(self, "tool_registry"):
             await self.tool_registry.close_mcp_toolsets()
+            await self.tool_registry.stop_hot_reload()
+        if hasattr(self, "agent_registry"):
+            await self.agent_registry.stop_hot_reload()
 
         # 等待 MCP 初始化任务完成（如果还在运行）
         if hasattr(self, "_mcp_init_task") and not self._mcp_init_task.done():
             await self._mcp_init_task
+        if hasattr(self, "_agent_intro_task") and self._agent_intro_task:
+            if not self._agent_intro_task.done():
+                await self._agent_intro_task
 
         logger.info("[清理] AIClient 已关闭")
 
@@ -223,6 +287,14 @@ class AIClient:
             API 响应 JSON 字典
         """
         start_time = time.perf_counter()
+        if call_type.startswith("agent:"):
+            agent_name = call_type.split("agent:", 1)[1]
+            mcp_registry = self.get_active_agent_mcp_registry(agent_name)
+            if mcp_registry:
+                mcp_tools = mcp_registry.get_tools_schema()
+                if mcp_tools:
+                    tools = self._merge_tools(tools, mcp_tools)
+
         request_body = self._build_request_body(
             model_config=model_config,
             messages=messages,
@@ -322,6 +394,40 @@ class AIClient:
         body.update(kwargs)
 
         return body
+
+    def _merge_tools(
+        self,
+        base_tools: list[dict[str, Any]] | None,
+        extra_tools: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not base_tools:
+            return list(extra_tools)
+
+        merged = list(base_tools)
+        existing_names = {
+            tool.get("function", {}).get("name")
+            for tool in base_tools
+            if tool.get("function")
+        }
+        for tool in extra_tools:
+            name = tool.get("function", {}).get("name")
+            if name and name not in existing_names:
+                merged.append(tool)
+                existing_names.add(name)
+        return merged
+
+    def _get_agent_mcp_config_path(self, agent_name: str) -> Path | None:
+        agent_dir = self.agent_registry.base_dir / agent_name
+        mcp_path = agent_dir / "mcp.json"
+        if mcp_path.exists():
+            return mcp_path
+        return None
+
+    def get_active_agent_mcp_registry(self, agent_name: str) -> Any | None:
+        registries = self._agent_mcp_registry_var.get()
+        if registries:
+            return registries.get(agent_name)
+        return None
 
     def _extract_choices_content(self, result: dict[str, Any]) -> str:
         """从 API 响应中提取 choices 内容
@@ -1175,6 +1281,32 @@ class AIClient:
 
         try:
             if is_agent:
+                mcp_registry = None
+                registry_token = None
+                mcp_config_path = self._get_agent_mcp_config_path(function_name)
+                if mcp_config_path:
+                    try:
+                        from .mcp import MCPToolRegistry
+
+                        mcp_registry = MCPToolRegistry(
+                            config_path=mcp_config_path,
+                            tool_name_strategy="mcp",
+                        )
+                        await mcp_registry.initialize()
+                        current = self._agent_mcp_registry_var.get()
+                        new_map = dict(current) if current else {}
+                        new_map[function_name] = mcp_registry
+                        registry_token = self._agent_mcp_registry_var.set(new_map)
+                        logger.info(
+                            f"[Agent MCP] {function_name} 加载了 {len(mcp_registry.get_tools_schema())} 个工具"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"[Agent MCP] {function_name} MCP 初始化失败: {e}"
+                        )
+                        mcp_registry = None
+                        registry_token = None
+
                 # 获取该 Agent 的临时历史记录
                 agent_histories = context.get("agent_histories", {})
                 agent_history = agent_histories.get(function_name, [])
@@ -1182,10 +1314,17 @@ class AIClient:
                 # 将历史记录注入到工具执行上下文中
                 agent_context = context.copy()
                 agent_context["agent_history"] = agent_history
+                agent_context["agent_name"] = function_name
 
-                result = await self.agent_registry.execute_agent(
-                    function_name, function_args, agent_context
-                )
+                try:
+                    result = await self.agent_registry.execute_agent(
+                        function_name, function_args, agent_context
+                    )
+                finally:
+                    if registry_token is not None:
+                        self._agent_mcp_registry_var.reset(registry_token)
+                    if mcp_registry:
+                        await mcp_registry.close()
 
                 # 更新该 Agent 的历史记录 (临时记录)
                 # 这里我们记录 Agent 的输入 prompt 和它的输出结果作为一轮对话

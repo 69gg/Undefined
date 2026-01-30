@@ -4,7 +4,7 @@ MCP 工具集允许 Undefined 机器人连接外部 MCP 服务器，扩展 AI �
 
 ## 架构
 
-MCP 工具集通过 `MCPToolSetRegistry` 实现，负责：
+MCP 工具集通过 `Undefined.mcp.MCPToolRegistry` 实现（兼容别名：`MCPToolSetRegistry`），负责：
 
 1. 加载 MCP 配置文件（`config/mcp.json`）
 2. 连接配置的 MCP 服务器

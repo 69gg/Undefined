@@ -57,11 +57,14 @@
 ## 核心特性
 
 - **Skills 架构**：全新设计的技能系统，将基础工具（Tools）与智能代理（Agents）分层管理，支持自动发现与注册。
+- **Skills 热重载**：自动扫描 `skills/` 目录，检测到变更后即时重载工具与 Agent，无需重启服务。
 - **并行工具执行**：无论是主 AI 还是子 Agent，均支持 `asyncio` 并发工具调用，大幅提升多任务处理速度（如同时读取多个文件或搜索多个关键词）。
 - **智能 Agent 矩阵**：内置多个专业 Agent，分工协作处理复杂任务。
+- **Agent 自我介绍自动生成**：启动时按 Agent 代码/配置 hash 生成 `intro.generated.md`（第一人称、结构化），与 `intro.md` 合并后作为描述；减少手动维护，保持能力说明与实现同步，有助于精准调度。
 - **请求上下文管理**：基于 Python `contextvars` 的统一请求上下文系统，自动 UUID 追踪，零竞态条件，完全的并发隔离。
 - **定时任务系统**：支持 Crontab 语法的强大定时任务系统，可自动执行各种操作（如定时提醒、定时搜索）。
 - **MCP 协议支持**：支持通过 MCP (Model Context Protocol) 连接外部工具和数据源，扩展 AI 能力。
+- **Agent 私有 MCP**：可为单个 agent 提供独立 MCP 配置，按调用即时加载并释放，工具仅对该 agent 可见。
 - **思维链支持**：支持开启思维链，提升复杂逻辑推理能力。
 - **高并发架构**：基于 `asyncio` 全异步设计，支持多队列消息处理与工具并发执行，轻松应对高并发场景。
 - **异步安全 I/O**：建立统一 IO 层，通过线程池和文件锁（`flock`）确保底层磁盘操作永不阻塞主事件循环，彻底杜绝死锁。
@@ -131,7 +134,9 @@ uv run -m Undefined
   - `VISION_MODEL_*`：视觉识别模型（负责识图）
   - `AGENT_MODEL_*`：Agent 专用模型（建议使用推理能力更强的模型）
   - `SECURITY_MODEL_*`：安全审核模型（负责防注入检测）
-- **功能配置**：`LOG_LEVEL`, `PROXY` 等
+- **功能配置**：`LOG_LEVEL`, `LOG_FILE_PATH`, `LOG_MAX_SIZE_MB`, `LOG_BACKUP_COUNT`
+- **Skills 热重载**：`SKILLS_HOT_RELOAD`, `SKILLS_HOT_RELOAD_INTERVAL`, `SKILLS_HOT_RELOAD_DEBOUNCE`
+- **代理设置（可选）**：`USE_PROXY`, `http_proxy`, `https_proxy`（兼容 `HTTP_PROXY/HTTPS_PROXY`）
 
 > 启动项目需要 OneBot 协议端，推荐使用 [NapCat](https://napneko.github.io/) 或 [Lagrange.Core](https://github.com/LagrangeDev/Lagrange.Core)。
 
@@ -157,6 +162,24 @@ Undefined 支持 **MCP (Model Context Protocol)** 协议，可以连接外部 MC
 ```
 
 更多资源请访问 [MCP 官方文档](https://modelcontextprotocol.io/) 或 [mcp.so](https://mcp.so) 发现更多服务器。
+
+#### Agent 私有 MCP（可选）
+
+除了全局 MCP 配置外，每个 agent 也支持单独的 MCP 配置文件。若存在，将在调用该 agent 时**临时加载**，并在调用结束后释放，工具仅对该 agent 可见（工具名为 MCP 原始名称，无额外前缀）。此方式无需设置 `MCP_CONFIG_PATH`。
+
+- 路径：`src/Undefined/skills/agents/<agent_name>/mcp.json`
+- 示例：`web_agent` 已预置 Playwright MCP（用于网页浏览/截图类能力）
+
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"]
+    }
+  }
+}
+```
 
 ## 技术架构
 
@@ -289,6 +312,29 @@ Undefined 的核心能力源自其强大的插件系统，位于 `src/Undefined/
 - **Tools (基础工具)**：原子化的功能单元，如 `send_message`, `get_history`。
 - **Agents (智能体)**：具有特定人设和任务的 AI 实体，如 `search_agent` (搜索), `code_agent` (代码)。
 - **Toolsets (复合工具集)**：一组相关功能的集合，支持动态加载。
+
+插件系统支持 **延迟加载 + 热重载**：`handler.py` 仅在首次调用时导入；当 `skills/` 下的 `config.json`/`handler.py` 发生变更时会自动重新加载。
+
+热重载配置（可选）：
+
+- `SKILLS_HOT_RELOAD`：`true/false`（默认 `true`）
+- `SKILLS_HOT_RELOAD_INTERVAL`：扫描间隔（秒，默认 `2.0`）
+- `SKILLS_HOT_RELOAD_DEBOUNCE`：去抖时间（秒，默认 `0.5`）
+
+#### Agent 自我介绍自动生成
+
+系统会在启动时检测 Agent 代码或配置的变更（hash 对比），自动生成 `intro.generated.md` 并与 `intro.md` 合并为最终描述：
+
+- **稳定一致**：统一的结构化自我介绍格式，避免各 Agent 文档风格不一。
+- **自动同步**：代码变更时自动更新说明，防止能力描述过期。
+- **易于定制**：提示词位于 `res/prompts/agent_self_intro.txt`，可按需调整口径。
+
+相关配置项（可选）：
+
+- `AGENT_INTRO_AUTOGEN_ENABLED`：是否开启自动生成（默认 `true`）
+- `AGENT_INTRO_AUTOGEN_QUEUE_INTERVAL`：队列处理间隔（秒，默认 `1.0`）
+- `AGENT_INTRO_AUTOGEN_MAX_TOKENS`：生成最大 token（默认 `700`）
+- `AGENT_INTRO_HASH_PATH`：hash 缓存路径（默认 `.cache/agent_intro_hashes.json`）
 
 ### "车站-列车" 队列模型
 

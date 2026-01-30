@@ -48,6 +48,10 @@ config.local.json
 .vscode
 .ruff_cache
 dist/
+.cache/
 
 # MCP 配置
 config/mcp.json
+
+# Agent intro auto generation
+src/Undefined/skills/agents/**/intro.generated.md

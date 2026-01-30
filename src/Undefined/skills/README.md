@@ -65,6 +65,13 @@ skills/
 - **特性**: 支持自动发现子工具并注册
 - **示例**: `web_agent`, `file_analysis_agent`, `naga_code_analysis_agent`
 
+## 运行机制（重要）
+
+- **延迟加载 (Lazy Load)**: 只在首次执行时才导入 `handler.py`，启动更快。
+- **结构化日志 + 统计**: 统一输出 `event=execute`、`status=success/timeout/error` 等结构化字段，并记录执行耗时与成功/失败计数。
+- **超时与取消**: 所有技能执行默认 120s 超时，超时会返回提示并记录统计。
+- **热重载 (Hot Reload)**: 自动扫描 `skills/` 目录，检测到 `config.json` 或 `handler.py` 变更后自动重载。
+
 ## 选择指南
 
 | 特性 | Tools | Toolsets | Agents |
@@ -97,11 +104,12 @@ skills/
 
 1. 在 `skills/agents/` 下创建新目录
 2. 添加 `intro.md`（给主 AI 看的能力说明）
-3. 添加 `prompt.md`（Agent 系统提示词）
-4. 添加 `config.json`（Agent 定义）
-5. 添加 `handler.py`（Agent 执行逻辑）
-6. 在 `tools/` 子目录中添加子工具（可选）
-7. 自动被 `AgentRegistry` 发现和注册
+3. （可选）生成 `intro.generated.md`（自动补充说明，系统启动时可自动生成）
+4. 添加 `prompt.md`（Agent 系统提示词）
+5. 添加 `config.json`（Agent 定义）
+6. 添加 `handler.py`（Agent 执行逻辑）
+7. 在 `tools/` 子目录中添加子工具（可选）
+8. 自动被 `AgentRegistry` 发现和注册
 
 ## 最佳实践与移植指南
 
@@ -161,10 +169,9 @@ skills/
     ```
 
 5.  **统一的加载机制**:
-    -   所有工具和 Agent 均通过继承 `BaseRegistry` 的加载器自动加载。
+    -   所有工具和 Agent 均通过统一加载器自动加载（支持延迟加载与热重载）。
     -   保持目录结构（`config.json` + `handler.py`）的一致性。
 
 6.  **异步安全 I/O**:
     -   严禁在 `handler.py` 中直接调用同步的 `open()`, `json.dump()` 或 `fcntl.flock()`。
     -   如果需要读写本地文件，建议使用 `asyncio.to_thread` 包装阻塞操作，或参考 `src/Undefined/utils/io.py`。
-
