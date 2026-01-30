@@ -18,7 +18,11 @@ class MCPToolSetRegistry:
     负责加载 MCP 配置，连接 MCP 服务器，并将 MCP 工具转换为 toolsets 格式。
     """
 
-    def __init__(self, config_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        config_path: str | Path | None = None,
+        tool_name_strategy: str = "mcp",
+    ) -> None:
         """
         初始化 MCP 工具集注册表。
 
@@ -31,6 +35,7 @@ class MCPToolSetRegistry:
             config_path = os.getenv("MCP_CONFIG_PATH", "config/mcp.json")
 
         self.config_path: Path = Path(config_path)
+        self.tool_name_strategy = tool_name_strategy
         self._tools_schema: List[Dict[str, Any]] = []
         self._tools_handlers: Dict[
             str, Callable[[Dict[str, Any], Dict[str, Any]], Awaitable[str]]
@@ -139,34 +144,38 @@ class MCPToolSetRegistry:
             # FastMCP 的行为：
             # - 单服务器：工具名不带前缀（如 resolve-library-id）
             # - 多服务器：工具名带服务器前缀（如 context7_resolve-library-id）
-            server_name = None
-            actual_tool_name = tool_name
-
-            # 检查工具名是否包含服务器前缀
-            for name in self._mcp_servers.keys():
-                if tool_name.startswith(f"{name}_"):
-                    server_name = name
-                    # 提取实际的工具名（去掉服务器前缀）
-                    actual_tool_name = tool_name[len(name) + 1 :]
-                    break
-
-            # 如果只有一个服务器且工具名没有前缀，使用该服务器名
-            if server_name is None and len(self._mcp_servers) == 1:
-                server_name = list(self._mcp_servers.keys())[0]
-                # FastMCP 调用时使用原始工具名（不带前缀）
+            if self.tool_name_strategy == "raw":
                 original_tool_name = tool_name
-            elif server_name:
-                # 多服务器，工具名已包含前缀
-                original_tool_name = tool_name
+                full_tool_name = tool_name
             else:
-                # 无法确定服务器，直接使用原始工具名
-                original_tool_name = tool_name
+                server_name = None
+                actual_tool_name = tool_name
 
-            # 构建完整的工具名称：mcp.{server_name}.{tool_name}
-            if server_name:
-                full_tool_name = f"mcp.{server_name}.{actual_tool_name}"
-            else:
-                full_tool_name = f"mcp.{actual_tool_name}"
+                # 检查工具名是否包含服务器前缀
+                for name in self._mcp_servers.keys():
+                    if tool_name.startswith(f"{name}_"):
+                        server_name = name
+                        # 提取实际的工具名（去掉服务器前缀）
+                        actual_tool_name = tool_name[len(name) + 1 :]
+                        break
+
+                # 如果只有一个服务器且工具名没有前缀，使用该服务器名
+                if server_name is None and len(self._mcp_servers) == 1:
+                    server_name = list(self._mcp_servers.keys())[0]
+                    # FastMCP 调用时使用原始工具名（不带前缀）
+                    original_tool_name = tool_name
+                elif server_name:
+                    # 多服务器，工具名已包含前缀
+                    original_tool_name = tool_name
+                else:
+                    # 无法确定服务器，直接使用原始工具名
+                    original_tool_name = tool_name
+
+                # 构建完整的工具名称：mcp.{server_name}.{tool_name}
+                if server_name:
+                    full_tool_name = f"mcp.{server_name}.{actual_tool_name}"
+                else:
+                    full_tool_name = f"mcp.{actual_tool_name}"
 
             # 构建 OpenAI function calling 格式的 schema
             schema = {

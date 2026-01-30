@@ -62,6 +62,7 @@
 - **请求上下文管理**：基于 Python `contextvars` 的统一请求上下文系统，自动 UUID 追踪，零竞态条件，完全的并发隔离。
 - **定时任务系统**：支持 Crontab 语法的强大定时任务系统，可自动执行各种操作（如定时提醒、定时搜索）。
 - **MCP 协议支持**：支持通过 MCP (Model Context Protocol) 连接外部工具和数据源，扩展 AI 能力。
+- **Agent 私有 MCP**：可为单个 agent 提供独立 MCP 配置，按调用即时加载并释放，工具仅对该 agent 可见。
 - **思维链支持**：支持开启思维链，提升复杂逻辑推理能力。
 - **高并发架构**：基于 `asyncio` 全异步设计，支持多队列消息处理与工具并发执行，轻松应对高并发场景。
 - **异步安全 I/O**：建立统一 IO 层，通过线程池和文件锁（`flock`）确保底层磁盘操作永不阻塞主事件循环，彻底杜绝死锁。
@@ -157,6 +158,24 @@ Undefined 支持 **MCP (Model Context Protocol)** 协议，可以连接外部 MC
 ```
 
 更多资源请访问 [MCP 官方文档](https://modelcontextprotocol.io/) 或 [mcp.so](https://mcp.so) 发现更多服务器。
+
+#### Agent 私有 MCP（可选）
+
+除了全局 MCP 配置外，每个 agent 也支持单独的 MCP 配置文件。若存在，将在调用该 agent 时**临时加载**，并在调用结束后释放，工具仅对该 agent 可见（工具名为 MCP 原始名称，无额外前缀）。此方式无需设置 `MCP_CONFIG_PATH`。
+
+- 路径：`src/Undefined/skills/agents/<agent_name>/mcp.json`
+- 示例：`web_agent` 已预置 Playwright MCP（用于网页浏览/截图类能力）
+
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"]
+    }
+  }
+}
+```
 
 ## 技术架构
 

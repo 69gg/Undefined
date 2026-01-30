@@ -112,6 +112,7 @@ class BaseRegistry:
 
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
+            self._patch_agent_tool_registry(module)
 
             if not hasattr(module, "execute"):
                 logger.error(f"{item_dir} 的处理器缺少 'execute' 函数")
@@ -122,6 +123,54 @@ class BaseRegistry:
 
         except Exception as e:
             logger.error(f"从 {item_dir} 加载失败: {e}")
+
+    def _patch_agent_tool_registry(self, module: Any) -> None:
+        """为 AgentToolRegistry 注入 MCP 执行逻辑（若存在）。"""
+        if not hasattr(module, "AgentToolRegistry"):
+            return
+
+        registry_cls = getattr(module, "AgentToolRegistry")
+        if getattr(registry_cls, "_mcp_patched", False):
+            return
+
+        if not hasattr(registry_cls, "execute_tool"):
+            return
+
+        original_execute_tool = registry_cls.execute_tool
+
+        async def execute_tool(
+            self: Any,
+            tool_name: str,
+            args: Dict[str, Any],
+            context: Dict[str, Any],
+        ) -> str:
+            if tool_name in getattr(self, "_tools_handlers", {}):
+                if asyncio.iscoroutinefunction(original_execute_tool):
+                    result = await original_execute_tool(self, tool_name, args, context)
+                    return str(result)
+                result = original_execute_tool(self, tool_name, args, context)
+                return str(result)
+
+            ai_client = context.get("ai_client")
+            agent_name = context.get("agent_name")
+            if (
+                ai_client
+                and agent_name
+                and hasattr(ai_client, "get_active_agent_mcp_registry")
+            ):
+                registry = ai_client.get_active_agent_mcp_registry(agent_name)
+                if registry:
+                    result = await registry.execute_tool(tool_name, args, context)
+                    return str(result)
+
+            if asyncio.iscoroutinefunction(original_execute_tool):
+                result = await original_execute_tool(self, tool_name, args, context)
+                return str(result)
+            result = original_execute_tool(self, tool_name, args, context)
+            return str(result)
+
+        registry_cls.execute_tool = execute_tool
+        registry_cls._mcp_patched = True
 
     def get_schema(self) -> List[Dict[str, Any]]:
         """获取所有已加载项的 Schema。"""
