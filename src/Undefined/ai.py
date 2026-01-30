@@ -1228,9 +1228,9 @@ class AIClient:
                 mcp_config_path = self._get_agent_mcp_config_path(function_name)
                 if mcp_config_path:
                     try:
-                        from .skills.toolsets.mcp import MCPToolSetRegistry
+                        from .mcp import MCPToolRegistry
 
-                        mcp_registry = MCPToolSetRegistry(
+                        mcp_registry = MCPToolRegistry(
                             config_path=mcp_config_path,
                             tool_name_strategy="mcp",
                         )

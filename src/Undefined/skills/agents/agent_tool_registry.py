@@ -84,9 +84,9 @@ class AgentToolRegistry:
             return
 
         try:
-            from ..toolsets.mcp import MCPToolSetRegistry
+            from ...mcp import MCPToolRegistry
 
-            self._mcp_registry = MCPToolSetRegistry(
+            self._mcp_registry = MCPToolRegistry(
                 config_path=self.mcp_config_path,
                 tool_name_strategy="mcp",
             )

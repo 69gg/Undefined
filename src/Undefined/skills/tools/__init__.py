@@ -5,7 +5,7 @@ from typing import Dict, Any, List, TYPE_CHECKING
 from ..registry import BaseRegistry
 
 if TYPE_CHECKING:
-    from ..toolsets.mcp import MCPToolSetRegistry
+    from ...mcp import MCPToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ class ToolRegistry(BaseRegistry):
         super().__init__(tools_path)
 
         # 初始化 MCP 工具集注册表
-        self._mcp_registry: MCPToolSetRegistry | None = None
+        self._mcp_registry: MCPToolRegistry | None = None
 
         # 自动加载
         self.load_tools()
@@ -113,10 +113,10 @@ class ToolRegistry(BaseRegistry):
     def _load_mcp_toolsets(self) -> None:
         """加载 MCP 工具集（创建注册表，但不初始化）"""
         try:
-            from ..toolsets.mcp import MCPToolSetRegistry
+            from ...mcp import MCPToolRegistry
 
             # 创建 MCP 工具集注册表
-            self._mcp_registry = MCPToolSetRegistry()
+            self._mcp_registry = MCPToolRegistry()
             logger.info("MCP 工具集注册表已创建（待初始化）")
 
         except ImportError as e:
