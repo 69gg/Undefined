@@ -78,6 +78,19 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
 工具注册表 (`ToolRegistry`) 会在初始化时自动扫描目录下的所有文件夹。只要文件夹内同时存在 `config.json` 和 `handler.py`，工具就会被自动加载并提供给 AI 使用，**无需手动修改任何导入代码**。
 
+## 运行特性
+
+- **延迟加载 (Lazy Load)**：`handler.py` 仅在首次调用时导入，减少启动耗时。
+- **超时与取消**：单次执行默认 120s 超时；超时会返回提示并记录统计。
+- **结构化日志**：统一输出 `event=execute`、`status=success/timeout/error` 等字段，便于检索与统计。
+- **热重载**：检测到工具变更会自动重新加载（默认开启）。
+
+可通过环境变量控制热重载：
+
+- `SKILLS_HOT_RELOAD`：`true/false`，默认 `true`
+- `SKILLS_HOT_RELOAD_INTERVAL`：扫描间隔，默认 `2.0` 秒
+- `SKILLS_HOT_RELOAD_DEBOUNCE`：去抖时间，默认 `0.5` 秒
+
 ## 开发建议
 
 1. **返回字符串**：工具的返回值必须是字符串。如果是复杂数据，请将其转为 JSON 字符串或格式化的文本。

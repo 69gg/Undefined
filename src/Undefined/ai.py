@@ -111,6 +111,22 @@ class AIClient:
         # 初始化 Agent 注册表
         self.agent_registry = AgentRegistry(Path(__file__).parent / "skills" / "agents")
 
+        # 启动 skills 热重载（可通过环境变量关闭）
+        hot_reload_enabled = os.getenv("SKILLS_HOT_RELOAD", "true").lower() not in {
+            "0",
+            "false",
+            "no",
+        }
+        if hot_reload_enabled:
+            try:
+                interval = float(os.getenv("SKILLS_HOT_RELOAD_INTERVAL", "2.0"))
+                debounce = float(os.getenv("SKILLS_HOT_RELOAD_DEBOUNCE", "0.5"))
+            except ValueError:
+                interval = 2.0
+                debounce = 0.5
+            self.tool_registry.start_hot_reload(interval=interval, debounce=debounce)
+            self.agent_registry.start_hot_reload(interval=interval, debounce=debounce)
+
         # Agent MCP 注册表（按调用上下文隔离）
         self._agent_mcp_registry_var: ContextVar[dict[str, Any] | None] = ContextVar(
             "agent_mcp_registry_var", default=None
@@ -184,6 +200,9 @@ class AIClient:
         # 关闭 MCP 工具集连接
         if hasattr(self, "tool_registry"):
             await self.tool_registry.close_mcp_toolsets()
+            await self.tool_registry.stop_hot_reload()
+        if hasattr(self, "agent_registry"):
+            await self.agent_registry.stop_hot_reload()
 
         # 等待 MCP 初始化任务完成（如果还在运行）
         if hasattr(self, "_mcp_init_task") and not self._mcp_init_task.done():

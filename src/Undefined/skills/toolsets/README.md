@@ -33,6 +33,13 @@ toolsets/
 3. 添加 `handler.py`（执行逻辑，必须包含 `async def execute(args, context)`）
 4. 自动被 `ToolRegistry` 发现和注册
 
+## 运行特性
+
+- **延迟加载 (Lazy Load)**：仅在首次调用时导入 `handler.py`。
+- **超时与取消**：单次执行默认 120s 超时，超时会返回提示并记录统计。
+- **结构化日志**：统一输出 `event=execute`、`status=success/timeout/error` 等字段。
+- **热重载**：检测到 `toolsets/` 中的变更会自动重新加载。
+
 ## 示例：添加一个新工具
 
 ### 1. 创建目录

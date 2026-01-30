@@ -16,17 +16,16 @@ class AgentRegistry(BaseRegistry):
         else:
             agents_path = Path(agents_dir)
 
-        super().__init__(agents_path)
+        super().__init__(agents_path, kind="agent")
+        self.set_watch_paths([self.base_dir])
         self.load_agents()
 
     def load_agents(self) -> None:
-        """自动发现和加载 agents"""
         self.load_items()
         self._log_agents_summary()
 
     def _log_agents_summary(self) -> None:
-        """输出 Agent 加载统计"""
-        agent_names = list(self._items_handlers.keys())
+        agent_names = list(self._items.keys())
         if agent_names:
             logger.info("=" * 60)
             logger.info("Agent 加载完成统计")
@@ -36,11 +35,9 @@ class AgentRegistry(BaseRegistry):
             logger.info("=" * 60)
 
     def get_agents_schema(self) -> List[Dict[str, Any]]:
-        """获取所有 agent 的 schema 定义（用于 OpenAI function calling）"""
         return self.get_schema()
 
     async def execute_agent(
         self, agent_name: str, args: Dict[str, Any], context: Dict[str, Any]
     ) -> str:
-        """执行 agent"""
         return await self.execute(agent_name, args, context)

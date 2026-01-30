@@ -115,6 +115,13 @@ Agent 的执行逻辑，负责：
 3. 通过 `AgentToolRegistry` 调用子工具
 4. 返回结果给主 AI
 
+## 运行特性
+
+- **延迟加载 (Lazy Load)**：Agent `handler.py` 首次调用时导入，减少启动耗时。
+- **超时与取消**：Agent 调用默认 120s 超时，超时返回提示并记录统计。
+- **结构化日志**：统一输出 `event=execute`、`status=success/timeout/error` 等字段。
+- **热重载**：检测到 `skills/agents/` 变更后自动重载 Agent 注册表。
+
 ## 最佳实践：统一请求与上下文
 
 为了简化 Agent 开发并确保 Token 统计一致性，建议所有 Agent 均遵循以下最佳实践：

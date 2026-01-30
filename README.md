@@ -57,6 +57,7 @@
 ## 核心特性
 
 - **Skills 架构**：全新设计的技能系统，将基础工具（Tools）与智能代理（Agents）分层管理，支持自动发现与注册。
+- **Skills 热重载**：自动扫描 `skills/` 目录，检测到变更后即时重载工具与 Agent，无需重启服务。
 - **并行工具执行**：无论是主 AI 还是子 Agent，均支持 `asyncio` 并发工具调用，大幅提升多任务处理速度（如同时读取多个文件或搜索多个关键词）。
 - **智能 Agent 矩阵**：内置多个专业 Agent，分工协作处理复杂任务。
 - **请求上下文管理**：基于 Python `contextvars` 的统一请求上下文系统，自动 UUID 追踪，零竞态条件，完全的并发隔离。
@@ -308,6 +309,14 @@ Undefined 的核心能力源自其强大的插件系统，位于 `src/Undefined/
 - **Tools (基础工具)**：原子化的功能单元，如 `send_message`, `get_history`。
 - **Agents (智能体)**：具有特定人设和任务的 AI 实体，如 `search_agent` (搜索), `code_agent` (代码)。
 - **Toolsets (复合工具集)**：一组相关功能的集合，支持动态加载。
+
+插件系统支持 **延迟加载 + 热重载**：`handler.py` 仅在首次调用时导入；当 `skills/` 下的 `config.json`/`handler.py` 发生变更时会自动重新加载。
+
+热重载配置（可选）：
+
+- `SKILLS_HOT_RELOAD`：`true/false`（默认 `true`）
+- `SKILLS_HOT_RELOAD_INTERVAL`：扫描间隔（秒，默认 `2.0`）
+- `SKILLS_HOT_RELOAD_DEBOUNCE`：去抖时间（秒，默认 `0.5`）
 
 ### "车站-列车" 队列模型
 
