@@ -60,6 +60,7 @@
 - **Skills 热重载**：自动扫描 `skills/` 目录，检测到变更后即时重载工具与 Agent，无需重启服务。
 - **并行工具执行**：无论是主 AI 还是子 Agent，均支持 `asyncio` 并发工具调用，大幅提升多任务处理速度（如同时读取多个文件或搜索多个关键词）。
 - **智能 Agent 矩阵**：内置多个专业 Agent，分工协作处理复杂任务。
+- **Agent 自我介绍自动生成**：启动时按 Agent 代码/配置 hash 生成 `intro.generated.md`（第一人称、结构化），与 `intro.md` 合并后作为描述；减少手动维护，保持能力说明与实现同步，有助于精准调度。
 - **请求上下文管理**：基于 Python `contextvars` 的统一请求上下文系统，自动 UUID 追踪，零竞态条件，完全的并发隔离。
 - **定时任务系统**：支持 Crontab 语法的强大定时任务系统，可自动执行各种操作（如定时提醒、定时搜索）。
 - **MCP 协议支持**：支持通过 MCP (Model Context Protocol) 连接外部工具和数据源，扩展 AI 能力。
@@ -319,6 +320,21 @@ Undefined 的核心能力源自其强大的插件系统，位于 `src/Undefined/
 - `SKILLS_HOT_RELOAD`：`true/false`（默认 `true`）
 - `SKILLS_HOT_RELOAD_INTERVAL`：扫描间隔（秒，默认 `2.0`）
 - `SKILLS_HOT_RELOAD_DEBOUNCE`：去抖时间（秒，默认 `0.5`）
+
+#### Agent 自我介绍自动生成
+
+系统会在启动时检测 Agent 代码或配置的变更（hash 对比），自动生成 `intro.generated.md` 并与 `intro.md` 合并为最终描述：
+
+- **稳定一致**：统一的结构化自我介绍格式，避免各 Agent 文档风格不一。
+- **自动同步**：代码变更时自动更新说明，防止能力描述过期。
+- **易于定制**：提示词位于 `res/prompts/agent_self_intro.txt`，可按需调整口径。
+
+相关配置项（可选）：
+
+- `AGENT_INTRO_AUTOGEN_ENABLED`：是否开启自动生成（默认 `true`）
+- `AGENT_INTRO_AUTOGEN_QUEUE_INTERVAL`：队列处理间隔（秒，默认 `1.0`）
+- `AGENT_INTRO_AUTOGEN_MAX_TOKENS`：生成最大 token（默认 `700`）
+- `AGENT_INTRO_HASH_PATH`：hash 缓存路径（默认 `.cache/agent_intro_hashes.json`）
 
 ### "车站-列车" 队列模型
 
