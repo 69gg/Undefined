@@ -1232,7 +1232,7 @@ class AIClient:
 
                         mcp_registry = MCPToolSetRegistry(
                             config_path=mcp_config_path,
-                            tool_name_strategy="raw",
+                            tool_name_strategy="mcp",
                         )
                         await mcp_registry.initialize()
                         current = self._agent_mcp_registry_var.get()

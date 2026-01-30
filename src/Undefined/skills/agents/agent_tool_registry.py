@@ -88,7 +88,7 @@ class AgentToolRegistry:
 
             self._mcp_registry = MCPToolSetRegistry(
                 config_path=self.mcp_config_path,
-                tool_name_strategy="raw",
+                tool_name_strategy="mcp",
             )
             await self._mcp_registry.initialize()
 

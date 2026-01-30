@@ -233,7 +233,7 @@ class MCPToolSetRegistry:
         """执行指定的 MCP 工具
 
         参数:
-            tool_name: 工具名称（格式：mcp.{server_name}_{tool_name}）
+            tool_name: 工具名称（格式：mcp.{server_name}.{tool_name}）
             args: 工具参数
             context: 执行上下文
 
