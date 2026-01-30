@@ -104,11 +104,12 @@ skills/
 
 1. 在 `skills/agents/` 下创建新目录
 2. 添加 `intro.md`（给主 AI 看的能力说明）
-3. 添加 `prompt.md`（Agent 系统提示词）
-4. 添加 `config.json`（Agent 定义）
-5. 添加 `handler.py`（Agent 执行逻辑）
-6. 在 `tools/` 子目录中添加子工具（可选）
-7. 自动被 `AgentRegistry` 发现和注册
+3. （可选）生成 `intro.generated.md`（自动补充说明，系统启动时可自动生成）
+4. 添加 `prompt.md`（Agent 系统提示词）
+5. 添加 `config.json`（Agent 定义）
+6. 添加 `handler.py`（Agent 执行逻辑）
+7. 在 `tools/` 子目录中添加子工具（可选）
+8. 自动被 `AgentRegistry` 发现和注册
 
 ## 最佳实践与移植指南
 

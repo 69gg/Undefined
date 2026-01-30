@@ -79,6 +79,7 @@ class BaseRegistry:
         self._watch_task: Optional[asyncio.Task[None]] = None
         self._watch_stop: Optional[asyncio.Event] = None
         self._last_snapshot: Dict[str, tuple[int, int]] = {}
+        self._watch_filenames: set[str] = {"config.json", "handler.py"}
 
         self.skills_root = self._resolve_skills_root(self.base_dir)
 
@@ -89,6 +90,9 @@ class BaseRegistry:
 
     def set_watch_paths(self, paths: List[Path]) -> None:
         self._watch_paths = paths
+
+    def set_watch_filenames(self, filenames: set[str]) -> None:
+        self._watch_filenames = filenames
 
     def _log_event(self, event: str, name: str = "", **fields: Any) -> None:
         parts = [f"event={event}", f"kind={self.kind}"]
@@ -344,7 +348,7 @@ class BaseRegistry:
 
     def _compute_snapshot(self) -> Dict[str, tuple[int, int]]:
         snapshot: Dict[str, tuple[int, int]] = {}
-        target_names = {"config.json", "handler.py"}
+        target_names = self._watch_filenames
         for root in self._watch_paths:
             if not root.exists():
                 continue

@@ -9,6 +9,7 @@ AI Agent 目录，每个 Agent 是一个工具集合。
 ```
 agent_name/
 ├── intro.md          # 给主 AI 看的能力说明
+├── intro.generated.md# 自动生成的补充说明（可选）
 ├── prompt.md         # Agent 系统提示词（从文件加载）
 ├── config.json       # Agent 定义（OpenAI function calling 格式）
 ├── handler.py        # Agent 执行逻辑
@@ -43,28 +44,54 @@ AGENT_MODEL_THINKING_BUDGET_TOKENS=0    # thinking budget tokens
 | `AGENT_MODEL_THINKING_ENABLED` | 是否启用思维链 | false |
 | `AGENT_MODEL_THINKING_BUDGET_TOKENS` | 思维链预算 token 数量 | 0 |
 
+## intro 自动生成（推荐）
+
+启动时会对 Agent 代码做 hash，如果检测到变更，则将补充说明写入 `intro.generated.md`。该文件会在加载时与 `intro.md` 合并。
+
+提示词文件位置：`res/prompts/agent_intro_generation.txt`
+
+```env
+AGENT_INTRO_AUTOGEN_ENABLED=true
+AGENT_INTRO_AUTOGEN_QUEUE_INTERVAL=1.0
+AGENT_INTRO_AUTOGEN_MAX_TOKENS=700
+AGENT_INTRO_HASH_PATH=.cache/agent_intro_hashes.json
+```
+
+| 环境变量 | 说明 | 默认值 |
+|---------|------|-------|
+| `AGENT_INTRO_AUTOGEN_ENABLED` | 是否启动自动生成 | true |
+| `AGENT_INTRO_AUTOGEN_QUEUE_INTERVAL` | 队列发车间隔（秒） | 1.0 |
+| `AGENT_INTRO_AUTOGEN_MAX_TOKENS` | 生成最大 token | 700 |
+| `AGENT_INTRO_HASH_PATH` | hash 缓存路径 | .cache/agent_intro_hashes.json |
+
 ## 核心文件说明
 
 ### intro.md
 给主 AI 参考的 Agent 能力说明，包括：
 - Agent 的功能概述
 - 支持的能力列表
-- 使用方式和参数说明
-- 返回格式
+- 边界与适用范围
+- 输入偏好与注意事项
 
-**这是主 AI 看到的核心描述**，系统会自动将 `intro.md` 的内容作为 Agent 的 description 传递给 AI。
+**这是主 AI 看到的核心描述**，系统会自动将 `intro.md` 与 `intro.generated.md` 的内容合并后作为 Agent 的 description 传递给 AI。
 
 示例：
 ```markdown
 # XXX 助手
 
-## 能力
-- 功能1
-- 功能2
+## 定位
+一句话概述
 
-## 使用方式
-- 提供 xxx 参数
+## 擅长
+- 能力1
+- 能力2
+
+## 边界
+- 不适用场景
 ```
+
+### intro.generated.md
+自动生成的补充说明文件，**不要手动编辑**。系统会在启动时检测代码变更并自动覆盖该文件。
 
 ### prompt.md
 Agent 内部的系统提示词，**从文件加载**，指导 Agent 如何选择和使用工具。
@@ -84,7 +111,7 @@ Agent 内部的系统提示词，**从文件加载**，指导 Agent 如何选择
 ### config.json
 Agent 的 OpenAI function calling 定义。
 
-**注意**：description 字段可选，不建议手动填写。系统会自动从 `intro.md` 读取内容作为 description 传递给 AI。
+**注意**：description 字段可选，不建议手动填写。系统会自动从 `intro.md` + `intro.generated.md` 读取内容作为 description 传递给 AI。
 
 现有配置中的 description 仅用于向后兼容，未来将逐步移除。
 

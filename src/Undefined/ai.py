@@ -4,6 +4,7 @@ AI 模型调用封装"""
 import importlib.util
 from .skills.tools import ToolRegistry
 from .skills.agents import AgentRegistry
+from .skills.agents.intro_generator import AgentIntroGenConfig, AgentIntroGenerator
 from .context import RequestContext
 import base64
 import json
@@ -111,6 +112,41 @@ class AIClient:
         # 初始化 Agent 注册表
         self.agent_registry = AgentRegistry(Path(__file__).parent / "skills" / "agents")
 
+        # 启动 Agent intro 自动生成（启动时队列）
+        intro_autogen_enabled = os.getenv(
+            "AGENT_INTRO_AUTOGEN_ENABLED", "true"
+        ).lower() not in {
+            "0",
+            "false",
+            "no",
+        }
+        try:
+            intro_queue_interval = float(
+                os.getenv("AGENT_INTRO_AUTOGEN_QUEUE_INTERVAL", "1.0")
+            )
+        except ValueError:
+            intro_queue_interval = 1.0
+        try:
+            intro_max_tokens = int(os.getenv("AGENT_INTRO_AUTOGEN_MAX_TOKENS", "700"))
+        except ValueError:
+            intro_max_tokens = 700
+        intro_cache_path = Path(
+            os.getenv("AGENT_INTRO_HASH_PATH", ".cache/agent_intro_hashes.json")
+        )
+        self._agent_intro_generator = AgentIntroGenerator(
+            self.agent_registry.base_dir,
+            self,
+            AgentIntroGenConfig(
+                enabled=intro_autogen_enabled,
+                queue_interval_seconds=intro_queue_interval,
+                max_tokens=intro_max_tokens,
+                cache_path=intro_cache_path,
+            ),
+        )
+        self._agent_intro_task = asyncio.create_task(
+            self._agent_intro_generator.start()
+        )
+
         # 启动 skills 热重载（可通过环境变量关闭）
         hot_reload_enabled = os.getenv("SKILLS_HOT_RELOAD", "true").lower() not in {
             "0",
@@ -207,6 +243,9 @@ class AIClient:
         # 等待 MCP 初始化任务完成（如果还在运行）
         if hasattr(self, "_mcp_init_task") and not self._mcp_init_task.done():
             await self._mcp_init_task
+        if hasattr(self, "_agent_intro_task") and self._agent_intro_task:
+            if not self._agent_intro_task.done():
+                await self._agent_intro_task
 
         logger.info("[清理] AIClient 已关闭")
 
