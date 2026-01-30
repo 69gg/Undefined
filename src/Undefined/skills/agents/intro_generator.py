@@ -32,7 +32,7 @@ class AgentIntroGenerator:
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._cache: dict[str, str] = {}
         self._worker_task: asyncio.Task[None] | None = None
-        self._prompt_path = Path("res/prompts/agent_intro_generation.txt")
+        self._prompt_path = Path("res/prompts/agent_self_intro.txt")
 
     async def start(self) -> None:
         if not self.config.enabled:
@@ -132,46 +132,23 @@ class AgentIntroGenerator:
                 break
 
     async def _generate_for_agent(self, agent_name: str, agent_dir: Path) -> None:
-        intro_path = agent_dir / "intro.md"
         prompt_path = agent_dir / "prompt.md"
-        config_path = agent_dir / "config.json"
         generated_path = agent_dir / "intro.generated.md"
 
-        intro_text = (
-            intro_path.read_text(encoding="utf-8") if intro_path.exists() else ""
-        )
-        prompt_text = (
+        agent_system_prompt = (
             prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
         )
-        config_text = (
-            config_path.read_text(encoding="utf-8") if config_path.exists() else ""
-        )
 
-        tools_summary = self._summarize_tools(agent_dir / "tools")
-
-        system_prompt = await self._load_system_prompt()
-
-        user_prompt = (
-            f"Agent 名称: {agent_name}\n\n"
-            "intro.md 内容:\n"
-            f"{intro_text.strip()}\n\n"
-            "prompt.md 内容(供参考):\n"
-            f"{prompt_text.strip()}\n\n"
-            "config.json 内容(供参考):\n"
-            f"{config_text.strip()}\n\n"
-            "工具能力摘要:\n"
-            f"{tools_summary}\n\n"
-            "请输出补充说明正文："
-        )
+        user_prompt = await self._load_intro_prompt()
 
         result = await self.ai_client.request_model(
             model_config=self.ai_client.agent_config,
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": agent_system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             max_tokens=self.config.max_tokens,
-            call_type=f"agent_intro:{agent_name}",
+            call_type=f"agent:{agent_name}",
         )
 
         content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -186,23 +163,14 @@ class AgentIntroGenerator:
         os.replace(tmp_path, generated_path)
         logger.info(f"[AgentIntro] 已更新: {generated_path}")
 
-    async def _load_system_prompt(self) -> str:
+    async def _load_intro_prompt(self) -> str:
         if self._prompt_path.exists():
             try:
                 async with aiofiles.open(self._prompt_path, "r", encoding="utf-8") as f:
                     return (await f.read()).strip()
             except Exception as e:
                 logger.warning(f"[AgentIntro] 读取提示词失败: {e}")
-        return (
-            "你是内部的文档写作者，负责给 Agent 生成简洁的“补充说明”。\n"
-            "输出将写入 intro.generated.md，并与 intro.md 合并后用于描述。\n"
-            "要求：\n"
-            "- 只写补充说明，不要重复 intro.md 的内容。\n"
-            "- 保持简洁、概括能力与边界，避免“硬流程/步骤清单”。\n"
-            "- 不要写工具调用教程，不要逐条罗列工具名。\n"
-            "- 允许一定的弹性与空间，不要过度约束。\n"
-            "- 使用中文 Markdown，避免一级标题(#)。\n"
-        )
+        return "请作下自我介绍（第一人称）。"
 
     def _summarize_tools(self, tools_dir: Path) -> str:
         if not tools_dir.exists():

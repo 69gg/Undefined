@@ -23,7 +23,7 @@ def build_agent_description(agent_dir: Path, fallback: str = "") -> str:
     if generated_text:
         merged = intro_text.rstrip()
         if merged:
-            merged += "\n\n---\n\n## 自动补充（系统生成）\n\n"
+            merged += "\n\n---\n\n## 以下为Agent自我介绍\n\n"
         merged += generated_text.strip()
         return merged.strip()
 
