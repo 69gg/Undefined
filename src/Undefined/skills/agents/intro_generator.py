@@ -78,13 +78,19 @@ class AgentIntroGenerator:
             if not (agent_dir / "handler.py").exists():
                 continue
             agent_name = agent_dir.name
+            generated_path = agent_dir / "intro.generated.md"
             digest = self._compute_agent_hash(agent_dir)
             if not digest:
                 continue
-            if self._cache.get(agent_name) == digest:
+            if self._cache.get(agent_name) == digest and generated_path.exists():
                 continue
             await self._queue.put(agent_name)
-            logger.info(f"[AgentIntro] 检测到变更，排队生成: {agent_name}")
+            if generated_path.exists():
+                logger.info(f"[AgentIntro] 检测到变更，排队生成: {agent_name}")
+            else:
+                logger.info(
+                    f"[AgentIntro] intro.generated.md 缺失，排队生成: {agent_name}"
+                )
 
     def _compute_agent_hash(self, agent_dir: Path) -> str:
         hasher = hashlib.sha256()
