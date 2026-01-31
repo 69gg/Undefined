@@ -22,12 +22,12 @@ _SENSITIVE_KEYWORDS: tuple[str, ...] = (
 )
 
 
-_BEARER_RE = re.compile(r"(Bearer\\s+)[A-Za-z0-9\\-._~+/=]+", re.IGNORECASE)
+_BEARER_RE = re.compile(r"(Bearer\s+)[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
 _KV_TOKEN_RE = re.compile(
     r"(?i)(api_key|apikey|access_token|refresh_token|id_token|token|secret|password)"
-    r"(\\s*[:=]\\s*)(['\\\"]?)([^'\\\"\\s]+)"
+    r"(\s*[:=]\s*)(['\"]?)([^'\"\s]+)"
 )
-_SK_RE = re.compile(r"\\bsk-[A-Za-z0-9]{8,}\\b")
+_SK_RE = re.compile(r"\bsk-[A-Za-z0-9]{8,}\b")
 
 
 def _is_sensitive_key(key: str) -> bool:
