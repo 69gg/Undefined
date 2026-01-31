@@ -231,7 +231,7 @@ class MessageHandler:
         if matches_xinliweiyuan(text):
             rand_val = random.random()
             if rand_val < 0.1:  # 10% 发送图片
-                image_path = os.path.abspath("data/img/xlwy.jpg")
+                image_path = os.path.abspath("img/xlwy.jpg")
                 message = f"[CQ:image,file={image_path}]"
                 # 50% 概率 @ 发送者
                 if random.random() < 0.5:

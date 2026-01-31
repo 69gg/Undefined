@@ -164,8 +164,9 @@ class CommandDispatcher:
                 return
 
             # 生成图表
-            img_dir = Path.cwd() / "img"
-            img_dir.mkdir(exist_ok=True)
+            from Undefined.utils.paths import RENDER_CACHE_DIR, ensure_dir
+
+            img_dir = ensure_dir(RENDER_CACHE_DIR)
 
             # 1. 折线图：时间趋势
             await self._generate_line_chart(summary, img_dir, days)
@@ -272,6 +273,11 @@ class CommandDispatcher:
 
             # 发送合并转发消息
             await self.onebot.send_forward_msg(group_id, forward_messages)
+
+            from Undefined.utils.cache import cleanup_cache_dir
+            from Undefined.utils.paths import RENDER_CACHE_DIR
+
+            cleanup_cache_dir(RENDER_CACHE_DIR)
 
         except Exception as e:
             logger.exception(f"[Stats] 生成统计图表失败: {e}")

@@ -38,6 +38,7 @@ __pycache__/
 .mypy_cache/
 
 logs/*
+data/
 
 AGENTS.md
 .DS_Store

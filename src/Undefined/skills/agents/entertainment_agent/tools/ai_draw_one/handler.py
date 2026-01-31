@@ -1,7 +1,6 @@
 from typing import Any, Dict
 import httpx
 import logging
-from pathlib import Path
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -44,8 +43,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             img_response.raise_for_status()
 
             filename = f"ai_draw_{uuid.uuid4().hex[:8]}.jpg"
-            filepath = Path.cwd() / "img" / filename
-            filepath.parent.mkdir(exist_ok=True)
+            from Undefined.utils.paths import IMAGE_CACHE_DIR, ensure_dir
+
+            filepath = ensure_dir(IMAGE_CACHE_DIR) / filename
 
             with open(filepath, "wb") as f:
                 f.write(img_response.content)
