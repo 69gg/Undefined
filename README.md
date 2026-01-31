@@ -135,6 +135,7 @@ uv run -m Undefined
   - `AGENT_MODEL_*`：Agent 专用模型（建议使用推理能力更强的模型）
   - `SECURITY_MODEL_*`：安全审核模型（负责防注入检测）
 - **功能配置**：`LOG_LEVEL`, `LOG_FILE_PATH`, `LOG_MAX_SIZE_MB`, `LOG_BACKUP_COUNT`, `LOG_THINKING`
+- **Token 统计归档**：`TOKEN_USAGE_MAX_SIZE_MB`（默认 5MB，<=0 禁用）, `TOKEN_USAGE_MAX_ARCHIVES`（最大归档数）, `TOKEN_USAGE_MAX_TOTAL_MB`（归档总大小上限，0 禁用）。归档目录为 `data/token_usage_archives/`，启动时自动检查并压缩。
 - **Skills 热重载**：`SKILLS_HOT_RELOAD`, `SKILLS_HOT_RELOAD_INTERVAL`, `SKILLS_HOT_RELOAD_DEBOUNCE`
 - **代理设置（可选）**：`USE_PROXY`, `http_proxy`, `https_proxy`（兼容 `HTTP_PROXY/HTTPS_PROXY`）
 

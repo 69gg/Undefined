@@ -156,7 +156,7 @@ class TokenUsageStorage:
     ) -> bool:
         """当文件超过阈值时进行压缩归档，并按策略清理历史归档"""
         if max_size_bytes is None:
-            max_size_mb = self._parse_env_int("TOKEN_USAGE_MAX_SIZE_MB", 3)
+            max_size_mb = self._parse_env_int("TOKEN_USAGE_MAX_SIZE_MB", 5)
             if max_size_mb <= 0:
                 return False
             max_size_bytes = max_size_mb * 1024 * 1024
