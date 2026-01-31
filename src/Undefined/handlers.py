@@ -27,6 +27,7 @@ from Undefined.services.command import CommandDispatcher
 from Undefined.services.ai_coordinator import AICoordinator
 
 from Undefined.scheduled_task_storage import ScheduledTaskStorage
+from Undefined.utils.logging import log_debug_json, redact_string
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,8 @@ class MessageHandler:
 
     async def handle_message(self, event: dict[str, Any]) -> None:
         """处理收到的消息事件"""
+        if logger.isEnabledFor(logging.DEBUG):
+            log_debug_json(logger, "[事件数据]", event)
         post_type = event.get("post_type", "message")
 
         # 处理拍一拍事件（效果同被 @）
@@ -134,8 +137,9 @@ class MessageHandler:
                     logger.warning(f"获取用户昵称失败: {e}")
 
             text = extract_text(private_message_content, self.config.bot_qq)
+            safe_text = redact_string(text)
             logger.info(
-                f"[私聊消息] sender={private_sender_id} name={user_name or private_sender_nickname} | {text[:100]}"
+                f"[私聊消息] sender={private_sender_id} name={user_name or private_sender_nickname} | {safe_text[:100]}"
             )
 
             # 保存私聊消息到历史记录（保存处理后的内容）
@@ -143,8 +147,9 @@ class MessageHandler:
             parsed_content = await parse_message_content_for_history(
                 private_message_content, self.config.bot_qq, self.onebot.get_msg
             )
+            safe_parsed = redact_string(parsed_content)
             logger.debug(
-                f"[历史记录] 保存私聊: user={private_sender_id}, content={parsed_content[:50]}..."
+                f"[历史记录] 保存私聊: user={private_sender_id}, content={safe_parsed[:50]}..."
             )
             await self.history_manager.add_private_message(
                 user_id=private_sender_id,
@@ -183,9 +188,10 @@ class MessageHandler:
 
         # 提取文本内容
         text = extract_text(message_content, self.config.bot_qq)
+        safe_text = redact_string(text)
         logger.info(
             f"[群消息] group={group_id} sender={sender_id} name={sender_card or sender_nickname} "
-            f"role={sender_role} | {text[:100]}"
+            f"role={sender_role} | {safe_text[:100]}"
         )
 
         # 保存消息到历史记录 (使用处理后的内容)
@@ -202,8 +208,9 @@ class MessageHandler:
         parsed_content = await parse_message_content_for_history(
             message_content, self.config.bot_qq, self.onebot.get_msg
         )
+        safe_parsed = redact_string(parsed_content)
         logger.debug(
-            f"[历史记录] 保存群聊: group={group_id}, sender={sender_id}, content={parsed_content[:50]}..."
+            f"[历史记录] 保存群聊: group={group_id}, sender={sender_id}, content={safe_parsed[:50]}..."
         )
         await self.history_manager.add_group_message(
             group_id=group_id,

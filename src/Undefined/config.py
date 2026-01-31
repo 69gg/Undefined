@@ -247,6 +247,36 @@ class Config:
             except ValueError:
                 logger.warning(f"FORWARD_PROXY_QQ 格式错误: {forward_proxy_qq_str}")
 
+        logger.debug(
+            "[配置] chat_model=%s api_url=%s api_key_set=%s max_tokens=%s thinking=%s",
+            chat_model.model_name,
+            chat_model.api_url,
+            bool(chat_model.api_key),
+            chat_model.max_tokens,
+            chat_model.thinking_enabled,
+        )
+        logger.debug(
+            "[配置] vision_model=%s api_url=%s api_key_set=%s thinking=%s",
+            vision_model.model_name,
+            vision_model.api_url,
+            bool(vision_model.api_key),
+            vision_model.thinking_enabled,
+        )
+        logger.debug(
+            "[配置] security_model=%s api_url=%s api_key_set=%s max_tokens=%s",
+            security_model.model_name,
+            security_model.api_url,
+            bool(security_model.api_key),
+            security_model.max_tokens,
+        )
+        logger.debug(
+            "[配置] agent_model=%s api_url=%s api_key_set=%s max_tokens=%s",
+            agent_model.model_name,
+            agent_model.api_url,
+            bool(agent_model.api_key),
+            agent_model.max_tokens,
+        )
+
         return cls(
             bot_qq=int(os.getenv("BOT_QQ", "0")),
             superadmin_qq=superadmin_qq,

@@ -31,6 +31,7 @@ from Undefined.skills.agents.intro_generator import (
 )
 from Undefined.skills.tools import ToolRegistry
 from Undefined.token_usage_storage import TokenUsageStorage
+from Undefined.utils.logging import log_debug_json, redact_string
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +174,7 @@ class AIClient:
                         searx_host=searxng_url, k=10
                     )
                     logger.info(
-                        f"[初始化] SearxSearchWrapper 初始化成功，URL: {searxng_url}"
+                        f"[初始化] SearxSearchWrapper 初始化成功，URL: {redact_string(searxng_url)}"
                     )
                 except Exception as exc:
                     logger.warning(f"SearxSearchWrapper 初始化失败: {exc}")
@@ -302,6 +303,14 @@ class AIClient:
         )
 
         tools = self.tool_manager.get_openai_tools()
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "[AI消息] 构建完成: messages=%s tools=%s question_len=%s",
+                len(messages),
+                len(tools),
+                len(question),
+            )
+            log_debug_json(logger, "[AI消息内容]", messages)
 
         ctx = RequestContext.current()
         tool_context = ctx.get_resources() if ctx else {}
@@ -342,6 +351,14 @@ class AIClient:
                 message = choice.get("message", {})
                 content: str = message.get("content") or ""
                 tool_calls = message.get("tool_calls", [])
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "[AI响应] content_len=%s tool_calls=%s",
+                        len(content),
+                        len(tool_calls),
+                    )
+                    if tool_calls:
+                        log_debug_json(logger, "[AI工具调用]", tool_calls)
 
                 if content.strip() and tool_calls:
                     logger.debug(
@@ -371,7 +388,7 @@ class AIClient:
 
                     logger.info(f"[工具准备] 准备调用: {function_name} (ID={call_id})")
                     logger.debug(
-                        f"[工具参数] {function_name} 参数: {function_args_str}"
+                        f"[工具参数] {function_name} 参数: {redact_string(function_args_str)}"
                     )
 
                     try:
@@ -415,6 +432,12 @@ class AIClient:
                             logger.debug(
                                 f"[工具响应] {fname} (ID={call_id}) 返回内容长度: {len(content_str)}"
                             )
+                            if logger.isEnabledFor(logging.DEBUG):
+                                log_debug_json(
+                                    logger,
+                                    f"[工具响应体] {fname} (ID={call_id})",
+                                    content_str,
+                                )
 
                         messages.append(
                             {

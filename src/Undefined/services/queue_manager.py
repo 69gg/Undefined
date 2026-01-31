@@ -109,6 +109,11 @@ class QueueManager:
         logger.info(
             f"[队列入队][{model_name}] 超级管理员私聊: size={queue.superadmin_queue.qsize()}"
         )
+        logger.debug(
+            "[队列入队详情][%s] superadmin keys=%s",
+            model_name,
+            list(request.keys()),
+        )
 
     async def add_private_request(
         self, request: dict[str, Any], model_name: str = "default"
@@ -118,6 +123,11 @@ class QueueManager:
         await queue.private_queue.put(request)
         logger.info(
             f"[队列入队][{model_name}] 普通私聊: size={queue.private_queue.qsize()}"
+        )
+        logger.debug(
+            "[队列入队详情][%s] private keys=%s",
+            model_name,
+            list(request.keys()),
         )
 
     async def add_group_mention_request(
@@ -129,6 +139,11 @@ class QueueManager:
         logger.info(
             f"[队列入队][{model_name}] 群聊被@: size={queue.group_mention_queue.qsize()}"
         )
+        logger.debug(
+            "[队列入队详情][%s] mention keys=%s",
+            model_name,
+            list(request.keys()),
+        )
 
     async def add_group_normal_request(
         self, request: dict[str, Any], model_name: str = "default"
@@ -139,6 +154,11 @@ class QueueManager:
         await queue.group_normal_queue.put(request)
         logger.info(
             f"[队列入队][{model_name}] 群聊普通: size={queue.group_normal_queue.qsize()}"
+        )
+        logger.debug(
+            "[队列入队详情][%s] normal keys=%s",
+            model_name,
+            list(request.keys()),
         )
 
     async def _process_model_loop(self, model_name: str) -> None:
@@ -234,6 +254,12 @@ class QueueManager:
         """安全执行请求处理，捕获异常"""
         try:
             start_time = time.perf_counter()
+            logger.debug(
+                "[请求处理] model=%s queue=%s type=%s",
+                model_name,
+                queue_name,
+                request.get("type", "unknown"),
+            )
             if self._request_handler:
                 await self._request_handler(request)
             duration = time.perf_counter() - start_time

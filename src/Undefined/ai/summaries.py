@@ -10,6 +10,7 @@ from Undefined.ai.http import ModelRequester
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.ai.tokens import TokenCounter
 from Undefined.config import ChatModelConfig
+from Undefined.utils.logging import log_debug_json
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,11 @@ class SummaryService:
             self._summarize_prompt_path, "r", encoding="utf-8"
         ) as f:
             system_prompt = await f.read()
+        logger.debug(
+            "[总结] summarize_prompt_len=%s path=%s",
+            len(system_prompt),
+            self._summarize_prompt_path,
+        )
 
         user_message = messages
         if context:
@@ -51,6 +57,8 @@ class SummaryService:
             )
             content = extract_choices_content(result)
             logger.info(f"[总结] 生成完成, length={len(content)}")
+            if logger.isEnabledFor(logging.DEBUG):
+                log_debug_json(logger, "[总结] 输出内容", content)
             return content
         except Exception as exc:
             logger.exception(f"[总结] 聊天记录总结失败: {exc}")
@@ -62,9 +70,17 @@ class SummaryService:
 
         segments = [f"分段 {i + 1}:\n{s}" for i, s in enumerate(summaries)]
         segments_text = "---".join(segments)
+        logger.debug(
+            "[总结] merge_segments=%s total_len=%s", len(segments), len(segments_text)
+        )
 
         async with aiofiles.open(self._merge_prompt_path, "r", encoding="utf-8") as f:
             prompt = await f.read()
+        logger.debug(
+            "[总结] merge_prompt_len=%s path=%s",
+            len(prompt),
+            self._merge_prompt_path,
+        )
         prompt += segments_text
 
         try:
@@ -75,6 +91,8 @@ class SummaryService:
                 call_type="merge_summaries",
             )
             content = extract_choices_content(result)
+            if logger.isEnabledFor(logging.DEBUG):
+                log_debug_json(logger, "[总结] 合并输出", content)
             return content
         except Exception as exc:
             logger.exception(f"合并总结失败: {exc}")

@@ -12,6 +12,7 @@ import httpx
 
 from Undefined.config import ChatModelConfig, VisionModelConfig, AgentModelConfig
 from Undefined.token_usage_storage import TokenUsageStorage, TokenUsage
+from Undefined.utils.logging import log_debug_json, redact_string
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,19 @@ class ModelRequester:
         )
 
         try:
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "[API请求] type=%s model=%s url=%s max_tokens=%s tools=%s tool_choice=%s messages=%s",
+                    call_type,
+                    model_config.model_name,
+                    model_config.api_url,
+                    max_tokens,
+                    bool(tools),
+                    tool_choice,
+                    len(messages),
+                )
+                log_debug_json(logger, "[API请求体]", request_body)
+
             response = await self._http_client.post(
                 model_config.api_url,
                 headers={
@@ -74,6 +88,18 @@ class ModelRequester:
                 f"模型={model_config.model_name}"
             )
 
+            if logger.isEnabledFor(logging.DEBUG):
+                request_id = response.headers.get(
+                    "x-request-id"
+                ) or response.headers.get("request-id", "")
+                logger.debug(
+                    "[API响应] status=%s request_id=%s content_type=%s",
+                    response.status_code,
+                    request_id,
+                    response.headers.get("content-type", ""),
+                )
+                log_debug_json(logger, "[API响应体]", result)
+
             asyncio.create_task(
                 self._token_usage_storage.record(
                     TokenUsage(
@@ -90,6 +116,20 @@ class ModelRequester:
             )
 
             return result
+        except httpx.HTTPStatusError as exc:
+            response = exc.response
+            logger.error(
+                "[API响应错误] status=%s url=%s body=%s",
+                response.status_code,
+                response.request.url,
+                redact_string(response.text),
+            )
+            if logger.isEnabledFor(logging.DEBUG):
+                try:
+                    log_debug_json(logger, "[API错误响应体]", response.json())
+                except ValueError:
+                    pass
+            raise
         except Exception as exc:
             logger.exception(f"[model.request.error] {call_type} 调用失败: {exc}")
             raise

@@ -12,6 +12,7 @@ import aiofiles
 from Undefined.context import RequestContext
 from Undefined.end_summary_storage import EndSummaryStorage
 from Undefined.memory import MemoryStorage
+from Undefined.utils.logging import log_debug_json
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,11 @@ class PromptBuilder:
         extra_context: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         system_prompt = await self._load_system_prompt()
+        logger.debug(
+            "[Prompt] system_prompt_len=%s path=%s",
+            len(system_prompt),
+            self._system_prompt_path,
+        )
 
         if self._bot_qq != 0:
             bot_qq_info = (
@@ -80,6 +86,10 @@ class PromptBuilder:
                     }
                 )
                 logger.info(f"[AI会话] 已注入 {len(memories)} 条长期记忆")
+                if logger.isEnabledFor(logging.DEBUG):
+                    log_debug_json(
+                        logger, "[AI会话] 注入长期记忆", [mem.fact for mem in memories]
+                    )
 
         await self._ensure_summaries_loaded()
         if self._end_summaries:
@@ -97,6 +107,10 @@ class PromptBuilder:
             logger.info(
                 f"[AI会话] 已注入 {len(self._end_summaries)} 条短期回忆 (end 摘要)"
             )
+            if logger.isEnabledFor(logging.DEBUG):
+                log_debug_json(
+                    logger, "[AI会话] 注入短期回忆", list(self._end_summaries)
+                )
 
         if get_recent_messages_callback:
             await self._inject_recent_messages(
@@ -112,6 +126,11 @@ class PromptBuilder:
         )
 
         messages.append({"role": "user", "content": f"【当前消息】\n{question}"})
+        logger.debug(
+            "[Prompt] messages_ready=%s question_len=%s",
+            len(messages),
+            len(question),
+        )
         return messages
 
     async def _inject_recent_messages(
@@ -188,5 +207,11 @@ class PromptBuilder:
                     }
                 )
             logger.debug(f"自动预获取了 {len(context_lines)} 条历史消息作为上下文")
+            if logger.isEnabledFor(logging.DEBUG):
+                log_debug_json(
+                    logger,
+                    "[Prompt] 历史消息上下文",
+                    context_lines,
+                )
         except Exception as exc:
             logger.warning(f"自动获取历史消息失败: {exc}")

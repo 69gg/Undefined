@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from Undefined.utils.logging import log_debug_json
+
 logger = logging.getLogger(__name__)
 
 
@@ -168,6 +170,15 @@ class BaseRegistry:
             self._items[full_name] = item
             self._items_schema.append(config)
             self._stats.setdefault(full_name, SkillStats())
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "[%s加载] name=%s module=%s path=%s",
+                    self.kind,
+                    full_name,
+                    module_name,
+                    handler_path,
+                )
+                log_debug_json(logger, f"[{self.kind}配置] {full_name}", config)
 
         except Exception as e:
             logger.error(f"从 {item_dir} 加载失败: {e}")
@@ -292,6 +303,13 @@ class BaseRegistry:
 
         start_time = time.monotonic()
         try:
+            if logger.isEnabledFor(logging.DEBUG):
+                log_debug_json(logger, f"[{self.kind}参数] {name}", args)
+                logger.debug(
+                    "[%s上下文] %s",
+                    self.kind,
+                    ", ".join(sorted(context.keys())),
+                )
             if item.handler is None and item.handler_path:
                 self._load_handler_for_item(item)
             handler = item.handler
@@ -305,6 +323,8 @@ class BaseRegistry:
             self._log_event(
                 "execute", name, status="success", duration_ms=int(duration * 1000)
             )
+            if logger.isEnabledFor(logging.DEBUG):
+                log_debug_json(logger, f"[{self.kind}结果] {name}", result)
             return str(result)
 
         except asyncio.TimeoutError:

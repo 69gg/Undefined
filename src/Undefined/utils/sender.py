@@ -5,6 +5,7 @@ import logging
 from Undefined.onebot import OneBotClient
 from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.common import message_to_segments, extract_text
+from Undefined.utils.logging import redact_string
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,8 @@ class MessageSender:
         self, group_id: int, message: str, auto_history: bool = True
     ) -> None:
         """发送群消息"""
-        logger.info(f"[发送消息] 目标群:{group_id} | 内容摘要:{message[:100]}...")
+        safe_message = redact_string(message)
+        logger.info(f"[发送消息] 目标群:{group_id} | 内容摘要:{safe_message[:100]}...")
         # 保存到历史记录
         if auto_history:
             # 解析消息以便正确处理 CQ 码（如图片）
@@ -85,7 +87,8 @@ class MessageSender:
         self, user_id: int, message: str, auto_history: bool = True
     ) -> None:
         """发送私聊消息"""
-        logger.info(f"[发送消息] 目标用户:{user_id} | 内容摘要:{message[:100]}...")
+        safe_message = redact_string(message)
+        logger.info(f"[发送消息] 目标用户:{user_id} | 内容摘要:{safe_message[:100]}...")
         # 保存到历史记录
         if auto_history:
             # 解析消息以便正确处理 CQ 码

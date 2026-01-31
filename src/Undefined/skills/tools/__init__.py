@@ -110,11 +110,16 @@ class ToolRegistry(BaseRegistry):
     def _apply_mcp_tools(self) -> None:
         if not self._mcp_registry:
             return
+        logger.debug(
+            "开始集成 MCP 工具: count=%s",
+            len(self._mcp_registry.get_tools_schema()),
+        )
         for schema in self._mcp_registry.get_tools_schema():
             name = schema.get("function", {}).get("name", "")
             handler = self._mcp_registry._tools_handlers.get(name)
             if name and handler:
                 self.register_external_item(name, schema, handler)
+                logger.debug("已集成 MCP 工具: %s", name)
 
     async def initialize_mcp_toolsets(self) -> None:
         """异步初始化 MCP 工具集"""

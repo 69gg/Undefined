@@ -60,6 +60,12 @@ class CommandDispatcher:
         cmd_name = match.group(1).lower()
         args_str = match.group(2).strip()
 
+        logger.debug(
+            "[Command] parse text_len=%s cmd=%s args=%s",
+            len(text),
+            cmd_name,
+            args_str,
+        )
         return {
             "name": cmd_name,
             "args": args_str.split() if args_str else [],
@@ -526,6 +532,13 @@ class CommandDispatcher:
         cmd_args = command["args"]
 
         logger.info(f"[Command] 执行命令: /{cmd_name} | 参数: {cmd_args}")
+        logger.debug(
+            "[Command] dispatch group=%s sender=%s cmd=%s args_count=%s",
+            group_id,
+            sender_id,
+            cmd_name,
+            len(cmd_args),
+        )
 
         try:
             # 公开命令

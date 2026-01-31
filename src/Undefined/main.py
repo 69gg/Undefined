@@ -76,6 +76,11 @@ def setup_logging() -> None:
         f"[bold cyan][启动][/bold cyan] 日志系统初始化完成。级别: [yellow]{log_level}[/yellow], 文件: [green]{log_file_path}[/green] "
         f"(最大 [magenta]{log_max_size // 1024 // 1024}[/magenta]MB, 保留 [magenta]{log_backup_count}[/magenta] 份)"
     )
+    logging.debug(
+        "[日志] handlers=%s level=%s",
+        [type(h).__name__ for h in root_logger.handlers],
+        log_level,
+    )
 
 
 async def main() -> None:

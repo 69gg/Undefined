@@ -11,6 +11,7 @@ import aiofiles
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.ai.http import ModelRequester
 from Undefined.config import VisionModelConfig
+from Undefined.utils.logging import log_debug_json, redact_string
 
 logger = logging.getLogger(__name__)
 
@@ -93,10 +94,19 @@ class MultimodalAnalyzer:
         prompt_extra: str = "",
     ) -> dict[str, str]:
         detected_type = detect_media_type(media_url, media_type)
-        logger.info(f"[媒体分析] 开始分析 {detected_type}: {media_url[:50]}...")
+        safe_url = redact_string(media_url)
+        logger.info(f"[媒体分析] 开始分析 {detected_type}: {safe_url[:50]}...")
+        logger.debug(
+            "[媒体分析] media_type=%s detected=%s url_len=%s prompt_extra_len=%s",
+            media_type,
+            detected_type,
+            len(media_url),
+            len(prompt_extra),
+        )
 
         cache_key = f"{detected_type}:{media_url[:100]}:{prompt_extra}"
         if cache_key in self._cache:
+            logger.debug("[媒体分析] 命中缓存: key=%s", cache_key[:120])
             return self._cache[cache_key]
 
         if media_url.startswith("data:") or media_url.startswith("http"):
@@ -118,6 +128,11 @@ class MultimodalAnalyzer:
 
         async with aiofiles.open(self._prompt_path, "r", encoding="utf-8") as f:
             prompt = await f.read()
+        logger.debug(
+            "[媒体分析] prompt_len=%s path=%s",
+            len(prompt),
+            self._prompt_path,
+        )
 
         if prompt_extra:
             prompt += f"\n\n【补充指令】\n{prompt_extra}"
@@ -145,6 +160,8 @@ class MultimodalAnalyzer:
                 call_type=f"vision_{detected_type}",
             )
             content = extract_choices_content(result)
+            if logger.isEnabledFor(logging.DEBUG):
+                log_debug_json(logger, "[媒体分析] 原始响应内容", content)
 
             description = ""
             ocr_text = ""
@@ -177,7 +194,7 @@ class MultimodalAnalyzer:
                 result_dict["subtitles"] = subtitles
 
             self._cache[cache_key] = result_dict
-            logger.info(f"[媒体分析] 完成并缓存: {media_url[:50]}... ({detected_type})")
+            logger.info(f"[媒体分析] 完成并缓存: {safe_url[:50]}... ({detected_type})")
             return result_dict
 
         except Exception as exc:

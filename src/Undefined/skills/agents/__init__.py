@@ -55,6 +55,7 @@ class AgentRegistry(BaseRegistry):
                 continue
             item.config.setdefault("function", {})
             item.config["function"]["description"] = description
+            logger.debug("[Agent简介] %s intro_len=%s", name, len(description))
 
     async def execute_agent(
         self, agent_name: str, args: Dict[str, Any], context: Dict[str, Any]

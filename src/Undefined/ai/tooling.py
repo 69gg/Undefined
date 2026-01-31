@@ -11,6 +11,7 @@ from typing import Any
 from Undefined.context import RequestContext
 from Undefined.skills.tools import ToolRegistry
 from Undefined.skills.agents import AgentRegistry
+from Undefined.utils.logging import log_debug_json, redact_string
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +112,15 @@ class ToolManager:
         exec_type = "Agent" if is_agent else "Tool"
 
         logger.debug(f"[{exec_type}调用] 准备执行 {function_name}")
+        if logger.isEnabledFor(logging.DEBUG):
+            log_debug_json(
+                logger, f"[{exec_type}调用参数] {function_name}", function_args
+            )
+            logger.debug(
+                "[%s调用上下文] %s",
+                exec_type,
+                ", ".join(sorted(context.keys())),
+            )
 
         try:
             if is_agent:
@@ -118,6 +128,11 @@ class ToolManager:
                 registry_token = None
                 mcp_config_path = self._get_agent_mcp_config_path(function_name)
                 if mcp_config_path:
+                    logger.debug(
+                        "[Agent MCP] %s 使用 MCP 配置: %s",
+                        function_name,
+                        mcp_config_path,
+                    )
                     try:
                         from Undefined.mcp import MCPToolRegistry
 
@@ -140,6 +155,11 @@ class ToolManager:
 
                 agent_histories = context.get("agent_histories", {})
                 agent_history = agent_histories.get(function_name, [])
+                logger.debug(
+                    "[Agent历史] %s 历史长度: %s",
+                    function_name,
+                    len(agent_history),
+                )
 
                 agent_context = context.copy()
                 agent_context["agent_history"] = agent_history
@@ -166,16 +186,19 @@ class ToolManager:
                 )
 
             duration = time.perf_counter() - start_time
+            result_text = redact_string(str(result))
             res_summary = (
-                str(result)[:100] + "..." if len(str(result)) > 100 else str(result)
+                result_text[:100] + "..." if len(result_text) > 100 else result_text
             )
             logger.info(
                 f"[{exec_type}结果] {function_name} 执行成功, 耗时={duration:.2f}s, 结果: {res_summary}"
             )
+            if logger.isEnabledFor(logging.DEBUG):
+                log_debug_json(logger, f"[{exec_type}结果详情] {function_name}", result)
             return result
         except Exception as exc:
             duration = time.perf_counter() - start_time
             logger.error(
-                f"[{exec_type}错误] {function_name} 执行失败, 耗时={duration:.2f}s, 错误: {exc}"
+                f"[{exec_type}错误] {function_name} 执行失败, 耗时={duration:.2f}s, 错误: {redact_string(str(exc))}"
             )
             raise
