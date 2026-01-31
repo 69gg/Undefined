@@ -2,10 +2,10 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, List, TYPE_CHECKING
 
-from ..registry import BaseRegistry, SkillStats
+from Undefined.skills.registry import BaseRegistry, SkillStats
 
 if TYPE_CHECKING:
-    from ...mcp import MCPToolRegistry
+    from Undefined.mcp import MCPToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ class ToolRegistry(BaseRegistry):
         if self._mcp_registry is not None:
             return
         try:
-            from ...mcp import MCPToolRegistry
+            from Undefined.mcp import MCPToolRegistry
 
             self._mcp_registry = MCPToolRegistry()
             logger.info("MCP 工具集注册表已创建（待初始化）")

@@ -1,5 +1,5 @@
 """MCP module."""
 
-from .registry import MCPToolRegistry, MCPToolSetRegistry
+from Undefined.mcp.registry import MCPToolRegistry, MCPToolSetRegistry
 
 __all__ = ["MCPToolRegistry", "MCPToolSetRegistry"]

@@ -4,7 +4,7 @@ import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .config import Config
+    from Undefined.config import Config
 
 
 class RateLimiter:

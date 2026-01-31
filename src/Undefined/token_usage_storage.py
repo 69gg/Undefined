@@ -78,7 +78,7 @@ class TokenUsageStorage:
             line = json.dumps(data, ensure_ascii=False)
 
             # 使用统一 IO 层追加内容
-            from .utils import io
+            from Undefined.utils import io
 
             await io.append_line(self.file_path, line, use_lock=True)
 

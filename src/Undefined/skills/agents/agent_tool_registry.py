@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from ..registry import BaseRegistry
+from Undefined.skills.registry import BaseRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class AgentToolRegistry(BaseRegistry):
             return
 
         try:
-            from ...mcp import MCPToolRegistry
+            from Undefined.mcp import MCPToolRegistry
 
             self._mcp_registry = MCPToolRegistry(
                 config_path=self.mcp_config_path,

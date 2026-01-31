@@ -2,9 +2,9 @@
 
 import logging
 
-from ..onebot import OneBotClient
-from .history import MessageHistoryManager
-from .common import message_to_segments, extract_text
+from Undefined.onebot import OneBotClient
+from Undefined.utils.history import MessageHistoryManager
+from Undefined.utils.common import message_to_segments, extract_text
 
 logger = logging.getLogger(__name__)
 

@@ -11,15 +11,15 @@ from dotenv import load_dotenv
 from rich.logging import RichHandler
 from rich.console import Console
 
-from .ai import AIClient
-from .config import get_config
-from .context import RequestContextFilter
-from .faq import FAQStorage
-from .handlers import MessageHandler
-from .memory import MemoryStorage
-from .scheduled_task_storage import ScheduledTaskStorage
-from .end_summary_storage import EndSummaryStorage
-from .onebot import OneBotClient
+from Undefined.ai import AIClient
+from Undefined.config import get_config
+from Undefined.context import RequestContextFilter
+from Undefined.faq import FAQStorage
+from Undefined.handlers import MessageHandler
+from Undefined.memory import MemoryStorage
+from Undefined.scheduled_task_storage import ScheduledTaskStorage
+from Undefined.end_summary_storage import EndSummaryStorage
+from Undefined.onebot import OneBotClient
 
 
 def setup_logging() -> None:

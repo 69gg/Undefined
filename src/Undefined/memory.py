@@ -69,7 +69,7 @@ class MemoryStorage:
     async def _save(self) -> None:
         """保存记忆到文件"""
         try:
-            from .utils import io
+            from Undefined.utils import io
 
             data = [asdict(m) for m in self._memories]
             await io.write_json(MEMORY_FILE_PATH, data, use_lock=True)

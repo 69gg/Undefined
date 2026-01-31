@@ -2,10 +2,13 @@
 AI 模型调用封装"""
 
 import importlib.util
-from .skills.tools import ToolRegistry
-from .skills.agents import AgentRegistry
-from .skills.agents.intro_generator import AgentIntroGenConfig, AgentIntroGenerator
-from .context import RequestContext
+from Undefined.skills.tools import ToolRegistry
+from Undefined.skills.agents import AgentRegistry
+from Undefined.skills.agents.intro_generator import (
+    AgentIntroGenConfig,
+    AgentIntroGenerator,
+)
+from Undefined.context import RequestContext
 import base64
 import json
 import logging
@@ -21,10 +24,10 @@ import time
 import asyncio
 import httpx
 
-from .config import ChatModelConfig, VisionModelConfig, AgentModelConfig
-from .memory import MemoryStorage
-from .end_summary_storage import EndSummaryStorage
-from .token_usage_storage import TokenUsageStorage, TokenUsage
+from Undefined.config import ChatModelConfig, VisionModelConfig, AgentModelConfig
+from Undefined.memory import MemoryStorage
+from Undefined.end_summary_storage import EndSummaryStorage
+from Undefined.token_usage_storage import TokenUsageStorage, TokenUsage
 
 
 logger = logging.getLogger(__name__)
@@ -1286,7 +1289,7 @@ class AIClient:
                 mcp_config_path = self._get_agent_mcp_config_path(function_name)
                 if mcp_config_path:
                     try:
-                        from .mcp import MCPToolRegistry
+                        from Undefined.mcp import MCPToolRegistry
 
                         mcp_registry = MCPToolRegistry(
                             config_path=mcp_config_path,

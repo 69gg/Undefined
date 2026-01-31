@@ -5,7 +5,7 @@ import asyncio
 import aiofiles
 import logging
 
-from ..agent_tool_registry import AgentToolRegistry
+from Undefined.skills.agents.agent_tool_registry import AgentToolRegistry
 
 logger = logging.getLogger(__name__)
 

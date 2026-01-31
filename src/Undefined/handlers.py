@@ -5,28 +5,28 @@ import os
 import random
 from typing import Any
 
-from .ai import AIClient
-from .config import Config
-from .faq import FAQStorage
-from .services.queue_manager import QueueManager
-from .onebot import (
+from Undefined.ai import AIClient
+from Undefined.config import Config
+from Undefined.faq import FAQStorage
+from Undefined.services.queue_manager import QueueManager
+from Undefined.onebot import (
     OneBotClient,
     get_message_content,
     get_message_sender_id,
 )
-from .utils.common import (
+from Undefined.utils.common import (
     extract_text,
     parse_message_content_for_history,
     matches_xinliweiyuan,
 )
-from .utils.history import MessageHistoryManager
-from .utils.scheduler import TaskScheduler
-from .utils.sender import MessageSender
-from .services.security import SecurityService
-from .services.command import CommandDispatcher
-from .services.ai_coordinator import AICoordinator
+from Undefined.utils.history import MessageHistoryManager
+from Undefined.utils.scheduler import TaskScheduler
+from Undefined.utils.sender import MessageSender
+from Undefined.services.security import SecurityService
+from Undefined.services.command import CommandDispatcher
+from Undefined.services.ai_coordinator import AICoordinator
 
-from .scheduled_task_storage import ScheduledTaskStorage
+from Undefined.scheduled_task_storage import ScheduledTaskStorage
 
 logger = logging.getLogger(__name__)
 

@@ -20,7 +20,7 @@ class EndSummaryStorage:
     async def save(self, summaries: List[str]) -> None:
         """保存所有摘要到文件"""
         try:
-            from .utils import io
+            from Undefined.utils import io
 
             await io.write_json(END_SUMMARIES_FILE_PATH, summaries, use_lock=True)
             logger.debug(f"已保存 {len(summaries)} 条 End 摘要")
@@ -29,7 +29,7 @@ class EndSummaryStorage:
 
     async def load(self) -> List[str]:
         """从文件加载所有摘要 (异步)"""
-        from .utils import io
+        from Undefined.utils import io
 
         data = await io.read_json(END_SUMMARIES_FILE_PATH, use_lock=False)
 

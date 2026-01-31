@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, List
 
-from ..registry import BaseRegistry, SkillStats
+from Undefined.skills.registry import BaseRegistry, SkillStats
 
 logger = logging.getLogger(__name__)
 

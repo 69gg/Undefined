@@ -2,8 +2,8 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, List
 
-from ..registry import BaseRegistry
-from .intro_utils import build_agent_description
+from Undefined.skills.registry import BaseRegistry
+from Undefined.skills.agents.intro_utils import build_agent_description
 
 logger = logging.getLogger(__name__)
 

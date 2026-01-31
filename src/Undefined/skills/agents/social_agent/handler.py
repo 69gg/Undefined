@@ -5,7 +5,7 @@ import aiofiles
 import logging
 from pathlib import Path
 
-from ..agent_tool_registry import AgentToolRegistry
+from Undefined.skills.agents.agent_tool_registry import AgentToolRegistry
 
 logger = logging.getLogger(__name__)
 

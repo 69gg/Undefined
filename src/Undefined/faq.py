@@ -81,7 +81,7 @@ class FAQStorage:
         group_dir = self._get_group_dir(faq.group_id)
         file_path = group_dir / f"{faq.id}.json"
 
-        from .utils import io
+        from Undefined.utils import io
 
         await io.write_json(file_path, faq.to_dict(), use_lock=True)
 
@@ -136,7 +136,7 @@ class FAQStorage:
         group_dir = self._get_group_dir(group_id)
         file_path = group_dir / f"{faq_id}.json"
 
-        from .utils import io
+        from Undefined.utils import io
 
         data = await io.read_json(file_path, use_lock=False)
         if data:
@@ -155,7 +155,7 @@ class FAQStorage:
         group_dir = self._get_group_dir(group_id)
         faqs: list[FAQ] = []
 
-        from .utils import io
+        from Undefined.utils import io
 
         # 批量列出文件并读取
         for file_path in sorted(group_dir.glob("*.json"), reverse=True):
@@ -207,7 +207,7 @@ class FAQStorage:
         group_dir = self._get_group_dir(group_id)
         file_path = group_dir / f"{faq_id}.json"
 
-        from .utils import io
+        from Undefined.utils import io
 
         return await io.delete_file(file_path)
 

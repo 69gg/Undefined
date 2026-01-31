@@ -110,7 +110,7 @@ class ScheduledTaskStorage:
                 else:
                     logger.warning(f"未知任务数据格式: {task_id}")
 
-            from .utils import io
+            from Undefined.utils import io
 
             await io.write_json(TASKS_FILE_PATH, data_to_save, use_lock=True)
             logger.debug(f"已保存 {len(data_to_save)} 个定时任务")

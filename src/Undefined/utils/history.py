@@ -57,7 +57,7 @@ class MessageHistoryManager:
         self, history: list[dict[str, Any]], path: str
     ) -> None:
         """异步保存历史记录到文件（最多 10000 条）"""
-        from . import io
+        from Undefined.utils import io
 
         try:
             # 只保留最近的 MAX_HISTORY 条
@@ -78,7 +78,7 @@ class MessageHistoryManager:
 
     async def _load_history_from_file(self, path: str) -> list[dict[str, Any]]:
         """异步从文件加载历史记录"""
-        from . import io
+        from Undefined.utils import io
 
         try:
             history = await io.read_json(path, use_lock=False)

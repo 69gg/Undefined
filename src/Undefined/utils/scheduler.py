@@ -11,7 +11,7 @@ from typing import Any, Optional
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from ..scheduled_task_storage import ScheduledTaskStorage
+from Undefined.scheduled_task_storage import ScheduledTaskStorage
 
 logger = logging.getLogger(__name__)
 
