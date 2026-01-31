@@ -262,9 +262,7 @@ class AIClient:
             for tool in tools
             if tool.get("function")
         }
-        prefetch_targets = [
-            name for name in prefetch_names if name in available_names
-        ]
+        prefetch_targets = [name for name in prefetch_names if name in available_names]
         if not prefetch_targets:
             return messages, tools
 
@@ -334,9 +332,7 @@ class AIClient:
         **kwargs: Any,
     ) -> dict[str, Any]:
         tools = self.tool_manager.maybe_merge_agent_tools(call_type, tools)
-        messages, tools = await self._maybe_prefetch_tools(
-            messages, tools, call_type
-        )
+        messages, tools = await self._maybe_prefetch_tools(messages, tools, call_type)
         return await self._requester.request(
             model_config=model_config,
             messages=messages,

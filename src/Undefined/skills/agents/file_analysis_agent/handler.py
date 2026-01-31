@@ -97,6 +97,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             # 3. 执行模型选择的工具 (Observation)
             tool_tasks = []
             tool_call_ids = []
+            tool_names = []
 
             for tool_call in tool_calls:
                 call_id: str = tool_call.get("id", "")
@@ -111,6 +112,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 )
 
                 tool_call_ids.append(call_id)
+                tool_names.append(function_name)
                 tool_tasks.append(
                     tool_registry.execute_tool(function_name, function_args, context)
                 )
@@ -121,6 +123,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
                 for i, tool_result in enumerate(results):
                     call_id = tool_call_ids[i]
+                    tool_name = tool_names[i]
                     content_str: str = ""
                     if isinstance(tool_result, Exception):
                         content_str = f"错误: {str(tool_result)}"
@@ -131,6 +134,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                         {
                             "role": "tool",
                             "tool_call_id": call_id,
+                            "name": tool_name,
                             "content": content_str,
                         }
                     )
