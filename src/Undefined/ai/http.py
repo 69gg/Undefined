@@ -164,6 +164,7 @@ class ModelRequester:
                 )
             else:
                 result = await self._request_with_openai(model_config, request_body)
+            result = self._normalize_result(result)
             duration = time.perf_counter() - start_time
 
             usage = result.get("usage", {}) or {}
@@ -309,6 +310,21 @@ class ModelRequester:
             except Exception:
                 pass
         return {"data": str(response)}
+
+    def _normalize_result(self, result: dict[str, Any]) -> dict[str, Any]:
+        choices = result.get("choices")
+        if isinstance(choices, list):
+            return result
+        data = result.get("data")
+        if isinstance(data, dict):
+            data_choices = data.get("choices")
+            if isinstance(data_choices, list):
+                normalized = dict(result)
+                normalized["choices"] = data_choices
+                return normalized
+        normalized = dict(result)
+        normalized["choices"] = [{}]
+        return normalized
 
     def _get_token_counter(self, model_name: str) -> TokenCounter:
         counter = self._token_counters.get(model_name)

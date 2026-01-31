@@ -22,9 +22,28 @@ class TokenCounter:
 
             self._tokenizer = tiktoken.encoding_for_model(self._model_name)
             logger.info("[tokenizer] tiktoken 加载成功")
+            return
+        except Exception as exc:
+            logger.warning(f"[tokenizer] tiktoken 加载失败，尝试回退到 GPT 编码: {exc}")
+
+        try:
+            import tiktoken
+
+            self._tokenizer = tiktoken.encoding_for_model("gpt-4")
+            logger.info("[tokenizer] 使用 GPT 编码回退成功")
+            return
+        except Exception as exc:
+            logger.warning(f"[tokenizer] GPT 编码回退失败，尝试 cl100k_base: {exc}")
+
+        try:
+            import tiktoken
+
+            self._tokenizer = tiktoken.get_encoding("cl100k_base")
+            logger.info("[tokenizer] 使用 cl100k_base 回退成功")
+            return
         except Exception as exc:
             self._tokenizer = None
-            logger.warning(f"[tokenizer] tiktoken 加载失败，将使用字符估算: {exc}")
+            logger.warning(f"[tokenizer] 编码回退失败，将使用字符估算: {exc}")
 
     def count(self, text: str) -> int:
         """计算文本的 token 数量。"""
