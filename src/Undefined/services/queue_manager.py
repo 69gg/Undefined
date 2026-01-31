@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,7 +107,7 @@ class QueueManager:
         queue = self._get_or_create_queue(model_name)
         await queue.superadmin_queue.put(request)
         logger.info(
-            f"[队列入队][{model_name}] 超级管理员私聊: 队列长度={queue.superadmin_queue.qsize()}"
+            f"[队列入队][{model_name}] 超级管理员私聊: size={queue.superadmin_queue.qsize()}"
         )
 
     async def add_private_request(
@@ -116,7 +117,7 @@ class QueueManager:
         queue = self._get_or_create_queue(model_name)
         await queue.private_queue.put(request)
         logger.info(
-            f"[队列入队][{model_name}] 普通私聊: 队列长度={queue.private_queue.qsize()}"
+            f"[队列入队][{model_name}] 普通私聊: size={queue.private_queue.qsize()}"
         )
 
     async def add_group_mention_request(
@@ -126,7 +127,7 @@ class QueueManager:
         queue = self._get_or_create_queue(model_name)
         await queue.group_mention_queue.put(request)
         logger.info(
-            f"[队列入队][{model_name}] 群聊被@: 队列长度={queue.group_mention_queue.qsize()}"
+            f"[队列入队][{model_name}] 群聊被@: size={queue.group_mention_queue.qsize()}"
         )
 
     async def add_group_normal_request(
@@ -137,7 +138,7 @@ class QueueManager:
         queue.trim_normal_queue()
         await queue.group_normal_queue.put(request)
         logger.info(
-            f"[队列入队][{model_name}] 群聊普通: 队列长度={queue.group_normal_queue.qsize()}"
+            f"[队列入队][{model_name}] 群聊普通: size={queue.group_normal_queue.qsize()}"
         )
 
     async def _process_model_loop(self, model_name: str) -> None:
@@ -193,8 +194,8 @@ class QueueManager:
                 if found_request and request:
                     request_type = request.get("type", "unknown")
                     logger.info(
-                        f"[队列发车][{model_name}] 载入 {queue_names[chosen_queue_idx]} 请求: {request_type} "
-                        f"(当前队列剩余={queues[chosen_queue_idx].qsize()})"
+                        f"[队列发车][{model_name}] {queue_names[chosen_queue_idx]} 请求: {request_type} "
+                        f"(remaining={queues[chosen_queue_idx].qsize()})"
                     )
 
                     # 异步执行处理，不等待结果

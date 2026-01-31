@@ -129,8 +129,7 @@ class SecurityService:
             is_injection = "INJECTION_DETECTED".lower() in content.lower()
             logger.info(
                 f"[Security] 注入检测完成: 判定={'风险' if is_injection else '安全'}, "
-                f"耗时={duration:.2f}s, Tokens={total_tokens} (P:{prompt_tokens} + C:{completion_tokens}), "
-                f"模型={security_config.model_name}"
+                f"耗时={duration:.2f}s, Tokens={total_tokens}, 模型={security_config.model_name}"
             )
 
             # 异步记录 token 使用

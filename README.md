@@ -231,30 +231,39 @@ graph TB
 
     %% AI 核心与大脑
     subgraph Brain [AI 核心能力层]
-        AIClient[AIClient 统一接口]
-        
+        subgraph AIRuntime ["AI Runtime (src/Undefined/ai)"]
+            AIClient[AIClient 统一接口]
+            PromptBuilder[PromptBuilder 构建提示词]
+            ToolManager[ToolManager 工具调度]
+            ModelRequester[ModelRequester API 调用]
+            MultimodalAnalyzer[MultimodalAnalyzer 多模态]
+            SummaryService[SummaryService 总结/标题]
+            TokenCounter[TokenCounter Token 统计]
+        end
+
         subgraph Context [上下文管理]
             HistoryManager[MessageHistoryManager]
             MemoryStorage[Memory 长期记忆]
+            EndSummary[EndSummaryStorage]
         end
-        
+
         subgraph SkillsSystem [Skills 技能系统]
             ToolRegistry[ToolRegistry 工具注册]
             AgentRegistry[AgentRegistry 代理注册]
-            
+
             subgraph AtomicTools [基础工具 Tools]
                 T_End[end 结束对话]
                 T_Python[python_interpreter]
                 T_Time[get_current_time]
             end
-            
+
             subgraph IntelligentAgents [智能体 Agents]
                 A_Web[WebAgent 网络搜索]
                 A_Code[CodeAnalysisAgent 代码分析]
                 A_Info[InfoAgent 信息查询]
                 A_Social[SocialAgent 社交互动]
             end
-            
+
             subgraph Extensions [扩展]
                 MCP_Client[MCP Client]
                 Ext_MCP[外部 MCP Server]
@@ -286,9 +295,20 @@ graph TB
     ModelQueues -->|轮询取值| DispatcherLoop
     
     DispatcherLoop -->|异步执行| AIClient
-    
-    AIClient <-->|API Request| LLM_API
-    AIClient <-->|调用| ToolRegistry
+
+    AIClient --> PromptBuilder
+    AIClient --> ToolManager
+    AIClient --> ModelRequester
+    AIClient --> MultimodalAnalyzer
+    AIClient --> SummaryService
+    AIClient --> TokenCounter
+
+    PromptBuilder --> HistoryManager
+    PromptBuilder --> MemoryStorage
+    PromptBuilder --> EndSummary
+
+    ModelRequester <-->|API Request| LLM_API
+    ToolManager <-->|调用| ToolRegistry
     ToolRegistry --> SkillsSystem
     MCP_Client <-->|Protocol| Ext_MCP
     
@@ -389,11 +409,12 @@ Undefined 欢迎开发者参与共建！
 *   **目录结构**:
     ```
     src/Undefined/
+    ├── ai/            # AI Runtime (client、prompt、tooling、summary、多模态)
     ├── skills/        # 技能插件核心目录
     ├── services/      # 核心服务 (Queue, Command, Security)
     ├── utils/         # 通用工具
-    ├── ai.py          # AI 交互层
-    └── handlers.py    # 消息处理层
+    ├── handlers.py    # 消息处理层
+    └── onebot.py      # OneBot WebSocket 客户端
     ```
 
 *   **开发指南**: 请参考 [src/Undefined/skills/README.md](src/Undefined/skills/README.md) 了解如何编写新的工具和 Agent。
