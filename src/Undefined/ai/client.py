@@ -227,6 +227,102 @@ class AIClient:
     def count_tokens(self, text: str) -> int:
         return self._token_counter.count(text)
 
+    def _get_prefetch_tool_names(self) -> list[str]:
+        raw = os.getenv("PREFETCH_TOOLS", "get_current_time")
+        names = [name.strip() for name in raw.split(",") if name.strip()]
+        return names
+
+    def _prefetch_hide_tools(self) -> bool:
+        return os.getenv("PREFETCH_TOOLS_HIDE", "true").lower() not in {
+            "0",
+            "false",
+            "no",
+        }
+
+    def _is_missing_tool_result(self, result: Any) -> bool:
+        if not isinstance(result, str):
+            return False
+        return result.startswith("未找到项目") or result.startswith("未找到 MCP 工具")
+
+    async def _maybe_prefetch_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        call_type: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
+        if not tools:
+            return messages, tools
+
+        prefetch_names = self._get_prefetch_tool_names()
+        if not prefetch_names:
+            return messages, tools
+
+        available_names = {
+            tool.get("function", {}).get("name")
+            for tool in tools
+            if tool.get("function")
+        }
+        prefetch_targets = [
+            name for name in prefetch_names if name in available_names
+        ]
+        if not prefetch_targets:
+            return messages, tools
+
+        ctx = RequestContext.current()
+        cache: dict[str, list[str]] = {}
+        done: set[str] = set()
+        if ctx:
+            cache = ctx.get_resource("prefetch_tools", {}) or {}
+            done = set(cache.get(call_type, []))
+
+        to_run = [name for name in prefetch_targets if name not in done]
+        if not to_run:
+            return messages, tools
+
+        results: list[tuple[str, Any]] = []
+        for name in to_run:
+            try:
+                result = await self.tool_manager.execute_tool(name, {}, {})
+            except Exception as exc:
+                logger.warning("[预先调用] %s 执行失败: %s", name, exc)
+                continue
+
+            if self._is_missing_tool_result(result):
+                logger.warning("[预先调用] %s 未找到对应工具，跳过", name)
+                continue
+
+            results.append((name, result))
+            done.add(name)
+
+        if not results:
+            return messages, tools
+
+        if ctx:
+            cache[call_type] = sorted(done)
+            ctx.set_resource("prefetch_tools", cache)
+
+        content_lines = ["【预先工具结果】"]
+        content_lines.extend([f"- {name}: {result}" for name, result in results])
+        prefetch_message = {"role": "system", "content": "\n".join(content_lines)}
+
+        insert_idx = 0
+        for idx, msg in enumerate(messages):
+            if msg.get("role") == "system":
+                insert_idx = idx + 1
+            else:
+                break
+        new_messages = list(messages)
+        new_messages.insert(insert_idx, prefetch_message)
+
+        if self._prefetch_hide_tools():
+            hidden = set(name for name in done)
+            tools = [
+                tool
+                for tool in tools
+                if tool.get("function", {}).get("name") not in hidden
+            ]
+        return new_messages, tools
+
     async def request_model(
         self,
         model_config: ChatModelConfig | VisionModelConfig | AgentModelConfig,
@@ -238,6 +334,9 @@ class AIClient:
         **kwargs: Any,
     ) -> dict[str, Any]:
         tools = self.tool_manager.maybe_merge_agent_tools(call_type, tools)
+        messages, tools = await self._maybe_prefetch_tools(
+            messages, tools, call_type
+        )
         return await self._requester.request(
             model_config=model_config,
             messages=messages,
