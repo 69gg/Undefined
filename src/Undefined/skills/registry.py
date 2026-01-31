@@ -364,6 +364,14 @@ class BaseRegistry:
     async def _reload_items(self) -> None:
         async with self._items_lock:
             self.load_items()
+            try:
+                from Undefined.context_resource_registry import (
+                    refresh_context_resource_keys,
+                )
+
+                refresh_context_resource_keys()
+            except Exception:
+                logger.debug("刷新上下文资源键缓存失败", exc_info=True)
 
     async def _watch_loop(self, interval: float, debounce: float) -> None:
         self._last_snapshot = self._compute_snapshot()
