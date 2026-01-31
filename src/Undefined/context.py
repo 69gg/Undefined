@@ -80,6 +80,10 @@ class RequestContext:
         """
         return self._resources.get(name, default)
 
+    def get_resources(self) -> dict[str, Any]:
+        """获取所有请求级别资源的浅拷贝"""
+        return dict(self._resources)
+
     @classmethod
     def current(cls) -> Optional["RequestContext"]:
         """获取当前请求上下文

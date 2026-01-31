@@ -5,15 +5,23 @@
 
 import asyncio
 import logging
+import os
 import time
-from typing import Any, Optional
+import uuid
+from pathlib import Path
+from typing import Any, Optional, cast
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from Undefined.context import RequestContext
+from Undefined.context_resource_registry import collect_context_resources
 from Undefined.scheduled_task_storage import ScheduledTaskStorage
+from Undefined.utils import io
 
 logger = logging.getLogger(__name__)
+
+CONTEXT_DIR = Path("data/scheduler_context")
 
 
 class TaskScheduler:
@@ -120,6 +128,8 @@ class TaskScheduler:
         try:
             trigger = CronTrigger.from_crontab(cron_expression)
 
+            context_id = await self._save_context_snapshot()
+
             self.scheduler.add_job(
                 self._execute_tool_wrapper,
                 trigger=trigger,
@@ -138,6 +148,7 @@ class TaskScheduler:
                 "task_name": task_name or "",
                 "max_executions": max_executions,
                 "current_executions": 0,
+                "context_id": context_id,
             }
 
             # 添加多工具支持
@@ -192,6 +203,8 @@ class TaskScheduler:
 
         try:
             task_info = self.tasks[task_id]
+            old_context_id = task_info.get("context_id")
+            new_context_id = await self._save_context_snapshot()
 
             if cron_expression is not None:
                 trigger = CronTrigger.from_crontab(cron_expression)
@@ -223,6 +236,11 @@ class TaskScheduler:
             if execution_mode is not None:
                 task_info["execution_mode"] = execution_mode
 
+            if new_context_id:
+                task_info["context_id"] = new_context_id
+                if old_context_id and old_context_id != new_context_id:
+                    await self._delete_context_snapshot(old_context_id)
+
             # 持久化保存
             await self.storage.save_all(self.tasks)
 
@@ -235,10 +253,15 @@ class TaskScheduler:
     async def remove_task(self, task_id: str) -> bool:
         """移除定时任务"""
         try:
+            context_id = None
+            if task_id in self.tasks:
+                context_id = self.tasks[task_id].get("context_id")
             self.scheduler.remove_job(task_id)
             if task_id in self.tasks:
                 del self.tasks[task_id]
                 await self.storage.save_all(self.tasks)
+            if context_id:
+                await self._delete_context_snapshot(context_id)
             logger.info(f"移除定时任务成功: {task_id}")
             return True
         except Exception as e:
@@ -248,6 +271,34 @@ class TaskScheduler:
     def list_tasks(self) -> dict[str, Any]:
         """列出所有任务"""
         return self.tasks
+
+    async def _save_context_snapshot(self) -> str | None:
+        ctx = RequestContext.current()
+        if not ctx:
+            return None
+
+        context_id = uuid.uuid4().hex
+        snapshot = {
+            "request_type": ctx.request_type,
+            "group_id": ctx.group_id,
+            "user_id": ctx.user_id,
+            "sender_id": ctx.sender_id,
+            "resource_keys": list(ctx.get_resources().keys()),
+        }
+        await io.write_json(CONTEXT_DIR / f"{context_id}.json", snapshot, use_lock=True)
+        return context_id
+
+    async def _load_context_snapshot(
+        self, context_id: str | None
+    ) -> dict[str, Any] | None:
+        if not context_id:
+            return None
+        return await io.read_json(CONTEXT_DIR / f"{context_id}.json", use_lock=False)
+
+    async def _delete_context_snapshot(self, context_id: str | None) -> None:
+        if not context_id:
+            return
+        await io.delete_file(CONTEXT_DIR / f"{context_id}.json")
 
     async def _execute_tool_wrapper(
         self,
@@ -272,80 +323,170 @@ class TaskScheduler:
         logger.debug(f"[任务详情] 目标={target_id}({target_type})")
 
         try:
-            context = {
-                "scheduler": self,
-                "ai_client": self.ai,
-                "sender": self.sender,
-                "onebot_client": self.onebot,
-                "history_manager": self.history_manager,
-            }
-
-            start_time = time.perf_counter()
-            results = []
-
-            if execution_mode == "parallel":
-                # 并行执行所有工具
-                results = await asyncio.gather(
-                    *[
-                        self.ai._execute_tool(
-                            tool["tool_name"], tool["tool_args"], context
-                        )
-                        for tool in tools
-                    ],
-                    return_exceptions=True,
+            context_snapshot = await self._load_context_snapshot(
+                task_info.get("context_id")
+            )
+            if context_snapshot:
+                request_type = context_snapshot.get("request_type") or (
+                    "group" if target_type == "group" else "private"
                 )
+                group_id = context_snapshot.get("group_id")
+                user_id = context_snapshot.get("user_id")
+                sender_id = context_snapshot.get("sender_id")
             else:
-                # 串行执行所有工具
-                for tool in tools:
-                    try:
-                        result = await self.ai._execute_tool(
-                            tool["tool_name"], tool["tool_args"], context
-                        )
-                        results.append(result)
-                    except Exception as e:
-                        logger.error(f"工具 {tool['tool_name']} 执行失败: {e}")
-                        results.append(str(e))
+                request_type = "group" if target_type == "group" else "private"
+                group_id = None
+                user_id = None
+                sender_id = None
 
-            duration = time.perf_counter() - start_time
+            if request_type == "group" and group_id is None:
+                group_id = target_id
+            if request_type == "private" and user_id is None:
+                user_id = target_id
 
-            # 将所有结果合并为一个字符串
-            combined_results = []
-            for i, (tool, result) in enumerate(zip(tools, results)):
-                if isinstance(result, Exception):
-                    combined_results.append(
-                        f"工具 {i + 1} ({tool['tool_name']}): 执行失败 - {result}"
+            async with RequestContext(
+                request_type=request_type,
+                group_id=group_id,
+                user_id=user_id,
+                sender_id=sender_id,
+            ) as ctx:
+
+                async def send_msg_cb(message: str, at_user: int | None = None) -> None:
+                    if request_type == "group" and target_id:
+                        if at_user:
+                            message = f"[CQ:at,qq={at_user}] {message}"
+                        await self.sender.send_group_message(target_id, message)
+                    elif request_type == "private" and target_id:
+                        await self.sender.send_private_message(target_id, message)
+
+                async def send_private_cb(uid: int, msg: str) -> None:
+                    await self.sender.send_private_message(uid, msg)
+
+                async def send_img_cb(tid: int, mtype: str, path: str) -> None:
+                    if not os.path.exists(path):
+                        return
+                    abs_path = os.path.abspath(path)
+                    ext = os.path.splitext(path)[1].lower()
+                    if ext in [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]:
+                        msg = f"[CQ:image,file={abs_path}]"
+                    elif ext in [".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"]:
+                        msg = f"[CQ:record,file={abs_path}]"
+                    else:
+                        return
+
+                    if mtype == "group":
+                        await self.onebot.send_group_message(tid, msg)
+                    elif mtype == "private":
+                        await self.onebot.send_private_message(tid, msg)
+
+                async def get_recent_cb(
+                    chat_id: str, msg_type: str, start: int, end: int
+                ) -> list[dict[str, Any]]:
+                    return cast(
+                        list[dict[str, Any]],
+                        self.history_manager.get_recent(chat_id, msg_type, start, end),
                     )
-                elif result:
-                    combined_results.append(
-                        f"工具 {i + 1} ({tool['tool_name']}): {result}"
+
+                async def send_like_cb(uid: int, times: int = 1) -> None:
+                    await self.onebot.send_like(uid, times)
+
+                ai_client = self.ai
+                sender = self.sender
+                history_manager = self.history_manager
+                onebot_client = self.onebot
+                scheduler = self
+                send_message_callback = send_msg_cb
+                get_recent_messages_callback = get_recent_cb
+                get_image_url_callback = self.onebot.get_image
+                get_forward_msg_callback = self.onebot.get_forward_msg
+                send_like_callback = send_like_cb
+                send_private_message_callback = send_private_cb
+                send_image_callback = send_img_cb
+                resource_vars = dict(globals())
+                resource_vars.update(locals())
+                resources = collect_context_resources(resource_vars)
+                resource_keys = (
+                    context_snapshot.get("resource_keys") if context_snapshot else None
+                )
+                if resource_keys:
+                    for key in resource_keys:
+                        if key in resources and resources[key] is not None:
+                            ctx.set_resource(key, resources[key])
+                else:
+                    for key, value in resources.items():
+                        if value is not None:
+                            ctx.set_resource(key, value)
+
+                start_time = time.perf_counter()
+                results = []
+
+                tool_context: dict[str, Any] = {"agent_histories": {}}
+                if execution_mode == "parallel":
+                    # 并行执行所有工具
+                    results = await asyncio.gather(
+                        *[
+                            self.ai._execute_tool(
+                                tool["tool_name"], tool["tool_args"], tool_context
+                            )
+                            for tool in tools
+                        ],
+                        return_exceptions=True,
                     )
                 else:
-                    combined_results.append(
-                        f"工具 {i + 1} ({tool['tool_name']}): 执行完成，无返回结果"
-                    )
+                    # 串行执行所有工具
+                    for tool in tools:
+                        try:
+                            result = await self.ai._execute_tool(
+                                tool["tool_name"], tool["tool_args"], tool_context
+                            )
+                            results.append(result)
+                        except Exception as e:
+                            logger.error(f"工具 {tool['tool_name']} 执行失败: {e}")
+                            results.append(str(e))
 
-            logger.info(
-                f"[任务完成] 定时任务执行成功: ID={task_id}, 耗时={duration:.2f}s"
-            )
+                duration = time.perf_counter() - start_time
 
-            # 更新执行次数
-            if task_id in self.tasks:
-                task_info = self.tasks[task_id]
-                task_info["current_executions"] = (
-                    task_info.get("current_executions", 0) + 1
+                # 将所有结果合并为一个字符串
+                combined_results = []
+                for i, (tool, result) in enumerate(zip(tools, results)):
+                    if isinstance(result, Exception):
+                        combined_results.append(
+                            f"工具 {i + 1} ({tool['tool_name']}): 执行失败 - {result}"
+                        )
+                    elif result:
+                        combined_results.append(
+                            f"工具 {i + 1} ({tool['tool_name']}): {result}"
+                        )
+                    else:
+                        combined_results.append(
+                            f"工具 {i + 1} ({tool['tool_name']}): 执行完成，无返回结果"
+                        )
+
+                logger.info(
+                    f"[任务完成] 定时任务执行成功: ID={task_id}, 耗时={duration:.2f}s"
                 )
 
-                # 持久化保存执行次数
-                await self.storage.save_all(self.tasks)
-
-                max_executions = task_info.get("max_executions")
-                current_executions = task_info.get("current_executions", 0)
-
-                if max_executions is not None and current_executions >= max_executions:
-                    await self.remove_task(task_id)
-                    logger.info(
-                        f"定时任务 {task_id} 已达到最大执行次数 {max_executions}，已自动删除"
+                # 更新执行次数
+                if task_id in self.tasks:
+                    task_info = self.tasks[task_id]
+                    task_info["current_executions"] = (
+                        task_info.get("current_executions", 0) + 1
                     )
+
+                    # 持久化保存执行次数
+                    await self.storage.save_all(self.tasks)
+
+                    max_executions = task_info.get("max_executions")
+                    current_executions = task_info.get("current_executions", 0)
+
+                    if (
+                        max_executions is not None
+                        and current_executions >= max_executions
+                    ):
+                        await self.remove_task(task_id)
+                        logger.info(
+                            f"定时任务 {task_id} 已达到最大执行次数 {max_executions}，已自动删除"
+                        )
 
         except Exception as e:
             logger.exception(f"定时任务执行出错: {e}")

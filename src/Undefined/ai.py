@@ -9,6 +9,7 @@ from Undefined.skills.agents.intro_generator import (
     AgentIntroGenerator,
 )
 from Undefined.context import RequestContext
+from Undefined.context_resource_registry import set_context_resource_scan_paths
 import base64
 import json
 import logging
@@ -114,6 +115,16 @@ class AIClient:
 
         # 初始化 Agent 注册表
         self.agent_registry = AgentRegistry(Path(__file__).parent / "skills" / "agents")
+
+        # 绑定上下文资源扫描路径（基于注册表 watch_paths）
+        scan_paths = [
+            p
+            for p in (
+                self.tool_registry._watch_paths + self.agent_registry._watch_paths
+            )
+            if p.exists()
+        ]
+        set_context_resource_scan_paths(scan_paths)
 
         # 启动 Agent intro 自动生成（启动时队列）
         intro_autogen_enabled = os.getenv(
@@ -1073,29 +1084,11 @@ class AIClient:
         tools = self._get_openai_tools()
 
         # 准备工具执行上下文
-        tool_context = {
-            "send_message_callback": send_message_callback,
-            "get_recent_messages_callback": get_recent_messages_callback,
-            "get_image_url_callback": get_image_url_callback,
-            "get_forward_msg_callback": get_forward_msg_callback,
-            "send_like_callback": send_like_callback,
-            "send_private_message_callback": self._send_private_message_callback,
-            "send_image_callback": self._send_image_callback,
-            "recent_replies": self.recent_replies,
-            "end_summaries": self._end_summaries,
-            "end_summary_storage": self._end_summary_storage,
-            "memory_storage": self.memory_storage,
-            "search_wrapper": self._search_wrapper,
-            "ai_client": self,
-            "crawl4ai_available": _CRAWL4AI_AVAILABLE,
-            "conversation_ended": False,
-            "sender": sender,
-            "history_manager": history_manager,
-            "onebot_client": onebot_client,
-            "scheduler": scheduler,
-            "token_usage_storage": self._token_usage_storage,
-            "agent_histories": {},  # 存储 Agent 的临时对话记录，键为 agent_name，值为消息列表
-        }
+        ctx = RequestContext.current()
+        tool_context = ctx.get_resources() if ctx else {}
+        tool_context["conversation_ended"] = False
+        # 存储 Agent 的临时对话记录，键为 agent_name，值为消息列表
+        tool_context.setdefault("agent_histories", {})
 
         # 合并额外上下文
         if extra_context:
@@ -1270,6 +1263,20 @@ class AIClient:
             执行结果
         """
         start_time = time.perf_counter()
+
+        # 自动注入 RequestContext 资源，避免调度/并发场景下手动传参
+        ctx = RequestContext.current()
+        if ctx:
+            for key, value in ctx.get_resources().items():
+                context.setdefault(key, value)
+            if ctx.group_id is not None:
+                context.setdefault("group_id", ctx.group_id)
+            if ctx.user_id is not None:
+                context.setdefault("user_id", ctx.user_id)
+            if ctx.sender_id is not None:
+                context.setdefault("sender_id", ctx.sender_id)
+            context.setdefault("request_type", ctx.request_type)
+            context.setdefault("request_id", ctx.request_id)
 
         # 首先尝试作为 Agent 执行
         agents_schema = self.agent_registry.get_agents_schema()

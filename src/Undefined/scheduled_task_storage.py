@@ -34,6 +34,7 @@ class ScheduledTask:
     max_executions: Optional[int]
     current_executions: int = 0
     created_at: str = ""
+    context_id: Optional[str] = None
     # 新增字段：多工具调用支持
     tools: Optional[list[ToolCall]] = None
     execution_mode: str = "serial"  # serial: 串行执行, parallel: 并行执行

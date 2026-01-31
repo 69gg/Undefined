@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any, Optional
 from Undefined.config import Config
 from Undefined.context import RequestContext
+from Undefined.context_resource_registry import collect_context_resources
 from Undefined.render import render_html_to_image, render_markdown_to_html
 from Undefined.services.queue_manager import QueueManager
 from Undefined.utils.history import MessageHistoryManager
@@ -170,13 +171,6 @@ class AICoordinator:
             sender_id=sender_id,
             user_id=sender_id,
         ) as ctx:
-            # 存储资源到上下文
-            ctx.set_resource("sender", self.sender)
-            ctx.set_resource("history_manager", self.history_manager)
-            ctx.set_resource("onebot_client", self.onebot)
-            ctx.set_resource("scheduler", self.scheduler)
-            ctx.set_resource("render_html_to_image", render_html_to_image)
-            ctx.set_resource("render_markdown_to_html", render_markdown_to_html)
 
             async def send_msg_cb(message: str, at_user: Optional[int] = None) -> None:
                 if at_user:
@@ -196,6 +190,26 @@ class AICoordinator:
 
             async def send_like_cb(uid: int, times: int = 1) -> None:
                 await self.onebot.send_like(uid, times)
+
+            # 存储资源到上下文
+            ai_client = self.ai
+            sender = self.sender
+            history_manager = self.history_manager
+            onebot_client = self.onebot
+            scheduler = self.scheduler
+            send_message_callback = send_msg_cb
+            get_recent_messages_callback = get_recent_cb
+            get_image_url_callback = self.onebot.get_image
+            get_forward_msg_callback = self.onebot.get_forward_msg
+            send_like_callback = send_like_cb
+            send_private_message_callback = send_private_cb
+            send_image_callback = send_img_cb
+            resource_vars = dict(globals())
+            resource_vars.update(locals())
+            resources = collect_context_resources(resource_vars)
+            for key, value in resources.items():
+                if value is not None:
+                    ctx.set_resource(key, value)
 
             try:
                 # 保留旧方式（向后兼容）
@@ -235,13 +249,6 @@ class AICoordinator:
             user_id=user_id,
             sender_id=user_id,
         ) as ctx:
-            # 存储资源到上下文
-            ctx.set_resource("sender", self.sender)
-            ctx.set_resource("history_manager", self.history_manager)
-            ctx.set_resource("onebot_client", self.onebot)
-            ctx.set_resource("scheduler", self.scheduler)
-            ctx.set_resource("render_html_to_image", render_html_to_image)
-            ctx.set_resource("render_markdown_to_html", render_markdown_to_html)
 
             async def send_msg_cb(message: str, at_user: Optional[int] = None) -> None:
                 await self.sender.send_private_message(user_id, message)
@@ -256,6 +263,29 @@ class AICoordinator:
 
             async def send_like_cb(uid: int, times: int = 1) -> None:
                 await self.onebot.send_like(uid, times)
+
+            async def send_private_cb(uid: int, msg: str) -> None:
+                await self.sender.send_private_message(uid, msg)
+
+            # 存储资源到上下文
+            ai_client = self.ai
+            sender = self.sender
+            history_manager = self.history_manager
+            onebot_client = self.onebot
+            scheduler = self.scheduler
+            send_message_callback = send_msg_cb
+            get_recent_messages_callback = get_recent_cb
+            get_image_url_callback = self.onebot.get_image
+            get_forward_msg_callback = self.onebot.get_forward_msg
+            send_like_callback = send_like_cb
+            send_private_message_callback = send_private_cb
+            send_image_callback = send_img_cb
+            resource_vars = dict(globals())
+            resource_vars.update(locals())
+            resources = collect_context_resources(resource_vars)
+            for key, value in resources.items():
+                if value is not None:
+                    ctx.set_resource(key, value)
 
             try:
                 # 保留旧方式（向后兼容）
