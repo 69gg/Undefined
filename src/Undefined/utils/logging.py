@@ -80,3 +80,15 @@ def log_debug_json(logger: logging.Logger, prefix: str, payload: Any) -> None:
     except (TypeError, ValueError):
         dumped = str(safe_payload)
     logger.debug("%s\n%s", prefix, dumped)
+
+
+def format_log_payload(payload: Any, max_length: int = 2000) -> str:
+    """Format payload for info logs with redaction and optional truncation."""
+    safe_payload = sanitize_data(payload)
+    try:
+        dumped = json.dumps(safe_payload, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        dumped = str(safe_payload)
+    if max_length > 0 and len(dumped) > max_length:
+        return dumped[:max_length] + "...(truncated)"
+    return dumped

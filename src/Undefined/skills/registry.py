@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from Undefined.utils.logging import log_debug_json
+from Undefined.utils.logging import format_log_payload, log_debug_json
 
 logger = logging.getLogger(__name__)
 
@@ -299,9 +299,39 @@ class BaseRegistry:
             item = self._items.get(name)
 
         if not item:
+            if logger.isEnabledFor(logging.INFO) and self.kind in {
+                "tool",
+                "agent_tool",
+                "agent",
+            }:
+                logger.info(
+                    "[%s调用] %s 参数=%s",
+                    self.kind,
+                    name,
+                    format_log_payload(args),
+                )
+                logger.info(
+                    "[%s返回] %s 结果=%s",
+                    self.kind,
+                    name,
+                    format_log_payload(f"未找到项目: {name}"),
+                )
             return f"未找到项目: {name}"
 
+        if logger.isEnabledFor(logging.INFO) and self.kind in {
+            "tool",
+            "agent_tool",
+            "agent",
+        }:
+            logger.info(
+                "[%s调用] %s 参数=%s",
+                self.kind,
+                name,
+                format_log_payload(args),
+            )
+
         start_time = time.monotonic()
+        result_payload: Any
         try:
             if logger.isEnabledFor(logging.DEBUG):
                 log_debug_json(logger, f"[{self.kind}参数] {name}", args)
@@ -314,18 +344,20 @@ class BaseRegistry:
                 self._load_handler_for_item(item)
             handler = item.handler
             if not handler:
-                return f"未找到项目: {name}"
+                result_payload = f"未找到项目: {name}"
+                return_value = str(result_payload)
+            else:
+                result = await self._execute_with_timeout(handler, args, context)
+                duration = time.monotonic() - start_time
 
-            result = await self._execute_with_timeout(handler, args, context)
-            duration = time.monotonic() - start_time
-
-            self._stats[name].record_success(duration)
-            self._log_event(
-                "execute", name, status="success", duration_ms=int(duration * 1000)
-            )
-            if logger.isEnabledFor(logging.DEBUG):
-                log_debug_json(logger, f"[{self.kind}结果] {name}", result)
-            return str(result)
+                self._stats[name].record_success(duration)
+                self._log_event(
+                    "execute", name, status="success", duration_ms=int(duration * 1000)
+                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    log_debug_json(logger, f"[{self.kind}结果] {name}", result)
+                result_payload = result
+                return_value = str(result)
 
         except asyncio.TimeoutError:
             duration = time.monotonic() - start_time
@@ -333,7 +365,8 @@ class BaseRegistry:
             self._log_event(
                 "execute", name, status="timeout", duration_ms=int(duration * 1000)
             )
-            return f"执行 {name} 超时 (>{int(self.timeout_seconds)}s)"
+            result_payload = f"执行 {name} 超时 (>{int(self.timeout_seconds)}s)"
+            return_value = str(result_payload)
 
         except asyncio.CancelledError:
             duration = time.monotonic() - start_time
@@ -341,7 +374,8 @@ class BaseRegistry:
             self._log_event(
                 "execute", name, status="cancelled", duration_ms=int(duration * 1000)
             )
-            return f"执行 {name} 已取消"
+            result_payload = f"执行 {name} 已取消"
+            return_value = str(result_payload)
 
         except Exception as e:
             duration = time.monotonic() - start_time
@@ -350,7 +384,21 @@ class BaseRegistry:
             self._log_event(
                 "execute", name, status="error", duration_ms=int(duration * 1000)
             )
-            return f"执行 {name} 时出错: {str(e)}"
+            result_payload = f"执行 {name} 时出错: {str(e)}"
+            return_value = str(result_payload)
+
+        if logger.isEnabledFor(logging.INFO) and self.kind in {
+            "tool",
+            "agent_tool",
+            "agent",
+        }:
+            logger.info(
+                "[%s返回] %s 结果=%s",
+                self.kind,
+                name,
+                format_log_payload(result_payload),
+            )
+        return return_value
 
     async def _execute_with_timeout(
         self,

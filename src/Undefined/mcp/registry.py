@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, cast
 
-from Undefined.utils.logging import log_debug_json
+from Undefined.utils.logging import format_log_payload, log_debug_json
 
 logger = logging.getLogger(__name__)
 
@@ -196,19 +196,49 @@ class MCPToolRegistry:
     ) -> str:
         handler = self._tools_handlers.get(tool_name)
         if not handler:
+            if logger.isEnabledFor(logging.INFO):
+                logger.info(
+                    "[MCP工具调用] %s 参数=%s",
+                    tool_name,
+                    format_log_payload(args),
+                )
+                logger.info(
+                    "[MCP工具返回] %s 结果=%s",
+                    tool_name,
+                    format_log_payload(f"未找到 MCP 工具: {tool_name}"),
+                )
             return f"未找到 MCP 工具: {tool_name}"
 
         try:
+            if logger.isEnabledFor(logging.INFO):
+                logger.info(
+                    "[MCP工具调用] %s 参数=%s",
+                    tool_name,
+                    format_log_payload(args),
+                )
             start_time = asyncio.get_event_loop().time()
             result = await handler(args, context)
             duration = asyncio.get_event_loop().time() - start_time
             logger.info(f"[MCP工具执行] {tool_name} 耗时={duration:.4f}s")
             if logger.isEnabledFor(logging.DEBUG):
                 log_debug_json(logger, f"[MCP工具结果] {tool_name}", result)
+            if logger.isEnabledFor(logging.INFO):
+                logger.info(
+                    "[MCP工具返回] %s 结果=%s",
+                    tool_name,
+                    format_log_payload(result),
+                )
             return str(result)
         except Exception as e:
             logger.exception(f"[MCP工具异常] 执行工具 {tool_name} 时出错")
-            return f"执行 MCP 工具 {tool_name} 时出错: {str(e)}"
+            error_text = f"执行 MCP 工具 {tool_name} 时出错: {str(e)}"
+            if logger.isEnabledFor(logging.INFO):
+                logger.info(
+                    "[MCP工具返回] %s 结果=%s",
+                    tool_name,
+                    format_log_payload(error_text),
+                )
+            return error_text
 
     async def close(self) -> None:
         logger.info("正在关闭 MCP 客户端连接...")
