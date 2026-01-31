@@ -20,6 +20,7 @@ from Undefined.memory import MemoryStorage
 from Undefined.scheduled_task_storage import ScheduledTaskStorage
 from Undefined.end_summary_storage import EndSummaryStorage
 from Undefined.onebot import OneBotClient
+from Undefined.token_usage_storage import TokenUsageStorage
 from Undefined.utils.paths import (
     CACHE_DIR,
     DATA_DIR,
@@ -113,6 +114,11 @@ async def main() -> None:
     ensure_runtime_dirs()
     logger = logging.getLogger(__name__)
     logger.info("[启动] 正在初始化 Undefined 机器人...")
+
+    try:
+        await TokenUsageStorage().compact_if_needed()
+    except Exception as exc:
+        logger.warning(f"[Token统计] 启动时归档检查失败: {exc}")
 
     try:
         config = get_config()

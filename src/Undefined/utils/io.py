@@ -95,7 +95,12 @@ async def read_json(file_path: Path | str, use_lock: bool = False) -> Optional[A
         raise
 
 
-async def append_line(file_path: Path | str, line: str, use_lock: bool = True) -> None:
+async def append_line(
+    file_path: Path | str,
+    line: str,
+    use_lock: bool = True,
+    lock_file_path: Path | str | None = None,
+) -> None:
     """异步安全地向文件追加一行
 
     参数:
@@ -113,17 +118,24 @@ async def append_line(file_path: Path | str, line: str, use_lock: bool = True) -
 
     def sync_append() -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "a", encoding="utf-8") as f:
+        lock_handle = None
+        try:
             if use_lock:
-                logger.debug(f"[IO] 获取排他锁: path={p}")
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
+                lock_path = Path(lock_file_path) if lock_file_path else p
+                lock_path.parent.mkdir(parents=True, exist_ok=True)
+                lock_handle = open(lock_path, "a", encoding="utf-8")
+                logger.debug(f"[IO] 获取排他锁: path={lock_path}")
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            with open(p, "a", encoding="utf-8") as f:
                 f.write(line)
                 f.flush()
-            finally:
-                if use_lock:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-                    logger.debug(f"[IO] 释放锁: path={p}")
+        finally:
+            if lock_handle is not None:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+                logger.debug(
+                    f"[IO] 释放锁: path={Path(lock_file_path) if lock_file_path else p}"
+                )
+                lock_handle.close()
 
     try:
         await asyncio.to_thread(sync_append)

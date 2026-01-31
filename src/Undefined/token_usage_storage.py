@@ -4,8 +4,12 @@
 """
 
 import asyncio
+import gzip
 import json
 import logging
+import os
+import shutil
+import fcntl
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -51,6 +55,9 @@ class TokenUsageStorage:
             file_path = Path("data/token_usage.jsonl")
 
         self.file_path: Path = file_path
+        self.lock_file_path: Path = self.file_path.with_name(
+            f"{self.file_path.name}.lock"
+        )
         self._ensure_file_exists()
 
     def _ensure_file_exists(self) -> None:
@@ -58,6 +65,130 @@ class TokenUsageStorage:
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.file_path.exists():
             self.file_path.touch()
+        if not self.lock_file_path.exists():
+            self.lock_file_path.touch()
+
+    @staticmethod
+    def _parse_env_int(name: str, default: int) -> int:
+        value = os.getenv(name, str(default)).strip()
+        try:
+            return int(value)
+        except ValueError:
+            return default
+
+    def _archive_prefix(self) -> str:
+        return self.file_path.stem
+
+    def _list_archives(self) -> list[Path]:
+        pattern = f"{self._archive_prefix()}.*.jsonl.gz"
+        candidates = sorted(
+            self.file_path.parent.glob(pattern),
+            key=lambda path: path.name,
+        )
+        return [path for path in candidates if not path.name.endswith(".tmp")]
+
+    def _build_archive_path(self) -> Path:
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        base_name = f"{self._archive_prefix()}.{timestamp}.jsonl.gz"
+        candidate = self.file_path.parent / base_name
+        index = 1
+        while candidate.exists():
+            candidate = self.file_path.parent / (
+                f"{self._archive_prefix()}.{timestamp}-{index}.jsonl.gz"
+            )
+            index += 1
+        return candidate
+
+    def _prune_archives(
+        self, max_archives: Optional[int], max_total_bytes: Optional[int]
+    ) -> None:
+        archives = self._list_archives()
+        if max_archives is not None and max_archives > 0:
+            if len(archives) > max_archives:
+                for path in archives[: len(archives) - max_archives]:
+                    try:
+                        path.unlink()
+                    except Exception:
+                        logger.warning(f"[Token统计] 无法删除归档: {path}")
+                archives = self._list_archives()
+
+        if max_total_bytes is not None and max_total_bytes > 0:
+            total = 0
+            sizes: list[tuple[Path, int]] = []
+            for path in archives:
+                try:
+                    size = path.stat().st_size
+                except FileNotFoundError:
+                    continue
+                sizes.append((path, size))
+                total += size
+            if total > max_total_bytes:
+                for path, size in sizes:
+                    try:
+                        path.unlink()
+                        total -= size
+                    except Exception:
+                        logger.warning(f"[Token统计] 无法删除归档: {path}")
+                    if total <= max_total_bytes:
+                        break
+
+    async def compact_if_needed(
+        self,
+        max_size_bytes: Optional[int] = None,
+        max_archives: Optional[int] = None,
+        max_total_bytes: Optional[int] = None,
+    ) -> bool:
+        """当文件超过阈值时进行压缩归档，并按策略清理历史归档"""
+        if max_size_bytes is None:
+            max_size_mb = self._parse_env_int("TOKEN_USAGE_MAX_SIZE_MB", 3)
+            if max_size_mb <= 0:
+                return False
+            max_size_bytes = max_size_mb * 1024 * 1024
+
+        if max_archives is None:
+            max_archives = self._parse_env_int("TOKEN_USAGE_MAX_ARCHIVES", 30)
+            if max_archives <= 0:
+                max_archives = None
+
+        if max_total_bytes is None:
+            max_total_mb = self._parse_env_int("TOKEN_USAGE_MAX_TOTAL_MB", 0)
+            max_total_bytes = max_total_mb * 1024 * 1024 if max_total_mb > 0 else None
+
+        def sync_compact() -> bool:
+            self._ensure_file_exists()
+            did_compact = False
+            self.lock_file_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.lock_file_path, "a", encoding="utf-8") as lock_handle:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+                try:
+                    if not self.file_path.exists():
+                        return False
+                    try:
+                        size = self.file_path.stat().st_size
+                    except FileNotFoundError:
+                        return False
+                    if size >= max_size_bytes and size > 0:
+                        archive_path = self._build_archive_path()
+                        tmp_path = archive_path.with_suffix(
+                            archive_path.suffix + ".tmp"
+                        )
+                        with open(self.file_path, "rb") as src:
+                            with gzip.open(tmp_path, "wb") as dst:
+                                shutil.copyfileobj(src, dst)
+                        tmp_path.replace(archive_path)
+                        with open(self.file_path, "w", encoding="utf-8"):
+                            pass
+                        did_compact = True
+                    self._prune_archives(max_archives, max_total_bytes)
+                finally:
+                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+            return did_compact
+
+        try:
+            return await asyncio.to_thread(sync_compact)
+        except Exception as e:
+            logger.error(f"[Token统计] 压缩归档失败: {e}")
+            return False
 
     async def record(self, usage: TokenUsage | dict[str, Any]) -> None:
         """记录一次 token 使用
@@ -80,7 +211,12 @@ class TokenUsageStorage:
             # 使用统一 IO 层追加内容
             from Undefined.utils import io
 
-            await io.append_line(self.file_path, line, use_lock=True)
+            await io.append_line(
+                self.file_path,
+                line,
+                use_lock=True,
+                lock_file_path=self.lock_file_path,
+            )
 
             logger.debug(
                 f"[Token统计] 已记录: {data.get('call_type')} - "
@@ -98,19 +234,33 @@ class TokenUsageStorage:
         records: list[TokenUsage] = []
         try:
 
+            def read_records_from_path(path: Path) -> list[TokenUsage]:
+                batch: list[TokenUsage] = []
+                if not path.exists():
+                    return batch
+                try:
+                    if path.suffix == ".gz":
+                        f_handle = gzip.open(path, "rt", encoding="utf-8")
+                    else:
+                        f_handle = open(path, "r", encoding="utf-8")
+                    with f_handle as f:
+                        for line in f:
+                            line = line.strip()
+                            if line:
+                                try:
+                                    data = json.loads(line)
+                                    batch.append(TokenUsage.from_dict(data))
+                                except json.JSONDecodeError:
+                                    pass
+                except OSError:
+                    logger.warning(f"[Token统计] 读取归档失败: {path}")
+                return batch
+
             def sync_read() -> list[TokenUsage]:
-                batch = []
-                if not self.file_path.exists():
-                    return []
-                with open(self.file_path, mode="r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            try:
-                                data = json.loads(line)
-                                batch.append(TokenUsage.from_dict(data))
-                            except json.JSONDecodeError:
-                                pass
+                batch: list[TokenUsage] = []
+                for archive in self._list_archives():
+                    batch.extend(read_records_from_path(archive))
+                batch.extend(read_records_from_path(self.file_path))
                 return batch
 
             records = await asyncio.to_thread(sync_read)
