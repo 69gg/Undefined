@@ -55,6 +55,9 @@ class TokenUsageStorage:
             file_path = Path("data/token_usage.jsonl")
 
         self.file_path: Path = file_path
+        self.archive_dir: Path = (
+            self.file_path.parent / f"{self.file_path.stem}_archives"
+        )
         self.lock_file_path: Path = self.file_path.with_name(
             f"{self.file_path.name}.lock"
         )
@@ -65,6 +68,7 @@ class TokenUsageStorage:
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.file_path.exists():
             self.file_path.touch()
+        self.archive_dir.mkdir(parents=True, exist_ok=True)
         if not self.lock_file_path.exists():
             self.lock_file_path.touch()
 
@@ -82,7 +86,7 @@ class TokenUsageStorage:
     def _list_archives(self) -> list[Path]:
         pattern = f"{self._archive_prefix()}.*.jsonl.gz"
         candidates = sorted(
-            self.file_path.parent.glob(pattern),
+            self.archive_dir.glob(pattern),
             key=lambda path: path.name,
         )
         return [path for path in candidates if not path.name.endswith(".tmp")]
@@ -90,10 +94,10 @@ class TokenUsageStorage:
     def _build_archive_path(self) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         base_name = f"{self._archive_prefix()}.{timestamp}.jsonl.gz"
-        candidate = self.file_path.parent / base_name
+        candidate = self.archive_dir / base_name
         index = 1
         while candidate.exists():
-            candidate = self.file_path.parent / (
+            candidate = self.archive_dir / (
                 f"{self._archive_prefix()}.{timestamp}-{index}.jsonl.gz"
             )
             index += 1
@@ -103,11 +107,18 @@ class TokenUsageStorage:
         self, max_archives: Optional[int], max_total_bytes: Optional[int]
     ) -> None:
         archives = self._list_archives()
+        logger.info(
+            "[Token统计] 归档清理检查: count=%s max_archives=%s max_total_bytes=%s",
+            len(archives),
+            max_archives if max_archives is not None else "unlimited",
+            max_total_bytes if max_total_bytes is not None else "unlimited",
+        )
         if max_archives is not None and max_archives > 0:
             if len(archives) > max_archives:
                 for path in archives[: len(archives) - max_archives]:
                     try:
                         path.unlink()
+                        logger.info("[Token统计] 已删除归档(超数量): %s", path)
                     except Exception:
                         logger.warning(f"[Token统计] 无法删除归档: {path}")
                 archives = self._list_archives()
@@ -127,6 +138,11 @@ class TokenUsageStorage:
                     try:
                         path.unlink()
                         total -= size
+                        logger.info(
+                            "[Token统计] 已删除归档(超总量): %s size=%s",
+                            path,
+                            size,
+                        )
                     except Exception:
                         logger.warning(f"[Token统计] 无法删除归档: {path}")
                     if total <= max_total_bytes:
@@ -158,19 +174,39 @@ class TokenUsageStorage:
             self._ensure_file_exists()
             did_compact = False
             self.lock_file_path.parent.mkdir(parents=True, exist_ok=True)
+            logger.info(
+                "[Token统计] 归档检查: file=%s archive_dir=%s threshold_bytes=%s max_archives=%s max_total_bytes=%s",
+                self.file_path,
+                self.archive_dir,
+                max_size_bytes,
+                max_archives if max_archives is not None else "unlimited",
+                max_total_bytes if max_total_bytes is not None else "unlimited",
+            )
             with open(self.lock_file_path, "a", encoding="utf-8") as lock_handle:
                 fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
                 try:
                     if not self.file_path.exists():
+                        logger.info("[Token统计] 归档跳过: 文件不存在")
                         return False
                     try:
                         size = self.file_path.stat().st_size
                     except FileNotFoundError:
+                        logger.info("[Token统计] 归档跳过: 文件状态不可用")
                         return False
+                    logger.info(
+                        "[Token统计] 当前文件大小: %s bytes (threshold=%s)",
+                        size,
+                        max_size_bytes,
+                    )
                     if size >= max_size_bytes and size > 0:
                         archive_path = self._build_archive_path()
                         tmp_path = archive_path.with_suffix(
                             archive_path.suffix + ".tmp"
+                        )
+                        logger.info(
+                            "[Token统计] 开始归档: %s -> %s",
+                            self.file_path,
+                            archive_path,
                         )
                         with open(self.file_path, "rb") as src:
                             with gzip.open(tmp_path, "wb") as dst:
@@ -179,6 +215,9 @@ class TokenUsageStorage:
                         with open(self.file_path, "w", encoding="utf-8"):
                             pass
                         did_compact = True
+                        logger.info("[Token统计] 归档完成: %s", archive_path)
+                    else:
+                        logger.info("[Token统计] 归档未触发: 文件未超过阈值")
                     self._prune_archives(max_archives, max_total_bytes)
                 finally:
                     fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)

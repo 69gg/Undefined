@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 import os
 import sys
 from logging.handlers import RotatingFileHandler
@@ -115,10 +116,22 @@ async def main() -> None:
     logger = logging.getLogger(__name__)
     logger.info("[启动] 正在初始化 Undefined 机器人...")
 
+    start_time = time.perf_counter()
     try:
-        await TokenUsageStorage().compact_if_needed()
+        did_compact = await TokenUsageStorage().compact_if_needed()
+        elapsed = time.perf_counter() - start_time
+        logger.info(
+            "[Token统计] 启动归档检查完成: compacted=%s elapsed=%.3fs",
+            did_compact,
+            elapsed,
+        )
     except Exception as exc:
-        logger.warning(f"[Token统计] 启动时归档检查失败: {exc}")
+        elapsed = time.perf_counter() - start_time
+        logger.warning(
+            "[Token统计] 启动时归档检查失败: %s elapsed=%.3fs",
+            exc,
+            elapsed,
+        )
 
     try:
         config = get_config()
