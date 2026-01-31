@@ -384,20 +384,27 @@ class AIClient:
                     call_id = tool_call.get("id", "")
                     function = tool_call.get("function", {})
                     function_name = function.get("name", "")
-                    function_args_str = function.get("arguments", "{}")
+                    raw_args = function.get("arguments")
 
                     logger.info(f"[工具准备] 准备调用: {function_name} (ID={call_id})")
                     logger.debug(
-                        f"[工具参数] {function_name} 参数: {redact_string(function_args_str)}"
+                        f"[工具参数] {function_name} 参数: {redact_string(str(raw_args))}"
                     )
 
-                    try:
-                        function_args: dict[str, Any] = json.loads(function_args_str)
-                    except json.JSONDecodeError as exc:
-                        logger.error(
-                            f"[工具错误] 参数解析失败: {function_args_str}, 错误: {exc}"
-                        )
+                    if isinstance(raw_args, dict):
+                        function_args = raw_args
+                    elif raw_args is None:
                         function_args = {}
+                    elif isinstance(raw_args, str) and not raw_args.strip():
+                        function_args = {}
+                    else:
+                        try:
+                            function_args = json.loads(raw_args)
+                        except json.JSONDecodeError as exc:
+                            logger.error(
+                                f"[工具错误] 参数解析失败: {raw_args}, 错误: {exc}"
+                            )
+                            function_args = {}
 
                     if not isinstance(function_args, dict):
                         function_args = {}
