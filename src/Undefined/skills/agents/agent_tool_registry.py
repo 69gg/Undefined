@@ -77,13 +77,23 @@ class AgentToolRegistry(BaseRegistry):
             ):
                 registry = ai_client.get_active_agent_mcp_registry(agent_name)
                 if registry:
+                    logger.info(
+                        "[agent_tool] %s 未命中本地工具，回退到 active MCP",
+                        tool_name,
+                    )
                     result = await registry.execute_tool(tool_name, args, context)
                     return str(result)
 
         if not item and self._mcp_registry:
+            logger.info(
+                "[agent_tool] %s 未命中本地工具，回退到 agent MCP",
+                tool_name,
+            )
             result = await self._mcp_registry.execute_tool(tool_name, args, context)
             return str(result)
 
+        if item:
+            logger.debug("[agent_tool] %s 命中本地工具", tool_name)
         return await self.execute(tool_name, args, context)
 
     async def close_mcp_tools(self) -> None:

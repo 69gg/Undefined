@@ -140,7 +140,7 @@ skills/
 
 3.  **使用 Context 注入外部依赖**:
     -   如果需要使用外部项目的功能（如数据库连接、特殊的渲染函数），通过 `context` 参数传入。
-    -   主程序（`handlers.py` 或 `ai.py`）负责在调用时将这些依赖放入 `context`。
+-   主程序（`handlers.py` 或 `ai/` 运行时）负责在调用时将这些依赖放入 `context`。
 
     ```python
     # 错误的做法

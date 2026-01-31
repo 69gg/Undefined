@@ -60,6 +60,12 @@ class CommandDispatcher:
         cmd_name = match.group(1).lower()
         args_str = match.group(2).strip()
 
+        logger.debug(
+            "[Command] parse text_len=%s cmd=%s args=%s",
+            len(text),
+            cmd_name,
+            args_str,
+        )
         return {
             "name": cmd_name,
             "args": args_str.split() if args_str else [],
@@ -158,8 +164,9 @@ class CommandDispatcher:
                 return
 
             # 生成图表
-            img_dir = Path.cwd() / "img"
-            img_dir.mkdir(exist_ok=True)
+            from Undefined.utils.paths import RENDER_CACHE_DIR, ensure_dir
+
+            img_dir = ensure_dir(RENDER_CACHE_DIR)
 
             # 1. 折线图：时间趋势
             await self._generate_line_chart(summary, img_dir, days)
@@ -266,6 +273,11 @@ class CommandDispatcher:
 
             # 发送合并转发消息
             await self.onebot.send_forward_msg(group_id, forward_messages)
+
+            from Undefined.utils.cache import cleanup_cache_dir
+            from Undefined.utils.paths import RENDER_CACHE_DIR
+
+            cleanup_cache_dir(RENDER_CACHE_DIR)
 
         except Exception as e:
             logger.exception(f"[Stats] 生成统计图表失败: {e}")
@@ -526,6 +538,13 @@ class CommandDispatcher:
         cmd_args = command["args"]
 
         logger.info(f"[Command] 执行命令: /{cmd_name} | 参数: {cmd_args}")
+        logger.debug(
+            "[Command] dispatch group=%s sender=%s cmd=%s args_count=%s",
+            group_id,
+            sender_id,
+            cmd_name,
+            len(cmd_args),
+        )
 
         try:
             # 公开命令

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 import os
 import sys
 from logging.handlers import RotatingFileHandler
@@ -20,6 +21,31 @@ from Undefined.memory import MemoryStorage
 from Undefined.scheduled_task_storage import ScheduledTaskStorage
 from Undefined.end_summary_storage import EndSummaryStorage
 from Undefined.onebot import OneBotClient
+from Undefined.token_usage_storage import TokenUsageStorage
+from Undefined.utils.paths import (
+    CACHE_DIR,
+    DATA_DIR,
+    DOWNLOAD_CACHE_DIR,
+    IMAGE_CACHE_DIR,
+    RENDER_CACHE_DIR,
+    ensure_dir,
+)
+
+
+def ensure_runtime_dirs() -> None:
+    """确保运行时目录存在"""
+    runtime_dirs = [
+        DATA_DIR,
+        Path("data/history"),
+        Path("data/faq"),
+        Path("data/scheduler_context"),
+        CACHE_DIR,
+        RENDER_CACHE_DIR,
+        IMAGE_CACHE_DIR,
+        DOWNLOAD_CACHE_DIR,
+    ]
+    for path in runtime_dirs:
+        ensure_dir(path)
 
 
 def setup_logging() -> None:
@@ -76,13 +102,36 @@ def setup_logging() -> None:
         f"[bold cyan][启动][/bold cyan] 日志系统初始化完成。级别: [yellow]{log_level}[/yellow], 文件: [green]{log_file_path}[/green] "
         f"(最大 [magenta]{log_max_size // 1024 // 1024}[/magenta]MB, 保留 [magenta]{log_backup_count}[/magenta] 份)"
     )
+    logging.debug(
+        "[日志] handlers=%s level=%s",
+        [type(h).__name__ for h in root_logger.handlers],
+        log_level,
+    )
 
 
 async def main() -> None:
     """主函数"""
     setup_logging()
+    ensure_runtime_dirs()
     logger = logging.getLogger(__name__)
     logger.info("[启动] 正在初始化 Undefined 机器人...")
+
+    start_time = time.perf_counter()
+    try:
+        did_compact = await TokenUsageStorage().compact_if_needed()
+        elapsed = time.perf_counter() - start_time
+        logger.info(
+            "[Token统计] 启动归档检查完成: compacted=%s elapsed=%.3fs",
+            did_compact,
+            elapsed,
+        )
+    except Exception as exc:
+        elapsed = time.perf_counter() - start_time
+        logger.warning(
+            "[Token统计] 启动时归档检查失败: %s elapsed=%.3fs",
+            exc,
+            elapsed,
+        )
 
     try:
         config = get_config()

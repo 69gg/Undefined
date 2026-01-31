@@ -83,8 +83,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     local_image_paths: list[str] = []
 
     # 创建图片保存目录
-    img_dir = Path.cwd() / "img"
-    img_dir.mkdir(exist_ok=True)
+    from Undefined.utils.paths import IMAGE_CACHE_DIR, ensure_dir
+
+    img_dir = ensure_dir(IMAGE_CACHE_DIR)
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         for i in range(count):

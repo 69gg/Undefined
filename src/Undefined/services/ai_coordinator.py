@@ -51,6 +51,13 @@ class AICoordinator:
     ) -> None:
         """自动回复处理：根据上下文决定是否回复"""
         is_at_bot = is_poke or self._is_at_bot(message_content)
+        logger.debug(
+            "[自动回复] group=%s sender=%s at_bot=%s text_len=%s",
+            group_id,
+            sender_id,
+            is_at_bot,
+            len(text),
+        )
 
         if sender_id != self.config.superadmin_qq:
             logger.debug(f"[Security] 注入检测: group={group_id}, user={sender_id}")
@@ -85,6 +92,12 @@ class AICoordinator:
             current_time,
             text,
         )
+        logger.debug(
+            "[自动回复] full_question_len=%s group=%s sender=%s",
+            len(full_question),
+            group_id,
+            sender_id,
+        )
 
         request_data = {
             "type": "auto_reply",
@@ -115,6 +128,7 @@ class AICoordinator:
         sender_name: str = "未知用户",
     ) -> None:
         """私聊回复处理"""
+        logger.debug("[私聊回复] user=%s text_len=%s", user_id, len(text))
         if user_id != self.config.superadmin_qq:
             if await self.security.detect_injection(text, message_content):
                 logger.warning(f"[Security] 私聊注入攻击: user_id={user_id}")
@@ -141,6 +155,11 @@ class AICoordinator:
             "text": text,
             "full_question": full_question,
         }
+        logger.debug(
+            "[私聊回复] full_question_len=%s user=%s",
+            len(full_question),
+            user_id,
+        )
 
         if user_id == self.config.superadmin_qq:
             await self.queue_manager.add_superadmin_request(
@@ -154,6 +173,7 @@ class AICoordinator:
     async def execute_reply(self, request: dict[str, Any]) -> None:
         """执行回复请求（由 QueueManager 调用）"""
         req_type = request.get("type", "unknown")
+        logger.debug("[执行请求] type=%s keys=%s", req_type, list(request.keys()))
         if req_type == "auto_reply":
             await self._execute_auto_reply(request)
         elif req_type == "private_reply":
@@ -210,6 +230,11 @@ class AICoordinator:
             for key, value in resources.items():
                 if value is not None:
                     ctx.set_resource(key, value)
+            logger.debug(
+                "[上下文资源] group=%s keys=%s",
+                group_id,
+                ", ".join(sorted(resources.keys())),
+            )
 
             try:
                 # 保留旧方式（向后兼容）
@@ -286,6 +311,11 @@ class AICoordinator:
             for key, value in resources.items():
                 if value is not None:
                     ctx.set_resource(key, value)
+            logger.debug(
+                "[上下文资源] private user=%s keys=%s",
+                user_id,
+                ", ".join(sorted(resources.keys())),
+            )
 
             try:
                 # 保留旧方式（向后兼容）

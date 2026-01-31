@@ -11,6 +11,8 @@ import logging
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, cast
 
+from Undefined.utils.logging import format_log_payload, log_debug_json
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,6 +51,8 @@ class MCPToolRegistry:
             with open(self.config_path, "r", encoding="utf-8") as f:
                 config = json.load(f)
             logger.info(f"已加载 MCP 配置: {self.config_path}")
+            if logger.isEnabledFor(logging.DEBUG):
+                log_debug_json(logger, "[MCP配置]", config)
             return cast(Dict[str, Any], config)
         except json.JSONDecodeError as e:
             logger.error(f"MCP 配置文件格式错误: {e}")
@@ -79,6 +83,8 @@ class MCPToolRegistry:
 
         logger.info(f"开始初始化 {len(mcp_servers)} 个 MCP 服务器...")
         self._mcp_servers = mcp_servers
+        if logger.isEnabledFor(logging.DEBUG):
+            log_debug_json(logger, "[MCP服务器列表]", list(mcp_servers.keys()))
 
         try:
             from fastmcp import Client
@@ -92,6 +98,8 @@ class MCPToolRegistry:
                 return
 
             tools = await self._mcp_client.list_tools()
+            if logger.isEnabledFor(logging.DEBUG):
+                log_debug_json(logger, "[MCP工具列表]", [t.name for t in tools])
             for tool in tools:
                 await self._register_tool(tool)
 
@@ -147,6 +155,12 @@ class MCPToolRegistry:
 
             async def handler(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 try:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        log_debug_json(
+                            logger,
+                            f"[MCP调用参数] {full_tool_name}",
+                            args,
+                        )
                     result = await self._mcp_client.call_tool(original_tool_name, args)
 
                     if hasattr(result, "content") and result.content:
@@ -182,17 +196,49 @@ class MCPToolRegistry:
     ) -> str:
         handler = self._tools_handlers.get(tool_name)
         if not handler:
+            if logger.isEnabledFor(logging.INFO):
+                logger.info(
+                    "[MCP工具调用] %s 参数=%s",
+                    tool_name,
+                    format_log_payload(args),
+                )
+                logger.info(
+                    "[MCP工具返回] %s 结果=%s",
+                    tool_name,
+                    format_log_payload(f"未找到 MCP 工具: {tool_name}"),
+                )
             return f"未找到 MCP 工具: {tool_name}"
 
         try:
+            if logger.isEnabledFor(logging.INFO):
+                logger.info(
+                    "[MCP工具调用] %s 参数=%s",
+                    tool_name,
+                    format_log_payload(args),
+                )
             start_time = asyncio.get_event_loop().time()
             result = await handler(args, context)
             duration = asyncio.get_event_loop().time() - start_time
             logger.info(f"[MCP工具执行] {tool_name} 耗时={duration:.4f}s")
+            if logger.isEnabledFor(logging.DEBUG):
+                log_debug_json(logger, f"[MCP工具结果] {tool_name}", result)
+            if logger.isEnabledFor(logging.INFO):
+                logger.info(
+                    "[MCP工具返回] %s 结果=%s",
+                    tool_name,
+                    format_log_payload(result),
+                )
             return str(result)
         except Exception as e:
             logger.exception(f"[MCP工具异常] 执行工具 {tool_name} 时出错")
-            return f"执行 MCP 工具 {tool_name} 时出错: {str(e)}"
+            error_text = f"执行 MCP 工具 {tool_name} 时出错: {str(e)}"
+            if logger.isEnabledFor(logging.INFO):
+                logger.info(
+                    "[MCP工具返回] %s 结果=%s",
+                    tool_name,
+                    format_log_payload(error_text),
+                )
+            return error_text
 
     async def close(self) -> None:
         logger.info("正在关闭 MCP 客户端连接...")

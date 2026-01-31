@@ -17,7 +17,7 @@
       </p>
     </td>
     <td width="30%">
-      <img src="https://raw.githubusercontent.com/69gg/Undefined/main/data/img/head.jpg" width="100%" alt="Undefined" />
+      <img src="https://raw.githubusercontent.com/69gg/Undefined/main/img/head.jpg" width="100%" alt="Undefined" />
     </td>
   </tr>
 </table>
@@ -134,7 +134,8 @@ uv run -m Undefined
   - `VISION_MODEL_*`：视觉识别模型（负责识图）
   - `AGENT_MODEL_*`：Agent 专用模型（建议使用推理能力更强的模型）
   - `SECURITY_MODEL_*`：安全审核模型（负责防注入检测）
-- **功能配置**：`LOG_LEVEL`, `LOG_FILE_PATH`, `LOG_MAX_SIZE_MB`, `LOG_BACKUP_COUNT`
+- **功能配置**：`LOG_LEVEL`, `LOG_FILE_PATH`, `LOG_MAX_SIZE_MB`, `LOG_BACKUP_COUNT`, `LOG_THINKING`
+- **Token 统计归档**：`TOKEN_USAGE_MAX_SIZE_MB`（默认 5MB，<=0 禁用）, `TOKEN_USAGE_MAX_ARCHIVES`（最大归档数）, `TOKEN_USAGE_MAX_TOTAL_MB`（归档总大小上限，0 禁用）。归档目录为 `data/token_usage_archives/`，启动时自动检查并压缩。
 - **Skills 热重载**：`SKILLS_HOT_RELOAD`, `SKILLS_HOT_RELOAD_INTERVAL`, `SKILLS_HOT_RELOAD_DEBOUNCE`
 - **代理设置（可选）**：`USE_PROXY`, `http_proxy`, `https_proxy`（兼容 `HTTP_PROXY/HTTPS_PROXY`）
 
@@ -231,30 +232,39 @@ graph TB
 
     %% AI 核心与大脑
     subgraph Brain [AI 核心能力层]
-        AIClient[AIClient 统一接口]
-        
+        subgraph AIRuntime ["AI Runtime (src/Undefined/ai)"]
+            AIClient[AIClient 统一接口]
+            PromptBuilder[PromptBuilder 构建提示词]
+            ToolManager[ToolManager 工具调度]
+            ModelRequester[ModelRequester API 调用]
+            MultimodalAnalyzer[MultimodalAnalyzer 多模态]
+            SummaryService[SummaryService 总结/标题]
+            TokenCounter[TokenCounter Token 统计]
+        end
+
         subgraph Context [上下文管理]
             HistoryManager[MessageHistoryManager]
             MemoryStorage[Memory 长期记忆]
+            EndSummary[EndSummaryStorage]
         end
-        
+
         subgraph SkillsSystem [Skills 技能系统]
             ToolRegistry[ToolRegistry 工具注册]
             AgentRegistry[AgentRegistry 代理注册]
-            
+
             subgraph AtomicTools [基础工具 Tools]
                 T_End[end 结束对话]
                 T_Python[python_interpreter]
                 T_Time[get_current_time]
             end
-            
+
             subgraph IntelligentAgents [智能体 Agents]
                 A_Web[WebAgent 网络搜索]
                 A_Code[CodeAnalysisAgent 代码分析]
                 A_Info[InfoAgent 信息查询]
                 A_Social[SocialAgent 社交互动]
             end
-            
+
             subgraph Extensions [扩展]
                 MCP_Client[MCP Client]
                 Ext_MCP[外部 MCP Server]
@@ -286,9 +296,20 @@ graph TB
     ModelQueues -->|轮询取值| DispatcherLoop
     
     DispatcherLoop -->|异步执行| AIClient
-    
-    AIClient <-->|API Request| LLM_API
-    AIClient <-->|调用| ToolRegistry
+
+    AIClient --> PromptBuilder
+    AIClient --> ToolManager
+    AIClient --> ModelRequester
+    AIClient --> MultimodalAnalyzer
+    AIClient --> SummaryService
+    AIClient --> TokenCounter
+
+    PromptBuilder --> HistoryManager
+    PromptBuilder --> MemoryStorage
+    PromptBuilder --> EndSummary
+
+    ModelRequester <-->|API Request| LLM_API
+    ToolManager <-->|调用| ToolRegistry
     ToolRegistry --> SkillsSystem
     MCP_Client <-->|Protocol| Ext_MCP
     
@@ -389,11 +410,12 @@ Undefined 欢迎开发者参与共建！
 *   **目录结构**:
     ```
     src/Undefined/
+    ├── ai/            # AI Runtime (client、prompt、tooling、summary、多模态)
     ├── skills/        # 技能插件核心目录
     ├── services/      # 核心服务 (Queue, Command, Security)
     ├── utils/         # 通用工具
-    ├── ai.py          # AI 交互层
-    └── handlers.py    # 消息处理层
+    ├── handlers.py    # 消息处理层
+    └── onebot.py      # OneBot WebSocket 客户端
     ```
 
 *   **开发指南**: 请参考 [src/Undefined/skills/README.md](src/Undefined/skills/README.md) 了解如何编写新的工具和 Agent。

@@ -10,6 +10,8 @@ from datetime import datetime
 import websockets
 from websockets.asyncio.client import ClientConnection
 
+from Undefined.utils.logging import log_debug_json, redact_string, sanitize_data
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,8 +43,9 @@ class OneBotClient:
             separator = "&" if "?" in url else "?"
             url = f"{url}{separator}access_token={self.token}"
 
+        safe_ws_url = redact_string(self.ws_url)
         logger.info(
-            f"[bold cyan][WebSocket][/bold cyan] 正在连接到 [blue]{self.ws_url}[/blue]..."
+            f"[bold cyan][WebSocket][/bold cyan] 正在连接到 [blue]{safe_ws_url}[/blue]..."
         )
 
         # 同时在请求头中传递 token（兼容不同实现）
@@ -88,9 +91,12 @@ class OneBotClient:
             "echo": echo,
         }
 
+        safe_params = sanitize_data(params or {})
         logger.debug(
-            f"[bold yellow][API请求][/bold yellow] [green]{action}[/green] (ID=[magenta]{echo}[/magenta]) | 参数: {params}"
+            f"[bold yellow][API请求][/bold yellow] [green]{action}[/green] (ID=[magenta]{echo}[/magenta]) | 参数: {safe_params}"
         )
+        if logger.isEnabledFor(logging.DEBUG):
+            log_debug_json(logger, "[OneBot请求体]", request)
 
         # 创建 Future 等待响应
         future: asyncio.Future[dict[str, Any]] = asyncio.Future()
@@ -117,6 +123,8 @@ class OneBotClient:
             logger.info(
                 f"[bold green][API成功][/bold green] [green]{action}[/green] (ID=[magenta]{echo}[/magenta]) | 耗时=[magenta]{duration:.2f}s[/magenta]"
             )
+            if logger.isEnabledFor(logging.DEBUG):
+                log_debug_json(logger, "[OneBot响应体]", response)
             return response
         except asyncio.TimeoutError:
             duration = time.perf_counter() - start_time
@@ -436,6 +444,8 @@ class OneBotClient:
 
     async def _dispatch_message(self, data: dict[str, Any]) -> None:
         """分发消息（API响应同步处理，事件异步处理）"""
+        if logger.isEnabledFor(logging.DEBUG):
+            log_debug_json(logger, "[WebSocket消息]", data)
         # 检查是否是 API 响应（需要立即处理）
         echo = data.get("echo")
         if echo is not None:

@@ -1,6 +1,5 @@
 from typing import Any, Dict
 import logging
-from pathlib import Path
 import uuid
 import matplotlib.pyplot as plt
 import matplotlib
@@ -23,9 +22,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "消息类型必须是 group 或 private"
 
     try:
+        from Undefined.utils.cache import cleanup_cache_dir
+        from Undefined.utils.paths import RENDER_CACHE_DIR, ensure_dir
+
         filename = f"render_{uuid.uuid4().hex[:16]}.png"
-        filepath = Path.cwd() / "img" / filename
-        filepath.parent.mkdir(exist_ok=True)
+        filepath = ensure_dir(RENDER_CACHE_DIR) / filename
 
         matplotlib.use("Agg")
 
@@ -62,10 +63,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             elif message_type == "private":
                 await sender.send_private_message(int(target_id), message)
 
+            cleanup_cache_dir(RENDER_CACHE_DIR)
             return f"LaTeX 图片已渲染并发送到 {message_type} {target_id}"
 
         elif send_image_callback:
             await send_image_callback(target_id, message_type, str(filepath))
+            cleanup_cache_dir(RENDER_CACHE_DIR)
             return f"LaTeX 图片已渲染并发送到 {message_type} {target_id}"
         else:
             return "发送图片回调未设置"
