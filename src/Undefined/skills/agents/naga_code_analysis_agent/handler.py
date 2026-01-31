@@ -1,11 +1,11 @@
 from typing import Any, Dict
 from pathlib import Path
-import json
 import asyncio
 import aiofiles
 import logging
 
 from Undefined.skills.agents.agent_tool_registry import AgentToolRegistry
+from Undefined.utils.tool_calls import parse_tool_arguments
 
 logger = logging.getLogger(__name__)
 
@@ -94,14 +94,13 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 call_id: str = tool_call.get("id", "")
                 function: dict[str, Any] = tool_call.get("function", {})
                 function_name: str = function.get("name", "")
-                function_args_str: str = function.get("arguments", "{}")
+                raw_args = function.get("arguments")
 
                 logger.info(f"Agent 正在准备工具: {function_name}")
 
-                try:
-                    function_args: dict[str, Any] = json.loads(function_args_str)
-                except json.JSONDecodeError:
-                    function_args = {}
+                function_args = parse_tool_arguments(
+                    raw_args, logger=logger, tool_name=function_name
+                )
 
                 tool_call_ids.append(call_id)
                 tool_tasks.append(

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-import json
 import logging
 import os
 from collections import deque
@@ -32,6 +31,7 @@ from Undefined.skills.agents.intro_generator import (
 from Undefined.skills.tools import ToolRegistry
 from Undefined.token_usage_storage import TokenUsageStorage
 from Undefined.utils.logging import log_debug_json, redact_string
+from Undefined.utils.tool_calls import parse_tool_arguments
 
 logger = logging.getLogger(__name__)
 
@@ -391,20 +391,11 @@ class AIClient:
                         f"[工具参数] {function_name} 参数: {redact_string(str(raw_args))}"
                     )
 
-                    if isinstance(raw_args, dict):
-                        function_args = raw_args
-                    elif raw_args is None:
-                        function_args = {}
-                    elif isinstance(raw_args, str) and not raw_args.strip():
-                        function_args = {}
-                    else:
-                        try:
-                            function_args = json.loads(raw_args)
-                        except json.JSONDecodeError as exc:
-                            logger.error(
-                                f"[工具错误] 参数解析失败: {raw_args}, 错误: {exc}"
-                            )
-                            function_args = {}
+                    function_args = parse_tool_arguments(
+                        raw_args,
+                        logger=logger,
+                        tool_name=function_name,
+                    )
 
                     if not isinstance(function_args, dict):
                         function_args = {}

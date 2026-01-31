@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from Undefined.utils.logging import format_log_payload, log_debug_json
+from Undefined.utils.tool_calls import parse_tool_arguments
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +247,7 @@ class BaseRegistry:
     async def execute(
         self, name: str, args: Dict[str, Any], context: Dict[str, Any]
     ) -> str:
+        args = parse_tool_arguments(args, logger=logger, tool_name=name)
         async with self._items_lock:
             item = self._items.get(name)
 
