@@ -9,9 +9,18 @@ logger = logging.getLogger(__name__)
 
 
 class AgentRegistry(BaseRegistry):
-    """Agent 注册表，自动发现和加载 agents"""
+    """智能体(Agent)注册中心
 
-    def __init__(self, agents_dir: str | Path | None = None):
+    自动发现、加载并管理具有独立逻辑和工具集的 Agent 项。
+    支持简介(intro)的自动提取和热重载。
+    """
+
+    def __init__(self, agents_dir: str | Path | None = None) -> None:
+        """初始化 Agent 注册表
+
+        参数:
+            agents_dir: Agent 存放的根目录
+        """
         if agents_dir is None:
             agents_path = Path(__file__).parent
         else:
@@ -25,6 +34,10 @@ class AgentRegistry(BaseRegistry):
         self.load_agents()
 
     def load_agents(self) -> None:
+        """执行完整的 Agent 加载流程
+
+        包含项目发现、简介注入以及加载汇总日志记录。
+        """
         self.load_items()
         self._apply_agent_intros()
         self._log_agents_summary()
@@ -40,9 +53,14 @@ class AgentRegistry(BaseRegistry):
             logger.info("=" * 60)
 
     def get_agents_schema(self) -> List[Dict[str, Any]]:
+        """获取所有 Agent 的架构定义列表"""
         return self.get_schema()
 
     def _apply_agent_intros(self) -> None:
+        """为每个已加载的 Agent 注入自述简介(Description)
+
+        优先从 intro.md 或生成的 md 文件中读取，否则回退到 config 里的描述。
+        """
         for name, item in self._items.items():
             agent_dir = self.base_dir / name
             if not agent_dir.exists():
@@ -60,4 +78,14 @@ class AgentRegistry(BaseRegistry):
     async def execute_agent(
         self, agent_name: str, args: Dict[str, Any], context: Dict[str, Any]
     ) -> str:
+        """调用并执行特定的 Agent
+
+        参数:
+            agent_name: Agent 名称
+            args: 调用参数
+            context: 执行上下文
+
+        返回:
+            Agent 执行结果文本
+        """
         return await self.execute(agent_name, args, context)

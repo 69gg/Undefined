@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """在网络上搜索指定小说及其相关链接信息"""
     name = args.get("name")
     href = args.get("href")
     num = args.get("num")

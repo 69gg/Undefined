@@ -31,6 +31,15 @@ class SummaryService:
         self._merge_prompt_path = merge_prompt_path
 
     async def summarize_chat(self, messages: str, context: str = "") -> str:
+        """对聊天记录进行总结
+
+        参数:
+            messages: 待总结的聊天记录文本
+            context: 前文摘要背景信息 (可选)
+
+        返回:
+            总结出的文本内容
+        """
         async with aiofiles.open(
             self._summarize_prompt_path, "r", encoding="utf-8"
         ) as f:
@@ -65,6 +74,14 @@ class SummaryService:
             return f"总结失败: {exc}"
 
     async def merge_summaries(self, summaries: list[str]) -> str:
+        """将多个分段总结整合为一个最终总结
+
+        参数:
+            summaries: 分段总结列表
+
+        返回:
+            合并后的最终总结
+        """
         if len(summaries) == 1:
             return summaries[0]
 
@@ -99,6 +116,15 @@ class SummaryService:
             return "\n\n---\n\n".join(summaries)
 
     def split_messages_by_tokens(self, messages: str, max_tokens: int) -> list[str]:
+        """按 token 限制切分长消息
+
+        参数:
+            messages: 原始消息文本
+            max_tokens: 最大允许的 token 数
+
+        返回:
+            切分后的消息段列表
+        """
         effective_max = max_tokens - 500
         lines = messages.split("\n")
         chunks: list[str] = []
@@ -121,6 +147,14 @@ class SummaryService:
         return chunks
 
     async def generate_title(self, summary: str) -> str:
+        """根据总结内容生成标题
+
+        参数:
+            summary: 总结文本
+
+        返回:
+            生成的简短标题
+        """
         prompt = (
             "请根据以下 Bug 修复分析报告，生成一个简短、准确的标题（不超过 20 字），用于 FAQ 索引。\n"
             "只返回标题文本，不要包含任何前缀或引号。\n\n"

@@ -42,6 +42,16 @@ class CommandDispatcher:
         onebot: OneBotClient,
         security: SecurityService,
     ) -> None:
+        """初始化命令分发器
+
+        参数:
+            config: 全局配置实例
+            sender: 消息发送助手
+            ai: AI 客户端(用于归纳和标题生成)
+            faq_storage: FAQ 存储管理器
+            onebot: OneBot HTTP API 客户端
+            security: 安全审计与限流服务
+        """
         self.config = config
         self.sender = sender
         self.ai = ai
@@ -51,7 +61,14 @@ class CommandDispatcher:
         self._token_usage_storage = TokenUsageStorage()
 
     def parse_command(self, text: str) -> Optional[dict[str, Any]]:
-        """解析命令"""
+        """解析斜杠命令字符串
+
+        参数:
+            text: 原始文本内容
+
+        返回:
+            包含命令名(name)和参数列表(args)的字典，解析失败则返回 None
+        """
         clean_text = re.sub(r"\[@\s*\d+\]", "", text).strip()
         match = re.match(r"/(\w+)\s*(.*)", clean_text)
         if not match:
@@ -109,27 +126,53 @@ class CommandDispatcher:
             return 7
 
     async def _handle_stats(self, group_id: int, args: list[str]) -> None:
-        """处理 /stats 命令，生成 token 使用统计图表
-
-        参数:
-            group_id: 群组 ID
-            args: 命令参数（时间范围，如 "7d", "1w", "30d"）
-        """
-        # 检查 matplotlib 是否可用
+        """处理 /stats 命令，生成 token 使用统计图表"""
+        # 1. 基础环境与参数检查
         if not _MATPLOTLIB_AVAILABLE:
             await self.sender.send_group_message(
                 group_id, "❌ 缺少必要的库，无法生成图表。请安装 matplotlib 和 pandas。"
             )
             return
 
-        # 解析时间范围
-        days = 7
-        if args and args[0] != "--help":
-            days = self._parse_time_range(args[0])
-
-        # 显示帮助信息
         if args and args[0] == "--help":
-            help_text = """📊 /stats 命令帮助
+            await self._handle_stats_help(group_id)
+            return
+
+        days = self._parse_time_range(args[0]) if args else 7
+
+        try:
+            # 2. 获取并验证数据
+            summary = await self._token_usage_storage.get_summary(days=days)
+            if summary["total_calls"] == 0:
+                await self.sender.send_group_message(
+                    group_id, f"📊 最近 {days} 天内无 Token 使用记录。"
+                )
+                return
+
+            # 3. 生成图表文件
+            from Undefined.utils.paths import RENDER_CACHE_DIR, ensure_dir
+
+            img_dir = ensure_dir(RENDER_CACHE_DIR)
+            await self._generate_line_chart(summary, img_dir, days)
+            await self._generate_bar_chart(summary, img_dir)
+            await self._generate_pie_chart(summary, img_dir)
+            await self._generate_stats_table(summary, img_dir)
+
+            # 4. 构建并发送合并转发消息
+            forward_messages = self._build_stats_forward_nodes(summary, img_dir, days)
+            await self.onebot.send_forward_msg(group_id, forward_messages)
+
+            from Undefined.utils.cache import cleanup_cache_dir
+
+            cleanup_cache_dir(RENDER_CACHE_DIR)
+
+        except Exception as e:
+            logger.exception(f"[Stats] 生成统计图表失败: {e}")
+            await self.sender.send_group_message(group_id, f"❌ 生成统计图表失败: {e}")
+
+    async def _handle_stats_help(self, group_id: int) -> None:
+        """发送 stats 命令的帮助信息"""
+        help_text = """📊 /stats 命令帮助
 
 用法：
   /stats [时间范围]
@@ -143,145 +186,44 @@ class CommandDispatcher:
 示例：
   /stats        - 显示最近 7 天的统计
   /stats 30d    - 显示最近 30 天的统计
-  /stats --help - 显示帮助信息
+  /stats --help - 显示帮助信息"""
+        await self.sender.send_group_message(group_id, help_text)
 
-生成的图表包括：
-  • 折线图：token 使用量随时间的变化趋势
-  • 柱状图：不同模型的 token 使用量对比
-  • 饼图：prompt 和 completion token 的比例
-  • 统计表格：调用次数、平均耗时等统计信息"""
-            await self.sender.send_group_message(group_id, help_text)
-            return
+    def _build_stats_forward_nodes(
+        self, summary: dict[str, Any], img_dir: Path, days: int
+    ) -> list[dict[str, Any]]:
+        """构建用于合并转发的统计图表节点列表"""
+        nodes = []
+        bot_qq = str(self.config.bot_qq)
 
-        try:
-            # 获取统计数据
-            summary = await self._token_usage_storage.get_summary(days=days)
-
-            if summary["total_calls"] == 0:
-                await self.sender.send_group_message(
-                    group_id, f"📊 No token usage records in the last {days} days."
-                )
-                return
-
-            # 生成图表
-            from Undefined.utils.paths import RENDER_CACHE_DIR, ensure_dir
-
-            img_dir = ensure_dir(RENDER_CACHE_DIR)
-
-            # 1. 折线图：时间趋势
-            await self._generate_line_chart(summary, img_dir, days)
-
-            # 2. 柱状图：模型对比
-            await self._generate_bar_chart(summary, img_dir)
-
-            # 3. 饼图：输入/输出比例
-            await self._generate_pie_chart(summary, img_dir)
-
-            # 4. 统计表格
-            await self._generate_stats_table(summary, img_dir)
-
-            # 构造合并转发消息
-            forward_messages = []
-
-            # 添加标题消息
-            title_message = f"📊 Token Usage Statistics for Last {days} Days:"
-            forward_messages.append(
+        # 辅助函数：创建消息节点
+        def add_node(content: str) -> None:
+            nodes.append(
                 {
                     "type": "node",
-                    "data": {
-                        "name": "Bot",
-                        "uin": str(self.config.bot_qq),
-                        "content": title_message,
-                    },
+                    "data": {"name": "Bot", "uin": bot_qq, "content": content},
                 }
             )
 
-            # 添加折线图
-            line_chart_path = img_dir / "stats_line_chart.png"
-            if line_chart_path.exists():
-                forward_messages.append(
-                    {
-                        "type": "node",
-                        "data": {
-                            "name": "Bot",
-                            "uin": str(self.config.bot_qq),
-                            "content": f"[CQ:image,file={str(line_chart_path.absolute())}]",
-                        },
-                    }
-                )
+        add_node(f"📊 最近 {days} 天的 Token 使用统计：")
 
-            # 添加柱状图
-            bar_chart_path = img_dir / "stats_bar_chart.png"
-            if bar_chart_path.exists():
-                forward_messages.append(
-                    {
-                        "type": "node",
-                        "data": {
-                            "name": "Bot",
-                            "uin": str(self.config.bot_qq),
-                            "content": f"[CQ:image,file={str(bar_chart_path.absolute())}]",
-                        },
-                    }
-                )
+        # 添加所有生成的图片
+        for img_name in ["line_chart", "bar_chart", "pie_chart", "table"]:
+            img_path = img_dir / f"stats_{img_name}.png"
+            if img_path.exists():
+                add_node(f"[CQ:image,file={str(img_path.absolute())}]")
 
-            # 添加饼图
-            pie_chart_path = img_dir / "stats_pie_chart.png"
-            if pie_chart_path.exists():
-                forward_messages.append(
-                    {
-                        "type": "node",
-                        "data": {
-                            "name": "Bot",
-                            "uin": str(self.config.bot_qq),
-                            "content": f"[CQ:image,file={str(pie_chart_path.absolute())}]",
-                        },
-                    }
-                )
+        # 添加文本摘要
+        summary_text = f"""📈 摘要汇总:
+• 总调用次数: {summary["total_calls"]}
+• 总消耗 Tokens: {summary["total_tokens"]:,}
+  └─ 输入: {summary["prompt_tokens"]:,}
+  └─ 输出: {summary["completion_tokens"]:,}
+• 平均耗时: {summary["avg_duration"]:.2f}s
+• 涉及模型数: {len(summary["models"])}"""
+        add_node(summary_text)
 
-            # 添加统计表格
-            stats_table_path = img_dir / "stats_table.png"
-            if stats_table_path.exists():
-                forward_messages.append(
-                    {
-                        "type": "node",
-                        "data": {
-                            "name": "Bot",
-                            "uin": str(self.config.bot_qq),
-                            "content": f"[CQ:image,file={str(stats_table_path.absolute())}]",
-                        },
-                    }
-                )
-
-            # 添加文本摘要
-            summary_text = f"""📈 Summary:
-• Total Calls: {summary["total_calls"]}
-• Total Tokens: {summary["total_tokens"]:,}
-  └─ Input: {summary["prompt_tokens"]:,}
-  └─ Output: {summary["completion_tokens"]:,}
-• Avg Duration: {summary["avg_duration"]:.2f}s
-• Model Count: {len(summary["models"])}"""
-            forward_messages.append(
-                {
-                    "type": "node",
-                    "data": {
-                        "name": "Bot",
-                        "uin": str(self.config.bot_qq),
-                        "content": summary_text,
-                    },
-                }
-            )
-
-            # 发送合并转发消息
-            await self.onebot.send_forward_msg(group_id, forward_messages)
-
-            from Undefined.utils.cache import cleanup_cache_dir
-            from Undefined.utils.paths import RENDER_CACHE_DIR
-
-            cleanup_cache_dir(RENDER_CACHE_DIR)
-
-        except Exception as e:
-            logger.exception(f"[Stats] 生成统计图表失败: {e}")
-            await self.sender.send_group_message(group_id, f"❌ 生成统计图表失败: {e}")
+        return nodes
 
     async def _generate_line_chart(
         self, summary: dict[str, Any], img_dir: Path, days: int
@@ -533,7 +475,13 @@ class CommandDispatcher:
     async def dispatch(
         self, group_id: int, sender_id: int, command: dict[str, Any]
     ) -> None:
-        """分发并执行命令"""
+        """分发并执行具体的命令
+
+        参数:
+            group_id: 消息来源群组
+            sender_id: 发送者 QQ 号
+            command: 解析出的命令数据结构
+        """
         cmd_name = command["name"]
         cmd_args = command["args"]
 
@@ -779,67 +727,36 @@ class CommandDispatcher:
     async def _handle_bugfix(
         self, group_id: int, admin_id: int, args: list[str]
     ) -> None:
-        if len(args) < 3:
-            await self.sender.send_group_message(
-                group_id,
-                "❌ 用法: /bugfix <QQ号1> [QQ号2] ... <开始时间> <结束时间>\n"
-                "时间格式: YYYY/MM/DD/HH:MM，结束时间可用 now\n"
-                "示例: /bugfix 123456 2024/12/01/09:00 now",
-            )
+        """处理 /bugfix 命令，通过分析聊天记录自动生成 FAQ 归档"""
+        # 1. 参数解析
+        parsed = self._parse_bugfix_args(args)
+        if isinstance(parsed, str):
+            await self.sender.send_group_message(group_id, parsed)
             return
 
-        target_qqs: list[int] = []
-        time_args = args[-2:]
-        qq_args = args[:-2]
-        try:
-            for arg in qq_args:
-                target_qqs.append(int(arg))
-        except ValueError:
-            await self.sender.send_group_message(
-                group_id, "❌ QQ 号格式错误，必须为数字"
-            )
-            return
+        target_qqs, start_date, end_date, start_str, end_str = parsed
+
+        await self.sender.send_group_message(
+            group_id, "🔍 正在获取对话记录进行回溯分析..."
+        )
 
         try:
-            start_date = datetime.strptime(time_args[0], "%Y/%m/%d/%H:%M")
-            if time_args[1].lower() == "now":
-                end_date = datetime.now()
-                end_date_str = "now"
-            else:
-                end_date = datetime.strptime(time_args[1], "%Y/%m/%d/%H:%M")
-                end_date_str = time_args[1]
-        except ValueError:
-            await self.sender.send_group_message(
-                group_id, "❌ 时间格式错误，请使用 YYYY/MM/DD/HH:MM 格式"
-            )
-            return
-
-        await self.sender.send_group_message(group_id, "🔍 正在获取对话记录...")
-
-        try:
+            # 2. 获取并处理消息
             messages = await self._fetch_messages(
                 group_id, target_qqs, start_date, end_date
             )
             if not messages:
                 await self.sender.send_group_message(
-                    group_id, "❌ 未找到符合条件的对话记录"
+                    group_id, "❌ 未找到符合条件的对话记录。"
                 )
                 return
 
             processed_text = await self._process_messages(messages)
-            total_tokens = self.ai.count_tokens(processed_text)
-            max_tokens = self.config.chat_model.max_tokens
 
-            if total_tokens <= max_tokens:
-                summary = await self.ai.summarize_chat(processed_text)
-            else:
-                await self.sender.send_group_message(
-                    group_id, f"📊 消息较长（{total_tokens} tokens），正在分段处理..."
-                )
-                chunks = self.ai.split_messages_by_tokens(processed_text, max_tokens)
-                summaries = [await self.ai.summarize_chat(chunk) for chunk in chunks]
-                summary = await self.ai.merge_summaries(summaries)
+            # 3. 生成摘要总结
+            summary = await self._obtain_bugfix_summary(group_id, processed_text)
 
+            # 4. 生成标题并入库
             title = extract_faq_title(summary)
             if not title or title == "未命名问题":
                 title = await self.ai.generate_title(summary)
@@ -847,18 +764,61 @@ class CommandDispatcher:
             faq = await self.faq_storage.create(
                 group_id=group_id,
                 target_qq=target_qqs[0],
-                start_time=time_args[0],
-                end_time=end_date_str,
+                start_time=start_str,
+                end_time=end_str,
                 title=title,
                 content=summary,
             )
-            await self.sender.send_group_message(
-                group_id,
-                f"✅ Bug 修复分析完成！\n\n📌 FAQ ID: {faq.id}\n📋 标题: {title}\n\n{summary}",
-            )
+
+            result_msg = f"✅ Bug 修复分析完成！\n\n📌 FAQ ID: {faq.id}\n📋 标题: {title}\n\n{summary}"
+            await self.sender.send_group_message(group_id, result_msg)
+
         except Exception as e:
             logger.exception(f"Bugfix 失败: {e}")
             await self.sender.send_group_message(group_id, f"❌ Bug 修复分析失败: {e}")
+
+    def _parse_bugfix_args(
+        self, args: list[str]
+    ) -> tuple[list[int], datetime, datetime, str, str] | str:
+        """解析 bugfix 命令的参数"""
+        if len(args) < 3:
+            return (
+                "❌ 用法: /bugfix <QQ号1> [QQ号2] ... <开始时间> <结束时间>\n"
+                "时间格式: YYYY/MM/DD/HH:MM，结束时间可用 now\n"
+                "示例: /bugfix 123456 2024/12/01/09:00 now"
+            )
+
+        try:
+            target_qqs = [int(arg) for arg in args[:-2]]
+            start_str, end_str_raw = args[-2], args[-1]
+            start_date = datetime.strptime(start_str, "%Y/%m/%d/%H:%M")
+
+            if end_str_raw.lower() == "now":
+                end_date, end_str = datetime.now(), "now"
+            else:
+                end_date, end_str = (
+                    datetime.strptime(end_str_raw, "%Y/%m/%d/%H:%M"),
+                    end_str_raw,
+                )
+
+            return target_qqs, start_date, end_date, start_str, end_str
+        except ValueError:
+            return "❌ 参数格式错误：QQ号应为数字，时间格式应为 YYYY/MM/DD/HH:MM。"
+
+    async def _obtain_bugfix_summary(self, group_id: int, processed_text: str) -> str:
+        """利用 AI 生成聊天记录的 Bug 分析摘要"""
+        total_tokens = self.ai.count_tokens(processed_text)
+        max_tokens = self.config.chat_model.max_tokens
+
+        if total_tokens <= max_tokens:
+            return str(await self.ai.summarize_chat(processed_text))
+
+        await self.sender.send_group_message(
+            group_id, f"📊 消息较长（{total_tokens} tokens），正在分段处理..."
+        )
+        chunks = self.ai.split_messages_by_tokens(processed_text, max_tokens)
+        summaries = [await self.ai.summarize_chat(chunk) for chunk in chunks]
+        return str(await self.ai.merge_summaries(summaries))
 
     async def _fetch_messages(
         self,

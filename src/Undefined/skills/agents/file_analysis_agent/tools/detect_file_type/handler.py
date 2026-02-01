@@ -139,20 +139,16 @@ EXTENSION_MAP: dict[str, str] = {
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
-    """执行文件类型检测
+    """执行文件格式探测
 
-    检测流程：
-    1. Linux 系统优先使用 `file` 命令
-    2. 其他系统或 file 命令失败时，使用文件头魔数 (Magic Number) 检测
-    3. 最后尝试使用文件扩展名检测
-    4. 如果都失败，返回 Unknown
+    综合使用系统 file 命令、文件头魔数以及后缀名进行识别。
 
     参数:
-        args: 工具参数
+        args: 包含 file_path 的字典
         context: 执行上下文
 
     返回:
-        检测结果描述
+        描述文件类型的字符串
     """
     file_path: str = args.get("file_path", "")
     path = Path(file_path)
@@ -188,6 +184,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
 
 def _detect_by_file_command(path: Path, file_size: int) -> str | None:
+    """尝试使用 Linux 系统自带的 file 命令进行识别"""
     try:
         result = subprocess.run(
             ["file", "-b", "-L", str(path)], capture_output=True, text=True, timeout=5
@@ -201,6 +198,7 @@ def _detect_by_file_command(path: Path, file_size: int) -> str | None:
 
 
 def _detect_by_magic_number(path: Path, file_size: int) -> str | None:
+    """尝试通过读取文件头前 32 字节并对比魔数来识别"""
     try:
         with open(path, "rb") as f:
             header = f.read(32)
@@ -214,6 +212,7 @@ def _detect_by_magic_number(path: Path, file_size: int) -> str | None:
 
 
 def _detect_by_extension(path: Path) -> str | None:
+    """根据文件后缀名识别文件类型（最后的回退方案）"""
     ext = path.suffix.lower()
     file_type = EXTENSION_MAP.get(ext)
     if file_type:

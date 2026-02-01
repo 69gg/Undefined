@@ -51,22 +51,31 @@ def ensure_runtime_dirs() -> None:
 def setup_logging() -> None:
     """设置日志（控制台 + 文件轮转）"""
     load_dotenv()
-    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
-    level = getattr(logging, log_level, logging.INFO)
+    level, log_level = _get_log_level()
 
-    # 日志格式
-    # 丰富日志处理器会自动处理时间戳、级别等，所以我们减短格式
-    log_format = "%(name)s: %(message)s"
-    file_log_format = "%(asctime)s [%(levelname)s] [%(request_id)s] %(name)s: %(message)s"  # Modified to include request_id
-    file_formatter = logging.Formatter(file_log_format)
-
-    # 根日志器
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
 
-    # 控制台处理器（使用 Rich）
+    # 1. 控制台处理器
+    _init_console_handler(root_logger, level)
+
+    # 2. 文件处理器
+    _init_file_handler(root_logger)
+
+    logging.info(f"[启动] 日志系统初始化完成。级别: {log_level}")
+
+
+def _get_log_level() -> tuple[int, str]:
+    """从环境变量获取日志级别"""
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, log_level, logging.INFO)
+    return level, log_level
+
+
+def _init_console_handler(root_logger: logging.Logger, level: int) -> None:
+    """初始化控制台 Rich 日志处理器"""
     console = Console(force_terminal=True)
-    console_handler = RichHandler(
+    handler = RichHandler(
         level=level,
         console=console,
         show_time=True,
@@ -74,39 +83,31 @@ def setup_logging() -> None:
         markup=True,
         rich_tracebacks=True,
     )
-    console_handler.setFormatter(logging.Formatter(log_format))
-    root_logger.addHandler(console_handler)
+    handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+    root_logger.addHandler(handler)
 
-    # 日志文件配置
+
+def _init_file_handler(root_logger: logging.Logger) -> None:
+    """初始化文件轮转日志处理器"""
     log_file_path = os.getenv("LOG_FILE_PATH", "logs/bot.log")
-    log_max_size = (
-        int(os.getenv("LOG_MAX_SIZE_MB", "10")) * 1024 * 1024
-    )  # 兆字节 -> 字节
+    log_max_size = int(os.getenv("LOG_MAX_SIZE_MB", "10")) * 1024 * 1024
     log_backup_count = int(os.getenv("LOG_BACKUP_COUNT", "5"))
 
-    # 确保日志目录存在
     log_dir = Path(log_file_path).parent
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    file_handler = RotatingFileHandler(
+    file_log_format = (
+        "%(asctime)s [%(levelname)s] [%(request_id)s] %(name)s: %(message)s"
+    )
+    handler = RotatingFileHandler(
         log_file_path,
         maxBytes=log_max_size,
         backupCount=log_backup_count,
         encoding="utf-8",
     )
-    file_handler.setFormatter(file_formatter)
-    file_handler.addFilter(RequestContextFilter())  # 添加请求上下文过滤器
-    root_logger.addHandler(file_handler)
-
-    logging.info(
-        f"[bold cyan][启动][/bold cyan] 日志系统初始化完成。级别: [yellow]{log_level}[/yellow], 文件: [green]{log_file_path}[/green] "
-        f"(最大 [magenta]{log_max_size // 1024 // 1024}[/magenta]MB, 保留 [magenta]{log_backup_count}[/magenta] 份)"
-    )
-    logging.debug(
-        "[日志] handlers=%s level=%s",
-        [type(h).__name__ for h in root_logger.handlers],
-        log_level,
-    )
+    handler.setFormatter(logging.Formatter(file_log_format))
+    handler.addFilter(RequestContextFilter())
+    root_logger.addHandler(handler)
 
 
 async def main() -> None:

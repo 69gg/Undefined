@@ -272,43 +272,65 @@ def _extract_imports(content: str, language: str) -> list[str]:
     return list(dict.fromkeys(imports))
 
 
-def _extract_functions(content: str, language: str) -> list[str]:
-    """从代码中提取函数定义
+# 函数定义正则表达式映射
+_FUNCTION_PATTERNS: dict[str, str] = {
+    "Python": r"def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+    "JavaScript": r"(?:function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)|const\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s+)?\(",
+    "TypeScript": r"(?:function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)|const\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s+)?\(",
+    "Java": r"(?:public|private|protected|static|\s)*\s*(?:void|[\w<>]+)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+    "Kotlin": r"fun\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+    "Go": r"func\s+(?:[(\w]+\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+    "Rust": r"fn\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+    "C": r"(?:static\s+)?(?:void|[\w*]+)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+    "C++": r"(?:static\s+)?(?:void|[\w*]+)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+    "Ruby": r"def\s+([a-zA-Z_][a-zA-Z0-9_?!]*)",
+    "PHP": r"function\s+([a-zA-Z_\x7f-\xff][a-zA-Z0-9_\x7f-\xff]*)\s*\(",
+    "Swift": r"func\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+    "Shell": r"^([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\)",
+}
 
-    参数:
+
+def _extract_function_name_from_match(match: re.Match[str]) -> str | None:
+    """从正则匹配结果中提取函数名。
+
+    Args:
+        match: 正则匹配结果
+
+    Returns:
+        函数名，未找到时返回 None
+    """
+    # 尝试获取第二个捕获组（用于 const function 形式）
+    if match.group(2):
+        return match.group(2)
+    # 返回第一个捕获组
+    return match.group(1)
+
+
+def _extract_functions(content: str, language: str) -> list[str]:
+    """从代码中提取函数定义。
+
+    Args:
         content: 代码内容
         language: 编程语言
 
-    返回:
+    Returns:
         函数名列表
     """
     functions: list[str] = []
-    patterns: dict[str, str] = {
-        "Python": r"def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
-        "JavaScript": r"(?:function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)|const\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s+)?\(",
-        "TypeScript": r"(?:function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)|const\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s+)?\(",
-        "Java": r"(?:public|private|protected|static|\s)*\s*(?:void|[\w<>]+)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
-        "Kotlin": r"fun\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
-        "Go": r"func\s+(?:[(\w]+\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
-        "Rust": r"fn\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
-        "C": r"(?:static\s+)?(?:void|[\w*]+)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
-        "C++": r"(?:static\s+)?(?:void|[\w*]+)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
-        "Ruby": r"def\s+([a-zA-Z_][a-zA-Z0-9_?!]*)",
-        "PHP": r"function\s+([a-zA-Z_\x7f-\xff][a-zA-Z0-9_\x7f-\xff]*)\s*\(",
-        "Swift": r"func\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
-        "Shell": r"^([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\)",
-    }
 
-    pattern = patterns.get(language)
+    # 获取对应语言的正则表达式
+    pattern = _FUNCTION_PATTERNS.get(language)
     if not pattern:
         return functions
 
+    # 遍历每一行，提取函数名
     for line in content.split("\n"):
         line = line.strip()
         match = re.match(pattern, line)
         if match:
-            func_name = match.group(1) if not match.group(2) else match.group(2)
-            functions.append(func_name)
+            func_name = _extract_function_name_from_match(match)
+            if func_name:
+                functions.append(func_name)
 
     return functions
 
@@ -352,18 +374,118 @@ def _extract_classes(content: str, language: str) -> list[str]:
     return classes
 
 
-def _extract_comment_blocks(content: str, language: str) -> list[str]:
-    """提取代码中的块注释
+def _is_line_comment(line: str) -> bool:
+    """检查行是否为单行注释。
 
-    参数:
+    Args:
+        line: 代码行
+
+    Returns:
+        如果是单行注释返回 True，否则返回 False
+    """
+    stripped = line.strip()
+    comment_prefixes = ("#", "//", "--", "%", ";", '"')
+    return stripped.startswith(comment_prefixes)
+
+
+def _is_block_end(line: str, end_delim: str) -> bool:
+    """检查行是否包含块注释结束标记。
+
+    Args:
+        line: 代码行
+        end_delim: 结束分隔符
+
+    Returns:
+        如果包含结束标记返回 True，否则返回 False
+    """
+    if not end_delim:
+        return False
+    line_stripped = line.strip()
+    return line_stripped.endswith(end_delim) or end_delim in line_stripped
+
+
+def _process_block_start(
+    line: str,
+    start_delim: str,
+    in_block: bool,
+    current_block: list[str],
+) -> tuple[bool, list[str]]:
+    """处理块注释开始。
+
+    Args:
+        line: 代码行
+        start_delim: 开始分隔符
+        in_block: 是否已在块中
+        current_block: 当前块内容
+
+    Returns:
+        (是否在块中, 当前块内容)
+    """
+    if in_block:
+        return in_block, current_block
+
+    line_stripped = line.strip()
+    if line_stripped.startswith(start_delim):
+        return True, [line]
+
+    return in_block, current_block
+
+
+def _process_block_line(
+    line: str,
+    end_delim: str | None,
+    in_block: bool,
+    current_block: list[str],
+    blocks: list[str],
+) -> tuple[bool, list[str]]:
+    """处理块注释中的行。
+
+    Args:
+        line: 代码行
+        end_delim: 结束分隔符
+        in_block: 是否已在块中
+        current_block: 当前块内容
+        blocks: 已收集的块列表
+
+    Returns:
+        (是否在块中, 当前块内容)
+    """
+    current_block.append(line)
+
+    # 有结束分隔符的情况
+    if end_delim:
+        if _is_block_end(line, end_delim):
+            _add_block_if_valid(blocks, current_block)
+            return False, []
+        return in_block, current_block
+
+    # 无结束分隔符（单行注释）的情况
+    if not _is_line_comment(line):
+        # 遇到非注释行，结束块
+        current_block.pop()  # 移除刚才添加的非注释行
+        _add_block_if_valid(blocks, current_block)
+        return False, []
+
+    return in_block, current_block
+
+
+def _extract_comment_blocks(content: str, language: str) -> list[str]:
+    """提取代码中的块注释。
+
+    支持两种类型的注释：
+    1. 有明确开始和结束标记的块注释（如 /* ... */）
+    2. 连续的单行注释（如 # ...）
+
+    Args:
         content: 代码内容
         language: 编程语言
 
-    返回:
+    Returns:
         注释块列表
     """
     blocks: list[str] = []
 
+    # 检查语言是否支持注释
     if language not in COMMENT_PATTERNS:
         return blocks
 
@@ -375,38 +497,17 @@ def _extract_comment_blocks(content: str, language: str) -> list[str]:
     in_block = False
     current_block: list[str] = []
 
-    for i, line in enumerate(lines):
-        line_lower = line.strip()
+    for line in lines:
+        # 处理块注释开始
+        in_block, current_block = _process_block_start(
+            line, start_delim, in_block, current_block
+        )
 
-        if not in_block:
-            if line_lower.startswith(start_delim):
-                in_block = True
-                current_block = [line]
-        else:
-            current_block.append(line)
-            # 处理块注释结束
-            if end_delim:
-                if line_lower.endswith(end_delim) or end_delim in line_lower:
-                    in_block = False
-                    _add_block_if_valid(blocks, current_block)
-                    current_block = []
-            # 处理单行注释连续出现的情况（伪块注释）
-            else:
-                if line.strip().startswith("#") or line.strip().startswith("//"):
-                    # 继续收集连续的单行注释
-                    pass
-                else:
-                    # 单行注释中断，保存之前的块
-                    # 注意：当前行不是注释，所以不应该加入 current_block，而是应该处理掉之前的 block
-                    # 但上面的逻辑已经 append 了，这实际上是把非注释行也加进去了，这是个小 bug
-                    # 为了保持原有逻辑大致不变但简化复杂度，我们这里做个修正：
-                    # 如果是单行注释模式，current_block 实际上在上一行结束时就应该判断是否继续
-                    # 这里的原始逻辑其实是把当前非注释行也加进去了然后结束。
-                    # 我们简化一下：遇到非注释行，结束块。
-                    current_block.pop()  # 移除刚才加进去的非注释行
-                    in_block = False
-                    _add_block_if_valid(blocks, current_block)
-                    current_block = []
+        # 如果在块中，处理当前行
+        if in_block:
+            in_block, current_block = _process_block_line(
+                line, end_delim, in_block, current_block, blocks
+            )
 
     # 处理文件末尾遗留的块
     if current_block:
@@ -416,9 +517,9 @@ def _extract_comment_blocks(content: str, language: str) -> list[str]:
 
 
 def _add_block_if_valid(blocks: list[str], current_block: list[str]) -> None:
-    """如果块内容有效且长度足够，则添加到列表
+    """如果块内容有效且长度足够，则添加到列表。
 
-    参数:
+    Args:
         blocks: 目标列表
         current_block: 当前块内容
     """

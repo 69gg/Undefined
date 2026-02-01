@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SkillStats:
+    """技能执行统计数据类
+
+    记录单个技能（工具或智能体）的执行次数、成功率、耗时及最后一次错误信息。
+    """
+
     count: int = 0
     success: int = 0
     failure: int = 0
@@ -43,6 +48,11 @@ class SkillStats:
 
 @dataclass
 class SkillItem:
+    """技能项元数据
+
+    封装了技能的配置信息、处理函数以及加载状态。
+    """
+
     name: str
     config: Dict[str, Any]
     handler_path: Optional[Path]
@@ -87,6 +97,7 @@ class BaseRegistry:
         self.skills_root = self._resolve_skills_root(self.base_dir)
 
     def _resolve_skills_root(self, base_dir: Path) -> Path:
+        """解析技能定义的根目录，用于计算模块导入路径"""
         if base_dir.name in {"tools", "agents", "toolsets"} and base_dir.parent.name:
             return base_dir.parent
         return base_dir
@@ -110,7 +121,7 @@ class BaseRegistry:
         self._items_schema = []
 
     def load_items(self) -> None:
-        """从 base_dir 自动发现并加载项（仅加载 config，不导入 handler）。"""
+        """从 base_dir 自动发现并加载技能定义（仅加载 config 配置文件，不导入 handler 代码）"""
         self._reset_items()
 
         if not self.base_dir.exists():
@@ -135,6 +146,14 @@ class BaseRegistry:
                 self._register_item_from_dir(item, prefix=prefix)
 
     def _register_item_from_dir(self, item_dir: Path, prefix: str = "") -> None:
+        """从特定目录解析并注册一个技能项
+
+        该方法会查找目录下的 config.json 和 handler.py，并构造 SkillItem。
+
+        参数:
+            item_dir: 技能所在的目录路径
+            prefix: 技能名称的前缀（用于命名隔离）
+        """
         config_path = item_dir / "config.json"
         handler_path = item_dir / "handler.py"
 
@@ -143,46 +162,61 @@ class BaseRegistry:
             return
 
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
-
-            if "name" not in config.get("function", {}):
-                logger.error(f"配置无效 {item_dir}: 缺少 function.name")
+            config = self._load_config(config_path)
+            if not config:
                 return
 
-            original_name = config["function"]["name"]
-            full_name = f"{prefix}{original_name}"
-
-            if prefix:
-                import copy
-
-                config = copy.deepcopy(config)
-                config["function"]["name"] = full_name
-
-            module_name = self._build_module_name(item_dir)
-
-            item = SkillItem(
-                name=full_name,
-                config=config,
-                handler_path=handler_path,
-                module_name=module_name,
-            )
-
-            self._items[full_name] = item
+            item = self._build_skill_item(item_dir, config, handler_path, prefix)
+            self._items[item.name] = item
             self._items_schema.append(config)
-            self._stats.setdefault(full_name, SkillStats())
+            self._stats.setdefault(item.name, SkillStats())
+
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
                     "[%s加载] name=%s module=%s path=%s",
                     self.kind,
-                    full_name,
-                    module_name,
+                    item.name,
+                    item.module_name,
                     handler_path,
                 )
-                log_debug_json(logger, f"[{self.kind}配置] {full_name}", config)
+                log_debug_json(logger, f"[{self.kind}配置] {item.name}", config)
 
         except Exception as e:
             logger.error(f"从 {item_dir} 加载失败: {e}")
+
+    def _load_config(self, config_path: Path) -> Optional[Dict[str, Any]]:
+        """加载并验证配置文件"""
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            if not isinstance(config, dict) or "name" not in config.get("function", {}):
+                logger.error(f"配置无效 {config_path.parent}: 缺少 function.name")
+                return None
+            return dict(config)
+        except Exception as e:
+            logger.error(f"加载配置文件失败 {config_path}: {e}")
+            return None
+
+    def _build_skill_item(
+        self, item_dir: Path, config: Dict[str, Any], handler_path: Path, prefix: str
+    ) -> SkillItem:
+        """构建 SkillItem 对象"""
+        original_name = config["function"]["name"]
+        full_name = f"{prefix}{original_name}"
+
+        if prefix:
+            import copy
+
+            config = copy.deepcopy(config)
+            config["function"]["name"] = full_name
+
+        module_name = self._build_module_name(item_dir)
+        return SkillItem(
+            name=full_name,
+            config=config,
+            handler_path=handler_path,
+            module_name=module_name,
+        )
 
     def _build_module_name(self, item_dir: Path) -> str:
         try:
@@ -196,6 +230,7 @@ class BaseRegistry:
     def _load_handler_for_item(
         self, item: SkillItem, reload_module: bool = False
     ) -> None:
+        """动态导入技能的 handler.py 模块并获取其 execute 函数"""
         if item.handler is not None and not reload_module:
             return
 
@@ -226,6 +261,15 @@ class BaseRegistry:
         schema: Dict[str, Any],
         handler: Callable[[Dict[str, Any], Dict[str, Any]], Awaitable[Any]],
     ) -> None:
+        """从外部（非文件系统发现）注册一个技能项
+
+        常用于注册动态生成的工具或 MCP 注入的工具。
+
+        参数:
+            name: 技能名称
+            schema: 符合相关协议的配置定义
+            handler: 执行的具体回调函数
+        """
         item = SkillItem(
             name=name,
             config=schema,
@@ -247,6 +291,16 @@ class BaseRegistry:
     async def execute(
         self, name: str, args: Dict[str, Any], context: Dict[str, Any]
     ) -> str:
+        """执行指定的技能，包含超时控制、异常处理及统计记录
+
+        参数:
+            name: 技能名称
+            args: 此调用传入的参数字典
+            context: 调用执行的上下文环境
+
+        返回:
+            执行结果的字符串表示
+        """
         args = parse_tool_arguments(args, logger=logger, tool_name=name)
         async with self._items_lock:
             item = self._items.get(name)

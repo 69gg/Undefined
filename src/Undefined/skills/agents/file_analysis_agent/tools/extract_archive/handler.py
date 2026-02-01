@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """从压缩包（Zip, Tar 等）中提取文件内容"""
     file_path: str = args.get("file_path", "")
     action: str = args.get("action", "list")
     extract_path: str | None = args.get("extract_path")

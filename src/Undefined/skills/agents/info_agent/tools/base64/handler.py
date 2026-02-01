@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """对字符串进行 Base64 编码或解码操作"""
     text = args.get("text")
     operation = args.get("operation")
 

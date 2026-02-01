@@ -5,6 +5,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """列出群文件列表及其下载链接"""
     """获取群文件列表"""
     ai_client = context.get("ai_client")
     group_id = args.get("group_id") or context.get("group_id")

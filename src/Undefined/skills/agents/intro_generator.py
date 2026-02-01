@@ -1,3 +1,8 @@
+"""Agent 自我介绍生成器。
+
+自动检测 Agent 配置文件的变更，并使用 AI 生成或更新自我介绍文档。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -16,16 +21,30 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AgentIntroGenConfig:
-    enabled: bool = True
-    queue_interval_seconds: float = 1.0
-    max_tokens: int = 700
-    cache_path: Path = Path(".cache/agent_intro_hashes.json")
+    """Agent 自我介绍生成器配置。"""
+
+    enabled: bool = True  # 是否启用自动生成
+    queue_interval_seconds: float = 1.0  # 队列处理间隔（秒）
+    max_tokens: int = 700  # 生成介绍的最大 token 数
+    cache_path: Path = Path(".cache/agent_intro_hashes.json")  # 缓存文件路径
 
 
 class AgentIntroGenerator:
+    """Agent 自我介绍生成器。
+
+    监控 Agent 目录，当检测到配置变更时，自动生成或更新自我介绍文档。
+    """
+
     def __init__(
         self, agents_dir: Path, ai_client: Any, config: AgentIntroGenConfig
     ) -> None:
+        """初始化 Agent 自我介绍生成器。
+
+        Args:
+            agents_dir: Agent 目录路径
+            ai_client: AI 客户端
+            config: 生成器配置
+        """
         self.agents_dir = agents_dir
         self.ai_client = ai_client
         self.config = config
@@ -35,6 +54,10 @@ class AgentIntroGenerator:
         self._prompt_path = Path("res/prompts/agent_self_intro.txt")
 
     async def start(self) -> None:
+        """启动生成器。
+
+        加载缓存，检测变更的 Agent 并加入处理队列。
+        """
         if not self.config.enabled:
             logger.info("[AgentIntro] 自动生成已关闭")
             return
@@ -50,6 +73,7 @@ class AgentIntroGenerator:
             self._worker_task = asyncio.create_task(self._worker_loop())
 
     async def _load_cache(self) -> None:
+        """加载 Agent 哈希缓存。"""
         path = self.config.cache_path
         try:
             if path.exists():
@@ -61,6 +85,7 @@ class AgentIntroGenerator:
             self._cache = {}
 
     async def _save_cache(self) -> None:
+        """保存 Agent 哈希缓存。"""
         path = self.config.cache_path
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -70,6 +95,7 @@ class AgentIntroGenerator:
             logger.warning(f"[AgentIntro] 保存缓存失败: {e}")
 
     async def _enqueue_changed_agents(self) -> None:
+        """检测变更的 Agent 并加入处理队列。"""
         for agent_dir in sorted(self.agents_dir.iterdir()):
             if not agent_dir.is_dir() or agent_dir.name.startswith("_"):
                 continue
@@ -93,6 +119,14 @@ class AgentIntroGenerator:
                 )
 
     def _compute_agent_hash(self, agent_dir: Path) -> str:
+        """计算 Agent 目录的哈希值。
+
+        Args:
+            agent_dir: Agent 目录路径
+
+        Returns:
+            哈希值字符串
+        """
         hasher = hashlib.sha256()
         for path in sorted(self._iter_hash_files(agent_dir)):
             rel = str(path.relative_to(agent_dir)).replace("\\", "/")
@@ -107,6 +141,14 @@ class AgentIntroGenerator:
         return hasher.hexdigest()
 
     def _iter_hash_files(self, agent_dir: Path) -> list[Path]:
+        """迭代需要计算哈希的文件。
+
+        Args:
+            agent_dir: Agent 目录路径
+
+        Returns:
+            文件路径列表
+        """
         files: list[Path] = []
         for path in agent_dir.rglob("*"):
             if not path.is_file():
@@ -118,6 +160,7 @@ class AgentIntroGenerator:
         return files
 
     async def _worker_loop(self) -> None:
+        """工作循环，处理队列中的 Agent。"""
         while True:
             agent_name = await self._queue.get()
             agent_dir = self.agents_dir / agent_name
@@ -138,6 +181,12 @@ class AgentIntroGenerator:
                 break
 
     async def _generate_for_agent(self, agent_name: str, agent_dir: Path) -> None:
+        """为指定 Agent 生成自我介绍。
+
+        Args:
+            agent_name: Agent 名称
+            agent_dir: Agent 目录路径
+        """
         prompt_path = agent_dir / "prompt.md"
         generated_path = agent_dir / "intro.generated.md"
 
@@ -170,6 +219,11 @@ class AgentIntroGenerator:
         logger.info(f"[AgentIntro] 已更新: {generated_path}")
 
     async def _load_intro_prompt(self) -> str:
+        """加载自我介绍提示词模板。
+
+        Returns:
+            提示词字符串
+        """
         if self._prompt_path.exists():
             try:
                 async with aiofiles.open(self._prompt_path, "r", encoding="utf-8") as f:
@@ -178,22 +232,66 @@ class AgentIntroGenerator:
                 logger.warning(f"[AgentIntro] 读取提示词失败: {e}")
         return "请作下自我介绍（第一人称）。"
 
+    def _extract_tool_info(self, tool_dir: Path) -> dict[str, Any] | None:
+        """从工具目录提取工具信息。
+
+        Args:
+            tool_dir: 工具目录路径
+
+        Returns:
+            工具信息字典，失败时返回 None
+        """
+        config_path = tool_dir / "config.json"
+        if not config_path.exists():
+            return None
+
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+        func = data.get("function", {})
+        name = func.get("name", tool_dir.name)
+        desc = func.get("description", "")
+        params = func.get("parameters", {}).get("properties", {})
+        param_keys = ", ".join(sorted(params.keys())) if params else "无"
+
+        return {"name": name, "desc": desc, "param_keys": param_keys}
+
+    def _format_tool_info(self, tool_info: dict[str, Any]) -> str:
+        """格式化工具信息为字符串。
+
+        Args:
+            tool_info: 工具信息字典
+
+        Returns:
+            格式化后的字符串
+        """
+        return f"- {tool_info['name']}: {tool_info['desc']} (参数: {tool_info['param_keys']})"
+
     def _summarize_tools(self, tools_dir: Path) -> str:
+        """生成工具目录的摘要信息。
+
+        Args:
+            tools_dir: 工具目录路径
+
+        Returns:
+            工具摘要字符串
+        """
         if not tools_dir.exists():
             return "无"
-        lines: list[str] = []
-        for tool_dir in sorted(p for p in tools_dir.iterdir() if p.is_dir()):
-            config_path = tool_dir / "config.json"
-            if not config_path.exists():
-                continue
-            try:
-                data = json.loads(config_path.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-            func = data.get("function", {})
-            name = func.get("name", tool_dir.name)
-            desc = func.get("description", "")
-            params = func.get("parameters", {}).get("properties", {})
-            param_keys = ", ".join(sorted(params.keys())) if params else "无"
-            lines.append(f"- {name}: {desc} (参数: {param_keys})")
+
+        # 获取所有工具目录
+        tool_dirs = sorted(p for p in tools_dir.iterdir() if p.is_dir())
+
+        # 提取工具信息
+        tool_infos: list[dict[str, Any]] = []
+        for tool_dir in tool_dirs:
+            tool_info = self._extract_tool_info(tool_dir)
+            if tool_info:
+                tool_infos.append(tool_info)
+
+        # 格式化工具信息
+        lines = [self._format_tool_info(info) for info in tool_infos]
+
         return "\n".join(lines) if lines else "无"

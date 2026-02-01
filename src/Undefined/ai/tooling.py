@@ -17,11 +17,21 @@ logger = logging.getLogger(__name__)
 
 
 class ToolManager:
-    """Handle tool/agent schema and execution."""
+    """工具与智能体（Agent）执行管理器
+
+    负责管理 OpenAI 格式的功能架构（Schema）生成的合并，并处理工具和 Agent 的具体执行过程。
+    支持 MCP (Model Context Protocol) 工具的动态注入和上下文资源的自动分发。
+    """
 
     def __init__(
         self, tool_registry: ToolRegistry, agent_registry: AgentRegistry
     ) -> None:
+        """初始化工具管理器
+
+        参数:
+            tool_registry: 标准工具注册中心
+            agent_registry: Agent 注册中心
+        """
         self.tool_registry = tool_registry
         self.agent_registry = agent_registry
         self._agent_mcp_registry_var: ContextVar[dict[str, Any] | None] = ContextVar(
@@ -29,6 +39,7 @@ class ToolManager:
         )
 
     def get_openai_tools(self) -> list[dict[str, Any]]:
+        """获取所有已加载工具和 Agent 的 OpenAI 兼容工具定义列表"""
         tools = self.tool_registry.get_tools_schema()
         agents = self.agent_registry.get_agents_schema()
         return tools + agents
@@ -38,6 +49,7 @@ class ToolManager:
         base_tools: list[dict[str, Any]] | None,
         extra_tools: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        """合并两组工具定义，根据函数名去重"""
         if not base_tools:
             return list(extra_tools)
 
@@ -89,7 +101,16 @@ class ToolManager:
         function_args: dict[str, Any],
         context: dict[str, Any],
     ) -> Any:
-        """执行工具或 Agent。"""
+        """执行指定的工具或 Agent 项
+
+        参数:
+            function_name: 函数/Agent 名称
+            function_args: 调用参数字典
+            context: 执行上下文字典，会自动注入 RequestContext 中的资源
+
+        返回:
+            执行结果
+        """
         start_time = time.perf_counter()
 
         # 自动注入 RequestContext 资源

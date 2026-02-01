@@ -2,6 +2,7 @@ from typing import Any, Dict
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """新增一条持久化长期记忆"""
     fact = args.get("fact", "")
     if not fact:
         return "记忆内容不能为空"

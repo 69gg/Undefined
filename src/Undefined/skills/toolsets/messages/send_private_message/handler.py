@@ -5,6 +5,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """向指定用户发送私聊消息"""
     user_id = args.get("user_id")
     message = args.get("message", "")
 

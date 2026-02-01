@@ -155,10 +155,33 @@ class TokenUsageStorage:
         max_total_bytes: Optional[int] = None,
     ) -> bool:
         """当文件超过阈值时进行压缩归档，并按策略清理历史归档"""
+        size_threshold, archives_threshold, total_bytes_threshold = (
+            self._get_size_thresholds(max_size_bytes, max_archives, max_total_bytes)
+        )
+
+        if size_threshold <= 0:
+            return False
+
+        try:
+            return await asyncio.to_thread(
+                self._sync_compact,
+                size_threshold,
+                archives_threshold,
+                total_bytes_threshold,
+            )
+        except Exception as e:
+            logger.error(f"[Token统计] 压缩归档失败: {e}")
+            return False
+
+    def _get_size_thresholds(
+        self,
+        max_size_bytes: Optional[int],
+        max_archives: Optional[int],
+        max_total_bytes: Optional[int],
+    ) -> tuple[int, Optional[int], Optional[int]]:
+        """获取并解析归档阈值配置"""
         if max_size_bytes is None:
             max_size_mb = self._parse_env_int("TOKEN_USAGE_MAX_SIZE_MB", 5)
-            if max_size_mb <= 0:
-                return False
             max_size_bytes = max_size_mb * 1024 * 1024
 
         if max_archives is None:
@@ -170,64 +193,65 @@ class TokenUsageStorage:
             max_total_mb = self._parse_env_int("TOKEN_USAGE_MAX_TOTAL_MB", 0)
             max_total_bytes = max_total_mb * 1024 * 1024 if max_total_mb > 0 else None
 
-        def sync_compact() -> bool:
-            self._ensure_file_exists()
-            did_compact = False
-            self.lock_file_path.parent.mkdir(parents=True, exist_ok=True)
-            logger.info(
-                "[Token统计] 归档检查: file=%s archive_dir=%s threshold_bytes=%s max_archives=%s max_total_bytes=%s",
-                self.file_path,
-                self.archive_dir,
-                max_size_bytes,
-                max_archives if max_archives is not None else "unlimited",
-                max_total_bytes if max_total_bytes is not None else "unlimited",
-            )
-            with open(self.lock_file_path, "a", encoding="utf-8") as lock_handle:
-                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
-                try:
-                    if not self.file_path.exists():
-                        logger.info("[Token统计] 归档跳过: 文件不存在")
-                        return False
-                    try:
-                        size = self.file_path.stat().st_size
-                    except FileNotFoundError:
-                        logger.info("[Token统计] 归档跳过: 文件状态不可用")
-                        return False
-                    logger.info(
-                        "[Token统计] 当前文件大小: %s bytes (threshold=%s)",
-                        size,
-                        max_size_bytes,
-                    )
-                    if size >= max_size_bytes and size > 0:
-                        archive_path = self._build_archive_path()
-                        tmp_path = archive_path.with_suffix(
-                            archive_path.suffix + ".tmp"
-                        )
-                        logger.info(
-                            "[Token统计] 开始归档: %s -> %s",
-                            self.file_path,
-                            archive_path,
-                        )
-                        with open(self.file_path, "rb") as src:
-                            with gzip.open(tmp_path, "wb") as dst:
-                                shutil.copyfileobj(src, dst)
-                        tmp_path.replace(archive_path)
-                        with open(self.file_path, "w", encoding="utf-8"):
-                            pass
-                        did_compact = True
-                        logger.info("[Token统计] 归档完成: %s", archive_path)
-                    else:
-                        logger.info("[Token统计] 归档未触发: 文件未超过阈值")
-                    self._prune_archives(max_archives, max_total_bytes)
-                finally:
-                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
-            return did_compact
+        return max_size_bytes, max_archives, max_total_bytes
+
+    def _sync_compact(
+        self,
+        max_size_bytes: int,
+        max_archives: Optional[int],
+        max_total_bytes: Optional[int],
+    ) -> bool:
+        """同步执行归档逻辑"""
+        self._ensure_file_exists()
+        did_compact = False
+
+        logger.info(
+            "[Token统计] 归档检查: file=%s threshold_bytes=%s",
+            self.file_path,
+            max_size_bytes,
+        )
+
+        with open(self.lock_file_path, "a", encoding="utf-8") as lock_handle:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            try:
+                if not self.file_path.exists():
+                    return False
+
+                current_size = self.file_path.stat().st_size
+                if current_size >= max_size_bytes and current_size > 0:
+                    self._do_compact_file()
+                    did_compact = True
+
+                self._prune_archives(max_archives, max_total_bytes)
+            finally:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+
+        return did_compact
+
+    def _do_compact_file(self) -> None:
+        """执行具体的文件压缩归档操作"""
+        archive_path = self._build_archive_path()
+        tmp_path = archive_path.with_suffix(archive_path.suffix + ".tmp")
+
+        logger.info("[Token统计] 开始归档: %s -> %s", self.file_path, archive_path)
 
         try:
-            return await asyncio.to_thread(sync_compact)
+            with open(self.file_path, "rb") as src:
+                with gzip.open(tmp_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+
+            tmp_path.replace(archive_path)
+
+            # 清空原文件
+            with open(self.file_path, "w", encoding="utf-8"):
+                pass
+
+            logger.info("[Token统计] 归档完成: %s", archive_path)
         except Exception as e:
-            logger.error(f"[Token统计] 压缩归档失败: {e}")
-            return False
+            logger.error(f"[Token统计] 文件归档操作失败: {e}")
+            if tmp_path.exists():
+                tmp_path.unlink()
+            raise
 
     async def record(self, usage: TokenUsage | dict[str, Any]) -> None:
         """记录一次 token 使用

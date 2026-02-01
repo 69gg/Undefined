@@ -5,46 +5,48 @@ from playwright.async_api import async_playwright
 from typing import Any
 
 
-async def render_markdown_to_html(md_text: str) -> str:
-    # 定义同步的解析逻辑
-    def _parse() -> str:
-        extensions = [
-            "toc",
-            "tables",
-            "fenced_code",
-            "codehilite",
-            "md_in_html",
-            "attr_list",
-            "pymdownx.superfences",
-            "pymdownx.arithmatex",
-            "pymdownx.tasklist",
-            "pymdownx.tilde",
-            "pymdownx.emoji",
+# --- Markdown 配置 ---
+_MARKDOWN_EXTENSIONS = [
+    "toc",
+    "tables",
+    "fenced_code",
+    "codehilite",
+    "md_in_html",
+    "attr_list",
+    "pymdownx.superfences",
+    "pymdownx.arithmatex",
+    "pymdownx.tasklist",
+    "pymdownx.tilde",
+    "pymdownx.emoji",
+]
+
+_MARKDOWN_EXTENSION_CONFIGS: dict[str, dict[str, Any]] = {
+    "pymdownx.superfences": {
+        "custom_fences": [
+            {
+                "name": "mermaid",
+                "class": "mermaid",
+                "format": lambda source, language, css_class, options, md, **kwargs: (
+                    f'<pre class="{css_class}">{source}</pre>'
+                ),
+            }
         ]
+    },
+    "pymdownx.arithmatex": {
+        "generic": True,
+    },
+}
 
-        extension_configs: dict[str, dict[str, Any]] = {
-            "pymdownx.superfences": {
-                "custom_fences": [
-                    {
-                        "name": "mermaid",
-                        "class": "mermaid",
-                        "format": lambda source,
-                        language,
-                        css_class,
-                        options,
-                        md,
-                        **kwargs: f'<pre class="{css_class}">{source}</pre>',
-                    }
-                ]
-            },
-            "pymdownx.arithmatex": {
-                "generic": True,
-            },
-        }
 
+async def render_markdown_to_html(md_text: str) -> str:
+    """将 Markdown 转换为带样式的 HTML 文本"""
+
+    def _parse() -> str:
         return str(
             markdown.markdown(
-                md_text, extensions=extensions, extension_configs=extension_configs
+                md_text,
+                extensions=_MARKDOWN_EXTENSIONS,
+                extension_configs=_MARKDOWN_EXTENSION_CONFIGS,
             )
         )
 

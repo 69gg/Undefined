@@ -73,6 +73,16 @@ class AIClient:
         end_summary_storage: Optional[EndSummaryStorage] = None,
         bot_qq: int = 0,
     ) -> None:
+        """初始化 AI 客户端
+
+        参数:
+            chat_config: 对话模型配置
+            vision_config: 视觉模型配置
+            agent_config: 智能体模型配置
+            memory_storage: 长期记忆存储
+            end_summary_storage: 短期回忆存储
+            bot_qq: 机器人自身的 QQ 号
+        """
         self.chat_config = chat_config
         self.vision_config = vision_config
         self.agent_config = agent_config
@@ -391,6 +401,25 @@ class AIClient:
         scheduler: Any = None,
         extra_context: dict[str, Any] | None = None,
     ) -> str:
+        """发送问题给 AI 并获取回复 (支持工具调用和迭代)
+
+        参数:
+            question: 用户输入的问题
+            context: 额外的上下文背景
+            send_message_callback: 发送消息的回调
+            get_recent_messages_callback: 获取上下文历史消息的回调
+            get_image_url_callback: 获取图片 URL 的回调
+            get_forward_msg_callback: 获取合并转发内容的回调
+            send_like_callback: 点赞回调
+            sender: 消息发送助手实例
+            history_manager: 历史记录管理器实例
+            onebot_client: OneBot 客户端实例
+            scheduler: 任务调度器实例
+            extra_context: 额外的上下文负载
+
+        返回:
+            AI 生成的最终文本回复
+        """
         messages = await self._prompt_builder.build_messages(
             question,
             get_recent_messages_callback=get_recent_messages_callback,

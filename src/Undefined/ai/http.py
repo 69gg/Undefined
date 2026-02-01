@@ -75,38 +75,151 @@ def _split_chat_completion_params(
     return known, extra
 
 
+def _stringify_thinking_list(value: list[Any]) -> str:
+    """将列表类型的思维链转换为字符串。
+
+    Args:
+        value: 思维链列表
+
+    Returns:
+        格式化后的字符串
+    """
+    parts = [_stringify_thinking(item) for item in value]
+    return "\n".join([part for part in parts if part])
+
+
+def _stringify_thinking_dict(value: dict[str, Any]) -> str:
+    """将字典类型的思维链转换为字符串。
+
+    Args:
+        value: 思维链字典
+
+    Returns:
+        格式化后的字符串
+    """
+    content = value.get("content")
+    if isinstance(content, str) and content:
+        return content
+    return str(value)
+
+
 def _stringify_thinking(value: Any) -> str:
+    """将思维链值转换为字符串。
+
+    Args:
+        value: 思维链值（可以是 None、字符串、列表或字典）
+
+    Returns:
+        格式化后的字符串
+    """
     if value is None:
         return ""
     if isinstance(value, str):
         return value
     if isinstance(value, list):
-        parts = [_stringify_thinking(item) for item in value]
-        return "\n".join([part for part in parts if part])
+        return _stringify_thinking_list(value)
     if isinstance(value, dict):
-        content = value.get("content")
-        if isinstance(content, str) and content:
-            return content
+        return _stringify_thinking_dict(value)
     return str(value)
 
 
-def _extract_thinking_content(result: dict[str, Any]) -> str:
-    choices = result.get("choices")
-    if isinstance(choices, list) and choices:
-        choice = choices[0]
-        if isinstance(choice, dict):
-            message = choice.get("message")
-            if isinstance(message, dict):
-                for key in _THINKING_KEYS:
-                    if key in message:
-                        return _stringify_thinking(message.get(key))
-            for key in _THINKING_KEYS:
-                if key in choice:
-                    return _stringify_thinking(choice.get(key))
+def _extract_from_message(message: dict[str, Any]) -> str:
+    """从 message 对象中提取思维链内容。
+
+    Args:
+        message: message 对象
+
+    Returns:
+        思维链内容字符串
+    """
+    if not isinstance(message, dict):
+        return ""
+    for key in _THINKING_KEYS:
+        if key in message:
+            return _stringify_thinking(message.get(key))
+    return ""
+
+
+def _extract_from_choice(choice: dict[str, Any]) -> str:
+    """从 choice 对象中提取思维链内容。
+
+    Args:
+        choice: choice 对象
+
+    Returns:
+        思维链内容字符串
+    """
+    if not isinstance(choice, dict):
+        return ""
+
+    # 优先从 message 中提取
+    message = choice.get("message")
+    if isinstance(message, dict):
+        thinking = _extract_from_message(message)
+        if thinking:
+            return thinking
+
+    # 尝试从 choice 直接提取
+    for key in _THINKING_KEYS:
+        if key in choice:
+            return _stringify_thinking(choice.get(key))
+
+    return ""
+
+
+def _extract_from_choices(choices: list[Any]) -> str:
+    """从 choices 列表中提取思维链内容。
+
+    Args:
+        choices: choices 列表
+
+    Returns:
+        思维链内容字符串
+    """
+    if not isinstance(choices, list) or not choices:
+        return ""
+    choice = choices[0]
+    return _extract_from_choice(choice)
+
+
+def _extract_from_result(result: dict[str, Any]) -> str:
+    """直接从结果对象中提取思维链内容。
+
+    Args:
+        result: API 响应结果
+
+    Returns:
+        思维链内容字符串
+    """
     for key in _THINKING_KEYS:
         if key in result:
             return _stringify_thinking(result.get(key))
     return ""
+
+
+def _extract_thinking_content(result: dict[str, Any]) -> str:
+    """从 API 响应中提取思维链内容。
+
+    提取优先级：
+    1. 从 choices[0].message 中提取
+    2. 从 choices[0] 直接提取
+    3. 从响应根对象中提取
+
+    Args:
+        result: API 响应结果
+
+    Returns:
+        思维链内容字符串
+    """
+    # 尝试从 choices 中提取
+    choices = result.get("choices")
+    if isinstance(choices, list):
+        thinking = _extract_from_choices(choices)
+        if thinking:
+            return thinking
+
+    # 尝试从响应根对象中提取
+    return _extract_from_result(result)
 
 
 class ModelRequester:

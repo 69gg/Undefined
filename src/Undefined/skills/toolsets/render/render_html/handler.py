@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """将其余格式（如 Markdown）渲染为 HTML 格式"""
     html_content = args.get("html_content", "")
     target_id = args.get("target_id")
     message_type = args.get("message_type")

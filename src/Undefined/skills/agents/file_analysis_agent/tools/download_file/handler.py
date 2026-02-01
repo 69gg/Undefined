@@ -24,6 +24,15 @@ DEFAULT_SIZE_LIMIT = 100 * 1024 * 1024
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """下载指定文件到临时缓存目录
+
+    参数:
+        args: 包含 file_source (URL 或 file_id) 和可选 max_size_mb
+        context: 包含回调函数的上下文
+
+    返回:
+        下载后的本地磁盘路径或错误信息
+    """
     file_source: str = args.get("file_source", "")
     max_size_mb: float = args.get("max_size_mb", 100)
 
@@ -48,6 +57,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 async def _download_from_url(
     url: str, temp_dir: Path, max_size_mb: float, task_uuid: str
 ) -> str:
+    """从 Web URL 进行下载，包含大小预检"""
     max_size_bytes: int = int(max_size_mb * 1024 * 1024)
 
     async with httpx.AsyncClient(timeout=60.0) as client:
@@ -91,6 +101,7 @@ async def _download_from_url(
 async def _download_from_file_id(
     file_id: str, temp_dir: Path, context: Dict[str, Any], task_uuid: str
 ) -> str:
+    """从 OneBot file_id 进行下载或解析"""
     get_image_url_callback = context.get("get_image_url_callback")
     if not get_image_url_callback:
         return "错误：file_id 模式需要 get_image_url_callback"

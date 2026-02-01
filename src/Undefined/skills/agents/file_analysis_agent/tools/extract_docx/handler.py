@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """解析 Word (.docx) 文档，提取元数据及文本内容"""
     file_path: str = args.get("file_path", "")
 
     path = Path(file_path)

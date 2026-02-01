@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """获取指定公告的详细属性及内容"""
     notice_id = args.get("notice_id")
     if not notice_id:
         return "请提供 notice_id"

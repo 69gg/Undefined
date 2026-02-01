@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """对指定网页进行抓取、渲染并提取其中的文本或特定元素内容"""
     url = args.get("url", "")
     if not url:
         return "URL 不能为空"

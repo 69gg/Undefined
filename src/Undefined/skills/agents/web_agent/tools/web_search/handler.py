@@ -5,6 +5,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """使用搜索引擎查询指定关键词，返回网页摘要列表"""
     query = args.get("query", "")
     if not query:
         return "搜索关键词不能为空"

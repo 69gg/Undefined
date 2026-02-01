@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """在文件内容中搜索特定关键词或正则表达式模式"""
     pattern = args.get("pattern", "")
     path_str = args.get("path")
     include = args.get("include")

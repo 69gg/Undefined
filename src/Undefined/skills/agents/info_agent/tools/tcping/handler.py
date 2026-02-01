@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """对指定 IP 和端口执行 TCP Ping 测试，探测端口通断及延迟情况"""
     address = args.get("address")
     port = args.get("port")
 

@@ -68,6 +68,7 @@ def _filter_messages(
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """在指定时间范围内检索特定会话（群聊或私聊）的历史记录"""
     chat_id = args.get("chat_id")
     msg_type = args.get("type")
     start_time = args.get("start_time", "")

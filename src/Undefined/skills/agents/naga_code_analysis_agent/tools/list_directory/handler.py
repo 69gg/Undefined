@@ -3,6 +3,7 @@ from typing import Any, Dict
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """列出指定目录下的文件和子目录"""
     path_str = args.get("path")
     # 将 base_path 限制在 NagaAgent 子模块中
     base_path = context.get("base_path", Path.cwd() / "code" / "NagaAgent")
