@@ -40,7 +40,7 @@ __pycache__/
 logs/*
 data/
 
-AGENTS.md
+#AGENTS.md
 .DS_Store
 .claude/
 
