@@ -134,6 +134,7 @@ uv run -m Undefined
   - `VISION_MODEL_*`：视觉识别模型（负责识图）
   - `AGENT_MODEL_*`：Agent 专用模型（建议使用推理能力更强的模型）
   - `SECURITY_MODEL_*`：安全审核模型（负责防注入检测）
+  - `*_MODEL_API_URL`：请填写 OpenAI 兼容的 **base URL**（如 `https://api.openai.com/v1` / `http://127.0.0.1:8000/v1`，也支持 `?api-version=...` 等 query）；如果填了完整 `/chat/completions` 旧写法也能用，但已弃用并会在运行时提示。
 - **功能配置**：`LOG_LEVEL`, `LOG_FILE_PATH`, `LOG_MAX_SIZE_MB`, `LOG_BACKUP_COUNT`, `LOG_THINKING`
 - **Token 统计归档**：`TOKEN_USAGE_MAX_SIZE_MB`（默认 5MB，<=0 禁用）, `TOKEN_USAGE_MAX_ARCHIVES`（最大归档数）, `TOKEN_USAGE_MAX_TOTAL_MB`（归档总大小上限，0 禁用）。归档目录为 `data/token_usage_archives/`，启动时自动检查并压缩。
 - **Skills 热重载**：`SKILLS_HOT_RELOAD`, `SKILLS_HOT_RELOAD_INTERVAL`, `SKILLS_HOT_RELOAD_DEBOUNCE`
@@ -236,7 +237,7 @@ graph TB
             AIClient[AIClient 统一接口]
             PromptBuilder[PromptBuilder 构建提示词]
             ToolManager[ToolManager 工具调度]
-            ModelRequester[ModelRequester API 调用]
+            ModelRequester[ModelRequester (ai/llm.py) API 调用]
             MultimodalAnalyzer[MultimodalAnalyzer 多模态]
             SummaryService[SummaryService 总结/标题]
             TokenCounter[TokenCounter Token 统计]

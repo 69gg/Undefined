@@ -25,7 +25,7 @@ Agent 使用独立的模型配置，通过环境变量设置：
 
 ```env
 # Agent 模型配置 (用于执行 agents)
-AGENT_MODEL_API_URL=          # API 地址
+AGENT_MODEL_API_URL=          # OpenAI-compatible base URL, e.g. https://api.openai.com/v1 (legacy /chat/completions is deprecated but still accepted)
 AGENT_MODEL_API_KEY=          # API 密钥
 AGENT_MODEL_NAME=             # 模型名称
 AGENT_MODEL_MAX_TOKENS=4096   # 最大 token 数
@@ -37,7 +37,7 @@ AGENT_MODEL_THINKING_BUDGET_TOKENS=0    # thinking budget tokens
 
 | 环境变量 | 说明 | 默认值 |
 |---------|------|-------|
-| `AGENT_MODEL_API_URL` | Agent 模型 API 地址 | 无（必填） |
+| `AGENT_MODEL_API_URL` | Agent 模型 API base URL（OpenAI 兼容，如 `https://api.openai.com/v1`） | 无（必填） |
 | `AGENT_MODEL_API_KEY` | Agent 模型 API 密钥 | 无（必填） |
 | `AGENT_MODEL_NAME` | Agent 模型名称 | 无（必填） |
 | `AGENT_MODEL_MAX_TOKENS` | 单次响应最大 token 数 | 4096 |
@@ -48,7 +48,7 @@ AGENT_MODEL_THINKING_BUDGET_TOKENS=0    # thinking budget tokens
 
 启动时会对 Agent 代码做 hash，如果检测到变更，则将补充说明写入 `intro.generated.md`。该文件会在加载时与 `intro.md` 合并。
 
-提示词文件位置：`res/prompts/agent_intro_generation.txt`
+提示词文件位置：`res/prompts/agent_self_intro.txt`
 
 ```env
 AGENT_INTRO_AUTOGEN_ENABLED=true

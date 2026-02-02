@@ -7,7 +7,7 @@ from Undefined.config import Config
 from Undefined.rate_limit import RateLimiter
 from Undefined.injection_response_agent import InjectionResponseAgent
 from Undefined.token_usage_storage import TokenUsageStorage
-from Undefined.ai.http import ModelRequester
+from Undefined.ai.llm import ModelRequester
 from Undefined.ai.parsing import extract_choices_content
 
 logger = logging.getLogger(__name__)

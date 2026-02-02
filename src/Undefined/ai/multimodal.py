@@ -9,7 +9,7 @@ from typing import Any
 import aiofiles
 
 from Undefined.ai.parsing import extract_choices_content
-from Undefined.ai.http import ModelRequester
+from Undefined.ai.llm import ModelRequester
 from Undefined.config import VisionModelConfig
 from Undefined.utils.logging import log_debug_json, redact_string
 

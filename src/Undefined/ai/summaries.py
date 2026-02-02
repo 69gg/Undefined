@@ -6,7 +6,7 @@ import logging
 
 import aiofiles
 
-from Undefined.ai.http import ModelRequester
+from Undefined.ai.llm import ModelRequester
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.ai.tokens import TokenCounter
 from Undefined.config import ChatModelConfig

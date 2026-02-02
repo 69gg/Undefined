@@ -12,7 +12,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 import httpx
 
-from Undefined.ai.http import ModelRequester
+from Undefined.ai.llm import ModelRequester
 from Undefined.ai.multimodal import MultimodalAnalyzer
 from Undefined.ai.prompts import PromptBuilder
 from Undefined.ai.summaries import SummaryService
@@ -217,20 +217,29 @@ class AIClient:
         logger.info("[初始化] AIClient 初始化完成")
 
     async def close(self) -> None:
-        logger.info("[清理] 正在关闭 AIClient HTTP 客户端...")
-        await self._http_client.aclose()
+        logger.info("[清理] 正在关闭 AIClient...")
 
-        if hasattr(self, "tool_registry"):
-            await self.tool_registry.close_mcp_toolsets()
-            await self.tool_registry.stop_hot_reload()
-        if hasattr(self, "agent_registry"):
-            await self.agent_registry.stop_hot_reload()
-
-        if hasattr(self, "_mcp_init_task") and not self._mcp_init_task.done():
-            await self._mcp_init_task
+        # 1) 停止后台任务（避免关闭 HTTP client 后仍有请求在跑）
+        if hasattr(self, "_agent_intro_generator"):
+            await self._agent_intro_generator.stop()
         if hasattr(self, "_agent_intro_task") and self._agent_intro_task:
             if not self._agent_intro_task.done():
                 await self._agent_intro_task
+
+        # 2) 等待 MCP 初始化完成，再关闭 MCP toolsets
+        if hasattr(self, "_mcp_init_task") and not self._mcp_init_task.done():
+            await self._mcp_init_task
+
+        if hasattr(self, "tool_registry"):
+            await self.tool_registry.stop_hot_reload()
+            await self.tool_registry.close_mcp_toolsets()
+        if hasattr(self, "agent_registry"):
+            await self.agent_registry.stop_hot_reload()
+
+        # 3) 最后关闭共享 HTTP client
+        if hasattr(self, "_http_client"):
+            logger.info("[清理] 正在关闭 AIClient HTTP 客户端...")
+            await self._http_client.aclose()
 
         logger.info("[清理] AIClient 已关闭")
 

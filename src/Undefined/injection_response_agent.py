@@ -8,7 +8,7 @@ import time
 from typing import Any
 from pathlib import Path
 
-from Undefined.ai.http import ModelRequester
+from Undefined.ai.llm import ModelRequester
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.config import SecurityModelConfig
 

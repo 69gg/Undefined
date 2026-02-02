@@ -72,6 +72,25 @@ class AgentIntroGenerator:
         if self._worker_task is None:
             self._worker_task = asyncio.create_task(self._worker_loop())
 
+    async def stop(self) -> None:
+        """停止生成器后台任务（若存在）。"""
+        task = self._worker_task
+        if task is None:
+            return
+        if task.done():
+            self._worker_task = None
+            return
+
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            logger.debug("[AgentIntro] 停止时捕获异常: %s", exc)
+        finally:
+            self._worker_task = None
+
     async def _load_cache(self) -> None:
         """加载 Agent 哈希缓存。"""
         path = self.config.cache_path
