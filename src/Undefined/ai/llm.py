@@ -25,6 +25,7 @@ from Undefined.config import (
 )
 from Undefined.token_usage_storage import TokenUsageStorage, TokenUsage
 from Undefined.utils.logging import log_debug_json, redact_string
+from Undefined.utils.tool_calls import normalize_tool_arguments_json
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +201,65 @@ def _sanitize_openai_tools(
             )
         sanitized.append(tool)
     return sanitized, changed, changes
+
+
+def _sanitize_openai_messages_tool_arguments(
+    messages: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int]:
+    """Sanitize messages[].tool_calls[].function.arguments to strict JSON strings.
+
+    Some OpenAI-compatible providers reject non-JSON `function.arguments` in the
+    request body (even though upstream OpenAI treats it as an opaque string).
+    This primarily affects conversations that include historical tool_calls.
+    """
+    if not messages:
+        return messages, 0
+
+    changed = 0
+    sanitized_messages: list[dict[str, Any]] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            sanitized_messages.append(message)
+            continue
+
+        tool_calls = message.get("tool_calls")
+        if not isinstance(tool_calls, list) or not tool_calls:
+            sanitized_messages.append(message)
+            continue
+
+        tool_calls_changed = False
+        sanitized_tool_calls: list[Any] = []
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                sanitized_tool_calls.append(tool_call)
+                continue
+            function = tool_call.get("function")
+            if not isinstance(function, dict):
+                sanitized_tool_calls.append(tool_call)
+                continue
+
+            old_args = function.get("arguments")
+            new_args = normalize_tool_arguments_json(old_args)
+            if isinstance(old_args, str) and old_args == new_args:
+                sanitized_tool_calls.append(tool_call)
+                continue
+
+            tool_calls_changed = True
+            changed += 1
+            new_tool_call = dict(tool_call)
+            new_function = dict(function)
+            new_function["arguments"] = new_args
+            new_tool_call["function"] = new_function
+            sanitized_tool_calls.append(new_tool_call)
+
+        if tool_calls_changed:
+            new_message = dict(message)
+            new_message["tool_calls"] = sanitized_tool_calls
+            sanitized_messages.append(new_message)
+        else:
+            sanitized_messages.append(message)
+
+    return sanitized_messages, changed
 
 
 def _stringify_thinking_list(value: list[Any]) -> str:
@@ -407,9 +467,18 @@ class ModelRequester:
         """发送请求到模型 API。"""
         start_time = time.perf_counter()
         ds_cot_enabled = getattr(model_config, "deepseek_new_cot_support", False)
+        messages_for_api, tool_args_fixed = _sanitize_openai_messages_tool_arguments(
+            messages
+        )
+        if tool_args_fixed and logger.isEnabledFor(logging.INFO):
+            logger.info(
+                "[messages.sanitize] tool_args_fixed=%s messages=%s",
+                tool_args_fixed,
+                len(messages_for_api),
+            )
         request_body = build_request_body(
             model_config=model_config,
-            messages=messages,
+            messages=messages_for_api,
             max_tokens=max_tokens,
             tools=tools,
             tool_choice=tool_choice,
@@ -477,7 +546,7 @@ class ModelRequester:
                 total_tokens = prompt_tokens + completion_tokens
             if total_tokens == 0:
                 prompt_tokens, completion_tokens, total_tokens = self._estimate_usage(
-                    model_config.model_name, messages, result
+                    model_config.model_name, messages_for_api, result
                 )
 
             logger.info(

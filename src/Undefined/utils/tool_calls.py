@@ -10,6 +10,12 @@ logger = logging.getLogger(__name__)
 
 _CODE_FENCE_PREFIXES: tuple[str, ...] = ("```json", "```JSON", "```")
 
+_JSON_DUMPS_KWARGS: dict[str, Any] = {
+    "ensure_ascii": False,
+    "separators": (",", ":"),
+    "default": str,
+}
+
 
 def _clean_json_string(raw: str) -> str:
     """Remove control characters that commonly break JSON parsing."""
@@ -141,3 +147,54 @@ def parse_tool_arguments(
             type(raw_args).__name__,
         )
     return {}
+
+
+def normalize_tool_arguments_json(raw_args: Any) -> str:
+    """Normalize tool call `function.arguments` to a strict JSON object string.
+
+    Some OpenAI-compatible providers validate that assistant/tool_calls/function.arguments
+    is valid JSON (and often expect an object). When models emit non-JSON or when
+    callers accidentally store a dict, subsequent requests can fail with 400.
+
+    This function always returns a JSON object string:
+    - dict -> JSON object string
+    - JSON string -> re-dumped JSON object (or wrapped into {"_value": ...})
+    - invalid / empty string -> {"_raw": "..."} or {}
+    - other types -> {"_value": ...}
+    """
+    if raw_args is None:
+        return "{}"
+
+    if isinstance(raw_args, dict):
+        return json.dumps(raw_args, **_JSON_DUMPS_KWARGS)
+
+    if isinstance(raw_args, str):
+        raw_text = raw_args
+        if not raw_text.strip():
+            return "{}"
+
+        cleaned = _strip_code_fences(raw_text)
+        candidates = [cleaned]
+        cleaned2 = _clean_json_string(cleaned)
+        if cleaned2 != cleaned:
+            candidates.append(cleaned2)
+        repaired = _repair_json_like_string(cleaned2)
+        if repaired and repaired not in candidates:
+            candidates.append(repaired)
+
+        parsed_any: Any | None = None
+        for candidate in candidates:
+            try:
+                parsed_any = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed_any, dict):
+                return json.dumps(parsed_any, **_JSON_DUMPS_KWARGS)
+            break
+
+        if parsed_any is not None:
+            return json.dumps({"_value": parsed_any}, **_JSON_DUMPS_KWARGS)
+
+        return json.dumps({"_raw": raw_text}, **_JSON_DUMPS_KWARGS)
+
+    return json.dumps({"_value": raw_args}, **_JSON_DUMPS_KWARGS)
