@@ -282,6 +282,7 @@ class ModelRequester:
     ) -> dict[str, Any]:
         """发送请求到模型 API。"""
         start_time = time.perf_counter()
+        ds_cot_enabled = getattr(model_config, "deepseek_new_cot_support", False)
         request_body = build_request_body(
             model_config=model_config,
             messages=messages,
@@ -292,6 +293,17 @@ class ModelRequester:
         )
 
         try:
+            if ds_cot_enabled and logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "[DeepSeek CoT] enabled=%s type=%s model=%s thinking_enabled=%s tools=%s messages=%s",
+                    ds_cot_enabled,
+                    call_type,
+                    model_config.model_name,
+                    getattr(model_config, "thinking_enabled", False),
+                    bool(tools),
+                    len(messages),
+                )
+
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
                     "[API请求] type=%s model=%s url=%s max_tokens=%s tools=%s tool_choice=%s messages=%s",

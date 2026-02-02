@@ -465,6 +465,8 @@ class AIClient:
         max_iterations = 1000
         iteration = 0
         conversation_ended = False
+        ds_cot_enabled = getattr(self.chat_config, "deepseek_new_cot_support", False)
+        ds_cot_logged = False
 
         while iteration < max_iterations:
             iteration += 1
@@ -494,6 +496,28 @@ class AIClient:
                     if tool_calls:
                         log_debug_json(logger, "[AI工具调用]", tool_calls)
 
+                log_thinking = os.getenv(
+                    "LOG_THINKING", "true"
+                ).strip().lower() not in {
+                    "0",
+                    "false",
+                    "no",
+                }
+                if ds_cot_enabled and tools and log_thinking and not ds_cot_logged:
+                    ds_cot_logged = True
+                    logger.info(
+                        "[DeepSeek CoT] thinking-mode 工具调用兼容已启用：将回传 reasoning_content 以避免 400"
+                    )
+                if ds_cot_enabled and reasoning_content and log_thinking:
+                    logger.info(
+                        "[DeepSeek CoT] 本轮 reasoning_content_len=%s",
+                        len(reasoning_content),
+                    )
+                    logger.info(
+                        "[DeepSeek CoT] reasoning_content=%s",
+                        redact_string(reasoning_content),
+                    )
+
                 if content.strip() and tool_calls:
                     logger.debug(
                         "AI 在 content 中返回了内容且存在工具调用，忽略 content，只执行工具调用"
@@ -511,10 +535,7 @@ class AIClient:
                     "content": content,
                     "tool_calls": tool_calls,
                 }
-                if (
-                    getattr(self.chat_config, "deepseek_new_cot_support", False)
-                    and reasoning_content is not None
-                ):
+                if ds_cot_enabled and reasoning_content is not None:
                     # DeepSeek thinking-mode 的 tool_calls 需要在同一问题的子回合中回传 reasoning_content，
                     # 否则可能触发 400（官方兼容性说明）。
                     assistant_message["reasoning_content"] = reasoning_content
