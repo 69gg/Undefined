@@ -150,6 +150,10 @@ class Config:
             thinking_budget_tokens=int(
                 os.getenv("CHAT_MODEL_THINKING_BUDGET_TOKENS", "20000")
             ),
+            deepseek_new_cot_support=os.getenv(
+                "CHAT_MODEL_DEEPSEEK_NEW_COT_SUPPORT", "false"
+            ).lower()
+            == "true",
         )
 
     @staticmethod
@@ -166,6 +170,10 @@ class Config:
             thinking_budget_tokens=int(
                 os.getenv("VISION_MODEL_THINKING_BUDGET_TOKENS", "20000")
             ),
+            deepseek_new_cot_support=os.getenv(
+                "VISION_MODEL_DEEPSEEK_NEW_COT_SUPPORT", "false"
+            ).lower()
+            == "true",
         )
 
     @staticmethod
@@ -190,6 +198,10 @@ class Config:
                 thinking_budget_tokens=int(
                     os.getenv("SECURITY_MODEL_THINKING_BUDGET_TOKENS", "0")
                 ),
+                deepseek_new_cot_support=os.getenv(
+                    "SECURITY_MODEL_DEEPSEEK_NEW_COT_SUPPORT", "false"
+                ).lower()
+                == "true",
             )
 
         logger.warning("未配置安全模型，将使用对话模型作为后备")
@@ -200,6 +212,7 @@ class Config:
             max_tokens=chat_model.max_tokens,
             thinking_enabled=False,
             thinking_budget_tokens=0,
+            deepseek_new_cot_support=False,
         )
 
     @staticmethod
@@ -216,6 +229,10 @@ class Config:
             thinking_budget_tokens=int(
                 os.getenv("AGENT_MODEL_THINKING_BUDGET_TOKENS", "0")
             ),
+            deepseek_new_cot_support=os.getenv(
+                "AGENT_MODEL_DEEPSEEK_NEW_COT_SUPPORT", "false"
+            ).lower()
+            == "true",
         )
 
     @staticmethod
@@ -289,12 +306,13 @@ class Config:
         ]
         for name, cfg in configs:
             logger.debug(
-                "[配置] %s_model=%s api_url=%s api_key_set=%s thinking=%s",
+                "[配置] %s_model=%s api_url=%s api_key_set=%s thinking=%s deepseek_new_cot=%s",
                 name,
                 cfg.model_name,
                 cfg.api_url,
                 bool(cfg.api_key),
                 cfg.thinking_enabled,
+                getattr(cfg, "deepseek_new_cot_support", False),
             )
 
     def reload(self) -> None:

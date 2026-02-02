@@ -483,6 +483,7 @@ class AIClient:
                 choice = result.get("choices", [{}])[0]
                 message = choice.get("message", {})
                 content: str = message.get("content") or ""
+                reasoning_content = message.get("reasoning_content")
                 tool_calls = message.get("tool_calls", [])
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(
@@ -505,9 +506,19 @@ class AIClient:
                     )
                     return content
 
-                messages.append(
-                    {"role": "assistant", "content": content, "tool_calls": tool_calls}
-                )
+                assistant_message: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": content,
+                    "tool_calls": tool_calls,
+                }
+                if (
+                    getattr(self.chat_config, "deepseek_new_cot_support", False)
+                    and reasoning_content is not None
+                ):
+                    # DeepSeek thinking-mode 的 tool_calls 需要在同一问题的子回合中回传 reasoning_content，
+                    # 否则可能触发 400（官方兼容性说明）。
+                    assistant_message["reasoning_content"] = reasoning_content
+                messages.append(assistant_message)
 
                 tool_tasks = []
                 tool_call_ids = []

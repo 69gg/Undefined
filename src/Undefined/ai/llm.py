@@ -547,10 +547,14 @@ def build_request_body(
     }
 
     if model_config.thinking_enabled:
-        body["thinking"] = {
-            "type": "enabled",
-            "budget_tokens": model_config.thinking_budget_tokens,
-        }
+        if getattr(model_config, "deepseek_new_cot_support", False):
+            # DeepSeek thinking mode 只需要 {"type":"enabled"}；额外字段可能导致兼容性问题。
+            body["thinking"] = {"type": "enabled"}
+        else:
+            body["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": model_config.thinking_budget_tokens,
+            }
 
     if tools:
         body["tools"] = tools
