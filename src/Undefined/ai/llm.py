@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime
 from typing import Any
@@ -64,6 +65,10 @@ _THINKING_KEYS: tuple[str, ...] = (
     "thoughts",
 )
 
+_DEFAULT_TOOLS_DESCRIPTION_MAX_LEN = 1024
+_TOOLS_PARAM_INDEX_RE = re.compile(r"Tools\[(\d+)\]", re.IGNORECASE)
+_DEFAULT_TOOLS_DESCRIPTION_PREVIEW_LEN = 160
+
 
 def _split_chat_completion_params(
     body: dict[str, Any],
@@ -76,6 +81,125 @@ def _split_chat_completion_params(
         else:
             extra[key] = value
     return known, extra
+
+
+def _tools_sanitize_enabled() -> bool:
+    value = os.getenv("TOOLS_SANITIZE", "false").strip().lower()
+    return value not in {"0", "false", "no"}
+
+
+def _tools_sanitize_verbose() -> bool:
+    value = os.getenv("TOOLS_SANITIZE_VERBOSE", "false").strip().lower()
+    return value in {"1", "true", "yes"}
+
+
+def _tools_description_max_len() -> int:
+    raw = os.getenv(
+        "TOOLS_DESCRIPTION_MAX_LEN", str(_DEFAULT_TOOLS_DESCRIPTION_MAX_LEN)
+    ).strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_TOOLS_DESCRIPTION_MAX_LEN
+    return value if value > 0 else _DEFAULT_TOOLS_DESCRIPTION_MAX_LEN
+
+
+def _clean_control_chars(text: str) -> str:
+    """Replace ASCII control characters with spaces."""
+    return "".join(" " if ord(ch) < 32 or ord(ch) == 127 else ch for ch in text)
+
+
+def _desc_preview(text: str) -> str:
+    preview_len_raw = os.getenv(
+        "TOOLS_DESCRIPTION_PREVIEW_LEN", str(_DEFAULT_TOOLS_DESCRIPTION_PREVIEW_LEN)
+    ).strip()
+    try:
+        preview_len = int(preview_len_raw)
+    except ValueError:
+        preview_len = _DEFAULT_TOOLS_DESCRIPTION_PREVIEW_LEN
+    if preview_len <= 0:
+        preview_len = _DEFAULT_TOOLS_DESCRIPTION_PREVIEW_LEN
+    return text[:preview_len] + ("…" if len(text) > preview_len else "")
+
+
+def _normalize_tool_description(description: Any, tool_name: str, max_len: int) -> str:
+    """Normalize tool function.description for stricter OpenAI-compatible providers."""
+    if description is None:
+        normalized = ""
+    elif isinstance(description, str):
+        normalized = description
+    else:
+        normalized = str(description)
+
+    normalized = _clean_control_chars(normalized)
+    normalized = " ".join(normalized.split())
+    normalized = normalized.strip()
+    if not normalized:
+        normalized = f"Tool function {tool_name}"
+    if len(normalized) > max_len:
+        normalized = normalized[:max_len].rstrip()
+    return normalized
+
+
+def _sanitize_openai_tools(
+    tools: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]]]:
+    """Sanitize tools schema to avoid 400s on strict providers (e.g., invalid description)."""
+    if not tools or not _tools_sanitize_enabled():
+        return tools, 0, []
+
+    max_len = _tools_description_max_len()
+    changed = 0
+    changes: list[dict[str, Any]] = []
+    sanitized: list[dict[str, Any]] = []
+    for idx, tool in enumerate(tools):
+        if not isinstance(tool, dict):
+            sanitized.append(tool)
+            continue
+        function = tool.get("function")
+        if not isinstance(function, dict):
+            sanitized.append(tool)
+            continue
+        name = function.get("name", "")
+        old_desc = function.get("description")
+        old_desc_str = (
+            ""
+            if old_desc is None
+            else (old_desc if isinstance(old_desc, str) else str(old_desc))
+        )
+        new_desc = _normalize_tool_description(old_desc, str(name), max_len)
+
+        if old_desc_str != new_desc:
+            reasons: list[str] = []
+            if not isinstance(old_desc, str):
+                reasons.append("non_string")
+            if any(ord(ch) < 32 or ord(ch) == 127 for ch in old_desc_str):
+                reasons.append("control_chars")
+            if "\n" in old_desc_str or "\r" in old_desc_str or "\t" in old_desc_str:
+                reasons.append("whitespace")
+            if not old_desc_str.strip():
+                reasons.append("empty")
+            if len(new_desc) >= max_len and len(old_desc_str) > len(new_desc):
+                reasons.append("truncated")
+
+            tool = dict(tool)
+            function = dict(function)
+            function["description"] = new_desc
+            tool["function"] = function
+            changed += 1
+            changes.append(
+                {
+                    "index": idx,
+                    "name": str(name),
+                    "old_len": len(old_desc_str),
+                    "new_len": len(new_desc),
+                    "old_preview": _desc_preview(_clean_control_chars(old_desc_str)),
+                    "new_preview": _desc_preview(new_desc),
+                    "reasons": reasons,
+                }
+            )
+        sanitized.append(tool)
+    return sanitized, changed, changes
 
 
 def _stringify_thinking_list(value: list[Any]) -> str:
@@ -291,6 +415,30 @@ class ModelRequester:
             tool_choice=tool_choice,
             **kwargs,
         )
+        if "tools" in request_body and isinstance(request_body.get("tools"), list):
+            sanitized_tools, changed_count, changes = _sanitize_openai_tools(
+                request_body["tools"]
+            )
+            request_body["tools"] = sanitized_tools
+            if changed_count and logger.isEnabledFor(logging.INFO):
+                logger.info(
+                    "[tools.sanitize] changed=%s total=%s max_desc_len=%s",
+                    changed_count,
+                    len(sanitized_tools),
+                    _tools_description_max_len(),
+                )
+                if _tools_sanitize_verbose():
+                    for change in changes:
+                        logger.info(
+                            "[tools.sanitize.item] index=%s name=%s reasons=%s old_len=%s new_len=%s old=%s new=%s",
+                            change.get("index"),
+                            change.get("name"),
+                            ",".join(change.get("reasons", [])),
+                            change.get("old_len"),
+                            change.get("new_len"),
+                            change.get("old_preview"),
+                            change.get("new_preview"),
+                        )
 
         try:
             if ds_cot_enabled and logger.isEnabledFor(logging.DEBUG):
@@ -369,6 +517,46 @@ class ModelRequester:
                 )
             except Exception:
                 body = str(exc.body)
+            if (
+                exc.status_code == 400
+                and isinstance(exc.body, dict)
+                and isinstance(exc.body.get("error"), dict)
+            ):
+                param = exc.body.get("error", {}).get("param")
+                if isinstance(param, str):
+                    match = _TOOLS_PARAM_INDEX_RE.search(param)
+                    if match and isinstance(request_body.get("tools"), list):
+                        try:
+                            idx = int(match.group(1))
+                        except ValueError:
+                            idx = -1
+                        if 0 <= idx < len(request_body["tools"]):
+                            tool = request_body["tools"][idx]
+                            tool_name = (
+                                tool.get("function", {}).get("name")
+                                if isinstance(tool, dict)
+                                else ""
+                            )
+                            desc_len: int | None = None
+                            desc_preview = ""
+                            if isinstance(tool, dict):
+                                function = tool.get("function", {})
+                                if isinstance(function, dict):
+                                    desc = function.get("description")
+                                    if desc is not None:
+                                        desc_str = (
+                                            desc if isinstance(desc, str) else str(desc)
+                                        )
+                                        desc_len = len(desc_str)
+                                        desc_preview = _desc_preview(desc_str)
+                            logger.error(
+                                "[tools.invalid] index=%s name=%s desc_len=%s desc=%s param=%s",
+                                idx,
+                                tool_name,
+                                desc_len,
+                                desc_preview,
+                                param,
+                            )
             logger.error(
                 "[API响应错误] status=%s request_id=%s url=%s body=%s",
                 exc.status_code,
