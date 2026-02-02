@@ -137,7 +137,7 @@ uv run -m Undefined
   - `*_MODEL_API_URL`：请填写 OpenAI 兼容的 **base URL**（如 `https://api.openai.com/v1` / `http://127.0.0.1:8000/v1`，也支持 `?api-version=...` 等 query）；如果填了完整 `/chat/completions` 旧写法也能用，但已弃用并会在运行时提示。
   - DeepSeek Thinking + Tool Calls：若使用 `deepseek-reasoner` 或 `deepseek-chat` + `thinking={"type":"enabled"}` 且启用了工具调用，建议设置 `*_MODEL_DEEPSEEK_NEW_COT_SUPPORT=true`，以便在同一问题的多轮 `tool_calls` 中回传 `reasoning_content`（避免部分场景 400）。
 - **功能配置**：`LOG_LEVEL`, `LOG_FILE_PATH`, `LOG_MAX_SIZE_MB`, `LOG_BACKUP_COUNT`, `LOG_THINKING`
-- **Token 统计归档**：`TOKEN_USAGE_MAX_SIZE_MB`（默认 5MB，<=0 禁用）, `TOKEN_USAGE_MAX_ARCHIVES`（最大归档数）, `TOKEN_USAGE_MAX_TOTAL_MB`（归档总大小上限，0 禁用）。归档目录为 `data/token_usage_archives/`，启动时自动检查并压缩。
+- **Token 统计归档**：`TOKEN_USAGE_MAX_SIZE_MB`（默认 5MB，<=0 禁用）, `TOKEN_USAGE_MAX_ARCHIVES`（最大归档数）, `TOKEN_USAGE_MAX_TOTAL_MB`（归档总大小上限，0 禁用）, `TOKEN_USAGE_ARCHIVE_PRUNE_MODE`（清理模式：delete/merge/none）。归档目录为 `data/token_usage_archives/`，启动时自动检查并压缩。
 - **Skills 热重载**：`SKILLS_HOT_RELOAD`, `SKILLS_HOT_RELOAD_INTERVAL`, `SKILLS_HOT_RELOAD_DEBOUNCE`
 - **代理设置（可选）**：`USE_PROXY`, `http_proxy`, `https_proxy`（兼容 `HTTP_PROXY/HTTPS_PROXY`）
 

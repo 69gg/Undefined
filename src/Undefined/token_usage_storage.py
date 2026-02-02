@@ -8,6 +8,7 @@ import gzip
 import json
 import logging
 import os
+import re
 import shutil
 import fcntl
 from dataclasses import dataclass, asdict
@@ -39,7 +40,70 @@ class TokenUsage:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TokenUsage":
         """从字典创建实例"""
-        return cls(**data)
+        timestamp_value = data.get("timestamp")
+        if timestamp_value is None:
+            timestamp_value = data.get("time") or data.get("created_at") or ""
+        if not isinstance(timestamp_value, str):
+            timestamp_value = str(timestamp_value)
+
+        model_name = data.get("model_name") or data.get("model") or ""
+        if not isinstance(model_name, str):
+            model_name = str(model_name)
+
+        def to_int(value: Any) -> int:
+            try:
+                return int(value or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        def to_float(value: Any) -> float:
+            try:
+                return float(value or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        prompt_tokens = to_int(
+            data.get("prompt_tokens")
+            if "prompt_tokens" in data
+            else data.get("input_tokens")
+        )
+        completion_tokens = to_int(
+            data.get("completion_tokens")
+            if "completion_tokens" in data
+            else data.get("output_tokens")
+        )
+        total_tokens = to_int(data.get("total_tokens"))
+        if total_tokens == 0 and (prompt_tokens or completion_tokens):
+            total_tokens = prompt_tokens + completion_tokens
+
+        call_type = data.get("call_type") or data.get("type") or "unknown"
+        if not isinstance(call_type, str):
+            call_type = str(call_type)
+
+        success_value = data.get("success", True)
+        if isinstance(success_value, bool):
+            success = success_value
+        elif isinstance(success_value, str):
+            success = success_value.strip().lower() not in {"0", "false", "no"}
+        else:
+            success = bool(success_value)
+
+        duration_seconds = to_float(
+            data.get("duration_seconds")
+            if "duration_seconds" in data
+            else data.get("duration")
+        )
+
+        return cls(
+            timestamp=timestamp_value,
+            model_name=model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            duration_seconds=duration_seconds,
+            call_type=call_type,
+            success=success,
+        )
 
 
 class TokenUsageStorage:
@@ -83,6 +147,22 @@ class TokenUsageStorage:
     def _archive_prefix(self) -> str:
         return self.file_path.stem
 
+    def _archive_prune_mode(self) -> str:
+        """归档清理模式
+
+        - delete: 超限时删除最旧归档（默认，兼容旧行为）
+        - merge: 超 max_archives 时合并最旧归档（尽量无损），超 max_total_bytes 仍可能删除
+        - none: 不做任何清理（无损但可能无限增长）
+        """
+        mode = os.getenv("TOKEN_USAGE_ARCHIVE_PRUNE_MODE", "delete").strip().lower()
+        if mode in {"delete", "prune", "drop"}:
+            return "delete"
+        if mode in {"merge", "repack", "lossless"}:
+            return "merge"
+        if mode in {"none", "keep", "off", "disable"}:
+            return "none"
+        return "delete"
+
     def _list_archives(self) -> list[Path]:
         pattern = f"{self._archive_prefix()}.*.jsonl.gz"
         candidates = sorted(
@@ -90,6 +170,17 @@ class TokenUsageStorage:
             key=lambda path: path.name,
         )
         return [path for path in candidates if not path.name.endswith(".tmp")]
+
+    def _extract_archive_time_key(self, filename: str) -> str | None:
+        """从归档文件名提取时间 key（用于生成可排序的 merge 归档名）"""
+        prefix = re.escape(self._archive_prefix())
+        match = re.match(
+            rf"^{prefix}\.(\d{{8}}-\d{{6}})(?:-\d+)?(?:-merged\.\d{{8}}-\d{{6}})?\.jsonl\.gz$",
+            filename,
+        )
+        if match:
+            return match.group(1)
+        return None
 
     def _build_archive_path(self) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -103,25 +194,115 @@ class TokenUsageStorage:
             index += 1
         return candidate
 
+    def _build_merged_archive_path(self, oldest_time_key: str) -> Path:
+        now_key = datetime.now().strftime("%Y%m%d-%H%M%S")
+        base_name = (
+            f"{self._archive_prefix()}.{oldest_time_key}-merged.{now_key}.jsonl.gz"
+        )
+        candidate = self.archive_dir / base_name
+        index = 1
+        while candidate.exists():
+            candidate = self.archive_dir / (
+                f"{self._archive_prefix()}.{oldest_time_key}-merged.{now_key}-{index}.jsonl.gz"
+            )
+            index += 1
+        return candidate
+
+    def _merge_archives(self, archives: list[Path]) -> Path:
+        """合并多个 .jsonl.gz 归档为一个（保持 JSONL 语义尽量无损）"""
+        if len(archives) < 2:
+            return archives[0]
+
+        oldest_key = self._extract_archive_time_key(archives[0].name)
+        if oldest_key is None:
+            oldest_key = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+        merged_path = self._build_merged_archive_path(oldest_key)
+        tmp_path = merged_path.with_suffix(merged_path.suffix + ".tmp")
+
+        logger.info(
+            "[Token统计] 合并归档: sources=%s -> %s",
+            len(archives),
+            merged_path,
+        )
+
+        last_byte: bytes = b"\n"
+        try:
+            with gzip.open(tmp_path, "wb") as dst:
+                for src_path in archives:
+                    with gzip.open(src_path, "rb") as src:
+                        while True:
+                            chunk = src.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            dst.write(chunk)
+                            last_byte = chunk[-1:]
+                    if last_byte != b"\n":
+                        dst.write(b"\n")
+                        last_byte = b"\n"
+
+            tmp_path.replace(merged_path)
+
+            for src_path in archives:
+                try:
+                    src_path.unlink()
+                except Exception:
+                    logger.warning("[Token统计] 无法删除已合并归档: %s", src_path)
+
+            return merged_path
+        except Exception:
+            if tmp_path.exists():
+                tmp_path.unlink()
+            raise
+
     def _prune_archives(
         self, max_archives: Optional[int], max_total_bytes: Optional[int]
     ) -> None:
+        prune_mode = self._archive_prune_mode()
         archives = self._list_archives()
         logger.info(
-            "[Token统计] 归档清理检查: count=%s max_archives=%s max_total_bytes=%s",
+            "[Token统计] 归档清理检查: mode=%s count=%s max_archives=%s max_total_bytes=%s",
+            prune_mode,
             len(archives),
             max_archives if max_archives is not None else "unlimited",
             max_total_bytes if max_total_bytes is not None else "unlimited",
         )
+
+        if prune_mode == "none":
+            return
+
         if max_archives is not None and max_archives > 0:
             if len(archives) > max_archives:
-                for path in archives[: len(archives) - max_archives]:
+                if prune_mode == "merge":
+                    merge_count = len(archives) - max_archives + 1
+                    merge_count = max(2, merge_count)
+                    to_merge = archives[:merge_count]
+                    logger.info(
+                        "[Token统计] 归档数量超限，尝试合并: current=%s max=%s merge_count=%s",
+                        len(archives),
+                        max_archives,
+                        merge_count,
+                    )
                     try:
-                        path.unlink()
-                        logger.info("[Token统计] 已删除归档(超数量): %s", path)
-                    except Exception:
-                        logger.warning(f"[Token统计] 无法删除归档: {path}")
-                archives = self._list_archives()
+                        merged_path = self._merge_archives(to_merge)
+                        logger.info("[Token统计] 已合并归档(超数量): %s", merged_path)
+                    except Exception as exc:
+                        logger.warning("[Token统计] 合并归档失败，跳过清理: %s", exc)
+                    archives = self._list_archives()
+                else:
+                    logger.info(
+                        "[Token统计] 归档数量超限，开始删除最旧: current=%s max=%s delete_count=%s",
+                        len(archives),
+                        max_archives,
+                        len(archives) - max_archives,
+                    )
+                    for path in archives[: len(archives) - max_archives]:
+                        try:
+                            path.unlink()
+                            logger.info("[Token统计] 已删除归档(超数量): %s", path)
+                        except Exception:
+                            logger.warning(f"[Token统计] 无法删除归档: {path}")
+                    archives = self._list_archives()
 
         if max_total_bytes is not None and max_total_bytes > 0:
             total = 0
@@ -301,29 +482,64 @@ class TokenUsageStorage:
                 batch: list[TokenUsage] = []
                 if not path.exists():
                     return batch
+                invalid_lines = 0
+                first_error: tuple[int, str, str] | None = None
+                total_lines = 0
                 try:
                     if path.suffix == ".gz":
                         f_handle = gzip.open(path, "rt", encoding="utf-8")
                     else:
                         f_handle = open(path, "r", encoding="utf-8")
                     with f_handle as f:
-                        for line in f:
-                            line = line.strip()
-                            if line:
-                                try:
-                                    data = json.loads(line)
-                                    batch.append(TokenUsage.from_dict(data))
-                                except json.JSONDecodeError:
-                                    pass
+                        for line_no, raw_line in enumerate(f, start=1):
+                            line = raw_line.strip()
+                            if not line:
+                                continue
+                            total_lines += 1
+                            try:
+                                data = json.loads(line)
+                                if not isinstance(data, dict):
+                                    raise TypeError("record is not a JSON object")
+                                batch.append(TokenUsage.from_dict(data))
+                            except Exception as exc:
+                                invalid_lines += 1
+                                if first_error is None:
+                                    preview = line[:240]
+                                    first_error = (line_no, type(exc).__name__, preview)
                 except OSError:
                     logger.warning(f"[Token统计] 读取归档失败: {path}")
+                if invalid_lines:
+                    err_line = first_error[0] if first_error else -1
+                    err_type = first_error[1] if first_error else "unknown"
+                    err_preview = first_error[2] if first_error else ""
+                    logger.warning(
+                        "[Token统计] 解析记录失败: path=%s invalid_lines=%s first_error_line=%s first_error_type=%s preview=%s",
+                        path,
+                        invalid_lines,
+                        err_line,
+                        err_type,
+                        err_preview,
+                    )
+                logger.debug(
+                    "[Token统计] 读取完成: path=%s lines=%s records=%s invalid=%s",
+                    path,
+                    total_lines,
+                    len(batch),
+                    invalid_lines,
+                )
                 return batch
 
             def sync_read() -> list[TokenUsage]:
                 batch: list[TokenUsage] = []
-                for archive in self._list_archives():
+                archives = self._list_archives()
+                for archive in archives:
                     batch.extend(read_records_from_path(archive))
                 batch.extend(read_records_from_path(self.file_path))
+                logger.info(
+                    "[Token统计] 汇总读取完成: archives=%s total_records=%s",
+                    len(archives),
+                    len(batch),
+                )
                 return batch
 
             records = await asyncio.to_thread(sync_read)
