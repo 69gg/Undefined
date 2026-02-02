@@ -190,142 +190,188 @@ Undefined 支持 **MCP (Model Context Protocol)** 协议，可以连接外部 MC
 
 ```mermaid
 graph TB
-    %% 外部实体
+    %% ==================== 外部实体层 ====================
     User([用户 User])
     Admin([管理员 Admin])
-    OneBotPlatform["OneBot 协议端\n(NapCat / Lagrange)"]
-    LLM_API["大模型 API\n(OpenAI / Claude / DeepSeek)"]
+    OneBotServer["OneBot 协议端<br/>(NapCat / Lagrange.Core)"]
+    LLM_API["大模型 API 服务商<br/>(OpenAI / Claude / DeepSeek / etc.)"]
 
-    %% 核心入口
-    subgraph Core [核心接入层]
-        Main[main.py 启动入口]
-        Config[Config 配置管理]
-        OneBotClient["OneBot Client\n(WebSocket 通信)"]
+    %% ==================== 核心入口层 ====================
+    subgraph EntryPoint["核心入口层 (src/Undefined/)"]
+        Main["main.py<br/>启动入口"]
+        ConfigLoader["Config<br/>配置管理器<br/>(config/loader.py)"]
+        OneBotClient["OneBotClient<br/>WebSocket 客户端<br/>(onebot.py)"]
+        Context["RequestContext<br/>请求上下文<br/>(context.py)"]
     end
 
-    %% 消息处理流
-    subgraph Processing [消息处理流]
-        MessageHandler[MessageHandler 消息分发]
-        
-        subgraph Security [安全防线]
-            SecurityService[SecurityService 注入检测]
-            SecurityModel[安全模型]
-        end
-        
-        CommandDispatcher[CommandDispatcher 指令分发]
-        
-        subgraph AI_Coordination [AI 协调与调度]
-            AICoordinator[AICoordinator 协调器]
-            
-            subgraph QueueSystem ["车站-列车" 队列系统]
-                QueueManager[QueueManager]
-                
-                subgraph ModelQueues ["ModelQueue (按模型隔离)"]
-                    Q_Admin[超级管理员队列]
-                    Q_Private[私聊队列]
-                    Q_Mention["群聊@队列"]
-                    Q_Normal[群聊普通队列]
-                end
-                
-                DispatcherLoop(("1Hz 非阻塞发车循环"))
-            end
-        end
+    %% ==================== 消息处理层 ====================
+    subgraph MessageLayer["消息处理层"]
+        MessageHandler["MessageHandler<br/>消息处理器<br/>(handlers.py)"]
+        SecurityService["SecurityService<br/>安全服务<br/>• 注入检测 • 速率限制<br/>(security.py)"]
+        CommandDispatcher["CommandDispatcher<br/>命令分发器<br/>• /help /stats /lsadmin<br/>• /addadmin /rmadmin<br/>(services/command.py)"]
+        AICoordinator["AICoordinator<br/>AI 协调器<br/>• Prompt 构建 • 队列管理<br/>• 回复执行<br/>(ai_coordinator.py)"]
+        QueueManager["QueueManager<br/>队列管理器<br/>(queue_manager.py)"]
     end
 
-    %% AI 核心与大脑
-    subgraph Brain [AI 核心能力层]
-        subgraph AIRuntime ["AI Runtime (src/Undefined/ai)"]
-            AIClient[AIClient 统一接口]
-            PromptBuilder[PromptBuilder 构建提示词]
-            ToolManager[ToolManager 工具调度]
-            ModelRequester[ModelRequester (ai/llm.py) API 调用]
-            MultimodalAnalyzer[MultimodalAnalyzer 多模态]
-            SummaryService[SummaryService 总结/标题]
-            TokenCounter[TokenCounter Token 统计]
-        end
-
-        subgraph Context [上下文管理]
-            HistoryManager[MessageHistoryManager]
-            MemoryStorage[Memory 长期记忆]
-            EndSummary[EndSummaryStorage]
-        end
-
-        subgraph SkillsSystem [Skills 技能系统]
-            ToolRegistry[ToolRegistry 工具注册]
-            AgentRegistry[AgentRegistry 代理注册]
-
-            subgraph AtomicTools [基础工具 Tools]
-                T_End[end 结束对话]
-                T_Python[python_interpreter]
-                T_Time[get_current_time]
-            end
-
-            subgraph IntelligentAgents [智能体 Agents]
-                A_Web[WebAgent 网络搜索]
-                A_Code[CodeAnalysisAgent 代码分析]
-                A_Info[InfoAgent 信息查询]
-                A_Social[SocialAgent 社交互动]
-            end
-
-            subgraph Extensions [扩展]
-                MCP_Client[MCP Client]
-                Ext_MCP[外部 MCP Server]
-            end
-        end
+    %% ==================== AI 核心能力层 ====================
+    subgraph AILayer["AI 核心能力层 (src/Undefined/ai/)"]
+        AIClient["AIClient<br/>AI 客户端主入口<br/>(client.py)<br/>• 技能热重载 • MCP 初始化<br/>• Agent intro 生成"]
+        PromptBuilder["PromptBuilder<br/>提示词构建器<br/>(prompts.py)"]
+        ModelRequester["ModelRequester<br/>模型请求器<br/>(llm.py)<br/>• OpenAI SDK • 工具清理<br/>• Thinking 提取"]
+        ToolManager["ToolManager<br/>工具管理器<br/>(tooling.py)<br/>• 工具执行 • Agent 工具合并<br/>• MCP 工具注入"]
+        MultimodalAnalyzer["MultimodalAnalyzer<br/>多模态分析器<br/>(multimodal.py)"]
+        SummaryService["SummaryService<br/>总结服务<br/>(summaries.py)"]
+        TokenCounter["TokenCounter<br/>Token 统计<br/>(tokens.py)"]
     end
 
-    %% 连线关系
-    User -->|发送消息| OneBotPlatform
-    Admin -->|管理指令| OneBotPlatform
-    OneBotPlatform <-->|WS Event/API| OneBotClient
-    
-    Main --> OneBotClient
-    Main --> Config
-    
-    OneBotClient -->|Event| MessageHandler
-    
-    MessageHandler -->|1.检测| SecurityService
-    SecurityService -.->|API Call| SecurityModel
-    
-    MessageHandler -->|2.指令?| CommandDispatcher
-    CommandDispatcher -->|Execute| OneBotClient
-    
-    MessageHandler -->|3.自动回复| AICoordinator
-    AICoordinator -->|构建 Context| HistoryManager
-    AICoordinator -->|入队请求| QueueManager
-    
-    QueueManager -->|分发| ModelQueues
-    ModelQueues -->|轮询取值| DispatcherLoop
-    
-    DispatcherLoop -->|异步执行| AIClient
+    %% ==================== 存储与上下文层 ====================
+    subgraph StorageLayer["存储与上下文层"]
+        HistoryManager["MessageHistoryManager<br/>消息历史管理<br/>(utils/history.py)<br/>• 懒加载 • 10000条限制"]
+        MemoryStorage["MemoryStorage<br/>长期记忆存储<br/>(memory.py)<br/>• 500条上限 • 自动去重"]
+        EndSummaryStorage["EndSummaryStorage<br/>短期总结存储<br/>(end_summary_storage.py)"]
+        FAQStorage["FAQStorage<br/>FAQ 存储<br/>(faq.py)"]
+        ScheduledTaskStorage["ScheduledTaskStorage<br/>定时任务存储<br/>(scheduled_task_storage.py)"]
+        TokenUsageStorage["TokenUsageStorage<br/>Token 使用统计<br/>(token_usage_storage.py)<br/>• 自动归档 • gzip 压缩"]
+    end
 
+    %% ==================== 技能系统层 ====================
+    subgraph SkillsLayer["Skills 技能系统 (src/Undefined/skills/)"]
+        ToolRegistry["ToolRegistry<br/>工具注册表<br/>(registry.py)<br/>• 延迟加载 • 热重载支持<br/>• 执行统计"]
+        AgentRegistry["AgentRegistry<br/>Agent 注册表<br/>(registry.py)<br/>• Agent 发现 • 工具聚合"]
+        
+        subgraph AtomicTools["基础工具"]
+            T_End["end<br/>结束对话"]
+            T_Python["python_interpreter<br/>Python 解释器"]
+            T_Time["get_current_time<br/>获取当前时间"]
+        end
+        
+        subgraph Toolsets["工具集 (7大类)"]
+            TS_Group["group.*<br/>群管理"]
+            TS_Messages["messages.*<br/>消息"]
+            TS_Memory["memory.*<br/>记忆"]
+            TS_Notices["notices.*<br/>公告"]
+            TS_Render["render.*<br/>渲染"]
+            TS_Scheduler["scheduler.*<br/>定时任务"]
+        end
+        
+        subgraph IntelligentAgents["智能体 Agents (6个)"]
+            A_Info["info_agent<br/>信息查询助手<br/>(15个工具)"]
+            A_Social["social_agent<br/>社交媒体助手<br/>(8个工具)"]
+            A_Web["web_agent<br/>网络搜索助手<br/>• MCP Playwright"]
+            A_File["file_analysis_agent<br/>文件分析助手<br/>(14个工具)"]
+            A_Naga["naga_code_analysis_agent<br/>NagaAgent 代码分析<br/>(7个工具)"]
+            A_Ent["entertainment_agent<br/>娱乐助手<br/>(10个工具)"]
+        end
+        
+        MCPRegistry["MCPToolRegistry<br/>MCP 工具注册表<br/>(mcp/registry.py)"]
+    end
+
+    %% ==================== IO 工具层 ====================
+    subgraph IOLayer["异步 IO 层 (utils/io.py)"]
+        IOUtils["IO 工具<br/>• write_json • read_json<br/>• append_line<br/>• 文件锁 (flock)"]
+    end
+
+    %% ==================== 数据持久化层 ====================
+    subgraph Persistence["数据持久化层 (data/)"]
+        Dir_History["history/<br/>• group_{id}.json<br/>• private_{id}.json"]
+        Dir_FAQ["faq/{group_id}/<br/>• YYYYMMDD-NNN.json"]
+        Dir_TokenUsage["token_usage_archives/<br/>• *.jsonl.gz"]
+        File_Memory["memory.json<br/>(长期记忆)"]
+        File_EndSummary["end_summaries.json<br/>(短期总结)"]
+        File_ScheduledTasks["scheduled_tasks.json<br/>(定时任务)"]
+    end
+
+    %% ==================== 连接线 ====================
+    %% 外部实体到核心入口
+    User -->|"消息"| OneBotServer
+    Admin -->|"指令"| OneBotServer
+    OneBotServer <-->|"WebSocket<br/>Event / API"| OneBotClient
+    
+    %% 核心入口层内部
+    Main -->|"初始化"| ConfigLoader
+    Main -->|"创建"| OneBotClient
+    Main -->|"创建"| AIClient
+    OneBotClient -->|"消息事件"| MessageHandler
+    
+    %% 消息处理层
+    MessageHandler -->|"1. 安全检测"| SecurityService
+    SecurityService -.->|"API 调用"| LLM_API
+    
+    MessageHandler -->|"2. 指令?"| CommandDispatcher
+    CommandDispatcher -->|"执行结果"| OneBotClient
+    
+    MessageHandler -->|"3. 自动回复"| AICoordinator
+    AICoordinator -->|"创建上下文"| Context
+    AICoordinator -->|"入队"| QueueManager
+    QueueManager -->|"1Hz 发车<br/>异步执行"| AIClient
+    
+    %% AI 核心能力层
     AIClient --> PromptBuilder
-    AIClient --> ToolManager
     AIClient --> ModelRequester
+    AIClient --> ToolManager
     AIClient --> MultimodalAnalyzer
     AIClient --> SummaryService
     AIClient --> TokenCounter
-
-    PromptBuilder --> HistoryManager
-    PromptBuilder --> MemoryStorage
-    PromptBuilder --> EndSummary
-
-    ModelRequester <-->|API Request| LLM_API
-    ToolManager <-->|调用| ToolRegistry
-    ToolRegistry --> SkillsSystem
-    MCP_Client <-->|Protocol| Ext_MCP
     
-    AtomicTools -->|Action| OneBotClient
-    IntelligentAgents -->|Recursive Call| AIClient
+    ModelRequester <-->|"API 请求"| LLM_API
     
-    AIClient -->|Reply Text| OneBotClient
+    %% 存储层连接
+    PromptBuilder -->|"注入"| HistoryManager
+    PromptBuilder -->|"注入"| MemoryStorage
+    PromptBuilder -->|"注入"| EndSummaryStorage
     
-    %% 样式
-    style QueueSystem fill:#e1f5fe,stroke:#01579b
-    style ModelQueues fill:#b3e5fc,stroke:#0277bd
-    style DispatcherLoop fill:#ffe0b2,stroke:#ff6f00,stroke-width:2px
-    style AIClient fill:#d1c4e9,stroke:#512da8,stroke-width:2px
-    style SkillsSystem fill:#f0f4c3,stroke:#827717
+    MessageHandler -->|"保存消息"| HistoryManager
+    AICoordinator -->|"记录统计"| TokenUsageStorage
+    CommandDispatcher -->|"FAQ 操作"| FAQStorage
+    
+    %% 技能系统层
+    ToolManager -->|"获取工具"| ToolRegistry
+    ToolManager -->|"获取 Agent"| AgentRegistry
+    ToolManager -->|"获取 MCP"| MCPRegistry
+    
+    ToolRegistry --> AtomicTools
+    ToolRegistry --> Toolsets
+    AgentRegistry --> IntelligentAgents
+    
+    %% IO 层连接
+    HistoryManager -->|"异步读写"| IOUtils
+    MemoryStorage -->|"异步读写"| IOUtils
+    TokenUsageStorage -->|"异步读写<br/>自动归档"| IOUtils
+    FAQStorage -->|"异步读写"| IOUtils
+    ScheduledTaskStorage -->|"异步读写"| IOUtils
+    
+    IOUtils --> Dir_History
+    IOUtils --> File_Memory
+    IOUtils --> File_EndSummary
+    IOUtils --> Dir_TokenUsage
+    IOUtils --> Dir_FAQ
+    IOUtils --> File_ScheduledTasks
+    
+    %% Agent 递归调用
+    IntelligentAgents -->|"递归调用"| AIClient
+    
+    %% 最终输出
+    AIClient -->|"Reply Text"| OneBotClient
+    OneBotClient -->|"发送"| OneBotServer
+    
+    %% 样式定义
+    classDef external fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef core fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef message fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef ai fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+    classDef skills fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    classDef storage fill:#e0f7fa,stroke:#00838f,stroke-width:2px
+    classDef io fill:#fce4ec,stroke:#c2185b,stroke-width:1px
+    classDef persistence fill:#f5f5f5,stroke:#616161,stroke-width:1px
+    
+    class User,Admin,OneBotServer,LLM_API external
+    class Main,ConfigLoader,OneBotClient,Context core
+    class MessageHandler,SecurityService,CommandDispatcher,AICoordinator,QueueManager message
+    class AIClient,PromptBuilder,ModelRequester,ToolManager,MultimodalAnalyzer,SummaryService,TokenCounter ai
+    class ToolRegistry,AgentRegistry,MCPRegistry,AtomicTools,Toolsets,IntelligentAgents skills
+    class HistoryManager,MemoryStorage,EndSummaryStorage,FAQStorage,ScheduledTaskStorage,TokenUsageStorage storage
+    class IOUtils io
+    class Dir_History,Dir_FAQ,Dir_TokenUsage,File_Memory,File_EndSummary,File_ScheduledTasks persistence
 ```
 
 ### Skills 插件系统
