@@ -460,6 +460,8 @@ class AIClient:
         tool_context.setdefault(
             "send_private_message_callback", self._send_private_message_callback
         )
+        tool_context.setdefault("send_message_callback", send_message_callback)
+        tool_context.setdefault("sender", sender)
         tool_context.setdefault("send_image_callback", self._send_image_callback)
 
         max_iterations = 1000
@@ -467,6 +469,7 @@ class AIClient:
         conversation_ended = False
         ds_cot_enabled = getattr(self.chat_config, "deepseek_new_cot_support", False)
         ds_cot_logged = False
+        ds_cot_missing_reason_logged = False
 
         while iteration < max_iterations:
             iteration += 1
@@ -516,6 +519,25 @@ class AIClient:
                     logger.info(
                         "[DeepSeek CoT] reasoning_content=%s",
                         redact_string(reasoning_content),
+                    )
+                if (
+                    ds_cot_enabled
+                    and log_thinking
+                    and tools
+                    and getattr(self.chat_config, "thinking_enabled", False)
+                    and not reasoning_content
+                    and tool_calls
+                    and not ds_cot_missing_reason_logged
+                ):
+                    ds_cot_missing_reason_logged = True
+                    message_keys = (
+                        ", ".join(sorted(message.keys()))
+                        if isinstance(message, dict)
+                        else type(message).__name__
+                    )
+                    logger.info(
+                        "[DeepSeek CoT] 未在响应中发现 reasoning_content（可能是模型/服务商不返回思维链）；message_keys=%s",
+                        message_keys,
                     )
 
                 if content.strip() and tool_calls:

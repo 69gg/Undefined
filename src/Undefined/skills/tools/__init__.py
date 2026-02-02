@@ -1,4 +1,5 @@
 import logging
+import copy
 from pathlib import Path
 from typing import Dict, Any, List, TYPE_CHECKING
 
@@ -210,10 +211,70 @@ class ToolRegistry(BaseRegistry):
 
     # --- 兼容性别名 ---
 
+    def _resolve_compat_tool_name(self, tool_name: str) -> str:
+        """将未带分类前缀的工具名映射到 toolsets 工具。
+
+        兼容历史 prompt/模型输出中直接调用 `send_message` 这类未带前缀的写法，
+        自动映射到唯一匹配的 `<category>.<tool_name>` 工具（例如 `messages.send_message`）。
+        """
+        if not tool_name or "." in tool_name:
+            return tool_name
+        if tool_name in self._items:
+            return tool_name
+
+        candidates = [
+            name for name in self._items.keys() if name.endswith(f".{tool_name}")
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+
+        # 若存在多个候选，优先 messages.<tool_name>（最常见的历史工具名冲突场景）。
+        preferred = f"messages.{tool_name}"
+        if preferred in self._items:
+            return preferred
+        return tool_name
+
+    def _build_schema_aliases(self) -> dict[str, str]:
+        """返回 (alias_name -> full_name) 的别名映射，用于工具 schema 兼容。"""
+        aliases: dict[str, str] = {}
+        # 历史 prompt 常使用无前缀的 send_message / send_private_message
+        for alias, full_name in (
+            ("send_message", "messages.send_message"),
+            ("send_private_message", "messages.send_private_message"),
+        ):
+            if alias in self._items:
+                continue
+            if full_name in self._items:
+                aliases[alias] = full_name
+        return aliases
+
     def get_tools_schema(self) -> List[Dict[str, Any]]:
-        return self.get_schema()
+        schema = list(self.get_schema())
+        aliases = self._build_schema_aliases()
+        if not aliases:
+            return schema
+
+        for alias_name, full_name in aliases.items():
+            target = next(
+                (
+                    item
+                    for item in schema
+                    if item.get("function", {}).get("name") == full_name
+                ),
+                None,
+            )
+            if not target:
+                continue
+            alias_schema = copy.deepcopy(target)
+            alias_schema.setdefault("function", {})
+            alias_schema["function"]["name"] = alias_name
+            schema.append(alias_schema)
+        return schema
 
     async def execute_tool(
         self, tool_name: str, args: Dict[str, Any], context: Dict[str, Any]
     ) -> str:
-        return await self.execute(tool_name, args, context)
+        resolved = self._resolve_compat_tool_name(tool_name)
+        if resolved != tool_name:
+            logger.info("[tool.alias] %s -> %s", tool_name, resolved)
+        return await self.execute(resolved, args, context)
