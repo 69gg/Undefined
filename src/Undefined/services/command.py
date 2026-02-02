@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from datetime import datetime
@@ -41,6 +42,8 @@ class CommandDispatcher:
         faq_storage: FAQStorage,
         onebot: OneBotClient,
         security: SecurityService,
+        queue_manager: Any = None,
+        rate_limiter: Any = None,
     ) -> None:
         """初始化命令分发器
 
@@ -51,6 +54,8 @@ class CommandDispatcher:
             faq_storage: FAQ 存储管理器
             onebot: OneBot HTTP API 客户端
             security: 安全审计与限流服务
+            queue_manager: AI 请求队列管理器
+            rate_limiter: 速率限制器
         """
         self.config = config
         self.sender = sender
@@ -58,7 +63,12 @@ class CommandDispatcher:
         self.faq_storage = faq_storage
         self.onebot = onebot
         self.security = security
+        self.queue_manager = queue_manager
+        self.rate_limiter = rate_limiter
         self._token_usage_storage = TokenUsageStorage()
+        # 存储 stats 分析结果，用于队列回调
+        self._stats_analysis_results: dict[int, str] = {}
+        self._stats_analysis_events: dict[int, asyncio.Event] = {}
 
     def parse_command(self, text: str) -> Optional[dict[str, Any]]:
         """解析斜杠命令字符串
@@ -125,12 +135,14 @@ class CommandDispatcher:
         except ValueError:
             return 7
 
-    async def _handle_stats(self, group_id: int, args: list[str]) -> None:
-        """处理 /stats 命令，生成 token 使用统计图表"""
+    async def _handle_stats(
+        self, group_id: int, sender_id: int, args: list[str]
+    ) -> None:
+        """处理 /stats 命令，生成 token 使用统计图表并进行 AI 分析"""
         # 1. 基础环境与参数检查
         if not _MATPLOTLIB_AVAILABLE:
             await self.sender.send_group_message(
-                group_id, "❌ 缺少必要的库，无法生成图表。请安装 matplotlib 和 pandas。"
+                group_id, "❌ 缺少必要的库，无法生成图表。请安装 matplotlib。"
             )
             return
 
@@ -158,8 +170,45 @@ class CommandDispatcher:
             await self._generate_pie_chart(summary, img_dir)
             await self._generate_stats_table(summary, img_dir)
 
-            # 4. 构建并发送合并转发消息
-            forward_messages = self._build_stats_forward_nodes(summary, img_dir, days)
+            # 4. 投递 AI 分析请求到队列
+            ai_analysis = ""
+            if self.queue_manager:
+                # 构建数据摘要
+                data_summary = self._build_data_summary(summary, days)
+
+                # 创建事件等待分析结果
+                analysis_event = asyncio.Event()
+                self._stats_analysis_events[group_id] = analysis_event
+
+                # 投递到队列
+                request_data = {
+                    "type": "stats_analysis",
+                    "group_id": group_id,
+                    "sender_id": sender_id,
+                    "data_summary": data_summary,
+                    "summary": summary,
+                    "days": days,
+                }
+                await self.queue_manager.add_group_mention_request(
+                    request_data, model_name=self.config.chat_model.model_name
+                )
+                logger.info(f"[Stats] 已投递 AI 分析请求到队列，群: {group_id}")
+
+                # 等待 AI 分析结果，120秒超时
+                try:
+                    await asyncio.wait_for(analysis_event.wait(), timeout=120.0)
+                    ai_analysis = self._stats_analysis_results.pop(group_id, "")
+                    logger.info(f"[Stats] 已获取 AI 分析结果，长度: {len(ai_analysis)}")
+                except asyncio.TimeoutError:
+                    logger.warning(f"[Stats] AI 分析超时，群: {group_id}，仅发送图表")
+                    ai_analysis = ""
+                finally:
+                    self._stats_analysis_events.pop(group_id, None)
+
+            # 5. 构建并发送合并转发消息（包含 AI 分析）
+            forward_messages = self._build_stats_forward_nodes(
+                summary, img_dir, days, ai_analysis
+            )
             await self.onebot.send_forward_msg(group_id, forward_messages)
 
             from Undefined.utils.cache import cleanup_cache_dir
@@ -169,6 +218,115 @@ class CommandDispatcher:
         except Exception as e:
             logger.exception(f"[Stats] 生成统计图表失败: {e}")
             await self.sender.send_group_message(group_id, f"❌ 生成统计图表失败: {e}")
+
+    def _build_data_summary(self, summary: dict[str, Any], days: int) -> str:
+        """构建用于 AI 分析的统计数据摘要"""
+        lines = []
+        lines.append("📊 Token 使用综合分析数据：")
+        lines.append("")
+
+        # 整体概况
+        lines.append("【整体概况】")
+        lines.append(f"统计周期: {days} 天")
+        lines.append(f"总调用次数: {summary['total_calls']}")
+        lines.append(f"总 Token 消耗: {summary['total_tokens']:,}")
+        lines.append(f"平均响应时间: {summary['avg_duration']:.2f}s")
+        lines.append(f"涉及模型数: {len(summary['models'])}")
+        lines.append("")
+
+        # 时间维度
+        daily_stats = summary.get("daily_stats", {})
+        if daily_stats:
+            dates = sorted(daily_stats.keys())
+            total_daily_calls = sum(daily_stats[d]["calls"] for d in dates)
+            total_daily_tokens = sum(daily_stats[d]["tokens"] for d in dates)
+            avg_daily_calls = total_daily_calls / len(dates) if dates else 0
+            avg_daily_tokens = total_daily_tokens / len(dates) if dates else 0
+
+            # 找出高峰日
+            peak_day = (
+                max(dates, key=lambda d: daily_stats[d]["tokens"]) if dates else ""
+            )
+            peak_day_tokens = daily_stats[peak_day]["tokens"] if peak_day else 0
+
+            lines.append("【时间维度】")
+            lines.append(f"统计天数: {len(dates)} 天")
+            lines.append(f"每日平均调用: {avg_daily_calls:.1f} 次")
+            lines.append(f"每日平均 Token: {avg_daily_tokens:,.0f} 个")
+            lines.append(f"高峰日期: {peak_day} ({peak_day_tokens:,} tokens)")
+            lines.append("")
+
+        # 模型维度
+        models = summary.get("models", {})
+        if models:
+            lines.append("【模型维度】")
+            total_tokens_all = summary["total_tokens"]
+            for model_name, model_data in sorted(
+                models.items(), key=lambda x: x[1]["tokens"], reverse=True
+            ):
+                calls = model_data["calls"]
+                tokens = model_data["tokens"]
+                prompt_tokens = model_data["prompt_tokens"]
+                completion_tokens = model_data["completion_tokens"]
+                token_pct = (
+                    (tokens / total_tokens_all * 100) if total_tokens_all > 0 else 0
+                )
+                avg_per_call = tokens / calls if calls > 0 else 0
+                io_ratio = completion_tokens / prompt_tokens if prompt_tokens > 0 else 0
+
+                lines.append(f"模型: {model_name}")
+                lines.append(
+                    f"  - 调用次数: {calls} ({calls / summary['total_calls'] * 100:.1f}%)"
+                )
+                lines.append(f"  - Token 消耗: {tokens:,} ({token_pct:.1f}%)")
+                lines.append(f"  - 平均每次调用: {avg_per_call:.0f} tokens")
+                lines.append(
+                    f"  - 输入: {prompt_tokens:,} / 输出: {completion_tokens:,}"
+                )
+                lines.append(f"  - 输入/输出比: 1:{io_ratio:.2f}")
+                lines.append("")
+
+        # 效率指标
+        prompt_tokens = summary.get("prompt_tokens", 0)
+        completion_tokens = summary.get("completion_tokens", 0)
+        total_tokens = summary.get("total_tokens", 0)
+        input_ratio = (prompt_tokens / total_tokens * 100) if total_tokens > 0 else 0
+        output_ratio = (
+            (completion_tokens / total_tokens * 100) if total_tokens > 0 else 0
+        )
+        output_per_input = completion_tokens / prompt_tokens if prompt_tokens > 0 else 0
+
+        lines.append("【效率指标】")
+        lines.append(f"输入 Token: {prompt_tokens:,} ({input_ratio:.1f}%)")
+        lines.append(f"输出 Token: {completion_tokens:,} ({output_ratio:.1f}%)")
+        lines.append(f"输入/输出比: 1:{output_per_input:.2f}")
+        lines.append("")
+
+        # 趋势分析
+        if daily_stats and len(daily_stats) > 1:
+            lines.append("【趋势分析】")
+            dates = sorted(daily_stats.keys())
+            first_day_tokens = daily_stats[dates[0]]["tokens"]
+            last_day_tokens = daily_stats[dates[-1]]["tokens"]
+            trend_change = (
+                ((last_day_tokens - first_day_tokens) / first_day_tokens * 100)
+                if first_day_tokens > 0
+                else 0
+            )
+            trend_desc = "增长" if trend_change > 0 else "下降"
+            lines.append(
+                f"总体趋势: {trend_desc} {abs(trend_change):.1f}% (从首日到末日)"
+            )
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def set_stats_analysis_result(self, group_id: int, analysis: str) -> None:
+        """设置 AI 分析结果（由队列处理器调用）"""
+        self._stats_analysis_results[group_id] = analysis
+        event = self._stats_analysis_events.get(group_id)
+        if event:
+            event.set()
 
     async def _handle_stats_help(self, group_id: int) -> None:
         """发送 stats 命令的帮助信息"""
@@ -190,7 +348,11 @@ class CommandDispatcher:
         await self.sender.send_group_message(group_id, help_text)
 
     def _build_stats_forward_nodes(
-        self, summary: dict[str, Any], img_dir: Path, days: int
+        self,
+        summary: dict[str, Any],
+        img_dir: Path,
+        days: int,
+        ai_analysis: str = "",
     ) -> list[dict[str, Any]]:
         """构建用于合并转发的统计图表节点列表"""
         nodes = []
@@ -222,6 +384,10 @@ class CommandDispatcher:
 • 平均耗时: {summary["avg_duration"]:.2f}s
 • 涉及模型数: {len(summary["models"])}"""
         add_node(summary_text)
+
+        # 添加 AI 分析结果（如果有）
+        if ai_analysis:
+            add_node(f"🤖 AI 智能分析\n{ai_analysis}")
 
         return nodes
 
@@ -499,8 +665,8 @@ class CommandDispatcher:
             if cmd_name == "help":
                 await self._handle_help(group_id)
             elif cmd_name == "stats":
-                await self._check_rate_limit_and_handle(
-                    group_id, sender_id, self._handle_stats, group_id, cmd_args
+                await self._check_stats_rate_limit_and_handle(
+                    group_id, sender_id, cmd_args
                 )
             elif cmd_name == "lsfaq":
                 await self._check_rate_limit_and_handle(
@@ -579,6 +745,30 @@ class CommandDispatcher:
             return
         self.security.record_rate_limit(user_id)
         await handler(*args)
+
+    async def _check_stats_rate_limit_and_handle(
+        self, group_id: int, user_id: int, args: list[str]
+    ) -> None:
+        """检查 /stats 命令的速率限制并执行
+
+        规则：
+        - 超级管理员和管理员：无限制
+        - 普通用户：1小时/次
+        """
+        # 检查 stats 专用频率限制
+        if self.rate_limiter:
+            allowed, remaining = self.rate_limiter.check_stats(user_id)
+            if not allowed:
+                minutes = remaining // 60
+                seconds = remaining % 60
+                time_str = f"{minutes}分{seconds}秒" if minutes > 0 else f"{seconds}秒"
+                await self.sender.send_group_message(
+                    group_id, f"⏳ /stats 命令太频繁，请 {time_str}后再试"
+                )
+                return
+            self.rate_limiter.record_stats(user_id)
+
+        await self._handle_stats(group_id, user_id, args)
 
     async def _send_no_permission(
         self, group_id: int, sender_id: int, cmd_name: str, required_role: str

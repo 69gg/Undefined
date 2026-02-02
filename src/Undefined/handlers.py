@@ -8,6 +8,7 @@ from typing import Any
 from Undefined.ai import AIClient
 from Undefined.config import Config
 from Undefined.faq import FAQStorage
+from Undefined.rate_limit import RateLimiter
 from Undefined.services.queue_manager import QueueManager
 from Undefined.onebot import (
     OneBotClient,
@@ -56,18 +57,28 @@ class MessageHandler:
 
         # 初始化服务
         self.security = SecurityService(config, ai._http_client)
+        self.rate_limiter = RateLimiter(config)
+        self.queue_manager = QueueManager()
         self.command_dispatcher = CommandDispatcher(
-            config, self.sender, ai, faq_storage, onebot, self.security
+            config,
+            self.sender,
+            ai,
+            faq_storage,
+            onebot,
+            self.security,
+            queue_manager=self.queue_manager,
+            rate_limiter=self.rate_limiter,
         )
         self.ai_coordinator = AICoordinator(
             config,
             ai,
-            QueueManager(),
+            self.queue_manager,
             self.history_manager,
             self.sender,
             onebot,
             TaskScheduler(ai, self.sender, onebot, self.history_manager, task_storage),
             self.security,
+            command_dispatcher=self.command_dispatcher,
         )
 
         # 启动队列
