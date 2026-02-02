@@ -15,26 +15,26 @@ graph TB
     %% ==================== 核心入口层 ====================
     subgraph EntryPoint["核心入口层 (src/Undefined/)"]
         Main["main.py<br/>启动入口"]
-        ConfigLoader["Config<br/>配置管理器<br/>(config/loader.py)"]
-        ConfigModels["配置模型<br/>(config/models.py)<br/>ChatModelConfig<br/>VisionModelConfig<br/>SecurityModelConfig<br/>AgentModelConfig"]
-        OneBotClient["OneBotClient<br/>WebSocket 客户端<br/>(onebot.py)"]
-        Context["RequestContext<br/>请求上下文<br/>(context.py)"]
+        ConfigLoader["Config<br/>配置管理器<br/>[config/loader.py]"]
+        ConfigModels["配置模型<br/>[config/models.py]<br/>ChatModelConfig<br/>VisionModelConfig<br/>SecurityModelConfig<br/>AgentModelConfig"]
+        OneBotClient["OneBotClient<br/>WebSocket 客户端<br/>[onebot.py]"]
+        Context["RequestContext<br/>请求上下文<br/>[context.py]"]
     end
 
     %% ==================== 消息处理层 ====================
     subgraph MessageLayer["消息处理层 (src/Undefined/)"]
-        MessageHandler["MessageHandler<br/>消息处理器<br/>(handlers.py)"]
+        MessageHandler["MessageHandler<br/>消息处理器<br/>[handlers.py]"]
         
         subgraph SecurityLayer["安全防线 (services/)"]
-            SecurityService["SecurityService<br/>安全服务<br/>• 注入攻击检测<br/>• 速率限制<br/>(security.py)"]
-            InjectionAgent["InjectionResponseAgent<br/>注入响应生成<br/>(injection_response_agent.py)"]
+            SecurityService["SecurityService<br/>安全服务<br/>• 注入攻击检测<br/>• 速率限制<br/>[security.py]"]
+            InjectionAgent["InjectionResponseAgent<br/>注入响应生成<br/>[injection_response_agent.py]"]
         end
         
-        CommandDispatcher["CommandDispatcher<br/>命令分发器<br/>• /help /stats /lsadmin<br/>• /addadmin /rmadmin<br/>• /bugfix /lsfaq<br/>(services/command.py)"]
+        CommandDispatcher["CommandDispatcher<br/>命令分发器<br/>• /help /stats /lsadmin<br/>• /addadmin /rmadmin<br/>• /bugfix /lsfaq<br/>[services/command.py]"]
         
-        subgraph QueueSystem['"车站-列车" 队列系统 (services/)']
-            AICoordinator["AICoordinator<br/>AI 协调器<br/>• Prompt 构建<br/>• 队列管理<br/>• 回复执行<br/>(ai_coordinator.py)"]
-            QueueManager["QueueManager<br/>队列管理器<br/>(queue_manager.py)"]
+        subgraph QueueSystem["车站-列车 队列系统 (services/)"]
+            AICoordinator["AICoordinator<br/>AI 协调器<br/>• Prompt 构建<br/>• 队列管理<br/>• 回复执行<br/>[ai_coordinator.py]"]
+            QueueManager["QueueManager<br/>队列管理器<br/>[queue_manager.py]"]
             
             subgraph ModelQueues["ModelQueue 队列组 (按模型隔离)"]
                 Q_SuperAdmin["超级管理员队列<br/>优先级: 最高"]
@@ -49,26 +49,26 @@ graph TB
 
     %% ==================== AI 核心能力层 ====================
     subgraph AILayer["AI 核心能力层 (src/Undefined/ai/)"]
-        AIClient["AIClient<br/>AI 客户端主入口<br/>(client.py)<br/>• 技能热重载<br/>• MCP 初始化<br/>• Agent intro 生成"]
+        AIClient["AIClient<br/>AI 客户端主入口<br/>[client.py]<br/>• 技能热重载 • MCP 初始化<br/>• Agent intro 生成"]
         
         subgraph AIComponents["AI 组件"]
-            PromptBuilder["PromptBuilder<br/>提示词构建器<br/>(prompts.py)"]
-            ModelRequester["ModelRequester<br/>模型请求器<br/>(llm.py)<br/>• OpenAI SDK<br/>• 工具清理<br/>• Thinking 提取"]
-            ToolManager["ToolManager<br/>工具管理器<br/>(tooling.py)<br/>• 工具执行<br/>• Agent 工具合并<br/>• MCP 工具注入"]
-            MultimodalAnalyzer["MultimodalAnalyzer<br/>多模态分析器<br/>(multimodal.py)<br/>• 图片/音频/视频"]
-            SummaryService["SummaryService<br/>总结服务<br/>(summaries.py)<br/>• 聊天记录总结<br/>• 标题生成"]
-            TokenCounter["TokenCounter<br/>Token 统计<br/>(tokens.py)"]
-            Parsing["Parsing<br/>响应解析<br/>(parsing.py)"]
+            PromptBuilder["PromptBuilder<br/>提示词构建器<br/>[prompts.py]"]
+            ModelRequester["ModelRequester<br/>模型请求器<br/>[llm.py]<br/>• OpenAI SDK • 工具清理<br/>• Thinking 提取"]
+            ToolManager["ToolManager<br/>工具管理器<br/>[tooling.py]<br/>• 工具执行 • Agent 工具合并<br/>• MCP 工具注入"]
+            MultimodalAnalyzer["MultimodalAnalyzer<br/>多模态分析器<br/>[multimodal.py]<br/>• 图片/音频/视频"]
+            SummaryService["SummaryService<br/>总结服务<br/>[summaries.py]<br/>• 聊天记录总结<br/>• 标题生成"]
+            TokenCounter["TokenCounter<br/>Token 统计<br/>[tokens.py]"]
+            Parsing["Parsing<br/>响应解析<br/>[parsing.py]"]
         end
     end
 
     %% ==================== 技能系统层 ====================
     subgraph SkillsLayer["Skills 技能系统 (src/Undefined/skills/)"]
         subgraph RegistryLayer["注册表核心"]
-            ToolRegistry["ToolRegistry<br/>工具注册表<br/>(registry.py)<br/>• 延迟加载<br/>• 热重载支持<br/>• 执行统计"]
-            AgentRegistry["AgentRegistry<br/>Agent 注册表<br/>(registry.py)<br/>• Agent 发现<br/>• 工具聚合"]
-            AgentToolRegistry["AgentToolRegistry<br/>Agent 专用工具注册表<br/>(agents/agent_tool_registry.py)<br/>• MCP 支持"]
-            IntroGenerator["IntroGenerator<br/>Agent 介绍生成器<br/>(agents/intro_generator.py)<br/>• 自动 hash 检测<br/>• intro.generated.md"]
+            ToolRegistry["ToolRegistry<br/>工具注册表<br/>[registry.py]<br/>• 延迟加载 • 热重载支持<br/>• 执行统计"]
+            AgentRegistry["AgentRegistry<br/>Agent 注册表<br/>[registry.py]<br/>• Agent 发现 • 工具聚合"]
+            AgentToolRegistry["AgentToolRegistry<br/>Agent 专用工具注册表<br/>[agents/agent_tool_registry.py]<br/>• MCP 支持"]
+            IntroGenerator["IntroGenerator<br/>Agent 介绍生成器<br/>[agents/intro_generator.py]<br/>• 自动 hash 检测<br/>• intro.generated.md"]
         end
         
         subgraph AtomicTools["基础工具 (skills/tools/)"]
@@ -99,7 +99,7 @@ graph TB
         end
         
         subgraph MCPIntegration["MCP 集成 (src/Undefined/mcp/)"]
-            MCPRegistry["MCPToolRegistry<br/>MCP 工具注册表<br/>(registry.py)<br/>• 连接 MCP Server<br/>• 工具转换"]
+            MCPRegistry["MCPToolRegistry<br/>MCP 工具注册表<br/>[registry.py]<br/>• 连接 MCP Server<br/>• 工具转换"]
             MCP_Config["MCP 配置<br/>config/mcp.json<br/>(全局配置)"]
             MCP_Agent_Private["Agent 私有 MCP<br/>mcp.json<br/>(按 Agent)"]
         end
@@ -108,25 +108,25 @@ graph TB
     %% ==================== 存储与上下文层 ====================
     subgraph StorageLayer["存储与上下文层 (src/Undefined/)"]
         subgraph ContextLayer["上下文管理"]
-            RequestContext["RequestContext<br/>(context.py)<br/>• UUID 追踪<br/>• 资源容器<br/>• 自动传播"]
+            RequestContext["RequestContext<br/>[context.py]<br/>• UUID 追踪<br/>• 资源容器<br/>• 自动传播"]
             ContextFilter["RequestContextFilter<br/>日志过滤器<br/>• request_id<br/>• group_id / user_id"]
-            ResourceRegistry["ContextResourceRegistry<br/>资源注册表<br/>(context_resource_registry.py)<br/>• 动态扫描"]
+            ResourceRegistry["ContextResourceRegistry<br/>资源注册表<br/>[context_resource_registry.py]<br/>• 动态扫描"]
         end
         
         subgraph StorageComponents["存储组件"]
-            HistoryManager["MessageHistoryManager<br/>消息历史管理<br/>(utils/history.py)<br/>• 懒加载<br/>• 10000条限制"]
-            MemoryStorage["MemoryStorage<br/>长期记忆存储<br/>(memory.py)<br/>• 500条上限<br/>• 自动去重"]
-            EndSummaryStorage["EndSummaryStorage<br/>短期总结存储<br/>(end_summary_storage.py)"]
-            FAQStorage["FAQStorage<br/>FAQ 存储<br/>(faq.py)<br/>• data/faq/{group_id}/"]
-            ScheduledTaskStorage["ScheduledTaskStorage<br/>定时任务存储<br/>(scheduled_task_storage.py)"]
-            TokenUsageStorage["TokenUsageStorage<br/>Token 使用统计<br/>(token_usage_storage.py)<br/>• 自动归档<br/>• gzip 压缩"]
+            HistoryManager["MessageHistoryManager<br/>消息历史管理<br/>[utils/history.py]<br/>• 懒加载<br/>• 10000条限制"]
+            MemoryStorage["MemoryStorage<br/>长期记忆存储<br/>[memory.py]<br/>• 500条上限<br/>• 自动去重"]
+            EndSummaryStorage["EndSummaryStorage<br/>短期总结存储<br/>[end_summary_storage.py]"]
+            FAQStorage["FAQStorage<br/>FAQ 存储<br/>[faq.py]<br/>• data/faq/{group_id}/"]
+            ScheduledTaskStorage["ScheduledTaskStorage<br/>定时任务存储<br/>[scheduled_task_storage.py]"]
+            TokenUsageStorage["TokenUsageStorage<br/>Token 使用统计<br/>[token_usage_storage.py]<br/>• 自动归档<br/>• gzip 压缩"]
         end
         
         subgraph IOLayer["异步 IO 层 (src/Undefined/utils/)"]
-            IOUtils["IO 工具<br/>(io.py)<br/>• write_json<br/>• read_json<br/>• append_line<br/>• 文件锁 (flock)"]
-            SchedulerUtils["调度器工具<br/>(scheduler.py)<br/>• crontab 解析"]
-            CacheUtils["缓存工具<br/>(cache.py)<br/>• 定期清理"]
-            SenderUtils["Sender 工具<br/>(sender.py)"]
+            IOUtils["IO 工具<br/>[io.py]<br/>• write_json<br/>• read_json<br/>• append_line<br/>• 文件锁 (flock)"]
+            SchedulerUtils["调度器工具<br/>[scheduler.py]<br/>• crontab 解析"]
+            CacheUtils["缓存工具<br/>[cache.py]<br/>• 定期清理"]
+            SenderUtils["Sender 工具<br/>[sender.py]"]
         end
     end
 
@@ -361,7 +361,7 @@ graph TB
         AIClient["AIClient<br/>主入口"]
         
         subgraph RegistrySystem["注册表系统"]
-            BaseRegistry["BaseRegistry<br/>基础注册表<br/>• 延迟加载<br/>• 热重载<br/>• 执行统计<br/>(registry.py)"]
+            BaseRegistry["BaseRegistry<br/>基础注册表<br/>• 延迟加载<br/>• 热重载<br/>• 执行统计<br/>[registry.py]"]
             ToolRegistry["ToolRegistry<br/>工具注册表"]
             AgentRegistry["AgentRegistry<br/>Agent 注册表"]
             AgentToolReg["AgentToolRegistry<br/>Agent 专用注册表<br/>• MCP 支持"]
@@ -442,7 +442,7 @@ graph LR
             RC["RequestContext<br/>• UUID<br/>• 资源容器"]
         end
         
-        subgraph IOLayer["IO 层<br/>(utils/io.py)"]
+        subgraph IOLayer["IO 层<br/>[utils/io.py]"]
             IO["异步 IO<br/>• write_json<br/>• read_json<br/>• append_line<br/>• 文件锁"]
         end
         
@@ -482,7 +482,7 @@ graph LR
 
 ```mermaid
 graph TB
-    subgraph QueueModel['"车站-列车" 队列模型']
+    subgraph QueueModel["车站-列车 队列模型"]
         subgraph QueueManager["QueueManager<br/>队列管理器"]
             direction TB
             Start["启动"]
@@ -668,6 +668,6 @@ graph LR
 
 ---
 
-**架构图版本**: v2.0  
+**架构图版本**: v2.10.0
 **更新日期**: 2026-02-02  
 **基于代码版本**: 最新 main 分支
