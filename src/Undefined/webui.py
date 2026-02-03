@@ -1190,6 +1190,10 @@ def _render_page(initial_view: str, using_default_password: bool) -> str:
       return I18N[lang][key] || key;
     }
 
+    function hasAuthToken() {
+      return Boolean(getCookie(TOKEN_COOKIE));
+    }
+
     function getCurrentLang() {
       const stored = getCookie(LANG_COOKIE);
       if (stored === 'en') {
@@ -1486,13 +1490,14 @@ def _render_page(initial_view: str, using_default_password: bool) -> str:
       try {
         const data = await api('/api/bot/status');
         const running = Boolean(data.running);
+        const allowControl = isAuthenticated || hasAuthToken();
         botStateBadge.textContent = running ? t('bot.running') : t('bot.stopped');
         botStateBadge.classList.toggle('warn', !running);
         botStatus.textContent = data.pid ? `PID ${data.pid}` : '--';
         botHint.textContent = running ? t('bot.hint.running') : t('bot.hint.stopped');
-        botStartBtn.disabled = running || !isAuthenticated;
-        botStopBtn.disabled = !running || !isAuthenticated;
-        if (!isAuthenticated) {
+        botStartBtn.disabled = running || !allowControl;
+        botStopBtn.disabled = !running || !allowControl;
+        if (!allowControl) {
           botHint.textContent = t('bot.hint.locked');
         }
       } catch (err) {
