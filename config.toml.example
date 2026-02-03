@@ -1,34 +1,34 @@
-# zh: 核心设置
-# en: Core settings
+# zh: 机器人小号配置
+# en: Bot account settings
 [core]
-# zh: 机器人 QQ 号（必填）
-# en: Bot QQ number (required)
+# zh: 机器人QQ号
+# en: Bot QQ number
 bot_qq = 0
-# zh: 超级管理员 QQ 号（必填）
-# en: Superadmin QQ number (required)
+# zh: 超级管理员QQ号（唯一，可添加其他管理员）
+# en: Superadmin QQ number (unique; can add other admins)
 superadmin_qq = 0
-# zh: 额外管理员 QQ 列表
-# en: Additional admin QQ numbers
+# zh: 初始管理员QQ号列表（逗号分隔，可选）
+# en: Initial admin QQ list (comma-separated, optional)
 admin_qq = []
-# zh: 转发代理 QQ 号
-# en: Forward proxy QQ number
+# zh: 音频转发代理QQ号（用于群聊音频转发，可选）
+# en: Audio forward proxy QQ number (for group audio forwarding, optional)
 forward_proxy_qq = 0
 
-# zh: OneBot WebSocket 设置
+# zh: OneBot WebSocket 配置
 # en: OneBot WebSocket settings
 [onebot]
-# zh: OneBot WebSocket 地址
-# en: OneBot WebSocket URL
+# zh: NapCat WebSocket 地址
+# en: NapCat WebSocket URL
 ws_url = "ws://127.0.0.1:3001"
-# zh: OneBot 访问令牌
-# en: OneBot access token
+# zh: Access Token（可选）
+# en: Access token (optional)
 token = ""
 
-# zh: 模型设置 - chat
-# en: Models - chat
+# zh: 对话模型配置（用于总结聊天记录）
+# en: Chat model config (used for chat summarization)
 [models.chat]
-# zh: Chat 模型 API 基础地址
-# en: Chat model API base URL
+# zh: OpenAI-compatible base URL，例如 https://api.openai.com/v1（legacy /chat/completions 已弃用但仍兼容）
+# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1 (legacy /chat/completions is deprecated but still accepted)
 api_url = ""
 # zh: Chat 模型 API Key
 # en: Chat model API key
@@ -36,24 +36,24 @@ api_key = ""
 # zh: Chat 模型名称
 # en: Chat model name
 model_name = ""
-# zh: Chat 模型最大 tokens
-# en: Chat model max tokens
+# zh: 最大生成 tokens
+# en: Max generation tokens
 max_tokens = 8192
-# zh: 启用思维链输出
-# en: Enable reasoning/thinking output
+# zh: 是否启用 thinking（思维链）
+# en: Enable thinking (reasoning)
 thinking_enabled = false
-# zh: 思维链 token 预算
-# en: Thinking token budget
+# zh: thinking budget tokens
+# en: thinking budget tokens
 thinking_budget_tokens = 20000
-# zh: 启用 DeepSeek 新 CoT 支持
-# en: Enable DeepSeek new CoT support
+# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 tool_calls 中回传 reasoning_content
+# en: DeepSeek thinking-mode tool-call compatibility: return reasoning_content across multi tool_calls
 deepseek_new_cot_support = false
 
-# zh: 模型设置 - vision
-# en: Models - vision
+# zh: 视觉模型配置（用于图片描述和OCR）
+# en: Vision model config (image description and OCR)
 [models.vision]
-# zh: Vision 模型 API 基础地址
-# en: Vision model API base URL
+# zh: OpenAI-compatible base URL，例如 https://api.openai.com/v1（legacy /chat/completions 已弃用但仍兼容）
+# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1 (legacy /chat/completions is deprecated but still accepted)
 api_url = ""
 # zh: Vision 模型 API Key
 # en: Vision model API key
@@ -61,46 +61,46 @@ api_key = ""
 # zh: Vision 模型名称
 # en: Vision model name
 model_name = ""
-# zh: 启用思维链输出
-# en: Enable reasoning/thinking output
+# zh: 是否启用 thinking（思维链）
+# en: Enable thinking (reasoning)
 thinking_enabled = false
-# zh: 思维链 token 预算
-# en: Thinking token budget
+# zh: thinking budget tokens
+# en: thinking budget tokens
 thinking_budget_tokens = 20000
-# zh: 启用 DeepSeek 新 CoT 支持
-# en: Enable DeepSeek new CoT support
+# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 tool_calls 中回传 reasoning_content
+# en: DeepSeek thinking-mode tool-call compatibility: return reasoning_content across multi tool_calls
 deepseek_new_cot_support = false
 
-# zh: 模型设置 - security
-# en: Models - security
+# zh: 安全模型配置（用于防注入检测和注入后的回复生成）
+# en: Security model config (injection detection and post-injection responses)
 [models.security]
-# zh: 安全模型 API 基础地址
-# en: Security model API base URL
+# zh: OpenAI-compatible base URL，例如 https://api.openai.com/v1（legacy /chat/completions 已弃用但仍兼容）
+# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1 (legacy /chat/completions is deprecated but still accepted)
 api_url = ""
-# zh: 安全模型 API Key
+# zh: Security 模型 API Key
 # en: Security model API key
 api_key = ""
-# zh: 安全模型名称
+# zh: Security 模型名称
 # en: Security model name
 model_name = ""
-# zh: 安全模型最大 tokens
-# en: Security model max tokens
+# zh: 可选限制：最大生成 tokens
+# en: Optional limit: max generation tokens
 max_tokens = 100
-# zh: 启用思维链输出
-# en: Enable reasoning/thinking output
+# zh: 是否启用 thinking（思维链）
+# en: Enable thinking (reasoning)
 thinking_enabled = false
-# zh: 思维链 token 预算
-# en: Thinking token budget
+# zh: thinking budget tokens
+# en: thinking budget tokens
 thinking_budget_tokens = 0
-# zh: 启用 DeepSeek 新 CoT 支持
-# en: Enable DeepSeek new CoT support
+# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 tool_calls 中回传 reasoning_content
+# en: DeepSeek thinking-mode tool-call compatibility: return reasoning_content across multi tool_calls
 deepseek_new_cot_support = false
 
-# zh: 模型设置 - agent
-# en: Models - agent
+# zh: Agent 模型配置（用于执行 agents）
+# en: Agent model config (used to run agents)
 [models.agent]
-# zh: Agent 模型 API 基础地址
-# en: Agent model API base URL
+# zh: OpenAI-compatible base URL，例如 https://api.openai.com/v1（legacy /chat/completions 已弃用但仍兼容）
+# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1 (legacy /chat/completions is deprecated but still accepted)
 api_url = ""
 # zh: Agent 模型 API Key
 # en: Agent model API key
@@ -108,151 +108,153 @@ api_key = ""
 # zh: Agent 模型名称
 # en: Agent model name
 model_name = ""
-# zh: Agent 模型最大 tokens
-# en: Agent model max tokens
+# zh: 可选限制：最大生成 tokens
+# en: Optional limit: max generation tokens
 max_tokens = 4096
-# zh: 启用思维链输出
-# en: Enable reasoning/thinking output
+# zh: 是否启用 thinking（思维链）
+# en: Enable thinking (reasoning)
 thinking_enabled = false
-# zh: 思维链 token 预算
-# en: Thinking token budget
+# zh: thinking budget tokens
+# en: thinking budget tokens
 thinking_budget_tokens = 0
-# zh: 启用 DeepSeek 新 CoT 支持
-# en: Enable DeepSeek new CoT support
+# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 tool_calls 中回传 reasoning_content
+# en: DeepSeek thinking-mode tool-call compatibility: return reasoning_content across multi tool_calls
 deepseek_new_cot_support = false
 
-# zh: 日志设置
+# zh: 日志配置
 # en: Logging settings
 [logging]
-# zh: 日志级别
-# en: Log level
+# zh: 日志级别（DEBUG/INFO/WARNING/ERROR）
+# en: Log level (DEBUG/INFO/WARNING/ERROR)
 level = "INFO"
 # zh: 日志文件路径
 # en: Log file path
 file_path = "logs/bot.log"
-# zh: 单个日志最大大小（MB）
+# zh: 单个日志文件最大大小（MB）
 # en: Max log file size (MB)
 max_size_mb = 10
-# zh: 日志备份数量
+# zh: 保留日志文件数量
 # en: Log backup count
 backup_count = 5
-# zh: 记录思维链输出
-# en: Log thinking output
+# zh: 是否在日志中输出思维链（默认开启）
+# en: Log thinking output (default on)
 log_thinking = true
 
-# zh: 工具 schema 清洗
-# en: Tools schema sanitize
+# zh: Tools Schema 兼容性（可选）
+# en: Tools schema compatibility (optional)
+# zh: 某些 OpenAI-compatible 网关会对 tools[].function.description 做更严格校验，可能触发 400
+# en: Some OpenAI-compatible gateways strictly validate tools[].function.description and may return 400
 [tools]
-# zh: 启用工具 schema 清洗
-# en: Enable tool schema sanitization
+# zh: 是否在请求前清洗 tools schema（默认关闭）
+# en: Sanitize tools schema before requests (default off)
 sanitize = false
-# zh: 描述最大长度
-# en: Max description length
+# zh: description 最大长度（超出会截断）
+# en: Description max length (truncated when exceeded)
 description_max_len = 1024
-# zh: 启用清洗详细日志
-# en: Enable verbose sanitization logs
+# zh: 是否输出逐条清洗详情日志（INFO）
+# en: Log per-item sanitization details (INFO)
 sanitize_verbose = false
-# zh: 描述预览长度
-# en: Description preview length
+# zh: 日志中 description 预览长度
+# en: Description preview length in logs
 description_preview_len = 160
 
-# zh: Skills 设置
-# en: Skills settings
+# zh: Skills 热重载配置（可选）
+# en: Skills hot reload settings (optional)
 [skills]
-# zh: 启用 Skills 热重载
+# zh: 是否开启 skills 热重载
 # en: Enable skills hot reload
 hot_reload = true
-# zh: 热重载轮询间隔（秒）
-# en: Hot reload polling interval (seconds)
+# zh: 扫描间隔（秒）
+# en: Scan interval (seconds)
 hot_reload_interval = 2.0
-# zh: 热重载防抖（秒）
-# en: Hot reload debounce (seconds)
+# zh: 去抖时间（秒）
+# en: Debounce time (seconds)
 hot_reload_debounce = 0.5
-# zh: 启用 Agent 简介自动生成
-# en: Enable agent intro auto-generation
+# zh: Agent intro 自动生成（推荐开启）
+# en: Agent intro auto-generation (recommended)
 intro_autogen_enabled = true
-# zh: 简介生成队列间隔（秒）
-# en: Intro generation queue interval (seconds)
+# zh: 队列发车间隔（秒）
+# en: Queue interval (seconds)
 intro_autogen_queue_interval = 1.0
-# zh: 简介生成最大 tokens
-# en: Intro generation max tokens
+# zh: 单次生成最大 token
+# en: Max tokens per generation
 intro_autogen_max_tokens = 8192
-# zh: 简介哈希缓存路径
-# en: Intro hash cache path
+# zh: Hash 缓存路径
+# en: Hash cache path
 intro_hash_path = ".cache/agent_intro_hashes.json"
-# zh: 预加载工具列表
-# en: Prefetch tools list
+# zh: 预先执行的工具列表（结果注入 system 消息）
+# en: Prefetch tool list (results injected into system messages)
 prefetch_tools = ["get_current_time"]
-# zh: 在提示中隐藏预加载工具
-# en: Hide prefetch tools from prompt
+# zh: 隐藏已预取的工具声明
+# en: Hide prefetched tools from model tool list
 prefetch_tools_hide = true
 
-# zh: 搜索设置
-# en: Search settings
+# zh: 搜索服务配置（SearXNG）
+# en: Search service config (SearxNG)
 [search]
-# zh: SearxNG 基础地址
-# en: SearxNG base URL
+# zh: SearxNG 搜索服务地址，如 http://127.0.0.1:8849
+# en: SearxNG service URL, e.g. http://127.0.0.1:8849
 searxng_url = ""
 
-# zh: 代理设置
-# en: Proxy settings
+# zh: 代理设置（可选）
+# en: Proxy settings (optional)
 [proxy]
-# zh: 启用代理
-# en: Enable proxy usage
+# zh: 是否在 web_agent 中启用代理
+# en: Enable proxy in web_agent
 use_proxy = true
-# zh: HTTP 代理
-# en: HTTP proxy
+# zh: 例如 http://127.0.0.1:7890（也可用环境变量 HTTP_PROXY）
+# en: e.g. http://127.0.0.1:7890 (or env var HTTP_PROXY)
 http_proxy = ""
-# zh: HTTPS 代理
-# en: HTTPS proxy
+# zh: 例如 http://127.0.0.1:7890（也可用环境变量 HTTPS_PROXY）
+# en: e.g. http://127.0.0.1:7890 (or env var HTTPS_PROXY)
 https_proxy = ""
 
-# zh: 天气 API
-# en: Weather API
+# zh: 天气API配置（心知天气）
+# en: Weather API config (Seniverse)
 [weather]
-# zh: 天气 API Key
-# en: Weather API key
+# zh: 心知天气 API Key，从 https://www.seniverse.com/ 获取
+# en: Seniverse API key, get from https://www.seniverse.com/
 api_key = ""
 
-# zh: XXAPI 设置
-# en: XXAPI
+# zh: XXAPI API 配置
+# en: XXAPI config
 [xxapi]
-# zh: XXAPI Token
-# en: XXAPI token
+# zh: XXAPI Token，前往 https://xxapi.cn 获取
+# en: XXAPI token, get from https://xxapi.cn
 api_token = ""
 
-# zh: Token 使用统计
-# en: Token usage
+# zh: Token 统计归档配置
+# en: Token usage archive settings
 [token_usage]
-# zh: 归档阈值（MB）
-# en: Archive when file exceeds size (MB)
+# zh: 超过该大小压缩归档（MB），<=0 禁用
+# en: Archive when size exceeds (MB), <=0 disables
 max_size_mb = 5
-# zh: 最大归档数量
-# en: Max archive files
+# zh: 最多保留归档数量，<=0 不限制
+# en: Max archive count, <=0 means unlimited
 max_archives = 30
-# zh: 最大归档总大小（MB），0 表示不限制
-# en: Max total archive size (MB), 0 disables
+# zh: 归档总大小上限（MB），<=0 禁用
+# en: Max total archive size (MB), <=0 disables
 max_total_mb = 0
-# zh: 归档清理模式：delete/keep
-# en: Prune mode: delete/keep
+# zh: 归档清理模式：delete(删除最旧，默认)/merge(合并最旧，尽量无损)/none(不清理，可能无限增长)
+# en: Prune mode: delete (default)/merge (lossless if possible)/none (no cleanup)
 archive_prune_mode = "delete"
 
-# zh: MCP 设置
-# en: MCP settings
+# zh: MCP (Model Context Protocol) 配置
+# en: MCP (Model Context Protocol) settings
 [mcp]
-# zh: MCP 配置路径
-# en: MCP config path
+# zh: MCP 配置文件路径（相对于工作目录）
+# en: MCP config file path (relative to working directory)
 config_path = "config/mcp.json"
 
 # zh: WebUI 设置
 # en: WebUI settings
 [webui]
 # zh: WebUI 监听地址
-# en: WebUI host
+# en: WebUI bind host
 url = "127.0.0.1"
 # zh: WebUI 端口
 # en: WebUI port
 port = 8787
-# zh: WebUI 密码
-# en: WebUI password
+# zh: WebUI 密码（留空则使用默认 changeme）
+# en: WebUI password (falls back to default 'changeme' if empty)
 password = "changeme"
