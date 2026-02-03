@@ -492,12 +492,12 @@ def _render_page(initial_view: str, using_default_password: bool) -> str:
       background: rgba(199, 139, 47, 0.12); color: #7a4e14; padding: 12px 14px; border-radius: 14px; font-size: 13px;
     }
     .muted { color: var(--muted); font-size: 13px; line-height: 1.6; }
-    .app-shell { display: grid; grid-template-columns: 240px 1fr; gap: 22px; }
+    .app-shell { display: grid; grid-template-columns: 200px 1fr; gap: 22px; }
     .sidebar {
       background: var(--nav);
       border: 1px solid var(--stroke);
       border-radius: 24px;
-      padding: 20px;
+      padding: 16px;
       display: grid;
       gap: 12px;
       min-height: 480px;
@@ -584,6 +584,18 @@ def _render_page(initial_view: str, using_default_password: bool) -> str:
               </div>
               <div class="muted" id="botHint">--</div>
             </div>
+            <div class="panel" id="landingLoginBox" style="display:none;">
+              <div class="panel-row">
+                <h3 data-i18n="auth.title">解锁控制台</h3>
+                <span class="badge warn" data-i18n="bot.locked">已锁定</span>
+              </div>
+              <div class="field" style="margin-bottom:10px;">
+                <label data-i18n="auth.placeholder">WebUI 密码</label>
+                <input id="landingPasswordInput" type="password" data-i18n-placeholder="auth.placeholder" placeholder="WebUI password" />
+              </div>
+              <button id="landingLoginBtn" class="btn primary" data-i18n="auth.sign_in">登录</button>
+              <div class="status" id="landingLoginStatus"></div>
+            </div>
             <div class="panel">
               <h3 data-i18n="landing.links">快捷入口</h3>
               <div class="link-grid">
@@ -600,6 +612,7 @@ def _render_page(initial_view: str, using_default_password: bool) -> str:
         <div class="app-shell">
           <aside class="sidebar">
             <div class="nav-title" data-i18n="tabs.title">导航</div>
+            <button class="nav-item" data-view="landing" data-i18n="tabs.landing">着陆页</button>
             <button class="nav-item" data-tab="config" data-i18n="tabs.config">配置修改</button>
             <button class="nav-item" data-tab="logs" data-i18n="tabs.logs">日志查看</button>
             <button class="nav-item" data-tab="about" data-i18n="tabs.about">作者与版权说明</button>
@@ -619,16 +632,15 @@ def _render_page(initial_view: str, using_default_password: bool) -> str:
             </div>
 
             <div id="appContent" style="display:none;">
-              <div class="card" style="margin-bottom:18px;">
-                <h2 data-i18n="config.title">配置修改</h2>
-                <p class="muted" data-i18n="config.subtitle">按分类逐项调整配置，保存后自动触发热更新。</p>
-                <div class="toolbar">
-                  <button id="saveFormBtn" class="btn primary" data-i18n="config.save">保存并刷新</button>
-                </div>
-                <div class="status" id="saveStatus"></div>
-              </div>
-
               <div id="tab-config" class="tab">
+                <div class="card" style="margin-bottom:18px;">
+                  <h2 data-i18n="config.title">配置修改</h2>
+                  <p class="muted" data-i18n="config.subtitle">按分类逐项调整配置，保存后自动触发热更新。</p>
+                  <div class="toolbar">
+                    <button id="saveFormBtn" class="btn primary" data-i18n="config.save">保存并刷新</button>
+                  </div>
+                  <div class="status" id="saveStatus"></div>
+                </div>
                 <div id="formSections" class="field-grid"></div>
               </div>
 
@@ -710,6 +722,10 @@ def _render_page(initial_view: str, using_default_password: bool) -> str:
     const botStatus = document.getElementById('botStatus');
     const botHint = document.getElementById('botHint');
     const botStateBadge = document.getElementById('botStateBadge');
+    const landingLoginBox = document.getElementById('landingLoginBox');
+    const landingPasswordInput = document.getElementById('landingPasswordInput');
+    const landingLoginBtn = document.getElementById('landingLoginBtn');
+    const landingLoginStatus = document.getElementById('landingLoginStatus');
     const themeToggle = document.getElementById('themeToggle');
     const langToggle = document.getElementById('langToggle');
 
@@ -735,6 +751,7 @@ def _render_page(initial_view: str, using_default_password: bool) -> str:
         'landing.link.logs': '日志查看',
         'landing.link.about': '作者与版权说明',
         'tabs.title': '导航',
+        'tabs.landing': '着陆页',
         'tabs.config': '配置修改',
         'tabs.logs': '日志查看',
         'tabs.about': '作者与版权说明',
@@ -874,6 +891,7 @@ def _render_page(initial_view: str, using_default_password: bool) -> str:
         'landing.link.logs': 'Log Viewer',
         'landing.link.about': 'Author & License',
         'tabs.title': 'Navigation',
+        'tabs.landing': 'Landing',
         'tabs.config': 'Config',
         'tabs.logs': 'Logs',
         'tabs.about': 'About',
@@ -1212,13 +1230,22 @@ def _render_page(initial_view: str, using_default_password: bool) -> str:
     function showSection(view) {
       landing.classList.toggle('active', view === 'landing');
       app.classList.toggle('active', view === 'app');
+      if (view === 'landing') {
+        stopLogAutoRefresh();
+      }
+    }
+
+    function setNavActive(target) {
+      document.querySelectorAll('.nav-item').forEach(btn => {
+        const isLanding = btn.dataset.view === 'landing';
+        const isActive = isLanding ? target === 'landing' : btn.dataset.tab === target;
+        btn.classList.toggle('active', isActive);
+      });
     }
 
     function showTab(tab) {
       currentTab = tab;
-      document.querySelectorAll('.nav-item').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.tab === tab);
-      });
+      setNavActive(tab);
       document.querySelectorAll('.tab').forEach(section => {
         section.classList.toggle('active', section.id === `tab-${tab}`);
       });
@@ -1226,6 +1253,9 @@ def _render_page(initial_view: str, using_default_password: bool) -> str:
         startLogAutoRefresh();
       } else {
         stopLogAutoRefresh();
+      }
+      if (tab === 'config' && isAuthenticated && Object.keys(lastSummary).length === 0) {
+        loadSummary();
       }
     }
 
@@ -1382,6 +1412,9 @@ def _render_page(initial_view: str, using_default_password: bool) -> str:
       statusPill.textContent = data.summary || 'config.toml';
       navFooter.textContent = data.summary || '';
       logoutBtn.style.display = isAuthenticated ? 'inline-flex' : 'none';
+      if (landingLoginBox) {
+        landingLoginBox.style.display = isAuthenticated ? 'none' : 'block';
+      }
       if (isAuthenticated) {
         loginBox.style.display = 'none';
         appContent.style.display = 'block';
@@ -1486,6 +1519,27 @@ def _render_page(initial_view: str, using_default_password: bool) -> str:
       }
     });
 
+    landingLoginBtn?.addEventListener('click', async () => {
+      if (!landingLoginStatus) {
+        return;
+      }
+      landingLoginStatus.textContent = t('auth.checking');
+      try {
+        const data = await api('/api/login', {
+          method: 'POST',
+          body: JSON.stringify({ password: landingPasswordInput?.value || '' })
+        });
+        if (data.token) {
+          setCookie(TOKEN_COOKIE, data.token, 7);
+        }
+        landingLoginStatus.textContent = t('auth.success');
+        await checkSession();
+        await loadBotStatus();
+      } catch (err) {
+        landingLoginStatus.textContent = translateError(err.message);
+      }
+    });
+
     logoutBtn?.addEventListener('click', async () => {
       try {
         await api('/api/logout', { method: 'POST' });
@@ -1532,6 +1586,13 @@ def _render_page(initial_view: str, using_default_password: bool) -> str:
 
     document.querySelectorAll('.nav-item').forEach(btn => {
       btn.addEventListener('click', () => {
+        if (btn.dataset.view === 'landing') {
+          showSection('landing');
+          setNavActive('landing');
+          checkSession().then(loadBotStatus);
+          return;
+        }
+        showSection('app');
         showTab(btn.dataset.tab || 'config');
       });
     });
@@ -1563,7 +1624,8 @@ def _render_page(initial_view: str, using_default_password: bool) -> str:
 
     if (initialView === 'landing') {
       showSection('landing');
-      loadBotStatus();
+      setNavActive('landing');
+      checkSession().then(loadBotStatus);
     } else {
       showSection('app');
       showTab(currentTab);
