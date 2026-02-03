@@ -369,7 +369,12 @@ class AICoordinator:
     async def _execute_stats_analysis(self, request: dict[str, Any]) -> None:
         """执行 stats 命令的 AI 分析"""
         group_id = request["group_id"]
+        request_id = request.get("request_id")
         data_summary = request.get("data_summary", "")
+
+        if not request_id:
+            logger.warning("[StatsAnalysis] 缺少 request_id，群: %s", group_id)
+            return
 
         try:
             # 加载 prompt 模板
@@ -379,7 +384,7 @@ class AICoordinator:
                 analysis = "AI 分析功能暂时不可用（提示词文件缺失）"
                 if self.command_dispatcher:
                     self.command_dispatcher.set_stats_analysis_result(
-                        group_id, analysis
+                        group_id, request_id, analysis
                     )
                 return
 
@@ -413,13 +418,17 @@ class AICoordinator:
 
             # 设置分析结果（通知等待的 _handle_stats 方法）
             if self.command_dispatcher:
-                self.command_dispatcher.set_stats_analysis_result(group_id, analysis)
+                self.command_dispatcher.set_stats_analysis_result(
+                    group_id, request_id, analysis
+                )
 
         except Exception as e:
             logger.exception(f"[StatsAnalysis] AI 分析失败: {e}")
             # 出错时也通知等待，但返回空字符串
             if self.command_dispatcher:
-                self.command_dispatcher.set_stats_analysis_result(group_id, "")
+                self.command_dispatcher.set_stats_analysis_result(
+                    group_id, request_id, ""
+                )
 
     def _is_at_bot(self, content: list[dict[str, Any]]) -> bool:
         """检查消息内容中是否包含对机器人的 @ 提问"""
