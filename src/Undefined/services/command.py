@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+from uuid import uuid4
 from datetime import datetime
 from typing import Any, Optional
 from pathlib import Path
@@ -18,11 +19,13 @@ from Undefined.services.security import SecurityService
 from Undefined.token_usage_storage import TokenUsageStorage
 
 # 尝试导入 matplotlib
+plt: Any
 try:
     import matplotlib.pyplot as plt
 
     _MATPLOTLIB_AVAILABLE = True
 except ImportError:
+    plt = None
     _MATPLOTLIB_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
@@ -67,8 +70,8 @@ class CommandDispatcher:
         self.rate_limiter = rate_limiter
         self._token_usage_storage = TokenUsageStorage()
         # 存储 stats 分析结果，用于队列回调
-        self._stats_analysis_results: dict[int, str] = {}
-        self._stats_analysis_events: dict[int, asyncio.Event] = {}
+        self._stats_analysis_results: dict[str, str] = {}
+        self._stats_analysis_events: dict[str, asyncio.Event] = {}
 
     def parse_command(self, text: str) -> Optional[dict[str, Any]]:
         """解析斜杠命令字符串
@@ -177,13 +180,15 @@ class CommandDispatcher:
                 data_summary = self._build_data_summary(summary, days)
 
                 # 创建事件等待分析结果
+                request_id = uuid4().hex
                 analysis_event = asyncio.Event()
-                self._stats_analysis_events[group_id] = analysis_event
+                self._stats_analysis_events[request_id] = analysis_event
 
                 # 投递到队列
                 request_data = {
                     "type": "stats_analysis",
                     "group_id": group_id,
+                    "request_id": request_id,
                     "sender_id": sender_id,
                     "data_summary": data_summary,
                     "summary": summary,
@@ -197,13 +202,14 @@ class CommandDispatcher:
                 # 等待 AI 分析结果，120秒超时
                 try:
                     await asyncio.wait_for(analysis_event.wait(), timeout=120.0)
-                    ai_analysis = self._stats_analysis_results.pop(group_id, "")
+                    ai_analysis = self._stats_analysis_results.pop(request_id, "")
                     logger.info(f"[Stats] 已获取 AI 分析结果，长度: {len(ai_analysis)}")
                 except asyncio.TimeoutError:
                     logger.warning(f"[Stats] AI 分析超时，群: {group_id}，仅发送图表")
                     ai_analysis = ""
                 finally:
-                    self._stats_analysis_events.pop(group_id, None)
+                    self._stats_analysis_events.pop(request_id, None)
+                    self._stats_analysis_results.pop(request_id, None)
 
             # 5. 构建并发送合并转发消息（包含 AI 分析）
             forward_messages = self._build_stats_forward_nodes(
@@ -321,12 +327,20 @@ class CommandDispatcher:
 
         return "\n".join(lines)
 
-    def set_stats_analysis_result(self, group_id: int, analysis: str) -> None:
+    def set_stats_analysis_result(
+        self, group_id: int, request_id: str, analysis: str
+    ) -> None:
         """设置 AI 分析结果（由队列处理器调用）"""
-        self._stats_analysis_results[group_id] = analysis
-        event = self._stats_analysis_events.get(group_id)
-        if event:
-            event.set()
+        event = self._stats_analysis_events.get(request_id)
+        if not event:
+            logger.warning(
+                "[StatsAnalysis] 未找到等待事件，群: %s, 请求: %s",
+                group_id,
+                request_id,
+            )
+            return
+        self._stats_analysis_results[request_id] = analysis
+        event.set()
 
     async def _handle_stats_help(self, group_id: int) -> None:
         """发送 stats 命令的帮助信息"""
