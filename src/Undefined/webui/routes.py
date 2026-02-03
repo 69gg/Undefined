@@ -9,6 +9,7 @@ from typing import cast, Any
 
 
 from Undefined.config.loader import CONFIG_PATH, load_toml_data
+from Undefined.config import get_config_manager
 
 from Undefined import __version__
 from .core import BotProcessController, SessionStore
@@ -214,6 +215,7 @@ async def save_config_handler(request: web.Request) -> Response:
 
     try:
         CONFIG_PATH.write_text(content, encoding="utf-8")
+        get_config_manager().reload()
         # Validate logic requirements (optional, warn but save is ok if syntax is valid)
         logic_valid, logic_msg = validate_required_config()
         return web.json_response(
@@ -262,6 +264,7 @@ async def config_patch_handler(request: web.Request) -> Response:
     patched = apply_patch(data, patch)
     rendered = render_toml(patched)
     CONFIG_PATH.write_text(rendered, encoding="utf-8")
+    get_config_manager().reload()
     validation_ok, validation_msg = validate_required_config()
 
     return web.json_response(

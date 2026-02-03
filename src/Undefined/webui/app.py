@@ -1,11 +1,10 @@
-import asyncio
 import logging
-import webbrowser
 from pathlib import Path
 
+from typing import Any
 from aiohttp import web
 
-from Undefined.config import load_webui_settings
+from Undefined.config import load_webui_settings, get_config_manager
 from .core import BotProcessController, SessionStore
 from .routes import routes
 
@@ -28,7 +27,17 @@ def create_app() -> web.Application:
     # Initialize core components
     app["bot"] = BotProcessController()
     app["session_store"] = SessionStore()
+
+    # Setup Hot Reload for WebUI settings
+    config_manager = get_config_manager()
     app["settings"] = load_webui_settings()
+
+    def _on_config_change(config: Any, changes: dict[str, Any]) -> None:
+        if any(key.startswith("webui.") for key in changes):
+            logger.info("[WebUI] 检测到 WebUI 配置变更，正在热重载设置...")
+            app["settings"] = load_webui_settings()
+
+    config_manager.subscribe(_on_config_change)
 
     # Routes
     app.add_routes(routes)
@@ -57,18 +66,8 @@ def run() -> None:
             "!!! USING DEFAULT PASSWORD !!! Please change 'webui.password' in config.toml"
         )
 
-    # Auto open browser if local
-    if host in ("127.0.0.1", "localhost", "0.0.0.0"):
-        # run in a task to not block startup
-        async def open_browser() -> None:
-            await asyncio.sleep(1)
-            target = "127.0.0.1" if host == "0.0.0.0" else host
-            try:
-                webbrowser.open(f"http://{target}:{port}")
-            except Exception:
-                pass
-
-        # This is a bit hacky in pure aiohttp run_app, but we can just let user open it
+    # Start config watching
+    get_config_manager().start_hot_reload()
 
     try:
         web.run_app(app, host=host, port=port, print=None)
