@@ -397,8 +397,22 @@ async function init() {
         };
     });
 
-    get("botStartBtnLanding").onclick = () => botAction("start");
-    get("botStopBtnLanding").onclick = () => botAction("stop");
+    get("botStartBtnLanding").onclick = () => {
+        if (!state.authenticated) {
+            get("landingLoginStatus").innerText = t("auth.subtitle");
+            get("landingPasswordInput").focus();
+            return;
+        }
+        botAction("start");
+    };
+    get("botStopBtnLanding").onclick = () => {
+        if (!state.authenticated) {
+            get("landingLoginStatus").innerText = t("auth.subtitle");
+            get("landingPasswordInput").focus();
+            return;
+        }
+        botAction("stop");
+    };
 
     get("landingLoginBtn").onclick = () => login(get("landingPasswordInput").value, "landingLoginStatus");
     get("appLoginBtn").onclick = () => login(get("appPasswordInput").value, "appLoginStatus");
@@ -425,11 +439,19 @@ async function init() {
         refreshUI();
     };
 
+    get("themeToggle").onclick = () => {
+        const t = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+        document.documentElement.setAttribute("data-theme", t);
+        get("themeToggle").innerText = t === "dark" ? "Dark" : "Light";
+    };
+
     // Initial data
-    const session = await checkSession();
-    if (session.authenticated) {
-        state.authenticated = true;
-        // If logged in, maybe skip landing? No, stay on landing if view is landing.
+    try {
+        const session = await checkSession();
+        state.authenticated = !!session.authenticated;
+    } catch (e) {
+        console.error("Session check failed", e);
+        state.authenticated = false;
     }
 
     refreshUI();

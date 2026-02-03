@@ -162,6 +162,33 @@ def merge_defaults(defaults: TomlData, data: TomlData) -> TomlData:
     return merged
 
 
+def sort_config(data: TomlData) -> TomlData:
+    """按 SECTION_ORDER 和 KEY_ORDER 排序配置"""
+    ordered: TomlData = {}
+    sections = SECTION_ORDER.get("", [])
+    # 保证指定顺序的 section 在前面
+    for s in sections:
+        if s in data:
+            val = data[s]
+            if isinstance(val, dict):
+                sub_ordered: TomlData = {}
+                keys = KEY_ORDER.get(s, [])
+                for k in keys:
+                    if k in val:
+                        sub_ordered[k] = val[k]
+                for k in sorted(val.keys()):
+                    if k not in sub_ordered:
+                        sub_ordered[k] = val[k]
+                ordered[s] = sub_ordered
+            else:
+                ordered[s] = val
+    # 添加剩余的 section
+    for s in sorted(data.keys()):
+        if s not in ordered:
+            ordered[s] = data[s]
+    return ordered
+
+
 def sorted_keys(table: TomlData, path: list[str]) -> list[str]:
     path_key = ".".join(path) if path else ""
     order = KEY_ORDER.get(path_key) or SECTION_ORDER.get(path_key)

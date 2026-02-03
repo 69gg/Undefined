@@ -20,6 +20,7 @@ from .utils import (
     merge_defaults,
     apply_patch,
     render_toml,
+    sort_config,
 )
 
 logger = logging.getLogger(__name__)
@@ -220,7 +221,8 @@ async def config_summary_handler(request: web.Request) -> Response:
     data = load_toml_data()
     defaults = load_default_data()
     summary = merge_defaults(defaults, data)
-    return web.json_response({"data": summary})
+    ordered = sort_config(summary)
+    return web.json_response({"data": ordered})
 
 
 @routes.post("/api/patch")

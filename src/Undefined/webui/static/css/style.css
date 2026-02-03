@@ -87,8 +87,12 @@ body {
 /* Layouts */
 .full-view {
   min-height: 100vh;
-  display: flex;
+  display: none;
   flex-direction: column;
+}
+
+.full-view.active {
+  display: flex;
 }
 
 .app-container {
