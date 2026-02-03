@@ -15,10 +15,20 @@ logging.basicConfig(
 logger = logging.getLogger("Undefined.webui")
 
 
+async def on_startup(app: web.Application) -> None:
+    get_config_manager().start_hot_reload()
+    logger.info("[WebUI] Background tasks started (hot-reload)")
+
+
 async def on_shutdown(app: web.Application) -> None:
     logger.info("WebUI shutting down, stopping bot process...")
     bot: BotProcessController = app["bot"]
     await bot.stop()
+
+
+async def on_cleanup(app: web.Application) -> None:
+    await get_config_manager().stop_hot_reload()
+    logger.info("[WebUI] Background tasks stopped")
 
 
 def create_app() -> web.Application:
@@ -47,7 +57,9 @@ def create_app() -> web.Application:
     app.router.add_static("/static", static_dir)
 
     # Lifecycle
+    app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
+    app.on_cleanup.append(on_cleanup)
 
     return app
 
@@ -65,9 +77,6 @@ def run() -> None:
         logger.warning(
             "!!! USING DEFAULT PASSWORD !!! Please change 'webui.password' in config.toml"
         )
-
-    # Start config watching
-    get_config_manager().start_hot_reload()
 
     try:
         web.run_app(app, host=host, port=port, print=None)
