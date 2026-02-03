@@ -133,13 +133,15 @@
                     <div class="header sticky">
                         <div>
                             <h1 class="page-title" data-i18n="config.title">配置修改</h1>
-                            <p class="page-subtitle" data-i18n="config.subtitle">按分类逐项调整配置，保存后自动触发热更新。</p>
+                            <div class="save-status" id="saveStatus" style="opacity: 0;">
+                                <div class="dot-pulse"></div>
+                                <span id="saveStatusText">Saving...</span>
+                            </div>
                         </div>
                         <div class="toolbar">
-                            <button id="btnSaveConfig" class="btn primary" data-i18n="config.save">保存并刷新</button>
+                            <button id="btnResetConfig" class="btn ghost" data-i18n="config.reset">重置更改</button>
                         </div>
                     </div>
-                    <div id="configStatus" class="status-msg"></div>
                     <div id="formSections" class="form-grid"></div>
                 </section>
 

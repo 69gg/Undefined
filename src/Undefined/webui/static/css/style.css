@@ -275,9 +275,14 @@ body {
   background-color: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: 20px;
-  margin-bottom: 16px;
+  padding: 16px 20px;
+  margin-bottom: 12px;
   box-shadow: var(--shadow-sm);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.panel:hover {
+  box-shadow: var(--shadow-md);
 }
 
 .panel-row {
@@ -310,10 +315,14 @@ body {
 }
 
 .form-section-title {
-  font-size: 16px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
   font-weight: 600;
-  margin-bottom: 16px;
-  color: var(--text-primary);
+  margin-bottom: 20px;
+  color: var(--accent-color);
+  border-bottom: 1px solid var(--accent-subtle);
+  padding-bottom: 8px;
 }
 
 .form-group {
@@ -370,6 +379,57 @@ body {
 
 .btn.primary:hover {
   background: var(--accent-hover);
+}
+
+.btn.ghost {
+  background: transparent;
+  border-color: var(--border-color);
+  color: var(--text-secondary);
+}
+
+.btn.ghost:hover {
+  background: var(--bg-sidebar);
+  color: var(--text-primary);
+}
+
+.save-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  transition: opacity 0.3s ease;
+}
+
+.save-status.active {
+  color: var(--accent-color);
+}
+
+.dot-pulse {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--accent-color);
+  color: var(--accent-color);
+  animation: dotPulse 1.5s infinite linear;
+}
+
+@keyframes dotPulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.5);
+    opacity: 0.5;
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .btn-sm {

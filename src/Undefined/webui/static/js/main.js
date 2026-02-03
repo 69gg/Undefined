@@ -28,6 +28,7 @@ const I18N = {
         "config.title": "配置修改",
         "config.subtitle": "按分类逐项调整配置，保存后自动触发热更新。",
         "config.save": "保存更改",
+        "config.reset": "重置更改",
         "logs.title": "运行日志",
         "logs.subtitle": "实时查看最后 200 行日志输出。",
         "logs.auto": "自动刷新",
@@ -65,6 +66,7 @@ const I18N = {
         "config.title": "Configuration",
         "config.subtitle": "Adjust settings by category. Changes trigger hot reload.",
         "config.save": "Save Changes",
+        "config.reset": "Revert Changes",
         "logs.title": "System Logs",
         "logs.subtitle": "Real-time view of the last 200 log lines.",
         "logs.auto": "Auto Refresh",
@@ -89,6 +91,7 @@ const state = {
     token: null,
     logTimer: null,
     statusTimer: null,
+    saveTimer: null,
 };
 
 // Utils
@@ -275,6 +278,26 @@ function buildConfigForm() {
     }
 }
 
+function showSaveStatus(status, text) {
+    const el = get("saveStatus");
+    const txt = get("saveStatusText");
+    if (status === "saving") {
+        el.style.opacity = "1";
+        el.classList.add("active");
+        txt.innerText = text || "Saving...";
+    } else if (status === "saved") {
+        el.classList.remove("active");
+        txt.innerText = text || "Saved";
+        setTimeout(() => {
+            if (!state.saveTimer) el.style.opacity = "0";
+        }, 2000);
+    } else if (status === "error") {
+        el.classList.remove("active");
+        txt.innerText = text || "Error";
+        el.style.opacity = "1";
+    }
+}
+
 function createField(path, val) {
     const group = document.createElement("div");
     group.className = "form-group";
@@ -284,6 +307,7 @@ function createField(path, val) {
     label.innerText = path.split(".").pop();
     group.appendChild(label);
 
+    let input;
     if (typeof val === "boolean") {
         const wrapper = document.createElement("label");
         wrapper.className = "toggle-wrapper";
@@ -292,20 +316,28 @@ function createField(path, val) {
             <span class="toggle-track"><span class="toggle-handle"></span></span>
         `;
         group.appendChild(wrapper);
+        input = wrapper.querySelector("input");
+        input.onchange = () => autoSave();
     } else {
-        const input = document.createElement("input");
+        input = document.createElement("input");
         input.className = "form-control config-input";
         input.dataset.path = path;
         input.value = Array.isArray(val) ? val.join(", ") : val;
         group.appendChild(input);
+        input.oninput = () => {
+            if (state.saveTimer) clearTimeout(state.saveTimer);
+            showSaveStatus("saving", "Typing...");
+            state.saveTimer = setTimeout(() => {
+                state.saveTimer = null;
+                autoSave();
+            }, 1000);
+        };
     }
     return group;
 }
 
-async function saveConfig() {
-    const btn = get("btnSaveConfig");
-    btn.disabled = true;
-    btn.innerText = "Saving...";
+async function autoSave() {
+    showSaveStatus("saving");
 
     const patch = {};
     document.querySelectorAll(".config-input").forEach(input => {
@@ -332,18 +364,27 @@ async function saveConfig() {
         });
         const data = await res.json();
         if (data.success) {
-            showToast("Configuration saved successfully!", "success");
+            showSaveStatus("saved");
             if (data.warning) {
                 showToast(`Warning: ${data.warning}`, "warning", 5000);
             }
         } else {
+            showSaveStatus("error", "Error saving");
             showToast(`Error: ${data.error}`, "error", 5000);
         }
     } catch (e) {
+        showSaveStatus("error", "Network Error");
         showToast(`Error: ${e.message}`, "error", 5000);
-    } finally {
-        btn.disabled = false;
-        btn.innerText = t("config.save");
+    }
+}
+
+async function resetConfig() {
+    if (!confirm("Are you sure you want to revert all local changes? This will reload the configuration from the server.")) return;
+    try {
+        await loadConfig();
+        showToast("Configuration reloaded from server.", "info");
+    } catch (e) {
+        showToast("Failed to reload configuration.", "error");
     }
 }
 
@@ -466,7 +507,7 @@ async function init() {
         });
     });
 
-    get("btnSaveConfig").onclick = saveConfig;
+    get("btnResetConfig").onclick = resetConfig;
     get("btnRefreshLogs").onclick = fetchLogs;
     get("logoutBtn").onclick = () => {
         setToken(null);
