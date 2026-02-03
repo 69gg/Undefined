@@ -1,6 +1,7 @@
 from typing import Any, Dict
 import logging
-import os
+
+from Undefined.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +32,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     max_chars = args.get("max_chars", 4096)
 
     try:
-        use_proxy = os.getenv("USE_PROXY", "true").lower() == "true"
-        proxy = (
-            os.getenv("http_proxy")
-            or os.getenv("https_proxy")
-            or os.getenv("HTTP_PROXY")
-            or os.getenv("HTTPS_PROXY")
-        )
+        runtime_config = get_config(strict=False)
+        use_proxy = runtime_config.use_proxy
+        proxy = runtime_config.http_proxy or runtime_config.https_proxy
 
         browser_config = BrowserConfig(
             headless=True,
@@ -61,7 +58,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             else:
                 run_config_kwargs["proxy_config"] = proxy
         elif use_proxy and not proxy:
-            logger.warning("USE_PROXY=true 但未找到代理配置，将不使用代理")
+            logger.warning("已启用代理但未配置地址，将不使用代理")
 
         run_config = CrawlerRunConfig(**run_config_kwargs)
 
@@ -94,7 +91,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     except RuntimeError as e:
         if "ERR_NETWORK_CHANGED" in str(e) or "ERR_CONNECTION" in str(e):
             logger.error(f"网络连接错误: {e}")
-            return f"网络连接错误，可能是代理配置问题。请检查代理设置或设置 USE_PROXY=false 禁用代理。错误: {e}"
+            return (
+                f"网络连接错误，可能是代理配置问题。请检查代理设置或关闭代理。错误: {e}"
+            )
         else:
             logger.error(f"抓取网页时发生错误: {e}")
             return f"抓取网页时发生错误: {e}"

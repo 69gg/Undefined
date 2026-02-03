@@ -1,20 +1,25 @@
-import os
 import aiohttp
 import logging
 from typing import Dict, Any, cast
 
+from Undefined.config import get_config
+
 logger = logging.getLogger(__name__)
 
-API_KEY = os.getenv("WEATHER_API_KEY", "")
 BASE_URL = "https://api.seniverse.com/v3"
 
 
+def _get_api_key() -> str:
+    return get_config(strict=False).weather_api_key
+
+
 async def fetch_data(url: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    if not API_KEY:
+    api_key = _get_api_key()
+    if not api_key:
         logger.error("WEATHER_API_KEY 未设置")
         return {"error": "天气服务未配置API密钥"}
 
-    params["key"] = API_KEY
+    params["key"] = api_key
     params["language"] = "zh-Hans"
     params["unit"] = "c"
 

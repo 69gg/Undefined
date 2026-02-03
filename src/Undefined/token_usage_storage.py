@@ -7,7 +7,6 @@ import asyncio
 import gzip
 import json
 import logging
-import os
 import re
 import shutil
 import fcntl
@@ -18,6 +17,15 @@ from typing import Any, Optional
 
 
 logger = logging.getLogger(__name__)
+
+
+def _get_runtime_config() -> Any | None:
+    try:
+        from Undefined.config import get_config
+
+        return get_config(strict=False)
+    except Exception:
+        return None
 
 
 @dataclass
@@ -136,14 +144,6 @@ class TokenUsageStorage:
         if not self.lock_file_path.exists():
             self.lock_file_path.touch()
 
-    @staticmethod
-    def _parse_env_int(name: str, default: int) -> int:
-        value = os.getenv(name, str(default)).strip()
-        try:
-            return int(value)
-        except ValueError:
-            return default
-
     def _archive_prefix(self) -> str:
         return self.file_path.stem
 
@@ -154,7 +154,13 @@ class TokenUsageStorage:
         - merge: 超 max_archives 时合并最旧归档（尽量无损），超 max_total_bytes 仍可能删除
         - none: 不做任何清理（无损但可能无限增长）
         """
-        mode = os.getenv("TOKEN_USAGE_ARCHIVE_PRUNE_MODE", "delete").strip().lower()
+        runtime_config = _get_runtime_config()
+        if runtime_config is not None:
+            mode = (
+                str(runtime_config.token_usage_archive_prune_mode or "").strip().lower()
+            )
+        else:
+            mode = "delete"
         if mode in {"delete", "prune", "drop"}:
             return "delete"
         if mode in {"merge", "repack", "lossless"}:
@@ -362,16 +368,28 @@ class TokenUsageStorage:
     ) -> tuple[int, Optional[int], Optional[int]]:
         """获取并解析归档阈值配置"""
         if max_size_bytes is None:
-            max_size_mb = self._parse_env_int("TOKEN_USAGE_MAX_SIZE_MB", 5)
+            runtime_config = _get_runtime_config()
+            if runtime_config is not None:
+                max_size_mb = int(runtime_config.token_usage_max_size_mb)
+            else:
+                max_size_mb = 5
             max_size_bytes = max_size_mb * 1024 * 1024
 
         if max_archives is None:
-            max_archives = self._parse_env_int("TOKEN_USAGE_MAX_ARCHIVES", 30)
+            runtime_config = _get_runtime_config()
+            if runtime_config is not None:
+                max_archives = int(runtime_config.token_usage_max_archives)
+            else:
+                max_archives = 30
             if max_archives <= 0:
                 max_archives = None
 
         if max_total_bytes is None:
-            max_total_mb = self._parse_env_int("TOKEN_USAGE_MAX_TOTAL_MB", 0)
+            runtime_config = _get_runtime_config()
+            if runtime_config is not None:
+                max_total_mb = int(runtime_config.token_usage_max_total_mb)
+            else:
+                max_total_mb = 0
             max_total_bytes = max_total_mb * 1024 * 1024 if max_total_mb > 0 else None
 
         return max_size_bytes, max_archives, max_total_bytes

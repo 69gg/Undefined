@@ -15,10 +15,11 @@ graph TB
     %% ==================== 核心入口层 ====================
     subgraph EntryPoint["核心入口层 (src/Undefined/)"]
         Main["main.py<br/>启动入口"]
-        ConfigLoader["Config<br/>配置管理器<br/>[config/loader.py]"]
+        ConfigLoader["ConfigManager<br/>配置管理器<br/>[config/manager.py + loader.py]"]
         ConfigModels["配置模型<br/>[config/models.py]<br/>ChatModelConfig<br/>VisionModelConfig<br/>SecurityModelConfig<br/>AgentModelConfig"]
         OneBotClient["OneBotClient<br/>WebSocket 客户端<br/>[onebot.py]"]
         Context["RequestContext<br/>请求上下文<br/>[context.py]"]
+        WebUI["webui.py<br/>配置控制台<br/>[src/Undefined/webui.py]"]
     end
 
     %% ==================== 消息处理层 ====================
@@ -139,7 +140,7 @@ graph TB
         File_EndSummary["end_summaries.json<br/>(短期总结)"]
         File_ScheduledTasks["scheduled_tasks.json<br/>(定时任务)"]
         Dir_Logs["logs/<br/>• bot.log<br/>• 轮转日志"]
-        File_Config["config.local.json<br/>(本地管理员)"]
+        File_Config["config.toml<br/>config.local.json"]
     end
 
     %% ==================== 资源文件层 ====================
@@ -159,6 +160,8 @@ graph TB
     Main -->|"创建"| OneBotClient
     Main -->|"创建"| AIClient
     ConfigLoader --> ConfigModels
+    ConfigLoader -->|"读取"| File_Config
+    WebUI -->|"读写"| File_Config
     OneBotClient -->|"消息事件"| MessageHandler
     
     %% 消息处理层
@@ -247,7 +250,7 @@ graph TB
     classDef agent fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
     
     class User,Admin,OneBotServer,LLM_API external
-    class Main,ConfigLoader,ConfigModels,OneBotClient,Context core
+    class Main,ConfigLoader,ConfigModels,OneBotClient,Context,WebUI core
     class MessageHandler,SecurityService,InjectionAgent,CommandDispatcher,AICoordinator message
     class AIClient,PromptBuilder,ModelRequester,ToolManager,MultimodalAnalyzer,SummaryService,TokenCounter,Parsing ai
     class ToolRegistry,AgentRegistry,AgentToolRegistry,IntroGenerator skills
@@ -633,15 +636,15 @@ graph LR
 
 | 配置类别 | 关键配置项 | 说明 |
 |---------|-----------|------|
-| **基础配置** | BOT_QQ, SUPERADMIN_QQ, ONEBOT_WS_URL | 机器人身份和连接 |
-| **模型配置** | CHAT_MODEL_*, VISION_MODEL_*, AGENT_MODEL_*, SECURITY_MODEL_* | 四类模型独立配置 |
-| **功能开关** | SKILLS_HOT_RELOAD, AGENT_INTRO_AUTOGEN_ENABLED | 热重载和自动生成 |
-| **日志配置** | LOG_LEVEL, LOG_FILE_PATH, LOG_MAX_SIZE_MB | 日志系统 |
-| **队列配置** | ai_request_interval: 1.0 | 请求间隔 |
-| **MCP 配置** | MCP_CONFIG_PATH | MCP 配置文件路径 |
-| **存储配置** | TOKEN_USAGE_MAX_SIZE_MB, MEMORY_MAX_MEMORIES | 存储限制 |
-| **思考链** | *_MODEL_THINKING_ENABLED | 思维链支持 |
-| **DeepSeek** | *_MODEL_DEEPSEEK_NEW_COT_SUPPORT | DeepSeek CoT 兼容 |
+| **基础配置** | `core.bot_qq`, `core.superadmin_qq`, `onebot.ws_url` | 机器人身份和连接 |
+| **模型配置** | `models.chat` / `models.vision` / `models.agent` / `models.security` | 四类模型独立配置 |
+| **功能开关** | `skills.hot_reload`, `skills.intro_autogen_enabled` | 热重载和自动生成 |
+| **日志配置** | `logging.level`, `logging.file_path`, `logging.max_size_mb` | 日志系统 |
+| **MCP 配置** | `mcp.config_path` | MCP 配置文件路径 |
+| **存储配置** | `token_usage.*` | Token 归档和清理策略 |
+| **思考链** | `*.thinking_enabled` | 思维链支持 |
+| **DeepSeek** | `*.deepseek_new_cot_support` | DeepSeek CoT 兼容 |
+| **WebUI** | `webui.url`, `webui.port`, `webui.password` | 配置控制台 |
 
 ## 九、关键特性总结
 
@@ -668,6 +671,6 @@ graph LR
 
 ---
 
-**架构图版本**: v2.10.0
-**更新日期**: 2026-02-02  
+**架构图版本**: v2.11.0
+**更新日期**: 2026-02-03  
 **基于代码版本**: 最新 main 分支

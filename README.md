@@ -5,7 +5,7 @@
         <h1>Undefined</h1>
         <em>A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture.</em>
         <br/><br/>
-        <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10+-blue.svg" alt="Python"></a>
+        <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11+-blue.svg" alt="Python"></a>
         <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License"></a>
         <a href="https://deepwiki.com/69gg/Undefined"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
         <br/><br/>
@@ -58,6 +58,7 @@
 
 - **Skills 架构**：全新设计的技能系统，将基础工具（Tools）与智能代理（Agents）分层管理，支持自动发现与注册。
 - **Skills 热重载**：自动扫描 `skills/` 目录，检测到变更后即时重载工具与 Agent，无需重启服务。
+- **配置热更新 + WebUI**：使用 `config.toml` 配置，支持热更新；提供 WebUI 在线编辑与校验。
 - **并行工具执行**：无论是主 AI 还是子 Agent，均支持 `asyncio` 并发工具调用，大幅提升多任务处理速度（如同时读取多个文件或搜索多个关键词）。
 - **智能 Agent 矩阵**：内置多个专业 Agent，分工协作处理复杂任务。
 - **Agent 自我介绍自动生成**：启动时按 Agent 代码/配置 hash 生成 `intro.generated.md`（第一人称、结构化），与 `intro.md` 合并后作为描述；减少手动维护，保持能力说明与实现同步，有助于精准调度。
@@ -86,10 +87,11 @@ graph TB
     %% ==================== 核心入口层 ====================
     subgraph EntryPoint["核心入口层 (src/Undefined/)"]
         Main["main.py<br/>启动入口"]
-        ConfigLoader["Config<br/>配置管理器<br/>[config/loader.py]"]
+        ConfigLoader["ConfigManager<br/>配置管理器<br/>[config/manager.py + loader.py]"]
         ConfigModels["配置模型<br/>[config/models.py]<br/>ChatModelConfig<br/>VisionModelConfig<br/>SecurityModelConfig<br/>AgentModelConfig"]
         OneBotClient["OneBotClient<br/>WebSocket 客户端<br/>[onebot.py]"]
         Context["RequestContext<br/>请求上下文<br/>[context.py]"]
+        WebUI["webui.py<br/>配置控制台<br/>[src/Undefined/webui.py]"]
     end
 
     %% ==================== 消息处理层 ====================
@@ -164,6 +166,7 @@ graph TB
         Dir_History["history/<br/>• group_{id}.json<br/>• private_{id}.json"]
         Dir_FAQ["faq/{group_id}/<br/>• YYYYMMDD-NNN.json"]
         Dir_TokenUsage["token_usage_archives/<br/>• *.jsonl.gz"]
+        File_Config["config.toml<br/>config.local.json"]
         File_Memory["memory.json<br/>(长期记忆)"]
         File_EndSummary["end_summaries.json<br/>(短期总结)"]
         File_ScheduledTasks["scheduled_tasks.json<br/>(定时任务)"]
@@ -180,6 +183,8 @@ graph TB
     Main -->|"创建"| OneBotClient
     Main -->|"创建"| AIClient
     ConfigLoader --> ConfigModels
+    ConfigLoader -->|"读取"| File_Config
+    WebUI -->|"读写"| File_Config
     OneBotClient -->|"消息事件"| MessageHandler
     
     %% 消息处理层
@@ -254,13 +259,13 @@ graph TB
     classDef persistence fill:#f5f5f5,stroke:#616161,stroke-width:1px
     
     class User,Admin,OneBotServer,LLM_API external
-    class Main,ConfigLoader,ConfigModels,OneBotClient,Context core
+    class Main,ConfigLoader,ConfigModels,OneBotClient,Context,WebUI core
     class MessageHandler,SecurityService,CommandDispatcher,AICoordinator,QueueManager message
     class AIClient,PromptBuilder,ModelRequester,ToolManager,MultimodalAnalyzer,SummaryService,TokenCounter ai
     class ToolRegistry,AgentRegistry,MCPRegistry,AtomicTools,Toolsets,IntelligentAgents skills
     class HistoryManager,MemoryStorage,EndSummaryStorage,FAQStorage,ScheduledTaskStorage,TokenUsageStorage storage
     class IOUtils io
-    class Dir_History,Dir_FAQ,Dir_TokenUsage,File_Memory,File_EndSummary,File_ScheduledTasks persistence
+    class Dir_History,Dir_FAQ,Dir_TokenUsage,File_Config,File_Memory,File_EndSummary,File_ScheduledTasks persistence
 ```
 
 ### 架构详解
@@ -352,34 +357,49 @@ uv run playwright install
 
 #### 3. 配置环境
 
-复制示例配置文件 `.env.example` 为 `.env` 并填写你的配置信息。
+复制示例配置文件 `config.toml.example` 为 `config.toml` 并填写你的配置信息。
 
 ```bash
-cp .env.example .env
+cp config.toml.example config.toml
 ```
 
 #### 4. 启动运行
 
 ```bash
-uv run -m Undefined
+uv run Undefined
+```
+
+如需 WebUI（配置编辑控制台）：
+
+```bash
+uv run Undefined-webui
+```
+
+或：
+
+```bash
+uv run Undefined-webui
 ```
 
 ### 配置说明
 
-在 `.env` 文件中配置以下核心参数：
+在 `config.toml` 文件中配置以下核心参数（示例见 `config.toml.example`）：
 
-- **基础配置**：`BOT_QQ` (机器人QQ), `SUPERADMIN_QQ` (超级管理员QQ), `ONEBOT_WS_URL` (OneBot连接地址)
-- **模型配置**：支持配置不同的模型服务商。
-  - `CHAT_MODEL_*`：主对话模型（负责回复消息）
-  - `VISION_MODEL_*`：视觉识别模型（负责识图）
-  - `AGENT_MODEL_*`：Agent 专用模型（建议使用推理能力更强的模型）
-  - `SECURITY_MODEL_*`：安全审核模型（负责防注入检测）
-  - `*_MODEL_API_URL`：请填写 OpenAI 兼容的 **base URL**（如 `https://api.openai.com/v1` / `http://127.0.0.1:8000/v1`，也支持 `?api-version=...` 等 query）；如果填了完整 `/chat/completions` 旧写法也能用，但已弃用并会在运行时提示。
-  - DeepSeek Thinking + Tool Calls：若使用 `deepseek-reasoner` 或 `deepseek-chat` + `thinking={"type":"enabled"}` 且启用了工具调用，建议设置 `*_MODEL_DEEPSEEK_NEW_COT_SUPPORT=true`，以便在同一问题的多轮 `tool_calls` 中回传 `reasoning_content`（避免部分场景 400）。
-- **功能配置**：`LOG_LEVEL`, `LOG_FILE_PATH`, `LOG_MAX_SIZE_MB`, `LOG_BACKUP_COUNT`, `LOG_THINKING`
-- **Token 统计归档**：`TOKEN_USAGE_MAX_SIZE_MB`（默认 5MB，<=0 禁用）, `TOKEN_USAGE_MAX_ARCHIVES`（最大归档数）, `TOKEN_USAGE_MAX_TOTAL_MB`（归档总大小上限，0 禁用）, `TOKEN_USAGE_ARCHIVE_PRUNE_MODE`（清理模式：delete/merge/none）。归档目录为 `data/token_usage_archives/`，启动时自动检查并压缩。
-- **Skills 热重载**：`SKILLS_HOT_RELOAD`, `SKILLS_HOT_RELOAD_INTERVAL`, `SKILLS_HOT_RELOAD_DEBOUNCE`
-- **代理设置（可选）**：`USE_PROXY`, `http_proxy`, `https_proxy`（兼容 `HTTP_PROXY/HTTPS_PROXY`）
+- **基础配置**：`[core]` 与 `[onebot]`
+- **模型配置**：`[models.chat]` / `[models.vision]` / `[models.agent]` / `[models.security]`
+  - `api_url`：OpenAI 兼容 **base URL**（如 `https://api.openai.com/v1` / `http://127.0.0.1:8000/v1`）
+  - DeepSeek Thinking + Tool Calls：若使用 `deepseek-reasoner` 或 `deepseek-chat` + `thinking={"type":"enabled"}` 且启用了工具调用，建议启用 `deepseek_new_cot_support`
+- **日志配置**：`[logging]`
+- **Token 统计归档**：`[token_usage]`（默认 5MB，<=0 禁用）
+- **Skills 热重载**：`[skills]`
+- **代理设置（可选）**：`[proxy]`
+- **WebUI**：`[webui]`（默认 `127.0.0.1:8787`，密码默认 `changeme`，启动 `uv run Undefined-webui`）
+
+管理员动态列表仍使用 `config.local.json`（自动读写）。
+
+`.env` 仍可作为临时兼容输入，但已不推荐使用。
+
+WebUI 支持：配置分组表单快速编辑、Diff 预览、日志尾部查看（含自动刷新）。
 
 > 启动项目需要 OneBot 协议端，推荐使用 [NapCat](https://napneko.github.io/) 或 [Lagrange.Core](https://github.com/LagrangeDev/Lagrange.Core)。
 
@@ -389,7 +409,7 @@ Undefined 支持 **MCP (Model Context Protocol)** 协议，可以连接外部 MC
 
 1. 复制配置示例：`cp config/mcp.json.example config/mcp.json`
 2. 编辑 `config/mcp.json`，添加你需要的 MCP 服务器。
-3. 确保 `.env` 中指定了路径：`MCP_CONFIG_PATH=config/mcp.json`
+3. 在 `config.toml` 中设置：`[mcp].config_path = "config/mcp.json"`
 
 **示例：文件系统访问**
 
@@ -429,7 +449,7 @@ Undefined 支持 **MCP (Model Context Protocol)** 协议，可以连接外部 MC
 ### 开始使用
 
 1. 启动 OneBot 协议端（如 NapCat）并登录 QQ。
-2. 配置好 `.env` 并启动 Undefined。
+2. 配置好 `config.toml` 并启动 Undefined。
 3. 连接成功后，机器人即可在群聊或私聊中响应。
 
 ### Agent 能力展示

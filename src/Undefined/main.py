@@ -3,17 +3,16 @@
 import asyncio
 import logging
 import time
-import os
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from dotenv import load_dotenv
 from rich.logging import RichHandler
 from rich.console import Console
 
 from Undefined.ai import AIClient
-from Undefined.config import get_config
+from Undefined.config import get_config, get_config_manager
+from Undefined.config.loader import Config
 from Undefined.context import RequestContextFilter
 from Undefined.faq import FAQStorage
 from Undefined.handlers import MessageHandler
@@ -50,8 +49,8 @@ def ensure_runtime_dirs() -> None:
 
 def setup_logging() -> None:
     """设置日志（控制台 + 文件轮转）"""
-    load_dotenv()
-    level, log_level = _get_log_level()
+    config = Config.load(strict=False)
+    level, log_level = _get_log_level(config)
 
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
@@ -60,14 +59,14 @@ def setup_logging() -> None:
     _init_console_handler(root_logger, level)
 
     # 2. 文件处理器
-    _init_file_handler(root_logger)
+    _init_file_handler(root_logger, config)
 
     logging.info(f"[启动] 日志系统初始化完成。级别: {log_level}")
 
 
-def _get_log_level() -> tuple[int, str]:
+def _get_log_level(config: Config) -> tuple[int, str]:
     """从环境变量获取日志级别"""
-    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    log_level = config.log_level.upper()
     level = getattr(logging, log_level, logging.INFO)
     return level, log_level
 
@@ -87,11 +86,11 @@ def _init_console_handler(root_logger: logging.Logger, level: int) -> None:
     root_logger.addHandler(handler)
 
 
-def _init_file_handler(root_logger: logging.Logger) -> None:
+def _init_file_handler(root_logger: logging.Logger, config: Config) -> None:
     """初始化文件轮转日志处理器"""
-    log_file_path = os.getenv("LOG_FILE_PATH", "logs/bot.log")
-    log_max_size = int(os.getenv("LOG_MAX_SIZE_MB", "10")) * 1024 * 1024
-    log_backup_count = int(os.getenv("LOG_BACKUP_COUNT", "5"))
+    log_file_path = config.log_file_path
+    log_max_size = config.log_max_size
+    log_backup_count = config.log_backup_count
 
     log_dir = Path(log_file_path).parent
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -157,6 +156,7 @@ async def main() -> None:
             memory_storage,
             end_summary_storage,
             bot_qq=config.bot_qq,
+            runtime_config=config,
         )
         faq_storage = FAQStorage()
 
@@ -169,6 +169,25 @@ async def main() -> None:
 
     logger.info("[启动] 机器人已准备就绪，开始连接 OneBot 服务...")
 
+    config_manager = get_config_manager()
+    config_manager.load(strict=True)
+
+    def _apply_config_updates(
+        updated: Config, changes: dict[str, tuple[object, object]]
+    ) -> None:
+        if "log_level" in changes:
+            level = getattr(logging, updated.log_level, logging.INFO)
+            logging.getLogger().setLevel(level)
+            logging.info("[配置] 日志级别已更新为 %s", updated.log_level)
+        if any(key.startswith("logging.") for key in changes):
+            logging.info("[配置] 日志文件参数变更需要重启后生效")
+
+    config_manager.subscribe(_apply_config_updates)
+    config_manager.start_hot_reload(
+        interval=config.skills_hot_reload_interval,
+        debounce=config.skills_hot_reload_debounce,
+    )
+
     try:
         await onebot.run_with_reconnect()
     except KeyboardInterrupt:
@@ -179,6 +198,7 @@ async def main() -> None:
         logger.info("[清理] 正在关闭机器人并释放资源...")
         await onebot.disconnect()
         await ai.close()
+        await config_manager.stop_hot_reload()
         logger.info("[退出] 机器人已停止运行")
 
 

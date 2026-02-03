@@ -1,11 +1,10 @@
 from typing import Any, Dict
 import logging
 import httpx
-import os
+
+from Undefined.config import get_config
 
 logger = logging.getLogger(__name__)
-
-API_TOKEN = os.getenv("XXAPI_API_TOKEN", "")
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
@@ -17,7 +16,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            params = {"host": host, "key": API_TOKEN}
+            api_token = get_config(strict=False).xxapi_api_token
+            if not api_token:
+                return "❌ XXAPI 未配置 API Token"
+            params = {"host": host, "key": api_token}
             logger.info(f"网络检测: {host}")
 
             response = await client.get(

@@ -5,10 +5,9 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import logging
-import os
 from collections import deque
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
 
 import httpx
 
@@ -18,7 +17,12 @@ from Undefined.ai.prompts import PromptBuilder
 from Undefined.ai.summaries import SummaryService
 from Undefined.ai.tokens import TokenCounter
 from Undefined.ai.tooling import ToolManager
-from Undefined.config import ChatModelConfig, VisionModelConfig, AgentModelConfig
+from Undefined.config import (
+    ChatModelConfig,
+    VisionModelConfig,
+    AgentModelConfig,
+    Config,
+)
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import set_context_resource_scan_paths
 from Undefined.end_summary_storage import EndSummaryStorage
@@ -37,11 +41,20 @@ logger = logging.getLogger(__name__)
 
 
 # 尝试导入 langchain SearxSearchWrapper
+if TYPE_CHECKING:
+    from langchain_community.utilities import (
+        SearxSearchWrapper as SearxSearchWrapperType,
+    )
+else:
+    SearxSearchWrapperType = object
+
+_SearxSearchWrapper: type[SearxSearchWrapperType] | None
 try:
-    from langchain_community.utilities import SearxSearchWrapper
+    from langchain_community.utilities import SearxSearchWrapper as _SearxSearchWrapper
 
     _SEARX_AVAILABLE = True
 except Exception:
+    _SearxSearchWrapper = None
     _SEARX_AVAILABLE = False
     logger.warning(
         "langchain_community 未安装或 SearxSearchWrapper 不可用，搜索功能将禁用"
@@ -72,6 +85,7 @@ class AIClient:
         memory_storage: Optional[MemoryStorage] = None,
         end_summary_storage: Optional[EndSummaryStorage] = None,
         bot_qq: int = 0,
+        runtime_config: Config | None = None,
     ) -> None:
         """初始化 AI 客户端
 
@@ -87,6 +101,7 @@ class AIClient:
         self.vision_config = vision_config
         self.agent_config = agent_config
         self.bot_qq = bot_qq
+        self.runtime_config = runtime_config
         self.memory_storage = memory_storage
         self._end_summary_storage = end_summary_storage or EndSummaryStorage()
 
@@ -128,22 +143,11 @@ class AIClient:
         set_context_resource_scan_paths(scan_paths)
 
         # 启动 Agent intro 自动生成
-        intro_autogen_enabled = os.getenv(
-            "AGENT_INTRO_AUTOGEN_ENABLED", "true"
-        ).lower() not in {"0", "false", "no"}
-        try:
-            intro_queue_interval = float(
-                os.getenv("AGENT_INTRO_AUTOGEN_QUEUE_INTERVAL", "1.0")
-            )
-        except ValueError:
-            intro_queue_interval = 1.0
-        try:
-            intro_max_tokens = int(os.getenv("AGENT_INTRO_AUTOGEN_MAX_TOKENS", "700"))
-        except ValueError:
-            intro_max_tokens = 700
-        intro_cache_path = Path(
-            os.getenv("AGENT_INTRO_HASH_PATH", ".cache/agent_intro_hashes.json")
-        )
+        runtime_config = self._get_runtime_config()
+        intro_autogen_enabled = runtime_config.agent_intro_autogen_enabled
+        intro_queue_interval = runtime_config.agent_intro_autogen_queue_interval
+        intro_max_tokens = runtime_config.agent_intro_autogen_max_tokens
+        intro_cache_path = Path(runtime_config.agent_intro_hash_path)
         self._agent_intro_generator = AgentIntroGenerator(
             self.agent_registry.base_dir,
             self,
@@ -159,28 +163,20 @@ class AIClient:
         )
 
         # 启动 skills 热重载
-        hot_reload_enabled = os.getenv("SKILLS_HOT_RELOAD", "true").lower() not in {
-            "0",
-            "false",
-            "no",
-        }
+        hot_reload_enabled = runtime_config.skills_hot_reload
         if hot_reload_enabled:
-            try:
-                interval = float(os.getenv("SKILLS_HOT_RELOAD_INTERVAL", "2.0"))
-                debounce = float(os.getenv("SKILLS_HOT_RELOAD_DEBOUNCE", "0.5"))
-            except ValueError:
-                interval = 2.0
-                debounce = 0.5
+            interval = runtime_config.skills_hot_reload_interval
+            debounce = runtime_config.skills_hot_reload_debounce
             self.tool_registry.start_hot_reload(interval=interval, debounce=debounce)
             self.agent_registry.start_hot_reload(interval=interval, debounce=debounce)
 
         # 初始化搜索 wrapper
         self._search_wrapper: Optional[Any] = None
-        if _SEARX_AVAILABLE:
-            searxng_url = os.getenv("SEARXNG_URL", "")
+        if _SEARX_AVAILABLE and _SearxSearchWrapper is not None:
+            searxng_url = runtime_config.searxng_url
             if searxng_url:
                 try:
-                    self._search_wrapper = SearxSearchWrapper(
+                    self._search_wrapper = _SearxSearchWrapper(
                         searx_host=searxng_url, k=10
                     )
                     logger.info(
@@ -246,17 +242,20 @@ class AIClient:
     def count_tokens(self, text: str) -> int:
         return self._token_counter.count(text)
 
+    def _get_runtime_config(self) -> Config:
+        if self.runtime_config is not None:
+            return self.runtime_config
+        from Undefined.config import get_config
+
+        return get_config(strict=False)
+
     def _get_prefetch_tool_names(self) -> list[str]:
-        raw = os.getenv("PREFETCH_TOOLS", "get_current_time")
-        names = [name.strip() for name in raw.split(",") if name.strip()]
-        return names
+        runtime_config = self._get_runtime_config()
+        return list(runtime_config.prefetch_tools)
 
     def _prefetch_hide_tools(self) -> bool:
-        return os.getenv("PREFETCH_TOOLS_HIDE", "true").lower() not in {
-            "0",
-            "false",
-            "no",
-        }
+        runtime_config = self._get_runtime_config()
+        return runtime_config.prefetch_tools_hide
 
     def _is_missing_tool_result(self, result: Any) -> bool:
         if not isinstance(result, str):
@@ -499,13 +498,7 @@ class AIClient:
                     if tool_calls:
                         log_debug_json(logger, "[AI工具调用]", tool_calls)
 
-                log_thinking = os.getenv(
-                    "LOG_THINKING", "true"
-                ).strip().lower() not in {
-                    "0",
-                    "false",
-                    "no",
-                }
+                log_thinking = self._get_runtime_config().log_thinking
                 if ds_cot_enabled and tools and log_thinking and not ds_cot_logged:
                     ds_cot_logged = True
                     logger.info(

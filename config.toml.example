@@ -1,0 +1,109 @@
+# Core
+[core]
+bot_qq = 0
+superadmin_qq = 0
+admin_qq = []
+forward_proxy_qq = 0
+
+# OneBot WebSocket
+[onebot]
+ws_url = "ws://127.0.0.1:3001"
+token = ""
+
+# Models
+[models.chat]
+api_url = ""
+api_key = ""
+model_name = ""
+max_tokens = 8192
+thinking_enabled = false
+thinking_budget_tokens = 20000
+deepseek_new_cot_support = false
+
+[models.vision]
+api_url = ""
+api_key = ""
+model_name = ""
+thinking_enabled = false
+thinking_budget_tokens = 20000
+deepseek_new_cot_support = false
+
+[models.security]
+api_url = ""
+api_key = ""
+model_name = ""
+max_tokens = 100
+thinking_enabled = false
+thinking_budget_tokens = 0
+deepseek_new_cot_support = false
+
+[models.agent]
+api_url = ""
+api_key = ""
+model_name = ""
+max_tokens = 4096
+thinking_enabled = false
+thinking_budget_tokens = 0
+deepseek_new_cot_support = false
+
+# Logging
+[logging]
+level = "INFO"
+file_path = "logs/bot.log"
+max_size_mb = 10
+backup_count = 5
+log_thinking = true
+
+# Tools schema sanitize
+[tools]
+sanitize = false
+description_max_len = 1024
+sanitize_verbose = false
+description_preview_len = 160
+
+# Skills
+[skills]
+hot_reload = true
+hot_reload_interval = 2.0
+hot_reload_debounce = 0.5
+intro_autogen_enabled = true
+intro_autogen_queue_interval = 1.0
+intro_autogen_max_tokens = 8192
+intro_hash_path = ".cache/agent_intro_hashes.json"
+prefetch_tools = ["get_current_time"]
+prefetch_tools_hide = true
+
+# Search
+[search]
+searxng_url = ""
+
+# Proxy
+[proxy]
+use_proxy = true
+http_proxy = ""
+https_proxy = ""
+
+# Weather API
+[weather]
+api_key = ""
+
+# XXAPI
+[xxapi]
+api_token = ""
+
+# Token usage
+[token_usage]
+max_size_mb = 5
+max_archives = 30
+max_total_mb = 0
+archive_prune_mode = "delete"
+
+# MCP
+[mcp]
+config_path = "config/mcp.json"
+
+# WebUI
+[webui]
+url = "127.0.0.1"
+port = 8787
+password = "changeme"

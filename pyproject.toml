@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
   { name = "Null", email = "pylindex@qq.com"  }
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "websockets>=12.0",
     "httpx>=0.27.0",
@@ -50,6 +50,7 @@ Issues = "https://github.com/69gg/Undefined/issues"
 
 [project.scripts]
 Undefined = "Undefined.main:run"
+Undefined-webui = "Undefined.webui:run"
 
 [project.optional-dependencies]
 dev = [
