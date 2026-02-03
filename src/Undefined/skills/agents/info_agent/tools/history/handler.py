@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """获取指定时间段内的历史消息记录"""
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             logger.info("获取历史上的今天")

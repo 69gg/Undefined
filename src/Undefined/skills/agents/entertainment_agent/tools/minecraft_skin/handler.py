@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """获取指定我的世界（Minecraft）正版用户的皮肤图片链接"""
     name = args.get("name")
     render_type = args.get("type", "头像")
     overlay = args.get("overlay", True)

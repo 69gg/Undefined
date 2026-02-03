@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """在全球范围内搜索指定关键词的音乐资源"""
     msg = args.get("msg")
     n = args.get("n", 1)
 

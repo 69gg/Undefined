@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """利用 AI 对文件进行多模态分析（图片文字提取、内容描述等）"""
     file_path: str = args.get("file_path", "")
     media_type: str = args.get("media_type", "auto")
     prompt_extra: str = args.get("prompt", "")

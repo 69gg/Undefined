@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """使用 glob 模式搜索匹配的文件"""
     pattern = args.get("pattern", "")
 
     # 将 base_path 限制在 NagaAgent 子模块中

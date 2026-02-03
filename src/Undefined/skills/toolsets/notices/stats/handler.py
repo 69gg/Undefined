@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """统计并分析公告的触达及反馈数据"""
     group_id = args.get("group_id")
     if not group_id:
         # 优先从 context 获取（避免并发问题）

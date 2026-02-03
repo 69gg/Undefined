@@ -148,12 +148,23 @@ async def append_line(
 
 
 async def exists(file_path: Path | str) -> bool:
-    """异步检查文件是否存在"""
+    """异步检查文件或目录是否存在
+
+    参数:
+        file_path: 要检查的路径
+    """
     return await asyncio.to_thread(Path(file_path).exists)
 
 
 async def delete_file(file_path: Path | str) -> bool:
-    """异步删除文件"""
+    """异步删除指定文件
+
+    参数:
+        file_path: 文件路径
+
+    返回:
+        删除成功返回 True，文件不存在则返回 False
+    """
     p = Path(file_path)
 
     def sync_delete() -> bool:

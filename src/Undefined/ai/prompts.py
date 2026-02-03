@@ -27,6 +27,14 @@ class PromptBuilder:
         end_summary_storage: EndSummaryStorage,
         system_prompt_path: str = "res/prompts/undefined.xml",
     ) -> None:
+        """初始化 Prompt 构建器
+
+        参数:
+            bot_qq: 机器人 QQ 号
+            memory_storage: 长期记忆存储 (可选)
+            end_summary_storage: 短期回忆存储
+            system_prompt_path: 系统提示词文件路径
+        """
         self._bot_qq = bot_qq
         self._memory_storage = memory_storage
         self._end_summary_storage = end_summary_storage
@@ -54,6 +62,16 @@ class PromptBuilder:
         | None = None,
         extra_context: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
+        """构建发送给 AI 的消息列表
+
+        参数:
+            question: 当前用户消息
+            get_recent_messages_callback: 获取历史消息的回调函数
+            extra_context: 额外的上下文信息 (如 group_id, user_id)
+
+        返回:
+            构建好的消息列表 (role/content 结构)
+        """
         system_prompt = await self._load_system_prompt()
         logger.debug(
             "[Prompt] system_prompt_len=%s path=%s",

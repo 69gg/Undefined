@@ -1,4 +1,4 @@
-"""Multimodal analysis helpers."""
+"""多模态分析辅助函数。"""
 
 from __future__ import annotations
 
@@ -9,56 +9,120 @@ from typing import Any
 import aiofiles
 
 from Undefined.ai.parsing import extract_choices_content
-from Undefined.ai.http import ModelRequester
+from Undefined.ai.llm import ModelRequester
 from Undefined.config import VisionModelConfig
 from Undefined.utils.logging import log_debug_json, redact_string
 
 logger = logging.getLogger(__name__)
 
+# 文件扩展名常量
+_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg")
+_AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma")
+_VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".webm", ".mkv", ".flv", ".wmv")
+
+# MIME 类型前缀到媒体类型的映射
+_MIME_PREFIX_TO_TYPE = {
+    "image/": "image",
+    "audio/": "audio",
+    "video/": "video",
+}
+
+
+def _extract_mime_type_from_data_url(media_url: str) -> str | None:
+    """从 data URL 中提取 MIME 类型。
+
+    Args:
+        media_url: 媒体 URL
+
+    Returns:
+        MIME 类型前缀（如 "image/"）或 None
+    """
+    if not media_url.startswith("data:"):
+        return None
+    mime_part = media_url.split(";")[0]
+    if ":" in mime_part:
+        return mime_part.split(":")[1]
+    return None
+
+
+def _get_media_type_by_extension(url_lower: str) -> str:
+    """根据文件扩展名判断媒体类型。
+
+    Args:
+        url_lower: 转换为小写的 URL
+
+    Returns:
+        媒体类型（"image"、"audio" 或 "video"）
+    """
+    for ext in _IMAGE_EXTENSIONS:
+        if ext in url_lower:
+            return "image"
+    for ext in _AUDIO_EXTENSIONS:
+        if ext in url_lower:
+            return "audio"
+    for ext in _VIDEO_EXTENSIONS:
+        if ext in url_lower:
+            return "video"
+    return "image"  # 默认返回图片类型
+
 
 def detect_media_type(media_url: str, specified_type: str = "auto") -> str:
+    """检测媒体文件的类型（图片、音频或视频）。"""
+    # 1. 优先级最高：手动指定类型
     if specified_type and specified_type != "auto":
         return specified_type
 
-    if media_url.startswith("data:"):
-        data_mime_type = media_url.split(";")[0].split(":")[1]
-        if data_mime_type.startswith("image/"):
-            return "image"
-        if data_mime_type.startswith("audio/"):
-            return "audio"
-        if data_mime_type.startswith("video/"):
-            return "video"
+    # 2. 检查 data URL
+    media_type = _detect_from_data_url(media_url)
+    if media_type:
+        return media_type
 
+    # 3. 使用 mimetypes 或扩展名猜测
+    return _detect_by_mimetypes(media_url)
+
+
+def _detect_from_data_url(media_url: str) -> str | None:
+    """从 data URL 的 MIME 类型中探测媒体类型"""
+    mime = _extract_mime_type_from_data_url(media_url)
+    if mime:
+        for prefix, media_type in _MIME_PREFIX_TO_TYPE.items():
+            if mime.startswith(prefix):
+                return media_type
+    return None
+
+
+def _detect_by_mimetypes(media_url: str) -> str:
+    """利用 mimetypes 库或扩展名探测媒体类型"""
     import mimetypes
 
-    guessed_mime_type, _ = mimetypes.guess_type(media_url)
-    if guessed_mime_type:
-        if guessed_mime_type.startswith("image/"):
-            return "image"
-        if guessed_mime_type.startswith("audio/"):
-            return "audio"
-        if guessed_mime_type.startswith("video/"):
-            return "video"
+    guessed_mime, _ = mimetypes.guess_type(media_url)
+    if guessed_mime:
+        for prefix, media_type in _MIME_PREFIX_TO_TYPE.items():
+            if guessed_mime.startswith(prefix):
+                return media_type
 
-    url_lower = media_url.lower()
-    image_extensions = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"]
-    audio_extensions = [".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma"]
-    video_extensions = [".mp4", ".avi", ".mov", ".webm", ".mkv", ".flv", ".wmv"]
+    return _get_media_type_by_extension(media_url.lower())
 
-    for ext in image_extensions:
-        if ext in url_lower:
-            return "image"
-    for ext in audio_extensions:
-        if ext in url_lower:
-            return "audio"
-    for ext in video_extensions:
-        if ext in url_lower:
-            return "video"
 
-    return "image"
+# 默认 MIME 类型映射
+_DEFAULT_MIME_TYPES = {
+    "image": "image/jpeg",
+    "audio": "audio/mpeg",
+    "video": "video/mp4",
+}
 
 
 def get_media_mime_type(media_type: str, file_path: str = "") -> str:
+    """获取媒体文件的 MIME 类型。
+
+    Args:
+        media_type: 媒体类型（"image"、"audio" 或 "video"）
+        file_path: 文件路径（可选），用于根据文件扩展名推断 MIME 类型
+
+    Returns:
+        MIME 类型字符串
+    """
+    # 如果提供了文件路径，优先使用 mimetypes 推断
     if file_path:
         import mimetypes
 
@@ -66,26 +130,154 @@ def get_media_mime_type(media_type: str, file_path: str = "") -> str:
         if mime_type:
             return mime_type
 
-    if media_type == "image":
-        return "image/jpeg"
-    if media_type == "audio":
-        return "audio/mpeg"
-    if media_type == "video":
-        return "video/mp4"
-    return "application/octet-stream"
+    # 返回默认 MIME 类型
+    return _DEFAULT_MIME_TYPES.get(media_type, "application/octet-stream")
+
+
+# 响应内容类型到字段名的映射
+_MEDIA_TYPE_TO_FIELD = {
+    "image": "ocr_text",
+    "audio": "transcript",
+    "video": "subtitles",
+}
+
+# 错误消息映射
+_ERROR_MESSAGES = {
+    "read": {
+        "image": "[图片无法读取]",
+        "audio": "[音频无法读取]",
+        "video": "[视频无法读取]",
+        "default": "[媒体文件无法读取]",
+    },
+    "analyze": {
+        "image": "[图片分析失败]",
+        "audio": "[音频分析失败]",
+        "video": "[视频分析失败]",
+        "default": "[媒体分析失败]",
+    },
+}
+
+
+def _parse_line_value(line: str, prefix: str) -> str:
+    """解析行内容，提取指定前缀后的值。
+
+    Args:
+        line: 待解析的行
+        prefix: 前缀（支持中文冒号和英文冒号）
+
+    Returns:
+        提取的值，如果值为 "无" 则返回空字符串
+    """
+    value = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+    return "" if value == "无" else value
+
+
+def _parse_analysis_response(content: str) -> dict[str, str]:
+    """解析 AI 分析响应的内容。
+
+    Args:
+        content: AI 返回的文本内容
+
+    Returns:
+        包含描述和类型特定字段的字典
+    """
+    # 字段前缀映射（支持中文冒号和英文冒号）
+    field_prefixes = {
+        "description": ("描述：", "描述:"),
+        "ocr_text": ("OCR：", "OCR:"),
+        "transcript": ("转写：", "转写:"),
+        "subtitles": ("字幕：", "字幕:"),
+    }
+
+    # 初始化所有字段为空
+    result = {
+        "description": "",
+        "ocr_text": "",
+        "transcript": "",
+        "subtitles": "",
+    }
+
+    # 解析每一行
+    for line in content.split("\n"):
+        line = line.strip()
+        for field, prefixes in field_prefixes.items():
+            if line.startswith(prefixes):
+                result[field] = _parse_line_value(line, prefixes[0])
+
+    # 如果没有解析到描述，使用完整内容作为描述
+    if not result["description"]:
+        result["description"] = content
+
+    return result
 
 
 class MultimodalAnalyzer:
+    """多模态媒体分析器。
+
+    支持分析图片、音频和视频文件，提取描述内容和类型特定信息（如 OCR 文字、转写文字、字幕等）。
+    """
+
     def __init__(
         self,
         requester: ModelRequester,
         vision_config: VisionModelConfig,
         prompt_path: str = "res/prompts/analyze_multimodal.txt",
     ) -> None:
+        """初始化多模态分析器。
+
+        Args:
+            requester: 模型请求器
+            vision_config: 视觉模型配置
+            prompt_path: 提示词模板文件路径
+        """
         self._requester = requester
         self._vision_config = vision_config
         self._prompt_path = prompt_path
         self._cache: dict[str, dict[str, str]] = {}
+
+    async def _load_media_content(self, media_url: str, media_type: str) -> str:
+        """加载媒体内容。
+
+        如果是本地文件，会将其转换为 base64 编码的 data URL。
+
+        Args:
+            media_url: 媒体 URL 或本地文件路径
+            media_type: 媒体类型
+
+        Returns:
+            可用于 API 请求的媒体内容字符串
+        """
+        if media_url.startswith("data:") or media_url.startswith("http"):
+            return media_url
+
+        # 读取本地文件并转换为 base64
+        async with aiofiles.open(media_url, "rb") as f:
+            media_data = base64.b64encode(await f.read()).decode()
+        mime_type = get_media_mime_type(media_type, media_url)
+        return f"data:{mime_type};base64,{media_data}"
+
+    async def _build_content_items(
+        self, media_type: str, media_content: str, prompt: str
+    ) -> list[dict[str, Any]]:
+        """构建请求内容项。
+
+        Args:
+            media_type: 媒体类型
+            media_content: 媒体内容（URL 或 data URL）
+            prompt: 提示词
+
+        Returns:
+            包含文本和媒体的内容项列表
+        """
+        content_items: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+
+        # 添加媒体内容项
+        media_item_key = f"{media_type}_url"
+        content_items.append(
+            {"type": media_item_key, media_item_key: {"url": media_content}}
+        )
+
+        return content_items
 
     async def analyze(
         self,
@@ -93,6 +285,16 @@ class MultimodalAnalyzer:
         media_type: str = "auto",
         prompt_extra: str = "",
     ) -> dict[str, str]:
+        """分析媒体文件。
+
+        Args:
+            media_url: 媒体文件 URL 或本地路径
+            media_type: 媒体类型，"auto" 表示自动检测
+            prompt_extra: 补充提示词
+
+        Returns:
+            包含描述和类型特定信息的字典
+        """
         detected_type = detect_media_type(media_url, media_type)
         safe_url = redact_string(media_url)
         logger.info(f"[媒体分析] 开始分析 {detected_type}: {safe_url[:50]}...")
@@ -104,54 +306,43 @@ class MultimodalAnalyzer:
             len(prompt_extra),
         )
 
+        # 检查缓存
         cache_key = f"{detected_type}:{media_url[:100]}:{prompt_extra}"
         if cache_key in self._cache:
             logger.debug("[媒体分析] 命中缓存: key=%s", cache_key[:120])
             return self._cache[cache_key]
 
-        if media_url.startswith("data:") or media_url.startswith("http"):
-            media_content = media_url
-        else:
-            try:
-                async with aiofiles.open(media_url, "rb") as f:
-                    media_data = base64.b64encode(await f.read()).decode()
-                mime_type = get_media_mime_type(detected_type, media_url)
-                media_content = f"data:{mime_type};base64,{media_data}"
-            except Exception as exc:
-                logger.error(f"无法读取媒体文件: {exc}")
-                error_msg = {
-                    "image": "[图片无法读取]",
-                    "audio": "[音频无法读取]",
-                    "video": "[视频无法读取]",
-                }.get(detected_type, "[媒体文件无法读取]")
-                return {"description": error_msg}
+        # 加载媒体内容
+        try:
+            media_content = await self._load_media_content(media_url, detected_type)
+        except Exception as exc:
+            logger.error(f"无法读取媒体文件: {exc}")
+            return {
+                "description": _ERROR_MESSAGES["read"].get(
+                    detected_type, _ERROR_MESSAGES["read"]["default"]
+                )
+            }
 
+        # 加载提示词
         async with aiofiles.open(self._prompt_path, "r", encoding="utf-8") as f:
             prompt = await f.read()
+
         logger.debug(
             "[媒体分析] prompt_len=%s path=%s",
             len(prompt),
             self._prompt_path,
         )
 
+        # 添加补充提示词
         if prompt_extra:
             prompt += f"\n\n【补充指令】\n{prompt_extra}"
 
-        content_items: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        # 构建请求内容
+        content_items = await self._build_content_items(
+            detected_type, media_content, prompt
+        )
 
-        if detected_type == "image":
-            content_items.append(
-                {"type": "image_url", "image_url": {"url": media_content}}
-            )
-        elif detected_type == "audio":
-            content_items.append(
-                {"type": "audio_url", "audio_url": {"url": media_content}}
-            )
-        elif detected_type == "video":
-            content_items.append(
-                {"type": "video_url", "video_url": {"url": media_content}}
-            )
-
+        # 发送分析请求
         try:
             result = await self._requester.request(
                 model_config=self._vision_config,
@@ -163,52 +354,40 @@ class MultimodalAnalyzer:
             if logger.isEnabledFor(logging.DEBUG):
                 log_debug_json(logger, "[媒体分析] 原始响应内容", content)
 
-            description = ""
-            ocr_text = ""
-            transcript = ""
-            subtitles = ""
+            # 解析响应内容
+            parsed = _parse_analysis_response(content)
 
-            for line in content.split("\n"):
-                line = line.strip()
-                if line.startswith("描述：") or line.startswith("描述:"):
-                    description = line.split("：", 1)[-1].split(":", 1)[-1].strip()
-                elif line.startswith("OCR：") or line.startswith("OCR:"):
-                    ocr_text = line.split("：", 1)[-1].split(":", 1)[-1].strip()
-                    if ocr_text == "无":
-                        ocr_text = ""
-                elif line.startswith("转写：") or line.startswith("转写:"):
-                    transcript = line.split("：", 1)[-1].split(":", 1)[-1].strip()
-                    if transcript == "无":
-                        transcript = ""
-                elif line.startswith("字幕：") or line.startswith("字幕:"):
-                    subtitles = line.split("：", 1)[-1].split(":", 1)[-1].strip()
-                    if subtitles == "无":
-                        subtitles = ""
+            # 根据媒体类型构建结果字典
+            result_dict: dict[str, str] = {"description": parsed["description"]}
+            field_name = _MEDIA_TYPE_TO_FIELD.get(detected_type)
+            if field_name:
+                result_dict[field_name] = parsed[field_name]
 
-            result_dict: dict[str, str] = {"description": description or content}
-            if detected_type == "image":
-                result_dict["ocr_text"] = ocr_text
-            elif detected_type == "audio":
-                result_dict["transcript"] = transcript
-            elif detected_type == "video":
-                result_dict["subtitles"] = subtitles
-
+            # 缓存结果
             self._cache[cache_key] = result_dict
             logger.info(f"[媒体分析] 完成并缓存: {safe_url[:50]}... ({detected_type})")
             return result_dict
 
         except Exception as exc:
             logger.exception(f"媒体分析失败: {exc}")
-            error_msg = {
-                "image": "[图片分析失败]",
-                "audio": "[音频分析失败]",
-                "video": "[视频分析失败]",
-            }.get(detected_type, "[媒体分析失败]")
-            return {"description": error_msg}
+            return {
+                "description": _ERROR_MESSAGES["analyze"].get(
+                    detected_type, _ERROR_MESSAGES["analyze"]["default"]
+                )
+            }
 
     async def describe_image(
         self, image_url: str, prompt_extra: str = ""
     ) -> dict[str, str]:
+        """描述图片内容。
+
+        Args:
+            image_url: 图片 URL 或本地路径
+            prompt_extra: 补充提示词
+
+        Returns:
+            包含描述和 OCR 文字的字典
+        """
         result = await self.analyze(image_url, "image", prompt_extra)
         if "ocr_text" not in result:
             result["ocr_text"] = ""

@@ -33,6 +33,7 @@ STAR_MAP = {1: "★", 2: "★★", 3: "★★★", 4: "★★★★", 5: "★★
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """查询指定星座的今日、明日、本周或本月运势"""
     constellation = args.get("constellation")
     time_type = args.get("time_type", "today")
 

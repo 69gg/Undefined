@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """提取 PDF 文档中的文本及结构化信息"""
     file_path: str = args.get("file_path", "")
     extract_images: bool = args.get("extract_images", False)
 

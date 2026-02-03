@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """获取百度热搜榜单"""
     limit = args.get("limit", 10)
 
     if limit < 1 or limit > 50:

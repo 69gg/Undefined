@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """向文昌帝君祈福，获取一段励志或考试相关的祝福语"""
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             logger.info("抽取文昌帝君灵签")

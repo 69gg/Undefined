@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """提取 XLSX 表格文件中的数据和文本"""
     file_path: str = args.get("file_path", "")
 
     path = Path(file_path)

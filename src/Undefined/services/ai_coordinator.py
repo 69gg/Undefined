@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 from Undefined.config import Config
 from Undefined.context import RequestContext
@@ -27,6 +28,7 @@ class AICoordinator:
         onebot: Any,  # OneBotClient
         scheduler: TaskScheduler,
         security: SecurityService,
+        command_dispatcher: Any = None,
     ) -> None:
         self.config = config
         self.ai = ai
@@ -36,6 +38,7 @@ class AICoordinator:
         self.onebot = onebot
         self.scheduler = scheduler
         self.security = security
+        self.command_dispatcher = command_dispatcher
 
     async def handle_auto_reply(
         self,
@@ -49,7 +52,19 @@ class AICoordinator:
         sender_role: str = "member",
         sender_title: str = "",
     ) -> None:
-        """自动回复处理：根据上下文决定是否回复"""
+        """群聊自动回复入口：根据消息内容、命中情况和安全检测决定是否回复
+
+        参数:
+            group_id: 群号
+            sender_id: 发送者 QQ
+            text: 消息纯文本
+            message_content: 结构化原始消息内容
+            is_poke: 是否为拍一拍触发
+            sender_name: 发送者昵称
+            group_name: 群名称
+            sender_role: 发送者角色 (owner/admin/member)
+            sender_title: 发送者群头衔
+        """
         is_at_bot = is_poke or self._is_at_bot(message_content)
         logger.debug(
             "[自动回复] group=%s sender=%s at_bot=%s text_len=%s",
@@ -127,7 +142,7 @@ class AICoordinator:
         is_poke: bool = False,
         sender_name: str = "未知用户",
     ) -> None:
-        """私聊回复处理"""
+        """处理私聊消息入口，决定回复策略并进行安全检测"""
         logger.debug("[私聊回复] user=%s text_len=%s", user_id, len(text))
         if user_id != self.config.superadmin_qq:
             if await self.security.detect_injection(text, message_content):
@@ -171,6 +186,11 @@ class AICoordinator:
             )
 
     async def execute_reply(self, request: dict[str, Any]) -> None:
+        """执行排队中的回复请求（由 QueueManager 分发调用）
+
+        参数:
+            request: 包含请求类型和必要元数据的请求字典
+        """
         """执行回复请求（由 QueueManager 调用）"""
         req_type = request.get("type", "unknown")
         logger.debug("[执行请求] type=%s keys=%s", req_type, list(request.keys()))
@@ -178,6 +198,8 @@ class AICoordinator:
             await self._execute_auto_reply(request)
         elif req_type == "private_reply":
             await self._execute_private_reply(request)
+        elif req_type == "stats_analysis":
+            await self._execute_stats_analysis(request)
 
     async def _execute_auto_reply(self, request: dict[str, Any]) -> None:
         group_id = request["group_id"]
@@ -344,7 +366,63 @@ class AICoordinator:
             except Exception:
                 logger.exception("私聊回复执行出错")
 
+    async def _execute_stats_analysis(self, request: dict[str, Any]) -> None:
+        """执行 stats 命令的 AI 分析"""
+        group_id = request["group_id"]
+        data_summary = request.get("data_summary", "")
+
+        try:
+            # 加载 prompt 模板
+            prompt_path = Path("res/prompts/stats_analysis.txt")
+            if not prompt_path.exists():
+                logger.warning("[StatsAnalysis] 提示词文件不存在，使用默认分析")
+                analysis = "AI 分析功能暂时不可用（提示词文件缺失）"
+                if self.command_dispatcher:
+                    self.command_dispatcher.set_stats_analysis_result(
+                        group_id, analysis
+                    )
+                return
+
+            prompt_template = prompt_path.read_text(encoding="utf-8")
+            full_prompt = prompt_template.format(data_summary=data_summary)
+
+            # 调用 AI 进行分析
+            messages = [
+                {"role": "system", "content": "你是一位专业的数据分析师。"},
+                {"role": "user", "content": full_prompt},
+            ]
+
+            result = await self.ai.request_model(
+                model_config=self.config.chat_model,
+                messages=messages,
+                max_tokens=2048,
+                call_type="stats_analysis",
+            )
+
+            # 提取分析结果
+            choices = result.get("choices", [{}])
+            if choices:
+                content = choices[0].get("message", {}).get("content", "")
+                analysis = content.strip()
+            else:
+                analysis = "AI 分析未能生成结果"
+
+            logger.info(
+                f"[StatsAnalysis] 分析完成，群: {group_id}, 长度: {len(analysis)}"
+            )
+
+            # 设置分析结果（通知等待的 _handle_stats 方法）
+            if self.command_dispatcher:
+                self.command_dispatcher.set_stats_analysis_result(group_id, analysis)
+
+        except Exception as e:
+            logger.exception(f"[StatsAnalysis] AI 分析失败: {e}")
+            # 出错时也通知等待，但返回空字符串
+            if self.command_dispatcher:
+                self.command_dispatcher.set_stats_analysis_result(group_id, "")
+
     def _is_at_bot(self, content: list[dict[str, Any]]) -> bool:
+        """检查消息内容中是否包含对机器人的 @ 提问"""
         for seg in content:
             if seg.get("type") == "at" and str(
                 seg.get("data", {}).get("qq", "")
@@ -359,6 +437,7 @@ class AICoordinator:
         is_private: bool = False,
         sender_id: Optional[int] = None,
     ) -> None:
+        """当检测到注入攻击时，生成并发送特定的防御性回复"""
         reply = await self.security.generate_injection_response(text)
         if is_private:
             await self.sender.send_private_message(tid, reply, auto_history=False)
@@ -385,6 +464,10 @@ class AICoordinator:
         time_str: str,
         text: str,
     ) -> str:
+        """构建最终发送给 AI 的结构化 XML 消息 Prompt
+
+        包含回复策略提示、用户信息和原始文本内容。
+        """
         return f"""{prefix}<message sender="{name}" sender_id="{uid}" group_id="{gid}" group_name="{gname}" location="{loc}" role="{role}" title="{title}" time="{time_str}">
 <content>{text}</content>
 </message>
@@ -404,6 +487,7 @@ class AICoordinator:
 简单说：像个极度安静的群友。被@或明确提到才回应，NagaAgent技术问题尽量回复，其他几乎不理。"""
 
     async def _send_image(self, tid: int, mtype: str, path: str) -> None:
+        """发送图片或语音消息到群聊或私聊"""
         # 这里为了简化，直接调用 onebot 发送，逻辑同原 MessageHandler._send_image
         import os
 

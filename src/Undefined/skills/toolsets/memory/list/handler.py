@@ -2,6 +2,7 @@ from typing import Any, Dict
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """列出当前的持久化长期记忆列表"""
     memory_storage = context.get("memory_storage")
 
     if memory_storage:

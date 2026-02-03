@@ -12,11 +12,17 @@ class TokenCounter:
     """Token counter with tiktoken fallback."""
 
     def __init__(self, model_name: str = "gpt-4") -> None:
+        """初始化 Token 计数器
+
+        参数:
+            model_name: 使用的模型名称，用于获取对应的编码器
+        """
         self._model_name = model_name
         self._tokenizer: Any | None = None
         self._try_load_tokenizer()
 
     def _try_load_tokenizer(self) -> None:
+        """尝试加载适合指定模型的 tiktoken 编码器"""
         try:
             import tiktoken
 

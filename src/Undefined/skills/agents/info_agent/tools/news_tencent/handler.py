@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """获取腾讯新闻的最新实时资讯"""
     page = args.get("page", 10)
     url = "https://api.jkyai.top/API/txxwtt.php"
 

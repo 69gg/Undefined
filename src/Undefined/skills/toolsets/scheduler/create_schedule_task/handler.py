@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """创建一个新的定时任务，支持 Crontab 表达式"""
     """
     执行 create_schedule_task 工具
     创建一个定时执行的任务

@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """获取指定句子的“人间文案”感悟"""
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             logger.info("获取人间凑数语录")

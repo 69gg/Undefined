@@ -2,6 +2,7 @@ from typing import Any, Dict
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """删除指定的持久化长期记忆条目"""
     memory_uuid = args.get("uuid", "")
     if not memory_uuid:
         return "UUID 不能为空"

@@ -9,6 +9,7 @@ API_TOKEN = os.getenv("XXAPI_API_TOKEN", "")
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """对特定网址或域名执行网络质量巡检，探测 HTTP 状态及延迟情况"""
     host = args.get("host")
 
     if not host:

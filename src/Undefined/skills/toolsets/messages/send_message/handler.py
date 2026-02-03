@@ -5,6 +5,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """发送群聊消息，支持文本和 CQ 码格式"""
     message = args.get("message", "")
     if not message:
         logger.warning("[发送消息] 收到空消息请求")

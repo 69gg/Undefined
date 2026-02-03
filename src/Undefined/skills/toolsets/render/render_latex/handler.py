@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """渲染 LaTeX 数学公式为图片或文本描述"""
     content = args.get("content", "")
     target_id = args.get("target_id")
     message_type = args.get("message_type")

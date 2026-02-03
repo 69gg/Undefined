@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 
 
 class MCPToolRegistry:
-    """MCP tool registry.
+    """MCP (Model Context Protocol) 工具注册中心
 
-    Loads MCP config, connects MCP servers, and converts MCP tools to function schemas.
+    负责加载 MCP 配置文件，连接并管理 MCP 服务器，并将 MCP 工具转换为标准函数架构。
     """
 
     def __init__(
@@ -43,6 +43,11 @@ class MCPToolRegistry:
         self._is_initialized: bool = False
 
     def load_mcp_config(self) -> Dict[str, Any]:
+        """从本地文件加载 MCP 服务器配置
+
+        返回:
+            包含 mcpServers 定义的字典
+        """
         if not self.config_path.exists():
             logger.warning(f"MCP 配置文件不存在: {self.config_path}")
             return {"mcpServers": {}}
@@ -62,6 +67,10 @@ class MCPToolRegistry:
             return {"mcpServers": {}}
 
     async def initialize(self) -> None:
+        """初始化 MCP 客户端并连接所有已配置的服务器列表
+
+        此过程会通过 fastmcp 库连接远端服务并拉取工具定义。
+        """
         self._tools_schema = []
         self._tools_handlers = {}
 
@@ -113,6 +122,10 @@ class MCPToolRegistry:
         self._is_initialized = True
 
     async def _register_tool(self, tool: Any) -> None:
+        """将单个 MCP 工具注册到本地表并生成执行处理器
+
+        此方法会将 MCP 工具名根据策略(strategy)进行命名空间转换。
+        """
         try:
             tool_name = tool.name
             tool_description = tool.description or ""
@@ -186,6 +199,7 @@ class MCPToolRegistry:
             logger.error(f"注册 MCP 工具失败 [{tool.name}]: {e}")
 
     def get_tools_schema(self) -> List[Dict[str, Any]]:
+        """获取所有已加载 MCP 工具的 OpenAI 兼容架构定义列表"""
         return self._tools_schema
 
     async def execute_tool(
@@ -194,6 +208,16 @@ class MCPToolRegistry:
         args: Dict[str, Any],
         context: Dict[str, Any],
     ) -> str:
+        """执行指定的 MCP 工具
+
+        参数:
+            tool_name: 转换后的工具命名空间全名 (如 'mcp.server.tool')
+            args: 调用参数
+            context: 执行上下文
+
+        返回:
+            工具返回的文本内容或错误说明
+        """
         handler = self._tools_handlers.get(tool_name)
         if not handler:
             if logger.isEnabledFor(logging.INFO):

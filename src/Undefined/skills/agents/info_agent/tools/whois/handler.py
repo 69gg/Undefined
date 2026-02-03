@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """查询域名或 IP 的 WHOIS 注册信息"""
     domain = args.get("domain")
 
     if not domain:

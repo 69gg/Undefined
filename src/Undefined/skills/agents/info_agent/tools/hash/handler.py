@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """计算给定字符串或文件的哈希值（如 MD5, SHA256 等）"""
     text = args.get("text")
     algorithm = args.get("algorithm")
 

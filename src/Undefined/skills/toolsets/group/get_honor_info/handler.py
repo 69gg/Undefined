@@ -5,6 +5,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """获取群员在群内的荣誉信息（如龙王、群聊之火等）"""
     """获取群荣誉信息"""
     ai_client = context.get("ai_client")
     group_id = args.get("group_id") or context.get("group_id")

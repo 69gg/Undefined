@@ -1,4 +1,5 @@
 import logging
+import copy
 from pathlib import Path
 from typing import Dict, Any, List, TYPE_CHECKING
 
@@ -50,33 +51,92 @@ class ToolRegistry(BaseRegistry):
         # 4) 输出工具列表（不包含 MCP 工具，因为 MCP 还未初始化）
         self._log_tools_summary(include_mcp=False)
 
-    def _log_tools_summary(self, include_mcp: bool = True) -> None:
-        tool_names = list(self._items.keys())
+    def _categorize_tools(
+        self, tool_names: list[str]
+    ) -> tuple[list[str], list[str], list[str]]:
+        """将工具按类型分类。
+
+        Args:
+            tool_names: 工具名称列表
+
+        Returns:
+            (基础工具列表, 工具集工具列表, MCP 工具列表)
+        """
         basic_tools = [name for name in tool_names if "." not in name]
         toolset_tools = [
             name for name in tool_names if "." in name and not name.startswith("mcp.")
         ]
         mcp_tools = [name for name in tool_names if name.startswith("mcp.")]
+        return basic_tools, toolset_tools, mcp_tools
 
-        toolset_by_category: Dict[str, List[str]] = {}
+    def _group_toolsets_by_category(
+        self, toolset_tools: list[str]
+    ) -> dict[str, list[str]]:
+        """将工具集工具按类别分组。
+
+        Args:
+            toolset_tools: 工具集工具列表
+
+        Returns:
+            按类别分组的工具字典
+        """
+        toolset_by_category: dict[str, list[str]] = {}
         for name in toolset_tools:
             category = name.split(".")[0]
             toolset_by_category.setdefault(category, []).append(name)
+        return toolset_by_category
 
+    def _format_tools_list(self, tools: list[str]) -> str:
+        """格式化工具列表为字符串。
+
+        Args:
+            tools: 工具列表
+
+        Returns:
+            格式化后的字符串
+        """
+        return ", ".join(tools) if tools else "无"
+
+    def _log_toolset_category(self, category: str, tools: list[str]) -> None:
+        """记录工具集类别的信息。
+
+        Args:
+            category: 类别名称
+            tools: 该类别的工具列表
+        """
+        logger.info(f"    [{category}] ({len(tools)} 个): {', '.join(tools)}")
+
+    def _log_tools_summary(self, include_mcp: bool = True) -> None:
+        """记录工具加载完成统计信息。
+
+        Args:
+            include_mcp: 是否包含 MCP 工具
+        """
+        tool_names = list(self._items.keys())
+
+        # 分类工具
+        basic_tools, toolset_tools, mcp_tools = self._categorize_tools(tool_names)
+
+        # 按类别分组工具集工具
+        toolset_by_category = self._group_toolsets_by_category(toolset_tools)
+
+        # 输出统计信息
         logger.info("=" * 60)
         if include_mcp:
             logger.info("工具加载完成统计 (包含 MCP)")
         else:
             logger.info("工具加载完成统计 (基础工具)")
         logger.info(
-            f"  - 基础工具 ({len(basic_tools)} 个): {', '.join(basic_tools) if basic_tools else '无'}"
+            f"  - 基础工具 ({len(basic_tools)} 个): {self._format_tools_list(basic_tools)}"
         )
         if toolset_by_category:
             logger.info(f"  - 工具集工具 ({len(toolset_tools)} 个):")
             for category, tools in sorted(toolset_by_category.items()):
-                logger.info(f"    [{category}] ({len(tools)} 个): {', '.join(tools)}")
+                self._log_toolset_category(category, tools)
         if mcp_tools and include_mcp:
-            logger.info(f"  - MCP 工具 ({len(mcp_tools)} 个): {', '.join(mcp_tools)}")
+            logger.info(
+                f"  - MCP 工具 ({len(mcp_tools)} 个): {self._format_tools_list(mcp_tools)}"
+            )
         logger.info(f"  - 总计: {len(tool_names)} 个工具")
         logger.info("=" * 60)
 
@@ -151,10 +211,70 @@ class ToolRegistry(BaseRegistry):
 
     # --- 兼容性别名 ---
 
+    def _resolve_compat_tool_name(self, tool_name: str) -> str:
+        """将未带分类前缀的工具名映射到 toolsets 工具。
+
+        兼容历史 prompt/模型输出中直接调用 `send_message` 这类未带前缀的写法，
+        自动映射到唯一匹配的 `<category>.<tool_name>` 工具（例如 `messages.send_message`）。
+        """
+        if not tool_name or "." in tool_name:
+            return tool_name
+        if tool_name in self._items:
+            return tool_name
+
+        candidates = [
+            name for name in self._items.keys() if name.endswith(f".{tool_name}")
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+
+        # 若存在多个候选，优先 messages.<tool_name>（最常见的历史工具名冲突场景）。
+        preferred = f"messages.{tool_name}"
+        if preferred in self._items:
+            return preferred
+        return tool_name
+
+    def _build_schema_aliases(self) -> dict[str, str]:
+        """返回 (alias_name -> full_name) 的别名映射，用于工具 schema 兼容。"""
+        aliases: dict[str, str] = {}
+        # 历史 prompt 常使用无前缀的 send_message / send_private_message
+        for alias, full_name in (
+            ("send_message", "messages.send_message"),
+            ("send_private_message", "messages.send_private_message"),
+        ):
+            if alias in self._items:
+                continue
+            if full_name in self._items:
+                aliases[alias] = full_name
+        return aliases
+
     def get_tools_schema(self) -> List[Dict[str, Any]]:
-        return self.get_schema()
+        schema = list(self.get_schema())
+        aliases = self._build_schema_aliases()
+        if not aliases:
+            return schema
+
+        for alias_name, full_name in aliases.items():
+            target = next(
+                (
+                    item
+                    for item in schema
+                    if item.get("function", {}).get("name") == full_name
+                ),
+                None,
+            )
+            if not target:
+                continue
+            alias_schema = copy.deepcopy(target)
+            alias_schema.setdefault("function", {})
+            alias_schema["function"]["name"] = alias_name
+            schema.append(alias_schema)
+        return schema
 
     async def execute_tool(
         self, tool_name: str, args: Dict[str, Any], context: Dict[str, Any]
     ) -> str:
-        return await self.execute(tool_name, args, context)
+        resolved = self._resolve_compat_tool_name(tool_name)
+        if resolved != tool_name:
+            logger.info("[tool.alias] %s -> %s", tool_name, resolved)
+        return await self.execute(resolved, args, context)

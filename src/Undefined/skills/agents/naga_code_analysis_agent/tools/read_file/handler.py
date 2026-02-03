@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """读取指定文件的详细内容"""
     # 支持两个参数名以实现兼容性
     file_path = args.get("file_path") or args.get("path", "")
 

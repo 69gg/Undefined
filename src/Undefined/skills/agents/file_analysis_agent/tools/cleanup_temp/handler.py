@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """清理系统生成的临时文件和缓存"""
     task_uuid: str = args.get("task_uuid", "")
 
     from Undefined.utils.paths import DOWNLOAD_CACHE_DIR

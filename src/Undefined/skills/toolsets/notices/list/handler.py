@@ -15,6 +15,7 @@ def parse_timestamp(time_str: str) -> int:
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """列出系统中所有已发布的公告条目"""
     group_id = args.get("group_id")
     if not group_id:
         # 优先从 context 获取（避免并发问题）

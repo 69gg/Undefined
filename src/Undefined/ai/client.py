@@ -12,7 +12,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 import httpx
 
-from Undefined.ai.http import ModelRequester
+from Undefined.ai.llm import ModelRequester
 from Undefined.ai.multimodal import MultimodalAnalyzer
 from Undefined.ai.prompts import PromptBuilder
 from Undefined.ai.summaries import SummaryService
@@ -73,6 +73,16 @@ class AIClient:
         end_summary_storage: Optional[EndSummaryStorage] = None,
         bot_qq: int = 0,
     ) -> None:
+        """初始化 AI 客户端
+
+        参数:
+            chat_config: 对话模型配置
+            vision_config: 视觉模型配置
+            agent_config: 智能体模型配置
+            memory_storage: 长期记忆存储
+            end_summary_storage: 短期回忆存储
+            bot_qq: 机器人自身的 QQ 号
+        """
         self.chat_config = chat_config
         self.vision_config = vision_config
         self.agent_config = agent_config
@@ -207,20 +217,29 @@ class AIClient:
         logger.info("[初始化] AIClient 初始化完成")
 
     async def close(self) -> None:
-        logger.info("[清理] 正在关闭 AIClient HTTP 客户端...")
-        await self._http_client.aclose()
+        logger.info("[清理] 正在关闭 AIClient...")
 
-        if hasattr(self, "tool_registry"):
-            await self.tool_registry.close_mcp_toolsets()
-            await self.tool_registry.stop_hot_reload()
-        if hasattr(self, "agent_registry"):
-            await self.agent_registry.stop_hot_reload()
-
-        if hasattr(self, "_mcp_init_task") and not self._mcp_init_task.done():
-            await self._mcp_init_task
+        # 1) 停止后台任务（避免关闭 HTTP client 后仍有请求在跑）
+        if hasattr(self, "_agent_intro_generator"):
+            await self._agent_intro_generator.stop()
         if hasattr(self, "_agent_intro_task") and self._agent_intro_task:
             if not self._agent_intro_task.done():
                 await self._agent_intro_task
+
+        # 2) 等待 MCP 初始化完成，再关闭 MCP toolsets
+        if hasattr(self, "_mcp_init_task") and not self._mcp_init_task.done():
+            await self._mcp_init_task
+
+        if hasattr(self, "tool_registry"):
+            await self.tool_registry.stop_hot_reload()
+            await self.tool_registry.close_mcp_toolsets()
+        if hasattr(self, "agent_registry"):
+            await self.agent_registry.stop_hot_reload()
+
+        # 3) 最后关闭共享 HTTP client
+        if hasattr(self, "_http_client"):
+            logger.info("[清理] 正在关闭 AIClient HTTP 客户端...")
+            await self._http_client.aclose()
 
         logger.info("[清理] AIClient 已关闭")
 
@@ -391,6 +410,25 @@ class AIClient:
         scheduler: Any = None,
         extra_context: dict[str, Any] | None = None,
     ) -> str:
+        """发送问题给 AI 并获取回复 (支持工具调用和迭代)
+
+        参数:
+            question: 用户输入的问题
+            context: 额外的上下文背景
+            send_message_callback: 发送消息的回调
+            get_recent_messages_callback: 获取上下文历史消息的回调
+            get_image_url_callback: 获取图片 URL 的回调
+            get_forward_msg_callback: 获取合并转发内容的回调
+            send_like_callback: 点赞回调
+            sender: 消息发送助手实例
+            history_manager: 历史记录管理器实例
+            onebot_client: OneBot 客户端实例
+            scheduler: 任务调度器实例
+            extra_context: 额外的上下文负载
+
+        返回:
+            AI 生成的最终文本回复
+        """
         messages = await self._prompt_builder.build_messages(
             question,
             get_recent_messages_callback=get_recent_messages_callback,
@@ -422,11 +460,16 @@ class AIClient:
         tool_context.setdefault(
             "send_private_message_callback", self._send_private_message_callback
         )
+        tool_context.setdefault("send_message_callback", send_message_callback)
+        tool_context.setdefault("sender", sender)
         tool_context.setdefault("send_image_callback", self._send_image_callback)
 
         max_iterations = 1000
         iteration = 0
         conversation_ended = False
+        ds_cot_enabled = getattr(self.chat_config, "deepseek_new_cot_support", False)
+        ds_cot_logged = False
+        ds_cot_missing_reason_logged = False
 
         while iteration < max_iterations:
             iteration += 1
@@ -445,6 +488,7 @@ class AIClient:
                 choice = result.get("choices", [{}])[0]
                 message = choice.get("message", {})
                 content: str = message.get("content") or ""
+                reasoning_content = message.get("reasoning_content")
                 tool_calls = message.get("tool_calls", [])
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(
@@ -454,6 +498,47 @@ class AIClient:
                     )
                     if tool_calls:
                         log_debug_json(logger, "[AI工具调用]", tool_calls)
+
+                log_thinking = os.getenv(
+                    "LOG_THINKING", "true"
+                ).strip().lower() not in {
+                    "0",
+                    "false",
+                    "no",
+                }
+                if ds_cot_enabled and tools and log_thinking and not ds_cot_logged:
+                    ds_cot_logged = True
+                    logger.info(
+                        "[DeepSeek CoT] thinking-mode 工具调用兼容已启用：将回传 reasoning_content 以避免 400"
+                    )
+                if ds_cot_enabled and reasoning_content and log_thinking:
+                    logger.info(
+                        "[DeepSeek CoT] 本轮 reasoning_content_len=%s",
+                        len(reasoning_content),
+                    )
+                    logger.info(
+                        "[DeepSeek CoT] reasoning_content=%s",
+                        redact_string(reasoning_content),
+                    )
+                if (
+                    ds_cot_enabled
+                    and log_thinking
+                    and tools
+                    and getattr(self.chat_config, "thinking_enabled", False)
+                    and not reasoning_content
+                    and tool_calls
+                    and not ds_cot_missing_reason_logged
+                ):
+                    ds_cot_missing_reason_logged = True
+                    message_keys = (
+                        ", ".join(sorted(message.keys()))
+                        if isinstance(message, dict)
+                        else type(message).__name__
+                    )
+                    logger.info(
+                        "[DeepSeek CoT] 未在响应中发现 reasoning_content（可能是模型/服务商不返回思维链）；message_keys=%s",
+                        message_keys,
+                    )
 
                 if content.strip() and tool_calls:
                     logger.debug(
@@ -467,9 +552,16 @@ class AIClient:
                     )
                     return content
 
-                messages.append(
-                    {"role": "assistant", "content": content, "tool_calls": tool_calls}
-                )
+                assistant_message: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": content,
+                    "tool_calls": tool_calls,
+                }
+                if ds_cot_enabled and reasoning_content is not None:
+                    # DeepSeek thinking-mode 的 tool_calls 需要在同一问题的子回合中回传 reasoning_content，
+                    # 否则可能触发 400（官方兼容性说明）。
+                    assistant_message["reasoning_content"] = reasoning_content
+                messages.append(assistant_message)
 
                 tool_tasks = []
                 tool_call_ids = []

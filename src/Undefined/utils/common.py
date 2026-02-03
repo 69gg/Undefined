@@ -2,12 +2,64 @@
 
 import re
 import logging
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Optional, List, Dict
 
 logger = logging.getLogger(__name__)
 
+# --- 常量定义 ---
 
-def extract_text(message_content: list[dict[str, Any]], bot_qq: int = 0) -> str:
+# 匹配 CQ 码的正则: [CQ:type,arg1=val1,arg2=val2]
+CQ_PATTERN = re.compile(r"\[CQ:([a-zA-Z0-9_-]+),?([^\]]*)\]")
+
+# 标点符号和空白字符正则（用于字数统计和触发规则匹配）
+# 包含：空白、常见中英文标点
+PUNC_PATTERN = re.compile(
+    r'[ \t\n\r\f\v\s!"#$%&\'()*+,\-./:;<=>?@\[\\\]^_`{|}~，。！？、；：""\'\'（）【】「」《》—…·]'
+)
+
+
+def _parse_segment(segment: Dict[str, Any], bot_qq: int = 0) -> Optional[str]:
+    """解析单个消息段为文本格式 (内部辅助函数)"""
+    type_ = segment.get("type", "")
+    data = segment.get("data", {})
+
+    if type_ == "text":
+        return str(data.get("text", ""))
+
+    if type_ == "at":
+        return _parse_at_segment(data, bot_qq)
+
+    if type_ == "face":
+        return "[表情]"
+
+    return _parse_media_segment(type_, data)
+
+
+def _parse_at_segment(data: Dict[str, Any], bot_qq: int) -> Optional[str]:
+    """解析 @ 消息段"""
+    qq = data.get("qq", "")
+    if bot_qq and str(qq) == str(bot_qq):
+        return None
+    return f"[@ {qq}]"
+
+
+def _parse_media_segment(type_: str, data: Dict[str, Any]) -> Optional[str]:
+    """解析多媒体文件类消息段 (图片, 文件, 视频, 语音, 音频)"""
+    media_types = {
+        "image": "图片",
+        "file": "文件",
+        "video": "视频",
+        "record": "语音",
+        "audio": "音频",
+    }
+    if type_ in media_types:
+        label = media_types[type_]
+        file_val = data.get("file", "") or data.get("url", "")
+        return f"[{label}: {str(file_val)}]"
+    return None
+
+
+def extract_text(message_content: List[Dict[str, Any]], bot_qq: int = 0) -> str:
     """提取消息中的文本内容
 
     参数:
@@ -17,42 +69,19 @@ def extract_text(message_content: list[dict[str, Any]], bot_qq: int = 0) -> str:
     返回:
         提取的文本
     """
-    texts: list[str] = []
+    texts: List[str] = []
     for segment in message_content:
-        type_ = segment.get("type", "")
-        data = segment.get("data", {})
-
-        if type_ == "text":
-            texts.append(data.get("text", ""))
-        elif type_ == "at":
-            qq = data.get("qq", "")
-            # 如果指定了 bot_qq 且 @ 的是 bot，则不显示 @
-            if bot_qq and str(qq) == str(bot_qq):
-                continue
-            texts.append(f"[@ {qq}]")
-        elif type_ == "image":
-            file = data.get("file", "") or data.get("url", "")
-            texts.append(f"[图片: {file}]")
-        elif type_ == "file":
-            file = data.get("file", "") or data.get("url", "")
-            texts.append(f"[文件: {file}]")
-        elif type_ == "video":
-            file = data.get("file", "") or data.get("url", "")
-            texts.append(f"[视频: {file}]")
-        elif type_ == "record":
-            file = data.get("file", "") or data.get("url", "")
-            texts.append(f"[语音: {file}]")
-        elif type_ == "audio":
-            file = data.get("file", "") or data.get("url", "")
-            texts.append(f"[音频: {file}]")
+        text = _parse_segment(segment, bot_qq)
+        if text is not None:
+            texts.append(text)
 
     return "".join(texts).strip()
 
 
 async def parse_message_content_for_history(
-    message_content: list[dict[str, Any]],
+    message_content: List[Dict[str, Any]],
     bot_qq: int,
-    get_msg_func: Callable[[int], Awaitable[dict[str, Any] | None]] | None = None,
+    get_msg_func: Optional[Callable[[int], Awaitable[Optional[Dict[str, Any]]]]] = None,
 ) -> str:
     """解析消息内容用于历史记录（支持回复引用和 @ 格式化）
 
@@ -64,68 +93,41 @@ async def parse_message_content_for_history(
     返回:
         解析后的文本
     """
-    texts: list[str] = []
+    texts: List[str] = []
     for segment in message_content:
         type_ = segment.get("type")
         data = segment.get("data", {})
 
-        if type_ == "text":
-            texts.append(data.get("text", ""))
-
-        elif type_ == "at":
-            qq = data.get("qq", "")
-            # 仅当 @ 的不是机器人时才显示，且使用指定格式
-            if str(qq) != str(bot_qq):
-                texts.append(f"[@ {qq}]")
-
-        elif type_ == "image":
-            file = data.get("file", "") or data.get("url", "")
-            texts.append(f"[图片: {file}]")
-
-        elif type_ == "file":
-            file = data.get("file", "") or data.get("url", "")
-            texts.append(f"[文件: {file}]")
-
-        elif type_ == "video":
-            file = data.get("file", "") or data.get("url", "")
-            texts.append(f"[视频: {file}]")
-
-        elif type_ == "record":
-            file = data.get("file", "") or data.get("url", "")
-            texts.append(f"[语音: {file}]")
-
-        elif type_ == "audio":
-            file = data.get("file", "") or data.get("url", "")
-            texts.append(f"[音频: {file}]")
-
-        elif type_ == "forward":
-            msg_id = data.get("id")
-            if msg_id:
-                # 合并转发只保存简单标记，AI 可以通过 get_forward_msg 工具查看完整内容
-                texts.append(f"[合并转发: {msg_id}]")
-
-        elif type_ == "reply":
+        # 1. 处理特殊复杂类型：回复和合并转发
+        if type_ == "reply":
             msg_id = data.get("id")
             if msg_id and get_msg_func:
                 try:
-                    # 尝试获取引用的消息内容
                     reply_msg = await get_msg_func(int(msg_id))
                     if reply_msg:
                         sender = reply_msg.get("sender", {}).get("nickname", "未知")
                         content = reply_msg.get("message", [])
-                        # 使用 extract_text 解析引用内容
                         quote_text = extract_text(content, bot_qq)
                         texts.append(f'<quote sender="{sender}">{quote_text}</quote>\n')
                 except Exception as e:
                     logger.warning(f"获取回复消息失败: {e}")
+            continue
 
-        elif type_ == "face":
-            texts.append("[表情]")
+        if type_ == "forward":
+            msg_id = data.get("id")
+            if msg_id:
+                texts.append(f"[合并转发: {msg_id}]")
+            continue
+
+        # 2. 调用通用解析器处理普通类型
+        text = _parse_segment(segment, bot_qq)
+        if text is not None:
+            texts.append(text)
 
     return "".join(texts).strip()
 
 
-def message_to_segments(message: str) -> list[dict[str, Any]]:
+def message_to_segments(message: str) -> List[Dict[str, Any]]:
     """将包含 CQ 码的字符串转换为 OneBot 消息段数组
 
     参数:
@@ -134,29 +136,24 @@ def message_to_segments(message: str) -> list[dict[str, Any]]:
     返回:
         消息段列表
     """
-    segments = []
-    # 匹配 CQ 码的正则
-    # [CQ:type,arg1=val1,arg2=val2]
-    cq_pattern = re.compile(r"\[CQ:([a-zA-Z0-9_-]+),?([^\]]*)\]")
-
+    segments: List[Dict[str, Any]] = []
     last_pos = 0
-    for match in cq_pattern.finditer(message):
+
+    for match in CQ_PATTERN.finditer(message):
         # 处理 CQ 码之前的文本
         text_part = message[last_pos : match.start()]
         if text_part:
             segments.append({"type": "text", "data": {"text": text_part}})
 
-        # 处理 CQ 码
+        # 处理 CQ 码及其子参数
         cq_type = match.group(1)
         cq_args_str = match.group(2)
+        data: Dict[str, str] = {}
 
-        # 解析参数
-        data = {}
         if cq_args_str:
             for arg_pair in cq_args_str.split(","):
                 if "=" in arg_pair:
                     k, v = arg_pair.split("=", 1)
-                    # 注意：这里假设输入的 CQ 码已经是经过 OneBot 转义的格式
                     data[k.strip()] = v.strip()
 
         segments.append({"type": cq_type, "data": data})
@@ -174,29 +171,21 @@ def matches_xinliweiyuan(text: str) -> bool:
     """判断文本是否匹配心理委员触发规则
 
     规则:
-    1. 单独“心理委员” (可选加标点/空格)
-    2. 前后（同时仅1）添加 5 个字以内（标点/空格不计入字数）
+    1. 包含“心理委员”
+    2. “心理委员”的前后（不同时存在）添加的部分统计非标点字符数 <= 5
     """
     keyword = "心理委员"
     if keyword not in text:
         return False
 
-    # 分割文本，找到关键字的位置
-    parts = text.split(keyword)
-    # 如果出现多次关键词，只要其中一个位置满足条件即可触发
-    # 但为了简单和符合直觉，我们检查是否【任何】一种分割方式满足条件
-    # 通常文本里只会有一个“心理委员”用于触发
-
-    # 标点符号和空白字符正则
-    # \s 匹配空白，[^\w\s] 在大多数情况下匹配标点（但在 Python 3 中 \w 包含中文）
-    # 我们直接定义非“字”的模式：空白、常见标点
-    punc_pattern = r'[ \t\n\r\f\v\s!"#$%&\'()*+,\-./:;<=>?@\[\\\]^_`{|}~，。！？、；：""\'\'（）【】「」《》—…·]'
-
     def count_real_chars(s: str) -> int:
-        """移除标点和空格后的长度"""
-        return len(re.sub(punc_pattern, "", s))
+        """从字符串中移除标点和空格后的实际字符长度"""
+        return len(PUNC_PATTERN.sub("", s))
 
-    # 遍历所有可能的分割（以防文本中有多个“心理委员”）
+    # 使用 split 分割出所有可能的上下文
+    parts = text.split(keyword)
+
+    # 遍历所有可能的“关键词”实例位置
     for i in range(len(parts) - 1):
         prefix = keyword.join(parts[: i + 1])
         suffix = keyword.join(parts[i + 1 :])

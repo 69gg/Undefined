@@ -8,7 +8,10 @@ logger = logging.getLogger(__name__)
 
 
 class AgentToolRegistry(BaseRegistry):
-    """Agent 内部的工具注册表（支持 agent 私有 MCP 工具）"""
+    """智能体(Agent)专用工具注册表
+
+    支持加载本地工具以及 Agent 私有的 MCP (Model Context Protocol) 扩展工具。
+    """
 
     def __init__(self, tools_dir: Path, mcp_config_path: Path | None = None) -> None:
         super().__init__(tools_dir, kind="agent_tool")
@@ -23,6 +26,10 @@ class AgentToolRegistry(BaseRegistry):
         self.load_items()
 
     async def initialize_mcp_tools(self) -> None:
+        """异步初始化该 Agent 配置的私有 MCP 工具服务器
+
+        若存在 mcp.json，将尝试加载并将其中的工具注册到当前 Agent 的可用列表中。
+        """
         """按需初始化 agent 私有 MCP 工具"""
         if self._mcp_initialized:
             return
@@ -64,6 +71,16 @@ class AgentToolRegistry(BaseRegistry):
     async def execute_tool(
         self, tool_name: str, args: dict[str, Any], context: dict[str, Any]
     ) -> str:
+        """执行特定工具或回退到 MCP 注册中心进行查找
+
+        参数:
+            tool_name: 工具名称
+            args: 调用参数
+            context: 执行上下文
+
+        返回:
+            工具执行的输出文本
+        """
         async with self._items_lock:
             item = self._items.get(tool_name)
 

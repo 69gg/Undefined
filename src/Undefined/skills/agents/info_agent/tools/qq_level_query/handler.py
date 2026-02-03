@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """查询指定 QQ 号的等级、活跃天数及升级进度"""
     params = {
         "qq": args.get("qq"),
         "uin": args.get("uin"),
