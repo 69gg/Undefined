@@ -21,6 +21,7 @@ from .utils import (
     validate_required_config,
     tail_file,
     load_default_data,
+    load_comment_map,
     merge_defaults,
     apply_patch,
     render_toml,
@@ -309,7 +310,8 @@ async def config_summary_handler(request: web.Request) -> Response:
     defaults = load_default_data()
     summary = merge_defaults(defaults, data)
     ordered = sort_config(summary)
-    return web.json_response({"data": ordered})
+    comments = load_comment_map()
+    return web.json_response({"data": ordered, "comments": comments})
 
 
 @routes.post("/api/patch")

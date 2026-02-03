@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 CONFIG_EXAMPLE_PATH = Path("config.toml.example")
 
 TomlData = dict[str, Any]
+CommentMap = dict[str, dict[str, str]]
 
 SECTION_ORDER: dict[str, list[str]] = {
     "": [
@@ -150,6 +151,93 @@ def load_default_data() -> TomlData:
         return {}
     except Exception:
         return {}
+
+
+def _normalize_comment_buffer(buffer: list[str]) -> dict[str, str]:
+    if not buffer:
+        return {}
+    parts: dict[str, list[str]] = {}
+    for item in buffer:
+        lower = item.lower()
+        if lower.startswith("zh:"):
+            parts.setdefault("zh", []).append(item[3:].strip())
+        elif lower.startswith("en:"):
+            parts.setdefault("en", []).append(item[3:].strip())
+        else:
+            parts.setdefault("default", []).append(item)
+
+    default = " ".join(parts.get("default", [])).strip()
+    zh_value = " ".join(parts.get("zh", [])).strip()
+    en_value = " ".join(parts.get("en", [])).strip()
+
+    result: dict[str, str] = {}
+    if zh_value:
+        result["zh"] = zh_value
+    if en_value:
+        result["en"] = en_value
+    if default:
+        if "zh" not in result:
+            result["zh"] = default
+        if "en" not in result:
+            result["en"] = default
+    return result
+
+
+def parse_comment_map(path: Path) -> CommentMap:
+    if not path.exists():
+        return {}
+    comments: CommentMap = {}
+    buffer: list[str] = []
+    current_section = ""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return {}
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            if buffer:
+                buffer.clear()
+            continue
+        if line.startswith("#"):
+            buffer.append(line.lstrip("#").strip())
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section_name = line[1:-1].strip()
+            if buffer:
+                comment = _normalize_comment_buffer(buffer)
+                if comment:
+                    comments[section_name] = comment
+                buffer.clear()
+            current_section = section_name
+            continue
+        if "=" in line:
+            key = line.split("=", 1)[0].strip()
+            if buffer:
+                comment = _normalize_comment_buffer(buffer)
+                if comment:
+                    path_key = f"{current_section}.{key}" if current_section else key
+                    comments[path_key] = comment
+                buffer.clear()
+            continue
+        if buffer:
+            buffer.clear()
+    return comments
+
+
+def load_comment_map() -> CommentMap:
+    comments = parse_comment_map(CONFIG_EXAMPLE_PATH)
+    if CONFIG_PATH.exists():
+        overrides = parse_comment_map(CONFIG_PATH)
+        for key, value in overrides.items():
+            if key not in comments:
+                comments[key] = value
+                continue
+            merged = dict(comments[key])
+            merged.update(value)
+            comments[key] = merged
+    return comments
 
 
 def merge_defaults(defaults: TomlData, data: TomlData) -> TomlData:

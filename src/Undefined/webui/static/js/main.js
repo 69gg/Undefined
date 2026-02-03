@@ -121,6 +121,7 @@ const state = {
     tab: "overview",
     view: window.INITIAL_VIEW || "landing",
     config: {},
+    comments: {},
     bot: { running: false, pid: null, uptime: 0 },
     token: null,
     logTimer: null,
@@ -156,6 +157,7 @@ function updateI18N() {
         el.placeholder = t(key);
     });
     get("langToggle").innerText = state.lang === "zh" ? "English" : "中文";
+    updateCommentTexts();
 }
 
 function setToken(token) {
@@ -275,7 +277,24 @@ async function loadConfig() {
     const res = await api("/api/config/summary");
     const data = await res.json();
     state.config = data.data;
+    state.comments = data.comments || {};
     buildConfigForm();
+}
+
+function getComment(path) {
+    const entry = state.comments && state.comments[path];
+    if (!entry) return "";
+    if (typeof entry === "string") return entry;
+    return entry[state.lang] || entry.en || entry.zh || "";
+}
+
+function updateCommentTexts() {
+    document.querySelectorAll("[data-comment-path]").forEach(el => {
+        const path = el.getAttribute("data-comment-path");
+        if (!path) return;
+        const text = getComment(path);
+        el.innerText = text;
+    });
 }
 
 function buildConfigForm() {
@@ -295,6 +314,15 @@ function buildConfigForm() {
         header.innerHTML = `<h3 class="form-section-title">${section}</h3>`;
         card.appendChild(header);
 
+        const sectionComment = getComment(section);
+        if (sectionComment) {
+            const hint = document.createElement("p");
+            hint.className = "form-section-hint";
+            hint.innerText = sectionComment;
+            hint.dataset.commentPath = section;
+            card.appendChild(hint);
+        }
+
         const fieldGrid = document.createElement("div");
         fieldGrid.className = "form-fields";
         card.appendChild(fieldGrid);
@@ -311,6 +339,16 @@ function buildConfigForm() {
                 subTitle.className = "form-subtitle";
                 subTitle.innerText = `[${section}.${key}]`;
                 subSection.appendChild(subTitle);
+
+                const subCommentKey = `${section}.${key}`;
+                const subComment = getComment(subCommentKey);
+                if (subComment) {
+                    const subHint = document.createElement("div");
+                    subHint.className = "form-subtitle-hint";
+                    subHint.innerText = subComment;
+                    subHint.dataset.commentPath = subCommentKey;
+                    subSection.appendChild(subHint);
+                }
 
                 const subGrid = document.createElement("div");
                 subGrid.className = "form-fields";
@@ -355,6 +393,15 @@ function createField(path, val) {
     label.className = "form-label";
     label.innerText = path.split(".").pop();
     group.appendChild(label);
+
+    const comment = getComment(path);
+    if (comment) {
+        const hint = document.createElement("div");
+        hint.className = "form-hint";
+        hint.innerText = comment;
+        hint.dataset.commentPath = path;
+        group.appendChild(hint);
+    }
 
     let input;
     if (typeof val === "boolean") {
@@ -523,7 +570,7 @@ function switchTab(tab) {
     });
 
     if (tab === "overview") {
-        if (!state.systemTimer) state.systemTimer = setInterval(fetchSystemInfo, 5000);
+        if (!state.systemTimer) state.systemTimer = setInterval(fetchSystemInfo, 1000);
         fetchSystemInfo();
     } else {
         if (state.systemTimer) { clearInterval(state.systemTimer); state.systemTimer = null; }

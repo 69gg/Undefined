@@ -376,6 +376,13 @@ body {
   margin-bottom: 16px;
 }
 
+.form-section-hint {
+  margin: -6px 0 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
 .form-fields {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -400,6 +407,12 @@ body {
   color: var(--text-tertiary);
 }
 
+.form-subtitle-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .form-section-title {
   font-size: 14px;
   text-transform: uppercase;
@@ -422,6 +435,12 @@ body {
   color: var(--text-secondary);
   margin-bottom: 8px;
   text-transform: capitalize;
+}
+
+.form-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
 }
 
 .form-control {
