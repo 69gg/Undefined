@@ -10,6 +10,7 @@ from typing import cast, Any
 
 from Undefined.config.loader import CONFIG_PATH, load_toml_data
 
+from Undefined import __version__
 from .core import BotProcessController, SessionStore
 from .utils import (
     read_config_source,
@@ -75,10 +76,17 @@ async def index_handler(request: web.Request) -> Response:
 
     html = html_file.read_text(encoding="utf-8")
 
+    license_file = Path("LICENSE")
+    license_text = (
+        license_file.read_text(encoding="utf-8") if license_file.exists() else ""
+    )
+
     # Inject initial state
     initial_state = {
         "using_default_password": settings.using_default_password,
         "config_exists": settings.config_exists,
+        "version": __version__,
+        "license": license_text,
     }
 
     html = html.replace("__INITIAL_STATE__", json.dumps(initial_state))

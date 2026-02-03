@@ -358,6 +358,13 @@ function refreshUI() {
         }
     }
 
+    if (window.INITIAL_STATE && window.INITIAL_STATE.version) {
+        get("about-version-display").innerText = window.INITIAL_STATE.version;
+    }
+    if (window.INITIAL_STATE && window.INITIAL_STATE.license) {
+        get("about-license-display").innerText = window.INITIAL_STATE.license;
+    }
+
     get("landingLoginBox").style.display = (!state.authenticated && state.view === "landing") ? "block" : "none";
 }
 
