@@ -375,7 +375,6 @@ class AICoordinator:
         if not request_id:
             logger.warning("[StatsAnalysis] 缺少 request_id，群: %s", group_id)
             return
-
         try:
             # 加载 prompt 模板
             prompt_path = Path("res/prompts/stats_analysis.txt")
