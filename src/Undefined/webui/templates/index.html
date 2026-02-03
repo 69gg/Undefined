@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Undefined Console</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script>
+        // Initial State Injection
+        window.INITIAL_STATE = __INITIAL_STATE__;
+    </script>
+</head>
+<body>
+    <div id="loginOverlay" class="login-overlay" style="display: none;">
+        <div class="card login-box">
+            <h2 style="font-family: var(--font-serif); margin-bottom: 8px;">Undefined Console</h2>
+            <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 24px;">Please enter your password to continue.</p>
+            <div class="form-group">
+                <input type="password" id="loginPassword" class="form-control" placeholder="Password" autofocus>
+            </div>
+            <button id="loginBtn" class="btn primary" style="width: 100%">Sign In</button>
+            <p id="loginError" style="color: var(--error); font-size: 12px; margin-top: 12px; display: none;"></p>
+        </div>
+    </div>
+
+    <div class="app-container" id="appContainer">
+        <aside class="sidebar">
+            <div class="brand">
+                <span class="brand-dot"></span>
+                <span>Undefined</span>
+            </div>
+            <ul class="nav-links">
+                <li class="nav-item active" data-view="dashboard">
+                    <svg fill="currentColor" viewBox="0 0 20 20"><path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"></path></svg>
+                    Dashboard
+                </li>
+                <li class="nav-item" data-view="config">
+                    <svg fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.532 1.532 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.532 1.532 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"></path></svg>
+                    Configuration
+                </li>
+                <li class="nav-item" data-view="logs">
+                    <svg fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"></path></svg>
+                    Logs
+                </li>
+                <li class="nav-item" data-view="about">
+                    <svg fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                    About
+                </li>
+            </ul>
+            <div class="sidebar-footer">
+                <button id="themeToggle" class="btn">Theme: Light</button>
+                <button id="logoutBtn" class="btn danger" style="border: none; background: transparent; text-align: left; padding-left: 14px;">Sign Out</button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <!-- Dashboard View -->
+            <section id="view-dashboard" class="view-section active">
+                <div class="header">
+                    <div>
+                        <h1 class="page-title">Dashboard</h1>
+                        <p class="page-subtitle">Overview & Control</p>
+                    </div>
+                </div>
+
+                <div class="status-banner">
+                    <span id="botStatusIndicator" class="status-indicator"></span>
+                    <div>
+                        <div id="botStatusText" class="status-text">Checking status...</div>
+                        <div id="botStatusMeta" class="status-meta">PID: -- | Uptime: --</div>
+                    </div>
+                    <div style="margin-left: auto; display: flex; gap: 10px;">
+                        <button id="btnStartBot" class="btn primary">Start Bot</button>
+                        <button id="btnStopBot" class="btn danger">Stop Bot</button>
+                    </div>
+                </div>
+
+                <div class="card">
+                     <h3>Quick Stats</h3>
+                     <p style="color: var(--text-secondary)">Metrics such as token usage, active sessions will appear here (Coming Soon).</p>
+                </div>
+            </section>
+
+            <!-- Config View -->
+            <section id="view-config" class="view-section">
+                <div class="header">
+                    <div>
+                        <h1 class="page-title">Configuration</h1>
+                        <p class="page-subtitle">Manage bot settings (toml)</p>
+                    </div>
+                    <div>
+                        <button id="btnSaveConfig" class="btn primary">Save Changes</button>
+                    </div>
+                </div>
+                
+                <div id="configEditorContainer">
+                    <!-- Dynamic Forms generated here -->
+                    <div style="text-align: center; padding: 40px; color: var(--text-secondary);">Loading configuration...</div>
+                </div>
+            </section>
+
+            <!-- Logs View -->
+            <section id="view-logs" class="view-section">
+                <div class="header">
+                    <div>
+                        <h1 class="page-title">System Logs</h1>
+                        <p class="page-subtitle">Real-time bot output</p>
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                         <label class="toggle-wrapper">
+                            <span style="font-size: 13px;">Auto Scroll</span>
+                            <input type="checkbox" id="logAutoScroll" class="toggle-input" checked>
+                            <span class="toggle-track"><span class="toggle-handle"></span></span>
+                        </label>
+                        <button id="btnRefreshLogs" class="btn">Refresh</button>
+                    </div>
+                </div>
+                
+                <div class="log-viewer" id="logContainer">Initialing log connection...</div>
+            </section>
+
+            <!-- About View -->
+            <section id="view-about" class="view-section">
+                <div class="header">
+                    <div>
+                        <h1 class="page-title">About</h1>
+                        <p class="page-subtitle">Legal & Credits</p>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h3>Undefined Bot</h3>
+                    <p style="margin-bottom: 20px;">A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture.</p>
+                    
+                    <div style="display: grid; grid-template-columns: 100px 1fr; gap: 12px; font-size: 14px; margin-bottom: 20px;">
+                        <div style="color: var(--text-secondary);">Version</div>
+                        <div>2.10.1</div>
+                        
+                        <div style="color: var(--text-secondary);">Author</div>
+                        <div>Null (pylindex@qq.com)</div>
+                        
+                        <div style="color: var(--text-secondary);">Refactor</div>
+                        <div>Undefined WebUI Team</div>
+                        
+                        <div style="color: var(--text-secondary);">License</div>
+                        <div>MIT License</div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h3>MIT License</h3>
+                    <pre style="font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); white-space: pre-wrap;">
+Copyright (c) 2025 Null
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+                    </pre>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/js/main.js"></script>
+</body>
+</html>
