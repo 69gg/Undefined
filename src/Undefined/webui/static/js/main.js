@@ -419,15 +419,16 @@ async function init() {
 
     // Bind App
     document.querySelectorAll(".nav-item").forEach(el => {
-        el.onclick = () => {
+        el.addEventListener("click", () => {
             const v = el.getAttribute("data-view");
+            const tab = el.getAttribute("data-tab");
             if (v === "landing") {
                 state.view = "landing";
                 refreshUI();
-            } else {
-                switchTab(el.getAttribute("data-tab"));
+            } else if (tab) {
+                switchTab(tab);
             }
-        };
+        });
     });
 
     get("btnSaveConfig").onclick = saveConfig;

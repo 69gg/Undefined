@@ -214,6 +214,14 @@ body {
   border-top: 1px solid var(--border-color);
 }
 
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+}
+
 /* Main Content */
 .main-content {
   padding: 40px 60px;
