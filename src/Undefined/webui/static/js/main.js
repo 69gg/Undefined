@@ -130,6 +130,19 @@ function setToken(token) {
     }
 }
 
+function showToast(message, type = "info", duration = 3000) {
+    const container = get("toast-container");
+    const toast = document.createElement("div");
+    toast.className = `toast ${type}`;
+    toast.innerText = message;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.classList.add("removing");
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
+}
+
 async function api(path, options = {}) {
     const headers = options.headers || {};
     if (state.token) headers["X-Auth-Token"] = state.token;
@@ -291,9 +304,8 @@ function createField(path, val) {
 
 async function saveConfig() {
     const btn = get("btnSaveConfig");
-    const status = get("configStatus");
     btn.disabled = true;
-    status.innerText = "...";
+    btn.innerText = "Saving...";
 
     const patch = {};
     document.querySelectorAll(".config-input").forEach(input => {
@@ -320,16 +332,18 @@ async function saveConfig() {
         });
         const data = await res.json();
         if (data.success) {
-            status.innerText = "Saved successfully.";
-            if (data.warning) status.innerText += ` Warning: ${data.warning}`;
-            setTimeout(() => { status.innerText = ""; }, 3000);
+            showToast("Configuration saved successfully!", "success");
+            if (data.warning) {
+                showToast(`Warning: ${data.warning}`, "warning", 5000);
+            }
         } else {
-            status.innerText = "Error: " + data.error;
+            showToast(`Error: ${data.error}`, "error", 5000);
         }
     } catch (e) {
-        status.innerText = e.message;
+        showToast(`Error: ${e.message}`, "error", 5000);
     } finally {
         btn.disabled = false;
+        btn.innerText = t("config.save");
     }
 }
 
@@ -392,7 +406,7 @@ function switchTab(tab) {
     });
 
     if (tab === "logs") {
-        if (!state.logTimer) state.logTimer = setInterval(fetchLogs, 2000);
+        if (!state.logTimer) state.logTimer = setInterval(fetchLogs, 1000);
         fetchLogs();
     } else {
         if (state.logTimer) { clearInterval(state.logTimer); state.logTimer = null; }
