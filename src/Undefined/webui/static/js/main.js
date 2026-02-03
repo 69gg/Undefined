@@ -8,12 +8,29 @@ const I18N = {
         "landing.kicker": "WebUI",
         "landing.subtitle": "提供配置管理、日志追踪与运行控制的统一入口。",
         "landing.cta": "进入控制台",
+        "landing.config": "配置修改",
         "landing.logs": "查看日志",
         "landing.about": "关于项目",
         "tabs.landing": "首页",
+        "tabs.overview": "运行概览",
         "tabs.config": "配置修改",
         "tabs.logs": "运行日志",
         "tabs.about": "项目说明",
+        "overview.title": "运行概览",
+        "overview.subtitle": "当前系统资源与运行环境快照。",
+        "overview.refresh": "刷新",
+        "overview.system": "系统信息",
+        "overview.resources": "资源使用",
+        "overview.runtime": "运行环境",
+        "overview.cpu_model": "CPU 型号",
+        "overview.cpu_usage": "CPU 占用率",
+        "overview.memory": "内存容量",
+        "overview.memory_usage": "内存占用率",
+        "overview.system_version": "系统版本",
+        "overview.system_arch": "系统架构",
+        "overview.undefined_version": "Undefined 版本",
+        "overview.python_version": "Python 版本",
+        "overview.kernel": "内核版本",
         "bot.title": "机器人运行状态",
         "bot.start": "启动机器人",
         "bot.stop": "停止机器人",
@@ -46,12 +63,29 @@ const I18N = {
         "landing.kicker": "WebUI",
         "landing.subtitle": "A unified entry point for configuration, log tracking, and runtime control.",
         "landing.cta": "Enter Console",
+        "landing.config": "Edit Config",
         "landing.logs": "View Logs",
         "landing.about": "About",
         "tabs.landing": "Landing",
+        "tabs.overview": "Overview",
         "tabs.config": "Configuration",
         "tabs.logs": "System Logs",
         "tabs.about": "About",
+        "overview.title": "Overview",
+        "overview.subtitle": "System resources and runtime snapshot.",
+        "overview.refresh": "Refresh",
+        "overview.system": "System",
+        "overview.resources": "Resources",
+        "overview.runtime": "Runtime",
+        "overview.cpu_model": "CPU Model",
+        "overview.cpu_usage": "CPU Usage",
+        "overview.memory": "Memory",
+        "overview.memory_usage": "Memory Usage",
+        "overview.system_version": "System Version",
+        "overview.system_arch": "Architecture",
+        "overview.undefined_version": "Undefined Version",
+        "overview.python_version": "Python Version",
+        "overview.kernel": "Kernel",
         "bot.title": "Bot Status",
         "bot.start": "Start Bot",
         "bot.stop": "Stop Bot",
@@ -84,13 +118,14 @@ const I18N = {
 const state = {
     lang: (window.INITIAL_STATE && window.INITIAL_STATE.lang) || getCookie("undefined_lang") || "zh",
     authenticated: false,
-    tab: "config",
+    tab: "overview",
     view: window.INITIAL_VIEW || "landing",
     config: {},
     bot: { running: false, pid: null, uptime: 0 },
     token: null,
     logTimer: null,
     statusTimer: null,
+    systemTimer: null,
     saveTimer: null,
 };
 
@@ -253,26 +288,40 @@ function buildConfigForm() {
         if (typeof values !== "object" || Array.isArray(values)) continue;
 
         const card = document.createElement("div");
-        card.className = "card";
-        card.innerHTML = `<h3 class="form-section-title">${section}</h3>`;
+        card.className = "card config-card";
+
+        const header = document.createElement("div");
+        header.className = "config-card-header";
+        header.innerHTML = `<h3 class="form-section-title">${section}</h3>`;
+        card.appendChild(header);
+
+        const fieldGrid = document.createElement("div");
+        fieldGrid.className = "form-fields";
+        card.appendChild(fieldGrid);
 
         for (const [key, val] of Object.entries(values)) {
             // Support one level deep (e.g. models.chat) if needed, 
             // but the backend summary merges them or keeps them as sub-objects.
             if (typeof val === "object" && !Array.isArray(val)) {
                 // Nested Section
-                const subTitle = document.createElement("div");
-                subTitle.className = "muted-sm";
-                subTitle.style.marginTop = "12px";
-                subTitle.innerText = `[${section}.${key}]`;
-                card.appendChild(subTitle);
+                const subSection = document.createElement("div");
+                subSection.className = "form-subsection";
 
+                const subTitle = document.createElement("div");
+                subTitle.className = "form-subtitle";
+                subTitle.innerText = `[${section}.${key}]`;
+                subSection.appendChild(subTitle);
+
+                const subGrid = document.createElement("div");
+                subGrid.className = "form-fields";
                 for (const [sk, sv] of Object.entries(val)) {
-                    card.appendChild(createField(`${section}.${key}.${sk}`, sv));
+                    subGrid.appendChild(createField(`${section}.${key}.${sk}`, sv));
                 }
+                subSection.appendChild(subGrid);
+                fieldGrid.appendChild(subSection);
                 continue;
             }
-            card.appendChild(createField(`${section}.${key}`, val));
+            fieldGrid.appendChild(createField(`${section}.${key}`, val));
         }
         container.appendChild(card);
     }
@@ -410,6 +459,33 @@ async function fetchLogs() {
     } catch (e) { }
 }
 
+async function fetchSystemInfo() {
+    try {
+        const res = await api("/api/system");
+        const data = await res.json();
+        const cpuUsage = data.cpu_usage_percent ?? 0;
+        const memUsage = data.memory_usage_percent ?? 0;
+
+        get("systemCpuModel").innerText = data.cpu_model || "--";
+        get("systemCpuUsage").innerText = data.cpu_usage_percent != null ? `${cpuUsage}%` : "--";
+        get("systemMemory").innerText =
+            data.memory_total_gb != null && data.memory_used_gb != null
+                ? `${data.memory_used_gb} GB / ${data.memory_total_gb} GB`
+                : "--";
+        get("systemMemoryUsage").innerText = data.memory_usage_percent != null ? `${memUsage}%` : "--";
+        get("systemVersion").innerText = data.system_version || "--";
+        get("systemArch").innerText = data.system_arch || "--";
+        get("systemKernel").innerText = data.system_release || "--";
+        get("systemPythonVersion").innerText = data.python_version || "--";
+        get("systemUndefinedVersion").innerText = data.undefined_version || "--";
+
+        const cpuBar = get("systemCpuBar");
+        const memBar = get("systemMemoryBar");
+        cpuBar.style.width = `${Math.min(100, Math.max(0, cpuUsage))}%`;
+        memBar.style.width = `${Math.min(100, Math.max(0, memUsage))}%`;
+    } catch (e) { }
+}
+
 // UI Controllers
 function refreshUI() {
     updateI18N();
@@ -445,6 +521,13 @@ function switchTab(tab) {
     document.querySelectorAll(".tab-content").forEach(el => {
         el.classList.toggle("active", el.id === `tab-${tab}`);
     });
+
+    if (tab === "overview") {
+        if (!state.systemTimer) state.systemTimer = setInterval(fetchSystemInfo, 5000);
+        fetchSystemInfo();
+    } else {
+        if (state.systemTimer) { clearInterval(state.systemTimer); state.systemTimer = null; }
+    }
 
     if (tab === "logs") {
         if (!state.logTimer) state.logTimer = setInterval(fetchLogs, 1000);
@@ -509,7 +592,14 @@ async function init() {
 
     get("btnResetConfig").onclick = resetConfig;
     get("btnRefreshLogs").onclick = fetchLogs;
+    get("btnRefreshOverview").onclick = fetchSystemInfo;
     get("logoutBtn").onclick = () => {
+        setToken(null);
+        state.authenticated = false;
+        state.view = "landing";
+        refreshUI();
+    };
+    get("mobileLogoutBtn").onclick = () => {
         setToken(null);
         state.authenticated = false;
         state.view = "landing";
@@ -544,4 +634,3 @@ async function init() {
 }
 
 document.addEventListener("DOMContentLoaded", init);
-

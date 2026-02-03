@@ -44,8 +44,9 @@
                     self-developed architecture.</p>
                 <p class="muted" data-i18n="landing.subtitle">提供配置管理、日志追踪与运行控制的统一入口。</p>
                 <div class="cta-row">
-                    <button class="btn primary" data-action="open-app" data-tab="config"
+                    <button class="btn primary" data-action="open-app" data-tab="overview"
                         data-i18n="landing.cta">进入控制台</button>
+                    <button class="btn" data-action="open-app" data-tab="config" data-i18n="landing.config">配置修改</button>
                     <button class="btn ghost" data-action="open-app" data-tab="logs"
                         data-i18n="landing.logs">日志查看</button>
                     <button class="btn ghost" data-action="open-app" data-tab="about"
@@ -93,7 +94,10 @@
                 <li class="nav-item" data-view="landing" data-i18n="tabs.landing">
                     Landing
                 </li>
-                <li class="nav-item active" data-tab="config" data-i18n="tabs.config">
+                <li class="nav-item active" data-tab="overview" data-i18n="tabs.overview">
+                    Overview
+                </li>
+                <li class="nav-item" data-tab="config" data-i18n="tabs.config">
                     Configuration
                 </li>
                 <li class="nav-item" data-tab="logs" data-i18n="tabs.logs">
@@ -128,8 +132,95 @@
             </div>
 
             <div id="appContent" style="display:none;">
+                <div class="mobile-nav">
+                    <div class="mobile-brand">
+                        <span class="brand-dot"></span>
+                        <span>Undefined</span>
+                    </div>
+                    <div class="mobile-tabs">
+                        <button class="nav-item" data-view="landing" data-i18n="tabs.landing">Landing</button>
+                        <button class="nav-item active" data-tab="overview" data-i18n="tabs.overview">Overview</button>
+                        <button class="nav-item" data-tab="config" data-i18n="tabs.config">Configuration</button>
+                        <button class="nav-item" data-tab="logs" data-i18n="tabs.logs">Logs</button>
+                        <button class="nav-item" data-tab="about" data-i18n="tabs.about">About</button>
+                    </div>
+                    <button id="mobileLogoutBtn" class="btn danger btn-sm" data-i18n="auth.sign_out">Sign Out</button>
+                </div>
+
+                <!-- Tab Overview -->
+                <section id="tab-overview" class="tab-content active">
+                    <div class="header">
+                        <div>
+                            <h1 class="page-title" data-i18n="overview.title">运行概览</h1>
+                            <p class="page-subtitle" data-i18n="overview.subtitle">当前系统资源与运行环境快照。</p>
+                        </div>
+                        <div class="toolbar">
+                            <button id="btnRefreshOverview" class="btn" data-i18n="overview.refresh">刷新</button>
+                        </div>
+                    </div>
+                    <div class="overview-grid">
+                        <div class="card">
+                            <div class="card-title" data-i18n="overview.system">系统信息</div>
+                            <div class="stat-row">
+                                <span class="stat-label" data-i18n="overview.system_version">系统版本</span>
+                                <span id="systemVersion" class="stat-value">--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label" data-i18n="overview.system_arch">系统架构</span>
+                                <span id="systemArch" class="stat-value">--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label" data-i18n="overview.cpu_model">CPU 型号</span>
+                                <span id="systemCpuModel" class="stat-value">--</span>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-title" data-i18n="overview.resources">资源使用</div>
+                            <div class="metric-block">
+                                <div class="stat-row">
+                                    <span class="stat-label" data-i18n="overview.cpu_usage">CPU 占用率</span>
+                                    <span id="systemCpuUsage" class="stat-value">--</span>
+                                </div>
+                                <div class="progress">
+                                    <div id="systemCpuBar" class="progress-bar"></div>
+                                </div>
+                            </div>
+                            <div class="metric-block">
+                                <div class="stat-row">
+                                    <span class="stat-label" data-i18n="overview.memory">内存容量</span>
+                                    <span id="systemMemory" class="stat-value">--</span>
+                                </div>
+                                <div class="stat-row">
+                                    <span class="stat-label" data-i18n="overview.memory_usage">内存占用率</span>
+                                    <span id="systemMemoryUsage" class="stat-value">--</span>
+                                </div>
+                                <div class="progress">
+                                    <div id="systemMemoryBar" class="progress-bar"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-title" data-i18n="overview.runtime">运行环境</div>
+                            <div class="stat-row">
+                                <span class="stat-label" data-i18n="overview.undefined_version">Undefined 版本</span>
+                                <span id="systemUndefinedVersion" class="stat-value">--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label" data-i18n="overview.python_version">Python 版本</span>
+                                <span id="systemPythonVersion" class="stat-value">--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label" data-i18n="overview.kernel">内核版本</span>
+                                <span id="systemKernel" class="stat-value">--</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Tab Config -->
-                <section id="tab-config" class="tab-content active">
+                <section id="tab-config" class="tab-content">
                     <div class="header sticky">
                         <div>
                             <h1 class="page-title" data-i18n="config.title">配置修改</h1>
