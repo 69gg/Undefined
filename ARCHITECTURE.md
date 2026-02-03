@@ -646,28 +646,51 @@ graph LR
 | **DeepSeek** | `*.deepseek_new_cot_support` | DeepSeek CoT 兼容 |
 | **WebUI** | `webui.url`, `webui.port`, `webui.password` | 配置控制台 |
 
-## 九、关键特性总结
+## 九、架构详解
 
-### 1. 并发与性能
-- **全异步架构**: 基于 asyncio，彻底避免阻塞
-- **并行工具执行**: 多个工具可同时执行
-- **非阻塞队列**: 1Hz 发车循环，不等待前一个请求完成
-- **懒加载**: 历史记录在后台异步加载
+### 8层架构分层
 
-### 2. 安全性
-- **注入检测**: 独立安全模型实时检测
-- **文件锁**: flock 保证并发安全
-- **上下文隔离**: contextvars 确保请求级隔离
+1. **外部实体层**：用户、管理员、OneBot 协议端 (NapCat/Lagrange.Core)、大模型 API 服务商
+2. **核心入口层**：main.py 启动入口、配置管理器 (config/loader.py)、OneBotClient (onebot.py)、RequestContext (context.py)
+3. **消息处理层**：MessageHandler (handlers.py)、SecurityService (security.py)、CommandDispatcher (services/command.py)、AICoordinator (ai_coordinator.py)、QueueManager (queue_manager.py)
+4. **AI 核心能力层**：AIClient (client.py)、PromptBuilder (prompts.py)、ModelRequester (llm.py)、ToolManager (tooling.py)、MultimodalAnalyzer (multimodal.py)、SummaryService (summaries.py)、TokenCounter (tokens.py)
+5. **存储与上下文层**：MessageHistoryManager (utils/history.py, 10000条限制)、MemoryStorage (memory.py, 500条上限)、EndSummaryStorage、FAQStorage、ScheduledTaskStorage、TokenUsageStorage (自动归档)
+6. **技能系统层**：ToolRegistry (registry.py)、AgentRegistry、6个 Agents (共64个工具)、7类 Toolsets
+7. **异步 IO 层**：统一 IO 工具 (utils/io.py)，包含 write_json、read_json、append_line、文件锁 (flock)
+8. **数据持久化层**：历史数据目录、FAQ 目录、Token 归档目录、记忆文件、总结文件、定时任务文件
 
-### 3. 扩展性
-- **Skills 热重载**: 代码变更自动重载
-- **MCP 协议**: 连接外部工具和数据源
-- **Agent 自动生成**: 介绍文档自动同步
+### "车站-列车" 队列模型
 
-### 4. 可靠性
-- **超时控制**: 工具执行默认 120 秒超时
-- **错误统计**: 详细的执行统计和日志
-- **自动归档**: Token 使用记录自动归档和清理
+针对高并发消息处理，Undefined 实现了全新的 **ModelQueue** 调度机制：
+
+*   **多模型隔离**：每个 AI 模型拥有独立的请求队列组（"站台"），互不干扰。
+*   **非阻塞发车**：实现了 **1Hz** 的非阻塞调度循环（"列车"）。每秒钟列车都会准时出发，带走一个请求到后台异步处理。
+*   **高可用性**：即使前一个请求仍在处理（如耗时的网络搜索），新的请求也会按时被分发，不会造成队列堵塞。
+*   **优先级管理**：支持四级优先级（超级管理员 > 私聊 > 群聊@ > 群聊普通），确保重要消息优先响应。
+
+### 6个智能体 Agent
+
+| Agent | 功能定位 | 工具数量 | 核心能力 |
+|-------|---------|---------|---------|
+| **info_agent** | 信息查询助手 | 15个 | 天气查询、热搜榜单、金价、网络检测等 |
+| **social_agent** | 社交媒体助手 | 8个 | B站搜索、音乐查询、随机视频推荐等 |
+| **web_agent** | 网络搜索助手 | 3个 + MCP | 网页搜索、爬虫、Playwright MCP |
+| **file_analysis_agent** | 文件分析助手 | 14个 | PDF/Word/Excel/PPT解析、代码分析、多模态分析 |
+| **naga_code_analysis_agent** | NagaAgent 代码分析 | 7个 | 代码库浏览、文件搜索、目录遍历 |
+| **entertainment_agent** | 娱乐助手 | 10个 | AI 绘图、星座运势、小说搜索等 |
+
+### Skills 插件系统
+
+- **Tools (基础工具)**：原子化的功能单元，如 `send_message`, `get_history`。
+- **Toolsets (复合工具集)**：7大类工具集 (group, messages, memory, notices, render, scheduler, mcp)。
+- **延迟加载 + 热重载**：`handler.py` 仅在首次调用时导入；当 `skills/` 下的 `config.json`/`handler.py` 发生变更时会自动重新加载。
+- **Agent 自我介绍自动生成**：启动时按 Agent 代码/配置 hash 生成 `intro.generated.md` 并与 `intro.md` 合并。
+
+### 统一 IO 层与异步存储
+
+-   **统一 IO 工具** (`src/Undefined/utils/io.py`)：任何涉及磁盘读写的操作（JSON 读写、行追加）都必须通过该层，内部使用 `asyncio.to_thread` 将阻塞调用移出主线程。
+-   **内核级文件锁**：引入 `flock` 机制。在高并发写入 Token 记录或记忆时，系统会自动进行排队并保持原子性，避免文件损坏或主循环假死。
+-   **存储组件异步化**：所有核心存储类（Memory, FAQ, Tasks）现已全面提供异步接口，确保机器人响应不受磁盘延迟影响。
 
 ---
 
