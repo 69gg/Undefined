@@ -8,7 +8,7 @@ from aiohttp.web_response import Response
 from typing import cast, Any
 
 
-from Undefined.config.loader import CONFIG_PATH
+from Undefined.config.loader import CONFIG_PATH, load_toml_data
 
 from .core import BotProcessController, SessionStore
 from .utils import (
@@ -16,9 +16,17 @@ from .utils import (
     validate_toml,
     validate_required_config,
     tail_file,
+    load_default_data,
+    merge_defaults,
+    apply_patch,
+    render_toml,
 )
 
 logger = logging.getLogger(__name__)
+
+SESSION_COOKIE = "undefined_webui"
+TOKEN_COOKIE = "undefined_webui_token"
+SESSION_TTL_SECONDS = 8 * 60 * 60
 
 # Use relative path from this file
 STATIC_DIR = Path(__file__).parent / "static"
@@ -43,10 +51,15 @@ def get_settings(request: web.Request) -> Any:
 
 
 def check_auth(request: web.Request) -> bool:
-    token = request.cookies.get("undefined_webui_token")
+    sessions = get_session_store(request)
+    # Extract token from cookie or header
+    token = request.cookies.get(SESSION_COOKIE)
     if not token:
-        return False
-    return get_session_store(request).is_valid(token)
+        token = request.cookies.get(TOKEN_COOKIE)
+    if not token:
+        token = request.headers.get("X-Auth-Token")
+
+    return sessions.is_valid(token)
 
 
 @routes.get("/")
@@ -68,6 +81,11 @@ async def index_handler(request: web.Request) -> Response:
     }
 
     html = html.replace("__INITIAL_STATE__", json.dumps(initial_state))
+    # Original used placeholders
+    html = html.replace("__INITIAL_VIEW__", '"landing"')
+    html = html.replace(
+        "__DEFAULT_FLAG__", "true" if settings.using_default_password else "false"
+    )
     return web.Response(text=html, content_type="text/html")
 
 
@@ -79,9 +97,21 @@ async def login_handler(request: web.Request) -> Response:
 
     if password == settings.password:
         token = get_session_store(request).create()
-        resp = web.json_response({"success": True})
+        resp = web.json_response({"success": True, "token": token})
+        # Set both cookies for maximum compatibility
         resp.set_cookie(
-            "undefined_webui_token", token, max_age=8 * 60 * 60, samesite="Strict"
+            SESSION_COOKIE,
+            token,
+            httponly=True,
+            samesite="Lax",
+            max_age=SESSION_TTL_SECONDS,
+        )
+        resp.set_cookie(
+            TOKEN_COOKIE,
+            token,
+            httponly=False,
+            samesite="Lax",
+            max_age=SESSION_TTL_SECONDS,
         )
         return resp
 
@@ -90,12 +120,34 @@ async def login_handler(request: web.Request) -> Response:
     )
 
 
+@routes.get("/api/session")
+async def session_handler(request: web.Request) -> Response:
+    settings = get_settings(request)
+    authenticated = check_auth(request)
+    summary = (
+        f"{settings.url}:{settings.port} | {'ready' if authenticated else 'locked'}"
+    )
+    payload = {
+        "authenticated": authenticated,
+        "using_default_password": settings.using_default_password,
+        "config_exists": settings.config_exists,
+        "config_path": str(CONFIG_PATH),
+        "summary": summary,
+    }
+    return web.json_response(payload)
+
+
 @routes.post("/api/logout")
 async def logout_handler(request: web.Request) -> Response:
-    token = request.cookies.get("undefined_webui_token")
+    token = (
+        request.cookies.get(SESSION_COOKIE)
+        or request.cookies.get(TOKEN_COOKIE)
+        or request.headers.get("X-Auth-Token")
+    )
     get_session_store(request).revoke(token)
     resp = web.json_response({"success": True})
-    resp.del_cookie("undefined_webui_token")
+    resp.del_cookie(SESSION_COOKIE)
+    resp.del_cookie(TOKEN_COOKIE)
     return resp
 
 
@@ -159,6 +211,51 @@ async def save_config_handler(request: web.Request) -> Response:
         )
     except Exception as e:
         return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@routes.get("/api/config/summary")
+async def config_summary_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+    data = load_toml_data()
+    defaults = load_default_data()
+    summary = merge_defaults(defaults, data)
+    return web.json_response({"data": summary})
+
+
+@routes.post("/api/patch")
+async def config_patch_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+    patch = body.get("patch")
+    if not isinstance(patch, dict):
+        return web.json_response({"error": "Invalid payload"}, status=400)
+
+    source = read_config_source()
+    try:
+        data = tomllib.loads(source["content"]) if source["content"].strip() else {}
+    except tomllib.TOMLDecodeError as exc:
+        return web.json_response({"error": f"TOML parse error: {exc}"}, status=400)
+
+    if not isinstance(data, dict):
+        data = {}
+
+    patched = apply_patch(data, patch)
+    rendered = render_toml(patched)
+    CONFIG_PATH.write_text(rendered, encoding="utf-8")
+    validation_ok, validation_msg = validate_required_config()
+
+    return web.json_response(
+        {
+            "success": True,
+            "message": "Saved",
+            "warning": None if validation_ok else validation_msg,
+        }
+    )
 
 
 @routes.get("/api/logs")

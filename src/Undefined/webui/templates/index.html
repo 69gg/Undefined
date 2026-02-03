@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,153 +8,185 @@
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:wght@400;500;600&family=Inter:wght@400;500;600&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
     <script>
         // Initial State Injection
         window.INITIAL_STATE = __INITIAL_STATE__;
+        window.INITIAL_VIEW = __INITIAL_VIEW__;
+        window.DEFAULT_FLAG = __DEFAULT_FLAG__;
     </script>
 </head>
-<body>
-    <div id="loginOverlay" class="login-overlay" style="display: none;">
-        <div class="card login-box">
-            <h2 style="font-family: var(--font-serif); margin-bottom: 8px;">Undefined Console</h2>
-            <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 24px;">Please enter your password to continue.</p>
-            <div class="form-group">
-                <input type="password" id="loginPassword" class="form-control" placeholder="Password" autofocus>
-            </div>
-            <button id="loginBtn" class="btn primary" style="width: 100%">Sign In</button>
-            <p id="loginError" style="color: var(--error); font-size: 12px; margin-top: 12px; display: none;"></p>
-        </div>
-    </div>
 
-    <div class="app-container" id="appContainer">
+<body>
+    <div class="noise"></div>
+
+    <!-- Landing View Section -->
+    <section id="view-landing" class="full-view active">
+        <header class="header landing-header">
+            <div class="brand">
+                <span class="brand-dot"></span>
+                <span data-i18n="landing.title">Undefined Console</span>
+            </div>
+            <div class="header-actions">
+                <button id="langToggle" class="btn">中文</button>
+                <button id="themeToggle" class="btn">Light</button>
+            </div>
+        </header>
+        <main class="landing-hero">
+            <div class="hero-content card">
+                <div class="eyebrow" data-i18n="landing.kicker">WebUI</div>
+                <h1 data-i18n="landing.title">配置控制台</h1>
+                <p class="tagline">A high-performance, highly scalable QQ group and private chat robot based on a
+                    self-developed architecture.</p>
+                <p class="muted" data-i18n="landing.subtitle">提供配置管理、日志追踪与运行控制的统一入口。</p>
+                <div class="cta-row">
+                    <button class="btn primary" data-action="open-app" data-tab="config"
+                        data-i18n="landing.cta">进入控制台</button>
+                    <button class="btn ghost" data-action="open-app" data-tab="logs"
+                        data-i18n="landing.logs">日志查看</button>
+                    <button class="btn ghost" data-action="open-app" data-tab="about"
+                        data-i18n="landing.about">关于项目</button>
+                </div>
+            </div>
+
+            <div class="hero-sidebar">
+                <div class="panel">
+                    <div class="panel-row">
+                        <h3 data-i18n="bot.title">Bot 控制</h3>
+                        <span id="botStateBadge" class="badge">--</span>
+                    </div>
+                    <div class="status-meta" id="botStatusMetaLanding">--</div>
+                    <div class="toolbar">
+                        <button id="botStartBtnLanding" class="btn primary btn-sm" data-i18n="bot.start">启动</button>
+                        <button id="botStopBtnLanding" class="btn danger btn-sm" data-i18n="bot.stop">停止</button>
+                    </div>
+                    <div class="muted-sm" id="botHintLanding">--</div>
+                </div>
+
+                <div class="panel" id="landingLoginBox" style="display:none;">
+                    <div class="panel-row">
+                        <h3 data-i18n="auth.title">解锁控制台</h3>
+                    </div>
+                    <div class="form-group">
+                        <input id="landingPasswordInput" type="password" class="form-control"
+                            data-i18n-placeholder="auth.placeholder" placeholder="WebUI password" />
+                    </div>
+                    <button id="landingLoginBtn" class="btn primary w-full" data-i18n="auth.sign_in">登录</button>
+                    <div class="status-msg" id="landingLoginStatus"></div>
+                </div>
+            </div>
+        </main>
+    </section>
+
+    <!-- App View Section -->
+    <div class="app-container" id="view-app" style="display: none;">
         <aside class="sidebar">
             <div class="brand">
                 <span class="brand-dot"></span>
                 <span>Undefined</span>
             </div>
             <ul class="nav-links">
-                <li class="nav-item active" data-view="dashboard">
-                    <svg fill="currentColor" viewBox="0 0 20 20"><path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"></path></svg>
-                    Dashboard
+                <li class="nav-item" data-view="landing" data-i18n="tabs.landing">
+                    Landing
                 </li>
-                <li class="nav-item" data-view="config">
-                    <svg fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.532 1.532 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.532 1.532 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"></path></svg>
+                <li class="nav-item active" data-tab="config" data-i18n="tabs.config">
                     Configuration
                 </li>
-                <li class="nav-item" data-view="logs">
-                    <svg fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"></path></svg>
+                <li class="nav-item" data-tab="logs" data-i18n="tabs.logs">
                     Logs
                 </li>
-                <li class="nav-item" data-view="about">
-                    <svg fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                <li class="nav-item" data-tab="about" data-i18n="tabs.about">
                     About
                 </li>
             </ul>
             <div class="sidebar-footer">
-                <button id="themeToggle" class="btn">Theme: Light</button>
-                <button id="logoutBtn" class="btn danger" style="border: none; background: transparent; text-align: left; padding-left: 14px;">Sign Out</button>
+                <div id="navFooter" class="muted-sm">--</div>
+                <button id="logoutBtn" class="btn danger-link" data-i18n="auth.sign_out">Sign Out</button>
             </div>
         </aside>
 
         <main class="main-content">
-            <!-- Dashboard View -->
-            <section id="view-dashboard" class="view-section active">
-                <div class="header">
-                    <div>
-                        <h1 class="page-title">Dashboard</h1>
-                        <p class="page-subtitle">Overview & Control</p>
-                    </div>
-                </div>
+            <!-- Warning Box -->
+            <div id="warningBox" class="warning-banner" style="display:none;">
+                <span data-i18n="auth.default_password">默认密码仍在使用，请尽快修改 webui.password 并重启 WebUI。</span>
+            </div>
 
-                <div class="status-banner">
-                    <span id="botStatusIndicator" class="status-indicator"></span>
-                    <div>
-                        <div id="botStatusText" class="status-text">Checking status...</div>
-                        <div id="botStatusMeta" class="status-meta">PID: -- | Uptime: --</div>
-                    </div>
-                    <div style="margin-left: auto; display: flex; gap: 10px;">
-                        <button id="btnStartBot" class="btn primary">Start Bot</button>
-                        <button id="btnStopBot" class="btn danger">Stop Bot</button>
-                    </div>
+            <!-- Login Box (Inside App) -->
+            <div id="appLoginBox" class="card login-card" style="display: none;">
+                <h2 data-i18n="auth.title">解锁控制台</h2>
+                <p class="muted" data-i18n="auth.subtitle">请输入 WebUI 密码以继续操作。</p>
+                <div class="form-group">
+                    <input id="appPasswordInput" type="password" class="form-control"
+                        data-i18n-placeholder="auth.placeholder" placeholder="WebUI password" />
                 </div>
+                <button id="appLoginBtn" class="btn primary w-full" data-i18n="auth.sign_in">登录</button>
+                <div class="status-msg" id="appLoginStatus"></div>
+            </div>
 
-                <div class="card">
-                     <h3>Quick Stats</h3>
-                     <p style="color: var(--text-secondary)">Metrics such as token usage, active sessions will appear here (Coming Soon).</p>
-                </div>
-            </section>
+            <div id="appContent" style="display:none;">
+                <!-- Tab Config -->
+                <section id="tab-config" class="tab-content active">
+                    <div class="header">
+                        <div>
+                            <h1 class="page-title" data-i18n="config.title">配置修改</h1>
+                            <p class="page-subtitle" data-i18n="config.subtitle">按分类逐项调整配置，保存后自动触发热更新。</p>
+                        </div>
+                        <div class="toolbar">
+                            <button id="btnSaveConfig" class="btn primary" data-i18n="config.save">保存并刷新</button>
+                        </div>
+                    </div>
+                    <div id="configStatus" class="status-msg"></div>
+                    <div id="formSections" class="form-grid"></div>
+                </section>
 
-            <!-- Config View -->
-            <section id="view-config" class="view-section">
-                <div class="header">
-                    <div>
-                        <h1 class="page-title">Configuration</h1>
-                        <p class="page-subtitle">Manage bot settings (toml)</p>
+                <!-- Tab Logs -->
+                <section id="tab-logs" class="tab-content">
+                    <div class="header">
+                        <div>
+                            <h1 class="page-title" data-i18n="logs.title">系统日志</h1>
+                            <p class="page-subtitle" data-i18n="logs.subtitle">实时查看 bot 日志尾部输出。</p>
+                        </div>
+                        <div class="toolbar">
+                            <label class="toggle-wrapper">
+                                <span data-i18n="logs.auto" style="font-size: 13px;">自动刷新</span>
+                                <input type="checkbox" id="logAutoScroll" class="toggle-input" checked>
+                                <span class="toggle-track"><span class="toggle-handle"></span></span>
+                            </label>
+                            <button id="btnRefreshLogs" class="btn" data-i18n="logs.refresh">刷新</button>
+                        </div>
                     </div>
-                    <div>
-                        <button id="btnSaveConfig" class="btn primary">Save Changes</button>
-                    </div>
-                </div>
-                
-                <div id="configEditorContainer">
-                    <!-- Dynamic Forms generated here -->
-                    <div style="text-align: center; padding: 40px; color: var(--text-secondary);">Loading configuration...</div>
-                </div>
-            </section>
+                    <div class="log-viewer" id="logContainer">Initialing log connection...</div>
+                </section>
 
-            <!-- Logs View -->
-            <section id="view-logs" class="view-section">
-                <div class="header">
-                    <div>
-                        <h1 class="page-title">System Logs</h1>
-                        <p class="page-subtitle">Real-time bot output</p>
+                <!-- Tab About -->
+                <section id="tab-about" class="tab-content">
+                    <div class="header">
+                        <div>
+                            <h1 class="page-title" data-i18n="about.title">作者与版权说明</h1>
+                            <p class="page-subtitle" data-i18n="about.subtitle">关于项目作者与开源协议。</p>
+                        </div>
                     </div>
-                    <div style="display: flex; gap: 10px; align-items: center;">
-                         <label class="toggle-wrapper">
-                            <span style="font-size: 13px;">Auto Scroll</span>
-                            <input type="checkbox" id="logAutoScroll" class="toggle-input" checked>
-                            <span class="toggle-track"><span class="toggle-handle"></span></span>
-                        </label>
-                        <button id="btnRefreshLogs" class="btn">Refresh</button>
-                    </div>
-                </div>
-                
-                <div class="log-viewer" id="logContainer">Initialing log connection...</div>
-            </section>
 
-            <!-- About View -->
-            <section id="view-about" class="view-section">
-                <div class="header">
-                    <div>
-                        <h1 class="page-title">About</h1>
-                        <p class="page-subtitle">Legal & Credits</p>
+                    <div class="card">
+                        <h3 data-i18n="about.author">作者</h3>
+                        <p style="margin-bottom: 20px;" data-i18n="about.author_name">Null</p>
+
+                        <div
+                            style="display: grid; grid-template-columns: 100px 1fr; gap: 12px; font-size: 14px; margin-bottom: 20px;">
+                            <div style="color: var(--text-secondary);" data-i18n="about.version">Version</div>
+                            <div>2.11.0</div>
+                            <div style="color: var(--text-secondary);" data-i18n="about.license">License</div>
+                            <div data-i18n="about.license_name">MIT License</div>
+                        </div>
                     </div>
-                </div>
-                
-                <div class="card">
-                    <h3>Undefined Bot</h3>
-                    <p style="margin-bottom: 20px;">A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture.</p>
-                    
-                    <div style="display: grid; grid-template-columns: 100px 1fr; gap: 12px; font-size: 14px; margin-bottom: 20px;">
-                        <div style="color: var(--text-secondary);">Version</div>
-                        <div>2.10.1</div>
-                        
-                        <div style="color: var(--text-secondary);">Author</div>
-                        <div>Null (pylindex@qq.com)</div>
-                        
-                        <div style="color: var(--text-secondary);">Refactor</div>
-                        <div>Undefined WebUI Team</div>
-                        
-                        <div style="color: var(--text-secondary);">License</div>
-                        <div>MIT License</div>
-                    </div>
-                </div>
-                
-                <div class="card">
-                    <h3>MIT License</h3>
-                    <pre style="font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); white-space: pre-wrap;">
+
+                    <div class="card">
+                        <h3 data-i18n="about.license">MIT License</h3>
+                        <pre
+                            style="font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); white-space: pre-wrap;">
 Copyright (c) 2025 Null
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -173,12 +206,14 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-                    </pre>
-                </div>
-            </section>
+                        </pre>
+                    </div>
+                </section>
+            </div>
         </main>
     </div>
 
     <script src="/static/js/main.js"></script>
 </body>
+
 </html>
