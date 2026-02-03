@@ -80,7 +80,7 @@ const I18N = {
 };
 
 const state = {
-    lang: localStorage.getItem("lang") || "zh",
+    lang: (window.INITIAL_STATE && window.INITIAL_STATE.lang) || getCookie("undefined_lang") || "zh",
     authenticated: false,
     tab: "config",
     view: window.INITIAL_VIEW || "landing",
@@ -94,6 +94,19 @@ const state = {
 // Utils
 function get(id) { return document.getElementById(id); }
 function t(key) { return I18N[state.lang][key] || key; }
+
+function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+}
+
+function setCookie(name, value, days = 30) {
+    const d = new Date();
+    d.setTime(d.getTime() + (days * 24 * 60 * 60 * 1000));
+    let expires = "expires=" + d.toUTCString();
+    document.cookie = name + "=" + value + ";" + expires + ";path=/;SameSite=Lax";
+}
 
 function updateI18N() {
     document.querySelectorAll("[data-i18n]").forEach(el => {
@@ -110,9 +123,10 @@ function updateI18N() {
 function setToken(token) {
     state.token = token;
     if (token) {
-        localStorage.setItem("undefined_token", token);
+        setCookie("undefined_webui_token", token);
     } else {
-        localStorage.removeItem("undefined_token");
+        document.cookie = "undefined_webui_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+        document.cookie = "undefined_webui=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
     }
 }
 
@@ -392,7 +406,7 @@ async function init() {
     // Bind Landing
     get("langToggle").onclick = () => {
         state.lang = state.lang === "zh" ? "en" : "zh";
-        localStorage.setItem("lang", state.lang);
+        setCookie("undefined_lang", state.lang);
         updateI18N();
     };
 
@@ -450,10 +464,17 @@ async function init() {
     get("themeToggle").onclick = () => {
         const t = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
         document.documentElement.setAttribute("data-theme", t);
+        setCookie("undefined_theme", t);
         get("themeToggle").innerText = t === "dark" ? "Dark" : "Light";
     };
 
     // Initial data
+    state.token = getCookie("undefined_webui_token");
+    if (window.INITIAL_STATE && window.INITIAL_STATE.theme) {
+        document.documentElement.setAttribute("data-theme", window.INITIAL_STATE.theme);
+        get("themeToggle").innerText = window.INITIAL_STATE.theme === "dark" ? "Dark" : "Light";
+    }
+
     try {
         const session = await checkSession();
         state.authenticated = !!session.authenticated;

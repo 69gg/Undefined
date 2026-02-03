@@ -81,12 +81,17 @@ async def index_handler(request: web.Request) -> Response:
         license_file.read_text(encoding="utf-8") if license_file.exists() else ""
     )
 
+    lang = request.cookies.get("undefined_lang", "zh")
+    theme = request.cookies.get("undefined_theme", "light")
+
     # Inject initial state
     initial_state = {
         "using_default_password": settings.using_default_password,
         "config_exists": settings.config_exists,
         "version": __version__,
         "license": license_text,
+        "lang": lang,
+        "theme": theme,
     }
 
     html = html.replace("__INITIAL_STATE__", json.dumps(initial_state))
