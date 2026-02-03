@@ -19,11 +19,13 @@ from Undefined.services.security import SecurityService
 from Undefined.token_usage_storage import TokenUsageStorage
 
 # 尝试导入 matplotlib
+plt: Any
 try:
     import matplotlib.pyplot as plt
 
     _MATPLOTLIB_AVAILABLE = True
 except ImportError:
+    plt = None
     _MATPLOTLIB_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
