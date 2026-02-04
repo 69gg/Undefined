@@ -88,8 +88,10 @@ const I18N = {
         "logs.jump_bottom": "回到底部",
         "logs.tab.bot": "Bot 日志",
         "logs.tab.webui": "WebUI 日志",
+        "logs.tab.all": "其他日志",
         "logs.file.current": "当前",
         "logs.file.history": "历史",
+        "logs.file.other": "文件",
         "logs.empty": "暂无日志。",
         "logs.error": "日志加载失败。",
         "logs.unauthorized": "未登录，无法读取日志。",
@@ -196,8 +198,10 @@ const I18N = {
         "logs.jump_bottom": "Jump to bottom",
         "logs.tab.bot": "Bot Logs",
         "logs.tab.webui": "WebUI Logs",
+        "logs.tab.all": "Other Logs",
         "logs.file.current": "Current",
         "logs.file.history": "History",
+        "logs.file.other": "File",
         "logs.empty": "No logs available.",
         "logs.error": "Failed to load logs.",
         "logs.unauthorized": "Unauthorized to access logs.",
@@ -385,13 +389,17 @@ function updateLogFileSelect() {
     const select = get("logFileSelect");
     if (!select) return;
     const files = state.logFiles[state.logType] || [];
+    select.disabled = files.length === 0;
     while (select.firstChild) {
         select.removeChild(select.firstChild);
     }
     files.forEach(file => {
         const option = document.createElement("option");
         option.value = file.name;
-        const label = file.current ? t("logs.file.current") : t("logs.file.history");
+        let label = file.current ? t("logs.file.current") : t("logs.file.history");
+        if (state.logType === "all") {
+            label = t("logs.file.other");
+        }
         option.textContent = `${file.name} (${label})`;
         select.appendChild(option);
     });
@@ -403,6 +411,10 @@ function updateLogFileSelect() {
 }
 
 function updateLogStreamEligibility() {
+    if (state.logType === "all") {
+        state.logStreamEnabled = false;
+        return;
+    }
     state.logStreamEnabled = !state.logFile || state.logFile === state.logFileCurrent;
 }
 
@@ -1053,6 +1065,11 @@ async function fetchLogs(force = false) {
     if (container && !state.logsRaw) {
         container.dataset.placeholder = "true";
         container.innerText = t("logs.initializing");
+    }
+    if (state.logType === "all" && !state.logFile) {
+        state.logsRaw = "";
+        renderLogs();
+        return;
     }
     try {
         const params = new URLSearchParams({

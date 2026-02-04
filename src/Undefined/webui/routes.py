@@ -129,6 +129,16 @@ def _resolve_webui_log_path() -> Path:
     return Path("logs/webui.log")
 
 
+def _is_log_file(path: Path) -> bool:
+    name = path.name
+    if ".log" not in name:
+        return False
+    lowered = name.lower()
+    if lowered.endswith((".tar", ".tar.gz", ".tgz")):
+        return False
+    return True
+
+
 def _list_log_files(base_path: Path) -> list[Path]:
     files = [base_path]
     if base_path.parent.exists():
@@ -149,10 +159,27 @@ def _list_log_files(base_path: Path) -> list[Path]:
     return sorted(files, key=_sort_key)
 
 
+def _list_all_log_files(log_dir: Path) -> list[Path]:
+    if not log_dir.exists():
+        return []
+    files = [path for path in log_dir.glob("*.log*") if _is_log_file(path)]
+    files.sort(key=lambda path: path.name)
+    return files
+
+
 def _resolve_log_file(base_path: Path, file_name: str | None) -> Path | None:
     if not file_name:
         return base_path
     for path in _list_log_files(base_path):
+        if path.name == file_name:
+            return path
+    return None
+
+
+def _resolve_any_log_file(log_dir: Path, file_name: str | None) -> Path | None:
+    if not file_name:
+        return None
+    for path in _list_all_log_files(log_dir):
         if path.name == file_name:
             return path
     return None
@@ -406,9 +433,15 @@ async def logs_handler(request: web.Request) -> Response:
     lines = int(request.query.get("lines", "200"))
     lines = max(1, min(lines, 2000))
     log_type = request.query.get("type", "bot")
-    log_path = _resolve_webui_log_path() if log_type == "webui" else _resolve_log_path()
     file_name = request.query.get("file")
-    target_path = _resolve_log_file(log_path, file_name)
+    if log_type == "webui":
+        log_path = _resolve_webui_log_path()
+        target_path = _resolve_log_file(log_path, file_name)
+    elif log_type == "all":
+        target_path = _resolve_any_log_file(Path("logs"), file_name)
+    else:
+        log_path = _resolve_log_path()
+        target_path = _resolve_log_file(log_path, file_name)
     if target_path is None:
         return web.json_response({"error": "Log file not found"}, status=404)
     content = tail_file(target_path, lines)
@@ -421,9 +454,21 @@ async def logs_files_handler(request: web.Request) -> Response:
         return web.json_response({"error": "Unauthorized"}, status=401)
 
     log_type = request.query.get("type", "bot")
-    log_path = _resolve_webui_log_path() if log_type == "webui" else _resolve_log_path()
+    if log_type == "webui":
+        log_path = _resolve_webui_log_path()
+        files_list = _list_log_files(log_path)
+        current_name = log_path.name
+    elif log_type == "all":
+        log_path = Path("logs")
+        files_list = _list_all_log_files(log_path)
+        current_name = ""
+    else:
+        log_path = _resolve_log_path()
+        files_list = _list_log_files(log_path)
+        current_name = log_path.name
+
     files: list[dict[str, Any]] = []
-    for path in _list_log_files(log_path):
+    for path in files_list:
         try:
             stat = path.stat()
             size = stat.st_size
@@ -438,11 +483,11 @@ async def logs_files_handler(request: web.Request) -> Response:
                 "name": path.name,
                 "size": size,
                 "modified": mtime,
-                "current": path.name == log_path.name,
+                "current": path.name == current_name,
                 "exists": exists,
             }
         )
-    return web.json_response({"files": files, "current": log_path.name})
+    return web.json_response({"files": files, "current": current_name})
 
 
 @routes.get("/api/logs/stream")
@@ -453,6 +498,10 @@ async def logs_stream_handler(request: web.Request) -> web.StreamResponse:
     lines = int(request.query.get("lines", "200"))
     lines = max(1, min(lines, 2000))
     log_type = request.query.get("type", "bot")
+    if log_type == "all":
+        return web.json_response(
+            {"error": "Streaming only supports bot/webui logs"}, status=400
+        )
     log_path = _resolve_webui_log_path() if log_type == "webui" else _resolve_log_path()
     file_name = request.query.get("file")
     if file_name and file_name != log_path.name:
