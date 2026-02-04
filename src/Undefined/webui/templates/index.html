@@ -267,7 +267,11 @@
                     <div class="header">
                         <div>
                             <h1 class="page-title" data-i18n="logs.title">系统日志</h1>
-                            <p class="page-subtitle" data-i18n="logs.subtitle">实时查看 bot 日志尾部输出。</p>
+                            <p class="page-subtitle" data-i18n="logs.subtitle">实时查看日志尾部输出。</p>
+                            <div class="log-tabs">
+                                <button class="log-tab active" data-log-type="bot" data-i18n="logs.tab.bot">Bot 日志</button>
+                                <button class="log-tab" data-log-type="webui" data-i18n="logs.tab.webui">WebUI 日志</button>
+                            </div>
                         </div>
                         <div class="toolbar">
                             <label class="toggle-wrapper">
@@ -277,6 +281,8 @@
                             </label>
                             <button id="btnPauseLogs" class="btn btn-sm" data-i18n="logs.pause">暂停</button>
                             <button id="btnRefreshLogs" class="btn btn-sm" data-i18n="logs.refresh">刷新</button>
+                            <select id="logFileSelect" class="form-control form-control-sm" aria-label="Log file">
+                            </select>
                             <select id="logLevelFilter" class="form-control form-control-sm" aria-label="Log level">
                             </select>
                             <input id="logSearchInput" type="search" class="form-control form-control-sm"

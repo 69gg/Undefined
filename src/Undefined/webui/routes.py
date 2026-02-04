@@ -2,6 +2,7 @@ import asyncio
 import logging
 import json
 import platform
+import re
 import tomllib
 from pathlib import Path
 
@@ -122,6 +123,39 @@ def _resolve_log_path() -> Path:
     except Exception:
         pass
     return log_path
+
+
+def _resolve_webui_log_path() -> Path:
+    return Path("logs/webui.log")
+
+
+def _list_log_files(base_path: Path) -> list[Path]:
+    files = [base_path]
+    if base_path.parent.exists():
+        prefix = f"{base_path.name}."
+        for candidate in base_path.parent.glob(f"{base_path.name}.*"):
+            suffix = candidate.name[len(prefix) :]
+            if suffix.isdigit():
+                files.append(candidate)
+
+    def _sort_key(path: Path) -> tuple[int, str]:
+        if path.name == base_path.name:
+            return (0, "")
+        match = re.search(r"\.([0-9]+)$", path.name)
+        if match:
+            return (1, match.group(1).zfill(6))
+        return (2, path.name)
+
+    return sorted(files, key=_sort_key)
+
+
+def _resolve_log_file(base_path: Path, file_name: str | None) -> Path | None:
+    if not file_name:
+        return base_path
+    for path in _list_log_files(base_path):
+        if path.name == file_name:
+            return path
+    return None
 
 
 # Global instances (injected via app, but for routes simplicity using global here/app context is better)
@@ -370,9 +404,45 @@ async def logs_handler(request: web.Request) -> Response:
         return web.json_response({"error": "Unauthorized"}, status=401)
 
     lines = int(request.query.get("lines", "200"))
-    log_path = _resolve_log_path()
-    content = tail_file(log_path, lines)
+    lines = max(1, min(lines, 2000))
+    log_type = request.query.get("type", "bot")
+    log_path = _resolve_webui_log_path() if log_type == "webui" else _resolve_log_path()
+    file_name = request.query.get("file")
+    target_path = _resolve_log_file(log_path, file_name)
+    if target_path is None:
+        return web.json_response({"error": "Log file not found"}, status=404)
+    content = tail_file(target_path, lines)
     return web.Response(text=content)
+
+
+@routes.get("/api/logs/files")
+async def logs_files_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+
+    log_type = request.query.get("type", "bot")
+    log_path = _resolve_webui_log_path() if log_type == "webui" else _resolve_log_path()
+    files: list[dict[str, Any]] = []
+    for path in _list_log_files(log_path):
+        try:
+            stat = path.stat()
+            size = stat.st_size
+            mtime = int(stat.st_mtime)
+            exists = True
+        except FileNotFoundError:
+            size = 0
+            mtime = 0
+            exists = False
+        files.append(
+            {
+                "name": path.name,
+                "size": size,
+                "modified": mtime,
+                "current": path.name == log_path.name,
+                "exists": exists,
+            }
+        )
+    return web.json_response({"files": files, "current": log_path.name})
 
 
 @routes.get("/api/logs/stream")
@@ -381,7 +451,14 @@ async def logs_stream_handler(request: web.Request) -> web.StreamResponse:
         return web.json_response({"error": "Unauthorized"}, status=401)
 
     lines = int(request.query.get("lines", "200"))
-    log_path = _resolve_log_path()
+    lines = max(1, min(lines, 2000))
+    log_type = request.query.get("type", "bot")
+    log_path = _resolve_webui_log_path() if log_type == "webui" else _resolve_log_path()
+    file_name = request.query.get("file")
+    if file_name and file_name != log_path.name:
+        return web.json_response(
+            {"error": "Streaming only supports current log"}, status=400
+        )
 
     headers = {
         "Content-Type": "text/event-stream",

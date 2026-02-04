@@ -329,6 +329,35 @@ body {
   flex-wrap: wrap;
 }
 
+.log-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.log-tab {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.log-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-app);
+}
+
+.log-tab.active {
+  background: var(--accent-subtle);
+  color: var(--accent-color);
+  border-color: rgba(217, 119, 87, 0.35);
+}
+
 .search-group {
   display: flex;
   align-items: center;
@@ -818,6 +847,11 @@ body {
 
 #logLevelFilter {
   min-width: 120px;
+  max-width: 100%;
+}
+
+#logFileSelect {
+  min-width: 160px;
   max-width: 100%;
 }
 

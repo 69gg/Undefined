@@ -75,7 +75,7 @@ const I18N = {
         "config.reload_success": "配置已从服务器重新加载。",
         "config.reload_error": "配置重载失败。",
         "logs.title": "运行日志",
-        "logs.subtitle": "实时查看最后 200 行日志输出。",
+        "logs.subtitle": "实时查看日志尾部输出。",
         "logs.auto": "自动刷新",
         "logs.refresh": "刷新",
         "logs.initializing": "正在连接日志...",
@@ -86,6 +86,10 @@ const I18N = {
         "logs.pause": "暂停",
         "logs.resume": "继续",
         "logs.jump_bottom": "回到底部",
+        "logs.tab.bot": "Bot 日志",
+        "logs.tab.webui": "WebUI 日志",
+        "logs.file.current": "当前",
+        "logs.file.history": "历史",
         "logs.empty": "暂无日志。",
         "logs.error": "日志加载失败。",
         "logs.unauthorized": "未登录，无法读取日志。",
@@ -179,7 +183,7 @@ const I18N = {
         "config.reload_success": "Configuration reloaded from server.",
         "config.reload_error": "Failed to reload configuration.",
         "logs.title": "System Logs",
-        "logs.subtitle": "Real-time view of the last 200 log lines.",
+        "logs.subtitle": "Real-time view of recent log output.",
         "logs.auto": "Auto Refresh",
         "logs.refresh": "Refresh",
         "logs.initializing": "Initializing log connection...",
@@ -190,6 +194,10 @@ const I18N = {
         "logs.pause": "Pause",
         "logs.resume": "Resume",
         "logs.jump_bottom": "Jump to bottom",
+        "logs.tab.bot": "Bot Logs",
+        "logs.tab.webui": "WebUI Logs",
+        "logs.file.current": "Current",
+        "logs.file.history": "History",
         "logs.empty": "No logs available.",
         "logs.error": "Failed to load logs.",
         "logs.unauthorized": "Unauthorized to access logs.",
@@ -230,6 +238,11 @@ const state = {
     logsRaw: "",
     logSearch: "",
     logLevel: "all",
+    logType: "bot",
+    logFiles: {},
+    logFile: "",
+    logFileCurrent: "",
+    logStreamEnabled: true,
     logsPaused: false,
     logAutoRefresh: true,
     logStream: null,
@@ -312,6 +325,8 @@ function updateI18N() {
     updateLogPlaceholder();
     updateLogFilterLabels();
     updateLogPauseLabel();
+    updateLogTabs();
+    updateLogFileSelect();
     updateSaveStatusText();
     updateConfigStateLabel();
     renderLogs();
@@ -357,6 +372,38 @@ function updateLogPauseLabel() {
     const button = get("btnPauseLogs");
     if (!button) return;
     button.innerText = state.logsPaused ? t("logs.resume") : t("logs.pause");
+}
+
+function updateLogTabs() {
+    document.querySelectorAll(".log-tab").forEach(tab => {
+        const logType = tab.dataset.logType;
+        tab.classList.toggle("active", logType === state.logType);
+    });
+}
+
+function updateLogFileSelect() {
+    const select = get("logFileSelect");
+    if (!select) return;
+    const files = state.logFiles[state.logType] || [];
+    while (select.firstChild) {
+        select.removeChild(select.firstChild);
+    }
+    files.forEach(file => {
+        const option = document.createElement("option");
+        option.value = file.name;
+        const label = file.current ? t("logs.file.current") : t("logs.file.history");
+        option.textContent = `${file.name} (${label})`;
+        select.appendChild(option);
+    });
+    if (!state.logFile || !files.find(file => file.name === state.logFile)) {
+        state.logFile = state.logFileCurrent || (files[0] && files[0].name) || "";
+    }
+    select.value = state.logFile;
+    updateLogStreamEligibility();
+}
+
+function updateLogStreamEligibility() {
+    state.logStreamEnabled = !state.logFile || state.logFile === state.logFileCurrent;
 }
 
 function updateConfigStateLabel() {
@@ -1008,7 +1055,14 @@ async function fetchLogs(force = false) {
         container.innerText = t("logs.initializing");
     }
     try {
-        const res = await api("/api/logs?lines=200");
+        const params = new URLSearchParams({
+            lines: "200",
+            type: state.logType,
+        });
+        if (state.logFile) {
+            params.set("file", state.logFile);
+        }
+        const res = await api(`/api/logs?${params.toString()}`);
         const text = await res.text();
         state.logsRaw = text || "";
         recordFetchSuccess("logs");
@@ -1142,8 +1196,13 @@ function bindLogScroll() {
 
 function startLogStream() {
     if (state.logStream || state.logStreamFailed || !window.EventSource) return false;
+    if (!state.logStreamEnabled) return false;
     state.logStreamFailed = false;
-    const stream = new EventSource("/api/logs/stream");
+    const params = new URLSearchParams({
+        lines: "200",
+        type: state.logType,
+    });
+    const stream = new EventSource(`/api/logs/stream?${params.toString()}`);
     state.logStream = stream;
 
     stream.onmessage = (event) => {
@@ -1181,6 +1240,11 @@ function updateLogRefreshState() {
         stopLogTimer();
         return;
     }
+    if (!state.logStreamEnabled) {
+        stopLogStream();
+        startLogTimer();
+        return;
+    }
     if (startLogStream()) {
         stopLogTimer();
         return;
@@ -1212,6 +1276,34 @@ async function copyLogsToClipboard() {
     } catch (e) {
         showToast(`${t("common.error")}: ${e.message}`, "error");
     }
+}
+
+async function fetchLogFiles(force = false) {
+    if (state.logFiles[state.logType] && !force) {
+        updateLogFileSelect();
+        return;
+    }
+    try {
+        const res = await api(`/api/logs/files?type=${state.logType}`);
+        const data = await res.json();
+        state.logFiles[state.logType] = data.files || [];
+        state.logFileCurrent = data.current || "";
+        updateLogFileSelect();
+    } catch (e) {
+        state.logFiles[state.logType] = [];
+    }
+}
+
+function setLogType(type) {
+    if (state.logType === type) return;
+    state.logType = type;
+    state.logFile = "";
+    state.logsRaw = "";
+    state.logStreamFailed = false;
+    updateLogTabs();
+    fetchLogFiles(true);
+    renderLogs();
+    updateLogRefreshState();
 }
 
 function downloadLogs() {
@@ -1298,6 +1390,10 @@ function refreshUI() {
         stopLogTimer();
     }
 
+    if (state.view === "app" && state.tab === "logs" && state.authenticated) {
+        fetchLogFiles();
+    }
+
     updateLogRefreshState();
 }
 
@@ -1321,6 +1417,7 @@ function switchTab(tab) {
 
     if (tab === "logs") {
         if (!document.hidden) {
+            fetchLogFiles();
             updateLogRefreshState();
             if (!state.logsPaused) {
                 fetchLogs(true);
@@ -1451,6 +1548,24 @@ async function init() {
                 fetchLogs(true);
             }
         };
+    }
+
+    document.querySelectorAll(".log-tab").forEach(tab => {
+        tab.addEventListener("click", () => {
+            const logType = tab.dataset.logType || "bot";
+            setLogType(logType);
+            fetchLogs(true);
+        });
+    });
+
+    const logFileSelect = get("logFileSelect");
+    if (logFileSelect) {
+        logFileSelect.addEventListener("change", () => {
+            state.logFile = logFileSelect.value;
+            updateLogStreamEligibility();
+            updateLogRefreshState();
+            fetchLogs(true);
+        });
     }
 
     const logAutoRefresh = get("logAutoScroll");

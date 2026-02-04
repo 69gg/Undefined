@@ -1,11 +1,12 @@
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from typing import Any
 from aiohttp import web
 
-from Undefined.config import load_webui_settings, get_config_manager
+from Undefined.config import load_webui_settings, get_config_manager, get_config
 from .core import BotProcessController, SessionStore
 from .routes import routes
 
@@ -14,6 +15,36 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("Undefined.webui")
+
+
+def _init_webui_file_handler() -> None:
+    root_logger = logging.getLogger()
+    log_path = Path("logs/webui.log")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    for handler in root_logger.handlers:
+        if isinstance(handler, RotatingFileHandler):
+            if Path(handler.baseFilename) == log_path:
+                return
+
+    try:
+        config = get_config(strict=False)
+        max_bytes = config.log_max_size
+        backup_count = config.log_backup_count
+    except Exception:
+        max_bytes = 10 * 1024 * 1024
+        backup_count = 5
+
+    file_handler = RotatingFileHandler(
+        log_path,
+        maxBytes=max_bytes,
+        backupCount=backup_count,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    )
+    root_logger.addHandler(file_handler)
 
 
 async def on_startup(app: web.Application) -> None:
@@ -74,6 +105,7 @@ def create_app() -> web.Application:
 
 def run() -> None:
     settings = load_webui_settings()
+    _init_webui_file_handler()
 
     app = create_app()
 
