@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import signal
+import subprocess
 import time
 import secrets
 from typing import Any
@@ -45,7 +46,13 @@ class BotProcessController:
         self._started_at: float | None = None
         self._lock = asyncio.Lock()
         self._watch_task: asyncio.Task[None] | None = None
-        self._start_new_session = os.name != "nt"
+        self._is_windows = os.name == "nt"
+        self._start_new_session = not self._is_windows
+        self._creationflags = 0
+        self._ctrl_break_signal: int | None = None
+        if self._is_windows:
+            self._creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            self._ctrl_break_signal = getattr(signal, "CTRL_BREAK_EVENT", None)
 
     def status(self) -> dict[str, Any]:
         running = bool(self._process and self._process.returncode is None)
@@ -67,6 +74,8 @@ class BotProcessController:
             logger.info("[WebUI] 启动机器人进程: %s", " ".join(BOT_COMMAND))
             if self._start_new_session:
                 logger.info("[WebUI] 机器人进程已启用独立进程组")
+            elif self._creationflags:
+                logger.info("[WebUI] 机器人进程已启用 Windows 进程组")
 
             # 传递环境变量，强制根据配置开启颜色
             env = os.environ.copy()
@@ -76,13 +85,19 @@ class BotProcessController:
             env["PYTHONUNBUFFERED"] = "1"
 
             try:
+                kwargs: dict[str, Any] = {}
+                if self._start_new_session:
+                    kwargs["start_new_session"] = True
+                elif self._creationflags:
+                    kwargs["creationflags"] = self._creationflags
+
                 self._process = await asyncio.create_subprocess_exec(
                     *BOT_COMMAND,
                     stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
                     env=env,
-                    start_new_session=self._start_new_session,
+                    **kwargs,
                 )
                 self._started_at = time.time()
                 self._watch_task = asyncio.create_task(
@@ -107,6 +122,14 @@ class BotProcessController:
                         os.killpg(process.pid, signal.SIGTERM)
                     except ProcessLookupError:
                         pass
+                elif self._is_windows and self._creationflags and process.pid:
+                    if self._ctrl_break_signal is not None:
+                        try:
+                            process.send_signal(self._ctrl_break_signal)
+                        except (ProcessLookupError, ValueError, AttributeError):
+                            process.terminate()
+                    else:
+                        process.terminate()
                 else:
                     process.terminate()
 
