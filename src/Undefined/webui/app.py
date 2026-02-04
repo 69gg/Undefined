@@ -87,7 +87,13 @@ def run() -> None:
         )
 
     try:
-        web.run_app(app, host=host, port=port, print=None)
+        web.run_app(
+            app,
+            host=host,
+            port=port,
+            print=None,
+            shutdown_timeout=1.0,
+        )
     except KeyboardInterrupt:
         pass
     finally:
