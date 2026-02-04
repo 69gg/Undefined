@@ -449,6 +449,7 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
   gap: 28px;
+  align-items: start;
 }
 
 .config-card-header {
@@ -481,6 +482,22 @@ body {
 .config-card.is-collapsed .form-section-hint,
 .config-card.is-collapsed .form-subsection {
   display: none;
+}
+
+.config-card.is-collapsed {
+  padding: 16px 20px;
+}
+
+.config-card.is-collapsed .config-card-header {
+  margin-bottom: 0;
+  align-items: center;
+}
+
+.config-card.is-collapsed .form-section-title {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: 0;
+  line-height: 1.2;
 }
 
 .config-card.is-hidden {
