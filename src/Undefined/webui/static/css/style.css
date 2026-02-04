@@ -362,6 +362,18 @@ body {
   color: var(--accent-color);
 }
 
+.badge.success {
+  background: rgba(74, 124, 89, 0.12);
+  color: var(--success);
+  border: 1px solid rgba(74, 124, 89, 0.3);
+}
+
+.badge.error {
+  background: rgba(201, 64, 64, 0.12);
+  color: var(--error);
+  border: 1px solid rgba(201, 64, 64, 0.3);
+}
+
 /* Form Styles */
 .form-grid {
   display: grid;
@@ -637,6 +649,30 @@ body {
   overflow-y: auto;
   white-space: pre-wrap;
   border: 1px solid var(--border-color);
+}
+
+.ansi-red {
+  color: #e06c75;
+}
+
+.ansi-green {
+  color: #98c379;
+}
+
+.ansi-yellow {
+  color: #e5c07b;
+}
+
+.ansi-blue {
+  color: #61afef;
+}
+
+.ansi-magenta {
+  color: #c678dd;
+}
+
+.ansi-cyan {
+  color: #56b6c2;
 }
 
 /* Toggle Switch */

@@ -36,6 +36,8 @@ const I18N = {
         "bot.stop": "停止机器人",
         "bot.status.running": "运行中",
         "bot.status.stopped": "未启动",
+        "bot.hint.running": "机器人正在运行并处理事件。",
+        "bot.hint.stopped": "机器人当前离线。",
         "auth.title": "解锁控制台",
         "auth.subtitle": "请输入 WebUI 密码以继续操作。",
         "auth.placeholder": "请输入 WebUI 密码",
@@ -46,10 +48,12 @@ const I18N = {
         "config.subtitle": "按分类逐项调整配置，保存后自动触发热更新。",
         "config.save": "保存更改",
         "config.reset": "重置更改",
+        "config.reset_confirm": "确定要撤销所有本地更改吗？这将从服务器重新加载配置。",
         "logs.title": "运行日志",
         "logs.subtitle": "实时查看最后 200 行日志输出。",
         "logs.auto": "自动刷新",
         "logs.refresh": "刷新",
+        "logs.initializing": "正在连接日志...",
         "about.title": "项目信息",
         "about.subtitle": "关于 Undefined 项目的作者及许可协议。",
         "about.author": "作者",
@@ -91,6 +95,8 @@ const I18N = {
         "bot.stop": "Stop Bot",
         "bot.status.running": "Running",
         "bot.status.stopped": "Stopped",
+        "bot.hint.running": "Bot is active and processing events.",
+        "bot.hint.stopped": "Bot is currently offline.",
         "auth.title": "Unlock Console",
         "auth.subtitle": "Please enter your WebUI password.",
         "auth.placeholder": "WebUI password",
@@ -101,10 +107,12 @@ const I18N = {
         "config.subtitle": "Adjust settings by category. Changes trigger hot reload.",
         "config.save": "Save Changes",
         "config.reset": "Revert Changes",
+        "config.reset_confirm": "Are you sure you want to revert all local changes? This will reload the configuration from the server.",
         "logs.title": "System Logs",
         "logs.subtitle": "Real-time view of the last 200 log lines.",
         "logs.auto": "Auto Refresh",
         "logs.refresh": "Refresh",
+        "logs.initializing": "Initializing log connection...",
         "about.title": "About Project",
         "about.subtitle": "Information about authors and open source licenses.",
         "about.author": "Author",
@@ -130,9 +138,29 @@ const state = {
     saveTimer: null,
 };
 
+const REFRESH_INTERVALS = {
+    status: 3000,
+    system: 1000,
+    logs: 1000,
+};
+
+const THEME_COLORS = {
+    light: "#f9f5f1",
+    dark: "#0f1112",
+};
+
 // Utils
 function get(id) { return document.getElementById(id); }
 function t(key) { return I18N[state.lang][key] || key; }
+
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
 
 function getCookie(name) {
     const value = `; ${document.cookie}`;
@@ -158,6 +186,29 @@ function updateI18N() {
     });
     get("langToggle").innerText = state.lang === "zh" ? "English" : "中文";
     updateCommentTexts();
+    updateLogPlaceholder();
+}
+
+function updateLogPlaceholder() {
+    const container = get("logContainer");
+    if (!container) return;
+    if (container.dataset.placeholder === "true") {
+        container.innerText = t("logs.initializing");
+    }
+}
+
+function updateThemeColor(theme) {
+    const meta = document.getElementById("themeColorMeta");
+    if (!meta) return;
+    meta.setAttribute("content", THEME_COLORS[theme] || THEME_COLORS.light);
+}
+
+function applyTheme(theme) {
+    const normalized = theme === "dark" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", normalized);
+    setCookie("undefined_theme", normalized);
+    get("themeToggle").innerText = normalized === "dark" ? "Dark" : "Light";
+    updateThemeColor(normalized);
 }
 
 function setToken(token) {
@@ -197,6 +248,45 @@ async function api(path, options = {}) {
         throw new Error("Unauthorized");
     }
     return res;
+}
+
+function startStatusTimer() {
+    if (!state.statusTimer) {
+        state.statusTimer = setInterval(fetchStatus, REFRESH_INTERVALS.status);
+    }
+}
+
+function stopStatusTimer() {
+    if (state.statusTimer) {
+        clearInterval(state.statusTimer);
+        state.statusTimer = null;
+    }
+}
+
+function startSystemTimer() {
+    if (!state.systemTimer) {
+        state.systemTimer = setInterval(fetchSystemInfo, REFRESH_INTERVALS.system);
+    }
+}
+
+function stopSystemTimer() {
+    if (state.systemTimer) {
+        clearInterval(state.systemTimer);
+        state.systemTimer = null;
+    }
+}
+
+function startLogTimer() {
+    if (!state.logTimer) {
+        state.logTimer = setInterval(fetchLogs, REFRESH_INTERVALS.logs);
+    }
+}
+
+function stopLogTimer() {
+    if (state.logTimer) {
+        clearInterval(state.logTimer);
+        state.logTimer = null;
+    }
 }
 
 // Actions
@@ -253,14 +343,14 @@ function updateBotUI() {
         badge.innerText = t("bot.status.running");
         badge.className = "badge success";
         metaL.innerText = `PID: ${state.bot.pid} | Uptime: ${Math.round(state.bot.uptime_seconds)}s`;
-        hintL.innerText = "Bot is active and processing events.";
+        hintL.innerText = t("bot.hint.running");
         get("botStartBtnLanding").disabled = true;
         get("botStopBtnLanding").disabled = false;
     } else {
         badge.innerText = t("bot.status.stopped");
         badge.className = "badge";
         metaL.innerText = "--";
-        hintL.innerText = "Bot is currently offline.";
+        hintL.innerText = t("bot.hint.stopped");
         get("botStartBtnLanding").disabled = false;
         get("botStopBtnLanding").disabled = true;
     }
@@ -475,7 +565,7 @@ async function autoSave() {
 }
 
 async function resetConfig() {
-    if (!confirm("Are you sure you want to revert all local changes? This will reload the configuration from the server.")) return;
+    if (!confirm(t("config.reset_confirm"))) return;
     try {
         await loadConfig();
         showToast("Configuration reloaded from server.", "info");
@@ -492,7 +582,8 @@ async function fetchLogs() {
         const auto = get("logAutoScroll").checked;
 
         // simple ansi color
-        const colored = text
+        const escaped = escapeHtml(text);
+        const colored = escaped
             .replace(/\x1b\[31m/g, '<span class="ansi-red">')
             .replace(/\x1b\[32m/g, '<span class="ansi-green">')
             .replace(/\x1b\[33m/g, '<span class="ansi-yellow">')
@@ -502,6 +593,7 @@ async function fetchLogs() {
             .replace(/\x1b\[0m/g, '</span>');
 
         container.innerHTML = colored;
+        container.dataset.placeholder = "false";
         if (auto) container.scrollTop = container.scrollHeight;
     } catch (e) { }
 }
@@ -558,6 +650,11 @@ function refreshUI() {
     }
 
     get("landingLoginBox").style.display = (!state.authenticated && state.view === "landing") ? "block" : "none";
+
+    if (state.view !== "app" || !state.authenticated) {
+        stopSystemTimer();
+        stopLogTimer();
+    }
 }
 
 function switchTab(tab) {
@@ -570,17 +667,21 @@ function switchTab(tab) {
     });
 
     if (tab === "overview") {
-        if (!state.systemTimer) state.systemTimer = setInterval(fetchSystemInfo, 1000);
-        fetchSystemInfo();
+        if (!document.hidden) {
+            startSystemTimer();
+            fetchSystemInfo();
+        }
     } else {
-        if (state.systemTimer) { clearInterval(state.systemTimer); state.systemTimer = null; }
+        stopSystemTimer();
     }
 
     if (tab === "logs") {
-        if (!state.logTimer) state.logTimer = setInterval(fetchLogs, 1000);
-        fetchLogs();
+        if (!document.hidden) {
+            startLogTimer();
+            fetchLogs();
+        }
     } else {
-        if (state.logTimer) { clearInterval(state.logTimer); state.logTimer = null; }
+        stopLogTimer();
     }
 }
 
@@ -655,16 +756,15 @@ async function init() {
 
     get("themeToggle").onclick = () => {
         const t = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
-        document.documentElement.setAttribute("data-theme", t);
-        setCookie("undefined_theme", t);
-        get("themeToggle").innerText = t === "dark" ? "Dark" : "Light";
+        applyTheme(t);
     };
 
     // Initial data
     state.token = getCookie("undefined_webui_token");
     if (window.INITIAL_STATE && window.INITIAL_STATE.theme) {
-        document.documentElement.setAttribute("data-theme", window.INITIAL_STATE.theme);
-        get("themeToggle").innerText = window.INITIAL_STATE.theme === "dark" ? "Dark" : "Light";
+        applyTheme(window.INITIAL_STATE.theme);
+    } else {
+        applyTheme("light");
     }
 
     try {
@@ -675,9 +775,30 @@ async function init() {
         state.authenticated = false;
     }
 
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+            stopStatusTimer();
+            stopSystemTimer();
+            stopLogTimer();
+            return;
+        }
+
+        startStatusTimer();
+        if (state.view === "app" && state.tab === "overview") {
+            startSystemTimer();
+            fetchSystemInfo();
+        }
+        if (state.view === "app" && state.tab === "logs") {
+            startLogTimer();
+            fetchLogs();
+        }
+    });
+
     refreshUI();
     fetchStatus();
-    state.statusTimer = setInterval(fetchStatus, 3000);
+    if (!document.hidden) {
+        startStatusTimer();
+    }
 }
 
 document.addEventListener("DOMContentLoaded", init);

@@ -352,8 +352,8 @@ async def config_patch_handler(request: web.Request) -> Response:
 
 @routes.get("/api/logs")
 async def logs_handler(request: web.Request) -> Response:
-    # Optional: check auth if sensitive
-    # if not check_auth(request): return ...
+    if not check_auth(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
 
     lines = int(request.query.get("lines", "200"))
     # Load log path from config or default
