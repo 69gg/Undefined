@@ -124,6 +124,45 @@ def read_config_source() -> dict[str, Any]:
     }
 
 
+def ensure_config_toml(
+    config_path: Path = CONFIG_PATH,
+    example_path: Path = CONFIG_EXAMPLE_PATH,
+) -> bool:
+    """确保 config.toml 存在。
+
+    - 当 config.toml 不存在时，优先从 config.toml.example 复制生成
+    - 仅在本次调用确实创建了文件时返回 True
+    """
+
+    if config_path.exists():
+        return False
+
+    content: str
+    if example_path.exists():
+        try:
+            content = example_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            logger.warning("读取 %s 失败，将使用内置模板: %s", example_path, exc)
+            content = ""
+    else:
+        content = ""
+
+    if not content.strip():
+        content = "[core]\nbot_qq = 0\nsuperadmin_qq = 0\n"
+
+    try:
+        # 使用独占创建，避免并发启动时覆盖已有文件
+        with open(config_path, "x", encoding="utf-8") as f:
+            f.write(content)
+        logger.info("已生成 %s（来源：%s）", config_path, example_path)
+        return True
+    except FileExistsError:
+        return False
+    except Exception as exc:
+        logger.warning("生成 %s 失败: %s", config_path, exc)
+        return False
+
+
 def validate_toml(content: str) -> tuple[bool, str]:
     try:
         tomllib.loads(content)

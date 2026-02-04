@@ -74,6 +74,7 @@ const I18N = {
         "config.save_network_error": "网络错误",
         "config.reload_success": "配置已从服务器重新加载。",
         "config.reload_error": "配置重载失败。",
+        "config.bootstrap_created": "检测到缺少 config.toml，已从示例生成；请在此页完善配置并保存。",
         "logs.title": "运行日志",
         "logs.subtitle": "实时查看日志尾部输出。",
         "logs.auto": "自动刷新",
@@ -185,6 +186,7 @@ const I18N = {
         "config.save_network_error": "Network error",
         "config.reload_success": "Configuration reloaded from server.",
         "config.reload_error": "Failed to reload configuration.",
+        "config.bootstrap_created": "config.toml was missing and has been generated from the example. Please review and save your configuration.",
         "logs.title": "System Logs",
         "logs.subtitle": "Real-time view of recent log output.",
         "logs.auto": "Auto Refresh",
@@ -1715,6 +1717,14 @@ async function init() {
         state.authenticated = false;
     }
 
+    const shouldRedirectToConfig = !!(
+        window.INITIAL_STATE && window.INITIAL_STATE.redirect_to_config
+    );
+    if (shouldRedirectToConfig) {
+        state.view = "app";
+        switchTab("config");
+    }
+
     document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
             stopStatusTimer();
@@ -1738,6 +1748,9 @@ async function init() {
     });
 
     refreshUI();
+    if (shouldRedirectToConfig) {
+        showToast(t("config.bootstrap_created"), "info", 6500);
+    }
     bindLogScroll();
     fetchStatus();
     if (!document.hidden) {

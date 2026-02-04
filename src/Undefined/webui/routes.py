@@ -234,14 +234,20 @@ async def index_handler(request: web.Request) -> Response:
     theme = request.cookies.get("undefined_theme", "light")
 
     # Inject initial state
+    redirect_to_config = bool(request.app.get("redirect_to_config_once"))
     initial_state = {
         "using_default_password": settings.using_default_password,
         "config_exists": settings.config_exists,
+        "redirect_to_config": redirect_to_config,
         "version": __version__,
         "license": license_text,
         "lang": lang,
         "theme": theme,
     }
+
+    if redirect_to_config:
+        # one-time per WebUI process lifetime
+        request.app["redirect_to_config_once"] = False
 
     html = html.replace("__INITIAL_STATE__", json.dumps(initial_state))
     # Original used placeholders
