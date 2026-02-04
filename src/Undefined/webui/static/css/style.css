@@ -826,6 +826,11 @@ body {
   max-width: 100%;
 }
 
+#btnJumpLogs {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .log-meta {
   font-size: 12px;
   color: var(--text-tertiary);

@@ -1118,7 +1118,13 @@ function updateLogMeta(total, matched) {
 function updateLogJumpButton() {
     const button = get("btnJumpLogs");
     if (!button) return;
-    button.style.display = state.logAtBottom ? "none" : "inline-flex";
+    if (state.logAtBottom) {
+        button.style.visibility = "hidden";
+        button.style.pointerEvents = "none";
+    } else {
+        button.style.visibility = "visible";
+        button.style.pointerEvents = "auto";
+    }
 }
 
 function bindLogScroll() {
