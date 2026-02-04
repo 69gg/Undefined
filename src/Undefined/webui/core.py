@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import signal
 import time
 import secrets
 from typing import Any
@@ -44,6 +45,7 @@ class BotProcessController:
         self._started_at: float | None = None
         self._lock = asyncio.Lock()
         self._watch_task: asyncio.Task[None] | None = None
+        self._start_new_session = os.name != "nt"
 
     def status(self) -> dict[str, Any]:
         running = bool(self._process and self._process.returncode is None)
@@ -63,6 +65,8 @@ class BotProcessController:
             if self._process and self._process.returncode is None:
                 return self.status()
             logger.info("[WebUI] 启动机器人进程: %s", " ".join(BOT_COMMAND))
+            if self._start_new_session:
+                logger.info("[WebUI] 机器人进程已启用独立进程组")
 
             # 传递环境变量，强制根据配置开启颜色
             env = os.environ.copy()
@@ -78,6 +82,7 @@ class BotProcessController:
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
                     env=env,
+                    start_new_session=self._start_new_session,
                 )
                 self._started_at = time.time()
                 self._watch_task = asyncio.create_task(
@@ -95,24 +100,49 @@ class BotProcessController:
                 self._started_at = None
                 return self.status()
             logger.info("[WebUI] 停止机器人进程: pid=%s", self._process.pid)
+            process = self._process
             try:
-                self._process.terminate()
-                try:
-                    await asyncio.wait_for(self._process.wait(), timeout=10)
-                except asyncio.TimeoutError:
-                    logger.warning("[WebUI] 机器人进程未及时退出，强制终止")
+                if self._start_new_session and process.pid:
                     try:
-                        self._process.kill()
+                        os.killpg(process.pid, signal.SIGTERM)
                     except ProcessLookupError:
                         pass
-                    await self._process.wait()
+                else:
+                    process.terminate()
+
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    logger.warning("[WebUI] 机器人进程未及时退出，强制终止")
+                    if self._start_new_session and process.pid:
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    else:
+                        try:
+                            process.kill()
+                        except ProcessLookupError:
+                            pass
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=2)
+                    except asyncio.TimeoutError:
+                        logger.warning("[WebUI] 机器人进程终止超时，跳过等待")
             except ProcessLookupError:
                 pass
             except Exception as e:
                 logger.error(f"停止进程出错: {e}")
+            finally:
+                if self._watch_task and not self._watch_task.done():
+                    self._watch_task.cancel()
+                    try:
+                        await self._watch_task
+                    except asyncio.CancelledError:
+                        pass
+                self._watch_task = None
+                self._process = None
+                self._started_at = None
 
-            self._process = None
-            self._started_at = None
             return self.status()
 
     async def _watch_process(self, process: asyncio.subprocess.Process) -> None:
