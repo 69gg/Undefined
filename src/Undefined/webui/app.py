@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from pathlib import Path
 
@@ -21,9 +22,16 @@ async def on_startup(app: web.Application) -> None:
 
 
 async def on_shutdown(app: web.Application) -> None:
-    logger.info("WebUI shutting down, stopping bot process...")
     bot: BotProcessController = app["bot"]
-    await bot.stop()
+    status = bot.status()
+    if not status.get("running"):
+        logger.info("WebUI shutting down, no bot process running")
+        return
+    logger.info("WebUI shutting down, stopping bot process...")
+    try:
+        await asyncio.wait_for(bot.stop(), timeout=5)
+    except asyncio.TimeoutError:
+        logger.warning("WebUI shutdown: bot stop timed out")
 
 
 async def on_cleanup(app: web.Application) -> None:
