@@ -82,7 +82,10 @@ def create_app() -> web.Application:
     app["settings"] = load_webui_settings()
 
     def _on_config_change(config: Any, changes: dict[str, Any]) -> None:
-        if any(key.startswith("webui.") for key in changes):
+        webui_keys = {"webui_url", "webui_port", "webui_password"}
+        if any(key.startswith("webui.") for key in changes) or webui_keys.intersection(
+            changes
+        ):
             logger.info("[WebUI] 检测到 WebUI 配置变更，正在热重载设置...")
             app["settings"] = load_webui_settings()
 
