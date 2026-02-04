@@ -52,12 +52,24 @@ class ConfigManager:
             "[配置] 热重载已启动: interval=%.2fs debounce=%.2fs", interval, debounce
         )
 
-    async def stop_hot_reload(self) -> None:
+    async def stop_hot_reload(self, timeout: float | None = 2.0) -> None:
         if not self._watch_task or not self._watch_stop:
             return
         self._watch_stop.set()
+        task = self._watch_task
         try:
-            await self._watch_task
+            if timeout is None:
+                await task
+            else:
+                try:
+                    await asyncio.wait_for(task, timeout=timeout)
+                except asyncio.TimeoutError:
+                    logger.warning("[配置] 热重载停止超时，正在取消任务")
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
         finally:
             self._watch_task = None
             self._watch_stop = None
@@ -99,8 +111,11 @@ class ConfigManager:
     def _notify(self, changes: dict[str, tuple[Any, Any]]) -> None:
         if not self._callbacks:
             return
+        config = self._config
+        if config is None:
+            return
         for callback in list(self._callbacks):
             try:
-                callback(self._config, changes)  # type: ignore[arg-type]
+                callback(config, changes)
             except Exception:
                 logger.debug("配置回调执行失败", exc_info=True)
