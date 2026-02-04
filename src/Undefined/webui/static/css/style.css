@@ -446,10 +446,15 @@ body {
 
 /* Form Styles */
 .form-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
-  gap: 28px;
-  align-items: start;
+  column-gap: 28px;
+  column-width: 360px;
+}
+
+.config-card {
+  display: inline-block;
+  width: 100%;
+  margin-bottom: 28px;
+  break-inside: avoid;
 }
 
 .config-card-header {
@@ -1052,7 +1057,8 @@ body {
   }
 
   .form-grid {
-    grid-template-columns: 1fr;
+    column-count: 1;
+    column-width: auto;
   }
 
   .form-fields {

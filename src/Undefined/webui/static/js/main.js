@@ -410,9 +410,7 @@ function applyTheme(theme) {
 
 function setToken(token) {
     state.token = token;
-    if (token) {
-        setCookie("undefined_webui_token", token);
-    } else {
+    if (!token) {
         document.cookie = "undefined_webui_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
         document.cookie = "undefined_webui=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
     }
@@ -438,7 +436,11 @@ async function api(path, options = {}) {
         headers["Content-Type"] = "application/json";
     }
 
-    const res = await fetch(path, { ...options, headers });
+    const res = await fetch(path, {
+        ...options,
+        headers,
+        credentials: options.credentials || "same-origin",
+    });
     if (res.status === 401) {
         state.authenticated = false;
         refreshUI();
@@ -1326,8 +1328,6 @@ function switchTab(tab) {
 
 // Init
 async function init() {
-    state.token = localStorage.getItem("undefined_token");
-
     // Bind Landing
     document.querySelectorAll('[data-action="toggle-lang"]').forEach(btn => {
         btn.addEventListener("click", () => {
@@ -1536,18 +1536,20 @@ async function init() {
     if (collapseAllBtn) {
         collapseAllBtn.onclick = () => setAllSectionsCollapsed(true);
     }
-    get("logoutBtn").onclick = () => {
+    const logout = async () => {
+        try {
+            await api("/api/logout", { method: "POST" });
+        } catch (e) {
+            // ignore
+        }
         setToken(null);
         state.authenticated = false;
         state.view = "landing";
         refreshUI();
     };
-    get("mobileLogoutBtn").onclick = () => {
-        setToken(null);
-        state.authenticated = false;
-        state.view = "landing";
-        refreshUI();
-    };
+
+    get("logoutBtn").onclick = logout;
+    get("mobileLogoutBtn").onclick = logout;
 
     // Initial data
     state.token = getCookie("undefined_webui_token");
