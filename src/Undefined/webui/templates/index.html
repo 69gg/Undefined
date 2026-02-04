@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <meta name="color-scheme" content="light dark">
+    <meta id="themeColorMeta" name="theme-color" content="#f9f5f1">
+    <title>Undefined Console</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:wght@400;500;600&family=Inter:wght@400;500;600&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script>
+        // Initial State Injection
+        window.INITIAL_STATE = __INITIAL_STATE__;
+        window.INITIAL_VIEW = __INITIAL_VIEW__;
+        window.DEFAULT_FLAG = __DEFAULT_FLAG__;
+    </script>
+</head>
+
+<body>
+    <div class="noise"></div>
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Landing View Section -->
+    <section id="view-landing" class="full-view active">
+        <header class="header landing-header">
+            <div class="brand">
+                <span class="brand-dot"></span>
+                <span data-i18n="landing.title">Undefined Console</span>
+            </div>
+            <div class="header-actions">
+                <button class="btn" data-action="toggle-lang">中文</button>
+                <button class="btn" data-action="toggle-theme">Light</button>
+            </div>
+        </header>
+        <main class="landing-hero">
+            <div class="hero-content card">
+                <div class="eyebrow" data-i18n="landing.kicker">WebUI</div>
+                <h1 data-i18n="landing.title">配置控制台</h1>
+                <p class="tagline">A high-performance, highly scalable QQ group and private chat robot based on a
+                    self-developed architecture.</p>
+                <p class="muted" data-i18n="landing.subtitle">提供配置管理、日志追踪与运行控制的统一入口。</p>
+                <div class="cta-row">
+                    <button class="btn primary" data-action="open-app" data-tab="overview"
+                        data-i18n="landing.cta">进入控制台</button>
+                    <button class="btn" data-action="open-app" data-tab="config" data-i18n="landing.config">配置修改</button>
+                    <button class="btn ghost" data-action="open-app" data-tab="logs"
+                        data-i18n="landing.logs">日志查看</button>
+                    <button class="btn ghost" data-action="open-app" data-tab="about"
+                        data-i18n="landing.about">关于项目</button>
+                </div>
+            </div>
+
+            <div class="hero-sidebar">
+                <div class="panel">
+                    <div class="panel-row">
+                        <h3 data-i18n="bot.title">Bot 控制</h3>
+                        <span id="botStateBadge" class="badge">--</span>
+                    </div>
+                    <div class="status-meta" id="botStatusMetaLanding">--</div>
+                    <div class="toolbar">
+                        <button id="botStartBtnLanding" class="btn primary btn-sm" data-i18n="bot.start">启动</button>
+                        <button id="botStopBtnLanding" class="btn danger btn-sm" data-i18n="bot.stop">停止</button>
+                    </div>
+                    <div class="muted-sm" id="botHintLanding">--</div>
+                </div>
+
+                <div class="panel" id="landingLoginBox" style="display:none;">
+                    <div class="panel-row">
+                        <h3 data-i18n="auth.title">解锁控制台</h3>
+                    </div>
+                    <div class="form-group">
+                        <input id="landingPasswordInput" type="password" class="form-control"
+                            data-i18n-placeholder="auth.placeholder" placeholder="WebUI password" />
+                    </div>
+                    <button id="landingLoginBtn" class="btn primary w-full" data-i18n="auth.sign_in">登录</button>
+                    <div class="status-msg" id="landingLoginStatus"></div>
+                </div>
+            </div>
+        </main>
+    </section>
+
+    <!-- App View Section -->
+    <div class="app-container" id="view-app" style="display: none;">
+        <aside class="sidebar">
+            <div class="brand">
+                <span class="brand-dot"></span>
+                <span>Undefined</span>
+            </div>
+            <ul class="nav-links">
+                <li class="nav-item" data-view="landing" data-i18n="tabs.landing" role="button" tabindex="0">
+                    Landing
+                </li>
+                <li class="nav-item active" data-tab="overview" data-i18n="tabs.overview" role="button" tabindex="0">
+                    Overview
+                </li>
+                <li class="nav-item" data-tab="config" data-i18n="tabs.config" role="button" tabindex="0">
+                    Configuration
+                </li>
+                <li class="nav-item" data-tab="logs" data-i18n="tabs.logs" role="button" tabindex="0">
+                    Logs
+                </li>
+                <li class="nav-item" data-tab="about" data-i18n="tabs.about" role="button" tabindex="0">
+                    About
+                </li>
+            </ul>
+            <div class="sidebar-footer">
+                <div id="navFooter" class="muted-sm">--</div>
+                <div class="sidebar-footer-actions">
+                    <button class="btn btn-sm" data-action="toggle-lang">中文</button>
+                    <button class="btn btn-sm" data-action="toggle-theme">Light</button>
+                </div>
+                <button id="logoutBtn" class="btn danger-link" data-i18n="auth.sign_out">Sign Out</button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <!-- Warning Box -->
+            <div id="warningBox" class="warning-banner" style="display:none;">
+                <span data-i18n="auth.default_password">默认密码仍在使用，请尽快修改 webui.password 并重启 WebUI。</span>
+            </div>
+
+            <!-- Login Box (Inside App) -->
+            <div id="appLoginBox" class="card login-card" style="display: none;">
+                <h2 data-i18n="auth.title">解锁控制台</h2>
+                <p class="muted" data-i18n="auth.subtitle">请输入 WebUI 密码以继续操作。</p>
+                <div class="form-group">
+                    <input id="appPasswordInput" type="password" class="form-control"
+                        data-i18n-placeholder="auth.placeholder" placeholder="WebUI password" />
+                </div>
+                <button id="appLoginBtn" class="btn primary w-full" data-i18n="auth.sign_in">登录</button>
+                <div class="status-msg" id="appLoginStatus"></div>
+            </div>
+
+            <div id="appContent" style="display:none;">
+                <div class="mobile-nav">
+                    <div class="mobile-brand">
+                        <span class="brand-dot"></span>
+                        <span>Undefined</span>
+                    </div>
+                    <div class="mobile-tabs">
+                        <button class="nav-item" data-view="landing" data-i18n="tabs.landing">Landing</button>
+                        <button class="nav-item active" data-tab="overview" data-i18n="tabs.overview">Overview</button>
+                        <button class="nav-item" data-tab="config" data-i18n="tabs.config">Configuration</button>
+                        <button class="nav-item" data-tab="logs" data-i18n="tabs.logs">Logs</button>
+                        <button class="nav-item" data-tab="about" data-i18n="tabs.about">About</button>
+                    </div>
+                    <div class="mobile-actions">
+                        <button class="btn ghost btn-sm" data-action="toggle-lang">中文</button>
+                        <button class="btn ghost btn-sm" data-action="toggle-theme">Light</button>
+                        <button id="mobileLogoutBtn" class="btn danger btn-sm" data-i18n="auth.sign_out">Sign Out</button>
+                    </div>
+                </div>
+
+                <!-- Tab Overview -->
+                <section id="tab-overview" class="tab-content active">
+                    <div class="header">
+                        <div>
+                            <h1 class="page-title" data-i18n="overview.title">运行概览</h1>
+                            <p class="page-subtitle" data-i18n="overview.subtitle">当前系统资源与运行环境快照。</p>
+                        </div>
+                        <div class="toolbar">
+                            <button id="btnRefreshOverview" class="btn" data-i18n="overview.refresh">刷新</button>
+                        </div>
+                    </div>
+                    <div class="overview-grid">
+                        <div class="card">
+                            <div class="card-title" data-i18n="overview.system">系统信息</div>
+                            <div class="stat-row">
+                                <span class="stat-label" data-i18n="overview.system_version">系统版本</span>
+                                <span id="systemVersion" class="stat-value">--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label" data-i18n="overview.system_arch">系统架构</span>
+                                <span id="systemArch" class="stat-value">--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label" data-i18n="overview.cpu_model">CPU 型号</span>
+                                <span id="systemCpuModel" class="stat-value">--</span>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-title" data-i18n="overview.resources">资源使用</div>
+                            <div class="metric-block">
+                                <div class="stat-row">
+                                    <span class="stat-label" data-i18n="overview.cpu_usage">CPU 占用率</span>
+                                    <span id="systemCpuUsage" class="stat-value">--</span>
+                                </div>
+                                <div class="progress">
+                                    <div id="systemCpuBar" class="progress-bar"></div>
+                                </div>
+                            </div>
+                            <div class="metric-block">
+                                <div class="stat-row">
+                                    <span class="stat-label" data-i18n="overview.memory">内存容量</span>
+                                    <span id="systemMemory" class="stat-value">--</span>
+                                </div>
+                                <div class="stat-row">
+                                    <span class="stat-label" data-i18n="overview.memory_usage">内存占用率</span>
+                                    <span id="systemMemoryUsage" class="stat-value">--</span>
+                                </div>
+                                <div class="progress">
+                                    <div id="systemMemoryBar" class="progress-bar"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-title" data-i18n="overview.runtime">运行环境</div>
+                            <div class="stat-row">
+                                <span class="stat-label" data-i18n="overview.undefined_version">Undefined 版本</span>
+                                <span id="systemUndefinedVersion" class="stat-value">--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label" data-i18n="overview.python_version">Python 版本</span>
+                                <span id="systemPythonVersion" class="stat-value">--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label" data-i18n="overview.kernel">内核版本</span>
+                                <span id="systemKernel" class="stat-value">--</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Tab Config -->
+                <section id="tab-config" class="tab-content">
+                    <div class="header sticky">
+                        <div>
+                            <h1 class="page-title" data-i18n="config.title">配置修改</h1>
+                            <div class="save-status" id="saveStatus" style="opacity: 0;">
+                                <div class="dot-pulse"></div>
+                                <span id="saveStatusText">Saving...</span>
+                            </div>
+                        </div>
+                        <div class="toolbar config-toolbar">
+                            <div class="toolbar-group">
+                                <div class="search-group">
+                                    <input id="configSearchInput" type="search" class="form-control form-control-sm"
+                                        data-i18n-placeholder="config.search_placeholder" placeholder="Search config..." />
+                                    <button id="configSearchClear" class="btn ghost btn-sm"
+                                        data-i18n="config.clear_search">清除</button>
+                                </div>
+                            </div>
+                            <div class="toolbar-group">
+                                <button id="btnExpandAll" class="btn ghost btn-sm"
+                                    data-i18n="config.expand_all">全部展开</button>
+                                <button id="btnCollapseAll" class="btn ghost btn-sm"
+                                    data-i18n="config.collapse_all">全部折叠</button>
+                                <button id="btnResetConfig" class="btn ghost" data-i18n="config.reset">重置更改</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="configState" class="empty-state" style="display:none;"></div>
+                    <div id="formSections" class="form-grid"></div>
+                </section>
+
+                <!-- Tab Logs -->
+                <section id="tab-logs" class="tab-content">
+                    <div class="header">
+                        <div>
+                            <h1 class="page-title" data-i18n="logs.title">系统日志</h1>
+                            <p class="page-subtitle" data-i18n="logs.subtitle">实时查看日志尾部输出。</p>
+                            <div class="log-tabs">
+                                <button class="log-tab active" data-log-type="bot" data-i18n="logs.tab.bot">Bot 日志</button>
+                                <button class="log-tab" data-log-type="webui" data-i18n="logs.tab.webui">WebUI 日志</button>
+                                <button class="log-tab" data-log-type="all" data-i18n="logs.tab.all">其他日志</button>
+                            </div>
+                        </div>
+                        <div class="toolbar">
+                            <label class="toggle-wrapper">
+                                <span data-i18n="logs.auto" style="font-size: 13px;">自动刷新</span>
+                                <input type="checkbox" id="logAutoScroll" class="toggle-input" checked>
+                                <span class="toggle-track"><span class="toggle-handle"></span></span>
+                            </label>
+                            <button id="btnPauseLogs" class="btn btn-sm" data-i18n="logs.pause">暂停</button>
+                            <button id="btnRefreshLogs" class="btn btn-sm" data-i18n="logs.refresh">刷新</button>
+                            <select id="logFileSelect" class="form-control form-control-sm" aria-label="Log file">
+                            </select>
+                            <select id="logLevelFilter" class="form-control form-control-sm" aria-label="Log level">
+                            </select>
+                            <input id="logSearchInput" type="search" class="form-control form-control-sm"
+                                data-i18n-placeholder="logs.search_placeholder" placeholder="搜索日志" />
+                            <button id="btnClearLogs" class="btn ghost btn-sm" data-i18n="logs.clear">清空</button>
+                            <button id="btnCopyLogs" class="btn ghost btn-sm" data-i18n="logs.copy">复制</button>
+                            <button id="btnDownloadLogs" class="btn ghost btn-sm" data-i18n="logs.download">下载</button>
+                            <button id="btnJumpLogs" class="btn ghost btn-sm" data-i18n="logs.jump_bottom">回到底部</button>
+                        </div>
+                    </div>
+                    <div class="log-meta" id="logMeta"></div>
+                    <div class="log-viewer" id="logContainer" data-placeholder="true" aria-live="off"
+                        aria-label="System logs">Initializing log connection...</div>
+                </section>
+
+                <!-- Tab About -->
+                <section id="tab-about" class="tab-content">
+                    <div class="header">
+                        <div>
+                            <h1 class="page-title" data-i18n="about.title">作者与版权说明</h1>
+                            <p class="page-subtitle" data-i18n="about.subtitle">关于项目作者与开源协议。</p>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3 data-i18n="about.author">作者</h3>
+                        <p style="margin-bottom: 20px;" data-i18n="about.author_name">Null</p>
+
+                        <div
+                            style="display: grid; grid-template-columns: 100px 1fr; gap: 12px; font-size: 14px; margin-bottom: 20px;">
+                            <div style="color: var(--text-secondary);" data-i18n="about.version">Version</div>
+                            <div id="about-version-display">--</div>
+                            <div style="color: var(--text-secondary);" data-i18n="about.license">License</div>
+                            <div data-i18n="about.license_name">MIT License</div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3 data-i18n="about.license">MIT License</h3>
+                        <pre id="about-license-display"
+                            style="font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); white-space: pre-wrap;">
+                        </pre>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/js/main.js"></script>
+</body>
+
+</html>

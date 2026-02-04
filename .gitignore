@@ -15,6 +15,7 @@ temp/
 
 # Environment
 .env
+config.toml
 
 # Editors
 .vscode/

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, cast
 
 from Undefined.utils.logging import format_log_payload, log_debug_json
+from Undefined.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +29,10 @@ class MCPToolRegistry:
         tool_name_strategy: str = "mcp",
     ) -> None:
         if config_path is None:
-            import os
-
-            config_path = os.getenv("MCP_CONFIG_PATH", "config/mcp.json")
+            try:
+                config_path = get_config(strict=False).mcp_config_path
+            except Exception:
+                config_path = "config/mcp.json"
 
         self.config_path: Path = Path(config_path)
         self.tool_name_strategy = tool_name_strategy

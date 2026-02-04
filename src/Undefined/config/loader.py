@@ -1,11 +1,14 @@
 """配置加载逻辑"""
 
+from __future__ import annotations
+
 import json
 import logging
 import os
-from dataclasses import dataclass
+import tomllib
+from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 
@@ -18,22 +21,161 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
-# 本地配置文件路径
+CONFIG_PATH = Path("config.toml")
 LOCAL_CONFIG_PATH = Path("config.local.json")
+
+DEFAULT_WEBUI_URL = "127.0.0.1"
+DEFAULT_WEBUI_PORT = 8787
+DEFAULT_WEBUI_PASSWORD = "changeme"
+
+_ENV_WARNED_KEYS: set[str] = set()
+
+
+def _warn_env_fallback(name: str) -> None:
+    if name in _ENV_WARNED_KEYS:
+        return
+    _ENV_WARNED_KEYS.add(name)
+    logger.warning("检测到环境变量 %s，建议迁移到 config.toml", name)
+
+
+def _load_env() -> None:
+    try:
+        load_dotenv()
+    except Exception:
+        logger.debug("加载 .env 失败，继续使用 config.toml", exc_info=True)
+
+
+def load_toml_data(config_path: Optional[Path] = None) -> dict[str, Any]:
+    """读取 config.toml 并返回字典"""
+    path = config_path or CONFIG_PATH
+    if not path.exists():
+        return {}
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+        if isinstance(data, dict):
+            return data
+        logger.warning("config.toml 内容不是对象结构")
+        return {}
+    except tomllib.TOMLDecodeError as exc:
+        logger.error("config.toml 解析失败: %s", exc)
+        return {}
+    except OSError as exc:
+        logger.error("读取 config.toml 失败: %s", exc)
+        return {}
+
+
+def _get_nested(data: dict[str, Any], path: tuple[str, ...]) -> Any:
+    node: Any = data
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            return None
+        node = node[key]
+    return node
+
+
+def _normalize_str(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped if stripped else None
+    return str(value).strip()
+
+
+def _coerce_int(value: Any, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_float(value: Any, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return default
+
+
+def _coerce_str(value: Any, default: str) -> str:
+    normalized = _normalize_str(value)
+    return normalized if normalized is not None else default
+
+
+def _coerce_int_list(value: Any) -> list[int]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        items: list[int] = []
+        for item in value:
+            try:
+                items.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        return items
+    if isinstance(value, str):
+        parts = [part.strip() for part in value.split(",") if part.strip()]
+        items = []
+        for part in parts:
+            try:
+                items.append(int(part))
+            except ValueError:
+                continue
+        return items
+    return []
+
+
+def _coerce_str_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [part.strip() for part in value.split(",") if part.strip()]
+    return []
+
+
+def _get_value(
+    data: dict[str, Any],
+    path: tuple[str, ...],
+    env_key: Optional[str],
+) -> Any:
+    value = _get_nested(data, path)
+    if value is not None:
+        return value
+    if env_key:
+        env_value = os.getenv(env_key)
+        if env_value is not None and str(env_value).strip() != "":
+            _warn_env_fallback(env_key)
+            return env_value
+    return None
 
 
 def load_local_admins() -> list[int]:
     """从本地配置文件加载动态管理员列表"""
     if not LOCAL_CONFIG_PATH.exists():
         return []
-
     try:
         with open(LOCAL_CONFIG_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
         admin_qqs: list[int] = data.get("admin_qqs", [])
         return admin_qqs
-    except Exception as e:
-        logger.warning(f"读取本地配置失败: {e}")
+    except Exception as exc:
+        logger.warning("读取本地配置失败: %s", exc)
         return []
 
 
@@ -50,10 +192,49 @@ def save_local_admins(admin_qqs: list[int]) -> None:
         with open(LOCAL_CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-        logger.info(f"已保存管理员列表到 {LOCAL_CONFIG_PATH}")
-    except Exception as e:
-        logger.error(f"保存本地配置失败: {e}")
+        logger.info("已保存管理员列表到 %s", LOCAL_CONFIG_PATH)
+    except Exception as exc:
+        logger.error("保存本地配置失败: %s", exc)
         raise
+
+
+@dataclass
+class WebUISettings:
+    url: str
+    port: int
+    password: str
+    using_default_password: bool
+    config_exists: bool
+
+
+def load_webui_settings(config_path: Optional[Path] = None) -> WebUISettings:
+    data = load_toml_data(config_path)
+    config_exists = bool(data)
+    url_value = _get_value(data, ("webui", "url"), None)
+    port_value = _get_value(data, ("webui", "port"), None)
+    password_value = _get_value(data, ("webui", "password"), None)
+
+    url = _coerce_str(url_value, DEFAULT_WEBUI_URL)
+    port = _coerce_int(port_value, DEFAULT_WEBUI_PORT)
+    if port <= 0 or port > 65535:
+        port = DEFAULT_WEBUI_PORT
+
+    password_normalized = _normalize_str(password_value)
+    if not password_normalized:
+        return WebUISettings(
+            url=url,
+            port=port,
+            password=DEFAULT_WEBUI_PASSWORD,
+            using_default_password=True,
+            config_exists=config_exists,
+        )
+    return WebUISettings(
+        url=url,
+        port=port,
+        password=password_normalized,
+        using_default_password=False,
+        config_exists=config_exists,
+    )
 
 
 @dataclass
@@ -61,147 +242,448 @@ class Config:
     """应用配置"""
 
     bot_qq: int
-    superadmin_qq: int  # 超级管理员（唯一）
-    admin_qqs: list[int]  # 管理员列表（来自 .env + 本地配置）
-    forward_proxy_qq: int | None  # 音频转发代理QQ号（可选，用于群聊音频转发）
+    superadmin_qq: int
+    admin_qqs: list[int]
+    forward_proxy_qq: int | None
     onebot_ws_url: str
     onebot_token: str
     chat_model: ChatModelConfig
     vision_model: VisionModelConfig
-    security_model: SecurityModelConfig  # 安全模型（防注入检测和回复生成）
-    agent_model: AgentModelConfig  # Agent 模型（用于执行各种 Agent）
+    security_model: SecurityModelConfig
+    agent_model: AgentModelConfig
+    log_level: str
     log_file_path: str
     log_max_size: int
     log_backup_count: int
+    log_thinking: bool
+    tools_sanitize: bool
+    tools_description_max_len: int
+    tools_sanitize_verbose: bool
+    tools_description_preview_len: int
+    token_usage_max_size_mb: int
+    token_usage_max_archives: int
+    token_usage_max_total_mb: int
+    token_usage_archive_prune_mode: str
+    skills_hot_reload: bool
+    skills_hot_reload_interval: float
+    skills_hot_reload_debounce: float
+    agent_intro_autogen_enabled: bool
+    agent_intro_autogen_queue_interval: float
+    agent_intro_autogen_max_tokens: int
+    agent_intro_hash_path: str
+    searxng_url: str
+    use_proxy: bool
+    http_proxy: str
+    https_proxy: str
+    weather_api_key: str
+    xxapi_api_token: str
+    mcp_config_path: str
+    prefetch_tools: list[str]
+    prefetch_tools_hide: bool
+    webui_url: str
+    webui_port: int
+    webui_password: str
 
     @classmethod
-    def load(cls) -> "Config":
-        """从环境变量和本地配置加载配置"""
-        load_dotenv()
+    def load(cls, config_path: Optional[Path] = None, strict: bool = True) -> "Config":
+        """从 config.toml 和本地配置加载配置"""
+        _load_env()
+        data = load_toml_data(config_path)
 
-        # 1. 验证必需的环境变量
-        cls._verify_required_vars()
+        bot_qq = _coerce_int(_get_value(data, ("core", "bot_qq"), "BOT_QQ"), 0)
+        superadmin_qq = _coerce_int(
+            _get_value(data, ("core", "superadmin_qq"), "SUPERADMIN_QQ"), 0
+        )
+        admin_qqs = _coerce_int_list(_get_value(data, ("core", "admin_qq"), "ADMIN_QQ"))
+        forward_proxy = _coerce_int(
+            _get_value(data, ("core", "forward_proxy_qq"), "FORWARD_PROXY_QQ"),
+            0,
+        )
+        forward_proxy_qq = forward_proxy if forward_proxy > 0 else None
 
-        # 2. 解析各个模型的配置
-        chat_model = cls._parse_chat_model_config()
-        vision_model = cls._parse_vision_model_config()
-        security_model = cls._parse_security_model_config(chat_model)
-        agent_model = cls._parse_agent_model_config()
+        onebot_ws_url = _coerce_str(
+            _get_value(data, ("onebot", "ws_url"), "ONEBOT_WS_URL"), ""
+        )
+        onebot_token = _coerce_str(
+            _get_value(data, ("onebot", "token"), "ONEBOT_TOKEN"), ""
+        )
 
-        # 3. 解析管理员配置
-        superadmin_qq, all_admins = cls._parse_admin_configs()
+        chat_model = cls._parse_chat_model_config(data)
+        vision_model = cls._parse_vision_model_config(data)
+        security_model = cls._parse_security_model_config(data, chat_model)
+        agent_model = cls._parse_agent_model_config(data)
 
-        # 4. 日志与辅助配置
-        log_file_path, log_max_size, log_backup_count = cls._parse_log_configs()
-        forward_proxy_qq = cls._parse_forward_proxy_config()
+        superadmin_qq, admin_qqs = cls._merge_admins(
+            superadmin_qq=superadmin_qq, admin_qqs=admin_qqs
+        )
 
-        # 5. 调试日志输出
+        log_level = _coerce_str(
+            _get_value(data, ("logging", "level"), "LOG_LEVEL"), "INFO"
+        ).upper()
+        log_file_path = _coerce_str(
+            _get_value(data, ("logging", "file_path"), "LOG_FILE_PATH"),
+            "logs/bot.log",
+        )
+        log_max_size_mb = _coerce_int(
+            _get_value(data, ("logging", "max_size_mb"), "LOG_MAX_SIZE_MB"), 10
+        )
+        log_backup_count = _coerce_int(
+            _get_value(data, ("logging", "backup_count"), "LOG_BACKUP_COUNT"), 5
+        )
+        log_thinking = _coerce_bool(
+            _get_value(data, ("logging", "log_thinking"), "LOG_THINKING"), True
+        )
+
+        tools_sanitize = _coerce_bool(
+            _get_value(data, ("tools", "sanitize"), "TOOLS_SANITIZE"), False
+        )
+        tools_description_max_len = _coerce_int(
+            _get_value(
+                data, ("tools", "description_max_len"), "TOOLS_DESCRIPTION_MAX_LEN"
+            ),
+            1024,
+        )
+        tools_sanitize_verbose = _coerce_bool(
+            _get_value(data, ("tools", "sanitize_verbose"), "TOOLS_SANITIZE_VERBOSE"),
+            False,
+        )
+        tools_description_preview_len = _coerce_int(
+            _get_value(
+                data,
+                ("tools", "description_preview_len"),
+                "TOOLS_DESCRIPTION_PREVIEW_LEN",
+            ),
+            160,
+        )
+
+        token_usage_max_size_mb = _coerce_int(
+            _get_value(data, ("token_usage", "max_size_mb"), "TOKEN_USAGE_MAX_SIZE_MB"),
+            5,
+        )
+        token_usage_max_archives = _coerce_int(
+            _get_value(
+                data, ("token_usage", "max_archives"), "TOKEN_USAGE_MAX_ARCHIVES"
+            ),
+            30,
+        )
+        token_usage_max_total_mb = _coerce_int(
+            _get_value(
+                data, ("token_usage", "max_total_mb"), "TOKEN_USAGE_MAX_TOTAL_MB"
+            ),
+            0,
+        )
+        token_usage_archive_prune_mode = _coerce_str(
+            _get_value(
+                data,
+                ("token_usage", "archive_prune_mode"),
+                "TOKEN_USAGE_ARCHIVE_PRUNE_MODE",
+            ),
+            "delete",
+        )
+
+        skills_hot_reload = _coerce_bool(
+            _get_value(data, ("skills", "hot_reload"), "SKILLS_HOT_RELOAD"), True
+        )
+        skills_hot_reload_interval = _coerce_float(
+            _get_value(
+                data, ("skills", "hot_reload_interval"), "SKILLS_HOT_RELOAD_INTERVAL"
+            ),
+            2.0,
+        )
+        skills_hot_reload_debounce = _coerce_float(
+            _get_value(
+                data, ("skills", "hot_reload_debounce"), "SKILLS_HOT_RELOAD_DEBOUNCE"
+            ),
+            0.5,
+        )
+
+        agent_intro_autogen_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("skills", "intro_autogen_enabled"),
+                "AGENT_INTRO_AUTOGEN_ENABLED",
+            ),
+            True,
+        )
+        agent_intro_autogen_queue_interval = _coerce_float(
+            _get_value(
+                data,
+                ("skills", "intro_autogen_queue_interval"),
+                "AGENT_INTRO_AUTOGEN_QUEUE_INTERVAL",
+            ),
+            1.0,
+        )
+        agent_intro_autogen_max_tokens = _coerce_int(
+            _get_value(
+                data,
+                ("skills", "intro_autogen_max_tokens"),
+                "AGENT_INTRO_AUTOGEN_MAX_TOKENS",
+            ),
+            8192,
+        )
+        agent_intro_hash_path = _coerce_str(
+            _get_value(data, ("skills", "intro_hash_path"), "AGENT_INTRO_HASH_PATH"),
+            ".cache/agent_intro_hashes.json",
+        )
+
+        prefetch_tools_raw = _get_value(
+            data, ("skills", "prefetch_tools"), "PREFETCH_TOOLS"
+        )
+        prefetch_tools = _coerce_str_list(prefetch_tools_raw)
+        if not prefetch_tools and prefetch_tools_raw is None:
+            prefetch_tools = ["get_current_time"]
+        prefetch_tools_hide = _coerce_bool(
+            _get_value(data, ("skills", "prefetch_tools_hide"), "PREFETCH_TOOLS_HIDE"),
+            True,
+        )
+
+        searxng_url = _coerce_str(
+            _get_value(data, ("search", "searxng_url"), "SEARXNG_URL"), ""
+        )
+
+        use_proxy = _coerce_bool(
+            _get_value(data, ("proxy", "use_proxy"), "USE_PROXY"), True
+        )
+        http_proxy = _coerce_str(
+            _get_value(data, ("proxy", "http_proxy"), "http_proxy"), ""
+        )
+        if not http_proxy:
+            http_proxy = _coerce_str(os.getenv("HTTP_PROXY"), "")
+            if http_proxy:
+                _warn_env_fallback("HTTP_PROXY")
+        https_proxy = _coerce_str(
+            _get_value(data, ("proxy", "https_proxy"), "https_proxy"), ""
+        )
+        if not https_proxy:
+            https_proxy = _coerce_str(os.getenv("HTTPS_PROXY"), "")
+            if https_proxy:
+                _warn_env_fallback("HTTPS_PROXY")
+
+        weather_api_key = _coerce_str(
+            _get_value(data, ("weather", "api_key"), "WEATHER_API_KEY"), ""
+        )
+        xxapi_api_token = _coerce_str(
+            _get_value(data, ("xxapi", "api_token"), "XXAPI_API_TOKEN"), ""
+        )
+
+        mcp_config_path = _coerce_str(
+            _get_value(data, ("mcp", "config_path"), "MCP_CONFIG_PATH"),
+            "config/mcp.json",
+        )
+
+        webui_settings = load_webui_settings(config_path)
+
+        if strict:
+            cls._verify_required_fields(
+                bot_qq=bot_qq,
+                superadmin_qq=superadmin_qq,
+                onebot_ws_url=onebot_ws_url,
+                chat_model=chat_model,
+                vision_model=vision_model,
+                agent_model=agent_model,
+            )
+
         cls._log_debug_info(chat_model, vision_model, security_model, agent_model)
 
         return cls(
-            bot_qq=int(os.getenv("BOT_QQ", "0")),
+            bot_qq=bot_qq,
             superadmin_qq=superadmin_qq,
-            admin_qqs=all_admins,
+            admin_qqs=admin_qqs,
             forward_proxy_qq=forward_proxy_qq,
-            onebot_ws_url=os.getenv("ONEBOT_WS_URL", ""),
-            onebot_token=os.getenv("ONEBOT_TOKEN", ""),
+            onebot_ws_url=onebot_ws_url,
+            onebot_token=onebot_token,
             chat_model=chat_model,
             vision_model=vision_model,
             security_model=security_model,
             agent_model=agent_model,
+            log_level=log_level,
             log_file_path=log_file_path,
-            log_max_size=log_max_size,
+            log_max_size=log_max_size_mb * 1024 * 1024,
             log_backup_count=log_backup_count,
+            log_thinking=log_thinking,
+            tools_sanitize=tools_sanitize,
+            tools_description_max_len=tools_description_max_len,
+            tools_sanitize_verbose=tools_sanitize_verbose,
+            tools_description_preview_len=tools_description_preview_len,
+            token_usage_max_size_mb=token_usage_max_size_mb,
+            token_usage_max_archives=token_usage_max_archives,
+            token_usage_max_total_mb=token_usage_max_total_mb,
+            token_usage_archive_prune_mode=token_usage_archive_prune_mode,
+            skills_hot_reload=skills_hot_reload,
+            skills_hot_reload_interval=skills_hot_reload_interval,
+            skills_hot_reload_debounce=skills_hot_reload_debounce,
+            agent_intro_autogen_enabled=agent_intro_autogen_enabled,
+            agent_intro_autogen_queue_interval=agent_intro_autogen_queue_interval,
+            agent_intro_autogen_max_tokens=agent_intro_autogen_max_tokens,
+            agent_intro_hash_path=agent_intro_hash_path,
+            searxng_url=searxng_url,
+            use_proxy=use_proxy,
+            http_proxy=http_proxy,
+            https_proxy=https_proxy,
+            weather_api_key=weather_api_key,
+            xxapi_api_token=xxapi_api_token,
+            mcp_config_path=mcp_config_path,
+            prefetch_tools=prefetch_tools,
+            prefetch_tools_hide=prefetch_tools_hide,
+            webui_url=webui_settings.url,
+            webui_port=webui_settings.port,
+            webui_password=webui_settings.password,
         )
 
     @staticmethod
-    def _verify_required_vars() -> None:
-        """验证必需的环境变量是否存在"""
-        required_vars = [
-            "BOT_QQ",
-            "SUPERADMIN_QQ",
-            "ONEBOT_WS_URL",
-            "CHAT_MODEL_API_URL",
-            "CHAT_MODEL_API_KEY",
-            "CHAT_MODEL_NAME",
-            "CHAT_MODEL_MAX_TOKENS",
-            "VISION_MODEL_API_URL",
-            "VISION_MODEL_API_KEY",
-            "VISION_MODEL_NAME",
-            "AGENT_MODEL_API_URL",
-            "AGENT_MODEL_API_KEY",
-            "AGENT_MODEL_NAME",
-        ]
-        missing = [var for var in required_vars if not os.getenv(var)]
-        if missing:
-            raise ValueError(f"缺少必需的环境变量: {', '.join(missing)}")
-
-    @staticmethod
-    def _parse_chat_model_config() -> ChatModelConfig:
-        """从环境变量中提取并构造对话模型配置"""
-        """解析对话模型配置"""
+    def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
         return ChatModelConfig(
-            api_url=os.getenv("CHAT_MODEL_API_URL", ""),
-            api_key=os.getenv("CHAT_MODEL_API_KEY", ""),
-            model_name=os.getenv("CHAT_MODEL_NAME", ""),
-            max_tokens=int(os.getenv("CHAT_MODEL_MAX_TOKENS", "8000")),
-            thinking_enabled=os.getenv("CHAT_MODEL_THINKING_ENABLED", "false").lower()
-            == "true",
-            thinking_budget_tokens=int(
-                os.getenv("CHAT_MODEL_THINKING_BUDGET_TOKENS", "20000")
+            api_url=_coerce_str(
+                _get_value(data, ("models", "chat", "api_url"), "CHAT_MODEL_API_URL"),
+                "",
             ),
-            deepseek_new_cot_support=os.getenv(
-                "CHAT_MODEL_DEEPSEEK_NEW_COT_SUPPORT", "false"
-            ).lower()
-            == "true",
+            api_key=_coerce_str(
+                _get_value(data, ("models", "chat", "api_key"), "CHAT_MODEL_API_KEY"),
+                "",
+            ),
+            model_name=_coerce_str(
+                _get_value(data, ("models", "chat", "model_name"), "CHAT_MODEL_NAME"),
+                "",
+            ),
+            max_tokens=_coerce_int(
+                _get_value(
+                    data, ("models", "chat", "max_tokens"), "CHAT_MODEL_MAX_TOKENS"
+                ),
+                8192,
+            ),
+            thinking_enabled=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "chat", "thinking_enabled"),
+                    "CHAT_MODEL_THINKING_ENABLED",
+                ),
+                False,
+            ),
+            thinking_budget_tokens=_coerce_int(
+                _get_value(
+                    data,
+                    ("models", "chat", "thinking_budget_tokens"),
+                    "CHAT_MODEL_THINKING_BUDGET_TOKENS",
+                ),
+                20000,
+            ),
+            deepseek_new_cot_support=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "chat", "deepseek_new_cot_support"),
+                    "CHAT_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+                ),
+                False,
+            ),
         )
 
     @staticmethod
-    def _parse_vision_model_config() -> VisionModelConfig:
-        """从环境变量中提取并构造视觉模型（多模态）配置"""
-        """解析视觉模型配置"""
+    def _parse_vision_model_config(data: dict[str, Any]) -> VisionModelConfig:
         return VisionModelConfig(
-            api_url=os.getenv("VISION_MODEL_API_URL", ""),
-            api_key=os.getenv("VISION_MODEL_API_KEY", ""),
-            model_name=os.getenv("VISION_NAME", "")
-            or os.getenv("VISION_MODEL_NAME", ""),
-            thinking_enabled=os.getenv("VISION_MODEL_THINKING_ENABLED", "false").lower()
-            == "true",
-            thinking_budget_tokens=int(
-                os.getenv("VISION_MODEL_THINKING_BUDGET_TOKENS", "20000")
+            api_url=_coerce_str(
+                _get_value(
+                    data, ("models", "vision", "api_url"), "VISION_MODEL_API_URL"
+                ),
+                "",
             ),
-            deepseek_new_cot_support=os.getenv(
-                "VISION_MODEL_DEEPSEEK_NEW_COT_SUPPORT", "false"
-            ).lower()
-            == "true",
+            api_key=_coerce_str(
+                _get_value(
+                    data, ("models", "vision", "api_key"), "VISION_MODEL_API_KEY"
+                ),
+                "",
+            ),
+            model_name=_coerce_str(
+                _get_value(
+                    data, ("models", "vision", "model_name"), "VISION_MODEL_NAME"
+                ),
+                "",
+            ),
+            thinking_enabled=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "vision", "thinking_enabled"),
+                    "VISION_MODEL_THINKING_ENABLED",
+                ),
+                False,
+            ),
+            thinking_budget_tokens=_coerce_int(
+                _get_value(
+                    data,
+                    ("models", "vision", "thinking_budget_tokens"),
+                    "VISION_MODEL_THINKING_BUDGET_TOKENS",
+                ),
+                20000,
+            ),
+            deepseek_new_cot_support=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "vision", "deepseek_new_cot_support"),
+                    "VISION_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+                ),
+                False,
+            ),
         )
 
     @staticmethod
     def _parse_security_model_config(
-        chat_model: ChatModelConfig,
+        data: dict[str, Any], chat_model: ChatModelConfig
     ) -> SecurityModelConfig:
-        """解析安全模型配置，支持后备逻辑"""
-        api_url = os.getenv("SECURITY_MODEL_API_URL", "")
-        api_key = os.getenv("SECURITY_MODEL_API_KEY", "")
-        model_name = os.getenv("SECURITY_MODEL_NAME", "")
+        api_url = _coerce_str(
+            _get_value(
+                data, ("models", "security", "api_url"), "SECURITY_MODEL_API_URL"
+            ),
+            "",
+        )
+        api_key = _coerce_str(
+            _get_value(
+                data, ("models", "security", "api_key"), "SECURITY_MODEL_API_KEY"
+            ),
+            "",
+        )
+        model_name = _coerce_str(
+            _get_value(
+                data, ("models", "security", "model_name"), "SECURITY_MODEL_NAME"
+            ),
+            "",
+        )
 
         if api_url and api_key and model_name:
             return SecurityModelConfig(
                 api_url=api_url,
                 api_key=api_key,
                 model_name=model_name,
-                max_tokens=int(os.getenv("SECURITY_MODEL_MAX_TOKENS", "100")),
-                thinking_enabled=os.getenv(
-                    "SECURITY_MODEL_THINKING_ENABLED", "false"
-                ).lower()
-                == "true",
-                thinking_budget_tokens=int(
-                    os.getenv("SECURITY_MODEL_THINKING_BUDGET_TOKENS", "0")
+                max_tokens=_coerce_int(
+                    _get_value(
+                        data,
+                        ("models", "security", "max_tokens"),
+                        "SECURITY_MODEL_MAX_TOKENS",
+                    ),
+                    100,
                 ),
-                deepseek_new_cot_support=os.getenv(
-                    "SECURITY_MODEL_DEEPSEEK_NEW_COT_SUPPORT", "false"
-                ).lower()
-                == "true",
+                thinking_enabled=_coerce_bool(
+                    _get_value(
+                        data,
+                        ("models", "security", "thinking_enabled"),
+                        "SECURITY_MODEL_THINKING_ENABLED",
+                    ),
+                    False,
+                ),
+                thinking_budget_tokens=_coerce_int(
+                    _get_value(
+                        data,
+                        ("models", "security", "thinking_budget_tokens"),
+                        "SECURITY_MODEL_THINKING_BUDGET_TOKENS",
+                    ),
+                    0,
+                ),
+                deepseek_new_cot_support=_coerce_bool(
+                    _get_value(
+                        data,
+                        ("models", "security", "deepseek_new_cot_support"),
+                        "SECURITY_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+                    ),
+                    False,
+                ),
             )
 
         logger.warning("未配置安全模型，将使用对话模型作为后备")
@@ -216,71 +698,98 @@ class Config:
         )
 
     @staticmethod
-    def _parse_agent_model_config() -> AgentModelConfig:
-        """从环境变量中提取并构造 Agent 执行专用的模型配置"""
-        """解析 Agent 模型配置"""
+    def _parse_agent_model_config(data: dict[str, Any]) -> AgentModelConfig:
         return AgentModelConfig(
-            api_url=os.getenv("AGENT_MODEL_API_URL", ""),
-            api_key=os.getenv("AGENT_MODEL_API_KEY", ""),
-            model_name=os.getenv("AGENT_MODEL_NAME", ""),
-            max_tokens=int(os.getenv("AGENT_MODEL_MAX_TOKENS", "4096")),
-            thinking_enabled=os.getenv("AGENT_MODEL_THINKING_ENABLED", "false").lower()
-            == "true",
-            thinking_budget_tokens=int(
-                os.getenv("AGENT_MODEL_THINKING_BUDGET_TOKENS", "0")
+            api_url=_coerce_str(
+                _get_value(data, ("models", "agent", "api_url"), "AGENT_MODEL_API_URL"),
+                "",
             ),
-            deepseek_new_cot_support=os.getenv(
-                "AGENT_MODEL_DEEPSEEK_NEW_COT_SUPPORT", "false"
-            ).lower()
-            == "true",
+            api_key=_coerce_str(
+                _get_value(data, ("models", "agent", "api_key"), "AGENT_MODEL_API_KEY"),
+                "",
+            ),
+            model_name=_coerce_str(
+                _get_value(data, ("models", "agent", "model_name"), "AGENT_MODEL_NAME"),
+                "",
+            ),
+            max_tokens=_coerce_int(
+                _get_value(
+                    data, ("models", "agent", "max_tokens"), "AGENT_MODEL_MAX_TOKENS"
+                ),
+                4096,
+            ),
+            thinking_enabled=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "agent", "thinking_enabled"),
+                    "AGENT_MODEL_THINKING_ENABLED",
+                ),
+                False,
+            ),
+            thinking_budget_tokens=_coerce_int(
+                _get_value(
+                    data,
+                    ("models", "agent", "thinking_budget_tokens"),
+                    "AGENT_MODEL_THINKING_BUDGET_TOKENS",
+                ),
+                0,
+            ),
+            deepseek_new_cot_support=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "agent", "deepseek_new_cot_support"),
+                    "AGENT_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+                ),
+                False,
+            ),
         )
 
     @staticmethod
-    def _parse_admin_configs() -> tuple[int, list[int]]:
-        """解析并合并管理员配置"""
-        superadmin_qq = int(os.getenv("SUPERADMIN_QQ", "0"))
-
-        # 解析 .env 中的管理员列表
-        admin_qq_str = os.getenv("ADMIN_QQ", "")
-        env_admins: list[int] = []
-        if admin_qq_str:
-            try:
-                env_admins = [
-                    int(qq.strip()) for qq in admin_qq_str.split(",") if qq.strip()
-                ]
-            except ValueError:
-                raise ValueError("ADMIN_QQ 格式错误，应为逗号分隔的数字")
-
-        # 合并本地配置的管理员
+    def _merge_admins(
+        superadmin_qq: int, admin_qqs: list[int]
+    ) -> tuple[int, list[int]]:
         local_admins = load_local_admins()
-        all_admins = list(set(env_admins + local_admins))
-
-        # 确保超级管理员也在管理员列表中
+        all_admins = list(set(admin_qqs + local_admins))
         if superadmin_qq and superadmin_qq not in all_admins:
             all_admins.append(superadmin_qq)
-
         return superadmin_qq, all_admins
 
     @staticmethod
-    def _parse_log_configs() -> tuple[str, int, int]:
-        """解析日志相关配置"""
-        log_file_path = os.getenv("LOG_FILE_PATH", "logs/bot.log")
-        log_max_size = (
-            int(os.getenv("LOG_MAX_SIZE_MB", "10")) * 1024 * 1024
-        )  # 转换为字节
-        log_backup_count = int(os.getenv("LOG_BACKUP_COUNT", "5"))
-        return log_file_path, log_max_size, log_backup_count
-
-    @staticmethod
-    def _parse_forward_proxy_config() -> Optional[int]:
-        """解析音频转发代理配置"""
-        forward_proxy_qq_str = os.getenv("FORWARD_PROXY_QQ")
-        if forward_proxy_qq_str and forward_proxy_qq_str.strip():
-            try:
-                return int(forward_proxy_qq_str.strip())
-            except ValueError:
-                logger.warning(f"FORWARD_PROXY_QQ 格式错误: {forward_proxy_qq_str}")
-        return None
+    def _verify_required_fields(
+        bot_qq: int,
+        superadmin_qq: int,
+        onebot_ws_url: str,
+        chat_model: ChatModelConfig,
+        vision_model: VisionModelConfig,
+        agent_model: AgentModelConfig,
+    ) -> None:
+        missing: list[str] = []
+        if bot_qq <= 0:
+            missing.append("core.bot_qq")
+        if superadmin_qq <= 0:
+            missing.append("core.superadmin_qq")
+        if not onebot_ws_url:
+            missing.append("onebot.ws_url")
+        if not chat_model.api_url:
+            missing.append("models.chat.api_url")
+        if not chat_model.api_key:
+            missing.append("models.chat.api_key")
+        if not chat_model.model_name:
+            missing.append("models.chat.model_name")
+        if not vision_model.api_url:
+            missing.append("models.vision.api_url")
+        if not vision_model.api_key:
+            missing.append("models.vision.api_key")
+        if not vision_model.model_name:
+            missing.append("models.vision.model_name")
+        if not agent_model.api_url:
+            missing.append("models.agent.api_url")
+        if not agent_model.api_key:
+            missing.append("models.agent.api_key")
+        if not agent_model.model_name:
+            missing.append("models.agent.model_name")
+        if missing:
+            raise ValueError(f"缺少必需配置: {', '.join(missing)}")
 
     @staticmethod
     def _log_debug_info(
@@ -289,7 +798,6 @@ class Config:
         security_model: SecurityModelConfig,
         agent_model: AgentModelConfig,
     ) -> None:
-        """输出调试日志"""
         configs: list[
             tuple[
                 str,
@@ -315,33 +823,35 @@ class Config:
                 getattr(cfg, "deepseek_new_cot_support", False),
             )
 
-    def reload(self) -> None:
-        """热重载配置（重新加载管理员列表等动态配置）"""
-        local_admins = load_local_admins()
-        load_dotenv(override=True)
+    def update_from(self, new_config: "Config") -> dict[str, tuple[Any, Any]]:
+        changes: dict[str, tuple[Any, Any]] = {}
+        for field in fields(self):
+            name = field.name
+            old_value = getattr(self, name)
+            new_value = getattr(new_config, name)
+            if isinstance(
+                old_value,
+                (
+                    ChatModelConfig,
+                    VisionModelConfig,
+                    SecurityModelConfig,
+                    AgentModelConfig,
+                ),
+            ):
+                changes.update(_update_dataclass(old_value, new_value, prefix=name))
+                continue
+            if old_value != new_value:
+                setattr(self, name, new_value)
+                changes[name] = (old_value, new_value)
+        return changes
 
-        admin_qq_str = os.getenv("ADMIN_QQ", "")
-        env_admins: list[int] = []
-        if admin_qq_str:
-            try:
-                env_admins = [
-                    int(qq.strip()) for qq in admin_qq_str.split(",") if qq.strip()
-                ]
-            except ValueError:
-                logger.warning("ADMIN_QQ 格式错误")
-
-        all_admins = list(set(env_admins + local_admins))
-        if self.superadmin_qq and self.superadmin_qq not in all_admins:
-            all_admins.append(self.superadmin_qq)
-
-        self.admin_qqs = all_admins
-        logger.info(f"配置已重载，管理员: {self.admin_qqs}")
+    def reload(self, strict: bool = False) -> dict[str, tuple[Any, Any]]:
+        new_config = Config.load(strict=strict)
+        return self.update_from(new_config)
 
     def add_admin(self, qq: int) -> bool:
-        """添加管理员（保存到本地配置）"""
         if qq in self.admin_qqs:
             return False
-
         self.admin_qqs.append(qq)
         local_admins = load_local_admins()
         if qq not in local_admins:
@@ -350,10 +860,8 @@ class Config:
         return True
 
     def remove_admin(self, qq: int) -> bool:
-        """移除管理员（从本地配置中移除）"""
         if qq == self.superadmin_qq or qq not in self.admin_qqs:
             return False
-
         self.admin_qqs.remove(qq)
         local_admins = load_local_admins()
         if qq in local_admins:
@@ -362,9 +870,24 @@ class Config:
         return True
 
     def is_superadmin(self, qq: int) -> bool:
-        """检查指定 QQ 是否为超级管理员"""
         return qq == self.superadmin_qq
 
     def is_admin(self, qq: int) -> bool:
-        """检查指定 QQ 是否具有管理员权限（包含超级管理员）"""
         return qq in self.admin_qqs
+
+
+def _update_dataclass(
+    old_value: Any, new_value: Any, prefix: str
+) -> dict[str, tuple[Any, Any]]:
+    changes: dict[str, tuple[Any, Any]] = {}
+    if not isinstance(old_value, type(new_value)):
+        changes[prefix] = (old_value, new_value)
+        return changes
+    for field in fields(old_value):
+        name = field.name
+        old_attr = getattr(old_value, name)
+        new_attr = getattr(new_value, name)
+        if old_attr != new_attr:
+            setattr(old_value, name, new_attr)
+            changes[f"{prefix}.{name}"] = (old_attr, new_attr)
+    return changes

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
 import time
 from datetime import datetime
@@ -22,6 +21,8 @@ from Undefined.config import (
     VisionModelConfig,
     AgentModelConfig,
     SecurityModelConfig,
+    Config,
+    get_config,
 )
 from Undefined.token_usage_storage import TokenUsageStorage, TokenUsage
 from Undefined.utils.logging import log_debug_json, redact_string
@@ -71,6 +72,13 @@ _TOOLS_PARAM_INDEX_RE = re.compile(r"Tools\[(\d+)\]", re.IGNORECASE)
 _DEFAULT_TOOLS_DESCRIPTION_PREVIEW_LEN = 160
 
 
+def _get_runtime_config() -> Config | None:
+    try:
+        return get_config(strict=False)
+    except Exception:
+        return None
+
+
 def _split_chat_completion_params(
     body: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -85,23 +93,24 @@ def _split_chat_completion_params(
 
 
 def _tools_sanitize_enabled() -> bool:
-    value = os.getenv("TOOLS_SANITIZE", "false").strip().lower()
-    return value not in {"0", "false", "no"}
+    runtime_config = _get_runtime_config()
+    if runtime_config is not None:
+        return bool(runtime_config.tools_sanitize)
+    return False
 
 
 def _tools_sanitize_verbose() -> bool:
-    value = os.getenv("TOOLS_SANITIZE_VERBOSE", "false").strip().lower()
-    return value in {"1", "true", "yes"}
+    runtime_config = _get_runtime_config()
+    if runtime_config is not None:
+        return bool(runtime_config.tools_sanitize_verbose)
+    return False
 
 
 def _tools_description_max_len() -> int:
-    raw = os.getenv(
-        "TOOLS_DESCRIPTION_MAX_LEN", str(_DEFAULT_TOOLS_DESCRIPTION_MAX_LEN)
-    ).strip()
-    try:
-        value = int(raw)
-    except ValueError:
+    runtime_config = _get_runtime_config()
+    if runtime_config is None:
         return _DEFAULT_TOOLS_DESCRIPTION_MAX_LEN
+    value = runtime_config.tools_description_max_len
     return value if value > 0 else _DEFAULT_TOOLS_DESCRIPTION_MAX_LEN
 
 
@@ -111,15 +120,13 @@ def _clean_control_chars(text: str) -> str:
 
 
 def _desc_preview(text: str) -> str:
-    preview_len_raw = os.getenv(
-        "TOOLS_DESCRIPTION_PREVIEW_LEN", str(_DEFAULT_TOOLS_DESCRIPTION_PREVIEW_LEN)
-    ).strip()
-    try:
-        preview_len = int(preview_len_raw)
-    except ValueError:
+    runtime_config = _get_runtime_config()
+    if runtime_config is None:
         preview_len = _DEFAULT_TOOLS_DESCRIPTION_PREVIEW_LEN
-    if preview_len <= 0:
-        preview_len = _DEFAULT_TOOLS_DESCRIPTION_PREVIEW_LEN
+    else:
+        preview_len = runtime_config.tools_description_preview_len
+        if preview_len <= 0:
+            preview_len = _DEFAULT_TOOLS_DESCRIPTION_PREVIEW_LEN
     return text[:preview_len] + ("…" if len(text) > preview_len else "")
 
 
@@ -642,8 +649,10 @@ class ModelRequester:
             raise
 
     def _thinking_logging_enabled(self) -> bool:
-        value = os.getenv("LOG_THINKING", "true").strip().lower()
-        return value not in {"0", "false", "no"}
+        runtime_config = _get_runtime_config()
+        if runtime_config is None:
+            return True
+        return bool(runtime_config.log_thinking)
 
     def _maybe_log_thinking(
         self, result: dict[str, Any], call_type: str, model_name: str
@@ -721,7 +730,8 @@ class ModelRequester:
         to_json = getattr(response, "to_json", None)
         if callable(to_json):
             try:
-                loaded = json.loads(to_json())
+                raw_json = to_json()
+                loaded = json.loads(str(raw_json))
                 if isinstance(loaded, dict):
                     return loaded
             except Exception:
