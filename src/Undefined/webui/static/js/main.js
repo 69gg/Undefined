@@ -11,6 +11,12 @@ const I18N = {
         "landing.config": "配置修改",
         "landing.logs": "查看日志",
         "landing.about": "关于项目",
+        "theme.light": "浅色",
+        "theme.dark": "深色",
+        "common.loading": "加载中...",
+        "common.error": "发生错误",
+        "common.saved": "已保存",
+        "common.warning": "警告",
         "tabs.landing": "首页",
         "tabs.overview": "运行概览",
         "tabs.config": "配置修改",
@@ -44,16 +50,55 @@ const I18N = {
         "auth.sign_in": "登 录",
         "auth.sign_out": "退出登录",
         "auth.default_password": "默认密码仍在使用，请尽快修改 webui.password 并重启 WebUI。",
+        "auth.signing_in": "登录中...",
+        "auth.login_failed": "登录失败",
+        "auth.unauthorized": "未登录或会话过期",
         "config.title": "配置修改",
         "config.subtitle": "按分类逐项调整配置，保存后自动触发热更新。",
         "config.save": "保存更改",
         "config.reset": "重置更改",
         "config.reset_confirm": "确定要撤销所有本地更改吗？这将从服务器重新加载配置。",
+        "config.search_placeholder": "搜索配置...",
+        "config.clear_search": "清除搜索",
+        "config.expand_all": "全部展开",
+        "config.collapse_all": "全部折叠",
+        "config.expand_section": "展开",
+        "config.collapse_section": "折叠",
+        "config.loading": "正在加载配置...",
+        "config.error": "配置加载失败，请重试。",
+        "config.no_results": "未找到匹配项。",
+        "config.typing": "输入中...",
+        "config.saving": "保存中...",
+        "config.saved": "已保存",
+        "config.save_error": "保存失败",
+        "config.save_network_error": "网络错误",
+        "config.reload_success": "配置已从服务器重新加载。",
+        "config.reload_error": "配置重载失败。",
         "logs.title": "运行日志",
         "logs.subtitle": "实时查看最后 200 行日志输出。",
         "logs.auto": "自动刷新",
         "logs.refresh": "刷新",
         "logs.initializing": "正在连接日志...",
+        "logs.search_placeholder": "搜索日志...",
+        "logs.clear": "清空",
+        "logs.copy": "复制",
+        "logs.download": "下载",
+        "logs.pause": "暂停",
+        "logs.resume": "继续",
+        "logs.jump_bottom": "回到底部",
+        "logs.empty": "暂无日志。",
+        "logs.error": "日志加载失败。",
+        "logs.unauthorized": "未登录，无法读取日志。",
+        "logs.copied": "日志已复制。",
+        "logs.download_ready": "日志已准备下载。",
+        "logs.cleared": "日志已清空。",
+        "logs.paused": "已暂停",
+        "logs.filtered": "已过滤",
+        "logs.level.all": "全部",
+        "logs.level.info": "Info",
+        "logs.level.warn": "Warn",
+        "logs.level.error": "Error",
+        "logs.level.debug": "Debug",
         "about.title": "项目信息",
         "about.subtitle": "关于 Undefined 项目的作者及许可协议。",
         "about.author": "作者",
@@ -70,6 +115,12 @@ const I18N = {
         "landing.config": "Edit Config",
         "landing.logs": "View Logs",
         "landing.about": "About",
+        "theme.light": "Light",
+        "theme.dark": "Dark",
+        "common.loading": "Loading...",
+        "common.error": "An error occurred",
+        "common.saved": "Saved",
+        "common.warning": "Warning",
         "tabs.landing": "Landing",
         "tabs.overview": "Overview",
         "tabs.config": "Configuration",
@@ -103,16 +154,55 @@ const I18N = {
         "auth.sign_in": "Sign In",
         "auth.sign_out": "Sign Out",
         "auth.default_password": "Default password is in use. Please change webui.password and restart.",
+        "auth.signing_in": "Signing in...",
+        "auth.login_failed": "Login failed",
+        "auth.unauthorized": "Unauthorized or session expired",
         "config.title": "Configuration",
         "config.subtitle": "Adjust settings by category. Changes trigger hot reload.",
         "config.save": "Save Changes",
         "config.reset": "Revert Changes",
         "config.reset_confirm": "Are you sure you want to revert all local changes? This will reload the configuration from the server.",
+        "config.search_placeholder": "Search config...",
+        "config.clear_search": "Clear search",
+        "config.expand_all": "Expand all",
+        "config.collapse_all": "Collapse all",
+        "config.expand_section": "Expand",
+        "config.collapse_section": "Collapse",
+        "config.loading": "Loading configuration...",
+        "config.error": "Failed to load configuration.",
+        "config.no_results": "No matching results.",
+        "config.typing": "Typing...",
+        "config.saving": "Saving...",
+        "config.saved": "Saved",
+        "config.save_error": "Save failed",
+        "config.save_network_error": "Network error",
+        "config.reload_success": "Configuration reloaded from server.",
+        "config.reload_error": "Failed to reload configuration.",
         "logs.title": "System Logs",
         "logs.subtitle": "Real-time view of the last 200 log lines.",
         "logs.auto": "Auto Refresh",
         "logs.refresh": "Refresh",
         "logs.initializing": "Initializing log connection...",
+        "logs.search_placeholder": "Search logs...",
+        "logs.clear": "Clear",
+        "logs.copy": "Copy",
+        "logs.download": "Download",
+        "logs.pause": "Pause",
+        "logs.resume": "Resume",
+        "logs.jump_bottom": "Jump to bottom",
+        "logs.empty": "No logs available.",
+        "logs.error": "Failed to load logs.",
+        "logs.unauthorized": "Unauthorized to access logs.",
+        "logs.copied": "Logs copied.",
+        "logs.download_ready": "Logs download ready.",
+        "logs.cleared": "Logs cleared.",
+        "logs.paused": "Paused",
+        "logs.filtered": "Filtered",
+        "logs.level.all": "All",
+        "logs.level.info": "Info",
+        "logs.level.warn": "Warn",
+        "logs.level.error": "Error",
+        "logs.level.debug": "Debug",
         "about.title": "About Project",
         "about.subtitle": "Information about authors and open source licenses.",
         "about.author": "Author",
@@ -125,17 +215,34 @@ const I18N = {
 
 const state = {
     lang: (window.INITIAL_STATE && window.INITIAL_STATE.lang) || getCookie("undefined_lang") || "zh",
+    theme: "light",
     authenticated: false,
     tab: "overview",
     view: window.INITIAL_VIEW || "landing",
     config: {},
     comments: {},
+    configCollapsed: {},
+    configSearch: "",
+    configLoading: false,
+    configLoaded: false,
     bot: { running: false, pid: null, uptime: 0 },
     token: null,
+    logsRaw: "",
+    logSearch: "",
+    logLevel: "all",
+    logsPaused: false,
+    logAutoRefresh: true,
+    logStream: null,
+    logStreamFailed: false,
+    logAtBottom: true,
+    logScrollBound: false,
     logTimer: null,
     statusTimer: null,
     systemTimer: null,
     saveTimer: null,
+    saveStatus: "idle",
+    fetchBackoff: { status: 0, system: 0, logs: 0 },
+    nextFetchAt: { status: 0, system: 0, logs: 0 },
 };
 
 const REFRESH_INTERVALS = {
@@ -149,6 +256,8 @@ const THEME_COLORS = {
     dark: "#0f1112",
 };
 
+const LOG_LEVELS = ["all", "error", "warn", "info", "debug"];
+
 // Utils
 function get(id) { return document.getElementById(id); }
 function t(key) { return I18N[state.lang][key] || key; }
@@ -160,6 +269,17 @@ function escapeHtml(value) {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
+}
+
+function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function setButtonLoading(button, loading) {
+    if (!button) return;
+    button.disabled = loading;
+    button.classList.toggle("is-loading", loading);
+    button.setAttribute("aria-busy", loading ? "true" : "false");
 }
 
 function getCookie(name) {
@@ -184,9 +304,28 @@ function updateI18N() {
         const key = el.getAttribute("data-i18n-placeholder");
         el.placeholder = t(key);
     });
-    get("langToggle").innerText = state.lang === "zh" ? "English" : "中文";
+    updateToggleLabels();
     updateCommentTexts();
+    updateConfigSearchIndex();
+    applyConfigFilter();
+    updateSectionToggleLabels();
     updateLogPlaceholder();
+    updateLogFilterLabels();
+    updateLogPauseLabel();
+    updateSaveStatusText();
+    updateConfigStateLabel();
+    renderLogs();
+}
+
+function updateToggleLabels() {
+    const langLabel = state.lang === "zh" ? "English" : "中文";
+    document.querySelectorAll('[data-action="toggle-lang"]').forEach(btn => {
+        btn.innerText = langLabel;
+    });
+    const themeLabel = state.theme === "dark" ? t("theme.dark") : t("theme.light");
+    document.querySelectorAll('[data-action="toggle-theme"]').forEach(btn => {
+        btn.innerText = themeLabel;
+    });
 }
 
 function updateLogPlaceholder() {
@@ -197,6 +336,63 @@ function updateLogPlaceholder() {
     }
 }
 
+function updateLogFilterLabels() {
+    const select = get("logLevelFilter");
+    if (!select) return;
+    const current = select.value || state.logLevel;
+    while (select.firstChild) {
+        select.removeChild(select.firstChild);
+    }
+    LOG_LEVELS.forEach(level => {
+        const option = document.createElement("option");
+        option.value = level;
+        option.textContent = t(`logs.level.${level}`);
+        select.appendChild(option);
+    });
+    select.value = current || "all";
+    state.logLevel = select.value;
+}
+
+function updateLogPauseLabel() {
+    const button = get("btnPauseLogs");
+    if (!button) return;
+    button.innerText = state.logsPaused ? t("logs.resume") : t("logs.pause");
+}
+
+function updateConfigStateLabel() {
+    const stateEl = get("configState");
+    if (!stateEl) return;
+    const key = stateEl.dataset.i18nState;
+    if (key) {
+        stateEl.innerText = t(key);
+    }
+}
+
+function updateSaveStatusText() {
+    const txt = get("saveStatusText");
+    if (!txt) return;
+    if (state.saveStatus === "saving") {
+        txt.innerText = t("config.saving");
+    } else if (state.saveStatus === "saved") {
+        txt.innerText = t("config.saved");
+    } else if (state.saveStatus === "error") {
+        txt.innerText = t("config.save_error");
+    } else {
+        txt.innerText = t("config.saving");
+    }
+}
+
+function updateSectionToggleLabels() {
+    document.querySelectorAll(".config-card").forEach(card => {
+        const section = card.dataset.section;
+        const toggle = card.querySelector(".config-card-actions button");
+        if (!toggle || !section) return;
+        const collapsed = !!state.configCollapsed[section];
+        toggle.innerText = collapsed ? t("config.expand_section") : t("config.collapse_section");
+        toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    });
+}
+
 function updateThemeColor(theme) {
     const meta = document.getElementById("themeColorMeta");
     if (!meta) return;
@@ -205,9 +401,10 @@ function updateThemeColor(theme) {
 
 function applyTheme(theme) {
     const normalized = theme === "dark" ? "dark" : "light";
+    state.theme = normalized;
     document.documentElement.setAttribute("data-theme", normalized);
     setCookie("undefined_theme", normalized);
-    get("themeToggle").innerText = normalized === "dark" ? "Dark" : "Light";
+    updateToggleLabels();
     updateThemeColor(normalized);
 }
 
@@ -250,6 +447,45 @@ async function api(path, options = {}) {
     return res;
 }
 
+function setConfigState(mode) {
+    const stateEl = get("configState");
+    const grid = get("formSections");
+    if (!stateEl || !grid) return;
+    if (!mode) {
+        stateEl.style.display = "none";
+        stateEl.dataset.i18nState = "";
+        grid.style.display = "grid";
+        return;
+    }
+    const keyMap = {
+        loading: "config.loading",
+        error: "config.error",
+        empty: "config.no_results",
+    };
+    const key = keyMap[mode] || "common.error";
+    stateEl.dataset.i18nState = key;
+    stateEl.innerText = t(key);
+    stateEl.style.display = "block";
+    grid.style.display = mode === "loading" || mode === "error" ? "none" : "grid";
+}
+
+function shouldFetch(kind) {
+    return Date.now() >= (state.nextFetchAt[kind] || 0);
+}
+
+function recordFetchError(kind) {
+    const current = state.fetchBackoff[kind] || 0;
+    const next = Math.min(5, current + 1);
+    state.fetchBackoff[kind] = next;
+    const delay = Math.min(15000, 1000 * Math.pow(2, next));
+    state.nextFetchAt[kind] = Date.now() + delay;
+}
+
+function recordFetchSuccess(kind) {
+    state.fetchBackoff[kind] = 0;
+    state.nextFetchAt[kind] = 0;
+}
+
 function startStatusTimer() {
     if (!state.statusTimer) {
         state.statusTimer = setInterval(fetchStatus, REFRESH_INTERVALS.status);
@@ -290,9 +526,11 @@ function stopLogTimer() {
 }
 
 // Actions
-async function login(pwd, statusId) {
+async function login(pwd, statusId, buttonId) {
     const s = get(statusId);
-    s.innerText = "...";
+    const button = buttonId ? get(buttonId) : null;
+    s.innerText = t("auth.signing_in");
+    setButtonLoading(button, true);
     try {
         const res = await api("/api/login", {
             method: "POST",
@@ -304,11 +542,14 @@ async function login(pwd, statusId) {
             state.authenticated = true;
             await checkSession();
             refreshUI();
+            s.innerText = "";
         } else {
-            s.innerText = data.error || "Login failed";
+            s.innerText = data.error || t("auth.login_failed");
         }
     } catch (e) {
-        s.innerText = e.message;
+        s.innerText = e.message || t("auth.login_failed");
+    } finally {
+        setButtonLoading(button, false);
     }
 }
 
@@ -326,12 +567,16 @@ async function checkSession() {
 }
 
 async function fetchStatus() {
+    if (!shouldFetch("status")) return;
     try {
         const res = await api("/api/status");
         const data = await res.json();
         state.bot = data;
+        recordFetchSuccess("status");
         updateBotUI();
-    } catch (e) { }
+    } catch (e) {
+        recordFetchError("status");
+    }
 }
 
 function updateBotUI() {
@@ -364,11 +609,24 @@ async function botAction(action) {
 }
 
 async function loadConfig() {
-    const res = await api("/api/config/summary");
-    const data = await res.json();
-    state.config = data.data;
-    state.comments = data.comments || {};
-    buildConfigForm();
+    if (state.configLoading) return;
+    state.configLoading = true;
+    state.configLoaded = false;
+    setConfigState("loading");
+    try {
+        const res = await api("/api/config/summary");
+        const data = await res.json();
+        state.config = data.data;
+        state.comments = data.comments || {};
+        state.configLoaded = true;
+        buildConfigForm();
+        setConfigState(null);
+    } catch (e) {
+        setConfigState("error");
+        showToast(t("config.error"), "error", 5000);
+    } finally {
+        state.configLoading = false;
+    }
 }
 
 function getComment(path) {
@@ -387,9 +645,20 @@ function updateCommentTexts() {
     });
 }
 
+function updateConfigSearchIndex() {
+    document.querySelectorAll(".form-group").forEach(group => {
+        const label = group.querySelector(".form-label");
+        const hint = group.querySelector(".form-hint");
+        const path = group.dataset.path || "";
+        const searchText = `${path} ${label ? label.innerText : ""} ${hint ? hint.innerText : ""}`.toLowerCase();
+        group.dataset.searchText = searchText;
+    });
+}
+
 function buildConfigForm() {
     const container = get("formSections");
-    container.innerHTML = "";
+    if (!container) return;
+    container.textContent = "";
 
     // Sort sections by SECTION_ORDER logic (already handled by backend mostly, 
     // but here we render top level keys as cards)
@@ -398,10 +667,31 @@ function buildConfigForm() {
 
         const card = document.createElement("div");
         card.className = "card config-card";
+        card.dataset.section = section;
+        const collapsed = !!state.configCollapsed[section];
+        card.classList.toggle("is-collapsed", collapsed);
 
         const header = document.createElement("div");
         header.className = "config-card-header";
-        header.innerHTML = `<h3 class="form-section-title">${section}</h3>`;
+
+        const title = document.createElement("h3");
+        title.className = "form-section-title";
+        title.textContent = section;
+        header.appendChild(title);
+
+        const actions = document.createElement("div");
+        actions.className = "config-card-actions";
+
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "btn ghost btn-sm";
+        toggle.dataset.section = section;
+        toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        toggle.innerText = collapsed ? t("config.expand_section") : t("config.collapse_section");
+        toggle.addEventListener("click", () => toggleSection(section));
+        actions.appendChild(toggle);
+
+        header.appendChild(actions);
         card.appendChild(header);
 
         const sectionComment = getComment(section);
@@ -453,31 +743,105 @@ function buildConfigForm() {
         }
         container.appendChild(card);
     }
+
+    updateConfigSearchIndex();
+    applyConfigFilter();
+}
+
+function toggleSection(section) {
+    state.configCollapsed[section] = !state.configCollapsed[section];
+    document.querySelectorAll(".config-card").forEach(card => {
+        if (card.dataset.section !== section) return;
+        const collapsed = !!state.configCollapsed[section];
+        card.classList.toggle("is-collapsed", collapsed);
+        const toggle = card.querySelector(".config-card-actions button");
+        if (toggle) {
+            toggle.innerText = collapsed ? t("config.expand_section") : t("config.collapse_section");
+            toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        }
+    });
+}
+
+function setAllSectionsCollapsed(collapsed) {
+    document.querySelectorAll(".config-card").forEach(card => {
+        const section = card.dataset.section;
+        if (!section) return;
+        state.configCollapsed[section] = collapsed;
+        card.classList.toggle("is-collapsed", collapsed);
+        const toggle = card.querySelector(".config-card-actions button");
+        if (toggle) {
+            toggle.innerText = collapsed ? t("config.expand_section") : t("config.collapse_section");
+            toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        }
+    });
+}
+
+function applyConfigFilter() {
+    if (!state.configLoaded) return;
+    const query = state.configSearch.trim().toLowerCase();
+    let matchCount = 0;
+    document.querySelectorAll(".config-card").forEach(card => {
+        let cardMatches = 0;
+        card.querySelectorAll(".form-group").forEach(group => {
+            const haystack = group.dataset.searchText || "";
+            const isMatch = !query || haystack.includes(query);
+            group.classList.toggle("is-hidden", !isMatch);
+            group.classList.toggle("is-match", isMatch && query.length > 0);
+            if (isMatch) cardMatches += 1;
+        });
+        card.querySelectorAll(".form-subsection").forEach(section => {
+            const visible = section.querySelector(".form-group:not(.is-hidden)");
+            section.style.display = visible ? "" : "none";
+        });
+        card.classList.toggle("force-open", query.length > 0);
+        card.classList.toggle("is-hidden", query.length > 0 && cardMatches === 0);
+        matchCount += cardMatches;
+    });
+
+    if (query.length > 0 && matchCount === 0) {
+        setConfigState("empty");
+    } else if (state.configLoaded) {
+        setConfigState(null);
+    }
 }
 
 function showSaveStatus(status, text) {
     const el = get("saveStatus");
     const txt = get("saveStatusText");
+    state.saveStatus = status;
     if (status === "saving") {
         el.style.opacity = "1";
         el.classList.add("active");
-        txt.innerText = text || "Saving...";
+        txt.innerText = text || t("config.saving");
     } else if (status === "saved") {
         el.classList.remove("active");
-        txt.innerText = text || "Saved";
+        txt.innerText = text || t("config.saved");
         setTimeout(() => {
-            if (!state.saveTimer) el.style.opacity = "0";
+            if (!state.saveTimer) {
+                el.style.opacity = "0";
+                state.saveStatus = "idle";
+                updateSaveStatusText();
+            }
         }, 2000);
     } else if (status === "error") {
         el.classList.remove("active");
-        txt.innerText = text || "Error";
+        txt.innerText = text || t("config.save_error");
         el.style.opacity = "1";
     }
+}
+
+function isSensitiveKey(path) {
+    return /(password|token|secret|api_key|apikey|access_key|private_key)/i.test(path);
+}
+
+function isLongText(value) {
+    return typeof value === "string" && (value.length > 80 || value.includes("\n"));
 }
 
 function createField(path, val) {
     const group = document.createElement("div");
     group.className = "form-group";
+    group.dataset.path = path;
 
     const label = document.createElement("label");
     label.className = "form-label";
@@ -493,26 +857,68 @@ function createField(path, val) {
         group.appendChild(hint);
     }
 
+    const searchText = `${path} ${comment || ""}`.toLowerCase();
+    group.dataset.searchText = searchText;
+
     let input;
     if (typeof val === "boolean") {
         const wrapper = document.createElement("label");
         wrapper.className = "toggle-wrapper";
-        wrapper.innerHTML = `
-            <input type="checkbox" class="toggle-input config-input" data-path="${path}" ${val ? "checked" : ""}>
-            <span class="toggle-track"><span class="toggle-handle"></span></span>
-        `;
+        const toggle = document.createElement("input");
+        toggle.type = "checkbox";
+        toggle.className = "toggle-input config-input";
+        toggle.dataset.path = path;
+        toggle.dataset.valueType = "boolean";
+        toggle.checked = Boolean(val);
+        const track = document.createElement("span");
+        track.className = "toggle-track";
+        const handle = document.createElement("span");
+        handle.className = "toggle-handle";
+        track.appendChild(handle);
+        wrapper.appendChild(toggle);
+        wrapper.appendChild(track);
         group.appendChild(wrapper);
-        input = wrapper.querySelector("input");
+        input = toggle;
         input.onchange = () => autoSave();
     } else {
-        input = document.createElement("input");
-        input.className = "form-control config-input";
+        const isArray = Array.isArray(val);
+        const isNumber = typeof val === "number";
+        const isSecret = isSensitiveKey(path);
+
+        if (isLongText(val)) {
+            input = document.createElement("textarea");
+            input.className = "form-control form-textarea config-input";
+            input.value = val || "";
+            input.dataset.valueType = "string";
+        } else {
+            input = document.createElement("input");
+            input.className = "form-control config-input";
+            if (isNumber) {
+                input.type = "number";
+                input.step = "any";
+                input.value = String(val);
+                input.dataset.valueType = "number";
+            } else if (isArray) {
+                input.type = "text";
+                input.value = val.join(", ");
+                input.dataset.valueType = "array";
+                const arrayType = val.every(item => typeof item === "number") ? "number" : "string";
+                input.dataset.arrayType = arrayType;
+            } else {
+                input.type = isSecret ? "password" : "text";
+                input.value = val == null ? "" : String(val);
+                input.dataset.valueType = "string";
+                if (isSecret) {
+                    input.setAttribute("autocomplete", "new-password");
+                }
+            }
+        }
+
         input.dataset.path = path;
-        input.value = Array.isArray(val) ? val.join(", ") : val;
         group.appendChild(input);
         input.oninput = () => {
             if (state.saveTimer) clearTimeout(state.saveTimer);
-            showSaveStatus("saving", "Typing...");
+            showSaveStatus("saving", t("config.typing"));
             state.saveTimer = setTimeout(() => {
                 state.saveTimer = null;
                 autoSave();
@@ -532,12 +938,30 @@ async function autoSave() {
         if (input.type === "checkbox") {
             val = input.checked;
         } else {
-            val = input.value;
-            // Native conversion
-            if (!isNaN(val) && val.trim() !== "") {
-                val = val.includes(".") ? parseFloat(val) : parseInt(val);
-            } else if (val.includes(",")) {
-                val = val.split(",").map(s => s.trim());
+            const raw = input.value;
+            const valueType = input.dataset.valueType || "string";
+            if (valueType === "number") {
+                const trimmed = raw.trim();
+                if (!trimmed) {
+                    val = "";
+                } else {
+                    val = trimmed.includes(".") ? parseFloat(trimmed) : parseInt(trimmed, 10);
+                    if (Number.isNaN(val)) {
+                        val = raw;
+                    }
+                }
+            } else if (valueType === "array") {
+                const items = raw.split(",").map(s => s.trim()).filter(Boolean);
+                if (input.dataset.arrayType === "number") {
+                    val = items.map(item => {
+                        const num = Number(item);
+                        return Number.isNaN(num) ? item : num;
+                    });
+                } else {
+                    val = items;
+                }
+            } else {
+                val = raw;
             }
         }
         patch[path] = val;
@@ -552,15 +976,15 @@ async function autoSave() {
         if (data.success) {
             showSaveStatus("saved");
             if (data.warning) {
-                showToast(`Warning: ${data.warning}`, "warning", 5000);
+                showToast(`${t("common.warning")}: ${data.warning}`, "warning", 5000);
             }
         } else {
-            showSaveStatus("error", "Error saving");
-            showToast(`Error: ${data.error}`, "error", 5000);
+            showSaveStatus("error", t("config.save_error"));
+            showToast(`${t("common.error")}: ${data.error}`, "error", 5000);
         }
     } catch (e) {
-        showSaveStatus("error", "Network Error");
-        showToast(`Error: ${e.message}`, "error", 5000);
+        showSaveStatus("error", t("config.save_network_error"));
+        showToast(`${t("common.error")}: ${e.message}`, "error", 5000);
     }
 }
 
@@ -568,37 +992,240 @@ async function resetConfig() {
     if (!confirm(t("config.reset_confirm"))) return;
     try {
         await loadConfig();
-        showToast("Configuration reloaded from server.", "info");
+        showToast(t("config.reload_success"), "info");
     } catch (e) {
-        showToast("Failed to reload configuration.", "error");
+        showToast(t("config.reload_error"), "error");
     }
 }
 
-async function fetchLogs() {
+async function fetchLogs(force = false) {
+    if (!force && !shouldFetch("logs")) return;
+    const container = get("logContainer");
+    if (container && !state.logsRaw) {
+        container.dataset.placeholder = "true";
+        container.innerText = t("logs.initializing");
+    }
     try {
         const res = await api("/api/logs?lines=200");
         const text = await res.text();
-        const container = get("logContainer");
-        const auto = get("logAutoScroll").checked;
+        state.logsRaw = text || "";
+        recordFetchSuccess("logs");
+        renderLogs();
+    } catch (e) {
+        recordFetchError("logs");
+        if (!container) return;
+        container.dataset.placeholder = "true";
+        container.innerText = e.message === "Unauthorized" ? t("logs.unauthorized") : t("logs.error");
+        updateLogMeta(0, 0);
+    }
+}
 
-        // simple ansi color
-        const escaped = escapeHtml(text);
-        const colored = escaped
-            .replace(/\x1b\[31m/g, '<span class="ansi-red">')
-            .replace(/\x1b\[32m/g, '<span class="ansi-green">')
-            .replace(/\x1b\[33m/g, '<span class="ansi-yellow">')
-            .replace(/\x1b\[34m/g, '<span class="ansi-blue">')
-            .replace(/\x1b\[35m/g, '<span class="ansi-magenta">')
-            .replace(/\x1b\[36m/g, '<span class="ansi-cyan">')
-            .replace(/\x1b\[0m/g, '</span>');
+function parseLogLevel(line) {
+    const lowered = line.toLowerCase();
+    if (/(\berror\b|\bfatal\b|\bexception\b)/i.test(lowered)) return "error";
+    if (/(\bwarn\b|\bwarning\b)/i.test(lowered)) return "warn";
+    if (/(\bdebug\b|\btrace\b)/i.test(lowered)) return "debug";
+    if (/(\binfo\b)/i.test(lowered)) return "info";
+    return "all";
+}
 
-        container.innerHTML = colored;
-        container.dataset.placeholder = "false";
-        if (auto) container.scrollTop = container.scrollHeight;
-    } catch (e) { }
+function filterLogLines(raw) {
+    const lines = raw.split(/\r?\n/);
+    const level = state.logLevel;
+    const query = state.logSearch.trim().toLowerCase();
+    const filtered = lines.filter(line => {
+        if (level !== "all" && parseLogLevel(line) !== level) return false;
+        if (query && !line.toLowerCase().includes(query)) return false;
+        return true;
+    });
+    return {
+        filtered,
+        total: lines.filter(line => line.length > 0).length,
+        matched: filtered.filter(line => line.length > 0).length,
+    };
+}
+
+function formatLogText(text) {
+    if (!text) return "";
+    let escaped = escapeHtml(text);
+    const query = state.logSearch.trim();
+    if (query) {
+        const regex = new RegExp(escapeRegExp(query), "gi");
+        escaped = escaped.replace(regex, '<mark class="log-highlight">$&</mark>');
+    }
+    escaped = escaped.replace(
+        /(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?)/g,
+        '<span class="log-timestamp">$1</span>'
+    );
+    return escaped
+        .replace(/\x1b\[31m/g, '<span class="ansi-red">')
+        .replace(/\x1b\[32m/g, '<span class="ansi-green">')
+        .replace(/\x1b\[33m/g, '<span class="ansi-yellow">')
+        .replace(/\x1b\[34m/g, '<span class="ansi-blue">')
+        .replace(/\x1b\[35m/g, '<span class="ansi-magenta">')
+        .replace(/\x1b\[36m/g, '<span class="ansi-cyan">')
+        .replace(/\x1b\[0m/g, '</span>');
+}
+
+function renderLogs() {
+    const container = get("logContainer");
+    if (!container) return;
+    if (!state.logsRaw) {
+        container.dataset.placeholder = "true";
+        container.innerText = t("logs.empty");
+        state.logAtBottom = true;
+        updateLogJumpButton();
+        updateLogMeta(0, 0);
+        return;
+    }
+
+    const { filtered, total, matched } = filterLogLines(state.logsRaw);
+    if (filtered.length === 0) {
+        container.dataset.placeholder = "true";
+        container.innerText = t("logs.empty");
+        state.logAtBottom = true;
+        updateLogJumpButton();
+        updateLogMeta(total, 0);
+        return;
+    }
+
+    const formatted = formatLogText(filtered.join("\n"));
+    container.innerHTML = formatted;
+    container.dataset.placeholder = "false";
+    if (state.logAutoRefresh && state.logAtBottom) {
+        container.scrollTop = container.scrollHeight;
+    }
+    updateLogJumpButton();
+    updateLogMeta(total, matched);
+}
+
+function updateLogMeta(total, matched) {
+    const meta = get("logMeta");
+    if (!meta) return;
+    const parts = [];
+    if (state.logsPaused) {
+        parts.push(t("logs.paused"));
+    }
+    if (state.logLevel !== "all" || state.logSearch.trim()) {
+        const stats = total > 0 ? `${matched}/${total}` : "0/0";
+        parts.push(`${t("logs.filtered")}: ${stats}`);
+    }
+    meta.innerText = parts.join(" | ");
+}
+
+function updateLogJumpButton() {
+    const button = get("btnJumpLogs");
+    if (!button) return;
+    button.style.display = state.logAtBottom ? "none" : "inline-flex";
+}
+
+function bindLogScroll() {
+    if (state.logScrollBound) return;
+    const container = get("logContainer");
+    if (!container) return;
+    container.addEventListener("scroll", () => {
+        const threshold = 24;
+        state.logAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+        updateLogJumpButton();
+    });
+    state.logScrollBound = true;
+    updateLogJumpButton();
+}
+
+function startLogStream() {
+    if (state.logStream || state.logStreamFailed || !window.EventSource) return false;
+    state.logStreamFailed = false;
+    const stream = new EventSource("/api/logs/stream");
+    state.logStream = stream;
+
+    stream.onmessage = (event) => {
+        state.logsRaw = event.data || "";
+        recordFetchSuccess("logs");
+        renderLogs();
+    };
+
+    stream.onerror = () => {
+        state.logStreamFailed = true;
+        stopLogStream();
+        if (state.logAutoRefresh && !state.logsPaused) {
+            startLogTimer();
+        }
+    };
+
+    return true;
+}
+
+function stopLogStream() {
+    if (state.logStream) {
+        state.logStream.close();
+        state.logStream = null;
+    }
+}
+
+function updateLogRefreshState() {
+    if (state.view !== "app" || state.tab !== "logs" || document.hidden || !state.authenticated) {
+        stopLogStream();
+        stopLogTimer();
+        return;
+    }
+    if (state.logsPaused || !state.logAutoRefresh) {
+        stopLogStream();
+        stopLogTimer();
+        return;
+    }
+    if (startLogStream()) {
+        stopLogTimer();
+        return;
+    }
+    startLogTimer();
+}
+
+async function copyLogsToClipboard() {
+    const text = state.logsRaw || "";
+    if (!text) {
+        showToast(t("logs.empty"), "info");
+        return;
+    }
+    try {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+        } else {
+            const textarea = document.createElement("textarea");
+            textarea.value = text;
+            textarea.style.position = "fixed";
+            textarea.style.opacity = "0";
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            document.execCommand("copy");
+            textarea.remove();
+        }
+        showToast(t("logs.copied"), "success");
+    } catch (e) {
+        showToast(`${t("common.error")}: ${e.message}`, "error");
+    }
+}
+
+function downloadLogs() {
+    const text = state.logsRaw || "";
+    if (!text) {
+        showToast(t("logs.empty"), "info");
+        return;
+    }
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `undefined-logs-${new Date().toISOString().replace(/[:.]/g, "-")}.log`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    showToast(t("logs.download_ready"), "info");
 }
 
 async function fetchSystemInfo() {
+    if (!shouldFetch("system")) return;
     try {
         const res = await api("/api/system");
         const data = await res.json();
@@ -622,7 +1249,10 @@ async function fetchSystemInfo() {
         const memBar = get("systemMemoryBar");
         cpuBar.style.width = `${Math.min(100, Math.max(0, cpuUsage))}%`;
         memBar.style.width = `${Math.min(100, Math.max(0, memUsage))}%`;
-    } catch (e) { }
+        recordFetchSuccess("system");
+    } catch (e) {
+        recordFetchError("system");
+    }
 }
 
 // UI Controllers
@@ -635,10 +1265,13 @@ function refreshUI() {
         if (state.authenticated) {
             get("appLoginBox").style.display = "none";
             get("appContent").style.display = "block";
-            loadConfig();
+            if (!state.configLoaded) {
+                loadConfig();
+            }
         } else {
             get("appLoginBox").style.display = "block";
             get("appContent").style.display = "none";
+            state.configLoaded = false;
         }
     }
 
@@ -653,8 +1286,11 @@ function refreshUI() {
 
     if (state.view !== "app" || !state.authenticated) {
         stopSystemTimer();
+        stopLogStream();
         stopLogTimer();
     }
+
+    updateLogRefreshState();
 }
 
 function switchTab(tab) {
@@ -677,10 +1313,13 @@ function switchTab(tab) {
 
     if (tab === "logs") {
         if (!document.hidden) {
-            startLogTimer();
-            fetchLogs();
+            updateLogRefreshState();
+            if (!state.logsPaused) {
+                fetchLogs(true);
+            }
         }
     } else {
+        stopLogStream();
         stopLogTimer();
     }
 }
@@ -690,11 +1329,20 @@ async function init() {
     state.token = localStorage.getItem("undefined_token");
 
     // Bind Landing
-    get("langToggle").onclick = () => {
-        state.lang = state.lang === "zh" ? "en" : "zh";
-        setCookie("undefined_lang", state.lang);
-        updateI18N();
-    };
+    document.querySelectorAll('[data-action="toggle-lang"]').forEach(btn => {
+        btn.addEventListener("click", () => {
+            state.lang = state.lang === "zh" ? "en" : "zh";
+            setCookie("undefined_lang", state.lang);
+            updateI18N();
+        });
+    });
+
+    document.querySelectorAll('[data-action="toggle-theme"]').forEach(btn => {
+        btn.addEventListener("click", () => {
+            const next = state.theme === "dark" ? "light" : "dark";
+            applyTheme(next);
+        });
+    });
 
     document.querySelectorAll('[data-action="open-app"]').forEach(el => {
         el.onclick = () => {
@@ -721,8 +1369,21 @@ async function init() {
         botAction("stop");
     };
 
-    get("landingLoginBtn").onclick = () => login(get("landingPasswordInput").value, "landingLoginStatus");
-    get("appLoginBtn").onclick = () => login(get("appPasswordInput").value, "appLoginStatus");
+    get("landingLoginBtn").onclick = () =>
+        login(get("landingPasswordInput").value, "landingLoginStatus", "landingLoginBtn");
+    get("appLoginBtn").onclick = () =>
+        login(get("appPasswordInput").value, "appLoginStatus", "appLoginBtn");
+
+    get("landingPasswordInput").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            login(get("landingPasswordInput").value, "landingLoginStatus", "landingLoginBtn");
+        }
+    });
+    get("appPasswordInput").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            login(get("appPasswordInput").value, "appLoginStatus", "appLoginBtn");
+        }
+    });
 
     // Bind App
     document.querySelectorAll(".nav-item").forEach(el => {
@@ -736,11 +1397,145 @@ async function init() {
                 switchTab(tab);
             }
         });
+        el.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                el.click();
+            }
+        });
     });
 
-    get("btnResetConfig").onclick = resetConfig;
-    get("btnRefreshLogs").onclick = fetchLogs;
-    get("btnRefreshOverview").onclick = fetchSystemInfo;
+    const resetBtn = get("btnResetConfig");
+    if (resetBtn) resetBtn.onclick = resetConfig;
+
+    const refreshLogsBtn = get("btnRefreshLogs");
+    if (refreshLogsBtn) {
+        refreshLogsBtn.onclick = async () => {
+            state.logStreamFailed = false;
+            setButtonLoading(refreshLogsBtn, true);
+            try {
+                await fetchLogs(true);
+            } finally {
+                setButtonLoading(refreshLogsBtn, false);
+            }
+        };
+    }
+
+    const refreshOverviewBtn = get("btnRefreshOverview");
+    if (refreshOverviewBtn) {
+        refreshOverviewBtn.onclick = async () => {
+            setButtonLoading(refreshOverviewBtn, true);
+            try {
+                await fetchSystemInfo();
+            } finally {
+                setButtonLoading(refreshOverviewBtn, false);
+            }
+        };
+    }
+
+    const pauseLogsBtn = get("btnPauseLogs");
+    if (pauseLogsBtn) {
+        pauseLogsBtn.onclick = () => {
+            state.logsPaused = !state.logsPaused;
+            pauseLogsBtn.innerText = state.logsPaused ? t("logs.resume") : t("logs.pause");
+            renderLogs();
+            updateLogRefreshState();
+            if (!state.logsPaused) {
+                state.logStreamFailed = false;
+                fetchLogs(true);
+            }
+        };
+    }
+
+    const logAutoRefresh = get("logAutoScroll");
+    if (logAutoRefresh) {
+        state.logAutoRefresh = logAutoRefresh.checked;
+        logAutoRefresh.onchange = () => {
+            state.logAutoRefresh = logAutoRefresh.checked;
+            if (state.logAutoRefresh) {
+                state.logStreamFailed = false;
+                if (!state.logsPaused) {
+                    fetchLogs(true);
+                }
+            }
+            updateLogRefreshState();
+        };
+    }
+
+    const logLevelFilter = get("logLevelFilter");
+    if (logLevelFilter) {
+        logLevelFilter.onchange = () => {
+            state.logLevel = logLevelFilter.value || "all";
+            renderLogs();
+        };
+    }
+
+    const logSearchInput = get("logSearchInput");
+    if (logSearchInput) {
+        logSearchInput.addEventListener("input", () => {
+            state.logSearch = logSearchInput.value || "";
+            renderLogs();
+        });
+    }
+
+    const logClearBtn = get("btnClearLogs");
+    if (logClearBtn) {
+        logClearBtn.onclick = () => {
+            state.logsRaw = "";
+            renderLogs();
+            showToast(t("logs.cleared"), "info");
+        };
+    }
+
+    const logCopyBtn = get("btnCopyLogs");
+    if (logCopyBtn) {
+        logCopyBtn.onclick = copyLogsToClipboard;
+    }
+
+    const logDownloadBtn = get("btnDownloadLogs");
+    if (logDownloadBtn) {
+        logDownloadBtn.onclick = downloadLogs;
+    }
+
+    const logJumpBtn = get("btnJumpLogs");
+    if (logJumpBtn) {
+        logJumpBtn.onclick = () => {
+            const container = get("logContainer");
+            if (container) {
+                container.scrollTop = container.scrollHeight;
+                state.logAtBottom = true;
+                updateLogJumpButton();
+            }
+        };
+    }
+
+    const configSearchInput = get("configSearchInput");
+    if (configSearchInput) {
+        configSearchInput.addEventListener("input", () => {
+            state.configSearch = configSearchInput.value || "";
+            applyConfigFilter();
+        });
+    }
+
+    const configSearchClear = get("configSearchClear");
+    if (configSearchClear && configSearchInput) {
+        configSearchClear.onclick = () => {
+            configSearchInput.value = "";
+            state.configSearch = "";
+            applyConfigFilter();
+            configSearchInput.focus();
+        };
+    }
+
+    const expandAllBtn = get("btnExpandAll");
+    if (expandAllBtn) {
+        expandAllBtn.onclick = () => setAllSectionsCollapsed(false);
+    }
+
+    const collapseAllBtn = get("btnCollapseAll");
+    if (collapseAllBtn) {
+        collapseAllBtn.onclick = () => setAllSectionsCollapsed(true);
+    }
     get("logoutBtn").onclick = () => {
         setToken(null);
         state.authenticated = false;
@@ -752,11 +1547,6 @@ async function init() {
         state.authenticated = false;
         state.view = "landing";
         refreshUI();
-    };
-
-    get("themeToggle").onclick = () => {
-        const t = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
-        applyTheme(t);
     };
 
     // Initial data
@@ -779,6 +1569,7 @@ async function init() {
         if (document.hidden) {
             stopStatusTimer();
             stopSystemTimer();
+            stopLogStream();
             stopLogTimer();
             return;
         }
@@ -789,12 +1580,15 @@ async function init() {
             fetchSystemInfo();
         }
         if (state.view === "app" && state.tab === "logs") {
-            startLogTimer();
-            fetchLogs();
+            updateLogRefreshState();
+            if (!state.logsPaused) {
+                fetchLogs(true);
+            }
         }
     });
 
     refreshUI();
+    bindLogScroll();
     fetchStatus();
     if (!document.hidden) {
         startStatusTimer();

@@ -110,6 +110,20 @@ def _read_memory_info() -> tuple[float, float, float] | None:
     return total_gb, used_gb, usage
 
 
+def _resolve_log_path() -> Path:
+    log_path = Path("logs/bot.log")
+    try:
+        if CONFIG_PATH.exists():
+            with open(CONFIG_PATH, "rb") as f:
+                cfg = tomllib.load(f)
+            path_str = cfg.get("logging", {}).get("file_path")
+            if path_str:
+                log_path = Path(path_str)
+    except Exception:
+        pass
+    return log_path
+
+
 # Global instances (injected via app, but for routes simplicity using global here/app context is better)
 # For simplicity in this functional refactor, we will attach them to app['bot'] etc.
 
@@ -356,25 +370,47 @@ async def logs_handler(request: web.Request) -> Response:
         return web.json_response({"error": "Unauthorized"}, status=401)
 
     lines = int(request.query.get("lines", "200"))
-    # Load log path from config or default
-    # For now, simplistic reading. Ideally, read from loaded Config.
-    # Assuming standard log path or parsing config.toml again (expensive)
-    # Let's simple-parse config.toml for log path or use default
-    log_path = Path("logs/bot.log")  # Default
-
-    # Try to peek config
-    try:
-        if CONFIG_PATH.exists():
-            with open(CONFIG_PATH, "rb") as f:
-                cfg = tomllib.load(f)
-                path_str = cfg.get("logging", {}).get("file_path")
-                if path_str:
-                    log_path = Path(path_str)
-    except Exception:
-        pass
-
+    log_path = _resolve_log_path()
     content = tail_file(log_path, lines)
     return web.Response(text=content)
+
+
+@routes.get("/api/logs/stream")
+async def logs_stream_handler(request: web.Request) -> web.StreamResponse:
+    if not check_auth(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+
+    lines = int(request.query.get("lines", "200"))
+    log_path = _resolve_log_path()
+
+    headers = {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+    }
+    resp = web.StreamResponse(status=200, reason="OK", headers=headers)
+    await resp.prepare(request)
+
+    last_payload: str | None = None
+    try:
+        while True:
+            payload = tail_file(log_path, lines)
+            if payload != last_payload:
+                data = "\n".join(f"data: {line}" for line in payload.splitlines())
+                await resp.write((data + "\n\n").encode("utf-8"))
+                last_payload = payload
+            await asyncio.sleep(1)
+    except asyncio.CancelledError:
+        raise
+    except (ConnectionResetError, RuntimeError):
+        pass
+    finally:
+        try:
+            await resp.write_eof()
+        except Exception:
+            pass
+
+    return resp
 
 
 @routes.get("/api/system")

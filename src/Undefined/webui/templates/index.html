@@ -35,8 +35,8 @@
                 <span data-i18n="landing.title">Undefined Console</span>
             </div>
             <div class="header-actions">
-                <button id="langToggle" class="btn">中文</button>
-                <button id="themeToggle" class="btn">Light</button>
+                <button class="btn" data-action="toggle-lang">中文</button>
+                <button class="btn" data-action="toggle-theme">Light</button>
             </div>
         </header>
         <main class="landing-hero">
@@ -94,24 +94,28 @@
                 <span>Undefined</span>
             </div>
             <ul class="nav-links">
-                <li class="nav-item" data-view="landing" data-i18n="tabs.landing">
+                <li class="nav-item" data-view="landing" data-i18n="tabs.landing" role="button" tabindex="0">
                     Landing
                 </li>
-                <li class="nav-item active" data-tab="overview" data-i18n="tabs.overview">
+                <li class="nav-item active" data-tab="overview" data-i18n="tabs.overview" role="button" tabindex="0">
                     Overview
                 </li>
-                <li class="nav-item" data-tab="config" data-i18n="tabs.config">
+                <li class="nav-item" data-tab="config" data-i18n="tabs.config" role="button" tabindex="0">
                     Configuration
                 </li>
-                <li class="nav-item" data-tab="logs" data-i18n="tabs.logs">
+                <li class="nav-item" data-tab="logs" data-i18n="tabs.logs" role="button" tabindex="0">
                     Logs
                 </li>
-                <li class="nav-item" data-tab="about" data-i18n="tabs.about">
+                <li class="nav-item" data-tab="about" data-i18n="tabs.about" role="button" tabindex="0">
                     About
                 </li>
             </ul>
             <div class="sidebar-footer">
                 <div id="navFooter" class="muted-sm">--</div>
+                <div class="sidebar-footer-actions">
+                    <button class="btn btn-sm" data-action="toggle-lang">中文</button>
+                    <button class="btn btn-sm" data-action="toggle-theme">Light</button>
+                </div>
                 <button id="logoutBtn" class="btn danger-link" data-i18n="auth.sign_out">Sign Out</button>
             </div>
         </aside>
@@ -147,7 +151,11 @@
                         <button class="nav-item" data-tab="logs" data-i18n="tabs.logs">Logs</button>
                         <button class="nav-item" data-tab="about" data-i18n="tabs.about">About</button>
                     </div>
-                    <button id="mobileLogoutBtn" class="btn danger btn-sm" data-i18n="auth.sign_out">Sign Out</button>
+                    <div class="mobile-actions">
+                        <button class="btn ghost btn-sm" data-action="toggle-lang">中文</button>
+                        <button class="btn ghost btn-sm" data-action="toggle-theme">Light</button>
+                        <button id="mobileLogoutBtn" class="btn danger btn-sm" data-i18n="auth.sign_out">Sign Out</button>
+                    </div>
                 </div>
 
                 <!-- Tab Overview -->
@@ -232,10 +240,25 @@
                                 <span id="saveStatusText">Saving...</span>
                             </div>
                         </div>
-                        <div class="toolbar">
-                            <button id="btnResetConfig" class="btn ghost" data-i18n="config.reset">重置更改</button>
+                        <div class="toolbar config-toolbar">
+                            <div class="toolbar-group">
+                                <div class="search-group">
+                                    <input id="configSearchInput" type="search" class="form-control form-control-sm"
+                                        data-i18n-placeholder="config.search_placeholder" placeholder="Search config..." />
+                                    <button id="configSearchClear" class="btn ghost btn-sm"
+                                        data-i18n="config.clear_search">清除</button>
+                                </div>
+                            </div>
+                            <div class="toolbar-group">
+                                <button id="btnExpandAll" class="btn ghost btn-sm"
+                                    data-i18n="config.expand_all">全部展开</button>
+                                <button id="btnCollapseAll" class="btn ghost btn-sm"
+                                    data-i18n="config.collapse_all">全部折叠</button>
+                                <button id="btnResetConfig" class="btn ghost" data-i18n="config.reset">重置更改</button>
+                            </div>
                         </div>
                     </div>
+                    <div id="configState" class="empty-state" style="display:none;"></div>
                     <div id="formSections" class="form-grid"></div>
                 </section>
 
@@ -252,10 +275,21 @@
                                 <input type="checkbox" id="logAutoScroll" class="toggle-input" checked>
                                 <span class="toggle-track"><span class="toggle-handle"></span></span>
                             </label>
-                            <button id="btnRefreshLogs" class="btn" data-i18n="logs.refresh">刷新</button>
+                            <button id="btnPauseLogs" class="btn btn-sm" data-i18n="logs.pause">暂停</button>
+                            <button id="btnRefreshLogs" class="btn btn-sm" data-i18n="logs.refresh">刷新</button>
+                            <select id="logLevelFilter" class="form-control form-control-sm" aria-label="Log level">
+                            </select>
+                            <input id="logSearchInput" type="search" class="form-control form-control-sm"
+                                data-i18n-placeholder="logs.search_placeholder" placeholder="搜索日志" />
+                            <button id="btnClearLogs" class="btn ghost btn-sm" data-i18n="logs.clear">清空</button>
+                            <button id="btnCopyLogs" class="btn ghost btn-sm" data-i18n="logs.copy">复制</button>
+                            <button id="btnDownloadLogs" class="btn ghost btn-sm" data-i18n="logs.download">下载</button>
+                            <button id="btnJumpLogs" class="btn ghost btn-sm" data-i18n="logs.jump_bottom">回到底部</button>
                         </div>
                     </div>
-                    <div class="log-viewer" id="logContainer" data-placeholder="true">Initializing log connection...</div>
+                    <div class="log-meta" id="logMeta"></div>
+                    <div class="log-viewer" id="logContainer" data-placeholder="true" aria-live="off"
+                        aria-label="System logs">Initializing log connection...</div>
                 </section>
 
                 <!-- Tab About -->
