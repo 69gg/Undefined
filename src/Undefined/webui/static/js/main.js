@@ -456,7 +456,7 @@ function setConfigState(mode) {
     if (!mode) {
         stateEl.style.display = "none";
         stateEl.dataset.i18nState = "";
-        grid.style.display = "grid";
+        grid.style.display = "block";
         return;
     }
     const keyMap = {
@@ -468,7 +468,7 @@ function setConfigState(mode) {
     stateEl.dataset.i18nState = key;
     stateEl.innerText = t(key);
     stateEl.style.display = "block";
-    grid.style.display = mode === "loading" || mode === "error" ? "none" : "grid";
+    grid.style.display = mode === "loading" || mode === "error" ? "none" : "block";
 }
 
 function shouldFetch(kind) {

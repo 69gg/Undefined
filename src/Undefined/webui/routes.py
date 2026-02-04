@@ -394,6 +394,8 @@ async def logs_stream_handler(request: web.Request) -> web.StreamResponse:
     last_payload: str | None = None
     try:
         while True:
+            if request.transport is None or request.transport.is_closing():
+                break
             payload = tail_file(log_path, lines)
             if payload != last_payload:
                 data = "\n".join(f"data: {line}" for line in payload.splitlines())
@@ -401,7 +403,7 @@ async def logs_stream_handler(request: web.Request) -> web.StreamResponse:
                 last_payload = payload
             await asyncio.sleep(1)
     except asyncio.CancelledError:
-        raise
+        logger.debug("[WebUI] logs stream cancelled")
     except (ConnectionResetError, RuntimeError):
         pass
     finally:
