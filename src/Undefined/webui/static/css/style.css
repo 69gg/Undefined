@@ -301,6 +301,7 @@ body {
   padding: 40px 60px;
   overflow-y: auto;
   max-width: 1400px;
+  scrollbar-gutter: stable;
 }
 
 .header {
@@ -829,10 +830,14 @@ body {
   font-size: 12px;
   color: var(--text-tertiary);
   margin-bottom: 10px;
+  min-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .log-meta:empty {
-  display: none;
+  visibility: hidden;
 }
 
 .log-highlight {
