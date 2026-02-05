@@ -124,7 +124,7 @@ graph TB
         end
         
         subgraph IOLayer["异步 IO 层 (src/Undefined/utils/)"]
-            IOUtils["IO 工具<br/>[io.py]<br/>• write_json<br/>• read_json<br/>• append_line<br/>• 文件锁 (flock)"]
+        IOUtils["IO 工具<br/>[io.py]<br/>• write_json<br/>• read_json<br/>• append_line<br/>• 文件锁 (flock/msvcrt)"]
             SchedulerUtils["调度器工具<br/>[scheduler.py]<br/>• crontab 解析"]
             CacheUtils["缓存工具<br/>[cache.py]<br/>• 定期清理"]
             SenderUtils["Sender 工具<br/>[sender.py]"]
@@ -656,7 +656,7 @@ graph LR
 4. **AI 核心能力层**：AIClient (client.py)、PromptBuilder (prompts.py)、ModelRequester (llm.py)、ToolManager (tooling.py)、MultimodalAnalyzer (multimodal.py)、SummaryService (summaries.py)、TokenCounter (tokens.py)
 5. **存储与上下文层**：MessageHistoryManager (utils/history.py, 10000条限制)、MemoryStorage (memory.py, 500条上限)、EndSummaryStorage、FAQStorage、ScheduledTaskStorage、TokenUsageStorage (自动归档)
 6. **技能系统层**：ToolRegistry (registry.py)、AgentRegistry、6个 Agents (共64个工具)、7类 Toolsets
-7. **异步 IO 层**：统一 IO 工具 (utils/io.py)，包含 write_json、read_json、append_line、文件锁 (flock)
+7. **异步 IO 层**：统一 IO 工具 (utils/io.py)，包含 write_json、read_json、append_line、跨平台文件锁 (flock/msvcrt)
 8. **数据持久化层**：历史数据目录、FAQ 目录、Token 归档目录、记忆文件、总结文件、定时任务文件
 
 ### "车站-列车" 队列模型
@@ -689,7 +689,7 @@ graph LR
 ### 统一 IO 层与异步存储
 
 -   **统一 IO 工具** (`src/Undefined/utils/io.py`)：任何涉及磁盘读写的操作（JSON 读写、行追加）都必须通过该层，内部使用 `asyncio.to_thread` 将阻塞调用移出主线程。
--   **内核级文件锁**：引入 `flock` 机制。在高并发写入 Token 记录或记忆时，系统会自动进行排队并保持原子性，避免文件损坏或主循环假死。
+-   **内核级文件锁**：引入跨平台文件锁 (Linux/macOS 使用 `flock`，Windows 使用 `msvcrt`)。在高并发写入 Token 记录或记忆时，系统会自动进行排队并保持原子性，避免文件损坏或主循环假死。
 -   **存储组件异步化**：所有核心存储类（Memory, FAQ, Tasks）现已全面提供异步接口，确保机器人响应不受磁盘延迟影响。
 
 ---

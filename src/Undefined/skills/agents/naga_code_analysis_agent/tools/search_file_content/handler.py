@@ -1,4 +1,4 @@
-import subprocess
+import re
 from pathlib import Path
 from typing import Any, Dict
 
@@ -24,24 +24,41 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not str(full_path).startswith(str(base_path)):
         return "权限不足：只能在当前工作目录下搜索"
 
-    cmd = ["grep", "-rn", pattern, str(full_path)]
-    if include:
-        cmd.extend(["--include", include])
+    if not pattern:
+        return "未提供搜索模式"
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        regex = re.compile(pattern)
+    except re.error:
+        return f"无效的正则表达式: {pattern}"
 
-        if result.returncode == 0:
-            output = result.stdout
-            lines = output.split("\n")[:50]
-            return "\n".join(lines)
-        else:
+    def iter_files(root: Path) -> list[Path]:
+        if root.is_file():
+            return [root]
+        return [p for p in root.rglob("*") if p.is_file()]
+
+    def include_match(path: Path) -> bool:
+        if not include:
+            return True
+        return path.match(include) or path.name == include
+
+    matches: list[str] = []
+    try:
+        for file_path in iter_files(full_path):
+            if not include_match(file_path):
+                continue
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                    for idx, line in enumerate(f, start=1):
+                        if regex.search(line):
+                            rel = file_path.relative_to(base_path).as_posix()
+                            matches.append(f"{rel}:{idx}:{line.rstrip()}")
+                            if len(matches) >= 50:
+                                return "\n".join(matches)
+            except OSError:
+                continue
+        if not matches:
             return f"未找到匹配: {pattern}"
-
-    except subprocess.TimeoutExpired:
-        return "工具执行超时: search_file_content"
+        return "\n".join(matches)
+    except Exception:
+        return "工具执行出错: search_file_content"

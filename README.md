@@ -331,6 +331,8 @@ uv run Undefined
 uv run Undefined-webui
 ```
 
+> 提示：资源文件已随包发布，支持在非项目根目录启动；如需自定义 `res/` 或 `img/` 内容，请保持目录结构不变。
+
 ### 配置说明
 
 在 `config.toml` 文件中配置以下核心参数（示例见 `config.toml.example`）：

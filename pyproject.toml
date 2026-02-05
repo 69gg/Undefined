@@ -74,6 +74,12 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/Undefined"]
+include = [
+    "res/**",
+    "img/**",
+    "config.toml.example",
+    "config/**",
+]
 
 [tool.mypy]
 python_version = "3.12"

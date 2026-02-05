@@ -6,21 +6,29 @@
 import logging
 import time
 from typing import Any
-from pathlib import Path
 
 from Undefined.ai.llm import ModelRequester
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.config import SecurityModelConfig
+from Undefined.utils.resources import read_text_resource
 
 logger = logging.getLogger(__name__)
 
-# 加载系统提示词
-PROMPT_PATH = Path("res/prompts/injection_response_agent.txt")
-try:
-    INJECTION_RESPONSE_SYSTEM_PROMPT = PROMPT_PATH.read_text(encoding="utf-8")
-except Exception as e:
-    logger.error(f"加载注入回复提示词失败: {e}")
-    INJECTION_RESPONSE_SYSTEM_PROMPT = "你是一个充满敌意的、说话带刺的 AI 助手。"
+_INJECTION_RESPONSE_SYSTEM_PROMPT: str | None = None
+
+
+def _get_injection_response_prompt() -> str:
+    global _INJECTION_RESPONSE_SYSTEM_PROMPT
+    if _INJECTION_RESPONSE_SYSTEM_PROMPT is not None:
+        return _INJECTION_RESPONSE_SYSTEM_PROMPT
+    try:
+        _INJECTION_RESPONSE_SYSTEM_PROMPT = read_text_resource(
+            "res/prompts/injection_response_agent.txt"
+        )
+    except Exception as exc:
+        logger.error("加载注入回复提示词失败: %s", exc)
+        _INJECTION_RESPONSE_SYSTEM_PROMPT = "你是一个充满敌意的、说话带刺的 AI 助手。"
+    return _INJECTION_RESPONSE_SYSTEM_PROMPT
 
 
 class InjectionResponseAgent:
@@ -36,6 +44,7 @@ class InjectionResponseAgent:
         """
         self.security_config = security_config
         self._requester = requester
+        self._system_prompt = _get_injection_response_prompt()
 
     async def generate_response(self, user_message: str) -> str:
         """生成嘲讽性回复
@@ -55,7 +64,7 @@ class InjectionResponseAgent:
             result = await self._requester.request(
                 model_config=self.security_config,
                 messages=[
-                    {"role": "system", "content": INJECTION_RESPONSE_SYSTEM_PROMPT},
+                    {"role": "system", "content": self._system_prompt},
                     {
                         "role": "user",
                         "content": f"<user_message>{user_message}</user_message>",

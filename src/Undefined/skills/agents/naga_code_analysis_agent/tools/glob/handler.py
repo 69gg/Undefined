@@ -1,4 +1,3 @@
-import subprocess
 from pathlib import Path
 from typing import Any, Dict
 
@@ -11,28 +10,24 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     base_path = context.get("base_path", Path.cwd() / "code" / "NagaAgent")
     base_path = Path(base_path).resolve()
 
-    path = str(base_path)
-
-    cmd = ["find", path, "-type", "f", "-name", pattern]
+    if not pattern:
+        return "未提供匹配模式"
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        matches: list[str] = []
+        for candidate in base_path.rglob(pattern):
+            if not candidate.is_file():
+                continue
+            try:
+                matches.append(str(candidate.relative_to(base_path)))
+            except ValueError:
+                continue
 
-        if result.returncode == 0:
-            files = result.stdout.strip().split("\n")
-            relative_files = [str(Path(f).relative_to(base_path)) for f in files if f]
-            if len(relative_files) > 100:
-                relative_files = relative_files[:100] + [
-                    f"... 还有 {len(relative_files) - 100} 个文件"
-                ]
-            return "\n".join(relative_files)
-        else:
+        if not matches:
             return f"未找到匹配的文件: {pattern}"
 
-    except subprocess.TimeoutExpired:
-        return "工具执行超时: glob"
+        if len(matches) > 100:
+            matches = matches[:100] + [f"... 还有 {len(matches) - 100} 个文件"]
+        return "\n".join(matches)
+    except Exception:
+        return "工具执行出错: glob"

@@ -3,10 +3,13 @@
 import asyncio
 import json
 import logging
-import fcntl
+import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Optional
+
+from Undefined.utils.file_lock import FileLock
 
 logger = logging.getLogger(__name__)
 
@@ -28,21 +31,36 @@ async def write_json(file_path: Path | str, data: Any, use_lock: bool = True) ->
         f"[IO] 写入JSON: path={p}, use_lock={use_lock}, size_estimate={data_size} chars"
     )
 
+    def lock_path_for(target: Path) -> Path:
+        return target.with_name(f"{target.name}.lock")
+
     def sync_write() -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
-        # 用 "w" 模式打开
-        with open(p, "w", encoding="utf-8") as f:
-            if use_lock:
-                logger.debug(f"[IO] 获取排他锁: path={p}")
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+
+        def atomic_write() -> None:
+            tmp_path: Path | None = None
             try:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-                # 显式刷新到磁盘
-                f.flush()
+                fd, tmp_name = tempfile.mkstemp(
+                    prefix=f".{p.name}.", suffix=".tmp", dir=str(p.parent)
+                )
+                tmp_path = Path(tmp_name)
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_name, p)
             finally:
-                if use_lock:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-                    logger.debug(f"[IO] 释放锁: path={p}")
+                if tmp_path is not None and tmp_path.exists():
+                    tmp_path.unlink()
+
+        if use_lock:
+            lock_path = lock_path_for(p)
+            logger.debug(f"[IO] 获取排他锁: path={lock_path}")
+            with FileLock(lock_path, shared=False):
+                atomic_write()
+            logger.debug(f"[IO] 释放锁: path={lock_path}")
+        else:
+            atomic_write()
 
     try:
         await asyncio.to_thread(sync_write)
@@ -69,20 +87,23 @@ async def read_json(file_path: Path | str, use_lock: bool = False) -> Optional[A
 
     logger.debug(f"[IO] 读取JSON: path={p}, use_lock={use_lock}")
 
+    def lock_path_for(target: Path) -> Path:
+        return target.with_name(f"{target.name}.lock")
+
     def sync_read() -> Optional[Any]:
         if not p.exists():
             logger.debug(f"[IO] 文件不存在: path={p}")
             return None
+        if use_lock:
+            lock_path = lock_path_for(p)
+            logger.debug(f"[IO] 获取共享锁: path={lock_path}")
+            with FileLock(lock_path, shared=True):
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            logger.debug(f"[IO] 释放锁: path={lock_path}")
+            return data
         with open(p, "r", encoding="utf-8") as f:
-            if use_lock:
-                logger.debug(f"[IO] 获取共享锁: path={p}")
-                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-            try:
-                return json.load(f)
-            finally:
-                if use_lock:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-                    logger.debug(f"[IO] 释放锁: path={p}")
+            return json.load(f)
 
     try:
         result = await asyncio.to_thread(sync_read)
@@ -116,26 +137,23 @@ async def append_line(
 
     logger.debug(f"[IO] 追加行: path={p}, use_lock={use_lock}, line_length={len(line)}")
 
+    def lock_path_for(target: Path) -> Path:
+        return target.with_name(f"{target.name}.lock")
+
     def sync_append() -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
-        lock_handle = None
-        try:
-            if use_lock:
-                lock_path = Path(lock_file_path) if lock_file_path else p
-                lock_path.parent.mkdir(parents=True, exist_ok=True)
-                lock_handle = open(lock_path, "a", encoding="utf-8")
-                logger.debug(f"[IO] 获取排他锁: path={lock_path}")
-                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
-            with open(p, "a", encoding="utf-8") as f:
-                f.write(line)
-                f.flush()
-        finally:
-            if lock_handle is not None:
-                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
-                logger.debug(
-                    f"[IO] 释放锁: path={Path(lock_file_path) if lock_file_path else p}"
-                )
-                lock_handle.close()
+        lock_path = Path(lock_file_path) if lock_file_path else lock_path_for(p)
+        if use_lock:
+            logger.debug(f"[IO] 获取排他锁: path={lock_path}")
+            with FileLock(lock_path, shared=False):
+                with open(p, "a", encoding="utf-8") as f:
+                    f.write(line)
+                    f.flush()
+            logger.debug(f"[IO] 释放锁: path={lock_path}")
+            return
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
 
     try:
         await asyncio.to_thread(sync_append)

@@ -26,14 +26,12 @@ from Undefined.utils.sender import MessageSender
 from Undefined.services.security import SecurityService
 from Undefined.services.command import CommandDispatcher
 from Undefined.services.ai_coordinator import AICoordinator
+from Undefined.utils.resources import resolve_resource_path
 
 from Undefined.scheduled_task_storage import ScheduledTaskStorage
 from Undefined.utils.logging import log_debug_json, redact_string
 
 logger = logging.getLogger(__name__)
-
-with open("res/prepared_messages/help_message.txt", "r", encoding="utf-8") as f:
-    HELP_MESSAGE = f.read()
 
 
 class MessageHandler:
@@ -242,7 +240,10 @@ class MessageHandler:
         if matches_xinliweiyuan(text):
             rand_val = random.random()
             if rand_val < 0.1:  # 10% 发送图片
-                image_path = os.path.abspath("img/xlwy.jpg")
+                try:
+                    image_path = str(resolve_resource_path("img/xlwy.jpg").resolve())
+                except Exception:
+                    image_path = os.path.abspath("img/xlwy.jpg")
                 message = f"[CQ:image,file={image_path}]"
                 # 50% 概率 @ 发送者
                 if random.random() < 0.5:

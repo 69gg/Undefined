@@ -4,6 +4,8 @@ import re
 import logging
 from typing import Any, Awaitable, Callable, Optional, List, Dict
 
+from Undefined.utils.xml import escape_xml_attr, escape_xml_text
+
 logger = logging.getLogger(__name__)
 
 # --- 常量定义 ---
@@ -108,7 +110,10 @@ async def parse_message_content_for_history(
                         sender = reply_msg.get("sender", {}).get("nickname", "未知")
                         content = reply_msg.get("message", [])
                         quote_text = extract_text(content, bot_qq)
-                        texts.append(f'<quote sender="{sender}">{quote_text}</quote>\n')
+                        texts.append(
+                            f'<quote sender="{escape_xml_attr(sender)}">'
+                            f"{escape_xml_text(quote_text)}</quote>\n"
+                        )
                 except Exception as e:
                     logger.warning(f"获取回复消息失败: {e}")
             continue

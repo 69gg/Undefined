@@ -12,6 +12,7 @@ from Undefined.ai.parsing import extract_choices_content
 from Undefined.ai.llm import ModelRequester
 from Undefined.config import VisionModelConfig
 from Undefined.utils.logging import log_debug_json, redact_string
+from Undefined.utils.resources import read_text_resource
 
 logger = logging.getLogger(__name__)
 
@@ -324,8 +325,11 @@ class MultimodalAnalyzer:
             }
 
         # 加载提示词
-        async with aiofiles.open(self._prompt_path, "r", encoding="utf-8") as f:
-            prompt = await f.read()
+        try:
+            prompt = read_text_resource(self._prompt_path)
+        except Exception:
+            async with aiofiles.open(self._prompt_path, "r", encoding="utf-8") as f:
+                prompt = await f.read()
 
         logger.debug(
             "[媒体分析] prompt_len=%s path=%s",
