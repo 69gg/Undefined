@@ -223,8 +223,10 @@ def _sanitize_openai_tool_names_in_request(
                         new_message = dict(message)
                     new_message["name"] = mapped
                     changed = True
-                elif "." in msg_name and not _TOOL_NAME_ALLOWED_RE.match(msg_name):
-                    # Keep request valid even if name isn't in schema map.
+                elif (not _TOOL_NAME_ALLOWED_RE.match(msg_name)) or (
+                    len(msg_name) > _TOOL_NAME_MAX_LEN
+                ):
+                    # Keep request valid even if name isn't in schema map (e.g. tool renamed/removed).
                     safe = _encode_tool_name_for_api(msg_name)
                     if safe != msg_name:
                         if new_message is message:
