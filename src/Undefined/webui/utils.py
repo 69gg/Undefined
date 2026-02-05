@@ -6,10 +6,23 @@ from pathlib import Path
 from typing import Any
 
 from Undefined.config.loader import CONFIG_PATH, Config
+from Undefined.utils.resources import resolve_resource_path
 
 logger = logging.getLogger(__name__)
 
 CONFIG_EXAMPLE_PATH = Path("config.toml.example")
+
+
+def _resolve_config_example_path(path: Path = CONFIG_EXAMPLE_PATH) -> Path | None:
+    if path.exists():
+        return path
+    try:
+        return resolve_resource_path(str(path))
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+
 
 TomlData = dict[str, Any]
 CommentMap = dict[str, dict[str, str]]
@@ -111,11 +124,12 @@ def read_config_source() -> dict[str, Any]:
             "exists": True,
             "source": str(CONFIG_PATH),
         }
-    if CONFIG_EXAMPLE_PATH.exists():
+    example_path = _resolve_config_example_path()
+    if example_path is not None and example_path.exists():
         return {
-            "content": CONFIG_EXAMPLE_PATH.read_text(encoding="utf-8"),
+            "content": example_path.read_text(encoding="utf-8"),
             "exists": False,
-            "source": str(CONFIG_EXAMPLE_PATH),
+            "source": str(example_path),
         }
     return {
         "content": "[core]\nbot_qq = 0\nsuperadmin_qq = 0\n",
@@ -138,11 +152,12 @@ def ensure_config_toml(
         return False
 
     content: str
-    if example_path.exists():
+    resolved_example = _resolve_config_example_path(example_path)
+    if resolved_example is not None and resolved_example.exists():
         try:
-            content = example_path.read_text(encoding="utf-8")
+            content = resolved_example.read_text(encoding="utf-8")
         except Exception as exc:
-            logger.warning("读取 %s 失败，将使用内置模板: %s", example_path, exc)
+            logger.warning("读取 %s 失败，将使用内置模板: %s", resolved_example, exc)
             content = ""
     else:
         content = ""
@@ -154,7 +169,11 @@ def ensure_config_toml(
         # 使用独占创建，避免并发启动时覆盖已有文件
         with open(config_path, "x", encoding="utf-8") as f:
             f.write(content)
-        logger.info("已生成 %s（来源：%s）", config_path, example_path)
+        logger.info(
+            "已生成 %s（来源：%s）",
+            config_path,
+            resolved_example or example_path,
+        )
         return True
     except FileExistsError:
         return False
@@ -180,10 +199,11 @@ def validate_required_config() -> tuple[bool, str]:
 
 
 def load_default_data() -> TomlData:
-    if not CONFIG_EXAMPLE_PATH.exists():
+    example_path = _resolve_config_example_path()
+    if example_path is None or not example_path.exists():
         return {}
     try:
-        with open(CONFIG_EXAMPLE_PATH, "rb") as f:
+        with open(example_path, "rb") as f:
             data = tomllib.load(f)
         if isinstance(data, dict):
             return data
@@ -266,7 +286,8 @@ def parse_comment_map(path: Path) -> CommentMap:
 
 
 def load_comment_map() -> CommentMap:
-    comments = parse_comment_map(CONFIG_EXAMPLE_PATH)
+    example_path = _resolve_config_example_path()
+    comments = parse_comment_map(example_path) if example_path else {}
     if CONFIG_PATH.exists():
         overrides = parse_comment_map(CONFIG_PATH)
         for key, value in overrides.items():

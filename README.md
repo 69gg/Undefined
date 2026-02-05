@@ -68,7 +68,7 @@
 - **Agent 私有 MCP**：可为单个 agent 提供独立 MCP 配置，按调用即时加载并释放，工具仅对该 agent 可见。
 - **思维链支持**：支持开启思维链，提升复杂逻辑推理能力。
 - **高并发架构**：基于 `asyncio` 全异步设计，支持多队列消息处理与工具并发执行，轻松应对高并发场景。
-- **异步安全 I/O**：建立统一 IO 层，通过线程池和文件锁（`flock`）确保底层磁盘操作永不阻塞主事件循环，彻底杜绝死锁。
+- **异步安全 I/O**：统一 IO 层通过线程池 + 跨平台文件锁（Linux/macOS `flock`，Windows `msvcrt`）+ 原子写入（`os.replace`）保证并发写入不损坏、且不阻塞主事件循环。
 - **安全防护**：内置独立的安全模型，实时检测注入攻击与恶意内容。
 - **OneBot 协议**：完美兼容 OneBot V11 协议，支持多种前端实现（如 NapCat）。
 
@@ -158,7 +158,7 @@ graph TB
 
     %% ==================== IO 工具层 ====================
     subgraph IOLayer["异步 IO 层 (utils/io.py)"]
-        IOUtils["IO 工具<br/>• write_json • read_json<br/>• append_line<br/>• 文件锁 (flock)"]
+        IOUtils["IO 工具<br/>• write_json • read_json<br/>• append_line<br/>• 文件锁 (flock/msvcrt) + 原子写入"]
     end
 
     %% ==================== 数据持久化层 ====================
@@ -274,7 +274,57 @@ graph TB
 
 ## 安装与部署
 
-我将持续优化安装体验。目前推荐使用源码部署，方便进行个性化配置和二次开发。
+提供 pip/uv tool 安装与源码部署两种方式：前者适合直接使用；后者适合深度自定义与二次开发。
+
+### pip/uv tool 部署（推荐用于直接使用）
+
+适合只想“安装后直接跑”的场景，`Undefined`/`Undefined-webui` 命令会作为可执行入口安装到你的环境中。
+
+```bash
+# 方式 1：pip
+pip install -U Undefined-bot
+
+# 方式 2：uv tool（建议隔离安装）
+uv tool install Undefined-bot
+```
+
+安装完成后，在任意目录准备 `config.toml` 并启动：
+
+```bash
+Undefined
+# 或
+Undefined-webui
+```
+
+> `Undefined-webui` 会在检测到当前目录缺少 `config.toml` 时，自动从 `config.toml.example` 生成一份，便于直接在 WebUI 中修改。
+
+#### pip/uv tool 部署的自定义方式
+
+wheel 会自带 `res/**` 与 `img/**`。为了便于自定义，程序读取资源文件时采用“可覆盖”策略：
+
+1. 优先加载运行目录下的同名文件（例如 `./res/prompts/...`）
+2. 若不存在，再使用安装包自带的资源文件
+
+因此你无需改动 site-packages，直接在运行目录放置覆盖文件即可，例如：
+
+```bash
+mkdir -p res/prompts
+# 然后把你想改的提示词放到对应路径（文件名与目录层级保持一致）
+```
+
+如果你希望直接修改“默认提示词/默认文案”（而不是每个运行目录做覆盖），推荐使用下面的“源码部署”，在仓库里修改 `res/` 后运行；不建议直接修改已安装环境的 `site-packages/res`（升级会被覆盖）。
+
+如果你不知道安装包内默认提示词文件在哪，可以用下面方式打印路径（用于复制一份出来改）：
+
+```bash
+python -c "from Undefined.utils.resources import resolve_resource_path; print(resolve_resource_path('res/prompts/undefined.xml'))"
+```
+
+资源加载自检（确保 wheel 资源可用）：
+
+```bash
+python -c "from Undefined.utils.resources import read_text_resource; print(len(read_text_resource('res/prompts/undefined.xml')))"
+```
 
 ### 源码部署（开发/使用）
 
@@ -319,6 +369,12 @@ uv run playwright install
 cp config.toml.example config.toml
 ```
 
+#### 源码部署的自定义指南
+
+- 自定义提示词/预置文案：直接修改仓库根目录的 `res/`（例如 `res/prompts/`、`res/prepared_messages/`）。
+- 自定义图片资源：修改 `img/` 下的对应文件（例如 `img/xlwy.jpg`）。
+- 若你希望“运行目录覆盖优先”：在启动目录放置 `./res/...`，会优先于默认资源生效（便于一套安装，多套运行配置）。
+
 #### 4. 启动运行
 
 ```bash
@@ -332,6 +388,12 @@ uv run Undefined-webui
 ```
 
 > 提示：资源文件已随包发布，支持在非项目根目录启动；如需自定义 `res/` 或 `img/` 内容，请保持目录结构不变。
+
+#### 5. 跨平台与资源路径（重要）
+
+- 资源读取：运行时会优先从运行目录加载同名 `res/...` / `img/...`（便于覆盖），若不存在再使用安装包自带资源；并提供仓库结构兜底查找，因此从任意目录启动也能正常加载提示词/帮助信息。
+- 资源覆盖：如需覆盖默认提示词/文案，可在当前工作目录放置同名的 `res/...` 文件；或在源码目录直接修改 `res/`。
+- 并发写入：运行时会为 JSON/日志类文件使用“锁文件 + 原子替换”写入策略，Windows/Linux/macOS 行为一致（会生成 `*.lock` 文件）。
 
 ### 配置说明
 
@@ -443,6 +505,14 @@ Undefined 欢迎开发者参与共建！
     ```
 
 *   **开发指南**: 请参考 [src/Undefined/skills/README.md](src/Undefined/skills/README.md) 了解如何编写新的工具和 Agent。
+
+### 开发自检
+
+```bash
+uv run ruff format .
+uv run ruff check .
+uv run mypy .
+```
 
 ## 致谢与友链
 

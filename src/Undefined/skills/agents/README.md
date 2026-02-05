@@ -21,34 +21,48 @@ agent_name/
 
 ## 模型配置
 
-Agent 使用独立的模型配置，通过环境变量设置：
+Agent 默认使用 `config.toml` 中的 `[models.agent]` 配置；同名环境变量仍可作为兼容覆盖（用于临时调试或无文件配置场景）。
 
-```env
-# Agent 模型配置 (用于执行 agents)
-AGENT_MODEL_API_URL=          # OpenAI-compatible base URL, e.g. https://api.openai.com/v1 (legacy /chat/completions is deprecated but still accepted)
-AGENT_MODEL_API_KEY=          # API 密钥
-AGENT_MODEL_NAME=             # 模型名称
-AGENT_MODEL_MAX_TOKENS=4096   # 最大 token 数
-AGENT_MODEL_THINKING_ENABLED=false     # 是否启用 thinking（思维链）
-AGENT_MODEL_THINKING_BUDGET_TOKENS=0    # thinking budget tokens
+推荐在 `config.toml` 配置：
+
+```toml
+[models.agent]
+api_url = "https://api.openai.com/v1"
+api_key = "..."
+model = "gpt-4o-mini"
+max_tokens = 4096
+thinking_enabled = false
+thinking_budget_tokens = 0
 ```
 
-### 配置说明
+兼容的环境变量（会覆盖 `config.toml`）：
 
-| 环境变量 | 说明 | 默认值 |
-|---------|------|-------|
-| `AGENT_MODEL_API_URL` | Agent 模型 API base URL（OpenAI 兼容，如 `https://api.openai.com/v1`） | 无（必填） |
-| `AGENT_MODEL_API_KEY` | Agent 模型 API 密钥 | 无（必填） |
-| `AGENT_MODEL_NAME` | Agent 模型名称 | 无（必填） |
-| `AGENT_MODEL_MAX_TOKENS` | 单次响应最大 token 数 | 4096 |
-| `AGENT_MODEL_THINKING_ENABLED` | 是否启用思维链 | false |
-| `AGENT_MODEL_THINKING_BUDGET_TOKENS` | 思维链预算 token 数量 | 0 |
+```env
+AGENT_MODEL_API_URL=
+AGENT_MODEL_API_KEY=
+AGENT_MODEL_NAME=
+AGENT_MODEL_MAX_TOKENS=4096
+AGENT_MODEL_THINKING_ENABLED=false
+AGENT_MODEL_THINKING_BUDGET_TOKENS=0
+```
 
 ## intro 自动生成（推荐）
 
 启动时会对 Agent 代码做 hash，如果检测到变更，则将补充说明写入 `intro.generated.md`。该文件会在加载时与 `intro.md` 合并。
 
-提示词文件位置：`res/prompts/agent_self_intro.txt`
+提示词文件位置：`res/prompts/agent_self_intro.txt`（已随 wheel 打包；运行时支持从包内读取，并可通过本地同路径文件覆盖）。
+
+推荐在 `config.toml` 配置：
+
+```toml
+[skills]
+intro_autogen_enabled = true
+intro_autogen_queue_interval = 1.0
+intro_autogen_max_tokens = 700
+intro_hash_path = ".cache/agent_intro_hashes.json"
+```
+
+兼容的环境变量（会覆盖 `config.toml`）：
 
 ```env
 AGENT_INTRO_AUTOGEN_ENABLED=true
@@ -57,12 +71,12 @@ AGENT_INTRO_AUTOGEN_MAX_TOKENS=700
 AGENT_INTRO_HASH_PATH=.cache/agent_intro_hashes.json
 ```
 
-| 环境变量 | 说明 | 默认值 |
+| 配置项（config.toml / env） | 说明 | 默认值 |
 |---------|------|-------|
-| `AGENT_INTRO_AUTOGEN_ENABLED` | 是否启动自动生成 | true |
-| `AGENT_INTRO_AUTOGEN_QUEUE_INTERVAL` | 队列发车间隔（秒） | 1.0 |
-| `AGENT_INTRO_AUTOGEN_MAX_TOKENS` | 生成最大 token | 700 |
-| `AGENT_INTRO_HASH_PATH` | hash 缓存路径 | .cache/agent_intro_hashes.json |
+| `skills.intro_autogen_enabled` / `AGENT_INTRO_AUTOGEN_ENABLED` | 是否启动自动生成 | true |
+| `skills.intro_autogen_queue_interval` / `AGENT_INTRO_AUTOGEN_QUEUE_INTERVAL` | 队列发车间隔（秒） | 1.0 |
+| `skills.intro_autogen_max_tokens` / `AGENT_INTRO_AUTOGEN_MAX_TOKENS` | 生成最大 token | 700 |
+| `skills.intro_hash_path` / `AGENT_INTRO_HASH_PATH` | hash 缓存路径 | .cache/agent_intro_hashes.json |
 
 ## 核心文件说明
 
@@ -138,7 +152,7 @@ Agent 的 OpenAI function calling 定义。
 ### handler.py
 Agent 的执行逻辑，负责：
 1. 从 `prompt.md` 加载系统提示词
-2. 使用 `AGENT_MODEL_*` 配置调用模型
+2. 使用 `config.toml` 的 `[models.agent]` 配置调用模型（或 `AGENT_MODEL_*` 兼容覆盖）
 3. 通过 `AgentToolRegistry` 调用子工具
 4. 返回结果给主 AI
 

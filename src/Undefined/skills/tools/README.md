@@ -45,9 +45,9 @@ skills/tools/
 实现工具的具体逻辑。必须包含一个异步函数 `execute(args, context)`。
 
 ```python
-from typing import Any, Dict
+from typing import Any
 
-async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     # 1. 获取参数
     val = args.get("arg1")
     
@@ -86,6 +86,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 - **热重载**：检测到工具变更会自动重新加载（默认开启）。
 
 可通过环境变量控制热重载：
+
+（也可通过 `config.toml` 的 `[skills]` 段配置；环境变量用于覆盖或临时调试。）
 
 - `SKILLS_HOT_RELOAD`：`true/false`，默认 `true`
 - `SKILLS_HOT_RELOAD_INTERVAL`：扫描间隔，默认 `2.0` 秒

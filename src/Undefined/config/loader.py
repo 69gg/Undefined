@@ -9,9 +9,23 @@ import re
 import tomllib
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, IO
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover
+    StrPath = str | os.PathLike[str]
+
+    def load_dotenv(
+        dotenv_path: StrPath | None = None,
+        stream: IO[str] | None = None,
+        verbose: bool = False,
+        override: bool = False,
+        interpolate: bool = True,
+        encoding: str | None = "utf-8",
+    ) -> bool:
+        return False
+
 
 from .models import (
     AgentModelConfig,
