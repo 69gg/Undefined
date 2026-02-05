@@ -454,6 +454,7 @@ class AIClient:
 
         # 注入常用资源（用于工具执行）
         tool_context.setdefault("ai_client", self)
+        tool_context.setdefault("runtime_config", self._get_runtime_config())
         tool_context.setdefault("search_wrapper", self._search_wrapper)
         tool_context.setdefault("recent_replies", self.recent_replies)
         tool_context.setdefault(

@@ -160,6 +160,13 @@ sanitize_verbose = false
 # en: Description preview length in logs
 description_preview_len = 160
 
+# zh: 彩蛋功能（可选）
+# en: Easter egg features (optional)
+[easter_egg]
+# zh: 是否在 AI 调用 Agent 工具时发送彩蛋提示（默认禁用）
+# en: Send easter-egg message when AI calls an agent tool (default off)
+agent_call_message_enabled = false
+
 # zh: Skills 热重载配置（可选）
 # en: Skills hot reload settings (optional)
 [skills]

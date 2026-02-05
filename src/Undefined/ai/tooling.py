@@ -95,6 +95,40 @@ class ToolManager:
             return mcp_path
         return None
 
+    async def _maybe_send_agent_call_easter_egg(
+        self, agent_name: str, context: dict[str, Any]
+    ) -> None:
+        runtime_config = context.get("runtime_config")
+        enabled = bool(
+            getattr(runtime_config, "easter_egg_agent_call_message_enabled", False)
+        )
+        if runtime_config is None:
+            try:
+                from Undefined.config import get_config
+
+                enabled = bool(
+                    get_config(strict=False).easter_egg_agent_call_message_enabled
+                )
+            except Exception:
+                enabled = False
+
+        if not enabled:
+            return
+
+        message = f"{agent_name}，我调用你了，我要调用你了！"
+        sender = context.get("sender")
+        send_message_callback = context.get("send_message_callback")
+        group_id = context.get("group_id")
+
+        try:
+            if sender and isinstance(group_id, int) and group_id > 0:
+                await sender.send_group_message(group_id, message)
+                return
+            if send_message_callback:
+                await send_message_callback(message, None)
+        except Exception as exc:
+            logger.debug("[彩蛋] 发送提示消息失败: %s", redact_string(str(exc)))
+
     async def execute_tool(
         self,
         function_name: str,
@@ -145,6 +179,7 @@ class ToolManager:
 
         try:
             if is_agent:
+                await self._maybe_send_agent_call_easter_egg(function_name, context)
                 mcp_registry = None
                 registry_token = None
                 mcp_config_path = self._get_agent_mcp_config_path(function_name)

@@ -320,6 +320,7 @@ class Config:
     tools_description_max_len: int
     tools_sanitize_verbose: bool
     tools_description_preview_len: int
+    easter_egg_agent_call_message_enabled: bool
     token_usage_max_size_mb: int
     token_usage_max_archives: int
     token_usage_max_total_mb: int
@@ -414,6 +415,15 @@ class Config:
                 "TOOLS_DESCRIPTION_PREVIEW_LEN",
             ),
             160,
+        )
+
+        easter_egg_agent_call_message_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("easter_egg", "agent_call_message_enabled"),
+                "EASTER_EGG_AGENT_CALL_MESSAGE_ENABLED",
+            ),
+            False,
         )
 
         token_usage_max_size_mb = _coerce_int(
@@ -565,6 +575,7 @@ class Config:
             tools_description_max_len=tools_description_max_len,
             tools_sanitize_verbose=tools_sanitize_verbose,
             tools_description_preview_len=tools_description_preview_len,
+            easter_egg_agent_call_message_enabled=easter_egg_agent_call_message_enabled,
             token_usage_max_size_mb=token_usage_max_size_mb,
             token_usage_max_archives=token_usage_max_archives,
             token_usage_max_total_mb=token_usage_max_total_mb,
