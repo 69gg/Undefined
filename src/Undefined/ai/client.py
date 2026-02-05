@@ -492,6 +492,17 @@ class AIClient:
                     tool_choice="auto",
                 )
 
+                tool_name_map = (
+                    result.get("_tool_name_map") if isinstance(result, dict) else None
+                )
+                api_to_internal: dict[str, str] = {}
+                if isinstance(tool_name_map, dict):
+                    raw_api_to_internal = tool_name_map.get("api_to_internal")
+                    if isinstance(raw_api_to_internal, dict):
+                        api_to_internal = {
+                            str(k): str(v) for k, v in raw_api_to_internal.items()
+                        }
+
                 choice = result.get("choices", [{}])[0]
                 message = choice.get("message", {})
                 content: str = message.get("content") or ""
@@ -566,39 +577,59 @@ class AIClient:
 
                 tool_tasks = []
                 tool_call_ids = []
-                tool_names = []
+                tool_api_names: list[str] = []
+                tool_internal_names: list[str] = []
 
                 for tool_call in tool_calls:
                     call_id = tool_call.get("id", "")
                     function = tool_call.get("function", {})
-                    function_name = function.get("name", "")
+                    api_function_name = function.get("name", "")
                     raw_args = function.get("arguments")
 
-                    logger.info(f"[工具准备] 准备调用: {function_name} (ID={call_id})")
+                    internal_function_name = api_to_internal.get(
+                        str(api_function_name), str(api_function_name)
+                    )
+
+                    if internal_function_name != api_function_name:
+                        logger.info(
+                            "[工具准备] 准备调用: %s (原名: %s) (ID=%s)",
+                            internal_function_name,
+                            api_function_name,
+                            call_id,
+                        )
+                    else:
+                        logger.info(
+                            "[工具准备] 准备调用: %s (ID=%s)",
+                            api_function_name,
+                            call_id,
+                        )
                     logger.debug(
-                        f"[工具参数] {function_name} 参数: {redact_string(str(raw_args))}"
+                        f"[工具参数] {api_function_name} 参数: {redact_string(str(raw_args))}"
                     )
 
                     function_args = parse_tool_arguments(
                         raw_args,
                         logger=logger,
-                        tool_name=function_name,
+                        tool_name=str(api_function_name),
                     )
 
                     if not isinstance(function_args, dict):
                         function_args = {}
 
                     tool_call_ids.append(call_id)
-                    tool_names.append(function_name)
+                    tool_api_names.append(str(api_function_name))
+                    tool_internal_names.append(str(internal_function_name))
                     tool_tasks.append(
                         self.tool_manager.execute_tool(
-                            function_name, function_args, tool_context
+                            str(internal_function_name), function_args, tool_context
                         )
                     )
 
                 if tool_tasks:
                     logger.info(
-                        f"[工具执行] 开始并发执行 {len(tool_tasks)} 个工具调用: {', '.join(tool_names)}"
+                        "[工具执行] 开始并发执行 %s 个工具调用: %s",
+                        len(tool_tasks),
+                        ", ".join(tool_internal_names),
                     )
                     tool_results = await asyncio.gather(
                         *tool_tasks, return_exceptions=True
@@ -606,22 +637,23 @@ class AIClient:
 
                     for i, tool_result in enumerate(tool_results):
                         call_id = tool_call_ids[i]
-                        fname = tool_names[i]
+                        api_fname = tool_api_names[i]
+                        internal_fname = tool_internal_names[i]
 
                         if isinstance(tool_result, Exception):
                             logger.error(
-                                f"[工具异常] {fname} (ID={call_id}) 执行抛出异常: {tool_result}"
+                                f"[工具异常] {internal_fname} (ID={call_id}) 执行抛出异常: {tool_result}"
                             )
                             content_str = f"执行失败: {str(tool_result)}"
                         else:
                             content_str = str(tool_result)
                             logger.debug(
-                                f"[工具响应] {fname} (ID={call_id}) 返回内容长度: {len(content_str)}"
+                                f"[工具响应] {internal_fname} (ID={call_id}) 返回内容长度: {len(content_str)}"
                             )
                             if logger.isEnabledFor(logging.DEBUG):
                                 log_debug_json(
                                     logger,
-                                    f"[工具响应体] {fname} (ID={call_id})",
+                                    f"[工具响应体] {internal_fname} (ID={call_id})",
                                     content_str,
                                 )
 
@@ -629,14 +661,16 @@ class AIClient:
                             {
                                 "role": "tool",
                                 "tool_call_id": call_id,
-                                "name": fname,
+                                "name": api_fname,
                                 "content": content_str,
                             }
                         )
 
                         if tool_context.get("conversation_ended"):
                             conversation_ended = True
-                            logger.info(f"[会话状态] 工具 {fname} 触发了会话结束标记")
+                            logger.info(
+                                f"[会话状态] 工具 {internal_fname} 触发了会话结束标记"
+                            )
 
                 if conversation_ended:
                     logger.info("对话已结束（调用 end 工具）")

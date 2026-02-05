@@ -57,7 +57,7 @@ KEY_ORDER: dict[str, list[str]] = {
     "onebot": ["ws_url", "token"],
     "logging": ["level", "file_path", "max_size_mb", "backup_count", "log_thinking"],
     "tools": [
-        "sanitize",
+        "dot_delimiter",
         "description_max_len",
         "sanitize_verbose",
         "description_preview_len",

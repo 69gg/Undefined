@@ -157,14 +157,14 @@ backup_count = 5
 # en: Log thinking output (default: on).
 log_thinking = true
 
-# zh: Tools Schema 兼容性（可选）。
-# en: Tools schema compatibility (optional).
-# zh: 某些 OpenAI-compatible 网关会对 "tools[].function.description" 做更严格的校验，可能触发 400 错误。
-# en: Some OpenAI-compatible gateways strictly validate "tools[].function.description" and may return 400.
+# zh: Tools 兼容性（可选）。
+# en: Tools compatibility (optional).
+# zh: 部分 OpenAI-compatible 网关会对 tools schema 做更严格的校验（尤其是 tools[].function.name / description），可能触发 400。
+# en: Some OpenAI-compatible gateways strictly validate tools schema (especially tools[].function.name/description) and may return 400.
 [tools]
-# zh: 是否在请求前清洗 tools schema（默认关闭）。
-# en: Sanitize tools schema before requests (default: off).
-sanitize = false
+# zh: 工具名分隔符：当工具原始名称包含 '.'（例如 scheduler.create_schedule_task / mcp.server.tool）时，发送给模型前会把 '.' 映射为该分隔符。
+# en: Tool-name delimiter: map '.' to this delimiter before sending tools to the model.
+dot_delimiter = "-_-"
 # zh: description 最大长度（超出会截断）。
 # en: Description max length (truncated when exceeded).
 description_max_len = 1024

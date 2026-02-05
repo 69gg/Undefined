@@ -1,8 +1,11 @@
-from typing import Any, Dict
+from __future__ import annotations
+
 import asyncio
-import aiofiles
 import logging
 from pathlib import Path
+from typing import Any
+
+import aiofiles
 
 from Undefined.skills.agents.agent_tool_registry import AgentToolRegistry
 from Undefined.utils.tool_calls import parse_tool_arguments
@@ -24,7 +27,7 @@ def _get_default_prompt() -> str:
     return "你是一个信息查询助手..."
 
 
-async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     """执行 info_agent"""
     user_prompt: str = args.get("prompt", "")
 
@@ -70,6 +73,17 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 tool_choice="auto",
             )
 
+            tool_name_map = (
+                result.get("_tool_name_map") if isinstance(result, dict) else None
+            )
+            api_to_internal: dict[str, str] = {}
+            if isinstance(tool_name_map, dict):
+                raw_api_to_internal = tool_name_map.get("api_to_internal")
+                if isinstance(raw_api_to_internal, dict):
+                    api_to_internal = {
+                        str(k): str(v) for k, v in raw_api_to_internal.items()
+                    }
+
             choice: dict[str, Any] = result.get("choices", [{}])[0]
             message: dict[str, Any] = choice.get("message", {})
             content: str = message.get("content") or ""
@@ -88,24 +102,30 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             # 准备并发执行工具
             tool_tasks = []
             tool_call_ids = []
-            tool_names = []
+            tool_api_names: list[str] = []
 
             for tool_call in tool_calls:
                 call_id: str = tool_call.get("id", "")
                 function: dict[str, Any] = tool_call.get("function", {})
-                function_name: str = function.get("name", "")
+                api_function_name: str = function.get("name", "")
                 raw_args = function.get("arguments")
 
-                logger.info(f"Agent 正在准备工具: {function_name}")
+                internal_function_name = api_to_internal.get(
+                    api_function_name, api_function_name
+                )
+
+                logger.info("Agent 正在准备工具: %s", internal_function_name)
 
                 function_args = parse_tool_arguments(
-                    raw_args, logger=logger, tool_name=function_name
+                    raw_args, logger=logger, tool_name=api_function_name
                 )
 
                 tool_call_ids.append(call_id)
-                tool_names.append(function_name)
+                tool_api_names.append(api_function_name)
                 tool_tasks.append(
-                    tool_registry.execute_tool(function_name, function_args, context)
+                    tool_registry.execute_tool(
+                        internal_function_name, function_args, context
+                    )
                 )
 
             # 并发执行
@@ -115,7 +135,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
                 for i, tool_result in enumerate(results):
                     call_id = tool_call_ids[i]
-                    tool_name = tool_names[i]
+                    api_tool_name = tool_api_names[i]
                     content_str: str = ""
                     if isinstance(tool_result, Exception):
                         content_str = f"错误: {str(tool_result)}"
@@ -126,7 +146,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                         {
                             "role": "tool",
                             "tool_call_id": call_id,
-                            "name": tool_name,
+                            "name": api_tool_name,
                             "content": content_str,
                         }
                     )
