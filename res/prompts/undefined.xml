@@ -69,7 +69,7 @@
         你的 content 必须始终始终始终始终为空字符串 ""。
         所有消息必须通过 OpenAI tool call 格式调用工具发送。
         可用工具：send_message (发送消息), end (结束对话)
-        **注意：部分高级工具位于工具集 (toolsets) 中，名称带有前缀（如 scheduler.create_schedule_task）。请根据工具定义的名称准确调用。**
+        **注意：工具集原始命名用 '.' 分隔（如 scheduler.create_schedule_task）。但由于部分模型服务商要求 function.name 只能包含 [a-zA-Z0-9_-]，系统会把 '.' 映射为 '-_-'。因此你在 tool call 里应使用 scheduler-_-create_schedule_task（原 scheduler.create_schedule_task）。MCP 工具同理，例如 mcp-_-server-_-tool（原 mcp.server.tool）。请始终以 tools 列表中的 name 为准。**
         **可以多次调用 send_message 工具，特别是在需要分段发送内容时。**
         **长回复可分多条发送，但条数要克制，避免刷屏。**
       </detail>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -71,6 +72,207 @@ _DEFAULT_TOOLS_DESCRIPTION_MAX_LEN = 1024
 _TOOLS_PARAM_INDEX_RE = re.compile(r"Tools\[(\d+)\]", re.IGNORECASE)
 _DEFAULT_TOOLS_DESCRIPTION_PREVIEW_LEN = 160
 
+_DEFAULT_TOOL_NAME_DOT_DELIMITER = "-_-"
+_TOOL_NAME_MAX_LEN = 64
+_TOOL_NAME_ALLOWED_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def _tool_name_dot_delimiter() -> str:
+    runtime_config = _get_runtime_config()
+    value = (
+        getattr(runtime_config, "tools_dot_delimiter", None) if runtime_config else None
+    )
+    text = str(value).strip() if value is not None else _DEFAULT_TOOL_NAME_DOT_DELIMITER
+    if not text:
+        return _DEFAULT_TOOL_NAME_DOT_DELIMITER
+    if "." in text:
+        return _DEFAULT_TOOL_NAME_DOT_DELIMITER
+    if not _TOOL_NAME_ALLOWED_RE.match(text):
+        return _DEFAULT_TOOL_NAME_DOT_DELIMITER
+    # Keep it reasonably short to avoid tool name truncation.
+    if len(text) > 16:
+        return text[:16]
+    return text
+
+
+def _hash8(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
+
+
+def _encode_tool_name_for_api(tool_name: str) -> str:
+    """Encode internal tool name to provider-safe function.name.
+
+    - Replace '.' with '-_-' (keeps internal naming semantics)
+    - Replace any other disallowed char with '_'
+    - Enforce max length (<=64), append stable hash when truncated
+    """
+    raw = str(tool_name or "").strip()
+    if not raw:
+        return "tool"
+
+    # Preserve separator semantics for toolsets: category.tool -> category<delimiter>tool
+    encoded = raw.replace(".", _tool_name_dot_delimiter())
+
+    # Replace other disallowed characters.
+    cleaned_chars: list[str] = []
+    for ch in encoded:
+        if ch.isalnum() or ch in {"_", "-"}:
+            cleaned_chars.append(ch)
+        else:
+            cleaned_chars.append("_")
+    encoded = "".join(cleaned_chars)
+
+    if not encoded:
+        encoded = "tool"
+
+    if len(encoded) > _TOOL_NAME_MAX_LEN:
+        suffix = "_" + _hash8(raw)
+        prefix_len = max(1, _TOOL_NAME_MAX_LEN - len(suffix))
+        encoded = encoded[:prefix_len] + suffix
+
+    # Final guard (should always pass)
+    if not _TOOL_NAME_ALLOWED_RE.match(encoded):
+        suffix = "_" + _hash8(raw)
+        encoded = re.sub(r"[^a-zA-Z0-9_-]", "_", encoded)
+        if len(encoded) > _TOOL_NAME_MAX_LEN:
+            encoded = encoded[: _TOOL_NAME_MAX_LEN - len(suffix)] + suffix
+        if not encoded:
+            encoded = "tool" + suffix
+
+    return encoded
+
+
+def _sanitize_openai_tool_names_in_request(
+    request_body: dict[str, Any],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Rewrite request_body tools/messages tool names to provider-safe names.
+
+    Returns:
+        (api_to_internal, internal_to_api) maps.
+
+    Notes:
+        - We only guarantee reversibility for names present in tools schema.
+        - Historical tool calls in messages are rewritten best-effort.
+    """
+    tools = request_body.get("tools")
+    if not isinstance(tools, list) or not tools:
+        return {}, {}
+
+    internal_to_api: dict[str, str] = {}
+    api_to_internal: dict[str, str] = {}
+    used_api: set[str] = set()
+
+    new_tools: list[dict[str, Any]] = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            new_tools.append(tool)
+            continue
+        function = tool.get("function")
+        if not isinstance(function, dict):
+            new_tools.append(tool)
+            continue
+        internal_name = str(function.get("name", "") or "")
+        if not internal_name:
+            new_tools.append(tool)
+            continue
+
+        # Stable encoding; add collision suffix if needed.
+        base_api_name = _encode_tool_name_for_api(internal_name)
+        api_name = base_api_name
+        if api_name in used_api and api_to_internal.get(api_name) != internal_name:
+            suffix = "_" + _hash8(internal_name)
+            prefix_len = max(1, _TOOL_NAME_MAX_LEN - len(suffix))
+            api_name = base_api_name[:prefix_len] + suffix
+        if api_name in used_api and api_to_internal.get(api_name) != internal_name:
+            # Ultra-rare fallback: incorporate index.
+            suffix = "_" + _hash8(f"{internal_name}:{len(used_api)}")
+            prefix_len = max(1, _TOOL_NAME_MAX_LEN - len(suffix))
+            api_name = base_api_name[:prefix_len] + suffix
+
+        used_api.add(api_name)
+        internal_to_api[internal_name] = api_name
+        api_to_internal[api_name] = internal_name
+
+        if api_name != internal_name:
+            tool = dict(tool)
+            function = dict(function)
+            function["name"] = api_name
+            tool["function"] = function
+        new_tools.append(tool)
+
+    request_body["tools"] = new_tools
+
+    # Best-effort rewrite of historical tool names in messages.
+    messages = request_body.get("messages")
+    if isinstance(messages, list) and messages:
+        new_messages: list[dict[str, Any]] = []
+        changed = False
+        for message in messages:
+            if not isinstance(message, dict):
+                new_messages.append(message)
+                continue
+
+            new_message = message
+
+            # Rewrite role=tool name (optional field).
+            msg_name = message.get("name")
+            if isinstance(msg_name, str) and msg_name:
+                mapped = internal_to_api.get(msg_name)
+                if mapped and mapped != msg_name:
+                    if new_message is message:
+                        new_message = dict(message)
+                    new_message["name"] = mapped
+                    changed = True
+                elif "." in msg_name and not _TOOL_NAME_ALLOWED_RE.match(msg_name):
+                    # Keep request valid even if name isn't in schema map.
+                    safe = _encode_tool_name_for_api(msg_name)
+                    if safe != msg_name:
+                        if new_message is message:
+                            new_message = dict(message)
+                        new_message["name"] = safe
+                        changed = True
+
+            tool_calls = message.get("tool_calls")
+            if isinstance(tool_calls, list) and tool_calls:
+                new_tool_calls: list[Any] = []
+                tool_calls_changed = False
+                for tool_call in tool_calls:
+                    if not isinstance(tool_call, dict):
+                        new_tool_calls.append(tool_call)
+                        continue
+                    function = tool_call.get("function")
+                    if not isinstance(function, dict):
+                        new_tool_calls.append(tool_call)
+                        continue
+                    fname = function.get("name")
+                    if not isinstance(fname, str) or not fname:
+                        new_tool_calls.append(tool_call)
+                        continue
+                    mapped = internal_to_api.get(fname)
+                    safe_name = mapped or _encode_tool_name_for_api(fname)
+                    if safe_name != fname:
+                        tool_calls_changed = True
+                        new_tool_call = dict(tool_call)
+                        new_function = dict(function)
+                        new_function["name"] = safe_name
+                        new_tool_call["function"] = new_function
+                        new_tool_calls.append(new_tool_call)
+                    else:
+                        new_tool_calls.append(tool_call)
+
+                if tool_calls_changed:
+                    if new_message is message:
+                        new_message = dict(message)
+                    new_message["tool_calls"] = new_tool_calls
+                    changed = True
+
+            new_messages.append(new_message)
+
+        if changed:
+            request_body["messages"] = new_messages
+
+    return api_to_internal, internal_to_api
+
 
 def _get_runtime_config() -> Config | None:
     try:
@@ -93,10 +295,9 @@ def _split_chat_completion_params(
 
 
 def _tools_sanitize_enabled() -> bool:
-    runtime_config = _get_runtime_config()
-    if runtime_config is not None:
-        return bool(runtime_config.tools_sanitize)
-    return False
+    # 历史配置项 tools.sanitize 已迁移为 tools.dot_delimiter。
+    # 为兼容严格网关，description 的 schema 清洗默认始终开启。
+    return True
 
 
 def _tools_sanitize_verbose() -> bool:
@@ -491,6 +692,14 @@ class ModelRequester:
             tool_choice=tool_choice,
             **kwargs,
         )
+
+        api_to_internal: dict[str, str] = {}
+        internal_to_api: dict[str, str] = {}
+        if isinstance(request_body.get("tools"), list):
+            api_to_internal, internal_to_api = _sanitize_openai_tool_names_in_request(
+                request_body
+            )
+
         if "tools" in request_body and isinstance(request_body.get("tools"), list):
             sanitized_tools, changed_count, changes = _sanitize_openai_tools(
                 request_body["tools"]
@@ -543,6 +752,12 @@ class ModelRequester:
 
             result = await self._request_with_openai(model_config, request_body)
             result = self._normalize_result(result)
+            if api_to_internal:
+                result["_tool_name_map"] = {
+                    "api_to_internal": api_to_internal,
+                    "internal_to_api": internal_to_api,
+                    "dot_delimiter": _tool_name_dot_delimiter(),
+                }
             duration = time.perf_counter() - start_time
 
             usage = result.get("usage", {}) or {}

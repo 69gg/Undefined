@@ -321,7 +321,7 @@ class Config:
     log_max_size: int
     log_backup_count: int
     log_thinking: bool
-    tools_sanitize: bool
+    tools_dot_delimiter: str
     tools_description_max_len: int
     tools_sanitize_verbose: bool
     tools_description_preview_len: int
@@ -415,9 +415,20 @@ class Config:
             _get_value(data, ("logging", "log_thinking"), "LOG_THINKING"), True
         )
 
-        tools_sanitize = _coerce_bool(
-            _get_value(data, ("tools", "sanitize"), "TOOLS_SANITIZE"), False
-        )
+        tools_dot_delimiter = _coerce_str(
+            _get_value(data, ("tools", "dot_delimiter"), "TOOLS_DOT_DELIMITER"), "-_-"
+        ).strip()
+        if not tools_dot_delimiter:
+            tools_dot_delimiter = "-_-"
+        # dot_delimiter 必须满足 OpenAI-compatible 的 function.name 约束。
+        if "." in tools_dot_delimiter or not re.fullmatch(
+            r"[a-zA-Z0-9_-]+", tools_dot_delimiter
+        ):
+            logger.warning(
+                "[配置] tools.dot_delimiter 非法（仅允许 [a-zA-Z0-9_-] 且不能包含 '.'），已回退默认值: '-_-'（当前=%s）",
+                tools_dot_delimiter,
+            )
+            tools_dot_delimiter = "-_-"
         tools_description_max_len = _coerce_int(
             _get_value(
                 data, ("tools", "description_max_len"), "TOOLS_DESCRIPTION_MAX_LEN"
@@ -603,7 +614,7 @@ class Config:
             log_max_size=log_max_size_mb * 1024 * 1024,
             log_backup_count=log_backup_count,
             log_thinking=log_thinking,
-            tools_sanitize=tools_sanitize,
+            tools_dot_delimiter=tools_dot_delimiter,
             tools_description_max_len=tools_description_max_len,
             tools_sanitize_verbose=tools_sanitize_verbose,
             tools_description_preview_len=tools_description_preview_len,
