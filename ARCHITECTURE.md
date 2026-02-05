@@ -124,7 +124,7 @@ graph TB
         end
         
         subgraph IOLayer["异步 IO 层 (src/Undefined/utils/)"]
-            IOUtils["IO 工具<br/>[io.py]<br/>• write_json<br/>• read_json<br/>• append_line<br/>• 文件锁 (flock)"]
+            IOUtils["IO 工具<br/>[io.py]<br/>• write_json<br/>• read_json<br/>• append_line<br/>• 文件锁 (flock/msvcrt) + 原子写入"]
             SchedulerUtils["调度器工具<br/>[scheduler.py]<br/>• crontab 解析"]
             CacheUtils["缓存工具<br/>[cache.py]<br/>• 定期清理"]
             SenderUtils["Sender 工具<br/>[sender.py]"]
@@ -656,7 +656,7 @@ graph LR
 4. **AI 核心能力层**：AIClient (client.py)、PromptBuilder (prompts.py)、ModelRequester (llm.py)、ToolManager (tooling.py)、MultimodalAnalyzer (multimodal.py)、SummaryService (summaries.py)、TokenCounter (tokens.py)
 5. **存储与上下文层**：MessageHistoryManager (utils/history.py, 10000条限制)、MemoryStorage (memory.py, 500条上限)、EndSummaryStorage、FAQStorage、ScheduledTaskStorage、TokenUsageStorage (自动归档)
 6. **技能系统层**：ToolRegistry (registry.py)、AgentRegistry、6个 Agents (共64个工具)、7类 Toolsets
-7. **异步 IO 层**：统一 IO 工具 (utils/io.py)，包含 write_json、read_json、append_line、文件锁 (flock)
+7. **异步 IO 层**：统一 IO 工具 (utils/io.py)，包含 write_json、read_json、append_line、跨平台文件锁 (flock/msvcrt)
 8. **数据持久化层**：历史数据目录、FAQ 目录、Token 归档目录、记忆文件、总结文件、定时任务文件
 
 ### "车站-列车" 队列模型
@@ -689,11 +689,17 @@ graph LR
 ### 统一 IO 层与异步存储
 
 -   **统一 IO 工具** (`src/Undefined/utils/io.py`)：任何涉及磁盘读写的操作（JSON 读写、行追加）都必须通过该层，内部使用 `asyncio.to_thread` 将阻塞调用移出主线程。
--   **内核级文件锁**：引入 `flock` 机制。在高并发写入 Token 记录或记忆时，系统会自动进行排队并保持原子性，避免文件损坏或主循环假死。
+-   **内核级文件锁**：引入跨平台文件锁 (Linux/macOS 使用 `flock`，Windows 使用 `msvcrt`)；通过锁文件实现跨平台一致的互斥语义。
+-   **原子写入**：关键 JSON 写入使用“写临时文件 + `os.replace` 原子替换”，避免进程异常退出导致文件半写损坏。
 -   **存储组件异步化**：所有核心存储类（Memory, FAQ, Tasks）现已全面提供异步接口，确保机器人响应不受磁盘延迟影响。
+
+### 资源加载与提示词安全
+
+-   **资源加载**：提示词与预置文案通过 `src/Undefined/utils/resources.py` 读取，优先从运行目录加载同名 `res/...`（便于覆盖），若不存在再回退到安装包自带资源，并提供仓库结构兜底，避免依赖启动时的工作目录。
+-   **提示词结构安全**：结构化 Prompt/历史消息注入使用 `src/Undefined/utils/xml.py` 做必要的 XML 转义，降低用户输入破坏结构或干扰解析的风险。
 
 ---
 
 **架构图版本**: v2.11.0
-**更新日期**: 2026-02-03  
+**更新日期**: 2026-02-05  
 **基于代码版本**: 最新 main 分支

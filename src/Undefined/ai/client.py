@@ -298,7 +298,14 @@ class AIClient:
         results: list[tuple[str, Any]] = []
         for name in to_run:
             try:
-                result = await self.tool_manager.execute_tool(name, {}, {})
+                result = await self.tool_manager.execute_tool(
+                    name,
+                    {},
+                    {
+                        "runtime_config": self._get_runtime_config(),
+                        "easter_egg_silent": True,
+                    },
+                )
             except Exception as exc:
                 logger.warning("[预先调用] %s 执行失败: %s", name, exc)
                 continue
@@ -454,6 +461,7 @@ class AIClient:
 
         # 注入常用资源（用于工具执行）
         tool_context.setdefault("ai_client", self)
+        tool_context.setdefault("runtime_config", self._get_runtime_config())
         tool_context.setdefault("search_wrapper", self._search_wrapper)
         tool_context.setdefault("recent_replies", self.recent_replies)
         tool_context.setdefault(

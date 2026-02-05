@@ -45,3 +45,10 @@ jobs:
 
       - name: Run Mypy
         run: uv run mypy .
+
+      - name: Build wheel
+        run: uv build --wheel
+
+      - name: Verify wheel contains resources
+        run: |
+          uv run python -c "import glob, zipfile; whl=glob.glob('dist/*.whl')[0]; z=zipfile.ZipFile(whl); names=set(z.namelist()); required={'config.toml.example','res/prompts/undefined.xml','res/prepared_messages/help_message.txt','img/xlwy.jpg'}; missing=sorted([p for p in required if p not in names]); assert not missing, f'missing in wheel: {missing}'"

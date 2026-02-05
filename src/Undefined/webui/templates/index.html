@@ -286,6 +286,11 @@
                             </select>
                             <select id="logLevelFilter" class="form-control form-control-sm" aria-label="Log level">
                             </select>
+                            <label class="toggle-wrapper">
+                                <span data-i18n="logs.level_gte" style="font-size: 13px;">该等级及以上</span>
+                                <input type="checkbox" id="logLevelGteToggle" class="toggle-input">
+                                <span class="toggle-track"><span class="toggle-handle"></span></span>
+                            </label>
                             <input id="logSearchInput" type="search" class="form-control form-control-sm"
                                 data-i18n-placeholder="logs.search_placeholder" placeholder="搜索日志" />
                             <button id="btnClearLogs" class="btn ghost btn-sm" data-i18n="logs.clear">清空</button>
@@ -332,6 +337,7 @@
         </main>
     </div>
 
+    <script src="/static/js/logs.js"></script>
     <script src="/static/js/main.js"></script>
 </body>
 

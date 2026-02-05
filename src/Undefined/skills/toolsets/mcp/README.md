@@ -38,7 +38,11 @@ MCP 工具的命名格式为：`mcp.{server_name}.{tool_name}`
 
 ### 环境变量
 
-- `MCP_CONFIG_PATH`：MCP 配置文件路径（默认：`config/mcp.json`）
+- 推荐：在 `config.toml` 设置 `[mcp].config_path = "config/mcp.json"`
+- 兼容：`MCP_CONFIG_PATH` 作为覆盖（默认：`config/mcp.json`）
+
+> 说明：全局 MCP 工具默认命名为 `mcp.{server_name}.{tool_name}`。
+> Agent 私有 MCP（`skills/agents/<agent>/mcp.json`）会在该 agent 调用期间临时加载，工具名保持 MCP 原始名称，不追加 `mcp.` 前缀。
 
 ## 使用示例
 
@@ -147,7 +151,7 @@ AI 可以使用：
 
 ### MCP 工具未加载
 
-1. 检查 `fastmcp` 是否安装：`pip list | grep fastmcp`
+1. 检查 `fastmcp` 是否安装：`python -m pip show fastmcp`（无输出表示未安装）
 2. 检查配置文件路径是否正确
 3. 查看日志中的错误信息
 

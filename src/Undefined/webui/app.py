@@ -9,6 +9,7 @@ from aiohttp import web
 from Undefined.config import load_webui_settings, get_config_manager, get_config
 from .core import BotProcessController, SessionStore
 from .routes import routes
+from .utils import ensure_config_toml
 
 # Setup logging for WebUI itself
 logging.basicConfig(
@@ -70,7 +71,7 @@ async def on_cleanup(app: web.Application) -> None:
     logger.info("[WebUI] Background tasks stopped")
 
 
-def create_app() -> web.Application:
+def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
     app = web.Application()
 
     # Initialize core components
@@ -80,6 +81,9 @@ def create_app() -> web.Application:
     # Setup Hot Reload for WebUI settings
     config_manager = get_config_manager()
     app["settings"] = load_webui_settings()
+
+    # One-time client-side redirect hint (consumed by index handler)
+    app["redirect_to_config_once"] = redirect_to_config_once
 
     def _on_config_change(config: Any, changes: dict[str, Any]) -> None:
         webui_keys = {"webui_url", "webui_port", "webui_password"}
@@ -107,10 +111,11 @@ def create_app() -> web.Application:
 
 
 def run() -> None:
+    created = ensure_config_toml()
     settings = load_webui_settings()
     _init_webui_file_handler()
 
-    app = create_app()
+    app = create_app(redirect_to_config_once=created)
 
     host = settings.url
     port = settings.port

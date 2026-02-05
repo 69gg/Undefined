@@ -17,6 +17,7 @@ from Undefined.onebot import (
 from Undefined.utils.sender import MessageSender
 from Undefined.services.security import SecurityService
 from Undefined.token_usage_storage import TokenUsageStorage
+from Undefined.utils.resources import read_text_resource
 
 # 尝试导入 matplotlib
 plt: Any
@@ -30,8 +31,19 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-with open("res/prepared_messages/help_message.txt", "r", encoding="utf-8") as f:
-    HELP_MESSAGE = f.read()
+_HELP_MESSAGE: str | None = None
+
+
+def _get_help_message() -> str:
+    global _HELP_MESSAGE
+    if _HELP_MESSAGE is not None:
+        return _HELP_MESSAGE
+    try:
+        _HELP_MESSAGE = read_text_resource("res/prepared_messages/help_message.txt")
+    except Exception as exc:
+        logger.error("加载 help_message 失败: %s", exc)
+        _HELP_MESSAGE = "帮助信息加载失败。"
+    return _HELP_MESSAGE
 
 
 class CommandDispatcher:
@@ -793,7 +805,7 @@ class CommandDispatcher:
         )
 
     async def _handle_help(self, group_id: int) -> None:
-        await self.sender.send_group_message(group_id, HELP_MESSAGE)
+        await self.sender.send_group_message(group_id, _get_help_message())
 
     async def _handle_lsfaq(self, group_id: int) -> None:
         faqs = await self.faq_storage.list_all(group_id)

@@ -11,6 +11,7 @@ from Undefined.ai.parsing import extract_choices_content
 from Undefined.ai.tokens import TokenCounter
 from Undefined.config import ChatModelConfig
 from Undefined.utils.logging import log_debug_json
+from Undefined.utils.resources import read_text_resource
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +41,13 @@ class SummaryService:
         返回:
             总结出的文本内容
         """
-        async with aiofiles.open(
-            self._summarize_prompt_path, "r", encoding="utf-8"
-        ) as f:
-            system_prompt = await f.read()
+        try:
+            system_prompt = read_text_resource(self._summarize_prompt_path)
+        except Exception:
+            async with aiofiles.open(
+                self._summarize_prompt_path, "r", encoding="utf-8"
+            ) as f:
+                system_prompt = await f.read()
         logger.debug(
             "[总结] summarize_prompt_len=%s path=%s",
             len(system_prompt),
@@ -91,8 +95,13 @@ class SummaryService:
             "[总结] merge_segments=%s total_len=%s", len(segments), len(segments_text)
         )
 
-        async with aiofiles.open(self._merge_prompt_path, "r", encoding="utf-8") as f:
-            prompt = await f.read()
+        try:
+            prompt = read_text_resource(self._merge_prompt_path)
+        except Exception:
+            async with aiofiles.open(
+                self._merge_prompt_path, "r", encoding="utf-8"
+            ) as f:
+                prompt = await f.read()
         logger.debug(
             "[总结] merge_prompt_len=%s path=%s",
             len(prompt),

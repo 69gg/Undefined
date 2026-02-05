@@ -173,5 +173,5 @@ skills/
     -   保持目录结构（`config.json` + `handler.py`）的一致性。
 
 6.  **异步安全 I/O**:
-    -   严禁在 `handler.py` 中直接调用同步的 `open()`, `json.dump()` 或 `fcntl.flock()`。
-    -   如果需要读写本地文件，建议使用 `asyncio.to_thread` 包装阻塞操作，或参考 `src/Undefined/utils/io.py`。
+-   避免在 `handler.py` 中进行阻塞式磁盘 I/O（大量 `open()` / 读写大文件 / 频繁 flush）。如必须使用同步 I/O，请用 `asyncio.to_thread` 移出事件循环。
+-   不要引入平台专用锁实现（如 `fcntl`）；在本仓库内读写 JSON/行追加请优先复用 `src/Undefined/utils/io.py`（跨平台锁 + 原子写入）。

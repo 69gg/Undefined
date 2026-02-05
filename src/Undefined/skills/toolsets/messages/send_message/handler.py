@@ -11,6 +11,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         logger.warning("[发送消息] 收到空消息请求")
         return "消息内容不能为空"
 
+    runtime_config = context.get("runtime_config")
+
     # 如果可用，使用 context.recent_replies 检查重复
     recent_replies = context.get("recent_replies")
     if recent_replies is not None and message in recent_replies:
@@ -36,6 +38,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 )
 
         if group_id:
+            if runtime_config is not None and not runtime_config.is_group_allowed(
+                int(group_id)
+            ):
+                return f"发送失败：目标群 {int(group_id)} 不在允许列表内（access.allowed_group_ids），已被访问控制拦截"
             logger.info(f"[发送消息] 准备发送到群 {group_id}: {message[:100]}")
             if at_user:
                 logger.debug(f"[发送消息] 同时 @ 用户: {at_user}")
@@ -49,6 +55,15 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 logger.exception(f"[发送消息] 发送到群 {group_id} 失败: {e}")
                 return f"发送失败: {e}"
         elif send_message_callback:
+            # 兼容：当无法确定群ID时，回调可能用于私聊回复
+            if runtime_config is not None:
+                uid = context.get("user_id")
+                if (
+                    isinstance(uid, int)
+                    and uid > 0
+                    and not runtime_config.is_private_allowed(uid)
+                ):
+                    return f"发送失败：目标用户 {uid} 不在允许列表内（access.allowed_private_ids），已被访问控制拦截"
             logger.info(f"[发送消息] 无法确定群ID，尝试使用回调发送: {message[:100]}")
             await send_message_callback(message, at_user)
             if recent_replies is not None:

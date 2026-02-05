@@ -1,260 +1,284 @@
-# zh: 机器人小号配置
-# en: Bot account settings
+# zh: 机器人小号配置。
+# en: Bot account settings.
 [core]
-# zh: 机器人QQ号
-# en: Bot QQ number
+# zh: 机器人QQ号。
+# en: Bot QQ number.
 bot_qq = 0
-# zh: 超级管理员QQ号（唯一，可添加其他管理员）
-# en: Superadmin QQ number (unique; can add other admins)
+# zh: 超级管理员QQ号（唯一，可添加其他管理员）。
+# en: Superadmin QQ number (unique).
 superadmin_qq = 0
-# zh: 初始管理员QQ号列表（逗号分隔，可选）
-# en: Initial admin QQ list (comma-separated, optional)
+# zh: 初始管理员QQ号列表（逗号分隔，可选）。
+# en: Initial admin QQ list (comma-separated, optional).
 admin_qq = []
-# zh: 音频转发代理QQ号（用于群聊音频转发，可选）
-# en: Audio forward proxy QQ number (for group audio forwarding, optional)
+# zh: 音频转发代理QQ号（用于群聊音频转发，可选）。
+# en: Audio forward proxy QQ number (for group audio forwarding, optional).
 forward_proxy_qq = 0
 
-# zh: OneBot WebSocket 配置
-# en: OneBot WebSocket settings
+# zh: 会话白名单（访问控制）。只要本段任一列表非空，系统将进入“限制模式”：未在白名单内的群/私聊会被忽略，且所有消息发送将被拦截。
+# en: Session allowlist (access control). If either the group or private allowlist is non-empty, the bot enters "allowlist mode": groups or private chats not in the allowlists will be ignored and outgoing messages will be blocked.
+[access]
+# zh: 允许处理/发送的群号白名单（留空 = 不限制）。
+# en: Allowed group IDs. Empty = no restriction.
+allowed_group_ids = []
+
+# zh: 允许处理/发送的私聊 QQ 白名单（留空 = 不限制）。
+# en: Allowed private-chat user IDs. Empty = no restriction.
+allowed_private_ids = []
+
+# zh: 超级管理员是否可在私聊中绕过 "allowed_private_ids"（仅影响私聊收发；群聊仍严格按 "allowed_group_ids"）。
+# en: Allow superadmin to bypass "allowed_private_ids" for private chats only.
+superadmin_bypass_allowlist = true
+
+# zh: OneBot WebSocket 配置。
+# en: OneBot WebSocket settings.
 [onebot]
-# zh: NapCat WebSocket 地址
-# en: NapCat WebSocket URL
+# zh: NapCat WebSocket地址。
+# en: NapCat WebSocket URL.
 ws_url = "ws://127.0.0.1:3001"
-# zh: Access Token（可选）
-# en: Access token (optional)
+# zh: Access Token（可选）。
+# en: Access token (optional).
 token = ""
 
-# zh: 对话模型配置（用于总结聊天记录）
-# en: Chat model config (used for chat summarization)
+# zh: 对话模型配置（用于总结聊天记录）。
+# en: Chat model config (used for chat summarization).
 [models.chat]
-# zh: OpenAI-compatible base URL，例如 https://api.openai.com/v1（legacy /chat/completions 已弃用但仍兼容）
-# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1 (legacy /chat/completions is deprecated but still accepted)
+# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
+# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
 api_url = ""
-# zh: Chat 模型 API Key
-# en: Chat model API key
+# zh: Chat 模型 API Key。
+# en: Chat model API key.
 api_key = ""
-# zh: Chat 模型名称
-# en: Chat model name
+# zh: Chat 模型名称。
+# en: Chat model name.
 model_name = ""
-# zh: 最大生成 tokens
-# en: Max generation tokens
+# zh: 最大生成 tokens。
+# en: Max generation tokens.
 max_tokens = 8192
-# zh: 是否启用 thinking（思维链）
-# en: Enable thinking (reasoning)
+# zh: 是否启用 thinking（思维链）。
+# en: Enable thinking (reasoning).
 thinking_enabled = false
-# zh: thinking budget tokens
-# en: thinking budget tokens
+# zh: thinking 预算 tokens。
+# en: Thinking-budget tokens.
 thinking_budget_tokens = 20000
-# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 tool_calls 中回传 reasoning_content
-# en: DeepSeek thinking-mode tool-call compatibility: return reasoning_content across multi tool_calls
+# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 "tool_calls" 中回传 "reasoning_content"。
+# en: DeepSeek thinking-mode tool-call compatibility: return "reasoning_content" across multiple "tool_calls".
 deepseek_new_cot_support = false
 
-# zh: 视觉模型配置（用于图片描述和OCR）
-# en: Vision model config (image description and OCR)
+# zh: 视觉模型配置（用于图片描述和 OCR）。
+# en: Vision model config (image description and OCR).
 [models.vision]
-# zh: OpenAI-compatible base URL，例如 https://api.openai.com/v1（legacy /chat/completions 已弃用但仍兼容）
-# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1 (legacy /chat/completions is deprecated but still accepted)
+# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
+# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
 api_url = ""
-# zh: Vision 模型 API Key
-# en: Vision model API key
+# zh: Vision 模型 API Key。
+# en: Vision model API key.
 api_key = ""
-# zh: Vision 模型名称
-# en: Vision model name
+# zh: Vision 模型名称。
+# en: Vision model name.
 model_name = ""
-# zh: 是否启用 thinking（思维链）
-# en: Enable thinking (reasoning)
+# zh: 是否启用 thinking（思维链）。
+# en: Enable thinking (reasoning).
 thinking_enabled = false
-# zh: thinking budget tokens
-# en: thinking budget tokens
+# zh: thinking 预算 tokens。
+# en: Thinking-budget tokens.
 thinking_budget_tokens = 20000
-# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 tool_calls 中回传 reasoning_content
-# en: DeepSeek thinking-mode tool-call compatibility: return reasoning_content across multi tool_calls
+# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 "tool_calls" 中回传 "reasoning_content"。
+# en: DeepSeek thinking-mode tool-call compatibility: return "reasoning_content" across multiple "tool_calls".
 deepseek_new_cot_support = false
 
-# zh: 安全模型配置（用于防注入检测和注入后的回复生成）
-# en: Security model config (injection detection and post-injection responses)
+# zh: 安全模型配置（用于防注入检测和注入后回复生成）。
+# en: Security model config (injection detection and post-injection responses).
 [models.security]
-# zh: OpenAI-compatible base URL，例如 https://api.openai.com/v1（legacy /chat/completions 已弃用但仍兼容）
-# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1 (legacy /chat/completions is deprecated but still accepted)
+# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
+# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
 api_url = ""
-# zh: Security 模型 API Key
-# en: Security model API key
+# zh: Security 模型 API Key。
+# en: Security model API key.
 api_key = ""
-# zh: Security 模型名称
-# en: Security model name
+# zh: Security 模型名称。
+# en: Security model name.
 model_name = ""
-# zh: 可选限制：最大生成 tokens
-# en: Optional limit: max generation tokens
+# zh: 可选限制：最大生成 tokens。
+# en: Optional limit: max generation tokens.
 max_tokens = 100
-# zh: 是否启用 thinking（思维链）
-# en: Enable thinking (reasoning)
+# zh: 是否启用 thinking（思维链）。
+# en: Enable thinking (reasoning).
 thinking_enabled = false
-# zh: thinking budget tokens
-# en: thinking budget tokens
+# zh: thinking 预算 tokens。
+# en: Thinking-budget tokens.
 thinking_budget_tokens = 0
-# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 tool_calls 中回传 reasoning_content
-# en: DeepSeek thinking-mode tool-call compatibility: return reasoning_content across multi tool_calls
+# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 "tool_calls" 中回传 "reasoning_content"。
+# en: DeepSeek thinking-mode tool-call compatibility: return "reasoning_content" across multiple "tool_calls".
 deepseek_new_cot_support = false
 
-# zh: Agent 模型配置（用于执行 agents）
-# en: Agent model config (used to run agents)
+# zh: Agent 模型配置（用于执行 agents）。
+# en: Agent model config (used to run agents).
 [models.agent]
-# zh: OpenAI-compatible base URL，例如 https://api.openai.com/v1（legacy /chat/completions 已弃用但仍兼容）
-# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1 (legacy /chat/completions is deprecated but still accepted)
+# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
+# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
 api_url = ""
-# zh: Agent 模型 API Key
-# en: Agent model API key
+# zh: Agent 模型 API Key。
+# en: Agent model API key.
 api_key = ""
-# zh: Agent 模型名称
-# en: Agent model name
+# zh: Agent 模型名称。
+# en: Agent model name.
 model_name = ""
-# zh: 可选限制：最大生成 tokens
-# en: Optional limit: max generation tokens
+# zh: 可选限制：最大生成 tokens。
+# en: Optional limit: max generation tokens.
 max_tokens = 4096
-# zh: 是否启用 thinking（思维链）
-# en: Enable thinking (reasoning)
+# zh: 是否启用 thinking（思维链）。
+# en: Enable thinking (reasoning).
 thinking_enabled = false
-# zh: thinking budget tokens
-# en: thinking budget tokens
+# zh: thinking 预算 tokens。
+# en: Thinking-budget tokens.
 thinking_budget_tokens = 0
-# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 tool_calls 中回传 reasoning_content
-# en: DeepSeek thinking-mode tool-call compatibility: return reasoning_content across multi tool_calls
+# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 "tool_calls" 中回传 "reasoning_content"。
+# en: DeepSeek thinking-mode tool-call compatibility: return "reasoning_content" across multiple "tool_calls".
 deepseek_new_cot_support = false
 
-# zh: 日志配置
-# en: Logging settings
+# zh: 日志配置。
+# en: Logging settings.
 [logging]
-# zh: 日志级别（DEBUG/INFO/WARNING/ERROR）
-# en: Log level (DEBUG/INFO/WARNING/ERROR)
+# zh: 日志级别（DEBUG/INFO/WARNING/ERROR）。
+# en: Log level (DEBUG/INFO/WARNING/ERROR).
 level = "INFO"
-# zh: 日志文件路径
-# en: Log file path
+# zh: 日志文件路径。
+# en: Log file path.
+# zh: 在 Windows 上建议使用正斜杠，如 D:/logs/bot.log，或使用单引号 'D:\logs\bot.log'，或在双引号中写双反斜杠 "D:\\logs\\bot.log"。
+# en: On Windows, prefer "D:/logs/bot.log", or "'D:\logs\bot.log'", or "D:\\logs\\bot.log".
 file_path = "logs/bot.log"
-# zh: 单个日志文件最大大小（MB）
-# en: Max log file size (MB)
+# zh: 单个日志文件最大大小（MB）。
+# en: Max log file size (MB).
 max_size_mb = 10
-# zh: 保留日志文件数量
-# en: Log backup count
+# zh: 保留日志文件数量。
+# en: Log backup count.
 backup_count = 5
-# zh: 是否在日志中输出思维链（默认开启）
-# en: Log thinking output (default on)
+# zh: 是否在日志中输出思维链（默认开启）。
+# en: Log thinking output (default: on).
 log_thinking = true
 
-# zh: Tools Schema 兼容性（可选）
-# en: Tools schema compatibility (optional)
-# zh: 某些 OpenAI-compatible 网关会对 tools[].function.description 做更严格校验，可能触发 400
-# en: Some OpenAI-compatible gateways strictly validate tools[].function.description and may return 400
+# zh: Tools Schema 兼容性（可选）。
+# en: Tools schema compatibility (optional).
+# zh: 某些 OpenAI-compatible 网关会对 "tools[].function.description" 做更严格的校验，可能触发 400 错误。
+# en: Some OpenAI-compatible gateways strictly validate "tools[].function.description" and may return 400.
 [tools]
-# zh: 是否在请求前清洗 tools schema（默认关闭）
-# en: Sanitize tools schema before requests (default off)
+# zh: 是否在请求前清洗 tools schema（默认关闭）。
+# en: Sanitize tools schema before requests (default: off).
 sanitize = false
-# zh: description 最大长度（超出会截断）
-# en: Description max length (truncated when exceeded)
+# zh: description 最大长度（超出会截断）。
+# en: Description max length (truncated when exceeded).
 description_max_len = 1024
-# zh: 是否输出逐条清洗详情日志（INFO）
-# en: Log per-item sanitization details (INFO)
+# zh: 是否输出逐条清洗详情日志（INFO）。
+# en: Log per-item sanitization details (INFO).
 sanitize_verbose = false
-# zh: 日志中 description 预览长度
-# en: Description preview length in logs
+# zh: 日志中 description 预览长度。
+# en: Description preview length in logs.
 description_preview_len = 160
 
-# zh: Skills 热重载配置（可选）
-# en: Skills hot reload settings (optional)
+# zh: 彩蛋功能（可选）。
+# en: Easter egg features (optional)
+[easter_egg]
+# zh: 彩蛋提示发送模式。模式："none"（关闭）/"agent"（主 AI 调用 Agent 时发送）/"tools"（主 AI 或 Agent 调用 Tool 时发送）/"clean"（过滤噪声；对自动预取的工具如 "get_current_time"、"send_message"、"end" 不予提示）/"all"（包括 Agent 内部调用其子工具即 "agent_tool" 的场景也发送）。默认："none"。
+# en: Easter-egg announcement mode. Modes: "none" (off) / "agent" (send when the main AI calls an Agent) / "tools" (send when the main AI or an Agent calls a Tool) / "clean" (filter noise; automatically prefetched tools such as "get_current_time", "send_message", and "end" are not announced) / "all" (also send when an Agent internally calls its sub-tools, i.e. "agent_tool"). Default: "none".
+agent_call_message_enabled = "none"
+
+# zh: Skills 热重载配置（可选）。
+# en: Skills hot reload settings (optional).
 [skills]
-# zh: 是否开启 skills 热重载
-# en: Enable skills hot reload
+# zh: 是否开启 skills 热重载。
+# en: Enable skills hot reload.
 hot_reload = true
-# zh: 扫描间隔（秒）
-# en: Scan interval (seconds)
+# zh: 扫描间隔（秒）。
+# en: Scan interval (seconds).
 hot_reload_interval = 2.0
-# zh: 去抖时间（秒）
-# en: Debounce time (seconds)
+# zh: 去抖时间（秒）。
+# en: Debounce time (seconds).
 hot_reload_debounce = 0.5
-# zh: Agent intro 自动生成（推荐开启）
-# en: Agent intro auto-generation (recommended)
+# zh: Agent intro 自动生成（推荐开启）。
+# en: Agent intro auto-generation (recommended).
 intro_autogen_enabled = true
-# zh: 队列发车间隔（秒）
-# en: Queue interval (seconds)
+# zh: 队列发车间隔（秒）。
+# en: Queue interval (seconds).
 intro_autogen_queue_interval = 1.0
-# zh: 单次生成最大 token
-# en: Max tokens per generation
+# zh: 单次生成最大 token。
+# en: Max tokens per generation.
 intro_autogen_max_tokens = 8192
-# zh: Hash 缓存路径
-# en: Hash cache path
+# zh: Hash 缓存路径。
+# en: Hash cache path.
 intro_hash_path = ".cache/agent_intro_hashes.json"
-# zh: 预先执行的工具列表（结果注入 system 消息）
-# en: Prefetch tool list (results injected into system messages)
+# zh: 预先执行的工具列表（结果注入 system 消息）。
+# en: Prefetch tool list (results injected into system messages).
 prefetch_tools = ["get_current_time"]
-# zh: 隐藏已预取的工具声明
-# en: Hide prefetched tools from model tool list
+# zh: 隐藏已预取的工具声明。
+# en: Hide prefetched tools from the model's tool list.
 prefetch_tools_hide = true
 
-# zh: 搜索服务配置（SearXNG）
-# en: Search service config (SearxNG)
+# zh: 搜索服务配置（SearXNG）。
+# en: Search service config (SearxNG).
 [search]
-# zh: SearxNG 搜索服务地址，如 http://127.0.0.1:8849
-# en: SearxNG service URL, e.g. http://127.0.0.1:8849
+# zh: SearxNG 搜索服务地址，例如 http://127.0.0.1:8849。
+# en: SearxNG service URL, e.g. http://127.0.0.1:8849.
 searxng_url = ""
 
-# zh: 代理设置（可选）
-# en: Proxy settings (optional)
+# zh: 代理设置（可选）。
+# en: Proxy settings (optional).
 [proxy]
-# zh: 是否在 web_agent 中启用代理
-# en: Enable proxy in web_agent
+# zh: 是否在 "web_agent" 中启用代理。
+# en: Enable proxy in "web_agent".
 use_proxy = true
-# zh: 例如 http://127.0.0.1:7890（也可用环境变量 HTTP_PROXY）
-# en: e.g. http://127.0.0.1:7890 (or env var HTTP_PROXY)
+# zh: 例如 http://127.0.0.1:7890（也可使用环境变量 "HTTP_PROXY"）。
+# en: e.g. http://127.0.0.1:7890 (or use the "HTTP_PROXY" environment variable).
 http_proxy = ""
-# zh: 例如 http://127.0.0.1:7890（也可用环境变量 HTTPS_PROXY）
-# en: e.g. http://127.0.0.1:7890 (or env var HTTPS_PROXY)
+# zh: 例如 http://127.0.0.1:7890（也可使用环境变量 "HTTPS_PROXY"）。
+# en: e.g. http://127.0.0.1:7890 (or use the "HTTPS_PROXY" environment variable).
 https_proxy = ""
 
-# zh: 天气API配置（心知天气）
-# en: Weather API config (Seniverse)
+# zh: 天气 API 配置（心知天气）。
+# en: Weather API config (Seniverse).
 [weather]
-# zh: 心知天气 API Key，从 https://www.seniverse.com/ 获取
-# en: Seniverse API key, get from https://www.seniverse.com/
+# zh: 心知天气 API Key，从 https://www.seniverse.com/ 获取。
+# en: Seniverse API key; obtain from https://www.seniverse.com/.
 api_key = ""
 
-# zh: XXAPI API 配置
-# en: XXAPI config
+# zh: XXAPI API 配置。
+# en: XXAPI config.
 [xxapi]
-# zh: XXAPI Token，前往 https://xxapi.cn 获取
-# en: XXAPI token, get from https://xxapi.cn
+# zh: XXAPI Token，前往 https://xxapi.cn/ 获取。
+# en: XXAPI token; obtain from https://xxapi.cn/.
 api_token = ""
 
-# zh: Token 统计归档配置
-# en: Token usage archive settings
+# zh: Token 统计归档配置。
+# en: Token usage archive settings.
 [token_usage]
-# zh: 超过该大小压缩归档（MB），<=0 禁用
-# en: Archive when size exceeds (MB), <=0 disables
+# zh: 超过该大小压缩归档（MB），<= 0 禁用。
+# en: Archive when size exceeds (MB); <= 0 disables.
 max_size_mb = 5
-# zh: 最多保留归档数量，<=0 不限制
-# en: Max archive count, <=0 means unlimited
+# zh: 最多保留归档数量，<= 0 不限制。
+# en: Max archive count; <= 0 means unlimited.
 max_archives = 30
-# zh: 归档总大小上限（MB），<=0 禁用
-# en: Max total archive size (MB), <=0 disables
+# zh: 归档总大小上限（MB），<= 0 禁用。
+# en: Max total archive size (MB); <= 0 disables.
 max_total_mb = 0
-# zh: 归档清理模式：delete(删除最旧，默认)/merge(合并最旧，尽量无损)/none(不清理，可能无限增长)
-# en: Prune mode: delete (default)/merge (lossless if possible)/none (no cleanup)
+# zh: 归档清理模式："delete"（删除最旧，默认）/"merge"（合并最旧，尽量无损）/"none"（不清理，可能无限增长）。
+# en: Prune mode: "delete" (default) / "merge" (attempt lossless merge) / "none" (no cleanup).
 archive_prune_mode = "delete"
 
-# zh: MCP (Model Context Protocol) 配置
-# en: MCP (Model Context Protocol) settings
+# zh: MCP（Model Context Protocol）配置。
+# en: MCP (Model Context Protocol) settings.
 [mcp]
-# zh: MCP 配置文件路径（相对于工作目录）
-# en: MCP config file path (relative to working directory)
+# zh: MCP 配置文件路径（相对于工作目录）。
+# en: MCP config file path (relative to the working directory).
 config_path = "config/mcp.json"
 
-# zh: WebUI 设置
-# en: WebUI settings
+# zh: WebUI 设置。
+# en: WebUI settings.
 [webui]
-# zh: WebUI 监听地址
-# en: WebUI bind host
+# zh: WebUI 监听地址。
+# en: WebUI bind host.
 url = "127.0.0.1"
-# zh: WebUI 端口
-# en: WebUI port
+# zh: WebUI 端口。
+# en: WebUI port.
 port = 8787
-# zh: WebUI 密码（留空则使用默认 changeme）
-# en: WebUI password (falls back to default 'changeme' if empty)
+# zh: WebUI 密码（留空则使用默认 "changeme"）。
+# en: WebUI password (falls back to default 'changeme' if empty).
 password = "changeme"

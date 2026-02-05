@@ -40,6 +40,8 @@ toolsets/
 - **结构化日志**：统一输出 `event=execute`、`status=success/timeout/error` 等字段。
 - **热重载**：检测到 `toolsets/` 中的变更会自动重新加载。
 
+热重载参数可通过 `config.toml` 的 `[skills]` 段配置；也支持同名环境变量覆盖。
+
 ## 示例：添加一个新工具
 
 ### 1. 创建目录
@@ -73,12 +75,12 @@ mkdir -p toolsets/my_category/my_new_tool
 ### 3. 创建 handler.py
 
 ```python
-from typing import Any, Dict
+from typing import Any
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
+async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     """执行工具逻辑"""
     param1 = args.get("param1")
 

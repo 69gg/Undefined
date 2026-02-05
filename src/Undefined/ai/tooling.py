@@ -95,6 +95,58 @@ class ToolManager:
             return mcp_path
         return None
 
+    def _get_easter_egg_call_mode(self, context: dict[str, Any]) -> str:
+        runtime_config = context.get("runtime_config")
+        mode = getattr(runtime_config, "easter_egg_agent_call_message_mode", None)
+        if runtime_config is None:
+            try:
+                from Undefined.config import get_config
+
+                mode = get_config(strict=False).easter_egg_agent_call_message_mode
+            except Exception:
+                mode = None
+
+        text = str(mode).strip().lower() if mode is not None else "none"
+        return text if text in {"none", "agent", "tools", "all", "clean"} else "none"
+
+    async def _maybe_send_call_easter_egg(
+        self, called_name: str, *, is_agent: bool, context: dict[str, Any]
+    ) -> None:
+        mode = self._get_easter_egg_call_mode(context)
+
+        if mode == "none":
+            return
+
+        if mode == "clean":
+            if context.get("easter_egg_silent"):
+                return
+            if not is_agent and called_name in {"send_message", "end"}:
+                return
+
+        if is_agent:
+            if mode not in {"agent", "tools", "all", "clean"}:
+                return
+        else:
+            # 仅主 AI 调用 tool 才提示；Agent 内部工具不经过 ToolManager
+            if mode not in {"tools", "all", "clean"}:
+                return
+            if context.get("agent_name"):
+                return
+
+        message = f"{called_name}，我调用你了，我要调用你了！"
+        sender = context.get("sender")
+        send_message_callback = context.get("send_message_callback")
+        group_id = context.get("group_id")
+
+        try:
+            if sender and isinstance(group_id, int) and group_id > 0:
+                await sender.send_group_message(group_id, message)
+                return
+            if send_message_callback:
+                await send_message_callback(message, None)
+        except Exception as exc:
+            logger.debug("[彩蛋] 发送提示消息失败: %s", redact_string(str(exc)))
+
     async def execute_tool(
         self,
         function_name: str,
@@ -145,6 +197,9 @@ class ToolManager:
 
         try:
             if is_agent:
+                await self._maybe_send_call_easter_egg(
+                    function_name, is_agent=True, context=context
+                )
                 mcp_registry = None
                 registry_token = None
                 mcp_config_path = self._get_agent_mcp_config_path(function_name)
@@ -202,6 +257,9 @@ class ToolManager:
                     agent_history.append({"role": "assistant", "content": str(result)})
                     agent_histories[function_name] = agent_history
             else:
+                await self._maybe_send_call_easter_egg(
+                    function_name, is_agent=False, context=context
+                )
                 result = await self.tool_registry.execute_tool(
                     function_name, function_args, context
                 )

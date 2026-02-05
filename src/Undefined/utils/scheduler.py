@@ -300,6 +300,39 @@ class TaskScheduler:
             return
         await io.delete_file(CONTEXT_DIR / f"{context_id}.json")
 
+    async def _execute_tool(
+        self,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        tool_context: dict[str, Any],
+    ) -> Any:
+        """执行工具（兼容多版本 AIClient 接口）"""
+        ai_client: Any = self.ai
+        tool_manager = getattr(ai_client, "tool_manager", None)
+        if tool_manager is not None and hasattr(tool_manager, "execute_tool"):
+            logger.debug("[任务调度] 使用 ToolManager 执行工具: %s", tool_name)
+            return await tool_manager.execute_tool(tool_name, tool_args, tool_context)
+
+        for attr in ("execute_tool", "_execute_tool"):
+            method = getattr(ai_client, attr, None)
+            if method is not None:
+                logger.debug(
+                    "[任务调度] 使用 AIClient.%s 执行工具: %s", attr, tool_name
+                )
+                return await method(tool_name, tool_args, tool_context)
+
+        available = [
+            name
+            for name in ("tool_manager", "execute_tool", "_execute_tool")
+            if hasattr(ai_client, name)
+        ]
+        logger.error(
+            "[任务调度] 工具执行入口不可用: tool=%s available=%s",
+            tool_name,
+            ",".join(available) or "none",
+        )
+        raise AttributeError("AIClient missing tool execution method")
+
     async def _execute_tool_wrapper(
         self,
         task_id: str,
@@ -375,9 +408,13 @@ class TaskScheduler:
                         return
 
                     if mtype == "group":
-                        await self.onebot.send_group_message(tid, msg)
+                        await self.sender.send_group_message(
+                            tid, msg, auto_history=False
+                        )
                     elif mtype == "private":
-                        await self.onebot.send_private_message(tid, msg)
+                        await self.sender.send_private_message(
+                            tid, msg, auto_history=False
+                        )
 
                 async def get_recent_cb(
                     chat_id: str, msg_type: str, start: int, end: int
@@ -425,7 +462,7 @@ class TaskScheduler:
                     # 并行执行所有工具
                     results = await asyncio.gather(
                         *[
-                            self.ai._execute_tool(
+                            self._execute_tool(
                                 tool["tool_name"], tool["tool_args"], tool_context
                             )
                             for tool in tools
@@ -436,7 +473,7 @@ class TaskScheduler:
                     # 串行执行所有工具
                     for tool in tools:
                         try:
-                            result = await self.ai._execute_tool(
+                            result = await self._execute_tool(
                                 tool["tool_name"], tool["tool_args"], tool_context
                             )
                             results.append(result)

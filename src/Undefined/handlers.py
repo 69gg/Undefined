@@ -26,14 +26,12 @@ from Undefined.utils.sender import MessageSender
 from Undefined.services.security import SecurityService
 from Undefined.services.command import CommandDispatcher
 from Undefined.services.ai_coordinator import AICoordinator
+from Undefined.utils.resources import resolve_resource_path
 
 from Undefined.scheduled_task_storage import ScheduledTaskStorage
 from Undefined.utils.logging import log_debug_json, redact_string
 
 logger = logging.getLogger(__name__)
-
-with open("res/prepared_messages/help_message.txt", "r", encoding="utf-8") as f:
-    HELP_MESSAGE = f.read()
 
 
 class MessageHandler:
@@ -53,7 +51,7 @@ class MessageHandler:
         self.faq_storage = faq_storage
         # 初始化 Utils
         self.history_manager = MessageHistoryManager()
-        self.sender = MessageSender(onebot, self.history_manager, config.bot_qq)
+        self.sender = MessageSender(onebot, self.history_manager, config.bot_qq, config)
 
         # 初始化服务
         self.security = SecurityService(config, ai._http_client)
@@ -101,6 +99,25 @@ class MessageHandler:
             poke_group_id: int = event.get("group_id", 0)
             poke_sender_id: int = event.get("user_id", 0)
 
+            # 会话白名单：不在允许列表则忽略
+            if poke_group_id == 0:
+                if not self.config.is_private_allowed(poke_sender_id):
+                    logger.debug(
+                        "[访问控制] 忽略私聊拍一拍: user=%s (allowlist enabled=%s)",
+                        poke_sender_id,
+                        self.config.access_control_enabled(),
+                    )
+                    return
+            else:
+                if not self.config.is_group_allowed(poke_group_id):
+                    logger.debug(
+                        "[访问控制] 忽略群聊拍一拍: group=%s sender=%s (allowlist enabled=%s)",
+                        poke_group_id,
+                        poke_sender_id,
+                        self.config.access_control_enabled(),
+                    )
+                    return
+
             logger.info(
                 f"[通知] 收到拍一拍: group={poke_group_id}, sender={poke_sender_id}"
             )
@@ -132,6 +149,15 @@ class MessageHandler:
         if event.get("message_type") == "private":
             private_sender_id: int = get_message_sender_id(event)
             private_message_content: list[dict[str, Any]] = get_message_content(event)
+
+            # 会话白名单：不在允许列表则忽略（不入历史、不触发任何处理）
+            if not self.config.is_private_allowed(private_sender_id):
+                logger.debug(
+                    "[访问控制] 忽略私聊消息: user=%s (allowlist enabled=%s)",
+                    private_sender_id,
+                    self.config.access_control_enabled(),
+                )
+                return
 
             # 获取发送者昵称
             private_sender: dict[str, Any] = event.get("sender", {})
@@ -190,6 +216,16 @@ class MessageHandler:
         sender_id: int = get_message_sender_id(event)
         message_content: list[dict[str, Any]] = get_message_content(event)
 
+        # 会话白名单：不在允许列表则忽略（不入历史、不触发任何处理）
+        if not self.config.is_group_allowed(group_id):
+            logger.debug(
+                "[访问控制] 忽略群消息: group=%s sender=%s (allowlist enabled=%s)",
+                group_id,
+                sender_id,
+                self.config.access_control_enabled(),
+            )
+            return
+
         # 获取发送者信息
         group_sender: dict[str, Any] = event.get("sender", {})
         sender_card: str = group_sender.get("card", "")
@@ -242,7 +278,10 @@ class MessageHandler:
         if matches_xinliweiyuan(text):
             rand_val = random.random()
             if rand_val < 0.1:  # 10% 发送图片
-                image_path = os.path.abspath("img/xlwy.jpg")
+                try:
+                    image_path = str(resolve_resource_path("img/xlwy.jpg").resolve())
+                except Exception:
+                    image_path = os.path.abspath("img/xlwy.jpg")
                 message = f"[CQ:image,file={image_path}]"
                 # 50% 概率 @ 发送者
                 if random.random() < 0.5:

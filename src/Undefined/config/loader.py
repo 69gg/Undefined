@@ -5,12 +5,27 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tomllib
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, IO
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover
+    StrPath = str | os.PathLike[str]
+
+    def load_dotenv(
+        dotenv_path: StrPath | None = None,
+        stream: IO[str] | None = None,
+        verbose: bool = False,
+        override: bool = False,
+        interpolate: bool = True,
+        encoding: str | None = "utf-8",
+    ) -> bool:
+        return False
+
 
 from .models import (
     AgentModelConfig,
@@ -45,23 +60,68 @@ def _load_env() -> None:
         logger.debug("加载 .env 失败，继续使用 config.toml", exc_info=True)
 
 
-def load_toml_data(config_path: Optional[Path] = None) -> dict[str, Any]:
+def _build_toml_decode_hint(line: str) -> str:
+    hints: list[str] = []
+    if "\\" in line:
+        hints.append(
+            'Windows 路径建议用单引号(不转义)或双反斜杠，或直接用正斜杠，例如：path = \'D:\\AI\\bot\' / path = "D:\\\\AI\\\\bot" / path = "D:/AI/bot"'
+        )
+    hints.append('多行文本请用三引号，例如：prompt = """..."""')
+    return "；".join(hints)
+
+
+def _format_toml_decode_error(
+    path: Path, text: str, exc: tomllib.TOMLDecodeError
+) -> str:
+    lineno: int | None = getattr(exc, "lineno", None)
+    colno: int | None = getattr(exc, "colno", None)
+    if not isinstance(lineno, int) or not isinstance(colno, int):
+        match = re.search(r"\(at line (\d+), column (\d+)\)", str(exc))
+        if match:
+            lineno = int(match.group(1))
+            colno = int(match.group(2))
+
+    if isinstance(lineno, int) and lineno > 0:
+        lines = text.splitlines()
+        line = lines[lineno - 1] if 0 <= (lineno - 1) < len(lines) else ""
+        caret_pos = max((colno or 1) - 1, 0)
+        caret = " " * min(caret_pos, len(line)) + "^"
+        hint = _build_toml_decode_hint(line)
+        location = f"line={lineno} col={colno or 1}"
+        return f"{exc} ({location})\n> {line}\n  {caret}\n提示：{hint}"
+    return str(exc)
+
+
+def load_toml_data(
+    config_path: Optional[Path] = None, *, strict: bool = False
+) -> dict[str, Any]:
     """读取 config.toml 并返回字典"""
     path = config_path or CONFIG_PATH
     if not path.exists():
         return {}
+    text = ""
     try:
-        with open(path, "rb") as f:
-            data = tomllib.load(f)
+        text = path.read_bytes().decode("utf-8-sig")
+        data = tomllib.loads(text)
         if isinstance(data, dict):
             return data
         logger.warning("config.toml 内容不是对象结构")
         return {}
     except tomllib.TOMLDecodeError as exc:
-        logger.error("config.toml 解析失败: %s", exc)
+        message = _format_toml_decode_error(path, text, exc)
+        logger.error("config.toml 解析失败 (%s): %s", path.resolve(), message)
+        if strict:
+            raise ValueError(message) from exc
+        return {}
+    except UnicodeDecodeError as exc:
+        logger.error("config.toml 编码错误 (%s): %s", path.resolve(), exc)
+        if strict:
+            raise ValueError(str(exc)) from exc
         return {}
     except OSError as exc:
         logger.error("读取 config.toml 失败: %s", exc)
+        if strict:
+            raise ValueError(str(exc)) from exc
         return {}
 
 
@@ -244,6 +304,11 @@ class Config:
     bot_qq: int
     superadmin_qq: int
     admin_qqs: list[int]
+    # 访问控制（会话白名单）：任一列表非空即启用限制模式
+    allowed_group_ids: list[int]
+    allowed_private_ids: list[int]
+    # 是否允许超级管理员在私聊中绕过 allowed_private_ids（仅私聊收发）
+    superadmin_bypass_allowlist: bool
     forward_proxy_qq: int | None
     onebot_ws_url: str
     onebot_token: str
@@ -260,6 +325,7 @@ class Config:
     tools_description_max_len: int
     tools_sanitize_verbose: bool
     tools_description_preview_len: int
+    easter_egg_agent_call_message_mode: str
     token_usage_max_size_mb: int
     token_usage_max_archives: int
     token_usage_max_total_mb: int
@@ -288,7 +354,7 @@ class Config:
     def load(cls, config_path: Optional[Path] = None, strict: bool = True) -> "Config":
         """从 config.toml 和本地配置加载配置"""
         _load_env()
-        data = load_toml_data(config_path)
+        data = load_toml_data(config_path, strict=strict)
 
         bot_qq = _coerce_int(_get_value(data, ("core", "bot_qq"), "BOT_QQ"), 0)
         superadmin_qq = _coerce_int(
@@ -315,6 +381,21 @@ class Config:
 
         superadmin_qq, admin_qqs = cls._merge_admins(
             superadmin_qq=superadmin_qq, admin_qqs=admin_qqs
+        )
+
+        allowed_group_ids = _coerce_int_list(
+            _get_value(data, ("access", "allowed_group_ids"), "ALLOWED_GROUP_IDS")
+        )
+        allowed_private_ids = _coerce_int_list(
+            _get_value(data, ("access", "allowed_private_ids"), "ALLOWED_PRIVATE_IDS")
+        )
+        superadmin_bypass_allowlist = _coerce_bool(
+            _get_value(
+                data,
+                ("access", "superadmin_bypass_allowlist"),
+                "SUPERADMIN_BYPASS_ALLOWLIST",
+            ),
+            True,
         )
 
         log_level = _coerce_str(
@@ -354,6 +435,24 @@ class Config:
                 "TOOLS_DESCRIPTION_PREVIEW_LEN",
             ),
             160,
+        )
+
+        easter_egg_mode_raw = _get_value(
+            data,
+            ("easter_egg", "agent_call_message_enabled"),
+            "EASTER_EGG_AGENT_CALL_MESSAGE_ENABLED",
+        )
+        if easter_egg_mode_raw is None:
+            easter_egg_mode_raw = os.getenv("EASTER_EGG_AGENT_CALL_MESSAGE_MODE")
+            if easter_egg_mode_raw is not None:
+                _warn_env_fallback("EASTER_EGG_AGENT_CALL_MESSAGE_MODE")
+            else:
+                easter_egg_mode_raw = os.getenv("EASTER_EGG_CALL_MESSAGE_MODE")
+                if easter_egg_mode_raw is not None:
+                    _warn_env_fallback("EASTER_EGG_CALL_MESSAGE_MODE")
+
+        easter_egg_agent_call_message_mode = cls._parse_easter_egg_call_mode(
+            easter_egg_mode_raw
         )
 
         token_usage_max_size_mb = _coerce_int(
@@ -489,6 +588,9 @@ class Config:
             bot_qq=bot_qq,
             superadmin_qq=superadmin_qq,
             admin_qqs=admin_qqs,
+            allowed_group_ids=allowed_group_ids,
+            allowed_private_ids=allowed_private_ids,
+            superadmin_bypass_allowlist=superadmin_bypass_allowlist,
             forward_proxy_qq=forward_proxy_qq,
             onebot_ws_url=onebot_ws_url,
             onebot_token=onebot_token,
@@ -505,6 +607,7 @@ class Config:
             tools_description_max_len=tools_description_max_len,
             tools_sanitize_verbose=tools_sanitize_verbose,
             tools_description_preview_len=tools_description_preview_len,
+            easter_egg_agent_call_message_mode=easter_egg_agent_call_message_mode,
             token_usage_max_size_mb=token_usage_max_size_mb,
             token_usage_max_archives=token_usage_max_archives,
             token_usage_max_total_mb=token_usage_max_total_mb,
@@ -529,6 +632,34 @@ class Config:
             webui_port=webui_settings.port,
             webui_password=webui_settings.password,
         )
+
+    def access_control_enabled(self) -> bool:
+        """是否启用会话白名单限制。
+
+        规则：allowed_group_ids 或 allowed_private_ids 任一非空即启用。
+        """
+
+        return bool(self.allowed_group_ids) or bool(self.allowed_private_ids)
+
+    def is_group_allowed(self, group_id: int) -> bool:
+        """群聊是否允许收发消息。"""
+
+        if not self.access_control_enabled():
+            return True
+        return int(group_id) in set(self.allowed_group_ids)
+
+    def is_private_allowed(self, user_id: int) -> bool:
+        """私聊是否允许收发消息。"""
+
+        if not self.access_control_enabled():
+            return True
+        if (
+            self.superadmin_bypass_allowlist
+            and int(user_id) == int(self.superadmin_qq)
+            and self.superadmin_qq > 0
+        ):
+            return True
+        return int(user_id) in set(self.allowed_private_ids)
 
     @staticmethod
     def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
@@ -844,6 +975,30 @@ class Config:
                 setattr(self, name, new_value)
                 changes[name] = (old_value, new_value)
         return changes
+
+    @staticmethod
+    def _parse_easter_egg_call_mode(value: Any) -> str:
+        """解析彩蛋提示模式。
+
+        兼容旧版布尔值：
+        - True  => agent
+        - False => none
+        """
+        if isinstance(value, bool):
+            return "agent" if value else "none"
+        if isinstance(value, (int, float)):
+            return "agent" if bool(value) else "none"
+        if value is None:
+            return "none"
+
+        text = str(value).strip().lower()
+        if text in {"true", "1", "yes", "on"}:
+            return "agent"
+        if text in {"false", "0", "no", "off"}:
+            return "none"
+        if text in {"none", "agent", "tools", "all", "clean"}:
+            return text
+        return "none"
 
     def reload(self, strict: bool = False) -> dict[str, tuple[Any, Any]]:
         new_config = Config.load(strict=strict)

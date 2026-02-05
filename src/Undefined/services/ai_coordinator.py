@@ -1,6 +1,5 @@
 import logging
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Optional
 from Undefined.config import Config
 from Undefined.context import RequestContext
@@ -11,6 +10,8 @@ from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.sender import MessageSender
 from Undefined.utils.scheduler import TaskScheduler
 from Undefined.services.security import SecurityService
+from Undefined.utils.resources import read_text_resource
+from Undefined.utils.xml import escape_xml_attr, escape_xml_text
 
 logger = logging.getLogger(__name__)
 
@@ -155,9 +156,9 @@ class AICoordinator:
 
         prompt_prefix = "(用户拍了拍你) " if is_poke else ""
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        full_question = f"""{prompt_prefix}<message sender="{sender_name}" sender_id="{user_id}" location="私聊" time="{current_time}">
-<content>{text}</content>
-</message>
+        full_question = f"""{prompt_prefix}<message sender="{escape_xml_attr(sender_name)}" sender_id="{escape_xml_attr(user_id)}" location="私聊" time="{escape_xml_attr(current_time)}">
+ <content>{escape_xml_text(text)}</content>
+ </message>
 
 【私聊消息】
 这是私聊消息，用户专门来找你说话。你可以自由选择是否回复：
@@ -377,8 +378,9 @@ class AICoordinator:
             return
         try:
             # 加载 prompt 模板
-            prompt_path = Path("res/prompts/stats_analysis.txt")
-            if not prompt_path.exists():
+            try:
+                prompt_template = read_text_resource("res/prompts/stats_analysis.txt")
+            except Exception:
                 logger.warning("[StatsAnalysis] 提示词文件不存在，使用默认分析")
                 analysis = "AI 分析功能暂时不可用（提示词文件缺失）"
                 if self.command_dispatcher:
@@ -386,8 +388,6 @@ class AICoordinator:
                         group_id, request_id, analysis
                     )
                 return
-
-            prompt_template = prompt_path.read_text(encoding="utf-8")
             full_prompt = prompt_template.format(data_summary=data_summary)
 
             # 调用 AI 进行分析
@@ -476,9 +476,18 @@ class AICoordinator:
 
         包含回复策略提示、用户信息和原始文本内容。
         """
-        return f"""{prefix}<message sender="{name}" sender_id="{uid}" group_id="{gid}" group_name="{gname}" location="{loc}" role="{role}" title="{title}" time="{time_str}">
-<content>{text}</content>
-</message>
+        safe_name = escape_xml_attr(name)
+        safe_uid = escape_xml_attr(uid)
+        safe_gid = escape_xml_attr(gid)
+        safe_gname = escape_xml_attr(gname)
+        safe_loc = escape_xml_attr(loc)
+        safe_role = escape_xml_attr(role)
+        safe_title = escape_xml_attr(title)
+        safe_time = escape_xml_attr(time_str)
+        safe_text = escape_xml_text(text)
+        return f"""{prefix}<message sender="{safe_name}" sender_id="{safe_uid}" group_id="{safe_gid}" group_name="{safe_gname}" location="{safe_loc}" role="{safe_role}" title="{safe_title}" time="{safe_time}">
+ <content>{safe_text}</content>
+ </message>
 
 【回复策略 - 极低频参与】
 1. 如果用户 @ 了你或拍了拍你 → 【必须回复】
@@ -496,7 +505,6 @@ class AICoordinator:
 
     async def _send_image(self, tid: int, mtype: str, path: str) -> None:
         """发送图片或语音消息到群聊或私聊"""
-        # 这里为了简化，直接调用 onebot 发送，逻辑同原 MessageHandler._send_image
         import os
 
         if not os.path.exists(path):
@@ -512,8 +520,8 @@ class AICoordinator:
 
         try:
             if mtype == "group":
-                await self.onebot.send_group_message(tid, msg)
+                await self.sender.send_group_message(tid, msg, auto_history=False)
             elif mtype == "private":
-                await self.onebot.send_private_message(tid, msg)
+                await self.sender.send_private_message(tid, msg, auto_history=False)
         except Exception:
             logger.exception("发送媒体文件失败")

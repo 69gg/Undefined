@@ -13,6 +13,8 @@ from Undefined.context import RequestContext
 from Undefined.end_summary_storage import EndSummaryStorage
 from Undefined.memory import MemoryStorage
 from Undefined.utils.logging import log_debug_json
+from Undefined.utils.resources import read_text_resource
+from Undefined.utils.xml import escape_xml_attr, escape_xml_text
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,10 @@ class PromptBuilder:
             logger.debug(f"[AI初始化] 已加载 {len(loaded_summaries)} 条 End 摘要")
 
     async def _load_system_prompt(self) -> str:
+        try:
+            return read_text_resource(self._system_prompt_path)
+        except Exception as exc:
+            logger.debug("读取系统提示词失败，尝试本地路径: %s", exc)
         async with aiofiles.open(self._system_prompt_path, "r", encoding="utf-8") as f:
             return await f.read()
 
@@ -194,20 +200,31 @@ class PromptBuilder:
                 role = msg.get("role", "member")
                 title = msg.get("title", "")
 
+                safe_sender = escape_xml_attr(sender_name)
+                safe_sender_id = escape_xml_attr(sender_id)
+                safe_chat_id = escape_xml_attr(chat_id)
+                safe_chat_name = escape_xml_attr(chat_name)
+                safe_role = escape_xml_attr(role)
+                safe_title = escape_xml_attr(title)
+                safe_time = escape_xml_attr(timestamp)
+                safe_text = escape_xml_text(str(text))
+
                 if msg_type_val == "group":
                     location = (
                         chat_name if chat_name.endswith("群") else f"{chat_name}群"
                     )
+                    safe_location = escape_xml_attr(location)
                     xml_msg = (
-                        f'<message sender="{sender_name}" sender_id="{sender_id}" group_id="{chat_id}" '
-                        f'group_name="{chat_name}" location="{location}" role="{role}" title="{title}" '
-                        f'time="{timestamp}">\n<content>{text}</content>\n</message>'
+                        f'<message sender="{safe_sender}" sender_id="{safe_sender_id}" group_id="{safe_chat_id}" '
+                        f'group_name="{safe_chat_name}" location="{safe_location}" role="{safe_role}" title="{safe_title}" '
+                        f'time="{safe_time}">\n<content>{safe_text}</content>\n</message>'
                     )
                 else:
                     location = "私聊"
+                    safe_location = escape_xml_attr(location)
                     xml_msg = (
-                        f'<message sender="{sender_name}" sender_id="{sender_id}" location="{location}" '
-                        f'time="{timestamp}">\n<content>{text}</content>\n</message>'
+                        f'<message sender="{safe_sender}" sender_id="{safe_sender_id}" location="{safe_location}" '
+                        f'time="{safe_time}">\n<content>{safe_text}</content>\n</message>'
                     )
                 context_lines.append(xml_msg)
 

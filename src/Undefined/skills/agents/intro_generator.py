@@ -16,6 +16,8 @@ from typing import Any
 
 import aiofiles
 
+from Undefined.utils.resources import read_text_resource
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,7 +53,6 @@ class AgentIntroGenerator:
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._cache: dict[str, str] = {}
         self._worker_task: asyncio.Task[None] | None = None
-        self._prompt_path = Path("res/prompts/agent_self_intro.txt")
 
     async def start(self) -> None:
         """启动生成器。
@@ -243,12 +244,10 @@ class AgentIntroGenerator:
         Returns:
             提示词字符串
         """
-        if self._prompt_path.exists():
-            try:
-                async with aiofiles.open(self._prompt_path, "r", encoding="utf-8") as f:
-                    return (await f.read()).strip()
-            except Exception as e:
-                logger.warning(f"[AgentIntro] 读取提示词失败: {e}")
+        try:
+            return read_text_resource("res/prompts/agent_self_intro.txt").strip()
+        except Exception as exc:
+            logger.warning(f"[AgentIntro] 读取提示词失败: {exc}")
         return "请作下自我介绍（第一人称）。"
 
     def _extract_tool_info(self, tool_dir: Path) -> dict[str, Any] | None:

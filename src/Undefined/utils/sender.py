@@ -2,6 +2,7 @@
 
 import logging
 
+from Undefined.config import Config
 from Undefined.onebot import OneBotClient
 from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.common import message_to_segments, extract_text
@@ -17,16 +18,32 @@ class MessageSender:
     """消息发送器"""
 
     def __init__(
-        self, onebot: OneBotClient, history_manager: MessageHistoryManager, bot_qq: int
+        self,
+        onebot: OneBotClient,
+        history_manager: MessageHistoryManager,
+        bot_qq: int,
+        config: Config,
     ):
         self.onebot = onebot
         self.history_manager = history_manager
         self.bot_qq = bot_qq
+        self.config = config
 
     async def send_group_message(
         self, group_id: int, message: str, auto_history: bool = True
     ) -> None:
         """发送群消息"""
+        if not self.config.is_group_allowed(group_id):
+            enabled = self.config.access_control_enabled()
+            logger.warning(
+                "[访问控制] 已拦截群消息发送: group=%s (allowlist enabled=%s)",
+                group_id,
+                enabled,
+            )
+            raise PermissionError(
+                f"blocked by allowlist: group_id={int(group_id)} enabled={enabled}"
+            )
+
         safe_message = redact_string(message)
         logger.info(f"[发送消息] 目标群:{group_id} | 内容摘要:{safe_message[:100]}...")
         # 保存到历史记录
@@ -87,6 +104,17 @@ class MessageSender:
         self, user_id: int, message: str, auto_history: bool = True
     ) -> None:
         """发送私聊消息"""
+        if not self.config.is_private_allowed(user_id):
+            enabled = self.config.access_control_enabled()
+            logger.warning(
+                "[访问控制] 已拦截私聊消息发送: user=%s (allowlist enabled=%s)",
+                user_id,
+                enabled,
+            )
+            raise PermissionError(
+                f"blocked by allowlist: user_id={int(user_id)} enabled={enabled}"
+            )
+
         safe_message = redact_string(message)
         logger.info(f"[发送消息] 目标用户:{user_id} | 内容摘要:{safe_message[:100]}...")
         # 保存到历史记录

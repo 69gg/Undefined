@@ -74,6 +74,7 @@ const I18N = {
         "config.save_network_error": "网络错误",
         "config.reload_success": "配置已从服务器重新加载。",
         "config.reload_error": "配置重载失败。",
+        "config.bootstrap_created": "检测到缺少 config.toml，已从示例生成；请在此页完善配置并保存。",
         "logs.title": "运行日志",
         "logs.subtitle": "实时查看日志尾部输出。",
         "logs.auto": "自动刷新",
@@ -105,6 +106,7 @@ const I18N = {
         "logs.level.warn": "Warn",
         "logs.level.error": "Error",
         "logs.level.debug": "Debug",
+        "logs.level_gte": "该等级及以上",
         "about.title": "项目信息",
         "about.subtitle": "关于 Undefined 项目的作者及许可协议。",
         "about.author": "作者",
@@ -184,6 +186,7 @@ const I18N = {
         "config.save_network_error": "Network error",
         "config.reload_success": "Configuration reloaded from server.",
         "config.reload_error": "Failed to reload configuration.",
+        "config.bootstrap_created": "config.toml was missing and has been generated from the example. Please review and save your configuration.",
         "logs.title": "System Logs",
         "logs.subtitle": "Real-time view of recent log output.",
         "logs.auto": "Auto Refresh",
@@ -215,6 +218,7 @@ const I18N = {
         "logs.level.warn": "Warn",
         "logs.level.error": "Error",
         "logs.level.debug": "Debug",
+        "logs.level_gte": "And above",
         "about.title": "About Project",
         "about.subtitle": "Information about authors and open source licenses.",
         "about.author": "Author",
@@ -242,6 +246,7 @@ const state = {
     logsRaw: "",
     logSearch: "",
     logLevel: "all",
+    logLevelGte: false,
     logType: "bot",
     logFiles: {},
     logFile: "",
@@ -273,7 +278,7 @@ const THEME_COLORS = {
     dark: "#0f1112",
 };
 
-const LOG_LEVELS = ["all", "error", "warn", "info", "debug"];
+const LOG_LEVELS = window.LogsController ? window.LogsController.LOG_LEVELS : ["all"];
 
 // Utils
 function get(id) { return document.getElementById(id); }
@@ -368,8 +373,9 @@ function updateLogFilterLabels() {
         option.textContent = t(`logs.level.${level}`);
         select.appendChild(option);
     });
-    select.value = current || "all";
-    state.logLevel = select.value;
+    const valid = LOG_LEVELS.includes(current) ? current : "all";
+    select.value = valid;
+    state.logLevel = valid;
 }
 
 function updateLogPauseLabel() {
@@ -1093,29 +1099,26 @@ async function fetchLogs(force = false) {
     }
 }
 
-function parseLogLevel(line) {
-    const lowered = line.toLowerCase();
-    if (/(\berror\b|\bfatal\b|\bexception\b)/i.test(lowered)) return "error";
-    if (/(\bwarn\b|\bwarning\b)/i.test(lowered)) return "warn";
-    if (/(\bdebug\b|\btrace\b)/i.test(lowered)) return "debug";
-    if (/(\binfo\b)/i.test(lowered)) return "info";
-    return "all";
-}
-
 function filterLogLines(raw) {
-    const lines = raw.split(/\r?\n/);
-    const level = state.logLevel;
+    // 日志过滤：等级筛选交给 LogsController 统一处理
     const query = state.logSearch.trim().toLowerCase();
-    const filtered = lines.filter(line => {
-        if (level !== "all" && parseLogLevel(line) !== level) return false;
-        if (query && !line.toLowerCase().includes(query)) return false;
-        return true;
-    });
-    return {
-        filtered,
-        total: lines.filter(line => line.length > 0).length,
-        matched: filtered.filter(line => line.length > 0).length,
-    };
+    const rawLines = raw ? raw.split(/\r?\n/) : [];
+    const base = window.LogsController
+        ? window.LogsController.filterLogLines(raw, {
+            level: state.logLevel,
+            gte: state.logLevelGte,
+        })
+        : { filtered: rawLines, total: rawLines.length };
+
+    let filtered = base.filtered;
+    if (query) {
+        filtered = filtered.filter(line => line.toLowerCase().includes(query));
+    }
+
+    const total = base.total ?? rawLines.length;
+    const matched = filtered.filter(line => line.length > 0).length;
+
+    return { filtered, total, matched };
 }
 
 function formatLogText(text) {
@@ -1179,7 +1182,7 @@ function updateLogMeta(total, matched) {
     if (state.logsPaused) {
         parts.push(t("logs.paused"));
     }
-    if (state.logLevel !== "all" || state.logSearch.trim()) {
+    if (state.logLevel !== "all" || state.logSearch.trim() || state.logLevelGte) {
         const stats = total > 0 ? `${matched}/${total}` : "0/0";
         parts.push(`${t("logs.filtered")}: ${stats}`);
     }
@@ -1608,6 +1611,15 @@ async function init() {
         };
     }
 
+    const logLevelGteToggle = get("logLevelGteToggle");
+    if (logLevelGteToggle) {
+        state.logLevelGte = logLevelGteToggle.checked;
+        logLevelGteToggle.onchange = () => {
+            state.logLevelGte = logLevelGteToggle.checked;
+            renderLogs();
+        };
+    }
+
     const logSearchInput = get("logSearchInput");
     if (logSearchInput) {
         logSearchInput.addEventListener("input", () => {
@@ -1705,6 +1717,14 @@ async function init() {
         state.authenticated = false;
     }
 
+    const shouldRedirectToConfig = !!(
+        window.INITIAL_STATE && window.INITIAL_STATE.redirect_to_config
+    );
+    if (shouldRedirectToConfig) {
+        state.view = "app";
+        switchTab("config");
+    }
+
     document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
             stopStatusTimer();
@@ -1728,6 +1748,9 @@ async function init() {
     });
 
     refreshUI();
+    if (shouldRedirectToConfig) {
+        showToast(t("config.bootstrap_created"), "info", 6500);
+    }
     bindLogScroll();
     fetchStatus();
     if (!document.hidden) {
