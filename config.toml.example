@@ -14,6 +14,23 @@ admin_qq = []
 # en: Audio forward proxy QQ number (for group audio forwarding, optional)
 forward_proxy_qq = 0
 
+# zh: 会话白名单（访问控制）
+# en: Session allowlist (access control)
+[access]
+# zh: 允许处理/发送的群号白名单。
+# zh: 留空 = 不限制；但只要本段任一列表非空，就会进入“限制模式”，未在白名单内的群/私聊将被忽略，且所有消息发送也会被拦截。
+# en: Allowed group IDs.
+# en: Empty = no restriction; but if either list is non-empty, allowlist mode is enabled.
+allowed_group_ids = []
+
+# zh: 允许处理/发送的私聊 QQ 白名单（同上）
+# en: Allowed private-chat user IDs
+allowed_private_ids = []
+
+# zh: 超级管理员是否可在私聊中绕过 allowed_private_ids（仅影响私聊收发；群聊仍严格按 allowed_group_ids）
+# en: Allow superadmin to bypass allowed_private_ids in private chat only
+superadmin_bypass_allowlist = true
+
 # zh: OneBot WebSocket 配置
 # en: OneBot WebSocket settings
 [onebot]

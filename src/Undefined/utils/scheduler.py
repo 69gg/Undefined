@@ -408,9 +408,13 @@ class TaskScheduler:
                         return
 
                     if mtype == "group":
-                        await self.onebot.send_group_message(tid, msg)
+                        await self.sender.send_group_message(
+                            tid, msg, auto_history=False
+                        )
                     elif mtype == "private":
-                        await self.onebot.send_private_message(tid, msg)
+                        await self.sender.send_private_message(
+                            tid, msg, auto_history=False
+                        )
 
                 async def get_recent_cb(
                     chat_id: str, msg_type: str, start: int, end: int

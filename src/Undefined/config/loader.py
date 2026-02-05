@@ -304,6 +304,11 @@ class Config:
     bot_qq: int
     superadmin_qq: int
     admin_qqs: list[int]
+    # 访问控制（会话白名单）：任一列表非空即启用限制模式
+    allowed_group_ids: list[int]
+    allowed_private_ids: list[int]
+    # 是否允许超级管理员在私聊中绕过 allowed_private_ids（仅私聊收发）
+    superadmin_bypass_allowlist: bool
     forward_proxy_qq: int | None
     onebot_ws_url: str
     onebot_token: str
@@ -376,6 +381,21 @@ class Config:
 
         superadmin_qq, admin_qqs = cls._merge_admins(
             superadmin_qq=superadmin_qq, admin_qqs=admin_qqs
+        )
+
+        allowed_group_ids = _coerce_int_list(
+            _get_value(data, ("access", "allowed_group_ids"), "ALLOWED_GROUP_IDS")
+        )
+        allowed_private_ids = _coerce_int_list(
+            _get_value(data, ("access", "allowed_private_ids"), "ALLOWED_PRIVATE_IDS")
+        )
+        superadmin_bypass_allowlist = _coerce_bool(
+            _get_value(
+                data,
+                ("access", "superadmin_bypass_allowlist"),
+                "SUPERADMIN_BYPASS_ALLOWLIST",
+            ),
+            True,
         )
 
         log_level = _coerce_str(
@@ -568,6 +588,9 @@ class Config:
             bot_qq=bot_qq,
             superadmin_qq=superadmin_qq,
             admin_qqs=admin_qqs,
+            allowed_group_ids=allowed_group_ids,
+            allowed_private_ids=allowed_private_ids,
+            superadmin_bypass_allowlist=superadmin_bypass_allowlist,
             forward_proxy_qq=forward_proxy_qq,
             onebot_ws_url=onebot_ws_url,
             onebot_token=onebot_token,
@@ -609,6 +632,34 @@ class Config:
             webui_port=webui_settings.port,
             webui_password=webui_settings.password,
         )
+
+    def access_control_enabled(self) -> bool:
+        """是否启用会话白名单限制。
+
+        规则：allowed_group_ids 或 allowed_private_ids 任一非空即启用。
+        """
+
+        return bool(self.allowed_group_ids) or bool(self.allowed_private_ids)
+
+    def is_group_allowed(self, group_id: int) -> bool:
+        """群聊是否允许收发消息。"""
+
+        if not self.access_control_enabled():
+            return True
+        return int(group_id) in set(self.allowed_group_ids)
+
+    def is_private_allowed(self, user_id: int) -> bool:
+        """私聊是否允许收发消息。"""
+
+        if not self.access_control_enabled():
+            return True
+        if (
+            self.superadmin_bypass_allowlist
+            and int(user_id) == int(self.superadmin_qq)
+            and self.superadmin_qq > 0
+        ):
+            return True
+        return int(user_id) in set(self.allowed_private_ids)
 
     @staticmethod
     def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:

@@ -59,6 +59,7 @@
 - **Skills 架构**：全新设计的技能系统，将基础工具（Tools）与智能代理（Agents）分层管理，支持自动发现与注册。
 - **Skills 热重载**：自动扫描 `skills/` 目录，检测到变更后即时重载工具与 Agent，无需重启服务。
 - **配置热更新 + WebUI**：使用 `config.toml` 配置，支持热更新；提供 WebUI 在线编辑与校验。
+- **会话白名单（群/私聊）**：只需配置 `access.allowed_group_ids` / `access.allowed_private_ids` 两个列表，即可把机器人“锁”在指定群与指定私聊里；避免被拉进陌生群误触发、也避免工具/定时任务把消息误发到不该去的地方（默认留空不限制）。
 - **并行工具执行**：无论是主 AI 还是子 Agent，均支持 `asyncio` 并发工具调用，大幅提升多任务处理速度（如同时读取多个文件或搜索多个关键词）。
 - **智能 Agent 矩阵**：内置多个专业 Agent，分工协作处理复杂任务。
 - **Agent 自我介绍自动生成**：启动时按 Agent 代码/配置 hash 生成 `intro.generated.md`（第一人称、结构化），与 `intro.md` 合并后作为描述；减少手动维护，保持能力说明与实现同步，有助于精准调度。
@@ -400,6 +401,11 @@ uv run Undefined-webui
 在 `config.toml` 文件中配置以下核心参数（示例见 `config.toml.example`）：
 
 - **基础配置**：`[core]` 与 `[onebot]`
+- **会话白名单（推荐）**：`[access]`
+  - `allowed_group_ids`：允许处理/发送消息的群号列表
+  - `allowed_private_ids`：允许处理/发送消息的私聊 QQ 列表
+  - `superadmin_bypass_allowlist`：超级管理员是否可在私聊中绕过 `allowed_private_ids`（仅影响私聊收发；群聊仍严格按 `allowed_group_ids`）
+  - 规则：只要 `allowed_group_ids` 或 `allowed_private_ids` 任一非空，就会启用限制模式；未在白名单内的群/私聊消息将被直接忽略，且所有消息发送也会被拦截（包括工具调用与定时任务）。
 - **模型配置**：`[models.chat]` / `[models.vision]` / `[models.agent]` / `[models.security]`
   - `api_url`：OpenAI 兼容 **base URL**（如 `https://api.openai.com/v1` / `http://127.0.0.1:8000/v1`）
   - DeepSeek Thinking + Tool Calls：若使用 `deepseek-reasoner` 或 `deepseek-chat` + `thinking={"type":"enabled"}` 且启用了工具调用，建议启用 `deepseek_new_cot_support`
@@ -416,6 +422,17 @@ uv run Undefined-webui
 > Windows 用户注意：`config.toml` 里的路径不要直接写 `D:\xxx\yyy`（反斜杠会被当作转义）。推荐用 `D:/xxx/yyy`，或用单引号：`'D:\xxx\yyy'`，或在双引号里写双反斜杠：`"D:\\xxx\\yyy"`。
 
 WebUI 支持：配置分组表单快速编辑、Diff 预览、日志尾部查看（含自动刷新）。
+
+#### 会话白名单示例
+
+把机器人限定在 2 个群 + 1 个私聊（最常见的“安全上车”配置）：
+
+```toml
+[access]
+allowed_group_ids = [123456789, 987654321]
+allowed_private_ids = [1122334455]
+superadmin_bypass_allowlist = true
+```
 
 > 启动项目需要 OneBot 协议端，推荐使用 [NapCat](https://napneko.github.io/) 或 [Lagrange.Core](https://github.com/LagrangeDev/Lagrange.Core)。
 

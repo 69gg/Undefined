@@ -30,6 +30,7 @@ CommentMap = dict[str, dict[str, str]]
 SECTION_ORDER: dict[str, list[str]] = {
     "": [
         "core",
+        "access",
         "onebot",
         "models",
         "logging",
@@ -48,6 +49,11 @@ SECTION_ORDER: dict[str, list[str]] = {
 
 KEY_ORDER: dict[str, list[str]] = {
     "core": ["bot_qq", "superadmin_qq", "admin_qq", "forward_proxy_qq"],
+    "access": [
+        "allowed_group_ids",
+        "allowed_private_ids",
+        "superadmin_bypass_allowlist",
+    ],
     "onebot": ["ws_url", "token"],
     "logging": ["level", "file_path", "max_size_mb", "backup_count", "log_thinking"],
     "tools": [

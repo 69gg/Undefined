@@ -505,7 +505,6 @@ class AICoordinator:
 
     async def _send_image(self, tid: int, mtype: str, path: str) -> None:
         """发送图片或语音消息到群聊或私聊"""
-        # 这里为了简化，直接调用 onebot 发送，逻辑同原 MessageHandler._send_image
         import os
 
         if not os.path.exists(path):
@@ -521,8 +520,8 @@ class AICoordinator:
 
         try:
             if mtype == "group":
-                await self.onebot.send_group_message(tid, msg)
+                await self.sender.send_group_message(tid, msg, auto_history=False)
             elif mtype == "private":
-                await self.onebot.send_private_message(tid, msg)
+                await self.sender.send_private_message(tid, msg, auto_history=False)
         except Exception:
             logger.exception("发送媒体文件失败")

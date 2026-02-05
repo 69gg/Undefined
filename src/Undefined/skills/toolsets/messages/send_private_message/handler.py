@@ -14,6 +14,15 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not message:
         return "消息内容不能为空"
 
+    runtime_config = context.get("runtime_config")
+    if runtime_config is not None:
+        try:
+            uid = int(user_id)
+        except Exception:
+            uid = 0
+        if uid > 0 and not runtime_config.is_private_allowed(uid):
+            return f"发送失败：目标用户 {uid} 不在允许列表内（access.allowed_private_ids），已被访问控制拦截"
+
     message = message.replace("\\", "")
 
     recent_replies = context.get("recent_replies")
