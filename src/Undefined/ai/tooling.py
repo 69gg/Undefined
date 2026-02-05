@@ -107,7 +107,7 @@ class ToolManager:
                 mode = None
 
         text = str(mode).strip().lower() if mode is not None else "none"
-        return text if text in {"none", "agent", "tools", "all"} else "none"
+        return text if text in {"none", "agent", "tools", "all", "clean"} else "none"
 
     async def _maybe_send_call_easter_egg(
         self, called_name: str, *, is_agent: bool, context: dict[str, Any]
@@ -117,12 +117,18 @@ class ToolManager:
         if mode == "none":
             return
 
+        if mode == "clean":
+            if context.get("easter_egg_silent"):
+                return
+            if not is_agent and called_name in {"send_message", "end"}:
+                return
+
         if is_agent:
-            if mode not in {"agent", "tools", "all"}:
+            if mode not in {"agent", "tools", "all", "clean"}:
                 return
         else:
             # 仅主 AI 调用 tool 才提示；Agent 内部工具不经过 ToolManager
-            if mode not in {"tools", "all"}:
+            if mode not in {"tools", "all", "clean"}:
                 return
             if context.get("agent_name"):
                 return

@@ -133,8 +133,14 @@ class AgentToolRegistry(BaseRegistry):
                 mode = None
 
         mode_text = str(mode).strip().lower() if mode is not None else "none"
-        if mode_text != "all":
+        if mode_text not in {"all", "clean"}:
             return
+
+        if mode_text == "clean":
+            if context.get("easter_egg_silent"):
+                return
+            if tool_name in {"send_message", "end"}:
+                return
 
         message = f"{tool_name}，我调用你了，我要调用你了！"
         sender = context.get("sender")

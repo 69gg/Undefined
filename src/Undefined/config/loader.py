@@ -423,9 +423,13 @@ class Config:
             "EASTER_EGG_AGENT_CALL_MESSAGE_ENABLED",
         )
         if easter_egg_mode_raw is None:
-            easter_egg_mode_raw = os.getenv("EASTER_EGG_CALL_MESSAGE_MODE")
+            easter_egg_mode_raw = os.getenv("EASTER_EGG_AGENT_CALL_MESSAGE_MODE")
             if easter_egg_mode_raw is not None:
-                _warn_env_fallback("EASTER_EGG_CALL_MESSAGE_MODE")
+                _warn_env_fallback("EASTER_EGG_AGENT_CALL_MESSAGE_MODE")
+            else:
+                easter_egg_mode_raw = os.getenv("EASTER_EGG_CALL_MESSAGE_MODE")
+                if easter_egg_mode_raw is not None:
+                    _warn_env_fallback("EASTER_EGG_CALL_MESSAGE_MODE")
 
         easter_egg_agent_call_message_mode = cls._parse_easter_egg_call_mode(
             easter_egg_mode_raw
@@ -941,7 +945,7 @@ class Config:
             return "agent"
         if text in {"false", "0", "no", "off"}:
             return "none"
-        if text in {"none", "agent", "tools", "all"}:
+        if text in {"none", "agent", "tools", "all", "clean"}:
             return text
         return "none"
 

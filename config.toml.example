@@ -170,7 +170,8 @@ description_preview_len = 160
 #   - agent : 主 AI 调用 Agent 时发送（旧版 true 行为）
 #   - tools : agent + 主 AI 调用 Tool 时发送
 #   - all   : tools + Agent 内部调用其子工具（agent_tool）时发送
-# en: Allowed values: none/agent/tools/all
+#   - clean : all + 过滤噪声（自动预取 get_current_time / send_message / end 不提示）
+# en: Allowed values: none/agent/tools/all/clean
 agent_call_message_enabled = "none"
 
 # zh: Skills 热重载配置（可选）
