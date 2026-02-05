@@ -348,6 +348,8 @@ uv run Undefined-webui
 管理员动态列表仍使用 `config.local.json`（自动读写）。
 
 > 旧的`.env` 仍可作为临时兼容输入，但已不推荐使用。
+>
+> Windows 用户注意：`config.toml` 里的路径不要直接写 `D:\xxx\yyy`（反斜杠会被当作转义）。推荐用 `D:/xxx/yyy`，或用单引号：`'D:\xxx\yyy'`，或在双引号里写双反斜杠：`"D:\\xxx\\yyy"`。
 
 WebUI 支持：配置分组表单快速编辑、Diff 预览、日志尾部查看（含自动刷新）。
 

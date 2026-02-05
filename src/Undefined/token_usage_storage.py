@@ -7,9 +7,9 @@ import asyncio
 import gzip
 import json
 import logging
+import os
 import re
 import shutil
-import fcntl
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -17,6 +17,30 @@ from typing import Any, Optional
 
 
 logger = logging.getLogger(__name__)
+
+if os.name == "nt":
+    import msvcrt
+
+    def _lock_file(handle: Any) -> None:
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]
+
+    def _unlock_file(handle: Any) -> None:
+        try:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
+        except OSError:
+            # 在 Windows 上如果 fd 已关闭或未持有锁，解锁可能抛错；忽略即可
+            return
+
+else:
+    import fcntl
+
+    def _lock_file(handle: Any) -> None:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+    def _unlock_file(handle: Any) -> None:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _get_runtime_config() -> Any | None:
@@ -410,8 +434,8 @@ class TokenUsageStorage:
             max_size_bytes,
         )
 
-        with open(self.lock_file_path, "a", encoding="utf-8") as lock_handle:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        with open(self.lock_file_path, "a+b") as lock_handle:
+            _lock_file(lock_handle)
             try:
                 if not self.file_path.exists():
                     return False
@@ -423,7 +447,7 @@ class TokenUsageStorage:
 
                 self._prune_archives(max_archives, max_total_bytes)
             finally:
-                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+                _unlock_file(lock_handle)
 
         return did_compact
 

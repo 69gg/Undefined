@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tomllib
 from dataclasses import dataclass, fields
 from pathlib import Path
@@ -45,23 +46,68 @@ def _load_env() -> None:
         logger.debug("加载 .env 失败，继续使用 config.toml", exc_info=True)
 
 
-def load_toml_data(config_path: Optional[Path] = None) -> dict[str, Any]:
+def _build_toml_decode_hint(line: str) -> str:
+    hints: list[str] = []
+    if "\\" in line:
+        hints.append(
+            'Windows 路径建议用单引号(不转义)或双反斜杠，或直接用正斜杠，例如：path = \'D:\\AI\\bot\' / path = "D:\\\\AI\\\\bot" / path = "D:/AI/bot"'
+        )
+    hints.append('多行文本请用三引号，例如：prompt = """..."""')
+    return "；".join(hints)
+
+
+def _format_toml_decode_error(
+    path: Path, text: str, exc: tomllib.TOMLDecodeError
+) -> str:
+    lineno: int | None = getattr(exc, "lineno", None)
+    colno: int | None = getattr(exc, "colno", None)
+    if not isinstance(lineno, int) or not isinstance(colno, int):
+        match = re.search(r"\(at line (\d+), column (\d+)\)", str(exc))
+        if match:
+            lineno = int(match.group(1))
+            colno = int(match.group(2))
+
+    if isinstance(lineno, int) and lineno > 0:
+        lines = text.splitlines()
+        line = lines[lineno - 1] if 0 <= (lineno - 1) < len(lines) else ""
+        caret_pos = max((colno or 1) - 1, 0)
+        caret = " " * min(caret_pos, len(line)) + "^"
+        hint = _build_toml_decode_hint(line)
+        location = f"line={lineno} col={colno or 1}"
+        return f"{exc} ({location})\n> {line}\n  {caret}\n提示：{hint}"
+    return str(exc)
+
+
+def load_toml_data(
+    config_path: Optional[Path] = None, *, strict: bool = False
+) -> dict[str, Any]:
     """读取 config.toml 并返回字典"""
     path = config_path or CONFIG_PATH
     if not path.exists():
         return {}
+    text = ""
     try:
-        with open(path, "rb") as f:
-            data = tomllib.load(f)
+        text = path.read_bytes().decode("utf-8-sig")
+        data = tomllib.loads(text)
         if isinstance(data, dict):
             return data
         logger.warning("config.toml 内容不是对象结构")
         return {}
     except tomllib.TOMLDecodeError as exc:
-        logger.error("config.toml 解析失败: %s", exc)
+        message = _format_toml_decode_error(path, text, exc)
+        logger.error("config.toml 解析失败 (%s): %s", path.resolve(), message)
+        if strict:
+            raise ValueError(message) from exc
+        return {}
+    except UnicodeDecodeError as exc:
+        logger.error("config.toml 编码错误 (%s): %s", path.resolve(), exc)
+        if strict:
+            raise ValueError(str(exc)) from exc
         return {}
     except OSError as exc:
         logger.error("读取 config.toml 失败: %s", exc)
+        if strict:
+            raise ValueError(str(exc)) from exc
         return {}
 
 
@@ -288,7 +334,7 @@ class Config:
     def load(cls, config_path: Optional[Path] = None, strict: bool = True) -> "Config":
         """从 config.toml 和本地配置加载配置"""
         _load_env()
-        data = load_toml_data(config_path)
+        data = load_toml_data(config_path, strict=strict)
 
         bot_qq = _coerce_int(_get_value(data, ("core", "bot_qq"), "BOT_QQ"), 0)
         superadmin_qq = _coerce_int(

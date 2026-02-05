@@ -129,6 +129,8 @@ deepseek_new_cot_support = false
 level = "INFO"
 # zh: 日志文件路径
 # en: Log file path
+# zh: Windows 路径建议用正斜杠 D:/logs/bot.log，或用单引号 'D:\logs\bot.log'，或在双引号里写双反斜杠 "D:\\logs\\bot.log"
+# en: On Windows, prefer D:/logs/bot.log, or 'D:\logs\bot.log', or "D:\\logs\\bot.log"
 file_path = "logs/bot.log"
 # zh: 单个日志文件最大大小（MB）
 # en: Max log file size (MB)
