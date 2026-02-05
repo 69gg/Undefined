@@ -320,7 +320,7 @@ class Config:
     tools_description_max_len: int
     tools_sanitize_verbose: bool
     tools_description_preview_len: int
-    easter_egg_agent_call_message_enabled: bool
+    easter_egg_agent_call_message_mode: str
     token_usage_max_size_mb: int
     token_usage_max_archives: int
     token_usage_max_total_mb: int
@@ -417,13 +417,18 @@ class Config:
             160,
         )
 
-        easter_egg_agent_call_message_enabled = _coerce_bool(
-            _get_value(
-                data,
-                ("easter_egg", "agent_call_message_enabled"),
-                "EASTER_EGG_AGENT_CALL_MESSAGE_ENABLED",
-            ),
-            False,
+        easter_egg_mode_raw = _get_value(
+            data,
+            ("easter_egg", "agent_call_message_enabled"),
+            "EASTER_EGG_AGENT_CALL_MESSAGE_ENABLED",
+        )
+        if easter_egg_mode_raw is None:
+            easter_egg_mode_raw = os.getenv("EASTER_EGG_CALL_MESSAGE_MODE")
+            if easter_egg_mode_raw is not None:
+                _warn_env_fallback("EASTER_EGG_CALL_MESSAGE_MODE")
+
+        easter_egg_agent_call_message_mode = cls._parse_easter_egg_call_mode(
+            easter_egg_mode_raw
         )
 
         token_usage_max_size_mb = _coerce_int(
@@ -575,7 +580,7 @@ class Config:
             tools_description_max_len=tools_description_max_len,
             tools_sanitize_verbose=tools_sanitize_verbose,
             tools_description_preview_len=tools_description_preview_len,
-            easter_egg_agent_call_message_enabled=easter_egg_agent_call_message_enabled,
+            easter_egg_agent_call_message_mode=easter_egg_agent_call_message_mode,
             token_usage_max_size_mb=token_usage_max_size_mb,
             token_usage_max_archives=token_usage_max_archives,
             token_usage_max_total_mb=token_usage_max_total_mb,
@@ -915,6 +920,30 @@ class Config:
                 setattr(self, name, new_value)
                 changes[name] = (old_value, new_value)
         return changes
+
+    @staticmethod
+    def _parse_easter_egg_call_mode(value: Any) -> str:
+        """解析彩蛋提示模式。
+
+        兼容旧版布尔值：
+        - True  => agent
+        - False => none
+        """
+        if isinstance(value, bool):
+            return "agent" if value else "none"
+        if isinstance(value, (int, float)):
+            return "agent" if bool(value) else "none"
+        if value is None:
+            return "none"
+
+        text = str(value).strip().lower()
+        if text in {"true", "1", "yes", "on"}:
+            return "agent"
+        if text in {"false", "0", "no", "off"}:
+            return "none"
+        if text in {"none", "agent", "tools", "all"}:
+            return text
+        return "none"
 
     def reload(self, strict: bool = False) -> dict[str, tuple[Any, Any]]:
         new_config = Config.load(strict=strict)

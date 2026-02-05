@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from Undefined.skills.registry import BaseRegistry
+from Undefined.utils.logging import redact_string
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ class AgentToolRegistry(BaseRegistry):
         返回:
             工具执行的输出文本
         """
+        await self._maybe_send_agent_tool_call_easter_egg(tool_name, context)
         async with self._items_lock:
             item = self._items.get(tool_name)
 
@@ -112,6 +114,41 @@ class AgentToolRegistry(BaseRegistry):
         if item:
             logger.debug("[agent_tool] %s 命中本地工具", tool_name)
         return await self.execute(tool_name, args, context)
+
+    async def _maybe_send_agent_tool_call_easter_egg(
+        self, tool_name: str, context: dict[str, Any]
+    ) -> None:
+        agent_name = context.get("agent_name")
+        if not agent_name:
+            return
+
+        runtime_config = context.get("runtime_config")
+        mode = getattr(runtime_config, "easter_egg_agent_call_message_mode", None)
+        if runtime_config is None:
+            try:
+                from Undefined.config import get_config
+
+                mode = get_config(strict=False).easter_egg_agent_call_message_mode
+            except Exception:
+                mode = None
+
+        mode_text = str(mode).strip().lower() if mode is not None else "none"
+        if mode_text != "all":
+            return
+
+        message = f"{tool_name}，我调用你了，我要调用你了！"
+        sender = context.get("sender")
+        send_message_callback = context.get("send_message_callback")
+        group_id = context.get("group_id")
+
+        try:
+            if sender and isinstance(group_id, int) and group_id > 0:
+                await sender.send_group_message(group_id, message)
+                return
+            if send_message_callback:
+                await send_message_callback(message, None)
+        except Exception as exc:
+            logger.debug("[彩蛋] 发送提示消息失败: %s", redact_string(str(exc)))
 
     async def close_mcp_tools(self) -> None:
         if self._mcp_registry:
