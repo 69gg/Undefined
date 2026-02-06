@@ -296,6 +296,52 @@ def _split_chat_completion_params(
     return known, extra
 
 
+def _is_deepseek_provider(model_config: ModelConfig) -> bool:
+    model_name = str(getattr(model_config, "model_name", "") or "").lower()
+    if model_name.startswith("deepseek"):
+        return True
+    api_url = str(getattr(model_config, "api_url", "") or "").lower()
+    return "deepseek" in api_url
+
+
+def _normalize_thinking_override(
+    value: Any, model_config: ModelConfig
+) -> dict[str, Any] | None:
+    if value is None:
+        return None
+
+    is_deepseek = _is_deepseek_provider(model_config)
+
+    if isinstance(value, dict):
+        raw_type = value.get("type")
+        if isinstance(raw_type, str):
+            type_value = raw_type.strip().lower()
+            if type_value in {"enabled", "disabled"}:
+                return {"type": type_value} if is_deepseek else dict(value)
+
+        raw_enabled = value.get("enabled")
+        if isinstance(raw_enabled, bool):
+            type_value = "enabled" if raw_enabled else "disabled"
+            if is_deepseek:
+                return {"type": type_value}
+            normalized = dict(value)
+            normalized.pop("enabled", None)
+            normalized["type"] = type_value
+            return normalized
+
+        return None
+
+    if isinstance(value, bool):
+        return {"type": "enabled" if value else "disabled"}
+
+    if isinstance(value, str):
+        type_value = value.strip().lower()
+        if type_value in {"enabled", "disabled"}:
+            return {"type": type_value}
+
+    return None
+
+
 def _tools_sanitize_enabled() -> bool:
     # 历史配置项 tools.sanitize 已迁移为 tools.dot_delimiter。
     # 为兼容严格网关，description 的 schema 清洗默认始终开启。
@@ -1043,8 +1089,14 @@ def build_request_body(
     }
 
     extra_kwargs: dict[str, Any] = dict(kwargs)
-    if not model_config.thinking_enabled and "thinking" in extra_kwargs:
-        extra_kwargs.pop("thinking", None)
+    if "thinking" in extra_kwargs:
+        normalized = _normalize_thinking_override(
+            extra_kwargs.get("thinking"), model_config
+        )
+        if normalized is None:
+            extra_kwargs.pop("thinking", None)
+        else:
+            extra_kwargs["thinking"] = normalized
 
     if model_config.thinking_enabled:
         if getattr(model_config, "deepseek_new_cot_support", False):
