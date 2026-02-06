@@ -5,7 +5,8 @@
         <h1>Undefined</h1>
         <em>A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture.</em>
         <br/><br/>
-        <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11+-blue.svg" alt="Python"></a>
+        <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11--3.13-blue.svg" alt="Python"></a>
+        <a href="https://docs.astral.sh/uv/"><img src="https://img.shields.io/badge/uv-auto%20python%20manager-6a5acd.svg" alt="uv"></a>
         <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License"></a>
         <a href="https://deepwiki.com/69gg/Undefined"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
         <br/><br/>
@@ -277,6 +278,10 @@ graph TB
 
 提供 pip/uv tool 安装与源码部署两种方式：前者适合直接使用；后者适合深度自定义与二次开发。
 
+> Python 版本要求：`3.11`~`3.13`（包含）。
+>
+> 若使用 `uv`，通常不需要你手动限制系统 Python 版本；`uv` 会根据项目约束自动选择/下载兼容解释器。
+
 ### pip/uv tool 部署（推荐用于直接使用）
 
 适合只想“安装后直接跑”的场景，`Undefined`/`Undefined-webui` 命令会作为可执行入口安装到你的环境中。
@@ -284,11 +289,14 @@ graph TB
 ```bash
 # 方式 1：pip
 pip install -U Undefined-bot
-playwright install
+python -m playwright install
 
 # 方式 2：uv tool（建议使用该方式进行隔离安装）
 # 安装uv（若未安装）
 pip install uv
+
+# 可选：显式指定兼容解释器（不指定时 uv 也会自动选择）
+# uv python install 3.12
 
 uv tool install Undefined-bot
 uv tool run --from Undefined-bot playwright install
@@ -314,6 +322,21 @@ Undefined-webui
 > `Undefined-webui` 会在检测到当前目录缺少 `config.toml` 时，自动从 `config.toml.example` 生成一份，便于直接在 WebUI 中修改。
 
 > 提示：资源文件已随包发布，支持在非项目根目录启动；如需自定义内容，请参考下方说明。
+
+#### 完整日志（排查用）
+
+如果你希望保留完整安装/运行日志，可直接重定向到文件：
+
+```bash
+# pip 安装日志
+python -m pip install -U Undefined-bot 2>&1 | tee install.log
+
+# 运行日志（CLI）
+Undefined 2>&1 | tee undefined.log
+
+# 运行日志（WebUI）
+Undefined-webui 2>&1 | tee undefined-webui.log
+```
 
 #### pip/uv tool 部署的自定义方式
 
@@ -368,7 +391,11 @@ git submodule update --init --recursive
 # 安装 uv (如果尚未安装)
 pip install uv
 
+# 可选：预装一个兼容解释器（推荐 3.12）
+# uv python install 3.12
+
 # 同步依赖
+# uv 会根据 pyproject.toml 自动处理 3.11~3.13 的解释器选择
 uv sync
 ```
 
