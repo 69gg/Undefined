@@ -284,20 +284,36 @@ graph TB
 ```bash
 # 方式 1：pip
 pip install -U Undefined-bot
+playwright install
 
-# 方式 2：uv tool（建议隔离安装）
+# 方式 2：uv tool（建议使用该方式进行隔离安装）
+# 安装uv（若未安装）
+pip install uv
+
 uv tool install Undefined-bot
+uv tool run --from Undefined-bot playwright install
 ```
 
 安装完成后，在任意目录准备 `config.toml` 并启动：
 
 ```bash
+# 启动方式（二选一）
+#
+# 1) 直接启动机器人（无 WebUI）
 Undefined
-# 或
+#
+# 2) 启动 WebUI（在浏览器里编辑配置，并在 WebUI 内启停机器人）
 Undefined-webui
 ```
 
+> 重要：`Undefined` 与 `Undefined-webui` **二选一即可**，不要同时运行两个进程；否则会出现“重复登录/重复收发消息”等问题。
+>
+> - 选择 `Undefined`：直接在终端运行机器人，修改 `config.toml` 后重启生效（或依赖热重载能力）。
+> - 选择 `Undefined-webui`：启动后访问 WebUI（默认 `http://127.0.0.1:8787`，密码默认 `changeme`；可在 `config.toml` 的 `[webui]` 中修改），在 WebUI 中在线编辑/校验配置，并通过 WebUI 启动/停止机器人进程。
+
 > `Undefined-webui` 会在检测到当前目录缺少 `config.toml` 时，自动从 `config.toml.example` 生成一份，便于直接在 WebUI 中修改。
+
+> 提示：资源文件已随包发布，支持在非项目根目录启动；如需自定义内容，请参考下方说明。
 
 #### pip/uv tool 部署的自定义方式
 
@@ -378,17 +394,18 @@ cp config.toml.example config.toml
 
 #### 4. 启动运行
 
+启动方式（二选一）：
+
 ```bash
+# 1) 直接启动机器人（无 WebUI）
 uv run Undefined
-```
 
-如需 WebUI（配置编辑控制台）：
-
-```bash
+# 2) 启动 WebUI（在浏览器里编辑配置，并在 WebUI 内启停机器人）
 uv run Undefined-webui
 ```
 
-> 提示：资源文件已随包发布，支持在非项目根目录启动；如需自定义 `res/` 或 `img/` 内容，请保持目录结构不变。
+> 重要：两种方式 **二选一即可**，不要同时运行。若你选择 `Undefined-webui`，请在 WebUI 中管理机器人进程的启停。
+
 
 #### 5. 跨平台与资源路径（重要）
 
