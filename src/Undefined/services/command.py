@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import time
 from uuid import uuid4
 from datetime import datetime
 from typing import Any, Optional
@@ -75,6 +76,7 @@ class CommandDispatcher:
         commands_dir = Path(__file__).parent / "commands"
         self.command_registry = CommandRegistry(commands_dir)
         self.command_registry.load_commands()
+        logger.info("[Command] 命令系统初始化完成: dir=%s", commands_dir)
 
     def parse_command(self, text: str) -> Optional[dict[str, Any]]:
         """解析斜杠命令字符串
@@ -665,6 +667,7 @@ class CommandDispatcher:
             sender_id: 发送者 QQ 号
             command: 解析出的命令数据结构
         """
+        start_time = time.perf_counter()
         cmd_name = str(command["name"])
         cmd_args = command["args"]
 
@@ -686,13 +689,46 @@ class CommandDispatcher:
             )
             return
 
+        logger.info(
+            "[Command] 命令匹配成功: input=/%s resolved=/%s permission=%s rate_limit=%s",
+            cmd_name,
+            meta.name,
+            meta.permission,
+            meta.rate_limit,
+        )
+
         allowed, role_name = self._check_command_permission(meta, sender_id)
         if not allowed:
+            logger.warning(
+                "[Command] 权限校验失败: cmd=/%s sender=%s required=%s",
+                meta.name,
+                sender_id,
+                role_name,
+            )
             await self._send_no_permission(group_id, sender_id, meta.name, role_name)
             return
 
+        logger.debug(
+            "[Command] 权限校验通过: cmd=/%s sender=%s",
+            meta.name,
+            sender_id,
+        )
+
         if not await self._check_command_rate_limit(meta, group_id, sender_id):
+            logger.warning(
+                "[Command] 速率限制拦截: cmd=/%s group=%s sender=%s",
+                meta.name,
+                group_id,
+                sender_id,
+            )
             return
+
+        logger.debug(
+            "[Command] 速率限制通过: cmd=/%s group=%s sender=%s",
+            meta.name,
+            group_id,
+            sender_id,
+        )
 
         context = CommandContext(
             group_id=group_id,
@@ -711,8 +747,20 @@ class CommandDispatcher:
 
         try:
             await self.command_registry.execute(meta, cmd_args, context)
+            duration = time.perf_counter() - start_time
+            logger.info(
+                "[Command] 分发完成: cmd=/%s duration=%.3fs",
+                meta.name,
+                duration,
+            )
         except Exception as e:
+            duration = time.perf_counter() - start_time
             logger.exception(f"[Command] 执行 /{meta.name} 失败: {e}")
+            logger.error(
+                "[Command] 分发失败: cmd=/%s duration=%.3fs",
+                meta.name,
+                duration,
+            )
             await self.sender.send_group_message(group_id, f"❌ 命令执行失败: {e}")
 
     def _check_command_permission(
@@ -735,10 +783,18 @@ class CommandDispatcher:
     ) -> bool:
         rate_limit = command_meta.rate_limit
         if rate_limit == "none":
+            logger.debug(
+                "[Command] 命令无需限流: cmd=/%s",
+                command_meta.name,
+            )
             return True
 
         if rate_limit == "stats":
             if self.rate_limiter is None:
+                logger.warning(
+                    "[Command] stats 限流器缺失，跳过限流: cmd=/%s",
+                    command_meta.name,
+                )
                 return True
             allowed, remaining = self.rate_limiter.check_stats(sender_id)
             if not allowed:
@@ -751,6 +807,11 @@ class CommandDispatcher:
                 )
                 return False
             self.rate_limiter.record_stats(sender_id)
+            logger.debug(
+                "[Command] stats 限流记录成功: cmd=/%s sender=%s",
+                command_meta.name,
+                sender_id,
+            )
             return True
 
         allowed, remaining = self.security.check_rate_limit(sender_id)
@@ -761,6 +822,11 @@ class CommandDispatcher:
             )
             return False
         self.security.record_rate_limit(sender_id)
+        logger.debug(
+            "[Command] 默认限流记录成功: cmd=/%s sender=%s",
+            command_meta.name,
+            sender_id,
+        )
         return True
 
     async def _send_no_permission(
