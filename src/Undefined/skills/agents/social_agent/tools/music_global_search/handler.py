@@ -1,8 +1,8 @@
 from typing import Any, Dict
-import httpx
 import logging
 
-from Undefined.skills.http_config import get_jkyai_url, get_request_timeout
+from Undefined.skills.http_client import get_json_with_retry
+from Undefined.skills.http_config import get_jkyai_url
 
 logger = logging.getLogger(__name__)
 
@@ -15,39 +15,37 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     url = get_jkyai_url("/API/qsyyjs.php")
 
     try:
-        timeout = get_request_timeout(15.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(
-                url, params={"msg": msg, "n": n, "type": "json"}
-            )
-            response.raise_for_status()
-            data = response.json()
+        data = await get_json_with_retry(
+            url,
+            params={"msg": msg, "n": n, "type": "json"},
+            default_timeout=15.0,
+            context=context,
+        )
 
-            if isinstance(data, dict):
-                output_lines = []
+        if isinstance(data, dict):
+            output_lines = []
 
-                title = data.get("title")
-                if title:
-                    output_lines.append(f"🎵 音乐搜索: {title}")
+            title = data.get("title")
+            if title:
+                output_lines.append(f"🎵 音乐搜索: {title}")
 
-                singer = data.get("singer")
-                if singer:
-                    output_lines.append(f"👤 歌手: {singer}")
+            singer = data.get("singer")
+            if singer:
+                output_lines.append(f"👤 歌手: {singer}")
 
-                music_url = data.get("music")
-                if music_url:
-                    output_lines.append(f"🔗 链接: {music_url}")
+            music_url = data.get("music")
+            if music_url:
+                output_lines.append(f"🔗 链接: {music_url}")
 
-                cover = data.get("cover")
-                if cover:
-                    output_lines.append(f"🖼️ 封面: {cover}")
+            cover = data.get("cover")
+            if cover:
+                output_lines.append(f"🖼️ 封面: {cover}")
 
-                if output_lines:
-                    return "\n".join(output_lines)
-                else:
-                    return "未找到相关音乐信息。"
+            if output_lines:
+                return "\n".join(output_lines)
+            return "未找到相关音乐信息。"
 
-            return str(data)
+        return str(data)
 
     except Exception as e:
         logger.exception(f"音乐搜索失败: {e}")

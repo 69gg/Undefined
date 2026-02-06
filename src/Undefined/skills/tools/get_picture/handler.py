@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 
 from Undefined.config import get_config
+from Undefined.skills.http_client import request_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -105,75 +106,81 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     base_url = _get_xxapi_base_url()
     api_url = f"{base_url}{API_PATHS[picture_type]}"
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        for i in range(count):
-            try:
-                logger.info(
-                    f"正在获取第 {i + 1}/{count} 张 {TYPE_NAMES[picture_type]} 图片..."
+    for i in range(count):
+        try:
+            logger.info(
+                f"正在获取第 {i + 1}/{count} 张 {TYPE_NAMES[picture_type]} 图片..."
+            )
+            response = await request_with_retry(
+                "GET",
+                api_url,
+                params=params,
+                timeout=timeout,
+                context=context,
+            )
+
+            # 美腿类型直接返回 JPEG 图片，不需要解析 JSON
+            if picture_type == "meitui":
+                # 验证响应内容类型
+                content_type = response.headers.get("content-type", "")
+                if "image" not in content_type.lower():
+                    logger.error(f"响应不是图片格式: {content_type}")
+                    fail_count += 1
+                    continue
+
+                # 保存图片
+                filename = f"{picture_type}_{uuid.uuid4().hex[:16]}.jpg"
+                filepath = img_dir / filename
+                filepath.write_bytes(response.content)
+
+                logger.info(f"图片已保存到: {filepath}")
+                local_image_paths.append(str(filepath))
+                success_count += 1
+            else:
+                data = response.json()
+
+                # 检查响应
+                if data.get("code") != 200:
+                    logger.error(f"获取图片失败: {data.get('msg')}")
+                    fail_count += 1
+                    continue
+
+                # 获取图片 URL
+                image_url = data.get("data")
+                if not image_url:
+                    logger.error("响应中未找到图片 URL")
+                    fail_count += 1
+                    continue
+
+                logger.info(f"图片 URL: {image_url}")
+
+                # 下载图片到本地
+                logger.info("正在下载图片到本地...")
+                image_response = await request_with_retry(
+                    "GET",
+                    str(image_url),
+                    timeout=max(timeout, 15.0),
+                    context=context,
                 )
-                response = await client.get(api_url, params=params)
-                response.raise_for_status()
 
-                # 美腿类型直接返回 JPEG 图片，不需要解析 JSON
-                if picture_type == "meitui":
-                    # 验证响应内容类型
-                    content_type = response.headers.get("content-type", "")
-                    if "image" not in content_type.lower():
-                        logger.error(f"响应不是图片格式: {content_type}")
-                        fail_count += 1
-                        continue
+                # 保存图片
+                filename = f"{picture_type}_{uuid.uuid4().hex[:16]}.jpg"
+                filepath = img_dir / filename
+                filepath.write_bytes(image_response.content)
 
-                    # 保存图片
-                    filename = f"{picture_type}_{uuid.uuid4().hex[:16]}.jpg"
-                    filepath = img_dir / filename
-                    filepath.write_bytes(response.content)
+                logger.info(f"图片已保存到: {filepath}")
+                local_image_paths.append(str(filepath))
+                success_count += 1
 
-                    logger.info(f"图片已保存到: {filepath}")
-                    local_image_paths.append(str(filepath))
-                    success_count += 1
-                else:
-                    data = response.json()
-
-                    # 检查响应
-                    if data.get("code") != 200:
-                        logger.error(f"获取图片失败: {data.get('msg')}")
-                        fail_count += 1
-                        continue
-
-                    # 获取图片 URL
-                    image_url = data.get("data")
-                    if not image_url:
-                        logger.error("响应中未找到图片 URL")
-                        fail_count += 1
-                        continue
-
-                    logger.info(f"图片 URL: {image_url}")
-
-                    # 下载图片到本地
-                    logger.info("正在下载图片到本地...")
-                    image_response = await client.get(
-                        image_url, timeout=max(timeout, 15.0)
-                    )
-                    image_response.raise_for_status()
-
-                    # 保存图片
-                    filename = f"{picture_type}_{uuid.uuid4().hex[:16]}.jpg"
-                    filepath = img_dir / filename
-                    filepath.write_bytes(image_response.content)
-
-                    logger.info(f"图片已保存到: {filepath}")
-                    local_image_paths.append(str(filepath))
-                    success_count += 1
-
-            except httpx.TimeoutException:
-                logger.error(f"获取图片超时: {picture_type} 第 {i + 1} 张")
-                fail_count += 1
-            except httpx.HTTPStatusError as e:
-                logger.error(f"HTTP 错误: {e}")
-                fail_count += 1
-            except Exception as e:
-                logger.exception(f"获取图片失败: {e}")
-                fail_count += 1
+        except httpx.TimeoutException:
+            logger.error(f"获取图片超时: {picture_type} 第 {i + 1} 张")
+            fail_count += 1
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP 错误: {e}")
+            fail_count += 1
+        except Exception as e:
+            logger.exception(f"获取图片失败: {e}")
+            fail_count += 1
 
     # 如果没有获取到任何图片
     if success_count == 0:

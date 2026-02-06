@@ -1,8 +1,8 @@
 from typing import Any, Dict
-import httpx
 import logging
 import uuid
 
+from Undefined.skills.http_client import request_with_retry
 from Undefined.skills.http_config import get_request_timeout, get_xingzhige_url
 
 logger = logging.getLogger(__name__)
@@ -29,30 +29,34 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     try:
         timeout = get_request_timeout(30.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(url, params=params)
+        response = await request_with_retry(
+            "GET",
+            url,
+            params=params,
+            timeout=timeout,
+            context=context,
+        )
 
-            # 检查内容类型
-            content_type = response.headers.get("content-type", "")
+        # 检查内容类型
+        content_type = response.headers.get("content-type", "")
 
-            if "application/json" in content_type:
-                return f"获取失败: {response.text}"
+        if "application/json" in content_type:
+            return f"获取失败: {response.text}"
 
-            # 假设是图片
-            filename = f"mc_skin_{uuid.uuid4().hex[:8]}.png"
-            from Undefined.utils.paths import IMAGE_CACHE_DIR, ensure_dir
+        # 假设是图片
+        filename = f"mc_skin_{uuid.uuid4().hex[:8]}.png"
+        from Undefined.utils.paths import IMAGE_CACHE_DIR, ensure_dir
 
-            filepath = ensure_dir(IMAGE_CACHE_DIR) / filename
+        filepath = ensure_dir(IMAGE_CACHE_DIR) / filename
 
-            with open(filepath, "wb") as f:
-                f.write(response.content)
+        with open(filepath, "wb") as f:
+            f.write(response.content)
 
-            send_image_callback = context.get("send_image_callback")
-            if send_image_callback:
-                await send_image_callback(target_id, message_type, str(filepath))
-                return f"Minecraft 皮肤/头像已发送给 {message_type} {target_id}"
-            else:
-                return "发送图片回调未设置，图片已保存但无法发送。"
+        send_image_callback = context.get("send_image_callback")
+        if send_image_callback:
+            await send_image_callback(target_id, message_type, str(filepath))
+            return f"Minecraft 皮肤/头像已发送给 {message_type} {target_id}"
+        return "发送图片回调未设置，图片已保存但无法发送。"
 
     except Exception as e:
         logger.exception(f"Minecraft 皮肤获取失败: {e}")

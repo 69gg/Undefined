@@ -2,7 +2,8 @@ from typing import Any, Dict
 import logging
 import httpx
 
-from Undefined.skills.http_config import get_request_timeout, get_xxapi_url
+from Undefined.skills.http_client import get_json_with_retry
+from Undefined.skills.http_config import get_xxapi_url
 
 logger = logging.getLogger(__name__)
 
@@ -20,21 +21,21 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "❌ 操作类型必须是 encode（加密）或 decode（解密）"
 
     try:
-        timeout = get_request_timeout(10.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            params = {"type": operation, "text": text}
-            logger.info(f"Base64 {operation}: {text[:50]}...")
+        params = {"type": operation, "text": text}
+        logger.info(f"Base64 {operation}: {text[:50]}...")
+        data = await get_json_with_retry(
+            get_xxapi_url("/api/base64"),
+            params=params,
+            default_timeout=10.0,
+            context=context,
+        )
 
-            response = await client.get(get_xxapi_url("/api/base64"), params=params)
-            response.raise_for_status()
-            data = response.json()
+        if data.get("code") != 200 and data.get("code") != "200":
+            return f"Base64 {operation} 失败: {data.get('msg')}"
 
-            if data.get("code") != 200 and data.get("code") != "200":
-                return f"Base64 {operation} 失败: {data.get('msg')}"
-
-            result = data.get("data")
-            operation_text = "加密" if operation == "encode" else "解密"
-            return f"Base64{operation_text}结果：\n{result}"
+        result = data.get("data")
+        operation_text = "加密" if operation == "encode" else "解密"
+        return f"Base64{operation_text}结果：\n{result}"
 
     except httpx.TimeoutException:
         return "请求超时，请稍后重试"

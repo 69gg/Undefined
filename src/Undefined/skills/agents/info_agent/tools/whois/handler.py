@@ -2,7 +2,8 @@ from typing import Any, Dict
 import logging
 import httpx
 
-from Undefined.skills.http_config import get_request_timeout, get_xxapi_url
+from Undefined.skills.http_client import get_json_with_retry
+from Undefined.skills.http_config import get_xxapi_url
 
 logger = logging.getLogger(__name__)
 
@@ -15,48 +16,49 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "❌ 域名不能为空"
 
     try:
-        timeout = get_request_timeout(15.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            params = {"domain": domain}
-            logger.info(f"查询Whois信息: {domain}")
+        params = {"domain": domain}
+        logger.info(f"查询Whois信息: {domain}")
 
-            response = await client.get(get_xxapi_url("/api/whois"), params=params)
-            response.raise_for_status()
-            data = response.json()
+        data = await get_json_with_retry(
+            get_xxapi_url("/api/whois"),
+            params=params,
+            default_timeout=15.0,
+            context=context,
+        )
 
-            if data.get("code") != 200:
-                return f"查询Whois失败: {data.get('msg')}"
+        if data.get("code") != 200:
+            return f"查询Whois失败: {data.get('msg')}"
 
-            whois_data = data.get("data", {})
-            result = f"【{domain} Whois信息】\n\n"
+        whois_data = data.get("data", {})
+        result = f"【{domain} Whois信息】\n\n"
 
-            domain_name = whois_data.get("Domain Name", "")
-            registrar = whois_data.get("Sponsoring Registrar", "")
-            registrar_url = whois_data.get("Registrar URL", "")
-            registrant = whois_data.get("Registrant", "")
-            registrant_email = whois_data.get("Registrant Contact Email", "")
-            registration_time = whois_data.get("Registration Time", "")
-            expiration_time = whois_data.get("Expiration Time", "")
-            dns_servers = whois_data.get("DNS Serve", [])
+        domain_name = whois_data.get("Domain Name", "")
+        registrar = whois_data.get("Sponsoring Registrar", "")
+        registrar_url = whois_data.get("Registrar URL", "")
+        registrant = whois_data.get("Registrant", "")
+        registrant_email = whois_data.get("Registrant Contact Email", "")
+        registration_time = whois_data.get("Registration Time", "")
+        expiration_time = whois_data.get("Expiration Time", "")
+        dns_servers = whois_data.get("DNS Serve", [])
 
-            if domain_name:
-                result += f"域名: {domain_name}\n"
-            if registrar:
-                result += f"注册商: {registrar}\n"
-            if registrar_url:
-                result += f"注册商URL: {registrar_url}\n"
-            if registrant:
-                result += f"注册人: {registrant}\n"
-            if registrant_email:
-                result += f"注册人邮箱: {registrant_email}\n"
-            if registration_time:
-                result += f"注册时间: {registration_time}\n"
-            if expiration_time:
-                result += f"到期时间: {expiration_time}\n"
-            if dns_servers:
-                result += f"DNS服务器: {', '.join(dns_servers)}\n"
+        if domain_name:
+            result += f"域名: {domain_name}\n"
+        if registrar:
+            result += f"注册商: {registrar}\n"
+        if registrar_url:
+            result += f"注册商URL: {registrar_url}\n"
+        if registrant:
+            result += f"注册人: {registrant}\n"
+        if registrant_email:
+            result += f"注册人邮箱: {registrant_email}\n"
+        if registration_time:
+            result += f"注册时间: {registration_time}\n"
+        if expiration_time:
+            result += f"到期时间: {expiration_time}\n"
+        if dns_servers:
+            result += f"DNS服务器: {', '.join(dns_servers)}\n"
 
-            return result
+        return result
 
     except httpx.TimeoutException:
         return "请求超时，请稍后重试"

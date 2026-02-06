@@ -2,7 +2,8 @@ from typing import Any, Dict
 import logging
 import httpx
 
-from Undefined.skills.http_config import get_request_timeout, get_xxapi_url
+from Undefined.skills.http_client import get_json_with_retry
+from Undefined.skills.http_config import get_xxapi_url
 
 logger = logging.getLogger(__name__)
 
@@ -22,32 +23,32 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "❌ 端口必须在 1-65535 之间"
 
     try:
-        timeout = get_request_timeout(30.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            params = {"address": address, "port": port}
-            logger.info(f"TCPing: {address}:{port}")
+        params = {"address": address, "port": port}
+        logger.info(f"TCPing: {address}:{port}")
+        data = await get_json_with_retry(
+            get_xxapi_url("/api/tcping"),
+            params=params,
+            default_timeout=30.0,
+            context=context,
+        )
 
-            response = await client.get(get_xxapi_url("/api/tcping"), params=params)
-            response.raise_for_status()
-            data = response.json()
+        if data.get("code") != 200:
+            return f"TCPing失败: {data.get('msg')}"
 
-            if data.get("code") != 200:
-                return f"TCPing失败: {data.get('msg')}"
+        result_data = data.get("data", {})
+        ping_result = result_data.get("ping")
+        result_address = result_data.get("address", address)
+        result_port = result_data.get("port", port)
 
-            result_data = data.get("data", {})
-            ping_result = result_data.get("ping")
-            result_address = result_data.get("address", address)
-            result_port = result_data.get("port", port)
+        output_lines = [
+            "TCPing测试结果：",
+            f"地址：{result_address}",
+            f"端口：{result_port}",
+        ]
+        if ping_result:
+            output_lines.append(f"延迟：{ping_result}")
 
-            output_lines = [
-                "TCPing测试结果：",
-                f"地址：{result_address}",
-                f"端口：{result_port}",
-            ]
-            if ping_result:
-                output_lines.append(f"延迟：{ping_result}")
-
-            return "\n".join(output_lines)
+        return "\n".join(output_lines)
 
     except httpx.TimeoutException:
         return "请求超时，请稍后重试"

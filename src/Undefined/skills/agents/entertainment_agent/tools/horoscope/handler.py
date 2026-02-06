@@ -2,7 +2,8 @@ from typing import Any, Dict
 import logging
 import httpx
 
-from Undefined.skills.http_config import get_request_timeout, get_xxapi_url
+from Undefined.skills.http_client import get_json_with_retry
+from Undefined.skills.http_config import get_xxapi_url
 
 logger = logging.getLogger(__name__)
 
@@ -53,87 +54,88 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return f"❌ 不支持的时间类型: {time_type}\n支持的时间类型: {', '.join(TIME_TYPE_MAP.keys())}"
 
     try:
-        timeout = get_request_timeout(10.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            params = {"type": constellation_en, "time": time_type_en}
-            logger.info(
-                f"获取星座运势: {constellation} ({constellation_en}), 时间: {time_type} ({time_type_en})"
-            )
+        params = {"type": constellation_en, "time": time_type_en}
+        logger.info(
+            f"获取星座运势: {constellation} ({constellation_en}), 时间: {time_type} ({time_type_en})"
+        )
 
-            response = await client.get(get_xxapi_url("/api/horoscope"), params=params)
-            response.raise_for_status()
-            data = response.json()
+        data = await get_json_with_retry(
+            get_xxapi_url("/api/horoscope"),
+            params=params,
+            default_timeout=10.0,
+            context=context,
+        )
 
-            if data.get("code") != 200:
-                return f"获取运势失败: {data.get('msg')}"
+        if data.get("code") != 200:
+            return f"获取运势失败: {data.get('msg')}"
 
-            fortune_data = data.get("data", {})
+        fortune_data = data.get("data", {})
 
-            # 格式化运势信息
-            title = fortune_data.get("title", constellation)
-            time_text = fortune_data.get("type", time_type)
-            short_comment = fortune_data.get("shortcomment", "")
-            date_text = fortune_data.get("time", "")
+        # 格式化运势信息
+        title = fortune_data.get("title", constellation)
+        time_text = fortune_data.get("type", time_type)
+        short_comment = fortune_data.get("shortcomment", "")
+        date_text = fortune_data.get("time", "")
 
-            # 运势评分
-            fortune = fortune_data.get("fortune", {})
-            fortune_stars = {
-                "综合": STAR_MAP.get(fortune.get("all", 0), ""),
-                "健康": STAR_MAP.get(fortune.get("health", 0), ""),
-                "爱情": STAR_MAP.get(fortune.get("love", 0), ""),
-                "财运": STAR_MAP.get(fortune.get("money", 0), ""),
-                "工作": STAR_MAP.get(fortune.get("work", 0), ""),
-            }
+        # 运势评分
+        fortune = fortune_data.get("fortune", {})
+        fortune_stars = {
+            "综合": STAR_MAP.get(fortune.get("all", 0), ""),
+            "健康": STAR_MAP.get(fortune.get("health", 0), ""),
+            "爱情": STAR_MAP.get(fortune.get("love", 0), ""),
+            "财运": STAR_MAP.get(fortune.get("money", 0), ""),
+            "工作": STAR_MAP.get(fortune.get("work", 0), ""),
+        }
 
-            # 运势指数
-            index = fortune_data.get("index", {})
+        # 运势指数
+        index = fortune_data.get("index", {})
 
-            # 运势文本
-            fortunetext = fortune_data.get("fortunetext", {})
+        # 运势文本
+        fortunetext = fortune_data.get("fortunetext", {})
 
-            # 幸运信息
-            lucky_color = fortune_data.get("luckycolor", "")
-            lucky_constellation = fortune_data.get("luckyconstellation", "")
-            lucky_number = fortune_data.get("luckynumber", "")
+        # 幸运信息
+        lucky_color = fortune_data.get("luckycolor", "")
+        lucky_constellation = fortune_data.get("luckyconstellation", "")
+        lucky_number = fortune_data.get("luckynumber", "")
 
-            # 宜忌
-            todo = fortune_data.get("todo", {})
-            todo_yi = todo.get("ji", "")
-            todo_ji = todo.get("yi", "")
+        # 宜忌
+        todo = fortune_data.get("todo", {})
+        todo_yi = todo.get("ji", "")
+        todo_ji = todo.get("yi", "")
 
-            # 构建结果
-            result = f"【{title} {time_text}】{date_text}\n"
-            result += f"短评：{short_comment}\n\n"
+        # 构建结果
+        result = f"【{title} {time_text}】{date_text}\n"
+        result += f"短评：{short_comment}\n\n"
 
-            result += "【运势评分】\n"
-            for name, stars in fortune_stars.items():
-                result += f"{name}：{stars}\n"
-            result += "\n"
+        result += "【运势评分】\n"
+        for name, stars in fortune_stars.items():
+            result += f"{name}：{stars}\n"
+        result += "\n"
 
-            result += "【运势指数】\n"
-            for name, value in index.items():
-                result += f"{name}：{value}\n"
-            result += "\n"
+        result += "【运势指数】\n"
+        for name, value in index.items():
+            result += f"{name}：{value}\n"
+        result += "\n"
 
-            result += "【运势详情】\n"
-            for name, text in fortunetext.items():
-                result += f"{name}：{text}\n"
-            result += "\n"
+        result += "【运势详情】\n"
+        for name, text in fortunetext.items():
+            result += f"{name}：{text}\n"
+        result += "\n"
 
-            result += "【幸运信息】\n"
-            result += f"幸运色：{lucky_color}\n"
-            result += f"幸运星座：{lucky_constellation}\n"
-            result += f"幸运数字：{lucky_number}\n"
-            result += "\n"
+        result += "【幸运信息】\n"
+        result += f"幸运色：{lucky_color}\n"
+        result += f"幸运星座：{lucky_constellation}\n"
+        result += f"幸运数字：{lucky_number}\n"
+        result += "\n"
 
-            if todo_yi or todo_ji:
-                result += "【宜忌】\n"
-                if todo_yi:
-                    result += f"宜：{todo_yi}\n"
-                if todo_ji:
-                    result += f"忌：{todo_ji}\n"
+        if todo_yi or todo_ji:
+            result += "【宜忌】\n"
+            if todo_yi:
+                result += f"宜：{todo_yi}\n"
+            if todo_ji:
+                result += f"忌：{todo_ji}\n"
 
-            return result
+        return result
 
     except httpx.TimeoutException:
         return "获取运势超时，请稍后重试"

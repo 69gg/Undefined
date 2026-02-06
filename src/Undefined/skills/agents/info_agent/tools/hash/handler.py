@@ -2,7 +2,8 @@ from typing import Any, Dict
 import logging
 import httpx
 
-from Undefined.skills.http_config import get_request_timeout, get_xxapi_url
+from Undefined.skills.http_client import get_json_with_retry
+from Undefined.skills.http_config import get_xxapi_url
 
 logger = logging.getLogger(__name__)
 
@@ -20,20 +21,20 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "❌ 算法必须是 md4、md5、sha1、sha256 或 sha512"
 
     try:
-        timeout = get_request_timeout(10.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            params = {"type": algorithm, "text": text}
-            logger.info(f"Hash {algorithm}: {text[:50]}...")
+        params = {"type": algorithm, "text": text}
+        logger.info(f"Hash {algorithm}: {text[:50]}...")
+        data = await get_json_with_retry(
+            get_xxapi_url("/api/hash"),
+            params=params,
+            default_timeout=10.0,
+            context=context,
+        )
 
-            response = await client.get(get_xxapi_url("/api/hash"), params=params)
-            response.raise_for_status()
-            data = response.json()
+        if data.get("code") != 200:
+            return f"Hash加密失败: {data.get('msg')}"
 
-            if data.get("code") != 200:
-                return f"Hash加密失败: {data.get('msg')}"
-
-            result = data.get("data")
-            return f"{algorithm.upper()}加密结果：\n{result}"
+        result = data.get("data")
+        return f"{algorithm.upper()}加密结果：\n{result}"
 
     except httpx.TimeoutException:
         return "请求超时，请稍后重试"

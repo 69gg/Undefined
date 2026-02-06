@@ -19,6 +19,14 @@ def get_request_timeout(default_timeout: float = 15.0) -> float:
     return timeout if timeout > 0 else default_timeout
 
 
+def get_request_retries(default_retries: int = 0) -> int:
+    config = get_config(strict=False)
+    retries = int(config.network_request_retries)
+    if retries < 0:
+        return default_retries
+    return retries
+
+
 def get_xxapi_url(path: str) -> str:
     config = get_config(strict=False)
     base_url = _normalize_base_url(config.api_xxapi_base_url, "https://v2.xxapi.cn")

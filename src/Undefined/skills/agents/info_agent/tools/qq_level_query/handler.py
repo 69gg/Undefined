@@ -1,8 +1,8 @@
 from typing import Any, Dict
-import httpx
 import logging
 
-from Undefined.skills.http_config import get_request_timeout, get_xingzhige_url
+from Undefined.skills.http_client import get_json_with_retry
+from Undefined.skills.http_config import get_xingzhige_url
 
 logger = logging.getLogger(__name__)
 
@@ -18,35 +18,36 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     url = get_xingzhige_url("/API/QQ_level/")
 
     try:
-        timeout = get_request_timeout(15.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(url, params=params)
-            response.raise_for_status()
-            data = response.json()
+        data = await get_json_with_retry(
+            url,
+            params=params,
+            default_timeout=15.0,
+            context=context,
+        )
 
-            if isinstance(data, dict):
-                nick = data.get("nick")
-                qq_level = data.get("QQlevel")
-                uin = data.get("uin", params["qq"])
-                avatar = data.get("avatar")
+        if isinstance(data, dict):
+            nick = data.get("nick")
+            qq_level = data.get("QQlevel")
+            uin = data.get("uin", params["qq"])
+            avatar = data.get("avatar")
 
-                output_lines = []
+            output_lines = []
 
-                header = "⭐ QQ等级查询"
-                if nick:
-                    header += f": {nick}"
-                if uin:
-                    header += f" ({uin})"
-                output_lines.append(header)
+            header = "⭐ QQ等级查询"
+            if nick:
+                header += f": {nick}"
+            if uin:
+                header += f" ({uin})"
+            output_lines.append(header)
 
-                if qq_level:
-                    output_lines.append(f"🆙 等级: {qq_level}")
+            if qq_level:
+                output_lines.append(f"🆙 等级: {qq_level}")
 
-                if avatar:
-                    output_lines.append(f"🖼️ 头像: {avatar}")
+            if avatar:
+                output_lines.append(f"🖼️ 头像: {avatar}")
 
-                return "\n".join(output_lines)
-            return str(data)
+            return "\n".join(output_lines)
+        return str(data)
 
     except Exception as e:
         logger.exception(f"QQ等级查询失败: {e}")
