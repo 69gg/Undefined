@@ -2,6 +2,8 @@ from typing import Any, Dict
 import logging
 import httpx
 
+from Undefined.skills.http_config import get_request_timeout, get_xxapi_url
+
 logger = logging.getLogger(__name__)
 
 
@@ -12,11 +14,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "❌ URL不能为空"
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        timeout = get_request_timeout(30.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             params = {"url": url}
             logger.info(f"网站测速: {url}")
 
-            response = await client.get("https://v2.xxapi.cn/api/speed", params=params)
+            response = await client.get(get_xxapi_url("/api/speed"), params=params)
             response.raise_for_status()
             data = response.json()
 

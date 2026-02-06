@@ -2,6 +2,8 @@ from typing import Any, Dict
 import logging
 import httpx
 
+from Undefined.skills.http_config import get_request_timeout, get_xxapi_url
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,11 +22,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "❌ 端口必须在 1-65535 之间"
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        timeout = get_request_timeout(30.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             params = {"address": address, "port": port}
             logger.info(f"TCPing: {address}:{port}")
 
-            response = await client.get("https://v2.xxapi.cn/api/tcping", params=params)
+            response = await client.get(get_xxapi_url("/api/tcping"), params=params)
             response.raise_for_status()
             data = response.json()
 

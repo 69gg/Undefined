@@ -2,6 +2,8 @@ from typing import Any, Dict
 import logging
 import httpx
 
+from Undefined.skills.http_config import get_request_timeout, get_xxapi_url
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,11 +20,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "❌ 操作类型必须是 encode（加密）或 decode（解密）"
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        timeout = get_request_timeout(10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             params = {"type": operation, "text": text}
             logger.info(f"Base64 {operation}: {text[:50]}...")
 
-            response = await client.get("https://v2.xxapi.cn/api/base64", params=params)
+            response = await client.get(get_xxapi_url("/api/base64"), params=params)
             response.raise_for_status()
             data = response.json()
 

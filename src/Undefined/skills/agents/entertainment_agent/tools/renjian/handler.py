@@ -2,16 +2,19 @@ from typing import Any, Dict
 import logging
 import httpx
 
+from Undefined.skills.http_config import get_request_timeout, get_xxapi_url
+
 logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """获取指定句子的“人间文案”感悟"""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        timeout = get_request_timeout(10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             logger.info("获取人间凑数语录")
 
-            response = await client.get("https://v2.xxapi.cn/api/renjian")
+            response = await client.get(get_xxapi_url("/api/renjian"))
             response.raise_for_status()
             data = response.json()
 

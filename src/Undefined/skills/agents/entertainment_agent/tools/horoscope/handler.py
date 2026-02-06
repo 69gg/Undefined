@@ -2,6 +2,8 @@ from typing import Any, Dict
 import logging
 import httpx
 
+from Undefined.skills.http_config import get_request_timeout, get_xxapi_url
+
 logger = logging.getLogger(__name__)
 
 # 星座名称映射（中文 -> 英文）
@@ -51,15 +53,14 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return f"❌ 不支持的时间类型: {time_type}\n支持的时间类型: {', '.join(TIME_TYPE_MAP.keys())}"
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        timeout = get_request_timeout(10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             params = {"type": constellation_en, "time": time_type_en}
             logger.info(
                 f"获取星座运势: {constellation} ({constellation_en}), 时间: {time_type} ({time_type_en})"
             )
 
-            response = await client.get(
-                "https://v2.xxapi.cn/api/horoscope", params=params
-            )
+            response = await client.get(get_xxapi_url("/api/horoscope"), params=params)
             response.raise_for_status()
             data = response.json()
 

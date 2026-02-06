@@ -2,6 +2,8 @@ from typing import Any, Dict
 import httpx
 import logging
 
+from Undefined.skills.http_config import get_request_timeout, get_xingzhige_url
+
 logger = logging.getLogger(__name__)
 
 
@@ -9,10 +11,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     msg = args.get("msg")
     n = args.get("n", 5)
 
-    url = "https://api.xingzhige.com/API/b_search/"
+    url = get_xingzhige_url("/API/b_search/")
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        timeout = get_request_timeout(15.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.get(url, params={"msg": msg, "n": n})
             response.raise_for_status()
             data = response.json()

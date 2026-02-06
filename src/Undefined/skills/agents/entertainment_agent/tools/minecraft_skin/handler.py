@@ -3,6 +3,8 @@ import httpx
 import logging
 import uuid
 
+from Undefined.skills.http_config import get_request_timeout, get_xingzhige_url
+
 logger = logging.getLogger(__name__)
 
 
@@ -16,7 +18,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     target_id = args.get("target_id")
     message_type = args.get("message_type")
 
-    url = "https://api.xingzhige.com/API/get_Minecraft_skins/"
+    url = get_xingzhige_url("/API/get_Minecraft_skins/")
     params = {
         "name": name,
         "type": render_type,
@@ -26,7 +28,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        timeout = get_request_timeout(30.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.get(url, params=params)
 
             # 检查内容类型

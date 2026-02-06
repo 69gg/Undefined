@@ -2,6 +2,8 @@ from typing import Any, Dict
 import logging
 import httpx
 
+from Undefined.skills.http_config import get_request_timeout, get_xxapi_url
+
 logger = logging.getLogger(__name__)
 
 
@@ -13,10 +15,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "❌ 热搜数量必须在 1-50 之间"
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        timeout = get_request_timeout(15.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             logger.info(f"获取百度热搜，数量: {limit}")
 
-            response = await client.get("https://v2.xxapi.cn/api/baiduhot")
+            response = await client.get(get_xxapi_url("/api/baiduhot"))
             response.raise_for_status()
             data = response.json()
 

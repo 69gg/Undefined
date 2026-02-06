@@ -2,6 +2,8 @@ from typing import Any, Dict
 import logging
 import httpx
 
+from Undefined.skills.http_config import get_request_timeout, get_xxapi_url
+
 logger = logging.getLogger(__name__)
 
 
@@ -13,11 +15,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "❌ 域名不能为空"
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        timeout = get_request_timeout(15.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             params = {"domain": domain}
             logger.info(f"查询Whois信息: {domain}")
 
-            response = await client.get("https://v2.xxapi.cn/api/whois", params=params)
+            response = await client.get(get_xxapi_url("/api/whois"), params=params)
             response.raise_for_status()
             data = response.json()
 

@@ -2,6 +2,8 @@ from typing import Any, Dict
 import httpx
 import logging
 
+from Undefined.skills.http_config import get_jkyai_url, get_request_timeout
+
 logger = logging.getLogger(__name__)
 
 
@@ -9,10 +11,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     song_id = args.get("id")
     platform = args.get("type")
 
-    url = "https://api.jkyai.top/API/yyjhss.php"
+    url = get_jkyai_url("/API/yyjhss.php")
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        timeout = get_request_timeout(15.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.get(url, params={"id": song_id, "type": platform})
             response.raise_for_status()
             data = response.json()

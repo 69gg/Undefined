@@ -2,6 +2,8 @@ from typing import Any, Dict
 import httpx
 import logging
 
+from Undefined.skills.http_config import get_jkyai_url, get_request_timeout
+
 logger = logging.getLogger(__name__)
 
 
@@ -11,7 +13,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     href = args.get("href")
     num = args.get("num")
 
-    url = "https://api.jkyai.top/API/fqmfxs.php"
+    url = get_jkyai_url("/API/fqmfxs.php")
     params = {}
     if name:
         params["name"] = name
@@ -21,7 +23,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         params["num"] = num
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        timeout = get_request_timeout(15.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.get(url, params=params)
 
             # API 返回文本
