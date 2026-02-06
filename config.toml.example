@@ -270,8 +270,8 @@ archive_prune_mode = "delete"
 # en: MCP config file path (relative to the working directory).
 config_path = "config/mcp.json"
 
-# zh: WebUI 设置。
-# en: WebUI settings.
+# zh: WebUI 设置。仅在使用 `Undefined-webui` 启动 WebUI 时生效；直接运行 `Undefined` 可忽略本段。
+# en: WebUI settings. Only used when starting WebUI via `Undefined-webui`; ignore this section if you run `Undefined` directly.
 [webui]
 # zh: WebUI 监听地址。
 # en: WebUI bind host.
