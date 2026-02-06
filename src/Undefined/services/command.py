@@ -1126,12 +1126,13 @@ class CommandDispatcher:
         batch = await self.onebot.get_group_msg_history(group_id, count=2500)
         if not batch:
             return []
+        target_qqs_set = set(target_qqs)
         results = []
         for msg in batch:
             msg_time = parse_message_time(msg)
             if (
                 start_date <= msg_time <= end_date
-                and get_message_sender_id(msg) in target_qqs
+                and get_message_sender_id(msg) in target_qqs_set
             ):
                 results.append(msg)
         return sorted(results, key=lambda m: m.get("time", 0))
