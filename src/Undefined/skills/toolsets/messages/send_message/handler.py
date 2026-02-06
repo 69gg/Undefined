@@ -14,11 +14,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     runtime_config = context.get("runtime_config")
 
-    # 如果可用，使用 context.recent_replies 检查重复
-    recent_replies = context.get("recent_replies")
-    if recent_replies is not None and message in recent_replies:
-        logger.info(f"[发送消息] 检测到重复消息内容: {message[:50]}...")
-
     at_user = args.get("at_user")
     send_message_callback = context.get("send_message_callback")
     sender = context.get("sender")
@@ -48,8 +43,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 message = f"[CQ:at,qq={at_user}] {message}"
             try:
                 await sender.send_group_message(group_id_int, message)
-                if recent_replies is not None:
-                    recent_replies.append(message)
                 return "消息已发送"
             except Exception as e:
                 logger.exception(
@@ -71,8 +64,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                     return f"发送失败：目标用户 {uid} 不在允许列表内（access.allowed_private_ids），已被访问控制拦截"
             logger.info(f"[发送消息] 无法确定群ID，尝试使用回调发送: {message[:100]}")
             await send_message_callback(message, at_user)
-            if recent_replies is not None:
-                recent_replies.append(message)
             return "消息已发送"
         else:
             logger.error("[发送消息] 发送失败：无法确定群组 ID 且无回调可用")
@@ -81,8 +72,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     elif send_message_callback:
         logger.info(f"[发送消息] 使用回调发送私聊或默认消息: {message[:100]}")
         await send_message_callback(message, at_user)
-        if recent_replies is not None:
-            recent_replies.append(message)
         return "消息已发送"
     else:
         logger.error("[发送消息] 发送消息回调和 sender 均未设置")

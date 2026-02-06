@@ -45,5 +45,6 @@ uv run mypy src/Undefined      # type-check (strict)
 ## Commit & Pull Request Guidelines
 
 - Follow Conventional Commits as used in history: `feat(scope): ...`, `fix(scope): ...`, `refactor(scope): ...`, `docs(...): ...`, `chore(...): ...`, `ci: ...`.
+- 每次完成变更后顺手 commit，不要等待用户重复提醒。
 - PRs should include: clear description, linked issue/PR number if applicable, how to test, and notes for any `.env`/MCP/config changes.
 - Never commit secrets: keep `.env` local (copy from `.env.example`) and redact tokens/IDs from logs and screenshots.

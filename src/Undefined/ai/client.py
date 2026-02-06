@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import logging
-from collections import deque
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
 
@@ -109,9 +108,6 @@ class AIClient:
         self._token_usage_storage = TokenUsageStorage()
         self._requester = ModelRequester(self._http_client, self._token_usage_storage)
         self._token_counter = TokenCounter()
-
-        # 记录最近发送的 50 条消息内容，用于去重
-        self.recent_replies: deque[str] = deque(maxlen=50)
 
         # 私聊发送回调
         self._send_private_message_callback: Optional[
@@ -464,7 +460,6 @@ class AIClient:
         tool_context.setdefault("ai_client", self)
         tool_context.setdefault("runtime_config", self._get_runtime_config())
         tool_context.setdefault("search_wrapper", self._search_wrapper)
-        tool_context.setdefault("recent_replies", self.recent_replies)
         tool_context.setdefault(
             "send_private_message_callback", self._send_private_message_callback
         )
