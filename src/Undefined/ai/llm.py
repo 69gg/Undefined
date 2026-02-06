@@ -1042,6 +1042,10 @@ def build_request_body(
         "max_tokens": max_tokens,
     }
 
+    extra_kwargs: dict[str, Any] = dict(kwargs)
+    if not model_config.thinking_enabled and "thinking" in extra_kwargs:
+        extra_kwargs.pop("thinking", None)
+
     if model_config.thinking_enabled:
         if getattr(model_config, "deepseek_new_cot_support", False):
             # DeepSeek thinking mode 只需要 {"type":"enabled"}；额外字段可能导致兼容性问题。
@@ -1056,5 +1060,5 @@ def build_request_body(
         body["tools"] = tools
         body["tool_choice"] = tool_choice
 
-    body.update(kwargs)
+    body.update(extra_kwargs)
     return body
