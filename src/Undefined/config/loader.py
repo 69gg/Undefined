@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import tomllib
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field as dataclass_field, fields
 from pathlib import Path
 from typing import Any, Optional, IO
 
@@ -174,6 +174,13 @@ def _coerce_bool(value: Any, default: bool) -> bool:
 def _coerce_str(value: Any, default: str) -> str:
     normalized = _normalize_str(value)
     return normalized if normalized is not None else default
+
+
+def _normalize_base_url(value: str, default: str) -> str:
+    normalized = value.strip().rstrip("/")
+    if normalized:
+        return normalized
+    return default.rstrip("/")
 
 
 def _coerce_int_list(value: Any) -> list[int]:
@@ -348,6 +355,12 @@ class Config:
     use_proxy: bool
     http_proxy: str
     https_proxy: str
+    network_request_timeout: float
+    network_request_retries: int
+    api_xxapi_base_url: str
+    api_xingzhige_base_url: str
+    api_jkyai_base_url: str
+    api_seniverse_base_url: str
     weather_api_key: str
     xxapi_api_token: str
     mcp_config_path: str
@@ -356,6 +369,21 @@ class Config:
     webui_url: str
     webui_port: int
     webui_password: str
+    _allowed_group_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
+    _allowed_private_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
+
+    def __post_init__(self) -> None:
+        # 访问控制白名单属于高频热路径，启动后缓存为 set 降低重复构建开销。
+        self._allowed_group_ids_set = {int(item) for item in self.allowed_group_ids}
+        self._allowed_private_ids_set = {int(item) for item in self.allowed_private_ids}
 
     @classmethod
     def load(cls, config_path: Optional[Path] = None, strict: bool = True) -> "Config":
@@ -636,6 +664,67 @@ class Config:
             if https_proxy:
                 _warn_env_fallback("HTTPS_PROXY")
 
+        network_request_timeout = _coerce_float(
+            _get_value(
+                data,
+                ("network", "request_timeout_seconds"),
+                "NETWORK_REQUEST_TIMEOUT_SECONDS",
+            ),
+            30.0,
+        )
+        if network_request_timeout <= 0:
+            network_request_timeout = 30.0
+
+        network_request_retries = _coerce_int(
+            _get_value(
+                data,
+                ("network", "request_retries"),
+                "NETWORK_REQUEST_RETRIES",
+            ),
+            0,
+        )
+        if network_request_retries < 0:
+            network_request_retries = 0
+        if network_request_retries > 5:
+            network_request_retries = 5
+
+        api_xxapi_base_url = _normalize_base_url(
+            _coerce_str(
+                _get_value(data, ("api_endpoints", "xxapi_base_url"), "XXAPI_BASE_URL"),
+                "https://v2.xxapi.cn",
+            ),
+            "https://v2.xxapi.cn",
+        )
+        api_xingzhige_base_url = _normalize_base_url(
+            _coerce_str(
+                _get_value(
+                    data,
+                    ("api_endpoints", "xingzhige_base_url"),
+                    "XINGZHIGE_BASE_URL",
+                ),
+                "https://api.xingzhige.com",
+            ),
+            "https://api.xingzhige.com",
+        )
+        api_jkyai_base_url = _normalize_base_url(
+            _coerce_str(
+                _get_value(data, ("api_endpoints", "jkyai_base_url"), "JKYAI_BASE_URL"),
+                "https://api.jkyai.top",
+            ),
+            "https://api.jkyai.top",
+        )
+        api_seniverse_base_url = _normalize_base_url(
+            _coerce_str(
+                _get_value(
+                    data,
+                    ("api_endpoints", "seniverse_base_url"),
+                    "SENIVERSE_BASE_URL",
+                ),
+                "https://api.seniverse.com/v3",
+            ),
+            "https://api.seniverse.com/v3",
+        )
+
         weather_api_key = _coerce_str(
             _get_value(data, ("weather", "api_key"), "WEATHER_API_KEY"), ""
         )
@@ -708,6 +797,12 @@ class Config:
             use_proxy=use_proxy,
             http_proxy=http_proxy,
             https_proxy=https_proxy,
+            network_request_timeout=network_request_timeout,
+            network_request_retries=network_request_retries,
+            api_xxapi_base_url=api_xxapi_base_url,
+            api_xingzhige_base_url=api_xingzhige_base_url,
+            api_jkyai_base_url=api_jkyai_base_url,
+            api_seniverse_base_url=api_seniverse_base_url,
             weather_api_key=weather_api_key,
             xxapi_api_token=xxapi_api_token,
             mcp_config_path=mcp_config_path,
@@ -731,7 +826,7 @@ class Config:
 
         if not self.access_control_enabled():
             return True
-        return int(group_id) in set(self.allowed_group_ids)
+        return int(group_id) in self._allowed_group_ids_set
 
     def is_private_allowed(self, user_id: int) -> bool:
         """私聊是否允许收发消息。"""
@@ -744,7 +839,7 @@ class Config:
             and self.superadmin_qq > 0
         ):
             return True
-        return int(user_id) in set(self.allowed_private_ids)
+        return int(user_id) in self._allowed_private_ids_set
 
     def should_process_group_message(self, is_at_bot: bool) -> bool:
         """是否处理该条群消息。"""

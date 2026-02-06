@@ -5,20 +5,22 @@ import asyncio
 import uuid
 from pathlib import Path
 
+from Undefined.config import get_config
+
 logger = logging.getLogger(__name__)
 
-# API 地址映射
-API_URLS = {
-    "baisi": "https://v2.xxapi.cn/api/baisi",
-    "heisi": "https://v2.xxapi.cn/api/heisi",
-    "head": "https://v2.xxapi.cn/api/head",
-    "jk": "https://v2.xxapi.cn/api/jk",
-    "acg": "https://v2.xxapi.cn/api/randomAcgPic",
-    "meinvpic": "https://v2.xxapi.cn/api/meinvpic",
-    "wallpaper": "https://v2.xxapi.cn/api/wallpaper",
-    "ys": "https://v2.xxapi.cn/api/ys",
-    "historypic": "https://v2.xxapi.cn/api/historypic",
-    "random4kPic": "https://v2.xxapi.cn/api/random4kPic",
+# API 路径映射（基础地址从配置读取）
+API_PATHS = {
+    "baisi": "/api/baisi",
+    "heisi": "/api/heisi",
+    "head": "/api/head",
+    "jk": "/api/jk",
+    "acg": "/api/randomAcgPic",
+    "meinvpic": "/api/meinvpic",
+    "wallpaper": "/api/wallpaper",
+    "ys": "/api/ys",
+    "historypic": "/api/historypic",
+    "random4kPic": "/api/random4kPic",
 }
 
 # 图片类型名称映射
@@ -35,6 +37,18 @@ TYPE_NAMES = {
     "random4kPic": "4K图片",
     "meitui": "美腿",
 }
+
+
+def _get_xxapi_base_url() -> str:
+    config = get_config(strict=False)
+    base_url = str(config.api_xxapi_base_url).strip().rstrip("/")
+    return base_url or "https://v2.xxapi.cn"
+
+
+def _get_timeout_seconds() -> float:
+    config = get_config(strict=False)
+    timeout = float(config.network_request_timeout)
+    return timeout if timeout > 0 else 10.0
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
@@ -54,7 +68,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "❌ 目标 ID 不能为空"
     if not isinstance(target_id, int):
         return "❌ 目标 ID 必须是整数"
-    if picture_type not in API_URLS:
+    if picture_type not in API_PATHS:
         return f"❌ 不支持的图片类型: {picture_type}\n支持的类型: {', '.join(TYPE_NAMES.values())}"
     if not isinstance(count, int):
         return "❌ 图片数量必须是整数"
@@ -87,13 +101,17 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     img_dir = ensure_dir(IMAGE_CACHE_DIR)
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    timeout = _get_timeout_seconds()
+    base_url = _get_xxapi_base_url()
+    api_url = f"{base_url}{API_PATHS[picture_type]}"
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
         for i in range(count):
             try:
                 logger.info(
                     f"正在获取第 {i + 1}/{count} 张 {TYPE_NAMES[picture_type]} 图片..."
                 )
-                response = await client.get(API_URLS[picture_type], params=params)
+                response = await client.get(api_url, params=params)
                 response.raise_for_status()
 
                 # 美腿类型直接返回 JPEG 图片，不需要解析 JSON
@@ -133,7 +151,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
                     # 下载图片到本地
                     logger.info("正在下载图片到本地...")
-                    image_response = await client.get(image_url, timeout=15.0)
+                    image_response = await client.get(
+                        image_url, timeout=max(timeout, 15.0)
+                    )
                     image_response.raise_for_status()
 
                     # 保存图片

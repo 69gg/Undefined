@@ -38,6 +38,8 @@ SECTION_ORDER: dict[str, list[str]] = {
         "skills",
         "search",
         "proxy",
+        "network",
+        "api_endpoints",
         "weather",
         "xxapi",
         "token_usage",
@@ -86,6 +88,13 @@ KEY_ORDER: dict[str, list[str]] = {
     ],
     "search": ["searxng_url"],
     "proxy": ["use_proxy", "http_proxy", "https_proxy"],
+    "network": ["request_timeout_seconds", "request_retries"],
+    "api_endpoints": [
+        "xxapi_base_url",
+        "xingzhige_base_url",
+        "jkyai_base_url",
+        "seniverse_base_url",
+    ],
     "weather": ["api_key"],
     "xxapi": ["api_token"],
     "token_usage": [

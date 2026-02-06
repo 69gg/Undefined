@@ -6,11 +6,21 @@ from Undefined.config import get_config
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://api.seniverse.com/v3"
-
 
 def _get_api_key() -> str:
     return get_config(strict=False).weather_api_key
+
+
+def _get_base_url() -> str:
+    config = get_config(strict=False)
+    base_url = str(config.api_seniverse_base_url).strip().rstrip("/")
+    return base_url or "https://api.seniverse.com/v3"
+
+
+def _get_timeout_seconds() -> float:
+    config = get_config(strict=False)
+    timeout = float(config.network_request_timeout)
+    return timeout if timeout > 0 else 30.0
 
 
 async def fetch_data(url: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -23,7 +33,8 @@ async def fetch_data(url: str, params: Dict[str, Any]) -> Dict[str, Any]:
     params["language"] = "zh-Hans"
     params["unit"] = "c"
 
-    async with aiohttp.ClientSession() as session:
+    timeout = aiohttp.ClientTimeout(total=_get_timeout_seconds())
+    async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(url, params=params) as response:
             if response.status != 200:
                 error_text = await response.text()
@@ -34,7 +45,7 @@ async def fetch_data(url: str, params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def get_weather_now(location: str) -> str:
-    url = f"{BASE_URL}/weather/now.json"
+    url = f"{_get_base_url()}/weather/now.json"
     data = await fetch_data(url, {"location": location})
 
     if "error" in data:
@@ -81,7 +92,7 @@ async def get_weather_now(location: str) -> str:
 
 
 async def get_weather_forecast(location: str) -> str:
-    url = f"{BASE_URL}/weather/daily.json"
+    url = f"{_get_base_url()}/weather/daily.json"
     # start=0 包括今天。days=5 为请求的范围。
     data = await fetch_data(url, {"location": location, "start": "0", "days": "5"})
 
@@ -130,7 +141,7 @@ async def get_weather_forecast(location: str) -> str:
 
 
 async def get_life_suggestion(location: str) -> str:
-    url = f"{BASE_URL}/life/suggestion.json"
+    url = f"{_get_base_url()}/life/suggestion.json"
     data = await fetch_data(url, {"location": location})
 
     if "error" in data:

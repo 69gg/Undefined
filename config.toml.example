@@ -254,6 +254,32 @@ http_proxy = ""
 # en: e.g. http://127.0.0.1:7890 (or use the "HTTPS_PROXY" environment variable).
 https_proxy = ""
 
+# zh: 网络请求配置（全局默认）。
+# en: Network request settings (global defaults).
+[network]
+# zh: 默认请求超时（秒），用于多数工具的 HTTP 请求。
+# en: Default request timeout in seconds for most HTTP tool calls.
+request_timeout_seconds = 30.0
+# zh: 默认重试次数（0-5）。
+# en: Default retry count (0-5).
+request_retries = 0
+
+# zh: 第三方 API 基础地址（便于自定义镜像或私有网关）。
+# en: Third-party API base URLs (for mirrors or private gateways).
+[api_endpoints]
+# zh: XXAPI 基础地址。
+# en: XXAPI base URL.
+xxapi_base_url = "https://v2.xxapi.cn"
+# zh: 星之阁 API 基础地址。
+# en: Xingzhige API base URL.
+xingzhige_base_url = "https://api.xingzhige.com"
+# zh: JKYAI API 基础地址。
+# en: JKYAI API base URL.
+jkyai_base_url = "https://api.jkyai.top"
+# zh: 心知天气 API 基础地址。
+# en: Seniverse API base URL.
+seniverse_base_url = "https://api.seniverse.com/v3"
+
 # zh: 天气 API 配置（心知天气）。
 # en: Weather API config (Seniverse).
 [weather]

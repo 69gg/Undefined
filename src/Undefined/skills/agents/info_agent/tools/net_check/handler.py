@@ -16,16 +16,22 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "❌ 主机地址不能为空"
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            api_token = get_config(strict=False).xxapi_api_token
+        config = get_config(strict=False)
+        timeout = float(config.network_request_timeout)
+        if timeout <= 0:
+            timeout = 30.0
+        api_token = config.xxapi_api_token
+        base_url = str(config.api_xxapi_base_url).strip().rstrip("/")
+        if not base_url:
+            base_url = "https://v2.xxapi.cn"
+
+        async with httpx.AsyncClient(timeout=timeout) as client:
             if not api_token:
                 return "❌ XXAPI 未配置 API Token"
             params = {"host": host, "key": api_token}
             logger.info(f"网络检测: {host}")
 
-            response = await client.get(
-                "https://v2.xxapi.cn/api/netCheck", params=params
-            )
+            response = await client.get(f"{base_url}/api/netCheck", params=params)
             response.raise_for_status()
             data = response.json()
 
