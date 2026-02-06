@@ -96,6 +96,10 @@ class MessageHandler:
                 logger.debug(f"[通知] 忽略拍一拍目标非机器人: target={target_id}")
                 return
 
+            if not self.config.should_process_poke_message():
+                logger.debug("[消息策略] 已关闭拍一拍处理，忽略此次 poke 事件")
+                return
+
             poke_group_id: int = event.get("group_id", 0)
             poke_sender_id: int = event.get("user_id", 0)
 
@@ -199,6 +203,13 @@ class MessageHandler:
             if private_sender_id == self.config.bot_qq:
                 return
 
+            if not self.config.should_process_private_message():
+                logger.debug(
+                    "[消息策略] 已关闭私聊处理: user=%s",
+                    private_sender_id,
+                )
+                return
+
             # 私聊消息直接触发回复
             await self.ai_coordinator.handle_private_reply(
                 private_sender_id,
@@ -289,7 +300,7 @@ class MessageHandler:
             return
 
         # 关键词自动回复：心理委员 (使用原始消息内容提取文本，保证关键词触发不受影响)
-        if matches_xinliweiyuan(text):
+        if self.config.keyword_reply_enabled and matches_xinliweiyuan(text):
             rand_val = random.random()
             if rand_val < 0.1:  # 10% 发送图片
                 try:

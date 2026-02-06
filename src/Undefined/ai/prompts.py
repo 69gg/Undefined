@@ -28,6 +28,7 @@ class PromptBuilder:
         memory_storage: MemoryStorage | None,
         end_summary_storage: EndSummaryStorage,
         system_prompt_path: str = "res/prompts/undefined.xml",
+        runtime_config_getter: Callable[[], Any] | None = None,
     ) -> None:
         """初始化 Prompt 构建器
 
@@ -41,6 +42,7 @@ class PromptBuilder:
         self._memory_storage = memory_storage
         self._end_summary_storage = end_summary_storage
         self._system_prompt_path = system_prompt_path
+        self._runtime_config_getter = runtime_config_getter
         self._end_summaries: deque[str] = deque(maxlen=100)
         self._summaries_loaded = False
 
@@ -187,7 +189,31 @@ class PromptBuilder:
                 chat_id = ""
                 msg_type = "group"
 
-            recent_msgs = await get_recent_messages_callback(chat_id, msg_type, 0, 20)
+            recent_limit = 20
+            if self._runtime_config_getter is not None:
+                try:
+                    runtime_config = self._runtime_config_getter()
+                    if hasattr(runtime_config, "get_context_recent_messages_limit"):
+                        recent_limit = int(
+                            runtime_config.get_context_recent_messages_limit()
+                        )
+                except Exception as exc:
+                    logger.debug("读取上下文历史条数配置失败: %s", exc)
+
+            if recent_limit < 0:
+                recent_limit = 0
+            if recent_limit > 200:
+                recent_limit = 200
+            if recent_limit == 0:
+                logger.debug("上下文历史消息注入已关闭 (limit=0)")
+                return
+
+            recent_msgs = await get_recent_messages_callback(
+                chat_id,
+                msg_type,
+                0,
+                recent_limit,
+            )
             context_lines: list[str] = []
             for msg in recent_msgs:
                 msg_type_val = msg.get("type", "group")

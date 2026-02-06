@@ -16,6 +16,18 @@ forward_proxy_qq = 0
 # zh: 是否处理每条群消息。关闭后仅处理 @机器人、私聊和拍一拍（推荐默认开启）。
 # en: Process every group message. If disabled, only @mentions, private chats, and pokes are handled (recommended: enabled).
 process_every_message = true
+# zh: 是否处理私聊消息。关闭后将只记录私聊历史，不触发 AI 回复。
+# en: Process private messages. If disabled, private chat history is still recorded but AI replies are skipped.
+process_private_message = true
+# zh: 是否响应拍一拍。关闭后拍一拍事件将被忽略。
+# en: Respond to poke events. If disabled, poke events are ignored.
+process_poke_message = true
+# zh: 是否启用群聊关键词自动回复（例如“心理委员”触发）。
+# en: Enable keyword auto-replies in group chats (e.g. the "心理委员" trigger).
+keyword_reply_enabled = true
+# zh: 注入给模型的最近历史消息条数上限（0-200，0 表示不注入历史）。
+# en: Max number of recent messages injected as model context (0-200; 0 disables history injection).
+context_recent_messages_limit = 20
 
 # zh: 会话白名单（访问控制）。只要本段任一列表非空，系统将进入“限制模式”：未在白名单内的群/私聊会被忽略，且所有消息发送将被拦截。
 # en: Session allowlist (access control). If either the group or private allowlist is non-empty, the bot enters "allowlist mode": groups or private chats not in the allowlists will be ignored and outgoing messages will be blocked.

@@ -419,6 +419,10 @@ uv run Undefined-webui
 
 - **基础配置**：`[core]` 与 `[onebot]`
   - `process_every_message`：是否处理每条群消息（默认开启）；关闭后仅处理 `@机器人`、私聊、拍一拍（群消息仍会写入历史）
+  - `process_private_message`：是否处理私聊消息；关闭后仅记录私聊历史，不触发 AI 回复
+  - `process_poke_message`：是否响应拍一拍事件
+  - `keyword_reply_enabled`：是否启用群聊关键词自动回复（如“心理委员”）
+  - `context_recent_messages_limit`：注入给模型的最近历史消息条数上限（`0-200`，`0` 表示不注入）
 - **会话白名单（推荐）**：`[access]`
   - `allowed_group_ids`：允许处理/发送消息的群号列表
   - `allowed_private_ids`：允许处理/发送消息的私聊 QQ 列表

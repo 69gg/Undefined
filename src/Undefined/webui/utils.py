@@ -54,6 +54,10 @@ KEY_ORDER: dict[str, list[str]] = {
         "admin_qq",
         "forward_proxy_qq",
         "process_every_message",
+        "process_private_message",
+        "process_poke_message",
+        "keyword_reply_enabled",
+        "context_recent_messages_limit",
     ],
     "access": [
         "allowed_group_ids",

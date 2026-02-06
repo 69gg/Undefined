@@ -196,6 +196,7 @@ class AIClient:
             bot_qq=self.bot_qq,
             memory_storage=self.memory_storage,
             end_summary_storage=self._end_summary_storage,
+            runtime_config_getter=self._get_runtime_config,
         )
         self._multimodal = MultimodalAnalyzer(self._requester, self.vision_config)
         self._summary_service = SummaryService(

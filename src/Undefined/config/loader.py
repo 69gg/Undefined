@@ -311,6 +311,10 @@ class Config:
     superadmin_bypass_allowlist: bool
     forward_proxy_qq: int | None
     process_every_message: bool
+    process_private_message: bool
+    process_poke_message: bool
+    keyword_reply_enabled: bool
+    context_recent_messages_limit: int
     onebot_ws_url: str
     onebot_token: str
     chat_model: ChatModelConfig
@@ -376,6 +380,42 @@ class Config:
             ),
             True,
         )
+        process_private_message = _coerce_bool(
+            _get_value(
+                data,
+                ("core", "process_private_message"),
+                "PROCESS_PRIVATE_MESSAGE",
+            ),
+            True,
+        )
+        process_poke_message = _coerce_bool(
+            _get_value(
+                data,
+                ("core", "process_poke_message"),
+                "PROCESS_POKE_MESSAGE",
+            ),
+            True,
+        )
+        keyword_reply_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("core", "keyword_reply_enabled"),
+                "KEYWORD_REPLY_ENABLED",
+            ),
+            True,
+        )
+        context_recent_messages_limit = _coerce_int(
+            _get_value(
+                data,
+                ("core", "context_recent_messages_limit"),
+                "CONTEXT_RECENT_MESSAGES_LIMIT",
+            ),
+            20,
+        )
+        if context_recent_messages_limit < 0:
+            context_recent_messages_limit = 0
+        if context_recent_messages_limit > 200:
+            context_recent_messages_limit = 200
 
         onebot_ws_url = _coerce_str(
             _get_value(data, ("onebot", "ws_url"), "ONEBOT_WS_URL"), ""
@@ -622,6 +662,10 @@ class Config:
             superadmin_bypass_allowlist=superadmin_bypass_allowlist,
             forward_proxy_qq=forward_proxy_qq,
             process_every_message=process_every_message,
+            process_private_message=process_private_message,
+            process_poke_message=process_poke_message,
+            keyword_reply_enabled=keyword_reply_enabled,
+            context_recent_messages_limit=context_recent_messages_limit,
             onebot_ws_url=onebot_ws_url,
             onebot_token=onebot_token,
             chat_model=chat_model,
@@ -698,6 +742,26 @@ class Config:
         if self.process_every_message:
             return True
         return bool(is_at_bot)
+
+    def should_process_private_message(self) -> bool:
+        """是否处理私聊消息回复。"""
+
+        return bool(self.process_private_message)
+
+    def should_process_poke_message(self) -> bool:
+        """是否处理拍一拍触发。"""
+
+        return bool(self.process_poke_message)
+
+    def get_context_recent_messages_limit(self) -> int:
+        """获取上下文最近历史消息条数上限。"""
+
+        limit = int(self.context_recent_messages_limit)
+        if limit < 0:
+            return 0
+        if limit > 200:
+            return 200
+        return limit
 
     def security_check_enabled(self) -> bool:
         """是否启用安全模型检查。"""
