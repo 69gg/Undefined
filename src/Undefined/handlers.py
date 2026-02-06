@@ -186,7 +186,10 @@ class MessageHandler:
             # 保存私聊消息到历史记录（保存处理后的内容）
             # 使用新的 utils
             parsed_content = await parse_message_content_for_history(
-                private_message_content, self.config.bot_qq, self.onebot.get_msg
+                private_message_content,
+                self.config.bot_qq,
+                self.onebot.get_msg,
+                self.onebot.get_forward_msg,
             )
             safe_parsed = redact_string(parsed_content)
             logger.debug(
@@ -264,7 +267,10 @@ class MessageHandler:
 
         # 使用新的 utils
         parsed_content = await parse_message_content_for_history(
-            message_content, self.config.bot_qq, self.onebot.get_msg
+            message_content,
+            self.config.bot_qq,
+            self.onebot.get_msg,
+            self.onebot.get_forward_msg,
         )
         safe_parsed = redact_string(parsed_content)
         logger.debug(

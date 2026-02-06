@@ -2,6 +2,7 @@
 
 import re
 import logging
+from datetime import datetime
 from typing import Any, Awaitable, Callable, Optional, List, Dict
 
 from Undefined.utils.xml import escape_xml_attr, escape_xml_text
@@ -18,6 +19,18 @@ CQ_PATTERN = re.compile(r"\[CQ:([a-zA-Z0-9_-]+),?([^\]]*)\]")
 PUNC_PATTERN = re.compile(
     r'[ \t\n\r\f\v\s!"#$%&\'()*+,\-./:;<=>?@\[\\\]^_`{|}~，。！？、；：""\'\'（）【】「」《》—…·]'
 )
+
+FORWARD_EXPAND_MAX_DEPTH = 3
+FORWARD_EXPAND_MAX_NODES = 50
+FORWARD_EXPAND_MAX_CHARS = 8000
+
+
+class _ForwardExpandState:
+    """合并转发递归展开状态。"""
+
+    def __init__(self) -> None:
+        self.visited_ids: set[str] = set()
+        self.node_count: int = 0
 
 
 def _parse_segment(segment: Dict[str, Any], bot_qq: int = 0) -> Optional[str]:
@@ -68,6 +81,161 @@ def _normalize_message_content(message: Any) -> List[Dict[str, Any]]:
         return message_to_segments(message)
 
     return []
+
+
+def _normalize_forward_nodes(raw_nodes: Any) -> List[Dict[str, Any]]:
+    """将不同格式的 forward 返回值规范为节点列表。"""
+    if isinstance(raw_nodes, list):
+        return [node for node in raw_nodes if isinstance(node, dict)]
+
+    if isinstance(raw_nodes, dict):
+        messages = raw_nodes.get("messages")
+        if isinstance(messages, list):
+            return [node for node in messages if isinstance(node, dict)]
+
+    return []
+
+
+def _format_forward_node_time(raw_time: Any) -> str:
+    """格式化合并转发节点时间。"""
+    if raw_time is None or raw_time == "":
+        return ""
+
+    try:
+        timestamp = float(raw_time)
+        if timestamp > 1_000_000_000_000:
+            timestamp /= 1000.0
+        if timestamp <= 0:
+            return ""
+        return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError, OSError, OverflowError):
+        return str(raw_time)
+
+
+def _truncate_forward_text(text: str) -> str:
+    """裁剪过长的合并转发展开内容。"""
+    if len(text) <= FORWARD_EXPAND_MAX_CHARS:
+        return text
+
+    marker = "\n[合并转发内容过长，已截断]"
+    max_text_len = FORWARD_EXPAND_MAX_CHARS - len(marker)
+    if max_text_len <= 0:
+        return marker.lstrip("\n")
+    return text[:max_text_len] + marker
+
+
+async def _extract_text_with_forward_expansion(
+    message_content: List[Dict[str, Any]],
+    bot_qq: int,
+    get_forward_msg_func: Optional[Callable[[str], Awaitable[list[dict[str, Any]]]]],
+    expand_state: _ForwardExpandState,
+    depth: int,
+) -> str:
+    """在提取文本时对 forward 段进行递归展开。"""
+    texts: List[str] = []
+    for segment in message_content:
+        type_ = segment.get("type", "")
+        raw_data = segment.get("data", {})
+        data = raw_data if isinstance(raw_data, dict) else {}
+        text: Optional[str]
+
+        if type_ == "forward":
+            forward_id = _extract_forward_id(data)
+            text = await _expand_forward_segment(
+                forward_id,
+                bot_qq,
+                get_forward_msg_func,
+                expand_state,
+                depth,
+            )
+        else:
+            text = _parse_segment(segment, bot_qq)
+
+        if text is not None:
+            texts.append(text)
+
+    return "".join(texts).strip()
+
+
+async def _expand_forward_segment(
+    forward_id: str,
+    bot_qq: int,
+    get_forward_msg_func: Optional[Callable[[str], Awaitable[list[dict[str, Any]]]]],
+    expand_state: _ForwardExpandState,
+    depth: int,
+) -> str:
+    """将合并转发段递归展开为可存档文本。"""
+    placeholder = f"[合并转发: {forward_id}]" if forward_id else "[合并转发]"
+    if not forward_id or get_forward_msg_func is None:
+        return placeholder
+
+    if depth >= FORWARD_EXPAND_MAX_DEPTH:
+        return f"{placeholder}[展开已达最大深度]"
+
+    if expand_state.node_count >= FORWARD_EXPAND_MAX_NODES:
+        return f"{placeholder}[展开已达节点上限]"
+
+    if forward_id in expand_state.visited_ids:
+        return f"{placeholder}[检测到循环引用]"
+
+    expand_state.visited_ids.add(forward_id)
+    try:
+        raw_nodes = await get_forward_msg_func(forward_id)
+    except Exception as exc:
+        logger.warning("获取合并转发内容失败，回退占位: id=%s err=%s", forward_id, exc)
+        expand_state.visited_ids.discard(forward_id)
+        return placeholder
+
+    try:
+        nodes = _normalize_forward_nodes(raw_nodes)
+        if not nodes:
+            return placeholder
+
+        lines: List[str] = [f"[合并转发展开: {forward_id}]"]
+        for node in nodes:
+            if expand_state.node_count >= FORWARD_EXPAND_MAX_NODES:
+                lines.append("[合并转发节点过多，后续已截断]")
+                break
+
+            expand_state.node_count += 1
+
+            sender = node.get("sender")
+            sender_data = sender if isinstance(sender, dict) else {}
+            sender_name = (
+                sender_data.get("nickname")
+                or sender_data.get("card")
+                or node.get("nickname")
+                or node.get("card")
+                or "未知用户"
+            )
+            sender_id = sender_data.get("user_id") or node.get("user_id") or ""
+            time_text = _format_forward_node_time(node.get("time"))
+
+            raw_content = (
+                node.get("content") or node.get("message") or node.get("raw_message")
+            )
+            node_content = _normalize_message_content(raw_content)
+            node_text = await _extract_text_with_forward_expansion(
+                node_content,
+                bot_qq,
+                get_forward_msg_func,
+                expand_state,
+                depth + 1,
+            )
+            if not node_text:
+                node_text = "(空消息)"
+
+            meta_parts: List[str] = [str(sender_name)]
+            if sender_id:
+                meta_parts.append(str(sender_id))
+            if time_text:
+                meta_parts.append(time_text)
+            lines.append(f"- {' | '.join(meta_parts)}: {node_text}")
+
+        lines.append(f"[合并转发结束: {forward_id}]")
+        return _truncate_forward_text("\n".join(lines))
+    finally:
+        expand_state.visited_ids.discard(forward_id)
 
 
 def _parse_at_segment(data: Dict[str, Any], bot_qq: int) -> Optional[str]:
@@ -126,6 +294,9 @@ async def parse_message_content_for_history(
     message_content: List[Dict[str, Any]],
     bot_qq: int,
     get_msg_func: Optional[Callable[[int], Awaitable[Optional[Dict[str, Any]]]]] = None,
+    get_forward_msg_func: Optional[
+        Callable[[str], Awaitable[list[dict[str, Any]]]]
+    ] = None,
 ) -> str:
     """解析消息内容用于历史记录（支持回复引用和 @ 格式化）
 
@@ -133,11 +304,13 @@ async def parse_message_content_for_history(
         message_content: 消息内容列表
         bot_qq: 机器人 QQ 号
         get_msg_func: 获取消息详情的异步函数（可选，用于处理回复引用）
+        get_forward_msg_func: 获取合并转发详情的异步函数（可选，用于递归展开）
 
     返回:
         解析后的文本
     """
     texts: List[str] = []
+    expand_state = _ForwardExpandState()
     for segment in message_content:
         type_ = segment.get("type")
         raw_data = segment.get("data", {})
@@ -165,13 +338,25 @@ async def parse_message_content_for_history(
                         content = _normalize_message_content(
                             reply_msg.get("message", [])
                         )
-                        quote_text = extract_text(content, bot_qq)
+                        quote_text = await _extract_text_with_forward_expansion(
+                            content,
+                            bot_qq,
+                            get_forward_msg_func,
+                            expand_state,
+                            0,
+                        )
 
                         if not quote_text:
                             raw_message = reply_msg.get("raw_message")
                             if raw_message is not None:
                                 raw_content = _normalize_message_content(raw_message)
-                                quote_text = extract_text(raw_content, bot_qq)
+                                quote_text = await _extract_text_with_forward_expansion(
+                                    raw_content,
+                                    bot_qq,
+                                    get_forward_msg_func,
+                                    expand_state,
+                                    0,
+                                )
                 except Exception as e:
                     logger.warning(f"获取回复消息失败: {e}")
 
@@ -186,10 +371,14 @@ async def parse_message_content_for_history(
 
         if type_ == "forward":
             msg_id = _extract_forward_id(data)
-            if msg_id:
-                texts.append(f"[合并转发: {msg_id}]")
-            else:
-                texts.append("[合并转发]")
+            forward_text = await _expand_forward_segment(
+                msg_id,
+                bot_qq,
+                get_forward_msg_func,
+                expand_state,
+                0,
+            )
+            texts.append(forward_text)
             continue
 
         # 2. 调用通用解析器处理普通类型
