@@ -363,6 +363,13 @@ def _tools_description_max_len() -> int:
     return value if value > 0 else _DEFAULT_TOOLS_DESCRIPTION_MAX_LEN
 
 
+def _tools_description_truncate_enabled() -> bool:
+    runtime_config = _get_runtime_config()
+    if runtime_config is None:
+        return False
+    return bool(runtime_config.tools_description_truncate_enabled)
+
+
 def _clean_control_chars(text: str) -> str:
     """Replace ASCII control characters with spaces."""
     return "".join(" " if ord(ch) < 32 or ord(ch) == 127 else ch for ch in text)
@@ -379,7 +386,12 @@ def _desc_preview(text: str) -> str:
     return text[:preview_len] + ("…" if len(text) > preview_len else "")
 
 
-def _normalize_tool_description(description: Any, tool_name: str, max_len: int) -> str:
+def _normalize_tool_description(
+    description: Any,
+    tool_name: str,
+    max_len: int,
+    truncate_enabled: bool,
+) -> str:
     """Normalize tool function.description for stricter OpenAI-compatible providers."""
     if description is None:
         normalized = ""
@@ -393,7 +405,7 @@ def _normalize_tool_description(description: Any, tool_name: str, max_len: int) 
     normalized = normalized.strip()
     if not normalized:
         normalized = f"Tool function {tool_name}"
-    if len(normalized) > max_len:
+    if truncate_enabled and len(normalized) > max_len:
         normalized = normalized[:max_len].rstrip()
     return normalized
 
@@ -406,6 +418,7 @@ def _sanitize_openai_tools(
         return tools, 0, []
 
     max_len = _tools_description_max_len()
+    truncate_enabled = _tools_description_truncate_enabled()
     changed = 0
     changes: list[dict[str, Any]] = []
     sanitized: list[dict[str, Any]] = []
@@ -424,7 +437,12 @@ def _sanitize_openai_tools(
             if old_desc is None
             else (old_desc if isinstance(old_desc, str) else str(old_desc))
         )
-        new_desc = _normalize_tool_description(old_desc, str(name), max_len)
+        new_desc = _normalize_tool_description(
+            old_desc,
+            str(name),
+            max_len,
+            truncate_enabled,
+        )
 
         if old_desc_str != new_desc:
             reasons: list[str] = []
@@ -436,7 +454,11 @@ def _sanitize_openai_tools(
                 reasons.append("whitespace")
             if not old_desc_str.strip():
                 reasons.append("empty")
-            if len(new_desc) >= max_len and len(old_desc_str) > len(new_desc):
+            if (
+                truncate_enabled
+                and len(new_desc) >= max_len
+                and len(old_desc_str) > len(new_desc)
+            ):
                 reasons.append("truncated")
 
             tool = dict(tool)
@@ -755,9 +777,10 @@ class ModelRequester:
             request_body["tools"] = sanitized_tools
             if changed_count and logger.isEnabledFor(logging.INFO):
                 logger.info(
-                    "[tools.sanitize] changed=%s total=%s max_desc_len=%s",
+                    "[tools.sanitize] changed=%s total=%s truncate_enabled=%s max_desc_len=%s",
                     changed_count,
                     len(sanitized_tools),
+                    _tools_description_truncate_enabled(),
                     _tools_description_max_len(),
                 )
                 if _tools_sanitize_verbose():

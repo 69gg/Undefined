@@ -183,8 +183,11 @@ log_thinking = true
 # zh: 工具名分隔符：当工具原始名称包含 '.'（例如 scheduler.create_schedule_task / mcp.server.tool）时，发送给模型前会把 '.' 映射为该分隔符。
 # en: Tool-name delimiter: map '.' to this delimiter before sending tools to the model.
 dot_delimiter = "-_-"
-# zh: description 最大长度（超出会截断）。
-# en: Description max length (truncated when exceeded).
+# zh: 是否启用 tools.description 截断。关闭时不会按长度截断，仅做清理/规范化。
+# en: Enable truncation for tools.description. If disabled, no length-based truncation is applied.
+description_truncate_enabled = false
+# zh: description 最大长度（仅在开启 description_truncate_enabled 时生效）。
+# en: Description max length (used only when description_truncate_enabled is enabled).
 description_max_len = 1024
 # zh: 是否输出逐条清洗详情日志（INFO）。
 # en: Log per-item sanitization details (INFO).

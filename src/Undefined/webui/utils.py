@@ -68,6 +68,7 @@ KEY_ORDER: dict[str, list[str]] = {
     "logging": ["level", "file_path", "max_size_mb", "backup_count", "log_thinking"],
     "tools": [
         "dot_delimiter",
+        "description_truncate_enabled",
         "description_max_len",
         "sanitize_verbose",
         "description_preview_len",

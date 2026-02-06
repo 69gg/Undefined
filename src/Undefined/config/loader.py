@@ -328,6 +328,7 @@ class Config:
     log_backup_count: int
     log_thinking: bool
     tools_dot_delimiter: str
+    tools_description_truncate_enabled: bool
     tools_description_max_len: int
     tools_sanitize_verbose: bool
     tools_description_preview_len: int
@@ -492,6 +493,14 @@ class Config:
                 data, ("tools", "description_max_len"), "TOOLS_DESCRIPTION_MAX_LEN"
             ),
             1024,
+        )
+        tools_description_truncate_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("tools", "description_truncate_enabled"),
+                "TOOLS_DESCRIPTION_TRUNCATE_ENABLED",
+            ),
+            False,
         )
         tools_sanitize_verbose = _coerce_bool(
             _get_value(data, ("tools", "sanitize_verbose"), "TOOLS_SANITIZE_VERBOSE"),
@@ -679,6 +688,7 @@ class Config:
             log_backup_count=log_backup_count,
             log_thinking=log_thinking,
             tools_dot_delimiter=tools_dot_delimiter,
+            tools_description_truncate_enabled=tools_description_truncate_enabled,
             tools_description_max_len=tools_description_max_len,
             tools_sanitize_verbose=tools_sanitize_verbose,
             tools_description_preview_len=tools_description_preview_len,
