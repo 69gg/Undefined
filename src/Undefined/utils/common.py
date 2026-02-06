@@ -23,7 +23,8 @@ PUNC_PATTERN = re.compile(
 def _parse_segment(segment: Dict[str, Any], bot_qq: int = 0) -> Optional[str]:
     """解析单个消息段为文本格式 (内部辅助函数)"""
     type_ = segment.get("type", "")
-    data = segment.get("data", {})
+    raw_data = segment.get("data", {})
+    data = raw_data if isinstance(raw_data, dict) else {}
 
     if type_ == "text":
         return str(data.get("text", ""))
@@ -35,6 +36,38 @@ def _parse_segment(segment: Dict[str, Any], bot_qq: int = 0) -> Optional[str]:
         return "[表情]"
 
     return _parse_media_segment(type_, data)
+
+
+def _extract_forward_id(data: Dict[str, Any]) -> str:
+    """提取合并转发 ID（兼容不同实现字段）。"""
+    forward_id = data.get("id") or data.get("resid") or data.get("message_id")
+    return str(forward_id).strip() if forward_id is not None else ""
+
+
+def _extract_reply_id(data: Dict[str, Any]) -> str:
+    """提取回复消息 ID（兼容不同实现字段）。"""
+    reply_id = data.get("id") or data.get("message_id")
+    return str(reply_id).strip() if reply_id is not None else ""
+
+
+def _normalize_message_content(message: Any) -> List[Dict[str, Any]]:
+    """将 message 归一化为消息段数组（兼容 list/dict/str）。"""
+    if isinstance(message, list):
+        normalized: List[Dict[str, Any]] = []
+        for item in message:
+            if isinstance(item, dict):
+                normalized.append(item)
+            elif isinstance(item, str):
+                normalized.extend(message_to_segments(item))
+        return normalized
+
+    if isinstance(message, dict):
+        return [message]
+
+    if isinstance(message, str):
+        return message_to_segments(message)
+
+    return []
 
 
 def _parse_at_segment(data: Dict[str, Any], bot_qq: int) -> Optional[str]:
@@ -58,6 +91,15 @@ def _parse_media_segment(type_: str, data: Dict[str, Any]) -> Optional[str]:
         label = media_types[type_]
         file_val = data.get("file", "") or data.get("url", "")
         return f"[{label}: {str(file_val)}]"
+
+    if type_ == "forward":
+        forward_id = _extract_forward_id(data)
+        return f"[合并转发: {forward_id}]" if forward_id else "[合并转发]"
+
+    if type_ == "reply":
+        reply_id = _extract_reply_id(data)
+        return f"[引用: {reply_id}]" if reply_id else "[引用]"
+
     return None
 
 
@@ -98,30 +140,56 @@ async def parse_message_content_for_history(
     texts: List[str] = []
     for segment in message_content:
         type_ = segment.get("type")
-        data = segment.get("data", {})
+        raw_data = segment.get("data", {})
+        data = raw_data if isinstance(raw_data, dict) else {}
 
         # 1. 处理特殊复杂类型：回复和合并转发
         if type_ == "reply":
-            msg_id = data.get("id")
+            msg_id = _extract_reply_id(data)
+            quote_sender = "未知"
+            quote_text = ""
+
             if msg_id and get_msg_func:
                 try:
                     reply_msg = await get_msg_func(int(msg_id))
                     if reply_msg:
-                        sender = reply_msg.get("sender", {}).get("nickname", "未知")
-                        content = reply_msg.get("message", [])
-                        quote_text = extract_text(content, bot_qq)
-                        texts.append(
-                            f'<quote sender="{escape_xml_attr(sender)}">'
-                            f"{escape_xml_text(quote_text)}</quote>\n"
+                        sender = reply_msg.get("sender")
+                        if isinstance(sender, dict):
+                            quote_sender = str(
+                                sender.get("nickname")
+                                or sender.get("card")
+                                or sender.get("user_id")
+                                or "未知"
+                            )
+
+                        content = _normalize_message_content(
+                            reply_msg.get("message", [])
                         )
+                        quote_text = extract_text(content, bot_qq)
+
+                        if not quote_text:
+                            raw_message = reply_msg.get("raw_message")
+                            if raw_message is not None:
+                                raw_content = _normalize_message_content(raw_message)
+                                quote_text = extract_text(raw_content, bot_qq)
                 except Exception as e:
                     logger.warning(f"获取回复消息失败: {e}")
+
+            if not quote_text:
+                quote_text = f"[引用: {msg_id}]" if msg_id else "[引用]"
+
+            texts.append(
+                f'<quote sender="{escape_xml_attr(quote_sender)}">'
+                f"{escape_xml_text(quote_text)}</quote>\n"
+            )
             continue
 
         if type_ == "forward":
-            msg_id = data.get("id")
+            msg_id = _extract_forward_id(data)
             if msg_id:
                 texts.append(f"[合并转发: {msg_id}]")
+            else:
+                texts.append("[合并转发]")
             continue
 
         # 2. 调用通用解析器处理普通类型
