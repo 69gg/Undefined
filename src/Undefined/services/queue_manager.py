@@ -65,6 +65,9 @@ class QueueManager:
         # 处理任务映射 model_name -> Task
         self._processor_tasks: dict[str, asyncio.Task[None]] = {}
 
+        # 在途请求任务（发车后异步执行）。用于优雅停机时统一回收。
+        self._inflight_tasks: set[asyncio.Task[None]] = set()
+
         self._request_handler: (
             Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None
         ) = None
@@ -87,7 +90,43 @@ class QueueManager:
                 except asyncio.CancelledError:
                     pass
         self._processor_tasks.clear()
+
+        inflight_count = len(self._inflight_tasks)
+        if inflight_count > 0:
+            logger.info("[队列服务] 正在回收在途请求任务: count=%s", inflight_count)
+            for task in list(self._inflight_tasks):
+                if not task.done():
+                    task.cancel()
+            results = await asyncio.gather(
+                *list(self._inflight_tasks), return_exceptions=True
+            )
+            cancelled_count = sum(
+                1 for result in results if isinstance(result, asyncio.CancelledError)
+            )
+            error_count = sum(
+                1
+                for result in results
+                if isinstance(result, Exception)
+                and not isinstance(result, asyncio.CancelledError)
+            )
+            logger.info(
+                "[队列服务] 在途任务回收完成: cancelled=%s errors=%s",
+                cancelled_count,
+                error_count,
+            )
+            self._inflight_tasks.clear()
+
         logger.info("[队列服务] 所有队列处理任务已停止")
+
+    def _track_inflight_task(self, task: asyncio.Task[None]) -> None:
+        """追踪在途任务，并在完成时自动移除。"""
+
+        self._inflight_tasks.add(task)
+
+        def _cleanup(done_task: asyncio.Task[None]) -> None:
+            self._inflight_tasks.discard(done_task)
+
+        task.add_done_callback(_cleanup)
 
     def _get_or_create_queue(self, model_name: str) -> ModelQueue:
         """获取或创建指定模型的队列，并确保处理任务已启动"""
@@ -220,11 +259,12 @@ class QueueManager:
 
                     # 异步执行处理，不等待结果
                     if self._request_handler:
-                        asyncio.create_task(
+                        inflight_task = asyncio.create_task(
                             self._safe_handle_request(
                                 request, model_name, queue_names[chosen_queue_idx]
                             )
                         )
+                        self._track_inflight_task(inflight_task)
 
                     queues[chosen_queue_idx].task_done()
 

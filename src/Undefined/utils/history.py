@@ -19,6 +19,8 @@ class MessageHistoryManager:
     def __init__(self) -> None:
         self._message_history: dict[str, list[dict[str, Any]]] = {}
         self._private_message_history: dict[str, list[dict[str, Any]]] = {}
+        self._group_locks: dict[str, asyncio.Lock] = {}
+        self._private_locks: dict[str, asyncio.Lock] = {}
 
         # Lazy Load 初始化标志
         self._initialized = asyncio.Event()
@@ -29,6 +31,20 @@ class MessageHistoryManager:
 
         # 启动后台异步加载任务
         self._init_task = asyncio.create_task(self._lazy_init())
+
+    def _get_group_lock(self, group_id: str) -> asyncio.Lock:
+        lock = self._group_locks.get(group_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._group_locks[group_id] = lock
+        return lock
+
+    def _get_private_lock(self, user_id: str) -> asyncio.Lock:
+        lock = self._private_locks.get(user_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._private_locks[user_id] = lock
+        return lock
 
     async def _lazy_init(self) -> None:
         """后台异步加载所有历史记录"""
@@ -204,38 +220,40 @@ class MessageHistoryManager:
         group_id_str = str(group_id)
         sender_id_str = str(sender_id)
 
-        if group_id_str not in self._message_history:
-            self._message_history[group_id_str] = []
+        async with self._get_group_lock(group_id_str):
+            if group_id_str not in self._message_history:
+                self._message_history[group_id_str] = []
 
-        display_name = sender_card or sender_nickname or sender_id_str
+            display_name = sender_card or sender_nickname or sender_id_str
 
-        current_count = len(self._message_history[group_id_str])
-        logger.debug(
-            f"[历史记录] 追加群消息: group={group_id}, current_count={current_count}"
-        )
+            current_count = len(self._message_history[group_id_str])
+            logger.debug(
+                f"[历史记录] 追加群消息: group={group_id}, current_count={current_count}"
+            )
 
-        self._message_history[group_id_str].append(
-            {
-                "type": "group",
-                "chat_id": group_id_str,
-                "chat_name": group_name or f"群{group_id_str}",
-                "user_id": sender_id_str,
-                "display_name": display_name,
-                "role": role,
-                "title": title,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "message": text_content,
-            }
-        )
+            self._message_history[group_id_str].append(
+                {
+                    "type": "group",
+                    "chat_id": group_id_str,
+                    "chat_name": group_name or f"群{group_id_str}",
+                    "user_id": sender_id_str,
+                    "display_name": display_name,
+                    "role": role,
+                    "title": title,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "message": text_content,
+                }
+            )
 
-        if len(self._message_history[group_id_str]) > MAX_HISTORY:
-            self._message_history[group_id_str] = self._message_history[group_id_str][
-                -MAX_HISTORY:
-            ]
+            if len(self._message_history[group_id_str]) > MAX_HISTORY:
+                self._message_history[group_id_str] = self._message_history[
+                    group_id_str
+                ][-MAX_HISTORY:]
 
-        await self._save_history_to_file(
-            self._message_history[group_id_str], self._get_group_history_path(group_id)
-        )
+            await self._save_history_to_file(
+                self._message_history[group_id_str],
+                self._get_group_history_path(group_id),
+            )
 
     async def add_private_message(
         self,
@@ -249,35 +267,36 @@ class MessageHistoryManager:
 
         user_id_str = str(user_id)
 
-        if user_id_str not in self._private_message_history:
-            self._private_message_history[user_id_str] = []
+        async with self._get_private_lock(user_id_str):
+            if user_id_str not in self._private_message_history:
+                self._private_message_history[user_id_str] = []
 
-        current_count = len(self._private_message_history[user_id_str])
-        logger.debug(
-            f"[历史记录] 追加私聊消息: user={user_id}, current_count={current_count}"
-        )
+            current_count = len(self._private_message_history[user_id_str])
+            logger.debug(
+                f"[历史记录] 追加私聊消息: user={user_id}, current_count={current_count}"
+            )
 
-        self._private_message_history[user_id_str].append(
-            {
-                "type": "private",
-                "chat_id": user_id_str,
-                "chat_name": user_name or f"QQ用户{user_id_str}",
-                "user_id": user_id_str,
-                "display_name": display_name or user_name or user_id_str,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "message": text_content,
-            }
-        )
+            self._private_message_history[user_id_str].append(
+                {
+                    "type": "private",
+                    "chat_id": user_id_str,
+                    "chat_name": user_name or f"QQ用户{user_id_str}",
+                    "user_id": user_id_str,
+                    "display_name": display_name or user_name or user_id_str,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "message": text_content,
+                }
+            )
 
-        if len(self._private_message_history[user_id_str]) > MAX_HISTORY:
-            self._private_message_history[user_id_str] = self._private_message_history[
-                user_id_str
-            ][-MAX_HISTORY:]
+            if len(self._private_message_history[user_id_str]) > MAX_HISTORY:
+                self._private_message_history[user_id_str] = (
+                    self._private_message_history[user_id_str][-MAX_HISTORY:]
+                )
 
-        await self._save_history_to_file(
-            self._private_message_history[user_id_str],
-            self._get_private_history_path(user_id),
-        )
+            await self._save_history_to_file(
+                self._private_message_history[user_id_str],
+                self._get_private_history_path(user_id),
+            )
 
     def get_recent(
         self,
@@ -336,26 +355,29 @@ class MessageHistoryManager:
         if group_id_str not in self._message_history:
             return
 
-        # 查找并修改消息
-        for i in range(len(self._message_history[group_id_str]) - 1, -1, -1):
-            msg = self._message_history[group_id_str][i]
-            if msg.get("user_id") == sender_id_str:
-                old_length = len(msg["message"])
-                new_length = len(new_message)
-                msg["message"] = new_message
+        async with self._get_group_lock(group_id_str):
+            # 查找并修改消息
+            for i in range(len(self._message_history[group_id_str]) - 1, -1, -1):
+                msg = self._message_history[group_id_str][i]
+                if msg.get("user_id") == sender_id_str:
+                    old_length = len(msg["message"])
+                    new_length = len(new_message)
+                    msg["message"] = new_message
 
-                logger.debug(
-                    f"[历史记录] 修改群消息: group={group_id}, user={sender_id}, "
-                    f"old_len={old_length}, new_len={new_length}"
-                )
+                    logger.debug(
+                        f"[历史记录] 修改群消息: group={group_id}, user={sender_id}, "
+                        f"old_len={old_length}, new_len={new_length}"
+                    )
 
-                # 原子保存
-                await self._save_history_to_file(
-                    self._message_history[group_id_str],
-                    self._get_group_history_path(group_id),
-                )
-                logger.info(f"已修改群聊 {group_id} 用户 {sender_id} 的最后一条消息")
-                break
+                    # 原子保存
+                    await self._save_history_to_file(
+                        self._message_history[group_id_str],
+                        self._get_group_history_path(group_id),
+                    )
+                    logger.info(
+                        f"已修改群聊 {group_id} 用户 {sender_id} 的最后一条消息"
+                    )
+                    break
 
     async def modify_last_private_message(
         self,
@@ -370,20 +392,23 @@ class MessageHistoryManager:
         if user_id_str not in self._private_message_history:
             return
 
-        if self._private_message_history[user_id_str]:
-            old_length = len(self._private_message_history[user_id_str][-1]["message"])
-            new_length = len(new_message)
+        async with self._get_private_lock(user_id_str):
+            if self._private_message_history[user_id_str]:
+                old_length = len(
+                    self._private_message_history[user_id_str][-1]["message"]
+                )
+                new_length = len(new_message)
 
-            self._private_message_history[user_id_str][-1]["message"] = new_message
+                self._private_message_history[user_id_str][-1]["message"] = new_message
 
-            logger.debug(
-                f"[历史记录] 修改私聊消息: user={user_id}, "
-                f"old_len={old_length}, new_len={new_length}"
-            )
+                logger.debug(
+                    f"[历史记录] 修改私聊消息: user={user_id}, "
+                    f"old_len={old_length}, new_len={new_length}"
+                )
 
-            # 原子保存
-            await self._save_history_to_file(
-                self._private_message_history[user_id_str],
-                self._get_private_history_path(user_id),
-            )
-            logger.info(f"已修改私聊用户 {user_id} 的最后一条消息")
+                # 原子保存
+                await self._save_history_to_file(
+                    self._private_message_history[user_id_str],
+                    self._get_private_history_path(user_id),
+                )
+                logger.info(f"已修改私聊用户 {user_id} 的最后一条消息")
