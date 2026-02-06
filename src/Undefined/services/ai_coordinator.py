@@ -260,12 +260,6 @@ class AICoordinator:
             )
 
             try:
-                # 保留旧方式（向后兼容）
-                self.ai.current_group_id = group_id
-                self.ai.current_user_id = sender_id
-                self.ai._send_private_message_callback = send_private_cb
-                self.ai._send_image_callback = send_img_cb
-
                 await self.ai.ask(
                     full_question,
                     send_message_callback=send_msg_cb,
@@ -341,10 +335,6 @@ class AICoordinator:
             )
 
             try:
-                # 保留旧方式（向后兼容）
-                self.ai.current_group_id = None
-                self.ai.current_user_id = user_id
-                self.ai._send_image_callback = send_img_cb
                 result = await self.ai.ask(
                     full_question,
                     send_message_callback=send_msg_cb,

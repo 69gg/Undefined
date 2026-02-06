@@ -22,37 +22,36 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     send_message_callback = context.get("send_message_callback")
     sender = context.get("sender")
 
+    # 仅使用当前请求上下文中的 group_id，避免共享状态导致并发串话。
+    group_id = args.get("group_id")
+    if group_id is None:
+        group_id = context.get("group_id")
+
     # 优先使用 sender 接口
     if sender:
-        # 优先从 context 获取 group_id（避免并发竞态条件）
-        group_id = context.get("group_id")
-        if group_id:
-            logger.debug(f"[发送消息] 从 context 获取 group_id: {group_id}")
-        else:
-            # 向后兼容：从 ai_client 获取（已废弃）
-            ai_client = context.get("ai_client")
-            group_id = ai_client.current_group_id if ai_client else None
-            if group_id:
-                logger.warning(
-                    f"[发送消息] 从 ai_client.current_group_id 获取群号（已废弃，可能存在并发问题）: {group_id}"
-                )
+        if group_id is not None:
+            try:
+                group_id_int = int(group_id)
+            except (TypeError, ValueError):
+                logger.warning("[发送消息] 非法 group_id: %s", group_id)
+                return "发送失败：group_id 必须是整数"
 
-        if group_id:
+            logger.debug("[发送消息] 从请求上下文获取 group_id: %s", group_id)
             if runtime_config is not None and not runtime_config.is_group_allowed(
-                int(group_id)
+                group_id_int
             ):
-                return f"发送失败：目标群 {int(group_id)} 不在允许列表内（access.allowed_group_ids），已被访问控制拦截"
-            logger.info(f"[发送消息] 准备发送到群 {group_id}: {message[:100]}")
+                return f"发送失败：目标群 {group_id_int} 不在允许列表内（access.allowed_group_ids），已被访问控制拦截"
+            logger.info(f"[发送消息] 准备发送到群 {group_id_int}: {message[:100]}")
             if at_user:
                 logger.debug(f"[发送消息] 同时 @ 用户: {at_user}")
                 message = f"[CQ:at,qq={at_user}] {message}"
             try:
-                await sender.send_group_message(group_id, message)
+                await sender.send_group_message(group_id_int, message)
                 if recent_replies is not None:
                     recent_replies.append(message)
                 return "消息已发送"
             except Exception as e:
-                logger.exception(f"[发送消息] 发送到群 {group_id} 失败: {e}")
+                logger.exception(f"[发送消息] 发送到群 {group_id_int} 失败: {e}")
                 return f"发送失败: {e}"
         elif send_message_callback:
             # 兼容：当无法确定群ID时，回调可能用于私聊回复
