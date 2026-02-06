@@ -284,9 +284,14 @@ graph TB
 ```bash
 # 方式 1：pip
 pip install -U Undefined-bot
+playwright install
 
-# 方式 2：uv tool（建议隔离安装）
+# 方式 2：uv tool（建议使用该方式进行隔离安装）
+# 安装uv（若未安装）
+pip install uv
+
 uv tool install Undefined-bot
+uv tool run --from Undefined-bot playwright install
 ```
 
 安装完成后，在任意目录准备 `config.toml` 并启动：
