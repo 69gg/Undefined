@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """获取指定公告的详细属性及内容"""
+    request_id = str(context.get("request_id", "-"))
     notice_id = args.get("notice_id")
     if not notice_id:
         return "请提供 notice_id"
@@ -59,5 +60,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return f"群 {group_id} 公告详情 [ID: {notice_id}]:\n时间: {pub_time}\n发布者: {sender_id}\n内容:\n{content}"
 
     except Exception as e:
-        logger.exception(f"[群公告] 获取群 {group_id} 公告详情失败: {e}")
-        return f"获取群公告详情失败: {e}"
+        logger.exception(
+            "[群公告] 获取公告详情失败: group=%s notice_id=%s request_id=%s err=%s",
+            group_id,
+            notice_id,
+            request_id,
+            e,
+        )
+        return "获取群公告详情失败，请稍后重试"

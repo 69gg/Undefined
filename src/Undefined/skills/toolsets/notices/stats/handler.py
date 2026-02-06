@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """统计并分析公告的触达及反馈数据"""
+    request_id = str(context.get("request_id", "-"))
     group_id = args.get("group_id")
     if not group_id:
         group_id = context.get("group_id")
@@ -45,5 +46,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return f"群 {group_id} 公告统计：\n当前共有 {total_count} 条公告记录\n最后更新时间: {latest_time_str}"
 
     except Exception as e:
-        logger.exception(f"[群公告] 获取群 {group_id} 公公告统计失败: {e}")
-        return f"获取群公告统计失败: {e}"
+        logger.exception(
+            "[群公告] 获取公告统计失败: group=%s request_id=%s err=%s",
+            group_id,
+            request_id,
+            e,
+        )
+        return "获取群公告统计失败，请稍后重试"

@@ -227,8 +227,14 @@ class CommandDispatcher:
             cleanup_cache_dir(RENDER_CACHE_DIR)
 
         except Exception as e:
-            logger.exception(f"[Stats] 生成统计图表失败: {e}")
-            await self.sender.send_group_message(group_id, f"❌ 生成统计图表失败: {e}")
+            error_id = uuid4().hex[:8]
+            logger.exception(
+                "[Stats] 生成统计图表失败: error_id=%s err=%s", error_id, e
+            )
+            await self.sender.send_group_message(
+                group_id,
+                f"❌ 生成统计图表失败，请稍后重试（错误码: {error_id}）",
+            )
 
     def _build_data_summary(self, summary: dict[str, Any], days: int) -> str:
         """构建用于 AI 分析的统计数据摘要"""
@@ -755,13 +761,23 @@ class CommandDispatcher:
             )
         except Exception as e:
             duration = time.perf_counter() - start_time
-            logger.exception(f"[Command] 执行 /{meta.name} 失败: {e}")
+            error_id = uuid4().hex[:8]
+            logger.exception(
+                "[Command] 执行失败: cmd=/%s error_id=%s err=%s",
+                meta.name,
+                error_id,
+                e,
+            )
             logger.error(
-                "[Command] 分发失败: cmd=/%s duration=%.3fs",
+                "[Command] 分发失败: cmd=/%s duration=%.3fs error_id=%s",
                 meta.name,
                 duration,
+                error_id,
             )
-            await self.sender.send_group_message(group_id, f"❌ 命令执行失败: {e}")
+            await self.sender.send_group_message(
+                group_id,
+                f"❌ 命令执行失败，请稍后重试（错误码: {error_id}）",
+            )
 
     def _check_command_permission(
         self,
@@ -961,8 +977,12 @@ class CommandDispatcher:
                 group_id, f"✅ 已添加管理员: {new_admin_qq}"
             )
         except Exception as e:
-            logger.exception(f"添加管理员失败: {e}")
-            await self.sender.send_group_message(group_id, f"❌ 添加管理员失败: {e}")
+            error_id = uuid4().hex[:8]
+            logger.exception("添加管理员失败: error_id=%s err=%s", error_id, e)
+            await self.sender.send_group_message(
+                group_id,
+                f"❌ 添加管理员失败，请稍后重试（错误码: {error_id}）",
+            )
 
     async def _handle_rmadmin(self, group_id: int, args: list[str]) -> None:
         if not args:
@@ -989,8 +1009,12 @@ class CommandDispatcher:
                 group_id, f"✅ 已移除管理员: {target_qq}"
             )
         except Exception as e:
-            logger.exception(f"移除管理员失败: {e}")
-            await self.sender.send_group_message(group_id, f"❌ 移除管理员失败: {e}")
+            error_id = uuid4().hex[:8]
+            logger.exception("移除管理员失败: error_id=%s err=%s", error_id, e)
+            await self.sender.send_group_message(
+                group_id,
+                f"❌ 移除管理员失败，请稍后重试（错误码: {error_id}）",
+            )
 
     async def _handle_bugfix(
         self, group_id: int, admin_id: int, args: list[str]
@@ -1042,8 +1066,12 @@ class CommandDispatcher:
             await self.sender.send_group_message(group_id, result_msg)
 
         except Exception as e:
-            logger.exception(f"Bugfix 失败: {e}")
-            await self.sender.send_group_message(group_id, f"❌ Bug 修复分析失败: {e}")
+            error_id = uuid4().hex[:8]
+            logger.exception("Bugfix 失败: error_id=%s err=%s", error_id, e)
+            await self.sender.send_group_message(
+                group_id,
+                f"❌ Bug 修复分析失败，请稍后重试（错误码: {error_id}）",
+            )
 
     def _parse_bugfix_args(
         self, args: list[str]

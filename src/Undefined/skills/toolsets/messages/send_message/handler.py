@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """发送群聊消息，支持文本和 CQ 码格式"""
+    request_id = str(context.get("request_id", "-"))
     message = args.get("message", "")
     if not message:
         logger.warning("[发送消息] 收到空消息请求")
@@ -51,8 +52,13 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                     recent_replies.append(message)
                 return "消息已发送"
             except Exception as e:
-                logger.exception(f"[发送消息] 发送到群 {group_id_int} 失败: {e}")
-                return f"发送失败: {e}"
+                logger.exception(
+                    "[发送消息] 发送到群失败: group=%s request_id=%s err=%s",
+                    group_id_int,
+                    request_id,
+                    e,
+                )
+                return "发送失败：消息服务暂时不可用，请稍后重试"
         elif send_message_callback:
             # 兼容：当无法确定群ID时，回调可能用于私聊回复
             if runtime_config is not None:

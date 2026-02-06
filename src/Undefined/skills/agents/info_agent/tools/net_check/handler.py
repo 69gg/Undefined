@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """对特定网址或域名执行网络质量巡检，探测 HTTP 状态及延迟情况"""
+    request_id = str(context.get("request_id", "-"))
     host = args.get("host")
 
     if not host:
@@ -113,8 +114,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     except httpx.TimeoutException:
         return "请求超时，请稍后重试"
     except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP 错误: {e}")
-        return f"网络检测失败: {e}"
+        logger.error("HTTP 错误: request_id=%s err=%s", request_id, e)
+        return "网络检测失败：上游接口返回异常状态"
     except Exception as e:
-        logger.exception(f"网络检测失败: {e}")
-        return f"网络检测失败: {e}"
+        logger.exception("网络检测失败: request_id=%s err=%s", request_id, e)
+        return "网络检测失败：服务暂时不可用，请稍后重试"
