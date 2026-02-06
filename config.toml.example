@@ -13,6 +13,9 @@ admin_qq = []
 # zh: 音频转发代理QQ号（用于群聊音频转发，可选）。
 # en: Audio forward proxy QQ number (for group audio forwarding, optional).
 forward_proxy_qq = 0
+# zh: 是否处理每条群消息。关闭后仅处理 @机器人、私聊和拍一拍（推荐默认开启）。
+# en: Process every group message. If disabled, only @mentions, private chats, and pokes are handled (recommended: enabled).
+process_every_message = true
 
 # zh: 会话白名单（访问控制）。只要本段任一列表非空，系统将进入“限制模式”：未在白名单内的群/私聊会被忽略，且所有消息发送将被拦截。
 # en: Session allowlist (access control). If either the group or private allowlist is non-empty, the bot enters "allowlist mode": groups or private chats not in the allowlists will be ignored and outgoing messages will be blocked.
@@ -89,6 +92,9 @@ deepseek_new_cot_support = false
 # zh: 安全模型配置（用于防注入检测和注入后回复生成）。
 # en: Security model config (injection detection and post-injection responses).
 [models.security]
+# zh: 是否启用安全模型检测与注入响应（推荐开启）。
+# en: Enable security-model detection and injection response (recommended).
+enabled = true
 # zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
 # en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
 api_url = ""

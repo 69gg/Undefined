@@ -50,6 +50,10 @@ class SecurityService:
         self, text: str, message_content: Optional[list[dict[str, Any]]] = None
     ) -> bool:
         """检测消息是否包含提示词注入攻击"""
+        if not self.config.security_check_enabled():
+            logger.debug("[Security] 已关闭安全模型检测，跳过注入检查")
+            return False
+
         start_time = time.perf_counter()
         try:
             # 将消息内容用 XML 包装

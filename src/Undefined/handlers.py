@@ -274,6 +274,20 @@ class MessageHandler:
         if sender_id == self.config.bot_qq:
             return
 
+        # 检查是否 @ 了机器人（后续分流共用）
+        is_at_bot = self.ai_coordinator._is_at_bot(message_content)
+
+        # 关闭“每条消息处理”后，仅处理 @ 消息（私聊/拍一拍在其他分支中处理）
+        if not self.config.should_process_group_message(is_at_bot=is_at_bot):
+            logger.debug(
+                "[消息策略] 跳过群消息处理: group=%s sender=%s process_every_message=%s at_bot=%s",
+                group_id,
+                sender_id,
+                self.config.process_every_message,
+                is_at_bot,
+            )
+            return
+
         # 关键词自动回复：心理委员 (使用原始消息内容提取文本，保证关键词触发不受影响)
         if matches_xinliweiyuan(text):
             rand_val = random.random()
@@ -304,9 +318,6 @@ class MessageHandler:
 
         # 提取文本内容
         # (已在上方提取用于日志记录)
-
-        # 检查是否 @ 了机器人
-        is_at_bot = self.ai_coordinator._is_at_bot(message_content)
 
         # 只有被@时才处理斜杠命令
         if is_at_bot:

@@ -48,7 +48,13 @@ SECTION_ORDER: dict[str, list[str]] = {
 }
 
 KEY_ORDER: dict[str, list[str]] = {
-    "core": ["bot_qq", "superadmin_qq", "admin_qq", "forward_proxy_qq"],
+    "core": [
+        "bot_qq",
+        "superadmin_qq",
+        "admin_qq",
+        "forward_proxy_qq",
+        "process_every_message",
+    ],
     "access": [
         "allowed_group_ids",
         "allowed_private_ids",
@@ -103,6 +109,7 @@ KEY_ORDER: dict[str, list[str]] = {
         "deepseek_new_cot_support",
     ],
     "models.security": [
+        "enabled",
         "api_url",
         "api_key",
         "model_name",

@@ -310,10 +310,12 @@ class Config:
     # 是否允许超级管理员在私聊中绕过 allowed_private_ids（仅私聊收发）
     superadmin_bypass_allowlist: bool
     forward_proxy_qq: int | None
+    process_every_message: bool
     onebot_ws_url: str
     onebot_token: str
     chat_model: ChatModelConfig
     vision_model: VisionModelConfig
+    security_model_enabled: bool
     security_model: SecurityModelConfig
     agent_model: AgentModelConfig
     log_level: str
@@ -366,6 +368,14 @@ class Config:
             0,
         )
         forward_proxy_qq = forward_proxy if forward_proxy > 0 else None
+        process_every_message = _coerce_bool(
+            _get_value(
+                data,
+                ("core", "process_every_message"),
+                "PROCESS_EVERY_MESSAGE",
+            ),
+            True,
+        )
 
         onebot_ws_url = _coerce_str(
             _get_value(data, ("onebot", "ws_url"), "ONEBOT_WS_URL"), ""
@@ -376,6 +386,14 @@ class Config:
 
         chat_model = cls._parse_chat_model_config(data)
         vision_model = cls._parse_vision_model_config(data)
+        security_model_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "security", "enabled"),
+                "SECURITY_MODEL_ENABLED",
+            ),
+            True,
+        )
         security_model = cls._parse_security_model_config(data, chat_model)
         agent_model = cls._parse_agent_model_config(data)
 
@@ -603,10 +621,12 @@ class Config:
             allowed_private_ids=allowed_private_ids,
             superadmin_bypass_allowlist=superadmin_bypass_allowlist,
             forward_proxy_qq=forward_proxy_qq,
+            process_every_message=process_every_message,
             onebot_ws_url=onebot_ws_url,
             onebot_token=onebot_token,
             chat_model=chat_model,
             vision_model=vision_model,
+            security_model_enabled=security_model_enabled,
             security_model=security_model,
             agent_model=agent_model,
             log_level=log_level,
@@ -671,6 +691,18 @@ class Config:
         ):
             return True
         return int(user_id) in set(self.allowed_private_ids)
+
+    def should_process_group_message(self, is_at_bot: bool) -> bool:
+        """是否处理该条群消息。"""
+
+        if self.process_every_message:
+            return True
+        return bool(is_at_bot)
+
+    def security_check_enabled(self) -> bool:
+        """是否启用安全模型检查。"""
+
+        return bool(self.security_model_enabled)
 
     @staticmethod
     def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:

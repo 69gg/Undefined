@@ -418,6 +418,7 @@ uv run Undefined-webui
 在 `config.toml` 文件中配置以下核心参数（示例见 `config.toml.example`）：
 
 - **基础配置**：`[core]` 与 `[onebot]`
+  - `process_every_message`：是否处理每条群消息（默认开启）；关闭后仅处理 `@机器人`、私聊、拍一拍（群消息仍会写入历史）
 - **会话白名单（推荐）**：`[access]`
   - `allowed_group_ids`：允许处理/发送消息的群号列表
   - `allowed_private_ids`：允许处理/发送消息的私聊 QQ 列表
@@ -425,6 +426,7 @@ uv run Undefined-webui
   - 规则：只要 `allowed_group_ids` 或 `allowed_private_ids` 任一非空，就会启用限制模式；未在白名单内的群/私聊消息将被直接忽略，且所有消息发送也会被拦截（包括工具调用与定时任务）。
 - **模型配置**：`[models.chat]` / `[models.vision]` / `[models.agent]` / `[models.security]`
   - `api_url`：OpenAI 兼容 **base URL**（如 `https://api.openai.com/v1` / `http://127.0.0.1:8000/v1`）
+  - `models.security.enabled`：是否启用安全模型检测（默认开启）
   - DeepSeek Thinking + Tool Calls：若使用 `deepseek-reasoner` 或 `deepseek-chat` + `thinking={"type":"enabled"}` 且启用了工具调用，建议启用 `deepseek_new_cot_support`
 - **日志配置**：`[logging]`
 - **Token 统计归档**：`[token_usage]`（默认 5MB，<=0 禁用）
