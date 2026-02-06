@@ -81,4 +81,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"获取用户信息失败: {e}")
-        return f"获取失败：{str(e)}"
+        return "获取用户信息失败，请稍后重试"

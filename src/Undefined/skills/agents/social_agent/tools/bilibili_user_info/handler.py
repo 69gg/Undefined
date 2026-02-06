@@ -69,4 +69,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"B站用户查询失败: {e}")
-        return f"B站用户查询失败: {e}"
+        return "B站用户查询失败，请稍后重试"

@@ -180,7 +180,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"检测文件类型失败: {e}")
-        return f"检测文件类型失败: {e}"
+        return "检测文件类型失败"
 
 
 def _detect_by_file_command(path: Path, file_size: int) -> str | None:

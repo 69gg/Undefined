@@ -51,4 +51,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"QQ等级查询失败: {e}")
-        return f"QQ等级查询失败: {e}"
+        return "QQ等级查询失败，请稍后重试"

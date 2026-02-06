@@ -69,4 +69,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"AI 绘图失败: {e}")
-        return f"AI 绘图失败: {e}"
+        return "AI 绘图失败，请稍后重试"

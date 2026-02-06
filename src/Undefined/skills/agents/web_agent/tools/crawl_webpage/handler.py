@@ -91,12 +91,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     except RuntimeError as e:
         if "ERR_NETWORK_CHANGED" in str(e) or "ERR_CONNECTION" in str(e):
             logger.error(f"网络连接错误: {e}")
-            return (
-                f"网络连接错误，可能是代理配置问题。请检查代理设置或关闭代理。错误: {e}"
-            )
+            return "网络连接错误，可能是代理配置问题。请检查代理设置或关闭代理。"
         else:
             logger.error(f"抓取网页时发生错误: {e}")
-            return f"抓取网页时发生错误: {e}"
+            return "抓取网页时发生错误，请稍后重试"
     except Exception as e:
         logger.error(f"网页获取失败: {e}")
-        return f"网页获取失败: {e}"
+        return "网页获取失败，请稍后重试"

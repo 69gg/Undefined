@@ -60,4 +60,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"Minecraft 皮肤获取失败: {e}")
-        return f"Minecraft 皮肤获取失败: {e}"
+        return "Minecraft 皮肤获取失败，请稍后重试"

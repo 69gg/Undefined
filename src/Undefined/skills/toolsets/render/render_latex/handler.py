@@ -79,4 +79,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return f"渲染失败：缺少依赖包 {missing_pkg}，请运行: uv add {missing_pkg}"
     except Exception as e:
         logger.exception(f"渲染并发送 LaTeX 图片失败: {e}")
-        return f"渲染失败: {e}"
+        return "渲染失败，请稍后重试"

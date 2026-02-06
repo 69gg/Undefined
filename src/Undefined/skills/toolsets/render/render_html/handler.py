@@ -43,4 +43,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"HTML 渲染并发送图片失败: {e}")
-        return f"HTML 渲染失败: {e}"
+        return "HTML 渲染失败，请稍后重试"

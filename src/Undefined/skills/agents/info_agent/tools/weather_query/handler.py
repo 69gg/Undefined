@@ -220,4 +220,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"天气查询工具出错: {e}")
-        return f"查询出错: {str(e)}"
+        return "查询出错，请稍后重试"

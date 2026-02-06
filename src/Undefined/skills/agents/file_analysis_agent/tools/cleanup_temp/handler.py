@@ -34,4 +34,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"清理下载缓存目录失败: {e}")
-        return f"清理下载缓存目录失败: {e}"
+        return "清理下载缓存目录失败，请稍后重试"

@@ -76,4 +76,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"解析 Word 文档失败: {e}")
-        return f"解析 Word 文档失败: {e}"
+        return "解析 Word 文档失败，文件可能已损坏或格式不支持"

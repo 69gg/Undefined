@@ -29,7 +29,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "请求超时，请稍后重试"
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP 错误: {e}")
-        return f"获取语录失败: {e}"
+        return "获取语录失败：网络请求错误"
     except Exception as e:
         logger.exception(f"获取语录失败: {e}")
-        return f"获取语录失败: {e}"
+        return "获取语录失败，请稍后重试"

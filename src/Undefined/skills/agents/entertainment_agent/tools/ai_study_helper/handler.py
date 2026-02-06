@@ -34,4 +34,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"AI 助手请求失败: {e}")
-        return f"AI 助手请求失败: {e}"
+        return "AI 助手请求失败，请稍后重试"

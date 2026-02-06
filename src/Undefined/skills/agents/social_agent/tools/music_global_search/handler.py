@@ -49,4 +49,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"音乐搜索失败: {e}")
-        return f"音乐搜索失败: {e}"
+        return "音乐搜索失败，请稍后重试"
