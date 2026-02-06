@@ -1,0 +1,11 @@
+{
+  "name": "help",
+  "description": "显示本帮助信息",
+  "usage": "/help",
+  "example": "/help",
+  "permission": "public",
+  "rate_limit": "none",
+  "show_in_help": true,
+  "order": 10,
+  "aliases": []
+}

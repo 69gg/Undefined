@@ -1,0 +1,11 @@
+{
+  "name": "lsadmin",
+  "description": "查看当前机器人管理员列表",
+  "usage": "/lsadmin",
+  "example": "/lsadmin",
+  "permission": "public",
+  "rate_limit": "none",
+  "show_in_help": true,
+  "order": 70,
+  "aliases": []
+}

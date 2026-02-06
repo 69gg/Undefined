@@ -15,9 +15,10 @@ from Undefined.onebot import (
     parse_message_time,
 )
 from Undefined.utils.sender import MessageSender
+from Undefined.services.commands.context import CommandContext
+from Undefined.services.commands.registry import CommandMeta, CommandRegistry
 from Undefined.services.security import SecurityService
 from Undefined.token_usage_storage import TokenUsageStorage
-from Undefined.utils.resources import read_text_resource
 
 # 尝试导入 matplotlib
 plt: Any
@@ -30,20 +31,6 @@ except ImportError:
     _MATPLOTLIB_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-
-_HELP_MESSAGE: str | None = None
-
-
-def _get_help_message() -> str:
-    global _HELP_MESSAGE
-    if _HELP_MESSAGE is not None:
-        return _HELP_MESSAGE
-    try:
-        _HELP_MESSAGE = read_text_resource("res/prepared_messages/help_message.txt")
-    except Exception as exc:
-        logger.error("加载 help_message 失败: %s", exc)
-        _HELP_MESSAGE = "帮助信息加载失败。"
-    return _HELP_MESSAGE
 
 
 class CommandDispatcher:
@@ -84,6 +71,10 @@ class CommandDispatcher:
         # 存储 stats 分析结果，用于队列回调
         self._stats_analysis_results: dict[str, str] = {}
         self._stats_analysis_events: dict[str, asyncio.Event] = {}
+
+        commands_dir = Path(__file__).parent / "commands"
+        self.command_registry = CommandRegistry(commands_dir)
+        self.command_registry.load_commands()
 
     def parse_command(self, text: str) -> Optional[dict[str, Any]]:
         """解析斜杠命令字符串
@@ -674,7 +665,7 @@ class CommandDispatcher:
             sender_id: 发送者 QQ 号
             command: 解析出的命令数据结构
         """
-        cmd_name = command["name"]
+        cmd_name = str(command["name"])
         cmd_args = command["args"]
 
         logger.info(f"[Command] 执行命令: /{cmd_name} | 参数: {cmd_args}")
@@ -686,115 +677,91 @@ class CommandDispatcher:
             len(cmd_args),
         )
 
-        try:
-            # 公开命令
-            if cmd_name == "help":
-                await self._handle_help(group_id)
-            elif cmd_name == "stats":
-                await self._check_stats_rate_limit_and_handle(
-                    group_id, sender_id, cmd_args
-                )
-            elif cmd_name == "lsfaq":
-                await self._check_rate_limit_and_handle(
-                    group_id, sender_id, self._handle_lsfaq, group_id
-                )
-            elif cmd_name == "viewfaq":
-                await self._check_rate_limit_and_handle(
-                    group_id, sender_id, self._handle_viewfaq, group_id, cmd_args
-                )
-            elif cmd_name == "searchfaq":
-                await self._check_rate_limit_and_handle(
-                    group_id, sender_id, self._handle_searchfaq, group_id, cmd_args
-                )
-            elif cmd_name == "lsadmin":
-                await self._handle_lsadmin(group_id)
-
-            # 管理员命令
-            elif cmd_name == "delfaq":
-                if not self.config.is_admin(sender_id):
-                    await self._send_no_permission(
-                        group_id, sender_id, cmd_name, "管理员"
-                    )
-                    return
-                await self._check_rate_limit_and_handle(
-                    group_id, sender_id, self._handle_delfaq, group_id, cmd_args
-                )
-            elif cmd_name == "bugfix":
-                if not self.config.is_admin(sender_id):
-                    await self._send_no_permission(
-                        group_id, sender_id, cmd_name, "管理员"
-                    )
-                    return
-                await self._check_rate_limit_and_handle(
-                    group_id,
-                    sender_id,
-                    self._handle_bugfix,
-                    group_id,
-                    sender_id,
-                    cmd_args,
-                )
-
-            # 超级管理员命令
-            elif cmd_name == "addadmin":
-                if not self.config.is_superadmin(sender_id):
-                    await self._send_no_permission(
-                        group_id, sender_id, cmd_name, "超级管理员"
-                    )
-                    return
-                await self._handle_addadmin(group_id, cmd_args)
-            elif cmd_name == "rmadmin":
-                if not self.config.is_superadmin(sender_id):
-                    await self._send_no_permission(
-                        group_id, sender_id, cmd_name, "超级管理员"
-                    )
-                    return
-                await self._handle_rmadmin(group_id, cmd_args)
-
-            else:
-                logger.info(f"[Command] 未知命令: /{cmd_name}")
-                await self.sender.send_group_message(
-                    group_id, f"❌ 未知命令: {cmd_name}\n使用 /help 查看可用命令"
-                )
-        except Exception as e:
-            logger.exception(f"[Command] 执行 /{cmd_name} 失败: {e}")
-            await self.sender.send_group_message(group_id, f"❌ 命令执行失败: {e}")
-
-    async def _check_rate_limit_and_handle(
-        self, group_id: int, user_id: int, handler: Any, *args: Any
-    ) -> None:
-        """检查速率限制并执行"""
-        allowed, remaining = self.security.check_rate_limit(user_id)
-        if not allowed:
+        meta = self.command_registry.resolve(cmd_name)
+        if meta is None:
+            logger.info(f"[Command] 未知命令: /{cmd_name}")
             await self.sender.send_group_message(
-                group_id, f"⏳ 操作太频繁，请 {remaining} 秒后再试"
+                group_id,
+                f"❌ 未知命令: {cmd_name}\n使用 /help 查看可用命令",
             )
             return
-        self.security.record_rate_limit(user_id)
-        await handler(*args)
 
-    async def _check_stats_rate_limit_and_handle(
-        self, group_id: int, user_id: int, args: list[str]
-    ) -> None:
-        """检查 /stats 命令的速率限制并执行
+        allowed, role_name = self._check_command_permission(meta, sender_id)
+        if not allowed:
+            await self._send_no_permission(group_id, sender_id, meta.name, role_name)
+            return
 
-        规则：
-        - 超级管理员和管理员：无限制
-        - 普通用户：1小时/次
-        """
-        # 检查 stats 专用频率限制
-        if self.rate_limiter:
-            allowed, remaining = self.rate_limiter.check_stats(user_id)
+        if not await self._check_command_rate_limit(meta, group_id, sender_id):
+            return
+
+        context = CommandContext(
+            group_id=group_id,
+            sender_id=sender_id,
+            config=self.config,
+            sender=self.sender,
+            ai=self.ai,
+            faq_storage=self.faq_storage,
+            onebot=self.onebot,
+            security=self.security,
+            queue_manager=self.queue_manager,
+            rate_limiter=self.rate_limiter,
+            dispatcher=self,
+            registry=self.command_registry,
+        )
+
+        try:
+            await self.command_registry.execute(meta, cmd_args, context)
+        except Exception as e:
+            logger.exception(f"[Command] 执行 /{meta.name} 失败: {e}")
+            await self.sender.send_group_message(group_id, f"❌ 命令执行失败: {e}")
+
+    def _check_command_permission(
+        self,
+        command_meta: CommandMeta,
+        sender_id: int,
+    ) -> tuple[bool, str]:
+        permission = command_meta.permission
+        if permission == "superadmin":
+            return self.config.is_superadmin(sender_id), "超级管理员"
+        if permission == "admin":
+            return self.config.is_admin(sender_id), "管理员"
+        return True, ""
+
+    async def _check_command_rate_limit(
+        self,
+        command_meta: CommandMeta,
+        group_id: int,
+        sender_id: int,
+    ) -> bool:
+        rate_limit = command_meta.rate_limit
+        if rate_limit == "none":
+            return True
+
+        if rate_limit == "stats":
+            if self.rate_limiter is None:
+                return True
+            allowed, remaining = self.rate_limiter.check_stats(sender_id)
             if not allowed:
                 minutes = remaining // 60
                 seconds = remaining % 60
                 time_str = f"{minutes}分{seconds}秒" if minutes > 0 else f"{seconds}秒"
                 await self.sender.send_group_message(
-                    group_id, f"⏳ /stats 命令太频繁，请 {time_str}后再试"
+                    group_id,
+                    f"⏳ /stats 命令太频繁，请 {time_str}后再试",
                 )
-                return
-            self.rate_limiter.record_stats(user_id)
+                return False
+            self.rate_limiter.record_stats(sender_id)
+            return True
 
-        await self._handle_stats(group_id, user_id, args)
+        allowed, remaining = self.security.check_rate_limit(sender_id)
+        if not allowed:
+            await self.sender.send_group_message(
+                group_id,
+                f"⏳ 操作太频繁，请 {remaining} 秒后再试",
+            )
+            return False
+        self.security.record_rate_limit(sender_id)
+        return True
 
     async def _send_no_permission(
         self, group_id: int, sender_id: int, cmd_name: str, required_role: str
@@ -805,7 +772,26 @@ class CommandDispatcher:
         )
 
     async def _handle_help(self, group_id: int) -> None:
-        await self.sender.send_group_message(group_id, _get_help_message())
+        commands = self.command_registry.list_commands(include_hidden=False)
+        permission_label_map = {
+            "public": "公开可用",
+            "admin": "仅限管理员",
+            "superadmin": "仅限超级管理员",
+        }
+
+        lines = ["Undefined命令模块 使用帮助", "", "可用命令：", ""]
+        for item in commands:
+            lines.append(item.usage)
+            if item.description:
+                lines.append(f"  {item.description}")
+            if item.example and item.example != item.usage:
+                lines.append(f"  示例：{item.example}")
+            lines.append(f"  ({permission_label_map.get(item.permission, '公开可用')})")
+            lines.append("")
+
+        lines.append("© 由 Null(qq:1708213363) <pylindex@qq.com> 编写 版权所有")
+        lines.append("开源链接：https://github.com/69gg/Undefined")
+        await self.sender.send_group_message(group_id, "\n".join(lines))
 
     async def _handle_lsfaq(self, group_id: int) -> None:
         faqs = await self.faq_storage.list_all(group_id)
