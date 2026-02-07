@@ -444,7 +444,6 @@ class AICoordinator:
             agent_intro_generator = self.ai._agent_intro_generator
             if not isinstance(agent_intro_generator, AgentIntroGenerator):
                 logger.error("[Agent介绍生成] 无法获取 AgentIntroGenerator 实例")
-                agent_intro_generator.set_intro_generation_result(request_id, None)
                 return
 
             (
