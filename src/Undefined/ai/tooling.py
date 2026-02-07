@@ -165,6 +165,17 @@ class ToolManager:
         """
         start_time = time.perf_counter()
 
+        runtime_config = context.get("runtime_config")
+        if runtime_config is not None:
+            nagaagent_mode_enabled = bool(
+                getattr(runtime_config, "nagaagent_mode_enabled", False)
+            )
+            if (
+                not nagaagent_mode_enabled
+                and function_name == "naga_code_analysis_agent"
+            ):
+                return "该功能未启用"
+
         # 自动注入 RequestContext 资源
         ctx = RequestContext.current()
         if ctx:

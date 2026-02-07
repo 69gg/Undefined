@@ -46,6 +46,29 @@ class PromptBuilder:
         self._end_summaries: deque[str] = deque(maxlen=100)
         self._summaries_loaded = False
 
+    def _select_system_prompt_path(self) -> str:
+        """根据运行时配置选择系统提示词路径。
+
+        - 关闭 nagaagent_mode_enabled: 使用默认 public prompt
+        - 开启 nagaagent_mode_enabled: 使用 NagaAgent prompt
+
+        说明：路径在每次构建 messages 时动态选择，以支持配置热更新。
+        """
+
+        if self._runtime_config_getter is None:
+            return self._system_prompt_path
+
+        runtime_config = None
+        try:
+            runtime_config = self._runtime_config_getter()
+        except Exception:
+            runtime_config = None
+
+        enabled = bool(getattr(runtime_config, "nagaagent_mode_enabled", False))
+        if enabled:
+            return "res/prompts/undfined_nagaagent.xml"
+        return "res/prompts/undefined.xml"
+
     async def _ensure_summaries_loaded(self) -> None:
         if not self._summaries_loaded:
             loaded_summaries = await self._end_summary_storage.load()
@@ -54,11 +77,12 @@ class PromptBuilder:
             logger.debug(f"[AI初始化] 已加载 {len(loaded_summaries)} 条 End 摘要")
 
     async def _load_system_prompt(self) -> str:
+        system_prompt_path = self._select_system_prompt_path()
         try:
-            return read_text_resource(self._system_prompt_path)
+            return read_text_resource(system_prompt_path)
         except Exception as exc:
             logger.debug("读取系统提示词失败，尝试本地路径: %s", exc)
-        async with aiofiles.open(self._system_prompt_path, "r", encoding="utf-8") as f:
+        async with aiofiles.open(system_prompt_path, "r", encoding="utf-8") as f:
             return await f.read()
 
     async def build_messages(
@@ -84,7 +108,7 @@ class PromptBuilder:
         logger.debug(
             "[Prompt] system_prompt_len=%s path=%s",
             len(system_prompt),
-            self._system_prompt_path,
+            self._select_system_prompt_path(),
         )
 
         if self._bot_qq != 0:

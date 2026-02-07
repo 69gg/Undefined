@@ -363,6 +363,24 @@ class AIClient:
         runtime_config = self._get_runtime_config()
         return list(runtime_config.prefetch_tools)
 
+    def _filter_tools_for_runtime_config(
+        self, tools: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        runtime_config = self._get_runtime_config()
+        enabled = bool(getattr(runtime_config, "nagaagent_mode_enabled", False))
+        if enabled:
+            return tools
+
+        # 关闭 NagaAgent 模式时：隐藏相关 Agent，避免被模型误调用。
+        filtered: list[dict[str, Any]] = []
+        for tool in tools:
+            function = tool.get("function") if isinstance(tool, dict) else None
+            name = function.get("name") if isinstance(function, dict) else None
+            if name == "naga_code_analysis_agent":
+                continue
+            filtered.append(tool)
+        return filtered
+
     def _prefetch_hide_tools(self) -> bool:
         runtime_config = self._get_runtime_config()
         return runtime_config.prefetch_tools_hide
@@ -554,6 +572,7 @@ class AIClient:
         )
 
         tools = self.tool_manager.get_openai_tools()
+        tools = self._filter_tools_for_runtime_config(tools)
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
                 "[AI消息] 构建完成: messages=%s tools=%s question_len=%s",

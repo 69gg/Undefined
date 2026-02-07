@@ -35,6 +35,7 @@ SECTION_ORDER: dict[str, list[str]] = {
         "models",
         "logging",
         "tools",
+        "features",
         "skills",
         "search",
         "proxy",
@@ -74,6 +75,9 @@ KEY_ORDER: dict[str, list[str]] = {
         "description_max_len",
         "sanitize_verbose",
         "description_preview_len",
+    ],
+    "features": [
+        "nagaagent_mode_enabled",
     ],
     "skills": [
         "hot_reload",
