@@ -507,7 +507,7 @@ class Config:
         ).strip()
         if not tools_dot_delimiter:
             tools_dot_delimiter = "-_-"
-        # dot_delimiter 必须满足 OpenAI-compatible 的 function.name 约束。
+        # dot_delimiter 必须满足 OpenAI 兼容的 function.name 约束。
         if "." in tools_dot_delimiter or not re.fullmatch(
             r"[a-zA-Z0-9_-]+", tools_dot_delimiter
         ):

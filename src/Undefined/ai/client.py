@@ -1,4 +1,4 @@
-"""AI client entry point."""
+"""AI 客户端入口。"""
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ except Exception:
     _SearxSearchWrapper = None
     _SEARX_AVAILABLE = False
     logger.warning(
-        "langchain_community 未安装或 SearxSearchWrapper 不可用，搜索功能将禁用"
+        "[初始化] langchain_community 未安装或 SearxSearchWrapper 不可用，搜索功能将禁用"
     )
 
 # 尝试导入 crawl4ai
@@ -70,7 +70,7 @@ try:
 except Exception:
     _CRAWL4AI_AVAILABLE = False
     _PROXY_CONFIG_AVAILABLE = False
-    logger.warning("crawl4ai 未安装，网页获取功能将禁用")
+    logger.warning("[初始化] crawl4ai 未安装，网页获取功能将禁用")
 
 
 class AIClient:
@@ -137,6 +137,10 @@ class AIClient:
             if p.exists()
         ]
         set_context_resource_scan_paths(scan_paths)
+        logger.debug(
+            "[初始化] 上下文资源扫描路径已绑定: count=%s",
+            len(scan_paths),
+        )
 
         # Agent intro 生成器（延迟初始化，需要外部设置 queue_manager）
         self._agent_intro_generator: Any | None = None
@@ -160,6 +164,13 @@ class AIClient:
             debounce = runtime_config.skills_hot_reload_debounce
             self.tool_registry.start_hot_reload(interval=interval, debounce=debounce)
             self.agent_registry.start_hot_reload(interval=interval, debounce=debounce)
+            logger.info(
+                "[初始化] 技能热重载已启用: interval=%.2fs debounce=%.2fs",
+                interval,
+                debounce,
+            )
+        else:
+            logger.info("[初始化] 技能热重载已禁用")
 
         # 初始化搜索 wrapper
         self._search_wrapper: Optional[Any] = None
@@ -171,17 +182,18 @@ class AIClient:
                         searx_host=searxng_url, k=10
                     )
                     logger.info(
-                        f"[初始化] SearxSearchWrapper 初始化成功，URL: {redact_string(searxng_url)}"
+                        "[初始化] SearxSearchWrapper 初始化成功: url=%s k=10",
+                        redact_string(searxng_url),
                     )
                 except Exception as exc:
-                    logger.warning(f"SearxSearchWrapper 初始化失败: {exc}")
+                    logger.warning("[初始化] SearxSearchWrapper 初始化失败: %s", exc)
             else:
-                logger.info("SEARXNG_URL 未配置，搜索功能禁用")
+                logger.info("[初始化] SEARXNG_URL 未配置，搜索功能禁用")
 
         if _CRAWL4AI_AVAILABLE:
-            logger.info("crawl4ai 可用，网页获取功能已启用")
+            logger.info("[初始化] crawl4ai 可用，网页获取功能已启用")
         else:
-            logger.warning("crawl4ai 不可用，网页获取功能将禁用")
+            logger.warning("[初始化] crawl4ai 不可用，网页获取功能将禁用")
 
         self._prompt_builder = PromptBuilder(
             bot_qq=self.bot_qq,
@@ -198,7 +210,7 @@ class AIClient:
             try:
                 await self.tool_registry.initialize_mcp_toolsets()
             except Exception as exc:
-                logger.warning(f"异步初始化 MCP 工具集失败: {exc}")
+                logger.warning("[初始化] 异步初始化 MCP 工具集失败: %s", exc)
 
         self._mcp_init_task = asyncio.create_task(init_mcp_async())
 
@@ -239,11 +251,11 @@ class AIClient:
             queue_manager: 队列管理器实例
         """
         if self._queue_manager is not None:
-            logger.warning("[AIClient] queue_manager 已设置，跳过重复设置")
+            logger.warning("[AI客户端] queue_manager 已设置，跳过重复设置")
             return
 
         if queue_manager is None:
-            logger.warning("[AIClient] 传入的 queue_manager 为 None")
+            logger.warning("[AI客户端] 传入的 queue_manager 为 None")
             return
 
         self._queue_manager = queue_manager
@@ -265,7 +277,7 @@ class AIClient:
                 await self._agent_intro_generator.stop()
                 self._agent_intro_generator = None
             self._agent_intro_task = None
-            logger.info("[AgentIntro] 自动生成已关闭")
+            logger.info("[Agent介绍] 自动生成已关闭")
             return
 
         if self._queue_manager is None:
@@ -281,7 +293,12 @@ class AIClient:
             self._agent_intro_task = asyncio.create_task(
                 self._agent_intro_generator.start()
             )
-            logger.info("[AgentIntro] 自动生成已启动")
+            logger.info(
+                "[Agent介绍] 自动生成已启动: interval=%.2fs max_tokens=%s cache=%s",
+                config.queue_interval_seconds,
+                config.max_tokens,
+                config.cache_path,
+            )
             return
 
         if self._agent_intro_generator.config.cache_path != config.cache_path:
@@ -295,7 +312,10 @@ class AIClient:
             self._agent_intro_task = asyncio.create_task(
                 self._agent_intro_generator.start()
             )
-            logger.info("[AgentIntro] 缓存路径变更，已重启生成器")
+            logger.info(
+                "[Agent介绍] 缓存路径变更，已重启生成器: cache=%s",
+                config.cache_path,
+            )
             return
 
         self._agent_intro_generator.config = config
@@ -304,27 +324,30 @@ class AIClient:
         """应用搜索服务配置（支持热更新）。"""
         if not _SEARX_AVAILABLE or _SearxSearchWrapper is None:
             if searxng_url:
-                logger.info("[配置] 搜索组件不可用，SEARXNG_URL 已忽略")
+                logger.warning(
+                    "[配置] 搜索组件不可用，已忽略 SEARXNG_URL=%s",
+                    redact_string(searxng_url),
+                )
+            else:
+                logger.info("[配置] 搜索组件不可用，搜索已禁用")
             self._search_wrapper = None
             return
 
         if not searxng_url:
             self._search_wrapper = None
-            logger.info("[配置] SEARXNG_URL 未配置，搜索功能禁用")
+            logger.info("[配置] SEARXNG_URL 未配置，搜索功能已禁用")
             return
 
         try:
             self._search_wrapper = _SearxSearchWrapper(searx_host=searxng_url, k=10)
             logger.info(
-                "[配置] 搜索服务已更新，URL=%s",
+                "[配置] 搜索服务已更新: url=%s k=10",
                 redact_string(searxng_url),
             )
         except Exception as exc:
-            logger.warning("搜索服务更新失败: %s", exc)
+            logger.warning("[配置] 搜索服务更新失败: %s", exc)
             self._search_wrapper = None
-            logger.info("[AIClient] Agent intro 生成器已启动")
-        else:
-            logger.info("[AIClient] Agent intro 自动生成已禁用")
+            logger.info("[配置] 搜索服务已回退为禁用")
 
     def count_tokens(self, text: str) -> int:
         return self._token_counter.count(text)
@@ -358,6 +381,7 @@ class AIClient:
         if not tools:
             return messages, tools
 
+        # 预先调用部分工具，为模型补充稳定上下文（同一 call_type 仅执行一次）
         prefetch_names = self._get_prefetch_tool_names()
         if not prefetch_names:
             return messages, tools
@@ -371,6 +395,7 @@ class AIClient:
         if not prefetch_targets:
             return messages, tools
 
+        # 使用 RequestContext 缓存已执行的预先调用，避免重复触发
         ctx = RequestContext.current()
         cache: dict[str, list[str]] = {}
         done: set[str] = set()
@@ -607,15 +632,15 @@ class AIClient:
                 if ds_cot_enabled and tools and log_thinking and not ds_cot_logged:
                     ds_cot_logged = True
                     logger.info(
-                        "[DeepSeek CoT] thinking-mode 工具调用兼容已启用：将回传 reasoning_content 以避免 400"
+                        "[DeepSeek思维链] thinking-mode 工具调用兼容已启用：将回传 reasoning_content 以避免 400"
                     )
                 if ds_cot_enabled and reasoning_content and log_thinking:
                     logger.info(
-                        "[DeepSeek CoT] 本轮 reasoning_content_len=%s",
+                        "[DeepSeek思维链] 本轮 reasoning_content_len=%s",
                         len(reasoning_content),
                     )
                     logger.info(
-                        "[DeepSeek CoT] reasoning_content=%s",
+                        "[DeepSeek思维链] reasoning_content=%s",
                         redact_string(reasoning_content),
                     )
                 if (
@@ -634,19 +659,20 @@ class AIClient:
                         else type(message).__name__
                     )
                     logger.info(
-                        "[DeepSeek CoT] 未在响应中发现 reasoning_content（可能是模型/服务商不返回思维链）；message_keys=%s",
+                        "[DeepSeek思维链] 未在响应中发现 reasoning_content（可能是模型/服务商不返回思维链）；message_keys=%s",
                         message_keys,
                     )
 
                 if content.strip() and tool_calls:
                     logger.debug(
-                        "AI 在 content 中返回了内容且存在工具调用，忽略 content，只执行工具调用"
+                        "检测到 content 与工具调用同时存在，忽略 content，仅执行工具调用"
                     )
                     content = ""
 
                 if not tool_calls:
                     logger.info(
-                        f"[AI回复] 会话结束，返回最终内容 (长度={len(content)})"
+                        "[AI回复] 会话结束，返回最终内容: length=%s",
+                        len(content),
                     )
                     return content
 
@@ -728,13 +754,19 @@ class AIClient:
 
                         if isinstance(tool_result, Exception):
                             logger.error(
-                                f"[工具异常] {internal_fname} (ID={call_id}) 执行抛出异常: {tool_result}"
+                                "[工具异常] %s (ID=%s) 执行抛出异常: %s",
+                                internal_fname,
+                                call_id,
+                                tool_result,
                             )
                             content_str = f"执行失败: {str(tool_result)}"
                         else:
                             content_str = str(tool_result)
                             logger.debug(
-                                f"[工具响应] {internal_fname} (ID={call_id}) 返回内容长度: {len(content_str)}"
+                                "[工具响应] %s (ID=%s) 返回内容长度=%s",
+                                internal_fname,
+                                call_id,
+                                len(content_str),
                             )
                             if logger.isEnabledFor(logging.DEBUG):
                                 log_debug_json(
@@ -755,15 +787,17 @@ class AIClient:
                         if tool_context.get("conversation_ended"):
                             conversation_ended = True
                             logger.info(
-                                f"[会话状态] 工具 {internal_fname} 触发了会话结束标记"
+                                "[会话状态] 工具触发会话结束标记: tool=%s",
+                                internal_fname,
                             )
 
                 if conversation_ended:
-                    logger.info("对话已结束（调用 end 工具）")
+                    logger.info("[会话状态] 对话已结束（调用 end 工具）")
                     return ""
 
             except Exception as exc:
-                logger.exception(f"ask 失败: {exc}")
+                logger.exception("ask 处理失败: %s", exc)
                 return f"处理失败: {exc}"
 
+        logger.warning("[AI决策] 达到最大迭代次数，未能完成处理")
         return "达到最大迭代次数，未能完成处理"

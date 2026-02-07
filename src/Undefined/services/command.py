@@ -76,7 +76,7 @@ class CommandDispatcher:
         commands_dir = Path(__file__).parent / "commands"
         self.command_registry = CommandRegistry(commands_dir)
         self.command_registry.load_commands()
-        logger.info("[Command] 命令系统初始化完成: dir=%s", commands_dir)
+        logger.info("[命令] 命令系统初始化完成: dir=%s", commands_dir)
 
     def parse_command(self, text: str) -> Optional[dict[str, Any]]:
         """解析斜杠命令字符串
@@ -96,7 +96,7 @@ class CommandDispatcher:
         args_str = match.group(2).strip()
 
         logger.debug(
-            "[Command] parse text_len=%s cmd=%s args=%s",
+            "[命令] 解析命令: text_len=%s cmd=%s args=%s",
             len(text),
             cmd_name,
             args_str,
@@ -677,9 +677,9 @@ class CommandDispatcher:
         cmd_name = str(command["name"])
         cmd_args = command["args"]
 
-        logger.info(f"[Command] 执行命令: /{cmd_name} | 参数: {cmd_args}")
+        logger.info("[命令] 执行命令: /%s | 参数=%s", cmd_name, cmd_args)
         logger.debug(
-            "[Command] dispatch group=%s sender=%s cmd=%s args_count=%s",
+            "[命令] 分发请求: group=%s sender=%s cmd=%s args_count=%s",
             group_id,
             sender_id,
             cmd_name,
@@ -688,7 +688,7 @@ class CommandDispatcher:
 
         meta = self.command_registry.resolve(cmd_name)
         if meta is None:
-            logger.info(f"[Command] 未知命令: /{cmd_name}")
+            logger.info("[命令] 未知命令: /%s", cmd_name)
             await self.sender.send_group_message(
                 group_id,
                 f"❌ 未知命令: {cmd_name}\n使用 /help 查看可用命令",
@@ -696,7 +696,7 @@ class CommandDispatcher:
             return
 
         logger.info(
-            "[Command] 命令匹配成功: input=/%s resolved=/%s permission=%s rate_limit=%s",
+            "[命令] 命令匹配成功: input=/%s resolved=/%s permission=%s rate_limit=%s",
             cmd_name,
             meta.name,
             meta.permission,
@@ -706,7 +706,7 @@ class CommandDispatcher:
         allowed, role_name = self._check_command_permission(meta, sender_id)
         if not allowed:
             logger.warning(
-                "[Command] 权限校验失败: cmd=/%s sender=%s required=%s",
+                "[命令] 权限校验失败: cmd=/%s sender=%s required=%s",
                 meta.name,
                 sender_id,
                 role_name,
@@ -715,14 +715,14 @@ class CommandDispatcher:
             return
 
         logger.debug(
-            "[Command] 权限校验通过: cmd=/%s sender=%s",
+            "[命令] 权限校验通过: cmd=/%s sender=%s",
             meta.name,
             sender_id,
         )
 
         if not await self._check_command_rate_limit(meta, group_id, sender_id):
             logger.warning(
-                "[Command] 速率限制拦截: cmd=/%s group=%s sender=%s",
+                "[命令] 速率限制拦截: cmd=/%s group=%s sender=%s",
                 meta.name,
                 group_id,
                 sender_id,
@@ -730,7 +730,7 @@ class CommandDispatcher:
             return
 
         logger.debug(
-            "[Command] 速率限制通过: cmd=/%s group=%s sender=%s",
+            "[命令] 速率限制通过: cmd=/%s group=%s sender=%s",
             meta.name,
             group_id,
             sender_id,
@@ -755,7 +755,7 @@ class CommandDispatcher:
             await self.command_registry.execute(meta, cmd_args, context)
             duration = time.perf_counter() - start_time
             logger.info(
-                "[Command] 分发完成: cmd=/%s duration=%.3fs",
+                "[命令] 分发完成: cmd=/%s duration=%.3fs",
                 meta.name,
                 duration,
             )
@@ -763,13 +763,13 @@ class CommandDispatcher:
             duration = time.perf_counter() - start_time
             error_id = uuid4().hex[:8]
             logger.exception(
-                "[Command] 执行失败: cmd=/%s error_id=%s err=%s",
+                "[命令] 执行失败: cmd=/%s error_id=%s err=%s",
                 meta.name,
                 error_id,
                 e,
             )
             logger.error(
-                "[Command] 分发失败: cmd=/%s duration=%.3fs error_id=%s",
+                "[命令] 分发失败: cmd=/%s duration=%.3fs error_id=%s",
                 meta.name,
                 duration,
                 error_id,
@@ -800,7 +800,7 @@ class CommandDispatcher:
         rate_limit = command_meta.rate_limit
         if rate_limit == "none":
             logger.debug(
-                "[Command] 命令无需限流: cmd=/%s",
+                "[命令] 命令无需限流: cmd=/%s",
                 command_meta.name,
             )
             return True
@@ -808,7 +808,7 @@ class CommandDispatcher:
         if rate_limit == "stats":
             if self.rate_limiter is None:
                 logger.warning(
-                    "[Command] stats 限流器缺失，跳过限流: cmd=/%s",
+                    "[命令] stats 限流器缺失，跳过限流: cmd=/%s",
                     command_meta.name,
                 )
                 return True
@@ -824,7 +824,7 @@ class CommandDispatcher:
                 return False
             self.rate_limiter.record_stats(sender_id)
             logger.debug(
-                "[Command] stats 限流记录成功: cmd=/%s sender=%s",
+                "[命令] stats 限流记录成功: cmd=/%s sender=%s",
                 command_meta.name,
                 sender_id,
             )
@@ -839,7 +839,7 @@ class CommandDispatcher:
             return False
         self.security.record_rate_limit(sender_id)
         logger.debug(
-            "[Command] 默认限流记录成功: cmd=/%s sender=%s",
+            "[命令] 默认限流记录成功: cmd=/%s sender=%s",
             command_meta.name,
             sender_id,
         )
@@ -848,7 +848,7 @@ class CommandDispatcher:
     async def _send_no_permission(
         self, group_id: int, sender_id: int, cmd_name: str, required_role: str
     ) -> None:
-        logger.warning(f"[Command] 权限不足: {sender_id} 尝试执行 /{cmd_name}")
+        logger.warning("[命令] 权限不足: sender=%s cmd=/%s", sender_id, cmd_name)
         await self.sender.send_group_message(
             group_id, f"⚠️ 权限不足：只有{required_role}可以使用此命令"
         )

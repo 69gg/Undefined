@@ -50,7 +50,7 @@ class MessageHandler:
         self.onebot = onebot
         self.ai = ai
         self.faq_storage = faq_storage
-        # 初始化 Utils
+        # 初始化工具组件
         self.history_manager = MessageHistoryManager()
         self.sender = MessageSender(onebot, self.history_manager, config.bot_qq, config)
 
@@ -60,7 +60,7 @@ class MessageHandler:
         self.queue_manager = QueueManager()
         self.queue_manager.update_model_intervals(build_model_queue_intervals(config))
 
-        # 设置 queue_manager 到 AIClient（触发 Agent intro 生成器启动）
+        # 设置队列管理器到 AIClient（触发 Agent 介绍生成器启动）
         ai.set_queue_manager(self.queue_manager)
 
         self.command_dispatcher = CommandDispatcher(
@@ -99,7 +99,10 @@ class MessageHandler:
             target_id = event.get("target_id", 0)
             # 只有拍机器人才响应
             if target_id != self.config.bot_qq:
-                logger.debug(f"[通知] 忽略拍一拍目标非机器人: target={target_id}")
+                logger.debug(
+                    "[通知] 忽略拍一拍目标非机器人: target=%s",
+                    target_id,
+                )
                 return
 
             if not self.config.should_process_poke_message():
@@ -129,9 +132,11 @@ class MessageHandler:
                     return
 
             logger.info(
-                f"[通知] 收到拍一拍: group={poke_group_id}, sender={poke_sender_id}"
+                "[通知] 收到拍一拍: group=%s sender=%s",
+                poke_group_id,
+                poke_sender_id,
             )
-            logger.debug(f"[通知] 拍一拍事件数据: {str(event)[:200]}")
+            logger.debug("[通知] 拍一拍事件数据: %s", str(event)[:200])
 
             if poke_group_id == 0:
                 logger.info("[通知] 私聊拍一拍，触发私聊回复")
@@ -143,7 +148,10 @@ class MessageHandler:
                     sender_name=str(poke_sender_id),
                 )
             else:
-                logger.info(f"[通知] 群聊拍一拍，触发群聊回复: group={poke_group_id}")
+                logger.info(
+                    "[通知] 群聊拍一拍，触发群聊回复: group=%s",
+                    poke_group_id,
+                )
                 await self.ai_coordinator.handle_auto_reply(
                     poke_group_id,
                     poke_sender_id,
@@ -180,17 +188,20 @@ class MessageHandler:
                     user_info = await self.onebot.get_stranger_info(private_sender_id)
                     if user_info:
                         user_name = user_info.get("nickname", "")
-                except Exception as e:
-                    logger.warning(f"获取用户昵称失败: {e}")
+                except Exception as exc:
+                    logger.warning("获取用户昵称失败: %s", exc)
 
             text = extract_text(private_message_content, self.config.bot_qq)
             safe_text = redact_string(text)
             logger.info(
-                f"[私聊消息] sender={private_sender_id} name={user_name or private_sender_nickname} | {safe_text[:100]}"
+                "[私聊消息] 发送者=%s 昵称=%s 内容=%s",
+                private_sender_id,
+                user_name or private_sender_nickname,
+                safe_text[:100],
             )
 
             # 保存私聊消息到历史记录（保存处理后的内容）
-            # 使用新的 utils
+            # 使用新的工具函数解析内容
             parsed_content = await parse_message_content_for_history(
                 private_message_content,
                 self.config.bot_qq,
@@ -199,7 +210,9 @@ class MessageHandler:
             )
             safe_parsed = redact_string(parsed_content)
             logger.debug(
-                f"[历史记录] 保存私聊: user={private_sender_id}, content={safe_parsed[:50]}..."
+                "[历史记录] 保存私聊: user=%s content=%s...",
+                private_sender_id,
+                safe_parsed[:50],
             )
             await self.history_manager.add_private_message(
                 user_id=private_sender_id,

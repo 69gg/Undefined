@@ -43,7 +43,7 @@ SESSION_COOKIE = "undefined_webui"
 TOKEN_COOKIE = "undefined_webui_token"
 SESSION_TTL_SECONDS = 8 * 60 * 60
 
-# Use relative path from this file
+# 使用相对路径定位资源目录
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 

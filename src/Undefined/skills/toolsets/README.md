@@ -1,6 +1,6 @@
-# Toolsets（工具集合）
+# 工具集
 
-Toolsets 是按功能分类组织的工具集合，用于将相关工具分组管理。
+工具集用于按功能分类组织工具，便于分组管理与统一命名。
 
 ## 目录结构
 
@@ -29,14 +29,14 @@ toolsets/
 ## 添加新工具
 
 1. 在对应分类目录下创建新目录
-2. 添加 `config.json`（工具定义，使用 OpenAI function calling 格式）
+2. 添加 `config.json`（工具定义，使用 OpenAI 函数调用格式）
 3. 添加 `handler.py`（执行逻辑，必须包含 `async def execute(args, context)`）
 4. 自动被 `ToolRegistry` 发现和注册
 
 ## 运行特性
 
-- **延迟加载 (Lazy Load)**：仅在首次调用时导入 `handler.py`。
-- **超时与取消**：单次执行默认 120s 超时，超时会返回提示并记录统计。
+- **延迟加载**：仅在首次调用时导入 `handler.py`。
+- **超时与取消**：单次执行默认 120 秒超时，超时会返回提示并记录统计。
 - **结构化日志**：统一输出 `event=execute`、`status=success/timeout/error` 等字段。
 - **热重载**：检测到 `toolsets/` 中的变更会自动重新加载。
 

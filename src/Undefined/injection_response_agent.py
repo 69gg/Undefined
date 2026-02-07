@@ -77,8 +77,9 @@ class InjectionResponseAgent:
             duration = time.perf_counter() - start_time
 
             logger.info(
-                f"[注入回复] 生成完成, 耗时={duration:.2f}s, "
-                f"模型={self.security_config.model_name}"
+                "[注入回复] 生成完成: elapsed=%.2fs model=%s",
+                duration,
+                self.security_config.model_name,
             )
 
             content = extract_choices_content(result).strip()
@@ -88,12 +89,12 @@ class InjectionResponseAgent:
             # 去除多余空格
             content = " ".join(content.split())
 
-            logger.debug(f"生成的嘲讽回复: {content}")
+            logger.debug("[注入回复] 生成内容: length=%s", len(content))
 
             return content if content else "无聊。"
-        except Exception as e:
+        except Exception as exc:
             duration = time.perf_counter() - start_time
-            logger.exception(f"生成嘲讽回复失败: {e}")
+            logger.exception("[注入回复] 生成失败: %s elapsed=%.2fs", exc, duration)
             # 失败时返回默认回复
             return "有病？"
 

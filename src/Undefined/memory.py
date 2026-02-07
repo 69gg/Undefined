@@ -56,14 +56,18 @@ class MemoryStorage:
                 loaded_memories.append(Memory(**item))
 
             self._memories = loaded_memories
-            logger.info(f"已加载 {len(self._memories)} 条记忆")
+            logger.info(
+                "[记忆] 加载完成: count=%s file=%s",
+                len(self._memories),
+                MEMORY_FILE_PATH,
+            )
 
             # 如果检测到旧格式，自动分配 UUID，将在后续保存时应用到文件
             if needs_rewrite:
-                logger.info("检测到旧格式记录，已在内存中自动分配 UUID")
+                logger.info("[记忆] 检测到旧格式记录，已在内存中自动分配 UUID")
 
-        except Exception as e:
-            logger.warning(f"加载记忆失败: {e}")
+        except Exception as exc:
+            logger.warning("[记忆] 加载失败: %s", exc)
             self._memories = []
 
     async def _save(self) -> None:
@@ -73,9 +77,9 @@ class MemoryStorage:
 
             data = [asdict(m) for m in self._memories]
             await io.write_json(MEMORY_FILE_PATH, data, use_lock=True)
-            logger.debug(f"已保存 {len(self._memories)} 条记忆")
-        except Exception as e:
-            logger.error(f"保存记忆失败: {e}")
+            logger.debug("[记忆] 保存完成: count=%s", len(self._memories))
+        except Exception as exc:
+            logger.error("[记忆] 保存失败: %s", exc)
 
     async def add(self, fact: str) -> Optional[str]:
         """添加一条记忆
@@ -87,13 +91,13 @@ class MemoryStorage:
             新生成的 UUID，如果失败则返回 None
         """
         if not fact or not fact.strip():
-            logger.warning("尝试添加空记忆，已忽略")
+            logger.warning("[记忆] 尝试添加空记忆，已忽略")
             return None
 
         # 检查是否已存在相同内容
         for existing in self._memories:
             if existing.fact == fact.strip():
-                logger.debug(f"记忆内容已存在，忽略: {fact[:50]}...")
+                logger.debug("[记忆] 记忆内容已存在，忽略: %s...", fact[:50])
                 return existing.uuid
 
         memory = Memory(
@@ -108,11 +112,18 @@ class MemoryStorage:
         # 如果超过上限，移除最旧的
         if len(self._memories) > self.max_memories:
             removed = self._memories.pop(0)
-            logger.info(f"记忆数量超过上限，移除最旧记忆: {removed.fact[:50]}...")
+            logger.info(
+                "[记忆] 超过上限，移除最旧记忆: %s...",
+                removed.fact[:50],
+            )
 
         await self._save()
         logger.info(
-            f"已添加记忆: {fact[:50]}... (UUID: {memory.uuid}, 当前 {len(self._memories)}/{self.max_memories})"
+            "[记忆] 已添加: uuid=%s size=%s/%s content=%s...",
+            memory.uuid,
+            len(self._memories),
+            self.max_memories,
+            fact[:50],
         )
         return memory.uuid
 
@@ -130,9 +141,13 @@ class MemoryStorage:
             if m.uuid == memory_uuid:
                 self._memories[i].fact = fact.strip()
                 await self._save()
-                logger.info(f"已更新记忆 {memory_uuid}: {fact[:50]}...")
+                logger.info(
+                    "[记忆] 已更新: uuid=%s content=%s...",
+                    memory_uuid,
+                    fact[:50],
+                )
                 return True
-        logger.warning(f"未找到 UUID 为 {memory_uuid} 的记忆，更新失败")
+        logger.warning("[记忆] 未找到 UUID=%s 的记忆，更新失败", memory_uuid)
         return False
 
     async def delete(self, memory_uuid: str) -> bool:
@@ -148,9 +163,13 @@ class MemoryStorage:
             if m.uuid == memory_uuid:
                 removed = self._memories.pop(i)
                 await self._save()
-                logger.info(f"已删除记忆 {memory_uuid}: {removed.fact[:50]}...")
+                logger.info(
+                    "[记忆] 已删除: uuid=%s content=%s...",
+                    memory_uuid,
+                    removed.fact[:50],
+                )
                 return True
-        logger.warning(f"未找到 UUID 为 {memory_uuid} 的记忆，删除失败")
+        logger.warning("[记忆] 未找到 UUID=%s 的记忆，删除失败", memory_uuid)
         return False
 
     def get_all(self) -> list[Memory]:
@@ -165,7 +184,7 @@ class MemoryStorage:
         """清空所有记忆"""
         self._memories = []
         await self._save()
-        logger.info("已清空所有记忆")
+        logger.info("[记忆] 已清空所有记忆")
 
     def count(self) -> int:
         """获取记忆数量

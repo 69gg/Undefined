@@ -1,4 +1,4 @@
-"""Tool and agent execution helpers."""
+"""工具与智能体执行辅助函数。"""
 
 from __future__ import annotations
 
@@ -182,9 +182,9 @@ class ToolManager:
         agents_schema = self.agent_registry.get_agents_schema()
         agent_names = [s.get("function", {}).get("name") for s in agents_schema]
         is_agent = function_name in agent_names
-        exec_type = "Agent" if is_agent else "Tool"
+        exec_type = "智能体" if is_agent else "工具"
 
-        logger.debug(f"[{exec_type}调用] 准备执行 {function_name}")
+        logger.debug("[%s调用] 准备执行: %s", exec_type, function_name)
         if logger.isEnabledFor(logging.DEBUG):
             log_debug_json(
                 logger, f"[{exec_type}调用参数] {function_name}", function_args
@@ -205,7 +205,7 @@ class ToolManager:
                 mcp_config_path = self._get_agent_mcp_config_path(function_name)
                 if mcp_config_path:
                     logger.debug(
-                        "[Agent MCP] %s 使用 MCP 配置: %s",
+                        "[智能体MCP] %s 使用 MCP 配置: %s",
                         function_name,
                         mcp_config_path,
                     )
@@ -222,10 +222,16 @@ class ToolManager:
                         new_map[function_name] = mcp_registry
                         registry_token = self._agent_mcp_registry_var.set(new_map)
                         logger.info(
-                            f"[Agent MCP] {function_name} 加载了 {len(mcp_registry.get_tools_schema())} 个工具"
+                            "[智能体MCP] %s 已加载工具: count=%s",
+                            function_name,
+                            len(mcp_registry.get_tools_schema()),
                         )
                     except Exception as exc:
-                        logger.warning(f"[Agent MCP] {function_name} 初始化失败: {exc}")
+                        logger.warning(
+                            "[智能体MCP] %s 初始化失败: %s",
+                            function_name,
+                            exc,
+                        )
                         mcp_registry = None
                         registry_token = None
 
@@ -270,7 +276,11 @@ class ToolManager:
                 result_text[:100] + "..." if len(result_text) > 100 else result_text
             )
             logger.info(
-                f"[{exec_type}结果] {function_name} 执行成功, 耗时={duration:.2f}s, 结果: {res_summary}"
+                "[%s结果] %s 执行成功: elapsed=%.2fs result=%s",
+                exec_type,
+                function_name,
+                duration,
+                res_summary,
             )
             if logger.isEnabledFor(logging.DEBUG):
                 log_debug_json(logger, f"[{exec_type}结果详情] {function_name}", result)
@@ -278,6 +288,10 @@ class ToolManager:
         except Exception as exc:
             duration = time.perf_counter() - start_time
             logger.error(
-                f"[{exec_type}错误] {function_name} 执行失败, 耗时={duration:.2f}s, 错误: {redact_string(str(exc))}"
+                "[%s错误] %s 执行失败: elapsed=%.2fs error=%s",
+                exec_type,
+                function_name,
+                duration,
+                redact_string(str(exc)),
             )
             raise

@@ -1,7 +1,7 @@
-"""Deprecated compatibility layer for LLM requests.
+"""LLM 请求的兼容层（已弃用）。
 
-This module used to contain the LLM requester implementation. It now lives in
-`Undefined.ai.llm`. Keep this module to avoid breaking existing imports.
+该模块曾包含 LLM 请求实现，现已迁移到 `Undefined.ai.llm`。
+保留此模块用于兼容旧导入路径，避免破坏既有调用。
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ warnings.warn(
     stacklevel=2,
 )
 
-# 常用符号显式导出（避免类型检查/IDE 跳转体验变差）
+# 常用符号显式导出（避免类型检查/集成开发环境跳转体验变差）
 ModelRequester = _llm.ModelRequester
 ModelConfig = _llm.ModelConfig
 build_request_body = _llm.build_request_body

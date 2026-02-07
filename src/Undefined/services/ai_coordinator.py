@@ -366,14 +366,14 @@ class AICoordinator:
         data_summary = request.get("data_summary", "")
 
         if not request_id:
-            logger.warning("[StatsAnalysis] 缺少 request_id，群: %s", group_id)
+            logger.warning("[统计分析] 缺少 request_id，群=%s", group_id)
             return
         try:
-            # 加载 prompt 模板
+            # 加载提示词模板
             try:
                 prompt_template = read_text_resource("res/prompts/stats_analysis.txt")
             except Exception:
-                logger.warning("[StatsAnalysis] 提示词文件不存在，使用默认分析")
+                logger.warning("[统计分析] 提示词文件不存在，使用默认分析")
                 analysis = "AI 分析功能暂时不可用（提示词文件缺失）"
                 if self.command_dispatcher:
                     self.command_dispatcher.set_stats_analysis_result(
@@ -404,7 +404,10 @@ class AICoordinator:
                 analysis = "AI 分析未能生成结果"
 
             logger.info(
-                f"[StatsAnalysis] 分析完成，群: {group_id}, 长度: {len(analysis)}"
+                "[统计分析] 分析完成: group=%s length=%s request_id=%s",
+                group_id,
+                len(analysis),
+                request_id,
             )
 
             # 设置分析结果（通知等待的 _handle_stats 方法）
@@ -413,8 +416,8 @@ class AICoordinator:
                     group_id, request_id, analysis
                 )
 
-        except Exception as e:
-            logger.exception(f"[StatsAnalysis] AI 分析失败: {e}")
+        except Exception as exc:
+            logger.exception("[统计分析] AI 分析失败: %s", exc)
             # 出错时也通知等待，但返回空字符串
             if self.command_dispatcher:
                 self.command_dispatcher.set_stats_analysis_result(
@@ -428,7 +431,7 @@ class AICoordinator:
 
         if not request_id or not agent_name:
             logger.warning(
-                "[AgentIntroGen] 缺少必要参数: request_id=%s, agent_name=%s",
+                "[Agent介绍生成] 缺少必要参数: request_id=%s agent_name=%s",
                 request_id,
                 agent_name,
             )
@@ -440,7 +443,7 @@ class AICoordinator:
 
             agent_intro_generator = self.ai._agent_intro_generator
             if not isinstance(agent_intro_generator, AgentIntroGenerator):
-                logger.error("[AgentIntroGen] 无法获取 AgentIntroGenerator 实例")
+                logger.error("[Agent介绍生成] 无法获取 AgentIntroGenerator 实例")
                 agent_intro_generator.set_intro_generation_result(request_id, None)
                 return
 
@@ -471,9 +474,10 @@ class AICoordinator:
                 generated_content = ""
 
             logger.info(
-                "[AgentIntroGen] 生成完成: agent=%s, length=%s",
+                "[Agent介绍生成] 生成完成: agent=%s length=%s request_id=%s",
                 agent_name,
                 len(generated_content),
+                request_id,
             )
 
             # 通知结果
@@ -481,8 +485,12 @@ class AICoordinator:
                 request_id, generated_content if generated_content else None
             )
 
-        except Exception as e:
-            logger.exception(f"[AgentIntroGen] 生成失败: agent={agent_name}, error={e}")
+        except Exception as exc:
+            logger.exception(
+                "[Agent介绍生成] 生成失败: agent=%s error=%s",
+                agent_name,
+                exc,
+            )
             # 出错时也通知，返回 None
             try:
                 agent_intro_generator = self.ai._agent_intro_generator

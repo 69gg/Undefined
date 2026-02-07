@@ -228,7 +228,7 @@ def extract_faq_title(content: str) -> str:
             title = line.split(":", 1)[-1].split("：", 1)[-1].strip()
             return title[:100]  # 限制长度
 
-    # 尝试从 Bug 问题描述中提取
+    # 尝试从缺陷问题描述中提取
     in_bug_section = False
     for line in content.split("\n"):
         line = line.strip()

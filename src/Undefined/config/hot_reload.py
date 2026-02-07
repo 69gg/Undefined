@@ -78,6 +78,7 @@ def apply_config_updates(
         return
 
     changed_keys = set(changes.keys())
+    logger.debug("[配置] 热更新变更项: %s", ", ".join(sorted(changed_keys)))
     _log_restart_required(changed_keys)
 
     if _needs_queue_interval_update(changed_keys):
@@ -113,7 +114,7 @@ def apply_config_updates(
 def _log_restart_required(changed_keys: set[str]) -> None:
     hits = sorted(key for key in changed_keys if key in _RESTART_REQUIRED_KEYS)
     if hits:
-        logger.info("[Config] Restart required for: %s", ", ".join(hits))
+        logger.warning("[配置] 以下配置变更需要重启生效: %s", ", ".join(hits))
 
 
 def _needs_queue_interval_update(changed_keys: set[str]) -> bool:
@@ -140,7 +141,7 @@ async def _apply_skills_hot_reload(updated: Config, ai_client: AIClient) -> None
     if not updated.skills_hot_reload:
         await ai_client.tool_registry.stop_hot_reload()
         await ai_client.agent_registry.stop_hot_reload()
-        logger.info("[Config] Skills hot reload disabled")
+        logger.info("[配置] 技能热重载已禁用")
         return
 
     await ai_client.tool_registry.stop_hot_reload()
@@ -154,7 +155,7 @@ async def _apply_skills_hot_reload(updated: Config, ai_client: AIClient) -> None
         debounce=updated.skills_hot_reload_debounce,
     )
     logger.info(
-        "[Config] Skills hot reload updated: interval=%.2fs debounce=%.2fs",
+        "[配置] 技能热重载已更新: interval=%.2fs debounce=%.2fs",
         updated.skills_hot_reload_interval,
         updated.skills_hot_reload_debounce,
     )
@@ -166,7 +167,7 @@ async def _restart_config_hot_reload(
     await config_manager.stop_hot_reload()
     config_manager.start_hot_reload(interval=interval, debounce=debounce)
     logger.info(
-        "[Config] Config hot reload updated: interval=%.2fs debounce=%.2fs",
+        "[配置] 配置热更新已重启: interval=%.2fs debounce=%.2fs",
         interval,
         debounce,
     )

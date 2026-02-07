@@ -23,9 +23,13 @@ class EndSummaryStorage:
             from Undefined.utils import io
 
             await io.write_json(END_SUMMARIES_FILE_PATH, summaries, use_lock=True)
-            logger.debug(f"已保存 {len(summaries)} 条 End 摘要")
-        except Exception as e:
-            logger.error(f"保存 End 摘要数据失败: {e}")
+            logger.debug(
+                "[End摘要] 保存完成: count=%s file=%s",
+                len(summaries),
+                END_SUMMARIES_FILE_PATH,
+            )
+        except Exception as exc:
+            logger.error("[End摘要] 保存失败: %s", exc)
 
     async def load(self) -> List[str]:
         """从文件加载所有摘要 (异步)"""
@@ -38,6 +42,9 @@ class EndSummaryStorage:
 
         if isinstance(data, list):
             return data
-        else:
-            logger.warning(f"End 摘要数据格式异常，期望 list，实际得到 {type(data)}")
-            return []
+
+        logger.warning(
+            "[End摘要] 数据格式异常，期望 list，实际=%s",
+            type(data),
+        )
+        return []

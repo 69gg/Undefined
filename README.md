@@ -3,7 +3,7 @@
     <td width="70%" valign="top">
       <div align="center">
         <h1>Undefined</h1>
-        <em>A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture.</em>
+        <em>基于自研架构的高性能、高可扩展 QQ 群聊与私聊机器人。</em>
         <br/><br/>
         <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11--3.13-blue.svg" alt="Python"></a>
         <a href="https://docs.astral.sh/uv/"><img src="https://img.shields.io/badge/uv-auto%20python%20manager-6a5acd.svg" alt="uv"></a>
@@ -107,7 +107,7 @@ graph TB
 
     %% ==================== AI 核心能力层 ====================
     subgraph AILayer["AI 核心能力层 (src/Undefined/ai/)"]
-        AIClient["AIClient<br/>AI 客户端主入口<br/>[client.py]<br/>• 技能热重载 • MCP 初始化<br/>• Agent intro 生成"]
+        AIClient["AIClient<br/>AI 客户端主入口<br/>[client.py]<br/>• 技能热重载 • MCP 初始化<br/>• Agent 介绍生成"]
         PromptBuilder["PromptBuilder<br/>提示词构建器<br/>[prompts.py]"]
         ModelRequester["ModelRequester<br/>模型请求器<br/>[llm.py]<br/>• OpenAI SDK • 工具清理<br/>• Thinking 提取"]
         ToolManager["ToolManager<br/>工具管理器<br/>[tooling.py]<br/>• 工具执行 • Agent 工具合并<br/>• MCP 工具注入"]
@@ -570,7 +570,7 @@ Undefined 欢迎开发者参与共建！
 *   **目录结构**:
     ```
     src/Undefined/
-    ├── ai/            # AI Runtime (client、prompt、tooling、summary、多模态)
+    ├── ai/            # AI 运行时（client、prompt、tooling、summary、多模态）
     ├── skills/        # 技能插件核心目录
     ├── services/      # 核心服务 (Queue, Command, Security)
     ├── utils/         # 通用工具

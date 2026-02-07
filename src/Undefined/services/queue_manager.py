@@ -30,8 +30,10 @@ class ModelQueue:
         """如果群聊普通队列超过10个，仅保留最新的2个"""
         queue_size = self.group_normal_queue.qsize()
         if queue_size > 10:
-            logger.info(
-                f"[队列修剪][{self.model_name}] 群聊普通队列长度 {queue_size} 超过阈值(10)，正在修剪..."
+            logger.warning(
+                "[队列修剪][%s] 群聊普通队列长度=%s 超过阈值(10)，将丢弃旧请求",
+                self.model_name,
+                queue_size,
             )
             # 取出所有元素
             all_requests: list[dict[str, Any]] = []
@@ -43,7 +45,9 @@ class ModelQueue:
             for req in latest_requests:
                 self.group_normal_queue.put_nowait(req)
             logger.info(
-                f"[队列修剪][{self.model_name}] 修剪完成，保留最新 {len(latest_requests)} 个请求"
+                "[队列修剪][%s] 修剪完成，保留最新=%s",
+                self.model_name,
+                len(latest_requests),
             )
 
 
@@ -72,10 +76,10 @@ class QueueManager:
         # 按模型名称区分的队列组
         self._model_queues: dict[str, ModelQueue] = {}
 
-        # 处理任务映射 model_name -> Task
+        # 处理任务映射：模型名 -> Task
         self._processor_tasks: dict[str, asyncio.Task[None]] = {}
 
-        # 在途请求任务（发车后异步执行）。用于优雅停机时统一回收。
+        # 在途请求任务（发车后异步执行），用于优雅停机时统一回收。
         self._inflight_tasks: set[asyncio.Task[None]] = set()
 
         self._request_handler: (
@@ -119,11 +123,18 @@ class QueueManager:
     ) -> None:
         """启动队列处理任务"""
         self._request_handler = request_handler
-        logger.info("[队列服务] 队列管理器已就绪")
+        logger.info(
+            "[队列服务] 队列管理器已就绪: default_interval=%.2fs",
+            self._default_interval,
+        )
 
     async def stop(self) -> None:
         """停止所有队列处理任务"""
-        logger.info("[队列服务] 正在停止所有队列处理任务...")
+        logger.info(
+            "[队列服务] 正在停止所有队列处理任务: processors=%s inflight=%s",
+            len(self._processor_tasks),
+            len(self._inflight_tasks),
+        )
         for name, task in self._processor_tasks.items():
             if not task.done():
                 task.cancel()
@@ -178,8 +189,30 @@ class QueueManager:
             if self._request_handler:
                 task = asyncio.create_task(self._process_model_loop(model_name))
                 self._processor_tasks[model_name] = task
-                logger.info(f"[队列服务] 已启动模型 [{model_name}] 的处理循环")
+                logger.info("[队列服务] 已启动模型处理循环: model=%s", model_name)
         return self._model_queues[model_name]
+
+    def _format_request_meta(self, request: dict[str, Any]) -> str:
+        """格式化请求关键元信息，便于日志排查。"""
+        parts: list[str] = []
+        request_id = request.get("request_id") or request.get("req_id")
+        group_id = request.get("group_id")
+        user_id = request.get("user_id")
+        message_id = request.get("message_id")
+        request_type = request.get("type")
+        if request_id:
+            parts.append(f"request_id={request_id}")
+        if request_type:
+            parts.append(f"type={request_type}")
+        if group_id is not None:
+            parts.append(f"group_id={group_id}")
+        if user_id is not None:
+            parts.append(f"user_id={user_id}")
+        if message_id is not None:
+            parts.append(f"message_id={message_id}")
+        if not parts:
+            return "meta=none"
+        return " ".join(parts)
 
     async def add_superadmin_request(
         self, request: dict[str, Any], model_name: str = "default"
@@ -188,7 +221,10 @@ class QueueManager:
         queue = self._get_or_create_queue(model_name)
         await queue.superadmin_queue.put(request)
         logger.info(
-            f"[队列入队][{model_name}] 超级管理员私聊: size={queue.superadmin_queue.qsize()}"
+            "[队列入队][%s] 超级管理员私聊: size=%s %s",
+            model_name,
+            queue.superadmin_queue.qsize(),
+            self._format_request_meta(request),
         )
         logger.debug(
             "[队列入队详情][%s] superadmin keys=%s",
@@ -203,7 +239,10 @@ class QueueManager:
         queue = self._get_or_create_queue(model_name)
         await queue.private_queue.put(request)
         logger.info(
-            f"[队列入队][{model_name}] 普通私聊: size={queue.private_queue.qsize()}"
+            "[队列入队][%s] 普通私聊: size=%s %s",
+            model_name,
+            queue.private_queue.qsize(),
+            self._format_request_meta(request),
         )
         logger.debug(
             "[队列入队详情][%s] private keys=%s",
@@ -218,8 +257,11 @@ class QueueManager:
         queue = self._get_or_create_queue(model_name)
         await queue.private_queue.put(request)
         logger.info(
-            f"[队列入队][{model_name}] Agent自我介绍: agent={request.get('agent_name', 'unknown')}, "
-            f"size={queue.private_queue.qsize()}"
+            "[队列入队][%s] Agent 自我介绍: agent=%s size=%s %s",
+            model_name,
+            request.get("agent_name", "unknown"),
+            queue.private_queue.qsize(),
+            self._format_request_meta(request),
         )
         logger.debug(
             "[队列入队详情][%s] agent_intro keys=%s",
@@ -234,7 +276,10 @@ class QueueManager:
         queue = self._get_or_create_queue(model_name)
         await queue.group_mention_queue.put(request)
         logger.info(
-            f"[队列入队][{model_name}] 群聊被@: size={queue.group_mention_queue.qsize()}"
+            "[队列入队][%s] 群聊被@: size=%s %s",
+            model_name,
+            queue.group_mention_queue.qsize(),
+            self._format_request_meta(request),
         )
         logger.debug(
             "[队列入队详情][%s] mention keys=%s",
@@ -250,7 +295,10 @@ class QueueManager:
         queue.trim_normal_queue()
         await queue.group_normal_queue.put(request)
         logger.info(
-            f"[队列入队][{model_name}] 群聊普通: size={queue.group_normal_queue.qsize()}"
+            "[队列入队][%s] 群聊普通: size=%s %s",
+            model_name,
+            queue.group_normal_queue.qsize(),
+            self._format_request_meta(request),
         )
         logger.debug(
             "[队列入队详情][%s] normal keys=%s",
@@ -272,32 +320,26 @@ class QueueManager:
         current_queue_idx = 0
         current_queue_processed = 0
 
-        # 即使没有请求，列车也会按模型节奏发车（检查一次）
-        # 这里我们使用 smart sleep: 如果处理了请求，等待剩余时间；如果空闲，等待完整时间?
-        # 需求: "列车(AI请求)每1s发车一次... 带走一个请求... 不管前面的请求有没有结束"
-        # 频率可配置，默认 1Hz
+        # 即使没有请求，也按模型节奏“发车”一次（检查队列）。
+        # 使用“动态睡眠”：若本轮处理过请求，则只睡剩余时间；若空闲则完整等待。
+        # 目标：保持固定节奏发车，不等待前一个请求完成。
 
         try:
             while True:
                 cycle_start_time = time.perf_counter()
 
-                # 尝试获取一个请求
+                # 选择一个请求
                 request = None
                 chosen_queue_idx = -1
 
-                # 按照优先级和调度逻辑选择一个请求
-                # 简单逻辑：遍历优先级，找到第一个非空
-                # 原有逻辑：有防饿死机制 (current_queue_processed >= 2 切换)
-                # 为了简化且符合“带走一个请求”，我们可以沿用之前的优先级轮转逻辑，
-                # 但这必须是非阻塞的 check
+                # 按优先级和轮转逻辑选择请求：
+                # - 优先级顺序固定（超级管理员 > 私聊 > 群聊@ > 群聊普通）
+                # - 每个队列处理 2 个后切换，避免长期饿死
+                # - 只做非阻塞检查，保持发车节奏
 
                 found_request = False
 
-                # 简单的优先级轮询（保留之前的公平性逻辑会比较复杂，这里简化为严格优先级+计数轮转）
-                # 为了保持之前的“每个队列处理2个后切换”逻辑，我们需要持久化状态
-                # 但这里每次循环都是一次“发车”，所以状态要保存在循环外 (current_queue_idx 等)
-
-                # 尝试从当前关注的队列开始找
+                # 从当前队列开始轮询，找到第一个非空队列
                 start_idx = current_queue_idx
                 for i in range(4):
                     idx = (start_idx + i) % 4
@@ -311,11 +353,15 @@ class QueueManager:
                 if found_request and request:
                     request_type = request.get("type", "unknown")
                     logger.info(
-                        f"[队列发车][{model_name}] {queue_names[chosen_queue_idx]} 请求: {request_type} "
-                        f"(remaining={queues[chosen_queue_idx].qsize()})"
+                        "[队列发车][%s] %s 请求: %s remaining=%s %s",
+                        model_name,
+                        queue_names[chosen_queue_idx],
+                        request_type,
+                        queues[chosen_queue_idx].qsize(),
+                        self._format_request_meta(request),
                     )
 
-                    # 异步执行处理，不等待结果
+                    # 异步执行处理，不等待结果（避免阻塞发车节奏）
                     if self._request_handler:
                         inflight_task = asyncio.create_task(
                             self._safe_handle_request(
@@ -343,9 +389,11 @@ class QueueManager:
                 await asyncio.sleep(wait_time)
 
         except asyncio.CancelledError:
-            logger.info(f"QueueManager: 模型 [{model_name}] 处理任务被取消")
-        except Exception as e:
-            logger.exception(f"QueueManager: 模型 [{model_name}] 循环异常: {e}")
+            logger.info("[队列服务] 模型处理循环已取消: model=%s", model_name)
+        except Exception as exc:
+            logger.exception(
+                "[队列服务] 模型处理循环异常: model=%s error=%s", model_name, exc
+            )
 
     async def _safe_handle_request(
         self, request: dict[str, Any], model_name: str, queue_name: str
@@ -354,16 +402,26 @@ class QueueManager:
         try:
             start_time = time.perf_counter()
             logger.debug(
-                "[请求处理] model=%s queue=%s type=%s",
+                "[请求处理] model=%s queue=%s type=%s %s",
                 model_name,
                 queue_name,
                 request.get("type", "unknown"),
+                self._format_request_meta(request),
             )
             if self._request_handler:
                 await self._request_handler(request)
             duration = time.perf_counter() - start_time
             logger.info(
-                f"[请求完成][{model_name}] {queue_name} 请求处理完成, 耗时={duration:.2f}s"
+                "[请求完成][%s] %s 请求处理完成: elapsed=%.2fs %s",
+                model_name,
+                queue_name,
+                duration,
+                self._format_request_meta(request),
             )
-        except Exception as e:
-            logger.exception(f"[请求失败][{model_name}] 处理请求失败: {e}")
+        except Exception as exc:
+            logger.exception(
+                "[请求失败][%s] 处理请求异常: %s %s",
+                model_name,
+                exc,
+                self._format_request_meta(request),
+            )

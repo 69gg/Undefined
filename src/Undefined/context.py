@@ -106,8 +106,8 @@ class RequestContext:
         ctx = cls.current()
         if ctx is None:
             raise RuntimeError(
-                "No active request context. "
-                "Make sure you're calling this within an 'async with RequestContext(...)' block."
+                "当前没有活跃的请求上下文。"
+                "请确保在 'async with RequestContext(...)' 作用域内调用。"
             )
         return ctx
 
@@ -115,11 +115,11 @@ class RequestContext:
         """进入上下文管理器"""
         self._token = _request_context.set(self)
         logger.debug(
-            f"[RequestContext] 创建请求上下文: "
-            f"request_id={self.request_id}, "
-            f"type={self.request_type}, "
-            f"group_id={self.group_id}, "
-            f"user_id={self.user_id}"
+            "[请求上下文] 创建请求上下文: request_id=%s type=%s group_id=%s user_id=%s",
+            self.request_id,
+            self.request_type,
+            self.group_id,
+            self.user_id,
         )
         return self
 
@@ -130,7 +130,7 @@ class RequestContext:
         exc_tb: Any,
     ) -> None:
         """退出上下文管理器，自动清理"""
-        logger.debug(f"[RequestContext] 清理请求上下文: request_id={self.request_id}")
+        logger.debug("[请求上下文] 清理请求上下文: request_id=%s", self.request_id)
         _request_context.reset(self._token)
         # 清理资源
         self._resources.clear()
@@ -203,7 +203,7 @@ class RequestContextFilter(logging.Filter):
         import logging
         from Undefined.context import RequestContextFilter
 
-        # 为所有 handler 添加过滤器
+        # 为所有处理器添加过滤器
         for handler in logging.root.handlers:
             handler.addFilter(RequestContextFilter())
 
