@@ -138,24 +138,19 @@ class AIClient:
         ]
         set_context_resource_scan_paths(scan_paths)
 
-        # 启动 Agent intro 自动生成
+        # Agent intro 生成器（延迟初始化，需要外部设置 queue_manager）
+        self._agent_intro_generator: Any | None = None
+        self._agent_intro_task: asyncio.Task[None] | None = None
+        self._queue_manager: Any | None = None
+        self._intro_config: Any | None = None
+
+        # 保存配置供后续使用
         runtime_config = self._get_runtime_config()
-        intro_autogen_enabled = runtime_config.agent_intro_autogen_enabled
-        intro_queue_interval = runtime_config.agent_intro_autogen_queue_interval
-        intro_max_tokens = runtime_config.agent_intro_autogen_max_tokens
-        intro_cache_path = Path(runtime_config.agent_intro_hash_path)
-        self._agent_intro_generator = AgentIntroGenerator(
-            self.agent_registry.base_dir,
-            self,
-            AgentIntroGenConfig(
-                enabled=intro_autogen_enabled,
-                queue_interval_seconds=intro_queue_interval,
-                max_tokens=intro_max_tokens,
-                cache_path=intro_cache_path,
-            ),
-        )
-        self._agent_intro_task = asyncio.create_task(
-            self._agent_intro_generator.start()
+        self._intro_config = AgentIntroGenConfig(
+            enabled=runtime_config.agent_intro_autogen_enabled,
+            queue_interval_seconds=runtime_config.agent_intro_autogen_queue_interval,
+            max_tokens=runtime_config.agent_intro_autogen_max_tokens,
+            cache_path=Path(runtime_config.agent_intro_hash_path),
         )
 
         # 启动 skills 热重载
@@ -213,8 +208,9 @@ class AIClient:
         logger.info("[清理] 正在关闭 AIClient...")
 
         # 1) 停止后台任务（避免关闭 HTTP client 后仍有请求在跑）
-        if hasattr(self, "_agent_intro_generator"):
-            await self._agent_intro_generator.stop()
+        intro_gen = getattr(self, "_agent_intro_generator", None)
+        if intro_gen is not None:
+            await intro_gen.stop()
         if hasattr(self, "_agent_intro_task") and self._agent_intro_task:
             if not self._agent_intro_task.done():
                 await self._agent_intro_task
@@ -235,6 +231,37 @@ class AIClient:
             await self._http_client.aclose()
 
         logger.info("[清理] AIClient 已关闭")
+
+    def set_queue_manager(self, queue_manager: Any) -> None:
+        """设置队列管理器并启动 Agent intro 生成器。
+
+        参数:
+            queue_manager: 队列管理器实例
+        """
+        if self._queue_manager is not None:
+            logger.warning("[AIClient] queue_manager 已设置，跳过重复设置")
+            return
+
+        if queue_manager is None:
+            logger.warning("[AIClient] 传入的 queue_manager 为 None")
+            return
+
+        self._queue_manager = queue_manager
+
+        # 启动 Agent intro 自动生成
+        if self._intro_config and self._intro_config.enabled:
+            self._agent_intro_generator = AgentIntroGenerator(
+                self.agent_registry.base_dir,
+                self,
+                queue_manager,
+                self._intro_config,
+            )
+            self._agent_intro_task = asyncio.create_task(
+                self._agent_intro_generator.start()
+            )
+            logger.info("[AIClient] Agent intro 生成器已启动")
+        else:
+            logger.info("[AIClient] Agent intro 自动生成已禁用")
 
     def count_tokens(self, text: str) -> int:
         return self._token_counter.count(text)

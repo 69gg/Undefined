@@ -169,6 +169,22 @@ class QueueManager:
             list(request.keys()),
         )
 
+    async def add_agent_intro_request(
+        self, request: dict[str, Any], model_name: str = "default"
+    ) -> None:
+        """添加 Agent 自我介绍生成请求（投递到 private_queue）"""
+        queue = self._get_or_create_queue(model_name)
+        await queue.private_queue.put(request)
+        logger.info(
+            f"[队列入队][{model_name}] Agent自我介绍: agent={request.get('agent_name', 'unknown')}, "
+            f"size={queue.private_queue.qsize()}"
+        )
+        logger.debug(
+            "[队列入队详情][%s] agent_intro keys=%s",
+            model_name,
+            list(request.keys()),
+        )
+
     async def add_group_mention_request(
         self, request: dict[str, Any], model_name: str = "default"
     ) -> None:

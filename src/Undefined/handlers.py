@@ -57,6 +57,10 @@ class MessageHandler:
         self.security = SecurityService(config, ai._http_client)
         self.rate_limiter = RateLimiter(config)
         self.queue_manager = QueueManager()
+
+        # 设置 queue_manager 到 AIClient（触发 Agent intro 生成器启动）
+        ai.set_queue_manager(self.queue_manager)
+
         self.command_dispatcher = CommandDispatcher(
             config,
             self.sender,

@@ -201,6 +201,8 @@ class AICoordinator:
             await self._execute_private_reply(request)
         elif req_type == "stats_analysis":
             await self._execute_stats_analysis(request)
+        elif req_type == "agent_intro_generation":
+            await self._execute_agent_intro_generation(request)
 
     async def _execute_auto_reply(self, request: dict[str, Any]) -> None:
         group_id = request["group_id"]
@@ -418,6 +420,75 @@ class AICoordinator:
                 self.command_dispatcher.set_stats_analysis_result(
                     group_id, request_id, ""
                 )
+
+    async def _execute_agent_intro_generation(self, request: dict[str, Any]) -> None:
+        """执行 Agent 自我介绍生成请求"""
+        request_id = request.get("request_id")
+        agent_name = request.get("agent_name")
+
+        if not request_id or not agent_name:
+            logger.warning(
+                "[AgentIntroGen] 缺少必要参数: request_id=%s, agent_name=%s",
+                request_id,
+                agent_name,
+            )
+            return
+
+        try:
+            # 获取提示词
+            from Undefined.skills.agents.intro_generator import AgentIntroGenerator
+
+            agent_intro_generator = self.ai._agent_intro_generator
+            if not isinstance(agent_intro_generator, AgentIntroGenerator):
+                logger.error("[AgentIntroGen] 无法获取 AgentIntroGenerator 实例")
+                agent_intro_generator.set_intro_generation_result(request_id, None)
+                return
+
+            (
+                system_prompt,
+                user_prompt,
+            ) = await agent_intro_generator.get_intro_prompt_and_context(agent_name)
+
+            # 调用 AI 生成
+            messages = [
+                {"role": "system", "content": system_prompt or "你是一位智能助手。"},
+                {"role": "user", "content": user_prompt},
+            ]
+
+            result = await self.ai.request_model(
+                model_config=self.ai.agent_config,
+                messages=messages,
+                max_tokens=agent_intro_generator.config.max_tokens,
+                call_type=f"agent:{agent_name}",
+            )
+
+            # 提取结果
+            choices = result.get("choices", [{}])
+            if choices:
+                content = choices[0].get("message", {}).get("content", "")
+                generated_content = content.strip()
+            else:
+                generated_content = ""
+
+            logger.info(
+                "[AgentIntroGen] 生成完成: agent=%s, length=%s",
+                agent_name,
+                len(generated_content),
+            )
+
+            # 通知结果
+            agent_intro_generator.set_intro_generation_result(
+                request_id, generated_content if generated_content else None
+            )
+
+        except Exception as e:
+            logger.exception(f"[AgentIntroGen] 生成失败: agent={agent_name}, error={e}")
+            # 出错时也通知，返回 None
+            try:
+                agent_intro_generator = self.ai._agent_intro_generator
+                agent_intro_generator.set_intro_generation_result(request_id, None)
+            except Exception:
+                pass
 
     def _is_at_bot(self, content: list[dict[str, Any]]) -> bool:
         """检查消息内容中是否包含对机器人的 @ 提问"""

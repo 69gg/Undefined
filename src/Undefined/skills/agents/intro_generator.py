@@ -1,4 +1,4 @@
-"""Agent 自我介绍生成器。
+"""
 
 自动检测 Agent 配置文件的变更，并使用 AI 生成或更新自我介绍文档。
 """
@@ -10,9 +10,10 @@ import hashlib
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import aiofiles
 
@@ -31,27 +32,44 @@ class AgentIntroGenConfig:
     cache_path: Path = Path(".cache/agent_intro_hashes.json")  # 缓存文件路径
 
 
+@dataclass
+class PendingIntroRequest:
+    """待处理的自我介绍请求。"""
+
+    agent_name: str
+    agent_dir: Path
+    event: asyncio.Event = field(default_factory=asyncio.Event)
+    result: str | None = None
+
+
 class AgentIntroGenerator:
     """Agent 自我介绍生成器。
 
     监控 Agent 目录，当检测到配置变更时，自动生成或更新自我介绍文档。
+    通过 QueueManager 投递请求，并等待回调结果。
     """
 
     def __init__(
-        self, agents_dir: Path, ai_client: Any, config: AgentIntroGenConfig
+        self,
+        agents_dir: Path,
+        ai_client: Any,
+        queue_manager: Any,
+        config: AgentIntroGenConfig,
     ) -> None:
         """初始化 Agent 自我介绍生成器。
 
         Args:
             agents_dir: Agent 目录路径
             ai_client: AI 客户端
+            queue_manager: 队列管理器（用于投递请求）
             config: 生成器配置
         """
         self.agents_dir = agents_dir
         self.ai_client = ai_client
+        self.queue_manager = queue_manager
         self.config = config
-        self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._cache: dict[str, str] = {}
+        self._pending_requests: dict[str, PendingIntroRequest] = {}
         self._worker_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
@@ -64,14 +82,14 @@ class AgentIntroGenerator:
             return
 
         await self._load_cache()
-        await self._enqueue_changed_agents()
+        changed_agents = await self._get_changed_agents()
 
-        if self._queue.empty():
+        if not changed_agents:
             logger.info("[AgentIntro] 启动时无需要更新的 Agent")
             return
 
         if self._worker_task is None:
-            self._worker_task = asyncio.create_task(self._worker_loop())
+            self._worker_task = asyncio.create_task(self._worker_loop(changed_agents))
 
     async def stop(self) -> None:
         """停止生成器后台任务（若存在）。"""
@@ -91,6 +109,20 @@ class AgentIntroGenerator:
             logger.debug("[AgentIntro] 停止时捕获异常: %s", exc)
         finally:
             self._worker_task = None
+
+    def set_intro_generation_result(self, request_id: str, content: str | None) -> None:
+        """设置自我介绍生成结果（由 AICoordinator 调用）。
+
+        Args:
+            request_id: 请求 ID
+            content: 生成的内容（失败时为 None 或空字符串）
+        """
+        pending = self._pending_requests.get(request_id)
+        if not pending:
+            logger.warning("[AgentIntro] 未找到等待的请求: request_id=%s", request_id)
+            return
+        pending.result = content if content else None
+        pending.event.set()
 
     async def _load_cache(self) -> None:
         """加载 Agent 哈希缓存。"""
@@ -114,8 +146,13 @@ class AgentIntroGenerator:
         except Exception as e:
             logger.warning(f"[AgentIntro] 保存缓存失败: {e}")
 
-    async def _enqueue_changed_agents(self) -> None:
-        """检测变更的 Agent 并加入处理队列。"""
+    async def _get_changed_agents(self) -> list[tuple[str, Path]]:
+        """检测变更的 Agent 并返回列表。
+
+        Returns:
+            [(agent_name, agent_dir), ...]
+        """
+        changed: list[tuple[str, Path]] = []
         for agent_dir in sorted(self.agents_dir.iterdir()):
             if not agent_dir.is_dir() or agent_dir.name.startswith("_"):
                 continue
@@ -130,13 +167,12 @@ class AgentIntroGenerator:
                 continue
             if self._cache.get(agent_name) == digest and generated_path.exists():
                 continue
-            await self._queue.put(agent_name)
+            changed.append((agent_name, agent_dir))
             if generated_path.exists():
-                logger.info(f"[AgentIntro] 检测到变更，排队生成: {agent_name}")
+                logger.info(f"[AgentIntro] 检测到变更: {agent_name}")
             else:
-                logger.info(
-                    f"[AgentIntro] intro.generated.md 缺失，排队生成: {agent_name}"
-                )
+                logger.info(f"[AgentIntro] intro.generated.md 缺失: {agent_name}")
+        return changed
 
     def _compute_agent_hash(self, agent_dir: Path) -> str:
         """计算 Agent 目录的哈希值。
@@ -179,59 +215,83 @@ class AgentIntroGenerator:
                 files.append(path)
         return files
 
-    async def _worker_loop(self) -> None:
-        """工作循环，处理队列中的 Agent。"""
-        while True:
-            agent_name = await self._queue.get()
-            agent_dir = self.agents_dir / agent_name
-            try:
-                await self._generate_for_agent(agent_name, agent_dir)
-                digest = self._compute_agent_hash(agent_dir)
-                if digest:
-                    self._cache[agent_name] = digest
-                    await self._save_cache()
-            except Exception as e:
-                logger.warning(f"[AgentIntro] 生成失败: {agent_name} -> {e}")
-            finally:
-                await asyncio.sleep(self.config.queue_interval_seconds)
-                self._queue.task_done()
-
-            if self._queue.empty():
-                logger.info("[AgentIntro] 启动队列处理完成")
-                break
-
-    async def _generate_for_agent(self, agent_name: str, agent_dir: Path) -> None:
-        """为指定 Agent 生成自我介绍。
+    async def _worker_loop(self, changed_agents: list[tuple[str, Path]]) -> None:
+        """工作循环，处理队列中的 Agent。
 
         Args:
-            agent_name: Agent 名称
-            agent_dir: Agent 目录路径
+            changed_agents: 需要处理的 Agent 列表
         """
-        prompt_path = agent_dir / "prompt.md"
+        for agent_name, agent_dir in changed_agents:
+            request_id = uuid4().hex
+            pending = PendingIntroRequest(
+                agent_name=agent_name,
+                agent_dir=agent_dir,
+            )
+            self._pending_requests[request_id] = pending
+
+            # 投递到 QueueManager
+            request_data = {
+                "type": "agent_intro_generation",
+                "request_id": request_id,
+                "agent_name": agent_name,
+                "agent_dir": str(agent_dir),
+            }
+            try:
+                await self.queue_manager.add_agent_intro_request(
+                    request_data,
+                    model_name=getattr(
+                        self.ai_client.agent_config, "model_name", "default"
+                    ),
+                )
+                logger.info(
+                    f"[AgentIntro] 已投递请求: {agent_name}, request_id={request_id}"
+                )
+            except Exception as e:
+                logger.error(f"[AgentIntro] 投递请求失败: {agent_name}, error={e}")
+                self._pending_requests.pop(request_id, None)
+                continue
+
+            # 等待结果（带超时）
+            try:
+                await asyncio.wait_for(pending.event.wait(), timeout=120.0)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"[AgentIntro] 等待结果超时: {agent_name}, request_id={request_id}"
+                )
+                self._pending_requests.pop(request_id, None)
+                continue
+
+            # 处理结果
+            if pending.result:
+                try:
+                    await self._write_intro_file(agent_dir, pending.result)
+                    # 更新缓存
+                    digest = self._compute_agent_hash(agent_dir)
+                    if digest:
+                        self._cache[agent_name] = digest
+                        await self._save_cache()
+                    logger.info(f"[AgentIntro] 生成完成: {agent_name}")
+                except Exception as e:
+                    logger.error(f"[AgentIntro] 写文件失败: {agent_name}, error={e}")
+            else:
+                logger.warning(f"[AgentIntro] 生成结果为空: {agent_name}")
+
+            # 清理
+            self._pending_requests.pop(request_id, None)
+
+            # 队列间隔
+            await asyncio.sleep(self.config.queue_interval_seconds)
+
+        logger.info("[AgentIntro] 队列处理完成")
+
+    async def _write_intro_file(self, agent_dir: Path, content: str) -> None:
+        """写入自我介绍文件。
+
+        Args:
+            agent_dir: Agent 目录路径
+            content: 生成的内容
+        """
         generated_path = agent_dir / "intro.generated.md"
-
-        agent_system_prompt = (
-            prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
-        )
-
-        user_prompt = await self._load_intro_prompt()
-
-        result = await self.ai_client.request_model(
-            model_config=self.ai_client.agent_config,
-            messages=[
-                {"role": "system", "content": agent_system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_tokens=self.config.max_tokens,
-            call_type=f"agent:{agent_name}",
-        )
-
-        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-        content = content.strip()
-        if not content:
-            logger.warning(f"[AgentIntro] 生成内容为空: {agent_name}")
-            return
-
         tmp_path = generated_path.with_suffix(".generated.tmp")
         async with aiofiles.open(tmp_path, "w", encoding="utf-8") as f:
             await f.write(content + "\n")
@@ -249,6 +309,28 @@ class AgentIntroGenerator:
         except Exception as exc:
             logger.warning(f"[AgentIntro] 读取提示词失败: {exc}")
         return "请作下自我介绍（第一人称）。"
+
+    async def get_intro_prompt_and_context(self, agent_name: str) -> tuple[str, str]:
+        """获取 Agent 的系统提示词和用户提示词。
+
+        供 AICoordinator 调用以构建请求。
+
+        Args:
+            agent_name: Agent 名称
+
+        Returns:
+            (system_prompt, user_prompt)
+        """
+        agent_dir = self.agents_dir / agent_name
+        prompt_path = agent_dir / "prompt.md"
+
+        system_prompt = (
+            prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
+        )
+
+        user_prompt = await self._load_intro_prompt()
+
+        return system_prompt, user_prompt
 
     def _extract_tool_info(self, tool_dir: Path) -> dict[str, Any] | None:
         """从工具目录提取工具信息。
