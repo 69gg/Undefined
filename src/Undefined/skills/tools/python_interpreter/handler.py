@@ -90,4 +90,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"[Python解释器] 执行出错: {e}")
-        return f"执行出错: {str(e)}"
+        return "执行出错，请检查代码或重试"

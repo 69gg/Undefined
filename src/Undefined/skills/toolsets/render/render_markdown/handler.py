@@ -38,7 +38,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             await render_html_to_image(html_content, str(filepath))
         except Exception as e:
             logger.exception(f"Markdown 渲染失败: {e}")
-            return f"Markdown 渲染失败: {e}"
+            return "Markdown 渲染失败，请稍后重试"
 
         send_image_callback = context.get("send_image_callback")
         sender = context.get("sender")
@@ -69,4 +69,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return f"渲染失败：缺少依赖包 {missing_pkg}，请运行: uv add {missing_pkg}"
     except Exception as e:
         logger.exception(f"渲染并发送 Markdown 图片失败: {e}")
-        return f"渲染失败: {e}"
+        return "渲染失败，请稍后重试"

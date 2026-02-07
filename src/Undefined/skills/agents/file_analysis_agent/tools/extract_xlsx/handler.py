@@ -29,7 +29,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"解析 Excel/CSV 失败: {e}")
-        return f"解析 Excel/CSV 失败: {e}"
+        return "解析 Excel/CSV 失败，文件可能已损坏"
 
 
 async def _extract_csv(path: Path, info: list[str]) -> str:
@@ -56,7 +56,8 @@ async def _extract_csv(path: Path, info: list[str]) -> str:
         return "\n".join(info) + "\n" + "\n".join(preview)
 
     except Exception as e:
-        return f"解析 CSV 失败: {e}"
+        logger.warning(f"解析 CSV 失败: {e}")
+        return "解析 CSV 失败"
 
 
 async def _extract_excel(path: Path, info: list[str]) -> str:
@@ -99,4 +100,4 @@ async def _extract_excel(path: Path, info: list[str]) -> str:
 
     except Exception as e:
         logger.exception(f"解析 Excel 失败: {e}")
-        return f"解析 Excel 失败: {e}"
+        return "解析 Excel 失败"

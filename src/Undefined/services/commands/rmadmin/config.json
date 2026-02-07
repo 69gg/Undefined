@@ -1,0 +1,11 @@
+{
+  "name": "rmadmin",
+  "description": "移除管理员（仅超级管理员）",
+  "usage": "/rmadmin <QQ号>",
+  "example": "/rmadmin 123456789",
+  "permission": "superadmin",
+  "rate_limit": "none",
+  "show_in_help": true,
+  "order": 90,
+  "aliases": []
+}

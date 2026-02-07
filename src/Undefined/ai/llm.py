@@ -1,4 +1,4 @@
-"""LLM model request handling."""
+"""LLM 模型请求处理。"""
 
 from __future__ import annotations
 
@@ -89,7 +89,7 @@ def _tool_name_dot_delimiter() -> str:
         return _DEFAULT_TOOL_NAME_DOT_DELIMITER
     if not _TOOL_NAME_ALLOWED_RE.match(text):
         return _DEFAULT_TOOL_NAME_DOT_DELIMITER
-    # Keep it reasonably short to avoid tool name truncation.
+    # 保持较短长度，避免工具名被服务端截断。
     if len(text) > 16:
         return text[:16]
     return text
@@ -100,20 +100,20 @@ def _hash8(text: str) -> str:
 
 
 def _encode_tool_name_for_api(tool_name: str) -> str:
-    """Encode internal tool name to provider-safe function.name.
+    """将内部工具名编码为服务端可接受的 function.name。
 
-    - Replace '.' with '-_-' (keeps internal naming semantics)
-    - Replace any other disallowed char with '_'
-    - Enforce max length (<=64), append stable hash when truncated
+    - 将 '.' 替换为 '-_-'（保留工具集命名语义）
+    - 其他不允许字符替换为 '_'
+    - 强制最大长度（<=64），超长时追加稳定哈希
     """
     raw = str(tool_name or "").strip()
     if not raw:
         return "tool"
 
-    # Preserve separator semantics for toolsets: category.tool -> category<delimiter>tool
+    # 保留工具集分隔语义：category.tool -> category<delimiter>tool
     encoded = raw.replace(".", _tool_name_dot_delimiter())
 
-    # Replace other disallowed characters.
+    # 替换其他不允许字符。
     cleaned_chars: list[str] = []
     for ch in encoded:
         if ch.isalnum() or ch in {"_", "-"}:
@@ -130,7 +130,7 @@ def _encode_tool_name_for_api(tool_name: str) -> str:
         prefix_len = max(1, _TOOL_NAME_MAX_LEN - len(suffix))
         encoded = encoded[:prefix_len] + suffix
 
-    # Final guard (should always pass)
+    # 最后兜底校验（理论上应始终通过）
     if not _TOOL_NAME_ALLOWED_RE.match(encoded):
         suffix = "_" + _hash8(raw)
         encoded = re.sub(r"[^a-zA-Z0-9_-]", "_", encoded)
@@ -145,14 +145,14 @@ def _encode_tool_name_for_api(tool_name: str) -> str:
 def _sanitize_openai_tool_names_in_request(
     request_body: dict[str, Any],
 ) -> tuple[dict[str, str], dict[str, str]]:
-    """Rewrite request_body tools/messages tool names to provider-safe names.
+    """将 request_body 的 tools/messages 工具名改写为服务端可接受的名称。
 
     Returns:
-        (api_to_internal, internal_to_api) maps.
+        (api_to_internal, internal_to_api) 映射表。
 
     Notes:
-        - We only guarantee reversibility for names present in tools schema.
-        - Historical tool calls in messages are rewritten best-effort.
+        - 仅保证 tools schema 中出现的名称可逆映射。
+        - 历史消息中的工具调用会尽力重写。
     """
     tools = request_body.get("tools")
     if not isinstance(tools, list) or not tools:
@@ -176,7 +176,7 @@ def _sanitize_openai_tool_names_in_request(
             new_tools.append(tool)
             continue
 
-        # Stable encoding; add collision suffix if needed.
+        # 稳定编码；如发生冲突则追加后缀。
         base_api_name = _encode_tool_name_for_api(internal_name)
         api_name = base_api_name
         if api_name in used_api and api_to_internal.get(api_name) != internal_name:
@@ -184,7 +184,7 @@ def _sanitize_openai_tool_names_in_request(
             prefix_len = max(1, _TOOL_NAME_MAX_LEN - len(suffix))
             api_name = base_api_name[:prefix_len] + suffix
         if api_name in used_api and api_to_internal.get(api_name) != internal_name:
-            # Ultra-rare fallback: incorporate index.
+            # 极少数冲突兜底：加入索引避免重复。
             suffix = "_" + _hash8(f"{internal_name}:{len(used_api)}")
             prefix_len = max(1, _TOOL_NAME_MAX_LEN - len(suffix))
             api_name = base_api_name[:prefix_len] + suffix
@@ -202,7 +202,7 @@ def _sanitize_openai_tool_names_in_request(
 
     request_body["tools"] = new_tools
 
-    # Best-effort rewrite of historical tool names in messages.
+    # 尽力重写历史消息中的工具名。
     messages = request_body.get("messages")
     if isinstance(messages, list) and messages:
         new_messages: list[dict[str, Any]] = []
@@ -214,7 +214,7 @@ def _sanitize_openai_tool_names_in_request(
 
             new_message = message
 
-            # Rewrite role=tool name (optional field).
+            # 重写 role=tool 的 name 字段（可选字段）。
             msg_name = message.get("name")
             if isinstance(msg_name, str) and msg_name:
                 mapped = internal_to_api.get(msg_name)
@@ -226,7 +226,7 @@ def _sanitize_openai_tool_names_in_request(
                 elif (not _TOOL_NAME_ALLOWED_RE.match(msg_name)) or (
                     len(msg_name) > _TOOL_NAME_MAX_LEN
                 ):
-                    # Keep request valid even if name isn't in schema map (e.g. tool renamed/removed).
+                    # 即便名称不在 schema 映射中，也尽量保证请求合法（如工具被重命名/移除）。
                     safe = _encode_tool_name_for_api(msg_name)
                     if safe != msg_name:
                         if new_message is message:
@@ -363,8 +363,15 @@ def _tools_description_max_len() -> int:
     return value if value > 0 else _DEFAULT_TOOLS_DESCRIPTION_MAX_LEN
 
 
+def _tools_description_truncate_enabled() -> bool:
+    runtime_config = _get_runtime_config()
+    if runtime_config is None:
+        return False
+    return bool(runtime_config.tools_description_truncate_enabled)
+
+
 def _clean_control_chars(text: str) -> str:
-    """Replace ASCII control characters with spaces."""
+    """将 ASCII 控制字符替换为空格。"""
     return "".join(" " if ord(ch) < 32 or ord(ch) == 127 else ch for ch in text)
 
 
@@ -379,8 +386,13 @@ def _desc_preview(text: str) -> str:
     return text[:preview_len] + ("…" if len(text) > preview_len else "")
 
 
-def _normalize_tool_description(description: Any, tool_name: str, max_len: int) -> str:
-    """Normalize tool function.description for stricter OpenAI-compatible providers."""
+def _normalize_tool_description(
+    description: Any,
+    tool_name: str,
+    max_len: int,
+    truncate_enabled: bool,
+) -> str:
+    """规范化工具 function.description，适配更严格的 OpenAI 兼容服务。"""
     if description is None:
         normalized = ""
     elif isinstance(description, str):
@@ -393,7 +405,7 @@ def _normalize_tool_description(description: Any, tool_name: str, max_len: int) 
     normalized = normalized.strip()
     if not normalized:
         normalized = f"Tool function {tool_name}"
-    if len(normalized) > max_len:
+    if truncate_enabled and len(normalized) > max_len:
         normalized = normalized[:max_len].rstrip()
     return normalized
 
@@ -406,6 +418,7 @@ def _sanitize_openai_tools(
         return tools, 0, []
 
     max_len = _tools_description_max_len()
+    truncate_enabled = _tools_description_truncate_enabled()
     changed = 0
     changes: list[dict[str, Any]] = []
     sanitized: list[dict[str, Any]] = []
@@ -424,7 +437,12 @@ def _sanitize_openai_tools(
             if old_desc is None
             else (old_desc if isinstance(old_desc, str) else str(old_desc))
         )
-        new_desc = _normalize_tool_description(old_desc, str(name), max_len)
+        new_desc = _normalize_tool_description(
+            old_desc,
+            str(name),
+            max_len,
+            truncate_enabled,
+        )
 
         if old_desc_str != new_desc:
             reasons: list[str] = []
@@ -436,7 +454,11 @@ def _sanitize_openai_tools(
                 reasons.append("whitespace")
             if not old_desc_str.strip():
                 reasons.append("empty")
-            if len(new_desc) >= max_len and len(old_desc_str) > len(new_desc):
+            if (
+                truncate_enabled
+                and len(new_desc) >= max_len
+                and len(old_desc_str) > len(new_desc)
+            ):
                 reasons.append("truncated")
 
             tool = dict(tool)
@@ -668,7 +690,7 @@ def _extract_thinking_content(result: dict[str, Any]) -> str:
 def _normalize_openai_base_url(
     api_url: str,
 ) -> tuple[str, dict[str, object] | None, bool]:
-    """将 legacy 的 /chat/completions URL 归一化为 OpenAI SDK 需要的 base_url.
+    """将旧式 /chat/completions URL 归一化为 OpenAI SDK 需要的 base_url。
 
     兼容策略（B）：如果发现 api_url 末尾包含 /chat/completions，则自动裁剪为 base_url，
     以便统一走 OpenAI SDK，并给出弃用警告。
@@ -755,9 +777,10 @@ class ModelRequester:
             request_body["tools"] = sanitized_tools
             if changed_count and logger.isEnabledFor(logging.INFO):
                 logger.info(
-                    "[tools.sanitize] changed=%s total=%s max_desc_len=%s",
+                    "[tools.sanitize] changed=%s total=%s truncate_enabled=%s max_desc_len=%s",
                     changed_count,
                     len(sanitized_tools),
+                    _tools_description_truncate_enabled(),
                     _tools_description_max_len(),
                 )
                 if _tools_sanitize_verbose():

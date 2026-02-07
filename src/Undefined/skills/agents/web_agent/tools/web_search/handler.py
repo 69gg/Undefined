@@ -25,4 +25,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             return "搜索未返回结果"
     except Exception as e:
         logger.error(f"搜索执行失败: {e}")
-        return f"搜索执行失败: {e}"
+        return "搜索执行失败，请稍后重试"

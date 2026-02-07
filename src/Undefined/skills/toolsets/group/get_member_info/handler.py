@@ -21,12 +21,8 @@ FIELD_MAPPING = {
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """获取群聊成员的详细信息"""
-    ai_client = context.get("ai_client")
+    request_id = str(context.get("request_id", "-"))
     group_id = args.get("group_id") or context.get("group_id")
-    if not group_id:
-        # 向后兼容
-        ai_client = context.get("ai_client")
-        group_id = ai_client.current_group_id if ai_client else None
     user_id = args.get("user_id")
     fields = args.get("fields")
     no_cache = args.get("no_cache", False)
@@ -103,7 +99,13 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return f"{result_str}\n✅ 信息获取成功"
 
     except Exception as e:
-        logger.exception(f"获取群成员信息失败: {e}")
+        logger.exception(
+            "获取群成员信息失败: group=%s user=%s request_id=%s err=%s",
+            group_id,
+            user_id,
+            request_id,
+            e,
+        )
         error_msg = str(e)
 
         if "retcode=100" in error_msg:
@@ -113,4 +115,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         elif "retcode=150" in error_msg:
             return "获取失败：频率过高"
         else:
-            return f"获取失败：{error_msg}"
+            return "获取失败：群成员信息服务暂时不可用，请稍后重试"

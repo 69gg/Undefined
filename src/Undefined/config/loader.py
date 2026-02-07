@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import tomllib
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field as dataclass_field, fields
 from pathlib import Path
 from typing import Any, Optional, IO
 
@@ -176,6 +176,13 @@ def _coerce_str(value: Any, default: str) -> str:
     return normalized if normalized is not None else default
 
 
+def _normalize_base_url(value: str, default: str) -> str:
+    normalized = value.strip().rstrip("/")
+    if normalized:
+        return normalized
+    return default.rstrip("/")
+
+
 def _coerce_int_list(value: Any) -> list[int]:
     if value is None:
         return []
@@ -310,10 +317,16 @@ class Config:
     # 是否允许超级管理员在私聊中绕过 allowed_private_ids（仅私聊收发）
     superadmin_bypass_allowlist: bool
     forward_proxy_qq: int | None
+    process_every_message: bool
+    process_private_message: bool
+    process_poke_message: bool
+    keyword_reply_enabled: bool
+    context_recent_messages_limit: int
     onebot_ws_url: str
     onebot_token: str
     chat_model: ChatModelConfig
     vision_model: VisionModelConfig
+    security_model_enabled: bool
     security_model: SecurityModelConfig
     agent_model: AgentModelConfig
     log_level: str
@@ -322,6 +335,7 @@ class Config:
     log_backup_count: int
     log_thinking: bool
     tools_dot_delimiter: str
+    tools_description_truncate_enabled: bool
     tools_description_max_len: int
     tools_sanitize_verbose: bool
     tools_description_preview_len: int
@@ -341,6 +355,12 @@ class Config:
     use_proxy: bool
     http_proxy: str
     https_proxy: str
+    network_request_timeout: float
+    network_request_retries: int
+    api_xxapi_base_url: str
+    api_xingzhige_base_url: str
+    api_jkyai_base_url: str
+    api_seniverse_base_url: str
     weather_api_key: str
     xxapi_api_token: str
     mcp_config_path: str
@@ -349,6 +369,21 @@ class Config:
     webui_url: str
     webui_port: int
     webui_password: str
+    _allowed_group_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
+    _allowed_private_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
+
+    def __post_init__(self) -> None:
+        # 访问控制白名单属于高频热路径，启动后缓存为 set 降低重复构建开销。
+        self._allowed_group_ids_set = {int(item) for item in self.allowed_group_ids}
+        self._allowed_private_ids_set = {int(item) for item in self.allowed_private_ids}
 
     @classmethod
     def load(cls, config_path: Optional[Path] = None, strict: bool = True) -> "Config":
@@ -366,6 +401,50 @@ class Config:
             0,
         )
         forward_proxy_qq = forward_proxy if forward_proxy > 0 else None
+        process_every_message = _coerce_bool(
+            _get_value(
+                data,
+                ("core", "process_every_message"),
+                "PROCESS_EVERY_MESSAGE",
+            ),
+            True,
+        )
+        process_private_message = _coerce_bool(
+            _get_value(
+                data,
+                ("core", "process_private_message"),
+                "PROCESS_PRIVATE_MESSAGE",
+            ),
+            True,
+        )
+        process_poke_message = _coerce_bool(
+            _get_value(
+                data,
+                ("core", "process_poke_message"),
+                "PROCESS_POKE_MESSAGE",
+            ),
+            True,
+        )
+        keyword_reply_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("core", "keyword_reply_enabled"),
+                "KEYWORD_REPLY_ENABLED",
+            ),
+            True,
+        )
+        context_recent_messages_limit = _coerce_int(
+            _get_value(
+                data,
+                ("core", "context_recent_messages_limit"),
+                "CONTEXT_RECENT_MESSAGES_LIMIT",
+            ),
+            20,
+        )
+        if context_recent_messages_limit < 0:
+            context_recent_messages_limit = 0
+        if context_recent_messages_limit > 200:
+            context_recent_messages_limit = 200
 
         onebot_ws_url = _coerce_str(
             _get_value(data, ("onebot", "ws_url"), "ONEBOT_WS_URL"), ""
@@ -376,6 +455,14 @@ class Config:
 
         chat_model = cls._parse_chat_model_config(data)
         vision_model = cls._parse_vision_model_config(data)
+        security_model_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "security", "enabled"),
+                "SECURITY_MODEL_ENABLED",
+            ),
+            True,
+        )
         security_model = cls._parse_security_model_config(data, chat_model)
         agent_model = cls._parse_agent_model_config(data)
 
@@ -420,7 +507,7 @@ class Config:
         ).strip()
         if not tools_dot_delimiter:
             tools_dot_delimiter = "-_-"
-        # dot_delimiter 必须满足 OpenAI-compatible 的 function.name 约束。
+        # dot_delimiter 必须满足 OpenAI 兼容的 function.name 约束。
         if "." in tools_dot_delimiter or not re.fullmatch(
             r"[a-zA-Z0-9_-]+", tools_dot_delimiter
         ):
@@ -434,6 +521,14 @@ class Config:
                 data, ("tools", "description_max_len"), "TOOLS_DESCRIPTION_MAX_LEN"
             ),
             1024,
+        )
+        tools_description_truncate_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("tools", "description_truncate_enabled"),
+                "TOOLS_DESCRIPTION_TRUNCATE_ENABLED",
+            ),
+            False,
         )
         tools_sanitize_verbose = _coerce_bool(
             _get_value(data, ("tools", "sanitize_verbose"), "TOOLS_SANITIZE_VERBOSE"),
@@ -569,6 +664,67 @@ class Config:
             if https_proxy:
                 _warn_env_fallback("HTTPS_PROXY")
 
+        network_request_timeout = _coerce_float(
+            _get_value(
+                data,
+                ("network", "request_timeout_seconds"),
+                "NETWORK_REQUEST_TIMEOUT_SECONDS",
+            ),
+            30.0,
+        )
+        if network_request_timeout <= 0:
+            network_request_timeout = 30.0
+
+        network_request_retries = _coerce_int(
+            _get_value(
+                data,
+                ("network", "request_retries"),
+                "NETWORK_REQUEST_RETRIES",
+            ),
+            0,
+        )
+        if network_request_retries < 0:
+            network_request_retries = 0
+        if network_request_retries > 5:
+            network_request_retries = 5
+
+        api_xxapi_base_url = _normalize_base_url(
+            _coerce_str(
+                _get_value(data, ("api_endpoints", "xxapi_base_url"), "XXAPI_BASE_URL"),
+                "https://v2.xxapi.cn",
+            ),
+            "https://v2.xxapi.cn",
+        )
+        api_xingzhige_base_url = _normalize_base_url(
+            _coerce_str(
+                _get_value(
+                    data,
+                    ("api_endpoints", "xingzhige_base_url"),
+                    "XINGZHIGE_BASE_URL",
+                ),
+                "https://api.xingzhige.com",
+            ),
+            "https://api.xingzhige.com",
+        )
+        api_jkyai_base_url = _normalize_base_url(
+            _coerce_str(
+                _get_value(data, ("api_endpoints", "jkyai_base_url"), "JKYAI_BASE_URL"),
+                "https://api.jkyai.top",
+            ),
+            "https://api.jkyai.top",
+        )
+        api_seniverse_base_url = _normalize_base_url(
+            _coerce_str(
+                _get_value(
+                    data,
+                    ("api_endpoints", "seniverse_base_url"),
+                    "SENIVERSE_BASE_URL",
+                ),
+                "https://api.seniverse.com/v3",
+            ),
+            "https://api.seniverse.com/v3",
+        )
+
         weather_api_key = _coerce_str(
             _get_value(data, ("weather", "api_key"), "WEATHER_API_KEY"), ""
         )
@@ -603,10 +759,16 @@ class Config:
             allowed_private_ids=allowed_private_ids,
             superadmin_bypass_allowlist=superadmin_bypass_allowlist,
             forward_proxy_qq=forward_proxy_qq,
+            process_every_message=process_every_message,
+            process_private_message=process_private_message,
+            process_poke_message=process_poke_message,
+            keyword_reply_enabled=keyword_reply_enabled,
+            context_recent_messages_limit=context_recent_messages_limit,
             onebot_ws_url=onebot_ws_url,
             onebot_token=onebot_token,
             chat_model=chat_model,
             vision_model=vision_model,
+            security_model_enabled=security_model_enabled,
             security_model=security_model,
             agent_model=agent_model,
             log_level=log_level,
@@ -615,6 +777,7 @@ class Config:
             log_backup_count=log_backup_count,
             log_thinking=log_thinking,
             tools_dot_delimiter=tools_dot_delimiter,
+            tools_description_truncate_enabled=tools_description_truncate_enabled,
             tools_description_max_len=tools_description_max_len,
             tools_sanitize_verbose=tools_sanitize_verbose,
             tools_description_preview_len=tools_description_preview_len,
@@ -634,6 +797,12 @@ class Config:
             use_proxy=use_proxy,
             http_proxy=http_proxy,
             https_proxy=https_proxy,
+            network_request_timeout=network_request_timeout,
+            network_request_retries=network_request_retries,
+            api_xxapi_base_url=api_xxapi_base_url,
+            api_xingzhige_base_url=api_xingzhige_base_url,
+            api_jkyai_base_url=api_jkyai_base_url,
+            api_seniverse_base_url=api_seniverse_base_url,
             weather_api_key=weather_api_key,
             xxapi_api_token=xxapi_api_token,
             mcp_config_path=mcp_config_path,
@@ -657,7 +826,7 @@ class Config:
 
         if not self.access_control_enabled():
             return True
-        return int(group_id) in set(self.allowed_group_ids)
+        return int(group_id) in self._allowed_group_ids_set
 
     def is_private_allowed(self, user_id: int) -> bool:
         """私聊是否允许收发消息。"""
@@ -670,10 +839,52 @@ class Config:
             and self.superadmin_qq > 0
         ):
             return True
-        return int(user_id) in set(self.allowed_private_ids)
+        return int(user_id) in self._allowed_private_ids_set
+
+    def should_process_group_message(self, is_at_bot: bool) -> bool:
+        """是否处理该条群消息。"""
+
+        if self.process_every_message:
+            return True
+        return bool(is_at_bot)
+
+    def should_process_private_message(self) -> bool:
+        """是否处理私聊消息回复。"""
+
+        return bool(self.process_private_message)
+
+    def should_process_poke_message(self) -> bool:
+        """是否处理拍一拍触发。"""
+
+        return bool(self.process_poke_message)
+
+    def get_context_recent_messages_limit(self) -> int:
+        """获取上下文最近历史消息条数上限。"""
+
+        limit = int(self.context_recent_messages_limit)
+        if limit < 0:
+            return 0
+        if limit > 200:
+            return 200
+        return limit
+
+    def security_check_enabled(self) -> bool:
+        """是否启用安全模型检查。"""
+
+        return bool(self.security_model_enabled)
 
     @staticmethod
     def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
+        queue_interval_seconds = _coerce_float(
+            _get_value(
+                data,
+                ("models", "chat", "queue_interval_seconds"),
+                "CHAT_MODEL_QUEUE_INTERVAL",
+            ),
+            1.0,
+        )
+        if queue_interval_seconds <= 0:
+            queue_interval_seconds = 1.0
         return ChatModelConfig(
             api_url=_coerce_str(
                 _get_value(data, ("models", "chat", "api_url"), "CHAT_MODEL_API_URL"),
@@ -693,6 +904,7 @@ class Config:
                 ),
                 8192,
             ),
+            queue_interval_seconds=queue_interval_seconds,
             thinking_enabled=_coerce_bool(
                 _get_value(
                     data,
@@ -721,6 +933,16 @@ class Config:
 
     @staticmethod
     def _parse_vision_model_config(data: dict[str, Any]) -> VisionModelConfig:
+        queue_interval_seconds = _coerce_float(
+            _get_value(
+                data,
+                ("models", "vision", "queue_interval_seconds"),
+                "VISION_MODEL_QUEUE_INTERVAL",
+            ),
+            1.0,
+        )
+        if queue_interval_seconds <= 0:
+            queue_interval_seconds = 1.0
         return VisionModelConfig(
             api_url=_coerce_str(
                 _get_value(
@@ -740,6 +962,7 @@ class Config:
                 ),
                 "",
             ),
+            queue_interval_seconds=queue_interval_seconds,
             thinking_enabled=_coerce_bool(
                 _get_value(
                     data,
@@ -788,6 +1011,16 @@ class Config:
             ),
             "",
         )
+        queue_interval_seconds = _coerce_float(
+            _get_value(
+                data,
+                ("models", "security", "queue_interval_seconds"),
+                "SECURITY_MODEL_QUEUE_INTERVAL",
+            ),
+            1.0,
+        )
+        if queue_interval_seconds <= 0:
+            queue_interval_seconds = 1.0
 
         if api_url and api_key and model_name:
             return SecurityModelConfig(
@@ -802,6 +1035,7 @@ class Config:
                     ),
                     100,
                 ),
+                queue_interval_seconds=queue_interval_seconds,
                 thinking_enabled=_coerce_bool(
                     _get_value(
                         data,
@@ -834,6 +1068,7 @@ class Config:
             api_key=chat_model.api_key,
             model_name=chat_model.model_name,
             max_tokens=chat_model.max_tokens,
+            queue_interval_seconds=chat_model.queue_interval_seconds,
             thinking_enabled=False,
             thinking_budget_tokens=0,
             deepseek_new_cot_support=False,
@@ -841,6 +1076,16 @@ class Config:
 
     @staticmethod
     def _parse_agent_model_config(data: dict[str, Any]) -> AgentModelConfig:
+        queue_interval_seconds = _coerce_float(
+            _get_value(
+                data,
+                ("models", "agent", "queue_interval_seconds"),
+                "AGENT_MODEL_QUEUE_INTERVAL",
+            ),
+            1.0,
+        )
+        if queue_interval_seconds <= 0:
+            queue_interval_seconds = 1.0
         return AgentModelConfig(
             api_url=_coerce_str(
                 _get_value(data, ("models", "agent", "api_url"), "AGENT_MODEL_API_URL"),
@@ -860,6 +1105,7 @@ class Config:
                 ),
                 4096,
             ),
+            queue_interval_seconds=queue_interval_seconds,
             thinking_enabled=_coerce_bool(
                 _get_value(
                     data,

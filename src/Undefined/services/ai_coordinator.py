@@ -201,6 +201,8 @@ class AICoordinator:
             await self._execute_private_reply(request)
         elif req_type == "stats_analysis":
             await self._execute_stats_analysis(request)
+        elif req_type == "agent_intro_generation":
+            await self._execute_agent_intro_generation(request)
 
     async def _execute_auto_reply(self, request: dict[str, Any]) -> None:
         group_id = request["group_id"]
@@ -260,12 +262,6 @@ class AICoordinator:
             )
 
             try:
-                # 保留旧方式（向后兼容）
-                self.ai.current_group_id = group_id
-                self.ai.current_user_id = sender_id
-                self.ai._send_private_message_callback = send_private_cb
-                self.ai._send_image_callback = send_img_cb
-
                 await self.ai.ask(
                     full_question,
                     send_message_callback=send_msg_cb,
@@ -341,10 +337,6 @@ class AICoordinator:
             )
 
             try:
-                # 保留旧方式（向后兼容）
-                self.ai.current_group_id = None
-                self.ai.current_user_id = user_id
-                self.ai._send_image_callback = send_img_cb
                 result = await self.ai.ask(
                     full_question,
                     send_message_callback=send_msg_cb,
@@ -374,14 +366,14 @@ class AICoordinator:
         data_summary = request.get("data_summary", "")
 
         if not request_id:
-            logger.warning("[StatsAnalysis] 缺少 request_id，群: %s", group_id)
+            logger.warning("[统计分析] 缺少 request_id，群=%s", group_id)
             return
         try:
-            # 加载 prompt 模板
+            # 加载提示词模板
             try:
                 prompt_template = read_text_resource("res/prompts/stats_analysis.txt")
             except Exception:
-                logger.warning("[StatsAnalysis] 提示词文件不存在，使用默认分析")
+                logger.warning("[统计分析] 提示词文件不存在，使用默认分析")
                 analysis = "AI 分析功能暂时不可用（提示词文件缺失）"
                 if self.command_dispatcher:
                     self.command_dispatcher.set_stats_analysis_result(
@@ -412,7 +404,10 @@ class AICoordinator:
                 analysis = "AI 分析未能生成结果"
 
             logger.info(
-                f"[StatsAnalysis] 分析完成，群: {group_id}, 长度: {len(analysis)}"
+                "[统计分析] 分析完成: group=%s length=%s request_id=%s",
+                group_id,
+                len(analysis),
+                request_id,
             )
 
             # 设置分析结果（通知等待的 _handle_stats 方法）
@@ -421,13 +416,86 @@ class AICoordinator:
                     group_id, request_id, analysis
                 )
 
-        except Exception as e:
-            logger.exception(f"[StatsAnalysis] AI 分析失败: {e}")
+        except Exception as exc:
+            logger.exception("[统计分析] AI 分析失败: %s", exc)
             # 出错时也通知等待，但返回空字符串
             if self.command_dispatcher:
                 self.command_dispatcher.set_stats_analysis_result(
                     group_id, request_id, ""
                 )
+
+    async def _execute_agent_intro_generation(self, request: dict[str, Any]) -> None:
+        """执行 Agent 自我介绍生成请求"""
+        request_id = request.get("request_id")
+        agent_name = request.get("agent_name")
+
+        if not request_id or not agent_name:
+            logger.warning(
+                "[Agent介绍生成] 缺少必要参数: request_id=%s agent_name=%s",
+                request_id,
+                agent_name,
+            )
+            return
+
+        try:
+            # 获取提示词
+            from Undefined.skills.agents.intro_generator import AgentIntroGenerator
+
+            agent_intro_generator = self.ai._agent_intro_generator
+            if not isinstance(agent_intro_generator, AgentIntroGenerator):
+                logger.error("[Agent介绍生成] 无法获取 AgentIntroGenerator 实例")
+                return
+
+            (
+                system_prompt,
+                user_prompt,
+            ) = await agent_intro_generator.get_intro_prompt_and_context(agent_name)
+
+            # 调用 AI 生成
+            messages = [
+                {"role": "system", "content": system_prompt or "你是一位智能助手。"},
+                {"role": "user", "content": user_prompt},
+            ]
+
+            result = await self.ai.request_model(
+                model_config=self.ai.agent_config,
+                messages=messages,
+                max_tokens=agent_intro_generator.config.max_tokens,
+                call_type=f"agent:{agent_name}",
+            )
+
+            # 提取结果
+            choices = result.get("choices", [{}])
+            if choices:
+                content = choices[0].get("message", {}).get("content", "")
+                generated_content = content.strip()
+            else:
+                generated_content = ""
+
+            logger.info(
+                "[Agent介绍生成] 生成完成: agent=%s length=%s request_id=%s",
+                agent_name,
+                len(generated_content),
+                request_id,
+            )
+
+            # 通知结果
+            agent_intro_generator.set_intro_generation_result(
+                request_id, generated_content if generated_content else None
+            )
+
+        except Exception as exc:
+            logger.exception(
+                "[Agent介绍生成] 生成失败: agent=%s error=%s",
+                agent_name,
+                exc,
+            )
+            # 出错时也通知，返回 None
+            try:
+                agent_intro_generator = self.ai._agent_intro_generator
+                agent_intro_generator.set_intro_generation_result(request_id, None)
+            except Exception:
+                pass
 
     def _is_at_bot(self, content: list[dict[str, Any]]) -> bool:
         """检查消息内容中是否包含对机器人的 @ 提问"""

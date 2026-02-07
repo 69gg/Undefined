@@ -95,7 +95,7 @@ async def _download_from_url(
             return f"错误：HTTP 错误 {e.response.status_code}"
         except Exception as e:
             logger.exception(f"下载失败: {e}")
-            return f"错误：下载失败 - {e}"
+            return "错误：下载失败"
 
 
 async def _download_from_file_id(
@@ -148,7 +148,7 @@ async def _download_from_file_id(
 
     except Exception as e:
         logger.exception(f"下载失败（file_id 模式）: {e}")
-        return f"错误：下载失败 - {e}"
+        return "错误：下载失败，请检查 file_id 或网络状态"
 
 
 def _extract_filename_from_url(url: str) -> str:

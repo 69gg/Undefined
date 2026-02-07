@@ -62,6 +62,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
         return file_content
 
-    except Exception as e:
+    except Exception:
         logger.exception(f"读取文件 {file_path} 时出错")
-        return f"读取文件失败: {e}"
+        return "读取文件失败，请检查路径和权限"

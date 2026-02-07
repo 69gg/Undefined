@@ -87,4 +87,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"读取文件失败: {e}")
-        return f"读取文件失败: {e}"
+        return "读取文件失败，可能包含无法解析的字符或格式错误"

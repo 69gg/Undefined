@@ -16,14 +16,10 @@ def parse_timestamp(time_str: str) -> int:
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """列出系统中所有已发布的公告条目"""
+    request_id = str(context.get("request_id", "-"))
     group_id = args.get("group_id")
     if not group_id:
-        # 优先从 context 获取（避免并发问题）
         group_id = context.get("group_id")
-    if not group_id:
-        # 向后兼容
-        ai_client = context.get("ai_client")
-        group_id = ai_client.current_group_id if ai_client else None
 
     if not group_id:
         return "未能确定群聊 ID，请提供 group_id 参数或在群聊中调用"
@@ -108,5 +104,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
         return "\n".join(lines)
     except Exception as e:
-        logger.exception(f"[群公告] 获取群 {group_id} 公告列表失败: {e}")
-        return f"获取群公告失败: {e}"
+        logger.exception(
+            "[群公告] 获取公告列表失败: group=%s request_id=%s err=%s",
+            group_id,
+            request_id,
+            e,
+        )
+        return "获取群公告失败，请稍后重试"

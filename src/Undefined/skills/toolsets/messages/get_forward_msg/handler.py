@@ -128,4 +128,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"解析合并转发消息时出错: {e}")
-        return f"解析合并转发消息时出错: {str(e)}"
+        return "解析合并转发消息时出错，请重试"

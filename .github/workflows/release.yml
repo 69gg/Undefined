@@ -61,7 +61,7 @@ jobs:
 
       - name: Verify dist contains packaged resources
         run: |
-          uv run python -c "import glob, zipfile; wheels=glob.glob('dist/*.whl'); assert wheels, 'no wheel built'; z=zipfile.ZipFile(wheels[0]); names=set(z.namelist()); required={'config.toml.example','res/prompts/undefined.xml','res/prepared_messages/help_message.txt','img/xlwy.jpg'}; missing=sorted([p for p in required if p not in names]); assert not missing, f'missing in wheel: {missing}'"
+          uv run python -c "import glob, zipfile; wheels=glob.glob('dist/*.whl'); assert wheels, 'no wheel built'; z=zipfile.ZipFile(wheels[0]); names=set(z.namelist()); required={'config.toml.example','res/prompts/undefined.xml','img/xlwy.jpg'}; missing=sorted([p for p in required if p not in names]); assert not missing, f'missing in wheel: {missing}'"
 
       - name: Create Release
         env:

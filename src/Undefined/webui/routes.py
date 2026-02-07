@@ -10,6 +10,14 @@ from aiohttp import web
 from aiohttp.web_response import Response
 from typing import cast, Any
 
+try:
+    import psutil
+
+    _PSUTIL_AVAILABLE = True
+except Exception:  # pragma: no cover
+    psutil = None
+    _PSUTIL_AVAILABLE = False
+
 
 from Undefined.config.loader import CONFIG_PATH, load_toml_data
 from Undefined.config import get_config_manager
@@ -35,11 +43,17 @@ SESSION_COOKIE = "undefined_webui"
 TOKEN_COOKIE = "undefined_webui_token"
 SESSION_TTL_SECONDS = 8 * 60 * 60
 
-# Use relative path from this file
+# 使用相对路径定位资源目录
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 routes = web.RouteTableDef()
+
+_CPU_PERCENT_PRIMED = False
+
+
+def _clamp_percent(value: float) -> float:
+    return max(0.0, min(100.0, value))
 
 
 def _read_cpu_times() -> tuple[int, int] | None:
@@ -62,6 +76,20 @@ def _read_cpu_times() -> tuple[int, int] | None:
 
 
 async def _get_cpu_usage_percent() -> float | None:
+    global _CPU_PERCENT_PRIMED
+
+    if _PSUTIL_AVAILABLE and psutil is not None:
+        try:
+            usage = psutil.cpu_percent(interval=None)
+            # psutil 文档说明首次非阻塞采样可能为 0，需要预热一次。
+            if not _CPU_PERCENT_PRIMED:
+                _CPU_PERCENT_PRIMED = True
+                await asyncio.sleep(0.12)
+                usage = psutil.cpu_percent(interval=None)
+            return _clamp_percent(float(usage))
+        except Exception:
+            logger.debug("[WebUI] psutil CPU 采集失败，回退 /proc 方案", exc_info=True)
+
     first = _read_cpu_times()
     if not first:
         return None
@@ -76,22 +104,38 @@ async def _get_cpu_usage_percent() -> float | None:
     if total_delta <= 0:
         return None
     usage = (1 - idle_delta / total_delta) * 100
-    return max(0.0, min(100.0, usage))
+    return _clamp_percent(usage)
 
 
 def _read_cpu_model() -> str:
+    model = platform.processor()
+    if model and model.strip():
+        return model.strip()
+
+    # Linux 下补充 /proc 兜底，其它平台直接返回 Unknown。
     cpuinfo_path = Path("/proc/cpuinfo")
     if cpuinfo_path.exists():
         for line in cpuinfo_path.read_text(encoding="utf-8").splitlines():
             if line.lower().startswith("model name"):
                 parts = line.split(":", 1)
                 if len(parts) == 2:
-                    return parts[1].strip()
-    model = platform.processor()
-    return model.strip() if model else "Unknown"
+                    candidate = parts[1].strip()
+                    if candidate:
+                        return candidate
+    return "Unknown"
 
 
 def _read_memory_info() -> tuple[float, float, float] | None:
+    if _PSUTIL_AVAILABLE and psutil is not None:
+        try:
+            memory = psutil.virtual_memory()
+            total_gb = float(memory.total) / 1024 / 1024 / 1024
+            used_gb = float(memory.used) / 1024 / 1024 / 1024
+            usage = float(memory.percent)
+            return total_gb, used_gb, _clamp_percent(usage)
+        except Exception:
+            logger.debug("[WebUI] psutil 内存采集失败，回退 /proc 方案", exc_info=True)
+
     meminfo_path = Path("/proc/meminfo")
     if not meminfo_path.exists():
         return None

@@ -546,9 +546,34 @@ class OneBotClient:
 
 
 def parse_message_time(message: dict[str, Any]) -> datetime:
-    """解析消息时间"""
-    timestamp = message.get("time", 0)
-    return datetime.fromtimestamp(timestamp)
+    """解析消息时间。
+
+    兼容秒级/毫秒级时间戳与字符串输入，异常时回退到当前时间。
+    """
+
+    raw_timestamp = message.get("time")
+
+    if raw_timestamp is None:
+        return datetime.now()
+
+    try:
+        timestamp = float(raw_timestamp)
+    except (TypeError, ValueError):
+        logger.debug("[OneBot] 无法解析消息时间戳，使用当前时间: %s", raw_timestamp)
+        return datetime.now()
+
+    # 13 位毫秒时间戳自动降为秒。
+    if timestamp > 1_000_000_000_000:
+        timestamp /= 1000.0
+
+    if timestamp <= 0:
+        return datetime.now()
+
+    try:
+        return datetime.fromtimestamp(timestamp)
+    except (OSError, OverflowError, ValueError):
+        logger.debug("[OneBot] 时间戳越界，使用当前时间: %s", raw_timestamp)
+        return datetime.now()
 
 
 def get_message_sender_id(message: dict[str, Any]) -> int:

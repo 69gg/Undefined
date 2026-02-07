@@ -11,7 +11,7 @@ from .core import BotProcessController, SessionStore
 from .routes import routes
 from .utils import ensure_config_toml
 
-# Setup logging for WebUI itself
+# 初始化 WebUI 自身日志
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
@@ -50,39 +50,39 @@ def _init_webui_file_handler() -> None:
 
 async def on_startup(app: web.Application) -> None:
     get_config_manager().start_hot_reload()
-    logger.info("[WebUI] Background tasks started (hot-reload)")
+    logger.info("[WebUI] 后台任务已启动（热重载）")
 
 
 async def on_shutdown(app: web.Application) -> None:
     bot: BotProcessController = app["bot"]
     status = bot.status()
     if not status.get("running"):
-        logger.info("WebUI shutting down, no bot process running")
+        logger.info("[WebUI] 正在关闭，无运行中的机器人进程")
         return
-    logger.info("WebUI shutting down, stopping bot process...")
+    logger.info("[WebUI] 正在关闭，准备停止机器人进程...")
     try:
         await asyncio.wait_for(bot.stop(), timeout=5)
     except asyncio.TimeoutError:
-        logger.warning("WebUI shutdown: bot stop timed out")
+        logger.warning("[WebUI] 关闭超时：机器人进程停止失败")
 
 
 async def on_cleanup(app: web.Application) -> None:
     await get_config_manager().stop_hot_reload()
-    logger.info("[WebUI] Background tasks stopped")
+    logger.info("[WebUI] 后台任务已停止")
 
 
 def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
     app = web.Application()
 
-    # Initialize core components
+    # 初始化核心组件
     app["bot"] = BotProcessController()
     app["session_store"] = SessionStore()
 
-    # Setup Hot Reload for WebUI settings
+    # 配置 WebUI 设置热重载
     config_manager = get_config_manager()
     app["settings"] = load_webui_settings()
 
-    # One-time client-side redirect hint (consumed by index handler)
+    # 一次性客户端重定向提示（由 index 处理）
     app["redirect_to_config_once"] = redirect_to_config_once
 
     def _on_config_change(config: Any, changes: dict[str, Any]) -> None:
@@ -95,14 +95,14 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
 
     config_manager.subscribe(_on_config_change)
 
-    # Routes
+    # 路由
     app.add_routes(routes)
 
-    # Static files
+    # 静态资源
     static_dir = Path(__file__).parent / "static"
     app.router.add_static("/static", static_dir)
 
-    # Lifecycle
+    # 生命周期
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
     app.on_cleanup.append(on_cleanup)

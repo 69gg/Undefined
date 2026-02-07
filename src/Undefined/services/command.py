@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import time
 from uuid import uuid4
 from datetime import datetime
 from typing import Any, Optional
@@ -15,9 +16,10 @@ from Undefined.onebot import (
     parse_message_time,
 )
 from Undefined.utils.sender import MessageSender
+from Undefined.services.commands.context import CommandContext
+from Undefined.services.commands.registry import CommandMeta, CommandRegistry
 from Undefined.services.security import SecurityService
 from Undefined.token_usage_storage import TokenUsageStorage
-from Undefined.utils.resources import read_text_resource
 
 # 尝试导入 matplotlib
 plt: Any
@@ -30,20 +32,6 @@ except ImportError:
     _MATPLOTLIB_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-
-_HELP_MESSAGE: str | None = None
-
-
-def _get_help_message() -> str:
-    global _HELP_MESSAGE
-    if _HELP_MESSAGE is not None:
-        return _HELP_MESSAGE
-    try:
-        _HELP_MESSAGE = read_text_resource("res/prepared_messages/help_message.txt")
-    except Exception as exc:
-        logger.error("加载 help_message 失败: %s", exc)
-        _HELP_MESSAGE = "帮助信息加载失败。"
-    return _HELP_MESSAGE
 
 
 class CommandDispatcher:
@@ -85,6 +73,11 @@ class CommandDispatcher:
         self._stats_analysis_results: dict[str, str] = {}
         self._stats_analysis_events: dict[str, asyncio.Event] = {}
 
+        commands_dir = Path(__file__).parent / "commands"
+        self.command_registry = CommandRegistry(commands_dir)
+        self.command_registry.load_commands()
+        logger.info("[命令] 命令系统初始化完成: dir=%s", commands_dir)
+
     def parse_command(self, text: str) -> Optional[dict[str, Any]]:
         """解析斜杠命令字符串
 
@@ -103,7 +96,7 @@ class CommandDispatcher:
         args_str = match.group(2).strip()
 
         logger.debug(
-            "[Command] parse text_len=%s cmd=%s args=%s",
+            "[命令] 解析命令: text_len=%s cmd=%s args=%s",
             len(text),
             cmd_name,
             args_str,
@@ -234,8 +227,14 @@ class CommandDispatcher:
             cleanup_cache_dir(RENDER_CACHE_DIR)
 
         except Exception as e:
-            logger.exception(f"[Stats] 生成统计图表失败: {e}")
-            await self.sender.send_group_message(group_id, f"❌ 生成统计图表失败: {e}")
+            error_id = uuid4().hex[:8]
+            logger.exception(
+                "[Stats] 生成统计图表失败: error_id=%s err=%s", error_id, e
+            )
+            await self.sender.send_group_message(
+                group_id,
+                f"❌ 生成统计图表失败，请稍后重试（错误码: {error_id}）",
+            )
 
     def _build_data_summary(self, summary: dict[str, Any], days: int) -> str:
         """构建用于 AI 分析的统计数据摘要"""
@@ -674,271 +673,185 @@ class CommandDispatcher:
             sender_id: 发送者 QQ 号
             command: 解析出的命令数据结构
         """
-        cmd_name = command["name"]
+        start_time = time.perf_counter()
+        cmd_name = str(command["name"])
         cmd_args = command["args"]
 
-        logger.info(f"[Command] 执行命令: /{cmd_name} | 参数: {cmd_args}")
+        logger.info("[命令] 执行命令: /%s | 参数=%s", cmd_name, cmd_args)
         logger.debug(
-            "[Command] dispatch group=%s sender=%s cmd=%s args_count=%s",
+            "[命令] 分发请求: group=%s sender=%s cmd=%s args_count=%s",
             group_id,
             sender_id,
             cmd_name,
             len(cmd_args),
         )
 
-        try:
-            # 公开命令
-            if cmd_name == "help":
-                await self._handle_help(group_id)
-            elif cmd_name == "stats":
-                await self._check_stats_rate_limit_and_handle(
-                    group_id, sender_id, cmd_args
-                )
-            elif cmd_name == "lsfaq":
-                await self._check_rate_limit_and_handle(
-                    group_id, sender_id, self._handle_lsfaq, group_id
-                )
-            elif cmd_name == "viewfaq":
-                await self._check_rate_limit_and_handle(
-                    group_id, sender_id, self._handle_viewfaq, group_id, cmd_args
-                )
-            elif cmd_name == "searchfaq":
-                await self._check_rate_limit_and_handle(
-                    group_id, sender_id, self._handle_searchfaq, group_id, cmd_args
-                )
-            elif cmd_name == "lsadmin":
-                await self._handle_lsadmin(group_id)
-
-            # 管理员命令
-            elif cmd_name == "delfaq":
-                if not self.config.is_admin(sender_id):
-                    await self._send_no_permission(
-                        group_id, sender_id, cmd_name, "管理员"
-                    )
-                    return
-                await self._check_rate_limit_and_handle(
-                    group_id, sender_id, self._handle_delfaq, group_id, cmd_args
-                )
-            elif cmd_name == "bugfix":
-                if not self.config.is_admin(sender_id):
-                    await self._send_no_permission(
-                        group_id, sender_id, cmd_name, "管理员"
-                    )
-                    return
-                await self._check_rate_limit_and_handle(
-                    group_id,
-                    sender_id,
-                    self._handle_bugfix,
-                    group_id,
-                    sender_id,
-                    cmd_args,
-                )
-
-            # 超级管理员命令
-            elif cmd_name == "addadmin":
-                if not self.config.is_superadmin(sender_id):
-                    await self._send_no_permission(
-                        group_id, sender_id, cmd_name, "超级管理员"
-                    )
-                    return
-                await self._handle_addadmin(group_id, cmd_args)
-            elif cmd_name == "rmadmin":
-                if not self.config.is_superadmin(sender_id):
-                    await self._send_no_permission(
-                        group_id, sender_id, cmd_name, "超级管理员"
-                    )
-                    return
-                await self._handle_rmadmin(group_id, cmd_args)
-
-            else:
-                logger.info(f"[Command] 未知命令: /{cmd_name}")
-                await self.sender.send_group_message(
-                    group_id, f"❌ 未知命令: {cmd_name}\n使用 /help 查看可用命令"
-                )
-        except Exception as e:
-            logger.exception(f"[Command] 执行 /{cmd_name} 失败: {e}")
-            await self.sender.send_group_message(group_id, f"❌ 命令执行失败: {e}")
-
-    async def _check_rate_limit_and_handle(
-        self, group_id: int, user_id: int, handler: Any, *args: Any
-    ) -> None:
-        """检查速率限制并执行"""
-        allowed, remaining = self.security.check_rate_limit(user_id)
-        if not allowed:
+        meta = self.command_registry.resolve(cmd_name)
+        if meta is None:
+            logger.info("[命令] 未知命令: /%s", cmd_name)
             await self.sender.send_group_message(
-                group_id, f"⏳ 操作太频繁，请 {remaining} 秒后再试"
+                group_id,
+                f"❌ 未知命令: {cmd_name}\n使用 /help 查看可用命令",
             )
             return
-        self.security.record_rate_limit(user_id)
-        await handler(*args)
 
-    async def _check_stats_rate_limit_and_handle(
-        self, group_id: int, user_id: int, args: list[str]
-    ) -> None:
-        """检查 /stats 命令的速率限制并执行
+        logger.info(
+            "[命令] 命令匹配成功: input=/%s resolved=/%s permission=%s rate_limit=%s",
+            cmd_name,
+            meta.name,
+            meta.permission,
+            meta.rate_limit,
+        )
 
-        规则：
-        - 超级管理员和管理员：无限制
-        - 普通用户：1小时/次
-        """
-        # 检查 stats 专用频率限制
-        if self.rate_limiter:
-            allowed, remaining = self.rate_limiter.check_stats(user_id)
+        allowed, role_name = self._check_command_permission(meta, sender_id)
+        if not allowed:
+            logger.warning(
+                "[命令] 权限校验失败: cmd=/%s sender=%s required=%s",
+                meta.name,
+                sender_id,
+                role_name,
+            )
+            await self._send_no_permission(group_id, sender_id, meta.name, role_name)
+            return
+
+        logger.debug(
+            "[命令] 权限校验通过: cmd=/%s sender=%s",
+            meta.name,
+            sender_id,
+        )
+
+        if not await self._check_command_rate_limit(meta, group_id, sender_id):
+            logger.warning(
+                "[命令] 速率限制拦截: cmd=/%s group=%s sender=%s",
+                meta.name,
+                group_id,
+                sender_id,
+            )
+            return
+
+        logger.debug(
+            "[命令] 速率限制通过: cmd=/%s group=%s sender=%s",
+            meta.name,
+            group_id,
+            sender_id,
+        )
+
+        context = CommandContext(
+            group_id=group_id,
+            sender_id=sender_id,
+            config=self.config,
+            sender=self.sender,
+            ai=self.ai,
+            faq_storage=self.faq_storage,
+            onebot=self.onebot,
+            security=self.security,
+            queue_manager=self.queue_manager,
+            rate_limiter=self.rate_limiter,
+            dispatcher=self,
+            registry=self.command_registry,
+        )
+
+        try:
+            await self.command_registry.execute(meta, cmd_args, context)
+            duration = time.perf_counter() - start_time
+            logger.info(
+                "[命令] 分发完成: cmd=/%s duration=%.3fs",
+                meta.name,
+                duration,
+            )
+        except Exception as e:
+            duration = time.perf_counter() - start_time
+            error_id = uuid4().hex[:8]
+            logger.exception(
+                "[命令] 执行失败: cmd=/%s error_id=%s err=%s",
+                meta.name,
+                error_id,
+                e,
+            )
+            logger.error(
+                "[命令] 分发失败: cmd=/%s duration=%.3fs error_id=%s",
+                meta.name,
+                duration,
+                error_id,
+            )
+            await self.sender.send_group_message(
+                group_id,
+                f"❌ 命令执行失败，请稍后重试（错误码: {error_id}）",
+            )
+
+    def _check_command_permission(
+        self,
+        command_meta: CommandMeta,
+        sender_id: int,
+    ) -> tuple[bool, str]:
+        permission = command_meta.permission
+        if permission == "superadmin":
+            return self.config.is_superadmin(sender_id), "超级管理员"
+        if permission == "admin":
+            return self.config.is_admin(sender_id), "管理员"
+        return True, ""
+
+    async def _check_command_rate_limit(
+        self,
+        command_meta: CommandMeta,
+        group_id: int,
+        sender_id: int,
+    ) -> bool:
+        rate_limit = command_meta.rate_limit
+        if rate_limit == "none":
+            logger.debug(
+                "[命令] 命令无需限流: cmd=/%s",
+                command_meta.name,
+            )
+            return True
+
+        if rate_limit == "stats":
+            if self.rate_limiter is None:
+                logger.warning(
+                    "[命令] stats 限流器缺失，跳过限流: cmd=/%s",
+                    command_meta.name,
+                )
+                return True
+            allowed, remaining = self.rate_limiter.check_stats(sender_id)
             if not allowed:
                 minutes = remaining // 60
                 seconds = remaining % 60
                 time_str = f"{minutes}分{seconds}秒" if minutes > 0 else f"{seconds}秒"
                 await self.sender.send_group_message(
-                    group_id, f"⏳ /stats 命令太频繁，请 {time_str}后再试"
+                    group_id,
+                    f"⏳ /stats 命令太频繁，请 {time_str}后再试",
                 )
-                return
-            self.rate_limiter.record_stats(user_id)
+                return False
+            self.rate_limiter.record_stats(sender_id)
+            logger.debug(
+                "[命令] stats 限流记录成功: cmd=/%s sender=%s",
+                command_meta.name,
+                sender_id,
+            )
+            return True
 
-        await self._handle_stats(group_id, user_id, args)
+        allowed, remaining = self.security.check_rate_limit(sender_id)
+        if not allowed:
+            await self.sender.send_group_message(
+                group_id,
+                f"⏳ 操作太频繁，请 {remaining} 秒后再试",
+            )
+            return False
+        self.security.record_rate_limit(sender_id)
+        logger.debug(
+            "[命令] 默认限流记录成功: cmd=/%s sender=%s",
+            command_meta.name,
+            sender_id,
+        )
+        return True
 
     async def _send_no_permission(
         self, group_id: int, sender_id: int, cmd_name: str, required_role: str
     ) -> None:
-        logger.warning(f"[Command] 权限不足: {sender_id} 尝试执行 /{cmd_name}")
+        logger.warning("[命令] 权限不足: sender=%s cmd=/%s", sender_id, cmd_name)
         await self.sender.send_group_message(
             group_id, f"⚠️ 权限不足：只有{required_role}可以使用此命令"
         )
-
-    async def _handle_help(self, group_id: int) -> None:
-        await self.sender.send_group_message(group_id, _get_help_message())
-
-    async def _handle_lsfaq(self, group_id: int) -> None:
-        faqs = await self.faq_storage.list_all(group_id)
-        if not faqs:
-            await self.sender.send_group_message(group_id, "📭 当前群组没有保存的 FAQ")
-            return
-        lines = ["📋 FAQ 列表：", ""]
-        for faq in faqs[:20]:
-            lines.append(f"📌 [{faq.id}] {faq.title}")
-            lines.append(f"   创建时间: {faq.created_at[:10]}")
-            lines.append("")
-        if len(faqs) > 20:
-            lines.append(f"... 还有 {len(faqs) - 20} 条")
-        await self.sender.send_group_message(group_id, "\n".join(lines))
-
-    async def _handle_viewfaq(self, group_id: int, args: list[str]) -> None:
-        if not args:
-            await self.sender.send_group_message(
-                group_id, "❌ 用法: /viewfaq <ID>\n示例: /viewfaq 20241205-001"
-            )
-            return
-        faq_id = args[0]
-        faq = await self.faq_storage.get(group_id, faq_id)
-        if not faq:
-            await self.sender.send_group_message(group_id, f"❌ FAQ 不存在: {faq_id}")
-            return
-        message = f"📖 FAQ: {faq.title}\n\n🆔 ID: {faq.id}\n👤 分析对象: {faq.target_qq}\n📅 时间范围: {faq.start_time} ~ {faq.end_time}\n🕐 创建时间: {faq.created_at}\n\n{faq.content}"
-        await self.sender.send_group_message(group_id, message)
-
-    async def _handle_searchfaq(self, group_id: int, args: list[str]) -> None:
-        if not args:
-            await self.sender.send_group_message(
-                group_id, "❌ 用法: /searchfaq <关键词>\n示例: /searchfaq 登录"
-            )
-            return
-        keyword = " ".join(args)
-        results = await self.faq_storage.search(group_id, keyword)
-        if not results:
-            await self.sender.send_group_message(
-                group_id, f'🔍 未找到包含 "{keyword}" 的 FAQ'
-            )
-            return
-        lines = [f'🔍 搜索 "{keyword}" 找到 {len(results)} 条结果：', ""]
-        for faq in results[:10]:
-            lines.append(f"📌 [{faq.id}] {faq.title}")
-            lines.append("")
-        if len(results) > 10:
-            lines.append(f"... 还有 {len(results) - 10} 条")
-        lines.append("\n使用 /viewfaq <ID> 查看详情")
-        await self.sender.send_group_message(group_id, "\n".join(lines))
-
-    async def _handle_delfaq(self, group_id: int, args: list[str]) -> None:
-        if not args:
-            await self.sender.send_group_message(
-                group_id, "❌ 用法: /delfaq <ID>\n示例: /delfaq 20241205-001"
-            )
-            return
-        faq_id = args[0]
-        faq = await self.faq_storage.get(group_id, faq_id)
-        if not faq:
-            await self.sender.send_group_message(group_id, f"❌ FAQ 不存在: {faq_id}")
-            return
-        if await self.faq_storage.delete(group_id, faq_id):
-            await self.sender.send_group_message(
-                group_id, f"✅ 已删除 FAQ: [{faq_id}] {faq.title}"
-            )
-        else:
-            await self.sender.send_group_message(group_id, f"❌ 删除失败: {faq_id}")
-
-    async def _handle_lsadmin(self, group_id: int) -> None:
-        lines = [f"👑 超级管理员: {self.config.superadmin_qq}"]
-        admins = [qq for qq in self.config.admin_qqs if qq != self.config.superadmin_qq]
-        if admins:
-            admin_list = "\n".join([f"- {qq}" for qq in admins])
-            lines.append(f"\n📋 管理员列表：\n{admin_list}")
-        else:
-            lines.append("\n📋 暂无其他管理员")
-        await self.sender.send_group_message(group_id, "\n".join(lines))
-
-    async def _handle_addadmin(self, group_id: int, args: list[str]) -> None:
-        if not args:
-            await self.sender.send_group_message(
-                group_id, "❌ 用法: /addadmin <QQ号>\n示例: /addadmin 123456789"
-            )
-            return
-        try:
-            new_admin_qq = int(args[0])
-        except ValueError:
-            await self.sender.send_group_message(
-                group_id, "❌ QQ 号格式错误，必须为数字"
-            )
-            return
-        if self.config.is_admin(new_admin_qq):
-            await self.sender.send_group_message(
-                group_id, f"⚠️ {new_admin_qq} 已经是管理员了"
-            )
-            return
-        try:
-            self.config.add_admin(new_admin_qq)
-            await self.sender.send_group_message(
-                group_id, f"✅ 已添加管理员: {new_admin_qq}"
-            )
-        except Exception as e:
-            logger.exception(f"添加管理员失败: {e}")
-            await self.sender.send_group_message(group_id, f"❌ 添加管理员失败: {e}")
-
-    async def _handle_rmadmin(self, group_id: int, args: list[str]) -> None:
-        if not args:
-            await self.sender.send_group_message(
-                group_id, "❌ 用法: /rmadmin <QQ号>\n示例: /rmadmin 123456789"
-            )
-            return
-        try:
-            target_qq = int(args[0])
-        except ValueError:
-            await self.sender.send_group_message(
-                group_id, "❌ QQ 号格式错误，必须为数字"
-            )
-            return
-        if self.config.is_superadmin(target_qq):
-            await self.sender.send_group_message(group_id, "❌ 无法移除超级管理员")
-            return
-        if not self.config.is_admin(target_qq):
-            await self.sender.send_group_message(group_id, f"⚠️ {target_qq} 不是管理员")
-            return
-        try:
-            self.config.remove_admin(target_qq)
-            await self.sender.send_group_message(
-                group_id, f"✅ 已移除管理员: {target_qq}"
-            )
-        except Exception as e:
-            logger.exception(f"移除管理员失败: {e}")
-            await self.sender.send_group_message(group_id, f"❌ 移除管理员失败: {e}")
 
     async def _handle_bugfix(
         self, group_id: int, admin_id: int, args: list[str]
@@ -990,8 +903,12 @@ class CommandDispatcher:
             await self.sender.send_group_message(group_id, result_msg)
 
         except Exception as e:
-            logger.exception(f"Bugfix 失败: {e}")
-            await self.sender.send_group_message(group_id, f"❌ Bug 修复分析失败: {e}")
+            error_id = uuid4().hex[:8]
+            logger.exception("Bugfix 失败: error_id=%s err=%s", error_id, e)
+            await self.sender.send_group_message(
+                group_id,
+                f"❌ Bug 修复分析失败，请稍后重试（错误码: {error_id}）",
+            )
 
     def _parse_bugfix_args(
         self, args: list[str]
@@ -1046,12 +963,13 @@ class CommandDispatcher:
         batch = await self.onebot.get_group_msg_history(group_id, count=2500)
         if not batch:
             return []
+        target_qqs_set = set(target_qqs)
         results = []
         for msg in batch:
             msg_time = parse_message_time(msg)
             if (
                 start_date <= msg_time <= end_date
-                and get_message_sender_id(msg) in target_qqs
+                and get_message_sender_id(msg) in target_qqs_set
             ):
                 results.append(msg)
         return sorted(results, key=lambda m: m.get("time", 0))

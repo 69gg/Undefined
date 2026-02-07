@@ -77,18 +77,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         elif context.get("user_id"):
             target_type = "private"
 
-    # 向后兼容：从 ai_client 获取
-    ai_client = context.get("ai_client")
-    if target_id is None and ai_client:
-        if ai_client.current_group_id:
-            target_id = ai_client.current_group_id
-            if not target_type:
-                target_type = "group"
-        elif ai_client.current_user_id:
-            target_id = ai_client.current_user_id
-            if not target_type:
-                target_type = "private"
-
     if not target_type:
         target_type = "group"
 

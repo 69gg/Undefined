@@ -1,19 +1,19 @@
-# Agent 目录 (Agents Directory)
+# 智能体目录
 
-AI Agent 目录，每个 Agent 是一个工具集合。
+智能体目录，每个智能体都是一个工具集合。
 
-## Agent 结构
+## 智能体结构
 
-每个 Agent 是一个目录，包含：
+每个智能体是一个目录，包含：
 
 ```
 agent_name/
 ├── intro.md          # 给主 AI 看的能力说明
 ├── intro.generated.md# 自动生成的补充说明（可选）
-├── prompt.md         # Agent 系统提示词（从文件加载）
-├── config.json       # Agent 定义（OpenAI function calling 格式）
-├── handler.py        # Agent 执行逻辑
-└── tools/            # Agent 专属子工具目录
+├── prompt.md         # 智能体系统提示词（从文件加载）
+├── config.json       # 智能体定义（OpenAI 函数调用格式）
+├── handler.py        # 智能体执行逻辑
+└── tools/            # 智能体专属子工具目录
     ├── tool1/
     ├── tool2/
     └── __init__.py
@@ -21,7 +21,7 @@ agent_name/
 
 ## 模型配置
 
-Agent 默认使用 `config.toml` 中的 `[models.agent]` 配置；同名环境变量仍可作为兼容覆盖（用于临时调试或无文件配置场景）。
+智能体默认使用 `config.toml` 中的 `[models.agent]` 配置；同名环境变量仍可作为兼容覆盖（用于临时调试或无文件配置场景）。
 
 推荐在 `config.toml` 配置：
 
@@ -46,9 +46,9 @@ AGENT_MODEL_THINKING_ENABLED=false
 AGENT_MODEL_THINKING_BUDGET_TOKENS=0
 ```
 
-## intro 自动生成（推荐）
+## 介绍自动生成（推荐）
 
-启动时会对 Agent 代码做 hash，如果检测到变更，则将补充说明写入 `intro.generated.md`。该文件会在加载时与 `intro.md` 合并。
+启动时会对智能体代码做哈希，如果检测到变更，则将补充说明写入 `intro.generated.md`。该文件会在加载时与 `intro.md` 合并。
 
 提示词文件位置：`res/prompts/agent_self_intro.txt`（已随 wheel 打包；运行时支持从包内读取，并可通过本地同路径文件覆盖）。
 

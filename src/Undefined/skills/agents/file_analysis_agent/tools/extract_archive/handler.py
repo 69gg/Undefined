@@ -35,7 +35,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"解析压缩包失败: {e}")
-        return f"解析压缩包失败: {e}"
+        return "解析压缩包失败，文件可能已损坏或格式不支持"
 
 
 async def _extract_zip(path: Path, action: str, extract_path: str | None) -> str:

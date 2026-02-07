@@ -6,12 +6,8 @@ logger = logging.getLogger(__name__)
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """获取群成员列表"""
-    ai_client = context.get("ai_client")
+    request_id = str(context.get("request_id", "-"))
     group_id = args.get("group_id") or context.get("group_id")
-    if not group_id:
-        # 向后兼容
-        ai_client = context.get("ai_client")
-        group_id = ai_client.current_group_id if ai_client else None
     count = args.get("count", 20)
     role_filter = args.get("role")
 
@@ -72,5 +68,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "\n".join(result_parts)
 
     except Exception as e:
-        logger.exception(f"获取群成员列表失败: {e}")
-        return f"获取失败：{str(e)}"
+        logger.exception(
+            "获取群成员列表失败: group=%s request_id=%s err=%s",
+            group_id,
+            request_id,
+            e,
+        )
+        return "获取失败：群成员列表服务暂时不可用，请稍后重试"

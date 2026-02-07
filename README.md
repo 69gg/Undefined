@@ -3,9 +3,10 @@
     <td width="70%" valign="top">
       <div align="center">
         <h1>Undefined</h1>
-        <em>A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture.</em>
+        <em>基于自研架构的高性能、高可扩展 QQ 群聊与私聊机器人。</em>
         <br/><br/>
-        <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11+-blue.svg" alt="Python"></a>
+        <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11--3.13-blue.svg" alt="Python"></a>
+        <a href="https://docs.astral.sh/uv/"><img src="https://img.shields.io/badge/uv-auto%20python%20manager-6a5acd.svg" alt="uv"></a>
         <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License"></a>
         <a href="https://deepwiki.com/69gg/Undefined"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
         <br/><br/>
@@ -106,7 +107,7 @@ graph TB
 
     %% ==================== AI 核心能力层 ====================
     subgraph AILayer["AI 核心能力层 (src/Undefined/ai/)"]
-        AIClient["AIClient<br/>AI 客户端主入口<br/>[client.py]<br/>• 技能热重载 • MCP 初始化<br/>• Agent intro 生成"]
+        AIClient["AIClient<br/>AI 客户端主入口<br/>[client.py]<br/>• 技能热重载 • MCP 初始化<br/>• Agent 介绍生成"]
         PromptBuilder["PromptBuilder<br/>提示词构建器<br/>[prompts.py]"]
         ModelRequester["ModelRequester<br/>模型请求器<br/>[llm.py]<br/>• OpenAI SDK • 工具清理<br/>• Thinking 提取"]
         ToolManager["ToolManager<br/>工具管理器<br/>[tooling.py]<br/>• 工具执行 • Agent 工具合并<br/>• MCP 工具注入"]
@@ -277,6 +278,10 @@ graph TB
 
 提供 pip/uv tool 安装与源码部署两种方式：前者适合直接使用；后者适合深度自定义与二次开发。
 
+> Python 版本要求：`3.11`~`3.13`（包含）。
+>
+> 若使用 `uv`，通常不需要你手动限制系统 Python 版本；`uv` 会根据项目约束自动选择/下载兼容解释器。
+
 ### pip/uv tool 部署（推荐用于直接使用）
 
 适合只想“安装后直接跑”的场景，`Undefined`/`Undefined-webui` 命令会作为可执行入口安装到你的环境中。
@@ -284,11 +289,14 @@ graph TB
 ```bash
 # 方式 1：pip
 pip install -U Undefined-bot
-playwright install
+python -m playwright install
 
 # 方式 2：uv tool（建议使用该方式进行隔离安装）
 # 安装uv（若未安装）
 pip install uv
+
+# 可选：显式指定兼容解释器（不指定时 uv 也会自动选择）
+# uv python install 3.12
 
 uv tool install Undefined-bot
 uv tool run --from Undefined-bot playwright install
@@ -314,6 +322,21 @@ Undefined-webui
 > `Undefined-webui` 会在检测到当前目录缺少 `config.toml` 时，自动从 `config.toml.example` 生成一份，便于直接在 WebUI 中修改。
 
 > 提示：资源文件已随包发布，支持在非项目根目录启动；如需自定义内容，请参考下方说明。
+
+#### 完整日志（排查用）
+
+如果你希望保留完整安装/运行日志，可直接重定向到文件：
+
+```bash
+# pip 安装日志
+python -m pip install -U Undefined-bot 2>&1 | tee install.log
+
+# 运行日志（CLI）
+Undefined 2>&1 | tee undefined.log
+
+# 运行日志（WebUI）
+Undefined-webui 2>&1 | tee undefined-webui.log
+```
 
 #### pip/uv tool 部署的自定义方式
 
@@ -368,7 +391,11 @@ git submodule update --init --recursive
 # 安装 uv (如果尚未安装)
 pip install uv
 
+# 可选：预装一个兼容解释器（推荐 3.12）
+# uv python install 3.12
+
 # 同步依赖
+# uv 会根据 pyproject.toml 自动处理 3.11~3.13 的解释器选择
 uv sync
 ```
 
@@ -388,7 +415,7 @@ cp config.toml.example config.toml
 
 #### 源码部署的自定义指南
 
-- 自定义提示词/预置文案：直接修改仓库根目录的 `res/`（例如 `res/prompts/`、`res/prepared_messages/`）。
+- 自定义提示词/预置文案：直接修改仓库根目录的 `res/`（例如 `res/prompts/`）。
 - 自定义图片资源：修改 `img/` 下的对应文件（例如 `img/xlwy.jpg`）。
 - 若你希望“运行目录覆盖优先”：在启动目录放置 `./res/...`，会优先于默认资源生效（便于一套安装，多套运行配置）。
 
@@ -409,7 +436,7 @@ uv run Undefined-webui
 
 #### 5. 跨平台与资源路径（重要）
 
-- 资源读取：运行时会优先从运行目录加载同名 `res/...` / `img/...`（便于覆盖），若不存在再使用安装包自带资源；并提供仓库结构兜底查找，因此从任意目录启动也能正常加载提示词/帮助信息。
+- 资源读取：运行时会优先从运行目录加载同名 `res/...` / `img/...`（便于覆盖），若不存在再使用安装包自带资源；并提供仓库结构兜底查找，因此从任意目录启动也能正常加载提示词与资源文案。
 - 资源覆盖：如需覆盖默认提示词/文案，可在当前工作目录放置同名的 `res/...` 文件；或在源码目录直接修改 `res/`。
 - 并发写入：运行时会为 JSON/日志类文件使用“锁文件 + 原子替换”写入策略，Windows/Linux/macOS 行为一致（会生成 `*.lock` 文件）。
 
@@ -418,6 +445,11 @@ uv run Undefined-webui
 在 `config.toml` 文件中配置以下核心参数（示例见 `config.toml.example`）：
 
 - **基础配置**：`[core]` 与 `[onebot]`
+  - `process_every_message`：是否处理每条群消息（默认开启）；关闭后仅处理 `@机器人`、私聊、拍一拍（群消息仍会写入历史）
+  - `process_private_message`：是否处理私聊消息；关闭后仅记录私聊历史，不触发 AI 回复
+  - `process_poke_message`：是否响应拍一拍事件
+  - `keyword_reply_enabled`：是否启用群聊关键词自动回复（如“心理委员”）
+  - `context_recent_messages_limit`：注入给模型的最近历史消息条数上限（`0-200`，`0` 表示不注入）
 - **会话白名单（推荐）**：`[access]`
   - `allowed_group_ids`：允许处理/发送消息的群号列表
   - `allowed_private_ids`：允许处理/发送消息的私聊 QQ 列表
@@ -425,6 +457,8 @@ uv run Undefined-webui
   - 规则：只要 `allowed_group_ids` 或 `allowed_private_ids` 任一非空，就会启用限制模式；未在白名单内的群/私聊消息将被直接忽略，且所有消息发送也会被拦截（包括工具调用与定时任务）。
 - **模型配置**：`[models.chat]` / `[models.vision]` / `[models.agent]` / `[models.security]`
   - `api_url`：OpenAI 兼容 **base URL**（如 `https://api.openai.com/v1` / `http://127.0.0.1:8000/v1`）
+  - `models.security.enabled`：是否启用安全模型检测（默认开启）
+  - `queue_interval_seconds`：队列发车间隔（秒），每个模型独立生效
   - DeepSeek Thinking + Tool Calls：若使用 `deepseek-reasoner` 或 `deepseek-chat` + `thinking={"type":"enabled"}` 且启用了工具调用，建议启用 `deepseek_new_cot_support`
 - **日志配置**：`[logging]`
 - **Token 统计归档**：`[token_usage]`（默认 5MB，<=0 禁用）
@@ -439,6 +473,12 @@ uv run Undefined-webui
 > Windows 用户注意：`config.toml` 里的路径不要直接写 `D:\xxx\yyy`（反斜杠会被当作转义）。推荐用 `D:/xxx/yyy`，或用单引号：`'D:\xxx\yyy'`，或在双引号里写双反斜杠：`"D:\\xxx\\yyy"`。
 
 WebUI 支持：配置分组表单快速编辑、Diff 预览、日志尾部查看（含自动刷新）。
+
+#### 配置热更新说明
+
+- 默认自动热更新：修改 `config.toml` 后，配置会自动生效
+- 需重启生效的项（黑名单）：`log_level`、`logging.file_path`、`logging.max_size_mb`、`logging.backup_count`、`onebot.ws_url`、`onebot.token`、`webui.url`、`webui.port`、`webui.password`
+- 模型发车节奏：`models.*.queue_interval_seconds` 支持热更新并立即生效
 
 #### 会话白名单示例
 
@@ -530,7 +570,7 @@ Undefined 欢迎开发者参与共建！
 *   **目录结构**:
     ```
     src/Undefined/
-    ├── ai/            # AI Runtime (client、prompt、tooling、summary、多模态)
+    ├── ai/            # AI 运行时（client、prompt、tooling、summary、多模态）
     ├── skills/        # 技能插件核心目录
     ├── services/      # 核心服务 (Queue, Command, Security)
     ├── utils/         # 通用工具

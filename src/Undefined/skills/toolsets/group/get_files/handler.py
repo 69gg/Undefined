@@ -7,12 +7,8 @@ logger = logging.getLogger(__name__)
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """列出群文件列表及其下载链接"""
     """获取群文件列表"""
-    ai_client = context.get("ai_client")
+    request_id = str(context.get("request_id", "-"))
     group_id = args.get("group_id") or context.get("group_id")
-    if not group_id:
-        # 向后兼容
-        ai_client = context.get("ai_client")
-        group_id = ai_client.current_group_id if ai_client else None
 
     if group_id is None:
         return "请提供群号（group_id 参数），或者在群聊中调用"
@@ -85,5 +81,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "\n".join(result_parts)
 
     except Exception as e:
-        logger.exception(f"获取群文件失败: {e}")
-        return f"获取失败：{str(e)} (可能当前 OneBot 实现不支持该接口)"
+        logger.exception(
+            "获取群文件失败: group=%s request_id=%s err=%s",
+            group_id,
+            request_id,
+            e,
+        )
+        return "获取失败：群文件服务暂时不可用，或当前 OneBot 实现不支持该接口"

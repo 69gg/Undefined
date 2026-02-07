@@ -7,12 +7,8 @@ logger = logging.getLogger(__name__)
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """获取群员在群内的荣誉信息（如龙王、群聊之火等）"""
     """获取群荣誉信息"""
-    ai_client = context.get("ai_client")
+    request_id = str(context.get("request_id", "-"))
     group_id = args.get("group_id") or context.get("group_id")
-    if not group_id:
-        # 向后兼容
-        ai_client = context.get("ai_client")
-        group_id = ai_client.current_group_id if ai_client else None
     honor_type = args.get("type", "all")
 
     if group_id is None:
@@ -81,5 +77,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "\n".join(result_parts)
 
     except Exception as e:
-        logger.exception(f"获取群荣誉失败: {e}")
-        return f"获取失败：{str(e)} (可能当前 OneBot 实现不支持该接口)"
+        logger.exception(
+            "获取群荣誉失败: group=%s request_id=%s err=%s",
+            group_id,
+            request_id,
+            e,
+        )
+        return "获取失败：群荣誉服务暂时不可用，或当前 OneBot 实现不支持该接口"

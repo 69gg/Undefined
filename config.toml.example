@@ -13,6 +13,21 @@ admin_qq = []
 # zh: 音频转发代理QQ号（用于群聊音频转发，可选）。
 # en: Audio forward proxy QQ number (for group audio forwarding, optional).
 forward_proxy_qq = 0
+# zh: 是否处理每条群消息。关闭后仅处理 @机器人、私聊和拍一拍（推荐默认开启）。
+# en: Process every group message. If disabled, only @mentions, private chats, and pokes are handled (recommended: enabled).
+process_every_message = true
+# zh: 是否处理私聊消息。关闭后将只记录私聊历史，不触发 AI 回复。
+# en: Process private messages. If disabled, private chat history is still recorded but AI replies are skipped.
+process_private_message = true
+# zh: 是否响应拍一拍。关闭后拍一拍事件将被忽略。
+# en: Respond to poke events. If disabled, poke events are ignored.
+process_poke_message = true
+# zh: 是否启用群聊关键词自动回复（例如“心理委员”触发）。
+# en: Enable keyword auto-replies in group chats (e.g. the "心理委员" trigger).
+keyword_reply_enabled = true
+# zh: 注入给模型的最近历史消息条数上限（0-200，0 表示不注入历史）。
+# en: Max number of recent messages injected as model context (0-200; 0 disables history injection).
+context_recent_messages_limit = 20
 
 # zh: 会话白名单（访问控制）。只要本段任一列表非空，系统将进入“限制模式”：未在白名单内的群/私聊会被忽略，且所有消息发送将被拦截。
 # en: Session allowlist (access control). If either the group or private allowlist is non-empty, the bot enters "allowlist mode": groups or private chats not in the allowlists will be ignored and outgoing messages will be blocked.
@@ -54,6 +69,9 @@ model_name = ""
 # zh: 最大生成 tokens。
 # en: Max generation tokens.
 max_tokens = 8192
+# zh: 队列发车间隔（秒）。
+# en: Queue interval (seconds).
+queue_interval_seconds = 1.0
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
 thinking_enabled = false
@@ -76,6 +94,9 @@ api_key = ""
 # zh: Vision 模型名称。
 # en: Vision model name.
 model_name = ""
+# zh: 队列发车间隔（秒）。
+# en: Queue interval (seconds).
+queue_interval_seconds = 1.0
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
 thinking_enabled = false
@@ -89,6 +110,9 @@ deepseek_new_cot_support = false
 # zh: 安全模型配置（用于防注入检测和注入后回复生成）。
 # en: Security model config (injection detection and post-injection responses).
 [models.security]
+# zh: 是否启用安全模型检测与注入响应（推荐开启）。
+# en: Enable security-model detection and injection response (recommended).
+enabled = true
 # zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
 # en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
 api_url = ""
@@ -101,6 +125,9 @@ model_name = ""
 # zh: 可选限制：最大生成 tokens。
 # en: Optional limit: max generation tokens.
 max_tokens = 100
+# zh: 队列发车间隔（秒）。
+# en: Queue interval (seconds).
+queue_interval_seconds = 1.0
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
 thinking_enabled = false
@@ -126,6 +153,9 @@ model_name = ""
 # zh: 可选限制：最大生成 tokens。
 # en: Optional limit: max generation tokens.
 max_tokens = 4096
+# zh: 队列发车间隔（秒）。
+# en: Queue interval (seconds).
+queue_interval_seconds = 1.0
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
 thinking_enabled = false
@@ -165,8 +195,11 @@ log_thinking = true
 # zh: 工具名分隔符：当工具原始名称包含 '.'（例如 scheduler.create_schedule_task / mcp.server.tool）时，发送给模型前会把 '.' 映射为该分隔符。
 # en: Tool-name delimiter: map '.' to this delimiter before sending tools to the model.
 dot_delimiter = "-_-"
-# zh: description 最大长度（超出会截断）。
-# en: Description max length (truncated when exceeded).
+# zh: 是否启用 tools.description 截断。关闭时不会按长度截断，仅做清理/规范化。
+# en: Enable truncation for tools.description. If disabled, no length-based truncation is applied.
+description_truncate_enabled = false
+# zh: description 最大长度（仅在开启 description_truncate_enabled 时生效）。
+# en: Description max length (used only when description_truncate_enabled is enabled).
 description_max_len = 1024
 # zh: 是否输出逐条清洗详情日志（INFO）。
 # en: Log per-item sanitization details (INFO).
@@ -232,6 +265,32 @@ http_proxy = ""
 # zh: 例如 http://127.0.0.1:7890（也可使用环境变量 "HTTPS_PROXY"）。
 # en: e.g. http://127.0.0.1:7890 (or use the "HTTPS_PROXY" environment variable).
 https_proxy = ""
+
+# zh: 网络请求配置（全局默认）。
+# en: Network request settings (global defaults).
+[network]
+# zh: 默认请求超时（秒），用于多数工具的 HTTP 请求。
+# en: Default request timeout in seconds for most HTTP tool calls.
+request_timeout_seconds = 30.0
+# zh: 默认重试次数（0-5）。
+# en: Default retry count (0-5).
+request_retries = 0
+
+# zh: 第三方 API 基础地址（便于自定义镜像或私有网关）。
+# en: Third-party API base URLs (for mirrors or private gateways).
+[api_endpoints]
+# zh: XXAPI 基础地址。
+# en: XXAPI base URL.
+xxapi_base_url = "https://v2.xxapi.cn"
+# zh: 星之阁 API 基础地址。
+# en: Xingzhige API base URL.
+xingzhige_base_url = "https://api.xingzhige.com"
+# zh: JKYAI API 基础地址。
+# en: JKYAI API base URL.
+jkyai_base_url = "https://api.jkyai.top"
+# zh: 心知天气 API 基础地址。
+# en: Seniverse API base URL.
+seniverse_base_url = "https://api.seniverse.com/v3"
 
 # zh: 天气 API 配置（心知天气）。
 # en: Weather API config (Seniverse).

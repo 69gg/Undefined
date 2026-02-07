@@ -1,4 +1,4 @@
-# 技能目录 (Skills Directory)
+# 技能目录
 
 技能目录，包含基础工具（tools）、智能代理（agents）和工具集合（toolsets）。
 
@@ -36,9 +36,9 @@ skills/
         └── update_schedule_task/
 ```
 
-## Tools vs Agents vs Toolsets
+## 工具、智能体与工具集对比
 
-### Tools（基础工具）
+### 基础工具
 
 - **定位**: 单一功能的原子操作
 - **调用方式**: 直接暴露给主 AI
@@ -46,7 +46,7 @@ skills/
 - **适用场景**: 通用、高频使用的简单操作
 - **示例**: `send_message`, `get_recent_messages`, `save_memory`, `end`
 
-### Toolsets（工具集合）
+### 工具集
 
 - **定位**: 按功能分类的相关工具组
 - **调用方式**: 直接暴露给主 AI
@@ -55,7 +55,7 @@ skills/
 - **适用场景**: 功能相关、需要分组管理的工具
 - **示例**: `render.render_html`, `scheduler.create_schedule_task`, `render.render_markdown`
 
-### Agents（智能代理）
+### 智能体
 
 - **定位**: 封装复杂任务的 AI Agent
 - **调用方式**: 暴露给主 AI，内部可调用多个子工具
@@ -67,30 +67,30 @@ skills/
 
 ## 运行机制（重要）
 
-- **延迟加载 (Lazy Load)**: 只在首次执行时才导入 `handler.py`，启动更快。
+- **延迟加载**: 仅在首次执行时才导入 `handler.py`，加快启动速度。
 - **结构化日志 + 统计**: 统一输出 `event=execute`、`status=success/timeout/error` 等结构化字段，并记录执行耗时与成功/失败计数。
-- **超时与取消**: 所有技能执行默认 120s 超时，超时会返回提示并记录统计。
-- **热重载 (Hot Reload)**: 自动扫描 `skills/` 目录，检测到 `config.json` 或 `handler.py` 变更后自动重载。
+- **超时与取消**: 所有技能执行默认 120 秒超时，超时会返回提示并记录统计。
+- **热重载**: 自动扫描 `skills/` 目录，检测到 `config.json` 或 `handler.py` 变更后自动重载。
 
 ## 选择指南
 
-| 特性 | Tools | Toolsets | Agents |
-|------|-------|----------|--------|
+| 特性 | 基础工具 | 工具集 | 智能体 |
+|------|----------|--------|--------|
 | 复杂度 | 低 | 中 | 高 |
-| 调用层级 | 直接调用 | 直接调用 | 间接调用（通过 prompt） |
+| 调用层级 | 直接调用 | 直接调用 | 间接调用（通过提示词） |
 | 内部工具 | 无 | 无 | 可包含多个子工具 |
 | 适用场景 | 通用原子操作 | 功能分组工具 | 领域复杂任务 |
 
 ## 添加新技能
 
-### 添加 Tools
+### 添加基础工具
 
 1. 在 `skills/tools/` 下创建新目录
-2. 添加 `config.json`（工具定义，OpenAI function calling 格式）
+2. 添加 `config.json`（工具定义，OpenAI 函数调用格式）
 3. 添加 `handler.py`（执行逻辑，必须包含 `async def execute(args, context)`）
 4. 自动被 `ToolRegistry` 发现和注册
 
-### 添加 Toolsets
+### 添加工具集
 
 1. 在 `skills/toolsets/` 下创建分类目录（如 `my_category/`）
 2. 在分类目录下创建工具目录（如 `my_tool/`）
@@ -100,12 +100,12 @@ skills/
 
 详细说明请参考 [toolsets/README.md](./toolsets/README.md)
 
-### 添加 Agents
+### 添加智能体
 
 1. 在 `skills/agents/` 下创建新目录
 2. 添加 `intro.md`（给主 AI 看的能力说明）
 3. （可选）生成 `intro.generated.md`（自动补充说明，系统启动时可自动生成）
-4. 添加 `prompt.md`（Agent 系统提示词）
+4. 添加 `prompt.md`（智能体系统提示词）
 5. 添加 `config.json`（Agent 定义）
 6. 添加 `handler.py`（Agent 执行逻辑）
 7. 在 `tools/` 子目录中添加子工具（可选）

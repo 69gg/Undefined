@@ -195,7 +195,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     except Exception as e:
         logger.exception(f"分析代码失败: {e}")
-        return f"分析代码失败: {e}"
+        return "分析代码失败，请稍后重试"
 
 
 def _detect_language(path: Path, content: str) -> str:

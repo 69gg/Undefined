@@ -27,6 +27,7 @@ from Undefined.services.security import SecurityService
 from Undefined.services.command import CommandDispatcher
 from Undefined.services.ai_coordinator import AICoordinator
 from Undefined.utils.resources import resolve_resource_path
+from Undefined.utils.queue_intervals import build_model_queue_intervals
 
 from Undefined.scheduled_task_storage import ScheduledTaskStorage
 from Undefined.utils.logging import log_debug_json, redact_string
@@ -49,7 +50,7 @@ class MessageHandler:
         self.onebot = onebot
         self.ai = ai
         self.faq_storage = faq_storage
-        # 初始化 Utils
+        # 初始化工具组件
         self.history_manager = MessageHistoryManager()
         self.sender = MessageSender(onebot, self.history_manager, config.bot_qq, config)
 
@@ -57,6 +58,11 @@ class MessageHandler:
         self.security = SecurityService(config, ai._http_client)
         self.rate_limiter = RateLimiter(config)
         self.queue_manager = QueueManager()
+        self.queue_manager.update_model_intervals(build_model_queue_intervals(config))
+
+        # 设置队列管理器到 AIClient（触发 Agent 介绍生成器启动）
+        ai.set_queue_manager(self.queue_manager)
+
         self.command_dispatcher = CommandDispatcher(
             config,
             self.sender,
@@ -93,7 +99,14 @@ class MessageHandler:
             target_id = event.get("target_id", 0)
             # 只有拍机器人才响应
             if target_id != self.config.bot_qq:
-                logger.debug(f"[通知] 忽略拍一拍目标非机器人: target={target_id}")
+                logger.debug(
+                    "[通知] 忽略拍一拍目标非机器人: target=%s",
+                    target_id,
+                )
+                return
+
+            if not self.config.should_process_poke_message():
+                logger.debug("[消息策略] 已关闭拍一拍处理，忽略此次 poke 事件")
                 return
 
             poke_group_id: int = event.get("group_id", 0)
@@ -119,9 +132,11 @@ class MessageHandler:
                     return
 
             logger.info(
-                f"[通知] 收到拍一拍: group={poke_group_id}, sender={poke_sender_id}"
+                "[通知] 收到拍一拍: group=%s sender=%s",
+                poke_group_id,
+                poke_sender_id,
             )
-            logger.debug(f"[通知] 拍一拍事件数据: {str(event)[:200]}")
+            logger.debug("[通知] 拍一拍事件数据: %s", str(event)[:200])
 
             if poke_group_id == 0:
                 logger.info("[通知] 私聊拍一拍，触发私聊回复")
@@ -133,7 +148,10 @@ class MessageHandler:
                     sender_name=str(poke_sender_id),
                 )
             else:
-                logger.info(f"[通知] 群聊拍一拍，触发群聊回复: group={poke_group_id}")
+                logger.info(
+                    "[通知] 群聊拍一拍，触发群聊回复: group=%s",
+                    poke_group_id,
+                )
                 await self.ai_coordinator.handle_auto_reply(
                     poke_group_id,
                     poke_sender_id,
@@ -170,23 +188,31 @@ class MessageHandler:
                     user_info = await self.onebot.get_stranger_info(private_sender_id)
                     if user_info:
                         user_name = user_info.get("nickname", "")
-                except Exception as e:
-                    logger.warning(f"获取用户昵称失败: {e}")
+                except Exception as exc:
+                    logger.warning("获取用户昵称失败: %s", exc)
 
             text = extract_text(private_message_content, self.config.bot_qq)
             safe_text = redact_string(text)
             logger.info(
-                f"[私聊消息] sender={private_sender_id} name={user_name or private_sender_nickname} | {safe_text[:100]}"
+                "[私聊消息] 发送者=%s 昵称=%s 内容=%s",
+                private_sender_id,
+                user_name or private_sender_nickname,
+                safe_text[:100],
             )
 
             # 保存私聊消息到历史记录（保存处理后的内容）
-            # 使用新的 utils
+            # 使用新的工具函数解析内容
             parsed_content = await parse_message_content_for_history(
-                private_message_content, self.config.bot_qq, self.onebot.get_msg
+                private_message_content,
+                self.config.bot_qq,
+                self.onebot.get_msg,
+                self.onebot.get_forward_msg,
             )
             safe_parsed = redact_string(parsed_content)
             logger.debug(
-                f"[历史记录] 保存私聊: user={private_sender_id}, content={safe_parsed[:50]}..."
+                "[历史记录] 保存私聊: user=%s content=%s...",
+                private_sender_id,
+                safe_parsed[:50],
             )
             await self.history_manager.add_private_message(
                 user_id=private_sender_id,
@@ -197,6 +223,13 @@ class MessageHandler:
 
             # 如果是 bot 自己的消息，只保存不触发回复，避免无限循环
             if private_sender_id == self.config.bot_qq:
+                return
+
+            if not self.config.should_process_private_message():
+                logger.debug(
+                    "[消息策略] 已关闭私聊处理: user=%s",
+                    private_sender_id,
+                )
                 return
 
             # 私聊消息直接触发回复
@@ -253,7 +286,10 @@ class MessageHandler:
 
         # 使用新的 utils
         parsed_content = await parse_message_content_for_history(
-            message_content, self.config.bot_qq, self.onebot.get_msg
+            message_content,
+            self.config.bot_qq,
+            self.onebot.get_msg,
+            self.onebot.get_forward_msg,
         )
         safe_parsed = redact_string(parsed_content)
         logger.debug(
@@ -274,8 +310,22 @@ class MessageHandler:
         if sender_id == self.config.bot_qq:
             return
 
+        # 检查是否 @ 了机器人（后续分流共用）
+        is_at_bot = self.ai_coordinator._is_at_bot(message_content)
+
+        # 关闭“每条消息处理”后，仅处理 @ 消息（私聊/拍一拍在其他分支中处理）
+        if not self.config.should_process_group_message(is_at_bot=is_at_bot):
+            logger.debug(
+                "[消息策略] 跳过群消息处理: group=%s sender=%s process_every_message=%s at_bot=%s",
+                group_id,
+                sender_id,
+                self.config.process_every_message,
+                is_at_bot,
+            )
+            return
+
         # 关键词自动回复：心理委员 (使用原始消息内容提取文本，保证关键词触发不受影响)
-        if matches_xinliweiyuan(text):
+        if self.config.keyword_reply_enabled and matches_xinliweiyuan(text):
             rand_val = random.random()
             if rand_val < 0.1:  # 10% 发送图片
                 try:
@@ -304,9 +354,6 @@ class MessageHandler:
 
         # 提取文本内容
         # (已在上方提取用于日志记录)
-
-        # 检查是否 @ 了机器人
-        is_at_bot = self.ai_coordinator._is_at_bot(message_content)
 
         # 只有被@时才处理斜杠命令
         if is_at_bot:
