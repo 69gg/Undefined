@@ -16,6 +16,7 @@ graph TB
     subgraph EntryPoint["核心入口层 (src/Undefined/)"]
         Main["main.py<br/>启动入口"]
         ConfigLoader["ConfigManager<br/>配置管理器<br/>[config/manager.py + loader.py]"]
+        ConfigHotReload["ConfigHotReload<br/>热更新应用器<br/>[config/hot_reload.py]"]
         ConfigModels["配置模型<br/>[config/models.py]<br/>ChatModelConfig<br/>VisionModelConfig<br/>SecurityModelConfig<br/>AgentModelConfig"]
         OneBotClient["OneBotClient<br/>WebSocket 客户端<br/>[onebot.py]"]
         Context["RequestContext<br/>请求上下文<br/>[context.py]"]
@@ -44,7 +45,7 @@ graph TB
                 Q_Normal["群聊普通队列<br/>优先级: 普通<br/>自动修剪: 保留最新2条"]
             end
             
-            DispatcherLoop[("1Hz 非阻塞<br/>发车循环<br/>每秒自动发车")]
+            DispatcherLoop[("按模型节奏<br/>发车循环<br/>默认 1Hz")]
         end
     end
 
@@ -157,10 +158,14 @@ graph TB
     
     %% 核心入口层内部
     Main -->|"初始化"| ConfigLoader
+    Main -->|"订阅变更"| ConfigHotReload
     Main -->|"创建"| OneBotClient
     Main -->|"创建"| AIClient
     ConfigLoader --> ConfigModels
     ConfigLoader -->|"读取"| File_Config
+    ConfigLoader -->|"变更回调"| ConfigHotReload
+    ConfigHotReload -->|"热更新"| AIClient
+    ConfigHotReload -->|"热更新"| QueueManager
     WebUI -->|"读写"| File_Config
     OneBotClient -->|"消息事件"| MessageHandler
     
@@ -250,7 +255,7 @@ graph TB
     classDef agent fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
     
     class User,Admin,OneBotServer,LLM_API external
-    class Main,ConfigLoader,ConfigModels,OneBotClient,Context,WebUI core
+    class Main,ConfigLoader,ConfigHotReload,ConfigModels,OneBotClient,Context,WebUI core
     class MessageHandler,SecurityService,InjectionAgent,CommandDispatcher,AICoordinator message
     class AIClient,PromptBuilder,ModelRequester,ToolManager,MultimodalAnalyzer,SummaryService,TokenCounter,Parsing ai
     class ToolRegistry,AgentRegistry,AgentToolRegistry,IntroGenerator skills
@@ -310,7 +315,7 @@ sequenceDiagram
             AC->>QM: add_group_mention/normal_request()
             
             %% 队列处理
-            QM->>QM: 1Hz 发车循环
+            QM->>QM: 按模型节奏发车循环
             QM->>AC: execute_reply()
             
             %% AI 调用
@@ -489,7 +494,7 @@ graph TB
         subgraph QueueManager["QueueManager<br/>队列管理器"]
             direction TB
             Start["启动"]
-            Loop["1Hz 循环<br/>每秒发车一次"]
+            Loop["按模型节奏循环<br/>默认 1Hz"]
             Check["检查各队列"]
             Dispatch["分发请求"]
             Exec["执行回调"]
@@ -537,6 +542,7 @@ graph TB
             F2["优先级: 四级优先级,<br/>确保重要消息优先响应"]
             F3["隔离性: 每个模型独立队列,<br/>互不干扰"]
             F4["自动修剪: 普通队列超过10条时,<br/>只保留最新2条"]
+            F5["可配置节奏: 每个模型可独立设置<br/>队列发车间隔"]
         end
     end
     
@@ -637,7 +643,7 @@ graph LR
 | 配置类别 | 关键配置项 | 说明 |
 |---------|-----------|------|
 | **基础配置** | `core.bot_qq`, `core.superadmin_qq`, `onebot.ws_url` | 机器人身份和连接 |
-| **模型配置** | `models.chat` / `models.vision` / `models.agent` / `models.security` | 四类模型独立配置 |
+| **模型配置** | `models.chat` / `models.vision` / `models.agent` / `models.security` | 四类模型独立配置（含 `queue_interval_seconds`） |
 | **功能开关** | `skills.hot_reload`, `skills.intro_autogen_enabled` | 热重载和自动生成 |
 | **日志配置** | `logging.level`, `logging.file_path`, `logging.max_size_mb` | 日志系统 |
 | **MCP 配置** | `mcp.config_path` | MCP 配置文件路径 |
@@ -651,7 +657,7 @@ graph LR
 ### 8层架构分层
 
 1. **外部实体层**：用户、管理员、OneBot 协议端 (NapCat/Lagrange.Core)、大模型 API 服务商
-2. **核心入口层**：main.py 启动入口、配置管理器 (config/loader.py)、OneBotClient (onebot.py)、RequestContext (context.py)
+2. **核心入口层**：main.py 启动入口、配置管理器 (config/loader.py)、热更新应用器 (config/hot_reload.py)、OneBotClient (onebot.py)、RequestContext (context.py)
 3. **消息处理层**：MessageHandler (handlers.py)、SecurityService (security.py)、CommandDispatcher (services/command.py)、AICoordinator (ai_coordinator.py)、QueueManager (queue_manager.py)
 4. **AI 核心能力层**：AIClient (client.py)、PromptBuilder (prompts.py)、ModelRequester (llm.py)、ToolManager (tooling.py)、MultimodalAnalyzer (multimodal.py)、SummaryService (summaries.py)、TokenCounter (tokens.py)
 5. **存储与上下文层**：MessageHistoryManager (utils/history.py, 10000条限制)、MemoryStorage (memory.py, 500条上限)、EndSummaryStorage、FAQStorage、ScheduledTaskStorage、TokenUsageStorage (自动归档)
@@ -664,7 +670,7 @@ graph LR
 针对高并发消息处理，Undefined 实现了全新的 **ModelQueue** 调度机制：
 
 *   **多模型隔离**：每个 AI 模型拥有独立的请求队列组（"站台"），互不干扰。
-*   **非阻塞发车**：实现了 **1Hz** 的非阻塞调度循环（"列车"）。每秒钟列车都会准时出发，带走一个请求到后台异步处理。
+*   **非阻塞发车**：实现了可配置节奏的非阻塞调度循环（默认 **1Hz**）。列车按节奏出发，带走一个请求到后台异步处理。
 *   **高可用性**：即使前一个请求仍在处理（如耗时的网络搜索），新的请求也会按时被分发，不会造成队列堵塞。
 *   **优先级管理**：支持四级优先级（超级管理员 > 私聊 > 群聊@ > 群聊普通），确保重要消息优先响应。
 
@@ -701,5 +707,5 @@ graph LR
 ---
 
 **架构图版本**: v2.11.0
-**更新日期**: 2026-02-05  
+**更新日期**: 2026-02-07  
 **基于代码版本**: 最新 main 分支
