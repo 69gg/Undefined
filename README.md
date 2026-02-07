@@ -458,6 +458,7 @@ uv run Undefined-webui
 - **模型配置**：`[models.chat]` / `[models.vision]` / `[models.agent]` / `[models.security]`
   - `api_url`：OpenAI 兼容 **base URL**（如 `https://api.openai.com/v1` / `http://127.0.0.1:8000/v1`）
   - `models.security.enabled`：是否启用安全模型检测（默认开启）
+  - `queue_interval_seconds`：队列发车间隔（秒），每个模型独立生效
   - DeepSeek Thinking + Tool Calls：若使用 `deepseek-reasoner` 或 `deepseek-chat` + `thinking={"type":"enabled"}` 且启用了工具调用，建议启用 `deepseek_new_cot_support`
 - **日志配置**：`[logging]`
 - **Token 统计归档**：`[token_usage]`（默认 5MB，<=0 禁用）
@@ -472,6 +473,12 @@ uv run Undefined-webui
 > Windows 用户注意：`config.toml` 里的路径不要直接写 `D:\xxx\yyy`（反斜杠会被当作转义）。推荐用 `D:/xxx/yyy`，或用单引号：`'D:\xxx\yyy'`，或在双引号里写双反斜杠：`"D:\\xxx\\yyy"`。
 
 WebUI 支持：配置分组表单快速编辑、Diff 预览、日志尾部查看（含自动刷新）。
+
+#### 配置热更新说明
+
+- 默认自动热更新：修改 `config.toml` 后，配置会自动生效
+- 需重启生效的项（黑名单）：`log_level`、`logging.file_path`、`logging.max_size_mb`、`logging.backup_count`、`onebot.ws_url`、`onebot.token`、`webui.url`、`webui.port`、`webui.password`
+- 模型发车节奏：`models.*.queue_interval_seconds` 支持热更新并立即生效
 
 #### 会话白名单示例
 
