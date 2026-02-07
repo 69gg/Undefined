@@ -27,6 +27,7 @@ from Undefined.services.security import SecurityService
 from Undefined.services.command import CommandDispatcher
 from Undefined.services.ai_coordinator import AICoordinator
 from Undefined.utils.resources import resolve_resource_path
+from Undefined.utils.queue_intervals import build_model_queue_intervals
 
 from Undefined.scheduled_task_storage import ScheduledTaskStorage
 from Undefined.utils.logging import log_debug_json, redact_string
@@ -57,6 +58,7 @@ class MessageHandler:
         self.security = SecurityService(config, ai._http_client)
         self.rate_limiter = RateLimiter(config)
         self.queue_manager = QueueManager()
+        self.queue_manager.update_model_intervals(build_model_queue_intervals(config))
 
         # 设置 queue_manager 到 AIClient（触发 Agent intro 生成器启动）
         ai.set_queue_manager(self.queue_manager)

@@ -69,6 +69,9 @@ model_name = ""
 # zh: 最大生成 tokens。
 # en: Max generation tokens.
 max_tokens = 8192
+# zh: 队列发车间隔（秒）。
+# en: Queue interval (seconds).
+queue_interval_seconds = 1.0
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
 thinking_enabled = false
@@ -91,6 +94,9 @@ api_key = ""
 # zh: Vision 模型名称。
 # en: Vision model name.
 model_name = ""
+# zh: 队列发车间隔（秒）。
+# en: Queue interval (seconds).
+queue_interval_seconds = 1.0
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
 thinking_enabled = false
@@ -119,6 +125,9 @@ model_name = ""
 # zh: 可选限制：最大生成 tokens。
 # en: Optional limit: max generation tokens.
 max_tokens = 100
+# zh: 队列发车间隔（秒）。
+# en: Queue interval (seconds).
+queue_interval_seconds = 1.0
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
 thinking_enabled = false
@@ -144,6 +153,9 @@ model_name = ""
 # zh: 可选限制：最大生成 tokens。
 # en: Optional limit: max generation tokens.
 max_tokens = 4096
+# zh: 队列发车间隔（秒）。
+# en: Queue interval (seconds).
+queue_interval_seconds = 1.0
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
 thinking_enabled = false

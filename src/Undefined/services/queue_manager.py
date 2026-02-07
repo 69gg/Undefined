@@ -52,12 +52,22 @@ class QueueManager:
 
     采用“站台-列车”模型：
     1. 每个模型有独立的队列组（站台）
-    2. 每个模型每秒发车一次（列车），带走一个请求
+    2. 每个模型按配置节奏发车（列车），带走一个请求
     3. 请求处理是异步不阻塞的（不管前一个是否结束）
     """
 
-    def __init__(self, ai_request_interval: float = 1.0) -> None:
+    def __init__(
+        self,
+        ai_request_interval: float = 1.0,
+        model_intervals: dict[str, float] | None = None,
+    ) -> None:
+        if ai_request_interval <= 0:
+            ai_request_interval = 1.0
         self.ai_request_interval = ai_request_interval
+        self._default_interval = ai_request_interval
+        self._model_intervals: dict[str, float] = {}
+        if model_intervals:
+            self.update_model_intervals(model_intervals)
 
         # 按模型名称区分的队列组
         self._model_queues: dict[str, ModelQueue] = {}
@@ -71,6 +81,38 @@ class QueueManager:
         self._request_handler: (
             Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None
         ) = None
+
+    def update_model_intervals(self, model_intervals: dict[str, float]) -> None:
+        """更新模型队列发车节奏映射。"""
+        normalized: dict[str, float] = {}
+        for model_name, interval in model_intervals.items():
+            if not isinstance(model_name, str):
+                continue
+            name = model_name.strip()
+            if not name:
+                continue
+            normalized[name] = self._normalize_interval(interval)
+        self._model_intervals = normalized
+        logger.info(
+            "[队列服务] 已更新模型发车节奏: count=%s default=%.2fs",
+            len(self._model_intervals),
+            self._default_interval,
+        )
+
+    def get_interval(self, model_name: str) -> float:
+        """获取指定模型的发车节奏。"""
+        if not model_name:
+            return self._default_interval
+        return self._model_intervals.get(model_name, self._default_interval)
+
+    def _normalize_interval(self, interval: float) -> float:
+        try:
+            value = float(interval)
+        except (TypeError, ValueError):
+            return self._default_interval
+        if value <= 0:
+            return self._default_interval
+        return value
 
     def start(
         self, request_handler: Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
@@ -230,10 +272,10 @@ class QueueManager:
         current_queue_idx = 0
         current_queue_processed = 0
 
-        # 即使没有请求，列车也会每秒发车（检查一次）
+        # 即使没有请求，列车也会按模型节奏发车（检查一次）
         # 这里我们使用 smart sleep: 如果处理了请求，等待剩余时间；如果空闲，等待完整时间?
         # 需求: "列车(AI请求)每1s发车一次... 带走一个请求... 不管前面的请求有没有结束"
-        # 意味着频率固定为 1Hz
+        # 频率可配置，默认 1Hz
 
         try:
             while True:
@@ -296,7 +338,8 @@ class QueueManager:
 
                 # 计算需要等待的时间，确保 1s 间隔
                 elapsed = time.perf_counter() - cycle_start_time
-                wait_time = max(0.0, self.ai_request_interval - elapsed)
+                interval = self.get_interval(model_name)
+                wait_time = max(0.0, interval - elapsed)
                 await asyncio.sleep(wait_time)
 
         except asyncio.CancelledError:

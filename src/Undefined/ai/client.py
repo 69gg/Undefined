@@ -248,17 +248,80 @@ class AIClient:
 
         self._queue_manager = queue_manager
 
-        # 启动 Agent intro 自动生成
-        if self._intro_config and self._intro_config.enabled:
+        # 启动/刷新 Agent intro 自动生成
+        if self._intro_config:
+            self.apply_intro_config(self._intro_config)
+
+    def apply_intro_config(self, config: AgentIntroGenConfig) -> None:
+        """应用 Agent intro 生成器配置（支持热更新）。"""
+        self._intro_config = config
+        if self._queue_manager is None:
+            return
+        asyncio.create_task(self._refresh_intro_generator(config))
+
+    async def _refresh_intro_generator(self, config: AgentIntroGenConfig) -> None:
+        if not config.enabled:
+            if self._agent_intro_generator is not None:
+                await self._agent_intro_generator.stop()
+                self._agent_intro_generator = None
+            self._agent_intro_task = None
+            logger.info("[AgentIntro] 自动生成已关闭")
+            return
+
+        if self._queue_manager is None:
+            return
+
+        if self._agent_intro_generator is None:
             self._agent_intro_generator = AgentIntroGenerator(
                 self.agent_registry.base_dir,
                 self,
-                queue_manager,
-                self._intro_config,
+                self._queue_manager,
+                config,
             )
             self._agent_intro_task = asyncio.create_task(
                 self._agent_intro_generator.start()
             )
+            logger.info("[AgentIntro] 自动生成已启动")
+            return
+
+        if self._agent_intro_generator.config.cache_path != config.cache_path:
+            await self._agent_intro_generator.stop()
+            self._agent_intro_generator = AgentIntroGenerator(
+                self.agent_registry.base_dir,
+                self,
+                self._queue_manager,
+                config,
+            )
+            self._agent_intro_task = asyncio.create_task(
+                self._agent_intro_generator.start()
+            )
+            logger.info("[AgentIntro] 缓存路径变更，已重启生成器")
+            return
+
+        self._agent_intro_generator.config = config
+
+    def apply_search_config(self, searxng_url: str) -> None:
+        """应用搜索服务配置（支持热更新）。"""
+        if not _SEARX_AVAILABLE or _SearxSearchWrapper is None:
+            if searxng_url:
+                logger.info("[配置] 搜索组件不可用，SEARXNG_URL 已忽略")
+            self._search_wrapper = None
+            return
+
+        if not searxng_url:
+            self._search_wrapper = None
+            logger.info("[配置] SEARXNG_URL 未配置，搜索功能禁用")
+            return
+
+        try:
+            self._search_wrapper = _SearxSearchWrapper(searx_host=searxng_url, k=10)
+            logger.info(
+                "[配置] 搜索服务已更新，URL=%s",
+                redact_string(searxng_url),
+            )
+        except Exception as exc:
+            logger.warning("搜索服务更新失败: %s", exc)
+            self._search_wrapper = None
             logger.info("[AIClient] Agent intro 生成器已启动")
         else:
             logger.info("[AIClient] Agent intro 自动生成已禁用")

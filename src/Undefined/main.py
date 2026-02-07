@@ -12,6 +12,7 @@ from rich.console import Console
 
 from Undefined.ai import AIClient
 from Undefined.config import get_config, get_config_manager
+from Undefined.config.hot_reload import HotReloadContext, apply_config_updates
 from Undefined.config.loader import Config
 from Undefined.context import RequestContextFilter
 from Undefined.faq import FAQStorage
@@ -172,15 +173,16 @@ async def main() -> None:
     config_manager = get_config_manager()
     config_manager.load(strict=True)
 
+    hot_reload_context = HotReloadContext(
+        ai_client=ai,
+        queue_manager=handler.queue_manager,
+        config_manager=config_manager,
+    )
+
     def _apply_config_updates(
         updated: Config, changes: dict[str, tuple[object, object]]
     ) -> None:
-        if "log_level" in changes:
-            level = getattr(logging, updated.log_level, logging.INFO)
-            logging.getLogger().setLevel(level)
-            logging.info("[配置] 日志级别已更新为 %s", updated.log_level)
-        if any(key.startswith("logging.") for key in changes):
-            logging.info("[配置] 日志文件参数变更需要重启后生效")
+        apply_config_updates(updated, changes, hot_reload_context)
 
     config_manager.subscribe(_apply_config_updates)
     config_manager.start_hot_reload(

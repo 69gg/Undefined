@@ -11,6 +11,7 @@ class ChatModelConfig:
     api_key: str
     model_name: str
     max_tokens: int
+    queue_interval_seconds: float = 1.0
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
     deepseek_new_cot_support: bool = False  # DeepSeek thinking-mode 工具调用兼容
@@ -23,6 +24,7 @@ class VisionModelConfig:
     api_url: str
     api_key: str
     model_name: str
+    queue_interval_seconds: float = 1.0
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
     deepseek_new_cot_support: bool = False  # DeepSeek thinking-mode 工具调用兼容
@@ -36,6 +38,7 @@ class SecurityModelConfig:
     api_key: str
     model_name: str
     max_tokens: int
+    queue_interval_seconds: float = 1.0
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 0  # 思维预算 token 数量
     deepseek_new_cot_support: bool = False  # DeepSeek thinking-mode 工具调用兼容
@@ -49,6 +52,7 @@ class AgentModelConfig:
     api_key: str
     model_name: str
     max_tokens: int = 4096
+    queue_interval_seconds: float = 1.0
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 0  # 思维预算 token 数量
     deepseek_new_cot_support: bool = False  # DeepSeek thinking-mode 工具调用兼容

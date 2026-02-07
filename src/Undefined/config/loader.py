@@ -875,6 +875,16 @@ class Config:
 
     @staticmethod
     def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
+        queue_interval_seconds = _coerce_float(
+            _get_value(
+                data,
+                ("models", "chat", "queue_interval_seconds"),
+                "CHAT_MODEL_QUEUE_INTERVAL",
+            ),
+            1.0,
+        )
+        if queue_interval_seconds <= 0:
+            queue_interval_seconds = 1.0
         return ChatModelConfig(
             api_url=_coerce_str(
                 _get_value(data, ("models", "chat", "api_url"), "CHAT_MODEL_API_URL"),
@@ -894,6 +904,7 @@ class Config:
                 ),
                 8192,
             ),
+            queue_interval_seconds=queue_interval_seconds,
             thinking_enabled=_coerce_bool(
                 _get_value(
                     data,
@@ -922,6 +933,16 @@ class Config:
 
     @staticmethod
     def _parse_vision_model_config(data: dict[str, Any]) -> VisionModelConfig:
+        queue_interval_seconds = _coerce_float(
+            _get_value(
+                data,
+                ("models", "vision", "queue_interval_seconds"),
+                "VISION_MODEL_QUEUE_INTERVAL",
+            ),
+            1.0,
+        )
+        if queue_interval_seconds <= 0:
+            queue_interval_seconds = 1.0
         return VisionModelConfig(
             api_url=_coerce_str(
                 _get_value(
@@ -941,6 +962,7 @@ class Config:
                 ),
                 "",
             ),
+            queue_interval_seconds=queue_interval_seconds,
             thinking_enabled=_coerce_bool(
                 _get_value(
                     data,
@@ -989,6 +1011,16 @@ class Config:
             ),
             "",
         )
+        queue_interval_seconds = _coerce_float(
+            _get_value(
+                data,
+                ("models", "security", "queue_interval_seconds"),
+                "SECURITY_MODEL_QUEUE_INTERVAL",
+            ),
+            1.0,
+        )
+        if queue_interval_seconds <= 0:
+            queue_interval_seconds = 1.0
 
         if api_url and api_key and model_name:
             return SecurityModelConfig(
@@ -1003,6 +1035,7 @@ class Config:
                     ),
                     100,
                 ),
+                queue_interval_seconds=queue_interval_seconds,
                 thinking_enabled=_coerce_bool(
                     _get_value(
                         data,
@@ -1035,6 +1068,7 @@ class Config:
             api_key=chat_model.api_key,
             model_name=chat_model.model_name,
             max_tokens=chat_model.max_tokens,
+            queue_interval_seconds=chat_model.queue_interval_seconds,
             thinking_enabled=False,
             thinking_budget_tokens=0,
             deepseek_new_cot_support=False,
@@ -1042,6 +1076,16 @@ class Config:
 
     @staticmethod
     def _parse_agent_model_config(data: dict[str, Any]) -> AgentModelConfig:
+        queue_interval_seconds = _coerce_float(
+            _get_value(
+                data,
+                ("models", "agent", "queue_interval_seconds"),
+                "AGENT_MODEL_QUEUE_INTERVAL",
+            ),
+            1.0,
+        )
+        if queue_interval_seconds <= 0:
+            queue_interval_seconds = 1.0
         return AgentModelConfig(
             api_url=_coerce_str(
                 _get_value(data, ("models", "agent", "api_url"), "AGENT_MODEL_API_URL"),
@@ -1061,6 +1105,7 @@ class Config:
                 ),
                 4096,
             ),
+            queue_interval_seconds=queue_interval_seconds,
             thinking_enabled=_coerce_bool(
                 _get_value(
                     data,
