@@ -322,6 +322,7 @@ class Config:
     process_poke_message: bool
     keyword_reply_enabled: bool
     context_recent_messages_limit: int
+    nagaagent_mode_enabled: bool
     onebot_ws_url: str
     onebot_token: str
     chat_model: ChatModelConfig
@@ -445,6 +446,15 @@ class Config:
             context_recent_messages_limit = 0
         if context_recent_messages_limit > 200:
             context_recent_messages_limit = 200
+
+        nagaagent_mode_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("features", "nagaagent_mode_enabled"),
+                "NAGAAGENT_MODE_ENABLED",
+            ),
+            False,
+        )
 
         onebot_ws_url = _coerce_str(
             _get_value(data, ("onebot", "ws_url"), "ONEBOT_WS_URL"), ""
@@ -764,6 +774,7 @@ class Config:
             process_poke_message=process_poke_message,
             keyword_reply_enabled=keyword_reply_enabled,
             context_recent_messages_limit=context_recent_messages_limit,
+            nagaagent_mode_enabled=nagaagent_mode_enabled,
             onebot_ws_url=onebot_ws_url,
             onebot_token=onebot_token,
             chat_model=chat_model,

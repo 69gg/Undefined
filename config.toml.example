@@ -208,6 +208,17 @@ sanitize_verbose = false
 # en: Description preview length in logs.
 description_preview_len = 160
 
+# zh: 功能开关（默认建议保持关闭）。
+# en: Feature flags (recommended to keep disabled by default).
+[features]
+# zh: 是否启用 NagaAgent 模式：
+# zh: - true: 使用 `res/prompts/undfined_nagaagent.xml`，并向模型暴露/允许调用相关 Agent
+# zh: - false: 使用 `res/prompts/undefined.xml`，并隐藏/禁用相关 Agent（避免无关提及）
+# en: Enable NagaAgent mode:
+# en: - true: use `res/prompts/undfined_nagaagent.xml` and expose related agents
+# en: - false: use `res/prompts/undefined.xml` and hide/disable related agents
+nagaagent_mode_enabled = false
+
 # zh: 彩蛋功能（可选）。
 # en: Easter egg features (optional)
 [easter_egg]
