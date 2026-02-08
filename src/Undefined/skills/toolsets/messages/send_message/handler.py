@@ -29,7 +29,7 @@ def _resolve_target(
 
     # 显式目标优先：target_type + target_id
     if has_target_type or has_target_id:
-        if not has_target_type or not has_target_id:
+        if not has_target_type and has_target_id:
             return None, "target_type 与 target_id 必须同时提供"
 
         if not isinstance(target_type_raw, str):
@@ -38,14 +38,44 @@ def _resolve_target(
         if target_type not in ("group", "private"):
             return None, "target_type 只能是 group 或 private"
 
-        target_id, id_error = _parse_positive_int(target_id_raw, "target_id")
-        if id_error or target_id is None:
-            return None, id_error or "target_id 非法"
-
         normalized_target_type: TargetType = (
             "group" if target_type == "group" else "private"
         )
-        return (normalized_target_type, target_id), None
+
+        if has_target_id:
+            target_id, id_error = _parse_positive_int(target_id_raw, "target_id")
+            if id_error or target_id is None:
+                return None, id_error or "target_id 非法"
+            return (normalized_target_type, target_id), None
+
+        request_type = context.get("request_type")
+        if request_type != normalized_target_type:
+            return None, "target_type 与当前会话类型不一致，无法推断 target_id"
+
+        if normalized_target_type == "group":
+            group_id, group_error = _parse_positive_int(
+                context.get("group_id"), "group_id"
+            )
+            if group_error or group_id is None:
+                return None, group_error or "无法根据 target_type 推断 target_id"
+            logger.info(
+                "[发送消息] 推断目标: request_id=%s target_type=%s target_id=%s",
+                context.get("request_id", "-"),
+                normalized_target_type,
+                group_id,
+            )
+            return ("group", group_id), None
+
+        user_id, user_error = _parse_positive_int(context.get("user_id"), "user_id")
+        if user_error or user_id is None:
+            return None, user_error or "无法根据 target_type 推断 target_id"
+        logger.info(
+            "[发送消息] 推断目标: request_id=%s target_type=%s target_id=%s",
+            context.get("request_id", "-"),
+            normalized_target_type,
+            user_id,
+        )
+        return ("private", user_id), None
 
     # 兼容旧参数：group_id / user_id
     legacy_group_id = args.get("group_id")
