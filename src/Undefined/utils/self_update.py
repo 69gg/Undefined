@@ -439,8 +439,16 @@ def check_git_update_eligibility(
             reason="not_a_git_repo",
         )
 
-    origin_url = _read_origin_url(repo_root, policy.remote_name)
-    branch = _read_branch(repo_root)
+    try:
+        origin_url = _read_origin_url(repo_root, policy.remote_name)
+        branch = _read_branch(repo_root)
+    except FileNotFoundError:
+        return GitUpdateResult(
+            eligible=False,
+            updated=False,
+            repo_root=repo_root,
+            reason="git_not_found",
+        )
     if origin_url is None:
         return GitUpdateResult(
             eligible=False,
