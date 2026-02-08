@@ -3,7 +3,7 @@
     <td width="70%" valign="top">
       <div align="center">
         <h1>Undefined</h1>
-        <em>基于自研架构的高性能、高可扩展 QQ 群聊与私聊机器人。</em>
+        <em>A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture.</em>
         <br/><br/>
         <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11--3.13-blue.svg" alt="Python"></a>
         <a href="https://docs.astral.sh/uv/"><img src="https://img.shields.io/badge/uv-auto%20python%20manager-6a5acd.svg" alt="uv"></a>
@@ -32,19 +32,36 @@
 
 - [立即体验](#立即体验)
 - [核心特性](#核心特性)
+- [系统架构概览](#系统架构概览)
+  - [架构图（Mermaid）](#架构图mermaid)
+  - [延伸阅读](#延伸阅读)
 - [安装与部署](#安装与部署)
+  - [pip/uv tool 部署（推荐用于直接使用）](#pipuv-tool-部署推荐用于直接使用)
+    - [完整日志（排查用）](#完整日志排查用)
+    - [pip/uv tool 部署的自定义方式](#pipuv-tool-部署的自定义方式)
   - [源码部署（开发/使用）](#源码部署开发使用)
+    - [1. 克隆项目](#1-克隆项目)
+    - [2. 安装依赖](#2-安装依赖)
+    - [3. 配置环境](#3-配置环境)
+    - [源码部署的自定义指南](#源码部署的自定义指南)
+    - [4. 启动运行](#4-启动运行)
+    - [5. 跨平台与资源路径（重要）](#5-跨平台与资源路径重要)
   - [配置说明](#配置说明)
+    - [配置热更新说明](#配置热更新说明)
+    - [会话白名单示例](#会话白名单示例)
   - [MCP 配置](#mcp-配置)
-- [技术架构](#技术架构)
-  - [Skills 插件系统](#skills-插件系统)
-  - ["车站-列车" 队列模型](#车站-列车-队列模型)
+    - [Agent 私有 MCP（可选）](#agent-私有-mcp可选)
 - [使用说明](#使用说明)
   - [开始使用](#开始使用)
   - [Agent 能力展示](#agent-能力展示)
   - [管理员命令](#管理员命令)
 - [扩展与开发](#扩展与开发)
+  - [目录结构](#目录结构)
+  - [开发指南](#开发指南)
+  - [开发自检](#开发自检)
+- [文档与延伸阅读](#文档与延伸阅读)
 - [致谢与友链](#致谢与友链)
+  - [NagaAgent](#nagaagent)
 - [开源协议](#开源协议)
 
 </details>
@@ -77,6 +94,8 @@
 ## 系统架构概览
 
 Undefined 采用 **8层异步架构设计**，以下是详细的系统架构图（包含所有核心组件、6个Agent、7类工具集、存储系统与数据流）：
+
+### 架构图（Mermaid）
 
 ```mermaid
 graph TB
@@ -270,6 +289,8 @@ graph TB
     class Dir_History,Dir_FAQ,Dir_TokenUsage,File_Config,File_Memory,File_EndSummary,File_ScheduledTasks persistence
 ```
 
+### 延伸阅读
+
 > 详细介绍请见[ARCHITECTURE.md](ARCHITECTURE.md)
 
 ---
@@ -317,7 +338,7 @@ Undefined-webui
 > 重要：`Undefined` 与 `Undefined-webui` **二选一即可**，不要同时运行两个进程；否则会出现“重复登录/重复收发消息”等问题。
 >
 > - 选择 `Undefined`：直接在终端运行机器人，修改 `config.toml` 后重启生效（或依赖热重载能力）。
-> - 选择 `Undefined-webui`：启动后访问 WebUI（默认 `http://127.0.0.1:8787`，密码默认 `changeme`；可在 `config.toml` 的 `[webui]` 中修改），在 WebUI 中在线编辑/校验配置，并通过 WebUI 启动/停止机器人进程。
+> - 选择 `Undefined-webui`：启动后访问 WebUI（默认 `http://127.0.0.1:8787`，密码默认 `changeme`；**首次启动必须修改默认密码，默认密码不可登录**；可在 `config.toml` 的 `[webui]` 中修改），在 WebUI 中在线编辑/校验配置，并通过 WebUI 启动/停止机器人进程。
 
 > `Undefined-webui` 会在检测到当前目录缺少 `config.toml` 时，自动从 `config.toml.example` 生成一份，便于直接在 WebUI 中修改。
 
@@ -448,7 +469,6 @@ uv run Undefined-webui
   - `process_every_message`：是否处理每条群消息（默认开启）；关闭后仅处理 `@机器人`、私聊、拍一拍（群消息仍会写入历史）
   - `process_private_message`：是否处理私聊消息；关闭后仅记录私聊历史，不触发 AI 回复
   - `process_poke_message`：是否响应拍一拍事件
-  - `keyword_reply_enabled`：是否启用群聊关键词自动回复（如“心理委员”）
   - `context_recent_messages_limit`：注入给模型的最近历史消息条数上限（`0-200`，`0` 表示不注入）
 - **会话白名单（推荐）**：`[access]`
   - `allowed_group_ids`：允许处理/发送消息的群号列表
@@ -463,6 +483,8 @@ uv run Undefined-webui
 - **日志配置**：`[logging]`
 - **功能开关（可选）**：`[features]`
   - `nagaagent_mode_enabled`：是否启用 NagaAgent 模式（开启后使用 `res/prompts/undfined_nagaagent.xml` 并暴露相关 Agent；关闭时使用 `res/prompts/undefined.xml` 并隐藏/禁用相关 Agent）
+- **彩蛋（可选）**：`[easter_egg]`
+  - `keyword_reply_enabled`：是否启用群聊关键词自动回复（如“心理委员”，默认关闭）
 - **Token 统计归档**：`[token_usage]`（默认 5MB，<=0 禁用）
 - **Skills 热重载**：`[skills]`
 - **代理设置（可选）**：`[proxy]`
@@ -569,18 +591,21 @@ Undefined 支持 **MCP (Model Context Protocol)** 协议，可以连接外部 MC
 
 Undefined 欢迎开发者参与共建！
 
-*   **目录结构**:
-    ```
-    src/Undefined/
-    ├── ai/            # AI 运行时（client、prompt、tooling、summary、多模态）
-    ├── skills/        # 技能插件核心目录
-    ├── services/      # 核心服务 (Queue, Command, Security)
-    ├── utils/         # 通用工具
-    ├── handlers.py    # 消息处理层
-    └── onebot.py      # OneBot WebSocket 客户端
-    ```
+### 目录结构
 
-*   **开发指南**: 请参考 [src/Undefined/skills/README.md](src/Undefined/skills/README.md) 了解如何编写新的工具和 Agent。
+```
+src/Undefined/
+├── ai/            # AI 运行时（client、prompt、tooling、summary、多模态）
+├── skills/        # 技能插件核心目录
+├── services/      # 核心服务 (Queue, Command, Security)
+├── utils/         # 通用工具
+├── handlers.py    # 消息处理层
+└── onebot.py      # OneBot WebSocket 客户端
+```
+
+### 开发指南
+
+请参考 [src/Undefined/skills/README.md](src/Undefined/skills/README.md) 了解如何编写新的工具和 Agent。
 
 ### 开发自检
 
@@ -589,6 +614,14 @@ uv run ruff format .
 uv run ruff check .
 uv run mypy .
 ```
+
+## 文档与延伸阅读
+
+- 架构说明：[`ARCHITECTURE.md`](ARCHITECTURE.md)
+- Skills 总览：[`src/Undefined/skills/README.md`](src/Undefined/skills/README.md)
+- Agents 开发：[`src/Undefined/skills/agents/README.md`](src/Undefined/skills/agents/README.md)
+- Tools 开发：[`src/Undefined/skills/tools/README.md`](src/Undefined/skills/tools/README.md)
+- Toolsets 开发：[`src/Undefined/skills/toolsets/README.md`](src/Undefined/skills/toolsets/README.md)
 
 ## 致谢与友链
 

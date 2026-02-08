@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 import tomllib
+from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from Undefined.config.loader import CONFIG_PATH, Config
 from Undefined.utils.resources import resolve_resource_path
@@ -27,129 +28,42 @@ def _resolve_config_example_path(path: Path = CONFIG_EXAMPLE_PATH) -> Path | Non
 TomlData = dict[str, Any]
 CommentMap = dict[str, dict[str, str]]
 
-SECTION_ORDER: dict[str, list[str]] = {
-    "": [
-        "core",
-        "access",
-        "onebot",
-        "models",
-        "logging",
-        "tools",
-        "features",
-        "skills",
-        "search",
-        "proxy",
-        "network",
-        "api_endpoints",
-        "weather",
-        "xxapi",
-        "token_usage",
-        "mcp",
-        "webui",
-    ],
-    "models": ["chat", "vision", "security", "agent"],
-}
+OrderMap = dict[str, list[str]]
 
-KEY_ORDER: dict[str, list[str]] = {
-    "core": [
-        "bot_qq",
-        "superadmin_qq",
-        "admin_qq",
-        "forward_proxy_qq",
-        "process_every_message",
-        "process_private_message",
-        "process_poke_message",
-        "keyword_reply_enabled",
-        "context_recent_messages_limit",
-    ],
-    "access": [
-        "allowed_group_ids",
-        "allowed_private_ids",
-        "superadmin_bypass_allowlist",
-    ],
-    "onebot": ["ws_url", "token"],
-    "logging": ["level", "file_path", "max_size_mb", "backup_count", "log_thinking"],
-    "tools": [
-        "dot_delimiter",
-        "description_truncate_enabled",
-        "description_max_len",
-        "sanitize_verbose",
-        "description_preview_len",
-    ],
-    "features": [
-        "nagaagent_mode_enabled",
-    ],
-    "skills": [
-        "hot_reload",
-        "hot_reload_interval",
-        "hot_reload_debounce",
-        "intro_autogen_enabled",
-        "intro_autogen_queue_interval",
-        "intro_autogen_max_tokens",
-        "intro_hash_path",
-        "prefetch_tools",
-        "prefetch_tools_hide",
-    ],
-    "search": ["searxng_url"],
-    "proxy": ["use_proxy", "http_proxy", "https_proxy"],
-    "network": ["request_timeout_seconds", "request_retries"],
-    "api_endpoints": [
-        "xxapi_base_url",
-        "xingzhige_base_url",
-        "jkyai_base_url",
-        "seniverse_base_url",
-    ],
-    "weather": ["api_key"],
-    "xxapi": ["api_token"],
-    "token_usage": [
-        "max_size_mb",
-        "max_archives",
-        "max_total_mb",
-        "archive_prune_mode",
-    ],
-    "mcp": ["config_path"],
-    "webui": ["url", "port", "password"],
-    "models.chat": [
-        "api_url",
-        "api_key",
-        "model_name",
-        "max_tokens",
-        "queue_interval_seconds",
-        "thinking_enabled",
-        "thinking_budget_tokens",
-        "deepseek_new_cot_support",
-    ],
-    "models.vision": [
-        "api_url",
-        "api_key",
-        "model_name",
-        "queue_interval_seconds",
-        "thinking_enabled",
-        "thinking_budget_tokens",
-        "deepseek_new_cot_support",
-    ],
-    "models.security": [
-        "enabled",
-        "api_url",
-        "api_key",
-        "model_name",
-        "max_tokens",
-        "queue_interval_seconds",
-        "thinking_enabled",
-        "thinking_budget_tokens",
-        "deepseek_new_cot_support",
-    ],
-    "models.agent": [
-        "api_url",
-        "api_key",
-        "model_name",
-        "max_tokens",
-        "queue_interval_seconds",
-        "thinking_enabled",
-        "thinking_budget_tokens",
-        "deepseek_new_cot_support",
-    ],
-}
+
+def _build_order_map(
+    table: TomlData,
+    path: list[str] | None = None,
+    out: OrderMap | None = None,
+) -> OrderMap:
+    """从 config.toml.example 推导配置渲染顺序。
+
+    - key 顺序使用 TOML 解析后的插入顺序
+    - 递归记录每个 table 路径（例如 "", "core", "models.chat"）下的 key 顺序
+    """
+
+    if out is None:
+        out = {}
+    if path is None:
+        path = []
+
+    path_key = ".".join(path) if path else ""
+    out[path_key] = list(table.keys())
+
+    for key, value in table.items():
+        if isinstance(value, dict):
+            _build_order_map(cast(TomlData, value), path + [key], out)
+    return out
+
+
+@lru_cache
+def get_config_order_map() -> OrderMap:
+    """获取配置顺序映射（以 config.toml.example 为准）。"""
+
+    defaults = load_default_data()
+    if not defaults:
+        return {}
+    return _build_order_map(defaults)
 
 
 def read_config_source() -> dict[str, Any]:
@@ -346,16 +260,18 @@ def merge_defaults(defaults: TomlData, data: TomlData) -> TomlData:
 
 
 def sort_config(data: TomlData) -> TomlData:
-    """按 SECTION_ORDER 和 KEY_ORDER 排序配置"""
+    """按 config.toml.example 的顺序排序配置"""
+
+    order_map = get_config_order_map()
     ordered: TomlData = {}
-    sections = SECTION_ORDER.get("", [])
+    sections = order_map.get("", [])
     # 保证指定顺序的 section 在前面
     for s in sections:
         if s in data:
             val = data[s]
             if isinstance(val, dict):
                 sub_ordered: TomlData = {}
-                keys = KEY_ORDER.get(s, [])
+                keys = order_map.get(s, [])
                 for k in keys:
                     if k in val:
                         sub_ordered[k] = val[k]
@@ -374,7 +290,7 @@ def sort_config(data: TomlData) -> TomlData:
 
 def sorted_keys(table: TomlData, path: list[str]) -> list[str]:
     path_key = ".".join(path) if path else ""
-    order = KEY_ORDER.get(path_key) or SECTION_ORDER.get(path_key)
+    order = get_config_order_map().get(path_key)
     if not order:
         return sorted(table.keys())
     order_index = {name: idx for idx, name in enumerate(order)}

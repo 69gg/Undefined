@@ -426,14 +426,19 @@ class Config:
             ),
             True,
         )
-        keyword_reply_enabled = _coerce_bool(
-            _get_value(
+        keyword_reply_raw = _get_value(
+            data,
+            ("easter_egg", "keyword_reply_enabled"),
+            "KEYWORD_REPLY_ENABLED",
+        )
+        if keyword_reply_raw is None:
+            # 兼容旧配置：历史上放在 [core].keyword_reply_enabled
+            keyword_reply_raw = _get_value(
                 data,
                 ("core", "keyword_reply_enabled"),
-                "KEYWORD_REPLY_ENABLED",
-            ),
-            True,
-        )
+                None,
+            )
+        keyword_reply_enabled = _coerce_bool(keyword_reply_raw, False)
         context_recent_messages_limit = _coerce_int(
             _get_value(
                 data,

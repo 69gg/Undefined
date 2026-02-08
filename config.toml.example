@@ -22,9 +22,6 @@ process_private_message = true
 # zh: 是否响应拍一拍。关闭后拍一拍事件将被忽略。
 # en: Respond to poke events. If disabled, poke events are ignored.
 process_poke_message = true
-# zh: 是否启用群聊关键词自动回复（例如“心理委员”触发）。
-# en: Enable keyword auto-replies in group chats (e.g. the "心理委员" trigger).
-keyword_reply_enabled = true
 # zh: 注入给模型的最近历史消息条数上限（0-200，0 表示不注入历史）。
 # en: Max number of recent messages injected as model context (0-200; 0 disables history injection).
 context_recent_messages_limit = 20
@@ -225,6 +222,9 @@ nagaagent_mode_enabled = false
 # zh: 彩蛋提示发送模式。模式："none"（关闭）/"agent"（主 AI 调用 Agent 时发送）/"tools"（主 AI 或 Agent 调用 Tool 时发送）/"clean"（过滤噪声；对自动预取的工具如 "get_current_time"、"send_message"、"end" 不予提示）/"all"（包括 Agent 内部调用其子工具即 "agent_tool" 的场景也发送）。默认："none"。
 # en: Easter-egg announcement mode. Modes: "none" (off) / "agent" (send when the main AI calls an Agent) / "tools" (send when the main AI or an Agent calls a Tool) / "clean" (filter noise; automatically prefetched tools such as "get_current_time", "send_message", and "end" are not announced) / "all" (also send when an Agent internally calls its sub-tools, i.e. "agent_tool"). Default: "none".
 agent_call_message_enabled = "none"
+# zh: 是否启用群聊关键词（“心理委员”）自动回复。
+# en: Enable keyword auto-replies("心理委员") in group chats.
+keyword_reply_enabled = false
 
 # zh: Skills 热重载配置（可选）。
 # en: Skills hot reload settings (optional).
@@ -349,6 +349,6 @@ url = "127.0.0.1"
 # zh: WebUI 端口。
 # en: WebUI port.
 port = 8787
-# zh: WebUI 密码（留空则使用默认 "changeme"）。
-# en: WebUI password (falls back to default 'changeme' if empty).
+# zh: WebUI 密码（首次启动必须修改默认值；默认密码无法登录）。
+# en: WebUI password (must be changed on first run; default password cannot be used to log in).
 password = "changeme"
