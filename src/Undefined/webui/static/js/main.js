@@ -114,6 +114,14 @@ const I18N = {
         "about.version": "版本",
         "about.license": "许可协议",
         "about.license_name": "MIT License",
+
+        "update.restart": "更新并重启",
+        "update.working": "正在检查更新...",
+        "update.updated_restarting": "更新完成，正在重启 WebUI...",
+        "update.uptodate_restarting": "已是最新版本，正在重启 WebUI...",
+        "update.not_eligible": "未满足更新条件（仅支持官方 origin/main）",
+        "update.failed": "更新失败",
+        "update.no_restart": "更新已完成但未重启（请检查 uv sync 输出）",
     },
     en: {
         "landing.title": "Undefined Console",
@@ -226,6 +234,14 @@ const I18N = {
         "about.version": "Version",
         "about.license": "License",
         "about.license_name": "MIT License",
+
+        "update.restart": "Update & Restart",
+        "update.working": "Checking for updates...",
+        "update.updated_restarting": "Updated. Restarting WebUI...",
+        "update.uptodate_restarting": "Up to date. Restarting WebUI...",
+        "update.not_eligible": "Update not eligible (official origin/main only)",
+        "update.failed": "Update failed",
+        "update.no_restart": "Updated but not restarted (check uv sync output)",
     }
 };
 
@@ -673,6 +689,66 @@ async function botAction(action) {
         await api(`/api/bot/${action}`, { method: "POST" });
         await fetchStatus();
     } catch (e) { }
+}
+
+function startWebuiRestartPoll() {
+    let attempts = 0;
+    const timer = setInterval(async () => {
+        attempts += 1;
+        try {
+            const res = await fetch("/api/session", { credentials: "same-origin" });
+            if (res.ok) {
+                clearInterval(timer);
+                location.reload();
+            }
+        } catch (e) {
+            // ignore during restart
+        }
+        if (attempts > 60) {
+            clearInterval(timer);
+        }
+    }, 1000);
+}
+
+async function updateAndRestartWebui(button) {
+    if (!state.authenticated) {
+        showToast(t("auth.unauthorized"), "error", 5000);
+        return;
+    }
+    setButtonLoading(button, true);
+    try {
+        showToast(t("update.working"), "info", 4000);
+        const res = await api("/api/update-restart", { method: "POST" });
+        const data = await res.json();
+        if (!data.success) {
+            throw new Error(data.error || t("update.failed"));
+        }
+        if (!data.eligible) {
+            showToast(`${t("update.not_eligible")}: ${data.reason || ""}`.trim(), "warning", 7000);
+            return;
+        }
+
+        if (data.will_restart === false) {
+            if (data.output) {
+                console.log(data.output);
+            }
+            showToast(t("update.no_restart"), "warning", 8000);
+            return;
+        }
+
+        if (data.updated) {
+            showToast(t("update.updated_restarting"), "success", 6000);
+        } else {
+            showToast(t("update.uptodate_restarting"), "info", 6000);
+        }
+
+        // The server will restart shortly; start polling to recover the UI.
+        startWebuiRestartPoll();
+    } catch (e) {
+        showToast(`${t("update.failed")}: ${e.message || e}`.trim(), "error", 8000);
+    } finally {
+        setButtonLoading(button, false);
+    }
 }
 
 async function loadConfig() {
@@ -1553,6 +1629,13 @@ async function init() {
             } finally {
                 setButtonLoading(refreshOverviewBtn, false);
             }
+        };
+    }
+
+    const updateRestartBtn = get("btnUpdateRestart");
+    if (updateRestartBtn) {
+        updateRestartBtn.onclick = async () => {
+            await updateAndRestartWebui(updateRestartBtn);
         };
     }
 

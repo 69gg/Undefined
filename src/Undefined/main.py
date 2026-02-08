@@ -31,6 +31,13 @@ from Undefined.utils.paths import (
     ensure_dir,
 )
 
+from Undefined.utils.self_update import (
+    GitUpdatePolicy,
+    apply_git_update,
+    format_update_result,
+    restart_process,
+)
+
 
 def ensure_runtime_dirs() -> None:
     """确保运行时目录存在"""
@@ -123,6 +130,21 @@ async def main() -> None:
     ensure_runtime_dirs()
     logger = logging.getLogger(__name__)
     logger.info("[启动] 正在初始化 Undefined 机器人...")
+
+    # Git-based auto update (only for official origin/main).
+    try:
+        update_result = await asyncio.to_thread(apply_git_update, GitUpdatePolicy())
+        logger.info("[自更新] %s", format_update_result(update_result))
+        if update_result.updated and update_result.repo_root is not None:
+            if update_result.uv_sync_attempted and not update_result.uv_synced:
+                logger.warning(
+                    "[自更新] 代码已更新但 uv sync 失败，跳过自动重启（避免启动失败）"
+                )
+            else:
+                logger.warning("[自更新] 检测到更新，正在重启进程以加载新代码...")
+                restart_process(module="Undefined", chdir=update_result.repo_root)
+    except Exception as exc:
+        logger.warning("[自更新] 检查更新失败，将继续启动: %s", exc)
 
     start_time = time.perf_counter()
     try:
