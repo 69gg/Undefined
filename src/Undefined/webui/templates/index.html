@@ -15,12 +15,8 @@
         href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:wght@400;500;600&family=Inter:wght@400;500;600&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
-    <script>
-        // Initial State Injection
-        window.INITIAL_STATE = __INITIAL_STATE__;
-        window.INITIAL_VIEW = __INITIAL_VIEW__;
-        window.DEFAULT_FLAG = __DEFAULT_FLAG__;
-    </script>
+    <script id="initial-state" type="application/json">__INITIAL_STATE__</script>
+    <script id="initial-view" type="application/json">__INITIAL_VIEW__</script>
 </head>
 
 <body>
@@ -82,6 +78,23 @@
                     <button id="landingLoginBtn" class="btn primary w-full" data-i18n="auth.sign_in">登录</button>
                     <div class="status-msg" id="landingLoginStatus"></div>
                 </div>
+
+                <div class="panel" id="landingPasswordResetBox" style="display:none;">
+                    <div class="panel-row">
+                        <h3 data-i18n="auth.reset_title">设置新密码</h3>
+                    </div>
+                    <p class="muted-sm" data-i18n="auth.change_required">默认密码已禁用，请先设置新密码。</p>
+                    <div class="form-group">
+                        <input id="landingCurrentPasswordInput" type="password" class="form-control"
+                            data-i18n-placeholder="auth.current_placeholder" placeholder="Current password" />
+                    </div>
+                    <div class="form-group">
+                        <input id="landingNewPasswordInput" type="password" class="form-control"
+                            data-i18n-placeholder="auth.new_placeholder" placeholder="New password" />
+                    </div>
+                    <button id="landingResetPasswordBtn" class="btn primary w-full" data-i18n="auth.update_password">更新密码</button>
+                    <div class="status-msg" id="landingResetStatus"></div>
+                </div>
             </div>
         </main>
     </section>
@@ -136,6 +149,21 @@
                 </div>
                 <button id="appLoginBtn" class="btn primary w-full" data-i18n="auth.sign_in">登录</button>
                 <div class="status-msg" id="appLoginStatus"></div>
+            </div>
+
+            <div id="appPasswordResetBox" class="card login-card" style="display: none;">
+                <h2 data-i18n="auth.reset_title">设置新密码</h2>
+                <p class="muted" data-i18n="auth.change_required">默认密码已禁用，请先设置新密码。</p>
+                <div class="form-group">
+                    <input id="appCurrentPasswordInput" type="password" class="form-control"
+                        data-i18n-placeholder="auth.current_placeholder" placeholder="Current password" />
+                </div>
+                <div class="form-group">
+                    <input id="appNewPasswordInput" type="password" class="form-control"
+                        data-i18n-placeholder="auth.new_placeholder" placeholder="New password" />
+                </div>
+                <button id="appResetPasswordBtn" class="btn primary w-full" data-i18n="auth.update_password">更新密码</button>
+                <div class="status-msg" id="appResetStatus"></div>
             </div>
 
             <div id="appContent" style="display:none;">

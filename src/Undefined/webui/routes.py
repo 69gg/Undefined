@@ -1,10 +1,12 @@
 import asyncio
+import ipaddress
 import logging
 import json
 import platform
 import re
 import tomllib
 import os
+import time
 from pathlib import Path
 
 from aiohttp import web
@@ -20,8 +22,8 @@ except Exception:  # pragma: no cover
     _PSUTIL_AVAILABLE = False
 
 
-from Undefined.config.loader import CONFIG_PATH, load_toml_data
-from Undefined.config import get_config_manager
+from Undefined.config.loader import CONFIG_PATH, load_toml_data, DEFAULT_WEBUI_PASSWORD
+from Undefined.config import get_config_manager, load_webui_settings
 
 from Undefined import __version__
 from .core import BotProcessController, SessionStore
@@ -49,6 +51,12 @@ logger = logging.getLogger(__name__)
 SESSION_COOKIE = "undefined_webui"
 TOKEN_COOKIE = "undefined_webui_token"
 SESSION_TTL_SECONDS = 8 * 60 * 60
+LOGIN_ATTEMPT_LIMIT = 5
+LOGIN_ATTEMPT_WINDOW = 5 * 60
+LOGIN_BLOCK_SECONDS = 15 * 60
+
+_LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+_LOGIN_BLOCKED_UNTIL: dict[str, float] = {}
 
 # 使用相对路径定位资源目录
 STATIC_DIR = Path(__file__).parent / "static"
@@ -257,11 +265,59 @@ def check_auth(request: web.Request) -> bool:
     # Extract token from cookie or header
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
-        token = request.cookies.get(TOKEN_COOKIE)
-    if not token:
         token = request.headers.get("X-Auth-Token")
 
     return sessions.is_valid(token)
+
+
+def _get_client_ip(request: web.Request) -> str:
+    if request.remote:
+        return request.remote
+    peer = request.transport.get_extra_info("peername") if request.transport else None
+    if isinstance(peer, tuple) and peer:
+        return str(peer[0])
+    return "unknown"
+
+
+def _is_loopback_address(addr: str) -> bool:
+    try:
+        return ipaddress.ip_address(addr).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_local_request(request: web.Request) -> bool:
+    addr = _get_client_ip(request)
+    return _is_loopback_address(addr)
+
+
+def _check_login_rate_limit(client_ip: str) -> tuple[bool, int]:
+    now = time.time()
+    blocked_until = _LOGIN_BLOCKED_UNTIL.get(client_ip, 0)
+    if blocked_until > now:
+        return False, int(blocked_until - now)
+    attempts = _LOGIN_ATTEMPTS.get(client_ip, [])
+    attempts = [ts for ts in attempts if now - ts <= LOGIN_ATTEMPT_WINDOW]
+    _LOGIN_ATTEMPTS[client_ip] = attempts
+    return True, 0
+
+
+def _record_login_failure(client_ip: str) -> tuple[bool, int]:
+    now = time.time()
+    attempts = _LOGIN_ATTEMPTS.get(client_ip, [])
+    attempts = [ts for ts in attempts if now - ts <= LOGIN_ATTEMPT_WINDOW]
+    attempts.append(now)
+    if len(attempts) >= LOGIN_ATTEMPT_LIMIT:
+        _LOGIN_ATTEMPTS.pop(client_ip, None)
+        _LOGIN_BLOCKED_UNTIL[client_ip] = now + LOGIN_BLOCK_SECONDS
+        return False, LOGIN_BLOCK_SECONDS
+    _LOGIN_ATTEMPTS[client_ip] = attempts
+    return True, 0
+
+
+def _clear_login_failures(client_ip: str) -> None:
+    _LOGIN_ATTEMPTS.pop(client_ip, None)
+    _LOGIN_BLOCKED_UNTIL.pop(client_ip, None)
 
 
 @routes.get("/")
@@ -300,24 +356,51 @@ async def index_handler(request: web.Request) -> Response:
         # one-time per WebUI process lifetime
         request.app["redirect_to_config_once"] = False
 
-    html = html.replace("__INITIAL_STATE__", json.dumps(initial_state))
+    initial_state_json = json.dumps(initial_state).replace("</", "<\\/")
+    html = html.replace("__INITIAL_STATE__", initial_state_json)
     # Original used placeholders
-    html = html.replace("__INITIAL_VIEW__", '"landing"')
-    html = html.replace(
-        "__DEFAULT_FLAG__", "true" if settings.using_default_password else "false"
-    )
+    html = html.replace("__INITIAL_VIEW__", json.dumps("landing"))
     return web.Response(text=html, content_type="text/html")
 
 
 @routes.post("/api/login")
 async def login_handler(request: web.Request) -> Response:
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response(
+            {"success": False, "error": "Invalid JSON"}, status=400
+        )
     password = data.get("password")
     settings = get_settings(request)
 
+    if settings.using_default_password:
+        return web.json_response(
+            {
+                "success": False,
+                "error": "Default password is disabled. Please update it first.",
+                "code": "default_password",
+            },
+            status=403,
+        )
+
+    client_ip = _get_client_ip(request)
+    allowed, retry_after = _check_login_rate_limit(client_ip)
+    if not allowed:
+        return web.json_response(
+            {
+                "success": False,
+                "error": "Too many login attempts. Please try again later.",
+                "retry_after": retry_after,
+                "code": "rate_limited",
+            },
+            status=429,
+        )
+
     if password == settings.password:
+        _clear_login_failures(client_ip)
         token = get_session_store(request).create()
-        resp = web.json_response({"success": True, "token": token})
+        resp = web.json_response({"success": True})
         # Set both cookies for maximum compatibility
         resp.set_cookie(
             SESSION_COOKIE,
@@ -326,14 +409,19 @@ async def login_handler(request: web.Request) -> Response:
             samesite="Lax",
             max_age=SESSION_TTL_SECONDS,
         )
-        resp.set_cookie(
-            TOKEN_COOKIE,
-            token,
-            httponly=False,
-            samesite="Lax",
-            max_age=SESSION_TTL_SECONDS,
-        )
         return resp
+
+    ok, block_seconds = _record_login_failure(client_ip)
+    if not ok:
+        return web.json_response(
+            {
+                "success": False,
+                "error": "Too many login attempts. Please try again later.",
+                "retry_after": block_seconds,
+                "code": "rate_limited",
+            },
+            status=429,
+        )
 
     return web.json_response(
         {"success": False, "error": "Invalid password"}, status=401
@@ -344,14 +432,13 @@ async def login_handler(request: web.Request) -> Response:
 async def session_handler(request: web.Request) -> Response:
     settings = get_settings(request)
     authenticated = check_auth(request)
-    summary = (
-        f"{settings.url}:{settings.port} | {'ready' if authenticated else 'locked'}"
-    )
+    summary = "locked"
+    if authenticated:
+        summary = f"{settings.url}:{settings.port} | ready"
     payload = {
         "authenticated": authenticated,
         "using_default_password": settings.using_default_password,
         "config_exists": settings.config_exists,
-        "config_path": str(CONFIG_PATH),
         "summary": summary,
     }
     return web.json_response(payload)
@@ -359,11 +446,7 @@ async def session_handler(request: web.Request) -> Response:
 
 @routes.post("/api/logout")
 async def logout_handler(request: web.Request) -> Response:
-    token = (
-        request.cookies.get(SESSION_COOKIE)
-        or request.cookies.get(TOKEN_COOKIE)
-        or request.headers.get("X-Auth-Token")
-    )
+    token = request.cookies.get(SESSION_COOKIE) or request.headers.get("X-Auth-Token")
     get_session_store(request).revoke(token)
     resp = web.json_response({"success": True})
     resp.del_cookie(SESSION_COOKIE)
@@ -374,7 +457,95 @@ async def logout_handler(request: web.Request) -> Response:
 @routes.get("/api/status")
 async def status_handler(request: web.Request) -> Response:
     bot = get_bot(request)
-    return web.json_response(bot.status())
+    status = bot.status()
+    if not check_auth(request):
+        return web.json_response(
+            {
+                "running": bool(status.get("running")),
+                "public": True,
+            }
+        )
+    return web.json_response(status)
+
+
+@routes.post("/api/password")
+async def password_handler(request: web.Request) -> Response:
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response(
+            {"success": False, "error": "Invalid JSON"}, status=400
+        )
+
+    current_password = str(data.get("current_password") or "").strip()
+    new_password = str(data.get("new_password") or "").strip()
+
+    settings = get_settings(request)
+    authenticated = check_auth(request)
+
+    if not authenticated:
+        if not settings.using_default_password:
+            return web.json_response(
+                {"success": False, "error": "Unauthorized"}, status=401
+            )
+        if not _is_local_request(request):
+            return web.json_response(
+                {
+                    "success": False,
+                    "error": "Password change requires local access when using default password.",
+                    "code": "local_required",
+                },
+                status=403,
+            )
+
+    if not current_password or current_password != settings.password:
+        return web.json_response(
+            {"success": False, "error": "Current password is incorrect."},
+            status=400,
+        )
+
+    if not new_password:
+        return web.json_response(
+            {"success": False, "error": "New password is required."}, status=400
+        )
+
+    if new_password == settings.password:
+        return web.json_response(
+            {"success": False, "error": "New password must be different."}, status=400
+        )
+
+    if new_password == DEFAULT_WEBUI_PASSWORD:
+        return web.json_response(
+            {
+                "success": False,
+                "error": "New password cannot be the default value.",
+            },
+            status=400,
+        )
+
+    source = read_config_source()
+    try:
+        data_dict = (
+            tomllib.loads(source["content"]) if source["content"].strip() else {}
+        )
+    except tomllib.TOMLDecodeError as exc:
+        return web.json_response(
+            {"success": False, "error": f"TOML parse error: {exc}"}, status=400
+        )
+    if not isinstance(data_dict, dict):
+        data_dict = {}
+
+    patched = apply_patch(data_dict, {"webui.password": new_password})
+    rendered = render_toml(patched)
+    CONFIG_PATH.write_text(rendered, encoding="utf-8")
+    get_config_manager().reload()
+    request.app["settings"] = load_webui_settings()
+    get_session_store(request).clear()
+
+    resp = web.json_response({"success": True, "message": "Password updated"})
+    resp.del_cookie(SESSION_COOKIE)
+    resp.del_cookie(TOKEN_COOKIE)
+    return resp
 
 
 @routes.post("/api/bot/{action}")

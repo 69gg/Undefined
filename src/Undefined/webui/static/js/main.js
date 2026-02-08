@@ -50,6 +50,15 @@ const I18N = {
         "auth.sign_in": "登 录",
         "auth.sign_out": "退出登录",
         "auth.default_password": "默认密码仍在使用，请尽快修改 webui.password 并重启 WebUI。",
+        "auth.change_required": "默认密码已禁用，请先设置新密码。",
+        "auth.reset_title": "设置新密码",
+        "auth.current_placeholder": "当前密码",
+        "auth.new_placeholder": "新密码",
+        "auth.update_password": "更新密码",
+        "auth.password_updated": "密码已更新，请使用新密码登录。",
+        "auth.password_updated_login": "密码已更新，正在登录...",
+        "auth.password_update_failed": "密码更新失败",
+        "auth.password_change_local": "默认密码模式下仅允许本机修改密码。",
         "auth.signing_in": "登录中...",
         "auth.login_failed": "登录失败",
         "auth.unauthorized": "未登录或会话过期",
@@ -170,6 +179,15 @@ const I18N = {
         "auth.sign_in": "Sign In",
         "auth.sign_out": "Sign Out",
         "auth.default_password": "Default password is in use. Please change webui.password and restart.",
+        "auth.change_required": "Default password is disabled. Please set a new password.",
+        "auth.reset_title": "Set New Password",
+        "auth.current_placeholder": "Current password",
+        "auth.new_placeholder": "New password",
+        "auth.update_password": "Update Password",
+        "auth.password_updated": "Password updated. Please sign in again.",
+        "auth.password_updated_login": "Password updated. Signing in...",
+        "auth.password_update_failed": "Password update failed",
+        "auth.password_change_local": "Password change requires local access when using default password.",
         "auth.signing_in": "Signing in...",
         "auth.login_failed": "Login failed",
         "auth.unauthorized": "Unauthorized or session expired",
@@ -245,12 +263,29 @@ const I18N = {
     }
 };
 
+function readJsonScript(id, fallback) {
+    const el = document.getElementById(id);
+    if (!el) return fallback;
+    try {
+        const text = (el.textContent || "").trim();
+        if (!text) return fallback;
+        return JSON.parse(text);
+    } catch (e) {
+        return fallback;
+    }
+}
+
+const initialState = readJsonScript("initial-state", {});
+const initialView = readJsonScript("initial-view", "landing");
+
 const state = {
-    lang: (window.INITIAL_STATE && window.INITIAL_STATE.lang) || getCookie("undefined_lang") || "zh",
+    lang: (initialState && initialState.lang) || getCookie("undefined_lang") || "zh",
     theme: "light",
     authenticated: false,
+    usingDefaultPassword: !!(initialState && initialState.using_default_password),
+    configExists: !!(initialState && initialState.config_exists),
     tab: "overview",
-    view: window.INITIAL_VIEW || "landing",
+    view: initialView || "landing",
     config: {},
     comments: {},
     configCollapsed: {},
@@ -258,7 +293,6 @@ const state = {
     configLoading: false,
     configLoaded: false,
     bot: { running: false, pid: null, uptime: 0 },
-    token: null,
     logsRaw: "",
     logSearch: "",
     logLevel: "all",
@@ -463,6 +497,30 @@ function updateSaveStatusText() {
     }
 }
 
+function updateAuthPanels() {
+    const usingDefault = !!state.usingDefaultPassword;
+    const showLanding = !state.authenticated && state.view === "landing";
+    const showAppLogin = !state.authenticated && state.view === "app";
+
+    const landingLogin = get("landingLoginBox");
+    const landingReset = get("landingPasswordResetBox");
+    if (landingLogin) {
+        landingLogin.style.display = showLanding && !usingDefault ? "block" : "none";
+    }
+    if (landingReset) {
+        landingReset.style.display = showLanding && usingDefault ? "block" : "none";
+    }
+
+    const appLogin = get("appLoginBox");
+    const appReset = get("appPasswordResetBox");
+    if (appLogin) {
+        appLogin.style.display = showAppLogin && !usingDefault ? "block" : "none";
+    }
+    if (appReset) {
+        appReset.style.display = showAppLogin && usingDefault ? "block" : "none";
+    }
+}
+
 function updateSectionToggleLabels() {
     document.querySelectorAll(".config-card").forEach(card => {
         const section = card.dataset.section;
@@ -489,14 +547,6 @@ function applyTheme(theme) {
     updateThemeColor(normalized);
 }
 
-function setToken(token) {
-    state.token = token;
-    if (!token) {
-        document.cookie = "undefined_webui_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-        document.cookie = "undefined_webui=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-    }
-}
-
 function showToast(message, type = "info", duration = 3000) {
     const container = get("toast-container");
     const toast = document.createElement("div");
@@ -512,7 +562,6 @@ function showToast(message, type = "info", duration = 3000) {
 
 async function api(path, options = {}) {
     const headers = options.headers || {};
-    if (state.token) headers["X-Auth-Token"] = state.token;
     if (options.method === "POST" && options.body && !headers["Content-Type"]) {
         headers["Content-Type"] = "application/json";
     }
@@ -621,16 +670,71 @@ async function login(pwd, statusId, buttonId) {
         });
         const data = await res.json();
         if (data.success) {
-            setToken(data.token);
             state.authenticated = true;
             await checkSession();
             refreshUI();
             s.innerText = "";
         } else {
-            s.innerText = data.error || t("auth.login_failed");
+            if (data.code === "default_password") {
+                s.innerText = t("auth.change_required");
+                showToast(t("auth.change_required"), "warning", 5000);
+            } else {
+                s.innerText = data.error || t("auth.login_failed");
+            }
         }
     } catch (e) {
         s.innerText = e.message || t("auth.login_failed");
+    } finally {
+        setButtonLoading(button, false);
+    }
+}
+
+async function changePassword(currentId, newId, statusId, buttonId) {
+    const statusEl = get(statusId);
+    const button = buttonId ? get(buttonId) : null;
+    const currentEl = get(currentId);
+    const newEl = get(newId);
+    const currentPassword = currentEl ? currentEl.value.trim() : "";
+    const newPassword = newEl ? newEl.value.trim() : "";
+
+    if (!currentPassword || !newPassword) {
+        if (statusEl) statusEl.innerText = t("auth.password_update_failed");
+        return;
+    }
+    if (currentPassword === newPassword) {
+        if (statusEl) statusEl.innerText = t("auth.password_update_failed");
+        return;
+    }
+
+    if (statusEl) statusEl.innerText = t("common.loading");
+    setButtonLoading(button, true);
+    try {
+        const res = await api("/api/password", {
+            method: "POST",
+            body: JSON.stringify({
+                current_password: currentPassword,
+                new_password: newPassword
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            if (statusEl) statusEl.innerText = t("auth.password_updated_login");
+            showToast(t("auth.password_updated_login"), "success", 4000);
+            if (currentEl) currentEl.value = "";
+            if (newEl) newEl.value = "";
+            state.usingDefaultPassword = false;
+            await login(newPassword, statusId, buttonId);
+        } else {
+            const msg = data.code === "local_required"
+                ? t("auth.password_change_local")
+                : (data.error || t("auth.password_update_failed"));
+            if (statusEl) statusEl.innerText = msg;
+            showToast(msg, "error", 5000);
+        }
+    } catch (e) {
+        const msg = e.message || t("auth.password_update_failed");
+        if (statusEl) statusEl.innerText = msg;
+        showToast(`${t("auth.password_update_failed")}: ${msg}`, "error", 5000);
     } finally {
         setButtonLoading(button, false);
     }
@@ -641,8 +745,16 @@ async function checkSession() {
         const res = await api("/api/session");
         const data = await res.json();
         state.authenticated = data.authenticated;
-        get("warningBox").style.display = data.using_default_password ? "block" : "none";
-        get("navFooter").innerText = data.summary;
+        state.usingDefaultPassword = !!data.using_default_password;
+        const warning = get("warningBox");
+        if (warning) {
+            warning.style.display = data.using_default_password ? "block" : "none";
+        }
+        const navFooter = get("navFooter");
+        if (navFooter) {
+            navFooter.innerText = data.summary || "";
+        }
+        updateAuthPanels();
         return data;
     } catch (e) {
         return { authenticated: false };
@@ -670,7 +782,12 @@ function updateBotUI() {
     if (state.bot.running) {
         badge.innerText = t("bot.status.running");
         badge.className = "badge success";
-        metaL.innerText = `PID: ${state.bot.pid} | Uptime: ${Math.round(state.bot.uptime_seconds)}s`;
+        const pidText = state.bot.pid != null ? `PID: ${state.bot.pid}` : "PID: --";
+        const uptimeText = state.bot.uptime_seconds != null
+            ? `Uptime: ${Math.round(state.bot.uptime_seconds)}s`
+            : "";
+        const parts = [pidText, uptimeText].filter(Boolean);
+        metaL.innerText = parts.length ? parts.join(" | ") : "--";
         hintL.innerText = t("bot.hint.running");
         get("botStartBtnLanding").disabled = true;
         get("botStopBtnLanding").disabled = false;
@@ -1459,26 +1576,24 @@ function refreshUI() {
 
     if (state.view === "app") {
         if (state.authenticated) {
-            get("appLoginBox").style.display = "none";
             get("appContent").style.display = "block";
             if (!state.configLoaded) {
                 loadConfig();
             }
         } else {
-            get("appLoginBox").style.display = "block";
             get("appContent").style.display = "none";
             state.configLoaded = false;
         }
     }
 
-    if (window.INITIAL_STATE && window.INITIAL_STATE.version) {
-        get("about-version-display").innerText = window.INITIAL_STATE.version;
+    if (initialState && initialState.version) {
+        get("about-version-display").innerText = initialState.version;
     }
-    if (window.INITIAL_STATE && window.INITIAL_STATE.license) {
-        get("about-license-display").innerText = window.INITIAL_STATE.license;
+    if (initialState && initialState.license) {
+        get("about-license-display").innerText = initialState.license;
     }
 
-    get("landingLoginBox").style.display = (!state.authenticated && state.view === "landing") ? "block" : "none";
+    updateAuthPanels();
 
     if (state.view !== "app" || !state.authenticated) {
         stopSystemTimer();
@@ -1573,6 +1688,27 @@ async function init() {
     get("appLoginBtn").onclick = () =>
         login(get("appPasswordInput").value, "appLoginStatus", "appLoginBtn");
 
+    const landingResetBtn = get("landingResetPasswordBtn");
+    if (landingResetBtn) {
+        landingResetBtn.onclick = () =>
+            changePassword(
+                "landingCurrentPasswordInput",
+                "landingNewPasswordInput",
+                "landingResetStatus",
+                "landingResetPasswordBtn"
+            );
+    }
+    const appResetBtn = get("appResetPasswordBtn");
+    if (appResetBtn) {
+        appResetBtn.onclick = () =>
+            changePassword(
+                "appCurrentPasswordInput",
+                "appNewPasswordInput",
+                "appResetStatus",
+                "appResetPasswordBtn"
+            );
+    }
+
     get("landingPasswordInput").addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
             login(get("landingPasswordInput").value, "landingLoginStatus", "landingLoginBtn");
@@ -1583,6 +1719,60 @@ async function init() {
             login(get("appPasswordInput").value, "appLoginStatus", "appLoginBtn");
         }
     });
+
+    const landingCurrent = get("landingCurrentPasswordInput");
+    const landingNew = get("landingNewPasswordInput");
+    if (landingCurrent) {
+        landingCurrent.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                changePassword(
+                    "landingCurrentPasswordInput",
+                    "landingNewPasswordInput",
+                    "landingResetStatus",
+                    "landingResetPasswordBtn"
+                );
+            }
+        });
+    }
+    if (landingNew) {
+        landingNew.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                changePassword(
+                    "landingCurrentPasswordInput",
+                    "landingNewPasswordInput",
+                    "landingResetStatus",
+                    "landingResetPasswordBtn"
+                );
+            }
+        });
+    }
+
+    const appCurrent = get("appCurrentPasswordInput");
+    const appNew = get("appNewPasswordInput");
+    if (appCurrent) {
+        appCurrent.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                changePassword(
+                    "appCurrentPasswordInput",
+                    "appNewPasswordInput",
+                    "appResetStatus",
+                    "appResetPasswordBtn"
+                );
+            }
+        });
+    }
+    if (appNew) {
+        appNew.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                changePassword(
+                    "appCurrentPasswordInput",
+                    "appNewPasswordInput",
+                    "appResetStatus",
+                    "appResetPasswordBtn"
+                );
+            }
+        });
+    }
 
     // Bind App
     document.querySelectorAll(".nav-item").forEach(el => {
@@ -1785,9 +1975,8 @@ async function init() {
     get("mobileLogoutBtn").onclick = logout;
 
     // Initial data
-    state.token = getCookie("undefined_webui_token");
-    if (window.INITIAL_STATE && window.INITIAL_STATE.theme) {
-        applyTheme(window.INITIAL_STATE.theme);
+    if (initialState && initialState.theme) {
+        applyTheme(initialState.theme);
     } else {
         applyTheme("light");
     }
@@ -1801,7 +1990,7 @@ async function init() {
     }
 
     const shouldRedirectToConfig = !!(
-        window.INITIAL_STATE && window.INITIAL_STATE.redirect_to_config
+        initialState && initialState.redirect_to_config
     );
     if (shouldRedirectToConfig) {
         state.view = "app";

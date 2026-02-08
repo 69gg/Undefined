@@ -349,6 +349,6 @@ url = "127.0.0.1"
 # zh: WebUI 端口。
 # en: WebUI port.
 port = 8787
-# zh: WebUI 密码（留空则使用默认 "changeme"）。
-# en: WebUI password (falls back to default 'changeme' if empty).
+# zh: WebUI 密码（首次启动必须修改默认值；默认密码无法登录）。
+# en: WebUI password (must be changed on first run; default password cannot be used to log in).
 password = "changeme"

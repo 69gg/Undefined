@@ -3,7 +3,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from typing import Any
+from typing import Any, Awaitable, Callable
 from aiohttp import web
 
 from Undefined.config import load_webui_settings, get_config_manager, get_config
@@ -22,6 +22,33 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("Undefined.webui")
+
+CSP_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src 'self' https://fonts.gstatic.com data:; "
+    "img-src 'self' data:; "
+    "connect-src 'self'; "
+    "base-uri 'self'; "
+    "frame-ancestors 'none'"
+)
+
+
+@web.middleware
+async def security_headers_middleware(
+    request: web.Request,
+    handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
+) -> web.StreamResponse:
+    try:
+        response = await handler(request)
+    except web.HTTPException as exc:
+        response = exc
+    response.headers.setdefault("Content-Security-Policy", CSP_POLICY)
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    return response
 
 
 def _init_webui_file_handler() -> None:
@@ -90,7 +117,7 @@ async def on_cleanup(app: web.Application) -> None:
 
 
 def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
-    app = web.Application()
+    app = web.Application(middlewares=[security_headers_middleware])
 
     # 初始化核心组件
     app["bot"] = BotProcessController()

@@ -39,6 +39,9 @@ class SessionStore:
             return
         self._sessions.pop(token, None)
 
+    def clear(self) -> None:
+        self._sessions.clear()
+
 
 class BotProcessController:
     def __init__(self) -> None:
