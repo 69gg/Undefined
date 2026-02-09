@@ -149,13 +149,14 @@ class AnthropicSkillRegistry:
         返回 SKILL.md 正文 + 附带文件列表（如有）。
 
         参数:
-            name: skill 的 name（不含 ``skill__`` 前缀）
+            name: skill 的 name（不含前缀）
 
         返回:
             格式化的 skill 内容文本
         """
         item = self._items.get(name)
         if item is None:
+            logger.warning("[AnthropicSkills] 未找到 skill: %s", name)
             return f"未找到 Anthropic Skill: {name}"
 
         parts: list[str] = [item.body]
@@ -168,6 +169,12 @@ class AnthropicSkillRegistry:
                 f"\n\n---\n附带文件（可在后续对话中请求查看详细内容）:\n{file_list}"
             )
 
+        logger.debug(
+            "[AnthropicSkills] 读取 skill 内容: name=%s body_len=%d files=%d",
+            name,
+            len(item.body),
+            len(files),
+        )
         return "\n".join(parts)
 
     async def execute_skill_tool(
@@ -193,6 +200,9 @@ class AnthropicSkillRegistry:
         else:
             skill_name = tool_name
 
+        logger.info(
+            "[AnthropicSkills] 执行 skill tool: %s -> %s", tool_name, skill_name
+        )
         return self.read_skill_content(skill_name)
 
     # ------------------------------------------------------------------

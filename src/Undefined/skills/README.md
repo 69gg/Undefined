@@ -1,6 +1,6 @@
 # 技能目录
 
-技能目录，包含基础工具（tools）、智能代理（agents）和工具集合（toolsets）。
+技能目录，包含基础工具（tools）、智能代理（agents）、工具集合（toolsets）和 Anthropic Skills（anthropic_skills）。
 
 ## 目录结构
 
@@ -16,27 +16,42 @@ skills/
 ├── agents/         # 智能代理，封装复杂任务的 AI Agent
 │   ├── __init__.py
 │   ├── web_agent/
+│   │   ├── anthropic_skills/  # Agent 私有 Anthropic Skills（可选）
+│   │   ├── tools/
+│   │   ├── config.json
+│   │   ├── handler.py
+│   │   ├── prompt.md
+│   │   └── intro.md
 │   ├── file_analysis_agent/
 │   ├── naga_code_analysis_agent/
 │   ├── info_agent/
 │   ├── social_agent/
 │   └── entertainment_agent/
 │
-└── toolsets/       # 工具集合，按功能分类组织
+├── toolsets/       # 工具集合，按功能分类组织
+│   ├── __init__.py
+│   ├── render/     # 渲染工具集
+│   │   ├── render_html/
+│   │   ├── render_latex/
+│   │   └── render_markdown/
+│   └── scheduler/  # 定时任务工具集
+│       ├── create_schedule_task/
+│       ├── delete_schedule_task/
+│       ├── get_current_time/
+│       ├── list_schedule_tasks/
+│       └── update_schedule_task/
+│
+└── anthropic_skills/  # Anthropic Skills（SKILL.md 格式）
     ├── __init__.py
-    ├── render/     # 渲染工具集
-    │   ├── render_html/
-    │   ├── render_latex/
-    │   └── render_markdown/
-    └── scheduler/  # 定时任务工具集
-        ├── create_schedule_task/
-        ├── delete_schedule_task/
-        ├── get_current_time/
-        ├── list_schedule_tasks/
-        └── update_schedule_task/
+    ├── loader.py
+    └── <skill-name>/
+        ├── SKILL.md       # 必须：YAML frontmatter + Markdown body
+        ├── references/    # 可选：参考文档
+        ├── scripts/       # 可选：脚本文件
+        └── assets/        # 可选：资源文件
 ```
 
-## 工具、智能体与工具集对比
+## 工具、智能体、工具集与 Anthropic Skills 对比
 
 ### 基础工具
 
@@ -65,6 +80,16 @@ skills/
 - **特性**: 支持自动发现子工具并注册
 - **示例**: `web_agent`, `file_analysis_agent`, `naga_code_analysis_agent`
 
+### Anthropic Skills
+
+- **定位**: 领域知识/指令注入，遵循 [agentskills.io](https://agentskills.io) 开放标准
+- **调用方式**: 注册为 `skills-_-<name>` function tool，AI 调用后返回完整指令内容
+- **命名规则**: 内部 `skills.<name>`，注册为 `skills-_-<name>`（使用 `config.tools_dot_delimiter`）
+- **目录结构**: `anthropic_skills/<skill-name>/SKILL.md` 或 `agents/<agent>/anthropic_skills/<skill-name>/`
+- **适用场景**: 提供领域专业知识、工作流程指导、最佳实践
+- **特性**: 渐进式披露（元数据始终注入，完整内容按需获取）、热重载
+- **示例**: `pdf-processing`, `code-review`, `data-analysis`
+
 ## 运行机制（重要）
 
 - **延迟加载**: 仅在首次执行时才导入 `handler.py`，加快启动速度。
@@ -74,12 +99,13 @@ skills/
 
 ## 选择指南
 
-| 特性 | 基础工具 | 工具集 | 智能体 |
-|------|----------|--------|--------|
-| 复杂度 | 低 | 中 | 高 |
-| 调用层级 | 直接调用 | 直接调用 | 间接调用（通过提示词） |
-| 内部工具 | 无 | 无 | 可包含多个子工具 |
-| 适用场景 | 通用原子操作 | 功能分组工具 | 领域复杂任务 |
+| 特性 | 基础工具 | 工具集 | 智能体 | Anthropic Skills |
+|------|----------|--------|--------|------------------|
+| 复杂度 | 低 | 中 | 高 | 低（纯提示词） |
+| 调用层级 | 直接调用 | 直接调用 | 间接调用 | 直接调用（tool） |
+| 内部工具 | 无 | 无 | 可包含多个子工具 | 无（知识注入） |
+| 适用场景 | 通用原子操作 | 功能分组工具 | 领域复杂任务 | 领域知识/指导 |
+| 格式 | config.json + handler.py | config.json + handler.py | config.json + handler.py + prompt.md | SKILL.md |
 
 ## 添加新技能
 
@@ -110,6 +136,63 @@ skills/
 6. 添加 `handler.py`（Agent 执行逻辑）
 7. 在 `tools/` 子目录中添加子工具（可选）
 8. 自动被 `AgentRegistry` 发现和注册
+
+### 添加 Anthropic Skills
+
+**全局 Skills（所有 AI 可用）：**
+
+1. 在 `skills/anthropic_skills/` 下创建新目录（如 `pdf-processing/`）
+2. 添加 `SKILL.md` 文件，包含 YAML frontmatter 和 Markdown 正文
+3. 目录名应与 `name` 字段一致
+4. 自动被 `AnthropicSkillRegistry` 发现并注册为 `skills-_-<name>` 工具
+
+**Agent 私有 Skills（仅该 Agent 可用）：**
+
+1. 在 `skills/agents/<agent_name>/anthropic_skills/` 下创建 skill 目录
+2. 添加 `SKILL.md` 文件
+3. Agent 执行时自动发现并加载，工具仅对该 Agent 可见
+
+**SKILL.md 格式示例：**
+
+```yaml
+---
+name: pdf-processing
+description: 从 PDF 文件中提取文本和表格，填写表单。当用户提到 PDF、表单或文档提取时使用。
+---
+
+# PDF 处理指南
+
+## 文本提取
+
+使用 pdfplumber:
+
+```python
+import pdfplumber
+
+with pdfplumber.open("file.pdf") as pdf:
+    text = pdf.pages[0].extract_text()
+```
+
+## 表格提取
+
+```python
+tables = pdf.pages[0].extract_tables()
+```
+
+## 最佳实践
+
+1. 处理大文件时使用分页加载
+2. 表格提取前检查是否有表格
+3. 中文 PDF 可能需要指定编码
+```
+
+**规范要求：**
+
+| 字段 | 必填 | 约束 |
+|------|------|------|
+| `name` | 是 | 小写字母/数字/连字符，最大64字符，不能以连字符开头/结尾 |
+| `description` | 是 | 最大1024字符，应说明**做什么**和**何时使用** |
+| Markdown 正文 | 否 | 详细指令/知识内容，建议 < 5000 字符 |
 
 ## 最佳实践与移植指南
 
