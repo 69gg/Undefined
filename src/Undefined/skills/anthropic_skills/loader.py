@@ -46,13 +46,16 @@ class AnthropicSkillItem:
     body: str
     frontmatter: dict[str, Any] = field(default_factory=dict)
 
-    @property
-    def tool_name(self) -> str:
+    def build_tool_name(self, dot_delimiter: str = "-_-") -> str:
         """生成注册为 function tool 时使用的名称。
 
-        使用 ``skill__`` 前缀避免与现有工具名冲突。
+        内部格式为 ``skills.<name>``，然后用 dot_delimiter 替换 ``.``。
+        默认结果: ``skills-_-<name>``
+
+        参数:
+            dot_delimiter: 用于替换 ``.`` 的分隔符，默认 ``-_-``
         """
-        return f"skill__{self.name}"
+        return f"skills{dot_delimiter}{self.name}"
 
     def get_file_listing(self) -> list[str]:
         """列出 skill 目录下除 SKILL.md 以外的附带文件（相对路径）。"""

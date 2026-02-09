@@ -130,7 +130,10 @@ class AIClient:
 
         # 初始化 Anthropic Agent Skills 注册表（可选，目录不存在时自动跳过）
         anthropic_skills_dir = base_dir / "skills" / "anthropic_skills"
-        self.anthropic_skill_registry = AnthropicSkillRegistry(anthropic_skills_dir)
+        dot_delimiter = self._get_runtime_config().tools_dot_delimiter
+        self.anthropic_skill_registry = AnthropicSkillRegistry(
+            anthropic_skills_dir, dot_delimiter=dot_delimiter
+        )
 
         self.tool_manager = ToolManager(
             self.tool_registry,

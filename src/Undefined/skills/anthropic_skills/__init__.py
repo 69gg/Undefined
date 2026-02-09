@@ -26,6 +26,9 @@ from Undefined.skills.anthropic_skills.loader import (
 
 logger = logging.getLogger(__name__)
 
+# 默认分隔符，与 config.tools_dot_delimiter 保持一致
+_DEFAULT_DOT_DELIMITER = "-_-"
+
 
 class AnthropicSkillRegistry:
     """Anthropic Agent Skills 注册表。
@@ -34,19 +37,27 @@ class AnthropicSkillRegistry:
     独立于 BaseRegistry（后者假定 config.json + handler.py 模式）。
     """
 
-    def __init__(self, skills_dir: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        skills_dir: Path | str | None = None,
+        dot_delimiter: str = _DEFAULT_DOT_DELIMITER,
+    ) -> None:
         """初始化 Anthropic Skills 注册表。
 
         参数:
             skills_dir: 存放 skills 的根目录。
                         若为 None 则使用默认路径 ``skills/anthropic_skills/``。
                         目录不存在时静默跳过（skills 是可选的）。
+            dot_delimiter: 用于替换工具名中 ``.`` 的分隔符，默认 ``-_-``。
+                           工具内部命名为 ``skills.<name>``，注册时变为
+                           ``skills-_-<name>``。
         """
         if skills_dir is None:
             self.skills_dir = Path(__file__).parent
         else:
             self.skills_dir = Path(skills_dir)
 
+        self.dot_delimiter = dot_delimiter
         self._items: Dict[str, AnthropicSkillItem] = {}
         self._schema_cache: List[Dict[str, Any]] = []
 
@@ -102,16 +113,16 @@ class AnthropicSkillRegistry:
     # OpenAI Function Calling Schema
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _build_tool_schema(item: AnthropicSkillItem) -> Dict[str, Any]:
+    def _build_tool_schema(self, item: AnthropicSkillItem) -> Dict[str, Any]:
         """为 skill 构建 OpenAI function calling 格式的 schema。
 
         AI 调用此 tool 后将获得该 skill 的完整指令内容。
         """
+        tool_name = item.build_tool_name(self.dot_delimiter)
         return {
             "type": "function",
             "function": {
-                "name": item.tool_name,
+                "name": tool_name,
                 "description": (
                     f"[Anthropic Skill] {item.description} "
                     f"调用此工具以获取该 skill 的完整指令和知识内容。"
@@ -167,7 +178,7 @@ class AnthropicSkillRegistry:
         从 tool_name 中提取 skill name，读取并返回 skill 内容。
 
         参数:
-            tool_name: 完整的 tool 名称（``skill__<name>``）
+            tool_name: 完整的 tool 名称（如 ``skills-_-<name>``）
             _args: 调用参数（当前不使用）
             _context: 执行上下文（当前不使用）
 
@@ -175,8 +186,10 @@ class AnthropicSkillRegistry:
             skill 的完整内容文本
         """
         # 从 tool_name 中提取 skill name
-        if tool_name.startswith("skill__"):
-            skill_name = tool_name[len("skill__") :]
+        # 格式: skills<delimiter><name>，如 skills-_-pdf-processing
+        prefix = f"skills{self.dot_delimiter}"
+        if tool_name.startswith(prefix):
+            skill_name = tool_name[len(prefix) :]
         else:
             skill_name = tool_name
 
@@ -200,12 +213,13 @@ class AnthropicSkillRegistry:
 
         lines: list[str] = ["<available_skills>"]
         for item in self._items.values():
+            tool_name = item.build_tool_name(self.dot_delimiter)
             lines.append("  <skill>")
             lines.append(f"    <name>{_escape_xml(item.name)}</name>")
             lines.append(
                 f"    <description>{_escape_xml(item.description)}</description>"
             )
-            lines.append(f"    <tool_name>{_escape_xml(item.tool_name)}</tool_name>")
+            lines.append(f"    <tool_name>{_escape_xml(tool_name)}</tool_name>")
             lines.append("  </skill>")
         lines.append("</available_skills>")
         return "\n".join(lines)

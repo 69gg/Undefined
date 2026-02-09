@@ -159,10 +159,16 @@ async def run_agent_with_tools(
                 tool_api_names.append(api_function_name)
 
                 # Anthropic Skill tool 路由
-                if (
-                    internal_function_name.startswith("skill__")
-                    and agent_skill_registry
-                ):
+                # 工具名格式: skills<delimiter><name>，如 skills-_-pdf-processing
+                skill_delimiter = (
+                    agent_skill_registry.dot_delimiter
+                    if agent_skill_registry
+                    else "-_-"
+                )
+                is_agent_skill = internal_function_name.startswith(
+                    f"skills{skill_delimiter}"
+                )
+                if is_agent_skill and agent_skill_registry:
                     tool_tasks.append(
                         asyncio.ensure_future(
                             agent_skill_registry.execute_skill_tool(

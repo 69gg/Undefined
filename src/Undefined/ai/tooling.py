@@ -219,7 +219,13 @@ class ToolManager:
             )
 
         # Anthropic Skill tool 路由
-        is_anthropic_skill = function_name.startswith("skill__")
+        # 工具名格式: skills<delimiter><name>，如 skills-_-pdf-processing
+        delimiter = (
+            self.anthropic_skill_registry.dot_delimiter
+            if self.anthropic_skill_registry
+            else "-_-"
+        )
+        is_anthropic_skill = function_name.startswith(f"skills{delimiter}")
 
         try:
             if is_anthropic_skill:
