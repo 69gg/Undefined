@@ -561,49 +561,15 @@ Undefined 支持 **MCP (Model Context Protocol)** 协议，可以连接外部 MC
 
 ### Anthropic Skills 配置
 
-Undefined 支持 **Anthropic Agent Skills**（[agentskills.io](https://agentskills.io) 开放标准），可以通过 `SKILL.md` 文件为 AI 注入领域知识和工作流程指导。
+支持 [agentskills.io](https://agentskills.io) 开放标准的 SKILL.md 文件，为 AI 注入领域知识。
 
-#### 添加全局 Skills
+**获取 Skills：**
+- 官方仓库：[github.com/anthropics/skills](https://github.com/anthropics/skills)
+- 社区收集：[agentskills.io](https://agentskills.io)
 
-1. 在 `src/Undefined/skills/anthropic_skills/` 下创建新目录（如 `my-skill/`）
-2. 创建 `SKILL.md` 文件：
-
-```yaml
----
-name: my-skill
-description: 这是一个示例 skill，当用户问及相关问题时使用。
----
-
-# 技能标题
-
-这里是详细的指导内容...
-
-## 步骤 1
-
-具体操作说明...
-
-## 步骤 2
-
-更多内容...
-```
-
-3. 重启后自动发现并注册为 `skills-_-my-skill` 工具
-
-#### 添加 Agent 私有 Skills
-
-在 `src/Undefined/skills/agents/<agent_name>/anthropic_skills/` 下创建 skill 目录和 `SKILL.md`，仅该 Agent 可用。
-
-#### 下载社区 Skills
-
-可以从 [agentskills.io](https://agentskills.io) 或 [GitHub - agentskills/agentskills](https://github.com/agentskills/agentskills) 下载社区贡献的 Skills，放入对应目录即可使用。
-
-#### 规范要求
-
-| 字段 | 必填 | 约束 |
-|------|------|------|
-| `name` | 是 | 小写字母/数字/连字符，最大64字符 |
-| `description` | 是 | 最大1024字符，说明**做什么**和**何时使用** |
-| 目录名 | - | 应与 `name` 字段一致 |
+**放置位置：**
+- 全局：`src/Undefined/skills/anthropic_skills/<skill-name>/SKILL.md`
+- Agent 私有：`src/Undefined/skills/agents/<agent-name>/anthropic_skills/<skill-name>/SKILL.md`
 
 ## 使用说明
 
