@@ -31,6 +31,7 @@ from Undefined.skills.agents.intro_generator import (
     AgentIntroGenConfig,
     AgentIntroGenerator,
 )
+from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
 from Undefined.skills.tools import ToolRegistry
 from Undefined.token_usage_storage import TokenUsageStorage
 from Undefined.utils.logging import log_debug_json, redact_string
@@ -126,7 +127,16 @@ class AIClient:
         base_dir = Path(__file__).resolve().parents[1]
         self.tool_registry = ToolRegistry(base_dir / "skills" / "tools")
         self.agent_registry = AgentRegistry(base_dir / "skills" / "agents")
-        self.tool_manager = ToolManager(self.tool_registry, self.agent_registry)
+
+        # 初始化 Anthropic Agent Skills 注册表（可选，目录不存在时自动跳过）
+        anthropic_skills_dir = base_dir / "skills" / "anthropic_skills"
+        self.anthropic_skill_registry = AnthropicSkillRegistry(anthropic_skills_dir)
+
+        self.tool_manager = ToolManager(
+            self.tool_registry,
+            self.agent_registry,
+            anthropic_skill_registry=self.anthropic_skill_registry,
+        )
 
         # 绑定上下文资源扫描路径（基于注册表 watch_paths）
         scan_paths = [
@@ -164,6 +174,10 @@ class AIClient:
             debounce = runtime_config.skills_hot_reload_debounce
             self.tool_registry.start_hot_reload(interval=interval, debounce=debounce)
             self.agent_registry.start_hot_reload(interval=interval, debounce=debounce)
+            if self.anthropic_skill_registry.has_skills():
+                self.anthropic_skill_registry.start_hot_reload(
+                    interval=interval, debounce=debounce
+                )
             logger.info(
                 "[初始化] 技能热重载已启用: interval=%.2fs debounce=%.2fs",
                 interval,
@@ -200,6 +214,7 @@ class AIClient:
             memory_storage=self.memory_storage,
             end_summary_storage=self._end_summary_storage,
             runtime_config_getter=self._get_runtime_config,
+            anthropic_skill_registry=self.anthropic_skill_registry,
         )
         self._multimodal = MultimodalAnalyzer(self._requester, self.vision_config)
         self._summary_service = SummaryService(
@@ -236,6 +251,8 @@ class AIClient:
             await self.tool_registry.close_mcp_toolsets()
         if hasattr(self, "agent_registry"):
             await self.agent_registry.stop_hot_reload()
+        if hasattr(self, "anthropic_skill_registry"):
+            await self.anthropic_skill_registry.stop_hot_reload()
 
         # 3) 最后关闭共享 HTTP client
         if hasattr(self, "_http_client"):

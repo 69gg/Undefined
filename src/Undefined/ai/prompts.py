@@ -12,6 +12,7 @@ import aiofiles
 from Undefined.context import RequestContext
 from Undefined.end_summary_storage import EndSummaryStorage
 from Undefined.memory import MemoryStorage
+from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
 from Undefined.utils.logging import log_debug_json
 from Undefined.utils.resources import read_text_resource
 from Undefined.utils.xml import escape_xml_attr, escape_xml_text
@@ -29,6 +30,7 @@ class PromptBuilder:
         end_summary_storage: EndSummaryStorage,
         system_prompt_path: str = "res/prompts/undefined.xml",
         runtime_config_getter: Callable[[], Any] | None = None,
+        anthropic_skill_registry: AnthropicSkillRegistry | None = None,
     ) -> None:
         """初始化 Prompt 构建器
 
@@ -37,12 +39,14 @@ class PromptBuilder:
             memory_storage: 长期记忆存储 (可选)
             end_summary_storage: 短期回忆存储
             system_prompt_path: 系统提示词文件路径
+            anthropic_skill_registry: Anthropic Skills 注册中心（可选）
         """
         self._bot_qq = bot_qq
         self._memory_storage = memory_storage
         self._end_summary_storage = end_summary_storage
         self._system_prompt_path = system_prompt_path
         self._runtime_config_getter = runtime_config_getter
+        self._anthropic_skill_registry = anthropic_skill_registry
         self._end_summaries: deque[str] = deque(maxlen=100)
         self._summaries_loaded = False
 
@@ -119,6 +123,31 @@ class PromptBuilder:
             system_prompt = bot_qq_info + system_prompt
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+
+        # 注入 Anthropic Skills 元数据（Level 1: 始终加载 name + description）
+        if (
+            self._anthropic_skill_registry
+            and self._anthropic_skill_registry.has_skills()
+        ):
+            skills_xml = self._anthropic_skill_registry.build_metadata_xml()
+            if skills_xml:
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "【可用的 Anthropic Skills】\n"
+                            f"{skills_xml}\n\n"
+                            "注意：以上是可用的 Anthropic Agent Skills 列表。"
+                            "当用户的请求与某个 skill 相关时，"
+                            "你可以调用对应的 skill tool（tool_name 字段）"
+                            "来获取该领域的详细指令和知识。"
+                        ),
+                    }
+                )
+                logger.debug(
+                    "[Prompt] 已注入 %d 个 Anthropic Skills 元数据",
+                    len(self._anthropic_skill_registry.get_all_skills()),
+                )
 
         if self._memory_storage:
             memories = self._memory_storage.get_all()
