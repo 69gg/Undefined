@@ -200,6 +200,8 @@
           <note>注意区分：如果在讨论其他bot或@其他bot，不要回复</note>
         </trigger>
       </mandatory_triggers>
+
+      <optional_triggers description="可选回复,需谨慎判断">
         
         <trigger id="5">
           <condition>直接称呼你的名字 (Undefined)</condition>
