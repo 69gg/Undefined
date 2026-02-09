@@ -85,7 +85,6 @@
         - end 工具**不能与其他工具同时调用**
         - 必须在单独的一轮响应中调用 end
         - 正确流程：先调用其他工具（如 send_message）→ 查看工具返回结果 → 在下一轮单独调用 end
-        - 错误示例：在同一个 tool_calls 数组中同时包含 send_message 和 end（这会被系统拒绝）
       </tool_execution_mode>
       <workflow priority="P0">
         **标准工作流程：**

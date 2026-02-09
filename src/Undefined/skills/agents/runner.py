@@ -130,41 +130,10 @@ async def run_agent_with_tools(
                 {"role": "assistant", "content": content, "tool_calls": tool_calls}
             )
 
-            # 检测 end 工具是否与其他工具并行调用（禁止）
-            tool_names_in_call = [
-                api_to_internal.get(
-                    str(tc.get("function", {}).get("name", "")),
-                    str(tc.get("function", {}).get("name", "")),
-                )
-                for tc in tool_calls
-            ]
-            has_end = "end" in tool_names_in_call
-            has_other = len(tool_names_in_call) > 1
-
-            if has_end and has_other:
-                other_names = [n for n in tool_names_in_call if n != "end"]
-                logger.warning(
-                    "[Agent:%s] end 工具不能与其他工具并行调用，拒绝执行。"
-                    "end 与 %s 同时被调用。",
-                    agent_name,
-                    ", ".join(other_names),
-                )
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": str(tool_calls[0].get("id", "")),
-                        "name": "end",
-                        "content": (
-                            "错误：end 工具不能与其他工具同时调用。"
-                            "请先完成其他工具调用，在下一轮响应中单独调用 end。"
-                        ),
-                    }
-                )
-                continue
-
             tool_tasks: list[asyncio.Future[Any]] = []
             tool_call_ids: list[str] = []
             tool_api_names: list[str] = []
+            end_tool_call: dict[str, Any] | None = None
 
             for tool_call in tool_calls:
                 call_id = str(tool_call.get("id", ""))
@@ -186,6 +155,23 @@ async def run_agent_with_tools(
                     logger=logger,
                     tool_name=api_function_name,
                 )
+
+                if not isinstance(function_args, dict):
+                    function_args = {}
+
+                # 检测 end 工具，暂存但不执行
+                if internal_function_name == "end":
+                    if len(tool_calls) > 1:
+                        logger.warning(
+                            "[Agent:%s] end 与其他工具同时调用，"
+                            "将先执行其他工具，然后返回 end 错误",
+                            agent_name,
+                        )
+                        end_tool_call = tool_call
+                        continue
+                    else:
+                        end_tool_call = tool_call
+                        continue
 
                 tool_call_ids.append(call_id)
                 tool_api_names.append(api_function_name)
@@ -243,6 +229,37 @@ async def run_agent_with_tools(
                             "tool_call_id": call_id,
                             "name": api_tool_name,
                             "content": content_str,
+                        }
+                    )
+
+            # 处理 end 工具调用
+            if end_tool_call:
+                end_call_id = str(end_tool_call.get("id", ""))
+                end_api_name = end_tool_call.get("function", {}).get("name", "end")
+                if tool_tasks:
+                    # end 与其他工具同时调用：其他工具已执行完毕，跳过 end（让 AI 自己决策）
+                    logger.info(
+                        "[Agent:%s] end 与其他工具同时调用，已执行其他工具，跳过 end",
+                        agent_name,
+                    )
+                else:
+                    # end 单独调用，正常执行
+                    end_args = parse_tool_arguments(
+                        end_tool_call.get("function", {}).get("arguments"),
+                        logger=logger,
+                        tool_name="end",
+                    )
+                    if not isinstance(end_args, dict):
+                        end_args = {}
+                    end_result = await tool_registry.execute_tool(
+                        "end", end_args, context
+                    )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": end_call_id,
+                            "name": end_api_name,
+                            "content": str(end_result),
                         }
                     )
 
