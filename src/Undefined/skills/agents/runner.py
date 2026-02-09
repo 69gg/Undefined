@@ -130,6 +130,38 @@ async def run_agent_with_tools(
                 {"role": "assistant", "content": content, "tool_calls": tool_calls}
             )
 
+            # 检测 end 工具是否与其他工具并行调用（禁止）
+            tool_names_in_call = [
+                api_to_internal.get(
+                    str(tc.get("function", {}).get("name", "")),
+                    str(tc.get("function", {}).get("name", "")),
+                )
+                for tc in tool_calls
+            ]
+            has_end = "end" in tool_names_in_call
+            has_other = len(tool_names_in_call) > 1
+
+            if has_end and has_other:
+                other_names = [n for n in tool_names_in_call if n != "end"]
+                logger.warning(
+                    "[Agent:%s] end 工具不能与其他工具并行调用，拒绝执行。"
+                    "end 与 %s 同时被调用。",
+                    agent_name,
+                    ", ".join(other_names),
+                )
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": str(tool_calls[0].get("id", "")),
+                        "name": "end",
+                        "content": (
+                            "错误：end 工具不能与其他工具同时调用。"
+                            "请先完成其他工具调用，在下一轮响应中单独调用 end。"
+                        ),
+                    }
+                )
+                continue
+
             tool_tasks: list[asyncio.Future[Any]] = []
             tool_call_ids: list[str] = []
             tool_api_names: list[str] = []
