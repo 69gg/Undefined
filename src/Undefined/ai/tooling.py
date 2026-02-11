@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any
 
 from Undefined.context import RequestContext
-from Undefined.skills.tools import ToolRegistry
 from Undefined.skills.agents import AgentRegistry
+from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
+from Undefined.skills.tools import ToolRegistry
 from Undefined.utils.logging import log_debug_json, redact_string
 
 logger = logging.getLogger(__name__)
@@ -24,16 +25,21 @@ class ToolManager:
     """
 
     def __init__(
-        self, tool_registry: ToolRegistry, agent_registry: AgentRegistry
+        self,
+        tool_registry: ToolRegistry,
+        agent_registry: AgentRegistry,
+        anthropic_skill_registry: AnthropicSkillRegistry | None = None,
     ) -> None:
         """初始化工具管理器
 
         参数:
             tool_registry: 标准工具注册中心
             agent_registry: Agent 注册中心
+            anthropic_skill_registry: Anthropic Agent Skills 注册中心（可选）
         """
         self.tool_registry = tool_registry
         self.agent_registry = agent_registry
+        self.anthropic_skill_registry = anthropic_skill_registry
         self._agent_mcp_registry_var: ContextVar[dict[str, Any] | None] = ContextVar(
             "agent_mcp_registry_var", default=None
         )
@@ -42,7 +48,13 @@ class ToolManager:
         """获取所有已加载工具和 Agent 的 OpenAI 兼容工具定义列表"""
         tools = self.tool_registry.get_tools_schema()
         agents = self.agent_registry.get_agents_schema()
-        return tools + agents
+        combined = tools + agents
+
+        # 合并 Anthropic Skills（如有）
+        if self.anthropic_skill_registry and self.anthropic_skill_registry.has_skills():
+            combined = combined + self.anthropic_skill_registry.get_tools_schema()
+
+        return combined
 
     def merge_tools(
         self,
@@ -206,7 +218,32 @@ class ToolManager:
                 ", ".join(sorted(context.keys())),
             )
 
+        # Anthropic Skill tool 路由
+        # 工具名格式: skills<delimiter><name>，如 skills-_-pdf-processing
+        delimiter = (
+            self.anthropic_skill_registry.dot_delimiter
+            if self.anthropic_skill_registry
+            else "-_-"
+        )
+        is_anthropic_skill = function_name.startswith(f"skills{delimiter}")
+
         try:
+            if is_anthropic_skill:
+                if self.anthropic_skill_registry:
+                    result = await self.anthropic_skill_registry.execute_skill_tool(
+                        function_name, function_args, context
+                    )
+                    duration = time.perf_counter() - start_time
+                    logger.info(
+                        "[Skill结果] %s 执行成功: elapsed=%.2fs result_len=%d",
+                        function_name,
+                        duration,
+                        len(str(result)),
+                    )
+                    return result
+                else:
+                    return f"Anthropic Skills 功能未启用: {function_name}"
+
             if is_agent:
                 await self._maybe_send_call_easter_egg(
                     function_name, is_agent=True, context=context

@@ -85,6 +85,7 @@
 - **定时任务系统**：支持 Crontab 语法的强大定时任务系统，可自动执行各种操作（如定时提醒、定时搜索）。
 - **MCP 协议支持**：支持通过 MCP (Model Context Protocol) 连接外部工具和数据源，扩展 AI 能力。
 - **Agent 私有 MCP**：可为单个 agent 提供独立 MCP 配置，按调用即时加载并释放，工具仅对该 agent 可见。
+- **Anthropic Skills**：支持 Anthropic Agent Skills（SKILL.md 格式），遵循 agentskills.io 开放标准，提供领域知识注入能力。
 - **思维链支持**：支持开启思维链，提升复杂逻辑推理能力。
 - **高并发架构**：基于 `asyncio` 全异步设计，支持多队列消息处理与工具并发执行，轻松应对高并发场景。
 - **异步安全 I/O**：统一 IO 层通过线程池 + 跨平台文件锁（Linux/macOS `flock`，Windows `msvcrt`）+ 原子写入（`os.replace`）保证并发写入不损坏、且不阻塞主事件循环。
@@ -558,6 +559,18 @@ Undefined 支持 **MCP (Model Context Protocol)** 协议，可以连接外部 MC
 }
 ```
 
+### Anthropic Skills 配置
+
+支持 [agentskills.io](https://agentskills.io) 开放标准的 SKILL.md 文件，为 AI 注入领域知识。
+
+**获取 Skills：**
+- 官方仓库：[github.com/anthropics/skills](https://github.com/anthropics/skills)
+- 社区收集：[agentskills.io](https://agentskills.io)
+
+**放置位置：**
+- 全局：`src/Undefined/skills/anthropic_skills/<skill-name>/SKILL.md`
+- Agent 私有：`src/Undefined/skills/agents/<agent-name>/anthropic_skills/<skill-name>/SKILL.md`
+
 ## 使用说明
 
 ### 开始使用
@@ -597,6 +610,10 @@ Undefined 欢迎开发者参与共建！
 src/Undefined/
 ├── ai/            # AI 运行时（client、prompt、tooling、summary、多模态）
 ├── skills/        # 技能插件核心目录
+│   ├── tools/           # 基础工具（原子化功能单元）
+│   ├── toolsets/        # 工具集（分组工具）
+│   ├── agents/          # 智能体（子 AI）
+│   └── anthropic_skills/ # Anthropic Skills（SKILL.md 格式）
 ├── services/      # 核心服务 (Queue, Command, Security)
 ├── utils/         # 通用工具
 ├── handlers.py    # 消息处理层

@@ -31,6 +31,7 @@ from Undefined.skills.agents.intro_generator import (
     AgentIntroGenConfig,
     AgentIntroGenerator,
 )
+from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
 from Undefined.skills.tools import ToolRegistry
 from Undefined.token_usage_storage import TokenUsageStorage
 from Undefined.utils.logging import log_debug_json, redact_string
@@ -126,7 +127,19 @@ class AIClient:
         base_dir = Path(__file__).resolve().parents[1]
         self.tool_registry = ToolRegistry(base_dir / "skills" / "tools")
         self.agent_registry = AgentRegistry(base_dir / "skills" / "agents")
-        self.tool_manager = ToolManager(self.tool_registry, self.agent_registry)
+
+        # 初始化 Anthropic Agent Skills 注册表（可选，目录不存在时自动跳过）
+        anthropic_skills_dir = base_dir / "skills" / "anthropic_skills"
+        dot_delimiter = self._get_runtime_config().tools_dot_delimiter
+        self.anthropic_skill_registry = AnthropicSkillRegistry(
+            anthropic_skills_dir, dot_delimiter=dot_delimiter
+        )
+
+        self.tool_manager = ToolManager(
+            self.tool_registry,
+            self.agent_registry,
+            anthropic_skill_registry=self.anthropic_skill_registry,
+        )
 
         # 绑定上下文资源扫描路径（基于注册表 watch_paths）
         scan_paths = [
@@ -164,6 +177,9 @@ class AIClient:
             debounce = runtime_config.skills_hot_reload_debounce
             self.tool_registry.start_hot_reload(interval=interval, debounce=debounce)
             self.agent_registry.start_hot_reload(interval=interval, debounce=debounce)
+            self.anthropic_skill_registry.start_hot_reload(
+                interval=interval, debounce=debounce
+            )
             logger.info(
                 "[初始化] 技能热重载已启用: interval=%.2fs debounce=%.2fs",
                 interval,
@@ -200,6 +216,7 @@ class AIClient:
             memory_storage=self.memory_storage,
             end_summary_storage=self._end_summary_storage,
             runtime_config_getter=self._get_runtime_config,
+            anthropic_skill_registry=self.anthropic_skill_registry,
         )
         self._multimodal = MultimodalAnalyzer(self._requester, self.vision_config)
         self._summary_service = SummaryService(
@@ -236,6 +253,8 @@ class AIClient:
             await self.tool_registry.close_mcp_toolsets()
         if hasattr(self, "agent_registry"):
             await self.agent_registry.stop_hot_reload()
+        if hasattr(self, "anthropic_skill_registry"):
+            await self.anthropic_skill_registry.stop_hot_reload()
 
         # 3) 最后关闭共享 HTTP client
         if hasattr(self, "_http_client"):
@@ -701,8 +720,6 @@ class AIClient:
                     "tool_calls": tool_calls,
                 }
                 if ds_cot_enabled and reasoning_content is not None:
-                    # DeepSeek thinking-mode 的 tool_calls 需要在同一问题的子回合中回传 reasoning_content，
-                    # 否则可能触发 400（官方兼容性说明）。
                     assistant_message["reasoning_content"] = reasoning_content
                 messages.append(assistant_message)
 
@@ -710,6 +727,7 @@ class AIClient:
                 tool_call_ids = []
                 tool_api_names: list[str] = []
                 tool_internal_names: list[str] = []
+                end_tool_call: dict[str, Any] | None = None
 
                 for tool_call in tool_calls:
                     call_id = tool_call.get("id", "")
@@ -746,6 +764,19 @@ class AIClient:
 
                     if not isinstance(function_args, dict):
                         function_args = {}
+
+                    # 检测 end 工具，暂存后统一处理
+                    if internal_function_name == "end":
+                        if len(tool_calls) > 1:
+                            logger.warning(
+                                "[工具调用] end 与其他工具同时调用，"
+                                "将先执行其他工具，并回填 end 跳过结果"
+                            )
+                            end_tool_call = tool_call
+                            continue
+                        else:
+                            end_tool_call = tool_call
+                            continue
 
                     tool_call_ids.append(call_id)
                     tool_api_names.append(str(api_function_name))
@@ -809,6 +840,50 @@ class AIClient:
                                 "[会话状态] 工具触发会话结束标记: tool=%s",
                                 internal_fname,
                             )
+
+                # 处理 end 工具调用
+                if end_tool_call:
+                    end_call_id = end_tool_call.get("id", "")
+                    end_api_name = end_tool_call.get("function", {}).get("name", "end")
+                    if tool_tasks:
+                        # end 与其他工具同时调用：跳过执行，但必须回填 tool 响应
+                        # 以匹配 assistant.tool_calls，避免下轮请求出现未配对的 tool_call_id。
+                        skip_content = (
+                            "end 与其他工具同轮调用，本轮未执行 end；"
+                            "请根据其他工具结果继续决策。"
+                        )
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": end_call_id,
+                                "name": end_api_name,
+                                "content": skip_content,
+                            }
+                        )
+                        logger.info("[工具调用] end 与其他工具同时调用，已回填跳过响应")
+                    else:
+                        # end 单独调用，正常执行
+                        end_args = parse_tool_arguments(
+                            end_tool_call.get("function", {}).get("arguments"),
+                            logger=logger,
+                            tool_name="end",
+                        )
+                        if not isinstance(end_args, dict):
+                            end_args = {}
+                        end_result = await self.tool_manager.execute_tool(
+                            "end", end_args, tool_context
+                        )
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": end_call_id,
+                                "name": end_api_name,
+                                "content": str(end_result),
+                            }
+                        )
+                        if tool_context.get("conversation_ended"):
+                            conversation_ended = True
+                            logger.info("[会话状态] end 工具触发会话结束")
 
                 if conversation_ended:
                     logger.info("[会话状态] 对话已结束（调用 end 工具）")

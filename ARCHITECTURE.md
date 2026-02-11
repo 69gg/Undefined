@@ -71,6 +71,7 @@ graph TB
             AgentRegistry["AgentRegistry<br/>Agent 注册表<br/>[registry.py]<br/>• Agent 发现 • 工具聚合"]
             AgentToolRegistry["AgentToolRegistry<br/>Agent 专用工具注册表<br/>[agents/agent_tool_registry.py]<br/>• MCP 支持"]
             IntroGenerator["IntroGenerator<br/>Agent 介绍生成器<br/>[agents/intro_generator.py]<br/>• 自动 hash 检测<br/>• intro.generated.md"]
+            AnthropicSkillRegistry["AnthropicSkillRegistry<br/>Anthropic Skills 注册表<br/>[anthropic_skills/]<br/>• SKILL.md 解析<br/>• 渐进式披露"]
         end
         
         subgraph AtomicTools["基础工具 (skills/tools/)"]
@@ -104,6 +105,13 @@ graph TB
             MCPRegistry["MCPToolRegistry<br/>MCP 工具注册表<br/>[registry.py]<br/>• 连接 MCP Server<br/>• 工具转换"]
             MCP_Config["MCP 配置<br/>config/mcp.json<br/>(全局配置)"]
             MCP_Agent_Private["Agent 私有 MCP<br/>mcp.json<br/>(按 Agent)"]
+        end
+        
+        subgraph AnthropicSkills["Anthropic Skills (skills/anthropic_skills/)"]
+            AS_Registry["AnthropicSkillRegistry<br/>Skills 注册表<br/>[anthropic_skills/__init__.py]<br/>• 自动发现 • 热重载"]
+            AS_Loader["SKILL.md 解析器<br/>[anthropic_skills/loader.py]<br/>• YAML frontmatter<br/>• Markdown body"]
+            AS_Global["全局 Skills<br/>skills/anthropic_skills/<br/>• pdf-processing<br/>• code-review"]
+            AS_Agent["Agent 私有 Skills<br/>agents/<name>/anthropic_skills/"]
         end
     end
 
@@ -638,7 +646,81 @@ graph LR
     TM --> MCPTools
 ```
 
-## 八、核心配置一览
+## 八、Anthropic Skills 架构
+
+```mermaid
+graph TB
+    subgraph AnthropicSkillsArch["Anthropic Skills 架构"]
+        subgraph Registry["注册表系统"]
+            ASReg["AnthropicSkillRegistry<br/>[anthropic_skills/__init__.py]<br/>• 自动发现<br/>• 热重载<br/>• XML 元数据生成"]
+            ASLoader["SKILL.md 解析器<br/>[anthropic_skills/loader.py]<br/>• YAML frontmatter<br/>• Markdown body<br/>• name/description 校验"]
+        end
+        
+        subgraph SkillsStorage["Skills 存储"]
+            GlobalSkills["全局 Skills<br/>skills/anthropic_skills/<br/>• pdf-processing/<br/>• code-review/<br/>• data-analysis/"]
+            AgentSkills["Agent 私有 Skills<br/>agents/<name>/anthropic_skills/<br/>• search-tips/<br/>• specialized-domain/"]
+        end
+        
+        subgraph SkillStructure["Skill 目录结构"]
+            SkillMD["SKILL.md<br/>• YAML frontmatter<br/>  - name (必填)<br/>  - description (必填)<br/>• Markdown 正文"]
+            References["references/<br/>参考文档 (可选)"]
+            Scripts["scripts/<br/>脚本文件 (可选)"]
+            Assets["assets/<br/>资源文件 (可选)"]
+        end
+        
+        subgraph ToolIntegration["工具集成"]
+            TM2["ToolManager"]
+            PB["PromptBuilder<br/>元数据注入"]
+        end
+    end
+    
+    %% 连接
+    ASReg --> ASLoader
+    ASLoader --> GlobalSkills
+    ASLoader --> AgentSkills
+    
+    GlobalSkills --> SkillStructure
+    AgentSkills --> SkillStructure
+    SkillStructure --> References
+    SkillStructure --> Scripts
+    SkillStructure --> Assets
+    
+    ASReg -->|"注册 skill-_-<name>"| TM2
+    ASReg -->|"XML 元数据"| PB
+```
+
+### Anthropic Skills 规范
+
+遵循 [agentskills.io](https://agentskills.io) 开放标准，参照 Claude Code 实现。
+
+**SKILL.md 格式：**
+
+```yaml
+---
+name: pdf-processing
+description: 从 PDF 文件中提取文本和表格，填写表单。当用户提到 PDF 时使用。
+---
+
+# PDF 处理指南
+
+## 文本提取
+
+使用 pdfplumber...
+
+## 表格提取
+
+...
+```
+
+**核心特性：**
+
+- **渐进式披露**：元数据（name + description）始终注入 system prompt（Level 1），完整内容按需调用获取（Level 2）
+- **自动发现**：扫描目录下所有包含 `SKILL.md` 的子目录
+- **工具注册**：每个 skill 注册为 `skills-_-<name>` function tool
+- **热重载**：监视 `SKILL.md` 变更，自动重新加载
+- **Agent 私有**：支持在 `agents/<name>/anthropic_skills/` 下存放 agent 专属 skills
+
+## 九、核心配置一览
 
 | 配置类别 | 关键配置项 | 说明 |
 |---------|-----------|------|
@@ -652,7 +734,7 @@ graph LR
 | **DeepSeek** | `*.deepseek_new_cot_support` | DeepSeek CoT 兼容 |
 | **WebUI** | `webui.url`, `webui.port`, `webui.password` | 配置控制台 |
 
-## 九、架构详解
+## 十、架构详解
 
 ### 8层架构分层
 
@@ -706,6 +788,6 @@ graph LR
 
 ---
 
-**架构图版本**: v2.11.0
-**更新日期**: 2026-02-07  
+**架构图版本**: v2.13.0
+**更新日期**: 2026-02-09  
 **基于代码版本**: 最新 main 分支
