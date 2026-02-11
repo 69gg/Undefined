@@ -159,12 +159,12 @@ async def run_agent_with_tools(
                 if not isinstance(function_args, dict):
                     function_args = {}
 
-                # 检测 end 工具，暂存但不执行
+                # 检测 end 工具，暂存后统一处理
                 if internal_function_name == "end":
                     if len(tool_calls) > 1:
                         logger.warning(
                             "[Agent:%s] end 与其他工具同时调用，"
-                            "将先执行其他工具，然后返回 end 错误",
+                            "将先执行其他工具，并回填 end 跳过结果",
                             agent_name,
                         )
                         end_tool_call = tool_call
@@ -237,9 +237,22 @@ async def run_agent_with_tools(
                 end_call_id = str(end_tool_call.get("id", ""))
                 end_api_name = end_tool_call.get("function", {}).get("name", "end")
                 if tool_tasks:
-                    # end 与其他工具同时调用：其他工具已执行完毕，跳过 end（让 AI 自己决策）
+                    # end 与其他工具同时调用：跳过执行，但仍回填 tool 响应，
+                    # 避免 assistant.tool_calls 出现未配对的 tool_call_id。
+                    skip_content = (
+                        "end 与其他工具同轮调用，本轮未执行 end；"
+                        "请根据其他工具结果继续决策。"
+                    )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": end_call_id,
+                            "name": end_api_name,
+                            "content": skip_content,
+                        }
+                    )
                     logger.info(
-                        "[Agent:%s] end 与其他工具同时调用，已执行其他工具，跳过 end",
+                        "[Agent:%s] end 与其他工具同时调用，已回填跳过响应",
                         agent_name,
                     )
                 else:
