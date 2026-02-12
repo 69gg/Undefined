@@ -1,0 +1,40 @@
+{
+    "type": "function",
+    "function": {
+        "name": "analyze_join_statistics",
+        "description": "分析群的加群情况，提供加群人数统计和趋势分析。包含：按时间筛选成员、人数统计、加群趋势分析、可选的成员列表。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "群号。如果已在群聊中，通常会自动获取。"
+                },
+                "start_time": {
+                    "type": "string",
+                    "description": "开始时间，格式：YYYY-MM-DD HH:MM:SS，例如：2024-02-01 00:00:00"
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": "结束时间，格式：YYYY-MM-DD HH:MM:SS，例如：2024-02-10 23:59:59"
+                },
+                "include_trend": {
+                    "type": "boolean",
+                    "description": "是否包含趋势分析，默认 true",
+                    "default": true
+                },
+                "include_member_list": {
+                    "type": "boolean",
+                    "description": "是否返回成员列表，默认 false",
+                    "default": false
+                },
+                "member_limit": {
+                    "type": "integer",
+                    "description": "返回成员列表的数量限制（最大100），默认 20",
+                    "default": 20
+                }
+            },
+            "required": []
+        }
+    }
+}

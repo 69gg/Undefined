@@ -1,0 +1,35 @@
+{
+    "type": "function",
+    "function": {
+        "name": "analyze_new_member_activity",
+        "description": "分析新成员的活跃情况，帮助了解新成员的融入程度。包含：活跃度统计、最活跃成员排行、发言分布分析。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "群号。如果已在群聊中，通常会自动获取。"
+                },
+                "join_start_time": {
+                    "type": "string",
+                    "description": "加群开始时间，格式：YYYY-MM-DD HH:MM:SS，例如：2024-02-01 00:00:00"
+                },
+                "join_end_time": {
+                    "type": "string",
+                    "description": "加群结束时间，格式：YYYY-MM-DD HH:MM:SS，例如：2024-02-10 23:59:59"
+                },
+                "max_history_count": {
+                    "type": "integer",
+                    "description": "最多获取的历史消息数量（最大5000），默认 2000",
+                    "default": 2000
+                },
+                "top_count": {
+                    "type": "integer",
+                    "description": "显示最活跃成员的数量（最大20），默认 5",
+                    "default": 5
+                }
+            },
+            "required": []
+        }
+    }
+}
