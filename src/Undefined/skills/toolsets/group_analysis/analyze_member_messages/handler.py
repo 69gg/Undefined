@@ -23,8 +23,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     start_time = args.get("start_time")
     end_time = args.get("end_time")
     include_messages = args.get("include_messages", False)
-    message_limit = min(args.get("message_limit", 20), 100)
-    max_history_count = min(args.get("max_history_count", 2000), 5000)
 
     # 1. 参数验证
     if not group_id:
@@ -37,6 +35,27 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         user_id = int(user_id)
     except (ValueError, TypeError):
         return "参数类型错误：group_id 和 user_id 必须是整数"
+
+    # 验证和规范化数值参数
+    try:
+        message_limit_raw = args.get("message_limit", 20)
+        message_limit = int(message_limit_raw) if message_limit_raw is not None else 20
+        if message_limit < 0:
+            return "参数错误：message_limit 必须是非负整数"
+        message_limit = min(message_limit, 100)
+    except (ValueError, TypeError):
+        return "参数类型错误：message_limit 必须是整数"
+
+    try:
+        max_history_count_raw = args.get("max_history_count", 2000)
+        max_history_count = (
+            int(max_history_count_raw) if max_history_count_raw is not None else 2000
+        )
+        if max_history_count < 0:
+            return "参数错误：max_history_count 必须是非负整数"
+        max_history_count = min(max_history_count, 5000)
+    except (ValueError, TypeError):
+        return "参数类型错误：max_history_count 必须是整数"
 
     # 2. 解析时间范围
     start_dt, end_dt = parse_time_range(start_time, end_time)

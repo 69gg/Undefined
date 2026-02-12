@@ -16,8 +16,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     group_id = args.get("group_id") or context.get("group_id")
     join_start_time = args.get("join_start_time")
     join_end_time = args.get("join_end_time")
-    max_history_count = min(args.get("max_history_count", 2000), 5000)
-    top_count = min(args.get("top_count", 5), 20)
 
     # 1. 参数验证
     if not group_id:
@@ -27,6 +25,27 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         group_id = int(group_id)
     except (ValueError, TypeError):
         return "参数类型错误：group_id 必须是整数"
+
+    # 验证和规范化数值参数
+    try:
+        max_history_count_raw = args.get("max_history_count", 2000)
+        max_history_count = (
+            int(max_history_count_raw) if max_history_count_raw is not None else 2000
+        )
+        if max_history_count < 0:
+            return "参数错误：max_history_count 必须是非负整数"
+        max_history_count = min(max_history_count, 5000)
+    except (ValueError, TypeError):
+        return "参数类型错误：max_history_count 必须是整数"
+
+    try:
+        top_count_raw = args.get("top_count", 5)
+        top_count = int(top_count_raw) if top_count_raw is not None else 5
+        if top_count < 0:
+            return "参数错误：top_count 必须是非负整数"
+        top_count = min(top_count, 20)
+    except (ValueError, TypeError):
+        return "参数类型错误：top_count 必须是整数"
 
     # 2. 解析时间范围
     start_dt, end_dt = parse_time_range(join_start_time, join_end_time)

@@ -18,7 +18,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     end_time = args.get("end_time")
     include_trend = args.get("include_trend", True)
     include_member_list = args.get("include_member_list", False)
-    member_limit = min(args.get("member_limit", 20), 100)
 
     # 1. 参数验证
     if not group_id:
@@ -28,6 +27,16 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         group_id = int(group_id)
     except (ValueError, TypeError):
         return "参数类型错误：group_id 必须是整数"
+
+    # 验证和规范化数值参数
+    try:
+        member_limit_raw = args.get("member_limit", 20)
+        member_limit = int(member_limit_raw) if member_limit_raw is not None else 20
+        if member_limit < 0:
+            return "参数错误：member_limit 必须是非负整数"
+        member_limit = min(member_limit, 100)
+    except (ValueError, TypeError):
+        return "参数类型错误：member_limit 必须是整数"
 
     # 2. 解析时间范围
     start_dt, end_dt = parse_time_range(start_time, end_time)
