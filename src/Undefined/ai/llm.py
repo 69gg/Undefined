@@ -745,7 +745,7 @@ class ModelRequester:
     ) -> dict[str, Any]:
         """发送请求到模型 API。"""
         start_time = time.perf_counter()
-        ds_cot_enabled = getattr(model_config, "deepseek_new_cot_support", False)
+        cot_compat = getattr(model_config, "thinking_tool_call_compat", False)
         messages_for_api, tool_args_fixed = _sanitize_openai_messages_tool_arguments(
             messages
         )
@@ -798,10 +798,10 @@ class ModelRequester:
                         )
 
         try:
-            if ds_cot_enabled and logger.isEnabledFor(logging.DEBUG):
+            if cot_compat and logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
-                    "[DeepSeek CoT] enabled=%s type=%s model=%s thinking_enabled=%s tools=%s messages=%s",
-                    ds_cot_enabled,
+                    "[思维链兼容] enabled=%s type=%s model=%s thinking_enabled=%s tools=%s messages=%s",
+                    cot_compat,
                     call_type,
                     model_config.model_name,
                     getattr(model_config, "thinking_enabled", False),
@@ -1126,8 +1126,8 @@ def build_request_body(
             extra_kwargs["thinking"] = normalized
 
     if model_config.thinking_enabled:
-        if getattr(model_config, "deepseek_new_cot_support", False):
-            # DeepSeek thinking mode 只需要 {"type":"enabled"}；额外字段可能导致兼容性问题。
+        if getattr(model_config, "thinking_tool_call_compat", False):
+            # 兼容模式只发送 {"type":"enabled"}，不含 budget_tokens（部分提供商不支持额外字段）
             body["thinking"] = {"type": "enabled"}
         else:
             body["thinking"] = {

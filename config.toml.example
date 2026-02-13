@@ -78,9 +78,9 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 20000
-# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 "tool_calls" 中回传 "reasoning_content"。
-# en: DeepSeek thinking-mode tool-call compatibility: return "reasoning_content" across multiple "tool_calls".
-deepseek_new_cot_support = false
+# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
+# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+thinking_tool_call_compat = false
 
 # zh: 视觉模型配置（用于图片描述和 OCR）。
 # en: Vision model config (image description and OCR).
@@ -103,9 +103,9 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 20000
-# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 "tool_calls" 中回传 "reasoning_content"。
-# en: DeepSeek thinking-mode tool-call compatibility: return "reasoning_content" across multiple "tool_calls".
-deepseek_new_cot_support = false
+# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
+# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+thinking_tool_call_compat = false
 
 # zh: 安全模型配置（用于防注入检测和注入后回复生成）。
 # en: Security model config (injection detection and post-injection responses).
@@ -134,9 +134,9 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 0
-# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 "tool_calls" 中回传 "reasoning_content"。
-# en: DeepSeek thinking-mode tool-call compatibility: return "reasoning_content" across multiple "tool_calls".
-deepseek_new_cot_support = false
+# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
+# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+thinking_tool_call_compat = false
 
 # zh: Agent 模型配置（用于执行 agents）。
 # en: Agent model config (used to run agents).
@@ -162,9 +162,9 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 0
-# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 "tool_calls" 中回传 "reasoning_content"。
-# en: DeepSeek thinking-mode tool-call compatibility: return "reasoning_content" across multiple "tool_calls".
-deepseek_new_cot_support = false
+# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
+# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+thinking_tool_call_compat = false
 
 # zh: 日志配置。
 # en: Logging settings.

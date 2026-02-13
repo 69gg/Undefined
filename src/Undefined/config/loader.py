@@ -1037,11 +1037,11 @@ class Config:
                 ),
                 20000,
             ),
-            deepseek_new_cot_support=_coerce_bool(
+            thinking_tool_call_compat=_coerce_bool(
                 _get_value(
                     data,
-                    ("models", "chat", "deepseek_new_cot_support"),
-                    "CHAT_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+                    ("models", "chat", "thinking_tool_call_compat"),
+                    "CHAT_MODEL_THINKING_TOOL_CALL_COMPAT",
                 ),
                 False,
             ),
@@ -1095,11 +1095,11 @@ class Config:
                 ),
                 20000,
             ),
-            deepseek_new_cot_support=_coerce_bool(
+            thinking_tool_call_compat=_coerce_bool(
                 _get_value(
                     data,
-                    ("models", "vision", "deepseek_new_cot_support"),
-                    "VISION_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+                    ("models", "vision", "thinking_tool_call_compat"),
+                    "VISION_MODEL_THINKING_TOOL_CALL_COMPAT",
                 ),
                 False,
             ),
@@ -1168,11 +1168,11 @@ class Config:
                     ),
                     0,
                 ),
-                deepseek_new_cot_support=_coerce_bool(
+                thinking_tool_call_compat=_coerce_bool(
                     _get_value(
                         data,
-                        ("models", "security", "deepseek_new_cot_support"),
-                        "SECURITY_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+                        ("models", "security", "thinking_tool_call_compat"),
+                        "SECURITY_MODEL_THINKING_TOOL_CALL_COMPAT",
                     ),
                     False,
                 ),
@@ -1187,7 +1187,7 @@ class Config:
             queue_interval_seconds=chat_model.queue_interval_seconds,
             thinking_enabled=False,
             thinking_budget_tokens=0,
-            deepseek_new_cot_support=False,
+            thinking_tool_call_compat=False,
         )
 
     @staticmethod
@@ -1238,11 +1238,11 @@ class Config:
                 ),
                 0,
             ),
-            deepseek_new_cot_support=_coerce_bool(
+            thinking_tool_call_compat=_coerce_bool(
                 _get_value(
                     data,
-                    ("models", "agent", "deepseek_new_cot_support"),
-                    "AGENT_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+                    ("models", "agent", "thinking_tool_call_compat"),
+                    "AGENT_MODEL_THINKING_TOOL_CALL_COMPAT",
                 ),
                 False,
             ),
@@ -1318,13 +1318,13 @@ class Config:
         ]
         for name, cfg in configs:
             logger.debug(
-                "[配置] %s_model=%s api_url=%s api_key_set=%s thinking=%s deepseek_new_cot=%s",
+                "[配置] %s_model=%s api_url=%s api_key_set=%s thinking=%s cot_compat=%s",
                 name,
                 cfg.model_name,
                 cfg.api_url,
                 bool(cfg.api_key),
                 cfg.thinking_enabled,
-                getattr(cfg, "deepseek_new_cot_support", False),
+                getattr(cfg, "thinking_tool_call_compat", False),
             )
 
     def update_from(self, new_config: "Config") -> dict[str, tuple[Any, Any]]:

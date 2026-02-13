@@ -624,9 +624,9 @@ class AIClient:
         iteration = 0
         conversation_ended = False
         any_tool_executed = False
-        ds_cot_enabled = getattr(self.chat_config, "deepseek_new_cot_support", False)
-        ds_cot_logged = False
-        ds_cot_missing_reason_logged = False
+        cot_compat = getattr(self.chat_config, "thinking_tool_call_compat", False)
+        cot_compat_logged = False
+        cot_missing_logged = False
 
         while iteration < max_iterations:
             iteration += 1
@@ -668,37 +668,28 @@ class AIClient:
                         log_debug_json(logger, "[AI工具调用]", tool_calls)
 
                 log_thinking = self._get_runtime_config().log_thinking
-                if ds_cot_enabled and tools and log_thinking and not ds_cot_logged:
-                    ds_cot_logged = True
+                if cot_compat and tools and log_thinking and not cot_compat_logged:
+                    cot_compat_logged = True
                     logger.info(
-                        "[DeepSeek思维链] thinking-mode 工具调用兼容已启用：将回传 reasoning_content 以避免 400"
-                    )
-                if ds_cot_enabled and reasoning_content and log_thinking:
-                    logger.info(
-                        "[DeepSeek思维链] 本轮 reasoning_content_len=%s",
-                        len(reasoning_content),
-                    )
-                    logger.info(
-                        "[DeepSeek思维链] reasoning_content=%s",
-                        redact_string(reasoning_content),
+                        "[思维链兼容] 多轮工具调用 reasoning_content 回传已启用"
                     )
                 if (
-                    ds_cot_enabled
+                    cot_compat
                     and log_thinking
                     and tools
                     and getattr(self.chat_config, "thinking_enabled", False)
                     and not reasoning_content
                     and tool_calls
-                    and not ds_cot_missing_reason_logged
+                    and not cot_missing_logged
                 ):
-                    ds_cot_missing_reason_logged = True
+                    cot_missing_logged = True
                     message_keys = (
                         ", ".join(sorted(message.keys()))
                         if isinstance(message, dict)
                         else type(message).__name__
                     )
                     logger.info(
-                        "[DeepSeek思维链] 未在响应中发现 reasoning_content（可能是模型/服务商不返回思维链）；message_keys=%s",
+                        "[思维链兼容] 未在响应中发现 reasoning_content（可能是模型/服务商不返回思维链）；message_keys=%s",
                         message_keys,
                     )
 
@@ -720,7 +711,7 @@ class AIClient:
                     "content": content,
                     "tool_calls": tool_calls,
                 }
-                if ds_cot_enabled and reasoning_content is not None:
+                if cot_compat and reasoning_content is not None:
                     assistant_message["reasoning_content"] = reasoning_content
                 messages.append(assistant_message)
 
