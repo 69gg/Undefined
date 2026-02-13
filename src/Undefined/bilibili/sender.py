@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _build_info_card(info: "VideoInfo") -> str:
+def _build_info_card(info: "VideoInfo", truncate_desc: bool = True) -> str:
     """构造信息卡片消息。"""
     parts: list[str] = []
     if info.cover_url:
@@ -34,7 +34,7 @@ def _build_info_card(info: "VideoInfo") -> str:
     parts.append(f"UP主: {info.up_name}")
     desc = info.desc.strip()
     if desc:
-        if len(desc) > 100:
+        if truncate_desc and len(desc) > 100:
             desc = desc[:100] + "..."
         parts.append(f"简介: {desc}")
     parts.append(f"https://www.bilibili.com/video/{info.bvid}")
@@ -153,6 +153,10 @@ async def send_bilibili_video(
             target_type,
             target_id,
         )
+
+        # 发视频前先发送封面/标题/UP/完整简介
+        pre_video_card = _build_info_card(video_info, truncate_desc=False)
+        await _send_message(sender, target_type, target_id, pre_video_card)
 
         video_message = f"[CQ:video,file=file://{abs_path}]"
         try:
