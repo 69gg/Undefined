@@ -86,6 +86,7 @@
 - **MCP 协议支持**：支持通过 MCP (Model Context Protocol) 连接外部工具和数据源，扩展 AI 能力。
 - **Agent 私有 MCP**：可为单个 agent 提供独立 MCP 配置，按调用即时加载并释放，工具仅对该 agent 可见。
 - **Anthropic Skills**：支持 Anthropic Agent Skills（SKILL.md 格式），遵循 agentskills.io 开放标准，提供领域知识注入能力。
+- **Bilibili 视频提取**：自动检测消息中的 B 站视频链接/BV 号/小程序分享，下载 1080p 视频并通过 QQ 发送；同时提供 AI 工具调用入口。
 - **思维链支持**：支持开启思维链，提升复杂逻辑推理能力。
 - **高并发架构**：基于 `asyncio` 全异步设计，支持多队列消息处理与工具并发执行，轻松应对高并发场景。
 - **异步安全 I/O**：统一 IO 层通过线程池 + 跨平台文件锁（Linux/macOS `flock`，Windows `msvcrt`）+ 原子写入（`os.replace`）保证并发写入不损坏、且不阻塞主事件循环。
@@ -155,6 +156,7 @@ graph TB
             T_End["end<br/>结束对话"]
             T_Python["python_interpreter<br/>Python 解释器"]
             T_Time["get_current_time<br/>获取当前时间"]
+            T_BilibiliVideo["bilibili_video<br/>B站视频下载发送"]
         end
         
         subgraph Toolsets["工具集 (7大类)"]
@@ -488,6 +490,15 @@ uv run Undefined-webui
   - `keyword_reply_enabled`：是否启用群聊关键词自动回复（如“心理委员”，默认关闭）
 - **Token 统计归档**：`[token_usage]`（默认 5MB，<=0 禁用）
 - **Skills 热重载**：`[skills]`
+- **Bilibili 视频提取**：`[bilibili]`
+  - `auto_extract_enabled`：是否启用自动提取（检测到 B 站链接/BV 号时自动下载并发送，默认关闭）
+  - `cookie`：B 站完整 Cookie 字符串（推荐，至少包含 `SESSDATA`，风控通过率更高）
+  - `prefer_quality`：首选清晰度（`80`=1080P, `64`=720P, `32`=480P）
+  - `max_duration`：最大视频时长限制（秒），超过则发送信息卡片（`0`=不限）
+  - `max_file_size`：最大文件大小限制（MB），超过则触发降级策略（`0`=不限）
+  - `oversize_strategy`：超限策略（`downgrade`=降低清晰度重试, `info`=发送封面+标题+简介）
+  - `auto_extract_group_ids` / `auto_extract_private_ids`：自动提取功能白名单（空=跟随全局 access）
+  - 系统依赖：需安装 `ffmpeg`
 - **代理设置（可选）**：`[proxy]`
 - **WebUI**：`[webui]`（默认 `127.0.0.1:8787`，密码默认 `changeme`，启动 `uv run Undefined-webui`）
 
@@ -584,6 +595,7 @@ Undefined 支持 **MCP (Model Context Protocol)** 协议，可以连接外部 MC
 机器人通过自然语言理解用户意图，自动调度相应的 Agent：
 
 *   **网络搜索**："搜索一下 DeepSeek 的最新动态"
+*   **B站视频**：发送 B 站链接/BV 号自动下载发送视频，或指令 AI "下载这个 B 站视频 BV1xx411c7mD"
 *   **代码分析**："分析 src/main.py 的代码逻辑"
 *   **娱乐互动**："画一张赛博朋克风格的猫"
 *   **定时任务**："每天早上 8 点提醒我看新闻"
@@ -609,6 +621,7 @@ Undefined 欢迎开发者参与共建！
 ```
 src/Undefined/
 ├── ai/            # AI 运行时（client、prompt、tooling、summary、多模态）
+├── bilibili/      # B站视频解析、下载与发送
 ├── skills/        # 技能插件核心目录
 │   ├── tools/           # 基础工具（原子化功能单元）
 │   ├── toolsets/        # 工具集（分组工具）

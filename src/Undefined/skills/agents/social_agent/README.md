@@ -2,6 +2,10 @@
 
 用于社交媒体检索与内容推荐，如音乐、视频、用户信息等。
 
+相关功能：
+- B 站视频搜索（本 Agent 内的 `bilibili_search` 工具）
+- B 站视频下载发送（独立的 `bilibili_video` 基础工具，位于 `skills/tools/bilibili_video/`）
+
 目录结构：
 - `config.json`：智能体定义
 - `intro.md`：能力说明

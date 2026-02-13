@@ -26,7 +26,13 @@ graph TB
     %% ==================== 消息处理层 ====================
     subgraph MessageLayer["消息处理层 (src/Undefined/)"]
         MessageHandler["MessageHandler<br/>消息处理器<br/>[handlers.py]"]
-        
+
+        subgraph BilibiliModule["Bilibili 模块 (bilibili/)"]
+            BilibiliParser["parser.py<br/>标识符解析<br/>• BV/AV号 • URL<br/>• b23.tv短链 • 小程序JSON"]
+            BilibiliDownloader["downloader.py<br/>视频下载<br/>• DASH流 • ffmpeg合并"]
+            BilibiliSender["sender.py<br/>视频发送<br/>• 视频消息 • 降级信息卡片"]
+        end
+
         subgraph SecurityLayer["安全防线 (services/)"]
             SecurityService["SecurityService<br/>安全服务<br/>• 注入攻击检测<br/>• 速率限制<br/>[security.py]"]
             InjectionAgent["InjectionResponseAgent<br/>注入响应生成<br/>[injection_response_agent.py]"]
@@ -80,6 +86,7 @@ graph TB
             T_Time["get_current_time<br/>获取当前时间"]
             T_GetPicture["get_picture<br/>获取图片"]
             T_GetUserInfo["get_user_info<br/>获取用户信息"]
+            T_BilibiliVideo["bilibili_video<br/>B站视频下载发送"]
         end
         
         subgraph Toolsets["工具集 (skills/toolsets/)"]
@@ -181,7 +188,12 @@ graph TB
     MessageHandler -->|"1. 安全检测"| SecurityService
     SecurityService -.->|"API 调用"| LLM_API
     SecurityService -->|"注入攻击"| InjectionAgent
-    
+
+    MessageHandler -->|"1.5 Bilibili检测"| BilibiliParser
+    BilibiliParser -->|"BV号"| BilibiliDownloader
+    BilibiliDownloader -->|"视频文件"| BilibiliSender
+    BilibiliSender -->|"发送"| OneBotClient
+
     MessageHandler -->|"2. 指令?"| CommandDispatcher
     CommandDispatcher -->|"执行结果"| OneBotClient
     
@@ -307,8 +319,16 @@ sequenceDiagram
     alt 检测到注入
         SS->>MH: 拦截并响应
     else 安全
-        %% 指令处理
-        MH->>CD: 解析斜杠命令
+        %% Bilibili 自动提取
+        alt 消息包含B站链接/BV号
+            MH->>MH: extract_bilibili_ids()
+            MH->>MH: download_video()
+            MH->>OH: 发送视频/信息卡片
+            OH->>OB: WebSocket API
+            OB->>U: 显示视频
+        else 非B站内容
+            %% 指令处理
+            MH->>CD: 解析斜杠命令
         alt 是命令
             CD->>ST: FAQ/管理员操作
             CD-->>OB: 返回结果
@@ -365,6 +385,7 @@ sequenceDiagram
             AC->>OH: 发送消息
             OH->>OB: WebSocket API
             OB->>U: 显示回复
+        end
         end
     end
 ```
@@ -730,6 +751,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 | **日志配置** | `logging.level`, `logging.file_path`, `logging.max_size_mb` | 日志系统 |
 | **MCP 配置** | `mcp.config_path` | MCP 配置文件路径 |
 | **存储配置** | `token_usage.*` | Token 归档和清理策略 |
+| **Bilibili** | `bilibili.auto_extract_enabled`, `bilibili.cookie`, `bilibili.prefer_quality` | B站视频自动提取与下载 |
 | **思考链** | `*.thinking_enabled` | 思维链支持 |
 | **DeepSeek** | `*.deepseek_new_cot_support` | DeepSeek CoT 兼容 |
 | **WebUI** | `webui.url`, `webui.port`, `webui.password` | 配置控制台 |
@@ -740,7 +762,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 
 1. **外部实体层**：用户、管理员、OneBot 协议端 (NapCat/Lagrange.Core)、大模型 API 服务商
 2. **核心入口层**：main.py 启动入口、配置管理器 (config/loader.py)、热更新应用器 (config/hot_reload.py)、OneBotClient (onebot.py)、RequestContext (context.py)
-3. **消息处理层**：MessageHandler (handlers.py)、SecurityService (security.py)、CommandDispatcher (services/command.py)、AICoordinator (ai_coordinator.py)、QueueManager (queue_manager.py)
+3. **消息处理层**：MessageHandler (handlers.py)、SecurityService (security.py)、CommandDispatcher (services/command.py)、AICoordinator (ai_coordinator.py)、QueueManager (queue_manager.py)、Bilibili 自动提取 (bilibili/)
 4. **AI 核心能力层**：AIClient (client.py)、PromptBuilder (prompts.py)、ModelRequester (llm.py)、ToolManager (tooling.py)、MultimodalAnalyzer (multimodal.py)、SummaryService (summaries.py)、TokenCounter (tokens.py)
 5. **存储与上下文层**：MessageHistoryManager (utils/history.py, 10000条限制)、MemoryStorage (memory.py, 500条上限)、EndSummaryStorage、FAQStorage、ScheduledTaskStorage、TokenUsageStorage (自动归档)
 6. **技能系统层**：ToolRegistry (registry.py)、AgentRegistry、6个 Agents (共64个工具)、7类 Toolsets
@@ -769,7 +791,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 
 ### Skills 插件系统
 
-- **Tools (基础工具)**：原子化的功能单元，如 `send_message`, `get_history`。
+- **Tools (基础工具)**：原子化的功能单元，如 `send_message`, `get_history`, `bilibili_video`。
 - **Toolsets (复合工具集)**：7大类工具集 (group, messages, memory, notices, render, scheduler, mcp)。
 - **延迟加载 + 热重载**：`handler.py` 仅在首次调用时导入；当 `skills/` 下的 `config.json`/`handler.py` 发生变更时会自动重新加载。
 - **Agent 自我介绍自动生成**：启动时按 Agent 代码/配置 hash 生成 `intro.generated.md` 并与 `intro.md` 合并。
@@ -788,6 +810,6 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 
 ---
 
-**架构图版本**: v2.13.0
-**更新日期**: 2026-02-09  
+**架构图版本**: v2.14.0
+**更新日期**: 2026-02-13  
 **基于代码版本**: 最新 main 分支

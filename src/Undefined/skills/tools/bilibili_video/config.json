@@ -1,0 +1,26 @@
+{
+    "type": "function",
+    "function": {
+        "name": "bilibili_video",
+        "description": "下载并发送 Bilibili 视频到群聊或私聊。支持 BV号、AV号或B站视频链接。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "video_id": {
+                    "type": "string",
+                    "description": "Bilibili 视频标识：BV号（如 BV1xx411c7mD）、AV号（如 av12345）或完整URL"
+                },
+                "target_type": {
+                    "type": "string",
+                    "enum": ["group", "private"],
+                    "description": "可选。目标会话类型"
+                },
+                "target_id": {
+                    "type": "integer",
+                    "description": "可选。目标会话 ID"
+                }
+            },
+            "required": ["video_id"]
+        }
+    }
+}
