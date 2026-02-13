@@ -60,7 +60,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     # 获取配置
     runtime_config = context.get("runtime_config")
     sender = context.get("sender")
-    onebot = context.get("onebot")
+    onebot = context.get("onebot_client") or context.get("onebot")
+    if not onebot and sender is not None and hasattr(sender, "onebot"):
+        onebot = getattr(sender, "onebot")
 
     if not sender or not onebot:
         return "缺少必要的运行时组件（sender/onebot）"

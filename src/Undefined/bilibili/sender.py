@@ -154,12 +154,12 @@ async def send_bilibili_video(
             target_id,
         )
 
-        # 发视频前先发送封面/标题/UP/完整简介
-        pre_video_card = _build_info_card(video_info, truncate_desc=False)
-        await _send_message(sender, target_type, target_id, pre_video_card)
-
         video_message = f"[CQ:video,file=file://{abs_path}]"
         try:
+            # 发视频前先发送封面/标题/UP/完整简介
+            pre_video_card = _build_info_card(video_info, truncate_desc=False)
+            await _send_message(sender, target_type, target_id, pre_video_card)
+
             await _send_message(sender, target_type, target_id, video_message)
             result = f"已发送视频「{video_info.title}」({quality_name}, {file_size_mb:.1f}MB)"
         except Exception as exc:
