@@ -1,5 +1,6 @@
 """消息处理和命令分发"""
 
+import asyncio
 import logging
 import os
 import random
@@ -232,6 +233,22 @@ class MessageHandler:
                 )
                 return
 
+            # Bilibili 视频自动提取（私聊）
+            if self.config.bilibili_auto_extract_enabled:
+                if self.config.is_bilibili_auto_extract_allowed_private(
+                    private_sender_id
+                ):
+                    bvids = await self._extract_bilibili_ids(
+                        text, private_message_content
+                    )
+                    if bvids:
+                        asyncio.create_task(
+                            self._handle_bilibili_extract(
+                                private_sender_id, bvids, "private"
+                            )
+                        )
+                        return
+
             # 私聊消息直接触发回复
             await self.ai_coordinator.handle_private_reply(
                 private_sender_id,
@@ -352,6 +369,16 @@ class MessageHandler:
             await self.sender.send_group_message(group_id, message)
             return
 
+        # Bilibili 视频自动提取
+        if self.config.bilibili_auto_extract_enabled:
+            if self.config.is_bilibili_auto_extract_allowed_group(group_id):
+                bvids = await self._extract_bilibili_ids(text, message_content)
+                if bvids:
+                    asyncio.create_task(
+                        self._handle_bilibili_extract(group_id, bvids, "group")
+                    )
+                    return
+
         # 提取文本内容
         # (已在上方提取用于日志记录)
 
@@ -374,6 +401,64 @@ class MessageHandler:
             sender_role=sender_role,
             sender_title=sender_title,
         )
+
+    async def _extract_bilibili_ids(
+        self, text: str, message_content: list[dict[str, Any]]
+    ) -> list[str]:
+        """从文本和消息段中提取 B 站视频 BV 号。"""
+        from Undefined.bilibili.parser import (
+            extract_bilibili_ids,
+            extract_from_json_message,
+        )
+
+        bvids = await extract_bilibili_ids(text)
+        if not bvids:
+            bvids = await extract_from_json_message(message_content)
+        return bvids
+
+    async def _handle_bilibili_extract(
+        self,
+        target_id: int,
+        bvids: list[str],
+        target_type: str,
+    ) -> None:
+        """处理 bilibili 视频自动提取和发送。"""
+        from Undefined.bilibili.sender import send_bilibili_video
+
+        for bvid in bvids[:3]:  # 最多同时处理 3 个
+            try:
+                await send_bilibili_video(
+                    video_id=bvid,
+                    sender=self.sender,
+                    onebot=self.onebot,
+                    target_type=target_type,  # type: ignore[arg-type]
+                    target_id=target_id,
+                    sessdata=self.config.bilibili_sessdata,
+                    prefer_quality=self.config.bilibili_prefer_quality,
+                    max_duration=self.config.bilibili_max_duration,
+                    max_file_size=self.config.bilibili_max_file_size,
+                    oversize_strategy=self.config.bilibili_oversize_strategy,
+                )
+            except Exception as exc:
+                logger.error(
+                    "[Bilibili] 自动提取失败 %s → %s:%s: %s",
+                    bvid,
+                    target_type,
+                    target_id,
+                    exc,
+                )
+                try:
+                    error_msg = f"视频提取失败: {exc}"
+                    if target_type == "group":
+                        await self.sender.send_group_message(
+                            target_id, error_msg, auto_history=False
+                        )
+                    else:
+                        await self.sender.send_private_message(
+                            target_id, error_msg, auto_history=False
+                        )
+                except Exception:
+                    pass
 
     async def close(self) -> None:
         """关闭消息处理器"""

@@ -340,6 +340,34 @@ archive_prune_mode = "delete"
 # en: MCP config file path (relative to the working directory).
 config_path = "config/mcp.json"
 
+# zh: Bilibili 视频自动提取配置。
+# en: Bilibili video auto-extraction settings.
+[bilibili]
+# zh: 是否启用自动提取（检测到B站视频链接/BV号时自动下载并发送）。
+# en: Enable auto-extraction (auto-download and send when Bilibili video links/BV IDs are detected).
+auto_extract_enabled = false
+# zh: B站账号的 SESSDATA cookie（获取 1080p 需要登录态）。
+# en: Bilibili SESSDATA cookie (login required for 1080p).
+sessdata = ""
+# zh: 首选清晰度: 80=1080P, 64=720P, 32=480P。
+# en: Preferred quality: 80=1080P, 64=720P, 32=480P.
+prefer_quality = 80
+# zh: 最大视频时长（秒），超过则不下载，仅发送信息卡片。0=不限。
+# en: Max video duration (seconds); exceeding this sends info card only. 0=unlimited.
+max_duration = 600
+# zh: 最大文件大小（MB），超过则触发 oversize_strategy。0=不限。
+# en: Max file size (MB); triggers oversize_strategy if exceeded. 0=unlimited.
+max_file_size = 100
+# zh: 超限策略: "downgrade"=降低清晰度重试, "info"=发送封面+标题+简介。
+# en: Oversize strategy: "downgrade"=retry at lower quality, "info"=send cover+title+description.
+oversize_strategy = "downgrade"
+# zh: 自动提取功能的群聊白名单（空=跟随全局 access.allowed_group_ids）。
+# en: Group allowlist for auto-extraction (empty = follow global access.allowed_group_ids).
+auto_extract_group_ids = []
+# zh: 自动提取功能的私聊白名单（空=跟随全局 access.allowed_private_ids）。
+# en: Private chat allowlist for auto-extraction (empty = follow global access.allowed_private_ids).
+auto_extract_private_ids = []
+
 # zh: WebUI 设置。仅在使用 `Undefined-webui` 启动 WebUI 时生效；直接运行 `Undefined` 可忽略本段。
 # en: WebUI settings. Only used when starting WebUI via `Undefined-webui`; ignore this section if you run `Undefined` directly.
 [webui]

@@ -370,6 +370,15 @@ class Config:
     webui_url: str
     webui_port: int
     webui_password: str
+    # Bilibili 视频提取
+    bilibili_auto_extract_enabled: bool
+    bilibili_sessdata: str
+    bilibili_prefer_quality: int
+    bilibili_max_duration: int
+    bilibili_max_file_size: int
+    bilibili_oversize_strategy: str
+    bilibili_auto_extract_group_ids: list[int]
+    bilibili_auto_extract_private_ids: list[int]
     _allowed_group_ids_set: set[int] = dataclass_field(
         default_factory=set,
         init=False,
@@ -380,11 +389,27 @@ class Config:
         init=False,
         repr=False,
     )
+    _bilibili_group_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
+    _bilibili_private_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         # 访问控制白名单属于高频热路径，启动后缓存为 set 降低重复构建开销。
         self._allowed_group_ids_set = {int(item) for item in self.allowed_group_ids}
         self._allowed_private_ids_set = {int(item) for item in self.allowed_private_ids}
+        self._bilibili_group_ids_set = {
+            int(item) for item in self.bilibili_auto_extract_group_ids
+        }
+        self._bilibili_private_ids_set = {
+            int(item) for item in self.bilibili_auto_extract_private_ids
+        }
 
     @classmethod
     def load(cls, config_path: Optional[Path] = None, strict: bool = True) -> "Config":
@@ -752,6 +777,34 @@ class Config:
             "config/mcp.json",
         )
 
+        # Bilibili 配置
+        bilibili_auto_extract_enabled = _coerce_bool(
+            _get_value(data, ("bilibili", "auto_extract_enabled"), None), False
+        )
+        bilibili_sessdata = _coerce_str(
+            _get_value(data, ("bilibili", "sessdata"), None), ""
+        )
+        bilibili_prefer_quality = _coerce_int(
+            _get_value(data, ("bilibili", "prefer_quality"), None), 80
+        )
+        bilibili_max_duration = _coerce_int(
+            _get_value(data, ("bilibili", "max_duration"), None), 600
+        )
+        bilibili_max_file_size = _coerce_int(
+            _get_value(data, ("bilibili", "max_file_size"), None), 100
+        )
+        bilibili_oversize_strategy = _coerce_str(
+            _get_value(data, ("bilibili", "oversize_strategy"), None), "downgrade"
+        )
+        if bilibili_oversize_strategy not in ("downgrade", "info"):
+            bilibili_oversize_strategy = "downgrade"
+        bilibili_auto_extract_group_ids = _coerce_int_list(
+            _get_value(data, ("bilibili", "auto_extract_group_ids"), None)
+        )
+        bilibili_auto_extract_private_ids = _coerce_int_list(
+            _get_value(data, ("bilibili", "auto_extract_private_ids"), None)
+        )
+
         webui_settings = load_webui_settings(config_path)
 
         if strict:
@@ -827,6 +880,14 @@ class Config:
             webui_url=webui_settings.url,
             webui_port=webui_settings.port,
             webui_password=webui_settings.password,
+            bilibili_auto_extract_enabled=bilibili_auto_extract_enabled,
+            bilibili_sessdata=bilibili_sessdata,
+            bilibili_prefer_quality=bilibili_prefer_quality,
+            bilibili_max_duration=bilibili_max_duration,
+            bilibili_max_file_size=bilibili_max_file_size,
+            bilibili_oversize_strategy=bilibili_oversize_strategy,
+            bilibili_auto_extract_group_ids=bilibili_auto_extract_group_ids,
+            bilibili_auto_extract_private_ids=bilibili_auto_extract_private_ids,
         )
 
     def access_control_enabled(self) -> bool:
@@ -856,6 +917,20 @@ class Config:
         ):
             return True
         return int(user_id) in self._allowed_private_ids_set
+
+    def is_bilibili_auto_extract_allowed_group(self, group_id: int) -> bool:
+        """群聊是否允许 bilibili 自动提取。"""
+        if self._bilibili_group_ids_set:
+            return int(group_id) in self._bilibili_group_ids_set
+        # 白名单为空时跟随全局 access 控制
+        return self.is_group_allowed(group_id)
+
+    def is_bilibili_auto_extract_allowed_private(self, user_id: int) -> bool:
+        """私聊是否允许 bilibili 自动提取。"""
+        if self._bilibili_private_ids_set:
+            return int(user_id) in self._bilibili_private_ids_set
+        # 白名单为空时跟随全局 access 控制
+        return self.is_private_allowed(user_id)
 
     def should_process_group_message(self, is_at_bot: bool) -> bool:
         """是否处理该条群消息。"""
