@@ -70,7 +70,7 @@ class PromptBuilder:
 
         enabled = bool(getattr(runtime_config, "nagaagent_mode_enabled", False))
         if enabled:
-            return "res/prompts/undfined_nagaagent.xml"
+            return "res/prompts/undefined_nagaagent.xml"
         return "res/prompts/undefined.xml"
 
     async def _ensure_summaries_loaded(self) -> None:
