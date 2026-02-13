@@ -485,7 +485,7 @@ uv run Undefined-webui
   - DeepSeek Thinking + Tool Calls：若使用 `deepseek-reasoner` 或 `deepseek-chat` + `thinking={"type":"enabled"}` 且启用了工具调用，建议启用 `deepseek_new_cot_support`
 - **日志配置**：`[logging]`
 - **功能开关（可选）**：`[features]`
-  - `nagaagent_mode_enabled`：是否启用 NagaAgent 模式（开启后使用 `res/prompts/undfined_nagaagent.xml` 并暴露相关 Agent；关闭时使用 `res/prompts/undefined.xml` 并隐藏/禁用相关 Agent）
+  - `nagaagent_mode_enabled`：是否启用 NagaAgent 模式（开启后使用 `res/prompts/undefined_nagaagent.xml` 并暴露相关 Agent；关闭时使用 `res/prompts/undefined.xml` 并隐藏/禁用相关 Agent）
 - **彩蛋（可选）**：`[easter_egg]`
   - `keyword_reply_enabled`：是否启用群聊关键词自动回复（如“心理委员”，默认关闭）
 - **Token 统计归档**：`[token_usage]`（默认 5MB，<=0 禁用）

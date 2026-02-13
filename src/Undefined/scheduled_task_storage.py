@@ -79,7 +79,7 @@ class ScheduledTaskStorage:
 
     def __init__(self) -> None:
         """初始化存储"""
-        self._load()
+        self._tasks = self._load()
 
     def _load(self) -> Dict[str, ScheduledTask]:
         """从文件加载所有任务"""

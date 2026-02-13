@@ -731,6 +731,7 @@ class ModelRequester:
         ] = {}
         self._token_counters: dict[str, TokenCounter] = {}
         self._warned_legacy_api_urls: set[str] = set()
+        self._background_tasks: set[asyncio.Task[Any]] = set()
 
     async def request(
         self,
@@ -853,7 +854,8 @@ class ModelRequester:
 
             self._maybe_log_thinking(result, call_type, model_config.model_name)
 
-            asyncio.create_task(
+            # 创建后台任务记录 token 使用情况，并保存引用防止被垃圾回收
+            task = asyncio.create_task(
                 self._token_usage_storage.record(
                     TokenUsage(
                         timestamp=datetime.now().isoformat(),
@@ -867,6 +869,8 @@ class ModelRequester:
                     )
                 )
             )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
 
             return result
         except APIStatusError as exc:
