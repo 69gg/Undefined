@@ -728,6 +728,7 @@ class AIClient:
                 tool_api_names: list[str] = []
                 tool_internal_names: list[str] = []
                 end_tool_call: dict[str, Any] | None = None
+                end_tool_args: dict[str, Any] = {}
 
                 for tool_call in tool_calls:
                     call_id = tool_call.get("id", "")
@@ -772,11 +773,9 @@ class AIClient:
                                 "[工具调用] end 与其他工具同时调用，"
                                 "将先执行其他工具，并回填 end 跳过结果"
                             )
-                            end_tool_call = tool_call
-                            continue
-                        else:
-                            end_tool_call = tool_call
-                            continue
+                        end_tool_call = tool_call
+                        end_tool_args = function_args
+                        continue
 
                     tool_call_ids.append(call_id)
                     tool_api_names.append(str(api_function_name))
@@ -862,16 +861,9 @@ class AIClient:
                         )
                         logger.info("[工具调用] end 与其他工具同时调用，已回填跳过响应")
                     else:
-                        # end 单独调用，正常执行
-                        end_args = parse_tool_arguments(
-                            end_tool_call.get("function", {}).get("arguments"),
-                            logger=logger,
-                            tool_name="end",
-                        )
-                        if not isinstance(end_args, dict):
-                            end_args = {}
+                        # end 单独调用，正常执行（参数已在循环中解析）
                         end_result = await self.tool_manager.execute_tool(
-                            "end", end_args, tool_context
+                            "end", end_tool_args, tool_context
                         )
                         messages.append(
                             {
