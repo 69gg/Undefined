@@ -15,6 +15,7 @@ class ModelQueue:
     """单个模型的优先队列组"""
 
     model_name: str
+    retry_queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
     superadmin_queue: asyncio.Queue[dict[str, Any]] = field(
         default_factory=asyncio.Queue
     )
@@ -64,11 +65,13 @@ class QueueManager:
         self,
         ai_request_interval: float = 1.0,
         model_intervals: dict[str, float] | None = None,
+        max_retries: int = 2,
     ) -> None:
         if ai_request_interval <= 0:
             ai_request_interval = 1.0
         self.ai_request_interval = ai_request_interval
         self._default_interval = ai_request_interval
+        self._max_retries = max(0, max_retries)
         self._model_intervals: dict[str, float] = {}
         if model_intervals:
             self.update_model_intervals(model_intervals)
@@ -320,44 +323,53 @@ class QueueManager:
         current_queue_idx = 0
         current_queue_processed = 0
 
-        # 即使没有请求，也按模型节奏“发车”一次（检查队列）。
-        # 使用“动态睡眠”：若本轮处理过请求，则只睡剩余时间；若空闲则完整等待。
+        # 即使没有请求，也按模型节奏"发车"一次（检查队列）。
+        # 使用"动态睡眠"：若本轮处理过请求，则只睡剩余时间；若空闲则完整等待。
         # 目标：保持固定节奏发车，不等待前一个请求完成。
 
         try:
             while True:
                 cycle_start_time = time.perf_counter()
 
-                # 选择一个请求
-                request = None
-                chosen_queue_idx = -1
+                request: dict[str, Any] | None = None
+                dispatch_queue_name = ""
 
-                # 按优先级和轮转逻辑选择请求：
-                # - 优先级顺序固定（超级管理员 > 私聊 > 群聊@ > 群聊普通）
-                # - 每个队列处理 2 个后切换，避免长期饿死
-                # - 只做非阻塞检查，保持发车节奏
+                # 1. 优先处理重试队列（最高优先级，不参与公平性轮转）
+                if not model_queue.retry_queue.empty():
+                    request = await model_queue.retry_queue.get()
+                    dispatch_queue_name = "重试"
+                    model_queue.retry_queue.task_done()
+                else:
+                    # 2. 按优先级和轮转逻辑选择常规队列
+                    start_idx = current_queue_idx
+                    for i in range(4):
+                        idx = (start_idx + i) % 4
+                        q = queues[idx]
+                        if not q.empty():
+                            request = await q.get()
+                            dispatch_queue_name = queue_names[idx]
+                            q.task_done()
 
-                found_request = False
+                            # 更新公平性计数
+                            current_queue_processed += 1
+                            if current_queue_processed >= 2:
+                                current_queue_idx = (current_queue_idx + 1) % 4
+                                current_queue_processed = 0
+                            break
 
-                # 从当前队列开始轮询，找到第一个非空队列
-                start_idx = current_queue_idx
-                for i in range(4):
-                    idx = (start_idx + i) % 4
-                    q = queues[idx]
-                    if not q.empty():
-                        request = await q.get()
-                        chosen_queue_idx = idx
-                        found_request = True
-                        break
-
-                if found_request and request:
+                # 3. 分发请求
+                if request is not None:
                     request_type = request.get("type", "unknown")
+                    retry_count = request.get("_retry_count", 0)
+                    retry_suffix = (
+                        f" (重试第{retry_count}次)" if retry_count > 0 else ""
+                    )
                     logger.info(
-                        "[队列发车][%s] %s 请求: %s remaining=%s %s",
+                        "[队列发车][%s] %s 请求%s: %s %s",
                         model_name,
-                        queue_names[chosen_queue_idx],
+                        dispatch_queue_name,
+                        retry_suffix,
                         request_type,
-                        queues[chosen_queue_idx].qsize(),
                         self._format_request_meta(request),
                     )
 
@@ -365,24 +377,12 @@ class QueueManager:
                     if self._request_handler:
                         inflight_task = asyncio.create_task(
                             self._safe_handle_request(
-                                request, model_name, queue_names[chosen_queue_idx]
+                                request, model_name, dispatch_queue_name
                             )
                         )
                         self._track_inflight_task(inflight_task)
 
-                    queues[chosen_queue_idx].task_done()
-
-                    # 更新公平性计数
-                    current_queue_processed += 1
-                    if current_queue_processed >= 2:
-                        current_queue_idx = (current_queue_idx + 1) % 4
-                        current_queue_processed = 0
-                        # 注意：如果下一个队列是空的，下一次循环会自动找再下一个非空的
-                else:
-                    # 没有请求，列车空车出发
-                    pass
-
-                # 计算需要等待的时间，确保 1s 间隔
+                # 计算需要等待的时间，确保固定间隔
                 elapsed = time.perf_counter() - cycle_start_time
                 interval = self.get_interval(model_name)
                 wait_time = max(0.0, interval - elapsed)
@@ -398,7 +398,7 @@ class QueueManager:
     async def _safe_handle_request(
         self, request: dict[str, Any], model_name: str, queue_name: str
     ) -> None:
-        """安全执行请求处理，捕获异常"""
+        """安全执行请求处理，捕获异常并按需重试"""
         try:
             start_time = time.perf_counter()
             logger.debug(
@@ -419,9 +419,34 @@ class QueueManager:
                 self._format_request_meta(request),
             )
         except Exception as exc:
-            logger.exception(
-                "[请求失败][%s] 处理请求异常: %s %s",
-                model_name,
-                exc,
-                self._format_request_meta(request),
-            )
+            retry_count = request.get("_retry_count", 0)
+            if self._max_retries > 0 and retry_count < self._max_retries:
+                request["_retry_count"] = retry_count + 1
+                model_queue = self._model_queues.get(model_name)
+                if model_queue:
+                    await model_queue.retry_queue.put(request)
+                    logger.warning(
+                        "[请求重试][%s] 第%s/%s次重试已入队: %s %s",
+                        model_name,
+                        retry_count + 1,
+                        self._max_retries,
+                        exc,
+                        self._format_request_meta(request),
+                    )
+                else:
+                    logger.exception(
+                        "[请求失败][%s] 处理请求异常且队列已不存在: %s %s",
+                        model_name,
+                        exc,
+                        self._format_request_meta(request),
+                    )
+            else:
+                logger.exception(
+                    "[请求失败][%s] 处理请求异常%s: %s %s",
+                    model_name,
+                    f"（已达最大重试次数{self._max_retries}）"
+                    if self._max_retries > 0
+                    else "",
+                    exc,
+                    self._format_request_meta(request),
+                )

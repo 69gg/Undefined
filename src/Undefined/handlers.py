@@ -58,7 +58,9 @@ class MessageHandler:
         # 初始化服务
         self.security = SecurityService(config, ai._http_client)
         self.rate_limiter = RateLimiter(config)
-        self.queue_manager = QueueManager()
+        self.queue_manager = QueueManager(
+            max_retries=config.ai_request_max_retries,
+        )
         self.queue_manager.update_model_intervals(build_model_queue_intervals(config))
 
         # 设置队列管理器到 AIClient（触发 Agent 介绍生成器启动）

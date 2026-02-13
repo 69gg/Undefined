@@ -25,6 +25,9 @@ process_poke_message = true
 # zh: 注入给模型的最近历史消息条数上限（0-200，0 表示不注入历史）。
 # en: Max number of recent messages injected as model context (0-200; 0 disables history injection).
 context_recent_messages_limit = 20
+# zh: 模型调用失败时最大重试次数（0=不重试，默认2，最大5）。失败的请求将被放回队列最前端优先重试。
+# en: Max retries for failed model API requests (0=no retry, default 2, max 5). Failed requests are re-queued with highest priority.
+ai_request_max_retries = 2
 
 # zh: 会话白名单（访问控制）。只要本段任一列表非空，系统将进入“限制模式”：未在白名单内的群/私聊会被忽略，且所有消息发送将被拦截。
 # en: Session allowlist (access control). If either the group or private allowlist is non-empty, the bot enters "allowlist mode": groups or private chats not in the allowlists will be ignored and outgoing messages will be blocked.

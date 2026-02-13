@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 _RESTART_REQUIRED_KEYS: set[str] = {
+    "ai_request_max_retries",
     "log_level",
     "log_file_path",
     "log_max_size",

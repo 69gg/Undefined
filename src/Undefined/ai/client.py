@@ -623,6 +623,7 @@ class AIClient:
         max_iterations = 1000
         iteration = 0
         conversation_ended = False
+        any_tool_executed = False
         ds_cot_enabled = getattr(self.chat_config, "deepseek_new_cot_support", False)
         ds_cot_logged = False
         ds_cot_missing_reason_logged = False
@@ -787,6 +788,7 @@ class AIClient:
                     )
 
                 if tool_tasks:
+                    any_tool_executed = True
                     logger.info(
                         "[工具执行] 开始并发执行 %s 个工具调用: %s",
                         len(tool_tasks),
@@ -882,6 +884,9 @@ class AIClient:
                     return ""
 
             except Exception as exc:
+                if not any_tool_executed:
+                    # 尚未执行任何工具（无消息发送等副作用），安全传播给上层重试
+                    raise
                 logger.exception("ask 处理失败: %s", exc)
                 return f"处理失败: {exc}"
 

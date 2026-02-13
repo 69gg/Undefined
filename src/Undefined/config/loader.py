@@ -322,6 +322,7 @@ class Config:
     process_poke_message: bool
     keyword_reply_enabled: bool
     context_recent_messages_limit: int
+    ai_request_max_retries: int
     nagaagent_mode_enabled: bool
     onebot_ws_url: str
     onebot_token: str
@@ -476,6 +477,19 @@ class Config:
             context_recent_messages_limit = 0
         if context_recent_messages_limit > 200:
             context_recent_messages_limit = 200
+
+        ai_request_max_retries = _coerce_int(
+            _get_value(
+                data,
+                ("core", "ai_request_max_retries"),
+                "AI_REQUEST_MAX_RETRIES",
+            ),
+            2,
+        )
+        if ai_request_max_retries < 0:
+            ai_request_max_retries = 0
+        if ai_request_max_retries > 5:
+            ai_request_max_retries = 5
 
         nagaagent_mode_enabled = _coerce_bool(
             _get_value(
@@ -837,6 +851,7 @@ class Config:
             process_poke_message=process_poke_message,
             keyword_reply_enabled=keyword_reply_enabled,
             context_recent_messages_limit=context_recent_messages_limit,
+            ai_request_max_retries=ai_request_max_retries,
             nagaagent_mode_enabled=nagaagent_mode_enabled,
             onebot_ws_url=onebot_ws_url,
             onebot_token=onebot_token,
