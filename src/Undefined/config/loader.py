@@ -372,7 +372,7 @@ class Config:
     webui_password: str
     # Bilibili 视频提取
     bilibili_auto_extract_enabled: bool
-    bilibili_sessdata: str
+    bilibili_cookie: str
     bilibili_prefer_quality: int
     bilibili_max_duration: int
     bilibili_max_file_size: int
@@ -781,9 +781,14 @@ class Config:
         bilibili_auto_extract_enabled = _coerce_bool(
             _get_value(data, ("bilibili", "auto_extract_enabled"), None), False
         )
-        bilibili_sessdata = _coerce_str(
-            _get_value(data, ("bilibili", "sessdata"), None), ""
+        bilibili_cookie = _coerce_str(
+            _get_value(data, ("bilibili", "cookie"), None), ""
         )
+        if not bilibili_cookie:
+            # 兼容旧配置项：bilibili.sessdata
+            bilibili_cookie = _coerce_str(
+                _get_value(data, ("bilibili", "sessdata"), None), ""
+            )
         bilibili_prefer_quality = _coerce_int(
             _get_value(data, ("bilibili", "prefer_quality"), None), 80
         )
@@ -881,7 +886,7 @@ class Config:
             webui_port=webui_settings.port,
             webui_password=webui_settings.password,
             bilibili_auto_extract_enabled=bilibili_auto_extract_enabled,
-            bilibili_sessdata=bilibili_sessdata,
+            bilibili_cookie=bilibili_cookie,
             bilibili_prefer_quality=bilibili_prefer_quality,
             bilibili_max_duration=bilibili_max_duration,
             bilibili_max_file_size=bilibili_max_file_size,
@@ -889,6 +894,11 @@ class Config:
             bilibili_auto_extract_group_ids=bilibili_auto_extract_group_ids,
             bilibili_auto_extract_private_ids=bilibili_auto_extract_private_ids,
         )
+
+    @property
+    def bilibili_sessdata(self) -> str:
+        """兼容旧字段名，等价于 bilibili_cookie。"""
+        return self.bilibili_cookie
 
     def access_control_enabled(self) -> bool:
         """是否启用会话白名单限制。

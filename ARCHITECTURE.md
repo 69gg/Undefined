@@ -751,7 +751,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 | **日志配置** | `logging.level`, `logging.file_path`, `logging.max_size_mb` | 日志系统 |
 | **MCP 配置** | `mcp.config_path` | MCP 配置文件路径 |
 | **存储配置** | `token_usage.*` | Token 归档和清理策略 |
-| **Bilibili** | `bilibili.auto_extract_enabled`, `bilibili.sessdata`, `bilibili.prefer_quality` | B站视频自动提取与下载 |
+| **Bilibili** | `bilibili.auto_extract_enabled`, `bilibili.cookie`, `bilibili.prefer_quality` | B站视频自动提取与下载 |
 | **思考链** | `*.thinking_enabled` | 思维链支持 |
 | **DeepSeek** | `*.deepseek_new_cot_support` | DeepSeek CoT 兼容 |
 | **WebUI** | `webui.url`, `webui.port`, `webui.password` | 配置控制台 |

@@ -9,6 +9,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
+from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,55 @@ QUALITY_MAP: dict[int, str] = {
 }
 
 
+def _build_cookies(cookie: str = "") -> dict[str, str]:
+    """将配置中的 cookie 字符串解析为 cookies 字典。
+
+    兼容两种输入：
+    1) 仅 SESSDATA 值（旧配置）
+    2) 完整 Cookie 串（推荐）
+    """
+    raw = cookie.strip()
+    if not raw:
+        return {}
+
+    # 旧配置：仅填了 SESSDATA 的值
+    if "=" not in raw:
+        return {"SESSDATA": raw}
+
+    parsed: dict[str, str] = {}
+
+    simple_cookie = SimpleCookie()
+    try:
+        simple_cookie.load(raw)
+    except CookieError:
+        simple_cookie = SimpleCookie()
+
+    if simple_cookie:
+        for key, morsel in simple_cookie.items():
+            value = morsel.value.strip()
+            if key and value:
+                parsed[key] = value
+
+    if parsed:
+        return parsed
+
+    # 部分异常格式下兜底手动拆分
+    for part in raw.split(";"):
+        item = part.strip()
+        if not item or "=" not in item:
+            continue
+        key, value = item.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if key and value:
+            parsed[key] = value
+
+    if parsed:
+        return parsed
+
+    return {"SESSDATA": raw}
+
+
 @dataclass
 class VideoInfo:
     """视频基本信息"""
@@ -57,16 +107,21 @@ class VideoInfo:
     desc: str  # 简介
 
 
-async def get_video_info(bvid: str, sessdata: str = "") -> VideoInfo:
+async def get_video_info(
+    bvid: str,
+    cookie: str = "",
+    sessdata: str = "",
+) -> VideoInfo:
     """获取视频基本信息。
 
     Raises:
         ValueError: API 返回错误或视频不存在。
         httpx.HTTPError: 网络请求失败。
     """
-    cookies: dict[str, str] = {}
-    if sessdata:
-        cookies["SESSDATA"] = sessdata
+    if not cookie and sessdata:
+        cookie = sessdata
+
+    cookies = _build_cookies(cookie)
 
     async with httpx.AsyncClient(
         headers=_HEADERS, cookies=cookies, timeout=15, follow_redirects=True
@@ -150,16 +205,17 @@ async def _merge_av(video_path: Path, audio_path: Path, output_path: Path) -> No
 
 async def download_video(
     bvid: str,
-    sessdata: str = "",
+    cookie: str = "",
     prefer_quality: int = 80,
     max_duration: int = 0,
     output_dir: Path | None = None,
+    sessdata: str = "",
 ) -> tuple[Path | None, VideoInfo, int]:
     """下载 B 站视频。
 
     Args:
         bvid: BV 号。
-        sessdata: B 站 SESSDATA cookie。
+        cookie: B 站完整 Cookie 字符串（推荐，至少包含 SESSDATA）。
         prefer_quality: 首选清晰度 qn（80=1080P）。
         max_duration: 最大时长限制（秒），0 表示不限。
         output_dir: 输出目录，默认 DOWNLOAD_CACHE_DIR。
@@ -168,7 +224,10 @@ async def download_video(
         (视频文件路径 | None, 视频信息, 实际清晰度 qn)。
         如果超时长限制，视频路径为 None。
     """
-    video_info = await get_video_info(bvid, sessdata)
+    if not cookie and sessdata:
+        cookie = sessdata
+
+    video_info = await get_video_info(bvid, cookie=cookie)
 
     # 时长检查
     if max_duration > 0 and video_info.duration > max_duration:
@@ -181,9 +240,7 @@ async def download_video(
         return None, video_info, 0
 
     # 获取播放地址
-    cookies: dict[str, str] = {}
-    if sessdata:
-        cookies["SESSDATA"] = sessdata
+    cookies = _build_cookies(cookie)
 
     async with httpx.AsyncClient(
         headers=_HEADERS, cookies=cookies, timeout=15, follow_redirects=True
@@ -192,7 +249,7 @@ async def download_video(
             _BILIBILI_API_PLAYURL,
             params={
                 "bvid": bvid,
-                "cid": await _get_cid(bvid, sessdata),
+                "cid": await _get_cid(bvid, cookie=cookie),
                 "fnval": 16,  # DASH 格式
                 "fourk": 1,
             },
@@ -286,11 +343,16 @@ async def download_video(
         raise
 
 
-async def _get_cid(bvid: str, sessdata: str = "") -> int:
+async def _get_cid(
+    bvid: str,
+    cookie: str = "",
+    sessdata: str = "",
+) -> int:
     """获取视频的 cid。"""
-    cookies: dict[str, str] = {}
-    if sessdata:
-        cookies["SESSDATA"] = sessdata
+    if not cookie and sessdata:
+        cookie = sessdata
+
+    cookies = _build_cookies(cookie)
 
     async with httpx.AsyncClient(
         headers=_HEADERS, cookies=cookies, timeout=15, follow_redirects=True

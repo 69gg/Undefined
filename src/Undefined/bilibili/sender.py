@@ -47,11 +47,12 @@ async def send_bilibili_video(
     onebot: OneBotClient,
     target_type: Literal["group", "private"],
     target_id: int,
-    sessdata: str = "",
+    cookie: str = "",
     prefer_quality: int = 80,
     max_duration: int = 0,
     max_file_size: int = 0,
     oversize_strategy: str = "downgrade",
+    sessdata: str = "",
 ) -> str:
     """下载并发送 B 站视频。
 
@@ -61,11 +62,12 @@ async def send_bilibili_video(
         onebot: OneBot 客户端。
         target_type: 目标会话类型。
         target_id: 目标会话 ID。
-        sessdata: B 站 SESSDATA cookie。
+        cookie: B 站完整 Cookie 字符串（推荐，至少包含 SESSDATA）。
         prefer_quality: 首选清晰度。
         max_duration: 最大时长限制（秒），0 不限。
         max_file_size: 最大文件大小（MB），0 不限。
         oversize_strategy: 超限策略 "downgrade" 或 "info"。
+        sessdata: 兼容旧参数名，等价于 cookie。
 
     Returns:
         操作结果描述。
@@ -75,11 +77,14 @@ async def send_bilibili_video(
     if not bvid:
         return f"无法解析视频标识: {video_id}"
 
+    if not cookie and sessdata:
+        cookie = sessdata
+
     try:
         # 下载视频
         video_path, video_info, actual_qn = await download_video(
             bvid=bvid,
-            sessdata=sessdata,
+            cookie=cookie,
             prefer_quality=prefer_quality,
             max_duration=max_duration,
         )
@@ -112,7 +117,7 @@ async def send_bilibili_video(
                 )
                 video_path, video_info, actual_qn = await download_video(
                     bvid=bvid,
-                    sessdata=sessdata,
+                    cookie=cookie,
                     prefer_quality=lower_qn,
                     max_duration=max_duration,
                 )
@@ -168,7 +173,7 @@ async def send_bilibili_video(
         logger.exception("[Bilibili] 处理视频失败: %s", bvid)
         # 尝试发送基本信息
         try:
-            info = await get_video_info(bvid, sessdata)
+            info = await get_video_info(bvid, cookie=cookie)
             card = _build_info_card(info)
             hint = f"(视频处理失败: {exc})\n"
             await _send_message(sender, target_type, target_id, hint + card)

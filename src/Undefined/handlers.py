@@ -433,7 +433,7 @@ class MessageHandler:
                     onebot=self.onebot,
                     target_type=target_type,  # type: ignore[arg-type]
                     target_id=target_id,
-                    sessdata=self.config.bilibili_sessdata,
+                    cookie=self.config.bilibili_cookie,
                     prefer_quality=self.config.bilibili_prefer_quality,
                     max_duration=self.config.bilibili_max_duration,
                     max_file_size=self.config.bilibili_max_file_size,

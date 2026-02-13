@@ -66,14 +66,18 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "缺少必要的运行时组件（sender/onebot）"
 
     # 读取 bilibili 配置
-    sessdata = ""
+    cookie = ""
     prefer_quality = 80
     max_duration = 600
     max_file_size = 100
     oversize_strategy = "downgrade"
 
     if runtime_config:
-        sessdata = getattr(runtime_config, "bilibili_sessdata", "")
+        cookie = getattr(
+            runtime_config,
+            "bilibili_cookie",
+            getattr(runtime_config, "bilibili_sessdata", ""),
+        )
         prefer_quality = getattr(runtime_config, "bilibili_prefer_quality", 80)
         max_duration = getattr(runtime_config, "bilibili_max_duration", 600)
         max_file_size = getattr(runtime_config, "bilibili_max_file_size", 100)
@@ -88,7 +92,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             onebot=onebot,
             target_type=target_type,
             target_id=target_id,
-            sessdata=sessdata,
+            cookie=cookie,
             prefer_quality=prefer_quality,
             max_duration=max_duration,
             max_file_size=max_file_size,

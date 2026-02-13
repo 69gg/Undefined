@@ -492,7 +492,7 @@ uv run Undefined-webui
 - **Skills 热重载**：`[skills]`
 - **Bilibili 视频提取**：`[bilibili]`
   - `auto_extract_enabled`：是否启用自动提取（检测到 B 站链接/BV 号时自动下载并发送，默认关闭）
-  - `sessdata`：B 站 SESSDATA cookie（获取 1080p 需要登录态）
+  - `cookie`：B 站完整 Cookie 字符串（推荐，至少包含 `SESSDATA`，风控通过率更高）
   - `prefer_quality`：首选清晰度（`80`=1080P, `64`=720P, `32`=480P）
   - `max_duration`：最大视频时长限制（秒），超过则发送信息卡片（`0`=不限）
   - `max_file_size`：最大文件大小限制（MB），超过则触发降级策略（`0`=不限）
