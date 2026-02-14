@@ -57,7 +57,7 @@ class OneBotClient:
             self.ws = await websockets.connect(
                 url,
                 ping_interval=20,
-                ping_timeout=20,
+                ping_timeout=480,
                 max_size=100 * 1024 * 1024,  # 100MB，支持大量历史消息
                 additional_headers=extra_headers if extra_headers else None,
             )
@@ -110,8 +110,8 @@ class OneBotClient:
 
         try:
             await self.ws.send(json.dumps(request))
-            # 等待响应，超时 30 秒
-            response = await asyncio.wait_for(future, timeout=30.0)
+            # 等待响应，超时 8 分钟
+            response = await asyncio.wait_for(future, timeout=480.0)
             duration = time.perf_counter() - start_time
 
             # 检查响应状态

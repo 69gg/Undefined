@@ -13,7 +13,7 @@ def build_url(base_url: str, path: str) -> str:
     return f"{base_url.rstrip('/')}{normalized_path}"
 
 
-def get_request_timeout(default_timeout: float = 15.0) -> float:
+def get_request_timeout(default_timeout: float = 480.0) -> float:
     config = get_config(strict=False)
     timeout = float(config.network_request_timeout)
     return timeout if timeout > 0 else default_timeout

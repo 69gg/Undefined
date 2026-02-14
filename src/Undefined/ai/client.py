@@ -105,7 +105,7 @@ class AIClient:
         self.memory_storage = memory_storage
         self._end_summary_storage = end_summary_storage or EndSummaryStorage()
 
-        self._http_client = httpx.AsyncClient(timeout=120.0)
+        self._http_client = httpx.AsyncClient(timeout=480.0)
         self._token_usage_storage = TokenUsageStorage()
         self._requester = ModelRequester(self._http_client, self._token_usage_storage)
         self._token_counter = TokenCounter()

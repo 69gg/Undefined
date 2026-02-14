@@ -253,7 +253,7 @@ class AgentIntroGenerator:
 
             # 等待结果（带超时）
             try:
-                await asyncio.wait_for(pending.event.wait(), timeout=120.0)
+                await asyncio.wait_for(pending.event.wait(), timeout=480.0)
             except asyncio.TimeoutError:
                 logger.warning(
                     f"[AgentIntro] 等待结果超时: {agent_name}, request_id={request_id}"

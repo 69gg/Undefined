@@ -998,7 +998,7 @@ class ModelRequester:
         client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
-            timeout=120.0,
+            timeout=480.0,
             default_query=default_query,
             http_client=self._http_client,
         )

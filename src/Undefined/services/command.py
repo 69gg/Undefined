@@ -204,9 +204,9 @@ class CommandDispatcher:
                 )
                 logger.info(f"[Stats] 已投递 AI 分析请求到队列，群: {group_id}")
 
-                # 等待 AI 分析结果，120秒超时
+                # 等待 AI 分析结果，8分钟超时
                 try:
-                    await asyncio.wait_for(analysis_event.wait(), timeout=120.0)
+                    await asyncio.wait_for(analysis_event.wait(), timeout=480.0)
                     ai_analysis = self._stats_analysis_results.pop(request_id, "")
                     logger.info(f"[Stats] 已获取 AI 分析结果，长度: {len(ai_analysis)}")
                 except asyncio.TimeoutError:

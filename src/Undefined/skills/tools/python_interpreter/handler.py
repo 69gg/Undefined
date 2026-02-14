@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 DOCKER_IMAGE = "python:3.11-slim"
 MEMORY_LIMIT = "128m"
 CPU_LIMIT = "0.5"
-TIMEOUT = 120  # 用户要求的 120s
+TIMEOUT = 480  # 8 分钟
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:

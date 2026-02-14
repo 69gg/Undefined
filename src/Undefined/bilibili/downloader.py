@@ -124,7 +124,7 @@ async def get_video_info(
     cookies = _build_cookies(cookie)
 
     async with httpx.AsyncClient(
-        headers=_HEADERS, cookies=cookies, timeout=15, follow_redirects=True
+        headers=_HEADERS, cookies=cookies, timeout=480, follow_redirects=True
     ) as client:
         resp = await client.get(_BILIBILI_API_VIEW, params={"bvid": bvid})
         resp.raise_for_status()
@@ -243,7 +243,7 @@ async def download_video(
     cookies = _build_cookies(cookie)
 
     async with httpx.AsyncClient(
-        headers=_HEADERS, cookies=cookies, timeout=15, follow_redirects=True
+        headers=_HEADERS, cookies=cookies, timeout=480, follow_redirects=True
     ) as client:
         resp = await client.get(
             _BILIBILI_API_PLAYURL,
@@ -296,7 +296,7 @@ async def download_video(
     try:
         video_url = video_stream.get("baseUrl") or video_stream.get("base_url", "")
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=15, read=120, write=15, pool=15),
+            timeout=httpx.Timeout(connect=480, read=480, write=480, pool=480),
             follow_redirects=True,
         ) as client:
             # 下载视频流
@@ -355,7 +355,7 @@ async def _get_cid(
     cookies = _build_cookies(cookie)
 
     async with httpx.AsyncClient(
-        headers=_HEADERS, cookies=cookies, timeout=15, follow_redirects=True
+        headers=_HEADERS, cookies=cookies, timeout=480, follow_redirects=True
     ) as client:
         resp = await client.get(_BILIBILI_API_VIEW, params={"bvid": bvid})
         resp.raise_for_status()
