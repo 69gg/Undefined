@@ -549,8 +549,7 @@ class AIClient:
         self,
         question: str,
         context: str = "",
-        send_message_callback: Callable[[str, int | None], Awaitable[None]]
-        | None = None,
+        send_message_callback: Callable[[str], Awaitable[None]] | None = None,
         get_recent_messages_callback: Callable[
             [str, str, int, int], Awaitable[list[dict[str, Any]]]
         ]

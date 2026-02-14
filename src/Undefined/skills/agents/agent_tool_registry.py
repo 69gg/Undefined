@@ -152,7 +152,7 @@ class AgentToolRegistry(BaseRegistry):
                 await sender.send_group_message(group_id, message)
                 return
             if send_message_callback:
-                await send_message_callback(message, None)
+                await send_message_callback(message)
         except Exception as exc:
             logger.debug("[彩蛋] 发送提示消息失败: %s", redact_string(str(exc)))
 

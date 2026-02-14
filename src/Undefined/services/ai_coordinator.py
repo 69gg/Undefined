@@ -217,9 +217,7 @@ class AICoordinator:
             user_id=sender_id,
         ) as ctx:
 
-            async def send_msg_cb(message: str, at_user: Optional[int] = None) -> None:
-                if at_user:
-                    message = f"[CQ:at,qq={at_user}] {message}"
+            async def send_msg_cb(message: str) -> None:
                 await self.sender.send_group_message(group_id, message)
 
             async def get_recent_cb(
@@ -295,7 +293,7 @@ class AICoordinator:
             sender_id=user_id,
         ) as ctx:
 
-            async def send_msg_cb(message: str, at_user: Optional[int] = None) -> None:
+            async def send_msg_cb(message: str) -> None:
                 await self.sender.send_private_message(user_id, message)
 
             async def get_recent_cb(
@@ -523,7 +521,7 @@ class AICoordinator:
                 tid, "<对注入消息的回复>", "Bot", "Bot"
             )
         else:
-            msg = f"[CQ:at,qq={sender_id}] {reply}" if sender_id else reply
+            msg = f"[@{sender_id}] {reply}" if sender_id else reply
             await self.sender.send_group_message(tid, msg, auto_history=False)
             await self.history_manager.add_group_message(
                 tid, self.config.bot_qq, "<对注入消息的回复>", "Bot", ""

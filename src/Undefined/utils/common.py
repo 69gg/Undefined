@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 # 匹配 CQ 码的正则: [CQ:type,arg1=val1,arg2=val2]
 CQ_PATTERN = re.compile(r"\[CQ:([a-zA-Z0-9_-]+),?([^\]]*)\]")
 
+# 匹配 [@{qq_id}] 格式的 @ 提及（qq_id 为 5~15 位数字）
+AT_MENTION_PATTERN = re.compile(r"\[@(\d{5,15})\]")
+
 # 标点符号和空白字符正则（用于字数统计和触发规则匹配）
 # 包含：空白、常见中英文标点
 PUNC_PATTERN = re.compile(
@@ -243,7 +246,7 @@ def _parse_at_segment(data: Dict[str, Any], bot_qq: int) -> Optional[str]:
     qq = data.get("qq", "")
     if bot_qq and str(qq) == str(bot_qq):
         return None
-    return f"[@ {qq}]"
+    return f"[@{qq}]"
 
 
 def _parse_media_segment(type_: str, data: Dict[str, Any]) -> Optional[str]:
@@ -387,6 +390,31 @@ async def parse_message_content_for_history(
             texts.append(text)
 
     return "".join(texts).strip()
+
+
+def process_at_mentions(message: str) -> str:
+    """将消息中的 [@{qq_id}] 格式转换为 [CQ:at,qq={qq_id}]
+
+    支持 \\[...\\] 转义来避免 @ 转换（输出为字面 [...]）。
+
+    示例:
+        "[@123456] 你好" → "[CQ:at,qq=123456] 你好"
+        "\\[@123456\\] 你好" → "[@123456] 你好"（不触发 @）
+    """
+    # 1. 暂存转义方括号
+    escaped_l = "\x00_ESC_LB_\x00"
+    escaped_r = "\x00_ESC_RB_\x00"
+    message = message.replace("\\[", escaped_l)
+    message = message.replace("\\]", escaped_r)
+
+    # 2. 转换 [@{qq_id}] → [CQ:at,qq={qq_id}]
+    message = AT_MENTION_PATTERN.sub(r"[CQ:at,qq=\1]", message)
+
+    # 3. 还原转义方括号为字面量
+    message = message.replace(escaped_l, "[")
+    message = message.replace(escaped_r, "]")
+
+    return message
 
 
 def message_to_segments(message: str) -> List[Dict[str, Any]]:

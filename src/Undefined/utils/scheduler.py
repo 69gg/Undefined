@@ -384,10 +384,8 @@ class TaskScheduler:
                 sender_id=sender_id,
             ) as ctx:
 
-                async def send_msg_cb(message: str, at_user: int | None = None) -> None:
+                async def send_msg_cb(message: str) -> None:
                     if request_type == "group" and target_id:
-                        if at_user:
-                            message = f"[CQ:at,qq={at_user}] {message}"
                         await self.sender.send_group_message(target_id, message)
                     elif request_type == "private" and target_id:
                         await self.sender.send_private_message(target_id, message)

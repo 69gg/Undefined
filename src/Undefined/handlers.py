@@ -354,7 +354,7 @@ class MessageHandler:
                 message = f"[CQ:image,file={image_path}]"
                 # 50% 概率 @ 发送者
                 if random.random() < 0.5:
-                    message = f"[CQ:at,qq={sender_id}] {message}"
+                    message = f"[@{sender_id}] {message}"
                 logger.info("关键词回复: 发送图片 xlwy.jpg")
             else:  # 90% 原有逻辑
                 if random.random() < 0.7:
@@ -363,7 +363,7 @@ class MessageHandler:
                     reply = "那咋了"
                 # 50% 概率 @ 发送者
                 if random.random() < 0.5:
-                    message = f"[CQ:at,qq={sender_id}] {reply}"
+                    message = f"[@{sender_id}] {reply}"
                 else:
                     message = reply
                 logger.info(f"关键词回复: {reply}")
