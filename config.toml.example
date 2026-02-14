@@ -54,8 +54,8 @@ ws_url = "ws://127.0.0.1:3001"
 # en: Access token (optional).
 token = ""
 
-# zh: 对话模型配置（用于总结聊天记录）。
-# en: Chat model config (used for chat summarization).
+# zh: 对话模型配置（主模型，处理每一条消息）。
+# en: Chat model config (the main model, processing each message).
 [models.chat]
 # zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
 # en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
