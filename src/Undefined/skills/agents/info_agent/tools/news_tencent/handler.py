@@ -39,5 +39,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return output if len(output) > 15 else f"未获取到新闻: {data}"
 
     except Exception as e:
-        logger.exception(f"获取新闻失败: {e}")
+        logger.warning("获取腾讯新闻失败: page=%s err=%s", page, e)
+        logger.debug("获取腾讯新闻异常详情", exc_info=True)
         return "获取新闻失败，请稍后重试"

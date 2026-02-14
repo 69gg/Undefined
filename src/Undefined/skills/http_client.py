@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -126,6 +127,10 @@ async def get_json_with_retry(
     context: dict[str, Any] | None = None,
     retries: int | None = None,
 ) -> Any:
+    request_id = "-"
+    if context is not None:
+        request_id = str(context.get("request_id", "-"))
+
     response = await request_with_retry(
         "GET",
         url,
@@ -136,7 +141,21 @@ async def get_json_with_retry(
         context=context,
         retries=retries,
     )
-    return response.json()
+    try:
+        return response.json()
+    except json.JSONDecodeError as exc:
+        content_type = response.headers.get("content-type", "")
+        preview = response.text[:200].replace("\n", "\\n").replace("\r", "\\r")
+        logger.warning(
+            "[HTTP] json decode failed: url=%s status=%s content_type=%s preview=%s request_id=%s err=%s",
+            url,
+            response.status_code,
+            content_type,
+            preview,
+            request_id,
+            exc,
+        )
+        raise
 
 
 async def get_text_with_retry(
