@@ -1,0 +1,41 @@
+{
+    "type": "function",
+    "function": {
+        "name": "task_progress",
+        "description": "任务进度追踪。处理需要多步骤、多 Agent 协作的复杂请求时，先用 plan 动作规划步骤，再在每步完成后用 update 动作标记进度。每次调用都会返回当前完整进度。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["plan", "update"],
+                    "description": "plan: 创建任务计划（会替换已有计划）；update: 更新指定步骤的状态"
+                },
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "integer",
+                                "description": "步骤序号（从 1 开始）"
+                            },
+                            "description": {
+                                "type": "string",
+                                "description": "步骤描述（plan 时必填）"
+                            },
+                            "status": {
+                                "type": "string",
+                                "enum": ["pending", "in_progress", "done", "skipped"],
+                                "description": "步骤状态（plan 时默认 pending；update 时必填）"
+                            }
+                        },
+                        "required": ["id"]
+                    },
+                    "description": "plan: 完整步骤列表（需要 id + description）；update: 要更新的步骤（需要 id + status）"
+                }
+            },
+            "required": ["action", "tasks"]
+        }
+    }
+}
