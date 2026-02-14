@@ -64,11 +64,19 @@ def _match_member(
         return _PRIORITY_SUBSTR, "QQ昵称"
 
     # --- 拼音匹配 ---
+    kw_full_py, kw_initials_py = _get_pinyin_forms(keyword)
     for name, field in [(card, "群昵称"), (nickname, "QQ昵称")]:
         if not name:
             continue
         full_py, initials_py = _get_pinyin_forms(name)
-        if kw_lower == initials_py or kw_lower in full_py:
+        if (
+            kw_lower in full_py  # 拼音输入匹配全拼（如 "luolan" in "ziluolan"）
+            or kw_lower == initials_py  # 拼音输入匹配首字母（如 "zll" == "zll"）
+            or kw_full_py
+            in full_py  # 中文关键词全拼匹配（如 "洛兰"→"luolan" in "ziluolan"）
+            or kw_initials_py
+            in initials_py  # 中文关键词首字母匹配（如 "洛兰"→"ll" in "zll"）
+        ):
             return _PRIORITY_PINYIN, f"{field}拼音"
 
     # --- 编辑距离容错 ---
