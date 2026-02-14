@@ -1037,6 +1037,14 @@ class Config:
                 ),
                 20000,
             ),
+            thinking_include_budget=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "chat", "thinking_include_budget"),
+                    "CHAT_MODEL_THINKING_INCLUDE_BUDGET",
+                ),
+                True,
+            ),
             thinking_tool_call_compat=_coerce_bool(
                 _get_value(
                     data,
@@ -1094,6 +1102,14 @@ class Config:
                     "VISION_MODEL_THINKING_BUDGET_TOKENS",
                 ),
                 20000,
+            ),
+            thinking_include_budget=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "vision", "thinking_include_budget"),
+                    "VISION_MODEL_THINKING_INCLUDE_BUDGET",
+                ),
+                True,
             ),
             thinking_tool_call_compat=_coerce_bool(
                 _get_value(
@@ -1168,6 +1184,14 @@ class Config:
                     ),
                     0,
                 ),
+                thinking_include_budget=_coerce_bool(
+                    _get_value(
+                        data,
+                        ("models", "security", "thinking_include_budget"),
+                        "SECURITY_MODEL_THINKING_INCLUDE_BUDGET",
+                    ),
+                    True,
+                ),
                 thinking_tool_call_compat=_coerce_bool(
                     _get_value(
                         data,
@@ -1187,6 +1211,7 @@ class Config:
             queue_interval_seconds=chat_model.queue_interval_seconds,
             thinking_enabled=False,
             thinking_budget_tokens=0,
+            thinking_include_budget=True,
             thinking_tool_call_compat=False,
         )
 
@@ -1237,6 +1262,14 @@ class Config:
                     "AGENT_MODEL_THINKING_BUDGET_TOKENS",
                 ),
                 0,
+            ),
+            thinking_include_budget=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "agent", "thinking_include_budget"),
+                    "AGENT_MODEL_THINKING_INCLUDE_BUDGET",
+                ),
+                True,
             ),
             thinking_tool_call_compat=_coerce_bool(
                 _get_value(

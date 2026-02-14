@@ -78,6 +78,9 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 20000
+# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
+# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = false
@@ -103,6 +106,9 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 20000
+# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
+# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = false
@@ -134,6 +140,9 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 0
+# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
+# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = false
@@ -162,6 +171,9 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 0
+# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
+# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = false

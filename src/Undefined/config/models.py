@@ -14,6 +14,7 @@ class ChatModelConfig:
     queue_interval_seconds: float = 1.0
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
+    thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     thinking_tool_call_compat: bool = (
         False  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
@@ -29,6 +30,7 @@ class VisionModelConfig:
     queue_interval_seconds: float = 1.0
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
+    thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     thinking_tool_call_compat: bool = (
         False  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
@@ -45,6 +47,7 @@ class SecurityModelConfig:
     queue_interval_seconds: float = 1.0
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 0  # 思维预算 token 数量
+    thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     thinking_tool_call_compat: bool = (
         False  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
@@ -61,6 +64,7 @@ class AgentModelConfig:
     queue_interval_seconds: float = 1.0
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 0  # 思维预算 token 数量
+    thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     thinking_tool_call_compat: bool = (
         False  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )

@@ -1126,14 +1126,10 @@ def build_request_body(
             extra_kwargs["thinking"] = normalized
 
     if model_config.thinking_enabled:
-        if getattr(model_config, "thinking_tool_call_compat", False):
-            # 兼容模式只发送 {"type":"enabled"}，不含 budget_tokens（部分提供商不支持额外字段）
-            body["thinking"] = {"type": "enabled"}
-        else:
-            body["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": model_config.thinking_budget_tokens,
-            }
+        thinking_param: dict[str, Any] = {"type": "enabled"}
+        if getattr(model_config, "thinking_include_budget", True):
+            thinking_param["budget_tokens"] = model_config.thinking_budget_tokens
+        body["thinking"] = thinking_param
 
     if tools:
         body["tools"] = tools
