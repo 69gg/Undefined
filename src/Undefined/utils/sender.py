@@ -5,7 +5,11 @@ import logging
 from Undefined.config import Config
 from Undefined.onebot import OneBotClient
 from Undefined.utils.history import MessageHistoryManager
-from Undefined.utils.common import message_to_segments, extract_text
+from Undefined.utils.common import (
+    message_to_segments,
+    extract_text,
+    process_at_mentions,
+)
 from Undefined.utils.logging import redact_string
 
 logger = logging.getLogger(__name__)
@@ -46,6 +50,10 @@ class MessageSender:
 
         safe_message = redact_string(message)
         logger.info(f"[发送消息] 目标群:{group_id} | 内容摘要:{safe_message[:100]}...")
+
+        # 将 [@{qq_id}] 格式转换为 [CQ:at,qq={qq_id}]
+        message = process_at_mentions(message)
+
         # 保存到历史记录
         if auto_history:
             # 解析消息以便正确处理 CQ 码（如图片）

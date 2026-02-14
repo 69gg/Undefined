@@ -2,13 +2,13 @@
     "type": "function",
     "function": {
         "name": "send_message",
-        "description": "发送消息到群聊或私聊。默认发送到当前会话；也可通过 target_type+target_id 指定目标群号或用户QQ。会受到访问控制白名单限制。可以在回答过程中多次调用，用于发送中间结果、进展信息或最终答案。最后必须调用 end 工具结束对话。",
+        "description": "发送消息到群聊或私聊。默认发送到当前会话；也可通过 target_type+target_id 指定目标群号或用户QQ。会受到访问控制白名单限制。可以在回答过程中多次调用，用于发送中间结果、进展信息或最终答案。最后必须调用 end 工具结束对话。\n群聊中 @ 某人：在消息里写 [@QQ号]，例如 [@2608261902] 你好。注意方括号内直接跟QQ号，不要加花括号。用 \\[@...\\] 转义可避免触发@。",
         "parameters": {
             "type": "object",
             "properties": {
                 "message": {
                     "type": "string",
-                    "description": "要发送的消息内容"
+                    "description": "要发送的消息内容。群聊中用 [@QQ号] 来 @ 用户，如 [@2608261902]。"
                 },
                 "target_type": {
                     "type": "string",
@@ -18,10 +18,6 @@
                 "target_id": {
                     "type": "integer",
                     "description": "可选。目标会话 ID：当 target_type=group 时为群号；target_type=private 时为用户 QQ 号。"
-                },
-                "at_user": {
-                    "type": "integer",
-                    "description": "可选。群聊消息要 @ 的用户 QQ 号（仅群聊生效）。"
                 }
             },
             "required": ["message"]

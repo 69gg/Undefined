@@ -58,7 +58,9 @@ class MessageHandler:
         # 初始化服务
         self.security = SecurityService(config, ai._http_client)
         self.rate_limiter = RateLimiter(config)
-        self.queue_manager = QueueManager()
+        self.queue_manager = QueueManager(
+            max_retries=config.ai_request_max_retries,
+        )
         self.queue_manager.update_model_intervals(build_model_queue_intervals(config))
 
         # 设置队列管理器到 AIClient（触发 Agent 介绍生成器启动）
@@ -352,7 +354,7 @@ class MessageHandler:
                 message = f"[CQ:image,file={image_path}]"
                 # 50% 概率 @ 发送者
                 if random.random() < 0.5:
-                    message = f"[CQ:at,qq={sender_id}] {message}"
+                    message = f"[@{sender_id}] {message}"
                 logger.info("关键词回复: 发送图片 xlwy.jpg")
             else:  # 90% 原有逻辑
                 if random.random() < 0.7:
@@ -361,7 +363,7 @@ class MessageHandler:
                     reply = "那咋了"
                 # 50% 概率 @ 发送者
                 if random.random() < 0.5:
-                    message = f"[CQ:at,qq={sender_id}] {reply}"
+                    message = f"[@{sender_id}] {reply}"
                 else:
                     message = reply
                 logger.info(f"关键词回复: {reply}")

@@ -163,11 +163,13 @@ async def send_bilibili_video(
             await _send_message(sender, target_type, target_id, video_message)
             result = f"已发送视频「{video_info.title}」({quality_name}, {file_size_mb:.1f}MB)"
         except Exception as exc:
-            logger.warning("[Bilibili] 视频发送失败，降级发送信息卡片: %s", exc)
+            logger.warning("[Bilibili] 视频发送失败：", exc)
+            """
             card = _build_info_card(video_info)
             hint = "(视频发送失败，发送信息卡片)\n"
             await _send_message(sender, target_type, target_id, hint + card)
-            result = f"视频发送失败（{exc}），已降级发送信息卡片"
+            """
+            result = f"视频发送失败（{exc}）"
         finally:
             cleanup_file(video_path)
 

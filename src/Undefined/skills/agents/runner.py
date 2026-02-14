@@ -134,6 +134,7 @@ async def run_agent_with_tools(
             tool_call_ids: list[str] = []
             tool_api_names: list[str] = []
             end_tool_call: dict[str, Any] | None = None
+            end_tool_args: dict[str, Any] = {}
 
             for tool_call in tool_calls:
                 call_id = str(tool_call.get("id", ""))
@@ -167,11 +168,9 @@ async def run_agent_with_tools(
                             "将先执行其他工具，并回填 end 跳过结果",
                             agent_name,
                         )
-                        end_tool_call = tool_call
-                        continue
-                    else:
-                        end_tool_call = tool_call
-                        continue
+                    end_tool_call = tool_call
+                    end_tool_args = function_args
+                    continue
 
                 tool_call_ids.append(call_id)
                 tool_api_names.append(api_function_name)
@@ -256,16 +255,9 @@ async def run_agent_with_tools(
                         agent_name,
                     )
                 else:
-                    # end 单独调用，正常执行
-                    end_args = parse_tool_arguments(
-                        end_tool_call.get("function", {}).get("arguments"),
-                        logger=logger,
-                        tool_name="end",
-                    )
-                    if not isinstance(end_args, dict):
-                        end_args = {}
+                    # end 单独调用，正常执行（参数已在循环中解析）
                     end_result = await tool_registry.execute_tool(
-                        "end", end_args, context
+                        "end", end_tool_args, context
                     )
                     messages.append(
                         {

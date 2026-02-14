@@ -25,6 +25,9 @@ process_poke_message = true
 # zh: 注入给模型的最近历史消息条数上限（0-200，0 表示不注入历史）。
 # en: Max number of recent messages injected as model context (0-200; 0 disables history injection).
 context_recent_messages_limit = 20
+# zh: 模型调用失败时最大重试次数（0=不重试，默认2，最大5）。失败的请求将被放回队列最前端优先重试。
+# en: Max retries for failed model API requests (0=no retry, default 2, max 5). Failed requests are re-queued with highest priority.
+ai_request_max_retries = 2
 
 # zh: 会话白名单（访问控制）。只要本段任一列表非空，系统将进入“限制模式”：未在白名单内的群/私聊会被忽略，且所有消息发送将被拦截。
 # en: Session allowlist (access control). If either the group or private allowlist is non-empty, the bot enters "allowlist mode": groups or private chats not in the allowlists will be ignored and outgoing messages will be blocked.
@@ -75,9 +78,12 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 20000
-# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 "tool_calls" 中回传 "reasoning_content"。
-# en: DeepSeek thinking-mode tool-call compatibility: return "reasoning_content" across multiple "tool_calls".
-deepseek_new_cot_support = false
+# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
+# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+thinking_include_budget = true
+# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
+# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+thinking_tool_call_compat = false
 
 # zh: 视觉模型配置（用于图片描述和 OCR）。
 # en: Vision model config (image description and OCR).
@@ -100,9 +106,12 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 20000
-# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 "tool_calls" 中回传 "reasoning_content"。
-# en: DeepSeek thinking-mode tool-call compatibility: return "reasoning_content" across multiple "tool_calls".
-deepseek_new_cot_support = false
+# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
+# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+thinking_include_budget = true
+# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
+# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+thinking_tool_call_compat = false
 
 # zh: 安全模型配置（用于防注入检测和注入后回复生成）。
 # en: Security model config (injection detection and post-injection responses).
@@ -131,9 +140,12 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 0
-# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 "tool_calls" 中回传 "reasoning_content"。
-# en: DeepSeek thinking-mode tool-call compatibility: return "reasoning_content" across multiple "tool_calls".
-deepseek_new_cot_support = false
+# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
+# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+thinking_include_budget = true
+# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
+# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+thinking_tool_call_compat = false
 
 # zh: Agent 模型配置（用于执行 agents）。
 # en: Agent model config (used to run agents).
@@ -159,9 +171,12 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 0
-# zh: DeepSeek thinking-mode 工具调用兼容：在同一问题的多轮 "tool_calls" 中回传 "reasoning_content"。
-# en: DeepSeek thinking-mode tool-call compatibility: return "reasoning_content" across multiple "tool_calls".
-deepseek_new_cot_support = false
+# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
+# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+thinking_include_budget = true
+# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
+# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+thinking_tool_call_compat = false
 
 # zh: 日志配置。
 # en: Logging settings.

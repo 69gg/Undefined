@@ -232,6 +232,43 @@ def _get_value(
     return None
 
 
+def _resolve_thinking_compat_flags(
+    data: dict[str, Any],
+    model_name: str,
+    include_budget_env_key: str,
+    tool_call_compat_env_key: str,
+    legacy_env_key: str,
+) -> tuple[bool, bool]:
+    """解析思维链兼容配置，并兼容旧字段 deepseek_new_cot_support。"""
+    include_budget_value = _get_value(
+        data,
+        ("models", model_name, "thinking_include_budget"),
+        include_budget_env_key,
+    )
+    tool_call_compat_value = _get_value(
+        data,
+        ("models", model_name, "thinking_tool_call_compat"),
+        tool_call_compat_env_key,
+    )
+    legacy_value = _get_value(
+        data,
+        ("models", model_name, "deepseek_new_cot_support"),
+        legacy_env_key,
+    )
+
+    include_budget_default = True
+    tool_call_compat_default = False
+    if legacy_value is not None:
+        legacy_enabled = _coerce_bool(legacy_value, False)
+        include_budget_default = not legacy_enabled
+        tool_call_compat_default = legacy_enabled
+
+    return (
+        _coerce_bool(include_budget_value, include_budget_default),
+        _coerce_bool(tool_call_compat_value, tool_call_compat_default),
+    )
+
+
 def load_local_admins() -> list[int]:
     """从本地配置文件加载动态管理员列表"""
     if not LOCAL_CONFIG_PATH.exists():
@@ -322,6 +359,7 @@ class Config:
     process_poke_message: bool
     keyword_reply_enabled: bool
     context_recent_messages_limit: int
+    ai_request_max_retries: int
     nagaagent_mode_enabled: bool
     onebot_ws_url: str
     onebot_token: str
@@ -476,6 +514,19 @@ class Config:
             context_recent_messages_limit = 0
         if context_recent_messages_limit > 200:
             context_recent_messages_limit = 200
+
+        ai_request_max_retries = _coerce_int(
+            _get_value(
+                data,
+                ("core", "ai_request_max_retries"),
+                "AI_REQUEST_MAX_RETRIES",
+            ),
+            2,
+        )
+        if ai_request_max_retries < 0:
+            ai_request_max_retries = 0
+        if ai_request_max_retries > 5:
+            ai_request_max_retries = 5
 
         nagaagent_mode_enabled = _coerce_bool(
             _get_value(
@@ -837,6 +888,7 @@ class Config:
             process_poke_message=process_poke_message,
             keyword_reply_enabled=keyword_reply_enabled,
             context_recent_messages_limit=context_recent_messages_limit,
+            ai_request_max_retries=ai_request_max_retries,
             nagaagent_mode_enabled=nagaagent_mode_enabled,
             onebot_ws_url=onebot_ws_url,
             onebot_token=onebot_token,
@@ -986,6 +1038,15 @@ class Config:
         )
         if queue_interval_seconds <= 0:
             queue_interval_seconds = 1.0
+        thinking_include_budget, thinking_tool_call_compat = (
+            _resolve_thinking_compat_flags(
+                data=data,
+                model_name="chat",
+                include_budget_env_key="CHAT_MODEL_THINKING_INCLUDE_BUDGET",
+                tool_call_compat_env_key="CHAT_MODEL_THINKING_TOOL_CALL_COMPAT",
+                legacy_env_key="CHAT_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+            )
+        )
         return ChatModelConfig(
             api_url=_coerce_str(
                 _get_value(data, ("models", "chat", "api_url"), "CHAT_MODEL_API_URL"),
@@ -1022,14 +1083,8 @@ class Config:
                 ),
                 20000,
             ),
-            deepseek_new_cot_support=_coerce_bool(
-                _get_value(
-                    data,
-                    ("models", "chat", "deepseek_new_cot_support"),
-                    "CHAT_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
-                ),
-                False,
-            ),
+            thinking_include_budget=thinking_include_budget,
+            thinking_tool_call_compat=thinking_tool_call_compat,
         )
 
     @staticmethod
@@ -1044,6 +1099,15 @@ class Config:
         )
         if queue_interval_seconds <= 0:
             queue_interval_seconds = 1.0
+        thinking_include_budget, thinking_tool_call_compat = (
+            _resolve_thinking_compat_flags(
+                data=data,
+                model_name="vision",
+                include_budget_env_key="VISION_MODEL_THINKING_INCLUDE_BUDGET",
+                tool_call_compat_env_key="VISION_MODEL_THINKING_TOOL_CALL_COMPAT",
+                legacy_env_key="VISION_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+            )
+        )
         return VisionModelConfig(
             api_url=_coerce_str(
                 _get_value(
@@ -1080,14 +1144,8 @@ class Config:
                 ),
                 20000,
             ),
-            deepseek_new_cot_support=_coerce_bool(
-                _get_value(
-                    data,
-                    ("models", "vision", "deepseek_new_cot_support"),
-                    "VISION_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
-                ),
-                False,
-            ),
+            thinking_include_budget=thinking_include_budget,
+            thinking_tool_call_compat=thinking_tool_call_compat,
         )
 
     @staticmethod
@@ -1123,6 +1181,16 @@ class Config:
         if queue_interval_seconds <= 0:
             queue_interval_seconds = 1.0
 
+        thinking_include_budget, thinking_tool_call_compat = (
+            _resolve_thinking_compat_flags(
+                data=data,
+                model_name="security",
+                include_budget_env_key="SECURITY_MODEL_THINKING_INCLUDE_BUDGET",
+                tool_call_compat_env_key="SECURITY_MODEL_THINKING_TOOL_CALL_COMPAT",
+                legacy_env_key="SECURITY_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+            )
+        )
+
         if api_url and api_key and model_name:
             return SecurityModelConfig(
                 api_url=api_url,
@@ -1153,14 +1221,8 @@ class Config:
                     ),
                     0,
                 ),
-                deepseek_new_cot_support=_coerce_bool(
-                    _get_value(
-                        data,
-                        ("models", "security", "deepseek_new_cot_support"),
-                        "SECURITY_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
-                    ),
-                    False,
-                ),
+                thinking_include_budget=thinking_include_budget,
+                thinking_tool_call_compat=thinking_tool_call_compat,
             )
 
         logger.warning("未配置安全模型，将使用对话模型作为后备")
@@ -1172,7 +1234,8 @@ class Config:
             queue_interval_seconds=chat_model.queue_interval_seconds,
             thinking_enabled=False,
             thinking_budget_tokens=0,
-            deepseek_new_cot_support=False,
+            thinking_include_budget=True,
+            thinking_tool_call_compat=False,
         )
 
     @staticmethod
@@ -1187,6 +1250,15 @@ class Config:
         )
         if queue_interval_seconds <= 0:
             queue_interval_seconds = 1.0
+        thinking_include_budget, thinking_tool_call_compat = (
+            _resolve_thinking_compat_flags(
+                data=data,
+                model_name="agent",
+                include_budget_env_key="AGENT_MODEL_THINKING_INCLUDE_BUDGET",
+                tool_call_compat_env_key="AGENT_MODEL_THINKING_TOOL_CALL_COMPAT",
+                legacy_env_key="AGENT_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+            )
+        )
         return AgentModelConfig(
             api_url=_coerce_str(
                 _get_value(data, ("models", "agent", "api_url"), "AGENT_MODEL_API_URL"),
@@ -1223,14 +1295,8 @@ class Config:
                 ),
                 0,
             ),
-            deepseek_new_cot_support=_coerce_bool(
-                _get_value(
-                    data,
-                    ("models", "agent", "deepseek_new_cot_support"),
-                    "AGENT_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
-                ),
-                False,
-            ),
+            thinking_include_budget=thinking_include_budget,
+            thinking_tool_call_compat=thinking_tool_call_compat,
         )
 
     @staticmethod
@@ -1303,13 +1369,13 @@ class Config:
         ]
         for name, cfg in configs:
             logger.debug(
-                "[配置] %s_model=%s api_url=%s api_key_set=%s thinking=%s deepseek_new_cot=%s",
+                "[配置] %s_model=%s api_url=%s api_key_set=%s thinking=%s cot_compat=%s",
                 name,
                 cfg.model_name,
                 cfg.api_url,
                 bool(cfg.api_key),
                 cfg.thinking_enabled,
-                getattr(cfg, "deepseek_new_cot_support", False),
+                getattr(cfg, "thinking_tool_call_compat", False),
             )
 
     def update_from(self, new_config: "Config") -> dict[str, tuple[Any, Any]]:

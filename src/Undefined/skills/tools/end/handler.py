@@ -16,7 +16,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             end_summary_storage = context.get("end_summary_storage")
             if end_summary_storage:
                 # 转换 deque 为 list 进行序列化
-                end_summary_storage.save(list(end_summaries))
+                await end_summary_storage.save(list(end_summaries))
 
     # 通知调用方对话应结束
     context["conversation_ended"] = True

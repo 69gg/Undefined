@@ -14,7 +14,10 @@ class ChatModelConfig:
     queue_interval_seconds: float = 1.0
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
-    deepseek_new_cot_support: bool = False  # DeepSeek thinking-mode 工具调用兼容
+    thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
+    thinking_tool_call_compat: bool = (
+        False  # 思维链 + 工具调用兼容（回传 reasoning_content）
+    )
 
 
 @dataclass
@@ -27,7 +30,10 @@ class VisionModelConfig:
     queue_interval_seconds: float = 1.0
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
-    deepseek_new_cot_support: bool = False  # DeepSeek thinking-mode 工具调用兼容
+    thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
+    thinking_tool_call_compat: bool = (
+        False  # 思维链 + 工具调用兼容（回传 reasoning_content）
+    )
 
 
 @dataclass
@@ -41,7 +47,10 @@ class SecurityModelConfig:
     queue_interval_seconds: float = 1.0
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 0  # 思维预算 token 数量
-    deepseek_new_cot_support: bool = False  # DeepSeek thinking-mode 工具调用兼容
+    thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
+    thinking_tool_call_compat: bool = (
+        False  # 思维链 + 工具调用兼容（回传 reasoning_content）
+    )
 
 
 @dataclass
@@ -55,4 +64,7 @@ class AgentModelConfig:
     queue_interval_seconds: float = 1.0
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 0  # 思维预算 token 数量
-    deepseek_new_cot_support: bool = False  # DeepSeek thinking-mode 工具调用兼容
+    thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
+    thinking_tool_call_compat: bool = (
+        False  # 思维链 + 工具调用兼容（回传 reasoning_content）
+    )

@@ -146,12 +146,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "消息内容不能为空"
 
     runtime_config = context.get("runtime_config")
-    at_user_raw = args.get("at_user")
-    at_user: int | None = None
-    if at_user_raw is not None:
-        at_user, at_user_error = _parse_positive_int(at_user_raw, "at_user")
-        if at_user_error:
-            return f"发送失败：{at_user_error}"
 
     send_message_callback = context.get("send_message_callback")
     send_private_message_callback = context.get("send_private_message_callback")
@@ -183,17 +177,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if sender:
         try:
             if target_type == "group":
-                outgoing_message = message
-                if at_user is not None:
-                    logger.debug("[发送消息] 群聊附带 @ 用户: %s", at_user)
-                    outgoing_message = f"[CQ:at,qq={at_user}] {message}"
-                logger.info(
-                    "[发送消息] 准备发送到群 %s: %s", target_id, outgoing_message[:100]
-                )
-                await sender.send_group_message(target_id, outgoing_message)
+                logger.info("[发送消息] 准备发送到群 %s: %s", target_id, message[:100])
+                await sender.send_group_message(target_id, message)
             else:
-                if at_user is not None:
-                    logger.debug("[发送消息] 私聊场景忽略 at_user 参数: %s", at_user)
                 logger.info("[发送消息] 准备发送私聊 %s: %s", target_id, message[:100])
                 await sender.send_private_message(target_id, message)
             return "消息已发送"
@@ -211,7 +197,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if target_type == "group":
         if send_message_callback and _is_current_group_target(context, target_id):
             try:
-                await send_message_callback(message, at_user)
+                await send_message_callback(message)
                 return "消息已发送"
             except Exception as e:
                 logger.exception(
@@ -244,7 +230,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     if send_message_callback and _is_current_private_target(context, target_id):
         try:
-            await send_message_callback(message, None)
+            await send_message_callback(message)
             return "消息已发送"
         except Exception as e:
             logger.exception(
