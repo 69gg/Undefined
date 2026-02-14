@@ -97,7 +97,17 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     group_id = args.get("group_id") or context.get("group_id")
     keyword = str(args.get("nickname", "")).strip()
     exact = bool(args.get("exact", False))
-    count = int(args.get("count", 10) or 10)
+    raw_count = args.get("count", 10)
+    if raw_count in (None, ""):
+        raw_count = 10
+
+    try:
+        count = int(raw_count)
+    except (TypeError, ValueError):
+        return "参数类型错误：count 必须是整数"
+
+    if count <= 0:
+        return "参数范围错误：count 必须大于 0"
 
     if not keyword:
         return "请提供要搜索的昵称关键词"

@@ -232,6 +232,43 @@ def _get_value(
     return None
 
 
+def _resolve_thinking_compat_flags(
+    data: dict[str, Any],
+    model_name: str,
+    include_budget_env_key: str,
+    tool_call_compat_env_key: str,
+    legacy_env_key: str,
+) -> tuple[bool, bool]:
+    """解析思维链兼容配置，并兼容旧字段 deepseek_new_cot_support。"""
+    include_budget_value = _get_value(
+        data,
+        ("models", model_name, "thinking_include_budget"),
+        include_budget_env_key,
+    )
+    tool_call_compat_value = _get_value(
+        data,
+        ("models", model_name, "thinking_tool_call_compat"),
+        tool_call_compat_env_key,
+    )
+    legacy_value = _get_value(
+        data,
+        ("models", model_name, "deepseek_new_cot_support"),
+        legacy_env_key,
+    )
+
+    include_budget_default = True
+    tool_call_compat_default = False
+    if legacy_value is not None:
+        legacy_enabled = _coerce_bool(legacy_value, False)
+        include_budget_default = not legacy_enabled
+        tool_call_compat_default = legacy_enabled
+
+    return (
+        _coerce_bool(include_budget_value, include_budget_default),
+        _coerce_bool(tool_call_compat_value, tool_call_compat_default),
+    )
+
+
 def load_local_admins() -> list[int]:
     """从本地配置文件加载动态管理员列表"""
     if not LOCAL_CONFIG_PATH.exists():
@@ -1001,6 +1038,15 @@ class Config:
         )
         if queue_interval_seconds <= 0:
             queue_interval_seconds = 1.0
+        thinking_include_budget, thinking_tool_call_compat = (
+            _resolve_thinking_compat_flags(
+                data=data,
+                model_name="chat",
+                include_budget_env_key="CHAT_MODEL_THINKING_INCLUDE_BUDGET",
+                tool_call_compat_env_key="CHAT_MODEL_THINKING_TOOL_CALL_COMPAT",
+                legacy_env_key="CHAT_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+            )
+        )
         return ChatModelConfig(
             api_url=_coerce_str(
                 _get_value(data, ("models", "chat", "api_url"), "CHAT_MODEL_API_URL"),
@@ -1037,22 +1083,8 @@ class Config:
                 ),
                 20000,
             ),
-            thinking_include_budget=_coerce_bool(
-                _get_value(
-                    data,
-                    ("models", "chat", "thinking_include_budget"),
-                    "CHAT_MODEL_THINKING_INCLUDE_BUDGET",
-                ),
-                True,
-            ),
-            thinking_tool_call_compat=_coerce_bool(
-                _get_value(
-                    data,
-                    ("models", "chat", "thinking_tool_call_compat"),
-                    "CHAT_MODEL_THINKING_TOOL_CALL_COMPAT",
-                ),
-                False,
-            ),
+            thinking_include_budget=thinking_include_budget,
+            thinking_tool_call_compat=thinking_tool_call_compat,
         )
 
     @staticmethod
@@ -1067,6 +1099,15 @@ class Config:
         )
         if queue_interval_seconds <= 0:
             queue_interval_seconds = 1.0
+        thinking_include_budget, thinking_tool_call_compat = (
+            _resolve_thinking_compat_flags(
+                data=data,
+                model_name="vision",
+                include_budget_env_key="VISION_MODEL_THINKING_INCLUDE_BUDGET",
+                tool_call_compat_env_key="VISION_MODEL_THINKING_TOOL_CALL_COMPAT",
+                legacy_env_key="VISION_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+            )
+        )
         return VisionModelConfig(
             api_url=_coerce_str(
                 _get_value(
@@ -1103,22 +1144,8 @@ class Config:
                 ),
                 20000,
             ),
-            thinking_include_budget=_coerce_bool(
-                _get_value(
-                    data,
-                    ("models", "vision", "thinking_include_budget"),
-                    "VISION_MODEL_THINKING_INCLUDE_BUDGET",
-                ),
-                True,
-            ),
-            thinking_tool_call_compat=_coerce_bool(
-                _get_value(
-                    data,
-                    ("models", "vision", "thinking_tool_call_compat"),
-                    "VISION_MODEL_THINKING_TOOL_CALL_COMPAT",
-                ),
-                False,
-            ),
+            thinking_include_budget=thinking_include_budget,
+            thinking_tool_call_compat=thinking_tool_call_compat,
         )
 
     @staticmethod
@@ -1154,6 +1181,16 @@ class Config:
         if queue_interval_seconds <= 0:
             queue_interval_seconds = 1.0
 
+        thinking_include_budget, thinking_tool_call_compat = (
+            _resolve_thinking_compat_flags(
+                data=data,
+                model_name="security",
+                include_budget_env_key="SECURITY_MODEL_THINKING_INCLUDE_BUDGET",
+                tool_call_compat_env_key="SECURITY_MODEL_THINKING_TOOL_CALL_COMPAT",
+                legacy_env_key="SECURITY_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+            )
+        )
+
         if api_url and api_key and model_name:
             return SecurityModelConfig(
                 api_url=api_url,
@@ -1184,22 +1221,8 @@ class Config:
                     ),
                     0,
                 ),
-                thinking_include_budget=_coerce_bool(
-                    _get_value(
-                        data,
-                        ("models", "security", "thinking_include_budget"),
-                        "SECURITY_MODEL_THINKING_INCLUDE_BUDGET",
-                    ),
-                    True,
-                ),
-                thinking_tool_call_compat=_coerce_bool(
-                    _get_value(
-                        data,
-                        ("models", "security", "thinking_tool_call_compat"),
-                        "SECURITY_MODEL_THINKING_TOOL_CALL_COMPAT",
-                    ),
-                    False,
-                ),
+                thinking_include_budget=thinking_include_budget,
+                thinking_tool_call_compat=thinking_tool_call_compat,
             )
 
         logger.warning("未配置安全模型，将使用对话模型作为后备")
@@ -1227,6 +1250,15 @@ class Config:
         )
         if queue_interval_seconds <= 0:
             queue_interval_seconds = 1.0
+        thinking_include_budget, thinking_tool_call_compat = (
+            _resolve_thinking_compat_flags(
+                data=data,
+                model_name="agent",
+                include_budget_env_key="AGENT_MODEL_THINKING_INCLUDE_BUDGET",
+                tool_call_compat_env_key="AGENT_MODEL_THINKING_TOOL_CALL_COMPAT",
+                legacy_env_key="AGENT_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+            )
+        )
         return AgentModelConfig(
             api_url=_coerce_str(
                 _get_value(data, ("models", "agent", "api_url"), "AGENT_MODEL_API_URL"),
@@ -1263,22 +1295,8 @@ class Config:
                 ),
                 0,
             ),
-            thinking_include_budget=_coerce_bool(
-                _get_value(
-                    data,
-                    ("models", "agent", "thinking_include_budget"),
-                    "AGENT_MODEL_THINKING_INCLUDE_BUDGET",
-                ),
-                True,
-            ),
-            thinking_tool_call_compat=_coerce_bool(
-                _get_value(
-                    data,
-                    ("models", "agent", "thinking_tool_call_compat"),
-                    "AGENT_MODEL_THINKING_TOOL_CALL_COMPAT",
-                ),
-                False,
-            ),
+            thinking_include_budget=thinking_include_budget,
+            thinking_tool_call_compat=thinking_tool_call_compat,
         )
 
     @staticmethod
