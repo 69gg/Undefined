@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 # 匹配 CQ 码的正则: [CQ:type,arg1=val1,arg2=val2]
 CQ_PATTERN = re.compile(r"\[CQ:([a-zA-Z0-9_-]+),?([^\]]*)\]")
 
-# 匹配 [@{qq_id}] 格式的 @ 提及（qq_id 为 5~15 位数字）
-AT_MENTION_PATTERN = re.compile(r"\[@(\d{5,15})\]")
+# 匹配 [@QQ号] 格式的 @ 提及（兼容 [@{QQ号}] 误加花括号的情况）
+AT_MENTION_PATTERN = re.compile(r"\[@\{?(\d{5,15})\}?\]")
 
 # 标点符号和空白字符正则（用于字数统计和触发规则匹配）
 # 包含：空白、常见中英文标点
@@ -242,10 +242,13 @@ async def _expand_forward_segment(
 
 
 def _parse_at_segment(data: Dict[str, Any], bot_qq: int) -> Optional[str]:
-    """解析 @ 消息段"""
+    """解析 @ 消息段，输出 [@{qq}({昵称})] 或 [@{qq}]"""
     qq = data.get("qq", "")
     if bot_qq and str(qq) == str(bot_qq):
         return None
+    name = data.get("name") or data.get("nickname") or ""
+    if name:
+        return f"[@{qq}({name})]"
     return f"[@{qq}]"
 
 
