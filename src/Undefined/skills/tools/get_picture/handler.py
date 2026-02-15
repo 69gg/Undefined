@@ -49,7 +49,7 @@ def _get_xxapi_base_url() -> str:
 def _get_timeout_seconds() -> float:
     config = get_config(strict=False)
     timeout = float(config.network_request_timeout)
-    return timeout if timeout > 0 else 10.0
+    return timeout if timeout > 0 else 480.0
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:

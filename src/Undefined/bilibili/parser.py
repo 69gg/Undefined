@@ -52,7 +52,7 @@ async def resolve_short_url(short_url: str) -> str | None:
     if not short_url.startswith("http"):
         short_url = f"https://{short_url}"
     try:
-        async with httpx.AsyncClient(follow_redirects=False, timeout=10) as client:
+        async with httpx.AsyncClient(follow_redirects=False, timeout=480) as client:
             resp = await client.head(short_url)
             location: str | None = resp.headers.get("Location") or resp.headers.get(
                 "location"

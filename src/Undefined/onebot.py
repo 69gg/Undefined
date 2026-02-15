@@ -57,7 +57,7 @@ class OneBotClient:
             self.ws = await websockets.connect(
                 url,
                 ping_interval=20,
-                ping_timeout=20,
+                ping_timeout=480,
                 max_size=100 * 1024 * 1024,  # 100MB，支持大量历史消息
                 additional_headers=extra_headers if extra_headers else None,
             )
@@ -76,7 +76,11 @@ class OneBotClient:
             logger.info("[WebSocket] 连接已断开")
 
     async def _call_api(
-        self, action: str, params: dict[str, Any] | None = None
+        self,
+        action: str,
+        params: dict[str, Any] | None = None,
+        *,
+        suppress_error_retcodes: set[int] | None = None,
     ) -> dict[str, Any]:
         """调用 OneBot API"""
         if not self.ws:
@@ -106,8 +110,8 @@ class OneBotClient:
 
         try:
             await self.ws.send(json.dumps(request))
-            # 等待响应，超时 30 秒
-            response = await asyncio.wait_for(future, timeout=30.0)
+            # 等待响应，超时 8 分钟
+            response = await asyncio.wait_for(future, timeout=480.0)
             duration = time.perf_counter() - start_time
 
             # 检查响应状态
@@ -115,9 +119,14 @@ class OneBotClient:
             if status == "failed":
                 retcode = response.get("retcode", -1)
                 msg = response.get("message", "未知错误")
-                logger.error(
-                    f"[bold red][API失败][/bold red] [green]{action}[/green] (ID=[magenta]{echo}[/magenta]) | 耗时=[magenta]{duration:.2f}s[/magenta] | retcode=[red]{retcode}[/red] | message={msg}"
-                )
+                if suppress_error_retcodes and retcode in suppress_error_retcodes:
+                    logger.warning(
+                        f"[bold yellow][API预期失败][/bold yellow] [green]{action}[/green] (ID=[magenta]{echo}[/magenta]) | 耗时=[magenta]{duration:.2f}s[/magenta] | retcode=[yellow]{retcode}[/yellow] | message={msg}"
+                    )
+                else:
+                    logger.error(
+                        f"[bold red][API失败][/bold red] [green]{action}[/green] (ID=[magenta]{echo}[/magenta]) | 耗时=[magenta]{duration:.2f}s[/magenta] | retcode=[red]{retcode}[/red] | message={msg}"
+                    )
                 raise RuntimeError(f"API 调用失败: {msg} (retcode={retcode})")
 
             logger.info(
@@ -297,7 +306,11 @@ class OneBotClient:
             消息节点列表
         """
         try:
-            result = await self._call_api("get_forward_msg", {"message_id": id})
+            result = await self._call_api(
+                "get_forward_msg",
+                {"message_id": id},
+                suppress_error_retcodes={1200},
+            )
             data = result.get("data", {})
             # data 可能是字典（包含 messages）或列表（直接是 nodes）
             if isinstance(data, dict):
@@ -308,6 +321,12 @@ class OneBotClient:
                 return nodes
             return []
         except Exception as e:
+            error_text = str(e)
+            if "retcode=1200" in error_text:
+                logger.debug(
+                    "合并转发消息不可获取（可能过期或内层）: id=%s err=%s", id, e
+                )
+                return []
             logger.error(f"获取合并转发消息失败: {e}")
             return []
 

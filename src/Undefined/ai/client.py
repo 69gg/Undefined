@@ -105,7 +105,7 @@ class AIClient:
         self.memory_storage = memory_storage
         self._end_summary_storage = end_summary_storage or EndSummaryStorage()
 
-        self._http_client = httpx.AsyncClient(timeout=120.0)
+        self._http_client = httpx.AsyncClient(timeout=480.0)
         self._token_usage_storage = TokenUsageStorage()
         self._requester = ModelRequester(self._http_client, self._token_usage_storage)
         self._token_counter = TokenCounter()
@@ -533,6 +533,16 @@ class AIClient:
     ) -> dict[str, str]:
         return await self._multimodal.describe_image(image_url, prompt_extra)
 
+    def get_media_history(self, media_key: str) -> list[dict[str, str]]:
+        """获取指定媒体键的多模态分析历史 Q&A 记录。"""
+        return self._multimodal.get_history(media_key)
+
+    async def save_media_history(
+        self, media_key: str, question: str, answer: str
+    ) -> None:
+        """保存一条多模态分析 Q&A 到历史记录并持久化到磁盘。"""
+        await self._multimodal.save_history(media_key, question, answer)
+
     async def summarize_chat(self, messages: str, context: str = "") -> str:
         return await self._summary_service.summarize_chat(messages, context)
 
@@ -612,6 +622,8 @@ class AIClient:
         tool_context.setdefault("ai_client", self)
         tool_context.setdefault("runtime_config", self._get_runtime_config())
         tool_context.setdefault("search_wrapper", self._search_wrapper)
+        tool_context.setdefault("end_summary_storage", self._end_summary_storage)
+        tool_context.setdefault("end_summaries", self._prompt_builder.end_summaries)
         tool_context.setdefault(
             "send_private_message_callback", self._send_private_message_callback
         )

@@ -21,12 +21,12 @@ uv sync
 uv run Undefined
 uv run Undefined-webui
 
-# 代码检查
+# 代码检查（ruff 使用默认规则，无额外 ruff.toml）
 uv run ruff format .
 uv run ruff check .
-uv run mypy .
+uv run mypy .              # strict 模式，ignore_missing_imports=true
 
-# 运行测试
+# 运行测试（pytest-asyncio，asyncio_mode="auto"）
 uv run pytest tests/
 uv run pytest tests/test_xxx.py           # 单个测试文件
 uv run pytest tests/test_xxx.py::test_fn  # 单个测试函数
@@ -52,7 +52,7 @@ uv run playwright install
 
 ## Skills 技能系统
 
-Skills 是核心扩展机制，分四类，全部通过 `config.json` + `handler.py` 自动发现注册：
+Skills 是核心扩展机制，分四类，全部通过 `config.json`（OpenAI function calling 格式）+ `handler.py` 自动发现注册：
 
 ### 基础工具 (`skills/tools/{tool_name}/`)
 - 原子操作，直接暴露给主 AI
@@ -65,12 +65,23 @@ Skills 是核心扩展机制，分四类，全部通过 `config.json` + `handler
 ### 智能体 (`skills/agents/{agent_name}/`)
 - 每个 Agent 目录包含：`config.json`, `handler.py`, `prompt.md`, `intro.md`, `tools/`（子工具）
 - 可选：`mcp.json`（Agent 私有 MCP）、`anthropic_skills/`（Agent 私有 Skills）
+- Agent 的 config.json 统一使用 `prompt` 参数接收用户需求
+- Agent handler 应使用 `skills/agents/runner.py` 的 `run_agent_with_tools()` 统一执行入口，它处理 prompt 加载、LLM 迭代、tool call 并发执行、结果回填
 - Agent 通过 `context["ai_client"].request_model()` 调用模型，确保 Token 统计一致
 - 6 个内置 Agent：info_agent, social_agent, web_agent, file_analysis_agent, naga_code_analysis_agent, entertainment_agent
 
 ### Anthropic Skills (`skills/anthropic_skills/{skill_name}/SKILL.md`)
 - 遵循 agentskills.io 标准，YAML frontmatter（name + description）+ Markdown 正文
 - 注册为 `skills-_-<name>` function tool，渐进式披露
+
+### handler.py 中可用的 `context` 字典关键 key
+- `ai_client`：AIClient 实例，用于 `request_model()` 调用模型
+- `onebot_client`：OneBotClient 实例，用于发送消息/调用 OneBot API
+- `config`：全局 Config 对象
+- `end_summaries`：deque，短期总结列表
+- `end_summary_storage`：EndSummaryStorage 实例
+- `conversation_ended`：设为 `True` 通知调用方对话结束
+- `agent_history`：Agent 调用时的上下文历史消息列表
 
 ## 关键设计模式
 
@@ -102,3 +113,10 @@ Skills 是核心扩展机制，分四类，全部通过 `config.json` + `handler
 - 热重载默认开启（`skills.hot_reload = true`），扫描 `skills/` 目录变更自动重载
 - Agent intro 自动生成：按代码 hash 检测变更，生成 `intro.generated.md`，不要手动编辑
 - 数据持久化在 `data/` 目录：`history/`, `faq/`, `token_usage_archives/`, `memory.json`, `end_summaries.json`, `scheduled_tasks.json`
+
+## 不应提交的文件
+
+- `config.toml`（含 API key 等敏感信息）
+- `config.local.json`（运行时自动生成的动态数据）
+- `data/`（运行时数据目录）
+- `intro.generated.md`（Agent 自动生成的介绍文件）

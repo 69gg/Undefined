@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
+from pathlib import Path
 from typing import Any
-
 import aiofiles
 
 from Undefined.ai.parsing import extract_choices_content
@@ -15,6 +16,12 @@ from Undefined.utils.logging import log_debug_json, redact_string
 from Undefined.utils.resources import read_text_resource
 
 logger = logging.getLogger(__name__)
+
+# 每个文件名最多保留的历史 Q&A 条数
+_MAX_QA_HISTORY = 5
+
+# 磁盘持久化路径
+_HISTORY_FILE_PATH = Path("data/media_qa_history.json")
 
 # 文件扩展名常量
 _IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg")
@@ -142,6 +149,7 @@ _MEDIA_TYPE_TO_FIELD = {
     "video": "subtitles",
 }
 
+
 # 错误消息映射
 _ERROR_MESSAGES = {
     "read": {
@@ -235,6 +243,9 @@ class MultimodalAnalyzer:
         self._vision_config = vision_config
         self._prompt_path = prompt_path
         self._cache: dict[str, dict[str, str]] = {}
+        # 按文件名索引的 Q&A 历史：{filename: [{q: ..., a: ...}, ...]}
+        self._file_history: dict[str, list[dict[str, str]]] = {}
+        self._load_history()
 
     async def _load_media_content(self, media_url: str, media_type: str) -> str:
         """加载媒体内容。
@@ -287,6 +298,8 @@ class MultimodalAnalyzer:
         prompt_extra: str = "",
     ) -> dict[str, str]:
         """分析媒体文件。
+
+        始终调用视觉模型进行真实分析，不会因历史缓存而跳过。
 
         Args:
             media_url: 媒体文件 URL 或本地路径
@@ -379,6 +392,60 @@ class MultimodalAnalyzer:
                     detected_type, _ERROR_MESSAGES["analyze"]["default"]
                 )
             }
+
+    # ── 媒体键级别的 Q&A 历史管理 ──
+
+    def _load_history(self) -> None:
+        """从磁盘加载历史 Q&A 缓存。"""
+        if not _HISTORY_FILE_PATH.exists():
+            return
+        try:
+            with open(_HISTORY_FILE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                self._file_history = data
+            logger.info(
+                "[媒体分析] 从磁盘加载历史缓存: %d 个文件", len(self._file_history)
+            )
+        except Exception as exc:
+            logger.warning("[媒体分析] 加载历史缓存失败: %s", exc)
+
+    async def _save_history(self) -> None:
+        """将历史缓存写入磁盘。"""
+        from Undefined.utils import io
+
+        try:
+            await io.write_json(_HISTORY_FILE_PATH, self._file_history, use_lock=True)
+        except Exception as exc:
+            logger.error("[媒体分析] 历史缓存写入磁盘失败: %s", exc)
+
+    def get_history(self, media_key: str) -> list[dict[str, str]]:
+        """获取指定媒体键的历史 Q&A 记录。
+
+        Args:
+            media_key: 媒体唯一键（可包含作用域和文件身份）
+
+        Returns:
+            Q&A 列表，每项包含 ``q`` 和 ``a`` 两个键
+        """
+        pairs = self._file_history.get(media_key)
+        if not pairs:
+            return []
+        return list(pairs[-_MAX_QA_HISTORY:])
+
+    async def save_history(self, media_key: str, question: str, answer: str) -> None:
+        """保存一条 Q&A 到指定媒体键的历史记录（上限 5 条）并持久化。
+
+        Args:
+            media_key: 媒体唯一键（可包含作用域和文件身份）
+            question: 提问内容
+            answer: 分析回答
+        """
+        pairs = self._file_history.setdefault(media_key, [])
+        pairs.append({"q": question, "a": answer})
+        if len(pairs) > _MAX_QA_HISTORY:
+            self._file_history[media_key] = pairs[-_MAX_QA_HISTORY:]
+        await self._save_history()
 
     async def describe_image(
         self, image_url: str, prompt_extra: str = ""

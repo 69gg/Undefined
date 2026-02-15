@@ -1,22 +1,46 @@
+from collections import deque
 from typing import Any, Dict
 import logging
+
+from Undefined.end_summary_storage import (
+    EndSummaryRecord,
+    EndSummaryStorage,
+    MAX_END_SUMMARIES,
+)
 
 logger = logging.getLogger(__name__)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
-    summary = args.get("summary", "")
+    summary_raw = args.get("summary", "")
+    summary = summary_raw.strip() if isinstance(summary_raw, str) else ""
+
     if summary:
+        record: EndSummaryRecord | None = None
+        end_summary_storage = context.get("end_summary_storage")
+        if isinstance(end_summary_storage, EndSummaryStorage):
+            record = await end_summary_storage.append_summary(summary)
+        elif end_summary_storage is not None:
+            logger.warning(
+                "[end工具] end_summary_storage 类型异常: %s", type(end_summary_storage)
+            )
+
+        if record is None:
+            record = EndSummaryStorage.make_record(summary)
+
         end_summaries = context.get("end_summaries")
         if end_summaries is not None:
-            end_summaries.append(summary)
-            logger.info(f"保存end记录: {summary[:50]}...")
+            if isinstance(end_summaries, deque):
+                end_summaries.append(record)
+            elif isinstance(end_summaries, list):
+                end_summaries.append(record)
+                del end_summaries[:-MAX_END_SUMMARIES]
+            else:
+                logger.warning(
+                    "[end工具] end_summaries 类型异常: %s", type(end_summaries)
+                )
 
-            # 持久化保存
-            end_summary_storage = context.get("end_summary_storage")
-            if end_summary_storage:
-                # 转换 deque 为 list 进行序列化
-                await end_summary_storage.save(list(end_summaries))
+        logger.info("保存end记录: %s...", summary[:50])
 
     # 通知调用方对话应结束
     context["conversation_ended"] = True

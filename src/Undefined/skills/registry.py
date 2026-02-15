@@ -72,7 +72,7 @@ class BaseRegistry:
         self,
         base_dir: Path | str | None = None,
         kind: str = "skill",
-        timeout_seconds: float = 120.0,
+        timeout_seconds: float = 480.0,
     ) -> None:
         if base_dir:
             self.base_dir = Path(base_dir)

@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "analyze_multimodal",
-        "description": "使用多模态 AI 模型分析图像、音频或视频内容。自动检测媒体类型并使用相应的分析提示词。",
+        "description": "使用多模态 AI 模型分析图像、音频或视频内容。自动检测媒体类型并使用相应的分析提示词。如果该文件已有历史分析记录，会优先返回历史记录供你参考；若历史记录不足以回答，可设置 force_analyze=true 进行全新分析。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -17,6 +17,10 @@
                 "prompt": {
                     "type": "string",
                     "description": "额外的分析指令，例如'提取图中所有手机号'、'转写音频内容'"
+                },
+                "force_analyze": {
+                    "type": "boolean",
+                    "description": "设为 true 时跳过历史记录缓存，强制执行全新的多模态分析。当历史记录不足以回答当前问题时使用。默认为 false"
                 }
             },
             "required": ["file_path"]

@@ -6,6 +6,8 @@ import json
 import logging
 from typing import Any
 
+from Undefined.utils.logging import format_log_payload
+
 logger = logging.getLogger(__name__)
 
 _CODE_FENCE_PREFIXES: tuple[str, ...] = ("```json", "```JSON", "```")
@@ -108,8 +110,10 @@ def parse_tool_arguments(
                     parsed = json.loads(repaired)
                     if logger:
                         logger.warning(
-                            "[工具警告] 参数 JSON 不完整，已自动修复: tool=%s",
+                            "[工具警告] 参数 JSON 不完整，已自动修复: tool=%s raw_call=%s repaired_call=%s",
                             tool_name or "unknown",
+                            format_log_payload(raw_args, max_length=2000),
+                            format_log_payload(repaired, max_length=2000),
                         )
                     return parsed if isinstance(parsed, dict) else {}
                 except json.JSONDecodeError:

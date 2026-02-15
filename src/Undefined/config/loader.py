@@ -764,7 +764,7 @@ class Config:
             30.0,
         )
         if network_request_timeout <= 0:
-            network_request_timeout = 30.0
+            network_request_timeout = 480.0
 
         network_request_retries = _coerce_int(
             _get_value(
