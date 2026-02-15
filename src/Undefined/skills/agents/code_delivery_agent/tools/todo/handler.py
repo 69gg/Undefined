@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -8,6 +9,15 @@ from typing import Any
 import aiofiles
 
 logger = logging.getLogger(__name__)
+
+
+def _get_lock(context: dict[str, Any]) -> asyncio.Lock:
+    """从 context 获取或创建 todo 专用锁，防止并发读写竞态。"""
+    lock: asyncio.Lock | None = context.get("_todo_lock")
+    if lock is None:
+        lock = asyncio.Lock()
+        context["_todo_lock"] = lock
+    return lock
 
 
 def _todo_path(context: dict[str, Any]) -> Path:
@@ -59,48 +69,50 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     if "task_dir" not in context:
         return "错误：task_dir 未设置"
 
-    path = _todo_path(context)
-    todos = await _load_todos(path)
+    lock = _get_lock(context)
+    async with lock:
+        path = _todo_path(context)
+        todos = await _load_todos(path)
 
-    if action == "list":
-        return _format_todos(todos)
+        if action == "list":
+            return _format_todos(todos)
 
-    if action == "add":
-        content = str(args.get("content", "")).strip()
-        if not content:
-            return "错误：add 操作需要 content"
-        new_item = {"id": _next_id(todos), "content": content, "status": "pending"}
-        todos.append(new_item)
-        await _save_todos(path, todos)
-        return f"已添加: [{new_item['id']}] {content}"
+        if action == "add":
+            content = str(args.get("content", "")).strip()
+            if not content:
+                return "错误：add 操作需要 content"
+            new_item = {"id": _next_id(todos), "content": content, "status": "pending"}
+            todos.append(new_item)
+            await _save_todos(path, todos)
+            return f"已添加: [{new_item['id']}] {content}"
 
-    if action == "update":
-        item_id = args.get("item_id")
-        if item_id is None:
-            return "错误：update 操作需要 item_id"
-        item_id = int(item_id)
-        status = str(args.get("status", "in_progress")).strip()
-        for item in todos:
-            if item["id"] == item_id:
-                item["status"] = status
-                await _save_todos(path, todos)
-                return f"已更新: [{item_id}] -> {status}"
-        return f"未找到 ID={item_id} 的待办项"
-
-    if action == "remove":
-        item_id = args.get("item_id")
-        if item_id is None:
-            return "错误：remove 操作需要 item_id"
-        item_id = int(item_id)
-        original_len = len(todos)
-        todos = [item for item in todos if item["id"] != item_id]
-        if len(todos) == original_len:
+        if action == "update":
+            item_id = args.get("item_id")
+            if item_id is None:
+                return "错误：update 操作需要 item_id"
+            item_id = int(item_id)
+            status = str(args.get("status", "in_progress")).strip()
+            for item in todos:
+                if item["id"] == item_id:
+                    item["status"] = status
+                    await _save_todos(path, todos)
+                    return f"已更新: [{item_id}] -> {status}"
             return f"未找到 ID={item_id} 的待办项"
-        await _save_todos(path, todos)
-        return f"已删除 ID={item_id}"
 
-    if action == "clear":
-        await _save_todos(path, [])
-        return "待办列表已清空"
+        if action == "remove":
+            item_id = args.get("item_id")
+            if item_id is None:
+                return "错误：remove 操作需要 item_id"
+            item_id = int(item_id)
+            original_len = len(todos)
+            todos = [item for item in todos if item["id"] != item_id]
+            if len(todos) == original_len:
+                return f"未找到 ID={item_id} 的待办项"
+            await _save_todos(path, todos)
+            return f"已删除 ID={item_id}"
+
+        if action == "clear":
+            await _save_todos(path, [])
+            return "待办列表已清空"
 
     return f"未知操作: {action}"

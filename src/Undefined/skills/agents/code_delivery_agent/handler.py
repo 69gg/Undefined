@@ -206,7 +206,6 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     docker_image = "ubuntu:24.04"
     prefix = CONTAINER_PREFIX_DEFAULT
     suffix = CONTAINER_SUFFIX_DEFAULT
-    cleanup_on_start = True
     cleanup_on_finish = True
     llm_max_retries = 5
     notify_on_failure = True
@@ -218,7 +217,6 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         docker_image = getattr(config, "code_delivery_docker_image", docker_image)
         prefix = getattr(config, "code_delivery_container_name_prefix", prefix)
         suffix = getattr(config, "code_delivery_container_name_suffix", suffix)
-        cleanup_on_start = getattr(config, "code_delivery_cleanup_on_start", True)
         cleanup_on_finish = getattr(config, "code_delivery_cleanup_on_finish", True)
         llm_max_retries = getattr(config, "code_delivery_llm_max_retries", 5)
         notify_on_failure = getattr(config, "code_delivery_notify_on_llm_failure", True)
