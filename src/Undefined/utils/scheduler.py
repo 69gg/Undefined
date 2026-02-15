@@ -426,6 +426,8 @@ class TaskScheduler:
                     await self.onebot.send_like(uid, times)
 
                 ai_client = self.ai
+                memory_storage = self.ai.memory_storage
+                runtime_config = self.ai.runtime_config
                 sender = self.sender
                 history_manager = self.history_manager
                 onebot_client = self.onebot

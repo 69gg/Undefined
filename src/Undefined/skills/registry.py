@@ -168,7 +168,7 @@ class BaseRegistry:
 
             item = self._build_skill_item(item_dir, config, handler_path, prefix)
             self._items[item.name] = item
-            self._items_schema.append(config)
+            self._items_schema.append(item.config)
             self._stats.setdefault(item.name, SkillStats())
 
             if logger.isEnabledFor(logging.DEBUG):

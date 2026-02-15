@@ -1,7 +1,7 @@
 {
     "type": "function",
     "function": {
-        "name": "memory.delete",
+        "name": "delete",
         "description": "根据 UUID 删除一条记忆。",
         "parameters": {
             "type": "object",

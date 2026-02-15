@@ -10,9 +10,17 @@ from datetime import datetime
 import websockets
 from websockets.asyncio.client import ClientConnection
 
+from Undefined.context import RequestContext
 from Undefined.utils.logging import log_debug_json, redact_string, sanitize_data
 
 logger = logging.getLogger(__name__)
+
+
+def _mark_message_sent_this_turn() -> None:
+    ctx = RequestContext.current()
+    if ctx is None:
+        return
+    ctx.set_resource("message_sent_this_turn", True)
 
 
 class OneBotClient:
@@ -146,25 +154,29 @@ class OneBotClient:
         self, group_id: int, message: str | list[dict[str, Any]]
     ) -> dict[str, Any]:
         """发送群消息"""
-        return await self._call_api(
+        result = await self._call_api(
             "send_group_msg",
             {
                 "group_id": group_id,
                 "message": message,
             },
         )
+        _mark_message_sent_this_turn()
+        return result
 
     async def send_private_message(
         self, user_id: int, message: str | list[dict[str, Any]]
     ) -> dict[str, Any]:
         """发送私聊消息"""
-        return await self._call_api(
+        result = await self._call_api(
             "send_private_msg",
             {
                 "user_id": user_id,
                 "message": message,
             },
         )
+        _mark_message_sent_this_turn()
+        return result
 
     async def get_group_msg_history(
         self,

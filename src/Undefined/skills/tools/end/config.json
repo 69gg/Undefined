@@ -9,6 +9,10 @@
                 "summary": {
                     "type": "string",
                     "description": "记录这次做了什么或以后可能要做什么。如果只是end了不做事，不需要填写。如果做了什么或以后可能要做什么，必须填写。这是你短期记忆的来源，十分重要。"
+                },
+                "force": {
+                    "type": "boolean",
+                    "description": "强制结束对话，跳过未发送消息的检查。默认为 false。"
                 }
             },
             "required": []

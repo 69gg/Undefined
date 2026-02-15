@@ -1,7 +1,7 @@
 {
     "type": "function",
     "function": {
-        "name": "memory.add",
+        "name": "add",
         "description": "保存一条记忆。当你觉得某些信息值得记住（比如用户的偏好、重要的事情、约定等），可以调用此工具保存。就事论事，就人论人，不做会话隔离。上限500条，超出上限会自动移除最旧的记忆。",
         "parameters": {
             "type": "object",

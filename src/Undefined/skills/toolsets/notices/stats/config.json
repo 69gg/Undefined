@@ -1,7 +1,7 @@
 {
     "type": "function",
     "function": {
-        "name": "notices.stats",
+        "name": "stats",
         "description": "获取群公告的统计信息，如公告总数和最新公告时间。",
         "parameters": {
             "type": "object",

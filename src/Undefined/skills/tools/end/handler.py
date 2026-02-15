@@ -2,6 +2,7 @@ from collections import deque
 from typing import Any, Dict
 import logging
 
+from Undefined.context import RequestContext
 from Undefined.end_summary_storage import (
     EndSummaryLocation,
     EndSummaryRecord,
@@ -10,6 +11,26 @@ from Undefined.end_summary_storage import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_force_flag(value: Any) -> bool:
+    """force 仅接受布尔值，其他类型一律视为 False。"""
+    return value if isinstance(value, bool) else False
+
+
+def _is_true_flag(value: Any) -> bool:
+    """上下文标记仅接受布尔 True。"""
+    return isinstance(value, bool) and value
+
+
+def _was_message_sent_this_turn(context: Dict[str, Any]) -> bool:
+    if _is_true_flag(context.get("message_sent_this_turn", False)):
+        return True
+
+    ctx = RequestContext.current()
+    if ctx is None:
+        return False
+    return _is_true_flag(ctx.get_resource("message_sent_this_turn", False))
 
 
 def _build_location(context: Dict[str, Any]) -> EndSummaryLocation | None:
@@ -39,6 +60,27 @@ def _build_location(context: Dict[str, Any]) -> EndSummaryLocation | None:
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     summary_raw = args.get("summary", "")
     summary = summary_raw.strip() if isinstance(summary_raw, str) else ""
+    force_raw = args.get("force", False)
+    force = _parse_force_flag(force_raw)
+    if "force" in args and not isinstance(force_raw, bool):
+        logger.warning(
+            "[end工具] force 参数类型非法，已按 False 处理: type=%s request_id=%s",
+            type(force_raw).__name__,
+            context.get("request_id", "-"),
+        )
+
+    # 检查：如果有 summary 但本轮未发送消息，且未强制执行，则拒绝
+    if summary and not force:
+        message_sent = _was_message_sent_this_turn(context)
+        if not message_sent:
+            logger.warning(
+                "[end工具] 拒绝执行：有 summary 但本轮未发送消息，request_id=%s",
+                context.get("request_id", "-"),
+            )
+            return (
+                "拒绝结束对话：你记录了 summary 但本轮未发送任何消息或媒体内容。"
+                "请先发送消息给用户，或者如果确实不需要发送，请使用 force=true 参数强制结束。"
+            )
 
     if summary:
         location = _build_location(context)

@@ -44,6 +44,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if sender:
         try:
             await sender.send_private_message(user_id, message)
+            context["message_sent_this_turn"] = True
             return f"私聊消息已发送给用户 {user_id}"
         except Exception as e:
             logger.exception(
@@ -57,6 +58,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if send_private_message_callback:
         try:
             await send_private_message_callback(user_id, message)
+            context["message_sent_this_turn"] = True
             return f"私聊消息已发送给用户 {user_id}"
         except Exception as e:
             logger.exception(
