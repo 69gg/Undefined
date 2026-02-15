@@ -1,7 +1,7 @@
 {
     "type": "function",
     "function": {
-        "name": "memory.update",
+        "name": "update",
         "description": "更新一条已有的记忆。需要提供该记忆的 UUID。",
         "parameters": {
             "type": "object",

@@ -1,7 +1,7 @@
 {
     "type": "function",
     "function": {
-        "name": "memory.list",
+        "name": "list",
         "description": "列出所有保存的记忆及其 UUID。当你需要 update 或 delete 时，应先调用此工具查找对应的 UUID。",
         "parameters": {
             "type": "object",
