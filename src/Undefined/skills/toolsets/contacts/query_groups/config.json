@@ -1,0 +1,26 @@
+{
+    "type": "function",
+    "function": {
+        "name": "query_groups",
+        "description": "查询群聊列表。支持按群名称精确/模糊匹配，或获取全部群聊。返回群号、群名称和成员数。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "keyword": {
+                    "type": "string",
+                    "description": "搜索关键词（群名称）。留空则返回全部群聊。"
+                },
+                "exact": {
+                    "type": "boolean",
+                    "description": "是否精确匹配（默认 false 模糊匹配）",
+                    "default": false
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "返回的最大结果数（默认 20）",
+                    "default": 20
+                }
+            }
+        }
+    }
+}

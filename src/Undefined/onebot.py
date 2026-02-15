@@ -296,6 +296,41 @@ class OneBotClient:
             logger.error(f"获取群成员列表失败: {e}")
             return []
 
+    async def get_friend_list(self) -> list[dict[str, Any]]:
+        """获取好友列表
+
+        返回:
+            好友信息列表，每个好友包含:
+            - user_id: QQ号
+            - nickname: QQ昵称
+            - remark: 备注名
+        """
+        try:
+            result = await self._call_api("get_friend_list")
+            data: list[dict[str, Any]] = result.get("data", [])
+            return data
+        except Exception as e:
+            logger.error(f"获取好友列表失败: {e}")
+            return []
+
+    async def get_group_list(self) -> list[dict[str, Any]]:
+        """获取群列表
+
+        返回:
+            群信息列表，每个群包含:
+            - group_id: 群号
+            - group_name: 群名称
+            - member_count: 成员数
+            - max_member_count: 最大成员数
+        """
+        try:
+            result = await self._call_api("get_group_list")
+            data: list[dict[str, Any]] = result.get("data", [])
+            return data
+        except Exception as e:
+            logger.error(f"获取群列表失败: {e}")
+            return []
+
     async def get_forward_msg(self, id: str) -> list[dict[str, Any]]:
         """获取合并转发消息详情
 
