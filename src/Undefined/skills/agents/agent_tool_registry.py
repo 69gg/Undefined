@@ -1,6 +1,7 @@
+import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from Undefined.skills.registry import BaseRegistry
 from Undefined.utils.logging import redact_string
@@ -24,7 +25,193 @@ class AgentToolRegistry(BaseRegistry):
         self.load_tools()
 
     def load_tools(self) -> None:
+        """加载本地工具和可调用的 agent"""
+        # 1. 加载本地工具（原有逻辑）
         self.load_items()
+
+        # 2. 扫描并注册可调用的 agent
+        callable_agents = self._scan_callable_agents()
+
+        for agent_name, agent_dir, allowed_callers in callable_agents:
+            # 读取 agent 的 config.json
+            agent_config = self._load_agent_config(agent_dir)
+            if not agent_config:
+                logger.warning(f"无法读取 agent {agent_name} 的配置，跳过注册")
+                continue
+
+            # 创建工具 schema
+            tool_schema = self._create_agent_tool_schema(agent_name, agent_config)
+
+            # 创建 handler（带访问控制）
+            handler = self._create_agent_call_handler(agent_name, allowed_callers)
+
+            # 注册为外部工具
+            tool_name = f"call_{agent_name}"
+            self.register_external_item(tool_name, tool_schema, handler)
+
+            # 记录允许的调用方
+            callers_str = (
+                ", ".join(allowed_callers)
+                if "*" not in allowed_callers
+                else "所有 agent"
+            )
+            logger.info(
+                f"[AgentToolRegistry] 注册可调用 agent: {tool_name}，"
+                f"允许调用方: {callers_str}"
+            )
+
+    def _scan_callable_agents(self) -> list[tuple[str, Path, list[str]]]:
+        """扫描所有可被调用的 agent
+
+        返回：[(agent_name, agent_dir, allowed_callers), ...]
+        """
+        agents_root = self.base_dir.parent.parent
+        if not agents_root.exists() or not agents_root.is_dir():
+            return []
+
+        callable_agents: list[tuple[str, Path, list[str]]] = []
+        for agent_dir in agents_root.iterdir():
+            if not agent_dir.is_dir():
+                continue
+            if agent_dir.name.startswith("_"):
+                continue
+
+            # 跳过当前 agent（避免自己调用自己）
+            if agent_dir == self.base_dir.parent:
+                continue
+
+            callable_json = agent_dir / "callable.json"
+            if not callable_json.exists():
+                continue
+
+            try:
+                with open(callable_json, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+
+                if not config.get("enabled", False):
+                    continue
+
+                # 读取允许的调用方列表
+                allowed_callers = config.get("allowed_callers", [])
+                if not isinstance(allowed_callers, list):
+                    logger.warning(
+                        f"{callable_json} 的 allowed_callers 必须是列表，跳过"
+                    )
+                    continue
+
+                # 空列表表示不允许任何调用
+                if not allowed_callers:
+                    logger.info(f"{agent_dir.name} 的 allowed_callers 为空，跳过注册")
+                    continue
+
+                callable_agents.append((agent_dir.name, agent_dir, allowed_callers))
+            except Exception as e:
+                logger.warning(f"读取 {callable_json} 失败: {e}")
+                continue
+
+        return callable_agents
+
+    def _load_agent_config(self, agent_dir: Path) -> dict[str, Any] | None:
+        """读取 agent 的 config.json
+
+        返回：agent 的配置字典，失败返回 None
+        """
+        config_path = agent_dir / "config.json"
+        if not config_path.exists():
+            return None
+
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+                if isinstance(config, dict):
+                    return config
+                return None
+        except Exception as e:
+            logger.warning(f"读取 {config_path} 失败: {e}")
+            return None
+
+    def _create_agent_tool_schema(
+        self, agent_name: str, agent_config: dict[str, Any]
+    ) -> dict[str, Any]:
+        """为可调用的 agent 创建工具 schema
+
+        参数：
+            agent_name: agent 名称
+            agent_config: agent 的 config.json 内容
+
+        返回：工具 schema 字典
+        """
+        function_def = agent_config.get("function", {})
+        agent_description = function_def.get("description", f"{agent_name} agent")
+        agent_parameters = function_def.get(
+            "parameters",
+            {
+                "type": "object",
+                "properties": {"prompt": {"type": "string", "description": "任务描述"}},
+                "required": ["prompt"],
+            },
+        )
+
+        tool_name = f"call_{agent_name}"
+        tool_description = f"调用 {agent_name}: {agent_description}"
+
+        return {
+            "type": "function",
+            "function": {
+                "name": tool_name,
+                "description": tool_description,
+                "parameters": agent_parameters,
+            },
+        }
+
+    def _create_agent_call_handler(
+        self, target_agent_name: str, allowed_callers: list[str]
+    ) -> Callable[[dict[str, Any], dict[str, Any]], Awaitable[str]]:
+        """创建一个通用的 agent 调用 handler，带访问控制
+
+        参数：
+            target_agent_name: 目标 agent 的名称
+            allowed_callers: 允许调用的 agent 名称列表
+
+        返回：异步 handler 函数
+        """
+
+        async def handler(args: dict[str, Any], context: dict[str, Any]) -> str:
+            # 1. 检查调用方权限
+            current_agent = context.get("agent_name")
+            if not current_agent:
+                return "错误：无法确定调用方 agent"
+
+            # 检查是否在允许列表中
+            if "*" not in allowed_callers and current_agent not in allowed_callers:
+                logger.warning(
+                    f"[AgentCall] {current_agent} 尝试调用 {target_agent_name}，但未被授权"
+                )
+                return f"错误：{current_agent} 无权调用 {target_agent_name}"
+
+            # 2. 获取 AI client
+            ai_client = context.get("ai_client")
+            if not ai_client:
+                return "错误：AI client 未在上下文中提供"
+
+            if not hasattr(ai_client, "agent_registry"):
+                return "错误：AI client 不支持 agent_registry"
+
+            # 3. 调用目标 agent
+            try:
+                logger.info(
+                    f"[AgentCall] {current_agent} 调用 {target_agent_name}，参数: {args}"
+                )
+                # 直接传递所有参数给目标 agent
+                result = await ai_client.agent_registry.execute_agent(
+                    target_agent_name, args, context
+                )
+                return str(result)
+            except Exception as e:
+                logger.exception(f"调用 agent {target_agent_name} 失败")
+                return f"调用 {target_agent_name} 失败: {e}"
+
+        return handler
 
     async def initialize_mcp_tools(self) -> None:
         """异步初始化该 Agent 配置的私有 MCP 工具服务器
