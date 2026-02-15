@@ -169,13 +169,12 @@ graph TB
             TS_Scheduler["scheduler.*<br/>• create_schedule_task<br/>• delete_schedule_task<br/>• list_schedule_tasks"]
         end
         
-        subgraph IntelligentAgents["智能体 Agents (6个)"]
-            A_Info["info_agent<br/>信息查询助手<br/>(15个工具)<br/>• weather_query<br/>• *hot 热搜<br/>• gold_price<br/>• whois"]
-            A_Social["social_agent<br/>社交媒体助手<br/>(8个工具)<br/>• bilibili_search<br/>• music_*<br/>• video_recommend"]
+        subgraph IntelligentAgents["智能体 Agents (5个)"]
+            A_Info["info_agent<br/>信息查询助手<br/>(17个工具)<br/>• weather_query<br/>• *hot 热搜<br/>• bilibili_*<br/>• whois"]
             A_Web["web_agent<br/>网络搜索助手<br/>• MCP Playwright<br/>• web_search<br/>• crawl_webpage"]
             A_File["file_analysis_agent<br/>文件分析助手<br/>(14个工具)<br/>• extract_* (PDF/Word/Excel/PPT)<br/>• analyze_code<br/>• analyze_multimodal"]
             A_Naga["naga_code_analysis_agent<br/>NagaAgent 代码分析<br/>(7个工具)<br/>• read_file / glob<br/>• search_file_content"]
-            A_Ent["entertainment_agent<br/>娱乐助手<br/>(10个工具)<br/>• ai_draw_one<br/>• horoscope<br/>• novel_search"]
+            A_Ent["entertainment_agent<br/>娱乐助手<br/>(9个工具)<br/>• ai_draw_one<br/>• horoscope<br/>• video_random_recommend"]
         end
         
         MCPRegistry["MCPToolRegistry<br/>MCP 工具注册表<br/>[mcp/registry.py]"]

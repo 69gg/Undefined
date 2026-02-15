@@ -475,9 +475,8 @@
         <agent_capability_boundaries>
           - **file_analysis_agent**：只做文件/图片的「识别与内容提取」。告诉它"看看这是什么"，而不是"帮用户解答这个问题"。
           - **web_agent**：只做「搜索和获取网页信息」。需要外部知识时才调用。
-          - **info_agent**：只做「结构化数据查询」（天气、热搜、QQ信息等）。
-          - **social_agent**：只做「社交媒体内容检索」（B站、音乐等）。
-          - **entertainment_agent**：只做「娱乐内容生成/查询」（绘画、运势、小说等）。
+          - **info_agent**：只做「结构化数据查询」（天气、热搜、QQ信息、B站查询等）。
+          - **entertainment_agent**：只做「娱乐内容生成/查询」（绘画、运势、小说、随机视频推荐等）。
           - **naga_code_analysis_agent**：只做「NagaAgent 项目代码分析」。
         </agent_capability_boundaries>
 
@@ -499,8 +498,8 @@
             → 必须**先** file_analysis_agent 识别角色 → 拿到结果后**再** web_agent 搜索养成攻略（有数据依赖）
           </sequential_case>
           <parallel_case>
-            用户问"搜一下这个角色的养成攻略和同人图"
-            → 已知角色名时，web_agent 搜攻略 和 social_agent 搜同人图 **互不依赖**，并行调用
+            用户问"搜一下这个角色的养成攻略，顺便来个随机视频"
+            → 已知角色名时，web_agent 搜攻略 和 entertainment_agent 做视频推荐 **互不依赖**，并行调用
           </parallel_case>
         </parallel_vs_sequential>
 

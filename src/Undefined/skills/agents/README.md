@@ -256,16 +256,11 @@ mv skills/tools/my_tool skills/agents/my_agent/tools/
 - **子工具**：`read_file`, `search_code`, `analyze_structure`
 
 ### info_agent（信息查询助手）
-- **功能**：查询天气、热搜、快递、WHOIS 等信息
-- **适用场景**：天气查询、热点新闻、快递追踪、域名查询
-- **子工具**：`get_weather`, `get_hot_search`, `query_express`, `whois_query`
-
-### social_agent（社交娱乐助手）
-- **功能**：B 站搜索、音乐搜索及点歌
-- **适用场景**：搜索 B 站视频、音乐搜索、点歌服务
-- **子工具**：`search_bilibili`, `search_music`, `play_music`
+- **功能**：查询天气、热搜、历史、WHOIS、B 站信息等
+- **适用场景**：天气查询、热点榜单、域名查询、B 站视频和 UP 主信息查询
+- **子工具**：`weather_query`, `*hot`, `whois`, `bilibili_search`, `bilibili_user_info`
 
 ### entertainment_agent（娱乐助手）
-- **功能**：运势查询、笑话、占卜等娱乐功能
-- **适用场景**：查看运势、获取娱乐内容
-- **子工具**：`get_horoscope`, `get_joke`, `fortune_telling`
+- **功能**：运势、小说、创意内容与随机视频推荐等娱乐功能
+- **适用场景**：查看运势、获取休闲内容、随机刷视频
+- **子工具**：`horoscope`, `novel_search`, `ai_draw_one`, `video_random_recommend`

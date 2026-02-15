@@ -25,7 +25,6 @@ skills/
 │   ├── file_analysis_agent/
 │   ├── naga_code_analysis_agent/
 │   ├── info_agent/
-│   ├── social_agent/
 │   └── entertainment_agent/
 │
 ├── toolsets/       # 工具集合，按功能分类组织
