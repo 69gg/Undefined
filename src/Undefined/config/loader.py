@@ -422,6 +422,9 @@ class Config:
     code_delivery_cleanup_on_start: bool
     code_delivery_llm_max_retries: int
     code_delivery_notify_on_llm_failure: bool
+    code_delivery_container_memory_limit: str
+    code_delivery_container_cpu_limit: str
+    code_delivery_command_blacklist: list[str]
     # Bilibili 视频提取
     bilibili_auto_extract_enabled: bool
     bilibili_cookie: str
@@ -928,6 +931,23 @@ class Config:
             _get_value(data, ("code_delivery", "notify_on_llm_failure"), None),
             True,
         )
+        code_delivery_container_memory_limit = _coerce_str(
+            _get_value(data, ("code_delivery", "container_memory_limit"), None),
+            "",
+        )
+        code_delivery_container_cpu_limit = _coerce_str(
+            _get_value(data, ("code_delivery", "container_cpu_limit"), None),
+            "",
+        )
+        code_delivery_command_blacklist_raw = _get_value(
+            data, ("code_delivery", "command_blacklist"), None
+        )
+        if isinstance(code_delivery_command_blacklist_raw, list):
+            code_delivery_command_blacklist = [
+                str(x) for x in code_delivery_command_blacklist_raw
+            ]
+        else:
+            code_delivery_command_blacklist = []
 
         webui_settings = load_webui_settings(config_path)
 
@@ -1018,6 +1038,9 @@ class Config:
             code_delivery_cleanup_on_start=code_delivery_cleanup_on_start,
             code_delivery_llm_max_retries=code_delivery_llm_max_retries,
             code_delivery_notify_on_llm_failure=code_delivery_notify_on_llm_failure,
+            code_delivery_container_memory_limit=code_delivery_container_memory_limit,
+            code_delivery_container_cpu_limit=code_delivery_container_cpu_limit,
+            code_delivery_command_blacklist=code_delivery_command_blacklist,
             bilibili_auto_extract_enabled=bilibili_auto_extract_enabled,
             bilibili_cookie=bilibili_cookie,
             bilibili_prefer_quality=bilibili_prefer_quality,

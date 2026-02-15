@@ -1,0 +1,32 @@
+{
+    "type": "function",
+    "function": {
+        "name": "tree",
+        "description": "显示目录树结构。快速查看项目文件组织。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "目录路径（相对于 /workspace，默认为根目录）"
+                },
+                "max_depth": {
+                    "type": "integer",
+                    "description": "最大递归深度（默认 5，0 表示不限制）"
+                },
+                "show_hidden": {
+                    "type": "boolean",
+                    "description": "是否显示隐藏文件（以 . 开头，默认 false）"
+                },
+                "exclude_patterns": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "排除的模式列表（如 ['node_modules', '__pycache__', '.git']）"
+                }
+            },
+            "required": []
+        }
+    }
+}

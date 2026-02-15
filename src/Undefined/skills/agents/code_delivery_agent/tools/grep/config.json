@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "grep",
-        "description": "在工作区内搜索文件内容。",
+        "description": "在工作区内搜索文件内容。支持上下文行显示。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -25,6 +25,23 @@
                 "max_matches": {
                     "type": "integer",
                     "description": "最大匹配数（默认 100）"
+                },
+                "context_before": {
+                    "type": "integer",
+                    "description": "显示匹配行之前的 N 行上下文（类似 grep -B）"
+                },
+                "context_after": {
+                    "type": "integer",
+                    "description": "显示匹配行之后的 N 行上下文（类似 grep -A）"
+                },
+                "context": {
+                    "type": "integer",
+                    "description": "显示匹配行前后各 N 行上下文（类似 grep -C）"
+                },
+                "output_mode": {
+                    "type": "string",
+                    "enum": ["matches", "files", "count"],
+                    "description": "输出模式：matches（显示匹配行，默认）、files（仅显示文件名）、count（显示匹配计数）"
                 }
             },
             "required": ["pattern"]

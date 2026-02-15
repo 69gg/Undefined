@@ -71,25 +71,39 @@ async def _create_container(
     workspace: Path,
     tmpfs_dir: Path,
     docker_image: str,
+    memory_limit: str = "",
+    cpu_limit: str = "",
 ) -> None:
     """创建并启动 Docker 容器。"""
-    rc, stdout, stderr = await _run_cmd(
+    cmd_args = [
         "docker",
         "run",
         "-d",
         "--name",
         container_name,
-        "-v",
-        f"{workspace.resolve()}:/workspace",
-        "-v",
-        f"{tmpfs_dir.resolve()}:/tmpfs",
-        "-w",
-        "/workspace",
-        docker_image,
-        "sleep",
-        "infinity",
-        timeout=120,
+    ]
+
+    # 添加资源限制
+    if memory_limit:
+        cmd_args.extend(["--memory", memory_limit])
+    if cpu_limit:
+        cmd_args.extend(["--cpus", cpu_limit])
+
+    cmd_args.extend(
+        [
+            "-v",
+            f"{workspace.resolve()}:/workspace",
+            "-v",
+            f"{tmpfs_dir.resolve()}:/tmpfs",
+            "-w",
+            "/workspace",
+            docker_image,
+            "sleep",
+            "infinity",
+        ]
     )
+
+    rc, stdout, stderr = await _run_cmd(*cmd_args, timeout=120)
     if rc != 0:
         raise RuntimeError(f"创建容器失败: {stderr or stdout}")
     logger.info("[CodeDelivery] 容器已创建: %s", container_name)
@@ -209,6 +223,8 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     cleanup_on_finish = True
     llm_max_retries = 5
     notify_on_failure = True
+    memory_limit = ""
+    cpu_limit = ""
 
     if config:
         if not getattr(config, "code_delivery_enabled", True):
@@ -220,6 +236,8 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         cleanup_on_finish = getattr(config, "code_delivery_cleanup_on_finish", True)
         llm_max_retries = getattr(config, "code_delivery_llm_max_retries", 5)
         notify_on_failure = getattr(config, "code_delivery_notify_on_llm_failure", True)
+        memory_limit = getattr(config, "code_delivery_container_memory_limit", "")
+        cpu_limit = getattr(config, "code_delivery_container_cpu_limit", "")
 
     # 创建任务目录
     task_id = str(uuid.uuid4())
@@ -242,7 +260,9 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
     try:
         # 创建容器
-        await _create_container(container_name, workspace, tmpfs_dir, docker_image)
+        await _create_container(
+            container_name, workspace, tmpfs_dir, docker_image, memory_limit, cpu_limit
+        )
 
         # 初始化工作区
         await _init_workspace(workspace, container_name, source_type, git_url, git_ref)

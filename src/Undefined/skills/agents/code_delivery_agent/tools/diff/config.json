@@ -1,0 +1,25 @@
+{
+    "type": "function",
+    "function": {
+        "name": "diff",
+        "description": "查看文件差异。支持两个文件对比，或文件与 git HEAD 对比。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path1": {
+                    "type": "string",
+                    "description": "第一个文件路径（相对于 /workspace）"
+                },
+                "path2": {
+                    "type": "string",
+                    "description": "第二个文件路径（相对于 /workspace），或留空表示与 git HEAD 对比"
+                },
+                "context_lines": {
+                    "type": "integer",
+                    "description": "上下文行数（默认 3）"
+                }
+            },
+            "required": ["path1"]
+        }
+    }
+}
