@@ -1,7 +1,7 @@
 {
     "type": "function",
     "function": {
-        "name": "notices.list",
+        "name": "list",
         "description": "综合查询群公告列表。支持按数量、全部获取、关键词搜索及时间范围筛选。",
         "parameters": {
             "type": "object",

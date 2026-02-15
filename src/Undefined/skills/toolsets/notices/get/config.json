@@ -1,7 +1,7 @@
 {
     "type": "function",
     "function": {
-        "name": "notices.get",
+        "name": "get",
         "description": "根据 notice_id 获取特定群公告的详细内容。",
         "parameters": {
             "type": "object",
