@@ -9,6 +9,10 @@
                 "file_path": {
                     "type": "string",
                     "description": "文件路径（相对于当前工作目录）"
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "description": "可选：最大字符数限制。如果文件内容超过此限制，将被截断。不指定则返回完整内容。建议：小文件不指定，大文件可设置为 50000-100000"
                 }
             },
             "required": ["file_path"]

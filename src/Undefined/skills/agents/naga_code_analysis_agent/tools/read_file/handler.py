@@ -10,6 +10,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """读取指定文件的详细内容"""
     # 支持两个参数名以实现兼容性
     file_path = args.get("file_path") or args.get("path", "")
+    max_chars: int | None = args.get("max_chars")
 
     if not file_path:
         return "错误：文件路径不能为空"
@@ -57,8 +58,14 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                         f"文件 {file_path} 使用 latin-1 解码，可能包含乱码。"
                     )
 
-        if len(file_content) > 10000:
-            file_content = file_content[:10000] + "\n... (内容过长，已截断)"
+        # 字符数截断（如果指定了 max_chars）
+        total_chars = len(file_content)
+        if max_chars and total_chars > max_chars:
+            file_content = file_content[:max_chars]
+            truncated_info = (
+                f"\n\n... (文件共 {total_chars} 字符，已截断到前 {max_chars} 字符)"
+            )
+            file_content += truncated_info
 
         return file_content
 
