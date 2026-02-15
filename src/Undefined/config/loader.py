@@ -408,6 +408,20 @@ class Config:
     webui_url: str
     webui_port: int
     webui_password: str
+    # Code Delivery Agent
+    code_delivery_enabled: bool
+    code_delivery_task_root: str
+    code_delivery_docker_image: str
+    code_delivery_container_name_prefix: str
+    code_delivery_container_name_suffix: str
+    code_delivery_command_timeout: int
+    code_delivery_max_command_output: int
+    code_delivery_default_archive_format: str
+    code_delivery_max_archive_size_mb: int
+    code_delivery_cleanup_on_finish: bool
+    code_delivery_cleanup_on_start: bool
+    code_delivery_llm_max_retries: int
+    code_delivery_notify_on_llm_failure: bool
     # Bilibili 视频提取
     bilibili_auto_extract_enabled: bool
     bilibili_cookie: str
@@ -861,6 +875,60 @@ class Config:
             _get_value(data, ("bilibili", "auto_extract_private_ids"), None)
         )
 
+        # Code Delivery Agent 配置
+        code_delivery_enabled = _coerce_bool(
+            _get_value(data, ("code_delivery", "enabled"), None), True
+        )
+        code_delivery_task_root = _coerce_str(
+            _get_value(data, ("code_delivery", "task_root"), None),
+            "data/code_delivery",
+        )
+        code_delivery_docker_image = _coerce_str(
+            _get_value(data, ("code_delivery", "docker_image"), None),
+            "ubuntu:24.04",
+        )
+        code_delivery_container_name_prefix = _coerce_str(
+            _get_value(data, ("code_delivery", "container_name_prefix"), None),
+            "code_delivery_",
+        )
+        code_delivery_container_name_suffix = _coerce_str(
+            _get_value(data, ("code_delivery", "container_name_suffix"), None),
+            "_runner",
+        )
+        code_delivery_command_timeout = _coerce_int(
+            _get_value(
+                data, ("code_delivery", "default_command_timeout_seconds"), None
+            ),
+            600,
+        )
+        code_delivery_max_command_output = _coerce_int(
+            _get_value(data, ("code_delivery", "max_command_output_chars"), None),
+            20000,
+        )
+        code_delivery_default_archive_format = _coerce_str(
+            _get_value(data, ("code_delivery", "default_archive_format"), None),
+            "zip",
+        )
+        if code_delivery_default_archive_format not in ("zip", "tar.gz"):
+            code_delivery_default_archive_format = "zip"
+        code_delivery_max_archive_size_mb = _coerce_int(
+            _get_value(data, ("code_delivery", "max_archive_size_mb"), None), 200
+        )
+        code_delivery_cleanup_on_finish = _coerce_bool(
+            _get_value(data, ("code_delivery", "cleanup_on_finish"), None), True
+        )
+        code_delivery_cleanup_on_start = _coerce_bool(
+            _get_value(data, ("code_delivery", "cleanup_on_start"), None), True
+        )
+        code_delivery_llm_max_retries = _coerce_int(
+            _get_value(data, ("code_delivery", "llm_max_retries_per_request"), None),
+            5,
+        )
+        code_delivery_notify_on_llm_failure = _coerce_bool(
+            _get_value(data, ("code_delivery", "notify_on_llm_failure"), None),
+            True,
+        )
+
         webui_settings = load_webui_settings(config_path)
 
         if strict:
@@ -937,6 +1005,19 @@ class Config:
             webui_url=webui_settings.url,
             webui_port=webui_settings.port,
             webui_password=webui_settings.password,
+            code_delivery_enabled=code_delivery_enabled,
+            code_delivery_task_root=code_delivery_task_root,
+            code_delivery_docker_image=code_delivery_docker_image,
+            code_delivery_container_name_prefix=code_delivery_container_name_prefix,
+            code_delivery_container_name_suffix=code_delivery_container_name_suffix,
+            code_delivery_command_timeout=code_delivery_command_timeout,
+            code_delivery_max_command_output=code_delivery_max_command_output,
+            code_delivery_default_archive_format=code_delivery_default_archive_format,
+            code_delivery_max_archive_size_mb=code_delivery_max_archive_size_mb,
+            code_delivery_cleanup_on_finish=code_delivery_cleanup_on_finish,
+            code_delivery_cleanup_on_start=code_delivery_cleanup_on_start,
+            code_delivery_llm_max_retries=code_delivery_llm_max_retries,
+            code_delivery_notify_on_llm_failure=code_delivery_notify_on_llm_failure,
             bilibili_auto_extract_enabled=bilibili_auto_extract_enabled,
             bilibili_cookie=bilibili_cookie,
             bilibili_prefer_quality=bilibili_prefer_quality,

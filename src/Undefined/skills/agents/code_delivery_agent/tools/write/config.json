@@ -1,0 +1,26 @@
+{
+    "type": "function",
+    "function": {
+        "name": "write",
+        "description": "写入文件到工作区。支持覆盖写入和追加写入。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "文件路径（相对于 /workspace）"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "要写入的内容"
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["overwrite", "append"],
+                    "description": "写入模式：overwrite（覆盖，默认）或 append（追加）"
+                }
+            },
+            "required": ["path", "content"]
+        }
+    }
+}

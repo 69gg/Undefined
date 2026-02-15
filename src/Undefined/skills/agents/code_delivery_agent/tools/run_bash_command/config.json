@@ -1,0 +1,25 @@
+{
+    "type": "function",
+    "function": {
+        "name": "run_bash_command",
+        "description": "在 Docker 容器内执行 bash 命令。可用于安装依赖、编译、运行测试等。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "要执行的 bash 命令"
+                },
+                "timeout_seconds": {
+                    "type": "integer",
+                    "description": "命令超时时间（秒），默认使用配置值"
+                },
+                "workdir": {
+                    "type": "string",
+                    "description": "可选：工作目录（容器内绝对路径，默认 /workspace）"
+                }
+            },
+            "required": ["command"]
+        }
+    }
+}

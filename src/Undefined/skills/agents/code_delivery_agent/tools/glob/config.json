@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "glob",
+        "description": "按 glob 模式匹配工作区内的文件。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "glob 匹配模式，例如 '**/*.py'、'src/**/*.js'"
+                },
+                "base_path": {
+                    "type": "string",
+                    "description": "可选：搜索起始路径（相对于 /workspace，默认为 /workspace 根目录）"
+                }
+            },
+            "required": ["pattern"]
+        }
+    }
+}

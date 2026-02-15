@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "read",
+        "description": "读取工作区内文件的文本内容。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "文件路径（相对于 /workspace）"
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "description": "可选：最大字符数限制，超出则截断"
+                }
+            },
+            "required": ["path"]
+        }
+    }
+}

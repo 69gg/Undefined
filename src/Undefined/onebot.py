@@ -430,6 +430,87 @@ class OneBotClient:
         """
         return await self._call_api("send_like", {"user_id": user_id, "times": times})
 
+    async def upload_group_file(
+        self,
+        group_id: int,
+        file_path: str,
+        name: str | None = None,
+    ) -> dict[str, Any]:
+        """上传文件到群聊
+
+        参数:
+            group_id: 群号
+            file_path: 本地文件绝对路径
+            name: 文件名（可选，默认使用原文件名）
+        """
+        from pathlib import Path as _Path
+
+        file_name = name or _Path(file_path).name
+        try:
+            return await self._call_api(
+                "upload_group_file",
+                {
+                    "group_id": group_id,
+                    "file": file_path,
+                    "name": file_name,
+                },
+            )
+        except RuntimeError:
+            # 回退：尝试用文件消息段发送
+            logger.warning(
+                "[文件上传] upload_group_file 失败，尝试文件消息段回退: group=%s",
+                group_id,
+            )
+            return await self.send_group_message(
+                group_id,
+                [
+                    {
+                        "type": "file",
+                        "data": {"file": f"file://{file_path}", "name": file_name},
+                    }
+                ],
+            )
+
+    async def upload_private_file(
+        self,
+        user_id: int,
+        file_path: str,
+        name: str | None = None,
+    ) -> dict[str, Any]:
+        """上传文件到私聊
+
+        参数:
+            user_id: 用户 QQ 号
+            file_path: 本地文件绝对路径
+            name: 文件名（可选，默认使用原文件名）
+        """
+        from pathlib import Path as _Path
+
+        file_name = name or _Path(file_path).name
+        try:
+            return await self._call_api(
+                "upload_private_file",
+                {
+                    "user_id": user_id,
+                    "file": file_path,
+                    "name": file_name,
+                },
+            )
+        except RuntimeError:
+            logger.warning(
+                "[文件上传] upload_private_file 失败，尝试文件消息段回退: user=%s",
+                user_id,
+            )
+            return await self.send_private_message(
+                user_id,
+                [
+                    {
+                        "type": "file",
+                        "data": {"file": f"file://{file_path}", "name": file_name},
+                    }
+                ],
+            )
+
     async def send_group_sign(self, group_id: int) -> dict[str, Any]:
         """执行群打卡
 
