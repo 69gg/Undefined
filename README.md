@@ -60,6 +60,7 @@
   - [开发指南](#开发指南)
   - [开发自检](#开发自检)
 - [文档与延伸阅读](#文档与延伸阅读)
+- [风险提示与免责声明](#风险提示与免责声明)
 - [致谢与友链](#致谢与友链)
   - [NagaAgent](#nagaagent)
 - [开源协议](#开源协议)
@@ -650,6 +651,17 @@ uv run mypy .
 - Agents 开发：[`src/Undefined/skills/agents/README.md`](src/Undefined/skills/agents/README.md)
 - Tools 开发：[`src/Undefined/skills/tools/README.md`](src/Undefined/skills/tools/README.md)
 - Toolsets 开发：[`src/Undefined/skills/toolsets/README.md`](src/Undefined/skills/toolsets/README.md)
+
+## 风险提示与免责声明
+
+1. **账号风控与封禁风险（含 QQ 账号）**  
+   本项目依赖第三方协议端（如 NapCat/Lagrange.Core）接入平台服务。任何因账号风控、功能限制、临时冻结或永久封禁造成的损失（含业务中断、数据损失、账号资产损失），均由实际部署方自行承担。
+
+2. **敏感信息处理风险**  
+   请勿使用本项目主动收集、存储、导出或传播密码、令牌、身份证件、银行卡、聊天隐私等敏感信息。因使用者配置不当、权限控制不足、日志泄露、二次开发缺陷或违规处理数据导致的信息泄露、合规处罚及连带损失，由使用者自行承担责任。
+
+3. **合规义务归属**  
+   使用者应确保其部署与运营行为符合所在地区法律法规、平台协议及群规（包括但不限于数据保护、隐私保护、网络安全与自动化使用限制）。项目维护者不对使用者的具体行为及后果承担连带责任。
 
 ## 致谢与友链
 
