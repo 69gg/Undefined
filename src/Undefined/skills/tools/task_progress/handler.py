@@ -13,6 +13,23 @@ STATUS_ICONS: Dict[str, str] = {
 VALID_STATUSES = frozenset(STATUS_ICONS.keys())
 
 
+def _parse_task_id(value: Any) -> int | None:
+    """将任务 ID 解析为整数；非法时返回 None。"""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return int(stripped)
+        except ValueError:
+            return None
+    return None
+
+
 def _format_task_list(tasks: list[dict[str, Any]]) -> str:
     """将任务列表格式化为可读文本。"""
     if not tasks:
@@ -51,9 +68,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         # 创建/替换计划
         new_tasks: list[dict[str, Any]] = []
         for item in tasks_input:
-            tid = item.get("id")
+            tid_raw = item.get("id")
             desc = item.get("description", "")
-            if tid is None or not desc:
+            tid = _parse_task_id(tid_raw)
+            if tid is None:
+                return f"plan 操作中 id 必须是整数，问题项: {item}"
+            if not desc:
                 return f"plan 操作要求每个步骤都有 id 和 description，问题项: {item}"
             status = item.get("status", "pending")
             if status not in VALID_STATUSES:
@@ -77,9 +97,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     updated: list[int] = []
     for item in tasks_input:
-        tid = item.get("id")
+        tid_raw = item.get("id")
         new_status = item.get("status")
-        if tid is None or new_status is None:
+        tid = _parse_task_id(tid_raw)
+        if tid is None:
+            return f"update 操作中 id 必须是整数，问题项: {item}"
+        if new_status is None:
             return f"update 操作要求每个项都有 id 和 status，问题项: {item}"
         if new_status not in VALID_STATUSES:
             return f"无效的 status: {new_status}，可选: {', '.join(VALID_STATUSES)}"

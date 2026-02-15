@@ -1,6 +1,7 @@
+import hashlib
+import logging
 from pathlib import Path
 from typing import Any, Dict
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,37 @@ def _format_result(result: dict[str, str]) -> str:
     if result.get("subtitles"):
         lines.append(f"字幕：{result['subtitles']}")
     return "\n".join(lines)
+
+
+def _hash_file(path: Path) -> str:
+    """按块计算文件 SHA256，避免一次性读入大文件。"""
+    hasher = hashlib.sha256()
+    with path.open("rb") as f:
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def _build_media_history_key(path: Path, context: Dict[str, Any]) -> str:
+    """构建带会话作用域的媒体历史键，避免同名文件冲突。"""
+    group_id = context.get("group_id")
+    user_id = context.get("user_id")
+    if group_id is not None:
+        scope = f"group:{group_id}"
+    elif user_id is not None:
+        scope = f"user:{user_id}"
+    else:
+        scope = "global"
+
+    try:
+        digest = _hash_file(path)
+        return f"{scope}|sha256:{digest}"
+    except Exception as e:
+        logger.warning("计算媒体文件哈希失败，降级使用绝对路径作为键: %s", e)
+        return f"{scope}|path:{path.resolve()}"
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
@@ -38,11 +70,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not ai_client:
         return "错误：AI client 未在上下文中提供"
 
-    filename = path.name
+    media_history_key = _build_media_history_key(path, context)
 
     # ── 非强制模式下，优先返回历史 Q&A 供 AI 判断 ──
     if not force_analyze:
-        history: list[dict[str, str]] = ai_client.get_media_history(filename)
+        history: list[dict[str, str]] = ai_client.get_media_history(media_history_key)
         if history:
             lines: list[str] = [f"【该文件已有 {len(history)} 条历史分析记录】"]
             for i, qa in enumerate(history, 1):
@@ -67,7 +99,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
             # 保存本次 Q&A 到历史
             question = prompt_extra or "（常规分析）"
-            await ai_client.save_media_history(filename, question, formatted)
+            await ai_client.save_media_history(media_history_key, question, formatted)
 
             return formatted
         return str(result) if result else "分析失败"

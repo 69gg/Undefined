@@ -393,7 +393,7 @@ class MultimodalAnalyzer:
                 )
             }
 
-    # ── 文件名级别的 Q&A 历史管理 ──
+    # ── 媒体键级别的 Q&A 历史管理 ──
 
     def _load_history(self) -> None:
         """从磁盘加载历史 Q&A 缓存。"""
@@ -419,32 +419,32 @@ class MultimodalAnalyzer:
         except Exception as exc:
             logger.error("[媒体分析] 历史缓存写入磁盘失败: %s", exc)
 
-    def get_history(self, filename: str) -> list[dict[str, str]]:
-        """获取指定文件名的历史 Q&A 记录。
+    def get_history(self, media_key: str) -> list[dict[str, str]]:
+        """获取指定媒体键的历史 Q&A 记录。
 
         Args:
-            filename: 媒体文件名
+            media_key: 媒体唯一键（可包含作用域和文件身份）
 
         Returns:
             Q&A 列表，每项包含 ``q`` 和 ``a`` 两个键
         """
-        pairs = self._file_history.get(filename)
+        pairs = self._file_history.get(media_key)
         if not pairs:
             return []
         return list(pairs[-_MAX_QA_HISTORY:])
 
-    async def save_history(self, filename: str, question: str, answer: str) -> None:
-        """保存一条 Q&A 到指定文件名的历史记录（上限 5 条）并持久化。
+    async def save_history(self, media_key: str, question: str, answer: str) -> None:
+        """保存一条 Q&A 到指定媒体键的历史记录（上限 5 条）并持久化。
 
         Args:
-            filename: 媒体文件名
+            media_key: 媒体唯一键（可包含作用域和文件身份）
             question: 提问内容
             answer: 分析回答
         """
-        pairs = self._file_history.setdefault(filename, [])
+        pairs = self._file_history.setdefault(media_key, [])
         pairs.append({"q": question, "a": answer})
         if len(pairs) > _MAX_QA_HISTORY:
-            self._file_history[filename] = pairs[-_MAX_QA_HISTORY:]
+            self._file_history[media_key] = pairs[-_MAX_QA_HISTORY:]
         await self._save_history()
 
     async def describe_image(

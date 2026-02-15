@@ -533,15 +533,15 @@ class AIClient:
     ) -> dict[str, str]:
         return await self._multimodal.describe_image(image_url, prompt_extra)
 
-    def get_media_history(self, filename: str) -> list[dict[str, str]]:
-        """获取指定文件名的多模态分析历史 Q&A 记录。"""
-        return self._multimodal.get_history(filename)
+    def get_media_history(self, media_key: str) -> list[dict[str, str]]:
+        """获取指定媒体键的多模态分析历史 Q&A 记录。"""
+        return self._multimodal.get_history(media_key)
 
     async def save_media_history(
-        self, filename: str, question: str, answer: str
+        self, media_key: str, question: str, answer: str
     ) -> None:
         """保存一条多模态分析 Q&A 到历史记录并持久化到磁盘。"""
-        await self._multimodal.save_history(filename, question, answer)
+        await self._multimodal.save_history(media_key, question, answer)
 
     async def summarize_chat(self, messages: str, context: str = "") -> str:
         return await self._summary_service.summarize_chat(messages, context)
