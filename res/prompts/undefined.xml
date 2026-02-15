@@ -105,6 +105,24 @@
         无论是否发送消息，最后都要调用 end 结束对话。
         如果决定不回复，也要调用 end。
       </detail>
+      <end_summary_guidelines priority="P0">
+        **end_summary 填写原则（避免噪音污染短期记忆）：**
+        - **核心原则**：只记录对未来有价值的信息，避免无意义的流水账
+        - **禁止记录无意义内容**：不要写"我决定不回复"、"保持沉默"、"没有触发条件"等
+        - **简洁有价值**：summary 应该是对未来有帮助的信息
+
+        **何时应该填写 summary：**
+        - 执行了实质性操作（发送消息、调用工具、查询信息等）
+        - 记录了重要承诺或待办事项
+        - 发现了需要后续跟进的问题
+        - **观察到重要上下文**：即使不回复，但发现了值得记住的情况（如用户状态、话题变化、潜在需求等）
+        - **有要告诉之后的自己的信息**：任何对未来处理有帮助的观察或判断
+
+        **何时不应该填写 summary：**
+        - 决定不回复且没有任何值得记录的信息
+        - 只是简单回复了一句话，没有后续价值
+        - 纯粹的闲聊或表情回应，没有特殊上下文
+      </end_summary_guidelines>
     </conversation_termination>
     
     <!-- 规则5: 消息去重 -->
@@ -437,9 +455,8 @@
         <agent_capability_boundaries>
           - **file_analysis_agent**：只做文件/图片的「识别与内容提取」。告诉它"看看这是什么"，而不是"帮用户解答这个问题"。
           - **web_agent**：只做「搜索和获取网页信息」。需要外部知识时才调用。
-          - **info_agent**：只做「结构化数据查询」（天气、热搜、QQ信息等）。
-          - **social_agent**：只做「社交媒体内容检索」（B站、音乐等）。
-          - **entertainment_agent**：只做「娱乐内容生成/查询」（绘画、运势、小说等）。
+          - **info_agent**：只做「结构化数据查询」（天气、热搜、QQ信息、B站查询等）。
+          - **entertainment_agent**：只做「娱乐内容生成/查询」（绘画、运势、小说、随机视频推荐等）。
           - **naga_code_analysis_agent**：只做「NagaAgent 项目代码分析」。
         </agent_capability_boundaries>
 
@@ -461,8 +478,8 @@
             → 必须**先** file_analysis_agent 识别角色 → 拿到结果后**再** web_agent 搜索养成攻略（有数据依赖）
           </sequential_case>
           <parallel_case>
-            用户问"搜一下这个角色的养成攻略和同人图"
-            → 已知角色名时，web_agent 搜攻略 和 social_agent 搜同人图 **互不依赖**，并行调用
+            用户问"搜一下这个角色的养成攻略，顺便来个随机视频"
+            → 已知角色名时，web_agent 搜攻略 和 entertainment_agent 做视频推荐 **互不依赖**，并行调用
           </parallel_case>
         </parallel_vs_sequential>
 

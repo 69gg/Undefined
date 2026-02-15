@@ -119,6 +119,8 @@ class AICoordinator:
             "type": "auto_reply",
             "group_id": group_id,
             "sender_id": sender_id,
+            "sender_name": sender_name,
+            "group_name": group_name,
             "text": text,
             "full_question": full_question,
             "is_at_bot": is_at_bot,
@@ -168,6 +170,7 @@ class AICoordinator:
         request_data = {
             "type": "private_reply",
             "user_id": user_id,
+            "sender_name": sender_name,
             "text": text,
             "full_question": full_question,
         }
@@ -207,6 +210,8 @@ class AICoordinator:
     async def _execute_auto_reply(self, request: dict[str, Any]) -> None:
         group_id = request["group_id"]
         sender_id = request["sender_id"]
+        sender_name = str(request.get("sender_name") or "未知用户")
+        group_name = str(request.get("group_name") or "未知群聊")
         full_question = request["full_question"]
 
         # 创建请求上下文
@@ -276,6 +281,8 @@ class AICoordinator:
                         "render_markdown_to_html": render_markdown_to_html,
                         "group_id": group_id,
                         "user_id": sender_id,
+                        "sender_name": sender_name,
+                        "group_name": group_name,
                     },
                 )
             except Exception:
@@ -284,6 +291,7 @@ class AICoordinator:
 
     async def _execute_private_reply(self, request: dict[str, Any]) -> None:
         user_id = request["user_id"]
+        sender_name = str(request.get("sender_name") or "未知用户")
         full_question = request["full_question"]
 
         # 创建请求上下文
@@ -351,6 +359,7 @@ class AICoordinator:
                         "render_html_to_image": render_html_to_image,
                         "render_markdown_to_html": render_markdown_to_html,
                         "user_id": user_id,
+                        "sender_name": sender_name,
                     },
                 )
                 if result:

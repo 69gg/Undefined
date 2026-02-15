@@ -100,12 +100,11 @@ graph TB
         end
         
         subgraph IntelligentAgents["智能体 Agents (skills/agents/)"]
-            A_Info["info_agent<br/>信息查询助手<br/>(15个工具)<br/>• weather_query<br/>• *hot 热搜<br/>• gold_price<br/>• whois"]
-            A_Social["social_agent<br/>社交媒体助手<br/>(8个工具)<br/>• bilibili_search<br/>• music_*<br/>• video_recommend"]
+            A_Info["info_agent<br/>信息查询助手<br/>(17个工具)<br/>• weather_query<br/>• *hot 热搜<br/>• bilibili_*<br/>• whois"]
             A_Web["web_agent<br/>网络搜索助手<br/>(3个工具 + MCP)<br/>• web_search<br/>• crawl_webpage<br/>• Playwright MCP"]
             A_File["file_analysis_agent<br/>文件分析助手<br/>(14个工具)<br/>• extract_* (PDF/Word/Excel/PPT)<br/>• analyze_code<br/>• analyze_multimodal"]
             A_Naga["naga_code_analysis_agent<br/>NagaAgent 代码分析<br/>(7个工具)<br/>• read_file / glob<br/>• search_file_content"]
-            A_Entertainment["entertainment_agent<br/>娱乐助手<br/>(10个工具)<br/>• ai_draw_one<br/>• horoscope<br/>• novel_search"]
+            A_Entertainment["entertainment_agent<br/>娱乐助手<br/>(9个工具)<br/>• ai_draw_one<br/>• horoscope<br/>• video_random_recommend"]
         end
         
         subgraph MCPIntegration["MCP 集成 (src/Undefined/mcp/)"]
@@ -284,7 +283,7 @@ graph TB
     class Dir_History,Dir_FAQ,Dir_TokenUsage,File_Memory,File_EndSummary,File_ScheduledTasks,Dir_Logs,File_Config persistence
     class Prompts,Intros resource
     class QueueManager,ModelQueues,DispatcherLoop queue
-    class A_Info,A_Social,A_Web,A_File,A_Naga,A_Entertainment agent
+    class A_Info,A_Web,A_File,A_Naga,A_Entertainment agent
 ```
 
 ## 二、数据流向图
@@ -421,7 +420,6 @@ graph TB
         
         subgraph AgentsLayer["Agents 层"]
             InfoAgent["info_agent<br/>信息查询"]
-            SocialAgent["social_agent<br/>社交媒体"]
             WebAgent["web_agent<br/>网络搜索<br/>• MCP Playwright"]
             FileAgent["file_analysis_agent<br/>文件分析"]
             NagaAgent["naga_code_analysis_agent<br/>代码分析"]
@@ -455,7 +453,6 @@ graph TB
     
     AgentRegistry --> AgentToolReg
     AgentToolReg --> InfoAgent
-    AgentToolReg --> SocialAgent
     AgentToolReg --> WebAgent
     AgentToolReg --> FileAgent
     AgentToolReg --> NagaAgent
@@ -778,16 +775,15 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 *   **高可用性**：即使前一个请求仍在处理（如耗时的网络搜索），新的请求也会按时被分发，不会造成队列堵塞。
 *   **优先级管理**：支持四级优先级（超级管理员 > 私聊 > 群聊@ > 群聊普通），确保重要消息优先响应。
 
-### 6个智能体 Agent
+### 5个智能体 Agent
 
 | Agent | 功能定位 | 工具数量 | 核心能力 |
 |-------|---------|---------|---------|
-| **info_agent** | 信息查询助手 | 15个 | 天气查询、热搜榜单、金价、网络检测等 |
-| **social_agent** | 社交媒体助手 | 8个 | B站搜索、音乐查询、随机视频推荐等 |
+| **info_agent** | 信息查询助手 | 17个 | 天气查询、热搜榜单、网络检测、B站信息查询等 |
 | **web_agent** | 网络搜索助手 | 3个 + MCP | 网页搜索、爬虫、Playwright MCP |
 | **file_analysis_agent** | 文件分析助手 | 14个 | PDF/Word/Excel/PPT解析、代码分析、多模态分析 |
 | **naga_code_analysis_agent** | NagaAgent 代码分析 | 7个 | 代码库浏览、文件搜索、目录遍历 |
-| **entertainment_agent** | 娱乐助手 | 10个 | AI 绘图、星座运势、小说搜索等 |
+| **entertainment_agent** | 娱乐助手 | 9个 | AI 绘图、星座运势、小说搜索、随机视频推荐等 |
 
 ### Skills 插件系统
 

@@ -615,6 +615,17 @@ class AIClient:
         tool_context["conversation_ended"] = False
         tool_context.setdefault("agent_histories", {})
 
+        # 显式注入 RequestContext 的核心字段（与 tooling.py:execute_tool_call 保持一致）
+        if ctx:
+            if ctx.group_id is not None:
+                tool_context.setdefault("group_id", ctx.group_id)
+            if ctx.user_id is not None:
+                tool_context.setdefault("user_id", ctx.user_id)
+            if ctx.sender_id is not None:
+                tool_context.setdefault("sender_id", ctx.sender_id)
+            tool_context.setdefault("request_type", ctx.request_type)
+            tool_context.setdefault("request_id", ctx.request_id)
+
         if extra_context:
             tool_context.update(extra_context)
 

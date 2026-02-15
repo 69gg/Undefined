@@ -181,12 +181,23 @@ class PromptBuilder:
 
         await self._ensure_summaries_loaded()
         if self._end_summaries:
-            summary_text = "\n".join(
-                [
-                    f"- [{item['timestamp']}] {item['summary']}"
-                    for item in self._end_summaries
-                ]
-            )
+            summary_lines: list[str] = []
+            for item in self._end_summaries:
+                location_text = ""
+                location = item.get("location")
+                if isinstance(location, dict):
+                    location_type = location.get("type")
+                    location_name = location.get("name")
+                    if (
+                        location_type in {"private", "group"}
+                        and isinstance(location_name, str)
+                        and location_name.strip()
+                    ):
+                        location_text = f" ({location_type}: {location_name.strip()})"
+                summary_lines.append(
+                    f"- [{item['timestamp']}] {item['summary']}{location_text}"
+                )
+            summary_text = "\n".join(summary_lines)
             messages.append(
                 {
                     "role": "system",

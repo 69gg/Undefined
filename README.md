@@ -60,6 +60,7 @@
   - [开发指南](#开发指南)
   - [开发自检](#开发自检)
 - [文档与延伸阅读](#文档与延伸阅读)
+- [风险提示与免责声明](#风险提示与免责声明)
 - [致谢与友链](#致谢与友链)
   - [NagaAgent](#nagaagent)
 - [开源协议](#开源协议)
@@ -168,13 +169,12 @@ graph TB
             TS_Scheduler["scheduler.*<br/>• create_schedule_task<br/>• delete_schedule_task<br/>• list_schedule_tasks"]
         end
         
-        subgraph IntelligentAgents["智能体 Agents (6个)"]
-            A_Info["info_agent<br/>信息查询助手<br/>(15个工具)<br/>• weather_query<br/>• *hot 热搜<br/>• gold_price<br/>• whois"]
-            A_Social["social_agent<br/>社交媒体助手<br/>(8个工具)<br/>• bilibili_search<br/>• music_*<br/>• video_recommend"]
+        subgraph IntelligentAgents["智能体 Agents (5个)"]
+            A_Info["info_agent<br/>信息查询助手<br/>(17个工具)<br/>• weather_query<br/>• *hot 热搜<br/>• bilibili_*<br/>• whois"]
             A_Web["web_agent<br/>网络搜索助手<br/>• MCP Playwright<br/>• web_search<br/>• crawl_webpage"]
             A_File["file_analysis_agent<br/>文件分析助手<br/>(14个工具)<br/>• extract_* (PDF/Word/Excel/PPT)<br/>• analyze_code<br/>• analyze_multimodal"]
             A_Naga["naga_code_analysis_agent<br/>NagaAgent 代码分析<br/>(7个工具)<br/>• read_file / glob<br/>• search_file_content"]
-            A_Ent["entertainment_agent<br/>娱乐助手<br/>(10个工具)<br/>• ai_draw_one<br/>• horoscope<br/>• novel_search"]
+            A_Ent["entertainment_agent<br/>娱乐助手<br/>(9个工具)<br/>• ai_draw_one<br/>• horoscope<br/>• video_random_recommend"]
         end
         
         MCPRegistry["MCPToolRegistry<br/>MCP 工具注册表<br/>[mcp/registry.py]"]
@@ -596,8 +596,6 @@ Undefined 支持 **MCP (Model Context Protocol)** 协议，可以连接外部 MC
 
 *   **网络搜索**："搜索一下 DeepSeek 的最新动态"
 *   **B站视频**：发送 B 站链接/BV 号自动下载发送视频，或指令 AI "下载这个 B 站视频 BV1xx411c7mD"
-*   **代码分析**："分析 src/main.py 的代码逻辑"
-*   **娱乐互动**："画一张赛博朋克风格的猫"
 *   **定时任务**："每天早上 8 点提醒我看新闻"
 
 ### 管理员命令
@@ -652,6 +650,17 @@ uv run mypy .
 - Agents 开发：[`src/Undefined/skills/agents/README.md`](src/Undefined/skills/agents/README.md)
 - Tools 开发：[`src/Undefined/skills/tools/README.md`](src/Undefined/skills/tools/README.md)
 - Toolsets 开发：[`src/Undefined/skills/toolsets/README.md`](src/Undefined/skills/toolsets/README.md)
+
+## 风险提示与免责声明
+
+1. **账号风控与封禁风险（含 QQ 账号）**  
+   本项目依赖第三方协议端（如 NapCat/Lagrange.Core）接入平台服务。任何因账号风控、功能限制、临时冻结或永久封禁造成的损失（含业务中断、数据损失、账号资产损失），均由实际部署方自行承担。
+
+2. **敏感信息处理风险**  
+   请勿使用本项目主动收集、存储、导出或传播密码、令牌、身份证件、银行卡、聊天隐私等敏感信息。因使用者配置不当、权限控制不足、日志泄露、二次开发缺陷或违规处理数据导致的信息泄露、合规处罚及连带损失，由使用者自行承担责任。
+
+3. **合规义务归属**  
+   使用者应确保其部署与运营行为符合所在地区法律法规、平台协议及群规（包括但不限于数据保护、隐私保护、网络安全与自动化使用限制）。项目维护者不对使用者的具体行为及后果承担连带责任。
 
 ## 致谢与友链
 
