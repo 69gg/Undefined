@@ -241,6 +241,8 @@ class AICoordinator:
 
             # 存储资源到上下文
             ai_client = self.ai
+            memory_storage = self.ai.memory_storage
+            runtime_config = self.ai.runtime_config
             sender = self.sender
             history_manager = self.history_manager
             onebot_client = self.onebot
@@ -320,6 +322,8 @@ class AICoordinator:
 
             # 存储资源到上下文
             ai_client = self.ai
+            memory_storage = self.ai.memory_storage
+            runtime_config = self.ai.runtime_config
             sender = self.sender
             history_manager = self.history_manager
             onebot_client = self.onebot
