@@ -9,7 +9,7 @@ import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from Undefined.utils.file_lock import FileLock
 
@@ -25,6 +25,14 @@ class EndSummaryRecord(TypedDict):
 
     summary: str
     timestamp: str
+    location: NotRequired["EndSummaryLocation"]
+
+
+class EndSummaryLocation(TypedDict):
+    """End 摘要存储位置。"""
+
+    type: Literal["private", "group"]
+    name: str
 
 
 def _now_iso_timestamp() -> str:
@@ -43,15 +51,42 @@ class EndSummaryStorage:
         self._append_lock = asyncio.Lock()
 
     @staticmethod
-    def make_record(summary: str, timestamp: str | None = None) -> EndSummaryRecord:
+    def _normalize_location(value: Any) -> EndSummaryLocation | None:
+        if not isinstance(value, dict):
+            return None
+
+        location_type = value.get("type")
+        if location_type not in {"private", "group"}:
+            return None
+
+        location_name_raw = value.get("name")
+        if not isinstance(location_name_raw, str):
+            return None
+
+        location_name = location_name_raw.strip()
+        if not location_name:
+            return None
+
+        return {"type": location_type, "name": location_name}
+
+    @staticmethod
+    def make_record(
+        summary: str,
+        timestamp: str | None = None,
+        location: EndSummaryLocation | None = None,
+    ) -> EndSummaryRecord:
         """构建单条摘要记录。"""
         resolved_timestamp = (timestamp or _now_iso_timestamp()).strip()
         if not resolved_timestamp:
             resolved_timestamp = _now_iso_timestamp()
-        return {
+        record: EndSummaryRecord = {
             "summary": summary.strip(),
             "timestamp": resolved_timestamp,
         }
+        normalized_location = EndSummaryStorage._normalize_location(location)
+        if normalized_location is not None:
+            record["location"] = normalized_location
+        return record
 
     def _normalize_records(self, data: Any) -> list[EndSummaryRecord]:
         """兼容旧格式并归一化为带时间戳记录。"""
@@ -84,7 +119,14 @@ class EndSummaryStorage:
                     if isinstance(timestamp_raw, str) and timestamp_raw.strip()
                     else _now_iso_timestamp()
                 )
-                normalized.append({"summary": summary, "timestamp": timestamp})
+                location = self._normalize_location(item.get("location"))
+                normalized.append(
+                    self.make_record(
+                        summary=summary,
+                        timestamp=timestamp,
+                        location=location,
+                    )
+                )
 
         return normalized[-MAX_END_SUMMARIES:]
 
@@ -148,14 +190,17 @@ class EndSummaryStorage:
             return records
 
     async def append_summary(
-        self, summary: str, timestamp: str | None = None
+        self,
+        summary: str,
+        timestamp: str | None = None,
+        location: EndSummaryLocation | None = None,
     ) -> EndSummaryRecord | None:
         """追加一条摘要并持久化，返回最终写入记录。"""
         cleaned_summary = summary.strip()
         if not cleaned_summary:
             return None
 
-        record = self.make_record(cleaned_summary, timestamp)
+        record = self.make_record(cleaned_summary, timestamp, location=location)
         try:
             async with self._append_lock:
                 await asyncio.to_thread(self._append_summary_sync, record)
