@@ -622,6 +622,8 @@ class AIClient:
         tool_context.setdefault("ai_client", self)
         tool_context.setdefault("runtime_config", self._get_runtime_config())
         tool_context.setdefault("search_wrapper", self._search_wrapper)
+        tool_context.setdefault("end_summary_storage", self._end_summary_storage)
+        tool_context.setdefault("end_summaries", self._prompt_builder.end_summaries)
         tool_context.setdefault(
             "send_private_message_callback", self._send_private_message_callback
         )

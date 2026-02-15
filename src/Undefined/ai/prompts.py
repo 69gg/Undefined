@@ -10,7 +10,11 @@ from typing import Any, Callable, Awaitable
 import aiofiles
 
 from Undefined.context import RequestContext
-from Undefined.end_summary_storage import EndSummaryStorage
+from Undefined.end_summary_storage import (
+    EndSummaryStorage,
+    EndSummaryRecord,
+    MAX_END_SUMMARIES,
+)
 from Undefined.memory import MemoryStorage
 from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
 from Undefined.utils.logging import log_debug_json
@@ -47,8 +51,13 @@ class PromptBuilder:
         self._system_prompt_path = system_prompt_path
         self._runtime_config_getter = runtime_config_getter
         self._anthropic_skill_registry = anthropic_skill_registry
-        self._end_summaries: deque[str] = deque(maxlen=100)
+        self._end_summaries: deque[EndSummaryRecord] = deque(maxlen=MAX_END_SUMMARIES)
         self._summaries_loaded = False
+
+    @property
+    def end_summaries(self) -> deque[EndSummaryRecord]:
+        """暴露短期摘要缓存，供工具执行上下文共享。"""
+        return self._end_summaries
 
     def _select_system_prompt_path(self) -> str:
         """根据运行时配置选择系统提示词路径。
@@ -172,7 +181,12 @@ class PromptBuilder:
 
         await self._ensure_summaries_loaded()
         if self._end_summaries:
-            summary_text = "\n".join([f"- {s}" for s in self._end_summaries])
+            summary_text = "\n".join(
+                [
+                    f"- [{item['timestamp']}] {item['summary']}"
+                    for item in self._end_summaries
+                ]
+            )
             messages.append(
                 {
                     "role": "system",
