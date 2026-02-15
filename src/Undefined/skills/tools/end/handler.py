@@ -39,6 +39,20 @@ def _build_location(context: Dict[str, Any]) -> EndSummaryLocation | None:
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     summary_raw = args.get("summary", "")
     summary = summary_raw.strip() if isinstance(summary_raw, str) else ""
+    force = args.get("force", False)
+
+    # 检查：如果有 summary 但本轮未发送消息，且未强制执行，则拒绝
+    if summary and not force:
+        message_sent = context.get("message_sent_this_turn", False)
+        if not message_sent:
+            logger.warning(
+                "[end工具] 拒绝执行：有 summary 但本轮未发送消息，request_id=%s",
+                context.get("request_id", "-"),
+            )
+            return (
+                "拒绝结束对话：你记录了 summary 但本轮未调用 send_message 发送消息。"
+                "请先发送消息给用户，或者如果确实不需要发送消息，请使用 force=true 参数强制结束。"
+            )
 
     if summary:
         location = _build_location(context)

@@ -182,6 +182,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             else:
                 logger.info("[发送消息] 准备发送私聊 %s: %s", target_id, message[:100])
                 await sender.send_private_message(target_id, message)
+            context["message_sent_this_turn"] = True
             return "消息已发送"
         except Exception as e:
             logger.exception(
@@ -193,11 +194,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             )
             return "发送失败：消息服务暂时不可用，请稍后重试"
 
-    # 无 sender 时只做兼容回调；仅允许发送到“当前会话”避免误投递
+    # 无 sender 时只做兼容回调；仅允许发送到"当前会话"避免误投递
     if target_type == "group":
         if send_message_callback and _is_current_group_target(context, target_id):
             try:
                 await send_message_callback(message)
+                context["message_sent_this_turn"] = True
                 return "消息已发送"
             except Exception as e:
                 logger.exception(
@@ -218,6 +220,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if send_private_message_callback:
         try:
             await send_private_message_callback(target_id, message)
+            context["message_sent_this_turn"] = True
             return "消息已发送"
         except Exception as e:
             logger.exception(
@@ -231,6 +234,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if send_message_callback and _is_current_private_target(context, target_id):
         try:
             await send_message_callback(message)
+            context["message_sent_this_turn"] = True
             return "消息已发送"
         except Exception as e:
             logger.exception(
