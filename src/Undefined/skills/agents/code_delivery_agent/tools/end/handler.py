@@ -41,7 +41,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     if not isinstance(exclude_patterns, list):
         exclude_patterns = []
     archive_name = str(args.get("archive_name", "")).strip() or "delivery"
-    archive_format = str(args.get("archive_format", "")).strip().lower() or "zip"
+    archive_format_arg = str(args.get("archive_format", "")).strip().lower()
     summary = str(args.get("summary", "")).strip()
 
     workspace: Path | None = context.get("workspace")
@@ -52,6 +52,20 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     ws_resolved = workspace.resolve()
     if not ws_resolved.exists():
         return "错误：workspace 目录不存在"
+
+    config = context.get("config")
+    default_archive_format = "zip"
+    if config:
+        default_archive_format = getattr(
+            config, "code_delivery_default_archive_format", "zip"
+        )
+    default_archive_format = str(default_archive_format).strip().lower()
+    if default_archive_format not in ("zip", "tar.gz"):
+        default_archive_format = "zip"
+
+    archive_format = archive_format_arg or default_archive_format
+    if archive_format not in ("zip", "tar.gz"):
+        return "错误：archive_format 仅支持 zip 或 tar.gz"
 
     # 收集要打包的文件
     files_to_pack: list[Path] = []
@@ -86,7 +100,6 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     archive_hash = _file_hash(str(archive_path))
 
     # 检查大小限制
-    config = context.get("config")
     max_size_mb: int = 200
     if config:
         max_size_mb = getattr(config, "code_delivery_max_archive_size_mb", 200)

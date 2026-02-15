@@ -202,10 +202,28 @@ class AgentToolRegistry(BaseRegistry):
                 logger.info(
                     f"[AgentCall] {current_agent} 调用 {target_agent_name}，参数: {args}"
                 )
-                # 直接传递所有参数给目标 agent
+                # 构造被调用方上下文，避免复用调用方身份与历史。
+                callee_context = context.copy()
+                callee_context["agent_name"] = target_agent_name
+
+                agent_histories = context.get("agent_histories")
+                if not isinstance(agent_histories, dict):
+                    agent_histories = {}
+                    context["agent_histories"] = agent_histories
+                callee_history = agent_histories.get(target_agent_name, [])
+                if not isinstance(callee_history, list):
+                    callee_history = []
+                    agent_histories[target_agent_name] = callee_history
+                callee_context["agent_history"] = callee_history
+
                 result = await ai_client.agent_registry.execute_agent(
-                    target_agent_name, args, context
+                    target_agent_name, args, callee_context
                 )
+                agent_prompt = str(args.get("prompt", "")).strip()
+                if agent_prompt and result:
+                    callee_history.append({"role": "user", "content": agent_prompt})
+                    callee_history.append({"role": "assistant", "content": str(result)})
+                    agent_histories[target_agent_name] = callee_history
                 return str(result)
             except Exception as e:
                 logger.exception(f"调用 agent {target_agent_name} 失败")

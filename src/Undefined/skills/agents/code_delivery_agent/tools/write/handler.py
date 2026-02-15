@@ -36,8 +36,11 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     if not workspace:
         return "错误：workspace 未设置"
 
-    full_path = (workspace / rel_path).resolve()
-    if not str(full_path).startswith(str(workspace.resolve())):
+    workspace_root = workspace.resolve()
+    full_path = (workspace_root / rel_path).resolve()
+    try:
+        full_path.relative_to(workspace_root)
+    except ValueError:
         return "错误：路径越界，只能写入 /workspace 下的文件"
 
     # 获取文件锁，防止并发写入竞态

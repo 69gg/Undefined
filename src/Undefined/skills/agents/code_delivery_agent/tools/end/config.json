@@ -20,7 +20,7 @@
                 "archive_format": {
                     "type": "string",
                     "enum": ["zip", "tar.gz"],
-                    "description": "可选：归档格式（默认 zip）"
+                    "description": "可选：归档格式（默认读取配置 code_delivery.default_archive_format）"
                 },
                 "summary": {
                     "type": "string",
