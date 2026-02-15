@@ -80,6 +80,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             return (
                 "拒绝结束对话：你记录了 summary 但本轮未发送任何消息或媒体内容。"
                 "请先发送消息给用户，或者如果确实不需要发送，请使用 force=true 参数强制结束。"
+                "如果你本轮没有做任何事，若无必要，建议不加summary参数，避免记忆噪声。"
             )
 
     if summary:

@@ -68,7 +68,7 @@ Skills 是核心扩展机制，分四类，全部通过 `config.json`（OpenAI f
 - Agent 的 config.json 统一使用 `prompt` 参数接收用户需求
 - Agent handler 应使用 `skills/agents/runner.py` 的 `run_agent_with_tools()` 统一执行入口，它处理 prompt 加载、LLM 迭代、tool call 并发执行、结果回填
 - Agent 通过 `context["ai_client"].request_model()` 调用模型，确保 Token 统计一致
-- 5 个内置 Agent：info_agent, web_agent, file_analysis_agent, naga_code_analysis_agent, entertainment_agent
+- 6 个内置 Agent：info_agent, web_agent, file_analysis_agent, naga_code_analysis_agent, entertainment_agent, code_delivery_agent
 
 ### Anthropic Skills (`skills/anthropic_skills/{skill_name}/SKILL.md`)
 - 遵循 agentskills.io 标准，YAML frontmatter（name + description）+ Markdown 正文

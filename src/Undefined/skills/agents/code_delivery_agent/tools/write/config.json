@@ -1,0 +1,38 @@
+{
+    "type": "function",
+    "function": {
+        "name": "write",
+        "description": "写入文件到工作区。支持多种写入模式：覆盖、追加、精确替换、行级插入。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "文件路径（相对于 /workspace）"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "要写入的内容（overwrite/append/insert_at_line 模式需要）"
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["overwrite", "append", "replace", "insert_at_line"],
+                    "description": "写入模式：overwrite（覆盖）、append（追加）、replace（精确替换）、insert_at_line（在指定行插入）"
+                },
+                "old_string": {
+                    "type": "string",
+                    "description": "replace 模式：要替换的原字符串（必须在文件中唯一存在）"
+                },
+                "new_string": {
+                    "type": "string",
+                    "description": "replace 模式：替换后的新字符串"
+                },
+                "line_number": {
+                    "type": "integer",
+                    "description": "insert_at_line 模式：在哪一行之前插入（1-based，0 表示文件开头）"
+                }
+            },
+            "required": ["path"]
+        }
+    }
+}

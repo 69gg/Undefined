@@ -1,0 +1,4 @@
+{
+    "enabled": true,
+    "allowed_callers": ["naga_code_alaysis_agent", "code_delivery_agent"]
+}

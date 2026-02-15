@@ -1,0 +1,38 @@
+{
+    "type": "function",
+    "function": {
+        "name": "run_bash_command",
+        "description": "在 Docker 容器内执行 bash 命令。支持前台/后台执行和进程终止。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["run", "kill"],
+                    "description": "操作类型：run（执行命令，默认）或 kill（终止后台进程）"
+                },
+                "command": {
+                    "type": "string",
+                    "description": "要执行的 bash 命令（action=run 时需要）"
+                },
+                "timeout_seconds": {
+                    "type": "integer",
+                    "description": "命令超时时间（秒），默认使用配置值"
+                },
+                "workdir": {
+                    "type": "string",
+                    "description": "可选：工作目录（容器内绝对路径，默认 /workspace）"
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": "是否后台执行（默认 false）。后台执行时返回进程ID，不等待命令完成"
+                },
+                "pid": {
+                    "type": "integer",
+                    "description": "要终止的进程ID（action=kill 时需要）"
+                }
+            },
+            "required": []
+        }
+    }
+}

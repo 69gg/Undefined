@@ -383,6 +383,58 @@ auto_extract_group_ids = []
 # en: Private chat allowlist for auto-extraction (empty = follow global access.allowed_private_ids).
 auto_extract_private_ids = []
 
+# zh: Code Delivery Agent 配置（代码交付 Agent，在 Docker 容器中编写代码并打包上传）。
+# en: Code Delivery Agent settings (writes code in Docker containers and delivers packaged results).
+[code_delivery]
+# zh: 是否启用 Code Delivery Agent。
+# en: Enable Code Delivery Agent.
+enabled = true
+# zh: 任务根目录（相对于工作目录）。
+# en: Task root directory (relative to working directory).
+task_root = "data/code_delivery"
+# zh: Docker 镜像名称。
+# en: Docker image name.
+docker_image = "ubuntu:24.04"
+# zh: 容器名前缀。
+# en: Container name prefix.
+container_name_prefix = "code_delivery_"
+# zh: 容器名后缀。
+# en: Container name suffix.
+container_name_suffix = "_runner"
+# zh: 命令默认超时时间（秒），0 表示不限时。
+# en: Default command timeout (seconds), 0 means no limit.
+default_command_timeout_seconds = 0
+# zh: 命令输出最大字符数。
+# en: Max command output characters.
+max_command_output_chars = 20000
+# zh: 默认归档格式（zip 或 tar.gz）。
+# en: Default archive format (zip or tar.gz).
+default_archive_format = "zip"
+# zh: 归档文件最大大小（MB）。
+# en: Max archive file size (MB).
+max_archive_size_mb = 200
+# zh: 任务完成后是否清理工作区和容器。
+# en: Clean up workspace and container after task completion.
+cleanup_on_finish = true
+# zh: 启动前是否清理残留工作区和容器。
+# en: Clean up leftover workspaces and containers on startup.
+cleanup_on_start = true
+# zh: 单次 LLM 请求最大连续失败次数（达到后发送失败通知并终止任务）。
+# en: Max consecutive LLM failures per request (sends failure notification and terminates task when reached).
+llm_max_retries_per_request = 5
+# zh: LLM 连续失败时是否向目标发送通知。
+# en: Send notification to target on consecutive LLM failures.
+notify_on_llm_failure = true
+# zh: 容器内存限制（如 "2g", "512m"），留空表示不限制。
+# en: Container memory limit (e.g., "2g", "512m"), empty means no limit.
+container_memory_limit = ""
+# zh: 容器 CPU 限制（如 "2.0", "0.5"），留空表示不限制。
+# en: Container CPU limit (e.g., "2.0", "0.5"), empty means no limit.
+container_cpu_limit = ""
+# zh: 命令黑名单（禁止执行的命令模式列表，支持通配符）。
+# en: Command blacklist (list of forbidden command patterns, supports wildcards).
+command_blacklist = ["rm -rf /", ":(){ :|:& };:", "mkfs.*", "dd if=/dev/zero"]
+
 # zh: WebUI 设置。仅在使用 `Undefined-webui` 启动 WebUI 时生效；直接运行 `Undefined` 可忽略本段。
 # en: WebUI settings. Only used when starting WebUI via `Undefined-webui`; ignore this section if you run `Undefined` directly.
 [webui]

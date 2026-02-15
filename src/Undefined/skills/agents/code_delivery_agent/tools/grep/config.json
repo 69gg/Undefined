@@ -1,0 +1,50 @@
+{
+    "type": "function",
+    "function": {
+        "name": "grep",
+        "description": "在工作区内搜索文件内容。支持上下文行显示。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "搜索模式（字符串或正则表达式）"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "可选：搜索路径（相对于 /workspace，默认搜索整个工作区）"
+                },
+                "is_regex": {
+                    "type": "boolean",
+                    "description": "是否为正则表达式（默认 false，按字面量匹配）"
+                },
+                "case_sensitive": {
+                    "type": "boolean",
+                    "description": "是否区分大小写（默认 true）"
+                },
+                "max_matches": {
+                    "type": "integer",
+                    "description": "最大匹配数（默认 100）"
+                },
+                "context_before": {
+                    "type": "integer",
+                    "description": "显示匹配行之前的 N 行上下文（类似 grep -B）"
+                },
+                "context_after": {
+                    "type": "integer",
+                    "description": "显示匹配行之后的 N 行上下文（类似 grep -A）"
+                },
+                "context": {
+                    "type": "integer",
+                    "description": "显示匹配行前后各 N 行上下文（类似 grep -C）"
+                },
+                "output_mode": {
+                    "type": "string",
+                    "enum": ["matches", "files", "count"],
+                    "description": "输出模式：matches（显示匹配行，默认）、files（仅显示文件名）、count（显示匹配计数）"
+                }
+            },
+            "required": ["pattern"]
+        }
+    }
+}

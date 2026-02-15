@@ -1,0 +1,39 @@
+{
+    "type": "function",
+    "function": {
+        "name": "code_delivery_agent",
+        "description": "代码交付助手，可在隔离的 Docker 容器中编写代码、执行命令、运行验证，最终打包并上传到指定群聊或私聊。支持从 Git 仓库克隆或空目录开始。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "任务目标描述，例如：'用 Python 写一个 HTTP 服务器，监听 8080 端口，返回 Hello World'"
+                },
+                "source_type": {
+                    "type": "string",
+                    "enum": ["git", "empty"],
+                    "description": "初始化来源类型：'git' 从 Git 仓库克隆，'empty' 从空目录开始"
+                },
+                "git_url": {
+                    "type": "string",
+                    "description": "Git 仓库 URL（source_type=git 时必填）"
+                },
+                "git_ref": {
+                    "type": "string",
+                    "description": "Git 分支/tag/commit（可选，默认为仓库默认分支）"
+                },
+                "target_type": {
+                    "type": "string",
+                    "enum": ["group", "private"],
+                    "description": "交付目标类型：'group' 群聊，'private' 私聊"
+                },
+                "target_id": {
+                    "type": "integer",
+                    "description": "交付目标 ID（群号或 QQ 号）"
+                }
+            },
+            "required": ["prompt", "source_type", "target_type", "target_id"]
+        }
+    }
+}

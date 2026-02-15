@@ -1,0 +1,34 @@
+{
+    "type": "function",
+    "function": {
+        "name": "read",
+        "description": "读取工作区内文件的文本内容。支持完整读取、按行读取、读取元信息、批量读取。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "文件路径（相对于 /workspace），或用逗号分隔的多个路径（批量读取）"
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["full", "lines", "stat"],
+                    "description": "读取模式：full（完整读取，默认）、lines（按行读取）、stat（仅读取文件元信息）"
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "description": "full 模式：最大字符数限制，超出则截断"
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "lines 模式：起始行号（从 1 开始）"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "lines 模式：读取的行数"
+                }
+            },
+            "required": ["path"]
+        }
+    }
+}

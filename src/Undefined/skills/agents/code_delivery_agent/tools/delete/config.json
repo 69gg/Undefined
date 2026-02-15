@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "delete",
+        "description": "安全删除文件或目录。支持递归删除。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "要删除的文件或目录路径（相对于 /workspace）"
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "是否递归删除目录（默认 false，删除非空目录时必须为 true）"
+                }
+            },
+            "required": ["path"]
+        }
+    }
+}

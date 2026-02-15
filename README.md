@@ -81,6 +81,7 @@
 - **会话白名单（群/私聊）**：只需配置 `access.allowed_group_ids` / `access.allowed_private_ids` 两个列表，即可把机器人“锁”在指定群与指定私聊里；避免被拉进陌生群误触发、也避免工具/定时任务把消息误发到不该去的地方（默认留空不限制）。
 - **并行工具执行**：无论是主 AI 还是子 Agent，均支持 `asyncio` 并发工具调用，大幅提升多任务处理速度（如同时读取多个文件或搜索多个关键词）。
 - **智能 Agent 矩阵**：内置多个专业 Agent，分工协作处理复杂任务。
+- **Agent 互调用**：Agent 之间可以相互调用，通过简单的配置文件（`callable.json`）即可让某个 Agent 成为其他 Agent 的工具，支持细粒度的访问控制，实现复杂的多 Agent 协作场景。
 - **Agent 自我介绍自动生成**：启动时按 Agent 代码/配置 hash 生成 `intro.generated.md`（第一人称、结构化），与 `intro.md` 合并后作为描述；减少手动维护，保持能力说明与实现同步，有助于精准调度。
 - **请求上下文管理**：基于 Python `contextvars` 的统一请求上下文系统，自动 UUID 追踪，零竞态条件，完全的并发隔离。
 - **定时任务系统**：支持 Crontab 语法的强大定时任务系统，可自动执行各种操作（如定时提醒、定时搜索）。
@@ -169,12 +170,13 @@ graph TB
             TS_Scheduler["scheduler.*<br/>• create_schedule_task<br/>• delete_schedule_task<br/>• list_schedule_tasks"]
         end
         
-        subgraph IntelligentAgents["智能体 Agents (5个)"]
+        subgraph IntelligentAgents["智能体 Agents (6个)"]
             A_Info["info_agent<br/>信息查询助手<br/>(17个工具)<br/>• weather_query<br/>• *hot 热搜<br/>• bilibili_*<br/>• whois"]
             A_Web["web_agent<br/>网络搜索助手<br/>• MCP Playwright<br/>• web_search<br/>• crawl_webpage"]
             A_File["file_analysis_agent<br/>文件分析助手<br/>(14个工具)<br/>• extract_* (PDF/Word/Excel/PPT)<br/>• analyze_code<br/>• analyze_multimodal"]
             A_Naga["naga_code_analysis_agent<br/>NagaAgent 代码分析<br/>(7个工具)<br/>• read_file / glob<br/>• search_file_content"]
             A_Ent["entertainment_agent<br/>娱乐助手<br/>(9个工具)<br/>• ai_draw_one<br/>• horoscope<br/>• video_random_recommend"]
+            A_Code["code_delivery_agent<br/>代码交付助手<br/>(13个工具)<br/>• Docker 容器隔离<br/>• Git 仓库克隆<br/>• 代码编写验证<br/>• 打包上传"]
         end
         
         MCPRegistry["MCPToolRegistry<br/>MCP 工具注册表<br/>[mcp/registry.py]"]
@@ -596,6 +598,7 @@ Undefined 支持 **MCP (Model Context Protocol)** 协议，可以连接外部 MC
 
 *   **网络搜索**："搜索一下 DeepSeek 的最新动态"
 *   **B站视频**：发送 B 站链接/BV 号自动下载发送视频，或指令 AI "下载这个 B 站视频 BV1xx411c7mD"
+*   **代码交付**："用 Python 写一个 HTTP 服务器，监听 8080 端口，返回 Hello World，打包发到这个群"
 *   **定时任务**："每天早上 8 点提醒我看新闻"
 
 ### 管理员命令
@@ -634,6 +637,8 @@ src/Undefined/
 ### 开发指南
 
 请参考 [src/Undefined/skills/README.md](src/Undefined/skills/README.md) 了解如何编写新的工具和 Agent。
+
+**Agent 互调用功能**：查看 [docs/agent-calling.md](docs/agent-calling.md) 了解如何让 Agent 之间相互调用，实现复杂的多 Agent 协作场景。
 
 ### 开发自检
 

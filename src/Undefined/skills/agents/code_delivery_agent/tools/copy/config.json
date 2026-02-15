@@ -1,0 +1,30 @@
+{
+    "type": "function",
+    "function": {
+        "name": "copy",
+        "description": "复制或移动文件/目录。支持递归复制目录。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "source": {
+                    "type": "string",
+                    "description": "源文件或目录路径（相对于 /workspace）"
+                },
+                "destination": {
+                    "type": "string",
+                    "description": "目标路径（相对于 /workspace）"
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["copy", "move"],
+                    "description": "操作模式：copy（复制）或 move（移动），默认 copy"
+                },
+                "overwrite": {
+                    "type": "boolean",
+                    "description": "如果目标已存在是否覆盖（默认 false）"
+                }
+            },
+            "required": ["source", "destination"]
+        }
+    }
+}

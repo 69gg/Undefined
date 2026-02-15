@@ -1,0 +1,33 @@
+{
+    "type": "function",
+    "function": {
+        "name": "end",
+        "description": "结束任务，按黑名单打包工作区并上传到目标群聊/私聊。调用后任务结束，容器和工作区将被清理。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "exclude_patterns": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "打包排除的 glob 模式列表，例如 ['.git/**', 'node_modules/**', '__pycache__/**']"
+                },
+                "archive_name": {
+                    "type": "string",
+                    "description": "可选：归档文件名（不含扩展名，默认为 'delivery'）"
+                },
+                "archive_format": {
+                    "type": "string",
+                    "enum": ["zip", "tar.gz"],
+                    "description": "可选：归档格式（默认读取配置 code_delivery.default_archive_format）"
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "可选：任务完成摘要，将随文件一起发送"
+                }
+            },
+            "required": ["exclude_patterns"]
+        }
+    }
+}

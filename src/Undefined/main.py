@@ -200,6 +200,22 @@ async def main() -> None:
         logger.exception("[初始化错误] 组件初始化期间发生异常: %s", exc)
         sys.exit(1)
 
+    # Code Delivery Agent 残留清理（程序启动时执行一次）
+    if config.code_delivery_enabled and config.code_delivery_cleanup_on_start:
+        try:
+            from Undefined.skills.agents.code_delivery_agent.handler import (
+                _cleanup_residual,
+            )
+
+            await _cleanup_residual(
+                config.code_delivery_task_root,
+                config.code_delivery_container_name_prefix,
+                config.code_delivery_container_name_suffix,
+            )
+            logger.info("[CodeDelivery] 启动残留清理完成")
+        except Exception as exc:
+            logger.warning("[CodeDelivery] 启动残留清理失败: %s", exc)
+
     logger.info("[启动] 机器人已准备就绪，开始连接 OneBot 服务...")
 
     config_manager = get_config_manager()

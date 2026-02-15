@@ -1,0 +1,31 @@
+{
+    "type": "function",
+    "function": {
+        "name": "todo",
+        "description": "记录与追踪任务待办和进度。在长任务中持续追踪未做/进行中/已完成项。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["add", "list", "update", "remove", "clear"],
+                    "description": "操作类型：add（添加）、list（列出）、update（更新状态）、remove（删除）、clear（清空）"
+                },
+                "item_id": {
+                    "type": "integer",
+                    "description": "待办项 ID（update/remove 时必填）"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "待办内容（add 时必填）"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["pending", "in_progress", "done"],
+                    "description": "状态（update 时可选，默认 pending）"
+                }
+            },
+            "required": ["action"]
+        }
+    }
+}
