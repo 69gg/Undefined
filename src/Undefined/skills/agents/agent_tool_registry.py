@@ -15,11 +15,23 @@ class AgentToolRegistry(BaseRegistry):
     支持加载本地工具以及 Agent 私有的 MCP (Model Context Protocol) 扩展工具。
     """
 
-    def __init__(self, tools_dir: Path, mcp_config_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        tools_dir: Path,
+        mcp_config_path: Path | None = None,
+        *,
+        current_agent_name: str | None = None,
+        is_main_agent: bool = False,
+    ) -> None:
         super().__init__(tools_dir, kind="agent_tool")
         self.mcp_config_path: Path | None = (
             mcp_config_path if mcp_config_path is None else Path(mcp_config_path)
         )
+        normalized_agent_name = (
+            str(current_agent_name).strip() if current_agent_name is not None else ""
+        )
+        self.current_agent_name: str | None = normalized_agent_name or None
+        self.is_main_agent: bool = bool(is_main_agent)
         self._mcp_registry: Any | None = None
         self._mcp_initialized: bool = False
         self.load_tools()
@@ -32,7 +44,20 @@ class AgentToolRegistry(BaseRegistry):
         # 2. 扫描并注册可调用的 agent
         callable_agents = self._scan_callable_agents()
 
+        if not self.is_main_agent and not self.current_agent_name:
+            logger.info(
+                "[AgentToolRegistry] 未提供 current_agent_name，严格模式下不注册任何可调用 agent"
+            )
+
         for agent_name, agent_dir, allowed_callers in callable_agents:
+            if not self._is_callable_agent_visible(allowed_callers):
+                logger.debug(
+                    "[AgentToolRegistry] 当前 agent=%s 无权看到 call_%s，跳过注册",
+                    self.current_agent_name,
+                    agent_name,
+                )
+                continue
+
             # 读取 agent 的 config.json
             agent_config = self._load_agent_config(agent_dir)
             if not agent_config:
@@ -59,6 +84,16 @@ class AgentToolRegistry(BaseRegistry):
                 f"[AgentToolRegistry] 注册可调用 agent: {tool_name}，"
                 f"允许调用方: {callers_str}"
             )
+
+    def _is_callable_agent_visible(self, allowed_callers: list[str]) -> bool:
+        """判断目标 callable agent 是否应暴露给当前 agent。"""
+        if self.is_main_agent:
+            return True
+
+        if not self.current_agent_name:
+            return False
+
+        return "*" in allowed_callers or self.current_agent_name in allowed_callers
 
     def _scan_callable_agents(self) -> list[tuple[str, Path, list[str]]]:
         """扫描所有可被调用的 agent
