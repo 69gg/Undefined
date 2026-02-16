@@ -56,6 +56,7 @@ skills/
 
 - **定位**: 单一功能的原子操作
 - **调用方式**: 直接暴露给主 AI
+- **Agent 可见性**: 默认仅主 AI 可见；可通过 `skills/tools/{tool_name}/callable.json` 按白名单暴露给 Agent
 - **命名规则**: 简单名称（如 `send_message`, `save_memory`）
 - **适用场景**: 通用、高频使用的简单操作
 - **示例**: `send_message`, `get_recent_messages`, `save_memory`, `end`

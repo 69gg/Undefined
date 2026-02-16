@@ -639,7 +639,7 @@ src/Undefined/
 
 请参考 [src/Undefined/skills/README.md](src/Undefined/skills/README.md) 了解如何编写新的工具和 Agent。
 
-**Agent 互调用功能**：查看 [docs/agent-calling.md](docs/agent-calling.md) 了解如何让 Agent 之间相互调用，实现复杂的多 Agent 协作场景。
+**Agent 互调用与主工具共享**：查看 [docs/agent-calling.md](docs/agent-calling.md) 了解如何让 Agent 之间相互调用，以及如何将 `skills/tools` 下的主工具按白名单暴露给 Agent。
 
 ### 开发自检
 

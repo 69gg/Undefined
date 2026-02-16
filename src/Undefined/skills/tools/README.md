@@ -10,8 +10,13 @@ skills/tools/
 ├── README.md            # 本说明文件
 └── tool_name/           # 工具名称
     ├── config.json      # 工具定义 (OpenAI 格式)
+    ├── callable.json    # 可选：允许哪些 Agent 调用该主工具
     └── handler.py       # 工具逻辑实现
 ```
+
+`callable.json` 为可选文件：
+- 不存在：仅主 AI 可调用该工具（默认，最安全）
+- 存在且 `enabled=true`：按 `allowed_callers` 暴露给 Agent
 
 ## 如何添加新工具
 
@@ -77,6 +82,28 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 ## 自动发现
 
 工具注册表 (`ToolRegistry`) 会在初始化时自动扫描目录下的所有文件夹。只要文件夹内同时存在 `config.json` 和 `handler.py`，工具就会被自动加载并提供给 AI 使用，**无需手动修改任何导入代码**。
+
+当某个 Agent 初始化其工具注册表（`AgentToolRegistry`）时，系统也会扫描 `skills/tools/*/callable.json`：
+- 通过白名单将主工具注入到该 Agent 的工具列表
+- 若 Agent 本地 `tools/` 中存在同名工具，则**本地优先**，共享主工具会被跳过
+
+示例（对所有 Agent 开放）：
+
+```json
+{
+    "enabled": true,
+    "allowed_callers": ["*"]
+}
+```
+
+示例（只开放给部分 Agent）：
+
+```json
+{
+    "enabled": true,
+    "allowed_callers": ["web_agent", "info_agent"]
+}
+```
 
 ## 运行特性
 
