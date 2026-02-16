@@ -447,9 +447,14 @@ class AIClient:
         results: list[tuple[str, Any]] = []
         for name in to_run:
             try:
+                # 为特定工具准备参数
+                tool_args: dict[str, Any] = {}
+                if name == "get_current_time":
+                    tool_args = {"format": "text", "include_lunar": True}
+
                 result = await self.tool_manager.execute_tool(
                     name,
-                    {},
+                    tool_args,
                     {
                         "runtime_config": self._get_runtime_config(),
                         "easter_egg_silent": True,
