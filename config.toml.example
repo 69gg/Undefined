@@ -311,8 +311,8 @@ xxapi_base_url = "https://v2.xxapi.cn"
 # zh: 星之阁 API 基础地址。
 # en: Xingzhige API base URL.
 xingzhige_base_url = "https://api.xingzhige.com"
-# zh: JKYAI API 基础地址。
-# en: JKYAI API base URL.
+# zh: JKYAI API 基础地址。（已弃用，不必填写）
+# en: JKYAI API base URL.(this field is no longer in use and does not need to be filled in)
 jkyai_base_url = "https://api.jkyai.top"
 # zh: 心知天气 API 基础地址。
 # en: Seniverse API base URL.
