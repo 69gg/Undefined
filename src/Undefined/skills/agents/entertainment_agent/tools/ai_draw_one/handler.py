@@ -10,13 +10,15 @@ logger = logging.getLogger(__name__)
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     prompt = args.get("prompt")
-    model = args.get("model", "anything-v5")  # 默认模型猜测
+    model = args.get("model", "doubaoApp/generations")  # 默认模型
+    del model  # 暂时不传model
     size = args.get("size", "1:1")
     target_id = args.get("target_id")
     message_type = args.get("message_type")
 
     url = get_xingzhige_url("/API/DrawOne/")
-    params = {"prompt": prompt, "model": model, "size": size}
+    # params = {"prompt": prompt, "model": model, "size": size}
+    params = {"prompt": prompt, "size": size}
 
     try:
         timeout = get_request_timeout(60.0)
