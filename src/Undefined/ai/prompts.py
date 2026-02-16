@@ -133,6 +133,40 @@ class PromptBuilder:
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
 
+        # 注入群聊关键词自动回复机制说明，避免模型误判历史中的系统彩蛋消息。
+        is_group_context = False
+        ctx = RequestContext.current()
+        if ctx and ctx.group_id is not None:
+            is_group_context = True
+        elif extra_context and extra_context.get("group_id") is not None:
+            is_group_context = True
+
+        keyword_reply_enabled = False
+        if self._runtime_config_getter is not None:
+            try:
+                runtime_config = self._runtime_config_getter()
+                keyword_reply_enabled = bool(
+                    getattr(runtime_config, "keyword_reply_enabled", False)
+                )
+            except Exception as exc:
+                logger.debug("读取关键词自动回复配置失败: %s", exc)
+
+        if is_group_context and keyword_reply_enabled:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "【系统行为说明】\n"
+                        '当前群聊已开启关键词自动回复彩蛋（例如触发词"心理委员"）。'
+                        "命中时，系统可能直接发送固定回复，并在历史中写入"
+                        '以"[系统关键词自动回复] "开头的消息。\n\n'
+                        "这类消息属于系统预设机制，不代表你在该轮主动决策。"
+                        "阅读历史时请识别该前缀，避免误判为人格漂移或上下文异常。"
+                        "除非用户主动询问，否则不要主动解释此机制。"
+                    ),
+                }
+            )
+
         # 注入 Anthropic Skills 元数据（Level 1: 始终加载 name + description）
         if (
             self._anthropic_skill_registry
