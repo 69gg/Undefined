@@ -426,6 +426,8 @@ class Config:
     code_delivery_container_memory_limit: str
     code_delivery_container_cpu_limit: str
     code_delivery_command_blacklist: list[str]
+    # messages 工具集
+    messages_send_text_file_max_size_kb: int
     # Bilibili 视频提取
     bilibili_auto_extract_enabled: bool
     bilibili_cookie: str
@@ -954,6 +956,18 @@ class Config:
         else:
             code_delivery_command_blacklist = []
 
+        # messages 工具集配置
+        messages_send_text_file_max_size_kb = _coerce_int(
+            _get_value(
+                data,
+                ("messages", "send_text_file_max_size_kb"),
+                "MESSAGES_SEND_TEXT_FILE_MAX_SIZE_KB",
+            ),
+            512,
+        )
+        if messages_send_text_file_max_size_kb <= 0:
+            messages_send_text_file_max_size_kb = 512
+
         webui_settings = load_webui_settings(config_path)
 
         if strict:
@@ -1047,6 +1061,7 @@ class Config:
             code_delivery_container_memory_limit=code_delivery_container_memory_limit,
             code_delivery_container_cpu_limit=code_delivery_container_cpu_limit,
             code_delivery_command_blacklist=code_delivery_command_blacklist,
+            messages_send_text_file_max_size_kb=messages_send_text_file_max_size_kb,
             bilibili_auto_extract_enabled=bilibili_auto_extract_enabled,
             bilibili_cookie=bilibili_cookie,
             bilibili_prefer_quality=bilibili_prefer_quality,

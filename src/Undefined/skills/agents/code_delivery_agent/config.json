@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "code_delivery_agent",
-        "description": "代码交付助手，可在隔离的 Docker 容器中编写代码、执行命令、运行验证，最终打包并上传到指定群聊或私聊。支持从 Git 仓库克隆或空目录开始。",
+        "description": "代码交付助手，可在隔离的 Docker 容器中编写代码、执行命令、运行验证，最终打包并上传到指定群聊或私聊。适合多文件工程与复杂任务。若仅需发送单个文本文件，优先使用 messages.send_text_file。支持从 Git 仓库克隆或空目录开始。",
         "parameters": {
             "type": "object",
             "properties": {

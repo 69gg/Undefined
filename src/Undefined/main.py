@@ -28,6 +28,7 @@ from Undefined.utils.paths import (
     DOWNLOAD_CACHE_DIR,
     IMAGE_CACHE_DIR,
     RENDER_CACHE_DIR,
+    TEXT_FILE_CACHE_DIR,
     ensure_dir,
 )
 
@@ -50,6 +51,7 @@ def ensure_runtime_dirs() -> None:
         RENDER_CACHE_DIR,
         IMAGE_CACHE_DIR,
         DOWNLOAD_CACHE_DIR,
+        TEXT_FILE_CACHE_DIR,
     ]
     for path in runtime_dirs:
         ensure_dir(path)

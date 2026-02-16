@@ -358,6 +358,13 @@ archive_prune_mode = "delete"
 # en: MCP config file path (relative to the working directory).
 config_path = "config/mcp.json"
 
+# zh: 消息工具配置。
+# en: Message tool settings.
+[messages]
+# zh: messages.send_text_file 单文件文本发送大小上限（KB）。默认 512KB（0.5MB）。
+# en: Size limit for messages.send_text_file single-text-file uploads (KB). Default 512KB (0.5MB).
+send_text_file_max_size_kb = 512
+
 # zh: Bilibili 视频自动提取配置。
 # en: Bilibili video auto-extraction settings.
 [bilibili]
