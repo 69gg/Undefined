@@ -59,12 +59,14 @@ def setup_logging() -> None:
     """设置日志（控制台 + 文件轮转）"""
     config = Config.load(strict=False)
     level, log_level = _get_log_level(config)
+    tty_active = bool(config.log_tty_enabled) and sys.stdout.isatty()
 
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
 
     # 1. 控制台处理器
-    _init_console_handler(root_logger, level)
+    if tty_active:
+        _init_console_handler(root_logger, level)
 
     # 2. 文件处理器
     _init_file_handler(root_logger, config)
@@ -76,6 +78,11 @@ def setup_logging() -> None:
         config.log_file_path,
         config.log_max_size,
         config.log_backup_count,
+    )
+    logger.info(
+        "[启动] 终端日志: enabled=%s active=%s",
+        config.log_tty_enabled,
+        tty_active,
     )
 
 

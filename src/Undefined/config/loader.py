@@ -372,6 +372,7 @@ class Config:
     log_file_path: str
     log_max_size: int
     log_backup_count: int
+    log_tty_enabled: bool
     log_thinking: bool
     tools_dot_delimiter: str
     tools_description_truncate_enabled: bool
@@ -605,6 +606,10 @@ class Config:
         )
         log_backup_count = _coerce_int(
             _get_value(data, ("logging", "backup_count"), "LOG_BACKUP_COUNT"), 5
+        )
+        log_tty_enabled = _coerce_bool(
+            _get_value(data, ("logging", "tty_enabled"), "LOG_TTY_ENABLED"),
+            False,
         )
         log_thinking = _coerce_bool(
             _get_value(data, ("logging", "log_thinking"), "LOG_THINKING"), True
@@ -989,6 +994,7 @@ class Config:
             log_file_path=log_file_path,
             log_max_size=log_max_size_mb * 1024 * 1024,
             log_backup_count=log_backup_count,
+            log_tty_enabled=log_tty_enabled,
             log_thinking=log_thinking,
             tools_dot_delimiter=tools_dot_delimiter,
             tools_description_truncate_enabled=tools_description_truncate_enabled,

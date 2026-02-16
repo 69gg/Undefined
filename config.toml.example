@@ -195,6 +195,9 @@ max_size_mb = 10
 # zh: 保留日志文件数量。
 # en: Log backup count.
 backup_count = 5
+# zh: 是否输出到终端 TTY（默认关闭，避免后台运行时终端阻塞）。
+# en: Enable logging to terminal TTY (default: off, prevents blocking in background runs).
+tty_enabled = false
 # zh: 是否在日志中输出思维链（默认开启）。
 # en: Log thinking output (default: on).
 log_thinking = true

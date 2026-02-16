@@ -21,6 +21,7 @@ _RESTART_REQUIRED_KEYS: set[str] = {
     "log_file_path",
     "log_max_size",
     "log_backup_count",
+    "log_tty_enabled",
     "onebot_ws_url",
     "onebot_token",
     "webui_url",
