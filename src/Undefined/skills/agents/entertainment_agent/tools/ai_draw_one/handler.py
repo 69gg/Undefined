@@ -35,17 +35,13 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         except Exception:
             return f"API 返回错误 (非JSON): {response.text[:100]}"
 
-        # 解析响应
-        # 文档说 "返回: Json"。它可能包含 "url" 或 "image" 字段。
-        # 我将假设是 'url' 或类似字段。
-        # 如果找不到 URL，我将返回 JSON 给用户以进行调试。
-        image_url = data.get("url") or data.get("image") or data.get("img")
-
-        if not image_url and "data" in data and isinstance(data["data"], str):
-            image_url = data["data"]
-
-        if not image_url:
-            return f"未找到图片链接: {data}"
+        try:
+            image_url = data["data"][0]["url"]
+            logger.info(f"API 返回原文: {data}")
+            logger.info(f"提取到的图片链接: {image_url}")
+        except (KeyError, IndexError):
+            logger.error(f"API 返回原文 (错误：未找到图片链接): {data}")
+            return f"API 返回原文 (错误：未找到图片链接): {data}"
 
         # 下载图片
         img_response = await request_with_retry(
