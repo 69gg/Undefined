@@ -9,18 +9,20 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
-from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+from Undefined.bilibili.wbi import build_signed_params, parse_cookie_string
 from Undefined.utils.paths import DOWNLOAD_CACHE_DIR, ensure_dir
 
 logger = logging.getLogger(__name__)
 
 _BILIBILI_API_VIEW = "https://api.bilibili.com/x/web-interface/view"
+_BILIBILI_API_VIEW_WBI = "https://api.bilibili.com/x/web-interface/wbi/view"
 _BILIBILI_API_PLAYURL = "https://api.bilibili.com/x/player/playurl"
+_BILIBILI_API_PLAYURL_WBI = "https://api.bilibili.com/x/player/wbi/playurl"
 
 _HEADERS = {
     "User-Agent": (
@@ -53,46 +55,72 @@ def _build_cookies(cookie: str = "") -> dict[str, str]:
     1) 仅 SESSDATA 值（旧配置）
     2) 完整 Cookie 串（推荐）
     """
-    raw = cookie.strip()
-    if not raw:
-        return {}
+    return parse_cookie_string(cookie)
 
-    # 旧配置：仅填了 SESSDATA 的值
-    if "=" not in raw:
-        return {"SESSDATA": raw}
 
-    parsed: dict[str, str] = {}
+def _api_message(data: dict[str, Any]) -> str:
+    return str(data.get("message") or data.get("msg") or "未知错误")
 
-    simple_cookie = SimpleCookie()
+
+async def _request_with_wbi_fallback(
+    client: httpx.AsyncClient,
+    *,
+    unsigned_url: str,
+    signed_url: str,
+    params: dict[str, Any],
+    api_name: str,
+) -> dict[str, Any]:
+    resp = await client.get(unsigned_url, params=params)
+    resp.raise_for_status()
+    payload = resp.json()
+    if not isinstance(payload, dict):
+        raise ValueError(f"{api_name} 返回格式异常")
+    if int(payload.get("code", -1)) == 0:
+        return payload
+
+    unsigned_code = payload.get("code")
+    unsigned_message = _api_message(payload)
+    logger.warning(
+        "[Bilibili] %s 首次失败 code=%s message=%s，尝试 WBI 签名重试",
+        api_name,
+        unsigned_code,
+        unsigned_message,
+    )
+
     try:
-        simple_cookie.load(raw)
-    except CookieError:
-        simple_cookie = SimpleCookie()
+        signed_params = await build_signed_params(client, params)
+    except Exception as exc:
+        logger.warning("[Bilibili] %s 生成 WBI 签名失败: %s", api_name, exc)
+        return payload
 
-    if simple_cookie:
-        for key, morsel in simple_cookie.items():
-            value = morsel.value.strip()
-            if key and value:
-                parsed[key] = value
+    resp_signed = await client.get(signed_url, params=signed_params)
+    resp_signed.raise_for_status()
+    payload_signed = resp_signed.json()
+    if not isinstance(payload_signed, dict):
+        raise ValueError(f"{api_name} WBI 返回格式异常")
+    if int(payload_signed.get("code", -1)) == 0:
+        logger.info("[Bilibili] %s WBI 签名重试成功", api_name)
+        return payload_signed
 
-    if parsed:
-        return parsed
+    try:
+        refreshed_params = await build_signed_params(client, params, force_refresh=True)
+    except Exception as exc:
+        logger.warning("[Bilibili] %s 刷新 WBI key 失败: %s", api_name, exc)
+        return payload_signed
 
-    # 部分异常格式下兜底手动拆分
-    for part in raw.split(";"):
-        item = part.strip()
-        if not item or "=" not in item:
-            continue
-        key, value = item.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if key and value:
-            parsed[key] = value
+    if refreshed_params == signed_params:
+        return payload_signed
 
-    if parsed:
-        return parsed
+    resp_refreshed = await client.get(signed_url, params=refreshed_params)
+    resp_refreshed.raise_for_status()
+    payload_refreshed = resp_refreshed.json()
+    if not isinstance(payload_refreshed, dict):
+        raise ValueError(f"{api_name} 刷新后 WBI 返回格式异常")
+    if int(payload_refreshed.get("code", -1)) == 0:
+        logger.info("[Bilibili] %s 刷新 WBI key 后重试成功", api_name)
+        return payload_refreshed
 
-    return {"SESSDATA": raw}
+    return payload_refreshed
 
 
 @dataclass
@@ -126,12 +154,16 @@ async def get_video_info(
     async with httpx.AsyncClient(
         headers=_HEADERS, cookies=cookies, timeout=480, follow_redirects=True
     ) as client:
-        resp = await client.get(_BILIBILI_API_VIEW, params={"bvid": bvid})
-        resp.raise_for_status()
-        data: dict[str, Any] = resp.json()
+        data = await _request_with_wbi_fallback(
+            client,
+            unsigned_url=_BILIBILI_API_VIEW,
+            signed_url=_BILIBILI_API_VIEW_WBI,
+            params={"bvid": bvid},
+            api_name="获取视频信息",
+        )
 
     if data.get("code") != 0:
-        msg = data.get("message", "未知错误")
+        msg = _api_message(data)
         raise ValueError(f"获取视频信息失败: {msg} (bvid={bvid})")
 
     info = data["data"]
@@ -245,20 +277,21 @@ async def download_video(
     async with httpx.AsyncClient(
         headers=_HEADERS, cookies=cookies, timeout=480, follow_redirects=True
     ) as client:
-        resp = await client.get(
-            _BILIBILI_API_PLAYURL,
+        data = await _request_with_wbi_fallback(
+            client,
+            unsigned_url=_BILIBILI_API_PLAYURL,
+            signed_url=_BILIBILI_API_PLAYURL_WBI,
             params={
                 "bvid": bvid,
                 "cid": await _get_cid(bvid, cookie=cookie),
                 "fnval": 16,  # DASH 格式
                 "fourk": 1,
             },
+            api_name="获取播放地址",
         )
-        resp.raise_for_status()
-        data: dict[str, Any] = resp.json()
 
     if data.get("code") != 0:
-        raise ValueError(f"获取播放地址失败: {data.get('message', '未知错误')}")
+        raise ValueError(f"获取播放地址失败: {_api_message(data)}")
 
     dash = data["data"].get("dash")
     if not dash:
@@ -357,12 +390,16 @@ async def _get_cid(
     async with httpx.AsyncClient(
         headers=_HEADERS, cookies=cookies, timeout=480, follow_redirects=True
     ) as client:
-        resp = await client.get(_BILIBILI_API_VIEW, params={"bvid": bvid})
-        resp.raise_for_status()
-        data: dict[str, Any] = resp.json()
+        data = await _request_with_wbi_fallback(
+            client,
+            unsigned_url=_BILIBILI_API_VIEW,
+            signed_url=_BILIBILI_API_VIEW_WBI,
+            params={"bvid": bvid},
+            api_name="获取 cid",
+        )
 
     if data.get("code") != 0:
-        raise ValueError(f"获取 cid 失败: {data.get('message', '未知错误')}")
+        raise ValueError(f"获取 cid 失败: {_api_message(data)}")
 
     pages = data["data"].get("pages", [])
     if not pages:

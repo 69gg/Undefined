@@ -361,8 +361,8 @@ config_path = "config/mcp.json"
 # zh: 是否启用自动提取（检测到B站视频链接/BV号时自动下载并发送）。
 # en: Enable auto-extraction (auto-download and send when Bilibili video links/BV IDs are detected).
 auto_extract_enabled = false
-# zh: B站账号完整 Cookie 字符串（推荐，至少包含 SESSDATA；用于更稳定地通过风控）。
-# en: Full Bilibili Cookie string (recommended, should include SESSDATA for better anti-bot pass rate).
+# zh: B站账号完整 Cookie 字符串（必须粘贴浏览器中的完整内容，不要只填 SESSDATA；建议至少包含 SESSDATA + buvid3 + buvid4，用于通过风控与 WBI 搜索）。
+# en: Full Bilibili Cookie string (paste the complete browser cookie; do not provide SESSDATA only. Recommended to include at least SESSDATA + buvid3 + buvid4 for anti-bot checks and WBI search).
 cookie = ""
 # zh: 首选清晰度: 80=1080P, 64=720P, 32=480P。
 # en: Preferred quality: 80=1080P, 64=720P, 32=480P.
