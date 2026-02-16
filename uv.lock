@@ -1831,6 +1831,12 @@ wheels = [
 ]
 
 [[package]]
+name = "lunar-python"
+version = "1.4.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/59/45/5154c95ae7feaab7ca508e71c3288692c09952dfe33b03b7c2f18a32e2cd/lunar_python-1.4.8.tar.gz", hash = "sha256:3aa11cc73c25e70ddf0ba5bdac7398c03acc9491a3aa512a91c9642973b669d6", size = 105862, upload-time = "2025-11-05T12:31:53.353Z" }
+
+[[package]]
 name = "lupa"
 version = "2.6"
 source = { registry = "https://pypi.org/simple" }
@@ -4106,6 +4112,7 @@ dependencies = [
     { name = "imgkit" },
     { name = "langchain-community" },
     { name = "linkify-it-py" },
+    { name = "lunar-python" },
     { name = "lxml" },
     { name = "markdown" },
     { name = "markdown-it-py", extra = ["plugins"] },
@@ -4173,6 +4180,7 @@ requires-dist = [
     { name = "imgkit" },
     { name = "langchain-community", specifier = ">=0.3.0" },
     { name = "linkify-it-py", specifier = ">=2.0.3" },
+    { name = "lunar-python", specifier = ">=1.4.8" },
     { name = "lxml", specifier = ">=5.4.0" },
     { name = "markdown", specifier = ">=3.10" },
     { name = "markdown-it-py", extras = ["plugins"], specifier = ">=4.0.0" },
