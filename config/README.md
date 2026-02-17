@@ -10,7 +10,7 @@
 2. 如需 MCP，复制 `config/mcp.json.example` 为 `config/mcp.json`，并在 `config.toml` 中配置 `[mcp].config_path`
 
 推荐关注的新增配置：
-- `[features].inflight_summary_enabled`：并发防重摘要总开关（默认 `true`）
+- `[features].inflight_summary_enabled`：并发防重摘要总开关（默认 `false`）
 - `[models.inflight_summary]`：进行中摘要模型（可选）；未完整配置时自动回退 `models.chat`
 
 注意事项：

@@ -720,7 +720,7 @@ class AICoordinator:
         except Exception as exc:
             logger.warning("[进行中摘要] 生成失败，使用默认状态: %s", exc)
 
-        updated = self.ai.set_inflight_summary_generation_result(
+        updated = await self.ai.set_inflight_summary_generation_result(
             request_id,
             action_summary,
         )

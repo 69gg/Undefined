@@ -182,7 +182,10 @@ class AgentToolRegistry(BaseRegistry):
 
     def _find_skills_root(self) -> Path | None:
         """向上查找 skills 根目录。"""
-        for candidate in (self.base_dir, *self.base_dir.parents):
+        max_depth = 10
+        for i, candidate in enumerate((self.base_dir, *self.base_dir.parents)):
+            if i >= max_depth:
+                break
             if candidate.name == "skills":
                 return candidate
         return None
