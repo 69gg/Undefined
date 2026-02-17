@@ -20,6 +20,13 @@ logger = logging.getLogger(__name__)
 
 _INFLIGHT_SUMMARY_SYSTEM_PROMPT_PATH = "res/prompts/inflight_summary_system.txt"
 _INFLIGHT_SUMMARY_USER_PROMPT_PATH = "res/prompts/inflight_summary_user.txt"
+_STATS_ANALYSIS_PROMPT_PATH = "res/prompts/stats_analysis.txt"
+_STATS_ANALYSIS_FALLBACK_PROMPT = (
+    "你是一位专业的数据分析师。请根据以下 Token 使用统计数据提供分析：\n\n"
+    "{data_summary}\n\n"
+    "请从整体概况、趋势、模型效率、成本结构、异常点和优化建议进行总结，"
+    "语言简洁，建议可执行。"
+)
 
 
 def _template_fields(template: str) -> list[str]:
@@ -404,17 +411,28 @@ class AICoordinator:
             return
         try:
             # 加载提示词模板
+            prompt_template = _STATS_ANALYSIS_FALLBACK_PROMPT
             try:
-                prompt_template = read_text_resource("res/prompts/stats_analysis.txt")
-            except Exception:
-                logger.warning("[统计分析] 提示词文件不存在，使用默认分析")
-                analysis = "AI 分析功能暂时不可用（提示词文件缺失）"
-                if self.command_dispatcher:
-                    self.command_dispatcher.set_stats_analysis_result(
-                        group_id, request_id, analysis
-                    )
-                return
-            full_prompt = prompt_template.format(data_summary=data_summary)
+                loaded_prompt = read_text_resource(_STATS_ANALYSIS_PROMPT_PATH).strip()
+                if loaded_prompt:
+                    prompt_template = loaded_prompt
+            except Exception as exc:
+                logger.warning("[统计分析] 读取提示词失败，使用内置模板: %s", exc)
+
+            if "{data_summary}" not in prompt_template:
+                logger.warning(
+                    "[统计分析] 提示词缺少 {data_summary} 占位符，自动追加",
+                )
+                prompt_template = f"{prompt_template}\n\n{{data_summary}}"
+
+            safe_data_summary = str(data_summary).strip() or "暂无统计数据摘要"
+            try:
+                full_prompt = prompt_template.format(data_summary=safe_data_summary)
+            except Exception as exc:
+                logger.warning("[统计分析] 提示词渲染失败，使用回退模板: %s", exc)
+                full_prompt = _STATS_ANALYSIS_FALLBACK_PROMPT.format(
+                    data_summary=safe_data_summary
+                )
 
             # 调用 AI 进行分析
             messages = [
@@ -436,6 +454,9 @@ class AICoordinator:
                 analysis = content.strip()
             else:
                 analysis = "AI 分析未能生成结果"
+
+            if not analysis:
+                analysis = "AI 分析结果为空，建议稍后重试。"
 
             logger.info(
                 "[统计分析] 分析完成: group=%s length=%s request_id=%s",

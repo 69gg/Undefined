@@ -34,6 +34,14 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+_STATS_DEFAULT_DAYS = 7
+_STATS_MIN_DAYS = 1
+_STATS_MAX_DAYS = 365
+_STATS_MODEL_TOP_N = 8
+_STATS_CALL_TYPE_TOP_N = 12
+_STATS_DATA_SUMMARY_MAX_CHARS = 12000
+
+
 class CommandDispatcher:
     """命令分发处理器，负责解析和执行斜杠命令"""
 
@@ -116,32 +124,39 @@ class CommandDispatcher:
             天数
         """
         if not time_str:
-            return 7  # 默认 7 天
+            return _STATS_DEFAULT_DAYS
+
+        def _clamp_days(value: int) -> int:
+            if value < _STATS_MIN_DAYS:
+                return _STATS_DEFAULT_DAYS
+            if value > _STATS_MAX_DAYS:
+                return _STATS_MAX_DAYS
+            return value
 
         time_str = time_str.lower().strip()
 
         # 解析快捷格式
         if time_str.endswith("d"):
             try:
-                return int(time_str[:-1])
+                return _clamp_days(int(time_str[:-1]))
             except ValueError:
-                return 7
+                return _STATS_DEFAULT_DAYS
         elif time_str.endswith("w"):
             try:
-                return int(time_str[:-1]) * 7
+                return _clamp_days(int(time_str[:-1]) * 7)
             except ValueError:
-                return 7
+                return _STATS_DEFAULT_DAYS
         elif time_str.endswith("m"):
             try:
-                return int(time_str[:-1]) * 30
+                return _clamp_days(int(time_str[:-1]) * 30)
             except ValueError:
-                return 7
+                return _STATS_DEFAULT_DAYS
 
         # 尝试直接解析为数字（默认为天）
         try:
-            return int(time_str)
+            return _clamp_days(int(time_str))
         except ValueError:
-            return 7
+            return _STATS_DEFAULT_DAYS
 
     async def _handle_stats(
         self, group_id: int, sender_id: int, args: list[str]
@@ -211,7 +226,7 @@ class CommandDispatcher:
                     logger.info(f"[Stats] 已获取 AI 分析结果，长度: {len(ai_analysis)}")
                 except asyncio.TimeoutError:
                     logger.warning(f"[Stats] AI 分析超时，群: {group_id}，仅发送图表")
-                    ai_analysis = ""
+                    ai_analysis = "AI 分析超时，已先发送图表与汇总数据。"
                 finally:
                     self._stats_analysis_events.pop(request_id, None)
                     self._stats_analysis_results.pop(request_id, None)
@@ -278,9 +293,10 @@ class CommandDispatcher:
         if models:
             lines.append("【模型维度】")
             total_tokens_all = summary["total_tokens"]
-            for model_name, model_data in sorted(
+            sorted_models = sorted(
                 models.items(), key=lambda x: x[1]["tokens"], reverse=True
-            ):
+            )
+            for model_name, model_data in sorted_models[:_STATS_MODEL_TOP_N]:
                 calls = model_data["calls"]
                 tokens = model_data["tokens"]
                 prompt_tokens = model_data["prompt_tokens"]
@@ -302,6 +318,41 @@ class CommandDispatcher:
                 )
                 lines.append(f"  - 输入/输出比: 1:{io_ratio:.2f}")
                 lines.append("")
+
+            if len(sorted_models) > _STATS_MODEL_TOP_N:
+                others = sorted_models[_STATS_MODEL_TOP_N:]
+                others_calls = sum(int(item[1].get("calls", 0)) for item in others)
+                others_tokens = sum(int(item[1].get("tokens", 0)) for item in others)
+                others_pct = (
+                    (others_tokens / total_tokens_all * 100)
+                    if total_tokens_all > 0
+                    else 0.0
+                )
+                lines.append(
+                    f"其余 {len(others)} 个模型合计: 调用 {others_calls} 次, Token {others_tokens:,} ({others_pct:.1f}%)"
+                )
+                lines.append("")
+
+        # 调用类型维度
+        call_types = summary.get("call_types", {})
+        if call_types:
+            lines.append("【调用类型维度】")
+            sorted_types = sorted(
+                call_types.items(), key=lambda item: int(item[1]), reverse=True
+            )
+            total_calls = max(1, int(summary.get("total_calls", 0)))
+            for call_type, count in sorted_types[:_STATS_CALL_TYPE_TOP_N]:
+                ratio = int(count) / total_calls * 100
+                lines.append(f"- {call_type}: {count} 次 ({ratio:.1f}%)")
+            if len(sorted_types) > _STATS_CALL_TYPE_TOP_N:
+                rest_count = sum(
+                    int(item[1]) for item in sorted_types[_STATS_CALL_TYPE_TOP_N:]
+                )
+                ratio = rest_count / total_calls * 100
+                lines.append(
+                    f"- 其他 {len(sorted_types) - _STATS_CALL_TYPE_TOP_N} 类: {rest_count} 次 ({ratio:.1f}%)"
+                )
+            lines.append("")
 
         # 效率指标
         prompt_tokens = summary.get("prompt_tokens", 0)
@@ -336,7 +387,19 @@ class CommandDispatcher:
             )
             lines.append("")
 
-        return "\n".join(lines)
+        summary_text = "\n".join(lines)
+        if len(summary_text) > _STATS_DATA_SUMMARY_MAX_CHARS:
+            trimmed = summary_text[: _STATS_DATA_SUMMARY_MAX_CHARS - 80].rstrip()
+            summary_text = (
+                f"{trimmed}\n\n[数据摘要已截断，总长度 {len(summary_text)} 字符，"
+                f"仅保留前 {_STATS_DATA_SUMMARY_MAX_CHARS} 字符]"
+            )
+            logger.info(
+                "[Stats] 数据摘要过长已截断: original_len=%s max_len=%s",
+                len("\n".join(lines)),
+                _STATS_DATA_SUMMARY_MAX_CHARS,
+            )
+        return summary_text
 
     def set_stats_analysis_result(
         self, group_id: int, request_id: str, analysis: str
