@@ -26,6 +26,9 @@ class ModelQueue:
     group_normal_queue: asyncio.Queue[dict[str, Any]] = field(
         default_factory=asyncio.Queue
     )
+    background_queue: asyncio.Queue[dict[str, Any]] = field(
+        default_factory=asyncio.Queue
+    )
 
     def trim_normal_queue(self) -> None:
         """如果群聊普通队列超过10个，仅保留最新的2个"""
@@ -309,6 +312,24 @@ class QueueManager:
             list(request.keys()),
         )
 
+    async def add_background_request(
+        self, request: dict[str, Any], model_name: str = "default"
+    ) -> None:
+        """添加后台低优先级请求。"""
+        queue = self._get_or_create_queue(model_name)
+        await queue.background_queue.put(request)
+        logger.info(
+            "[队列入队][%s] 后台请求: size=%s %s",
+            model_name,
+            queue.background_queue.qsize(),
+            self._format_request_meta(request),
+        )
+        logger.debug(
+            "[队列入队详情][%s] background keys=%s",
+            model_name,
+            list(request.keys()),
+        )
+
     async def _process_model_loop(self, model_name: str) -> None:
         """单个模型的处理循环（列车调度）"""
         model_queue = self._model_queues[model_name]
@@ -319,6 +340,8 @@ class QueueManager:
             model_queue.group_normal_queue,
         ]
         queue_names = ["超级管理员私聊", "私聊", "群聊被@", "群聊普通"]
+        background_queue = model_queue.background_queue
+        background_queue_name = "后台"
 
         current_queue_idx = 0
         current_queue_processed = 0
@@ -342,8 +365,8 @@ class QueueManager:
                 else:
                     # 2. 按优先级和轮转逻辑选择常规队列
                     start_idx = current_queue_idx
-                    for i in range(4):
-                        idx = (start_idx + i) % 4
+                    for i in range(len(queues)):
+                        idx = (start_idx + i) % len(queues)
                         q = queues[idx]
                         if not q.empty():
                             request = await q.get()
@@ -353,9 +376,16 @@ class QueueManager:
                             # 更新公平性计数
                             current_queue_processed += 1
                             if current_queue_processed >= 2:
-                                current_queue_idx = (current_queue_idx + 1) % 4
+                                current_queue_idx = (current_queue_idx + 1) % len(
+                                    queues
+                                )
                                 current_queue_processed = 0
                             break
+
+                    if request is None and not background_queue.empty():
+                        request = await background_queue.get()
+                        dispatch_queue_name = background_queue_name
+                        background_queue.task_done()
 
                 # 3. 分发请求
                 if request is not None:

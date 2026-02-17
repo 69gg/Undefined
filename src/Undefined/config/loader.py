@@ -30,6 +30,7 @@ except Exception:  # pragma: no cover
 from .models import (
     AgentModelConfig,
     ChatModelConfig,
+    InflightSummaryModelConfig,
     SecurityModelConfig,
     VisionModelConfig,
 )
@@ -368,6 +369,7 @@ class Config:
     security_model_enabled: bool
     security_model: SecurityModelConfig
     agent_model: AgentModelConfig
+    inflight_summary_model: InflightSummaryModelConfig
     log_level: str
     log_file_path: str
     log_max_size: int
@@ -576,6 +578,9 @@ class Config:
         )
         security_model = cls._parse_security_model_config(data, chat_model)
         agent_model = cls._parse_agent_model_config(data)
+        inflight_summary_model = cls._parse_inflight_summary_model_config(
+            data, chat_model
+        )
 
         superadmin_qq, admin_qqs = cls._merge_admins(
             superadmin_qq=superadmin_qq, admin_qqs=admin_qqs
@@ -980,7 +985,13 @@ class Config:
                 agent_model=agent_model,
             )
 
-        cls._log_debug_info(chat_model, vision_model, security_model, agent_model)
+        cls._log_debug_info(
+            chat_model,
+            vision_model,
+            security_model,
+            agent_model,
+            inflight_summary_model,
+        )
 
         return cls(
             bot_qq=bot_qq,
@@ -1004,6 +1015,7 @@ class Config:
             security_model_enabled=security_model_enabled,
             security_model=security_model,
             agent_model=agent_model,
+            inflight_summary_model=inflight_summary_model,
             log_level=log_level,
             log_file_path=log_file_path,
             log_max_size=log_max_size_mb * 1024 * 1024,
@@ -1425,6 +1437,102 @@ class Config:
         )
 
     @staticmethod
+    def _parse_inflight_summary_model_config(
+        data: dict[str, Any], chat_model: ChatModelConfig
+    ) -> InflightSummaryModelConfig:
+        api_url = _coerce_str(
+            _get_value(
+                data,
+                ("models", "inflight_summary", "api_url"),
+                "INFLIGHT_SUMMARY_MODEL_API_URL",
+            ),
+            "",
+        )
+        api_key = _coerce_str(
+            _get_value(
+                data,
+                ("models", "inflight_summary", "api_key"),
+                "INFLIGHT_SUMMARY_MODEL_API_KEY",
+            ),
+            "",
+        )
+        model_name = _coerce_str(
+            _get_value(
+                data,
+                ("models", "inflight_summary", "model_name"),
+                "INFLIGHT_SUMMARY_MODEL_NAME",
+            ),
+            "",
+        )
+
+        queue_interval_seconds = _coerce_float(
+            _get_value(
+                data,
+                ("models", "inflight_summary", "queue_interval_seconds"),
+                "INFLIGHT_SUMMARY_MODEL_QUEUE_INTERVAL",
+            ),
+            1.5,
+        )
+        if queue_interval_seconds <= 0:
+            queue_interval_seconds = 1.5
+
+        thinking_include_budget = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "inflight_summary", "thinking_include_budget"),
+                "INFLIGHT_SUMMARY_MODEL_THINKING_INCLUDE_BUDGET",
+            ),
+            False,
+        )
+        thinking_tool_call_compat = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "inflight_summary", "thinking_tool_call_compat"),
+                "INFLIGHT_SUMMARY_MODEL_THINKING_TOOL_CALL_COMPAT",
+            ),
+            False,
+        )
+
+        resolved_api_url = api_url if api_url else chat_model.api_url
+        resolved_api_key = api_key if api_key else chat_model.api_key
+        resolved_model_name = model_name if model_name else chat_model.model_name
+        if not (api_url and api_key and model_name):
+            logger.info("未完整配置 inflight_summary 模型，已回退到 chat 模型")
+
+        return InflightSummaryModelConfig(
+            api_url=resolved_api_url,
+            api_key=resolved_api_key,
+            model_name=resolved_model_name,
+            max_tokens=_coerce_int(
+                _get_value(
+                    data,
+                    ("models", "inflight_summary", "max_tokens"),
+                    "INFLIGHT_SUMMARY_MODEL_MAX_TOKENS",
+                ),
+                128,
+            ),
+            queue_interval_seconds=queue_interval_seconds,
+            thinking_enabled=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "inflight_summary", "thinking_enabled"),
+                    "INFLIGHT_SUMMARY_MODEL_THINKING_ENABLED",
+                ),
+                False,
+            ),
+            thinking_budget_tokens=_coerce_int(
+                _get_value(
+                    data,
+                    ("models", "inflight_summary", "thinking_budget_tokens"),
+                    "INFLIGHT_SUMMARY_MODEL_THINKING_BUDGET_TOKENS",
+                ),
+                0,
+            ),
+            thinking_include_budget=thinking_include_budget,
+            thinking_tool_call_compat=thinking_tool_call_compat,
+        )
+
+    @staticmethod
     def _merge_admins(
         superadmin_qq: int, admin_qqs: list[int]
     ) -> tuple[int, list[int]]:
@@ -1477,6 +1585,7 @@ class Config:
         vision_model: VisionModelConfig,
         security_model: SecurityModelConfig,
         agent_model: AgentModelConfig,
+        inflight_summary_model: InflightSummaryModelConfig,
     ) -> None:
         configs: list[
             tuple[
@@ -1484,13 +1593,15 @@ class Config:
                 ChatModelConfig
                 | VisionModelConfig
                 | SecurityModelConfig
-                | AgentModelConfig,
+                | AgentModelConfig
+                | InflightSummaryModelConfig,
             ]
         ] = [
             ("chat", chat_model),
             ("vision", vision_model),
             ("security", security_model),
             ("agent", agent_model),
+            ("inflight_summary", inflight_summary_model),
         ]
         for name, cfg in configs:
             logger.debug(
@@ -1516,6 +1627,7 @@ class Config:
                     VisionModelConfig,
                     SecurityModelConfig,
                     AgentModelConfig,
+                    InflightSummaryModelConfig,
                 ),
             ):
                 changes.update(_update_dataclass(old_value, new_value, prefix=name))

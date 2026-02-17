@@ -178,6 +178,39 @@ thinking_include_budget = true
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = false
 
+# zh: 进行中任务摘要模型配置（可选，用于并发真空期的“处理中摘要”）。
+# en: Inflight summary model config (optional, used to generate in-progress task summaries).
+# zh: 当 api_url/api_key/model_name 任一为空时，自动回退到 [models.chat]。
+# en: Falls back to [models.chat] when api_url/api_key/model_name is missing.
+[models.inflight_summary]
+# zh: OpenAI-compatible 基址 URL（可选，留空则回退 chat）。
+# en: OpenAI-compatible base URL (optional; empty means fallback to chat).
+api_url = ""
+# zh: 模型 API Key（可选，留空则回退 chat）。
+# en: API key (optional; empty means fallback to chat).
+api_key = ""
+# zh: 模型名称（可选，留空则回退 chat）。
+# en: Model name (optional; empty means fallback to chat).
+model_name = ""
+# zh: 最大生成 tokens（可选，默认 128）。
+# en: Max generation tokens (optional, default 128).
+max_tokens = 128
+# zh: 队列发车间隔（秒，可选，默认 1.5）。
+# en: Queue interval in seconds (optional, default 1.5).
+queue_interval_seconds = 1.5
+# zh: 是否启用 thinking（可选，默认 false）。
+# en: Enable thinking (optional, default false).
+thinking_enabled = false
+# zh: thinking 预算 tokens（可选，默认 0）。
+# en: Thinking budget tokens (optional, default 0).
+thinking_budget_tokens = 0
+# zh: 是否在请求中发送 budget_tokens（可选，默认 false）。
+# en: Include budget_tokens in request (optional, default false).
+thinking_include_budget = false
+# zh: 思维链工具调用兼容（可选，默认 false）。
+# en: Thinking tool-call compatibility (optional, default false).
+thinking_tool_call_compat = false
+
 # zh: 日志配置。
 # en: Logging settings.
 [logging]

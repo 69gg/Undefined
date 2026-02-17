@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, Literal
+
 from Undefined.config import Config
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
@@ -206,6 +207,8 @@ class AICoordinator:
             await self._execute_stats_analysis(request)
         elif req_type == "agent_intro_generation":
             await self._execute_agent_intro_generation(request)
+        elif req_type == "inflight_summary_generation":
+            await self._execute_inflight_summary_generation(request)
 
     async def _execute_auto_reply(self, request: dict[str, Any]) -> None:
         group_id = request["group_id"]
@@ -509,6 +512,93 @@ class AICoordinator:
                 agent_intro_generator.set_intro_generation_result(request_id, None)
             except Exception:
                 pass
+
+    async def _execute_inflight_summary_generation(
+        self, request: dict[str, Any]
+    ) -> None:
+        """异步生成进行中任务的简短摘要。"""
+        request_id = str(request.get("request_id") or "").strip()
+        source_message = str(request.get("source_message") or "").strip()
+        location_raw = request.get("location")
+
+        if not request_id:
+            logger.warning("[进行中摘要] 缺少 request_id")
+            return
+
+        if not source_message:
+            source_message = "(无文本内容)"
+
+        location_type: Literal["group", "private"] = "private"
+        location_name = "未知会话"
+        location_id = 0
+        if isinstance(location_raw, dict):
+            raw_type = str(location_raw.get("type") or "").strip().lower()
+            if raw_type in {"group", "private"}:
+                location_type = "group" if raw_type == "group" else "private"
+            raw_name = location_raw.get("name")
+            if isinstance(raw_name, str) and raw_name.strip():
+                location_name = raw_name.strip()
+            try:
+                location_id = int(location_raw.get("id", 0) or 0)
+            except (TypeError, ValueError):
+                location_id = 0
+
+        model_config = self.ai.get_inflight_summary_model_config()
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是任务状态摘要器。"
+                    "请输出一句极简中文短语（不超过20字），"
+                    "用于描述该任务当前处理动作。"
+                    "禁止解释、禁止换行、禁止时间承诺。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"会话类型: {location_type}\n"
+                    f"会话名称: {location_name}\n"
+                    f"会话ID: {location_id}\n"
+                    f"正在处理消息: {source_message}\n"
+                    "仅返回一个动作短语，例如：已开始生成首版"
+                ),
+            },
+        ]
+
+        action_summary = "处理中"
+        try:
+            result = await self.ai.request_model(
+                model_config=model_config,
+                messages=messages,
+                max_tokens=model_config.max_tokens,
+                call_type="inflight_summary_generation",
+            )
+            choices = result.get("choices", [{}])
+            if choices:
+                content = choices[0].get("message", {}).get("content", "")
+                cleaned = " ".join(str(content).split()).strip()
+                if cleaned:
+                    action_summary = cleaned
+        except Exception as exc:
+            logger.warning("[进行中摘要] 生成失败，使用默认状态: %s", exc)
+
+        updated = self.ai.set_inflight_summary_generation_result(
+            request_id,
+            action_summary,
+        )
+        if updated:
+            logger.info(
+                "[进行中摘要] 更新完成: request_id=%s type=%s chat_id=%s",
+                request_id,
+                location_type,
+                location_id,
+            )
+        else:
+            logger.debug(
+                "[进行中摘要] 请求已结束或记录不存在，跳过更新: request_id=%s",
+                request_id,
+            )
 
     def _is_at_bot(self, content: list[dict[str, Any]]) -> bool:
         """检查消息内容中是否包含对机器人的 @ 提问"""

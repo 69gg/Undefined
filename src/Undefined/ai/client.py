@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import importlib.util
 import logging
+import re
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING, Literal
 
 import httpx
 
@@ -20,11 +22,13 @@ from Undefined.config import (
     ChatModelConfig,
     VisionModelConfig,
     AgentModelConfig,
+    InflightSummaryModelConfig,
     Config,
 )
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import set_context_resource_scan_paths
 from Undefined.end_summary_storage import EndSummaryStorage
+from Undefined.inflight_task_store import InflightTaskLocation, InflightTaskStore
 from Undefined.memory import MemoryStorage
 from Undefined.skills.agents import AgentRegistry
 from Undefined.skills.agents.intro_generator import (
@@ -38,6 +42,11 @@ from Undefined.utils.logging import log_debug_json, redact_string
 from Undefined.utils.tool_calls import parse_tool_arguments
 
 logger = logging.getLogger(__name__)
+
+
+_CONTENT_TAG_PATTERN = re.compile(
+    r"<content>(.*?)</content>", re.DOTALL | re.IGNORECASE
+)
 
 
 # 尝试导入 langchain SearxSearchWrapper
@@ -211,10 +220,13 @@ class AIClient:
         else:
             logger.warning("[初始化] crawl4ai 不可用，网页获取功能将禁用")
 
+        self._inflight_task_store = InflightTaskStore()
+
         self._prompt_builder = PromptBuilder(
             bot_qq=self.bot_qq,
             memory_storage=self.memory_storage,
             end_summary_storage=self._end_summary_storage,
+            inflight_task_store=self._inflight_task_store,
             runtime_config_getter=self._get_runtime_config,
             anthropic_skill_registry=self.anthropic_skill_registry,
         )
@@ -502,7 +514,10 @@ class AIClient:
 
     async def request_model(
         self,
-        model_config: ChatModelConfig | VisionModelConfig | AgentModelConfig,
+        model_config: ChatModelConfig
+        | VisionModelConfig
+        | AgentModelConfig
+        | InflightSummaryModelConfig,
         messages: list[dict[str, Any]],
         max_tokens: int = 8192,
         call_type: str = "chat",
@@ -559,6 +574,138 @@ class AIClient:
 
     async def generate_title(self, summary: str) -> str:
         return await self._summary_service.generate_title(summary)
+
+    def get_inflight_task_store(self) -> InflightTaskStore:
+        return self._inflight_task_store
+
+    def get_inflight_summary_model_config(self) -> InflightSummaryModelConfig:
+        runtime_config = self._get_runtime_config()
+        return runtime_config.inflight_summary_model
+
+    def set_inflight_summary_generation_result(
+        self, request_id: str, action_summary: str
+    ) -> bool:
+        return self._inflight_task_store.mark_ready(request_id, action_summary)
+
+    def clear_inflight_summary_for_request(self, request_id: str) -> bool:
+        return self._inflight_task_store.clear_by_request(request_id)
+
+    def clear_inflight_summary_for_chat(
+        self,
+        request_type: Literal["group", "private"],
+        chat_id: int,
+        owner_request_id: str | None = None,
+    ) -> bool:
+        return self._inflight_task_store.clear_for_chat(
+            request_type=request_type,
+            chat_id=chat_id,
+            owner_request_id=owner_request_id,
+        )
+
+    async def _enqueue_inflight_summary_generation(
+        self,
+        *,
+        request_id: str,
+        source_message: str,
+        location: InflightTaskLocation,
+    ) -> None:
+        if self._queue_manager is None:
+            logger.debug(
+                "[进行中摘要] queue_manager 未设置，跳过异步摘要: request_id=%s",
+                request_id,
+            )
+            return
+
+        request_data: dict[str, Any] = {
+            "type": "inflight_summary_generation",
+            "request_id": request_id,
+            "source_message": source_message,
+            "location": {
+                "type": location.get("type"),
+                "name": location.get("name"),
+                "id": int(location.get("id", 0)),
+            },
+        }
+        model_config = self.get_inflight_summary_model_config()
+        try:
+            await self._queue_manager.add_background_request(
+                request_data,
+                model_name=model_config.model_name,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[进行中摘要] 投递后台请求失败: request_id=%s error=%s",
+                request_id,
+                exc,
+            )
+
+    def _extract_message_excerpt(self, question: str) -> str:
+        matched = _CONTENT_TAG_PATTERN.search(question)
+        if matched:
+            content = html.unescape(matched.group(1))
+        else:
+            content = question
+        cleaned = " ".join(content.split()).strip()
+        if not cleaned:
+            return "(无文本内容)"
+        if len(cleaned) > 120:
+            return cleaned[:117].rstrip() + "..."
+        return cleaned
+
+    def _build_inflight_location(
+        self, tool_context: dict[str, Any]
+    ) -> InflightTaskLocation | None:
+        request_type = str(tool_context.get("request_type") or "").strip().lower()
+        if request_type == "group":
+            group_id_raw = tool_context.get("group_id")
+            if group_id_raw is None:
+                return None
+            try:
+                group_id = int(group_id_raw)
+            except (TypeError, ValueError):
+                return None
+            group_name_raw = tool_context.get("group_name")
+            group_name = (
+                str(group_name_raw).strip() if group_name_raw is not None else ""
+            )
+            if not group_name:
+                group_name = f"群{group_id}"
+            return {"type": "group", "name": group_name, "id": group_id}
+
+        if request_type == "private":
+            user_id_raw = tool_context.get("user_id")
+            if user_id_raw is None:
+                user_id_raw = tool_context.get("sender_id")
+            if user_id_raw is None:
+                return None
+            try:
+                user_id = int(user_id_raw)
+            except (TypeError, ValueError):
+                return None
+            sender_name_raw = tool_context.get("sender_name")
+            sender_name = (
+                str(sender_name_raw).strip() if sender_name_raw is not None else ""
+            )
+            if not sender_name:
+                sender_name = str(user_id)
+            return {"type": "private", "name": sender_name, "id": user_id}
+
+        return None
+
+    def _is_end_only_tool_calls(
+        self,
+        tool_calls: list[dict[str, Any]],
+        api_to_internal: dict[str, str],
+    ) -> bool:
+        if not tool_calls:
+            return False
+        for tool_call in tool_calls:
+            function = tool_call.get("function", {})
+            api_name = str(function.get("name", "") or "")
+            internal_name = api_to_internal.get(api_name, api_name)
+            if internal_name != "end":
+                return False
+        return True
 
     async def ask(
         self,
@@ -640,6 +787,7 @@ class AIClient:
         tool_context.setdefault("search_wrapper", self._search_wrapper)
         tool_context.setdefault("end_summary_storage", self._end_summary_storage)
         tool_context.setdefault("end_summaries", self._prompt_builder.end_summaries)
+        tool_context.setdefault("inflight_task_store", self._inflight_task_store)
         tool_context.setdefault(
             "send_private_message_callback", self._send_private_message_callback
         )
@@ -654,6 +802,18 @@ class AIClient:
         cot_compat = getattr(self.chat_config, "thinking_tool_call_compat", False)
         cot_compat_logged = False
         cot_missing_logged = False
+
+        inflight_request_id = str(tool_context.get("request_id") or "").strip()
+        inflight_location = self._build_inflight_location(tool_context)
+        source_message_excerpt = self._extract_message_excerpt(question)
+        inflight_registered = False
+
+        def _clear_inflight_on_exit() -> None:
+            nonlocal inflight_registered
+            if not inflight_registered or not inflight_request_id:
+                return
+            self.clear_inflight_summary_for_request(inflight_request_id)
+            inflight_registered = False
 
         while iteration < max_iterations:
             iteration += 1
@@ -726,11 +886,39 @@ class AIClient:
                     )
                     content = ""
 
+                if iteration == 1 and tool_calls and not inflight_registered:
+                    is_end_only = self._is_end_only_tool_calls(
+                        tool_calls, api_to_internal
+                    )
+                    if not is_end_only and inflight_request_id and inflight_location:
+                        self._inflight_task_store.upsert_pending(
+                            request_id=inflight_request_id,
+                            request_type=inflight_location["type"],
+                            chat_id=inflight_location["id"],
+                            location_name=inflight_location["name"],
+                            source_message=source_message_excerpt,
+                        )
+                        inflight_registered = True
+                        logger.info(
+                            "[进行中摘要] 已创建占位: request_id=%s location=%s:%s",
+                            inflight_request_id,
+                            inflight_location["type"],
+                            inflight_location["id"],
+                        )
+                        asyncio.create_task(
+                            self._enqueue_inflight_summary_generation(
+                                request_id=inflight_request_id,
+                                source_message=source_message_excerpt,
+                                location=inflight_location,
+                            )
+                        )
+
                 if not tool_calls:
                     logger.info(
                         "[AI回复] 会话结束，返回最终内容: length=%s",
                         len(content),
                     )
+                    _clear_inflight_on_exit()
                     return content
 
                 assistant_message: dict[str, Any] = {
@@ -899,14 +1087,18 @@ class AIClient:
 
                 if conversation_ended:
                     logger.info("[会话状态] 对话已结束（调用 end 工具）")
+                    _clear_inflight_on_exit()
                     return ""
 
             except Exception as exc:
                 if not any_tool_executed:
                     # 尚未执行任何工具（无消息发送等副作用），安全传播给上层重试
+                    _clear_inflight_on_exit()
                     raise
                 logger.exception("ask 处理失败: %s", exc)
+                _clear_inflight_on_exit()
                 return f"处理失败: {exc}"
 
         logger.warning("[AI决策] 达到最大迭代次数，未能完成处理")
+        _clear_inflight_on_exit()
         return "达到最大迭代次数，未能完成处理"

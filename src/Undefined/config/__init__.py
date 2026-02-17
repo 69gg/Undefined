@@ -7,6 +7,7 @@ from .manager import ConfigManager
 from .models import (
     AgentModelConfig,
     ChatModelConfig,
+    InflightSummaryModelConfig,
     SecurityModelConfig,
     VisionModelConfig,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "VisionModelConfig",
     "SecurityModelConfig",
     "AgentModelConfig",
+    "InflightSummaryModelConfig",
     "get_config",
     "get_config_manager",
     "load_webui_settings",
