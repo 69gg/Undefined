@@ -582,21 +582,21 @@ class AIClient:
         runtime_config = self._get_runtime_config()
         return runtime_config.inflight_summary_model
 
-    def set_inflight_summary_generation_result(
+    async def set_inflight_summary_generation_result(
         self, request_id: str, action_summary: str
     ) -> bool:
-        return self._inflight_task_store.mark_ready(request_id, action_summary)
+        return await self._inflight_task_store.mark_ready(request_id, action_summary)
 
-    def clear_inflight_summary_for_request(self, request_id: str) -> bool:
-        return self._inflight_task_store.clear_by_request(request_id)
+    async def clear_inflight_summary_for_request(self, request_id: str) -> bool:
+        return await self._inflight_task_store.clear_by_request(request_id)
 
-    def clear_inflight_summary_for_chat(
+    async def clear_inflight_summary_for_chat(
         self,
         request_type: Literal["group", "private"],
         chat_id: int,
         owner_request_id: str | None = None,
     ) -> bool:
-        return self._inflight_task_store.clear_for_chat(
+        return await self._inflight_task_store.clear_for_chat(
             request_type=request_type,
             chat_id=chat_id,
             owner_request_id=owner_request_id,
@@ -807,7 +807,7 @@ class AIClient:
             and self._should_pre_register_inflight(pre_context, question)
         )
         if should_pre_register and inflight_request_id and inflight_location:
-            self._inflight_task_store.upsert_pending(
+            await self._inflight_task_store.upsert_pending(
                 request_id=inflight_request_id,
                 request_type=inflight_location["type"],
                 chat_id=inflight_location["id"],
@@ -884,11 +884,11 @@ class AIClient:
         cot_compat_logged = False
         cot_missing_logged = False
 
-        def _clear_inflight_on_exit() -> None:
+        async def _clear_inflight_on_exit() -> None:
             nonlocal inflight_registered
             if not inflight_registered or not inflight_request_id:
                 return
-            self.clear_inflight_summary_for_request(inflight_request_id)
+            await self.clear_inflight_summary_for_request(inflight_request_id)
             inflight_registered = False
 
         while iteration < max_iterations:
@@ -968,7 +968,9 @@ class AIClient:
                     )
                     if is_end_only:
                         if inflight_registered and inflight_request_id:
-                            self.clear_inflight_summary_for_request(inflight_request_id)
+                            await self.clear_inflight_summary_for_request(
+                                inflight_request_id
+                            )
                             inflight_registered = False
                             logger.info(
                                 "[进行中摘要] 首轮仅end，已清理占位: request_id=%s",
@@ -976,7 +978,7 @@ class AIClient:
                             )
                     elif inflight_request_id and inflight_location:
                         if not inflight_registered:
-                            self._inflight_task_store.upsert_pending(
+                            await self._inflight_task_store.upsert_pending(
                                 request_id=inflight_request_id,
                                 request_type=inflight_location["type"],
                                 chat_id=inflight_location["id"],
@@ -1017,7 +1019,7 @@ class AIClient:
                         "[AI回复] 会话结束，返回最终内容: length=%s",
                         len(content),
                     )
-                    _clear_inflight_on_exit()
+                    await _clear_inflight_on_exit()
                     return content
 
                 assistant_message: dict[str, Any] = {
@@ -1186,18 +1188,18 @@ class AIClient:
 
                 if conversation_ended:
                     logger.info("[会话状态] 对话已结束（调用 end 工具）")
-                    _clear_inflight_on_exit()
+                    await _clear_inflight_on_exit()
                     return ""
 
             except Exception as exc:
                 if not any_tool_executed:
                     # 尚未执行任何工具（无消息发送等副作用），安全传播给上层重试
-                    _clear_inflight_on_exit()
+                    await _clear_inflight_on_exit()
                     raise
                 logger.exception("ask 处理失败: %s", exc)
-                _clear_inflight_on_exit()
+                await _clear_inflight_on_exit()
                 return f"处理失败: {exc}"
 
         logger.warning("[AI决策] 达到最大迭代次数，未能完成处理")
-        _clear_inflight_on_exit()
+        await _clear_inflight_on_exit()
         return "达到最大迭代次数，未能完成处理"

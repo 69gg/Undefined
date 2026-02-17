@@ -253,7 +253,7 @@ class PromptBuilder:
                     logger, "[AI会话] 注入短期回忆", list(self._end_summaries)
                 )
 
-        self._inject_inflight_tasks(messages, extra_context)
+        await self._inject_inflight_tasks(messages, extra_context)
 
         if get_recent_messages_callback:
             await self._inject_recent_messages(
@@ -320,7 +320,7 @@ class PromptBuilder:
 
         return None
 
-    def _inject_inflight_tasks(
+    async def _inject_inflight_tasks(
         self,
         messages: list[dict[str, Any]],
         extra_context: dict[str, Any] | None,
@@ -346,7 +346,7 @@ class PromptBuilder:
         request_type, chat_id = scope
         ctx = RequestContext.current()
         exclude_request_id = ctx.request_id if ctx else None
-        records = self._inflight_task_store.list_for_chat(
+        records = await self._inflight_task_store.list_for_chat(
             request_type=request_type,
             chat_id=chat_id,
             exclude_request_id=exclude_request_id,

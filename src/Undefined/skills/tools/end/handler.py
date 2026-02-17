@@ -119,7 +119,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         request_id = context.get("request_id")
         cleared = False
         if isinstance(request_id, str) and request_id.strip():
-            cleared = inflight_task_store.clear_by_request(request_id)
+            cleared = await inflight_task_store.clear_by_request(request_id)
 
         if not cleared:
             request_type = context.get("request_type")
@@ -144,7 +144,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                         chat_id = None
 
             if request_type in {"group", "private"} and chat_id is not None:
-                inflight_task_store.clear_for_chat(
+                await inflight_task_store.clear_for_chat(
                     request_type=request_type,
                     chat_id=chat_id,
                     owner_request_id=request_id
