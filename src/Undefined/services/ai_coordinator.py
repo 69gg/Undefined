@@ -17,6 +17,10 @@ from Undefined.utils.xml import escape_xml_attr, escape_xml_text
 logger = logging.getLogger(__name__)
 
 
+_INFLIGHT_SUMMARY_SYSTEM_PROMPT_PATH = "res/prompts/inflight_summary_system.txt"
+_INFLIGHT_SUMMARY_USER_PROMPT_PATH = "res/prompts/inflight_summary_user.txt"
+
+
 class AICoordinator:
     """AI 协调器，处理 AI 回复逻辑、Prompt 构建和队列管理"""
 
@@ -543,26 +547,64 @@ class AICoordinator:
             except (TypeError, ValueError):
                 location_id = 0
 
+        system_prompt = (
+            "你是任务状态摘要器。"
+            "请输出一句极简中文短语（不超过20字），"
+            "用于描述该任务当前处理动作。"
+            "禁止解释、禁止换行、禁止时间承诺。"
+        )
+        user_prompt_template = (
+            "会话类型: {location_type}\n"
+            "会话名称: {location_name}\n"
+            "会话ID: {location_id}\n"
+            "正在处理消息: {source_message}\n"
+            "仅返回一个动作短语，例如：已开始生成首版"
+        )
+
+        try:
+            loaded_system_prompt = read_text_resource(
+                _INFLIGHT_SUMMARY_SYSTEM_PROMPT_PATH
+            ).strip()
+            if loaded_system_prompt:
+                system_prompt = loaded_system_prompt
+        except Exception as exc:
+            logger.debug("[进行中摘要] 读取系统提示词失败，使用内置默认: %s", exc)
+
+        try:
+            loaded_user_prompt = read_text_resource(
+                _INFLIGHT_SUMMARY_USER_PROMPT_PATH
+            ).strip()
+            if loaded_user_prompt:
+                user_prompt_template = loaded_user_prompt
+        except Exception as exc:
+            logger.debug("[进行中摘要] 读取用户提示词失败，使用内置默认: %s", exc)
+
+        try:
+            user_prompt = user_prompt_template.format(
+                location_type=location_type,
+                location_name=location_name,
+                location_id=location_id,
+                source_message=source_message,
+            )
+        except Exception as exc:
+            logger.warning("[进行中摘要] 用户提示词模板格式异常，使用默认模板: %s", exc)
+            user_prompt = (
+                f"会话类型: {location_type}\n"
+                f"会话名称: {location_name}\n"
+                f"会话ID: {location_id}\n"
+                f"正在处理消息: {source_message}\n"
+                "仅返回一个动作短语，例如：已开始生成首版"
+            )
+
         model_config = self.ai.get_inflight_summary_model_config()
         messages = [
             {
                 "role": "system",
-                "content": (
-                    "你是任务状态摘要器。"
-                    "请输出一句极简中文短语（不超过20字），"
-                    "用于描述该任务当前处理动作。"
-                    "禁止解释、禁止换行、禁止时间承诺。"
-                ),
+                "content": system_prompt,
             },
             {
                 "role": "user",
-                "content": (
-                    f"会话类型: {location_type}\n"
-                    f"会话名称: {location_name}\n"
-                    f"会话ID: {location_id}\n"
-                    f"正在处理消息: {source_message}\n"
-                    "仅返回一个动作短语，例如：已开始生成首版"
-                ),
+                "content": user_prompt,
             },
         ]
 

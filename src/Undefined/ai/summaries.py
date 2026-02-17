@@ -24,12 +24,14 @@ class SummaryService:
         token_counter: TokenCounter,
         summarize_prompt_path: str = "res/prompts/summarize.txt",
         merge_prompt_path: str = "res/prompts/merge_summaries.txt",
+        title_prompt_path: str = "res/prompts/generate_title.txt",
     ) -> None:
         self._requester = requester
         self._chat_config = chat_config
         self._token_counter = token_counter
         self._summarize_prompt_path = summarize_prompt_path
         self._merge_prompt_path = merge_prompt_path
+        self._title_prompt_path = title_prompt_path
 
     async def summarize_chat(self, messages: str, context: str = "") -> str:
         """对聊天记录进行总结
@@ -164,11 +166,39 @@ class SummaryService:
         返回:
             生成的简短标题
         """
-        prompt = (
+        summary_text = summary[:2000]
+        prompt_template = (
             "请根据以下 Bug 修复分析报告，生成一个简短、准确的标题（不超过 20 字），用于 FAQ 索引。\n"
             "只返回标题文本，不要包含任何前缀或引号。\n\n"
-            "分析报告：\n" + summary[:2000]
+            "分析报告：\n{summary}"
         )
+
+        try:
+            loaded_prompt_template = read_text_resource(self._title_prompt_path).strip()
+            if loaded_prompt_template:
+                prompt_template = loaded_prompt_template
+        except Exception:
+            try:
+                async with aiofiles.open(
+                    self._title_prompt_path, "r", encoding="utf-8"
+                ) as f:
+                    loaded_prompt_template = (await f.read()).strip()
+                if loaded_prompt_template:
+                    prompt_template = loaded_prompt_template
+            except Exception:
+                logger.debug(
+                    "[总结] 标题提示词读取失败，使用内置模板: %s",
+                    self._title_prompt_path,
+                )
+
+        try:
+            prompt = prompt_template.format(summary=summary_text)
+        except Exception:
+            prompt = (
+                "请根据以下 Bug 修复分析报告，生成一个简短、准确的标题（不超过 20 字），用于 FAQ 索引。\n"
+                "只返回标题文本，不要包含任何前缀或引号。\n\n"
+                "分析报告：\n" + summary_text
+            )
 
         try:
             result = await self._requester.request(
