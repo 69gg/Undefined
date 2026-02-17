@@ -1,0 +1,12 @@
+{
+    "type": "function",
+    "function": {
+        "name": "init_docker",
+        "description": "初始化 Docker 容器和工作区。仅在需要多文件工程、需要运行验证或打包交付时调用。单文件轻量任务请直接使用 send_text_file 工具。",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    }
+}

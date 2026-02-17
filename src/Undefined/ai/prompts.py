@@ -329,7 +329,7 @@ class PromptBuilder:
             try:
                 runtime_config = self._runtime_config_getter()
                 enabled = bool(
-                    getattr(runtime_config, "inflight_summary_enabled", True)
+                    getattr(runtime_config, "inflight_pre_register_enabled", True)
                 )
                 if not enabled:
                     return

@@ -170,6 +170,9 @@ class AIClient:
         self._queue_manager: Any | None = None
         self._intro_config: Any | None = None
 
+        # 后台任务引用集合（防止被 GC）
+        self._background_tasks: set[asyncio.Task[Any]] = set()
+
         # 保存配置供后续使用
         runtime_config = self._get_runtime_config()
         self._intro_config = AgentIntroGenConfig(
@@ -793,10 +796,7 @@ class AIClient:
         if not inflight_summary_enabled:
             logger.debug("[进行中摘要] 功能已关闭：跳过占位与摘要注入")
 
-        should_pre_register = (
-            inflight_summary_enabled
-            and self._should_pre_register_inflight(pre_context, question)
-        )
+        should_pre_register = self._should_pre_register_inflight(pre_context, question)
         if should_pre_register and inflight_request_id and inflight_location:
             await self._inflight_task_store.upsert_pending(
                 request_id=inflight_request_id,
@@ -985,6 +985,14 @@ class AIClient:
                             )
 
                         if not inflight_summary_enqueued:
+
+                            def _cleanup_task(t: asyncio.Task[Any]) -> None:
+                                self._background_tasks.discard(t)
+                                if t.exception() is not None:
+                                    logger.error(
+                                        "[进行中摘要] 投递失败: %s", t.exception()
+                                    )
+
                             task = asyncio.create_task(
                                 self._enqueue_inflight_summary_generation(
                                     request_id=inflight_request_id,
@@ -992,15 +1000,8 @@ class AIClient:
                                     location=inflight_location,
                                 )
                             )
-                            task.add_done_callback(
-                                lambda t: (
-                                    logger.error(
-                                        "[进行中摘要] 投递失败: %s", t.exception()
-                                    )
-                                    if t.exception() is not None
-                                    else None
-                                )
-                            )
+                            self._background_tasks.add(task)
+                            task.add_done_callback(_cleanup_task)
                             inflight_summary_enqueued = True
                             logger.info(
                                 "[进行中摘要] 已投递摘要生成: request_id=%s",

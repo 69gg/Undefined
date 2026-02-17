@@ -39,6 +39,8 @@ class MessageSender:
         message: str,
         auto_history: bool = True,
         history_prefix: str = "",
+        *,
+        mark_sent: bool = True,
     ) -> None:
         """发送群消息"""
         if not self.config.is_group_allowed(group_id):
@@ -78,7 +80,9 @@ class MessageSender:
         # 自动分段发送
         if len(message) <= MAX_MESSAGE_LENGTH:
             segments = message_to_segments(message)
-            await self.onebot.send_group_message(group_id, segments)
+            await self.onebot.send_group_message(
+                group_id, segments, mark_sent=mark_sent
+            )
             return
 
         # 按行分割
@@ -96,7 +100,7 @@ class MessageSender:
                 chunk_text = "\n".join(current_chunk)
                 logger.debug(f"[消息分段] 发送第 {chunk_count} 段")
                 await self.onebot.send_group_message(
-                    group_id, message_to_segments(chunk_text)
+                    group_id, message_to_segments(chunk_text), mark_sent=mark_sent
                 )
                 current_chunk = []
                 current_length = 0
@@ -109,13 +113,18 @@ class MessageSender:
             chunk_text = "\n".join(current_chunk)
             logger.debug(f"[消息分段] 发送第 {chunk_count} 段 (最后一段)")
             await self.onebot.send_group_message(
-                group_id, message_to_segments(chunk_text)
+                group_id, message_to_segments(chunk_text), mark_sent=mark_sent
             )
 
         logger.info(f"[消息分段] 已完成 {chunk_count} 段消息的发送")
 
     async def send_private_message(
-        self, user_id: int, message: str, auto_history: bool = True
+        self,
+        user_id: int,
+        message: str,
+        auto_history: bool = True,
+        *,
+        mark_sent: bool = True,
     ) -> None:
         """发送私聊消息"""
         if not self.config.is_private_allowed(user_id):
@@ -148,7 +157,9 @@ class MessageSender:
         # 自动分段发送
         if len(message) <= MAX_MESSAGE_LENGTH:
             segments = message_to_segments(message)
-            await self.onebot.send_private_message(user_id, segments)
+            await self.onebot.send_private_message(
+                user_id, segments, mark_sent=mark_sent
+            )
             return
 
         # 按行分割
@@ -166,7 +177,7 @@ class MessageSender:
                 chunk_text = "\n".join(current_chunk)
                 logger.debug(f"[消息分段] 发送第 {chunk_count} 段")
                 await self.onebot.send_private_message(
-                    user_id, message_to_segments(chunk_text)
+                    user_id, message_to_segments(chunk_text), mark_sent=mark_sent
                 )
                 current_chunk = []
                 current_length = 0
@@ -179,7 +190,7 @@ class MessageSender:
             chunk_text = "\n".join(current_chunk)
             logger.debug(f"[消息分段] 发送第 {chunk_count} 段 (最后一段)")
             await self.onebot.send_private_message(
-                user_id, message_to_segments(chunk_text)
+                user_id, message_to_segments(chunk_text), mark_sent=mark_sent
             )
 
         logger.info(f"[消息分段] 已完成 {chunk_count} 段消息的发送")

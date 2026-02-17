@@ -178,8 +178,8 @@ thinking_include_budget = true
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = false
 
-# zh: 进行中任务摘要模型配置（可选，用于并发真空期的“处理中摘要”）。
-# en: Inflight summary model config (optional, used to generate in-progress task summaries).
+# zh: 进行中任务摘要模型配置（可选，用于并发真空期的"处理中摘要"）。仅当 [queue] 下 inflight_summary_enabled = true 时生效。
+# en: Inflight summary model config (optional, used to generate in-progress task summaries). Only effective when inflight_summary_enabled = true under [queue].
 # zh: 当 api_url/api_key/model_name 任一为空时，自动回退到 [models.chat]。
 # en: Falls back to [models.chat] when api_url/api_key/model_name is missing.
 [models.inflight_summary]
@@ -274,11 +274,10 @@ nagaagent_mode_enabled = false
 # en: - true: enable (default), pre-register before first round
 # en: - false: disable, no pre-registration
 inflight_pre_register_enabled = true
-
-# zh: 是否生成进行中任务摘要（需要额外 API 调用）
+# zh: 是否生成进行中任务摘要（需要额外摘要模型设置）
 # zh: - true: 启用，异步生成动作摘要
 # zh: - false: 关闭（默认），不生成摘要
-# en: Enable inflight task summary generation (requires additional API calls)
+# en: Enable inflight task summary generation (additional summary model settings required)
 # en: - true: enable, generate action summary asynchronously
 # en: - false: disable (default), no summary generation
 inflight_summary_enabled = false
@@ -323,7 +322,6 @@ prefetch_tools = ["get_current_time"]
 # zh: 隐藏已预取的工具声明。
 # en: Hide prefetched tools from the model's tool list.
 prefetch_tools_hide = true
-
 # zh: 搜索服务配置（SearXNG）。
 # en: Search service config (SearxNG).
 [search]

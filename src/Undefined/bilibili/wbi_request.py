@@ -5,9 +5,9 @@ from typing import Any
 import httpx
 
 from Undefined.bilibili.wbi import build_signed_params
-from Undefined.utils.logger import get_logger
+import logging
 
-logger = get_logger()
+logger = logging.getLogger(__name__)
 
 
 async def request_with_wbi_fallback(

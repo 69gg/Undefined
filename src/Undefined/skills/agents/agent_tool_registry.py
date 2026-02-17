@@ -182,7 +182,10 @@ class AgentToolRegistry(BaseRegistry):
 
     def _find_skills_root(self) -> Path | None:
         """向上查找 skills 根目录。"""
-        for candidate in (self.base_dir, *self.base_dir.parents):
+        max_depth = 10
+        for i, candidate in enumerate((self.base_dir, *self.base_dir.parents)):
+            if i >= max_depth:
+                break
             if candidate.name == "skills":
                 return candidate
         return None
@@ -559,15 +562,11 @@ class AgentToolRegistry(BaseRegistry):
 
         message = f"{tool_name}，我调用你了，我要调用你了！"
         sender = context.get("sender")
-        send_message_callback = context.get("send_message_callback")
         group_id = context.get("group_id")
 
         try:
             if sender and isinstance(group_id, int) and group_id > 0:
-                await sender.send_group_message(group_id, message)
-                return
-            if send_message_callback:
-                await send_message_callback(message)
+                await sender.send_group_message(group_id, message, mark_sent=False)
         except Exception as exc:
             logger.debug("[彩蛋] 发送提示消息失败: %s", redact_string(str(exc)))
 

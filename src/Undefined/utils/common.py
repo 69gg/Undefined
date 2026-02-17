@@ -244,8 +244,6 @@ async def _expand_forward_segment(
 def _parse_at_segment(data: Dict[str, Any], bot_qq: int) -> Optional[str]:
     """解析 @ 消息段，输出 [@{qq}({昵称})] 或 [@{qq}]"""
     qq = data.get("qq", "")
-    if bot_qq and str(qq) == str(bot_qq):
-        return None
     name = data.get("name") or data.get("nickname") or ""
     if name:
         return f"[@{qq}({name})]"
