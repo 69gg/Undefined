@@ -717,28 +717,19 @@ class AIClient:
     def _is_inflight_summary_enabled(self) -> bool:
         try:
             runtime_config = self._get_runtime_config()
-            return bool(getattr(runtime_config, "inflight_summary_enabled", True))
+            return bool(getattr(runtime_config, "inflight_summary_enabled", False))
         except Exception:
-            return True
+            return False
 
     def _should_pre_register_inflight(
         self, context: dict[str, Any], question: str
     ) -> bool:
-        """是否在首轮模型调用前预注册进行中占位。
-
-        仅对更可能触发任务执行的会话场景预注册，尽量减少误拦截：
-        - 私聊
-        - 群聊且为 @/拍一拍 触发
-        """
-        request_type = str(context.get("request_type") or "").strip().lower()
-        if request_type == "private":
+        """根据配置决定是否预注册进行中占位。"""
+        try:
+            runtime_config = self._get_runtime_config()
+            return bool(getattr(runtime_config, "inflight_pre_register_enabled", True))
+        except Exception:
             return True
-        if request_type == "group":
-            if bool(context.get("is_at_bot")):
-                return True
-            if "(用户 @ 了你)" in question or "(用户拍了拍你)" in question:
-                return True
-        return False
 
     async def ask(
         self,

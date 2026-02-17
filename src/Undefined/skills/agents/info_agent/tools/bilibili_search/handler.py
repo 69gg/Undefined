@@ -7,7 +7,8 @@ from typing import Any
 
 import httpx
 
-from Undefined.bilibili.wbi import build_signed_params, parse_cookie_string
+from Undefined.bilibili.wbi import parse_cookie_string
+from Undefined.bilibili.wbi_request import request_with_wbi_fallback
 from Undefined.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -92,65 +93,6 @@ def _params_for_mode(args: dict[str, Any], mode: str) -> tuple[dict[str, Any], s
         params["tids"] = _to_positive_int(args["tids"], 0)
 
     return params, search_type
-
-
-async def _request_with_wbi_fallback(
-    client: httpx.AsyncClient,
-    *,
-    endpoint: str,
-    params: dict[str, Any],
-    mode: str,
-) -> dict[str, Any]:
-    resp = await client.get(endpoint, params=params)
-    resp.raise_for_status()
-    payload = resp.json()
-
-    if not isinstance(payload, dict):
-        raise ValueError("B站搜索返回格式异常")
-    if int(payload.get("code", -1)) == 0:
-        return payload
-
-    code = payload.get("code")
-    message = _error_message(payload)
-    logger.warning(
-        "[BilibiliSearch] mode=%s 首次失败 code=%s message=%s，尝试 WBI 签名",
-        mode,
-        code,
-        message,
-    )
-
-    try:
-        signed_params = await build_signed_params(client, params)
-    except Exception as exc:
-        logger.warning("[BilibiliSearch] 生成 WBI 签名失败: %s", exc)
-        return payload
-
-    resp_signed = await client.get(endpoint, params=signed_params)
-    resp_signed.raise_for_status()
-    payload_signed = resp_signed.json()
-    if not isinstance(payload_signed, dict):
-        raise ValueError("B站搜索签名重试返回格式异常")
-    if int(payload_signed.get("code", -1)) == 0:
-        logger.info("[BilibiliSearch] mode=%s WBI 签名重试成功", mode)
-        return payload_signed
-
-    try:
-        refreshed_params = await build_signed_params(client, params, force_refresh=True)
-    except Exception as exc:
-        logger.warning("[BilibiliSearch] 刷新 WBI key 失败: %s", exc)
-        return payload_signed
-
-    if refreshed_params == signed_params:
-        return payload_signed
-
-    resp_refreshed = await client.get(endpoint, params=refreshed_params)
-    resp_refreshed.raise_for_status()
-    payload_refreshed = resp_refreshed.json()
-    if not isinstance(payload_refreshed, dict):
-        raise ValueError("B站搜索刷新签名后返回格式异常")
-    if int(payload_refreshed.get("code", -1)) == 0:
-        logger.info("[BilibiliSearch] mode=%s 刷新 WBI key 后重试成功", mode)
-    return payload_refreshed
 
 
 def _extract_type_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -331,11 +273,11 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
             timeout=timeout,
             follow_redirects=True,
         ) as client:
-            payload = await _request_with_wbi_fallback(
+            payload = await request_with_wbi_fallback(
                 client,
                 endpoint=endpoint,
                 params=params,
-                mode=mode,
+                log_prefix=f"[BilibiliSearch] mode={mode}",
             )
 
         if int(payload.get("code", -1)) != 0:

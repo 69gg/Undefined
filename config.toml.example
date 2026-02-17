@@ -267,12 +267,21 @@ description_preview_len = 160
 # en: - false: use `res/prompts/undefined.xml` and hide/disable related agents
 nagaagent_mode_enabled = false
 # zh: 是否启用“进行中任务摘要”防重机制。
-# zh: - true: 启用并发防重摘要（默认）
-# zh: - false: 关闭该机制（不注入【进行中的任务】上下文，也不生成摘要）
-# en: Enable inflight task summary anti-duplicate mechanism.
-# en: - true: enable (default)
-# en: - false: disable (no inflight context injection or summary generation)
-inflight_summary_enabled = true
+# zh: 是否预注册进行中占位（防止重复执行）
+# zh: - true: 启用（默认），在首轮前预占位
+# zh: - false: 关闭，不预注册占位
+# en: Enable inflight task pre-registration (prevent duplicate execution)
+# en: - true: enable (default), pre-register before first round
+# en: - false: disable, no pre-registration
+inflight_pre_register_enabled = true
+
+# zh: 是否生成进行中任务摘要（需要额外 API 调用）
+# zh: - true: 启用，异步生成动作摘要
+# zh: - false: 关闭（默认），不生成摘要
+# en: Enable inflight task summary generation (requires additional API calls)
+# en: - true: enable, generate action summary asynchronously
+# en: - false: disable (default), no summary generation
+inflight_summary_enabled = false
 
 # zh: 彩蛋功能（可选）。
 # en: Easter egg features (optional)

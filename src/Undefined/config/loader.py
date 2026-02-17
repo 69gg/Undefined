@@ -362,6 +362,7 @@ class Config:
     context_recent_messages_limit: int
     ai_request_max_retries: int
     nagaagent_mode_enabled: bool
+    inflight_pre_register_enabled: bool
     inflight_summary_enabled: bool
     onebot_ws_url: str
     onebot_token: str
@@ -559,13 +560,21 @@ class Config:
             ),
             False,
         )
+        inflight_pre_register_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("features", "inflight_pre_register_enabled"),
+                "INFLIGHT_PRE_REGISTER_ENABLED",
+            ),
+            True,
+        )
         inflight_summary_enabled = _coerce_bool(
             _get_value(
                 data,
                 ("features", "inflight_summary_enabled"),
                 "INFLIGHT_SUMMARY_ENABLED",
             ),
-            True,
+            False,
         )
 
         onebot_ws_url = _coerce_str(
@@ -1017,6 +1026,7 @@ class Config:
             context_recent_messages_limit=context_recent_messages_limit,
             ai_request_max_retries=ai_request_max_retries,
             nagaagent_mode_enabled=nagaagent_mode_enabled,
+            inflight_pre_register_enabled=inflight_pre_register_enabled,
             inflight_summary_enabled=inflight_summary_enabled,
             onebot_ws_url=onebot_ws_url,
             onebot_token=onebot_token,

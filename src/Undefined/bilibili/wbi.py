@@ -208,7 +208,7 @@ async def get_mixin_key(
             return _cached_mixin_key
 
         _cached_mixin_key = await _refresh_mixin_key(client)
-        _cached_at = now
+        _cached_at = time.time()
         return _cached_mixin_key
 
 
