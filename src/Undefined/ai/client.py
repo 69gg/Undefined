@@ -609,6 +609,13 @@ class AIClient:
         source_message: str,
         location: InflightTaskLocation,
     ) -> None:
+        if not self._is_inflight_summary_enabled():
+            logger.debug(
+                "[进行中摘要] 功能已关闭，跳过摘要投递: request_id=%s",
+                request_id,
+            )
+            return
+
         if self._queue_manager is None:
             logger.debug(
                 "[进行中摘要] queue_manager 未设置，跳过异步摘要: request_id=%s",
@@ -707,6 +714,13 @@ class AIClient:
                 return False
         return True
 
+    def _is_inflight_summary_enabled(self) -> bool:
+        try:
+            runtime_config = self._get_runtime_config()
+            return bool(getattr(runtime_config, "inflight_summary_enabled", True))
+        except Exception:
+            return True
+
     def _should_pre_register_inflight(
         self, context: dict[str, Any], question: str
     ) -> bool:
@@ -783,8 +797,15 @@ class AIClient:
         source_message_excerpt = self._extract_message_excerpt(question)
         inflight_registered = False
         inflight_summary_enqueued = False
+        inflight_summary_enabled = self._is_inflight_summary_enabled()
 
-        should_pre_register = self._should_pre_register_inflight(pre_context, question)
+        if not inflight_summary_enabled:
+            logger.debug("[进行中摘要] 功能已关闭：跳过占位与摘要注入")
+
+        should_pre_register = (
+            inflight_summary_enabled
+            and self._should_pre_register_inflight(pre_context, question)
+        )
         if should_pre_register and inflight_request_id and inflight_location:
             self._inflight_task_store.upsert_pending(
                 request_id=inflight_request_id,
@@ -941,7 +962,7 @@ class AIClient:
                     )
                     content = ""
 
-                if iteration == 1 and tool_calls:
+                if inflight_summary_enabled and iteration == 1 and tool_calls:
                     is_end_only = self._is_end_only_tool_calls(
                         tool_calls, api_to_internal
                     )

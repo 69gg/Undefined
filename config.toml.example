@@ -256,8 +256,8 @@ sanitize_verbose = false
 # en: Description preview length in logs.
 description_preview_len = 160
 
-# zh: 功能开关（默认建议保持关闭）。
-# en: Feature flags (recommended to keep disabled by default).
+# zh: 功能开关。
+# en: Feature flags.
 [features]
 # zh: 是否启用 NagaAgent 模式：
 # zh: - true: 使用 `res/prompts/undefined_nagaagent.xml`，并向模型暴露/允许调用相关 Agent
@@ -266,6 +266,13 @@ description_preview_len = 160
 # en: - true: use `res/prompts/undefined_nagaagent.xml` and expose related agents
 # en: - false: use `res/prompts/undefined.xml` and hide/disable related agents
 nagaagent_mode_enabled = false
+# zh: 是否启用“进行中任务摘要”防重机制。
+# zh: - true: 启用并发防重摘要（默认）
+# zh: - false: 关闭该机制（不注入【进行中的任务】上下文，也不生成摘要）
+# en: Enable inflight task summary anti-duplicate mechanism.
+# en: - true: enable (default)
+# en: - false: disable (no inflight context injection or summary generation)
+inflight_summary_enabled = true
 
 # zh: 彩蛋功能（可选）。
 # en: Easter egg features (optional)

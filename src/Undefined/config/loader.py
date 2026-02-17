@@ -362,6 +362,7 @@ class Config:
     context_recent_messages_limit: int
     ai_request_max_retries: int
     nagaagent_mode_enabled: bool
+    inflight_summary_enabled: bool
     onebot_ws_url: str
     onebot_token: str
     chat_model: ChatModelConfig
@@ -557,6 +558,14 @@ class Config:
                 "NAGAAGENT_MODE_ENABLED",
             ),
             False,
+        )
+        inflight_summary_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("features", "inflight_summary_enabled"),
+                "INFLIGHT_SUMMARY_ENABLED",
+            ),
+            True,
         )
 
         onebot_ws_url = _coerce_str(
@@ -1008,6 +1017,7 @@ class Config:
             context_recent_messages_limit=context_recent_messages_limit,
             ai_request_max_retries=ai_request_max_retries,
             nagaagent_mode_enabled=nagaagent_mode_enabled,
+            inflight_summary_enabled=inflight_summary_enabled,
             onebot_ws_url=onebot_ws_url,
             onebot_token=onebot_token,
             chat_model=chat_model,

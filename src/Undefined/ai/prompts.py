@@ -325,6 +325,17 @@ class PromptBuilder:
         messages: list[dict[str, Any]],
         extra_context: dict[str, Any] | None,
     ) -> None:
+        if self._runtime_config_getter is not None:
+            try:
+                runtime_config = self._runtime_config_getter()
+                enabled = bool(
+                    getattr(runtime_config, "inflight_summary_enabled", True)
+                )
+                if not enabled:
+                    return
+            except Exception:
+                pass
+
         if self._inflight_task_store is None:
             return
 
