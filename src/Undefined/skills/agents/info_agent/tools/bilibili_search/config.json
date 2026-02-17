@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "bilibili_search",
-        "description": "搜索 Bilibili 视频、番剧、用户等。",
+        "description": "搜索 Bilibili 内容，默认视频分类搜索；支持切换综合搜索。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -13,6 +13,19 @@
                 "n": {
                     "type": "integer",
                     "description": "返回数据数量 (默认5)"
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["type", "all"],
+                    "description": "搜索模式：type=分类搜索（默认），all=综合搜索"
+                },
+                "search_type": {
+                    "type": "string",
+                    "description": "分类搜索类型（仅 mode=type 时有效），默认 video"
+                },
+                "page": {
+                    "type": "integer",
+                    "description": "页码（默认1）"
                 }
             },
             "required": ["msg"]

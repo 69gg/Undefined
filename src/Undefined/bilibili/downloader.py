@@ -9,18 +9,21 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
-from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+from Undefined.bilibili.wbi import parse_cookie_string
+from Undefined.bilibili.wbi_request import request_with_wbi_fallback
 from Undefined.utils.paths import DOWNLOAD_CACHE_DIR, ensure_dir
 
 logger = logging.getLogger(__name__)
 
 _BILIBILI_API_VIEW = "https://api.bilibili.com/x/web-interface/view"
+_BILIBILI_API_VIEW_WBI = "https://api.bilibili.com/x/web-interface/wbi/view"
 _BILIBILI_API_PLAYURL = "https://api.bilibili.com/x/player/playurl"
+_BILIBILI_API_PLAYURL_WBI = "https://api.bilibili.com/x/player/wbi/playurl"
 
 _HEADERS = {
     "User-Agent": (
@@ -53,46 +56,11 @@ def _build_cookies(cookie: str = "") -> dict[str, str]:
     1) 仅 SESSDATA 值（旧配置）
     2) 完整 Cookie 串（推荐）
     """
-    raw = cookie.strip()
-    if not raw:
-        return {}
+    return parse_cookie_string(cookie)
 
-    # 旧配置：仅填了 SESSDATA 的值
-    if "=" not in raw:
-        return {"SESSDATA": raw}
 
-    parsed: dict[str, str] = {}
-
-    simple_cookie = SimpleCookie()
-    try:
-        simple_cookie.load(raw)
-    except CookieError:
-        simple_cookie = SimpleCookie()
-
-    if simple_cookie:
-        for key, morsel in simple_cookie.items():
-            value = morsel.value.strip()
-            if key and value:
-                parsed[key] = value
-
-    if parsed:
-        return parsed
-
-    # 部分异常格式下兜底手动拆分
-    for part in raw.split(";"):
-        item = part.strip()
-        if not item or "=" not in item:
-            continue
-        key, value = item.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if key and value:
-            parsed[key] = value
-
-    if parsed:
-        return parsed
-
-    return {"SESSDATA": raw}
+def _api_message(data: dict[str, Any]) -> str:
+    return str(data.get("message") or data.get("msg") or "未知错误")
 
 
 @dataclass
@@ -105,6 +73,7 @@ class VideoInfo:
     cover_url: str  # 封面图 URL
     up_name: str  # UP 主名
     desc: str  # 简介
+    cid: int  # 视频 cid
 
 
 async def get_video_info(
@@ -126,16 +95,23 @@ async def get_video_info(
     async with httpx.AsyncClient(
         headers=_HEADERS, cookies=cookies, timeout=480, follow_redirects=True
     ) as client:
-        resp = await client.get(_BILIBILI_API_VIEW, params={"bvid": bvid})
-        resp.raise_for_status()
-        data: dict[str, Any] = resp.json()
+        data = await request_with_wbi_fallback(
+            client,
+            endpoint=_BILIBILI_API_VIEW,
+            signed_endpoint=_BILIBILI_API_VIEW_WBI,
+            params={"bvid": bvid},
+            log_prefix="[Bilibili] 获取视频信息",
+        )
 
     if data.get("code") != 0:
-        msg = data.get("message", "未知错误")
+        msg = _api_message(data)
         raise ValueError(f"获取视频信息失败: {msg} (bvid={bvid})")
 
     info = data["data"]
     owner = info.get("owner", {})
+    pages = info.get("pages", [])
+    if not pages:
+        raise ValueError(f"视频无分P信息: {bvid}")
     return VideoInfo(
         bvid=bvid,
         title=info.get("title", ""),
@@ -143,6 +119,7 @@ async def get_video_info(
         cover_url=info.get("pic", ""),
         up_name=owner.get("name", ""),
         desc=info.get("desc", ""),
+        cid=int(pages[0]["cid"]),
     )
 
 
@@ -245,20 +222,21 @@ async def download_video(
     async with httpx.AsyncClient(
         headers=_HEADERS, cookies=cookies, timeout=480, follow_redirects=True
     ) as client:
-        resp = await client.get(
-            _BILIBILI_API_PLAYURL,
+        data = await request_with_wbi_fallback(
+            client,
+            endpoint=_BILIBILI_API_PLAYURL,
+            signed_endpoint=_BILIBILI_API_PLAYURL_WBI,
             params={
                 "bvid": bvid,
-                "cid": await _get_cid(bvid, cookie=cookie),
+                "cid": video_info.cid,
                 "fnval": 16,  # DASH 格式
                 "fourk": 1,
             },
+            log_prefix="[Bilibili] 获取播放地址",
         )
-        resp.raise_for_status()
-        data: dict[str, Any] = resp.json()
 
     if data.get("code") != 0:
-        raise ValueError(f"获取播放地址失败: {data.get('message', '未知错误')}")
+        raise ValueError(f"获取播放地址失败: {_api_message(data)}")
 
     dash = data["data"].get("dash")
     if not dash:
@@ -341,33 +319,6 @@ async def download_video(
         # 出错时清理工作目录
         _cleanup_dir(work_dir)
         raise
-
-
-async def _get_cid(
-    bvid: str,
-    cookie: str = "",
-    sessdata: str = "",
-) -> int:
-    """获取视频的 cid。"""
-    if not cookie and sessdata:
-        cookie = sessdata
-
-    cookies = _build_cookies(cookie)
-
-    async with httpx.AsyncClient(
-        headers=_HEADERS, cookies=cookies, timeout=480, follow_redirects=True
-    ) as client:
-        resp = await client.get(_BILIBILI_API_VIEW, params={"bvid": bvid})
-        resp.raise_for_status()
-        data: dict[str, Any] = resp.json()
-
-    if data.get("code") != 0:
-        raise ValueError(f"获取 cid 失败: {data.get('message', '未知错误')}")
-
-    pages = data["data"].get("pages", [])
-    if not pages:
-        raise ValueError(f"视频无分P信息: {bvid}")
-    return int(pages[0]["cid"])
 
 
 def _cleanup_dir(path: Path) -> None:

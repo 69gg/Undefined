@@ -62,6 +62,30 @@ EOF
 }
 ```
 
+### 4. 让 `skills/tools` 下的主工具对 Agent 可见
+
+除了 Agent 互调用外，也可以把主工具按白名单暴露给 Agent，避免在每个 Agent 下重复复制工具目录。
+
+在主工具目录下添加 `callable.json`：
+
+```json
+{
+    "enabled": true,
+    "allowed_callers": ["*"]
+}
+```
+
+文件位置：
+
+```
+src/Undefined/skills/tools/{tool_name}/callable.json
+```
+
+规则：
+- 不存在 `callable.json`：仅主 AI 可调用该工具（默认行为）
+- `enabled: true` + `allowed_callers`：对应 Agent 可调用
+- 若 Agent 本地 `tools/` 下存在同名工具：本地优先，共享主工具会被跳过
+
 ## 配置文件详解
 
 ### 文件位置

@@ -7,6 +7,7 @@ CACHE_DIR = DATA_DIR / "cache"
 RENDER_CACHE_DIR = CACHE_DIR / "render"
 IMAGE_CACHE_DIR = CACHE_DIR / "images"
 DOWNLOAD_CACHE_DIR = CACHE_DIR / "downloads"
+TEXT_FILE_CACHE_DIR = CACHE_DIR / "text_files"
 
 
 def ensure_dir(path: Path) -> Path:

@@ -101,7 +101,7 @@ Skills 是核心扩展机制，分四类，全部通过 `config.json`（OpenAI f
 - 主配置：`config.toml`（TOML 格式，支持热更新）
 - 配置模型：`config/models.py`，四类模型配置（chat/vision/agent/security）
 - 运行时动态数据：`config.local.json`（自动生成，勿提交）
-- 需重启的配置项：`log_level`, `logging.file_path/max_size_mb/backup_count`, `onebot.ws_url/token`, `webui.*`
+- 需重启的配置项：`log_level`, `logging.file_path/max_size_mb/backup_count/tty_enabled`, `onebot.ws_url/token`, `webui.*`
 
 ## 开发注意事项
 

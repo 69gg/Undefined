@@ -46,7 +46,11 @@ async def run_agent_with_tools(
     if not user_content.strip():
         return empty_user_content_message
 
-    tool_registry = AgentToolRegistry(agent_dir / "tools")
+    tool_registry = AgentToolRegistry(
+        agent_dir / "tools",
+        current_agent_name=agent_name,
+        is_main_agent=False,
+    )
     tools = tool_registry.get_tools_schema()
 
     # 发现并加载 agent 私有 Anthropic Skills（可选）

@@ -34,7 +34,11 @@ class MessageSender:
         self.config = config
 
     async def send_group_message(
-        self, group_id: int, message: str, auto_history: bool = True
+        self,
+        group_id: int,
+        message: str,
+        auto_history: bool = True,
+        history_prefix: str = "",
     ) -> None:
         """发送群消息"""
         if not self.config.is_group_allowed(group_id):
@@ -59,6 +63,8 @@ class MessageSender:
             # 解析消息以便正确处理 CQ 码（如图片）
             segments = message_to_segments(message)
             history_content = extract_text(segments, self.bot_qq)
+            if history_prefix:
+                history_content = f"{history_prefix}{history_content}"
             logger.debug(f"[历史记录] 正在保存 Bot 群聊回复: group={group_id}")
 
             await self.history_manager.add_group_message(

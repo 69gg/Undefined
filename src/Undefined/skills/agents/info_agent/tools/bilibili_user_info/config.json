@@ -2,13 +2,38 @@
     "type": "function",
     "function": {
         "name": "bilibili_user_info",
-        "description": "查询 Bilibili 用户信息。",
+        "description": "查询 Bilibili 用户信息，支持控制返回详细程度与扩展字段。",
         "parameters": {
             "type": "object",
             "properties": {
                 "mid": {
                     "type": "integer",
                     "description": "用户 UID (mid)"
+                },
+                "detail_mode": {
+                    "type": "string",
+                    "enum": ["brief", "full"],
+                    "description": "返回模式：brief=简要（默认），full=详细"
+                },
+                "include_relation": {
+                    "type": "boolean",
+                    "description": "是否补充粉丝/关注统计（默认 true）"
+                },
+                "include_card": {
+                    "type": "boolean",
+                    "description": "是否补充名片信息（稿件数/获赞等，默认 true）"
+                },
+                "include_live": {
+                    "type": "boolean",
+                    "description": "是否展示直播间信息（默认 true）"
+                },
+                "include_face": {
+                    "type": "boolean",
+                    "description": "是否展示头像链接（默认 true）"
+                },
+                "include_space_link": {
+                    "type": "boolean",
+                    "description": "是否展示空间链接（默认 true）"
                 }
             },
             "required": ["mid"]

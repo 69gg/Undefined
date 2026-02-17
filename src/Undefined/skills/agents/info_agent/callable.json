@@ -1,4 +1,4 @@
 {
     "enabled": true,
-    "allowed_callers": ["code_delivery_agent"]
+    "allowed_callers": ["web_agent"]
 }

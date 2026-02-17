@@ -30,6 +30,7 @@ except Exception:  # pragma: no cover
 from .models import (
     AgentModelConfig,
     ChatModelConfig,
+    InflightSummaryModelConfig,
     SecurityModelConfig,
     VisionModelConfig,
 )
@@ -361,6 +362,8 @@ class Config:
     context_recent_messages_limit: int
     ai_request_max_retries: int
     nagaagent_mode_enabled: bool
+    inflight_pre_register_enabled: bool
+    inflight_summary_enabled: bool
     onebot_ws_url: str
     onebot_token: str
     chat_model: ChatModelConfig
@@ -368,10 +371,12 @@ class Config:
     security_model_enabled: bool
     security_model: SecurityModelConfig
     agent_model: AgentModelConfig
+    inflight_summary_model: InflightSummaryModelConfig
     log_level: str
     log_file_path: str
     log_max_size: int
     log_backup_count: int
+    log_tty_enabled: bool
     log_thinking: bool
     tools_dot_delimiter: str
     tools_description_truncate_enabled: bool
@@ -425,6 +430,8 @@ class Config:
     code_delivery_container_memory_limit: str
     code_delivery_container_cpu_limit: str
     code_delivery_command_blacklist: list[str]
+    # messages 工具集
+    messages_send_text_file_max_size_kb: int
     # Bilibili 视频提取
     bilibili_auto_extract_enabled: bool
     bilibili_cookie: str
@@ -553,6 +560,22 @@ class Config:
             ),
             False,
         )
+        inflight_pre_register_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("features", "inflight_pre_register_enabled"),
+                "INFLIGHT_PRE_REGISTER_ENABLED",
+            ),
+            True,
+        )
+        inflight_summary_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("features", "inflight_summary_enabled"),
+                "INFLIGHT_SUMMARY_ENABLED",
+            ),
+            False,
+        )
 
         onebot_ws_url = _coerce_str(
             _get_value(data, ("onebot", "ws_url"), "ONEBOT_WS_URL"), ""
@@ -573,6 +596,9 @@ class Config:
         )
         security_model = cls._parse_security_model_config(data, chat_model)
         agent_model = cls._parse_agent_model_config(data)
+        inflight_summary_model = cls._parse_inflight_summary_model_config(
+            data, chat_model
+        )
 
         superadmin_qq, admin_qqs = cls._merge_admins(
             superadmin_qq=superadmin_qq, admin_qqs=admin_qqs
@@ -605,6 +631,10 @@ class Config:
         )
         log_backup_count = _coerce_int(
             _get_value(data, ("logging", "backup_count"), "LOG_BACKUP_COUNT"), 5
+        )
+        log_tty_enabled = _coerce_bool(
+            _get_value(data, ("logging", "tty_enabled"), "LOG_TTY_ENABLED"),
+            False,
         )
         log_thinking = _coerce_bool(
             _get_value(data, ("logging", "log_thinking"), "LOG_THINKING"), True
@@ -949,6 +979,18 @@ class Config:
         else:
             code_delivery_command_blacklist = []
 
+        # messages 工具集配置
+        messages_send_text_file_max_size_kb = _coerce_int(
+            _get_value(
+                data,
+                ("messages", "send_text_file_max_size_kb"),
+                "MESSAGES_SEND_TEXT_FILE_MAX_SIZE_KB",
+            ),
+            512,
+        )
+        if messages_send_text_file_max_size_kb <= 0:
+            messages_send_text_file_max_size_kb = 512
+
         webui_settings = load_webui_settings(config_path)
 
         if strict:
@@ -961,7 +1003,13 @@ class Config:
                 agent_model=agent_model,
             )
 
-        cls._log_debug_info(chat_model, vision_model, security_model, agent_model)
+        cls._log_debug_info(
+            chat_model,
+            vision_model,
+            security_model,
+            agent_model,
+            inflight_summary_model,
+        )
 
         return cls(
             bot_qq=bot_qq,
@@ -978,6 +1026,8 @@ class Config:
             context_recent_messages_limit=context_recent_messages_limit,
             ai_request_max_retries=ai_request_max_retries,
             nagaagent_mode_enabled=nagaagent_mode_enabled,
+            inflight_pre_register_enabled=inflight_pre_register_enabled,
+            inflight_summary_enabled=inflight_summary_enabled,
             onebot_ws_url=onebot_ws_url,
             onebot_token=onebot_token,
             chat_model=chat_model,
@@ -985,10 +1035,12 @@ class Config:
             security_model_enabled=security_model_enabled,
             security_model=security_model,
             agent_model=agent_model,
+            inflight_summary_model=inflight_summary_model,
             log_level=log_level,
             log_file_path=log_file_path,
             log_max_size=log_max_size_mb * 1024 * 1024,
             log_backup_count=log_backup_count,
+            log_tty_enabled=log_tty_enabled,
             log_thinking=log_thinking,
             tools_dot_delimiter=tools_dot_delimiter,
             tools_description_truncate_enabled=tools_description_truncate_enabled,
@@ -1041,6 +1093,7 @@ class Config:
             code_delivery_container_memory_limit=code_delivery_container_memory_limit,
             code_delivery_container_cpu_limit=code_delivery_container_cpu_limit,
             code_delivery_command_blacklist=code_delivery_command_blacklist,
+            messages_send_text_file_max_size_kb=messages_send_text_file_max_size_kb,
             bilibili_auto_extract_enabled=bilibili_auto_extract_enabled,
             bilibili_cookie=bilibili_cookie,
             bilibili_prefer_quality=bilibili_prefer_quality,
@@ -1404,6 +1457,102 @@ class Config:
         )
 
     @staticmethod
+    def _parse_inflight_summary_model_config(
+        data: dict[str, Any], chat_model: ChatModelConfig
+    ) -> InflightSummaryModelConfig:
+        api_url = _coerce_str(
+            _get_value(
+                data,
+                ("models", "inflight_summary", "api_url"),
+                "INFLIGHT_SUMMARY_MODEL_API_URL",
+            ),
+            "",
+        )
+        api_key = _coerce_str(
+            _get_value(
+                data,
+                ("models", "inflight_summary", "api_key"),
+                "INFLIGHT_SUMMARY_MODEL_API_KEY",
+            ),
+            "",
+        )
+        model_name = _coerce_str(
+            _get_value(
+                data,
+                ("models", "inflight_summary", "model_name"),
+                "INFLIGHT_SUMMARY_MODEL_NAME",
+            ),
+            "",
+        )
+
+        queue_interval_seconds = _coerce_float(
+            _get_value(
+                data,
+                ("models", "inflight_summary", "queue_interval_seconds"),
+                "INFLIGHT_SUMMARY_MODEL_QUEUE_INTERVAL",
+            ),
+            1.5,
+        )
+        if queue_interval_seconds <= 0:
+            queue_interval_seconds = 1.5
+
+        thinking_include_budget = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "inflight_summary", "thinking_include_budget"),
+                "INFLIGHT_SUMMARY_MODEL_THINKING_INCLUDE_BUDGET",
+            ),
+            False,
+        )
+        thinking_tool_call_compat = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "inflight_summary", "thinking_tool_call_compat"),
+                "INFLIGHT_SUMMARY_MODEL_THINKING_TOOL_CALL_COMPAT",
+            ),
+            False,
+        )
+
+        resolved_api_url = api_url if api_url else chat_model.api_url
+        resolved_api_key = api_key if api_key else chat_model.api_key
+        resolved_model_name = model_name if model_name else chat_model.model_name
+        if not (api_url and api_key and model_name):
+            logger.info("未完整配置 inflight_summary 模型，已回退到 chat 模型")
+
+        return InflightSummaryModelConfig(
+            api_url=resolved_api_url,
+            api_key=resolved_api_key,
+            model_name=resolved_model_name,
+            max_tokens=_coerce_int(
+                _get_value(
+                    data,
+                    ("models", "inflight_summary", "max_tokens"),
+                    "INFLIGHT_SUMMARY_MODEL_MAX_TOKENS",
+                ),
+                128,
+            ),
+            queue_interval_seconds=queue_interval_seconds,
+            thinking_enabled=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "inflight_summary", "thinking_enabled"),
+                    "INFLIGHT_SUMMARY_MODEL_THINKING_ENABLED",
+                ),
+                False,
+            ),
+            thinking_budget_tokens=_coerce_int(
+                _get_value(
+                    data,
+                    ("models", "inflight_summary", "thinking_budget_tokens"),
+                    "INFLIGHT_SUMMARY_MODEL_THINKING_BUDGET_TOKENS",
+                ),
+                0,
+            ),
+            thinking_include_budget=thinking_include_budget,
+            thinking_tool_call_compat=thinking_tool_call_compat,
+        )
+
+    @staticmethod
     def _merge_admins(
         superadmin_qq: int, admin_qqs: list[int]
     ) -> tuple[int, list[int]]:
@@ -1456,6 +1605,7 @@ class Config:
         vision_model: VisionModelConfig,
         security_model: SecurityModelConfig,
         agent_model: AgentModelConfig,
+        inflight_summary_model: InflightSummaryModelConfig,
     ) -> None:
         configs: list[
             tuple[
@@ -1463,13 +1613,15 @@ class Config:
                 ChatModelConfig
                 | VisionModelConfig
                 | SecurityModelConfig
-                | AgentModelConfig,
+                | AgentModelConfig
+                | InflightSummaryModelConfig,
             ]
         ] = [
             ("chat", chat_model),
             ("vision", vision_model),
             ("security", security_model),
             ("agent", agent_model),
+            ("inflight_summary", inflight_summary_model),
         ]
         for name, cfg in configs:
             logger.debug(
@@ -1495,6 +1647,7 @@ class Config:
                     VisionModelConfig,
                     SecurityModelConfig,
                     AgentModelConfig,
+                    InflightSummaryModelConfig,
                 ),
             ):
                 changes.update(_update_dataclass(old_value, new_value, prefix=name))

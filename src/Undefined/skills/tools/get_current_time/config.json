@@ -2,10 +2,24 @@
     "type": "function",
     "function": {
         "name": "get_current_time",
-        "description": "获取当前系统时间。",
+        "description": "获取当前系统时间，支持公历、农历、黄历等多种信息。",
         "parameters": {
             "type": "object",
-            "properties": {},
+            "properties": {
+                "format": {
+                    "type": "string",
+                    "enum": ["iso", "text", "json"],
+                    "description": "输出格式：iso=ISO8601格式(默认)，text=人类可读文本，json=结构化JSON"
+                },
+                "include_lunar": {
+                    "type": "boolean",
+                    "description": "是否包含农历信息（年、月、日、生肖、干支等），默认 false"
+                },
+                "include_almanac": {
+                    "type": "boolean",
+                    "description": "是否包含黄历信息（宜忌、节气、节日、冲煞、胎神等），默认 false"
+                }
+            },
             "required": []
         }
     }

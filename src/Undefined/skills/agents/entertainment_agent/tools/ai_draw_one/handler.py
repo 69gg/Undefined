@@ -10,13 +10,15 @@ logger = logging.getLogger(__name__)
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     prompt = args.get("prompt")
-    model = args.get("model", "anything-v5")  # 默认模型猜测
+    model = args.get("model", "doubaoApp/generations")  # 默认模型
+    del model  # 暂时不传model
     size = args.get("size", "1:1")
     target_id = args.get("target_id")
     message_type = args.get("message_type")
 
     url = get_xingzhige_url("/API/DrawOne/")
-    params = {"prompt": prompt, "model": model, "size": size}
+    # params = {"prompt": prompt, "model": model, "size": size}
+    params = {"prompt": prompt, "size": size}
 
     try:
         timeout = get_request_timeout(60.0)
@@ -33,17 +35,13 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         except Exception:
             return f"API 返回错误 (非JSON): {response.text[:100]}"
 
-        # 解析响应
-        # 文档说 "返回: Json"。它可能包含 "url" 或 "image" 字段。
-        # 我将假设是 'url' 或类似字段。
-        # 如果找不到 URL，我将返回 JSON 给用户以进行调试。
-        image_url = data.get("url") or data.get("image") or data.get("img")
-
-        if not image_url and "data" in data and isinstance(data["data"], str):
-            image_url = data["data"]
-
-        if not image_url:
-            return f"未找到图片链接: {data}"
+        try:
+            image_url = data["data"][0]["url"]
+            logger.info(f"API 返回原文: {data}")
+            logger.info(f"提取到的图片链接: {image_url}")
+        except (KeyError, IndexError):
+            logger.error(f"API 返回原文 (错误：未找到图片链接): {data}")
+            return f"API 返回原文 (错误：未找到图片链接): {data}"
 
         # 下载图片
         img_response = await request_with_retry(

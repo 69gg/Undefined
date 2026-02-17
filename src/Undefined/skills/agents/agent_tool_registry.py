@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 from pathlib import Path
@@ -15,24 +16,49 @@ class AgentToolRegistry(BaseRegistry):
     支持加载本地工具以及 Agent 私有的 MCP (Model Context Protocol) 扩展工具。
     """
 
-    def __init__(self, tools_dir: Path, mcp_config_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        tools_dir: Path,
+        mcp_config_path: Path | None = None,
+        *,
+        current_agent_name: str | None = None,
+        is_main_agent: bool = False,
+    ) -> None:
         super().__init__(tools_dir, kind="agent_tool")
         self.mcp_config_path: Path | None = (
             mcp_config_path if mcp_config_path is None else Path(mcp_config_path)
         )
+        normalized_agent_name = (
+            str(current_agent_name).strip() if current_agent_name is not None else ""
+        )
+        self.current_agent_name: str | None = normalized_agent_name or None
+        self.is_main_agent: bool = bool(is_main_agent)
         self._mcp_registry: Any | None = None
         self._mcp_initialized: bool = False
         self.load_tools()
 
     def load_tools(self) -> None:
-        """加载本地工具和可调用的 agent"""
+        """加载本地工具、可调用 agent 与可共享主工具。"""
         # 1. 加载本地工具（原有逻辑）
         self.load_items()
 
         # 2. 扫描并注册可调用的 agent
         callable_agents = self._scan_callable_agents()
 
+        if not self.is_main_agent and not self.current_agent_name:
+            logger.info(
+                "[AgentToolRegistry] 未提供 current_agent_name，严格模式下不注册任何可调用 agent"
+            )
+
         for agent_name, agent_dir, allowed_callers in callable_agents:
+            if not self._is_callable_agent_visible(allowed_callers):
+                logger.debug(
+                    "[AgentToolRegistry] 当前 agent=%s 无权看到 call_%s，跳过注册",
+                    self.current_agent_name,
+                    agent_name,
+                )
+                continue
+
             # 读取 agent 的 config.json
             agent_config = self._load_agent_config(agent_dir)
             if not agent_config:
@@ -59,6 +85,49 @@ class AgentToolRegistry(BaseRegistry):
                 f"[AgentToolRegistry] 注册可调用 agent: {tool_name}，"
                 f"允许调用方: {callers_str}"
             )
+
+        # 3. 扫描并注册可共享的主 tools（skills/tools/*/callable.json）
+        callable_main_tools = self._scan_callable_main_tools()
+        for tool_name, tool_schema, allowed_callers in callable_main_tools:
+            if not self._is_callable_agent_visible(allowed_callers):
+                logger.debug(
+                    "[AgentToolRegistry] 当前 agent=%s 无权看到共享工具 %s，跳过注册",
+                    self.current_agent_name,
+                    tool_name,
+                )
+                continue
+
+            # 本地工具优先，避免改变既有行为
+            if tool_name in self._items:
+                logger.debug(
+                    "[AgentToolRegistry] 共享工具 %s 与本地工具重名，保留本地实现",
+                    tool_name,
+                )
+                continue
+
+            handler = self._create_main_tool_proxy_handler(tool_name, allowed_callers)
+            self.register_external_item(tool_name, copy.deepcopy(tool_schema), handler)
+
+            callers_str = (
+                ", ".join(allowed_callers)
+                if "*" not in allowed_callers
+                else "所有 agent"
+            )
+            logger.info(
+                "[AgentToolRegistry] 注册共享主工具: %s，允许调用方: %s",
+                tool_name,
+                callers_str,
+            )
+
+    def _is_callable_agent_visible(self, allowed_callers: list[str]) -> bool:
+        """判断目标 callable agent 是否应暴露给当前 agent。"""
+        if self.is_main_agent:
+            return True
+
+        if not self.current_agent_name:
+            return False
+
+        return "*" in allowed_callers or self.current_agent_name in allowed_callers
 
     def _scan_callable_agents(self) -> list[tuple[str, Path, list[str]]]:
         """扫描所有可被调用的 agent
@@ -111,6 +180,92 @@ class AgentToolRegistry(BaseRegistry):
 
         return callable_agents
 
+    def _find_skills_root(self) -> Path | None:
+        """向上查找 skills 根目录。"""
+        for candidate in (self.base_dir, *self.base_dir.parents):
+            if candidate.name == "skills":
+                return candidate
+        return None
+
+    def _scan_callable_main_tools(
+        self,
+    ) -> list[tuple[str, dict[str, Any], list[str]]]:
+        """扫描可共享给 Agent 的主工具。
+
+        配置位置：skills/tools/{tool_name}/callable.json
+        返回：[(tool_name, tool_schema, allowed_callers), ...]
+        """
+        skills_root = self._find_skills_root()
+        if not skills_root:
+            logger.warning(
+                "[AgentToolRegistry] 未找到 skills 根目录，跳过共享主工具扫描"
+            )
+            return []
+
+        tools_root = skills_root / "tools"
+        if not tools_root.exists() or not tools_root.is_dir():
+            return []
+
+        callable_tools: list[tuple[str, dict[str, Any], list[str]]] = []
+        for tool_dir in tools_root.iterdir():
+            if not tool_dir.is_dir():
+                continue
+            if tool_dir.name.startswith("_"):
+                continue
+
+            callable_json = tool_dir / "callable.json"
+            if not callable_json.exists():
+                continue
+
+            config_path = tool_dir / "config.json"
+            handler_path = tool_dir / "handler.py"
+            if not config_path.exists() or not handler_path.exists():
+                logger.warning(
+                    "[AgentToolRegistry] 共享工具目录缺少 config.json 或 handler.py: %s",
+                    tool_dir,
+                )
+                continue
+
+            try:
+                with open(callable_json, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+
+                if not config.get("enabled", False):
+                    continue
+
+                allowed_callers = config.get("allowed_callers", [])
+                if not isinstance(allowed_callers, list):
+                    logger.warning(
+                        "%s 的 allowed_callers 必须是列表，跳过",
+                        callable_json,
+                    )
+                    continue
+
+                if not allowed_callers:
+                    logger.info(
+                        "共享工具 %s 的 allowed_callers 为空，跳过注册",
+                        tool_dir.name,
+                    )
+                    continue
+
+                tool_schema = self._load_tool_config(config_path)
+                if not tool_schema:
+                    logger.warning("无法读取共享工具配置，跳过: %s", config_path)
+                    continue
+
+                tool_name = str(tool_schema.get("function", {}).get("name", "")).strip()
+                if not tool_name:
+                    logger.warning(
+                        "共享工具配置缺少 function.name，跳过: %s", config_path
+                    )
+                    continue
+
+                callable_tools.append((tool_name, tool_schema, allowed_callers))
+            except Exception as e:
+                logger.warning("读取 %s 失败: %s", callable_json, e)
+
+        return callable_tools
+
     def _load_agent_config(self, agent_dir: Path) -> dict[str, Any] | None:
         """读取 agent 的 config.json
 
@@ -128,6 +283,24 @@ class AgentToolRegistry(BaseRegistry):
                 return None
         except Exception as e:
             logger.warning(f"读取 {config_path} 失败: {e}")
+            return None
+
+    def _load_tool_config(self, config_path: Path) -> dict[str, Any] | None:
+        """读取主工具 config.json。"""
+        if not config_path.exists():
+            return None
+
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            if not isinstance(config, dict):
+                return None
+            function = config.get("function")
+            if not isinstance(function, dict) or "name" not in function:
+                return None
+            return config
+        except Exception as e:
+            logger.warning("读取 %s 失败: %s", config_path, e)
             return None
 
     def _create_agent_tool_schema(
@@ -228,6 +401,43 @@ class AgentToolRegistry(BaseRegistry):
             except Exception as e:
                 logger.exception(f"调用 agent {target_agent_name} 失败")
                 return f"调用 {target_agent_name} 失败: {e}"
+
+        return handler
+
+    def _create_main_tool_proxy_handler(
+        self, target_tool_name: str, allowed_callers: list[str]
+    ) -> Callable[[dict[str, Any], dict[str, Any]], Awaitable[str]]:
+        """创建共享主工具代理 handler，带访问控制。"""
+
+        async def handler(args: dict[str, Any], context: dict[str, Any]) -> str:
+            current_agent = context.get("agent_name")
+            if not current_agent:
+                return "错误：无法确定调用方 agent"
+
+            if "*" not in allowed_callers and current_agent not in allowed_callers:
+                logger.warning(
+                    "[SharedTool] %s 尝试调用 %s，但未被授权",
+                    current_agent,
+                    target_tool_name,
+                )
+                return f"错误：{current_agent} 无权调用共享工具 {target_tool_name}"
+
+            ai_client = context.get("ai_client")
+            if not ai_client:
+                return "错误：AI client 未在上下文中提供"
+
+            tool_registry = getattr(ai_client, "tool_registry", None)
+            if tool_registry is None:
+                return "错误：AI client 不支持 tool_registry"
+
+            try:
+                result = await tool_registry.execute_tool(
+                    target_tool_name, args, context
+                )
+                return str(result)
+            except Exception as e:
+                logger.exception("调用共享主工具 %s 失败", target_tool_name)
+                return f"调用共享工具 {target_tool_name} 失败: {e}"
 
         return handler
 

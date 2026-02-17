@@ -178,6 +178,39 @@ thinking_include_budget = true
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = false
 
+# zh: 进行中任务摘要模型配置（可选，用于并发真空期的“处理中摘要”）。
+# en: Inflight summary model config (optional, used to generate in-progress task summaries).
+# zh: 当 api_url/api_key/model_name 任一为空时，自动回退到 [models.chat]。
+# en: Falls back to [models.chat] when api_url/api_key/model_name is missing.
+[models.inflight_summary]
+# zh: OpenAI-compatible 基址 URL（可选，留空则回退 chat）。
+# en: OpenAI-compatible base URL (optional; empty means fallback to chat).
+api_url = ""
+# zh: 模型 API Key（可选，留空则回退 chat）。
+# en: API key (optional; empty means fallback to chat).
+api_key = ""
+# zh: 模型名称（可选，留空则回退 chat）。
+# en: Model name (optional; empty means fallback to chat).
+model_name = ""
+# zh: 最大生成 tokens（可选，默认 128）。
+# en: Max generation tokens (optional, default 128).
+max_tokens = 128
+# zh: 队列发车间隔（秒，可选，默认 1.5）。
+# en: Queue interval in seconds (optional, default 1.5).
+queue_interval_seconds = 1.5
+# zh: 是否启用 thinking（可选，默认 false）。
+# en: Enable thinking (optional, default false).
+thinking_enabled = false
+# zh: thinking 预算 tokens（可选，默认 0）。
+# en: Thinking budget tokens (optional, default 0).
+thinking_budget_tokens = 0
+# zh: 是否在请求中发送 budget_tokens（可选，默认 false）。
+# en: Include budget_tokens in request (optional, default false).
+thinking_include_budget = false
+# zh: 思维链工具调用兼容（可选，默认 false）。
+# en: Thinking tool-call compatibility (optional, default false).
+thinking_tool_call_compat = false
+
 # zh: 日志配置。
 # en: Logging settings.
 [logging]
@@ -195,6 +228,9 @@ max_size_mb = 10
 # zh: 保留日志文件数量。
 # en: Log backup count.
 backup_count = 5
+# zh: 是否输出到终端 TTY（默认关闭，避免后台运行时终端阻塞）。
+# en: Enable logging to terminal TTY (default: off, prevents blocking in background runs).
+tty_enabled = false
 # zh: 是否在日志中输出思维链（默认开启）。
 # en: Log thinking output (default: on).
 log_thinking = true
@@ -220,8 +256,8 @@ sanitize_verbose = false
 # en: Description preview length in logs.
 description_preview_len = 160
 
-# zh: 功能开关（默认建议保持关闭）。
-# en: Feature flags (recommended to keep disabled by default).
+# zh: 功能开关。
+# en: Feature flags.
 [features]
 # zh: 是否启用 NagaAgent 模式：
 # zh: - true: 使用 `res/prompts/undefined_nagaagent.xml`，并向模型暴露/允许调用相关 Agent
@@ -230,6 +266,22 @@ description_preview_len = 160
 # en: - true: use `res/prompts/undefined_nagaagent.xml` and expose related agents
 # en: - false: use `res/prompts/undefined.xml` and hide/disable related agents
 nagaagent_mode_enabled = false
+# zh: 是否启用“进行中任务摘要”防重机制。
+# zh: 是否预注册进行中占位（防止重复执行）
+# zh: - true: 启用（默认），在首轮前预占位
+# zh: - false: 关闭，不预注册占位
+# en: Enable inflight task pre-registration (prevent duplicate execution)
+# en: - true: enable (default), pre-register before first round
+# en: - false: disable, no pre-registration
+inflight_pre_register_enabled = true
+
+# zh: 是否生成进行中任务摘要（需要额外 API 调用）
+# zh: - true: 启用，异步生成动作摘要
+# zh: - false: 关闭（默认），不生成摘要
+# en: Enable inflight task summary generation (requires additional API calls)
+# en: - true: enable, generate action summary asynchronously
+# en: - false: disable (default), no summary generation
+inflight_summary_enabled = false
 
 # zh: 彩蛋功能（可选）。
 # en: Easter egg features (optional)
@@ -311,8 +363,8 @@ xxapi_base_url = "https://v2.xxapi.cn"
 # zh: 星之阁 API 基础地址。
 # en: Xingzhige API base URL.
 xingzhige_base_url = "https://api.xingzhige.com"
-# zh: JKYAI API 基础地址。
-# en: JKYAI API base URL.
+# zh: JKYAI API 基础地址。（已弃用，不必填写）
+# en: JKYAI API base URL.(this field is no longer in use and does not need to be filled in)
 jkyai_base_url = "https://api.jkyai.top"
 # zh: 心知天气 API 基础地址。
 # en: Seniverse API base URL.
@@ -355,14 +407,21 @@ archive_prune_mode = "delete"
 # en: MCP config file path (relative to the working directory).
 config_path = "config/mcp.json"
 
+# zh: 消息工具配置。
+# en: Message tool settings.
+[messages]
+# zh: messages.send_text_file 单文件文本发送大小上限（KB）。默认 512KB（0.5MB）。
+# en: Size limit for messages.send_text_file single-text-file uploads (KB). Default 512KB (0.5MB).
+send_text_file_max_size_kb = 512
+
 # zh: Bilibili 视频自动提取配置。
 # en: Bilibili video auto-extraction settings.
 [bilibili]
 # zh: 是否启用自动提取（检测到B站视频链接/BV号时自动下载并发送）。
 # en: Enable auto-extraction (auto-download and send when Bilibili video links/BV IDs are detected).
 auto_extract_enabled = false
-# zh: B站账号完整 Cookie 字符串（推荐，至少包含 SESSDATA；用于更稳定地通过风控）。
-# en: Full Bilibili Cookie string (recommended, should include SESSDATA for better anti-bot pass rate).
+# zh: B站账号完整 Cookie 字符串（必须粘贴浏览器中的完整内容，不要只填 SESSDATA；建议至少包含 SESSDATA + buvid3 + buvid4，用于通过风控与 WBI 搜索）。
+# en: Full Bilibili Cookie string (paste the complete browser cookie; do not provide SESSDATA only. Recommended to include at least SESSDATA + buvid3 + buvid4 for anti-bot checks and WBI search).
 cookie = ""
 # zh: 首选清晰度: 80=1080P, 64=720P, 32=480P。
 # en: Preferred quality: 80=1080P, 64=720P, 32=480P.

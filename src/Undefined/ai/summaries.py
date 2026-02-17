@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from string import Formatter
 
 import aiofiles
 
@@ -16,6 +17,17 @@ from Undefined.utils.resources import read_text_resource
 logger = logging.getLogger(__name__)
 
 
+def _template_fields(template: str) -> list[str]:
+    fields: list[str] = []
+    try:
+        for _, field_name, _, _ in Formatter().parse(template):
+            if field_name:
+                fields.append(field_name)
+    except ValueError:
+        return []
+    return fields
+
+
 class SummaryService:
     def __init__(
         self,
@@ -24,12 +36,14 @@ class SummaryService:
         token_counter: TokenCounter,
         summarize_prompt_path: str = "res/prompts/summarize.txt",
         merge_prompt_path: str = "res/prompts/merge_summaries.txt",
+        title_prompt_path: str = "res/prompts/generate_title.txt",
     ) -> None:
         self._requester = requester
         self._chat_config = chat_config
         self._token_counter = token_counter
         self._summarize_prompt_path = summarize_prompt_path
         self._merge_prompt_path = merge_prompt_path
+        self._title_prompt_path = title_prompt_path
 
     async def summarize_chat(self, messages: str, context: str = "") -> str:
         """对聊天记录进行总结
@@ -164,11 +178,74 @@ class SummaryService:
         返回:
             生成的简短标题
         """
-        prompt = (
+        summary_text = summary[:2000]
+        prompt_template = (
             "请根据以下 Bug 修复分析报告，生成一个简短、准确的标题（不超过 20 字），用于 FAQ 索引。\n"
             "只返回标题文本，不要包含任何前缀或引号。\n\n"
-            "分析报告：\n" + summary[:2000]
+            "分析报告：\n{summary}"
         )
+
+        logger.debug(
+            "[总结] 开始生成标题: summary_len=%s truncated_len=%s",
+            len(summary),
+            len(summary_text),
+        )
+
+        try:
+            loaded_prompt_template = read_text_resource(self._title_prompt_path).strip()
+            if loaded_prompt_template:
+                prompt_template = loaded_prompt_template
+                logger.debug(
+                    "[总结] 使用标题提示词文件: path=%s len=%s fields=%s",
+                    self._title_prompt_path,
+                    len(prompt_template),
+                    _template_fields(prompt_template),
+                )
+        except Exception:
+            try:
+                async with aiofiles.open(
+                    self._title_prompt_path, "r", encoding="utf-8"
+                ) as f:
+                    loaded_prompt_template = (await f.read()).strip()
+                if loaded_prompt_template:
+                    prompt_template = loaded_prompt_template
+                    logger.debug(
+                        "[总结] 使用标题提示词文件(异步兜底): path=%s len=%s fields=%s",
+                        self._title_prompt_path,
+                        len(prompt_template),
+                        _template_fields(prompt_template),
+                    )
+            except Exception:
+                logger.debug(
+                    "[总结] 标题提示词读取失败，使用内置模板: %s",
+                    self._title_prompt_path,
+                )
+
+        try:
+            template_fields = _template_fields(prompt_template)
+            if "summary" not in template_fields:
+                logger.warning(
+                    "[总结] 标题提示词缺少 {summary} 占位符: path=%s fields=%s",
+                    self._title_prompt_path,
+                    template_fields,
+                )
+            prompt = prompt_template.format(summary=summary_text)
+            logger.debug(
+                "[总结] 标题模板渲染成功: fields=%s prompt_len=%s",
+                template_fields,
+                len(prompt),
+            )
+        except Exception:
+            logger.warning(
+                "[总结] 标题模板渲染失败，回退内置模板: path=%s fields=%s",
+                self._title_prompt_path,
+                _template_fields(prompt_template),
+            )
+            prompt = (
+                "请根据以下 Bug 修复分析报告，生成一个简短、准确的标题（不超过 20 字），用于 FAQ 索引。\n"
+                "只返回标题文本，不要包含任何前缀或引号。\n\n"
+                "分析报告：\n" + summary_text
+            )
 
         try:
             result = await self._requester.request(
@@ -178,6 +255,7 @@ class SummaryService:
                 call_type="generate_title",
             )
             title = extract_choices_content(result).strip()
+            logger.debug("[总结] 标题生成完成: title_len=%s", len(title))
             return title
         except Exception as exc:
             logger.exception(f"生成标题失败: {exc}")

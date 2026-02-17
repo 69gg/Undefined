@@ -346,7 +346,11 @@ async def _run_agent_with_retry(
     agent_config = ai_client.agent_config
     system_prompt = await load_prompt_text(agent_dir, "你是一个代码交付助手。")
 
-    tool_registry = AgentToolRegistry(agent_dir / "tools")
+    tool_registry = AgentToolRegistry(
+        agent_dir / "tools",
+        current_agent_name="code_delivery_agent",
+        is_main_agent=False,
+    )
     tools = tool_registry.get_tools_schema()
 
     agent_history = context.get("agent_history", [])

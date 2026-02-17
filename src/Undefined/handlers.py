@@ -35,6 +35,8 @@ from Undefined.utils.logging import log_debug_json, redact_string
 
 logger = logging.getLogger(__name__)
 
+KEYWORD_REPLY_HISTORY_PREFIX = "[系统关键词自动回复] "
+
 
 class MessageHandler:
     """消息处理器"""
@@ -368,7 +370,11 @@ class MessageHandler:
                     message = reply
                 logger.info(f"关键词回复: {reply}")
             # 使用 sender 发送
-            await self.sender.send_group_message(group_id, message)
+            await self.sender.send_group_message(
+                group_id,
+                message,
+                history_prefix=KEYWORD_REPLY_HISTORY_PREFIX,
+            )
             return
 
         # Bilibili 视频自动提取

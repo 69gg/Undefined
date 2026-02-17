@@ -21,6 +21,7 @@ _RESTART_REQUIRED_KEYS: set[str] = {
     "log_file_path",
     "log_max_size",
     "log_backup_count",
+    "log_tty_enabled",
     "onebot_ws_url",
     "onebot_token",
     "webui_url",
@@ -33,6 +34,7 @@ _QUEUE_INTERVAL_KEYS: set[str] = {
     "vision_model.queue_interval_seconds",
     "security_model.queue_interval_seconds",
     "agent_model.queue_interval_seconds",
+    "inflight_summary_model.queue_interval_seconds",
 }
 
 _MODEL_NAME_KEYS: set[str] = {
@@ -40,6 +42,7 @@ _MODEL_NAME_KEYS: set[str] = {
     "vision_model.model_name",
     "security_model.model_name",
     "agent_model.model_name",
+    "inflight_summary_model.model_name",
 }
 
 _AGENT_INTRO_KEYS: set[str] = {

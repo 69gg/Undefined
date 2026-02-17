@@ -1,6 +1,8 @@
 import logging
 from datetime import datetime
-from typing import Any, Optional
+from string import Formatter
+from typing import Any, Optional, Literal
+
 from Undefined.config import Config
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
@@ -14,6 +16,28 @@ from Undefined.utils.resources import read_text_resource
 from Undefined.utils.xml import escape_xml_attr, escape_xml_text
 
 logger = logging.getLogger(__name__)
+
+
+_INFLIGHT_SUMMARY_SYSTEM_PROMPT_PATH = "res/prompts/inflight_summary_system.txt"
+_INFLIGHT_SUMMARY_USER_PROMPT_PATH = "res/prompts/inflight_summary_user.txt"
+_STATS_ANALYSIS_PROMPT_PATH = "res/prompts/stats_analysis.txt"
+_STATS_ANALYSIS_FALLBACK_PROMPT = (
+    "你是一位专业的数据分析师。请根据以下 Token 使用统计数据提供分析：\n\n"
+    "{data_summary}\n\n"
+    "请从整体概况、趋势、模型效率、成本结构、异常点和优化建议进行总结，"
+    "语言简洁，建议可执行。"
+)
+
+
+def _template_fields(template: str) -> list[str]:
+    fields: list[str] = []
+    try:
+        for _, field_name, _, _ in Formatter().parse(template):
+            if field_name:
+                fields.append(field_name)
+    except ValueError:
+        return []
+    return fields
 
 
 class AICoordinator:
@@ -206,6 +230,8 @@ class AICoordinator:
             await self._execute_stats_analysis(request)
         elif req_type == "agent_intro_generation":
             await self._execute_agent_intro_generation(request)
+        elif req_type == "inflight_summary_generation":
+            await self._execute_inflight_summary_generation(request)
 
     async def _execute_auto_reply(self, request: dict[str, Any]) -> None:
         group_id = request["group_id"]
@@ -283,6 +309,7 @@ class AICoordinator:
                         "render_markdown_to_html": render_markdown_to_html,
                         "group_id": group_id,
                         "user_id": sender_id,
+                        "is_at_bot": bool(request.get("is_at_bot", False)),
                         "sender_name": sender_name,
                         "group_name": group_name,
                     },
@@ -363,6 +390,7 @@ class AICoordinator:
                         "render_html_to_image": render_html_to_image,
                         "render_markdown_to_html": render_markdown_to_html,
                         "user_id": user_id,
+                        "is_private_chat": True,
                         "sender_name": sender_name,
                     },
                 )
@@ -383,17 +411,28 @@ class AICoordinator:
             return
         try:
             # 加载提示词模板
+            prompt_template = _STATS_ANALYSIS_FALLBACK_PROMPT
             try:
-                prompt_template = read_text_resource("res/prompts/stats_analysis.txt")
-            except Exception:
-                logger.warning("[统计分析] 提示词文件不存在，使用默认分析")
-                analysis = "AI 分析功能暂时不可用（提示词文件缺失）"
-                if self.command_dispatcher:
-                    self.command_dispatcher.set_stats_analysis_result(
-                        group_id, request_id, analysis
-                    )
-                return
-            full_prompt = prompt_template.format(data_summary=data_summary)
+                loaded_prompt = read_text_resource(_STATS_ANALYSIS_PROMPT_PATH).strip()
+                if loaded_prompt:
+                    prompt_template = loaded_prompt
+            except Exception as exc:
+                logger.warning("[统计分析] 读取提示词失败，使用内置模板: %s", exc)
+
+            if "{data_summary}" not in prompt_template:
+                logger.warning(
+                    "[统计分析] 提示词缺少 {data_summary} 占位符，自动追加",
+                )
+                prompt_template = f"{prompt_template}\n\n{{data_summary}}"
+
+            safe_data_summary = str(data_summary).strip() or "暂无统计数据摘要"
+            try:
+                full_prompt = prompt_template.format(data_summary=safe_data_summary)
+            except Exception as exc:
+                logger.warning("[统计分析] 提示词渲染失败，使用回退模板: %s", exc)
+                full_prompt = _STATS_ANALYSIS_FALLBACK_PROMPT.format(
+                    data_summary=safe_data_summary
+                )
 
             # 调用 AI 进行分析
             messages = [
@@ -415,6 +454,9 @@ class AICoordinator:
                 analysis = content.strip()
             else:
                 analysis = "AI 分析未能生成结果"
+
+            if not analysis:
+                analysis = "AI 分析结果为空，建议稍后重试。"
 
             logger.info(
                 "[统计分析] 分析完成: group=%s length=%s request_id=%s",
@@ -509,6 +551,191 @@ class AICoordinator:
                 agent_intro_generator.set_intro_generation_result(request_id, None)
             except Exception:
                 pass
+
+    async def _execute_inflight_summary_generation(
+        self, request: dict[str, Any]
+    ) -> None:
+        """异步生成进行中任务的简短摘要。"""
+        request_id = str(request.get("request_id") or "").strip()
+        source_message = str(request.get("source_message") or "").strip()
+        location_raw = request.get("location")
+
+        if not request_id:
+            logger.warning("[进行中摘要] 缺少 request_id")
+            return
+
+        if not source_message:
+            source_message = "(无文本内容)"
+
+        logger.debug(
+            "[进行中摘要] 开始生成: request_id=%s source_len=%s",
+            request_id,
+            len(source_message),
+        )
+
+        location_type: Literal["group", "private"] = "private"
+        location_name = "未知会话"
+        location_id = 0
+        if isinstance(location_raw, dict):
+            raw_type = str(location_raw.get("type") or "").strip().lower()
+            if raw_type in {"group", "private"}:
+                location_type = "group" if raw_type == "group" else "private"
+            raw_name = location_raw.get("name")
+            if isinstance(raw_name, str) and raw_name.strip():
+                location_name = raw_name.strip()
+            try:
+                location_id = int(location_raw.get("id", 0) or 0)
+            except (TypeError, ValueError):
+                location_id = 0
+
+        logger.debug(
+            "[进行中摘要] 上下文定位: request_id=%s type=%s name=%s id=%s",
+            request_id,
+            location_type,
+            location_name,
+            location_id,
+        )
+
+        system_prompt = (
+            "你是任务状态摘要器。"
+            "请输出一句极简中文短语（不超过20字），"
+            "用于描述该任务当前处理动作。"
+            "禁止解释、禁止换行、禁止时间承诺。"
+        )
+        user_prompt_template = (
+            "会话类型: {location_type}\n"
+            "会话名称: {location_name}\n"
+            "会话ID: {location_id}\n"
+            "正在处理消息: {source_message}\n"
+            "仅返回一个动作短语，例如：已开始生成首版"
+        )
+
+        try:
+            loaded_system_prompt = read_text_resource(
+                _INFLIGHT_SUMMARY_SYSTEM_PROMPT_PATH
+            ).strip()
+            if loaded_system_prompt:
+                system_prompt = loaded_system_prompt
+                logger.debug(
+                    "[进行中摘要] 使用系统提示词文件: path=%s len=%s",
+                    _INFLIGHT_SUMMARY_SYSTEM_PROMPT_PATH,
+                    len(system_prompt),
+                )
+        except Exception as exc:
+            logger.debug("[进行中摘要] 读取系统提示词失败，使用内置默认: %s", exc)
+
+        try:
+            loaded_user_prompt = read_text_resource(
+                _INFLIGHT_SUMMARY_USER_PROMPT_PATH
+            ).strip()
+            if loaded_user_prompt:
+                user_prompt_template = loaded_user_prompt
+                logger.debug(
+                    "[进行中摘要] 使用用户提示词文件: path=%s len=%s fields=%s",
+                    _INFLIGHT_SUMMARY_USER_PROMPT_PATH,
+                    len(user_prompt_template),
+                    _template_fields(user_prompt_template),
+                )
+        except Exception as exc:
+            logger.debug("[进行中摘要] 读取用户提示词失败，使用内置默认: %s", exc)
+
+        render_context: dict[str, Any] = {
+            "location_type": location_type,
+            "location_name": location_name,
+            "location_id": location_id,
+            "source_message": source_message,
+        }
+        template_fields = _template_fields(user_prompt_template)
+        missing_fields = [
+            field_name
+            for field_name in (
+                "location_type",
+                "location_name",
+                "location_id",
+                "source_message",
+            )
+            if field_name not in template_fields
+        ]
+        if missing_fields:
+            logger.warning(
+                "[进行中摘要] 用户提示词缺少占位符: missing=%s path=%s",
+                missing_fields,
+                _INFLIGHT_SUMMARY_USER_PROMPT_PATH,
+            )
+        try:
+            user_prompt = user_prompt_template.format(**render_context)
+            logger.debug(
+                "[进行中摘要] 模板渲染成功: request_id=%s fields=%s output_len=%s",
+                request_id,
+                template_fields,
+                len(user_prompt),
+            )
+        except Exception as exc:
+            logger.warning("[进行中摘要] 用户提示词模板格式异常，使用默认模板: %s", exc)
+            user_prompt = (
+                f"会话类型: {location_type}\n"
+                f"会话名称: {location_name}\n"
+                f"会话ID: {location_id}\n"
+                f"正在处理消息: {source_message}\n"
+                "仅返回一个动作短语，例如：已开始生成首版"
+            )
+
+        model_config = self.ai.get_inflight_summary_model_config()
+        logger.debug(
+            "[进行中摘要] 请求模型: request_id=%s model=%s max_tokens=%s",
+            request_id,
+            model_config.model_name,
+            model_config.max_tokens,
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": system_prompt,
+            },
+            {
+                "role": "user",
+                "content": user_prompt,
+            },
+        ]
+
+        action_summary = "处理中"
+        try:
+            result = await self.ai.request_model(
+                model_config=model_config,
+                messages=messages,
+                max_tokens=model_config.max_tokens,
+                call_type="inflight_summary_generation",
+            )
+            choices = result.get("choices", [{}])
+            if choices:
+                content = choices[0].get("message", {}).get("content", "")
+                cleaned = " ".join(str(content).split()).strip()
+                if cleaned:
+                    action_summary = cleaned
+                    logger.debug(
+                        "[进行中摘要] 模型返回动作: request_id=%s action_len=%s",
+                        request_id,
+                        len(action_summary),
+                    )
+        except Exception as exc:
+            logger.warning("[进行中摘要] 生成失败，使用默认状态: %s", exc)
+
+        updated = self.ai.set_inflight_summary_generation_result(
+            request_id,
+            action_summary,
+        )
+        if updated:
+            logger.info(
+                "[进行中摘要] 更新完成: request_id=%s type=%s chat_id=%s",
+                request_id,
+                location_type,
+                location_id,
+            )
+        else:
+            logger.debug(
+                "[进行中摘要] 请求已结束或记录不存在，跳过更新: request_id=%s",
+                request_id,
+            )
 
     def _is_at_bot(self, content: list[dict[str, Any]]) -> bool:
         """检查消息内容中是否包含对机器人的 @ 提问"""
