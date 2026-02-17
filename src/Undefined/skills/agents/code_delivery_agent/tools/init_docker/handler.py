@@ -22,28 +22,40 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
     container_name = f"{config['prefix']}{task_id}{config['suffix']}"
 
-    from ...docker_utils import create_container, init_workspace
+    from ...docker_utils import create_container, destroy_container, init_workspace
 
-    await create_container(
-        container_name,
-        workspace,
-        tmpfs_dir,
-        config["docker_image"],
-        config["memory_limit"],
-        config["cpu_limit"],
-    )
-    await init_workspace(
-        workspace,
-        container_name,
-        init_args.get("source_type", "empty"),
-        init_args.get("git_url", ""),
-        init_args.get("git_ref", ""),
-    )
+    try:
+        await create_container(
+            container_name,
+            workspace,
+            tmpfs_dir,
+            config["docker_image"],
+            config["memory_limit"],
+            config["cpu_limit"],
+        )
+        context["container_name"] = container_name
+        context["task_dir"] = task_dir
+
+        await init_workspace(
+            workspace,
+            container_name,
+            init_args.get("source_type", "empty"),
+            init_args.get("git_url", ""),
+            init_args.get("git_ref", ""),
+        )
+    except Exception:
+        try:
+            await destroy_container(container_name)
+        except Exception:
+            pass
+        import shutil
+
+        if task_dir.exists():
+            shutil.rmtree(task_dir, ignore_errors=True)
+        raise
 
     context["docker_initialized"] = True
-    context["task_dir"] = task_dir
     context["workspace"] = workspace
-    context["container_name"] = container_name
 
     source_type = init_args.get("source_type", "empty")
     if source_type == "git":
