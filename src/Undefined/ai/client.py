@@ -994,11 +994,20 @@ class AIClient:
                             )
 
                         if not inflight_summary_enqueued:
-                            asyncio.create_task(
+                            task = asyncio.create_task(
                                 self._enqueue_inflight_summary_generation(
                                     request_id=inflight_request_id,
                                     source_message=source_message_excerpt,
                                     location=inflight_location,
+                                )
+                            )
+                            task.add_done_callback(
+                                lambda t: (
+                                    logger.error(
+                                        "[进行中摘要] 投递失败: %s", t.exception()
+                                    )
+                                    if t.exception() is not None
+                                    else None
                                 )
                             )
                             inflight_summary_enqueued = True

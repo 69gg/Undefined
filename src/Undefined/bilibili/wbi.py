@@ -142,6 +142,8 @@ def _extract_key_from_url(url: str) -> str:
 
 def _compute_mixin_key(img_key: str, sub_key: str) -> str:
     merged = img_key + sub_key
+    if len(merged) < 64:
+        raise ValueError(f"WBI key 长度不足: 需要 64 字符，实际 {len(merged)}")
     mixed = "".join(merged[i] for i in _MIXIN_KEY_ENC_TAB)
     return mixed[:32]
 
