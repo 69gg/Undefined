@@ -151,7 +151,11 @@ class OneBotClient:
             self._pending_responses.pop(echo, None)
 
     async def send_group_message(
-        self, group_id: int, message: str | list[dict[str, Any]]
+        self,
+        group_id: int,
+        message: str | list[dict[str, Any]],
+        *,
+        mark_sent: bool = True,
     ) -> dict[str, Any]:
         """发送群消息"""
         result = await self._call_api(
@@ -161,11 +165,16 @@ class OneBotClient:
                 "message": message,
             },
         )
-        _mark_message_sent_this_turn()
+        if mark_sent:
+            _mark_message_sent_this_turn()
         return result
 
     async def send_private_message(
-        self, user_id: int, message: str | list[dict[str, Any]]
+        self,
+        user_id: int,
+        message: str | list[dict[str, Any]],
+        *,
+        mark_sent: bool = True,
     ) -> dict[str, Any]:
         """发送私聊消息"""
         result = await self._call_api(
@@ -175,7 +184,8 @@ class OneBotClient:
                 "message": message,
             },
         )
-        _mark_message_sent_this_turn()
+        if mark_sent:
+            _mark_message_sent_this_turn()
         return result
 
     async def get_group_msg_history(

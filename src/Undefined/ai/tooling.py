@@ -147,15 +147,11 @@ class ToolManager:
 
         message = f"{called_name}，我调用你了，我要调用你了！"
         sender = context.get("sender")
-        send_message_callback = context.get("send_message_callback")
         group_id = context.get("group_id")
 
         try:
             if sender and isinstance(group_id, int) and group_id > 0:
-                await sender.send_group_message(group_id, message)
-                return
-            if send_message_callback:
-                await send_message_callback(message)
+                await sender.send_group_message(group_id, message, mark_sent=False)
         except Exception as exc:
             logger.debug("[彩蛋] 发送提示消息失败: %s", redact_string(str(exc)))
 
