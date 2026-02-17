@@ -79,6 +79,7 @@
 - **Skills 热重载**：自动扫描 `skills/` 目录，检测到变更后即时重载工具与 Agent，无需重启服务。
 - **配置热更新 + WebUI**：使用 `config.toml` 配置，支持热更新；提供 WebUI 在线编辑与校验。
 - **会话白名单（群/私聊）**：只需配置 `access.allowed_group_ids` / `access.allowed_private_ids` 两个列表，即可把机器人“锁”在指定群与指定私聊里；避免被拉进陌生群误触发、也避免工具/定时任务把消息误发到不该去的地方（默认留空不限制）。
+- **并发防重复执行（进行中摘要）**：对私聊与 `@机器人` 场景在首轮前预占位，并在后续请求注入 `【进行中的任务】` 上下文，减少“催促/追问”导致的重复任务执行；支持通过 `features.inflight_summary_enabled` 一键开关。
 - **并行工具执行**：无论是主 AI 还是子 Agent，均支持 `asyncio` 并发工具调用，大幅提升多任务处理速度（如同时读取多个文件或搜索多个关键词）。
 - **智能 Agent 矩阵**：内置多个专业 Agent，分工协作处理复杂任务。
 - **Agent 互调用**：Agent 之间可以相互调用，通过简单的配置文件（`callable.json`）即可让某个 Agent 成为其他 Agent 的工具，支持细粒度的访问控制，实现复杂的多 Agent 协作场景。
@@ -480,15 +481,17 @@ uv run Undefined-webui
   - `allowed_private_ids`：允许处理/发送消息的私聊 QQ 列表
   - `superadmin_bypass_allowlist`：超级管理员是否可在私聊中绕过 `allowed_private_ids`（仅影响私聊收发；群聊仍严格按 `allowed_group_ids`）
   - 规则：只要 `allowed_group_ids` 或 `allowed_private_ids` 任一非空，就会启用限制模式；未在白名单内的群/私聊消息将被直接忽略，且所有消息发送也会被拦截（包括工具调用与定时任务）。
-- **模型配置**：`[models.chat]` / `[models.vision]` / `[models.agent]` / `[models.security]`
+- **模型配置**：`[models.chat]` / `[models.vision]` / `[models.agent]` / `[models.security]` / `[models.inflight_summary]`
   - `api_url`：OpenAI 兼容 **base URL**（如 `https://api.openai.com/v1` / `http://127.0.0.1:8000/v1`）
   - `models.security.enabled`：是否启用安全模型检测（默认开启）
   - `queue_interval_seconds`：队列发车间隔（秒），每个模型独立生效
+  - `models.inflight_summary`：并发防重的“进行中摘要”模型（可选）；当 `api_url/api_key/model_name` 任一缺失时，会自动回退到 `models.chat`
   - DeepSeek Thinking + Tool Calls：若使用 `deepseek-reasoner` 或 `deepseek-chat` + `thinking={"type":"enabled"}` 且启用了工具调用，建议启用 `deepseek_new_cot_support`
 - **日志配置**：`[logging]`
   - `tty_enabled`：是否输出到终端 TTY（默认 `false`）；关闭后仅写入日志文件
 - **功能开关（可选）**：`[features]`
   - `nagaagent_mode_enabled`：是否启用 NagaAgent 模式（开启后使用 `res/prompts/undefined_nagaagent.xml` 并暴露相关 Agent；关闭时使用 `res/prompts/undefined.xml` 并隐藏/禁用相关 Agent）
+  - `inflight_summary_enabled`：是否启用“进行中任务摘要”防重机制（默认 `true`）。关闭后将不注入 `【进行中的任务】` 上下文，也不会发起摘要模型请求
 - **彩蛋（可选）**：`[easter_egg]`
   - `keyword_reply_enabled`：是否启用群聊关键词自动回复（如“心理委员”，默认关闭）
 - **Token 统计归档**：`[token_usage]`（默认 5MB，<=0 禁用）
@@ -521,6 +524,22 @@ WebUI 支持：配置分组表单快速编辑、Diff 预览、日志尾部查看
 - 默认自动热更新：修改 `config.toml` 后，配置会自动生效
 - 需重启生效的项（黑名单）：`log_level`、`logging.file_path`、`logging.max_size_mb`、`logging.backup_count`、`logging.tty_enabled`、`onebot.ws_url`、`onebot.token`、`webui.url`、`webui.port`、`webui.password`
 - 模型发车节奏：`models.*.queue_interval_seconds` 支持热更新并立即生效
+
+#### 防重复执行机制（进行中摘要）
+
+- 目标：降低并发场景下同一任务被重复执行（例如“写个 X”后立刻“写快点/它可以吗”）
+- 机制：
+  - 对私聊和 `@机器人/拍一拍` 触发的会话，首轮模型调用前预注册“进行中任务”占位
+  - 后续请求会在系统上下文注入 `【进行中的任务】`，引导模型走“轻量回复 + end”而非重跑业务 Agent
+  - 首轮若仅调用 `end`，占位会立即清除
+- 配置：
+  - 总开关：`[features].inflight_summary_enabled`（默认 `true`）
+  - 模型：`[models.inflight_summary]`（可选，缺省自动回退 `models.chat`）
+- 观测日志关键字：
+  - `首轮前预占位`
+  - `注入进行中任务`
+  - `首轮仅end，已清理占位`
+  - `已投递摘要生成`
 
 #### 会话白名单示例
 
@@ -615,7 +634,13 @@ Undefined 支持 **MCP (Model Context Protocol)** 协议，可以连接外部 MC
 /addadmin <QQ>      # 添加管理员（仅超级管理员）
 /rmadmin <QQ>       # 移除管理员
 /bugfix <QQ>        # 生成指定用户的 Bug 修复报告
+/stats [时间范围]    # Token 使用统计 + AI 分析（如 7d/30d/1w/1m）
 ```
+
+`/stats` 说明：
+
+- 默认统计最近 7 天，参数范围会自动钳制在 1-365 天
+- 会生成图表并附带 AI 分析；若分析超时，会先发送图表和汇总，再给出超时提示
 
 ## 扩展与开发
 
