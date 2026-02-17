@@ -912,6 +912,13 @@ class AIClient:
                                 location=inflight_location,
                             )
                         )
+                    else:
+                        logger.debug(
+                            "[进行中摘要] 跳过占位创建: request_id=%s end_only=%s has_location=%s",
+                            inflight_request_id,
+                            is_end_only,
+                            bool(inflight_location),
+                        )
 
                 if not tool_calls:
                     logger.info(

@@ -343,6 +343,14 @@ class PromptBuilder:
         if not records:
             return
 
+        logger.debug(
+            "[AI会话] 注入进行中任务: type=%s chat_id=%s count=%s exclude_request=%s",
+            request_type,
+            chat_id,
+            len(records),
+            exclude_request_id,
+        )
+
         record_lines = [f"- {item['display_text']}" for item in records]
         inflight_text = "\n".join(record_lines)
         messages.append(

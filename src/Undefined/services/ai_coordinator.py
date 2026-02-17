@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from string import Formatter
 from typing import Any, Optional, Literal
 
 from Undefined.config import Config
@@ -19,6 +20,17 @@ logger = logging.getLogger(__name__)
 
 _INFLIGHT_SUMMARY_SYSTEM_PROMPT_PATH = "res/prompts/inflight_summary_system.txt"
 _INFLIGHT_SUMMARY_USER_PROMPT_PATH = "res/prompts/inflight_summary_user.txt"
+
+
+def _template_fields(template: str) -> list[str]:
+    fields: list[str] = []
+    try:
+        for _, field_name, _, _ in Formatter().parse(template):
+            if field_name:
+                fields.append(field_name)
+    except ValueError:
+        return []
+    return fields
 
 
 class AICoordinator:
@@ -532,6 +544,12 @@ class AICoordinator:
         if not source_message:
             source_message = "(无文本内容)"
 
+        logger.debug(
+            "[进行中摘要] 开始生成: request_id=%s source_len=%s",
+            request_id,
+            len(source_message),
+        )
+
         location_type: Literal["group", "private"] = "private"
         location_name = "未知会话"
         location_id = 0
@@ -546,6 +564,14 @@ class AICoordinator:
                 location_id = int(location_raw.get("id", 0) or 0)
             except (TypeError, ValueError):
                 location_id = 0
+
+        logger.debug(
+            "[进行中摘要] 上下文定位: request_id=%s type=%s name=%s id=%s",
+            request_id,
+            location_type,
+            location_name,
+            location_id,
+        )
 
         system_prompt = (
             "你是任务状态摘要器。"
@@ -567,6 +593,11 @@ class AICoordinator:
             ).strip()
             if loaded_system_prompt:
                 system_prompt = loaded_system_prompt
+                logger.debug(
+                    "[进行中摘要] 使用系统提示词文件: path=%s len=%s",
+                    _INFLIGHT_SUMMARY_SYSTEM_PROMPT_PATH,
+                    len(system_prompt),
+                )
         except Exception as exc:
             logger.debug("[进行中摘要] 读取系统提示词失败，使用内置默认: %s", exc)
 
@@ -576,15 +607,45 @@ class AICoordinator:
             ).strip()
             if loaded_user_prompt:
                 user_prompt_template = loaded_user_prompt
+                logger.debug(
+                    "[进行中摘要] 使用用户提示词文件: path=%s len=%s fields=%s",
+                    _INFLIGHT_SUMMARY_USER_PROMPT_PATH,
+                    len(user_prompt_template),
+                    _template_fields(user_prompt_template),
+                )
         except Exception as exc:
             logger.debug("[进行中摘要] 读取用户提示词失败，使用内置默认: %s", exc)
 
+        render_context: dict[str, Any] = {
+            "location_type": location_type,
+            "location_name": location_name,
+            "location_id": location_id,
+            "source_message": source_message,
+        }
+        template_fields = _template_fields(user_prompt_template)
+        missing_fields = [
+            field_name
+            for field_name in (
+                "location_type",
+                "location_name",
+                "location_id",
+                "source_message",
+            )
+            if field_name not in template_fields
+        ]
+        if missing_fields:
+            logger.warning(
+                "[进行中摘要] 用户提示词缺少占位符: missing=%s path=%s",
+                missing_fields,
+                _INFLIGHT_SUMMARY_USER_PROMPT_PATH,
+            )
         try:
-            user_prompt = user_prompt_template.format(
-                location_type=location_type,
-                location_name=location_name,
-                location_id=location_id,
-                source_message=source_message,
+            user_prompt = user_prompt_template.format(**render_context)
+            logger.debug(
+                "[进行中摘要] 模板渲染成功: request_id=%s fields=%s output_len=%s",
+                request_id,
+                template_fields,
+                len(user_prompt),
             )
         except Exception as exc:
             logger.warning("[进行中摘要] 用户提示词模板格式异常，使用默认模板: %s", exc)
@@ -597,6 +658,12 @@ class AICoordinator:
             )
 
         model_config = self.ai.get_inflight_summary_model_config()
+        logger.debug(
+            "[进行中摘要] 请求模型: request_id=%s model=%s max_tokens=%s",
+            request_id,
+            model_config.model_name,
+            model_config.max_tokens,
+        )
         messages = [
             {
                 "role": "system",
@@ -622,6 +689,11 @@ class AICoordinator:
                 cleaned = " ".join(str(content).split()).strip()
                 if cleaned:
                     action_summary = cleaned
+                    logger.debug(
+                        "[进行中摘要] 模型返回动作: request_id=%s action_len=%s",
+                        request_id,
+                        len(action_summary),
+                    )
         except Exception as exc:
             logger.warning("[进行中摘要] 生成失败，使用默认状态: %s", exc)
 

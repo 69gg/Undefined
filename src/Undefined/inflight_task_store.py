@@ -8,6 +8,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, TypedDict
 
+import logging
+
+
+logger = logging.getLogger(__name__)
+
 
 class InflightTaskLocation(TypedDict):
     """进行中任务的会话位置。"""
@@ -97,6 +102,8 @@ class InflightTaskStore:
             entry = self._entries_by_chat.pop(key, None)
             if entry is not None:
                 self._chat_key_by_request.pop(entry.request_id, None)
+        if expired_keys:
+            logger.debug("[进行中摘要存储] 清理过期记录: count=%s", len(expired_keys))
 
     def _touch_expire_locked(self, entry: _InflightEntry) -> None:
         entry.expires_at_monotonic = time.monotonic() + float(self._ttl_seconds)
@@ -160,8 +167,20 @@ class InflightTaskStore:
             previous = self._entries_by_chat.get(chat_key)
             if previous is not None:
                 self._chat_key_by_request.pop(previous.request_id, None)
+                logger.debug(
+                    "[进行中摘要存储] 覆盖会话记录: chat=%s old_request=%s new_request=%s",
+                    chat_key,
+                    previous.request_id,
+                    cleaned_request_id,
+                )
             self._entries_by_chat[chat_key] = entry
             self._chat_key_by_request[cleaned_request_id] = chat_key
+            logger.debug(
+                "[进行中摘要存储] 创建占位记录: chat=%s request=%s source_len=%s",
+                chat_key,
+                cleaned_request_id,
+                len(safe_source),
+            )
             return self._to_record(entry)
 
     def mark_ready(self, request_id: str, action_summary: str) -> bool:
@@ -177,9 +196,18 @@ class InflightTaskStore:
             self._gc_locked()
             chat_key = self._chat_key_by_request.get(cleaned_request_id)
             if not chat_key:
+                logger.debug(
+                    "[进行中摘要存储] 更新失败: request不存在 request=%s",
+                    cleaned_request_id,
+                )
                 return False
             entry = self._entries_by_chat.get(chat_key)
             if entry is None or entry.request_id != cleaned_request_id:
+                logger.debug(
+                    "[进行中摘要存储] 更新失败: 会话记录不匹配 request=%s chat=%s",
+                    cleaned_request_id,
+                    chat_key,
+                )
                 return False
 
             now_iso = _now_iso()
@@ -192,6 +220,12 @@ class InflightTaskStore:
                 action,
             )
             self._touch_expire_locked(entry)
+            logger.debug(
+                "[进行中摘要存储] 更新就绪: chat=%s request=%s action_len=%s",
+                chat_key,
+                cleaned_request_id,
+                len(action),
+            )
             return True
 
     def clear_by_request(self, request_id: str) -> bool:
@@ -201,13 +235,32 @@ class InflightTaskStore:
             self._gc_locked()
             chat_key = self._chat_key_by_request.pop(cleaned_request_id, None)
             if chat_key is None:
+                logger.debug(
+                    "[进行中摘要存储] 按request清理未命中: request=%s",
+                    cleaned_request_id,
+                )
                 return False
             entry = self._entries_by_chat.get(chat_key)
             if entry is None:
+                logger.debug(
+                    "[进行中摘要存储] 按request清理失败: chat记录不存在 request=%s chat=%s",
+                    cleaned_request_id,
+                    chat_key,
+                )
                 return False
             if entry.request_id != cleaned_request_id:
+                logger.debug(
+                    "[进行中摘要存储] 按request清理失败: owner不匹配 request=%s owner=%s",
+                    cleaned_request_id,
+                    entry.request_id,
+                )
                 return False
             self._entries_by_chat.pop(chat_key, None)
+            logger.debug(
+                "[进行中摘要存储] 按request清理成功: request=%s chat=%s",
+                cleaned_request_id,
+                chat_key,
+            )
             return True
 
     def clear_for_chat(
@@ -224,11 +277,23 @@ class InflightTaskStore:
             self._gc_locked()
             entry = self._entries_by_chat.get(chat_key)
             if entry is None:
+                logger.debug("[进行中摘要存储] 按会话清理未命中: chat=%s", chat_key)
                 return False
             if owner and entry.request_id != owner:
+                logger.debug(
+                    "[进行中摘要存储] 按会话清理被拒绝: chat=%s owner=%s request=%s",
+                    chat_key,
+                    owner,
+                    entry.request_id,
+                )
                 return False
             self._entries_by_chat.pop(chat_key, None)
             self._chat_key_by_request.pop(entry.request_id, None)
+            logger.debug(
+                "[进行中摘要存储] 按会话清理成功: chat=%s request=%s",
+                chat_key,
+                entry.request_id,
+            )
             return True
 
     def list_for_chat(
@@ -249,6 +314,17 @@ class InflightTaskStore:
             if entry is None:
                 return []
             if excluded and entry.request_id == excluded:
+                logger.debug(
+                    "[进行中摘要存储] 查询命中但被排除: chat=%s request=%s",
+                    chat_key,
+                    excluded,
+                )
                 return []
             self._touch_expire_locked(entry)
+            logger.debug(
+                "[进行中摘要存储] 查询命中: chat=%s request=%s status=%s",
+                chat_key,
+                entry.request_id,
+                entry.status,
+            )
             return [self._to_record(entry)]
