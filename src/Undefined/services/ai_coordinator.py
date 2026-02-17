@@ -302,6 +302,7 @@ class AICoordinator:
                         "render_markdown_to_html": render_markdown_to_html,
                         "group_id": group_id,
                         "user_id": sender_id,
+                        "is_at_bot": bool(request.get("is_at_bot", False)),
                         "sender_name": sender_name,
                         "group_name": group_name,
                     },
@@ -382,6 +383,7 @@ class AICoordinator:
                         "render_html_to_image": render_html_to_image,
                         "render_markdown_to_html": render_markdown_to_html,
                         "user_id": user_id,
+                        "is_private_chat": True,
                         "sender_name": sender_name,
                     },
                 )

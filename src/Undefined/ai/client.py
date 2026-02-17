@@ -707,6 +707,25 @@ class AIClient:
                 return False
         return True
 
+    def _should_pre_register_inflight(
+        self, context: dict[str, Any], question: str
+    ) -> bool:
+        """是否在首轮模型调用前预注册进行中占位。
+
+        仅对更可能触发任务执行的会话场景预注册，尽量减少误拦截：
+        - 私聊
+        - 群聊且为 @/拍一拍 触发
+        """
+        request_type = str(context.get("request_type") or "").strip().lower()
+        if request_type == "private":
+            return True
+        if request_type == "group":
+            if bool(context.get("is_at_bot")):
+                return True
+            if "(用户 @ 了你)" in question or "(用户拍了拍你)" in question:
+                return True
+        return False
+
     async def ask(
         self,
         question: str,
@@ -745,6 +764,43 @@ class AIClient:
         返回:
             AI 生成的最终文本回复
         """
+        ctx = RequestContext.current()
+        pre_context: dict[str, Any] = {}
+        if ctx:
+            if ctx.group_id is not None:
+                pre_context["group_id"] = ctx.group_id
+            if ctx.user_id is not None:
+                pre_context["user_id"] = ctx.user_id
+            if ctx.sender_id is not None:
+                pre_context["sender_id"] = ctx.sender_id
+            pre_context["request_type"] = ctx.request_type
+            pre_context["request_id"] = ctx.request_id
+        if extra_context:
+            pre_context.update(extra_context)
+
+        inflight_request_id = str(pre_context.get("request_id") or "").strip()
+        inflight_location = self._build_inflight_location(pre_context)
+        source_message_excerpt = self._extract_message_excerpt(question)
+        inflight_registered = False
+        inflight_summary_enqueued = False
+
+        should_pre_register = self._should_pre_register_inflight(pre_context, question)
+        if should_pre_register and inflight_request_id and inflight_location:
+            self._inflight_task_store.upsert_pending(
+                request_id=inflight_request_id,
+                request_type=inflight_location["type"],
+                chat_id=inflight_location["id"],
+                location_name=inflight_location["name"],
+                source_message=source_message_excerpt,
+            )
+            inflight_registered = True
+            logger.info(
+                "[进行中摘要] 首轮前预占位: request_id=%s location=%s:%s",
+                inflight_request_id,
+                inflight_location["type"],
+                inflight_location["id"],
+            )
+
         messages = await self._prompt_builder.build_messages(
             question,
             get_recent_messages_callback=get_recent_messages_callback,
@@ -762,7 +818,6 @@ class AIClient:
             )
             log_debug_json(logger, "[AI消息内容]", messages)
 
-        ctx = RequestContext.current()
         tool_context = ctx.get_resources() if ctx else {}
         tool_context["conversation_ended"] = False
         tool_context.setdefault("agent_histories", {})
@@ -795,6 +850,11 @@ class AIClient:
         tool_context.setdefault("sender", sender)
         tool_context.setdefault("send_image_callback", self._send_image_callback)
 
+        if not inflight_request_id:
+            inflight_request_id = str(tool_context.get("request_id") or "").strip()
+        if inflight_location is None:
+            inflight_location = self._build_inflight_location(tool_context)
+
         max_iterations = 1000
         iteration = 0
         conversation_ended = False
@@ -802,11 +862,6 @@ class AIClient:
         cot_compat = getattr(self.chat_config, "thinking_tool_call_compat", False)
         cot_compat_logged = False
         cot_missing_logged = False
-
-        inflight_request_id = str(tool_context.get("request_id") or "").strip()
-        inflight_location = self._build_inflight_location(tool_context)
-        source_message_excerpt = self._extract_message_excerpt(question)
-        inflight_registered = False
 
         def _clear_inflight_on_exit() -> None:
             nonlocal inflight_registered
@@ -886,32 +941,48 @@ class AIClient:
                     )
                     content = ""
 
-                if iteration == 1 and tool_calls and not inflight_registered:
+                if iteration == 1 and tool_calls:
                     is_end_only = self._is_end_only_tool_calls(
                         tool_calls, api_to_internal
                     )
-                    if not is_end_only and inflight_request_id and inflight_location:
-                        self._inflight_task_store.upsert_pending(
-                            request_id=inflight_request_id,
-                            request_type=inflight_location["type"],
-                            chat_id=inflight_location["id"],
-                            location_name=inflight_location["name"],
-                            source_message=source_message_excerpt,
-                        )
-                        inflight_registered = True
-                        logger.info(
-                            "[进行中摘要] 已创建占位: request_id=%s location=%s:%s",
-                            inflight_request_id,
-                            inflight_location["type"],
-                            inflight_location["id"],
-                        )
-                        asyncio.create_task(
-                            self._enqueue_inflight_summary_generation(
-                                request_id=inflight_request_id,
-                                source_message=source_message_excerpt,
-                                location=inflight_location,
+                    if is_end_only:
+                        if inflight_registered and inflight_request_id:
+                            self.clear_inflight_summary_for_request(inflight_request_id)
+                            inflight_registered = False
+                            logger.info(
+                                "[进行中摘要] 首轮仅end，已清理占位: request_id=%s",
+                                inflight_request_id,
                             )
-                        )
+                    elif inflight_request_id and inflight_location:
+                        if not inflight_registered:
+                            self._inflight_task_store.upsert_pending(
+                                request_id=inflight_request_id,
+                                request_type=inflight_location["type"],
+                                chat_id=inflight_location["id"],
+                                location_name=inflight_location["name"],
+                                source_message=source_message_excerpt,
+                            )
+                            inflight_registered = True
+                            logger.info(
+                                "[进行中摘要] 已创建占位: request_id=%s location=%s:%s",
+                                inflight_request_id,
+                                inflight_location["type"],
+                                inflight_location["id"],
+                            )
+
+                        if not inflight_summary_enqueued:
+                            asyncio.create_task(
+                                self._enqueue_inflight_summary_generation(
+                                    request_id=inflight_request_id,
+                                    source_message=source_message_excerpt,
+                                    location=inflight_location,
+                                )
+                            )
+                            inflight_summary_enqueued = True
+                            logger.info(
+                                "[进行中摘要] 已投递摘要生成: request_id=%s",
+                                inflight_request_id,
+                            )
                     else:
                         logger.debug(
                             "[进行中摘要] 跳过占位创建: request_id=%s end_only=%s has_location=%s",
