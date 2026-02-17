@@ -1,0 +1,26 @@
+{
+    "type": "function",
+    "function": {
+        "name": "send_text_file",
+        "description": "发送单文件文本内容到目标群聊或私聊。适用于单文件、轻量任务（如单个脚本、配置文件、文档）。默认大小上限 512KB。多文件工程、需要运行验证或打包交付的复杂任务，请使用 init_docker 初始化容器后进行开发。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "文件文本内容"
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "文件名（仅允许单文件名，不可包含路径），例如 main.py、README.md、CMakeLists.txt"
+                },
+                "encoding": {
+                    "type": "string",
+                    "enum": ["utf-8", "utf-8-sig", "ascii", "gbk"],
+                    "description": "可选。文件编码，默认 utf-8。"
+                }
+            },
+            "required": ["content", "filename"]
+        }
+    }
+}
