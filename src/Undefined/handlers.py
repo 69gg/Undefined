@@ -254,6 +254,19 @@ class MessageHandler:
                         return
 
             # 私聊消息直接触发回复
+            if self.config.model_pool_enabled:
+                selected = self.ai_coordinator.ai.model_selector.try_resolve_compare(
+                    0, private_sender_id, text
+                )
+                if selected:
+                    self.ai_coordinator.ai.model_selector.set_preference(
+                        0, private_sender_id, "chat", selected
+                    )
+                    await self.ai_coordinator.ai.model_selector.save_preferences()
+                    await self.sender.send_private_message(
+                        private_sender_id, f"已切换到模型: {selected}"
+                    )
+                    return
             await self.ai_coordinator.handle_private_reply(
                 private_sender_id,
                 text,
@@ -389,21 +402,6 @@ class MessageHandler:
 
         # 提取文本内容
         # (已在上方提取用于日志记录)
-
-        # 尝试解析"选X"消息（多模型比较后的选择，仅在多模型功能启用时）
-        if self.config.model_pool_enabled:
-            selected = self.ai_coordinator.ai.model_selector.try_resolve_compare(
-                group_id, sender_id, text
-            )
-            if selected:
-                self.ai_coordinator.ai.model_selector.set_preference(
-                    group_id, sender_id, "chat", selected
-                )
-                await self.ai_coordinator.ai.model_selector.save_preferences()
-                await self.sender.send_group_message(
-                    group_id, f"已切换到模型: {selected}"
-                )
-                return
 
         # 只有被@时才处理斜杠命令
         if is_at_bot:

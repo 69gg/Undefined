@@ -150,23 +150,15 @@ class AICoordinator:
             "is_at_bot": is_at_bot,
         }
 
-        # 动态选择模型
-        effective_config = self.ai.model_selector.select_chat_config(
-            self.config.chat_model,
-            group_id=group_id,
-            user_id=sender_id,
-            global_enabled=self.config.model_pool_enabled,
-        )
-
         if is_at_bot:
             logger.info(f"[AI] 触发原因: {'拍一拍' if is_poke else '@机器人'}")
             await self.queue_manager.add_group_mention_request(
-                request_data, model_name=effective_config.model_name
+                request_data, model_name=self.config.chat_model.model_name
             )
         else:
             logger.info("[AI] 投递至普通请求队列")
             await self.queue_manager.add_group_normal_request(
-                request_data, model_name=effective_config.model_name
+                request_data, model_name=self.config.chat_model.model_name
             )
 
     async def handle_private_reply(
