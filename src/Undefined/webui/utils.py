@@ -314,12 +314,20 @@ def format_value(value: Any) -> str:
     return f'"{str(value)}"'
 
 
+def _is_array_of_tables(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and all(isinstance(i, dict) for i in value)
+    )
+
+
 def render_table(path: list[str], table: TomlData) -> list[str]:
     lines: list[str] = []
     items: list[str] = []
     for key in sorted_keys(table, path):
         value = table[key]
-        if isinstance(value, dict):
+        if isinstance(value, dict) or _is_array_of_tables(value):
             continue
         items.append(f"{key} = {format_value(value)}")
     if items and path:
@@ -332,9 +340,17 @@ def render_table(path: list[str], table: TomlData) -> list[str]:
 
     for key in sorted_keys(table, path):
         value = table[key]
-        if not isinstance(value, dict):
-            continue
-        lines.extend(render_table(path + [key], value))
+        if isinstance(value, dict):
+            lines.extend(render_table(path + [key], value))
+        elif _is_array_of_tables(value):
+            aot_path = ".".join(path + [key])
+            for item in value:
+                lines.append(f"[[{aot_path}]]")
+                for k in sorted_keys(item, path + [key]):
+                    v = item[k]
+                    if not isinstance(v, dict):
+                        lines.append(f"{k} = {format_value(v)}")
+                lines.append("")
     return lines
 
 
