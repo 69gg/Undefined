@@ -70,7 +70,10 @@ class ModelPoolService:
         async def _query(name: str, cfg: ChatModelConfig) -> tuple[str, str]:
             try:
                 result = await self._ai.request_model(
-                    model_config=cfg, messages=list(messages), call_type="compare"
+                    model_config=cfg,
+                    messages=list(messages),
+                    max_tokens=cfg.max_tokens,
+                    call_type="compare",
                 )
                 content = (
                     result.get("choices", [{}])[0].get("message", {}).get("content", "")

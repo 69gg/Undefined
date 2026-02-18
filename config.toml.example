@@ -54,11 +54,7 @@ ws_url = "ws://127.0.0.1:3001"
 # en: Access token (optional).
 token = ""
 
-# zh: 模型池全局开关（关闭后所有多模型功能禁用，行为与原版一致）。
-# en: Global model pool switch (when disabled, all multi-model features are disabled, behaves like the original version).
 [models]
-pool_enabled = false
-
 # zh: 对话模型配置（主模型，处理每一条消息）。
 # en: Chat model config (the main model, processing each message).
 [models.chat]
@@ -315,6 +311,9 @@ inflight_pre_register_enabled = true
 # en: - true: enable, generate action summary asynchronously
 # en: - false: disable (default), no summary generation
 inflight_summary_enabled = false
+# zh: 多模型池全局开关（关闭后所有多模型功能禁用，行为与原版一致）。无特殊需求不建议启用。
+# en: Global model pool switch. When disabled, all multi-model features are disabled. Not recommended unless you have specific needs.
+pool_enabled = false
 
 # zh: 彩蛋功能（可选）。
 # en: Easter egg features (optional)

@@ -12,7 +12,7 @@
 ### 1. 全局开关
 
 ```toml
-[models]
+[features]
 pool_enabled = true  # 默认 false，需显式开启
 ```
 
@@ -95,7 +95,7 @@ bot:
 ## 开关层级
 
 ```
-models.pool_enabled          ← 全局总开关（false 时完全不生效）
+features.pool_enabled        ← 全局总开关（false 时完全不生效）
   └─ models.chat.pool.enabled   ← Chat 模型池开关
   └─ models.agent.pool.enabled  ← Agent 模型池开关
 ```

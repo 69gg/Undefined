@@ -604,7 +604,7 @@ class Config:
         )
 
         model_pool_enabled = _coerce_bool(
-            _get_value(data, ("models", "pool_enabled"), "MODEL_POOL_ENABLED"), False
+            _get_value(data, ("features", "pool_enabled"), "MODEL_POOL_ENABLED"), False
         )
 
         superadmin_qq, admin_qqs = cls._merge_admins(
