@@ -254,19 +254,10 @@ class MessageHandler:
                         return
 
             # 私聊消息直接触发回复
-            if self.config.model_pool_enabled:
-                selected = self.ai_coordinator.ai.model_selector.try_resolve_compare(
-                    0, private_sender_id, text
-                )
-                if selected:
-                    self.ai_coordinator.ai.model_selector.set_preference(
-                        0, private_sender_id, "chat", selected
-                    )
-                    await self.ai_coordinator.ai.model_selector.save_preferences()
-                    await self.sender.send_private_message(
-                        private_sender_id, f"已切换到模型: {selected}"
-                    )
-                    return
+            if await self.ai_coordinator.model_pool.handle_private_message(
+                private_sender_id, text
+            ):
+                return
             await self.ai_coordinator.handle_private_reply(
                 private_sender_id,
                 text,

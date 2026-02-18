@@ -7,6 +7,7 @@ from Undefined.config import Config
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
 from Undefined.render import render_html_to_image, render_markdown_to_html
+from Undefined.services.model_pool import ModelPoolService
 from Undefined.services.queue_manager import QueueManager
 from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.sender import MessageSender
@@ -64,6 +65,7 @@ class AICoordinator:
         self.scheduler = scheduler
         self.security = security
         self.command_dispatcher = command_dispatcher
+        self.model_pool = ModelPoolService(ai, config, sender)
 
     async def handle_auto_reply(
         self,
@@ -205,11 +207,8 @@ class AICoordinator:
         )
 
         # 动态选择模型（私聊 group_id=0）
-        effective_config = self.ai.model_selector.select_chat_config(
-            self.config.chat_model,
-            group_id=0,
-            user_id=user_id,
-            global_enabled=self.config.model_pool_enabled,
+        effective_config = self.model_pool.select_chat_config(
+            self.config.chat_model, user_id=user_id
         )
 
         if user_id == self.config.superadmin_qq:
