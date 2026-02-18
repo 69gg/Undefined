@@ -54,6 +54,11 @@ ws_url = "ws://127.0.0.1:3001"
 # en: Access token (optional).
 token = ""
 
+# zh: 模型池全局开关（关闭后所有多模型功能禁用，行为与原版一致）。
+# en: Global model pool switch (when disabled, all multi-model features are disabled, behaves like the original version).
+[models]
+pool_enabled = false
+
 # zh: 对话模型配置（主模型，处理每一条消息）。
 # en: Chat model config (the main model, processing each message).
 [models.chat]
@@ -84,6 +89,21 @@ thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = false
+
+# zh: 模型池配置（可选，支持多模型轮询/随机/用户指定）。
+# en: Model pool configuration (optional, supports round-robin/random/user-specified).
+# [models.chat.pool]
+# enabled = true
+# strategy = "default"  # "default" | "round_robin" | "random"
+# [[models.chat.pool.models]]
+# model_name = "claude-sonnet-4-20250514"
+# api_url = "https://api.anthropic.com/v1"
+# api_key = ""
+# # 其他字段（max_tokens, thinking_* 等）可选，缺省继承主模型
+# [[models.chat.pool.models]]
+# model_name = "deepseek-chat"
+# api_url = "https://api.deepseek.com/v1"
+# api_key = ""
 
 # zh: 视觉模型配置（用于图片描述和 OCR）。
 # en: Vision model config (image description and OCR).
@@ -177,6 +197,20 @@ thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = false
+
+# zh: Agent 模型池配置（可选，支持多模型轮询/随机/用户指定）。
+# en: Agent model pool configuration (optional, supports round-robin/random/user-specified).
+# [models.agent.pool]
+# enabled = true
+# strategy = "default"  # "default" | "round_robin" | "random"
+# [[models.agent.pool.models]]
+# model_name = "claude-sonnet-4-20250514"
+# api_url = "https://api.anthropic.com/v1"
+# api_key = ""
+# [[models.agent.pool.models]]
+# model_name = "deepseek-chat"
+# api_url = "https://api.deepseek.com/v1"
+# api_key = ""
 
 # zh: 进行中任务摘要模型配置（可选，用于并发真空期的"处理中摘要"）。仅当 [queue] 下 inflight_summary_enabled = true 时生效。
 # en: Inflight summary model config (optional, used to generate in-progress task summaries). Only effective when inflight_summary_enabled = true under [queue].

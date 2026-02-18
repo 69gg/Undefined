@@ -8,6 +8,8 @@ from .models import (
     AgentModelConfig,
     ChatModelConfig,
     InflightSummaryModelConfig,
+    ModelPool,
+    ModelPoolEntry,
     SecurityModelConfig,
     VisionModelConfig,
 )
@@ -19,6 +21,8 @@ __all__ = [
     "SecurityModelConfig",
     "AgentModelConfig",
     "InflightSummaryModelConfig",
+    "ModelPool",
+    "ModelPoolEntry",
     "get_config",
     "get_config_manager",
     "load_webui_settings",

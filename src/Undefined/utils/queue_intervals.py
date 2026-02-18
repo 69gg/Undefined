@@ -25,4 +25,13 @@ def build_model_queue_intervals(config: Config) -> dict[str, float]:
         if not name:
             continue
         intervals[name] = float(interval)
+
+    # 注册 pool 中模型的队列间隔
+    for pool_source in (config.chat_model, config.agent_model):
+        if pool_source.pool and pool_source.pool.enabled:
+            for entry in pool_source.pool.models:
+                name = entry.model_name.strip()
+                if name and name not in intervals:
+                    intervals[name] = float(entry.queue_interval_seconds)
+
     return intervals

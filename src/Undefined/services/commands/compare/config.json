@@ -1,0 +1,11 @@
+{
+  "name": "compare",
+  "description": "多模型比较，同一问题并发发给所有模型",
+  "usage": "/compare <问题>",
+  "example": "/compare 什么是量子计算",
+  "permission": "public",
+  "rate_limit": "stats",
+  "show_in_help": true,
+  "order": 31,
+  "aliases": ["pk"]
+}

@@ -31,6 +31,8 @@ from .models import (
     AgentModelConfig,
     ChatModelConfig,
     InflightSummaryModelConfig,
+    ModelPool,
+    ModelPoolEntry,
     SecurityModelConfig,
     VisionModelConfig,
 )
@@ -372,6 +374,7 @@ class Config:
     security_model: SecurityModelConfig
     agent_model: AgentModelConfig
     inflight_summary_model: InflightSummaryModelConfig
+    model_pool_enabled: bool
     log_level: str
     log_file_path: str
     log_max_size: int
@@ -598,6 +601,10 @@ class Config:
         agent_model = cls._parse_agent_model_config(data)
         inflight_summary_model = cls._parse_inflight_summary_model_config(
             data, chat_model
+        )
+
+        model_pool_enabled = _coerce_bool(
+            _get_value(data, ("models", "pool_enabled"), "MODEL_POOL_ENABLED"), False
         )
 
         superadmin_qq, admin_qqs = cls._merge_admins(
@@ -1036,6 +1043,7 @@ class Config:
             security_model=security_model,
             agent_model=agent_model,
             inflight_summary_model=inflight_summary_model,
+            model_pool_enabled=model_pool_enabled,
             log_level=log_level,
             log_file_path=log_file_path,
             log_max_size=log_max_size_mb * 1024 * 1024,
@@ -1184,6 +1192,65 @@ class Config:
         return bool(self.security_model_enabled)
 
     @staticmethod
+    def _parse_model_pool(
+        data: dict[str, Any],
+        model_section: str,
+        primary_config: ChatModelConfig | AgentModelConfig,
+    ) -> ModelPool | None:
+        """解析模型池配置，缺省字段继承 primary_config"""
+        pool_data = data.get("models", {}).get(model_section, {}).get("pool")
+        if not isinstance(pool_data, dict):
+            return None
+
+        enabled = _coerce_bool(pool_data.get("enabled"), True)
+        strategy = _coerce_str(pool_data.get("strategy"), "default").strip().lower()
+        if strategy not in ("default", "round_robin", "random"):
+            strategy = "default"
+
+        raw_models = pool_data.get("models")
+        if not isinstance(raw_models, list):
+            return ModelPool(enabled=enabled, strategy=strategy)
+
+        entries: list[ModelPoolEntry] = []
+        for item in raw_models:
+            if not isinstance(item, dict):
+                continue
+            name = _coerce_str(item.get("model_name"), "").strip()
+            if not name:
+                continue
+            entries.append(
+                ModelPoolEntry(
+                    api_url=_coerce_str(item.get("api_url"), primary_config.api_url),
+                    api_key=_coerce_str(item.get("api_key"), primary_config.api_key),
+                    model_name=name,
+                    max_tokens=_coerce_int(
+                        item.get("max_tokens"), primary_config.max_tokens
+                    ),
+                    queue_interval_seconds=_coerce_float(
+                        item.get("queue_interval_seconds"),
+                        primary_config.queue_interval_seconds,
+                    ),
+                    thinking_enabled=_coerce_bool(
+                        item.get("thinking_enabled"), primary_config.thinking_enabled
+                    ),
+                    thinking_budget_tokens=_coerce_int(
+                        item.get("thinking_budget_tokens"),
+                        primary_config.thinking_budget_tokens,
+                    ),
+                    thinking_include_budget=_coerce_bool(
+                        item.get("thinking_include_budget"),
+                        primary_config.thinking_include_budget,
+                    ),
+                    thinking_tool_call_compat=_coerce_bool(
+                        item.get("thinking_tool_call_compat"),
+                        primary_config.thinking_tool_call_compat,
+                    ),
+                )
+            )
+
+        return ModelPool(enabled=enabled, strategy=strategy, models=entries)
+
+    @staticmethod
     def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
         queue_interval_seconds = _coerce_float(
             _get_value(
@@ -1204,7 +1271,7 @@ class Config:
                 legacy_env_key="CHAT_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
             )
         )
-        return ChatModelConfig(
+        config = ChatModelConfig(
             api_url=_coerce_str(
                 _get_value(data, ("models", "chat", "api_url"), "CHAT_MODEL_API_URL"),
                 "",
@@ -1243,6 +1310,8 @@ class Config:
             thinking_include_budget=thinking_include_budget,
             thinking_tool_call_compat=thinking_tool_call_compat,
         )
+        config.pool = Config._parse_model_pool(data, "chat", config)
+        return config
 
     @staticmethod
     def _parse_vision_model_config(data: dict[str, Any]) -> VisionModelConfig:
@@ -1416,7 +1485,7 @@ class Config:
                 legacy_env_key="AGENT_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
             )
         )
-        return AgentModelConfig(
+        config = AgentModelConfig(
             api_url=_coerce_str(
                 _get_value(data, ("models", "agent", "api_url"), "AGENT_MODEL_API_URL"),
                 "",
@@ -1455,6 +1524,8 @@ class Config:
             thinking_include_budget=thinking_include_budget,
             thinking_tool_call_compat=thinking_tool_call_compat,
         )
+        config.pool = Config._parse_model_pool(data, "agent", config)
+        return config
 
     @staticmethod
     def _parse_inflight_summary_model_config(
