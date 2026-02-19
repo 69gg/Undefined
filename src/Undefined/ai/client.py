@@ -406,6 +406,18 @@ class AIClient:
 
         return get_config(strict=False)
 
+    def _find_chat_config_by_name(self, model_name: str) -> ChatModelConfig:
+        """根据模型名查找配置（主模型或池中模型）"""
+        if model_name == self.chat_config.model_name:
+            return self.chat_config
+        if self.chat_config.pool and self.chat_config.pool.enabled:
+            for entry in self.chat_config.pool.models:
+                if entry.model_name == model_name:
+                    return self.model_selector._entry_to_chat_config(
+                        entry, self.chat_config
+                    )
+        return self.chat_config
+
     def _get_prefetch_tool_names(self) -> list[str]:
         runtime_config = self._get_runtime_config()
         return list(runtime_config.prefetch_tools)
@@ -882,15 +894,11 @@ class AIClient:
 
         # 动态选择模型（等待偏好加载就绪，避免竞态）
         await self.model_selector.wait_ready()
-        group_id = pre_context.get("group_id", 0) or 0
-        user_id = pre_context.get("user_id", 0) or 0
-        runtime_config = self._get_runtime_config()
-        effective_chat_config = self.model_selector.select_chat_config(
-            self.chat_config,
-            group_id=group_id,
-            user_id=user_id,
-            global_enabled=runtime_config.model_pool_enabled,
-        )
+        selected_model_name = pre_context.get("selected_model_name")
+        if selected_model_name:
+            effective_chat_config = self._find_chat_config_by_name(selected_model_name)
+        else:
+            effective_chat_config = self.chat_config
 
         max_iterations = 1000
         iteration = 0
@@ -956,7 +964,7 @@ class AIClient:
                     cot_compat
                     and log_thinking
                     and tools
-                    and getattr(self.chat_config, "thinking_enabled", False)
+                    and getattr(effective_chat_config, "thinking_enabled", False)
                     and not reasoning_content
                     and tool_calls
                     and not cot_missing_logged

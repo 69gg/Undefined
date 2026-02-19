@@ -210,6 +210,7 @@ class AICoordinator:
         effective_config = self.model_pool.select_chat_config(
             self.config.chat_model, user_id=user_id
         )
+        request_data["selected_model_name"] = effective_config.model_name
 
         if user_id == self.config.superadmin_qq:
             await self.queue_manager.add_superadmin_request(
@@ -399,6 +400,7 @@ class AICoordinator:
                         "user_id": user_id,
                         "is_private_chat": True,
                         "sender_name": sender_name,
+                        "selected_model_name": request.get("selected_model_name"),
                     },
                 )
                 if result:

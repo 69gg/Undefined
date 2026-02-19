@@ -6,6 +6,7 @@ import asyncio
 import logging
 import random
 import re
+import threading
 import time
 from pathlib import Path
 
@@ -34,6 +35,7 @@ class ModelSelector:
         self._preferences_path = preferences_path or _DEFAULT_PREFERENCES_PATH
         self._compare_expire_seconds = compare_expire_seconds
         self._lock = asyncio.Lock()
+        self._rr_lock = threading.Lock()
         self._rr_counters: dict[str, int] = {}
         self._preferences: dict[tuple[int, int], dict[str, str]] = {}
         # pending_compares 只存模型名列表，不存配置对象
@@ -62,6 +64,10 @@ class ModelSelector:
             entry = self._find_entry(primary.pool, pref)
             if entry:
                 return self._entry_to_chat_config(entry, primary)
+            if pref_key in self._preferences and "chat" in self._preferences[pref_key]:
+                del self._preferences[pref_key]["chat"]
+                if not self._preferences[pref_key]:
+                    del self._preferences[pref_key]
 
         entry = self._select_by_strategy(primary.pool, "chat")
         if entry is None:
@@ -90,6 +96,10 @@ class ModelSelector:
             entry = self._find_entry(primary.pool, pref)
             if entry:
                 return self._entry_to_agent_config(entry, primary)
+            if pref_key in self._preferences and "agent" in self._preferences[pref_key]:
+                del self._preferences[pref_key]["agent"]
+                if not self._preferences[pref_key]:
+                    del self._preferences[pref_key]
 
         entry = self._select_by_strategy(primary.pool, "agent")
         if entry is None:
@@ -103,9 +113,10 @@ class ModelSelector:
         result: list[tuple[str, ChatModelConfig]] = [(primary.model_name, primary)]
         if primary.pool and primary.pool.enabled:
             for entry in primary.pool.models:
-                result.append(
-                    (entry.model_name, self._entry_to_chat_config(entry, primary))
-                )
+                if entry.model_name != primary.model_name:
+                    result.append(
+                        (entry.model_name, self._entry_to_chat_config(entry, primary))
+                    )
         return result
 
     def set_preference(
@@ -205,9 +216,10 @@ class ModelSelector:
         if pool.strategy == "random":
             return random.choice(pool.models)
         if pool.strategy == "round_robin":
-            idx = self._rr_counters.get(pool_key, 0)
-            entry = pool.models[idx % len(pool.models)]
-            self._rr_counters[pool_key] = idx + 1
+            with self._rr_lock:
+                idx = self._rr_counters.get(pool_key, 0)
+                entry = pool.models[idx % len(pool.models)]
+                self._rr_counters[pool_key] = idx + 1
             return entry
         return None
 

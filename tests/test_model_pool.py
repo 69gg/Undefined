@@ -713,3 +713,115 @@ class TestModelPoolIntegration:
 
         assert result1.model_name == "model-a"
         assert result2.model_name == "model-b"
+
+
+class TestModelSelectorBugFixes:
+    """测试模型选择器的 bug 修复"""
+
+    def test_clear_invalid_preference_when_model_removed(
+        self, model_selector: ModelSelector, primary_chat_config: ChatModelConfig
+    ) -> None:
+        """测试当用户偏好的模型从池中移除时，偏好被自动清除"""
+        user_id = 12345
+
+        # 设置用户偏好为 model-a
+        model_selector.set_preference(0, user_id, "chat", "model-a")
+        assert model_selector.get_preference(0, user_id, "chat") == "model-a"
+
+        # 创建一个新的配置，池中不包含 model-a
+        new_pool = ModelPool(
+            enabled=True,
+            strategy="round_robin",
+            models=[
+                ModelPoolEntry(
+                    api_url="https://api.example.com/v1",
+                    api_key="key2",
+                    model_name="model-b",
+                    max_tokens=4096,
+                ),
+            ],
+        )
+        new_config = ChatModelConfig(
+            api_url="https://api.example.com/v1",
+            api_key="primary-key",
+            model_name="primary-model",
+            max_tokens=4096,
+            pool=new_pool,
+        )
+
+        # 选择模型时，由于 model-a 不在池中，应该清除偏好并回退到策略选择
+        result = model_selector.select_chat_config(
+            new_config, group_id=0, user_id=user_id, global_enabled=True
+        )
+
+        # 验证偏好已被清除
+        assert model_selector.get_preference(0, user_id, "chat") is None
+        # 验证回退到策略选择（round_robin 第一个模型）
+        assert result.model_name == "model-b"
+
+    @pytest.mark.asyncio
+    async def test_round_robin_thread_safety(
+        self, model_selector: ModelSelector, primary_chat_config: ChatModelConfig
+    ) -> None:
+        """测试 round-robin 计数器在并发场景下的线程安全"""
+        import concurrent.futures
+
+        # 并发选择模型 100 次
+        def select_model() -> str:
+            result = model_selector.select_chat_config(
+                primary_chat_config, group_id=0, user_id=0, global_enabled=True
+            )
+            return result.model_name
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(select_model) for _ in range(100)]
+            results = [f.result() for f in futures]
+
+        # 验证所有选择都成功（没有异常）
+        assert len(results) == 100
+        # 验证 round-robin 轮询（model-a 和 model-b 应该大致各占一半）
+        count_a = results.count("model-a")
+        count_b = results.count("model-b")
+        assert count_a == 50
+        assert count_b == 50
+
+    def test_get_all_chat_models_no_duplicate_primary(
+        self, model_selector: ModelSelector
+    ) -> None:
+        """测试 get_all_chat_models 不会重复包含主模型"""
+        # 创建一个配置，池中包含与主模型同名的模型
+        pool = ModelPool(
+            enabled=True,
+            strategy="round_robin",
+            models=[
+                ModelPoolEntry(
+                    api_url="https://api.example.com/v1",
+                    api_key="key1",
+                    model_name="primary-model",  # 与主模型同名
+                    max_tokens=4096,
+                ),
+                ModelPoolEntry(
+                    api_url="https://api.example.com/v1",
+                    api_key="key2",
+                    model_name="model-b",
+                    max_tokens=4096,
+                ),
+            ],
+        )
+        config = ChatModelConfig(
+            api_url="https://api.example.com/v1",
+            api_key="primary-key",
+            model_name="primary-model",
+            max_tokens=4096,
+            pool=pool,
+        )
+
+        # 获取所有模型
+        all_models = model_selector.get_all_chat_models(config)
+
+        # 验证主模型只出现一次
+        model_names = [name for name, _ in all_models]
+        assert model_names.count("primary-model") == 1
+        # 验证总共有 2 个模型（primary-model 和 model-b）
+        assert len(all_models) == 2
+        assert set(model_names) == {"primary-model", "model-b"}

@@ -1202,7 +1202,7 @@ class Config:
         if not isinstance(pool_data, dict):
             return None
 
-        enabled = _coerce_bool(pool_data.get("enabled"), True)
+        enabled = _coerce_bool(pool_data.get("enabled"), False)
         strategy = _coerce_str(pool_data.get("strategy"), "default").strip().lower()
         if strategy not in ("default", "round_robin", "random"):
             strategy = "default"
