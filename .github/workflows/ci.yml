@@ -46,6 +46,9 @@ jobs:
       - name: Run Mypy
         run: uv run mypy .
 
+      - name: Run Tests
+        run: uv run pytest tests/
+
       - name: Build wheel
         run: uv build --wheel
 
