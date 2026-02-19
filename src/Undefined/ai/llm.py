@@ -21,7 +21,6 @@ from Undefined.config import (
     ChatModelConfig,
     VisionModelConfig,
     AgentModelConfig,
-    InflightSummaryModelConfig,
     SecurityModelConfig,
     Config,
     get_config,
@@ -33,11 +32,7 @@ from Undefined.utils.tool_calls import normalize_tool_arguments_json
 logger = logging.getLogger(__name__)
 
 ModelConfig = (
-    ChatModelConfig
-    | VisionModelConfig
-    | AgentModelConfig
-    | InflightSummaryModelConfig
-    | SecurityModelConfig
+    ChatModelConfig | VisionModelConfig | AgentModelConfig | SecurityModelConfig
 )
 
 __all__ = ["ModelRequester", "build_request_body", "ModelConfig"]

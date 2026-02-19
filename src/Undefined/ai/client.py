@@ -8,7 +8,7 @@ import importlib.util
 import logging
 import re
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING, Literal
+from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
 
 import httpx
 
@@ -23,13 +23,11 @@ from Undefined.config import (
     ChatModelConfig,
     VisionModelConfig,
     AgentModelConfig,
-    InflightSummaryModelConfig,
     Config,
 )
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import set_context_resource_scan_paths
 from Undefined.end_summary_storage import EndSummaryStorage
-from Undefined.inflight_task_store import InflightTaskLocation, InflightTaskStore
 from Undefined.memory import MemoryStorage
 from Undefined.skills.agents import AgentRegistry
 from Undefined.skills.agents.intro_generator import (
@@ -227,13 +225,10 @@ class AIClient:
         else:
             logger.warning("[初始化] crawl4ai 不可用，网页获取功能将禁用")
 
-        self._inflight_task_store = InflightTaskStore()
-
         self._prompt_builder = PromptBuilder(
             bot_qq=self.bot_qq,
             memory_storage=self.memory_storage,
             end_summary_storage=self._end_summary_storage,
-            inflight_task_store=self._inflight_task_store,
             runtime_config_getter=self._get_runtime_config,
             anthropic_skill_registry=self.anthropic_skill_registry,
         )
@@ -542,10 +537,7 @@ class AIClient:
 
     async def request_model(
         self,
-        model_config: ChatModelConfig
-        | VisionModelConfig
-        | AgentModelConfig
-        | InflightSummaryModelConfig,
+        model_config: ChatModelConfig | VisionModelConfig | AgentModelConfig,
         messages: list[dict[str, Any]],
         max_tokens: int = 8192,
         call_type: str = "chat",
@@ -603,77 +595,6 @@ class AIClient:
     async def generate_title(self, summary: str) -> str:
         return await self._summary_service.generate_title(summary)
 
-    def get_inflight_task_store(self) -> InflightTaskStore:
-        return self._inflight_task_store
-
-    def get_inflight_summary_model_config(self) -> InflightSummaryModelConfig:
-        runtime_config = self._get_runtime_config()
-        return runtime_config.inflight_summary_model
-
-    async def set_inflight_summary_generation_result(
-        self, request_id: str, action_summary: str
-    ) -> bool:
-        return await self._inflight_task_store.mark_ready(request_id, action_summary)
-
-    async def clear_inflight_summary_for_request(self, request_id: str) -> bool:
-        return await self._inflight_task_store.clear_by_request(request_id)
-
-    async def clear_inflight_summary_for_chat(
-        self,
-        request_type: Literal["group", "private"],
-        chat_id: int,
-        owner_request_id: str | None = None,
-    ) -> bool:
-        return await self._inflight_task_store.clear_for_chat(
-            request_type=request_type,
-            chat_id=chat_id,
-            owner_request_id=owner_request_id,
-        )
-
-    async def _enqueue_inflight_summary_generation(
-        self,
-        *,
-        request_id: str,
-        source_message: str,
-        location: InflightTaskLocation,
-    ) -> None:
-        if not self._is_inflight_summary_enabled():
-            logger.debug(
-                "[进行中摘要] 功能已关闭，跳过摘要投递: request_id=%s",
-                request_id,
-            )
-            return
-
-        if self._queue_manager is None:
-            logger.debug(
-                "[进行中摘要] queue_manager 未设置，跳过异步摘要: request_id=%s",
-                request_id,
-            )
-            return
-
-        request_data: dict[str, Any] = {
-            "type": "inflight_summary_generation",
-            "request_id": request_id,
-            "source_message": source_message,
-            "location": {
-                "type": location.get("type"),
-                "name": location.get("name"),
-                "id": int(location.get("id", 0)),
-            },
-        }
-        model_config = self.get_inflight_summary_model_config()
-        try:
-            await self._queue_manager.add_background_request(
-                request_data,
-                model_name=model_config.model_name,
-            )
-        except Exception as exc:
-            logger.warning(
-                "[进行中摘要] 投递后台请求失败: request_id=%s error=%s",
-                request_id,
-                exc,
-            )
-
     def _extract_message_excerpt(self, question: str) -> str:
         matched = _CONTENT_TAG_PATTERN.search(question)
         if matched:
@@ -686,46 +607,6 @@ class AIClient:
         if len(cleaned) > 120:
             return cleaned[:117].rstrip() + "..."
         return cleaned
-
-    def _build_inflight_location(
-        self, tool_context: dict[str, Any]
-    ) -> InflightTaskLocation | None:
-        request_type = str(tool_context.get("request_type") or "").strip().lower()
-        if request_type == "group":
-            group_id_raw = tool_context.get("group_id")
-            if group_id_raw is None:
-                return None
-            try:
-                group_id = int(group_id_raw)
-            except (TypeError, ValueError):
-                return None
-            group_name_raw = tool_context.get("group_name")
-            group_name = (
-                str(group_name_raw).strip() if group_name_raw is not None else ""
-            )
-            if not group_name:
-                group_name = f"群{group_id}"
-            return {"type": "group", "name": group_name, "id": group_id}
-
-        if request_type == "private":
-            user_id_raw = tool_context.get("user_id")
-            if user_id_raw is None:
-                user_id_raw = tool_context.get("sender_id")
-            if user_id_raw is None:
-                return None
-            try:
-                user_id = int(user_id_raw)
-            except (TypeError, ValueError):
-                return None
-            sender_name_raw = tool_context.get("sender_name")
-            sender_name = (
-                str(sender_name_raw).strip() if sender_name_raw is not None else ""
-            )
-            if not sender_name:
-                sender_name = str(user_id)
-            return {"type": "private", "name": sender_name, "id": user_id}
-
-        return None
 
     def _is_end_only_tool_calls(
         self,
@@ -741,23 +622,6 @@ class AIClient:
             if internal_name != "end":
                 return False
         return True
-
-    def _is_inflight_summary_enabled(self) -> bool:
-        try:
-            runtime_config = self._get_runtime_config()
-            return bool(getattr(runtime_config, "inflight_summary_enabled", False))
-        except Exception:
-            return False
-
-    def _should_pre_register_inflight(
-        self, context: dict[str, Any], question: str
-    ) -> bool:
-        """根据配置决定是否预注册进行中占位。"""
-        try:
-            runtime_config = self._get_runtime_config()
-            return bool(getattr(runtime_config, "inflight_pre_register_enabled", True))
-        except Exception:
-            return True
 
     async def ask(
         self,
@@ -811,33 +675,6 @@ class AIClient:
         if extra_context:
             pre_context.update(extra_context)
 
-        inflight_request_id = str(pre_context.get("request_id") or "").strip()
-        inflight_location = self._build_inflight_location(pre_context)
-        source_message_excerpt = self._extract_message_excerpt(question)
-        inflight_registered = False
-        inflight_summary_enqueued = False
-        inflight_summary_enabled = self._is_inflight_summary_enabled()
-
-        if not inflight_summary_enabled:
-            logger.debug("[进行中摘要] 功能已关闭：跳过占位与摘要注入")
-
-        should_pre_register = self._should_pre_register_inflight(pre_context, question)
-        if should_pre_register and inflight_request_id and inflight_location:
-            await self._inflight_task_store.upsert_pending(
-                request_id=inflight_request_id,
-                request_type=inflight_location["type"],
-                chat_id=inflight_location["id"],
-                location_name=inflight_location["name"],
-                source_message=source_message_excerpt,
-            )
-            inflight_registered = True
-            logger.info(
-                "[进行中摘要] 首轮前预占位: request_id=%s location=%s:%s",
-                inflight_request_id,
-                inflight_location["type"],
-                inflight_location["id"],
-            )
-
         messages = await self._prompt_builder.build_messages(
             question,
             get_recent_messages_callback=get_recent_messages_callback,
@@ -879,18 +716,12 @@ class AIClient:
         tool_context.setdefault("search_wrapper", self._search_wrapper)
         tool_context.setdefault("end_summary_storage", self._end_summary_storage)
         tool_context.setdefault("end_summaries", self._prompt_builder.end_summaries)
-        tool_context.setdefault("inflight_task_store", self._inflight_task_store)
         tool_context.setdefault(
             "send_private_message_callback", self._send_private_message_callback
         )
         tool_context.setdefault("send_message_callback", send_message_callback)
         tool_context.setdefault("sender", sender)
         tool_context.setdefault("send_image_callback", self._send_image_callback)
-
-        if not inflight_request_id:
-            inflight_request_id = str(tool_context.get("request_id") or "").strip()
-        if inflight_location is None:
-            inflight_location = self._build_inflight_location(tool_context)
 
         # 动态选择模型（等待偏好加载就绪，避免竞态）
         await self.model_selector.wait_ready()
@@ -907,13 +738,6 @@ class AIClient:
         cot_compat = getattr(effective_chat_config, "thinking_tool_call_compat", False)
         cot_compat_logged = False
         cot_missing_logged = False
-
-        async def _clear_inflight_on_exit() -> None:
-            nonlocal inflight_registered
-            if not inflight_registered or not inflight_request_id:
-                return
-            await self.clear_inflight_summary_for_request(inflight_request_id)
-            inflight_registered = False
 
         while iteration < max_iterations:
             iteration += 1
@@ -986,74 +810,11 @@ class AIClient:
                     )
                     content = ""
 
-                if inflight_summary_enabled and iteration == 1 and tool_calls:
-                    is_end_only = self._is_end_only_tool_calls(
-                        tool_calls, api_to_internal
-                    )
-                    if is_end_only:
-                        if inflight_registered and inflight_request_id:
-                            await self.clear_inflight_summary_for_request(
-                                inflight_request_id
-                            )
-                            inflight_registered = False
-                            logger.info(
-                                "[进行中摘要] 首轮仅end，已清理占位: request_id=%s",
-                                inflight_request_id,
-                            )
-                    elif inflight_request_id and inflight_location:
-                        if not inflight_registered:
-                            await self._inflight_task_store.upsert_pending(
-                                request_id=inflight_request_id,
-                                request_type=inflight_location["type"],
-                                chat_id=inflight_location["id"],
-                                location_name=inflight_location["name"],
-                                source_message=source_message_excerpt,
-                            )
-                            inflight_registered = True
-                            logger.info(
-                                "[进行中摘要] 已创建占位: request_id=%s location=%s:%s",
-                                inflight_request_id,
-                                inflight_location["type"],
-                                inflight_location["id"],
-                            )
-
-                        if not inflight_summary_enqueued:
-
-                            def _cleanup_task(t: asyncio.Task[Any]) -> None:
-                                self._background_tasks.discard(t)
-                                if t.exception() is not None:
-                                    logger.error(
-                                        "[进行中摘要] 投递失败: %s", t.exception()
-                                    )
-
-                            task = asyncio.create_task(
-                                self._enqueue_inflight_summary_generation(
-                                    request_id=inflight_request_id,
-                                    source_message=source_message_excerpt,
-                                    location=inflight_location,
-                                )
-                            )
-                            self._background_tasks.add(task)
-                            task.add_done_callback(_cleanup_task)
-                            inflight_summary_enqueued = True
-                            logger.info(
-                                "[进行中摘要] 已投递摘要生成: request_id=%s",
-                                inflight_request_id,
-                            )
-                    else:
-                        logger.debug(
-                            "[进行中摘要] 跳过占位创建: request_id=%s end_only=%s has_location=%s",
-                            inflight_request_id,
-                            is_end_only,
-                            bool(inflight_location),
-                        )
-
                 if not tool_calls:
                     logger.info(
                         "[AI回复] 会话结束，返回最终内容: length=%s",
                         len(content),
                     )
-                    await _clear_inflight_on_exit()
                     return content
 
                 assistant_message: dict[str, Any] = {
@@ -1222,18 +983,14 @@ class AIClient:
 
                 if conversation_ended:
                     logger.info("[会话状态] 对话已结束（调用 end 工具）")
-                    await _clear_inflight_on_exit()
                     return ""
 
             except Exception as exc:
                 if not any_tool_executed:
                     # 尚未执行任何工具（无消息发送等副作用），安全传播给上层重试
-                    await _clear_inflight_on_exit()
                     raise
                 logger.exception("ask 处理失败: %s", exc)
-                await _clear_inflight_on_exit()
                 return f"处理失败: {exc}"
 
         logger.warning("[AI决策] 达到最大迭代次数，未能完成处理")
-        await _clear_inflight_on_exit()
         return "达到最大迭代次数，未能完成处理"
