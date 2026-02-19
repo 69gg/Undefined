@@ -96,18 +96,3 @@ class AgentModelConfig:
         False  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
     pool: ModelPool | None = None  # 模型池配置
-
-
-@dataclass
-class InflightSummaryModelConfig:
-    """进行中任务摘要模型配置。"""
-
-    api_url: str
-    api_key: str
-    model_name: str
-    max_tokens: int = 128
-    queue_interval_seconds: float = 1.5
-    thinking_enabled: bool = False
-    thinking_budget_tokens: int = 0
-    thinking_include_budget: bool = False
-    thinking_tool_call_compat: bool = False

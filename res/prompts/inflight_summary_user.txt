@@ -1,5 +1,0 @@
-会话类型: {location_type}
-会话名称: {location_name}
-会话ID: {location_id}
-正在处理消息: {source_message}
-仅返回一个动作短语，例如：已开始生成首版

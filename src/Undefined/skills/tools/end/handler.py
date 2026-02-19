@@ -9,7 +9,6 @@ from Undefined.end_summary_storage import (
     EndSummaryStorage,
     MAX_END_SUMMARIES,
 )
-from Undefined.inflight_task_store import InflightTaskStore
 
 logger = logging.getLogger(__name__)
 
@@ -113,44 +112,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 )
 
         logger.info("保存end记录: %s...", summary[:50])
-
-    inflight_task_store = context.get("inflight_task_store")
-    if isinstance(inflight_task_store, InflightTaskStore):
-        request_id = context.get("request_id")
-        cleared = False
-        if isinstance(request_id, str) and request_id.strip():
-            cleared = await inflight_task_store.clear_by_request(request_id)
-
-        if not cleared:
-            request_type = context.get("request_type")
-            chat_id: int | None = None
-            if request_type == "group":
-                raw_group_id = context.get("group_id")
-                if raw_group_id is None:
-                    chat_id = None
-                else:
-                    try:
-                        chat_id = int(raw_group_id)
-                    except (TypeError, ValueError):
-                        chat_id = None
-            elif request_type == "private":
-                raw_user_id = context.get("user_id")
-                if raw_user_id is None:
-                    chat_id = None
-                else:
-                    try:
-                        chat_id = int(raw_user_id)
-                    except (TypeError, ValueError):
-                        chat_id = None
-
-            if request_type in {"group", "private"} and chat_id is not None:
-                await inflight_task_store.clear_for_chat(
-                    request_type=request_type,
-                    chat_id=chat_id,
-                    owner_request_id=request_id
-                    if isinstance(request_id, str)
-                    else None,
-                )
 
     # 通知调用方对话应结束
     context["conversation_ended"] = True

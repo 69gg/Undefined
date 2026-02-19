@@ -205,39 +205,6 @@ strategy = "default"
 # en: Agent model pool entries (model_name, api_url, api_key required; others optional, inherit from primary).
 models = []
 
-# zh: 进行中任务摘要模型配置（可选，用于并发真空期的"处理中摘要"）。仅当 [queue] 下 inflight_summary_enabled = true 时生效。
-# en: Inflight summary model config (optional, used to generate in-progress task summaries). Only effective when inflight_summary_enabled = true under [queue].
-# zh: 当 api_url/api_key/model_name 任一为空时，自动回退到 [models.chat]。
-# en: Falls back to [models.chat] when api_url/api_key/model_name is missing.
-[models.inflight_summary]
-# zh: OpenAI-compatible 基址 URL（可选，留空则回退 chat）。
-# en: OpenAI-compatible base URL (optional; empty means fallback to chat).
-api_url = ""
-# zh: 模型 API Key（可选，留空则回退 chat）。
-# en: API key (optional; empty means fallback to chat).
-api_key = ""
-# zh: 模型名称（可选，留空则回退 chat）。
-# en: Model name (optional; empty means fallback to chat).
-model_name = ""
-# zh: 最大生成 tokens（可选，默认 128）。
-# en: Max generation tokens (optional, default 128).
-max_tokens = 128
-# zh: 队列发车间隔（秒，可选，默认 1.5）。
-# en: Queue interval in seconds (optional, default 1.5).
-queue_interval_seconds = 1.5
-# zh: 是否启用 thinking（可选，默认 false）。
-# en: Enable thinking (optional, default false).
-thinking_enabled = false
-# zh: thinking 预算 tokens（可选，默认 0）。
-# en: Thinking budget tokens (optional, default 0).
-thinking_budget_tokens = 0
-# zh: 是否在请求中发送 budget_tokens（可选，默认 false）。
-# en: Include budget_tokens in request (optional, default false).
-thinking_include_budget = false
-# zh: 思维链工具调用兼容（可选，默认 false）。
-# en: Thinking tool-call compatibility (optional, default false).
-thinking_tool_call_compat = false
-
 # zh: 日志配置。
 # en: Logging settings.
 [logging]
@@ -293,21 +260,6 @@ description_preview_len = 160
 # en: - true: use `res/prompts/undefined_nagaagent.xml` and expose related agents
 # en: - false: use `res/prompts/undefined.xml` and hide/disable related agents
 nagaagent_mode_enabled = false
-# zh: 是否启用“进行中任务摘要”防重机制。
-# zh: 是否预注册进行中占位（防止重复执行）
-# zh: - true: 启用（默认），在首轮前预占位
-# zh: - false: 关闭，不预注册占位
-# en: Enable inflight task pre-registration (prevent duplicate execution)
-# en: - true: enable (default), pre-register before first round
-# en: - false: disable, no pre-registration
-inflight_pre_register_enabled = true
-# zh: 是否生成进行中任务摘要（需要额外摘要模型设置）
-# zh: - true: 启用，异步生成动作摘要
-# zh: - false: 关闭（默认），不生成摘要
-# en: Enable inflight task summary generation (additional summary model settings required)
-# en: - true: enable, generate action summary asynchronously
-# en: - false: disable (default), no summary generation
-inflight_summary_enabled = false
 # zh: 多模型池全局开关（关闭后所有多模型功能禁用，行为与原版一致）。无特殊需求不建议启用。
 # en: Global model pool switch. When disabled, all multi-model features are disabled. Not recommended unless you have specific needs.
 pool_enabled = false

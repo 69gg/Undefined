@@ -7,7 +7,6 @@ from .manager import ConfigManager
 from .models import (
     AgentModelConfig,
     ChatModelConfig,
-    InflightSummaryModelConfig,
     ModelPool,
     ModelPoolEntry,
     SecurityModelConfig,
@@ -20,7 +19,6 @@ __all__ = [
     "VisionModelConfig",
     "SecurityModelConfig",
     "AgentModelConfig",
-    "InflightSummaryModelConfig",
     "ModelPool",
     "ModelPoolEntry",
     "get_config",
