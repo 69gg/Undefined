@@ -358,7 +358,16 @@ class MessageHandler:
         # 关键词自动回复：心理委员 (使用原始消息内容提取文本，保证关键词触发不受影响)
         if self.config.keyword_reply_enabled and matches_xinliweiyuan(text):
             rand_val = random.random()
-            if rand_val < 0.1:  # 10% 发送图片
+            if rand_val < 0.01:  # 1% 飞起来
+                message = f"[@{sender_id}] 再发让你飞起来"
+                logger.info("关键词回复: 再发让你飞起来")
+                await self.sender.send_group_message(
+                    group_id,
+                    message,
+                    history_prefix=KEYWORD_REPLY_HISTORY_PREFIX,
+                )
+                return
+            elif rand_val < 0.11:  # 10% 发送图片
                 try:
                     image_path = str(resolve_resource_path("img/xlwy.jpg").resolve())
                 except Exception:
