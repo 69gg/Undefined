@@ -440,6 +440,80 @@ class OneBotClient:
         """
         return await self._call_api("send_like", {"user_id": user_id, "times": times})
 
+    async def send_group_poke(
+        self,
+        group_id: int,
+        user_id: int,
+        *,
+        mark_sent: bool = True,
+    ) -> dict[str, Any]:
+        """在群聊中拍一拍指定成员。
+
+        参数:
+            group_id: 群号
+            user_id: 被拍一拍的用户 QQ 号
+            mark_sent: 是否标记本轮已发送（用于 end 工具判定）
+
+        返回:
+            API 响应
+        """
+        try:
+            result = await self._call_api(
+                "group_poke", {"group_id": group_id, "user_id": user_id}
+            )
+        except RuntimeError:
+            logger.warning(
+                "[拍一拍] group_poke 失败，尝试 send_poke 回退: group=%s user=%s",
+                group_id,
+                user_id,
+            )
+            result = await self._call_api(
+                "send_poke",
+                {
+                    "group_id": group_id,
+                    "user_id": user_id,
+                    "target_id": user_id,
+                },
+            )
+
+        if mark_sent:
+            _mark_message_sent_this_turn()
+        return result
+
+    async def send_private_poke(
+        self,
+        user_id: int,
+        *,
+        mark_sent: bool = True,
+    ) -> dict[str, Any]:
+        """在私聊中拍一拍指定用户。
+
+        参数:
+            user_id: 被拍一拍的用户 QQ 号
+            mark_sent: 是否标记本轮已发送（用于 end 工具判定）
+
+        返回:
+            API 响应
+        """
+        try:
+            result = await self._call_api("friend_poke", {"user_id": user_id})
+        except RuntimeError:
+            logger.warning(
+                "[拍一拍] friend_poke 失败，尝试 send_poke 回退: user=%s",
+                user_id,
+            )
+            result = await self._call_api(
+                "send_poke",
+                {
+                    "user_id": user_id,
+                    "target_id": user_id,
+                },
+            )
+
+        if mark_sent:
+            _mark_message_sent_this_turn()
+        return result
+
     async def upload_group_file(
         self,
         group_id: int,

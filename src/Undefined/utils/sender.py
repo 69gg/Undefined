@@ -219,6 +219,50 @@ class MessageSender:
 
         logger.info(f"[消息分段] 已完成 {chunk_count} 段消息的发送")
 
+    async def send_group_poke(
+        self,
+        group_id: int,
+        user_id: int,
+        *,
+        mark_sent: bool = True,
+    ) -> None:
+        """在群聊中拍一拍指定成员。"""
+        if not self.config.is_group_allowed(group_id):
+            enabled = self.config.access_control_enabled()
+            logger.warning(
+                "[访问控制] 已拦截群拍一拍: group=%s user=%s (allowlist enabled=%s)",
+                group_id,
+                user_id,
+                enabled,
+            )
+            raise PermissionError(
+                f"blocked by allowlist: group_id={int(group_id)} enabled={enabled}"
+            )
+
+        logger.info("[拍一拍] 群=%s 用户=%s", group_id, user_id)
+        await self.onebot.send_group_poke(group_id, user_id, mark_sent=mark_sent)
+
+    async def send_private_poke(
+        self,
+        user_id: int,
+        *,
+        mark_sent: bool = True,
+    ) -> None:
+        """在私聊中拍一拍指定用户。"""
+        if not self.config.is_private_allowed(user_id):
+            enabled = self.config.access_control_enabled()
+            logger.warning(
+                "[访问控制] 已拦截私聊拍一拍: user=%s (allowlist enabled=%s)",
+                user_id,
+                enabled,
+            )
+            raise PermissionError(
+                f"blocked by allowlist: user_id={int(user_id)} enabled={enabled}"
+            )
+
+        logger.info("[拍一拍] 私聊用户=%s", user_id)
+        await self.onebot.send_private_poke(user_id, mark_sent=mark_sent)
+
     async def send_group_file(
         self,
         group_id: int,
