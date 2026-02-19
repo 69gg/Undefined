@@ -441,6 +441,9 @@ config_path = "config/mcp.json"
 # zh: messages.send_text_file 单文件文本发送大小上限（KB）。默认 512KB（0.5MB）。
 # en: Size limit for messages.send_text_file single-text-file uploads (KB). Default 512KB (0.5MB).
 send_text_file_max_size_kb = 512
+# zh: messages.send_url_file URL 文件发送大小上限（MB）。默认 100MB。
+# en: Size limit for messages.send_url_file URL-file uploads (MB). Default 100MB.
+send_url_file_max_size_mb = 100
 
 # zh: Bilibili 视频自动提取配置。
 # en: Bilibili video auto-extraction settings.

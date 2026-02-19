@@ -507,8 +507,9 @@ uv run Undefined-webui
   - `oversize_strategy`：超限策略（`downgrade`=降低清晰度重试, `info`=发送封面+标题+简介）
   - `auto_extract_group_ids` / `auto_extract_private_ids`：自动提取功能白名单（空=跟随全局 access）
   - 系统依赖：需安装 `ffmpeg`
-- **消息工具（单文件发送）**：`[messages]`
+- **消息工具**：`[messages]`
   - `send_text_file_max_size_kb`：`messages.send_text_file` 单文件文本发送大小上限（KB），默认 `512`（`0.5MB`）
+  - `send_url_file_max_size_mb`：`messages.send_url_file` URL 文件发送大小上限（MB），默认 `100`
   - 建议：单文件、轻量任务优先用 `messages.send_text_file`；多文件工程或需要执行验证/打包交付优先用 `code_delivery_agent`
 - **代理设置（可选）**：`[proxy]`
 - **WebUI**：`[webui]`（默认 `127.0.0.1:8787`，密码默认 `changeme`，启动 `uv run Undefined-webui`）
