@@ -34,7 +34,6 @@ _QUEUE_INTERVAL_KEYS: set[str] = {
     "vision_model.queue_interval_seconds",
     "security_model.queue_interval_seconds",
     "agent_model.queue_interval_seconds",
-    "inflight_summary_model.queue_interval_seconds",
     "chat_model.pool",
     "agent_model.pool",
 }
@@ -44,7 +43,6 @@ _MODEL_NAME_KEYS: set[str] = {
     "vision_model.model_name",
     "security_model.model_name",
     "agent_model.model_name",
-    "inflight_summary_model.model_name",
 }
 
 _AGENT_INTRO_KEYS: set[str] = {
