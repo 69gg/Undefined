@@ -1,4 +1,4 @@
-"""最近消息获取工具（OneBot 优先）。"""
+"""最近消息获取工具（本地 history 优先）。"""
 
 from __future__ import annotations
 
@@ -104,7 +104,7 @@ def _get_recent_from_history_manager(
         return []
 
 
-async def get_recent_messages_prefer_onebot(
+async def get_recent_messages_prefer_local(
     *,
     chat_id: str,
     msg_type: str,
@@ -116,10 +116,20 @@ async def get_recent_messages_prefer_onebot(
     group_name_hint: str | None = None,
     max_onebot_count: int = 5000,
 ) -> list[dict[str, Any]]:
-    """优先从 OneBot 获取最近消息，失败时回退到本地 history。"""
+    """优先从本地 history 获取最近消息，必要时回退到 OneBot。"""
     norm_start, norm_end = _normalize_range(start, end)
     if norm_end <= 0:
         return []
+
+    local_messages = _get_recent_from_history_manager(
+        history_manager,
+        chat_id,
+        msg_type,
+        norm_start,
+        norm_end,
+    )
+    if local_messages:
+        return local_messages
 
     if msg_type == "group" and onebot_client is not None:
         try:
@@ -145,14 +155,34 @@ async def get_recent_messages_prefer_onebot(
                 formatted_messages.sort(key=lambda item: str(item.get("timestamp", "")))
                 return _slice_recent(formatted_messages, norm_start, norm_end)
         except (TypeError, ValueError):
-            logger.debug("群聊 chat_id 不是数字，回退到本地 history: %s", chat_id)
+            logger.debug("群聊 chat_id 不是数字，无法回退到 OneBot: %s", chat_id)
         except Exception as exc:
-            logger.warning("从 OneBot 获取群历史失败，回退到本地 history: %s", exc)
+            logger.warning("从 OneBot 获取群历史失败: %s", exc)
 
-    return _get_recent_from_history_manager(
-        history_manager,
-        chat_id,
-        msg_type,
-        norm_start,
-        norm_end,
+    return []
+
+
+async def get_recent_messages_prefer_onebot(
+    *,
+    chat_id: str,
+    msg_type: str,
+    start: int,
+    end: int,
+    onebot_client: Any | None,
+    history_manager: Any | None,
+    bot_qq: int,
+    group_name_hint: str | None = None,
+    max_onebot_count: int = 5000,
+) -> list[dict[str, Any]]:
+    """兼容旧名称，当前行为等同于本地优先。"""
+    return await get_recent_messages_prefer_local(
+        chat_id=chat_id,
+        msg_type=msg_type,
+        start=start,
+        end=end,
+        onebot_client=onebot_client,
+        history_manager=history_manager,
+        bot_qq=bot_qq,
+        group_name_hint=group_name_hint,
+        max_onebot_count=max_onebot_count,
     )

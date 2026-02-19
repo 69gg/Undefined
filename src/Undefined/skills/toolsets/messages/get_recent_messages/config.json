@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "get_recent_messages",
-        "description": "获取指定聊天的历史消息。群聊场景优先走 OneBot 历史接口，失败时回退本地 history；私聊默认使用本地 history。",
+        "description": "获取指定聊天的历史消息。默认优先使用本地 history；当群聊本地记录为空时，再尝试 OneBot 历史接口。",
         "parameters": {
             "type": "object",
             "properties": {

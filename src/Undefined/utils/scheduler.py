@@ -17,7 +17,7 @@ from apscheduler.triggers.cron import CronTrigger
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
 from Undefined.scheduled_task_storage import ScheduledTaskStorage
-from Undefined.utils.recent_messages import get_recent_messages_prefer_onebot
+from Undefined.utils.recent_messages import get_recent_messages_prefer_local
 from Undefined.utils import io
 
 logger = logging.getLogger(__name__)
@@ -418,7 +418,7 @@ class TaskScheduler:
                 async def get_recent_cb(
                     chat_id: str, msg_type: str, start: int, end: int
                 ) -> list[dict[str, Any]]:
-                    return await get_recent_messages_prefer_onebot(
+                    return await get_recent_messages_prefer_local(
                         chat_id=chat_id,
                         msg_type=msg_type,
                         start=start,

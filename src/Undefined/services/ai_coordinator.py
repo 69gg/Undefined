@@ -13,7 +13,7 @@ from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.sender import MessageSender
 from Undefined.utils.scheduler import TaskScheduler
 from Undefined.services.security import SecurityService
-from Undefined.utils.recent_messages import get_recent_messages_prefer_onebot
+from Undefined.utils.recent_messages import get_recent_messages_prefer_local
 from Undefined.utils.resources import read_text_resource
 from Undefined.utils.xml import escape_xml_attr, escape_xml_text
 
@@ -263,7 +263,7 @@ class AICoordinator:
             async def get_recent_cb(
                 chat_id: str, msg_type: str, start: int, end: int
             ) -> list[dict[str, Any]]:
-                return await get_recent_messages_prefer_onebot(
+                return await get_recent_messages_prefer_local(
                     chat_id=chat_id,
                     msg_type=msg_type,
                     start=start,
@@ -354,7 +354,7 @@ class AICoordinator:
             async def get_recent_cb(
                 chat_id: str, msg_type: str, start: int, end: int
             ) -> list[dict[str, Any]]:
-                return await get_recent_messages_prefer_onebot(
+                return await get_recent_messages_prefer_local(
                     chat_id=chat_id,
                     msg_type=msg_type,
                     start=start,
