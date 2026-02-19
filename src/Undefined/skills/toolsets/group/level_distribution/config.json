@@ -1,0 +1,34 @@
+{
+    "type": "function",
+    "function": {
+        "name": "level_distribution",
+        "description": "统计群成员等级分布（成员数据来自 OneBot get_group_member_list），输出各等级人数与占比，并可附带每个等级的示例成员。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "群号。如果已在群聊中，通常会自动获取。"
+                },
+                "include_examples": {
+                    "type": "boolean",
+                    "description": "是否展示每个等级的示例成员，默认 true。",
+                    "default": true
+                },
+                "example_count": {
+                    "type": "integer",
+                    "description": "每个等级展示的示例成员数量，默认 3，最大 10。",
+                    "default": 3
+                },
+                "min_level": {
+                    "type": "integer",
+                    "description": "仅统计不低于该等级的成员。"
+                },
+                "max_level": {
+                    "type": "integer",
+                    "description": "仅统计不高于该等级的成员。"
+                }
+            }
+        }
+    }
+}

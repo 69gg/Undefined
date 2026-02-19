@@ -1,0 +1,41 @@
+{
+    "type": "function",
+    "function": {
+        "name": "detect_inactive_risk",
+        "description": "识别群成员活跃风险（成员数据来自 OneBot get_group_member_list）。检测从未发言、长期潜水、新成员沉默、高等级低活跃等治理候选并打分排序。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "群号。如果已在群聊中，通常会自动获取。"
+                },
+                "new_member_days": {
+                    "type": "integer",
+                    "description": "新成员定义（入群不超过 N 天），默认 30。",
+                    "default": 30
+                },
+                "silent_days": {
+                    "type": "integer",
+                    "description": "低活跃阈值（超过 N 天无发言），默认 14。",
+                    "default": 14
+                },
+                "long_inactive_days": {
+                    "type": "integer",
+                    "description": "长期潜水阈值（超过 N 天无发言），默认 60。",
+                    "default": 60
+                },
+                "high_level_threshold": {
+                    "type": "integer",
+                    "description": "高等级阈值（等级 >= N），默认 30。",
+                    "default": 30
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "返回风险成员数量，默认 20，最大 100。",
+                    "default": 20
+                }
+            }
+        }
+    }
+}

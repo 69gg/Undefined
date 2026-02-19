@@ -1,0 +1,55 @@
+{
+    "type": "function",
+    "function": {
+        "name": "rank_members",
+        "description": "按历史消息活跃度对群成员排行（历史数据来自 OneBot get_group_msg_history）。支持时间窗口、活跃天数、消息数和综合分排序，适合精细化活跃度查询。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "群号。如果已在群聊中，通常会自动获取。"
+                },
+                "start_time": {
+                    "type": "string",
+                    "description": "开始时间，格式：YYYY-MM-DD HH:MM:SS。"
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": "结束时间，格式：YYYY-MM-DD HH:MM:SS。"
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "未指定 start_time 时使用最近 N 天窗口，默认 7 天。",
+                    "default": 7
+                },
+                "max_history_count": {
+                    "type": "integer",
+                    "description": "最多读取的历史消息数量，默认 3000，最大 5000。",
+                    "default": 3000
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "返回排行数量，默认 20，最大 100。",
+                    "default": 20
+                },
+                "include_zero": {
+                    "type": "boolean",
+                    "description": "是否包含时间窗口内消息数为 0 的成员，默认 false。",
+                    "default": false
+                },
+                "sort_by": {
+                    "type": "string",
+                    "description": "排序字段：score(综合分), message_count(消息数), active_days(活跃天数), last_sent_time(最后发言)。默认 score。",
+                    "enum": [
+                        "score",
+                        "message_count",
+                        "active_days",
+                        "last_sent_time"
+                    ],
+                    "default": "score"
+                }
+            }
+        }
+    }
+}
