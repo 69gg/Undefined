@@ -7,6 +7,20 @@
 
 > 仅私聊支持用户手动切换 Chat 模型；群聊始终使用主模型。
 
+## 配置方式
+
+### 方式一：WebUI
+
+启动 `uv run Undefined-webui`，登录后进入「配置修改」页：
+
+- **全局开关**：`features` → `pool_enabled` 设为 `true`
+- **Chat 模型池**：`models` → `chat` → `pool`，设置 `enabled`、`strategy`，在 `models` 列表中添加/移除条目
+- **Agent 模型池**：`models` → `agent` → `pool`，同上
+
+每次修改自动保存并热更新，无需重启。
+
+### 方式二：直接编辑 config.toml
+
 ## 配置
 
 ### 1. 全局开关

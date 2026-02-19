@@ -88,18 +88,16 @@ thinking_tool_call_compat = false
 
 # zh: 模型池配置（可选，支持多模型轮询/随机/用户指定）。
 # en: Model pool configuration (optional, supports round-robin/random/user-specified).
-# [models.chat.pool]
-# enabled = true
-# strategy = "default"  # "default" | "round_robin" | "random"
-# [[models.chat.pool.models]]
-# model_name = "claude-sonnet-4-20250514"
-# api_url = "https://api.anthropic.com/v1"
-# api_key = ""
-# # 其他字段（max_tokens, thinking_* 等）可选，缺省继承主模型
-# [[models.chat.pool.models]]
-# model_name = "deepseek-chat"
-# api_url = "https://api.deepseek.com/v1"
-# api_key = ""
+[models.chat.pool]
+# zh: 是否启用模型池。
+# en: Enable model pool.
+enabled = false
+# zh: 分配策略：default（用户指定）/ round_robin（轮询）/ random（随机）。
+# en: Strategy: default (user-specified) / round_robin / random.
+strategy = "default"
+# zh: 模型池列表（每项需填 model_name、api_url、api_key，其余字段可选，缺省继承主模型）。
+# en: Model pool entries (model_name, api_url, api_key required; others optional, inherit from primary).
+models = []
 
 # zh: 视觉模型配置（用于图片描述和 OCR）。
 # en: Vision model config (image description and OCR).
@@ -196,17 +194,16 @@ thinking_tool_call_compat = false
 
 # zh: Agent 模型池配置（可选，支持多模型轮询/随机/用户指定）。
 # en: Agent model pool configuration (optional, supports round-robin/random/user-specified).
-# [models.agent.pool]
-# enabled = true
-# strategy = "default"  # "default" | "round_robin" | "random"
-# [[models.agent.pool.models]]
-# model_name = "claude-sonnet-4-20250514"
-# api_url = "https://api.anthropic.com/v1"
-# api_key = ""
-# [[models.agent.pool.models]]
-# model_name = "deepseek-chat"
-# api_url = "https://api.deepseek.com/v1"
-# api_key = ""
+[models.agent.pool]
+# zh: 是否启用 Agent 模型池。
+# en: Enable agent model pool.
+enabled = false
+# zh: 分配策略：default（用户指定）/ round_robin（轮询）/ random（随机）。
+# en: Strategy: default (user-specified) / round_robin / random.
+strategy = "default"
+# zh: Agent 模型池列表（每项需填 model_name、api_url、api_key，其余字段可选，缺省继承主模型）。
+# en: Agent model pool entries (model_name, api_url, api_key required; others optional, inherit from primary).
+models = []
 
 # zh: 进行中任务摘要模型配置（可选，用于并发真空期的"处理中摘要"）。仅当 [queue] 下 inflight_summary_enabled = true 时生效。
 # en: Inflight summary model config (optional, used to generate in-progress task summaries). Only effective when inflight_summary_enabled = true under [queue].

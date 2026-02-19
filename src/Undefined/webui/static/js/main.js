@@ -124,6 +124,8 @@ const I18N = {
         "about.license": "许可协议",
         "about.license_name": "MIT License",
 
+        "config.aot_add": "＋ 添加条目",
+        "config.aot_remove": "移除",
         "update.restart": "更新并重启",
         "update.working": "正在检查更新...",
         "update.updated_restarting": "更新完成，正在重启 WebUI...",
@@ -260,6 +262,8 @@ const I18N = {
         "update.not_eligible": "Update not eligible (official origin/main only)",
         "update.failed": "Update failed",
         "update.no_restart": "Updated but not restarted (check uv sync output)",
+        "config.aot_add": "+ Add Entry",
+        "config.aot_remove": "Remove",
     }
 };
 
@@ -993,7 +997,14 @@ function buildConfigForm() {
                 const subGrid = document.createElement("div");
                 subGrid.className = "form-fields";
                 for (const [sk, sv] of Object.entries(val)) {
-                    subGrid.appendChild(createField(`${section}.${key}.${sk}`, sv));
+                    const subPath = `${section}.${key}.${sk}`;
+                    if (sv !== null && typeof sv === "object" && !Array.isArray(sv)) {
+                        subGrid.appendChild(createSubSubSection(subPath, sv));
+                    } else if (Array.isArray(sv) && (AOT_PATHS.has(subPath) || sv.some(i => typeof i === "object" && i !== null))) {
+                        subGrid.appendChild(createAotWidget(subPath, sv));
+                    } else {
+                        subGrid.appendChild(createField(subPath, sv));
+                    }
                 }
                 subSection.appendChild(subGrid);
                 fieldGrid.appendChild(subSection);
@@ -1188,6 +1199,111 @@ function createField(path, val) {
     return group;
 }
 
+const AOT_PATHS = new Set(["models.chat.pool.models", "models.agent.pool.models"]);
+
+function createSubSubSection(path, obj) {
+    const div = document.createElement("div");
+    div.className = "form-subsection";
+    const title = document.createElement("div");
+    title.className = "form-subtitle";
+    title.innerText = `[${path}]`;
+    div.appendChild(title);
+    const comment = getComment(path);
+    if (comment) {
+        const hint = document.createElement("div");
+        hint.className = "form-subtitle-hint";
+        hint.innerText = comment;
+        hint.dataset.commentPath = path;
+        div.appendChild(hint);
+    }
+    const grid = document.createElement("div");
+    grid.className = "form-fields";
+    for (const [k, v] of Object.entries(obj)) {
+        const subPath = `${path}.${k}`;
+        if (AOT_PATHS.has(subPath) || (Array.isArray(v) && v.length > 0 && v.every(i => typeof i === "object" && i !== null))) {
+            grid.appendChild(createAotWidget(subPath, v));
+        } else {
+            grid.appendChild(createField(subPath, v));
+        }
+    }
+    div.appendChild(grid);
+    return div;
+}
+
+function createAotEntry(path, entry) {
+    const div = document.createElement("div");
+    div.className = "aot-entry";
+    div.style.cssText = "border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;";
+    const fields = document.createElement("div");
+    fields.className = "form-fields";
+    for (const [k, v] of Object.entries(entry)) {
+        const fg = document.createElement("div");
+        fg.className = "form-group";
+        fg.dataset.path = `${path}[].${k}`;
+        const lbl = document.createElement("label");
+        lbl.className = "form-label";
+        lbl.innerText = k;
+        fg.appendChild(lbl);
+        const isSecret = isSensitiveKey(k);
+        const inp = document.createElement("input");
+        inp.className = "form-control aot-field-input";
+        inp.type = isSecret ? "password" : "text";
+        inp.value = v == null ? "" : String(v);
+        inp.dataset.fieldKey = k;
+        if (isSecret) inp.setAttribute("autocomplete", "new-password");
+        inp.oninput = () => {
+            if (state.saveTimer) clearTimeout(state.saveTimer);
+            showSaveStatus("saving", t("config.typing"));
+            state.saveTimer = setTimeout(() => { state.saveTimer = null; autoSave(); }, 1000);
+        };
+        fg.appendChild(inp);
+        fields.appendChild(fg);
+    }
+    div.appendChild(fields);
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "btn ghost btn-sm";
+    removeBtn.innerText = t("config.aot_remove");
+    removeBtn.onclick = () => { div.remove(); autoSave(); };
+    div.appendChild(removeBtn);
+    return div;
+}
+
+function createAotWidget(path, arr) {
+    const DEFAULT_ENTRY = { model_name: "", api_url: "", api_key: "" };
+    const container = document.createElement("div");
+    container.className = "form-group";
+    container.dataset.path = path;
+    const lbl = document.createElement("div");
+    lbl.className = "form-label";
+    lbl.innerText = path.split(".").pop();
+    container.appendChild(lbl);
+    const comment = getComment(path);
+    if (comment) {
+        const hint = document.createElement("div");
+        hint.className = "form-hint";
+        hint.innerText = comment;
+        hint.dataset.commentPath = path;
+        container.appendChild(hint);
+    }
+    const entriesDiv = document.createElement("div");
+    entriesDiv.dataset.aotPath = path;
+    container.appendChild(entriesDiv);
+    (arr || []).forEach(entry => entriesDiv.appendChild(createAotEntry(path, entry)));
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "btn ghost btn-sm";
+    addBtn.style.marginTop = "4px";
+    addBtn.innerText = t("config.aot_add");
+    addBtn.onclick = () => {
+        const template = arr && arr.length > 0 ? Object.fromEntries(Object.keys(arr[0]).map(k => [k, ""])) : DEFAULT_ENTRY;
+        entriesDiv.appendChild(createAotEntry(path, template));
+        autoSave();
+    };
+    container.appendChild(addBtn);
+    return container;
+}
+
 async function autoSave() {
     showSaveStatus("saving");
 
@@ -1225,6 +1341,19 @@ async function autoSave() {
             }
         }
         patch[path] = val;
+    });
+
+    document.querySelectorAll("[data-aot-path]").forEach(container => {
+        const aotPath = container.dataset.aotPath;
+        const entries = [];
+        container.querySelectorAll(".aot-entry").forEach(entry => {
+            const obj = {};
+            entry.querySelectorAll(".aot-field-input").forEach(inp => {
+                obj[inp.dataset.fieldKey] = inp.value;
+            });
+            entries.push(obj);
+        });
+        patch[aotPath] = entries;
     });
 
     try {
