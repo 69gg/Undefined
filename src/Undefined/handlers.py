@@ -144,6 +144,7 @@ class MessageHandler:
             logger.debug("[通知] 拍一拍事件数据: %s", str(event)[:200])
 
             if poke_group_id == 0:
+                await self._record_private_poke_history(poke_sender_id, event)
                 logger.info("[通知] 私聊拍一拍，触发私聊回复")
                 await self.ai_coordinator.handle_private_reply(
                     poke_sender_id,
@@ -153,6 +154,11 @@ class MessageHandler:
                     sender_name=str(poke_sender_id),
                 )
             else:
+                await self._record_group_poke_history(
+                    poke_group_id,
+                    poke_sender_id,
+                    event,
+                )
                 logger.info(
                     "[通知] 群聊拍一拍，触发群聊回复: group=%s",
                     poke_group_id,
@@ -413,6 +419,91 @@ class MessageHandler:
             sender_role=sender_role,
             sender_title=sender_title,
         )
+
+    async def _record_private_poke_history(
+        self, user_id: int, event: dict[str, Any]
+    ) -> None:
+        """记录私聊拍一拍到历史。"""
+        sender = event.get("sender", {})
+        sender_nickname = ""
+        if isinstance(sender, dict):
+            sender_nickname = str(sender.get("nickname", "")).strip()
+
+        user_name = sender_nickname
+        if not user_name:
+            try:
+                user_info = await self.onebot.get_stranger_info(user_id)
+                if isinstance(user_info, dict):
+                    user_name = str(user_info.get("nickname", "")).strip()
+            except Exception as exc:
+                logger.warning(
+                    "[通知] 获取私聊拍一拍用户昵称失败: user=%s err=%s",
+                    user_id,
+                    exc,
+                )
+
+        try:
+            await self.history_manager.add_private_message(
+                user_id=user_id,
+                text_content="(拍了拍你)",
+                display_name=sender_nickname or user_name or str(user_id),
+                user_name=user_name,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[历史记录] 写入私聊拍一拍失败: user=%s err=%s",
+                user_id,
+                exc,
+            )
+
+    async def _record_group_poke_history(
+        self,
+        group_id: int,
+        sender_id: int,
+        event: dict[str, Any],
+    ) -> None:
+        """记录群聊拍一拍到历史。"""
+        sender = event.get("sender", {})
+        sender_card = ""
+        sender_nickname = ""
+        sender_role = "member"
+        sender_title = ""
+        if isinstance(sender, dict):
+            sender_card = str(sender.get("card", "")).strip()
+            sender_nickname = str(sender.get("nickname", "")).strip()
+            sender_role = str(sender.get("role", "member")).strip() or "member"
+            sender_title = str(sender.get("title", "")).strip()
+
+        group_name = ""
+        try:
+            group_info = await self.onebot.get_group_info(group_id)
+            if isinstance(group_info, dict):
+                group_name = str(group_info.get("group_name", "")).strip()
+        except Exception as exc:
+            logger.warning(
+                "[通知] 获取拍一拍群名失败: group=%s err=%s",
+                group_id,
+                exc,
+            )
+
+        try:
+            await self.history_manager.add_group_message(
+                group_id=group_id,
+                sender_id=sender_id,
+                text_content="(拍了拍你)",
+                sender_card=sender_card,
+                sender_nickname=sender_nickname,
+                group_name=group_name,
+                role=sender_role,
+                title=sender_title,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[历史记录] 写入群聊拍一拍失败: group=%s sender=%s err=%s",
+                group_id,
+                sender_id,
+                exc,
+            )
 
     async def _extract_bilibili_ids(
         self, text: str, message_content: list[dict[str, Any]]
