@@ -24,7 +24,7 @@ function recordFetchError(kind) {
     const current = state.fetchBackoff[kind] || 0;
     const next = Math.min(5, current + 1);
     state.fetchBackoff[kind] = next;
-    state.nextFetchAt[kind] = Date.now() + Math.min(15000, 1000 * Math.pow(2, next));
+    state.nextFetchAt[kind] = Date.now() + Math.min(15000, 1000 * 2 ** next);
 }
 
 function recordFetchSuccess(kind) {
