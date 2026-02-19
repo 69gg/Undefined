@@ -5,8 +5,9 @@ import logging
 import os
 import shutil
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Dict, Literal
+from typing import Any, Dict, Literal, cast
 from urllib.parse import unquote, urlparse
 
 import aiofiles
@@ -125,6 +126,98 @@ def _resolve_onebot_client(context: Dict[str, Any]) -> Any | None:
         return None
 
     return getattr(sender, "onebot", None)
+
+
+def _resolve_file_send_callable(
+    context: Dict[str, Any],
+    target_type: TargetType,
+) -> tuple[
+    Callable[[int, str, str | None], Awaitable[Any]] | None,
+    bool,
+    str | None,
+]:
+    sender = context.get("sender")
+    if sender is not None:
+        sender_method_name = (
+            "send_group_file" if target_type == "group" else "send_private_file"
+        )
+        sender_callable = getattr(sender, sender_method_name, None)
+        if callable(sender_callable):
+            return (
+                cast(Callable[[int, str, str | None], Awaitable[Any]], sender_callable),
+                True,
+                None,
+            )
+
+    onebot_client = _resolve_onebot_client(context)
+    if onebot_client is None:
+        return None, False, "发送失败：统一发送层未设置"
+
+    onebot_method_name = (
+        "upload_group_file" if target_type == "group" else "upload_private_file"
+    )
+    onebot_callable = getattr(onebot_client, onebot_method_name, None)
+    if not callable(onebot_callable):
+        return None, False, "发送失败：统一发送层未设置"
+    return (
+        cast(Callable[[int, str, str | None], Awaitable[Any]], onebot_callable),
+        False,
+        None,
+    )
+
+
+def _format_size(size_bytes: int) -> str:
+    if size_bytes < 1024:
+        return f"{size_bytes}B"
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f}KB"
+    if size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / 1024 / 1024:.2f}MB"
+    return f"{size_bytes / 1024 / 1024 / 1024:.2f}GB"
+
+
+async def _record_file_history_if_needed(
+    context: Dict[str, Any],
+    target_type: TargetType,
+    target_id: int,
+    file_name: str,
+    file_size: int,
+) -> None:
+    history_manager = context.get("history_manager")
+    if history_manager is None:
+        return
+
+    message = f"[文件] {file_name} ({_format_size(file_size)})"
+    runtime_config = context.get("runtime_config")
+    bot_qq_raw = getattr(runtime_config, "bot_qq", 0)
+    try:
+        bot_qq = int(bot_qq_raw)
+    except (TypeError, ValueError):
+        bot_qq = 0
+
+    try:
+        if target_type == "group":
+            await history_manager.add_group_message(
+                group_id=target_id,
+                sender_id=bot_qq,
+                text_content=message,
+                sender_nickname="Bot",
+                group_name="",
+            )
+        else:
+            await history_manager.add_private_message(
+                user_id=target_id,
+                text_content=message,
+                display_name="Bot",
+                user_name="Bot",
+            )
+    except Exception:
+        logger.exception(
+            "[URL文件发送] 记录历史失败: target_type=%s target_id=%s file=%s",
+            target_type,
+            target_id,
+            file_name,
+        )
 
 
 def _resolve_max_file_size_bytes(runtime_config: Any) -> int:
@@ -341,9 +434,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         ):
             return f"发送失败：目标用户 {target_id} 不在允许列表内（access.allowed_private_ids）"
 
-    onebot_client = _resolve_onebot_client(context)
-    if onebot_client is None:
-        return "发送失败：OneBot 客户端未设置"
+    send_file_callable, history_recorded_by_sender, sender_error = (
+        _resolve_file_send_callable(context, target_type)
+    )
+    if sender_error or send_file_callable is None:
+        return sender_error or "发送失败：统一发送层未设置"
 
     max_file_size_bytes = _resolve_max_file_size_bytes(runtime_config)
     timeout_seconds = max(get_request_timeout(480.0), 15.0)
@@ -411,10 +506,16 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             timeout_seconds=timeout_seconds,
         )
 
-        if target_type == "group":
-            await onebot_client.upload_group_file(target_id, abs_path, filename)
-        else:
-            await onebot_client.upload_private_file(target_id, abs_path, filename)
+        await send_file_callable(target_id, abs_path, filename)
+
+        if not history_recorded_by_sender:
+            await _record_file_history_if_needed(
+                context=context,
+                target_type=target_type,
+                target_id=target_id,
+                file_name=filename,
+                file_size=downloaded_size,
+            )
 
         context["message_sent_this_turn"] = True
         logger.info(

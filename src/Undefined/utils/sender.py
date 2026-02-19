@@ -1,6 +1,7 @@
 """消息发送管理"""
 
 import logging
+from pathlib import Path
 
 from Undefined.config import Config
 from Undefined.onebot import OneBotClient
@@ -16,6 +17,29 @@ logger = logging.getLogger(__name__)
 
 # QQ 消息长度限制（保守估算）
 MAX_MESSAGE_LENGTH = 4000
+
+
+def _format_size(size_bytes: int | None) -> str:
+    if size_bytes is None or size_bytes < 0:
+        return "未知大小"
+    if size_bytes < 1024:
+        return f"{size_bytes}B"
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f}KB"
+    if size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / 1024 / 1024:.2f}MB"
+    return f"{size_bytes / 1024 / 1024 / 1024:.2f}GB"
+
+
+def _build_file_history_message(file_name: str, size_bytes: int | None) -> str:
+    return f"[文件] {file_name} ({_format_size(size_bytes)})"
+
+
+def _get_file_size(file_path: str) -> int | None:
+    try:
+        return Path(file_path).stat().st_size
+    except OSError:
+        return None
 
 
 class MessageSender:
@@ -194,3 +218,90 @@ class MessageSender:
             )
 
         logger.info(f"[消息分段] 已完成 {chunk_count} 段消息的发送")
+
+    async def send_group_file(
+        self,
+        group_id: int,
+        file_path: str,
+        name: str | None = None,
+        auto_history: bool = True,
+    ) -> None:
+        """通过统一发送层上传群文件。"""
+        if not self.config.is_group_allowed(group_id):
+            enabled = self.config.access_control_enabled()
+            logger.warning(
+                "[访问控制] 已拦截群文件发送: group=%s (allowlist enabled=%s)",
+                group_id,
+                enabled,
+            )
+            raise PermissionError(
+                f"blocked by allowlist: group_id={int(group_id)} enabled={enabled}"
+            )
+
+        file_name = name or Path(file_path).name
+        logger.info("[发送文件] 目标群:%s | 文件:%s", group_id, file_name)
+
+        await self.onebot.upload_group_file(group_id, file_path, file_name)
+
+        if not auto_history:
+            return
+
+        file_size = _get_file_size(file_path)
+        history_content = _build_file_history_message(file_name, file_size)
+        try:
+            await self.history_manager.add_group_message(
+                group_id=group_id,
+                sender_id=self.bot_qq,
+                text_content=history_content,
+                sender_nickname="Bot",
+                group_name="",
+            )
+        except Exception:
+            logger.exception(
+                "[历史记录] 记录群文件发送失败: group=%s file=%s",
+                group_id,
+                file_name,
+            )
+
+    async def send_private_file(
+        self,
+        user_id: int,
+        file_path: str,
+        name: str | None = None,
+        auto_history: bool = True,
+    ) -> None:
+        """通过统一发送层上传私聊文件。"""
+        if not self.config.is_private_allowed(user_id):
+            enabled = self.config.access_control_enabled()
+            logger.warning(
+                "[访问控制] 已拦截私聊文件发送: user=%s (allowlist enabled=%s)",
+                user_id,
+                enabled,
+            )
+            raise PermissionError(
+                f"blocked by allowlist: user_id={int(user_id)} enabled={enabled}"
+            )
+
+        file_name = name or Path(file_path).name
+        logger.info("[发送文件] 目标用户:%s | 文件:%s", user_id, file_name)
+
+        await self.onebot.upload_private_file(user_id, file_path, file_name)
+
+        if not auto_history:
+            return
+
+        file_size = _get_file_size(file_path)
+        history_content = _build_file_history_message(file_name, file_size)
+        try:
+            await self.history_manager.add_private_message(
+                user_id=user_id,
+                text_content=history_content,
+                display_name="Bot",
+                user_name="Bot",
+            )
+        except Exception:
+            logger.exception(
+                "[历史记录] 记录私聊文件发送失败: user=%s file=%s",
+                user_id,
+                file_name,
+            )
