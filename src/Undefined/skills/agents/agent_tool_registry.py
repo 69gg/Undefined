@@ -33,6 +33,7 @@ class AgentToolRegistry(BaseRegistry):
         )
         self.current_agent_name: str | None = normalized_agent_name or None
         self.is_main_agent: bool = bool(is_main_agent)
+        self._callable_agent_tool_names: set[str] = set()
         self._mcp_registry: Any | None = None
         self._mcp_initialized: bool = False
         self.load_tools()
@@ -74,6 +75,7 @@ class AgentToolRegistry(BaseRegistry):
             # 注册为外部工具
             tool_name = f"call_{agent_name}"
             self.register_external_item(tool_name, tool_schema, handler)
+            self._callable_agent_tool_names.add(tool_name)
 
             # 记录允许的调用方
             callers_str = (
@@ -378,6 +380,11 @@ class AgentToolRegistry(BaseRegistry):
                 logger.info(
                     f"[AgentCall] {current_agent} 调用 {target_agent_name}，参数: {args}"
                 )
+                await self._maybe_send_agent_to_agent_call_easter_egg(
+                    caller_agent=current_agent,
+                    callee_agent=target_agent_name,
+                    context=context,
+                )
                 # 构造被调用方上下文，避免复用调用方身份与历史。
                 callee_context = context.copy()
                 callee_context["agent_name"] = target_agent_name
@@ -539,6 +546,9 @@ class AgentToolRegistry(BaseRegistry):
         agent_name = context.get("agent_name")
         if not agent_name:
             return
+        if tool_name in self._callable_agent_tool_names:
+            # call_<agent> 走 agent 层级彩蛋，避免与 agent_tool 层级重复发送。
+            return
 
         runtime_config = context.get("runtime_config")
         mode = getattr(runtime_config, "easter_egg_agent_call_message_mode", None)
@@ -561,6 +571,40 @@ class AgentToolRegistry(BaseRegistry):
                 return
 
         message = f"{tool_name}，我调用你了，我要调用你了！"
+        sender = context.get("sender")
+        group_id = context.get("group_id")
+
+        try:
+            if sender and isinstance(group_id, int) and group_id > 0:
+                await sender.send_group_message(group_id, message, mark_sent=False)
+        except Exception as exc:
+            logger.debug("[彩蛋] 发送提示消息失败: %s", redact_string(str(exc)))
+
+    async def _maybe_send_agent_to_agent_call_easter_egg(
+        self,
+        *,
+        caller_agent: str,
+        callee_agent: str,
+        context: dict[str, Any],
+    ) -> None:
+        runtime_config = context.get("runtime_config")
+        mode = getattr(runtime_config, "easter_egg_agent_call_message_mode", None)
+        if runtime_config is None:
+            try:
+                from Undefined.config import get_config
+
+                mode = get_config(strict=False).easter_egg_agent_call_message_mode
+            except Exception:
+                mode = None
+
+        mode_text = str(mode).strip().lower() if mode is not None else "none"
+        if mode_text not in {"agent", "tools", "all", "clean"}:
+            return
+
+        if mode_text == "clean" and context.get("easter_egg_silent"):
+            return
+
+        message = f"{caller_agent}：{callee_agent}，我调用你了，我要调用你了！"
         sender = context.get("sender")
         group_id = context.get("group_id")
 
