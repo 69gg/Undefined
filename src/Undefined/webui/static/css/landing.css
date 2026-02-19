@@ -1,0 +1,37 @@
+.landing-header {
+  padding: 26px 60px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.landing-hero {
+  padding: 0 60px 60px;
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr;
+  gap: 40px;
+  align-items: start;
+}
+
+.hero-content { padding: 40px; }
+
+.eyebrow {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+}
+
+.hero-content h1 {
+  font-family: var(--font-serif);
+  font-size: 48px;
+  margin: 12px 0;
+  font-weight: 500;
+}
+
+.tagline { font-size: 16px; line-height: 1.6; margin-bottom: 12px; }
+
+.cta-row { display: flex; gap: 12px; margin-top: 32px; flex-wrap: wrap; }
+
+.header-actions { display: flex; align-items: center; gap: 12px; }

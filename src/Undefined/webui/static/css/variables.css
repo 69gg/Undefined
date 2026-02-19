@@ -1,0 +1,52 @@
+:root {
+  --bg-app: #f9f5f1;
+  --bg-sidebar: #f0ebe4;
+  --bg-card: #ffffff;
+  --bg-input: #ffffff;
+  --bg-deep: #efe6d8;
+  --bg-glow: #fff7ec;
+
+  --text-primary: #3d3935;
+  --text-secondary: #6e675f;
+  --text-tertiary: #9e968c;
+
+  --accent-color: #d97757;
+  --accent-hover: #c56545;
+  --accent-subtle: #fbeee9;
+
+  --border-color: #e6e0d8;
+  --border-focus: #d97757;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  --shadow-lg: 0 24px 60px rgba(31, 27, 22, 0.12);
+
+  --success: #4a7c59;
+  --warning: #cc8925;
+  --error: #c94040;
+
+  --font-serif: "IBM Plex Serif", "Times New Roman", serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", "Menlo", monospace;
+
+  --sidebar-width: 240px;
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 24px;
+}
+
+[data-theme="dark"] {
+  --bg-app: #0f1112;
+  --bg-sidebar: #161b1f;
+  --bg-card: #171c1f;
+  --bg-input: #12171a;
+  --bg-deep: #14181a;
+  --bg-glow: #1b2125;
+
+  --text-primary: #f4efe7;
+  --text-secondary: #b2a79b;
+  --text-tertiary: #6d6256;
+
+  --border-color: #2b3439;
+  --accent-subtle: #2d1f1c;
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
