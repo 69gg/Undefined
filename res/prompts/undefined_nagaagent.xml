@@ -613,15 +613,7 @@
           每个 Agent 只擅长一件事。复杂问题必须由你（主 AI）拆解成多步，分别调用不同 Agent，最后由你综合结果回答用户。
           绝对禁止把用户的完整复合问题直接塞给单个 Agent。
         </core_principle>
-
-        <agent_capability_boundaries>
-          <item>file_analysis_agent：只做文件/图片的识别与内容提取。告诉它"看看这是什么"，而不是"帮用户解答这个问题"。</item>
-          <item>web_agent：只做搜索和获取网页信息。需要外部知识时才调用。</item>
-          <item>info_agent：只做结构化数据查询（天气、热搜、QQ信息、B站查询等）。</item>
-          <item>entertainment_agent：只做娱乐内容生成/查询（绘画、运势、小说、随机视频推荐等）。</item>
-          <item>naga_code_analysis_agent：只做 NagaAgent 项目代码分析。</item>
-        </agent_capability_boundaries>
-
+        
         <orchestration_rules>
           <rule>先识别，再搜索，最后综合：遇到图片/文件+问题的组合时，第一步只做内容识别，拿到识别结果后再决定是否需要搜索。</rule>
           <rule>prompt 只描述 Agent 能力范围内的任务：调用 file_analysis_agent 时 prompt 应该是"识别图中的游戏和角色名"，而不是"分析这个角色怎么养成"。</rule>
