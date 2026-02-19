@@ -13,6 +13,7 @@ from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING, Literal
 import httpx
 
 from Undefined.ai.llm import ModelRequester
+from Undefined.ai.model_selector import ModelSelector
 from Undefined.ai.multimodal import MultimodalAnalyzer
 from Undefined.ai.prompts import PromptBuilder
 from Undefined.ai.summaries import SummaryService
@@ -150,6 +151,9 @@ class AIClient:
             anthropic_skill_registry=self.anthropic_skill_registry,
         )
 
+        # 初始化模型选择器
+        self.model_selector = ModelSelector()
+
         # 绑定上下文资源扫描路径（基于注册表 watch_paths）
         scan_paths = [
             p
@@ -245,6 +249,15 @@ class AIClient:
                 logger.warning("[初始化] 异步初始化 MCP 工具集失败: %s", exc)
 
         self._mcp_init_task = asyncio.create_task(init_mcp_async())
+
+        # 异步加载模型偏好
+        async def load_preferences_async() -> None:
+            try:
+                await self.model_selector.load_preferences()
+            except Exception as exc:
+                logger.warning("[初始化] 加载模型偏好失败: %s", exc)
+
+        self._preferences_load_task = asyncio.create_task(load_preferences_async())
 
         logger.info("[初始化] AIClient 初始化完成")
 
@@ -392,6 +405,18 @@ class AIClient:
         from Undefined.config import get_config
 
         return get_config(strict=False)
+
+    def _find_chat_config_by_name(self, model_name: str) -> ChatModelConfig:
+        """根据模型名查找配置（主模型或池中模型）"""
+        if model_name == self.chat_config.model_name:
+            return self.chat_config
+        if self.chat_config.pool and self.chat_config.pool.enabled:
+            for entry in self.chat_config.pool.models:
+                if entry.model_name == model_name:
+                    return self.model_selector._entry_to_chat_config(
+                        entry, self.chat_config
+                    )
+        return self.chat_config
 
     def _get_prefetch_tool_names(self) -> list[str]:
         runtime_config = self._get_runtime_config()
@@ -867,11 +892,19 @@ class AIClient:
         if inflight_location is None:
             inflight_location = self._build_inflight_location(tool_context)
 
+        # 动态选择模型（等待偏好加载就绪，避免竞态）
+        await self.model_selector.wait_ready()
+        selected_model_name = pre_context.get("selected_model_name")
+        if selected_model_name:
+            effective_chat_config = self._find_chat_config_by_name(selected_model_name)
+        else:
+            effective_chat_config = self.chat_config
+
         max_iterations = 1000
         iteration = 0
         conversation_ended = False
         any_tool_executed = False
-        cot_compat = getattr(self.chat_config, "thinking_tool_call_compat", False)
+        cot_compat = getattr(effective_chat_config, "thinking_tool_call_compat", False)
         cot_compat_logged = False
         cot_missing_logged = False
 
@@ -888,7 +921,7 @@ class AIClient:
 
             try:
                 result = await self.request_model(
-                    model_config=self.chat_config,
+                    model_config=effective_chat_config,
                     messages=messages,
                     max_tokens=8192,
                     call_type="chat",
@@ -931,7 +964,7 @@ class AIClient:
                     cot_compat
                     and log_thinking
                     and tools
-                    and getattr(self.chat_config, "thinking_enabled", False)
+                    and getattr(effective_chat_config, "thinking_enabled", False)
                     and not reasoning_content
                     and tool_calls
                     and not cot_missing_logged

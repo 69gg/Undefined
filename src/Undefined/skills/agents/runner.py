@@ -72,6 +72,14 @@ async def run_agent_with_tools(
         return "AI client 未在上下文中提供"
 
     agent_config = ai_client.agent_config
+    # 动态选择 agent 模型
+    group_id = context.get("group_id", 0) or 0
+    user_id = context.get("user_id", 0) or 0
+    runtime_config = context.get("runtime_config")
+    global_enabled = runtime_config.model_pool_enabled if runtime_config else False
+    agent_config = ai_client.model_selector.select_agent_config(
+        agent_config, group_id=group_id, user_id=user_id, global_enabled=global_enabled
+    )
     system_prompt = await load_prompt_text(agent_dir, default_prompt)
 
     # 注入 agent 私有 Anthropic Skills 元数据到 system prompt

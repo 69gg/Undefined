@@ -254,6 +254,10 @@ class MessageHandler:
                         return
 
             # 私聊消息直接触发回复
+            if await self.ai_coordinator.model_pool.handle_private_message(
+                private_sender_id, text
+            ):
+                return
             await self.ai_coordinator.handle_private_reply(
                 private_sender_id,
                 text,

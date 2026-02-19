@@ -1,6 +1,32 @@
 """配置模型定义"""
 
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class ModelPoolEntry:
+    """模型池中的单个模型条目（已合并缺省值后的完整配置）"""
+
+    api_url: str
+    api_key: str
+    model_name: str
+    max_tokens: int
+    queue_interval_seconds: float = 1.0
+    thinking_enabled: bool = False
+    thinking_budget_tokens: int = 0
+    thinking_include_budget: bool = True
+    thinking_tool_call_compat: bool = False
+
+
+@dataclass
+class ModelPool:
+    """模型池配置"""
+
+    enabled: bool = True  # 是否启用模型池功能
+    strategy: str = "default"  # "default" | "round_robin" | "random"
+    models: list[ModelPoolEntry] = field(default_factory=list)
 
 
 @dataclass
@@ -18,6 +44,7 @@ class ChatModelConfig:
     thinking_tool_call_compat: bool = (
         False  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
+    pool: ModelPool | None = None  # 模型池配置
 
 
 @dataclass
@@ -68,6 +95,7 @@ class AgentModelConfig:
     thinking_tool_call_compat: bool = (
         False  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
+    pool: ModelPool | None = None  # 模型池配置
 
 
 @dataclass

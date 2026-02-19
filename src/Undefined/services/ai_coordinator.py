@@ -7,6 +7,7 @@ from Undefined.config import Config
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
 from Undefined.render import render_html_to_image, render_markdown_to_html
+from Undefined.services.model_pool import ModelPoolService
 from Undefined.services.queue_manager import QueueManager
 from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.sender import MessageSender
@@ -64,6 +65,7 @@ class AICoordinator:
         self.scheduler = scheduler
         self.security = security
         self.command_dispatcher = command_dispatcher
+        self.model_pool = ModelPoolService(ai, config, sender)
 
     async def handle_auto_reply(
         self,
@@ -204,13 +206,19 @@ class AICoordinator:
             user_id,
         )
 
+        # 动态选择模型（私聊 group_id=0）
+        effective_config = self.model_pool.select_chat_config(
+            self.config.chat_model, user_id=user_id
+        )
+        request_data["selected_model_name"] = effective_config.model_name
+
         if user_id == self.config.superadmin_qq:
             await self.queue_manager.add_superadmin_request(
-                request_data, model_name=self.config.chat_model.model_name
+                request_data, model_name=effective_config.model_name
             )
         else:
             await self.queue_manager.add_private_request(
-                request_data, model_name=self.config.chat_model.model_name
+                request_data, model_name=effective_config.model_name
             )
 
     async def execute_reply(self, request: dict[str, Any]) -> None:
@@ -392,6 +400,7 @@ class AICoordinator:
                         "user_id": user_id,
                         "is_private_chat": True,
                         "sender_name": sender_name,
+                        "selected_model_name": request.get("selected_model_name"),
                     },
                 )
                 if result:
