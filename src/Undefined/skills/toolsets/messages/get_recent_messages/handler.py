@@ -155,12 +155,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     # 获取消息
     messages = []
-    if history_manager:
-        messages = history_manager.get_recent(resolved_chat_id, msg_type, start, end)
-    elif get_recent_messages_callback:
+    if get_recent_messages_callback:
         messages = await get_recent_messages_callback(
             resolved_chat_id, msg_type, start, end
         )
+    elif history_manager:
+        messages = history_manager.get_recent(resolved_chat_id, msg_type, start, end)
     else:
         return "获取消息回调未设置"
 

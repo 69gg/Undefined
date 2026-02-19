@@ -13,6 +13,7 @@ from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.sender import MessageSender
 from Undefined.utils.scheduler import TaskScheduler
 from Undefined.services.security import SecurityService
+from Undefined.utils.recent_messages import get_recent_messages_prefer_onebot
 from Undefined.utils.resources import read_text_resource
 from Undefined.utils.xml import escape_xml_attr, escape_xml_text
 
@@ -262,7 +263,16 @@ class AICoordinator:
             async def get_recent_cb(
                 chat_id: str, msg_type: str, start: int, end: int
             ) -> list[dict[str, Any]]:
-                return self.history_manager.get_recent(chat_id, msg_type, start, end)
+                return await get_recent_messages_prefer_onebot(
+                    chat_id=chat_id,
+                    msg_type=msg_type,
+                    start=start,
+                    end=end,
+                    onebot_client=self.onebot,
+                    history_manager=self.history_manager,
+                    bot_qq=self.config.bot_qq,
+                    group_name_hint=group_name,
+                )
 
             async def send_private_cb(uid: int, msg: str) -> None:
                 await self.sender.send_private_message(uid, msg)
@@ -344,7 +354,15 @@ class AICoordinator:
             async def get_recent_cb(
                 chat_id: str, msg_type: str, start: int, end: int
             ) -> list[dict[str, Any]]:
-                return self.history_manager.get_recent(chat_id, msg_type, start, end)
+                return await get_recent_messages_prefer_onebot(
+                    chat_id=chat_id,
+                    msg_type=msg_type,
+                    start=start,
+                    end=end,
+                    onebot_client=self.onebot,
+                    history_manager=self.history_manager,
+                    bot_qq=self.config.bot_qq,
+                )
 
             async def send_img_cb(tid: int, mtype: str, path: str) -> None:
                 await self._send_image(tid, mtype, path)
