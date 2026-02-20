@@ -1,0 +1,20 @@
+{
+    "type": "function",
+    "function": {
+        "name": "list_emojis",
+        "description": "列出可用的 emoji 映射（emoji_id 与别名），可按关键字过滤。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "keyword": {
+                    "type": "string",
+                    "description": "可选。关键字过滤（匹配别名）。"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "可选。最多返回多少条，默认 50，最大 200。"
+                }
+            }
+        }
+    }
+}

@@ -440,6 +440,67 @@ class OneBotClient:
         """
         return await self._call_api("send_like", {"user_id": user_id, "times": times})
 
+    async def fetch_emoji_like(self, message_id: int) -> dict[str, Any]:
+        """获取消息已设置的表情反应信息（扩展接口）。
+
+        参数:
+            message_id: 消息 ID
+
+        返回:
+            data 字段内容（字典），异常时抛出 RuntimeError
+        """
+        result = await self._call_api("fetch_emoji_like", {"message_id": message_id})
+        data = result.get("data")
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    async def set_msg_emoji_like(
+        self,
+        message_id: int,
+        emoji_id: int,
+        *,
+        set_like: bool = True,
+        mark_sent: bool = True,
+    ) -> dict[str, Any]:
+        """给指定消息添加/取消表情反应（扩展接口）。
+
+        参数:
+            message_id: 目标消息 ID
+            emoji_id: 表情 ID
+            set_like: True=添加反应，False=取消反应
+            mark_sent: 是否标记本轮已发送（用于 end 工具判定）
+
+        返回:
+            API 响应
+        """
+        if set_like:
+            try:
+                result = await self._call_api(
+                    "set_msg_emoji_like",
+                    {"message_id": message_id, "emoji_id": emoji_id},
+                )
+            except RuntimeError:
+                logger.warning(
+                    "[消息表情] set_msg_emoji_like 默认参数失败，尝试 set=true 回退: msg=%s emoji=%s",
+                    message_id,
+                    emoji_id,
+                )
+                result = await self._call_api(
+                    "set_msg_emoji_like",
+                    {"message_id": message_id, "emoji_id": emoji_id, "set": True},
+                )
+        else:
+            # 取消反应可能依赖实现方扩展参数，默认采用 set=false。
+            result = await self._call_api(
+                "set_msg_emoji_like",
+                {"message_id": message_id, "emoji_id": emoji_id, "set": False},
+            )
+
+        if mark_sent:
+            _mark_message_sent_this_turn()
+        return result
+
     async def send_group_poke(
         self,
         group_id: int,

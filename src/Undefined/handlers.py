@@ -203,6 +203,7 @@ class MessageHandler:
         if event.get("message_type") == "private":
             private_sender_id: int = get_message_sender_id(event)
             private_message_content: list[dict[str, Any]] = get_message_content(event)
+            trigger_message_id = event.get("message_id")
 
             # 会话白名单：不在允许列表则忽略（不入历史、不触发任何处理）
             if not self.config.is_private_allowed(private_sender_id):
@@ -294,6 +295,7 @@ class MessageHandler:
                 text,
                 private_message_content,
                 sender_name=user_name,
+                trigger_message_id=trigger_message_id,
             )
             return
 
@@ -304,6 +306,7 @@ class MessageHandler:
         group_id: int = event.get("group_id", 0)
         sender_id: int = get_message_sender_id(event)
         message_content: list[dict[str, Any]] = get_message_content(event)
+        trigger_message_id = event.get("message_id")
 
         # 会话白名单：不在允许列表则忽略（不入历史、不触发任何处理）
         if not self.config.is_group_allowed(group_id):
@@ -452,6 +455,7 @@ class MessageHandler:
             group_name=group_name,
             sender_role=sender_role,
             sender_title=sender_title,
+            trigger_message_id=trigger_message_id,
         )
 
     async def _record_private_poke_history(

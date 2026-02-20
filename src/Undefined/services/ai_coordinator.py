@@ -65,6 +65,7 @@ class AICoordinator:
         group_name: str = "未知群聊",
         sender_role: str = "member",
         sender_title: str = "",
+        trigger_message_id: int | None = None,
     ) -> None:
         """群聊自动回复入口：根据消息内容、命中情况和安全检测决定是否回复
 
@@ -137,6 +138,7 @@ class AICoordinator:
             "text": text,
             "full_question": full_question,
             "is_at_bot": is_at_bot,
+            "trigger_message_id": trigger_message_id,
         }
 
         if is_at_bot:
@@ -157,6 +159,7 @@ class AICoordinator:
         message_content: list[dict[str, Any]],
         is_poke: bool = False,
         sender_name: str = "未知用户",
+        trigger_message_id: int | None = None,
     ) -> None:
         """处理私聊消息入口，决定回复策略并进行安全检测"""
         logger.debug("[私聊回复] user=%s text_len=%s", user_id, len(text))
@@ -186,6 +189,7 @@ class AICoordinator:
             "sender_name": sender_name,
             "text": text,
             "full_question": full_question,
+            "trigger_message_id": trigger_message_id,
         }
         logger.debug(
             "[私聊回复] full_question_len=%s user=%s",
@@ -232,6 +236,7 @@ class AICoordinator:
         sender_name = str(request.get("sender_name") or "未知用户")
         group_name = str(request.get("group_name") or "未知群聊")
         full_question = request["full_question"]
+        trigger_message_id = request.get("trigger_message_id")
 
         # 创建请求上下文
         async with RequestContext(
@@ -324,6 +329,7 @@ class AICoordinator:
         user_id = request["user_id"]
         sender_name = str(request.get("sender_name") or "未知用户")
         full_question = request["full_question"]
+        trigger_message_id = request.get("trigger_message_id")
 
         # 创建请求上下文
         async with RequestContext(
