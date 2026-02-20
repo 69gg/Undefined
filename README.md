@@ -82,7 +82,7 @@
 - **会话白名单（群/私聊）**：只需配置 `access.allowed_group_ids` / `access.allowed_private_ids` 两个列表，即可把机器人"锁"在指定群与指定私聊里；避免被拉进陌生群误触发、也避免工具/定时任务把消息误发到不该去的地方（默认留空不限制）。
 - **并行工具执行**：无论是主 AI 还是子 Agent，均支持 `asyncio` 并发工具调用，大幅提升多任务处理速度（如同时读取多个文件或搜索多个关键词）。
 - **智能 Agent 矩阵**：内置多个专业 Agent，分工协作处理复杂任务。
-- **Agent 互调用**：Agent 之间可以相互调用，通过简单的配置文件（`callable.json`）即可让某个 Agent 成为其他 Agent 的工具，支持细粒度的访问控制，实现复杂的多 Agent 协作场景。
+- **callable.json 共享机制**：通过简单的配置文件（`callable.json`）即可让 Agent 互相调用、将 `skills/tools/` 或 `skills/toolsets/` 下的工具按白名单暴露给 Agent，支持细粒度访问控制，实现复杂的多 Agent 协作场景。
 - **Agent 自我介绍自动生成**：启动时按 Agent 代码/配置 hash 生成 `intro.generated.md`（第一人称、结构化），与 `intro.md` 合并后作为描述；减少手动维护，保持能力说明与实现同步，有助于精准调度。
 - **请求上下文管理**：基于 Python `contextvars` 的统一请求上下文系统，自动 UUID 追踪，零竞态条件，完全的并发隔离。
 - **定时任务系统**：支持 Crontab 语法的强大定时任务系统，可自动执行各种操作（如定时提醒、定时搜索）。
@@ -649,7 +649,7 @@ src/Undefined/
 
 请参考 [src/Undefined/skills/README.md](src/Undefined/skills/README.md) 了解如何编写新的工具和 Agent。
 
-**Agent 互调用与主工具共享**：查看 [docs/agent-calling.md](docs/agent-calling.md) 了解如何让 Agent 之间相互调用，以及如何将 `skills/tools` 下的主工具按白名单暴露给 Agent。
+**callable.json 共享机制**：查看 [docs/callable.md](docs/callable.md) 了解如何让 Agent 之间相互调用，以及如何将 `skills/tools` 或 `skills/toolsets` 下的工具按白名单暴露给 Agent。
 
 ### 开发自检
 

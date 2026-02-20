@@ -65,6 +65,7 @@ skills/
 
 - **定位**: 按功能分类的相关工具组
 - **调用方式**: 直接暴露给主 AI
+- **Agent 可见性**: 默认仅主 AI 可见；可通过 `skills/toolsets/{category}/{tool_name}/callable.json` 按白名单暴露给 Agent
 - **命名规则**: `{category}.{tool_name}`（如 `render.render_html`, `scheduler.create_schedule_task`）
 - **目录结构**: `toolsets/{category}/{tool_name}/`
 - **适用场景**: 功能相关、需要分组管理的工具
@@ -123,6 +124,7 @@ skills/
 3. 添加 `config.json`（工具定义）
 4. 添加 `handler.py`（执行逻辑）
 5. 自动被 `ToolRegistry` 发现和注册，名称为 `my_category.my_tool`
+6. （可选）添加 `callable.json` 将该工具按白名单暴露给 Agent
 
 详细说明请参考 [toolsets/README.md](./toolsets/README.md)
 

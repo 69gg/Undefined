@@ -195,9 +195,11 @@ class AgentToolRegistry(BaseRegistry):
     def _scan_callable_main_tools(
         self,
     ) -> list[tuple[str, dict[str, Any], list[str]]]:
-        """扫描可共享给 Agent 的主工具。
+        """扫描可共享给 Agent 的主工具（tools/ 和 toolsets/）。
 
-        配置位置：skills/tools/{tool_name}/callable.json
+        配置位置：
+          skills/tools/{tool_name}/callable.json
+          skills/toolsets/{category}/{tool_name}/callable.json
         返回：[(tool_name, tool_schema, allowed_callers), ...]
         """
         skills_root = self._find_skills_root()
@@ -207,20 +209,69 @@ class AgentToolRegistry(BaseRegistry):
             )
             return []
 
-        tools_root = skills_root / "tools"
-        if not tools_root.exists() or not tools_root.is_dir():
-            return []
-
         callable_tools: list[tuple[str, dict[str, Any], list[str]]] = []
-        for tool_dir in tools_root.iterdir():
-            if not tool_dir.is_dir():
-                continue
-            if tool_dir.name.startswith("_"):
+
+        tools_root = skills_root / "tools"
+        if tools_root.exists() and tools_root.is_dir():
+            callable_tools.extend(
+                self._scan_callable_tools_in_dir(tools_root, prefix="")
+            )
+
+        toolsets_root = skills_root / "toolsets"
+        if toolsets_root.exists() and toolsets_root.is_dir():
+            for category_dir in sorted(toolsets_root.iterdir()):
+                if category_dir.is_dir() and not category_dir.name.startswith("_"):
+                    callable_tools.extend(
+                        self._scan_callable_tools_in_dir(
+                            category_dir, prefix=f"{category_dir.name}."
+                        )
+                    )
+
+        return callable_tools
+
+    def _load_callable_config(self, path: Path) -> list[str] | None:
+        """读取 callable.json，返回 allowed_callers；不满足条件返回 None。"""
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            if not cfg.get("enabled", False):
+                return None
+            callers = cfg.get("allowed_callers", [])
+            if not isinstance(callers, list) or not callers:
+                return None
+            return callers
+        except Exception as e:
+            logger.warning("读取 %s 失败: %s", path, e)
+            return None
+
+    def _scan_callable_tools_in_dir(
+        self, dir_path: Path, prefix: str
+    ) -> list[tuple[str, dict[str, Any], list[str]]]:
+        """扫描目录下带 callable.json 的工具，工具名加 prefix。
+
+        若 dir_path/callable.json 存在（分类级），对目录下所有工具生效（上级覆盖下级）。
+        """
+        # 分类级 callable.json（上级覆盖）
+        category_callers: list[str] | None = None
+        category_callable = dir_path / "callable.json"
+        if category_callable.exists():
+            category_callers = self._load_callable_config(category_callable)
+
+        result: list[tuple[str, dict[str, Any], list[str]]] = []
+        for tool_dir in dir_path.iterdir():
+            if not tool_dir.is_dir() or tool_dir.name.startswith("_"):
                 continue
 
-            callable_json = tool_dir / "callable.json"
-            if not callable_json.exists():
-                continue
+            if category_callers is not None:
+                allowed_callers = category_callers
+            else:
+                tool_callable = tool_dir / "callable.json"
+                if not tool_callable.exists():
+                    continue
+                _callers = self._load_callable_config(tool_callable)
+                if _callers is None:
+                    continue
+                allowed_callers = _callers
 
             config_path = tool_dir / "config.json"
             handler_path = tool_dir / "handler.py"
@@ -231,45 +282,23 @@ class AgentToolRegistry(BaseRegistry):
                 )
                 continue
 
-            try:
-                with open(callable_json, "r", encoding="utf-8") as f:
-                    config = json.load(f)
+            tool_schema = self._load_tool_config(config_path)
+            if not tool_schema:
+                logger.warning("无法读取共享工具配置，跳过: %s", config_path)
+                continue
 
-                if not config.get("enabled", False):
-                    continue
+            raw_name = str(tool_schema.get("function", {}).get("name", "")).strip()
+            if not raw_name:
+                logger.warning("共享工具配置缺少 function.name，跳过: %s", config_path)
+                continue
 
-                allowed_callers = config.get("allowed_callers", [])
-                if not isinstance(allowed_callers, list):
-                    logger.warning(
-                        "%s 的 allowed_callers 必须是列表，跳过",
-                        callable_json,
-                    )
-                    continue
+            tool_name = f"{prefix}{raw_name}"
+            if prefix:
+                tool_schema["function"]["name"] = tool_name
 
-                if not allowed_callers:
-                    logger.info(
-                        "共享工具 %s 的 allowed_callers 为空，跳过注册",
-                        tool_dir.name,
-                    )
-                    continue
+            result.append((tool_name, tool_schema, allowed_callers))
 
-                tool_schema = self._load_tool_config(config_path)
-                if not tool_schema:
-                    logger.warning("无法读取共享工具配置，跳过: %s", config_path)
-                    continue
-
-                tool_name = str(tool_schema.get("function", {}).get("name", "")).strip()
-                if not tool_name:
-                    logger.warning(
-                        "共享工具配置缺少 function.name，跳过: %s", config_path
-                    )
-                    continue
-
-                callable_tools.append((tool_name, tool_schema, allowed_callers))
-            except Exception as e:
-                logger.warning("读取 %s 失败: %s", callable_json, e)
-
-        return callable_tools
+        return result
 
     def _load_agent_config(self, agent_dir: Path) -> dict[str, Any] | None:
         """读取 agent 的 config.json

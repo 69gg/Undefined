@@ -26,6 +26,31 @@ toolsets/
   - `toolsets/render/render_html/` → 注册为 `render.render_html`
   - `toolsets/scheduler/create_schedule_task/` → 注册为 `scheduler.create_schedule_task`
 
+## 暴露给 Agent（callable.json）
+
+默认情况下，工具集工具仅主 AI 可见。可通过 `callable.json` 按白名单暴露给 Agent：
+
+**单个工具**（放在工具目录下）：
+
+```
+toolsets/{category}/{tool_name}/callable.json
+```
+
+**整个分类**（放在分类目录下，上级覆盖下级）：
+
+```
+toolsets/{category}/callable.json
+```
+
+```json
+{
+    "enabled": true,
+    "allowed_callers": ["*"]
+}
+```
+
+注册名为 `{category}.{tool_name}`。分类级与工具级同时存在时，分类级优先。详见 [docs/callable.md](../../../../docs/callable.md)。
+
 ## 添加新工具
 
 1. 在对应分类目录下创建新目录
