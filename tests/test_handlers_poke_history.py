@@ -50,14 +50,14 @@ async def test_private_poke_writes_history_and_triggers_reply() -> None:
     handler.history_manager.add_private_message.assert_called_once()
     private_history_call = handler.history_manager.add_private_message.call_args
     assert private_history_call.kwargs["user_id"] == 20001
-    assert private_history_call.kwargs["text_content"] == "(拍了拍你)"
+    assert private_history_call.kwargs["text_content"] == "测试用户拍了拍你"
     assert private_history_call.kwargs["display_name"] == "测试用户"
     assert private_history_call.kwargs["user_name"] == "测试用户"
 
     handler.ai_coordinator.handle_private_reply.assert_called_once()
     private_reply_call = handler.ai_coordinator.handle_private_reply.call_args
     assert private_reply_call.args[0] == 20001
-    assert private_reply_call.args[1] == "(拍了拍你)"
+    assert private_reply_call.args[1] == "测试用户拍了拍你"
     assert private_reply_call.args[2] == []
     assert private_reply_call.kwargs["is_poke"] is True
     assert private_reply_call.kwargs["sender_name"] == "20001"
@@ -90,7 +90,7 @@ async def test_group_poke_writes_history_and_triggers_reply() -> None:
     group_history_call = handler.history_manager.add_group_message.call_args
     assert group_history_call.kwargs["group_id"] == 30001
     assert group_history_call.kwargs["sender_id"] == 20001
-    assert group_history_call.kwargs["text_content"] == "(拍了拍你)"
+    assert group_history_call.kwargs["text_content"] == "群名片拍了拍你"
     assert group_history_call.kwargs["sender_card"] == "群名片"
     assert group_history_call.kwargs["sender_nickname"] == "群昵称"
     assert group_history_call.kwargs["group_name"] == "测试群"
@@ -101,7 +101,7 @@ async def test_group_poke_writes_history_and_triggers_reply() -> None:
     group_reply_call = handler.ai_coordinator.handle_auto_reply.call_args
     assert group_reply_call.args[0] == 30001
     assert group_reply_call.args[1] == 20001
-    assert group_reply_call.args[2] == "(拍了拍你)"
+    assert group_reply_call.args[2] == "群名片拍了拍你"
     assert group_reply_call.args[3] == []
     assert group_reply_call.kwargs["is_poke"] is True
     assert group_reply_call.kwargs["sender_name"] == "20001"

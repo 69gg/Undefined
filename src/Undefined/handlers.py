@@ -144,17 +144,19 @@ class MessageHandler:
             logger.debug("[通知] 拍一拍事件数据: %s", str(event)[:200])
 
             if poke_group_id == 0:
-                await self._record_private_poke_history(poke_sender_id, event)
+                poke_text = await self._record_private_poke_history(
+                    poke_sender_id, event
+                )
                 logger.info("[通知] 私聊拍一拍，触发私聊回复")
                 await self.ai_coordinator.handle_private_reply(
                     poke_sender_id,
-                    "(拍了拍你)",
+                    poke_text,
                     [],
                     is_poke=True,
                     sender_name=str(poke_sender_id),
                 )
             else:
-                await self._record_group_poke_history(
+                poke_text = await self._record_group_poke_history(
                     poke_group_id,
                     poke_sender_id,
                     event,
@@ -166,7 +168,7 @@ class MessageHandler:
                 await self.ai_coordinator.handle_auto_reply(
                     poke_group_id,
                     poke_sender_id,
-                    "(拍了拍你)",
+                    poke_text,
                     [],
                     is_poke=True,
                     sender_name=str(poke_sender_id),
@@ -431,7 +433,7 @@ class MessageHandler:
 
     async def _record_private_poke_history(
         self, user_id: int, event: dict[str, Any]
-    ) -> None:
+    ) -> str:
         """记录私聊拍一拍到历史。"""
         sender = event.get("sender", {})
         sender_nickname = ""
@@ -451,11 +453,14 @@ class MessageHandler:
                     exc,
                 )
 
+        display_name = sender_nickname or user_name or f"QQ{user_id}"
+        poke_text = f"{display_name}拍了拍你"
+
         try:
             await self.history_manager.add_private_message(
                 user_id=user_id,
-                text_content="(拍了拍你)",
-                display_name=sender_nickname or user_name or str(user_id),
+                text_content=poke_text,
+                display_name=display_name,
                 user_name=user_name,
             )
         except Exception as exc:
@@ -464,13 +469,14 @@ class MessageHandler:
                 user_id,
                 exc,
             )
+        return poke_text
 
     async def _record_group_poke_history(
         self,
         group_id: int,
         sender_id: int,
         event: dict[str, Any],
-    ) -> None:
+    ) -> str:
         """记录群聊拍一拍到历史。"""
         sender = event.get("sender", {})
         sender_card = ""
@@ -495,11 +501,14 @@ class MessageHandler:
                 exc,
             )
 
+        display_name = sender_card or sender_nickname or f"QQ{sender_id}"
+        poke_text = f"{display_name}拍了拍你"
+
         try:
             await self.history_manager.add_group_message(
                 group_id=group_id,
                 sender_id=sender_id,
-                text_content="(拍了拍你)",
+                text_content=poke_text,
                 sender_card=sender_card,
                 sender_nickname=sender_nickname,
                 group_name=group_name,
@@ -513,6 +522,7 @@ class MessageHandler:
                 sender_id,
                 exc,
             )
+        return poke_text
 
     async def _extract_bilibili_ids(
         self, text: str, message_content: list[dict[str, Any]]
