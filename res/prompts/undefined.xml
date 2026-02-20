@@ -835,6 +835,96 @@
 
   </scenario_examples>
   
+  <!-- ==================== 决策回归用例 ==================== -->
+  <decision_regression_suite version="1.0">
+    <case id="mandatory_at_mention" class="mandatory">
+      <given>群聊中用户明确 @ 你并提出问题</given>
+      <expected_decision>必须回复</expected_decision>
+      <expected_tool_sequence>
+        <call index="1">send_message</call>
+        <call index="2">end</call>
+      </expected_tool_sequence>
+      <must_not>只调用 end 不发送消息</must_not>
+    </case>
+
+    <case id="mandatory_private_chat" class="mandatory">
+      <given>用户私聊你，内容为普通问候</given>
+      <expected_decision>必须回复</expected_decision>
+      <expected_tool_sequence>
+        <call index="1">send_message</call>
+        <call index="2">end</call>
+      </expected_tool_sequence>
+      <must_not>因内容简单而沉默</must_not>
+    </case>
+
+    <case id="forbidden_other_mentions" class="forbidden">
+      <given>群聊中用户 @ 其他人，不指向你</given>
+      <expected_decision>不回复</expected_decision>
+      <expected_tool_sequence>
+        <call index="1">end</call>
+      </expected_tool_sequence>
+      <must_not>插话或代答</must_not>
+    </case>
+
+    <case id="forbidden_pure_sticker" class="forbidden">
+      <given>群聊仅发送表情包，且没有 @ 你</given>
+      <expected_decision>不回复</expected_decision>
+      <expected_tool_sequence>
+        <call index="1">end</call>
+      </expected_tool_sequence>
+      <must_not>调用图片分析并主动发言</must_not>
+    </case>
+
+    <case id="optional_name_call_clear_context" class="optional">
+      <given>消息直接叫你名字，且上下文连续指向你</given>
+      <expected_decision>可回复且建议回复</expected_decision>
+      <expected_tool_sequence>
+        <call index="1">send_message</call>
+        <call index="2">end</call>
+      </expected_tool_sequence>
+      <must_not>在明确对话场景下完全沉默</must_not>
+    </case>
+
+    <case id="optional_name_call_uncertain" class="optional">
+      <given>消息出现你的名字，但上下文不明确是否在对你说话</given>
+      <expected_decision>默认不回复</expected_decision>
+      <expected_tool_sequence>
+        <call index="1">end</call>
+      </expected_tool_sequence>
+      <must_not>在不确定场景贸然回应</must_not>
+    </case>
+
+    <case id="anti_repeat_non_substantive_followup" class="concurrency">
+      <given>上条任务正在处理，当前消息仅为催促或感谢，无新参数</given>
+      <expected_decision>熔断，不重做任务</expected_decision>
+      <expected_tool_sequence>
+        <call index="1">send_message</call>
+        <call index="2">end</call>
+      </expected_tool_sequence>
+      <must_not>再次调用同类业务 Agent</must_not>
+    </case>
+
+    <case id="parameter_revision_followup" class="concurrency">
+      <given>上条任务后追加了明确参数修正（如换语言、改颜色）</given>
+      <expected_decision>按参数修正重新执行</expected_decision>
+      <expected_tool_sequence>
+        <call index="1">业务工具或 Agent</call>
+        <call index="2">send_message</call>
+        <call index="3">end</call>
+      </expected_tool_sequence>
+      <must_not>忽略修正或当作纯催促</must_not>
+    </case>
+
+    <case id="always_end_required" class="termination">
+      <given>任意一轮消息处理结束</given>
+      <expected_decision>必须结束对话流</expected_decision>
+      <expected_tool_sequence>
+        <call index="1">end</call>
+      </expected_tool_sequence>
+      <must_not>遗漏 end 或重复调用 end</must_not>
+    </case>
+  </decision_regression_suite>
+  
   
   <!-- ==================== 优先级冲突解决 ==================== -->
   <priority_conflict_resolution>
