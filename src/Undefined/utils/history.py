@@ -13,6 +13,13 @@ HISTORY_DIR = os.path.join("data", "history")
 MAX_HISTORY = 10000  # 统一 10000 条限制
 
 
+def _extract_id_from_history_filename(path: str, prefix: str) -> str:
+    filename = os.path.basename(path)
+    if filename.startswith(prefix) and filename.endswith(".json"):
+        return filename[len(prefix) : -5]
+    return ""
+
+
 class MessageHistoryManager:
     """消息历史管理器（异步，Lazy Load）"""
 
@@ -104,25 +111,68 @@ class MessageHistoryManager:
                 return []
 
             if isinstance(history, list):
-                # 兼容旧格式：补充缺失的字段
+                group_id_from_path = _extract_id_from_history_filename(path, "group_")
+                private_id_from_path = _extract_id_from_history_filename(
+                    path, "private_"
+                )
+                is_group_path = bool(group_id_from_path)
+
+                normalized_history: list[dict[str, Any]] = []
+                # 兼容旧格式：补充缺失字段，避免后续上下文注入出现空 sender/chat
                 for msg in history:
-                    if "type" not in msg:
-                        msg["type"] = "private" if "private" in path else "group"
-                    if "chat_id" not in msg:
-                        if "group_" in path:
-                            msg["chat_id"] = msg.get("user_id", "")
+                    if not isinstance(msg, dict):
+                        continue
+
+                    msg_type = str(msg.get("type", "")).strip().lower()
+                    if msg_type not in {"group", "private"}:
+                        msg_type = "group" if is_group_path else "private"
+                        msg["type"] = msg_type
+
+                    chat_id_val = str(msg.get("chat_id", "")).strip()
+                    if not chat_id_val:
+                        if msg_type == "group":
+                            chat_id_val = group_id_from_path
                         else:
-                            msg["chat_id"] = msg.get("user_id", "")
-                    if "timestamp" not in msg:
+                            chat_id_val = private_id_from_path
+                        msg["chat_id"] = chat_id_val
+
+                    user_id_val = str(msg.get("user_id", "")).strip()
+                    if not user_id_val:
+                        fallback_user_id = str(msg.get("sender_id", "")).strip()
+                        if not fallback_user_id and msg_type == "private":
+                            fallback_user_id = chat_id_val or private_id_from_path
+                        msg["user_id"] = fallback_user_id
+
+                    if not str(msg.get("display_name", "")).strip():
+                        fallback_display = (
+                            msg.get("sender_name")
+                            or msg.get("nickname")
+                            or msg.get("user_id")
+                            or "未知用户"
+                        )
+                        msg["display_name"] = str(fallback_display)
+
+                    if not str(msg.get("chat_name", "")).strip():
+                        if msg_type == "group":
+                            group_chat_id = chat_id_val or group_id_from_path
+                            msg["chat_name"] = f"群{group_chat_id}"
+                        else:
+                            private_chat_id = chat_id_val or private_id_from_path
+                            msg["chat_name"] = f"QQ用户{private_chat_id}"
+
+                    if "timestamp" not in msg or msg.get("timestamp") is None:
                         msg["timestamp"] = ""
-                    if "chat_name" not in msg:
-                        if msg["type"] == "group":
-                            msg["chat_name"] = f"群{msg.get('chat_id', '')}"
-                        else:
-                            msg["chat_name"] = f"QQ用户{msg.get('chat_id', '')}"
+                    if "message" not in msg or msg.get("message") is None:
+                        msg["message"] = str(msg.get("content", ""))
+
+                    normalized_history.append(msg)
 
                 # 只保留最近的 MAX_HISTORY 条
-                return history[-MAX_HISTORY:] if len(history) > MAX_HISTORY else history
+                return (
+                    normalized_history[-MAX_HISTORY:]
+                    if len(normalized_history) > MAX_HISTORY
+                    else normalized_history
+                )
         except Exception as e:
             logger.error(f"加载历史记录失败 {path}: {e}")
 
