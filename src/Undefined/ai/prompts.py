@@ -277,7 +277,12 @@ class PromptBuilder:
 
         each_rules = await self._load_each_rules()
         if each_rules:
-            messages.append({"role": "system", "content": each_rules})
+            messages.append(
+                {
+                    "role": "system",
+                    "content": f"【强制规则 - 必须在进行任何操作前仔细阅读并严格遵守】\n{each_rules}",
+                }
+            )
 
         messages.append({"role": "user", "content": f"【当前消息】\n{question}"})
         logger.debug(
