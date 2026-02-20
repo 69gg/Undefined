@@ -129,3 +129,30 @@ class TestAgentCallEasterEgg:
             )
 
             assert sender.messages == []
+
+    @pytest.mark.asyncio
+    async def test_agent_to_tool_easter_egg_message_format(self) -> None:
+        with TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            tools_dir = Path(tmpdir) / "tools"
+            tools_dir.mkdir(parents=True)
+            registry = AgentToolRegistry(tools_dir, current_agent_name="web_agent")
+
+            sender = _DummySender()
+            context = {
+                "agent_name": "web_agent",
+                "runtime_config": SimpleNamespace(
+                    easter_egg_agent_call_message_mode="all"
+                ),
+                "sender": sender,
+                "group_id": 123456,
+            }
+
+            await registry._maybe_send_agent_tool_call_easter_egg("qq_like", context)
+
+            assert sender.messages == [
+                (
+                    123456,
+                    "web_agent：qq_like，我调用你了，我要调用你了！",
+                    False,
+                )
+            ]

@@ -599,7 +599,7 @@ class AgentToolRegistry(BaseRegistry):
             if tool_name in {"send_message", "end"}:
                 return
 
-        message = f"{tool_name}，我调用你了，我要调用你了！"
+        message = f"{agent_name}：{tool_name}，我调用你了，我要调用你了！"
         sender = context.get("sender")
         group_id = context.get("group_id")
 
