@@ -1,0 +1,29 @@
+{
+    "type": "function",
+    "function": {
+        "name": "get_member_title",
+        "description": "查询指定 QQ 在群内的头衔信息。支持指定群号，未指定时会尝试从当前会话上下文推断。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "群号。可选；在群聊中通常可自动获取。"
+                },
+                "user_id": {
+                    "type": "integer",
+                    "description": "目标成员 QQ 号。"
+                },
+                "qq": {
+                    "type": "integer",
+                    "description": "目标成员 QQ 号（user_id 别名）。"
+                },
+                "no_cache": {
+                    "type": "boolean",
+                    "description": "是否不使用缓存获取最新信息，默认 false。",
+                    "default": false
+                }
+            }
+        }
+    }
+}
