@@ -135,6 +135,62 @@ texts → split_lines → [batch 1, batch 2, ...] → Queue → API (间隔发�
 
 使用 ChromaDB 的 cosine 距离度量。每行内容的 SHA256 前 16 位作为 ID，重复内容自动去重（upsert）。
 
+## 嵌入模型适配
+
+不同嵌入模型对输入格式的要求不同，主要区别在于**查询端是否需要拼接指令前缀**。
+
+### query_instruction 说明
+
+部分模型（如 Qwen3-Embedding、E5、BGE、Instructor 系列）在训练时采用了带指令的对比学习，Query 和 Document 的向量空间是分开优化的。对这类模型，查询时**必须**在文本前拼接对应指令，否则检索效果会大幅下降。
+
+**行为**：`query_instruction` 只在语义搜索（`knowledge_semantic_search`）时拼接到查询文本前，文档嵌入时不加。
+
+### 各模型配置示例
+
+**OpenAI text-embedding-3-* / ada-002**（无需指令）
+
+```toml
+[models.embedding]
+api_url = "https://api.openai.com/v1"
+api_key = "sk-xxx"
+model_name = "text-embedding-3-small"
+dimensions = 512   # text-embedding-3-* 支持，ada-002 不支持此参数
+```
+
+**Qwen3-Embedding**（需要指令，格式：`Instruct: {任务描述}\nQuery: `）
+
+```toml
+[models.embedding]
+api_url = "http://localhost:8000/v1"   # 本地部署地址
+api_key = "EMPTY"
+model_name = "Qwen/Qwen3-Embedding"
+query_instruction = "Instruct: 为这个搜索查询检索相关文档\nQuery: "
+```
+
+代码检索场景可换为：
+
+```toml
+query_instruction = "Instruct: 为这个搜索查询检索相关代码片段\nQuery: "
+```
+
+**BGE 系列**（如 `BAAI/bge-large-zh-v1.5`）
+
+```toml
+[models.embedding]
+model_name = "BAAI/bge-large-zh-v1.5"
+query_instruction = "为这个句子生成表示以用于检索相关文章："
+```
+
+**E5 系列**（如 `intfloat/multilingual-e5-large`）
+
+```toml
+[models.embedding]
+model_name = "intfloat/multilingual-e5-large"
+query_instruction = "query: "
+```
+
+> 具体指令内容以各模型官方文档为准。不确定时可先不填，观察检索效果后再调整。
+
 ## 手动触发嵌入
 
 如果关闭了自动扫描，可以通过重启机器人触发一次全量扫描，或将 `auto_scan` + `auto_embed` 临时设为 `true` 后热更新配置。
