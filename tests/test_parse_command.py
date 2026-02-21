@@ -31,12 +31,8 @@ def dispatcher() -> CommandDispatcher:
         ("[@123([test])] /help", "help"),
         ("[@123(@test)] /help", "help"),
         ("[@123([@foo])] /help", "help"),
-        # 昵称含闭合序列 )]
-        ("[@123(a)]b)] /help", "help"),
-        ("[@123(x)](y)] /help", "help"),
         # 多个 @ 段
         ("[@11(a)] [@22(b)] /stats 7d", "stats"),
-        ("[@11(a)]b)] [@22(c)] /help", "help"),
     ],
     ids=[
         "bare_cmd",
@@ -46,10 +42,7 @@ def dispatcher() -> CommandDispatcher:
         "name_with_brackets",
         "name_with_at",
         "name_with_at_bracket",
-        "name_with_close_seq",
-        "name_with_close_seq_paren",
         "multi_at",
-        "multi_at_close_seq",
     ],
 )
 def test_parse_command_recognises(
@@ -66,9 +59,19 @@ def test_parse_command_recognises(
         "普通文本",
         "[@123] 普通聊天",
         "[@123(name)] 不是命令",
+        # 防止贪婪越界：普通文本含 )] 后跟 /cmd 不应误触发
+        "[@123(a)] foo )] /help",
+        "[@123(name)] 看这个)] /stats",
         "",
     ],
-    ids=["plain", "at_no_cmd", "at_name_no_cmd", "empty"],
+    ids=[
+        "plain",
+        "at_no_cmd",
+        "at_name_no_cmd",
+        "trailing_close_seq",
+        "trailing_close_seq2",
+        "empty",
+    ],
 )
 def test_parse_command_returns_none(dispatcher: CommandDispatcher, text: str) -> None:
     assert dispatcher.parse_command(text) is None
