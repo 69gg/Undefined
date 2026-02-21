@@ -440,18 +440,18 @@ class OneBotClient:
         """
         return await self._call_api("send_like", {"user_id": user_id, "times": times})
 
-    async def fetch_emoji_like(self, message_id: int) -> dict[str, Any]:
+    async def fetch_emoji_like(self, message_id: int) -> dict[str, Any] | list[Any]:
         """获取消息已设置的表情反应信息（扩展接口）。
 
         参数:
             message_id: 消息 ID
 
         返回:
-            data 字段内容（字典），异常时抛出 RuntimeError
+            data 字段内容（字典或列表），异常时抛出 RuntimeError
         """
         result = await self._call_api("fetch_emoji_like", {"message_id": message_id})
         data = result.get("data")
-        if isinstance(data, dict):
+        if isinstance(data, (dict, list)):
             return data
         return {}
 

@@ -155,15 +155,20 @@ def _resolve_target_user(
     send_target: tuple[TargetType, int],
 ) -> tuple[int | None, str | None]:
     target_user_raw = args.get("target_user_id")
+    target_type, target_id = send_target
     if target_user_raw is not None:
         target_user_id, target_user_error = _parse_positive_int(
             target_user_raw, "target_user_id"
         )
         if target_user_error or target_user_id is None:
             return None, target_user_error or "target_user_id 非法"
+        if target_type == "private" and target_user_id != target_id:
+            return (
+                None,
+                f"target_user_id={target_user_id} 与私聊目标 target_id={target_id} 不一致",
+            )
         return target_user_id, None
 
-    target_type, target_id = send_target
     if target_type == "private":
         return target_id, None
 
