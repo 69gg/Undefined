@@ -108,3 +108,59 @@ def test_access_mode_allowlist_blocks_unlisted_targets(tmp_path: Path) -> None:
     assert config.is_private_allowed(222222) is False
     assert config.is_group_allowed(123456) is True
     assert config.is_private_allowed(111111) is True
+
+
+def test_access_mode_allowlist_private_only_does_not_block_groups(
+    tmp_path: Path,
+) -> None:
+    config = _load_config(
+        tmp_path,
+        (
+            'mode = "allowlist"\n'
+            "allowed_group_ids = []\n"
+            "allowed_private_ids = [111111]\n"
+            "blocked_group_ids = []\n"
+            "blocked_private_ids = []\n"
+        ),
+    )
+
+    assert config.group_access_denied_reason(654321) is None
+    assert config.is_group_allowed(654321) is True
+    assert config.private_access_denied_reason(222222) == "allowlist"
+    assert config.is_private_allowed(222222) is False
+
+
+def test_missing_mode_keeps_legacy_allowlist_behavior(tmp_path: Path) -> None:
+    config = _load_config(
+        tmp_path,
+        (
+            "allowed_group_ids = [123456]\n"
+            "allowed_private_ids = [111111]\n"
+            "blocked_group_ids = []\n"
+            "blocked_private_ids = []\n"
+        ),
+    )
+
+    assert config.access_mode == "legacy"
+    assert config.allowlist_mode_enabled() is True
+    assert config.is_group_allowed(123456) is True
+    assert config.is_group_allowed(654321) is False
+    assert config.is_private_allowed(111111) is True
+    assert config.is_private_allowed(222222) is False
+
+
+def test_missing_mode_keeps_legacy_hybrid_behavior(tmp_path: Path) -> None:
+    config = _load_config(
+        tmp_path,
+        (
+            "allowed_group_ids = [123456]\n"
+            "allowed_private_ids = [111111]\n"
+            "blocked_group_ids = [123456]\n"
+            "blocked_private_ids = []\n"
+        ),
+    )
+
+    assert config.access_mode == "legacy"
+    # 兼容旧行为：群聊黑名单优先于白名单。
+    assert config.group_access_denied_reason(123456) == "blacklist"
+    assert config.is_group_allowed(123456) is False

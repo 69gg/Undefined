@@ -482,7 +482,7 @@ class Config:
     def __post_init__(self) -> None:
         # 访问控制属于高频热路径，启动后缓存为 set 降低重复构建开销。
         normalized_mode = str(self.access_mode).strip().lower()
-        if normalized_mode not in {"off", "blacklist", "allowlist"}:
+        if normalized_mode not in {"off", "blacklist", "allowlist", "legacy"}:
             normalized_mode = "off"
         self.access_mode = normalized_mode
         self._allowed_group_ids_set = {int(item) for item in self.allowed_group_ids}
@@ -611,15 +611,7 @@ class Config:
             superadmin_qq=superadmin_qq, admin_qqs=admin_qqs
         )
 
-        access_mode = _coerce_str(
-            _get_value(data, ("access", "mode"), "ACCESS_MODE"), "off"
-        ).lower()
-        if access_mode not in {"off", "blacklist", "allowlist"}:
-            logger.warning(
-                "[配置] access.mode 非法（仅支持 off/blacklist/allowlist），已回退为 off: %s",
-                access_mode,
-            )
-            access_mode = "off"
+        access_mode_raw = _get_value(data, ("access", "mode"), "ACCESS_MODE")
         allowed_group_ids = _coerce_int_list(
             _get_value(data, ("access", "allowed_group_ids"), "ALLOWED_GROUP_IDS")
         )
@@ -648,6 +640,28 @@ class Config:
             ),
             False,
         )
+        if access_mode_raw is None:
+            # 兼容旧配置：未配置 mode 时沿用历史行为（群黑名单 + 白名单联动）。
+            if (
+                allowed_group_ids
+                or blocked_group_ids
+                or allowed_private_ids
+                or blocked_private_ids
+            ):
+                access_mode = "legacy"
+                logger.warning(
+                    "[配置] access.mode 未设置，已启用兼容模式（legacy）。建议显式设置为 off/blacklist/allowlist。"
+                )
+            else:
+                access_mode = "off"
+        else:
+            access_mode = _coerce_str(access_mode_raw, "off").lower()
+            if access_mode not in {"off", "blacklist", "allowlist"}:
+                logger.warning(
+                    "[配置] access.mode 非法（仅支持 off/blacklist/allowlist），已回退为 off: %s",
+                    access_mode,
+                )
+                access_mode = "off"
 
         log_level = _coerce_str(
             _get_value(data, ("logging", "level"), "LOG_LEVEL"), "INFO"
@@ -1160,14 +1174,24 @@ class Config:
     def allowlist_mode_enabled(self) -> bool:
         """是否启用白名单限制模式。"""
 
-        return self.access_mode == "allowlist" and (
+        return self.access_mode in {"allowlist", "legacy"} and (
             bool(self.allowed_group_ids) or bool(self.allowed_private_ids)
         )
+
+    def group_allowlist_enabled(self) -> bool:
+        """群聊白名单是否生效（显式 allowlist 模式按维度独立控制）。"""
+
+        return bool(self.allowed_group_ids)
+
+    def private_allowlist_enabled(self) -> bool:
+        """私聊白名单是否生效（显式 allowlist 模式按维度独立控制）。"""
+
+        return bool(self.allowed_private_ids)
 
     def blacklist_mode_enabled(self) -> bool:
         """是否启用黑名单限制模式。"""
 
-        return self.access_mode == "blacklist" and (
+        return self.access_mode in {"blacklist", "legacy"} and (
             bool(self.blocked_group_ids) or bool(self.blocked_private_ids)
         )
 
@@ -1192,7 +1216,15 @@ class Config:
             if normalized_group_id in self._blocked_group_ids_set:
                 return "blacklist"
             return None
-        if not self.allowlist_mode_enabled():
+        if self.access_mode == "legacy":
+            if normalized_group_id in self._blocked_group_ids_set:
+                return "blacklist"
+            if not self.allowlist_mode_enabled():
+                return None
+            if normalized_group_id not in self._allowed_group_ids_set:
+                return "allowlist"
+            return None
+        if not self.group_allowlist_enabled():
             return None
         if normalized_group_id not in self._allowed_group_ids_set:
             return "allowlist"
@@ -1219,7 +1251,27 @@ class Config:
             ):
                 return None
             return "blacklist"
-        if not self.allowlist_mode_enabled():
+        if self.access_mode == "legacy":
+            if normalized_user_id in self._blocked_private_ids_set:
+                if (
+                    self.superadmin_bypass_private_blacklist
+                    and normalized_user_id == int(self.superadmin_qq)
+                    and self.superadmin_qq > 0
+                ):
+                    return None
+                return "blacklist"
+            if not self.allowlist_mode_enabled():
+                return None
+            if (
+                self.superadmin_bypass_allowlist
+                and normalized_user_id == int(self.superadmin_qq)
+                and self.superadmin_qq > 0
+            ):
+                return None
+            if normalized_user_id not in self._allowed_private_ids_set:
+                return "allowlist"
+            return None
+        if not self.private_allowlist_enabled():
             return None
         if (
             self.superadmin_bypass_allowlist

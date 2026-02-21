@@ -29,6 +29,10 @@ superadmin_bypass_private_blacklist = false
 说明：
 - `mode=blacklist` 时，`allowed_*` 不参与判定。
 - `mode=allowlist` 时，`blocked_*` 不参与判定。
+- `mode=allowlist` 时，群/私聊按各自列表独立生效：
+  - `allowed_group_ids=[]` 表示群聊不限制。
+  - `allowed_private_ids=[]` 表示私聊不限制。
+- 若 `mode` 未配置且已有黑/白名单字段，系统会进入兼容模式（legacy）以保持旧版本行为。建议尽快显式设置 `mode`。
 
 ## superadmin 私聊绕过
 
