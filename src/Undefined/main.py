@@ -214,6 +214,8 @@ async def main() -> None:
                 base_dir=config.knowledge_base_dir,
                 embedder=_embedder,
                 default_top_k=config.knowledge_default_top_k,
+                chunk_size=config.knowledge_chunk_size,
+                chunk_overlap=config.knowledge_chunk_overlap,
             )
             ai.set_knowledge_manager(knowledge_manager)
             if config.knowledge_auto_scan and config.knowledge_auto_embed:

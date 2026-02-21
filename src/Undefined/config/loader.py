@@ -443,6 +443,8 @@ class Config:
     knowledge_auto_embed: bool
     knowledge_scan_interval: float
     knowledge_embed_batch_size: int
+    knowledge_chunk_size: int
+    knowledge_chunk_overlap: int
     knowledge_default_top_k: int
     # Bilibili 视频提取
     bilibili_auto_extract_enabled: bool
@@ -603,6 +605,16 @@ class Config:
         )
         if knowledge_embed_batch_size <= 0:
             knowledge_embed_batch_size = 64
+        knowledge_chunk_size = _coerce_int(
+            _get_value(data, ("knowledge", "chunk_size"), None), 10
+        )
+        if knowledge_chunk_size <= 0:
+            knowledge_chunk_size = 10
+        knowledge_chunk_overlap = _coerce_int(
+            _get_value(data, ("knowledge", "chunk_overlap"), None), 2
+        )
+        if knowledge_chunk_overlap < 0:
+            knowledge_chunk_overlap = 0
         knowledge_default_top_k = _coerce_int(
             _get_value(data, ("knowledge", "default_top_k"), None), 5
         )
@@ -1149,6 +1161,8 @@ class Config:
             knowledge_auto_embed=knowledge_auto_embed,
             knowledge_scan_interval=knowledge_scan_interval,
             knowledge_embed_batch_size=knowledge_embed_batch_size,
+            knowledge_chunk_size=knowledge_chunk_size,
+            knowledge_chunk_overlap=knowledge_chunk_overlap,
             knowledge_default_top_k=knowledge_default_top_k,
         )
 

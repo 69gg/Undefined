@@ -42,7 +42,9 @@ base_dir = "knowledge"            # 知识库根目录
 auto_scan = true                  # 定期扫描文本变更
 auto_embed = true                 # 发现变更自动嵌入
 scan_interval = 60                # 扫描间隔（秒）
-embed_batch_size = 64             # 每批嵌入行数
+embed_batch_size = 64             # 每批嵌入块数
+chunk_size = 10                   # 每个向量块包含的行数（滑动窗口大小）
+chunk_overlap = 2                 # 相邻块重叠的行数
 default_top_k = 5                 # 语义搜索默认返回数
 ```
 
@@ -118,7 +120,18 @@ knowledge/
 
 ### 文本切分
 
-每个 `.txt` 文件按行切分，忽略空行。每一行作为一个独立的向量单元存入 ChromaDB。
+每个 `.txt` 文件先按行切分并忽略空行，再用**滑动窗口**合并为向量块：
+
+```
+原始行: [l1, l2, l3, l4, l5, l6, l7]
+chunk_size=4, chunk_overlap=1 → step=3
+
+块1: l1\nl2\nl3\nl4
+块2: l4\nl5\nl6\nl7
+```
+
+- `chunk_size`：每块包含的行数（默认 10）
+- `chunk_overlap`：相邻块重叠的行数（默认 2），保证语义连续性
 
 ### 增量嵌入
 

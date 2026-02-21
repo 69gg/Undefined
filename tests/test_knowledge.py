@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from Undefined.knowledge.chunker import split_lines
+from Undefined.knowledge.chunker import chunk_lines
 from Undefined.knowledge.embedder import Embedder
 from Undefined.knowledge.manager import KnowledgeManager
 
@@ -15,19 +15,33 @@ from Undefined.knowledge.manager import KnowledgeManager
 # ── chunker ──────────────────────────────────────────────────────────────────
 
 
-def test_split_lines_basic() -> None:
-    text = "line1\nline2\nline3"
-    assert split_lines(text) == ["line1", "line2", "line3"]
+def test_chunk_lines_basic() -> None:
+    text = "l1\nl2\nl3\nl4\nl5"
+    chunks = chunk_lines(text, window=3, overlap=1)  # step=2
+    assert chunks == ["l1\nl2\nl3", "l3\nl4\nl5", "l5"]
 
 
-def test_split_lines_ignores_empty() -> None:
-    text = "line1\n\n\nline2\n  \nline3"
-    assert split_lines(text) == ["line1", "line2", "line3"]
+def test_chunk_lines_ignores_empty() -> None:
+    text = "l1\n\nl2\n  \nl3"
+    chunks = chunk_lines(text, window=3, overlap=0)
+    assert chunks == ["l1\nl2\nl3"]
 
 
-def test_split_lines_empty_text() -> None:
-    assert split_lines("") == []
-    assert split_lines("   \n\n  ") == []
+def test_chunk_lines_empty_text() -> None:
+    assert chunk_lines("") == []
+    assert chunk_lines("   \n\n  ") == []
+
+
+def test_chunk_lines_overlap() -> None:
+    text = "\n".join(f"l{i}" for i in range(1, 8))  # l1..l7
+    chunks = chunk_lines(text, window=4, overlap=1)  # step=3
+    assert chunks[0] == "l1\nl2\nl3\nl4"
+    assert chunks[1] == "l4\nl5\nl6\nl7"
+
+
+def test_chunk_lines_smaller_than_window() -> None:
+    text = "l1\nl2"
+    assert chunk_lines(text, window=10, overlap=2) == ["l1\nl2"]
 
 
 # ── embedder ─────────────────────────────────────────────────────────────────
@@ -95,6 +109,7 @@ async def test_embedder_queue_serializes() -> None:
 def _make_manager(tmp_path: Path) -> tuple[KnowledgeManager, MagicMock]:
     embedder = MagicMock(spec=Embedder)
     embedder.embed = AsyncMock(return_value=[[0.1, 0.2]])
+    embedder._config = MagicMock(document_instruction="")
     manager = KnowledgeManager(base_dir=tmp_path, embedder=embedder, default_top_k=3)
     return manager, embedder
 
@@ -160,21 +175,22 @@ def test_text_search_missing_kb(tmp_path: Path) -> None:
 
 async def test_embed_knowledge_base(tmp_path: Path) -> None:
     manager, embedder = _make_manager(tmp_path)
-    embedder.embed = AsyncMock(return_value=[[0.1, 0.2], [0.3, 0.4]])
+    embedder.embed = AsyncMock(return_value=[[0.1, 0.2]])
 
     _make_kb(tmp_path, "kb1", {"doc.txt": "line one\nline two\n\nline three"})
 
     with patch.object(manager, "_get_store") as mock_store:
         store = AsyncMock()
-        store.add_chunks = AsyncMock(return_value=3)
+        store.add_chunks = AsyncMock(return_value=1)
         mock_store.return_value = store
 
         added = await manager.embed_knowledge_base("kb1")
 
-    assert added == 3
+    assert added == 1
     embedder.embed.assert_called_once()
-    called_lines = embedder.embed.call_args[0][0]
-    assert called_lines == ["line one", "line two", "line three"]
+    # 默认 window=10，3行合并为1个块
+    called_chunks = embedder.embed.call_args[0][0]
+    assert called_chunks == ["line one\nline two\nline three"]
 
 
 async def test_embed_skips_unchanged_files(tmp_path: Path) -> None:

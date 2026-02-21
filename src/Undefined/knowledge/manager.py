@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from Undefined.knowledge.chunker import split_lines
+from Undefined.knowledge.chunker import chunk_lines
 from Undefined.knowledge.store import KnowledgeStore
 
 if TYPE_CHECKING:
@@ -26,10 +26,14 @@ class KnowledgeManager:
         base_dir: str | Path,
         embedder: Embedder,
         default_top_k: int = 5,
+        chunk_size: int = 10,
+        chunk_overlap: int = 2,
     ) -> None:
         self._base_dir = Path(base_dir)
         self._embedder = embedder
         self._default_top_k = default_top_k
+        self._chunk_size = chunk_size
+        self._chunk_overlap = chunk_overlap
         self._stores: dict[str, KnowledgeStore] = {}
         self._scan_task: asyncio.Task[None] | None = None
 
@@ -80,7 +84,7 @@ class KnowledgeManager:
             if manifest.get(txt_file.name) == fhash:
                 continue
             content = await asyncio.to_thread(txt_file.read_text, "utf-8")
-            lines = split_lines(content)
+            lines = chunk_lines(content, self._chunk_size, self._chunk_overlap)
             if not lines:
                 manifest[txt_file.name] = fhash
                 continue
