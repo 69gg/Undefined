@@ -274,6 +274,13 @@ agent_call_message_enabled = "none"
 # en: Enable keyword auto-replies("心理委员") in group chats.
 keyword_reply_enabled = false
 
+# zh: 历史记录配置。
+# en: History settings.
+[history]
+# zh: 每个会话最多保留的消息条数。
+# en: Max messages to keep per conversation.
+max_records = 10000
+
 # zh: Skills 热重载配置（可选）。
 # en: Skills hot reload settings (optional).
 [skills]
@@ -393,6 +400,9 @@ config_path = "config/mcp.json"
 # zh: messages.send_text_file 单文件文本发送大小上限（KB）。默认 512KB（0.5MB）。
 # en: Size limit for messages.send_text_file single-text-file uploads (KB). Default 512KB (0.5MB).
 send_text_file_max_size_kb = 512
+# zh: messages.send_url_file URL 文件发送大小上限（MB）。默认 100MB。
+# en: Size limit for messages.send_url_file URL-file uploads (MB). Default 100MB.
+send_url_file_max_size_mb = 100
 
 # zh: Bilibili 视频自动提取配置。
 # en: Bilibili video auto-extraction settings.

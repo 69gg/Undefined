@@ -9,7 +9,7 @@ import os
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -17,6 +17,7 @@ from apscheduler.triggers.cron import CronTrigger
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
 from Undefined.scheduled_task_storage import ScheduledTaskStorage
+from Undefined.utils.recent_messages import get_recent_messages_prefer_local
 from Undefined.utils import io
 
 logger = logging.getLogger(__name__)
@@ -417,9 +418,14 @@ class TaskScheduler:
                 async def get_recent_cb(
                     chat_id: str, msg_type: str, start: int, end: int
                 ) -> list[dict[str, Any]]:
-                    return cast(
-                        list[dict[str, Any]],
-                        self.history_manager.get_recent(chat_id, msg_type, start, end),
+                    return await get_recent_messages_prefer_local(
+                        chat_id=chat_id,
+                        msg_type=msg_type,
+                        start=start,
+                        end=end,
+                        onebot_client=self.onebot,
+                        history_manager=self.history_manager,
+                        bot_qq=int(getattr(self.ai, "bot_qq", 0)),
                     )
 
                 async def send_like_cb(uid: int, times: int = 1) -> None:

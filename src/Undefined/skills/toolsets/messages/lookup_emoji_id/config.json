@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "lookup_emoji_id",
+        "description": "根据 emoji 名称或字符查询对应的 emoji_id（供 react_message_emoji 使用）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "emoji": {
+                    "type": "string",
+                    "description": "要查询的表情名称或字符，例如 点赞 / 👍。"
+                }
+            },
+            "required": ["emoji"]
+        }
+    }
+}

@@ -1,0 +1,25 @@
+{
+    "type": "function",
+    "function": {
+        "name": "send_poke",
+        "description": "发送拍一拍。默认在当前会话中拍当前对话对象（群聊默认拍发言者，私聊默认拍对方）；也可通过 target_user_id 指定被拍用户，并用 target_type + target_id 指定发送位置（群聊/私聊）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target_user_id": {
+                    "type": "integer",
+                    "description": "可选。要拍一拍的目标 QQ 号。"
+                },
+                "target_type": {
+                    "type": "string",
+                    "enum": ["group", "private"],
+                    "description": "可选。发送位置类型：group(群聊) 或 private(私聊)。"
+                },
+                "target_id": {
+                    "type": "integer",
+                    "description": "可选。发送位置 ID：target_type=group 时为群号；target_type=private 时为用户 QQ 号。"
+                }
+            }
+        }
+    }
+}

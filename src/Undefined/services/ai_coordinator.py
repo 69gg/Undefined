@@ -12,6 +12,7 @@ from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.sender import MessageSender
 from Undefined.utils.scheduler import TaskScheduler
 from Undefined.services.security import SecurityService
+from Undefined.utils.recent_messages import get_recent_messages_prefer_local
 from Undefined.utils.resources import read_text_resource
 from Undefined.utils.xml import escape_xml_attr, escape_xml_text
 
@@ -64,6 +65,7 @@ class AICoordinator:
         group_name: str = "未知群聊",
         sender_role: str = "member",
         sender_title: str = "",
+        trigger_message_id: int | None = None,
     ) -> None:
         """群聊自动回复入口：根据消息内容、命中情况和安全检测决定是否回复
 
@@ -136,6 +138,7 @@ class AICoordinator:
             "text": text,
             "full_question": full_question,
             "is_at_bot": is_at_bot,
+            "trigger_message_id": trigger_message_id,
         }
 
         if is_at_bot:
@@ -156,6 +159,7 @@ class AICoordinator:
         message_content: list[dict[str, Any]],
         is_poke: bool = False,
         sender_name: str = "未知用户",
+        trigger_message_id: int | None = None,
     ) -> None:
         """处理私聊消息入口，决定回复策略并进行安全检测"""
         logger.debug("[私聊回复] user=%s text_len=%s", user_id, len(text))
@@ -185,6 +189,7 @@ class AICoordinator:
             "sender_name": sender_name,
             "text": text,
             "full_question": full_question,
+            "trigger_message_id": trigger_message_id,
         }
         logger.debug(
             "[私聊回复] full_question_len=%s user=%s",
@@ -231,6 +236,7 @@ class AICoordinator:
         sender_name = str(request.get("sender_name") or "未知用户")
         group_name = str(request.get("group_name") or "未知群聊")
         full_question = request["full_question"]
+        trigger_message_id = request.get("trigger_message_id")
 
         # 创建请求上下文
         async with RequestContext(
@@ -246,7 +252,16 @@ class AICoordinator:
             async def get_recent_cb(
                 chat_id: str, msg_type: str, start: int, end: int
             ) -> list[dict[str, Any]]:
-                return self.history_manager.get_recent(chat_id, msg_type, start, end)
+                return await get_recent_messages_prefer_local(
+                    chat_id=chat_id,
+                    msg_type=msg_type,
+                    start=start,
+                    end=end,
+                    onebot_client=self.onebot,
+                    history_manager=self.history_manager,
+                    bot_qq=self.config.bot_qq,
+                    group_name_hint=group_name,
+                )
 
             async def send_private_cb(uid: int, msg: str) -> None:
                 await self.sender.send_private_message(uid, msg)
@@ -278,6 +293,8 @@ class AICoordinator:
             for key, value in resources.items():
                 if value is not None:
                     ctx.set_resource(key, value)
+            if trigger_message_id is not None:
+                ctx.set_resource("trigger_message_id", trigger_message_id)
             logger.debug(
                 "[上下文资源] group=%s keys=%s",
                 group_id,
@@ -314,6 +331,7 @@ class AICoordinator:
         user_id = request["user_id"]
         sender_name = str(request.get("sender_name") or "未知用户")
         full_question = request["full_question"]
+        trigger_message_id = request.get("trigger_message_id")
 
         # 创建请求上下文
         async with RequestContext(
@@ -328,7 +346,15 @@ class AICoordinator:
             async def get_recent_cb(
                 chat_id: str, msg_type: str, start: int, end: int
             ) -> list[dict[str, Any]]:
-                return self.history_manager.get_recent(chat_id, msg_type, start, end)
+                return await get_recent_messages_prefer_local(
+                    chat_id=chat_id,
+                    msg_type=msg_type,
+                    start=start,
+                    end=end,
+                    onebot_client=self.onebot,
+                    history_manager=self.history_manager,
+                    bot_qq=self.config.bot_qq,
+                )
 
             async def send_img_cb(tid: int, mtype: str, path: str) -> None:
                 await self._send_image(tid, mtype, path)
@@ -360,6 +386,8 @@ class AICoordinator:
             for key, value in resources.items():
                 if value is not None:
                     ctx.set_resource(key, value)
+            if trigger_message_id is not None:
+                ctx.set_resource("trigger_message_id", trigger_message_id)
             logger.debug(
                 "[上下文资源] private user=%s keys=%s",
                 user_id,

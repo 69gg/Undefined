@@ -1,0 +1,42 @@
+{
+    "type": "function",
+    "function": {
+        "name": "react_message_emoji",
+        "description": "给指定消息添加或取消表情反应（QQ 消息表情）。默认作用于当前触发消息；支持通过 emoji_id 直接指定，也支持传 emoji 文本/字符（会查本地映射表）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "emoji_id": {
+                    "type": "integer",
+                    "description": "可选。表情 ID（推荐，最准确）。"
+                },
+                "emoji": {
+                    "type": "string",
+                    "description": "可选。表情名称或字符（如 点赞 / 👍），会映射到 emoji_id。"
+                },
+                "message_id": {
+                    "type": "integer",
+                    "description": "可选。目标消息 ID；不传时默认使用当前触发消息。"
+                },
+                "action": {
+                    "type": "string",
+                    "enum": ["set", "unset"],
+                    "description": "可选。set=添加反应，unset=取消反应，默认 set。"
+                },
+                "target_type": {
+                    "type": "string",
+                    "enum": ["group", "private"],
+                    "description": "可选。目标会话类型，用于安全校验。"
+                },
+                "target_id": {
+                    "type": "integer",
+                    "description": "可选。目标会话 ID（群号或用户 QQ），与 target_type 配套。"
+                },
+                "strict_current_session": {
+                    "type": "boolean",
+                    "description": "可选。是否强制校验该消息属于当前会话，默认 true。"
+                }
+            }
+        }
+    }
+}

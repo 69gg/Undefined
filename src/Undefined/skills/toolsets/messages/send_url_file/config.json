@@ -1,0 +1,30 @@
+{
+    "type": "function",
+    "function": {
+        "name": "send_url_file",
+        "description": "从 URL 下载并发送文件到群聊或私聊。默认大小上限 100MB，可在 config.toml 的 [messages].send_url_file_max_size_mb 调整。会先通过 Content-Length 预检文件大小；若无法获取大小则不会发送。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "文件 URL（仅支持 http/https）"
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "可选。发送时使用的文件名（仅允许单文件名，不可包含路径）。不填时自动从响应头或 URL 推断。"
+                },
+                "target_type": {
+                    "type": "string",
+                    "enum": ["group", "private"],
+                    "description": "可选。目标会话类型：group（群聊）或 private（私聊）。不填时自动按上下文推断。"
+                },
+                "target_id": {
+                    "type": "integer",
+                    "description": "可选。目标会话 ID（群号或 QQ 号）。"
+                }
+            },
+            "required": ["url"]
+        }
+    }
+}

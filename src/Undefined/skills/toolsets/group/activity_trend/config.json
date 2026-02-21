@@ -1,0 +1,48 @@
+{
+    "type": "function",
+    "function": {
+        "name": "activity_trend",
+        "description": "分析群聊活跃趋势（历史数据来自 OneBot get_group_msg_history）。按天/周统计消息量与活跃人数，输出峰值时段和趋势条形图。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "群号。如果已在群聊中，通常会自动获取。"
+                },
+                "start_time": {
+                    "type": "string",
+                    "description": "开始时间，格式：YYYY-MM-DD HH:MM:SS。"
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": "结束时间，格式：YYYY-MM-DD HH:MM:SS。"
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "未指定 start_time 时使用最近 N 天，默认 30 天。",
+                    "default": 30
+                },
+                "granularity": {
+                    "type": "string",
+                    "description": "统计粒度：day(按天) 或 week(按周)，默认 day。",
+                    "enum": [
+                        "day",
+                        "week"
+                    ],
+                    "default": "day"
+                },
+                "max_history_count": {
+                    "type": "integer",
+                    "description": "最多读取历史消息数量，默认 5000。",
+                    "default": 5000
+                },
+                "top_count": {
+                    "type": "integer",
+                    "description": "展示最活跃成员数量，默认 5，最大 20。",
+                    "default": 5
+                }
+            }
+        }
+    }
+}

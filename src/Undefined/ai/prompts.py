@@ -89,6 +89,18 @@ class PromptBuilder:
             self._summaries_loaded = True
             logger.debug(f"[AI初始化] 已加载 {len(loaded_summaries)} 条 End 摘要")
 
+    async def _load_each_rules(self) -> str:
+        path = "res/IMPORTANT/each.md"
+        try:
+            return read_text_resource(path)
+        except Exception:
+            pass
+        try:
+            async with aiofiles.open(path, "r", encoding="utf-8") as f:
+                return await f.read()
+        except Exception:
+            return ""
+
     async def _load_system_prompt(self) -> str:
         system_prompt_path = self._select_system_prompt_path()
         try:
@@ -262,6 +274,15 @@ class PromptBuilder:
                 "content": f"【当前时间】\n{current_time}\n\n注意：以上是当前的系统时间，供你参考。",
             }
         )
+
+        each_rules = await self._load_each_rules()
+        if each_rules:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": f"【强制规则 - 必须在进行任何操作前仔细阅读并严格遵守】\n{each_rules}",
+                }
+            )
 
         messages.append({"role": "user", "content": f"【当前消息】\n{question}"})
         logger.debug(

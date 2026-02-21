@@ -387,6 +387,7 @@ class Config:
     token_usage_max_archives: int
     token_usage_max_total_mb: int
     token_usage_archive_prune_mode: str
+    history_max_records: int
     skills_hot_reload: bool
     skills_hot_reload_interval: float
     skills_hot_reload_debounce: float
@@ -431,6 +432,7 @@ class Config:
     code_delivery_command_blacklist: list[str]
     # messages 工具集
     messages_send_text_file_max_size_kb: int
+    messages_send_url_file_max_size_mb: int
     # Bilibili 视频提取
     bilibili_auto_extract_enabled: bool
     bilibili_cookie: str
@@ -707,6 +709,10 @@ class Config:
             "delete",
         )
 
+        history_max_records = _coerce_int(
+            _get_value(data, ("history", "max_records"), "HISTORY_MAX_RECORDS"), 10000
+        )
+
         skills_hot_reload = _coerce_bool(
             _get_value(data, ("skills", "hot_reload"), "SKILLS_HOT_RELOAD"), True
         )
@@ -974,6 +980,17 @@ class Config:
         if messages_send_text_file_max_size_kb <= 0:
             messages_send_text_file_max_size_kb = 512
 
+        messages_send_url_file_max_size_mb = _coerce_int(
+            _get_value(
+                data,
+                ("messages", "send_url_file_max_size_mb"),
+                "MESSAGES_SEND_URL_FILE_MAX_SIZE_MB",
+            ),
+            100,
+        )
+        if messages_send_url_file_max_size_mb <= 0:
+            messages_send_url_file_max_size_mb = 100
+
         webui_settings = load_webui_settings(config_path)
 
         if strict:
@@ -1033,6 +1050,7 @@ class Config:
             token_usage_max_total_mb=token_usage_max_total_mb,
             token_usage_archive_prune_mode=token_usage_archive_prune_mode,
             skills_hot_reload=skills_hot_reload,
+            history_max_records=history_max_records,
             skills_hot_reload_interval=skills_hot_reload_interval,
             skills_hot_reload_debounce=skills_hot_reload_debounce,
             agent_intro_autogen_enabled=agent_intro_autogen_enabled,
@@ -1074,6 +1092,7 @@ class Config:
             code_delivery_container_cpu_limit=code_delivery_container_cpu_limit,
             code_delivery_command_blacklist=code_delivery_command_blacklist,
             messages_send_text_file_max_size_kb=messages_send_text_file_max_size_kb,
+            messages_send_url_file_max_size_mb=messages_send_url_file_max_size_mb,
             bilibili_auto_extract_enabled=bilibili_auto_extract_enabled,
             bilibili_cookie=bilibili_cookie,
             bilibili_prefer_quality=bilibili_prefer_quality,

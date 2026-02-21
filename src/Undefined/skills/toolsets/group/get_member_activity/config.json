@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "get_member_activity",
-        "description": "分析群成员活跃度。统计最近发言时间，识别活跃成员和长期不发言的成员（僵尸粉）。",
+        "description": "分析群成员活跃度（数据统一来自 OneBot 接口）。支持 member_list/history/hybrid 三种模式：可结合最近发言与历史消息窗口，输出活跃统计、活跃榜和潜水成员。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -14,6 +14,38 @@
                     "type": "integer",
                     "description": "非活跃阈值（天数），默认 30 天",
                     "default": 30
+                },
+                "source": {
+                    "type": "string",
+                    "description": "数据源模式：member_list(仅最近发言), history(仅历史窗口消息), hybrid(融合，默认)。",
+                    "enum": [
+                        "member_list",
+                        "history",
+                        "hybrid"
+                    ],
+                    "default": "hybrid"
+                },
+                "start_time": {
+                    "type": "string",
+                    "description": "历史窗口开始时间，格式：YYYY-MM-DD HH:MM:SS。"
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": "历史窗口结束时间，格式：YYYY-MM-DD HH:MM:SS。"
+                },
+                "history_days": {
+                    "type": "integer",
+                    "description": "未指定 start_time 时历史窗口默认最近 N 天，默认等于 threshold_days。"
+                },
+                "max_history_count": {
+                    "type": "integer",
+                    "description": "历史分析最多读取消息数量，默认 3000，最大 5000。",
+                    "default": 3000
+                },
+                "include_zero": {
+                    "type": "boolean",
+                    "description": "source=history 时是否包含窗口内消息为 0 的成员，默认 false。",
+                    "default": false
                 },
                 "count": {
                     "type": "integer",

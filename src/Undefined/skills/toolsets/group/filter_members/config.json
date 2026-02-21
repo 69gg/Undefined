@@ -1,0 +1,91 @@
+{
+    "type": "function",
+    "function": {
+        "name": "filter_members",
+        "description": "多条件筛选群成员（成员数据来自 OneBot get_group_member_list）。支持按角色、等级区间/正则、入群时间、最近发言时间、昵称关键词、头衔关键词进行筛选，并支持排序与分页。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "群号。如果已在群聊中，通常会自动获取。"
+                },
+                "role": {
+                    "type": "string",
+                    "description": "按角色筛选：owner(群主), admin(管理员), member(普通成员)。",
+                    "enum": [
+                        "owner",
+                        "admin",
+                        "member"
+                    ]
+                },
+                "level_min": {
+                    "type": "integer",
+                    "description": "等级下限（包含）。"
+                },
+                "level_max": {
+                    "type": "integer",
+                    "description": "等级上限（包含）。"
+                },
+                "level_regex": {
+                    "type": "string",
+                    "description": "等级字段正则匹配（如 ^\\d+$）。"
+                },
+                "join_start_time": {
+                    "type": "string",
+                    "description": "入群开始时间，格式：YYYY-MM-DD HH:MM:SS"
+                },
+                "join_end_time": {
+                    "type": "string",
+                    "description": "入群结束时间，格式：YYYY-MM-DD HH:MM:SS"
+                },
+                "active_within_days": {
+                    "type": "integer",
+                    "description": "筛选最近 N 天内有发言的成员。"
+                },
+                "inactive_over_days": {
+                    "type": "integer",
+                    "description": "筛选超过 N 天未发言（含从未发言）的成员。"
+                },
+                "name_keyword": {
+                    "type": "string",
+                    "description": "昵称关键词（匹配群昵称或QQ昵称）。"
+                },
+                "title_keyword": {
+                    "type": "string",
+                    "description": "头衔关键词。"
+                },
+                "sort_by": {
+                    "type": "string",
+                    "description": "排序字段，默认 last_sent_time。",
+                    "enum": [
+                        "last_sent_time",
+                        "join_time",
+                        "level",
+                        "user_id"
+                    ],
+                    "default": "last_sent_time"
+                },
+                "sort_order": {
+                    "type": "string",
+                    "description": "排序方向：asc 或 desc，默认 desc。",
+                    "enum": [
+                        "asc",
+                        "desc"
+                    ],
+                    "default": "desc"
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "分页偏移量，默认 0。",
+                    "default": 0
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "返回条数，默认 20，最大 200。",
+                    "default": 20
+                }
+            }
+        }
+    }
+}

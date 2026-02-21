@@ -1,6 +1,7 @@
 """消息处理和命令分发"""
 
 import asyncio
+from dataclasses import dataclass
 import logging
 import os
 import random
@@ -38,6 +39,26 @@ logger = logging.getLogger(__name__)
 KEYWORD_REPLY_HISTORY_PREFIX = "[系统关键词自动回复] "
 
 
+def _format_poke_history_text(display_name: str, user_id: int) -> str:
+    """格式化拍一拍历史文本。"""
+    return f"{display_name}(暱称)[{user_id}(QQ号)] 拍了拍你。"
+
+
+@dataclass(frozen=True)
+class PrivatePokeRecord:
+    poke_text: str
+    sender_name: str
+
+
+@dataclass(frozen=True)
+class GroupPokeRecord:
+    poke_text: str
+    sender_name: str
+    group_name: str
+    sender_role: str
+    sender_title: str
+
+
 class MessageHandler:
     """消息处理器"""
 
@@ -54,7 +75,7 @@ class MessageHandler:
         self.ai = ai
         self.faq_storage = faq_storage
         # 初始化工具组件
-        self.history_manager = MessageHistoryManager()
+        self.history_manager = MessageHistoryManager(config.history_max_records)
         self.sender = MessageSender(onebot, self.history_manager, config.bot_qq, config)
 
         # 初始化服务
@@ -144,15 +165,23 @@ class MessageHandler:
             logger.debug("[通知] 拍一拍事件数据: %s", str(event)[:200])
 
             if poke_group_id == 0:
+                private_poke = await self._record_private_poke_history(
+                    poke_sender_id, event
+                )
                 logger.info("[通知] 私聊拍一拍，触发私聊回复")
                 await self.ai_coordinator.handle_private_reply(
                     poke_sender_id,
-                    "(拍了拍你)",
+                    private_poke.poke_text,
                     [],
                     is_poke=True,
-                    sender_name=str(poke_sender_id),
+                    sender_name=private_poke.sender_name,
                 )
             else:
+                group_poke = await self._record_group_poke_history(
+                    poke_group_id,
+                    poke_sender_id,
+                    event,
+                )
                 logger.info(
                     "[通知] 群聊拍一拍，触发群聊回复: group=%s",
                     poke_group_id,
@@ -160,11 +189,13 @@ class MessageHandler:
                 await self.ai_coordinator.handle_auto_reply(
                     poke_group_id,
                     poke_sender_id,
-                    "(拍了拍你)",
+                    group_poke.poke_text,
                     [],
                     is_poke=True,
-                    sender_name=str(poke_sender_id),
-                    group_name=str(poke_group_id),
+                    sender_name=group_poke.sender_name,
+                    group_name=group_poke.group_name,
+                    sender_role=group_poke.sender_role,
+                    sender_title=group_poke.sender_title,
                 )
             return
 
@@ -172,6 +203,7 @@ class MessageHandler:
         if event.get("message_type") == "private":
             private_sender_id: int = get_message_sender_id(event)
             private_message_content: list[dict[str, Any]] = get_message_content(event)
+            trigger_message_id = event.get("message_id")
 
             # 会话白名单：不在允许列表则忽略（不入历史、不触发任何处理）
             if not self.config.is_private_allowed(private_sender_id):
@@ -263,6 +295,7 @@ class MessageHandler:
                 text,
                 private_message_content,
                 sender_name=user_name,
+                trigger_message_id=trigger_message_id,
             )
             return
 
@@ -273,6 +306,7 @@ class MessageHandler:
         group_id: int = event.get("group_id", 0)
         sender_id: int = get_message_sender_id(event)
         message_content: list[dict[str, Any]] = get_message_content(event)
+        trigger_message_id = event.get("message_id")
 
         # 会话白名单：不在允许列表则忽略（不入历史、不触发任何处理）
         if not self.config.is_group_allowed(group_id):
@@ -352,7 +386,16 @@ class MessageHandler:
         # 关键词自动回复：心理委员 (使用原始消息内容提取文本，保证关键词触发不受影响)
         if self.config.keyword_reply_enabled and matches_xinliweiyuan(text):
             rand_val = random.random()
-            if rand_val < 0.1:  # 10% 发送图片
+            if rand_val < 0.01:  # 1% 飞起来
+                message = f"[@{sender_id}] 再发让你飞起来"
+                logger.info("关键词回复: 再发让你飞起来")
+                await self.sender.send_group_message(
+                    group_id,
+                    message,
+                    history_prefix=KEYWORD_REPLY_HISTORY_PREFIX,
+                )
+                return
+            elif rand_val < 0.11:  # 10% 发送图片
                 try:
                     image_path = str(resolve_resource_path("img/xlwy.jpg").resolve())
                 except Exception:
@@ -410,6 +453,128 @@ class MessageHandler:
             message_content,
             sender_name=display_name,
             group_name=group_name,
+            sender_role=sender_role,
+            sender_title=sender_title,
+            trigger_message_id=trigger_message_id,
+        )
+
+    async def _record_private_poke_history(
+        self, user_id: int, event: dict[str, Any]
+    ) -> PrivatePokeRecord:
+        """记录私聊拍一拍到历史。"""
+        sender = event.get("sender", {})
+        sender_nickname = ""
+        if isinstance(sender, dict):
+            sender_nickname = str(sender.get("nickname", "")).strip()
+
+        user_name = sender_nickname
+        if not user_name:
+            try:
+                user_info = await self.onebot.get_stranger_info(user_id)
+                if isinstance(user_info, dict):
+                    user_name = str(user_info.get("nickname", "")).strip()
+            except Exception as exc:
+                logger.warning(
+                    "[通知] 获取私聊拍一拍用户昵称失败: user=%s err=%s",
+                    user_id,
+                    exc,
+                )
+
+        display_name = sender_nickname or user_name or f"QQ{user_id}"
+        normalized_user_name = user_name or display_name
+        poke_text = _format_poke_history_text(display_name, user_id)
+
+        try:
+            await self.history_manager.add_private_message(
+                user_id=user_id,
+                text_content=poke_text,
+                display_name=display_name,
+                user_name=normalized_user_name,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[历史记录] 写入私聊拍一拍失败: user=%s err=%s",
+                user_id,
+                exc,
+            )
+        return PrivatePokeRecord(poke_text=poke_text, sender_name=display_name)
+
+    async def _record_group_poke_history(
+        self,
+        group_id: int,
+        sender_id: int,
+        event: dict[str, Any],
+    ) -> GroupPokeRecord:
+        """记录群聊拍一拍到历史。"""
+        sender = event.get("sender", {})
+        sender_card = ""
+        sender_nickname = ""
+        sender_role = "member"
+        sender_title = ""
+        if isinstance(sender, dict):
+            sender_card = str(sender.get("card", "")).strip()
+            sender_nickname = str(sender.get("nickname", "")).strip()
+            sender_role = str(sender.get("role", "member")).strip() or "member"
+            sender_title = str(sender.get("title", "")).strip()
+
+        if not sender_card and not sender_nickname:
+            try:
+                member_info = await self.onebot.get_group_member_info(
+                    group_id, sender_id
+                )
+                if isinstance(member_info, dict):
+                    sender_card = str(member_info.get("card", "")).strip()
+                    sender_nickname = str(member_info.get("nickname", "")).strip()
+                    sender_role = (
+                        str(member_info.get("role", "member")).strip() or "member"
+                    )
+                    sender_title = str(member_info.get("title", "")).strip()
+            except Exception as exc:
+                logger.warning(
+                    "[通知] 获取拍一拍群成员信息失败: group=%s user=%s err=%s",
+                    group_id,
+                    sender_id,
+                    exc,
+                )
+
+        group_name = ""
+        try:
+            group_info = await self.onebot.get_group_info(group_id)
+            if isinstance(group_info, dict):
+                group_name = str(group_info.get("group_name", "")).strip()
+        except Exception as exc:
+            logger.warning(
+                "[通知] 获取拍一拍群名失败: group=%s err=%s",
+                group_id,
+                exc,
+            )
+
+        display_name = sender_card or sender_nickname or f"QQ{sender_id}"
+        poke_text = _format_poke_history_text(display_name, sender_id)
+        normalized_group_name = group_name or f"群{group_id}"
+
+        try:
+            await self.history_manager.add_group_message(
+                group_id=group_id,
+                sender_id=sender_id,
+                text_content=poke_text,
+                sender_card=sender_card,
+                sender_nickname=sender_nickname,
+                group_name=normalized_group_name,
+                role=sender_role,
+                title=sender_title,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[历史记录] 写入群聊拍一拍失败: group=%s sender=%s err=%s",
+                group_id,
+                sender_id,
+                exc,
+            )
+        return GroupPokeRecord(
+            poke_text=poke_text,
+            sender_name=display_name,
+            group_name=normalized_group_name,
             sender_role=sender_role,
             sender_title=sender_title,
         )
