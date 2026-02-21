@@ -88,6 +88,7 @@ class EmbeddingModelConfig:
     api_key: str
     model_name: str
     queue_interval_seconds: float = 1.0
+    dimensions: int | None = None
 
 
 @dataclass

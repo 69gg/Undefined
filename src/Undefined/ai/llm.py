@@ -13,7 +13,13 @@ from typing import Any
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 import httpx
-from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncOpenAI,
+    NOT_GIVEN,
+)
 
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.ai.tokens import TokenCounter
@@ -1002,6 +1008,7 @@ class ModelRequester:
         response = await client.embeddings.create(
             model=model_config.model_name,
             input=texts,
+            dimensions=model_config.dimensions or NOT_GIVEN,  # type: ignore[arg-type]
         )
         return [item.embedding for item in response.data]
 

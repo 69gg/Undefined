@@ -1317,6 +1317,10 @@ class Config:
                 ),
                 1.0,
             ),
+            dimensions=_coerce_int(
+                _get_value(data, ("models", "embedding", "dimensions"), None), 0
+            )
+            or None,
         )
 
     @staticmethod

@@ -32,6 +32,7 @@ api_url = "https://api.openai.com/v1"
 api_key = "sk-xxx"
 model_name = "text-embedding-3-small"
 queue_interval_seconds = 1.0      # 发车间隔（秒）
+dimensions = 512                  # 向量维度（可选，0或不填则使用模型默认值）
 
 [knowledge]
 enabled = true
