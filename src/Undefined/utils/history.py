@@ -22,6 +22,8 @@ def _extract_id_from_history_filename(path: str, prefix: str) -> str:
 class MessageHistoryManager:
     """消息历史管理器（异步，Lazy Load）"""
 
+    _max_records: int = 10000
+
     def __init__(self, max_records: int = 10000) -> None:
         self._max_records = max_records
         self._message_history: dict[str, list[dict[str, Any]]] = {}
