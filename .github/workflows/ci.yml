@@ -46,6 +46,14 @@ jobs:
       - name: Run Mypy
         run: uv run mypy .
 
+      - name: Cache Pytest
+        uses: actions/cache@v4
+        with:
+          path: .pytest_cache
+          key: ${{ runner.os }}-pytest-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pytest-
+
       - name: Run Tests
         run: uv run pytest tests/
 
