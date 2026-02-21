@@ -225,6 +225,27 @@ def _resolve_bot_qq(context: Dict[str, Any]) -> int:
         return 0
 
 
+def _group_access_error(runtime_config: Any, group_id: int) -> str:
+    reason_getter = getattr(runtime_config, "group_access_denied_reason", None)
+    reason = reason_getter(group_id) if callable(reason_getter) else None
+    if reason == "blacklist":
+        return (
+            f"发送失败：目标群 {group_id} 在黑名单内（access.blocked_group_ids），"
+            "已被访问控制拦截"
+        )
+    return (
+        f"发送失败：目标群 {group_id} 不在允许列表内（access.allowed_group_ids），"
+        "已被访问控制拦截"
+    )
+
+
+def _private_access_error(user_id: int) -> str:
+    return (
+        f"发送失败：目标用户 {user_id} 不在允许列表内（access.allowed_private_ids），"
+        "已被访问控制拦截"
+    )
+
+
 async def _record_poke_history_if_needed(
     context: Dict[str, Any],
     target_type: TargetType,
@@ -290,11 +311,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     runtime_config = context.get("runtime_config")
     if runtime_config is not None:
         if target_type == "group" and not runtime_config.is_group_allowed(target_id):
-            return f"发送失败：目标群 {target_id} 不在允许列表内（access.allowed_group_ids），已被访问控制拦截"
+            return _group_access_error(runtime_config, target_id)
         if target_type == "private" and not runtime_config.is_private_allowed(
             target_user_id
         ):
-            return f"发送失败：目标用户 {target_user_id} 不在允许列表内（access.allowed_private_ids），已被访问控制拦截"
+            return _private_access_error(target_user_id)
 
     sender = context.get("sender")
     if sender is not None:
@@ -330,8 +351,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 target_user_id,
             )
             if target_type == "group":
-                return f"发送失败：目标群 {target_id} 不在允许列表内（access.allowed_group_ids），已被访问控制拦截"
-            return f"发送失败：目标用户 {target_user_id} 不在允许列表内（access.allowed_private_ids），已被访问控制拦截"
+                return _group_access_error(runtime_config, target_id)
+            return _private_access_error(target_user_id)
         except Exception as e:
             logger.exception(
                 "[拍一拍] sender 发送失败: request_id=%s target_type=%s target_id=%s user=%s err=%s",

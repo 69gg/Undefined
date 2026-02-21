@@ -12,6 +12,18 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _group_access_error(runtime_config: Any, group_id: int) -> str:
+    reason_getter = getattr(runtime_config, "group_access_denied_reason", None)
+    reason = reason_getter(group_id) if callable(reason_getter) else None
+    if reason == "blacklist":
+        return f"上传失败：目标群 {group_id} 在黑名单内（access.blocked_group_ids）"
+    return f"上传失败：目标群 {group_id} 不在允许列表内（access.allowed_group_ids）"
+
+
+def _private_access_error(user_id: int) -> str:
+    return f"上传失败：目标用户 {user_id} 不在允许列表内（access.allowed_private_ids）"
+
+
 def _should_exclude(rel_path: str, patterns: list[str]) -> bool:
     """检查路径是否匹配任一排除模式。"""
     for pattern in patterns:
@@ -113,9 +125,21 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     onebot_client = context.get("onebot_client")
     target_type: str = context.get("target_type", "")
     target_id: int = context.get("target_id", 0)
+    runtime_config = context.get("runtime_config") or context.get("config")
 
     upload_status = "未上传"
-    if onebot_client and target_type and target_id:
+    access_error: str | None = None
+    if runtime_config is not None:
+        if target_type == "group" and not runtime_config.is_group_allowed(target_id):
+            access_error = _group_access_error(runtime_config, target_id)
+        if target_type == "private" and not runtime_config.is_private_allowed(
+            target_id
+        ):
+            access_error = _private_access_error(target_id)
+
+    if access_error is not None:
+        upload_status = access_error
+    elif onebot_client and target_type and target_id:
         try:
             abs_path = str(archive_path.resolve())
             if target_type == "group":

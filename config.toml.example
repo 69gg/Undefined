@@ -29,12 +29,16 @@ context_recent_messages_limit = 20
 # en: Max retries for failed model API requests (0=no retry, default 2, max 5). Failed requests are re-queued with highest priority.
 ai_request_max_retries = 2
 
-# zh: 会话白名单（访问控制）。只要本段任一列表非空，系统将进入“限制模式”：未在白名单内的群/私聊会被忽略，且所有消息发送将被拦截。
-# en: Session allowlist (access control). If either the group or private allowlist is non-empty, the bot enters "allowlist mode": groups or private chats not in the allowlists will be ignored and outgoing messages will be blocked.
+# zh: 访问控制（白名单 + 群黑名单）。群黑名单优先级高于白名单；命中黑名单的群会被直接忽略并拦截发送。
+# en: Access control (allowlist + group blacklist). Group blacklist has higher priority than allowlist; blocked groups are always ignored and outgoing sends are denied.
 [access]
 # zh: 允许处理/发送的群号白名单（留空 = 不限制）。
 # en: Allowed group IDs. Empty = no restriction.
 allowed_group_ids = []
+
+# zh: 禁止处理/发送的群号黑名单（优先级高于 allowed_group_ids）。
+# en: Blocked group IDs. Higher priority than allowed_group_ids.
+blocked_group_ids = []
 
 # zh: 允许处理/发送的私聊 QQ 白名单（留空 = 不限制）。
 # en: Allowed private-chat user IDs. Empty = no restriction.

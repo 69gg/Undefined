@@ -350,8 +350,10 @@ class Config:
     bot_qq: int
     superadmin_qq: int
     admin_qqs: list[int]
-    # 访问控制（会话白名单）：任一列表非空即启用限制模式
+    # 访问控制（会话白名单 + 群黑名单）
     allowed_group_ids: list[int]
+    # 群聊黑名单：命中后直接拒绝（优先级高于白名单）
+    blocked_group_ids: list[int]
     allowed_private_ids: list[int]
     # 是否允许超级管理员在私聊中绕过 allowed_private_ids（仅私聊收发）
     superadmin_bypass_allowlist: bool
@@ -447,6 +449,11 @@ class Config:
         init=False,
         repr=False,
     )
+    _blocked_group_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
     _allowed_private_ids_set: set[int] = dataclass_field(
         default_factory=set,
         init=False,
@@ -466,6 +473,7 @@ class Config:
     def __post_init__(self) -> None:
         # 访问控制白名单属于高频热路径，启动后缓存为 set 降低重复构建开销。
         self._allowed_group_ids_set = {int(item) for item in self.allowed_group_ids}
+        self._blocked_group_ids_set = {int(item) for item in self.blocked_group_ids}
         self._allowed_private_ids_set = {int(item) for item in self.allowed_private_ids}
         self._bilibili_group_ids_set = {
             int(item) for item in self.bilibili_auto_extract_group_ids
@@ -591,6 +599,9 @@ class Config:
 
         allowed_group_ids = _coerce_int_list(
             _get_value(data, ("access", "allowed_group_ids"), "ALLOWED_GROUP_IDS")
+        )
+        blocked_group_ids = _coerce_int_list(
+            _get_value(data, ("access", "blocked_group_ids"), "BLOCKED_GROUP_IDS")
         )
         allowed_private_ids = _coerce_int_list(
             _get_value(data, ("access", "allowed_private_ids"), "ALLOWED_PRIVATE_IDS")
@@ -1015,6 +1026,7 @@ class Config:
             superadmin_qq=superadmin_qq,
             admin_qqs=admin_qqs,
             allowed_group_ids=allowed_group_ids,
+            blocked_group_ids=blocked_group_ids,
             allowed_private_ids=allowed_private_ids,
             superadmin_bypass_allowlist=superadmin_bypass_allowlist,
             forward_proxy_qq=forward_proxy_qq,
@@ -1108,33 +1120,59 @@ class Config:
         """兼容旧字段名，等价于 bilibili_cookie。"""
         return self.bilibili_cookie
 
-    def access_control_enabled(self) -> bool:
-        """是否启用会话白名单限制。
-
-        规则：allowed_group_ids 或 allowed_private_ids 任一非空即启用。
-        """
+    def allowlist_mode_enabled(self) -> bool:
+        """是否启用白名单限制模式。"""
 
         return bool(self.allowed_group_ids) or bool(self.allowed_private_ids)
+
+    def access_control_enabled(self) -> bool:
+        """是否启用访问控制（白名单或群黑名单）。"""
+
+        return self.allowlist_mode_enabled() or bool(self.blocked_group_ids)
+
+    def group_access_denied_reason(self, group_id: int) -> str | None:
+        """群聊访问被拒绝原因。
+
+        返回:
+            - "blacklist": 命中 access.blocked_group_ids
+            - "allowlist": 白名单模式下不在 access.allowed_group_ids
+            - None: 允许访问
+        """
+
+        normalized_group_id = int(group_id)
+        if normalized_group_id in self._blocked_group_ids_set:
+            return "blacklist"
+        if not self.allowlist_mode_enabled():
+            return None
+        if normalized_group_id not in self._allowed_group_ids_set:
+            return "allowlist"
+        return None
 
     def is_group_allowed(self, group_id: int) -> bool:
         """群聊是否允许收发消息。"""
 
-        if not self.access_control_enabled():
-            return True
-        return int(group_id) in self._allowed_group_ids_set
+        return self.group_access_denied_reason(group_id) is None
+
+    def private_access_denied_reason(self, user_id: int) -> str | None:
+        """私聊访问被拒绝原因。"""
+
+        normalized_user_id = int(user_id)
+        if not self.allowlist_mode_enabled():
+            return None
+        if (
+            self.superadmin_bypass_allowlist
+            and normalized_user_id == int(self.superadmin_qq)
+            and self.superadmin_qq > 0
+        ):
+            return None
+        if normalized_user_id not in self._allowed_private_ids_set:
+            return "allowlist"
+        return None
 
     def is_private_allowed(self, user_id: int) -> bool:
         """私聊是否允许收发消息。"""
 
-        if not self.access_control_enabled():
-            return True
-        if (
-            self.superadmin_bypass_allowlist
-            and int(user_id) == int(self.superadmin_qq)
-            and self.superadmin_qq > 0
-        ):
-            return True
-        return int(user_id) in self._allowed_private_ids_set
+        return self.private_access_denied_reason(user_id) is None
 
     def is_bilibili_auto_extract_allowed_group(self, group_id: int) -> bool:
         """群聊是否允许 bilibili 自动提取。"""

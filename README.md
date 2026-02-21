@@ -79,7 +79,7 @@
 - **Skills 热重载**：自动扫描 `skills/` 目录，检测到变更后即时重载工具与 Agent，无需重启服务。
 - **配置热更新 + WebUI**：使用 `config.toml` 配置，支持热更新；提供 WebUI 在线编辑与校验。
 - **多模型池**：支持配置多个 AI 模型，可轮询、随机选择或用户指定；支持多模型并发比较，选择最佳结果继续对话。详见 [多模型功能文档](docs/multi-model.md)。
-- **会话白名单（群/私聊）**：只需配置 `access.allowed_group_ids` / `access.allowed_private_ids` 两个列表，即可把机器人"锁"在指定群与指定私聊里；避免被拉进陌生群误触发、也避免工具/定时任务把消息误发到不该去的地方（默认留空不限制）。
+- **访问控制（群/私聊）**：支持 `access.allowed_group_ids` / `access.allowed_private_ids` 白名单 + `access.blocked_group_ids` 群黑名单；可把机器人锁在指定会话，并对高风险群做硬拦截（黑名单优先级高于白名单）。
 - **并行工具执行**：无论是主 AI 还是子 Agent，均支持 `asyncio` 并发工具调用，大幅提升多任务处理速度（如同时读取多个文件或搜索多个关键词）。
 - **智能 Agent 矩阵**：内置多个专业 Agent，分工协作处理复杂任务。
 - **callable.json 共享机制**：通过简单的配置文件（`callable.json`）即可让 Agent 互相调用、将 `skills/tools/` 或 `skills/toolsets/` 下的工具按白名单暴露给 Agent，支持细粒度访问控制，实现复杂的多 Agent 协作场景。
@@ -476,11 +476,12 @@ uv run Undefined-webui
   - `process_private_message`：是否处理私聊消息；关闭后仅记录私聊历史，不触发 AI 回复
   - `process_poke_message`：是否响应拍一拍事件
   - `context_recent_messages_limit`：注入给模型的最近历史消息条数上限（`0-200`，`0` 表示不注入）
-- **会话白名单（推荐）**：`[access]`
+- **访问控制（推荐）**：`[access]`
   - `allowed_group_ids`：允许处理/发送消息的群号列表
+  - `blocked_group_ids`：禁止处理/发送消息的群号列表（优先级高于 `allowed_group_ids`）
   - `allowed_private_ids`：允许处理/发送消息的私聊 QQ 列表
   - `superadmin_bypass_allowlist`：超级管理员是否可在私聊中绕过 `allowed_private_ids`（仅影响私聊收发；群聊仍严格按 `allowed_group_ids`）
-  - 规则：只要 `allowed_group_ids` 或 `allowed_private_ids` 任一非空，就会启用限制模式；未在白名单内的群/私聊消息将被直接忽略，且所有消息发送也会被拦截（包括工具调用与定时任务）。
+  - 规则：群黑名单 `blocked_group_ids` 始终优先；命中即拦截。白名单限制模式仍保持原规则：`allowed_group_ids` 或 `allowed_private_ids` 任一非空时启用，未在白名单内的群/私聊消息将被忽略，且发送也会被拦截（包括工具调用与定时任务）。
 - **模型配置**：`[models.chat]` / `[models.vision]` / `[models.agent]` / `[models.security]`
   - `api_url`：OpenAI 兼容 **base URL**（如 `https://api.openai.com/v1` / `http://127.0.0.1:8000/v1`）
   - `models.security.enabled`：是否启用安全模型检测（默认开启）
@@ -532,6 +533,13 @@ WebUI 支持：配置分组表单快速编辑、Diff 预览、日志尾部查看
 allowed_group_ids = [123456789, 987654321]
 allowed_private_ids = [1122334455]
 superadmin_bypass_allowlist = true
+```
+
+如果你只想屏蔽部分群（其余群照常工作）：
+
+```toml
+[access]
+blocked_group_ids = [123456789, 987654321]
 ```
 
 > 启动项目需要 OneBot 协议端，推荐使用 [NapCat](https://napneko.github.io/) 或 [Lagrange.Core](https://github.com/LagrangeDev/Lagrange.Core)。

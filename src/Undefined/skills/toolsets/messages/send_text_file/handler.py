@@ -349,6 +349,18 @@ async def _cleanup_directory(path: Path) -> None:
     await asyncio.to_thread(sync_cleanup)
 
 
+def _group_access_error(runtime_config: Any, group_id: int) -> str:
+    reason_getter = getattr(runtime_config, "group_access_denied_reason", None)
+    reason = reason_getter(group_id) if callable(reason_getter) else None
+    if reason == "blacklist":
+        return f"发送失败：目标群 {group_id} 在黑名单内（access.blocked_group_ids）"
+    return f"发送失败：目标群 {group_id} 不在允许列表内（access.allowed_group_ids）"
+
+
+def _private_access_error(user_id: int) -> str:
+    return f"发送失败：目标用户 {user_id} 不在允许列表内（access.allowed_private_ids）"
+
+
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """发送单文件文本内容到群聊或私聊。"""
     request_id = str(context.get("request_id", "-"))
@@ -395,11 +407,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     if runtime_config is not None:
         if target_type == "group" and not runtime_config.is_group_allowed(target_id):
-            return f"发送失败：目标群 {target_id} 不在允许列表内（access.allowed_group_ids）"
+            return _group_access_error(runtime_config, target_id)
         if target_type == "private" and not runtime_config.is_private_allowed(
             target_id
         ):
-            return f"发送失败：目标用户 {target_id} 不在允许列表内（access.allowed_private_ids）"
+            return _private_access_error(target_id)
 
     send_file_callable, history_recorded_by_sender, sender_error = (
         _resolve_file_send_callable(context, target_type)
