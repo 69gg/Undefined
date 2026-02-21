@@ -147,7 +147,9 @@ class KnowledgeManager:
     ) -> list[dict[str, Any]]:
         """在指定知识库中语义搜索。"""
         k = top_k or self._default_top_k
-        query_emb = (await self._embedder.embed([query]))[0]
+        instruction = getattr(self._embedder._config, "query_instruction", "")
+        query_input = f"{instruction}{query}" if instruction else query
+        query_emb = (await self._embedder.embed([query_input]))[0]
         return await self._get_store(kb_name).query(query_emb, k)
 
     def start_auto_scan(self, interval: float) -> None:

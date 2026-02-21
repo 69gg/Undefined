@@ -33,6 +33,7 @@ api_key = "sk-xxx"
 model_name = "text-embedding-3-small"
 queue_interval_seconds = 1.0      # 发车间隔（秒）
 dimensions = 512                  # 向量维度（可选，0或不填则使用模型默认值）
+query_instruction = ""            # 查询端指令前缀（Qwen3-Embedding 等模型需要）
 
 [knowledge]
 enabled = true

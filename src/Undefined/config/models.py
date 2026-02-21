@@ -89,6 +89,7 @@ class EmbeddingModelConfig:
     model_name: str
     queue_interval_seconds: float = 1.0
     dimensions: int | None = None
+    query_instruction: str = ""  # 查询端指令前缀（如 Qwen3-Embedding 需要）
 
 
 @dataclass

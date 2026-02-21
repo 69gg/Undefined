@@ -1321,6 +1321,9 @@ class Config:
                 _get_value(data, ("models", "embedding", "dimensions"), None), 0
             )
             or None,
+            query_instruction=_coerce_str(
+                _get_value(data, ("models", "embedding", "query_instruction"), None), ""
+            ),
         )
 
     @staticmethod
