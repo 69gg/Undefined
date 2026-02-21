@@ -29,9 +29,13 @@ context_recent_messages_limit = 20
 # en: Max retries for failed model API requests (0=no retry, default 2, max 5). Failed requests are re-queued with highest priority.
 ai_request_max_retries = 2
 
-# zh: 访问控制（白名单 + 群黑名单）。群黑名单优先级高于白名单；命中黑名单的群会被直接忽略并拦截发送。
-# en: Access control (allowlist + group blacklist). Group blacklist has higher priority than allowlist; blocked groups are always ignored and outgoing sends are denied.
+# zh: 访问控制。mode 可选：off（不启用）/ blacklist（按黑名单）/ allowlist（按白名单）。
+# en: Access control. mode options: off (disabled) / blacklist / allowlist.
 [access]
+# zh: 访问控制模式：off / blacklist / allowlist。
+# en: Access control mode: off / blacklist / allowlist.
+mode = "off"
+
 # zh: 允许处理/发送的群号白名单（留空 = 不限制）。
 # en: Allowed group IDs. Empty = no restriction.
 allowed_group_ids = []
@@ -44,9 +48,17 @@ blocked_group_ids = []
 # en: Allowed private-chat user IDs. Empty = no restriction.
 allowed_private_ids = []
 
+# zh: 禁止处理/发送的私聊 QQ 黑名单（blacklist 模式生效）。
+# en: Blocked private-chat user IDs (effective in blacklist mode).
+blocked_private_ids = []
+
 # zh: 超级管理员是否可在私聊中绕过 "allowed_private_ids"（仅影响私聊收发；群聊仍严格按 "allowed_group_ids"）。
 # en: Allow superadmin to bypass "allowed_private_ids" for private chats only.
 superadmin_bypass_allowlist = true
+
+# zh: 超级管理员是否可在私聊中绕过 "blocked_private_ids"（仅影响私聊收发）。
+# en: Allow superadmin to bypass "blocked_private_ids" for private chats only.
+superadmin_bypass_private_blacklist = false
 
 # zh: OneBot WebSocket 配置。
 # en: OneBot WebSocket settings.

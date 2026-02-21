@@ -20,7 +20,11 @@ def _group_access_error(runtime_config: Any, group_id: int) -> str:
     return f"上传失败：目标群 {group_id} 不在允许列表内（access.allowed_group_ids）"
 
 
-def _private_access_error(user_id: int) -> str:
+def _private_access_error(runtime_config: Any, user_id: int) -> str:
+    reason_getter = getattr(runtime_config, "private_access_denied_reason", None)
+    reason = reason_getter(user_id) if callable(reason_getter) else None
+    if reason == "blacklist":
+        return f"上传失败：目标用户 {user_id} 在黑名单内（access.blocked_private_ids）"
     return f"上传失败：目标用户 {user_id} 不在允许列表内（access.allowed_private_ids）"
 
 
@@ -135,7 +139,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         if target_type == "private" and not runtime_config.is_private_allowed(
             target_id
         ):
-            access_error = _private_access_error(target_id)
+            access_error = _private_access_error(runtime_config, target_id)
 
     if access_error is not None:
         upload_status = access_error
