@@ -627,7 +627,7 @@ class AgentToolRegistry(BaseRegistry):
                 mode = None
 
         mode_text = str(mode).strip().lower() if mode is not None else "none"
-        if mode_text not in {"agent", "tools", "all", "clean"}:
+        if mode_text not in {"agent", "all", "clean"}:
             return
 
         if mode_text == "clean" and context.get("easter_egg_silent"):
