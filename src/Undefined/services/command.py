@@ -95,7 +95,7 @@ class CommandDispatcher:
         返回:
             包含命令名(name)和参数列表(args)的字典，解析失败则返回 None
         """
-        clean_text = re.sub(r"\[@\s*\d+\]", "", text).strip()
+        clean_text = re.sub(r"\[@\s*\d+(?:\(.*?\))?\]", "", text).strip()
         match = re.match(r"/(\w+)\s*(.*)", clean_text)
         if not match:
             return None
