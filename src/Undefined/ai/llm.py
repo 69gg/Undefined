@@ -22,6 +22,7 @@ from Undefined.config import (
     VisionModelConfig,
     AgentModelConfig,
     SecurityModelConfig,
+    EmbeddingModelConfig,
     Config,
     get_config,
 )
@@ -32,7 +33,11 @@ from Undefined.utils.tool_calls import normalize_tool_arguments_json
 logger = logging.getLogger(__name__)
 
 ModelConfig = (
-    ChatModelConfig | VisionModelConfig | AgentModelConfig | SecurityModelConfig
+    ChatModelConfig
+    | VisionModelConfig
+    | AgentModelConfig
+    | SecurityModelConfig
+    | EmbeddingModelConfig
 )
 
 __all__ = ["ModelRequester", "build_request_body", "ModelConfig"]
@@ -982,6 +987,24 @@ class ModelRequester:
         response = await client.chat.completions.create(**params)
         return self._response_to_dict(response)
 
+    async def embed(
+        self,
+        model_config: EmbeddingModelConfig,
+        texts: list[str],
+    ) -> list[list[float]]:
+        """调用 OpenAI 兼容的嵌入 API，返回向量列表。"""
+        base_url, default_query, _ = _normalize_openai_base_url(model_config.api_url)
+        client = self._get_openai_client(
+            base_url=base_url,
+            api_key=model_config.api_key,
+            default_query=default_query,
+        )
+        response = await client.embeddings.create(
+            model=model_config.model_name,
+            input=texts,
+        )
+        return [item.embedding for item in response.data]
+
     def _get_openai_client(
         self, base_url: str, api_key: str, default_query: dict[str, object] | None
     ) -> AsyncOpenAI:
@@ -1125,10 +1148,12 @@ def build_request_body(
         else:
             extra_kwargs["thinking"] = normalized
 
-    if model_config.thinking_enabled:
+    if getattr(model_config, "thinking_enabled", False):
         thinking_param: dict[str, Any] = {"type": "enabled"}
         if getattr(model_config, "thinking_include_budget", True):
-            thinking_param["budget_tokens"] = model_config.thinking_budget_tokens
+            thinking_param["budget_tokens"] = getattr(
+                model_config, "thinking_budget_tokens", 0
+            )
         body["thinking"] = thinking_param
 
     if tools:

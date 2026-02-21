@@ -7,6 +7,7 @@ from .manager import ConfigManager
 from .models import (
     AgentModelConfig,
     ChatModelConfig,
+    EmbeddingModelConfig,
     ModelPool,
     ModelPoolEntry,
     SecurityModelConfig,
@@ -19,6 +20,7 @@ __all__ = [
     "VisionModelConfig",
     "SecurityModelConfig",
     "AgentModelConfig",
+    "EmbeddingModelConfig",
     "ModelPool",
     "ModelPoolEntry",
     "get_config",

@@ -1,0 +1,1 @@
+{"type":"function","function":{"name":"knowledge_list","description":"列出所有可用的知识库名称。","parameters":{"type":"object","properties":{},"required":[]}}}

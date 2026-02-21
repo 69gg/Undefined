@@ -1,0 +1,1 @@
+{"type":"function","function":{"name":"knowledge_semantic_search","description":"在指定知识库中以语义相似度搜索相关内容。","parameters":{"type":"object","properties":{"knowledge_base":{"type":"string","description":"知识库名称"},"query":{"type":"string","description":"查询文本"},"top_k":{"type":"integer","description":"返回结果数量，默认5"}},"required":["knowledge_base","query"]}}}

@@ -81,6 +81,16 @@ class SecurityModelConfig:
 
 
 @dataclass
+class EmbeddingModelConfig:
+    """嵌入模型配置"""
+
+    api_url: str
+    api_key: str
+    model_name: str
+    queue_interval_seconds: float = 1.0
+
+
+@dataclass
 class AgentModelConfig:
     """Agent 模型配置（用于执行 agents）"""
 

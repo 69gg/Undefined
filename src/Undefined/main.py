@@ -201,6 +201,25 @@ async def main() -> None:
         )
         faq_storage = FAQStorage()
 
+        if config.knowledge_enabled:
+            from Undefined.knowledge import Embedder, KnowledgeManager
+
+            _embedder = Embedder(
+                ai._requester,
+                config.embedding_model,
+                batch_size=config.knowledge_embed_batch_size,
+            )
+            _embedder.start()
+            knowledge_manager = KnowledgeManager(
+                base_dir=config.knowledge_base_dir,
+                embedder=_embedder,
+                default_top_k=config.knowledge_default_top_k,
+            )
+            ai.set_knowledge_manager(knowledge_manager)
+            if config.knowledge_auto_scan and config.knowledge_auto_embed:
+                knowledge_manager.start_auto_scan(config.knowledge_scan_interval)
+            logger.info("[知识库] 初始化完成: base_dir=%s", config.knowledge_base_dir)
+
         handler = MessageHandler(config, onebot, ai, faq_storage, task_storage)
         onebot.set_message_handler(handler.handle_message)
         elapsed = time.perf_counter() - init_start

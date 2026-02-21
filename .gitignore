@@ -57,3 +57,7 @@ config/mcp.json
 
 # Agent intro auto generation
 src/Undefined/skills/agents/**/intro.generated.md
+
+# 知识库运行时数据
+knowledge/*/chroma/
+knowledge/*/.manifest.json
