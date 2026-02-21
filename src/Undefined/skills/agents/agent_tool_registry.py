@@ -590,7 +590,7 @@ class AgentToolRegistry(BaseRegistry):
                 mode = None
 
         mode_text = str(mode).strip().lower() if mode is not None else "none"
-        if mode_text not in {"all", "clean"}:
+        if mode_text not in {"all", "clean", "tools"}:
             return
 
         if mode_text == "clean":
