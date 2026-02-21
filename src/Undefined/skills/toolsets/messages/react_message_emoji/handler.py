@@ -260,6 +260,34 @@ def _resolve_current_session_target(
     return None
 
 
+def _group_access_error(runtime_config: Any, group_id: int) -> str:
+    reason_getter = getattr(runtime_config, "group_access_denied_reason", None)
+    reason = reason_getter(group_id) if callable(reason_getter) else None
+    if reason == "blacklist":
+        return (
+            f"目标群 {group_id} 在黑名单内（access.blocked_group_ids），"
+            "已被访问控制拦截"
+        )
+    return (
+        f"目标群 {group_id} 不在允许列表内（access.allowed_group_ids），"
+        "已被访问控制拦截"
+    )
+
+
+def _private_access_error(runtime_config: Any, user_id: int) -> str:
+    reason_getter = getattr(runtime_config, "private_access_denied_reason", None)
+    reason = reason_getter(user_id) if callable(reason_getter) else None
+    if reason == "blacklist":
+        return (
+            f"目标用户 {user_id} 在黑名单内（access.blocked_private_ids），"
+            "已被访问控制拦截"
+        )
+    return (
+        f"目标用户 {user_id} 不在允许列表内（access.allowed_private_ids），"
+        "已被访问控制拦截"
+    )
+
+
 def _validate_target_and_allowlist(
     *,
     snapshot: dict[str, Any],
@@ -296,15 +324,9 @@ def _validate_target_and_allowlist(
 
     target_type, target_id = effective_target
     if target_type == "group" and not runtime_config.is_group_allowed(target_id):
-        return (
-            f"目标群 {target_id} 不在允许列表内（access.allowed_group_ids），"
-            "已被访问控制拦截"
-        )
+        return _group_access_error(runtime_config, target_id)
     if target_type == "private" and not runtime_config.is_private_allowed(target_id):
-        return (
-            f"目标用户 {target_id} 不在允许列表内（access.allowed_private_ids），"
-            "已被访问控制拦截"
-        )
+        return _private_access_error(runtime_config, target_id)
     return None
 
 
