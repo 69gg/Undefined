@@ -84,7 +84,9 @@ class KnowledgeManager:
             if not lines:
                 manifest[txt_file.name] = fhash
                 continue
-            embeddings = await self._embedder.embed(lines)
+            doc_instr = getattr(self._embedder._config, "document_instruction", "")
+            embed_lines = [f"{doc_instr}{ln}" for ln in lines] if doc_instr else lines
+            embeddings = await self._embedder.embed(embed_lines)
             added = await store.add_chunks(
                 lines,
                 embeddings,

@@ -1324,6 +1324,10 @@ class Config:
             query_instruction=_coerce_str(
                 _get_value(data, ("models", "embedding", "query_instruction"), None), ""
             ),
+            document_instruction=_coerce_str(
+                _get_value(data, ("models", "embedding", "document_instruction"), None),
+                "",
+            ),
         )
 
     @staticmethod

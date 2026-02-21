@@ -90,6 +90,7 @@ class EmbeddingModelConfig:
     queue_interval_seconds: float = 1.0
     dimensions: int | None = None
     query_instruction: str = ""  # 查询端指令前缀（如 Qwen3-Embedding 需要）
+    document_instruction: str = ""  # 文档端指令前缀（如 E5 系列需要 "passage: "）
 
 
 @dataclass

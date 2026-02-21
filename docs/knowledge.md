@@ -34,6 +34,7 @@ model_name = "text-embedding-3-small"
 queue_interval_seconds = 1.0      # 发车间隔（秒）
 dimensions = 512                  # 向量维度（可选，0或不填则使用模型默认值）
 query_instruction = ""            # 查询端指令前缀（Qwen3-Embedding 等模型需要）
+document_instruction = ""         # 文档端指令前缀（E5 系列需要 "passage: "）
 
 [knowledge]
 enabled = true
@@ -139,11 +140,16 @@ texts → split_lines → [batch 1, batch 2, ...] → Queue → API (间隔发�
 
 不同嵌入模型对输入格式的要求不同，主要区别在于**查询端是否需要拼接指令前缀**。
 
-### query_instruction 说明
+### query_instruction 与 document_instruction 说明
 
-部分模型（如 Qwen3-Embedding、E5、BGE、Instructor 系列）在训练时采用了带指令的对比学习，Query 和 Document 的向量空间是分开优化的。对这类模型，查询时**必须**在文本前拼接对应指令，否则检索效果会大幅下降。
+部分模型（如 Qwen3-Embedding、E5、BGE、Instructor 系列）在训练时采用了带指令的对比学习，Query 和 Document 的向量空间是分开优化的。对这类模型，需要在文本前拼接对应指令，否则检索效果会大幅下降。
 
-**行为**：`query_instruction` 只在语义搜索（`knowledge_semantic_search`）时拼接到查询文本前，文档嵌入时不加。
+| 配置项 | 作用时机 | 说明 |
+|--------|---------|------|
+| `query_instruction` | 语义搜索时，拼接到查询文本前 | Qwen3、BGE 等只有 Query 端需要 |
+| `document_instruction` | 嵌入文档时，拼接到每行文本前 | E5 系列 Document 端也需要前缀 |
+
+两者默认为空，不填则不拼接。
 
 ### 各模型配置示例
 
@@ -181,12 +187,13 @@ model_name = "BAAI/bge-large-zh-v1.5"
 query_instruction = "为这个句子生成表示以用于检索相关文章："
 ```
 
-**E5 系列**（如 `intfloat/multilingual-e5-large`）
+**E5 系列**（如 `intfloat/multilingual-e5-large`，Query 和 Document 都需要前缀）
 
 ```toml
 [models.embedding]
 model_name = "intfloat/multilingual-e5-large"
 query_instruction = "query: "
+document_instruction = "passage: "
 ```
 
 > 具体指令内容以各模型官方文档为准。不确定时可先不填，观察检索效果后再调整。
