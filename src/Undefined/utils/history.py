@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 
 # 历史记录文件路径
 HISTORY_DIR = os.path.join("data", "history")
-MAX_HISTORY = 10000  # 统一 10000 条限制
 
 
 def _extract_id_from_history_filename(path: str, prefix: str) -> str:
@@ -23,7 +22,8 @@ def _extract_id_from_history_filename(path: str, prefix: str) -> str:
 class MessageHistoryManager:
     """消息历史管理器（异步，Lazy Load）"""
 
-    def __init__(self) -> None:
+    def __init__(self, max_records: int = 10000) -> None:
+        self._max_records = max_records
         self._message_history: dict[str, list[dict[str, Any]]] = {}
         self._private_message_history: dict[str, list[dict[str, Any]]] = {}
         self._group_locks: dict[str, asyncio.Lock] = {}
@@ -83,11 +83,13 @@ class MessageHistoryManager:
         from Undefined.utils import io
 
         try:
-            # 只保留最近的 MAX_HISTORY 条
+            # 只保留最近的 self._max_records 条
             truncated_history = (
-                history[-MAX_HISTORY:] if len(history) > MAX_HISTORY else history
+                history[-self._max_records :]
+                if len(history) > self._max_records
+                else history
             )
-            truncated = len(history) > MAX_HISTORY
+            truncated = len(history) > self._max_records
 
             logger.debug(
                 f"[历史记录] 准备保存: path={path}, total={len(history)}, truncated={truncated}"
@@ -167,10 +169,10 @@ class MessageHistoryManager:
 
                     normalized_history.append(msg)
 
-                # 只保留最近的 MAX_HISTORY 条
+                # 只保留最近的 self._max_records 条
                 return (
-                    normalized_history[-MAX_HISTORY:]
-                    if len(normalized_history) > MAX_HISTORY
+                    normalized_history[-self._max_records :]
+                    if len(normalized_history) > self._max_records
                     else normalized_history
                 )
         except Exception as e:
@@ -295,10 +297,10 @@ class MessageHistoryManager:
                 }
             )
 
-            if len(self._message_history[group_id_str]) > MAX_HISTORY:
+            if len(self._message_history[group_id_str]) > self._max_records:
                 self._message_history[group_id_str] = self._message_history[
                     group_id_str
-                ][-MAX_HISTORY:]
+                ][-self._max_records :]
 
             await self._save_history_to_file(
                 self._message_history[group_id_str],
@@ -338,9 +340,9 @@ class MessageHistoryManager:
                 }
             )
 
-            if len(self._private_message_history[user_id_str]) > MAX_HISTORY:
+            if len(self._private_message_history[user_id_str]) > self._max_records:
                 self._private_message_history[user_id_str] = (
-                    self._private_message_history[user_id_str][-MAX_HISTORY:]
+                    self._private_message_history[user_id_str][-self._max_records :]
                 )
 
             await self._save_history_to_file(

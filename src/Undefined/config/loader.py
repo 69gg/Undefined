@@ -387,6 +387,7 @@ class Config:
     token_usage_max_archives: int
     token_usage_max_total_mb: int
     token_usage_archive_prune_mode: str
+    history_max_records: int
     skills_hot_reload: bool
     skills_hot_reload_interval: float
     skills_hot_reload_debounce: float
@@ -706,6 +707,10 @@ class Config:
                 "TOKEN_USAGE_ARCHIVE_PRUNE_MODE",
             ),
             "delete",
+        )
+
+        history_max_records = _coerce_int(
+            _get_value(data, ("history", "max_records"), "HISTORY_MAX_RECORDS"), 10000
         )
 
         skills_hot_reload = _coerce_bool(
@@ -1045,6 +1050,7 @@ class Config:
             token_usage_max_total_mb=token_usage_max_total_mb,
             token_usage_archive_prune_mode=token_usage_archive_prune_mode,
             skills_hot_reload=skills_hot_reload,
+            history_max_records=history_max_records,
             skills_hot_reload_interval=skills_hot_reload_interval,
             skills_hot_reload_debounce=skills_hot_reload_debounce,
             agent_intro_autogen_enabled=agent_intro_autogen_enabled,

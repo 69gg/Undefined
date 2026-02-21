@@ -75,7 +75,7 @@ class MessageHandler:
         self.ai = ai
         self.faq_storage = faq_storage
         # 初始化工具组件
-        self.history_manager = MessageHistoryManager()
+        self.history_manager = MessageHistoryManager(config.history_max_records)
         self.sender = MessageSender(onebot, self.history_manager, config.bot_qq, config)
 
         # 初始化服务
