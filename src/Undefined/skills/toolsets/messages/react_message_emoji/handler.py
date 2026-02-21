@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import OrderedDict
 from typing import Any, Dict, Literal
 
 from Undefined.context import RequestContext
@@ -13,8 +14,9 @@ TargetType = Literal["group", "private"]
 ActionType = Literal["set", "unset"]
 
 _SEEN_OPS_KEY = "_emoji_reaction_seen_ops"
-_MESSAGE_LOCKS: dict[int, asyncio.Lock] = {}
+_MESSAGE_LOCKS: OrderedDict[int, asyncio.Lock] = OrderedDict()
 _MESSAGE_LOCKS_GUARD = asyncio.Lock()
+_MESSAGE_LOCKS_MAX = 1000
 
 
 def _parse_positive_int(value: Any, field_name: str) -> tuple[int | None, str | None]:
@@ -181,10 +183,13 @@ def _get_seen_ops(context: Dict[str, Any]) -> set[str]:
 
 async def _get_message_lock(message_id: int) -> asyncio.Lock:
     async with _MESSAGE_LOCKS_GUARD:
-        lock = _MESSAGE_LOCKS.get(message_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            _MESSAGE_LOCKS[message_id] = lock
+        if message_id in _MESSAGE_LOCKS:
+            _MESSAGE_LOCKS.move_to_end(message_id)
+            return _MESSAGE_LOCKS[message_id]
+        lock = asyncio.Lock()
+        _MESSAGE_LOCKS[message_id] = lock
+        while len(_MESSAGE_LOCKS) > _MESSAGE_LOCKS_MAX:
+            _MESSAGE_LOCKS.popitem(last=False)
         return lock
 
 
