@@ -517,6 +517,26 @@ class MessageHandler:
             sender_role = str(sender.get("role", "member")).strip() or "member"
             sender_title = str(sender.get("title", "")).strip()
 
+        if not sender_card and not sender_nickname:
+            try:
+                member_info = await self.onebot.get_group_member_info(
+                    group_id, sender_id
+                )
+                if isinstance(member_info, dict):
+                    sender_card = str(member_info.get("card", "")).strip()
+                    sender_nickname = str(member_info.get("nickname", "")).strip()
+                    sender_role = (
+                        str(member_info.get("role", "member")).strip() or "member"
+                    )
+                    sender_title = str(member_info.get("title", "")).strip()
+            except Exception as exc:
+                logger.warning(
+                    "[通知] 获取拍一拍群成员信息失败: group=%s user=%s err=%s",
+                    group_id,
+                    sender_id,
+                    exc,
+                )
+
         group_name = ""
         try:
             group_info = await self.onebot.get_group_info(group_id)

@@ -293,6 +293,8 @@ class AICoordinator:
             for key, value in resources.items():
                 if value is not None:
                     ctx.set_resource(key, value)
+            if trigger_message_id is not None:
+                ctx.set_resource("trigger_message_id", trigger_message_id)
             logger.debug(
                 "[上下文资源] group=%s keys=%s",
                 group_id,
@@ -384,6 +386,8 @@ class AICoordinator:
             for key, value in resources.items():
                 if value is not None:
                     ctx.set_resource(key, value)
+            if trigger_message_id is not None:
+                ctx.set_resource("trigger_message_id", trigger_message_id)
             logger.debug(
                 "[上下文资源] private user=%s keys=%s",
                 user_id,
