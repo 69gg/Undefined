@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -71,6 +72,17 @@ class KnowledgeManager:
             chroma_dir.mkdir(parents=True, exist_ok=True)
             self._stores[name] = KnowledgeStore(name, chroma_dir)
         return self._stores[name]
+
+    def _get_existing_store(self, name: str) -> KnowledgeStore | None:
+        cached = self._stores.get(name)
+        if cached is not None:
+            return cached
+        chroma_dir = self._base_dir / name / "chroma"
+        if not chroma_dir.exists() or not chroma_dir.is_dir():
+            return None
+        store = KnowledgeStore(name, chroma_dir)
+        self._stores[name] = store
+        return store
 
     def list_knowledge_bases(self) -> list[str]:
         if not self._base_dir.exists():
@@ -161,26 +173,42 @@ class KnowledgeManager:
         kb_dir = self._base_dir / kb_name
         if not kb_dir.exists():
             return 0
-        text_files = self._iter_indexable_text_files(kb_dir)
-        if not text_files:
-            return 0
 
         manifest = await self._load_manifest(kb_name)
-        store = self._get_store(kb_name)
+        text_files = self._iter_indexable_text_files(kb_dir)
+        current_sources = {path.relative_to(kb_dir).as_posix() for path in text_files}
+        removed_sources = sorted(set(manifest) - current_sources)
+
+        store: KnowledgeStore | None = None
         total = 0
+        manifest_changed = False
+
+        if removed_sources:
+            store = self._get_store(kb_name)
+            for source in removed_sources:
+                await store.delete_by_source(source)
+                manifest.pop(source, None)
+                manifest_changed = True
+                logger.info("[知识库] kb=%s removed source=%s", kb_name, source)
 
         for text_file in text_files:
             relative_source = text_file.relative_to(kb_dir).as_posix()
             fhash = await self._file_hash(text_file)
             if manifest.get(relative_source) == fhash:
                 continue
+            if store is None:
+                store = self._get_store(kb_name)
+            await store.delete_by_source(relative_source)
             try:
                 content = await asyncio.to_thread(text_file.read_text, "utf-8")
             except (OSError, UnicodeDecodeError):
+                if manifest.pop(relative_source, None) is not None:
+                    manifest_changed = True
                 continue
             lines = chunk_lines(content, self._chunk_size, self._chunk_overlap)
             if not lines:
                 manifest[relative_source] = fhash
+                manifest_changed = True
                 continue
             doc_instr = getattr(self._embedder._config, "document_instruction", "")
             embed_lines = [f"{doc_instr}{ln}" for ln in lines] if doc_instr else lines
@@ -191,12 +219,14 @@ class KnowledgeManager:
                 metadata_base={"source": relative_source, "kb": kb_name},
             )
             manifest[relative_source] = fhash
+            manifest_changed = True
             total += added
             logger.info(
                 "[知识库] kb=%s file=%s lines=%s", kb_name, relative_source, added
             )
 
-        await self._save_manifest(kb_name, manifest)
+        if manifest_changed:
+            await self._save_manifest(kb_name, manifest)
         return total
 
     async def scan_and_embed_all(self) -> int:
@@ -260,13 +290,20 @@ class KnowledgeManager:
         rerank_top_k: int | None = None,
     ) -> list[dict[str, Any]]:
         """在指定知识库中语义搜索。"""
+        kb_dir = self._base_dir / kb_name
+        if not kb_dir.exists() or not (kb_dir / "texts").exists():
+            return []
+        store = self._get_existing_store(kb_name)
+        if store is None:
+            return []
+
         k = top_k or self._default_top_k
         if k <= 0:
             k = self._default_top_k
         instruction = getattr(self._embedder._config, "query_instruction", "")
         query_input = f"{instruction}{query}" if instruction else query
         query_emb = (await self._embedder.embed([query_input]))[0]
-        results = await self._get_store(kb_name).query(query_emb, k)
+        results = await store.query(query_emb, k)
         if not results:
             return []
 
@@ -379,6 +416,9 @@ class KnowledgeManager:
     async def stop(self) -> None:
         if self._scan_task:
             self._scan_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._scan_task
             self._scan_task = None
+        await self._embedder.stop()
         if self._reranker:
             await self._reranker.stop()

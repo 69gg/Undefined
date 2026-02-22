@@ -51,6 +51,15 @@ class KnowledgeStore:
         await asyncio.to_thread(_upsert)
         return len(chunks)
 
+    async def delete_by_source(self, source: str) -> None:
+        if not source:
+            return
+
+        def _delete() -> None:
+            self._collection.delete(where={"source": source})
+
+        await asyncio.to_thread(_delete)
+
     async def query(
         self, query_embedding: list[float], top_k: int = 5
     ) -> list[dict[str, Any]]:

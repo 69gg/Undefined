@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -354,6 +355,58 @@ async def test_embed_scans_common_text_formats(tmp_path: Path) -> None:
     assert embedder.embed.call_count == 3
 
 
+async def test_embed_removes_deleted_sources(tmp_path: Path) -> None:
+    manager, _ = _make_manager(tmp_path)
+    kb_dir = _make_kb(tmp_path, "kb1", {})
+    manifest_path = kb_dir / ".manifest.json"
+    manifest_path.write_text('{"texts/old.txt":"deadbeef"}', "utf-8")
+
+    with patch.object(manager, "_get_store") as mock_store:
+        store = AsyncMock()
+        mock_store.return_value = store
+        added = await manager.embed_knowledge_base("kb1")
+
+    assert added == 0
+    store.delete_by_source.assert_awaited_once_with("texts/old.txt")
+    assert json.loads(manifest_path.read_text("utf-8")) == {}
+
+
+async def test_embed_replaces_changed_file_chunks(tmp_path: Path) -> None:
+    manager, embedder = _make_manager(tmp_path)
+    embedder.embed = AsyncMock(return_value=[[0.1]])
+    kb_dir = _make_kb(tmp_path, "kb1", {"doc.txt": "hello"})
+    manifest_path = kb_dir / ".manifest.json"
+    manifest_path.write_text('{"texts/doc.txt":"outdated"}', "utf-8")
+
+    with patch.object(manager, "_get_store") as mock_store:
+        store = AsyncMock()
+        store.add_chunks = AsyncMock(return_value=1)
+        mock_store.return_value = store
+        added = await manager.embed_knowledge_base("kb1")
+
+    assert added == 1
+    store.delete_by_source.assert_awaited_once_with("texts/doc.txt")
+    assert "texts/doc.txt" in json.loads(manifest_path.read_text("utf-8"))
+
+
+async def test_semantic_search_missing_kb_does_not_create_store(tmp_path: Path) -> None:
+    manager, embedder = _make_manager(tmp_path)
+    results = await manager.semantic_search("missing", "hello")
+    assert results == []
+    embedder.embed.assert_not_called()
+    assert not (tmp_path / "missing" / "chroma").exists()
+
+
+async def test_semantic_search_without_index_returns_empty(tmp_path: Path) -> None:
+    manager, embedder = _make_manager(tmp_path)
+    _make_kb(tmp_path, "kb1", {"doc.txt": "hello"})
+
+    results = await manager.semantic_search("kb1", "hello")
+    assert results == []
+    embedder.embed.assert_not_called()
+    assert not (tmp_path / "kb1" / "chroma").exists()
+
+
 async def test_semantic_search_with_rerank(tmp_path: Path) -> None:
     embedder = MagicMock(spec=Embedder)
     embedder.embed = AsyncMock(return_value=[[0.1, 0.2]])
@@ -375,8 +428,9 @@ async def test_semantic_search_with_rerank(tmp_path: Path) -> None:
         rerank_enabled=True,
         rerank_top_k=2,
     )
+    _make_kb(tmp_path, "kb1", {"doc.txt": "hello"})
 
-    with patch.object(manager, "_get_store") as mock_store:
+    with patch.object(manager, "_get_existing_store") as mock_store:
         store = AsyncMock()
         store.query = AsyncMock(
             return_value=[
@@ -410,8 +464,9 @@ async def test_semantic_search_rerank_override_disabled(tmp_path: Path) -> None:
         rerank_enabled=True,
         rerank_top_k=2,
     )
+    _make_kb(tmp_path, "kb1", {"doc.txt": "hello"})
 
-    with patch.object(manager, "_get_store") as mock_store:
+    with patch.object(manager, "_get_existing_store") as mock_store:
         store = AsyncMock()
         store.query = AsyncMock(
             return_value=[
@@ -443,8 +498,9 @@ async def test_semantic_search_rerank_top_k_must_be_smaller(tmp_path: Path) -> N
         rerank_enabled=True,
         rerank_top_k=3,
     )
+    _make_kb(tmp_path, "kb1", {"doc.txt": "hello"})
 
-    with patch.object(manager, "_get_store") as mock_store:
+    with patch.object(manager, "_get_existing_store") as mock_store:
         store = AsyncMock()
         store.query = AsyncMock(
             return_value=[
@@ -478,8 +534,9 @@ async def test_semantic_search_fallback_when_rerank_fails(tmp_path: Path) -> Non
         rerank_enabled=True,
         rerank_top_k=2,
     )
+    _make_kb(tmp_path, "kb1", {"doc.txt": "hello"})
 
-    with patch.object(manager, "_get_store") as mock_store:
+    with patch.object(manager, "_get_existing_store") as mock_store:
         store = AsyncMock()
         store.query = AsyncMock(
             return_value=[
@@ -493,3 +550,23 @@ async def test_semantic_search_fallback_when_rerank_fails(tmp_path: Path) -> Non
 
     assert [item["content"] for item in results] == ["a", "b"]
     assert all("rerank_score" not in item for item in results)
+
+
+async def test_manager_stop_stops_background_components(tmp_path: Path) -> None:
+    embedder = MagicMock(spec=Embedder)
+    embedder.stop = AsyncMock()
+    embedder._config = MagicMock()
+    reranker = MagicMock(spec=Reranker)
+    reranker.stop = AsyncMock()
+    manager = KnowledgeManager(base_dir=tmp_path, embedder=embedder, reranker=reranker)
+
+    manager.start_auto_scan(interval=3600)
+    scan_task = manager._scan_task
+    assert scan_task is not None
+
+    await manager.stop()
+
+    assert manager._scan_task is None
+    assert scan_task.cancelled() or scan_task.done()
+    embedder.stop.assert_awaited_once()
+    reranker.stop.assert_awaited_once()

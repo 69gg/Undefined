@@ -48,6 +48,10 @@ class Embedder:
     async def stop(self) -> None:
         if self._task:
             self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
             self._task = None
 
     async def _process_loop(self) -> None:
@@ -56,7 +60,8 @@ class Embedder:
             job = await self._queue.get()
             try:
                 result = await self._requester.embed(self._config, job.texts)
-                job.future.set_result(result)
+                if not job.future.done():
+                    job.future.set_result(result)
             except Exception as exc:
                 if not job.future.done():
                     job.future.set_exception(exc)

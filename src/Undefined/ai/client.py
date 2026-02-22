@@ -267,6 +267,13 @@ class AIClient:
         if hasattr(self, "_agent_intro_task") and self._agent_intro_task:
             if not self._agent_intro_task.done():
                 await self._agent_intro_task
+        knowledge_manager = getattr(self, "_knowledge_manager", None)
+        if knowledge_manager is not None and hasattr(knowledge_manager, "stop"):
+            try:
+                await knowledge_manager.stop()
+            except Exception as exc:
+                logger.warning("[清理] 关闭知识库管理器失败: %s", exc)
+            self._knowledge_manager = None
 
         # 2) 等待 MCP 初始化完成，再关闭 MCP toolsets
         if hasattr(self, "_mcp_init_task") and not self._mcp_init_task.done():
