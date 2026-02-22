@@ -139,3 +139,29 @@ async def test_send_poke_infers_from_request_context_when_context_missing() -> N
     assert result == "已在群 70007 拍了拍 QQ80008"
     sender.send_group_poke.assert_called_once_with(70007, 80008)
     assert context["message_sent_this_turn"] is True
+
+
+@pytest.mark.asyncio
+async def test_send_poke_group_blacklist_message() -> None:
+    sender = SimpleNamespace(
+        send_group_poke=AsyncMock(),
+        send_private_poke=AsyncMock(),
+    )
+    context: dict[str, Any] = {
+        "request_type": "group",
+        "group_id": 10001,
+        "sender_id": 20002,
+        "request_id": "req-blacklist-1",
+        "runtime_config": SimpleNamespace(
+            bot_qq=123456,
+            is_group_allowed=lambda _gid: False,
+            is_private_allowed=lambda _uid: True,
+            group_access_denied_reason=lambda _gid: "blacklist",
+        ),
+        "sender": sender,
+    }
+
+    result = await execute({}, context)
+
+    assert "黑名单" in result
+    sender.send_group_poke.assert_not_called()

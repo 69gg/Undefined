@@ -352,11 +352,17 @@ class Config:
     bot_qq: int
     superadmin_qq: int
     admin_qqs: list[int]
-    # 访问控制（会话白名单）：任一列表非空即启用限制模式
+    # 访问控制模式：off / blacklist / allowlist
+    access_mode: str
+    # 访问控制（会话白名单 + 黑名单）
     allowed_group_ids: list[int]
+    blocked_group_ids: list[int]
     allowed_private_ids: list[int]
+    blocked_private_ids: list[int]
     # 是否允许超级管理员在私聊中绕过 allowed_private_ids（仅私聊收发）
     superadmin_bypass_allowlist: bool
+    # 是否允许超级管理员在私聊中绕过 blocked_private_ids（仅私聊收发）
+    superadmin_bypass_private_blacklist: bool
     forward_proxy_qq: int | None
     process_every_message: bool
     process_private_message: bool
@@ -464,7 +470,17 @@ class Config:
         init=False,
         repr=False,
     )
+    _blocked_group_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
     _allowed_private_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
+    _blocked_private_ids_set: set[int] = dataclass_field(
         default_factory=set,
         init=False,
         repr=False,
@@ -481,9 +497,15 @@ class Config:
     )
 
     def __post_init__(self) -> None:
-        # 访问控制白名单属于高频热路径，启动后缓存为 set 降低重复构建开销。
+        # 访问控制属于高频热路径，启动后缓存为 set 降低重复构建开销。
+        normalized_mode = str(self.access_mode).strip().lower()
+        if normalized_mode not in {"off", "blacklist", "allowlist", "legacy"}:
+            normalized_mode = "off"
+        self.access_mode = normalized_mode
         self._allowed_group_ids_set = {int(item) for item in self.allowed_group_ids}
+        self._blocked_group_ids_set = {int(item) for item in self.blocked_group_ids}
         self._allowed_private_ids_set = {int(item) for item in self.allowed_private_ids}
+        self._blocked_private_ids_set = {int(item) for item in self.blocked_private_ids}
         self._bilibili_group_ids_set = {
             int(item) for item in self.bilibili_auto_extract_group_ids
         }
@@ -681,11 +703,18 @@ class Config:
             superadmin_qq=superadmin_qq, admin_qqs=admin_qqs
         )
 
+        access_mode_raw = _get_value(data, ("access", "mode"), "ACCESS_MODE")
         allowed_group_ids = _coerce_int_list(
             _get_value(data, ("access", "allowed_group_ids"), "ALLOWED_GROUP_IDS")
         )
+        blocked_group_ids = _coerce_int_list(
+            _get_value(data, ("access", "blocked_group_ids"), "BLOCKED_GROUP_IDS")
+        )
         allowed_private_ids = _coerce_int_list(
             _get_value(data, ("access", "allowed_private_ids"), "ALLOWED_PRIVATE_IDS")
+        )
+        blocked_private_ids = _coerce_int_list(
+            _get_value(data, ("access", "blocked_private_ids"), "BLOCKED_PRIVATE_IDS")
         )
         superadmin_bypass_allowlist = _coerce_bool(
             _get_value(
@@ -695,6 +724,36 @@ class Config:
             ),
             True,
         )
+        superadmin_bypass_private_blacklist = _coerce_bool(
+            _get_value(
+                data,
+                ("access", "superadmin_bypass_private_blacklist"),
+                "SUPERADMIN_BYPASS_PRIVATE_BLACKLIST",
+            ),
+            False,
+        )
+        if access_mode_raw is None:
+            # 兼容旧配置：未配置 mode 时沿用历史行为（群黑名单 + 白名单联动）。
+            if (
+                allowed_group_ids
+                or blocked_group_ids
+                or allowed_private_ids
+                or blocked_private_ids
+            ):
+                access_mode = "legacy"
+                logger.warning(
+                    "[配置] access.mode 未设置，已启用兼容模式（legacy）。建议显式设置为 off/blacklist/allowlist。"
+                )
+            else:
+                access_mode = "off"
+        else:
+            access_mode = _coerce_str(access_mode_raw, "off").lower()
+            if access_mode not in {"off", "blacklist", "allowlist"}:
+                logger.warning(
+                    "[配置] access.mode 非法（仅支持 off/blacklist/allowlist），已回退为 off: %s",
+                    access_mode,
+                )
+                access_mode = "off"
 
         log_level = _coerce_str(
             _get_value(data, ("logging", "level"), "LOG_LEVEL"), "INFO"
@@ -1106,9 +1165,13 @@ class Config:
             bot_qq=bot_qq,
             superadmin_qq=superadmin_qq,
             admin_qqs=admin_qqs,
+            access_mode=access_mode,
             allowed_group_ids=allowed_group_ids,
+            blocked_group_ids=blocked_group_ids,
             allowed_private_ids=allowed_private_ids,
+            blocked_private_ids=blocked_private_ids,
             superadmin_bypass_allowlist=superadmin_bypass_allowlist,
+            superadmin_bypass_private_blacklist=superadmin_bypass_private_blacklist,
             forward_proxy_qq=forward_proxy_qq,
             process_every_message=process_every_message,
             process_private_message=process_private_message,
@@ -1213,46 +1276,135 @@ class Config:
         """兼容旧字段名，等价于 bilibili_cookie。"""
         return self.bilibili_cookie
 
-    def access_control_enabled(self) -> bool:
-        """是否启用会话白名单限制。
+    def allowlist_mode_enabled(self) -> bool:
+        """是否启用白名单限制模式。"""
 
-        规则：allowed_group_ids 或 allowed_private_ids 任一非空即启用。
+        return self.access_mode in {"allowlist", "legacy"} and (
+            bool(self.allowed_group_ids) or bool(self.allowed_private_ids)
+        )
+
+    def group_allowlist_enabled(self) -> bool:
+        """群聊白名单是否生效（显式 allowlist 模式按维度独立控制）。"""
+
+        return bool(self.allowed_group_ids)
+
+    def private_allowlist_enabled(self) -> bool:
+        """私聊白名单是否生效（显式 allowlist 模式按维度独立控制）。"""
+
+        return bool(self.allowed_private_ids)
+
+    def blacklist_mode_enabled(self) -> bool:
+        """是否启用黑名单限制模式。"""
+
+        return self.access_mode in {"blacklist", "legacy"} and (
+            bool(self.blocked_group_ids) or bool(self.blocked_private_ids)
+        )
+
+    def access_control_enabled(self) -> bool:
+        """是否启用访问控制。"""
+
+        return self.allowlist_mode_enabled() or self.blacklist_mode_enabled()
+
+    def group_access_denied_reason(self, group_id: int) -> str | None:
+        """群聊访问被拒绝原因。
+
+        返回:
+            - "blacklist": 命中 access.blocked_group_ids
+            - "allowlist": allowlist 模式下不在 access.allowed_group_ids
+            - None: 允许访问
         """
 
-        return bool(self.allowed_group_ids) or bool(self.allowed_private_ids)
+        normalized_group_id = int(group_id)
+        if self.access_mode == "off":
+            return None
+        if self.access_mode == "blacklist":
+            if normalized_group_id in self._blocked_group_ids_set:
+                return "blacklist"
+            return None
+        if self.access_mode == "legacy":
+            if normalized_group_id in self._blocked_group_ids_set:
+                return "blacklist"
+            if not self.allowlist_mode_enabled():
+                return None
+            if normalized_group_id not in self._allowed_group_ids_set:
+                return "allowlist"
+            return None
+        if not self.group_allowlist_enabled():
+            return None
+        if normalized_group_id not in self._allowed_group_ids_set:
+            return "allowlist"
+        return None
 
     def is_group_allowed(self, group_id: int) -> bool:
         """群聊是否允许收发消息。"""
 
-        if not self.access_control_enabled():
-            return True
-        return int(group_id) in self._allowed_group_ids_set
+        return self.group_access_denied_reason(group_id) is None
+
+    def private_access_denied_reason(self, user_id: int) -> str | None:
+        """私聊访问被拒绝原因。"""
+
+        normalized_user_id = int(user_id)
+        if self.access_mode == "off":
+            return None
+        if self.access_mode == "blacklist":
+            if normalized_user_id not in self._blocked_private_ids_set:
+                return None
+            if (
+                self.superadmin_bypass_private_blacklist
+                and normalized_user_id == int(self.superadmin_qq)
+                and self.superadmin_qq > 0
+            ):
+                return None
+            return "blacklist"
+        if self.access_mode == "legacy":
+            if normalized_user_id in self._blocked_private_ids_set:
+                if (
+                    self.superadmin_bypass_private_blacklist
+                    and normalized_user_id == int(self.superadmin_qq)
+                    and self.superadmin_qq > 0
+                ):
+                    return None
+                return "blacklist"
+            if not self.allowlist_mode_enabled():
+                return None
+            if (
+                self.superadmin_bypass_allowlist
+                and normalized_user_id == int(self.superadmin_qq)
+                and self.superadmin_qq > 0
+            ):
+                return None
+            if normalized_user_id not in self._allowed_private_ids_set:
+                return "allowlist"
+            return None
+        if not self.private_allowlist_enabled():
+            return None
+        if (
+            self.superadmin_bypass_allowlist
+            and normalized_user_id == int(self.superadmin_qq)
+            and self.superadmin_qq > 0
+        ):
+            return None
+        if normalized_user_id not in self._allowed_private_ids_set:
+            return "allowlist"
+        return None
 
     def is_private_allowed(self, user_id: int) -> bool:
         """私聊是否允许收发消息。"""
 
-        if not self.access_control_enabled():
-            return True
-        if (
-            self.superadmin_bypass_allowlist
-            and int(user_id) == int(self.superadmin_qq)
-            and self.superadmin_qq > 0
-        ):
-            return True
-        return int(user_id) in self._allowed_private_ids_set
+        return self.private_access_denied_reason(user_id) is None
 
     def is_bilibili_auto_extract_allowed_group(self, group_id: int) -> bool:
         """群聊是否允许 bilibili 自动提取。"""
         if self._bilibili_group_ids_set:
             return int(group_id) in self._bilibili_group_ids_set
-        # 白名单为空时跟随全局 access 控制
+        # 功能白名单为空时跟随全局 access 控制
         return self.is_group_allowed(group_id)
 
     def is_bilibili_auto_extract_allowed_private(self, user_id: int) -> bool:
         """私聊是否允许 bilibili 自动提取。"""
         if self._bilibili_private_ids_set:
             return int(user_id) in self._bilibili_private_ids_set
-        # 白名单为空时跟随全局 access 控制
+        # 功能白名单为空时跟随全局 access 控制
         return self.is_private_allowed(user_id)
 
     def should_process_group_message(self, is_at_bot: bool) -> bool:

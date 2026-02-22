@@ -138,21 +138,31 @@ class MessageHandler:
             poke_group_id: int = event.get("group_id", 0)
             poke_sender_id: int = event.get("user_id", 0)
 
-            # 会话白名单：不在允许列表则忽略
+            # 访问控制：命中群黑名单或不满足白名单限制时忽略
             if poke_group_id == 0:
                 if not self.config.is_private_allowed(poke_sender_id):
+                    private_reason = (
+                        self.config.private_access_denied_reason(poke_sender_id)
+                        or "unknown"
+                    )
                     logger.debug(
-                        "[访问控制] 忽略私聊拍一拍: user=%s (allowlist enabled=%s)",
+                        "[访问控制] 忽略私聊拍一拍: user=%s reason=%s (access enabled=%s)",
                         poke_sender_id,
+                        private_reason,
                         self.config.access_control_enabled(),
                     )
                     return
             else:
                 if not self.config.is_group_allowed(poke_group_id):
+                    group_reason = (
+                        self.config.group_access_denied_reason(poke_group_id)
+                        or "unknown"
+                    )
                     logger.debug(
-                        "[访问控制] 忽略群聊拍一拍: group=%s sender=%s (allowlist enabled=%s)",
+                        "[访问控制] 忽略群聊拍一拍: group=%s sender=%s reason=%s (access enabled=%s)",
                         poke_group_id,
                         poke_sender_id,
+                        group_reason,
                         self.config.access_control_enabled(),
                     )
                     return
@@ -205,11 +215,16 @@ class MessageHandler:
             private_message_content: list[dict[str, Any]] = get_message_content(event)
             trigger_message_id = event.get("message_id")
 
-            # 会话白名单：不在允许列表则忽略（不入历史、不触发任何处理）
+            # 访问控制：命中黑/白名单规则时忽略（不入历史、不触发任何处理）
             if not self.config.is_private_allowed(private_sender_id):
+                private_reason = (
+                    self.config.private_access_denied_reason(private_sender_id)
+                    or "unknown"
+                )
                 logger.debug(
-                    "[访问控制] 忽略私聊消息: user=%s (allowlist enabled=%s)",
+                    "[访问控制] 忽略私聊消息: user=%s reason=%s (access enabled=%s)",
                     private_sender_id,
+                    private_reason,
                     self.config.access_control_enabled(),
                 )
                 return
@@ -308,12 +323,14 @@ class MessageHandler:
         message_content: list[dict[str, Any]] = get_message_content(event)
         trigger_message_id = event.get("message_id")
 
-        # 会话白名单：不在允许列表则忽略（不入历史、不触发任何处理）
+        # 访问控制：命中黑/白名单规则时忽略（不入历史、不触发任何处理）
         if not self.config.is_group_allowed(group_id):
+            group_reason = self.config.group_access_denied_reason(group_id) or "unknown"
             logger.debug(
-                "[访问控制] 忽略群消息: group=%s sender=%s (allowlist enabled=%s)",
+                "[访问控制] 忽略群消息: group=%s sender=%s reason=%s (access enabled=%s)",
                 group_id,
                 sender_id,
+                group_reason,
                 self.config.access_control_enabled(),
             )
             return

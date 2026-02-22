@@ -69,13 +69,16 @@ class MessageSender:
         """发送群消息"""
         if not self.config.is_group_allowed(group_id):
             enabled = self.config.access_control_enabled()
+            reason = self.config.group_access_denied_reason(group_id) or "unknown"
             logger.warning(
-                "[访问控制] 已拦截群消息发送: group=%s (allowlist enabled=%s)",
+                "[访问控制] 已拦截群消息发送: group=%s reason=%s (access enabled=%s)",
                 group_id,
+                reason,
                 enabled,
             )
             raise PermissionError(
-                f"blocked by allowlist: group_id={int(group_id)} enabled={enabled}"
+                "blocked by access control: "
+                f"type=group reason={reason} group_id={int(group_id)} enabled={enabled}"
             )
 
         safe_message = redact_string(message)
@@ -153,13 +156,16 @@ class MessageSender:
         """发送私聊消息"""
         if not self.config.is_private_allowed(user_id):
             enabled = self.config.access_control_enabled()
+            reason = self.config.private_access_denied_reason(user_id) or "unknown"
             logger.warning(
-                "[访问控制] 已拦截私聊消息发送: user=%s (allowlist enabled=%s)",
+                "[访问控制] 已拦截私聊消息发送: user=%s reason=%s (access enabled=%s)",
                 user_id,
+                reason,
                 enabled,
             )
             raise PermissionError(
-                f"blocked by allowlist: user_id={int(user_id)} enabled={enabled}"
+                "blocked by access control: "
+                f"type=private reason={reason} user_id={int(user_id)} enabled={enabled}"
             )
 
         safe_message = redact_string(message)
@@ -229,14 +235,17 @@ class MessageSender:
         """在群聊中拍一拍指定成员。"""
         if not self.config.is_group_allowed(group_id):
             enabled = self.config.access_control_enabled()
+            reason = self.config.group_access_denied_reason(group_id) or "unknown"
             logger.warning(
-                "[访问控制] 已拦截群拍一拍: group=%s user=%s (allowlist enabled=%s)",
+                "[访问控制] 已拦截群拍一拍: group=%s user=%s reason=%s (access enabled=%s)",
                 group_id,
                 user_id,
+                reason,
                 enabled,
             )
             raise PermissionError(
-                f"blocked by allowlist: group_id={int(group_id)} enabled={enabled}"
+                "blocked by access control: "
+                f"type=group reason={reason} group_id={int(group_id)} enabled={enabled}"
             )
 
         logger.info("[拍一拍] 群=%s 用户=%s", group_id, user_id)
@@ -251,13 +260,16 @@ class MessageSender:
         """在私聊中拍一拍指定用户。"""
         if not self.config.is_private_allowed(user_id):
             enabled = self.config.access_control_enabled()
+            reason = self.config.private_access_denied_reason(user_id) or "unknown"
             logger.warning(
-                "[访问控制] 已拦截私聊拍一拍: user=%s (allowlist enabled=%s)",
+                "[访问控制] 已拦截私聊拍一拍: user=%s reason=%s (access enabled=%s)",
                 user_id,
+                reason,
                 enabled,
             )
             raise PermissionError(
-                f"blocked by allowlist: user_id={int(user_id)} enabled={enabled}"
+                "blocked by access control: "
+                f"type=private reason={reason} user_id={int(user_id)} enabled={enabled}"
             )
 
         logger.info("[拍一拍] 私聊用户=%s", user_id)
@@ -273,13 +285,16 @@ class MessageSender:
         """通过统一发送层上传群文件。"""
         if not self.config.is_group_allowed(group_id):
             enabled = self.config.access_control_enabled()
+            reason = self.config.group_access_denied_reason(group_id) or "unknown"
             logger.warning(
-                "[访问控制] 已拦截群文件发送: group=%s (allowlist enabled=%s)",
+                "[访问控制] 已拦截群文件发送: group=%s reason=%s (access enabled=%s)",
                 group_id,
+                reason,
                 enabled,
             )
             raise PermissionError(
-                f"blocked by allowlist: group_id={int(group_id)} enabled={enabled}"
+                "blocked by access control: "
+                f"type=group reason={reason} group_id={int(group_id)} enabled={enabled}"
             )
 
         file_name = name or Path(file_path).name
@@ -317,13 +332,16 @@ class MessageSender:
         """通过统一发送层上传私聊文件。"""
         if not self.config.is_private_allowed(user_id):
             enabled = self.config.access_control_enabled()
+            reason = self.config.private_access_denied_reason(user_id) or "unknown"
             logger.warning(
-                "[访问控制] 已拦截私聊文件发送: user=%s (allowlist enabled=%s)",
+                "[访问控制] 已拦截私聊文件发送: user=%s reason=%s (access enabled=%s)",
                 user_id,
+                reason,
                 enabled,
             )
             raise PermissionError(
-                f"blocked by allowlist: user_id={int(user_id)} enabled={enabled}"
+                "blocked by access control: "
+                f"type=private reason={reason} user_id={int(user_id)} enabled={enabled}"
             )
 
         file_name = name or Path(file_path).name
