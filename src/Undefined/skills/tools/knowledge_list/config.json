@@ -1,1 +1,21 @@
-{"type":"function","function":{"name":"knowledge_list","description":"列出所有可用的知识库名称。","parameters":{"type":"object","properties":{},"required":[]}}}
+{
+  "type": "function",
+  "function": {
+    "name": "knowledge_list",
+    "description": "列出可用知识库及其 intro.md 简介，便于选择最匹配的知识库。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "only_ready": {
+          "type": "boolean",
+          "description": "是否仅返回已配置 intro.md 的知识库，默认 true"
+        },
+        "intro_max_chars": {
+          "type": "integer",
+          "description": "每个知识库简介最大字符数，默认 300"
+        }
+      },
+      "required": []
+    }
+  }
+}

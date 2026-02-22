@@ -169,6 +169,32 @@ def test_list_knowledge_bases(tmp_path: Path) -> None:
     assert manager.list_knowledge_bases() == ["kb1", "kb2"]
 
 
+def test_list_knowledge_base_infos(tmp_path: Path) -> None:
+    manager, _ = _make_manager(tmp_path)
+    _make_kb(tmp_path, "kb1", {"a.txt": "hello"})
+    _make_kb(tmp_path, "kb2", {"b.txt": "world"})
+    (tmp_path / "kb1" / "intro.md").write_text("这个知识库用于心脏医学研究。", "utf-8")
+
+    infos = manager.list_knowledge_base_infos(only_ready=False)
+    assert infos == [
+        {"name": "kb1", "intro": "这个知识库用于心脏医学研究。", "has_intro": True},
+        {"name": "kb2", "intro": "", "has_intro": False},
+    ]
+
+    ready_infos = manager.list_knowledge_base_infos(only_ready=True)
+    assert ready_infos == [
+        {"name": "kb1", "intro": "这个知识库用于心脏医学研究。", "has_intro": True}
+    ]
+
+
+def test_read_knowledge_base_intro_truncates(tmp_path: Path) -> None:
+    manager, _ = _make_manager(tmp_path)
+    _make_kb(tmp_path, "kb1", {"a.txt": "hello"})
+    (tmp_path / "kb1" / "intro.md").write_text("abcdefg", "utf-8")
+
+    assert manager.read_knowledge_base_intro("kb1", max_chars=5) == "abcd…"
+
+
 def test_text_search_basic(tmp_path: Path) -> None:
     manager, _ = _make_manager(tmp_path)
     _make_kb(tmp_path, "kb1", {"doc.txt": "hello world\nfoo bar\nhello again"})

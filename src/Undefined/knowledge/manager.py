@@ -60,6 +60,38 @@ class KnowledgeManager:
             if d.is_dir() and (d / "texts").exists()
         ]
 
+    def read_knowledge_base_intro(self, kb_name: str, max_chars: int = 300) -> str:
+        intro_path = self._base_dir / kb_name / "intro.md"
+        if not intro_path.exists():
+            return ""
+        try:
+            intro = intro_path.read_text("utf-8").strip()
+        except OSError:
+            return ""
+        if max_chars <= 0 or len(intro) <= max_chars:
+            return intro
+        return f"{intro[: max_chars - 1].rstrip()}…"
+
+    def list_knowledge_base_infos(
+        self,
+        intro_max_chars: int = 300,
+        only_ready: bool = False,
+    ) -> list[dict[str, Any]]:
+        infos: list[dict[str, Any]] = []
+        for kb_name in self.list_knowledge_bases():
+            intro = self.read_knowledge_base_intro(kb_name, max_chars=intro_max_chars)
+            has_intro = bool(intro)
+            if only_ready and not has_intro:
+                continue
+            infos.append(
+                {
+                    "name": kb_name,
+                    "intro": intro,
+                    "has_intro": has_intro,
+                }
+            )
+        return infos
+
     async def _load_manifest(self, kb_name: str) -> dict[str, str]:
         path = self._base_dir / kb_name / _MANIFEST_FILE
         if not path.exists():
