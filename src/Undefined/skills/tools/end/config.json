@@ -2,13 +2,13 @@
     "type": "function",
     "function": {
         "name": "end",
-        "description": "结束当前对话。必须提供 action_summary 描述本轮做了什么。如果本轮获得了关于用户/群的新信息（偏好、身份、习惯等），填写 new_info。不要提供你以前已经获取到的或存在于记忆里的内容，会导致你的记忆噪声增多。",
+        "description": "结束当前对话。如果本轮有实质性操作或值得记录的信息，填写 action_summary；否则留空。如果本轮获得了关于用户/群的新信息（偏好、身份、习惯等），填写 new_info。不要提供你以前已经获取到的或存在于记忆里的内容，会导致你的记忆噪声增多。",
         "parameters": {
             "type": "object",
             "properties": {
                 "action_summary": {
                     "type": "string",
-                    "description": "本轮做了什么（必填）"
+                    "description": "本轮做了什么（有实质内容时填写，否则留空）"
                 },
                 "new_info": {
                     "type": "string",
@@ -23,7 +23,7 @@
                     "description": "强制结束，跳过未发送消息检查"
                 }
             },
-            "required": ["action_summary"]
+            "required": []
         }
     }
 }
