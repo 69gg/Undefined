@@ -1974,11 +1974,34 @@ class Config:
         h = data.get("models", {}).get("historian", {})
         if not isinstance(h, dict) or not h:
             return fallback
+        queue_interval_seconds = _coerce_float(
+            h.get("queue_interval_seconds"), fallback.queue_interval_seconds
+        )
+        if queue_interval_seconds <= 0:
+            queue_interval_seconds = fallback.queue_interval_seconds
+        thinking_include_budget, thinking_tool_call_compat = (
+            _resolve_thinking_compat_flags(
+                data={"models": {"historian": h}},
+                model_name="historian",
+                include_budget_env_key="HISTORIAN_MODEL_THINKING_INCLUDE_BUDGET",
+                tool_call_compat_env_key="HISTORIAN_MODEL_THINKING_TOOL_CALL_COMPAT",
+                legacy_env_key="HISTORIAN_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+            )
+        )
         return AgentModelConfig(
             api_url=_coerce_str(h.get("api_url"), fallback.api_url),
             api_key=_coerce_str(h.get("api_key"), fallback.api_key),
             model_name=_coerce_str(h.get("model_name"), fallback.model_name),
             max_tokens=_coerce_int(h.get("max_tokens"), fallback.max_tokens),
+            queue_interval_seconds=queue_interval_seconds,
+            thinking_enabled=_coerce_bool(
+                h.get("thinking_enabled"), fallback.thinking_enabled
+            ),
+            thinking_budget_tokens=_coerce_int(
+                h.get("thinking_budget_tokens"), fallback.thinking_budget_tokens
+            ),
+            thinking_include_budget=thinking_include_budget,
+            thinking_tool_call_compat=thinking_tool_call_compat,
         )
 
     @staticmethod

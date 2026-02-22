@@ -224,10 +224,33 @@ models = []
 # zh: 史官模型配置（认知记忆后台改写用，未配置时回退到 agent 模型）。
 # en: Historian model config (for cognitive memory rewriting, falls back to agent model if unset).
 [models.historian]
-# api_url = ""
-# api_key = ""
-# model_name = ""
-# max_tokens = 4096
+# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
+# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
+api_url = ""
+# zh: 史官模型 API Key。
+# en: Historian model API key.
+api_key = ""
+# zh: 史官模型名称。
+# en: Historian model name.
+model_name = ""
+# zh: 可选限制：最大生成 tokens。
+# en: Optional limit: max generation tokens.
+max_tokens = 4096
+# zh: 队列发车间隔（秒）。
+# en: Queue interval (seconds).
+queue_interval_seconds = 1.0
+# zh: 是否启用 thinking（思维链）。
+# en: Enable thinking (reasoning).
+thinking_enabled = false
+# zh: thinking 预算 tokens。
+# en: Thinking-budget tokens.
+thinking_budget_tokens = 0
+# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
+# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+thinking_include_budget = true
+# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
+# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+thinking_tool_call_compat = false
 
 # zh: 嵌入模型配置（知识库语义检索使用）。
 # en: Embedding model config (used by knowledge semantic retrieval).
