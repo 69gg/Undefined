@@ -203,12 +203,19 @@ class HistorianWorker:
                 )
 
         metadata: dict[str, Any] = {
+            "request_id": job.get("request_id", ""),
+            "end_seq": job.get("end_seq", 0),
             "user_id": job.get("user_id", ""),
             "group_id": job.get("group_id", ""),
             "sender_id": job.get("sender_id", ""),
             "request_type": job.get("request_type", ""),
             "timestamp_utc": job.get("timestamp_utc", ""),
             "timestamp_local": job.get("timestamp_local", ""),
+            "timezone": job.get("timezone", ""),
+            "location_abs": job.get("location_abs", ""),
+            "message_ids": job.get("message_ids", []),
+            "has_new_info": bool(job.get("has_new_info", False)),
+            "schema_version": job.get("schema_version", "final_v1"),
             "is_absolute": is_absolute,
         }
         await self._vector_store.upsert_event(job_id, canonical, metadata)

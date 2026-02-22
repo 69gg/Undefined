@@ -32,12 +32,14 @@ class JobQueue:
         )
 
     async def enqueue(self, job: dict[str, Any]) -> str:
-        job_id = f"{job.get('request_id', str(uuid4()))}_{job.get('end_seq', 0)}_{int(time.time() * 1000)}"
+        request_id = str(job.get("request_id") or str(uuid4()))
+        end_seq = job.get("end_seq", 0)
+        job_id = f"{request_id}_{end_seq}_{int(time.time() * 1000)}"
         await write_json(self._pending_dir / f"{job_id}.json", job)
         logger.info(
             "[认知队列] 入队成功: job_id=%s request_id=%s user=%s group=%s sender=%s",
             job_id,
-            job.get("request_id", ""),
+            request_id,
             job.get("user_id", ""),
             job.get("group_id", ""),
             job.get("sender_id", ""),

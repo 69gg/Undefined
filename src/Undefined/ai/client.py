@@ -95,6 +95,7 @@ class AIClient:
         end_summary_storage: Optional[EndSummaryStorage] = None,
         bot_qq: int = 0,
         runtime_config: Config | None = None,
+        cognitive_service: Any = None,
     ) -> None:
         """初始化 AI 客户端
 
@@ -119,7 +120,7 @@ class AIClient:
         self._requester = ModelRequester(self._http_client, self._token_usage_storage)
         self._token_counter = TokenCounter()
         self._knowledge_manager: Any = None
-        self._cognitive_service: Any = None
+        self._cognitive_service: Any = cognitive_service
 
         # 私聊发送回调
         self._send_private_message_callback: Optional[
@@ -238,6 +239,7 @@ class AIClient:
             end_summary_storage=self._end_summary_storage,
             runtime_config_getter=self._get_runtime_config,
             anthropic_skill_registry=self.anthropic_skill_registry,
+            cognitive_service=self._cognitive_service,
         )
         self._multimodal = MultimodalAnalyzer(self._requester, self.vision_config)
         self._summary_service = SummaryService(
@@ -281,12 +283,15 @@ class AIClient:
                 logger.warning("[清理] 关闭知识库管理器失败: %s", exc)
             self._knowledge_manager = None
         cognitive_service = getattr(self, "_cognitive_service", None)
-        if cognitive_service is not None and hasattr(cognitive_service, "stop"):
-            try:
-                await cognitive_service.stop()
-            except Exception as exc:
-                logger.warning("[清理] 关闭认知记忆服务失败: %s", exc)
+        if cognitive_service is not None:
+            if hasattr(cognitive_service, "stop"):
+                try:
+                    await cognitive_service.stop()
+                except Exception as exc:
+                    logger.warning("[清理] 关闭认知记忆服务失败: %s", exc)
             self._cognitive_service = None
+            if hasattr(self, "_prompt_builder") and self._prompt_builder is not None:
+                self._prompt_builder.set_cognitive_service(None)
 
         # 2) 等待 MCP 初始化完成，再关闭 MCP toolsets
         if hasattr(self, "_mcp_init_task") and not self._mcp_init_task.done():
@@ -446,8 +451,10 @@ class AIClient:
 
     def set_cognitive_service(self, service: Any) -> None:
         self._cognitive_service = service
+        if hasattr(self, "_prompt_builder") and self._prompt_builder is not None:
+            self._prompt_builder.set_cognitive_service(service)
         logger.info(
-            "[AI客户端] 认知记忆服务已挂载: enabled=%s",
+            "[AI客户端] 认知记忆服务已挂载并同步到 PromptBuilder: enabled=%s",
             bool(getattr(service, "enabled", False)) if service is not None else False,
         )
 

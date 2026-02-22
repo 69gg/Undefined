@@ -56,6 +56,14 @@ class PromptBuilder:
         self._end_summaries: deque[EndSummaryRecord] = deque(maxlen=MAX_END_SUMMARIES)
         self._summaries_loaded = False
 
+    def set_cognitive_service(self, service: Any = None) -> None:
+        """更新认知记忆服务引用（支持运行时注入/替换）。"""
+        self._cognitive_service = service
+        logger.info(
+            "[Prompt] 认知服务引用已更新: enabled=%s",
+            bool(getattr(service, "enabled", False)) if service is not None else False,
+        )
+
     @property
     def end_summaries(self) -> deque[EndSummaryRecord]:
         """暴露短期摘要缓存，供工具执行上下文共享。"""
@@ -232,21 +240,35 @@ class PromptBuilder:
             self._cognitive_service, "enabled", False
         ):
             ctx = RequestContext.current()
-            cognitive_context = await self._cognitive_service.build_context(
-                query=question,
-                group_id=str(ctx.group_id)
+            resolved_group_id = (
+                str(ctx.group_id)
                 if ctx and ctx.group_id is not None
-                else (
-                    str(extra_context.get("group_id", "")) if extra_context else None
-                ),
-                user_id=str(ctx.user_id)
+                else (str(extra_context.get("group_id", "")) if extra_context else None)
+            )
+            resolved_user_id = (
+                str(ctx.user_id)
                 if ctx and ctx.user_id is not None
-                else (str(extra_context.get("user_id", "")) if extra_context else None),
-                sender_id=str(ctx.sender_id)
+                else (str(extra_context.get("user_id", "")) if extra_context else None)
+            )
+            resolved_sender_id = (
+                str(ctx.sender_id)
                 if ctx and ctx.sender_id is not None
                 else (
                     str(extra_context.get("sender_id", "")) if extra_context else None
-                ),
+                )
+            )
+            logger.info(
+                "[AI会话] 开始自动检索认知记忆: query_len=%s group=%s user=%s sender=%s",
+                len(question),
+                resolved_group_id or "",
+                resolved_user_id or "",
+                resolved_sender_id or "",
+            )
+            cognitive_context = await self._cognitive_service.build_context(
+                query=question,
+                group_id=resolved_group_id,
+                user_id=resolved_user_id,
+                sender_id=resolved_sender_id,
                 sender_name=str(extra_context.get("sender_name", ""))
                 if extra_context
                 else None,
@@ -256,7 +278,12 @@ class PromptBuilder:
             )
             if cognitive_context:
                 messages.append({"role": "system", "content": cognitive_context})
-                logger.info("[AI会话] 已注入认知记忆上下文")
+                logger.info(
+                    "[AI会话] 已注入认知记忆上下文: context_len=%s",
+                    len(cognitive_context),
+                )
+            else:
+                logger.info("[AI会话] 自动检索完成：未命中可注入认知记忆")
         elif self._end_summaries:
             summary_lines: list[str] = []
             for item in self._end_summaries:

@@ -35,29 +35,60 @@ class CognitiveService:
         if not self.enabled:
             logger.info("[认知服务] 已禁用，跳过入队")
             return None
+        if not str(action_summary or "").strip():
+            logger.info("[认知服务] action_summary 为空，跳过入队")
+            return None
         ctx = RequestContext.current()
         from datetime import datetime, timezone
 
-        now = datetime.now()
+        now = datetime.now().astimezone()
+        safe_request_id = (
+            str(ctx.request_id)
+            if ctx and str(ctx.request_id or "").strip()
+            else str(context.get("request_id", "")).strip()
+        )
+        if not safe_request_id:
+            # 最终兜底由 JobQueue 生成 request_id。
+            safe_request_id = ""
+
+        end_seq_raw = context.get("_end_seq", 0)
+        try:
+            end_seq = int(end_seq_raw)
+        except (TypeError, ValueError):
+            end_seq = 0
+
+        has_new_info = bool(str(new_info or "").strip())
+        message_ids = context.get("message_ids")
+        if not isinstance(message_ids, list):
+            message_ids = []
+
         job: dict[str, Any] = {
-            "request_id": ctx.request_id if ctx else "",
+            "request_id": safe_request_id,
+            "end_seq": end_seq,
             "user_id": str(ctx.user_id or "") if ctx else "",
             "group_id": str(ctx.group_id or "") if ctx else "",
             "sender_id": str(ctx.sender_id or "") if ctx else "",
-            "request_type": ctx.request_type if ctx else "",
+            "request_type": str(ctx.request_type) if ctx and ctx.request_type else "",
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "timestamp_local": now.isoformat(),
+            "timezone": str(now.tzinfo or ""),
+            "location_abs": str(
+                context.get("group_name") or context.get("sender_name") or ""
+            ),
+            "message_ids": message_ids,
             "action_summary": action_summary,
             "new_info": new_info,
-            "has_new_info": bool(new_info),
+            "has_new_info": has_new_info,
+            "schema_version": "final_v1",
         }
         logger.info(
-            "[认知服务] 准备入队: request_id=%s user=%s group=%s sender=%s has_new_info=%s action_len=%s new_info_len=%s",
+            "[认知服务] 准备入队: request_id=%s end_seq=%s user=%s group=%s sender=%s has_new_info=%s action_len=%s new_info_len=%s",
             job.get("request_id", ""),
+            job.get("end_seq", 0),
             job.get("user_id", ""),
             job.get("group_id", ""),
             job.get("sender_id", ""),
-            job["has_new_info"],
+            has_new_info,
             len(action_summary),
             len(new_info),
         )
