@@ -33,6 +33,7 @@ from .models import (
     EmbeddingModelConfig,
     ModelPool,
     ModelPoolEntry,
+    RerankModelConfig,
     SecurityModelConfig,
     VisionModelConfig,
 )
@@ -436,6 +437,7 @@ class Config:
     messages_send_url_file_max_size_mb: int
     # 嵌入模型
     embedding_model: EmbeddingModelConfig
+    rerank_model: RerankModelConfig
     # 知识库
     knowledge_enabled: bool
     knowledge_base_dir: str
@@ -446,6 +448,8 @@ class Config:
     knowledge_chunk_size: int
     knowledge_chunk_overlap: int
     knowledge_default_top_k: int
+    knowledge_enable_rerank: bool
+    knowledge_rerank_top_k: int
     # Bilibili 视频提取
     bilibili_auto_extract_enabled: bool
     bilibili_cookie: str
@@ -582,6 +586,7 @@ class Config:
         )
 
         embedding_model = cls._parse_embedding_model_config(data)
+        rerank_model = cls._parse_rerank_model_config(data)
 
         knowledge_enabled = _coerce_bool(
             _get_value(data, ("knowledge", "enabled"), None), False
@@ -620,6 +625,40 @@ class Config:
         )
         if knowledge_default_top_k <= 0:
             knowledge_default_top_k = 5
+        knowledge_enable_rerank = _coerce_bool(
+            _get_value(data, ("knowledge", "enable_rerank"), None), False
+        )
+        knowledge_rerank_top_k = _coerce_int(
+            _get_value(data, ("knowledge", "rerank_top_k"), None), 3
+        )
+        if knowledge_rerank_top_k <= 0:
+            knowledge_rerank_top_k = 3
+        if knowledge_default_top_k <= 1 and knowledge_enable_rerank:
+            logger.warning(
+                "[配置] knowledge.default_top_k=%s，无法满足 rerank_top_k < default_top_k，"
+                "已自动禁用重排",
+                knowledge_default_top_k,
+            )
+            knowledge_enable_rerank = False
+        if knowledge_rerank_top_k >= knowledge_default_top_k:
+            fallback = knowledge_default_top_k - 1
+            if fallback <= 0:
+                fallback = 1
+                knowledge_enable_rerank = False
+                logger.warning(
+                    "[配置] knowledge.rerank_top_k 需小于 knowledge.default_top_k，"
+                    "且当前 default_top_k=%s 无法满足约束，已自动禁用重排",
+                    knowledge_default_top_k,
+                )
+            else:
+                logger.warning(
+                    "[配置] knowledge.rerank_top_k 需小于 knowledge.default_top_k，"
+                    "已回退: rerank_top_k=%s -> %s (default_top_k=%s)",
+                    knowledge_rerank_top_k,
+                    fallback,
+                    knowledge_default_top_k,
+                )
+            knowledge_rerank_top_k = fallback
 
         chat_model = cls._parse_chat_model_config(data)
         vision_model = cls._parse_vision_model_config(data)
@@ -1155,6 +1194,7 @@ class Config:
             bilibili_auto_extract_group_ids=bilibili_auto_extract_group_ids,
             bilibili_auto_extract_private_ids=bilibili_auto_extract_private_ids,
             embedding_model=embedding_model,
+            rerank_model=rerank_model,
             knowledge_enabled=knowledge_enabled,
             knowledge_base_dir=knowledge_base_dir,
             knowledge_auto_scan=knowledge_auto_scan,
@@ -1164,6 +1204,8 @@ class Config:
             knowledge_chunk_size=knowledge_chunk_size,
             knowledge_chunk_overlap=knowledge_chunk_overlap,
             knowledge_default_top_k=knowledge_default_top_k,
+            knowledge_enable_rerank=knowledge_enable_rerank,
+            knowledge_rerank_top_k=knowledge_rerank_top_k,
         )
 
     @property
@@ -1341,6 +1383,39 @@ class Config:
             document_instruction=_coerce_str(
                 _get_value(data, ("models", "embedding", "document_instruction"), None),
                 "",
+            ),
+        )
+
+    @staticmethod
+    def _parse_rerank_model_config(data: dict[str, Any]) -> RerankModelConfig:
+        queue_interval_seconds = _coerce_float(
+            _get_value(data, ("models", "rerank", "queue_interval_seconds"), None),
+            1.0,
+        )
+        if queue_interval_seconds <= 0:
+            queue_interval_seconds = 1.0
+        return RerankModelConfig(
+            api_url=_coerce_str(
+                _get_value(
+                    data, ("models", "rerank", "api_url"), "RERANK_MODEL_API_URL"
+                ),
+                "",
+            ),
+            api_key=_coerce_str(
+                _get_value(
+                    data, ("models", "rerank", "api_key"), "RERANK_MODEL_API_KEY"
+                ),
+                "",
+            ),
+            model_name=_coerce_str(
+                _get_value(
+                    data, ("models", "rerank", "model_name"), "RERANK_MODEL_NAME"
+                ),
+                "",
+            ),
+            queue_interval_seconds=queue_interval_seconds,
+            query_instruction=_coerce_str(
+                _get_value(data, ("models", "rerank", "query_instruction"), None), ""
             ),
         )
 

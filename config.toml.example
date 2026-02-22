@@ -205,6 +205,87 @@ strategy = "default"
 # en: Agent model pool entries (model_name, api_url, api_key required; others optional, inherit from primary).
 models = []
 
+# zh: 嵌入模型配置（知识库语义检索使用）。
+# en: Embedding model config (used by knowledge semantic retrieval).
+[models.embedding]
+# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1。
+# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1.
+api_url = ""
+# zh: Embedding 模型 API Key。
+# en: Embedding model API key.
+api_key = ""
+# zh: Embedding 模型名称。
+# en: Embedding model name.
+model_name = ""
+# zh: 队列发车间隔（秒）。
+# en: Queue interval (seconds).
+queue_interval_seconds = 1.0
+# zh: 向量维度（可选）。0 或留空表示使用模型默认维度。
+# en: Embedding dimensions (optional). Use 0/empty to use model defaults.
+dimensions = 0
+# zh: 查询端指令前缀（可选，Qwen3/BGE 等模型常用）。
+# en: Query instruction prefix (optional, common for Qwen3/BGE-style models).
+query_instruction = ""
+# zh: 文档端指令前缀（可选，E5 等模型常用，例如 "passage: "）。
+# en: Document instruction prefix (optional, common for E5-style models, e.g. "passage: ").
+document_instruction = ""
+
+# zh: 重排模型配置（知识库二阶段检索使用）。
+# en: Rerank model config (used in second-stage knowledge retrieval).
+[models.rerank]
+# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1。
+# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1.
+api_url = ""
+# zh: Rerank 模型 API Key。
+# en: Rerank model API key.
+api_key = ""
+# zh: Rerank 模型名称。
+# en: Rerank model name.
+model_name = ""
+# zh: 队列发车间隔（秒）。
+# en: Queue interval (seconds).
+queue_interval_seconds = 1.0
+# zh: 查询端指令前缀（可选，部分 rerank 模型需要，如 "Instruct: ...\\nQuery: "）。
+# en: Query instruction prefix (optional, required by some rerank models, e.g. "Instruct: ...\\nQuery: ").
+query_instruction = ""
+
+# zh: 本地知识库配置。
+# en: Local knowledge base settings.
+[knowledge]
+# zh: 是否启用本地知识库。
+# en: Enable local knowledge base.
+enabled = false
+# zh: 知识库根目录。
+# en: Knowledge base root directory.
+base_dir = "knowledge"
+# zh: 是否定期扫描文本变更。
+# en: Periodically scan text changes.
+auto_scan = false
+# zh: 是否自动执行嵌入。
+# en: Automatically run embedding.
+auto_embed = false
+# zh: 扫描间隔（秒）。
+# en: Scan interval (seconds).
+scan_interval = 60.0
+# zh: 每批嵌入块数。
+# en: Embedding batch size.
+embed_batch_size = 64
+# zh: 每个向量块包含的行数（滑动窗口大小）。
+# en: Number of lines per chunk (sliding window size).
+chunk_size = 10
+# zh: 相邻块重叠的行数。
+# en: Overlap lines between adjacent chunks.
+chunk_overlap = 2
+# zh: 语义搜索默认召回数。
+# en: Default semantic retrieval top-k.
+default_top_k = 5
+# zh: 是否启用语义检索后的重排。
+# en: Enable reranking after semantic retrieval.
+enable_rerank = false
+# zh: 重排后返回条数（必须小于 default_top_k）。
+# en: Number of results returned after rerank (must be less than default_top_k).
+rerank_top_k = 3
+
 # zh: 日志配置。
 # en: Logging settings.
 [logging]

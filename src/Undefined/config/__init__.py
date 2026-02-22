@@ -10,6 +10,7 @@ from .models import (
     EmbeddingModelConfig,
     ModelPool,
     ModelPoolEntry,
+    RerankModelConfig,
     SecurityModelConfig,
     VisionModelConfig,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "SecurityModelConfig",
     "AgentModelConfig",
     "EmbeddingModelConfig",
+    "RerankModelConfig",
     "ModelPool",
     "ModelPoolEntry",
     "get_config",

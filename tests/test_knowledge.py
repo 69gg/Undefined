@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from Undefined.knowledge.chunker import chunk_lines
 from Undefined.knowledge.embedder import Embedder
 from Undefined.knowledge.manager import KnowledgeManager
+from Undefined.knowledge.reranker import Reranker
 
 
 # ── chunker ──────────────────────────────────────────────────────────────────
@@ -101,6 +102,42 @@ async def test_embedder_queue_serializes() -> None:
     )
     assert len(results) == 3
     assert sorted(order) == [1, 2, 3]
+
+
+# ── reranker ────────────────────────────────────────────────────────────────
+
+
+def _make_reranker() -> tuple[Reranker, MagicMock]:
+    requester = MagicMock()
+    config = MagicMock()
+    config.queue_interval_seconds = 0.0
+    reranker = Reranker(requester, config)
+    return reranker, requester
+
+
+async def test_reranker_queue_serializes() -> None:
+    reranker, requester = _make_reranker()
+    order: list[str] = []
+
+    async def fake_rerank(
+        model_config: Any,
+        query: str,
+        documents: list[str],
+        top_n: int | None = None,
+    ) -> list[dict[str, Any]]:
+        order.append(query)
+        return [{"index": 0, "relevance_score": 0.9, "document": documents[0]}]
+
+    requester.rerank = fake_rerank
+    reranker.start()
+
+    results = await asyncio.gather(
+        reranker.rerank("q1", ["a"]),
+        reranker.rerank("q2", ["b"]),
+        reranker.rerank("q3", ["c"]),
+    )
+    assert len(results) == 3
+    assert sorted(order) == ["q1", "q2", "q3"]
 
 
 # ── manager ──────────────────────────────────────────────────────────────────
@@ -210,3 +247,109 @@ async def test_embed_skips_unchanged_files(tmp_path: Path) -> None:
         # 第二次扫描，文件未变，不应再次嵌入
         await manager.embed_knowledge_base("kb1")
         assert embedder.embed.call_count == first_call_count
+
+
+async def test_semantic_search_with_rerank(tmp_path: Path) -> None:
+    embedder = MagicMock(spec=Embedder)
+    embedder.embed = AsyncMock(return_value=[[0.1, 0.2]])
+    embedder._config = MagicMock(query_instruction="")
+
+    reranker = MagicMock(spec=Reranker)
+    reranker.rerank = AsyncMock(
+        return_value=[
+            {"index": 1, "relevance_score": 0.91},
+            {"index": 0, "relevance_score": 0.84},
+        ]
+    )
+
+    manager = KnowledgeManager(
+        base_dir=tmp_path,
+        embedder=embedder,
+        reranker=reranker,
+        default_top_k=3,
+        rerank_enabled=True,
+        rerank_top_k=2,
+    )
+
+    with patch.object(manager, "_get_store") as mock_store:
+        store = AsyncMock()
+        store.query = AsyncMock(
+            return_value=[
+                {"content": "a", "metadata": {"source": "a.txt"}, "distance": 0.2},
+                {"content": "b", "metadata": {"source": "b.txt"}, "distance": 0.1},
+                {"content": "c", "metadata": {"source": "c.txt"}, "distance": 0.3},
+            ]
+        )
+        mock_store.return_value = store
+
+        results = await manager.semantic_search("kb1", "hello")
+
+    assert [item["content"] for item in results] == ["b", "a"]
+    assert results[0]["rerank_score"] == 0.91
+    reranker.rerank.assert_called_once()
+
+
+async def test_semantic_search_rerank_override_disabled(tmp_path: Path) -> None:
+    embedder = MagicMock(spec=Embedder)
+    embedder.embed = AsyncMock(return_value=[[0.1, 0.2]])
+    embedder._config = MagicMock(query_instruction="")
+
+    reranker = MagicMock(spec=Reranker)
+    reranker.rerank = AsyncMock(return_value=[])
+
+    manager = KnowledgeManager(
+        base_dir=tmp_path,
+        embedder=embedder,
+        reranker=reranker,
+        default_top_k=3,
+        rerank_enabled=True,
+        rerank_top_k=2,
+    )
+
+    with patch.object(manager, "_get_store") as mock_store:
+        store = AsyncMock()
+        store.query = AsyncMock(
+            return_value=[
+                {"content": "a", "metadata": {}, "distance": 0.2},
+                {"content": "b", "metadata": {}, "distance": 0.1},
+            ]
+        )
+        mock_store.return_value = store
+
+        results = await manager.semantic_search("kb1", "hello", enable_rerank=False)
+
+    assert [item["content"] for item in results] == ["a", "b"]
+    reranker.rerank.assert_not_called()
+
+
+async def test_semantic_search_rerank_top_k_must_be_smaller(tmp_path: Path) -> None:
+    embedder = MagicMock(spec=Embedder)
+    embedder.embed = AsyncMock(return_value=[[0.1, 0.2]])
+    embedder._config = MagicMock(query_instruction="")
+
+    reranker = MagicMock(spec=Reranker)
+    reranker.rerank = AsyncMock(return_value=[{"index": 1, "relevance_score": 0.99}])
+
+    manager = KnowledgeManager(
+        base_dir=tmp_path,
+        embedder=embedder,
+        reranker=reranker,
+        default_top_k=3,
+        rerank_enabled=True,
+        rerank_top_k=3,
+    )
+
+    with patch.object(manager, "_get_store") as mock_store:
+        store = AsyncMock()
+        store.query = AsyncMock(
+            return_value=[
+                {"content": "a", "metadata": {}, "distance": 0.2},
+                {"content": "b", "metadata": {}, "distance": 0.1},
+            ]
+        )
+        mock_store.return_value = store
+
+        results = await manager.semantic_search("kb1", "hello", top_k=2, rerank_top_k=2)
+
+    assert len(results) == 1
+    assert results[0]["content"] == "b"

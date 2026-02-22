@@ -14,6 +14,7 @@ from Undefined.knowledge.store import KnowledgeStore
 
 if TYPE_CHECKING:
     from Undefined.knowledge.embedder import Embedder
+    from Undefined.knowledge.reranker import Reranker
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +26,21 @@ class KnowledgeManager:
         self,
         base_dir: str | Path,
         embedder: Embedder,
+        reranker: Reranker | None = None,
         default_top_k: int = 5,
         chunk_size: int = 10,
         chunk_overlap: int = 2,
+        rerank_enabled: bool = False,
+        rerank_top_k: int = 3,
     ) -> None:
         self._base_dir = Path(base_dir)
         self._embedder = embedder
+        self._reranker = reranker
         self._default_top_k = default_top_k
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
+        self._rerank_enabled = rerank_enabled
+        self._rerank_top_k = rerank_top_k
         self._stores: dict[str, KnowledgeStore] = {}
         self._scan_task: asyncio.Task[None] | None = None
 
@@ -150,13 +157,106 @@ class KnowledgeManager:
         kb_name: str,
         query: str,
         top_k: int | None = None,
+        enable_rerank: bool | None = None,
+        rerank_top_k: int | None = None,
     ) -> list[dict[str, Any]]:
         """在指定知识库中语义搜索。"""
         k = top_k or self._default_top_k
+        if k <= 0:
+            k = self._default_top_k
         instruction = getattr(self._embedder._config, "query_instruction", "")
         query_input = f"{instruction}{query}" if instruction else query
         query_emb = (await self._embedder.embed([query_input]))[0]
-        return await self._get_store(kb_name).query(query_emb, k)
+        results = await self._get_store(kb_name).query(query_emb, k)
+        if not results:
+            return []
+
+        should_rerank, final_rerank_top_k = self._resolve_rerank_plan(
+            semantic_top_k=k,
+            enable_rerank=enable_rerank,
+            rerank_top_k=rerank_top_k,
+        )
+        if not should_rerank:
+            return results
+        return await self._apply_rerank(
+            query=query,
+            results=results,
+            rerank_top_k=final_rerank_top_k,
+        )
+
+    def _resolve_rerank_plan(
+        self,
+        *,
+        semantic_top_k: int,
+        enable_rerank: bool | None,
+        rerank_top_k: int | None,
+    ) -> tuple[bool, int]:
+        if self._reranker is None:
+            return False, 0
+
+        enabled = self._rerank_enabled if enable_rerank is None else bool(enable_rerank)
+        if not enabled:
+            return False, 0
+        if semantic_top_k <= 1:
+            return False, 0
+
+        candidate_top_k = self._rerank_top_k if rerank_top_k is None else rerank_top_k
+        if candidate_top_k <= 0:
+            return False, 0
+
+        if candidate_top_k >= semantic_top_k:
+            candidate_top_k = semantic_top_k - 1
+        if candidate_top_k <= 0:
+            return False, 0
+        return True, candidate_top_k
+
+    async def _apply_rerank(
+        self,
+        *,
+        query: str,
+        results: list[dict[str, Any]],
+        rerank_top_k: int,
+    ) -> list[dict[str, Any]]:
+        if self._reranker is None or not results:
+            return results
+
+        docs = [str(item.get("content", "")) for item in results]
+        reranked = await self._reranker.rerank(
+            query=query,
+            documents=docs,
+            top_n=min(rerank_top_k, len(docs)),
+        )
+
+        reordered: list[dict[str, Any]] = []
+        used_indices: set[int] = set()
+        for item in reranked:
+            idx_raw = item.get("index")
+            if isinstance(idx_raw, int):
+                idx = idx_raw
+            elif isinstance(idx_raw, str):
+                try:
+                    idx = int(idx_raw)
+                except ValueError:
+                    continue
+            elif isinstance(idx_raw, float):
+                idx = int(idx_raw)
+            else:
+                continue
+            if idx < 0 or idx >= len(results) or idx in used_indices:
+                continue
+            enriched = dict(results[idx])
+            try:
+                enriched["rerank_score"] = float(item.get("relevance_score", 0.0))
+            except (TypeError, ValueError):
+                enriched["rerank_score"] = 0.0
+            reordered.append(enriched)
+            used_indices.add(idx)
+            if len(reordered) >= rerank_top_k:
+                break
+
+        if reordered:
+            return reordered
+        return results[:rerank_top_k]
 
     def start_auto_scan(self, interval: float) -> None:
         if self._scan_task is not None:
@@ -177,3 +277,5 @@ class KnowledgeManager:
         if self._scan_task:
             self._scan_task.cancel()
             self._scan_task = None
+        if self._reranker:
+            await self._reranker.stop()

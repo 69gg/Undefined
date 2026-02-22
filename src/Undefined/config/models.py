@@ -94,6 +94,17 @@ class EmbeddingModelConfig:
 
 
 @dataclass
+class RerankModelConfig:
+    """重排模型配置"""
+
+    api_url: str
+    api_key: str
+    model_name: str
+    queue_interval_seconds: float = 1.0
+    query_instruction: str = ""  # 查询端指令前缀（如部分 rerank 模型需要）
+
+
+@dataclass
 class AgentModelConfig:
     """Agent 模型配置（用于执行 agents）"""
 
