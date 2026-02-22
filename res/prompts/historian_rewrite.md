@@ -16,4 +16,4 @@
 action_summary: {action_summary}
 new_info: {new_info}
 
-请输出改写后的 canonical_text（纯文本，不要 JSON）：
+请调用 submit_rewrite 工具提交改写后的事件文本。

@@ -17,6 +17,21 @@ _PRONOUN_RE = re.compile(
 _REL_TIME_RE = re.compile(r"(今天|昨天|明天|刚才|刚刚|稍后|上周|下周|最近)")
 _REL_PLACE_RE = re.compile(r"(这里|那边|本地|当地|这儿|那儿)")
 
+_REWRITE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "submit_rewrite",
+        "description": "提交绝对化改写后的事件文本",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "改写后的纯文本"},
+            },
+            "required": ["text"],
+        },
+    },
+}
+
 _PROFILE_TOOL = {
     "type": "function",
     "function": {
@@ -147,9 +162,13 @@ class HistorianWorker:
         response = await self._ai_client.request_model(
             model_config=self._model_config or self._ai_client.agent_config,
             messages=[{"role": "user", "content": prompt}],
+            tools=[_REWRITE_TOOL],
+            tool_choice={"type": "function", "function": {"name": "submit_rewrite"}},
             call_type="historian_rewrite",
         )
-        return str(response.choices[0].message.content).strip()
+        tool_call = response.choices[0].message.tool_calls[0]
+        args = json.loads(tool_call.function.arguments)
+        return str(args.get("text", "")).strip()
 
     async def _merge_profile(
         self, job: dict[str, Any], canonical: str, event_id: str
