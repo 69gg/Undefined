@@ -14,12 +14,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _create_future() -> asyncio.Future[list[list[float]]]:
+    return asyncio.get_running_loop().create_future()
+
+
 @dataclass
 class _EmbedJob:
     texts: list[str]
-    future: asyncio.Future[list[list[float]]] = field(
-        default_factory=lambda: asyncio.get_event_loop().create_future()
-    )
+    future: asyncio.Future[list[list[float]]] = field(default_factory=_create_future)
 
 
 class Embedder:

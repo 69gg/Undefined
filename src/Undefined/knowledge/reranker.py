@@ -11,14 +11,16 @@ if TYPE_CHECKING:
     from Undefined.config.models import RerankModelConfig
 
 
+def _create_future() -> asyncio.Future[list[dict[str, Any]]]:
+    return asyncio.get_running_loop().create_future()
+
+
 @dataclass
 class _RerankJob:
     query: str
     documents: list[str]
     top_n: int | None
-    future: asyncio.Future[list[dict[str, Any]]] = field(
-        default_factory=lambda: asyncio.get_event_loop().create_future()
-    )
+    future: asyncio.Future[list[dict[str, Any]]] = field(default_factory=_create_future)
 
 
 class Reranker:

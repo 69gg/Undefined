@@ -204,6 +204,14 @@ async def main() -> None:
         if config.knowledge_enabled:
             from Undefined.knowledge import Embedder, KnowledgeManager, Reranker
 
+            if (
+                not config.embedding_model.api_url
+                or not config.embedding_model.model_name
+            ):
+                raise ValueError(
+                    "知识库已启用，但 models.embedding.api_url / model_name 未配置完整"
+                )
+
             _embedder = Embedder(
                 ai._requester,
                 config.embedding_model,
@@ -235,6 +243,8 @@ async def main() -> None:
             ai.set_knowledge_manager(knowledge_manager)
             if config.knowledge_auto_scan and config.knowledge_auto_embed:
                 knowledge_manager.start_auto_scan(config.knowledge_scan_interval)
+            elif config.knowledge_auto_embed:
+                knowledge_manager.start_initial_scan()
             logger.info("[知识库] 初始化完成: base_dir=%s", config.knowledge_base_dir)
 
         handler = MessageHandler(config, onebot, ai, faq_storage, task_storage)

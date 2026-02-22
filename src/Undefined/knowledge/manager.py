@@ -7,9 +7,12 @@ import hashlib
 import json
 import logging
 import os
+import re
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from chromadb.errors import NotFoundError
 
 from Undefined.knowledge.chunker import chunk_lines
 from Undefined.knowledge.store import KnowledgeStore
@@ -23,6 +26,7 @@ logger = logging.getLogger(__name__)
 _MANIFEST_FILE = ".manifest.json"
 _INTRO_FILE = "intro.md"
 _IGNORED_DIRS = {"chroma", ".git", "__pycache__"}
+_COLLECTION_NAME_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_-]{1,61}[A-Za-z0-9])$")
 _SUPPORTED_TEXT_EXTENSIONS = {
     ".txt",
     ".md",
@@ -65,22 +69,63 @@ class KnowledgeManager:
         self._rerank_top_k = rerank_top_k
         self._stores: dict[str, KnowledgeStore] = {}
         self._scan_task: asyncio.Task[None] | None = None
+        self._initial_scan_task: asyncio.Task[None] | None = None
+
+    def _resolve_kb_dir(self, kb_name: str) -> Path | None:
+        raw = str(kb_name or "").strip()
+        if not raw:
+            return None
+        kb_path = Path(raw)
+        if kb_path.is_absolute():
+            return None
+        if len(kb_path.parts) != 1 or kb_path.parts[0] in {".", ".."}:
+            return None
+        candidate = (self._base_dir / kb_path.parts[0]).resolve()
+        base_dir = self._base_dir.resolve()
+        if candidate == base_dir or base_dir not in candidate.parents:
+            return None
+        return candidate
+
+    def _collection_name_for_kb(self, kb_name: str) -> str:
+        name = str(kb_name or "").strip()
+        if _COLLECTION_NAME_RE.fullmatch(name):
+            return name
+        digest = hashlib.sha1(name.encode("utf-8"), usedforsecurity=False).hexdigest()[
+            :24
+        ]
+        return f"kb_{digest}"
 
     def _get_store(self, name: str) -> KnowledgeStore:
         if name not in self._stores:
-            chroma_dir = self._base_dir / name / "chroma"
+            kb_dir = self._resolve_kb_dir(name)
+            if kb_dir is None:
+                raise ValueError(f"invalid knowledge base name: {name!r}")
+            chroma_dir = kb_dir / "chroma"
             chroma_dir.mkdir(parents=True, exist_ok=True)
-            self._stores[name] = KnowledgeStore(name, chroma_dir)
+            self._stores[name] = KnowledgeStore(
+                self._collection_name_for_kb(name),
+                chroma_dir,
+            )
         return self._stores[name]
 
     def _get_existing_store(self, name: str) -> KnowledgeStore | None:
         cached = self._stores.get(name)
         if cached is not None:
             return cached
-        chroma_dir = self._base_dir / name / "chroma"
+        kb_dir = self._resolve_kb_dir(name)
+        if kb_dir is None:
+            return None
+        chroma_dir = kb_dir / "chroma"
         if not chroma_dir.exists() or not chroma_dir.is_dir():
             return None
-        store = KnowledgeStore(name, chroma_dir)
+        try:
+            store = KnowledgeStore(
+                self._collection_name_for_kb(name),
+                chroma_dir,
+                create_if_missing=False,
+            )
+        except NotFoundError:
+            return None
         self._stores[name] = store
         return store
 
@@ -121,7 +166,10 @@ class KnowledgeManager:
         return files
 
     def read_knowledge_base_intro(self, kb_name: str, max_chars: int = 300) -> str:
-        intro_path = self._base_dir / kb_name / _INTRO_FILE
+        kb_dir = self._resolve_kb_dir(kb_name)
+        if kb_dir is None:
+            return ""
+        intro_path = kb_dir / _INTRO_FILE
         if not intro_path.exists():
             return ""
         try:
@@ -153,14 +201,20 @@ class KnowledgeManager:
         return infos
 
     async def _load_manifest(self, kb_name: str) -> dict[str, str]:
-        path = self._base_dir / kb_name / _MANIFEST_FILE
+        kb_dir = self._resolve_kb_dir(kb_name)
+        if kb_dir is None:
+            return {}
+        path = kb_dir / _MANIFEST_FILE
         if not path.exists():
             return {}
         text = await asyncio.to_thread(path.read_text, "utf-8")
         return json.loads(text)  # type: ignore[no-any-return]
 
     async def _save_manifest(self, kb_name: str, manifest: dict[str, str]) -> None:
-        path = self._base_dir / kb_name / _MANIFEST_FILE
+        kb_dir = self._resolve_kb_dir(kb_name)
+        if kb_dir is None:
+            return
+        path = kb_dir / _MANIFEST_FILE
         content = json.dumps(manifest, ensure_ascii=False, indent=2)
         await asyncio.to_thread(path.write_text, content, "utf-8")
 
@@ -170,8 +224,8 @@ class KnowledgeManager:
 
     async def embed_knowledge_base(self, kb_name: str) -> int:
         """扫描并嵌入一个知识库的新增/变更文件，返回新增行数。"""
-        kb_dir = self._base_dir / kb_name
-        if not kb_dir.exists():
+        kb_dir = self._resolve_kb_dir(kb_name)
+        if kb_dir is None or not kb_dir.exists():
             return 0
 
         manifest = await self._load_manifest(kb_name)
@@ -248,8 +302,8 @@ class KnowledgeManager:
         source_keyword: str | None = None,
     ) -> list[dict[str, Any]]:
         """在指定知识库的原始文本中关键词搜索。"""
-        kb_dir = self._base_dir / kb_name
-        if not kb_dir.exists():
+        kb_dir = self._resolve_kb_dir(kb_name)
+        if kb_dir is None or not kb_dir.exists():
             return []
 
         results: list[dict[str, Any]] = []
@@ -290,8 +344,8 @@ class KnowledgeManager:
         rerank_top_k: int | None = None,
     ) -> list[dict[str, Any]]:
         """在指定知识库中语义搜索。"""
-        kb_dir = self._base_dir / kb_name
-        if not kb_dir.exists() or not (kb_dir / "texts").exists():
+        kb_dir = self._resolve_kb_dir(kb_name)
+        if kb_dir is None or not kb_dir.exists() or not (kb_dir / "texts").exists():
             return []
         store = self._get_existing_store(kb_name)
         if store is None:
@@ -403,6 +457,21 @@ class KnowledgeManager:
             return
         self._scan_task = asyncio.create_task(self._auto_scan_loop(interval))
 
+    def start_initial_scan(self) -> None:
+        if self._initial_scan_task is not None:
+            return
+        self._initial_scan_task = asyncio.create_task(self._initial_scan_once())
+
+    async def _initial_scan_once(self) -> None:
+        try:
+            added = await self.scan_and_embed_all()
+            if added:
+                logger.info("[知识库] 启动扫描: 新增 %s 行", added)
+        except Exception as exc:
+            logger.error("[知识库] 启动扫描异常: %s", exc)
+        finally:
+            self._initial_scan_task = None
+
     async def _auto_scan_loop(self, interval: float) -> None:
         while True:
             try:
@@ -414,6 +483,11 @@ class KnowledgeManager:
             await asyncio.sleep(interval)
 
     async def stop(self) -> None:
+        if self._initial_scan_task:
+            self._initial_scan_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._initial_scan_task
+            self._initial_scan_task = None
         if self._scan_task:
             self._scan_task.cancel()
             with suppress(asyncio.CancelledError):

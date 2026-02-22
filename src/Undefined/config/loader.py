@@ -1152,6 +1152,8 @@ class Config:
                 chat_model=chat_model,
                 vision_model=vision_model,
                 agent_model=agent_model,
+                knowledge_enabled=knowledge_enabled,
+                embedding_model=embedding_model,
             )
 
         cls._log_debug_info(
@@ -1866,6 +1868,8 @@ class Config:
         chat_model: ChatModelConfig,
         vision_model: VisionModelConfig,
         agent_model: AgentModelConfig,
+        knowledge_enabled: bool,
+        embedding_model: EmbeddingModelConfig,
     ) -> None:
         missing: list[str] = []
         if bot_qq <= 0:
@@ -1892,6 +1896,11 @@ class Config:
             missing.append("models.agent.api_key")
         if not agent_model.model_name:
             missing.append("models.agent.model_name")
+        if knowledge_enabled:
+            if not embedding_model.api_url:
+                missing.append("models.embedding.api_url")
+            if not embedding_model.model_name:
+                missing.append("models.embedding.model_name")
         if missing:
             raise ValueError(f"缺少必需配置: {', '.join(missing)}")
 

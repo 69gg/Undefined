@@ -1,4 +1,6 @@
 from __future__ import annotations
+import math
+from pathlib import Path
 from typing import Any
 import json
 
@@ -53,6 +55,33 @@ def _trim_text(text: str, max_chars: int) -> str:
     return f"{text[: max_chars - 1].rstrip()}…"
 
 
+def _is_valid_kb_name(value: str) -> bool:
+    stripped = value.strip()
+    if not stripped:
+        return False
+    kb_path = Path(stripped)
+    return (
+        not kb_path.is_absolute()
+        and len(kb_path.parts) == 1
+        and kb_path.parts[0] not in {".", ".."}
+    )
+
+
+def _distance_to_relevance(value: Any) -> float:
+    try:
+        distance = float(value)
+    except (TypeError, ValueError):
+        distance = 1.0
+    if not math.isfinite(distance):
+        distance = 1.0
+    relevance = 1.0 - distance
+    if relevance < 0.0:
+        relevance = 0.0
+    elif relevance > 1.0:
+        relevance = 1.0
+    return round(relevance, 4)
+
+
 async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     km = context.get("knowledge_manager")
     if km is None:
@@ -61,6 +90,8 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     query = str(args.get("query", "")).strip()
     if not kb or not query:
         return "错误：knowledge_base 和 query 不能为空"
+    if not _is_valid_kb_name(kb):
+        return "错误：knowledge_base 格式非法"
 
     enable_rerank = _parse_bool(args.get("enable_rerank"), default=False)
 
@@ -117,7 +148,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         source = str((r.get("metadata") or {}).get("source", ""))
         if source_keyword and source_keyword not in source.lower():
             continue
-        relevance = round(1 - float(r.get("distance", 0)), 4)
+        relevance = _distance_to_relevance(r.get("distance", 1.0))
         if relevance < min_relevance:
             continue
         text = _trim_text(str(r.get("content", "")), int(max_chars_per_item or 0))

@@ -1,4 +1,6 @@
 from __future__ import annotations
+import asyncio
+from pathlib import Path
 from typing import Any
 import json
 
@@ -38,6 +40,18 @@ def _trim_text(text: str, max_chars: int) -> str:
     return f"{text[: max_chars - 1].rstrip()}…"
 
 
+def _is_valid_kb_name(value: str) -> bool:
+    stripped = value.strip()
+    if not stripped:
+        return False
+    kb_path = Path(stripped)
+    return (
+        not kb_path.is_absolute()
+        and len(kb_path.parts) == 1
+        and kb_path.parts[0] not in {".", ".."}
+    )
+
+
 async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     km = context.get("knowledge_manager")
     if km is None:
@@ -46,6 +60,8 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     keyword = str(args.get("keyword", "")).strip()
     if not kb or not keyword:
         return "错误：knowledge_base 和 keyword 不能为空"
+    if not _is_valid_kb_name(kb):
+        return "错误：knowledge_base 格式非法"
 
     try:
         max_lines = _parse_int(
@@ -68,7 +84,8 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     include_source = _parse_bool(args.get("include_source"), default=True)
     source_keyword = str(args.get("source_keyword") or "").strip()
 
-    results = km.text_search(
+    results = await asyncio.to_thread(
+        km.text_search,
         kb,
         keyword,
         max_lines=max_lines,

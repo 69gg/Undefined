@@ -16,16 +16,26 @@ logger = logging.getLogger(__name__)
 class KnowledgeStore:
     """管理单个知识库的 ChromaDB collection。"""
 
-    def __init__(self, name: str, chroma_dir: Path) -> None:
+    def __init__(
+        self, name: str, chroma_dir: Path, *, create_if_missing: bool = True
+    ) -> None:
         self.name = name
         self._client = chromadb.PersistentClient(path=str(chroma_dir))
-        self._collection = self._client.get_or_create_collection(
-            name=name,
-            metadata={"hnsw:space": "cosine"},
-        )
+        if create_if_missing:
+            self._collection = self._client.get_or_create_collection(
+                name=name,
+                metadata={"hnsw:space": "cosine"},
+            )
+        else:
+            self._collection = self._client.get_collection(name=name)
 
     def _content_hash(self, text: str) -> str:
         return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+    def _chunk_id(self, source: str, chunk_index: int, text: str) -> str:
+        content_hash = self._content_hash(text)
+        payload = f"{source}:{chunk_index}:{content_hash}"
+        return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
     async def add_chunks(
         self,
@@ -35,7 +45,8 @@ class KnowledgeStore:
     ) -> int:
         if not chunks:
             return 0
-        ids = [self._content_hash(c) for c in chunks]
+        source = str((metadata_base or {}).get("source", "") or "")
+        ids = [self._chunk_id(source, i, c) for i, c in enumerate(chunks)]
         metadatas: list[dict[str, Any]] = [
             {**(metadata_base or {}), "chunk_index": i} for i in range(len(chunks))
         ]

@@ -8,10 +8,12 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from chromadb.errors import NotFoundError
 from Undefined.knowledge.chunker import chunk_lines
 from Undefined.knowledge.embedder import Embedder
 from Undefined.knowledge.manager import KnowledgeManager
 from Undefined.knowledge.reranker import Reranker
+from Undefined.knowledge.store import KnowledgeStore
 
 
 # ── chunker ──────────────────────────────────────────────────────────────────
@@ -44,6 +46,15 @@ def test_chunk_lines_overlap() -> None:
 def test_chunk_lines_smaller_than_window() -> None:
     text = "l1\nl2"
     assert chunk_lines(text, window=10, overlap=2) == ["l1\nl2"]
+
+
+def test_store_content_hash_includes_source() -> None:
+    store = KnowledgeStore.__new__(KnowledgeStore)
+    h1 = store._chunk_id("texts/a.txt", 0, "same chunk")
+    h2 = store._chunk_id("texts/b.txt", 0, "same chunk")
+    h3 = store._chunk_id("texts/a.txt", 1, "same chunk")
+    assert h1 != h2
+    assert h1 != h3
 
 
 # ── embedder ─────────────────────────────────────────────────────────────────
@@ -179,6 +190,42 @@ def test_list_knowledge_bases_supports_texts_subdirs(tmp_path: Path) -> None:
     assert manager.list_knowledge_bases() == ["kb1", "kb2"]
 
 
+def test_get_existing_store_uses_read_only_collection(tmp_path: Path) -> None:
+    manager, _ = _make_manager(tmp_path)
+    _make_kb(tmp_path, "kb1", {"a.txt": "hello"})
+    chroma_dir = tmp_path / "kb1" / "chroma"
+    chroma_dir.mkdir(parents=True)
+
+    with patch("Undefined.knowledge.manager.KnowledgeStore") as mock_store_cls:
+        store = MagicMock()
+        mock_store_cls.return_value = store
+        result = manager._get_existing_store("kb1")
+
+    assert result is store
+    mock_store_cls.assert_called_once_with("kb1", chroma_dir, create_if_missing=False)
+
+
+def test_get_existing_store_returns_none_when_collection_missing(
+    tmp_path: Path,
+) -> None:
+    manager, _ = _make_manager(tmp_path)
+    _make_kb(tmp_path, "kb1", {"a.txt": "hello"})
+    (tmp_path / "kb1" / "chroma").mkdir(parents=True)
+
+    with patch(
+        "Undefined.knowledge.manager.KnowledgeStore",
+        side_effect=NotFoundError("not found"),
+    ):
+        assert manager._get_existing_store("kb1") is None
+
+
+def test_collection_name_fallback_for_invalid_kb_name(tmp_path: Path) -> None:
+    manager, _ = _make_manager(tmp_path)
+    collection_name = manager._collection_name_for_kb("foo/bar")
+    assert collection_name.startswith("kb_")
+    assert len(collection_name) == 27
+
+
 def test_list_knowledge_base_infos(tmp_path: Path) -> None:
     manager, _ = _make_manager(tmp_path)
     _make_kb(tmp_path, "kb1", {"a.txt": "hello"})
@@ -288,6 +335,11 @@ def test_text_search_missing_kb(tmp_path: Path) -> None:
     assert manager.text_search("nonexistent", "keyword") == []
 
 
+def test_text_search_invalid_kb_name(tmp_path: Path) -> None:
+    manager, _ = _make_manager(tmp_path)
+    assert manager.text_search("../escape", "keyword") == []
+
+
 async def test_embed_knowledge_base(tmp_path: Path) -> None:
     manager, embedder = _make_manager(tmp_path)
     embedder.embed = AsyncMock(return_value=[[0.1, 0.2]])
@@ -306,6 +358,13 @@ async def test_embed_knowledge_base(tmp_path: Path) -> None:
     # 默认 window=10，3行合并为1个块
     called_chunks = embedder.embed.call_args[0][0]
     assert called_chunks == ["line one\nline two\nline three"]
+
+
+async def test_embed_knowledge_base_invalid_kb_name(tmp_path: Path) -> None:
+    manager, embedder = _make_manager(tmp_path)
+    added = await manager.embed_knowledge_base("../escape")
+    assert added == 0
+    embedder.embed.assert_not_called()
 
 
 async def test_embed_skips_unchanged_files(tmp_path: Path) -> None:
@@ -395,6 +454,13 @@ async def test_semantic_search_missing_kb_does_not_create_store(tmp_path: Path) 
     assert results == []
     embedder.embed.assert_not_called()
     assert not (tmp_path / "missing" / "chroma").exists()
+
+
+async def test_semantic_search_invalid_kb_name(tmp_path: Path) -> None:
+    manager, embedder = _make_manager(tmp_path)
+    results = await manager.semantic_search("../escape", "hello")
+    assert results == []
+    embedder.embed.assert_not_called()
 
 
 async def test_semantic_search_without_index_returns_empty(tmp_path: Path) -> None:

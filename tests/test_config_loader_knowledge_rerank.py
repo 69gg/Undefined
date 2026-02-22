@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from Undefined.config.loader import Config
 
 
@@ -53,3 +55,41 @@ query_instruction = "Instruct: 检索相关文档\\nQuery: "
 """,
     )
     assert cfg.rerank_model.query_instruction.startswith("Instruct:")
+
+
+def test_knowledge_enabled_requires_embedding_model_in_strict_mode(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        """
+[core]
+bot_qq = 1
+superadmin_qq = 2
+
+[onebot]
+ws_url = "ws://localhost:3001"
+
+[models.chat]
+api_url = "https://api.openai.com/v1"
+api_key = "sk-chat"
+model_name = "chat-model"
+
+[models.vision]
+api_url = "https://api.openai.com/v1"
+api_key = "sk-vision"
+model_name = "vision-model"
+
+[models.agent]
+api_url = "https://api.openai.com/v1"
+api_key = "sk-agent"
+model_name = "agent-model"
+
+[knowledge]
+enabled = true
+""",
+        "utf-8",
+    )
+
+    with pytest.raises(ValueError, match="models\\.embedding\\.api_url"):
+        Config.load(config_path, strict=True)

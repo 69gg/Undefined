@@ -105,3 +105,45 @@ async def test_knowledge_semantic_search_handler_applies_post_filters() -> None:
     assert payload["count"] == 1
     assert payload["items"][0]["source"] == "texts/docs/a.md"
     assert payload["items"][0]["relevance"] == 0.95
+
+
+async def test_knowledge_text_search_handler_rejects_invalid_kb_name() -> None:
+    result = await knowledge_text_search_handler.execute(
+        {
+            "knowledge_base": "../etc",
+            "keyword": "x",
+        },
+        {"knowledge_manager": MagicMock()},
+    )
+    assert result == "错误：knowledge_base 格式非法"
+
+
+async def test_knowledge_semantic_search_handler_rejects_invalid_kb_name() -> None:
+    km = SimpleNamespace()
+    km.semantic_search = AsyncMock(return_value=[])
+    result = await knowledge_semantic_search_handler.execute(
+        {
+            "knowledge_base": "../etc",
+            "query": "x",
+        },
+        {"knowledge_manager": km},
+    )
+    assert result == "错误：knowledge_base 格式非法"
+    km.semantic_search.assert_not_called()
+
+
+async def test_knowledge_semantic_search_handler_clamps_relevance() -> None:
+    km = SimpleNamespace()
+    km.semantic_search = AsyncMock(
+        return_value=[
+            {"content": "a", "metadata": {"source": "texts/a.md"}, "distance": -0.3},
+            {"content": "b", "metadata": {"source": "texts/b.md"}, "distance": 1.7},
+        ]
+    )
+    result = await knowledge_semantic_search_handler.execute(
+        {"knowledge_base": "kb1", "query": "x"},
+        {"knowledge_manager": km},
+    )
+    payload = json.loads(result)
+    assert payload["items"][0]["relevance"] == 1.0
+    assert payload["items"][1]["relevance"] == 0.0
