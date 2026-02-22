@@ -379,3 +379,38 @@ async def test_semantic_search_rerank_top_k_must_be_smaller(tmp_path: Path) -> N
 
     assert len(results) == 1
     assert results[0]["content"] == "b"
+
+
+async def test_semantic_search_fallback_when_rerank_fails(tmp_path: Path) -> None:
+    embedder = MagicMock(spec=Embedder)
+    embedder.embed = AsyncMock(return_value=[[0.1, 0.2]])
+    embedder._config = MagicMock(query_instruction="")
+
+    reranker = MagicMock(spec=Reranker)
+    reranker.rerank = AsyncMock(
+        side_effect=ValueError("not enough values to unpack (expected 2, got 0)")
+    )
+
+    manager = KnowledgeManager(
+        base_dir=tmp_path,
+        embedder=embedder,
+        reranker=reranker,
+        default_top_k=3,
+        rerank_enabled=True,
+        rerank_top_k=2,
+    )
+
+    with patch.object(manager, "_get_store") as mock_store:
+        store = AsyncMock()
+        store.query = AsyncMock(
+            return_value=[
+                {"content": "a", "metadata": {"source": "a.txt"}, "distance": 0.2},
+                {"content": "b", "metadata": {"source": "b.txt"}, "distance": 0.1},
+            ]
+        )
+        mock_store.return_value = store
+
+        results = await manager.semantic_search("kb1", "hello")
+
+    assert [item["content"] for item in results] == ["a", "b"]
+    assert all("rerank_score" not in item for item in results)

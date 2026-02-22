@@ -253,11 +253,15 @@ class KnowledgeManager:
             return results
 
         docs = [str(item.get("content", "")) for item in results]
-        reranked = await self._reranker.rerank(
-            query=query,
-            documents=docs,
-            top_n=min(rerank_top_k, len(docs)),
-        )
+        try:
+            reranked = await self._reranker.rerank(
+                query=query,
+                documents=docs,
+                top_n=min(rerank_top_k, len(docs)),
+            )
+        except Exception as exc:
+            logger.warning("[知识库] 重排失败，已回退语义结果: error=%s", exc)
+            return results
 
         reordered: list[dict[str, Any]] = []
         used_indices: set[int] = set()

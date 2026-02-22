@@ -107,14 +107,14 @@ class RetrievalRequester:
         if isinstance(top_n, int) and top_n > 0:
             request_body["top_n"] = top_n
 
+        # Some OpenAI-compatible providers return non-dict JSON payloads for rerank.
+        # Use a broad cast target and normalize the payload shape ourselves.
         response = await client.post(
             "/rerank",
-            cast_to=dict,
+            cast_to=object,
             body=request_body,
         )
-        response_dict = (
-            response if isinstance(response, dict) else self._response_to_dict(response)
-        )
+        response_dict = self._normalize_rerank_payload(response)
         results = self._normalize_rerank_results(
             response_dict,
             documents=documents,
@@ -150,6 +150,18 @@ class RetrievalRequester:
             len(documents),
         )
         return results
+
+    def _normalize_rerank_payload(self, response: Any) -> dict[str, Any]:
+        if isinstance(response, dict):
+            return response
+        if isinstance(response, list):
+            return {"data": response}
+        if response is None:
+            return {}
+        converted = self._response_to_dict(response)
+        if isinstance(converted, dict):
+            return converted
+        return {}
 
     def _extract_usage(self, response_dict: dict[str, Any]) -> tuple[int, int, int]:
         usage = response_dict.get("usage", {}) or {}
