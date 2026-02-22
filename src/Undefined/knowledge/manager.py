@@ -86,11 +86,6 @@ class KnowledgeManager:
             return False
         return path.suffix.lower() in _SUPPORTED_TEXT_EXTENSIONS
 
-    def _has_indexable_text_files(self, kb_dir: Path) -> bool:
-        for _ in self._iter_indexable_text_files(kb_dir):
-            return True
-        return False
-
     def _iter_indexable_text_files(self, kb_dir: Path) -> list[Path]:
         texts_dir = kb_dir / "texts"
         if not texts_dir.exists() or not texts_dir.is_dir():
@@ -219,6 +214,8 @@ class KnowledgeManager:
         keyword: str,
         max_lines: int = 20,
         max_chars: int = 2000,
+        case_sensitive: bool = False,
+        source_keyword: str | None = None,
     ) -> list[dict[str, Any]]:
         """在指定知识库的原始文本中关键词搜索。"""
         kb_dir = self._base_dir / kb_name
@@ -227,16 +224,25 @@ class KnowledgeManager:
 
         results: list[dict[str, Any]] = []
         total_chars = 0
-        kw_lower = keyword.lower()
+        keyword_cmp = keyword if case_sensitive else keyword.lower()
+        source_kw = (source_keyword or "").strip()
+        source_kw_cmp = source_kw if case_sensitive else source_kw.lower()
 
         for text_file in self._iter_indexable_text_files(kb_dir):
+            relative_source = text_file.relative_to(kb_dir).as_posix()
+            if source_kw_cmp:
+                source_cmp = (
+                    relative_source if case_sensitive else relative_source.lower()
+                )
+                if source_kw_cmp not in source_cmp:
+                    continue
             try:
                 content = text_file.read_text("utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
-            relative_source = text_file.relative_to(kb_dir).as_posix()
             for lineno, line in enumerate(content.splitlines(), 1):
-                if kw_lower in line.lower():
+                line_cmp = line if case_sensitive else line.lower()
+                if keyword_cmp in line_cmp:
                     results.append(
                         {"source": relative_source, "line": lineno, "content": line}
                     )

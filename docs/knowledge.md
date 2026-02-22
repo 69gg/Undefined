@@ -90,46 +90,46 @@ knowledge/
 
 ### knowledge_list
 
-列出知识库名称和 `intro.md` 简介。建议先调用它，再根据简介选择 `knowledge_base`。
+列出知识库（结构化紧凑输出）。建议先调用它，再根据简介选择 `knowledge_base`。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `only_ready` | boolean | | 是否仅返回已配置 `intro.md` 的知识库，默认 `true` |
-| `intro_max_chars` | integer | | 每个简介最大字符数，默认 `300` |
+| `include_intro` | boolean | | 是否返回简介，默认 `true` |
+| `include_has_intro` | boolean | | 是否返回 `has_intro` 字段，默认 `false` |
+| `intro_max_chars` | integer | | 每个简介最大字符数，默认 `120` |
+| `max_items` | integer | | 最多返回知识库条目，默认 `50` |
+| `name_keyword` | string | | 按名称关键词过滤（不区分大小写） |
 
 ```json
-[
-  {
-    "name": "cardio_research",
-    "intro": "这个知识库用于心脏医学研究，覆盖冠心病、心律失常与心衰的文献摘要。",
-    "has_intro": true
-  }
-]
+{"ok":true,"count":1,"truncated":false,"items":[{"name":"cardio_research","intro":"心脏医学研究资料"}]}
 ```
 
 ### knowledge_text_search
 
-在原始文本中按关键词搜索（大小写不敏感）。
+在原始文本中按关键词搜索（结构化紧凑输出）。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `knowledge_base` | string | ✓ | 知识库名称 |
 | `keyword` | string | ✓ | 搜索关键词 |
 | `max_lines` | integer | | 最多返回行数，默认 20 |
-| `max_chars` | integer | | 最多返回字符数，默认 2000 |
+| `max_chars` | integer | | 搜索阶段总字符上限，默认 2000 |
+| `max_chars_per_item` | integer | | 每条结果最大字符数，默认 180 |
+| `case_sensitive` | boolean | | 是否大小写敏感，默认 `false` |
+| `source_keyword` | string | | 按 `source` 路径关键词过滤 |
+| `include_source` | boolean | | 是否输出 `source`，默认 `true` |
+| `include_line` | boolean | | 是否输出 `line`，默认 `true` |
 
 返回示例：
 
 ```json
-[
-  {"source": "faq.txt", "line": 12, "content": "如何重置密码？"},
-  {"source": "manual.txt", "line": 5, "content": "密码长度不少于8位"}
-]
+{"ok":true,"knowledge_base":"my_docs","keyword":"重置密码","count":2,"items":[{"source":"texts/faq.txt","line":12,"text":"如何重置密码？"},{"source":"texts/manual.txt","line":5,"text":"密码长度不少于8位"}]}
 ```
 
 ### knowledge_semantic_search
 
-通过嵌入向量计算语义相似度，返回最相关的行。
+通过嵌入向量计算语义相似度，返回结构化结果。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
@@ -138,27 +138,16 @@ knowledge/
 | `top_k` | integer | | 语义召回数量，默认取配置值 |
 | `enable_rerank` | boolean | | 是否启用重排；不传则使用配置默认值 |
 | `rerank_top_k` | integer | | 重排返回数量，需小于语义召回数量 |
+| `min_relevance` | number | | 相关度阈值（0-1），默认 0 |
+| `source_keyword` | string | | 按 `source` 路径关键词过滤 |
+| `max_chars_per_item` | integer | | 每条结果最大字符数，默认 220 |
+| `include_rerank_score` | boolean | | 是否输出 `rerank_score`，默认 `true` |
+| `deduplicate` | boolean | | 是否按 `source+text` 去重，默认 `true` |
 
 返回示例：
 
 ```json
-[
-  {"content": "重置密码需要验证手机号", "source": "faq.txt", "relevance": 0.91},
-  {"content": "忘记密码可联系客服", "source": "faq.txt", "relevance": 0.87}
-]
-```
-
-启用重排后，结果会额外包含 `rerank_score`：
-
-```json
-[
-  {
-    "content": "重置密码需要验证手机号",
-    "source": "faq.txt",
-    "relevance": 0.91,
-    "rerank_score": 0.981245
-  }
-]
+{"ok":true,"knowledge_base":"my_docs","query":"怎么重置密码","count":2,"items":[{"source":"texts/faq.txt","text":"重置密码需要验证手机号","relevance":0.91,"rerank_score":0.981245},{"source":"texts/faq.txt","text":"忘记密码可联系客服","relevance":0.87,"rerank_score":0.9123}]}
 ```
 
 ### 参数优先级与约束
@@ -178,7 +167,7 @@ knowledge/
 
 ### 文本切分
 
-每个 `.txt` 文件先按行切分并忽略空行，再用**滑动窗口**合并为向量块：
+每个文本文件（如 `.txt/.md/.html/.htm`）先按行切分并忽略空行，再用**滑动窗口**合并为向量块：
 
 ```
 原始行: [l1, l2, l3, l4, l5, l6, l7]
@@ -346,7 +335,7 @@ query_instruction = "Instruct: 为这个搜索查询重排候选文档\nQuery: "
 
 ## 注意事项
 
-- 目前仅支持 `.txt` 纯文本文件
+- 支持常见纯文本格式（如 `.txt/.md/.markdown/.html/.htm/.rst/.csv/.tsv/.json/.yaml/.yml/.xml/.log/.ini/.cfg/.conf`）
 - 文本文件应使用 UTF-8 编码
 - `chroma/` 目录较大时可手动删除后重新嵌入（会触发全量重建）
 - 嵌入模型需兼容 OpenAI `/v1/embeddings` 接口

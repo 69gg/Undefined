@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "knowledge_list",
-    "description": "列出可用知识库及其 intro.md 简介，便于选择最匹配的知识库。",
+    "description": "列出知识库（紧凑结构化输出），支持按名称过滤、控制简介与返回数量。",
     "parameters": {
       "type": "object",
       "properties": {
@@ -10,9 +10,25 @@
           "type": "boolean",
           "description": "是否仅返回已配置 intro.md 的知识库，默认 true"
         },
+        "include_intro": {
+          "type": "boolean",
+          "description": "是否返回简介内容，默认 true"
+        },
+        "include_has_intro": {
+          "type": "boolean",
+          "description": "是否返回 has_intro 字段，默认 false"
+        },
         "intro_max_chars": {
           "type": "integer",
-          "description": "每个知识库简介最大字符数，默认 300"
+          "description": "每个知识库简介最大字符数，默认 120"
+        },
+        "max_items": {
+          "type": "integer",
+          "description": "最多返回多少个知识库，默认 50"
+        },
+        "name_keyword": {
+          "type": "string",
+          "description": "按知识库名称关键词过滤（不区分大小写）"
         }
       },
       "required": []

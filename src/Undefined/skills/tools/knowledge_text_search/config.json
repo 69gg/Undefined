@@ -1,1 +1,52 @@
-{"type":"function","function":{"name":"knowledge_text_search","description":"在指定知识库的原始文本中关键词搜索。","parameters":{"type":"object","properties":{"knowledge_base":{"type":"string","description":"知识库名称"},"keyword":{"type":"string","description":"搜索关键词"},"max_lines":{"type":"integer","description":"最多返回行数，默认20"},"max_chars":{"type":"integer","description":"最多返回字符数，默认2000"}},"required":["knowledge_base","keyword"]}}}
+{
+  "type": "function",
+  "function": {
+    "name": "knowledge_text_search",
+    "description": "在知识库文本中关键词搜索（结构化紧凑输出），支持大小写与文件路径过滤。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "knowledge_base": {
+          "type": "string",
+          "description": "知识库名称"
+        },
+        "keyword": {
+          "type": "string",
+          "description": "搜索关键词"
+        },
+        "max_lines": {
+          "type": "integer",
+          "description": "最多返回行数，默认 20"
+        },
+        "max_chars": {
+          "type": "integer",
+          "description": "总字符上限（搜索阶段），默认 2000"
+        },
+        "max_chars_per_item": {
+          "type": "integer",
+          "description": "每条结果最大字符数（输出阶段裁剪），默认 180"
+        },
+        "case_sensitive": {
+          "type": "boolean",
+          "description": "是否大小写敏感，默认 false"
+        },
+        "source_keyword": {
+          "type": "string",
+          "description": "按 source 路径关键词过滤（例如 docs/faq）"
+        },
+        "include_source": {
+          "type": "boolean",
+          "description": "是否输出 source 字段，默认 true"
+        },
+        "include_line": {
+          "type": "boolean",
+          "description": "是否输出 line 字段，默认 true"
+        }
+      },
+      "required": [
+        "knowledge_base",
+        "keyword"
+      ]
+    }
+  }
+}

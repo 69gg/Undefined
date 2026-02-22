@@ -240,6 +240,31 @@ def test_text_search_case_insensitive(tmp_path: Path) -> None:
     assert len(results) == 1
 
 
+def test_text_search_case_sensitive(tmp_path: Path) -> None:
+    manager, _ = _make_manager(tmp_path)
+    _make_kb(tmp_path, "kb1", {"doc.txt": "Hello World\nhello world"})
+
+    results = manager.text_search("kb1", "hello", case_sensitive=True)
+    assert len(results) == 1
+    assert results[0]["line"] == 2
+
+
+def test_text_search_source_keyword_filter(tmp_path: Path) -> None:
+    manager, _ = _make_manager(tmp_path)
+    _make_kb(
+        tmp_path,
+        "kb1",
+        {
+            "docs/a.md": "重置密码说明",
+            "faq/b.txt": "重置密码入口",
+        },
+    )
+
+    results = manager.text_search("kb1", "重置密码", source_keyword="docs/")
+    assert len(results) == 1
+    assert results[0]["source"] == "texts/docs/a.md"
+
+
 def test_text_search_supports_md_and_html(tmp_path: Path) -> None:
     manager, _ = _make_manager(tmp_path)
     _make_kb(
