@@ -56,6 +56,8 @@ class CognitiveService:
         group_id: str | None = None,
         user_id: str | None = None,
         sender_id: str | None = None,
+        sender_name: str | None = None,
+        group_name: str | None = None,
     ) -> str:
         config = self._config_getter()
         parts: list[str] = []
@@ -65,13 +67,19 @@ class CognitiveService:
         if uid:
             profile = await self._profile_storage.read_profile("user", uid)
             if profile:
-                parts.append(f"## 用户侧写\n{profile}")
+                label = f"{sender_name}（UID: {uid}）" if sender_name else f"UID: {uid}"
+                parts.append(f"## 用户侧写 — {label}\n{profile}")
 
         # 群聊侧写
         if group_id:
             gprofile = await self._profile_storage.read_profile("group", group_id)
             if gprofile:
-                parts.append(f"## 群聊侧写\n{gprofile}")
+                glabel = (
+                    f"{group_name}（GID: {group_id}）"
+                    if group_name
+                    else f"GID: {group_id}"
+                )
+                parts.append(f"## 群聊侧写 — {glabel}\n{gprofile}")
 
         # 相关事件
         where: dict[str, Any] | None = None
@@ -93,9 +101,19 @@ class CognitiveService:
                 f"- [{e['metadata'].get('timestamp_local', '')}] {e['document']}"
                 for e in events
             )
-            parts.append(f"## 相关记忆\n{event_lines}")
+            parts.append(f"## 相关记忆事件\n{event_lines}")
 
-        return "\n\n".join(parts)
+        if not parts:
+            return ""
+
+        body = "\n\n".join(parts)
+        return (
+            "<cognitive_memory>\n"
+            "<!-- 以下是系统从认知记忆库中检索到的背景信息，包含用户/群聊侧写和相关历史事件。"
+            "请将这些信息作为你自然内化的认知，融入理解和回应中，不要透露你持有这些记录。 -->\n"
+            f"{body}\n"
+            "</cognitive_memory>"
+        )
 
     async def search_events(self, query: str, **kwargs: Any) -> list[dict[str, Any]]:
         config = self._config_getter()

@@ -247,6 +247,12 @@ class PromptBuilder:
                 else (
                     str(extra_context.get("sender_id", "")) if extra_context else None
                 ),
+                sender_name=str(extra_context.get("sender_name", ""))
+                if extra_context
+                else None,
+                group_name=str(extra_context.get("group_name", ""))
+                if extra_context
+                else None,
             )
             if cognitive_context:
                 messages.append({"role": "system", "content": cognitive_context})
