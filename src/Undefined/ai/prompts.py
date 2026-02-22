@@ -35,6 +35,7 @@ class PromptBuilder:
         system_prompt_path: str = "res/prompts/undefined.xml",
         runtime_config_getter: Callable[[], Any] | None = None,
         anthropic_skill_registry: AnthropicSkillRegistry | None = None,
+        cognitive_service: Any = None,
     ) -> None:
         """初始化 Prompt 构建器
 
@@ -51,6 +52,7 @@ class PromptBuilder:
         self._system_prompt_path = system_prompt_path
         self._runtime_config_getter = runtime_config_getter
         self._anthropic_skill_registry = anthropic_skill_registry
+        self._cognitive_service = cognitive_service
         self._end_summaries: deque[EndSummaryRecord] = deque(maxlen=MAX_END_SUMMARIES)
         self._summaries_loaded = False
 
@@ -226,7 +228,30 @@ class PromptBuilder:
                     )
 
         await self._ensure_summaries_loaded()
-        if self._end_summaries:
+        if self._cognitive_service and getattr(
+            self._cognitive_service, "enabled", False
+        ):
+            ctx = RequestContext.current()
+            cognitive_context = await self._cognitive_service.build_context(
+                query=question,
+                group_id=str(ctx.group_id)
+                if ctx and ctx.group_id is not None
+                else (
+                    str(extra_context.get("group_id", "")) if extra_context else None
+                ),
+                user_id=str(ctx.user_id)
+                if ctx and ctx.user_id is not None
+                else (str(extra_context.get("user_id", "")) if extra_context else None),
+                sender_id=str(ctx.sender_id)
+                if ctx and ctx.sender_id is not None
+                else (
+                    str(extra_context.get("sender_id", "")) if extra_context else None
+                ),
+            )
+            if cognitive_context:
+                messages.append({"role": "system", "content": cognitive_context})
+                logger.info("[AI会话] 已注入认知记忆上下文")
+        elif self._end_summaries:
             summary_lines: list[str] = []
             for item in self._end_summaries:
                 location_text = ""

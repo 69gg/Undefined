@@ -58,8 +58,14 @@ def _build_location(context: Dict[str, Any]) -> EndSummaryLocation | None:
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
-    summary_raw = args.get("summary", "")
-    summary = summary_raw.strip() if isinstance(summary_raw, str) else ""
+    action_summary_raw = args.get("action_summary") or args.get("summary", "")
+    action_summary = (
+        action_summary_raw.strip() if isinstance(action_summary_raw, str) else ""
+    )
+    new_info_raw = args.get("new_info", "")
+    new_info = new_info_raw.strip() if isinstance(new_info_raw, str) else ""
+    # 兼容旧版 summary 字段
+    summary = action_summary
     force_raw = args.get("force", False)
     force = _parse_force_flag(force_raw)
     if "force" in args and not isinstance(force_raw, bool):
@@ -112,6 +118,15 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 )
 
         logger.info("保存end记录: %s...", summary[:50])
+
+    # 若 cognitive 启用，入队 memory_job
+    cognitive_service = context.get("cognitive_service")
+    if cognitive_service and action_summary:
+        await cognitive_service.enqueue_job(
+            action_summary=action_summary,
+            new_info=new_info,
+            context=context,
+        )
 
     # 通知调用方对话应结束
     context["conversation_ended"] = True

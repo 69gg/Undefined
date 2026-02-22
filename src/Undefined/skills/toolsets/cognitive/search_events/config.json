@@ -1,0 +1,19 @@
+{
+  "type": "function",
+  "function": {
+    "name": "search_events",
+    "description": "搜索历史事件记忆。用于回忆之前发生过的事情。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string", "description": "搜索关键词或语义描述" },
+        "target_user_id": { "type": "string", "description": "限定用户ID（可选）" },
+        "target_group_id": { "type": "string", "description": "限定群ID（可选）" },
+        "top_k": { "type": "integer", "description": "返回条数，默认12" },
+        "time_from": { "type": "string", "description": "起始时间 ISO格式（可选）" },
+        "time_to": { "type": "string", "description": "截止时间 ISO格式（可选）" }
+      },
+      "required": ["query"]
+    }
+  }
+}

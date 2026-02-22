@@ -97,6 +97,7 @@ graph TB
             TS_Render["render.*<br/>• render_html<br/>• render_latex<br/>• render_markdown"]
             TS_Scheduler["scheduler.*<br/>• create_schedule_task<br/>• delete_schedule_task<br/>• list_schedule_tasks"]
             TS_MCP["mcp.*<br/>MCP 工具集"]
+            TS_Cognitive["cognitive.*<br/>• search_events<br/>• get_profile<br/>• search_profiles"]
         end
         
         subgraph IntelligentAgents["智能体 Agents (skills/agents/)"]
@@ -415,6 +416,7 @@ graph TB
                 TRender["render.*<br/>渲染"]
                 TSched["scheduler.*<br/>定时任务"]
                 TMCP["mcp.*<br/>MCP"]
+                TCognitive["cognitive.*<br/>认知记忆"]
             end
         end
         
@@ -762,7 +764,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 3. **消息处理层**：MessageHandler (handlers.py)、SecurityService (security.py)、CommandDispatcher (services/command.py)、AICoordinator (ai_coordinator.py)、QueueManager (queue_manager.py)、Bilibili 自动提取 (bilibili/)
 4. **AI 核心能力层**：AIClient (client.py)、PromptBuilder (prompts.py)、ModelRequester (llm.py)、ToolManager (tooling.py)、MultimodalAnalyzer (multimodal.py)、SummaryService (summaries.py)、TokenCounter (tokens.py)
 5. **存储与上下文层**：MessageHistoryManager (utils/history.py, 10000条限制)、MemoryStorage (memory.py, 500条上限)、EndSummaryStorage、FAQStorage、ScheduledTaskStorage、TokenUsageStorage (自动归档)
-6. **技能系统层**：ToolRegistry (registry.py)、AgentRegistry、6个 Agents (共64个工具)、7类 Toolsets
+6. **技能系统层**：ToolRegistry (registry.py)、AgentRegistry、6个 Agents (共64个工具)、8类 Toolsets
 7. **异步 IO 层**：统一 IO 工具 (utils/io.py)，包含 write_json、read_json、append_line、跨平台文件锁 (flock/msvcrt)
 8. **数据持久化层**：历史数据目录、FAQ 目录、Token 归档目录、记忆文件、总结文件、定时任务文件
 
@@ -788,7 +790,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 ### Skills 插件系统
 
 - **Tools (基础工具)**：原子化的功能单元，如 `send_message`, `get_history`, `bilibili_video`。
-- **Toolsets (复合工具集)**：7大类工具集 (group, messages, memory, notices, render, scheduler, mcp)。
+- **Toolsets (复合工具集)**：8大类工具集 (group, messages, memory, notices, render, scheduler, mcp, cognitive)。
 - **延迟加载 + 热重载**：`handler.py` 仅在首次调用时导入；当 `skills/` 下的 `config.json`/`handler.py` 发生变更时会自动重新加载。
 - **Agent 自我介绍自动生成**：启动时按 Agent 代码/配置 hash 生成 `intro.generated.md` 并与 `intro.md` 合并。
 

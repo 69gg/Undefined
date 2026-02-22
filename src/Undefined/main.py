@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 import sys
+from typing import Any
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -30,6 +31,15 @@ from Undefined.utils.paths import (
     RENDER_CACHE_DIR,
     TEXT_FILE_CACHE_DIR,
     ensure_dir,
+    COGNITIVE_CHROMADB_DIR,
+    COGNITIVE_QUEUES_DIR,
+    COGNITIVE_PROFILES_DIR,
+    COGNITIVE_PROFILES_USERS_DIR,
+    COGNITIVE_PROFILES_GROUPS_DIR,
+    COGNITIVE_PROFILES_HISTORY_DIR,
+    COGNITIVE_QUEUES_PENDING_DIR,
+    COGNITIVE_QUEUES_PROCESSING_DIR,
+    COGNITIVE_QUEUES_FAILED_DIR,
 )
 
 from Undefined.utils.self_update import (
@@ -184,6 +194,11 @@ async def main() -> None:
 
     # 初始化组件
     logger.info("[初始化] 正在加载核心组件...")
+    cognitive_service = None
+    historian_worker = None
+    job_queue = None
+    _reranker: Any = None
+    _embedder: Any = None
     try:
         init_start = time.perf_counter()
         onebot = OneBotClient(config.onebot_ws_url, config.onebot_token)
@@ -218,7 +233,7 @@ async def main() -> None:
                 batch_size=config.knowledge_embed_batch_size,
             )
             _embedder.start()
-            _reranker: Reranker | None = None
+            _reranker = None
             if (
                 config.rerank_model.api_url
                 and config.rerank_model.model_name
@@ -247,6 +262,69 @@ async def main() -> None:
                 knowledge_manager.start_initial_scan()
             logger.info("[知识库] 初始化完成: base_dir=%s", config.knowledge_base_dir)
 
+        # === Cognitive Memory ===
+        cognitive_actually_enabled = config.cognitive.enabled
+        if cognitive_actually_enabled and (
+            not config.embedding_model.api_url or not config.embedding_model.model_name
+        ):
+            logger.warning(
+                "[认知记忆] cognitive.enabled=true 但 models.embedding 未配置，自动降级禁用"
+            )
+            cognitive_actually_enabled = False
+
+        if cognitive_actually_enabled:
+            from Undefined.cognitive import (
+                CognitiveVectorStore,
+                JobQueue,
+                ProfileStorage,
+                CognitiveService,
+                HistorianWorker,
+            )
+
+            for _cog_dir in (
+                COGNITIVE_CHROMADB_DIR,
+                COGNITIVE_QUEUES_PENDING_DIR,
+                COGNITIVE_QUEUES_PROCESSING_DIR,
+                COGNITIVE_QUEUES_FAILED_DIR,
+                COGNITIVE_PROFILES_USERS_DIR,
+                COGNITIVE_PROFILES_GROUPS_DIR,
+                COGNITIVE_PROFILES_HISTORY_DIR,
+            ):
+                ensure_dir(_cog_dir)
+
+            if not config.knowledge_enabled:
+                from Undefined.knowledge import Embedder
+
+                _embedder = Embedder(
+                    ai._requester,
+                    config.embedding_model,
+                    batch_size=config.knowledge_embed_batch_size,
+                )
+                _embedder.start()
+
+            vector_store = CognitiveVectorStore(str(COGNITIVE_CHROMADB_DIR), _embedder)
+            job_queue = JobQueue(str(COGNITIVE_QUEUES_DIR))
+            profile_storage = ProfileStorage(
+                str(COGNITIVE_PROFILES_DIR),
+                revision_keep=config.cognitive.profile_revision_keep,
+            )
+            cognitive_service = CognitiveService(
+                config_getter=lambda: config.cognitive,
+                vector_store=vector_store,
+                job_queue=job_queue,
+                profile_storage=profile_storage,
+                reranker=_reranker,
+            )
+            historian_worker = HistorianWorker(
+                job_queue=job_queue,
+                vector_store=vector_store,
+                profile_storage=profile_storage,
+                ai_client=ai,
+                config_getter=lambda: config.cognitive,
+            )
+            ai.set_cognitive_service(cognitive_service)
+            logger.info("[认知记忆] 初始化完成")
+
         handler = MessageHandler(config, onebot, ai, faq_storage, task_storage)
         onebot.set_message_handler(handler.handle_message)
         elapsed = time.perf_counter() - init_start
@@ -272,6 +350,12 @@ async def main() -> None:
             logger.warning("[CodeDelivery] 启动残留清理失败: %s", exc)
 
     logger.info("[启动] 机器人已准备就绪，开始连接 OneBot 服务...")
+
+    if historian_worker and job_queue:
+        await job_queue.recover_stale(
+            timeout_seconds=config.cognitive.stale_job_timeout_seconds
+        )
+        await historian_worker.start()
 
     config_manager = get_config_manager()
     config_manager.load(strict=True)
@@ -306,6 +390,8 @@ async def main() -> None:
         logger.exception("[异常] 运行期间发生未捕获的错误: %s", exc)
     finally:
         logger.info("[清理] 正在关闭机器人并释放资源...")
+        if historian_worker:
+            await historian_worker.stop()
         await onebot.disconnect()
         await ai.close()
         await config_manager.stop_hot_reload()

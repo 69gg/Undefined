@@ -60,7 +60,7 @@ Skills 是核心扩展机制，分四类，全部通过 `config.json`（OpenAI f
 
 ### 工具集 (`skills/toolsets/{category}/{tool_name}/`)
 - 按类别分组，注册名为 `{category}.{tool_name}`（如 `render.render_html`）
-- 7 大类：group, messages, memory, notices, render, scheduler, mcp
+- 8 大类：group, messages, memory, notices, render, scheduler, mcp, cognitive
 
 ### 智能体 (`skills/agents/{agent_name}/`)
 - 每个 Agent 目录包含：`config.json`, `handler.py`, `prompt.md`, `intro.md`, `tools/`（子工具）

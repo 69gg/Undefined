@@ -192,3 +192,54 @@ async def delete_file(file_path: Path | str) -> bool:
         return False
 
     return await asyncio.to_thread(sync_delete)
+
+
+def _write_text_sync(target: Path, content: str, use_lock: bool) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    def atomic_write() -> None:
+        tmp_path: Path | None = None
+        try:
+            fd, tmp_name = tempfile.mkstemp(
+                prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent)
+            )
+            tmp_path = Path(tmp_name)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_name, target)
+        finally:
+            if tmp_path is not None and tmp_path.exists():
+                tmp_path.unlink()
+
+    if use_lock:
+        lock_path = target.with_name(f"{target.name}.lock")
+        with FileLock(lock_path, shared=False):
+            atomic_write()
+    else:
+        atomic_write()
+
+
+def _read_text_sync(target: Path, use_lock: bool) -> str | None:
+    if not target.exists():
+        return None
+    if use_lock:
+        lock_path = target.with_name(f"{target.name}.lock")
+        with FileLock(lock_path, shared=True):
+            return target.read_text(encoding="utf-8")
+    return target.read_text(encoding="utf-8")
+
+
+async def write_text(
+    file_path: str | Path, content: str, use_lock: bool = True
+) -> None:
+    """原子写入文本文件"""
+    target = Path(file_path)
+    await asyncio.to_thread(_write_text_sync, target, content, use_lock)
+
+
+async def read_text(file_path: str | Path, use_lock: bool = False) -> str | None:
+    """异步读取文本文件"""
+    target = Path(file_path)
+    return await asyncio.to_thread(_read_text_sync, target, use_lock)

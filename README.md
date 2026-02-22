@@ -79,6 +79,7 @@
 - **Skills 热重载**：自动扫描 `skills/` 目录，检测到变更后即时重载工具与 Agent，无需重启服务。
 - **配置热更新 + WebUI**：使用 `config.toml` 配置，支持热更新；提供 WebUI 在线编辑与校验。
 - **多模型池**：支持配置多个 AI 模型，可轮询、随机选择或用户指定；支持多模型并发比较，选择最佳结果继续对话。详见 [多模型功能文档](docs/multi-model.md)。
+- **认知记忆系统**：基于向量数据库的长期记忆，支持事件语义检索与用户/群聊自动侧写，后台异步处理、前台零延迟。详见 [认知记忆文档](docs/cognitive-memory.md)。
 - **本地知识库**：将纯文本文件向量化存入 ChromaDB，AI 可通过关键词搜索或语义搜索查询领域知识；支持增量嵌入与自动扫描。详见 [知识库文档](docs/knowledge.md)。
 - **访问控制（群/私聊）**：支持 `access.mode` 三种模式（`off` / `blacklist` / `allowlist`）和群/私聊黑白名单；可按策略限制收发范围，避免误触发与误投递。详见 [docs/access-control.md](docs/access-control.md)。
 - **并行工具执行**：无论是主 AI 还是子 Agent，均支持 `asyncio` 并发工具调用，大幅提升多任务处理速度（如同时读取多个文件或搜索多个关键词）。
@@ -99,7 +100,7 @@
 
 ## 系统架构概览
 
-Undefined 采用 **8层异步架构设计**，以下是详细的系统架构图（包含所有核心组件、6个Agent、7类工具集、存储系统与数据流）：
+Undefined 采用 **8层异步架构设计**，以下是详细的系统架构图（包含所有核心组件、6个Agent、8类工具集、存储系统与数据流）：
 
 ### 架构图（Mermaid）
 
@@ -145,7 +146,8 @@ graph TB
     subgraph StorageLayer["存储与上下文层"]
         HistoryManager["MessageHistoryManager<br/>消息历史管理<br/>[utils/history.py]<br/>• 懒加载 • 10000条限制"]
         MemoryStorage["MemoryStorage<br/>长期记忆存储<br/>[memory.py]<br/>• 500条上限 • 自动去重"]
-        EndSummaryStorage["EndSummaryStorage<br/>短期总结存储<br/>[end_summary_storage.py]"]
+        EndSummaryStorage["EndSummaryStorage<br/>短期总结存储<br/>[end_summary_storage.py]<br/>(cognitive 模式下由 CognitiveService 替代)"]
+        CognitiveService["CognitiveService<br/>认知记忆服务<br/>[cognitive/service.py]<br/>• 事件向量检索 • 用户/群侧写<br/>• 后台史官"]
         FAQStorage["FAQStorage<br/>FAQ 存储<br/>[faq.py]"]
         ScheduledTaskStorage["ScheduledTaskStorage<br/>定时任务存储<br/>[scheduled_task_storage.py]"]
         TokenUsageStorage["TokenUsageStorage<br/>Token 使用统计<br/>[token_usage_storage.py]<br/>• 自动归档 • gzip 压缩"]
@@ -163,13 +165,14 @@ graph TB
             T_BilibiliVideo["bilibili_video<br/>B站视频下载发送"]
         end
         
-        subgraph Toolsets["工具集 (7大类)"]
+        subgraph Toolsets["工具集 (8大类)"]
             TS_Group["group.*<br/>• get_member_list<br/>• get_member_info<br/>• get_honor_info<br/>• get_files"]
             TS_Messages["messages.*<br/>• send_message<br/>• get_recent_messages<br/>• get_forward_msg"]
             TS_Memory["memory.*<br/>• add / delete<br/>• list / update"]
             TS_Notices["notices.*<br/>• list / get / stats"]
             TS_Render["render.*<br/>• render_html<br/>• render_latex<br/>• render_markdown"]
             TS_Scheduler["scheduler.*<br/>• create_schedule_task<br/>• delete_schedule_task<br/>• list_schedule_tasks"]
+            TS_Cognitive["cognitive.*<br/>• search_events<br/>• get_profile<br/>• search_profiles"]
         end
         
         subgraph IntelligentAgents["智能体 Agents (6个)"]
@@ -194,6 +197,7 @@ graph TB
         Dir_History["history/<br/>• group_{id}.json<br/>• private_{id}.json"]
         Dir_FAQ["faq/{group_id}/<br/>• YYYYMMDD-NNN.json"]
         Dir_TokenUsage["token_usage_archives/<br/>• *.jsonl.gz"]
+        Dir_Cognitive["cognitive/<br/>• chromadb/ (向量库)<br/>• profiles/ (侧写)<br/>• queues/ (任务队列)"]
         File_Config["config.toml<br/>config.local.json"]
         File_Memory["memory.json<br/>(长期记忆)"]
         File_EndSummary["end_summaries.json<br/>(短期总结)"]
@@ -241,6 +245,8 @@ graph TB
     PromptBuilder -->|"注入"| HistoryManager
     PromptBuilder -->|"注入"| MemoryStorage
     PromptBuilder -->|"注入"| EndSummaryStorage
+    PromptBuilder -->|"注入"| CognitiveService
+    CognitiveService -->|"异步读写"| IOUtils
     
     MessageHandler -->|"保存消息"| HistoryManager
     AICoordinator -->|"记录统计"| TokenUsageStorage
@@ -262,6 +268,7 @@ graph TB
     FAQStorage -->|"异步读写"| IOUtils
     ScheduledTaskStorage -->|"异步读写"| IOUtils
     
+    IOUtils --> Dir_Cognitive
     IOUtils --> Dir_History
     IOUtils --> File_Memory
     IOUtils --> File_EndSummary
@@ -291,9 +298,9 @@ graph TB
     class MessageHandler,SecurityService,CommandDispatcher,AICoordinator,QueueManager message
     class AIClient,PromptBuilder,ModelRequester,ToolManager,MultimodalAnalyzer,SummaryService,TokenCounter ai
     class ToolRegistry,AgentRegistry,MCPRegistry,AtomicTools,Toolsets,IntelligentAgents skills
-    class HistoryManager,MemoryStorage,EndSummaryStorage,FAQStorage,ScheduledTaskStorage,TokenUsageStorage storage
+    class HistoryManager,MemoryStorage,EndSummaryStorage,FAQStorage,ScheduledTaskStorage,TokenUsageStorage,CognitiveService storage
     class IOUtils io
-    class Dir_History,Dir_FAQ,Dir_TokenUsage,File_Config,File_Memory,File_EndSummary,File_ScheduledTasks persistence
+    class Dir_History,Dir_FAQ,Dir_TokenUsage,File_Config,File_Memory,File_EndSummary,File_ScheduledTasks,Dir_Cognitive persistence
 ```
 
 ### 延伸阅读
@@ -310,7 +317,7 @@ graph TB
 >
 > 若使用 `uv`，通常不需要你手动限制系统 Python 版本；`uv` 会根据项目约束自动选择/下载兼容解释器。
 
-### pip/uv tool 部署（推荐用于直接使用）
+### pip/uv tool 部署（快速，适合默认行为）
 
 适合只想“安装后直接跑”的场景，`Undefined`/`Undefined-webui` 命令会作为可执行入口安装到你的环境中。
 
@@ -394,7 +401,7 @@ python -c "from Undefined.utils.resources import resolve_resource_path; print(re
 python -c "from Undefined.utils.resources import read_text_resource; print(len(read_text_resource('res/prompts/undefined.xml')))"
 ```
 
-### 源码部署（开发/使用）
+### 源码部署（推荐，可尽情自定义）
 
 #### 1. 克隆项目
 
@@ -503,6 +510,10 @@ uv run Undefined-webui
   - `send_text_file_max_size_kb`：`messages.send_text_file` 单文件文本发送大小上限（KB），默认 `512`（`0.5MB`）
   - `send_url_file_max_size_mb`：`messages.send_url_file` URL 文件发送大小上限（MB），默认 `100`
   - 建议：单文件、轻量任务优先用 `messages.send_text_file`；多文件工程或需要执行验证/打包交付优先用 `code_delivery_agent`
+- **认知记忆（可选）**：`[cognitive]`
+  - `[models.embedding]`：embedding 模型配置（复用知识库配置，api_url / api_key / model_name）
+  - `enabled`：是否启用认知记忆系统（默认开启，embedding 未配置时自动降级）
+  - 详细配置见 [认知记忆文档](docs/cognitive-memory.md)
 - **代理设置（可选）**：`[proxy]`
 - **WebUI**：`[webui]`（默认 `127.0.0.1:8787`，密码默认 `changeme`，启动 `uv run Undefined-webui`）
 
@@ -624,9 +635,11 @@ Undefined 欢迎开发者参与共建！
 src/Undefined/
 ├── ai/            # AI 运行时（client、prompt、tooling、summary、多模态）
 ├── bilibili/      # B站视频解析、下载与发送
+├── cognitive/     # 认知记忆系统（向量存储、史官、侧写、队列）
 ├── skills/        # 技能插件核心目录
 │   ├── tools/           # 基础工具（原子化功能单元）
 │   ├── toolsets/        # 工具集（分组工具）
+│   │   └── cognitive/   # 认知记忆主动工具（search_events / get_profile / search_profiles）
 │   ├── agents/          # 智能体（子 AI）
 │   └── anthropic_skills/ # Anthropic Skills（SKILL.md 格式）
 ├── services/      # 核心服务 (Queue, Command, Security)
@@ -657,6 +670,7 @@ uv run mypy .
 - Agents 开发：[`src/Undefined/skills/agents/README.md`](src/Undefined/skills/agents/README.md)
 - Tools 开发：[`src/Undefined/skills/tools/README.md`](src/Undefined/skills/tools/README.md)
 - Toolsets 开发：[`src/Undefined/skills/toolsets/README.md`](src/Undefined/skills/toolsets/README.md)
+- 认知记忆系统：[`docs/cognitive-memory.md`](docs/cognitive-memory.md)
 
 ## 风险提示与免责声明
 

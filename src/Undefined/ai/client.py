@@ -118,6 +118,7 @@ class AIClient:
         self._requester = ModelRequester(self._http_client, self._token_usage_storage)
         self._token_counter = TokenCounter()
         self._knowledge_manager: Any = None
+        self._cognitive_service: Any = None
 
         # 私聊发送回调
         self._send_private_message_callback: Optional[
@@ -274,6 +275,13 @@ class AIClient:
             except Exception as exc:
                 logger.warning("[清理] 关闭知识库管理器失败: %s", exc)
             self._knowledge_manager = None
+        cognitive_service = getattr(self, "_cognitive_service", None)
+        if cognitive_service is not None and hasattr(cognitive_service, "stop"):
+            try:
+                await cognitive_service.stop()
+            except Exception as exc:
+                logger.warning("[清理] 关闭认知记忆服务失败: %s", exc)
+            self._cognitive_service = None
 
         # 2) 等待 MCP 初始化完成，再关闭 MCP toolsets
         if hasattr(self, "_mcp_init_task") and not self._mcp_init_task.done():
@@ -372,6 +380,9 @@ class AIClient:
 
     def set_knowledge_manager(self, manager: Any) -> None:
         self._knowledge_manager = manager
+
+    def set_cognitive_service(self, service: Any) -> None:
+        self._cognitive_service = service
 
     def apply_search_config(self, searxng_url: str) -> None:
         """应用搜索服务配置（支持热更新）。"""
@@ -734,6 +745,7 @@ class AIClient:
         tool_context.setdefault("sender", sender)
         tool_context.setdefault("send_image_callback", self._send_image_callback)
         tool_context.setdefault("knowledge_manager", self._knowledge_manager)
+        tool_context.setdefault("cognitive_service", self._cognitive_service)
 
         # 动态选择模型（等待偏好加载就绪，避免竞态）
         await self.model_selector.wait_ready()

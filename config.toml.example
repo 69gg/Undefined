@@ -593,3 +593,62 @@ port = 8787
 # zh: WebUI 密码（首次启动必须修改默认值；默认密码无法登录）。
 # en: WebUI password (must be changed on first run; default password cannot be used to log in).
 password = "changeme"
+
+# zh: 认知记忆系统配置。
+# en: Cognitive memory system configuration.
+[cognitive]
+# zh: 是否启用认知记忆系统。
+# en: Enable cognitive memory system.
+enabled = false
+
+[cognitive.vector_store]
+# zh: ChromaDB 向量数据库存储路径。
+# en: ChromaDB vector store path.
+path = "data/cognitive/chromadb"
+
+[cognitive.query]
+# zh: 自动注入上下文时的召回条数。
+# en: Number of results to inject automatically.
+auto_top_k = 3
+# zh: 工具调用时的默认召回条数。
+# en: Default top-k for tool calls.
+tool_default_top_k = 12
+# zh: 用户画像召回条数。
+# en: Top-k for profile retrieval.
+profile_top_k = 8
+# zh: rerank 候选倍数（候选数 = top_k * multiplier）。
+# en: Rerank candidate multiplier.
+rerank_candidate_multiplier = 3
+
+[cognitive.historian]
+# zh: 记忆改写最大重试次数。
+# en: Max retries for memory rewrite.
+rewrite_max_retry = 2
+# zh: 队列轮询间隔（秒）。
+# en: Queue poll interval (seconds).
+poll_interval_seconds = 1.0
+# zh: 任务超时时间（秒），超时后重新入队。
+# en: Stale job timeout (seconds), re-queued after timeout.
+stale_job_timeout_seconds = 300.0
+
+[cognitive.profile]
+# zh: 用户画像存储路径。
+# en: Profile storage path.
+path = "data/cognitive/profiles"
+# zh: 保留的历史版本数量。
+# en: Number of profile revisions to keep.
+revision_keep = 5
+
+[cognitive.queue]
+# zh: 队列文件存储路径。
+# en: Queue file storage path.
+path = "data/cognitive/queues"
+# zh: 失败任务最大保留天数。
+# en: Max age (days) for failed jobs.
+failed_max_age_days = 30
+# zh: 失败任务最大文件数。
+# en: Max number of failed job files.
+failed_max_files = 500
+# zh: 每处理多少条任务触发一次失败队列清理。
+# en: Failed queue cleanup interval (number of jobs processed).
+failed_cleanup_interval = 100

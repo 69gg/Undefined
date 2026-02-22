@@ -30,6 +30,7 @@ except Exception:  # pragma: no cover
 from .models import (
     AgentModelConfig,
     ChatModelConfig,
+    CognitiveConfig,
     EmbeddingModelConfig,
     ModelPool,
     ModelPoolEntry,
@@ -465,6 +466,8 @@ class Config:
     bilibili_oversize_strategy: str
     bilibili_auto_extract_group_ids: list[int]
     bilibili_auto_extract_private_ids: list[int]
+    # 认知记忆
+    cognitive: CognitiveConfig
     _allowed_group_ids_set: set[int] = dataclass_field(
         default_factory=set,
         init=False,
@@ -1144,6 +1147,8 @@ class Config:
 
         webui_settings = load_webui_settings(config_path)
 
+        cognitive = cls._parse_cognitive_config(data)
+
         if strict:
             cls._verify_required_fields(
                 bot_qq=bot_qq,
@@ -1271,6 +1276,7 @@ class Config:
             knowledge_default_top_k=knowledge_default_top_k,
             knowledge_enable_rerank=knowledge_enable_rerank,
             knowledge_rerank_top_k=knowledge_rerank_top_k,
+            cognitive=cognitive,
         )
 
     @property
@@ -1957,6 +1963,70 @@ class Config:
                 setattr(self, name, new_value)
                 changes[name] = (old_value, new_value)
         return changes
+
+    @staticmethod
+    def _parse_cognitive_config(data: dict[str, Any]) -> CognitiveConfig:
+        cog = data.get("cognitive", {})
+        vs = cog.get("vector_store", {}) if isinstance(cog, dict) else {}
+        q = cog.get("query", {}) if isinstance(cog, dict) else {}
+        hist = cog.get("historian", {}) if isinstance(cog, dict) else {}
+        prof = cog.get("profile", {}) if isinstance(cog, dict) else {}
+        que = cog.get("queue", {}) if isinstance(cog, dict) else {}
+        return CognitiveConfig(
+            enabled=_coerce_bool(
+                cog.get("enabled") if isinstance(cog, dict) else None, True
+            ),
+            vector_store_path=_coerce_str(
+                vs.get("path") if isinstance(vs, dict) else None,
+                "data/cognitive/chromadb",
+            ),
+            queue_path=_coerce_str(
+                que.get("path") if isinstance(que, dict) else None,
+                "data/cognitive/queues",
+            ),
+            profiles_path=_coerce_str(
+                prof.get("path") if isinstance(prof, dict) else None,
+                "data/cognitive/profiles",
+            ),
+            auto_top_k=_coerce_int(
+                q.get("auto_top_k") if isinstance(q, dict) else None, 3
+            ),
+            tool_default_top_k=_coerce_int(
+                q.get("tool_default_top_k") if isinstance(q, dict) else None, 12
+            ),
+            profile_top_k=_coerce_int(
+                q.get("profile_top_k") if isinstance(q, dict) else None, 8
+            ),
+            rerank_candidate_multiplier=_coerce_int(
+                q.get("rerank_candidate_multiplier") if isinstance(q, dict) else None, 3
+            ),
+            rewrite_max_retry=_coerce_int(
+                hist.get("rewrite_max_retry") if isinstance(hist, dict) else None, 2
+            ),
+            poll_interval_seconds=_coerce_float(
+                hist.get("poll_interval_seconds") if isinstance(hist, dict) else None,
+                1.0,
+            ),
+            stale_job_timeout_seconds=_coerce_float(
+                hist.get("stale_job_timeout_seconds")
+                if isinstance(hist, dict)
+                else None,
+                300.0,
+            ),
+            profile_revision_keep=_coerce_int(
+                prof.get("revision_keep") if isinstance(prof, dict) else None, 5
+            ),
+            failed_max_age_days=_coerce_int(
+                que.get("failed_max_age_days") if isinstance(que, dict) else None, 30
+            ),
+            failed_max_files=_coerce_int(
+                que.get("failed_max_files") if isinstance(que, dict) else None, 500
+            ),
+            failed_cleanup_interval=_coerce_int(
+                que.get("failed_cleanup_interval") if isinstance(que, dict) else None,
+                100,
+            ),
+        )
 
     @staticmethod
     def _parse_easter_egg_call_mode(value: Any) -> str:

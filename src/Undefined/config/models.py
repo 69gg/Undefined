@@ -120,3 +120,24 @@ class AgentModelConfig:
         False  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
     pool: ModelPool | None = None  # 模型池配置
+
+
+@dataclass
+class CognitiveConfig:
+    """认知记忆系统配置"""
+
+    enabled: bool = True
+    vector_store_path: str = "data/cognitive/chromadb"
+    queue_path: str = "data/cognitive/queues"
+    profiles_path: str = "data/cognitive/profiles"
+    auto_top_k: int = 3
+    tool_default_top_k: int = 12
+    profile_top_k: int = 8
+    rewrite_max_retry: int = 2
+    poll_interval_seconds: float = 1.0
+    stale_job_timeout_seconds: float = 300.0
+    profile_revision_keep: int = 5
+    failed_max_age_days: int = 30
+    failed_max_files: int = 500
+    failed_cleanup_interval: int = 100
+    rerank_candidate_multiplier: int = 3
