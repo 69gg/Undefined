@@ -127,6 +127,32 @@ knowledge/
 ]
 ```
 
+启用重排后，结果会额外包含 `rerank_score`：
+
+```json
+[
+  {
+    "content": "重置密码需要验证手机号",
+    "source": "faq.txt",
+    "relevance": 0.91,
+    "rerank_score": 0.981245
+  }
+]
+```
+
+### 参数优先级与约束
+
+`knowledge_semantic_search` 参数优先级：
+
+1. tool 调用参数（`top_k` / `enable_rerank` / `rerank_top_k`）
+2. `config.toml` 中 `[knowledge]` 默认值
+
+约束规则：
+
+- `top_k`、`rerank_top_k` 必须为正整数
+- `rerank_top_k` 必须小于本次语义召回数量（即本次 `top_k` 生效值）
+- 当约束不满足时，系统会自动降级：缩小 `rerank_top_k` 或禁用重排（并输出日志告警）
+
 ## 工作原理
 
 ### 文本切分
@@ -170,6 +196,26 @@ texts → split_lines → [batch 1, batch 2, ...] → Queue → API (间隔发�
 - `rerank_top_k < 语义召回数量`
 
 若你的重排模型要求指令前缀（例如 `Instruct: ...\nQuery: `），可配置 `models.rerank.query_instruction`，系统会在重排请求时自动拼接到 `query` 前。
+
+### 统一 OpenAI 请求层与 Token 统计
+
+知识库检索中的嵌入和重排都走统一的 OpenAI 请求层（OpenAI SDK）：
+
+- 嵌入：`/v1/embeddings`
+- 重排：`/v1/rerank`
+
+这样做的好处：
+
+- 统一复用连接池、base_url 兼容处理、错误处理逻辑
+- 便于后续扩展新的检索相关能力
+- 统一记录 token 使用，方便 `/stats` 统计
+
+`/stats` 中可看到新增调用类型：
+
+- `embedding`
+- `rerank`
+
+> 若上游响应缺失 usage 字段，系统会回退到本地估算，确保统计口径连续可用。
 
 ### 向量存储
 
@@ -237,6 +283,42 @@ document_instruction = "passage: "
 
 > 具体指令内容以各模型官方文档为准。不确定时可先不填，观察检索效果后再调整。
 
+## 重排模型适配
+
+重排模型使用 OpenAI 兼容 `/v1/rerank` 接口，核心输入为：
+
+- `query`：查询文本
+- `documents`：待重排文档列表
+- `top_n`：返回数量
+
+### query_instruction 说明
+
+部分重排模型要求在 Query 前拼接任务指令，可通过 `models.rerank.query_instruction` 配置。该前缀只作用于**重排阶段**，不影响向量召回阶段的嵌入输入。
+
+### 配置示例
+
+**无需指令前缀**
+
+```toml
+[models.rerank]
+api_url = "https://api.openai.com/v1"
+api_key = "sk-xxx"
+model_name = "text-rerank-001"
+query_instruction = ""
+```
+
+**需要指令前缀（示例）**
+
+```toml
+[models.rerank]
+api_url = "http://localhost:8000/v1"
+api_key = "EMPTY"
+model_name = "my-rerank-model"
+query_instruction = "Instruct: 为这个搜索查询重排候选文档\nQuery: "
+```
+
+> 指令模板请以具体模型文档为准。
+
 ## 手动触发嵌入
 
 如果关闭了自动扫描，可以通过重启机器人触发一次全量扫描，或将 `auto_scan` + `auto_embed` 临时设为 `true` 后热更新配置。
@@ -248,3 +330,4 @@ document_instruction = "passage: "
 - `chroma/` 目录较大时可手动删除后重新嵌入（会触发全量重建）
 - 嵌入模型需兼容 OpenAI `/v1/embeddings` 接口
 - 重排模型需兼容 OpenAI `/v1/rerank` 接口
+- 建议先确认重排模型是否要求 `query_instruction` 前缀，避免相关性下降
