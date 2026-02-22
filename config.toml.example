@@ -221,6 +221,14 @@ strategy = "default"
 # en: Agent model pool entries (model_name, api_url, api_key required; others optional, inherit from primary).
 models = []
 
+# zh: 史官模型配置（认知记忆后台改写用，未配置时回退到 agent 模型）。
+# en: Historian model config (for cognitive memory rewriting, falls back to agent model if unset).
+[models.historian]
+# api_url = ""
+# api_key = ""
+# model_name = ""
+# max_tokens = 4096
+
 # zh: 嵌入模型配置（知识库语义检索使用）。
 # en: Embedding model config (used by knowledge semantic retrieval).
 [models.embedding]

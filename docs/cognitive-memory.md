@@ -158,7 +158,7 @@ data/cognitive/
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `enabled` | bool | `true` | 是否启用（变更需重启） |
+| `enabled` | bool | `false` | 是否启用（变更需重启） |
 
 ### [cognitive.vector_store]
 
@@ -174,6 +174,17 @@ data/cognitive/
 | `tool_default_top_k` | int | `12` | `cognitive.search_events` 默认返回条数（支持热更新） |
 | `profile_top_k` | int | `8` | `cognitive.search_profiles` 默认返回条数（支持热更新） |
 | `rerank_candidate_multiplier` | int | `3` | 重排候选倍数（启用 rerank 时生效） |
+
+### [models.historian]（可选）
+
+史官后台改写使用的模型，未配置时回退到 `[models.agent]`。可指定轻量模型以降低成本。
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `api_url` | str | 继承 agent | OpenAI 兼容 base URL |
+| `api_key` | str | 继承 agent | API 密钥 |
+| `model_name` | str | 继承 agent | 模型名称 |
+| `max_tokens` | int | 继承 agent | 最大生成 tokens |
 
 ### [cognitive.historian]
 

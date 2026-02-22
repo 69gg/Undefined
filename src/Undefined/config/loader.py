@@ -379,6 +379,7 @@ class Config:
     security_model_enabled: bool
     security_model: SecurityModelConfig
     agent_model: AgentModelConfig
+    historian_model: AgentModelConfig
     model_pool_enabled: bool
     log_level: str
     log_file_path: str
@@ -697,6 +698,7 @@ class Config:
         )
         security_model = cls._parse_security_model_config(data, chat_model)
         agent_model = cls._parse_agent_model_config(data)
+        historian_model = cls._parse_historian_model_config(data, agent_model)
 
         model_pool_enabled = _coerce_bool(
             _get_value(data, ("features", "pool_enabled"), "MODEL_POOL_ENABLED"), False
@@ -1194,6 +1196,7 @@ class Config:
             security_model_enabled=security_model_enabled,
             security_model=security_model,
             agent_model=agent_model,
+            historian_model=historian_model,
             model_pool_enabled=model_pool_enabled,
             log_level=log_level,
             log_file_path=log_file_path,
@@ -1965,6 +1968,20 @@ class Config:
         return changes
 
     @staticmethod
+    def _parse_historian_model_config(
+        data: dict[str, Any], fallback: AgentModelConfig
+    ) -> AgentModelConfig:
+        h = data.get("models", {}).get("historian", {})
+        if not isinstance(h, dict) or not h:
+            return fallback
+        return AgentModelConfig(
+            api_url=_coerce_str(h.get("api_url"), fallback.api_url),
+            api_key=_coerce_str(h.get("api_key"), fallback.api_key),
+            model_name=_coerce_str(h.get("model_name"), fallback.model_name),
+            max_tokens=_coerce_int(h.get("max_tokens"), fallback.max_tokens),
+        )
+
+    @staticmethod
     def _parse_cognitive_config(data: dict[str, Any]) -> CognitiveConfig:
         cog = data.get("cognitive", {})
         vs = cog.get("vector_store", {}) if isinstance(cog, dict) else {}
@@ -1974,7 +1991,7 @@ class Config:
         que = cog.get("queue", {}) if isinstance(cog, dict) else {}
         return CognitiveConfig(
             enabled=_coerce_bool(
-                cog.get("enabled") if isinstance(cog, dict) else None, True
+                cog.get("enabled") if isinstance(cog, dict) else None, False
             ),
             vector_store_path=_coerce_str(
                 vs.get("path") if isinstance(vs, dict) else None,

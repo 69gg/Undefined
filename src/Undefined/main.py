@@ -321,6 +321,7 @@ async def main() -> None:
                 profile_storage=profile_storage,
                 ai_client=ai,
                 config_getter=lambda: config.cognitive,
+                model_config=config.historian_model,
             )
             ai.set_cognitive_service(cognitive_service)
             logger.info("[认知记忆] 初始化完成")

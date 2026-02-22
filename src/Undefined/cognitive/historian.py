@@ -47,12 +47,14 @@ class HistorianWorker:
         profile_storage: Any,
         ai_client: Any,
         config_getter: Callable[[], Any],
+        model_config: Any = None,
     ) -> None:
         self._job_queue = job_queue
         self._vector_store = vector_store
         self._profile_storage = profile_storage
         self._ai_client = ai_client
         self._config_getter = config_getter
+        self._model_config = model_config
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
 
@@ -143,7 +145,7 @@ class HistorianWorker:
             new_info=job.get("new_info", ""),
         )
         response = await self._ai_client.request_model(
-            model_config=self._ai_client.agent_config,
+            model_config=self._model_config or self._ai_client.agent_config,
             messages=[{"role": "user", "content": prompt}],
             call_type="historian_rewrite",
         )
@@ -176,7 +178,7 @@ class HistorianWorker:
         )
 
         response = await self._ai_client.request_model(
-            model_config=self._ai_client.agent_config,
+            model_config=self._model_config or self._ai_client.agent_config,
             messages=[{"role": "user", "content": prompt}],
             tools=[_PROFILE_TOOL],
             tool_choice={"type": "function", "function": {"name": "update_profile"}},
