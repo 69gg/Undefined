@@ -14,6 +14,8 @@
 
 事件上下文：
 - event_id: {event_id}
+- request_id: {request_id}
+- end_seq: {end_seq}
 - 时间: {timestamp_local}（{timezone}）
 - 请求类型: {request_type}
 - user_id: {user_id}
@@ -21,6 +23,8 @@
 - sender_id: {sender_id}
 - group_name: {group_name}
 - sender_name: {sender_name}
+- message_ids: {message_ids}
+- action_summary: {action_summary}
 
 当前侧写：
 {current_profile}

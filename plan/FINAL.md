@@ -7,7 +7,7 @@
 
 ## 0. 最终拍板（不可再摇摆）
 
-1. `end` 记忆输入强制双字段：`action_summary`（做了什么）+ `new_info`（新信息）。
+1. `end` 记忆输入采用双字段语义：`action_summary`（本轮做了什么）+ `new_info`（针对当前新消息抽取的一条新记忆），两者均可为空。
 2. 前台只负责入队，后台史官异步整理；主回复链路绝不等待记忆写入。
 3. 史官必须做绝对化：消灭代词、相对时间、相对地点。
 4. 事件记忆存 ChromaDB（`events`），并写入完整 metadata（含 location/time）。
@@ -40,10 +40,16 @@
 ```json
 {
   "action_summary": "本轮做了什么",
-  "new_info": "本轮获得的新信息（可空）",
+  "new_info": "针对当前新消息提取的一条新记忆（可空）",
   "force": false
 }
 ```
+
+约束：
+
+1. `end` 允许空调用（两字段都为空）用于仅结束对话，不产生日志入队。
+2. `action_summary` 仅记录 AI 本轮实际动作，保持短句。
+3. `new_info` 每条新消息最多 1 条，提取不到则留空，不复述历史已知信息。
 
 兼容策略：
 
@@ -107,7 +113,7 @@ source_event_id: "req_xxx:1"
 
 ## 3. 后台史官流程（标准流水线）
 
-1. 前台 `end` 调用后，落盘 `memory_job` 到 `data/queues/pending/{job_id}.json`。
+1. 前台 `end` 调用后，若 `action_summary`/`new_info` 任一非空，则落盘 `memory_job` 到 `data/queues/pending/{job_id}.json`。
 2. Worker 从 `pending` 原子移动到 `processing` 后处理。
 3. LLM 绝对化改写：生成 `did_what/new_info/canonical_text`。
 4. 正则闸门检查：
@@ -115,7 +121,7 @@ source_event_id: "req_xxx:1"
    2. 相对时间：`今天|昨天|明天|刚才|刚刚|稍后|上周|下周|最近`
    3. 相对地点：`这里|那边|本地|当地|这儿|那儿`
 5. 命中违规则回炉重写，最多 2 次；仍失败则降级写入并打告警。
-6. 事件 embedding + upsert 到 `events`。
+6. 事件 embedding + upsert 到 `events`（允许按 group/sender 等视角生成多条事件记录）。
 7. 若 `new_info` 非空：合并并覆盖 user/group profile，写快照，再更新 `profiles` embedding。
 8. 成功后删除 `processing` 任务；失败进入 `failed/`。
 

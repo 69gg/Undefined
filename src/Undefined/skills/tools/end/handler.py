@@ -11,6 +11,24 @@ from Undefined.end_summary_storage import (
 )
 
 logger = logging.getLogger(__name__)
+_OUTBOUND_ACTION_HINTS = (
+    "send_message",
+    "send_private_message",
+    "send_poke",
+    "发送",
+    "回复",
+    "回了",
+    "发了",
+)
+_NEGATIVE_OUTBOUND_HINTS = (
+    "未发送",
+    "没发送",
+    "未回复",
+    "没回复",
+    "未发",
+    "没发",
+    "无需发送",
+)
 
 
 def _parse_force_flag(value: Any) -> bool:
@@ -57,6 +75,34 @@ def _build_location(context: Dict[str, Any]) -> EndSummaryLocation | None:
     return None
 
 
+def _action_summary_requires_message_sent(summary: str) -> bool:
+    text = str(summary or "").strip().lower()
+    if not text:
+        return False
+    if any(hint in text for hint in _NEGATIVE_OUTBOUND_HINTS):
+        return False
+    return any(hint in text for hint in _OUTBOUND_ACTION_HINTS)
+
+
+def _build_record_key(
+    context: Dict[str, Any],
+    *,
+    action_summary: str,
+    new_info: str,
+    perspective: str,
+) -> tuple[str, ...]:
+    return (
+        str(context.get("request_id", "")).strip(),
+        str(context.get("trigger_message_id", "")).strip(),
+        str(context.get("request_type", "")).strip(),
+        str(context.get("group_id", "")).strip(),
+        str(context.get("sender_id") or context.get("user_id") or "").strip(),
+        perspective.strip(),
+        action_summary.strip(),
+        new_info.strip(),
+    )
+
+
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     action_summary_raw = args.get("action_summary") or args.get("summary", "")
     action_summary = (
@@ -64,6 +110,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     )
     new_info_raw = args.get("new_info", "")
     new_info = new_info_raw.strip() if isinstance(new_info_raw, str) else ""
+    perspective_raw = args.get("perspective", "")
+    perspective = perspective_raw.strip() if isinstance(perspective_raw, str) else ""
     # 兼容旧版 summary 字段
     summary = action_summary
     force_raw = args.get("force", False)
@@ -75,18 +123,35 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             context.get("request_id", "-"),
         )
 
-    # 检查：如果有 summary 但本轮未发送消息，且未强制执行，则拒绝
-    if summary and not force:
+    record_key = _build_record_key(
+        context,
+        action_summary=action_summary,
+        new_info=new_info,
+        perspective=perspective,
+    )
+    if context.get("_end_last_record_key") == record_key:
+        logger.info(
+            "[end工具] 轻量去重命中，跳过重复记录: request_id=%s trigger_message_id=%s perspective=%s",
+            context.get("request_id", "-"),
+            context.get("trigger_message_id", "-"),
+            perspective or "default",
+        )
+        context["conversation_ended"] = True
+        return "对话已结束（重复记录已跳过）"
+    context["_end_last_record_key"] = record_key
+
+    # 仅在 action_summary 明确表示“已发送/已回复”时，执行发送一致性检查。
+    if summary and not force and _action_summary_requires_message_sent(summary):
         message_sent = _was_message_sent_this_turn(context)
         if not message_sent:
             logger.warning(
-                "[end工具] 拒绝执行：有 summary 但本轮未发送消息，request_id=%s",
+                "[end工具] 拒绝执行：action_summary 声称已发送但本轮未发送消息，request_id=%s",
                 context.get("request_id", "-"),
             )
             return (
-                "拒绝结束对话：你记录了 summary 但本轮未发送任何消息或媒体内容。"
+                "拒绝结束对话：action_summary 声称已发送消息，但本轮未发送任何消息或媒体内容。"
                 "请先发送消息给用户，或者如果确实不需要发送，请使用 force=true 参数强制结束。"
-                "如果你本轮没有做任何事，若无必要，建议不加summary参数，避免记忆噪声。"
+                "如果你本轮没有发送消息，请改写 action_summary 为真实动作。"
             )
 
     if summary:
@@ -118,16 +183,22 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 )
 
         logger.info("保存end记录: %s...", summary[:50])
+    else:
+        logger.info("[end工具] action_summary 为空，跳过 end 摘要写入")
 
     # 若 cognitive 启用，入队 memory_job
     cognitive_service = context.get("cognitive_service")
-    if cognitive_service and action_summary:
+    if perspective:
+        context["memory_perspective"] = perspective
+    if cognitive_service and (action_summary or new_info):
         job_id = await cognitive_service.enqueue_job(
             action_summary=action_summary,
             new_info=new_info,
             context=context,
         )
         logger.info("[end工具] 认知记忆任务已提交: job_id=%s", job_id or "")
+    elif cognitive_service:
+        logger.info("[end工具] 记忆字段均为空，跳过认知入队")
 
     # 通知调用方对话应结束
     context["conversation_ended"] = True

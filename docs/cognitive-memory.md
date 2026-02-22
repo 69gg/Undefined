@@ -4,7 +4,7 @@
 
 认知记忆系统是 Undefined 的长期记忆架构，由两部分组成：
 
-- **事件记忆**：每轮对话结束时，AI 将本轮摘要写入文件队列，后台史官异步改写为绝对化事件并存入 ChromaDB 向量库，支持语义检索。
+- **事件记忆**：每轮对话结束时，AI 通过 `end` 工具提交 `action_summary`/`new_info`（可空），后台史官异步改写为绝对化事件并存入 ChromaDB 向量库，支持语义检索。
 - **用户/群侧写**：当对话中出现新信息（偏好、身份、习惯等）时，史官自动合并更新 Markdown 侧写文件，下次对话时注入 prompt。
 
 与旧 `end_summaries` 的区别：
@@ -59,6 +59,12 @@ AI 调用 `end` 工具结束对话时，只做一次文件落盘（p95 < 5ms）�
                         └─ 写 end_summaries.json     ← 旧模式双写
 ```
 
+`end` 字段语义：
+
+- `action_summary`：记录 AI 本轮做了什么，建议短句，可空。
+- `new_info`：针对当前新消息提取的一条新记忆（0/1 条），可空。
+- 两字段都为空时，仅结束会话，不写认知队列。
+
 ### 后台史官流水线
 
 ```
@@ -75,6 +81,7 @@ processing/{job_id}.json
     │
     ▼ ChromaDB upsert（events collection）
     │
+    ▼ 若有 new_info → 可按 group/sender 等视角生成多条事件记录
     ▼ 若有 new_info → tool_call 结构化提取 → 更新侧写文件 + 向量库
     │
     ▼ complete（删除 processing 文件）
@@ -83,7 +90,7 @@ processing/{job_id}.json
                 否 → failed/{job_id}.json
 ```
 
-史官是独立的后台 `asyncio.Task`，不走主消息队列，不影响任何前台响应。
+史官是独立的后台 `asyncio.Task`，不走主消息队列，不影响任何前台响应。默认单 worker，按需可扩展多 worker 并发消费。
 
 ---
 
@@ -101,6 +108,7 @@ processing/{job_id}.json
 | `timestamp_utc` | UTC 时间（ISO 格式） |
 | `timestamp_local` | 本地时间（Asia/Shanghai） |
 | `request_type` | `group` 或 `private` |
+| `perspective` | 记录视角（如 `group` / `sender` / `global`） |
 | `is_absolute` | 是否通过绝对化闸门 |
 | `schema_version` | 数据版本（`final_v1`） |
 
@@ -355,4 +363,4 @@ failed 文件中包含原始 job 数据和 `error` 字段，记录失败原因�
 
 **Q: 史官处理速度跟不上怎么办？**
 
-史官是单 worker 串行处理，每个任务需要 1-2 次 LLM 调用。高并发场景下 `pending/` 目录会积压，但不影响前台响应。可适当降低 `poll_interval_seconds` 加快消费速度。
+默认是单 worker 串行处理，每个任务需要 1-2 次 LLM 调用。高并发场景下 `pending/` 目录会积压，但不影响前台响应。可适当降低 `poll_interval_seconds` 或扩展多 worker 加快消费速度。

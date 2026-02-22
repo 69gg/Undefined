@@ -32,11 +32,13 @@ class CognitiveService:
     async def enqueue_job(
         self, action_summary: str, new_info: str, context: dict[str, Any]
     ) -> str | None:
+        action_summary_text = str(action_summary or "").strip()
+        new_info_text = str(new_info or "").strip()
         if not self.enabled:
             logger.info("[认知服务] 已禁用，跳过入队")
             return None
-        if not str(action_summary or "").strip():
-            logger.info("[认知服务] action_summary 为空，跳过入队")
+        if not action_summary_text and not new_info_text:
+            logger.info("[认知服务] action_summary/new_info 均为空，跳过入队")
             return None
         ctx = RequestContext.current()
         from datetime import datetime, timezone
@@ -57,10 +59,12 @@ class CognitiveService:
         except (TypeError, ValueError):
             end_seq = 0
 
-        has_new_info = bool(str(new_info or "").strip())
+        has_new_info = bool(new_info_text)
         message_ids = context.get("message_ids")
         if not isinstance(message_ids, list):
             message_ids = []
+        message_ids = [str(item).strip() for item in message_ids if str(item).strip()]
+        perspective = str(context.get("memory_perspective", "")).strip()
         user_id = (
             str(ctx.user_id or "") if ctx else str(context.get("user_id", "") or "")
         )
@@ -126,23 +130,25 @@ class CognitiveService:
                 context.get("group_name") or context.get("sender_name") or ""
             ),
             "message_ids": message_ids,
-            "action_summary": action_summary,
-            "new_info": new_info,
+            "action_summary": action_summary_text,
+            "new_info": new_info_text,
             "has_new_info": has_new_info,
+            "perspective": perspective,
             "profile_targets": profile_targets,
             "schema_version": "final_v1",
         }
         logger.info(
-            "[认知服务] 准备入队: request_id=%s end_seq=%s user=%s group=%s sender=%s has_new_info=%s profile_targets=%s action_len=%s new_info_len=%s",
+            "[认知服务] 准备入队: request_id=%s end_seq=%s user=%s group=%s sender=%s perspective=%s has_new_info=%s profile_targets=%s action_len=%s new_info_len=%s",
             job.get("request_id", ""),
             job.get("end_seq", 0),
             job.get("user_id", ""),
             job.get("group_id", ""),
             job.get("sender_id", ""),
+            perspective or "default",
             has_new_info,
             len(profile_targets),
-            len(action_summary),
-            len(new_info),
+            len(action_summary_text),
+            len(new_info_text),
         )
         result: str | None = await self._job_queue.enqueue(job)
         logger.info("[认知服务] 入队完成: job_id=%s", result or "")

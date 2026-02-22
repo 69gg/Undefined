@@ -820,6 +820,15 @@ class AIClient:
         tool_context.setdefault("send_image_callback", self._send_image_callback)
         tool_context.setdefault("knowledge_manager", self._knowledge_manager)
         tool_context.setdefault("cognitive_service", self._cognitive_service)
+        message_ids = tool_context.get("message_ids")
+        if not isinstance(message_ids, list):
+            message_ids = []
+            tool_context["message_ids"] = message_ids
+        trigger_message_id = tool_context.get("trigger_message_id")
+        if trigger_message_id is not None:
+            trigger_message_id_text = str(trigger_message_id).strip()
+            if trigger_message_id_text and trigger_message_id_text not in message_ids:
+                message_ids.append(trigger_message_id_text)
 
         # 动态选择模型（等待偏好加载就绪，避免竞态）
         await self.model_selector.wait_ready()

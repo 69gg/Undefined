@@ -13,7 +13,7 @@
 ┌─────────────────────────┐                ┌──────────────────────────┐
 │ end handler              │                │ HistorianWorker          │
 │  ├─ 写 action_summary    │   文件队列     │  ├─ poll pending/        │
-│  ├─ 写 new_info          │ ──────────►   │  ├─ LLM 绝对化改写       │
+│  ├─ 写 new_info(0/1条)   │ ──────────►   │  ├─ LLM 绝对化改写       │
 │  └─ 落盘 pending/*.json  │                │  ├─ 正则闸门检查         │
 └─────────────────────────┘                │  ├─ ChromaDB upsert      │
                                            │  └─ Profile 合并+快照    │
@@ -325,20 +325,20 @@ HistorianWorker 是**独立的后台循环**，不走 QueueManager 的"车站-�
 
 文件：`src/Undefined/skills/tools/end/config.json`
 
-新增 `action_summary` 和 `new_info` 参数，保留 `summary` 做兼容：
+新增 `action_summary` 和 `new_info` 参数（两者可空），保留 `summary` 做兼容：
 
 ```json
 {
   "type": "function",
   "function": {
     "name": "end",
-    "description": "结束当前对话。必须提供 action_summary 描述本轮做了什么。如果本轮获得了关于用户/群的新信息（偏好、身份、习惯等），填写 new_info。",
+    "description": "结束当前对话。action_summary 记录本轮做了什么（可空，建议短句）；new_info 记录针对当前新消息提取的一条新记忆（可空）。",
     "parameters": {
       "type": "object",
       "properties": {
         "action_summary": {
           "type": "string",
-          "description": "本轮做了什么（必填）"
+          "description": "本轮做了什么（可空，建议短句）"
         },
         "new_info": {
           "type": "string",
@@ -373,9 +373,9 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     # 2. 原有逻辑不变：检查是否发送过消息、写 end_summary_storage
     # ...（保持现有 end_summary_storage 写入，确保旧模式可回退）
 
-    # 3. 新增：若 cognitive 启用，入队 memory_job
+    # 3. 新增：若 cognitive 启用且 action_summary/new_info 任一非空，入队 memory_job
     cognitive_service = context.get("cognitive_service")
-    if cognitive_service and action_summary:
+    if cognitive_service and (action_summary or new_info):
         await cognitive_service.enqueue_job(
             action_summary=action_summary,
             new_info=new_info,
@@ -612,7 +612,9 @@ class CognitiveService:
 
 ```python
 async def enqueue_job(self, action_summary, new_info, context):
-    if not self.enabled or not action_summary:
+    if not self.enabled:
+        return None
+    if not str(action_summary or "").strip() and not str(new_info or "").strip():
         return None
     ctx = RequestContext.current()
     job = {
@@ -787,9 +789,10 @@ tool_context["cognitive_service"] = self._ai_client._cognitive_service
 
 ```xml
 <end_tool_usage>
-  调用 end 时必须提供：
-  - action_summary：本轮做了什么（必填）
-  - new_info：本轮获得的关于用户/群的新信息（偏好、身份、习惯等，可空）
+  调用 end 时可选提供：
+  - action_summary：本轮做了什么（可空，建议短句）
+  - new_info：针对当前新消息提取的一条新记忆（可空）
+  - new_info 每条消息最多写一条；若没有稳定新信息则留空
   new_info 要求具体、绝对化（写明谁、什么时候、在哪里），避免代词和相对时间。
 </end_tool_usage>
 ```
@@ -1114,7 +1117,7 @@ end handler → `enqueue_job` 时，从 `RequestContext.current()` 提取所有�
 1. 不做 confidence/deprecated 体系
 2. 不引入 Redis/Kafka/PostgreSQL
 3. 不做多级 profile chunk 策略
-4. 不做 HistorianWorker 多实例并发（单 worker 足够，后续按需扩展）
+4. 默认单 HistorianWorker；允许按需扩展多实例并发（同队列消费，多条记录并存）
 5. 不做 embedding 缓存（ChromaDB 自带去重，首版不优化）
 
 ---
@@ -1589,7 +1592,7 @@ if cognitive_actually_enabled and (
 | 只传 `summary` | `action_summary = args.get("action_summary") or args.get("summary", "")` | 映射为 action_summary，new_info="" |
 | 只传 `action_summary` | 直接使用 | 正常 |
 | 同时传 `action_summary` + `summary` | `action_summary` 优先（`or` 短路） | 正常 |
-| 都不传 | action_summary="" → 不入队，不写 end_summary | 与旧行为一致 |
+| 都不传 | 仅结束会话；不入队，可不写 end_summary | 与新契约一致 |
 
 旧版 `summary` 字段在 `config.json` 中保留（标注 `[过渡兼容]`），不删除，直到过渡期结束。
 

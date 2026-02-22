@@ -198,11 +198,12 @@ class HistorianWorker:
     async def _process_job(self, job_id: str, job: dict[str, Any]) -> None:
         config = self._config_getter()
         logger.info(
-            "[史官] 开始处理任务 %s: user=%s group=%s sender=%s has_new_info=%s profile_targets=%s rewrite_max_retry=%s",
+            "[史官] 开始处理任务 %s: user=%s group=%s sender=%s perspective=%s has_new_info=%s profile_targets=%s rewrite_max_retry=%s",
             job_id,
             job.get("user_id", ""),
             job.get("group_id", ""),
             job.get("sender_id", ""),
+            job.get("perspective", ""),
             job.get("has_new_info", False),
             len(job.get("profile_targets", []) or []),
             config.rewrite_max_retry,
@@ -248,6 +249,7 @@ class HistorianWorker:
             "location_abs": job.get("location_abs", ""),
             "message_ids": job.get("message_ids", []),
             "has_new_info": bool(job.get("has_new_info", False)),
+            "perspective": str(job.get("perspective", "")).strip(),
             "schema_version": job.get("schema_version", "final_v1"),
             "is_absolute": is_absolute,
         }
@@ -353,6 +355,31 @@ class HistorianWorker:
 
         action_summary = str(job.get("action_summary", ""))
         new_info = str(job.get("new_info", ""))
+        message_ids_raw = job.get("message_ids", [])
+        if isinstance(message_ids_raw, list):
+            message_ids = [
+                str(item).strip() for item in message_ids_raw if str(item).strip()
+            ]
+        else:
+            message_ids = []
+        profile_targets_raw = job.get("profile_targets", [])
+        profile_targets_text = "[]"
+        if isinstance(profile_targets_raw, list) and profile_targets_raw:
+            compact_targets: list[str] = []
+            for target in profile_targets_raw:
+                if not isinstance(target, dict):
+                    continue
+                entity_type = str(target.get("entity_type", "")).strip()
+                entity_id = str(target.get("entity_id", "")).strip()
+                perspective = str(target.get("perspective", "")).strip()
+                if not entity_type or not entity_id:
+                    continue
+                if perspective:
+                    compact_targets.append(f"{entity_type}:{entity_id}({perspective})")
+                else:
+                    compact_targets.append(f"{entity_type}:{entity_id}")
+            if compact_targets:
+                profile_targets_text = ", ".join(compact_targets)
         logger.debug(
             "[史官] 任务 %s 发起绝对化改写: attempt=%s action_len=%s new_info_len=%s",
             job_id or "unknown",
@@ -363,11 +390,16 @@ class HistorianWorker:
 
         template = read_text_resource("res/prompts/historian_rewrite.md")
         prompt = template.format(
+            request_id=job.get("request_id", ""),
+            end_seq=job.get("end_seq", 0),
             timestamp_local=job.get("timestamp_local", ""),
             timezone=job.get("timezone", "Asia/Shanghai"),
             user_id=job.get("user_id", ""),
             group_id=job.get("group_id", ""),
             sender_id=job.get("sender_id", ""),
+            message_ids=", ".join(message_ids) if message_ids else "[]",
+            perspective=job.get("perspective", ""),
+            profile_targets=profile_targets_text,
             action_summary=action_summary,
             new_info=new_info,
         )
@@ -542,6 +574,13 @@ class HistorianWorker:
         from Undefined.utils.resources import read_text_resource
 
         template = read_text_resource("res/prompts/historian_profile_merge.md")
+        message_ids_raw = job.get("message_ids", [])
+        if isinstance(message_ids_raw, list):
+            message_ids = [
+                str(item).strip() for item in message_ids_raw if str(item).strip()
+            ]
+        else:
+            message_ids = []
         prompt = template.format(
             current_profile=_escape_braces(current),
             canonical_text=_escape_braces(canonical),
@@ -559,6 +598,10 @@ class HistorianWorker:
             timestamp_local=_escape_braces(str(job.get("timestamp_local", ""))),
             timezone=_escape_braces(str(job.get("timezone", ""))),
             event_id=_escape_braces(event_id),
+            request_id=_escape_braces(str(job.get("request_id", ""))),
+            end_seq=_escape_braces(str(job.get("end_seq", 0))),
+            message_ids=_escape_braces(", ".join(message_ids) if message_ids else "[]"),
+            action_summary=_escape_braces(str(job.get("action_summary", ""))),
         )
 
         response = await self._ai_client.submit_background_llm_call(

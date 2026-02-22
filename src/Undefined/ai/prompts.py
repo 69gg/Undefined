@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import html
 import logging
+import re
 from collections import deque
 from datetime import datetime
 from typing import Any, Callable, Awaitable, Literal
@@ -22,6 +24,12 @@ from Undefined.utils.resources import read_text_resource
 from Undefined.utils.xml import escape_xml_attr, escape_xml_text
 
 logger = logging.getLogger(__name__)
+
+_CURRENT_MESSAGE_RE = re.compile(
+    r"<message\b(?P<attrs>[^>]*)>\s*<content>(?P<content>.*?)</content>\s*</message>",
+    re.DOTALL | re.IGNORECASE,
+)
+_XML_ATTR_RE = re.compile(r'(?P<key>[a-zA-Z_][a-zA-Z0-9_-]*)="(?P<value>[^"]*)"')
 
 
 class PromptBuilder:
@@ -322,7 +330,7 @@ class PromptBuilder:
 
         if get_recent_messages_callback:
             await self._inject_recent_messages(
-                messages, get_recent_messages_callback, extra_context
+                messages, get_recent_messages_callback, extra_context, question
             )
 
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -401,6 +409,7 @@ class PromptBuilder:
             [str, str, int, int], Awaitable[list[dict[str, Any]]]
         ],
         extra_context: dict[str, Any] | None,
+        question: str,
     ) -> None:
         try:
             ctx = RequestContext.current()
@@ -448,6 +457,9 @@ class PromptBuilder:
                 msg_type,
                 0,
                 recent_limit,
+            )
+            recent_msgs = self._drop_current_message_if_duplicated(
+                recent_msgs, question
             )
             context_lines: list[str] = []
             for msg in recent_msgs:
@@ -511,3 +523,63 @@ class PromptBuilder:
                 )
         except Exception as exc:
             logger.warning(f"自动获取历史消息失败: {exc}")
+
+    def _extract_current_message_signature(self, question: str) -> dict[str, str]:
+        matched = _CURRENT_MESSAGE_RE.search(str(question or ""))
+        if not matched:
+            return {}
+
+        attrs_text = str(matched.group("attrs") or "")
+        attrs: dict[str, str] = {}
+        for attr_match in _XML_ATTR_RE.finditer(attrs_text):
+            key = str(attr_match.group("key") or "").strip()
+            if not key:
+                continue
+            attrs[key] = html.unescape(str(attr_match.group("value") or "")).strip()
+
+        content = html.unescape(str(matched.group("content") or "")).strip()
+        return {
+            "sender_id": attrs.get("sender_id", ""),
+            "timestamp": attrs.get("time", ""),
+            "content": content,
+        }
+
+    def _drop_current_message_if_duplicated(
+        self, recent_msgs: list[dict[str, Any]], question: str
+    ) -> list[dict[str, Any]]:
+        if not recent_msgs:
+            return recent_msgs
+
+        signature = self._extract_current_message_signature(question)
+        if not signature:
+            return recent_msgs
+
+        last_msg = recent_msgs[-1]
+        last_sender_id = str(last_msg.get("user_id", "")).strip()
+        last_timestamp = str(last_msg.get("timestamp", "")).strip()
+        last_content = str(last_msg.get("message", "")).strip()
+
+        sig_sender_id = str(signature.get("sender_id", "")).strip()
+        sig_timestamp = str(signature.get("timestamp", "")).strip()
+        sig_content = str(signature.get("content", "")).strip()
+        if not sig_sender_id or not sig_content:
+            return recent_msgs
+
+        if last_sender_id != sig_sender_id:
+            return recent_msgs
+        if last_content != sig_content:
+            return recent_msgs
+
+        if sig_timestamp and last_timestamp and sig_timestamp != last_timestamp:
+            # history 写入时间与事件时间可能存在秒级偏差；若分钟都不同则判定不是同一帧。
+            if sig_timestamp[:16] != last_timestamp[:16]:
+                return recent_msgs
+
+        logger.info(
+            "[Prompt] 历史注入剔除当前帧: sender=%s sig_time=%s history_time=%s content_preview=%s",
+            sig_sender_id,
+            sig_timestamp,
+            last_timestamp,
+            sig_content[:60],
+        )
+        return recent_msgs[:-1]

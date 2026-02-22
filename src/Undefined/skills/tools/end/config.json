@@ -2,21 +2,25 @@
     "type": "function",
     "function": {
         "name": "end",
-        "description": "结束当前对话。如果本轮有实质性操作或值得记录的信息，填写 action_summary；否则留空。如果本轮获得了关于用户/群的新信息（偏好、身份、习惯等），填写 new_info。不要提供你以前已经获取到的或存在于记忆里的内容，会导致你的记忆噪声增多。",
+        "description": "结束当前对话。action_summary 记录 AI 本轮做了什么（可空，建议短句）；new_info 记录针对当前新消息提取的一条新记忆（可空，最多一条）。两者都可空，空时仅结束对话不写入认知队列。避免重复复述历史已知记忆。",
         "parameters": {
             "type": "object",
             "properties": {
                 "action_summary": {
                     "type": "string",
-                    "description": "本轮做了什么（有实质内容时填写，否则留空）"
+                    "description": "本轮做了什么（可空，建议短句）"
                 },
                 "new_info": {
                     "type": "string",
-                    "description": "本轮获得的新信息（可空）"
+                    "description": "针对当前新消息提取的一条新记忆（可空，最多一条）"
                 },
                 "summary": {
                     "type": "string",
                     "description": "[过渡兼容] 旧版摘要字段，优先使用 action_summary。尽量不要填写。"
+                },
+                "perspective": {
+                    "type": "string",
+                    "description": "可选记录视角（如 group/sender），用于多史官并行场景区分记录。"
                 },
                 "force": {
                     "type": "boolean",
