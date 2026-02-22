@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "end",
-        "description": "结束当前对话。必须提供 action_summary 描述本轮做了什么。如果本轮获得了关于用户/群的新信息（偏好、身份、习惯等），填写 new_info。",
+        "description": "结束当前对话。必须提供 action_summary 描述本轮做了什么。如果本轮获得了关于用户/群的新信息（偏好、身份、习惯等），填写 new_info。不要提供你以前已经获取到的或存在于记忆里的内容，会导致你的记忆噪声增多。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -16,14 +16,14 @@
                 },
                 "summary": {
                     "type": "string",
-                    "description": "[过渡兼容] 旧版摘要字段，优先使用 action_summary"
+                    "description": "[过渡兼容] 旧版摘要字段，优先使用 action_summary。尽量不要填写。"
                 },
                 "force": {
                     "type": "boolean",
                     "description": "强制结束，跳过未发送消息检查"
                 }
             },
-            "required": []
+            "required": ["action_summary"]
         }
     }
 }
