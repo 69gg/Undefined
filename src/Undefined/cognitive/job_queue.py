@@ -55,6 +55,38 @@ class JobQueue:
         await write_json(self._failed_dir / f"{job_id}.json", data)
         await asyncio.to_thread(lambda: src.unlink(missing_ok=True))
 
+    async def requeue(self, job_id: str, error: str) -> None:
+        """将 processing 任务移回 pending，递增 _retry_count（原子操作）。"""
+        src = self._processing_dir / f"{job_id}.json"
+        dst = self._pending_dir / f"{job_id}.json"
+        data = await read_json(src) or {}
+        data["_retry_count"] = data.get("_retry_count", 0) + 1
+        data["_last_error"] = error
+        # 先原子更新 processing 内容，再原子移动到 pending
+        await write_json(src, data)
+        await asyncio.to_thread(lambda: os.replace(src, dst))
+
+    async def retry_all(self) -> int:
+        """将所有 failed 任务移回 pending 队列，返回重试数量。"""
+
+        def _move_all() -> int:
+            import json
+
+            count = 0
+            for f in self._failed_dir.glob("*.json"):
+                try:
+                    data = json.loads(f.read_text("utf-8"))
+                    data.pop("error", None)
+                    dst = self._pending_dir / f.name
+                    dst.write_text(json.dumps(data, ensure_ascii=False), "utf-8")
+                    f.unlink()
+                    count += 1
+                except (OSError, Exception):
+                    continue
+            return count
+
+        return await asyncio.to_thread(_move_all)
+
     async def recover_stale(self, timeout_seconds: float) -> int:
         def _recover() -> int:
             now = time.time()

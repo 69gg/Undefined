@@ -141,3 +141,4 @@ class CognitiveConfig:
     failed_max_files: int = 500
     failed_cleanup_interval: int = 100
     rerank_candidate_multiplier: int = 3
+    job_max_retries: int = 3

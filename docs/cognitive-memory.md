@@ -78,7 +78,9 @@ processing/{job_id}.json
     ▼ 若有 new_info → tool_call 结构化提取 → 更新侧写文件 + 向量库
     │
     ▼ complete（删除 processing 文件）
-        异常 → failed/{job_id}.json
+        异常 → 重试次数 < job_max_retries？
+                是 → requeue 回 pending（原子 os.replace）
+                否 → failed/{job_id}.json
 ```
 
 史官是独立的后台 `asyncio.Task`，不走主消息队列，不影响任何前台响应。
@@ -173,7 +175,7 @@ data/cognitive/
 | `auto_top_k` | int | `3` | 每轮自动注入的相关事件条数（支持热更新） |
 | `tool_default_top_k` | int | `12` | `cognitive.search_events` 默认返回条数（支持热更新） |
 | `profile_top_k` | int | `8` | `cognitive.search_profiles` 默认返回条数（支持热更新） |
-| `rerank_candidate_multiplier` | int | `3` | 重排候选倍数（启用 rerank 时生效） |
+| `rerank_candidate_multiplier` | int | `3` | 重排候选倍数（必须 >= 2，否则跳过重排；候选数 = top_k × multiplier） |
 
 ### [models.historian]（可选）
 
@@ -209,6 +211,7 @@ data/cognitive/
 | `failed_max_age_days` | int | `30` | failed 队列文件最大保留天数 |
 | `failed_max_files` | int | `500` | failed 队列最大文件数 |
 | `failed_cleanup_interval` | int | `100` | 每 N 轮 poll 执行一次清理（0 禁用） |
+| `job_max_retries` | int | `3` | 单个任务最大自动重试次数（超过后移入 failed，0=不重试） |
 
 ### [models.embedding]（必须配置）
 

@@ -602,8 +602,8 @@ port = 8787
 # en: WebUI password (must be changed on first run; default password cannot be used to log in).
 password = "changeme"
 
-# zh: 认知记忆系统配置。
-# en: Cognitive memory system configuration.
+# zh: 认知记忆系统配置。启用后需配置 [models.embedding]，其余参数均有合理默认值。
+# en: Cognitive memory system. Requires [models.embedding] when enabled. All other params have sensible defaults.
 [cognitive]
 # zh: 是否启用认知记忆系统。
 # en: Enable cognitive memory system.
@@ -624,8 +624,8 @@ tool_default_top_k = 12
 # zh: 用户画像召回条数。
 # en: Top-k for profile retrieval.
 profile_top_k = 8
-# zh: rerank 候选倍数（候选数 = top_k * multiplier）。
-# en: Rerank candidate multiplier.
+# zh: rerank 候选倍数（候选数 = top_k * multiplier，必须 >= 2，否则跳过重排）。
+# en: Rerank candidate multiplier (must be >= 2, otherwise reranking is skipped).
 rerank_candidate_multiplier = 3
 
 [cognitive.historian]
@@ -660,3 +660,6 @@ failed_max_files = 500
 # zh: 每处理多少条任务触发一次失败队列清理。
 # en: Failed queue cleanup interval (number of jobs processed).
 failed_cleanup_interval = 100
+# zh: 单个任务最大自动重试次数（超过后移入 failed，0=不重试）。
+# en: Max auto-retries per job before moving to failed (0=no retry).
+job_max_retries = 3

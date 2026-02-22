@@ -90,8 +90,25 @@ class HistorianWorker:
                 try:
                     await self._process_job(job_id, job)
                 except Exception as e:
-                    logger.error(f"[史官] 任务 {job_id} 处理失败: {e}")
-                    await self._job_queue.fail(job_id, str(e))
+                    retry_count = job.get("_retry_count", 0)
+                    max_retries = self._config_getter().job_max_retries
+                    if retry_count < max_retries:
+                        logger.warning(
+                            "[史官] 任务 %s 处理失败 (%s/%s)，将自动重试: %s",
+                            job_id,
+                            retry_count + 1,
+                            max_retries,
+                            e,
+                        )
+                        await self._job_queue.requeue(job_id, str(e))
+                    else:
+                        logger.error(
+                            "[史官] 任务 %s 达到最大重试次数 (%s)，移入 failed: %s",
+                            job_id,
+                            max_retries,
+                            e,
+                        )
+                        await self._job_queue.fail(job_id, str(e))
 
             poll_count += 1
             config = self._config_getter()

@@ -2043,6 +2043,9 @@ class Config:
                 que.get("failed_cleanup_interval") if isinstance(que, dict) else None,
                 100,
             ),
+            job_max_retries=_coerce_int(
+                que.get("job_max_retries") if isinstance(que, dict) else None, 3
+            ),
         )
 
     @staticmethod

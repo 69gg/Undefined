@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Any
 
 import chromadb
+
+logger = logging.getLogger(__name__)
 
 
 class CognitiveVectorStore:
@@ -86,7 +89,14 @@ class CognitiveVectorStore:
         candidate_multiplier: int,
     ) -> list[dict[str, Any]]:
         emb = await self._embed(query_text)
-        fetch_k = top_k * candidate_multiplier if reranker else top_k
+        # 重排要求候选数 > 最终返回数，否则重排无意义
+        use_reranker = reranker and candidate_multiplier >= 2
+        if reranker and candidate_multiplier < 2:
+            logger.warning(
+                "[认知记忆] rerank_candidate_multiplier=%s < 2，跳过重排",
+                candidate_multiplier,
+            )
+        fetch_k = top_k * candidate_multiplier if use_reranker else top_k
         kwargs: dict[str, Any] = dict(
             query_embeddings=[emb],
             n_results=fetch_k,
@@ -107,7 +117,7 @@ class CognitiveVectorStore:
             for d, m, dist in zip(docs, metas, dists)
         ]
 
-        if reranker and results:
+        if use_reranker and results:
             reranked = await reranker.rerank(
                 query_text, [r["document"] for r in results], top_n=top_k
             )

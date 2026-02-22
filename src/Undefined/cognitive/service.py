@@ -82,7 +82,11 @@ class CognitiveService:
 
         top_k = getattr(config, "auto_top_k", 5)
         events = await self._vector_store.query_events(
-            query, top_k=top_k, where=where, reranker=self._reranker
+            query,
+            top_k=top_k,
+            where=where,
+            reranker=self._reranker,
+            candidate_multiplier=config.rerank_candidate_multiplier,
         )
         if events:
             event_lines = "\n".join(
@@ -94,6 +98,7 @@ class CognitiveService:
         return "\n\n".join(parts)
 
     async def search_events(self, query: str, **kwargs: Any) -> list[dict[str, Any]]:
+        config = self._config_getter()
         where: dict[str, Any] | None = None
         if "group_id" in kwargs or "user_id" in kwargs:
             where = {
@@ -103,7 +108,11 @@ class CognitiveService:
             }
         top_k = kwargs.get("top_k", 5)
         results: list[dict[str, Any]] = await self._vector_store.query_events(
-            query, top_k=top_k, where=where or None, reranker=self._reranker
+            query,
+            top_k=top_k,
+            where=where or None,
+            reranker=self._reranker,
+            candidate_multiplier=config.rerank_candidate_multiplier,
         )
         return results
 
@@ -114,11 +123,16 @@ class CognitiveService:
         return result
 
     async def search_profiles(self, query: str, **kwargs: Any) -> list[dict[str, Any]]:
+        config = self._config_getter()
         top_k = kwargs.get("top_k", 5)
         where: dict[str, Any] | None = None
         if "entity_type" in kwargs:
             where = {"entity_type": kwargs["entity_type"]}
         results: list[dict[str, Any]] = await self._vector_store.query_profiles(
-            query, top_k=top_k, where=where, reranker=self._reranker
+            query,
+            top_k=top_k,
+            where=where,
+            reranker=self._reranker,
+            candidate_multiplier=config.rerank_candidate_multiplier,
         )
         return results
