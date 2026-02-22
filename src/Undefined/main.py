@@ -324,7 +324,13 @@ async def main() -> None:
                 model_config=config.historian_model,
             )
             ai.set_cognitive_service(cognitive_service)
-            logger.info("[认知记忆] 初始化完成")
+            logger.info(
+                "[认知记忆] 初始化完成: chroma_dir=%s queue_dir=%s profiles_dir=%s revision_keep=%s",
+                str(COGNITIVE_CHROMADB_DIR),
+                str(COGNITIVE_QUEUES_DIR),
+                str(COGNITIVE_PROFILES_DIR),
+                config.cognitive.profile_revision_keep,
+            )
 
         handler = MessageHandler(config, onebot, ai, faq_storage, task_storage)
         onebot.set_message_handler(handler.handle_message)
@@ -353,10 +359,16 @@ async def main() -> None:
     logger.info("[启动] 机器人已准备就绪，开始连接 OneBot 服务...")
 
     if historian_worker and job_queue:
-        await job_queue.recover_stale(
+        recovered = await job_queue.recover_stale(
             timeout_seconds=config.cognitive.stale_job_timeout_seconds
         )
+        logger.info(
+            "[认知记忆] 启动前陈旧任务恢复完成: recovered=%s timeout_seconds=%s",
+            recovered,
+            config.cognitive.stale_job_timeout_seconds,
+        )
         await historian_worker.start()
+        logger.info("[认知记忆] 史官后台任务已启动")
 
     config_manager = get_config_manager()
     config_manager.load(strict=True)

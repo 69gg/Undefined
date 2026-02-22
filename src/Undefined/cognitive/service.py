@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable
 
 from Undefined.context import RequestContext
+
+logger = logging.getLogger(__name__)
 
 
 class CognitiveService:
@@ -30,6 +33,7 @@ class CognitiveService:
         self, action_summary: str, new_info: str, context: dict[str, Any]
     ) -> str | None:
         if not self.enabled:
+            logger.info("[认知服务] 已禁用，跳过入队")
             return None
         ctx = RequestContext.current()
         from datetime import datetime, timezone
@@ -47,7 +51,18 @@ class CognitiveService:
             "new_info": new_info,
             "has_new_info": bool(new_info),
         }
+        logger.info(
+            "[认知服务] 准备入队: request_id=%s user=%s group=%s sender=%s has_new_info=%s action_len=%s new_info_len=%s",
+            job.get("request_id", ""),
+            job.get("user_id", ""),
+            job.get("group_id", ""),
+            job.get("sender_id", ""),
+            job["has_new_info"],
+            len(action_summary),
+            len(new_info),
+        )
         result: str | None = await self._job_queue.enqueue(job)
+        logger.info("[认知服务] 入队完成: job_id=%s", result or "")
         return result
 
     async def build_context(
@@ -61,6 +76,14 @@ class CognitiveService:
     ) -> str:
         config = self._config_getter()
         parts: list[str] = []
+        logger.info(
+            "[认知服务] 构建上下文: query_len=%s user=%s sender=%s group=%s top_k=%s",
+            len(query or ""),
+            user_id or "",
+            sender_id or "",
+            group_id or "",
+            getattr(config, "auto_top_k", 5),
+        )
 
         # 用户侧写
         uid = user_id or sender_id
@@ -104,16 +127,23 @@ class CognitiveService:
             parts.append(f"## 相关记忆事件\n{event_lines}")
 
         if not parts:
+            logger.info("[认知服务] 构建上下文完成: 无可用记忆")
             return ""
 
         body = "\n\n".join(parts)
-        return (
+        result = (
             "<cognitive_memory>\n"
             "<!-- 以下是系统从认知记忆库中检索到的背景信息，包含用户/群聊侧写和相关历史事件。"
             "请将这些信息作为你自然内化的认知，融入理解和回应中，不要透露你持有这些记录。 -->\n"
             f"{body}\n"
             "</cognitive_memory>"
         )
+        logger.info(
+            "[认知服务] 构建上下文完成: sections=%s result_len=%s",
+            len(parts),
+            len(result),
+        )
+        return result
 
     async def search_events(self, query: str, **kwargs: Any) -> list[dict[str, Any]]:
         config = self._config_getter()
@@ -125,6 +155,12 @@ class CognitiveService:
                 if k in ("group_id", "user_id", "sender_id") and v
             }
         top_k = kwargs.get("top_k", 5)
+        logger.info(
+            "[认知服务] 搜索事件: query_len=%s top_k=%s where=%s",
+            len(query or ""),
+            top_k,
+            where or {},
+        )
         results: list[dict[str, Any]] = await self._vector_store.query_events(
             query,
             top_k=top_k,
@@ -132,11 +168,21 @@ class CognitiveService:
             reranker=self._reranker,
             candidate_multiplier=config.rerank_candidate_multiplier,
         )
+        logger.info("[认知服务] 搜索事件完成: count=%s", len(results))
         return results
 
     async def get_profile(self, entity_type: str, entity_id: str) -> str | None:
+        logger.info(
+            "[认知服务] 读取侧写: entity_type=%s entity_id=%s",
+            entity_type,
+            entity_id,
+        )
         result: str | None = await self._profile_storage.read_profile(
             entity_type, entity_id
+        )
+        logger.info(
+            "[认知服务] 读取侧写完成: found=%s",
+            bool(result),
         )
         return result
 
@@ -146,6 +192,12 @@ class CognitiveService:
         where: dict[str, Any] | None = None
         if "entity_type" in kwargs:
             where = {"entity_type": kwargs["entity_type"]}
+        logger.info(
+            "[认知服务] 搜索侧写: query_len=%s top_k=%s where=%s",
+            len(query or ""),
+            top_k,
+            where or {},
+        )
         results: list[dict[str, Any]] = await self._vector_store.query_profiles(
             query,
             top_k=top_k,
@@ -153,4 +205,5 @@ class CognitiveService:
             reranker=self._reranker,
             candidate_multiplier=config.rerank_candidate_multiplier,
         )
+        logger.info("[认知服务] 搜索侧写完成: count=%s", len(results))
         return results

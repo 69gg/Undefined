@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from pathlib import Path
@@ -10,6 +11,8 @@ from typing import Any
 from uuid import uuid4
 
 from Undefined.utils.io import read_json, write_json
+
+logger = logging.getLogger(__name__)
 
 
 class JobQueue:
@@ -20,10 +23,25 @@ class JobQueue:
         self._failed_dir = base / "failed"
         for d in (self._pending_dir, self._processing_dir, self._failed_dir):
             d.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            "[认知队列] 初始化完成: base=%s pending=%s processing=%s failed=%s",
+            str(base),
+            str(self._pending_dir),
+            str(self._processing_dir),
+            str(self._failed_dir),
+        )
 
     async def enqueue(self, job: dict[str, Any]) -> str:
         job_id = f"{job.get('request_id', str(uuid4()))}_{job.get('end_seq', 0)}_{int(time.time() * 1000)}"
         await write_json(self._pending_dir / f"{job_id}.json", job)
+        logger.info(
+            "[认知队列] 入队成功: job_id=%s request_id=%s user=%s group=%s sender=%s",
+            job_id,
+            job.get("request_id", ""),
+            job.get("user_id", ""),
+            job.get("group_id", ""),
+            job.get("sender_id", ""),
+        )
         return job_id
 
     async def dequeue(self) -> tuple[str, dict[str, Any]] | None:
@@ -38,15 +56,30 @@ class JobQueue:
                     with open(dst, "r", encoding="utf-8") as fh:
                         data = json.load(fh)
                     return f.stem, data
-                except (OSError, Exception):
+                except (OSError, Exception) as exc:
+                    logger.warning(
+                        "[认知队列] 出队失败，跳过文件: file=%s err=%s",
+                        str(f),
+                        exc,
+                    )
                     continue
             return None
 
-        return await asyncio.to_thread(_pick)
+        result = await asyncio.to_thread(_pick)
+        if result:
+            job_id, data = result
+            logger.info(
+                "[认知队列] 出队成功: job_id=%s retry_count=%s has_new_info=%s",
+                job_id,
+                data.get("_retry_count", 0),
+                data.get("has_new_info", False),
+            )
+        return result
 
     async def complete(self, job_id: str) -> None:
         p = self._processing_dir / f"{job_id}.json"
         await asyncio.to_thread(lambda: p.unlink(missing_ok=True))
+        logger.info("[认知队列] 任务完成并移除 processing: job_id=%s", job_id)
 
     async def fail(self, job_id: str, error: str) -> None:
         src = self._processing_dir / f"{job_id}.json"
@@ -54,6 +87,11 @@ class JobQueue:
         data["error"] = error
         await write_json(self._failed_dir / f"{job_id}.json", data)
         await asyncio.to_thread(lambda: src.unlink(missing_ok=True))
+        logger.warning(
+            "[认知队列] 任务写入 failed: job_id=%s error=%s",
+            job_id,
+            error,
+        )
 
     async def requeue(self, job_id: str, error: str) -> None:
         """将 processing 任务移回 pending，递增 _retry_count（原子操作）。"""
@@ -65,6 +103,12 @@ class JobQueue:
         # 先原子更新 processing 内容，再原子移动到 pending
         await write_json(src, data)
         await asyncio.to_thread(lambda: os.replace(src, dst))
+        logger.info(
+            "[认知队列] 任务回队: job_id=%s retry_count=%s last_error=%s",
+            job_id,
+            data.get("_retry_count", 0),
+            error,
+        )
 
     async def retry_all(self) -> int:
         """将所有 failed 任务移回 pending 队列，返回重试数量。"""
@@ -81,11 +125,18 @@ class JobQueue:
                     dst.write_text(json.dumps(data, ensure_ascii=False), "utf-8")
                     f.unlink()
                     count += 1
-                except (OSError, Exception):
+                except (OSError, Exception) as exc:
+                    logger.warning(
+                        "[认知队列] failed 任务回队失败: file=%s err=%s",
+                        str(f),
+                        exc,
+                    )
                     continue
             return count
 
-        return await asyncio.to_thread(_move_all)
+        count = await asyncio.to_thread(_move_all)
+        logger.info("[认知队列] failed 批量回队完成: count=%s", count)
+        return count
 
     async def recover_stale(self, timeout_seconds: float) -> int:
         def _recover() -> int:
@@ -96,8 +147,25 @@ class JobQueue:
                     if now - f.stat().st_mtime > timeout_seconds:
                         os.replace(f, self._pending_dir / f.name)
                         count += 1
-                except OSError:
+                except OSError as exc:
+                    logger.warning(
+                        "[认知队列] 恢复陈旧任务失败: file=%s err=%s",
+                        str(f),
+                        exc,
+                    )
                     continue
             return count
 
-        return await asyncio.to_thread(_recover)
+        count = await asyncio.to_thread(_recover)
+        if count > 0:
+            logger.info(
+                "[认知队列] 已恢复陈旧任务: count=%s timeout_seconds=%s",
+                count,
+                timeout_seconds,
+            )
+        else:
+            logger.info(
+                "[认知队列] 无需恢复陈旧任务: timeout_seconds=%s",
+                timeout_seconds,
+            )
+        return count

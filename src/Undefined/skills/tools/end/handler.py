@@ -122,11 +122,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     # 若 cognitive 启用，入队 memory_job
     cognitive_service = context.get("cognitive_service")
     if cognitive_service and action_summary:
-        await cognitive_service.enqueue_job(
+        job_id = await cognitive_service.enqueue_job(
             action_summary=action_summary,
             new_info=new_info,
             context=context,
         )
+        logger.info("[end工具] 认知记忆任务已提交: job_id=%s", job_id or "")
 
     # 通知调用方对话应结束
     context["conversation_ended"] = True

@@ -446,6 +446,10 @@ class AIClient:
 
     def set_cognitive_service(self, service: Any) -> None:
         self._cognitive_service = service
+        logger.info(
+            "[AI客户端] 认知记忆服务已挂载: enabled=%s",
+            bool(getattr(service, "enabled", False)) if service is not None else False,
+        )
 
     def apply_search_config(self, searxng_url: str) -> None:
         """应用搜索服务配置（支持热更新）。"""
