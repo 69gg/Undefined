@@ -61,14 +61,64 @@ class CognitiveService:
         message_ids = context.get("message_ids")
         if not isinstance(message_ids, list):
             message_ids = []
+        user_id = (
+            str(ctx.user_id or "") if ctx else str(context.get("user_id", "") or "")
+        )
+        group_id = (
+            str(ctx.group_id or "") if ctx else str(context.get("group_id", "") or "")
+        )
+        sender_id = (
+            str(ctx.sender_id or "")
+            if ctx
+            else str(context.get("sender_id") or context.get("user_id", "") or "")
+        )
+        request_type = (
+            str(ctx.request_type)
+            if ctx and ctx.request_type
+            else str(context.get("request_type", "") or "")
+        )
+        sender_name = str(context.get("sender_name") or "").strip()
+        group_name = str(context.get("group_name") or "").strip()
+
+        profile_targets: list[dict[str, str]] = []
+        if has_new_info:
+            group_id = group_id.strip()
+            sender_id = sender_id.strip() or user_id.strip()
+            seen: set[tuple[str, str]] = set()
+            if group_id:
+                key = ("group", group_id)
+                if key not in seen:
+                    seen.add(key)
+                    profile_targets.append(
+                        {
+                            "entity_type": "group",
+                            "entity_id": group_id,
+                            "perspective": "group",
+                            "preferred_name": group_name,
+                        }
+                    )
+            if sender_id:
+                key = ("user", sender_id)
+                if key not in seen:
+                    seen.add(key)
+                    profile_targets.append(
+                        {
+                            "entity_type": "user",
+                            "entity_id": sender_id,
+                            "perspective": "sender",
+                            "preferred_name": sender_name,
+                        }
+                    )
 
         job: dict[str, Any] = {
             "request_id": safe_request_id,
             "end_seq": end_seq,
-            "user_id": str(ctx.user_id or "") if ctx else "",
-            "group_id": str(ctx.group_id or "") if ctx else "",
-            "sender_id": str(ctx.sender_id or "") if ctx else "",
-            "request_type": str(ctx.request_type) if ctx and ctx.request_type else "",
+            "user_id": user_id,
+            "group_id": group_id,
+            "sender_id": sender_id,
+            "sender_name": sender_name,
+            "group_name": group_name,
+            "request_type": request_type,
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "timestamp_local": now.isoformat(),
             "timezone": str(now.tzinfo or ""),
@@ -79,16 +129,18 @@ class CognitiveService:
             "action_summary": action_summary,
             "new_info": new_info,
             "has_new_info": has_new_info,
+            "profile_targets": profile_targets,
             "schema_version": "final_v1",
         }
         logger.info(
-            "[认知服务] 准备入队: request_id=%s end_seq=%s user=%s group=%s sender=%s has_new_info=%s action_len=%s new_info_len=%s",
+            "[认知服务] 准备入队: request_id=%s end_seq=%s user=%s group=%s sender=%s has_new_info=%s profile_targets=%s action_len=%s new_info_len=%s",
             job.get("request_id", ""),
             job.get("end_seq", 0),
             job.get("user_id", ""),
             job.get("group_id", ""),
             job.get("sender_id", ""),
             has_new_info,
+            len(profile_targets),
             len(action_summary),
             len(new_info),
         )

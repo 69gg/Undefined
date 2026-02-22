@@ -16,4 +16,4 @@
 action_summary: {action_summary}
 new_info: {new_info}
 
-请调用 submit_rewrite 工具提交改写后的事件文本。
+必须通过 `submit_rewrite` 工具提交结果，禁止输出普通文本内容。

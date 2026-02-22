@@ -42,6 +42,14 @@ _PROFILE_TOOL = {
         "parameters": {
             "type": "object",
             "properties": {
+                "skip": {
+                    "type": "boolean",
+                    "description": "是否跳过更新；当新信息不稳定/不足时为 true",
+                },
+                "skip_reason": {
+                    "type": "string",
+                    "description": "跳过原因",
+                },
                 "name": {"type": "string", "description": "用户/群名称"},
                 "tags": {
                     "type": "array",
@@ -50,7 +58,7 @@ _PROFILE_TOOL = {
                 },
                 "summary": {"type": "string", "description": "侧写正文（Markdown）"},
             },
-            "required": ["name", "tags", "summary"],
+            "required": ["skip", "name", "tags", "summary"],
         },
     },
 }
@@ -77,6 +85,30 @@ def _collect_unique_hits(
         if len(found) >= limit:
             break
     return found
+
+
+def _extract_frontmatter_name(markdown: str) -> str:
+    text = str(markdown or "")
+    if not text.startswith("---"):
+        return ""
+    try:
+        import yaml
+
+        parts = text[3:].split("---", 1)
+        if len(parts) != 2:
+            return ""
+        frontmatter = yaml.safe_load(parts[0])
+        if not isinstance(frontmatter, dict):
+            return ""
+        value = frontmatter.get("name")
+        return str(value).strip() if value is not None else ""
+    except Exception:
+        return ""
+
+
+def _escape_braces(text: str) -> str:
+    value = str(text or "")
+    return value.replace("{", "{{").replace("}", "}}")
 
 
 class HistorianWorker:
@@ -166,12 +198,13 @@ class HistorianWorker:
     async def _process_job(self, job_id: str, job: dict[str, Any]) -> None:
         config = self._config_getter()
         logger.info(
-            "[史官] 开始处理任务 %s: user=%s group=%s sender=%s has_new_info=%s rewrite_max_retry=%s",
+            "[史官] 开始处理任务 %s: user=%s group=%s sender=%s has_new_info=%s profile_targets=%s rewrite_max_retry=%s",
             job_id,
             job.get("user_id", ""),
             job.get("group_id", ""),
             job.get("sender_id", ""),
             job.get("has_new_info", False),
+            len(job.get("profile_targets", []) or []),
             config.rewrite_max_retry,
         )
         canonical = await self._rewrite(job, job_id=job_id, attempt=1)
@@ -227,7 +260,7 @@ class HistorianWorker:
         )
 
         if job.get("has_new_info"):
-            await self._merge_profile(job, canonical, job_id)
+            await self._merge_profiles(job, canonical, job_id)
 
         await self._job_queue.complete(job_id)
         logger.info("[史官] 任务 %s 处理完成", job_id)
@@ -242,6 +275,76 @@ class HistorianWorker:
             "relative_time": _collect_unique_hits(_REL_TIME_RE, content),
             "relative_place": _collect_unique_hits(_REL_PLACE_RE, content),
         }
+
+    def _extract_required_tool_args(
+        self,
+        response: dict[str, Any],
+        *,
+        expected_tool_name: str,
+        stage: str,
+        job_id: str,
+        attempt: int | None = None,
+        target: str | None = None,
+    ) -> dict[str, Any]:
+        suffix = f" stage={stage} expected_tool={expected_tool_name}"
+        if attempt is not None:
+            suffix += f" attempt={attempt}"
+        if target:
+            suffix += f" target={target}"
+
+        choices = response.get("choices")
+        if not isinstance(choices, list) or not choices:
+            logger.error("[史官] 任务 %s 响应缺少 choices:%s", job_id, suffix)
+            raise ValueError(f"{stage} 响应缺少 choices")
+
+        message = choices[0].get("message") if isinstance(choices[0], dict) else None
+        if not isinstance(message, dict):
+            logger.error("[史官] 任务 %s 响应缺少 message:%s", job_id, suffix)
+            raise ValueError(f"{stage} 响应缺少 message")
+
+        tool_calls = message.get("tool_calls")
+        if not isinstance(tool_calls, list) or not tool_calls:
+            logger.error(
+                "[史官] 任务 %s 响应缺少 tool_calls:%s content_preview=%s",
+                job_id,
+                suffix,
+                _preview_text(str(message.get("content", ""))),
+            )
+            raise ValueError(f"{stage} 响应缺少 tool_calls")
+
+        tool_call = tool_calls[0]
+        function = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
+        tool_name = str(function.get("name", "")).strip()
+        if tool_name != expected_tool_name:
+            logger.error(
+                "[史官] 任务 %s 工具名不匹配:%s actual_tool=%s",
+                job_id,
+                suffix,
+                tool_name,
+            )
+            raise ValueError(f"{stage} 工具名不匹配: {tool_name}")
+
+        raw_args = str(function.get("arguments", "{}"))
+        try:
+            args = json.loads(raw_args)
+        except json.JSONDecodeError as exc:
+            logger.error(
+                "[史官] 任务 %s 工具参数 JSON 解析失败:%s err=%s raw_preview=%s",
+                job_id,
+                suffix,
+                exc,
+                _preview_text(raw_args),
+            )
+            raise
+        if not isinstance(args, dict):
+            logger.error(
+                "[史官] 任务 %s 工具参数类型非法:%s type=%s",
+                job_id,
+                suffix,
+                type(args).__name__,
+            )
+            raise ValueError(f"{stage} 工具参数类型非法")
+        return args
 
     async def _rewrite(
         self, job: dict[str, Any], *, job_id: str = "", attempt: int = 1
@@ -275,46 +378,13 @@ class HistorianWorker:
             tool_choice={"type": "function", "function": {"name": "submit_rewrite"}},
             call_type="historian_rewrite",
         )
-        choices = response.get("choices")
-        if not isinstance(choices, list) or not choices:
-            logger.error(
-                "[史官] 任务 %s 改写响应缺少 choices: response_type=%s",
-                job_id or "unknown",
-                type(response).__name__,
-            )
-            raise ValueError("historian_rewrite 响应缺少 choices")
-
-        message = choices[0].get("message") if isinstance(choices[0], dict) else None
-        if not isinstance(message, dict):
-            logger.error("[史官] 任务 %s 改写响应缺少 message", job_id or "unknown")
-            raise ValueError("historian_rewrite 响应缺少 message")
-
-        tool_calls = message.get("tool_calls")
-        if not isinstance(tool_calls, list) or not tool_calls:
-            logger.error(
-                "[史官] 任务 %s 改写响应缺少 tool_calls: content_preview=%s",
-                job_id or "unknown",
-                _preview_text(str(message.get("content", ""))),
-            )
-            raise ValueError("historian_rewrite 响应缺少 tool_calls")
-
-        tool_call = tool_calls[0]
-        raw_args = str(
-            tool_call.get("function", {}).get("arguments", "{}")
-            if isinstance(tool_call, dict)
-            else "{}"
+        args = self._extract_required_tool_args(
+            response=response,
+            expected_tool_name="submit_rewrite",
+            stage="historian_rewrite",
+            job_id=job_id or "unknown",
+            attempt=attempt,
         )
-        try:
-            args = json.loads(raw_args)
-        except json.JSONDecodeError as exc:
-            logger.error(
-                "[史官] 任务 %s 改写工具参数 JSON 解析失败: attempt=%s err=%s raw_preview=%s",
-                job_id or "unknown",
-                attempt,
-                exc,
-                _preview_text(raw_args),
-            )
-            raise
 
         text = str(args.get("text", "")).strip()
         logger.debug(
@@ -326,37 +396,169 @@ class HistorianWorker:
         )
         return text
 
-    async def _merge_profile(
-        self, job: dict[str, Any], canonical: str, event_id: str
-    ) -> None:
-        import yaml
+    def _resolve_profile_targets(self, job: dict[str, Any]) -> list[dict[str, str]]:
+        targets: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        raw_targets = job.get("profile_targets")
+        if isinstance(raw_targets, list):
+            for item in raw_targets:
+                if not isinstance(item, dict):
+                    continue
+                entity_type = str(item.get("entity_type", "")).strip()
+                raw_entity_id = item.get("entity_id")
+                entity_id = (
+                    str(raw_entity_id).strip() if raw_entity_id is not None else ""
+                )
+                if entity_type not in {"user", "group"} or not entity_id:
+                    continue
+                key = (entity_type, entity_id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                targets.append(
+                    {
+                        "entity_type": entity_type,
+                        "entity_id": entity_id,
+                        "perspective": str(item.get("perspective", "")).strip(),
+                        "preferred_name": str(item.get("preferred_name", "")).strip(),
+                    }
+                )
+        if targets:
+            return targets
 
-        entity_type = "group" if job.get("group_id") else "user"
+        # 向后兼容旧任务：沿用单目标策略。
+        entity_type = "group" if str(job.get("group_id", "")).strip() else "user"
         entity_id = str(
             job.get("group_id") or job.get("user_id") or job.get("sender_id", "")
-        )
-        if not entity_id:
-            logger.warning("[史官] 任务 %s 侧写合并跳过：缺少实体ID", event_id)
+        ).strip()
+        if entity_id:
+            targets.append(
+                {
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "perspective": "legacy",
+                    "preferred_name": "",
+                }
+            )
+        return targets
+
+    def _resolve_profile_name(
+        self, target: dict[str, str], current_profile: str
+    ) -> str:
+        preferred_name = str(target.get("preferred_name", "")).strip()
+        if preferred_name:
+            return preferred_name
+        current_name = _extract_frontmatter_name(current_profile)
+        if current_name:
+            return current_name
+        entity_id = str(target.get("entity_id", "")).strip()
+        if str(target.get("entity_type", "")).strip() == "group":
+            return f"GID:{entity_id}"
+        return f"UID:{entity_id}"
+
+    async def _merge_profiles(
+        self, job: dict[str, Any], canonical: str, event_id: str
+    ) -> None:
+        targets = self._resolve_profile_targets(job)
+        if not targets:
+            logger.warning("[史官] 任务 %s 侧写合并跳过：缺少目标实体", event_id)
             return
         logger.info(
-            "[史官] 任务 %s 开始合并侧写: entity_type=%s entity_id=%s",
+            "[史官] 任务 %s 开始合并侧写: target_count=%s targets=%s",
             event_id,
+            len(targets),
+            [
+                (t["entity_type"], t["entity_id"], t.get("perspective", ""))
+                for t in targets
+            ],
+        )
+        success_count = 0
+        for index, target in enumerate(targets, start=1):
+            try:
+                merged = await self._merge_profile_target(
+                    job=job,
+                    canonical=canonical,
+                    event_id=event_id,
+                    target=target,
+                    target_index=index,
+                    target_count=len(targets),
+                )
+                if merged:
+                    success_count += 1
+            except Exception as exc:
+                logger.exception(
+                    "[史官] 任务 %s 侧写目标合并失败: target=%s:%s perspective=%s err=%s",
+                    event_id,
+                    target.get("entity_type", ""),
+                    target.get("entity_id", ""),
+                    target.get("perspective", ""),
+                    exc,
+                )
+        logger.info(
+            "[史官] 任务 %s 侧写合并结束: success=%s total=%s",
+            event_id,
+            success_count,
+            len(targets),
+        )
+
+    async def _merge_profile_target(
+        self,
+        *,
+        job: dict[str, Any],
+        canonical: str,
+        event_id: str,
+        target: dict[str, str],
+        target_index: int,
+        target_count: int,
+    ) -> bool:
+        import yaml
+
+        entity_type = str(target.get("entity_type", "")).strip()
+        entity_id = str(target.get("entity_id", "")).strip()
+        perspective = str(target.get("perspective", "")).strip()
+        if entity_type not in {"user", "group"} or not entity_id:
+            logger.warning(
+                "[史官] 任务 %s 侧写目标非法，跳过: target=%s",
+                event_id,
+                target,
+            )
+            return False
+        logger.info(
+            "[史官] 任务 %s 合并侧写目标(%s/%s): entity_type=%s entity_id=%s perspective=%s",
+            event_id,
+            target_index,
+            target_count,
             entity_type,
             entity_id,
+            perspective,
         )
 
         current = (
             await self._profile_storage.read_profile(entity_type, entity_id)
             or "（暂无侧写）"
         )
+        effective_name = self._resolve_profile_name(target, current)
 
         from Undefined.utils.resources import read_text_resource
 
         template = read_text_resource("res/prompts/historian_profile_merge.md")
         prompt = template.format(
-            current_profile=current,
-            canonical_text=canonical,
-            new_info=job.get("new_info", ""),
+            current_profile=_escape_braces(current),
+            canonical_text=_escape_braces(canonical),
+            new_info=_escape_braces(str(job.get("new_info", ""))),
+            target_entity_type=entity_type,
+            target_entity_id=entity_id,
+            target_perspective=perspective,
+            target_display_name=_escape_braces(effective_name),
+            request_type=_escape_braces(str(job.get("request_type", ""))),
+            user_id=_escape_braces(str(job.get("user_id", ""))),
+            group_id=_escape_braces(str(job.get("group_id", ""))),
+            sender_id=_escape_braces(str(job.get("sender_id", ""))),
+            sender_name=_escape_braces(str(job.get("sender_name", ""))),
+            group_name=_escape_braces(str(job.get("group_name", ""))),
+            timestamp_local=_escape_braces(str(job.get("timestamp_local", ""))),
+            timezone=_escape_braces(str(job.get("timezone", ""))),
+            event_id=_escape_braces(event_id),
         )
 
         response = await self._ai_client.submit_background_llm_call(
@@ -366,69 +568,86 @@ class HistorianWorker:
             tool_choice={"type": "function", "function": {"name": "update_profile"}},
             call_type="historian_profile_merge",
         )
-
-        choices = response.get("choices")
-        if not isinstance(choices, list) or not choices:
-            logger.error("[史官] 任务 %s 侧写合并响应缺少 choices", event_id)
-            raise ValueError("historian_profile_merge 响应缺少 choices")
-        message = choices[0].get("message") if isinstance(choices[0], dict) else None
-        if not isinstance(message, dict):
-            logger.error("[史官] 任务 %s 侧写合并响应缺少 message", event_id)
-            raise ValueError("historian_profile_merge 响应缺少 message")
-        tool_calls = message.get("tool_calls")
-        if not isinstance(tool_calls, list) or not tool_calls:
-            logger.error(
-                "[史官] 任务 %s 侧写合并响应缺少 tool_calls: content_preview=%s",
-                event_id,
-                _preview_text(str(message.get("content", ""))),
-            )
-            raise ValueError("historian_profile_merge 响应缺少 tool_calls")
-        tool_call = tool_calls[0]
-        raw_args = str(
-            tool_call.get("function", {}).get("arguments", "{}")
-            if isinstance(tool_call, dict)
-            else "{}"
+        args = self._extract_required_tool_args(
+            response=response,
+            expected_tool_name="update_profile",
+            stage="historian_profile_merge",
+            job_id=event_id,
+            target=f"{entity_type}:{entity_id}",
         )
-        try:
-            args = json.loads(raw_args)
-        except json.JSONDecodeError as exc:
-            logger.error(
-                "[史官] 任务 %s 侧写合并工具参数 JSON 解析失败: err=%s raw_preview=%s",
+
+        skip = bool(args.get("skip", False))
+        skip_reason = str(args.get("skip_reason", "")).strip()
+        if skip:
+            logger.info(
+                "[史官] 任务 %s 侧写更新跳过: target=%s:%s perspective=%s reason=%s",
                 event_id,
-                exc,
-                _preview_text(raw_args),
+                entity_type,
+                entity_id,
+                perspective,
+                skip_reason or "unspecified",
             )
-            raise
+            return False
+
+        summary = str(args.get("summary", "")).strip()
+        if not summary:
+            logger.info(
+                "[史官] 任务 %s 侧写更新跳过: target=%s:%s perspective=%s reason=empty_summary",
+                event_id,
+                entity_type,
+                entity_id,
+                perspective,
+            )
+            return False
+
+        raw_tags = args.get("tags", [])
+        tags: list[str] = []
+        if isinstance(raw_tags, list):
+            tags = [str(item).strip() for item in raw_tags if str(item).strip()]
+
+        llm_name = str(args.get("name", "")).strip()
+        if llm_name and llm_name != effective_name:
+            logger.info(
+                "[史官] 任务 %s 侧写名称已锁定: target=%s:%s llm_name=%s effective_name=%s",
+                event_id,
+                entity_type,
+                entity_id,
+                llm_name,
+                effective_name,
+            )
 
         frontmatter = {
             "entity_type": entity_type,
             "entity_id": entity_id,
-            "name": args.get("name", ""),
-            "tags": args.get("tags", []),
+            "name": effective_name,
+            "tags": tags,
             "updated_at": datetime.now().isoformat(),
             "source_event_id": event_id,
         }
-        content = f"---\n{yaml.dump(frontmatter, allow_unicode=True)}---\n{args.get('summary', '')}"
+        content = f"---\n{yaml.dump(frontmatter, allow_unicode=True)}---\n{summary}"
 
         await self._profile_storage.write_profile(entity_type, entity_id, content)
         logger.info(
-            "[史官] 任务 %s 侧写文件写入完成: entity_type=%s entity_id=%s tags=%s",
+            "[史官] 任务 %s 侧写文件写入完成: entity_type=%s entity_id=%s tags=%s perspective=%s",
             event_id,
             entity_type,
             entity_id,
-            args.get("tags", []),
+            tags,
+            perspective,
         )
         await self._vector_store.upsert_profile(
             f"{entity_type}:{entity_id}",
-            args.get("summary", ""),
+            summary,
             {
                 "entity_type": entity_type,
                 "entity_id": entity_id,
-                "name": args.get("name", ""),
+                "name": effective_name,
             },
         )
         logger.info(
-            "[史官] 任务 %s 侧写向量入库完成: profile_id=%s",
+            "[史官] 任务 %s 侧写向量入库完成: profile_id=%s perspective=%s",
             event_id,
             f"{entity_type}:{entity_id}",
+            perspective,
         )
+        return True
