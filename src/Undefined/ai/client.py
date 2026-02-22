@@ -9,6 +9,7 @@ import logging
 import re
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
+from uuid import uuid4
 
 import httpx
 
@@ -173,6 +174,10 @@ class AIClient:
         self._agent_intro_task: asyncio.Task[None] | None = None
         self._queue_manager: Any | None = None
         self._intro_config: Any | None = None
+        # 后台 LLM 调用挂起表（走队列的后台请求）
+        self._pending_llm_calls: dict[
+            str, tuple[asyncio.Event, dict[str, Any] | Exception | None]
+        ] = {}
 
         # 后台任务引用集合（防止被 GC）
         self._background_tasks: set[asyncio.Task[Any]] = set()
@@ -301,6 +306,64 @@ class AIClient:
             await self._http_client.aclose()
 
         logger.info("[清理] AIClient 已关闭")
+
+    async def submit_background_llm_call(
+        self,
+        model_config: Any,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any = "auto",
+        call_type: str = "background",
+        max_tokens: int | None = None,
+    ) -> dict[str, Any]:
+        """将 LLM 调用投递到后台队列，走统一发车间隔和 Token 统计。
+        无 queue_manager 时降级为直接调用。"""
+        effective_max_tokens = (
+            max_tokens
+            if max_tokens is not None
+            else getattr(model_config, "max_tokens", 4096)
+        )
+        if self._queue_manager is None:
+            return await self.request_model(
+                model_config=model_config,
+                messages=messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                call_type=call_type,
+                max_tokens=effective_max_tokens,
+            )
+        request_id = uuid4().hex
+        event: asyncio.Event = asyncio.Event()
+        self._pending_llm_calls[request_id] = (event, None)
+        model_name = getattr(model_config, "model_name", "default")
+        await self._queue_manager.add_background_request(
+            {
+                "type": "background_llm_call",
+                "request_id": request_id,
+                "model_config": model_config,
+                "messages": messages,
+                "tools": tools,
+                "tool_choice": tool_choice,
+                "call_type": call_type,
+                "max_tokens": effective_max_tokens,
+            },
+            model_name=model_name,
+        )
+        await asyncio.wait_for(event.wait(), timeout=480.0)
+        _, result = self._pending_llm_calls.pop(request_id, (None, None))
+        if isinstance(result, Exception):
+            raise result
+        return result or {}
+
+    def set_llm_call_result(
+        self, request_id: str, result: dict[str, Any] | Exception
+    ) -> None:
+        entry = self._pending_llm_calls.get(request_id)
+        if entry is None:
+            return
+        event, _ = entry
+        self._pending_llm_calls[request_id] = (event, result)
+        event.set()
 
     def set_queue_manager(self, queue_manager: Any) -> None:
         """设置队列管理器并启动 Agent intro 生成器。

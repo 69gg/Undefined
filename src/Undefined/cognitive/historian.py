@@ -176,15 +176,15 @@ class HistorianWorker:
             action_summary=job.get("action_summary", ""),
             new_info=job.get("new_info", ""),
         )
-        response = await self._ai_client.request_model(
+        response = await self._ai_client.submit_background_llm_call(
             model_config=self._model_config or self._ai_client.agent_config,
             messages=[{"role": "user", "content": prompt}],
             tools=[_REWRITE_TOOL],
             tool_choice={"type": "function", "function": {"name": "submit_rewrite"}},
             call_type="historian_rewrite",
         )
-        tool_call = response.choices[0].message.tool_calls[0]
-        args = json.loads(tool_call.function.arguments)
+        tool_call = response["choices"][0]["message"]["tool_calls"][0]
+        args = json.loads(tool_call["function"]["arguments"])
         return str(args.get("text", "")).strip()
 
     async def _merge_profile(
@@ -213,7 +213,7 @@ class HistorianWorker:
             new_info=job.get("new_info", ""),
         )
 
-        response = await self._ai_client.request_model(
+        response = await self._ai_client.submit_background_llm_call(
             model_config=self._model_config or self._ai_client.agent_config,
             messages=[{"role": "user", "content": prompt}],
             tools=[_PROFILE_TOOL],
@@ -221,8 +221,8 @@ class HistorianWorker:
             call_type="historian_profile_merge",
         )
 
-        tool_call = response.choices[0].message.tool_calls[0]
-        args = json.loads(tool_call.function.arguments)
+        tool_call = response["choices"][0]["message"]["tool_calls"][0]
+        args = json.loads(tool_call["function"]["arguments"])
 
         frontmatter = {
             "entity_type": entity_type,
