@@ -30,8 +30,10 @@ except Exception:  # pragma: no cover
 from .models import (
     AgentModelConfig,
     ChatModelConfig,
+    EmbeddingModelConfig,
     ModelPool,
     ModelPoolEntry,
+    RerankModelConfig,
     SecurityModelConfig,
     VisionModelConfig,
 )
@@ -439,6 +441,21 @@ class Config:
     # messages 工具集
     messages_send_text_file_max_size_kb: int
     messages_send_url_file_max_size_mb: int
+    # 嵌入模型
+    embedding_model: EmbeddingModelConfig
+    rerank_model: RerankModelConfig
+    # 知识库
+    knowledge_enabled: bool
+    knowledge_base_dir: str
+    knowledge_auto_scan: bool
+    knowledge_auto_embed: bool
+    knowledge_scan_interval: float
+    knowledge_embed_batch_size: int
+    knowledge_chunk_size: int
+    knowledge_chunk_overlap: int
+    knowledge_default_top_k: int
+    knowledge_enable_rerank: bool
+    knowledge_rerank_top_k: int
     # Bilibili 视频提取
     bilibili_auto_extract_enabled: bool
     bilibili_cookie: str
@@ -589,6 +606,81 @@ class Config:
         onebot_token = _coerce_str(
             _get_value(data, ("onebot", "token"), "ONEBOT_TOKEN"), ""
         )
+
+        embedding_model = cls._parse_embedding_model_config(data)
+        rerank_model = cls._parse_rerank_model_config(data)
+
+        knowledge_enabled = _coerce_bool(
+            _get_value(data, ("knowledge", "enabled"), None), False
+        )
+        knowledge_base_dir = _coerce_str(
+            _get_value(data, ("knowledge", "base_dir"), None), "knowledge"
+        )
+        knowledge_auto_scan = _coerce_bool(
+            _get_value(data, ("knowledge", "auto_scan"), None), False
+        )
+        knowledge_auto_embed = _coerce_bool(
+            _get_value(data, ("knowledge", "auto_embed"), None), False
+        )
+        knowledge_scan_interval = _coerce_float(
+            _get_value(data, ("knowledge", "scan_interval"), None), 60.0
+        )
+        if knowledge_scan_interval <= 0:
+            knowledge_scan_interval = 60.0
+        knowledge_embed_batch_size = _coerce_int(
+            _get_value(data, ("knowledge", "embed_batch_size"), None), 64
+        )
+        if knowledge_embed_batch_size <= 0:
+            knowledge_embed_batch_size = 64
+        knowledge_chunk_size = _coerce_int(
+            _get_value(data, ("knowledge", "chunk_size"), None), 10
+        )
+        if knowledge_chunk_size <= 0:
+            knowledge_chunk_size = 10
+        knowledge_chunk_overlap = _coerce_int(
+            _get_value(data, ("knowledge", "chunk_overlap"), None), 2
+        )
+        if knowledge_chunk_overlap < 0:
+            knowledge_chunk_overlap = 0
+        knowledge_default_top_k = _coerce_int(
+            _get_value(data, ("knowledge", "default_top_k"), None), 5
+        )
+        if knowledge_default_top_k <= 0:
+            knowledge_default_top_k = 5
+        knowledge_enable_rerank = _coerce_bool(
+            _get_value(data, ("knowledge", "enable_rerank"), None), False
+        )
+        knowledge_rerank_top_k = _coerce_int(
+            _get_value(data, ("knowledge", "rerank_top_k"), None), 3
+        )
+        if knowledge_rerank_top_k <= 0:
+            knowledge_rerank_top_k = 3
+        if knowledge_default_top_k <= 1 and knowledge_enable_rerank:
+            logger.warning(
+                "[配置] knowledge.default_top_k=%s，无法满足 rerank_top_k < default_top_k，"
+                "已自动禁用重排",
+                knowledge_default_top_k,
+            )
+            knowledge_enable_rerank = False
+        if knowledge_rerank_top_k >= knowledge_default_top_k:
+            fallback = knowledge_default_top_k - 1
+            if fallback <= 0:
+                fallback = 1
+                knowledge_enable_rerank = False
+                logger.warning(
+                    "[配置] knowledge.rerank_top_k 需小于 knowledge.default_top_k，"
+                    "且当前 default_top_k=%s 无法满足约束，已自动禁用重排",
+                    knowledge_default_top_k,
+                )
+            else:
+                logger.warning(
+                    "[配置] knowledge.rerank_top_k 需小于 knowledge.default_top_k，"
+                    "已回退: rerank_top_k=%s -> %s (default_top_k=%s)",
+                    knowledge_rerank_top_k,
+                    fallback,
+                    knowledge_default_top_k,
+                )
+            knowledge_rerank_top_k = fallback
 
         chat_model = cls._parse_chat_model_config(data)
         vision_model = cls._parse_vision_model_config(data)
@@ -1060,6 +1152,8 @@ class Config:
                 chat_model=chat_model,
                 vision_model=vision_model,
                 agent_model=agent_model,
+                knowledge_enabled=knowledge_enabled,
+                embedding_model=embedding_model,
             )
 
         cls._log_debug_info(
@@ -1164,6 +1258,19 @@ class Config:
             bilibili_oversize_strategy=bilibili_oversize_strategy,
             bilibili_auto_extract_group_ids=bilibili_auto_extract_group_ids,
             bilibili_auto_extract_private_ids=bilibili_auto_extract_private_ids,
+            embedding_model=embedding_model,
+            rerank_model=rerank_model,
+            knowledge_enabled=knowledge_enabled,
+            knowledge_base_dir=knowledge_base_dir,
+            knowledge_auto_scan=knowledge_auto_scan,
+            knowledge_auto_embed=knowledge_auto_embed,
+            knowledge_scan_interval=knowledge_scan_interval,
+            knowledge_embed_batch_size=knowledge_embed_batch_size,
+            knowledge_chunk_size=knowledge_chunk_size,
+            knowledge_chunk_overlap=knowledge_chunk_overlap,
+            knowledge_default_top_k=knowledge_default_top_k,
+            knowledge_enable_rerank=knowledge_enable_rerank,
+            knowledge_rerank_top_k=knowledge_rerank_top_k,
         )
 
     @property
@@ -1392,6 +1499,79 @@ class Config:
             )
 
         return ModelPool(enabled=enabled, strategy=strategy, models=entries)
+
+    @staticmethod
+    def _parse_embedding_model_config(data: dict[str, Any]) -> EmbeddingModelConfig:
+        return EmbeddingModelConfig(
+            api_url=_coerce_str(
+                _get_value(
+                    data, ("models", "embedding", "api_url"), "EMBEDDING_MODEL_API_URL"
+                ),
+                "",
+            ),
+            api_key=_coerce_str(
+                _get_value(
+                    data, ("models", "embedding", "api_key"), "EMBEDDING_MODEL_API_KEY"
+                ),
+                "",
+            ),
+            model_name=_coerce_str(
+                _get_value(
+                    data, ("models", "embedding", "model_name"), "EMBEDDING_MODEL_NAME"
+                ),
+                "",
+            ),
+            queue_interval_seconds=_coerce_float(
+                _get_value(
+                    data, ("models", "embedding", "queue_interval_seconds"), None
+                ),
+                1.0,
+            ),
+            dimensions=_coerce_int(
+                _get_value(data, ("models", "embedding", "dimensions"), None), 0
+            )
+            or None,
+            query_instruction=_coerce_str(
+                _get_value(data, ("models", "embedding", "query_instruction"), None), ""
+            ),
+            document_instruction=_coerce_str(
+                _get_value(data, ("models", "embedding", "document_instruction"), None),
+                "",
+            ),
+        )
+
+    @staticmethod
+    def _parse_rerank_model_config(data: dict[str, Any]) -> RerankModelConfig:
+        queue_interval_seconds = _coerce_float(
+            _get_value(data, ("models", "rerank", "queue_interval_seconds"), None),
+            1.0,
+        )
+        if queue_interval_seconds <= 0:
+            queue_interval_seconds = 1.0
+        return RerankModelConfig(
+            api_url=_coerce_str(
+                _get_value(
+                    data, ("models", "rerank", "api_url"), "RERANK_MODEL_API_URL"
+                ),
+                "",
+            ),
+            api_key=_coerce_str(
+                _get_value(
+                    data, ("models", "rerank", "api_key"), "RERANK_MODEL_API_KEY"
+                ),
+                "",
+            ),
+            model_name=_coerce_str(
+                _get_value(
+                    data, ("models", "rerank", "model_name"), "RERANK_MODEL_NAME"
+                ),
+                "",
+            ),
+            queue_interval_seconds=queue_interval_seconds,
+            query_instruction=_coerce_str(
+                _get_value(data, ("models", "rerank", "query_instruction"), None), ""
+            ),
+        )
 
     @staticmethod
     def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
@@ -1688,6 +1868,8 @@ class Config:
         chat_model: ChatModelConfig,
         vision_model: VisionModelConfig,
         agent_model: AgentModelConfig,
+        knowledge_enabled: bool,
+        embedding_model: EmbeddingModelConfig,
     ) -> None:
         missing: list[str] = []
         if bot_qq <= 0:
@@ -1714,6 +1896,11 @@ class Config:
             missing.append("models.agent.api_key")
         if not agent_model.model_name:
             missing.append("models.agent.model_name")
+        if knowledge_enabled:
+            if not embedding_model.api_url:
+                missing.append("models.embedding.api_url")
+            if not embedding_model.model_name:
+                missing.append("models.embedding.model_name")
         if missing:
             raise ValueError(f"缺少必需配置: {', '.join(missing)}")
 

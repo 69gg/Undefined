@@ -13,15 +13,23 @@ from typing import Any
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 import httpx
-from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncOpenAI,
+)
 
 from Undefined.ai.parsing import extract_choices_content
+from Undefined.ai.retrieval import RetrievalRequester
 from Undefined.ai.tokens import TokenCounter
 from Undefined.config import (
     ChatModelConfig,
     VisionModelConfig,
     AgentModelConfig,
     SecurityModelConfig,
+    EmbeddingModelConfig,
+    RerankModelConfig,
     Config,
     get_config,
 )
@@ -32,7 +40,12 @@ from Undefined.utils.tool_calls import normalize_tool_arguments_json
 logger = logging.getLogger(__name__)
 
 ModelConfig = (
-    ChatModelConfig | VisionModelConfig | AgentModelConfig | SecurityModelConfig
+    ChatModelConfig
+    | VisionModelConfig
+    | AgentModelConfig
+    | SecurityModelConfig
+    | EmbeddingModelConfig
+    | RerankModelConfig
 )
 
 __all__ = ["ModelRequester", "build_request_body", "ModelConfig"]
@@ -732,6 +745,12 @@ class ModelRequester:
         self._token_counters: dict[str, TokenCounter] = {}
         self._warned_legacy_api_urls: set[str] = set()
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._retrieval_requester = RetrievalRequester(
+            get_openai_client=self._get_openai_client_for_model,
+            response_to_dict=self._response_to_dict,
+            get_token_counter=self._get_token_counter,
+            record_usage=self._record_usage,
+        )
 
     async def request(
         self,
@@ -854,23 +873,14 @@ class ModelRequester:
 
             self._maybe_log_thinking(result, call_type, model_config.model_name)
 
-            # 创建后台任务记录 token 使用情况，并保存引用防止被垃圾回收
-            task = asyncio.create_task(
-                self._token_usage_storage.record(
-                    TokenUsage(
-                        timestamp=datetime.now().isoformat(),
-                        model_name=model_config.model_name,
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
-                        total_tokens=total_tokens,
-                        duration_seconds=duration,
-                        call_type=call_type,
-                        success=True,
-                    )
-                )
+            self._record_usage(
+                model_name=model_config.model_name,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                duration_seconds=duration,
+                call_type=call_type,
             )
-            self._background_tasks.add(task)
-            task.add_done_callback(self._background_tasks.discard)
 
             return result
         except APIStatusError as exc:
@@ -961,6 +971,37 @@ class ModelRequester:
     async def _request_with_openai(
         self, model_config: ModelConfig, request_body: dict[str, Any]
     ) -> dict[str, Any]:
+        client = self._get_openai_client_for_model(model_config)
+        params, extra_body = _split_chat_completion_params(request_body)
+        if extra_body:
+            params["extra_body"] = extra_body
+        response = await client.chat.completions.create(**params)
+        return self._response_to_dict(response)
+
+    async def embed(
+        self,
+        model_config: EmbeddingModelConfig,
+        texts: list[str],
+    ) -> list[list[float]]:
+        """调用统一检索请求层的 embeddings。"""
+        return await self._retrieval_requester.embed(model_config, texts)
+
+    async def rerank(
+        self,
+        model_config: RerankModelConfig,
+        query: str,
+        documents: list[str],
+        top_n: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """调用统一检索请求层的 rerank。"""
+        return await self._retrieval_requester.rerank(
+            model_config=model_config,
+            query=query,
+            documents=documents,
+            top_n=top_n,
+        )
+
+    def _get_openai_client_for_model(self, model_config: ModelConfig) -> AsyncOpenAI:
         base_url, default_query, changed = _normalize_openai_base_url(
             model_config.api_url
         )
@@ -972,15 +1013,38 @@ class ModelRequester:
                 base_url,
                 model_config.api_url,
             )
-
-        client = self._get_openai_client(
-            base_url=base_url, api_key=model_config.api_key, default_query=default_query
+        return self._get_openai_client(
+            base_url=base_url,
+            api_key=model_config.api_key,
+            default_query=default_query,
         )
-        params, extra_body = _split_chat_completion_params(request_body)
-        if extra_body:
-            params["extra_body"] = extra_body
-        response = await client.chat.completions.create(**params)
-        return self._response_to_dict(response)
+
+    def _record_usage(
+        self,
+        *,
+        model_name: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        total_tokens: int,
+        duration_seconds: float,
+        call_type: str,
+    ) -> None:
+        task = asyncio.create_task(
+            self._token_usage_storage.record(
+                TokenUsage(
+                    timestamp=datetime.now().isoformat(),
+                    model_name=model_name,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    duration_seconds=duration_seconds,
+                    call_type=call_type,
+                    success=True,
+                )
+            )
+        )
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     def _get_openai_client(
         self, base_url: str, api_key: str, default_query: dict[str, object] | None
@@ -1125,10 +1189,12 @@ def build_request_body(
         else:
             extra_kwargs["thinking"] = normalized
 
-    if model_config.thinking_enabled:
+    if getattr(model_config, "thinking_enabled", False):
         thinking_param: dict[str, Any] = {"type": "enabled"}
         if getattr(model_config, "thinking_include_budget", True):
-            thinking_param["budget_tokens"] = model_config.thinking_budget_tokens
+            thinking_param["budget_tokens"] = getattr(
+                model_config, "thinking_budget_tokens", 0
+            )
         body["thinking"] = thinking_param
 
     if tools:

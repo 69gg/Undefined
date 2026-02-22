@@ -117,6 +117,7 @@ class AIClient:
         self._token_usage_storage = TokenUsageStorage()
         self._requester = ModelRequester(self._http_client, self._token_usage_storage)
         self._token_counter = TokenCounter()
+        self._knowledge_manager: Any = None
 
         # 私聊发送回调
         self._send_private_message_callback: Optional[
@@ -266,6 +267,13 @@ class AIClient:
         if hasattr(self, "_agent_intro_task") and self._agent_intro_task:
             if not self._agent_intro_task.done():
                 await self._agent_intro_task
+        knowledge_manager = getattr(self, "_knowledge_manager", None)
+        if knowledge_manager is not None and hasattr(knowledge_manager, "stop"):
+            try:
+                await knowledge_manager.stop()
+            except Exception as exc:
+                logger.warning("[清理] 关闭知识库管理器失败: %s", exc)
+            self._knowledge_manager = None
 
         # 2) 等待 MCP 初始化完成，再关闭 MCP toolsets
         if hasattr(self, "_mcp_init_task") and not self._mcp_init_task.done():
@@ -361,6 +369,9 @@ class AIClient:
             return
 
         self._agent_intro_generator.config = config
+
+    def set_knowledge_manager(self, manager: Any) -> None:
+        self._knowledge_manager = manager
 
     def apply_search_config(self, searxng_url: str) -> None:
         """应用搜索服务配置（支持热更新）。"""
@@ -722,6 +733,7 @@ class AIClient:
         tool_context.setdefault("send_message_callback", send_message_callback)
         tool_context.setdefault("sender", sender)
         tool_context.setdefault("send_image_callback", self._send_image_callback)
+        tool_context.setdefault("knowledge_manager", self._knowledge_manager)
 
         # 动态选择模型（等待偏好加载就绪，避免竞态）
         await self.model_selector.wait_ready()

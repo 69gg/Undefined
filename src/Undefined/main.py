@@ -201,6 +201,52 @@ async def main() -> None:
         )
         faq_storage = FAQStorage()
 
+        if config.knowledge_enabled:
+            from Undefined.knowledge import Embedder, KnowledgeManager, Reranker
+
+            if (
+                not config.embedding_model.api_url
+                or not config.embedding_model.model_name
+            ):
+                raise ValueError(
+                    "知识库已启用，但 models.embedding.api_url / model_name 未配置完整"
+                )
+
+            _embedder = Embedder(
+                ai._requester,
+                config.embedding_model,
+                batch_size=config.knowledge_embed_batch_size,
+            )
+            _embedder.start()
+            _reranker: Reranker | None = None
+            if (
+                config.rerank_model.api_url
+                and config.rerank_model.model_name
+                and config.knowledge_enable_rerank
+            ):
+                _reranker = Reranker(ai._requester, config.rerank_model)
+                _reranker.start()
+            elif config.knowledge_enable_rerank:
+                logger.warning(
+                    "[知识库] 已启用重排，但 models.rerank 未配置完整，重排将自动禁用"
+                )
+            knowledge_manager = KnowledgeManager(
+                base_dir=config.knowledge_base_dir,
+                embedder=_embedder,
+                reranker=_reranker,
+                default_top_k=config.knowledge_default_top_k,
+                chunk_size=config.knowledge_chunk_size,
+                chunk_overlap=config.knowledge_chunk_overlap,
+                rerank_enabled=config.knowledge_enable_rerank,
+                rerank_top_k=config.knowledge_rerank_top_k,
+            )
+            ai.set_knowledge_manager(knowledge_manager)
+            if config.knowledge_auto_scan and config.knowledge_auto_embed:
+                knowledge_manager.start_auto_scan(config.knowledge_scan_interval)
+            elif config.knowledge_auto_embed:
+                knowledge_manager.start_initial_scan()
+            logger.info("[知识库] 初始化完成: base_dir=%s", config.knowledge_base_dir)
+
         handler = MessageHandler(config, onebot, ai, faq_storage, task_storage)
         onebot.set_message_handler(handler.handle_message)
         elapsed = time.perf_counter() - init_start

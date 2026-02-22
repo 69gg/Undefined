@@ -79,6 +79,7 @@
 - **Skills 热重载**：自动扫描 `skills/` 目录，检测到变更后即时重载工具与 Agent，无需重启服务。
 - **配置热更新 + WebUI**：使用 `config.toml` 配置，支持热更新；提供 WebUI 在线编辑与校验。
 - **多模型池**：支持配置多个 AI 模型，可轮询、随机选择或用户指定；支持多模型并发比较，选择最佳结果继续对话。详见 [多模型功能文档](docs/multi-model.md)。
+- **本地知识库**：将纯文本文件向量化存入 ChromaDB，AI 可通过关键词搜索或语义搜索查询领域知识；支持增量嵌入与自动扫描。详见 [知识库文档](docs/knowledge.md)。
 - **访问控制（群/私聊）**：支持 `access.mode` 三种模式（`off` / `blacklist` / `allowlist`）和群/私聊黑白名单；可按策略限制收发范围，避免误触发与误投递。详见 [docs/access-control.md](docs/access-control.md)。
 - **并行工具执行**：无论是主 AI 还是子 Agent，均支持 `asyncio` 并发工具调用，大幅提升多任务处理速度（如同时读取多个文件或搜索多个关键词）。
 - **智能 Agent 矩阵**：内置多个专业 Agent，分工协作处理复杂任务。

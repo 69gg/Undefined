@@ -81,6 +81,30 @@ class SecurityModelConfig:
 
 
 @dataclass
+class EmbeddingModelConfig:
+    """嵌入模型配置"""
+
+    api_url: str
+    api_key: str
+    model_name: str
+    queue_interval_seconds: float = 1.0
+    dimensions: int | None = None
+    query_instruction: str = ""  # 查询端指令前缀（如 Qwen3-Embedding 需要）
+    document_instruction: str = ""  # 文档端指令前缀（如 E5 系列需要 "passage: "）
+
+
+@dataclass
+class RerankModelConfig:
+    """重排模型配置"""
+
+    api_url: str
+    api_key: str
+    model_name: str
+    queue_interval_seconds: float = 1.0
+    query_instruction: str = ""  # 查询端指令前缀（如部分 rerank 模型需要）
+
+
+@dataclass
 class AgentModelConfig:
     """Agent 模型配置（用于执行 agents）"""
 
