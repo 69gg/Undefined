@@ -16,12 +16,12 @@
 knowledge/                        # 项目根目录，仅存数据
 └── {知识库名}/
     ├── intro.md                  # 必填：给 AI 看的知识库简介
-    ├── texts/                    # 原始文本（*.txt，扁平结构）
+    ├── texts/                    # 必填：原始文本目录（支持子目录）
     ├── chroma/                   # ChromaDB 向量库（自动生成）
     └── .manifest.json            # 文件 hash 记录（自动生成）
 ```
 
-`knowledge/` 下不放代码，只有数据文件。`intro.md` 用于让 AI 先理解“这个库讲什么”，再决定是否调用搜索工具。`chroma/` 和 `.manifest.json` 已加入 `.gitignore`。
+`knowledge/` 下不放代码，只有数据文件。`intro.md` 用于让 AI 先理解“这个库讲什么”，再决定是否调用搜索工具。系统会自动递归扫描 `texts/` 下的常见纯文本文件（如 `md/txt/html/htm` 等），并忽略 `chroma/`、`.manifest.json`、`intro.md`。`chroma/` 和 `.manifest.json` 已加入 `.gitignore`。
 
 ## 快速开始
 
@@ -66,7 +66,9 @@ knowledge/
     ├── intro.md
     └── texts/
         ├── faq.txt
-        └── manual.txt
+        ├── manual.md
+        └── docs/
+            └── policy.html
 ```
 
 `intro.md` 示例（简洁、可判别）：
@@ -81,7 +83,7 @@ knowledge/
 
 ```
 [知识库] 初始化完成: base_dir=knowledge
-[知识库] kb=my_docs file=faq.txt lines=42
+[知识库] kb=my_docs file=texts/faq.txt lines=42
 ```
 
 ## 工具用法

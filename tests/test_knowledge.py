@@ -156,7 +156,9 @@ def _make_kb(tmp_path: Path, name: str, files: dict[str, str]) -> Path:
     texts_dir = kb_dir / "texts"
     texts_dir.mkdir(parents=True)
     for fname, content in files.items():
-        (texts_dir / fname).write_text(content, "utf-8")
+        file_path = texts_dir / fname
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(content, "utf-8")
     return kb_dir
 
 
@@ -166,6 +168,13 @@ def test_list_knowledge_bases(tmp_path: Path) -> None:
 
     _make_kb(tmp_path, "kb1", {"a.txt": "hello"})
     _make_kb(tmp_path, "kb2", {"b.txt": "world"})
+    assert manager.list_knowledge_bases() == ["kb1", "kb2"]
+
+
+def test_list_knowledge_bases_supports_texts_subdirs(tmp_path: Path) -> None:
+    manager, _ = _make_manager(tmp_path)
+    _make_kb(tmp_path, "kb1", {"docs/readme.md": "hello"})
+    _make_kb(tmp_path, "kb2", {"a.txt": "world"})
     assert manager.list_knowledge_bases() == ["kb1", "kb2"]
 
 
@@ -231,6 +240,23 @@ def test_text_search_case_insensitive(tmp_path: Path) -> None:
     assert len(results) == 1
 
 
+def test_text_search_supports_md_and_html(tmp_path: Path) -> None:
+    manager, _ = _make_manager(tmp_path)
+    _make_kb(
+        tmp_path,
+        "kb1",
+        {
+            "guide.md": "如何重置密码\n请先验证邮箱",
+            "docs/page.html": "<h1>重置密码步骤</h1>",
+        },
+    )
+
+    results = manager.text_search("kb1", "重置密码")
+    sources = {item["source"] for item in results}
+    assert "texts/guide.md" in sources
+    assert "texts/docs/page.html" in sources
+
+
 def test_text_search_missing_kb(tmp_path: Path) -> None:
     manager, _ = _make_manager(tmp_path)
     assert manager.text_search("nonexistent", "keyword") == []
@@ -273,6 +299,34 @@ async def test_embed_skips_unchanged_files(tmp_path: Path) -> None:
         # 第二次扫描，文件未变，不应再次嵌入
         await manager.embed_knowledge_base("kb1")
         assert embedder.embed.call_count == first_call_count
+
+
+async def test_embed_scans_common_text_formats(tmp_path: Path) -> None:
+    manager, embedder = _make_manager(tmp_path)
+    embedder.embed = AsyncMock(return_value=[[0.1]])
+
+    _make_kb(
+        tmp_path,
+        "kb1",
+        {
+            "chapters/1.md": "第一章",
+            "faq.txt": "常见问题",
+            "web/page.htm": "<p>页面内容</p>",
+            "chroma/ignored.txt": "应被忽略",
+            "image.png": "not text",
+        },
+    )
+    (tmp_path / "kb1" / "intro.md").write_text("知识库简介，不用于向量化", "utf-8")
+
+    with patch.object(manager, "_get_store") as mock_store:
+        store = AsyncMock()
+        store.add_chunks = AsyncMock(return_value=1)
+        mock_store.return_value = store
+
+        added = await manager.embed_knowledge_base("kb1")
+
+    assert added == 3
+    assert embedder.embed.call_count == 3
 
 
 async def test_semantic_search_with_rerank(tmp_path: Path) -> None:

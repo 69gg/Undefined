@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +20,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _MANIFEST_FILE = ".manifest.json"
+_INTRO_FILE = "intro.md"
+_IGNORED_DIRS = {"chroma", ".git", "__pycache__"}
+_SUPPORTED_TEXT_EXTENSIONS = {
+    ".txt",
+    ".md",
+    ".markdown",
+    ".html",
+    ".htm",
+    ".rst",
+    ".csv",
+    ".tsv",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".xml",
+    ".log",
+    ".ini",
+    ".cfg",
+    ".conf",
+}
 
 
 class KnowledgeManager:
@@ -60,8 +81,40 @@ class KnowledgeManager:
             if d.is_dir() and (d / "texts").exists()
         ]
 
+    def _is_supported_text_file(self, path: Path) -> bool:
+        if path.name in {_MANIFEST_FILE, _INTRO_FILE}:
+            return False
+        return path.suffix.lower() in _SUPPORTED_TEXT_EXTENSIONS
+
+    def _has_indexable_text_files(self, kb_dir: Path) -> bool:
+        for _ in self._iter_indexable_text_files(kb_dir):
+            return True
+        return False
+
+    def _iter_indexable_text_files(self, kb_dir: Path) -> list[Path]:
+        texts_dir = kb_dir / "texts"
+        if not texts_dir.exists() or not texts_dir.is_dir():
+            return []
+
+        files: list[Path] = []
+        for root, dirnames, filenames in os.walk(texts_dir):
+            dirnames[:] = [
+                d
+                for d in dirnames
+                if d.lower() not in _IGNORED_DIRS and not d.startswith(".")
+            ]
+            root_path = Path(root)
+            for name in filenames:
+                file_path = root_path / name
+                if not self._is_supported_text_file(file_path):
+                    continue
+                files.append(file_path)
+
+        files.sort(key=lambda p: p.relative_to(kb_dir).as_posix())
+        return files
+
     def read_knowledge_base_intro(self, kb_name: str, max_chars: int = 300) -> str:
-        intro_path = self._base_dir / kb_name / "intro.md"
+        intro_path = self._base_dir / kb_name / _INTRO_FILE
         if not intro_path.exists():
             return ""
         try:
@@ -110,22 +163,29 @@ class KnowledgeManager:
 
     async def embed_knowledge_base(self, kb_name: str) -> int:
         """扫描并嵌入一个知识库的新增/变更文件，返回新增行数。"""
-        texts_dir = self._base_dir / kb_name / "texts"
-        if not texts_dir.exists():
+        kb_dir = self._base_dir / kb_name
+        if not kb_dir.exists():
+            return 0
+        text_files = self._iter_indexable_text_files(kb_dir)
+        if not text_files:
             return 0
 
         manifest = await self._load_manifest(kb_name)
         store = self._get_store(kb_name)
         total = 0
 
-        for txt_file in sorted(texts_dir.glob("*.txt")):
-            fhash = await self._file_hash(txt_file)
-            if manifest.get(txt_file.name) == fhash:
+        for text_file in text_files:
+            relative_source = text_file.relative_to(kb_dir).as_posix()
+            fhash = await self._file_hash(text_file)
+            if manifest.get(relative_source) == fhash:
                 continue
-            content = await asyncio.to_thread(txt_file.read_text, "utf-8")
+            try:
+                content = await asyncio.to_thread(text_file.read_text, "utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
             lines = chunk_lines(content, self._chunk_size, self._chunk_overlap)
             if not lines:
-                manifest[txt_file.name] = fhash
+                manifest[relative_source] = fhash
                 continue
             doc_instr = getattr(self._embedder._config, "document_instruction", "")
             embed_lines = [f"{doc_instr}{ln}" for ln in lines] if doc_instr else lines
@@ -133,12 +193,12 @@ class KnowledgeManager:
             added = await store.add_chunks(
                 lines,
                 embeddings,
-                metadata_base={"source": txt_file.name, "kb": kb_name},
+                metadata_base={"source": relative_source, "kb": kb_name},
             )
-            manifest[txt_file.name] = fhash
+            manifest[relative_source] = fhash
             total += added
             logger.info(
-                "[知识库] kb=%s file=%s lines=%s", kb_name, txt_file.name, added
+                "[知识库] kb=%s file=%s lines=%s", kb_name, relative_source, added
             )
 
         await self._save_manifest(kb_name, manifest)
@@ -161,23 +221,24 @@ class KnowledgeManager:
         max_chars: int = 2000,
     ) -> list[dict[str, Any]]:
         """在指定知识库的原始文本中关键词搜索。"""
-        texts_dir = self._base_dir / kb_name / "texts"
-        if not texts_dir.exists():
+        kb_dir = self._base_dir / kb_name
+        if not kb_dir.exists():
             return []
 
         results: list[dict[str, Any]] = []
         total_chars = 0
         kw_lower = keyword.lower()
 
-        for txt_file in sorted(texts_dir.glob("*.txt")):
+        for text_file in self._iter_indexable_text_files(kb_dir):
             try:
-                content = txt_file.read_text("utf-8")
-            except OSError:
+                content = text_file.read_text("utf-8")
+            except (OSError, UnicodeDecodeError):
                 continue
+            relative_source = text_file.relative_to(kb_dir).as_posix()
             for lineno, line in enumerate(content.splitlines(), 1):
                 if kw_lower in line.lower():
                     results.append(
-                        {"source": txt_file.name, "line": lineno, "content": line}
+                        {"source": relative_source, "line": lineno, "content": line}
                     )
                     total_chars += len(line)
                     if len(results) >= max_lines or total_chars >= max_chars:
