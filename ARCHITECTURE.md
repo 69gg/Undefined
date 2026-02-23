@@ -110,6 +110,13 @@ graph TB
             A_Code["code_delivery_agent<br/>代码交付助手<br/>(13个工具)<br/>• Docker 容器隔离<br/>• Git 仓库克隆<br/>• 代码编写验证<br/>• 打包上传"]
         end
         
+        subgraph CommandsLayer["平台指令 (skills/commands/)"]
+            Cmd_Core["核心指令<br/>• help • stats"]
+            Cmd_Admin["管理指令<br/>• addadmin<br/>• rmadmin • lsadmin"]
+            Cmd_FAQ["FAQ 指令<br/>• lsfaq • viewfaq<br/>• searchfaq • delfaq"]
+            Cmd_Fun["娱乐指令<br/>• bugfix"]
+        end
+        
         subgraph MCPIntegration["MCP 集成 (src/Undefined/mcp/)"]
             MCPRegistry["MCPToolRegistry<br/>MCP 工具注册表<br/>[registry.py]<br/>• 连接 MCP Server<br/>• 工具转换"]
             MCP_Config["MCP 配置<br/>config/mcp.json<br/>(全局配置)"]
@@ -244,6 +251,8 @@ graph TB
     ToolRegistry --> Toolsets
     AgentRegistry --> IntelligentAgents
     AgentRegistry -->|"触发"| IntroGenerator
+    
+    CommandDispatcher -->|"动态加载"| CommandsLayer
     
     A_Web -->|"私有 MCP"| MCP_Agent_Private
     MCP_Agent_Private -->|"连接"| MCPRegistry
@@ -452,6 +461,10 @@ graph TB
             EntAgent["entertainment_agent<br/>娱乐"]
         end
         
+        subgraph CommandsLayer2["Commands 层"]
+            CmdPlugins["指令插件库<br/>(skills/commands/)"]
+        end
+        
         subgraph IntroSystem["Intro 系统"]
             IntroGen["IntroGenerator<br/>介绍生成器"]
             IntroUtils["IntroUtils<br/>合并工具"]
@@ -476,6 +489,7 @@ graph TB
     ToolRegistry --> Toolsets
     Toolsets --> ToolsetsDetail
     AgentRegistry --> AgentsLayer
+    BaseRegistry -.->|"模式参考"| CommandsLayer2
     
     AgentRegistry --> AgentToolReg
     AgentToolReg --> InfoAgent
