@@ -109,13 +109,13 @@ skills/
 
 ## 选择指南
 
-| 特性 | 基础工具 | 工具集 | 智能体 | Anthropic Skills |
-|------|----------|--------|--------|------------------|
-| 复杂度 | 低 | 中 | 高 | 低（纯提示词） |
-| 调用层级 | 直接调用 | 直接调用 | 间接调用 | 直接调用（tool） |
-| 内部工具 | 无 | 无 | 可包含多个子工具 | 无（知识注入） |
-| 适用场景 | 通用原子操作 | 功能分组工具 | 领域复杂任务 | 领域知识/指导 |
-| 格式 | config.json + handler.py | config.json + handler.py | config.json + handler.py + prompt.md | SKILL.md |
+| 特性 | 基础工具 | 工具集 | 智能体 | 平台指令 (Commands) | Anthropic Skills |
+|------|----------|--------|--------|------------------|------------------|
+| 复杂度 | 低 | 中 | 高 | 中（独立执行逻辑） | 低（纯提示词） |
+| 调用层级 | 直接调用 | 直接调用 | 间接调用 | 被群聊拦截器直接执行 | 直接调用（tool） |
+| 内部工具 | 无 | 无 | 可包含多个子工具 | 无 | 无（知识注入） |
+| 适用场景 | 通用原子操作 | 功能分组工具 | 领域复杂任务 | 基础系统管理与控制 | 领域知识/指导 |
+| 格式 | config.json + handler.py | config.json + handler.py | config.json + handler.py + prompt.md | config.json + handler.py | SKILL.md |
 
 ## 添加新技能
 
@@ -162,6 +162,14 @@ skills/
 1. 在 `skills/agents/<agent_name>/anthropic_skills/` 下创建 skill 目录
 2. 添加 `SKILL.md` 文件
 3. Agent 执行时自动发现并加载，工具仅对该 Agent 可见
+
+### 添加平台斜杠指令 (Commands)
+
+详细说明请参考 [顶级斜杠指令指南](../../../../docs/slash-commands.md)。
+1. 在 `skills/commands/` 下创建新目录
+2. 添加 `config.json`（设定命令的前缀、优先级和权限限定）
+3. 添加 `handler.py`（执行逻辑，接收和回复用户的直接指令）
+4. 自动被 `CommandRegistry` 发现和注册
 
 **SKILL.md 格式示例：**
 

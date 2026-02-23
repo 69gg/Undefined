@@ -18,6 +18,7 @@ src/Undefined/
 │   ├── toolsets/        # 聚合工具集 (分组后的工具组)
 │   │   └── cognitive/   # 认知记忆主动暴露工具 (search_events, get_profile 等)
 │   ├── agents/          # 智能体 (独立自主的子 AI，负责处理诸如 Web 搜索、文件分析的具体长时任务)
+│   ├── commands/        # 中心化斜杠指令系统 (实现如 /help, /stats, /addadmin 等平台功能)
 │   └── anthropic_skills/# Anthropic 协议集成的外部 Skills (兼容 SKILL.md 格式)
 ├── services/      # 核心运行服务 (Queue 任务队列, Command 命令分发, Security 安全防护拦截)
 ├── utils/         # 通用支持工具组 (包含历史处理、JSON原子读写加锁 IO 操作等)
@@ -31,6 +32,7 @@ src/Undefined/
 - **Agents 开发专版**：[agents/README.md](../../src/Undefined/skills/agents/README.md)
 - **Tools 开发专版**：[tools/README.md](../../src/Undefined/skills/tools/README.md)
 - **Toolsets 开发专版**：[toolsets/README.md](../../src/Undefined/skills/toolsets/README.md)
+- **Commands 开发专版**：[详细斜杠指令开发指南](slash-commands.md)
 
 ### callable.json 共享授权机制
 
