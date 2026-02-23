@@ -81,7 +81,8 @@ class CommandDispatcher:
         self._stats_analysis_results: dict[str, str] = {}
         self._stats_analysis_events: dict[str, asyncio.Event] = {}
 
-        commands_dir = Path(__file__).parent / "commands"
+        # 加载所有命令实现 (独立插件形式存放在 skills/commands 目录下)
+        commands_dir = Path(__file__).parent.parent / "skills" / "commands"
         self.command_registry = CommandRegistry(commands_dir)
         self.command_registry.load_commands()
         logger.info("[命令] 命令系统初始化完成: dir=%s", commands_dir)

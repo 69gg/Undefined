@@ -42,6 +42,13 @@ skills/
 │       ├── list_schedule_tasks/
 │       └── update_schedule_task/
 │
+├── commands/       # 平台级斜杠指令，以插件形式动态加载
+│   ├── __init__.py
+│   ├── help/
+│   ├── stats/
+│   ├── addadmin/
+│   └── ...
+│
 └── anthropic_skills/  # Anthropic Skills（SKILL.md 格式）
     ├── __init__.py
     ├── loader.py

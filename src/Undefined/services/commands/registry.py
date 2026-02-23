@@ -89,7 +89,7 @@ class CommandRegistry:
             module_name = ".".join(
                 [
                     "Undefined",
-                    "services",
+                    "skills",
                     "commands",
                     command_dir.name,
                     "handler",

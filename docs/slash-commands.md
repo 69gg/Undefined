@@ -80,47 +80,62 @@ Undefined 提供了一套强大的斜杠指令（Slash Commands）系统。管�
 
 ## 🛠️ 第二部分：如何自定义/扩展新的斜杠命令？
 
-Undefined 具有可插拔的指令解析层，所有的指令逻辑实现均放在 `src/Undefined/services/commands/` 目录下。
+Undefined 具有可插拔的指令解析层，所有的指令逻辑实现均放在 `src/Undefined/skills/commands/` 目录下（作为一项特殊的核心系统技能存在）。
 
 开发一个新命令极为简单，只需几行代码即可完成自动注册、权限鉴定要求和参数解析。
 
 ### 命令系统的核心结构
 
 ```text
-src/Undefined/services/commands/
-├── __init__.py
-├── context.py        # 核心上下文 (CommandContext) 定义
-├── registry.py       # 命令注册表 (CommandRegistry) 和 Meta 定义
-├── builtin_*.py      # 内置命令 (如基础帮助、FAQ、权限检查)
-└── my_custom_cmd.py  # 👈 你新建的自定义命令文件
+src/Undefined/
+├── services/commands/
+│   ├── __init__.py
+│   ├── context.py        # 核心上下文 (CommandContext) 定义
+│   └── registry.py       # 命令注册表 (CommandRegistry) 和 Meta 定义
+└── skills/commands/      # 具体的所有指令实现存放目录
+    ├── __init__.py
+    ├── help/             # 内置命令：基础帮助
+    ├── faq/              # 内置命令：FAQ增删改查
+    └── my_custom_cmd/    # 👈 你新建的自定义命令目录（需要包含 config.json 和 handler.py）
 ```
 
 ### 1. 编写自定义命令的基本模板
 
-在 `commands/` 目录下新建一个 `.py` 文件，例如 `hello_world.py`，然后使用 `@command` 装饰器定义指令。
+在 `skills/commands/` 目录下新建一个你的命令大类目录，例如 `skills/commands/hello_world/`，然后在里面创建 `config.json` 和 `handler.py`。
 
+#### A. 配置声明 (`config.json`)
+```json
+{
+    "name": "hello",
+    "description": "向群里的盆友问个好",
+    "permission": "admin",
+    "rate_limit": "default",
+    "show_in_help": true,
+    "order": 100,
+    "aliases": ["hi", "helloworld"]
+}
+```
+*提示： `permission` 可选 `public` / `admin` / `superadmin`。*
+
+#### B. 执行逻辑 (`handler.py`)
 ```python
-# src/Undefined/services/commands/hello_world.py
-from Undefined.services.commands.registry import command
+# src/Undefined/skills/commands/hello_world/handler.py
+import logging
 from Undefined.services.commands.context import CommandContext
 
-@command(
-    name="hello",           # 触发指令：/hello
-    description="向群里的盆友问个好", # 指令说明
-    permission="admin",     # 权限要求："admin" / "superadmin" / "anyone"
-    rate_limit=2.0          # 速率限制：每 2 秒允许调用一次
-)
-async def hello_command(ctx: CommandContext) -> None:
-    # ctx.args 获取空格分割的参数列表
-    if not ctx.args:
+logger = logging.getLogger(__name__)
+
+async def execute(args: list[str], context: CommandContext) -> None:
+    # args 为空格分割的参数列表
+    if not args:
         target = "世界"
     else:
-        target = " ".join(ctx.args)
+        target = " ".join(args)
         
     # 执行回复动作
-    await ctx.sender.send_group_message(
-        ctx.group_id, 
-        f"👋 你好, {target}! 这个命令是由 {ctx.sender_id} 触发的。"
+    await context.sender.send_group_message(
+        context.group_id, 
+        f"👋 你好, {target}! 这个命令是由 {context.sender_id} 触发的。"
     )
 ```
 
@@ -150,7 +165,7 @@ async def hello_command(ctx: CommandContext) -> None:
 ### 4. 自动注册与生效
 
 你无需去任何主函数写 `import hello_world`！
-Undefined 在启动时会使用 `pkgutil` **自动扫描并动态加载** `services/commands/` 目录下的所有模块。只需保证文件存在并且被 `@command` 装饰，你的命令就能直接生效：
+Undefined 在启动时会使用 `pkgutil` **自动扫描并动态加载** `skills/commands/` 目录下的所有模块。只需保证文件存在并且合法，你的命令就能直接生效：
 
 ```bash
 uv run Undefined
