@@ -89,23 +89,25 @@ graph TB
             T_BilibiliVideo["bilibili_video<br/>B站视频下载发送"]
         end
         
-        subgraph Toolsets["工具集 (skills/toolsets/)"]
+        subgraph Toolsets["工具集 (skills/toolsets/, 9大类)"]
             TS_Group["group.*<br/>• get_member_list<br/>• get_member_info<br/>• get_honor_info<br/>• get_files"]
             TS_Messages["messages.*<br/>• send_message<br/>• get_recent_messages<br/>• get_forward_msg"]
             TS_Memory["memory.*<br/>• add / delete<br/>• list / update"]
+            TS_Contacts["contacts.*<br/>• query_friends<br/>• query_groups"]
+            TS_GroupAnalysis["group_analysis.*<br/>• analyze_member_messages<br/>• analyze_join_statistics<br/>• analyze_new_member_activity"]
             TS_Notices["notices.*<br/>• list / get / stats"]
             TS_Render["render.*<br/>• render_html<br/>• render_latex<br/>• render_markdown"]
             TS_Scheduler["scheduler.*<br/>• create_schedule_task<br/>• delete_schedule_task<br/>• list_schedule_tasks"]
-            TS_MCP["mcp.*<br/>MCP 工具集"]
             TS_Cognitive["cognitive.*<br/>• search_events<br/>• get_profile<br/>• search_profiles"]
         end
         
-        subgraph IntelligentAgents["智能体 Agents (skills/agents/)"]
+        subgraph IntelligentAgents["智能体 Agents (skills/agents/, 6个)"]
             A_Info["info_agent<br/>信息查询助手<br/>(17个工具)<br/>• weather_query<br/>• *hot 热搜<br/>• bilibili_*<br/>• whois"]
             A_Web["web_agent<br/>网络搜索助手<br/>(3个工具 + MCP)<br/>• web_search<br/>• crawl_webpage<br/>• Playwright MCP"]
             A_File["file_analysis_agent<br/>文件分析助手<br/>(14个工具)<br/>• extract_* (PDF/Word/Excel/PPT)<br/>• analyze_code<br/>• analyze_multimodal"]
             A_Naga["naga_code_analysis_agent<br/>NagaAgent 代码分析<br/>(7个工具)<br/>• read_file / glob<br/>• search_file_content"]
             A_Entertainment["entertainment_agent<br/>娱乐助手<br/>(9个工具)<br/>• ai_draw_one<br/>• horoscope<br/>• video_random_recommend"]
+            A_Code["code_delivery_agent<br/>代码交付助手<br/>(13个工具)<br/>• Docker 容器隔离<br/>• Git 仓库克隆<br/>• 代码编写验证<br/>• 打包上传"]
         end
         
         subgraph MCPIntegration["MCP 集成 (src/Undefined/mcp/)"]
@@ -134,6 +136,11 @@ graph TB
             HistoryManager["MessageHistoryManager<br/>消息历史管理<br/>[utils/history.py]<br/>• 懒加载<br/>• 10000条限制"]
             MemoryStorage["MemoryStorage<br/>长期记忆存储<br/>[memory.py]<br/>• 500条上限<br/>• 自动去重"]
             EndSummaryStorage["EndSummaryStorage<br/>短期总结存储<br/>[end_summary_storage.py]"]
+            CognitiveService["CognitiveService<br/>认知记忆服务<br/>[cognitive/service.py]<br/>• 事件检索 • 侧写读取<br/>• 入队 memory job"]
+            CognitiveJobQueue["JobQueue<br/>认知任务队列<br/>[cognitive/job_queue.py]<br/>• pending/processing/failed"]
+            CognitiveHistorian["HistorianWorker<br/>后台史官<br/>[cognitive/historian.py]<br/>• 绝对化改写 • 闸门重试<br/>• 侧写合并"]
+            CognitiveVectorStore["CognitiveVectorStore<br/>向量存储<br/>[cognitive/vector_store.py]<br/>• events/profiles<br/>• 时间衰减加权排序"]
+            CognitiveProfileStorage["ProfileStorage<br/>侧写存储<br/>[cognitive/profile_storage.py]<br/>• users/groups Markdown<br/>• 历史快照"]
             FAQStorage["FAQStorage<br/>FAQ 存储<br/>[faq.py]<br/>• data/faq/{group_id}/"]
             ScheduledTaskStorage["ScheduledTaskStorage<br/>定时任务存储<br/>[scheduled_task_storage.py]"]
             TokenUsageStorage["TokenUsageStorage<br/>Token 使用统计<br/>[token_usage_storage.py]<br/>• 自动归档<br/>• gzip 压缩"]
@@ -148,15 +155,16 @@ graph TB
     end
 
     %% ==================== 数据持久化层 ====================
-    subgraph Persistence["数据持久化层 (data/)"]
-        Dir_History["history/<br/>• group_{id}.json<br/>• private_{id}.json"]
-        Dir_FAQ["faq/<br/>• {group_id}/<br/>  - {date}-{seq}.json"]
-        Dir_TokenUsage["token_usage_archives/<br/>• token_usage.jsonl<br/>• *.jsonl.gz"]
-        File_Memory["memory.json<br/>(长期记忆)"]
-        File_EndSummary["end_summaries.json<br/>(短期总结)"]
-        File_ScheduledTasks["scheduled_tasks.json<br/>(定时任务)"]
-        Dir_Logs["logs/<br/>• bot.log<br/>• 轮转日志"]
-        File_Config["config.toml<br/>config.local.json"]
+        subgraph Persistence["数据持久化层 (data/)"]
+            Dir_History["history/<br/>• group_{id}.json<br/>• private_{id}.json"]
+            Dir_FAQ["faq/<br/>• {group_id}/<br/>  - {date}-{seq}.json"]
+            Dir_TokenUsage["token_usage_archives/<br/>• token_usage.jsonl<br/>• *.jsonl.gz"]
+            Dir_Cognitive["cognitive/<br/>• chromadb/<br/>• profiles/<br/>• queues/"]
+            File_Memory["memory.json<br/>(长期记忆)"]
+            File_EndSummary["end_summaries.json<br/>(短期总结)"]
+            File_ScheduledTasks["scheduled_tasks.json<br/>(定时任务)"]
+            Dir_Logs["logs/<br/>• bot.log<br/>• 轮转日志"]
+            File_Config["config.toml<br/>config.local.json"]
     end
 
     %% ==================== 资源文件层 ====================
@@ -215,7 +223,17 @@ graph TB
     ModelRequester <-->|"API 请求"| LLM_API
     PromptBuilder -->|"注入记忆"| MemoryStorage
     PromptBuilder -->|"注入总结"| EndSummaryStorage
+    PromptBuilder -->|"注入认知"| CognitiveService
     PromptBuilder -->|"注入历史"| HistoryManager
+    T_End -->|"写短期摘要"| EndSummaryStorage
+    T_End -->|"enqueue_job(action/new_info)"| CognitiveService
+    CognitiveService -->|"入队"| CognitiveJobQueue
+    CognitiveJobQueue -->|"dequeue / requeue"| CognitiveHistorian
+    CognitiveHistorian -.->|"background rewrite / merge"| LLM_API
+    CognitiveHistorian -->|"upsert events/profiles"| CognitiveVectorStore
+    CognitiveHistorian -->|"写侧写"| CognitiveProfileStorage
+    CognitiveService -->|"query events/profiles"| CognitiveVectorStore
+    CognitiveService -->|"读取侧写"| CognitiveProfileStorage
     
     ToolManager -->|"获取工具"| ToolRegistry
     ToolManager -->|"获取 Agent"| AgentRegistry
@@ -245,12 +263,15 @@ graph TB
     TokenUsageStorage -->|"异步读写<br/>自动归档"| IOUtils
     FAQStorage -->|"异步读写"| IOUtils
     ScheduledTaskStorage -->|"异步读写"| IOUtils
+    CognitiveJobQueue -->|"异步读写"| IOUtils
+    CognitiveProfileStorage -->|"异步读写"| IOUtils
     
     IOUtils --> Dir_History
     IOUtils --> File_Memory
     IOUtils --> File_EndSummary
     IOUtils --> Dir_TokenUsage
     IOUtils --> Dir_FAQ
+    IOUtils --> Dir_Cognitive
     IOUtils --> File_ScheduledTasks
     
     %% 资源文件
@@ -279,12 +300,12 @@ graph TB
     class MessageHandler,SecurityService,InjectionAgent,CommandDispatcher,AICoordinator message
     class AIClient,PromptBuilder,ModelRequester,ToolManager,MultimodalAnalyzer,SummaryService,TokenCounter,Parsing ai
     class ToolRegistry,AgentRegistry,AgentToolRegistry,IntroGenerator skills
-    class RequestContext,ContextFilter,ResourceRegistry,HistoryManager,MemoryStorage,EndSummaryStorage,FAQStorage,ScheduledTaskStorage,TokenUsageStorage storage
+    class RequestContext,ContextFilter,ResourceRegistry,HistoryManager,MemoryStorage,EndSummaryStorage,CognitiveService,CognitiveJobQueue,CognitiveHistorian,CognitiveVectorStore,CognitiveProfileStorage,FAQStorage,ScheduledTaskStorage,TokenUsageStorage storage
     class IOUtils,SchedulerUtils,CacheUtils,SenderUtils io
-    class Dir_History,Dir_FAQ,Dir_TokenUsage,File_Memory,File_EndSummary,File_ScheduledTasks,Dir_Logs,File_Config persistence
+    class Dir_History,Dir_FAQ,Dir_TokenUsage,Dir_Cognitive,File_Memory,File_EndSummary,File_ScheduledTasks,Dir_Logs,File_Config persistence
     class Prompts,Intros resource
     class QueueManager,ModelQueues,DispatcherLoop queue
-    class A_Info,A_Web,A_File,A_Naga,A_Entertainment agent
+    class A_Info,A_Web,A_File,A_Naga,A_Entertainment,A_Code agent
 ```
 
 ## 二、数据流向图
@@ -353,6 +374,7 @@ sequenceDiagram
             AI->>ST: 加载记忆
             AI->>ST: 加载历史
             AI->>ST: 加载总结
+            AI->>ST: 语义检索认知事件 + 读取侧写
             AI->>AI: build_messages()
             
             %% 模型请求
@@ -382,6 +404,7 @@ sequenceDiagram
             AI-->>AC: 返回回复内容
             
             AC->>ST: 保存总结
+            AC->>ST: end 工具入队认知任务（异步）
             AC->>OH: 发送消息
             OH->>OB: WebSocket API
             OB->>U: 显示回复
@@ -412,10 +435,11 @@ graph TB
                 TGroup["group.*<br/>群管理"]
                 TMsg["messages.*<br/>消息"]
                 TMem["memory.*<br/>记忆"]
+                TContacts["contacts.*<br/>联系人"]
+                TGroupAnalysis["group_analysis.*<br/>群分析"]
                 TNotice["notices.*<br/>公告"]
                 TRender["render.*<br/>渲染"]
                 TSched["scheduler.*<br/>定时任务"]
-                TMCP["mcp.*<br/>MCP"]
                 TCognitive["cognitive.*<br/>认知记忆"]
             end
         end
@@ -486,6 +510,10 @@ graph LR
             History["MessageHistoryManager<br/>data/history/<br/>• 懒加载<br/>• 10000条限制"]
             Memory["MemoryStorage<br/>data/memory.json<br/>• 500条上限"]
             EndSummary["EndSummaryStorage<br/>data/end_summaries.json"]
+            CognitiveSvc["CognitiveService<br/>认知记忆入口"]
+            CognitiveQueue["JobQueue<br/>data/cognitive/queues/"]
+            CognitiveVector["CognitiveVectorStore<br/>data/cognitive/chromadb/"]
+            CognitiveProfile["ProfileStorage<br/>data/cognitive/profiles/"]
             FAQ["FAQStorage<br/>data/faq/{group_id}/<br/>• ID: YYYYMMDD-NNN"]
             Tasks["ScheduledTaskStorage<br/>data/scheduled_tasks.json<br/>• Cron 格式"]
             TokenUsage["TokenUsageStorage<br/>data/token_usage.jsonl<br/>• 自动归档<br/>• gzip 压缩"]
@@ -501,15 +529,23 @@ graph LR
     RC -->|"保存消息"| History
     RC -->|"读写"| Memory
     RC -->|"读写"| EndSummary
+    RC -->|"检索/入队"| CognitiveSvc
     RC -->|"FAQ 操作"| FAQ
     RC -->|"任务管理"| Tasks
+    
+    CognitiveSvc --> CognitiveQueue
+    CognitiveSvc --> CognitiveVector
+    CognitiveSvc --> CognitiveProfile
     
     TokenUsage --> IO
     History --> IO
     Memory --> IO
     EndSummary --> IO
+    CognitiveQueue --> IO
+    CognitiveProfile --> IO
     FAQ --> IO
     Tasks --> IO
+    CognitiveVector --> FS
     
     IO -->|"异步安全"| FS
 ```
@@ -750,6 +786,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 | **日志配置** | `logging.level`, `logging.file_path`, `logging.max_size_mb` | 日志系统 |
 | **MCP 配置** | `mcp.config_path` | MCP 配置文件路径 |
 | **存储配置** | `token_usage.*` | Token 归档和清理策略 |
+| **认知记忆** | `cognitive.enabled`, `cognitive.query.*`, `models.embedding.*` | 事件检索、时间衰减加权、侧写与后台史官 |
 | **Bilibili** | `bilibili.auto_extract_enabled`, `bilibili.cookie`, `bilibili.prefer_quality` | B站视频自动提取与下载 |
 | **思考链** | `*.thinking_enabled` | 思维链支持 |
 | **思维链兼容** | `*.thinking_tool_call_compat` | 思维链 + 工具调用兼容 |
@@ -763,8 +800,8 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 2. **核心入口层**：main.py 启动入口、配置管理器 (config/loader.py)、热更新应用器 (config/hot_reload.py)、OneBotClient (onebot.py)、RequestContext (context.py)
 3. **消息处理层**：MessageHandler (handlers.py)、SecurityService (security.py)、CommandDispatcher (services/command.py)、AICoordinator (ai_coordinator.py)、QueueManager (queue_manager.py)、Bilibili 自动提取 (bilibili/)
 4. **AI 核心能力层**：AIClient (client.py)、PromptBuilder (prompts.py)、ModelRequester (llm.py)、ToolManager (tooling.py)、MultimodalAnalyzer (multimodal.py)、SummaryService (summaries.py)、TokenCounter (tokens.py)
-5. **存储与上下文层**：MessageHistoryManager (utils/history.py, 10000条限制)、MemoryStorage (memory.py, 500条上限)、EndSummaryStorage、FAQStorage、ScheduledTaskStorage、TokenUsageStorage (自动归档)
-6. **技能系统层**：ToolRegistry (registry.py)、AgentRegistry、6个 Agents (共64个工具)、8类 Toolsets
+5. **存储与上下文层**：MessageHistoryManager (utils/history.py, 10000条限制)、MemoryStorage (memory.py, 500条上限)、EndSummaryStorage、CognitiveService + JobQueue + HistorianWorker + VectorStore + ProfileStorage、FAQStorage、ScheduledTaskStorage、TokenUsageStorage (自动归档)
+6. **技能系统层**：ToolRegistry (registry.py)、AgentRegistry、6个 Agents、9类 Toolsets
 7. **异步 IO 层**：统一 IO 工具 (utils/io.py)，包含 write_json、read_json、append_line、跨平台文件锁 (flock/msvcrt)
 8. **数据持久化层**：历史数据目录、FAQ 目录、Token 归档目录、记忆文件、总结文件、定时任务文件
 
@@ -777,7 +814,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 *   **高可用性**：即使前一个请求仍在处理（如耗时的网络搜索），新的请求也会按时被分发，不会造成队列堵塞。
 *   **优先级管理**：支持四级优先级（超级管理员 > 私聊 > 群聊@ > 群聊普通），确保重要消息优先响应。
 
-### 5个智能体 Agent
+### 6个智能体 Agent
 
 | Agent | 功能定位 | 工具数量 | 核心能力 |
 |-------|---------|---------|---------|
@@ -786,11 +823,12 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 | **file_analysis_agent** | 文件分析助手 | 14个 | PDF/Word/Excel/PPT解析、代码分析、多模态分析 |
 | **naga_code_analysis_agent** | NagaAgent 代码分析 | 7个 | 代码库浏览、文件搜索、目录遍历 |
 | **entertainment_agent** | 娱乐助手 | 9个 | AI 绘图、星座运势、小说搜索、随机视频推荐等 |
+| **code_delivery_agent** | 代码交付助手 | 13个 | Docker 隔离、仓库克隆、代码验证、打包上传 |
 
 ### Skills 插件系统
 
 - **Tools (基础工具)**：原子化的功能单元，如 `send_message`, `get_history`, `bilibili_video`。
-- **Toolsets (复合工具集)**：8大类工具集 (group, messages, memory, notices, render, scheduler, mcp, cognitive)。
+- **Toolsets (复合工具集)**：9大类工具集 (group, messages, memory, contacts, group_analysis, notices, render, scheduler, cognitive)。
 - **延迟加载 + 热重载**：`handler.py` 仅在首次调用时导入；当 `skills/` 下的 `config.json`/`handler.py` 发生变更时会自动重新加载。
 - **Agent 自我介绍自动生成**：启动时按 Agent 代码/配置 hash 生成 `intro.generated.md` 并与 `intro.md` 合并。
 
@@ -808,6 +846,6 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 
 ---
 
-**架构图版本**: v2.14.0
-**更新日期**: 2026-02-13  
+**架构图版本**: v2.15.0
+**更新日期**: 2026-02-23  
 **基于代码版本**: 最新 main 分支
