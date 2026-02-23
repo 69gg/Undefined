@@ -17,10 +17,22 @@ Undefined 提供了一套强大的斜杠指令（Slash Commands）系统。管�
 ### 内置命令列表及详细用法
 
 #### 1. 基础帮助与状态查询
-- **/help**
-  - **说明**：显示所有可用命令的快速速查表。
-  - **参数**：无
-  - **示例**：`/help`
+- **/help [命令名]**
+  - **说明**：
+    - 不带参数时，显示所有可用命令的快速速查表。
+    - 带命令名时，显示该命令的统一格式帮助（命令元信息 + 命令目录下 README 文档内容）。
+  - **参数**：
+
+    | 参数 | 是否必填 | 说明 |
+    |------|----------|------|
+    | `命令名` | 可选 | 目标命令名，支持带或不带 `/`，如 `stats` 或 `/stats` |
+
+  - **示例**：
+    ```
+    /help
+    /help stats
+    /help /lsfaq
+    ```
 
 #### 2. 统计与分析服务
 - **/stats [时间范围]**
@@ -36,7 +48,6 @@ Undefined 提供了一套强大的斜杠指令（Slash Commands）系统。管�
     - `Nw`：N 周，如 `2w` = 最近 14 天
     - `Nm`：N 个月，如 `1m` = 最近 30 天
     - `N`：纯数字，直接解释为天数，如 `14` = 最近 14 天
-    - `--help`：显示 `/stats` 命令自身的用法帮助
 
     > **范围限制**：天数最小为 1 天，最大为 365 天。超出范围自动钳制。无法解析的格式回退到默认值 7 天。
 
@@ -48,7 +59,6 @@ Undefined 提供了一套强大的斜杠指令（Slash Commands）系统。管�
     /stats 2w         → 最近 14 天
     /stats 1m         → 最近 30 天
     /stats 14         → 最近 14 天
-    /stats --help     → 查看帮助
     ```
 
 #### 3. 权限管理 (动态 Admin)
@@ -174,7 +184,7 @@ src/Undefined/
 
 ### 1. 编写自定义命令的基本模板
 
-在 `skills/commands/` 目录下新建一个你的命令大类目录，例如 `skills/commands/hello_world/`，然后在里面创建 `config.json` 和 `handler.py`。
+在 `skills/commands/` 目录下新建一个你的命令大类目录，例如 `skills/commands/hello_world/`，然后在里面创建 `config.json`、`handler.py` 和 `README.md`。
 
 #### A. 配置声明 (`config.json`)
 ```json
@@ -217,6 +227,19 @@ async def execute(args: list[str], context: CommandContext) -> None:
     )
 ```
 
+#### C. 说明文档 (`README.md`)
+`README.md` 会被 `/help <command>` 自动读取并拼接到统一帮助模板中，建议保持简洁、可读、结构稳定（推荐包含“功能 / 用法 / 参数 / 示例 / 说明”）。
+
+```md
+# /hello 命令说明
+
+## 功能
+向群友打招呼。
+
+## 用法
+- /hello [目标]
+```
+
 ### 2. 参数 Context (`CommandContext`) 详解
 
 被自动注入的 `ctx` 对象包含当前命令生命周期的所有可用资源：
@@ -243,10 +266,10 @@ async def execute(args: list[str], context: CommandContext) -> None:
 ### 4. 自动注册与生效
 
 你无需去任何主函数写 `import hello_world`！
-Undefined 在启动时会使用 `pkgutil` **自动扫描并动态加载** `skills/commands/` 目录下的所有模块。只需保证文件存在并且合法，你的命令就能直接生效：
+Undefined 会在运行时自动检测 `skills/commands/` 目录变化并热重载命令（新增目录、修改 `config.json` / `handler.py` / `README.md` 都会生效）。只需保证文件存在并且合法：
 
 ```bash
 uv run Undefined
 ```
 
-启动完毕后在群里输入 `/help`，你就会自动看到你刚才写的 `/hello` 出现在帮助列表中！
+命令就绪后在群里输入 `/help`，你会看到 `/hello` 出现在列表中；输入 `/help hello` 可以看到你在 `README.md` 里写的详细说明。

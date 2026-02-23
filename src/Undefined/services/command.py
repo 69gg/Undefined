@@ -170,10 +170,6 @@ class CommandDispatcher:
             )
             return
 
-        if args and args[0] == "--help":
-            await self._handle_stats_help(group_id)
-            return
-
         days = self._parse_time_range(args[0]) if args else 7
 
         try:
@@ -416,25 +412,6 @@ class CommandDispatcher:
             return
         self._stats_analysis_results[request_id] = analysis
         event.set()
-
-    async def _handle_stats_help(self, group_id: int) -> None:
-        """发送 stats 命令的帮助信息"""
-        help_text = """📊 /stats 命令帮助
-
-用法：
-  /stats [时间范围]
-
-时间范围格式：
-  7d  - 最近 7 天（默认）
-  1w  - 最近 1 周
-  30d - 最近 30 天
-  1m  - 最近 1 个月
-
-示例：
-  /stats        - 显示最近 7 天的统计
-  /stats 30d    - 显示最近 30 天的统计
-  /stats --help - 显示帮助信息"""
-        await self.sender.send_group_message(group_id, help_text)
 
     def _build_stats_forward_nodes(
         self,
@@ -750,6 +727,7 @@ class CommandDispatcher:
             len(cmd_args),
         )
 
+        self.command_registry.maybe_reload()
         meta = self.command_registry.resolve(cmd_name)
         if meta is None:
             logger.info("[命令] 未知命令: /%s", cmd_name)
@@ -766,6 +744,13 @@ class CommandDispatcher:
             meta.permission,
             meta.rate_limit,
         )
+
+        if cmd_args and cmd_args[0] == "--help":
+            await self.sender.send_group_message(
+                group_id,
+                f"⚠️ 参数 --help 已弃用\n请使用：/help {meta.name}",
+            )
+            return
 
         allowed, role_name = self._check_command_permission(meta, sender_id)
         if not allowed:

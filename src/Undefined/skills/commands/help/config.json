@@ -1,8 +1,8 @@
 {
   "name": "help",
-  "description": "显示本帮助信息",
-  "usage": "/help",
-  "example": "/help",
+  "description": "显示命令列表或命令详细帮助",
+  "usage": "/help [命令名]",
+  "example": "/help stats",
   "permission": "public",
   "rate_limit": {
     "user": 0,

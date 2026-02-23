@@ -1,29 +1,86 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from Undefined.services.commands.context import CommandContext
 
+_DOC_MAX_CHARS = 8000
 
-async def execute(args: list[str], context: CommandContext) -> None:
-    """处理 /help。"""
 
-    _ = args
-    commands = context.registry.list_commands(include_hidden=False)
+def _permission_label(permission: str) -> str:
     permission_label_map = {
         "public": "公开可用",
         "admin": "仅限管理员",
         "superadmin": "仅限超级管理员",
     }
+    return permission_label_map.get(permission, "公开可用")
 
-    lines = ["Undefined命令模块 使用帮助", "", "可用命令：", ""]
+
+def _format_command_list(context: CommandContext) -> str:
+    commands = context.registry.list_commands(include_hidden=False)
+    lines = ["Undefined 命令帮助", "", "可用命令："]
     for item in commands:
-        lines.append(item.usage)
-        if item.description:
-            lines.append(f"  {item.description}")
-        if item.example and item.example != item.usage:
-            lines.append(f"  示例：{item.example}")
-        lines.append(f"  ({permission_label_map.get(item.permission, '公开可用')})")
-        lines.append("")
+        description = item.description or "暂无说明"
+        lines.append(f"- {item.usage}：{description}")
+    lines.append("")
+    lines.append("查看详细帮助：/help <command>")
+    return "\n".join(lines)
 
-    lines.append("© 由 Null(qq:1708213363) <pylindex@qq.com> 编写 版权所有")
-    lines.append("开源链接：https://github.com/69gg/Undefined")
-    await context.sender.send_group_message(context.group_id, "\n".join(lines))
+
+def _normalize_command_name(text: str) -> str:
+    return text.strip().lstrip("/").lower()
+
+
+def _load_command_doc(doc_path: Path | None) -> str:
+    if doc_path is None or not doc_path.exists():
+        return ""
+    content = doc_path.read_text(encoding="utf-8").strip()
+    if len(content) <= _DOC_MAX_CHARS:
+        return content
+    trimmed = content[: _DOC_MAX_CHARS - 32].rstrip()
+    return f"{trimmed}\n\n[文档过长，已截断]"
+
+
+def _format_command_detail(command_name: str, context: CommandContext) -> str | None:
+    meta = context.registry.resolve(command_name)
+    if meta is None:
+        return None
+
+    aliases = "、".join(f"/{alias}" for alias in meta.aliases) if meta.aliases else "无"
+    doc_content = _load_command_doc(meta.doc_path)
+    rate_limit = meta.rate_limit
+
+    lines = [
+        f"命令详情：/{meta.name}",
+        "",
+        f"描述：{meta.description or '暂无说明'}",
+        f"用法：{meta.usage or f'/{meta.name}'}",
+        f"示例：{meta.example or meta.usage or f'/{meta.name}'}",
+        f"权限：{_permission_label(meta.permission)}",
+        (
+            "限流："
+            f"user={rate_limit.user}s, admin={rate_limit.admin}s, superadmin={rate_limit.superadmin}s"
+        ),
+        f"别名：{aliases}",
+    ]
+    if doc_content:
+        lines.extend(["", "说明文档：", doc_content])
+    return "\n".join(lines)
+
+
+async def execute(args: list[str], context: CommandContext) -> None:
+    """处理 /help。"""
+    if not args:
+        await context.sender.send_group_message(
+            context.group_id, _format_command_list(context)
+        )
+        return
+
+    detail_text = _format_command_detail(_normalize_command_name(args[0]), context)
+    if detail_text is None:
+        await context.sender.send_group_message(
+            context.group_id,
+            f"❌ 未找到命令：{args[0]}\n请使用 /help 查看命令列表",
+        )
+        return
+    await context.sender.send_group_message(context.group_id, detail_text)
