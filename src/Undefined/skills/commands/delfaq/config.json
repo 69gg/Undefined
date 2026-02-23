@@ -4,7 +4,11 @@
   "usage": "/delfaq <ID>",
   "example": "/delfaq 20241205-001",
   "permission": "admin",
-  "rate_limit": "default",
+  "rate_limit": {
+    "user": 10,
+    "admin": 5,
+    "superadmin": 0
+  },
   "show_in_help": true,
   "order": 60,
   "aliases": []

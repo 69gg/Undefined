@@ -28,13 +28,18 @@ commands/
     "name": "example",
     "description": "指令描述信息",
     "permission": "public",
-    "rate_limit": "default",
+    "rate_limit": {
+        "user": 10,
+        "admin": 5,
+        "superadmin": 0
+    },
     "show_in_help": true,
     "order": 100,
     "aliases": ["ex", "examples"]
 }
 ```
 *提示： `permission` 可选 `public` / `admin` / `superadmin`。*
+*提示： `rate_limit` 单独指定各级使用者的独立调用冷却拦截秒级时间（0代表无限制）。*
 
 **handler.py 必须实现 `execute` 方法：**
 ```python

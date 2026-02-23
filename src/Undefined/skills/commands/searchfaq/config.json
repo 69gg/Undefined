@@ -4,7 +4,11 @@
   "usage": "/searchfaq <关键词>",
   "example": "/searchfaq 登录",
   "permission": "public",
-  "rate_limit": "default",
+  "rate_limit": {
+    "user": 10,
+    "admin": 5,
+    "superadmin": 0
+  },
   "show_in_help": true,
   "order": 50,
   "aliases": []

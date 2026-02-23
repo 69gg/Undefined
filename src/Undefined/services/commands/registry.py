@@ -17,6 +17,15 @@ CommandHandler = Callable[[list[str], CommandContext], Awaitable[None]]
 
 
 @dataclass
+class CommandRateLimit:
+    """命令限流规则（单位：秒，0表示无限制）"""
+
+    user: int = 10
+    admin: int = 5
+    superadmin: int = 0
+
+
+@dataclass
 class CommandMeta:
     """命令元信息。"""
 
@@ -25,7 +34,7 @@ class CommandMeta:
     usage: str
     example: str
     permission: str
-    rate_limit: str
+    rate_limit: CommandRateLimit
     show_in_help: bool
     order: int
     aliases: list[str]
@@ -120,7 +129,7 @@ class CommandRegistry:
                 "[CommandRegistry] 已注册命令: /%s permission=%s rate_limit=%s aliases=%s",
                 meta.name,
                 meta.permission,
-                meta.rate_limit,
+                f"U:{meta.rate_limit.user}s/A:{meta.rate_limit.admin}s/S:{meta.rate_limit.superadmin}s",
                 meta.aliases or "[]",
             )
             for alias in meta.aliases:
@@ -150,11 +159,26 @@ class CommandRegistry:
             return text
         return "public"
 
-    def _normalize_rate_limit(self, value: Any) -> str:
+    def _normalize_rate_limit(self, value: Any) -> CommandRateLimit:
+        if isinstance(value, dict):
+            try:
+                return CommandRateLimit(
+                    user=int(value.get("user", 10)),
+                    admin=int(value.get("admin", 5)),
+                    superadmin=int(value.get("superadmin", 0)),
+                )
+            except (ValueError, TypeError):
+                logger.warning(
+                    "[CommandRegistry] 命令限流配置解析失败，使用默认值: %s", value
+                )
+                return CommandRateLimit()
+
         text = str(value or "default").strip().lower()
-        if text in {"none", "default", "stats"}:
-            return text
-        return "default"
+        if text == "none":
+            return CommandRateLimit(user=0, admin=0, superadmin=0)
+        elif text == "stats":
+            return CommandRateLimit(user=3600, admin=0, superadmin=0)
+        return CommandRateLimit()
 
     def _normalize_aliases(self, value: Any) -> list[str]:
         if not isinstance(value, list):

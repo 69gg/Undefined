@@ -4,7 +4,11 @@
   "usage": "/help",
   "example": "/help",
   "permission": "public",
-  "rate_limit": "none",
+  "rate_limit": {
+    "user": 0,
+    "admin": 0,
+    "superadmin": 0
+  },
   "show_in_help": true,
   "order": 10,
   "aliases": []

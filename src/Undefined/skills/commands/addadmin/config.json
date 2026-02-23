@@ -4,7 +4,11 @@
   "usage": "/addadmin <QQ号>",
   "example": "/addadmin 123456789",
   "permission": "superadmin",
-  "rate_limit": "none",
+  "rate_limit": {
+    "user": 0,
+    "admin": 0,
+    "superadmin": 0
+  },
   "show_in_help": true,
   "order": 80,
   "aliases": []

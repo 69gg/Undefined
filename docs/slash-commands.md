@@ -104,13 +104,18 @@ src/Undefined/
     "name": "hello",
     "description": "向群里的盆友问个好",
     "permission": "admin",
-    "rate_limit": "default",
+    "rate_limit": {
+        "user": 10,
+        "admin": 5,
+        "superadmin": 0
+    },
     "show_in_help": true,
     "order": 100,
     "aliases": ["hi", "helloworld"]
 }
 ```
 *提示： `permission` 可选 `public` / `admin` / `superadmin`。*
+*提示： `rate_limit` 单独指定各级使用者的独立调用冷却拦截秒级时间（0代表无限制）。*
 
 #### B. 执行逻辑 (`handler.py`)
 ```python

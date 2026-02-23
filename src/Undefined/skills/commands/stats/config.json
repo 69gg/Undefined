@@ -4,7 +4,11 @@
   "usage": "/stats [时间范围]",
   "example": "/stats 7d",
   "permission": "public",
-  "rate_limit": "stats",
+  "rate_limit": {
+    "user": 3600,
+    "admin": 0,
+    "superadmin": 0
+  },
   "show_in_help": true,
   "order": 20,
   "aliases": []

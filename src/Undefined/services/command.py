@@ -862,50 +862,42 @@ class CommandDispatcher:
         sender_id: int,
     ) -> bool:
         rate_limit = command_meta.rate_limit
-        if rate_limit == "none":
-            logger.debug(
-                "[命令] 命令无需限流: cmd=/%s",
+
+        # 获取 rate_limiter 实例
+        limiter = self.rate_limiter
+        if limiter is None and hasattr(self.security, "rate_limiter"):
+            limiter = self.security.rate_limiter
+
+        if limiter is None:
+            logger.warning(
+                "[命令] 限流器缺失，跳过限流: cmd=/%s",
                 command_meta.name,
             )
             return True
 
-        if rate_limit == "stats":
-            if self.rate_limiter is None:
-                logger.warning(
-                    "[命令] stats 限流器缺失，跳过限流: cmd=/%s",
-                    command_meta.name,
-                )
-                return True
-            allowed, remaining = self.rate_limiter.check_stats(sender_id)
-            if not allowed:
+        allowed, remaining = limiter.check_command(
+            sender_id, command_meta.name, rate_limit
+        )
+        if not allowed:
+            if remaining >= 60:
                 minutes = remaining // 60
                 seconds = remaining % 60
                 time_str = f"{minutes}分{seconds}秒" if minutes > 0 else f"{seconds}秒"
-                await self.sender.send_group_message(
-                    group_id,
-                    f"⏳ /stats 命令太频繁，请 {time_str}后再试",
-                )
-                return False
-            self.rate_limiter.record_stats(sender_id)
-            logger.debug(
-                "[命令] stats 限流记录成功: cmd=/%s sender=%s",
-                command_meta.name,
-                sender_id,
-            )
-            return True
+            else:
+                time_str = f"{remaining}秒"
 
-        allowed, remaining = self.security.check_rate_limit(sender_id)
-        if not allowed:
             await self.sender.send_group_message(
                 group_id,
-                f"⏳ 操作太频繁，请 {remaining} 秒后再试",
+                f"⏳ /{command_meta.name} 命令太频繁，请 {time_str}后再试",
             )
             return False
-        self.security.record_rate_limit(sender_id)
+
+        limiter.record_command(sender_id, command_meta.name, rate_limit)
         logger.debug(
-            "[命令] 默认限流记录成功: cmd=/%s sender=%s",
+            "[命令] 动态限流记录成功: cmd=/%s sender=%s limits=%s",
             command_meta.name,
             sender_id,
+            f"U:{rate_limit.user}/A:{rate_limit.admin}",
         )
         return True
 

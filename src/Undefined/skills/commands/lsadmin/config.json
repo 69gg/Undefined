@@ -4,7 +4,11 @@
   "usage": "/lsadmin",
   "example": "/lsadmin",
   "permission": "public",
-  "rate_limit": "none",
+  "rate_limit": {
+    "user": 0,
+    "admin": 0,
+    "superadmin": 0
+  },
   "show_in_help": true,
   "order": 70,
   "aliases": []
