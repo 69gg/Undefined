@@ -284,6 +284,9 @@ class CognitiveService:
             where_clauses.append({"user_id": user_id})
         if sender_id:
             where_clauses.append({"sender_id": sender_id})
+        request_type = str(kwargs.get("request_type") or "").strip()
+        if request_type:
+            where_clauses.append({"request_type": request_type})
 
         time_from_epoch = _parse_iso_to_epoch_seconds(kwargs.get("time_from"))
         time_to_epoch = _parse_iso_to_epoch_seconds(kwargs.get("time_to"))
