@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "list",
-        "description": "列出所有保存的记忆及其 UUID。当你需要 update 或 delete 时，应先调用此工具查找对应的 UUID。",
+        "description": "列出所有手动长期记忆（memory 系列）及其 UUID。当你需要 memory.update 或 memory.delete 时，应先调用此工具查找对应 UUID。该列表不包含认知记忆事件/侧写。",
         "parameters": {
             "type": "object",
             "properties": {}

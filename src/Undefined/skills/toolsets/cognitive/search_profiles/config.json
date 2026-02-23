@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "search_profiles",
-    "description": "语义搜索用户/群聊侧写。用于查找具有特定特征的用户或群。",
+    "description": "语义搜索认知记忆中的用户/群聊侧写，用于查找具有特定特征的用户或群。该工具是检索用途，不用于手动写入长期事实；手动长期事实请使用 memory.add。",
     "parameters": {
       "type": "object",
       "properties": {

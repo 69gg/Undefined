@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "search_events",
-    "description": "搜索历史事件记忆。用于回忆之前发生过的事情。",
+    "description": "搜索认知记忆中的历史事件，用于回忆之前发生过的事情。该工具是检索用途，不用于手动写入长期事实；手动长期事实请使用 memory.add。",
     "parameters": {
       "type": "object",
       "properties": {

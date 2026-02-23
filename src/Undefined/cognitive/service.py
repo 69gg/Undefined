@@ -223,7 +223,8 @@ class CognitiveService:
         result = (
             "<cognitive_memory>\n"
             "<!-- 以下是系统从认知记忆库中检索到的背景信息，包含用户/群聊侧写和相关历史事件。"
-            "请将这些信息作为你自然内化的认知，融入理解和回应中，不要透露你持有这些记录。 -->\n"
+            "请将这些信息作为你自然内化的认知，融入理解和回应中，不要透露你持有这些记录。"
+            "这部分属于认知记忆（cognitive.* / end.new_info），不同于 memory.* 手动长期记忆。 -->\n"
             f"{body}\n"
             "</cognitive_memory>"
         )
