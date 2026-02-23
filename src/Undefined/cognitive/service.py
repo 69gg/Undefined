@@ -3,11 +3,35 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from Undefined.context import RequestContext
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_iso_to_epoch_seconds(value: Any) -> int | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp())
+
+
+def _compose_where(clauses: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not clauses:
+        return None
+    if len(clauses) == 1:
+        return clauses[0]
+    return {"$and": clauses}
 
 
 class CognitiveService:
@@ -41,9 +65,9 @@ class CognitiveService:
             logger.info("[认知服务] action_summary/new_info 均为空，跳过入队")
             return None
         ctx = RequestContext.current()
-        from datetime import datetime, timezone
 
         now = datetime.now().astimezone()
+        now_utc = datetime.now(timezone.utc)
         safe_request_id = (
             str(ctx.request_id)
             if ctx and str(ctx.request_id or "").strip()
@@ -123,8 +147,9 @@ class CognitiveService:
             "sender_name": sender_name,
             "group_name": group_name,
             "request_type": request_type,
-            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "timestamp_utc": now_utc.isoformat(),
             "timestamp_local": now.isoformat(),
+            "timestamp_epoch": int(now_utc.timestamp()),
             "timezone": str(now.tzinfo or ""),
             "location_abs": str(
                 context.get("group_name") or context.get("sender_name") or ""
@@ -207,6 +232,14 @@ class CognitiveService:
             where=where,
             reranker=self._reranker,
             candidate_multiplier=config.rerank_candidate_multiplier,
+            time_decay_enabled=bool(getattr(config, "time_decay_enabled", True)),
+            time_decay_half_life_days=float(
+                getattr(config, "time_decay_half_life_days_auto", 14.0)
+            ),
+            time_decay_boost=float(getattr(config, "time_decay_boost", 0.2)),
+            time_decay_min_similarity=float(
+                getattr(config, "time_decay_min_similarity", 0.35)
+            ),
         )
         if events:
             event_lines = "\n".join(
@@ -237,19 +270,58 @@ class CognitiveService:
 
     async def search_events(self, query: str, **kwargs: Any) -> list[dict[str, Any]]:
         config = self._config_getter()
-        where: dict[str, Any] | None = None
-        if "group_id" in kwargs or "user_id" in kwargs:
-            where = {
-                k: v
-                for k, v in kwargs.items()
-                if k in ("group_id", "user_id", "sender_id") and v
-            }
-        top_k = kwargs.get("top_k", 5)
+        group_id = str(
+            kwargs.get("group_id") or kwargs.get("target_group_id") or ""
+        ).strip()
+        user_id = str(
+            kwargs.get("user_id") or kwargs.get("target_user_id") or ""
+        ).strip()
+        sender_id = str(kwargs.get("sender_id") or "").strip()
+        where_clauses: list[dict[str, Any]] = []
+        if group_id:
+            where_clauses.append({"group_id": group_id})
+        if user_id:
+            where_clauses.append({"user_id": user_id})
+        if sender_id:
+            where_clauses.append({"sender_id": sender_id})
+
+        time_from_epoch = _parse_iso_to_epoch_seconds(kwargs.get("time_from"))
+        time_to_epoch = _parse_iso_to_epoch_seconds(kwargs.get("time_to"))
+        if (
+            time_from_epoch is not None
+            and time_to_epoch is not None
+            and time_from_epoch > time_to_epoch
+        ):
+            logger.warning(
+                "[认知服务] search_events 时间范围反转，已自动交换: time_from=%s time_to=%s",
+                kwargs.get("time_from"),
+                kwargs.get("time_to"),
+            )
+            time_from_epoch, time_to_epoch = time_to_epoch, time_from_epoch
+        if time_from_epoch is not None or time_to_epoch is not None:
+            time_filter: dict[str, Any] = {}
+            if time_from_epoch is not None:
+                time_filter["$gte"] = time_from_epoch
+            if time_to_epoch is not None:
+                time_filter["$lte"] = time_to_epoch
+            where_clauses.append({"timestamp_epoch": time_filter})
+
+        where = _compose_where(where_clauses)
+        default_top_k = getattr(config, "tool_default_top_k", 12)
+        top_k_raw = kwargs.get("top_k", default_top_k)
+        try:
+            top_k = int(top_k_raw)
+        except Exception:
+            top_k = default_top_k
+        if top_k <= 0:
+            top_k = default_top_k
         logger.info(
-            "[认知服务] 搜索事件: query_len=%s top_k=%s where=%s",
+            "[认知服务] 搜索事件: query_len=%s top_k=%s where=%s time_from=%s time_to=%s",
             len(query or ""),
             top_k,
             where or {},
+            time_from_epoch,
+            time_to_epoch,
         )
         results: list[dict[str, Any]] = await self._vector_store.query_events(
             query,
@@ -257,6 +329,14 @@ class CognitiveService:
             where=where or None,
             reranker=self._reranker,
             candidate_multiplier=config.rerank_candidate_multiplier,
+            time_decay_enabled=bool(getattr(config, "time_decay_enabled", True)),
+            time_decay_half_life_days=float(
+                getattr(config, "time_decay_half_life_days_tool", 60.0)
+            ),
+            time_decay_boost=float(getattr(config, "time_decay_boost", 0.2)),
+            time_decay_min_similarity=float(
+                getattr(config, "time_decay_min_similarity", 0.35)
+            ),
         )
         logger.info("[认知服务] 搜索事件完成: count=%s", len(results))
         return results

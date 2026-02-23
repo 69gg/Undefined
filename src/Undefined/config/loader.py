@@ -2035,6 +2035,28 @@ class Config:
                 q.get("recent_end_summaries_inject_k") if isinstance(q, dict) else None,
                 30,
             ),
+            time_decay_enabled=_coerce_bool(
+                q.get("time_decay_enabled") if isinstance(q, dict) else None, True
+            ),
+            time_decay_half_life_days_auto=_coerce_float(
+                q.get("time_decay_half_life_days_auto")
+                if isinstance(q, dict)
+                else None,
+                14.0,
+            ),
+            time_decay_half_life_days_tool=_coerce_float(
+                q.get("time_decay_half_life_days_tool")
+                if isinstance(q, dict)
+                else None,
+                60.0,
+            ),
+            time_decay_boost=_coerce_float(
+                q.get("time_decay_boost") if isinstance(q, dict) else None, 0.2
+            ),
+            time_decay_min_similarity=_coerce_float(
+                q.get("time_decay_min_similarity") if isinstance(q, dict) else None,
+                0.35,
+            ),
             tool_default_top_k=_coerce_int(
                 q.get("tool_default_top_k") if isinstance(q, dict) else None, 12
             ),

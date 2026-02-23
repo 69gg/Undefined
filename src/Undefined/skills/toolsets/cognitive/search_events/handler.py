@@ -9,7 +9,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         query=args["query"],
         target_user_id=args.get("target_user_id"),
         target_group_id=args.get("target_group_id"),
-        top_k=args.get("top_k", 12),
+        top_k=args.get("top_k"),
         time_from=args.get("time_from"),
         time_to=args.get("time_to"),
     )

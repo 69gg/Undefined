@@ -107,10 +107,30 @@ processing/{job_id}.json
 | `sender_id` | 实际发送者 ID |
 | `timestamp_utc` | UTC 时间（ISO 格式） |
 | `timestamp_local` | 本地时间（Asia/Shanghai） |
+| `timestamp_epoch` | UTC Unix 时间戳（秒，供时间范围过滤与衰减加权） |
 | `request_type` | `group` 或 `private` |
 | `perspective` | 记录视角（如 `group` / `sender` / `global`） |
 | `is_absolute` | 是否通过绝对化闸门 |
 | `schema_version` | 数据版本（`final_v1`） |
+
+### 检索排序策略（events）
+
+事件检索采用两段式排序，兼顾语义相关性与时间新近性：
+
+1. 语义召回（可选 rerank）得到候选集合；
+2. 在候选集合上按时间衰减加权重排后再截断到 `top_k`。
+
+加权公式：
+
+```text
+sim = clamp(1 - distance, 0, 1)
+decay = 0.5 ^ (age_seconds / half_life_seconds)
+final_score = sim × (1 + boost × decay)
+```
+
+- 仅当 `sim >= time_decay_min_similarity` 时才施加时间加权，防止“新但不相关”的结果上浮。
+- `half_life_seconds = time_decay_half_life_days × 86400`。
+- `time_from/time_to` 为硬过滤条件，先过滤再排序。
 
 ### 用户/群侧写（Markdown + YAML Frontmatter）
 
@@ -181,6 +201,12 @@ data/cognitive/
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `auto_top_k` | int | `3` | 每轮自动注入的相关事件条数（支持热更新） |
+| `recent_end_summaries_inject_k` | int | `30` | 认知模式下额外注入最近 N 条 end 行动摘要（短期工作记忆，带时间；0=禁用，支持热更新） |
+| `time_decay_enabled` | bool | `true` | 是否启用事件检索时间衰减加权（支持热更新） |
+| `time_decay_half_life_days_auto` | float | `14.0` | 自动注入场景半衰期（天，支持热更新） |
+| `time_decay_half_life_days_tool` | float | `60.0` | 工具检索场景半衰期（天，支持热更新） |
+| `time_decay_boost` | float | `0.2` | 时间加权强度（支持热更新） |
+| `time_decay_min_similarity` | float | `0.35` | 启用时间加权的最低语义相似度阈值（支持热更新） |
 | `tool_default_top_k` | int | `12` | `cognitive.search_events` 默认返回条数（支持热更新） |
 | `profile_top_k` | int | `8` | `cognitive.search_profiles` 默认返回条数（支持热更新） |
 | `rerank_candidate_multiplier` | int | `3` | 重排候选倍数（必须 >= 2，否则跳过重排；候选数 = top_k × multiplier） |
@@ -245,16 +271,21 @@ data/cognitive/
 
 ### cognitive.search_events
 
-搜索历史事件记忆，用于回忆之前发生过的事情。
+搜索历史事件记忆，用于回忆之前发生过的事情（支持时间范围硬过滤 + 时间衰减加权排序）。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `query` | string | 是 | 搜索关键词或语义描述 |
 | `target_user_id` | string | 否 | 限定用户 ID |
 | `target_group_id` | string | 否 | 限定群 ID |
-| `top_k` | integer | 否 | 返回条数（默认 12） |
+| `top_k` | integer | 否 | 返回条数（默认使用 `cognitive.query.tool_default_top_k`） |
 | `time_from` | string | 否 | 起始时间（ISO 格式） |
 | `time_to` | string | 否 | 截止时间（ISO 格式） |
+
+说明：
+
+- `time_from` / `time_to` 生效于服务端 where 过滤（非 prompt 层软约束）。
+- 当 `time_from > time_to` 时，系统会自动交换并记录 warning 日志，避免空结果误用。
 
 ### cognitive.get_profile
 

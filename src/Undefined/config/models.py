@@ -134,6 +134,11 @@ class CognitiveConfig:
     # When cognitive is enabled, also inject last N end action summaries as short-term working memory.
     # 0 disables this injection.
     recent_end_summaries_inject_k: int = 30
+    time_decay_enabled: bool = True
+    time_decay_half_life_days_auto: float = 14.0
+    time_decay_half_life_days_tool: float = 60.0
+    time_decay_boost: float = 0.2
+    time_decay_min_similarity: float = 0.35
     tool_default_top_k: int = 12
     profile_top_k: int = 8
     rewrite_max_retry: int = 2
