@@ -8,13 +8,18 @@
 5. `action_summary` 可能为空；为空时以 `new_info` 和上下文为主
 6. `new_info` 代表当前消息提取到的一条新记忆（可能是多条中的一条），优先保证可追溯性
 
+称呼规则：
+- bot 自身统一称为「{bot_name}」
+- 其他用户：有昵称时用「昵称(QQ号)」格式（如「{sender_name}({sender_id})」），无昵称时用「UID:{sender_id}」
+- 群聊：有群名时用「群名(群号)」格式（如「{group_name}({group_id})」），无群名时用「GID:{group_id}」
+
 上下文信息：
 - request_id: {request_id}
 - end_seq: {end_seq}
 - 时间：{timestamp_local}（{timezone}）
-- 用户：{user_id}
-- 群聊：{group_id}（如有）
-- 发送者：{sender_id}
+- bot: {bot_name}
+- 用户：{sender_name}({sender_id})
+- 群聊：{group_name}({group_id})（如有）
 - message_ids: {message_ids}
 - perspective: {perspective}
 - profile_targets: {profile_targets}

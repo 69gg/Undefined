@@ -138,6 +138,8 @@ class CognitiveService:
                         }
                     )
 
+        bot_name = str(self._config_getter().bot_name or "Undefined").strip()
+
         job: dict[str, Any] = {
             "request_id": safe_request_id,
             "end_seq": end_seq,
@@ -146,6 +148,7 @@ class CognitiveService:
             "sender_id": sender_id,
             "sender_name": sender_name,
             "group_name": group_name,
+            "bot_name": bot_name,
             "request_type": request_type,
             "timestamp_utc": now_utc.isoformat(),
             "timestamp_local": now.isoformat(),

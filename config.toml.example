@@ -631,6 +631,9 @@ password = "changeme"
 # zh: 是否启用认知记忆系统。
 # en: Enable cognitive memory system.
 enabled = true
+# zh: 史官改写时 bot 自身的称呼（仅影响认知记忆中的事件文本，不影响主提示词）。
+# en: Bot's display name used by the historian when rewriting events (does not affect the main prompt).
+bot_name = "Undefined"
 
 [cognitive.vector_store]
 # zh: ChromaDB 向量数据库存储路径。

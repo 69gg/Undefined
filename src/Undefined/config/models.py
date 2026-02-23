@@ -127,6 +127,8 @@ class CognitiveConfig:
     """认知记忆系统配置"""
 
     enabled: bool = True
+    # 史官改写时 bot 自身的称呼（仅影响认知记忆事件文本，不影响主提示词）
+    bot_name: str = "Undefined"
     vector_store_path: str = "data/cognitive/chromadb"
     queue_path: str = "data/cognitive/queues"
     profiles_path: str = "data/cognitive/profiles"
