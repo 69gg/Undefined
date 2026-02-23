@@ -2031,6 +2031,10 @@ class Config:
             auto_top_k=_coerce_int(
                 q.get("auto_top_k") if isinstance(q, dict) else None, 3
             ),
+            recent_end_summaries_inject_k=_coerce_int(
+                q.get("recent_end_summaries_inject_k") if isinstance(q, dict) else None,
+                30,
+            ),
             tool_default_top_k=_coerce_int(
                 q.get("tool_default_top_k") if isinstance(q, dict) else None, 12
             ),

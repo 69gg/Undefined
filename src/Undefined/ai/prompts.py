@@ -249,6 +249,22 @@ class PromptBuilder:
         if self._cognitive_service and getattr(
             self._cognitive_service, "enabled", False
         ):
+            recent_action_inject_k = 30
+            if self._runtime_config_getter is not None:
+                try:
+                    runtime_config = self._runtime_config_getter()
+                    cog_cfg = getattr(runtime_config, "cognitive", None)
+                    if cog_cfg is not None and hasattr(
+                        cog_cfg, "recent_end_summaries_inject_k"
+                    ):
+                        recent_action_inject_k = int(
+                            getattr(cog_cfg, "recent_end_summaries_inject_k")
+                        )
+                except Exception:
+                    pass
+            if recent_action_inject_k < 0:
+                recent_action_inject_k = 0
+
             ctx = RequestContext.current()
             resolved_group_id = (
                 str(ctx.group_id)
@@ -294,6 +310,41 @@ class PromptBuilder:
                 )
             else:
                 logger.info("[AI会话] 自动检索完成：未命中可注入认知记忆")
+
+            # 额外注入最近 end 行动记录，作为短期“工作记忆”，弥补史官异步入库延迟与向量检索的漏召回。
+            if recent_action_inject_k > 0 and self._end_summaries:
+                items = list(self._end_summaries)[-recent_action_inject_k:]
+                recent_summary_lines: list[str] = []
+                for item in items:
+                    location_text = ""
+                    location = item.get("location")
+                    if isinstance(location, dict):
+                        location_type = location.get("type")
+                        location_name = location.get("name")
+                        if (
+                            location_type in {"private", "group"}
+                            and isinstance(location_name, str)
+                            and location_name.strip()
+                        ):
+                            location_text = (
+                                f" ({location_type}: {location_name.strip()})"
+                            )
+                    recent_summary_lines.append(
+                        f"- [{item.get('timestamp', '')}] {item.get('summary', '')}{location_text}"
+                    )
+                recent_summary_text = "\n".join(recent_summary_lines).strip()
+                if recent_summary_text:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                f"【短期行动记录（最近 {len(items)} 条，带时间）】\n"
+                                f"{recent_summary_text}\n\n"
+                                "注意：以上是你最近在 end 时记录的行动摘要，用于保持短期连续性。"
+                                "它可能与认知记忆事件存在重复；优先以更具体、更近期的描述为准。"
+                            ),
+                        }
+                    )
         elif self._end_summaries:
             summary_lines: list[str] = []
             for item in self._end_summaries:
