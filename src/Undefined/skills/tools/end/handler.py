@@ -11,25 +11,6 @@ from Undefined.end_summary_storage import (
 )
 
 logger = logging.getLogger(__name__)
-_OUTBOUND_ACTION_HINTS = (
-    "send_message",
-    "send_private_message",
-    "send_poke",
-    "发送",
-    "回复",
-    "回了",
-    "发了",
-)
-_NEGATIVE_OUTBOUND_HINTS = (
-    "未发送",
-    "没发送",
-    "未回复",
-    "没回复",
-    "未发",
-    "没发",
-    "无需发送",
-)
-
 
 _TRUE_BOOL_TOKENS = {"1", "true", "yes", "y", "on"}
 _FALSE_BOOL_TOKENS = {"0", "false", "no", "n", "off", ""}
@@ -102,15 +83,6 @@ def _build_location(context: Dict[str, Any]) -> EndSummaryLocation | None:
     return None
 
 
-def _action_summary_requires_message_sent(summary: str) -> bool:
-    text = str(summary or "").strip().lower()
-    if not text:
-        return False
-    if any(hint in text for hint in _NEGATIVE_OUTBOUND_HINTS):
-        return False
-    return any(hint in text for hint in _OUTBOUND_ACTION_HINTS)
-
-
 def _build_record_key(
     context: Dict[str, Any],
     *,
@@ -168,19 +140,18 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "对话已结束（重复记录已跳过）"
     context["_end_last_record_key"] = record_key
 
-    # 仅在 action_summary 明确表示“已发送/已回复”时，执行发送一致性检查。
-    if summary and not force and _action_summary_requires_message_sent(summary):
-        message_sent = _was_message_sent_this_turn(context)
-        if not message_sent:
-            logger.warning(
-                "[end工具] 拒绝执行：action_summary 声称已发送但本轮未发送消息，request_id=%s",
-                context.get("request_id", "-"),
-            )
-            return (
-                "拒绝结束对话：action_summary 声称已发送消息，但本轮未发送任何消息或媒体内容。"
-                "请先发送消息给用户，或者如果确实不需要发送，请使用 force=true 参数强制结束。"
-                "如果你本轮没有发送消息，请改写 action_summary 为真实动作。"
-            )
+    # action_summary 非空且本轮未发送消息时拒绝（force=true 可跳过）
+    if summary and not force and not _was_message_sent_this_turn(context):
+        logger.warning(
+            "[end工具] 拒绝执行：本轮未发送消息，request_id=%s",
+            context.get("request_id", "-"),
+        )
+        return (
+            "拒绝结束对话：你填写了 action_summary（本轮行动记录）但本轮未发送任何消息或媒体内容。"
+            "请先发送消息给用户，或使用 force=true 强制结束。"
+            "若本轮确实未做任何事，建议留空 action_summary 以避免记忆噪声。"
+            "若你获取到了新信息，考虑填写 new_info 字段以保存这些信息，而不是放在 action_summary 里。"
+        )
 
     if summary:
         location = _build_location(context)
