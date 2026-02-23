@@ -16,6 +16,7 @@ _PRONOUN_RE = re.compile(
 )
 _REL_TIME_RE = re.compile(r"(今天|昨天|明天|刚才|刚刚|稍后|上周|下周|最近)")
 _REL_PLACE_RE = re.compile(r"(这里|那边|本地|当地|这儿|那儿)")
+_ID_RE = re.compile(r"(?<!\d)(\d{5,12})(?!\d)")
 _MAX_LOG_PREVIEW_LEN = 200
 _MAX_HIT_VALUES_PER_PATTERN = 5
 
@@ -78,6 +79,22 @@ def _collect_unique_hits(
     seen: set[str] = set()
     for match in pattern.finditer(text):
         value = match.group(0)
+        if value in seen:
+            continue
+        seen.add(value)
+        found.append(value)
+        if len(found) >= limit:
+            break
+    return found
+
+
+def _collect_unique_id_hits(
+    text: str, *, limit: int = _MAX_HIT_VALUES_PER_PATTERN
+) -> list[str]:
+    found: list[str] = []
+    seen: set[str] = set()
+    for match in _ID_RE.finditer(str(text or "")):
+        value = match.group(1)
         if value in seen:
             continue
         seen.add(value)
@@ -230,28 +247,52 @@ class HistorianWorker:
         config = self._config_getter()
         canonical = await self._rewrite(job, job_id=job_id, attempt=1)
         is_absolute = True
+        must_keep_ids = self._collect_source_entity_ids(job)
         for attempt in range(config.rewrite_max_retry + 1):
             hit_detail = self._collect_regex_hits(canonical)
-            if not any(hit_detail.values()):
+            entity_drift_ids = self._collect_entity_id_drift(
+                job, canonical, must_keep_ids=must_keep_ids
+            )
+            if not any(hit_detail.values()) and not entity_drift_ids:
                 break
             if attempt < config.rewrite_max_retry:
                 logger.warning(
-                    "[史官] 任务 %s 绝对化闸门命中 (%s/%s): pronoun=%s rel_time=%s rel_place=%s preview=%s",
+                    "[史官] 任务 %s 绝对化闸门命中 (%s/%s): pronoun=%s rel_time=%s rel_place=%s id_drift=%s preview=%s",
                     job_id,
                     attempt + 1,
                     config.rewrite_max_retry + 1,
                     hit_detail["pronoun"],
                     hit_detail["relative_time"],
                     hit_detail["relative_place"],
+                    entity_drift_ids,
                     _preview_text(canonical),
                 )
-                canonical = await self._rewrite(job, job_id=job_id, attempt=attempt + 2)
+                canonical = await self._rewrite(
+                    job,
+                    job_id=job_id,
+                    attempt=attempt + 2,
+                    must_keep_entity_ids=entity_drift_ids,
+                )
             else:
                 is_absolute = False
+                if entity_drift_ids:
+                    fallback_text = (
+                        str(job.get("new_info", "")).strip()
+                        or str(job.get("action_summary", "")).strip()
+                    )
+                    if fallback_text:
+                        logger.warning(
+                            "[史官] 任务 %s 实体ID漂移未修复，回退使用原始摘要: ids=%s preview=%s",
+                            job_id,
+                            entity_drift_ids,
+                            _preview_text(fallback_text),
+                        )
+                        canonical = fallback_text
                 logger.warning(
-                    "[史官] 任务 %s 绝对化失败，降级写入: final_hits=%s preview=%s",
+                    "[史官] 任务 %s 绝对化失败，降级写入: final_hits=%s id_drift=%s preview=%s",
                     job_id,
                     hit_detail,
+                    entity_drift_ids,
                     _preview_text(canonical),
                 )
         return canonical, is_absolute
@@ -352,6 +393,46 @@ class HistorianWorker:
             "relative_place": _collect_unique_hits(_REL_PLACE_RE, content),
         }
 
+    def _collect_source_entity_ids(self, job: dict[str, Any]) -> list[str]:
+        source_parts = [
+            str(job.get("action_summary", "")),
+            str(job.get("new_info", "")),
+        ]
+        source_ids = _collect_unique_id_hits(" ".join(source_parts), limit=50)
+        if not source_ids:
+            return []
+
+        context_ids: set[str] = set()
+        for key in ("sender_id", "user_id", "group_id"):
+            value = str(job.get(key, "")).strip()
+            if value:
+                context_ids.update(_collect_unique_id_hits(value, limit=50))
+        message_ids = job.get("message_ids", [])
+        if isinstance(message_ids, list):
+            for value in message_ids:
+                text = str(value).strip()
+                if text:
+                    context_ids.update(_collect_unique_id_hits(text, limit=50))
+
+        return [sid for sid in source_ids if sid not in context_ids]
+
+    def _collect_entity_id_drift(
+        self,
+        job: dict[str, Any],
+        canonical: str,
+        *,
+        must_keep_ids: list[str] | None = None,
+    ) -> list[str]:
+        required_ids = (
+            must_keep_ids
+            if must_keep_ids is not None
+            else self._collect_source_entity_ids(job)
+        )
+        if not required_ids:
+            return []
+        canonical_ids = set(_collect_unique_id_hits(canonical, limit=50))
+        return [eid for eid in required_ids if eid not in canonical_ids]
+
     def _extract_required_tool_args(
         self,
         response: dict[str, Any],
@@ -423,7 +504,12 @@ class HistorianWorker:
         return args
 
     async def _rewrite(
-        self, job: dict[str, Any], *, job_id: str = "", attempt: int = 1
+        self,
+        job: dict[str, Any],
+        *,
+        job_id: str = "",
+        attempt: int = 1,
+        must_keep_entity_ids: list[str] | None = None,
     ) -> str:
         from Undefined.utils.resources import read_text_resource
 
@@ -463,6 +549,14 @@ class HistorianWorker:
         )
 
         template = read_text_resource("res/prompts/historian_rewrite.md")
+        source_message = str(job.get("source_message", "")).strip()
+        recent_messages_raw = job.get("recent_messages", [])
+        recent_messages: list[str] = []
+        if isinstance(recent_messages_raw, list):
+            recent_messages = [
+                str(item).strip() for item in recent_messages_raw if str(item).strip()
+            ]
+        recent_messages_text = "\n".join(f"- {line}" for line in recent_messages)
         prompt = template.format(
             request_id=job.get("request_id", ""),
             end_seq=job.get("end_seq", 0),
@@ -479,7 +573,18 @@ class HistorianWorker:
             profile_targets=profile_targets_text,
             action_summary=action_summary,
             new_info=new_info,
+            source_message=source_message or "（无）",
+            recent_messages=recent_messages_text or "（无）",
         )
+        if must_keep_entity_ids:
+            unique_ids = [sid for sid in must_keep_entity_ids if str(sid).strip()]
+            if unique_ids:
+                prompt += (
+                    "\n\n额外硬约束（本轮必须满足）：\n"
+                    "- 以下实体ID在原始摘要中已显式出现，改写结果必须原样保留，不得改写为 sender_id 或其他ID：\n"
+                    f"- must_keep_entity_ids: {', '.join(unique_ids)}\n"
+                    "- 若无法判断昵称，请至少保留对应的数字ID。"
+                )
         response = await self._ai_client.submit_background_llm_call(
             model_config=self._model_config or self._ai_client.agent_config,
             messages=[{"role": "user", "content": prompt}],
@@ -683,6 +788,15 @@ class HistorianWorker:
             end_seq=_escape_braces(str(job.get("end_seq", 0))),
             message_ids=_escape_braces(", ".join(message_ids) if message_ids else "[]"),
             action_summary=_escape_braces(str(job.get("action_summary", ""))),
+            source_message=_escape_braces(str(job.get("source_message", ""))),
+            recent_messages=_escape_braces(
+                "\n".join(
+                    f"- {str(item).strip()}"
+                    for item in (job.get("recent_messages", []) or [])
+                    if str(item).strip()
+                )
+                or "（无）"
+            ),
         )
 
         response = await self._ai_client.submit_background_llm_call(

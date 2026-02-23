@@ -131,7 +131,15 @@ auto_top_k = 3          # 每次对话自动根据语义召回匹配的前 3 条
 # 其他高阶设定包括：
 # time_decay_enabled = true （按时间衰减修正记忆权重）
 # time_decay_half_life_days_auto = 14.0 （半衰期）
+
+[cognitive.historian]
+rewrite_max_retry = 2               # 绝对化改写失败时的最大重试次数
+recent_messages_inject_k = 12       # 提供给史官的最近消息参考条数（0=禁用）
+recent_message_line_max_len = 240   # 每条最近消息参考的最大长度
+source_message_max_len = 800        # 当前触发消息原文的最大长度
 ```
+
+以上 `cognitive.historian.*` 参数支持热更新，可在不中断服务的情况下微调史官上下文密度。
 
 ---
 

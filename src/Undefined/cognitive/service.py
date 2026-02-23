@@ -107,6 +107,13 @@ class CognitiveService:
         )
         sender_name = str(context.get("sender_name") or "").strip()
         group_name = str(context.get("group_name") or "").strip()
+        source_message = str(context.get("historian_source_message") or "").strip()
+        recent_messages_raw = context.get("historian_recent_messages", [])
+        recent_messages: list[str] = []
+        if isinstance(recent_messages_raw, list):
+            recent_messages = [
+                str(item).strip() for item in recent_messages_raw if str(item).strip()
+            ]
 
         profile_targets: list[dict[str, str]] = []
         if has_new_info:
@@ -164,9 +171,11 @@ class CognitiveService:
             "perspective": perspective,
             "profile_targets": profile_targets,
             "schema_version": "final_v1",
+            "source_message": source_message,
+            "recent_messages": recent_messages,
         }
         logger.info(
-            "[认知服务] 准备入队: request_id=%s end_seq=%s user=%s group=%s sender=%s perspective=%s has_new_info=%s profile_targets=%s action_len=%s new_info_len=%s",
+            "[认知服务] 准备入队: request_id=%s end_seq=%s user=%s group=%s sender=%s perspective=%s has_new_info=%s profile_targets=%s action_len=%s new_info_len=%s source_len=%s recent_ref=%s",
             job.get("request_id", ""),
             job.get("end_seq", 0),
             job.get("user_id", ""),
@@ -177,6 +186,8 @@ class CognitiveService:
             len(profile_targets),
             len(action_summary_text),
             len(new_info_items),
+            len(source_message),
+            len(recent_messages),
         )
         result: str | None = await self._job_queue.enqueue(job)
         logger.info("[认知服务] 入队完成: job_id=%s", result or "")
@@ -202,8 +213,8 @@ class CognitiveService:
             getattr(config, "auto_top_k", 5),
         )
 
-        # 用户侧写
-        uid = user_id or sender_id
+        # 用户侧写（优先 sender_id，与 enqueue_job 写入侧一致）
+        uid = sender_id or user_id
         if uid:
             profile = await self._profile_storage.read_profile("user", uid)
             if profile:

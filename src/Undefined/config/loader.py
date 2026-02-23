@@ -2069,6 +2069,22 @@ class Config:
             rewrite_max_retry=_coerce_int(
                 hist.get("rewrite_max_retry") if isinstance(hist, dict) else None, 2
             ),
+            historian_recent_messages_inject_k=_coerce_int(
+                hist.get("recent_messages_inject_k")
+                if isinstance(hist, dict)
+                else None,
+                12,
+            ),
+            historian_recent_message_line_max_len=_coerce_int(
+                hist.get("recent_message_line_max_len")
+                if isinstance(hist, dict)
+                else None,
+                240,
+            ),
+            historian_source_message_max_len=_coerce_int(
+                hist.get("source_message_max_len") if isinstance(hist, dict) else None,
+                800,
+            ),
             poll_interval_seconds=_coerce_float(
                 hist.get("poll_interval_seconds") if isinstance(hist, dict) else None,
                 1.0,

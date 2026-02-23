@@ -152,3 +152,10 @@ class CognitiveConfig:
     failed_cleanup_interval: int = 100
     rerank_candidate_multiplier: int = 3
     job_max_retries: int = 3
+    # Historian reference context shaping.
+    # Number of recent messages attached to historian jobs for disambiguation.
+    historian_recent_messages_inject_k: int = 12
+    # Max characters per recent message line attached to historian jobs.
+    historian_recent_message_line_max_len: int = 240
+    # Max characters for the current source message attached to historian jobs.
+    historian_source_message_max_len: int = 800

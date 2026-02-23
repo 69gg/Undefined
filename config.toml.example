@@ -676,6 +676,15 @@ rerank_candidate_multiplier = 3
 # zh: 记忆改写最大重试次数。
 # en: Max retries for memory rewrite.
 rewrite_max_retry = 2
+# zh: 提供给史官的最近消息参考条数（用于实体消歧）；0=禁用。
+# en: Number of recent message references for historian disambiguation; 0 disables.
+recent_messages_inject_k = 12
+# zh: 最近消息参考中每条消息的最大字符数（超出会截断）。
+# en: Max characters per recent message reference line (truncated when exceeded).
+recent_message_line_max_len = 240
+# zh: 触发本轮的“当前消息原文”最大字符数（超出会截断）。
+# en: Max characters of the current source message attached to historian jobs.
+source_message_max_len = 800
 # zh: 队列轮询间隔（秒）。
 # en: Queue poll interval (seconds).
 poll_interval_seconds = 1.0

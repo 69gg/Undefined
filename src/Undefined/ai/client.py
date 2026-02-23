@@ -817,9 +817,13 @@ class AIClient:
         )
         tool_context.setdefault("send_message_callback", send_message_callback)
         tool_context.setdefault("sender", sender)
+        tool_context.setdefault("history_manager", history_manager)
+        tool_context.setdefault("onebot_client", onebot_client)
+        tool_context.setdefault("scheduler", scheduler)
         tool_context.setdefault("send_image_callback", self._send_image_callback)
         tool_context.setdefault("knowledge_manager", self._knowledge_manager)
         tool_context.setdefault("cognitive_service", self._cognitive_service)
+        tool_context.setdefault("current_question", question)
         message_ids = tool_context.get("message_ids")
         if not isinstance(message_ids, list):
             message_ids = []

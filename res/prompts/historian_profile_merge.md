@@ -25,6 +25,9 @@
 - sender_name: {sender_name}
 - message_ids: {message_ids}
 - action_summary: {action_summary}
+- 当前消息原文: {source_message}
+- 最近消息参考:
+{recent_messages}
 
 当前侧写：
 {current_profile}
