@@ -1,0 +1,15 @@
+{
+  "name": "copyright",
+  "description": "查看版权信息与风险免责声明",
+  "usage": "/copyright",
+  "example": "/copyright",
+  "permission": "public",
+  "rate_limit": {
+    "user": 0,
+    "admin": 0,
+    "superadmin": 0
+  },
+  "show_in_help": true,
+  "order": 11,
+  "aliases": ["license", "about", "disclaimer"]
+}

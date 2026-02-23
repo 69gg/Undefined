@@ -34,6 +34,16 @@ Undefined 提供了一套强大的斜杠指令（Slash Commands）系统。管�
     /help /lsfaq
     ```
 
+- **/copyright**
+  - **说明**：查看项目版权信息、开源协议和风险免责声明。
+  - **别名**：`/license`、`/about`、`/disclaimer`
+  - **参数**：无
+  - **示例**：
+    ```
+    /copyright
+    /license
+    ```
+
 #### 2. 统计与分析服务
 - **/stats [时间范围]**
   - **说明**：生成过去一段时间内 Token 的使用统计数据、模型消耗排行、输入输出比例，并带有精美的可视化图表与自动 AI 本地分析！
@@ -178,6 +188,7 @@ src/Undefined/
 └── skills/commands/      # 具体的所有指令实现存放目录
     ├── __init__.py
     ├── help/             # 内置命令：基础帮助
+    ├── copyright/        # 内置命令：版权与免责声明
     ├── faq/              # 内置命令：FAQ增删改查
     └── my_custom_cmd/    # 👈 你新建的自定义命令目录（需要包含 config.json 和 handler.py）
 ```
@@ -204,6 +215,7 @@ src/Undefined/
 ```
 *提示： `permission` 可选 `public` / `admin` / `superadmin`。*
 *提示： `rate_limit` 单独指定各级使用者的独立调用冷却拦截秒级时间（0代表无限制）。*
+*提示：可选字段 `help_footer` 为字符串数组，主要用于 `/help` 这类命令在列表页尾部输出固定提示文案。*
 
 #### B. 执行逻辑 (`handler.py`)
 ```python

@@ -46,6 +46,7 @@ class CommandMeta:
     show_in_help: bool
     order: int
     aliases: list[str]
+    help_footer: list[str]
     handler_path: Path
     doc_path: Path | None
     module_name: str
@@ -156,6 +157,7 @@ class CommandRegistry:
                 show_in_help=bool(config.get("show_in_help", True)),
                 order=int(config.get("order", 999)),
                 aliases=self._normalize_aliases(config.get("aliases")),
+                help_footer=self._normalize_help_footer(config.get("help_footer")),
                 handler_path=handler_path,
                 doc_path=(command_dir / _COMMAND_DOC_FILENAME)
                 if (command_dir / _COMMAND_DOC_FILENAME).exists()
@@ -233,6 +235,16 @@ class CommandRegistry:
             if alias:
                 aliases.append(alias)
         return aliases
+
+    def _normalize_help_footer(self, value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        footer: list[str] = []
+        for item in value:
+            line = str(item).strip()
+            if line:
+                footer.append(line)
+        return footer
 
     def _build_snapshot(self) -> dict[str, CommandSnapshot]:
         if not self.base_dir.exists():

@@ -18,12 +18,18 @@ def _permission_label(permission: str) -> str:
 
 def _format_command_list(context: CommandContext) -> str:
     commands = context.registry.list_commands(include_hidden=False)
-    lines = ["Undefined 命令帮助", "", "可用命令："]
-    for item in commands:
-        description = item.description or "暂无说明"
-        lines.append(f"- {item.usage}：{description}")
-    lines.append("")
-    lines.append("查看详细帮助：/help <command>")
+    command_lines = [
+        f"- {item.usage}：{item.description or '暂无说明'}" for item in commands
+    ]
+
+    help_meta = context.registry.resolve("help")
+    footer_lines = (
+        help_meta.help_footer
+        if help_meta is not None and help_meta.help_footer
+        else ["查看详细帮助：/help <command>", "版权与免责声明：/copyright"]
+    )
+
+    lines = ["Undefined 命令帮助", "", "可用命令：", *command_lines, "", *footer_lines]
     return "\n".join(lines)
 
 

@@ -15,4 +15,3 @@
 ## 说明
 - 可先用 `/lsfaq` 或 `/searchfaq` 找到目标 ID。
 - 若 ID 不存在，会返回未找到提示。
-- 旧参数 `--help` 已弃用，请使用 `/help viewfaq`。

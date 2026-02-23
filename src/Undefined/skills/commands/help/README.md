@@ -15,4 +15,4 @@
 ## 说明
 - `<command>` 支持带或不带 `/` 前缀。
 - `<command>` 支持命令别名（若该命令配置了别名）。
-- 旧参数 `--help` 已弃用，请统一使用 `/help <command>`。
+- 列表页尾部提示文案由 `help/config.json` 的 `help_footer` 字段配置并自动渲染。
