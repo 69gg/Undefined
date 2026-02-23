@@ -20,39 +20,6 @@ commands/
 
 ## 创建与接入示例
 
-要在系统里跑通一个斜杠指令，你需要新建目录并放入 `config.json` 声明以及 `handler.py` 逻辑：
+要在系统里跑通一个斜杠指令，你需要新建目录并放入 `config.json` 声明以及 `handler.py` 逻辑。
 
-**config.json 格式：**
-```json
-{
-    "name": "example",
-    "description": "指令描述信息",
-    "permission": "public",
-    "rate_limit": {
-        "user": 10,
-        "admin": 5,
-        "superadmin": 0
-    },
-    "show_in_help": true,
-    "order": 100,
-    "aliases": ["ex", "examples"]
-}
-```
-*提示： `permission` 可选 `public` / `admin` / `superadmin`。*
-*提示： `rate_limit` 单独指定各级使用者的独立调用冷却拦截秒级时间（0代表无限制）。*
-
-**handler.py 必须实现 `execute` 方法：**
-```python
-import logging
-from Undefined.services.commands.context import CommandContext
-
-logger = logging.getLogger(__name__)
-
-async def execute(args: list[str], context: CommandContext) -> None:
-    # 完整的业务逻辑
-    await context.sender.send_group_message(context.group_id, f"Hello World! {args}")
-```
-
-所有的改动生效且没有报错之后，机器人将能够在聊天窗口通过 `/example` 被唤醒！
-
-更多关于上下文 `CommandContext` 注入属性的帮助可参考 [顶级使用文档](../../../../docs/slash-commands.md)。
+为了避免文档重复，关于 `config.json` 的具体参数格式（包括动态限流规则）以及 `handler.py` 的执行上下文和逻辑编写，请前往 **[斜杠指令开发指南](../../../../docs/slash-commands.md#🛠️-第二部分如何自定义扩展新的斜杠命令)** 查阅最新最详尽的说明。
