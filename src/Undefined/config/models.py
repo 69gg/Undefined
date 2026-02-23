@@ -126,7 +126,7 @@ class AgentModelConfig:
 class CognitiveConfig:
     """认知记忆系统配置"""
 
-    enabled: bool = False
+    enabled: bool = True
     vector_store_path: str = "data/cognitive/chromadb"
     queue_path: str = "data/cognitive/queues"
     profiles_path: str = "data/cognitive/profiles"

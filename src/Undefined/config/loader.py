@@ -2014,7 +2014,7 @@ class Config:
         que = cog.get("queue", {}) if isinstance(cog, dict) else {}
         return CognitiveConfig(
             enabled=_coerce_bool(
-                cog.get("enabled") if isinstance(cog, dict) else None, False
+                cog.get("enabled") if isinstance(cog, dict) else None, True
             ),
             vector_store_path=_coerce_str(
                 vs.get("path") if isinstance(vs, dict) else None,

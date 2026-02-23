@@ -630,7 +630,7 @@ password = "changeme"
 [cognitive]
 # zh: 是否启用认知记忆系统。
 # en: Enable cognitive memory system.
-enabled = false
+enabled = true
 
 [cognitive.vector_store]
 # zh: ChromaDB 向量数据库存储路径。

@@ -188,7 +188,7 @@ data/cognitive/
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `enabled` | bool | `false` | 是否启用（变更需重启） |
+| `enabled` | bool | `true` | 是否启用（变更需重启；未配置 embedding 时会自动降级） |
 
 ### [cognitive.vector_store]
 

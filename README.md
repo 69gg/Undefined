@@ -77,7 +77,7 @@
 
 - **Skills 架构**：全新设计的技能系统，将基础工具（Tools）与智能代理（Agents）分层管理，支持自动发现与注册。
 - **Skills 热重载**：自动扫描 `skills/` 目录，检测到变更后即时重载工具与 Agent，无需重启服务。
-- **认知记忆系统**：基于向量数据库的长期记忆，支持事件语义检索与用户/群聊自动侧写，后台异步处理、前台零延迟。详见 [认知记忆文档](docs/cognitive-memory.md)。
+- **认知记忆系统**：基于向量数据库的长期记忆，支持事件语义检索、时间范围过滤、时间衰减加权排序与用户/群聊自动侧写，后台异步处理、前台零延迟。详见 [认知记忆文档](docs/cognitive-memory.md)。
 - **配置热更新 + WebUI**：使用 `config.toml` 配置，支持热更新；提供 WebUI 在线编辑与校验。
 - **多模型池**：支持配置多个 AI 模型，可轮询、随机选择或用户指定；支持多模型并发比较，选择最佳结果继续对话。详见 [多模型功能文档](docs/multi-model.md)。
 - **本地知识库**：将纯文本文件向量化存入 ChromaDB，AI 可通过关键词搜索或语义搜索查询领域知识；支持增量嵌入与自动扫描。详见 [知识库文档](docs/knowledge.md)。
@@ -100,7 +100,7 @@
 
 ## 系统架构概览
 
-Undefined 采用 **8层异步架构设计**，以下是详细的系统架构图（包含所有核心组件、6个Agent、8类工具集、存储系统与数据流）：
+Undefined 采用 **8层异步架构设计**，以下是详细的系统架构图（包含所有核心组件、6个 Agent、9 类工具集、认知记忆完整链路、存储系统与数据流）：
 
 ### 架构图（Mermaid）
 
@@ -148,6 +148,12 @@ graph TB
         MemoryStorage["MemoryStorage<br/>长期记忆存储<br/>[memory.py]<br/>• 500条上限 • 自动去重"]
         EndSummaryStorage["EndSummaryStorage<br/>短期总结存储<br/>[end_summary_storage.py]<br/>(cognitive 模式下由 CognitiveService 替代)"]
         CognitiveService["CognitiveService<br/>认知记忆服务<br/>[cognitive/service.py]<br/>• 事件向量检索 • 用户/群侧写<br/>• 后台史官"]
+        subgraph CognitiveSubsystem["认知记忆子系统 (src/Undefined/cognitive/)"]
+            CogJobQueue["JobQueue<br/>任务队列<br/>[job_queue.py]<br/>• pending/processing/failed<br/>• 原子搬运 + 重试"]
+            CogHistorian["HistorianWorker<br/>后台史官<br/>[historian.py]<br/>• 绝对化改写 + 闸门<br/>• 侧写合并"]
+            CogVector["CognitiveVectorStore<br/>向量存储<br/>[vector_store.py]<br/>• events/profiles 查询<br/>• 时间衰减加权排序"]
+            CogProfile["ProfileStorage<br/>侧写存储<br/>[profile_storage.py]<br/>• users/groups Markdown<br/>• 历史快照"]
+        end
         FAQStorage["FAQStorage<br/>FAQ 存储<br/>[faq.py]"]
         ScheduledTaskStorage["ScheduledTaskStorage<br/>定时任务存储<br/>[scheduled_task_storage.py]"]
         TokenUsageStorage["TokenUsageStorage<br/>Token 使用统计<br/>[token_usage_storage.py]<br/>• 自动归档 • gzip 压缩"]
@@ -165,10 +171,12 @@ graph TB
             T_BilibiliVideo["bilibili_video<br/>B站视频下载发送"]
         end
         
-        subgraph Toolsets["工具集 (8大类)"]
+        subgraph Toolsets["工具集 (9大类)"]
             TS_Group["group.*<br/>• get_member_list<br/>• get_member_info<br/>• get_honor_info<br/>• get_files"]
             TS_Messages["messages.*<br/>• send_message<br/>• get_recent_messages<br/>• get_forward_msg"]
             TS_Memory["memory.*<br/>• add / delete<br/>• list / update"]
+            TS_Contacts["contacts.*<br/>• query_friends<br/>• query_groups"]
+            TS_GroupAnalysis["group_analysis.*<br/>• analyze_member_messages<br/>• analyze_join_statistics<br/>• analyze_new_member_activity"]
             TS_Notices["notices.*<br/>• list / get / stats"]
             TS_Render["render.*<br/>• render_html<br/>• render_latex<br/>• render_markdown"]
             TS_Scheduler["scheduler.*<br/>• create_schedule_task<br/>• delete_schedule_task<br/>• list_schedule_tasks"]
@@ -246,7 +254,17 @@ graph TB
     PromptBuilder -->|"注入"| MemoryStorage
     PromptBuilder -->|"注入"| EndSummaryStorage
     PromptBuilder -->|"注入"| CognitiveService
-    CognitiveService -->|"异步读写"| IOUtils
+    T_End -->|"写短期摘要"| EndSummaryStorage
+    T_End -->|"enqueue_job(action/new_info)"| CognitiveService
+    CognitiveService -->|"入队"| CogJobQueue
+    CogJobQueue -->|"dequeue / requeue"| CogHistorian
+    CogHistorian -.->|"background rewrite / merge"| LLM_API
+    CogHistorian -->|"upsert events/profiles"| CogVector
+    CogHistorian -->|"写侧写"| CogProfile
+    CognitiveService -->|"读取侧写"| CogProfile
+    CognitiveService -->|"query events/profiles"| CogVector
+    CogJobQueue -->|"异步读写"| IOUtils
+    CogProfile -->|"异步读写"| IOUtils
     
     MessageHandler -->|"保存消息"| HistoryManager
     AICoordinator -->|"记录统计"| TokenUsageStorage
@@ -269,6 +287,7 @@ graph TB
     ScheduledTaskStorage -->|"异步读写"| IOUtils
     
     IOUtils --> Dir_Cognitive
+    CogVector --> Dir_Cognitive
     IOUtils --> Dir_History
     IOUtils --> File_Memory
     IOUtils --> File_EndSummary
@@ -298,7 +317,7 @@ graph TB
     class MessageHandler,SecurityService,CommandDispatcher,AICoordinator,QueueManager message
     class AIClient,PromptBuilder,ModelRequester,ToolManager,MultimodalAnalyzer,SummaryService,TokenCounter ai
     class ToolRegistry,AgentRegistry,MCPRegistry,AtomicTools,Toolsets,IntelligentAgents skills
-    class HistoryManager,MemoryStorage,EndSummaryStorage,FAQStorage,ScheduledTaskStorage,TokenUsageStorage,CognitiveService storage
+    class HistoryManager,MemoryStorage,EndSummaryStorage,FAQStorage,ScheduledTaskStorage,TokenUsageStorage,CognitiveService,CogJobQueue,CogHistorian,CogVector,CogProfile storage
     class IOUtils io
     class Dir_History,Dir_FAQ,Dir_TokenUsage,File_Config,File_Memory,File_EndSummary,File_ScheduledTasks,Dir_Cognitive persistence
 ```
@@ -513,6 +532,9 @@ uv run Undefined-webui
 - **认知记忆（可选）**：`[cognitive]`
   - `[models.embedding]`：embedding 模型配置（复用知识库配置，api_url / api_key / model_name）
   - `enabled`：是否启用认知记忆系统（默认开启，embedding 未配置时自动降级）
+  - `cognitive.query.recent_end_summaries_inject_k`：认知模式下额外注入最近 N 条 `end` 行动摘要作为短期工作记忆（默认 `30`）
+  - `cognitive.query.time_decay_*`：事件检索时间衰减加权参数（支持自动注入与工具检索分别设定半衰期）
+  - `cognitive.search_events`：支持 `time_from/time_to` 时间范围硬过滤
   - 详细配置见 [认知记忆文档](docs/cognitive-memory.md)
 - **代理设置（可选）**：`[proxy]`
 - **WebUI**：`[webui]`（默认 `127.0.0.1:8787`，密码默认 `changeme`，启动 `uv run Undefined-webui`）
