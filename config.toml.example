@@ -644,6 +644,9 @@ path = "data/cognitive/chromadb"
 # zh: 自动注入上下文时的召回条数。
 # en: Number of results to inject automatically.
 auto_top_k = 3
+# zh: 是否启用认知记忆检索重排（独立于 knowledge.enable_rerank）。
+# en: Enable reranking for cognitive memory retrieval (independent of knowledge.enable_rerank).
+enable_rerank = true
 # zh: 开启认知记忆后，额外注入最近 N 条 end 行动摘要作为短期工作记忆（带时间）；0=禁用。
 # en: When cognitive is enabled, also inject last N end action summaries as short-term working memory (with timestamps); 0 disables.
 recent_end_summaries_inject_k = 30

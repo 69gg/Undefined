@@ -10,7 +10,7 @@ import os
 import re
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from chromadb.errors import NotFoundError
 
@@ -20,6 +20,7 @@ from Undefined.knowledge.store import KnowledgeStore
 if TYPE_CHECKING:
     from Undefined.knowledge.embedder import Embedder
     from Undefined.knowledge.reranker import Reranker
+    from Undefined.knowledge.runtime import RetrievalRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -51,15 +52,17 @@ class KnowledgeManager:
     def __init__(
         self,
         base_dir: str | Path,
-        embedder: Embedder,
+        embedder: Embedder | None = None,
         reranker: Reranker | None = None,
         default_top_k: int = 5,
         chunk_size: int = 10,
         chunk_overlap: int = 2,
         rerank_enabled: bool = False,
         rerank_top_k: int = 3,
+        retrieval_runtime: RetrievalRuntime | None = None,
     ) -> None:
         self._base_dir = Path(base_dir)
+        self._retrieval_runtime = retrieval_runtime
         self._embedder = embedder
         self._reranker = reranker
         self._default_top_k = default_top_k
@@ -70,6 +73,38 @@ class KnowledgeManager:
         self._stores: dict[str, KnowledgeStore] = {}
         self._scan_task: asyncio.Task[None] | None = None
         self._initial_scan_task: asyncio.Task[None] | None = None
+        if self._retrieval_runtime is None and self._embedder is None:
+            raise ValueError("embedder 或 retrieval_runtime 至少提供一个")
+
+    def _resolve_embedder(self) -> Any:
+        if self._retrieval_runtime is not None:
+            return self._retrieval_runtime
+        return self._embedder
+
+    async def _embed_texts(self, texts: list[str]) -> list[list[float]]:
+        embedder = self._resolve_embedder()
+        if embedder is None:
+            raise RuntimeError("embedder 未初始化")
+        return cast(list[list[float]], await embedder.embed(texts))
+
+    def _get_query_instruction(self) -> str:
+        if self._retrieval_runtime is not None:
+            return str(getattr(self._retrieval_runtime, "query_instruction", "") or "")
+        embedder_config = getattr(self._embedder, "_config", None)
+        return str(getattr(embedder_config, "query_instruction", "") or "")
+
+    def _get_document_instruction(self) -> str:
+        if self._retrieval_runtime is not None:
+            return str(
+                getattr(self._retrieval_runtime, "document_instruction", "") or ""
+            )
+        embedder_config = getattr(self._embedder, "_config", None)
+        return str(getattr(embedder_config, "document_instruction", "") or "")
+
+    def _get_reranker(self) -> Any:
+        if self._retrieval_runtime is not None:
+            return self._retrieval_runtime.ensure_reranker()
+        return self._reranker
 
     def _resolve_kb_dir(self, kb_name: str) -> Path | None:
         raw = str(kb_name or "").strip()
@@ -264,9 +299,9 @@ class KnowledgeManager:
                 manifest[relative_source] = fhash
                 manifest_changed = True
                 continue
-            doc_instr = getattr(self._embedder._config, "document_instruction", "")
+            doc_instr = self._get_document_instruction()
             embed_lines = [f"{doc_instr}{ln}" for ln in lines] if doc_instr else lines
-            embeddings = await self._embedder.embed(embed_lines)
+            embeddings = await self._embed_texts(embed_lines)
             added = await store.add_chunks(
                 lines,
                 embeddings,
@@ -354,9 +389,9 @@ class KnowledgeManager:
         k = top_k or self._default_top_k
         if k <= 0:
             k = self._default_top_k
-        instruction = getattr(self._embedder._config, "query_instruction", "")
+        instruction = self._get_query_instruction()
         query_input = f"{instruction}{query}" if instruction else query
-        query_emb = (await self._embedder.embed([query_input]))[0]
+        query_emb = (await self._embed_texts([query_input]))[0]
         results = await store.query(query_emb, k)
         if not results:
             return []
@@ -381,13 +416,12 @@ class KnowledgeManager:
         enable_rerank: bool | None,
         rerank_top_k: int | None,
     ) -> tuple[bool, int]:
-        if self._reranker is None:
-            return False, 0
-
         enabled = self._rerank_enabled if enable_rerank is None else bool(enable_rerank)
         if not enabled:
             return False, 0
         if semantic_top_k <= 1:
+            return False, 0
+        if self._get_reranker() is None:
             return False, 0
 
         candidate_top_k = self._rerank_top_k if rerank_top_k is None else rerank_top_k
@@ -407,12 +441,13 @@ class KnowledgeManager:
         results: list[dict[str, Any]],
         rerank_top_k: int,
     ) -> list[dict[str, Any]]:
-        if self._reranker is None or not results:
+        reranker = self._get_reranker()
+        if reranker is None or not results:
             return results
 
         docs = [str(item.get("content", "")) for item in results]
         try:
-            reranked = await self._reranker.rerank(
+            reranked = await reranker.rerank(
                 query=query,
                 documents=docs,
                 top_n=min(rerank_top_k, len(docs)),
@@ -493,6 +528,8 @@ class KnowledgeManager:
             with suppress(asyncio.CancelledError):
                 await self._scan_task
             self._scan_task = None
-        await self._embedder.stop()
-        if self._reranker:
-            await self._reranker.stop()
+        if self._retrieval_runtime is None:
+            if self._embedder and hasattr(self._embedder, "stop"):
+                await self._embedder.stop()
+            if self._reranker:
+                await self._reranker.stop()

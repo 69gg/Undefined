@@ -222,6 +222,7 @@ data/cognitive/
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `auto_top_k` | int | `3` | 每轮自动注入的相关事件条数（支持热更新） |
+| `enable_rerank` | bool | `true` | 是否启用认知记忆检索重排（独立于 `knowledge.enable_rerank`，支持热更新） |
 | `recent_end_summaries_inject_k` | int | `30` | 认知模式下额外注入最近 N 条 end 行动摘要（短期工作记忆，带时间；0=禁用，支持热更新） |
 | `time_decay_enabled` | bool | `true` | 是否启用事件检索时间衰减加权（支持热更新） |
 | `time_decay_half_life_days_auto` | float | `14.0` | 自动注入场景半衰期（天，支持热更新） |
@@ -286,6 +287,10 @@ data/cognitive/
 
 - **支持热更新**：`cognitive.query.*`、`cognitive.historian.poll_interval_seconds`、`cognitive.historian.rewrite_max_retry`、`cognitive.historian.recent_messages_inject_k`、`cognitive.historian.recent_message_line_max_len`、`cognitive.historian.source_message_max_len`
 - **需重启**：`cognitive.enabled`、`models.embedding.*`、`models.rerank.*`
+
+说明：
+- `knowledge.enable_rerank` 仅控制知识库检索重排。
+- 认知记忆重排由 `cognitive.query.enable_rerank` 独立控制。
 
 ---
 

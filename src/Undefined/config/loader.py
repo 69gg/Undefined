@@ -2031,6 +2031,9 @@ class Config:
             auto_top_k=_coerce_int(
                 q.get("auto_top_k") if isinstance(q, dict) else None, 3
             ),
+            enable_rerank=_coerce_bool(
+                q.get("enable_rerank") if isinstance(q, dict) else None, True
+            ),
             recent_end_summaries_inject_k=_coerce_int(
                 q.get("recent_end_summaries_inject_k") if isinstance(q, dict) else None,
                 30,

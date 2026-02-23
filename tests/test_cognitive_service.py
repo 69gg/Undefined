@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -15,6 +15,47 @@ class _FakeJobQueue:
     async def enqueue(self, job: dict[str, Any]) -> str:
         self.last_job = job
         return "job-test"
+
+
+class _FakeVectorStore:
+    def __init__(self) -> None:
+        self.last_event_kwargs: dict[str, Any] | None = None
+        self.last_profile_kwargs: dict[str, Any] | None = None
+
+    async def query_events(
+        self,
+        _query: str,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        self.last_event_kwargs = dict(kwargs)
+        return []
+
+    async def query_profiles(
+        self,
+        _query: str,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        self.last_profile_kwargs = dict(kwargs)
+        return []
+
+
+class _FakeProfileStorage:
+    async def read_profile(
+        self,
+        _entity_type: str,
+        _entity_id: str,
+    ) -> str | None:
+        return None
+
+
+class _FakeRetrievalRuntime:
+    def __init__(self, reranker: object | None) -> None:
+        self._reranker = reranker
+        self.ensure_reranker_calls = 0
+
+    def ensure_reranker(self) -> object | None:
+        self.ensure_reranker_calls += 1
+        return self._reranker
 
 
 @pytest.mark.asyncio
@@ -54,3 +95,133 @@ async def test_enqueue_job_keeps_historian_reference_fields() -> None:
     assert queue.last_job.get("recent_messages") == [
         "[2026-02-23 19:02:11] 洛泫(120218451): Null 说这个是竞态问题"
     ]
+
+
+@pytest.mark.asyncio
+async def test_search_events_uses_reranker_when_cognitive_rerank_enabled() -> None:
+    vector_store = _FakeVectorStore()
+    reranker = object()
+    service = CognitiveService(
+        config_getter=lambda: SimpleNamespace(
+            enabled=True,
+            enable_rerank=True,
+            tool_default_top_k=12,
+            rerank_candidate_multiplier=3,
+            time_decay_enabled=True,
+            time_decay_half_life_days_tool=60.0,
+            time_decay_boost=0.2,
+            time_decay_min_similarity=0.35,
+        ),
+        vector_store=vector_store,
+        job_queue=_FakeJobQueue(),
+        profile_storage=_FakeProfileStorage(),
+        reranker=reranker,
+    )
+
+    await service.search_events("测试")
+
+    assert vector_store.last_event_kwargs is not None
+    assert vector_store.last_event_kwargs.get("reranker") is reranker
+
+
+@pytest.mark.asyncio
+async def test_search_events_skips_reranker_when_cognitive_rerank_disabled() -> None:
+    vector_store = _FakeVectorStore()
+    service = CognitiveService(
+        config_getter=lambda: SimpleNamespace(
+            enabled=True,
+            enable_rerank=False,
+            tool_default_top_k=12,
+            rerank_candidate_multiplier=3,
+            time_decay_enabled=True,
+            time_decay_half_life_days_tool=60.0,
+            time_decay_boost=0.2,
+            time_decay_min_similarity=0.35,
+        ),
+        vector_store=vector_store,
+        job_queue=_FakeJobQueue(),
+        profile_storage=_FakeProfileStorage(),
+        reranker=object(),
+    )
+
+    await service.search_events("测试")
+
+    assert vector_store.last_event_kwargs is not None
+    assert vector_store.last_event_kwargs.get("reranker") is None
+
+
+@pytest.mark.asyncio
+async def test_search_profiles_skips_reranker_when_cognitive_rerank_disabled() -> None:
+    vector_store = _FakeVectorStore()
+    service = CognitiveService(
+        config_getter=lambda: SimpleNamespace(
+            enabled=True,
+            enable_rerank=False,
+            rerank_candidate_multiplier=3,
+        ),
+        vector_store=vector_store,
+        job_queue=_FakeJobQueue(),
+        profile_storage=_FakeProfileStorage(),
+        reranker=object(),
+    )
+
+    await service.search_profiles("测试")
+
+    assert vector_store.last_profile_kwargs is not None
+    assert vector_store.last_profile_kwargs.get("reranker") is None
+
+
+@pytest.mark.asyncio
+async def test_search_events_uses_runtime_reranker_when_enabled() -> None:
+    vector_store = _FakeVectorStore()
+    runtime = _FakeRetrievalRuntime(reranker=object())
+    service = CognitiveService(
+        config_getter=lambda: SimpleNamespace(
+            enabled=True,
+            enable_rerank=True,
+            tool_default_top_k=12,
+            rerank_candidate_multiplier=3,
+            time_decay_enabled=True,
+            time_decay_half_life_days_tool=60.0,
+            time_decay_boost=0.2,
+            time_decay_min_similarity=0.35,
+        ),
+        vector_store=vector_store,
+        job_queue=_FakeJobQueue(),
+        profile_storage=_FakeProfileStorage(),
+        retrieval_runtime=cast(Any, runtime),
+    )
+
+    await service.search_events("测试")
+
+    assert runtime.ensure_reranker_calls == 1
+    assert vector_store.last_event_kwargs is not None
+    assert vector_store.last_event_kwargs.get("reranker") is runtime._reranker
+
+
+@pytest.mark.asyncio
+async def test_search_events_does_not_touch_runtime_reranker_when_disabled() -> None:
+    vector_store = _FakeVectorStore()
+    runtime = _FakeRetrievalRuntime(reranker=object())
+    service = CognitiveService(
+        config_getter=lambda: SimpleNamespace(
+            enabled=True,
+            enable_rerank=False,
+            tool_default_top_k=12,
+            rerank_candidate_multiplier=3,
+            time_decay_enabled=True,
+            time_decay_half_life_days_tool=60.0,
+            time_decay_boost=0.2,
+            time_decay_min_similarity=0.35,
+        ),
+        vector_store=vector_store,
+        job_queue=_FakeJobQueue(),
+        profile_storage=_FakeProfileStorage(),
+        retrieval_runtime=cast(Any, runtime),
+    )
+
+    await service.search_events("测试")
+
+    assert runtime.ensure_reranker_calls == 0
+    assert vector_store.last_event_kwargs is not None
+    assert vector_store.last_event_kwargs.get("reranker") is None

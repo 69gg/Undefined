@@ -115,6 +115,8 @@ thinking_tool_call_compat = false
 - `[models.historian]`：**记忆史官**，异步在后台总结归纳长期记忆，需要长上下文支撑。
 - `[models.embedding]` 与 `[models.rerank]`：文本向量化与召回排序，配合 [认知记忆系统](cognitive-memory.md) 使用。
 
+说明：`models.embedding` / `models.rerank` 走统一检索运行层（队列发车 + 同一 OpenAI SDK 客户端 + 统一 token 统计口径），`queue_interval_seconds` 会同时影响知识库与认知记忆检索链路。
+
 ---
 
 ## 认知记忆 `[cognitive]`
@@ -128,6 +130,7 @@ enabled = true          # 强烈建议开启，否则无法形成长时记忆（
 
 [cognitive.query]
 auto_top_k = 3          # 每次对话自动根据语义召回匹配的前 3 条古老记忆
+enable_rerank = true    # 认知记忆重排开关（独立于 knowledge.enable_rerank）
 # 其他高阶设定包括：
 # time_decay_enabled = true （按时间衰减修正记忆权重）
 # time_decay_half_life_days_auto = 14.0 （半衰期）

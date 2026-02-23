@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from Undefined.context import RequestContext
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from Undefined.knowledge.runtime import RetrievalRuntime
 
 
 def _parse_iso_to_epoch_seconds(value: Any) -> int | None:
@@ -42,12 +45,25 @@ class CognitiveService:
         job_queue: Any,
         profile_storage: Any,
         reranker: Any = None,
+        retrieval_runtime: RetrievalRuntime | None = None,
     ) -> None:
         self._config_getter = config_getter
         self._vector_store = vector_store
         self._job_queue = job_queue
         self._profile_storage = profile_storage
         self._reranker = reranker
+        self._retrieval_runtime = retrieval_runtime
+
+    def _base_reranker(self) -> Any:
+        if self._retrieval_runtime is not None:
+            return self._retrieval_runtime.ensure_reranker()
+        return self._reranker
+
+    def _current_reranker(self) -> Any:
+        config = self._config_getter()
+        if not bool(getattr(config, "enable_rerank", True)):
+            return None
+        return self._base_reranker()
 
     @property
     def enabled(self) -> bool:
@@ -244,7 +260,7 @@ class CognitiveService:
             query,
             top_k=top_k,
             where=where,
-            reranker=self._reranker,
+            reranker=self._current_reranker(),
             candidate_multiplier=config.rerank_candidate_multiplier,
             time_decay_enabled=bool(getattr(config, "time_decay_enabled", True)),
             time_decay_half_life_days=float(
@@ -344,7 +360,7 @@ class CognitiveService:
             query,
             top_k=top_k,
             where=where or None,
-            reranker=self._reranker,
+            reranker=self._current_reranker(),
             candidate_multiplier=config.rerank_candidate_multiplier,
             time_decay_enabled=bool(getattr(config, "time_decay_enabled", True)),
             time_decay_half_life_days=float(
@@ -389,7 +405,7 @@ class CognitiveService:
             query,
             top_k=top_k,
             where=where,
-            reranker=self._reranker,
+            reranker=self._current_reranker(),
             candidate_multiplier=config.rerank_candidate_multiplier,
         )
         logger.info("[认知服务] 搜索侧写完成: count=%s", len(results))
