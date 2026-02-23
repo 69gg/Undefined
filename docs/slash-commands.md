@@ -1,0 +1,159 @@
+# 命令系统与斜杠指令
+
+Undefined 提供了一套强大的斜杠指令（Slash Commands）系统。管理员可以通过简单的带前缀的命令（如 `/help`）在群聊或私聊中快速管理机器人状态、查询统计信息或分配权限。
+
+本文档将分为**使用指南**和**自定义开发指南**两部分，帮助你全面掌握命令系统。
+
+---
+
+## 👨‍💻 第一部分：斜杠命令详细使用指南
+
+### 权限与调用说明
+
+- 所有的管理类斜杠命令需要发送者具有管理员或超管权限（在 `config.local.json` 中配置或通过 `/addadmin` 动态添加）。
+- 普通用户使用此类命令时会收到权限不足的提示。
+- 命令可以在群聊或私聊中直接发送。
+
+### 内置命令列表及详细用法
+
+#### 1. 基础帮助与状态查询
+- **/help**
+  - **说明**：显示所有可用命令的快速速查表。
+  - **参数**：无
+  - **示例**：`/help`
+- **/ping**
+  - **说明**：心跳测试。机器人会快速回复 "pong"，用于检测机器人的当前网络连通性和存活状态。
+  - **参数**：无
+  - **示例**：`/ping`
+
+#### 2. 统计与分析服务
+- **/stats [时间范围]**
+  - **说明**：生成过去一段时间内 Token 的使用统计数据、模型消耗排行、输入输出比例，并带有精美的可视化图表与自动 AI 本地分析！
+  - **参数**：
+    - `时间范围`（可选）：如 `7d` (7天), `1w` (1周), `30d` (30天), `1m` (1个月)。默认为 7 天。
+  - **示例**：
+    - `/stats`：统计最近 7 天
+    - `/stats 30d`：统计最近 30 天
+    - `/stats --help`：查看该指令的具体帮助
+
+#### 3. 权限管理 (动态 Admin)
+通过指令动态管理管理员列表，变更会自动持久化到 `config.local.json`，无需重启。超管（Superadmin）拥有最高权限，由配置文件的 `core.super_admins` 静态定义。
+
+- **/lsadmin**
+  - **说明**：列出当前所有的系统超级管理员和动态添加的管理员。
+  - **参数**：无
+  - **示例**：`/lsadmin`
+- **/addadmin \<QQ号>**
+  - **说明**：将指定用户添加为管理员。**（注：仅 Superadmin 可执行此操作）**。
+  - **参数**：
+    - `QQ号`（必填）：目标用户的 QQ 账号。
+  - **示例**：`/addadmin 123456789`
+- **/rmadmin \<QQ号>**
+  - **说明**：移除指定的管理员。不能通过此命令移除 Superadmin。
+  - **参数**：
+    - `QQ号`（必填）：目标用户的 QQ 账号。
+  - **示例**：`/rmadmin 123456789`
+
+#### 4. 本地群级 FAQ 系统
+用于对常见问题（FAQ）进行增删改查设置。FAQ 不必每次请求 AI 大模型，极大地节省 Token 并加快响应。
+
+- **/faq_add \<Q> \<A>**
+  - **说明**：新增问答规则。
+  - **举例**：`/faq_add 怎么安装游戏 点击群文件下载最新版的 ZIP 解压即可`
+- **/faq_del \<ID>**
+  - **说明**：删除指定 ID 的 FAQ。
+  - **举例**：`/faq_del FAQ-001`
+- **/faq_update \<ID> \<Q> \<A>**
+  - **说明**：更新已有的问答对。
+  - **举例**：`/faq_update FAQ-001 怎么安装最新版 直接看群公告即可`
+- **/faq_list**
+  - **说明**：列出当前群聊绑定的所有 FAQ 项目。
+- **/faq_search \<Keyword>**
+  - **说明**：在现有 FAQ 中按关键词搜索。
+
+#### 5. 排障与反馈
+- **/bugfix [QQ号]**
+  - **说明**：提取该用户的近期对话日志和后台报错记录，交给 AI 进行分析整理，快速生成 Bug 修复报告。如果不提供 QQ 号，则默认提取命令发送者本人的日志。
+  - **示例**：`/bugfix` 或 `/bugfix 123456789`
+
+---
+
+## 🛠️ 第二部分：如何自定义/扩展新的斜杠命令？
+
+Undefined 具有可插拔的指令解析层，所有的指令逻辑实现均放在 `src/Undefined/services/commands/` 目录下。
+
+开发一个新命令极为简单，只需几行代码即可完成自动注册、权限鉴定要求和参数解析。
+
+### 命令系统的核心结构
+
+```text
+src/Undefined/services/commands/
+├── __init__.py
+├── context.py        # 核心上下文 (CommandContext) 定义
+├── registry.py       # 命令注册表 (CommandRegistry) 和 Meta 定义
+├── builtin_*.py      # 内置命令 (如基础帮助、FAQ、权限检查)
+└── my_custom_cmd.py  # 👈 你新建的自定义命令文件
+```
+
+### 1. 编写自定义命令的基本模板
+
+在 `commands/` 目录下新建一个 `.py` 文件，例如 `hello_world.py`，然后使用 `@command` 装饰器定义指令。
+
+```python
+# src/Undefined/services/commands/hello_world.py
+from Undefined.services.commands.registry import command
+from Undefined.services.commands.context import CommandContext
+
+@command(
+    name="hello",           # 触发指令：/hello
+    description="向群里的盆友问个好", # 指令说明
+    permission="admin",     # 权限要求："admin" / "superadmin" / "anyone"
+    rate_limit=2.0          # 速率限制：每 2 秒允许调用一次
+)
+async def hello_command(ctx: CommandContext) -> None:
+    # ctx.args 获取空格分割的参数列表
+    if not ctx.args:
+        target = "世界"
+    else:
+        target = " ".join(ctx.args)
+        
+    # 执行回复动作
+    await ctx.sender.send_group_message(
+        ctx.group_id, 
+        f"👋 你好, {target}! 这个命令是由 {ctx.sender_id} 触发的。"
+    )
+```
+
+### 2. 参数 Context (`CommandContext`) 详解
+
+被自动注入的 `ctx` 对象包含当前命令生命周期的所有可用资源：
+
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `ctx.group_id` | `int` | 当前接收指令的群组 ID。私聊时这通常会映射为 0 或特定逻辑池。 |
+| `ctx.sender_id` | `int` | 发出命令的用户 QQ 号。 |
+| `ctx.args` | `list[str]` | 参数列表（用空格切割），例如 `/hello foo bar` 则为 `["foo", "bar"]` |
+| `ctx.sender` | `MessageSender` | 消息收发器工具，包含 `send_group_message`, `send_private_message` |
+| `ctx.config` | `Config` | 系统的核心配置管理器 |
+| `ctx.bot_qq` | `int` | 当前机器人的自身 QQ 号 |
+| `ctx.ai` | `AIClient` | 主 AI Client，可以用于进行分析、总结等大模型调用 |
+| `ctx.faq_storage` | `FAQStorage` | FAQ 的键值操作入口 |
+
+### 3. 可用的 `permission` (权限级别)
+
+命令可以限定谁能执行：
+
+- `"superadmin"`: 仅 `config.toml` 中 `[core].super_admins` 列表内的人可执行。
+- `"admin"`: 超级管理员 + `config.local.json` 动态添加的管理员均可执行。
+- `"anyone"`: 群内或私聊中的任何用户均可执行。（注意风控和被滥用刷屏的风险）
+
+### 4. 自动注册与生效
+
+你无需去任何主函数写 `import hello_world`！
+Undefined 在启动时会使用 `pkgutil` **自动扫描并动态加载** `services/commands/` 目录下的所有模块。只需保证文件存在并且被 `@command` 装饰，你的命令就能直接生效：
+
+```bash
+uv run Undefined
+```
+
+启动完毕后在群里输入 `/help`，你就会自动看到你刚才写的 `/hello` 出现在帮助列表中！
