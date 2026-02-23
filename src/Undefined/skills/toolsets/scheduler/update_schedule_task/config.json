@@ -1,1 +1,72 @@
-{"type": "function", "function": {"name": "update_schedule_task", "description": "修改已存在的定时任务。可修改 crontab 表达式、工具名称、工具参数、任务名称、最大执行次数、多工具配置和执行模式。", "parameters": {"type": "object", "properties": {"task_id": {"type": "string", "description": "要修改的任务 ID。可通过 list_schedule_tasks 查看所有任务及其 ID。"}, "cron_expression": {"type": "string", "description": "新的 crontab 表达式 (分 时 日 月 周)。"}, "tool_name": {"type": "string", "description": "新的工具名称（单工具模式，与 tools 二选一）。"}, "tool_args": {"type": "object", "description": "新的工具参数 (JSON)（单工具模式）。"}, "tools": {"type": "array", "description": "新的多工具调用列表（多工具模式，与 tool_name 二选一）。", "items": {"type": "object", "properties": {"tool_name": {"type": "string", "description": "工具名称"}, "tool_args": {"type": "object", "description": "工具参数"}}, "required": ["tool_name", "tool_args"]}}, "execution_mode": {"type": "string", "description": "新的执行模式，'serial' 串行执行，'parallel' 并行执行。", "enum": ["serial", "parallel"]}, "task_name": {"type": "string", "description": "新的任务名称。"}, "max_executions": {"type": "integer", "description": "新的最大执行次数（可选）。设置为 1 表示执行一次后自动删除，设置为 N 表示执行 N 次后自动删除，不设置则保持原值。"}}, "required": ["task_id"]}}}
+{
+    "type": "function",
+    "function": {
+        "name": "update_schedule_task",
+        "description": "修改已存在的定时任务。可修改 crontab 表达式、工具配置、任务名称、最大执行次数和执行模式。支持切换为调用未来自己的 self_instruction 模式。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "要修改的任务 ID。可通过 list_schedule_tasks 查看所有任务及其 ID。"
+                },
+                "cron_expression": {
+                    "type": "string",
+                    "description": "新的 crontab 表达式 (分 时 日 月 周)。"
+                },
+                "tool_name": {
+                    "type": "string",
+                    "description": "新的工具名称（单工具模式，与 tools / self_instruction 三选一）。"
+                },
+                "tool_args": {
+                    "type": "object",
+                    "description": "新的工具参数 (JSON)（单工具模式）。"
+                },
+                "tools": {
+                    "type": "array",
+                    "description": "新的多工具调用列表（多工具模式，与 tool_name / self_instruction 三选一）。",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tool_name": {
+                                "type": "string",
+                                "description": "工具名称"
+                            },
+                            "tool_args": {
+                                "type": "object",
+                                "description": "工具参数"
+                            }
+                        },
+                        "required": [
+                            "tool_name",
+                            "tool_args"
+                        ]
+                    }
+                },
+                "self_instruction": {
+                    "type": "string",
+                    "description": "新的调用未来自己的指令文本（调用自己模式，与 tool_name / tools 三选一）。"
+                },
+                "execution_mode": {
+                    "type": "string",
+                    "description": "新的执行模式，'serial' 串行执行，'parallel' 并行执行。",
+                    "enum": [
+                        "serial",
+                        "parallel"
+                    ]
+                },
+                "task_name": {
+                    "type": "string",
+                    "description": "新的任务名称。"
+                },
+                "max_executions": {
+                    "type": "integer",
+                    "description": "新的最大执行次数（可选）。设置为 1 表示执行一次后自动删除，设置为 N 表示执行 N 次后自动删除，不设置则保持原值。"
+                }
+            },
+            "required": [
+                "task_id"
+            ]
+        }
+    }
+}

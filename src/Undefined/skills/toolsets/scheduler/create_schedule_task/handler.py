@@ -3,6 +3,7 @@ import uuid
 import logging
 
 logger = logging.getLogger(__name__)
+SELF_CALL_TOOL_NAME = "scheduler.call_self"
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
@@ -18,6 +19,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     tools = args.get("tools")
     execution_mode = args.get("execution_mode", "serial")
     max_executions = args.get("max_executions")
+    self_instruction = args.get("self_instruction")
 
     # 验证参数
     if not cron_expression:
@@ -26,12 +28,20 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     # 验证工具参数：单工具模式或多工具模式二选一
     has_single_tool = tool_name is not None
     has_multi_tools = tools is not None and len(tools) > 0
+    has_self_instruction = self_instruction is not None
 
-    if not has_single_tool and not has_multi_tools:
-        return "必须提供 tool_name（单工具模式）或 tools（多工具模式）参数"
+    normalized_self_instruction = ""
+    if has_self_instruction:
+        normalized_self_instruction = str(self_instruction).strip()
+        if not normalized_self_instruction:
+            return "self_instruction 不能为空"
 
-    if has_single_tool and has_multi_tools:
-        return "不能同时使用 tool_name 和 tools 参数，请选择其中一种模式"
+    mode_count = sum([has_single_tool, has_multi_tools, has_self_instruction])
+    if mode_count == 0:
+        return "必须提供 tool_name（单工具模式）、tools（多工具模式）或 self_instruction（调用自己模式）参数"
+
+    if mode_count > 1:
+        return "tool_name、tools、self_instruction 不能同时使用，请选择其中一种模式"
 
     # 验证多工具模式参数
     if has_multi_tools:
@@ -80,23 +90,39 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not target_type:
         target_type = "group"
 
+    resolved_tool_name = tool_name
+    resolved_tool_args = tool_args
+    resolved_tools = tools
+    if has_self_instruction:
+        resolved_tool_name = SELF_CALL_TOOL_NAME
+        resolved_tool_args = {"prompt": normalized_self_instruction}
+        resolved_tools = None
+
     success = await scheduler.add_task(
         task_id=task_id,
-        tool_name=tool_name or (tools[0]["tool_name"] if tools else ""),
-        tool_args=tool_args or (tools[0]["tool_args"] if tools else {}),
+        tool_name=resolved_tool_name
+        or (resolved_tools[0]["tool_name"] if resolved_tools else ""),
+        tool_args=resolved_tool_args
+        or (resolved_tools[0]["tool_args"] if resolved_tools else {}),
         cron_expression=cron_expression,
         target_id=target_id,
         target_type=target_type,
         task_name=task_name,
         max_executions=max_executions,
-        tools=tools,
+        tools=resolved_tools,
         execution_mode=execution_mode,
+        self_instruction=normalized_self_instruction if has_self_instruction else None,
     )
 
     if success:
         name_info = f" '{task_name}'" if task_name else ""
         max_info = f"，最多执行 {max_executions} 次" if max_executions else ""
 
+        if has_self_instruction:
+            return (
+                f"定时任务{name_info}已成功添加 (ID: {task_id})。\n"
+                f"将在 '{cron_expression}' 时间调用未来的自己，指令：{normalized_self_instruction}{max_info}。"
+            )
         if has_multi_tools and tools:
             mode_info = (
                 f"，执行模式：{'并行' if execution_mode == 'parallel' else '串行'}"
