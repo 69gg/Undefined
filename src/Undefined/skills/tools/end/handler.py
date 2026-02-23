@@ -31,14 +31,41 @@ _NEGATIVE_OUTBOUND_HINTS = (
 )
 
 
-def _parse_force_flag(value: Any) -> bool:
-    """force 仅接受布尔值，其他类型一律视为 False。"""
-    return value if isinstance(value, bool) else False
+_TRUE_BOOL_TOKENS = {"1", "true", "yes", "y", "on"}
+_FALSE_BOOL_TOKENS = {"0", "false", "no", "n", "off", ""}
+
+
+def _coerce_bool(value: Any) -> tuple[bool, bool]:
+    """宽松布尔解析。
+
+    返回:
+        (parsed_value, recognized)
+    """
+    if isinstance(value, bool):
+        return value, True
+
+    if isinstance(value, int):
+        return value != 0, True
+
+    if isinstance(value, str):
+        token = value.strip().lower()
+        if token in _TRUE_BOOL_TOKENS:
+            return True, True
+        if token in _FALSE_BOOL_TOKENS:
+            return False, True
+
+    return False, False
+
+
+def _parse_force_flag(value: Any) -> tuple[bool, bool]:
+    """force 支持宽松布尔解析（字符串大小写、0/1 等）。"""
+    return _coerce_bool(value)
 
 
 def _is_true_flag(value: Any) -> bool:
-    """上下文标记仅接受布尔 True。"""
-    return isinstance(value, bool) and value
+    """上下文标记采用宽松布尔解析。"""
+    parsed, _recognized = _coerce_bool(value)
+    return parsed
 
 
 def _was_message_sent_this_turn(context: Dict[str, Any]) -> bool:
@@ -115,10 +142,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     # 兼容旧版 summary 字段
     summary = action_summary
     force_raw = args.get("force", False)
-    force = _parse_force_flag(force_raw)
-    if "force" in args and not isinstance(force_raw, bool):
+    force, force_recognized = _parse_force_flag(force_raw)
+    if "force" in args and not force_recognized:
         logger.warning(
-            "[end工具] force 参数类型非法，已按 False 处理: type=%s request_id=%s",
+            "[end工具] force 参数无法识别，已按 False 处理: value=%r type=%s request_id=%s",
+            force_raw,
             type(force_raw).__name__,
             context.get("request_id", "-"),
         )
