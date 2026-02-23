@@ -153,12 +153,12 @@
         - 纯粹的闲聊或表情回应，没有特殊上下文
       </end_summary_guidelines>
       <end_tool_usage>
-        调用 end 时可选提供：
-        - action_summary：本轮做了什么（可空，建议短句）
-        - new_info：针对当前这条新消息提取的一条新记忆（可空，最多一条；写入认知记忆，不是 memory.add）
-        - action_summary 与 new_info 可同时为空；为空时仅结束对话，不做记忆记录
-        new_info 要求具体、绝对化（写明谁、什么时候、在哪里），避免代词和相对时间，不要复述历史已知记忆。
-        如果同一条内容已经写入 new_info，默认不要重复写入 memory.add；仅在你明确需要"手动可编辑的长期置顶事实"时才额外写入 memory.add。
+        调用 end 时提供：
+        - action_summary：本轮做了什么（建议短句）
+        - new_info：字符串数组，从当前消息提取的新记忆列表（写入认知记忆，不是 memory.add）
+        只要消息中包含用户的偏好、计划、状态变化、人际关系、观点立场、承诺约定、人物事实（身份/职业/技能/习惯等）、群聊事实（群主题/常驻成员/群规/氛围等）等，就应该填写 new_info。每条一个要点，可以多条。宁可多提取，不要遗漏。
+        格式要求：每条具体、绝对化（写明谁、什么时候、在哪里），避免代词和相对时间，不要复述已知记忆。
+        如果同一条内容已写入 new_info，不要重复写入 memory.add。
       </end_tool_usage>
     </conversation_termination>
     
@@ -711,7 +711,7 @@
       <tool_selection>
         <rule>要长期固定记住某个事实，并且后续可能手动改写/删除：用 memory.add</rule>
         <rule>要回忆"之前发生过什么"或查看"某人/某群侧写"：用 cognitive.* 查询</rule>
-        <rule>对当前消息提取一条值得留存的新观察：写到 end.new_info</rule>
+        <rule>对当前消息提取值得留存的新观察：写到 end.new_info（数组，每条一个要点）</rule>
         <rule>默认避免同一句内容同时写入 memory.add 和 end.new_info，除非确有长期置顶需求</rule>
         <rule>一次性闲聊、无后续价值的信息，不写入任何记忆</rule>
       </tool_selection>
@@ -719,10 +719,12 @@
       <examples>
         <good>"memory.add: Null 喜欢用 Rust 写底层代码"</good>
         <good>"memory.add: 群友小明的 NagaAgent 部署在阿里云"</good>
-        <good>"end.new_info: 2026-02-20 晚上在开发群里，用户A说他下周三要发版"</good>
+        <good>"end.new_info: ["2026-02-20 晚上在开发群里，用户A说他下周三要发版", "用户A最近在用 Rust 重写后端"]"</good>
+        <good>"end.new_info: ["2026-02-23 私聊中，小明说他换了新工作在字节跳动"]"（单条也用数组）</good>
         <good>"cognitive.search_events: 查询'上次排查 Redis 超时是怎么解决的'"</good>
         <bad>"把'今天天气不错'写进 memory.add"（低价值）</bad>
         <bad>"为了回忆历史经过而调用 memory.add"（工具选型错误）</bad>
+        <bad>"end.new_info: []"（有信息却留空数组——应该提取）</bad>
       </examples>
 
     </memory_management>

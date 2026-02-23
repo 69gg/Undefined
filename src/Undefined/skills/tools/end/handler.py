@@ -87,9 +87,9 @@ def _build_record_key(
     context: Dict[str, Any],
     *,
     action_summary: str,
-    new_info: str,
+    new_info: list[str],
     perspective: str,
-) -> tuple[str, ...]:
+) -> tuple[Any, ...]:
     return (
         str(context.get("request_id", "")).strip(),
         str(context.get("trigger_message_id", "")).strip(),
@@ -98,7 +98,7 @@ def _build_record_key(
         str(context.get("sender_id") or context.get("user_id") or "").strip(),
         perspective.strip(),
         action_summary.strip(),
-        new_info.strip(),
+        tuple(new_info),
     )
 
 
@@ -107,8 +107,13 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     action_summary = (
         action_summary_raw.strip() if isinstance(action_summary_raw, str) else ""
     )
-    new_info_raw = args.get("new_info", "")
-    new_info = new_info_raw.strip() if isinstance(new_info_raw, str) else ""
+    new_info_raw = args.get("new_info", [])
+    if isinstance(new_info_raw, str):
+        new_info = [new_info_raw.strip()] if new_info_raw.strip() else []
+    elif isinstance(new_info_raw, list):
+        new_info = [str(item).strip() for item in new_info_raw if str(item).strip()]
+    else:
+        new_info = []
     perspective_raw = args.get("perspective", "")
     perspective = perspective_raw.strip() if isinstance(perspective_raw, str) else ""
     # 兼容旧版 summary 字段

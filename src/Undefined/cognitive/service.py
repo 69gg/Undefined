@@ -54,14 +54,14 @@ class CognitiveService:
         return bool(self._config_getter().enabled)
 
     async def enqueue_job(
-        self, action_summary: str, new_info: str, context: dict[str, Any]
+        self, action_summary: str, new_info: list[str], context: dict[str, Any]
     ) -> str | None:
         action_summary_text = str(action_summary or "").strip()
-        new_info_text = str(new_info or "").strip()
+        new_info_items = [s for s in new_info if s.strip()] if new_info else []
         if not self.enabled:
             logger.info("[认知服务] 已禁用，跳过入队")
             return None
-        if not action_summary_text and not new_info_text:
+        if not action_summary_text and not new_info_items:
             logger.info("[认知服务] action_summary/new_info 均为空，跳过入队")
             return None
         ctx = RequestContext.current()
@@ -83,7 +83,7 @@ class CognitiveService:
         except (TypeError, ValueError):
             end_seq = 0
 
-        has_new_info = bool(new_info_text)
+        has_new_info = bool(new_info_items)
         message_ids = context.get("message_ids")
         if not isinstance(message_ids, list):
             message_ids = []
@@ -156,7 +156,7 @@ class CognitiveService:
             ),
             "message_ids": message_ids,
             "action_summary": action_summary_text,
-            "new_info": new_info_text,
+            "new_info": new_info_items,
             "has_new_info": has_new_info,
             "perspective": perspective,
             "profile_targets": profile_targets,
@@ -173,7 +173,7 @@ class CognitiveService:
             has_new_info,
             len(profile_targets),
             len(action_summary_text),
-            len(new_info_text),
+            len(new_info_items),
         )
         result: str | None = await self._job_queue.enqueue(job)
         logger.info("[认知服务] 入队完成: job_id=%s", result or "")

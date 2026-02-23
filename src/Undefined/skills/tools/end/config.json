@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "end",
-        "description": "结束当前对话。action_summary 记录 AI 本轮做了什么（可空，建议短句）；new_info 记录针对当前新消息提取的一条新记忆（可空，最多一条）。两者都可空，空时仅结束对话不写入认知队列。避免重复复述历史已知记忆。",
+        "description": "结束当前对话。action_summary 记录本轮做了什么（建议短句）；new_info 提取当前消息中值得记住的新信息（用户偏好/计划/状态/关系/观点/人物事实/群聊事实等，每条一个要点，尽量提取）。避免复述已知记忆。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -11,8 +11,9 @@
                     "description": "本轮做了什么（可空，建议短句）"
                 },
                 "new_info": {
-                    "type": "string",
-                    "description": "针对当前新消息提取的一条新记忆（可空，最多一条）"
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "从当前消息提取新记忆列表——用户偏好、计划、状态、关系、观点、人物事实（身份/职业/技能/习惯）、群聊事实（主题/成员/氛围）等，每条一个要点，只要对未来有参考价值就应填写。格式：具体、绝对化，写明谁/何时/何地。"
                 },
                 "summary": {
                     "type": "string",

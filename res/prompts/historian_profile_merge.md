@@ -32,7 +32,7 @@
 新事件：
 {canonical_text}
 
-新信息：
+新信息（可能包含多条）：
 {new_info}
 
 要求：
