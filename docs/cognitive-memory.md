@@ -354,6 +354,19 @@ data/cognitive/
 
 ## 运维
 
+### 更换嵌入模型
+
+更换嵌入模型（维度变化或模型升级）后，需要对向量库进行全量重嵌入。详见 [`scripts/reembed_cognitive.py`](../scripts/reembed_cognitive.py)。
+
+```bash
+# 1. 先在 config.toml 中更新 [models.embedding] 为新模型配置
+# 2. 停止机器人
+# 3. 执行重嵌入（建议先 dry-run 确认）
+uv run python scripts/reembed_cognitive.py --dry-run
+uv run python scripts/reembed_cognitive.py
+# 4. 重启机器人
+```
+
 ### 回退方式
 
 **级别 1：重启回退**（推荐，最安全）

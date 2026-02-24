@@ -76,6 +76,7 @@ Undefined 的功能极为丰富，为了让本页面不过于臃肿，我们将�
 - 📚 **[本地知识库接入方案](docs/knowledge.md)**：为 AI 挂载本地文本资产，轻松拥抱企业/个人专属 QA。
 - 🔄 **[多模型并发竞技](docs/multi-model.md)**：配置多个异构模型，让它们并行运算、同台 PK，从中择优响应。
 - ⌨️ **[命令系统与斜杠指令](docs/slash-commands.md)**：查阅所有斜杠指令(`/*`)的详细用法，并学习如何轻松扩展你自己的指令系统。
+- 🔧 **[运维脚本](scripts/README.md)**：嵌入模型更换后的向量库重嵌入等维护工具。
 - 👨‍💻 **[开发者与拓展中心](docs/development.md)**：代码结构剖析和开发新 Agent 的流程参考及自检命令。
   - **[核心技能系统 (Skills) 解析](src/Undefined/skills/README.md)**：全景式掌握什么是 Skills 架构、怎样定制原子工具与子智能体。
   - **[callable.json 共享授权说明](docs/callable.md)**：细粒度管控 Agent 之间的相互调用与工具越权防范。
