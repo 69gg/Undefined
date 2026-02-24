@@ -653,6 +653,8 @@ class HistorianWorker:
             force="true" if _coerce_bool(job.get("force", False)) else "false",
             action_summary=memo,
             new_info=observations,
+            memo=memo,
+            observations=observations,
             source_message=source_message or "（无）",
             recent_messages=recent_messages_text or "（无）",
         )
@@ -857,6 +859,11 @@ class HistorianWorker:
                 if isinstance(job.get("observations", job.get("new_info")), list)
                 else str(job.get("observations", job.get("new_info", "")))
             ),
+            observations=_escape_braces(
+                "\n".join(job.get("observations", job.get("new_info", [])))
+                if isinstance(job.get("observations", job.get("new_info")), list)
+                else str(job.get("observations", job.get("new_info", "")))
+            ),
             target_entity_type=entity_type,
             target_entity_id=entity_id,
             target_perspective=perspective,
@@ -876,6 +883,7 @@ class HistorianWorker:
             action_summary=_escape_braces(
                 str(job.get("memo", job.get("action_summary", "")))
             ),
+            memo=_escape_braces(str(job.get("memo", job.get("action_summary", "")))),
             source_message=_escape_braces(str(job.get("source_message", ""))),
             recent_messages=_escape_braces(
                 "\n".join(
