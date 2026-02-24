@@ -142,6 +142,8 @@ recent_message_line_max_len = 240   # 每条最近消息参考的最大长度
 source_message_max_len = 800        # 当前触发消息原文的最大长度
 ```
 
+自动注入认知记忆时，系统会优先使用当前帧 `<content>` 作为检索 query；当消息较短时会追加少量会话语境（群/私聊、@触发、发送者、群名）以提升召回稳定性。详见 [《认知记忆系统详解》](cognitive-memory.md)。
+
 以上 `cognitive.historian.*` 参数支持热更新，可在不中断服务的情况下微调史官上下文密度。
 
 ---

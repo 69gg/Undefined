@@ -30,6 +30,8 @@ _CURRENT_MESSAGE_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 _XML_ATTR_RE = re.compile(r'(?P<key>[a-zA-Z_][a-zA-Z0-9_-]*)="(?P<value>[^"]*)"')
+_COGNITIVE_QUERY_SHORT_THRESHOLD = 20
+_COGNITIVE_CONTEXT_VALUE_MAX_LEN = 18
 
 
 class PromptBuilder:
@@ -283,15 +285,20 @@ class PromptBuilder:
                     str(extra_context.get("sender_id", "")) if extra_context else None
                 )
             )
+            cognitive_query, query_enhanced = self._build_cognitive_query(
+                question, extra_context
+            )
             logger.info(
-                "[AI会话] 开始自动检索认知记忆: query_len=%s group=%s user=%s sender=%s",
+                "[AI会话] 开始自动检索认知记忆: raw_query_len=%s effective_query_len=%s query_enhanced=%s group=%s user=%s sender=%s",
                 len(question),
+                len(cognitive_query),
+                query_enhanced,
                 resolved_group_id or "",
                 resolved_user_id or "",
                 resolved_sender_id or "",
             )
             cognitive_context = await self._cognitive_service.build_context(
-                query=question,
+                query=cognitive_query,
                 group_id=resolved_group_id,
                 user_id=resolved_user_id,
                 sender_id=resolved_sender_id,
@@ -576,6 +583,55 @@ class PromptBuilder:
                 )
         except Exception as exc:
             logger.warning(f"自动获取历史消息失败: {exc}")
+
+    @staticmethod
+    def _normalize_cognitive_context_value(value: Any) -> str:
+        text = " ".join(str(value or "").split()).strip()
+        if len(text) <= _COGNITIVE_CONTEXT_VALUE_MAX_LEN:
+            return text
+        return text[: _COGNITIVE_CONTEXT_VALUE_MAX_LEN - 3].rstrip() + "..."
+
+    def _build_cognitive_query(
+        self, question: str, extra_context: dict[str, Any] | None = None
+    ) -> tuple[str, bool]:
+        question_text = str(question or "").strip()
+        signature = self._extract_current_message_signature(question_text)
+        current_content = str(signature.get("content", "")).strip()
+        base_query = current_content or question_text
+        if not base_query:
+            return "", False
+
+        # 优先使用当前帧原始消息内容；仅在短消息时追加少量会话语境，降低“这/那个”类指代丢失。
+        if (
+            not current_content
+            or len(current_content) > _COGNITIVE_QUERY_SHORT_THRESHOLD
+        ):
+            return base_query, False
+
+        context_parts: list[str] = []
+        if extra_context:
+            if bool(extra_context.get("is_private_chat", False)):
+                context_parts.append("会话:私聊")
+            elif str(extra_context.get("group_id", "")).strip():
+                context_parts.append("会话:群聊")
+            if bool(extra_context.get("is_at_bot", False)):
+                context_parts.append("触发:@机器人")
+
+            sender_name = self._normalize_cognitive_context_value(
+                extra_context.get("sender_name", "")
+            )
+            if sender_name:
+                context_parts.append(f"发送者:{sender_name}")
+
+            group_name = self._normalize_cognitive_context_value(
+                extra_context.get("group_name", "")
+            )
+            if group_name:
+                context_parts.append(f"群:{group_name}")
+
+        if not context_parts:
+            return base_query, False
+        return f"{base_query}\n语境: {'; '.join(context_parts)}", True
 
     def _extract_current_message_signature(self, question: str) -> dict[str, str]:
         matched = _CURRENT_MESSAGE_RE.search(str(question or ""))

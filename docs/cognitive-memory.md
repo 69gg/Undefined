@@ -153,6 +153,19 @@ final_score = sim × (1 + boost × decay)
 - `half_life_seconds = time_decay_half_life_days × 86400`。
 - `time_from/time_to` 为硬过滤条件，先过滤再排序。
 
+### 自动注入场景的 Query 构造
+
+每轮对话自动注入认知记忆（`PromptBuilder -> cognitive.build_context`）时，检索 `query` 的构造规则如下：
+
+1. 优先提取当前帧 `<message><content>...</content></message>` 的 `content` 作为查询文本；
+2. 若无法提取（例如非 XML 纯文本），回退到原始 `question`；
+3. 当 `content` 较短（当前实现阈值：`<= 20` 字）时，追加一行轻量语境（群/私聊、是否 `@`、发送者、群名）以缓解“这/那个”类指代查询的漏召回。
+
+说明：
+
+- 该规则影响自动注入路径下的语义召回与 rerank（两者使用同一 query）。
+- 手动工具 `cognitive.search_events` / `cognitive.search_profiles` 仍使用调用方显式传入的 `query`。
+
 ### 用户/群侧写（Markdown + YAML Frontmatter）
 
 文件路径：`data/cognitive/profiles/users/{user_id}.md` / `groups/{group_id}.md`
