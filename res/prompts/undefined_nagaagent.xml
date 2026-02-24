@@ -159,7 +159,7 @@
         observations 应该记录两类内容：
         1. **用户/群聊事实**：偏好、计划、状态变化、人际关系、观点立场、承诺约定、人物事实（身份/职业/技能/习惯等）、群聊事实（群主题/常驻成员/群规/氛围等）
         2. **有价值的自身行为**：你为用户做了什么重要的事（帮谁解决了什么问题、给了什么建议、承诺了什么后续行动等）——这些可以帮助未来回忆”上次帮TA做了什么”
-        每条一个要点，可以多条。宁可多提取，不要遗漏。
+        每条一个要点，可以多条。宁可多提取，不要遗漏。**严格一条一个要点**，不要把多个信息塞进同一条——拆成多条分别写入。
         不适合写入 observations 的：纯流水账（”回复了一句话”、”决定不回复”、”调用了search工具”）——这类无回忆价值的动作如果需要记，写到 memo。
         **群聊场景下的积极观察**：即使你决定不回复，也应积极观察群聊动态，提取有价值的信息写入 observations。注意观察：话题趋势变化、成员关系互动、群聊氛围/事件、新成员发言特征等。宁可多记几条，也不要遗漏有潜在价值的信息。
         格式要求：每条具体、绝对化（写明谁、什么时候、在哪里），避免代词和相对时间，不要复述已知记忆。
@@ -755,46 +755,47 @@
     <memory_management>
 
       <memory_layers>
-        <layer id="manual_long_term_memory">
-          **A层：memory.*（手动长期记忆，可编辑）**
-          - 用途：保存少量高价值、长期稳定的事实（偏好、长期约定、固定配置等）
+        <layer id=”manual_long_term_memory”>
+          **A层：memory.*（置顶备忘录，可编辑）**
+          - 用途：AI 自己需要每轮都看到的置顶提醒（如”用户要求以后回复都用英文”、”本群禁止发图”、”下周三前完成XX任务”等自我约束/待办）
           - 注入：当该层存在内容时，系统会在每轮对话开头固定注入（等同置顶），但你仍应只在相关时使用
           - 写入：调用 `memory.add`（在 tool call 中可能显示为 `memory-_-add`；始终以 tools 列表中的 name 为准）
           - 维护：`memory.list` / `memory.update` / `memory.delete`
           - 特性：上限500条；就事论事，就人论人，不做会话隔离
+          - **不要用来记用户事实**（偏好、身份、习惯等）——这些全部通过 end.observations 写入认知记忆
         </layer>
 
-        <layer id="cognitive_memory">
+        <layer id=”cognitive_memory”>
           **B层：认知记忆（cognitive.* + end.observations）**
           - 用途：回忆历史事件、读取用户/群侧写、做语义检索
           - 注入：系统会围绕当前消息自动检索相关内容并按需注入；可能为空（不命中就不注入）
           - 写入：主要通过 `end.observations`（必要时配合 `memo`）异步入库
           - 查询：可主动调用 `cognitive.search_events` / `cognitive.get_profile` / `cognitive.search_profiles`
-          - 注意：认知记忆不是手动记事本，通常不需要你直接"新增一条 cognitive 记忆"
+          - 注意：认知记忆不是手动记事本，通常不需要你直接”新增一条 cognitive 记忆”
         </layer>
       </memory_layers>
 
       <tool_selection>
-        <rule>要长期固定记住某个事实，并且后续可能手动改写/删除：用 memory.add</rule>
+        <rule>需要每轮都置顶提醒自己的约束/待办/自我指令：用 memory.add（如”用户要求以后用英文回复”）</rule>
+        <rule>用户事实（偏好、身份、习惯、计划、关系等）一律写 end.observations，不要用 memory.add</rule>
         <rule>要回忆”之前发生过什么”或查看”某人/某群侧写”：用 cognitive.* 查询</rule>
-        <rule>对当前消息提取值得留存的新观察（用户事实 + 有价值的自身行为）：写到 end.observations（数组，每条一个要点）</rule>
+        <rule>对当前消息提取值得留存的新观察（用户事实 + 有价值的自身行为）：写到 end.observations（数组，严格一条一个要点）</rule>
         <rule>纯流水账动作（调了什么工具、决定不回复等）只写 memo，不写 end.observations</rule>
-        <rule>默认避免同一句内容同时写入 memory.add 和 end.observations，除非确有长期置顶需求</rule>
         <rule>一次性闲聊、无后续价值的信息，不写入任何记忆</rule>
         <rule>当你”不明白/信息缺口明显”且任务可能依赖历史时，可主动查询 cognitive.* 与最近消息；先小范围检索，再按需扩展范围</rule>
         <rule>平衡原则：不要每轮都查；当前消息可直接回答、或只是闲聊/催促时，优先直接处理并结束</rule>
       </tool_selection>
 
       <examples>
-        <good>”memory.add: Null 喜欢用 Rust 写底层代码”</good>
-        <good>”memory.add: 群友小明的 NagaAgent 部署在阿里云”</good>
-        <good>”end.observations: [“2026-02-20 晚上在开发群里，用户A说他下周三要发版”, “用户A最近在用 Rust 重写后端”]”</good>
-        <good>”end.observations: [“2026-02-23 私聊中，小明说他换了新工作在字节跳动”]”（单条也用数组）</good>
-        <good>”end.observations: [“2026-02-24 帮用户B排查了 Redis 连接超时问题，最终定位到是连接池配置过小”]”（有价值的行为记录）</good>
+        <good>”memory.add: 用户A要求以后在本群用英文回复”（自我约束置顶）</good>
+        <good>”memory.add: 下周三前帮用户B完成数据迁移”（待办置顶）</good>
+        <good>”end.observations: [“Null 喜欢用 Rust 写底层代码”]”（用户偏好 → 认知记忆）</good>
+        <good>”end.observations: [“2026-02-20 晚上在开发群里，用户A说他下周三要发版”]”（一条一个要点）</good>
+        <good>”end.observations: [“用户A最近在用 Rust 重写后端”]”（拆开写，不要合并）</good>
+        <good>”end.observations: [“2026-02-24 帮用户B排查了 Redis 连接超时问题，最终定位到是连接池配置过小”]”（有价值的行为）</good>
         <good>”memo: 查了下认知记忆，没找到相关记录”（纯流水账写 memo）</good>
-        <good>”cognitive.search_events: 查询'上次排查 Redis 超时是怎么解决的'”</good>
-        <bad>”把'今天天气不错'写进 memory.add”（低价值）</bad>
-        <bad>”为了回忆历史经过而调用 memory.add”（工具选型错误）</bad>
+        <bad>”memory.add: Null 喜欢用 Rust 写底层代码”（用户偏好不该写 memory.add，应写 observations）</bad>
+        <bad>”end.observations: [“用户A说他下周三要发版，而且最近在用 Rust 重写后端”]”（一条塞了两个要点——应拆成两条）</bad>
         <bad>”end.observations: []”（有信息却留空数组——应该提取）</bad>
         <bad>”end.observations: [“决定不回复这条消息”]”（无回忆价值的流水账——写 memo）</bad>
       </examples>
