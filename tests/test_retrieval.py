@@ -10,7 +10,7 @@ from openai import AsyncOpenAI
 
 from Undefined.ai.retrieval import RetrievalRequester
 from Undefined.ai.tokens import TokenCounter
-from Undefined.config.models import EmbeddingModelConfig
+from Undefined.config.models import EmbeddingModelConfig, RerankModelConfig
 
 
 class _DummyCounter:
@@ -99,3 +99,39 @@ async def test_embed_passes_dimensions_to_openai_sdk() -> None:
     assert result == [[0.1, 0.2, 0.3]]
     assert fake_client.embeddings.last_kwargs is not None
     assert fake_client.embeddings.last_kwargs["dimensions"] == 768
+
+
+class _FakeRerankClient:
+    def __init__(self) -> None:
+        self.last_post_path: str | None = None
+        self.last_post_body: dict[str, Any] | None = None
+
+    async def post(self, path: str, *, cast_to: object, body: dict[str, Any]) -> Any:
+        self.last_post_path = path
+        self.last_post_body = dict(body)
+        return {"results": [{"index": 1, "relevance_score": 0.88}]}
+
+
+@pytest.mark.asyncio
+async def test_rerank_disables_return_documents_in_request() -> None:
+    fake_client = _FakeRerankClient()
+    requester = RetrievalRequester(
+        get_openai_client=lambda _cfg: cast(AsyncOpenAI, fake_client),
+        response_to_dict=lambda response: cast(dict[str, Any], response),
+        get_token_counter=lambda _model: cast(TokenCounter, _DummyCounter()),
+        record_usage=lambda **_kwargs: None,
+    )
+    cfg = RerankModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="text-rerank-001",
+        queue_interval_seconds=1.0,
+    )
+    documents = ["doc A", "doc B"]
+
+    result = await requester.rerank(cfg, query="hello", documents=documents, top_n=1)
+
+    assert fake_client.last_post_path == "/rerank"
+    assert fake_client.last_post_body is not None
+    assert fake_client.last_post_body["return_documents"] is False
+    assert result == [{"index": 1, "relevance_score": 0.88, "document": "doc B"}]
