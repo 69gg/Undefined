@@ -18,6 +18,11 @@ class _DummyCounter:
         return 0
 
 
+class _CharEstimateCounter:
+    def count(self, text: str) -> int:
+        return len(str(text or "")) // 3 + 1
+
+
 def _make_requester(response_to_dict: Any | None = None) -> RetrievalRequester:
     return RetrievalRequester(
         get_openai_client=lambda _cfg: cast(AsyncOpenAI, object()),
@@ -135,3 +140,28 @@ async def test_rerank_disables_return_documents_in_request() -> None:
     assert fake_client.last_post_body is not None
     assert fake_client.last_post_body["return_documents"] is False
     assert result == [{"index": 1, "relevance_score": 0.88, "document": "doc B"}]
+
+
+@pytest.mark.asyncio
+async def test_rerank_falls_back_to_local_estimation_when_usage_is_zero() -> None:
+    fake_client = _FakeRerankClient()
+    records: list[dict[str, Any]] = []
+    requester = RetrievalRequester(
+        get_openai_client=lambda _cfg: cast(AsyncOpenAI, fake_client),
+        response_to_dict=lambda response: cast(dict[str, Any], response),
+        get_token_counter=lambda _model: cast(TokenCounter, _CharEstimateCounter()),
+        record_usage=lambda **kwargs: records.append(dict(kwargs)),
+    )
+    cfg = RerankModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="text-rerank-001",
+        queue_interval_seconds=1.0,
+    )
+
+    await requester.rerank(cfg, query="hello", documents=["doc A", "doc B"], top_n=1)
+
+    assert records
+    usage = records[-1]
+    assert usage.get("call_type") == "rerank"
+    assert int(usage.get("total_tokens", 0)) > 0

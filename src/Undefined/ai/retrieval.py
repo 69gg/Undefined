@@ -58,6 +58,12 @@ class RetrievalRequester:
         prompt_tokens, completion_tokens, total_tokens = self._extract_usage(
             response_dict
         )
+        if total_tokens <= 0:
+            prompt_tokens, completion_tokens, total_tokens = self._estimate_usage(
+                model_name=model_config.model_name,
+                prompt_text="\n".join(texts),
+                completion_data=None,
+            )
 
         self._record_usage(
             model_name=model_config.model_name,
@@ -120,6 +126,12 @@ class RetrievalRequester:
         prompt_tokens, completion_tokens, total_tokens = self._extract_usage(
             response_dict
         )
+        if total_tokens <= 0:
+            prompt_tokens, completion_tokens, total_tokens = self._estimate_usage(
+                model_name=model_config.model_name,
+                prompt_text=json.dumps(request_body, ensure_ascii=False, default=str),
+                completion_data=results,
+            )
 
         self._record_usage(
             model_name=model_config.model_name,
