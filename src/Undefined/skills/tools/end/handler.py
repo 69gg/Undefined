@@ -315,7 +315,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return (
             "拒绝结束对话：你填写了 memo（本轮行动备忘）但本轮未发送任何消息或媒体内容。"
             "请先发送消息给用户，或使用 force=true 强制结束。"
-            "若本轮确实未做任何事，建议留空 memo 以避免记忆噪声。"
+            "若本轮确实未做任何事，建议留空 memo 以避免记忆噪声。当然，你要存也没关系。这只是个提示，防止你忘了。"
             "若你获取到了新信息，考虑填写 observations 字段以保存这些信息，而不是放在 memo 里。"
         )
 
