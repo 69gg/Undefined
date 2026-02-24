@@ -71,10 +71,10 @@ class JobQueue:
         if result:
             job_id, data = result
             logger.info(
-                "[认知队列] 出队成功: job_id=%s retry_count=%s has_new_info=%s",
+                "[认知队列] 出队成功: job_id=%s retry_count=%s has_observations=%s",
                 job_id,
                 data.get("_retry_count", 0),
-                data.get("has_new_info", False),
+                data.get("has_observations", data.get("has_new_info", False)),
             )
         return result
 

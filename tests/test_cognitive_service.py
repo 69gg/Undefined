@@ -84,8 +84,8 @@ async def test_enqueue_job_keeps_historian_reference_fields() -> None:
     }
 
     job_id = await service.enqueue_job(
-        action_summary="",
-        new_info=["Null(1708213363)说发现了竞态问题"],
+        memo="",
+        observations=["Null(1708213363)说发现了竞态问题"],
         context=context,
     )
 
@@ -96,6 +96,10 @@ async def test_enqueue_job_keeps_historian_reference_fields() -> None:
         "[2026-02-23 19:02:11] 洛泫(120218451): Null 说这个是竞态问题"
     ]
     assert queue.last_job.get("force") is False
+    # 验证 job 字典中使用新 key
+    assert "memo" in queue.last_job
+    assert "observations" in queue.last_job
+    assert "has_observations" in queue.last_job
 
 
 @pytest.mark.asyncio
@@ -111,8 +115,8 @@ async def test_enqueue_job_keeps_force_flag() -> None:
     context: dict[str, Any] = {"request_id": "req-force-gate"}
 
     await service.enqueue_job(
-        action_summary="测试",
-        new_info=[],
+        memo="测试",
+        observations=[],
         context=context,
         force=True,
     )

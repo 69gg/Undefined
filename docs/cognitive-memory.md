@@ -2,10 +2,11 @@
 
 ## 概述
 
-认知记忆系统是 Undefined 的长期记忆架构，由两部分组成：
+认知记忆系统是 Undefined 的三层分层记忆架构，模拟人类记忆机制：
 
-- **事件记忆**：每轮对话结束时，AI 通过 `end` 工具提交 `action_summary`/`new_info`（可空），后台史官异步改写为绝对化事件并存入 ChromaDB 向量库，支持语义检索。
-- **用户/群侧写**：当对话中出现新信息（偏好、身份、习惯等）时，史官自动合并更新 Markdown 侧写文件，下次对话时注入 prompt。
+- **短期记忆**（`end.memo`）：每轮对话结束自动记录行动备忘，最近 N 条始终注入，保持短期连续性，零配置开箱即用。
+- **认知记忆**（`end.observations` + `cognitive.*`）：核心层，AI 在每轮对话中主动观察并提取用户/群聊事实（`observations`），经后台史官异步改写为绝对化事件并存入 ChromaDB 向量库，支持语义检索；当对话中出现新信息（偏好、身份、习惯等）时，史官自动合并更新 Markdown 侧写文件，下次对话时注入 prompt。
+- **手动长期记忆**（`memory.*`）：AI 手动维护的少量高价值置顶事实，每轮固定注入，支持增删改查。
 
 与旧 `end_summaries` 的区别：
 
@@ -61,8 +62,8 @@ AI 调用 `end` 工具结束对话时，只做一次文件落盘（p95 < 5ms）�
 
 `end` 字段语义：
 
-- `action_summary`：记录 AI 本轮做了什么，建议短句，可空。
-- `new_info`：针对当前新消息提取的新记忆列表（0..N 条），可空；每条会独立改写与入库。
+- `memo`：记录 AI 本轮做了什么，建议短句，可空。
+- `observations`：针对当前新消息提取的新记忆列表（0..N 条），可空；每条会独立改写与入库。
 - 两字段都为空时，仅结束会话，不写认知队列。
 
 ### 后台史官流水线
@@ -81,8 +82,8 @@ processing/{job_id}.json
     │
     ▼ ChromaDB upsert（events collection）
     │
-    ▼ 若有 new_info → 可按 group/sender 等视角生成多条事件记录
-    ▼ 若有 new_info → tool_call 结构化提取 → 更新侧写文件 + 向量库
+    ▼ 若有 observations → 可按 group/sender 等视角生成多条事件记录
+    ▼ 若有 observations → tool_call 结构化提取 → 更新侧写文件 + 向量库
     │
     ▼ complete（删除 processing 文件）
         异常 → 重试次数 < job_max_retries？

@@ -236,7 +236,7 @@ class PromptBuilder:
                             "【memory.* 手动长期记忆（可编辑）】\n"
                             f"{memory_text}\n\n"
                             "注意：以上是你通过 memory.add 等工具主动维护的长期事实清单。"
-                            "它与认知记忆（cognitive.* / end.new_info 产生的事件与侧写）是两套机制。"
+                            "它与认知记忆（cognitive.* / end.observations 产生的事件与侧写）是两套机制。"
                             "请根据任务选择合适的记忆工具，避免混用。"
                         ),
                     }

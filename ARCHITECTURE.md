@@ -233,7 +233,7 @@ graph TB
     PromptBuilder -->|"注入认知"| CognitiveService
     PromptBuilder -->|"注入历史"| HistoryManager
     T_End -->|"写短期摘要"| EndSummaryStorage
-    T_End -->|"enqueue_job(action/new_info)"| CognitiveService
+    T_End -->|"enqueue_job(memo/observations)"| CognitiveService
     CognitiveService -->|"入队"| CognitiveJobQueue
     CognitiveJobQueue -->|"dequeue / requeue"| CognitiveHistorian
     CognitiveHistorian -.->|"background rewrite / merge"| LLM_API

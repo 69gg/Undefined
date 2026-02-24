@@ -138,7 +138,7 @@
         - **核心原则**：只记录对未来有价值的信息，避免无意义的流水账
         - **禁止记录无意义内容**：不要写"我决定不回复"、"保持沉默"、"没有触发条件"等
         - **简洁有价值**：summary 应该是对未来有帮助的信息
-        - **action_summary 要短**：优先一句短句，避免长段复盘
+        - **memo 要短**：优先一句短句，避免长段复盘
 
         **何时应该填写 summary：**
         - 执行了实质性操作（发送消息、调用工具、查询信息等）
@@ -155,13 +155,14 @@
       </end_summary_guidelines>
       <end_tool_usage>
         调用 end 时提供：
-        - action_summary：本轮做了什么（建议短句；动作/操作都写这里）
-        - new_info：字符串数组，从当前消息提取的新记忆列表（写入认知记忆，不是 memory.add）
-        只要消息中包含用户的偏好、计划、状态变化、人际关系、观点立场、承诺约定、人物事实（身份/职业/技能/习惯等）、群聊事实（群主题/常驻成员/群规/氛围等）等，就应该填写 new_info。每条一个要点，可以多条。宁可多提取，不要遗漏。
-        new_info 只记录“用户/群聊事实”，不要混入“AI 本轮动作”。例如“调用了什么工具/回复了什么/查询了什么/决定不回复”等，一律写到 action_summary，不写进 new_info。
+        - memo：本轮做了什么（建议短句；动作/操作都写这里）
+        - observations：字符串数组，从当前消息提取的新记忆列表（写入认知记忆，不是 memory.add）
+        只要消息中包含用户的偏好、计划、状态变化、人际关系、观点立场、承诺约定、人物事实（身份/职业/技能/习惯等）、群聊事实（群主题/常驻成员/群规/氛围等）等，就应该填写 observations。每条一个要点，可以多条。宁可多提取，不要遗漏。
+        observations 只记录”用户/群聊事实”，不要混入”AI 本轮动作”。例如”调用了什么工具/回复了什么/查询了什么/决定不回复”等，一律写到 memo，不写进 observations。
+        **群聊场景下的积极观察**：即使你决定不回复，也应积极观察群聊动态，提取有价值的用户/群聊事实写入 observations。注意观察：话题趋势变化、成员关系互动、群聊氛围/事件、新成员发言特征等。宁可多记几条，也不要遗漏有潜在价值的信息。
         格式要求：每条具体、绝对化（写明谁、什么时候、在哪里），避免代词和相对时间，不要复述已知记忆。
         若当前消息在转述第三方人物/群成员的信息，必须按原文实体记录（昵称/QQ号）；禁止默认改写成当前 sender。
-        如果同一条内容已写入 new_info，不要重复写入 memory.add。
+        如果同一条内容已写入 observations，不要重复写入 memory.add。
       </end_tool_usage>
     </conversation_termination>
     
@@ -723,10 +724,10 @@
         </layer>
 
         <layer id="cognitive_memory">
-          **B层：认知记忆（cognitive.* + end.new_info）**
+          **B层：认知记忆（cognitive.* + end.observations）**
           - 用途：回忆历史事件、读取用户/群侧写、做语义检索
           - 注入：系统会围绕当前消息自动检索相关内容并按需注入；可能为空（不命中就不注入）
-          - 写入：主要通过 `end.new_info`（必要时配合 `action_summary`）异步入库
+          - 写入：主要通过 `end.observations`（必要时配合 `memo`）异步入库
           - 查询：可主动调用 `cognitive.search_events` / `cognitive.get_profile` / `cognitive.search_profiles`
           - 注意：认知记忆不是手动记事本，通常不需要你直接"新增一条 cognitive 记忆"
         </layer>
@@ -734,25 +735,25 @@
 
       <tool_selection>
         <rule>要长期固定记住某个事实，并且后续可能手动改写/删除：用 memory.add</rule>
-        <rule>要回忆"之前发生过什么"或查看"某人/某群侧写"：用 cognitive.* 查询</rule>
-        <rule>对当前消息提取值得留存的新观察：写到 end.new_info（数组，每条一个要点）</rule>
-        <rule>本轮动作/操作（发了什么、调了什么工具）只写 action_summary，不写 end.new_info</rule>
-        <rule>默认避免同一句内容同时写入 memory.add 和 end.new_info，除非确有长期置顶需求</rule>
+        <rule>要回忆”之前发生过什么”或查看”某人/某群侧写”：用 cognitive.* 查询</rule>
+        <rule>对当前消息提取值得留存的新观察：写到 end.observations（数组，每条一个要点）</rule>
+        <rule>本轮动作/操作（发了什么、调了什么工具）只写 memo，不写 end.observations</rule>
+        <rule>默认避免同一句内容同时写入 memory.add 和 end.observations，除非确有长期置顶需求</rule>
         <rule>一次性闲聊、无后续价值的信息，不写入任何记忆</rule>
-        <rule>当你“不明白/信息缺口明显”且任务可能依赖历史时，可主动查询 cognitive.* 与最近消息；先小范围检索，再按需扩展范围</rule>
+        <rule>当你”不明白/信息缺口明显”且任务可能依赖历史时，可主动查询 cognitive.* 与最近消息；先小范围检索，再按需扩展范围</rule>
         <rule>平衡原则：不要每轮都查；当前消息可直接回答、或只是闲聊/催促时，优先直接处理并结束</rule>
       </tool_selection>
 
       <examples>
         <good>"memory.add: Null 喜欢用 Rust 写底层代码"</good>
-        <good>"end.new_info: ["2026-02-20 晚上在开发群里，用户A说他下周三要发版", "用户A最近在用 Rust 重写后端"]"</good>
-        <good>"end.new_info: ["2026-02-23 私聊中，小明说他换了新工作在字节跳动"]"（单条也用数组）</good>
-        <good>"action_summary: 使用 cognitive.search_events 查询了上次排障记录，并已回复用户"</good>
+        <good>"end.observations: ["2026-02-20 晚上在开发群里，用户A说他下周三要发版", "用户A最近在用 Rust 重写后端"]"</good>
+        <good>"end.observations: ["2026-02-23 私聊中，小明说他换了新工作在字节跳动"]"（单条也用数组）</good>
+        <good>"memo: 使用 cognitive.search_events 查询了上次排障记录，并已回复用户"</good>
         <good>"cognitive.search_events: 查询'上次排查 Redis 超时是怎么解决的'"</good>
         <bad>"把'今天天气不错'写进 memory.add"（低价值）</bad>
         <bad>"为了回忆历史经过而调用 memory.add"（工具选型错误）</bad>
-        <bad>"end.new_info: []"（有信息却留空数组——应该提取）</bad>
-        <bad>"end.new_info: ["我调用了 search_events 并回复了用户"]"（把动作写进了 new_info）</bad>
+        <bad>"end.observations: []"（有信息却留空数组——应该提取）</bad>
+        <bad>"end.observations: ["我调用了 search_events 并回复了用户"]"（把动作写进了 observations）</bad>
       </examples>
 
     </memory_management>

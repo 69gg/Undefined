@@ -239,8 +239,8 @@ def _build_location(context: Dict[str, Any]) -> EndSummaryLocation | None:
 def _build_record_key(
     context: Dict[str, Any],
     *,
-    action_summary: str,
-    new_info: list[str],
+    memo: str,
+    observations: list[str],
     perspective: str,
 ) -> tuple[Any, ...]:
     return (
@@ -250,27 +250,35 @@ def _build_record_key(
         str(context.get("group_id", "")).strip(),
         str(context.get("sender_id") or context.get("user_id") or "").strip(),
         perspective.strip(),
-        action_summary.strip(),
-        tuple(new_info),
+        memo.strip(),
+        tuple(observations),
     )
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
-    action_summary_raw = args.get("action_summary") or args.get("summary", "")
-    action_summary = (
-        action_summary_raw.strip() if isinstance(action_summary_raw, str) else ""
+    # memo 优先新名，fallback 旧名 action_summary 和 summary
+    memo_raw = (
+        args.get("memo")
+        if "memo" in args
+        else (args.get("action_summary") or args.get("summary", ""))
     )
-    new_info_raw = args.get("new_info", [])
-    if isinstance(new_info_raw, str):
-        new_info = [new_info_raw.strip()] if new_info_raw.strip() else []
-    elif isinstance(new_info_raw, list):
-        new_info = [str(item).strip() for item in new_info_raw if str(item).strip()]
+    memo = memo_raw.strip() if isinstance(memo_raw, str) else ""
+    # observations 优先新名，fallback 旧名 new_info
+    observations_raw = (
+        args.get("observations") if "observations" in args else args.get("new_info", [])
+    )
+    if isinstance(observations_raw, str):
+        observations = [observations_raw.strip()] if observations_raw.strip() else []
+    elif isinstance(observations_raw, list):
+        observations = [
+            str(item).strip() for item in observations_raw if str(item).strip()
+        ]
     else:
-        new_info = []
+        observations = []
     perspective_raw = args.get("perspective", "")
     perspective = perspective_raw.strip() if isinstance(perspective_raw, str) else ""
     # 兼容旧版 summary 字段
-    summary = action_summary
+    summary = memo
     force_raw = args.get("force", False)
     force, force_recognized = _parse_force_flag(force_raw)
     if "force" in args and not force_recognized:
@@ -283,8 +291,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     record_key = _build_record_key(
         context,
-        action_summary=action_summary,
-        new_info=new_info,
+        memo=memo,
+        observations=observations,
         perspective=perspective,
     )
     if context.get("_end_last_record_key") == record_key:
@@ -298,17 +306,17 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "对话已结束（重复记录已跳过）"
     context["_end_last_record_key"] = record_key
 
-    # action_summary 非空且本轮未发送消息时拒绝（force=true 可跳过）
+    # memo 非空且本轮未发送消息时拒绝（force=true 可跳过）
     if summary and not force and not _was_message_sent_this_turn(context):
         logger.warning(
             "[end工具] 拒绝执行：本轮未发送消息，request_id=%s",
             context.get("request_id", "-"),
         )
         return (
-            "拒绝结束对话：你填写了 action_summary（本轮行动记录）但本轮未发送任何消息或媒体内容。"
+            "拒绝结束对话：你填写了 memo（本轮行动备忘）但本轮未发送任何消息或媒体内容。"
             "请先发送消息给用户，或使用 force=true 强制结束。"
-            "若本轮确实未做任何事，建议留空 action_summary 以避免记忆噪声。"
-            "若你获取到了新信息，考虑填写 new_info 字段以保存这些信息，而不是放在 action_summary 里。"
+            "若本轮确实未做任何事，建议留空 memo 以避免记忆噪声。"
+            "若你获取到了新信息，考虑填写 observations 字段以保存这些信息，而不是放在 memo 里。"
         )
 
     if summary:
@@ -341,17 +349,17 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
         logger.info("保存end记录: %s...", summary[:50])
     else:
-        logger.info("[end工具] action_summary 为空，跳过 end 摘要写入")
+        logger.info("[end工具] memo 为空，跳过 end 摘要写入")
 
     # 若 cognitive 启用，入队 memory_job
     cognitive_service = context.get("cognitive_service")
     if perspective:
         context["memory_perspective"] = perspective
-    if cognitive_service and (action_summary or new_info):
+    if cognitive_service and (memo or observations):
         _inject_historian_reference_context(context)
         job_id = await cognitive_service.enqueue_job(
-            action_summary=action_summary,
-            new_info=new_info,
+            memo=memo,
+            observations=observations,
             context=context,
             force=force,
         )

@@ -307,18 +307,12 @@ class HistorianWorker:
             else:
                 is_absolute = False
                 if entity_drift_ids:
-                    fallback_text = (
-                        str(job.get("new_info", "")).strip()
-                        or str(job.get("action_summary", "")).strip()
+                    logger.warning(
+                        "[史官] 任务 %s 实体ID漂移未修复，保留最后一次AI改写结果: ids=%s preview=%s",
+                        job_id,
+                        entity_drift_ids,
+                        _preview_text(canonical),
                     )
-                    if fallback_text:
-                        logger.warning(
-                            "[史官] 任务 %s 实体ID漂移未修复，回退使用原始摘要: ids=%s preview=%s",
-                            job_id,
-                            entity_drift_ids,
-                            _preview_text(fallback_text),
-                        )
-                        canonical = fallback_text
                 logger.warning(
                     "[史官] 任务 %s 绝对化失败，降级写入: final_hits=%s id_drift=%s preview=%s",
                     job_id,
@@ -330,24 +324,32 @@ class HistorianWorker:
 
     async def _process_job(self, job_id: str, job: dict[str, Any]) -> None:
         logger.info(
-            "[史官] 开始处理任务 %s: user=%s group=%s sender=%s perspective=%s has_new_info=%s profile_targets=%s",
+            "[史官] 开始处理任务 %s: user=%s group=%s sender=%s perspective=%s has_observations=%s profile_targets=%s",
             job_id,
             job.get("user_id", ""),
             job.get("group_id", ""),
             job.get("sender_id", ""),
             job.get("perspective", ""),
-            job.get("has_new_info", False),
+            job.get("has_observations", job.get("has_new_info", False)),
             len(job.get("profile_targets", []) or []),
         )
 
-        # 兼容旧版 string 格式
-        raw_new_info = job.get("new_info", [])
-        if isinstance(raw_new_info, str):
-            new_info_items = [raw_new_info.strip()] if raw_new_info.strip() else []
-        elif isinstance(raw_new_info, list):
-            new_info_items = [str(s).strip() for s in raw_new_info if str(s).strip()]
+        # 兼容旧版：优先 observations，fallback new_info
+        raw_observations = (
+            job.get("observations")
+            if "observations" in job
+            else job.get("new_info", [])
+        )
+        if isinstance(raw_observations, str):
+            observation_items = (
+                [raw_observations.strip()] if raw_observations.strip() else []
+            )
+        elif isinstance(raw_observations, list):
+            observation_items = [
+                str(s).strip() for s in raw_observations if str(s).strip()
+            ]
         else:
-            new_info_items = []
+            observation_items = []
 
         base_metadata: dict[str, Any] = {
             "request_id": job.get("request_id", ""),
@@ -368,17 +370,17 @@ class HistorianWorker:
 
         canonicals: list[str] = []
 
-        if new_info_items:
-            # 每条 new_info 独立改写+入库
-            for idx, info_item in enumerate(new_info_items):
-                sub_job = {**job, "new_info": info_item}
-                event_id = f"{job_id}_{idx}" if len(new_info_items) > 1 else job_id
+        if observation_items:
+            # 每条 observation 独立改写+入库
+            for idx, info_item in enumerate(observation_items):
+                sub_job = {**job, "observations": info_item}
+                event_id = f"{job_id}_{idx}" if len(observation_items) > 1 else job_id
                 canonical, is_absolute = await self._rewrite_and_validate(
                     sub_job, event_id
                 )
                 meta = {
                     **base_metadata,
-                    "has_new_info": True,
+                    "has_observations": True,
                     "is_absolute": is_absolute,
                 }
                 await self._vector_store.upsert_event(event_id, canonical, meta)
@@ -387,26 +389,18 @@ class HistorianWorker:
                     "[史官] 任务 %s 事件入库完成(%s/%s): is_absolute=%s len=%s",
                     event_id,
                     idx + 1,
-                    len(new_info_items),
+                    len(observation_items),
                     is_absolute,
                     len(canonical),
                 )
-        elif job.get("action_summary", "").strip():
-            # 仅有 action_summary，无 new_info
-            sub_job = {**job, "new_info": ""}
-            canonical, is_absolute = await self._rewrite_and_validate(sub_job, job_id)
-            meta = {**base_metadata, "has_new_info": False, "is_absolute": is_absolute}
-            await self._vector_store.upsert_event(job_id, canonical, meta)
-            canonicals.append(canonical)
-            logger.info(
-                "[史官] 任务 %s 事件入库完成(仅action): is_absolute=%s len=%s",
-                job_id,
-                is_absolute,
-                len(canonical),
-            )
 
         # 侧写合并：传入所有 canonical 文本
-        if job.get("has_new_info") and canonicals:
+        has_obs = (
+            job.get("has_observations")
+            if "has_observations" in job
+            else job.get("has_new_info", False)
+        )
+        if has_obs and canonicals:
             merged_canonical = "\n".join(canonicals)
             await self._merge_profiles(job, merged_canonical, job_id)
 
@@ -463,9 +457,18 @@ class HistorianWorker:
         return "\n".join(lines)
 
     def _collect_source_entity_ids(self, job: dict[str, Any]) -> list[str]:
+        # 向后兼容：优先 memo/observations，fallback action_summary/new_info
+        memo_text = str(
+            job.get("memo") if "memo" in job else job.get("action_summary", "")
+        )
+        observations_text = str(
+            job.get("observations")
+            if "observations" in job
+            else job.get("new_info", "")
+        )
         source_parts = [
-            str(job.get("action_summary", "")),
-            str(job.get("new_info", "")),
+            memo_text,
+            observations_text,
         ]
         source_ids = _collect_unique_id_hits(" ".join(source_parts), limit=50)
         if not source_ids:
@@ -583,8 +586,14 @@ class HistorianWorker:
     ) -> str:
         from Undefined.utils.resources import read_text_resource
 
-        action_summary = str(job.get("action_summary", ""))
-        new_info = str(job.get("new_info", ""))
+        # 向后兼容：优先 memo，fallback action_summary
+        memo = str(job.get("memo") if "memo" in job else job.get("action_summary", ""))
+        # 向后兼容：优先 observations，fallback new_info
+        observations = str(
+            job.get("observations")
+            if "observations" in job
+            else job.get("new_info", "")
+        )
         message_ids_raw = job.get("message_ids", [])
         if isinstance(message_ids_raw, list):
             message_ids = [
@@ -611,11 +620,11 @@ class HistorianWorker:
             if compact_targets:
                 profile_targets_text = ", ".join(compact_targets)
         logger.debug(
-            "[史官] 任务 %s 发起绝对化改写: attempt=%s action_len=%s new_info_len=%s",
+            "[史官] 任务 %s 发起绝对化改写: attempt=%s memo_len=%s observations_len=%s",
             job_id or "unknown",
             attempt,
-            len(action_summary),
-            len(new_info),
+            len(memo),
+            len(observations),
         )
 
         template = read_text_resource("res/prompts/historian_rewrite.md")
@@ -642,8 +651,8 @@ class HistorianWorker:
             perspective=job.get("perspective", ""),
             profile_targets=profile_targets_text,
             force="true" if _coerce_bool(job.get("force", False)) else "false",
-            action_summary=action_summary,
-            new_info=new_info,
+            action_summary=memo,
+            new_info=observations,
             source_message=source_message or "（无）",
             recent_messages=recent_messages_text or "（无）",
         )
@@ -844,9 +853,9 @@ class HistorianWorker:
             current_profile=_escape_braces(current),
             canonical_text=_escape_braces(canonical),
             new_info=_escape_braces(
-                "\n".join(job.get("new_info", []))
-                if isinstance(job.get("new_info"), list)
-                else str(job.get("new_info", ""))
+                "\n".join(job.get("observations", job.get("new_info", [])))
+                if isinstance(job.get("observations", job.get("new_info")), list)
+                else str(job.get("observations", job.get("new_info", "")))
             ),
             target_entity_type=entity_type,
             target_entity_id=entity_id,
@@ -864,7 +873,9 @@ class HistorianWorker:
             request_id=_escape_braces(str(job.get("request_id", ""))),
             end_seq=_escape_braces(str(job.get("end_seq", 0))),
             message_ids=_escape_braces(", ".join(message_ids) if message_ids else "[]"),
-            action_summary=_escape_braces(str(job.get("action_summary", ""))),
+            action_summary=_escape_braces(
+                str(job.get("memo", job.get("action_summary", "")))
+            ),
             source_message=_escape_braces(str(job.get("source_message", ""))),
             recent_messages=_escape_braces(
                 "\n".join(

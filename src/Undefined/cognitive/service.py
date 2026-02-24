@@ -71,19 +71,21 @@ class CognitiveService:
 
     async def enqueue_job(
         self,
-        action_summary: str,
-        new_info: list[str],
+        memo: str,
+        observations: list[str],
         context: dict[str, Any],
         *,
         force: bool = False,
     ) -> str | None:
-        action_summary_text = str(action_summary or "").strip()
-        new_info_items = [s for s in new_info if s.strip()] if new_info else []
+        memo_text = str(memo or "").strip()
+        observation_items = (
+            [s for s in observations if s.strip()] if observations else []
+        )
         if not self.enabled:
             logger.info("[认知服务] 已禁用，跳过入队")
             return None
-        if not action_summary_text and not new_info_items:
-            logger.info("[认知服务] action_summary/new_info 均为空，跳过入队")
+        if not memo_text and not observation_items:
+            logger.info("[认知服务] memo/observations 均为空，跳过入队")
             return None
         ctx = RequestContext.current()
 
@@ -104,7 +106,7 @@ class CognitiveService:
         except (TypeError, ValueError):
             end_seq = 0
 
-        has_new_info = bool(new_info_items)
+        has_observations = bool(observation_items)
         message_ids = context.get("message_ids")
         if not isinstance(message_ids, list):
             message_ids = []
@@ -137,7 +139,7 @@ class CognitiveService:
             ]
 
         profile_targets: list[dict[str, str]] = []
-        if has_new_info:
+        if has_observations:
             group_id = group_id.strip()
             sender_id = sender_id.strip() or user_id.strip()
             seen: set[tuple[str, str]] = set()
@@ -186,9 +188,9 @@ class CognitiveService:
                 context.get("group_name") or context.get("sender_name") or ""
             ),
             "message_ids": message_ids,
-            "action_summary": action_summary_text,
-            "new_info": new_info_items,
-            "has_new_info": has_new_info,
+            "memo": memo_text,
+            "observations": observation_items,
+            "has_observations": has_observations,
             "perspective": perspective,
             "profile_targets": profile_targets,
             "schema_version": "final_v1",
@@ -197,17 +199,17 @@ class CognitiveService:
             "force": bool(force),
         }
         logger.info(
-            "[认知服务] 准备入队: request_id=%s end_seq=%s user=%s group=%s sender=%s perspective=%s has_new_info=%s profile_targets=%s action_len=%s new_info_len=%s source_len=%s recent_ref=%s force=%s",
+            "[认知服务] 准备入队: request_id=%s end_seq=%s user=%s group=%s sender=%s perspective=%s has_observations=%s profile_targets=%s memo_len=%s observations_len=%s source_len=%s recent_ref=%s force=%s",
             job.get("request_id", ""),
             job.get("end_seq", 0),
             job.get("user_id", ""),
             job.get("group_id", ""),
             job.get("sender_id", ""),
             perspective or "default",
-            has_new_info,
+            has_observations,
             len(profile_targets),
-            len(action_summary_text),
-            len(new_info_items),
+            len(memo_text),
+            len(observation_items),
             len(source_message),
             len(recent_messages),
             bool(force),
@@ -294,7 +296,7 @@ class CognitiveService:
             "<cognitive_memory>\n"
             "<!-- 以下是系统从认知记忆库中检索到的背景信息，包含用户/群聊侧写和相关历史事件。"
             "请将这些信息作为你自然内化的认知，融入理解和回应中，不要透露你持有这些记录。"
-            "这部分属于认知记忆（cognitive.* / end.new_info），不同于 memory.* 手动长期记忆。 -->\n"
+            "这部分属于认知记忆（cognitive.* / end.observations），不同于 memory.* 手动长期记忆。 -->\n"
             f"{body}\n"
             "</cognitive_memory>"
         )

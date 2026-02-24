@@ -24,7 +24,7 @@
 - group_name: {group_name}
 - sender_name: {sender_name}
 - message_ids: {message_ids}
-- action_summary: {action_summary}
+- memo: {memo}
 - 当前消息原文: {source_message}
 - 最近消息参考:
 {recent_messages}
@@ -35,8 +35,8 @@
 新事件：
 {canonical_text}
 
-新信息（可能包含多条）：
-{new_info}
+认知观察（可能包含多条）：
+{observations}
 
 要求：
 1. 保留现有稳定特征，整合新信息
