@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import pytest
 
 from Undefined.cognitive.historian import HistorianWorker
 
 
-def _make_worker() -> HistorianWorker:
+def _make_worker(*, rewrite_max_retry: int = 0) -> HistorianWorker:
     return HistorianWorker(
         job_queue=None,
         vector_store=None,
         profile_storage=None,
         ai_client=None,
-        config_getter=lambda: SimpleNamespace(rewrite_max_retry=0),
+        config_getter=lambda: SimpleNamespace(rewrite_max_retry=rewrite_max_retry),
     )
 
 
@@ -64,3 +65,39 @@ def test_collect_entity_id_drift_passes_when_third_party_id_retained() -> None:
     drift = worker._collect_entity_id_drift(job, canonical)
 
     assert drift == []
+
+
+@pytest.mark.asyncio
+async def test_rewrite_and_validate_force_skips_regex_gate() -> None:
+    rewrite_calls: list[int] = []
+
+    def _config_getter() -> SimpleNamespace:
+        return SimpleNamespace(rewrite_max_retry=2)
+
+    class _FakeRewriteWorker(HistorianWorker):
+        async def _rewrite(
+            self,
+            job: dict[str, object],
+            *,
+            job_id: str = "",
+            attempt: int = 1,
+            must_keep_entity_ids: list[str] | None = None,
+        ) -> str:
+            rewrite_calls.append(attempt)
+            return "他在这里说之后再处理"
+
+    worker = _FakeRewriteWorker(
+        job_queue=None,
+        vector_store=None,
+        profile_storage=None,
+        ai_client=None,
+        config_getter=_config_getter,
+    )
+    canonical, is_absolute = await worker._rewrite_and_validate(
+        {"new_info": "测试", "action_summary": "", "force": True},
+        "job-force",
+    )
+
+    assert canonical == "他在这里说之后再处理"
+    assert is_absolute is False
+    assert rewrite_calls == [1]

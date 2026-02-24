@@ -95,6 +95,30 @@ async def test_enqueue_job_keeps_historian_reference_fields() -> None:
     assert queue.last_job.get("recent_messages") == [
         "[2026-02-23 19:02:11] 洛泫(120218451): Null 说这个是竞态问题"
     ]
+    assert queue.last_job.get("force") is False
+
+
+@pytest.mark.asyncio
+async def test_enqueue_job_keeps_force_flag() -> None:
+    queue = _FakeJobQueue()
+    service = CognitiveService(
+        config_getter=lambda: SimpleNamespace(enabled=True, bot_name="Undefined"),
+        vector_store=None,
+        job_queue=queue,
+        profile_storage=None,
+        reranker=None,
+    )
+    context: dict[str, Any] = {"request_id": "req-force-gate"}
+
+    await service.enqueue_job(
+        action_summary="测试",
+        new_info=[],
+        context=context,
+        force=True,
+    )
+
+    assert queue.last_job is not None
+    assert queue.last_job.get("force") is True
 
 
 @pytest.mark.asyncio

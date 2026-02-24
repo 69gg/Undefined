@@ -156,6 +156,20 @@ def _resolve_timestamp_epoch(job: dict[str, Any]) -> int:
     return int(datetime.now(timezone.utc).timestamp())
 
 
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off", ""}:
+            return False
+    return False
+
+
 class HistorianWorker:
     def __init__(
         self,
@@ -247,13 +261,24 @@ class HistorianWorker:
         config = self._config_getter()
         canonical = await self._rewrite(job, job_id=job_id, attempt=1)
         is_absolute = True
+        force_gate_bypass = _coerce_bool(job.get("force", False))
         must_keep_ids = self._collect_source_entity_ids(job)
         for attempt in range(config.rewrite_max_retry + 1):
             hit_detail = self._collect_regex_hits(canonical)
+            has_regex_hits = any(hit_detail.values())
             entity_drift_ids = self._collect_entity_id_drift(
                 job, canonical, must_keep_ids=must_keep_ids
             )
-            if not any(hit_detail.values()) and not entity_drift_ids:
+            if not has_regex_hits and not entity_drift_ids:
+                break
+            if force_gate_bypass and has_regex_hits and not entity_drift_ids:
+                is_absolute = False
+                logger.warning(
+                    "[史官] 任务 %s force=true，跳过绝对化正则闸门并强制入库: hits=%s preview=%s",
+                    job_id,
+                    hit_detail,
+                    _preview_text(canonical),
+                )
                 break
             if attempt < config.rewrite_max_retry:
                 logger.warning(

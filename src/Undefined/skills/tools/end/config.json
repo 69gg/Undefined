@@ -25,7 +25,7 @@
                 },
                 "force": {
                     "type": "boolean",
-                    "description": "强制结束，跳过未发送消息检查"
+                    "description": "强制结束，跳过未发送消息检查；并在认知史官遇到绝对化正则闸门失败时允许强制入库"
                 }
             },
             "required": []

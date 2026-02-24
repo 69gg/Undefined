@@ -70,7 +70,12 @@ class CognitiveService:
         return bool(self._config_getter().enabled)
 
     async def enqueue_job(
-        self, action_summary: str, new_info: list[str], context: dict[str, Any]
+        self,
+        action_summary: str,
+        new_info: list[str],
+        context: dict[str, Any],
+        *,
+        force: bool = False,
     ) -> str | None:
         action_summary_text = str(action_summary or "").strip()
         new_info_items = [s for s in new_info if s.strip()] if new_info else []
@@ -189,9 +194,10 @@ class CognitiveService:
             "schema_version": "final_v1",
             "source_message": source_message,
             "recent_messages": recent_messages,
+            "force": bool(force),
         }
         logger.info(
-            "[认知服务] 准备入队: request_id=%s end_seq=%s user=%s group=%s sender=%s perspective=%s has_new_info=%s profile_targets=%s action_len=%s new_info_len=%s source_len=%s recent_ref=%s",
+            "[认知服务] 准备入队: request_id=%s end_seq=%s user=%s group=%s sender=%s perspective=%s has_new_info=%s profile_targets=%s action_len=%s new_info_len=%s source_len=%s recent_ref=%s force=%s",
             job.get("request_id", ""),
             job.get("end_seq", 0),
             job.get("user_id", ""),
@@ -204,6 +210,7 @@ class CognitiveService:
             len(new_info_items),
             len(source_message),
             len(recent_messages),
+            bool(force),
         )
         result: str | None = await self._job_queue.enqueue(job)
         logger.info("[认知服务] 入队完成: job_id=%s", result or "")

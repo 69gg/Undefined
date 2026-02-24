@@ -353,6 +353,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             action_summary=action_summary,
             new_info=new_info,
             context=context,
+            force=force,
         )
         logger.info("[end工具] 认知记忆任务已提交: job_id=%s", job_id or "")
     elif cognitive_service:

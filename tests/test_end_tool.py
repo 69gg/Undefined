@@ -79,11 +79,18 @@ class _FakeHistoryManager:
 class _FakeCognitiveService:
     def __init__(self) -> None:
         self.last_context: dict[str, Any] | None = None
+        self.last_force: bool | None = None
 
     async def enqueue_job(
-        self, action_summary: str, new_info: list[str], context: dict[str, Any]
+        self,
+        action_summary: str,
+        new_info: list[str],
+        context: dict[str, Any],
+        *,
+        force: bool = False,
     ) -> str:
         self.last_context = dict(context)
+        self.last_force = bool(force)
         return "job-test"
 
 
@@ -120,6 +127,7 @@ async def test_end_enriches_historian_reference_context() -> None:
     assert cognitive_service.last_context is not None
     assert cognitive_service.last_context.get("historian_source_message")
     assert cognitive_service.last_context.get("historian_recent_messages")
+    assert cognitive_service.last_force is True
 
 
 class _ManyHistoryManager:

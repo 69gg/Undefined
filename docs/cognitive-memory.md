@@ -133,6 +133,7 @@ processing/{job_id}.json
 |------|------|
 | `source_message` | 当前触发消息原文（截断后） |
 | `recent_messages` | 最近消息参考列表（每条已裁剪） |
+| `force` | 来自 `end.force` 的强制标记；为 `true` 时，史官在绝对化正则闸门失败且无实体 ID 漂移时可跳过闸门直接入库 |
 
 ### 检索排序策略（events）
 
