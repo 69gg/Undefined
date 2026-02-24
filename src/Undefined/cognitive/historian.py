@@ -281,6 +281,11 @@ class HistorianWorker:
                 )
                 break
             if attempt < config.rewrite_max_retry:
+                gate_feedback = self._build_gate_feedback(
+                    hit_detail,
+                    entity_drift_ids,
+                    force_enabled=force_gate_bypass,
+                )
                 logger.warning(
                     "[史官] 任务 %s 绝对化闸门命中 (%s/%s): pronoun=%s rel_time=%s rel_place=%s id_drift=%s preview=%s",
                     job_id,
@@ -297,6 +302,7 @@ class HistorianWorker:
                     job_id=job_id,
                     attempt=attempt + 2,
                     must_keep_entity_ids=entity_drift_ids,
+                    gate_feedback=gate_feedback,
                 )
             else:
                 is_absolute = False
@@ -418,6 +424,44 @@ class HistorianWorker:
             "relative_place": _collect_unique_hits(_REL_PLACE_RE, content),
         }
 
+    def _build_gate_feedback(
+        self,
+        hit_detail: dict[str, list[str]],
+        entity_drift_ids: list[str],
+        *,
+        force_enabled: bool,
+    ) -> str:
+        lines: list[str] = []
+        pronouns = [
+            str(v).strip() for v in hit_detail.get("pronoun", []) if str(v).strip()
+        ]
+        rel_times = [
+            str(v).strip()
+            for v in hit_detail.get("relative_time", [])
+            if str(v).strip()
+        ]
+        rel_places = [
+            str(v).strip()
+            for v in hit_detail.get("relative_place", [])
+            if str(v).strip()
+        ]
+        if pronouns:
+            lines.append(f"- 命中代词: {', '.join(pronouns)}")
+        if rel_times:
+            lines.append(f"- 命中相对时间: {', '.join(rel_times)}")
+        if rel_places:
+            lines.append(f"- 命中相对地点: {', '.join(rel_places)}")
+        if entity_drift_ids:
+            lines.append(f"- 命中实体ID漂移: {', '.join(entity_drift_ids)}")
+        lines.append(f"- 当前 force: {'true' if force_enabled else 'false'}")
+        if force_enabled:
+            lines.append(
+                "- force=true 仅可放宽专有名词中的相对词；实体ID漂移仍然不允许。"
+            )
+        else:
+            lines.append("- force=false 时必须彻底消除相对表达并修复ID漂移。")
+        return "\n".join(lines)
+
     def _collect_source_entity_ids(self, job: dict[str, Any]) -> list[str]:
         source_parts = [
             str(job.get("action_summary", "")),
@@ -535,6 +579,7 @@ class HistorianWorker:
         job_id: str = "",
         attempt: int = 1,
         must_keep_entity_ids: list[str] | None = None,
+        gate_feedback: str | None = None,
     ) -> str:
         from Undefined.utils.resources import read_text_resource
 
@@ -611,6 +656,12 @@ class HistorianWorker:
                     f"- must_keep_entity_ids: {', '.join(unique_ids)}\n"
                     "- 若无法判断昵称，请至少保留对应的数字ID。"
                 )
+        if gate_feedback and str(gate_feedback).strip():
+            prompt += (
+                "\n\n上次提交被“绝对化闸门”拦截，原因如下（请逐项修正后再提交）：\n"
+                f"{gate_feedback.strip()}\n"
+                "- 返回前请自检：不得包含代词/相对时间/相对地点；且不得丢失必须保留的实体ID。"
+            )
         response = await self._ai_client.submit_background_llm_call(
             model_config=self._model_config or self._ai_client.agent_config,
             messages=[{"role": "user", "content": prompt}],
