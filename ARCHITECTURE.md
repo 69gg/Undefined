@@ -141,7 +141,7 @@ graph TB
         
         subgraph StorageComponents["存储组件"]
             HistoryManager["MessageHistoryManager<br/>消息历史管理<br/>[utils/history.py]<br/>• 懒加载<br/>• 10000条限制"]
-            MemoryStorage["MemoryStorage<br/>长期记忆存储<br/>[memory.py]<br/>• 500条上限<br/>• 自动去重"]
+            MemoryStorage["MemoryStorage<br/>置顶备忘录<br/>[memory.py]<br/>• 500条上限<br/>• 自动去重"]
             EndSummaryStorage["EndSummaryStorage<br/>短期总结存储<br/>[end_summary_storage.py]"]
             CognitiveService["CognitiveService<br/>认知记忆服务<br/>[cognitive/service.py]<br/>• 事件检索 • 侧写读取<br/>• 入队 memory job"]
             CognitiveJobQueue["JobQueue<br/>认知任务队列<br/>[cognitive/job_queue.py]<br/>• pending/processing/failed"]
@@ -167,7 +167,7 @@ graph TB
             Dir_FAQ["faq/<br/>• {group_id}/<br/>  - {date}-{seq}.json"]
             Dir_TokenUsage["token_usage_archives/<br/>• token_usage.jsonl<br/>• *.jsonl.gz"]
             Dir_Cognitive["cognitive/<br/>• chromadb/<br/>• profiles/<br/>• queues/"]
-            File_Memory["memory.json<br/>(长期记忆)"]
+            File_Memory["memory.json<br/>(置顶备忘录)"]
             File_EndSummary["end_summaries.json<br/>(短期总结)"]
             File_ScheduledTasks["scheduled_tasks.json<br/>(定时任务)"]
             Dir_Logs["logs/<br/>• bot.log<br/>• 轮转日志"]
@@ -814,7 +814,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 2. **核心入口层**：main.py 启动入口、配置管理器 (config/loader.py)、热更新应用器 (config/hot_reload.py)、OneBotClient (onebot.py)、RequestContext (context.py)
 3. **消息处理层**：MessageHandler (handlers.py)、SecurityService (security.py)、CommandDispatcher (services/command.py)、AICoordinator (ai_coordinator.py)、QueueManager (queue_manager.py)、Bilibili 自动提取 (bilibili/)
 4. **AI 核心能力层**：AIClient (client.py)、PromptBuilder (prompts.py)、ModelRequester (llm.py)、ToolManager (tooling.py)、MultimodalAnalyzer (multimodal.py)、SummaryService (summaries.py)、TokenCounter (tokens.py)
-5. **存储与上下文层**：MessageHistoryManager (utils/history.py, 10000条限制)、MemoryStorage (memory.py, 500条上限)、EndSummaryStorage、CognitiveService + JobQueue + HistorianWorker + VectorStore + ProfileStorage、FAQStorage、ScheduledTaskStorage、TokenUsageStorage (自动归档)
+5. **存储与上下文层**：MessageHistoryManager (utils/history.py, 10000条限制)、MemoryStorage (memory.py, 置顶备忘录, 500条上限)、EndSummaryStorage、CognitiveService + JobQueue + HistorianWorker + VectorStore + ProfileStorage、FAQStorage、ScheduledTaskStorage、TokenUsageStorage (自动归档)
 6. **技能系统层**：ToolRegistry (registry.py)、AgentRegistry、6个 Agents、9类 Toolsets
 7. **异步 IO 层**：统一 IO 工具 (utils/io.py)，包含 write_json、read_json、append_line、跨平台文件锁 (flock/msvcrt)
 8. **数据持久化层**：历史数据目录、FAQ 目录、Token 归档目录、记忆文件、总结文件、定时任务文件
