@@ -40,6 +40,8 @@ _STATS_MAX_DAYS = 365
 _STATS_MODEL_TOP_N = 8
 _STATS_CALL_TYPE_TOP_N = 12
 _STATS_DATA_SUMMARY_MAX_CHARS = 12000
+_STATS_AI_FLAGS = {"--ai", "-a"}
+_STATS_TIME_RANGE_RE = re.compile(r"^\d+[dwm]?$", re.IGNORECASE)
 
 
 class CommandDispatcher:
@@ -159,10 +161,30 @@ class CommandDispatcher:
         except ValueError:
             return _STATS_DEFAULT_DAYS
 
+    def _parse_stats_options(self, args: list[str]) -> tuple[int, bool]:
+        """解析 /stats 参数：时间范围 + AI 分析开关。"""
+        days = _STATS_DEFAULT_DAYS
+        enable_ai_analysis = False
+        picked_days = False
+
+        for raw in args:
+            token = str(raw or "").strip()
+            if not token:
+                continue
+            lower = token.lower()
+            if lower in _STATS_AI_FLAGS:
+                enable_ai_analysis = True
+                continue
+            if not picked_days and _STATS_TIME_RANGE_RE.match(lower):
+                days = self._parse_time_range(lower)
+                picked_days = True
+
+        return days, enable_ai_analysis
+
     async def _handle_stats(
         self, group_id: int, sender_id: int, args: list[str]
     ) -> None:
-        """处理 /stats 命令，生成 token 使用统计图表并进行 AI 分析"""
+        """处理 /stats 命令，生成 token 使用统计图表（可选 AI 分析）"""
         # 1. 基础环境与参数检查
         if not _MATPLOTLIB_AVAILABLE:
             await self.sender.send_group_message(
@@ -170,7 +192,7 @@ class CommandDispatcher:
             )
             return
 
-        days = self._parse_time_range(args[0]) if args else 7
+        days, enable_ai_analysis = self._parse_stats_options(args)
 
         try:
             # 2. 获取并验证数据
@@ -190,9 +212,9 @@ class CommandDispatcher:
             await self._generate_pie_chart(summary, img_dir)
             await self._generate_stats_table(summary, img_dir)
 
-            # 4. 投递 AI 分析请求到队列
+            # 4. 按参数投递 AI 分析请求到队列（默认关闭）
             ai_analysis = ""
-            if self.queue_manager:
+            if enable_ai_analysis and self.queue_manager:
                 # 构建数据摘要
                 data_summary = self._build_data_summary(summary, days)
 

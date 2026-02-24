@@ -1,8 +1,8 @@
 {
   "name": "stats",
   "description": "查看 Token 使用统计和图表",
-  "usage": "/stats [时间范围]",
-  "example": "/stats 7d",
+  "usage": "/stats [时间范围] [--ai]",
+  "example": "/stats 7d --ai",
   "permission": "public",
   "rate_limit": {
     "user": 3600,
