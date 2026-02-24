@@ -478,19 +478,6 @@ xxapi_base_url = "https://v2.xxapi.cn"
 # zh: 星之阁 API 基础地址。
 # en: Xingzhige API base URL.
 xingzhige_base_url = "https://api.xingzhige.com"
-# zh: JKYAI API 基础地址。（已弃用，不必填写）
-# en: JKYAI API base URL.(this field is no longer in use and does not need to be filled in)
-jkyai_base_url = "https://api.jkyai.top"
-# zh: 心知天气 API 基础地址。
-# en: Seniverse API base URL.
-seniverse_base_url = "https://api.seniverse.com/v3"
-
-# zh: 天气 API 配置（心知天气）。
-# en: Weather API config (Seniverse).
-[weather]
-# zh: 心知天气 API Key，从 https://www.seniverse.com/ 获取。
-# en: Seniverse API key; obtain from https://www.seniverse.com/.
-api_key = ""
 
 # zh: XXAPI API 配置。
 # en: XXAPI config.
