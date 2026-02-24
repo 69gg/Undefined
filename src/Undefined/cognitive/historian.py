@@ -596,6 +596,7 @@ class HistorianWorker:
             message_ids=", ".join(message_ids) if message_ids else "[]",
             perspective=job.get("perspective", ""),
             profile_targets=profile_targets_text,
+            force="true" if _coerce_bool(job.get("force", False)) else "false",
             action_summary=action_summary,
             new_info=new_info,
             source_message=source_message or "（无）",

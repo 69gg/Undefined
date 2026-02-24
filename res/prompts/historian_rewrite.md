@@ -9,6 +9,7 @@
 6. `new_info` 代表当前消息提取到的一条新记忆（可能是多条中的一条），优先保证可追溯性
 7. 若原文已显式出现实体标识（如 `昵称(数字ID)`、`用户123456`、`QQ:123456`），必须保留该数字ID；禁止擅自替换成 `sender_id` 或其他ID
 8. 可参考“当前消息原文”和“最近消息参考”做实体消歧；当 `new_info` 与参考上下文冲突时，以可验证且更具体的信息为准
+9. 当 `force=true` 且命中的“相对表达”属于专有名词本体（如用户名“你是谁”、片名《后天》、书名/歌名等）时，不得改写该专有名词，可保留原词直接提交；但实体 ID 一律不得漂移
 
 称呼规则：
 - bot 自身统一称为「{bot_name}」
@@ -25,6 +26,7 @@
 - message_ids: {message_ids}
 - perspective: {perspective}
 - profile_targets: {profile_targets}
+- force: {force}
 
 原始摘要：
 action_summary: {action_summary}
