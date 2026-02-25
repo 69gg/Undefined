@@ -444,9 +444,14 @@
                                 placeholder="输入消息，或直接 /help 这样的命令"></textarea>
                             <div class="runtime-chat-actions">
                                 <input id="runtimeChatImageInput" type="file" accept="image/*" hidden />
-                                <button id="btnRuntimeChatImage" class="btn" data-i18n="runtime.image">图片</button>
-                                <button id="btnRuntimeChatSend" class="btn primary"
-                                    data-i18n="runtime.send">发送</button>
+                                <button id="btnRuntimeChatImage" class="btn runtime-chat-action-btn runtime-chat-action-btn-image" type="button">
+                                    <span class="runtime-chat-action-icon" aria-hidden="true">+</span>
+                                    <span class="sr-only" data-i18n="runtime.image">图片</span>
+                                </button>
+                                <button id="btnRuntimeChatSend" class="btn primary runtime-chat-action-btn runtime-chat-action-btn-send" type="button">
+                                    <span class="runtime-chat-action-icon" aria-hidden="true">⏎</span>
+                                    <span class="sr-only" data-i18n="runtime.send">发送</span>
+                                </button>
                             </div>
                         </div>
                     </div>

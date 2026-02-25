@@ -21,7 +21,19 @@
   .log-viewer { height: 420px; }
   .noise { opacity: 0.08; }
   .main-content.chat-layout #tab-chat .chat-runtime-card { height: clamp(400px, calc(100vh - 180px), 680px); }
-  .main-content.chat-layout #tab-chat .runtime-chat-input { min-height: 40px; max-height: 76px; }
+  .main-content.chat-layout #tab-chat .runtime-chat-input {
+    height: 40px;
+    min-height: 40px;
+    max-height: 40px;
+  }
+  .main-content.chat-layout #tab-chat .runtime-chat-action-btn {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+  }
+  .main-content.chat-layout #tab-chat .runtime-chat-action-icon {
+    font-size: 18px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

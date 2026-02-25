@@ -72,8 +72,12 @@
   max-height: none;
 }
 .main-content.chat-layout #tab-chat .runtime-chat-input {
-  min-height: 46px;
-  max-height: 96px;
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  resize: none;
+  line-height: 22px;
+  overflow-y: auto;
 }
 
 .header { margin-bottom: 32px; display: flex; justify-content: space-between; align-items: flex-end; }

@@ -229,7 +229,7 @@
 .runtime-chat-input-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
+  align-items: center;
   gap: 8px;
 }
 .runtime-chat-actions {
@@ -239,8 +239,37 @@
   white-space: nowrap;
   gap: 8px;
 }
+.runtime-chat-action-btn {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  padding: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.runtime-chat-action-icon {
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 700;
+}
+.runtime-chat-action-btn-send .runtime-chat-action-icon {
+  transform: translateY(-1px);
+}
 .runtime-chat-input {
   min-height: 88px;
   resize: vertical;
   line-height: 1.5;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
