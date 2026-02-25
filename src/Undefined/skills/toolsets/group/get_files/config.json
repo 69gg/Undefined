@@ -2,13 +2,17 @@
     "type": "function",
     "function": {
         "name": "get_files",
-        "description": "获取群文件列表（根目录）。",
+        "description": "获取群文件列表。默认查看根目录；提供 folder_id 可查看指定文件夹内的文件。",
         "parameters": {
             "type": "object",
             "properties": {
                 "group_id": {
                     "type": "integer",
                     "description": "群号。如果已在群聊中，通常会自动获取。"
+                },
+                "folder_id": {
+                    "type": "string",
+                    "description": "文件夹ID。不提供时查看根目录；提供时查看该文件夹内的文件。可从根目录文件夹列表中获取。"
                 }
             }
         }
