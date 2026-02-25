@@ -49,11 +49,11 @@ async def test_copyright_command_outputs_required_metadata() -> None:
 
     assert sender.messages
     output = sender.messages[-1][1]
-    assert "风险提示与免责声明" in output
-    assert "作者：Null<1708213363@qq.com>" in output
-    assert "开源链接：github.com/69gg/Undefined" in output
+    assert "风险提示" in output
+    assert "作者：Null <pylindex@qq.com>" in output
+    assert "https://github.com/69gg/Undefined" in output
     assert "PyPI 包：Undefined-bot" in output
-    assert "开源 LICENSE：MIT" in output
+    assert "MIT License" in output
 
 
 def test_copyright_aliases_resolve() -> None:
