@@ -34,9 +34,8 @@ def _build_info_card(info: "VideoInfo", truncate_desc: bool = True) -> str:
     parts.append(f"UP主: {info.up_name}")
     desc = info.desc.strip()
     if desc:
-        if truncate_desc and len(desc) > 100:
-            desc = desc[:100] + "..."
-        parts.append(f"简介: {desc}")
+        parts.append(f"---\n{desc}")
+    parts.append("---")
     parts.append(f"https://www.bilibili.com/video/{info.bvid}")
     return "\n".join(parts)
 
