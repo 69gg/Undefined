@@ -80,6 +80,16 @@ def _json_error(message: str, status: int = 400) -> Response:
     return web.json_response({"error": message}, status=status)
 
 
+def _optional_query_param(request: web.Request, key: str) -> str | None:
+    raw = request.query.get(key)
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    return text
+
+
 async def _probe_http_endpoint(
     *,
     name: str,
@@ -424,16 +434,21 @@ class RuntimeAPIServer:
         if not query:
             return _json_error("q is required", status=400)
 
-        results = await cognitive_service.search_events(
-            query=query,
-            target_user_id=request.query.get("target_user_id"),
-            target_group_id=request.query.get("target_group_id"),
-            sender_id=request.query.get("sender_id"),
-            request_type=request.query.get("request_type"),
-            top_k=request.query.get("top_k"),
-            time_from=request.query.get("time_from"),
-            time_to=request.query.get("time_to"),
-        )
+        search_kwargs: dict[str, Any] = {"query": query}
+        for key in (
+            "target_user_id",
+            "target_group_id",
+            "sender_id",
+            "request_type",
+            "top_k",
+            "time_from",
+            "time_to",
+        ):
+            value = _optional_query_param(request, key)
+            if value is not None:
+                search_kwargs[key] = value
+
+        results = await cognitive_service.search_events(**search_kwargs)
         return web.json_response({"count": len(results), "items": results})
 
     async def _cognitive_profiles_handler(self, request: web.Request) -> Response:
@@ -445,11 +460,15 @@ class RuntimeAPIServer:
         if not query:
             return _json_error("q is required", status=400)
 
-        results = await cognitive_service.search_profiles(
-            query=query,
-            entity_type=request.query.get("entity_type"),
-            top_k=request.query.get("top_k"),
-        )
+        search_kwargs: dict[str, Any] = {"query": query}
+        entity_type = _optional_query_param(request, "entity_type")
+        if entity_type is not None:
+            search_kwargs["entity_type"] = entity_type
+        top_k = _optional_query_param(request, "top_k")
+        if top_k is not None:
+            search_kwargs["top_k"] = top_k
+
+        results = await cognitive_service.search_profiles(**search_kwargs)
         return web.json_response({"count": len(results), "items": results})
 
     async def _cognitive_profile_handler(self, request: web.Request) -> Response:

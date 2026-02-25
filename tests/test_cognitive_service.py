@@ -200,6 +200,29 @@ async def test_search_profiles_skips_reranker_when_cognitive_rerank_disabled() -
 
 
 @pytest.mark.asyncio
+async def test_search_profiles_handles_none_top_k_and_empty_entity_type() -> None:
+    vector_store = _FakeVectorStore()
+    service = CognitiveService(
+        config_getter=lambda: SimpleNamespace(
+            enabled=True,
+            enable_rerank=True,
+            profile_top_k=8,
+            rerank_candidate_multiplier=3,
+        ),
+        vector_store=vector_store,
+        job_queue=_FakeJobQueue(),
+        profile_storage=_FakeProfileStorage(),
+        reranker=object(),
+    )
+
+    await service.search_profiles("测试", top_k=None, entity_type=None)
+
+    assert vector_store.last_profile_kwargs is not None
+    assert vector_store.last_profile_kwargs.get("top_k") == 8
+    assert vector_store.last_profile_kwargs.get("where") is None
+
+
+@pytest.mark.asyncio
 async def test_search_events_uses_runtime_reranker_when_enabled() -> None:
     vector_store = _FakeVectorStore()
     runtime = _FakeRetrievalRuntime(reranker=object())

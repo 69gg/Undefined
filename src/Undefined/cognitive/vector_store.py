@@ -35,6 +35,16 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
     return default
 
 
+def _safe_positive_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        return max(1, int(default))
+    if parsed <= 0:
+        return max(1, int(default))
+    return parsed
+
+
 def _metadata_timestamp_epoch(metadata: Any) -> float | None:
     if not isinstance(metadata, dict):
         return None
@@ -271,8 +281,8 @@ class CognitiveVectorStore:
         apply_mmr: bool = False,
     ) -> list[dict[str, Any]]:
         col_name = getattr(col, "name", "unknown")
-        safe_top_k = max(1, int(top_k))
-        safe_multiplier = max(1, int(candidate_multiplier))
+        safe_top_k = _safe_positive_int(top_k, default=1)
+        safe_multiplier = _safe_positive_int(candidate_multiplier, default=1)
         logger.debug(
             "[认知向量库] 开始查询 collection=%s top_k=%s where=%s decay=%s mmr=%s",
             col_name,

@@ -402,10 +402,23 @@ class CognitiveService:
 
     async def search_profiles(self, query: str, **kwargs: Any) -> list[dict[str, Any]]:
         config = self._config_getter()
-        top_k = kwargs.get("top_k", 5)
+        default_top_k = int(getattr(config, "profile_top_k", 5))
+        top_k_raw = kwargs.get("top_k", default_top_k)
+        try:
+            top_k = int(top_k_raw)
+        except Exception:
+            top_k = default_top_k
+        if top_k <= 0:
+            top_k = default_top_k
+
         where: dict[str, Any] | None = None
-        if "entity_type" in kwargs:
-            where = {"entity_type": kwargs["entity_type"]}
+        entity_type_raw = kwargs.get("entity_type")
+        entity_type = (
+            str(entity_type_raw).strip() if entity_type_raw is not None else ""
+        )
+        if entity_type:
+            where = {"entity_type": entity_type}
+
         logger.info(
             "[认知服务] 搜索侧写: query_len=%s top_k=%s where=%s",
             len(query or ""),
