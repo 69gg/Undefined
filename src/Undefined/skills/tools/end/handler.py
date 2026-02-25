@@ -236,25 +236,6 @@ def _build_location(context: Dict[str, Any]) -> EndSummaryLocation | None:
     return None
 
 
-def _build_record_key(
-    context: Dict[str, Any],
-    *,
-    memo: str,
-    observations: list[str],
-    perspective: str,
-) -> tuple[Any, ...]:
-    return (
-        str(context.get("request_id", "")).strip(),
-        str(context.get("trigger_message_id", "")).strip(),
-        str(context.get("request_type", "")).strip(),
-        str(context.get("group_id", "")).strip(),
-        str(context.get("sender_id") or context.get("user_id") or "").strip(),
-        perspective.strip(),
-        memo.strip(),
-        tuple(observations),
-    )
-
-
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     # memo 优先新名，fallback 旧名 action_summary 和 summary
     memo_raw = (
@@ -288,23 +269,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             type(force_raw).__name__,
             context.get("request_id", "-"),
         )
-
-    record_key = _build_record_key(
-        context,
-        memo=memo,
-        observations=observations,
-        perspective=perspective,
-    )
-    if context.get("_end_last_record_key") == record_key:
-        logger.info(
-            "[end工具] 轻量去重命中，跳过重复记录: request_id=%s trigger_message_id=%s perspective=%s",
-            context.get("request_id", "-"),
-            context.get("trigger_message_id", "-"),
-            perspective or "default",
-        )
-        context["conversation_ended"] = True
-        return "对话已结束（重复记录已跳过）"
-    context["_end_last_record_key"] = record_key
 
     # memo 非空且本轮未发送消息时拒绝（force=true 可跳过）
     if summary and not force and not _was_message_sent_this_turn(context):
