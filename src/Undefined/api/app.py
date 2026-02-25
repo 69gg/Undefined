@@ -24,6 +24,44 @@ _VIRTUAL_USER_NAME = "system"
 _AUTH_HEADER = "X-Undefined-API-Key"
 
 
+class _WebUIVirtualSender:
+    """将工具发送行为重定向到 WebUI 会话，不触发 OneBot 实际发送。"""
+
+    def __init__(
+        self,
+        virtual_user_id: int,
+        send_private_callback: Callable[[int, str], Awaitable[None]],
+        onebot: Any = None,
+    ) -> None:
+        self._virtual_user_id = virtual_user_id
+        self._send_private_callback = send_private_callback
+        # 保留 onebot 属性，兼容依赖 sender.onebot 的工具读取能力。
+        self.onebot = onebot
+
+    async def send_private_message(
+        self,
+        user_id: int,
+        message: str,
+        auto_history: bool = True,
+        *,
+        mark_sent: bool = True,
+    ) -> None:
+        _ = user_id, auto_history, mark_sent
+        await self._send_private_callback(self._virtual_user_id, message)
+
+    async def send_group_message(
+        self,
+        group_id: int,
+        message: str,
+        auto_history: bool = True,
+        history_prefix: str = "",
+        *,
+        mark_sent: bool = True,
+    ) -> None:
+        _ = group_id, auto_history, history_prefix, mark_sent
+        await self._send_private_callback(self._virtual_user_id, message)
+
+
 @dataclass
 class RuntimeAPIContext:
     config_getter: Callable[[], Any]
@@ -496,6 +534,9 @@ class RuntimeAPIServer:
 会话身份：虚拟用户 system(42)。
 权限等级：superadmin（你可按最高管理权限处理）。
 请正常进行私聊对话；如果需要结束会话，调用 end 工具。"""
+        virtual_sender = _WebUIVirtualSender(
+            _VIRTUAL_USER_ID, _capture_private_message, onebot=self._ctx.onebot
+        )
 
         async def _get_recent_cb(
             chat_id: str, msg_type: str, start: int, end: int
@@ -523,7 +564,7 @@ class RuntimeAPIServer:
                 get_recent_messages_callback=_get_recent_cb,
                 get_image_url_callback=self._ctx.onebot.get_image,
                 get_forward_msg_callback=self._ctx.onebot.get_forward_msg,
-                sender=self._ctx.sender,
+                sender=virtual_sender,
                 history_manager=self._ctx.history_manager,
                 onebot_client=self._ctx.onebot,
                 scheduler=self._ctx.scheduler,
