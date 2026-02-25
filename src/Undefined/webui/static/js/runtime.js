@@ -29,6 +29,70 @@
         log.scrollTop = log.scrollHeight;
     }
 
+    async function parseJsonSafe(res) {
+        try {
+            return await res.json();
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    function buildRequestError(res, payload) {
+        const fallback = `${res.status} ${res.statusText || "Request failed"}`.trim();
+        if (!payload || typeof payload !== "object") return fallback;
+        const base = payload.error ? String(payload.error) : fallback;
+        return payload.detail ? `${base}: ${payload.detail}` : base;
+    }
+
+    async function consumeSse(res, onEvent) {
+        if (!res.body) return;
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        function emitBlock(rawBlock) {
+            const block = String(rawBlock || "").trim();
+            if (!block) return;
+            let event = "message";
+            const dataLines = [];
+            block.split("\n").forEach((line) => {
+                if (line.startsWith(":")) return;
+                if (line.startsWith("event:")) {
+                    event = line.slice(6).trim() || "message";
+                    return;
+                }
+                if (line.startsWith("data:")) {
+                    dataLines.push(line.slice(5).trimStart());
+                }
+            });
+            if (dataLines.length === 0) return;
+            const rawData = dataLines.join("\n");
+            let payload = {};
+            try {
+                payload = JSON.parse(rawData);
+            } catch (_error) {
+                payload = { raw: rawData };
+            }
+            onEvent(event, payload);
+        }
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            buffer = buffer.replace(/\r\n/g, "\n");
+            let boundary = buffer.indexOf("\n\n");
+            while (boundary !== -1) {
+                const block = buffer.slice(0, boundary);
+                buffer = buffer.slice(boundary + 2);
+                emitBlock(block);
+                boundary = buffer.indexOf("\n\n");
+            }
+        }
+        buffer += decoder.decode();
+        if (buffer.trim()) emitBlock(buffer);
+    }
+
     function renderMemoryItems(items) {
         const container = get("runtimeMemoryList");
         const meta = get("runtimeMemoryMeta");
@@ -133,13 +197,61 @@
         try {
             const res = await api("/api/runtime/chat", {
                 method: "POST",
-                body: JSON.stringify({ message }),
+                headers: { Accept: "text/event-stream" },
+                body: JSON.stringify({ message, stream: true }),
             });
-            const data = await res.json();
-            const messages = Array.isArray(data.messages) ? data.messages : [];
+
+            const contentType = (res.headers.get("Content-Type") || "").toLowerCase();
+            if (contentType.includes("text/event-stream") && res.body) {
+                let replied = false;
+                let streamError = "";
+                let donePayload = null;
+                await consumeSse(res, (event, payload) => {
+                    if (event === "message") {
+                        const content = String(
+                            payload && (payload.content ?? payload.message)
+                                ? payload.content ?? payload.message
+                                : ""
+                        ).trim();
+                        if (!content) return;
+                        appendChatMessage("bot", content);
+                        replied = true;
+                        return;
+                    }
+                    if (event === "error") {
+                        streamError = String(
+                            payload && (payload.error || payload.message)
+                                ? payload.error || payload.message
+                                : "stream error"
+                        );
+                        return;
+                    }
+                    if (event === "done") {
+                        donePayload = payload;
+                    }
+                });
+                if (streamError) {
+                    throw new Error(streamError);
+                }
+                if (!replied && donePayload && donePayload.reply) {
+                    appendChatMessage("bot", String(donePayload.reply));
+                    replied = true;
+                }
+                if (!replied) {
+                    appendChatMessage("bot", t("runtime.empty"));
+                }
+                return;
+            }
+
+            const data = await parseJsonSafe(res);
+            if (!res.ok || (data && data.error)) {
+                throw new Error(buildRequestError(res, data));
+            }
+
+            const messages = data && Array.isArray(data.messages) ? data.messages : [];
             if (messages.length > 0) {
                 messages.forEach((msg) => appendChatMessage("bot", String(msg || "")));
-            } else if (data.reply) {
+            } else if (data && data.reply) {
                 appendChatMessage("bot", String(data.reply));
             } else {
                 appendChatMessage("bot", t("runtime.empty"));

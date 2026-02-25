@@ -12,6 +12,7 @@ from Undefined.config import get_config
 from ._shared import check_auth, routes
 
 _AUTH_HEADER = "X-Undefined-API-Key"
+_CHAT_PROXY_TIMEOUT_SECONDS = 480.0
 
 
 def _runtime_base_url() -> str:
@@ -27,19 +28,29 @@ def _runtime_disabled() -> Response:
     return web.json_response({"error": "Runtime API disabled"}, status=503)
 
 
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    text = str(value or "").strip().lower()
+    return text in {"1", "true", "yes", "on"}
+
+
 async def _proxy_runtime(
     *,
     method: str,
     path: str,
     params: Mapping[str, str] | None = None,
     payload: dict[str, Any] | None = None,
+    timeout_seconds: float = 20.0,
 ) -> Response:
     cfg = get_config(strict=False)
     if not cfg.api.enabled:
         return _runtime_disabled()
 
     url = f"{_runtime_base_url()}{path}"
-    timeout = ClientTimeout(total=20)
+    timeout = ClientTimeout(total=timeout_seconds)
     headers = {_AUTH_HEADER: str(cfg.api.auth_key or "")}
 
     try:
@@ -65,6 +76,79 @@ async def _proxy_runtime(
                     content_type=resp.content_type,
                     charset=resp.charset,
                 )
+    except (OSError, asyncio.TimeoutError) as exc:
+        return web.json_response(
+            {"error": "Runtime API unreachable", "detail": str(exc)},
+            status=502,
+        )
+
+
+async def _proxy_runtime_stream(
+    request: web.Request,
+    *,
+    method: str,
+    path: str,
+    payload: dict[str, Any] | None = None,
+    timeout_seconds: float = _CHAT_PROXY_TIMEOUT_SECONDS,
+) -> web.StreamResponse:
+    cfg = get_config(strict=False)
+    if not cfg.api.enabled:
+        return _runtime_disabled()
+
+    url = f"{_runtime_base_url()}{path}"
+    timeout = ClientTimeout(total=timeout_seconds)
+    headers = {_AUTH_HEADER: str(cfg.api.auth_key or "")}
+    accept = request.headers.get("Accept")
+    if accept:
+        headers["Accept"] = accept
+
+    try:
+        async with ClientSession(timeout=timeout) as session:
+            async with session.request(
+                method=method,
+                url=url,
+                json=payload,
+                headers=headers,
+            ) as upstream:
+                content_type = (upstream.headers.get("Content-Type") or "").lower()
+                if "text/event-stream" not in content_type:
+                    text = await upstream.text()
+                    if "application/json" in content_type:
+                        try:
+                            data = json.loads(text) if text else {}
+                        except json.JSONDecodeError:
+                            data = {"raw": text}
+                        return web.json_response(data, status=upstream.status)
+                    return web.Response(
+                        status=upstream.status,
+                        text=text,
+                        content_type=upstream.content_type,
+                        charset=upstream.charset,
+                    )
+
+                downstream = web.StreamResponse(
+                    status=upstream.status,
+                    reason=upstream.reason,
+                    headers={
+                        "Content-Type": "text/event-stream",
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                    },
+                )
+                await downstream.prepare(request)
+                try:
+                    async for chunk in upstream.content.iter_chunked(1024):
+                        if request.transport is None or request.transport.is_closing():
+                            break
+                        await downstream.write(chunk)
+                except (ConnectionResetError, RuntimeError):
+                    pass
+                finally:
+                    try:
+                        await downstream.write_eof()
+                    except Exception:
+                        pass
+                return downstream
     except (OSError, asyncio.TimeoutError) as exc:
         return web.json_response(
             {"error": "Runtime API unreachable", "detail": str(exc)},
@@ -157,7 +241,7 @@ async def runtime_cognitive_profile_handler(request: web.Request) -> Response:
 
 
 @routes.post("/api/runtime/chat")
-async def runtime_chat_handler(request: web.Request) -> Response:
+async def runtime_chat_handler(request: web.Request) -> web.StreamResponse:
     if not check_auth(request):
         return _unauthorized()
     try:
@@ -169,8 +253,21 @@ async def runtime_chat_handler(request: web.Request) -> Response:
     if not message:
         return web.json_response({"error": "message is required"}, status=400)
 
+    stream = _to_bool(body.get("stream"))
+    payload: dict[str, Any] = {"message": message}
+    if stream:
+        payload["stream"] = True
+        return await _proxy_runtime_stream(
+            request,
+            method="POST",
+            path="/api/v1/chat",
+            payload=payload,
+            timeout_seconds=_CHAT_PROXY_TIMEOUT_SECONDS,
+        )
+
     return await _proxy_runtime(
         method="POST",
         path="/api/v1/chat",
-        payload={"message": message},
+        payload=payload,
+        timeout_seconds=_CHAT_PROXY_TIMEOUT_SECONDS,
     )

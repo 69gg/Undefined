@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import socket
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Awaitable, Callable
@@ -22,6 +24,7 @@ logger = logging.getLogger(__name__)
 _VIRTUAL_USER_ID = 42
 _VIRTUAL_USER_NAME = "system"
 _AUTH_HEADER = "X-Undefined-API-Key"
+_CHAT_SSE_KEEPALIVE_SECONDS = 10.0
 
 
 class _WebUIVirtualSender:
@@ -88,6 +91,30 @@ def _optional_query_param(request: web.Request, key: str) -> str | None:
     if not text:
         return None
     return text
+
+
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    text = str(value or "").strip().lower()
+    return text in {"1", "true", "yes", "on"}
+
+
+def _build_chat_response_payload(mode: str, outputs: list[str]) -> dict[str, Any]:
+    return {
+        "mode": mode,
+        "virtual_user_id": _VIRTUAL_USER_ID,
+        "permission": "superadmin",
+        "messages": outputs,
+        "reply": "\n\n".join(outputs).strip(),
+    }
+
+
+def _sse_event(event: str, payload: dict[str, Any]) -> bytes:
+    data = json.dumps(payload, ensure_ascii=False)
+    return f"event: {event}\ndata: {data}\n\n".encode("utf-8")
 
 
 async def _probe_http_endpoint(
@@ -228,7 +255,15 @@ def _build_openapi_spec(ctx: RuntimeAPIContext) -> dict[str, Any]:
             "/api/v1/cognitive/profile/{entity_type}/{entity_id}": {
                 "get": {"summary": "Get a profile by entity type/id"}
             },
-            "/api/v1/chat": {"post": {"summary": "WebUI special private chat"}},
+            "/api/v1/chat": {
+                "post": {
+                    "summary": "WebUI special private chat",
+                    "description": (
+                        "POST JSON {message, stream?}. "
+                        "When stream=true, response is SSE with keep-alive comments."
+                    ),
+                }
+            },
         },
     }
 
@@ -491,33 +526,14 @@ class RuntimeAPIServer:
             }
         )
 
-    async def _chat_handler(self, request: web.Request) -> Response:
-        try:
-            body = await request.json()
-        except Exception:
-            return _json_error("Invalid JSON", status=400)
-
-        text = str(body.get("message", "") or "").strip()
-        if not text:
-            return _json_error("message is required", status=400)
-
+    async def _run_webui_chat(
+        self,
+        *,
+        text: str,
+        send_output: Callable[[int, str], Awaitable[None]],
+    ) -> str:
         cfg = self._ctx.config_getter()
         permission_sender_id = int(cfg.superadmin_qq)
-        outputs: list[str] = []
-
-        async def _capture_private_message(user_id: int, message: str) -> None:
-            _ = user_id
-            content = str(message or "").strip()
-            if not content:
-                return
-            outputs.append(content)
-            await self._ctx.history_manager.add_private_message(
-                user_id=_VIRTUAL_USER_ID,
-                text_content=content,
-                display_name="Bot",
-                user_name="Bot",
-            )
-
         await self._ctx.history_manager.add_private_message(
             user_id=_VIRTUAL_USER_ID,
             text_content=text,
@@ -531,17 +547,9 @@ class RuntimeAPIServer:
                 user_id=_VIRTUAL_USER_ID,
                 sender_id=permission_sender_id,
                 command=command,
-                send_private_callback=_capture_private_message,
+                send_private_callback=send_output,
             )
-            return web.json_response(
-                {
-                    "mode": "command",
-                    "virtual_user_id": _VIRTUAL_USER_ID,
-                    "permission": "superadmin",
-                    "messages": outputs,
-                    "reply": "\n\n".join(outputs).strip(),
-                }
-            )
+            return "command"
 
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         full_question = f"""<message sender="{escape_xml_attr(_VIRTUAL_USER_NAME)}" sender_id="{escape_xml_attr(_VIRTUAL_USER_ID)}" location="WebUI私聊" time="{escape_xml_attr(current_time)}">
@@ -554,7 +562,7 @@ class RuntimeAPIServer:
 权限等级：superadmin（你可按最高管理权限处理）。
 请正常进行私聊对话；如果需要结束会话，调用 end 工具。"""
         virtual_sender = _WebUIVirtualSender(
-            _VIRTUAL_USER_ID, _capture_private_message, onebot=self._ctx.onebot
+            _VIRTUAL_USER_ID, send_output, onebot=self._ctx.onebot
         )
 
         async def _get_recent_cb(
@@ -577,9 +585,7 @@ class RuntimeAPIServer:
         ):
             result = await self._ctx.ai.ask(
                 full_question,
-                send_message_callback=lambda msg: _capture_private_message(
-                    _VIRTUAL_USER_ID, msg
-                ),
+                send_message_callback=lambda msg: send_output(_VIRTUAL_USER_ID, msg),
                 get_recent_messages_callback=_get_recent_cb,
                 get_image_url_callback=self._ctx.onebot.get_image,
                 get_forward_msg_callback=self._ctx.onebot.get_forward_msg,
@@ -598,14 +604,121 @@ class RuntimeAPIServer:
 
         final_reply = str(result or "").strip()
         if final_reply:
-            await _capture_private_message(_VIRTUAL_USER_ID, final_reply)
+            await send_output(_VIRTUAL_USER_ID, final_reply)
 
-        return web.json_response(
-            {
-                "mode": "chat",
-                "virtual_user_id": _VIRTUAL_USER_ID,
-                "permission": "superadmin",
-                "messages": outputs,
-                "reply": "\n\n".join(outputs).strip(),
-            }
+        return "chat"
+
+    async def _chat_handler(self, request: web.Request) -> web.StreamResponse:
+        try:
+            body = await request.json()
+        except Exception:
+            return _json_error("Invalid JSON", status=400)
+
+        text = str(body.get("message", "") or "").strip()
+        if not text:
+            return _json_error("message is required", status=400)
+
+        stream = _to_bool(body.get("stream"))
+        outputs: list[str] = []
+
+        async def _capture_private_message(user_id: int, message: str) -> None:
+            _ = user_id
+            content = str(message or "").strip()
+            if not content:
+                return
+            outputs.append(content)
+            await self._ctx.history_manager.add_private_message(
+                user_id=_VIRTUAL_USER_ID,
+                text_content=content,
+                display_name="Bot",
+                user_name="Bot",
+            )
+
+        if not stream:
+            mode = await self._run_webui_chat(
+                text=text, send_output=_capture_private_message
+            )
+            return web.json_response(_build_chat_response_payload(mode, outputs))
+
+        response = web.StreamResponse(
+            status=200,
+            reason="OK",
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            },
         )
+        await response.prepare(request)
+
+        message_queue: asyncio.Queue[str] = asyncio.Queue()
+
+        async def _capture_private_message_stream(user_id: int, message: str) -> None:
+            await _capture_private_message(user_id, message)
+            content = str(message or "").strip()
+            if content:
+                await message_queue.put(content)
+
+        task = asyncio.create_task(
+            self._run_webui_chat(text=text, send_output=_capture_private_message_stream)
+        )
+        mode = "chat"
+        client_disconnected = False
+        try:
+            await response.write(
+                _sse_event(
+                    "meta",
+                    {
+                        "virtual_user_id": _VIRTUAL_USER_ID,
+                        "permission": "superadmin",
+                    },
+                )
+            )
+
+            while True:
+                if request.transport is None or request.transport.is_closing():
+                    client_disconnected = True
+                    break
+                if task.done() and message_queue.empty():
+                    break
+                try:
+                    message = await asyncio.wait_for(
+                        message_queue.get(),
+                        timeout=_CHAT_SSE_KEEPALIVE_SECONDS,
+                    )
+                    await response.write(_sse_event("message", {"content": message}))
+                except asyncio.TimeoutError:
+                    await response.write(b": keep-alive\n\n")
+
+            if client_disconnected:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+                return response
+
+            mode = await task
+            await response.write(
+                _sse_event("done", _build_chat_response_payload(mode, outputs))
+            )
+        except asyncio.CancelledError:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+            raise
+        except (ConnectionResetError, RuntimeError):
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        except Exception as exc:
+            logger.exception("[RuntimeAPI] chat stream failed: %s", exc)
+            if not task.done():
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+            with suppress(Exception):
+                await response.write(_sse_event("error", {"error": str(exc)}))
+        finally:
+            with suppress(Exception):
+                await response.write_eof()
+
+        return response

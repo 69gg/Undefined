@@ -86,9 +86,16 @@ curl http://127.0.0.1:8788/openapi.json
 
 ```json
 {
-  "message": "你好"
+  "message": "你好",
+  "stream": false
 }
 ```
+
+- 当 `stream = true` 时，返回 `text/event-stream`（SSE）：
+  - `event: meta`：会话元信息。
+  - `event: message`：AI/命令输出片段。
+  - `event: done`：最终汇总（与非流式 JSON 结构一致）。
+  - 在长时间无内容时会发送 `: keep-alive` 注释帧，防止中间层空闲断连。
 
 行为约定：
 
@@ -109,6 +116,12 @@ curl -H "X-Undefined-API-Key: $KEY" \
   -H "Content-Type: application/json" \
   -d '{"message":"/help"}' \
   "$API/api/v1/chat"
+
+curl -N -H "X-Undefined-API-Key: $KEY" \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{"message":"你好","stream":true}' \
+  "$API/api/v1/chat"
 ```
 
 ## 6. WebUI 代理调用（推荐）
@@ -125,6 +138,7 @@ WebUI 不直接在前端暴露 `auth_key`，而是通过后端代理访问主进
 - `GET /api/runtime/openapi`
 
 WebUI 后端会自动从 `config.toml` 读取 `[api].auth_key` 并注入 Header。
+`/api/runtime/chat` 代理超时为 `480s`，并透传 SSE keep-alive。
 
 ## 7. 故障排查
 
