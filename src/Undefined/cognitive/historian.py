@@ -303,6 +303,7 @@ class HistorianWorker:
                     attempt=attempt + 2,
                     must_keep_entity_ids=entity_drift_ids,
                     gate_feedback=gate_feedback,
+                    previous_rewrite=canonical,
                 )
             else:
                 is_absolute = False
@@ -583,6 +584,7 @@ class HistorianWorker:
         attempt: int = 1,
         must_keep_entity_ids: list[str] | None = None,
         gate_feedback: str | None = None,
+        previous_rewrite: str | None = None,
     ) -> str:
         from Undefined.utils.resources import read_text_resource
 
@@ -668,11 +670,23 @@ class HistorianWorker:
                     "- 若无法判断昵称，请至少保留对应的数字ID。"
                 )
         if gate_feedback and str(gate_feedback).strip():
-            prompt += (
-                "\n\n上次提交被“绝对化闸门”拦截，原因如下（请逐项修正后再提交）：\n"
-                f"{gate_feedback.strip()}\n"
-                "- 返回前请自检：不得包含代词/相对时间/相对地点；且不得丢失必须保留的实体ID。"
-            )
+            gate_parts: list[str] = [
+                "",
+                "",
+                "上次提交被“绝对化闸门”拦截，"
+                "原因如下（请在上次改写结果基础上逐项修正后再提交）：",
+                gate_feedback.strip(),
+                "- 返回前请自检：不得包含代词/相对时间/相对地点；"
+                "且不得丢失必须保留的实体ID。",
+                "- 若闸门属于误判（如命中词属于专有名词、用户昵称、作品名等），"
+                "AI 调用 end 工具时可使用 force=true 跳过正则闸门。",
+            ]
+            prompt += "\n".join(gate_parts)
+            if previous_rewrite and str(previous_rewrite).strip():
+                prompt += (
+                    "\n\n你上次的改写结果"
+                    "（请在此基础上修正，而非从头改写）：\n" + previous_rewrite.strip()
+                )
         response = await self._ai_client.submit_background_llm_call(
             model_config=self._model_config or self._ai_client.agent_config,
             messages=[{"role": "user", "content": prompt}],

@@ -102,6 +102,7 @@ async def test_rewrite_and_validate_force_skips_regex_gate() -> None:
             attempt: int = 1,
             must_keep_entity_ids: list[str] | None = None,
             gate_feedback: str | None = None,
+            previous_rewrite: str | None = None,
         ) -> str:
             rewrite_calls.append(attempt)
             return "他在这里说之后再处理"
@@ -126,6 +127,7 @@ async def test_rewrite_and_validate_force_skips_regex_gate() -> None:
 @pytest.mark.asyncio
 async def test_rewrite_and_validate_passes_gate_feedback_on_retry() -> None:
     captured_feedback: list[str] = []
+    captured_previous: list[str | None] = []
 
     def _config_getter() -> SimpleNamespace:
         return SimpleNamespace(rewrite_max_retry=1)
@@ -139,10 +141,12 @@ async def test_rewrite_and_validate_passes_gate_feedback_on_retry() -> None:
             attempt: int = 1,
             must_keep_entity_ids: list[str] | None = None,
             gate_feedback: str | None = None,
+            previous_rewrite: str | None = None,
         ) -> str:
             if attempt == 1:
                 return "他今天在这里说之后再处理"
             captured_feedback.append(str(gate_feedback or ""))
+            captured_previous.append(previous_rewrite)
             return "Null(1708213363)在2026-02-24 10:00于bot测试群(1017148870)表示将于2026-02-24 11:00处理"
 
     worker = _FakeRewriteWorker(
@@ -173,6 +177,8 @@ async def test_rewrite_and_validate_passes_gate_feedback_on_retry() -> None:
     assert "命中相对时间" in feedback
     assert "命中相对地点" in feedback
     assert "当前 force: false" in feedback
+    assert captured_previous
+    assert captured_previous[0] == "他今天在这里说之后再处理"
 
 
 @pytest.mark.asyncio
