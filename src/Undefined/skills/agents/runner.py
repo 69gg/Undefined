@@ -130,6 +130,7 @@ async def run_agent_with_tools(
             choice: dict[str, Any] = result.get("choices", [{}])[0]
             message: dict[str, Any] = choice.get("message", {})
             content: str = message.get("content") or ""
+            reasoning_content: str | None = message.get("reasoning_content")
             tool_calls: list[dict[str, Any]] = message.get("tool_calls", [])
 
             if content.strip() and tool_calls:
@@ -138,9 +139,15 @@ async def run_agent_with_tools(
             if not tool_calls:
                 return content
 
-            messages.append(
-                {"role": "assistant", "content": content, "tool_calls": tool_calls}
-            )
+            assistant_message: dict[str, Any] = {
+                "role": "assistant",
+                "content": content,
+                "tool_calls": tool_calls,
+            }
+            cot_compat = getattr(agent_config, "thinking_tool_call_compat", False)
+            if cot_compat and reasoning_content is not None:
+                assistant_message["reasoning_content"] = reasoning_content
+            messages.append(assistant_message)
 
             tool_tasks: list[asyncio.Future[Any]] = []
             tool_call_ids: list[str] = []
