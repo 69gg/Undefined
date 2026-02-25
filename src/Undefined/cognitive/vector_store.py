@@ -74,6 +74,43 @@ def _metadata_timestamp_epoch(metadata: Any) -> float | None:
     return None
 
 
+def _sanitize_metadata_value(value: Any) -> str | int | float | bool | list[Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, list):
+        normalized_items: list[str | int | float | bool] = []
+        for item in value:
+            if item is None:
+                continue
+            if isinstance(item, bool):
+                normalized_items.append(item)
+                continue
+            if isinstance(item, (int, float)):
+                normalized_items.append(item)
+                continue
+            text = str(item).strip()
+            if text:
+                normalized_items.append(text)
+        return normalized_items or None
+    text = str(value).strip()
+    return text or None
+
+
+def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    sanitized: dict[str, Any] = {}
+    for raw_key, raw_value in metadata.items():
+        key = str(raw_key).strip()
+        if not key:
+            continue
+        normalized_value = _sanitize_metadata_value(raw_value)
+        if normalized_value is None:
+            continue
+        sanitized[key] = normalized_value
+    return sanitized
+
+
 def _similarity_from_distance(distance: Any) -> float:
     dist = _safe_float(distance, default=1.0)
     return _clamp(1.0 - dist, 0.0, 1.0)
@@ -166,11 +203,12 @@ class CognitiveVectorStore:
     async def upsert_event(
         self, event_id: str, document: str, metadata: dict[str, Any]
     ) -> None:
+        safe_metadata = _sanitize_metadata(metadata)
         logger.info(
             "[认知向量库] 写入事件: event_id=%s doc_len=%s metadata_keys=%s",
             event_id,
             len(document or ""),
-            sorted(metadata.keys()),
+            sorted(safe_metadata.keys()),
         )
         emb = await self._embed(document)
         col = self._events
@@ -179,7 +217,7 @@ class CognitiveVectorStore:
                 ids=[event_id],
                 documents=[document],
                 embeddings=[emb],  # type: ignore[arg-type]
-                metadatas=[metadata],
+                metadatas=[safe_metadata],
             )
         )
         logger.info("[认知向量库] 事件写入完成: event_id=%s", event_id)
@@ -227,11 +265,12 @@ class CognitiveVectorStore:
     async def upsert_profile(
         self, profile_id: str, document: str, metadata: dict[str, Any]
     ) -> None:
+        safe_metadata = _sanitize_metadata(metadata)
         logger.info(
             "[认知向量库] 写入侧写向量: profile_id=%s doc_len=%s metadata_keys=%s",
             profile_id,
             len(document or ""),
-            sorted(metadata.keys()),
+            sorted(safe_metadata.keys()),
         )
         emb = await self._embed(document)
         col = self._profiles
@@ -240,7 +279,7 @@ class CognitiveVectorStore:
                 ids=[profile_id],
                 documents=[document],
                 embeddings=[emb],  # type: ignore[arg-type]
-                metadatas=[metadata],
+                metadatas=[safe_metadata],
             )
         )
         logger.info("[认知向量库] 侧写向量写入完成: profile_id=%s", profile_id)
