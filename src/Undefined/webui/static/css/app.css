@@ -65,7 +65,7 @@
 .main-content.chat-layout #tab-chat .chat-runtime-card {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  height: clamp(460px, calc(100vh - 280px), 780px);
+  height: clamp(520px, calc(100vh - 230px), 840px);
 }
 .main-content.chat-layout #tab-chat .runtime-chat-log {
   min-height: 0;

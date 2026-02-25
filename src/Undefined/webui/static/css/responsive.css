@@ -6,7 +6,7 @@
   .main-content { padding: 30px; }
   .header { flex-direction: column; align-items: flex-start; gap: 16px; }
   .header.sticky { margin: -30px -30px 24px -30px; padding-left: 30px; padding-right: 30px; }
-  .main-content.chat-layout #tab-chat .chat-runtime-card { height: clamp(420px, calc(100vh - 260px), 700px); }
+  .main-content.chat-layout #tab-chat .chat-runtime-card { height: clamp(460px, calc(100vh - 220px), 760px); }
 }
 
 @media (max-width: 768px) {
@@ -20,7 +20,7 @@
   .form-fields { grid-template-columns: 1fr; }
   .log-viewer { height: 420px; }
   .noise { opacity: 0.08; }
-  .main-content.chat-layout #tab-chat .chat-runtime-card { height: clamp(360px, calc(100vh - 220px), 620px); }
+  .main-content.chat-layout #tab-chat .chat-runtime-card { height: clamp(400px, calc(100vh - 180px), 680px); }
   .main-content.chat-layout #tab-chat .runtime-chat-input { min-height: 40px; max-height: 76px; }
 }
 

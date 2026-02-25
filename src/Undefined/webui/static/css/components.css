@@ -228,11 +228,15 @@
 }
 .runtime-chat-input-row {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
   gap: 8px;
 }
 .runtime-chat-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  white-space: nowrap;
   gap: 8px;
 }
 .runtime-chat-input {
