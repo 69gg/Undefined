@@ -26,7 +26,11 @@ def _format_command_list(context: CommandContext) -> str:
     footer_lines = (
         help_meta.help_footer
         if help_meta is not None and help_meta.help_footer
-        else ["查看详细帮助：/help <command>", "版权与免责声明：/copyright"]
+        else [
+            "查看详细帮助：/help <command>",
+            "版权与免责声明：/copyright",
+            "Copyright (c) 2025 Null <pylindex@qq.com>. Licensed under the MIT License.",
+        ]
     )
 
     lines = ["Undefined 命令帮助", "", "可用命令：", *command_lines, "", *footer_lines]
