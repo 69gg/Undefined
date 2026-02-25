@@ -19,6 +19,11 @@ function refreshUI() {
         }
     }
 
+    const mainContent = document.querySelector(".main-content");
+    if (mainContent) {
+        mainContent.classList.toggle("chat-layout", state.tab === "chat");
+    }
+
     if (initialState && initialState.version) get("about-version-display").innerText = initialState.version;
     if (initialState && initialState.license) get("about-license-display").innerText = initialState.license;
 
@@ -33,6 +38,10 @@ function refreshUI() {
 
 function switchTab(tab) {
     state.tab = tab;
+    const mainContent = document.querySelector(".main-content");
+    if (mainContent) {
+        mainContent.classList.toggle("chat-layout", tab === "chat");
+    }
     document.querySelectorAll(".nav-item").forEach(el => {
         el.classList.toggle("active", el.getAttribute("data-tab") === tab);
     });

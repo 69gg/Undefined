@@ -442,8 +442,12 @@
                             <textarea id="runtimeChatInput" class="form-control runtime-chat-input"
                                 data-i18n-placeholder="runtime.chat_placeholder"
                                 placeholder="输入消息，或直接 /help 这样的命令"></textarea>
-                            <button id="btnRuntimeChatSend" class="btn primary"
-                                data-i18n="runtime.send">发送</button>
+                            <div class="runtime-chat-actions">
+                                <input id="runtimeChatImageInput" type="file" accept="image/*" hidden />
+                                <button id="btnRuntimeChatImage" class="btn" data-i18n="runtime.image">图片</button>
+                                <button id="btnRuntimeChatSend" class="btn primary"
+                                    data-i18n="runtime.send">发送</button>
+                            </div>
                         </div>
                     </div>
                 </section>

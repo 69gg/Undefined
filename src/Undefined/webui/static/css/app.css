@@ -60,6 +60,13 @@
 .tab-content.active { display: block; }
 
 .main-content { padding: 40px 60px; overflow-y: auto; max-width: 1400px; scrollbar-gutter: stable; }
+.main-content.chat-layout { max-width: none; }
+.main-content.chat-layout #tab-chat .runtime-card { max-width: 100%; }
+.main-content.chat-layout #tab-chat .runtime-chat-log {
+  min-height: 420px;
+  max-height: calc(100vh - 320px);
+}
+.main-content.chat-layout #tab-chat .runtime-chat-input { min-height: 130px; }
 
 .header { margin-bottom: 32px; display: flex; justify-content: space-between; align-items: flex-end; }
 .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

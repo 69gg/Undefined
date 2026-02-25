@@ -25,7 +25,7 @@
         if (!log) return;
         const item = document.createElement("div");
         item.className = `runtime-chat-item ${role}`;
-        item.innerHTML = `<div class="runtime-chat-role">${role === "user" ? "You" : "AI"}</div><div class="runtime-chat-content">${escapeHtml(content)}</div>`;
+        item.innerHTML = `<div class="runtime-chat-role">${role === "user" ? "You" : "AI"}</div><div class="runtime-chat-content">${renderChatContent(content)}</div>`;
         log.appendChild(item);
         log.scrollTop = log.scrollHeight;
     }
@@ -34,6 +34,70 @@
         const log = get("runtimeChatLog");
         if (!log) return;
         log.innerHTML = "";
+    }
+
+    function parseCqAttributes(raw) {
+        const attrs = {};
+        String(raw || "")
+            .split(",")
+            .forEach((part) => {
+                const idx = part.indexOf("=");
+                if (idx <= 0) return;
+                const key = part.slice(0, idx).trim();
+                const value = part.slice(idx + 1).trim();
+                if (!key) return;
+                attrs[key] = value;
+            });
+        return attrs;
+    }
+
+    function resolveCqImageSource(attrs) {
+        const raw = String((attrs && (attrs.url || attrs.file)) || "").trim();
+        if (!raw) return "";
+        if (raw.startsWith("base64://")) {
+            const payload = raw.slice("base64://".length).trim();
+            return payload ? `data:image/png;base64,${payload}` : "";
+        }
+        if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:image/")) {
+            return raw;
+        }
+        return "";
+    }
+
+    function renderChatContent(content) {
+        const text = String(content || "");
+        const imagePattern = /\[CQ:image,([^\]]+)\]/g;
+        let html = "";
+        let cursor = 0;
+        let match = imagePattern.exec(text);
+        while (match) {
+            const start = match.index;
+            if (start > cursor) {
+                html += escapeHtml(text.slice(cursor, start));
+            }
+            const attrs = parseCqAttributes(match[1]);
+            const src = resolveCqImageSource(attrs);
+            if (src) {
+                html += `<img class="runtime-chat-image" src="${escapeHtml(src)}" alt="image" loading="lazy" />`;
+            } else {
+                html += `<code>${escapeHtml(match[0])}</code>`;
+            }
+            cursor = imagePattern.lastIndex;
+            match = imagePattern.exec(text);
+        }
+        if (cursor < text.length) {
+            html += escapeHtml(text.slice(cursor));
+        }
+        return html || escapeHtml(text);
+    }
+
+    function readFileAsDataUrl(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ""));
+            reader.onerror = () => reject(new Error("File read failed"));
+            reader.readAsDataURL(file);
+        });
     }
 
     async function parseJsonSafe(res) {
@@ -292,6 +356,32 @@
         }
     }
 
+    async function handleChatImagePicked(event) {
+        const input = event && event.target ? event.target : null;
+        const files = input && input.files ? Array.from(input.files) : [];
+        const chatInput = get("runtimeChatInput");
+        if (!chatInput || files.length === 0) return;
+
+        try {
+            for (const file of files) {
+                if (!file || !String(file.type || "").startsWith("image/")) continue;
+                const dataUrl = await readFileAsDataUrl(file);
+                const base64 = String(dataUrl).split(",", 2)[1] || "";
+                if (!base64) continue;
+                if (chatInput.value && !chatInput.value.endsWith("\n")) {
+                    chatInput.value += "\n";
+                }
+                chatInput.value += `[CQ:image,file=base64://${base64}]`;
+            }
+            showToast(t("runtime.image_added"), "success", 1800);
+            chatInput.focus();
+        } catch (error) {
+            showToast(`${t("runtime.failed")}: ${error.message || error}`, "error", 5000);
+        } finally {
+            if (input) input.value = "";
+        }
+    }
+
     async function refreshAll() {
         try {
             const meta = await fetchRuntimeMeta();
@@ -332,6 +422,15 @@
 
         const sendBtn = get("btnRuntimeChatSend");
         if (sendBtn) sendBtn.addEventListener("click", sendChatMessage);
+
+        const imageBtn = get("btnRuntimeChatImage");
+        const imageInput = get("runtimeChatImageInput");
+        if (imageBtn && imageInput) {
+            imageBtn.addEventListener("click", () => {
+                imageInput.click();
+            });
+            imageInput.addEventListener("change", handleChatImagePicked);
+        }
 
         const chatInput = get("runtimeChatInput");
         if (chatInput) {
