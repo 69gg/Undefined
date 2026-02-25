@@ -48,6 +48,8 @@
                     <button class="btn" data-action="open-app" data-tab="config" data-i18n="landing.config">配置修改</button>
                     <button class="btn ghost" data-action="open-app" data-tab="logs"
                         data-i18n="landing.logs">日志查看</button>
+                    <button class="btn ghost" data-action="open-app" data-tab="runtime"
+                        data-i18n="landing.runtime">运行接口</button>
                     <button class="btn ghost" data-action="open-app" data-tab="about"
                         data-i18n="landing.about">关于项目</button>
                 </div>
@@ -119,6 +121,9 @@
                 <li class="nav-item" data-tab="logs" data-i18n="tabs.logs" role="button" tabindex="0">
                     Logs
                 </li>
+                <li class="nav-item" data-tab="runtime" data-i18n="tabs.runtime" role="button" tabindex="0">
+                    Runtime
+                </li>
                 <li class="nav-item" data-tab="about" data-i18n="tabs.about" role="button" tabindex="0">
                     About
                 </li>
@@ -177,6 +182,7 @@
                         <button class="nav-item active" data-tab="overview" data-i18n="tabs.overview">Overview</button>
                         <button class="nav-item" data-tab="config" data-i18n="tabs.config">Configuration</button>
                         <button class="nav-item" data-tab="logs" data-i18n="tabs.logs">Logs</button>
+                        <button class="nav-item" data-tab="runtime" data-i18n="tabs.runtime">Runtime</button>
                         <button class="nav-item" data-tab="about" data-i18n="tabs.about">About</button>
                     </div>
                     <div class="mobile-actions">
@@ -333,6 +339,99 @@
                         aria-label="System logs">Initializing log connection...</div>
                 </section>
 
+                <!-- Tab Runtime -->
+                <section id="tab-runtime" class="tab-content">
+                    <div class="header">
+                        <div>
+                            <h1 class="page-title" data-i18n="runtime.title">Runtime 能力中心</h1>
+                            <p class="page-subtitle" data-i18n="runtime.subtitle">探针、记忆查询、侧写查看与 WebUI AI Chat。</p>
+                        </div>
+                        <div class="toolbar">
+                            <button id="btnRuntimeRefresh" class="btn" data-i18n="runtime.refresh_all">刷新全部</button>
+                        </div>
+                    </div>
+
+                    <div class="runtime-grid">
+                        <div class="card runtime-card">
+                            <div class="card-title" data-i18n="runtime.probe_internal">内部探针</div>
+                            <pre id="runtimeProbeInternal" class="runtime-json">--</pre>
+                        </div>
+                        <div class="card runtime-card">
+                            <div class="card-title" data-i18n="runtime.probe_external">外部探针</div>
+                            <pre id="runtimeProbeExternal" class="runtime-json">--</pre>
+                        </div>
+                    </div>
+
+                    <div class="card runtime-card">
+                        <div class="panel-row runtime-head">
+                            <div class="card-title" data-i18n="runtime.memory_title">记忆查询（只读）</div>
+                            <div class="runtime-inline">
+                                <input id="runtimeMemoryQuery" type="search" class="form-control form-control-sm"
+                                    data-i18n-placeholder="runtime.memory_query_placeholder" placeholder="输入关键词..." />
+                                <button id="btnRuntimeMemorySearch" class="btn btn-sm"
+                                    data-i18n="runtime.search">查询</button>
+                            </div>
+                        </div>
+                        <div id="runtimeMemoryMeta" class="log-meta"></div>
+                        <div id="runtimeMemoryList" class="runtime-list"></div>
+                    </div>
+
+                    <div class="runtime-grid">
+                        <div class="card runtime-card">
+                            <div class="panel-row runtime-head">
+                                <div class="card-title" data-i18n="runtime.cognitive_events">认知事件检索</div>
+                                <div class="runtime-inline">
+                                    <input id="runtimeEventsQuery" type="search" class="form-control form-control-sm"
+                                        data-i18n-placeholder="runtime.events_placeholder" placeholder="输入事件关键词..." />
+                                    <button id="btnRuntimeEventsSearch" class="btn btn-sm"
+                                        data-i18n="runtime.search">查询</button>
+                                </div>
+                            </div>
+                            <pre id="runtimeEventsResult" class="runtime-json">--</pre>
+                        </div>
+                        <div class="card runtime-card">
+                            <div class="panel-row runtime-head">
+                                <div class="card-title" data-i18n="runtime.cognitive_profiles">认知侧写检索</div>
+                                <div class="runtime-inline">
+                                    <input id="runtimeProfilesQuery" type="search" class="form-control form-control-sm"
+                                        data-i18n-placeholder="runtime.profiles_placeholder" placeholder="输入侧写关键词..." />
+                                    <button id="btnRuntimeProfilesSearch" class="btn btn-sm"
+                                        data-i18n="runtime.search">查询</button>
+                                </div>
+                            </div>
+                            <pre id="runtimeProfilesResult" class="runtime-json">--</pre>
+                        </div>
+                    </div>
+
+                    <div class="card runtime-card">
+                        <div class="panel-row runtime-head">
+                            <div class="card-title" data-i18n="runtime.cognitive_profile_get">按实体查看侧写</div>
+                            <div class="runtime-inline">
+                                <input id="runtimeProfileEntityType" type="text" class="form-control form-control-sm"
+                                    value="user" placeholder="entity_type" />
+                                <input id="runtimeProfileEntityId" type="text" class="form-control form-control-sm"
+                                    placeholder="entity_id" />
+                                <button id="btnRuntimeProfileGet" class="btn btn-sm"
+                                    data-i18n="runtime.fetch">获取</button>
+                            </div>
+                        </div>
+                        <pre id="runtimeProfileResult" class="runtime-json">--</pre>
+                    </div>
+
+                    <div class="card runtime-card">
+                        <div class="card-title" data-i18n="runtime.chat_title">AI Chat（虚拟私聊 system#42）</div>
+                        <p class="muted-sm" data-i18n="runtime.chat_hint">该会话由 WebUI 发起，权限为 superadmin；私聊里可直接使用 /命令。</p>
+                        <div id="runtimeChatLog" class="runtime-chat-log"></div>
+                        <div class="runtime-chat-input-row">
+                            <textarea id="runtimeChatInput" class="form-control runtime-chat-input"
+                                data-i18n-placeholder="runtime.chat_placeholder"
+                                placeholder="输入消息，或直接 /help 这样的命令"></textarea>
+                            <button id="btnRuntimeChatSend" class="btn primary"
+                                data-i18n="runtime.send">发送</button>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Tab About -->
                 <section id="tab-about" class="tab-content">
                     <div class="header">
@@ -373,6 +472,7 @@
     <script src="/static/js/api.js"></script>
     <script src="/static/js/auth.js"></script>
     <script src="/static/js/bot.js"></script>
+    <script src="/static/js/runtime.js"></script>
     <script src="/static/js/config-form.js"></script>
     <script src="/static/js/log-view.js"></script>
     <script src="/static/js/main.js"></script>

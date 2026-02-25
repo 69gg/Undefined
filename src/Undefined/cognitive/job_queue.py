@@ -194,3 +194,16 @@ class JobQueue:
                 timeout_seconds,
             )
         return count
+
+    def snapshot(self) -> dict[str, Any]:
+        """返回队列目录计数快照。"""
+        return {
+            "pending": sum(1 for _ in self._pending_dir.glob("*.json")),
+            "processing": sum(1 for _ in self._processing_dir.glob("*.json")),
+            "failed": sum(1 for _ in self._failed_dir.glob("*.json")),
+            "paths": {
+                "pending": str(self._pending_dir),
+                "processing": str(self._processing_dir),
+                "failed": str(self._failed_dir),
+            },
+        }

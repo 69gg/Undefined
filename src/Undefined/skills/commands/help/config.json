@@ -11,6 +11,7 @@
   },
   "show_in_help": true,
   "order": 10,
+  "allow_in_private": true,
   "aliases": [],
   "help_footer": [
     "查看详细帮助：/help <command>",

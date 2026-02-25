@@ -28,6 +28,7 @@ except Exception:  # pragma: no cover
 
 
 from .models import (
+    APIConfig,
     AgentModelConfig,
     ChatModelConfig,
     CognitiveConfig,
@@ -47,6 +48,9 @@ LOCAL_CONFIG_PATH = Path("config.local.json")
 DEFAULT_WEBUI_URL = "127.0.0.1"
 DEFAULT_WEBUI_PORT = 8787
 DEFAULT_WEBUI_PASSWORD = "changeme"
+DEFAULT_API_HOST = "127.0.0.1"
+DEFAULT_API_PORT = 8788
+DEFAULT_API_AUTH_KEY = "changeme"
 
 _ENV_WARNED_KEYS: set[str] = set()
 
@@ -423,6 +427,7 @@ class Config:
     webui_url: str
     webui_port: int
     webui_password: str
+    api: APIConfig
     # Code Delivery Agent
     code_delivery_enabled: bool
     code_delivery_task_root: str
@@ -1148,6 +1153,7 @@ class Config:
             messages_send_url_file_max_size_mb = 100
 
         webui_settings = load_webui_settings(config_path)
+        api_config = cls._parse_api_config(data)
 
         cognitive = cls._parse_cognitive_config(data)
 
@@ -1240,6 +1246,7 @@ class Config:
             webui_url=webui_settings.url,
             webui_port=webui_settings.port,
             webui_password=webui_settings.password,
+            api=api_config,
             code_delivery_enabled=code_delivery_enabled,
             code_delivery_task_root=code_delivery_task_root,
             code_delivery_docker_image=code_delivery_docker_image,
@@ -2114,6 +2121,31 @@ class Config:
             job_max_retries=_coerce_int(
                 que.get("job_max_retries") if isinstance(que, dict) else None, 3
             ),
+        )
+
+    @staticmethod
+    def _parse_api_config(data: dict[str, Any]) -> APIConfig:
+        section_raw = data.get("api", {})
+        section = section_raw if isinstance(section_raw, dict) else {}
+
+        enabled = _coerce_bool(section.get("enabled"), True)
+        host = _coerce_str(section.get("host"), DEFAULT_API_HOST)
+        port = _coerce_int(section.get("port"), DEFAULT_API_PORT)
+        if port <= 0 or port > 65535:
+            port = DEFAULT_API_PORT
+
+        auth_key = _coerce_str(section.get("auth_key"), DEFAULT_API_AUTH_KEY)
+        if not auth_key:
+            auth_key = DEFAULT_API_AUTH_KEY
+
+        openapi_enabled = _coerce_bool(section.get("openapi_enabled"), True)
+
+        return APIConfig(
+            enabled=enabled,
+            host=host,
+            port=port,
+            auth_key=auth_key,
+            openapi_enabled=openapi_enabled,
         )
 
     @staticmethod

@@ -43,6 +43,20 @@ class OneBotClient:
         """设置消息处理器"""
         self._message_handler = handler
 
+    def connection_status(self) -> dict[str, Any]:
+        """返回连接状态快照。"""
+        ws = self.ws
+        ws_exists = ws is not None
+        ws_closed = bool(getattr(ws, "closed", True)) if ws_exists else True
+        connected = ws_exists and (not ws_closed) and self._running
+        return {
+            "connected": connected,
+            "running": self._running,
+            "ws_exists": ws_exists,
+            "ws_closed": ws_closed,
+            "ws_url": self.ws_url,
+        }
+
     async def connect(self) -> None:
         """连接到 OneBot WebSocket"""
         # 构建带 token 的 URL

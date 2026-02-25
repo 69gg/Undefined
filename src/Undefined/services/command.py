@@ -4,7 +4,7 @@ import re
 import time
 from uuid import uuid4
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 from pathlib import Path
 
 from Undefined.config import Config
@@ -42,6 +42,27 @@ _STATS_CALL_TYPE_TOP_N = 12
 _STATS_DATA_SUMMARY_MAX_CHARS = 12000
 _STATS_AI_FLAGS = {"--ai", "-a"}
 _STATS_TIME_RANGE_RE = re.compile(r"^\d+[dwm]?$", re.IGNORECASE)
+
+
+class _PrivateCommandSenderProxy:
+    """将命令处理器里的 send_group_message 代理到私聊发送。"""
+
+    def __init__(
+        self,
+        user_id: int,
+        send_private_message: Callable[[int, str], Awaitable[None]],
+    ) -> None:
+        self._user_id = user_id
+        self._send_private_message = send_private_message
+
+    async def send_group_message(
+        self,
+        group_id: int,
+        message: str,
+        mark_sent: bool = False,
+    ) -> None:
+        _ = group_id, mark_sent
+        await self._send_private_message(self._user_id, message)
 
 
 class CommandDispatcher:
@@ -729,48 +750,111 @@ class CommandDispatcher:
     async def dispatch(
         self, group_id: int, sender_id: int, command: dict[str, Any]
     ) -> None:
-        """分发并执行具体的命令
+        await self._dispatch_internal(
+            scope="group",
+            group_id=group_id,
+            sender_id=sender_id,
+            command=command,
+            user_id=None,
+            send_private_callback=None,
+        )
 
-        参数:
-            group_id: 消息来源群组
-            sender_id: 发送者 QQ 号
-            command: 解析出的命令数据结构
-        """
+    async def dispatch_private(
+        self,
+        user_id: int,
+        sender_id: int,
+        command: dict[str, Any],
+        send_private_callback: Callable[[int, str], Awaitable[None]] | None = None,
+    ) -> None:
+        await self._dispatch_internal(
+            scope="private",
+            group_id=0,
+            sender_id=sender_id,
+            command=command,
+            user_id=user_id,
+            send_private_callback=send_private_callback,
+        )
+
+    async def _dispatch_internal(
+        self,
+        *,
+        scope: str,
+        group_id: int,
+        sender_id: int,
+        command: dict[str, Any],
+        user_id: int | None,
+        send_private_callback: Callable[[int, str], Awaitable[None]] | None,
+    ) -> None:
+        """统一分发入口：支持群聊与私聊。"""
         start_time = time.perf_counter()
         cmd_name = str(command["name"])
         cmd_args = command["args"]
 
-        logger.info("[命令] 执行命令: /%s | 参数=%s", cmd_name, cmd_args)
-        logger.debug(
-            "[命令] 分发请求: group=%s sender=%s cmd=%s args_count=%s",
-            group_id,
-            sender_id,
-            cmd_name,
-            len(cmd_args),
+        if scope == "private":
+            logger.debug(
+                "[命令] 分发请求: private user=%s sender=%s cmd=%s args_count=%s",
+                user_id,
+                sender_id,
+                cmd_name,
+                len(cmd_args),
+            )
+            target_log = f"private={user_id}"
+        else:
+            logger.debug(
+                "[命令] 分发请求: group=%s sender=%s cmd=%s args_count=%s",
+                group_id,
+                sender_id,
+                cmd_name,
+                len(cmd_args),
+            )
+            target_log = f"group={group_id}"
+
+        async def _send_target_message(message: str) -> None:
+            if scope == "private":
+                target_user_id = int(user_id or 0)
+                if send_private_callback is not None:
+                    await send_private_callback(target_user_id, message)
+                else:
+                    await self.sender.send_private_message(target_user_id, message)
+            else:
+                await self.sender.send_group_message(group_id, message)
+
+        logger.info(
+            "[命令] 执行命令: /%s | 参数=%s | %s", cmd_name, cmd_args, target_log
         )
 
         self.command_registry.maybe_reload()
         meta = self.command_registry.resolve(cmd_name)
         if meta is None:
             logger.info("[命令] 未知命令: /%s", cmd_name)
-            await self.sender.send_group_message(
-                group_id,
-                f"❌ 未知命令: {cmd_name}\n使用 /help 查看可用命令",
+            await _send_target_message(
+                f"❌ 未知命令: {cmd_name}\n使用 /help 查看可用命令"
+            )
+            return
+
+        if scope == "private" and not meta.allow_in_private:
+            logger.info(
+                "[命令] 私聊作用域禁用: /%s user=%s",
+                meta.name,
+                user_id,
+            )
+            await _send_target_message(
+                f"⚠️ /{meta.name} 当前不支持私聊使用。请在群聊中 @机器人 后执行。"
             )
             return
 
         logger.info(
-            "[命令] 命令匹配成功: input=/%s resolved=/%s permission=%s rate_limit=%s",
+            "[命令] 命令匹配成功: input=/%s resolved=/%s permission=%s rate_limit=%s private=%s",
             cmd_name,
             meta.name,
             meta.permission,
             meta.rate_limit,
+            meta.allow_in_private,
         )
 
         if cmd_args and cmd_args[0] == "--help":
-            await self.sender.send_group_message(
-                group_id,
-                f"⚠️ 参数 --help 已弃用\n请使用：/help {meta.name}",
+            await _send_target_message(
+                f"⚠️ 参数 --help 已弃用\n请使用：/help {meta.name}"
             )
             return
 
@@ -782,36 +866,46 @@ class CommandDispatcher:
                 sender_id,
                 role_name,
             )
-            await self._send_no_permission(group_id, sender_id, meta.name, role_name)
+            await self._send_no_permission(
+                sender_id=sender_id,
+                cmd_name=meta.name,
+                required_role=role_name,
+                send_message=_send_target_message,
+            )
             return
 
-        logger.debug(
-            "[命令] 权限校验通过: cmd=/%s sender=%s",
-            meta.name,
-            sender_id,
-        )
+        logger.debug("[命令] 权限校验通过: cmd=/%s sender=%s", meta.name, sender_id)
 
-        if not await self._check_command_rate_limit(meta, group_id, sender_id):
+        if not await self._check_command_rate_limit(
+            command_meta=meta,
+            sender_id=sender_id,
+            send_message=_send_target_message,
+        ):
             logger.warning(
-                "[命令] 速率限制拦截: cmd=/%s group=%s sender=%s",
+                "[命令] 速率限制拦截: cmd=/%s scope=%s sender=%s",
                 meta.name,
-                group_id,
+                scope,
                 sender_id,
             )
             return
 
-        logger.debug(
-            "[命令] 速率限制通过: cmd=/%s group=%s sender=%s",
-            meta.name,
-            group_id,
-            sender_id,
-        )
+        logger.debug("[命令] 速率限制通过: cmd=/%s sender=%s", meta.name, sender_id)
+
+        command_sender: Any
+        if scope == "private":
+            command_sender = _PrivateCommandSenderProxy(
+                int(user_id or 0),
+                send_private_callback
+                or (lambda uid, msg: self.sender.send_private_message(uid, msg)),
+            )
+        else:
+            command_sender = self.sender
 
         context = CommandContext(
             group_id=group_id,
             sender_id=sender_id,
             config=self.config,
-            sender=self.sender,
+            sender=command_sender,
             ai=self.ai,
             faq_storage=self.faq_storage,
             onebot=self.onebot,
@@ -825,11 +919,7 @@ class CommandDispatcher:
         try:
             await self.command_registry.execute(meta, cmd_args, context)
             duration = time.perf_counter() - start_time
-            logger.info(
-                "[命令] 分发完成: cmd=/%s duration=%.3fs",
-                meta.name,
-                duration,
-            )
+            logger.info("[命令] 分发完成: cmd=/%s duration=%.3fs", meta.name, duration)
         except Exception as e:
             duration = time.perf_counter() - start_time
             error_id = uuid4().hex[:8]
@@ -845,9 +935,8 @@ class CommandDispatcher:
                 duration,
                 error_id,
             )
-            await self.sender.send_group_message(
-                group_id,
-                f"❌ 命令执行失败，请稍后重试（错误码: {error_id}）",
+            await _send_target_message(
+                f"❌ 命令执行失败，请稍后重试（错误码: {error_id}）"
             )
 
     def _check_command_permission(
@@ -865,8 +954,8 @@ class CommandDispatcher:
     async def _check_command_rate_limit(
         self,
         command_meta: CommandMeta,
-        group_id: int,
         sender_id: int,
+        send_message: Callable[[str], Awaitable[None]],
     ) -> bool:
         rate_limit = command_meta.rate_limit
 
@@ -893,9 +982,8 @@ class CommandDispatcher:
             else:
                 time_str = f"{remaining}秒"
 
-            await self.sender.send_group_message(
-                group_id,
-                f"⏳ /{command_meta.name} 命令太频繁，请 {time_str}后再试",
+            await send_message(
+                f"⏳ /{command_meta.name} 命令太频繁，请 {time_str}后再试"
             )
             return False
 
@@ -909,12 +997,14 @@ class CommandDispatcher:
         return True
 
     async def _send_no_permission(
-        self, group_id: int, sender_id: int, cmd_name: str, required_role: str
+        self,
+        sender_id: int,
+        cmd_name: str,
+        required_role: str,
+        send_message: Callable[[str], Awaitable[None]],
     ) -> None:
         logger.warning("[命令] 权限不足: sender=%s cmd=/%s", sender_id, cmd_name)
-        await self.sender.send_group_message(
-            group_id, f"⚠️ 权限不足：只有{required_role}可以使用此命令"
-        )
+        await send_message(f"⚠️ 权限不足：只有{required_role}可以使用此命令")
 
     async def _handle_bugfix(
         self, group_id: int, admin_id: int, args: list[str]

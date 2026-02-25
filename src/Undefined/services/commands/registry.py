@@ -46,6 +46,7 @@ class CommandMeta:
     show_in_help: bool
     order: int
     aliases: list[str]
+    allow_in_private: bool
     help_footer: list[str]
     handler_path: Path
     doc_path: Path | None
@@ -157,6 +158,7 @@ class CommandRegistry:
                 show_in_help=bool(config.get("show_in_help", True)),
                 order=int(config.get("order", 999)),
                 aliases=self._normalize_aliases(config.get("aliases")),
+                allow_in_private=bool(config.get("allow_in_private", False)),
                 help_footer=self._normalize_help_footer(config.get("help_footer")),
                 handler_path=handler_path,
                 doc_path=(command_dir / _COMMAND_DOC_FILENAME)
@@ -172,10 +174,11 @@ class CommandRegistry:
                 )
             commands[name] = meta
             logger.info(
-                "[CommandRegistry] 已注册命令: /%s permission=%s rate_limit=%s aliases=%s",
+                "[CommandRegistry] 已注册命令: /%s permission=%s rate_limit=%s private=%s aliases=%s",
                 meta.name,
                 meta.permission,
                 f"U:{meta.rate_limit.user}s/A:{meta.rate_limit.admin}s/S:{meta.rate_limit.superadmin}s",
+                meta.allow_in_private,
                 meta.aliases or "[]",
             )
             for alias in meta.aliases:

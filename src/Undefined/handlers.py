@@ -305,6 +305,16 @@ class MessageHandler:
                 private_sender_id, text
             ):
                 return
+
+            private_command = self.command_dispatcher.parse_command(text)
+            if private_command:
+                await self.command_dispatcher.dispatch_private(
+                    user_id=private_sender_id,
+                    sender_id=private_sender_id,
+                    command=private_command,
+                )
+                return
+
             await self.ai_coordinator.handle_private_reply(
                 private_sender_id,
                 text,

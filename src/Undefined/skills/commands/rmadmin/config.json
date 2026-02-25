@@ -11,5 +11,6 @@
   },
   "show_in_help": true,
   "order": 90,
+  "allow_in_private": true,
   "aliases": []
 }

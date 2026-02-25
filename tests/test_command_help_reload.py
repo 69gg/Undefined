@@ -52,6 +52,7 @@ def _write_command(
     aliases: list[str] | None = None,
     handler_text: str = "v1",
     doc_text: str | None = None,
+    allow_in_private: bool = False,
 ) -> Path:
     command_dir = base_dir / command_dir_name
     command_dir.mkdir(parents=True, exist_ok=True)
@@ -64,6 +65,7 @@ def _write_command(
                 "usage": usage,
                 "example": example,
                 "permission": "public",
+                "allow_in_private": allow_in_private,
                 "rate_limit": {"user": 0, "admin": 0, "superadmin": 0},
                 "show_in_help": True,
                 "order": 10,
@@ -156,9 +158,98 @@ async def test_help_command_detail_includes_template_and_readme(tmp_path: Path) 
     assert "描述：Foo 命令描述" in output
     assert "用法：/foo <name>" in output
     assert "示例：/foo alice" in output
+    assert "作用域：仅群聊" in output
     assert "别名：/f" in output
     assert "说明文档：" in output
     assert "这是 Foo 的详细说明。" in output
+
+
+@pytest.mark.asyncio
+async def test_help_list_filters_private_only_commands_in_private_scope(
+    tmp_path: Path,
+) -> None:
+    commands_dir = tmp_path / "commands"
+    commands_dir.mkdir(parents=True)
+    _write_command(
+        commands_dir,
+        "open",
+        command_name="open",
+        usage="/open",
+        allow_in_private=True,
+        handler_text="ok",
+    )
+    _write_command(
+        commands_dir,
+        "grouponly",
+        command_name="grouponly",
+        usage="/grouponly",
+        allow_in_private=False,
+        handler_text="ok",
+    )
+
+    registry = CommandRegistry(commands_dir)
+    registry.load_commands()
+    sender = _DummySender()
+    stub = cast(Any, SimpleNamespace())
+    private_context = CommandContext(
+        group_id=0,
+        sender_id=10002,
+        config=stub,
+        sender=cast(Any, sender),
+        ai=stub,
+        faq_storage=stub,
+        onebot=stub,
+        security=stub,
+        queue_manager=None,
+        rate_limiter=None,
+        dispatcher=stub,
+        registry=registry,
+    )
+
+    await help_execute([], private_context)
+    output = sender.messages[-1][1]
+    assert "当前会话：私聊" in output
+    assert "/open（群聊/私聊）" in output
+    assert "/grouponly" not in output
+
+
+@pytest.mark.asyncio
+async def test_help_detail_hides_group_only_command_in_private_scope(
+    tmp_path: Path,
+) -> None:
+    commands_dir = tmp_path / "commands"
+    commands_dir.mkdir(parents=True)
+    _write_command(
+        commands_dir,
+        "grouponly",
+        command_name="grouponly",
+        usage="/grouponly",
+        allow_in_private=False,
+        handler_text="ok",
+    )
+
+    registry = CommandRegistry(commands_dir)
+    registry.load_commands()
+    sender = _DummySender()
+    stub = cast(Any, SimpleNamespace())
+    private_context = CommandContext(
+        group_id=0,
+        sender_id=10002,
+        config=stub,
+        sender=cast(Any, sender),
+        ai=stub,
+        faq_storage=stub,
+        onebot=stub,
+        security=stub,
+        queue_manager=None,
+        rate_limiter=None,
+        dispatcher=stub,
+        registry=registry,
+    )
+
+    await help_execute(["grouponly"], private_context)
+    output = sender.messages[-1][1]
+    assert "未找到命令" in output
 
 
 @pytest.mark.asyncio

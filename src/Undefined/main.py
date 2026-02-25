@@ -22,6 +22,7 @@ from Undefined.memory import MemoryStorage
 from Undefined.scheduled_task_storage import ScheduledTaskStorage
 from Undefined.end_summary_storage import EndSummaryStorage
 from Undefined.onebot import OneBotClient
+from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
 from Undefined.token_usage_storage import TokenUsageStorage
 from Undefined.utils.paths import (
     CACHE_DIR,
@@ -198,6 +199,7 @@ async def main() -> None:
     historian_worker = None
     job_queue = None
     retrieval_runtime = None
+    runtime_api_server: RuntimeAPIServer | None = None
     _reranker: Any = None
     try:
         init_start = time.perf_counter()
@@ -399,6 +401,36 @@ async def main() -> None:
         config.skills_hot_reload_debounce,
     )
 
+    if config.api.enabled:
+        runtime_api_context = RuntimeAPIContext(
+            config_getter=lambda: get_config(strict=False),
+            onebot=onebot,
+            ai=ai,
+            command_dispatcher=handler.command_dispatcher,
+            queue_manager=handler.queue_manager,
+            history_manager=handler.history_manager,
+            sender=handler.sender,
+            scheduler=handler.ai_coordinator.scheduler,
+            cognitive_service=cognitive_service,
+            cognitive_job_queue=job_queue,
+        )
+        runtime_api_server = RuntimeAPIServer(
+            runtime_api_context,
+            host=config.api.host,
+            port=config.api.port,
+        )
+        try:
+            await runtime_api_server.start()
+            if config.api.auth_key == "changeme":
+                logger.warning(
+                    "[RuntimeAPI] 当前仍使用默认鉴权密钥 changeme，请尽快修改 [api].auth_key"
+                )
+        except Exception as exc:
+            runtime_api_server = None
+            logger.exception("[RuntimeAPI] 启动失败，已跳过: %s", exc)
+    else:
+        logger.info("[RuntimeAPI] 已禁用（api.enabled=false）")
+
     try:
         await onebot.run_with_reconnect()
     except KeyboardInterrupt:
@@ -407,6 +439,8 @@ async def main() -> None:
         logger.exception("[异常] 运行期间发生未捕获的错误: %s", exc)
     finally:
         logger.info("[清理] 正在关闭机器人并释放资源...")
+        if runtime_api_server is not None:
+            await runtime_api_server.stop()
         if historian_worker:
             await historian_worker.stop()
         await onebot.disconnect()

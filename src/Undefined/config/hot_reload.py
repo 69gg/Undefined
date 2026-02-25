@@ -27,6 +27,12 @@ _RESTART_REQUIRED_KEYS: set[str] = {
     "webui_url",
     "webui_port",
     "webui_password",
+    "api",
+    "api.enabled",
+    "api.host",
+    "api.port",
+    "api.auth_key",
+    "api.openapi_enabled",
 }
 
 _QUEUE_INTERVAL_KEYS: set[str] = {

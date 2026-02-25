@@ -16,10 +16,26 @@ def _permission_label(permission: str) -> str:
     return permission_label_map.get(permission, "公开可用")
 
 
+def _scope_label(allow_in_private: bool) -> str:
+    return "群聊/私聊" if allow_in_private else "仅群聊"
+
+
+def _is_private_scope(context: CommandContext) -> bool:
+    return int(context.group_id) == 0
+
+
 def _format_command_list(context: CommandContext) -> str:
     commands = context.registry.list_commands(include_hidden=False)
+    in_private = _is_private_scope(context)
+    if in_private:
+        commands = [item for item in commands if item.allow_in_private]
+
     command_lines = [
-        f"- {item.usage}：{item.description or '暂无说明'}" for item in commands
+        (
+            f"- {item.usage}（{_scope_label(item.allow_in_private)}）："
+            f"{item.description or '暂无说明'}"
+        )
+        for item in commands
     ]
 
     help_meta = context.registry.resolve("help")
@@ -33,7 +49,19 @@ def _format_command_list(context: CommandContext) -> str:
         ]
     )
 
-    lines = ["Undefined 命令帮助", "", "可用命令：", *command_lines, "", *footer_lines]
+    scope_hint = (
+        "当前会话：私聊（仅展示支持私聊的命令）" if in_private else "当前会话：群聊"
+    )
+    lines = [
+        "Undefined 命令帮助",
+        "",
+        scope_hint,
+        "",
+        "可用命令：",
+        *command_lines,
+        "",
+        *footer_lines,
+    ]
     return "\n".join(lines)
 
 
@@ -55,6 +83,8 @@ def _format_command_detail(command_name: str, context: CommandContext) -> str | 
     meta = context.registry.resolve(command_name)
     if meta is None:
         return None
+    if _is_private_scope(context) and not meta.allow_in_private:
+        return None
 
     aliases = "、".join(f"/{alias}" for alias in meta.aliases) if meta.aliases else "无"
     doc_content = _load_command_doc(meta.doc_path)
@@ -67,6 +97,7 @@ def _format_command_detail(command_name: str, context: CommandContext) -> str | 
         f"用法：{meta.usage or f'/{meta.name}'}",
         f"示例：{meta.example or meta.usage or f'/{meta.name}'}",
         f"权限：{_permission_label(meta.permission)}",
+        f"作用域：{_scope_label(meta.allow_in_private)}",
         (
             "限流："
             f"user={rate_limit.user}s, admin={rate_limit.admin}s, superadmin={rate_limit.superadmin}s"

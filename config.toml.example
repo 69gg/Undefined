@@ -612,6 +612,25 @@ port = 8787
 # en: WebUI password (must be changed on first run; default password cannot be used to log in).
 password = "changeme"
 
+# zh: 主进程 Runtime API（供 WebUI/外部系统读取探针、记忆检索、AI Chat 使用）。
+# en: Runtime API in the main process (for WebUI/external integrations: probes, memory queries, AI chat).
+[api]
+# zh: 是否启用 Runtime API。
+# en: Enable Runtime API.
+enabled = true
+# zh: Runtime API 监听地址。
+# en: Runtime API bind host.
+host = "127.0.0.1"
+# zh: Runtime API 端口。
+# en: Runtime API port.
+port = 8788
+# zh: Runtime API 鉴权密钥（通过请求头 X-Undefined-API-Key 传递）。
+# en: Runtime API auth key (send via X-Undefined-API-Key header).
+auth_key = "changeme"
+# zh: 是否暴露 OpenAPI 文档（/openapi.json）。
+# en: Expose OpenAPI document (/openapi.json).
+openapi_enabled = true
+
 # zh: 认知记忆系统配置。启用后需配置 [models.embedding]，其余参数均有合理默认值。
 # en: Cognitive memory system. Requires [models.embedding] when enabled. All other params have sensible defaults.
 [cognitive]

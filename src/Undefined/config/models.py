@@ -160,3 +160,14 @@ class CognitiveConfig:
     historian_recent_message_line_max_len: int = 240
     # Max characters for the current source message attached to historian jobs.
     historian_source_message_max_len: int = 800
+
+
+@dataclass
+class APIConfig:
+    """主进程 OpenAPI/Runtime API 配置"""
+
+    enabled: bool = True
+    host: str = "127.0.0.1"
+    port: int = 8788
+    auth_key: str = "changeme"
+    openapi_enabled: bool = True

@@ -41,6 +41,7 @@
   - **置顶备忘录**（`memory.*`）：AI 自身的置顶提醒（自我约束、待办事项），每轮固定注入，支持增删改查
   详见 [认知记忆文档](docs/cognitive-memory.md)。
 - **配置热更新 + WebUI**：使用 `config.toml` 配置，支持热更新；提供 WebUI 在线编辑与校验。
+- **Runtime API + OpenAPI**：主进程可暴露本地 Runtime API（探针、记忆只读查询、认知侧写检索、WebUI AI Chat），并提供 OpenAPI 文档。详见 [docs/openapi.md](docs/openapi.md)。
 - **多模型池**：支持配置多个 AI 模型，可轮询、随机选择或用户指定；支持多模型并发比较，选择最佳结果继续对话。详见 [多模型功能文档](docs/multi-model.md)。
 - **本地知识库**：将纯文本文件向量化存入 ChromaDB，AI 可通过关键词搜索或语义搜索查询领域知识；支持增量嵌入与自动扫描。详见 [知识库文档](docs/knowledge.md)。
 - **访问控制（群/私聊）**：支持 `access.mode` 三种模式（`off` / `blacklist` / `allowlist`）和群/私聊黑白名单；可按策略限制收发范围，避免误触发与误投递。详见 [docs/access-control.md](docs/access-control.md)。
@@ -76,6 +77,7 @@ Undefined 的功能极为丰富，为了让本页面不过于臃肿，我们将�
 - 📚 **[本地知识库接入方案](docs/knowledge.md)**：为 AI 挂载本地文本资产，轻松拥抱企业/个人专属 QA。
 - 🔄 **[多模型并发竞技](docs/multi-model.md)**：配置多个异构模型，让它们并行运算、同台 PK，从中择优响应。
 - ⌨️ **[命令系统与斜杠指令](docs/slash-commands.md)**：查阅所有斜杠指令(`/*`)的详细用法，并学习如何轻松扩展你自己的指令系统。
+- 🌐 **[Runtime API 与 OpenAPI](docs/openapi.md)**：主进程 API、鉴权、探针、记忆/侧写查询和 WebUI 代理调用说明。
 - 🔧 **[运维脚本](scripts/README.md)**：嵌入模型更换后的向量库重嵌入等维护工具。
 - 👨‍💻 **[开发者与拓展中心](docs/development.md)**：代码结构剖析和开发新 Agent 的流程参考及自检命令。
   - **[核心技能系统 (Skills) 解析](src/Undefined/skills/README.md)**：全景式掌握什么是 Skills 架构、怎样定制原子工具与子智能体。

@@ -487,9 +487,28 @@ model_name = "gpt-4o-mini"
 
 ---
 
-### 4.23 `[cognitive]` 认知记忆
+### 4.23 `[api]` Runtime API / OpenAPI
 
-### 4.23.1 根配置
+| 字段 | 默认值 | 说明 |
+|---|---:|---|
+| `enabled` | `true` | 是否启用主进程 Runtime API |
+| `host` | `127.0.0.1` | Runtime API 监听地址 |
+| `port` | `8788` | Runtime API 端口（1..65535） |
+| `auth_key` | `changeme` | 请求头鉴权密钥（`X-Undefined-API-Key`） |
+| `openapi_enabled` | `true` | 是否暴露 `/openapi.json` |
+
+关键行为：
+- Runtime API 仅在主进程 `Undefined` 中启动，WebUI 通过后端代理调用。
+- WebUI 会自动读取 `config.toml` 的 `api.auth_key` 并转发，不在前端暴露密钥。
+- 默认密钥 `changeme` 仅用于初始开发环境，生产请务必替换。
+
+详见 [docs/openapi.md](openapi.md)。
+
+---
+
+### 4.24 `[cognitive]` 认知记忆
+
+### 4.24.1 根配置
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -498,13 +517,13 @@ model_name = "gpt-4o-mini"
 
 说明：当前版本解析器尚未从 `config.toml` 显式读取 `cognitive.bot_name`，运行时会保持默认值 `Undefined`。
 
-### 4.23.2 `[cognitive.vector_store]`
+### 4.24.2 `[cognitive.vector_store]`
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `path` | `data/cognitive/chromadb` | Chroma 存储目录 |
 
-### 4.23.3 `[cognitive.query]`
+### 4.24.3 `[cognitive.query]`
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -520,7 +539,7 @@ model_name = "gpt-4o-mini"
 | `profile_top_k` | `8` | 侧写检索 top-k |
 | `rerank_candidate_multiplier` | `3` | 候选倍数（`top_k * multiplier`） |
 
-### 4.23.4 `[cognitive.historian]`
+### 4.24.4 `[cognitive.historian]`
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -531,14 +550,14 @@ model_name = "gpt-4o-mini"
 | `poll_interval_seconds` | `1.0` | 队列轮询间隔 |
 | `stale_job_timeout_seconds` | `300.0` | processing 超时回收阈值 |
 
-### 4.23.5 `[cognitive.profile]`
+### 4.24.5 `[cognitive.profile]`
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `path` | `data/cognitive/profiles` | 侧写存储目录 |
 | `revision_keep` | `5` | 保留历史版本数量 |
 
-### 4.23.6 `[cognitive.queue]`
+### 4.24.6 `[cognitive.queue]`
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -569,6 +588,7 @@ model_name = "gpt-4o-mini"
 - `webui.url`
 - `webui.port`
 - `webui.password`
+- `api.*`（`enabled/host/port/auth_key/openapi_enabled`）
 
 ### 5.3 明确“会执行热应用”的字段
 - 模型发车间隔 / 模型名 / 模型池变更（队列间隔刷新）

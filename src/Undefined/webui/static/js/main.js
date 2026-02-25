@@ -7,6 +7,13 @@ function refreshUI() {
         if (state.authenticated) {
             get("appContent").style.display = "block";
             if (!state.configLoaded) loadConfig();
+            if (
+                state.tab === "runtime" &&
+                window.RuntimeController &&
+                typeof window.RuntimeController.onTabActivated === "function"
+            ) {
+                window.RuntimeController.onTabActivated("runtime");
+            }
         } else {
             get("appContent").style.display = "none";
             state.configLoaded = false;
@@ -49,9 +56,17 @@ function switchTab(tab) {
     } else {
         stopLogStream(); stopLogTimer();
     }
+
+    if (window.RuntimeController && typeof window.RuntimeController.onTabActivated === "function") {
+        window.RuntimeController.onTabActivated(tab);
+    }
 }
 
 async function init() {
+    if (window.RuntimeController && typeof window.RuntimeController.init === "function") {
+        window.RuntimeController.init();
+    }
+
     document.querySelectorAll('[data-action="toggle-lang"]').forEach(btn => {
         btn.addEventListener("click", () => {
             state.lang = state.lang === "zh" ? "en" : "zh";

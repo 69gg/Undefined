@@ -12,7 +12,7 @@ Undefined 提供了一套强大的斜杠指令（Slash Commands）系统。管�
 
 - 所有的管理类斜杠命令需要发送者具有管理员或超管权限（在 `config.local.json` 中配置或通过 `/addadmin` 动态添加）。
 - 普通用户使用此类命令时会收到权限不足的提示。
-- 命令可以在群聊或私聊中直接发送。
+- 私聊里只有 `config.json` 显式声明 `"allow_in_private": true` 的命令可直接执行；未开放命令会提示“当前不支持私聊使用”。
 
 ### 内置命令列表及详细用法
 
@@ -208,6 +208,7 @@ src/Undefined/
     "name": "hello",
     "description": "向群里的盆友问个好",
     "permission": "admin",
+    "allow_in_private": true,
     "rate_limit": {
         "user": 10,
         "admin": 5,
@@ -219,6 +220,7 @@ src/Undefined/
 }
 ```
 *提示： `permission` 可选 `public` / `admin` / `superadmin`。*
+*提示： `allow_in_private` 控制该命令是否允许在私聊中通过 `/命令` 直接触发，默认 `false`。*
 *提示： `rate_limit` 单独指定各级使用者的独立调用冷却拦截秒级时间（0代表无限制）。*
 *提示：可选字段 `help_footer` 为字符串数组，主要用于 `/help` 这类命令在列表页尾部输出固定提示文案。*
 
