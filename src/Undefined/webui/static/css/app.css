@@ -89,6 +89,8 @@
 .log-tab { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-secondary); font-size: 12px; cursor: pointer; transition: 0.2s; }
 .log-tab:hover { color: var(--text-primary); background: var(--bg-app); }
 .log-tab.active { background: var(--accent-subtle); color: var(--accent-color); border-color: rgba(217, 119, 87, 0.35); }
+/* Keep logs tab within viewport without page-level scrolling. */
+#tab-logs .log-viewer { height: clamp(260px, 46vh, 460px); }
 
 .search-group { display: flex; align-items: center; gap: 8px; flex: 1; }
 .search-group .form-control { flex: 1; min-width: 220px; max-width: 100%; }
