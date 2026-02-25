@@ -55,7 +55,8 @@ _PROFILE_TOOL = {
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "兴趣/技能标签",
+                    "maxItems": 5,
+                    "description": "身份级标签（角色/核心领域），最多 5 个，不写话题",
                 },
                 "summary": {"type": "string", "description": "侧写正文（Markdown）"},
             },
@@ -952,6 +953,7 @@ class HistorianWorker:
         tags: list[str] = []
         if isinstance(raw_tags, list):
             tags = [str(item).strip() for item in raw_tags if str(item).strip()]
+            tags = tags[:5]
 
         llm_name = str(args.get("name", "")).strip()
         if llm_name and llm_name != effective_name:
@@ -985,7 +987,7 @@ class HistorianWorker:
         )
         await self._vector_store.upsert_profile(
             f"{entity_type}:{entity_id}",
-            summary,
+            f"标签: {', '.join(tags)}\n{summary}" if tags else summary,
             {
                 "entity_type": entity_type,
                 "entity_id": entity_id,
