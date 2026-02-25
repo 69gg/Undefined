@@ -18,7 +18,7 @@
   .card { padding: 22px; }
   .form-grid { column-count: 1; column-width: auto; }
   .form-fields { grid-template-columns: 1fr; }
-  .log-viewer { height: 320px; }
+  .log-viewer { height: 380px; }
   .noise { opacity: 0.08; }
   .main-content.chat-layout #tab-chat .chat-runtime-card { height: clamp(400px, calc(100vh - 180px), 680px); }
   .main-content.chat-layout #tab-chat .runtime-chat-input {
