@@ -58,6 +58,9 @@
             const payload = raw.slice("base64://".length).trim();
             return payload ? `data:image/png;base64,${payload}` : "";
         }
+        if (raw.startsWith("/") || /^[A-Za-z]:[\\/]/.test(raw)) {
+            return `/api/runtime/chat/image?path=${encodeURIComponent(raw)}`;
+        }
         if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:image/")) {
             return raw;
         }

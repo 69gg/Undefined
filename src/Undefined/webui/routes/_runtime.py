@@ -3,16 +3,27 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from aiohttp import ClientSession, ClientTimeout, web
 from aiohttp.web_response import Response
 
 from Undefined.config import get_config
+from Undefined.utils.paths import CACHE_DIR
 from ._shared import check_auth, routes
 
 _AUTH_HEADER = "X-Undefined-API-Key"
 _CHAT_PROXY_TIMEOUT_SECONDS = 480.0
+_MAX_CHAT_IMAGE_SIZE = 12 * 1024 * 1024
+_ALLOWED_CHAT_IMAGE_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".bmp",
+}
 
 
 def _runtime_base_url() -> str:
@@ -35,6 +46,29 @@ def _to_bool(value: Any) -> bool:
         return value != 0
     text = str(value or "").strip().lower()
     return text in {"1", "true", "yes", "on"}
+
+
+def _resolve_chat_image_path(raw_path: str) -> Path | None:
+    text = str(raw_path or "").strip()
+    if not text:
+        return None
+
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve()
+    else:
+        path = path.resolve()
+
+    cache_root = (Path.cwd() / CACHE_DIR).resolve()
+    if path != cache_root and cache_root not in path.parents:
+        return None
+    if path.suffix.lower() not in _ALLOWED_CHAT_IMAGE_EXTENSIONS:
+        return None
+    if not path.is_file():
+        return None
+    if path.stat().st_size > _MAX_CHAT_IMAGE_SIZE:
+        return None
+    return path
 
 
 async def _proxy_runtime(
@@ -282,3 +316,16 @@ async def runtime_chat_history_handler(request: web.Request) -> Response:
         path="/api/v1/chat/history",
         params=request.query,
     )
+
+
+@routes.get("/api/runtime/chat/image")
+async def runtime_chat_image_handler(request: web.Request) -> web.StreamResponse:
+    if not check_auth(request):
+        return _unauthorized()
+
+    raw_path = str(request.query.get("path", "") or "").strip()
+    image_path = _resolve_chat_image_path(raw_path)
+    if image_path is None:
+        return web.json_response({"error": "Invalid image path"}, status=400)
+
+    return web.FileResponse(path=image_path)
