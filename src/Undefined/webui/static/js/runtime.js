@@ -118,6 +118,21 @@
         return payload.detail ? `${base}: ${payload.detail}` : base;
     }
 
+    function appendRuntimeApiHint(message) {
+        const text = String(message || "").trim();
+        if (!text) return text;
+        const normalized = text.toLowerCase();
+        const unreachable = normalized.includes("runtime api unreachable")
+            || normalized.includes("failed to fetch")
+            || normalized.includes("networkerror")
+            || normalized.includes(" 502 ")
+            || normalized.startsWith("502 ");
+        if (!unreachable) return text;
+        const hint = t("runtime.api_start_hint");
+        if (!hint || text.includes(hint)) return text;
+        return `${text} ${hint}`;
+    }
+
     async function consumeSse(res, onEvent) {
         if (!res.body) return;
         const reader = res.body.getReader();
@@ -352,7 +367,11 @@
             }
             runtimeState.chatHistoryLoaded = true;
         } catch (error) {
-            showToast(`${t("runtime.failed")}: ${error.message || error}`, "error", 5000);
+            showToast(
+                `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
+                "error",
+                5000
+            );
         } finally {
             runtimeState.chatBusy = false;
             setButtonLoading(button, false);
@@ -379,7 +398,11 @@
             showToast(t("runtime.image_added"), "success", 1800);
             chatInput.focus();
         } catch (error) {
-            showToast(`${t("runtime.failed")}: ${error.message || error}`, "error", 5000);
+            showToast(
+                `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
+                "error",
+                5000
+            );
         } finally {
             if (input) input.value = "";
         }
@@ -403,7 +426,11 @@
 
             runtimeState.loaded = true;
         } catch (error) {
-            showToast(`${t("runtime.failed")}: ${error.message || error}`, "error", 5000);
+            showToast(
+                `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
+                "error",
+                5000
+            );
         }
     }
 
@@ -456,7 +483,11 @@
         }
         if (tab === "chat") {
             loadChatHistory().catch((error) => {
-                showToast(`${t("runtime.failed")}: ${error.message || error}`, "error", 5000);
+                showToast(
+                    `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
+                    "error",
+                    5000
+                );
             });
         }
     }
