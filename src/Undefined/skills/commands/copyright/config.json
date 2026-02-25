@@ -11,5 +11,5 @@
   },
   "show_in_help": true,
   "order": 11,
-  "aliases": ["license", "about", "disclaimer"]
+  "aliases": ["license", "about", "disclaimer", "cprt"]
 }

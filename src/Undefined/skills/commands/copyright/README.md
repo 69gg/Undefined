@@ -10,6 +10,7 @@
 - `/copyright`
 - `/license`
 - `/about`
+- `/cprt`
 
 ## 说明
 - 命令内容来源于项目 `README.md` 的免责声明章节与仓库公开信息。

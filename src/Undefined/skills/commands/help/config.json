@@ -14,6 +14,7 @@
   "aliases": [],
   "help_footer": [
     "查看详细帮助：/help <command>",
-    "版权与免责声明：/copyright"
+    "详细版权与免责声明：/cprt",
+    "Copyright (c) 2025 Null <pylindex@qq.com>. Licensed under the MIT License."
   ]
 }

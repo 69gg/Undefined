@@ -3,20 +3,31 @@ from __future__ import annotations
 from Undefined.services.commands.context import CommandContext
 
 
-_COPYRIGHT_TEXT = """Undefined 版权信息与免责声明
+_COPYRIGHT_TEXT = """Undefined 使用说明与风险提示
 
-风险提示与免责声明
-1. 账号风控与封禁风险（含 QQ 账号）
-   本项目依赖第三方协议端（如 NapCat/Lagrange.Core）接入平台服务。任何因账号风控、功能限制、临时冻结或永久封禁造成的损失，均由实际部署方自行承担。
-2. 敏感信息处理风险
-   请勿使用本项目主动收集、存储、导出或传播敏感信息。因使用者配置不当或违规处理数据导致的合规处罚及连带损失保留追究权力。
-3. 合规义务归属
-   使用者应确保其部署与运营行为符合所在地区法律法规、平台协议及群规。项目维护者不对使用者的具体行为及后果承担连带责任。
+免责声明
+本项目基于 MIT License 开源发布，并按“原样”（AS IS）提供。
+作者不对因使用、部署、修改或分发本项目而产生的任何直接或间接损失承担责任。
 
-作者：Null<1708213363@qq.com>
-开源链接：github.com/69gg/Undefined
+使用风险说明
+1. 第三方平台风险
+   本项目可能依赖第三方协议端或平台服务（如 NapCat / Lagrange.Core 等）。
+   因平台风控、功能限制、账号冻结或封禁等造成的影响与损失，
+   由实际部署与使用者自行承担。
+
+2. 数据与隐私风险
+   使用者应合理配置系统，避免违规收集、存储或传播敏感信息。
+   因使用者行为导致的合规风险或法律责任，由使用者自行承担。
+
+3. 合规义务
+   使用者应确保其部署与运营行为符合所在地法律法规、
+   平台服务协议及相关规则。
+   作者不参与具体运营行为，亦不对使用者行为承担连带责任。
+
+作者：Null <pylindex@qq.com>
+开源地址：https://github.com/69gg/Undefined
 PyPI 包：Undefined-bot
-开源 LICENSE：MIT
+许可证：MIT License
 """
 
 
