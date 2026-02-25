@@ -29,3 +29,6 @@ class CommandContext:
     rate_limiter: Any
     dispatcher: Any
     registry: CommandRegistry
+    scope: str = "group"
+    user_id: int | None = None
+    is_webui_session: bool = False

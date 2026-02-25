@@ -264,6 +264,9 @@ def _build_openapi_spec(ctx: RuntimeAPIContext) -> dict[str, Any]:
                     ),
                 }
             },
+            "/api/v1/chat/history": {
+                "get": {"summary": "Get virtual private chat history for WebUI"}
+            },
         },
     }
 
@@ -332,6 +335,7 @@ class RuntimeAPIServer:
                     self._cognitive_profile_handler,
                 ),
                 web.post("/api/v1/chat", self._chat_handler),
+                web.get("/api/v1/chat/history", self._chat_history_handler),
             ]
         )
         return app
@@ -548,6 +552,7 @@ class RuntimeAPIServer:
                 sender_id=permission_sender_id,
                 command=command,
                 send_private_callback=send_output,
+                is_webui_session=True,
             )
             return "command"
 
@@ -607,6 +612,45 @@ class RuntimeAPIServer:
             await send_output(_VIRTUAL_USER_ID, final_reply)
 
         return "chat"
+
+    async def _chat_history_handler(self, request: web.Request) -> Response:
+        limit_raw = str(request.query.get("limit", "200") or "200").strip()
+        try:
+            limit = int(limit_raw)
+        except ValueError:
+            limit = 200
+        limit = max(1, min(limit, 500))
+
+        getter = getattr(self._ctx.history_manager, "get_recent_private", None)
+        if not callable(getter):
+            return _json_error("History manager not ready", status=503)
+
+        records = getter(_VIRTUAL_USER_ID, limit)
+        items: list[dict[str, Any]] = []
+        for item in records:
+            if not isinstance(item, dict):
+                continue
+            content = str(item.get("message", "")).strip()
+            if not content:
+                continue
+            display_name = str(item.get("display_name", "")).strip().lower()
+            role = "bot" if display_name == "bot" else "user"
+            items.append(
+                {
+                    "role": role,
+                    "content": content,
+                    "timestamp": str(item.get("timestamp", "") or "").strip(),
+                }
+            )
+
+        return web.json_response(
+            {
+                "virtual_user_id": _VIRTUAL_USER_ID,
+                "permission": "superadmin",
+                "count": len(items),
+                "items": items,
+            }
+        )
 
     async def _chat_handler(self, request: web.Request) -> web.StreamResponse:
         try:

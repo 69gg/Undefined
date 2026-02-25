@@ -103,6 +103,12 @@ curl http://127.0.0.1:8788/openapi.json
 - 权限视角：`superadmin`。
 - 如果输入以 `/` 开头，按私聊命令分发执行（遵循命令 `allow_in_private` 开放策略）。
 
+### WebUI AI Chat 历史记录
+
+- `GET /api/v1/chat/history?limit=200`
+- 用于读取虚拟私聊 `system#42` 的历史记录（只读）。
+- 返回中包含 `role/content/timestamp`，用于 WebUI 自动恢复会话视图。
+
 ## 5. cURL 示例
 
 ```bash
@@ -135,6 +141,7 @@ WebUI 不直接在前端暴露 `auth_key`，而是通过后端代理访问主进
 - `GET /api/runtime/cognitive/profiles`
 - `GET /api/runtime/cognitive/profile/{entity_type}/{entity_id}`
 - `POST /api/runtime/chat`
+- `GET /api/runtime/chat/history`
 - `GET /api/runtime/openapi`
 
 WebUI 后端会自动从 `config.toml` 读取 `[api].auth_key` 并注入 Header。

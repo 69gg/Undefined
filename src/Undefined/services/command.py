@@ -64,6 +64,17 @@ class _PrivateCommandSenderProxy:
         _ = group_id, mark_sent
         await self._send_private_message(self._user_id, message)
 
+    async def send_private_message(
+        self,
+        user_id: int,
+        message: str,
+        auto_history: bool = True,
+        *,
+        mark_sent: bool = True,
+    ) -> None:
+        _ = user_id, auto_history, mark_sent
+        await self._send_private_message(self._user_id, message)
+
 
 class CommandDispatcher:
     """命令分发处理器，负责解析和执行斜杠命令"""
@@ -235,41 +246,14 @@ class CommandDispatcher:
 
             # 4. 按参数投递 AI 分析请求到队列（默认关闭）
             ai_analysis = ""
-            if enable_ai_analysis and self.queue_manager:
-                # 构建数据摘要
-                data_summary = self._build_data_summary(summary, days)
-
-                # 创建事件等待分析结果
-                request_id = uuid4().hex
-                analysis_event = asyncio.Event()
-                self._stats_analysis_events[request_id] = analysis_event
-
-                # 投递到队列
-                request_data = {
-                    "type": "stats_analysis",
-                    "group_id": group_id,
-                    "request_id": request_id,
-                    "sender_id": sender_id,
-                    "data_summary": data_summary,
-                    "summary": summary,
-                    "days": days,
-                }
-                await self.queue_manager.add_group_mention_request(
-                    request_data, model_name=self.config.chat_model.model_name
+            if enable_ai_analysis:
+                ai_analysis = await self._run_stats_ai_analysis(
+                    scope="group",
+                    scope_id=group_id,
+                    sender_id=sender_id,
+                    summary=summary,
+                    days=days,
                 )
-                logger.info(f"[Stats] 已投递 AI 分析请求到队列，群: {group_id}")
-
-                # 等待 AI 分析结果，8分钟超时
-                try:
-                    await asyncio.wait_for(analysis_event.wait(), timeout=480.0)
-                    ai_analysis = self._stats_analysis_results.pop(request_id, "")
-                    logger.info(f"[Stats] 已获取 AI 分析结果，长度: {len(ai_analysis)}")
-                except asyncio.TimeoutError:
-                    logger.warning(f"[Stats] AI 分析超时，群: {group_id}，仅发送图表")
-                    ai_analysis = "AI 分析超时，已先发送图表与汇总数据。"
-                finally:
-                    self._stats_analysis_events.pop(request_id, None)
-                    self._stats_analysis_results.pop(request_id, None)
 
             # 5. 构建并发送合并转发消息（包含 AI 分析）
             forward_messages = self._build_stats_forward_nodes(
@@ -290,6 +274,132 @@ class CommandDispatcher:
                 group_id,
                 f"❌ 生成统计图表失败，请稍后重试（错误码: {error_id}）",
             )
+
+    async def _handle_stats_private(
+        self,
+        user_id: int,
+        sender_id: int,
+        args: list[str],
+        send_message: Callable[[str], Awaitable[None]] | None = None,
+        *,
+        is_webui_session: bool = False,
+    ) -> None:
+        """处理私聊 /stats（含 WebUI 虚拟私聊适配）。"""
+
+        async def _send_private(message: str) -> None:
+            if send_message is not None:
+                await send_message(message)
+            else:
+                await self.sender.send_private_message(user_id, message)
+
+        days, enable_ai_analysis = self._parse_stats_options(args)
+        try:
+            summary = await self._token_usage_storage.get_summary(days=days)
+            if summary["total_calls"] == 0:
+                await _send_private(f"📊 最近 {days} 天内无 Token 使用记录。")
+                return
+
+            ai_analysis = ""
+            if enable_ai_analysis:
+                ai_analysis = await self._run_stats_ai_analysis(
+                    scope="private",
+                    scope_id=0,
+                    sender_id=sender_id,
+                    summary=summary,
+                    days=days,
+                )
+
+            # WebUI 虚拟私聊不发送 CQ 图片，直接返回文本摘要，避免前端显示异常。
+            if is_webui_session:
+                summary_text = self._build_stats_summary_text(summary)
+                message = f"📊 最近 {days} 天的 Token 使用统计：\n{summary_text}"
+                if ai_analysis:
+                    message += f"\n\n🤖 AI 智能分析\n{ai_analysis}"
+                await _send_private(message)
+                return
+
+            if not _MATPLOTLIB_AVAILABLE:
+                await _send_private(
+                    "❌ 缺少必要的库，无法生成图表。请安装 matplotlib。"
+                )
+                return
+
+            from Undefined.utils.paths import RENDER_CACHE_DIR, ensure_dir
+            from Undefined.utils.cache import cleanup_cache_dir
+
+            img_dir = ensure_dir(RENDER_CACHE_DIR)
+            await self._generate_line_chart(summary, img_dir, days)
+            await self._generate_bar_chart(summary, img_dir)
+            await self._generate_pie_chart(summary, img_dir)
+            await self._generate_stats_table(summary, img_dir)
+
+            await _send_private(f"📊 最近 {days} 天的 Token 使用统计：")
+            for img_name in ["line_chart", "bar_chart", "pie_chart", "table"]:
+                img_path = img_dir / f"stats_{img_name}.png"
+                if img_path.exists():
+                    await _send_private(f"[CQ:image,file={str(img_path.absolute())}]")
+
+            await _send_private(self._build_stats_summary_text(summary))
+            if ai_analysis:
+                await _send_private(f"🤖 AI 智能分析\n{ai_analysis}")
+
+            cleanup_cache_dir(RENDER_CACHE_DIR)
+        except Exception as e:
+            error_id = uuid4().hex[:8]
+            logger.exception(
+                "[Stats] 私聊统计生成失败: error_id=%s user=%s err=%s",
+                error_id,
+                user_id,
+                e,
+            )
+            await _send_private(
+                f"❌ 生成统计图表失败，请稍后重试（错误码: {error_id}）"
+            )
+
+    async def _run_stats_ai_analysis(
+        self,
+        *,
+        scope: str,
+        scope_id: int,
+        sender_id: int,
+        summary: dict[str, Any],
+        days: int,
+    ) -> str:
+        if not self.queue_manager:
+            return ""
+
+        data_summary = self._build_data_summary(summary, days)
+        request_id = uuid4().hex
+        analysis_event = asyncio.Event()
+        self._stats_analysis_events[request_id] = analysis_event
+        request_data = {
+            "type": "stats_analysis",
+            "group_id": scope_id,
+            "request_id": request_id,
+            "sender_id": sender_id,
+            "data_summary": data_summary,
+            "summary": summary,
+            "days": days,
+            "scope": scope,
+        }
+        await self.queue_manager.add_group_mention_request(
+            request_data, model_name=self.config.chat_model.model_name
+        )
+        logger.info("[Stats] 已投递 AI 分析请求: scope=%s target=%s", scope, scope_id)
+
+        try:
+            await asyncio.wait_for(analysis_event.wait(), timeout=480.0)
+            ai_analysis = self._stats_analysis_results.pop(request_id, "")
+            logger.info(
+                "[Stats] 已获取 AI 分析结果: scope=%s len=%s", scope, len(ai_analysis)
+            )
+            return ai_analysis
+        except asyncio.TimeoutError:
+            logger.warning("[Stats] AI 分析超时: scope=%s target=%s", scope, scope_id)
+            return "AI 分析超时，已先发送图表与汇总数据。"
+        finally:
+            self._stats_analysis_events.pop(request_id, None)
+            self._stats_analysis_results.pop(request_id, None)
 
     def _build_data_summary(self, summary: dict[str, Any], days: int) -> str:
         """构建用于 AI 分析的统计数据摘要"""
@@ -441,6 +551,15 @@ class CommandDispatcher:
             )
         return summary_text
 
+    def _build_stats_summary_text(self, summary: dict[str, Any]) -> str:
+        return f"""📈 摘要汇总:
+• 总调用次数: {summary["total_calls"]}
+• 总消耗 Tokens: {summary["total_tokens"]:,}
+  └─ 输入: {summary["prompt_tokens"]:,}
+  └─ 输出: {summary["completion_tokens"]:,}
+• 平均耗时: {summary["avg_duration"]:.2f}s
+• 涉及模型数: {len(summary["models"])}"""
+
     def set_stats_analysis_result(
         self, group_id: int, request_id: str, analysis: str
     ) -> None:
@@ -485,14 +604,7 @@ class CommandDispatcher:
                 add_node(f"[CQ:image,file={str(img_path.absolute())}]")
 
         # 添加文本摘要
-        summary_text = f"""📈 摘要汇总:
-• 总调用次数: {summary["total_calls"]}
-• 总消耗 Tokens: {summary["total_tokens"]:,}
-  └─ 输入: {summary["prompt_tokens"]:,}
-  └─ 输出: {summary["completion_tokens"]:,}
-• 平均耗时: {summary["avg_duration"]:.2f}s
-• 涉及模型数: {len(summary["models"])}"""
-        add_node(summary_text)
+        add_node(self._build_stats_summary_text(summary))
 
         # 添加 AI 分析结果（如果有）
         if ai_analysis:
@@ -765,6 +877,7 @@ class CommandDispatcher:
         sender_id: int,
         command: dict[str, Any],
         send_private_callback: Callable[[int, str], Awaitable[None]] | None = None,
+        is_webui_session: bool = False,
     ) -> None:
         await self._dispatch_internal(
             scope="private",
@@ -773,6 +886,7 @@ class CommandDispatcher:
             command=command,
             user_id=user_id,
             send_private_callback=send_private_callback,
+            is_webui_session=is_webui_session,
         )
 
     async def _dispatch_internal(
@@ -784,6 +898,7 @@ class CommandDispatcher:
         command: dict[str, Any],
         user_id: int | None,
         send_private_callback: Callable[[int, str], Awaitable[None]] | None,
+        is_webui_session: bool = False,
     ) -> None:
         """统一分发入口：支持群聊与私聊。"""
         start_time = time.perf_counter()
@@ -914,6 +1029,9 @@ class CommandDispatcher:
             rate_limiter=self.rate_limiter,
             dispatcher=self,
             registry=self.command_registry,
+            scope=scope,
+            user_id=user_id,
+            is_webui_session=is_webui_session,
         )
 
         try:

@@ -50,6 +50,8 @@
                         data-i18n="landing.logs">日志查看</button>
                     <button class="btn ghost" data-action="open-app" data-tab="runtime"
                         data-i18n="landing.runtime">运行接口</button>
+                    <button class="btn ghost" data-action="open-app" data-tab="chat"
+                        data-i18n="landing.chat">AI Chat</button>
                     <button class="btn ghost" data-action="open-app" data-tab="about"
                         data-i18n="landing.about">关于项目</button>
                 </div>
@@ -124,6 +126,9 @@
                 <li class="nav-item" data-tab="runtime" data-i18n="tabs.runtime" role="button" tabindex="0">
                     Runtime
                 </li>
+                <li class="nav-item" data-tab="chat" data-i18n="tabs.chat" role="button" tabindex="0">
+                    Chat
+                </li>
                 <li class="nav-item" data-tab="about" data-i18n="tabs.about" role="button" tabindex="0">
                     About
                 </li>
@@ -183,6 +188,7 @@
                         <button class="nav-item" data-tab="config" data-i18n="tabs.config">Configuration</button>
                         <button class="nav-item" data-tab="logs" data-i18n="tabs.logs">Logs</button>
                         <button class="nav-item" data-tab="runtime" data-i18n="tabs.runtime">Runtime</button>
+                        <button class="nav-item" data-tab="chat" data-i18n="tabs.chat">Chat</button>
                         <button class="nav-item" data-tab="about" data-i18n="tabs.about">About</button>
                     </div>
                     <div class="mobile-actions">
@@ -344,7 +350,7 @@
                     <div class="header">
                         <div>
                             <h1 class="page-title" data-i18n="runtime.title">Runtime 能力中心</h1>
-                            <p class="page-subtitle" data-i18n="runtime.subtitle">探针、记忆查询、侧写查看与 WebUI AI Chat。</p>
+                            <p class="page-subtitle" data-i18n="runtime.subtitle">探针、记忆查询与侧写查看。</p>
                         </div>
                         <div class="toolbar">
                             <button id="btnRuntimeRefresh" class="btn" data-i18n="runtime.refresh_all">刷新全部</button>
@@ -416,6 +422,16 @@
                             </div>
                         </div>
                         <pre id="runtimeProfileResult" class="runtime-json">--</pre>
+                    </div>
+                </section>
+
+                <!-- Tab Chat -->
+                <section id="tab-chat" class="tab-content">
+                    <div class="header">
+                        <div>
+                            <h1 class="page-title" data-i18n="chat.title">AI Chat</h1>
+                            <p class="page-subtitle" data-i18n="chat.subtitle">虚拟私聊 system#42，会自动恢复历史记录。</p>
+                        </div>
                     </div>
 
                     <div class="card runtime-card">

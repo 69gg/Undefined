@@ -3,6 +3,7 @@
         initialized: false,
         loaded: false,
         chatBusy: false,
+        chatHistoryLoaded: false,
     };
 
     function i18nFormat(key, params = {}) {
@@ -27,6 +28,12 @@
         item.innerHTML = `<div class="runtime-chat-role">${role === "user" ? "You" : "AI"}</div><div class="runtime-chat-content">${escapeHtml(content)}</div>`;
         log.appendChild(item);
         log.scrollTop = log.scrollHeight;
+    }
+
+    function clearChatMessages() {
+        const log = get("runtimeChatLog");
+        if (!log) return;
+        log.innerHTML = "";
     }
 
     async function parseJsonSafe(res) {
@@ -181,6 +188,25 @@
         setJsonBlock("runtimeProfileResult", data);
     }
 
+    async function loadChatHistory(force = false) {
+        if (runtimeState.chatHistoryLoaded && !force) return;
+        const res = await api("/api/runtime/chat/history?limit=200");
+        const data = await parseJsonSafe(res);
+        if (!res.ok || (data && data.error)) {
+            throw new Error(buildRequestError(res, data));
+        }
+
+        clearChatMessages();
+        const items = data && Array.isArray(data.items) ? data.items : [];
+        items.forEach((item) => {
+            const role = item && item.role === "bot" ? "bot" : "user";
+            const content = String((item && item.content) || "").trim();
+            if (!content) return;
+            appendChatMessage(role, content);
+        });
+        runtimeState.chatHistoryLoaded = true;
+    }
+
     async function sendChatMessage() {
         if (runtimeState.chatBusy) return;
         const input = get("runtimeChatInput");
@@ -240,6 +266,7 @@
                 if (!replied) {
                     appendChatMessage("bot", t("runtime.empty"));
                 }
+                runtimeState.chatHistoryLoaded = true;
                 return;
             }
 
@@ -256,6 +283,7 @@
             } else {
                 appendChatMessage("bot", t("runtime.empty"));
             }
+            runtimeState.chatHistoryLoaded = true;
         } catch (error) {
             showToast(`${t("runtime.failed")}: ${error.message || error}`, "error", 5000);
         } finally {
@@ -317,10 +345,17 @@
     }
 
     function onTabActivated(tab) {
-        if (tab !== "runtime") return;
         if (!state.authenticated) return;
-        if (!runtimeState.loaded) {
-            refreshAll();
+        if (tab === "runtime") {
+            if (!runtimeState.loaded) {
+                refreshAll();
+            }
+            return;
+        }
+        if (tab === "chat") {
+            loadChatHistory().catch((error) => {
+                showToast(`${t("runtime.failed")}: ${error.message || error}`, "error", 5000);
+            });
         }
     }
 
@@ -334,5 +369,6 @@
         init,
         onTabActivated,
         refreshAll,
+        loadChatHistory,
     };
 })();

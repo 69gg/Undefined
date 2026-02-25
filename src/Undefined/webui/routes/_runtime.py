@@ -271,3 +271,14 @@ async def runtime_chat_handler(request: web.Request) -> web.StreamResponse:
         payload=payload,
         timeout_seconds=_CHAT_PROXY_TIMEOUT_SECONDS,
     )
+
+
+@routes.get("/api/runtime/chat/history")
+async def runtime_chat_history_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    return await _proxy_runtime(
+        method="GET",
+        path="/api/v1/chat/history",
+        params=request.query,
+    )

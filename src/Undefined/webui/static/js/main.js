@@ -8,11 +8,10 @@ function refreshUI() {
             get("appContent").style.display = "block";
             if (!state.configLoaded) loadConfig();
             if (
-                state.tab === "runtime" &&
                 window.RuntimeController &&
                 typeof window.RuntimeController.onTabActivated === "function"
             ) {
-                window.RuntimeController.onTabActivated("runtime");
+                window.RuntimeController.onTabActivated(state.tab);
             }
         } else {
             get("appContent").style.display = "none";
