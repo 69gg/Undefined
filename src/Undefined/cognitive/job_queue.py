@@ -23,6 +23,14 @@ class JobQueue:
         self._failed_dir = base / "failed"
         for d in (self._pending_dir, self._processing_dir, self._failed_dir):
             d.mkdir(parents=True, exist_ok=True)
+        # 启动时清理所有遗留的 lock 文件
+        stale_lock_count = 0
+        for d in (self._pending_dir, self._processing_dir, self._failed_dir):
+            for lock_file in d.glob("*.lock"):
+                lock_file.unlink(missing_ok=True)
+                stale_lock_count += 1
+        if stale_lock_count:
+            logger.info("[认知队列] 清理遗留 lock 文件: count=%s", stale_lock_count)
         logger.info(
             "[认知队列] 初始化完成: base=%s pending=%s processing=%s failed=%s",
             str(base),
@@ -57,6 +65,9 @@ class JobQueue:
 
                     with open(dst, "r", encoding="utf-8") as fh:
                         data = json.load(fh)
+                    # 清理遗留的 lock 文件
+                    lock_file = f.with_name(f"{f.name}.lock")
+                    lock_file.unlink(missing_ok=True)
                     return f.stem, data
                 except (OSError, Exception) as exc:
                     logger.warning(
@@ -80,7 +91,12 @@ class JobQueue:
 
     async def complete(self, job_id: str) -> None:
         p = self._processing_dir / f"{job_id}.json"
-        await asyncio.to_thread(lambda: p.unlink(missing_ok=True))
+
+        def _remove() -> None:
+            p.unlink(missing_ok=True)
+            p.with_name(f"{p.name}.lock").unlink(missing_ok=True)
+
+        await asyncio.to_thread(_remove)
         logger.info("[认知队列] 任务完成并移除 processing: job_id=%s", job_id)
 
     async def fail(self, job_id: str, error: str) -> None:
@@ -88,7 +104,12 @@ class JobQueue:
         data = await read_json(src) or {}
         data["error"] = error
         await write_json(self._failed_dir / f"{job_id}.json", data)
-        await asyncio.to_thread(lambda: src.unlink(missing_ok=True))
+
+        def _remove() -> None:
+            src.unlink(missing_ok=True)
+            src.with_name(f"{src.name}.lock").unlink(missing_ok=True)
+
+        await asyncio.to_thread(_remove)
         logger.warning(
             "[认知队列] 任务写入 failed: job_id=%s error=%s",
             job_id,
@@ -126,6 +147,7 @@ class JobQueue:
                     dst = self._pending_dir / f.name
                     dst.write_text(json.dumps(data, ensure_ascii=False), "utf-8")
                     f.unlink()
+                    f.with_name(f"{f.name}.lock").unlink(missing_ok=True)
                     count += 1
                 except (OSError, Exception) as exc:
                     logger.warning(
@@ -148,6 +170,7 @@ class JobQueue:
                 try:
                     if now - f.stat().st_mtime > timeout_seconds:
                         os.replace(f, self._pending_dir / f.name)
+                        f.with_name(f"{f.name}.lock").unlink(missing_ok=True)
                         count += 1
                 except OSError as exc:
                     logger.warning(
