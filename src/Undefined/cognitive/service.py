@@ -279,6 +279,7 @@ class CognitiveService:
             time_decay_min_similarity=float(
                 getattr(config, "time_decay_min_similarity", 0.35)
             ),
+            apply_mmr=True,
         )
         if events:
             event_lines = "\n".join(
@@ -379,6 +380,7 @@ class CognitiveService:
             time_decay_min_similarity=float(
                 getattr(config, "time_decay_min_similarity", 0.35)
             ),
+            apply_mmr=True,
         )
         logger.info("[认知服务] 搜索事件完成: count=%s", len(results))
         return results

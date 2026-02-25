@@ -83,7 +83,7 @@ processing/{job_id}.json
     ▼ ChromaDB upsert（events collection）
     │
     ▼ 若有 observations → 可按 group/sender 等视角生成多条事件记录
-    ▼ 若有 observations → tool_call 结构化提取 → 更新侧写文件 + 向量库
+    ▼ 若有 observations → 检索该实体历史事件注入 merge 上下文 → tool_call 结构化提取 → 更新侧写文件 + 向量库
     │
     ▼ complete（删除 processing 文件）
         异常 → 重试次数 < job_max_retries？
@@ -138,10 +138,13 @@ processing/{job_id}.json
 
 ### 检索排序策略（events）
 
-事件检索采用两段式排序，兼顾语义相关性与时间新近性：
+事件检索采用三段式排序，兼顾语义相关性、时间新近性与结果多样性：
 
 1. 语义召回（可选 rerank）得到候选集合；
-2. 在候选集合上按时间衰减加权重排后再截断到 `top_k`。
+2. 在候选集合上按时间衰减加权重排；
+3. MMR（最大边际相关性）去重筛选后截断到 `top_k`。
+
+#### 时间衰减加权
 
 加权公式：
 
@@ -154,6 +157,22 @@ final_score = sim × (1 + boost × decay)
 - 仅当 `sim >= time_decay_min_similarity` 时才施加时间加权，防止“新但不相关”的结果上浮。
 - `half_life_seconds = time_decay_half_life_days × 86400`。
 - `time_from/time_to` 为硬过滤条件，先过滤再排序。
+
+#### MMR 去重
+
+同一事实被反复观察时（如"用户喜欢 Python"出现多次），ChromaDB 会积累大量近似重复向量，导致 top_k 被同一话题霸占。MMR（Maximal Marginal Relevance）在候选集中贪心选择语义多样的结果，惩罚与已选中项过于相似的文档：
+
+```text
+MMR_score = λ × relevance(doc, query) − (1 − λ) × max_similarity(doc, selected_set)
+```
+
+- `λ = 0.7`（默认），偏重相关性的同时保证多样性。
+- 内层循环使用 numba JIT 编译加速，避免高维向量（如 4096 维）在纯 Python 中的性能问题。
+- MMR 仅对 events collection 启用（`build_context()` 和 `search_events()` 自动开启），profiles 不需要（每个实体只有一条）。
+
+### 侧写合并：历史事件注入
+
+史官合并侧写时，会在 merge LLM 调用前用当前 observations 作为 query 从 ChromaDB 检索该实体的 top-8 历史事件，注入 merge prompt。这让史官拥有更丰富的上下文来判断哪些特征应保留，避免因本轮未提及而误删长期稳定特征。
 
 ### 自动注入场景的 Query 构造
 

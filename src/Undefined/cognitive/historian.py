@@ -856,6 +856,30 @@ class HistorianWorker:
         )
         effective_name = self._resolve_profile_name(target, current)
 
+        # 检索该实体的历史事件作为 merge 参考
+        observations_text = (
+            "\n".join(job.get("observations", job.get("new_info", [])))
+            if isinstance(job.get("observations", job.get("new_info")), list)
+            else str(job.get("observations", job.get("new_info", "")))
+        )
+        hist_where: dict[str, Any] = {}
+        if entity_type == "group":
+            hist_where = {"group_id": entity_id}
+        else:
+            hist_where = {"sender_id": entity_id}
+        historical_events = await self._vector_store.query_events(
+            observations_text,
+            top_k=8,
+            where=hist_where,
+        )
+        historical_lines = (
+            "\n".join(
+                f"- [{e['metadata'].get('timestamp_local', '')}] {e['document']}"
+                for e in historical_events
+            )
+            or "（暂无历史事件）"
+        )
+
         from Undefined.utils.resources import read_text_resource
 
         template = read_text_resource("res/prompts/historian_profile_merge.md")
@@ -868,6 +892,7 @@ class HistorianWorker:
             message_ids = []
         prompt = template.format(
             current_profile=_escape_braces(current),
+            historical_events=_escape_braces(historical_lines),
             canonical_text=_escape_braces(canonical),
             new_info=_escape_braces(
                 "\n".join(job.get("observations", job.get("new_info", [])))

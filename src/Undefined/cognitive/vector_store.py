@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import chromadb
+import numpy as np
+from numba import njit
+from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +67,63 @@ def _metadata_timestamp_epoch(metadata: Any) -> float | None:
 def _similarity_from_distance(distance: Any) -> float:
     dist = _safe_float(distance, default=1.0)
     return _clamp(1.0 - dist, 0.0, 1.0)
+
+
+@njit(cache=True)  # type: ignore[untyped-decorator]
+def _mmr_select(
+    embeddings: NDArray[np.float32],
+    query_embedding: NDArray[np.float32],
+    top_k: int,
+    lambda_param: float,
+) -> NDArray[np.intp]:
+    """MMR 贪心选择，返回选中的索引数组。"""
+    n = embeddings.shape[0]
+    if n <= top_k:
+        return np.arange(n)
+
+    # 预计算 query-doc 相关性（cosine similarity）
+    query_norm = np.sqrt(np.sum(query_embedding * query_embedding))
+    relevance = np.empty(n, dtype=np.float64)
+    norms = np.empty(n, dtype=np.float64)
+    for i in range(n):
+        norms[i] = np.sqrt(np.sum(embeddings[i] * embeddings[i]))
+        if query_norm == 0.0 or norms[i] == 0.0:
+            relevance[i] = 0.0
+        else:
+            relevance[i] = np.sum(embeddings[i] * query_embedding) / (
+                norms[i] * query_norm
+            )
+
+    selected = np.empty(top_k, dtype=np.intp)
+    max_sim_to_selected = np.full(n, -np.inf, dtype=np.float64)
+    chosen = np.zeros(n, dtype=np.bool_)
+
+    for step in range(top_k):
+        best_idx = -1
+        best_score = -np.inf
+        for i in range(n):
+            if chosen[i]:
+                continue
+            redundancy = max(max_sim_to_selected[i], 0.0) if step > 0 else 0.0
+            score = lambda_param * relevance[i] - (1.0 - lambda_param) * redundancy
+            if score > best_score:
+                best_score = score
+                best_idx = i
+        if best_idx < 0:
+            return selected[:step]
+        selected[step] = best_idx
+        chosen[best_idx] = True
+        # 更新 max_sim_to_selected：新选中项与所有未选中项的相似度
+        if norms[best_idx] > 0.0:
+            for j in range(n):
+                if not chosen[j] and norms[j] > 0.0:
+                    sim = np.sum(embeddings[j] * embeddings[best_idx]) / (
+                        norms[j] * norms[best_idx]
+                    )
+                    if sim > max_sim_to_selected[j]:
+                        max_sim_to_selected[j] = sim
+
+    return selected
 
 
 class CognitiveVectorStore:
@@ -125,9 +185,10 @@ class CognitiveVectorStore:
         time_decay_half_life_days: float = 14.0,
         time_decay_boost: float = 0.2,
         time_decay_min_similarity: float = 0.35,
+        apply_mmr: bool = False,
     ) -> list[dict[str, Any]]:
         logger.info(
-            "[认知向量库] 查询事件: query_len=%s top_k=%s where=%s reranker=%s multiplier=%s decay_enabled=%s half_life_days=%s boost=%s min_sim=%s",
+            "[认知向量库] 查询事件: query_len=%s top_k=%s where=%s reranker=%s multiplier=%s decay_enabled=%s half_life_days=%s boost=%s min_sim=%s mmr=%s",
             len(query_text or ""),
             top_k,
             where or {},
@@ -137,6 +198,7 @@ class CognitiveVectorStore:
             time_decay_half_life_days,
             time_decay_boost,
             time_decay_min_similarity,
+            apply_mmr,
         )
         return await self._query(
             self._events,
@@ -149,6 +211,7 @@ class CognitiveVectorStore:
             time_decay_half_life_days=time_decay_half_life_days,
             time_decay_boost=time_decay_boost,
             time_decay_min_similarity=time_decay_min_similarity,
+            apply_mmr=apply_mmr,
         )
 
     async def upsert_profile(
@@ -205,16 +268,18 @@ class CognitiveVectorStore:
         time_decay_half_life_days: float = 14.0,
         time_decay_boost: float = 0.2,
         time_decay_min_similarity: float = 0.35,
+        apply_mmr: bool = False,
     ) -> list[dict[str, Any]]:
         col_name = getattr(col, "name", "unknown")
         safe_top_k = max(1, int(top_k))
         safe_multiplier = max(1, int(candidate_multiplier))
         logger.debug(
-            "[认知向量库] 开始查询 collection=%s top_k=%s where=%s decay=%s",
+            "[认知向量库] 开始查询 collection=%s top_k=%s where=%s decay=%s mmr=%s",
             col_name,
             safe_top_k,
             where or {},
             apply_time_decay,
+            apply_mmr,
         )
         emb = await self._embed(query_text)
         # 重排要求候选数 > 最终返回数，否则重排无意义
@@ -225,13 +290,16 @@ class CognitiveVectorStore:
                 safe_multiplier,
             )
         use_extra_candidates = safe_multiplier >= 2 and (
-            use_reranker or apply_time_decay
+            use_reranker or apply_time_decay or apply_mmr
         )
         fetch_k = safe_top_k * safe_multiplier if use_extra_candidates else safe_top_k
+        include: list[str] = ["documents", "metadatas", "distances"]
+        if apply_mmr:
+            include.append("embeddings")
         kwargs: dict[str, Any] = dict(
             query_embeddings=[emb],
             n_results=fetch_k,
-            include=["documents", "metadatas", "distances"],
+            include=include,
         )
         if where:
             kwargs["where"] = where
@@ -243,10 +311,15 @@ class CognitiveVectorStore:
         docs: list[str] = (raw.get("documents") or [[]])[0]
         metas: list[dict[str, Any]] = (raw.get("metadatas") or [[]])[0]
         dists: list[float] = (raw.get("distances") or [[]])[0]
-        results = [
-            {"document": d, "metadata": m, "distance": dist}
-            for d, m, dist in zip(docs, metas, dists)
-        ]
+        embeddings_raw: list[list[float]] = (
+            (raw.get("embeddings") or [[]])[0] if apply_mmr else []
+        )
+        results: list[dict[str, Any]] = []
+        for i, (d, m, dist) in enumerate(zip(docs, metas, dists)):
+            item: dict[str, Any] = {"document": d, "metadata": m, "distance": dist}
+            if apply_mmr and i < len(embeddings_raw):
+                item["embedding"] = embeddings_raw[i]
+            results.append(item)
         logger.info(
             "[认知向量库] 查询完成: collection=%s fetch_k=%s hit_count=%s",
             col_name,
@@ -261,36 +334,38 @@ class CognitiveVectorStore:
                 len(results),
                 safe_top_k,
             )
-            rerank_top_n = fetch_k if apply_time_decay else safe_top_k
+            rerank_top_n = fetch_k if (apply_time_decay or apply_mmr) else safe_top_k
             reranked = await reranker.rerank(
                 query_text, [r["document"] for r in results], top_n=rerank_top_n
             )
-            final: list[dict[str, Any]] = []
+            reranked_results: list[dict[str, Any]] = []
             for item in reranked[:rerank_top_n]:
                 index = int(_safe_float(item.get("index"), default=-1))
                 if index < 0 or index >= len(results):
                     continue
-                final.append(
-                    {
-                        "document": item.get("document", results[index]["document"]),
-                        "metadata": results[index]["metadata"],
-                        "distance": results[index]["distance"],
-                        "rerank_score": _safe_float(
-                            item.get("relevance_score"), default=0.0
-                        ),
-                    }
-                )
+                entry: dict[str, Any] = {
+                    "document": item.get("document", results[index]["document"]),
+                    "metadata": results[index]["metadata"],
+                    "distance": results[index]["distance"],
+                    "rerank_score": _safe_float(
+                        item.get("relevance_score"), default=0.0
+                    ),
+                }
+                if apply_mmr and "embedding" in results[index]:
+                    entry["embedding"] = results[index]["embedding"]
+                reranked_results.append(entry)
             logger.info(
                 "[认知向量库] 重排完成: collection=%s final_count=%s",
                 col_name,
-                len(final),
+                len(reranked_results),
             )
-            results = final
+            results = reranked_results
 
         if apply_time_decay and results:
+            decay_top_k = fetch_k if apply_mmr else safe_top_k
             final = self._apply_time_decay_ranking(
                 results=results,
-                top_k=safe_top_k,
+                top_k=decay_top_k,
                 half_life_days=time_decay_half_life_days,
                 boost=time_decay_boost,
                 min_similarity=time_decay_min_similarity,
@@ -301,9 +376,14 @@ class CognitiveVectorStore:
                 col_name,
                 len(final),
             )
-            return final
+        else:
+            final = results if apply_mmr else results[:safe_top_k]
 
-        final = results[:safe_top_k]
+        if apply_mmr and final:
+            final = self._apply_mmr(final, emb, safe_top_k)
+            for item in final:
+                item.pop("embedding", None)
+
         logger.info(
             "[认知向量库] 返回查询结果: collection=%s final_count=%s",
             col_name,
@@ -377,3 +457,21 @@ class CognitiveVectorStore:
                 safe_min_similarity,
             )
         return final
+
+    @staticmethod
+    def _apply_mmr(
+        results: list[dict[str, Any]],
+        query_embedding: list[float],
+        top_k: int,
+        lambda_param: float = 0.7,
+    ) -> list[dict[str, Any]]:
+        """MMR 多样性筛选，从候选集中选出语义多样的 top_k 条。"""
+        if len(results) <= top_k:
+            return results
+        valid = [r for r in results if "embedding" in r]
+        if len(valid) <= top_k:
+            return results[:top_k]
+        emb_matrix = np.array([r["embedding"] for r in valid], dtype=np.float32)
+        q_emb = np.array(query_embedding, dtype=np.float32)
+        indices = _mmr_select(emb_matrix, q_emb, top_k, lambda_param)
+        return [valid[int(i)] for i in indices]
