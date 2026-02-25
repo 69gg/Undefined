@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import logging
 import re
 import time
@@ -309,19 +310,13 @@ class CommandDispatcher:
                     days=days,
                 )
 
-            # WebUI 虚拟私聊不发送 CQ 图片，直接返回文本摘要，避免前端显示异常。
-            if is_webui_session:
-                summary_text = self._build_stats_summary_text(summary)
-                message = f"📊 最近 {days} 天的 Token 使用统计：\n{summary_text}"
-                if ai_analysis:
-                    message += f"\n\n🤖 AI 智能分析\n{ai_analysis}"
-                await _send_private(message)
-                return
-
             if not _MATPLOTLIB_AVAILABLE:
-                await _send_private(
-                    "❌ 缺少必要的库，无法生成图表。请安装 matplotlib。"
-                )
+                message = "❌ 缺少必要的库，无法生成图表。请安装 matplotlib。"
+                if is_webui_session:
+                    message += "\n\n" + self._build_stats_summary_text(summary)
+                    if ai_analysis:
+                        message += f"\n\n🤖 AI 智能分析\n{ai_analysis}"
+                await _send_private(message)
                 return
 
             from Undefined.utils.paths import RENDER_CACHE_DIR, ensure_dir
@@ -337,7 +332,11 @@ class CommandDispatcher:
             for img_name in ["line_chart", "bar_chart", "pie_chart", "table"]:
                 img_path = img_dir / f"stats_{img_name}.png"
                 if img_path.exists():
-                    await _send_private(f"[CQ:image,file={str(img_path.absolute())}]")
+                    message = await self._build_private_stats_image_message(
+                        img_path,
+                        inline_base64=is_webui_session,
+                    )
+                    await _send_private(message)
 
             await _send_private(self._build_stats_summary_text(summary))
             if ai_analysis:
@@ -355,6 +354,30 @@ class CommandDispatcher:
             await _send_private(
                 f"❌ 生成统计图表失败，请稍后重试（错误码: {error_id}）"
             )
+
+    async def _build_private_stats_image_message(
+        self,
+        image_path: Path,
+        *,
+        inline_base64: bool,
+    ) -> str:
+        absolute_path = str(image_path.absolute())
+        if not inline_base64:
+            return f"[CQ:image,file={absolute_path}]"
+
+        try:
+            encoded = await asyncio.to_thread(
+                lambda: base64.b64encode(image_path.read_bytes()).decode("ascii")
+            )
+        except Exception as exc:
+            logger.warning(
+                "[Stats] 图像 base64 编码失败，回退文件路径: path=%s err=%s",
+                absolute_path,
+                exc,
+            )
+            return f"[CQ:image,file={absolute_path}]"
+
+        return f"[CQ:image,file=base64://{encoded}]"
 
     async def _run_stats_ai_analysis(
         self,
