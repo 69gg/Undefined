@@ -60,6 +60,25 @@
 .tab-content.active { display: block; }
 
 .main-content { padding: 40px 60px; overflow-y: auto; max-width: 1400px; scrollbar-gutter: stable; }
+.main-content.chat-layout { max-width: none; }
+.main-content.chat-layout #tab-chat .runtime-card { max-width: 100%; }
+.main-content.chat-layout #tab-chat .chat-runtime-card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: clamp(520px, calc(100vh - 230px), 840px);
+}
+.main-content.chat-layout #tab-chat .runtime-chat-log {
+  min-height: 0;
+  max-height: none;
+}
+.main-content.chat-layout #tab-chat .runtime-chat-input {
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  resize: none;
+  line-height: 22px;
+  overflow-y: auto;
+}
 
 .header { margin-bottom: 32px; display: flex; justify-content: space-between; align-items: flex-end; }
 .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -70,6 +89,8 @@
 .log-tab { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-secondary); font-size: 12px; cursor: pointer; transition: 0.2s; }
 .log-tab:hover { color: var(--text-primary); background: var(--bg-app); }
 .log-tab.active { background: var(--accent-subtle); color: var(--accent-color); border-color: rgba(217, 119, 87, 0.35); }
+/* Keep logs tab within viewport without page-level scrolling. */
+#tab-logs .log-viewer { height: clamp(320px, 56vh, 540px); }
 
 .search-group { display: flex; align-items: center; gap: 8px; flex: 1; }
 .search-group .form-control { flex: 1; min-width: 220px; max-width: 100%; }

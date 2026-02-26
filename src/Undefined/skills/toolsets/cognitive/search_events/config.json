@@ -1,0 +1,21 @@
+{
+  "type": "function",
+  "function": {
+    "name": "search_events",
+        "description": "搜索认知记忆中的历史事件，用于回忆之前发生过的事情。支持用户/群与时间范围过滤，并应用时间衰减加权排序。该工具是检索用途，不用于手动写入长期事实；手动长期事实请使用 memory.add。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string", "description": "搜索关键词或语义描述" },
+        "target_user_id": { "type": "string", "description": "限定用户ID（可选）" },
+        "target_group_id": { "type": "string", "description": "限定群ID（可选）" },
+        "sender_id": { "type": "string", "description": "限定发送者ID（可选，与target_user_id可组合使用）" },
+        "request_type": { "type": "string", "enum": ["private", "group"], "description": "限定消息来源类型：private=私聊，group=群聊（可选）" },
+        "top_k": { "type": "integer", "description": "返回条数，默认取配置 cognitive.query.tool_default_top_k" },
+        "time_from": { "type": "string", "description": "起始时间 ISO格式（可选）" },
+        "time_to": { "type": "string", "description": "截止时间 ISO格式（可选）" }
+      },
+      "required": ["query"]
+    }
+  }
+}

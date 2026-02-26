@@ -7,10 +7,21 @@ function refreshUI() {
         if (state.authenticated) {
             get("appContent").style.display = "block";
             if (!state.configLoaded) loadConfig();
+            if (
+                window.RuntimeController &&
+                typeof window.RuntimeController.onTabActivated === "function"
+            ) {
+                window.RuntimeController.onTabActivated(state.tab);
+            }
         } else {
             get("appContent").style.display = "none";
             state.configLoaded = false;
         }
+    }
+
+    const mainContent = document.querySelector(".main-content");
+    if (mainContent) {
+        mainContent.classList.toggle("chat-layout", state.tab === "chat");
     }
 
     if (initialState && initialState.version) get("about-version-display").innerText = initialState.version;
@@ -27,6 +38,10 @@ function refreshUI() {
 
 function switchTab(tab) {
     state.tab = tab;
+    const mainContent = document.querySelector(".main-content");
+    if (mainContent) {
+        mainContent.classList.toggle("chat-layout", tab === "chat");
+    }
     document.querySelectorAll(".nav-item").forEach(el => {
         el.classList.toggle("active", el.getAttribute("data-tab") === tab);
     });
@@ -49,9 +64,17 @@ function switchTab(tab) {
     } else {
         stopLogStream(); stopLogTimer();
     }
+
+    if (window.RuntimeController && typeof window.RuntimeController.onTabActivated === "function") {
+        window.RuntimeController.onTabActivated(tab);
+    }
 }
 
 async function init() {
+    if (window.RuntimeController && typeof window.RuntimeController.init === "function") {
+        window.RuntimeController.init();
+    }
+
     document.querySelectorAll('[data-action="toggle-lang"]').forEach(btn => {
         btn.addEventListener("click", () => {
             state.lang = state.lang === "zh" ? "en" : "zh";

@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "get_messages_by_time",
-        "description": "根据时间范围检索消息。用于查找特定时间段内的聊天记录。",
+        "description": "根据时间范围检索消息。用于查找特定时间段内的聊天记录。支持按关键词和发送者过滤。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -22,6 +22,14 @@
                 "end_time": {
                     "type": "string",
                     "description": "结束时间（格式：YYYY-MM-DD HH:MM:SS，例如：2025-12-29 12:00:00）"
+                },
+                "keyword": {
+                    "type": "string",
+                    "description": "关键词过滤，只返回包含该关键词的消息（大小写不敏感）"
+                },
+                "sender": {
+                    "type": "string",
+                    "description": "发送者过滤，只返回指定发送者的消息。可以是用户ID、昵称或群名片"
                 }
             },
             "required": ["chat_id", "type", "start_time", "end_time"]

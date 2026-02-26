@@ -100,6 +100,7 @@ class RetrievalRequester:
             "model": model_config.model_name,
             "query": query,
             "documents": documents,
+            "return_documents": False,
         }
         query_instruction = str(getattr(model_config, "query_instruction", "") or "")
         if query_instruction:

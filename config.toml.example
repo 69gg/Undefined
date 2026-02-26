@@ -221,6 +221,37 @@ strategy = "default"
 # en: Agent model pool entries (model_name, api_url, api_key required; others optional, inherit from primary).
 models = []
 
+# zh: 史官模型配置（认知记忆后台改写用，未配置时回退到 agent 模型）。
+# en: Historian model config (for cognitive memory rewriting, falls back to agent model if unset).
+[models.historian]
+# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
+# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
+api_url = ""
+# zh: 史官模型 API Key。
+# en: Historian model API key.
+api_key = ""
+# zh: 史官模型名称。
+# en: Historian model name.
+model_name = ""
+# zh: 可选限制：最大生成 tokens。
+# en: Optional limit: max generation tokens.
+max_tokens = 4096
+# zh: 队列发车间隔（秒）。
+# en: Queue interval (seconds).
+queue_interval_seconds = 1.0
+# zh: 是否启用 thinking（思维链）。
+# en: Enable thinking (reasoning).
+thinking_enabled = false
+# zh: thinking 预算 tokens。
+# en: Thinking-budget tokens.
+thinking_budget_tokens = 0
+# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
+# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+thinking_include_budget = true
+# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
+# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+thinking_tool_call_compat = false
+
 # zh: 嵌入模型配置（知识库语义检索使用）。
 # en: Embedding model config (used by knowledge semantic retrieval).
 [models.embedding]
@@ -447,19 +478,6 @@ xxapi_base_url = "https://v2.xxapi.cn"
 # zh: 星之阁 API 基础地址。
 # en: Xingzhige API base URL.
 xingzhige_base_url = "https://api.xingzhige.com"
-# zh: JKYAI API 基础地址。（已弃用，不必填写）
-# en: JKYAI API base URL.(this field is no longer in use and does not need to be filled in)
-jkyai_base_url = "https://api.jkyai.top"
-# zh: 心知天气 API 基础地址。
-# en: Seniverse API base URL.
-seniverse_base_url = "https://api.seniverse.com/v3"
-
-# zh: 天气 API 配置（心知天气）。
-# en: Weather API config (Seniverse).
-[weather]
-# zh: 心知天气 API Key，从 https://www.seniverse.com/ 获取。
-# en: Seniverse API key; obtain from https://www.seniverse.com/.
-api_key = ""
 
 # zh: XXAPI API 配置。
 # en: XXAPI config.
@@ -593,3 +611,117 @@ port = 8787
 # zh: WebUI 密码（首次启动必须修改默认值；默认密码无法登录）。
 # en: WebUI password (must be changed on first run; default password cannot be used to log in).
 password = "changeme"
+
+# zh: 主进程 Runtime API（供 WebUI/外部系统读取探针、记忆检索、AI Chat 使用）。
+# en: Runtime API in the main process (for WebUI/external integrations: probes, memory queries, AI chat).
+[api]
+# zh: 是否启用 Runtime API。
+# en: Enable Runtime API.
+enabled = true
+# zh: Runtime API 监听地址。
+# en: Runtime API bind host.
+host = "127.0.0.1"
+# zh: Runtime API 端口。
+# en: Runtime API port.
+port = 8788
+# zh: Runtime API 鉴权密钥（通过请求头 X-Undefined-API-Key 传递）。
+# en: Runtime API auth key (send via X-Undefined-API-Key header).
+auth_key = "changeme"
+# zh: 是否暴露 OpenAPI 文档（/openapi.json）。
+# en: Expose OpenAPI document (/openapi.json).
+openapi_enabled = true
+
+# zh: 认知记忆系统配置。启用后需配置 [models.embedding]，其余参数均有合理默认值。
+# en: Cognitive memory system. Requires [models.embedding] when enabled. All other params have sensible defaults.
+[cognitive]
+# zh: 是否启用认知记忆系统。
+# en: Enable cognitive memory system.
+enabled = true
+# zh: 史官改写时 bot 自身的称呼（仅影响认知记忆中的事件文本，不影响主提示词）。
+# en: Bot's display name used by the historian when rewriting events (does not affect the main prompt).
+bot_name = "Undefined"
+
+[cognitive.vector_store]
+# zh: ChromaDB 向量数据库存储路径。
+# en: ChromaDB vector store path.
+path = "data/cognitive/chromadb"
+
+[cognitive.query]
+# zh: 自动注入上下文时的召回条数。
+# en: Number of results to inject automatically.
+auto_top_k = 3
+# zh: 是否启用认知记忆检索重排（独立于 knowledge.enable_rerank）。
+# en: Enable reranking for cognitive memory retrieval (independent of knowledge.enable_rerank).
+enable_rerank = true
+# zh: 开启认知记忆后，额外注入最近 N 条 end 行动摘要作为短期工作记忆（带时间）；0=禁用。
+# en: When cognitive is enabled, also inject last N end action summaries as short-term working memory (with timestamps); 0 disables.
+recent_end_summaries_inject_k = 30
+# zh: 是否启用事件检索的时间衰减加权（语义相似度基础上对近期记忆轻微加权）。
+# en: Enable recency decay weighting for event retrieval (slight boost for recent memories on top of semantic relevance).
+time_decay_enabled = true
+# zh: 自动注入场景的时间半衰期（天）。值越小，近期权重衰减越快。
+# en: Time decay half-life in days for automatic injection. Smaller values decay recency weight faster.
+time_decay_half_life_days_auto = 14.0
+# zh: 工具检索场景的时间半衰期（天）。通常设置更大以保留长期可回忆性。
+# en: Time decay half-life in days for tool search. Usually larger to preserve long-term recall.
+time_decay_half_life_days_tool = 60.0
+# zh: 时间加权强度（最终得分 = sim × (1 + boost × decay)）。
+# en: Recency boost strength (final score = sim × (1 + boost × decay)).
+time_decay_boost = 0.2
+# zh: 仅当语义相似度不低于该阈值时才施加时间加权，避免“新但不相关”上浮。
+# en: Apply recency boost only when semantic similarity is above this threshold, to avoid promoting recent but irrelevant hits.
+time_decay_min_similarity = 0.35
+# zh: 工具调用时的默认召回条数。
+# en: Default top-k for tool calls.
+tool_default_top_k = 12
+# zh: 用户画像召回条数。
+# en: Top-k for profile retrieval.
+profile_top_k = 8
+# zh: rerank 候选倍数（候选数 = top_k * multiplier，必须 >= 2，否则跳过重排）。
+# en: Rerank candidate multiplier (must be >= 2, otherwise reranking is skipped).
+rerank_candidate_multiplier = 3
+
+[cognitive.historian]
+# zh: 记忆改写最大重试次数。
+# en: Max retries for memory rewrite.
+rewrite_max_retry = 2
+# zh: 提供给史官的最近消息参考条数（用于实体消歧）；0=禁用。
+# en: Number of recent message references for historian disambiguation; 0 disables.
+recent_messages_inject_k = 12
+# zh: 最近消息参考中每条消息的最大字符数（超出会截断）。
+# en: Max characters per recent message reference line (truncated when exceeded).
+recent_message_line_max_len = 240
+# zh: 触发本轮的“当前消息原文”最大字符数（超出会截断）。
+# en: Max characters of the current source message attached to historian jobs.
+source_message_max_len = 800
+# zh: 队列轮询间隔（秒）。
+# en: Queue poll interval (seconds).
+poll_interval_seconds = 1.0
+# zh: 任务超时时间（秒），超时后重新入队。
+# en: Stale job timeout (seconds), re-queued after timeout.
+stale_job_timeout_seconds = 300.0
+
+[cognitive.profile]
+# zh: 用户画像存储路径。
+# en: Profile storage path.
+path = "data/cognitive/profiles"
+# zh: 保留的历史版本数量。
+# en: Number of profile revisions to keep.
+revision_keep = 5
+
+[cognitive.queue]
+# zh: 队列文件存储路径。
+# en: Queue file storage path.
+path = "data/cognitive/queues"
+# zh: 失败任务最大保留天数。
+# en: Max age (days) for failed jobs.
+failed_max_age_days = 30
+# zh: 失败任务最大文件数。
+# en: Max number of failed job files.
+failed_max_files = 500
+# zh: 每处理多少条任务触发一次失败队列清理。
+# en: Failed queue cleanup interval (number of jobs processed).
+failed_cleanup_interval = 100
+# zh: 单个任务最大自动重试次数（超过后移入 failed，0=不重试）。
+# en: Max auto-retries per job before moving to failed (0=no retry).
+job_max_retries = 3

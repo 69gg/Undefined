@@ -1,0 +1,16 @@
+{
+  "name": "delfaq",
+  "description": "删除指定 FAQ",
+  "usage": "/delfaq <ID>",
+  "example": "/delfaq 20241205-001",
+  "permission": "admin",
+  "rate_limit": {
+    "user": 10,
+    "admin": 5,
+    "superadmin": 0
+  },
+  "show_in_help": true,
+  "order": 60,
+  "allow_in_private": false,
+  "aliases": []
+}

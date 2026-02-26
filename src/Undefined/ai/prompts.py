@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import html
 import logging
+import re
 from collections import deque
 from datetime import datetime
 from typing import Any, Callable, Awaitable, Literal
@@ -23,6 +25,14 @@ from Undefined.utils.xml import escape_xml_attr, escape_xml_text
 
 logger = logging.getLogger(__name__)
 
+_CURRENT_MESSAGE_RE = re.compile(
+    r"<message\b(?P<attrs>[^>]*)>\s*<content>(?P<content>.*?)</content>\s*</message>",
+    re.DOTALL | re.IGNORECASE,
+)
+_XML_ATTR_RE = re.compile(r'(?P<key>[a-zA-Z_][a-zA-Z0-9_-]*)="(?P<value>[^"]*)"')
+_COGNITIVE_QUERY_SHORT_THRESHOLD = 20
+_COGNITIVE_CONTEXT_VALUE_MAX_LEN = 18
+
 
 class PromptBuilder:
     """Construct system/user messages with memory, history, and time."""
@@ -35,6 +45,7 @@ class PromptBuilder:
         system_prompt_path: str = "res/prompts/undefined.xml",
         runtime_config_getter: Callable[[], Any] | None = None,
         anthropic_skill_registry: AnthropicSkillRegistry | None = None,
+        cognitive_service: Any = None,
     ) -> None:
         """初始化 Prompt 构建器
 
@@ -51,8 +62,17 @@ class PromptBuilder:
         self._system_prompt_path = system_prompt_path
         self._runtime_config_getter = runtime_config_getter
         self._anthropic_skill_registry = anthropic_skill_registry
+        self._cognitive_service = cognitive_service
         self._end_summaries: deque[EndSummaryRecord] = deque(maxlen=MAX_END_SUMMARIES)
         self._summaries_loaded = False
+
+    def set_cognitive_service(self, service: Any = None) -> None:
+        """更新认知记忆服务引用（支持运行时注入/替换）。"""
+        self._cognitive_service = service
+        logger.info(
+            "[Prompt] 认知服务引用已更新: enabled=%s",
+            bool(getattr(service, "enabled", False)) if service is not None else False,
+        )
 
     @property
     def end_summaries(self) -> deque[EndSummaryRecord]:
@@ -213,9 +233,11 @@ class PromptBuilder:
                     {
                         "role": "system",
                         "content": (
-                            "【这是你之前想要记住的东西】\n"
+                            "【memory.* 手动长期记忆（可编辑）】\n"
                             f"{memory_text}\n\n"
-                            "注意：以上是你之前主动保存的记忆，用于帮助你更好地理解用户和上下文。就事论事，就人论人，不做会话隔离。"
+                            "注意：以上是你通过 memory.add 等工具主动维护的长期事实清单。"
+                            "它与认知记忆（cognitive.* / end.observations 产生的事件与侧写）是两套机制。"
+                            "请根据任务选择合适的记忆工具，避免混用。"
                         ),
                     }
                 )
@@ -226,7 +248,111 @@ class PromptBuilder:
                     )
 
         await self._ensure_summaries_loaded()
-        if self._end_summaries:
+        if self._cognitive_service and getattr(
+            self._cognitive_service, "enabled", False
+        ):
+            recent_action_inject_k = 30
+            if self._runtime_config_getter is not None:
+                try:
+                    runtime_config = self._runtime_config_getter()
+                    cog_cfg = getattr(runtime_config, "cognitive", None)
+                    if cog_cfg is not None and hasattr(
+                        cog_cfg, "recent_end_summaries_inject_k"
+                    ):
+                        recent_action_inject_k = int(
+                            getattr(cog_cfg, "recent_end_summaries_inject_k")
+                        )
+                except Exception:
+                    pass
+            if recent_action_inject_k < 0:
+                recent_action_inject_k = 0
+
+            ctx = RequestContext.current()
+            resolved_group_id = (
+                str(ctx.group_id)
+                if ctx and ctx.group_id is not None
+                else (str(extra_context.get("group_id", "")) if extra_context else None)
+            )
+            resolved_user_id = (
+                str(ctx.user_id)
+                if ctx and ctx.user_id is not None
+                else (str(extra_context.get("user_id", "")) if extra_context else None)
+            )
+            resolved_sender_id = (
+                str(ctx.sender_id)
+                if ctx and ctx.sender_id is not None
+                else (
+                    str(extra_context.get("sender_id", "")) if extra_context else None
+                )
+            )
+            cognitive_query, query_enhanced = self._build_cognitive_query(
+                question, extra_context
+            )
+            logger.info(
+                "[AI会话] 开始自动检索认知记忆: raw_query_len=%s effective_query_len=%s query_enhanced=%s group=%s user=%s sender=%s",
+                len(question),
+                len(cognitive_query),
+                query_enhanced,
+                resolved_group_id or "",
+                resolved_user_id or "",
+                resolved_sender_id or "",
+            )
+            cognitive_context = await self._cognitive_service.build_context(
+                query=cognitive_query,
+                group_id=resolved_group_id,
+                user_id=resolved_user_id,
+                sender_id=resolved_sender_id,
+                sender_name=str(extra_context.get("sender_name", ""))
+                if extra_context
+                else None,
+                group_name=str(extra_context.get("group_name", ""))
+                if extra_context
+                else None,
+            )
+            if cognitive_context:
+                messages.append({"role": "system", "content": cognitive_context})
+                logger.info(
+                    "[AI会话] 已注入认知记忆上下文: context_len=%s",
+                    len(cognitive_context),
+                )
+            else:
+                logger.info("[AI会话] 自动检索完成：未命中可注入认知记忆")
+
+            # 额外注入最近 end 行动记录，作为短期“工作记忆”，弥补史官异步入库延迟与向量检索的漏召回。
+            if recent_action_inject_k > 0 and self._end_summaries:
+                items = list(self._end_summaries)[-recent_action_inject_k:]
+                recent_summary_lines: list[str] = []
+                for item in items:
+                    location_text = ""
+                    location = item.get("location")
+                    if isinstance(location, dict):
+                        location_type = location.get("type")
+                        location_name = location.get("name")
+                        if (
+                            location_type in {"private", "group"}
+                            and isinstance(location_name, str)
+                            and location_name.strip()
+                        ):
+                            location_text = (
+                                f" ({location_type}: {location_name.strip()})"
+                            )
+                    recent_summary_lines.append(
+                        f"- [{item.get('timestamp', '')}] {item.get('summary', '')}{location_text}"
+                    )
+                recent_summary_text = "\n".join(recent_summary_lines).strip()
+                if recent_summary_text:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                f"【短期行动记录（最近 {len(items)} 条，带时间）】\n"
+                                f"{recent_summary_text}\n\n"
+                                "注意：以上是你最近在 end 时记录的行动摘要，用于保持短期连续性。"
+                                "它可能与认知记忆事件存在重复；优先以更具体、更近期的描述为准。"
+                            ),
+                        }
+                    )
+        elif self._end_summaries:
             summary_lines: list[str] = []
             for item in self._end_summaries:
                 location_text = ""
@@ -264,7 +390,7 @@ class PromptBuilder:
 
         if get_recent_messages_callback:
             await self._inject_recent_messages(
-                messages, get_recent_messages_callback, extra_context
+                messages, get_recent_messages_callback, extra_context, question
             )
 
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -343,6 +469,7 @@ class PromptBuilder:
             [str, str, int, int], Awaitable[list[dict[str, Any]]]
         ],
         extra_context: dict[str, Any] | None,
+        question: str,
     ) -> None:
         try:
             ctx = RequestContext.current()
@@ -390,6 +517,9 @@ class PromptBuilder:
                 msg_type,
                 0,
                 recent_limit,
+            )
+            recent_msgs = self._drop_current_message_if_duplicated(
+                recent_msgs, question
             )
             context_lines: list[str] = []
             for msg in recent_msgs:
@@ -453,3 +583,112 @@ class PromptBuilder:
                 )
         except Exception as exc:
             logger.warning(f"自动获取历史消息失败: {exc}")
+
+    @staticmethod
+    def _normalize_cognitive_context_value(value: Any) -> str:
+        text = " ".join(str(value or "").split()).strip()
+        if len(text) <= _COGNITIVE_CONTEXT_VALUE_MAX_LEN:
+            return text
+        return text[: _COGNITIVE_CONTEXT_VALUE_MAX_LEN - 3].rstrip() + "..."
+
+    def _build_cognitive_query(
+        self, question: str, extra_context: dict[str, Any] | None = None
+    ) -> tuple[str, bool]:
+        question_text = str(question or "").strip()
+        signature = self._extract_current_message_signature(question_text)
+        current_content = str(signature.get("content", "")).strip()
+        base_query = current_content or question_text
+        if not base_query:
+            return "", False
+
+        # 优先使用当前帧原始消息内容；仅在短消息时追加少量会话语境，降低“这/那个”类指代丢失。
+        if (
+            not current_content
+            or len(current_content) > _COGNITIVE_QUERY_SHORT_THRESHOLD
+        ):
+            return base_query, False
+
+        context_parts: list[str] = []
+        if extra_context:
+            if bool(extra_context.get("is_private_chat", False)):
+                context_parts.append("会话:私聊")
+            elif str(extra_context.get("group_id", "")).strip():
+                context_parts.append("会话:群聊")
+            if bool(extra_context.get("is_at_bot", False)):
+                context_parts.append("触发:@机器人")
+
+            sender_name = self._normalize_cognitive_context_value(
+                extra_context.get("sender_name", "")
+            )
+            if sender_name:
+                context_parts.append(f"发送者:{sender_name}")
+
+            group_name = self._normalize_cognitive_context_value(
+                extra_context.get("group_name", "")
+            )
+            if group_name:
+                context_parts.append(f"群:{group_name}")
+
+        if not context_parts:
+            return base_query, False
+        return f"{base_query}\n语境: {'; '.join(context_parts)}", True
+
+    def _extract_current_message_signature(self, question: str) -> dict[str, str]:
+        matched = _CURRENT_MESSAGE_RE.search(str(question or ""))
+        if not matched:
+            return {}
+
+        attrs_text = str(matched.group("attrs") or "")
+        attrs: dict[str, str] = {}
+        for attr_match in _XML_ATTR_RE.finditer(attrs_text):
+            key = str(attr_match.group("key") or "").strip()
+            if not key:
+                continue
+            attrs[key] = html.unescape(str(attr_match.group("value") or "")).strip()
+
+        content = html.unescape(str(matched.group("content") or "")).strip()
+        return {
+            "sender_id": attrs.get("sender_id", ""),
+            "timestamp": attrs.get("time", ""),
+            "content": content,
+        }
+
+    def _drop_current_message_if_duplicated(
+        self, recent_msgs: list[dict[str, Any]], question: str
+    ) -> list[dict[str, Any]]:
+        if not recent_msgs:
+            return recent_msgs
+
+        signature = self._extract_current_message_signature(question)
+        if not signature:
+            return recent_msgs
+
+        last_msg = recent_msgs[-1]
+        last_sender_id = str(last_msg.get("user_id", "")).strip()
+        last_timestamp = str(last_msg.get("timestamp", "")).strip()
+        last_content = str(last_msg.get("message", "")).strip()
+
+        sig_sender_id = str(signature.get("sender_id", "")).strip()
+        sig_timestamp = str(signature.get("timestamp", "")).strip()
+        sig_content = str(signature.get("content", "")).strip()
+        if not sig_sender_id or not sig_content:
+            return recent_msgs
+
+        if last_sender_id != sig_sender_id:
+            return recent_msgs
+        if last_content != sig_content:
+            return recent_msgs
+
+        if sig_timestamp and last_timestamp and sig_timestamp != last_timestamp:
+            # history 写入时间与事件时间可能存在秒级偏差；若分钟都不同则判定不是同一帧。
+            if sig_timestamp[:16] != last_timestamp[:16]:
+                return recent_msgs
+
+        logger.info(
+            "[Prompt] 历史注入剔除当前帧: sender=%s sig_time=%s history_time=%s content_preview=%s",
+            sig_sender_id,
+            sig_timestamp,
+            last_timestamp,
+            sig_content[:60],
+        )
+        return recent_msgs[:-1]

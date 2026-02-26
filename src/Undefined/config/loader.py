@@ -28,8 +28,10 @@ except Exception:  # pragma: no cover
 
 
 from .models import (
+    APIConfig,
     AgentModelConfig,
     ChatModelConfig,
+    CognitiveConfig,
     EmbeddingModelConfig,
     ModelPool,
     ModelPoolEntry,
@@ -46,6 +48,9 @@ LOCAL_CONFIG_PATH = Path("config.local.json")
 DEFAULT_WEBUI_URL = "127.0.0.1"
 DEFAULT_WEBUI_PORT = 8787
 DEFAULT_WEBUI_PASSWORD = "changeme"
+DEFAULT_API_HOST = "127.0.0.1"
+DEFAULT_API_PORT = 8788
+DEFAULT_API_AUTH_KEY = "changeme"
 
 _ENV_WARNED_KEYS: set[str] = set()
 
@@ -378,6 +383,7 @@ class Config:
     security_model_enabled: bool
     security_model: SecurityModelConfig
     agent_model: AgentModelConfig
+    historian_model: AgentModelConfig
     model_pool_enabled: bool
     log_level: str
     log_file_path: str
@@ -421,6 +427,7 @@ class Config:
     webui_url: str
     webui_port: int
     webui_password: str
+    api: APIConfig
     # Code Delivery Agent
     code_delivery_enabled: bool
     code_delivery_task_root: str
@@ -465,6 +472,8 @@ class Config:
     bilibili_oversize_strategy: str
     bilibili_auto_extract_group_ids: list[int]
     bilibili_auto_extract_private_ids: list[int]
+    # 认知记忆
+    cognitive: CognitiveConfig
     _allowed_group_ids_set: set[int] = dataclass_field(
         default_factory=set,
         init=False,
@@ -694,6 +703,7 @@ class Config:
         )
         security_model = cls._parse_security_model_config(data, chat_model)
         agent_model = cls._parse_agent_model_config(data)
+        historian_model = cls._parse_historian_model_config(data, agent_model)
 
         model_pool_enabled = _coerce_bool(
             _get_value(data, ("features", "pool_enabled"), "MODEL_POOL_ENABLED"), False
@@ -1143,6 +1153,9 @@ class Config:
             messages_send_url_file_max_size_mb = 100
 
         webui_settings = load_webui_settings(config_path)
+        api_config = cls._parse_api_config(data)
+
+        cognitive = cls._parse_cognitive_config(data)
 
         if strict:
             cls._verify_required_fields(
@@ -1189,6 +1202,7 @@ class Config:
             security_model_enabled=security_model_enabled,
             security_model=security_model,
             agent_model=agent_model,
+            historian_model=historian_model,
             model_pool_enabled=model_pool_enabled,
             log_level=log_level,
             log_file_path=log_file_path,
@@ -1232,6 +1246,7 @@ class Config:
             webui_url=webui_settings.url,
             webui_port=webui_settings.port,
             webui_password=webui_settings.password,
+            api=api_config,
             code_delivery_enabled=code_delivery_enabled,
             code_delivery_task_root=code_delivery_task_root,
             code_delivery_docker_image=code_delivery_docker_image,
@@ -1271,6 +1286,7 @@ class Config:
             knowledge_default_top_k=knowledge_default_top_k,
             knowledge_enable_rerank=knowledge_enable_rerank,
             knowledge_rerank_top_k=knowledge_rerank_top_k,
+            cognitive=cognitive,
         )
 
     @property
@@ -1957,6 +1973,184 @@ class Config:
                 setattr(self, name, new_value)
                 changes[name] = (old_value, new_value)
         return changes
+
+    @staticmethod
+    def _parse_historian_model_config(
+        data: dict[str, Any], fallback: AgentModelConfig
+    ) -> AgentModelConfig:
+        h = data.get("models", {}).get("historian", {})
+        if not isinstance(h, dict) or not h:
+            return fallback
+        queue_interval_seconds = _coerce_float(
+            h.get("queue_interval_seconds"), fallback.queue_interval_seconds
+        )
+        if queue_interval_seconds <= 0:
+            queue_interval_seconds = fallback.queue_interval_seconds
+        thinking_include_budget, thinking_tool_call_compat = (
+            _resolve_thinking_compat_flags(
+                data={"models": {"historian": h}},
+                model_name="historian",
+                include_budget_env_key="HISTORIAN_MODEL_THINKING_INCLUDE_BUDGET",
+                tool_call_compat_env_key="HISTORIAN_MODEL_THINKING_TOOL_CALL_COMPAT",
+                legacy_env_key="HISTORIAN_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+            )
+        )
+        return AgentModelConfig(
+            api_url=_coerce_str(h.get("api_url"), fallback.api_url),
+            api_key=_coerce_str(h.get("api_key"), fallback.api_key),
+            model_name=_coerce_str(h.get("model_name"), fallback.model_name),
+            max_tokens=_coerce_int(h.get("max_tokens"), fallback.max_tokens),
+            queue_interval_seconds=queue_interval_seconds,
+            thinking_enabled=_coerce_bool(
+                h.get("thinking_enabled"), fallback.thinking_enabled
+            ),
+            thinking_budget_tokens=_coerce_int(
+                h.get("thinking_budget_tokens"), fallback.thinking_budget_tokens
+            ),
+            thinking_include_budget=thinking_include_budget,
+            thinking_tool_call_compat=thinking_tool_call_compat,
+        )
+
+    @staticmethod
+    def _parse_cognitive_config(data: dict[str, Any]) -> CognitiveConfig:
+        cog = data.get("cognitive", {})
+        vs = cog.get("vector_store", {}) if isinstance(cog, dict) else {}
+        q = cog.get("query", {}) if isinstance(cog, dict) else {}
+        hist = cog.get("historian", {}) if isinstance(cog, dict) else {}
+        prof = cog.get("profile", {}) if isinstance(cog, dict) else {}
+        que = cog.get("queue", {}) if isinstance(cog, dict) else {}
+        return CognitiveConfig(
+            enabled=_coerce_bool(
+                cog.get("enabled") if isinstance(cog, dict) else None, True
+            ),
+            bot_name=_coerce_str(
+                cog.get("bot_name") if isinstance(cog, dict) else None,
+                "Undefined",
+            ),
+            vector_store_path=_coerce_str(
+                vs.get("path") if isinstance(vs, dict) else None,
+                "data/cognitive/chromadb",
+            ),
+            queue_path=_coerce_str(
+                que.get("path") if isinstance(que, dict) else None,
+                "data/cognitive/queues",
+            ),
+            profiles_path=_coerce_str(
+                prof.get("path") if isinstance(prof, dict) else None,
+                "data/cognitive/profiles",
+            ),
+            auto_top_k=_coerce_int(
+                q.get("auto_top_k") if isinstance(q, dict) else None, 3
+            ),
+            enable_rerank=_coerce_bool(
+                q.get("enable_rerank") if isinstance(q, dict) else None, True
+            ),
+            recent_end_summaries_inject_k=_coerce_int(
+                q.get("recent_end_summaries_inject_k") if isinstance(q, dict) else None,
+                30,
+            ),
+            time_decay_enabled=_coerce_bool(
+                q.get("time_decay_enabled") if isinstance(q, dict) else None, True
+            ),
+            time_decay_half_life_days_auto=_coerce_float(
+                q.get("time_decay_half_life_days_auto")
+                if isinstance(q, dict)
+                else None,
+                14.0,
+            ),
+            time_decay_half_life_days_tool=_coerce_float(
+                q.get("time_decay_half_life_days_tool")
+                if isinstance(q, dict)
+                else None,
+                60.0,
+            ),
+            time_decay_boost=_coerce_float(
+                q.get("time_decay_boost") if isinstance(q, dict) else None, 0.2
+            ),
+            time_decay_min_similarity=_coerce_float(
+                q.get("time_decay_min_similarity") if isinstance(q, dict) else None,
+                0.35,
+            ),
+            tool_default_top_k=_coerce_int(
+                q.get("tool_default_top_k") if isinstance(q, dict) else None, 12
+            ),
+            profile_top_k=_coerce_int(
+                q.get("profile_top_k") if isinstance(q, dict) else None, 8
+            ),
+            rerank_candidate_multiplier=_coerce_int(
+                q.get("rerank_candidate_multiplier") if isinstance(q, dict) else None, 3
+            ),
+            rewrite_max_retry=_coerce_int(
+                hist.get("rewrite_max_retry") if isinstance(hist, dict) else None, 2
+            ),
+            historian_recent_messages_inject_k=_coerce_int(
+                hist.get("recent_messages_inject_k")
+                if isinstance(hist, dict)
+                else None,
+                12,
+            ),
+            historian_recent_message_line_max_len=_coerce_int(
+                hist.get("recent_message_line_max_len")
+                if isinstance(hist, dict)
+                else None,
+                240,
+            ),
+            historian_source_message_max_len=_coerce_int(
+                hist.get("source_message_max_len") if isinstance(hist, dict) else None,
+                800,
+            ),
+            poll_interval_seconds=_coerce_float(
+                hist.get("poll_interval_seconds") if isinstance(hist, dict) else None,
+                1.0,
+            ),
+            stale_job_timeout_seconds=_coerce_float(
+                hist.get("stale_job_timeout_seconds")
+                if isinstance(hist, dict)
+                else None,
+                300.0,
+            ),
+            profile_revision_keep=_coerce_int(
+                prof.get("revision_keep") if isinstance(prof, dict) else None, 5
+            ),
+            failed_max_age_days=_coerce_int(
+                que.get("failed_max_age_days") if isinstance(que, dict) else None, 30
+            ),
+            failed_max_files=_coerce_int(
+                que.get("failed_max_files") if isinstance(que, dict) else None, 500
+            ),
+            failed_cleanup_interval=_coerce_int(
+                que.get("failed_cleanup_interval") if isinstance(que, dict) else None,
+                100,
+            ),
+            job_max_retries=_coerce_int(
+                que.get("job_max_retries") if isinstance(que, dict) else None, 3
+            ),
+        )
+
+    @staticmethod
+    def _parse_api_config(data: dict[str, Any]) -> APIConfig:
+        section_raw = data.get("api", {})
+        section = section_raw if isinstance(section_raw, dict) else {}
+
+        enabled = _coerce_bool(section.get("enabled"), True)
+        host = _coerce_str(section.get("host"), DEFAULT_API_HOST)
+        port = _coerce_int(section.get("port"), DEFAULT_API_PORT)
+        if port <= 0 or port > 65535:
+            port = DEFAULT_API_PORT
+
+        auth_key = _coerce_str(section.get("auth_key"), DEFAULT_API_AUTH_KEY)
+        if not auth_key:
+            auth_key = DEFAULT_API_AUTH_KEY
+
+        openapi_enabled = _coerce_bool(section.get("openapi_enabled"), True)
+
+        return APIConfig(
+            enabled=enabled,
+            host=host,
+            port=port,
+            auth_key=auth_key,
+            openapi_enabled=openapi_enabled,
+        )
 
     @staticmethod
     def _parse_easter_egg_call_mode(value: Any) -> str:

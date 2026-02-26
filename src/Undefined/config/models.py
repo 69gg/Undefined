@@ -120,3 +120,54 @@ class AgentModelConfig:
         False  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
     pool: ModelPool | None = None  # 模型池配置
+
+
+@dataclass
+class CognitiveConfig:
+    """认知记忆系统配置"""
+
+    enabled: bool = True
+    # 史官改写时 bot 自身的称呼（仅影响认知记忆事件文本，不影响主提示词）
+    bot_name: str = "Undefined"
+    vector_store_path: str = "data/cognitive/chromadb"
+    queue_path: str = "data/cognitive/queues"
+    profiles_path: str = "data/cognitive/profiles"
+    auto_top_k: int = 3
+    enable_rerank: bool = True
+    # When cognitive is enabled, also inject last N end action summaries as short-term working memory.
+    # 0 disables this injection.
+    recent_end_summaries_inject_k: int = 30
+    time_decay_enabled: bool = True
+    time_decay_half_life_days_auto: float = 14.0
+    time_decay_half_life_days_tool: float = 60.0
+    time_decay_boost: float = 0.2
+    time_decay_min_similarity: float = 0.35
+    tool_default_top_k: int = 12
+    profile_top_k: int = 8
+    rewrite_max_retry: int = 2
+    poll_interval_seconds: float = 1.0
+    stale_job_timeout_seconds: float = 300.0
+    profile_revision_keep: int = 5
+    failed_max_age_days: int = 30
+    failed_max_files: int = 500
+    failed_cleanup_interval: int = 100
+    rerank_candidate_multiplier: int = 3
+    job_max_retries: int = 3
+    # Historian reference context shaping.
+    # Number of recent messages attached to historian jobs for disambiguation.
+    historian_recent_messages_inject_k: int = 12
+    # Max characters per recent message line attached to historian jobs.
+    historian_recent_message_line_max_len: int = 240
+    # Max characters for the current source message attached to historian jobs.
+    historian_source_message_max_len: int = 800
+
+
+@dataclass
+class APIConfig:
+    """主进程 OpenAPI/Runtime API 配置"""
+
+    enabled: bool = True
+    host: str = "127.0.0.1"
+    port: int = 8788
+    auth_key: str = "changeme"
+    openapi_enabled: bool = True

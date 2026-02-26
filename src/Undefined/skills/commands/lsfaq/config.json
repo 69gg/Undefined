@@ -1,0 +1,16 @@
+{
+  "name": "lsfaq",
+  "description": "列出当前群组的所有 FAQ 条目",
+  "usage": "/lsfaq",
+  "example": "/lsfaq",
+  "permission": "public",
+  "rate_limit": {
+    "user": 10,
+    "admin": 5,
+    "superadmin": 0
+  },
+  "show_in_help": true,
+  "order": 30,
+  "allow_in_private": false,
+  "aliases": []
+}

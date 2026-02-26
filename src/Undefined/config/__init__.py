@@ -5,6 +5,7 @@ from typing import Optional
 from .loader import Config, WebUISettings, load_webui_settings
 from .manager import ConfigManager
 from .models import (
+    APIConfig,
     AgentModelConfig,
     ChatModelConfig,
     EmbeddingModelConfig,
@@ -20,6 +21,7 @@ __all__ = [
     "ChatModelConfig",
     "VisionModelConfig",
     "SecurityModelConfig",
+    "APIConfig",
     "AgentModelConfig",
     "EmbeddingModelConfig",
     "RerankModelConfig",

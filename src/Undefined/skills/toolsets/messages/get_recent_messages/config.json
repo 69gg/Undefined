@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "get_recent_messages",
-        "description": "获取指定聊天的历史消息。默认优先使用本地 history；当群聊本地记录为空时，再尝试 OneBot 历史接口。",
+        "description": "获取指定聊天的历史消息。支持按位置范围获取，也支持按关键词和发送者过滤。默认优先使用本地 history；当群聊本地记录为空时，再尝试 OneBot 历史接口。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -22,6 +22,14 @@
                 "end": {
                     "type": "integer",
                     "description": "结束位置（从最新消息往前数），默认为 10"
+                },
+                "keyword": {
+                    "type": "string",
+                    "description": "关键词过滤，只返回包含该关键词的消息（大小写不敏感）"
+                },
+                "sender": {
+                    "type": "string",
+                    "description": "发送者过滤，只返回指定发送者的消息。可以是用户ID、昵称或群名片"
                 }
             },
             "required": ["chat_id", "type"]

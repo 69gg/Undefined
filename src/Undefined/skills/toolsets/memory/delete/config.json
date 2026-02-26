@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "delete",
-        "description": "根据 UUID 删除一条记忆。",
+        "description": "根据 UUID 删除一条手动长期记忆（memory 系列）。仅作用于 memory.* 清单，不作用于认知记忆事件/侧写。",
         "parameters": {
             "type": "object",
             "properties": {

@@ -6,6 +6,7 @@
   .main-content { padding: 30px; }
   .header { flex-direction: column; align-items: flex-start; gap: 16px; }
   .header.sticky { margin: -30px -30px 24px -30px; padding-left: 30px; padding-right: 30px; }
+  .main-content.chat-layout #tab-chat .chat-runtime-card { height: clamp(460px, calc(100vh - 220px), 760px); }
 }
 
 @media (max-width: 768px) {
@@ -17,8 +18,30 @@
   .card { padding: 22px; }
   .form-grid { column-count: 1; column-width: auto; }
   .form-fields { grid-template-columns: 1fr; }
-  .log-viewer { height: 420px; }
+  .log-viewer { height: 380px; }
   .noise { opacity: 0.08; }
+  .runtime-inline-action { width: 100%; }
+  .runtime-inline-action .form-control { flex: 1 1 auto; }
+  .runtime-query-stack { min-width: 100%; }
+  .runtime-filters { grid-template-columns: 1fr; }
+  .runtime-inline-entity { flex-wrap: wrap; }
+  .runtime-inline-entity #runtimeProfileEntityType,
+  .runtime-inline-entity #runtimeProfileEntityId { flex: 1 1 100%; }
+  .runtime-inline-entity .runtime-inline-submit-btn { margin-left: auto; }
+  .main-content.chat-layout #tab-chat .chat-runtime-card { height: clamp(400px, calc(100vh - 180px), 680px); }
+  .main-content.chat-layout #tab-chat .runtime-chat-input {
+    height: 40px;
+    min-height: 40px;
+    max-height: 40px;
+  }
+  .main-content.chat-layout #tab-chat .runtime-chat-action-btn {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+  }
+  .main-content.chat-layout #tab-chat .runtime-chat-action-icon {
+    font-size: 18px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

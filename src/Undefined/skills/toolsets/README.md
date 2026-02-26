@@ -1,6 +1,8 @@
-# 工具集
+# 工具集 (Toolsets)
 
-工具集用于按功能分类组织工具，便于分组管理与统一命名。
+> 👈 **[返回技能中心主页](../README.md)** | **[阅读详细扩展开发指南](../../../../../docs/development.md)**
+
+工具集用于按功能分类组织互相有关联的工具，便于分组管理与统一结构化命名。
 
 ## 目录结构
 
@@ -13,7 +15,6 @@ toolsets/
 └── scheduler/               # 定时任务工具集
     ├── create_schedule_task/
     ├── delete_schedule_task/
-    ├── get_current_time/
     ├── list_schedule_tasks/
     └── update_schedule_task/
 ```
@@ -139,6 +140,6 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
 - `scheduler.create_schedule_task`: 创建定时任务
 - `scheduler.delete_schedule_task`: 删除定时任务
-- `scheduler.get_current_time`: 获取当前时间
 - `scheduler.list_schedule_tasks`: 列出所有定时任务
 - `scheduler.update_schedule_task`: 更新定时任务
+- `scheduler.create_schedule_task` / `scheduler.update_schedule_task` 支持 `self_instruction` 参数，可在未来时刻调用 AI 自己执行一条延迟指令

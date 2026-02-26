@@ -2,6 +2,7 @@ from typing import Any, Dict
 import logging
 
 logger = logging.getLogger(__name__)
+SELF_CALL_TOOL_NAME = "scheduler.call_self"
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
@@ -17,6 +18,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     execution_mode = args.get("execution_mode")
     task_name = args.get("task_name")
     max_executions = args.get("max_executions")
+    self_instruction = args.get("self_instruction")
 
     if not task_id:
         return "请提供要修改的任务 ID"
@@ -24,9 +26,17 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     # 验证工具参数：单工具模式或多工具模式二选一
     has_single_tool = tool_name is not None
     has_multi_tools = tools is not None and len(tools) > 0
+    has_self_instruction = self_instruction is not None
 
-    if has_single_tool and has_multi_tools:
-        return "不能同时使用 tool_name 和 tools 参数，请选择其中一种模式"
+    normalized_self_instruction = ""
+    if has_self_instruction:
+        normalized_self_instruction = str(self_instruction).strip()
+        if not normalized_self_instruction:
+            return "self_instruction 不能为空"
+
+    mode_count = sum([has_single_tool, has_multi_tools, has_self_instruction])
+    if mode_count > 1:
+        return "tool_name、tools、self_instruction 不能同时使用，请选择其中一种模式"
 
     # 验证多工具模式参数
     if has_multi_tools:
@@ -57,6 +67,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not scheduler:
         return "调度器未在上下文中提供"
 
+    if has_self_instruction:
+        tool_name = SELF_CALL_TOOL_NAME
+        tool_args = {"prompt": normalized_self_instruction}
+        tools = None
+
     success = await scheduler.update_task(
         task_id=task_id,
         cron_expression=cron_expression,
@@ -66,6 +81,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         max_executions=max_executions,
         tools=tools,
         execution_mode=execution_mode,
+        self_instruction=normalized_self_instruction if has_self_instruction else None,
     )
 
     if success:

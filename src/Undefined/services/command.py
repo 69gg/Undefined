@@ -1,10 +1,11 @@
 import asyncio
+import base64
 import logging
 import re
 import time
 from uuid import uuid4
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 from pathlib import Path
 
 from Undefined.config import Config
@@ -40,6 +41,40 @@ _STATS_MAX_DAYS = 365
 _STATS_MODEL_TOP_N = 8
 _STATS_CALL_TYPE_TOP_N = 12
 _STATS_DATA_SUMMARY_MAX_CHARS = 12000
+_STATS_AI_FLAGS = {"--ai", "-a"}
+_STATS_TIME_RANGE_RE = re.compile(r"^\d+[dwm]?$", re.IGNORECASE)
+
+
+class _PrivateCommandSenderProxy:
+    """将命令处理器里的 send_group_message 代理到私聊发送。"""
+
+    def __init__(
+        self,
+        user_id: int,
+        send_private_message: Callable[[int, str], Awaitable[None]],
+    ) -> None:
+        self._user_id = user_id
+        self._send_private_message = send_private_message
+
+    async def send_group_message(
+        self,
+        group_id: int,
+        message: str,
+        mark_sent: bool = False,
+    ) -> None:
+        _ = group_id, mark_sent
+        await self._send_private_message(self._user_id, message)
+
+    async def send_private_message(
+        self,
+        user_id: int,
+        message: str,
+        auto_history: bool = True,
+        *,
+        mark_sent: bool = True,
+    ) -> None:
+        _ = user_id, auto_history, mark_sent
+        await self._send_private_message(self._user_id, message)
 
 
 class CommandDispatcher:
@@ -81,7 +116,8 @@ class CommandDispatcher:
         self._stats_analysis_results: dict[str, str] = {}
         self._stats_analysis_events: dict[str, asyncio.Event] = {}
 
-        commands_dir = Path(__file__).parent / "commands"
+        # 加载所有命令实现 (独立插件形式存放在 skills/commands 目录下)
+        commands_dir = Path(__file__).parent.parent / "skills" / "commands"
         self.command_registry = CommandRegistry(commands_dir)
         self.command_registry.load_commands()
         logger.info("[命令] 命令系统初始化完成: dir=%s", commands_dir)
@@ -158,10 +194,30 @@ class CommandDispatcher:
         except ValueError:
             return _STATS_DEFAULT_DAYS
 
+    def _parse_stats_options(self, args: list[str]) -> tuple[int, bool]:
+        """解析 /stats 参数：时间范围 + AI 分析开关。"""
+        days = _STATS_DEFAULT_DAYS
+        enable_ai_analysis = False
+        picked_days = False
+
+        for raw in args:
+            token = str(raw or "").strip()
+            if not token:
+                continue
+            lower = token.lower()
+            if lower in _STATS_AI_FLAGS:
+                enable_ai_analysis = True
+                continue
+            if not picked_days and _STATS_TIME_RANGE_RE.match(lower):
+                days = self._parse_time_range(lower)
+                picked_days = True
+
+        return days, enable_ai_analysis
+
     async def _handle_stats(
         self, group_id: int, sender_id: int, args: list[str]
     ) -> None:
-        """处理 /stats 命令，生成 token 使用统计图表并进行 AI 分析"""
+        """处理 /stats 命令，生成 token 使用统计图表（可选 AI 分析）"""
         # 1. 基础环境与参数检查
         if not _MATPLOTLIB_AVAILABLE:
             await self.sender.send_group_message(
@@ -169,11 +225,7 @@ class CommandDispatcher:
             )
             return
 
-        if args and args[0] == "--help":
-            await self._handle_stats_help(group_id)
-            return
-
-        days = self._parse_time_range(args[0]) if args else 7
+        days, enable_ai_analysis = self._parse_stats_options(args)
 
         try:
             # 2. 获取并验证数据
@@ -193,43 +245,16 @@ class CommandDispatcher:
             await self._generate_pie_chart(summary, img_dir)
             await self._generate_stats_table(summary, img_dir)
 
-            # 4. 投递 AI 分析请求到队列
+            # 4. 按参数投递 AI 分析请求到队列（默认关闭）
             ai_analysis = ""
-            if self.queue_manager:
-                # 构建数据摘要
-                data_summary = self._build_data_summary(summary, days)
-
-                # 创建事件等待分析结果
-                request_id = uuid4().hex
-                analysis_event = asyncio.Event()
-                self._stats_analysis_events[request_id] = analysis_event
-
-                # 投递到队列
-                request_data = {
-                    "type": "stats_analysis",
-                    "group_id": group_id,
-                    "request_id": request_id,
-                    "sender_id": sender_id,
-                    "data_summary": data_summary,
-                    "summary": summary,
-                    "days": days,
-                }
-                await self.queue_manager.add_group_mention_request(
-                    request_data, model_name=self.config.chat_model.model_name
+            if enable_ai_analysis:
+                ai_analysis = await self._run_stats_ai_analysis(
+                    scope="group",
+                    scope_id=group_id,
+                    sender_id=sender_id,
+                    summary=summary,
+                    days=days,
                 )
-                logger.info(f"[Stats] 已投递 AI 分析请求到队列，群: {group_id}")
-
-                # 等待 AI 分析结果，8分钟超时
-                try:
-                    await asyncio.wait_for(analysis_event.wait(), timeout=480.0)
-                    ai_analysis = self._stats_analysis_results.pop(request_id, "")
-                    logger.info(f"[Stats] 已获取 AI 分析结果，长度: {len(ai_analysis)}")
-                except asyncio.TimeoutError:
-                    logger.warning(f"[Stats] AI 分析超时，群: {group_id}，仅发送图表")
-                    ai_analysis = "AI 分析超时，已先发送图表与汇总数据。"
-                finally:
-                    self._stats_analysis_events.pop(request_id, None)
-                    self._stats_analysis_results.pop(request_id, None)
 
             # 5. 构建并发送合并转发消息（包含 AI 分析）
             forward_messages = self._build_stats_forward_nodes(
@@ -250,6 +275,154 @@ class CommandDispatcher:
                 group_id,
                 f"❌ 生成统计图表失败，请稍后重试（错误码: {error_id}）",
             )
+
+    async def _handle_stats_private(
+        self,
+        user_id: int,
+        sender_id: int,
+        args: list[str],
+        send_message: Callable[[str], Awaitable[None]] | None = None,
+        *,
+        is_webui_session: bool = False,
+    ) -> None:
+        """处理私聊 /stats（含 WebUI 虚拟私聊适配）。"""
+
+        async def _send_private(message: str) -> None:
+            if send_message is not None:
+                await send_message(message)
+            else:
+                await self.sender.send_private_message(user_id, message)
+
+        days, enable_ai_analysis = self._parse_stats_options(args)
+        try:
+            summary = await self._token_usage_storage.get_summary(days=days)
+            if summary["total_calls"] == 0:
+                await _send_private(f"📊 最近 {days} 天内无 Token 使用记录。")
+                return
+
+            ai_analysis = ""
+            if enable_ai_analysis:
+                ai_analysis = await self._run_stats_ai_analysis(
+                    scope="private",
+                    scope_id=0,
+                    sender_id=sender_id,
+                    summary=summary,
+                    days=days,
+                )
+
+            if not _MATPLOTLIB_AVAILABLE:
+                message = "❌ 缺少必要的库，无法生成图表。请安装 matplotlib。"
+                if is_webui_session:
+                    message += "\n\n" + self._build_stats_summary_text(summary)
+                    if ai_analysis:
+                        message += f"\n\n🤖 AI 智能分析\n{ai_analysis}"
+                await _send_private(message)
+                return
+
+            from Undefined.utils.paths import RENDER_CACHE_DIR, ensure_dir
+            from Undefined.utils.cache import cleanup_cache_dir
+
+            img_dir = ensure_dir(RENDER_CACHE_DIR)
+            await self._generate_line_chart(summary, img_dir, days)
+            await self._generate_bar_chart(summary, img_dir)
+            await self._generate_pie_chart(summary, img_dir)
+            await self._generate_stats_table(summary, img_dir)
+
+            await _send_private(f"📊 最近 {days} 天的 Token 使用统计：")
+            for img_name in ["line_chart", "bar_chart", "pie_chart", "table"]:
+                img_path = img_dir / f"stats_{img_name}.png"
+                if img_path.exists():
+                    message = await self._build_private_stats_image_message(
+                        img_path,
+                        inline_base64=is_webui_session,
+                    )
+                    await _send_private(message)
+
+            await _send_private(self._build_stats_summary_text(summary))
+            if ai_analysis:
+                await _send_private(f"🤖 AI 智能分析\n{ai_analysis}")
+
+            cleanup_cache_dir(RENDER_CACHE_DIR)
+        except Exception as e:
+            error_id = uuid4().hex[:8]
+            logger.exception(
+                "[Stats] 私聊统计生成失败: error_id=%s user=%s err=%s",
+                error_id,
+                user_id,
+                e,
+            )
+            await _send_private(
+                f"❌ 生成统计图表失败，请稍后重试（错误码: {error_id}）"
+            )
+
+    async def _build_private_stats_image_message(
+        self,
+        image_path: Path,
+        *,
+        inline_base64: bool,
+    ) -> str:
+        absolute_path = str(image_path.absolute())
+        if not inline_base64:
+            return f"[CQ:image,file={absolute_path}]"
+
+        try:
+            encoded = await asyncio.to_thread(
+                lambda: base64.b64encode(image_path.read_bytes()).decode("ascii")
+            )
+        except Exception as exc:
+            logger.warning(
+                "[Stats] 图像 base64 编码失败，回退文件路径: path=%s err=%s",
+                absolute_path,
+                exc,
+            )
+            return f"[CQ:image,file={absolute_path}]"
+
+        return f"[CQ:image,file=base64://{encoded}]"
+
+    async def _run_stats_ai_analysis(
+        self,
+        *,
+        scope: str,
+        scope_id: int,
+        sender_id: int,
+        summary: dict[str, Any],
+        days: int,
+    ) -> str:
+        if not self.queue_manager:
+            return ""
+
+        data_summary = self._build_data_summary(summary, days)
+        request_id = uuid4().hex
+        analysis_event = asyncio.Event()
+        self._stats_analysis_events[request_id] = analysis_event
+        request_data = {
+            "type": "stats_analysis",
+            "group_id": scope_id,
+            "request_id": request_id,
+            "sender_id": sender_id,
+            "data_summary": data_summary,
+            "summary": summary,
+            "days": days,
+            "scope": scope,
+        }
+        await self.queue_manager.add_group_mention_request(
+            request_data, model_name=self.config.chat_model.model_name
+        )
+        logger.info("[Stats] 已投递 AI 分析请求: scope=%s target=%s", scope, scope_id)
+
+        try:
+            await asyncio.wait_for(analysis_event.wait(), timeout=480.0)
+            ai_analysis = self._stats_analysis_results.pop(request_id, "")
+            logger.info(
+                "[Stats] 已获取 AI 分析结果: scope=%s len=%s", scope, len(ai_analysis)
+            )
+            return ai_analysis
+        except asyncio.TimeoutError:
+            logger.warning("[Stats] AI 分析超时: scope=%s target=%s", scope, scope_id)
+            return "AI 分析超时，已先发送图表与汇总数据。"
+        finally:
+            self._stats_analysis_events.pop(request_id, None)
+            self._stats_analysis_results.pop(request_id, None)
 
     def _build_data_summary(self, summary: dict[str, Any], days: int) -> str:
         """构建用于 AI 分析的统计数据摘要"""
@@ -401,6 +574,15 @@ class CommandDispatcher:
             )
         return summary_text
 
+    def _build_stats_summary_text(self, summary: dict[str, Any]) -> str:
+        return f"""📈 摘要汇总:
+• 总调用次数: {summary["total_calls"]}
+• 总消耗 Tokens: {summary["total_tokens"]:,}
+  └─ 输入: {summary["prompt_tokens"]:,}
+  └─ 输出: {summary["completion_tokens"]:,}
+• 平均耗时: {summary["avg_duration"]:.2f}s
+• 涉及模型数: {len(summary["models"])}"""
+
     def set_stats_analysis_result(
         self, group_id: int, request_id: str, analysis: str
     ) -> None:
@@ -415,25 +597,6 @@ class CommandDispatcher:
             return
         self._stats_analysis_results[request_id] = analysis
         event.set()
-
-    async def _handle_stats_help(self, group_id: int) -> None:
-        """发送 stats 命令的帮助信息"""
-        help_text = """📊 /stats 命令帮助
-
-用法：
-  /stats [时间范围]
-
-时间范围格式：
-  7d  - 最近 7 天（默认）
-  1w  - 最近 1 周
-  30d - 最近 30 天
-  1m  - 最近 1 个月
-
-示例：
-  /stats        - 显示最近 7 天的统计
-  /stats 30d    - 显示最近 30 天的统计
-  /stats --help - 显示帮助信息"""
-        await self.sender.send_group_message(group_id, help_text)
 
     def _build_stats_forward_nodes(
         self,
@@ -464,14 +627,7 @@ class CommandDispatcher:
                 add_node(f"[CQ:image,file={str(img_path.absolute())}]")
 
         # 添加文本摘要
-        summary_text = f"""📈 摘要汇总:
-• 总调用次数: {summary["total_calls"]}
-• 总消耗 Tokens: {summary["total_tokens"]:,}
-  └─ 输入: {summary["prompt_tokens"]:,}
-  └─ 输出: {summary["completion_tokens"]:,}
-• 平均耗时: {summary["avg_duration"]:.2f}s
-• 涉及模型数: {len(summary["models"])}"""
-        add_node(summary_text)
+        add_node(self._build_stats_summary_text(summary))
 
         # 添加 AI 分析结果（如果有）
         if ai_analysis:
@@ -729,42 +885,119 @@ class CommandDispatcher:
     async def dispatch(
         self, group_id: int, sender_id: int, command: dict[str, Any]
     ) -> None:
-        """分发并执行具体的命令
+        await self._dispatch_internal(
+            scope="group",
+            group_id=group_id,
+            sender_id=sender_id,
+            command=command,
+            user_id=None,
+            send_private_callback=None,
+        )
 
-        参数:
-            group_id: 消息来源群组
-            sender_id: 发送者 QQ 号
-            command: 解析出的命令数据结构
-        """
+    async def dispatch_private(
+        self,
+        user_id: int,
+        sender_id: int,
+        command: dict[str, Any],
+        send_private_callback: Callable[[int, str], Awaitable[None]] | None = None,
+        is_webui_session: bool = False,
+    ) -> None:
+        await self._dispatch_internal(
+            scope="private",
+            group_id=0,
+            sender_id=sender_id,
+            command=command,
+            user_id=user_id,
+            send_private_callback=send_private_callback,
+            is_webui_session=is_webui_session,
+        )
+
+    async def _dispatch_internal(
+        self,
+        *,
+        scope: str,
+        group_id: int,
+        sender_id: int,
+        command: dict[str, Any],
+        user_id: int | None,
+        send_private_callback: Callable[[int, str], Awaitable[None]] | None,
+        is_webui_session: bool = False,
+    ) -> None:
+        """统一分发入口：支持群聊与私聊。"""
         start_time = time.perf_counter()
         cmd_name = str(command["name"])
         cmd_args = command["args"]
 
-        logger.info("[命令] 执行命令: /%s | 参数=%s", cmd_name, cmd_args)
-        logger.debug(
-            "[命令] 分发请求: group=%s sender=%s cmd=%s args_count=%s",
-            group_id,
-            sender_id,
-            cmd_name,
-            len(cmd_args),
+        if scope == "private":
+            logger.debug(
+                "[命令] 分发请求: private user=%s sender=%s cmd=%s args_count=%s",
+                user_id,
+                sender_id,
+                cmd_name,
+                len(cmd_args),
+            )
+            target_log = f"private={user_id}"
+        else:
+            logger.debug(
+                "[命令] 分发请求: group=%s sender=%s cmd=%s args_count=%s",
+                group_id,
+                sender_id,
+                cmd_name,
+                len(cmd_args),
+            )
+            target_log = f"group={group_id}"
+
+        async def _send_target_message(message: str) -> None:
+            if scope == "private":
+                if user_id is None:
+                    logger.warning("[命令] 私聊命令无法发送：user_id 为 None")
+                    return
+                target_user_id = int(user_id)
+                if send_private_callback is not None:
+                    await send_private_callback(target_user_id, message)
+                else:
+                    await self.sender.send_private_message(target_user_id, message)
+            else:
+                await self.sender.send_group_message(group_id, message)
+
+        logger.info(
+            "[命令] 执行命令: /%s | 参数=%s | %s", cmd_name, cmd_args, target_log
         )
 
+        self.command_registry.maybe_reload()
         meta = self.command_registry.resolve(cmd_name)
         if meta is None:
             logger.info("[命令] 未知命令: /%s", cmd_name)
-            await self.sender.send_group_message(
-                group_id,
-                f"❌ 未知命令: {cmd_name}\n使用 /help 查看可用命令",
+            await _send_target_message(
+                f"❌ 未知命令: {cmd_name}\n使用 /help 查看可用命令"
+            )
+            return
+
+        if scope == "private" and not meta.allow_in_private:
+            logger.info(
+                "[命令] 私聊作用域禁用: /%s user=%s",
+                meta.name,
+                user_id,
+            )
+            await _send_target_message(
+                f"⚠️ /{meta.name} 当前不支持私聊使用。请在群聊中 @机器人 后执行。"
             )
             return
 
         logger.info(
-            "[命令] 命令匹配成功: input=/%s resolved=/%s permission=%s rate_limit=%s",
+            "[命令] 命令匹配成功: input=/%s resolved=/%s permission=%s rate_limit=%s private=%s",
             cmd_name,
             meta.name,
             meta.permission,
             meta.rate_limit,
+            meta.allow_in_private,
         )
+
+        if cmd_args and cmd_args[0] == "--help":
+            await _send_target_message(
+                f"⚠️ 参数 --help 已弃用\n请使用：/help {meta.name}"
+            )
+            return
 
         allowed, role_name = self._check_command_permission(meta, sender_id)
         if not allowed:
@@ -774,36 +1007,46 @@ class CommandDispatcher:
                 sender_id,
                 role_name,
             )
-            await self._send_no_permission(group_id, sender_id, meta.name, role_name)
+            await self._send_no_permission(
+                sender_id=sender_id,
+                cmd_name=meta.name,
+                required_role=role_name,
+                send_message=_send_target_message,
+            )
             return
 
-        logger.debug(
-            "[命令] 权限校验通过: cmd=/%s sender=%s",
-            meta.name,
-            sender_id,
-        )
+        logger.debug("[命令] 权限校验通过: cmd=/%s sender=%s", meta.name, sender_id)
 
-        if not await self._check_command_rate_limit(meta, group_id, sender_id):
+        if not await self._check_command_rate_limit(
+            command_meta=meta,
+            sender_id=sender_id,
+            send_message=_send_target_message,
+        ):
             logger.warning(
-                "[命令] 速率限制拦截: cmd=/%s group=%s sender=%s",
+                "[命令] 速率限制拦截: cmd=/%s scope=%s sender=%s",
                 meta.name,
-                group_id,
+                scope,
                 sender_id,
             )
             return
 
-        logger.debug(
-            "[命令] 速率限制通过: cmd=/%s group=%s sender=%s",
-            meta.name,
-            group_id,
-            sender_id,
-        )
+        logger.debug("[命令] 速率限制通过: cmd=/%s sender=%s", meta.name, sender_id)
+
+        command_sender: Any
+        if scope == "private":
+            command_sender = _PrivateCommandSenderProxy(
+                int(user_id or 0),
+                send_private_callback
+                or (lambda uid, msg: self.sender.send_private_message(uid, msg)),
+            )
+        else:
+            command_sender = self.sender
 
         context = CommandContext(
             group_id=group_id,
             sender_id=sender_id,
             config=self.config,
-            sender=self.sender,
+            sender=command_sender,
             ai=self.ai,
             faq_storage=self.faq_storage,
             onebot=self.onebot,
@@ -812,16 +1055,15 @@ class CommandDispatcher:
             rate_limiter=self.rate_limiter,
             dispatcher=self,
             registry=self.command_registry,
+            scope=scope,
+            user_id=user_id,
+            is_webui_session=is_webui_session,
         )
 
         try:
             await self.command_registry.execute(meta, cmd_args, context)
             duration = time.perf_counter() - start_time
-            logger.info(
-                "[命令] 分发完成: cmd=/%s duration=%.3fs",
-                meta.name,
-                duration,
-            )
+            logger.info("[命令] 分发完成: cmd=/%s duration=%.3fs", meta.name, duration)
         except Exception as e:
             duration = time.perf_counter() - start_time
             error_id = uuid4().hex[:8]
@@ -837,9 +1079,8 @@ class CommandDispatcher:
                 duration,
                 error_id,
             )
-            await self.sender.send_group_message(
-                group_id,
-                f"❌ 命令执行失败，请稍后重试（错误码: {error_id}）",
+            await _send_target_message(
+                f"❌ 命令执行失败，请稍后重试（错误码: {error_id}）"
             )
 
     def _check_command_permission(
@@ -857,64 +1098,57 @@ class CommandDispatcher:
     async def _check_command_rate_limit(
         self,
         command_meta: CommandMeta,
-        group_id: int,
         sender_id: int,
+        send_message: Callable[[str], Awaitable[None]],
     ) -> bool:
         rate_limit = command_meta.rate_limit
-        if rate_limit == "none":
-            logger.debug(
-                "[命令] 命令无需限流: cmd=/%s",
+
+        # 获取 rate_limiter 实例
+        limiter = self.rate_limiter
+        if limiter is None and hasattr(self.security, "rate_limiter"):
+            limiter = self.security.rate_limiter
+
+        if limiter is None:
+            logger.warning(
+                "[命令] 限流器缺失，跳过限流: cmd=/%s",
                 command_meta.name,
             )
             return True
 
-        if rate_limit == "stats":
-            if self.rate_limiter is None:
-                logger.warning(
-                    "[命令] stats 限流器缺失，跳过限流: cmd=/%s",
-                    command_meta.name,
-                )
-                return True
-            allowed, remaining = self.rate_limiter.check_stats(sender_id)
-            if not allowed:
+        allowed, remaining = limiter.check_command(
+            sender_id, command_meta.name, rate_limit
+        )
+        if not allowed:
+            if remaining >= 60:
                 minutes = remaining // 60
                 seconds = remaining % 60
                 time_str = f"{minutes}分{seconds}秒" if minutes > 0 else f"{seconds}秒"
-                await self.sender.send_group_message(
-                    group_id,
-                    f"⏳ /stats 命令太频繁，请 {time_str}后再试",
-                )
-                return False
-            self.rate_limiter.record_stats(sender_id)
-            logger.debug(
-                "[命令] stats 限流记录成功: cmd=/%s sender=%s",
-                command_meta.name,
-                sender_id,
-            )
-            return True
+            else:
+                time_str = f"{remaining}秒"
 
-        allowed, remaining = self.security.check_rate_limit(sender_id)
-        if not allowed:
-            await self.sender.send_group_message(
-                group_id,
-                f"⏳ 操作太频繁，请 {remaining} 秒后再试",
+            await send_message(
+                f"⏳ /{command_meta.name} 命令太频繁，请 {time_str}后再试"
             )
             return False
-        self.security.record_rate_limit(sender_id)
+
+        limiter.record_command(sender_id, command_meta.name, rate_limit)
         logger.debug(
-            "[命令] 默认限流记录成功: cmd=/%s sender=%s",
+            "[命令] 动态限流记录成功: cmd=/%s sender=%s limits=%s",
             command_meta.name,
             sender_id,
+            f"U:{rate_limit.user}/A:{rate_limit.admin}",
         )
         return True
 
     async def _send_no_permission(
-        self, group_id: int, sender_id: int, cmd_name: str, required_role: str
+        self,
+        sender_id: int,
+        cmd_name: str,
+        required_role: str,
+        send_message: Callable[[str], Awaitable[None]],
     ) -> None:
         logger.warning("[命令] 权限不足: sender=%s cmd=/%s", sender_id, cmd_name)
-        await self.sender.send_group_message(
-            group_id, f"⚠️ 权限不足：只有{required_role}可以使用此命令"
-        )
+        await send_message(f"⚠️ 权限不足：只有{required_role}可以使用此命令")
 
     async def _handle_bugfix(
         self, group_id: int, admin_id: int, args: list[str]

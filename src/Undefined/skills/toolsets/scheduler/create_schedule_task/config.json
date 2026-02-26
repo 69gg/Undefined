@@ -1,1 +1,68 @@
-{"type": "function", "function": {"name": "create_schedule_task", "description": "创建一个定时执行的任务。支持 crontab 语法。可以指定要调用的工具及其参数、执行次数限制。支持单工具和多工具（串行/并行）模式。", "parameters": {"type": "object", "properties": {"task_name": {"type": "string", "description": "任务名称（用于标识，建议使用有意义的名称）"}, "cron_expression": {"type": "string", "description": "crontab 表达式 (分 时 日 月 周)。例如 '* * * * *' 表示每分钟执行，'30 8 * * *' 表示每天 8:30 执行。"}, "tool_name": {"type": "string", "description": "要定时调用的工具名称，例如 'get_current_time', 'send_message' 等。（单工具模式，与 tools 二选一）"}, "tool_args": {"type": "object", "description": "调用工具时传递的参数对象 (JSON)。（单工具模式）"}, "tools": {"type": "array", "description": "多工具调用列表，每个元素包含 tool_name 和 tool_args。（多工具模式，与 tool_name 二选一）", "items": {"type": "object", "properties": {"tool_name": {"type": "string", "description": "工具名称"}, "tool_args": {"type": "object", "description": "工具参数"}}, "required": ["tool_name", "tool_args"]}}, "execution_mode": {"type": "string", "description": "执行模式，仅在多工具模式下有效。'serial' 串行执行（默认），'parallel' 并行执行。", "enum": ["serial", "parallel"]}, "max_executions": {"type": "integer", "description": "最大执行次数（可选）。设置为 1 表示执行一次后自动删除，设置为 N 表示执行 N 次后自动删除，不设置则无限执行。"}}, "required": ["cron_expression"]}}}
+{
+    "type": "function",
+    "function": {
+        "name": "create_schedule_task",
+        "description": "创建一个定时执行的任务。支持 crontab 语法。支持三种模式：单工具、多工具（串行/并行）、调用未来的自己（self_instruction）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_name": {
+                    "type": "string",
+                    "description": "任务名称（用于标识，建议使用有意义的名称）"
+                },
+                "cron_expression": {
+                    "type": "string",
+                    "description": "crontab 表达式 (分 时 日 月 周)。例如 '* * * * *' 表示每分钟执行，'30 8 * * *' 表示每天 8:30 执行。"
+                },
+                "tool_name": {
+                    "type": "string",
+                    "description": "要定时调用的工具名称（单工具模式，与 tools / self_instruction 三选一）。"
+                },
+                "tool_args": {
+                    "type": "object",
+                    "description": "调用工具时传递的参数对象 (JSON)。（单工具模式）"
+                },
+                "tools": {
+                    "type": "array",
+                    "description": "多工具调用列表，每个元素包含 tool_name 和 tool_args。（多工具模式，与 tool_name / self_instruction 三选一）",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tool_name": {
+                                "type": "string",
+                                "description": "工具名称"
+                            },
+                            "tool_args": {
+                                "type": "object",
+                                "description": "工具参数"
+                            }
+                        },
+                        "required": [
+                            "tool_name",
+                            "tool_args"
+                        ]
+                    }
+                },
+                "self_instruction": {
+                    "type": "string",
+                    "description": "调用未来自己的指令文本（调用自己模式，与 tool_name / tools 三选一）。例如：'明天 9 点总结今天群里提到的待办并提醒我。'"
+                },
+                "execution_mode": {
+                    "type": "string",
+                    "description": "执行模式，仅在多工具模式下有效。'serial' 串行执行（默认），'parallel' 并行执行。",
+                    "enum": [
+                        "serial",
+                        "parallel"
+                    ]
+                },
+                "max_executions": {
+                    "type": "integer",
+                    "description": "最大执行次数（可选）。设置为 1 表示执行一次后自动删除，设置为 N 表示执行 N 次后自动删除，不设置则无限执行。"
+                }
+            },
+            "required": [
+                "cron_expression"
+            ]
+        }
+    }
+}

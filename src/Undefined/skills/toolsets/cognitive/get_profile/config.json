@@ -1,0 +1,15 @@
+{
+  "type": "function",
+  "function": {
+    "name": "get_profile",
+    "description": "获取认知记忆中的用户或群聊侧写信息。该工具是检索用途，不用于手动写入长期事实；手动长期事实请使用 memory.add。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "entity_type": { "type": "string", "enum": ["user", "group"], "description": "实体类型" },
+        "entity_id": { "type": "string", "description": "用户ID或群ID" }
+      },
+      "required": ["entity_type", "entity_id"]
+    }
+  }
+}

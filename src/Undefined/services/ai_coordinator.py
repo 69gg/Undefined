@@ -229,6 +229,8 @@ class AICoordinator:
             await self._execute_stats_analysis(request)
         elif req_type == "agent_intro_generation":
             await self._execute_agent_intro_generation(request)
+        elif req_type == "background_llm_call":
+            await self._execute_background_llm_call(request)
 
     async def _execute_auto_reply(self, request: dict[str, Any]) -> None:
         group_id = request["group_id"]
@@ -499,6 +501,27 @@ class AICoordinator:
                 self.command_dispatcher.set_stats_analysis_result(
                     group_id, request_id, ""
                 )
+
+    async def _execute_background_llm_call(self, request: dict[str, Any]) -> None:
+        """执行后台 LLM 调用。成功时回调结果；失败时若重试未耗尽则交由 QueueManager 重试，
+        否则回调异常让调用方立即感知。"""
+        request_id = request.get("request_id", "")
+        try:
+            result = await self.ai.request_model(
+                model_config=request["model_config"],
+                messages=request["messages"],
+                tools=request.get("tools"),
+                tool_choice=request.get("tool_choice", "auto"),
+                call_type=request.get("call_type", "background"),
+                max_tokens=request.get("max_tokens")
+                or getattr(request["model_config"], "max_tokens", 4096),
+            )
+            self.ai.set_llm_call_result(request_id, result)
+        except Exception as exc:
+            retry_count = request.get("_retry_count", 0)
+            if retry_count >= self.config.ai_request_max_retries:
+                self.ai.set_llm_call_result(request_id, exc)
+            raise
 
     async def _execute_agent_intro_generation(self, request: dict[str, Any]) -> None:
         """执行 Agent 自我介绍生成请求"""

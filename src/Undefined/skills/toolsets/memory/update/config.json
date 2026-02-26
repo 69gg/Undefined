@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "update",
-        "description": "更新一条已有的记忆。需要提供该记忆的 UUID。",
+        "description": "更新一条手动长期记忆（memory 系列）。需要提供该记忆的 UUID。仅作用于 memory.* 清单，不作用于认知记忆事件/侧写。",
         "parameters": {
             "type": "object",
             "properties": {

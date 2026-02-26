@@ -1,6 +1,7 @@
 from collections import deque
 from typing import Any, Dict
 import logging
+import re
 
 from Undefined.context import RequestContext
 from Undefined.end_summary_storage import (
@@ -12,15 +13,54 @@ from Undefined.end_summary_storage import (
 
 logger = logging.getLogger(__name__)
 
+_TRUE_BOOL_TOKENS = {"1", "true", "yes", "y", "on"}
+_FALSE_BOOL_TOKENS = {"0", "false", "no", "n", "off", ""}
+_CONTENT_TAG_RE = re.compile(
+    r"<message\b[^>]*>\s*<content>(?P<content>.*?)</content>\s*</message>",
+    re.DOTALL | re.IGNORECASE,
+)
+_DEFAULT_HISTORIAN_TEXT_LEN = 800
+_DEFAULT_HISTORIAN_LINES = 12
+_DEFAULT_HISTORIAN_LINE_LEN = 240
+_MIN_HISTORIAN_TEXT_LEN = 16
+_MAX_HISTORIAN_TEXT_LEN = 4000
+_MIN_HISTORIAN_LINES = 0
+_MAX_HISTORIAN_LINES = 50
+_MIN_HISTORIAN_LINE_LEN = 16
+_MAX_HISTORIAN_LINE_LEN = 1000
 
-def _parse_force_flag(value: Any) -> bool:
-    """force 仅接受布尔值，其他类型一律视为 False。"""
-    return value if isinstance(value, bool) else False
+
+def _coerce_bool(value: Any) -> tuple[bool, bool]:
+    """宽松布尔解析。
+
+    返回:
+        (parsed_value, recognized)
+    """
+    if isinstance(value, bool):
+        return value, True
+
+    if isinstance(value, int):
+        return value != 0, True
+
+    if isinstance(value, str):
+        token = value.strip().lower()
+        if token in _TRUE_BOOL_TOKENS:
+            return True, True
+        if token in _FALSE_BOOL_TOKENS:
+            return False, True
+
+    return False, False
+
+
+def _parse_force_flag(value: Any) -> tuple[bool, bool]:
+    """force 支持宽松布尔解析（字符串大小写、0/1 等）。"""
+    return _coerce_bool(value)
 
 
 def _is_true_flag(value: Any) -> bool:
-    """上下文标记仅接受布尔 True。"""
-    return isinstance(value, bool) and value
+    """上下文标记采用宽松布尔解析。"""
+    parsed, _recognized = _coerce_bool(value)
+    return parsed
 
 
 def _was_message_sent_this_turn(context: Dict[str, Any]) -> bool:
@@ -31,6 +71,145 @@ def _was_message_sent_this_turn(context: Dict[str, Any]) -> bool:
     if ctx is None:
         return False
     return _is_true_flag(ctx.get_resource("message_sent_this_turn", False))
+
+
+def _clip_text(value: Any, max_len: int) -> str:
+    text = str(value or "").strip()
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 3].rstrip() + "..."
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _clamp_int(value: int, min_value: int, max_value: int) -> int:
+    if value < min_value:
+        return min_value
+    if value > max_value:
+        return max_value
+    return value
+
+
+def _resolve_historian_limits(context: Dict[str, Any]) -> tuple[int, int, int]:
+    max_source_len = _DEFAULT_HISTORIAN_TEXT_LEN
+    recent_k = _DEFAULT_HISTORIAN_LINES
+    max_recent_line_len = _DEFAULT_HISTORIAN_LINE_LEN
+
+    runtime_config = context.get("runtime_config")
+    cognitive = getattr(runtime_config, "cognitive", None) if runtime_config else None
+    if cognitive is not None:
+        max_source_len = _safe_int(
+            getattr(cognitive, "historian_source_message_max_len", max_source_len),
+            max_source_len,
+        )
+        recent_k = _safe_int(
+            getattr(cognitive, "historian_recent_messages_inject_k", recent_k),
+            recent_k,
+        )
+        max_recent_line_len = _safe_int(
+            getattr(
+                cognitive, "historian_recent_message_line_max_len", max_recent_line_len
+            ),
+            max_recent_line_len,
+        )
+
+    max_source_len = _clamp_int(
+        max_source_len, _MIN_HISTORIAN_TEXT_LEN, _MAX_HISTORIAN_TEXT_LEN
+    )
+    recent_k = _clamp_int(recent_k, _MIN_HISTORIAN_LINES, _MAX_HISTORIAN_LINES)
+    max_recent_line_len = _clamp_int(
+        max_recent_line_len, _MIN_HISTORIAN_LINE_LEN, _MAX_HISTORIAN_LINE_LEN
+    )
+    return max_source_len, recent_k, max_recent_line_len
+
+
+def _extract_current_content_from_question(question: str, *, max_len: int) -> str:
+    text = str(question or "").strip()
+    if not text:
+        return ""
+    matched = _CONTENT_TAG_RE.search(text)
+    if matched:
+        return _clip_text(matched.group("content"), max_len)
+    return _clip_text(text, max_len)
+
+
+def _build_historian_recent_messages(
+    context: Dict[str, Any], *, recent_k: int, max_line_len: int
+) -> list[str]:
+    if recent_k <= 0:
+        return []
+
+    history_manager = context.get("history_manager")
+    if history_manager is None or not hasattr(history_manager, "get_recent"):
+        return []
+
+    request_type = str(context.get("request_type") or "").strip().lower()
+    if request_type == "group":
+        chat_id = str(context.get("group_id") or "").strip()
+        msg_type = "group"
+    elif request_type == "private":
+        chat_id = str(context.get("user_id") or context.get("sender_id") or "").strip()
+        msg_type = "private"
+    else:
+        return []
+
+    if not chat_id:
+        return []
+
+    try:
+        recent = history_manager.get_recent(chat_id, msg_type, 0, recent_k)
+    except Exception as exc:
+        logger.warning(
+            "[end工具] 获取近期历史失败: chat=%s type=%s err=%s", chat_id, msg_type, exc
+        )
+        return []
+
+    if not isinstance(recent, list):
+        return []
+
+    lines: list[str] = []
+    for msg in recent:
+        if not isinstance(msg, dict):
+            continue
+        timestamp = str(msg.get("timestamp", "")).strip()
+        display_name = str(msg.get("display_name", "")).strip()
+        user_id = str(msg.get("user_id", "")).strip()
+        message_text = _clip_text(msg.get("message", ""), max_line_len)
+        if not message_text:
+            continue
+        who = display_name or (f"UID:{user_id}" if user_id else "未知用户")
+        if user_id:
+            who = f"{who}({user_id})"
+        if timestamp:
+            lines.append(f"[{timestamp}] {who}: {message_text}")
+        else:
+            lines.append(f"{who}: {message_text}")
+    return lines[-recent_k:]
+
+
+def _inject_historian_reference_context(context: Dict[str, Any]) -> None:
+    max_source_len, recent_k, max_recent_line_len = _resolve_historian_limits(context)
+    current_question = str(context.get("current_question") or "").strip()
+    source_message = _extract_current_content_from_question(
+        current_question, max_len=max_source_len
+    )
+    if source_message:
+        context["historian_source_message"] = source_message
+    elif current_question:
+        context["historian_source_message"] = _clip_text(
+            current_question, max_source_len
+        )
+
+    recent_lines = _build_historian_recent_messages(
+        context, recent_k=recent_k, max_line_len=max_recent_line_len
+    )
+    if recent_lines:
+        context["historian_recent_messages"] = recent_lines
 
 
 def _build_location(context: Dict[str, Any]) -> EndSummaryLocation | None:
@@ -58,30 +237,51 @@ def _build_location(context: Dict[str, Any]) -> EndSummaryLocation | None:
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
-    summary_raw = args.get("summary", "")
-    summary = summary_raw.strip() if isinstance(summary_raw, str) else ""
+    # memo 优先新名，fallback 旧名 action_summary 和 summary
+    memo_raw = (
+        args.get("memo")
+        if "memo" in args
+        else (args.get("action_summary") or args.get("summary", ""))
+    )
+    memo = memo_raw.strip() if isinstance(memo_raw, str) else ""
+    # observations 优先新名，fallback 旧名 new_info
+    observations_raw = (
+        args.get("observations") if "observations" in args else args.get("new_info", [])
+    )
+    if isinstance(observations_raw, str):
+        observations = [observations_raw.strip()] if observations_raw.strip() else []
+    elif isinstance(observations_raw, list):
+        observations = [
+            str(item).strip() for item in observations_raw if str(item).strip()
+        ]
+    else:
+        observations = []
+    perspective_raw = args.get("perspective", "")
+    perspective = perspective_raw.strip() if isinstance(perspective_raw, str) else ""
+    # 兼容旧版 summary 字段
+    summary = memo
     force_raw = args.get("force", False)
-    force = _parse_force_flag(force_raw)
-    if "force" in args and not isinstance(force_raw, bool):
+    force, force_recognized = _parse_force_flag(force_raw)
+    if "force" in args and not force_recognized:
         logger.warning(
-            "[end工具] force 参数类型非法，已按 False 处理: type=%s request_id=%s",
+            "[end工具] force 参数无法识别，已按 False 处理: value=%r type=%s request_id=%s",
+            force_raw,
             type(force_raw).__name__,
             context.get("request_id", "-"),
         )
 
-    # 检查：如果有 summary 但本轮未发送消息，且未强制执行，则拒绝
-    if summary and not force:
-        message_sent = _was_message_sent_this_turn(context)
-        if not message_sent:
-            logger.warning(
-                "[end工具] 拒绝执行：有 summary 但本轮未发送消息，request_id=%s",
-                context.get("request_id", "-"),
-            )
-            return (
-                "拒绝结束对话：你记录了 summary 但本轮未发送任何消息或媒体内容。"
-                "请先发送消息给用户，或者如果确实不需要发送，请使用 force=true 参数强制结束。"
-                "如果你本轮没有做任何事，若无必要，建议不加summary参数，避免记忆噪声。"
-            )
+    # memo 非空且本轮未发送消息时拒绝（force=true 可跳过）
+    if summary and not force and not _was_message_sent_this_turn(context):
+        logger.warning(
+            "[end工具] 拒绝执行：本轮未发送消息，request_id=%s",
+            context.get("request_id", "-"),
+        )
+        return (
+            "拒绝结束对话：你填写了 memo（本轮行动备忘）但本轮未发送任何消息或媒体内容。"
+            "请先发送消息给用户，或使用 force=true 强制结束。"
+            "若本轮确实未做任何事，建议留空 memo 以避免记忆噪声。当然，你要存也没关系。这只是个提示，防止你忘了。"
+            "若你获取到了新信息，考虑填写 observations 字段以保存这些信息，而不是放在 memo 里。"
+        )
 
     if summary:
         location = _build_location(context)
@@ -112,6 +312,24 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 )
 
         logger.info("保存end记录: %s...", summary[:50])
+    else:
+        logger.info("[end工具] memo 为空，跳过 end 摘要写入")
+
+    # 若 cognitive 启用，入队 memory_job
+    cognitive_service = context.get("cognitive_service")
+    if perspective:
+        context["memory_perspective"] = perspective
+    if cognitive_service and (memo or observations):
+        _inject_historian_reference_context(context)
+        job_id = await cognitive_service.enqueue_job(
+            memo=memo,
+            observations=observations,
+            context=context,
+            force=force,
+        )
+        logger.info("[end工具] 认知记忆任务已提交: job_id=%s", job_id or "")
+    elif cognitive_service:
+        logger.info("[end工具] 记忆字段均为空，跳过认知入队")
 
     # 通知调用方对话应结束
     context["conversation_ended"] = True

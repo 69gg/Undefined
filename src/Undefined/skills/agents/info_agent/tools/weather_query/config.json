@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "weather_query",
-        "description": "查询指定城市的天气实况、未来预报或生活指数（如穿衣、洗车、运动建议等）。",
+        "description": "查询指定城市的天气实况或未来预报。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -12,8 +12,8 @@
                 },
                 "query_type": {
                     "type": "string",
-                    "enum": ["now", "forecast", "life"],
-                    "description": "查询类型: 'now'(实况天气, 默认), 'forecast'(未来天气预报), 'life'(生活指数/建议)。"
+                    "enum": ["now", "forecast"],
+                    "description": "查询类型: 'now'(实况天气, 默认), 'forecast'(未来天气预报)。"
                 }
             },
             "required": ["location"]

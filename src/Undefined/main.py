@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 import sys
+from typing import Any
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from Undefined.memory import MemoryStorage
 from Undefined.scheduled_task_storage import ScheduledTaskStorage
 from Undefined.end_summary_storage import EndSummaryStorage
 from Undefined.onebot import OneBotClient
+from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
 from Undefined.token_usage_storage import TokenUsageStorage
 from Undefined.utils.paths import (
     CACHE_DIR,
@@ -184,6 +186,12 @@ async def main() -> None:
 
     # 初始化组件
     logger.info("[初始化] 正在加载核心组件...")
+    cognitive_service = None
+    historian_worker = None
+    job_queue = None
+    retrieval_runtime = None
+    runtime_api_server: RuntimeAPIServer | None = None
+    _reranker: Any = None
     try:
         init_start = time.perf_counter()
         onebot = OneBotClient(config.onebot_ws_url, config.onebot_token)
@@ -200,9 +208,49 @@ async def main() -> None:
             runtime_config=config,
         )
         faq_storage = FAQStorage()
+        from Undefined.knowledge import RetrievalRuntime
+
+        retrieval_runtime = RetrievalRuntime(
+            ai._requester,
+            config.embedding_model,
+            config.rerank_model,
+            embed_batch_size=config.knowledge_embed_batch_size,
+        )
+
+        # === Cognitive Memory ===
+        cognitive_actually_enabled = config.cognitive.enabled
+        if cognitive_actually_enabled and (
+            not config.embedding_model.api_url or not config.embedding_model.model_name
+        ):
+            logger.warning(
+                "[认知记忆] cognitive.enabled=true 但 models.embedding 未配置，自动降级禁用"
+            )
+            cognitive_actually_enabled = False
+
+        cognitive_enable_rerank = bool(getattr(config.cognitive, "enable_rerank", True))
+        need_reranker_for_knowledge = bool(
+            config.knowledge_enabled and config.knowledge_enable_rerank
+        )
+        need_reranker_for_cognitive = bool(
+            cognitive_actually_enabled and cognitive_enable_rerank
+        )
+        need_shared_reranker = (
+            need_reranker_for_knowledge or need_reranker_for_cognitive
+        )
+        if need_shared_reranker:
+            _reranker = retrieval_runtime.ensure_reranker()
+            if _reranker is None:
+                if need_reranker_for_knowledge:
+                    logger.warning(
+                        "[知识库] 已启用重排，但 models.rerank 未配置完整，重排将自动禁用"
+                    )
+                if need_reranker_for_cognitive:
+                    logger.warning(
+                        "[认知记忆] 已启用重排，但 models.rerank 未配置完整，重排将自动禁用"
+                    )
 
         if config.knowledge_enabled:
-            from Undefined.knowledge import Embedder, KnowledgeManager, Reranker
+            from Undefined.knowledge import KnowledgeManager
 
             if (
                 not config.embedding_model.api_url
@@ -212,33 +260,14 @@ async def main() -> None:
                     "知识库已启用，但 models.embedding.api_url / model_name 未配置完整"
                 )
 
-            _embedder = Embedder(
-                ai._requester,
-                config.embedding_model,
-                batch_size=config.knowledge_embed_batch_size,
-            )
-            _embedder.start()
-            _reranker: Reranker | None = None
-            if (
-                config.rerank_model.api_url
-                and config.rerank_model.model_name
-                and config.knowledge_enable_rerank
-            ):
-                _reranker = Reranker(ai._requester, config.rerank_model)
-                _reranker.start()
-            elif config.knowledge_enable_rerank:
-                logger.warning(
-                    "[知识库] 已启用重排，但 models.rerank 未配置完整，重排将自动禁用"
-                )
             knowledge_manager = KnowledgeManager(
                 base_dir=config.knowledge_base_dir,
-                embedder=_embedder,
-                reranker=_reranker,
                 default_top_k=config.knowledge_default_top_k,
                 chunk_size=config.knowledge_chunk_size,
                 chunk_overlap=config.knowledge_chunk_overlap,
                 rerank_enabled=config.knowledge_enable_rerank,
                 rerank_top_k=config.knowledge_rerank_top_k,
+                retrieval_runtime=retrieval_runtime,
             )
             ai.set_knowledge_manager(knowledge_manager)
             if config.knowledge_auto_scan and config.knowledge_auto_embed:
@@ -246,6 +275,63 @@ async def main() -> None:
             elif config.knowledge_auto_embed:
                 knowledge_manager.start_initial_scan()
             logger.info("[知识库] 初始化完成: base_dir=%s", config.knowledge_base_dir)
+
+        if cognitive_actually_enabled:
+            from Undefined.cognitive import (
+                CognitiveVectorStore,
+                JobQueue,
+                ProfileStorage,
+                CognitiveService,
+                HistorianWorker,
+            )
+
+            _cog_chroma = Path(config.cognitive.vector_store_path)
+            _cog_queues = Path(config.cognitive.queue_path)
+            _cog_profiles = Path(config.cognitive.profiles_path)
+
+            for _cog_dir in (
+                _cog_chroma,
+                _cog_queues / "pending",
+                _cog_queues / "processing",
+                _cog_queues / "failed",
+                _cog_profiles / "users",
+                _cog_profiles / "groups",
+                _cog_profiles / "history",
+            ):
+                ensure_dir(_cog_dir)
+
+            vector_store = CognitiveVectorStore(
+                str(_cog_chroma),
+                retrieval_runtime,
+            )
+            job_queue = JobQueue(str(_cog_queues))
+            profile_storage = ProfileStorage(
+                str(_cog_profiles),
+                revision_keep=config.cognitive.profile_revision_keep,
+            )
+            cognitive_service = CognitiveService(
+                config_getter=lambda: get_config(strict=False).cognitive,
+                vector_store=vector_store,
+                job_queue=job_queue,
+                profile_storage=profile_storage,
+                retrieval_runtime=retrieval_runtime,
+            )
+            historian_worker = HistorianWorker(
+                job_queue=job_queue,
+                vector_store=vector_store,
+                profile_storage=profile_storage,
+                ai_client=ai,
+                config_getter=lambda: get_config(strict=False).cognitive,
+                model_config=config.historian_model,
+            )
+            ai.set_cognitive_service(cognitive_service)
+            logger.info(
+                "[认知记忆] 初始化完成: chroma_dir=%s queue_dir=%s profiles_dir=%s revision_keep=%s",
+                str(_cog_chroma),
+                str(_cog_queues),
+                str(_cog_profiles),
+                config.cognitive.profile_revision_keep,
+            )
 
         handler = MessageHandler(config, onebot, ai, faq_storage, task_storage)
         onebot.set_message_handler(handler.handle_message)
@@ -273,6 +359,18 @@ async def main() -> None:
 
     logger.info("[启动] 机器人已准备就绪，开始连接 OneBot 服务...")
 
+    if historian_worker and job_queue:
+        recovered = await job_queue.recover_stale(
+            timeout_seconds=config.cognitive.stale_job_timeout_seconds
+        )
+        logger.info(
+            "[认知记忆] 启动前陈旧任务恢复完成: recovered=%s timeout_seconds=%s",
+            recovered,
+            config.cognitive.stale_job_timeout_seconds,
+        )
+        await historian_worker.start()
+        logger.info("[认知记忆] 史官后台任务已启动")
+
     config_manager = get_config_manager()
     config_manager.load(strict=True)
 
@@ -298,6 +396,36 @@ async def main() -> None:
         config.skills_hot_reload_debounce,
     )
 
+    if config.api.enabled:
+        runtime_api_context = RuntimeAPIContext(
+            config_getter=lambda: get_config(strict=False),
+            onebot=onebot,
+            ai=ai,
+            command_dispatcher=handler.command_dispatcher,
+            queue_manager=handler.queue_manager,
+            history_manager=handler.history_manager,
+            sender=handler.sender,
+            scheduler=handler.ai_coordinator.scheduler,
+            cognitive_service=cognitive_service,
+            cognitive_job_queue=job_queue,
+        )
+        runtime_api_server = RuntimeAPIServer(
+            runtime_api_context,
+            host=config.api.host,
+            port=config.api.port,
+        )
+        try:
+            await runtime_api_server.start()
+            if config.api.auth_key == "changeme":
+                logger.warning(
+                    "[RuntimeAPI] 当前仍使用默认鉴权密钥 changeme，请尽快修改 [api].auth_key"
+                )
+        except Exception as exc:
+            runtime_api_server = None
+            logger.exception("[RuntimeAPI] 启动失败，已跳过: %s", exc)
+    else:
+        logger.info("[RuntimeAPI] 已禁用（api.enabled=false）")
+
     try:
         await onebot.run_with_reconnect()
     except KeyboardInterrupt:
@@ -306,8 +434,14 @@ async def main() -> None:
         logger.exception("[异常] 运行期间发生未捕获的错误: %s", exc)
     finally:
         logger.info("[清理] 正在关闭机器人并释放资源...")
+        if runtime_api_server is not None:
+            await runtime_api_server.stop()
+        if historian_worker:
+            await historian_worker.stop()
         await onebot.disconnect()
         await ai.close()
+        if retrieval_runtime is not None:
+            await retrieval_runtime.stop()
         await config_manager.stop_hot_reload()
         logger.info("[退出] 机器人已停止运行")
 

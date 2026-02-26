@@ -1,0 +1,21 @@
+{
+  "name": "help",
+  "description": "显示命令列表或命令详细帮助",
+  "usage": "/help [命令名]",
+  "example": "/help stats",
+  "permission": "public",
+  "rate_limit": {
+    "user": 0,
+    "admin": 0,
+    "superadmin": 0
+  },
+  "show_in_help": true,
+  "order": 10,
+  "allow_in_private": true,
+  "aliases": [],
+  "help_footer": [
+    "查看详细帮助：/help <command>",
+    "详细版权与免责声明：/cprt",
+    "Copyright (c) 2025 Null <pylindex@qq.com>. Licensed under the MIT License."
+  ]
+}

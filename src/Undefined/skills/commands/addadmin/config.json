@@ -1,0 +1,16 @@
+{
+  "name": "addadmin",
+  "description": "添加管理员（仅超级管理员）",
+  "usage": "/addadmin <QQ号>",
+  "example": "/addadmin 123456789",
+  "permission": "superadmin",
+  "rate_limit": {
+    "user": 0,
+    "admin": 0,
+    "superadmin": 0
+  },
+  "show_in_help": true,
+  "order": 80,
+  "allow_in_private": true,
+  "aliases": []
+}

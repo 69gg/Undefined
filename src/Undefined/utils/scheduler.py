@@ -23,6 +23,7 @@ from Undefined.utils import io
 logger = logging.getLogger(__name__)
 
 CONTEXT_DIR = Path("data/scheduler_context")
+SELF_CALL_TOOL_NAME = "scheduler.call_self"
 
 
 class TaskScheduler:
@@ -108,6 +109,7 @@ class TaskScheduler:
         max_executions: int | None = None,
         tools: list[dict[str, Any]] | None = None,
         execution_mode: str = "serial",
+        self_instruction: str | None = None,
     ) -> bool:
         """添加定时任务
 
@@ -122,6 +124,7 @@ class TaskScheduler:
             max_executions: 最大执行次数（None 表示无限）
             tools: 多工具调用列表，格式为 [{"tool_name": "...", "tool_args": {...}}, ...]
             execution_mode: 执行模式，"serial" 串行执行，"parallel" 并行执行
+            self_instruction: 面向未来自己的指令文本（可选）
 
         返回:
             是否添加成功
@@ -151,6 +154,23 @@ class TaskScheduler:
                 "current_executions": 0,
                 "context_id": context_id,
             }
+
+            resolved_self_instruction = str(self_instruction or "").strip() or None
+            if resolved_self_instruction is None and tool_name == SELF_CALL_TOOL_NAME:
+                prompt = str(tool_args.get("prompt", "")).strip()
+                if prompt:
+                    resolved_self_instruction = prompt
+            if (
+                resolved_self_instruction is None
+                and tools
+                and len(tools) == 1
+                and tools[0].get("tool_name") == SELF_CALL_TOOL_NAME
+            ):
+                prompt = str(tools[0].get("tool_args", {}).get("prompt", "")).strip()
+                if prompt:
+                    resolved_self_instruction = prompt
+            if resolved_self_instruction is not None:
+                task_data["self_instruction"] = resolved_self_instruction
 
             # 添加多工具支持
             if tools:
@@ -182,6 +202,7 @@ class TaskScheduler:
         max_executions: int | None = None,
         tools: list[dict[str, Any]] | None = None,
         execution_mode: str | None = None,
+        self_instruction: str | None = None,
     ) -> bool:
         """修改定时任务（不支持修改 task_id）
 
@@ -194,6 +215,7 @@ class TaskScheduler:
             max_executions: 新的最大执行次数
             tools: 新的多工具调用列表（多工具模式）
             execution_mode: 新的执行模式（"serial" 或 "parallel"）
+            self_instruction: 新的面向未来自己的指令文本（可选）
 
         返回:
             是否修改成功
@@ -217,9 +239,15 @@ class TaskScheduler:
                 # 如果修改了 tool_name，清除 tools 字段以避免冲突
                 if "tools" in task_info:
                     del task_info["tools"]
+                if tool_name != SELF_CALL_TOOL_NAME:
+                    task_info.pop("self_instruction", None)
 
             if tool_args is not None:
                 task_info["tool_args"] = tool_args
+                if task_info.get("tool_name") == SELF_CALL_TOOL_NAME:
+                    prompt = str(tool_args.get("prompt", "")).strip()
+                    if prompt:
+                        task_info["self_instruction"] = prompt
 
             if task_name is not None:
                 task_info["task_name"] = task_name
@@ -233,9 +261,33 @@ class TaskScheduler:
                 if tools:
                     task_info["tool_name"] = tools[0]["tool_name"]
                     task_info["tool_args"] = tools[0]["tool_args"]
+                    if (
+                        len(tools) == 1
+                        and tools[0].get("tool_name") == SELF_CALL_TOOL_NAME
+                    ):
+                        prompt = str(
+                            tools[0].get("tool_args", {}).get("prompt", "")
+                        ).strip()
+                        if prompt:
+                            task_info["self_instruction"] = prompt
+                    else:
+                        task_info.pop("self_instruction", None)
+                else:
+                    task_info.pop("self_instruction", None)
 
             if execution_mode is not None:
                 task_info["execution_mode"] = execution_mode
+
+            if self_instruction is not None:
+                prompt = str(self_instruction).strip()
+                if prompt:
+                    task_info["self_instruction"] = prompt
+                    task_info["tool_name"] = SELF_CALL_TOOL_NAME
+                    task_info["tool_args"] = {"prompt": prompt}
+                    task_info.pop("tools", None)
+                    task_info["execution_mode"] = "serial"
+                else:
+                    task_info.pop("self_instruction", None)
 
             if new_context_id:
                 task_info["context_id"] = new_context_id
@@ -308,6 +360,9 @@ class TaskScheduler:
         tool_context: dict[str, Any],
     ) -> Any:
         """执行工具（兼容多版本 AIClient 接口）"""
+        if tool_name == SELF_CALL_TOOL_NAME:
+            return await self._execute_self_call(tool_args, tool_context)
+
         ai_client: Any = self.ai
         tool_manager = getattr(ai_client, "tool_manager", None)
         if tool_manager is not None and hasattr(tool_manager, "execute_tool"):
@@ -333,6 +388,62 @@ class TaskScheduler:
             ",".join(available) or "none",
         )
         raise AttributeError("AIClient missing tool execution method")
+
+    async def _execute_self_call(
+        self,
+        tool_args: dict[str, Any],
+        tool_context: dict[str, Any],
+    ) -> str:
+        """执行定时任务中的“调用自己”逻辑。"""
+        prompt = str(tool_args.get("prompt", "")).strip()
+        if not prompt:
+            raise ValueError("self_instruction 不能为空")
+
+        send_message_callback = tool_context.get("send_message_callback")
+        get_recent_messages_callback = tool_context.get("get_recent_messages_callback")
+        get_image_url_callback = tool_context.get("get_image_url_callback")
+        get_forward_msg_callback = tool_context.get("get_forward_msg_callback")
+        send_like_callback = tool_context.get("send_like_callback")
+        sender = tool_context.get("sender")
+        history_manager = tool_context.get("history_manager")
+        onebot_client = tool_context.get("onebot_client")
+        task_id = tool_context.get("scheduled_task_id")
+        task_name = tool_context.get("scheduled_task_name")
+
+        extra_context: dict[str, Any] = {
+            "scheduled_self_call": True,
+        }
+        if task_id:
+            extra_context["scheduled_task_id"] = task_id
+        if task_name:
+            extra_context["scheduled_task_name"] = task_name
+
+        logger.info(
+            "[任务调度] 触发调用自己: task_id=%s task_name=%s prompt_len=%s",
+            task_id,
+            task_name or "",
+            len(prompt),
+        )
+
+        result = await self.ai.ask(
+            prompt,
+            send_message_callback=send_message_callback,
+            get_recent_messages_callback=get_recent_messages_callback,
+            get_image_url_callback=get_image_url_callback,
+            get_forward_msg_callback=get_forward_msg_callback,
+            send_like_callback=send_like_callback,
+            sender=sender,
+            history_manager=history_manager,
+            onebot_client=onebot_client,
+            scheduler=self,
+            extra_context=extra_context,
+        )
+
+        result_text = str(result).strip() if isinstance(result, str) else ""
+        if result_text and callable(send_message_callback):
+            await send_message_callback(result_text)
+
+        return "已执行向未来自己的指令"
 
     async def _execute_tool_wrapper(
         self,
@@ -463,7 +574,10 @@ class TaskScheduler:
                 start_time = time.perf_counter()
                 results = []
 
-                tool_context: dict[str, Any] = {"agent_histories": {}}
+                tool_context = ctx.get_resources()
+                tool_context.setdefault("agent_histories", {})
+                tool_context["scheduled_task_id"] = task_id
+                tool_context["scheduled_task_name"] = task_info.get("task_name", "")
                 if execution_mode == "parallel":
                     # 并行执行所有工具
                     results = await asyncio.gather(

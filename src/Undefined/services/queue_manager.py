@@ -198,6 +198,41 @@ class QueueManager:
                 logger.info("[队列服务] 已启动模型处理循环: model=%s", model_name)
         return self._model_queues[model_name]
 
+    def snapshot(self) -> dict[str, Any]:
+        """返回当前队列状态快照。"""
+        models: dict[str, dict[str, int]] = {}
+        totals = {
+            "retry": 0,
+            "superadmin": 0,
+            "private": 0,
+            "group_mention": 0,
+            "group_normal": 0,
+            "background": 0,
+        }
+
+        for model_name, queue in self._model_queues.items():
+            model_snapshot = {
+                "retry": queue.retry_queue.qsize(),
+                "superadmin": queue.superadmin_queue.qsize(),
+                "private": queue.private_queue.qsize(),
+                "group_mention": queue.group_mention_queue.qsize(),
+                "group_normal": queue.group_normal_queue.qsize(),
+                "background": queue.background_queue.qsize(),
+            }
+            models[model_name] = model_snapshot
+            for key, value in model_snapshot.items():
+                totals[key] += value
+
+        return {
+            "default_interval_seconds": self._default_interval,
+            "max_retries": self._max_retries,
+            "processor_count": len(self._processor_tasks),
+            "inflight_count": len(self._inflight_tasks),
+            "model_count": len(models),
+            "models": models,
+            "totals": totals,
+        }
+
     def _format_request_meta(self, request: dict[str, Any]) -> str:
         """格式化请求关键元信息，便于日志排查。"""
         parts: list[str] = []

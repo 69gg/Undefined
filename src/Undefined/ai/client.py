@@ -9,6 +9,7 @@ import logging
 import re
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
+from uuid import uuid4
 
 import httpx
 
@@ -94,6 +95,7 @@ class AIClient:
         end_summary_storage: Optional[EndSummaryStorage] = None,
         bot_qq: int = 0,
         runtime_config: Config | None = None,
+        cognitive_service: Any = None,
     ) -> None:
         """初始化 AI 客户端
 
@@ -118,6 +120,7 @@ class AIClient:
         self._requester = ModelRequester(self._http_client, self._token_usage_storage)
         self._token_counter = TokenCounter()
         self._knowledge_manager: Any = None
+        self._cognitive_service: Any = cognitive_service
 
         # 私聊发送回调
         self._send_private_message_callback: Optional[
@@ -172,6 +175,10 @@ class AIClient:
         self._agent_intro_task: asyncio.Task[None] | None = None
         self._queue_manager: Any | None = None
         self._intro_config: Any | None = None
+        # 后台 LLM 调用挂起表（走队列的后台请求）
+        self._pending_llm_calls: dict[
+            str, tuple[asyncio.Event, dict[str, Any] | Exception | None]
+        ] = {}
 
         # 后台任务引用集合（防止被 GC）
         self._background_tasks: set[asyncio.Task[Any]] = set()
@@ -232,6 +239,7 @@ class AIClient:
             end_summary_storage=self._end_summary_storage,
             runtime_config_getter=self._get_runtime_config,
             anthropic_skill_registry=self.anthropic_skill_registry,
+            cognitive_service=self._cognitive_service,
         )
         self._multimodal = MultimodalAnalyzer(self._requester, self.vision_config)
         self._summary_service = SummaryService(
@@ -274,6 +282,16 @@ class AIClient:
             except Exception as exc:
                 logger.warning("[清理] 关闭知识库管理器失败: %s", exc)
             self._knowledge_manager = None
+        cognitive_service = getattr(self, "_cognitive_service", None)
+        if cognitive_service is not None:
+            if hasattr(cognitive_service, "stop"):
+                try:
+                    await cognitive_service.stop()
+                except Exception as exc:
+                    logger.warning("[清理] 关闭认知记忆服务失败: %s", exc)
+            self._cognitive_service = None
+            if hasattr(self, "_prompt_builder") and self._prompt_builder is not None:
+                self._prompt_builder.set_cognitive_service(None)
 
         # 2) 等待 MCP 初始化完成，再关闭 MCP toolsets
         if hasattr(self, "_mcp_init_task") and not self._mcp_init_task.done():
@@ -293,6 +311,67 @@ class AIClient:
             await self._http_client.aclose()
 
         logger.info("[清理] AIClient 已关闭")
+
+    async def submit_background_llm_call(
+        self,
+        model_config: Any,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any = "auto",
+        call_type: str = "background",
+        max_tokens: int | None = None,
+    ) -> dict[str, Any]:
+        """将 LLM 调用投递到后台队列，走统一发车间隔和 Token 统计。
+        无 queue_manager 时降级为直接调用。"""
+        effective_max_tokens = (
+            max_tokens
+            if max_tokens is not None
+            else getattr(model_config, "max_tokens", 4096)
+        )
+        if self._queue_manager is None:
+            return await self.request_model(
+                model_config=model_config,
+                messages=messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                call_type=call_type,
+                max_tokens=effective_max_tokens,
+            )
+        request_id = uuid4().hex
+        event: asyncio.Event = asyncio.Event()
+        self._pending_llm_calls[request_id] = (event, None)
+        model_name = getattr(model_config, "model_name", "default")
+        await self._queue_manager.add_background_request(
+            {
+                "type": "background_llm_call",
+                "request_id": request_id,
+                "model_config": model_config,
+                "messages": messages,
+                "tools": tools,
+                "tool_choice": tool_choice,
+                "call_type": call_type,
+                "max_tokens": effective_max_tokens,
+            },
+            model_name=model_name,
+        )
+        try:
+            await asyncio.wait_for(event.wait(), timeout=480.0)
+        finally:
+            entry = self._pending_llm_calls.pop(request_id, None)
+        _, result = entry if entry is not None else (None, None)
+        if isinstance(result, Exception):
+            raise result
+        return result or {}
+
+    def set_llm_call_result(
+        self, request_id: str, result: dict[str, Any] | Exception
+    ) -> None:
+        entry = self._pending_llm_calls.get(request_id)
+        if entry is None:
+            return
+        event, _ = entry
+        self._pending_llm_calls[request_id] = (event, result)
+        event.set()
 
     def set_queue_manager(self, queue_manager: Any) -> None:
         """设置队列管理器并启动 Agent intro 生成器。
@@ -372,6 +451,15 @@ class AIClient:
 
     def set_knowledge_manager(self, manager: Any) -> None:
         self._knowledge_manager = manager
+
+    def set_cognitive_service(self, service: Any) -> None:
+        self._cognitive_service = service
+        if hasattr(self, "_prompt_builder") and self._prompt_builder is not None:
+            self._prompt_builder.set_cognitive_service(service)
+        logger.info(
+            "[AI客户端] 认知记忆服务已挂载并同步到 PromptBuilder: enabled=%s",
+            bool(getattr(service, "enabled", False)) if service is not None else False,
+        )
 
     def apply_search_config(self, searxng_url: str) -> None:
         """应用搜索服务配置（支持热更新）。"""
@@ -731,9 +819,30 @@ class AIClient:
             "send_private_message_callback", self._send_private_message_callback
         )
         tool_context.setdefault("send_message_callback", send_message_callback)
+        tool_context.setdefault(
+            "get_recent_messages_callback", get_recent_messages_callback
+        )
+        tool_context.setdefault("get_image_url_callback", get_image_url_callback)
+        tool_context.setdefault("get_forward_msg_callback", get_forward_msg_callback)
+        tool_context.setdefault("send_like_callback", send_like_callback)
         tool_context.setdefault("sender", sender)
+        tool_context.setdefault("history_manager", history_manager)
+        tool_context.setdefault("onebot_client", onebot_client)
+        tool_context.setdefault("scheduler", scheduler)
         tool_context.setdefault("send_image_callback", self._send_image_callback)
+        tool_context.setdefault("memory_storage", self.memory_storage)
         tool_context.setdefault("knowledge_manager", self._knowledge_manager)
+        tool_context.setdefault("cognitive_service", self._cognitive_service)
+        tool_context.setdefault("current_question", question)
+        message_ids = tool_context.get("message_ids")
+        if not isinstance(message_ids, list):
+            message_ids = []
+            tool_context["message_ids"] = message_ids
+        trigger_message_id = tool_context.get("trigger_message_id")
+        if trigger_message_id is not None:
+            trigger_message_id_text = str(trigger_message_id).strip()
+            if trigger_message_id_text and trigger_message_id_text not in message_ids:
+                message_ids.append(trigger_message_id_text)
 
         # 动态选择模型（等待偏好加载就绪，避免竞态）
         await self.model_selector.wait_ready()
