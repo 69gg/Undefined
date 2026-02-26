@@ -2023,6 +2023,10 @@ class Config:
             enabled=_coerce_bool(
                 cog.get("enabled") if isinstance(cog, dict) else None, True
             ),
+            bot_name=_coerce_str(
+                cog.get("bot_name") if isinstance(cog, dict) else None,
+                "Undefined",
+            ),
             vector_store_path=_coerce_str(
                 vs.get("path") if isinstance(vs, dict) else None,
                 "data/cognitive/chromadb",
