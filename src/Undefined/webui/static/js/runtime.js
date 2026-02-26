@@ -7,6 +7,12 @@
         runtimeEnabled: true,
         chatBusy: false,
         chatHistoryLoaded: false,
+        queryBusy: {
+            memory: false,
+            events: false,
+            profiles: false,
+            profileGet: false,
+        },
     };
     const RUNTIME_DISABLED_ERROR = "Runtime API disabled";
 
@@ -319,6 +325,25 @@
         setJsonBlock("runtimeProfileResult", data);
     }
 
+    async function runQueryAction(kind, buttonId, action) {
+        if (runtimeState.queryBusy[kind]) return;
+        runtimeState.queryBusy[kind] = true;
+        const button = get(buttonId);
+        setButtonLoading(button, true);
+        try {
+            await action();
+        } catch (error) {
+            showToast(
+                `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
+                "error",
+                5000
+            );
+        } finally {
+            setButtonLoading(button, false);
+            runtimeState.queryBusy[kind] = false;
+        }
+    }
+
     async function loadChatHistory(force = false) {
         if (runtimeState.chatHistoryLoaded && !force) return;
         const res = await api("/api/runtime/chat/history?limit=200");
@@ -499,23 +524,44 @@
     }
 
     function bindEvents() {
+        const bindEnter = (id, handler) => {
+            const input = get(id);
+            if (!input) return;
+            input.addEventListener("keydown", (event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    handler();
+                }
+            });
+        };
+
         const probeRefresh = get("btnProbeRefresh");
         if (probeRefresh) probeRefresh.addEventListener("click", refreshProbes);
 
         const memoryRefresh = get("btnMemoryRefresh");
         if (memoryRefresh) memoryRefresh.addEventListener("click", refreshMemory);
 
+        const runMemorySearch = () => runQueryAction("memory", "btnRuntimeMemorySearch", searchMemory);
+        const runEventsSearch = () => runQueryAction("events", "btnRuntimeEventsSearch", searchEvents);
+        const runProfilesSearch = () => runQueryAction("profiles", "btnRuntimeProfilesSearch", searchProfiles);
+        const runProfileGet = () => runQueryAction("profileGet", "btnRuntimeProfileGet", fetchProfileByEntity);
+
         const memoryBtn = get("btnRuntimeMemorySearch");
-        if (memoryBtn) memoryBtn.addEventListener("click", searchMemory);
+        if (memoryBtn) memoryBtn.addEventListener("click", runMemorySearch);
+        bindEnter("runtimeMemoryQuery", runMemorySearch);
 
         const eventsBtn = get("btnRuntimeEventsSearch");
-        if (eventsBtn) eventsBtn.addEventListener("click", searchEvents);
+        if (eventsBtn) eventsBtn.addEventListener("click", runEventsSearch);
+        bindEnter("runtimeEventsQuery", runEventsSearch);
 
         const profilesBtn = get("btnRuntimeProfilesSearch");
-        if (profilesBtn) profilesBtn.addEventListener("click", searchProfiles);
+        if (profilesBtn) profilesBtn.addEventListener("click", runProfilesSearch);
+        bindEnter("runtimeProfilesQuery", runProfilesSearch);
 
         const profileGetBtn = get("btnRuntimeProfileGet");
-        if (profileGetBtn) profileGetBtn.addEventListener("click", fetchProfileByEntity);
+        if (profileGetBtn) profileGetBtn.addEventListener("click", runProfileGet);
+        bindEnter("runtimeProfileEntityType", runProfileGet);
+        bindEnter("runtimeProfileEntityId", runProfileGet);
 
         const sendBtn = get("btnRuntimeChatSend");
         if (sendBtn) sendBtn.addEventListener("click", sendChatMessage);

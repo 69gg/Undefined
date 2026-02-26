@@ -135,6 +135,51 @@
 .runtime-head { gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .runtime-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .runtime-inline .form-control { min-width: 160px; }
+.runtime-inline-action {
+  flex-wrap: nowrap;
+  gap: 10px;
+}
+.runtime-inline-action .form-control {
+  min-width: 0;
+  flex: 1 1 220px;
+}
+.runtime-inline-entity #runtimeProfileEntityType {
+  flex: 0 0 104px;
+  min-width: 104px;
+}
+.runtime-inline-entity #runtimeProfileEntityId {
+  flex: 1 1 220px;
+}
+.runtime-inline-submit-btn {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  padding: 0;
+  border-radius: 999px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.runtime-inline-submit-icon {
+  font-size: 16px;
+  line-height: 1;
+  font-weight: 700;
+  transform: translateY(-1px);
+}
+.runtime-inline-submit-btn.is-loading {
+  opacity: 1;
+}
+.runtime-inline-submit-btn.is-loading .runtime-inline-submit-icon {
+  opacity: 0;
+}
+.runtime-inline-submit-btn.is-loading::after {
+  position: absolute;
+  margin-left: 0;
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+}
 .runtime-json {
   margin: 0;
   padding: 14px;

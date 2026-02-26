@@ -387,29 +387,17 @@
                         </div>
                     </div>
 
-                    <div class="card runtime-card">
-                        <div class="panel-row runtime-head">
-                            <div class="card-title" data-i18n="runtime.memory_title">记忆查询（只读）</div>
-                            <div class="runtime-inline">
-                                <input id="runtimeMemoryQuery" type="search" class="form-control form-control-sm"
-                                    data-i18n-placeholder="runtime.memory_query_placeholder" placeholder="输入关键词..." />
-                                <button id="btnRuntimeMemorySearch" class="btn btn-sm"
-                                    data-i18n="runtime.search">查询</button>
-                            </div>
-                        </div>
-                        <div id="runtimeMemoryMeta" class="log-meta"></div>
-                        <div id="runtimeMemoryList" class="runtime-list"></div>
-                    </div>
-
                     <div class="runtime-grid">
                         <div class="card runtime-card">
                             <div class="panel-row runtime-head">
                                 <div class="card-title" data-i18n="runtime.cognitive_events">认知事件检索</div>
-                                <div class="runtime-inline">
+                                <div class="runtime-inline runtime-inline-action">
                                     <input id="runtimeEventsQuery" type="search" class="form-control form-control-sm"
                                         data-i18n-placeholder="runtime.events_placeholder" placeholder="输入事件关键词..." />
-                                    <button id="btnRuntimeEventsSearch" class="btn btn-sm"
-                                        data-i18n="runtime.search">查询</button>
+                                    <button id="btnRuntimeEventsSearch" class="btn runtime-inline-submit-btn" type="button">
+                                        <span class="runtime-inline-submit-icon" aria-hidden="true">⏎</span>
+                                        <span class="sr-only" data-i18n="runtime.search">查询</span>
+                                    </button>
                                 </div>
                             </div>
                             <pre id="runtimeEventsResult" class="runtime-json">--</pre>
@@ -417,11 +405,13 @@
                         <div class="card runtime-card">
                             <div class="panel-row runtime-head">
                                 <div class="card-title" data-i18n="runtime.cognitive_profiles">认知侧写检索</div>
-                                <div class="runtime-inline">
+                                <div class="runtime-inline runtime-inline-action">
                                     <input id="runtimeProfilesQuery" type="search" class="form-control form-control-sm"
                                         data-i18n-placeholder="runtime.profiles_placeholder" placeholder="输入侧写关键词..." />
-                                    <button id="btnRuntimeProfilesSearch" class="btn btn-sm"
-                                        data-i18n="runtime.search">查询</button>
+                                    <button id="btnRuntimeProfilesSearch" class="btn runtime-inline-submit-btn" type="button">
+                                        <span class="runtime-inline-submit-icon" aria-hidden="true">⏎</span>
+                                        <span class="sr-only" data-i18n="runtime.search">查询</span>
+                                    </button>
                                 </div>
                             </div>
                             <pre id="runtimeProfilesResult" class="runtime-json">--</pre>
@@ -431,16 +421,34 @@
                     <div class="card runtime-card">
                         <div class="panel-row runtime-head">
                             <div class="card-title" data-i18n="runtime.cognitive_profile_get">按实体查看侧写</div>
-                            <div class="runtime-inline">
+                            <div class="runtime-inline runtime-inline-action runtime-inline-entity">
                                 <input id="runtimeProfileEntityType" type="text" class="form-control form-control-sm"
                                     value="user" placeholder="entity_type" />
                                 <input id="runtimeProfileEntityId" type="text" class="form-control form-control-sm"
                                     placeholder="entity_id" />
-                                <button id="btnRuntimeProfileGet" class="btn btn-sm"
-                                    data-i18n="runtime.fetch">获取</button>
+                                <button id="btnRuntimeProfileGet" class="btn runtime-inline-submit-btn" type="button">
+                                    <span class="runtime-inline-submit-icon" aria-hidden="true">⏎</span>
+                                    <span class="sr-only" data-i18n="runtime.fetch">获取</span>
+                                </button>
                             </div>
                         </div>
                         <pre id="runtimeProfileResult" class="runtime-json">--</pre>
+                    </div>
+
+                    <div class="card runtime-card">
+                        <div class="panel-row runtime-head">
+                            <div class="card-title" data-i18n="runtime.memory_title">长期记忆查询</div>
+                            <div class="runtime-inline runtime-inline-action">
+                                <input id="runtimeMemoryQuery" type="search" class="form-control form-control-sm"
+                                    data-i18n-placeholder="runtime.memory_query_placeholder" placeholder="输入关键词..." />
+                                <button id="btnRuntimeMemorySearch" class="btn runtime-inline-submit-btn" type="button">
+                                    <span class="runtime-inline-submit-icon" aria-hidden="true">⏎</span>
+                                    <span class="sr-only" data-i18n="runtime.search">查询</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="runtimeMemoryMeta" class="log-meta"></div>
+                        <div id="runtimeMemoryList" class="runtime-list"></div>
                     </div>
                 </section>
 

@@ -20,6 +20,12 @@
   .form-fields { grid-template-columns: 1fr; }
   .log-viewer { height: 380px; }
   .noise { opacity: 0.08; }
+  .runtime-inline-action { width: 100%; }
+  .runtime-inline-action .form-control { flex: 1 1 auto; }
+  .runtime-inline-entity { flex-wrap: wrap; }
+  .runtime-inline-entity #runtimeProfileEntityType,
+  .runtime-inline-entity #runtimeProfileEntityId { flex: 1 1 100%; }
+  .runtime-inline-entity .runtime-inline-submit-btn { margin-left: auto; }
   .main-content.chat-layout #tab-chat .chat-runtime-card { height: clamp(400px, calc(100vh - 180px), 680px); }
   .main-content.chat-layout #tab-chat .runtime-chat-input {
     height: 40px;
