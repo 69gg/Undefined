@@ -1,10 +1,14 @@
 (function () {
     const runtimeState = {
         initialized: false,
-        loaded: false,
+        probesLoaded: false,
+        memoryLoaded: false,
+        runtimeMetaLoaded: false,
+        runtimeEnabled: true,
         chatBusy: false,
         chatHistoryLoaded: false,
     };
+    const RUNTIME_DISABLED_ERROR = "Runtime API disabled";
 
     function i18nFormat(key, params = {}) {
         let text = t(key);
@@ -202,10 +206,39 @@
             .join("");
     }
 
+    function setProbeUnavailable(message) {
+        const msg = String(message || RUNTIME_DISABLED_ERROR);
+        setJsonBlock("runtimeProbeInternal", { error: msg });
+        setJsonBlock("runtimeProbeExternal", { error: msg });
+    }
+
+    function setMemoryUnavailable(message) {
+        const msg = String(message || RUNTIME_DISABLED_ERROR);
+        const container = get("runtimeMemoryList");
+        const meta = get("runtimeMemoryMeta");
+        if (meta) meta.textContent = msg;
+        if (container) {
+            container.innerHTML = `<div class="empty-state">${escapeHtml(msg)}</div>`;
+        }
+        setJsonBlock("runtimeEventsResult", { error: msg });
+        setJsonBlock("runtimeProfilesResult", { error: msg });
+        setJsonBlock("runtimeProfileResult", { error: msg });
+    }
+
     async function fetchRuntimeMeta() {
         const res = await api("/api/runtime/meta");
         const data = await res.json();
         return data;
+    }
+
+    async function ensureRuntimeEnabled() {
+        if (runtimeState.runtimeMetaLoaded) {
+            return runtimeState.runtimeEnabled;
+        }
+        const meta = await fetchRuntimeMeta();
+        runtimeState.runtimeMetaLoaded = true;
+        runtimeState.runtimeEnabled = !!(meta && meta.enabled);
+        return runtimeState.runtimeEnabled;
     }
 
     async function fetchInternalProbe() {
@@ -221,6 +254,10 @@
     }
 
     async function searchMemory() {
+        if (!(await ensureRuntimeEnabled())) {
+            setMemoryUnavailable(t("runtime.disabled"));
+            return;
+        }
         const input = get("runtimeMemoryQuery");
         const query = (input && input.value ? input.value : "").trim();
         const params = new URLSearchParams();
@@ -231,6 +268,10 @@
     }
 
     async function searchEvents() {
+        if (!(await ensureRuntimeEnabled())) {
+            setJsonBlock("runtimeEventsResult", { error: t("runtime.disabled") });
+            return;
+        }
         const input = get("runtimeEventsQuery");
         const query = (input && input.value ? input.value : "").trim();
         if (!query) {
@@ -244,6 +285,10 @@
     }
 
     async function searchProfiles() {
+        if (!(await ensureRuntimeEnabled())) {
+            setJsonBlock("runtimeProfilesResult", { error: t("runtime.disabled") });
+            return;
+        }
         const input = get("runtimeProfilesQuery");
         const query = (input && input.value ? input.value : "").trim();
         if (!query) {
@@ -257,6 +302,10 @@
     }
 
     async function fetchProfileByEntity() {
+        if (!(await ensureRuntimeEnabled())) {
+            setJsonBlock("runtimeProfileResult", { error: t("runtime.disabled") });
+            return;
+        }
         const typeInput = get("runtimeProfileEntityType");
         const idInput = get("runtimeProfileEntityId");
         const entityType = (typeInput && typeInput.value ? typeInput.value : "").trim();
@@ -408,23 +457,16 @@
         }
     }
 
-    async function refreshAll() {
+    async function refreshProbes() {
         try {
-            const meta = await fetchRuntimeMeta();
-            if (!meta.enabled) {
-                setJsonBlock("runtimeProbeInternal", { error: "Runtime API disabled" });
-                setJsonBlock("runtimeProbeExternal", { error: "Runtime API disabled" });
-                renderMemoryItems([]);
+            if (!(await ensureRuntimeEnabled())) {
+                setProbeUnavailable(t("runtime.disabled"));
+                runtimeState.probesLoaded = true;
                 return;
             }
 
-            await Promise.all([
-                fetchInternalProbe(),
-                fetchExternalProbe(),
-                searchMemory(),
-            ]);
-
-            runtimeState.loaded = true;
+            await Promise.all([fetchInternalProbe(), fetchExternalProbe()]);
+            runtimeState.probesLoaded = true;
         } catch (error) {
             showToast(
                 `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
@@ -434,9 +476,34 @@
         }
     }
 
+    async function refreshMemory() {
+        try {
+            if (!(await ensureRuntimeEnabled())) {
+                setMemoryUnavailable(t("runtime.disabled"));
+                runtimeState.memoryLoaded = true;
+                return;
+            }
+            await searchMemory();
+            runtimeState.memoryLoaded = true;
+        } catch (error) {
+            showToast(
+                `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
+                "error",
+                5000
+            );
+        }
+    }
+
+    async function refreshAll() {
+        await Promise.all([refreshProbes(), refreshMemory()]);
+    }
+
     function bindEvents() {
-        const refresh = get("btnRuntimeRefresh");
-        if (refresh) refresh.addEventListener("click", refreshAll);
+        const probeRefresh = get("btnProbeRefresh");
+        if (probeRefresh) probeRefresh.addEventListener("click", refreshProbes);
+
+        const memoryRefresh = get("btnMemoryRefresh");
+        if (memoryRefresh) memoryRefresh.addEventListener("click", refreshMemory);
 
         const memoryBtn = get("btnRuntimeMemorySearch");
         if (memoryBtn) memoryBtn.addEventListener("click", searchMemory);
@@ -475,9 +542,15 @@
 
     function onTabActivated(tab) {
         if (!state.authenticated) return;
-        if (tab === "runtime") {
-            if (!runtimeState.loaded) {
-                refreshAll();
+        if (tab === "probes") {
+            if (!runtimeState.probesLoaded) {
+                refreshProbes();
+            }
+            return;
+        }
+        if (tab === "memory") {
+            if (!runtimeState.memoryLoaded) {
+                refreshMemory();
             }
             return;
         }
@@ -501,6 +574,8 @@
     window.RuntimeController = {
         init,
         onTabActivated,
+        refreshProbes,
+        refreshMemory,
         refreshAll,
         loadChatHistory,
     };

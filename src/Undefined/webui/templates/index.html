@@ -48,8 +48,10 @@
                     <button class="btn" data-action="open-app" data-tab="config" data-i18n="landing.config">配置修改</button>
                     <button class="btn ghost" data-action="open-app" data-tab="logs"
                         data-i18n="landing.logs">日志查看</button>
-                    <button class="btn ghost" data-action="open-app" data-tab="runtime"
-                        data-i18n="landing.runtime">运行接口</button>
+                    <button class="btn ghost" data-action="open-app" data-tab="probes"
+                        data-i18n="landing.probes">探针</button>
+                    <button class="btn ghost" data-action="open-app" data-tab="memory"
+                        data-i18n="landing.memory">记忆</button>
                     <button class="btn ghost" data-action="open-app" data-tab="chat"
                         data-i18n="landing.chat">AI Chat</button>
                     <button class="btn ghost" data-action="open-app" data-tab="about"
@@ -123,8 +125,11 @@
                 <li class="nav-item" data-tab="logs" data-i18n="tabs.logs" role="button" tabindex="0">
                     Logs
                 </li>
-                <li class="nav-item" data-tab="runtime" data-i18n="tabs.runtime" role="button" tabindex="0">
-                    Runtime
+                <li class="nav-item" data-tab="probes" data-i18n="tabs.probes" role="button" tabindex="0">
+                    Probes
+                </li>
+                <li class="nav-item" data-tab="memory" data-i18n="tabs.memory" role="button" tabindex="0">
+                    Memory
                 </li>
                 <li class="nav-item" data-tab="chat" data-i18n="tabs.chat" role="button" tabindex="0">
                     Chat
@@ -187,7 +192,8 @@
                         <button class="nav-item active" data-tab="overview" data-i18n="tabs.overview">Overview</button>
                         <button class="nav-item" data-tab="config" data-i18n="tabs.config">Configuration</button>
                         <button class="nav-item" data-tab="logs" data-i18n="tabs.logs">Logs</button>
-                        <button class="nav-item" data-tab="runtime" data-i18n="tabs.runtime">Runtime</button>
+                        <button class="nav-item" data-tab="probes" data-i18n="tabs.probes">Probes</button>
+                        <button class="nav-item" data-tab="memory" data-i18n="tabs.memory">Memory</button>
                         <button class="nav-item" data-tab="chat" data-i18n="tabs.chat">Chat</button>
                         <button class="nav-item" data-tab="about" data-i18n="tabs.about">About</button>
                     </div>
@@ -345,15 +351,15 @@
                         aria-label="System logs">Initializing log connection...</div>
                 </section>
 
-                <!-- Tab Runtime -->
-                <section id="tab-runtime" class="tab-content">
+                <!-- Tab Probes -->
+                <section id="tab-probes" class="tab-content">
                     <div class="header">
                         <div>
-                            <h1 class="page-title" data-i18n="runtime.title">Runtime 能力中心</h1>
-                            <p class="page-subtitle" data-i18n="runtime.subtitle">探针、记忆查询与侧写查看。</p>
+                            <h1 class="page-title" data-i18n="probes.title">探针</h1>
+                            <p class="page-subtitle" data-i18n="probes.subtitle">查看内部与外部探针状态。</p>
                         </div>
                         <div class="toolbar">
-                            <button id="btnRuntimeRefresh" class="btn" data-i18n="runtime.refresh_all">刷新全部</button>
+                            <button id="btnProbeRefresh" class="btn" data-i18n="probes.refresh">刷新</button>
                         </div>
                     </div>
 
@@ -365,6 +371,19 @@
                         <div class="card runtime-card">
                             <div class="card-title" data-i18n="runtime.probe_external">外部探针</div>
                             <pre id="runtimeProbeExternal" class="runtime-json">--</pre>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Tab Memory -->
+                <section id="tab-memory" class="tab-content">
+                    <div class="header">
+                        <div>
+                            <h1 class="page-title" data-i18n="memory.title">记忆与侧写</h1>
+                            <p class="page-subtitle" data-i18n="memory.subtitle">只读检索记忆、认知事件与侧写。</p>
+                        </div>
+                        <div class="toolbar">
+                            <button id="btnMemoryRefresh" class="btn" data-i18n="memory.refresh">刷新</button>
                         </div>
                     </div>
 
