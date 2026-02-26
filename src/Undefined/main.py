@@ -310,7 +310,7 @@ async def main() -> None:
                 revision_keep=config.cognitive.profile_revision_keep,
             )
             cognitive_service = CognitiveService(
-                config_getter=lambda: config.cognitive,
+                config_getter=lambda: get_config(strict=False).cognitive,
                 vector_store=vector_store,
                 job_queue=job_queue,
                 profile_storage=profile_storage,
@@ -321,7 +321,7 @@ async def main() -> None:
                 vector_store=vector_store,
                 profile_storage=profile_storage,
                 ai_client=ai,
-                config_getter=lambda: config.cognitive,
+                config_getter=lambda: get_config(strict=False).cognitive,
                 model_config=config.historian_model,
             )
             ai.set_cognitive_service(cognitive_service)
