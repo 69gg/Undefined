@@ -1,4 +1,5 @@
 import asyncio
+import gzip as _gzip_mod
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -33,6 +34,105 @@ CSP_POLICY = (
     "base-uri 'self'; "
     "frame-ancestors 'none'"
 )
+
+# ── gzip 压缩 ──
+
+_GZIP_CONTENT_TYPES = frozenset(
+    {
+        "text/html",
+        "text/css",
+        "text/plain",
+        "text/javascript",
+        "application/javascript",
+        "application/json",
+        "image/svg+xml",
+    }
+)
+_GZIP_FILE_EXTENSIONS = frozenset(
+    {
+        ".js",
+        ".css",
+        ".html",
+        ".json",
+        ".svg",
+        ".xml",
+        ".txt",
+    }
+)
+_GZIP_MIN_BYTES = 512
+_GZIP_MAX_BYTES = 2 * 1024 * 1024
+_GZIP_MIME: dict[str, str] = {
+    ".js": "application/javascript",
+    ".css": "text/css",
+    ".html": "text/html; charset=utf-8",
+    ".json": "application/json",
+    ".svg": "image/svg+xml",
+    ".xml": "application/xml",
+    ".txt": "text/plain; charset=utf-8",
+}
+
+
+def _gzip_compress(data: bytes) -> bytes | None:
+    compressed = _gzip_mod.compress(data, compresslevel=6)
+    return compressed if len(compressed) < len(data) else None
+
+
+@web.middleware
+async def gzip_middleware(
+    request: web.Request,
+    handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
+) -> web.StreamResponse:
+    """对可压缩响应自动 gzip，覆盖 web.Response 和静态文件。"""
+    response = await handler(request)
+
+    if "gzip" not in request.headers.get("Accept-Encoding", ""):
+        return response
+    if response.headers.get("Content-Encoding"):
+        return response
+
+    # web.Response（HTML 模板、JSON API 等）
+    if isinstance(response, web.Response):
+        body = response.body
+        if isinstance(body, bytes) and _GZIP_MIN_BYTES <= len(body) <= _GZIP_MAX_BYTES:
+            ct = (response.content_type or "").split(";")[0].strip()
+            if ct in _GZIP_CONTENT_TYPES:
+                compressed = _gzip_compress(body)
+                if compressed is not None:
+                    response.body = compressed
+                    response.headers["Content-Encoding"] = "gzip"
+                    response.headers["Vary"] = "Accept-Encoding"
+        return response
+
+    # FileResponse（静态 JS/CSS 等）
+    if isinstance(response, web.FileResponse):
+        file_path: Path | None = getattr(response, "_path", None)
+        if file_path is not None and file_path.suffix.lower() in _GZIP_FILE_EXTENSIONS:
+            try:
+                raw = file_path.read_bytes()
+            except OSError:
+                return response
+            if _GZIP_MIN_BYTES <= len(raw) <= _GZIP_MAX_BYTES:
+                compressed = _gzip_compress(raw)
+                if compressed is not None:
+                    mime = _GZIP_MIME.get(
+                        file_path.suffix.lower(), "application/octet-stream"
+                    )
+                    new_resp = web.Response(body=compressed, content_type=mime)
+                    # 保留外层中间件已设置的 header（如安全头）
+                    _skip = {
+                        "content-length",
+                        "content-type",
+                        "content-encoding",
+                        "transfer-encoding",
+                    }
+                    for key, value in response.headers.items():
+                        if key.lower() not in _skip:
+                            new_resp.headers.setdefault(key, value)
+                    new_resp.headers["Content-Encoding"] = "gzip"
+                    new_resp.headers["Vary"] = "Accept-Encoding"
+                    return new_resp
+
+    return response
 
 
 @web.middleware
@@ -117,7 +217,7 @@ async def on_cleanup(app: web.Application) -> None:
 
 
 def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
-    app = web.Application(middlewares=[security_headers_middleware])
+    app = web.Application(middlewares=[gzip_middleware, security_headers_middleware])
 
     # 初始化核心组件
     app["bot"] = BotProcessController()
