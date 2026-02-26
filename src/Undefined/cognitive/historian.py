@@ -712,7 +712,12 @@ class HistorianWorker:
             target=f"{entity_type}:{entity_id}",
         )
 
-        skip = bool(args.get("skip", False))
+        raw_skip = args.get("skip", False)
+        skip = (
+            raw_skip.lower() not in ("false", "0", "no", "")
+            if isinstance(raw_skip, str)
+            else bool(raw_skip)
+        )
         skip_reason = str(args.get("skip_reason", "")).strip()
         if skip:
             logger.info(

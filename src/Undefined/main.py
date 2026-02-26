@@ -32,15 +32,6 @@ from Undefined.utils.paths import (
     RENDER_CACHE_DIR,
     TEXT_FILE_CACHE_DIR,
     ensure_dir,
-    COGNITIVE_CHROMADB_DIR,
-    COGNITIVE_QUEUES_DIR,
-    COGNITIVE_PROFILES_DIR,
-    COGNITIVE_PROFILES_USERS_DIR,
-    COGNITIVE_PROFILES_GROUPS_DIR,
-    COGNITIVE_PROFILES_HISTORY_DIR,
-    COGNITIVE_QUEUES_PENDING_DIR,
-    COGNITIVE_QUEUES_PROCESSING_DIR,
-    COGNITIVE_QUEUES_FAILED_DIR,
 )
 
 from Undefined.utils.self_update import (
@@ -294,24 +285,28 @@ async def main() -> None:
                 HistorianWorker,
             )
 
+            _cog_chroma = Path(config.cognitive.vector_store_path)
+            _cog_queues = Path(config.cognitive.queue_path)
+            _cog_profiles = Path(config.cognitive.profiles_path)
+
             for _cog_dir in (
-                COGNITIVE_CHROMADB_DIR,
-                COGNITIVE_QUEUES_PENDING_DIR,
-                COGNITIVE_QUEUES_PROCESSING_DIR,
-                COGNITIVE_QUEUES_FAILED_DIR,
-                COGNITIVE_PROFILES_USERS_DIR,
-                COGNITIVE_PROFILES_GROUPS_DIR,
-                COGNITIVE_PROFILES_HISTORY_DIR,
+                _cog_chroma,
+                _cog_queues / "pending",
+                _cog_queues / "processing",
+                _cog_queues / "failed",
+                _cog_profiles / "users",
+                _cog_profiles / "groups",
+                _cog_profiles / "history",
             ):
                 ensure_dir(_cog_dir)
 
             vector_store = CognitiveVectorStore(
-                str(COGNITIVE_CHROMADB_DIR),
+                str(_cog_chroma),
                 retrieval_runtime,
             )
-            job_queue = JobQueue(str(COGNITIVE_QUEUES_DIR))
+            job_queue = JobQueue(str(_cog_queues))
             profile_storage = ProfileStorage(
-                str(COGNITIVE_PROFILES_DIR),
+                str(_cog_profiles),
                 revision_keep=config.cognitive.profile_revision_keep,
             )
             cognitive_service = CognitiveService(
@@ -332,9 +327,9 @@ async def main() -> None:
             ai.set_cognitive_service(cognitive_service)
             logger.info(
                 "[认知记忆] 初始化完成: chroma_dir=%s queue_dir=%s profiles_dir=%s revision_keep=%s",
-                str(COGNITIVE_CHROMADB_DIR),
-                str(COGNITIVE_QUEUES_DIR),
-                str(COGNITIVE_PROFILES_DIR),
+                str(_cog_chroma),
+                str(_cog_queues),
+                str(_cog_profiles),
                 config.cognitive.profile_revision_keep,
             )
 
