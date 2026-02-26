@@ -236,6 +236,42 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+.runtime-json-inline {
+  margin: 0;
+  max-height: 260px;
+}
+.runtime-profile-title {
+  margin: 2px 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: var(--accent-color);
+}
+.runtime-profile-list {
+  margin: 2px 0 8px;
+  padding-left: 18px;
+}
+.runtime-profile-list li {
+  margin: 2px 0;
+  line-height: 1.6;
+}
+.runtime-profile-kv {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  gap: 8px;
+  margin: 4px 0;
+}
+.runtime-profile-k {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+.runtime-profile-v {
+  color: var(--text-primary);
+  word-break: break-word;
+}
+.runtime-profile-p {
+  margin: 3px 0;
+}
 .runtime-tags {
   display: flex;
   flex-wrap: wrap;

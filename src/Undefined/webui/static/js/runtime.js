@@ -56,6 +56,65 @@
         return num.toFixed(digits);
     }
 
+    function renderStructuredText(text) {
+        const raw = String(text || "").trim();
+        if (!raw) return escapeHtml(text || "");
+
+        if ((raw.startsWith("{") && raw.endsWith("}")) || (raw.startsWith("[") && raw.endsWith("]"))) {
+            try {
+                const parsed = JSON.parse(raw);
+                return `<pre class="runtime-json runtime-json-inline">${escapeHtml(JSON.stringify(parsed, null, 2))}</pre>`;
+            } catch (_error) {
+                // Fall through to line-based rendering.
+            }
+        }
+
+        const lines = raw.split(/\r?\n/);
+        const blocks = [];
+        let listItems = [];
+
+        const flushList = () => {
+            if (!listItems.length) return;
+            blocks.push(`<ul class="runtime-profile-list">${listItems.join("")}</ul>`);
+            listItems = [];
+        };
+
+        for (const line of lines) {
+            const textLine = String(line || "").trim();
+            if (!textLine) {
+                flushList();
+                continue;
+            }
+
+            const heading = textLine.match(/^#{1,3}\s+(.+)$/);
+            if (heading) {
+                flushList();
+                blocks.push(`<div class="runtime-profile-title">${escapeHtml(heading[1])}</div>`);
+                continue;
+            }
+
+            const bullet = textLine.match(/^[-*]\s+(.+)$/);
+            if (bullet) {
+                listItems.push(`<li>${escapeHtml(bullet[1])}</li>`);
+                continue;
+            }
+
+            const kv = textLine.match(/^([^:：]{1,32})[:：]\s*(.+)$/);
+            if (kv) {
+                flushList();
+                blocks.push(
+                    `<div class="runtime-profile-kv"><span class="runtime-profile-k">${escapeHtml(kv[1])}</span><span class="runtime-profile-v">${escapeHtml(kv[2])}</span></div>`
+                );
+                continue;
+            }
+
+            flushList();
+            blocks.push(`<p class="runtime-profile-p">${escapeHtml(textLine)}</p>`);
+        }
+        flushList();
+        return blocks.join("") || `<p class="runtime-profile-p">${escapeHtml(raw)}</p>`;
+    }
+
     function appendChatMessage(role, content) {
         const log = get("runtimeChatLog");
         if (!log) return;
@@ -338,7 +397,8 @@
 
         const entityType = escapeHtml(String(payload.entity_type || "").trim());
         const entityId = escapeHtml(String(payload.entity_id || "").trim());
-        const profile = escapeHtml(String(payload.profile || "").trim());
+        const profileRaw = String(payload.profile || "").trim();
+        const profile = renderStructuredText(profileRaw);
         const found = !!payload.found;
         const status = found ? t("runtime.found") : t("runtime.not_found");
 
