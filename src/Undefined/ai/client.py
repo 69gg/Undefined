@@ -816,11 +816,18 @@ class AIClient:
             "send_private_message_callback", self._send_private_message_callback
         )
         tool_context.setdefault("send_message_callback", send_message_callback)
+        tool_context.setdefault(
+            "get_recent_messages_callback", get_recent_messages_callback
+        )
+        tool_context.setdefault("get_image_url_callback", get_image_url_callback)
+        tool_context.setdefault("get_forward_msg_callback", get_forward_msg_callback)
+        tool_context.setdefault("send_like_callback", send_like_callback)
         tool_context.setdefault("sender", sender)
         tool_context.setdefault("history_manager", history_manager)
         tool_context.setdefault("onebot_client", onebot_client)
         tool_context.setdefault("scheduler", scheduler)
         tool_context.setdefault("send_image_callback", self._send_image_callback)
+        tool_context.setdefault("memory_storage", self.memory_storage)
         tool_context.setdefault("knowledge_manager", self._knowledge_manager)
         tool_context.setdefault("cognitive_service", self._cognitive_service)
         tool_context.setdefault("current_question", question)

@@ -18,6 +18,8 @@ from aiohttp.web_response import Response
 
 from Undefined import __version__
 from Undefined.context import RequestContext
+from Undefined.context_resource_registry import collect_context_resources
+from Undefined.render import render_html_to_image, render_markdown_to_html  # noqa: F401
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
 from Undefined.utils.xml import escape_xml_attr, escape_xml_text
 
@@ -813,17 +815,39 @@ class RuntimeAPIServer:
             request_type="private",
             user_id=_VIRTUAL_USER_ID,
             sender_id=permission_sender_id,
-        ):
+        ) as ctx:
+            # 与 ai_coordinator 保持一致：通过 collect_context_resources 自动注入
+            ai_client = self._ctx.ai
+            memory_storage = self._ctx.ai.memory_storage
+            runtime_config = self._ctx.ai.runtime_config
+            sender = virtual_sender
+            history_manager = self._ctx.history_manager
+            onebot_client = self._ctx.onebot
+            scheduler = self._ctx.scheduler
+
+            def send_message_callback(msg: str) -> Awaitable[None]:
+                return send_output(_VIRTUAL_USER_ID, msg)
+
+            get_recent_messages_callback = _get_recent_cb
+            get_image_url_callback = self._ctx.onebot.get_image
+            get_forward_msg_callback = self._ctx.onebot.get_forward_msg
+            resource_vars = dict(globals())
+            resource_vars.update(locals())
+            resources = collect_context_resources(resource_vars)
+            for key, value in resources.items():
+                if value is not None:
+                    ctx.set_resource(key, value)
+
             result = await self._ctx.ai.ask(
                 full_question,
-                send_message_callback=lambda msg: send_output(_VIRTUAL_USER_ID, msg),
-                get_recent_messages_callback=_get_recent_cb,
-                get_image_url_callback=self._ctx.onebot.get_image,
-                get_forward_msg_callback=self._ctx.onebot.get_forward_msg,
-                sender=virtual_sender,
-                history_manager=self._ctx.history_manager,
-                onebot_client=self._ctx.onebot,
-                scheduler=self._ctx.scheduler,
+                send_message_callback=send_message_callback,
+                get_recent_messages_callback=get_recent_messages_callback,
+                get_image_url_callback=get_image_url_callback,
+                get_forward_msg_callback=get_forward_msg_callback,
+                sender=sender,
+                history_manager=history_manager,
+                onebot_client=onebot_client,
+                scheduler=scheduler,
                 extra_context={
                     "is_private_chat": True,
                     "user_id": _VIRTUAL_USER_ID,
