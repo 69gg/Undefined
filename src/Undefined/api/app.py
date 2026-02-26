@@ -850,6 +850,7 @@ class RuntimeAPIServer:
                 scheduler=scheduler,
                 extra_context={
                     "is_private_chat": True,
+                    "request_type": "private",
                     "user_id": _VIRTUAL_USER_ID,
                     "sender_name": _VIRTUAL_USER_NAME,
                     "webui_session": True,
