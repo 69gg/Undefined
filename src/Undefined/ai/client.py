@@ -354,8 +354,11 @@ class AIClient:
             },
             model_name=model_name,
         )
-        await asyncio.wait_for(event.wait(), timeout=480.0)
-        _, result = self._pending_llm_calls.pop(request_id, (None, None))
+        try:
+            await asyncio.wait_for(event.wait(), timeout=480.0)
+        finally:
+            entry = self._pending_llm_calls.pop(request_id, None)
+        _, result = entry if entry is not None else (None, None)
         if isinstance(result, Exception):
             raise result
         return result or {}
