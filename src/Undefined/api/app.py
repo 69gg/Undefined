@@ -673,7 +673,7 @@ class RuntimeAPIServer:
                 return float(created_dt.timestamp())
             return float("-inf")
 
-        items.sort(key=_created_sort_key, reverse=True)
+        items.sort(key=_created_sort_key)
         if limit is not None:
             items = items[:limit]
 

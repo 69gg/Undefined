@@ -258,11 +258,24 @@ class CognitiveService:
                 parts.append(f"## 群聊侧写 — {glabel}\n{gprofile}")
 
         # 相关事件
+        # user_id 和 sender_id 可能不同（如 WebUI 虚拟私聊 user_id=42,
+        # sender_id=superadmin_qq），用 $or 合并检索两侧事件。
         where: dict[str, Any] | None = None
         if group_id:
             where = {"group_id": group_id}
         elif uid:
-            where = {"user_id": uid}
+            uid_set = {uid}
+            if user_id and user_id != uid:
+                uid_set.add(user_id)
+            if sender_id and sender_id != uid:
+                uid_set.add(sender_id)
+            if len(uid_set) == 1:
+                where = {"user_id": uid}
+            else:
+                where = {
+                    "$or": [{"user_id": v} for v in uid_set]
+                    + [{"sender_id": v} for v in uid_set]
+                }
 
         top_k = getattr(config, "auto_top_k", 5)
         events = await self._vector_store.query_events(

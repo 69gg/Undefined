@@ -11,14 +11,7 @@ from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
-_PRONOUN_RE = re.compile(
-    r"(?<![a-zA-Z])(我|你|他|她|它|他们|她们|它们|这位|那位)(?![a-zA-Z])"
-)
-_REL_TIME_RE = re.compile(r"(今天|昨天|明天|刚才|刚刚|稍后|上周|下周|最近)")
-_REL_PLACE_RE = re.compile(r"(这里|那边|本地|当地|这儿|那儿)")
-_ID_RE = re.compile(r"(?<!\d)(\d{5,12})(?!\d)")
 _MAX_LOG_PREVIEW_LEN = 200
-_MAX_HIT_VALUES_PER_PATTERN = 5
 
 _REWRITE_TOOL = {
     "type": "function",
@@ -71,38 +64,6 @@ def _preview_text(text: str, max_len: int = _MAX_LOG_PREVIEW_LEN) -> str:
     if len(compact) <= max_len:
         return compact
     return f"{compact[:max_len]}..."
-
-
-def _collect_unique_hits(
-    pattern: re.Pattern[str], text: str, *, limit: int = _MAX_HIT_VALUES_PER_PATTERN
-) -> list[str]:
-    found: list[str] = []
-    seen: set[str] = set()
-    for match in pattern.finditer(text):
-        value = match.group(0)
-        if value in seen:
-            continue
-        seen.add(value)
-        found.append(value)
-        if len(found) >= limit:
-            break
-    return found
-
-
-def _collect_unique_id_hits(
-    text: str, *, limit: int = _MAX_HIT_VALUES_PER_PATTERN
-) -> list[str]:
-    found: list[str] = []
-    seen: set[str] = set()
-    for match in _ID_RE.finditer(str(text or "")):
-        value = match.group(1)
-        if value in seen:
-            continue
-        seen.add(value)
-        found.append(value)
-        if len(found) >= limit:
-            break
-    return found
 
 
 def _extract_frontmatter_name(markdown: str) -> str:
@@ -255,74 +216,10 @@ class HistorianWorker:
             await asyncio.sleep(config.poll_interval_seconds)
         logger.info("[史官] 轮询循环已结束")
 
-    async def _rewrite_and_validate(
-        self, job: dict[str, Any], job_id: str
-    ) -> tuple[str, bool]:
-        """改写并验证绝对化，返回 (canonical, is_absolute)。"""
-        config = self._config_getter()
-        canonical = await self._rewrite(job, job_id=job_id, attempt=1)
-        is_absolute = True
-        force_gate_bypass = _coerce_bool(job.get("force", False))
-        must_keep_ids = self._collect_source_entity_ids(job)
-        for attempt in range(config.rewrite_max_retry + 1):
-            hit_detail = self._collect_regex_hits(canonical)
-            has_regex_hits = any(hit_detail.values())
-            entity_drift_ids = self._collect_entity_id_drift(
-                job, canonical, must_keep_ids=must_keep_ids
-            )
-            if not has_regex_hits and not entity_drift_ids:
-                break
-            if force_gate_bypass and has_regex_hits and not entity_drift_ids:
-                is_absolute = False
-                logger.warning(
-                    "[史官] 任务 %s force=true，跳过绝对化正则闸门并强制入库: hits=%s preview=%s",
-                    job_id,
-                    hit_detail,
-                    _preview_text(canonical),
-                )
-                break
-            if attempt < config.rewrite_max_retry:
-                gate_feedback = self._build_gate_feedback(
-                    hit_detail,
-                    entity_drift_ids,
-                    force_enabled=force_gate_bypass,
-                )
-                logger.warning(
-                    "[史官] 任务 %s 绝对化闸门命中 (%s/%s): pronoun=%s rel_time=%s rel_place=%s id_drift=%s preview=%s",
-                    job_id,
-                    attempt + 1,
-                    config.rewrite_max_retry + 1,
-                    hit_detail["pronoun"],
-                    hit_detail["relative_time"],
-                    hit_detail["relative_place"],
-                    entity_drift_ids,
-                    _preview_text(canonical),
-                )
-                canonical = await self._rewrite(
-                    job,
-                    job_id=job_id,
-                    attempt=attempt + 2,
-                    must_keep_entity_ids=entity_drift_ids,
-                    gate_feedback=gate_feedback,
-                    previous_rewrite=canonical,
-                )
-            else:
-                is_absolute = False
-                if entity_drift_ids:
-                    logger.warning(
-                        "[史官] 任务 %s 实体ID漂移未修复，保留最后一次AI改写结果: ids=%s preview=%s",
-                        job_id,
-                        entity_drift_ids,
-                        _preview_text(canonical),
-                    )
-                logger.warning(
-                    "[史官] 任务 %s 绝对化失败，降级写入: final_hits=%s id_drift=%s preview=%s",
-                    job_id,
-                    hit_detail,
-                    entity_drift_ids,
-                    _preview_text(canonical),
-                )
-        return canonical, is_absolute
+    async def _rewrite_and_validate(self, job: dict[str, Any], job_id: str) -> str:
+        """改写为绝对化事件文本。"""
+        canonical = await self._rewrite(job, job_id=job_id)
+        return canonical
 
     async def _process_job(self, job_id: str, job: dict[str, Any]) -> None:
         logger.info(
@@ -377,22 +274,18 @@ class HistorianWorker:
             for idx, info_item in enumerate(observation_items):
                 sub_job = {**job, "observations": info_item}
                 event_id = f"{job_id}_{idx}" if len(observation_items) > 1 else job_id
-                canonical, is_absolute = await self._rewrite_and_validate(
-                    sub_job, event_id
-                )
+                canonical = await self._rewrite_and_validate(sub_job, event_id)
                 meta = {
                     **base_metadata,
                     "has_observations": True,
-                    "is_absolute": is_absolute,
                 }
                 await self._vector_store.upsert_event(event_id, canonical, meta)
                 canonicals.append(canonical)
                 logger.info(
-                    "[史官] 任务 %s 事件入库完成(%s/%s): is_absolute=%s len=%s",
+                    "[史官] 任务 %s 事件入库完成(%s/%s): len=%s",
                     event_id,
                     idx + 1,
                     len(observation_items),
-                    is_absolute,
                     len(canonical),
                 )
 
@@ -408,104 +301,6 @@ class HistorianWorker:
 
         await self._job_queue.complete(job_id)
         logger.info("[史官] 任务 %s 处理完成", job_id)
-
-    def _check_regex(self, text: str) -> bool:
-        return any(self._collect_regex_hits(text).values())
-
-    def _collect_regex_hits(self, text: str) -> dict[str, list[str]]:
-        content = str(text or "")
-        return {
-            "pronoun": _collect_unique_hits(_PRONOUN_RE, content),
-            "relative_time": _collect_unique_hits(_REL_TIME_RE, content),
-            "relative_place": _collect_unique_hits(_REL_PLACE_RE, content),
-        }
-
-    def _build_gate_feedback(
-        self,
-        hit_detail: dict[str, list[str]],
-        entity_drift_ids: list[str],
-        *,
-        force_enabled: bool,
-    ) -> str:
-        lines: list[str] = []
-        pronouns = [
-            str(v).strip() for v in hit_detail.get("pronoun", []) if str(v).strip()
-        ]
-        rel_times = [
-            str(v).strip()
-            for v in hit_detail.get("relative_time", [])
-            if str(v).strip()
-        ]
-        rel_places = [
-            str(v).strip()
-            for v in hit_detail.get("relative_place", [])
-            if str(v).strip()
-        ]
-        if pronouns:
-            lines.append(f"- 命中代词: {', '.join(pronouns)}")
-        if rel_times:
-            lines.append(f"- 命中相对时间: {', '.join(rel_times)}")
-        if rel_places:
-            lines.append(f"- 命中相对地点: {', '.join(rel_places)}")
-        if entity_drift_ids:
-            lines.append(f"- 命中实体ID漂移: {', '.join(entity_drift_ids)}")
-        lines.append(f"- 当前 force: {'true' if force_enabled else 'false'}")
-        if force_enabled:
-            lines.append(
-                "- force=true 仅可放宽专有名词中的相对词；实体ID漂移仍然不允许。"
-            )
-        else:
-            lines.append("- force=false 时必须彻底消除相对表达并修复ID漂移。")
-        return "\n".join(lines)
-
-    def _collect_source_entity_ids(self, job: dict[str, Any]) -> list[str]:
-        # 向后兼容：优先 memo/observations，fallback action_summary/new_info
-        memo_text = str(
-            job.get("memo") if "memo" in job else job.get("action_summary", "")
-        )
-        observations_text = str(
-            job.get("observations")
-            if "observations" in job
-            else job.get("new_info", "")
-        )
-        source_parts = [
-            memo_text,
-            observations_text,
-        ]
-        source_ids = _collect_unique_id_hits(" ".join(source_parts), limit=50)
-        if not source_ids:
-            return []
-
-        context_ids: set[str] = set()
-        for key in ("sender_id", "user_id", "group_id"):
-            value = str(job.get(key, "")).strip()
-            if value:
-                context_ids.update(_collect_unique_id_hits(value, limit=50))
-        message_ids = job.get("message_ids", [])
-        if isinstance(message_ids, list):
-            for value in message_ids:
-                text = str(value).strip()
-                if text:
-                    context_ids.update(_collect_unique_id_hits(text, limit=50))
-
-        return [sid for sid in source_ids if sid not in context_ids]
-
-    def _collect_entity_id_drift(
-        self,
-        job: dict[str, Any],
-        canonical: str,
-        *,
-        must_keep_ids: list[str] | None = None,
-    ) -> list[str]:
-        required_ids = (
-            must_keep_ids
-            if must_keep_ids is not None
-            else self._collect_source_entity_ids(job)
-        )
-        if not required_ids:
-            return []
-        canonical_ids = set(_collect_unique_id_hits(canonical, limit=50))
-        return [eid for eid in required_ids if eid not in canonical_ids]
 
     def _extract_required_tool_args(
         self,
@@ -582,10 +377,6 @@ class HistorianWorker:
         job: dict[str, Any],
         *,
         job_id: str = "",
-        attempt: int = 1,
-        must_keep_entity_ids: list[str] | None = None,
-        gate_feedback: str | None = None,
-        previous_rewrite: str | None = None,
     ) -> str:
         from Undefined.utils.resources import read_text_resource
 
@@ -623,9 +414,8 @@ class HistorianWorker:
             if compact_targets:
                 profile_targets_text = ", ".join(compact_targets)
         logger.debug(
-            "[史官] 任务 %s 发起绝对化改写: attempt=%s memo_len=%s observations_len=%s",
+            "[史官] 任务 %s 发起绝对化改写: memo_len=%s observations_len=%s",
             job_id or "unknown",
-            attempt,
             len(memo),
             len(observations),
         )
@@ -661,33 +451,6 @@ class HistorianWorker:
             source_message=source_message or "（无）",
             recent_messages=recent_messages_text or "（无）",
         )
-        if must_keep_entity_ids:
-            unique_ids = [sid for sid in must_keep_entity_ids if str(sid).strip()]
-            if unique_ids:
-                prompt += (
-                    "\n\n额外硬约束（本轮必须满足）：\n"
-                    "- 以下实体ID在原始摘要中已显式出现，改写结果必须原样保留，不得改写为 sender_id 或其他ID：\n"
-                    f"- must_keep_entity_ids: {', '.join(unique_ids)}\n"
-                    "- 若无法判断昵称，请至少保留对应的数字ID。"
-                )
-        if gate_feedback and str(gate_feedback).strip():
-            gate_parts: list[str] = [
-                "",
-                "",
-                "上次提交被“绝对化闸门”拦截，"
-                "原因如下（请在上次改写结果基础上逐项修正后再提交）：",
-                gate_feedback.strip(),
-                "- 返回前请自检：不得包含代词/相对时间/相对地点；"
-                "且不得丢失必须保留的实体ID。",
-                "- 若闸门属于误判（如命中词属于专有名词、用户昵称、作品名等），"
-                "AI 调用 end 工具时可使用 force=true 跳过正则闸门。",
-            ]
-            prompt += "\n".join(gate_parts)
-            if previous_rewrite and str(previous_rewrite).strip():
-                prompt += (
-                    "\n\n你上次的改写结果"
-                    "（请在此基础上修正，而非从头改写）：\n" + previous_rewrite.strip()
-                )
         response = await self._ai_client.submit_background_llm_call(
             model_config=self._model_config or self._ai_client.agent_config,
             messages=[{"role": "user", "content": prompt}],
@@ -700,14 +463,12 @@ class HistorianWorker:
             expected_tool_name="submit_rewrite",
             stage="historian_rewrite",
             job_id=job_id or "unknown",
-            attempt=attempt,
         )
 
         text = str(args.get("text", "")).strip()
         logger.debug(
-            "[史官] 任务 %s 收到改写候选: attempt=%s len=%s preview=%s",
+            "[史官] 任务 %s 收到改写结果: len=%s preview=%s",
             job_id or "unknown",
-            attempt,
             len(text),
             _preview_text(text),
         )
