@@ -149,9 +149,12 @@ class ToolManager:
         sender = context.get("sender")
         group_id = context.get("group_id")
 
+        user_id = context.get("user_id")
         try:
             if sender and isinstance(group_id, int) and group_id > 0:
                 await sender.send_group_message(group_id, message, mark_sent=False)
+            elif sender and isinstance(user_id, int) and user_id > 0:
+                await sender.send_private_message(user_id, message, mark_sent=False)
         except Exception as exc:
             logger.debug("[彩蛋] 发送提示消息失败: %s", redact_string(str(exc)))
 
