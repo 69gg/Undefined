@@ -108,7 +108,7 @@ async def gzip_middleware(
         file_path: Path | None = getattr(response, "_path", None)
         if file_path is not None and file_path.suffix.lower() in _GZIP_FILE_EXTENSIONS:
             try:
-                raw = file_path.read_bytes()
+                raw = await asyncio.to_thread(file_path.read_bytes)
             except OSError:
                 return response
             if _GZIP_MIN_BYTES <= len(raw) <= _GZIP_MAX_BYTES:

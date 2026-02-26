@@ -949,7 +949,10 @@ class CommandDispatcher:
 
         async def _send_target_message(message: str) -> None:
             if scope == "private":
-                target_user_id = int(user_id or 0)
+                if user_id is None:
+                    logger.warning("[命令] 私聊命令无法发送：user_id 为 None")
+                    return
+                target_user_id = int(user_id)
                 if send_private_callback is not None:
                     await send_private_callback(target_user_id, message)
                 else:
