@@ -30,6 +30,32 @@
         el.textContent = payload ? JSON.stringify(payload, null, 2) : "--";
     }
 
+    function readInputValue(id) {
+        const el = get(id);
+        if (!el) return "";
+        return String(el.value || "").trim();
+    }
+
+    function appendQueryParam(params, key, value) {
+        const text = String(value || "").trim();
+        if (!text) return;
+        params.set(key, text);
+    }
+
+    function appendPositiveIntParam(params, key, value) {
+        const text = String(value || "").trim();
+        if (!text) return;
+        const num = Number.parseInt(text, 10);
+        if (!Number.isFinite(num) || num <= 0) return;
+        params.set(key, String(num));
+    }
+
+    function formatNumeric(value, digits = 4) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return "";
+        return num.toFixed(digits);
+    }
+
     function appendChatMessage(role, content) {
         const log = get("runtimeChatLog");
         if (!log) return;
@@ -121,6 +147,15 @@
         }
     }
 
+    async function fetchJsonOrThrow(path) {
+        const res = await api(path);
+        const data = await parseJsonSafe(res);
+        if (!res.ok || (data && data.error)) {
+            throw new Error(buildRequestError(res, data));
+        }
+        return data || {};
+    }
+
     function buildRequestError(res, payload) {
         const fallback = `${res.status} ${res.statusText || "Request failed"}`.trim();
         if (!payload || typeof payload !== "object") return fallback;
@@ -192,16 +227,29 @@
         if (buffer.trim()) emitBlock(buffer);
     }
 
-    function renderMemoryItems(items) {
+    function renderMemoryItems(payload) {
         const container = get("runtimeMemoryList");
         const meta = get("runtimeMemoryMeta");
         if (!container || !meta) return;
+        const items = payload && Array.isArray(payload.items) ? payload.items : [];
+        const queryInfo = payload && payload.query && typeof payload.query === "object"
+            ? payload.query
+            : {};
         if (!Array.isArray(items) || items.length === 0) {
             meta.textContent = i18nFormat("runtime.total", { count: 0 });
             container.innerHTML = `<div class="empty-state">${t("runtime.empty")}</div>`;
             return;
         }
-        meta.textContent = i18nFormat("runtime.total", { count: items.length });
+        const parts = [i18nFormat("runtime.total", { count: items.length })];
+        const queryText = String(queryInfo.q || "").trim();
+        if (queryText) parts.push(`q=${queryText}`);
+        const topK = String(queryInfo.top_k || "").trim();
+        if (topK) parts.push(`top_k=${topK}`);
+        const timeFrom = String(queryInfo.time_from || "").trim();
+        if (timeFrom) parts.push(`from=${timeFrom}`);
+        const timeTo = String(queryInfo.time_to || "").trim();
+        if (timeTo) parts.push(`to=${timeTo}`);
+        meta.textContent = parts.join(" · ");
         container.innerHTML = items
             .map((item) => {
                 const uuid = escapeHtml(item.uuid || "");
@@ -212,6 +260,95 @@
             .join("");
     }
 
+    function setListMessage(metaId, listId, message) {
+        const meta = get(metaId);
+        const list = get(listId);
+        const msg = String(message || "").trim() || t("runtime.empty");
+        if (meta) meta.textContent = msg;
+        if (list) {
+            list.innerHTML = `<div class="empty-state">${escapeHtml(msg)}</div>`;
+        }
+    }
+
+    function renderCognitiveItems(metaId, listId, payload) {
+        const meta = get(metaId);
+        const list = get(listId);
+        if (!meta || !list) return;
+        const items = payload && Array.isArray(payload.items) ? payload.items : [];
+        const count = Number.isFinite(Number(payload && payload.count))
+            ? Number(payload.count)
+            : items.length;
+        meta.textContent = i18nFormat("runtime.total", { count });
+        if (!items.length) {
+            list.innerHTML = `<div class="empty-state">${t("runtime.empty")}</div>`;
+            return;
+        }
+
+        const preferredMetaKeys = [
+            "timestamp_local",
+            "request_type",
+            "group_id",
+            "user_id",
+            "sender_id",
+            "entity_type",
+            "entity_id",
+            "request_id",
+        ];
+
+        list.innerHTML = items.map((item, index) => {
+            const doc = escapeHtml(String((item && item.document) || "").trim());
+            const md = item && typeof item.metadata === "object" && item.metadata
+                ? item.metadata
+                : {};
+            const dist = formatNumeric(item && item.distance);
+            const rerank = formatNumeric(item && item.rerank_score);
+            const timestamp = escapeHtml(String(md.timestamp_local || "").trim());
+            const headLabel = timestamp || `#${index + 1}`;
+            const tags = [];
+            if (dist) tags.push(`<span class="runtime-tag">distance ${dist}</span>`);
+            if (rerank) tags.push(`<span class="runtime-tag">rerank ${rerank}</span>`);
+
+            const metaRows = preferredMetaKeys
+                .filter((key) => md[key] !== undefined && md[key] !== null && String(md[key]).trim() !== "")
+                .map((key) => {
+                    const raw = md[key];
+                    const text = (raw && typeof raw === "object")
+                        ? JSON.stringify(raw)
+                        : String(raw);
+                    return `<span class="runtime-kv-item"><span>${escapeHtml(key)}</span><code>${escapeHtml(text)}</code></span>`;
+                })
+                .join("");
+
+            return `<div class="runtime-list-item">
+                <div class="runtime-list-head"><span>${headLabel}</span><div class="runtime-tags">${tags.join("")}</div></div>
+                <div class="runtime-doc">${doc || "--"}</div>
+                ${metaRows ? `<div class="runtime-kv">${metaRows}</div>` : ""}
+            </div>`;
+        }).join("");
+    }
+
+    function renderProfileDetail(payload) {
+        const meta = get("runtimeProfileMeta");
+        const container = get("runtimeProfileResult");
+        if (!meta || !container) return;
+        if (!payload || typeof payload !== "object") {
+            setListMessage("runtimeProfileMeta", "runtimeProfileResult", t("runtime.empty"));
+            return;
+        }
+
+        const entityType = escapeHtml(String(payload.entity_type || "").trim());
+        const entityId = escapeHtml(String(payload.entity_id || "").trim());
+        const profile = escapeHtml(String(payload.profile || "").trim());
+        const found = !!payload.found;
+        const status = found ? t("runtime.found") : t("runtime.not_found");
+
+        meta.textContent = `${entityType || "-"} / ${entityId || "-"} · ${status}`;
+        container.innerHTML = `<div class="runtime-list-item">
+            <div class="runtime-list-head"><code>${entityType || "-"}</code><code>${entityId || "-"}</code></div>
+            <div class="runtime-doc">${profile || t("runtime.empty")}</div>
+        </div>`;
+    }
+
     function setProbeUnavailable(message) {
         const msg = String(message || RUNTIME_DISABLED_ERROR);
         setJsonBlock("runtimeProbeInternal", { error: msg });
@@ -220,15 +357,10 @@
 
     function setMemoryUnavailable(message) {
         const msg = String(message || RUNTIME_DISABLED_ERROR);
-        const container = get("runtimeMemoryList");
-        const meta = get("runtimeMemoryMeta");
-        if (meta) meta.textContent = msg;
-        if (container) {
-            container.innerHTML = `<div class="empty-state">${escapeHtml(msg)}</div>`;
-        }
-        setJsonBlock("runtimeEventsResult", { error: msg });
-        setJsonBlock("runtimeProfilesResult", { error: msg });
-        setJsonBlock("runtimeProfileResult", { error: msg });
+        setListMessage("runtimeMemoryMeta", "runtimeMemoryList", msg);
+        setListMessage("runtimeEventsMeta", "runtimeEventsResult", msg);
+        setListMessage("runtimeProfilesMeta", "runtimeProfilesResult", msg);
+        setListMessage("runtimeProfileMeta", "runtimeProfileResult", msg);
     }
 
     async function fetchRuntimeMeta() {
@@ -264,65 +396,73 @@
             setMemoryUnavailable(t("runtime.disabled"));
             return;
         }
-        const input = get("runtimeMemoryQuery");
-        const query = (input && input.value ? input.value : "").trim();
+        const query = readInputValue("runtimeMemoryQuery");
+        const topK = readInputValue("runtimeMemoryTopK");
+        const timeFrom = readInputValue("runtimeMemoryTimeFrom");
+        const timeTo = readInputValue("runtimeMemoryTimeTo");
         const params = new URLSearchParams();
-        if (query) params.set("q", query);
-        const res = await api(`/api/runtime/memory?${params.toString()}`);
-        const data = await res.json();
-        renderMemoryItems(data.items || []);
+        appendQueryParam(params, "q", query);
+        appendPositiveIntParam(params, "top_k", topK);
+        appendQueryParam(params, "time_from", timeFrom);
+        appendQueryParam(params, "time_to", timeTo);
+        const data = await fetchJsonOrThrow(`/api/runtime/memory?${params.toString()}`);
+        renderMemoryItems(data);
     }
 
     async function searchEvents() {
         if (!(await ensureRuntimeEnabled())) {
-            setJsonBlock("runtimeEventsResult", { error: t("runtime.disabled") });
+            setListMessage("runtimeEventsMeta", "runtimeEventsResult", t("runtime.disabled"));
             return;
         }
-        const input = get("runtimeEventsQuery");
-        const query = (input && input.value ? input.value : "").trim();
+        const query = readInputValue("runtimeEventsQuery");
         if (!query) {
-            setJsonBlock("runtimeEventsResult", { error: "q is required" });
+            setListMessage("runtimeEventsMeta", "runtimeEventsResult", "q is required");
             return;
         }
-        const params = new URLSearchParams({ q: query });
-        const res = await api(`/api/runtime/cognitive/events?${params.toString()}`);
-        const data = await res.json();
-        setJsonBlock("runtimeEventsResult", data);
+        const params = new URLSearchParams();
+        appendQueryParam(params, "q", query);
+        appendPositiveIntParam(params, "top_k", readInputValue("runtimeEventsTopK"));
+        appendQueryParam(params, "request_type", readInputValue("runtimeEventsRequestType"));
+        appendQueryParam(params, "target_user_id", readInputValue("runtimeEventsTargetUserId"));
+        appendQueryParam(params, "target_group_id", readInputValue("runtimeEventsTargetGroupId"));
+        appendQueryParam(params, "sender_id", readInputValue("runtimeEventsSenderId"));
+        appendQueryParam(params, "time_from", readInputValue("runtimeEventsTimeFrom"));
+        appendQueryParam(params, "time_to", readInputValue("runtimeEventsTimeTo"));
+        const data = await fetchJsonOrThrow(`/api/runtime/cognitive/events?${params.toString()}`);
+        renderCognitiveItems("runtimeEventsMeta", "runtimeEventsResult", data);
     }
 
     async function searchProfiles() {
         if (!(await ensureRuntimeEnabled())) {
-            setJsonBlock("runtimeProfilesResult", { error: t("runtime.disabled") });
+            setListMessage("runtimeProfilesMeta", "runtimeProfilesResult", t("runtime.disabled"));
             return;
         }
-        const input = get("runtimeProfilesQuery");
-        const query = (input && input.value ? input.value : "").trim();
+        const query = readInputValue("runtimeProfilesQuery");
         if (!query) {
-            setJsonBlock("runtimeProfilesResult", { error: "q is required" });
+            setListMessage("runtimeProfilesMeta", "runtimeProfilesResult", "q is required");
             return;
         }
-        const params = new URLSearchParams({ q: query });
-        const res = await api(`/api/runtime/cognitive/profiles?${params.toString()}`);
-        const data = await res.json();
-        setJsonBlock("runtimeProfilesResult", data);
+        const params = new URLSearchParams();
+        appendQueryParam(params, "q", query);
+        appendPositiveIntParam(params, "top_k", readInputValue("runtimeProfilesTopK"));
+        appendQueryParam(params, "entity_type", readInputValue("runtimeProfilesEntityType"));
+        const data = await fetchJsonOrThrow(`/api/runtime/cognitive/profiles?${params.toString()}`);
+        renderCognitiveItems("runtimeProfilesMeta", "runtimeProfilesResult", data);
     }
 
     async function fetchProfileByEntity() {
         if (!(await ensureRuntimeEnabled())) {
-            setJsonBlock("runtimeProfileResult", { error: t("runtime.disabled") });
+            setListMessage("runtimeProfileMeta", "runtimeProfileResult", t("runtime.disabled"));
             return;
         }
-        const typeInput = get("runtimeProfileEntityType");
-        const idInput = get("runtimeProfileEntityId");
-        const entityType = (typeInput && typeInput.value ? typeInput.value : "").trim();
-        const entityId = (idInput && idInput.value ? idInput.value : "").trim();
+        const entityType = readInputValue("runtimeProfileEntityType");
+        const entityId = readInputValue("runtimeProfileEntityId");
         if (!entityType || !entityId) {
-            setJsonBlock("runtimeProfileResult", { error: "entity_type/entity_id are required" });
+            setListMessage("runtimeProfileMeta", "runtimeProfileResult", "entity_type/entity_id are required");
             return;
         }
-        const res = await api(`/api/runtime/cognitive/profile/${encodeURIComponent(entityType)}/${encodeURIComponent(entityId)}`);
-        const data = await res.json();
-        setJsonBlock("runtimeProfileResult", data);
+        const data = await fetchJsonOrThrow(`/api/runtime/cognitive/profile/${encodeURIComponent(entityType)}/${encodeURIComponent(entityId)}`);
+        renderProfileDetail(data);
     }
 
     async function runQueryAction(kind, buttonId, action) {
@@ -534,6 +674,9 @@
                 }
             });
         };
+        const bindEnterMany = (ids, handler) => {
+            ids.forEach((id) => bindEnter(id, handler));
+        };
 
         const probeRefresh = get("btnProbeRefresh");
         if (probeRefresh) probeRefresh.addEventListener("click", refreshProbes);
@@ -548,15 +691,37 @@
 
         const memoryBtn = get("btnRuntimeMemorySearch");
         if (memoryBtn) memoryBtn.addEventListener("click", runMemorySearch);
-        bindEnter("runtimeMemoryQuery", runMemorySearch);
+        bindEnterMany(
+            [
+                "runtimeMemoryQuery",
+                "runtimeMemoryTopK",
+                "runtimeMemoryTimeFrom",
+                "runtimeMemoryTimeTo",
+            ],
+            runMemorySearch
+        );
 
         const eventsBtn = get("btnRuntimeEventsSearch");
         if (eventsBtn) eventsBtn.addEventListener("click", runEventsSearch);
-        bindEnter("runtimeEventsQuery", runEventsSearch);
+        bindEnterMany(
+            [
+                "runtimeEventsQuery",
+                "runtimeEventsTopK",
+                "runtimeEventsTargetUserId",
+                "runtimeEventsTargetGroupId",
+                "runtimeEventsSenderId",
+                "runtimeEventsTimeFrom",
+                "runtimeEventsTimeTo",
+            ],
+            runEventsSearch
+        );
 
         const profilesBtn = get("btnRuntimeProfilesSearch");
         if (profilesBtn) profilesBtn.addEventListener("click", runProfilesSearch);
-        bindEnter("runtimeProfilesQuery", runProfilesSearch);
+        bindEnterMany(
+            ["runtimeProfilesQuery", "runtimeProfilesTopK", "runtimeProfilesEntityType"],
+            runProfilesSearch
+        );
 
         const profileGetBtn = get("btnRuntimeProfileGet");
         if (profileGetBtn) profileGetBtn.addEventListener("click", runProfileGet);

@@ -135,6 +135,17 @@
 .runtime-head { gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .runtime-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .runtime-inline .form-control { min-width: 160px; }
+.runtime-query-stack {
+  display: grid;
+  gap: 8px;
+  flex: 1 1 720px;
+  min-width: min(100%, 560px);
+}
+.runtime-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 8px;
+}
 .runtime-inline-action {
   flex-wrap: nowrap;
   gap: 10px;
@@ -217,6 +228,52 @@
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+}
+.runtime-doc {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.runtime-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.runtime-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+.runtime-kv {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 6px 10px;
+}
+.runtime-kv-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+.runtime-kv-item code {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
 }
 .runtime-chat-log {
   border: 1px solid var(--border-color);

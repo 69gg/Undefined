@@ -49,11 +49,11 @@
                     <button class="btn ghost" data-action="open-app" data-tab="logs"
                         data-i18n="landing.logs">日志查看</button>
                     <button class="btn ghost" data-action="open-app" data-tab="probes"
-                        data-i18n="landing.probes">探针</button>
+                        data-i18n="landing.probes">探针诊断</button>
                     <button class="btn ghost" data-action="open-app" data-tab="memory"
-                        data-i18n="landing.memory">记忆</button>
+                        data-i18n="landing.memory">记忆检索</button>
                     <button class="btn ghost" data-action="open-app" data-tab="chat"
-                        data-i18n="landing.chat">AI Chat</button>
+                        data-i18n="landing.chat">智能对话</button>
                     <button class="btn ghost" data-action="open-app" data-tab="about"
                         data-i18n="landing.about">关于项目</button>
                 </div>
@@ -126,13 +126,13 @@
                     Logs
                 </li>
                 <li class="nav-item" data-tab="probes" data-i18n="tabs.probes" role="button" tabindex="0">
-                    Probes
+                    探针诊断
                 </li>
                 <li class="nav-item" data-tab="memory" data-i18n="tabs.memory" role="button" tabindex="0">
-                    Memory
+                    记忆检索
                 </li>
                 <li class="nav-item" data-tab="chat" data-i18n="tabs.chat" role="button" tabindex="0">
-                    Chat
+                    智能对话
                 </li>
                 <li class="nav-item" data-tab="about" data-i18n="tabs.about" role="button" tabindex="0">
                     About
@@ -192,9 +192,9 @@
                         <button class="nav-item active" data-tab="overview" data-i18n="tabs.overview">Overview</button>
                         <button class="nav-item" data-tab="config" data-i18n="tabs.config">Configuration</button>
                         <button class="nav-item" data-tab="logs" data-i18n="tabs.logs">Logs</button>
-                        <button class="nav-item" data-tab="probes" data-i18n="tabs.probes">Probes</button>
-                        <button class="nav-item" data-tab="memory" data-i18n="tabs.memory">Memory</button>
-                        <button class="nav-item" data-tab="chat" data-i18n="tabs.chat">Chat</button>
+                        <button class="nav-item" data-tab="probes" data-i18n="tabs.probes">探针诊断</button>
+                        <button class="nav-item" data-tab="memory" data-i18n="tabs.memory">记忆检索</button>
+                        <button class="nav-item" data-tab="chat" data-i18n="tabs.chat">智能对话</button>
                         <button class="nav-item" data-tab="about" data-i18n="tabs.about">About</button>
                     </div>
                     <div class="mobile-actions">
@@ -379,7 +379,7 @@
                 <section id="tab-memory" class="tab-content">
                     <div class="header">
                         <div>
-                            <h1 class="page-title" data-i18n="memory.title">记忆与侧写</h1>
+                            <h1 class="page-title" data-i18n="memory.title">记忆检索</h1>
                             <p class="page-subtitle" data-i18n="memory.subtitle">只读检索记忆、认知事件与侧写。</p>
                         </div>
                         <div class="toolbar">
@@ -391,30 +391,61 @@
                         <div class="card runtime-card">
                             <div class="panel-row runtime-head">
                                 <div class="card-title" data-i18n="runtime.cognitive_events">认知事件检索</div>
-                                <div class="runtime-inline runtime-inline-action">
-                                    <input id="runtimeEventsQuery" type="search" class="form-control form-control-sm"
-                                        data-i18n-placeholder="runtime.events_placeholder" placeholder="输入事件关键词..." />
-                                    <button id="btnRuntimeEventsSearch" class="btn runtime-inline-submit-btn" type="button">
-                                        <span class="runtime-inline-submit-icon" aria-hidden="true">⏎</span>
-                                        <span class="sr-only" data-i18n="runtime.search">查询</span>
-                                    </button>
+                                <div class="runtime-query-stack">
+                                    <div class="runtime-inline runtime-inline-action">
+                                        <input id="runtimeEventsQuery" type="search" class="form-control form-control-sm"
+                                            data-i18n-placeholder="runtime.events_placeholder" placeholder="输入事件关键词..." />
+                                        <button id="btnRuntimeEventsSearch" class="btn runtime-inline-submit-btn" type="button">
+                                            <span class="runtime-inline-submit-icon" aria-hidden="true">⏎</span>
+                                            <span class="sr-only" data-i18n="runtime.search">查询</span>
+                                        </button>
+                                    </div>
+                                    <div class="runtime-filters">
+                                        <input id="runtimeEventsTopK" type="number" min="1" step="1" class="form-control form-control-sm"
+                                            data-i18n-placeholder="runtime.topk_placeholder" placeholder="top_k" />
+                                        <select id="runtimeEventsRequestType" class="form-control form-control-sm">
+                                            <option value="" data-i18n="runtime.request_type_all">全部类型</option>
+                                            <option value="private" data-i18n="runtime.request_type_private">私聊</option>
+                                            <option value="group" data-i18n="runtime.request_type_group">群聊</option>
+                                        </select>
+                                        <input id="runtimeEventsTargetUserId" type="text" class="form-control form-control-sm"
+                                            data-i18n-placeholder="runtime.target_user_placeholder" placeholder="目标用户ID" />
+                                        <input id="runtimeEventsTargetGroupId" type="text" class="form-control form-control-sm"
+                                            data-i18n-placeholder="runtime.target_group_placeholder" placeholder="目标群ID" />
+                                        <input id="runtimeEventsSenderId" type="text" class="form-control form-control-sm"
+                                            data-i18n-placeholder="runtime.sender_placeholder" placeholder="发送者ID" />
+                                        <input id="runtimeEventsTimeFrom" type="datetime-local" class="form-control form-control-sm"
+                                            title="time_from" />
+                                        <input id="runtimeEventsTimeTo" type="datetime-local" class="form-control form-control-sm"
+                                            title="time_to" />
+                                    </div>
                                 </div>
                             </div>
-                            <pre id="runtimeEventsResult" class="runtime-json">--</pre>
+                            <div id="runtimeEventsMeta" class="log-meta"></div>
+                            <div id="runtimeEventsResult" class="runtime-list"></div>
                         </div>
                         <div class="card runtime-card">
                             <div class="panel-row runtime-head">
                                 <div class="card-title" data-i18n="runtime.cognitive_profiles">认知侧写检索</div>
-                                <div class="runtime-inline runtime-inline-action">
-                                    <input id="runtimeProfilesQuery" type="search" class="form-control form-control-sm"
-                                        data-i18n-placeholder="runtime.profiles_placeholder" placeholder="输入侧写关键词..." />
-                                    <button id="btnRuntimeProfilesSearch" class="btn runtime-inline-submit-btn" type="button">
-                                        <span class="runtime-inline-submit-icon" aria-hidden="true">⏎</span>
-                                        <span class="sr-only" data-i18n="runtime.search">查询</span>
-                                    </button>
+                                <div class="runtime-query-stack">
+                                    <div class="runtime-inline runtime-inline-action">
+                                        <input id="runtimeProfilesQuery" type="search" class="form-control form-control-sm"
+                                            data-i18n-placeholder="runtime.profiles_placeholder" placeholder="输入侧写关键词..." />
+                                        <button id="btnRuntimeProfilesSearch" class="btn runtime-inline-submit-btn" type="button">
+                                            <span class="runtime-inline-submit-icon" aria-hidden="true">⏎</span>
+                                            <span class="sr-only" data-i18n="runtime.search">查询</span>
+                                        </button>
+                                    </div>
+                                    <div class="runtime-filters">
+                                        <input id="runtimeProfilesTopK" type="number" min="1" step="1" class="form-control form-control-sm"
+                                            data-i18n-placeholder="runtime.topk_placeholder" placeholder="top_k" />
+                                        <input id="runtimeProfilesEntityType" type="text" class="form-control form-control-sm"
+                                            data-i18n-placeholder="runtime.entity_type_placeholder" placeholder="entity_type" />
+                                    </div>
                                 </div>
                             </div>
-                            <pre id="runtimeProfilesResult" class="runtime-json">--</pre>
+                            <div id="runtimeProfilesMeta" class="log-meta"></div>
+                            <div id="runtimeProfilesResult" class="runtime-list"></div>
                         </div>
                     </div>
 
@@ -432,19 +463,30 @@
                                 </button>
                             </div>
                         </div>
-                        <pre id="runtimeProfileResult" class="runtime-json">--</pre>
+                        <div id="runtimeProfileMeta" class="log-meta"></div>
+                        <div id="runtimeProfileResult" class="runtime-list"></div>
                     </div>
 
                     <div class="card runtime-card">
                         <div class="panel-row runtime-head">
                             <div class="card-title" data-i18n="runtime.memory_title">长期记忆查询</div>
-                            <div class="runtime-inline runtime-inline-action">
-                                <input id="runtimeMemoryQuery" type="search" class="form-control form-control-sm"
-                                    data-i18n-placeholder="runtime.memory_query_placeholder" placeholder="输入关键词..." />
-                                <button id="btnRuntimeMemorySearch" class="btn runtime-inline-submit-btn" type="button">
-                                    <span class="runtime-inline-submit-icon" aria-hidden="true">⏎</span>
-                                    <span class="sr-only" data-i18n="runtime.search">查询</span>
-                                </button>
+                            <div class="runtime-query-stack">
+                                <div class="runtime-inline runtime-inline-action">
+                                    <input id="runtimeMemoryQuery" type="search" class="form-control form-control-sm"
+                                        data-i18n-placeholder="runtime.memory_query_placeholder" placeholder="输入关键词..." />
+                                    <button id="btnRuntimeMemorySearch" class="btn runtime-inline-submit-btn" type="button">
+                                        <span class="runtime-inline-submit-icon" aria-hidden="true">⏎</span>
+                                        <span class="sr-only" data-i18n="runtime.search">查询</span>
+                                    </button>
+                                </div>
+                                <div class="runtime-filters">
+                                    <input id="runtimeMemoryTopK" type="number" min="1" step="1" class="form-control form-control-sm"
+                                        data-i18n-placeholder="runtime.topk_placeholder" placeholder="top_k" />
+                                    <input id="runtimeMemoryTimeFrom" type="datetime-local" class="form-control form-control-sm"
+                                        title="time_from" />
+                                    <input id="runtimeMemoryTimeTo" type="datetime-local" class="form-control form-control-sm"
+                                        title="time_to" />
+                                </div>
                             </div>
                         </div>
                         <div id="runtimeMemoryMeta" class="log-meta"></div>
@@ -456,7 +498,7 @@
                 <section id="tab-chat" class="tab-content">
                     <div class="header">
                         <div>
-                            <h1 class="page-title" data-i18n="chat.title">AI Chat</h1>
+                            <h1 class="page-title" data-i18n="chat.title">智能对话</h1>
                             <p class="page-subtitle" data-i18n="chat.subtitle">虚拟私聊 system#42。</p>
                         </div>
                     </div>

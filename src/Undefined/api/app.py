@@ -93,6 +93,19 @@ def _optional_query_param(request: web.Request, key: str) -> str | None:
     return text
 
 
+def _parse_query_time(value: str | None) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    candidates = [text, text.replace("Z", "+00:00")]
+    if "T" in text:
+        candidates.append(text.replace("T", " "))
+    for candidate in candidates:
+        with suppress(ValueError):
+            return datetime.fromisoformat(candidate)
+    return None
+
+
 def _to_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -446,15 +459,49 @@ class RuntimeAPIServer:
 
     async def _memory_handler(self, request: web.Request) -> Response:
         query = str(request.query.get("q", "") or "").strip().lower()
+        top_k_raw = _optional_query_param(request, "top_k")
+        time_from_raw = _optional_query_param(request, "time_from")
+        time_to_raw = _optional_query_param(request, "time_to")
         memory_storage = getattr(self._ctx.ai, "memory_storage", None)
         if memory_storage is None:
             return _json_error("Memory storage not ready", status=503)
 
+        limit: int | None = None
+        if top_k_raw is not None:
+            try:
+                limit = int(top_k_raw)
+            except ValueError:
+                return _json_error("top_k must be an integer", status=400)
+            if limit <= 0:
+                return _json_error("top_k must be > 0", status=400)
+
+        time_from_dt = _parse_query_time(time_from_raw)
+        if time_from_raw is not None and time_from_dt is None:
+            return _json_error("time_from must be ISO datetime", status=400)
+        time_to_dt = _parse_query_time(time_to_raw)
+        if time_to_raw is not None and time_to_dt is None:
+            return _json_error("time_to must be ISO datetime", status=400)
+        if time_from_dt and time_to_dt and time_from_dt > time_to_dt:
+            time_from_dt, time_to_dt = time_to_dt, time_from_dt
+
         records = memory_storage.get_all()
-        items = [
-            {"uuid": item.uuid, "fact": item.fact, "created_at": item.created_at}
-            for item in records
-        ]
+        items: list[dict[str, Any]] = []
+        for item in records:
+            created_at = str(item.created_at or "").strip()
+            created_dt = _parse_query_time(created_at)
+            if time_from_dt and created_dt and created_dt < time_from_dt:
+                continue
+            if time_to_dt and created_dt and created_dt > time_to_dt:
+                continue
+            if (time_from_dt or time_to_dt) and created_dt is None:
+                continue
+            items.append(
+                {
+                    "uuid": item.uuid,
+                    "fact": item.fact,
+                    "created_at": created_at,
+                }
+            )
         if query:
             items = [
                 item
@@ -462,7 +509,31 @@ class RuntimeAPIServer:
                 if query in str(item.get("fact", "")).lower()
                 or query in str(item.get("uuid", "")).lower()
             ]
-        return web.json_response({"total": len(items), "items": items})
+
+        def _created_sort_key(item: dict[str, Any]) -> float:
+            created_dt = _parse_query_time(str(item.get("created_at") or ""))
+            if created_dt is None:
+                return float("-inf")
+            with suppress(OSError, OverflowError, ValueError):
+                return float(created_dt.timestamp())
+            return float("-inf")
+
+        items.sort(key=_created_sort_key, reverse=True)
+        if limit is not None:
+            items = items[:limit]
+
+        return web.json_response(
+            {
+                "total": len(items),
+                "items": items,
+                "query": {
+                    "q": query or "",
+                    "top_k": limit,
+                    "time_from": time_from_raw,
+                    "time_to": time_to_raw,
+                },
+            }
+        )
 
     async def _cognitive_events_handler(self, request: web.Request) -> Response:
         cognitive_service = self._ctx.cognitive_service

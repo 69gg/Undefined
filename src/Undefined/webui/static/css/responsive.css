@@ -22,6 +22,8 @@
   .noise { opacity: 0.08; }
   .runtime-inline-action { width: 100%; }
   .runtime-inline-action .form-control { flex: 1 1 auto; }
+  .runtime-query-stack { min-width: 100%; }
+  .runtime-filters { grid-template-columns: 1fr; }
   .runtime-inline-entity { flex-wrap: wrap; }
   .runtime-inline-entity #runtimeProfileEntityType,
   .runtime-inline-entity #runtimeProfileEntityId { flex: 1 1 100%; }
