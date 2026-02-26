@@ -871,6 +871,7 @@ class HistorianWorker:
             observations_text,
             top_k=8,
             where=hist_where,
+            apply_mmr=True,
         )
         historical_lines = (
             "\n".join(
