@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import platform
 import socket
+import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass
@@ -25,6 +27,7 @@ _VIRTUAL_USER_ID = 42
 _VIRTUAL_USER_NAME = "system"
 _AUTH_HEADER = "X-Undefined-API-Key"
 _CHAT_SSE_KEEPALIVE_SECONDS = 10.0
+_PROCESS_START_TIME = time.time()
 
 
 class _WebUIVirtualSender:
@@ -130,16 +133,62 @@ def _sse_event(event: str, payload: dict[str, Any]) -> bytes:
     return f"event: {event}\ndata: {data}\n\n".encode("utf-8")
 
 
+def _mask_url(url: str) -> str:
+    """保留 scheme + host，隐藏 path 细节。"""
+    text = str(url or "").strip().rstrip("/")
+    if not text:
+        return ""
+    parsed = urlsplit(text)
+    host = parsed.hostname or ""
+    port_part = f":{parsed.port}" if parsed.port else ""
+    scheme = parsed.scheme or "https"
+    return f"{scheme}://{host}{port_part}/..."
+
+
+def _registry_summary(registry: Any) -> dict[str, Any]:
+    """从 BaseRegistry 提取轻量摘要。"""
+    if registry is None:
+        return {"count": 0, "loaded": 0, "items": []}
+    items: dict[str, Any] = getattr(registry, "_items", {})
+    stats: dict[str, Any] = {}
+    get_stats = getattr(registry, "get_stats", None)
+    if callable(get_stats):
+        stats = get_stats()
+    summary_items: list[dict[str, Any]] = []
+    for name, item in items.items():
+        st = stats.get(name)
+        entry: dict[str, Any] = {
+            "name": name,
+            "loaded": getattr(item, "loaded", False),
+        }
+        if st is not None:
+            entry["calls"] = getattr(st, "count", 0)
+            entry["success"] = getattr(st, "success", 0)
+            entry["failure"] = getattr(st, "failure", 0)
+        summary_items.append(entry)
+    return {
+        "count": len(items),
+        "loaded": sum(1 for i in items.values() if getattr(i, "loaded", False)),
+        "items": summary_items,
+    }
+
+
 async def _probe_http_endpoint(
     *,
     name: str,
     base_url: str,
     api_key: str,
+    model_name: str = "",
     timeout_seconds: float = 5.0,
 ) -> dict[str, Any]:
     normalized = str(base_url or "").strip().rstrip("/")
     if not normalized:
-        return {"name": name, "status": "skipped", "reason": "empty_url"}
+        return {
+            "name": name,
+            "status": "skipped",
+            "reason": "empty_url",
+            "model_name": model_name,
+        }
 
     headers: dict[str, str] = {}
     if api_key:
@@ -157,9 +206,10 @@ async def _probe_http_endpoint(
                     return {
                         "name": name,
                         "status": "ok",
-                        "url": url,
+                        "url": _mask_url(url),
                         "http_status": resp.status,
                         "latency_ms": elapsed_ms,
+                        "model_name": model_name,
                     }
         except Exception as exc:
             last_error = str(exc)
@@ -168,8 +218,9 @@ async def _probe_http_endpoint(
     return {
         "name": name,
         "status": "error",
-        "url": normalized,
+        "url": _mask_url(normalized),
         "error": last_error or "request_failed",
+        "model_name": model_name,
     }
 
 
@@ -388,9 +439,43 @@ class RuntimeAPIServer:
         )
         memory_storage = getattr(self._ctx.ai, "memory_storage", None)
         memory_count = memory_storage.count() if memory_storage is not None else 0
+
+        # Skills 统计
+        ai = self._ctx.ai
+        skills_info: dict[str, Any] = {}
+        if ai is not None:
+            tool_reg = getattr(ai, "tool_registry", None)
+            agent_reg = getattr(ai, "agent_registry", None)
+            anthropic_reg = getattr(ai, "anthropic_skill_registry", None)
+            skills_info["tools"] = _registry_summary(tool_reg)
+            skills_info["agents"] = _registry_summary(agent_reg)
+            skills_info["anthropic_skills"] = _registry_summary(anthropic_reg)
+
+        # 模型配置（脱敏）
+        models_info: dict[str, Any] = {}
+        for label in ("chat_model", "vision_model", "agent_model", "security_model"):
+            mcfg = getattr(cfg, label, None)
+            if mcfg is not None:
+                models_info[label] = {
+                    "model_name": getattr(mcfg, "model_name", ""),
+                    "api_url": _mask_url(getattr(mcfg, "api_url", "")),
+                    "thinking_enabled": getattr(mcfg, "thinking_enabled", False),
+                }
+        for label in ("embedding_model", "rerank_model"):
+            mcfg = getattr(cfg, label, None)
+            if mcfg is not None:
+                models_info[label] = {
+                    "model_name": getattr(mcfg, "model_name", ""),
+                    "api_url": _mask_url(getattr(mcfg, "api_url", "")),
+                }
+
+        uptime_seconds = round(time.time() - _PROCESS_START_TIME, 1)
         payload = {
             "timestamp": datetime.now().isoformat(),
             "version": __version__,
+            "python": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+            "platform": platform.system(),
+            "uptime_seconds": uptime_seconds,
             "onebot": self._ctx.onebot.connection_status()
             if self._ctx.onebot is not None
             else {},
@@ -408,6 +493,8 @@ class RuntimeAPIServer:
                 "port": cfg.api.port,
                 "openapi_enabled": bool(cfg.api.openapi_enabled),
             },
+            "skills": skills_info,
+            "models": models_info,
         }
         return web.json_response(payload)
 
@@ -419,31 +506,37 @@ class RuntimeAPIServer:
                 name="chat_model",
                 base_url=cfg.chat_model.api_url,
                 api_key=cfg.chat_model.api_key,
+                model_name=cfg.chat_model.model_name,
             ),
             _probe_http_endpoint(
                 name="vision_model",
                 base_url=cfg.vision_model.api_url,
                 api_key=cfg.vision_model.api_key,
+                model_name=cfg.vision_model.model_name,
             ),
             _probe_http_endpoint(
                 name="security_model",
                 base_url=cfg.security_model.api_url,
                 api_key=cfg.security_model.api_key,
+                model_name=cfg.security_model.model_name,
             ),
             _probe_http_endpoint(
                 name="agent_model",
                 base_url=cfg.agent_model.api_url,
                 api_key=cfg.agent_model.api_key,
+                model_name=cfg.agent_model.model_name,
             ),
             _probe_http_endpoint(
                 name="embedding_model",
                 base_url=cfg.embedding_model.api_url,
                 api_key=cfg.embedding_model.api_key,
+                model_name=getattr(cfg.embedding_model, "model_name", ""),
             ),
             _probe_http_endpoint(
                 name="rerank_model",
                 base_url=cfg.rerank_model.api_url,
                 api_key=cfg.rerank_model.api_key,
+                model_name=getattr(cfg.rerank_model, "model_name", ""),
             ),
             _probe_ws_endpoint(cfg.onebot_ws_url),
         ]

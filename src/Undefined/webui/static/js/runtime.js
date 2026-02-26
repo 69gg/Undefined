@@ -30,6 +30,201 @@
         el.textContent = payload ? JSON.stringify(payload, null, 2) : "--";
     }
 
+    /* ── Probe rendering helpers ── */
+
+    function formatUptime(seconds) {
+        if (!seconds || seconds < 0) return "--";
+        const d = Math.floor(seconds / 86400);
+        const h = Math.floor((seconds % 86400) / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
+        const parts = [];
+        if (d > 0) parts.push(`${d}d`);
+        if (h > 0) parts.push(`${h}h`);
+        if (m > 0) parts.push(`${m}m`);
+        parts.push(`${s}s`);
+        return parts.join(" ");
+    }
+
+    function probeStatusBadge(status) {
+        const cls = status === "ok" ? "ok" : status === "skipped" ? "skipped" : "error";
+        const label = status === "ok" ? "OK" : status === "skipped" ? "Skipped" : "Error";
+        return `<span class="probe-status ${cls}"><span class="probe-dot"></span>${escapeHtml(label)}</span>`;
+    }
+
+    function probeItem(label, value) {
+        return `<div class="probe-item"><span class="probe-item-label">${escapeHtml(label)}</span><span class="probe-item-value">${value}</span></div>`;
+    }
+
+    function renderInternalProbe(data) {
+        const el = get("runtimeProbeInternal");
+        if (!el) return;
+        if (!data || data.error) {
+            el.innerHTML = `<div class="empty-state">${escapeHtml(data?.error || "--")}</div>`;
+            return;
+        }
+
+        let html = "";
+
+        // System info
+        const ob = data.onebot || {};
+        const obStatus = ob.connected ? "ok" : "error";
+        html += `<div class="probe-section">`;
+        html += `<div class="probe-section-title">${t("probes.section_system")}</div>`;
+        html += `<div class="probe-grid">`;
+        html += probeItem(t("probes.version"), `<code>v${escapeHtml(data.version || "--")}</code>`);
+        html += probeItem("Python", `<code>${escapeHtml(data.python || "--")}</code>`);
+        html += probeItem(t("probes.platform"), escapeHtml(data.platform || "--"));
+        html += probeItem(t("probes.uptime"), `<code>${formatUptime(data.uptime_seconds)}</code>`);
+        html += probeItem("OneBot", probeStatusBadge(obStatus));
+        if (ob.ws_url) html += probeItem("WS URL", `<code>${escapeHtml(ob.ws_url)}</code>`);
+        html += `</div></div>`;
+
+        // Models
+        if (data.models && Object.keys(data.models).length > 0) {
+            html += `<div class="probe-section">`;
+            html += `<div class="probe-section-title">${t("probes.section_models")}</div>`;
+            html += `<div class="probe-endpoint-list">`;
+            for (const [key, m] of Object.entries(data.models)) {
+                const label = key.replace(/_/g, " ");
+                html += `<div class="probe-endpoint">`;
+                html += `<div class="probe-endpoint-info">`;
+                html += `<div class="probe-endpoint-name">${escapeHtml(label)}</div>`;
+                html += `<div class="probe-endpoint-meta">`;
+                if (m.model_name) html += `<span>${t("probes.model")}: <code>${escapeHtml(m.model_name)}</code></span>`;
+                if (m.api_url) html += `<span>URL: <code>${escapeHtml(m.api_url)}</code></span>`;
+                html += `</div></div>`;
+                if (m.thinking_enabled !== undefined) {
+                    html += `<div class="probe-endpoint-right"><span class="probe-queue-tag">${m.thinking_enabled ? "Thinking ✓" : "Thinking ✗"}</span></div>`;
+                }
+                html += `</div>`;
+            }
+            html += `</div></div>`;
+        }
+
+        // Queue
+        const q = data.queues || {};
+        if (q.totals || q.processor_count !== undefined) {
+            html += `<div class="probe-section">`;
+            html += `<div class="probe-section-title">${t("probes.section_queues")}</div>`;
+            html += `<div class="probe-grid">`;
+            if (q.processor_count !== undefined) html += probeItem(t("probes.processors"), String(q.processor_count));
+            if (q.inflight_count !== undefined) html += probeItem(t("probes.inflight"), String(q.inflight_count));
+            if (q.model_count !== undefined) html += probeItem(t("probes.model_queues"), String(q.model_count));
+            html += `</div>`;
+            if (q.totals) {
+                html += `<div class="probe-queue-row" style="margin-top:8px">`;
+                for (const [k, v] of Object.entries(q.totals)) {
+                    html += `<span class="probe-queue-tag"><span class="probe-queue-label">${escapeHtml(k)}</span> ${v}</span>`;
+                }
+                html += `</div>`;
+            }
+            html += `</div>`;
+        }
+
+        // Memory & Cognitive
+        const mem = data.memory || {};
+        const cog = data.cognitive || {};
+        html += `<div class="probe-section">`;
+        html += `<div class="probe-section-title">${t("probes.section_services")}</div>`;
+        html += `<div class="probe-grid">`;
+        html += probeItem(t("probes.memory_count"), String(mem.count ?? "--"));
+        html += probeItem(t("probes.cognitive"), probeStatusBadge(cog.enabled ? "ok" : "skipped"));
+        const apiInfo = data.api || {};
+        html += probeItem("Runtime API", probeStatusBadge(apiInfo.enabled ? "ok" : "error"));
+        if (apiInfo.enabled) html += probeItem(t("probes.api_listen"), `<code>${escapeHtml(apiInfo.host || "")}:${apiInfo.port || ""}</code>`);
+        html += `</div></div>`;
+
+        // Skills
+        const sk = data.skills || {};
+        if (sk.tools || sk.agents || sk.anthropic_skills) {
+            html += `<div class="probe-section">`;
+            html += `<div class="probe-section-title">${t("probes.section_skills")}</div>`;
+            html += `<div class="probe-grid" style="margin-bottom:8px">`;
+            if (sk.tools) html += probeItem(t("probes.tools"), `${sk.tools.loaded ?? 0} / ${sk.tools.count ?? 0}`);
+            if (sk.agents) html += probeItem(t("probes.agents"), `${sk.agents.loaded ?? 0} / ${sk.agents.count ?? 0}`);
+            if (sk.anthropic_skills) html += probeItem("Anthropic Skills", `${sk.anthropic_skills.loaded ?? 0} / ${sk.anthropic_skills.count ?? 0}`);
+            html += `</div>`;
+            // Show active skills (ones with calls > 0)
+            const activeItems = [];
+            for (const reg of [sk.tools, sk.agents, sk.anthropic_skills]) {
+                if (reg && reg.items) {
+                    for (const item of reg.items) {
+                        if (item.calls > 0) activeItems.push(item);
+                    }
+                }
+            }
+            if (activeItems.length > 0) {
+                activeItems.sort((a, b) => (b.calls || 0) - (a.calls || 0));
+                const shown = activeItems.slice(0, 10);
+                html += `<div style="display:grid;gap:4px">`;
+                for (const item of shown) {
+                    html += `<div class="probe-skill-row">`;
+                    html += `<span class="probe-skill-name">${escapeHtml(item.name)}</span>`;
+                    html += `<span class="probe-skill-stats">`;
+                    html += `<span>${item.calls} calls</span>`;
+                    html += `<span style="color:var(--success)">${item.success} ok</span>`;
+                    if (item.failure > 0) html += `<span style="color:var(--error)">${item.failure} fail</span>`;
+                    html += `</span></div>`;
+                }
+                if (activeItems.length > 10) {
+                    html += `<div class="muted-sm" style="text-align:center;padding:4px">+${activeItems.length - 10} more</div>`;
+                }
+                html += `</div>`;
+            }
+            html += `</div>`;
+        }
+
+        el.innerHTML = html;
+    }
+
+    function renderExternalProbe(data) {
+        const el = get("runtimeProbeExternal");
+        if (!el) return;
+        if (!data || data.error) {
+            el.innerHTML = `<div class="empty-state">${escapeHtml(data?.error || "--")}</div>`;
+            return;
+        }
+
+        let html = "";
+
+        // Overall banner
+        const allOk = data.ok;
+        const bannerCls = allOk ? "ok" : "error";
+        const bannerText = allOk ? t("probes.all_ok") : t("probes.some_failed");
+        html += `<div class="probe-overall-banner ${bannerCls}"><span class="probe-dot" style="width:9px;height:9px;border-radius:50%;background:currentColor;flex-shrink:0"></span>${escapeHtml(bannerText)}</div>`;
+
+        // Timestamp
+        if (data.timestamp) {
+            html += `<div class="muted-sm" style="margin-bottom:10px">${escapeHtml(data.timestamp)}</div>`;
+        }
+
+        // Endpoints
+        const results = data.results || [];
+        html += `<div class="probe-endpoint-list">`;
+        for (const r of results) {
+            const statusCls = r.status === "ok" ? "ok" : r.status === "skipped" ? "skipped" : "error";
+            html += `<div class="probe-endpoint">`;
+            html += `<div class="probe-endpoint-info">`;
+            html += `<div class="probe-endpoint-name">${escapeHtml((r.name || "").replace(/_/g, " "))}</div>`;
+            html += `<div class="probe-endpoint-meta">`;
+            if (r.model_name) html += `<span>${t("probes.model")}: <code>${escapeHtml(r.model_name)}</code></span>`;
+            if (r.url) html += `<span>URL: <code>${escapeHtml(r.url)}</code></span>`;
+            if (r.host) html += `<span>Host: <code>${escapeHtml(r.host)}${r.port ? ":" + r.port : ""}</code></span>`;
+            if (r.http_status) html += `<span>HTTP ${r.http_status}</span>`;
+            if (r.error) html += `<span style="color:var(--error)">${escapeHtml(r.error)}</span>`;
+            if (r.reason) html += `<span>${escapeHtml(r.reason)}</span>`;
+            html += `</div></div>`;
+            html += `<div class="probe-endpoint-right">`;
+            html += probeStatusBadge(r.status);
+            if (r.latency_ms !== undefined) html += `<span class="probe-latency">${r.latency_ms} ms</span>`;
+            html += `</div></div>`;
+        }
+        html += `</div>`;
+
+        el.innerHTML = html;
+    }
+
     function readInputValue(id) {
         const el = get(id);
         if (!el) return "";
@@ -411,8 +606,8 @@
 
     function setProbeUnavailable(message) {
         const msg = String(message || RUNTIME_DISABLED_ERROR);
-        setJsonBlock("runtimeProbeInternal", { error: msg });
-        setJsonBlock("runtimeProbeExternal", { error: msg });
+        renderInternalProbe({ error: msg });
+        renderExternalProbe({ error: msg });
     }
 
     function setMemoryUnavailable(message) {
@@ -442,13 +637,13 @@
     async function fetchInternalProbe() {
         const res = await api("/api/runtime/probes/internal");
         const data = await res.json();
-        setJsonBlock("runtimeProbeInternal", data);
+        renderInternalProbe(data);
     }
 
     async function fetchExternalProbe() {
         const res = await api("/api/runtime/probes/external");
         const data = await res.json();
-        setJsonBlock("runtimeProbeExternal", data);
+        renderExternalProbe(data);
     }
 
     async function searchMemory() {

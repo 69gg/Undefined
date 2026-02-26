@@ -202,6 +202,171 @@
   max-height: 360px;
   overflow: auto;
 }
+
+/* Probe rendered view */
+.probe-container { font-size: 13px; line-height: 1.5; }
+.probe-section { margin-bottom: 16px; }
+.probe-section:last-child { margin-bottom: 0; }
+.probe-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--border-color);
+}
+.probe-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+.probe-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+.probe-item-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+.probe-item-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+.probe-item-value code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+}
+.probe-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.probe-status .probe-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.probe-status.ok { background: rgba(74, 124, 89, 0.12); color: var(--success); border: 1px solid rgba(74, 124, 89, 0.3); }
+.probe-status.ok .probe-dot { background: var(--success); }
+.probe-status.error { background: rgba(201, 64, 64, 0.12); color: var(--error); border: 1px solid rgba(201, 64, 64, 0.3); }
+.probe-status.error .probe-dot { background: var(--error); }
+.probe-status.skipped { background: var(--bg-app); color: var(--text-tertiary); border: 1px solid var(--border-color); }
+.probe-status.skipped .probe-dot { background: var(--text-tertiary); }
+.probe-endpoint-list { display: grid; gap: 8px; }
+.probe-endpoint {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+.probe-endpoint-info { min-width: 0; }
+.probe-endpoint-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.probe-endpoint-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.probe-endpoint-meta code {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+.probe-endpoint-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.probe-latency {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.probe-overall-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.probe-overall-banner.ok {
+  background: rgba(74, 124, 89, 0.08);
+  border: 1px solid rgba(74, 124, 89, 0.25);
+  color: var(--success);
+}
+.probe-overall-banner.error {
+  background: rgba(201, 64, 64, 0.08);
+  border: 1px solid rgba(201, 64, 64, 0.25);
+  color: var(--error);
+}
+.probe-queue-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.probe-queue-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+.probe-queue-tag .probe-queue-label { color: var(--text-tertiary); font-family: var(--font-sans); }
+.probe-skill-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+.probe-skill-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.probe-skill-stats {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
 .runtime-list { display: grid; gap: 12px; }
 .runtime-list-item {
   border: 1px solid var(--border-color);
