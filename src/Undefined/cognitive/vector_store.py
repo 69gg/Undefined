@@ -384,31 +384,49 @@ class CognitiveVectorStore:
                 safe_top_k,
             )
             rerank_top_n = fetch_k if (apply_time_decay or apply_mmr) else safe_top_k
-            reranked = await reranker.rerank(
-                query_text, [r["document"] for r in results], top_n=rerank_top_n
-            )
-            reranked_results: list[dict[str, Any]] = []
-            for item in reranked[:rerank_top_n]:
-                index = int(_safe_float(item.get("index"), default=-1))
-                if index < 0 or index >= len(results):
-                    continue
-                entry: dict[str, Any] = {
-                    "document": item.get("document", results[index]["document"]),
-                    "metadata": results[index]["metadata"],
-                    "distance": results[index]["distance"],
-                    "rerank_score": _safe_float(
-                        item.get("relevance_score"), default=0.0
-                    ),
-                }
-                if apply_mmr and "embedding" in results[index]:
-                    entry["embedding"] = results[index]["embedding"]
-                reranked_results.append(entry)
-            logger.info(
-                "[认知向量库] 重排完成: collection=%s final_count=%s",
-                col_name,
-                len(reranked_results),
-            )
-            results = reranked_results
+            try:
+                reranked = await reranker.rerank(
+                    query_text, [r["document"] for r in results], top_n=rerank_top_n
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[认知向量库] 重排失败，回退原始检索结果: collection=%s top_k=%s candidates=%s err=%s",
+                    col_name,
+                    safe_top_k,
+                    len(results),
+                    exc,
+                )
+            else:
+                reranked_results: list[dict[str, Any]] = []
+                for item in reranked[:rerank_top_n]:
+                    index = int(_safe_float(item.get("index"), default=-1))
+                    if index < 0 or index >= len(results):
+                        continue
+                    entry: dict[str, Any] = {
+                        "document": item.get("document", results[index]["document"]),
+                        "metadata": results[index]["metadata"],
+                        "distance": results[index]["distance"],
+                        "rerank_score": _safe_float(
+                            item.get("relevance_score"), default=0.0
+                        ),
+                    }
+                    if apply_mmr and "embedding" in results[index]:
+                        entry["embedding"] = results[index]["embedding"]
+                    reranked_results.append(entry)
+                if reranked_results:
+                    logger.info(
+                        "[认知向量库] 重排完成: collection=%s final_count=%s",
+                        col_name,
+                        len(reranked_results),
+                    )
+                    results = reranked_results
+                else:
+                    logger.warning(
+                        "[认知向量库] 重排结果为空，回退原始检索结果: collection=%s top_k=%s candidates=%s",
+                        col_name,
+                        safe_top_k,
+                        len(results),
+                    )
 
         if apply_time_decay and results:
             decay_top_k = fetch_k if apply_mmr else safe_top_k
