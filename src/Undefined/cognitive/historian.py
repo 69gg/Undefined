@@ -999,6 +999,12 @@ class HistorianWorker:
             "updated_at": datetime.now().isoformat(),
             "source_event_id": event_id,
         }
+        if entity_type == "user":
+            frontmatter["nickname"] = effective_name
+            frontmatter["qq"] = entity_id
+        else:
+            frontmatter["group_name"] = effective_name
+            frontmatter["group_id"] = entity_id
         content = f"---\n{yaml.dump(frontmatter, allow_unicode=True)}---\n{summary}"
 
         await self._profile_storage.write_profile(entity_type, entity_id, content)
@@ -1010,14 +1016,34 @@ class HistorianWorker:
             tags,
             perspective,
         )
+        profile_doc_lines: list[str] = []
+        if entity_type == "user":
+            profile_doc_lines.append(f"昵称: {effective_name}")
+            profile_doc_lines.append(f"QQ号: {entity_id}")
+        else:
+            profile_doc_lines.append(f"群名: {effective_name}")
+            profile_doc_lines.append(f"群号: {entity_id}")
+        if tags:
+            profile_doc_lines.append(f"标签: {', '.join(tags)}")
+        profile_doc_lines.append(summary)
+        profile_doc = "\n".join(line for line in profile_doc_lines if line.strip())
+
+        profile_metadata: dict[str, Any] = {
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "name": effective_name,
+        }
+        if entity_type == "user":
+            profile_metadata["nickname"] = effective_name
+            profile_metadata["qq"] = entity_id
+        else:
+            profile_metadata["group_name"] = effective_name
+            profile_metadata["group_id"] = entity_id
+
         await self._vector_store.upsert_profile(
             f"{entity_type}:{entity_id}",
-            f"标签: {', '.join(tags)}\n{summary}" if tags else summary,
-            {
-                "entity_type": entity_type,
-                "entity_id": entity_id,
-                "name": effective_name,
-            },
+            profile_doc,
+            profile_metadata,
         )
         logger.info(
             "[史官] 任务 %s 侧写向量入库完成: profile_id=%s perspective=%s",
