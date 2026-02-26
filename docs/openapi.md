@@ -61,8 +61,67 @@ curl http://127.0.0.1:8788/openapi.json
 
 ### 探针
 
-- `GET /api/v1/probes/internal`：进程内部探针（OneBot 连接、队列、记忆计数、认知队列等）。
-- `GET /api/v1/probes/external`：外部依赖探测（模型 API 与 OneBot 端口连通）。
+- `GET /api/v1/probes/internal`：进程内部探针。
+- `GET /api/v1/probes/external`：外部依赖探测。
+
+#### 内部探针响应字段
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `timestamp` | `string` | ISO 时间戳 |
+| `version` | `string` | Undefined 版本号 |
+| `python` | `string` | Python 版本（如 `3.12.4`） |
+| `platform` | `string` | 操作系统（如 `Linux`） |
+| `uptime_seconds` | `float` | 进程运行时长（秒） |
+| `onebot` | `object` | OneBot 连接状态（`connected`、`running`、`ws_url` 等） |
+| `queues` | `object` | 请求队列快照（`processor_count`、`inflight_count`、`totals` 按优先级分布） |
+| `memory` | `object` | 长期记忆（`count`：条数） |
+| `cognitive` | `object` | 认知服务（`enabled`、`queue`） |
+| `api` | `object` | Runtime API 配置（`enabled`、`host`、`port`、`openapi_enabled`） |
+| `skills` | `object` | 技能统计，包含 `tools`、`agents`、`anthropic_skills` 三个子对象 |
+| `models` | `object` | 模型配置，包含各模型的 `model_name`、脱敏 `api_url`、`thinking_enabled` |
+
+`skills` 子对象结构：
+
+```json
+{
+  "count": 12,
+  "loaded": 12,
+  "items": [
+    { "name": "get_time", "loaded": true, "calls": 5, "success": 5, "failure": 0 }
+  ]
+}
+```
+
+`models` 子对象结构（URL 经脱敏处理，仅保留 scheme + host）：
+
+```json
+{
+  "chat_model": { "model_name": "claude-sonnet-4-20250514", "api_url": "https://api.example.com/...", "thinking_enabled": false },
+  "embedding_model": { "model_name": "text-embedding-3-small", "api_url": "https://api.example.com/..." }
+}
+```
+
+#### 外部探针响应字段
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `ok` | `bool` | 全部端点是否正常 |
+| `timestamp` | `string` | ISO 时间戳 |
+| `results` | `array` | 各端点检测结果列表 |
+
+单个检测结果：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `name` | `string` | 端点名称（如 `chat_model`、`onebot_ws`） |
+| `status` | `string` | `ok` / `error` / `skipped` |
+| `model_name` | `string` | 关联的模型名称（HTTP 端点） |
+| `url` | `string` | 脱敏后的探测 URL（HTTP 端点） |
+| `http_status` | `int` | HTTP 响应状态码（仅 `ok` 时） |
+| `latency_ms` | `float` | 响应延迟（毫秒，仅 `ok` 时） |
+| `error` | `string` | 错误信息（仅 `error` 时） |
+| `host` / `port` | `string` / `int` | WebSocket 端点的主机与端口 |
 
 ### 记忆（只读）
 

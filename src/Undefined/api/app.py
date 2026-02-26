@@ -67,6 +67,49 @@ class _WebUIVirtualSender:
         _ = group_id, auto_history, history_prefix, mark_sent
         await self._send_private_callback(self._virtual_user_id, message)
 
+    async def send_private_file(
+        self,
+        user_id: int,
+        file_path: str,
+        name: str | None = None,
+        auto_history: bool = True,
+    ) -> None:
+        """将文件拷贝到 WebUI 缓存并发送文件卡片消息。"""
+        _ = user_id, auto_history
+        import shutil
+        import uuid as _uuid
+        from pathlib import Path as _Path
+
+        from Undefined.utils.paths import WEBUI_FILE_CACHE_DIR, ensure_dir
+
+        src = _Path(file_path)
+        display_name = name or src.name
+        file_id = _uuid.uuid4().hex
+        dest_dir = ensure_dir(WEBUI_FILE_CACHE_DIR / file_id)
+        dest = dest_dir / display_name
+
+        def _copy_and_stat() -> int:
+            shutil.copy2(src, dest)
+            return dest.stat().st_size
+
+        try:
+            file_size = await asyncio.to_thread(_copy_and_stat)
+        except OSError:
+            file_size = 0
+
+        message = f"[CQ:file,id={file_id},name={display_name},size={file_size}]"
+        await self._send_private_callback(self._virtual_user_id, message)
+
+    async def send_group_file(
+        self,
+        group_id: int,
+        file_path: str,
+        name: str | None = None,
+        auto_history: bool = True,
+    ) -> None:
+        """群文件在虚拟会话中同样重定向为文本消息。"""
+        await self.send_private_file(group_id, file_path, name, auto_history)
+
 
 @dataclass
 class RuntimeAPIContext:
@@ -305,9 +348,28 @@ def _build_openapi_spec(ctx: RuntimeAPIContext) -> dict[str, Any]:
                     "responses": {"200": {"description": "Schema JSON"}},
                 }
             },
-            "/api/v1/probes/internal": {"get": {"summary": "Internal runtime probes"}},
+            "/api/v1/probes/internal": {
+                "get": {
+                    "summary": "Internal runtime probes",
+                    "description": (
+                        "Returns system info (version, Python, platform, uptime), "
+                        "OneBot connection status, request queue snapshot, "
+                        "memory count, cognitive service status, API config, "
+                        "skill statistics (tools/agents/anthropic_skills with call counts), "
+                        "and model configuration (names, masked URLs, thinking flags)."
+                    ),
+                }
+            },
             "/api/v1/probes/external": {
-                "get": {"summary": "External dependency probes"}
+                "get": {
+                    "summary": "External dependency probes",
+                    "description": (
+                        "Concurrently probes all configured model API endpoints "
+                        "(chat, vision, security, agent, embedding, rerank) "
+                        "and OneBot WebSocket. Each result includes status, "
+                        "model name, masked URL, HTTP status code, and latency."
+                    ),
+                }
             },
             "/api/v1/memory": {"get": {"summary": "List/search manual memories"}},
             "/api/v1/cognitive/events": {

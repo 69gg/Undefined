@@ -9,6 +9,7 @@ IMAGE_CACHE_DIR = CACHE_DIR / "images"
 DOWNLOAD_CACHE_DIR = CACHE_DIR / "downloads"
 TEXT_FILE_CACHE_DIR = CACHE_DIR / "text_files"
 URL_FILE_CACHE_DIR = CACHE_DIR / "url_files"
+WEBUI_FILE_CACHE_DIR = CACHE_DIR / "webui_files"
 
 
 def ensure_dir(path: Path) -> Path:

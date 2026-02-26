@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Mapping
+from urllib.parse import quote as _url_quote
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,7 @@ from aiohttp import ClientSession, ClientTimeout, web
 from aiohttp.web_response import Response
 
 from Undefined.config import get_config
-from Undefined.utils.paths import CACHE_DIR
+from Undefined.utils.paths import CACHE_DIR, WEBUI_FILE_CACHE_DIR
 from ._shared import check_auth, routes
 
 _AUTH_HEADER = "X-Undefined-API-Key"
@@ -329,3 +330,43 @@ async def runtime_chat_image_handler(request: web.Request) -> web.StreamResponse
         return web.json_response({"error": "Invalid image path"}, status=400)
 
     return web.FileResponse(path=image_path)
+
+
+@routes.get("/api/runtime/chat/file")
+async def runtime_chat_file_handler(request: web.Request) -> web.StreamResponse:
+    """提供 WebUI 虚拟私聊文件下载。"""
+    if not check_auth(request):
+        return _unauthorized()
+
+    file_id = str(request.query.get("id", "") or "").strip()
+    if not file_id or not file_id.isalnum():
+        return web.json_response({"error": "Invalid file id"}, status=400)
+
+    file_dir = (Path.cwd() / WEBUI_FILE_CACHE_DIR / file_id).resolve()
+    cache_root = (Path.cwd() / WEBUI_FILE_CACHE_DIR).resolve()
+    if cache_root not in file_dir.parents and file_dir != cache_root:
+        return web.json_response({"error": "Invalid file id"}, status=400)
+    if not file_dir.is_dir():
+        return web.json_response({"error": "File not found"}, status=404)
+
+    try:
+        files = list(file_dir.iterdir())
+    except OSError:
+        return web.json_response({"error": "File not found"}, status=404)
+    if not files:
+        return web.json_response({"error": "File not found"}, status=404)
+
+    target = files[0]
+    if not target.is_file():
+        return web.json_response({"error": "File not found"}, status=404)
+
+    # RFC 5987 编码：ASCII fallback + UTF-8 filename*
+    raw_name = target.name
+    ascii_name = raw_name.encode("ascii", errors="replace").decode("ascii")
+    utf8_name = _url_quote(raw_name, safe="")
+    disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{utf8_name}"
+
+    return web.FileResponse(
+        path=target,
+        headers={"Content-Disposition": disposition},
+    )

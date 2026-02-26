@@ -313,9 +313,11 @@
     function appendChatMessage(role, content) {
         const log = get("runtimeChatLog");
         if (!log) return;
+        const isBot = role !== "user";
+        const contentClass = isBot ? "runtime-chat-content markdown" : "runtime-chat-content";
         const item = document.createElement("div");
         item.className = `runtime-chat-item ${role}`;
-        item.innerHTML = `<div class="runtime-chat-role">${role === "user" ? "You" : "AI"}</div><div class="runtime-chat-content">${renderChatContent(content)}</div>`;
+        item.innerHTML = `<div class="runtime-chat-role">${role === "user" ? "You" : "AI"}</div><div class="${contentClass}">${renderChatContent(content, isBot)}</div>`;
         log.appendChild(item);
         log.scrollTop = log.scrollHeight;
     }
@@ -357,30 +359,78 @@
         return "";
     }
 
-    function renderChatContent(content) {
+    function formatFileSize(bytes) {
+        const n = Number(bytes);
+        if (!Number.isFinite(n) || n <= 0) return "";
+        if (n < 1024) return n + "B";
+        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + "KB";
+        return (n / 1024 / 1024).toFixed(2) + "MB";
+    }
+
+    function renderFileCard(attrs) {
+        const fileId = escapeHtml(String(attrs.id || "").trim());
+        const name = escapeHtml(String(attrs.name || "file").trim());
+        const size = formatFileSize(attrs.size);
+        if (!fileId) return `<code>[file]</code>`;
+        const href = `/api/runtime/chat/file?id=${encodeURIComponent(fileId)}`;
+        return `<div class="runtime-chat-file-card">`
+            + `<div class="runtime-chat-file-icon">&#128196;</div>`
+            + `<div class="runtime-chat-file-info">`
+            + `<div class="runtime-chat-file-name">${name}</div>`
+            + (size ? `<div class="runtime-chat-file-size">${size}</div>` : "")
+            + `</div>`
+            + `<a class="runtime-chat-file-dl" href="${href}" download="${name}">${t("runtime.download") || "Download"}</a>`
+            + `</div>`;
+    }
+
+    function renderChatContent(content, useMarkdown) {
         const text = String(content || "");
+
+        // Extract CQ file codes into placeholders
+        const filePattern = /\[CQ:file,([^\]]+)\]/g;
+        const filePlaceholders = [];
+        let step1 = text.replace(filePattern, (match, attrStr) => {
+            const attrs = parseCqAttributes(attrStr);
+            const idx = filePlaceholders.length;
+            filePlaceholders.push(renderFileCard(attrs));
+            return `CQFILEPH${idx}CQFILEPH`;
+        });
+
+        // Extract CQ image codes into placeholders before markdown parsing
         const imagePattern = /\[CQ:image,([^\]]+)\]/g;
-        let html = "";
-        let cursor = 0;
-        let match = imagePattern.exec(text);
-        while (match) {
-            const start = match.index;
-            if (start > cursor) {
-                html += escapeHtml(text.slice(cursor, start));
-            }
-            const attrs = parseCqAttributes(match[1]);
+        const images = [];
+        const processed = step1.replace(imagePattern, (match, attrStr) => {
+            const attrs = parseCqAttributes(attrStr);
             const src = resolveCqImageSource(attrs);
             if (src) {
-                html += `<img class="runtime-chat-image" src="${escapeHtml(src)}" alt="image" loading="lazy" />`;
-            } else {
-                html += `<code>${escapeHtml(match[0])}</code>`;
+                const idx = images.length;
+                images.push(`<img class="runtime-chat-image" src="${escapeHtml(src)}" alt="image" loading="lazy" />`);
+                return `CQIMGPH${idx}CQIMGPH`;
             }
-            cursor = imagePattern.lastIndex;
-            match = imagePattern.exec(text);
+            return match;
+        });
+
+        let html;
+        if (useMarkdown && typeof marked !== "undefined" && marked.parse) {
+            try {
+                html = marked.parse(processed, { breaks: true, gfm: true });
+            } catch (_e) {
+                html = escapeHtml(processed);
+            }
+        } else {
+            html = escapeHtml(processed);
         }
-        if (cursor < text.length) {
-            html += escapeHtml(text.slice(cursor));
+
+        // Restore placeholders
+        for (let i = 0; i < images.length; i++) {
+            html = html.replace(new RegExp(`CQIMGPH${i}CQIMGPH`, "g"), images[i]);
         }
+        for (let i = 0; i < filePlaceholders.length; i++) {
+            // marked may wrap placeholder in <p>, strip it for block-level card
+            html = html.replace(new RegExp(`<p>\\s*CQFILEPH${i}CQFILEPH\\s*</p>`, "g"), filePlaceholders[i]);
+            html = html.replace(new RegExp(`CQFILEPH${i}CQFILEPH`, "g"), filePlaceholders[i]);
+        }
+
         return html || escapeHtml(text);
     }
 
