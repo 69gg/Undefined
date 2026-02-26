@@ -47,7 +47,9 @@ class OneBotClient:
         """返回连接状态快照。"""
         ws = self.ws
         ws_exists = ws is not None
-        ws_closed = bool(getattr(ws, "closed", True)) if ws_exists else True
+        # websockets v13+ ClientConnection 没有 .closed 属性，
+        # 用 close_code 判断：连接关闭后 close_code 为 int，活跃时为 None
+        ws_closed = (ws.close_code is not None) if ws is not None else True
         connected = ws_exists and (not ws_closed) and self._running
         return {
             "connected": connected,

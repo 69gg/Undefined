@@ -7,6 +7,7 @@
         runtimeEnabled: true,
         chatBusy: false,
         chatHistoryLoaded: false,
+        probeTimer: null,
         queryBusy: {
             memory: false,
             events: false,
@@ -1056,14 +1057,30 @@
         }
     }
 
+    const PROBE_REFRESH_INTERVAL = 5000;
+
+    function startProbeTimer() {
+        stopProbeTimer();
+        runtimeState.probeTimer = setInterval(refreshProbes, PROBE_REFRESH_INTERVAL);
+    }
+
+    function stopProbeTimer() {
+        if (runtimeState.probeTimer) {
+            clearInterval(runtimeState.probeTimer);
+            runtimeState.probeTimer = null;
+        }
+    }
+
     function onTabActivated(tab) {
         if (!state.authenticated) return;
         if (tab === "probes") {
             if (!runtimeState.probesLoaded) {
                 refreshProbes();
             }
+            startProbeTimer();
             return;
         }
+        stopProbeTimer();
         if (tab === "memory") {
             if (!runtimeState.memoryLoaded) {
                 refreshMemory();
