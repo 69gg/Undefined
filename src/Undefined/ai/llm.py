@@ -1199,7 +1199,12 @@ def build_request_body(
 
     if tools:
         body["tools"] = tools
-        body["tool_choice"] = tool_choice
+        # thinking 模式不支持强制指定 tool_choice（specified），降级为 auto
+        thinking_active = "thinking" in body
+        if thinking_active and isinstance(tool_choice, dict):
+            body["tool_choice"] = "auto"
+        else:
+            body["tool_choice"] = tool_choice
 
     body.update(extra_kwargs)
     return body
