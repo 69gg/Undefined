@@ -341,13 +341,10 @@ class CognitiveService:
                 kwargs.get("time_to"),
             )
             time_from_epoch, time_to_epoch = time_to_epoch, time_from_epoch
-        if time_from_epoch is not None or time_to_epoch is not None:
-            time_filter: dict[str, Any] = {}
-            if time_from_epoch is not None:
-                time_filter["$gte"] = time_from_epoch
-            if time_to_epoch is not None:
-                time_filter["$lte"] = time_to_epoch
-            where_clauses.append({"timestamp_epoch": time_filter})
+        if time_from_epoch is not None:
+            where_clauses.append({"timestamp_epoch": {"$gte": time_from_epoch}})
+        if time_to_epoch is not None:
+            where_clauses.append({"timestamp_epoch": {"$lte": time_to_epoch}})
 
         where = _compose_where(where_clauses)
         default_top_k = getattr(config, "tool_default_top_k", 12)
