@@ -37,4 +37,4 @@ async def test_build_private_stats_image_message_uses_path_for_normal_private(
         inline_base64=False,
     )
 
-    assert message == f"[CQ:image,file={str(image.absolute())}]"
+    assert message == f"[CQ:image,file={image.absolute().as_uri()}]"

@@ -361,9 +361,9 @@ class CommandDispatcher:
         *,
         inline_base64: bool,
     ) -> str:
-        absolute_path = str(image_path.absolute())
+        file_uri = image_path.absolute().as_uri()
         if not inline_base64:
-            return f"[CQ:image,file={absolute_path}]"
+            return f"[CQ:image,file={file_uri}]"
 
         try:
             encoded = await asyncio.to_thread(
@@ -372,10 +372,10 @@ class CommandDispatcher:
         except Exception as exc:
             logger.warning(
                 "[Stats] 图像 base64 编码失败，回退文件路径: path=%s err=%s",
-                absolute_path,
+                file_uri,
                 exc,
             )
-            return f"[CQ:image,file={absolute_path}]"
+            return f"[CQ:image,file={file_uri}]"
 
         return f"[CQ:image,file=base64://{encoded}]"
 
@@ -624,7 +624,7 @@ class CommandDispatcher:
         for img_name in ["line_chart", "bar_chart", "pie_chart", "table"]:
             img_path = img_dir / f"stats_{img_name}.png"
             if img_path.exists():
-                add_node(f"[CQ:image,file={str(img_path.absolute())}]")
+                add_node(f"[CQ:image,file={img_path.absolute().as_uri()}]")
 
         # 添加文本摘要
         add_node(self._build_stats_summary_text(summary))
