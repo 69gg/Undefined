@@ -932,8 +932,8 @@ class HistorianWorker:
                     else:
                         fallback_name = ""
                     effective_name = (
-                        llm_name
-                        or name_hint
+                        name_hint
+                        or llm_name
                         or fallback_name
                         or (f"GID:{up_eid}" if up_et == "group" else f"UID:{up_eid}")
                     )
