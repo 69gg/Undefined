@@ -869,6 +869,19 @@ class HistorianWorker:
                 elif tc_name == "update_profile":
                     up_et = str(tc_args.get("entity_type", entity_type)).strip()
                     up_eid = str(tc_args.get("entity_id", entity_id)).strip()
+                    if (
+                        up_et not in {"user", "group"}
+                        or not up_eid
+                        or not up_eid.isalnum()
+                    ):
+                        tool_results.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc_id,
+                                "content": "错误：entity_type 或 entity_id 无效",
+                            }
+                        )
+                        continue
                     raw_skip = tc_args.get("skip", False)
                     skip = (
                         raw_skip.lower() not in ("false", "0", "no", "")
@@ -910,9 +923,8 @@ class HistorianWorker:
                                 "content": "错误：summary 为空",
                             }
                         )
-                        done = True
+                        done = False
                         continue
-
                     raw_tags = tc_args.get("tags", [])
                     up_tags: list[str] = []
                     if isinstance(raw_tags, list):
@@ -921,9 +933,17 @@ class HistorianWorker:
                         ]
 
                     llm_name = str(tc_args.get("name", "")).strip()
+                    if not llm_name and not preferred_name:
+                        existing = await self._profile_storage.read_profile(
+                            up_et, up_eid
+                        )
+                        fallback_name = _extract_frontmatter_name(existing or "")
+                    else:
+                        fallback_name = ""
                     effective_name = (
                         llm_name
                         or preferred_name
+                        or fallback_name
                         or (f"GID:{up_eid}" if up_et == "group" else f"UID:{up_eid}")
                     )
 
