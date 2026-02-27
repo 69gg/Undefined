@@ -552,20 +552,6 @@ class HistorianWorker:
             )
         return targets
 
-    def _resolve_profile_name(
-        self, target: dict[str, str], current_profile: str
-    ) -> str:
-        preferred_name = str(target.get("preferred_name", "")).strip()
-        if preferred_name:
-            return preferred_name
-        current_name = _extract_frontmatter_name(current_profile)
-        if current_name:
-            return current_name
-        entity_id = str(target.get("entity_id", "")).strip()
-        if str(target.get("entity_type", "")).strip() == "group":
-            return f"GID:{entity_id}"
-        return f"UID:{entity_id}"
-
     async def _merge_profiles(
         self, job: dict[str, Any], canonical: str, event_id: str
     ) -> None:
@@ -848,7 +834,11 @@ class HistorianWorker:
                 if tc_name == "read_profile":
                     rp_et = str(tc_args.get("entity_type", "")).strip()
                     rp_eid = str(tc_args.get("entity_id", "")).strip()
-                    if rp_et not in {"user", "group"} or not rp_eid:
+                    if (
+                        rp_et not in {"user", "group"}
+                        or not rp_eid
+                        or not rp_eid.isalnum()
+                    ):
                         tc_content = "错误：entity_type 或 entity_id 无效"
                     else:
                         profile_text = await self._profile_storage.read_profile(
@@ -923,7 +913,6 @@ class HistorianWorker:
                                 "content": "错误：summary 为空",
                             }
                         )
-                        done = False
                         continue
                     raw_tags = tc_args.get("tags", [])
                     up_tags: list[str] = []
