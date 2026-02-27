@@ -1,7 +1,7 @@
 [project]
 name = "Undefined-bot"
-version = "3.0.3"
-description = "A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture."
+version = "3.1.0"
+description = "QQ bot platform with cognitive memory architecture and multi-agent Skills, via OneBot V11."
 readme = "README.md"
 authors = [
   { name = "Null", email = "pylindex@qq.com"  }

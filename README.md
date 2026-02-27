@@ -3,7 +3,7 @@
     <td width="70%" valign="top">
       <div align="center">
         <h1>Undefined</h1>
-        <em>A high-performance, highly scalable QQ group and private chat robot based on a self-developed architecture.</em>
+        <em>QQ bot platform with cognitive memory architecture and multi-agent Skills, via OneBot V11.</em>
         <br/><br/>
         <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11--3.13-blue.svg" alt="Python"></a>
         <a href="https://docs.astral.sh/uv/"><img src="https://img.shields.io/badge/uv-auto%20python%20manager-6a5acd.svg" alt="uv"></a>
@@ -14,7 +14,7 @@
       </div>
       <h3>项目简介</h3>
       <p>
-        <strong>Undefined</strong> 是一个功能强大的 QQ 机器人平台，采用全新的 <strong>自研 Skills</strong> 架构。基于现代 Python 异步技术栈构建，它不仅提供基础的对话能力，更通过内置的多个智能 Agent 实现代码分析、网络搜索、娱乐互动等多模态能力，具备创新的<strong>无阻塞认知记忆系统</strong>。
+        <strong>Undefined</strong> 是一个基于 Python 异步架构的高性能 QQ 机器人平台，搭载<strong>认知记忆架构</strong>，采用自研 <strong>Skills</strong> 系统，内置多个智能 Agent，支持代码分析、网络搜索、娱乐互动等多模态能力，并提供 <strong>WebUI</strong> 在线管理。
       </p>
     </td>
     <td width="30%">
