@@ -66,8 +66,8 @@
 - 句子短而概括，避免冗长复述
 
 输出规则（调用 `update_profile` 工具）：
-- 若应跳过更新：`skip=true`，并给出 `skip_reason`；`summary` 置空字符串，`tags` 可为空数组。
-- 若执行更新：`skip=false`，返回 `summary` 和 `tags`。
+- 若应跳过更新：`skip=true`，并给出 `skip_reason`；`summary` 置空字符串，`tags` 可为空数组。**调用后流程立即终止，无法再执行任何操作，请确保在此之前已完成所有必要的读取与更新。**
+- 若执行更新：`skip=false`，返回 `summary` 和 `tags`。同样，调用后流程立即终止。
 - `entity_type` 和 `entity_id` 必须与目标实体一致。
 - `name` 使用目标实体的显示名（优先 `{target_display_name}`），不要把 `{target_entity_id}` 当昵称随意改写。
 - 必须通过 `update_profile` 工具返回结构化参数，禁止输出普通文本内容。
