@@ -607,12 +607,13 @@ class OneBotClient:
         from pathlib import Path as _Path
 
         file_name = name or _Path(file_path).name
+        file_uri = _Path(file_path).resolve().as_uri()
         try:
             return await self._call_api(
                 "upload_group_file",
                 {
                     "group_id": group_id,
-                    "file": file_path,
+                    "file": file_uri,
                     "name": file_name,
                 },
             )
@@ -627,7 +628,7 @@ class OneBotClient:
                 [
                     {
                         "type": "file",
-                        "data": {"file": f"file://{file_path}", "name": file_name},
+                        "data": {"file": file_uri, "name": file_name},
                     }
                 ],
             )
@@ -648,12 +649,13 @@ class OneBotClient:
         from pathlib import Path as _Path
 
         file_name = name or _Path(file_path).name
+        file_uri = _Path(file_path).resolve().as_uri()
         try:
             return await self._call_api(
                 "upload_private_file",
                 {
                     "user_id": user_id,
-                    "file": file_path,
+                    "file": file_uri,
                     "name": file_name,
                 },
             )
@@ -667,7 +669,7 @@ class OneBotClient:
                 [
                     {
                         "type": "file",
-                        "data": {"file": f"file://{file_path}", "name": file_name},
+                        "data": {"file": file_uri, "name": file_name},
                     }
                 ],
             )

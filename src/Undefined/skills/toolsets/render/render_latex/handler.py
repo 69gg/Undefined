@@ -54,10 +54,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         sender = context.get("sender")
 
         if sender:
-            import os
+            from pathlib import Path
 
-            abs_path = os.path.abspath(str(filepath))
-            message = f"[CQ:image,file={abs_path}]"
+            message = f"[CQ:image,file={Path(filepath).resolve().as_uri()}]"
 
             if message_type == "group":
                 await sender.send_group_message(int(target_id), message)

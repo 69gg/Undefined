@@ -163,4 +163,44 @@ uv run Undefined-webui
 ### 5. 跨平台与资源路径（重要）
 
 - **资源读取**：运行时会优先从运行目录加载同名 `res/...` / `img/...`（便于覆盖），若不存在再使用安装包自带资源；并提供仓库结构兜底查找，因此从任意目录启动也能正常加载提示词与资源文案。
-- **并发写入**：运行时会为 JSON/日志类文件使用“锁文件 + 原子替换”写入策略，Windows/Linux/macOS 行为一致（会生成 `*.lock` 文件）。
+- **并发写入**：运行时会为 JSON/日志类文件使用”锁文件 + 原子替换”写入策略，Windows/Linux/macOS 行为一致（会生成 `*.lock` 文件）。
+
+---
+
+## NapCat / Lagrange.Core 部署要求
+
+**NapCat（或 Lagrange.Core）必须与 Bot 进程共享同一文件系统，不能将 NapCat 单独放在无法访问 Bot 数据目录的 Docker 容器内。**
+
+### 原因
+
+Bot 发送本地文件（图片、音频、压缩包等）时，统一使用 `file:///path/to/file` URI，例如：
+
+```
+[CQ:image,file=file:///home/pyl/Undefined/data/cache/render/stats_line_chart.png]
+```
+
+NapCat 收到后会在**自身所在的文件系统**上按路径读取文件。若 NapCat 在独立容器中，宿主机路径不可见，会报：
+
+```
+ENOENT: no such file or directory, copyfile '/home/pyl/...' -> '/app/.config/QQ/NapCat/temp/...'
+```
+
+### 支持的部署方式
+
+| 场景 | 是否支持 |
+|---|---|
+| Bot 和 NapCat 都在宿主机 | ✅ |
+| Bot 在宿主机，NapCat 在 Docker（路径未挂载） | ❌ |
+| Bot 和 NapCat 在同一个 Docker 容器 | ✅ |
+| Bot 和 NapCat 在不同容器，共享同一 volume 且路径一致 | ✅ |
+
+### 受影响的功能
+
+以下功能均依赖本地文件路径：
+
+- `/stats` 统计图表
+- `render.render_markdown` / `render.render_latex` 渲染图片
+- 定时任务发送图片 / 音频
+- `code_delivery_agent` 代码交付压缩包
+- `messages.send_text_file` / `messages.send_url_file`
+- Bilibili 视频下载发送

@@ -508,12 +508,12 @@ class TaskScheduler:
                 async def send_img_cb(tid: int, mtype: str, path: str) -> None:
                     if not os.path.exists(path):
                         return
-                    abs_path = os.path.abspath(path)
+                    file_uri = Path(path).resolve().as_uri()
                     ext = os.path.splitext(path)[1].lower()
                     if ext in [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]:
-                        msg = f"[CQ:image,file={abs_path}]"
+                        msg = f"[CQ:image,file={file_uri}]"
                     elif ext in [".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"]:
-                        msg = f"[CQ:record,file={abs_path}]"
+                        msg = f"[CQ:record,file={file_uri}]"
                     else:
                         return
 

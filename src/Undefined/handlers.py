@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 import logging
 import os
+from pathlib import Path
 import random
 from typing import Any
 
@@ -424,9 +425,11 @@ class MessageHandler:
                 return
             elif rand_val < 0.11:  # 10% 发送图片
                 try:
-                    image_path = str(resolve_resource_path("img/xlwy.jpg").resolve())
+                    image_path = (
+                        resolve_resource_path("img/xlwy.jpg").resolve().as_uri()
+                    )
                 except Exception:
-                    image_path = os.path.abspath("img/xlwy.jpg")
+                    image_path = Path(os.path.abspath("img/xlwy.jpg")).as_uri()
                 message = f"[CQ:image,file={image_path}]"
                 # 50% 概率 @ 发送者
                 if random.random() < 0.5:
