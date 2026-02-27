@@ -922,7 +922,9 @@ class HistorianWorker:
                         ]
 
                     llm_name = str(tc_args.get("name", "")).strip()
-                    if not llm_name and not preferred_name:
+                    is_target = up_et == entity_type and up_eid == entity_id
+                    name_hint = preferred_name if is_target else ""
+                    if not llm_name and not name_hint:
                         existing = await self._profile_storage.read_profile(
                             up_et, up_eid
                         )
@@ -931,7 +933,7 @@ class HistorianWorker:
                         fallback_name = ""
                     effective_name = (
                         llm_name
-                        or preferred_name
+                        or name_hint
                         or fallback_name
                         or (f"GID:{up_eid}" if up_et == "group" else f"UID:{up_eid}")
                     )
