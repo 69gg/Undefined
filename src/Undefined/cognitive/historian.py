@@ -28,14 +28,46 @@ _REWRITE_TOOL = {
     },
 }
 
+_READ_PROFILE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "read_profile",
+        "description": "读取指定实体的当前侧写内容",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "entity_type": {
+                    "type": "string",
+                    "enum": ["user", "group"],
+                    "description": "实体类型：user 或 group",
+                },
+                "entity_id": {
+                    "type": "string",
+                    "description": "实体 ID（用户 QQ 号或群号）",
+                },
+            },
+            "required": ["entity_type", "entity_id"],
+        },
+    },
+}
+
 _PROFILE_TOOL = {
     "type": "function",
     "function": {
         "name": "update_profile",
-        "description": "更新用户/群侧写",
+        "description": "更新用户/群侧写。调用前必须先用 read_profile 查看当前内容",
         "parameters": {
             "type": "object",
             "properties": {
+                "entity_type": {
+                    "type": "string",
+                    "enum": ["user", "group"],
+                    "description": "实体类型：user 或 group",
+                },
+                "entity_id": {
+                    "type": "string",
+                    "description": "实体 ID（用户 QQ 号或群号）",
+                },
                 "skip": {
                     "type": "boolean",
                     "description": "是否跳过更新；当新信息不稳定/不足时为 true",
@@ -53,7 +85,7 @@ _PROFILE_TOOL = {
                 },
                 "summary": {"type": "string", "description": "侧写正文（Markdown）"},
             },
-            "required": ["skip", "name", "tags", "summary"],
+            "required": ["entity_type", "entity_id", "skip", "name", "tags", "summary"],
         },
     },
 }
@@ -520,20 +552,6 @@ class HistorianWorker:
             )
         return targets
 
-    def _resolve_profile_name(
-        self, target: dict[str, str], current_profile: str
-    ) -> str:
-        preferred_name = str(target.get("preferred_name", "")).strip()
-        if preferred_name:
-            return preferred_name
-        current_name = _extract_frontmatter_name(current_profile)
-        if current_name:
-            return current_name
-        entity_id = str(target.get("entity_id", "")).strip()
-        if str(target.get("entity_type", "")).strip() == "group":
-            return f"GID:{entity_id}"
-        return f"UID:{entity_id}"
-
     async def _merge_profiles(
         self, job: dict[str, Any], canonical: str, event_id: str
     ) -> None:
@@ -579,186 +597,20 @@ class HistorianWorker:
             len(targets),
         )
 
-    async def _merge_profile_target(
+    async def _write_profile(
         self,
         *,
-        job: dict[str, Any],
-        canonical: str,
+        entity_type: str,
+        entity_id: str,
+        effective_name: str,
+        tags: list[str],
+        summary: str,
         event_id: str,
-        target: dict[str, str],
-        target_index: int,
-        target_count: int,
-    ) -> bool:
+        perspective: str,
+    ) -> None:
         import yaml
 
-        entity_type = str(target.get("entity_type", "")).strip()
-        entity_id = str(target.get("entity_id", "")).strip()
-        perspective = str(target.get("perspective", "")).strip()
-        if entity_type not in {"user", "group"} or not entity_id:
-            logger.warning(
-                "[史官] 任务 %s 侧写目标非法，跳过: target=%s",
-                event_id,
-                target,
-            )
-            return False
-        logger.info(
-            "[史官] 任务 %s 合并侧写目标(%s/%s): entity_type=%s entity_id=%s perspective=%s",
-            event_id,
-            target_index,
-            target_count,
-            entity_type,
-            entity_id,
-            perspective,
-        )
-
-        current = (
-            await self._profile_storage.read_profile(entity_type, entity_id)
-            or "（暂无侧写）"
-        )
-        effective_name = self._resolve_profile_name(target, current)
-
-        # 检索该实体的历史事件作为 merge 参考
-        observations_text = (
-            "\n".join(job.get("observations", job.get("new_info", [])))
-            if isinstance(job.get("observations", job.get("new_info")), list)
-            else str(job.get("observations", job.get("new_info", "")))
-        )
-        hist_where: dict[str, Any] = {}
-        if entity_type == "group":
-            hist_where = {"group_id": entity_id}
-        else:
-            hist_where = {"sender_id": entity_id}
-        historical_events = await self._vector_store.query_events(
-            observations_text,
-            top_k=8,
-            where=hist_where,
-            apply_mmr=True,
-        )
-        historical_lines = (
-            "\n".join(
-                f"- [{e['metadata'].get('timestamp_local', '')}] {e['document']}"
-                for e in historical_events
-            )
-            or "（暂无历史事件）"
-        )
-
-        from Undefined.utils.resources import read_text_resource
-
-        template = read_text_resource("res/prompts/historian_profile_merge.md")
-        message_ids_raw = job.get("message_ids", [])
-        if isinstance(message_ids_raw, list):
-            message_ids = [
-                str(item).strip() for item in message_ids_raw if str(item).strip()
-            ]
-        else:
-            message_ids = []
-        prompt = template.format(
-            current_profile=_escape_braces(current),
-            historical_events=_escape_braces(historical_lines),
-            canonical_text=_escape_braces(canonical),
-            new_info=_escape_braces(
-                "\n".join(job.get("observations", job.get("new_info", [])))
-                if isinstance(job.get("observations", job.get("new_info")), list)
-                else str(job.get("observations", job.get("new_info", "")))
-            ),
-            observations=_escape_braces(
-                "\n".join(job.get("observations", job.get("new_info", [])))
-                if isinstance(job.get("observations", job.get("new_info")), list)
-                else str(job.get("observations", job.get("new_info", "")))
-            ),
-            target_entity_type=entity_type,
-            target_entity_id=entity_id,
-            target_perspective=perspective,
-            target_display_name=_escape_braces(effective_name),
-            request_type=_escape_braces(str(job.get("request_type", ""))),
-            user_id=_escape_braces(str(job.get("user_id", ""))),
-            group_id=_escape_braces(str(job.get("group_id", ""))),
-            sender_id=_escape_braces(str(job.get("sender_id", ""))),
-            sender_name=_escape_braces(str(job.get("sender_name", ""))),
-            group_name=_escape_braces(str(job.get("group_name", ""))),
-            timestamp_local=_escape_braces(str(job.get("timestamp_local", ""))),
-            timezone=_escape_braces(str(job.get("timezone", ""))),
-            event_id=_escape_braces(event_id),
-            request_id=_escape_braces(str(job.get("request_id", ""))),
-            end_seq=_escape_braces(str(job.get("end_seq", 0))),
-            message_ids=_escape_braces(", ".join(message_ids) if message_ids else "[]"),
-            action_summary=_escape_braces(
-                str(job.get("memo", job.get("action_summary", "")))
-            ),
-            memo=_escape_braces(str(job.get("memo", job.get("action_summary", "")))),
-            source_message=_escape_braces(str(job.get("source_message", ""))),
-            recent_messages=_escape_braces(
-                "\n".join(
-                    f"- {str(item).strip()}"
-                    for item in (job.get("recent_messages", []) or [])
-                    if str(item).strip()
-                )
-                or "（无）"
-            ),
-        )
-
-        response = await self._ai_client.submit_background_llm_call(
-            model_config=self._model_config or self._ai_client.agent_config,
-            messages=[{"role": "user", "content": prompt}],
-            tools=[_PROFILE_TOOL],
-            tool_choice={"type": "function", "function": {"name": "update_profile"}},
-            call_type="historian_profile_merge",
-        )
-        args = self._extract_required_tool_args(
-            response=response,
-            expected_tool_name="update_profile",
-            stage="historian_profile_merge",
-            job_id=event_id,
-            target=f"{entity_type}:{entity_id}",
-        )
-
-        raw_skip = args.get("skip", False)
-        skip = (
-            raw_skip.lower() not in ("false", "0", "no", "")
-            if isinstance(raw_skip, str)
-            else bool(raw_skip)
-        )
-        skip_reason = str(args.get("skip_reason", "")).strip()
-        if skip:
-            logger.info(
-                "[史官] 任务 %s 侧写更新跳过: target=%s:%s perspective=%s reason=%s",
-                event_id,
-                entity_type,
-                entity_id,
-                perspective,
-                skip_reason or "unspecified",
-            )
-            return False
-
-        summary = str(args.get("summary", "")).strip()
-        if not summary:
-            logger.info(
-                "[史官] 任务 %s 侧写更新跳过: target=%s:%s perspective=%s reason=empty_summary",
-                event_id,
-                entity_type,
-                entity_id,
-                perspective,
-            )
-            return False
-
-        raw_tags = args.get("tags", [])
-        tags: list[str] = []
-        if isinstance(raw_tags, list):
-            tags = [str(item).strip() for item in raw_tags if str(item).strip()]
-            tags = tags[:10]
-
-        llm_name = str(args.get("name", "")).strip()
-        if llm_name and llm_name != effective_name:
-            logger.info(
-                "[史官] 任务 %s 侧写名称已锁定: target=%s:%s llm_name=%s effective_name=%s",
-                event_id,
-                entity_type,
-                entity_id,
-                llm_name,
-                effective_name,
-            )
-
-        frontmatter = {
+        frontmatter: dict[str, Any] = {
             "entity_type": entity_type,
             "entity_id": entity_id,
             "name": effective_name,
@@ -783,6 +635,7 @@ class HistorianWorker:
             tags,
             perspective,
         )
+
         profile_doc_lines: list[str] = []
         if entity_type == "user":
             profile_doc_lines.append(f"昵称: {effective_name}")
@@ -818,4 +671,299 @@ class HistorianWorker:
             f"{entity_type}:{entity_id}",
             perspective,
         )
-        return True
+
+    async def _merge_profile_target(
+        self,
+        *,
+        job: dict[str, Any],
+        canonical: str,
+        event_id: str,
+        target: dict[str, str],
+        target_index: int,
+        target_count: int,
+    ) -> bool:
+        entity_type = str(target.get("entity_type", "")).strip()
+        entity_id = str(target.get("entity_id", "")).strip()
+        perspective = str(target.get("perspective", "")).strip()
+        if entity_type not in {"user", "group"} or not entity_id:
+            logger.warning(
+                "[史官] 任务 %s 侧写目标非法，跳过: target=%s",
+                event_id,
+                target,
+            )
+            return False
+        logger.info(
+            "[史官] 任务 %s 合并侧写目标(%s/%s): entity_type=%s entity_id=%s perspective=%s",
+            event_id,
+            target_index,
+            target_count,
+            entity_type,
+            entity_id,
+            perspective,
+        )
+
+        preferred_name = str(target.get("preferred_name", "")).strip()
+
+        # 检索该实体的历史事件作为 merge 参考
+        observations_raw = job.get("observations", job.get("new_info", []))
+        observations_text = (
+            "\n".join(observations_raw)
+            if isinstance(observations_raw, list)
+            else str(observations_raw)
+        )
+        hist_where: dict[str, Any] = {}
+        if entity_type == "group":
+            hist_where = {"group_id": entity_id}
+        else:
+            hist_where = {"sender_id": entity_id}
+        historical_events = await self._vector_store.query_events(
+            observations_text,
+            top_k=8,
+            where=hist_where,
+            apply_mmr=True,
+        )
+        historical_lines = (
+            "\n".join(
+                f"- [{e['metadata'].get('timestamp_local', '')}] {e['document']}"
+                for e in historical_events
+            )
+            or "（暂无历史事件）"
+        )
+
+        from Undefined.utils.resources import read_text_resource
+
+        template = read_text_resource("res/prompts/historian_profile_merge.md")
+        message_ids_raw = job.get("message_ids", [])
+        if isinstance(message_ids_raw, list):
+            message_ids = [
+                str(item).strip() for item in message_ids_raw if str(item).strip()
+            ]
+        else:
+            message_ids = []
+
+        prompt = template.format(
+            historical_events=_escape_braces(historical_lines),
+            canonical_text=_escape_braces(canonical),
+            observations=_escape_braces(observations_text),
+            new_info=_escape_braces(observations_text),
+            target_entity_type=entity_type,
+            target_entity_id=entity_id,
+            target_perspective=perspective,
+            target_display_name=_escape_braces(preferred_name or entity_id),
+            request_type=_escape_braces(str(job.get("request_type", ""))),
+            user_id=_escape_braces(str(job.get("user_id", ""))),
+            group_id=_escape_braces(str(job.get("group_id", ""))),
+            sender_id=_escape_braces(str(job.get("sender_id", ""))),
+            sender_name=_escape_braces(str(job.get("sender_name", ""))),
+            group_name=_escape_braces(str(job.get("group_name", ""))),
+            timestamp_local=_escape_braces(str(job.get("timestamp_local", ""))),
+            timezone=_escape_braces(str(job.get("timezone", ""))),
+            event_id=_escape_braces(event_id),
+            request_id=_escape_braces(str(job.get("request_id", ""))),
+            end_seq=_escape_braces(str(job.get("end_seq", 0))),
+            message_ids=_escape_braces(", ".join(message_ids) if message_ids else "[]"),
+            memo=_escape_braces(str(job.get("memo", job.get("action_summary", "")))),
+            action_summary=_escape_braces(
+                str(job.get("memo", job.get("action_summary", "")))
+            ),
+            source_message=_escape_braces(str(job.get("source_message", ""))),
+            recent_messages=_escape_braces(
+                "\n".join(
+                    f"- {str(item).strip()}"
+                    for item in (job.get("recent_messages", []) or [])
+                    if str(item).strip()
+                )
+                or "（无）"
+            ),
+        )
+
+        messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
+        tools = [_READ_PROFILE_TOOL, _PROFILE_TOOL]
+        result = False
+        max_turns = 100
+
+        for turn in range(max_turns):
+            response = await self._ai_client.submit_background_llm_call(
+                model_config=self._model_config or self._ai_client.agent_config,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                call_type="historian_profile_merge",
+            )
+
+            choices = response.get("choices") or []
+            if not choices:
+                logger.warning("[史官] 任务 %s turn=%s 响应无 choices", event_id, turn)
+                break
+            message = choices[0].get("message") if isinstance(choices[0], dict) else {}
+            if not isinstance(message, dict):
+                break
+
+            tool_calls = message.get("tool_calls") or []
+            if not tool_calls:
+                logger.info(
+                    "[史官] 任务 %s turn=%s 无 tool_calls，结束", event_id, turn
+                )
+                break
+
+            # 追加 assistant 轮次
+            assistant_msg: dict[str, Any] = {
+                "role": "assistant",
+                "tool_calls": tool_calls,
+            }
+            if message.get("content"):
+                assistant_msg["content"] = message["content"]
+            messages.append(assistant_msg)
+
+            tool_results: list[dict[str, Any]] = []
+            done = False
+
+            for tc in tool_calls:
+                if not isinstance(tc, dict):
+                    continue
+                func = tc.get("function") or {}
+                tc_name = str(func.get("name", "")).strip()
+                tc_id = str(tc.get("id", "")).strip()
+                try:
+                    tc_args: dict[str, Any] = json.loads(
+                        str(func.get("arguments", "{}"))
+                    )
+                except json.JSONDecodeError:
+                    tc_args = {}
+
+                if tc_name == "read_profile":
+                    rp_et = str(tc_args.get("entity_type", "")).strip()
+                    rp_eid = str(tc_args.get("entity_id", "")).strip()
+                    if (
+                        rp_et not in {"user", "group"}
+                        or not rp_eid
+                        or not rp_eid.isalnum()
+                    ):
+                        tc_content = "错误：entity_type 或 entity_id 无效"
+                    else:
+                        profile_text = await self._profile_storage.read_profile(
+                            rp_et, rp_eid
+                        )
+                        tc_content = profile_text or "（暂无侧写）"
+                    logger.info(
+                        "[史官] 任务 %s read_profile: %s:%s len=%s",
+                        event_id,
+                        rp_et,
+                        rp_eid,
+                        len(tc_content),
+                    )
+                    tool_results.append(
+                        {"role": "tool", "tool_call_id": tc_id, "content": tc_content}
+                    )
+
+                elif tc_name == "update_profile":
+                    up_et = str(tc_args.get("entity_type", entity_type)).strip()
+                    up_eid = str(tc_args.get("entity_id", entity_id)).strip()
+                    if (
+                        up_et not in {"user", "group"}
+                        or not up_eid
+                        or not up_eid.isalnum()
+                    ):
+                        tool_results.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc_id,
+                                "content": "错误：entity_type 或 entity_id 无效",
+                            }
+                        )
+                        continue
+                    raw_skip = tc_args.get("skip", False)
+                    skip = (
+                        raw_skip.lower() not in ("false", "0", "no", "")
+                        if isinstance(raw_skip, str)
+                        else bool(raw_skip)
+                    )
+                    if skip:
+                        skip_reason = str(tc_args.get("skip_reason", "")).strip()
+                        logger.info(
+                            "[史官] 任务 %s 侧写更新跳过: target=%s:%s perspective=%s reason=%s",
+                            event_id,
+                            up_et,
+                            up_eid,
+                            perspective,
+                            skip_reason or "unspecified",
+                        )
+                        tool_results.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc_id,
+                                "content": f"已跳过: {skip_reason}",
+                            }
+                        )
+                        done = True
+                        continue
+
+                    summary = str(tc_args.get("summary", "")).strip()
+                    if not summary:
+                        logger.info(
+                            "[史官] 任务 %s 侧写更新跳过: target=%s:%s reason=empty_summary",
+                            event_id,
+                            up_et,
+                            up_eid,
+                        )
+                        tool_results.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc_id,
+                                "content": "错误：summary 为空",
+                            }
+                        )
+                        continue
+                    raw_tags = tc_args.get("tags", [])
+                    up_tags: list[str] = []
+                    if isinstance(raw_tags, list):
+                        up_tags = [str(t).strip() for t in raw_tags if str(t).strip()][
+                            :10
+                        ]
+
+                    llm_name = str(tc_args.get("name", "")).strip()
+                    is_target = up_et == entity_type and up_eid == entity_id
+                    name_hint = preferred_name if is_target else ""
+                    if not llm_name and not name_hint:
+                        existing = await self._profile_storage.read_profile(
+                            up_et, up_eid
+                        )
+                        fallback_name = _extract_frontmatter_name(existing or "")
+                    else:
+                        fallback_name = ""
+                    effective_name = (
+                        name_hint
+                        or llm_name
+                        or fallback_name
+                        or (f"GID:{up_eid}" if up_et == "group" else f"UID:{up_eid}")
+                    )
+
+                    await self._write_profile(
+                        entity_type=up_et,
+                        entity_id=up_eid,
+                        effective_name=effective_name,
+                        tags=up_tags,
+                        summary=summary,
+                        event_id=event_id,
+                        perspective=perspective,
+                    )
+                    tool_results.append(
+                        {"role": "tool", "tool_call_id": tc_id, "content": "侧写已更新"}
+                    )
+                    result = True
+                    done = True
+
+                else:
+                    tool_results.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "content": f"未知工具: {tc_name}",
+                        }
+                    )
+
+            messages.extend(tool_results)
+            if done:
+                break
+
+        return result
