@@ -113,18 +113,14 @@ async def test_download_video_returns_info_when_duration_exceeds_limit(
 async def test_download_video_uses_oh_my_bilibili_download(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    prefetch_called = False
+
     async def _fake_get_video_info(
         _bvid: str, cookie: str = "", sessdata: str = ""
     ) -> downloader.VideoInfo:
-        return downloader.VideoInfo(
-            bvid="BV1xx411c7mD",
-            title="short",
-            duration=30,
-            cover_url="",
-            up_name="up",
-            desc="desc",
-            cid=2,
-        )
+        nonlocal prefetch_called
+        prefetch_called = True
+        raise AssertionError("max_duration=0 should not prefetch video info")
 
     def _fake_omb_get_video_info(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("download path should not call sync get_video_info")
@@ -173,3 +169,4 @@ async def test_download_video_uses_oh_my_bilibili_download(
     assert path.exists()
     assert qn == 64
     assert info.title == "from-download"
+    assert prefetch_called is False

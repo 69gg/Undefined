@@ -300,7 +300,9 @@ class MultimodalAnalyzer:
             return await self._load_remote_media_as_data_url(media_url, media_type)
 
         # 读取本地文件并转换为 base64
-        media_data = base64.b64encode(Path(media_url).read_bytes()).decode()
+        async with aiofiles.open(media_url, "rb") as f:
+            media_bytes = bytes(await f.read())
+        media_data = base64.b64encode(media_bytes).decode()
         mime_type = get_media_mime_type(media_type, media_url)
         return f"data:{mime_type};base64,{media_data}"
 
@@ -316,7 +318,9 @@ class MultimodalAnalyzer:
             await self._cleanup_url_cache_if_needed()
             if not cache_path.exists():
                 await self._download_url_to_cache(media_url, cache_path)
-            media_data = base64.b64encode(cache_path.read_bytes()).decode()
+            async with aiofiles.open(cache_path, "rb") as f:
+                media_bytes = bytes(await f.read())
+            media_data = base64.b64encode(media_bytes).decode()
 
         mime_type = get_media_mime_type(media_type, media_url)
         return f"data:{mime_type};base64,{media_data}"
@@ -352,7 +356,8 @@ class MultimodalAnalyzer:
             ) as client:
                 response = await client.get(media_url)
                 response.raise_for_status()
-                tmp_path.write_bytes(response.content)
+                async with aiofiles.open(tmp_path, "wb") as f:
+                    await f.write(response.content)
             tmp_path.replace(cache_path)
         except Exception:
             try:
@@ -360,6 +365,14 @@ class MultimodalAnalyzer:
             except Exception:
                 pass
             raise
+
+    @staticmethod
+    def _extract_cache_key_from_tmp(path: Path) -> str:
+        """从临时文件名提取 cache_key（{key}.{ext}.tmp -> key）。
+
+        Extract cache_key from tmp filename ({key}.{ext}.tmp -> key).
+        """
+        return Path(path.stem).stem
 
     async def _cleanup_url_cache_if_needed(self) -> None:
         """按 TTL + 文件数上限清理 URL 媒体缓存。"""
@@ -381,23 +394,32 @@ class MultimodalAnalyzer:
                 return
             self._last_url_cache_cleanup_at = now
 
+            async with self._url_cache_locks_guard:
+                active_keys = {
+                    key for key, lock in self._url_cache_locks.items() if lock.locked()
+                }
             cache_dir = _MEDIA_URL_CACHE_DIR
             if not cache_dir.exists():
+                await self._prune_url_cache_locks(
+                    active_keys=active_keys,
+                    present_keys=set(),
+                )
                 return
 
-            active_keys = {
-                key for key, lock in self._url_cache_locks.items() if lock.locked()
-            }
             files: list[Path] = [p for p in cache_dir.iterdir() if p.is_file()]
             expire_before = now - _MEDIA_URL_CACHE_TTL_SECONDS
             kept_files: list[Path] = []
+            present_keys: set[str] = set()
 
             # 先按 TTL 清理，跳过正在下载/读取的活跃键。
             # First, TTL cleanup; skip active keys still being downloaded/read.
             for path in files:
                 if path.name.endswith(".tmp"):
-                    path.unlink(missing_ok=True)
+                    tmp_key = self._extract_cache_key_from_tmp(path)
+                    if tmp_key and tmp_key not in active_keys:
+                        path.unlink(missing_ok=True)
                     continue
+                present_keys.add(path.stem)
                 try:
                     mtime = path.stat().st_mtime
                 except OSError:
@@ -407,16 +429,48 @@ class MultimodalAnalyzer:
                 else:
                     kept_files.append(path)
 
+            await self._prune_url_cache_locks(
+                active_keys=active_keys,
+                present_keys=present_keys,
+            )
+
             # 再按数量上限清理最旧文件，同样跳过活跃键。
             # Then enforce max-file limit by deleting oldest files, skipping active keys.
             if len(kept_files) <= _MEDIA_URL_CACHE_MAX_FILES:
                 return
 
-            kept_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-            for path in kept_files[_MEDIA_URL_CACHE_MAX_FILES:]:
+            kept_with_mtime: list[tuple[float, Path]] = []
+            for path in kept_files:
+                try:
+                    kept_with_mtime.append((path.stat().st_mtime, path))
+                except OSError:
+                    continue
+            kept_with_mtime.sort(key=lambda item: item[0], reverse=True)
+            for _, path in kept_with_mtime[_MEDIA_URL_CACHE_MAX_FILES:]:
                 if path.stem in active_keys:
                     continue
                 path.unlink(missing_ok=True)
+
+    async def _prune_url_cache_locks(
+        self,
+        *,
+        active_keys: set[str],
+        present_keys: set[str],
+    ) -> None:
+        """回收不再活跃且已无缓存文件的 URL 锁，避免字典无限增长。
+
+        Prune stale URL locks with no active task/file to avoid unbounded growth.
+        """
+        async with self._url_cache_locks_guard:
+            stale_keys = [
+                key
+                for key, lock in self._url_cache_locks.items()
+                if key not in active_keys
+                and key not in present_keys
+                and not lock.locked()
+            ]
+            for key in stale_keys:
+                self._url_cache_locks.pop(key, None)
 
     async def _build_content_items(
         self, media_type: str, media_content: str, prompt: str

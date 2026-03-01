@@ -75,3 +75,85 @@ async def test_load_media_content_serializes_same_url_download(
 
     assert set(results) == {"data:image/jpeg;base64,eHl6"}
     assert download_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_cleanup_keeps_tmp_file_for_active_download(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cache_dir = tmp_path / "multimodal_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(multimodal_module, "_MEDIA_URL_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(
+        multimodal_module, "_MEDIA_URL_CACHE_CLEANUP_INTERVAL_SECONDS", 0.0
+    )
+
+    analyzer = _make_analyzer()
+    url = "https://example.com/live.png"
+    key = analyzer._build_url_cache_key(url)
+    tmp_file = cache_dir / f"{key}.png.tmp"
+    tmp_file.write_bytes(b"in-progress")
+
+    lock = asyncio.Lock()
+    await lock.acquire()
+    analyzer._url_cache_locks[key] = lock
+
+    await analyzer._cleanup_url_cache_if_needed()
+    assert tmp_file.exists()
+
+    lock.release()
+    await analyzer._cleanup_url_cache_if_needed()
+    assert not tmp_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_handles_oserror_during_mtime_sort(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cache_dir = tmp_path / "multimodal_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(multimodal_module, "_MEDIA_URL_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(
+        multimodal_module, "_MEDIA_URL_CACHE_CLEANUP_INTERVAL_SECONDS", 0.0
+    )
+    monkeypatch.setattr(multimodal_module, "_MEDIA_URL_CACHE_TTL_SECONDS", 999999)
+    monkeypatch.setattr(multimodal_module, "_MEDIA_URL_CACHE_MAX_FILES", 1)
+
+    keep_a = cache_dir / "a.bin"
+    keep_b = cache_dir / "b.bin"
+    keep_a.write_bytes(b"a")
+    keep_b.write_bytes(b"b")
+
+    analyzer = _make_analyzer()
+    original_stat = Path.stat
+    stat_calls: dict[str, int] = {}
+
+    def _flaky_stat(self: Path, *args: Any, **kwargs: Any) -> Any:
+        name = self.name
+        stat_calls[name] = stat_calls.get(name, 0) + 1
+        if name == "b.bin" and stat_calls[name] >= 2:
+            raise FileNotFoundError("simulated concurrent delete")
+        return original_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", _flaky_stat)
+
+    await analyzer._cleanup_url_cache_if_needed()
+    assert keep_a.exists() or keep_b.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_prunes_unused_url_cache_locks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cache_dir = tmp_path / "multimodal_cache"
+    monkeypatch.setattr(multimodal_module, "_MEDIA_URL_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(
+        multimodal_module, "_MEDIA_URL_CACHE_CLEANUP_INTERVAL_SECONDS", 0.0
+    )
+
+    analyzer = _make_analyzer()
+    analyzer._url_cache_locks["stale-a"] = asyncio.Lock()
+    analyzer._url_cache_locks["stale-b"] = asyncio.Lock()
+
+    await analyzer._cleanup_url_cache_if_needed()
+    assert analyzer._url_cache_locks == {}

@@ -133,17 +133,18 @@ async def download_video(
     if not cookie and sessdata:
         cookie = sessdata
 
-    video_info = await get_video_info(bvid, cookie=cookie)
-
-    # 时长检查
-    if max_duration > 0 and video_info.duration > max_duration:
-        logger.info(
-            "[Bilibili] 视频时长 %ds 超过限制 %ds，跳过下载: %s",
-            video_info.duration,
-            max_duration,
-            bvid,
-        )
-        return None, video_info, 0
+    # 时长门禁：仅当调用方配置了 max_duration 时才预取元信息。
+    # Duration gate: prefetch metadata only when max_duration is configured.
+    if max_duration > 0:
+        video_info = await get_video_info(bvid, cookie=cookie)
+        if video_info.duration > max_duration:
+            logger.info(
+                "[Bilibili] 视频时长 %ds 超过限制 %ds，跳过下载: %s",
+                video_info.duration,
+                max_duration,
+                bvid,
+            )
+            return None, video_info, 0
 
     if output_dir is None:
         output_dir = DOWNLOAD_CACHE_DIR

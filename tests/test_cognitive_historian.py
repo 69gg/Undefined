@@ -114,13 +114,14 @@ async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
 ):
     class _FakeVectorStore:
         def __init__(self) -> None:
-            self.last_where: dict[str, Any] | None = None
+            self.where_calls: list[dict[str, Any]] = []
 
         async def query_events(
             self, _query: str, **kwargs: Any
         ) -> list[dict[str, Any]]:
             where = kwargs.get("where")
-            self.last_where = where if isinstance(where, dict) else None
+            if isinstance(where, dict):
+                self.where_calls.append(where)
             return []
 
     class _FakeAIClient:
@@ -171,6 +172,5 @@ async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
     )
 
     assert result is False
-    assert vector_store.last_where == {
-        "$or": [{"sender_id": "123456"}, {"user_id": "123456"}]
-    }
+    assert {"sender_id": "123456"} in vector_store.where_calls
+    assert {"user_id": "123456"} in vector_store.where_calls

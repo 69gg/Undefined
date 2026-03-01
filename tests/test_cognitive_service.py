@@ -420,3 +420,30 @@ async def test_build_context_private_mode_queries_groups_and_current_private() -
     assert "当前私聊上下文" in context
     assert "群聊公共经验" in context
     assert context.index("当前私聊上下文") < context.index("群聊公共经验")
+
+
+def test_merge_weighted_events_preserves_scope_rank_order() -> None:
+    # scoped_events 已经是 query_events 的最终排序（含 time_decay/mmr/rerank），
+    # merge 过程不应再按 base_score 重新洗牌。
+    scoped_events = [
+        {
+            "document": "更新但稍弱相似度",
+            "metadata": {"timestamp_local": "2026-02-25 12:00:00"},
+            "distance": 0.40,
+        },
+        {
+            "document": "更老但更高相似度",
+            "metadata": {"timestamp_local": "2026-02-20 12:00:00"},
+            "distance": 0.20,
+        },
+    ]
+
+    merged = CognitiveService._merge_weighted_events(
+        [(scoped_events, 1.0)],
+        top_k=2,
+    )
+
+    assert [item["document"] for item in merged] == [
+        "更新但稍弱相似度",
+        "更老但更高相似度",
+    ]

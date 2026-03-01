@@ -167,11 +167,16 @@ class CognitiveService:
         safe_top_k = max(1, int(top_k))
         safe_group_boost = max(0.0, float(current_group_boost))
         seen_keys: set[tuple[str, str, str, str, str, str]] = set()
-        scored_items: list[tuple[float, float, float, int, dict[str, Any]]] = []
+        # 排序主键优先使用“作用域内原始排名”（已含 time_decay/mmr/rerank 效果），
+        # 再使用相似度分值兜底，避免跨 scope 合并时打乱衰减后的顺序。
+        scored_items: list[
+            tuple[float, float, float, float, float, int, dict[str, Any]]
+        ] = []
         serial = 0
         for scoped_events, scope_weight in scoped_results:
             safe_scope_weight = max(0.0, _safe_float(scope_weight, default=1.0))
-            for event in scoped_events:
+            scope_size = max(1, len(scoped_events))
+            for rank_idx, event in enumerate(scoped_events):
                 dedupe_key = _event_dedupe_key(event)
                 if dedupe_key in seen_keys:
                     continue
@@ -185,11 +190,16 @@ class CognitiveService:
                     and str(metadata.get("group_id", "")).strip() == current_group_id
                 ):
                     scope_boost *= safe_group_boost
+                # 保留每个 scope 内已重排结果（time_decay/mmr/rerank）的相对顺序。
+                rank_score = float(scope_size - rank_idx) / float(scope_size)
+                weighted_rank_score = rank_score * scope_boost
                 base_score = _event_base_score(event)
                 weighted_score = base_score * scope_boost
                 scored_items.append(
                     (
+                        weighted_rank_score,
                         weighted_score,
+                        rank_score,
                         base_score,
                         _event_timestamp_epoch(metadata),
                         serial,
@@ -197,8 +207,17 @@ class CognitiveService:
                     )
                 )
                 serial += 1
-        scored_items.sort(key=lambda item: (-item[0], -item[1], -item[2], item[3]))
-        return [item[4] for item in scored_items[:safe_top_k]]
+        scored_items.sort(
+            key=lambda item: (
+                -item[0],
+                -item[1],
+                -item[2],
+                -item[3],
+                -item[4],
+                item[5],
+            )
+        )
+        return [item[6] for item in scored_items[:safe_top_k]]
 
     async def _query_events_for_auto_context(
         self,
