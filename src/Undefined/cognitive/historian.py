@@ -182,6 +182,7 @@ class HistorianWorker:
         self._model_config = model_config
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
+        self._inflight_tasks: set[asyncio.Task[None]] = set()
 
     async def start(self) -> None:
         logger.info("[史官] Worker 启动中")
@@ -196,40 +197,27 @@ class HistorianWorker:
         logger.info("[史官] Worker 已停止")
 
     async def _poll_loop(self) -> None:
-        poll_count = 0
+        dispatch_count = 0
         logger.info("[史官] 轮询循环已开始")
         while not self._stop_event.is_set():
             result = await self._job_queue.dequeue()
             if result:
                 job_id, job = result
-                try:
-                    await self._process_job(job_id, job)
-                except Exception as e:
-                    retry_count = job.get("_retry_count", 0)
-                    max_retries = self._config_getter().job_max_retries
-                    if retry_count < max_retries:
-                        logger.warning(
-                            "[史官] 任务 %s 处理失败 (%s/%s)，将自动重试: %s",
-                            job_id,
-                            retry_count + 1,
-                            max_retries,
-                            e,
-                        )
-                        await self._job_queue.requeue(job_id, str(e))
-                    else:
-                        logger.error(
-                            "[史官] 任务 %s 达到最大重试次数 (%s)，移入 failed: %s",
-                            job_id,
-                            max_retries,
-                            e,
-                        )
-                        await self._job_queue.fail(job_id, str(e))
+                task = asyncio.create_task(self._process_job_with_retry(job_id, job))
+                self._inflight_tasks.add(task)
+                task.add_done_callback(self._inflight_tasks.discard)
+                dispatch_count += 1
+                logger.info(
+                    "[史官] 任务已发车: job_id=%s inflight=%s",
+                    job_id,
+                    len(self._inflight_tasks),
+                )
 
-            poll_count += 1
             config = self._config_getter()
             if (
                 config.failed_cleanup_interval > 0
-                and poll_count % config.failed_cleanup_interval == 0
+                and dispatch_count > 0
+                and dispatch_count % config.failed_cleanup_interval == 0
             ):
                 from Undefined.utils.cache import cleanup_cache_dir
 
@@ -246,7 +234,37 @@ class HistorianWorker:
                 )
 
             await asyncio.sleep(config.poll_interval_seconds)
+
+        if self._inflight_tasks:
+            logger.info(
+                "[史官] 等待在途任务收敛: inflight=%s", len(self._inflight_tasks)
+            )
+            await asyncio.gather(*list(self._inflight_tasks), return_exceptions=True)
         logger.info("[史官] 轮询循环已结束")
+
+    async def _process_job_with_retry(self, job_id: str, job: dict[str, Any]) -> None:
+        try:
+            await self._process_job(job_id, job)
+        except Exception as e:
+            retry_count = job.get("_retry_count", 0)
+            max_retries = self._config_getter().job_max_retries
+            if retry_count < max_retries:
+                logger.warning(
+                    "[史官] 任务 %s 处理失败 (%s/%s)，将自动重试: %s",
+                    job_id,
+                    retry_count + 1,
+                    max_retries,
+                    e,
+                )
+                await self._job_queue.requeue(job_id, str(e))
+            else:
+                logger.error(
+                    "[史官] 任务 %s 达到最大重试次数 (%s)，移入 failed: %s",
+                    job_id,
+                    max_retries,
+                    e,
+                )
+                await self._job_queue.fail(job_id, str(e))
 
     async def _rewrite_and_validate(self, job: dict[str, Any], job_id: str) -> str:
         """改写为绝对化事件文本。"""

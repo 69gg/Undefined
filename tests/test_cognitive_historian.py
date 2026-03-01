@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 
@@ -174,3 +175,67 @@ async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
     assert result is False
     assert {"sender_id": "123456"} in vector_store.where_calls
     assert {"user_id": "123456"} in vector_store.where_calls
+
+
+@pytest.mark.asyncio
+async def test_poll_loop_dispatches_without_waiting_previous_job_completion() -> None:
+    started: list[str] = []
+    finished: list[str] = []
+    first_job_gate = asyncio.Event()
+
+    class _FakeQueue:
+        def __init__(self) -> None:
+            self._items: list[tuple[str, dict[str, Any]] | None] = [
+                ("job-1", {"_retry_count": 0}),
+                ("job-2", {"_retry_count": 0}),
+                None,
+                None,
+            ]
+
+        async def dequeue(self) -> tuple[str, dict[str, Any]] | None:
+            if self._items:
+                return self._items.pop(0)
+            return None
+
+        async def requeue(self, _job_id: str, _error: str) -> None:
+            return None
+
+        async def fail(self, _job_id: str, _error: str) -> None:
+            return None
+
+    queue = _FakeQueue()
+
+    class _DispatchWorker(HistorianWorker):
+        async def _process_job(self, job_id: str, job: dict[str, Any]) -> None:
+            _ = job
+            started.append(job_id)
+            if job_id == "job-1":
+                await first_job_gate.wait()
+                finished.append(job_id)
+                return
+
+            # 关键断言：第二单启动时，第一单尚未完成。
+            assert "job-1" in started
+            assert "job-1" not in finished
+            finished.append(job_id)
+            first_job_gate.set()
+            self._stop_event.set()
+
+    worker = _DispatchWorker(
+        job_queue=queue,
+        vector_store=None,
+        profile_storage=None,
+        ai_client=None,
+        config_getter=lambda: SimpleNamespace(
+            poll_interval_seconds=0.01,
+            failed_cleanup_interval=0,
+            failed_max_age_days=30,
+            failed_max_files=500,
+            job_max_retries=0,
+        ),
+    )
+
+    await asyncio.wait_for(worker._poll_loop(), timeout=1.0)
+
+    assert started[:2] == ["job-1", "job-2"]
+    assert "job-1" in finished and "job-2" in finished
