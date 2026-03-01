@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, cast
 
 from Undefined.context import RequestContext
 
@@ -35,6 +36,83 @@ def _compose_where(clauses: list[dict[str, Any]]) -> dict[str, Any] | None:
     if len(clauses) == 1:
         return clauses[0]
     return {"$and": clauses}
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except Exception:
+            return default
+    return default
+
+
+def _event_base_score(item: dict[str, Any]) -> float:
+    rerank_score = item.get("rerank_score")
+    if isinstance(rerank_score, (int, float)):
+        return max(0.0, float(rerank_score))
+    if isinstance(rerank_score, str):
+        try:
+            return max(0.0, float(rerank_score.strip()))
+        except Exception:
+            pass
+    similarity = 1.0 - _safe_float(item.get("distance"), default=1.0)
+    if similarity < 0.0:
+        return 0.0
+    if similarity > 1.0:
+        return 1.0
+    return similarity
+
+
+def _event_timestamp_epoch(metadata: Any) -> float:
+    if not isinstance(metadata, dict):
+        return float("-inf")
+    raw_epoch = metadata.get("timestamp_epoch")
+    if isinstance(raw_epoch, (int, float)):
+        return float(raw_epoch)
+    if isinstance(raw_epoch, str):
+        try:
+            return float(raw_epoch.strip())
+        except Exception:
+            pass
+    for key in ("timestamp_utc", "timestamp_local"):
+        parsed = _parse_iso_to_epoch_seconds(metadata.get(key))
+        if parsed is not None:
+            return float(parsed)
+    return float("-inf")
+
+
+def _event_dedupe_key(item: dict[str, Any]) -> tuple[str, str, str, str, str, str]:
+    metadata = item.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    return (
+        str(item.get("document", "")).strip(),
+        str(metadata.get("timestamp_epoch", "")).strip(),
+        str(metadata.get("timestamp_local", "")).strip(),
+        str(metadata.get("group_id", "")).strip(),
+        str(metadata.get("sender_id", "")).strip(),
+        str(metadata.get("user_id", "")).strip(),
+    )
+
+
+def _resolve_auto_request_type(
+    *,
+    request_type: str | None,
+    group_id: str,
+    user_id: str,
+    sender_id: str,
+) -> str:
+    normalized = str(request_type or "").strip().lower()
+    if normalized in {"group", "private"}:
+        return normalized
+    if group_id:
+        return "group"
+    if sender_id or user_id:
+        return "private"
+    return ""
 
 
 class CognitiveService:
@@ -68,6 +146,217 @@ class CognitiveService:
     @property
     def enabled(self) -> bool:
         return bool(self._config_getter().enabled)
+
+    @staticmethod
+    def _uid_candidates(user_id: str, sender_id: str) -> list[str]:
+        values: list[str] = []
+        for raw in (sender_id, user_id):
+            text = str(raw or "").strip()
+            if text and text not in values:
+                values.append(text)
+        return values
+
+    @staticmethod
+    def _merge_weighted_events(
+        scoped_results: list[tuple[list[dict[str, Any]], float]],
+        *,
+        top_k: int,
+        current_group_id: str = "",
+        current_group_boost: float = 1.0,
+    ) -> list[dict[str, Any]]:
+        safe_top_k = max(1, int(top_k))
+        safe_group_boost = max(0.0, float(current_group_boost))
+        seen_keys: set[tuple[str, str, str, str, str, str]] = set()
+        # 排序主键优先使用“作用域内原始排名”（已含 time_decay/mmr/rerank 效果），
+        # 再使用相似度分值兜底，避免跨 scope 合并时打乱衰减后的顺序。
+        scored_items: list[
+            tuple[float, float, float, float, float, int, dict[str, Any]]
+        ] = []
+        serial = 0
+        for scoped_events, scope_weight in scoped_results:
+            safe_scope_weight = max(0.0, _safe_float(scope_weight, default=1.0))
+            scope_size = max(1, len(scoped_events))
+            for rank_idx, event in enumerate(scoped_events):
+                dedupe_key = _event_dedupe_key(event)
+                if dedupe_key in seen_keys:
+                    continue
+                seen_keys.add(dedupe_key)
+                metadata = event.get("metadata")
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                scope_boost = safe_scope_weight
+                if (
+                    current_group_id
+                    and str(metadata.get("group_id", "")).strip() == current_group_id
+                ):
+                    scope_boost *= safe_group_boost
+                # 保留每个 scope 内已重排结果（time_decay/mmr/rerank）的相对顺序。
+                rank_score = float(scope_size - rank_idx) / float(scope_size)
+                weighted_rank_score = rank_score * scope_boost
+                base_score = _event_base_score(event)
+                weighted_score = base_score * scope_boost
+                scored_items.append(
+                    (
+                        weighted_rank_score,
+                        weighted_score,
+                        rank_score,
+                        base_score,
+                        _event_timestamp_epoch(metadata),
+                        serial,
+                        event,
+                    )
+                )
+                serial += 1
+        scored_items.sort(
+            key=lambda item: (
+                -item[0],
+                -item[1],
+                -item[2],
+                -item[3],
+                -item[4],
+                item[5],
+            )
+        )
+        return [item[6] for item in scored_items[:safe_top_k]]
+
+    async def _query_events_for_auto_context(
+        self,
+        *,
+        query: str,
+        request_type: str,
+        group_id: str,
+        user_id: str,
+        sender_id: str,
+        top_k: int,
+        config: Any,
+    ) -> list[dict[str, Any]]:
+        safe_top_k = max(1, int(top_k))
+        scope_candidate_multiplier = int(
+            getattr(config, "auto_scope_candidate_multiplier", 2)
+        )
+        if scope_candidate_multiplier <= 0:
+            scope_candidate_multiplier = 2
+        scoped_top_k = max(safe_top_k, safe_top_k * scope_candidate_multiplier)
+        current_group_boost = _safe_float(
+            getattr(config, "auto_current_group_boost", 1.15), default=1.15
+        )
+        if current_group_boost <= 0:
+            current_group_boost = 1.15
+        current_private_boost = _safe_float(
+            getattr(config, "auto_current_private_boost", 1.25), default=1.25
+        )
+        if current_private_boost <= 0:
+            current_private_boost = 1.25
+        common_kwargs: dict[str, Any] = {
+            "reranker": self._current_reranker(),
+            "candidate_multiplier": config.rerank_candidate_multiplier,
+            "time_decay_enabled": bool(getattr(config, "time_decay_enabled", True)),
+            "time_decay_half_life_days": float(
+                getattr(config, "time_decay_half_life_days_auto", 14.0)
+            ),
+            "time_decay_boost": float(getattr(config, "time_decay_boost", 0.2)),
+            "time_decay_min_similarity": float(
+                getattr(config, "time_decay_min_similarity", 0.35)
+            ),
+            "apply_mmr": True,
+        }
+        uid_values = self._uid_candidates(user_id, sender_id)
+
+        if request_type == "group":
+            group_events: list[dict[str, Any]] = await self._vector_store.query_events(
+                query,
+                top_k=scoped_top_k,
+                where={"request_type": "group"},
+                **common_kwargs,
+            )
+            merged = self._merge_weighted_events(
+                [(group_events, 1.0)],
+                top_k=safe_top_k,
+                current_group_id=group_id,
+                current_group_boost=current_group_boost,
+            )
+            logger.info(
+                "[认知服务] 自动检索（群聊）: group_candidates=%s merged=%s top_k=%s scope_multiplier=%s current_group_boost=%.2f",
+                len(group_events),
+                len(merged),
+                safe_top_k,
+                scope_candidate_multiplier,
+                current_group_boost,
+            )
+            return merged
+
+        if request_type == "private":
+            group_task = self._vector_store.query_events(
+                query,
+                top_k=scoped_top_k,
+                where={"request_type": "group"},
+                **common_kwargs,
+            )
+            if uid_values:
+                uid_clauses = [{"user_id": value} for value in uid_values] + [
+                    {"sender_id": value} for value in uid_values
+                ]
+                private_where: dict[str, Any] = {
+                    "$and": [
+                        {"request_type": "private"},
+                        {"$or": uid_clauses},
+                    ]
+                }
+                private_task = self._vector_store.query_events(
+                    query,
+                    top_k=scoped_top_k,
+                    where=private_where,
+                    **common_kwargs,
+                )
+                group_events_raw, private_events_raw = await asyncio.gather(
+                    group_task, private_task
+                )
+                group_events = cast(list[dict[str, Any]], group_events_raw)
+                private_events = cast(list[dict[str, Any]], private_events_raw)
+            else:
+                group_events = cast(list[dict[str, Any]], await group_task)
+                private_events = []
+            merged = self._merge_weighted_events(
+                [
+                    (group_events, 1.0),
+                    (private_events, current_private_boost),
+                ],
+                top_k=safe_top_k,
+            )
+            logger.info(
+                "[认知服务] 自动检索（私聊）: group_candidates=%s private_candidates=%s merged=%s top_k=%s scope_multiplier=%s private_boost=%.2f uid_candidates=%s",
+                len(group_events),
+                len(private_events),
+                len(merged),
+                safe_top_k,
+                scope_candidate_multiplier,
+                current_private_boost,
+                uid_values,
+            )
+            return merged
+
+        where: dict[str, Any] | None = None
+        if group_id:
+            where = {"group_id": group_id}
+        elif uid_values:
+            where = {
+                "$or": [{"user_id": value} for value in uid_values]
+                + [{"sender_id": value} for value in uid_values]
+            }
+        events: list[dict[str, Any]] = await self._vector_store.query_events(
+            query,
+            top_k=safe_top_k,
+            where=where,
+            **common_kwargs,
+        )
+        logger.info(
+            "[认知服务] 自动检索（兜底）: mode=%s where=%s count=%s top_k=%s",
+            request_type or "unknown",
+            where or {},
+            len(events),
+            safe_top_k,
+        )
+        return events
 
     async def enqueue_job(
         self,
@@ -226,20 +515,31 @@ class CognitiveService:
         sender_id: str | None = None,
         sender_name: str | None = None,
         group_name: str | None = None,
+        request_type: str | None = None,
     ) -> str:
         config = self._config_getter()
+        safe_group_id = str(group_id or "").strip()
+        safe_user_id = str(user_id or "").strip()
+        safe_sender_id = str(sender_id or "").strip()
+        safe_request_type = _resolve_auto_request_type(
+            request_type=request_type,
+            group_id=safe_group_id,
+            user_id=safe_user_id,
+            sender_id=safe_sender_id,
+        )
         parts: list[str] = []
         logger.info(
-            "[认知服务] 构建上下文: query_len=%s user=%s sender=%s group=%s top_k=%s",
+            "[认知服务] 构建上下文: query_len=%s type=%s user=%s sender=%s group=%s top_k=%s",
             len(query or ""),
-            user_id or "",
-            sender_id or "",
-            group_id or "",
+            safe_request_type or "",
+            safe_user_id,
+            safe_sender_id,
+            safe_group_id,
             getattr(config, "auto_top_k", 5),
         )
 
         # 用户侧写（优先 sender_id，与 enqueue_job 写入侧一致）
-        uid = sender_id or user_id
+        uid = safe_sender_id or safe_user_id
         if uid:
             profile = await self._profile_storage.read_profile("user", uid)
             if profile:
@@ -247,52 +547,31 @@ class CognitiveService:
                 parts.append(f"## 用户侧写 — {label}\n{profile}")
 
         # 群聊侧写
-        if group_id:
-            gprofile = await self._profile_storage.read_profile("group", group_id)
+        if safe_group_id:
+            gprofile = await self._profile_storage.read_profile("group", safe_group_id)
             if gprofile:
                 glabel = (
-                    f"{group_name}（GID: {group_id}）"
+                    f"{group_name}（GID: {safe_group_id}）"
                     if group_name
-                    else f"GID: {group_id}"
+                    else f"GID: {safe_group_id}"
                 )
                 parts.append(f"## 群聊侧写 — {glabel}\n{gprofile}")
 
-        # 相关事件
-        # user_id 和 sender_id 可能不同（如 WebUI 虚拟私聊 user_id=42,
-        # sender_id=superadmin_qq），用 $or 合并检索两侧事件。
-        where: dict[str, Any] | None = None
-        if group_id:
-            where = {"group_id": group_id}
-        elif uid:
-            uid_set = {uid}
-            if user_id and user_id != uid:
-                uid_set.add(user_id)
-            if sender_id and sender_id != uid:
-                uid_set.add(sender_id)
-            if len(uid_set) == 1:
-                where = {"user_id": uid}
-            else:
-                where = {
-                    "$or": [{"user_id": v} for v in uid_set]
-                    + [{"sender_id": v} for v in uid_set]
-                }
-
-        top_k = getattr(config, "auto_top_k", 5)
-        events = await self._vector_store.query_events(
-            query,
+        default_top_k = 5
+        try:
+            top_k = int(getattr(config, "auto_top_k", default_top_k))
+        except Exception:
+            top_k = default_top_k
+        if top_k <= 0:
+            top_k = default_top_k
+        events = await self._query_events_for_auto_context(
+            query=query,
+            request_type=safe_request_type,
+            group_id=safe_group_id,
+            user_id=safe_user_id,
+            sender_id=safe_sender_id,
             top_k=top_k,
-            where=where,
-            reranker=self._current_reranker(),
-            candidate_multiplier=config.rerank_candidate_multiplier,
-            time_decay_enabled=bool(getattr(config, "time_decay_enabled", True)),
-            time_decay_half_life_days=float(
-                getattr(config, "time_decay_half_life_days_auto", 14.0)
-            ),
-            time_decay_boost=float(getattr(config, "time_decay_boost", 0.2)),
-            time_decay_min_similarity=float(
-                getattr(config, "time_decay_min_similarity", 0.35)
-            ),
-            apply_mmr=True,
+            config=config,
         )
         if events:
             event_lines = "\n".join(

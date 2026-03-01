@@ -106,3 +106,71 @@ async def test_process_job_memo_only_no_observations_skips_vector_write() -> Non
     assert len(upserted_events) == 0
     # 但任务应正常完成
     assert "job-memo-only" in completed_jobs
+
+
+@pytest.mark.asyncio
+async def test_merge_profile_target_user_queries_history_with_sender_or_user_id() -> (
+    None
+):
+    class _FakeVectorStore:
+        def __init__(self) -> None:
+            self.where_calls: list[dict[str, Any]] = []
+
+        async def query_events(
+            self, _query: str, **kwargs: Any
+        ) -> list[dict[str, Any]]:
+            where = kwargs.get("where")
+            if isinstance(where, dict):
+                self.where_calls.append(where)
+            return []
+
+    class _FakeAIClient:
+        agent_config = object()
+
+        async def submit_background_llm_call(self, **kwargs: Any) -> dict[str, Any]:
+            _ = kwargs
+            return {"choices": []}
+
+    vector_store = _FakeVectorStore()
+    worker = HistorianWorker(
+        job_queue=None,
+        vector_store=vector_store,
+        profile_storage=SimpleNamespace(read_profile=None),
+        ai_client=_FakeAIClient(),
+        config_getter=lambda: SimpleNamespace(),
+    )
+    job: dict[str, Any] = {
+        "observations": ["用户提到会继续用 Python"],
+        "request_type": "private",
+        "user_id": "123456",
+        "group_id": "",
+        "sender_id": "123456",
+        "sender_name": "测试用户",
+        "group_name": "",
+        "timestamp_local": "2026-03-01T12:00:00+08:00",
+        "timezone": "Asia/Shanghai",
+        "request_id": "req-1",
+        "end_seq": 1,
+        "message_ids": [],
+        "memo": "",
+        "source_message": "我还是喜欢 Python",
+        "recent_messages": [],
+    }
+
+    result = await worker._merge_profile_target(
+        job=job,
+        canonical="测试用户(123456)表示长期偏好 Python",
+        event_id="job-1",
+        target={
+            "entity_type": "user",
+            "entity_id": "123456",
+            "perspective": "sender",
+            "preferred_name": "测试用户",
+        },
+        target_index=1,
+        target_count=1,
+    )
+
+    assert result is False
+    assert {"sender_id": "123456"} in vector_store.where_calls
+    assert {"user_id": "123456"} in vector_store.where_calls

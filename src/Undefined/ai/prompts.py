@@ -285,14 +285,29 @@ class PromptBuilder:
                     str(extra_context.get("sender_id", "")) if extra_context else None
                 )
             )
+            resolved_request_type = (
+                str(ctx.request_type).strip()
+                if ctx and ctx.request_type
+                else (
+                    str(extra_context.get("request_type", "")).strip()
+                    if extra_context
+                    else ""
+                )
+            )
+            if not resolved_request_type:
+                if resolved_group_id and str(resolved_group_id).strip():
+                    resolved_request_type = "group"
+                elif resolved_sender_id or resolved_user_id:
+                    resolved_request_type = "private"
             cognitive_query, query_enhanced = self._build_cognitive_query(
                 question, extra_context
             )
             logger.info(
-                "[AI会话] 开始自动检索认知记忆: raw_query_len=%s effective_query_len=%s query_enhanced=%s group=%s user=%s sender=%s",
+                "[AI会话] 开始自动检索认知记忆: raw_query_len=%s effective_query_len=%s query_enhanced=%s type=%s group=%s user=%s sender=%s",
                 len(question),
                 len(cognitive_query),
                 query_enhanced,
+                resolved_request_type or "",
                 resolved_group_id or "",
                 resolved_user_id or "",
                 resolved_sender_id or "",
@@ -308,6 +323,7 @@ class PromptBuilder:
                 group_name=str(extra_context.get("group_name", ""))
                 if extra_context
                 else None,
+                request_type=resolved_request_type or None,
             )
             if cognitive_context:
                 messages.append({"role": "system", "content": cognitive_context})

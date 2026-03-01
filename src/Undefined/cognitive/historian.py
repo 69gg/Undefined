@@ -672,6 +672,63 @@ class HistorianWorker:
             perspective,
         )
 
+    @staticmethod
+    def _historical_event_dedupe_key(
+        event: dict[str, Any],
+    ) -> tuple[str, str, str, str, str]:
+        metadata = event.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        return (
+            str(event.get("document", "")).strip(),
+            str(metadata.get("timestamp_local", "")).strip(),
+            str(metadata.get("sender_id", "")).strip(),
+            str(metadata.get("user_id", "")).strip(),
+            str(metadata.get("group_id", "")).strip(),
+        )
+
+    async def _query_user_history_events_for_profile_merge(
+        self,
+        *,
+        query_text: str,
+        entity_id: str,
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        """用户历史检索兼容路径：分别按 sender_id/user_id 查询并合并去重。
+
+        Compatibility path for user history retrieval:
+        query sender_id/user_id separately, then merge and dedupe.
+        """
+        safe_top_k = max(1, int(top_k))
+        sender_query = self._vector_store.query_events(
+            query_text,
+            top_k=safe_top_k,
+            where={"sender_id": entity_id},
+            apply_mmr=True,
+        )
+        user_query = self._vector_store.query_events(
+            query_text,
+            top_k=safe_top_k,
+            where={"user_id": entity_id},
+            apply_mmr=True,
+        )
+        sender_events_raw, user_events_raw = await asyncio.gather(
+            sender_query, user_query
+        )
+        merged_events = list(sender_events_raw) + list(user_events_raw)
+
+        deduped: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str, str, str]] = set()
+        for event in merged_events:
+            key = self._historical_event_dedupe_key(event)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(event)
+            if len(deduped) >= safe_top_k:
+                break
+        return deduped
+
     async def _merge_profile_target(
         self,
         *,
@@ -711,17 +768,19 @@ class HistorianWorker:
             if isinstance(observations_raw, list)
             else str(observations_raw)
         )
-        hist_where: dict[str, Any] = {}
         if entity_type == "group":
-            hist_where = {"group_id": entity_id}
+            historical_events = await self._vector_store.query_events(
+                observations_text,
+                top_k=8,
+                where={"group_id": entity_id},
+                apply_mmr=True,
+            )
         else:
-            hist_where = {"sender_id": entity_id}
-        historical_events = await self._vector_store.query_events(
-            observations_text,
-            top_k=8,
-            where=hist_where,
-            apply_mmr=True,
-        )
+            historical_events = await self._query_user_history_events_for_profile_merge(
+                query_text=observations_text,
+                entity_id=entity_id,
+                top_k=8,
+            )
         historical_lines = (
             "\n".join(
                 f"- [{e['metadata'].get('timestamp_local', '')}] {e['document']}"

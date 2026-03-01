@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import hashlib
 import json
 import logging
 from pathlib import Path
+import time
 from typing import Any
+from urllib.parse import urlsplit
+
 import aiofiles
+import httpx
 
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.ai.llm import ModelRequester
@@ -22,6 +28,27 @@ _MAX_QA_HISTORY = 5
 
 # 磁盘持久化路径
 _HISTORY_FILE_PATH = Path("data/media_qa_history.json")
+
+# 远程媒体缓存目录（用于先下载 URL 再转 data URL）
+# Remote media cache directory (download URL first, then convert to data URL).
+_MEDIA_URL_CACHE_DIR = Path("data/cache/multimodal_media")
+
+# 远程媒体缓存清理策略：仅保留最近 6 小时 + 最多 256 个文件。
+# Remote media cache cleanup policy: keep only recent 6h + max 256 files.
+_MEDIA_URL_CACHE_TTL_SECONDS = 6 * 60 * 60
+_MEDIA_URL_CACHE_MAX_FILES = 256
+
+# 两次自动清理之间的最小间隔（秒），避免每次请求都全量扫描目录。
+# Minimum interval between cleanup runs (seconds) to avoid full scan on every call.
+_MEDIA_URL_CACHE_CLEANUP_INTERVAL_SECONDS = 60.0
+
+# 下载 URL 到本地缓存时的网络超时（秒）。
+# Network timeout (seconds) when downloading URL to local cache.
+_MEDIA_URL_DOWNLOAD_TIMEOUT_SECONDS = 120.0
+
+# 下载阶段临时文件后缀（追加在缓存文件名后），用于区分真实缓存文件。
+# Download-stage temporary suffix (appended to cache filename) to avoid clashes.
+_MEDIA_URL_DOWNLOAD_TMP_SUFFIX = ".downloading"
 
 # 文件扩展名常量
 _IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg")
@@ -245,6 +272,17 @@ class MultimodalAnalyzer:
         self._cache: dict[str, dict[str, str]] = {}
         # 按文件名索引的 Q&A 历史：{filename: [{q: ..., a: ...}, ...]}
         self._file_history: dict[str, list[dict[str, str]]] = {}
+
+        # URL 下载锁：按 URL 哈希粒度加锁，避免并发下载同一文件造成竞态。
+        # URL download lock: keyed by URL hash to avoid duplicate concurrent downloads.
+        self._url_cache_locks: dict[str, asyncio.Lock] = {}
+        self._url_cache_locks_guard = asyncio.Lock()
+
+        # 缓存清理锁 + 上次清理时间，避免并发清理相互干扰。
+        # Cache cleanup lock + last cleanup timestamp to avoid concurrent cleanup races.
+        self._url_cache_cleanup_lock = asyncio.Lock()
+        self._last_url_cache_cleanup_at = 0.0
+
         self._load_history()
 
     async def _load_media_content(self, media_url: str, media_type: str) -> str:
@@ -259,14 +297,196 @@ class MultimodalAnalyzer:
         Returns:
             可用于 API 请求的媒体内容字符串
         """
-        if media_url.startswith("data:") or media_url.startswith("http"):
+        if media_url.startswith("data:"):
             return media_url
+
+        if media_url.startswith("http://") or media_url.startswith("https://"):
+            return await self._load_remote_media_as_data_url(media_url, media_type)
 
         # 读取本地文件并转换为 base64
         async with aiofiles.open(media_url, "rb") as f:
-            media_data = base64.b64encode(await f.read()).decode()
+            media_bytes = bytes(await f.read())
+        media_data = base64.b64encode(media_bytes).decode()
         mime_type = get_media_mime_type(media_type, media_url)
         return f"data:{mime_type};base64,{media_data}"
+
+    async def _load_remote_media_as_data_url(
+        self, media_url: str, media_type: str
+    ) -> str:
+        """将远程 URL 下载到缓存并转换为 data URL。"""
+        cache_key = self._build_url_cache_key(media_url)
+        lock = await self._get_url_cache_lock(cache_key)
+        cache_path = self._build_url_cache_path(cache_key, media_url)
+
+        async with lock:
+            await self._cleanup_url_cache_if_needed()
+            if not cache_path.exists():
+                await self._download_url_to_cache(media_url, cache_path)
+            async with aiofiles.open(cache_path, "rb") as f:
+                media_bytes = bytes(await f.read())
+            media_data = base64.b64encode(media_bytes).decode()
+
+        mime_type = get_media_mime_type(media_type, media_url)
+        return f"data:{mime_type};base64,{media_data}"
+
+    def _build_url_cache_key(self, media_url: str) -> str:
+        """构建 URL 缓存键（使用 URL 内容哈希）。"""
+        return hashlib.sha256(media_url.encode("utf-8")).hexdigest()
+
+    def _build_url_cache_path(self, cache_key: str, media_url: str) -> Path:
+        """基于 URL 生成缓存文件路径。"""
+        suffix = Path(urlsplit(media_url).path).suffix.lower()
+        if not suffix or len(suffix) > 10:
+            suffix = ".bin"
+        return _MEDIA_URL_CACHE_DIR / f"{cache_key}{suffix}"
+
+    async def _get_url_cache_lock(self, cache_key: str) -> asyncio.Lock:
+        """获取 URL 对应的下载锁（同 URL 串行化）。"""
+        async with self._url_cache_locks_guard:
+            lock = self._url_cache_locks.get(cache_key)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._url_cache_locks[cache_key] = lock
+            return lock
+
+    async def _download_url_to_cache(self, media_url: str, cache_path: Path) -> None:
+        """下载远程 URL 到缓存文件（原子写入，避免部分文件）。"""
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = cache_path.with_name(
+            f"{cache_path.name}{_MEDIA_URL_DOWNLOAD_TMP_SUFFIX}"
+        )
+        try:
+            timeout = httpx.Timeout(_MEDIA_URL_DOWNLOAD_TIMEOUT_SECONDS)
+            async with httpx.AsyncClient(
+                timeout=timeout, follow_redirects=True
+            ) as client:
+                response = await client.get(media_url)
+                response.raise_for_status()
+                async with aiofiles.open(tmp_path, "wb") as f:
+                    await f.write(response.content)
+            tmp_path.replace(cache_path)
+        except Exception:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            raise
+
+    @staticmethod
+    def _extract_cache_key_from_tmp(path: Path) -> str:
+        """从临时文件名提取 cache_key（{key}.{ext}.<tmp_suffix> -> key）。
+
+        Extract cache_key from tmp filename ({key}.{ext}.<tmp_suffix> -> key).
+        """
+        return Path(path.stem).stem
+
+    @staticmethod
+    def _is_download_tmp_path(path: Path) -> bool:
+        """判断是否为下载过程临时文件（{key}.{ext}.<tmp_suffix>）。
+
+        Identify download tmp files by requiring a dedicated trailing suffix and
+        at least one original extension segment before it.
+        """
+        suffixes = path.suffixes
+        return len(suffixes) >= 2 and suffixes[-1] == _MEDIA_URL_DOWNLOAD_TMP_SUFFIX
+
+    async def _cleanup_url_cache_if_needed(self) -> None:
+        """按 TTL + 文件数上限清理 URL 媒体缓存。"""
+        now = time.time()
+        if (
+            now - self._last_url_cache_cleanup_at
+            < _MEDIA_URL_CACHE_CLEANUP_INTERVAL_SECONDS
+        ):
+            return
+
+        async with self._url_cache_cleanup_lock:
+            # 双重检查，避免并发情况下重复清理。
+            # Double-check to avoid repeated cleanup under concurrency.
+            now = time.time()
+            if (
+                now - self._last_url_cache_cleanup_at
+                < _MEDIA_URL_CACHE_CLEANUP_INTERVAL_SECONDS
+            ):
+                return
+            self._last_url_cache_cleanup_at = now
+
+            async with self._url_cache_locks_guard:
+                active_keys = {
+                    key for key, lock in self._url_cache_locks.items() if lock.locked()
+                }
+            cache_dir = _MEDIA_URL_CACHE_DIR
+            if not cache_dir.exists():
+                await self._prune_url_cache_locks(
+                    active_keys=active_keys,
+                    present_keys=set(),
+                )
+                return
+
+            files: list[Path] = [p for p in cache_dir.iterdir() if p.is_file()]
+            expire_before = now - _MEDIA_URL_CACHE_TTL_SECONDS
+            kept_files: list[Path] = []
+            present_keys: set[str] = set()
+
+            # 先按 TTL 清理，跳过正在下载/读取的活跃键。
+            # First, TTL cleanup; skip active keys still being downloaded/read.
+            for path in files:
+                if self._is_download_tmp_path(path):
+                    tmp_key = self._extract_cache_key_from_tmp(path)
+                    if tmp_key and tmp_key not in active_keys:
+                        path.unlink(missing_ok=True)
+                    continue
+                present_keys.add(path.stem)
+                try:
+                    mtime = path.stat().st_mtime
+                except OSError:
+                    continue
+                if mtime < expire_before and path.stem not in active_keys:
+                    path.unlink(missing_ok=True)
+                else:
+                    kept_files.append(path)
+
+            await self._prune_url_cache_locks(
+                active_keys=active_keys,
+                present_keys=present_keys,
+            )
+
+            # 再按数量上限清理最旧文件，同样跳过活跃键。
+            # Then enforce max-file limit by deleting oldest files, skipping active keys.
+            if len(kept_files) <= _MEDIA_URL_CACHE_MAX_FILES:
+                return
+
+            kept_with_mtime: list[tuple[float, Path]] = []
+            for path in kept_files:
+                try:
+                    kept_with_mtime.append((path.stat().st_mtime, path))
+                except OSError:
+                    continue
+            kept_with_mtime.sort(key=lambda item: item[0], reverse=True)
+            for _, path in kept_with_mtime[_MEDIA_URL_CACHE_MAX_FILES:]:
+                if path.stem in active_keys:
+                    continue
+                path.unlink(missing_ok=True)
+
+    async def _prune_url_cache_locks(
+        self,
+        *,
+        active_keys: set[str],
+        present_keys: set[str],
+    ) -> None:
+        """回收不再活跃且已无缓存文件的 URL 锁，避免字典无限增长。
+
+        Prune stale URL locks with no active task/file to avoid unbounded growth.
+        """
+        async with self._url_cache_locks_guard:
+            stale_keys = [
+                key
+                for key, lock in self._url_cache_locks.items()
+                if key not in active_keys
+                and key not in present_keys
+                and not lock.locked()
+            ]
+            for key in stale_keys:
+                self._url_cache_locks.pop(key, None)
 
     async def _build_content_items(
         self, media_type: str, media_content: str, prompt: str

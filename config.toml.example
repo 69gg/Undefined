@@ -650,6 +650,15 @@ path = "data/cognitive/chromadb"
 # zh: 自动注入上下文时的召回条数。
 # en: Number of results to inject automatically.
 auto_top_k = 3
+# zh: 自动注入检索时每个作用域（scope）的候选扩展倍数（候选数约等于 auto_top_k * 该值）。
+# en: Candidate expansion multiplier per retrieval scope in auto injection (candidates ~= auto_top_k * this value).
+auto_scope_candidate_multiplier = 2
+# zh: 群聊自动检索时，属于当前群的命中额外加权系数（>1 更偏向当前群）。
+# en: Extra score multiplier for hits from the current group in group auto retrieval (>1 favors current group).
+auto_current_group_boost = 1.15
+# zh: 私聊自动检索时，属于当前私聊用户的命中额外加权系数（>1 更偏向当前私聊）。
+# en: Extra score multiplier for hits from the current private chat in private auto retrieval (>1 favors current private chat).
+auto_current_private_boost = 1.25
 # zh: 是否启用认知记忆检索重排（独立于 knowledge.enable_rerank）。
 # en: Enable reranking for cognitive memory retrieval (independent of knowledge.enable_rerank).
 enable_rerank = true

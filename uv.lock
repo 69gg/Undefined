@@ -2686,6 +2686,18 @@ wheels = [
 ]
 
 [[package]]
+name = "oh-my-bilibili"
+version = "0.1.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ff/44/c875183af3d46e06a30188560820ffadb3ce60ce790e5e2e6b81c6fc91f0/oh_my_bilibili-0.1.2.tar.gz", hash = "sha256:5af2455a4579b620c12d90c792b776057a8046413ec6bac3947bd9f94158e624", size = 8769, upload-time = "2026-03-01T06:52:43.54Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5f/4f/44faf3801ddbbdcbddba3b03ef2351dc207d8664a228616e06d9203c1845/oh_my_bilibili-0.1.2-py3-none-any.whl", hash = "sha256:737ce1332433662866e84ea8f7085ed4dfa0f2fe0d517f25a47a300ef676fda5", size = 12028, upload-time = "2026-03-01T06:52:42.592Z" },
+]
+
+[[package]]
 name = "onnxruntime"
 version = "1.24.2"
 source = { registry = "https://pypi.org/simple" }
@@ -4663,6 +4675,7 @@ dependencies = [
     { name = "matplotlib" },
     { name = "mdit-py-plugins" },
     { name = "numba" },
+    { name = "oh-my-bilibili" },
     { name = "openai" },
     { name = "openpyxl" },
     { name = "pillow" },
@@ -4735,6 +4748,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'ci'", specifier = ">=1.8.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
     { name = "numba", specifier = ">=0.61.0" },
+    { name = "oh-my-bilibili", specifier = ">=0.1.2" },
     { name = "openai", specifier = ">=2.15.0" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pillow" },

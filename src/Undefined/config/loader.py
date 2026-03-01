@@ -2042,6 +2042,20 @@ class Config:
             auto_top_k=_coerce_int(
                 q.get("auto_top_k") if isinstance(q, dict) else None, 3
             ),
+            auto_scope_candidate_multiplier=_coerce_int(
+                q.get("auto_scope_candidate_multiplier")
+                if isinstance(q, dict)
+                else None,
+                2,
+            ),
+            auto_current_group_boost=_coerce_float(
+                q.get("auto_current_group_boost") if isinstance(q, dict) else None,
+                1.15,
+            ),
+            auto_current_private_boost=_coerce_float(
+                q.get("auto_current_private_boost") if isinstance(q, dict) else None,
+                1.25,
+            ),
             enable_rerank=_coerce_bool(
                 q.get("enable_rerank") if isinstance(q, dict) else None, True
             ),
