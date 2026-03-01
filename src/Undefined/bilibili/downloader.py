@@ -1,40 +1,26 @@
-"""B 站视频下载
+"""B 站视频下载适配层。
 
-通过 B 站 API 获取视频信息，下载 DASH 音视频流并用 ffmpeg 合并。
+使用 `oh_my_bilibili` 提供的视频信息获取和下载能力，
+对外保持本项目原有接口与返回结构不变。
 """
 
 from __future__ import annotations
 
 import asyncio
-import logging
-import uuid
 from dataclasses import dataclass
+from functools import partial
+import logging
 from pathlib import Path
-from typing import Any
+import uuid
+from typing import Any, Protocol, cast
 
-import httpx
-
-from Undefined.bilibili.wbi import parse_cookie_string
-from Undefined.bilibili.wbi_request import request_with_wbi_fallback
 from Undefined.utils.paths import DOWNLOAD_CACHE_DIR, ensure_dir
 
 logger = logging.getLogger(__name__)
 
-_BILIBILI_API_VIEW = "https://api.bilibili.com/x/web-interface/view"
-_BILIBILI_API_VIEW_WBI = "https://api.bilibili.com/x/web-interface/wbi/view"
-_BILIBILI_API_PLAYURL = "https://api.bilibili.com/x/player/playurl"
-_BILIBILI_API_PLAYURL_WBI = "https://api.bilibili.com/x/player/wbi/playurl"
+_DEFAULT_TIMEOUT_SECONDS = 480.0
 
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Referer": "https://www.bilibili.com",
-}
-
-# 清晰度映射
+# 清晰度映射（兼容发送层展示逻辑）
 QUALITY_MAP: dict[int, str] = {
     127: "8K",
     126: "杜比视界",
@@ -49,23 +35,9 @@ QUALITY_MAP: dict[int, str] = {
 }
 
 
-def _build_cookies(cookie: str = "") -> dict[str, str]:
-    """将配置中的 cookie 字符串解析为 cookies 字典。
-
-    兼容两种输入：
-    1) 仅 SESSDATA 值（旧配置）
-    2) 完整 Cookie 串（推荐）
-    """
-    return parse_cookie_string(cookie)
-
-
-def _api_message(data: dict[str, Any]) -> str:
-    return str(data.get("message") or data.get("msg") or "未知错误")
-
-
 @dataclass
 class VideoInfo:
-    """视频基本信息"""
+    """视频基本信息。"""
 
     bvid: str
     title: str
@@ -76,108 +48,72 @@ class VideoInfo:
     cid: int  # 视频 cid
 
 
+class _OmbVideoInfo(Protocol):
+    """`oh_my_bilibili.models.VideoInfo` 最小结构约束。"""
+
+    bvid: str
+    title: str
+    duration: int
+    cover_url: str
+    up_name: str
+    desc: str
+    cid: int
+
+
+class _OmbDownloadResult(Protocol):
+    """`oh_my_bilibili.models.DownloadResult` 最小结构约束。"""
+
+    path: Path
+    quality: int
+    video_info: _OmbVideoInfo
+
+
+def _require_omb() -> tuple[Any, Any]:
+    """按需导入 oh_my_bilibili，缺失时给出明确错误。"""
+    try:
+        from oh_my_bilibili import download, get_video_info
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "未安装依赖 oh-my-bilibili。请先执行 `uv add oh-my-bilibili` 或 `uv sync`。"
+        ) from exc
+    return get_video_info, download
+
+
+def _map_video_info(raw: _OmbVideoInfo) -> VideoInfo:
+    """将 oh_my_bilibili 的 VideoInfo 映射为项目内部结构。"""
+    return VideoInfo(
+        bvid=str(raw.bvid),
+        title=str(raw.title),
+        duration=int(raw.duration),
+        cover_url=str(raw.cover_url),
+        up_name=str(raw.up_name),
+        desc=str(raw.desc),
+        cid=int(raw.cid),
+    )
+
+
 async def get_video_info(
     bvid: str,
     cookie: str = "",
     sessdata: str = "",
 ) -> VideoInfo:
-    """获取视频基本信息。
-
-    Raises:
-        ValueError: API 返回错误或视频不存在。
-        httpx.HTTPError: 网络请求失败。
-    """
+    """获取视频基本信息。"""
     if not cookie and sessdata:
         cookie = sessdata
 
-    cookies = _build_cookies(cookie)
-
-    async with httpx.AsyncClient(
-        headers=_HEADERS, cookies=cookies, timeout=480, follow_redirects=True
-    ) as client:
-        data = await request_with_wbi_fallback(
-            client,
-            endpoint=_BILIBILI_API_VIEW,
-            signed_endpoint=_BILIBILI_API_VIEW_WBI,
-            params={"bvid": bvid},
-            log_prefix="[Bilibili] 获取视频信息",
-        )
-
-    if data.get("code") != 0:
-        msg = _api_message(data)
-        raise ValueError(f"获取视频信息失败: {msg} (bvid={bvid})")
-
-    info = data["data"]
-    owner = info.get("owner", {})
-    pages = info.get("pages", [])
-    if not pages:
-        raise ValueError(f"视频无分P信息: {bvid}")
-    return VideoInfo(
-        bvid=bvid,
-        title=info.get("title", ""),
-        duration=info.get("duration", 0),
-        cover_url=info.get("pic", ""),
-        up_name=owner.get("name", ""),
-        desc=info.get("desc", ""),
-        cid=int(pages[0]["cid"]),
+    omb_get_video_info, _ = _require_omb()
+    raw = cast(
+        _OmbVideoInfo,
+        await asyncio.to_thread(
+            partial(
+                omb_get_video_info,
+                bvid,
+                cookie=cookie,
+                timeout=_DEFAULT_TIMEOUT_SECONDS,
+            )
+        ),
     )
-
-
-def _select_quality(available_qualities: list[int], prefer: int) -> int:
-    """选择最合适的清晰度。
-
-    优先选择 prefer；不可用时选最接近且不超过的；都超过则选最低。
-    """
-    if not available_qualities:
-        return prefer
-    if prefer in available_qualities:
-        return prefer
-    # 不超过 prefer 的最高清晰度
-    lower = [q for q in available_qualities if q <= prefer]
-    if lower:
-        return max(lower)
-    # 所有都比 prefer 高，选最低
-    return min(available_qualities)
-
-
-async def _download_stream(
-    client: httpx.AsyncClient,
-    url: str,
-    dest: Path,
-) -> None:
-    """下载单个流到文件。"""
-    async with client.stream("GET", url, headers=_HEADERS) as resp:
-        resp.raise_for_status()
-        with open(dest, "wb") as f:
-            async for chunk in resp.aiter_bytes(chunk_size=1024 * 64):
-                f.write(chunk)
-
-
-async def _merge_av(video_path: Path, audio_path: Path, output_path: Path) -> None:
-    """用 ffmpeg 合并音视频流。"""
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        str(video_path),
-        "-i",
-        str(audio_path),
-        "-c:v",
-        "copy",
-        "-c:a",
-        "copy",
-        "-movflags",
-        "+faststart",
-        str(output_path),
-    ]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg 合并失败: {stderr.decode(errors='replace')[:500]}")
+    return _map_video_info(raw)
 
 
 async def download_video(
@@ -189,13 +125,6 @@ async def download_video(
     sessdata: str = "",
 ) -> tuple[Path | None, VideoInfo, int]:
     """下载 B 站视频。
-
-    Args:
-        bvid: BV 号。
-        cookie: B 站完整 Cookie 字符串（推荐，至少包含 SESSDATA）。
-        prefer_quality: 首选清晰度 qn（80=1080P）。
-        max_duration: 最大时长限制（秒），0 表示不限。
-        output_dir: 输出目录，默认 DOWNLOAD_CACHE_DIR。
 
     Returns:
         (视频文件路径 | None, 视频信息, 实际清晰度 qn)。
@@ -216,107 +145,39 @@ async def download_video(
         )
         return None, video_info, 0
 
-    # 获取播放地址
-    cookies = _build_cookies(cookie)
-
-    async with httpx.AsyncClient(
-        headers=_HEADERS, cookies=cookies, timeout=480, follow_redirects=True
-    ) as client:
-        data = await request_with_wbi_fallback(
-            client,
-            endpoint=_BILIBILI_API_PLAYURL,
-            signed_endpoint=_BILIBILI_API_PLAYURL_WBI,
-            params={
-                "bvid": bvid,
-                "cid": video_info.cid,
-                "fnval": 16,  # DASH 格式
-                "fourk": 1,
-            },
-            log_prefix="[Bilibili] 获取播放地址",
-        )
-
-    if data.get("code") != 0:
-        raise ValueError(f"获取播放地址失败: {_api_message(data)}")
-
-    dash = data["data"].get("dash")
-    if not dash:
-        raise ValueError("该视频不支持 DASH 格式下载")
-
-    # 选择视频流
-    video_streams: list[dict[str, Any]] = dash.get("video", [])
-    audio_streams: list[dict[str, Any]] = dash.get("audio", []) or []
-
-    if not video_streams:
-        raise ValueError("未找到可用的视频流")
-
-    available_qns = list({v["id"] for v in video_streams})
-    actual_qn = _select_quality(available_qns, prefer_quality)
-
-    # 选择该清晰度下编码最优的视频流
-    target_videos = [v for v in video_streams if v["id"] == actual_qn]
-    if not target_videos:
-        target_videos = video_streams
-        actual_qn = target_videos[0]["id"]
-    video_stream = target_videos[0]
-
-    # 选择最高质量音频流
-    audio_stream = audio_streams[0] if audio_streams else None
-
-    # 准备临时目录
     if output_dir is None:
         output_dir = DOWNLOAD_CACHE_DIR
     work_dir = ensure_dir(output_dir / uuid.uuid4().hex)
 
-    video_tmp = work_dir / "video.m4s"
-    audio_tmp = work_dir / "audio.m4s"
-    output_file = work_dir / f"{bvid}.mp4"
+    _, omb_download = _require_omb()
 
     try:
-        video_url = video_stream.get("baseUrl") or video_stream.get("base_url", "")
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=480, read=480, write=480, pool=480),
-            follow_redirects=True,
-        ) as client:
-            # 下载视频流
-            logger.info(
-                "[Bilibili] 开始下载视频流 %s (qn=%d %s)",
-                bvid,
-                actual_qn,
-                QUALITY_MAP.get(actual_qn, "未知"),
-            )
-            await _download_stream(client, video_url, video_tmp)
-
-            # 下载音频流
-            if audio_stream:
-                audio_url = audio_stream.get("baseUrl") or audio_stream.get(
-                    "base_url", ""
+        result = cast(
+            _OmbDownloadResult,
+            await asyncio.to_thread(
+                partial(
+                    omb_download,
+                    bvid,
+                    save_path=work_dir,
+                    cookie=cookie,
+                    prefer_quality=prefer_quality,
+                    timeout=_DEFAULT_TIMEOUT_SECONDS,
+                    overwrite=True,
                 )
-                logger.info("[Bilibili] 开始下载音频流 %s", bvid)
-                await _download_stream(client, audio_url, audio_tmp)
-
-        # 合并
-        if audio_stream and audio_tmp.exists():
-            logger.info("[Bilibili] ffmpeg 合并音视频 %s", bvid)
-            await _merge_av(video_tmp, audio_tmp, output_file)
-        else:
-            # 无音频流，直接重命名视频
-            video_tmp.rename(output_file)
-
-        # 清理临时 m4s 文件
-        for tmp in (video_tmp, audio_tmp):
-            if tmp.exists():
-                tmp.unlink()
+            ),
+        )
+        downloaded_path = Path(result.path)
+        mapped_info = _map_video_info(result.video_info)
+        actual_qn = int(result.quality)
 
         logger.info(
             "[Bilibili] 下载完成: %s (%.1f MB, qn=%d)",
             bvid,
-            output_file.stat().st_size / 1024 / 1024,
+            downloaded_path.stat().st_size / 1024 / 1024,
             actual_qn,
         )
-        return output_file, video_info, actual_qn
-
+        return downloaded_path, mapped_info, actual_qn
     except Exception:
-        # 出错时清理工作目录
         _cleanup_dir(work_dir)
         raise
 

@@ -3,6 +3,7 @@
 下载并发送 Bilibili 视频到群聊或私聊。支持 BV 号、AV 号或 B 站视频链接。
 
 依赖：
+- Python 依赖：`oh-my-bilibili`（用于视频信息获取与下载）
 - 系统需安装 `ffmpeg`（用于合并 DASH 音视频流）
 
 常用参数：
@@ -12,8 +13,8 @@
 
 运行流程：
 1. 解析 `video_id` 为 BV 号
-2. 调用 B 站 API 获取视频信息和 DASH 流地址
-3. 下载音视频流并用 ffmpeg 合并为 MP4
+2. 调用 `oh_my_bilibili` 获取视频信息
+3. 调用 `oh_my_bilibili` 下载视频（库内部处理 DASH 与 ffmpeg 合并）
 4. 通过 `[CQ:video]` 发送到目标会话
 5. 超限时降级为封面+标题+简介信息卡片
 

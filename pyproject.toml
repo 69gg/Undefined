@@ -45,6 +45,7 @@ dependencies = [
     "psutil>=7.2.2",
     "pyyaml>=6.0.3",
     "pypinyin>=0.53.0",
+    "oh-my-bilibili>=0.1.2",
     "chromadb>=0.6.0",
     "numba>=0.61.0",
 ]
