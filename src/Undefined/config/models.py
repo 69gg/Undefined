@@ -133,6 +133,15 @@ class CognitiveConfig:
     queue_path: str = "data/cognitive/queues"
     profiles_path: str = "data/cognitive/profiles"
     auto_top_k: int = 3
+    # 自动注入检索时每个 scope 的候选扩展倍数（最终候选≈auto_top_k*该值）。
+    # Candidate expansion multiplier per scope for auto retrieval (candidates ~= auto_top_k * this value).
+    auto_scope_candidate_multiplier: int = 2
+    # 群聊自动检索中，当前群命中条目的额外权重系数（>1 更偏向当前群）。
+    # Extra score multiplier for current-group hits in group auto retrieval (>1 favors current group).
+    auto_current_group_boost: float = 1.15
+    # 私聊自动检索中，当前私聊命中条目的额外权重系数（>1 更偏向当前私聊）。
+    # Extra score multiplier for current-private hits in private auto retrieval (>1 favors current private chat).
+    auto_current_private_boost: float = 1.25
     enable_rerank: bool = True
     # When cognitive is enabled, also inject last N end action summaries as short-term working memory.
     # 0 disables this injection.

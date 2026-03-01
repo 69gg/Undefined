@@ -528,6 +528,9 @@ model_name = "gpt-4o-mini"
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `auto_top_k` | `3` | 自动注入召回条数 |
+| `auto_scope_candidate_multiplier` | `2` | 自动注入时每个作用域候选扩展倍数（候选数≈`auto_top_k * multiplier`） |
+| `auto_current_group_boost` | `1.15` | 群聊自动检索时，当前群命中额外加权系数 |
+| `auto_current_private_boost` | `1.25` | 私聊自动检索时，当前私聊命中额外加权系数 |
 | `enable_rerank` | `true` | 认知检索是否启用 rerank |
 | `recent_end_summaries_inject_k` | `30` | 最近 end 摘要注入条数，`0` 禁用 |
 | `time_decay_enabled` | `true` | 是否启用时间衰减加权 |

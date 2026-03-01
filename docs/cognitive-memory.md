@@ -187,6 +187,20 @@ MMR_score = λ × relevance(doc, query) − (1 − λ) × max_similarity(doc, se
 - 该规则影响自动注入路径下的语义召回与 rerank（两者使用同一 query）。
 - 手动工具 `cognitive.search_events` / `cognitive.search_profiles` 仍使用调用方显式传入的 `query`。
 
+### 自动注入场景的跨会话检索与加权
+
+自动注入路径会按会话类型采用不同检索范围，并在融合阶段做轻量加权：
+
+- 群聊：检索所有群聊事件（`request_type=group`），并对当前群命中做额外加权。
+- 私聊：检索所有群聊事件 + 当前私聊事件（`request_type=private` 且 `user_id/sender_id` 命中），并对当前私聊命中做额外加权。
+- 最终结果会做去重并按融合分数排序后截断到 `auto_top_k`。
+
+可调参数（`[cognitive.query]`）：
+
+- `auto_scope_candidate_multiplier`：每个作用域的候选扩展倍数。
+- `auto_current_group_boost`：群聊模式下当前群额外权重。
+- `auto_current_private_boost`：私聊模式下当前私聊额外权重。
+
 ### 用户/群侧写（Markdown + YAML Frontmatter）
 
 文件路径：`data/cognitive/profiles/users/{user_id}.md` / `groups/{group_id}.md`
@@ -256,6 +270,9 @@ data/cognitive/
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `auto_top_k` | int | `3` | 每轮自动注入的相关事件条数（支持热更新） |
+| `auto_scope_candidate_multiplier` | int | `2` | 自动注入时每个作用域候选扩展倍数（候选数≈`auto_top_k * multiplier`，支持热更新） |
+| `auto_current_group_boost` | float | `1.15` | 群聊自动检索时当前群命中额外加权系数（支持热更新） |
+| `auto_current_private_boost` | float | `1.25` | 私聊自动检索时当前私聊命中额外加权系数（支持热更新） |
 | `enable_rerank` | bool | `true` | 是否启用认知记忆检索重排（独立于 `knowledge.enable_rerank`，支持热更新） |
 | `recent_end_summaries_inject_k` | int | `30` | 认知模式下额外注入最近 N 条 end 行动摘要（短期工作记忆，带时间；0=禁用，支持热更新） |
 | `time_decay_enabled` | bool | `true` | 是否启用事件检索时间衰减加权（支持热更新） |
