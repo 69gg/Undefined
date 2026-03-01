@@ -715,7 +715,13 @@ class HistorianWorker:
         if entity_type == "group":
             hist_where = {"group_id": entity_id}
         else:
-            hist_where = {"sender_id": entity_id}
+            # user_id 与 sender_id 在不同入口/兼容场景下可能不一致，合并检索避免漏召回。
+            hist_where = {
+                "$or": [
+                    {"sender_id": entity_id},
+                    {"user_id": entity_id},
+                ]
+            }
         historical_events = await self._vector_store.query_events(
             observations_text,
             top_k=8,
