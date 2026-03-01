@@ -91,7 +91,9 @@ async def test_cleanup_keeps_tmp_file_for_active_download(
     analyzer = _make_analyzer()
     url = "https://example.com/live.png"
     key = analyzer._build_url_cache_key(url)
-    tmp_file = cache_dir / f"{key}.png.tmp"
+    tmp_file = cache_dir / (
+        f"{key}.png{multimodal_module._MEDIA_URL_DOWNLOAD_TMP_SUFFIX}"
+    )
     tmp_file.write_bytes(b"in-progress")
 
     lock = asyncio.Lock()
@@ -104,6 +106,29 @@ async def test_cleanup_keeps_tmp_file_for_active_download(
     lock.release()
     await analyzer._cleanup_url_cache_if_needed()
     assert not tmp_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_does_not_delete_regular_cache_file_with_tmp_extension(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cache_dir = tmp_path / "multimodal_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(multimodal_module, "_MEDIA_URL_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(
+        multimodal_module, "_MEDIA_URL_CACHE_CLEANUP_INTERVAL_SECONDS", 0.0
+    )
+    monkeypatch.setattr(multimodal_module, "_MEDIA_URL_CACHE_TTL_SECONDS", 999999)
+    monkeypatch.setattr(multimodal_module, "_MEDIA_URL_CACHE_MAX_FILES", 256)
+
+    analyzer = _make_analyzer()
+    url = "https://example.com/raw.tmp"
+    key = analyzer._build_url_cache_key(url)
+    cache_file = cache_dir / f"{key}.tmp"
+    cache_file.write_bytes(b"real-cache")
+
+    await analyzer._cleanup_url_cache_if_needed()
+    assert cache_file.exists()
 
 
 @pytest.mark.asyncio

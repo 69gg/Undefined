@@ -46,6 +46,10 @@ _MEDIA_URL_CACHE_CLEANUP_INTERVAL_SECONDS = 60.0
 # Network timeout (seconds) when downloading URL to local cache.
 _MEDIA_URL_DOWNLOAD_TIMEOUT_SECONDS = 120.0
 
+# 下载阶段临时文件后缀（追加在缓存文件名后），用于区分真实缓存文件。
+# Download-stage temporary suffix (appended to cache filename) to avoid clashes.
+_MEDIA_URL_DOWNLOAD_TMP_SUFFIX = ".downloading"
+
 # 文件扩展名常量
 _IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg")
 _AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma")
@@ -348,7 +352,9 @@ class MultimodalAnalyzer:
     async def _download_url_to_cache(self, media_url: str, cache_path: Path) -> None:
         """下载远程 URL 到缓存文件（原子写入，避免部分文件）。"""
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = cache_path.with_name(f"{cache_path.name}.tmp")
+        tmp_path = cache_path.with_name(
+            f"{cache_path.name}{_MEDIA_URL_DOWNLOAD_TMP_SUFFIX}"
+        )
         try:
             timeout = httpx.Timeout(_MEDIA_URL_DOWNLOAD_TIMEOUT_SECONDS)
             async with httpx.AsyncClient(
@@ -368,11 +374,21 @@ class MultimodalAnalyzer:
 
     @staticmethod
     def _extract_cache_key_from_tmp(path: Path) -> str:
-        """从临时文件名提取 cache_key（{key}.{ext}.tmp -> key）。
+        """从临时文件名提取 cache_key（{key}.{ext}.<tmp_suffix> -> key）。
 
-        Extract cache_key from tmp filename ({key}.{ext}.tmp -> key).
+        Extract cache_key from tmp filename ({key}.{ext}.<tmp_suffix> -> key).
         """
         return Path(path.stem).stem
+
+    @staticmethod
+    def _is_download_tmp_path(path: Path) -> bool:
+        """判断是否为下载过程临时文件（{key}.{ext}.<tmp_suffix>）。
+
+        Identify download tmp files by requiring a dedicated trailing suffix and
+        at least one original extension segment before it.
+        """
+        suffixes = path.suffixes
+        return len(suffixes) >= 2 and suffixes[-1] == _MEDIA_URL_DOWNLOAD_TMP_SUFFIX
 
     async def _cleanup_url_cache_if_needed(self) -> None:
         """按 TTL + 文件数上限清理 URL 媒体缓存。"""
@@ -414,7 +430,7 @@ class MultimodalAnalyzer:
             # 先按 TTL 清理，跳过正在下载/读取的活跃键。
             # First, TTL cleanup; skip active keys still being downloaded/read.
             for path in files:
-                if path.name.endswith(".tmp"):
+                if self._is_download_tmp_path(path):
                     tmp_key = self._extract_cache_key_from_tmp(path)
                     if tmp_key and tmp_key not in active_keys:
                         path.unlink(missing_ok=True)
