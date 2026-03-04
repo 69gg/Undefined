@@ -2,13 +2,27 @@
     "type": "function",
     "function": {
         "name": "python_interpreter",
-        "description": "在隔离的 Docker 容器中执行 Python 代码。适用于数学计算、数据处理和逻辑验证。无法访问网络或宿主机文件系统。",
+        "description": "在隔离的 Docker 容器中执行 Python 代码。适用于数学计算、数据处理、图表绘制等任务。可选安装第三方库，并可在执行后自动发送生成的文件（如图片、文档等）。输出文件请写入 /tmp/ 目录。",
         "parameters": {
             "type": "object",
             "properties": {
                 "code": {
                     "type": "string",
-                    "description": "要执行的 Python 代码。"
+                    "description": "要执行的 Python 代码。如需生成文件，请写入 /tmp/ 目录（如 /tmp/output.png）。"
+                },
+                "libraries": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "可选。需要通过 pip 安装的第三方库列表，如 [\"matplotlib\", \"pillow\"]。指定后容器将启用网络以下载安装。"
+                },
+                "send_files": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "可选。代码执行后要发送给用户的文件路径列表（容器内 /tmp/ 下的路径），如 [\"/tmp/chart.png\", \"/tmp/result.csv\"]。图片文件将内联发送，其他文件作为附件上传。仅在代码执行成功时发送。"
                 }
             },
             "required": [
