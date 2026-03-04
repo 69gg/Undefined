@@ -173,13 +173,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         logger.warning("[发送消息] 收到空消息请求")
         return "消息内容不能为空"
 
-    # 解析 reply_to 参数
-    reply_to_raw = args.get("reply_to")
-    reply_to_id: int | None = None
-    if reply_to_raw is not None:
-        reply_to_id, reply_error = _parse_positive_int(reply_to_raw, "reply_to")
-        if reply_error:
-            return f"发送失败：{reply_error}"
+    # 解析 reply_to 参数（无效值静默忽略，视为未传）
+    reply_to_id, _ = _parse_positive_int(args.get("reply_to"), "reply_to")
 
     runtime_config = context.get("runtime_config")
 

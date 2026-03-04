@@ -40,13 +40,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     user_id, user_error = _parse_positive_int(user_id_raw, "user_id")
     message = str(args.get("message", ""))
 
-    # 解析 reply_to 参数
-    reply_to_raw = args.get("reply_to")
-    reply_to_id: int | None = None
-    if reply_to_raw is not None:
-        reply_to_id, reply_error = _parse_positive_int(reply_to_raw, "reply_to")
-        if reply_error:
-            return f"发送失败：{reply_error}"
+    # 解析 reply_to 参数（无效值静默忽略，视为未传）
+    reply_to_id, _ = _parse_positive_int(args.get("reply_to"), "reply_to")
 
     if user_error:
         return f"发送失败：{user_error}"
