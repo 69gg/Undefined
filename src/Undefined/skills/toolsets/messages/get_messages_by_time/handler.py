@@ -177,6 +177,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             chat_name = msg.get("chat_name", "未知群聊")
             timestamp_str = msg.get("timestamp", "")
             text = msg.get("message", "")
+            message_id = msg.get("message_id")
 
             if msg_type_val == "group":
                 # 确保群名以"群"结尾
@@ -184,8 +185,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             else:
                 location = "私聊"
 
+            msg_id_attr = ""
+            if message_id is not None:
+                msg_id_attr = f' message_id="{message_id}"'
+
             # 格式：XML 标准化
-            formatted.append(f"""<message sender="{sender_name}" sender_id="{sender_id}" location="{location}" time="{timestamp_str}">
+            formatted.append(f"""<message{msg_id_attr} sender="{sender_name}" sender_id="{sender_id}" location="{location}" time="{timestamp_str}">
 <content>{text}</content>
 </message>""")
 

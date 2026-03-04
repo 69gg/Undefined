@@ -40,6 +40,14 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     user_id, user_error = _parse_positive_int(user_id_raw, "user_id")
     message = str(args.get("message", ""))
 
+    # 解析 reply_to 参数
+    reply_to_raw = args.get("reply_to")
+    reply_to_id: int | None = None
+    if reply_to_raw is not None:
+        reply_to_id, reply_error = _parse_positive_int(reply_to_raw, "reply_to")
+        if reply_error:
+            return f"发送失败：{reply_error}"
+
     if user_error:
         return f"发送失败：{user_error}"
     if user_id is None:
@@ -57,7 +65,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     if sender:
         try:
-            await sender.send_private_message(user_id, message)
+            await sender.send_private_message(user_id, message, reply_to=reply_to_id)
             context["message_sent_this_turn"] = True
             return f"私聊消息已发送给用户 {user_id}"
         except Exception as e:

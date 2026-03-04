@@ -65,6 +65,7 @@ class MessageSender:
         history_prefix: str = "",
         *,
         mark_sent: bool = True,
+        reply_to: int | None = None,
     ) -> None:
         """发送群消息"""
         if not self.config.is_group_allowed(group_id):
@@ -87,37 +88,57 @@ class MessageSender:
         # 将 [@{qq_id}] 格式转换为 [CQ:at,qq={qq_id}]
         message = process_at_mentions(message)
 
-        # 保存到历史记录
+        # 准备历史记录文本（不含 reply 段）
+        history_content: str | None = None
         if auto_history:
-            # 解析消息以便正确处理 CQ 码（如图片）
-            segments = message_to_segments(message)
-            history_content = extract_text(segments, self.bot_qq)
+            hist_segments = message_to_segments(message)
+            history_content = extract_text(hist_segments, self.bot_qq)
             if history_prefix:
                 history_content = f"{history_prefix}{history_content}"
-            logger.debug(f"[历史记录] 正在保存 Bot 群聊回复: group={group_id}")
 
+        # 发送消息
+        bot_message_id: int | None = None
+        if len(message) <= MAX_MESSAGE_LENGTH:
+            segments = message_to_segments(message)
+            if reply_to is not None:
+                segments.insert(0, {"type": "reply", "data": {"id": str(reply_to)}})
+            result = await self.onebot.send_group_message(
+                group_id, segments, mark_sent=mark_sent
+            )
+            if isinstance(result, dict):
+                bot_message_id = result.get("message_id")
+        else:
+            bot_message_id = await self._send_chunked_group(
+                group_id, message, mark_sent=mark_sent, reply_to=reply_to
+            )
+
+        # 发送成功后写入历史记录
+        if auto_history and history_content is not None:
+            logger.debug(f"[历史记录] 正在保存 Bot 群聊回复: group={group_id}")
             await self.history_manager.add_group_message(
                 group_id=group_id,
                 sender_id=self.bot_qq,
                 text_content=history_content,
                 sender_nickname="Bot",
-                group_name="",  # 群名暂时未知，通常不需要Bot去获取
+                group_name="",
+                message_id=bot_message_id,
             )
 
-        # 自动分段发送
-        if len(message) <= MAX_MESSAGE_LENGTH:
-            segments = message_to_segments(message)
-            await self.onebot.send_group_message(
-                group_id, segments, mark_sent=mark_sent
-            )
-            return
-
-        # 按行分割
+    async def _send_chunked_group(
+        self,
+        group_id: int,
+        message: str,
+        *,
+        mark_sent: bool = True,
+        reply_to: int | None = None,
+    ) -> int | None:
+        """分段发送群消息，返回第一段的 message_id。"""
         logger.info(f"[消息分段] 消息过长 ({len(message)} 字符)，正在自动分段发送...")
         lines = message.split("\n")
         current_chunk: list[str] = []
         current_length = 0
         chunk_count = 0
+        first_message_id: int | None = None
 
         for line in lines:
             line_length = len(line) + 1
@@ -126,9 +147,14 @@ class MessageSender:
                 chunk_count += 1
                 chunk_text = "\n".join(current_chunk)
                 logger.debug(f"[消息分段] 发送第 {chunk_count} 段")
-                await self.onebot.send_group_message(
-                    group_id, message_to_segments(chunk_text), mark_sent=mark_sent
+                segments = message_to_segments(chunk_text)
+                if chunk_count == 1 and reply_to is not None:
+                    segments.insert(0, {"type": "reply", "data": {"id": str(reply_to)}})
+                result = await self.onebot.send_group_message(
+                    group_id, segments, mark_sent=mark_sent
                 )
+                if chunk_count == 1 and isinstance(result, dict):
+                    first_message_id = result.get("message_id")
                 current_chunk = []
                 current_length = 0
 
@@ -139,11 +165,17 @@ class MessageSender:
             chunk_count += 1
             chunk_text = "\n".join(current_chunk)
             logger.debug(f"[消息分段] 发送第 {chunk_count} 段 (最后一段)")
-            await self.onebot.send_group_message(
-                group_id, message_to_segments(chunk_text), mark_sent=mark_sent
+            segments = message_to_segments(chunk_text)
+            if chunk_count == 1 and reply_to is not None:
+                segments.insert(0, {"type": "reply", "data": {"id": str(reply_to)}})
+            result = await self.onebot.send_group_message(
+                group_id, segments, mark_sent=mark_sent
             )
+            if chunk_count == 1 and isinstance(result, dict):
+                first_message_id = result.get("message_id")
 
         logger.info(f"[消息分段] 已完成 {chunk_count} 段消息的发送")
+        return first_message_id
 
     async def send_private_message(
         self,
@@ -152,6 +184,7 @@ class MessageSender:
         auto_history: bool = True,
         *,
         mark_sent: bool = True,
+        reply_to: int | None = None,
     ) -> None:
         """发送私聊消息"""
         if not self.config.is_private_allowed(user_id):
@@ -170,34 +203,55 @@ class MessageSender:
 
         safe_message = redact_string(message)
         logger.info(f"[发送消息] 目标用户:{user_id} | 内容摘要:{safe_message[:100]}...")
-        # 保存到历史记录
-        if auto_history:
-            # 解析消息以便正确处理 CQ 码
-            segments = message_to_segments(message)
-            history_content = extract_text(segments, self.bot_qq)
-            logger.debug(f"[历史记录] 正在保存 Bot 私聊回复: user={user_id}")
 
+        # 准备历史记录文本
+        history_content: str | None = None
+        if auto_history:
+            hist_segments = message_to_segments(message)
+            history_content = extract_text(hist_segments, self.bot_qq)
+
+        # 发送消息
+        bot_message_id: int | None = None
+        if len(message) <= MAX_MESSAGE_LENGTH:
+            segments = message_to_segments(message)
+            if reply_to is not None:
+                segments.insert(0, {"type": "reply", "data": {"id": str(reply_to)}})
+            result = await self.onebot.send_private_message(
+                user_id, segments, mark_sent=mark_sent
+            )
+            if isinstance(result, dict):
+                bot_message_id = result.get("message_id")
+        else:
+            bot_message_id = await self._send_chunked_private(
+                user_id, message, mark_sent=mark_sent, reply_to=reply_to
+            )
+
+        # 发送成功后写入历史记录
+        if auto_history and history_content is not None:
+            logger.debug(f"[历史记录] 正在保存 Bot 私聊回复: user={user_id}")
             await self.history_manager.add_private_message(
                 user_id=user_id,
                 text_content=history_content,
                 display_name="Bot",
                 user_name="Bot",
+                message_id=bot_message_id,
             )
 
-        # 自动分段发送
-        if len(message) <= MAX_MESSAGE_LENGTH:
-            segments = message_to_segments(message)
-            await self.onebot.send_private_message(
-                user_id, segments, mark_sent=mark_sent
-            )
-            return
-
-        # 按行分割
+    async def _send_chunked_private(
+        self,
+        user_id: int,
+        message: str,
+        *,
+        mark_sent: bool = True,
+        reply_to: int | None = None,
+    ) -> int | None:
+        """分段发送私聊消息，返回第一段的 message_id。"""
         logger.info(f"[消息分段] 消息过长 ({len(message)} 字符)，正在自动分段发送...")
         lines = message.split("\n")
         current_chunk: list[str] = []
         current_length = 0
         chunk_count = 0
+        first_message_id: int | None = None
 
         for line in lines:
             line_length = len(line) + 1
@@ -206,9 +260,14 @@ class MessageSender:
                 chunk_count += 1
                 chunk_text = "\n".join(current_chunk)
                 logger.debug(f"[消息分段] 发送第 {chunk_count} 段")
-                await self.onebot.send_private_message(
-                    user_id, message_to_segments(chunk_text), mark_sent=mark_sent
+                segments = message_to_segments(chunk_text)
+                if chunk_count == 1 and reply_to is not None:
+                    segments.insert(0, {"type": "reply", "data": {"id": str(reply_to)}})
+                result = await self.onebot.send_private_message(
+                    user_id, segments, mark_sent=mark_sent
                 )
+                if chunk_count == 1 and isinstance(result, dict):
+                    first_message_id = result.get("message_id")
                 current_chunk = []
                 current_length = 0
 
@@ -219,11 +278,17 @@ class MessageSender:
             chunk_count += 1
             chunk_text = "\n".join(current_chunk)
             logger.debug(f"[消息分段] 发送第 {chunk_count} 段 (最后一段)")
-            await self.onebot.send_private_message(
-                user_id, message_to_segments(chunk_text), mark_sent=mark_sent
+            segments = message_to_segments(chunk_text)
+            if chunk_count == 1 and reply_to is not None:
+                segments.insert(0, {"type": "reply", "data": {"id": str(reply_to)}})
+            result = await self.onebot.send_private_message(
+                user_id, segments, mark_sent=mark_sent
             )
+            if chunk_count == 1 and isinstance(result, dict):
+                first_message_id = result.get("message_id")
 
         logger.info(f"[消息分段] 已完成 {chunk_count} 段消息的发送")
+        return first_message_id
 
     async def send_group_poke(
         self,

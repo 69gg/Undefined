@@ -267,6 +267,7 @@ class MessageHistoryManager:
         group_name: str = "",
         role: str = "member",
         title: str = "",
+        message_id: int | None = None,
     ) -> None:
         """异步保存群消息到历史记录"""
         await self._ensure_initialized()
@@ -285,19 +286,21 @@ class MessageHistoryManager:
                 f"[历史记录] 追加群消息: group={group_id}, current_count={current_count}"
             )
 
-            self._message_history[group_id_str].append(
-                {
-                    "type": "group",
-                    "chat_id": group_id_str,
-                    "chat_name": group_name or f"群{group_id_str}",
-                    "user_id": sender_id_str,
-                    "display_name": display_name,
-                    "role": role,
-                    "title": title,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "message": text_content,
-                }
-            )
+            record: dict[str, Any] = {
+                "type": "group",
+                "chat_id": group_id_str,
+                "chat_name": group_name or f"群{group_id_str}",
+                "user_id": sender_id_str,
+                "display_name": display_name,
+                "role": role,
+                "title": title,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "message": text_content,
+            }
+            if message_id is not None:
+                record["message_id"] = message_id
+
+            self._message_history[group_id_str].append(record)
 
             if len(self._message_history[group_id_str]) > self._max_records:
                 self._message_history[group_id_str] = self._message_history[
@@ -315,6 +318,7 @@ class MessageHistoryManager:
         text_content: str,
         display_name: str = "",
         user_name: str = "",
+        message_id: int | None = None,
     ) -> None:
         """异步保存私聊消息到历史记录"""
         await self._ensure_initialized()
@@ -330,17 +334,19 @@ class MessageHistoryManager:
                 f"[历史记录] 追加私聊消息: user={user_id}, current_count={current_count}"
             )
 
-            self._private_message_history[user_id_str].append(
-                {
-                    "type": "private",
-                    "chat_id": user_id_str,
-                    "chat_name": user_name or f"QQ用户{user_id_str}",
-                    "user_id": user_id_str,
-                    "display_name": display_name or user_name or user_id_str,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "message": text_content,
-                }
-            )
+            record: dict[str, Any] = {
+                "type": "private",
+                "chat_id": user_id_str,
+                "chat_name": user_name or f"QQ用户{user_id_str}",
+                "user_id": user_id_str,
+                "display_name": display_name or user_name or user_id_str,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "message": text_content,
+            }
+            if message_id is not None:
+                record["message_id"] = message_id
+
+            self._private_message_history[user_id_str].append(record)
 
             if len(self._private_message_history[user_id_str]) > self._max_records:
                 self._private_message_history[user_id_str] = (

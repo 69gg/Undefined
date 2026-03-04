@@ -13,6 +13,10 @@
                 "message": {
                     "type": "string",
                     "description": "要发送的私聊消息内容"
+                },
+                "reply_to": {
+                    "type": "integer",
+                    "description": "可选。要引用回复的消息 ID (message_id)。设置后消息将以引用回复形式出现，可从历史消息的 message_id 属性获取。"
                 }
             },
             "required": ["message"]
