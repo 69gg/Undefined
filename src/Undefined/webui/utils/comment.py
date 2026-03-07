@@ -34,17 +34,11 @@ def _normalize_comment_buffer(buffer: list[str]) -> dict[str, str]:
     return result
 
 
-def parse_comment_map(path: Path) -> CommentMap:
-    if not path.exists():
-        return {}
+def parse_comment_map_text(text: str) -> CommentMap:
     comments: CommentMap = {}
     buffer: list[str] = []
     current_section = ""
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except Exception:
-        return {}
-    for raw_line in lines:
+    for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line:
             buffer.clear()
@@ -53,7 +47,7 @@ def parse_comment_map(path: Path) -> CommentMap:
             buffer.append(line.lstrip("#").strip())
             continue
         if line.startswith("[") and line.endswith("]"):
-            section_name = line[1:-1].strip()
+            section_name = line.strip("[]").strip()
             if buffer:
                 comment = _normalize_comment_buffer(buffer)
                 if comment:
@@ -72,6 +66,15 @@ def parse_comment_map(path: Path) -> CommentMap:
             continue
         buffer.clear()
     return comments
+
+
+def parse_comment_map(path: Path) -> CommentMap:
+    if not path.exists():
+        return {}
+    try:
+        return parse_comment_map_text(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
 def load_comment_map() -> CommentMap:

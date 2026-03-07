@@ -890,6 +890,33 @@ async function autoSave() {
     }
 }
 
+async function syncConfigTemplate(button) {
+    if (!confirm(t("config.sync_confirm"))) return;
+    setButtonLoading(button, true);
+    showSaveStatus("saving", t("config.syncing"));
+    try {
+        const res = await api("/api/config/sync-template", { method: "POST" });
+        const data = await res.json();
+        if (!data.success) {
+            showSaveStatus("error", t("config.save_error"));
+            showToast(`${t("common.error")}: ${data.error || t("config.sync_error")}`, "error", 5000);
+            return;
+        }
+        await loadConfig();
+        showSaveStatus("saved", t("config.saved"));
+        if (data.warning) {
+            showToast(`${t("common.warning")}: ${data.warning}`, "warning", 5000);
+        }
+        const suffix = Number.isFinite(data.added_count) ? ` (+${data.added_count})` : "";
+        showToast(`${t("config.sync_success")}${suffix}`, "info", 4000);
+    } catch (e) {
+        showSaveStatus("error", t("config.sync_error"));
+        showToast(`${t("common.error")}: ${e.message}`, "error", 5000);
+    } finally {
+        setButtonLoading(button, false);
+    }
+}
+
 async function resetConfig() {
     if (!confirm(t("config.reset_confirm"))) return;
     try {

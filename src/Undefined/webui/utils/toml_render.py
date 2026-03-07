@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any, cast
 
+from .comment import CommentMap
 from .config_io import load_default_data
 
 TomlData = dict[str, Any]
@@ -61,55 +62,116 @@ def _is_array_of_tables(value: Any) -> bool:
     )
 
 
-def _render_scalar_items(path: list[str], table: TomlData) -> list[str]:
-    return [
-        f"{key} = {format_value(table[key])}"
-        for key in sorted_keys(table, path)
-        if not isinstance(table[key], dict) and not _is_array_of_tables(table[key])
-    ]
+def _comment_lines(comments: CommentMap | None, path_key: str) -> list[str]:
+    if not comments:
+        return []
+    entry = comments.get(path_key)
+    if not entry:
+        return []
+    lines: list[str] = []
+    zh = str(entry.get("zh", "")).strip()
+    en = str(entry.get("en", "")).strip()
+    if zh:
+        lines.append(f"# zh: {zh}")
+    if en:
+        lines.append(f"# en: {en}")
+    if not lines:
+        for value in entry.values():
+            text = str(value).strip()
+            if text:
+                lines.append(f"# {text}")
+    return lines
 
 
-def _render_nested_items(path: list[str], table: TomlData) -> list[str]:
+def _append_comment(
+    lines: list[str], comments: CommentMap | None, path_key: str
+) -> None:
+    comment_lines = _comment_lines(comments, path_key)
+    if comment_lines:
+        lines.extend(comment_lines)
+
+
+def _render_scalar_items(
+    path: list[str], table: TomlData, comments: CommentMap | None = None
+) -> list[str]:
+    lines: list[str] = []
+    path_prefix = ".".join(path) if path else ""
+    for key in sorted_keys(table, path):
+        value = table[key]
+        if isinstance(value, dict) or _is_array_of_tables(value):
+            continue
+        path_key = f"{path_prefix}.{key}" if path_prefix else key
+        _append_comment(lines, comments, path_key)
+        lines.append(f"{key} = {format_value(value)}")
+    return lines
+
+
+def _render_nested_items(
+    path: list[str], table: TomlData, comments: CommentMap | None = None
+) -> list[str]:
     lines: list[str] = []
     for key in sorted_keys(table, path):
         value = table[key]
         if isinstance(value, dict):
-            lines.extend(render_table(path + [key], value))
+            lines.extend(render_table(path + [key], value, comments=comments))
         elif _is_array_of_tables(value):
             aot_path = path + [key]
-            for item in value:
+            for index, item in enumerate(value):
                 lines.extend(
-                    _render_array_of_tables_item(aot_path, cast(TomlData, item))
+                    _render_array_of_tables_item(
+                        aot_path,
+                        cast(TomlData, item),
+                        comments=comments,
+                        include_collection_comment=index == 0,
+                    )
                 )
     return lines
 
 
-def _render_array_of_tables_item(path: list[str], table: TomlData) -> list[str]:
-    lines = [f"[[{'.'.join(path)}]]"]
-    lines.extend(_render_scalar_items(path, table))
+def _render_array_of_tables_item(
+    path: list[str],
+    table: TomlData,
+    *,
+    comments: CommentMap | None = None,
+    include_collection_comment: bool = False,
+) -> list[str]:
+    lines: list[str] = []
+    path_key = ".".join(path)
+    if include_collection_comment:
+        _append_comment(lines, comments, path_key)
+    lines.append(f"[[{path_key}]]")
+    lines.extend(_render_scalar_items(path, table, comments=comments))
     lines.append("")
-    lines.extend(_render_nested_items(path, table))
+    lines.extend(_render_nested_items(path, table, comments=comments))
     return lines
 
 
-def render_table(path: list[str], table: TomlData) -> list[str]:
+def render_table(
+    path: list[str], table: TomlData, comments: CommentMap | None = None
+) -> list[str]:
     lines: list[str] = []
-    items = _render_scalar_items(path, table)
-    if items and path:
+    items = _render_scalar_items(path, table, comments=comments)
+    nested = _render_nested_items(path, table, comments=comments)
+
+    if path:
+        _append_comment(lines, comments, ".".join(path))
         lines.append(f"[{'.'.join(path)}]")
         lines.extend(items)
         lines.append("")
-    elif items:
+        lines.extend(nested)
+        return lines
+
+    if items:
         lines.extend(items)
         lines.append("")
-    lines.extend(_render_nested_items(path, table))
+    lines.extend(nested)
     return lines
 
 
-def render_toml(data: TomlData) -> str:
+def render_toml(data: TomlData, comments: CommentMap | None = None) -> str:
     if not data:
         return ""
-    return "\n".join(render_table([], data)).rstrip() + "\n"
+    return "\n".join(render_table([], data, comments=comments)).rstrip() + "\n"
 
 
 def apply_patch(data: TomlData, patch: dict[str, Any]) -> TomlData:

@@ -140,6 +140,9 @@ async function init() {
     const resetBtn = get("btnResetConfig");
     if (resetBtn) resetBtn.onclick = resetConfig;
 
+    const syncConfigBtn = get("btnSyncConfigTemplate");
+    if (syncConfigBtn) syncConfigBtn.onclick = () => syncConfigTemplate(syncConfigBtn);
+
     const refreshLogsBtn = get("btnRefreshLogs");
     if (refreshLogsBtn) {
         refreshLogsBtn.onclick = async () => {

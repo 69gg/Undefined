@@ -16,6 +16,7 @@ from ..utils import (
     apply_patch,
     render_toml,
     sort_config,
+    sync_config_file,
 )
 
 
@@ -85,7 +86,9 @@ async def config_patch_handler(request: web.Request) -> Response:
         data = {}
 
     patched = apply_patch(data, patch)
-    CONFIG_PATH.write_text(render_toml(patched), encoding="utf-8")
+    CONFIG_PATH.write_text(
+        render_toml(patched, comments=load_comment_map()), encoding="utf-8"
+    )
     get_config_manager().reload()
     validation_ok, validation_msg = validate_required_config()
     return web.json_response(
@@ -95,3 +98,28 @@ async def config_patch_handler(request: web.Request) -> Response:
             "warning": None if validation_ok else validation_msg,
         }
     )
+
+
+@routes.post("/api/config/sync-template")
+async def sync_config_template_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+    try:
+        result = sync_config_file()
+        get_config_manager().reload()
+        validation_ok, validation_msg = validate_required_config()
+        return web.json_response(
+            {
+                "success": True,
+                "message": "Synced",
+                "added_paths": result.added_paths,
+                "added_count": len(result.added_paths),
+                "warning": None if validation_ok else validation_msg,
+            }
+        )
+    except FileNotFoundError as exc:
+        return web.json_response({"success": False, "error": str(exc)}, status=404)
+    except ValueError as exc:
+        return web.json_response({"success": False, "error": str(exc)}, status=400)
+    except Exception as exc:
+        return web.json_response({"success": False, "error": str(exc)}, status=500)

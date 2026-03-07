@@ -2,7 +2,7 @@
 
 import tomllib
 
-from Undefined.webui.utils import render_toml
+from Undefined.webui.utils import parse_comment_map_text, render_toml
 
 
 def _roundtrip(toml_str: str) -> dict:  # type: ignore[type-arg]
@@ -119,3 +119,30 @@ name = "child-b"
             "child-a",
             "child-b",
         ]
+
+    def test_render_comments_and_empty_table(self) -> None:
+        """带注释的空表应被完整渲染出来"""
+        src = """
+# zh: 主配置
+# en: Main section
+[models.chat.request_params]
+"""
+        comments = parse_comment_map_text(src)
+        rendered = render_toml(
+            {"models": {"chat": {"request_params": {}}}}, comments=comments
+        )
+        assert "# zh: 主配置" in rendered
+        assert "[models.chat.request_params]" in rendered
+
+    def test_render_comments_before_scalar_keys(self) -> None:
+        """标量字段前应写出示例注释"""
+        comments = {
+            "core.bot_qq": {
+                "zh": "机器人QQ号。",
+                "en": "Bot QQ number.",
+            }
+        }
+        rendered = render_toml({"core": {"bot_qq": 1}}, comments=comments)
+        assert "# zh: 机器人QQ号。" in rendered
+        assert "# en: Bot QQ number." in rendered
+        assert "bot_qq = 1" in rendered

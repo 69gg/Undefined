@@ -8,7 +8,13 @@ from .config_io import (
     CONFIG_EXAMPLE_PATH,
     TomlData,
 )
-from .comment import CommentMap, parse_comment_map, load_comment_map
+from .comment import (
+    CommentMap,
+    parse_comment_map,
+    parse_comment_map_text,
+    load_comment_map,
+)
+from .config_sync import ConfigTemplateSyncResult, sync_config_file, sync_config_text
 from .toml_render import (
     format_value,
     render_table,
@@ -31,7 +37,11 @@ __all__ = [
     "TomlData",
     "CommentMap",
     "parse_comment_map",
+    "parse_comment_map_text",
     "load_comment_map",
+    "ConfigTemplateSyncResult",
+    "sync_config_file",
+    "sync_config_text",
     "format_value",
     "render_table",
     "render_toml",

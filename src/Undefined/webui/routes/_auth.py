@@ -19,7 +19,7 @@ from ._shared import (
     _record_login_failure,
     _clear_login_failures,
 )
-from ..utils import read_config_source, apply_patch, render_toml
+from ..utils import read_config_source, apply_patch, load_comment_map, render_toml
 
 
 @routes.post("/api/login")
@@ -171,7 +171,9 @@ async def password_handler(request: web.Request) -> Response:
         data_dict = {}
 
     patched = apply_patch(data_dict, {"webui.password": new_password})
-    CONFIG_PATH.write_text(render_toml(patched), encoding="utf-8")
+    CONFIG_PATH.write_text(
+        render_toml(patched, comments=load_comment_map()), encoding="utf-8"
+    )
     get_config_manager().reload()
     request.app["settings"] = load_webui_settings()
     get_session_store(request).clear()
