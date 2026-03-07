@@ -768,6 +768,9 @@ function buildAotTemplate(path, arr) {
             if (!Object.prototype.hasOwnProperty.call(template, "thinking_tool_call_compat")) {
                 template.thinking_tool_call_compat = true
             }
+            if (!Object.prototype.hasOwnProperty.call(template, "responses_tool_choice_compat")) {
+                template.responses_tool_choice_compat = false
+            }
             if (!Object.prototype.hasOwnProperty.call(template, "reasoning_enabled")) {
                 template.reasoning_enabled = false
             }
@@ -777,7 +780,7 @@ function buildAotTemplate(path, arr) {
         }
         return template
     }
-    return { model_name: "", api_url: "", api_key: "", api_mode: "chat_completions", thinking_tool_call_compat: true, reasoning_enabled: false, reasoning_effort: "medium", request_params: {} }
+    return { model_name: "", api_url: "", api_key: "", api_mode: "chat_completions", thinking_tool_call_compat: true, responses_tool_choice_compat: false, reasoning_enabled: false, reasoning_effort: "medium", request_params: {} }
 }
 
 function createAotWidget(path, arr) {

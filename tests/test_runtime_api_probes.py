@@ -27,6 +27,7 @@ async def test_runtime_internal_probe_includes_chat_model_transport_fields() -> 
                 api_mode="responses",
                 thinking_enabled=False,
                 thinking_tool_call_compat=True,
+                responses_tool_choice_compat=False,
                 reasoning_enabled=True,
                 reasoning_effort="high",
             ),
@@ -56,6 +57,7 @@ async def test_runtime_internal_probe_includes_chat_model_transport_fields() -> 
         "api_mode": "responses",
         "thinking_enabled": False,
         "thinking_tool_call_compat": True,
+        "responses_tool_choice_compat": False,
         "reasoning_enabled": True,
         "reasoning_effort": "high",
     }

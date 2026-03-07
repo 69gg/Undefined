@@ -528,6 +528,9 @@ class RuntimeAPIServer:
                     "thinking_tool_call_compat": getattr(
                         mcfg, "thinking_tool_call_compat", True
                     ),
+                    "responses_tool_choice_compat": getattr(
+                        mcfg, "responses_tool_choice_compat", False
+                    ),
                     "reasoning_enabled": getattr(mcfg, "reasoning_enabled", False),
                     "reasoning_effort": getattr(mcfg, "reasoning_effort", "medium"),
                 }

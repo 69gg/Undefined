@@ -20,6 +20,7 @@ class ModelPoolEntry:
     thinking_budget_tokens: int = 0
     thinking_include_budget: bool = True
     thinking_tool_call_compat: bool = True
+    responses_tool_choice_compat: bool = False
     reasoning_enabled: bool = False
     reasoning_effort: str = "medium"
     request_params: dict[str, Any] = field(default_factory=dict)
@@ -50,6 +51,9 @@ class ChatModelConfig:
     thinking_tool_call_compat: bool = (
         True  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
+    responses_tool_choice_compat: bool = (
+        False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
+    )
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位
     request_params: dict[str, Any] = field(default_factory=dict)
@@ -71,6 +75,9 @@ class VisionModelConfig:
     thinking_tool_call_compat: bool = (
         True  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
+    responses_tool_choice_compat: bool = (
+        False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
+    )
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位
     request_params: dict[str, Any] = field(default_factory=dict)
@@ -91,6 +98,9 @@ class SecurityModelConfig:
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     thinking_tool_call_compat: bool = (
         True  # 思维链 + 工具调用兼容（回传 reasoning_content）
+    )
+    responses_tool_choice_compat: bool = (
+        False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
     )
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位
@@ -138,6 +148,9 @@ class AgentModelConfig:
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     thinking_tool_call_compat: bool = (
         True  # 思维链 + 工具调用兼容（回传 reasoning_content）
+    )
+    responses_tool_choice_compat: bool = (
+        False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
     )
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位

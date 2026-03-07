@@ -199,7 +199,10 @@ async def test_responses_request_normalizes_tool_calls_and_usage() -> None:
             },
         }
     ]
-    assert fake_client.responses.last_kwargs["tool_choice"] == "required"
+    assert fake_client.responses.last_kwargs["tool_choice"] == {
+        "type": "function",
+        "name": "lookup",
+    }
     assert fake_client.responses.last_kwargs["metadata"] == {"source": "config"}
     assert fake_client.responses.last_kwargs["extra_body"] == {"custom_flag": "on"}
     assert "thinking" not in fake_client.responses.last_kwargs
@@ -218,6 +221,94 @@ async def test_responses_request_normalizes_tool_calls_and_usage() -> None:
         "previous_response_id": "resp_1",
         "tool_result_start_index": 2,
     }
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_responses_tool_choice_compat_mode_uses_required_string() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeClient(
+        responses=[
+            {
+                "id": "resp_compat",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "call_id": "call_compat",
+                        "name": "lookup",
+                        "arguments": '{"query": "weather"}',
+                    }
+                ],
+                "usage": {"input_tokens": 5, "output_tokens": 4, "total_tokens": 9},
+            }
+        ]
+    )
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+        responses_tool_choice_compat=True,
+    )
+
+    await requester.request(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=128,
+        call_type="chat",
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "description": "lookup weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search",
+                    "description": "search docs",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                    },
+                },
+            },
+        ],
+        tool_choice=cast(Any, {"type": "function", "function": {"name": "lookup"}}),
+    )
+
+    assert fake_client.responses.last_kwargs is not None
+    assert fake_client.responses.last_kwargs["tool_choice"] == "required"
+    assert fake_client.responses.last_kwargs["tools"] == [
+        {
+            "type": "function",
+            "name": "lookup",
+            "description": "lookup weather",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        }
+    ]
 
     await requester._http_client.aclose()
 
@@ -364,6 +455,7 @@ async def test_responses_tools_and_tool_choice_use_sanitized_api_names() -> None
         model_name="gpt-test",
         max_tokens=512,
         api_mode="responses",
+        responses_tool_choice_compat=True,
     )
 
     result = await requester.request(

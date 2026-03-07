@@ -71,6 +71,7 @@ api_url = "https://api.openai.com/v1"
 api_key = "sk-a"
 api_mode = "responses"
 thinking_tool_call_compat = true
+responses_tool_choice_compat = true
 reasoning_enabled = true
 reasoning_effort = "high"
 
@@ -90,6 +91,7 @@ name = "beta"
         model = data["models"]["chat"]["pool"]["models"][0]
         assert model["api_mode"] == "responses"
         assert model["thinking_tool_call_compat"] is True
+        assert model["responses_tool_choice_compat"] is True
         assert model["reasoning_enabled"] is True
         assert model["reasoning_effort"] == "high"
         params = model["request_params"]

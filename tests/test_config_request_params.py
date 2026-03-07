@@ -26,6 +26,7 @@ model_name = "gpt-chat"
 api_mode = "responses"
 reasoning_enabled = true
 reasoning_effort = "high"
+responses_tool_choice_compat = true
 
 [models.chat.request_params]
 temperature = 0.2
@@ -54,6 +55,7 @@ model_name = "gpt-agent"
 api_mode = "responses"
 reasoning_enabled = true
 reasoning_effort = "minimal"
+responses_tool_choice_compat = true
 
 [models.agent.request_params]
 temperature = 0.3
@@ -92,6 +94,7 @@ priority = "high"
     assert cfg.chat_model.reasoning_enabled is True
     assert cfg.chat_model.reasoning_effort == "high"
     assert cfg.chat_model.thinking_tool_call_compat is True
+    assert cfg.chat_model.responses_tool_choice_compat is True
     assert cfg.chat_model.request_params == {
         "temperature": 0.2,
         "metadata": {"source": "chat"},
@@ -102,6 +105,7 @@ priority = "high"
     assert cfg.chat_model.pool.models[0].reasoning_enabled is False
     assert cfg.chat_model.pool.models[0].reasoning_effort == "low"
     assert cfg.chat_model.pool.models[0].thinking_tool_call_compat is True
+    assert cfg.chat_model.pool.models[0].responses_tool_choice_compat is True
     assert cfg.chat_model.pool.models[0].request_params == {
         "temperature": 0.6,
         "metadata": {"source": "chat"},
@@ -112,17 +116,20 @@ priority = "high"
     assert cfg.security_model.reasoning_enabled == cfg.chat_model.reasoning_enabled
     assert cfg.security_model.reasoning_effort == cfg.chat_model.reasoning_effort
     assert cfg.security_model.thinking_tool_call_compat is True
+    assert cfg.security_model.responses_tool_choice_compat is True
     assert cfg.security_model.request_params == cfg.chat_model.request_params
 
     assert cfg.agent_model.api_mode == "responses"
     assert cfg.agent_model.reasoning_enabled is True
     assert cfg.agent_model.reasoning_effort == "minimal"
     assert cfg.agent_model.thinking_tool_call_compat is True
+    assert cfg.agent_model.responses_tool_choice_compat is True
 
     assert cfg.historian_model.api_mode == "chat_completions"
     assert cfg.historian_model.reasoning_enabled is True
     assert cfg.historian_model.reasoning_effort == "xhigh"
     assert cfg.historian_model.thinking_tool_call_compat is True
+    assert cfg.historian_model.responses_tool_choice_compat is True
     assert cfg.historian_model.request_params == {
         "temperature": 0.1,
         "metadata": {"source": "historian"},
@@ -134,3 +141,4 @@ priority = "high"
         "metadata": {"source": "embed"},
     }
     assert cfg.rerank_model.request_params == {"priority": "high"}
+    assert cfg.vision_model.responses_tool_choice_compat is False

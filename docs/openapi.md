@@ -79,7 +79,7 @@ curl http://127.0.0.1:8788/openapi.json
 | `cognitive` | `object` | 认知服务（`enabled`、`queue`） |
 | `api` | `object` | Runtime API 配置（`enabled`、`host`、`port`、`openapi_enabled`） |
 | `skills` | `object` | 技能统计，包含 `tools`、`agents`、`anthropic_skills` 三个子对象 |
-| `models` | `object` | 模型配置；聊天类模型包含 `model_name`、脱敏 `api_url`、`api_mode`、`thinking_enabled`、`thinking_tool_call_compat`、`reasoning_enabled`、`reasoning_effort` |
+| `models` | `object` | 模型配置；聊天类模型包含 `model_name`、脱敏 `api_url`、`api_mode`、`thinking_enabled`、`thinking_tool_call_compat`、`responses_tool_choice_compat`、`reasoning_enabled`、`reasoning_effort` |
 
 `skills` 子对象结构：
 
@@ -103,6 +103,7 @@ curl http://127.0.0.1:8788/openapi.json
     "api_mode": "responses",
     "thinking_enabled": false,
     "thinking_tool_call_compat": true,
+    "responses_tool_choice_compat": false,
     "reasoning_enabled": true,
     "reasoning_effort": "high"
   },

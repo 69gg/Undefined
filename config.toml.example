@@ -110,6 +110,9 @@ thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = true
+# zh: Responses API 的 tool_choice 兼容模式：仅为兼容部分只接受字符串 tool_choice 的代理，上报为 "required" 并只保留目标工具。默认关闭。
+# en: Responses API tool_choice compatibility mode: for proxies that only accept string tool_choice, send "required" and keep only the selected tool. Disabled by default.
+responses_tool_choice_compat = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -164,6 +167,9 @@ thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = true
+# zh: Responses API 的 tool_choice 兼容模式：仅为兼容部分只接受字符串 tool_choice 的代理，上报为 "required" 并只保留目标工具。默认关闭。
+# en: Responses API tool_choice compatibility mode: for proxies that only accept string tool_choice, send "required" and keep only the selected tool. Disabled by default.
+responses_tool_choice_compat = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -211,6 +217,9 @@ thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = true
+# zh: Responses API 的 tool_choice 兼容模式：仅为兼容部分只接受字符串 tool_choice 的代理，上报为 "required" 并只保留目标工具。默认关闭。
+# en: Responses API tool_choice compatibility mode: for proxies that only accept string tool_choice, send "required" and keep only the selected tool. Disabled by default.
+responses_tool_choice_compat = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -255,6 +264,9 @@ thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = true
+# zh: Responses API 的 tool_choice 兼容模式：仅为兼容部分只接受字符串 tool_choice 的代理，上报为 "required" 并只保留目标工具。默认关闭。
+# en: Responses API tool_choice compatibility mode: for proxies that only accept string tool_choice, send "required" and keep only the selected tool. Disabled by default.
+responses_tool_choice_compat = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -312,6 +324,9 @@ thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = true
+# zh: Responses API 的 tool_choice 兼容模式：仅为兼容部分只接受字符串 tool_choice 的代理，上报为 "required" 并只保留目标工具。默认关闭。
+# en: Responses API tool_choice compatibility mode: for proxies that only accept string tool_choice, send "required" and keep only the selected tool. Disabled by default.
+responses_tool_choice_compat = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.

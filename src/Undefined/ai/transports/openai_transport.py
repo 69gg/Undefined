@@ -294,6 +294,8 @@ def _normalize_responses_tools(
 def _normalize_responses_tool_choice(
     tool_choice: Any,
     internal_to_api: dict[str, str],
+    *,
+    compat_mode: bool = False,
 ) -> tuple[Any, str | None]:
     if not isinstance(tool_choice, dict):
         return tool_choice, None
@@ -312,7 +314,9 @@ def _normalize_responses_tool_choice(
         return "auto", None
 
     api_name = internal_to_api.get(name, name)
-    return "required", api_name
+    if compat_mode:
+        return "required", api_name
+    return {"type": "function", "name": api_name}, None
 
 
 def build_responses_request_body(
@@ -336,7 +340,11 @@ def build_responses_request_body(
     if tools:
         normalized_tools = _normalize_responses_tools(tools, internal_to_api)
         normalized_tool_choice, selected_tool_name = _normalize_responses_tool_choice(
-            tool_choice, internal_to_api
+            tool_choice,
+            internal_to_api,
+            compat_mode=bool(
+                getattr(model_config, "responses_tool_choice_compat", False)
+            ),
         )
         if selected_tool_name:
             filtered_tools = [
