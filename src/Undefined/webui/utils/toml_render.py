@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from typing import Any, cast
 
@@ -48,7 +49,7 @@ def format_value(value: Any) -> str:
     if isinstance(value, (int, float)):
         return str(value)
     if isinstance(value, str):
-        return f'"{value.replace(chr(92), chr(92) * 2).replace(chr(34), chr(92) + chr(34))}"'
+        return json.dumps(value, ensure_ascii=False)
     if isinstance(value, list):
         return f"[{', '.join(format_value(item) for item in value)}]"
     return f'"{str(value)}"'

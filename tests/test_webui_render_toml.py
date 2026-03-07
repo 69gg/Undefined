@@ -146,3 +146,22 @@ name = "child-b"
         assert "# zh: 机器人QQ号。" in rendered
         assert "# en: Bot QQ number." in rendered
         assert "bot_qq = 1" in rendered
+
+    def test_multiline_string_roundtrip(self) -> None:
+        """多行字符串应被渲染成合法 TOML，并可完整往返"""
+        original = "第一行\n第二行\n第三行"
+        rendered = render_toml(
+            {"models": {"embedding": {"query_instruction": original}}}
+        )
+        parsed = tomllib.loads(rendered)
+        assert parsed["models"]["embedding"]["query_instruction"] == original
+        assert "\n" in rendered
+
+    def test_multiline_string_with_quotes_and_backslashes_roundtrip(self) -> None:
+        """带引号与反斜杠的多行字符串也必须是合法 TOML"""
+        original = 'prefix "quoted"\npath\\to\\file\nline3'
+        rendered = render_toml(
+            {"models": {"embedding": {"document_instruction": original}}}
+        )
+        parsed = tomllib.loads(rendered)
+        assert parsed["models"]["embedding"]["document_instruction"] == original

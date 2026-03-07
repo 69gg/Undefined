@@ -43,3 +43,25 @@ pool_enabled = false
     assert "# zh: 是否处理私聊消息。" in result.content
     assert "# en: Enable model pool." in result.content
     assert result.added_paths == ["core.process_private_message", "features"]
+
+
+def test_sync_config_text_preserves_multiline_string_values() -> None:
+    current = '''
+[models.embedding]
+query_instruction = """第一行
+第二行
+第三行"""
+'''
+    example = '''
+[models.embedding]
+query_instruction = """默认第一行
+默认第二行"""
+document_instruction = """文档前缀
+第二行"""
+'''
+    result = sync_config_text(current, example)
+    parsed = tomllib.loads(result.content)
+    assert (
+        parsed["models"]["embedding"]["query_instruction"] == "第一行\n第二行\n第三行"
+    )
+    assert parsed["models"]["embedding"]["document_instruction"] == "文档前缀\n第二行"
