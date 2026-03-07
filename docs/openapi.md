@@ -111,6 +111,8 @@ curl http://127.0.0.1:8788/openapi.json
 }
 ```
 
+说明：`responses_tool_choice_compat` 通常保持 `false`；仅建议在 `responses` 请求默认配置下仍返回 `500` 时再尝试开启。当前已知 `new-api v0.11.4-alpha.3` 存在该兼容问题。
+
 #### 外部探针响应字段
 
 | 字段 | 类型 | 说明 |

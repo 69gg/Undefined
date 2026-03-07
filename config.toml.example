@@ -110,8 +110,8 @@ thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = true
-# zh: Responses API 的 tool_choice 兼容模式：仅为兼容部分只接受字符串 tool_choice 的代理，上报为 "required" 并只保留目标工具。默认关闭。
-# en: Responses API tool_choice compatibility mode: for proxies that only accept string tool_choice, send "required" and keep only the selected tool. Disabled by default.
+# zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。当前已在 new-api v0.11.4-alpha.3 发现该问题。默认关闭。
+# en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. This issue is currently observed on new-api v0.11.4-alpha.3. Disabled by default.
 responses_tool_choice_compat = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
@@ -167,8 +167,8 @@ thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = true
-# zh: Responses API 的 tool_choice 兼容模式：仅为兼容部分只接受字符串 tool_choice 的代理，上报为 "required" 并只保留目标工具。默认关闭。
-# en: Responses API tool_choice compatibility mode: for proxies that only accept string tool_choice, send "required" and keep only the selected tool. Disabled by default.
+# zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。当前已在 new-api v0.11.4-alpha.3 发现该问题。默认关闭。
+# en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. This issue is currently observed on new-api v0.11.4-alpha.3. Disabled by default.
 responses_tool_choice_compat = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
@@ -217,8 +217,8 @@ thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = true
-# zh: Responses API 的 tool_choice 兼容模式：仅为兼容部分只接受字符串 tool_choice 的代理，上报为 "required" 并只保留目标工具。默认关闭。
-# en: Responses API tool_choice compatibility mode: for proxies that only accept string tool_choice, send "required" and keep only the selected tool. Disabled by default.
+# zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。当前已在 new-api v0.11.4-alpha.3 发现该问题。默认关闭。
+# en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. This issue is currently observed on new-api v0.11.4-alpha.3. Disabled by default.
 responses_tool_choice_compat = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
@@ -264,8 +264,8 @@ thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = true
-# zh: Responses API 的 tool_choice 兼容模式：仅为兼容部分只接受字符串 tool_choice 的代理，上报为 "required" 并只保留目标工具。默认关闭。
-# en: Responses API tool_choice compatibility mode: for proxies that only accept string tool_choice, send "required" and keep only the selected tool. Disabled by default.
+# zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。当前已在 new-api v0.11.4-alpha.3 发现该问题。默认关闭。
+# en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. This issue is currently observed on new-api v0.11.4-alpha.3. Disabled by default.
 responses_tool_choice_compat = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
@@ -324,8 +324,8 @@ thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = true
-# zh: Responses API 的 tool_choice 兼容模式：仅为兼容部分只接受字符串 tool_choice 的代理，上报为 "required" 并只保留目标工具。默认关闭。
-# en: Responses API tool_choice compatibility mode: for proxies that only accept string tool_choice, send "required" and keep only the selected tool. Disabled by default.
+# zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。当前已在 new-api v0.11.4-alpha.3 发现该问题。默认关闭。
+# en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. This issue is currently observed on new-api v0.11.4-alpha.3. Disabled by default.
 responses_tool_choice_compat = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。

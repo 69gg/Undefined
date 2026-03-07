@@ -150,7 +150,7 @@ model_name = "gpt-4o-mini"
 | `thinking_budget_tokens` | thinking 预算 |
 | `thinking_include_budget` | 是否发送 `budget_tokens` |
 | `thinking_tool_call_compat` | Tool Calls 兼容模式：在多轮工具调用中回填 `reasoning_content`；默认 `true` |
-| `responses_tool_choice_compat` | `responses` 下的 `tool_choice` 兼容开关：对不支持对象型 `tool_choice` 的代理降级为字符串 `"required"`；默认 `false` |
+| `responses_tool_choice_compat` | `responses` 下的 `tool_choice` 兼容开关：仅建议在默认关闭时请求仍返回 500、怀疑上游不兼容对象型 `tool_choice` 时再尝试开启；开启后降级为字符串 `"required"`；默认 `false` |
 | `request_params` | 额外请求体参数（透传给模型 API，保留字段会忽略） |
 
 请求模式说明：
@@ -159,8 +159,10 @@ model_name = "gpt-4o-mini"
   - `reasoning_enabled=true` 时额外发送 `reasoning={ effort = ... }`
 - `api_mode="responses"`：走 `client.responses.create(...)`
   - 仅在 `reasoning_enabled=true` 时发送 `reasoning={ effort = ... }`
+  - 默认使用官方对象格式：`{"type":"function","name":"..."}`
   - `responses_tool_choice_compat=true` 时，会把指定函数的 `tool_choice` 降级为字符串 `"required"`，并只保留目标工具，用于兼容部分不完整代理
-  - 关闭时使用官方对象格式：`{"type":"function","name":"..."}`
+  - 仅建议在默认关闭时请求仍返回 500，再尝试开启该兼容开关
+  - 当前已知 `new-api v0.11.4-alpha.3` 存在这类兼容问题
   - 旧式 `thinking_*` 不会下发到 `responses`
 
 `request_params` 说明：
