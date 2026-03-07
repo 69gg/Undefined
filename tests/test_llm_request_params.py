@@ -7,6 +7,7 @@ import pytest
 from openai import AsyncOpenAI, BadRequestError
 
 from Undefined.ai.llm import ModelRequester, _encode_tool_name_for_api
+from Undefined.ai.transports.openai_transport import normalize_responses_result
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.config.models import ChatModelConfig
 from Undefined.token_usage_storage import TokenUsageStorage
@@ -231,7 +232,34 @@ async def test_responses_request_normalizes_tool_calls_and_usage() -> None:
         "tool_result_start_index": 2,
     }
 
-    await requester._http_client.aclose()
+
+def test_normalize_responses_result_falls_back_to_output_text_and_scalar_content() -> (
+    None
+):
+    top_level = normalize_responses_result(
+        {
+            "id": "resp_top_level",
+            "output": [],
+            "output_text": "hello from gateway",
+        }
+    )
+    assert top_level["choices"][0]["message"]["content"] == "hello from gateway"
+
+    scalar_content = normalize_responses_result(
+        {
+            "id": "resp_scalar",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": {"text": "hello from content object"},
+                }
+            ],
+        }
+    )
+    assert scalar_content["choices"][0]["message"]["content"] == (
+        "hello from content object"
+    )
 
 
 @pytest.mark.asyncio
@@ -427,11 +455,74 @@ async def test_responses_transport_state_uses_previous_response_id_and_tool_outp
         "total_tokens": 7,
     }
 
-    await requester._http_client.aclose()
-
 
 @pytest.mark.asyncio
-async def test_responses_force_stateless_replay_skips_previous_response_id() -> None:
+async def test_responses_transport_state_uses_prefetched_message_count() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeClient(
+        responses=[
+            {
+                "id": "resp_prefetch",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "call_id": "call_prefetch",
+                        "name": "lookup",
+                        "arguments": '{"query": "weather"}',
+                    }
+                ],
+                "usage": {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5},
+            }
+        ]
+    )
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+    )
+
+    result = await requester.request(
+        model_config=cfg,
+        messages=[
+            {"role": "system", "content": "prefetch result"},
+            {"role": "user", "content": "hello"},
+        ],
+        max_tokens=128,
+        call_type="chat",
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "description": "lookup weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                    },
+                },
+            }
+        ],
+        message_count_for_transport=2,
+    )
+
+    assert result["_transport_state"] == {
+        "api_mode": "responses",
+        "previous_response_id": "resp_prefetch",
+        "tool_result_start_index": 3,
+    }
+
+    await requester._http_client.aclose()
     requester = ModelRequester(
         http_client=httpx.AsyncClient(),
         token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),

@@ -440,6 +440,10 @@ def normalize_responses_result(
                         assistant_texts.append(str(part.get("text")))
                     elif part_type == "refusal" and part.get("refusal") is not None:
                         assistant_texts.append(str(part.get("refusal")))
+            else:
+                text = _stringify_content(content)
+                if text:
+                    assistant_texts.append(text)
         elif item_type == "function_call":
             function_name = str(item.get("name", "")).strip()
             if api_to_internal:
@@ -458,9 +462,13 @@ def normalize_responses_result(
                 }
             )
 
+    content = "\n".join(text for text in assistant_texts if text).strip()
+    if not content and "output_text" in result:
+        content = str(result["output_text"]).strip()
+
     message: dict[str, Any] = {
         "role": "assistant",
-        "content": "\n".join(text for text in assistant_texts if text).strip(),
+        "content": content,
     }
     reasoning_content = _collect_reasoning_text(output)
     if reasoning_content:

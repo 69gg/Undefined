@@ -648,7 +648,6 @@ class AIClient:
         transport_state: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        message_count_for_transport = len(messages)
         tools = self.tool_manager.maybe_merge_agent_tools(call_type, tools)
         if not (
             isinstance(transport_state, dict)
@@ -657,6 +656,7 @@ class AIClient:
             messages, tools = await self._maybe_prefetch_tools(
                 messages, tools, call_type
             )
+        message_count_for_transport = len(messages)
         return await self._requester.request(
             model_config=model_config,
             messages=messages,

@@ -12,25 +12,34 @@ logger = logging.getLogger(__name__)
 
 # Docker 执行配置
 DOCKER_IMAGE = "python:3.11-slim"
+DOCKER_USER = "65534:65534"
 MEMORY_LIMIT = "128m"
 MEMORY_LIMIT_WITH_LIBS = "512m"
 CPU_LIMIT = "0.5"
 TIMEOUT = 480  # 8 分钟
 TIMEOUT_WITH_LIBS = 600  # 10 分钟（pip 安装需要更多时间）
+OUTPUT_FILE_RETENTION_SECONDS = 30.0
 
 # 图片扩展名（内联发送而非文件附件）
 _IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"})
 
 # 安全：库名仅允许 PyPI 合法字符，必须以字母/数字开头（防止 -r/-e/--index-url 注入）
 _SAFE_LIB_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-\[\],<>=!~]*$")
+_PENDING_CLEANUP_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _get_output_relative_path(container_path: str) -> PurePosixPath | None:
+    try:
+        relative = PurePosixPath(container_path).relative_to("/tmp")
+    except (TypeError, ValueError):
+        return None
+    return relative if relative.parts else None
 
 
 def _resolve_output_host_path(container_path: str, host_tmpdir: str) -> Path | None:
     """将容器内 /tmp 路径映射到宿主机临时目录，并拒绝目录穿越/符号链接逃逸。"""
-    try:
-        pure_path = PurePosixPath(container_path)
-        relative = pure_path.relative_to("/tmp")
-    except (TypeError, ValueError):
+    relative = _get_output_relative_path(container_path)
+    if relative is None:
         return None
 
     host_tmp_root = Path(host_tmpdir).resolve()
@@ -44,6 +53,23 @@ def _resolve_output_host_path(container_path: str, host_tmpdir: str) -> Path | N
     return candidate
 
 
+async def _cleanup_output_dir_later(host_tmpdir: str, delay_seconds: float) -> None:
+    try:
+        await asyncio.sleep(delay_seconds)
+        await asyncio.to_thread(shutil.rmtree, host_tmpdir, True)
+    finally:
+        task = asyncio.current_task()
+        if task is not None:
+            _PENDING_CLEANUP_TASKS.discard(task)
+
+
+def _schedule_output_dir_cleanup(host_tmpdir: str) -> None:
+    task = asyncio.create_task(
+        _cleanup_output_dir_later(host_tmpdir, OUTPUT_FILE_RETENTION_SECONDS)
+    )
+    _PENDING_CLEANUP_TASKS.add(task)
+
+
 def _build_docker_base_cmd(host_tmpdir: str, memory: str) -> list[str]:
     return [
         "docker",
@@ -53,6 +79,8 @@ def _build_docker_base_cmd(host_tmpdir: str, memory: str) -> list[str]:
         memory,
         "--cpus",
         CPU_LIMIT,
+        "--user",
+        DOCKER_USER,
         "-v",
         f"{host_tmpdir}:/tmp",
     ]
@@ -144,6 +172,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     # 创建宿主机临时目录，绑定挂载到容器 /tmp
     host_tmpdir = tempfile.mkdtemp(prefix="pyinterp_")
+    defer_cleanup = False
 
     try:
         # 验证文件路径必须绑定到容器 /tmp，并且不能逃逸宿主机临时目录
@@ -216,6 +245,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 file_result = await _send_output_files(send_files, host_tmpdir, context)
                 if file_result:
                     parts.append(file_result)
+                defer_cleanup = True
 
             return "\n".join(parts)
 
@@ -226,7 +256,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         logger.exception("[Python解释器] 执行出错: %s", e)
         return "执行出错，请检查代码或重试"
     finally:
-        shutil.rmtree(host_tmpdir, ignore_errors=True)
+        if defer_cleanup:
+            _schedule_output_dir_cleanup(host_tmpdir)
+        else:
+            shutil.rmtree(host_tmpdir, ignore_errors=True)
 
 
 async def _send_output_files(

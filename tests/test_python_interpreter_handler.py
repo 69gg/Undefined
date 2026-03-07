@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -97,9 +99,58 @@ async def test_execute_with_libraries_runs_user_code_in_network_isolated_contain
     assert "--network" not in install_cmd
     assert "python /tmp/_script.py" not in " ".join(install_cmd)
     assert "pip install" in " ".join(install_cmd)
+    assert "--user" in install_cmd
+    assert python_handler.DOCKER_USER in install_cmd
 
     assert "--network" in exec_cmd
     assert "none" in exec_cmd
     assert "--read-only" in exec_cmd
     assert "PYTHONPATH=/tmp/_site_packages" in exec_cmd
     assert "python /tmp/_script.py" in " ".join(exec_cmd)
+    assert "--user" in exec_cmd
+    assert python_handler.DOCKER_USER in exec_cmd
+
+
+@pytest.mark.asyncio
+async def test_execute_defers_cleanup_after_sending_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    host_tmpdir = tmp_path / "mounted"
+    host_tmpdir.mkdir()
+    output_file = host_tmpdir / "result.txt"
+    output_file.write_text("hello", encoding="utf-8")
+
+    monkeypatch.setattr(tempfile, "mkdtemp", lambda prefix: str(host_tmpdir))
+    monkeypatch.setattr(
+        python_handler,
+        "_run_docker_command",
+        AsyncMock(return_value=(0, "", "")),
+    )
+    send_files_mock = AsyncMock(return_value="已发送: result.txt")
+    monkeypatch.setattr(python_handler, "_send_output_files", send_files_mock)
+    cleanup_mock = MagicMock()
+    monkeypatch.setattr(python_handler, "_schedule_output_dir_cleanup", cleanup_mock)
+
+    result = await python_handler.execute(
+        {
+            "code": "print('hello')",
+            "send_files": ["/tmp/result.txt"],
+        },
+        {},
+    )
+
+    assert result == "代码执行成功 (无输出)。\n已发送: result.txt"
+    cleanup_mock.assert_called_once_with(str(host_tmpdir))
+    assert output_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_output_dir_later_removes_directory(tmp_path: Path) -> None:
+    host_tmpdir = tmp_path / "mounted"
+    host_tmpdir.mkdir()
+    (host_tmpdir / "result.txt").write_text("hello", encoding="utf-8")
+
+    await python_handler._cleanup_output_dir_later(str(host_tmpdir), 0)
+
+    assert not host_tmpdir.exists()
