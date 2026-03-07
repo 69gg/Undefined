@@ -58,3 +58,56 @@ name = "b"
         rendered = render_toml(tomllib.loads(src))
         assert '"{' not in rendered
         assert "[[items]]" in rendered
+
+    def test_pool_model_request_params_roundtrip(self) -> None:
+        """模型池条目下的 request_params 嵌套结构应完整往返"""
+        src = """
+[models.chat.pool]
+enabled = true
+
+[[models.chat.pool.models]]
+model_name = "gpt-5"
+api_url = "https://api.openai.com/v1"
+api_key = "sk-a"
+
+[models.chat.pool.models.request_params]
+temperature = 0.7
+
+[models.chat.pool.models.request_params.metadata]
+source = "webui"
+
+[[models.chat.pool.models.request_params.tags]]
+name = "alpha"
+
+[[models.chat.pool.models.request_params.tags]]
+name = "beta"
+"""
+        data = _roundtrip(src)
+        model = data["models"]["chat"]["pool"]["models"][0]
+        params = model["request_params"]
+        assert params["temperature"] == 0.7
+        assert params["metadata"]["source"] == "webui"
+        assert [item["name"] for item in params["tags"]] == ["alpha", "beta"]
+
+    def test_nested_aot_child_tables_roundtrip(self) -> None:
+        """数组表项下的嵌套表与子数组表不能在渲染时丢失"""
+        src = """
+[[items]]
+name = "root"
+
+[items.meta]
+enabled = true
+
+[[items.meta.children]]
+name = "child-a"
+
+[[items.meta.children]]
+name = "child-b"
+"""
+        data = _roundtrip(src)
+        item = data["items"][0]
+        assert item["meta"]["enabled"] is True
+        assert [child["name"] for child in item["meta"]["children"]] == [
+            "child-a",
+            "child-b",
+        ]

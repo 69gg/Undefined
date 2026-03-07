@@ -102,6 +102,10 @@ thinking_include_budget = true
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = false
 
+# zh: 额外请求体参数（可选），可用于 temperature、reasoning_effort 或供应商私有参数。
+# en: Extra request-body params (optional), e.g. temperature, reasoning_effort, or vendor-specific fields.
+[models.chat.request_params]
+
 # zh: 模型池配置（可选，支持多模型轮询/随机/用户指定）。
 # en: Model pool configuration (optional, supports round-robin/random/user-specified).
 [models.chat.pool]
@@ -143,6 +147,10 @@ thinking_include_budget = true
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = false
 
+# zh: 额外请求体参数（可选），可用于 temperature、reasoning_effort 或供应商私有参数。
+# en: Extra request-body params (optional), e.g. temperature, reasoning_effort, or vendor-specific fields.
+[models.vision.request_params]
+
 # zh: 安全模型配置（用于防注入检测和注入后回复生成）。
 # en: Security model config (injection detection and post-injection responses).
 [models.security]
@@ -177,6 +185,10 @@ thinking_include_budget = true
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = false
 
+# zh: 额外请求体参数（可选），可用于 temperature、reasoning_effort 或供应商私有参数。
+# en: Extra request-body params (optional), e.g. temperature, reasoning_effort, or vendor-specific fields.
+[models.security.request_params]
+
 # zh: Agent 模型配置（用于执行 agents）。
 # en: Agent model config (used to run agents).
 [models.agent]
@@ -207,6 +219,10 @@ thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = false
+
+# zh: 额外请求体参数（可选），可用于 temperature、reasoning_effort 或供应商私有参数。
+# en: Extra request-body params (optional), e.g. temperature, reasoning_effort, or vendor-specific fields.
+[models.agent.request_params]
 
 # zh: Agent 模型池配置（可选，支持多模型轮询/随机/用户指定）。
 # en: Agent model pool configuration (optional, supports round-robin/random/user-specified).
@@ -252,6 +268,10 @@ thinking_include_budget = true
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = false
 
+# zh: 额外请求体参数（可选），可用于 temperature、reasoning_effort 或供应商私有参数。
+# en: Extra request-body params (optional), e.g. temperature, reasoning_effort, or vendor-specific fields.
+[models.historian.request_params]
+
 # zh: 嵌入模型配置（知识库语义检索使用）。
 # en: Embedding model config (used by knowledge semantic retrieval).
 [models.embedding]
@@ -277,6 +297,10 @@ query_instruction = ""
 # en: Document instruction prefix (optional, common for E5-style models, e.g. "passage: ").
 document_instruction = ""
 
+# zh: 额外请求体参数（可选），用于 embedding 供应商的扩展字段。
+# en: Extra request-body params (optional) for embedding-provider-specific fields.
+[models.embedding.request_params]
+
 # zh: 重排模型配置（知识库二阶段检索使用）。
 # en: Rerank model config (used in second-stage knowledge retrieval).
 [models.rerank]
@@ -295,6 +319,10 @@ queue_interval_seconds = 1.0
 # zh: 查询端指令前缀（可选，部分 rerank 模型需要，如 "Instruct: ...\\nQuery: "）。
 # en: Query instruction prefix (optional, required by some rerank models, e.g. "Instruct: ...\\nQuery: ").
 query_instruction = ""
+
+# zh: 额外请求体参数（可选），用于 rerank 供应商的扩展字段。
+# en: Extra request-body params (optional) for rerank-provider-specific fields.
+[models.rerank.request_params]
 
 # zh: 本地知识库配置。
 # en: Local knowledge base settings.

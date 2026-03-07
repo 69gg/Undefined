@@ -11,6 +11,7 @@ from openai import NOT_GIVEN, AsyncOpenAI
 
 from Undefined.ai.tokens import TokenCounter
 from Undefined.config import EmbeddingModelConfig, RerankModelConfig
+from Undefined.utils.request_params import split_reserved_request_params
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,18 @@ _OpenAIClientGetter: TypeAlias = Callable[[_ModelConfig], AsyncOpenAI]
 _ResponseToDict: TypeAlias = Callable[[Any], dict[str, Any]]
 _TokenCounterGetter: TypeAlias = Callable[[str], TokenCounter]
 _RecordUsageCallback: TypeAlias = Callable[..., None]
+
+_SDK_REQUEST_OPTION_FIELDS: frozenset[str] = frozenset(
+    {"extra_headers", "extra_query", "extra_body", "timeout"}
+)
+_EMBEDDING_KNOWN_FIELDS: frozenset[str] = frozenset({"encoding_format", "user"})
+_EMBEDDING_RESERVED_FIELDS: frozenset[str] = (
+    frozenset({"model", "input", "dimensions"}) | _SDK_REQUEST_OPTION_FIELDS
+)
+_RERANK_RESERVED_FIELDS: frozenset[str] = (
+    frozenset({"model", "query", "documents", "top_n", "return_documents"})
+    | _SDK_REQUEST_OPTION_FIELDS
+)
 
 
 class RetrievalRequester:
@@ -37,6 +50,26 @@ class RetrievalRequester:
         self._get_token_counter = get_token_counter
         self._record_usage = record_usage
 
+    def _split_request_params(
+        self,
+        model_config: _ModelConfig,
+        *,
+        reserved_fields: frozenset[str],
+        call_type: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        allowed, ignored = split_reserved_request_params(
+            getattr(model_config, "request_params", {}),
+            reserved_fields,
+        )
+        if ignored:
+            logger.warning(
+                "[request_params] ignored_keys=%s type=%s model=%s",
+                ",".join(sorted(ignored)),
+                call_type,
+                model_config.model_name,
+            )
+        return allowed, ignored
+
     async def embed(
         self, model_config: EmbeddingModelConfig, texts: list[str]
     ) -> list[list[float]]:
@@ -46,10 +79,27 @@ class RetrievalRequester:
 
         start_time = time.perf_counter()
         client = self._get_openai_client(model_config)
+        request_params, _ = self._split_request_params(
+            model_config,
+            reserved_fields=_EMBEDDING_RESERVED_FIELDS,
+            call_type="embedding",
+        )
+        method_kwargs = {
+            key: value
+            for key, value in request_params.items()
+            if key in _EMBEDDING_KNOWN_FIELDS
+        }
+        extra_body = {
+            key: value
+            for key, value in request_params.items()
+            if key not in _EMBEDDING_KNOWN_FIELDS
+        }
         response = await client.embeddings.create(
             model=model_config.model_name,
             input=texts,
             dimensions=model_config.dimensions or NOT_GIVEN,  # type: ignore[arg-type]
+            extra_body=extra_body or None,
+            **method_kwargs,
         )
         response_dict = self._response_to_dict(response)
         embeddings = [item.embedding for item in response.data]
@@ -96,7 +146,13 @@ class RetrievalRequester:
 
         start_time = time.perf_counter()
         client = self._get_openai_client(model_config)
+        request_params, _ = self._split_request_params(
+            model_config,
+            reserved_fields=_RERANK_RESERVED_FIELDS,
+            call_type="rerank",
+        )
         request_body: dict[str, Any] = {
+            **request_params,
             "model": model_config.model_name,
             "query": query,
             "documents": documents,

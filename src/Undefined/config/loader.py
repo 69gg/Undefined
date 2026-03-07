@@ -39,6 +39,10 @@ from .models import (
     SecurityModelConfig,
     VisionModelConfig,
 )
+from Undefined.utils.request_params import (
+    merge_request_params,
+    normalize_request_params,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +227,16 @@ def _coerce_str_list(value: Any) -> list[str]:
     if isinstance(value, str):
         return [part.strip() for part in value.split(",") if part.strip()]
     return []
+
+
+def _coerce_request_params(value: Any) -> dict[str, Any]:
+    return normalize_request_params(value)
+
+
+def _get_model_request_params(data: dict[str, Any], model_name: str) -> dict[str, Any]:
+    return _coerce_request_params(
+        _get_nested(data, ("models", model_name, "request_params"))
+    )
 
 
 def _get_value(
@@ -1511,6 +1525,10 @@ class Config:
                         item.get("thinking_tool_call_compat"),
                         primary_config.thinking_tool_call_compat,
                     ),
+                    request_params=merge_request_params(
+                        primary_config.request_params,
+                        item.get("request_params"),
+                    ),
                 )
             )
 
@@ -1554,6 +1572,7 @@ class Config:
                 _get_value(data, ("models", "embedding", "document_instruction"), None),
                 "",
             ),
+            request_params=_get_model_request_params(data, "embedding"),
         )
 
     @staticmethod
@@ -1587,6 +1606,7 @@ class Config:
             query_instruction=_coerce_str(
                 _get_value(data, ("models", "rerank", "query_instruction"), None), ""
             ),
+            request_params=_get_model_request_params(data, "rerank"),
         )
 
     @staticmethod
@@ -1648,6 +1668,7 @@ class Config:
             ),
             thinking_include_budget=thinking_include_budget,
             thinking_tool_call_compat=thinking_tool_call_compat,
+            request_params=_get_model_request_params(data, "chat"),
         )
         config.pool = Config._parse_model_pool(data, "chat", config)
         return config
@@ -1711,6 +1732,7 @@ class Config:
             ),
             thinking_include_budget=thinking_include_budget,
             thinking_tool_call_compat=thinking_tool_call_compat,
+            request_params=_get_model_request_params(data, "vision"),
         )
 
     @staticmethod
@@ -1788,6 +1810,7 @@ class Config:
                 ),
                 thinking_include_budget=thinking_include_budget,
                 thinking_tool_call_compat=thinking_tool_call_compat,
+                request_params=_get_model_request_params(data, "security"),
             )
 
         logger.warning("未配置安全模型，将使用对话模型作为后备")
@@ -1801,6 +1824,7 @@ class Config:
             thinking_budget_tokens=0,
             thinking_include_budget=True,
             thinking_tool_call_compat=False,
+            request_params=merge_request_params(chat_model.request_params),
         )
 
     @staticmethod
@@ -1862,6 +1886,7 @@ class Config:
             ),
             thinking_include_budget=thinking_include_budget,
             thinking_tool_call_compat=thinking_tool_call_compat,
+            request_params=_get_model_request_params(data, "agent"),
         )
         config.pool = Config._parse_model_pool(data, "agent", config)
         return config
@@ -2009,6 +2034,10 @@ class Config:
             ),
             thinking_include_budget=thinking_include_budget,
             thinking_tool_call_compat=thinking_tool_call_compat,
+            request_params=merge_request_params(
+                fallback.request_params,
+                h.get("request_params"),
+            ),
         )
 
     @staticmethod

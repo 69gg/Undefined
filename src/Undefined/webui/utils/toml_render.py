@@ -61,13 +61,40 @@ def _is_array_of_tables(value: Any) -> bool:
     )
 
 
-def render_table(path: list[str], table: TomlData) -> list[str]:
-    lines: list[str] = []
-    items = [
+def _render_scalar_items(path: list[str], table: TomlData) -> list[str]:
+    return [
         f"{key} = {format_value(table[key])}"
         for key in sorted_keys(table, path)
         if not isinstance(table[key], dict) and not _is_array_of_tables(table[key])
     ]
+
+
+def _render_nested_items(path: list[str], table: TomlData) -> list[str]:
+    lines: list[str] = []
+    for key in sorted_keys(table, path):
+        value = table[key]
+        if isinstance(value, dict):
+            lines.extend(render_table(path + [key], value))
+        elif _is_array_of_tables(value):
+            aot_path = path + [key]
+            for item in value:
+                lines.extend(
+                    _render_array_of_tables_item(aot_path, cast(TomlData, item))
+                )
+    return lines
+
+
+def _render_array_of_tables_item(path: list[str], table: TomlData) -> list[str]:
+    lines = [f"[[{'.'.join(path)}]]"]
+    lines.extend(_render_scalar_items(path, table))
+    lines.append("")
+    lines.extend(_render_nested_items(path, table))
+    return lines
+
+
+def render_table(path: list[str], table: TomlData) -> list[str]:
+    lines: list[str] = []
+    items = _render_scalar_items(path, table)
     if items and path:
         lines.append(f"[{'.'.join(path)}]")
         lines.extend(items)
@@ -75,19 +102,7 @@ def render_table(path: list[str], table: TomlData) -> list[str]:
     elif items:
         lines.extend(items)
         lines.append("")
-    for key in sorted_keys(table, path):
-        value = table[key]
-        if isinstance(value, dict):
-            lines.extend(render_table(path + [key], value))
-        elif _is_array_of_tables(value):
-            aot_path = ".".join(path + [key])
-            for item in value:
-                lines.append(f"[[{aot_path}]]")
-                for k in sorted_keys(item, path + [key]):
-                    v = item[k]
-                    if not isinstance(v, dict):
-                        lines.append(f"{k} = {format_value(v)}")
-                lines.append("")
+    lines.extend(_render_nested_items(path, table))
     return lines
 
 

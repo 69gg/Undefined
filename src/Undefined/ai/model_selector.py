@@ -245,6 +245,7 @@ class ModelSelector:
             thinking_budget_tokens=entry.thinking_budget_tokens,
             thinking_include_budget=entry.thinking_include_budget,
             thinking_tool_call_compat=entry.thinking_tool_call_compat,
+            request_params=entry.request_params,
             pool=primary.pool,
         )
 
@@ -263,5 +264,6 @@ class ModelSelector:
             thinking_budget_tokens=entry.thinking_budget_tokens,
             thinking_include_budget=entry.thinking_include_budget,
             thinking_tool_call_compat=entry.thinking_tool_call_compat,
+            request_params=entry.request_params,
             pool=primary.pool,
         )

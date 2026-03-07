@@ -146,6 +146,7 @@ model_name = "gpt-4o-mini"
 | `thinking_budget_tokens` | thinking 预算 |
 | `thinking_include_budget` | 是否发送 budget_tokens |
 | `thinking_tool_call_compat` | Tool Calls 兼容模式（回传 reasoning_content） |
+| `request_params` | 额外请求体参数（透传给模型 API，保留字段会忽略） |
 
 兼容字段（旧配置）：
 - `models.<x>.deepseek_new_cot_support`
@@ -158,6 +159,9 @@ model_name = "gpt-4o-mini"
 - `max_tokens=8192`
 - `queue_interval_seconds=1.0`（`<=0` 回退 `1.0`）
 - `thinking_budget_tokens=20000`
+
+补充：
+- 可通过 `[models.chat.request_params]` 传入 `temperature`、`response_format`、`reasoning_effort` 或兼容网关私有字段。
 
 ### 4.4.3 `[models.vision]` 视觉模型
 
@@ -205,7 +209,11 @@ model_name = "gpt-4o-mini"
 
 `models` 条目支持字段：
 - `model_name`（必填）
-- `api_url`/`api_key`/`max_tokens`/`queue_interval_seconds`/`thinking_*`（可选，缺省继承主模型）
+- `api_url`/`api_key`/`max_tokens`/`queue_interval_seconds`/`thinking_*`/`request_params`（可选，缺省继承主模型）
+
+`request_params` 继承规则：
+- `[[models.chat.pool.models]]` 与 `[[models.agent.pool.models]]` 的 `request_params` 会与主模型按顶层键浅合并。
+- 同名键由池条目覆盖；嵌套对象按整键替换，不做深合并。
 
 生效条件（全部满足才启用池）：
 1. `features.pool_enabled=true`
@@ -223,6 +231,7 @@ model_name = "gpt-4o-mini"
 | `dimensions` | `0` | 向量维度；`0`/空视为 `None`（模型默认） |
 | `query_instruction` | `""` | 查询前缀 |
 | `document_instruction` | `""` | 文档前缀 |
+| `request_params` | `{}` | 额外请求体参数；保留字段如 `model`/`input`/`dimensions` 会忽略 |
 
 ### 4.4.9 `[models.rerank]` 重排模型
 
@@ -233,6 +242,13 @@ model_name = "gpt-4o-mini"
 | `model_name` | `""` | 模型名 |
 | `queue_interval_seconds` | `1.0` | `<=0` 回退 `1.0` |
 | `query_instruction` | `""` | 查询前缀 |
+| `request_params` | `{}` | 额外请求体参数；保留字段如 `model`/`query`/`documents`/`top_n` 会忽略 |
+
+`request_params` 说明：
+- 仅用于**请求体**字段，不包含 `api_key`、`base_url`、`timeout`、`extra_headers` 等 client 选项。
+- 聊天类保留字段：`model`、`messages`、`max_tokens`、`tools`、`tool_choice`、`stream`、`stream_options`。
+- embedding 保留字段：`model`、`input`、`dimensions`。
+- rerank 保留字段：`model`、`query`、`documents`、`top_n`、`return_documents`。
 
 ---
 

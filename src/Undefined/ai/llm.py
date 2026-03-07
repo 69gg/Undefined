@@ -35,6 +35,10 @@ from Undefined.config import (
 )
 from Undefined.token_usage_storage import TokenUsageStorage, TokenUsage
 from Undefined.utils.logging import log_debug_json, redact_string
+from Undefined.utils.request_params import (
+    merge_request_params,
+    split_reserved_request_params,
+)
 from Undefined.utils.tool_calls import normalize_tool_arguments_json
 
 logger = logging.getLogger(__name__)
@@ -71,6 +75,25 @@ _CHAT_COMPLETIONS_KNOWN_FIELDS: set[str] = {
     "logprobs",
     "top_logprobs",
 }
+
+_SDK_REQUEST_OPTION_FIELDS: frozenset[str] = frozenset(
+    {"extra_headers", "extra_query", "extra_body", "timeout"}
+)
+
+_CHAT_COMPLETIONS_RESERVED_FIELDS: frozenset[str] = (
+    frozenset(
+        {
+            "model",
+            "messages",
+            "max_tokens",
+            "tools",
+            "tool_choice",
+            "stream",
+            "stream_options",
+        }
+    )
+    | _SDK_REQUEST_OPTION_FIELDS
+)
 
 _THINKING_KEYS: tuple[str, ...] = (
     "thinking",
@@ -729,6 +752,44 @@ def _normalize_openai_base_url(
     return normalized, default_query, True
 
 
+def _warn_ignored_request_params(
+    *,
+    call_type: str,
+    model_name: str,
+    ignored: dict[str, Any],
+) -> None:
+    if not ignored:
+        return
+    logger.warning(
+        "[request_params] ignored_keys=%s type=%s model=%s",
+        ",".join(sorted(ignored)),
+        call_type,
+        model_name,
+    )
+
+
+def _build_effective_request_kwargs(
+    model_config: ModelConfig,
+    *,
+    call_type: str,
+    overrides: dict[str, Any],
+) -> dict[str, Any]:
+    merged = merge_request_params(
+        getattr(model_config, "request_params", {}),
+        overrides,
+    )
+    allowed, ignored = split_reserved_request_params(
+        merged,
+        _CHAT_COMPLETIONS_RESERVED_FIELDS,
+    )
+    _warn_ignored_request_params(
+        call_type=call_type,
+        model_name=model_config.model_name,
+        ignored=ignored,
+    )
+    return allowed
+
+
 class ModelRequester:
     """统一的模型请求封装。"""
 
@@ -774,13 +835,18 @@ class ModelRequester:
                 tool_args_fixed,
                 len(messages_for_api),
             )
+        effective_kwargs = _build_effective_request_kwargs(
+            model_config,
+            call_type=call_type,
+            overrides=dict(kwargs),
+        )
         request_body = build_request_body(
             model_config=model_config,
             messages=messages_for_api,
             max_tokens=max_tokens,
             tools=tools,
             tool_choice=tool_choice,
-            **kwargs,
+            **effective_kwargs,
         )
 
         api_to_internal: dict[str, str] = {}

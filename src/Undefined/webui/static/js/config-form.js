@@ -42,6 +42,40 @@ function updateConfigSearchIndex() {
     });
 }
 
+function isPlainObject(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value)
+}
+
+function isAotCollection(path, value) {
+    return Array.isArray(value) && (AOT_PATHS.has(path) || value.some(item => item !== null && typeof item === "object"))
+}
+
+function isRequestParamsPath(path) {
+    return path === "request_params" || path.endsWith(".request_params")
+}
+
+function scheduleAutoSave() {
+    if (state.saveTimer) clearTimeout(state.saveTimer)
+    showSaveStatus("saving", t("config.typing"))
+    state.saveTimer = setTimeout(() => {
+        state.saveTimer = null
+        autoSave()
+    }, 1000)
+}
+
+function createEditorNode(path, value) {
+    if (isRequestParamsPath(path)) {
+        return createRequestParamsWidget(path, isPlainObject(value) ? value : {})
+    }
+    if (isPlainObject(value)) {
+        return createSubSubSection(path, value)
+    }
+    if (isAotCollection(path, value)) {
+        return createAotWidget(path, value)
+    }
+    return createField(path, value)
+}
+
 function buildConfigForm() {
     const container = get("formSections");
     if (!container) return;
@@ -93,42 +127,7 @@ function buildConfigForm() {
         card.appendChild(fieldGrid);
 
         for (const [key, val] of Object.entries(values)) {
-            if (typeof val === "object" && !Array.isArray(val)) {
-                const subSection = document.createElement("div");
-                subSection.className = "form-subsection";
-
-                const subTitle = document.createElement("div");
-                subTitle.className = "form-subtitle";
-                subTitle.innerText = `[${section}.${key}]`;
-                subSection.appendChild(subTitle);
-
-                const subCommentKey = `${section}.${key}`;
-                const subComment = getComment(subCommentKey);
-                if (subComment) {
-                    const subHint = document.createElement("div");
-                    subHint.className = "form-subtitle-hint";
-                    subHint.innerText = subComment;
-                    subHint.dataset.commentPath = subCommentKey;
-                    subSection.appendChild(subHint);
-                }
-
-                const subGrid = document.createElement("div");
-                subGrid.className = "form-fields";
-                for (const [sk, sv] of Object.entries(val)) {
-                    const subPath = `${section}.${key}.${sk}`;
-                    if (sv !== null && typeof sv === "object" && !Array.isArray(sv)) {
-                        subGrid.appendChild(createSubSubSection(subPath, sv));
-                    } else if (Array.isArray(sv) && (AOT_PATHS.has(subPath) || sv.some(i => typeof i === "object" && i !== null))) {
-                        subGrid.appendChild(createAotWidget(subPath, sv));
-                    } else {
-                        subGrid.appendChild(createField(subPath, sv));
-                    }
-                }
-                subSection.appendChild(subGrid);
-                fieldGrid.appendChild(subSection);
-                continue;
-            }
-            fieldGrid.appendChild(createField(`${section}.${key}`, val));
+            fieldGrid.appendChild(createEditorNode(`${section}.${key}`, val));
         }
         container.appendChild(card);
     }
@@ -294,11 +293,7 @@ function createField(path, val) {
 
         input.dataset.path = path;
         group.appendChild(input);
-        input.oninput = () => {
-            if (state.saveTimer) clearTimeout(state.saveTimer);
-            showSaveStatus("saving", t("config.typing"));
-            state.saveTimer = setTimeout(() => { state.saveTimer = null; autoSave(); }, 1000);
-        };
+        input.oninput = () => scheduleAutoSave();
     }
     return group;
 }
@@ -324,145 +319,534 @@ function createSubSubSection(path, obj) {
     grid.className = "form-fields";
     for (const [k, v] of Object.entries(obj)) {
         const subPath = `${path}.${k}`;
-        if (AOT_PATHS.has(subPath) || (Array.isArray(v) && v.length > 0 && v.every(i => typeof i === "object" && i !== null))) {
-            grid.appendChild(createAotWidget(subPath, v));
-        } else {
-            grid.appendChild(createField(subPath, v));
-        }
+        grid.appendChild(createEditorNode(subPath, v));
     }
     div.appendChild(grid);
     return div;
 }
 
-function createAotEntry(path, entry) {
-    const div = document.createElement("div");
-    div.className = "aot-entry";
-    div.style.cssText = "border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;";
-    const fields = document.createElement("div");
-    fields.className = "form-fields";
-    for (const [k, v] of Object.entries(entry)) {
-        const fg = document.createElement("div");
-        fg.className = "form-group";
-        fg.dataset.path = `${path}[].${k}`;
-        const lbl = document.createElement("label");
-        lbl.className = "form-label";
-        lbl.innerText = k;
-        fg.appendChild(lbl);
-        const isSecret = isSensitiveKey(k);
-        const inp = document.createElement("input");
-        inp.className = "form-control aot-field-input";
-        inp.type = isSecret ? "password" : "text";
-        inp.value = v == null ? "" : String(v);
-        inp.dataset.fieldKey = k;
-        if (isSecret) inp.setAttribute("autocomplete", "new-password");
-        inp.oninput = () => {
-            if (state.saveTimer) clearTimeout(state.saveTimer);
-            showSaveStatus("saving", t("config.typing"));
-            state.saveTimer = setTimeout(() => { state.saveTimer = null; autoSave(); }, 1000);
-        };
-        fg.appendChild(inp);
-        fields.appendChild(fg);
+function buildEmptyStructuredValue(value) {
+    if (Array.isArray(value)) {
+        return value.length > 0 ? [buildEmptyStructuredValue(value[0])] : []
     }
-    div.appendChild(fields);
-    const removeBtn = document.createElement("button");
-    removeBtn.type = "button";
-    removeBtn.className = "btn ghost btn-sm";
-    removeBtn.innerText = t("config.aot_remove");
-    removeBtn.onclick = () => { div.remove(); autoSave(); };
-    div.appendChild(removeBtn);
-    return div;
+    if (isPlainObject(value)) {
+        return Object.fromEntries(Object.keys(value).map(key => [key, buildEmptyStructuredValue(value[key])]))
+    }
+    if (typeof value === "boolean") return false
+    if (value === null) return null
+    return ""
+}
+
+function inferStructuredType(value) {
+    if (Array.isArray(value)) return "array"
+    if (isPlainObject(value)) return "object"
+    return "scalar"
+}
+
+function inferScalarType(value) {
+    if (value === null) return "null"
+    if (typeof value === "number") return "number"
+    if (typeof value === "boolean") return "boolean"
+    return "string"
+}
+
+function createRequestParamsWidget(path, value) {
+    const group = document.createElement("div")
+    group.className = "form-group"
+    group.dataset.path = path
+
+    const label = document.createElement("label")
+    label.className = "form-label"
+    label.innerText = path.split(".").pop()
+    group.appendChild(label)
+
+    const comment = getComment(path)
+    if (comment) {
+        const hint = document.createElement("div")
+        hint.className = "form-hint"
+        hint.innerText = comment
+        hint.dataset.commentPath = path
+        group.appendChild(hint)
+    }
+
+    group.dataset.searchText = `${path} ${comment || ""}`.toLowerCase()
+    const editor = createStructuredValueEditor(value, { rootType: "object" })
+    editor.dataset.requestParamsRoot = "true"
+    group.appendChild(editor)
+    return group
+}
+
+function createStructuredActionButton(text, onClick) {
+    const button = document.createElement("button")
+    button.type = "button"
+    button.className = "btn ghost btn-sm"
+    button.innerText = text
+    button.onclick = onClick
+    return button
+}
+
+function createStructuredValueEditor(value, options = {}) {
+    const rootType = options.rootType || inferStructuredType(value)
+    if (rootType === "object") {
+        return createStructuredObjectEditor(isPlainObject(value) ? value : {})
+    }
+    if (rootType === "array") {
+        return createStructuredArrayEditor(Array.isArray(value) ? value : [])
+    }
+    return createStructuredScalarEditor(value)
+}
+
+function createStructuredObjectEditor(value) {
+    const wrapper = document.createElement("div")
+    wrapper.dataset.structuredType = "object"
+
+    const body = document.createElement("div")
+    body.className = "request-params-object-body"
+    wrapper.appendChild(body)
+
+    Object.entries(value).forEach(([key, itemValue]) => {
+        body.appendChild(createStructuredObjectEntry(key, itemValue))
+    })
+
+    const actions = document.createElement("div")
+    actions.style.marginTop = "8px"
+    actions.style.display = "flex"
+    actions.style.gap = "8px"
+    actions.style.flexWrap = "wrap"
+    actions.appendChild(createStructuredActionButton(`${t("config.aot_add")} Field`, () => {
+        body.appendChild(createStructuredObjectEntry("", ""))
+        autoSave()
+    }))
+    actions.appendChild(createStructuredActionButton(`${t("config.aot_add")} Object`, () => {
+        body.appendChild(createStructuredObjectEntry("", {}))
+        autoSave()
+    }))
+    actions.appendChild(createStructuredActionButton(`${t("config.aot_add")} Array`, () => {
+        body.appendChild(createStructuredObjectEntry("", []))
+        autoSave()
+    }))
+    wrapper.appendChild(actions)
+
+    return wrapper
+}
+
+function createStructuredObjectEntry(key, value) {
+    const entry = document.createElement("div")
+    entry.className = "request-params-object-entry"
+    entry.style.cssText = "border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;"
+
+    const keyGroup = document.createElement("div")
+    keyGroup.className = "form-group"
+    const keyLabel = document.createElement("label")
+    keyLabel.className = "form-label"
+    keyLabel.innerText = "key"
+    keyGroup.appendChild(keyLabel)
+    const keyInput = document.createElement("input")
+    keyInput.type = "text"
+    keyInput.className = "form-control request-params-key-input"
+    keyInput.value = key || ""
+    keyInput.oninput = () => scheduleAutoSave()
+    keyGroup.appendChild(keyInput)
+    entry.appendChild(keyGroup)
+
+    const valueContainer = document.createElement("div")
+    valueContainer.className = "request-params-entry-value"
+    valueContainer.appendChild(createStructuredValueEditor(value))
+    entry.appendChild(valueContainer)
+
+    const removeBtn = createStructuredActionButton(t("config.aot_remove"), () => {
+        entry.remove()
+        autoSave()
+    })
+    entry.appendChild(removeBtn)
+
+    return entry
+}
+
+function createStructuredArrayEditor(value) {
+    const wrapper = document.createElement("div")
+    wrapper.dataset.structuredType = "array"
+
+    const body = document.createElement("div")
+    body.className = "request-params-array-body"
+    wrapper.appendChild(body)
+
+    value.forEach(itemValue => {
+        body.appendChild(createStructuredArrayEntry(itemValue))
+    })
+
+    const actions = document.createElement("div")
+    actions.style.marginTop = "8px"
+    actions.style.display = "flex"
+    actions.style.gap = "8px"
+    actions.style.flexWrap = "wrap"
+    actions.appendChild(createStructuredActionButton(`${t("config.aot_add")} Value`, () => {
+        body.appendChild(createStructuredArrayEntry(""))
+        autoSave()
+    }))
+    actions.appendChild(createStructuredActionButton(`${t("config.aot_add")} Object`, () => {
+        body.appendChild(createStructuredArrayEntry({}))
+        autoSave()
+    }))
+    actions.appendChild(createStructuredActionButton(`${t("config.aot_add")} Array`, () => {
+        body.appendChild(createStructuredArrayEntry([]))
+        autoSave()
+    }))
+    wrapper.appendChild(actions)
+
+    return wrapper
+}
+
+function createStructuredArrayEntry(value) {
+    const entry = document.createElement("div")
+    entry.className = "request-params-array-entry"
+    entry.style.cssText = "border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;"
+
+    const valueContainer = document.createElement("div")
+    valueContainer.className = "request-params-entry-value"
+    valueContainer.appendChild(createStructuredValueEditor(value))
+    entry.appendChild(valueContainer)
+
+    const removeBtn = createStructuredActionButton(t("config.aot_remove"), () => {
+        entry.remove()
+        autoSave()
+    })
+    entry.appendChild(removeBtn)
+
+    return entry
+}
+
+function createStructuredScalarEditor(value) {
+    const wrapper = document.createElement("div")
+    wrapper.dataset.structuredType = "scalar"
+
+    const typeGroup = document.createElement("div")
+    typeGroup.className = "form-group"
+    const typeLabel = document.createElement("label")
+    typeLabel.className = "form-label"
+    typeLabel.innerText = "type"
+    typeGroup.appendChild(typeLabel)
+
+    const typeSelect = document.createElement("select")
+    typeSelect.className = "form-control request-params-scalar-type"
+    ;["string", "number", "boolean", "null"].forEach(type => {
+        const option = document.createElement("option")
+        option.value = type
+        option.innerText = type
+        typeSelect.appendChild(option)
+    })
+    typeSelect.value = inferScalarType(value)
+    typeGroup.appendChild(typeSelect)
+    wrapper.appendChild(typeGroup)
+
+    const valueContainer = document.createElement("div")
+    valueContainer.className = "request-params-scalar-value"
+    wrapper.appendChild(valueContainer)
+
+    const renderValueInput = () => {
+        const scalarType = typeSelect.value
+        valueContainer.textContent = ""
+
+        if (scalarType === "null") {
+            const emptyHint = document.createElement("div")
+            emptyHint.className = "form-hint"
+            emptyHint.innerText = "null"
+            valueContainer.appendChild(emptyHint)
+            return
+        }
+
+        if (scalarType === "boolean") {
+            const booleanWrap = document.createElement("label")
+            booleanWrap.className = "toggle-wrapper"
+            const booleanInput = document.createElement("input")
+            booleanInput.type = "checkbox"
+            booleanInput.className = "toggle-input request-params-scalar-input"
+            booleanInput.checked = typeof value === "boolean" ? value : false
+            booleanInput.onchange = () => autoSave()
+            const track = document.createElement("span")
+            track.className = "toggle-track"
+            const handle = document.createElement("span")
+            handle.className = "toggle-handle"
+            track.appendChild(handle)
+            booleanWrap.appendChild(booleanInput)
+            booleanWrap.appendChild(track)
+            valueContainer.appendChild(booleanWrap)
+            return
+        }
+
+        const input = document.createElement("input")
+        input.className = "form-control request-params-scalar-input"
+        input.type = scalarType === "number" ? "number" : "text"
+        if (scalarType === "number") {
+            input.step = "any"
+            input.value = typeof value === "number" ? String(value) : ""
+        } else {
+            input.value = value == null ? "" : String(value)
+        }
+        input.oninput = () => scheduleAutoSave()
+        valueContainer.appendChild(input)
+    }
+
+    typeSelect.onchange = () => {
+        value = typeSelect.value === "boolean" ? false : typeSelect.value === "null" ? null : ""
+        renderValueInput()
+        autoSave()
+    }
+
+    renderValueInput()
+    return wrapper
+}
+
+function getStructuredValueChild(container) {
+    return Array.from(container.children).find(child => child.dataset && child.dataset.structuredType)
+}
+
+function readStructuredValueEditor(node) {
+    const type = node.dataset.structuredType
+    if (type === "object") {
+        const result = {}
+        const body = node.querySelector(".request-params-object-body")
+        Array.from(body ? body.children : []).forEach(entry => {
+            const keyInput = entry.querySelector(".request-params-key-input")
+            const key = keyInput ? keyInput.value.trim() : ""
+            if (!key) return
+            const valueContainer = entry.querySelector(".request-params-entry-value")
+            const valueNode = valueContainer ? getStructuredValueChild(valueContainer) : null
+            if (!valueNode) return
+            result[key] = readStructuredValueEditor(valueNode)
+        })
+        return result
+    }
+    if (type === "array") {
+        const body = node.querySelector(".request-params-array-body")
+        return Array.from(body ? body.children : []).map(entry => {
+            const valueContainer = entry.querySelector(".request-params-entry-value")
+            const valueNode = valueContainer ? getStructuredValueChild(valueContainer) : null
+            return valueNode ? readStructuredValueEditor(valueNode) : null
+        })
+    }
+
+    const scalarType = node.querySelector(".request-params-scalar-type")?.value || "string"
+    if (scalarType === "null") return null
+    const scalarInput = node.querySelector(".request-params-scalar-input")
+    if (scalarType === "boolean") {
+        return Boolean(scalarInput?.checked)
+    }
+    const raw = scalarInput ? scalarInput.value : ""
+    if (scalarType === "number") {
+        const parsed = Number(raw)
+        return Number.isNaN(parsed) ? 0 : parsed
+    }
+    return raw
+}
+
+function createAotScalarInput(key, value) {
+    const isLong = isLongText(value)
+    const isNumber = typeof value === "number"
+    const isBoolean = typeof value === "boolean"
+    const isArray = Array.isArray(value)
+    const isSecret = isSensitiveKey(key)
+
+    if (isBoolean) {
+        const wrapper = document.createElement("label")
+        wrapper.className = "toggle-wrapper"
+        const toggle = document.createElement("input")
+        toggle.type = "checkbox"
+        toggle.className = "toggle-input aot-field-input"
+        toggle.dataset.valueType = "boolean"
+        toggle.checked = Boolean(value)
+        toggle.onchange = () => autoSave()
+        const track = document.createElement("span")
+        track.className = "toggle-track"
+        const handle = document.createElement("span")
+        handle.className = "toggle-handle"
+        track.appendChild(handle)
+        wrapper.appendChild(toggle)
+        wrapper.appendChild(track)
+        return wrapper
+    }
+
+    let input
+    if (isLong) {
+        input = document.createElement("textarea")
+        input.className = "form-control form-textarea aot-field-input"
+    } else {
+        input = document.createElement("input")
+        input.className = "form-control aot-field-input"
+        input.type = isNumber ? "number" : isSecret ? "password" : "text"
+        if (isNumber) input.step = "any"
+        if (isSecret) input.setAttribute("autocomplete", "new-password")
+    }
+
+    input.dataset.valueType = isNumber ? "number" : isArray ? "array" : "string"
+    if (isArray) {
+        input.dataset.arrayType = value.every(item => typeof item === "number") ? "number" : "string"
+        input.value = value.join(", ")
+    } else {
+        input.value = value == null ? "" : String(value)
+    }
+    input.oninput = () => scheduleAutoSave()
+    return input
+}
+
+function createAotEntry(path, entry) {
+    const div = document.createElement("div")
+    div.className = "aot-entry"
+    div.style.cssText = "border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;"
+    const fields = document.createElement("div")
+    fields.className = "form-fields"
+
+    for (const [key, value] of Object.entries(entry)) {
+        const field = document.createElement("div")
+        field.className = "form-group aot-entry-field"
+        field.dataset.fieldKey = key
+        field.dataset.path = `${path}[].${key}`
+
+        const label = document.createElement("label")
+        label.className = "form-label"
+        label.innerText = key
+        field.appendChild(label)
+
+        const fieldPath = `${path}.${key}`
+        if (isPlainObject(value) || Array.isArray(value)) {
+            field.dataset.fieldEditor = "structured"
+            const editor = createStructuredValueEditor(value, { rootType: isRequestParamsPath(fieldPath) ? "object" : inferStructuredType(value) })
+            field.appendChild(editor)
+        } else {
+            field.dataset.fieldEditor = "scalar"
+            field.appendChild(createAotScalarInput(key, value))
+        }
+        fields.appendChild(field)
+    }
+
+    div.appendChild(fields)
+    const removeBtn = document.createElement("button")
+    removeBtn.type = "button"
+    removeBtn.className = "btn ghost btn-sm"
+    removeBtn.innerText = t("config.aot_remove")
+    removeBtn.onclick = () => { div.remove(); autoSave() }
+    div.appendChild(removeBtn)
+    return div
+}
+
+function buildAotTemplate(path, arr) {
+    if (arr && arr.length > 0) {
+        const template = buildEmptyStructuredValue(arr[0])
+        if (AOT_PATHS.has(path) && !Object.prototype.hasOwnProperty.call(template, "request_params")) {
+            template.request_params = {}
+        }
+        return template
+    }
+    return { model_name: "", api_url: "", api_key: "", request_params: {} }
 }
 
 function createAotWidget(path, arr) {
-    const DEFAULT_ENTRY = { model_name: "", api_url: "", api_key: "" };
-    const container = document.createElement("div");
-    container.className = "form-group";
-    container.dataset.path = path;
-    const lbl = document.createElement("div");
-    lbl.className = "form-label";
-    lbl.innerText = path.split(".").pop();
-    container.appendChild(lbl);
-    const comment = getComment(path);
+    const container = document.createElement("div")
+    container.className = "form-group"
+    container.dataset.path = path
+    const lbl = document.createElement("div")
+    lbl.className = "form-label"
+    lbl.innerText = path.split(".").pop()
+    container.appendChild(lbl)
+    const comment = getComment(path)
     if (comment) {
-        const hint = document.createElement("div");
-        hint.className = "form-hint";
-        hint.innerText = comment;
-        hint.dataset.commentPath = path;
-        container.appendChild(hint);
+        const hint = document.createElement("div")
+        hint.className = "form-hint"
+        hint.innerText = comment
+        hint.dataset.commentPath = path
+        container.appendChild(hint)
     }
-    const entriesDiv = document.createElement("div");
-    entriesDiv.dataset.aotPath = path;
-    container.appendChild(entriesDiv);
-    (arr || []).forEach(entry => entriesDiv.appendChild(createAotEntry(path, entry)));
-    const addBtn = document.createElement("button");
-    addBtn.type = "button";
-    addBtn.className = "btn ghost btn-sm";
-    addBtn.style.marginTop = "4px";
-    addBtn.innerText = t("config.aot_add");
+    container.dataset.searchText = `${path} ${comment || ""}`.toLowerCase()
+    const entriesDiv = document.createElement("div")
+    entriesDiv.dataset.aotPath = path
+    container.appendChild(entriesDiv)
+    ;(arr || []).forEach(entry => entriesDiv.appendChild(createAotEntry(path, entry)))
+    const addBtn = document.createElement("button")
+    addBtn.type = "button"
+    addBtn.className = "btn ghost btn-sm"
+    addBtn.style.marginTop = "4px"
+    addBtn.innerText = t("config.aot_add")
     addBtn.onclick = () => {
-        const template = arr && arr.length > 0 ? Object.fromEntries(Object.keys(arr[0]).map(k => [k, ""])) : DEFAULT_ENTRY;
-        entriesDiv.appendChild(createAotEntry(path, template));
-        autoSave();
-    };
-    container.appendChild(addBtn);
-    return container;
+        entriesDiv.appendChild(createAotEntry(path, buildAotTemplate(path, arr)))
+        autoSave()
+    }
+    container.appendChild(addBtn)
+    return container
+}
+
+function parseInputValue(input) {
+    const valueType = input.dataset.valueType || "string"
+    if (valueType === "boolean") {
+        return input.checked
+    }
+    const raw = input.value
+    if (valueType === "number") {
+        const trimmed = raw.trim()
+        if (!trimmed) return ""
+        const parsed = trimmed.includes(".") ? parseFloat(trimmed) : parseInt(trimmed, 10)
+        return Number.isNaN(parsed) ? raw : parsed
+    }
+    if (valueType === "array") {
+        const items = raw.split(",").map(item => item.trim()).filter(Boolean)
+        return input.dataset.arrayType === "number"
+            ? items.map(item => {
+                const number = Number(item)
+                return Number.isNaN(number) ? item : number
+            })
+            : items
+    }
+    return raw
 }
 
 async function autoSave() {
-    showSaveStatus("saving");
+    showSaveStatus("saving")
 
-    const patch = {};
+    const patch = {}
     document.querySelectorAll(".config-input").forEach(input => {
-        const path = input.dataset.path;
-        let val;
-        if (input.type === "checkbox") {
-            val = input.checked;
-        } else {
-            const raw = input.value;
-            const valueType = input.dataset.valueType || "string";
-            if (valueType === "number") {
-                const trimmed = raw.trim();
-                if (!trimmed) { val = ""; }
-                else {
-                    val = trimmed.includes(".") ? parseFloat(trimmed) : parseInt(trimmed, 10);
-                    if (Number.isNaN(val)) val = raw;
-                }
-            } else if (valueType === "array") {
-                const items = raw.split(",").map(s => s.trim()).filter(Boolean);
-                val = input.dataset.arrayType === "number"
-                    ? items.map(item => { const num = Number(item); return Number.isNaN(num) ? item : num; })
-                    : items;
-            } else {
-                val = raw;
-            }
-        }
-        patch[path] = val;
-    });
+        patch[input.dataset.path] = parseInputValue(input)
+    })
+
+    document.querySelectorAll("[data-request-params-root]").forEach(editor => {
+        const group = editor.closest(".form-group")
+        if (!group?.dataset.path) return
+        patch[group.dataset.path] = readStructuredValueEditor(editor)
+    })
 
     document.querySelectorAll("[data-aot-path]").forEach(container => {
-        const aotPath = container.dataset.aotPath;
-        const entries = [];
+        const aotPath = container.dataset.aotPath
+        const entries = []
         container.querySelectorAll(".aot-entry").forEach(entry => {
-            const obj = {};
-            entry.querySelectorAll(".aot-field-input").forEach(inp => { obj[inp.dataset.fieldKey] = inp.value; });
-            entries.push(obj);
-        });
-        patch[aotPath] = entries;
-    });
+            const obj = {}
+            entry.querySelectorAll(".aot-entry-field").forEach(field => {
+                const key = field.dataset.fieldKey
+                if (!key) return
+                if (field.dataset.fieldEditor === "structured") {
+                    const valueNode = getStructuredValueChild(field)
+                    obj[key] = valueNode ? readStructuredValueEditor(valueNode) : {}
+                    return
+                }
+                const input = field.querySelector(".aot-field-input")
+                if (!input) return
+                obj[key] = parseInputValue(input)
+            })
+            entries.push(obj)
+        })
+        patch[aotPath] = entries
+    })
 
     try {
-        const res = await api("/api/patch", { method: "POST", body: JSON.stringify({ patch }) });
-        const data = await res.json();
+        const res = await api("/api/patch", { method: "POST", body: JSON.stringify({ patch }) })
+        const data = await res.json()
         if (data.success) {
-            showSaveStatus("saved");
-            if (data.warning) showToast(`${t("common.warning")}: ${data.warning}`, "warning", 5000);
+            showSaveStatus("saved")
+            if (data.warning) showToast(`${t("common.warning")}: ${data.warning}`, "warning", 5000)
         } else {
-            showSaveStatus("error", t("config.save_error"));
-            showToast(`${t("common.error")}: ${data.error}`, "error", 5000);
+            showSaveStatus("error", t("config.save_error"))
+            showToast(`${t("common.error")}: ${data.error}`, "error", 5000)
         }
     } catch (e) {
-        showSaveStatus("error", t("config.save_network_error"));
-        showToast(`${t("common.error")}: ${e.message}`, "error", 5000);
+        showSaveStatus("error", t("config.save_network_error"))
+        showToast(`${t("common.error")}: ${e.message}`, "error", 5000)
     }
 }
 

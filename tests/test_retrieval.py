@@ -106,6 +106,45 @@ async def test_embed_passes_dimensions_to_openai_sdk() -> None:
     assert fake_client.embeddings.last_kwargs["dimensions"] == 768
 
 
+@pytest.mark.asyncio
+async def test_embed_passes_request_params_and_ignores_reserved_fields(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fake_client = _FakeClient()
+    requester = RetrievalRequester(
+        get_openai_client=lambda _cfg: cast(AsyncOpenAI, fake_client),
+        response_to_dict=lambda response: {
+            "usage": getattr(response, "usage", {}),
+        },
+        get_token_counter=lambda _model: cast(TokenCounter, _DummyCounter()),
+        record_usage=lambda **_kwargs: None,
+    )
+    cfg = EmbeddingModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="text-embedding-3-small",
+        queue_interval_seconds=1.0,
+        dimensions=768,
+        request_params={
+            "encoding_format": "base64",
+            "user": "tester",
+            "metadata": {"source": "embed"},
+            "dimensions": 1024,
+        },
+    )
+
+    await requester.embed(cfg, ["hello"])
+
+    assert fake_client.embeddings.last_kwargs is not None
+    assert fake_client.embeddings.last_kwargs["dimensions"] == 768
+    assert fake_client.embeddings.last_kwargs["encoding_format"] == "base64"
+    assert fake_client.embeddings.last_kwargs["user"] == "tester"
+    assert fake_client.embeddings.last_kwargs["extra_body"] == {
+        "metadata": {"source": "embed"}
+    }
+    assert "ignored_keys=dimensions" in caplog.text
+
+
 class _FakeRerankClient:
     def __init__(self) -> None:
         self.last_post_path: str | None = None
@@ -140,6 +179,41 @@ async def test_rerank_disables_return_documents_in_request() -> None:
     assert fake_client.last_post_body is not None
     assert fake_client.last_post_body["return_documents"] is False
     assert result == [{"index": 1, "relevance_score": 0.88, "document": "doc B"}]
+
+
+@pytest.mark.asyncio
+async def test_rerank_passes_request_params_and_ignores_reserved_fields(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fake_client = _FakeRerankClient()
+    requester = RetrievalRequester(
+        get_openai_client=lambda _cfg: cast(AsyncOpenAI, fake_client),
+        response_to_dict=lambda response: cast(dict[str, Any], response),
+        get_token_counter=lambda _model: cast(TokenCounter, _DummyCounter()),
+        record_usage=lambda **_kwargs: None,
+    )
+    cfg = RerankModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="text-rerank-001",
+        queue_interval_seconds=1.0,
+        request_params={
+            "priority": "high",
+            "return_documents": True,
+            "query": "ignored",
+        },
+    )
+
+    await requester.rerank(cfg, query="hello", documents=["doc A", "doc B"], top_n=1)
+
+    assert fake_client.last_post_body is not None
+    assert fake_client.last_post_body["priority"] == "high"
+    assert fake_client.last_post_body["query"] == "hello"
+    assert fake_client.last_post_body["return_documents"] is False
+    assert (
+        "ignored_keys=query,return_documents" in caplog.text
+        or "ignored_keys=return_documents,query" in caplog.text
+    )
 
 
 @pytest.mark.asyncio

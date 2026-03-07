@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -18,6 +19,7 @@ class ModelPoolEntry:
     thinking_budget_tokens: int = 0
     thinking_include_budget: bool = True
     thinking_tool_call_compat: bool = False
+    request_params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -44,6 +46,7 @@ class ChatModelConfig:
     thinking_tool_call_compat: bool = (
         False  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
+    request_params: dict[str, Any] = field(default_factory=dict)
     pool: ModelPool | None = None  # 模型池配置
 
 
@@ -61,6 +64,7 @@ class VisionModelConfig:
     thinking_tool_call_compat: bool = (
         False  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
+    request_params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -78,6 +82,7 @@ class SecurityModelConfig:
     thinking_tool_call_compat: bool = (
         False  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
+    request_params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -91,6 +96,7 @@ class EmbeddingModelConfig:
     dimensions: int | None = None
     query_instruction: str = ""  # 查询端指令前缀（如 Qwen3-Embedding 需要）
     document_instruction: str = ""  # 文档端指令前缀（如 E5 系列需要 "passage: "）
+    request_params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -102,6 +108,7 @@ class RerankModelConfig:
     model_name: str
     queue_interval_seconds: float = 1.0
     query_instruction: str = ""  # 查询端指令前缀（如部分 rerank 模型需要）
+    request_params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -119,6 +126,7 @@ class AgentModelConfig:
     thinking_tool_call_compat: bool = (
         False  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
+    request_params: dict[str, Any] = field(default_factory=dict)
     pool: ModelPool | None = None  # 模型池配置
 
 
