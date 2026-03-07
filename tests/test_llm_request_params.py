@@ -199,10 +199,7 @@ async def test_responses_request_normalizes_tool_calls_and_usage() -> None:
             },
         }
     ]
-    assert fake_client.responses.last_kwargs["tool_choice"] == {
-        "type": "function",
-        "name": "lookup",
-    }
+    assert fake_client.responses.last_kwargs["tool_choice"] == "required"
     assert fake_client.responses.last_kwargs["metadata"] == {"source": "config"}
     assert fake_client.responses.last_kwargs["extra_body"] == {"custom_flag": "on"}
     assert "thinking" not in fake_client.responses.last_kwargs
@@ -408,10 +405,7 @@ async def test_responses_tools_and_tool_choice_use_sanitized_api_names() -> None
         },
     }
     assert api_tool_name != "lookup.weather@bj"
-    assert fake_client.responses.last_kwargs["tool_choice"] == {
-        "type": "function",
-        "name": api_tool_name,
-    }
+    assert fake_client.responses.last_kwargs["tool_choice"] == "required"
     assert result["choices"][0]["message"]["tool_calls"][0]["function"]["name"] == (
         "lookup.weather@bj"
     )

@@ -294,20 +294,25 @@ def _normalize_responses_tools(
 def _normalize_responses_tool_choice(
     tool_choice: Any,
     internal_to_api: dict[str, str],
-) -> Any:
+) -> tuple[Any, str | None]:
     if not isinstance(tool_choice, dict):
-        return tool_choice
+        return tool_choice, None
     choice_type = str(tool_choice.get("type", "")).strip().lower()
-    if choice_type == "function":
-        function = tool_choice.get("function")
-        if isinstance(function, dict):
-            name = str(function.get("name", "")).strip()
-            if name:
-                return {
-                    "type": "function",
-                    "name": internal_to_api.get(name, name),
-                }
-    return tool_choice
+    if choice_type != "function":
+        return tool_choice, None
+
+    name = ""
+    function = tool_choice.get("function")
+    if isinstance(function, dict):
+        name = str(function.get("name", "")).strip()
+    elif tool_choice.get("name") is not None:
+        name = str(tool_choice.get("name", "")).strip()
+
+    if not name:
+        return "auto", None
+
+    api_name = internal_to_api.get(name, name)
+    return "required", api_name
 
 
 def build_responses_request_body(
@@ -329,10 +334,21 @@ def build_responses_request_body(
     if reasoning is not None:
         body["reasoning"] = reasoning
     if tools:
-        body["tools"] = _normalize_responses_tools(tools, internal_to_api)
-        body["tool_choice"] = _normalize_responses_tool_choice(
+        normalized_tools = _normalize_responses_tools(tools, internal_to_api)
+        normalized_tool_choice, selected_tool_name = _normalize_responses_tool_choice(
             tool_choice, internal_to_api
         )
+        if selected_tool_name:
+            filtered_tools = [
+                tool
+                for tool in normalized_tools
+                if str(tool.get("type", "")).strip().lower() == "function"
+                and str(tool.get("name", "")).strip() == selected_tool_name
+            ]
+            if filtered_tools:
+                normalized_tools = filtered_tools
+        body["tools"] = normalized_tools
+        body["tool_choice"] = normalized_tool_choice
 
     previous_response_id = ""
     start_index = 0
