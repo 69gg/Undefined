@@ -17,7 +17,7 @@
 - 主文件：`config.toml`
 - 示例模板：`config.toml.example`
 - 启动 WebUI 时，如 `config.toml` 不存在，会自动用示例模板生成。
-- 已有 `config.toml` 想补齐新增配置项/注释时，可用 WebUI 的“同步模板”按钮，或运行 `uv run python scripts/sync_config_template.py`。
+- 已有 `config.toml` 想补齐新增配置项/注释时，可用 WebUI 的“同步模板”按钮，或运行 `python scripts/sync_config_template.py`（也支持 `uv run python scripts/sync_config_template.py`）。
 
 ### 1.2 运行时本地文件
 - `config.local.json`：运行时维护的本地管理员列表（如 `/addadmin`）。

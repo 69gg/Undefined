@@ -1,10 +1,16 @@
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
 import sys
 from pathlib import Path
 
-from Undefined.webui.utils import sync_config_file
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_SRC_DIR = _PROJECT_ROOT / "src"
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+
+from Undefined.webui.utils import sync_config_file  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:

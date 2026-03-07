@@ -9,14 +9,17 @@
 保留当前 `config.toml` 已有配置值，同时把 `config.toml.example` 中新增的配置项、默认空表和双语注释同步回来。
 
 ```bash
-# 直接写回 config.toml
+# 直接用 Python 运行
+python scripts/sync_config_template.py
+
+# 若希望复用项目虚拟环境，也可这样运行
 uv run python scripts/sync_config_template.py
 
 # 仅预览，不落盘
-uv run python scripts/sync_config_template.py --dry-run
+python scripts/sync_config_template.py --dry-run
 
 # 输出同步后的完整内容
-uv run python scripts/sync_config_template.py --stdout
+python scripts/sync_config_template.py --stdout
 ```
 
 **适用场景**：
