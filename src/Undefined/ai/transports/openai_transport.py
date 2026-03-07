@@ -250,7 +250,51 @@ def _messages_to_responses_input(
     return items
 
 
-def _normalize_responses_tool_choice(tool_choice: Any) -> Any:
+def _normalize_responses_tools(
+    tools: list[dict[str, Any]],
+    internal_to_api: dict[str, str],
+) -> list[dict[str, Any]]:
+    normalized_tools: list[dict[str, Any]] = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        tool_type = str(tool.get("type", "")).strip().lower()
+        if tool_type != "function":
+            normalized_tools.append(dict(tool))
+            continue
+
+        function = tool.get("function")
+        if not isinstance(function, dict):
+            normalized_tools.append(dict(tool))
+            continue
+
+        name = str(function.get("name", "")).strip()
+        if not name:
+            normalized_tools.append(dict(tool))
+            continue
+
+        api_name = internal_to_api.get(name, name)
+        normalized_tool: dict[str, Any] = {
+            "type": "function",
+            "name": api_name,
+        }
+        description = function.get("description")
+        if description is not None:
+            normalized_tool["description"] = description
+        parameters = function.get("parameters")
+        if parameters is not None:
+            normalized_tool["parameters"] = parameters
+        strict = function.get("strict")
+        if strict is not None:
+            normalized_tool["strict"] = strict
+        normalized_tools.append(normalized_tool)
+    return normalized_tools
+
+
+def _normalize_responses_tool_choice(
+    tool_choice: Any,
+    internal_to_api: dict[str, str],
+) -> Any:
     if not isinstance(tool_choice, dict):
         return tool_choice
     choice_type = str(tool_choice.get("type", "")).strip().lower()
@@ -259,7 +303,10 @@ def _normalize_responses_tool_choice(tool_choice: Any) -> Any:
         if isinstance(function, dict):
             name = str(function.get("name", "")).strip()
             if name:
-                return {"type": "function", "name": name}
+                return {
+                    "type": "function",
+                    "name": internal_to_api.get(name, name),
+                }
     return tool_choice
 
 
@@ -282,8 +329,10 @@ def build_responses_request_body(
     if reasoning is not None:
         body["reasoning"] = reasoning
     if tools:
-        body["tools"] = tools
-        body["tool_choice"] = _normalize_responses_tool_choice(tool_choice)
+        body["tools"] = _normalize_responses_tools(tools, internal_to_api)
+        body["tool_choice"] = _normalize_responses_tool_choice(
+            tool_choice, internal_to_api
+        )
 
     previous_response_id = ""
     start_index = 0

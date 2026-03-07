@@ -6,7 +6,7 @@ import httpx
 import pytest
 from openai import AsyncOpenAI
 
-from Undefined.ai.llm import ModelRequester
+from Undefined.ai.llm import ModelRequester, _encode_tool_name_for_api
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.config.models import ChatModelConfig
 from Undefined.token_usage_storage import TokenUsageStorage
@@ -187,6 +187,18 @@ async def test_responses_request_normalizes_tool_calls_and_usage() -> None:
     assert fake_client.responses.last_kwargs["model"] == "gpt-test"
     assert fake_client.responses.last_kwargs["max_output_tokens"] == 128
     assert fake_client.responses.last_kwargs["reasoning"] == {"effort": "low"}
+    assert fake_client.responses.last_kwargs["tools"] == [
+        {
+            "type": "function",
+            "name": "lookup",
+            "description": "lookup weather",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        }
+    ]
     assert fake_client.responses.last_kwargs["tool_choice"] == {
         "type": "function",
         "name": "lookup",
@@ -317,5 +329,91 @@ async def test_responses_transport_state_uses_previous_response_id_and_tool_outp
         "completion_tokens": 3,
         "total_tokens": 7,
     }
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_responses_tools_and_tool_choice_use_sanitized_api_names() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    expected_api_name = _encode_tool_name_for_api("lookup.weather@bj")
+    fake_client = _FakeClient(
+        responses=[
+            {
+                "id": "resp_1",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "call_id": "call_1",
+                        "name": expected_api_name,
+                        "arguments": '{"query": "weather"}',
+                    }
+                ],
+                "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5},
+            }
+        ]
+    )
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+    )
+
+    result = await requester.request(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=128,
+        call_type="chat",
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup.weather@bj",
+                    "description": "lookup weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                    },
+                },
+            }
+        ],
+        tool_choice=cast(
+            Any,
+            {"type": "function", "function": {"name": "lookup.weather@bj"}},
+        ),
+    )
+
+    assert fake_client.responses.last_kwargs is not None
+    tool_payload = fake_client.responses.last_kwargs["tools"][0]
+    api_tool_name = tool_payload["name"]
+    assert tool_payload == {
+        "type": "function",
+        "name": api_tool_name,
+        "description": "lookup weather",
+        "parameters": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+    }
+    assert api_tool_name != "lookup.weather@bj"
+    assert fake_client.responses.last_kwargs["tool_choice"] == {
+        "type": "function",
+        "name": api_tool_name,
+    }
+    assert result["choices"][0]["message"]["tool_calls"][0]["function"]["name"] == (
+        "lookup.weather@bj"
+    )
 
     await requester._http_client.aclose()
