@@ -89,6 +89,15 @@ max_tokens = 8192
 # zh: 队列发车间隔（秒）。
 # en: Queue interval (seconds).
 queue_interval_seconds = 1.0
+# zh: API 模式：传统 chat.completions 或新版 responses。
+# en: API mode: classic chat.completions or the newer responses API.
+api_mode = "chat_completions"
+# zh: 是否启用 reasoning.effort。
+# en: Enable reasoning.effort.
+reasoning_enabled = false
+# zh: reasoning.effort 档位：none / minimal / low / medium / high / xhigh。
+# en: reasoning.effort level: none / minimal / low / medium / high / xhigh.
+reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
 thinking_enabled = false
@@ -100,10 +109,10 @@ thinking_budget_tokens = 20000
 thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
-thinking_tool_call_compat = false
+thinking_tool_call_compat = true
 
-# zh: 额外请求体参数（可选），可用于 temperature、reasoning_effort 或供应商私有参数。
-# en: Extra request-body params (optional), e.g. temperature, reasoning_effort, or vendor-specific fields.
+# zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
+# en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
 [models.chat.request_params]
 
 # zh: 模型池配置（可选，支持多模型轮询/随机/用户指定）。
@@ -134,6 +143,15 @@ model_name = ""
 # zh: 队列发车间隔（秒）。
 # en: Queue interval (seconds).
 queue_interval_seconds = 1.0
+# zh: API 模式：传统 chat.completions 或新版 responses。
+# en: API mode: classic chat.completions or the newer responses API.
+api_mode = "chat_completions"
+# zh: 是否启用 reasoning.effort。
+# en: Enable reasoning.effort.
+reasoning_enabled = false
+# zh: reasoning.effort 档位：none / minimal / low / medium / high / xhigh。
+# en: reasoning.effort level: none / minimal / low / medium / high / xhigh.
+reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
 thinking_enabled = false
@@ -145,10 +163,10 @@ thinking_budget_tokens = 20000
 thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
-thinking_tool_call_compat = false
+thinking_tool_call_compat = true
 
-# zh: 额外请求体参数（可选），可用于 temperature、reasoning_effort 或供应商私有参数。
-# en: Extra request-body params (optional), e.g. temperature, reasoning_effort, or vendor-specific fields.
+# zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
+# en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
 [models.vision.request_params]
 
 # zh: 安全模型配置（用于防注入检测和注入后回复生成）。
@@ -172,6 +190,15 @@ max_tokens = 100
 # zh: 队列发车间隔（秒）。
 # en: Queue interval (seconds).
 queue_interval_seconds = 1.0
+# zh: API 模式：传统 chat.completions 或新版 responses。
+# en: API mode: classic chat.completions or the newer responses API.
+api_mode = "chat_completions"
+# zh: 是否启用 reasoning.effort。
+# en: Enable reasoning.effort.
+reasoning_enabled = false
+# zh: reasoning.effort 档位：none / minimal / low / medium / high / xhigh。
+# en: reasoning.effort level: none / minimal / low / medium / high / xhigh.
+reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
 thinking_enabled = false
@@ -183,10 +210,10 @@ thinking_budget_tokens = 0
 thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
-thinking_tool_call_compat = false
+thinking_tool_call_compat = true
 
-# zh: 额外请求体参数（可选），可用于 temperature、reasoning_effort 或供应商私有参数。
-# en: Extra request-body params (optional), e.g. temperature, reasoning_effort, or vendor-specific fields.
+# zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
+# en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
 [models.security.request_params]
 
 # zh: Agent 模型配置（用于执行 agents）。
@@ -207,6 +234,15 @@ max_tokens = 4096
 # zh: 队列发车间隔（秒）。
 # en: Queue interval (seconds).
 queue_interval_seconds = 1.0
+# zh: API 模式：传统 chat.completions 或新版 responses。
+# en: API mode: classic chat.completions or the newer responses API.
+api_mode = "chat_completions"
+# zh: 是否启用 reasoning.effort。
+# en: Enable reasoning.effort.
+reasoning_enabled = false
+# zh: reasoning.effort 档位：none / minimal / low / medium / high / xhigh。
+# en: reasoning.effort level: none / minimal / low / medium / high / xhigh.
+reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
 thinking_enabled = false
@@ -218,10 +254,10 @@ thinking_budget_tokens = 0
 thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
-thinking_tool_call_compat = false
+thinking_tool_call_compat = true
 
-# zh: 额外请求体参数（可选），可用于 temperature、reasoning_effort 或供应商私有参数。
-# en: Extra request-body params (optional), e.g. temperature, reasoning_effort, or vendor-specific fields.
+# zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
+# en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
 [models.agent.request_params]
 
 # zh: Agent 模型池配置（可选，支持多模型轮询/随机/用户指定）。
@@ -255,6 +291,15 @@ max_tokens = 4096
 # zh: 队列发车间隔（秒）。
 # en: Queue interval (seconds).
 queue_interval_seconds = 1.0
+# zh: API 模式：传统 chat.completions 或新版 responses。
+# en: API mode: classic chat.completions or the newer responses API.
+api_mode = "chat_completions"
+# zh: 是否启用 reasoning.effort。
+# en: Enable reasoning.effort.
+reasoning_enabled = false
+# zh: reasoning.effort 档位：none / minimal / low / medium / high / xhigh。
+# en: reasoning.effort level: none / minimal / low / medium / high / xhigh.
+reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
 thinking_enabled = false
@@ -266,10 +311,10 @@ thinking_budget_tokens = 0
 thinking_include_budget = true
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
-thinking_tool_call_compat = false
+thinking_tool_call_compat = true
 
-# zh: 额外请求体参数（可选），可用于 temperature、reasoning_effort 或供应商私有参数。
-# en: Extra request-body params (optional), e.g. temperature, reasoning_effort, or vendor-specific fields.
+# zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
+# en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
 [models.historian.request_params]
 
 # zh: 嵌入模型配置（知识库语义检索使用）。

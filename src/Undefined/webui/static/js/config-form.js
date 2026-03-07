@@ -219,6 +219,16 @@ function isLongText(value) {
     return typeof value === "string" && (value.length > 80 || value.includes("\n"));
 }
 
+const FIELD_SELECT_OPTIONS = {
+    api_mode: ["chat_completions", "responses"],
+    reasoning_effort: ["none", "minimal", "low", "medium", "high", "xhigh"],
+}
+
+function getFieldSelectOptions(path) {
+    const key = path.split(".").pop()
+    return FIELD_SELECT_OPTIONS[key] || null
+}
+
 function createField(path, val) {
     const group = document.createElement("div");
     group.className = "form-group";
@@ -264,8 +274,20 @@ function createField(path, val) {
         const isArray = Array.isArray(val);
         const isNumber = typeof val === "number";
         const isSecret = isSensitiveKey(path);
+        const selectOptions = getFieldSelectOptions(path);
 
-        if (isLongText(val)) {
+        if (selectOptions) {
+            input = document.createElement("select");
+            input.className = "form-control config-input";
+            input.dataset.valueType = "string";
+            selectOptions.forEach(optionValue => {
+                const option = document.createElement("option");
+                option.value = optionValue;
+                option.innerText = optionValue;
+                option.selected = String(val ?? "") === optionValue;
+                input.appendChild(option);
+            });
+        } else if (isLongText(val)) {
             input = document.createElement("textarea");
             input.className = "form-control form-textarea config-input";
             input.value = val || "";
@@ -293,7 +315,11 @@ function createField(path, val) {
 
         input.dataset.path = path;
         group.appendChild(input);
-        input.oninput = () => scheduleAutoSave();
+        if (selectOptions) {
+            input.onchange = () => autoSave();
+        } else {
+            input.oninput = () => scheduleAutoSave();
+        }
     }
     return group;
 }
@@ -732,12 +758,26 @@ function createAotEntry(path, entry) {
 function buildAotTemplate(path, arr) {
     if (arr && arr.length > 0) {
         const template = buildEmptyStructuredValue(arr[0])
-        if (AOT_PATHS.has(path) && !Object.prototype.hasOwnProperty.call(template, "request_params")) {
-            template.request_params = {}
+        if (AOT_PATHS.has(path)) {
+            if (!Object.prototype.hasOwnProperty.call(template, "request_params")) {
+                template.request_params = {}
+            }
+            if (!Object.prototype.hasOwnProperty.call(template, "api_mode")) {
+                template.api_mode = "chat_completions"
+            }
+            if (!Object.prototype.hasOwnProperty.call(template, "thinking_tool_call_compat")) {
+                template.thinking_tool_call_compat = true
+            }
+            if (!Object.prototype.hasOwnProperty.call(template, "reasoning_enabled")) {
+                template.reasoning_enabled = false
+            }
+            if (!Object.prototype.hasOwnProperty.call(template, "reasoning_effort")) {
+                template.reasoning_effort = "medium"
+            }
         }
         return template
     }
-    return { model_name: "", api_url: "", api_key: "", request_params: {} }
+    return { model_name: "", api_url: "", api_key: "", api_mode: "chat_completions", thinking_tool_call_compat: true, reasoning_enabled: false, reasoning_effort: "medium", request_params: {} }
 }
 
 function createAotWidget(path, arr) {

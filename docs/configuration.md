@@ -142,11 +142,26 @@ model_name = "gpt-4o-mini"
 | `model_name` | 模型名 |
 | `max_tokens` | 最大输出 token（vision 无此字段） |
 | `queue_interval_seconds` | 该模型请求队列发车间隔（秒） |
-| `thinking_enabled` | 是否启用思维链参数 |
+| `api_mode` | 请求模式：`chat_completions` 或 `responses` |
+| `reasoning_enabled` | 是否启用 `reasoning.effort` |
+| `reasoning_effort` | `reasoning.effort` 档位：`none` / `minimal` / `low` / `medium` / `high` / `xhigh` |
+| `thinking_enabled` | 是否启用旧式 `thinking` 参数 |
 | `thinking_budget_tokens` | thinking 预算 |
-| `thinking_include_budget` | 是否发送 budget_tokens |
-| `thinking_tool_call_compat` | Tool Calls 兼容模式（回传 reasoning_content） |
+| `thinking_include_budget` | 是否发送 `budget_tokens` |
+| `thinking_tool_call_compat` | Tool Calls 兼容模式：在多轮工具调用中回填 `reasoning_content`；默认 `true` |
 | `request_params` | 额外请求体参数（透传给模型 API，保留字段会忽略） |
+
+请求模式说明：
+- `api_mode="chat_completions"`：走 `client.chat.completions.create(...)`
+  - `thinking_enabled=true` 时发送旧式 `thinking`
+  - `reasoning_enabled=true` 时额外发送 `reasoning={ effort = ... }`
+- `api_mode="responses"`：走 `client.responses.create(...)`
+  - 仅在 `reasoning_enabled=true` 时发送 `reasoning={ effort = ... }`
+  - 旧式 `thinking_*` 不会下发到 `responses`
+
+`request_params` 说明：
+- 适合放 provider 私有请求体字段，例如 `metadata`、`temperature`、兼容网关扩展参数等。
+- 不要再通过 `request_params` 传 `reasoning` / `reasoning_effort` / `thinking`；这些现在有正式配置字段控制。
 
 兼容字段（旧配置）：
 - `models.<x>.deepseek_new_cot_support`
@@ -158,37 +173,51 @@ model_name = "gpt-4o-mini"
 默认：
 - `max_tokens=8192`
 - `queue_interval_seconds=1.0`（`<=0` 回退 `1.0`）
+- `api_mode="chat_completions"`
+- `reasoning_enabled=false`
+- `reasoning_effort="medium"`
 - `thinking_budget_tokens=20000`
+- `thinking_tool_call_compat=true`
 
 补充：
-- 可通过 `[models.chat.request_params]` 传入 `temperature`、`response_format`、`reasoning_effort` 或兼容网关私有字段。
+- 若上游只对 `/v1/responses` 识别自定义参数，可将 `api_mode` 切到 `responses`。
+- `[models.chat.request_params]` 仍可放 `temperature`、`response_format` 或兼容网关私有字段，但不再用于 `reasoning` 配置。
 
 ### 4.4.3 `[models.vision]` 视觉模型
 
 默认：
 - `queue_interval_seconds=1.0`（`<=0` 回退 `1.0`）
+- `api_mode="chat_completions"`
+- `reasoning_enabled=false`
+- `reasoning_effort="medium"`
 - `thinking_budget_tokens=20000`
+- `thinking_tool_call_compat=true`
 
 ### 4.4.4 `[models.security]` 安全模型
 
 字段：
 - 额外开关：`enabled=true`
-- 默认：`max_tokens=100`，`thinking_budget_tokens=0`
+- 默认：`max_tokens=100`、`api_mode="chat_completions"`、`reasoning_enabled=false`、`reasoning_effort="medium"`、`thinking_budget_tokens=0`、`thinking_tool_call_compat=true`
 
 关键回退逻辑：
 - 若 `api_url/api_key/model_name` 任一缺失，会自动回退为 chat 模型（并告警）。
+- 回退时会继承 chat 的 `api_mode`、`reasoning_*` 与 `request_params`；旧 `thinking_*` 仍保持安全模型自身默认值。
 
 ### 4.4.5 `[models.agent]` Agent 执行模型
 
 默认：
 - `max_tokens=4096`
 - `queue_interval_seconds=1.0`（`<=0` 回退 `1.0`）
+- `api_mode="chat_completions"`
+- `reasoning_enabled=false`
+- `reasoning_effort="medium"`
+- `thinking_tool_call_compat=true`
 
 ### 4.4.6 `[models.historian]` 史官模型
 
 - 用于认知记忆后台改写。
 - 若整个节缺失或为空：完整回退到 `models.agent`。
-- 若部分字段缺失：逐项继承 agent 配置。
+- 若部分字段缺失：逐项继承 agent 配置，包括 `api_mode`、`reasoning_*`、`thinking_*` 与 `request_params`。
 - `queue_interval_seconds<=0` 时回退到 agent 的间隔。
 
 ### 4.4.7 模型池
@@ -209,7 +238,10 @@ model_name = "gpt-4o-mini"
 
 `models` 条目支持字段：
 - `model_name`（必填）
-- `api_url`/`api_key`/`max_tokens`/`queue_interval_seconds`/`thinking_*`/`request_params`（可选，缺省继承主模型）
+- `api_url` / `api_key` / `max_tokens` / `queue_interval_seconds`
+- `api_mode` / `reasoning_enabled` / `reasoning_effort`
+- `thinking_*` / `request_params`
+- 以上可选字段缺省继承主模型
 
 `request_params` 继承规则：
 - `[[models.chat.pool.models]]` 与 `[[models.agent.pool.models]]` 的 `request_params` 会与主模型按顶层键浅合并。
@@ -246,7 +278,8 @@ model_name = "gpt-4o-mini"
 
 `request_params` 说明：
 - 仅用于**请求体**字段，不包含 `api_key`、`base_url`、`timeout`、`extra_headers` 等 client 选项。
-- 聊天类保留字段：`model`、`messages`、`max_tokens`、`tools`、`tool_choice`、`stream`、`stream_options`。
+- 聊天类（`chat_completions`）保留字段：`model`、`messages`、`max_tokens`、`tools`、`tool_choice`、`stream`、`stream_options`、`reasoning`、`reasoning_effort`。
+- 聊天类（`responses`）保留字段：`model`、`input`、`instructions`、`max_output_tokens`、`tools`、`tool_choice`、`previous_response_id`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`。
 - embedding 保留字段：`model`、`input`、`dimensions`。
 - rerank 保留字段：`model`、`query`、`documents`、`top_n`、`return_documents`。
 
@@ -638,7 +671,9 @@ model_name = "gpt-4o-mini"
 - `BOT_QQ` / `SUPERADMIN_QQ`
 - `ONEBOT_WS_URL` / `ONEBOT_TOKEN`
 - `CHAT_MODEL_API_URL` / `CHAT_MODEL_API_KEY` / `CHAT_MODEL_NAME`
+- `CHAT_MODEL_API_MODE` / `CHAT_MODEL_REASONING_ENABLED` / `CHAT_MODEL_REASONING_EFFORT`
 - `VISION_MODEL_*` / `AGENT_MODEL_*` / `SECURITY_MODEL_*`
+- 上述模型环境变量同样覆盖 `*_THINKING_ENABLED`、`*_THINKING_BUDGET_TOKENS`、`*_THINKING_TOOL_CALL_COMPAT`
 - `EMBEDDING_MODEL_*` / `RERANK_MODEL_*`
 - `SEARXNG_URL`
 - `HTTP_PROXY` / `HTTPS_PROXY`

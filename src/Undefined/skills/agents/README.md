@@ -31,11 +31,20 @@ agent_name/
 [models.agent]
 api_url = "https://api.openai.com/v1"
 api_key = "..."
-model = "gpt-4o-mini"
+model_name = "gpt-4o-mini"
 max_tokens = 4096
+api_mode = "chat_completions"
+reasoning_enabled = false
+reasoning_effort = "medium"
 thinking_enabled = false
 thinking_budget_tokens = 0
+thinking_tool_call_compat = true
 ```
+
+说明：
+- `api_mode = "chat_completions"` 时，旧 `thinking_*` 仍按原逻辑生效；若开启 `reasoning_enabled`，也会额外发送 `reasoning.effort`。
+- `api_mode = "responses"` 时，Agent 的多轮工具调用会自动使用 `previous_response_id + function_call_output` 续轮；旧 `thinking_*` 不会发到 `responses`。
+- `thinking_tool_call_compat` 默认 `true`，会把 `reasoning_content` 回填到本地消息历史，便于日志、回放和兼容读取。
 
 兼容的环境变量（会覆盖 `config.toml`）：
 
@@ -44,8 +53,12 @@ AGENT_MODEL_API_URL=
 AGENT_MODEL_API_KEY=
 AGENT_MODEL_NAME=
 AGENT_MODEL_MAX_TOKENS=4096
+AGENT_MODEL_API_MODE=chat_completions
+AGENT_MODEL_REASONING_ENABLED=false
+AGENT_MODEL_REASONING_EFFORT=medium
 AGENT_MODEL_THINKING_ENABLED=false
 AGENT_MODEL_THINKING_BUDGET_TOKENS=0
+AGENT_MODEL_THINKING_TOOL_CALL_COMPAT=true
 ```
 
 ## 介绍自动生成（推荐）

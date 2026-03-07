@@ -21,6 +21,13 @@ from openai import (
 )
 
 from Undefined.ai.parsing import extract_choices_content
+from Undefined.ai.transports import (
+    API_MODE_RESPONSES,
+    build_responses_request_body,
+    get_api_mode,
+    get_reasoning_payload,
+    normalize_responses_result,
+)
 from Undefined.ai.retrieval import RetrievalRequester
 from Undefined.ai.tokens import TokenCounter
 from Undefined.config import (
@@ -80,6 +87,26 @@ _SDK_REQUEST_OPTION_FIELDS: frozenset[str] = frozenset(
     {"extra_headers", "extra_query", "extra_body", "timeout"}
 )
 
+_RESPONSES_KNOWN_FIELDS: set[str] = {
+    "model",
+    "input",
+    "instructions",
+    "max_output_tokens",
+    "metadata",
+    "previous_response_id",
+    "reasoning",
+    "temperature",
+    "top_p",
+    "tools",
+    "tool_choice",
+    "parallel_tool_calls",
+    "stream",
+    "stream_options",
+    "text",
+    "truncation",
+    "user",
+}
+
 _CHAT_COMPLETIONS_RESERVED_FIELDS: frozenset[str] = (
     frozenset(
         {
@@ -90,6 +117,28 @@ _CHAT_COMPLETIONS_RESERVED_FIELDS: frozenset[str] = (
             "tool_choice",
             "stream",
             "stream_options",
+            "reasoning",
+            "reasoning_effort",
+        }
+    )
+    | _SDK_REQUEST_OPTION_FIELDS
+)
+
+_RESPONSES_RESERVED_FIELDS: frozenset[str] = (
+    frozenset(
+        {
+            "model",
+            "input",
+            "instructions",
+            "max_output_tokens",
+            "tools",
+            "tool_choice",
+            "previous_response_id",
+            "stream",
+            "stream_options",
+            "thinking",
+            "reasoning",
+            "reasoning_effort",
         }
     )
     | _SDK_REQUEST_OPTION_FIELDS
@@ -326,6 +375,19 @@ def _split_chat_completion_params(
     extra: dict[str, Any] = {}
     for key, value in body.items():
         if key in _CHAT_COMPLETIONS_KNOWN_FIELDS:
+            known[key] = value
+        else:
+            extra[key] = value
+    return known, extra
+
+
+def _split_responses_params(
+    body: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    known: dict[str, Any] = {}
+    extra: dict[str, Any] = {}
+    for key, value in body.items():
+        if key in _RESPONSES_KNOWN_FIELDS:
             known[key] = value
         else:
             extra[key] = value
@@ -778,9 +840,14 @@ def _build_effective_request_kwargs(
         getattr(model_config, "request_params", {}),
         overrides,
     )
+    reserved_fields = (
+        _RESPONSES_RESERVED_FIELDS
+        if get_api_mode(model_config) == API_MODE_RESPONSES
+        else _CHAT_COMPLETIONS_RESERVED_FIELDS
+    )
     allowed, ignored = split_reserved_request_params(
         merged,
-        _CHAT_COMPLETIONS_RESERVED_FIELDS,
+        reserved_fields,
     )
     _warn_ignored_request_params(
         call_type=call_type,
@@ -821,11 +888,19 @@ class ModelRequester:
         call_type: str = "chat",
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str = "auto",
+        transport_state: dict[str, Any] | None = None,
+        message_count_for_transport: int | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """发送请求到模型 API。"""
         start_time = time.perf_counter()
         cot_compat = getattr(model_config, "thinking_tool_call_compat", False)
+        api_mode = get_api_mode(model_config)
+        transport_message_count = (
+            message_count_for_transport
+            if message_count_for_transport is not None
+            else len(messages)
+        )
         messages_for_api, tool_args_fixed = _sanitize_openai_messages_tool_arguments(
             messages
         )
@@ -835,32 +910,30 @@ class ModelRequester:
                 tool_args_fixed,
                 len(messages_for_api),
             )
-        effective_kwargs = _build_effective_request_kwargs(
-            model_config,
-            call_type=call_type,
-            overrides=dict(kwargs),
-        )
-        request_body = build_request_body(
-            model_config=model_config,
-            messages=messages_for_api,
-            max_tokens=max_tokens,
-            tools=tools,
-            tool_choice=tool_choice,
-            **effective_kwargs,
-        )
 
+        tools_for_api = tools
         api_to_internal: dict[str, str] = {}
         internal_to_api: dict[str, str] = {}
-        if isinstance(request_body.get("tools"), list):
+        if isinstance(tools_for_api, list):
+            request_for_sanitize = {
+                "messages": messages_for_api,
+                "tools": list(tools_for_api),
+            }
             api_to_internal, internal_to_api = _sanitize_openai_tool_names_in_request(
-                request_body
+                request_for_sanitize
             )
+            raw_messages = request_for_sanitize.get("messages")
+            if isinstance(raw_messages, list):
+                messages_for_api = raw_messages
+            raw_tools = request_for_sanitize.get("tools")
+            if isinstance(raw_tools, list):
+                tools_for_api = raw_tools
 
-        if "tools" in request_body and isinstance(request_body.get("tools"), list):
+        if isinstance(tools_for_api, list):
             sanitized_tools, changed_count, changes = _sanitize_openai_tools(
-                request_body["tools"]
+                tools_for_api
             )
-            request_body["tools"] = sanitized_tools
+            tools_for_api = sanitized_tools
             if changed_count and logger.isEnabledFor(logging.INFO):
                 logger.info(
                     "[tools.sanitize] changed=%s total=%s truncate_enabled=%s max_desc_len=%s",
@@ -882,13 +955,30 @@ class ModelRequester:
                             change.get("new_preview"),
                         )
 
+        effective_kwargs = _build_effective_request_kwargs(
+            model_config,
+            call_type=call_type,
+            overrides=dict(kwargs),
+        )
+        request_body = build_request_body(
+            model_config=model_config,
+            messages=messages_for_api,
+            max_tokens=max_tokens,
+            tools=tools_for_api,
+            tool_choice=tool_choice,
+            internal_to_api=internal_to_api,
+            transport_state=transport_state,
+            **effective_kwargs,
+        )
+
         try:
             if cot_compat and logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
-                    "[思维链兼容] enabled=%s type=%s model=%s thinking_enabled=%s tools=%s messages=%s",
+                    "[思维链兼容] enabled=%s type=%s model=%s api_mode=%s thinking_enabled=%s tools=%s messages=%s",
                     cot_compat,
                     call_type,
                     model_config.model_name,
+                    api_mode,
                     getattr(model_config, "thinking_enabled", False),
                     bool(tools),
                     len(messages),
@@ -896,19 +986,45 @@ class ModelRequester:
 
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
-                    "[API请求] type=%s model=%s url=%s max_tokens=%s tools=%s tool_choice=%s messages=%s",
+                    "[API请求] type=%s model=%s api_mode=%s url=%s max_tokens=%s tools=%s tool_choice=%s messages=%s",
                     call_type,
                     model_config.model_name,
+                    api_mode,
                     model_config.api_url,
                     max_tokens,
-                    bool(tools),
+                    bool(tools_for_api),
                     tool_choice,
                     len(messages),
                 )
                 log_debug_json(logger, "[API请求体]", request_body)
 
-            result = await self._request_with_openai(model_config, request_body)
-            result = self._normalize_result(result)
+            raw_result = await self._request_with_openai(model_config, request_body)
+            if api_mode == API_MODE_RESPONSES:
+                result = normalize_responses_result(
+                    raw_result,
+                    api_to_internal if api_to_internal else None,
+                )
+                response_id = str(
+                    raw_result.get("id") or result.get("id") or ""
+                ).strip()
+                if response_id:
+                    choice = result.get("choices", [{}])[0]
+                    message = (
+                        choice.get("message", {}) if isinstance(choice, dict) else {}
+                    )
+                    tool_calls = (
+                        message.get("tool_calls", [])
+                        if isinstance(message, dict)
+                        else []
+                    )
+                    result["_transport_state"] = {
+                        "api_mode": api_mode,
+                        "previous_response_id": response_id,
+                        "tool_result_start_index": transport_message_count
+                        + (1 if tool_calls else 0),
+                    }
+            else:
+                result = self._normalize_result(raw_result)
             if api_to_internal:
                 result["_tool_name_map"] = {
                     "api_to_internal": api_to_internal,
@@ -1038,6 +1154,12 @@ class ModelRequester:
         self, model_config: ModelConfig, request_body: dict[str, Any]
     ) -> dict[str, Any]:
         client = self._get_openai_client_for_model(model_config)
+        if get_api_mode(model_config) == API_MODE_RESPONSES:
+            params, extra_body = _split_responses_params(request_body)
+            if extra_body:
+                params["extra_body"] = extra_body
+            response = await client.responses.create(**params)
+            return self._response_to_dict(response)
         params, extra_body = _split_chat_completion_params(request_body)
         if extra_body:
             params["extra_body"] = extra_body
@@ -1236,16 +1358,36 @@ def build_request_body(
     max_tokens: int,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: str = "auto",
+    internal_to_api: dict[str, str] | None = None,
+    transport_state: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """构建 API 请求体。"""
+    api_mode = get_api_mode(model_config)
+    extra_kwargs: dict[str, Any] = dict(kwargs)
+    reasoning_payload = get_reasoning_payload(model_config)
+
+    if api_mode == API_MODE_RESPONSES:
+        extra_kwargs.pop("thinking", None)
+        extra_kwargs.pop("reasoning", None)
+        extra_kwargs.pop("reasoning_effort", None)
+        return build_responses_request_body(
+            model_config,
+            messages,
+            max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
+            extra_kwargs=extra_kwargs,
+            internal_to_api=internal_to_api or {},
+            transport_state=transport_state,
+        )
+
     body: dict[str, Any] = {
         "model": model_config.model_name,
         "messages": messages,
         "max_tokens": max_tokens,
     }
 
-    extra_kwargs: dict[str, Any] = dict(kwargs)
     if "thinking" in extra_kwargs:
         normalized = _normalize_thinking_override(
             extra_kwargs.get("thinking"), model_config
@@ -1255,6 +1397,9 @@ def build_request_body(
         else:
             extra_kwargs["thinking"] = normalized
 
+    extra_kwargs.pop("reasoning", None)
+    extra_kwargs.pop("reasoning_effort", None)
+
     if getattr(model_config, "thinking_enabled", False):
         thinking_param: dict[str, Any] = {"type": "enabled"}
         if getattr(model_config, "thinking_include_budget", True):
@@ -1263,9 +1408,11 @@ def build_request_body(
             )
         body["thinking"] = thinking_param
 
+    if reasoning_payload is not None:
+        body["reasoning"] = reasoning_payload
+
     if tools:
         body["tools"] = tools
-        # thinking 模式不支持强制指定 tool_choice（specified），降级为 auto
         thinking_active = "thinking" in body
         if thinking_active and isinstance(tool_choice, dict):
             body["tool_choice"] = "auto"

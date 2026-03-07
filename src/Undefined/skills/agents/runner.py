@@ -102,6 +102,7 @@ async def run_agent_with_tools(
     if agent_history:
         messages.extend(agent_history)
     messages.append({"role": "user", "content": user_content})
+    transport_state: dict[str, Any] | None = None
 
     for iteration in range(1, max_iterations + 1):
         logger.debug("[Agent:%s] iteration=%s", agent_name, iteration)
@@ -113,6 +114,7 @@ async def run_agent_with_tools(
                 call_type=f"agent:{agent_name}",
                 tools=tools if tools else None,
                 tool_choice="auto",
+                transport_state=transport_state,
             )
 
             tool_name_map = (
@@ -126,6 +128,13 @@ async def run_agent_with_tools(
                         str(key): str(value)
                         for key, value in raw_api_to_internal.items()
                     }
+
+            next_transport_state = (
+                result.get("_transport_state") if isinstance(result, dict) else None
+            )
+            transport_state = (
+                next_transport_state if isinstance(next_transport_state, dict) else None
+            )
 
             choice: dict[str, Any] = result.get("choices", [{}])[0]
             message: dict[str, Any] = choice.get("message", {})

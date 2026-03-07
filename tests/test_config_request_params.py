@@ -10,7 +10,9 @@ def _load_config(path: Path, text: str) -> Config:
     return Config.load(path, strict=False)
 
 
-def test_model_request_params_load_and_inherit(tmp_path: Path) -> None:
+def test_model_request_params_load_inherit_and_new_transport_fields(
+    tmp_path: Path,
+) -> None:
     cfg = _load_config(
         tmp_path / "config.toml",
         """
@@ -21,6 +23,9 @@ ws_url = "ws://127.0.0.1:3001"
 api_url = "https://api.openai.com/v1"
 api_key = "sk-chat"
 model_name = "gpt-chat"
+api_mode = "responses"
+reasoning_enabled = true
+reasoning_effort = "high"
 
 [models.chat.request_params]
 temperature = 0.2
@@ -34,6 +39,9 @@ strategy = "round_robin"
 model_name = "gpt-chat-b"
 api_url = "https://pool.example/v1"
 api_key = "sk-pool"
+api_mode = "chat_completions"
+reasoning_enabled = false
+reasoning_effort = "low"
 
 [models.chat.pool.models.request_params]
 temperature = 0.6
@@ -43,6 +51,9 @@ provider = { name = "pool" }
 api_url = "https://api.openai.com/v1"
 api_key = "sk-agent"
 model_name = "gpt-agent"
+api_mode = "responses"
+reasoning_enabled = true
+reasoning_effort = "minimal"
 
 [models.agent.request_params]
 temperature = 0.3
@@ -51,6 +62,8 @@ response_format = { type = "json_object" }
 
 [models.historian]
 model_name = "gpt-historian"
+api_mode = "chat_completions"
+reasoning_effort = "xhigh"
 
 [models.historian.request_params]
 temperature = 0.1
@@ -75,22 +88,47 @@ priority = "high"
 """,
     )
 
+    assert cfg.chat_model.api_mode == "responses"
+    assert cfg.chat_model.reasoning_enabled is True
+    assert cfg.chat_model.reasoning_effort == "high"
+    assert cfg.chat_model.thinking_tool_call_compat is True
     assert cfg.chat_model.request_params == {
         "temperature": 0.2,
         "metadata": {"source": "chat"},
     }
+
     assert cfg.chat_model.pool is not None
+    assert cfg.chat_model.pool.models[0].api_mode == "chat_completions"
+    assert cfg.chat_model.pool.models[0].reasoning_enabled is False
+    assert cfg.chat_model.pool.models[0].reasoning_effort == "low"
+    assert cfg.chat_model.pool.models[0].thinking_tool_call_compat is True
     assert cfg.chat_model.pool.models[0].request_params == {
         "temperature": 0.6,
         "metadata": {"source": "chat"},
         "provider": {"name": "pool"},
     }
+
+    assert cfg.security_model.api_mode == cfg.chat_model.api_mode
+    assert cfg.security_model.reasoning_enabled == cfg.chat_model.reasoning_enabled
+    assert cfg.security_model.reasoning_effort == cfg.chat_model.reasoning_effort
+    assert cfg.security_model.thinking_tool_call_compat is True
     assert cfg.security_model.request_params == cfg.chat_model.request_params
+
+    assert cfg.agent_model.api_mode == "responses"
+    assert cfg.agent_model.reasoning_enabled is True
+    assert cfg.agent_model.reasoning_effort == "minimal"
+    assert cfg.agent_model.thinking_tool_call_compat is True
+
+    assert cfg.historian_model.api_mode == "chat_completions"
+    assert cfg.historian_model.reasoning_enabled is True
+    assert cfg.historian_model.reasoning_effort == "xhigh"
+    assert cfg.historian_model.thinking_tool_call_compat is True
     assert cfg.historian_model.request_params == {
         "temperature": 0.1,
         "metadata": {"source": "historian"},
         "response_format": {"type": "json_object"},
     }
+
     assert cfg.embedding_model.request_params == {
         "encoding_format": "base64",
         "metadata": {"source": "embed"},

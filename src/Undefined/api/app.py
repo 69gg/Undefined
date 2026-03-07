@@ -523,7 +523,13 @@ class RuntimeAPIServer:
                 models_info[label] = {
                     "model_name": getattr(mcfg, "model_name", ""),
                     "api_url": _mask_url(getattr(mcfg, "api_url", "")),
+                    "api_mode": getattr(mcfg, "api_mode", "chat_completions"),
                     "thinking_enabled": getattr(mcfg, "thinking_enabled", False),
+                    "thinking_tool_call_compat": getattr(
+                        mcfg, "thinking_tool_call_compat", True
+                    ),
+                    "reasoning_enabled": getattr(mcfg, "reasoning_enabled", False),
+                    "reasoning_effort": getattr(mcfg, "reasoning_effort", "medium"),
                 }
         for label in ("embedding_model", "rerank_model"):
             mcfg = getattr(cfg, label, None)

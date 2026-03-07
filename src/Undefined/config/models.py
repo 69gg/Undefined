@@ -15,10 +15,13 @@ class ModelPoolEntry:
     model_name: str
     max_tokens: int
     queue_interval_seconds: float = 1.0
+    api_mode: str = "chat_completions"
     thinking_enabled: bool = False
     thinking_budget_tokens: int = 0
     thinking_include_budget: bool = True
-    thinking_tool_call_compat: bool = False
+    thinking_tool_call_compat: bool = True
+    reasoning_enabled: bool = False
+    reasoning_effort: str = "medium"
     request_params: dict[str, Any] = field(default_factory=dict)
 
 
@@ -40,12 +43,15 @@ class ChatModelConfig:
     model_name: str
     max_tokens: int
     queue_interval_seconds: float = 1.0
+    api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     thinking_tool_call_compat: bool = (
-        False  # 思维链 + 工具调用兼容（回传 reasoning_content）
+        True  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
+    reasoning_enabled: bool = False  # 是否启用 reasoning.effort
+    reasoning_effort: str = "medium"  # reasoning effort 档位
     request_params: dict[str, Any] = field(default_factory=dict)
     pool: ModelPool | None = None  # 模型池配置
 
@@ -58,12 +64,15 @@ class VisionModelConfig:
     api_key: str
     model_name: str
     queue_interval_seconds: float = 1.0
+    api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     thinking_tool_call_compat: bool = (
-        False  # 思维链 + 工具调用兼容（回传 reasoning_content）
+        True  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
+    reasoning_enabled: bool = False  # 是否启用 reasoning.effort
+    reasoning_effort: str = "medium"  # reasoning effort 档位
     request_params: dict[str, Any] = field(default_factory=dict)
 
 
@@ -76,12 +85,15 @@ class SecurityModelConfig:
     model_name: str
     max_tokens: int
     queue_interval_seconds: float = 1.0
+    api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 0  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     thinking_tool_call_compat: bool = (
-        False  # 思维链 + 工具调用兼容（回传 reasoning_content）
+        True  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
+    reasoning_enabled: bool = False  # 是否启用 reasoning.effort
+    reasoning_effort: str = "medium"  # reasoning effort 档位
     request_params: dict[str, Any] = field(default_factory=dict)
 
 
@@ -120,12 +132,15 @@ class AgentModelConfig:
     model_name: str
     max_tokens: int = 4096
     queue_interval_seconds: float = 1.0
+    api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 0  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     thinking_tool_call_compat: bool = (
-        False  # 思维链 + 工具调用兼容（回传 reasoning_content）
+        True  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
+    reasoning_enabled: bool = False  # 是否启用 reasoning.effort
+    reasoning_effort: str = "medium"  # reasoning effort 档位
     request_params: dict[str, Any] = field(default_factory=dict)
     pool: ModelPool | None = None  # 模型池配置
 

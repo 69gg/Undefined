@@ -8,6 +8,7 @@ from Undefined.rate_limit import RateLimiter
 from Undefined.injection_response_agent import InjectionResponseAgent
 from Undefined.token_usage_storage import TokenUsageStorage
 from Undefined.ai.llm import ModelRequester
+from Undefined.ai.transports import API_MODE_CHAT_COMPLETIONS, get_api_mode
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.utils.resources import read_text_resource
 from Undefined.utils.xml import escape_xml_text, escape_xml_attr
@@ -103,7 +104,10 @@ class SecurityService:
             # 使用安全模型配置进行注入检测
             security_config = self.config.security_model
             request_kwargs: dict[str, Any] = {}
-            if not security_config.thinking_enabled:
+            if (
+                get_api_mode(security_config) == API_MODE_CHAT_COMPLETIONS
+                and not security_config.thinking_enabled
+            ):
                 request_kwargs["thinking"] = {"enabled": False, "budget_tokens": 0}
 
             result = await self._requester.request(

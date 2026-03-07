@@ -69,6 +69,10 @@ enabled = true
 model_name = "gpt-5"
 api_url = "https://api.openai.com/v1"
 api_key = "sk-a"
+api_mode = "responses"
+thinking_tool_call_compat = true
+reasoning_enabled = true
+reasoning_effort = "high"
 
 [models.chat.pool.models.request_params]
 temperature = 0.7
@@ -84,6 +88,10 @@ name = "beta"
 """
         data = _roundtrip(src)
         model = data["models"]["chat"]["pool"]["models"][0]
+        assert model["api_mode"] == "responses"
+        assert model["thinking_tool_call_compat"] is True
+        assert model["reasoning_enabled"] is True
+        assert model["reasoning_effort"] == "high"
         params = model["request_params"]
         assert params["temperature"] == 0.7
         assert params["metadata"]["source"] == "webui"
