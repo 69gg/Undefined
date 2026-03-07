@@ -94,7 +94,7 @@ def _stringify_content(value: Any) -> str:
 
 def _content_to_response_parts(content: Any) -> list[dict[str, Any]]:
     if isinstance(content, str):
-        return [{"type": "input_text", "text": content}]
+        return [{"type": "input_text", "text": content}] if content else []
     if not isinstance(content, list):
         text = _stringify_content(content)
         return [{"type": "input_text", "text": text}] if text else []
@@ -360,10 +360,12 @@ def build_responses_request_body(
 
     previous_response_id = ""
     start_index = 0
+    stateless_replay = False
     if isinstance(transport_state, dict):
         previous_response_id = str(
             transport_state.get("previous_response_id") or ""
         ).strip()
+        stateless_replay = bool(transport_state.get("stateless_replay"))
         try:
             start_index = int(transport_state.get("tool_result_start_index") or 0)
         except Exception:
@@ -371,7 +373,7 @@ def build_responses_request_body(
         if start_index < 0:
             start_index = 0
 
-    if previous_response_id:
+    if previous_response_id and not stateless_replay:
         body["previous_response_id"] = previous_response_id
         body["input"] = _messages_to_responses_input(
             messages[start_index:], internal_to_api, include_system=True

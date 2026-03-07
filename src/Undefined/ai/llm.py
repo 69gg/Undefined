@@ -155,6 +155,10 @@ _THINKING_KEYS: tuple[str, ...] = (
 
 _DEFAULT_TOOLS_DESCRIPTION_MAX_LEN = 1024
 _TOOLS_PARAM_INDEX_RE = re.compile(r"Tools\[(\d+)\]", re.IGNORECASE)
+_RESPONSES_MISSING_TOOL_CALL_OUTPUT_RE = re.compile(
+    r"no tool call found for function call output with call_id",
+    re.IGNORECASE,
+)
 _DEFAULT_TOOLS_DESCRIPTION_PREVIEW_LEN = 160
 
 _DEFAULT_TOOL_NAME_DOT_DELIMITER = "-_-"
@@ -225,6 +229,32 @@ def _encode_tool_name_for_api(tool_name: str) -> str:
             encoded = "tool" + suffix
 
     return encoded
+
+
+def _responses_should_fallback_to_stateless_replay(
+    exc: APIStatusError,
+    request_body: dict[str, Any],
+    *,
+    stateless_replay: bool,
+) -> bool:
+    if stateless_replay or not request_body.get("previous_response_id"):
+        return False
+    input_items = request_body.get("input")
+    if not isinstance(input_items, list) or not any(
+        isinstance(item, dict) and item.get("type") == "function_call_output"
+        for item in input_items
+    ):
+        return False
+    if exc.status_code != 400 or not isinstance(exc.body, dict):
+        return False
+    error = exc.body.get("error")
+    if not isinstance(error, dict):
+        return False
+    message = str(error.get("message", "")).strip()
+    param = str(error.get("param", "")).strip().lower()
+    return param == "input" and bool(
+        _RESPONSES_MISSING_TOOL_CALL_OUTPUT_RE.search(message)
+    )
 
 
 def _sanitize_openai_tool_names_in_request(
@@ -960,6 +990,11 @@ class ModelRequester:
             call_type=call_type,
             overrides=dict(kwargs),
         )
+        responses_stateless_replay = bool(
+            isinstance(transport_state, dict)
+            and transport_state.get("stateless_replay")
+        )
+        effective_transport_state = transport_state
         request_body = build_request_body(
             model_config=model_config,
             messages=messages_for_api,
@@ -967,7 +1002,7 @@ class ModelRequester:
             tools=tools_for_api,
             tool_choice=tool_choice,
             internal_to_api=internal_to_api,
-            transport_state=transport_state,
+            transport_state=effective_transport_state,
             **effective_kwargs,
         )
 
@@ -998,7 +1033,45 @@ class ModelRequester:
                 )
                 log_debug_json(logger, "[API请求体]", request_body)
 
-            raw_result = await self._request_with_openai(model_config, request_body)
+            try:
+                raw_result = await self._request_with_openai(model_config, request_body)
+            except APIStatusError as exc:
+                if (
+                    api_mode == API_MODE_RESPONSES
+                    and _responses_should_fallback_to_stateless_replay(
+                        exc,
+                        request_body,
+                        stateless_replay=responses_stateless_replay,
+                    )
+                ):
+                    logger.warning(
+                        "[responses.compat] previous_response_id 续轮失败，自动降级为 stateless replay: model=%s call_type=%s previous_response_id=%s",
+                        model_config.model_name,
+                        call_type,
+                        request_body.get("previous_response_id", ""),
+                    )
+                    effective_transport_state = dict(effective_transport_state or {})
+                    effective_transport_state["stateless_replay"] = True
+                    responses_stateless_replay = True
+                    request_body = build_request_body(
+                        model_config=model_config,
+                        messages=messages_for_api,
+                        max_tokens=max_tokens,
+                        tools=tools_for_api,
+                        tool_choice=tool_choice,
+                        internal_to_api=internal_to_api,
+                        transport_state=effective_transport_state,
+                        **effective_kwargs,
+                    )
+                    if logger.isEnabledFor(logging.DEBUG):
+                        log_debug_json(
+                            logger, "[API请求体][stateless replay]", request_body
+                        )
+                    raw_result = await self._request_with_openai(
+                        model_config, request_body
+                    )
+                else:
+                    raise
             if api_mode == API_MODE_RESPONSES:
                 result = normalize_responses_result(
                     raw_result,
@@ -1023,6 +1096,8 @@ class ModelRequester:
                         "tool_result_start_index": transport_message_count
                         + (1 if tool_calls else 0),
                     }
+                    if responses_stateless_replay:
+                        result["_transport_state"]["stateless_replay"] = True
             else:
                 result = self._normalize_result(raw_result)
             if api_to_internal:

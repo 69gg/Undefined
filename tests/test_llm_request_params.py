@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import httpx
 import pytest
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 
 from Undefined.ai.llm import ModelRequester, _encode_tool_name_for_api
 from Undefined.ai.parsing import extract_choices_content
@@ -35,7 +35,7 @@ class _FakeChatCompletionsAPI:
 
 
 class _FakeResponsesAPI:
-    def __init__(self, responses: list[dict[str, Any]] | None = None) -> None:
+    def __init__(self, responses: list[Any] | None = None) -> None:
         self.last_kwargs: dict[str, Any] | None = None
         self.calls: list[dict[str, Any]] = []
         self._responses = list(responses or [])
@@ -45,7 +45,16 @@ class _FakeResponsesAPI:
         self.calls.append(dict(kwargs))
         if not self._responses:
             raise AssertionError("fake responses exhausted")
-        return self._responses.pop(0)
+        item = self._responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return cast(dict[str, Any], item)
+
+
+def _make_bad_request_error(message: str, body: dict[str, Any]) -> BadRequestError:
+    request = httpx.Request("POST", "https://api.example.com/v1/responses")
+    response = httpx.Response(400, request=request)
+    return BadRequestError(message, response=response, body=body)
 
 
 class _FakeClient:
@@ -387,7 +396,7 @@ async def test_responses_transport_state_uses_previous_response_id_and_tool_outp
         tools=tools,
     )
     first_tool_calls = first["choices"][0]["message"]["tool_calls"]
-    messages = [
+    messages: list[dict[str, Any]] = [
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "", "tool_calls": first_tool_calls},
         {"role": "tool", "tool_call_id": "call_1", "content": "done"},
@@ -416,6 +425,141 @@ async def test_responses_transport_state_uses_previous_response_id_and_tool_outp
         "prompt_tokens": 4,
         "completion_tokens": 3,
         "total_tokens": 7,
+    }
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_responses_followup_falls_back_to_stateless_replay_on_missing_call_id() -> (
+    None
+):
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeClient(
+        responses=cast(
+            list[dict[str, Any]],
+            [
+                _make_bad_request_error(
+                    "No tool call found for function call output with call_id call_1.",
+                    {
+                        "error": {
+                            "message": "No tool call found for function call output with call_id call_1.",
+                            "type": "invalid_request_error",
+                            "param": "input",
+                            "code": None,
+                        }
+                    },
+                ),
+                {
+                    "id": "resp_2",
+                    "output": [
+                        {
+                            "type": "message",
+                            "id": "msg_1",
+                            "role": "assistant",
+                            "status": "completed",
+                            "content": [{"type": "output_text", "text": "all done"}],
+                        }
+                    ],
+                    "usage": {"input_tokens": 6, "output_tokens": 3, "total_tokens": 9},
+                },
+            ],
+        ),
+    )
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+    )
+    messages: list[dict[str, Any]] = [
+        {"role": "user", "content": "hello"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "lookup",
+                        "arguments": '{"query": "weather"}',
+                    },
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "done"},
+    ]
+
+    result = await requester.request(
+        model_config=cfg,
+        messages=messages,
+        max_tokens=128,
+        call_type="chat",
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "description": "lookup weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                    },
+                },
+            }
+        ],
+        transport_state={
+            "api_mode": "responses",
+            "previous_response_id": "resp_1",
+            "tool_result_start_index": 2,
+        },
+        message_count_for_transport=len(messages),
+    )
+
+    assert fake_client.responses.calls[0]["previous_response_id"] == "resp_1"
+    assert fake_client.responses.calls[0]["input"] == [
+        {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "done",
+        }
+    ]
+    assert "previous_response_id" not in fake_client.responses.calls[1]
+    replay_input = fake_client.responses.calls[1]["input"]
+    assert replay_input[0] == {
+        "type": "message",
+        "role": "user",
+        "content": [{"type": "input_text", "text": "hello"}],
+    }
+    assert replay_input[1]["type"] == "function_call"
+    assert replay_input[1]["call_id"] == "call_1"
+    assert replay_input[1]["name"] == "lookup"
+    assert replay_input[1]["arguments"] in {
+        '{"query": "weather"}',
+        '{"query":"weather"}',
+    }
+    assert replay_input[2] == {
+        "type": "function_call_output",
+        "call_id": "call_1",
+        "output": "done",
+    }
+    assert extract_choices_content(result) == "all done"
+    assert result["_transport_state"] == {
+        "api_mode": "responses",
+        "previous_response_id": "resp_2",
+        "tool_result_start_index": 3,
+        "stateless_replay": True,
     }
 
     await requester._http_client.aclose()
