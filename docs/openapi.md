@@ -79,7 +79,7 @@ curl http://127.0.0.1:8788/openapi.json
 | `cognitive` | `object` | 认知服务（`enabled`、`queue`） |
 | `api` | `object` | Runtime API 配置（`enabled`、`host`、`port`、`openapi_enabled`） |
 | `skills` | `object` | 技能统计，包含 `tools`、`agents`、`anthropic_skills` 三个子对象 |
-| `models` | `object` | 模型配置；聊天类模型包含 `model_name`、脱敏 `api_url`、`api_mode`、`thinking_enabled`、`thinking_tool_call_compat`、`responses_tool_choice_compat`、`reasoning_enabled`、`reasoning_effort` |
+| `models` | `object` | 模型配置；聊天类模型包含 `model_name`、脱敏 `api_url`、`api_mode`、`thinking_enabled`、`thinking_tool_call_compat`、`responses_tool_choice_compat`、`responses_force_stateless_replay`、`reasoning_enabled`、`reasoning_effort` |
 
 `skills` 子对象结构：
 
@@ -104,6 +104,7 @@ curl http://127.0.0.1:8788/openapi.json
     "thinking_enabled": false,
     "thinking_tool_call_compat": true,
     "responses_tool_choice_compat": false,
+    "responses_force_stateless_replay": false,
     "reasoning_enabled": true,
     "reasoning_effort": "high"
   },
@@ -111,7 +112,7 @@ curl http://127.0.0.1:8788/openapi.json
 }
 ```
 
-说明：`responses_tool_choice_compat` 通常保持 `false`；仅建议在 `responses` 请求默认配置下仍返回 `500` 时再尝试开启。当前已知 `new-api v0.11.4-alpha.3` 存在该兼容问题。
+说明：`responses_tool_choice_compat` 与 `responses_force_stateless_replay` 通常都保持 `false`；仅建议在 `responses` 请求默认配置下仍返回 `500`，且怀疑上游不兼容状态续轮时再尝试开启。当前已知 `new-api v0.11.4-alpha.3` 存在该兼容问题。
 
 #### 外部探针响应字段
 

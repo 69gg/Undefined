@@ -991,10 +991,17 @@ class ModelRequester:
             overrides=dict(kwargs),
         )
         responses_stateless_replay = bool(
+            getattr(model_config, "responses_force_stateless_replay", False)
+        ) or bool(
             isinstance(transport_state, dict)
             and transport_state.get("stateless_replay")
         )
-        effective_transport_state = transport_state
+        effective_transport_state: dict[str, Any] | None
+        if responses_stateless_replay:
+            effective_transport_state = dict(transport_state or {})
+            effective_transport_state["stateless_replay"] = True
+        else:
+            effective_transport_state = transport_state
         request_body = build_request_body(
             model_config=model_config,
             messages=messages_for_api,

@@ -332,6 +332,22 @@ def _resolve_responses_tool_choice_compat(
     )
 
 
+def _resolve_responses_force_stateless_replay(
+    data: dict[str, Any],
+    model_name: str,
+    env_key: str,
+    default: bool = False,
+) -> bool:
+    return _coerce_bool(
+        _get_value(
+            data,
+            ("models", model_name, "responses_force_stateless_replay"),
+            env_key,
+        ),
+        default,
+    )
+
+
 def load_local_admins() -> list[int]:
     """从本地配置文件加载动态管理员列表"""
     if not LOCAL_CONFIG_PATH.exists():
@@ -1579,6 +1595,10 @@ class Config:
                         item.get("responses_tool_choice_compat"),
                         primary_config.responses_tool_choice_compat,
                     ),
+                    responses_force_stateless_replay=_coerce_bool(
+                        item.get("responses_force_stateless_replay"),
+                        primary_config.responses_force_stateless_replay,
+                    ),
                     reasoning_enabled=_coerce_bool(
                         item.get("reasoning_enabled"),
                         primary_config.reasoning_enabled,
@@ -1696,6 +1716,9 @@ class Config:
         responses_tool_choice_compat = _resolve_responses_tool_choice_compat(
             data, "chat", "CHAT_MODEL_RESPONSES_TOOL_CHOICE_COMPAT"
         )
+        responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
+            data, "chat", "CHAT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+        )
         reasoning_enabled = _coerce_bool(
             _get_value(
                 data,
@@ -1752,6 +1775,7 @@ class Config:
             thinking_include_budget=thinking_include_budget,
             thinking_tool_call_compat=thinking_tool_call_compat,
             responses_tool_choice_compat=responses_tool_choice_compat,
+            responses_force_stateless_replay=responses_force_stateless_replay,
             reasoning_enabled=reasoning_enabled,
             reasoning_effort=reasoning_effort,
             request_params=_get_model_request_params(data, "chat"),
@@ -1783,6 +1807,9 @@ class Config:
         api_mode = _resolve_api_mode(data, "vision", "VISION_MODEL_API_MODE")
         responses_tool_choice_compat = _resolve_responses_tool_choice_compat(
             data, "vision", "VISION_MODEL_RESPONSES_TOOL_CHOICE_COMPAT"
+        )
+        responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
+            data, "vision", "VISION_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
         )
         reasoning_enabled = _coerce_bool(
             _get_value(
@@ -1840,6 +1867,7 @@ class Config:
             thinking_include_budget=thinking_include_budget,
             thinking_tool_call_compat=thinking_tool_call_compat,
             responses_tool_choice_compat=responses_tool_choice_compat,
+            responses_force_stateless_replay=responses_force_stateless_replay,
             reasoning_enabled=reasoning_enabled,
             reasoning_effort=reasoning_effort,
             request_params=_get_model_request_params(data, "vision"),
@@ -1890,6 +1918,9 @@ class Config:
         api_mode = _resolve_api_mode(data, "security", "SECURITY_MODEL_API_MODE")
         responses_tool_choice_compat = _resolve_responses_tool_choice_compat(
             data, "security", "SECURITY_MODEL_RESPONSES_TOOL_CHOICE_COMPAT"
+        )
+        responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
+            data, "security", "SECURITY_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
         )
         reasoning_enabled = _coerce_bool(
             _get_value(
@@ -1942,6 +1973,7 @@ class Config:
                 thinking_include_budget=thinking_include_budget,
                 thinking_tool_call_compat=thinking_tool_call_compat,
                 responses_tool_choice_compat=responses_tool_choice_compat,
+                responses_force_stateless_replay=responses_force_stateless_replay,
                 reasoning_enabled=reasoning_enabled,
                 reasoning_effort=reasoning_effort,
                 request_params=_get_model_request_params(data, "security"),
@@ -1960,6 +1992,7 @@ class Config:
             thinking_include_budget=True,
             thinking_tool_call_compat=chat_model.thinking_tool_call_compat,
             responses_tool_choice_compat=chat_model.responses_tool_choice_compat,
+            responses_force_stateless_replay=chat_model.responses_force_stateless_replay,
             reasoning_enabled=chat_model.reasoning_enabled,
             reasoning_effort=chat_model.reasoning_effort,
             request_params=merge_request_params(chat_model.request_params),
@@ -1989,6 +2022,9 @@ class Config:
         api_mode = _resolve_api_mode(data, "agent", "AGENT_MODEL_API_MODE")
         responses_tool_choice_compat = _resolve_responses_tool_choice_compat(
             data, "agent", "AGENT_MODEL_RESPONSES_TOOL_CHOICE_COMPAT"
+        )
+        responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
+            data, "agent", "AGENT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
         )
         reasoning_enabled = _coerce_bool(
             _get_value(
@@ -2046,6 +2082,7 @@ class Config:
             thinking_include_budget=thinking_include_budget,
             thinking_tool_call_compat=thinking_tool_call_compat,
             responses_tool_choice_compat=responses_tool_choice_compat,
+            responses_force_stateless_replay=responses_force_stateless_replay,
             reasoning_enabled=reasoning_enabled,
             reasoning_effort=reasoning_effort,
             request_params=_get_model_request_params(data, "agent"),
@@ -2130,7 +2167,7 @@ class Config:
         ]
         for name, cfg in configs:
             logger.debug(
-                "[配置] %s_model=%s api_url=%s api_key_set=%s api_mode=%s thinking=%s reasoning=%s/%s cot_compat=%s responses_tool_choice_compat=%s",
+                "[配置] %s_model=%s api_url=%s api_key_set=%s api_mode=%s thinking=%s reasoning=%s/%s cot_compat=%s responses_tool_choice_compat=%s responses_force_stateless_replay=%s",
                 name,
                 cfg.model_name,
                 cfg.api_url,
@@ -2141,6 +2178,7 @@ class Config:
                 getattr(cfg, "reasoning_effort", "medium"),
                 getattr(cfg, "thinking_tool_call_compat", False),
                 getattr(cfg, "responses_tool_choice_compat", False),
+                getattr(cfg, "responses_force_stateless_replay", False),
             )
 
     def update_from(self, new_config: "Config") -> dict[str, tuple[Any, Any]]:
@@ -2198,6 +2236,12 @@ class Config:
             "HISTORIAN_MODEL_RESPONSES_TOOL_CHOICE_COMPAT",
             fallback.responses_tool_choice_compat,
         )
+        responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
+            {"models": {"historian": h}},
+            "historian",
+            "HISTORIAN_MODEL_RESPONSES_FORCE_STATELESS_REPLAY",
+            fallback.responses_force_stateless_replay,
+        )
         return AgentModelConfig(
             api_url=_coerce_str(h.get("api_url"), fallback.api_url),
             api_key=_coerce_str(h.get("api_key"), fallback.api_key),
@@ -2214,6 +2258,7 @@ class Config:
             thinking_include_budget=thinking_include_budget,
             thinking_tool_call_compat=thinking_tool_call_compat,
             responses_tool_choice_compat=responses_tool_choice_compat,
+            responses_force_stateless_replay=responses_force_stateless_replay,
             reasoning_enabled=_coerce_bool(
                 _get_value(
                     {"models": {"historian": h}},

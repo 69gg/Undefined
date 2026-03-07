@@ -531,6 +531,9 @@ class RuntimeAPIServer:
                     "responses_tool_choice_compat": getattr(
                         mcfg, "responses_tool_choice_compat", False
                     ),
+                    "responses_force_stateless_replay": getattr(
+                        mcfg, "responses_force_stateless_replay", False
+                    ),
                     "reasoning_enabled": getattr(mcfg, "reasoning_enabled", False),
                     "reasoning_effort": getattr(mcfg, "reasoning_effort", "medium"),
                 }

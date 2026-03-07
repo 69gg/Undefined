@@ -21,6 +21,7 @@ class ModelPoolEntry:
     thinking_include_budget: bool = True
     thinking_tool_call_compat: bool = True
     responses_tool_choice_compat: bool = False
+    responses_force_stateless_replay: bool = False
     reasoning_enabled: bool = False
     reasoning_effort: str = "medium"
     request_params: dict[str, Any] = field(default_factory=dict)
@@ -54,6 +55,7 @@ class ChatModelConfig:
     responses_tool_choice_compat: bool = (
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
     )
+    responses_force_stateless_replay: bool = False  # Responses API 续轮强制降级为 stateless replay（不使用 previous_response_id）
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位
     request_params: dict[str, Any] = field(default_factory=dict)
@@ -78,6 +80,7 @@ class VisionModelConfig:
     responses_tool_choice_compat: bool = (
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
     )
+    responses_force_stateless_replay: bool = False  # Responses API 续轮强制降级为 stateless replay（不使用 previous_response_id）
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位
     request_params: dict[str, Any] = field(default_factory=dict)
@@ -102,6 +105,7 @@ class SecurityModelConfig:
     responses_tool_choice_compat: bool = (
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
     )
+    responses_force_stateless_replay: bool = False  # Responses API 续轮强制降级为 stateless replay（不使用 previous_response_id）
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位
     request_params: dict[str, Any] = field(default_factory=dict)
@@ -152,6 +156,7 @@ class AgentModelConfig:
     responses_tool_choice_compat: bool = (
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
     )
+    responses_force_stateless_replay: bool = False  # Responses API 续轮强制降级为 stateless replay（不使用 previous_response_id）
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位
     request_params: dict[str, Any] = field(default_factory=dict)

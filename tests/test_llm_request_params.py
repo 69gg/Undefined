@@ -431,6 +431,113 @@ async def test_responses_transport_state_uses_previous_response_id_and_tool_outp
 
 
 @pytest.mark.asyncio
+async def test_responses_force_stateless_replay_skips_previous_response_id() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeClient(
+        responses=[
+            {
+                "id": "resp_2",
+                "output": [
+                    {
+                        "type": "message",
+                        "id": "msg_1",
+                        "role": "assistant",
+                        "status": "completed",
+                        "content": [{"type": "output_text", "text": "all done"}],
+                    }
+                ],
+                "usage": {"input_tokens": 6, "output_tokens": 3, "total_tokens": 9},
+            }
+        ]
+    )
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+        responses_force_stateless_replay=True,
+    )
+    messages: list[dict[str, Any]] = [
+        {"role": "user", "content": "hello"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "lookup",
+                        "arguments": '{"query": "weather"}',
+                    },
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "done"},
+    ]
+
+    result = await requester.request(
+        model_config=cfg,
+        messages=messages,
+        max_tokens=128,
+        call_type="chat",
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "description": "lookup weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                    },
+                },
+            }
+        ],
+        transport_state={
+            "api_mode": "responses",
+            "previous_response_id": "resp_1",
+            "tool_result_start_index": 2,
+        },
+        message_count_for_transport=len(messages),
+    )
+
+    assert "previous_response_id" not in fake_client.responses.calls[0]
+    replay_input = fake_client.responses.calls[0]["input"]
+    assert replay_input[0] == {
+        "type": "message",
+        "role": "user",
+        "content": [{"type": "input_text", "text": "hello"}],
+    }
+    assert replay_input[1]["type"] == "function_call"
+    assert replay_input[1]["call_id"] == "call_1"
+    assert replay_input[2] == {
+        "type": "function_call_output",
+        "call_id": "call_1",
+        "output": "done",
+    }
+    assert extract_choices_content(result) == "all done"
+    assert result["_transport_state"] == {
+        "api_mode": "responses",
+        "previous_response_id": "resp_2",
+        "tool_result_start_index": 3,
+        "stateless_replay": True,
+    }
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_responses_followup_falls_back_to_stateless_replay_on_missing_call_id() -> (
     None
 ):

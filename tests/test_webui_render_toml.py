@@ -72,6 +72,7 @@ api_key = "sk-a"
 api_mode = "responses"
 thinking_tool_call_compat = true
 responses_tool_choice_compat = true
+responses_force_stateless_replay = true
 reasoning_enabled = true
 reasoning_effort = "high"
 
@@ -92,6 +93,7 @@ name = "beta"
         assert model["api_mode"] == "responses"
         assert model["thinking_tool_call_compat"] is True
         assert model["responses_tool_choice_compat"] is True
+        assert model["responses_force_stateless_replay"] is True
         assert model["reasoning_enabled"] is True
         assert model["reasoning_effort"] == "high"
         params = model["request_params"]

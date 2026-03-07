@@ -151,6 +151,7 @@ model_name = "gpt-4o-mini"
 | `thinking_include_budget` | 是否发送 `budget_tokens` |
 | `thinking_tool_call_compat` | Tool Calls 兼容模式：在多轮工具调用中回填 `reasoning_content`；默认 `true` |
 | `responses_tool_choice_compat` | `responses` 下的 `tool_choice` 兼容开关：仅建议在默认关闭时请求仍返回 500、怀疑上游不兼容对象型 `tool_choice` 时再尝试开启；开启后降级为字符串 `"required"`；默认 `false` |
+| `responses_force_stateless_replay` | `responses` 下的续轮强制降级开关：启用后多轮工具调用始终跳过 `previous_response_id`，改为完整消息重放；默认 `false` |
 | `request_params` | 额外请求体参数（透传给模型 API，保留字段会忽略） |
 
 请求模式说明：
@@ -161,7 +162,8 @@ model_name = "gpt-4o-mini"
   - 仅在 `reasoning_enabled=true` 时发送 `reasoning={ effort = ... }`
   - 默认使用官方对象格式：`{"type":"function","name":"..."}`
   - `responses_tool_choice_compat=true` 时，会把指定函数的 `tool_choice` 降级为字符串 `"required"`，并只保留目标工具，用于兼容部分不完整代理
-  - 仅建议在默认关闭时请求仍返回 500，再尝试开启该兼容开关
+  - `responses_force_stateless_replay=true` 时，多轮工具调用会始终跳过 `previous_response_id`，直接走完整消息重放
+  - 仅建议在默认关闭时请求仍返回 500，再尝试开启这些兼容开关
   - 当前已知 `new-api v0.11.4-alpha.3` 存在这类兼容问题
   - 旧式 `thinking_*` 不会下发到 `responses`
 
@@ -185,6 +187,7 @@ model_name = "gpt-4o-mini"
 - `thinking_budget_tokens=20000`
 - `thinking_tool_call_compat=true`
 - `responses_tool_choice_compat=false`
+- `responses_force_stateless_replay=false`
 
 补充：
 - 若上游只对 `/v1/responses` 识别自定义参数，可将 `api_mode` 切到 `responses`。
@@ -200,16 +203,17 @@ model_name = "gpt-4o-mini"
 - `thinking_budget_tokens=20000`
 - `thinking_tool_call_compat=true`
 - `responses_tool_choice_compat=false`
+- `responses_force_stateless_replay=false`
 
 ### 4.4.4 `[models.security]` 安全模型
 
 字段：
 - 额外开关：`enabled=true`
-- 默认：`max_tokens=100`、`api_mode="chat_completions"`、`reasoning_enabled=false`、`reasoning_effort="medium"`、`thinking_budget_tokens=0`、`thinking_tool_call_compat=true`、`responses_tool_choice_compat=false`
+- 默认：`max_tokens=100`、`api_mode="chat_completions"`、`reasoning_enabled=false`、`reasoning_effort="medium"`、`thinking_budget_tokens=0`、`thinking_tool_call_compat=true`、`responses_tool_choice_compat=false`、`responses_force_stateless_replay=false`
 
 关键回退逻辑：
 - 若 `api_url/api_key/model_name` 任一缺失，会自动回退为 chat 模型（并告警）。
-- 回退时会继承 chat 的 `api_mode`、`reasoning_*`、`responses_tool_choice_compat` 与 `request_params`；旧 `thinking_*` 仍保持安全模型自身默认值。
+- 回退时会继承 chat 的 `api_mode`、`reasoning_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`；旧 `thinking_*` 仍保持安全模型自身默认值。
 
 ### 4.4.5 `[models.agent]` Agent 执行模型
 
@@ -221,12 +225,13 @@ model_name = "gpt-4o-mini"
 - `reasoning_effort="medium"`
 - `thinking_tool_call_compat=true`
 - `responses_tool_choice_compat=false`
+- `responses_force_stateless_replay=false`
 
 ### 4.4.6 `[models.historian]` 史官模型
 
 - 用于认知记忆后台改写。
 - 若整个节缺失或为空：完整回退到 `models.agent`。
-- 若部分字段缺失：逐项继承 agent 配置，包括 `api_mode`、`reasoning_*`、`thinking_*`、`responses_tool_choice_compat` 与 `request_params`。
+- 若部分字段缺失：逐项继承 agent 配置，包括 `api_mode`、`reasoning_*`、`thinking_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`。
 - `queue_interval_seconds<=0` 时回退到 agent 的间隔。
 
 ### 4.4.7 模型池
@@ -248,7 +253,7 @@ model_name = "gpt-4o-mini"
 `models` 条目支持字段：
 - `model_name`（必填）
 - `api_url` / `api_key` / `max_tokens` / `queue_interval_seconds`
-- `api_mode` / `reasoning_enabled` / `reasoning_effort` / `responses_tool_choice_compat`
+- `api_mode` / `reasoning_enabled` / `reasoning_effort` / `responses_tool_choice_compat` / `responses_force_stateless_replay`
 - `thinking_*` / `request_params`
 - 以上可选字段缺省继承主模型
 
@@ -288,7 +293,7 @@ model_name = "gpt-4o-mini"
 `request_params` 说明：
 - 仅用于**请求体**字段，不包含 `api_key`、`base_url`、`timeout`、`extra_headers` 等 client 选项。
 - 聊天类（`chat_completions`）保留字段：`model`、`messages`、`max_tokens`、`tools`、`tool_choice`、`stream`、`stream_options`、`reasoning`、`reasoning_effort`。
-- 聊天类（`responses`）保留字段：`model`、`input`、`instructions`、`max_output_tokens`、`tools`、`tool_choice`、`previous_response_id`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`。
+- 聊天类（`responses`）保留字段：`model`、`input`、`instructions`、`max_output_tokens`、`tools`、`tool_choice`、`previous_response_id`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`。启用 `responses_force_stateless_replay` 时会主动跳过 `previous_response_id`。
 - embedding 保留字段：`model`、`input`、`dimensions`。
 - rerank 保留字段：`model`、`query`、`documents`、`top_n`、`return_documents`。
 
@@ -680,9 +685,9 @@ model_name = "gpt-4o-mini"
 - `BOT_QQ` / `SUPERADMIN_QQ`
 - `ONEBOT_WS_URL` / `ONEBOT_TOKEN`
 - `CHAT_MODEL_API_URL` / `CHAT_MODEL_API_KEY` / `CHAT_MODEL_NAME`
-- `CHAT_MODEL_API_MODE` / `CHAT_MODEL_REASONING_ENABLED` / `CHAT_MODEL_REASONING_EFFORT` / `CHAT_MODEL_RESPONSES_TOOL_CHOICE_COMPAT`
+- `CHAT_MODEL_API_MODE` / `CHAT_MODEL_REASONING_ENABLED` / `CHAT_MODEL_REASONING_EFFORT` / `CHAT_MODEL_RESPONSES_TOOL_CHOICE_COMPAT` / `CHAT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY`
 - `VISION_MODEL_*` / `AGENT_MODEL_*` / `SECURITY_MODEL_*` / `HISTORIAN_MODEL_*`
-- 上述模型环境变量同样覆盖 `*_THINKING_ENABLED`、`*_THINKING_BUDGET_TOKENS`、`*_THINKING_TOOL_CALL_COMPAT`、`*_RESPONSES_TOOL_CHOICE_COMPAT`
+- 上述模型环境变量同样覆盖 `*_THINKING_ENABLED`、`*_THINKING_BUDGET_TOKENS`、`*_THINKING_TOOL_CALL_COMPAT`、`*_RESPONSES_TOOL_CHOICE_COMPAT`、`*_RESPONSES_FORCE_STATELESS_REPLAY`
 - `EMBEDDING_MODEL_*` / `RERANK_MODEL_*`
 - `SEARXNG_URL`
 - `HTTP_PROXY` / `HTTPS_PROXY`
