@@ -194,6 +194,21 @@ def merge_defaults(defaults: TomlData, data: TomlData) -> TomlData:
     for key, value in data.items():
         if isinstance(value, dict) and isinstance(merged.get(key), dict):
             merged[key] = merge_defaults(merged[key], value)
+        elif _is_array_of_tables(value) and _is_array_of_tables(merged.get(key)):
+            default_items = cast(list[TomlData], merged[key])
+            current_items = cast(list[TomlData], value)
+            if not default_items:
+                merged[key] = list(current_items)
+                continue
+
+            template_item = default_items[0]
+            merged[key] = [
+                merge_defaults(
+                    default_items[idx] if idx < len(default_items) else template_item,
+                    item,
+                )
+                for idx, item in enumerate(current_items)
+            ]
         else:
             merged[key] = value
     return merged

@@ -4,7 +4,8 @@ import os
 import re
 import shutil
 import tempfile
-from pathlib import Path
+import time
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,105 @@ _IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 _SAFE_LIB_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-\[\],<>=!~]*$")
 
 
+def _resolve_output_host_path(container_path: str, host_tmpdir: str) -> Path | None:
+    """将容器内 /tmp 路径映射到宿主机临时目录，并拒绝目录穿越/符号链接逃逸。"""
+    try:
+        pure_path = PurePosixPath(container_path)
+        relative = pure_path.relative_to("/tmp")
+    except (TypeError, ValueError):
+        return None
+
+    host_tmp_root = Path(host_tmpdir).resolve()
+    candidate = (host_tmp_root / relative.as_posix()).resolve(strict=False)
+
+    try:
+        candidate.relative_to(host_tmp_root)
+    except ValueError:
+        return None
+
+    return candidate
+
+
+def _build_docker_base_cmd(host_tmpdir: str, memory: str) -> list[str]:
+    return [
+        "docker",
+        "run",
+        "--rm",
+        "--memory",
+        memory,
+        "--cpus",
+        CPU_LIMIT,
+        "-v",
+        f"{host_tmpdir}:/tmp",
+    ]
+
+
+def _build_install_cmd(host_tmpdir: str, memory: str) -> list[str]:
+    cmd = _build_docker_base_cmd(host_tmpdir, memory)
+    cmd.append(DOCKER_IMAGE)
+    cmd.extend(
+        [
+            "sh",
+            "-c",
+            "python -m pip install --quiet --disable-pip-version-check "
+            "--no-cache-dir -r /tmp/_requirements.txt --target /tmp/_site_packages; "
+            "_e=$?; chmod -R a+rw /tmp 2>/dev/null; exit $_e",
+        ]
+    )
+    return cmd
+
+
+def _build_exec_cmd(
+    host_tmpdir: str,
+    memory: str,
+    *,
+    pythonpath: str | None = None,
+) -> list[str]:
+    cmd = _build_docker_base_cmd(host_tmpdir, memory)
+    cmd.extend(["--network", "none", "--read-only"])
+    if pythonpath:
+        cmd.extend(["-e", f"PYTHONPATH={pythonpath}"])
+    cmd.append(DOCKER_IMAGE)
+    cmd.extend(
+        [
+            "sh",
+            "-c",
+            "python /tmp/_script.py; _e=$?; chmod -R a+rw /tmp 2>/dev/null; exit $_e",
+        ]
+    )
+    return cmd
+
+
+async def _run_docker_command(
+    cmd: list[str],
+    *,
+    timeout: float,
+) -> tuple[int, str, str]:
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    try:
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(
+            process.communicate(), timeout=timeout
+        )
+    except asyncio.TimeoutError:
+        try:
+            process.terminate()
+            await process.wait()
+        except Exception as e:
+            logger.error("[Python解释器] 终止超时进程失败: %s", e)
+        raise
+
+    return (
+        process.returncode if process.returncode is not None else 1,
+        stdout_bytes.decode("utf-8", errors="replace"),
+        stderr_bytes.decode("utf-8", errors="replace"),
+    )
+
+
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """在 Docker 容器中执行 Python 代码，可选安装库和发送输出文件。"""
     code = args.get("code", "")
@@ -38,11 +138,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         if not _SAFE_LIB_PATTERN.match(lib):
             return f"错误: 无效的库名 '{lib}'。"
 
-    # 验证文件路径必须在 /tmp/ 下
-    for fpath in send_files:
-        if not fpath.startswith("/tmp/"):
-            return f"错误: 输出文件路径必须在 /tmp/ 目录下: '{fpath}'"
-
     has_libs = bool(libraries)
     memory = MEMORY_LIMIT_WITH_LIBS if has_libs else MEMORY_LIMIT
     timeout = TIMEOUT_WITH_LIBS if has_libs else TIMEOUT
@@ -51,46 +146,45 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     host_tmpdir = tempfile.mkdtemp(prefix="pyinterp_")
 
     try:
+        # 验证文件路径必须绑定到容器 /tmp，并且不能逃逸宿主机临时目录
+        for fpath in send_files:
+            if _resolve_output_host_path(fpath, host_tmpdir) is None:
+                return f"错误: 输出文件路径必须位于容器 /tmp 目录内: '{fpath}'"
+
         # 将代码写入脚本文件（避免 shell 引号转义问题）
         script_path = os.path.join(host_tmpdir, "_script.py")
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(code)
 
-        # 构建 docker 命令
-        cmd: list[str] = [
-            "docker",
-            "run",
-            "--rm",
-            "--memory",
-            memory,
-            "--cpus",
-            CPU_LIMIT,
-            "-v",
-            f"{host_tmpdir}:/tmp",
-        ]
+        deadline = time.monotonic() + timeout
 
         if has_libs:
-            # 需要网络下载包、需要写权限安装包
+            # 单独安装依赖，再以无网络/只读根文件系统执行用户代码。
             req_path = os.path.join(host_tmpdir, "_requirements.txt")
             with open(req_path, "w", encoding="utf-8") as f:
                 for lib in libraries:
                     f.write(lib + "\n")
-            cmd.append(DOCKER_IMAGE)
-            # pip install → 运行代码 → 修正文件权限以便宿主机清理
-            cmd.extend(
-                [
-                    "sh",
-                    "-c",
-                    "pip install --quiet -r /tmp/_requirements.txt "
-                    "&& python /tmp/_script.py; "
-                    "_e=$?; chmod -R a+rw /tmp 2>/dev/null; exit $_e",
-                ]
+            install_timeout = max(deadline - time.monotonic(), 1.0)
+            install_cmd = _build_install_cmd(host_tmpdir, memory)
+            install_code, install_stdout, install_stderr = await _run_docker_command(
+                install_cmd,
+                timeout=install_timeout,
+            )
+            if install_code != 0:
+                return (
+                    f"依赖安装失败 (退出代码: {install_code}):\n"
+                    f"{install_stderr}\n{install_stdout}"
+                )
+
+            exec_timeout = max(deadline - time.monotonic(), 1.0)
+            cmd = _build_exec_cmd(
+                host_tmpdir,
+                memory,
+                pythonpath="/tmp/_site_packages",
             )
         else:
-            # 无需网络、只读文件系统
-            cmd.extend(["--network", "none", "--read-only"])
-            cmd.append(DOCKER_IMAGE)
-            cmd.extend(["python", "/tmp/_script.py"])
+            cmd = _build_exec_cmd(host_tmpdir, memory)
+            exec_timeout = timeout
 
         logger.info(
             "[Python解释器] 开始执行, 超时: %ss, 库: %s, 输出文件: %s",
@@ -100,20 +194,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         )
         logger.debug("[Python解释器] 代码内容:\n%s", code)
 
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(), timeout=timeout
+            exit_code, response, error_output = await _run_docker_command(
+                cmd,
+                timeout=exec_timeout,
             )
-
-            exit_code = process.returncode
-            response = stdout_bytes.decode("utf-8", errors="replace")
-            error_output = stderr_bytes.decode("utf-8", errors="replace")
 
             # 构建结果
             parts: list[str] = []
@@ -135,11 +220,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             return "\n".join(parts)
 
         except asyncio.TimeoutError:
-            try:
-                process.terminate()
-                await process.wait()
-            except Exception as e:
-                logger.error("[Python解释器] 终止超时进程失败: %s", e)
             return f"错误: 代码执行超时 ({timeout}s)。"
 
     except Exception as e:
@@ -165,9 +245,12 @@ async def _send_output_files(
 
     results: list[str] = []
     for container_path in send_files:
-        # /tmp/output.png → {host_tmpdir}/output.png
-        relative = container_path.removeprefix("/tmp/")
-        host_path = os.path.join(host_tmpdir, relative)
+        resolved_host_path = _resolve_output_host_path(container_path, host_tmpdir)
+        if resolved_host_path is None:
+            results.append(f"文件路径非法: {container_path}")
+            continue
+
+        host_path = str(resolved_host_path)
 
         if not os.path.isfile(host_path):
             results.append(f"文件未找到: {container_path}")

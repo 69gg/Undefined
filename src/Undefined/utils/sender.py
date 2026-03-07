@@ -19,6 +19,22 @@ logger = logging.getLogger(__name__)
 MAX_MESSAGE_LENGTH = 4000
 
 
+def _extract_message_id(result: object) -> int | None:
+    if not isinstance(result, dict):
+        return None
+
+    message_id = result.get("message_id")
+    if message_id is None:
+        data = result.get("data")
+        if isinstance(data, dict):
+            message_id = data.get("message_id")
+
+    try:
+        return int(message_id) if message_id is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _format_size(size_bytes: int | None) -> str:
     if size_bytes is None or size_bytes < 0:
         return "未知大小"
@@ -105,8 +121,7 @@ class MessageSender:
             result = await self.onebot.send_group_message(
                 group_id, segments, mark_sent=mark_sent
             )
-            if isinstance(result, dict):
-                bot_message_id = result.get("message_id")
+            bot_message_id = _extract_message_id(result)
         else:
             bot_message_id = await self._send_chunked_group(
                 group_id, message, mark_sent=mark_sent, reply_to=reply_to
@@ -153,8 +168,8 @@ class MessageSender:
                 result = await self.onebot.send_group_message(
                     group_id, segments, mark_sent=mark_sent
                 )
-                if chunk_count == 1 and isinstance(result, dict):
-                    first_message_id = result.get("message_id")
+                if chunk_count == 1:
+                    first_message_id = _extract_message_id(result)
                 current_chunk = []
                 current_length = 0
 
@@ -171,8 +186,8 @@ class MessageSender:
             result = await self.onebot.send_group_message(
                 group_id, segments, mark_sent=mark_sent
             )
-            if chunk_count == 1 and isinstance(result, dict):
-                first_message_id = result.get("message_id")
+            if chunk_count == 1:
+                first_message_id = _extract_message_id(result)
 
         logger.info(f"[消息分段] 已完成 {chunk_count} 段消息的发送")
         return first_message_id
@@ -219,8 +234,7 @@ class MessageSender:
             result = await self.onebot.send_private_message(
                 user_id, segments, mark_sent=mark_sent
             )
-            if isinstance(result, dict):
-                bot_message_id = result.get("message_id")
+            bot_message_id = _extract_message_id(result)
         else:
             bot_message_id = await self._send_chunked_private(
                 user_id, message, mark_sent=mark_sent, reply_to=reply_to
@@ -266,8 +280,8 @@ class MessageSender:
                 result = await self.onebot.send_private_message(
                     user_id, segments, mark_sent=mark_sent
                 )
-                if chunk_count == 1 and isinstance(result, dict):
-                    first_message_id = result.get("message_id")
+                if chunk_count == 1:
+                    first_message_id = _extract_message_id(result)
                 current_chunk = []
                 current_length = 0
 
@@ -284,8 +298,8 @@ class MessageSender:
             result = await self.onebot.send_private_message(
                 user_id, segments, mark_sent=mark_sent
             )
-            if chunk_count == 1 and isinstance(result, dict):
-                first_message_id = result.get("message_id")
+            if chunk_count == 1:
+                first_message_id = _extract_message_id(result)
 
         logger.info(f"[消息分段] 已完成 {chunk_count} 段消息的发送")
         return first_message_id
