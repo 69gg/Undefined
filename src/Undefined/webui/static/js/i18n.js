@@ -210,9 +210,6 @@ const I18N = {
         "about.subtitle": "关于 Undefined 项目的作者及许可协议。",
         "about.author": "作者",
         "about.author_name": "Null (pylindex@qq.com)",
-        "about.console": "管理入口",
-        "about.console_desc":
-            "继续支持 `uv run Undefined-webui` 一键进入控制台，也可使用安装好的桌面端或 Android App 连接到同一管理服务。",
         "about.version": "版本",
         "about.license": "许可协议",
         "about.license_name": "MIT License",
@@ -443,9 +440,6 @@ const I18N = {
         "about.subtitle": "Information about authors and open source licenses.",
         "about.author": "Author",
         "about.author_name": "Null (pylindex@qq.com)",
-        "about.console": "Management Entry",
-        "about.console_desc":
-            "`uv run Undefined-webui` remains the one-command entry point, while the desktop and Android app can connect to the same management service.",
         "about.version": "Version",
         "about.license": "License",
         "about.license_name": "MIT License",

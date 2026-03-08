@@ -82,13 +82,11 @@
 
 .main-content {
   min-width: 0;
-  min-height: 0;
-  height: 100vh;
-  padding: 40px 60px;
-  overflow-y: auto;
+  min-height: 100vh;
+  padding: 20px 60px 40px;
+  overflow: visible;
   max-width: 1400px;
   width: 100%;
-  scrollbar-gutter: stable;
 }
 .main-content.chat-layout { max-width: none; }
 .main-content.chat-layout #tab-chat .runtime-card { max-width: 100%; }
@@ -128,8 +126,8 @@
 .header.sticky {
   position: sticky; top: 0; z-index: 100;
   background: var(--bg-app);
-  padding: 20px 0;
-  margin: -40px -60px 32px -60px;
+  padding: 14px 0;
+  margin: -20px -60px 24px -60px;
   padding-left: 60px; padding-right: 60px;
   border-bottom: 1px solid var(--border-color);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);

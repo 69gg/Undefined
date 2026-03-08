@@ -32,6 +32,7 @@ async def index_handler(request: web.Request) -> Response:
     query_view = str(request.query.get("view") or "").strip().lower()
     query_tab = str(request.query.get("tab") or "").strip().lower()
     query_client = str(request.query.get("client") or "").strip().lower()
+    query_return_to = str(request.query.get("return_to") or "").strip()
 
     lang = (
         query_lang
@@ -58,6 +59,7 @@ async def index_handler(request: web.Request) -> Response:
         "theme": theme,
         "initial_tab": initial_tab,
         "launcher_mode": launcher_mode,
+        "return_to": query_return_to if launcher_mode else "",
     }
     if redirect_to_config:
         request.app[REDIRECT_TO_CONFIG_ONCE_APP_KEY] = False

@@ -3,9 +3,9 @@
 }
 
 @media (max-width: 960px) {
-  .main-content { padding: 30px; }
+  .main-content { padding: 16px 30px 30px; }
   .header { flex-direction: column; align-items: flex-start; gap: 16px; }
-  .header.sticky { margin: -30px -30px 24px -30px; padding-left: 30px; padding-right: 30px; }
+  .header.sticky { margin: -16px -30px 20px -30px; padding-left: 30px; padding-right: 30px; }
   .main-content.chat-layout #tab-chat .chat-runtime-card { height: clamp(460px, calc(100vh - 220px), 760px); }
 }
 
@@ -20,7 +20,6 @@
   .mobile-nav { display: flex; }
   .landing-header, .landing-hero, .main-content { padding: 20px 16px; }
   .main-content {
-    height: auto;
     min-height: 100vh;
   }
   .header.sticky { margin: -20px -20px 20px -20px; padding-left: 20px; padding-right: 20px; }

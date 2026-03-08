@@ -33,7 +33,6 @@
             <div class="header-actions">
                 <button class="btn" data-action="toggle-lang">中文</button>
                 <button class="btn" data-action="toggle-theme">Light</button>
-                <button id="landingLogoutBtn" class="btn danger-link" data-i18n="auth.sign_out" style="display:none;">Sign Out</button>
             </div>
         </header>
         <main class="landing-hero">
@@ -153,10 +152,6 @@
             <!-- Warning Box -->
             <div id="warningBox" class="warning-banner" style="display:none;">
                 <span data-i18n="auth.default_password">默认密码仍在使用，请尽快修改 webui.password 并重启 WebUI。</span>
-            </div>
-
-            <div id="appQuickActions" class="toolbar" style="display:none; justify-content:flex-end; margin-bottom:16px;">
-                <button id="appQuickLogoutBtn" class="btn danger" data-i18n="auth.sign_out">Sign Out</button>
             </div>
 
             <!-- Login Box (Inside App) -->
@@ -557,11 +552,6 @@
                             <div style="color: var(--text-secondary);" data-i18n="about.license">License</div>
                             <div data-i18n="about.license_name">MIT License</div>
                         </div>
-                    </div>
-
-                    <div class="card">
-                        <h3 data-i18n="about.console">管理入口</h3>
-                        <p class="muted" data-i18n="about.console_desc">继续支持 `uv run Undefined-webui` 一键进入控制台，也可使用安装好的桌面端或 Android App 连接到同一管理服务。</p>
                     </div>
 
                     <div class="card">

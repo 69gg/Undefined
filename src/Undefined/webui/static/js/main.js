@@ -32,18 +32,6 @@ function refreshUI() {
 
     updateAuthPanels();
 
-    const landingLogoutBtn = get("landingLogoutBtn");
-    if (landingLogoutBtn)
-        landingLogoutBtn.style.display =
-            state.launcherMode && state.authenticated ? "inline-flex" : "none";
-
-    const appQuickActions = get("appQuickActions");
-    if (appQuickActions)
-        appQuickActions.style.display =
-            state.launcherMode && state.view === "app" && state.authenticated
-                ? "flex"
-                : "none";
-
     if (state.view !== "app" || !state.authenticated) {
         stopSystemTimer();
         stopLogStream();
@@ -92,6 +80,26 @@ function switchTab(tab) {
         typeof window.RuntimeController.onTabActivated === "function"
     ) {
         window.RuntimeController.onTabActivated(tab);
+    }
+}
+
+function canReturnToLauncher(url) {
+    try {
+        const parsed = new URL(String(url || ""));
+        const protocol = parsed.protocol.toLowerCase();
+        const hostname = parsed.hostname.toLowerCase();
+        if (protocol === "tauri:") {
+            return hostname === "localhost" || hostname === "";
+        }
+        if (!["http:", "https:"].includes(protocol)) return false;
+        return (
+            hostname === "localhost" ||
+            hostname === "127.0.0.1" ||
+            hostname === "::1" ||
+            hostname.endsWith(".localhost")
+        );
+    } catch (_error) {
+        return false;
     }
 }
 
@@ -392,6 +400,10 @@ async function init() {
         clearStoredAuthTokens();
         state.authenticated = false;
         state.view = "landing";
+        if (state.launcherMode && canReturnToLauncher(state.returnTo)) {
+            window.location.assign(state.returnTo);
+            return;
+        }
         const target = new URL(window.location.origin + "/");
         target.searchParams.set("lang", state.lang);
         target.searchParams.set("theme", state.theme);
@@ -400,10 +412,6 @@ async function init() {
     };
     get("logoutBtn").onclick = logout;
     get("mobileLogoutBtn").onclick = logout;
-    const landingLogoutBtn = get("landingLogoutBtn");
-    if (landingLogoutBtn) landingLogoutBtn.onclick = logout;
-    const appQuickLogoutBtn = get("appQuickLogoutBtn");
-    if (appQuickLogoutBtn) appQuickLogoutBtn.onclick = logout;
 
     applyTheme(
         initialState && initialState.theme ? initialState.theme : "light",

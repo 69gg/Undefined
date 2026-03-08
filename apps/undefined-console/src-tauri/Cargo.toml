@@ -1,6 +1,6 @@
 [package]
 name = "undefined_console"
-version = "0.1.0"
+version = "3.2.0"
 description = "Undefined cross-platform management console"
 authors = ["Undefined contributors"]
 license = "MIT"

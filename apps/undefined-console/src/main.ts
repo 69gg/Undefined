@@ -399,6 +399,7 @@ async function openWebui(): Promise<void> {
 	target.searchParams.set("tab", "overview");
 	target.searchParams.set("view", "app");
 	target.searchParams.set("client", "native");
+	target.searchParams.set("return_to", window.location.href);
 
 	let bootstrapAuth: AuthBootstrapPayload | null = null;
 	if (profile.password.trim()) {

@@ -110,6 +110,7 @@ const state = {
     theme: (initialState && initialState.theme) || "light",
     authenticated: false,
     launcherMode: !!(initialState && initialState.launcher_mode),
+    returnTo: (initialState && initialState.return_to) || "",
     authAccessToken:
         (bootstrapAuth && bootstrapAuth.accessToken) ||
         readStorage("undefined_auth_access_token"),
