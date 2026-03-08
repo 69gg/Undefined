@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 # Docker 执行配置
 DOCKER_IMAGE = "python:3.11-slim"
-DOCKER_USER = "65534:65534"
 MEMORY_LIMIT = "128m"
 MEMORY_LIMIT_WITH_LIBS = "512m"
 CPU_LIMIT = "0.5"
@@ -70,6 +69,10 @@ def _schedule_output_dir_cleanup(host_tmpdir: str) -> None:
     _PENDING_CLEANUP_TASKS.add(task)
 
 
+def _get_docker_user() -> str:
+    return f"{os.getuid()}:{os.getgid()}"
+
+
 def _build_docker_base_cmd(host_tmpdir: str, memory: str) -> list[str]:
     return [
         "docker",
@@ -80,7 +83,7 @@ def _build_docker_base_cmd(host_tmpdir: str, memory: str) -> list[str]:
         "--cpus",
         CPU_LIMIT,
         "--user",
-        DOCKER_USER,
+        _get_docker_user(),
         "-v",
         f"{host_tmpdir}:/tmp",
     ]

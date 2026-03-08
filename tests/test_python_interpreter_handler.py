@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -105,7 +106,7 @@ async def test_execute_with_libraries_runs_user_code_in_network_isolated_contain
     assert "python /tmp/_script.py" not in " ".join(install_cmd)
     assert "pip install" in " ".join(install_cmd)
     assert "--user" in install_cmd
-    assert python_handler.DOCKER_USER in install_cmd
+    assert f"{os.getuid()}:{os.getgid()}" in install_cmd
     assert len(script_paths) == 1
     assert not Path(script_paths[0]).exists()
 
@@ -115,7 +116,7 @@ async def test_execute_with_libraries_runs_user_code_in_network_isolated_contain
     assert "PYTHONPATH=/tmp/_site_packages" in exec_cmd
     assert "python /tmp/_script.py" in " ".join(exec_cmd)
     assert "--user" in exec_cmd
-    assert python_handler.DOCKER_USER in exec_cmd
+    assert f"{os.getuid()}:{os.getgid()}" in exec_cmd
 
 
 @pytest.mark.asyncio
