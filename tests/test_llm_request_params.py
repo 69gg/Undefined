@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from openai import AsyncOpenAI, BadRequestError
 
+from Undefined.ai.client import AIClient
 from Undefined.ai.llm import ModelRequester, _encode_tool_name_for_api
 from Undefined.ai.transports.openai_transport import normalize_responses_result
 from Undefined.ai.parsing import extract_choices_content
@@ -454,6 +457,86 @@ async def test_responses_transport_state_uses_previous_response_id_and_tool_outp
         "completion_tokens": 3,
         "total_tokens": 7,
     }
+
+
+@pytest.mark.asyncio
+async def test_ai_client_request_model_prefetch_keeps_transport_count_from_caller_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = object.__new__(AIClient)
+    requester = AsyncMock(return_value={"choices": []})
+    prefetch_mock = AsyncMock(
+        return_value=(
+            [
+                {"role": "system", "content": "【预先工具结果】\n- lookup: done"},
+                {"role": "user", "content": "hello"},
+            ],
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "lookup",
+                        "description": "lookup weather",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"query": {"type": "string"}},
+                            "required": ["query"],
+                        },
+                    },
+                }
+            ],
+        )
+    )
+    setattr(client, "_requester", SimpleNamespace(request=requester))
+    setattr(
+        client,
+        "tool_manager",
+        SimpleNamespace(maybe_merge_agent_tools=lambda _call_type, tools: tools),
+    )
+    monkeypatch.setattr(client, "_maybe_prefetch_tools", prefetch_mock)
+
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+    )
+    caller_messages: list[dict[str, Any]] = [{"role": "user", "content": "hello"}]
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "lookup",
+                "description": "lookup weather",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            },
+        }
+    ]
+
+    await AIClient.request_model(
+        client,
+        model_config=cfg,
+        messages=caller_messages,
+        max_tokens=128,
+        call_type="chat",
+        tools=tools,
+    )
+
+    prefetch_mock.assert_awaited_once_with(caller_messages, tools, "chat")
+    assert requester.await_count == 1
+    assert requester.await_args is not None
+    assert requester.await_args.kwargs["messages"] == [
+        {"role": "system", "content": "【预先工具结果】\n- lookup: done"},
+        {"role": "user", "content": "hello"},
+    ]
+    assert requester.await_args.kwargs["message_count_for_transport"] == len(
+        caller_messages
+    )
 
 
 @pytest.mark.asyncio
