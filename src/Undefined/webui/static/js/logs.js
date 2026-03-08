@@ -63,7 +63,7 @@
 
     function getLogLevels() {
         const levels = Object.keys(LOG_LEVEL_DEFS).sort(
-            (a, b) => LOG_LEVEL_DEFS[b].rank - LOG_LEVEL_DEFS[a].rank
+            (a, b) => LOG_LEVEL_DEFS[b].rank - LOG_LEVEL_DEFS[a].rank,
         );
         return ["all", ...levels];
     }

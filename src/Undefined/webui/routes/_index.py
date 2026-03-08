@@ -4,7 +4,12 @@ from aiohttp import web
 from aiohttp.web_response import Response
 
 from Undefined import __version__
-from ._shared import routes, TEMPLATE_DIR, get_settings
+from ._shared import (
+    REDIRECT_TO_CONFIG_ONCE_APP_KEY,
+    TEMPLATE_DIR,
+    get_settings,
+    routes,
+)
 
 
 @routes.get("/")
@@ -24,7 +29,7 @@ async def index_handler(request: web.Request) -> Response:
 
     lang = request.cookies.get("undefined_lang", "zh")
     theme = request.cookies.get("undefined_theme", "light")
-    redirect_to_config = bool(request.app.get("redirect_to_config_once"))
+    redirect_to_config = bool(request.app.get(REDIRECT_TO_CONFIG_ONCE_APP_KEY, False))
 
     initial_state = {
         "using_default_password": settings.using_default_password,
@@ -36,7 +41,7 @@ async def index_handler(request: web.Request) -> Response:
         "theme": theme,
     }
     if redirect_to_config:
-        request.app["redirect_to_config_once"] = False
+        request.app[REDIRECT_TO_CONFIG_ONCE_APP_KEY] = False
 
     initial_state_json = json.dumps(initial_state).replace("</", "<\\/")
     html = html.replace("__INITIAL_STATE__", initial_state_json)

@@ -5,6 +5,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from Undefined.config import load_webui_settings
 from Undefined.config.loader import CONFIG_PATH, Config
 from Undefined.utils.resources import resolve_resource_path
 
@@ -87,6 +88,45 @@ def validate_required_config() -> tuple[bool, str]:
         return True, "OK"
     except Exception as exc:
         return False, str(exc)
+
+
+def load_bootstrap_probe_data() -> dict[str, Any]:
+    source = read_config_source()
+    content = str(source.get("content") or "")
+    exists = bool(source.get("exists"))
+    toml_valid, toml_message = validate_toml(content)
+    strict_valid = False
+    strict_message = ""
+    if toml_valid:
+        strict_valid, strict_message = validate_required_config()
+
+    danger_defaults: list[str] = []
+    parsed: dict[str, Any] = {}
+    if toml_valid and content.strip():
+        try:
+            loaded = tomllib.loads(content)
+            if isinstance(loaded, dict):
+                parsed = loaded
+        except Exception:
+            parsed = {}
+
+    webui_settings = load_webui_settings()
+    if webui_settings.using_default_password:
+        danger_defaults.append("webui.password")
+    api_auth_key = str(parsed.get("api", {}).get("auth_key") or "").strip()
+    if api_auth_key == "changeme":
+        danger_defaults.append("api.auth_key")
+
+    return {
+        "config_exists": exists,
+        "config_source": source.get("source", ""),
+        "toml_valid": toml_valid,
+        "toml_message": toml_message,
+        "config_valid": strict_valid,
+        "validation_error": "" if strict_valid else strict_message,
+        "using_default_password": webui_settings.using_default_password,
+        "danger_defaults": danger_defaults,
+    }
 
 
 def load_default_data() -> TomlData:

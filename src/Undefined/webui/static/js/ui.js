@@ -1,8 +1,8 @@
 function updateI18N() {
-    document.querySelectorAll("[data-i18n]").forEach(el => {
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
         el.innerText = t(el.getAttribute("data-i18n"));
     });
-    document.querySelectorAll("[data-i18n-placeholder]").forEach(el => {
+    document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
         el.placeholder = t(el.getAttribute("data-i18n-placeholder"));
     });
     updateToggleLabels();
@@ -22,11 +22,12 @@ function updateI18N() {
 
 function updateToggleLabels() {
     const langLabel = state.lang === "zh" ? "English" : "中文";
-    document.querySelectorAll('[data-action="toggle-lang"]').forEach(btn => {
+    document.querySelectorAll('[data-action="toggle-lang"]').forEach((btn) => {
         btn.innerText = langLabel;
     });
-    const themeLabel = state.theme === "dark" ? t("theme.dark") : t("theme.light");
-    document.querySelectorAll('[data-action="toggle-theme"]').forEach(btn => {
+    const themeLabel =
+        state.theme === "dark" ? t("theme.dark") : t("theme.light");
+    document.querySelectorAll('[data-action="toggle-theme"]').forEach((btn) => {
         btn.innerText = themeLabel;
     });
 }
@@ -44,7 +45,7 @@ function updateLogFilterLabels() {
     if (!select) return;
     const current = select.value || state.logLevel;
     while (select.firstChild) select.removeChild(select.firstChild);
-    LOG_LEVELS.forEach(level => {
+    LOG_LEVELS.forEach((level) => {
         const option = document.createElement("option");
         option.value = level;
         option.textContent = t(`logs.level.${level}`);
@@ -62,7 +63,7 @@ function updateLogPauseLabel() {
 }
 
 function updateLogTabs() {
-    document.querySelectorAll(".log-tab").forEach(tab => {
+    document.querySelectorAll(".log-tab").forEach((tab) => {
         tab.classList.toggle("active", tab.dataset.logType === state.logType);
     });
 }
@@ -73,16 +74,19 @@ function updateLogFileSelect() {
     const files = state.logFiles[state.logType] || [];
     select.disabled = files.length === 0;
     while (select.firstChild) select.removeChild(select.firstChild);
-    files.forEach(file => {
+    files.forEach((file) => {
         const option = document.createElement("option");
         option.value = file.name;
-        let label = file.current ? t("logs.file.current") : t("logs.file.history");
+        let label = file.current
+            ? t("logs.file.current")
+            : t("logs.file.history");
         if (state.logType === "all") label = t("logs.file.other");
         option.textContent = `${file.name} (${label})`;
         select.appendChild(option);
     });
-    if (!state.logFile || !files.find(file => file.name === state.logFile)) {
-        state.logFile = state.logFileCurrent || (files[0] && files[0].name) || "";
+    if (!state.logFile || !files.find((file) => file.name === state.logFile)) {
+        state.logFile =
+            state.logFileCurrent || (files[0] && files[0].name) || "";
     }
     select.value = state.logFile;
     updateLogStreamEligibility();
@@ -93,7 +97,8 @@ function updateLogStreamEligibility() {
         state.logStreamEnabled = false;
         return;
     }
-    state.logStreamEnabled = !state.logFile || state.logFile === state.logFileCurrent;
+    state.logStreamEnabled =
+        !state.logFile || state.logFile === state.logFileCurrent;
 }
 
 function updateConfigStateLabel() {
@@ -124,22 +129,32 @@ function updateAuthPanels() {
 
     const landingLogin = get("landingLoginBox");
     const landingReset = get("landingPasswordResetBox");
-    if (landingLogin) landingLogin.style.display = showLanding && !usingDefault ? "block" : "none";
-    if (landingReset) landingReset.style.display = showLanding && usingDefault ? "block" : "none";
+    if (landingLogin)
+        landingLogin.style.display =
+            showLanding && !usingDefault ? "block" : "none";
+    if (landingReset)
+        landingReset.style.display =
+            showLanding && usingDefault ? "block" : "none";
 
     const appLogin = get("appLoginBox");
     const appReset = get("appPasswordResetBox");
-    if (appLogin) appLogin.style.display = showAppLogin && !usingDefault ? "block" : "none";
-    if (appReset) appReset.style.display = showAppLogin && usingDefault ? "block" : "none";
+    if (appLogin)
+        appLogin.style.display =
+            showAppLogin && !usingDefault ? "block" : "none";
+    if (appReset)
+        appReset.style.display =
+            showAppLogin && usingDefault ? "block" : "none";
 }
 
 function updateSectionToggleLabels() {
-    document.querySelectorAll(".config-card").forEach(card => {
+    document.querySelectorAll(".config-card").forEach((card) => {
         const section = card.dataset.section;
         const toggle = card.querySelector(".config-card-actions button");
         if (!toggle || !section) return;
         const collapsed = !!state.configCollapsed[section];
-        toggle.innerText = collapsed ? t("config.expand_section") : t("config.collapse_section");
+        toggle.innerText = collapsed
+            ? t("config.expand_section")
+            : t("config.collapse_section");
         toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
     });
 }
@@ -181,10 +196,15 @@ function setConfigState(mode) {
         grid.style.display = "block";
         return;
     }
-    const keyMap = { loading: "config.loading", error: "config.error", empty: "config.no_results" };
+    const keyMap = {
+        loading: "config.loading",
+        error: "config.error",
+        empty: "config.no_results",
+    };
     const key = keyMap[mode] || "common.error";
     stateEl.dataset.i18nState = key;
     stateEl.innerText = t(key);
     stateEl.style.display = "block";
-    grid.style.display = mode === "loading" || mode === "error" ? "none" : "block";
+    grid.style.display =
+        mode === "loading" || mode === "error" ? "none" : "block";
 }

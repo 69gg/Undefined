@@ -42,6 +42,11 @@
                 <p class="tagline">A high-performance, highly scalable QQ group and private chat robot based on a
                     self-developed architecture.</p>
                 <p class="muted" data-i18n="landing.subtitle">提供配置管理、日志追踪与运行控制的统一入口。</p>
+                <div class="hero-highlights">
+                    <span class="hero-highlight-pill" data-i18n="landing.highlight.quickstart">一条命令进入管理台</span>
+                    <span class="hero-highlight-pill" data-i18n="landing.highlight.remote">支持远程管理</span>
+                    <span class="hero-highlight-pill" data-i18n="landing.highlight.platforms">Web / Desktop / Android</span>
+                </div>
                 <div class="cta-row">
                     <button class="btn primary" data-action="open-app" data-tab="overview"
                         data-i18n="landing.cta">进入控制台</button>
@@ -367,6 +372,10 @@
 
                     <div class="runtime-grid">
                         <div class="card runtime-card">
+                            <div class="card-title" data-i18n="probes.section_bootstrap">引导与管理探针</div>
+                            <div id="managementBootstrapProbe" class="probe-container">--</div>
+                        </div>
+                        <div class="card runtime-card">
                             <div class="card-title" data-i18n="runtime.probe_internal">内部探针</div>
                             <div id="runtimeProbeInternal" class="probe-container">--</div>
                         </div>
@@ -548,6 +557,11 @@
                             <div style="color: var(--text-secondary);" data-i18n="about.license">License</div>
                             <div data-i18n="about.license_name">MIT License</div>
                         </div>
+                    </div>
+
+                    <div class="card">
+                        <h3 data-i18n="about.console">管理入口</h3>
+                        <p class="muted" data-i18n="about.console_desc">继续支持 `uv run Undefined-webui` 一键进入控制台，也可使用安装好的桌面端或 Android App 连接到同一管理服务。</p>
                     </div>
 
                     <div class="card">

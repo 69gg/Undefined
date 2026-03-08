@@ -4,12 +4,13 @@ async function login(pwd, statusId, buttonId) {
     s.innerText = t("auth.signing_in");
     setButtonLoading(button, true);
     try {
-        const res = await api("/api/login", {
+        const res = await api(authEndpointCandidates("login"), {
             method: "POST",
-            body: JSON.stringify({ password: pwd })
+            body: JSON.stringify({ password: pwd }),
         });
         const data = await res.json();
         if (data.success) {
+            updateAuthFromPayload(data);
             state.authenticated = true;
             await checkSession();
             refreshUI();
@@ -45,10 +46,16 @@ async function changePassword(currentId, newId, statusId, buttonId) {
     if (statusEl) statusEl.innerText = t("common.loading");
     setButtonLoading(button, true);
     try {
-        const res = await api("/api/password", {
-            method: "POST",
-            body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
-        });
+        const res = await api(
+            ["/api/v1/management/auth/password", "/api/password"],
+            {
+                method: "POST",
+                body: JSON.stringify({
+                    current_password: currentPassword,
+                    new_password: newPassword,
+                }),
+            },
+        );
         const data = await res.json();
         if (data.success) {
             if (statusEl) statusEl.innerText = t("auth.password_updated_login");
@@ -58,9 +65,10 @@ async function changePassword(currentId, newId, statusId, buttonId) {
             state.usingDefaultPassword = false;
             await login(newPassword, statusId, buttonId);
         } else {
-            const msg = data.code === "local_required"
-                ? t("auth.password_change_local")
-                : (data.error || t("auth.password_update_failed"));
+            const msg =
+                data.code === "local_required"
+                    ? t("auth.password_change_local")
+                    : data.error || t("auth.password_update_failed");
             if (statusEl) statusEl.innerText = msg;
             showToast(msg, "error", 5000);
         }
@@ -75,12 +83,17 @@ async function changePassword(currentId, newId, statusId, buttonId) {
 
 async function checkSession() {
     try {
-        const res = await api("/api/session");
+        const res = await api(authEndpointCandidates("session"));
         const data = await res.json();
+        updateAuthFromPayload(data);
         state.authenticated = data.authenticated;
         state.usingDefaultPassword = !!data.using_default_password;
+        state.capabilities = data.capabilities || state.capabilities;
         const warning = get("warningBox");
-        if (warning) warning.style.display = data.using_default_password ? "block" : "none";
+        if (warning)
+            warning.style.display = data.using_default_password
+                ? "block"
+                : "none";
         const navFooter = get("navFooter");
         if (navFooter) navFooter.innerText = data.summary || "";
         updateAuthPanels();

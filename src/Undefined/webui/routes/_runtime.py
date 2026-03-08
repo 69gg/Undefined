@@ -191,6 +191,7 @@ async def _proxy_runtime_stream(
         )
 
 
+@routes.get("/api/v1/management/runtime/meta")
 @routes.get("/api/runtime/meta")
 async def runtime_meta_handler(request: web.Request) -> Response:
     if not check_auth(request):
@@ -206,6 +207,7 @@ async def runtime_meta_handler(request: web.Request) -> Response:
     )
 
 
+@routes.get("/api/v1/management/runtime/openapi")
 @routes.get("/api/runtime/openapi")
 async def runtime_openapi_handler(request: web.Request) -> Response:
     if not check_auth(request):
@@ -216,6 +218,7 @@ async def runtime_openapi_handler(request: web.Request) -> Response:
     )
 
 
+@routes.get("/api/v1/management/runtime/probes/internal")
 @routes.get("/api/runtime/probes/internal")
 async def runtime_probe_internal_handler(request: web.Request) -> Response:
     if not check_auth(request):
@@ -223,6 +226,7 @@ async def runtime_probe_internal_handler(request: web.Request) -> Response:
     return await _proxy_runtime(method="GET", path="/api/v1/probes/internal")
 
 
+@routes.get("/api/v1/management/runtime/probes/external")
 @routes.get("/api/runtime/probes/external")
 async def runtime_probe_external_handler(request: web.Request) -> Response:
     if not check_auth(request):
@@ -230,6 +234,7 @@ async def runtime_probe_external_handler(request: web.Request) -> Response:
     return await _proxy_runtime(method="GET", path="/api/v1/probes/external")
 
 
+@routes.get("/api/v1/management/runtime/memory")
 @routes.get("/api/runtime/memory")
 async def runtime_memory_handler(request: web.Request) -> Response:
     if not check_auth(request):
@@ -241,6 +246,7 @@ async def runtime_memory_handler(request: web.Request) -> Response:
     )
 
 
+@routes.get("/api/v1/management/runtime/cognitive/events")
 @routes.get("/api/runtime/cognitive/events")
 async def runtime_cognitive_events_handler(request: web.Request) -> Response:
     if not check_auth(request):
@@ -252,6 +258,7 @@ async def runtime_cognitive_events_handler(request: web.Request) -> Response:
     )
 
 
+@routes.get("/api/v1/management/runtime/cognitive/profiles")
 @routes.get("/api/runtime/cognitive/profiles")
 async def runtime_cognitive_profiles_handler(request: web.Request) -> Response:
     if not check_auth(request):
@@ -263,6 +270,7 @@ async def runtime_cognitive_profiles_handler(request: web.Request) -> Response:
     )
 
 
+@routes.get("/api/v1/management/runtime/cognitive/profile/{entity_type}/{entity_id}")
 @routes.get("/api/runtime/cognitive/profile/{entity_type}/{entity_id}")
 async def runtime_cognitive_profile_handler(request: web.Request) -> Response:
     if not check_auth(request):
@@ -275,6 +283,7 @@ async def runtime_cognitive_profile_handler(request: web.Request) -> Response:
     )
 
 
+@routes.post("/api/v1/management/runtime/chat")
 @routes.post("/api/runtime/chat")
 async def runtime_chat_handler(request: web.Request) -> web.StreamResponse:
     if not check_auth(request):
@@ -308,6 +317,7 @@ async def runtime_chat_handler(request: web.Request) -> web.StreamResponse:
     )
 
 
+@routes.get("/api/v1/management/runtime/chat/history")
 @routes.get("/api/runtime/chat/history")
 async def runtime_chat_history_handler(request: web.Request) -> Response:
     if not check_auth(request):
@@ -319,6 +329,7 @@ async def runtime_chat_history_handler(request: web.Request) -> Response:
     )
 
 
+@routes.get("/api/v1/management/runtime/chat/image")
 @routes.get("/api/runtime/chat/image")
 async def runtime_chat_image_handler(request: web.Request) -> web.StreamResponse:
     if not check_auth(request):
@@ -332,6 +343,7 @@ async def runtime_chat_image_handler(request: web.Request) -> web.StreamResponse
     return web.FileResponse(path=image_path)
 
 
+@routes.get("/api/v1/management/runtime/chat/file")
 @routes.get("/api/runtime/chat/file")
 async def runtime_chat_file_handler(request: web.Request) -> web.StreamResponse:
     """提供 WebUI 虚拟私聊文件下载。"""

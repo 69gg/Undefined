@@ -20,6 +20,18 @@ def _truncate(text: str, *, max_chars: int = 12000) -> str:
     return text[:max_chars] + "\n... (truncated)"
 
 
+async def _run_bot_action(request: web.Request, action: str) -> Response:
+    if not check_auth(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+    bot = get_bot(request)
+    if action == "start":
+        return web.json_response(await bot.start())
+    if action == "stop":
+        return web.json_response(await bot.stop())
+    return web.json_response({"error": "Invalid action"}, status=400)
+
+
+@routes.get("/api/v1/management/status")
 @routes.get("/api/status")
 async def status_handler(request: web.Request) -> Response:
     bot = get_bot(request)
@@ -31,19 +43,23 @@ async def status_handler(request: web.Request) -> Response:
     return web.json_response(status)
 
 
+@routes.post("/api/v1/management/bot/{action}")
 @routes.post("/api/bot/{action}")
 async def bot_action_handler(request: web.Request) -> Response:
-    if not check_auth(request):
-        return web.json_response({"error": "Unauthorized"}, status=401)
-    action = request.match_info["action"]
-    bot = get_bot(request)
-    if action == "start":
-        return web.json_response(await bot.start())
-    elif action == "stop":
-        return web.json_response(await bot.stop())
-    return web.json_response({"error": "Invalid action"}, status=400)
+    return await _run_bot_action(request, request.match_info["action"])
 
 
+@routes.post("/api/v1/management/bot/start")
+async def bot_start_handler(request: web.Request) -> Response:
+    return await _run_bot_action(request, "start")
+
+
+@routes.post("/api/v1/management/bot/stop")
+async def bot_stop_handler(request: web.Request) -> Response:
+    return await _run_bot_action(request, "stop")
+
+
+@routes.post("/api/v1/management/update-restart")
 @routes.post("/api/update-restart")
 async def update_restart_handler(request: web.Request) -> Response:
     if not check_auth(request):

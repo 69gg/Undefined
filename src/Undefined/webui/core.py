@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import dataclass
 import logging
 import os
 import signal
@@ -10,29 +11,93 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 SESSION_TTL_SECONDS = 8 * 60 * 60
+ACCESS_TOKEN_TTL_SECONDS = 15 * 60
+REFRESH_TOKEN_TTL_SECONDS = 8 * 60 * 60
 BOT_COMMAND = ("uv", "run", "Undefined")
 
 
-class SessionStore:
-    def __init__(self, ttl_seconds: int = SESSION_TTL_SECONDS) -> None:
-        self._ttl_seconds = ttl_seconds
-        self._sessions: dict[str, float] = {}
+@dataclass
+class SessionEntry:
+    expires_at: float
+    kind: str = "session"
 
-    def create(self) -> str:
+
+class SessionStore:
+    def __init__(
+        self,
+        ttl_seconds: int = SESSION_TTL_SECONDS,
+        access_ttl_seconds: int = ACCESS_TOKEN_TTL_SECONDS,
+        refresh_ttl_seconds: int = REFRESH_TOKEN_TTL_SECONDS,
+    ) -> None:
+        self._ttl_seconds = ttl_seconds
+        self._access_ttl_seconds = access_ttl_seconds
+        self._refresh_ttl_seconds = refresh_ttl_seconds
+        self._sessions: dict[str, SessionEntry] = {}
+
+    def create(self, *, ttl_seconds: int | None = None, kind: str = "session") -> str:
         token = secrets.token_urlsafe(32)
-        self._sessions[token] = time.time() + self._ttl_seconds
+        ttl = self._ttl_seconds if ttl_seconds is None else ttl_seconds
+        self._sessions[token] = SessionEntry(expires_at=time.time() + ttl, kind=kind)
         return token
 
-    def is_valid(self, token: str | None) -> bool:
+    def _resolve_entry(self, token: str | None) -> SessionEntry | None:
         if not token:
-            return False
-        expiry = self._sessions.get(token)
-        if not expiry:
-            return False
-        if expiry < time.time():
+            return None
+        entry = self._sessions.get(token)
+        if entry is None:
+            return None
+        if entry.expires_at < time.time():
             self._sessions.pop(token, None)
+            return None
+        return entry
+
+    def is_valid(
+        self,
+        token: str | None,
+        *,
+        allowed_kinds: set[str] | None = None,
+    ) -> bool:
+        entry = self._resolve_entry(token)
+        if entry is None:
+            return False
+        if allowed_kinds is not None and entry.kind not in allowed_kinds:
             return False
         return True
+
+    def get_expiry_ms(self, token: str | None) -> int:
+        entry = self._resolve_entry(token)
+        if entry is None:
+            return 0
+        return int(entry.expires_at * 1000)
+
+    def get_kind(self, token: str | None) -> str | None:
+        entry = self._resolve_entry(token)
+        return None if entry is None else entry.kind
+
+    def issue_auth_tokens(self) -> dict[str, int | str]:
+        access_token = self.create(
+            ttl_seconds=self._access_ttl_seconds,
+            kind="access",
+        )
+        refresh_token = self.create(
+            ttl_seconds=self._refresh_ttl_seconds,
+            kind="refresh",
+        )
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "expires_in": self._access_ttl_seconds,
+            "refresh_expires_in": self._refresh_ttl_seconds,
+            "access_token_expires_at": self.get_expiry_ms(access_token),
+        }
+
+    def refresh_auth_tokens(
+        self, refresh_token: str | None
+    ) -> dict[str, int | str] | None:
+        if not self.is_valid(refresh_token, allowed_kinds={"refresh"}):
+            return None
+        self.revoke(refresh_token)
+        return self.issue_auth_tokens()
 
     def revoke(self, token: str | None) -> None:
         if not token:

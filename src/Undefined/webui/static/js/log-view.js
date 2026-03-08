@@ -11,7 +11,10 @@ async function fetchLogs(force = false) {
         return;
     }
     try {
-        const params = new URLSearchParams({ lines: "200", type: state.logType });
+        const params = new URLSearchParams({
+            lines: "200",
+            type: state.logType,
+        });
         if (state.logFile) params.set("file", state.logFile);
         const res = await api(`/api/logs?${params.toString()}`);
         const text = await res.text();
@@ -22,7 +25,10 @@ async function fetchLogs(force = false) {
         recordFetchError("logs");
         if (!container) return;
         container.dataset.placeholder = "true";
-        container.innerText = e.message === "Unauthorized" ? t("logs.unauthorized") : t("logs.error");
+        container.innerText =
+            e.message === "Unauthorized"
+                ? t("logs.unauthorized")
+                : t("logs.error");
         updateLogMeta(0, 0);
     }
 }
@@ -31,14 +37,20 @@ function filterLogLines(raw) {
     const query = state.logSearch.trim().toLowerCase();
     const rawLines = raw ? raw.split(/\r?\n/) : [];
     const base = window.LogsController
-        ? window.LogsController.filterLogLines(raw, { level: state.logLevel, gte: state.logLevelGte })
+        ? window.LogsController.filterLogLines(raw, {
+              level: state.logLevel,
+              gte: state.logLevelGte,
+          })
         : { filtered: rawLines, total: rawLines.length };
 
     let filtered = base.filtered;
-    if (query) filtered = filtered.filter(line => line.toLowerCase().includes(query));
+    if (query)
+        filtered = filtered.filter((line) =>
+            line.toLowerCase().includes(query),
+        );
 
     const total = base.total ?? rawLines.length;
-    const matched = filtered.filter(line => line.length > 0).length;
+    const matched = filtered.filter((line) => line.length > 0).length;
     return { filtered, total, matched };
 }
 
@@ -48,11 +60,14 @@ function formatLogText(text) {
     const query = state.logSearch.trim();
     if (query) {
         const regex = new RegExp(escapeRegExp(query), "gi");
-        escaped = escaped.replace(regex, '<mark class="log-highlight">$&</mark>');
+        escaped = escaped.replace(
+            regex,
+            '<mark class="log-highlight">$&</mark>',
+        );
     }
     escaped = escaped.replace(
         /(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?)/g,
-        '<span class="log-timestamp">$1</span>'
+        '<span class="log-timestamp">$1</span>',
     );
     return escaped
         .replace(/\x1b\[31m/g, '<span class="ansi-red">')
@@ -61,7 +76,7 @@ function formatLogText(text) {
         .replace(/\x1b\[34m/g, '<span class="ansi-blue">')
         .replace(/\x1b\[35m/g, '<span class="ansi-magenta">')
         .replace(/\x1b\[36m/g, '<span class="ansi-cyan">')
-        .replace(/\x1b\[0m/g, '</span>');
+        .replace(/\x1b\[0m/g, "</span>");
 }
 
 function renderLogs() {
@@ -86,7 +101,8 @@ function renderLogs() {
     }
     container.innerHTML = formatLogText(filtered.join("\n"));
     container.dataset.placeholder = "false";
-    if (state.logAutoRefresh && state.logAtBottom) container.scrollTop = container.scrollHeight;
+    if (state.logAutoRefresh && state.logAtBottom)
+        container.scrollTop = container.scrollHeight;
     updateLogJumpButton();
     updateLogMeta(total, matched);
 }
@@ -96,8 +112,14 @@ function updateLogMeta(total, matched) {
     if (!meta) return;
     const parts = [];
     if (state.logsPaused) parts.push(t("logs.paused"));
-    if (state.logLevel !== "all" || state.logSearch.trim() || state.logLevelGte) {
-        parts.push(`${t("logs.filtered")}: ${total > 0 ? `${matched}/${total}` : "0/0"}`);
+    if (
+        state.logLevel !== "all" ||
+        state.logSearch.trim() ||
+        state.logLevelGte
+    ) {
+        parts.push(
+            `${t("logs.filtered")}: ${total > 0 ? `${matched}/${total}` : "0/0"}`,
+        );
     }
     meta.innerText = parts.join(" | ");
 }
@@ -114,7 +136,11 @@ function bindLogScroll() {
     const container = get("logContainer");
     if (!container) return;
     container.addEventListener("scroll", () => {
-        state.logAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 24;
+        state.logAtBottom =
+            container.scrollHeight -
+                container.scrollTop -
+                container.clientHeight <
+            24;
         updateLogJumpButton();
     });
     state.logScrollBound = true;
@@ -122,7 +148,8 @@ function bindLogScroll() {
 }
 
 function startLogStream() {
-    if (state.logStream || state.logStreamFailed || !window.EventSource) return false;
+    if (state.logStream || state.logStreamFailed || !window.EventSource)
+        return false;
     if (!state.logStreamEnabled) return false;
     state.logStreamFailed = false;
     const params = new URLSearchParams({ lines: "200", type: state.logType });
@@ -142,24 +169,46 @@ function startLogStream() {
 }
 
 function stopLogStream() {
-    if (state.logStream) { state.logStream.close(); state.logStream = null; }
+    if (state.logStream) {
+        state.logStream.close();
+        state.logStream = null;
+    }
 }
 
 function updateLogRefreshState() {
-    if (state.view !== "app" || state.tab !== "logs" || document.hidden || !state.authenticated) {
-        stopLogStream(); stopLogTimer(); return;
+    if (
+        state.view !== "app" ||
+        state.tab !== "logs" ||
+        document.hidden ||
+        !state.authenticated
+    ) {
+        stopLogStream();
+        stopLogTimer();
+        return;
     }
     if (state.logsPaused || !state.logAutoRefresh) {
-        stopLogStream(); stopLogTimer(); return;
+        stopLogStream();
+        stopLogTimer();
+        return;
     }
-    if (!state.logStreamEnabled) { stopLogStream(); startLogTimer(); return; }
-    if (startLogStream()) { stopLogTimer(); return; }
+    if (!state.logStreamEnabled) {
+        stopLogStream();
+        startLogTimer();
+        return;
+    }
+    if (startLogStream()) {
+        stopLogTimer();
+        return;
+    }
     startLogTimer();
 }
 
 async function copyLogsToClipboard() {
     const text = state.logsRaw || "";
-    if (!text) { showToast(t("logs.empty"), "info"); return; }
+    if (!text) {
+        showToast(t("logs.empty"), "info");
+        return;
+    }
     try {
         if (navigator.clipboard && window.isSecureContext) {
             await navigator.clipboard.writeText(text);
@@ -168,7 +217,8 @@ async function copyLogsToClipboard() {
             textarea.value = text;
             textarea.style.cssText = "position:fixed;opacity:0";
             document.body.appendChild(textarea);
-            textarea.focus(); textarea.select();
+            textarea.focus();
+            textarea.select();
             document.execCommand("copy");
             textarea.remove();
         }
@@ -179,7 +229,10 @@ async function copyLogsToClipboard() {
 }
 
 async function fetchLogFiles(force = false) {
-    if (state.logFiles[state.logType] && !force) { updateLogFileSelect(); return; }
+    if (state.logFiles[state.logType] && !force) {
+        updateLogFileSelect();
+        return;
+    }
     try {
         const res = await api(`/api/logs/files?type=${state.logType}`);
         const data = await res.json();
@@ -205,7 +258,10 @@ function setLogType(type) {
 
 function downloadLogs() {
     const text = state.logsRaw || "";
-    if (!text) { showToast(t("logs.empty"), "info"); return; }
+    if (!text) {
+        showToast(t("logs.empty"), "info");
+        return;
+    }
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");

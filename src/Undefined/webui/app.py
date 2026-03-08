@@ -10,6 +10,12 @@ from aiohttp import web
 from Undefined.config import load_webui_settings, get_config_manager, get_config
 from .core import BotProcessController, SessionStore
 from .routes import routes
+from .routes._shared import (
+    BOT_APP_KEY,
+    REDIRECT_TO_CONFIG_ONCE_APP_KEY,
+    SESSION_STORE_APP_KEY,
+    SETTINGS_APP_KEY,
+)
 from .utils import ensure_config_toml
 from Undefined.utils.self_update import (
     GitUpdatePolicy,
@@ -191,7 +197,7 @@ async def on_startup(app: web.Application) -> None:
         marker = Path("data/cache/pending_bot_autostart")
         if marker.exists():
             marker.unlink(missing_ok=True)
-            bot: BotProcessController = app["bot"]
+            bot = app[BOT_APP_KEY]
             await bot.start()
             logger.info("[WebUI] 检测到自动恢复标记，已尝试启动机器人进程")
     except Exception:
@@ -199,7 +205,7 @@ async def on_startup(app: web.Application) -> None:
 
 
 async def on_shutdown(app: web.Application) -> None:
-    bot: BotProcessController = app["bot"]
+    bot = app[BOT_APP_KEY]
     status = bot.status()
     if not status.get("running"):
         logger.info("[WebUI] 正在关闭，无运行中的机器人进程")
@@ -220,15 +226,15 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
     app = web.Application(middlewares=[gzip_middleware, security_headers_middleware])
 
     # 初始化核心组件
-    app["bot"] = BotProcessController()
-    app["session_store"] = SessionStore()
+    app[BOT_APP_KEY] = BotProcessController()
+    app[SESSION_STORE_APP_KEY] = SessionStore()
 
     # 配置 WebUI 设置热重载
     config_manager = get_config_manager()
-    app["settings"] = load_webui_settings()
+    app[SETTINGS_APP_KEY] = load_webui_settings()
 
     # 一次性客户端重定向提示（由 index 处理）
-    app["redirect_to_config_once"] = redirect_to_config_once
+    app[REDIRECT_TO_CONFIG_ONCE_APP_KEY] = redirect_to_config_once
 
     def _on_config_change(config: Any, changes: dict[str, Any]) -> None:
         webui_keys = {"webui_url", "webui_port", "webui_password"}
@@ -236,7 +242,7 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
             changes
         ):
             logger.info("[WebUI] 检测到 WebUI 配置变更，正在热重载设置...")
-            app["settings"] = load_webui_settings()
+            app[SETTINGS_APP_KEY] = load_webui_settings()
 
     config_manager.subscribe(_on_config_change)
 

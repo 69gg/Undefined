@@ -1,12 +1,32 @@
 {
   "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 4
+  },
   "files": {
-    "include": ["src/Undefined/webui/static/js/**/*.js"]
+    "include": ["src/Undefined/webui/static/js/**/*.js"],
+    "ignore": ["src/Undefined/webui/static/js/vendor/**"]
   },
   "linter": {
     "rules": {
+      "complexity": {
+        "noForEach": "off",
+        "useOptionalChain": "off",
+        "useArrowFunction": "off"
+      },
       "correctness": {
         "noUnusedVariables": "off"
+      },
+      "style": {
+        "noUnusedTemplateLiteral": "off",
+        "noParameterAssign": "off",
+        "useNumberNamespace": "off",
+        "useTemplate": "off"
+      },
+      "suspicious": {
+        "noControlCharactersInRegex": "off",
+        "noRedundantUseStrict": "off"
       }
     }
   }

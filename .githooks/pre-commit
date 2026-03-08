@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACMRTUXB || true)
+
+if [ -z "$STAGED" ]; then
+  exit 0
+fi
+
+echo -e "${YELLOW}🔍 运行 pre-commit 检查...${NC}"
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo -e "${RED}❌ 未找到 uv，请先安装 uv${NC}"
+  exit 1
+fi
+
+if [ ! -f "pyproject.toml" ]; then
+  echo -e "${RED}❌ 未找到 pyproject.toml${NC}"
+  exit 1
+fi
+
+echo -e "${YELLOW}📝 Python: ruff format --check${NC}"
+uv run ruff format --check --exclude "code/" --force-exclude
+
+echo -e "${YELLOW}📝 Python: ruff check${NC}"
+uv run ruff check . --exclude "code/" --force-exclude
+
+echo -e "${YELLOW}📝 Python: mypy${NC}"
+uv run mypy . --exclude "code/"
+
+if printf '%s\n' "$STAGED" | grep -Eq '^(apps/undefined-console/|src/Undefined/webui/static/js/|biome\.json$|\.github/workflows/(ci|release)\.yml$)'; then
+  echo -e "${YELLOW}📝 检测到 JS/Tauri 相关改动，运行前端与 Tauri 检查...${NC}"
+
+  if ! command -v npm >/dev/null 2>&1; then
+    echo -e "${RED}❌ 未找到 npm，请先安装 Node.js${NC}"
+    exit 1
+  fi
+
+  if [ ! -x "apps/undefined-console/node_modules/.bin/biome" ]; then
+    echo -e "${RED}❌ 缺少 apps/undefined-console/node_modules，请先运行 cd apps/undefined-console && npm install${NC}"
+    exit 1
+  fi
+
+  npm --prefix apps/undefined-console run check
+fi
+
+echo -e "${GREEN}✅ pre-commit 检查通过${NC}"

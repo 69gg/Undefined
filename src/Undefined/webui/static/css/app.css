@@ -53,6 +53,42 @@
 .mobile-tabs .nav-item { border-radius: 999px; padding: 8px 14px; border: 1px solid var(--border-color); background: var(--bg-card); white-space: nowrap; font-size: 12px; }
 .mobile-tabs .nav-item.active { color: var(--accent-color); border-color: rgba(217, 119, 87, 0.4); }
 
+.hero-highlights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0 6px;
+}
+
+.hero-highlight-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(217, 119, 87, 0.22);
+  background: rgba(217, 119, 87, 0.08);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.probe-advice-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.probe-advice-item {
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-app);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .sidebar-footer { margin-top: auto; display: flex; flex-direction: column; gap: 16px; padding-top: 20px; border-top: 1px solid var(--border-color); }
 .sidebar-footer-actions { display: flex; gap: 8px; }
 

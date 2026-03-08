@@ -6,6 +6,7 @@ __pycache__/
 .venv/
 venv/
 node_modules/
+apps/**/node_modules/
 
 # Logs and temp files
 *.log
@@ -50,7 +51,11 @@ config.local.json
 .vscode
 .ruff_cache
 dist/
+apps/**/dist/
 .cache/
+apps/**/src-tauri/target/
+apps/**/src-tauri/gen/
+apps/**/src-tauri/.cargo/
 
 # MCP 配置
 config/mcp.json

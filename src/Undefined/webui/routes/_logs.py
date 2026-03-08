@@ -77,6 +77,7 @@ def _resolve_any_log_file(log_dir: Path, file_name: str | None) -> Path | None:
     return next((p for p in _list_all_log_files(log_dir) if p.name == file_name), None)
 
 
+@routes.get("/api/v1/management/logs")
 @routes.get("/api/logs")
 async def logs_handler(request: web.Request) -> Response:
     if not check_auth(request):
@@ -95,6 +96,7 @@ async def logs_handler(request: web.Request) -> Response:
     return web.Response(text=tail_file(target_path, lines))
 
 
+@routes.get("/api/v1/management/logs/files")
 @routes.get("/api/logs/files")
 async def logs_files_handler(request: web.Request) -> Response:
     if not check_auth(request):
@@ -138,6 +140,7 @@ async def logs_files_handler(request: web.Request) -> Response:
     return web.json_response({"files": files, "current": current_name})
 
 
+@routes.get("/api/v1/management/logs/stream")
 @routes.get("/api/logs/stream")
 async def logs_stream_handler(request: web.Request) -> web.StreamResponse:
     if not check_auth(request):

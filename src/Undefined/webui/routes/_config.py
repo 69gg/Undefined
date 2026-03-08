@@ -1,8 +1,11 @@
 import tomllib
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 from aiohttp import web
 from aiohttp.web_response import Response
 
+from Undefined.config.loader import Config
 from Undefined.config.loader import CONFIG_PATH, load_toml_data
 from Undefined.config import get_config_manager
 from ._shared import routes, check_auth
@@ -20,6 +23,7 @@ from ..utils import (
 )
 
 
+@routes.get("/api/v1/management/config")
 @routes.get("/api/config")
 async def get_config_handler(request: web.Request) -> Response:
     if not check_auth(request):
@@ -27,6 +31,7 @@ async def get_config_handler(request: web.Request) -> Response:
     return web.json_response(read_config_source())
 
 
+@routes.post("/api/v1/management/config")
 @routes.post("/api/config")
 async def save_config_handler(request: web.Request) -> Response:
     if not check_auth(request):
@@ -53,6 +58,41 @@ async def save_config_handler(request: web.Request) -> Response:
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
+@routes.post("/api/v1/management/config/validate")
+async def validate_config_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+    content = str(data.get("content") or "")
+    syntax_valid, syntax_message = validate_toml(content)
+    strict_valid = False
+    strict_message = ""
+    if syntax_valid:
+        with NamedTemporaryFile("w", encoding="utf-8", suffix=".toml", delete=True) as f:
+            f.write(content)
+            f.flush()
+            try:
+                Config.load(Path(f.name), strict=True)
+                strict_valid = True
+                strict_message = "OK"
+            except Exception as exc:
+                strict_valid = False
+                strict_message = str(exc)
+    return web.json_response(
+        {
+            "success": syntax_valid and strict_valid,
+            "syntax_valid": syntax_valid,
+            "syntax_message": syntax_message,
+            "strict_valid": strict_valid,
+            "strict_message": strict_message,
+        }
+    )
+
+
+@routes.get("/api/v1/management/config/summary")
 @routes.get("/api/config/summary")
 async def config_summary_handler(request: web.Request) -> Response:
     if not check_auth(request):
@@ -65,6 +105,7 @@ async def config_summary_handler(request: web.Request) -> Response:
     return web.json_response({"data": ordered, "comments": comments})
 
 
+@routes.post("/api/v1/management/config/patch")
 @routes.post("/api/patch")
 async def config_patch_handler(request: web.Request) -> Response:
     if not check_auth(request):
@@ -100,6 +141,7 @@ async def config_patch_handler(request: web.Request) -> Response:
     )
 
 
+@routes.post("/api/v1/management/config/sync-template")
 @routes.post("/api/config/sync-template")
 async def sync_config_template_handler(request: web.Request) -> Response:
     if not check_auth(request):
