@@ -71,7 +71,9 @@ async def validate_config_handler(request: web.Request) -> Response:
     strict_valid = False
     strict_message = ""
     if syntax_valid:
-        with NamedTemporaryFile("w", encoding="utf-8", suffix=".toml", delete=True) as f:
+        with NamedTemporaryFile(
+            "w", encoding="utf-8", suffix=".toml", delete=True
+        ) as f:
             f.write(content)
             f.flush()
             try:

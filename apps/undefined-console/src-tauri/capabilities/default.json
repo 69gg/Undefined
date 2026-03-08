@@ -1,7 +1,27 @@
 {
-	"$schema": "https://schema.tauri.app/capability/1",
-	"identifier": "default",
+	"$schema": "../gen/schemas/desktop-schema.json",
+	"identifier": "main-capability",
 	"description": "Default capability for the Undefined Console main window.",
 	"windows": ["main"],
-	"permissions": ["core:default"]
+	"permissions": [
+		"core:default",
+		{
+			"identifier": "http:default",
+			"allow": [
+				{
+					"url": "http://*:*"
+				},
+				{
+					"url": "https://*:*"
+				},
+				{
+					"url": "http://*"
+				},
+				{
+					"url": "https://*"
+				}
+			],
+			"deny": []
+		}
+	]
 }

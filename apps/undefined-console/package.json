@@ -20,7 +20,8 @@
 		"tauri:android:debug": "tauri android build --debug"
 	},
 	"dependencies": {
-		"@tauri-apps/api": "^2.3.0"
+		"@tauri-apps/api": "^2.3.0",
+		"@tauri-apps/plugin-http": "^2.3.0"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.4",

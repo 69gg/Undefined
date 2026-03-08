@@ -83,6 +83,39 @@ def _gzip_compress(data: bytes) -> bytes | None:
     return compressed if len(compressed) < len(data) else None
 
 
+def _apply_cors_headers(request: web.Request, response: web.StreamResponse) -> None:
+    origin = str(request.headers.get("Origin") or "").strip()
+    allow_origin = origin or "*"
+    response.headers.setdefault("Access-Control-Allow-Origin", allow_origin)
+    response.headers.setdefault("Vary", "Origin")
+    response.headers.setdefault("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+    request_headers = str(
+        request.headers.get("Access-Control-Request-Headers") or ""
+    ).strip()
+    response.headers.setdefault(
+        "Access-Control-Allow-Headers",
+        request_headers
+        or "Authorization, Content-Type, X-Auth-Token, X-Refresh-Token, X-Undefined-API-Key",
+    )
+    response.headers.setdefault("Access-Control-Max-Age", "86400")
+    if origin:
+        response.headers.setdefault("Access-Control-Allow-Credentials", "true")
+
+
+@web.middleware
+async def cors_middleware(
+    request: web.Request,
+    handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
+) -> web.StreamResponse:
+    response: web.StreamResponse
+    if request.method == "OPTIONS":
+        response = web.Response(status=204)
+    else:
+        response = await handler(request)
+    _apply_cors_headers(request, response)
+    return response
+
+
 @web.middleware
 async def gzip_middleware(
     request: web.Request,
@@ -223,7 +256,9 @@ async def on_cleanup(app: web.Application) -> None:
 
 
 def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
-    app = web.Application(middlewares=[gzip_middleware, security_headers_middleware])
+    app = web.Application(
+        middlewares=[cors_middleware, gzip_middleware, security_headers_middleware]
+    )
 
     # 初始化核心组件
     app[BOT_APP_KEY] = BotProcessController()

@@ -176,9 +176,19 @@ async def capabilities_probe_handler(request: web.Request) -> Response:
             "desktop_app": True,
             "android_app": True,
             "auth": auth_capabilities(),
-            "config": {"read": True, "write": True, "validate": True, "sync_template": True},
+            "config": {
+                "read": True,
+                "write": True,
+                "validate": True,
+                "sync_template": True,
+            },
             "logs": {"read": True, "stream": True},
-            "bot": {"status": True, "start": True, "stop": True, "update_restart": True},
+            "bot": {
+                "status": True,
+                "start": True,
+                "stop": True,
+                "update_restart": True,
+            },
             "runtime": {
                 "enabled": runtime_enabled,
                 "reachable": runtime_reachable,

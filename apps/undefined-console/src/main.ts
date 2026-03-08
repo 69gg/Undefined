@@ -1,3 +1,5 @@
+import { isTauri } from "@tauri-apps/api/core";
+import { fetch as nativeFetch } from "@tauri-apps/plugin-http";
 import "./style.css";
 
 type ConnectionMode = "management" | "runtime";
@@ -668,7 +670,7 @@ async function probeManagement(
 
 	if (profile.password) {
 		try {
-			const loginResp = await fetch(loginUrl, {
+			const loginResp = await request(loginUrl, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ password: profile.password }),
@@ -697,7 +699,7 @@ async function probeManagement(
 
 	for (const endpoint of [capabilityUrl, sessionUrl, `${base}/`]) {
 		try {
-			const response = await fetch(endpoint, { method: "GET", headers });
+			const response = await request(endpoint, { method: "GET", headers });
 			const text = await response.text();
 			const detailParts = [
 				`${t("endpoint_label")}: ${endpoint}`,
@@ -739,9 +741,9 @@ async function probeRuntime(profile: ConnectionProfile): Promise<ProbeState> {
 		? { "X-Undefined-API-Key": profile.apiKey }
 		: undefined;
 	try {
-		const health = await fetch(`${base}/health`, { headers });
+		const health = await request(`${base}/health`, { headers });
 		const healthText = await health.text();
-		const openapi = await fetch(`${base}/openapi.json`, { headers });
+		const openapi = await request(`${base}/openapi.json`, { headers });
 		const openapiText = await openapi.text();
 		return {
 			kind: "runtime",
@@ -774,6 +776,28 @@ function escapeHtml(value: string): string {
 
 function escapeAttribute(value: string): string {
 	return escapeHtml(value).replaceAll("`", "&#96;");
+}
+
+async function request(url: string, init: RequestInit = {}): Promise<Response> {
+	if (isTauri()) {
+		try {
+			return await nativeFetch(url, {
+				method: init.method ?? "GET",
+				headers: init.headers,
+				body: init.body,
+			});
+		} catch (error) {
+			const message = String(error || "");
+			const shouldFallback =
+				message.includes("configured scope") ||
+				message.includes("Load failed") ||
+				message.includes("TypeError");
+			if (!shouldFallback) {
+				throw error;
+			}
+		}
+	}
+	return fetch(url, init);
 }
 
 render();

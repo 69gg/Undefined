@@ -131,6 +131,24 @@ def _json_error(message: str, status: int = 400) -> Response:
     return web.json_response({"error": message}, status=status)
 
 
+def _apply_cors_headers(request: web.Request, response: web.StreamResponse) -> None:
+    origin = str(request.headers.get("Origin") or "").strip()
+    allow_origin = origin or "*"
+    response.headers.setdefault("Access-Control-Allow-Origin", allow_origin)
+    response.headers.setdefault("Vary", "Origin")
+    response.headers.setdefault("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+    request_headers = str(
+        request.headers.get("Access-Control-Request-Headers") or ""
+    ).strip()
+    response.headers.setdefault(
+        "Access-Control-Allow-Headers",
+        request_headers or "Authorization, Content-Type, X-Undefined-API-Key",
+    )
+    response.headers.setdefault("Access-Control-Max-Age", "86400")
+    if origin:
+        response.headers.setdefault("Access-Control-Allow-Credentials", "true")
+
+
 def _optional_query_param(request: web.Request, key: str) -> str | None:
     raw = request.query.get(key)
     if raw is None:
@@ -437,12 +455,21 @@ class RuntimeAPIServer:
             request: web.Request,
             handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
         ) -> web.StreamResponse:
+            response: web.StreamResponse
+            if request.method == "OPTIONS":
+                response = web.Response(status=204)
+                _apply_cors_headers(request, response)
+                return response
             if request.path.startswith("/api/"):
                 expected = str(self._context.config_getter().api.auth_key or "")
                 provided = request.headers.get(_AUTH_HEADER, "")
                 if not expected or provided != expected:
-                    return _json_error("Unauthorized", status=401)
-            return await handler(request)
+                    response = _json_error("Unauthorized", status=401)
+                    _apply_cors_headers(request, response)
+                    return response
+            response = await handler(request)
+            _apply_cors_headers(request, response)
+            return response
 
         app = web.Application(middlewares=[_auth_middleware])
         app["runtime_api_context"] = self._context

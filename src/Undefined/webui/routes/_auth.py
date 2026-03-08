@@ -27,7 +27,9 @@ from ._shared import (
 from ..utils import read_config_source, apply_patch, load_comment_map, render_toml
 
 
-def _build_session_payload(request: web.Request, authenticated: bool) -> dict[str, object]:
+def _build_session_payload(
+    request: web.Request, authenticated: bool
+) -> dict[str, object]:
     settings = get_settings(request)
     sessions = get_session_store(request)
     active_token = get_valid_auth_token(request)
@@ -36,7 +38,9 @@ def _build_session_payload(request: web.Request, authenticated: bool) -> dict[st
         "authenticated": authenticated,
         "using_default_password": settings.using_default_password,
         "config_exists": settings.config_exists,
-        "summary": f"{settings.url}:{settings.port} | ready" if authenticated else "locked",
+        "summary": f"{settings.url}:{settings.port} | ready"
+        if authenticated
+        else "locked",
         "capabilities": {
             "management_api_v1": True,
             "runtime_proxy": True,
