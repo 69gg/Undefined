@@ -32,6 +32,18 @@ function refreshUI() {
 
     updateAuthPanels();
 
+    const landingLogoutBtn = get("landingLogoutBtn");
+    if (landingLogoutBtn)
+        landingLogoutBtn.style.display =
+            state.launcherMode && state.authenticated ? "inline-flex" : "none";
+
+    const appQuickActions = get("appQuickActions");
+    if (appQuickActions)
+        appQuickActions.style.display =
+            state.launcherMode && state.view === "app" && state.authenticated
+                ? "flex"
+                : "none";
+
     if (state.view !== "app" || !state.authenticated) {
         stopSystemTimer();
         stopLogStream();
@@ -380,10 +392,18 @@ async function init() {
         clearStoredAuthTokens();
         state.authenticated = false;
         state.view = "landing";
-        refreshUI();
+        const target = new URL(window.location.origin + "/");
+        target.searchParams.set("lang", state.lang);
+        target.searchParams.set("theme", state.theme);
+        target.searchParams.set("view", "landing");
+        window.location.assign(target.toString());
     };
     get("logoutBtn").onclick = logout;
     get("mobileLogoutBtn").onclick = logout;
+    const landingLogoutBtn = get("landingLogoutBtn");
+    if (landingLogoutBtn) landingLogoutBtn.onclick = logout;
+    const appQuickLogoutBtn = get("appQuickLogoutBtn");
+    if (appQuickLogoutBtn) appQuickLogoutBtn.onclick = logout;
 
     applyTheme(
         initialState && initialState.theme ? initialState.theme : "light",
@@ -392,8 +412,19 @@ async function init() {
     try {
         const session = await checkSession();
         state.authenticated = !!session.authenticated;
+        if (
+            state.authenticated &&
+            state.authRefreshToken &&
+            state.authAccessTokenExpiresAt
+        ) {
+            scheduleAuthRefresh();
+        }
     } catch (e) {
         state.authenticated = false;
+    }
+
+    if (state.view === "app") {
+        switchTab(state.tab || "overview");
     }
 
     const shouldRedirectToConfig = !!(

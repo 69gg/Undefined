@@ -2,7 +2,6 @@ import { isTauri } from "@tauri-apps/api/core";
 import { fetch as nativeFetch } from "@tauri-apps/plugin-http";
 import "./style.css";
 
-type ConnectionMode = "management" | "runtime";
 type Lang = "zh" | "en";
 type Theme = "light" | "dark";
 type ProbeKind = "management" | "runtime" | "profile" | "configuration";
@@ -10,10 +9,9 @@ type ProbeKind = "management" | "runtime" | "profile" | "configuration";
 type ConnectionProfile = {
 	id: string;
 	name: string;
-	mode: ConnectionMode;
-	managementUrl: string;
-	runtimeUrl: string;
-	apiKey: string;
+	host: string;
+	managementPort: string;
+	runtimePort: string;
 	password: string;
 	notes: string;
 };
@@ -23,6 +21,12 @@ type ProbeState = {
 	status: "idle" | "ok" | "error";
 	summary: string;
 	detail: string;
+};
+
+type AuthBootstrapPayload = {
+	accessToken: string;
+	refreshToken: string;
+	accessTokenExpiresAt: number;
 };
 
 const PROFILE_STORAGE_KEY = "undefined.console.profiles";
@@ -46,31 +50,27 @@ const messages = {
 		button_new: "新建连接",
 		button_use: "使用",
 		button_delete: "删除",
-		nav_probes: "探针",
 		saved_profiles: "已保存连接",
 		saved_profiles_copy: "连接配置保存在当前设备本地。",
 		editor_title: "连接编辑器",
-		editor_copy:
-			"管理模式用于打开完整 WebUI；运行态模式只用于探测 Runtime API。",
+		editor_copy: "填写同一个 IP/域名，再分别填写 Management 与 Runtime 端口。",
 		display_name: "显示名称",
-		mode: "连接模式",
-		mode_management: "管理模式",
-		mode_runtime: "仅运行态",
-		management_url: "Management 地址",
-		runtime_url: "Runtime 地址",
+		host: "IP / 域名",
+		host_placeholder: "例如：192.168.2.1 或 example.com",
+		management_port: "Management 端口",
+		runtime_port: "Runtime 端口",
 		password: "管理密码",
-		password_placeholder: "用于测试管理登录",
-		api_key: "Runtime API Key",
-		api_key_placeholder: "仅运行态探测时使用",
+		password_placeholder: "填写后打开 WebUI 时会自动尝试登录",
 		notes: "备注",
 		notes_placeholder: "例如：本机、预发布、Android 备用连接",
-		launcher_hint: "如果你想要完整功能和完整 UI，请直接打开远程 WebUI。",
+		launcher_hint:
+			"Tauri 只负责连接管理；真正的后台功能与样式都以 WebUI 为准。",
 		empty_profiles: "还没有保存的连接。",
 		empty_probes: "点击“测试连接”后，这里会显示探针结果。",
 		profile_default_name: "本地管理入口",
 		profile_default_notes: "推荐默认项，连接本机 Undefined-webui。",
-		profile_seed_name: "本地 Runtime 示例",
-		profile_seed_notes: "用于直接检查本地 Runtime API。",
+		profile_seed_name: "本地示例连接",
+		profile_seed_notes: "用于快速填入本机 Management / Runtime 默认端口。",
 		profile_new_name: "新连接",
 		current_in_use: "当前使用",
 		saved: "已保存",
@@ -82,17 +82,19 @@ const messages = {
 		profile_kind: "连接状态",
 		configuration_kind: "配置状态",
 		endpoint_unreachable: "端点不可达",
-		unauthorized_hint: "未授权；如果是管理模式，请填写密码。",
+		unauthorized_hint:
+			"未授权；如果填写了管理密码，打开 WebUI 时会自动尝试登录。",
 		config_missing: "还没有配置任何端点",
-		config_missing_detail: "请至少填写一个 Management 地址或 Runtime 地址。",
+		config_missing_detail: "请至少填写 IP/域名与 Management 端口。",
 		not_configured: "未配置",
 		endpoint_label: "端点",
 		tried_label: "尝试地址",
 		health_label: "健康检查",
 		openapi_label: "OpenAPI",
 		base_url_label: "基础地址",
-		cannot_open: "当前连接没有 Management 地址，无法打开 WebUI。",
+		cannot_open: "当前连接缺少 IP/域名或 Management 端口，无法打开 WebUI。",
 		opening: "正在打开远程 WebUI...",
+		login_failed: "自动登录失败，将直接打开 WebUI 登录页。",
 	},
 	en: {
 		brand: "Undefined Console",
@@ -111,34 +113,31 @@ const messages = {
 		button_new: "New profile",
 		button_use: "Use",
 		button_delete: "Delete",
-		nav_probes: "Probes",
 		saved_profiles: "Saved profiles",
 		saved_profiles_copy: "Profiles are stored locally on this device.",
 		editor_title: "Profile editor",
 		editor_copy:
-			"Management mode opens the full WebUI. Runtime-only mode is kept for Runtime API probing only.",
+			"Use one host/IP field, then provide dedicated Management and Runtime ports.",
 		display_name: "Display name",
-		mode: "Mode",
-		mode_management: "Management",
-		mode_runtime: "Runtime-only",
-		management_url: "Management URL",
-		runtime_url: "Runtime URL",
+		host: "Host / IP",
+		host_placeholder: "For example: 192.168.2.1 or example.com",
+		management_port: "Management port",
+		runtime_port: "Runtime port",
 		password: "Management password",
-		password_placeholder: "Used for testing management login",
-		api_key: "Runtime API key",
-		api_key_placeholder: "Used for runtime probing only",
+		password_placeholder: "If filled, WebUI will try to sign in automatically",
 		notes: "Notes",
 		notes_placeholder: "For example: local, staging, Android fallback",
 		launcher_hint:
-			"If you want the full UI and all features, open the remote WebUI directly.",
+			"Tauri only manages connections; the real console UI and features stay in WebUI.",
 		empty_profiles: "No saved profiles yet.",
 		empty_probes:
 			"Probe results will appear here after you click test connection.",
 		profile_default_name: "Local Management",
 		profile_default_notes:
 			"Recommended default. Connect to local Undefined-webui.",
-		profile_seed_name: "Local Runtime seed",
-		profile_seed_notes: "Use this to inspect a local Runtime API directly.",
+		profile_seed_name: "Local seed profile",
+		profile_seed_notes:
+			"Use this to quickly fill the local Management / Runtime defaults.",
 		profile_new_name: "New profile",
 		current_in_use: "ACTIVE",
 		saved: "SAVED",
@@ -150,9 +149,10 @@ const messages = {
 		profile_kind: "Profile",
 		configuration_kind: "Configuration",
 		endpoint_unreachable: "Endpoint unreachable",
-		unauthorized_hint: "Unauthorized; add a password for management mode.",
+		unauthorized_hint:
+			"Unauthorized; if a password is filled, WebUI open will try to sign in automatically.",
 		config_missing: "No endpoints configured",
-		config_missing_detail: "Add a Management URL or Runtime URL.",
+		config_missing_detail: "Add a host/IP and Management port.",
 		not_configured: "Not configured",
 		endpoint_label: "Endpoint",
 		tried_label: "Tried",
@@ -160,8 +160,10 @@ const messages = {
 		openapi_label: "OpenAPI",
 		base_url_label: "Base URL",
 		cannot_open:
-			"This profile has no Management URL, so WebUI cannot be opened.",
+			"This profile is missing a host/IP or Management port, so WebUI cannot be opened.",
 		opening: "Opening remote WebUI...",
+		login_failed:
+			"Automatic login failed. Opening the WebUI login page directly.",
 	},
 } as const;
 
@@ -198,6 +200,20 @@ function loadPreference<T extends Lang | Theme>(
 	}
 }
 
+function parseLegacyUrl(url: string): { host: string; port: string } {
+	const text = String(url || "").trim();
+	if (!text) return { host: "", port: "" };
+	try {
+		const parsed = new URL(text);
+		return {
+			host: parsed.hostname || "",
+			port: parsed.port || (parsed.protocol === "https:" ? "443" : "80"),
+		};
+	} catch {
+		return { host: "", port: "" };
+	}
+}
+
 function loadProfiles(): ConnectionProfile[] {
 	const raw = localStorage.getItem(PROFILE_STORAGE_KEY);
 	if (!raw) {
@@ -205,18 +221,33 @@ function loadProfiles(): ConnectionProfile[] {
 			{
 				id: crypto.randomUUID(),
 				name: messages.zh.profile_default_name,
-				mode: "management",
-				managementUrl: "http://127.0.0.1:8787",
-				runtimeUrl: "http://127.0.0.1:8788",
-				apiKey: "",
+				host: "127.0.0.1",
+				managementPort: "8787",
+				runtimePort: "8788",
 				password: "",
 				notes: messages.zh.profile_default_notes,
 			},
 		];
 	}
 	try {
-		const parsed = JSON.parse(raw) as ConnectionProfile[];
-		return Array.isArray(parsed) ? parsed : [];
+		const parsed = JSON.parse(raw) as Array<Record<string, unknown>>;
+		if (!Array.isArray(parsed)) return [];
+		return parsed.map((item) => {
+			const management = parseLegacyUrl(String(item.managementUrl || ""));
+			const runtime = parseLegacyUrl(String(item.runtimeUrl || ""));
+			const host = String(item.host || management.host || runtime.host || "");
+			return {
+				id: String(item.id || crypto.randomUUID()),
+				name: String(item.name || messages.zh.profile_new_name),
+				host,
+				managementPort: String(
+					item.managementPort || management.port || "8787",
+				),
+				runtimePort: String(item.runtimePort || runtime.port || "8788"),
+				password: String(item.password || ""),
+				notes: String(item.notes || ""),
+			};
+		});
 	} catch {
 		return [];
 	}
@@ -245,19 +276,18 @@ function selectedProfile(): ConnectionProfile | undefined {
 	return state.profiles.find((profile) => profile.id === state.selectedId);
 }
 
-function normalizeUrl(value: string): string {
-	return value.trim().replace(/\/$/, "");
+function buildManagementUrl(profile: ConnectionProfile): string {
+	const host = profile.host.trim();
+	const port = profile.managementPort.trim();
+	if (!host || !port) return "";
+	return `http://${host}:${port}`;
 }
 
-function modeLabel(mode: ConnectionMode): string {
-	return mode === "management" ? t("mode_management") : t("mode_runtime");
-}
-
-function probeKindLabel(kind: ProbeKind): string {
-	if (kind === "management") return t("management_kind");
-	if (kind === "runtime") return t("runtime_kind");
-	if (kind === "profile") return t("profile_kind");
-	return t("configuration_kind");
+function buildRuntimeUrl(profile: ConnectionProfile): string {
+	const host = profile.host.trim();
+	const port = profile.runtimePort.trim();
+	if (!host || !port) return "";
+	return `http://${host}:${port}`;
 }
 
 function badge(status: ProbeState["status"]): string {
@@ -268,6 +298,13 @@ function badge(status: ProbeState["status"]): string {
 				? t("status_error")
 				: t("status_idle");
 	return `<span class="badge ${status}">${escapeHtml(label)}</span>`;
+}
+
+function probeKindLabel(kind: ProbeKind): string {
+	if (kind === "management") return t("management_kind");
+	if (kind === "runtime") return t("runtime_kind");
+	if (kind === "profile") return t("profile_kind");
+	return t("configuration_kind");
 }
 
 function toggleLang(): void {
@@ -302,19 +339,104 @@ async function request(url: string, init: RequestInit = {}): Promise<Response> {
 	return fetch(url, init);
 }
 
-async function open_webui(): Promise<void> {
+function normalizeBootstrapAuthPayload(
+	payload: unknown,
+): AuthBootstrapPayload | null {
+	if (!payload || typeof payload !== "object") return null;
+	const raw = payload as Record<string, unknown> & { tokens?: unknown };
+	const source =
+		raw.tokens && typeof raw.tokens === "object"
+			? (raw.tokens as Record<string, unknown>)
+			: raw;
+	const accessToken = String(
+		source.access_token || source.accessToken || "",
+	).trim();
+	const refreshToken = String(
+		source.refresh_token || source.refreshToken || "",
+	).trim();
+	const accessTokenExpiresAt =
+		Number.parseInt(
+			String(
+				source.access_token_expires_at || source.accessTokenExpiresAt || "0",
+			),
+			10,
+		) || 0;
+	if (!accessToken) return null;
+	return { accessToken, refreshToken, accessTokenExpiresAt };
+}
+
+function encodeBootstrapAuth(payload: AuthBootstrapPayload): string {
+	const json = JSON.stringify(payload);
+	const bytes = new TextEncoder().encode(json);
+	let binary = "";
+	for (const byte of bytes) {
+		binary += String.fromCharCode(byte);
+	}
+	return btoa(binary)
+		.replaceAll("+", "-")
+		.replaceAll("/", "_")
+		.replace(/=+$/u, "");
+}
+
+async function openWebui(): Promise<void> {
+	state.infoMessage = "";
 	const profile = selectedProfile();
-	if (!profile?.managementUrl) {
+	if (!profile) {
 		state.infoMessage = t("cannot_open");
 		render();
 		return;
 	}
-	state.infoMessage = t("opening");
+	const base = buildManagementUrl(profile);
+	if (!base) {
+		state.infoMessage = t("cannot_open");
+		render();
+		return;
+	}
+
+	const target = new URL(base);
+	target.searchParams.set("lang", state.lang);
+	target.searchParams.set("theme", state.theme);
+	target.searchParams.set("tab", "overview");
+	target.searchParams.set("view", "app");
+	target.searchParams.set("client", "native");
+
+	let bootstrapAuth: AuthBootstrapPayload | null = null;
+	if (profile.password.trim()) {
+		try {
+			const loginResponse = await fetch(
+				`${base}/api/v1/management/auth/login`,
+				{
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ password: profile.password.trim() }),
+					mode: "cors",
+				},
+			);
+			if (loginResponse.ok) {
+				const loginPayload = await loginResponse
+					.clone()
+					.json()
+					.catch(() => null);
+				bootstrapAuth = normalizeBootstrapAuthPayload(loginPayload);
+			}
+			if (!bootstrapAuth) {
+				state.infoMessage = t("login_failed");
+			}
+		} catch {
+			state.infoMessage = t("login_failed");
+		}
+	}
+
+	if (bootstrapAuth) {
+		target.hash = `auth=${encodeBootstrapAuth(bootstrapAuth)}`;
+	}
+
+	state.infoMessage = state.infoMessage || t("opening");
 	render();
-	window.location.assign(normalizeUrl(profile.managementUrl));
+	window.location.assign(target.toString());
 }
 
-async function run_probes(): Promise<void> {
+async function runProbes(): Promise<void> {
 	const profile = selectedProfile();
 	if (!profile) {
 		state.probes = [
@@ -330,8 +452,11 @@ async function run_probes(): Promise<void> {
 	}
 
 	const probes: ProbeState[] = [];
-	if (profile.managementUrl) probes.push(await probe_management(profile));
-	if (profile.runtimeUrl) probes.push(await probe_runtime(profile));
+	const managementUrl = buildManagementUrl(profile);
+	const runtimeUrl = buildRuntimeUrl(profile);
+	if (managementUrl)
+		probes.push(await probeManagement(managementUrl, profile.password));
+	if (runtimeUrl) probes.push(await probeRuntime(runtimeUrl));
 	if (!probes.length) {
 		probes.push({
 			kind: "configuration",
@@ -344,22 +469,22 @@ async function run_probes(): Promise<void> {
 	render();
 }
 
-async function probe_management(
-	profile: ConnectionProfile,
+async function probeManagement(
+	base: string,
+	password: string,
 ): Promise<ProbeState> {
-	const base = normalizeUrl(profile.managementUrl);
 	const loginUrl = `${base}/api/v1/management/auth/login`;
 	const capabilityUrl = `${base}/api/v1/management/probes/capabilities`;
 	const sessionUrl = `${base}/api/v1/management/auth/session`;
 	let headers: Record<string, string> | undefined;
 	let loginDetail = "";
 
-	if (profile.password) {
+	if (password.trim()) {
 		try {
 			const loginResp = await request(loginUrl, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ password: profile.password }),
+				body: JSON.stringify({ password }),
 			});
 			const loginText = await loginResp.text();
 			loginDetail = `${t("endpoint_label")}: ${loginUrl}\n\n${truncate(loginText)}`;
@@ -388,7 +513,7 @@ async function probe_management(
 				truncate(text),
 			];
 			if (loginDetail) detailParts.unshift(loginDetail);
-			if (response.status === 401 && !profile.password) {
+			if (response.status === 401 && !password.trim()) {
 				detailParts.push(t("unauthorized_hint"));
 			}
 			return {
@@ -417,15 +542,11 @@ async function probe_management(
 	};
 }
 
-async function probe_runtime(profile: ConnectionProfile): Promise<ProbeState> {
-	const base = normalizeUrl(profile.runtimeUrl);
-	const headers = profile.apiKey
-		? { "X-Undefined-API-Key": profile.apiKey }
-		: undefined;
+async function probeRuntime(base: string): Promise<ProbeState> {
 	try {
-		const health = await request(`${base}/health`, { headers });
+		const health = await request(`${base}/health`);
 		const healthText = await health.text();
-		const openapi = await request(`${base}/openapi.json`, { headers });
+		const openapi = await request(`${base}/openapi.json`);
 		const openapiText = await openapi.text();
 		return {
 			kind: "runtime",
@@ -455,16 +576,13 @@ function render(): void {
 		? state.profiles
 				.map((entry) => {
 					const active = entry.id === state.selectedId;
-					const target =
-						entry.mode === "management"
-							? entry.managementUrl
-							: entry.runtimeUrl;
+					const summary = `${entry.host || t("not_configured")} · ${entry.managementPort || "-"} / ${entry.runtimePort || "-"}`;
 					return `
                     <article class="connection-card" data-profile-id="${entry.id}">
                         <div class="connection-head">
                             <div>
                                 <strong>${escapeHtml(entry.name)}</strong>
-                                <div class="connection-meta">${escapeHtml(modeLabel(entry.mode))} · ${escapeHtml(target || t("not_configured"))}</div>
+                                <div class="connection-meta">${escapeHtml(summary)}</div>
                             </div>
                             <span class="badge ${active ? "ok" : "idle"}">${active ? t("current_in_use") : t("saved")}</span>
                         </div>
@@ -496,15 +614,13 @@ function render(): void {
 				.join("")
 		: `<div class="empty-state">${t("empty_probes")}</div>`;
 
-	const activeMode = profile?.mode ?? "management";
-
 	app.innerHTML = `
-        <div class="shell launcher-shell">
-            <main class="content launcher-content">
+        <div class="launcher-shell">
+            <main class="launcher-content">
                 <header class="launcher-header">
                     <div>
                         <div class="brand"><span class="brand-dot"></span><span>${t("brand")}</span></div>
-                        <p class="panel-copy launcher-subtitle">${t("subtitle")}</p>
+                        <p class="launcher-subtitle">${t("subtitle")}</p>
                     </div>
                     <div class="sidebar-actions">
                         <button class="pref-chip" type="button" data-action="toggle-lang">${t("lang_toggle")}</button>
@@ -524,7 +640,7 @@ function render(): void {
                         ${state.infoMessage ? `<div class="connection-meta launcher-message">${escapeHtml(state.infoMessage)}</div>` : ""}
                     </article>
 
-                    <div class="layout-grid launcher-grid">
+                    <div class="launcher-grid">
                         <section class="panel">
                             <h2 class="section-title">${t("saved_profiles")}</h2>
                             <p class="panel-copy">${t("saved_profiles_copy")}</p>
@@ -540,27 +656,20 @@ function render(): void {
                                     <input id="profile-name" name="name" value="${escapeAttribute(profile?.name ?? "")}" required />
                                 </div>
                                 <div class="field">
-                                    <label for="profile-mode">${t("mode")}</label>
-                                    <select id="profile-mode" name="mode">
-                                        <option value="management" ${activeMode === "management" ? "selected" : ""}>${t("mode_management")}</option>
-                                        <option value="runtime" ${activeMode === "runtime" ? "selected" : ""}>${t("mode_runtime")}</option>
-                                    </select>
+                                    <label for="host">${t("host")}</label>
+                                    <input id="host" name="host" value="${escapeAttribute(profile?.host ?? "")}" placeholder="${escapeAttribute(t("host_placeholder"))}" />
                                 </div>
-                                <div class="field full">
-                                    <label for="management-url">${t("management_url")}</label>
-                                    <input id="management-url" name="managementUrl" value="${escapeAttribute(profile?.managementUrl ?? "")}" placeholder="http://127.0.0.1:8787" />
+                                <div class="field">
+                                    <label for="management-port">${t("management_port")}</label>
+                                    <input id="management-port" name="managementPort" value="${escapeAttribute(profile?.managementPort ?? "")}" inputmode="numeric" />
+                                </div>
+                                <div class="field">
+                                    <label for="runtime-port">${t("runtime_port")}</label>
+                                    <input id="runtime-port" name="runtimePort" value="${escapeAttribute(profile?.runtimePort ?? "")}" inputmode="numeric" />
                                 </div>
                                 <div class="field full">
                                     <label for="password">${t("password")}</label>
                                     <input id="password" type="password" name="password" value="${escapeAttribute(profile?.password ?? "")}" placeholder="${escapeAttribute(t("password_placeholder"))}" />
-                                </div>
-                                <div class="field full">
-                                    <label for="runtime-url">${t("runtime_url")}</label>
-                                    <input id="runtime-url" name="runtimeUrl" value="${escapeAttribute(profile?.runtimeUrl ?? "")}" placeholder="http://127.0.0.1:8788" />
-                                </div>
-                                <div class="field full">
-                                    <label for="api-key">${t("api_key")}</label>
-                                    <input id="api-key" name="apiKey" value="${escapeAttribute(profile?.apiKey ?? "")}" placeholder="${escapeAttribute(t("api_key_placeholder"))}" />
                                 </div>
                                 <div class="field full">
                                     <label for="notes">${t("notes")}</label>
@@ -578,8 +687,7 @@ function render(): void {
                     </div>
 
                     <section class="panel">
-                        <h2 class="section-title">${t("nav_probes")}</h2>
-                        <p class="panel-copy">${t("subtitle")}</p>
+                        <h2 class="section-title">${t("management_kind")} / ${t("runtime_kind")}</h2>
                         <div class="status-list">${probeCards}</div>
                     </section>
                 </section>
@@ -587,10 +695,10 @@ function render(): void {
         </div>
     `;
 
-	bind_events();
+	bindEvents();
 }
 
-function bind_events(): void {
+function bindEvents(): void {
 	document
 		.querySelector<HTMLFormElement>("#profile-form")
 		?.addEventListener("submit", (event) => {
@@ -599,13 +707,9 @@ function bind_events(): void {
 			const nextProfile: ConnectionProfile = {
 				id: state.selectedId || crypto.randomUUID(),
 				name: String(form.get("name") || t("profile_new_name")).trim(),
-				mode:
-					String(form.get("mode") || "management") === "runtime"
-						? "runtime"
-						: "management",
-				managementUrl: normalizeUrl(String(form.get("managementUrl") || "")),
-				runtimeUrl: normalizeUrl(String(form.get("runtimeUrl") || "")),
-				apiKey: String(form.get("apiKey") || "").trim(),
+				host: String(form.get("host") || "").trim(),
+				managementPort: String(form.get("managementPort") || "").trim(),
+				runtimePort: String(form.get("runtimePort") || "").trim(),
 				password: String(form.get("password") || "").trim(),
 				notes: String(form.get("notes") || "").trim(),
 			};
@@ -659,10 +763,9 @@ function bind_events(): void {
 			const profile: ConnectionProfile = {
 				id: crypto.randomUUID(),
 				name: t("profile_new_name"),
-				mode: "management",
-				managementUrl: "",
-				runtimeUrl: "",
-				apiKey: "",
+				host: "",
+				managementPort: "",
+				runtimePort: "",
 				password: "",
 				notes: "",
 			};
@@ -679,10 +782,9 @@ function bind_events(): void {
 			const profile: ConnectionProfile = {
 				id: crypto.randomUUID(),
 				name: t("profile_seed_name"),
-				mode: "runtime",
-				managementUrl: "http://127.0.0.1:8787",
-				runtimeUrl: "http://127.0.0.1:8788",
-				apiKey: "changeme",
+				host: "127.0.0.1",
+				managementPort: "8787",
+				runtimePort: "8788",
 				password: "",
 				notes: t("profile_seed_notes"),
 			};
@@ -696,13 +798,13 @@ function bind_events(): void {
 	document
 		.querySelector<HTMLElement>("[data-action='open-webui']")
 		?.addEventListener("click", () => {
-			void open_webui();
+			void openWebui();
 		});
 
 	document
 		.querySelector<HTMLElement>("[data-action='test-connection']")
 		?.addEventListener("click", () => {
-			void run_probes();
+			void runProbes();
 		});
 
 	document

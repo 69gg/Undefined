@@ -10,6 +10,95 @@ function readJsonScript(id, fallback) {
     }
 }
 
+function normalizeBootstrapAuthPayload(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    const source =
+        payload.tokens && typeof payload.tokens === "object"
+            ? payload.tokens
+            : payload;
+    const accessToken = String(
+        source.access_token || source.accessToken || "",
+    ).trim();
+    const refreshToken = String(
+        source.refresh_token || source.refreshToken || "",
+    ).trim();
+    const accessTokenExpiresAt =
+        Number.parseInt(
+            String(
+                source.access_token_expires_at ||
+                    source.accessTokenExpiresAt ||
+                    "0",
+            ),
+            10,
+        ) || 0;
+    if (!accessToken) return null;
+    return { accessToken, refreshToken, accessTokenExpiresAt };
+}
+
+function decodeBase64UrlUtf8(value) {
+    const normalized = String(value || "")
+        .replace(/-/g, "+")
+        .replace(/_/g, "/");
+    const padded =
+        normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4);
+    const binary = window.atob(padded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+}
+
+function readBootstrapAuthPayload() {
+    const hash = String(window.location.hash || "").replace(/^#/, "");
+    if (!hash) return null;
+    const params = new URLSearchParams(hash);
+    const raw = params.get("auth");
+    if (!raw) return null;
+    try {
+        return normalizeBootstrapAuthPayload(
+            JSON.parse(decodeBase64UrlUtf8(raw)),
+        );
+    } catch (_error) {
+        return null;
+    }
+}
+
+function persistBootstrapAuthPayload(payload) {
+    if (!payload) return;
+    try {
+        if (payload.accessToken) {
+            window.localStorage.setItem(
+                "undefined_auth_access_token",
+                payload.accessToken,
+            );
+        }
+        if (payload.refreshToken) {
+            window.localStorage.setItem(
+                "undefined_auth_refresh_token",
+                payload.refreshToken,
+            );
+        }
+        if (payload.accessTokenExpiresAt) {
+            window.localStorage.setItem(
+                "undefined_auth_access_expires_at",
+                String(payload.accessTokenExpiresAt),
+            );
+        }
+    } catch (_error) {
+        // ignore storage failures in hardened browsers/private mode
+    }
+}
+
+function clearBootstrapAuthHash() {
+    if (!String(window.location.hash || "").includes("auth=")) return;
+    const nextUrl = `${window.location.pathname}${window.location.search}`;
+    window.history.replaceState(null, "", nextUrl);
+}
+
+const bootstrapAuth = readBootstrapAuthPayload();
+if (bootstrapAuth) {
+    persistBootstrapAuthPayload(bootstrapAuth);
+    clearBootstrapAuthHash();
+}
+
 const initialState = readJsonScript("initial-state", {});
 const initialView = readJsonScript("initial-view", "landing");
 
@@ -18,14 +107,23 @@ const state = {
         (initialState && initialState.lang) ||
         getCookie("undefined_lang") ||
         "zh",
-    theme: "light",
+    theme: (initialState && initialState.theme) || "light",
     authenticated: false,
-    authAccessToken: readStorage("undefined_auth_access_token"),
-    authRefreshToken: readStorage("undefined_auth_refresh_token"),
+    launcherMode: !!(initialState && initialState.launcher_mode),
+    authAccessToken:
+        (bootstrapAuth && bootstrapAuth.accessToken) ||
+        readStorage("undefined_auth_access_token"),
+    authRefreshToken:
+        (bootstrapAuth && bootstrapAuth.refreshToken) ||
+        readStorage("undefined_auth_refresh_token"),
     authAccessTokenExpiresAt:
-        Number.parseInt(
-            readStorage("undefined_auth_access_expires_at") || "0",
-            10,
+        Number(
+            (bootstrapAuth && bootstrapAuth.accessTokenExpiresAt) ||
+                Number.parseInt(
+                    readStorage("undefined_auth_access_expires_at") || "0",
+                    10,
+                ) ||
+                0,
         ) || 0,
     authRefreshTimer: null,
     usingDefaultPassword: !!(
@@ -33,7 +131,7 @@ const state = {
     ),
     configExists: !!(initialState && initialState.config_exists),
     capabilities: null,
-    tab: "overview",
+    tab: (initialState && initialState.initial_tab) || "overview",
     view: initialView || "landing",
     config: {},
     comments: {},

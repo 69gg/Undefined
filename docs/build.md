@@ -102,8 +102,10 @@ uv run ruff check src/Undefined/webui
 当前 App 的职责不是维护一套长期独立的第二后台，而是：
 
 - 保存连接档案
+- 使用一个 IP/域名 + 两个端口录入方式管理实例
 - 测试 Management / Runtime 入口
-- 直接打开真正的远程 WebUI
+- 自动尝试登录后打开真正的远程 WebUI
+- 退出 WebUI 后回到主界面
 
 跨平台客户端位于：
 

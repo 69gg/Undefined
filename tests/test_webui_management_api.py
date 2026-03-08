@@ -8,8 +8,9 @@ from aiohttp import web
 
 from Undefined.webui.app import create_app
 from Undefined.webui.core import SessionStore
-from Undefined.webui.routes import _auth, _system
+from Undefined.webui.routes import _auth, _index, _system
 from Undefined.webui.routes._shared import (
+    REDIRECT_TO_CONFIG_ONCE_APP_KEY,
     SESSION_COOKIE,
     SESSION_STORE_APP_KEY,
     SETTINGS_APP_KEY,
@@ -26,6 +27,7 @@ def _request(
     json_body: dict[str, object] | None = None,
     headers: dict[str, str] | None = None,
     cookies: dict[str, str] | None = None,
+    query: dict[str, str] | None = None,
     settings: object | None = None,
     session_store: SessionStore | None = None,
 ) -> DummyRequest:
@@ -33,6 +35,7 @@ def _request(
         _json=json_body or {},
         headers=headers or {},
         cookies=cookies or {},
+        query=query or {},
         app={
             SETTINGS_APP_KEY: settings
             or SimpleNamespace(
@@ -43,6 +46,7 @@ def _request(
                 config_exists=True,
             ),
             SESSION_STORE_APP_KEY: session_store or SessionStore(),
+            REDIRECT_TO_CONFIG_ONCE_APP_KEY: False,
         },
         remote="127.0.0.1",
         transport=None,
@@ -162,3 +166,28 @@ def test_create_app_registers_management_routes() -> None:
     assert ("GET", "/api/v1/management/runtime/meta") in routes
     assert ("POST", "/api/v1/management/config/validate") in routes
     assert ("POST", "/api/v1/management/bot/start") in routes
+
+
+async def test_index_handler_applies_launcher_mode_and_initial_view() -> None:
+    request = _request(
+        query={
+            "lang": "en",
+            "theme": "dark",
+            "view": "app",
+            "tab": "logs",
+            "client": "native",
+        }
+    )
+
+    response = await _index.index_handler(cast(web.Request, cast(Any, request)))
+    payload_text = cast(web.Response, response).text
+
+    assert payload_text is not None
+    assert '"lang": "en"' in payload_text
+    assert '"theme": "dark"' in payload_text
+    assert '"initial_tab": "logs"' in payload_text
+    assert '"launcher_mode": true' in payload_text
+    assert (
+        '<script id="initial-view" type="application/json">"app"</script>'
+        in payload_text
+    )

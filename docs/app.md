@@ -6,7 +6,7 @@ Undefined 当前的跨平台 App（`apps/undefined-console/`）定位为：
 - 对 Management API / Runtime API 做基础连通性探测
 - 在桌面端 / Android 中直接打开 **真正的远程 WebUI**
 
-也就是说，它不是再维护一套长期独立演进的“第二后台”，而是作为 **连接器 + 容器**，尽量保证你最终看到的仍然是原生 WebUI 的完整体验与完整功能。
+也就是说，它不是再维护一套长期独立演进的“第二后台”，而是作为 **连接器 / 启动器**，尽量保证你最终看到的仍然是原生 WebUI 的完整体验与完整功能。
 
 ## 1. 支持范围
 
@@ -22,53 +22,73 @@ Undefined 当前的跨平台 App（`apps/undefined-console/`）定位为：
 - `iOS` 当前**不在发布矩阵内**
 - Release workflow 会在打 tag 时同步构建并上传非 iOS 平台安装包
 
-## 2. 为什么不再维护一套独立后台
+## 2. App 的职责
 
-浏览器版 WebUI 已经是项目里最完整、最稳定、最好看的控制台。
+Tauri App 当前不再尝试长期维护一套平行后台。它的职责是：
 
-如果 Tauri 内再维护一套平行后台，会带来两个问题：
+1. 保存远程实例连接配置
+2. 做基础连通性探测
+3. 自动尝试登录 Management API
+4. 把语言 / 主题偏好透传给远程 WebUI
+5. 直接打开真正的 WebUI
 
-1. UI 很容易和 WebUI 漂移
-2. 功能很容易落后于 WebUI
-
-所以当前策略是：
+换句话说：
 
 - **浏览器 WebUI 是唯一真源**
 - **Tauri App 负责连接与打开这个真源**
 
-## 3. 两种连接模式
+## 3. 连接模型
 
-### Management 模式（推荐）
+每个连接现在使用以下字段：
 
-适合日常运维与远程管理。
+- `显示名称`
+- `IP / 域名`
+- `Management 端口`
+- `Runtime 端口`
+- `管理密码`
+- `备注`
 
-需要：
+这样做的好处是：
 
-- `management_url`
-- WebUI 密码（用于测试管理登录）
+- 不再要求用户手写两个完整 URL
+- 更适合桌面端和移动端录入
+- 同一个主机下的两个服务端口更容易一起管理
 
-作用：
+## 4. Management 与 Runtime 的作用
 
-- 探测 Management API
-- 直接打开真正的远程 WebUI
-
-### Runtime-only 模式
-
-适合只接运行态，只读或半只读使用。
-
-需要：
-
-- `runtime_url`
-- `X-Undefined-API-Key`
+### Management
 
 作用：
 
-- 探测 Runtime API 健康状态
-- 查看运行态是否可达
+- 测试 Management API 是否可达
+- 自动登录（如果填写了管理密码）
+- 打开真正的 WebUI
 
-不建议把 Runtime-only 模式当作主要远程运维方案，因为它无法替代完整 WebUI。
+### Runtime
 
-## 4. 推荐使用流程
+作用：
+
+- 做 Runtime API 健康检查
+- 确认 OpenAPI 与运行态是否可达
+
+说明：Runtime 只是辅助探测，不负责替代完整后台。
+
+## 5. 语言 / 主题 / 自动登录
+
+当你在 App 中点击“打开 WebUI”时，当前实现会：
+
+1. 如果填写了管理密码，先尝试调用登录接口
+2. 再把当前的 `lang/theme` 偏好透传给远程 WebUI
+3. 默认直接跳到 WebUI 的 `app` 视图（不是 landing）
+
+这意味着：
+
+- App 里切到英文 / 暗色后，打开 WebUI 会尽量保持一致
+- 如果自动登录成功，进入 WebUI 后会直接是已登录状态
+- 如果自动登录失败，则会落到 WebUI 登录页
+- 从 WebUI 退出登录后，会回到主界面而不是停留在管理页
+
+## 6. 推荐使用流程
 
 1. 先在服务器或本机运行：
 
@@ -78,11 +98,11 @@ uv run Undefined-webui
 
 2. 在浏览器中完成首次密码设置与配置补齐
 3. 启动 Bot
-4. 在桌面端或 Android App 中新增一个 `Management` 连接档案
-5. 在 App 中点击“打开 WebUI”
-6. 后续直接在 App 容器中使用真正的 WebUI
+4. 在桌面端或 Android App 中新增一个连接档案
+5. 点击“测试连接”确认 Management / Runtime 可达
+6. 点击“打开 WebUI”后，如已填写管理密码会先自动登录，再进入真正后台
 
-## 5. Android 适配说明
+## 7. Android 适配说明
 
 Android 端仍然走同一套连接模型，但 UI 目标是：
 
@@ -96,7 +116,7 @@ Android 端仍然走同一套连接模型，但 UI 目标是：
 - 优化打开远程 WebUI 前的引导
 - 必要时对 WebUI 本体做移动端适配
 
-## 6. Release 产物
+## 8. Release 产物
 
 每次 `v*` tag 发布时，Release workflow 计划同步上传：
 
@@ -106,7 +126,7 @@ Android 端仍然走同一套连接模型，但 UI 目标是：
 - macOS：`.dmg`（Intel / Apple Silicon）
 - Android：`.apk`
 
-## 7. 本地开发
+## 9. 本地开发
 
 App 位于：
 
@@ -120,6 +140,7 @@ npm install
 npm run dev
 npm run tauri:dev
 npm run tauri:build
+npm run tauri:build:no-strip
 npm run tauri:android:init
 npm run tauri:android -- --apk
 ```
@@ -142,12 +163,14 @@ npm run tauri:dev
 
 3. 在 App 中：
 
-- 填 `Management 地址`
+- 填 `IP / 域名`
+- 填 `Management 端口`
+- 需要时填 `Runtime 端口`
 - 填管理密码
 - 点击“测试连接”
 - 点击“打开 WebUI”
 
-## 8. 结论
+## 10. 结论
 
 如果你要：
 
@@ -158,4 +181,4 @@ npm run tauri:dev
 那么当前最稳妥的路线就是：
 
 - `Undefined-webui` 继续作为真正后台
-- `Tauri App` 作为远程连接器和容器
+- `Tauri App` 作为远程连接器和启动器
