@@ -27,4 +27,7 @@ body {
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr;
   min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+  align-items: stretch;
 }
