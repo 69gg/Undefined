@@ -180,11 +180,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             if _resolve_output_host_path(fpath, host_tmpdir) is None:
                 return f"错误: 输出文件路径必须位于容器 /tmp 目录内: '{fpath}'"
 
-        # 将代码写入脚本文件（避免 shell 引号转义问题）
         script_path = os.path.join(host_tmpdir, "_script.py")
-        with open(script_path, "w", encoding="utf-8") as f:
-            f.write(code)
-
         deadline = time.monotonic() + timeout
 
         if has_libs:
@@ -205,6 +201,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                     f"{install_stderr}\n{install_stdout}"
                 )
 
+            # 避免在有网络的安装阶段暴露用户脚本给依赖安装代码。
+            with open(script_path, "w", encoding="utf-8") as f:
+                f.write(code)
+
             exec_timeout = max(deadline - time.monotonic(), 1.0)
             cmd = _build_exec_cmd(
                 host_tmpdir,
@@ -212,6 +212,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 pythonpath="/tmp/_site_packages",
             )
         else:
+            # 将代码写入脚本文件（避免 shell 引号转义问题）
+            with open(script_path, "w", encoding="utf-8") as f:
+                f.write(code)
             cmd = _build_exec_cmd(host_tmpdir, memory)
             exec_timeout = timeout
 

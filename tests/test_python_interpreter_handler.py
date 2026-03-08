@@ -69,6 +69,7 @@ async def test_execute_with_libraries_runs_user_code_in_network_isolated_contain
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, ...]] = []
+    script_paths: list[str] = []
 
     async def _fake_create_subprocess_exec(
         *args: str, **kwargs: object
@@ -76,11 +77,15 @@ async def test_execute_with_libraries_runs_user_code_in_network_isolated_contain
         calls.append(tuple(args))
         return _FakeProcess()
 
-    monkeypatch.setattr(
-        asyncio,
-        "create_subprocess_exec",
-        _fake_create_subprocess_exec,
-    )
+    real_mkdtemp = tempfile.mkdtemp
+
+    def _tracked_mkdtemp(prefix: str) -> str:
+        path = real_mkdtemp(prefix=prefix)
+        script_paths.append(str(Path(path) / "_script.py"))
+        return path
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+    monkeypatch.setattr(tempfile, "mkdtemp", _tracked_mkdtemp)
 
     result = await python_handler.execute(
         {
@@ -101,6 +106,8 @@ async def test_execute_with_libraries_runs_user_code_in_network_isolated_contain
     assert "pip install" in " ".join(install_cmd)
     assert "--user" in install_cmd
     assert python_handler.DOCKER_USER in install_cmd
+    assert len(script_paths) == 1
+    assert not Path(script_paths[0]).exists()
 
     assert "--network" in exec_cmd
     assert "none" in exec_cmd
