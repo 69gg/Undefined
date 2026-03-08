@@ -4,13 +4,13 @@
 
 - Python 包构建（`wheel` / `sdist`）
 - `Undefined-webui` 管理控制台的本地开发与验证
-- 跨平台控制台 `apps/undefined-console/` 的桌面端 / Android 构建
+- 跨平台连接器 `apps/undefined-console/` 的桌面端 / Android 构建
 - GitHub Release 工作流的发布矩阵
 
 > 约定：
 >
 > - 浏览器版管理入口仍然是 `uv run Undefined-webui`
-> - 桌面端 / Android 控制台是额外客户端，不替代 `Undefined-webui`
+> - 桌面端 / Android App 是额外的连接器 / 容器，不替代 `Undefined-webui`
 > - Release 工作流默认覆盖 `Windows / macOS / Linux / Android`，不包含 `iOS`
 
 ## 1. 环境准备
@@ -99,6 +99,12 @@ uv run ruff check src/Undefined/webui
 
 ## 4. 跨平台控制台 App
 
+当前 App 的职责不是维护一套长期独立的第二后台，而是：
+
+- 保存连接档案
+- 测试 Management / Runtime 入口
+- 直接打开真正的远程 WebUI
+
 跨平台客户端位于：
 
 ```text
@@ -127,7 +133,6 @@ npm run tauri:dev
 ### 桌面端构建
 
 ```bash
-npm run build
 npm run tauri:build
 ```
 
@@ -290,7 +295,8 @@ uv build
 ```bash
 cd apps/undefined-console
 npm install
-npm run build
+npm run check  # 代码检查（lint + typecheck + cargo check）
+# 注意：npm run tauri:build 会自动执行 npm run build，无需手动构建前端
 ```
 
 如果本次改动涉及 Android 构建链：
