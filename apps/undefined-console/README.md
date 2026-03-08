@@ -15,9 +15,24 @@ A `Tauri v2` management client for Undefined that targets the remote Management 
 npm install
 npm run dev           # Vite web shell
 npm run build         # Shared frontend bundle
-npm run tauri:dev     # Desktop development shell
-npm run tauri:build   # Desktop production bundles
+npm run tauri:dev           # Desktop development shell
+npm run tauri:build         # Desktop production bundles
+npm run tauri:build:no-strip # Linux 本地打包失败时的 workaround
 npm run tauri:android -- --apk
+```
+
+## Linux local build note
+
+On some newer Linux distributions, local AppImage packaging may fail during the `linuxdeploy` stage due to `strip` compatibility. If that happens, use:
+
+```bash
+NO_STRIP=true npm run tauri:build
+```
+
+or:
+
+```bash
+npm run tauri:build:no-strip
 ```
 
 ## Connection model

@@ -136,6 +136,33 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
+#### Linux 本地 AppImage 备注
+
+在部分较新的 Linux 发行版上，本地执行 `npm run tauri:build` 可能在 AppImage 阶段失败，常见表现是：
+
+- `failed to run linuxdeploy`
+- 或 `strip` 无法处理 `.relr.dyn` 段
+
+如果你本地遇到这个问题，可直接使用：
+
+```bash
+NO_STRIP=true npm run tauri:build
+```
+
+或者使用仓库里补好的快捷脚本：
+
+```bash
+npm run tauri:build:no-strip
+```
+
+如果你只想在本机先验证 Linux 安装包链路，也可以优先只打 `deb`：
+
+```bash
+npm run tauri:build:no-strip -- --bundles deb
+```
+
+这个问题主要是本机 `linuxdeploy` / `strip` 工具链兼容性导致，不一定代表项目代码或 Tauri 配置有问题。
+
 ### Android 初始化与构建
 
 首次或 CI 环境中，先初始化 Android 项目：

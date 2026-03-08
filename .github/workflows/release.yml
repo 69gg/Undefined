@@ -177,7 +177,12 @@ jobs:
 
       - name: Build Tauri bundles
         working-directory: ${{ env.APP_DIR }}
-        run: npm run tauri:build -- --ci --bundles ${{ matrix.bundles }}
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            NO_STRIP=true npm run tauri:build -- --ci --bundles ${{ matrix.bundles }}
+          else
+            npm run tauri:build -- --ci --bundles ${{ matrix.bundles }}
+          fi
 
       - name: Collect release artifacts
         shell: bash
