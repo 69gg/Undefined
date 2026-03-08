@@ -516,6 +516,7 @@ class AICoordinator:
                 call_type=request.get("call_type", "background"),
                 max_tokens=request.get("max_tokens")
                 or getattr(request["model_config"], "max_tokens", 4096),
+                transport_state=request.get("transport_state"),
             )
             self.ai.set_llm_call_result(request_id, result)
         except Exception as exc:

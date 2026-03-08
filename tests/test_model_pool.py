@@ -8,7 +8,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from Undefined.ai.model_selector import ModelSelector
-from Undefined.config.models import ChatModelConfig, ModelPool, ModelPoolEntry
+from Undefined.config.models import (
+    AgentModelConfig,
+    ChatModelConfig,
+    ModelPool,
+    ModelPoolEntry,
+)
 from Undefined.services.model_pool import ModelPoolService
 
 
@@ -294,6 +299,72 @@ class TestModelSelectorSelection:
         assert models[0][0] == "primary-model"
         assert models[1][0] == "model-a"
         assert models[2][0] == "model-b"
+
+    def test_select_chat_config_preserves_responses_flags(
+        self,
+        model_selector: ModelSelector,
+    ) -> None:
+        primary = ChatModelConfig(
+            api_url="https://api.example.com/v1",
+            api_key="primary-key",
+            model_name="primary-model",
+            max_tokens=4096,
+            pool=ModelPool(
+                enabled=True,
+                strategy="round_robin",
+                models=[
+                    ModelPoolEntry(
+                        api_url="https://pool.example.com/v1",
+                        api_key="pool-key",
+                        model_name="pool-model",
+                        max_tokens=2048,
+                        api_mode="responses",
+                        responses_tool_choice_compat=True,
+                        responses_force_stateless_replay=True,
+                    )
+                ],
+            ),
+        )
+
+        result = model_selector.select_chat_config(primary, global_enabled=True)
+
+        assert result.model_name == "pool-model"
+        assert result.api_mode == "responses"
+        assert result.responses_tool_choice_compat is True
+        assert result.responses_force_stateless_replay is True
+
+    def test_select_agent_config_preserves_responses_flags(
+        self,
+        model_selector: ModelSelector,
+    ) -> None:
+        primary = AgentModelConfig(
+            api_url="https://api.example.com/v1",
+            api_key="primary-key",
+            model_name="primary-agent",
+            max_tokens=4096,
+            pool=ModelPool(
+                enabled=True,
+                strategy="round_robin",
+                models=[
+                    ModelPoolEntry(
+                        api_url="https://pool.example.com/v1",
+                        api_key="pool-key",
+                        model_name="pool-agent",
+                        max_tokens=2048,
+                        api_mode="responses",
+                        responses_tool_choice_compat=True,
+                        responses_force_stateless_replay=True,
+                    )
+                ],
+            ),
+        )
+
+        result = model_selector.select_agent_config(primary, global_enabled=True)
+
+        assert result.model_name == "pool-agent"
+        assert result.api_mode == "responses"
+        assert result.responses_tool_choice_compat is True
+        assert result.responses_force_stateless_replay is True
 
 
 class TestModelPoolServiceHandleMessage:

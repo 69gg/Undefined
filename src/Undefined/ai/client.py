@@ -320,6 +320,7 @@ class AIClient:
         tool_choice: Any = "auto",
         call_type: str = "background",
         max_tokens: int | None = None,
+        transport_state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """将 LLM 调用投递到后台队列，走统一发车间隔和 Token 统计。
         无 queue_manager 时降级为直接调用。"""
@@ -336,6 +337,7 @@ class AIClient:
                 tool_choice=tool_choice,
                 call_type=call_type,
                 max_tokens=effective_max_tokens,
+                transport_state=transport_state,
             )
         request_id = uuid4().hex
         event: asyncio.Event = asyncio.Event()
@@ -351,6 +353,7 @@ class AIClient:
                 "tool_choice": tool_choice,
                 "call_type": call_type,
                 "max_tokens": effective_max_tokens,
+                "transport_state": transport_state,
             },
             model_name=model_name,
         )
@@ -642,10 +645,18 @@ class AIClient:
         call_type: str = "chat",
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str = "auto",
+        transport_state: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         tools = self.tool_manager.maybe_merge_agent_tools(call_type, tools)
-        messages, tools = await self._maybe_prefetch_tools(messages, tools, call_type)
+        if not (
+            isinstance(transport_state, dict)
+            and transport_state.get("previous_response_id")
+        ):
+            messages, tools = await self._maybe_prefetch_tools(
+                messages, tools, call_type
+            )
+        message_count_for_transport = len(messages)
         return await self._requester.request(
             model_config=model_config,
             messages=messages,
@@ -653,6 +664,8 @@ class AIClient:
             call_type=call_type,
             tools=tools,
             tool_choice=tool_choice,
+            transport_state=transport_state,
+            message_count_for_transport=message_count_for_transport,
             **kwargs,
         )
 
@@ -859,6 +872,7 @@ class AIClient:
         cot_compat = getattr(effective_chat_config, "thinking_tool_call_compat", False)
         cot_compat_logged = False
         cot_missing_logged = False
+        transport_state: dict[str, Any] | None = None
 
         while iteration < max_iterations:
             iteration += 1
@@ -872,6 +886,7 @@ class AIClient:
                     call_type="chat",
                     tools=tools,
                     tool_choice="auto",
+                    transport_state=transport_state,
                 )
 
                 tool_name_map = (
@@ -884,6 +899,15 @@ class AIClient:
                         api_to_internal = {
                             str(k): str(v) for k, v in raw_api_to_internal.items()
                         }
+
+                next_transport_state = (
+                    result.get("_transport_state") if isinstance(result, dict) else None
+                )
+                transport_state = (
+                    next_transport_state
+                    if isinstance(next_transport_state, dict)
+                    else None
+                )
 
                 choice = result.get("choices", [{}])[0]
                 message = choice.get("message", {})

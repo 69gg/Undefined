@@ -173,6 +173,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         logger.warning("[发送消息] 收到空消息请求")
         return "消息内容不能为空"
 
+    # 解析 reply_to 参数（无效值静默忽略，视为未传）
+    reply_to_id, _ = _parse_positive_int(args.get("reply_to"), "reply_to")
+
     runtime_config = context.get("runtime_config")
 
     send_message_callback = context.get("send_message_callback")
@@ -206,10 +209,14 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         try:
             if target_type == "group":
                 logger.info("[发送消息] 准备发送到群 %s: %s", target_id, message[:100])
-                await sender.send_group_message(target_id, message)
+                await sender.send_group_message(
+                    target_id, message, reply_to=reply_to_id
+                )
             else:
                 logger.info("[发送消息] 准备发送私聊 %s: %s", target_id, message[:100])
-                await sender.send_private_message(target_id, message)
+                await sender.send_private_message(
+                    target_id, message, reply_to=reply_to_id
+                )
             context["message_sent_this_turn"] = True
             return "消息已发送"
         except Exception as e:

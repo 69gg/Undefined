@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -14,10 +15,16 @@ class ModelPoolEntry:
     model_name: str
     max_tokens: int
     queue_interval_seconds: float = 1.0
+    api_mode: str = "chat_completions"
     thinking_enabled: bool = False
     thinking_budget_tokens: int = 0
     thinking_include_budget: bool = True
-    thinking_tool_call_compat: bool = False
+    thinking_tool_call_compat: bool = True
+    responses_tool_choice_compat: bool = False
+    responses_force_stateless_replay: bool = False
+    reasoning_enabled: bool = False
+    reasoning_effort: str = "medium"
+    request_params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -38,12 +45,20 @@ class ChatModelConfig:
     model_name: str
     max_tokens: int
     queue_interval_seconds: float = 1.0
+    api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     thinking_tool_call_compat: bool = (
-        False  # 思维链 + 工具调用兼容（回传 reasoning_content）
+        True  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
+    responses_tool_choice_compat: bool = (
+        False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
+    )
+    responses_force_stateless_replay: bool = False  # Responses API 续轮强制降级为 stateless replay（不使用 previous_response_id）
+    reasoning_enabled: bool = False  # 是否启用 reasoning.effort
+    reasoning_effort: str = "medium"  # reasoning effort 档位
+    request_params: dict[str, Any] = field(default_factory=dict)
     pool: ModelPool | None = None  # 模型池配置
 
 
@@ -55,12 +70,20 @@ class VisionModelConfig:
     api_key: str
     model_name: str
     queue_interval_seconds: float = 1.0
+    api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     thinking_tool_call_compat: bool = (
-        False  # 思维链 + 工具调用兼容（回传 reasoning_content）
+        True  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
+    responses_tool_choice_compat: bool = (
+        False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
+    )
+    responses_force_stateless_replay: bool = False  # Responses API 续轮强制降级为 stateless replay（不使用 previous_response_id）
+    reasoning_enabled: bool = False  # 是否启用 reasoning.effort
+    reasoning_effort: str = "medium"  # reasoning effort 档位
+    request_params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -72,12 +95,20 @@ class SecurityModelConfig:
     model_name: str
     max_tokens: int
     queue_interval_seconds: float = 1.0
+    api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 0  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     thinking_tool_call_compat: bool = (
-        False  # 思维链 + 工具调用兼容（回传 reasoning_content）
+        True  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
+    responses_tool_choice_compat: bool = (
+        False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
+    )
+    responses_force_stateless_replay: bool = False  # Responses API 续轮强制降级为 stateless replay（不使用 previous_response_id）
+    reasoning_enabled: bool = False  # 是否启用 reasoning.effort
+    reasoning_effort: str = "medium"  # reasoning effort 档位
+    request_params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -91,6 +122,7 @@ class EmbeddingModelConfig:
     dimensions: int | None = None
     query_instruction: str = ""  # 查询端指令前缀（如 Qwen3-Embedding 需要）
     document_instruction: str = ""  # 文档端指令前缀（如 E5 系列需要 "passage: "）
+    request_params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -102,6 +134,7 @@ class RerankModelConfig:
     model_name: str
     queue_interval_seconds: float = 1.0
     query_instruction: str = ""  # 查询端指令前缀（如部分 rerank 模型需要）
+    request_params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -113,12 +146,20 @@ class AgentModelConfig:
     model_name: str
     max_tokens: int = 4096
     queue_interval_seconds: float = 1.0
+    api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 0  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     thinking_tool_call_compat: bool = (
-        False  # 思维链 + 工具调用兼容（回传 reasoning_content）
+        True  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
+    responses_tool_choice_compat: bool = (
+        False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
+    )
+    responses_force_stateless_replay: bool = False  # Responses API 续轮强制降级为 stateless replay（不使用 previous_response_id）
+    reasoning_enabled: bool = False  # 是否启用 reasoning.effort
+    reasoning_effort: str = "medium"  # reasoning effort 档位
+    request_params: dict[str, Any] = field(default_factory=dict)
     pool: ModelPool | None = None  # 模型池配置
 
 

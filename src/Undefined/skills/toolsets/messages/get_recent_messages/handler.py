@@ -104,10 +104,15 @@ def _format_message_xml(msg: dict[str, Any]) -> str:
     chat_name = msg.get("chat_name", "未知群聊")
     timestamp = msg.get("timestamp", "")
     text = msg.get("message", "")
+    message_id = msg.get("message_id")
 
     location = _format_message_location(msg_type_val, chat_name)
 
-    return f"""<message sender="{sender_name}" sender_id="{sender_id}" location="{location}" time="{timestamp}">
+    msg_id_attr = ""
+    if message_id is not None:
+        msg_id_attr = f' message_id="{message_id}"'
+
+    return f"""<message{msg_id_attr} sender="{sender_name}" sender_id="{sender_id}" location="{location}" time="{timestamp}">
 <content>{text}</content>
 </message>"""
 

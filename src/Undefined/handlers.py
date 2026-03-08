@@ -272,6 +272,7 @@ class MessageHandler:
                 text_content=parsed_content,
                 display_name=private_sender_nickname,
                 user_name=user_name,
+                message_id=trigger_message_id,
             )
 
             # 如果是 bot 自己的消息，只保存不触发回复，避免无限循环
@@ -391,6 +392,7 @@ class MessageHandler:
             group_name=group_name,
             role=sender_role,
             title=sender_title,
+            message_id=trigger_message_id,
         )
 
         # 如果是 bot 自己的消息，只保存不触发回复，避免无限循环

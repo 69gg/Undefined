@@ -39,6 +39,10 @@ from .models import (
     SecurityModelConfig,
     VisionModelConfig,
 )
+from Undefined.utils.request_params import (
+    merge_request_params,
+    normalize_request_params,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -225,6 +229,16 @@ def _coerce_str_list(value: Any) -> list[str]:
     return []
 
 
+def _coerce_request_params(value: Any) -> dict[str, Any]:
+    return normalize_request_params(value)
+
+
+def _get_model_request_params(data: dict[str, Any], model_name: str) -> dict[str, Any]:
+    return _coerce_request_params(
+        _get_nested(data, ("models", model_name, "request_params"))
+    )
+
+
 def _get_value(
     data: dict[str, Any],
     path: tuple[str, ...],
@@ -239,6 +253,10 @@ def _get_value(
             _warn_env_fallback(env_key)
             return env_value
     return None
+
+
+_VALID_API_MODES = {"chat_completions", "responses"}
+_VALID_REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 
 
 def _resolve_thinking_compat_flags(
@@ -266,7 +284,7 @@ def _resolve_thinking_compat_flags(
     )
 
     include_budget_default = True
-    tool_call_compat_default = False
+    tool_call_compat_default = True
     if legacy_value is not None:
         legacy_enabled = _coerce_bool(legacy_value, False)
         include_budget_default = not legacy_enabled
@@ -275,6 +293,58 @@ def _resolve_thinking_compat_flags(
     return (
         _coerce_bool(include_budget_value, include_budget_default),
         _coerce_bool(tool_call_compat_value, tool_call_compat_default),
+    )
+
+
+def _resolve_api_mode(
+    data: dict[str, Any],
+    model_name: str,
+    env_key: str,
+    default: str = "chat_completions",
+) -> str:
+    raw_value = _get_value(data, ("models", model_name, "api_mode"), env_key)
+    value = _coerce_str(raw_value, default).strip().lower()
+    if value not in _VALID_API_MODES:
+        return default
+    return value
+
+
+def _resolve_reasoning_effort(value: Any, default: str = "medium") -> str:
+    effort = _coerce_str(value, default).strip().lower()
+    if effort not in _VALID_REASONING_EFFORTS:
+        return default
+    return effort
+
+
+def _resolve_responses_tool_choice_compat(
+    data: dict[str, Any],
+    model_name: str,
+    env_key: str,
+    default: bool = False,
+) -> bool:
+    return _coerce_bool(
+        _get_value(
+            data,
+            ("models", model_name, "responses_tool_choice_compat"),
+            env_key,
+        ),
+        default,
+    )
+
+
+def _resolve_responses_force_stateless_replay(
+    data: dict[str, Any],
+    model_name: str,
+    env_key: str,
+    default: bool = False,
+) -> bool:
+    return _coerce_bool(
+        _get_value(
+            data,
+            ("models", model_name, "responses_force_stateless_replay"),
+            env_key,
+        ),
+        default,
     )
 
 
@@ -1496,6 +1566,16 @@ class Config:
                         item.get("queue_interval_seconds"),
                         primary_config.queue_interval_seconds,
                     ),
+                    api_mode=(
+                        _coerce_str(item.get("api_mode"), primary_config.api_mode)
+                        .strip()
+                        .lower()
+                    )
+                    if _coerce_str(item.get("api_mode"), primary_config.api_mode)
+                    .strip()
+                    .lower()
+                    in _VALID_API_MODES
+                    else primary_config.api_mode,
                     thinking_enabled=_coerce_bool(
                         item.get("thinking_enabled"), primary_config.thinking_enabled
                     ),
@@ -1510,6 +1590,26 @@ class Config:
                     thinking_tool_call_compat=_coerce_bool(
                         item.get("thinking_tool_call_compat"),
                         primary_config.thinking_tool_call_compat,
+                    ),
+                    responses_tool_choice_compat=_coerce_bool(
+                        item.get("responses_tool_choice_compat"),
+                        primary_config.responses_tool_choice_compat,
+                    ),
+                    responses_force_stateless_replay=_coerce_bool(
+                        item.get("responses_force_stateless_replay"),
+                        primary_config.responses_force_stateless_replay,
+                    ),
+                    reasoning_enabled=_coerce_bool(
+                        item.get("reasoning_enabled"),
+                        primary_config.reasoning_enabled,
+                    ),
+                    reasoning_effort=_resolve_reasoning_effort(
+                        item.get("reasoning_effort"),
+                        primary_config.reasoning_effort,
+                    ),
+                    request_params=merge_request_params(
+                        primary_config.request_params,
+                        item.get("request_params"),
                     ),
                 )
             )
@@ -1554,6 +1654,7 @@ class Config:
                 _get_value(data, ("models", "embedding", "document_instruction"), None),
                 "",
             ),
+            request_params=_get_model_request_params(data, "embedding"),
         )
 
     @staticmethod
@@ -1587,6 +1688,7 @@ class Config:
             query_instruction=_coerce_str(
                 _get_value(data, ("models", "rerank", "query_instruction"), None), ""
             ),
+            request_params=_get_model_request_params(data, "rerank"),
         )
 
     @staticmethod
@@ -1610,6 +1712,29 @@ class Config:
                 legacy_env_key="CHAT_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
             )
         )
+        api_mode = _resolve_api_mode(data, "chat", "CHAT_MODEL_API_MODE")
+        responses_tool_choice_compat = _resolve_responses_tool_choice_compat(
+            data, "chat", "CHAT_MODEL_RESPONSES_TOOL_CHOICE_COMPAT"
+        )
+        responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
+            data, "chat", "CHAT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+        )
+        reasoning_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "chat", "reasoning_enabled"),
+                "CHAT_MODEL_REASONING_ENABLED",
+            ),
+            False,
+        )
+        reasoning_effort = _resolve_reasoning_effort(
+            _get_value(
+                data,
+                ("models", "chat", "reasoning_effort"),
+                "CHAT_MODEL_REASONING_EFFORT",
+            ),
+            "medium",
+        )
         config = ChatModelConfig(
             api_url=_coerce_str(
                 _get_value(data, ("models", "chat", "api_url"), "CHAT_MODEL_API_URL"),
@@ -1630,6 +1755,7 @@ class Config:
                 8192,
             ),
             queue_interval_seconds=queue_interval_seconds,
+            api_mode=api_mode,
             thinking_enabled=_coerce_bool(
                 _get_value(
                     data,
@@ -1648,6 +1774,11 @@ class Config:
             ),
             thinking_include_budget=thinking_include_budget,
             thinking_tool_call_compat=thinking_tool_call_compat,
+            responses_tool_choice_compat=responses_tool_choice_compat,
+            responses_force_stateless_replay=responses_force_stateless_replay,
+            reasoning_enabled=reasoning_enabled,
+            reasoning_effort=reasoning_effort,
+            request_params=_get_model_request_params(data, "chat"),
         )
         config.pool = Config._parse_model_pool(data, "chat", config)
         return config
@@ -1673,6 +1804,29 @@ class Config:
                 legacy_env_key="VISION_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
             )
         )
+        api_mode = _resolve_api_mode(data, "vision", "VISION_MODEL_API_MODE")
+        responses_tool_choice_compat = _resolve_responses_tool_choice_compat(
+            data, "vision", "VISION_MODEL_RESPONSES_TOOL_CHOICE_COMPAT"
+        )
+        responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
+            data, "vision", "VISION_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+        )
+        reasoning_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "vision", "reasoning_enabled"),
+                "VISION_MODEL_REASONING_ENABLED",
+            ),
+            False,
+        )
+        reasoning_effort = _resolve_reasoning_effort(
+            _get_value(
+                data,
+                ("models", "vision", "reasoning_effort"),
+                "VISION_MODEL_REASONING_EFFORT",
+            ),
+            "medium",
+        )
         return VisionModelConfig(
             api_url=_coerce_str(
                 _get_value(
@@ -1693,6 +1847,7 @@ class Config:
                 "",
             ),
             queue_interval_seconds=queue_interval_seconds,
+            api_mode=api_mode,
             thinking_enabled=_coerce_bool(
                 _get_value(
                     data,
@@ -1711,6 +1866,11 @@ class Config:
             ),
             thinking_include_budget=thinking_include_budget,
             thinking_tool_call_compat=thinking_tool_call_compat,
+            responses_tool_choice_compat=responses_tool_choice_compat,
+            responses_force_stateless_replay=responses_force_stateless_replay,
+            reasoning_enabled=reasoning_enabled,
+            reasoning_effort=reasoning_effort,
+            request_params=_get_model_request_params(data, "vision"),
         )
 
     @staticmethod
@@ -1755,6 +1915,29 @@ class Config:
                 legacy_env_key="SECURITY_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
             )
         )
+        api_mode = _resolve_api_mode(data, "security", "SECURITY_MODEL_API_MODE")
+        responses_tool_choice_compat = _resolve_responses_tool_choice_compat(
+            data, "security", "SECURITY_MODEL_RESPONSES_TOOL_CHOICE_COMPAT"
+        )
+        responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
+            data, "security", "SECURITY_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+        )
+        reasoning_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "security", "reasoning_enabled"),
+                "SECURITY_MODEL_REASONING_ENABLED",
+            ),
+            False,
+        )
+        reasoning_effort = _resolve_reasoning_effort(
+            _get_value(
+                data,
+                ("models", "security", "reasoning_effort"),
+                "SECURITY_MODEL_REASONING_EFFORT",
+            ),
+            "medium",
+        )
 
         if api_url and api_key and model_name:
             return SecurityModelConfig(
@@ -1770,6 +1953,7 @@ class Config:
                     100,
                 ),
                 queue_interval_seconds=queue_interval_seconds,
+                api_mode=api_mode,
                 thinking_enabled=_coerce_bool(
                     _get_value(
                         data,
@@ -1788,6 +1972,11 @@ class Config:
                 ),
                 thinking_include_budget=thinking_include_budget,
                 thinking_tool_call_compat=thinking_tool_call_compat,
+                responses_tool_choice_compat=responses_tool_choice_compat,
+                responses_force_stateless_replay=responses_force_stateless_replay,
+                reasoning_enabled=reasoning_enabled,
+                reasoning_effort=reasoning_effort,
+                request_params=_get_model_request_params(data, "security"),
             )
 
         logger.warning("未配置安全模型，将使用对话模型作为后备")
@@ -1797,10 +1986,16 @@ class Config:
             model_name=chat_model.model_name,
             max_tokens=chat_model.max_tokens,
             queue_interval_seconds=chat_model.queue_interval_seconds,
+            api_mode=chat_model.api_mode,
             thinking_enabled=False,
             thinking_budget_tokens=0,
             thinking_include_budget=True,
-            thinking_tool_call_compat=False,
+            thinking_tool_call_compat=chat_model.thinking_tool_call_compat,
+            responses_tool_choice_compat=chat_model.responses_tool_choice_compat,
+            responses_force_stateless_replay=chat_model.responses_force_stateless_replay,
+            reasoning_enabled=chat_model.reasoning_enabled,
+            reasoning_effort=chat_model.reasoning_effort,
+            request_params=merge_request_params(chat_model.request_params),
         )
 
     @staticmethod
@@ -1824,6 +2019,29 @@ class Config:
                 legacy_env_key="AGENT_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
             )
         )
+        api_mode = _resolve_api_mode(data, "agent", "AGENT_MODEL_API_MODE")
+        responses_tool_choice_compat = _resolve_responses_tool_choice_compat(
+            data, "agent", "AGENT_MODEL_RESPONSES_TOOL_CHOICE_COMPAT"
+        )
+        responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
+            data, "agent", "AGENT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+        )
+        reasoning_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "agent", "reasoning_enabled"),
+                "AGENT_MODEL_REASONING_ENABLED",
+            ),
+            False,
+        )
+        reasoning_effort = _resolve_reasoning_effort(
+            _get_value(
+                data,
+                ("models", "agent", "reasoning_effort"),
+                "AGENT_MODEL_REASONING_EFFORT",
+            ),
+            "medium",
+        )
         config = AgentModelConfig(
             api_url=_coerce_str(
                 _get_value(data, ("models", "agent", "api_url"), "AGENT_MODEL_API_URL"),
@@ -1844,6 +2062,7 @@ class Config:
                 4096,
             ),
             queue_interval_seconds=queue_interval_seconds,
+            api_mode=api_mode,
             thinking_enabled=_coerce_bool(
                 _get_value(
                     data,
@@ -1862,6 +2081,11 @@ class Config:
             ),
             thinking_include_budget=thinking_include_budget,
             thinking_tool_call_compat=thinking_tool_call_compat,
+            responses_tool_choice_compat=responses_tool_choice_compat,
+            responses_force_stateless_replay=responses_force_stateless_replay,
+            reasoning_enabled=reasoning_enabled,
+            reasoning_effort=reasoning_effort,
+            request_params=_get_model_request_params(data, "agent"),
         )
         config.pool = Config._parse_model_pool(data, "agent", config)
         return config
@@ -1943,13 +2167,18 @@ class Config:
         ]
         for name, cfg in configs:
             logger.debug(
-                "[配置] %s_model=%s api_url=%s api_key_set=%s thinking=%s cot_compat=%s",
+                "[配置] %s_model=%s api_url=%s api_key_set=%s api_mode=%s thinking=%s reasoning=%s/%s cot_compat=%s responses_tool_choice_compat=%s responses_force_stateless_replay=%s",
                 name,
                 cfg.model_name,
                 cfg.api_url,
                 bool(cfg.api_key),
+                getattr(cfg, "api_mode", "chat_completions"),
                 cfg.thinking_enabled,
+                getattr(cfg, "reasoning_enabled", False),
+                getattr(cfg, "reasoning_effort", "medium"),
                 getattr(cfg, "thinking_tool_call_compat", False),
+                getattr(cfg, "responses_tool_choice_compat", False),
+                getattr(cfg, "responses_force_stateless_replay", False),
             )
 
     def update_from(self, new_config: "Config") -> dict[str, tuple[Any, Any]]:
@@ -1995,12 +2224,31 @@ class Config:
                 legacy_env_key="HISTORIAN_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
             )
         )
+        api_mode = _resolve_api_mode(
+            {"models": {"historian": h}},
+            "historian",
+            "HISTORIAN_MODEL_API_MODE",
+            fallback.api_mode,
+        )
+        responses_tool_choice_compat = _resolve_responses_tool_choice_compat(
+            {"models": {"historian": h}},
+            "historian",
+            "HISTORIAN_MODEL_RESPONSES_TOOL_CHOICE_COMPAT",
+            fallback.responses_tool_choice_compat,
+        )
+        responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
+            {"models": {"historian": h}},
+            "historian",
+            "HISTORIAN_MODEL_RESPONSES_FORCE_STATELESS_REPLAY",
+            fallback.responses_force_stateless_replay,
+        )
         return AgentModelConfig(
             api_url=_coerce_str(h.get("api_url"), fallback.api_url),
             api_key=_coerce_str(h.get("api_key"), fallback.api_key),
             model_name=_coerce_str(h.get("model_name"), fallback.model_name),
             max_tokens=_coerce_int(h.get("max_tokens"), fallback.max_tokens),
             queue_interval_seconds=queue_interval_seconds,
+            api_mode=api_mode,
             thinking_enabled=_coerce_bool(
                 h.get("thinking_enabled"), fallback.thinking_enabled
             ),
@@ -2009,6 +2257,28 @@ class Config:
             ),
             thinking_include_budget=thinking_include_budget,
             thinking_tool_call_compat=thinking_tool_call_compat,
+            responses_tool_choice_compat=responses_tool_choice_compat,
+            responses_force_stateless_replay=responses_force_stateless_replay,
+            reasoning_enabled=_coerce_bool(
+                _get_value(
+                    {"models": {"historian": h}},
+                    ("models", "historian", "reasoning_enabled"),
+                    "HISTORIAN_MODEL_REASONING_ENABLED",
+                ),
+                fallback.reasoning_enabled,
+            ),
+            reasoning_effort=_resolve_reasoning_effort(
+                _get_value(
+                    {"models": {"historian": h}},
+                    ("models", "historian", "reasoning_effort"),
+                    "HISTORIAN_MODEL_REASONING_EFFORT",
+                ),
+                fallback.reasoning_effort,
+            ),
+            request_params=merge_request_params(
+                fallback.request_params,
+                h.get("request_params"),
+            ),
         )
 
     @staticmethod

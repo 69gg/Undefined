@@ -4,6 +4,29 @@
 
 ## 脚本列表
 
+### [`sync_config_template.py`](sync_config_template.py) — 同步配置模板与注释
+
+保留当前 `config.toml` 已有配置值，同时把 `config.toml.example` 中新增的配置项、默认空表和双语注释同步回来。
+
+```bash
+# 直接用 Python 运行
+python scripts/sync_config_template.py
+
+# 若希望复用项目虚拟环境，也可这样运行
+uv run python scripts/sync_config_template.py
+
+# 仅预览，不落盘
+python scripts/sync_config_template.py --dry-run
+
+# 输出同步后的完整内容
+python scripts/sync_config_template.py --stdout
+```
+
+**适用场景**：
+- 项目升级后想把新增配置项补齐到现有 `config.toml`
+- 想恢复 `config.toml.example` 中的最新双语注释
+- 不想手工比对新旧配置文件
+
 ### [`reembed_cognitive.py`](reembed_cognitive.py) — 认知记忆向量库重嵌入
 
 当更换嵌入模型（维度变化或模型升级）时，对 ChromaDB 中的 `cognitive_events` 和 `cognitive_profiles` 进行全量重嵌入。

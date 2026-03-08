@@ -858,6 +858,7 @@ class HistorianWorker:
         tools = [_READ_PROFILE_TOOL, _PROFILE_TOOL]
         result = False
         max_turns = 100
+        transport_state: dict[str, Any] | None = None
 
         for turn in range(max_turns):
             response = await self._ai_client.submit_background_llm_call(
@@ -866,6 +867,14 @@ class HistorianWorker:
                 tools=tools,
                 tool_choice="auto",
                 call_type="historian_profile_merge",
+                transport_state=transport_state,
+            )
+
+            next_transport_state = (
+                response.get("_transport_state") if isinstance(response, dict) else None
+            )
+            transport_state = (
+                next_transport_state if isinstance(next_transport_state, dict) else None
             )
 
             choices = response.get("choices") or []

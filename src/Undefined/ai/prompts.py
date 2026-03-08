@@ -548,6 +548,7 @@ class PromptBuilder:
                 text = msg.get("message", "")
                 role = msg.get("role", "member")
                 title = msg.get("title", "")
+                message_id = msg.get("message_id")
 
                 safe_sender = escape_xml_attr(sender_name)
                 safe_sender_id = escape_xml_attr(sender_id)
@@ -558,13 +559,17 @@ class PromptBuilder:
                 safe_time = escape_xml_attr(timestamp)
                 safe_text = escape_xml_text(str(text))
 
+                msg_id_attr = ""
+                if message_id is not None:
+                    msg_id_attr = f' message_id="{escape_xml_attr(str(message_id))}"'
+
                 if msg_type_val == "group":
                     location = (
                         chat_name if chat_name.endswith("群") else f"{chat_name}群"
                     )
                     safe_location = escape_xml_attr(location)
                     xml_msg = (
-                        f'<message sender="{safe_sender}" sender_id="{safe_sender_id}" group_id="{safe_chat_id}" '
+                        f'<message{msg_id_attr} sender="{safe_sender}" sender_id="{safe_sender_id}" group_id="{safe_chat_id}" '
                         f'group_name="{safe_chat_name}" location="{safe_location}" role="{safe_role}" title="{safe_title}" '
                         f'time="{safe_time}">\n<content>{safe_text}</content>\n</message>'
                     )
@@ -572,7 +577,7 @@ class PromptBuilder:
                     location = "私聊"
                     safe_location = escape_xml_attr(location)
                     xml_msg = (
-                        f'<message sender="{safe_sender}" sender_id="{safe_sender_id}" location="{safe_location}" '
+                        f'<message{msg_id_attr} sender="{safe_sender}" sender_id="{safe_sender_id}" location="{safe_location}" '
                         f'time="{safe_time}">\n<content>{safe_text}</content>\n</message>'
                     )
                 context_lines.append(xml_msg)

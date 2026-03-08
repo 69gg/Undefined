@@ -47,6 +47,13 @@ def _extract_from_choice(choice: Any) -> str:
     return content or ""
 
 
+def _extract_output_text(result: dict[str, Any]) -> str:
+    value = result.get("output_text")
+    if isinstance(value, str):
+        return value
+    return ""
+
+
 def _find_first_choice(result: dict[str, Any]) -> dict[str, Any] | None:
     """在响应中查找第一个选项。
 
@@ -113,6 +120,10 @@ def extract_choices_content(result: dict[str, Any]) -> str:
         KeyError: 当无法从响应中提取内容时
     """
     logger.debug(f"提取 choices 内容，响应结构: {list(result.keys())}")
+
+    output_text = _extract_output_text(result)
+    if output_text:
+        return output_text
 
     # 查找第一个选项
     choice = _find_first_choice(result)

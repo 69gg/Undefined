@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from Undefined.ai.llm import ModelRequester
+from Undefined.ai.transports import API_MODE_CHAT_COMPLETIONS, get_api_mode
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.config import SecurityModelConfig
 from Undefined.utils.resources import read_text_resource
@@ -58,7 +59,10 @@ class InjectionResponseAgent:
         start_time = time.perf_counter()
         try:
             request_kwargs: dict[str, Any] = {"temperature": 0.7}
-            if not self.security_config.thinking_enabled:
+            if (
+                get_api_mode(self.security_config) == API_MODE_CHAT_COMPLETIONS
+                and not self.security_config.thinking_enabled
+            ):
                 request_kwargs["thinking"] = {"enabled": False, "budget_tokens": 0}
 
             result = await self._requester.request(
