@@ -34,13 +34,37 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --group ci -p ${{ env.PYTHON_VERSION }}
 
+      - name: Cache Ruff
+        uses: actions/cache@v4
+        with:
+          path: .ruff_cache
+          key: ${{ runner.os }}-ruff-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-ruff-
+
       - name: Run Ruff
         run: |
           uv run ruff check .
           uv run ruff format --check .
 
+      - name: Cache Mypy
+        uses: actions/cache@v4
+        with:
+          path: .mypy_cache
+          key: ${{ runner.os }}-mypy-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mypy-
+
       - name: Run Mypy
         run: uv run mypy .
+
+      - name: Cache Pytest
+        uses: actions/cache@v4
+        with:
+          path: .pytest_cache
+          key: ${{ runner.os }}-pytest-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pytest-
 
       - name: Run tests
         run: uv run pytest tests/
@@ -177,6 +201,7 @@ jobs:
 
       - name: Build Tauri bundles
         working-directory: ${{ env.APP_DIR }}
+        shell: bash
         run: |
           if [ "${{ runner.os }}" = "Linux" ]; then
             NO_STRIP=true npm run tauri:build -- --ci --bundles ${{ matrix.bundles }}
@@ -265,9 +290,27 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Cache Android SDK packages
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib/android/sdk
+          key: android-sdk-34-ndk-27.0.12077973
+        id: android-sdk-cache
+
       - name: Install Android platform packages
+        if: steps.android-sdk-cache.outputs.cache-hit != 'true'
         run: |
           sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;27.0.12077973"
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
 
       - name: Install app dependencies
         working-directory: ${{ env.APP_DIR }}
