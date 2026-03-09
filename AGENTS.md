@@ -1,28 +1,26 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-Primary code lives in `src/Undefined/`. Keep changes in the matching domain package: `ai/` for model orchestration, `cognitive/` for memory pipelines, `services/` for runtime services, `skills/` for tools/agents/commands, `webui/` for the management UI, and `utils/` for shared helpers. Tests live in `tests/`. Packaged assets and defaults live in `res/`, `img/`, and `config/`. Scripts are in `scripts/`; docs are in `docs/`.
+`src/Undefined/` contains the main Python package. Core areas include `ai/`, `cognitive/`, `services/`, `skills/`, and `webui/`. `tests/` holds the pytest suite; add new tests close to the behavior they cover with `test_*.py` names. `apps/undefined-console/` is the Tauri + Vite management client. `code/NagaAgent/` is a Git submodule, so keep upstream syncs and local patches as clearly separated changes. Packaged assets live in `res/`, `img/`, and `config/`; generated outputs like `dist/` and runtime data under `logs/` are not primary edit targets.
 
 ## Build, Test, and Development Commands
-- `uv sync --group dev -p 3.12`: install the project with contributor tooling.
-- `uv run playwright install`: install the browser runtime used by rendering and web-driven features.
-- `cp config.toml.example config.toml`: create a local config before running the app.
-- `uv run Undefined`: start the bot process directly.
-- `uv run Undefined-webui`: start the WebUI manager. Do not run this alongside `Undefined`.
-- `uv run ruff format .`: apply formatting.
-- `uv run ruff check .`: run lint checks.
-- `uv run mypy .`: run strict type checking.
-- `uv run pytest tests/`: run the full test suite.
-- `uv build --wheel`: build the distribution and verify packaged resources.
+Use `uv` for the root project:
+
+- `uv sync` installs Python dependencies.
+- `uv run playwright install` installs browser runtimes used by screenshot features.
+- `uv run Undefined-webui` starts the recommended local management entrypoint.
+- `uv run pytest tests/` runs the backend test suite.
+- `uv run ruff check .` and `uv run ruff format --check .` enforce Python linting and formatting.
+- `uv run mypy .` runs strict type checks.
+- `uv build --wheel` validates packaging and resource inclusion.
+
+For the desktop console app, run `cd apps/undefined-console && npm ci && npm run check`. Use `npm run tauri:dev` for local desktop development.
 
 ## Coding Style & Naming Conventions
-Use 4-space indentation, Python type hints, and `async`/`await` for I/O paths. Let Ruff drive formatting instead of hand-formatting around it. Use `snake_case` for modules, functions, and variables; `PascalCase` for classes; `UPPER_SNAKE_CASE` for constants. Keep modules narrow in scope, and place new Skills content under the correct subtree such as `skills/tools/`, `skills/toolsets/`, or `skills/agents/`.
+Use 4-space indentation. Python code should be type-annotated and Ruff-formatted; follow `snake_case` for modules and functions, `PascalCase` for classes, and keep modules focused. WebUI JavaScript in `src/Undefined/webui/static/js/` is formatted with Biome using 4-space indents. `code/NagaAgent/frontend/` follows Vue/TypeScript conventions enforced by ESLint.
 
 ## Testing Guidelines
-The project uses `pytest` with `pytest-asyncio` (`asyncio_mode = auto`). Name files `tests/test_*.py` and test functions `test_*`. Prefer focused runs while iterating, for example `uv run pytest tests/test_parse_command.py -q`, then finish with the full suite. Add regression coverage for behavior changes in handlers, config loading, Skills discovery, and WebUI routes.
+Write tests as `tests/test_<feature>.py`. Async tests are supported through `pytest-asyncio`. Add or update tests for behavior changes in APIs, config loading, cognitive memory, and WebUI routes. CI runs the full Python suite plus console checks on pushes and pull requests; no explicit coverage threshold is configured, so use judgment and cover touched paths well.
 
 ## Commit & Pull Request Guidelines
-Follow the commit style already used in history: `feat: ...`, `fix(scope): ...`, `chore(version): ...`. Keep subjects short and imperative. PRs should include a clear summary, linked issue when applicable, the commands you ran (`ruff`, `mypy`, `pytest`), and screenshots for WebUI changes. If you modify `res/`, `img/`, or `config.toml.example`, note that wheel packaging was checked with `uv build --wheel`.
-
-## Security & Configuration Tips
-Treat `config.toml` as runtime state and avoid committing secrets. Prefer `config.toml.example` for documented defaults. Outputs under `data/` and `logs/` should stay out of feature commits unless the change explicitly targets fixtures or diagnostics.
+Recent history follows Conventional Commits with optional scopes, for example `fix(webui): refine launcher return flow` and `docs(build): document linux no-strip workaround`. Keep subjects imperative and concise. For pull requests, include a short impact summary, linked issues, and the commands you ran. Attach screenshots for WebUI or Tauri UI changes. If you change versioned release files, keep `pyproject.toml` and `src/Undefined/__init__.py` in sync. To mirror local checks, enable repo hooks with `git config core.hooksPath .githooks`.

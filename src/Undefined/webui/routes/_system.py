@@ -2,11 +2,14 @@ import asyncio
 import platform
 from pathlib import Path
 
+from aiohttp import ClientSession, ClientTimeout
 from aiohttp import web
 from aiohttp.web_response import Response
 
 from Undefined import __version__
-from ._shared import routes, check_auth
+from Undefined.config import get_config
+from ._shared import auth_capabilities, routes, check_auth, get_settings
+from ..utils import load_bootstrap_probe_data
 
 try:
     import psutil
@@ -112,6 +115,94 @@ def _read_memory_info() -> tuple[float, float, float] | None:
     )
 
 
+async def _runtime_health_status() -> tuple[bool, bool, str]:
+    cfg = get_config(strict=False)
+    if not bool(cfg.api.enabled):
+        return False, False, "disabled"
+    url = f"http://{cfg.api.host}:{cfg.api.port}/health"
+    try:
+        timeout = ClientTimeout(total=3.0)
+        async with ClientSession(timeout=timeout) as session:
+            async with session.get(url) as resp:
+                return True, resp.status < 500, f"HTTP {resp.status}"
+    except Exception as exc:
+        return True, False, str(exc)
+
+
+def _bootstrap_advice(data: dict[str, object]) -> list[str]:
+    advice: list[str] = []
+    if not bool(data.get("config_exists")):
+        advice.append("config.toml 缺失，建议先在控制台补齐基础配置。")
+    if not bool(data.get("toml_valid")):
+        advice.append("配置文件存在 TOML 语法错误，请先修复语法。")
+    if (
+        bool(data.get("toml_valid"))
+        and bool(data.get("config_exists"))
+        and not bool(data.get("config_valid"))
+    ):
+        error = str(data.get("validation_error") or "").strip()
+        advice.append(error or "配置尚未通过严格校验，保存修复后即可启动 Bot。")
+    if bool(data.get("using_default_password")):
+        advice.append("默认 WebUI 密码已禁用，请先设置新密码后再继续。")
+    if not advice:
+        advice.append("管理入口已就绪，可继续编辑配置、查看日志或启动 Bot。")
+    return advice
+
+
+@routes.get("/api/v1/management/probes/bootstrap")
+async def bootstrap_probe_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+    bootstrap = load_bootstrap_probe_data()
+    runtime_enabled, runtime_reachable, runtime_detail = await _runtime_health_status()
+    payload = {
+        **bootstrap,
+        "runtime_enabled": runtime_enabled,
+        "runtime_reachable": runtime_reachable,
+        "runtime_detail": runtime_detail,
+        "auth_mode": "token" if request.headers.get("Authorization") else "cookie",
+        "management_url": f"http://{get_settings(request).url}:{get_settings(request).port}",
+    }
+    payload["advice"] = _bootstrap_advice(payload)
+    return web.json_response(payload)
+
+
+@routes.get("/api/v1/management/probes/capabilities")
+async def capabilities_probe_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+    runtime_enabled, runtime_reachable, runtime_detail = await _runtime_health_status()
+    return web.json_response(
+        {
+            "management_api_v1": True,
+            "runtime_proxy": True,
+            "bootstrap_probe": True,
+            "desktop_app": True,
+            "android_app": True,
+            "auth": auth_capabilities(),
+            "config": {
+                "read": True,
+                "write": True,
+                "validate": True,
+                "sync_template": True,
+            },
+            "logs": {"read": True, "stream": True},
+            "bot": {
+                "status": True,
+                "start": True,
+                "stop": True,
+                "update_restart": True,
+            },
+            "runtime": {
+                "enabled": runtime_enabled,
+                "reachable": runtime_reachable,
+                "detail": runtime_detail,
+            },
+        }
+    )
+
+
+@routes.get("/api/v1/management/system")
 @routes.get("/api/system")
 async def system_info_handler(request: web.Request) -> Response:
     if not check_auth(request):

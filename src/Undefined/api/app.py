@@ -12,14 +12,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit
-
 from aiohttp import ClientSession, ClientTimeout, web
 from aiohttp.web_response import Response
 
 from Undefined import __version__
+from Undefined.config import load_webui_settings
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
 from Undefined.render import render_html_to_image, render_markdown_to_html  # noqa: F401
+from Undefined.utils.cors import is_allowed_cors_origin, normalize_origin
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
 from Undefined.utils.xml import escape_xml_attr, escape_xml_text
 
@@ -129,6 +130,25 @@ class RuntimeAPIContext:
 
 def _json_error(message: str, status: int = 400) -> Response:
     return web.json_response({"error": message}, status=status)
+
+
+def _apply_cors_headers(request: web.Request, response: web.StreamResponse) -> None:
+    origin = normalize_origin(str(request.headers.get("Origin") or ""))
+    settings = load_webui_settings()
+    response.headers.setdefault("Vary", "Origin")
+    response.headers.setdefault("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+    response.headers.setdefault(
+        "Access-Control-Allow-Headers",
+        "Authorization, Content-Type, X-Undefined-API-Key",
+    )
+    response.headers.setdefault("Access-Control-Max-Age", "86400")
+    if origin and is_allowed_cors_origin(
+        origin,
+        configured_host=str(settings.url or ""),
+        configured_port=settings.port,
+    ):
+        response.headers.setdefault("Access-Control-Allow-Origin", origin)
+        response.headers.setdefault("Access-Control-Allow-Credentials", "true")
 
 
 def _optional_query_param(request: web.Request, key: str) -> str | None:
@@ -437,12 +457,21 @@ class RuntimeAPIServer:
             request: web.Request,
             handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
         ) -> web.StreamResponse:
+            response: web.StreamResponse
+            if request.method == "OPTIONS":
+                response = web.Response(status=204)
+                _apply_cors_headers(request, response)
+                return response
             if request.path.startswith("/api/"):
                 expected = str(self._context.config_getter().api.auth_key or "")
                 provided = request.headers.get(_AUTH_HEADER, "")
                 if not expected or provided != expected:
-                    return _json_error("Unauthorized", status=401)
-            return await handler(request)
+                    response = _json_error("Unauthorized", status=401)
+                    _apply_cors_headers(request, response)
+                    return response
+            response = await handler(request)
+            _apply_cors_headers(request, response)
+            return response
 
         app = web.Application(middlewares=[_auth_middleware])
         app["runtime_api_context"] = self._context

@@ -1,16 +1,27 @@
 import ipaddress
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from aiohttp import web
 
-from ..core import BotProcessController, SessionStore
+from Undefined.config import WebUISettings
+from ..core import (
+    ACCESS_TOKEN_TTL_SECONDS,
+    REFRESH_TOKEN_TTL_SECONDS,
+    BotProcessController,
+    SessionStore,
+)
 
 routes = web.RouteTableDef()
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
+
+BOT_APP_KEY = web.AppKey("bot", BotProcessController)
+SESSION_STORE_APP_KEY = web.AppKey("session_store", SessionStore)
+SETTINGS_APP_KEY = web.AppKey("settings", WebUISettings)
+REDIRECT_TO_CONFIG_ONCE_APP_KEY = web.AppKey("redirect_to_config_once", bool)
 
 SESSION_COOKIE = "undefined_webui"
 TOKEN_COOKIE = "undefined_webui_token"
@@ -24,21 +35,88 @@ _LOGIN_BLOCKED_UNTIL: dict[str, float] = {}
 
 
 def get_bot(request: web.Request) -> BotProcessController:
-    return cast(BotProcessController, request.app["bot"])
+    return request.app[BOT_APP_KEY]
 
 
 def get_session_store(request: web.Request) -> SessionStore:
-    return cast(SessionStore, request.app["session_store"])
+    return request.app[SESSION_STORE_APP_KEY]
 
 
-def get_settings(request: web.Request) -> Any:
-    return request.app["settings"]
+def get_settings(request: web.Request) -> WebUISettings:
+    return request.app[SETTINGS_APP_KEY]
+
+
+def get_bearer_token(request: web.Request) -> str | None:
+    auth_header = str(request.headers.get("Authorization") or "").strip()
+    if not auth_header:
+        return None
+    prefix = "bearer "
+    if auth_header.lower().startswith(prefix):
+        token = auth_header[len(prefix) :].strip()
+        return token or None
+    return None
+
+
+def get_auth_token(request: web.Request) -> str | None:
+    return (
+        get_bearer_token(request)
+        or request.cookies.get(SESSION_COOKIE)
+        or request.headers.get("X-Auth-Token")
+    )
+
+
+def get_auth_tokens(request: web.Request) -> list[str]:
+    tokens = [
+        get_bearer_token(request),
+        request.cookies.get(SESSION_COOKIE),
+        request.headers.get("X-Auth-Token"),
+    ]
+    result: list[str] = []
+    for token in tokens:
+        text = str(token or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+def get_refresh_token(
+    request: web.Request, payload: dict[str, Any] | None = None
+) -> str | None:
+    if payload is not None:
+        value = payload.get("refresh_token") or payload.get("refreshToken")
+        text = str(value or "").strip()
+        if text:
+            return text
+    return (
+        request.cookies.get(TOKEN_COOKIE)
+        or request.headers.get("X-Refresh-Token")
+        or get_bearer_token(request)
+    )
 
 
 def check_auth(request: web.Request) -> bool:
     sessions = get_session_store(request)
-    token = request.cookies.get(SESSION_COOKIE) or request.headers.get("X-Auth-Token")
-    return sessions.is_valid(token)
+    for token in get_auth_tokens(request):
+        if sessions.is_valid(token, allowed_kinds={"session", "access"}):
+            return True
+    return False
+
+
+def get_valid_auth_token(request: web.Request) -> str | None:
+    sessions = get_session_store(request)
+    for token in get_auth_tokens(request):
+        if sessions.is_valid(token, allowed_kinds={"session", "access"}):
+            return token
+    return None
+
+
+def auth_capabilities() -> dict[str, Any]:
+    return {
+        "cookie_supported": True,
+        "bearer_supported": True,
+        "access_token_ttl_seconds": ACCESS_TOKEN_TTL_SECONDS,
+        "refresh_token_ttl_seconds": REFRESH_TOKEN_TTL_SECONDS,
+    }
 
 
 def _get_client_ip(request: web.Request) -> str:

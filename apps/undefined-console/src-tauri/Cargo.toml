@@ -1,0 +1,17 @@
+[package]
+name = "undefined_console"
+version = "3.2.0"
+description = "Undefined cross-platform management console"
+authors = ["Undefined contributors"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2.0.2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2.2.5", features = [] }
+tauri-plugin-http = "2"

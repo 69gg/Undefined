@@ -1,6 +1,13 @@
 # Runtime API / OpenAPI 指南
 
-本文档说明 Undefined 主进程暴露的 Runtime API（含 OpenAPI 文档），以及 WebUI 如何安全调用。
+本文档说明 Undefined 主进程暴露的 Runtime API（含 OpenAPI 文档），以及 WebUI / App 如何通过 Management API 代理安全调用。
+
+> 职责边界：
+>
+> - **Management API**：配置、日志、Bot 启停、bootstrap probe、远程管理入口
+> - **Runtime API**：主进程运行态能力（探针、记忆、认知、AI Chat）
+>
+> 如果你想看控制面接口，请同时参考 [Management API 文档](management-api.md)。
 
 ## 1. 配置项
 

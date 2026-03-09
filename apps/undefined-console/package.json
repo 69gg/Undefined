@@ -1,0 +1,33 @@
+{
+	"name": "undefined-console",
+	"private": true,
+	"version": "3.2.0",
+	"type": "module",
+	"scripts": {
+		"dev": "vite --host 0.0.0.0 --port 1420",
+		"lint": "biome check src package.json tsconfig.json vite.config.ts src-tauri/tauri.conf.json src-tauri/capabilities/default.json",
+		"lint:webui": "biome check --config-path ../../biome.json ../../src/Undefined/webui/static/js",
+		"typecheck": "tsc --noEmit",
+		"tauri:fmt:check": "cargo fmt --manifest-path src-tauri/Cargo.toml --all --check",
+		"tauri:check": "cargo check --manifest-path src-tauri/Cargo.toml",
+		"check": "npm run lint && npm run lint:webui && npm run typecheck && npm run tauri:fmt:check && npm run tauri:check",
+		"build": "npm run typecheck && vite build",
+		"preview": "vite preview --host 0.0.0.0 --port 4173",
+		"tauri:dev": "tauri dev",
+		"tauri:build": "tauri build",
+		"tauri:android:init": "tauri android init --ci",
+		"tauri:android": "tauri android build",
+		"tauri:android:debug": "tauri android build --debug",
+		"tauri:build:no-strip": "NO_STRIP=true tauri build"
+	},
+	"dependencies": {
+		"@tauri-apps/api": "^2.3.0",
+		"@tauri-apps/plugin-http": "^2.3.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^1.9.4",
+		"@tauri-apps/cli": "^2.3.1",
+		"typescript": "^5.7.3",
+		"vite": "^6.2.1"
+	}
+}

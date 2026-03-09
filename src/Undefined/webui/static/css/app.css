@@ -1,10 +1,15 @@
 .sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
   background-color: var(--bg-sidebar);
   border-right: 1px solid var(--border-color);
   padding: 24px;
   display: flex;
   flex-direction: column;
   gap: 32px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .brand { font-family: var(--font-serif); font-size: 22px; font-weight: 500; display: flex; align-items: center; gap: 12px; }
@@ -53,13 +58,36 @@
 .mobile-tabs .nav-item { border-radius: 999px; padding: 8px 14px; border: 1px solid var(--border-color); background: var(--bg-card); white-space: nowrap; font-size: 12px; }
 .mobile-tabs .nav-item.active { color: var(--accent-color); border-color: rgba(217, 119, 87, 0.4); }
 
+.probe-advice-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.probe-advice-item {
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-app);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .sidebar-footer { margin-top: auto; display: flex; flex-direction: column; gap: 16px; padding-top: 20px; border-top: 1px solid var(--border-color); }
 .sidebar-footer-actions { display: flex; gap: 8px; }
 
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 
-.main-content { padding: 40px 60px; overflow-y: auto; max-width: 1400px; scrollbar-gutter: stable; }
+.main-content {
+  min-width: 0;
+  min-height: 100vh;
+  padding: 20px 60px 40px;
+  overflow: visible;
+  max-width: 1400px;
+  width: 100%;
+}
 .main-content.chat-layout { max-width: none; }
 .main-content.chat-layout #tab-chat .runtime-card { max-width: 100%; }
 .main-content.chat-layout #tab-chat .chat-runtime-card {
@@ -98,8 +126,8 @@
 .header.sticky {
   position: sticky; top: 0; z-index: 100;
   background: var(--bg-app);
-  padding: 20px 0;
-  margin: -40px -60px 32px -60px;
+  padding: 14px 0;
+  margin: -20px -60px 24px -60px;
   padding-left: 60px; padding-right: 60px;
   border-bottom: 1px solid var(--border-color);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);

@@ -41,7 +41,7 @@ src/Undefined/
 - 细粒度的工具白名单权限配置。
 - 允许特定 Agent 相互调用的灵活授权。
 
-## 开发自检 (代码规范与类型检查)
+## 开发自检 (代码规范、类型检查与 Git Hook)
 
 修改完代码提交之前，请始终进行以下命令确认代码符合质量标准并拦截潜在的类型隐患：
 
@@ -49,5 +49,35 @@ src/Undefined/
 uv run ruff format .
 uv run ruff check .
 uv run mypy .
+uv run pytest tests/
 ```
-> **注意**：项目严格遵守类型注释规范，`mypy .` 通过是代码入库的前提条件。
+
+如果你改动了跨平台控制台 `apps/undefined-console/`，或改动了 `src/Undefined/webui/static/js/` 里的前端脚本，建议额外执行：
+
+```bash
+cd apps/undefined-console
+npm install
+npm run check
+```
+
+### Git Hook
+
+仓库内已经提供可维护的 git hook：
+
+```text
+.githooks/pre-commit
+.githooks/pre-tag
+```
+
+启用方式：
+
+```bash
+bash scripts/install_git_hooks.sh
+```
+
+启用后：
+
+- `pre-commit` 会执行 Python 的 `ruff + mypy`
+- 当提交包含 JS / Tauri / WebUI 前端相关改动时，还会自动执行 `Biome + TypeScript + cargo fmt/check`
+
+> **注意**：项目严格遵守类型注释规范，`mypy .` 通过是代码入库的前提条件；跨平台控制台相关改动则以 `npm run check` 通过为准。

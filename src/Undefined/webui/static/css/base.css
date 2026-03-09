@@ -8,6 +8,7 @@ body {
   line-height: 1.5;
   transition: background-color 0.3s ease, color 0.3s ease;
   min-height: 100vh;
+  overflow-y: auto;
 }
 
 .noise {
@@ -27,4 +28,6 @@ body {
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr;
   min-height: 100vh;
+  overflow: visible;
+  align-items: stretch;
 }

@@ -48,6 +48,19 @@ Undefined-webui
 > `Undefined-webui` 会在检测到当前目录缺少 `config.toml` 时，自动从 `config.toml.example` 生成一份，便于直接在 WebUI 中修改。
 > 提示：资源文件已随包发布，支持在非项目根目录启动；如需自定义内容，请参考下方说明。
 
+## Management-first 推荐流程
+
+推荐把 `Undefined-webui` 当作默认入口：
+
+1. 运行 `Undefined-webui` 或 `uv run Undefined-webui`
+2. 在浏览器中打开管理控制台
+3. 若 `config.toml` 缺失，WebUI 会自动生成模板
+4. 在控制台中补齐配置、保存并校验
+5. 直接点击启动 Bot
+6. 若需要远程管理，再使用桌面端或 Android App 连接到这个 Management API
+
+这样可以避免“先手写配置、再反复命令行重启”的冷启动成本，尤其适合首次部署与远程运维。
+
 ### 完整日志（排查用）
 
 如果你希望保留完整安装/运行日志，可直接重定向到文件：

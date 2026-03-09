@@ -3,19 +3,39 @@
 }
 
 @media (max-width: 960px) {
-  .main-content { padding: 30px; }
+  .main-content { padding: 16px 30px 30px; }
   .header { flex-direction: column; align-items: flex-start; gap: 16px; }
-  .header.sticky { margin: -30px -30px 24px -30px; padding-left: 30px; padding-right: 30px; }
+  .header.sticky { margin: -16px -30px 20px -30px; padding-left: 30px; padding-right: 30px; }
   .main-content.chat-layout #tab-chat .chat-runtime-card { height: clamp(460px, calc(100vh - 220px), 760px); }
 }
 
 @media (max-width: 768px) {
-  .app-container { grid-template-columns: 1fr; }
+  .app-container {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
   .sidebar { display: none; }
   .mobile-nav { display: flex; }
-  .landing-header, .landing-hero, .main-content { padding: 20px; }
+  .landing-header, .landing-hero, .main-content { padding: 20px 16px; }
+  .main-content {
+    min-height: 100vh;
+  }
   .header.sticky { margin: -20px -20px 20px -20px; padding-left: 20px; padding-right: 20px; }
   .card { padding: 22px; }
+  .overview-grid, .runtime-grid { grid-template-columns: 1fr; }
+  .toolbar { width: 100%; }
+  .toolbar > * { flex: 1 1 auto; }
+  .cta-row { display: grid; grid-template-columns: 1fr 1fr; }
+  .hero-highlights { gap: 8px; }
+  .hero-highlight-pill { width: 100%; justify-content: center; }
+  .mobile-nav {
+    padding-top: calc(12px + env(safe-area-inset-top));
+    padding-bottom: 14px;
+  }
+  .mobile-tabs { width: 100%; }
+  .mobile-actions { width: 100%; justify-content: space-between; }
   .form-grid { column-count: 1; column-width: auto; }
   .form-fields { grid-template-columns: 1fr; }
   .log-viewer { height: 380px; }
@@ -42,6 +62,16 @@
   .main-content.chat-layout #tab-chat .runtime-chat-action-icon {
     font-size: 18px;
   }
+}
+
+@media (max-width: 480px) {
+  .header { gap: 12px; }
+  .card { padding: 18px; }
+  .cta-row { grid-template-columns: 1fr; }
+  .mobile-tabs .nav-item { font-size: 11px; padding: 8px 12px; }
+  .log-viewer { height: 52vh; }
+  .probe-item { grid-template-columns: 1fr; gap: 6px; }
+  .probe-item-value { justify-self: flex-start; }
 }
 
 @media (prefers-reduced-motion: reduce) {

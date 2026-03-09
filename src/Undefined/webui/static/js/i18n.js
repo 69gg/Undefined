@@ -53,7 +53,8 @@ const I18N = {
         "auth.placeholder": "请输入 WebUI 密码",
         "auth.sign_in": "登 录",
         "auth.sign_out": "退出登录",
-        "auth.default_password": "默认密码仍在使用，请尽快修改 webui.password 并重启 WebUI。",
+        "auth.default_password":
+            "默认密码仍在使用，请尽快修改 webui.password 并重启 WebUI。",
         "auth.change_required": "默认密码已禁用，请先设置新密码。",
         "auth.reset_title": "设置新密码",
         "auth.current_placeholder": "当前密码",
@@ -70,9 +71,11 @@ const I18N = {
         "config.subtitle": "按分类逐项调整配置，保存后自动触发热更新。",
         "config.save": "保存更改",
         "config.reset": "重置更改",
-        "config.reset_confirm": "确定要撤销所有本地更改吗？这将从服务器重新加载配置。",
+        "config.reset_confirm":
+            "确定要撤销所有本地更改吗？这将从服务器重新加载配置。",
         "config.sync_template": "同步模板",
-        "config.sync_confirm": "确定要把 config.toml.example 中的新配置项和注释同步到当前 config.toml 吗？现有配置值会保留。",
+        "config.sync_confirm":
+            "确定要把 config.toml.example 中的新配置项和注释同步到当前 config.toml 吗？现有配置值会保留。",
         "config.syncing": "同步模板中...",
         "config.sync_success": "模板同步完成",
         "config.sync_error": "模板同步失败",
@@ -92,7 +95,8 @@ const I18N = {
         "config.save_network_error": "网络错误",
         "config.reload_success": "配置已从服务器重新加载。",
         "config.reload_error": "配置重载失败。",
-        "config.bootstrap_created": "检测到缺少 config.toml，已从示例生成；请在此页完善配置并保存。",
+        "config.bootstrap_created":
+            "检测到缺少 config.toml，已从示例生成；请在此页完善配置并保存。",
         "logs.title": "运行日志",
         "logs.subtitle": "实时查看日志尾部输出。",
         "logs.auto": "自动刷新",
@@ -133,6 +137,7 @@ const I18N = {
         "probes.section_queues": "请求队列",
         "probes.section_services": "服务状态",
         "probes.section_skills": "技能统计",
+        "probes.section_bootstrap": "引导与管理探针",
         "probes.version": "版本",
         "probes.platform": "平台",
         "probes.uptime": "运行时间",
@@ -145,6 +150,18 @@ const I18N = {
         "probes.api_listen": "监听地址",
         "probes.tools": "基础工具",
         "probes.agents": "智能体",
+        "probes.bootstrap_config": "配置文件",
+        "probes.bootstrap_validation": "严格校验",
+        "probes.bootstrap_auth": "认证状态",
+        "probes.bootstrap_runtime": "运行态",
+        "probes.bootstrap_config_exists":
+            "已检测到 config.toml，可继续在控制台编辑。",
+        "probes.bootstrap_config_missing":
+            "尚未检测到 config.toml，控制台会先生成模板供你补齐。",
+        "probes.bootstrap_runtime_pending":
+            "管理层在线，但运行态尚未就绪；完善配置后可直接启动 Bot。",
+        "probes.bootstrap_ready":
+            "管理入口已就绪，可继续编辑配置、查看日志或启动实例。",
         "probes.all_ok": "所有外部端点均正常",
         "probes.some_failed": "部分外部端点异常",
         "memory.title": "记忆检索",
@@ -173,7 +190,8 @@ const I18N = {
         "runtime.cognitive_profile_get": "按实体查看侧写",
         "runtime.fetch": "获取",
         "runtime.chat_title": "AI Chat（虚拟私聊 system#42）",
-        "runtime.chat_hint": "该会话由 WebUI 发起，权限为 superadmin；私聊里可直接使用 /命令。",
+        "runtime.chat_hint":
+            "该会话由 WebUI 发起，权限为 superadmin；私聊里可直接使用 /命令。",
         "runtime.chat_placeholder": "输入消息，或直接 /help 这样的命令",
         "runtime.image": "图片",
         "runtime.image_added": "已插入图片",
@@ -208,7 +226,8 @@ const I18N = {
     en: {
         "landing.title": "Undefined Console",
         "landing.kicker": "WebUI",
-        "landing.subtitle": "A unified entry point for configuration, log tracking, and runtime control.",
+        "landing.subtitle":
+            "A unified entry point for configuration, log tracking, and runtime control.",
         "landing.cta": "Enter Console",
         "landing.config": "Edit Config",
         "landing.logs": "View Logs",
@@ -259,8 +278,10 @@ const I18N = {
         "auth.placeholder": "WebUI password",
         "auth.sign_in": "Sign In",
         "auth.sign_out": "Sign Out",
-        "auth.default_password": "Default password is in use. Please change webui.password and restart.",
-        "auth.change_required": "Default password is disabled. Please set a new password.",
+        "auth.default_password":
+            "Default password is in use. Please change webui.password and restart.",
+        "auth.change_required":
+            "Default password is disabled. Please set a new password.",
         "auth.reset_title": "Set New Password",
         "auth.current_placeholder": "Current password",
         "auth.new_placeholder": "New password",
@@ -268,17 +289,21 @@ const I18N = {
         "auth.password_updated": "Password updated. Please sign in again.",
         "auth.password_updated_login": "Password updated. Signing in...",
         "auth.password_update_failed": "Password update failed",
-        "auth.password_change_local": "Password change requires local access when using default password.",
+        "auth.password_change_local":
+            "Password change requires local access when using default password.",
         "auth.signing_in": "Signing in...",
         "auth.login_failed": "Login failed",
         "auth.unauthorized": "Unauthorized or session expired",
         "config.title": "Configuration",
-        "config.subtitle": "Adjust settings by category. Changes trigger hot reload.",
+        "config.subtitle":
+            "Adjust settings by category. Changes trigger hot reload.",
         "config.save": "Save Changes",
         "config.reset": "Revert Changes",
-        "config.reset_confirm": "Are you sure you want to revert all local changes? This will reload the configuration from the server.",
+        "config.reset_confirm":
+            "Are you sure you want to revert all local changes? This will reload the configuration from the server.",
         "config.sync_template": "Sync Template",
-        "config.sync_confirm": "Sync new settings and comments from config.toml.example into the current config.toml? Existing configured values will be kept.",
+        "config.sync_confirm":
+            "Sync new settings and comments from config.toml.example into the current config.toml? Existing configured values will be kept.",
         "config.syncing": "Syncing template...",
         "config.sync_success": "Template sync completed",
         "config.sync_error": "Template sync failed",
@@ -298,7 +323,8 @@ const I18N = {
         "config.save_network_error": "Network error",
         "config.reload_success": "Configuration reloaded from server.",
         "config.reload_error": "Failed to reload configuration.",
-        "config.bootstrap_created": "config.toml was missing and has been generated from the example. Please review and save your configuration.",
+        "config.bootstrap_created":
+            "config.toml was missing and has been generated from the example. Please review and save your configuration.",
         "logs.title": "System Logs",
         "logs.subtitle": "Real-time view of recent log output.",
         "logs.auto": "Auto Refresh",
@@ -339,6 +365,7 @@ const I18N = {
         "probes.section_queues": "Request Queues",
         "probes.section_services": "Service Status",
         "probes.section_skills": "Skill Statistics",
+        "probes.section_bootstrap": "Bootstrap & Management",
         "probes.version": "Version",
         "probes.platform": "Platform",
         "probes.uptime": "Uptime",
@@ -351,10 +378,23 @@ const I18N = {
         "probes.api_listen": "Listen Addr",
         "probes.tools": "Tools",
         "probes.agents": "Agents",
+        "probes.bootstrap_config": "Config File",
+        "probes.bootstrap_validation": "Strict Validation",
+        "probes.bootstrap_auth": "Auth",
+        "probes.bootstrap_runtime": "Runtime",
+        "probes.bootstrap_config_exists":
+            "config.toml is present and can be edited in the console.",
+        "probes.bootstrap_config_missing":
+            "config.toml is missing; the console will bootstrap a template for recovery.",
+        "probes.bootstrap_runtime_pending":
+            "Management is online but runtime is not ready yet; finish config and start the bot.",
+        "probes.bootstrap_ready":
+            "Management entry is ready for config edits, logs, and bot startup.",
         "probes.all_ok": "All external endpoints are healthy",
         "probes.some_failed": "Some external endpoints are unhealthy",
         "memory.title": "Memory Hub",
-        "memory.subtitle": "Read-only search for memory, cognitive events, and profiles.",
+        "memory.subtitle":
+            "Read-only search for memory, cognitive events, and profiles.",
         "memory.refresh": "Refresh",
         "runtime.title": "Runtime Hub",
         "runtime.subtitle": "Probes plus memory/profile read-only queries.",
@@ -379,7 +419,8 @@ const I18N = {
         "runtime.cognitive_profile_get": "Get Profile by Entity",
         "runtime.fetch": "Fetch",
         "runtime.chat_title": "AI Chat (virtual private chat system#42)",
-        "runtime.chat_hint": "This WebUI session runs as superadmin; slash commands work directly in private chat.",
+        "runtime.chat_hint":
+            "This WebUI session runs as superadmin; slash commands work directly in private chat.",
         "runtime.chat_placeholder": "Type a message, or run /help directly",
         "runtime.image": "Image",
         "runtime.image_added": "Image inserted",
@@ -391,7 +432,8 @@ const I18N = {
         "runtime.disabled": "Runtime API is disabled",
         "runtime.found": "Found",
         "runtime.not_found": "Not found",
-        "runtime.api_start_hint": "Please start the bot process in WebUI first.",
+        "runtime.api_start_hint":
+            "Please start the bot process in WebUI first.",
         "chat.title": "AI Dialog",
         "chat.subtitle": "Virtual private session system#42.",
         "about.title": "About Project",
@@ -405,10 +447,11 @@ const I18N = {
         "update.working": "Checking for updates...",
         "update.updated_restarting": "Updated. Restarting WebUI...",
         "update.uptodate_restarting": "Up to date. Restarting WebUI...",
-        "update.not_eligible": "Update not eligible (official origin/main only)",
+        "update.not_eligible":
+            "Update not eligible (official origin/main only)",
         "update.failed": "Update failed",
         "update.no_restart": "Updated but not restarted (check uv sync output)",
         "config.aot_add": "+ Add Entry",
         "config.aot_remove": "Remove",
-    }
+    },
 };

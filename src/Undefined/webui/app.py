@@ -8,8 +8,15 @@ from typing import Any, Awaitable, Callable
 from aiohttp import web
 
 from Undefined.config import load_webui_settings, get_config_manager, get_config
+from Undefined.utils.cors import is_allowed_cors_origin, normalize_origin
 from .core import BotProcessController, SessionStore
 from .routes import routes
+from .routes._shared import (
+    BOT_APP_KEY,
+    REDIRECT_TO_CONFIG_ONCE_APP_KEY,
+    SESSION_STORE_APP_KEY,
+    SETTINGS_APP_KEY,
+)
 from .utils import ensure_config_toml
 from Undefined.utils.self_update import (
     GitUpdatePolicy,
@@ -75,6 +82,39 @@ _GZIP_MIME: dict[str, str] = {
 def _gzip_compress(data: bytes) -> bytes | None:
     compressed = _gzip_mod.compress(data, compresslevel=6)
     return compressed if len(compressed) < len(data) else None
+
+
+def _apply_cors_headers(request: web.Request, response: web.StreamResponse) -> None:
+    origin = normalize_origin(str(request.headers.get("Origin") or ""))
+    settings = load_webui_settings()
+    response.headers.setdefault("Vary", "Origin")
+    response.headers.setdefault("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+    response.headers.setdefault(
+        "Access-Control-Allow-Headers",
+        "Authorization, Content-Type, X-Auth-Token, X-Refresh-Token, X-Undefined-API-Key",
+    )
+    response.headers.setdefault("Access-Control-Max-Age", "86400")
+    if origin and is_allowed_cors_origin(
+        origin,
+        configured_host=str(settings.url or ""),
+        configured_port=settings.port,
+    ):
+        response.headers.setdefault("Access-Control-Allow-Origin", origin)
+        response.headers.setdefault("Access-Control-Allow-Credentials", "true")
+
+
+@web.middleware
+async def cors_middleware(
+    request: web.Request,
+    handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
+) -> web.StreamResponse:
+    response: web.StreamResponse
+    if request.method == "OPTIONS":
+        response = web.Response(status=204)
+    else:
+        response = await handler(request)
+    _apply_cors_headers(request, response)
+    return response
 
 
 @web.middleware
@@ -191,7 +231,7 @@ async def on_startup(app: web.Application) -> None:
         marker = Path("data/cache/pending_bot_autostart")
         if marker.exists():
             marker.unlink(missing_ok=True)
-            bot: BotProcessController = app["bot"]
+            bot = app[BOT_APP_KEY]
             await bot.start()
             logger.info("[WebUI] 检测到自动恢复标记，已尝试启动机器人进程")
     except Exception:
@@ -199,7 +239,7 @@ async def on_startup(app: web.Application) -> None:
 
 
 async def on_shutdown(app: web.Application) -> None:
-    bot: BotProcessController = app["bot"]
+    bot = app[BOT_APP_KEY]
     status = bot.status()
     if not status.get("running"):
         logger.info("[WebUI] 正在关闭，无运行中的机器人进程")
@@ -217,18 +257,20 @@ async def on_cleanup(app: web.Application) -> None:
 
 
 def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
-    app = web.Application(middlewares=[gzip_middleware, security_headers_middleware])
+    app = web.Application(
+        middlewares=[cors_middleware, gzip_middleware, security_headers_middleware]
+    )
 
     # 初始化核心组件
-    app["bot"] = BotProcessController()
-    app["session_store"] = SessionStore()
+    app[BOT_APP_KEY] = BotProcessController()
+    app[SESSION_STORE_APP_KEY] = SessionStore()
 
     # 配置 WebUI 设置热重载
     config_manager = get_config_manager()
-    app["settings"] = load_webui_settings()
+    app[SETTINGS_APP_KEY] = load_webui_settings()
 
     # 一次性客户端重定向提示（由 index 处理）
-    app["redirect_to_config_once"] = redirect_to_config_once
+    app[REDIRECT_TO_CONFIG_ONCE_APP_KEY] = redirect_to_config_once
 
     def _on_config_change(config: Any, changes: dict[str, Any]) -> None:
         webui_keys = {"webui_url", "webui_port", "webui_password"}
@@ -236,7 +278,7 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
             changes
         ):
             logger.info("[WebUI] 检测到 WebUI 配置变更，正在热重载设置...")
-            app["settings"] = load_webui_settings()
+            app[SETTINGS_APP_KEY] = load_webui_settings()
 
     config_manager.subscribe(_on_config_change)
 

@@ -1,0 +1,44 @@
+{
+	"$schema": "https://schema.tauri.app/config/2",
+	"productName": "Undefined Console",
+	"version": "3.2.0",
+	"identifier": "com.undefined.console",
+	"build": {
+		"beforeDevCommand": "npm run dev",
+		"beforeBuildCommand": "npm run build",
+		"devUrl": "http://localhost:1420",
+		"frontendDist": "../dist"
+	},
+	"app": {
+		"windows": [
+			{
+				"label": "main",
+				"title": "Undefined Console",
+				"width": 1320,
+				"height": 860,
+				"minWidth": 360,
+				"minHeight": 640,
+				"resizable": true,
+				"fullscreen": false
+			}
+		],
+		"security": {
+			"csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset:; font-src 'self' data: asset:; connect-src 'self' http: https: ipc: tauri: asset:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+		}
+	},
+	"bundle": {
+		"active": true,
+		"category": "DeveloperTool",
+		"shortDescription": "Remote-first management console for Undefined.",
+		"longDescription": "A desktop and Android control surface for connecting to Undefined management and runtime endpoints.",
+		"targets": ["appimage", "deb", "dmg", "msi", "nsis"],
+		"icon": [
+			"icons/32x32.png",
+			"icons/128x128.png",
+			"icons/128x128@2x.png",
+			"icons/icon.icns",
+			"icons/icon.ico",
+			"icons/icon.png"
+		]
+	}
+}

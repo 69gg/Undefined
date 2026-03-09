@@ -2,6 +2,7 @@
     const runtimeState = {
         initialized: false,
         probesLoaded: false,
+        bootstrapLoaded: false,
         memoryLoaded: false,
         runtimeMetaLoaded: false,
         runtimeEnabled: true,
@@ -48,8 +49,10 @@
     }
 
     function probeStatusBadge(status) {
-        const cls = status === "ok" ? "ok" : status === "skipped" ? "skipped" : "error";
-        const label = status === "ok" ? "OK" : status === "skipped" ? "Skipped" : "Error";
+        const cls =
+            status === "ok" ? "ok" : status === "skipped" ? "skipped" : "error";
+        const label =
+            status === "ok" ? "OK" : status === "skipped" ? "Skipped" : "Error";
         return `<span class="probe-status ${cls}"><span class="probe-dot"></span>${escapeHtml(label)}</span>`;
     }
 
@@ -73,12 +76,28 @@
         html += `<div class="probe-section">`;
         html += `<div class="probe-section-title">${t("probes.section_system")}</div>`;
         html += `<div class="probe-grid">`;
-        html += probeItem(t("probes.version"), `<code>v${escapeHtml(data.version || "--")}</code>`);
-        html += probeItem("Python", `<code>${escapeHtml(data.python || "--")}</code>`);
-        html += probeItem(t("probes.platform"), escapeHtml(data.platform || "--"));
-        html += probeItem(t("probes.uptime"), `<code>${formatUptime(data.uptime_seconds)}</code>`);
+        html += probeItem(
+            t("probes.version"),
+            `<code>v${escapeHtml(data.version || "--")}</code>`,
+        );
+        html += probeItem(
+            "Python",
+            `<code>${escapeHtml(data.python || "--")}</code>`,
+        );
+        html += probeItem(
+            t("probes.platform"),
+            escapeHtml(data.platform || "--"),
+        );
+        html += probeItem(
+            t("probes.uptime"),
+            `<code>${formatUptime(data.uptime_seconds)}</code>`,
+        );
         html += probeItem("OneBot", probeStatusBadge(obStatus));
-        if (ob.ws_url) html += probeItem("WS URL", `<code>${escapeHtml(ob.ws_url)}</code>`);
+        if (ob.ws_url)
+            html += probeItem(
+                "WS URL",
+                `<code>${escapeHtml(ob.ws_url)}</code>`,
+            );
         html += `</div></div>`;
 
         // Models
@@ -92,8 +111,10 @@
                 html += `<div class="probe-endpoint-info">`;
                 html += `<div class="probe-endpoint-name">${escapeHtml(label)}</div>`;
                 html += `<div class="probe-endpoint-meta">`;
-                if (m.model_name) html += `<span>${t("probes.model")}: <code>${escapeHtml(m.model_name)}</code></span>`;
-                if (m.api_url) html += `<span>URL: <code>${escapeHtml(m.api_url)}</code></span>`;
+                if (m.model_name)
+                    html += `<span>${t("probes.model")}: <code>${escapeHtml(m.model_name)}</code></span>`;
+                if (m.api_url)
+                    html += `<span>URL: <code>${escapeHtml(m.api_url)}</code></span>`;
                 html += `</div></div>`;
                 if (m.thinking_enabled !== undefined) {
                     html += `<div class="probe-endpoint-right"><span class="probe-queue-tag">${m.thinking_enabled ? "Thinking ✓" : "Thinking ✗"}</span></div>`;
@@ -109,9 +130,21 @@
             html += `<div class="probe-section">`;
             html += `<div class="probe-section-title">${t("probes.section_queues")}</div>`;
             html += `<div class="probe-grid">`;
-            if (q.processor_count !== undefined) html += probeItem(t("probes.processors"), String(q.processor_count));
-            if (q.inflight_count !== undefined) html += probeItem(t("probes.inflight"), String(q.inflight_count));
-            if (q.model_count !== undefined) html += probeItem(t("probes.model_queues"), String(q.model_count));
+            if (q.processor_count !== undefined)
+                html += probeItem(
+                    t("probes.processors"),
+                    String(q.processor_count),
+                );
+            if (q.inflight_count !== undefined)
+                html += probeItem(
+                    t("probes.inflight"),
+                    String(q.inflight_count),
+                );
+            if (q.model_count !== undefined)
+                html += probeItem(
+                    t("probes.model_queues"),
+                    String(q.model_count),
+                );
             html += `</div>`;
             if (q.totals) {
                 html += `<div class="probe-queue-row" style="margin-top:8px">`;
@@ -130,10 +163,20 @@
         html += `<div class="probe-section-title">${t("probes.section_services")}</div>`;
         html += `<div class="probe-grid">`;
         html += probeItem(t("probes.memory_count"), String(mem.count ?? "--"));
-        html += probeItem(t("probes.cognitive"), probeStatusBadge(cog.enabled ? "ok" : "skipped"));
+        html += probeItem(
+            t("probes.cognitive"),
+            probeStatusBadge(cog.enabled ? "ok" : "skipped"),
+        );
         const apiInfo = data.api || {};
-        html += probeItem("Runtime API", probeStatusBadge(apiInfo.enabled ? "ok" : "error"));
-        if (apiInfo.enabled) html += probeItem(t("probes.api_listen"), `<code>${escapeHtml(apiInfo.host || "")}:${apiInfo.port || ""}</code>`);
+        html += probeItem(
+            "Runtime API",
+            probeStatusBadge(apiInfo.enabled ? "ok" : "error"),
+        );
+        if (apiInfo.enabled)
+            html += probeItem(
+                t("probes.api_listen"),
+                `<code>${escapeHtml(apiInfo.host || "")}:${apiInfo.port || ""}</code>`,
+            );
         html += `</div></div>`;
 
         // Skills
@@ -142,9 +185,21 @@
             html += `<div class="probe-section">`;
             html += `<div class="probe-section-title">${t("probes.section_skills")}</div>`;
             html += `<div class="probe-grid" style="margin-bottom:8px">`;
-            if (sk.tools) html += probeItem(t("probes.tools"), `${sk.tools.loaded ?? 0} / ${sk.tools.count ?? 0}`);
-            if (sk.agents) html += probeItem(t("probes.agents"), `${sk.agents.loaded ?? 0} / ${sk.agents.count ?? 0}`);
-            if (sk.anthropic_skills) html += probeItem("Anthropic Skills", `${sk.anthropic_skills.loaded ?? 0} / ${sk.anthropic_skills.count ?? 0}`);
+            if (sk.tools)
+                html += probeItem(
+                    t("probes.tools"),
+                    `${sk.tools.loaded ?? 0} / ${sk.tools.count ?? 0}`,
+                );
+            if (sk.agents)
+                html += probeItem(
+                    t("probes.agents"),
+                    `${sk.agents.loaded ?? 0} / ${sk.agents.count ?? 0}`,
+                );
+            if (sk.anthropic_skills)
+                html += probeItem(
+                    "Anthropic Skills",
+                    `${sk.anthropic_skills.loaded ?? 0} / ${sk.anthropic_skills.count ?? 0}`,
+                );
             html += `</div>`;
             // Show active skills (ones with calls > 0)
             const activeItems = [];
@@ -165,7 +220,8 @@
                     html += `<span class="probe-skill-stats">`;
                     html += `<span>${item.calls} calls</span>`;
                     html += `<span style="color:var(--success)">${item.success} ok</span>`;
-                    if (item.failure > 0) html += `<span style="color:var(--error)">${item.failure} fail</span>`;
+                    if (item.failure > 0)
+                        html += `<span style="color:var(--error)">${item.failure} fail</span>`;
                     html += `</span></div>`;
                 }
                 if (activeItems.length > 10) {
@@ -204,21 +260,31 @@
         const results = data.results || [];
         html += `<div class="probe-endpoint-list">`;
         for (const r of results) {
-            const statusCls = r.status === "ok" ? "ok" : r.status === "skipped" ? "skipped" : "error";
+            const statusCls =
+                r.status === "ok"
+                    ? "ok"
+                    : r.status === "skipped"
+                      ? "skipped"
+                      : "error";
             html += `<div class="probe-endpoint">`;
             html += `<div class="probe-endpoint-info">`;
             html += `<div class="probe-endpoint-name">${escapeHtml((r.name || "").replace(/_/g, " "))}</div>`;
             html += `<div class="probe-endpoint-meta">`;
-            if (r.model_name) html += `<span>${t("probes.model")}: <code>${escapeHtml(r.model_name)}</code></span>`;
-            if (r.url) html += `<span>URL: <code>${escapeHtml(r.url)}</code></span>`;
-            if (r.host) html += `<span>Host: <code>${escapeHtml(r.host)}${r.port ? ":" + r.port : ""}</code></span>`;
+            if (r.model_name)
+                html += `<span>${t("probes.model")}: <code>${escapeHtml(r.model_name)}</code></span>`;
+            if (r.url)
+                html += `<span>URL: <code>${escapeHtml(r.url)}</code></span>`;
+            if (r.host)
+                html += `<span>Host: <code>${escapeHtml(r.host)}${r.port ? ":" + r.port : ""}</code></span>`;
             if (r.http_status) html += `<span>HTTP ${r.http_status}</span>`;
-            if (r.error) html += `<span style="color:var(--error)">${escapeHtml(r.error)}</span>`;
+            if (r.error)
+                html += `<span style="color:var(--error)">${escapeHtml(r.error)}</span>`;
             if (r.reason) html += `<span>${escapeHtml(r.reason)}</span>`;
             html += `</div></div>`;
             html += `<div class="probe-endpoint-right">`;
             html += probeStatusBadge(r.status);
-            if (r.latency_ms !== undefined) html += `<span class="probe-latency">${r.latency_ms} ms</span>`;
+            if (r.latency_ms !== undefined)
+                html += `<span class="probe-latency">${r.latency_ms} ms</span>`;
             html += `</div></div>`;
         }
         html += `</div>`;
@@ -256,7 +322,10 @@
         const raw = String(text || "").trim();
         if (!raw) return escapeHtml(text || "");
 
-        if ((raw.startsWith("{") && raw.endsWith("}")) || (raw.startsWith("[") && raw.endsWith("]"))) {
+        if (
+            (raw.startsWith("{") && raw.endsWith("}")) ||
+            (raw.startsWith("[") && raw.endsWith("]"))
+        ) {
             try {
                 const parsed = JSON.parse(raw);
                 return `<pre class="runtime-json runtime-json-inline">${escapeHtml(JSON.stringify(parsed, null, 2))}</pre>`;
@@ -271,7 +340,9 @@
 
         const flushList = () => {
             if (!listItems.length) return;
-            blocks.push(`<ul class="runtime-profile-list">${listItems.join("")}</ul>`);
+            blocks.push(
+                `<ul class="runtime-profile-list">${listItems.join("")}</ul>`,
+            );
             listItems = [];
         };
 
@@ -285,7 +356,9 @@
             const heading = textLine.match(/^#{1,3}\s+(.+)$/);
             if (heading) {
                 flushList();
-                blocks.push(`<div class="runtime-profile-title">${escapeHtml(heading[1])}</div>`);
+                blocks.push(
+                    `<div class="runtime-profile-title">${escapeHtml(heading[1])}</div>`,
+                );
                 continue;
             }
 
@@ -299,23 +372,30 @@
             if (kv) {
                 flushList();
                 blocks.push(
-                    `<div class="runtime-profile-kv"><span class="runtime-profile-k">${escapeHtml(kv[1])}</span><span class="runtime-profile-v">${escapeHtml(kv[2])}</span></div>`
+                    `<div class="runtime-profile-kv"><span class="runtime-profile-k">${escapeHtml(kv[1])}</span><span class="runtime-profile-v">${escapeHtml(kv[2])}</span></div>`,
                 );
                 continue;
             }
 
             flushList();
-            blocks.push(`<p class="runtime-profile-p">${escapeHtml(textLine)}</p>`);
+            blocks.push(
+                `<p class="runtime-profile-p">${escapeHtml(textLine)}</p>`,
+            );
         }
         flushList();
-        return blocks.join("") || `<p class="runtime-profile-p">${escapeHtml(raw)}</p>`;
+        return (
+            blocks.join("") ||
+            `<p class="runtime-profile-p">${escapeHtml(raw)}</p>`
+        );
     }
 
     function appendChatMessage(role, content) {
         const log = get("runtimeChatLog");
         if (!log) return;
         const isBot = role !== "user";
-        const contentClass = isBot ? "runtime-chat-content markdown" : "runtime-chat-content";
+        const contentClass = isBot
+            ? "runtime-chat-content markdown"
+            : "runtime-chat-content";
         const item = document.createElement("div");
         item.className = `runtime-chat-item ${role}`;
         item.innerHTML = `<div class="runtime-chat-role">${role === "user" ? "You" : "AI"}</div><div class="${contentClass}">${renderChatContent(content, isBot)}</div>`;
@@ -354,7 +434,11 @@
         if (raw.startsWith("/") || /^[A-Za-z]:[\\/]/.test(raw)) {
             return `/api/runtime/chat/image?path=${encodeURIComponent(raw)}`;
         }
-        if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:image/")) {
+        if (
+            raw.startsWith("http://") ||
+            raw.startsWith("https://") ||
+            raw.startsWith("data:image/")
+        ) {
             return raw;
         }
         return "";
@@ -374,14 +458,16 @@
         const size = formatFileSize(attrs.size);
         if (!fileId) return `<code>[file]</code>`;
         const href = `/api/runtime/chat/file?id=${encodeURIComponent(fileId)}`;
-        return `<div class="runtime-chat-file-card">`
-            + `<div class="runtime-chat-file-icon">&#128196;</div>`
-            + `<div class="runtime-chat-file-info">`
-            + `<div class="runtime-chat-file-name">${name}</div>`
-            + (size ? `<div class="runtime-chat-file-size">${size}</div>` : "")
-            + `</div>`
-            + `<a class="runtime-chat-file-dl" href="${href}" download="${name}">${t("runtime.download") || "Download"}</a>`
-            + `</div>`;
+        return (
+            `<div class="runtime-chat-file-card">` +
+            `<div class="runtime-chat-file-icon">&#128196;</div>` +
+            `<div class="runtime-chat-file-info">` +
+            `<div class="runtime-chat-file-name">${name}</div>` +
+            (size ? `<div class="runtime-chat-file-size">${size}</div>` : "") +
+            `</div>` +
+            `<a class="runtime-chat-file-dl" href="${href}" download="${name}">${t("runtime.download") || "Download"}</a>` +
+            `</div>`
+        );
     }
 
     function renderChatContent(content, useMarkdown) {
@@ -390,7 +476,7 @@
         // Extract CQ file codes into placeholders
         const filePattern = /\[CQ:file,([^\]]+)\]/g;
         const filePlaceholders = [];
-        let step1 = text.replace(filePattern, (match, attrStr) => {
+        const step1 = text.replace(filePattern, (match, attrStr) => {
             const attrs = parseCqAttributes(attrStr);
             const idx = filePlaceholders.length;
             filePlaceholders.push(renderFileCard(attrs));
@@ -405,7 +491,9 @@
             const src = resolveCqImageSource(attrs);
             if (src) {
                 const idx = images.length;
-                images.push(`<img class="runtime-chat-image" src="${escapeHtml(src)}" alt="image" loading="lazy" />`);
+                images.push(
+                    `<img class="runtime-chat-image" src="${escapeHtml(src)}" alt="image" loading="lazy" />`,
+                );
                 return `CQIMGPH${idx}CQIMGPH`;
             }
             return match;
@@ -424,12 +512,21 @@
 
         // Restore placeholders
         for (let i = 0; i < images.length; i++) {
-            html = html.replace(new RegExp(`CQIMGPH${i}CQIMGPH`, "g"), images[i]);
+            html = html.replace(
+                new RegExp(`CQIMGPH${i}CQIMGPH`, "g"),
+                images[i],
+            );
         }
         for (let i = 0; i < filePlaceholders.length; i++) {
             // marked may wrap placeholder in <p>, strip it for block-level card
-            html = html.replace(new RegExp(`<p>\\s*CQFILEPH${i}CQFILEPH\\s*</p>`, "g"), filePlaceholders[i]);
-            html = html.replace(new RegExp(`CQFILEPH${i}CQFILEPH`, "g"), filePlaceholders[i]);
+            html = html.replace(
+                new RegExp(`<p>\\s*CQFILEPH${i}CQFILEPH\\s*</p>`, "g"),
+                filePlaceholders[i],
+            );
+            html = html.replace(
+                new RegExp(`CQFILEPH${i}CQFILEPH`, "g"),
+                filePlaceholders[i],
+            );
         }
 
         return html || escapeHtml(text);
@@ -462,7 +559,8 @@
     }
 
     function buildRequestError(res, payload) {
-        const fallback = `${res.status} ${res.statusText || "Request failed"}`.trim();
+        const fallback =
+            `${res.status} ${res.statusText || "Request failed"}`.trim();
         if (!payload || typeof payload !== "object") return fallback;
         const base = payload.error ? String(payload.error) : fallback;
         return payload.detail ? `${base}: ${payload.detail}` : base;
@@ -472,11 +570,12 @@
         const text = String(message || "").trim();
         if (!text) return text;
         const normalized = text.toLowerCase();
-        const unreachable = normalized.includes("runtime api unreachable")
-            || normalized.includes("failed to fetch")
-            || normalized.includes("networkerror")
-            || normalized.includes(" 502 ")
-            || normalized.startsWith("502 ");
+        const unreachable =
+            normalized.includes("runtime api unreachable") ||
+            normalized.includes("failed to fetch") ||
+            normalized.includes("networkerror") ||
+            normalized.includes(" 502 ") ||
+            normalized.startsWith("502 ");
         if (!unreachable) return text;
         const hint = t("runtime.api_start_hint");
         if (!hint || text.includes(hint)) return text;
@@ -536,10 +635,12 @@
         const container = get("runtimeMemoryList");
         const meta = get("runtimeMemoryMeta");
         if (!container || !meta) return;
-        const items = payload && Array.isArray(payload.items) ? payload.items : [];
-        const queryInfo = payload && payload.query && typeof payload.query === "object"
-            ? payload.query
-            : {};
+        const items =
+            payload && Array.isArray(payload.items) ? payload.items : [];
+        const queryInfo =
+            payload && payload.query && typeof payload.query === "object"
+                ? payload.query
+                : {};
         if (!Array.isArray(items) || items.length === 0) {
             meta.textContent = i18nFormat("runtime.total", { count: 0 });
             container.innerHTML = `<div class="empty-state">${t("runtime.empty")}</div>`;
@@ -579,7 +680,8 @@
         const meta = get(metaId);
         const list = get(listId);
         if (!meta || !list) return;
-        const items = payload && Array.isArray(payload.items) ? payload.items : [];
+        const items =
+            payload && Array.isArray(payload.items) ? payload.items : [];
         const count = Number.isFinite(Number(payload && payload.count))
             ? Number(payload.count)
             : items.length;
@@ -600,36 +702,55 @@
             "request_id",
         ];
 
-        list.innerHTML = items.map((item, index) => {
-            const doc = escapeHtml(String((item && item.document) || "").trim());
-            const md = item && typeof item.metadata === "object" && item.metadata
-                ? item.metadata
-                : {};
-            const dist = formatNumeric(item && item.distance);
-            const rerank = formatNumeric(item && item.rerank_score);
-            const timestamp = escapeHtml(String(md.timestamp_local || "").trim());
-            const headLabel = timestamp || `#${index + 1}`;
-            const tags = [];
-            if (dist) tags.push(`<span class="runtime-tag">distance ${dist}</span>`);
-            if (rerank) tags.push(`<span class="runtime-tag">rerank ${rerank}</span>`);
+        list.innerHTML = items
+            .map((item, index) => {
+                const doc = escapeHtml(
+                    String((item && item.document) || "").trim(),
+                );
+                const md =
+                    item && typeof item.metadata === "object" && item.metadata
+                        ? item.metadata
+                        : {};
+                const dist = formatNumeric(item && item.distance);
+                const rerank = formatNumeric(item && item.rerank_score);
+                const timestamp = escapeHtml(
+                    String(md.timestamp_local || "").trim(),
+                );
+                const headLabel = timestamp || `#${index + 1}`;
+                const tags = [];
+                if (dist)
+                    tags.push(
+                        `<span class="runtime-tag">distance ${dist}</span>`,
+                    );
+                if (rerank)
+                    tags.push(
+                        `<span class="runtime-tag">rerank ${rerank}</span>`,
+                    );
 
-            const metaRows = preferredMetaKeys
-                .filter((key) => md[key] !== undefined && md[key] !== null && String(md[key]).trim() !== "")
-                .map((key) => {
-                    const raw = md[key];
-                    const text = (raw && typeof raw === "object")
-                        ? JSON.stringify(raw)
-                        : String(raw);
-                    return `<span class="runtime-kv-item"><span>${escapeHtml(key)}</span><code>${escapeHtml(text)}</code></span>`;
-                })
-                .join("");
+                const metaRows = preferredMetaKeys
+                    .filter(
+                        (key) =>
+                            md[key] !== undefined &&
+                            md[key] !== null &&
+                            String(md[key]).trim() !== "",
+                    )
+                    .map((key) => {
+                        const raw = md[key];
+                        const text =
+                            raw && typeof raw === "object"
+                                ? JSON.stringify(raw)
+                                : String(raw);
+                        return `<span class="runtime-kv-item"><span>${escapeHtml(key)}</span><code>${escapeHtml(text)}</code></span>`;
+                    })
+                    .join("");
 
-            return `<div class="runtime-list-item">
+                return `<div class="runtime-list-item">
                 <div class="runtime-list-head"><span>${headLabel}</span><div class="runtime-tags">${tags.join("")}</div></div>
                 <div class="runtime-doc">${doc || "--"}</div>
                 ${metaRows ? `<div class="runtime-kv">${metaRows}</div>` : ""}
             </div>`;
-        }).join("");
+            })
+            .join("");
     }
 
     function renderProfileDetail(payload) {
@@ -637,7 +758,11 @@
         const container = get("runtimeProfileResult");
         if (!meta || !container) return;
         if (!payload || typeof payload !== "object") {
-            setListMessage("runtimeProfileMeta", "runtimeProfileResult", t("runtime.empty"));
+            setListMessage(
+                "runtimeProfileMeta",
+                "runtimeProfileResult",
+                t("runtime.empty"),
+            );
             return;
         }
 
@@ -655,6 +780,96 @@
         </div>`;
     }
 
+    function renderBootstrapProbe(data) {
+        const el = get("managementBootstrapProbe");
+        if (!el) return;
+        if (!data || data.error) {
+            el.innerHTML = `<div class="empty-state">${escapeHtml(data?.error || "--")}</div>`;
+            return;
+        }
+
+        const configExists = !!data.config_exists;
+        const configValid =
+            data.config_valid === undefined ? null : !!data.config_valid;
+        const usingDefaultPassword = !!data.using_default_password;
+        const runtimeEnabled = !!data.runtime_enabled;
+        const runtimeReachable =
+            data.runtime_reachable === undefined
+                ? null
+                : !!data.runtime_reachable;
+        const authMode =
+            data.auth_mode || (state.authAccessToken ? "token" : "cookie");
+        const advice = Array.isArray(data.advice) ? data.advice : [];
+
+        const configStatus = configExists ? "ok" : "error";
+        const validationStatus =
+            configValid === null ? "skipped" : configValid ? "ok" : "error";
+        const authStatus = usingDefaultPassword ? "error" : "ok";
+        const runtimeStatus =
+            runtimeReachable === null
+                ? runtimeEnabled
+                    ? "skipped"
+                    : "error"
+                : runtimeReachable
+                  ? "ok"
+                  : runtimeEnabled
+                    ? "error"
+                    : "skipped";
+
+        let html = `<div class="probe-section"><div class="probe-section-title">${t("probes.section_bootstrap")}</div>`;
+        html += `<div class="probe-grid">`;
+        html += probeItem(
+            t("probes.bootstrap_config"),
+            probeStatusBadge(configStatus),
+        );
+        html += probeItem(
+            t("probes.bootstrap_validation"),
+            probeStatusBadge(validationStatus),
+        );
+        html += probeItem(
+            t("probes.bootstrap_auth"),
+            `${probeStatusBadge(authStatus)} <code>${escapeHtml(String(authMode))}</code>`,
+        );
+        html += probeItem(
+            t("probes.bootstrap_runtime"),
+            probeStatusBadge(runtimeStatus),
+        );
+        html += `</div>`;
+
+        const summary = [];
+        if (configExists) summary.push(t("probes.bootstrap_config_exists"));
+        if (!configExists) summary.push(t("probes.bootstrap_config_missing"));
+        if (configValid === false && data.validation_error)
+            summary.push(String(data.validation_error));
+        if (usingDefaultPassword) summary.push(t("auth.change_required"));
+        if (runtimeEnabled && runtimeReachable === false)
+            summary.push(t("probes.bootstrap_runtime_pending"));
+        if (!summary.length) summary.push(t("probes.bootstrap_ready"));
+
+        html += `<div class="probe-advice-list">${summary
+            .concat(advice)
+            .map(
+                (item) =>
+                    `<div class="probe-advice-item">${escapeHtml(item)}</div>`,
+            )
+            .join("")}</div>`;
+        html += `</div>`;
+        el.innerHTML = html;
+    }
+
+    function buildBootstrapFallback(meta, errorMessage = "") {
+        return {
+            config_exists: !!state.configExists,
+            config_valid: null,
+            using_default_password: !!state.usingDefaultPassword,
+            auth_mode: state.authAccessToken ? "token" : "cookie",
+            runtime_enabled: !!(meta && meta.enabled),
+            runtime_reachable: false,
+            validation_error: "",
+            advice: errorMessage ? [String(errorMessage)] : [],
+        };
+    }
+
     function setProbeUnavailable(message) {
         const msg = String(message || RUNTIME_DISABLED_ERROR);
         renderInternalProbe({ error: msg });
@@ -670,9 +885,10 @@
     }
 
     async function fetchRuntimeMeta() {
-        const res = await api("/api/runtime/meta");
-        const data = await res.json();
-        return data;
+        return fetchJsonOrThrow([
+            "/api/v1/management/runtime/meta",
+            "/api/runtime/meta",
+        ]);
     }
 
     async function ensureRuntimeEnabled() {
@@ -686,15 +902,36 @@
     }
 
     async function fetchInternalProbe() {
-        const res = await api("/api/runtime/probes/internal");
-        const data = await res.json();
+        const data = await fetchJsonOrThrow([
+            "/api/v1/management/runtime/probes/internal",
+            "/api/runtime/probes/internal",
+        ]);
         renderInternalProbe(data);
     }
 
     async function fetchExternalProbe() {
-        const res = await api("/api/runtime/probes/external");
-        const data = await res.json();
+        const data = await fetchJsonOrThrow([
+            "/api/v1/management/runtime/probes/external",
+            "/api/runtime/probes/external",
+        ]);
         renderExternalProbe(data);
+    }
+
+    async function fetchBootstrapProbe() {
+        try {
+            const data = await fetchJsonOrThrow([
+                "/api/v1/management/probes/bootstrap",
+                "/api/v1/management/probes/capabilities",
+            ]);
+            renderBootstrapProbe(data);
+        } catch (error) {
+            const meta = await fetchRuntimeMeta().catch(() => ({
+                enabled: false,
+            }));
+            renderBootstrapProbe(
+                buildBootstrapFallback(meta, error.message || error),
+            );
+        }
     }
 
     async function searchMemory() {
@@ -711,63 +948,135 @@
         appendPositiveIntParam(params, "top_k", topK);
         appendQueryParam(params, "time_from", timeFrom);
         appendQueryParam(params, "time_to", timeTo);
-        const data = await fetchJsonOrThrow(`/api/runtime/memory?${params.toString()}`);
+        const data = await fetchJsonOrThrow(
+            `/api/runtime/memory?${params.toString()}`,
+        );
         renderMemoryItems(data);
     }
 
     async function searchEvents() {
         if (!(await ensureRuntimeEnabled())) {
-            setListMessage("runtimeEventsMeta", "runtimeEventsResult", t("runtime.disabled"));
+            setListMessage(
+                "runtimeEventsMeta",
+                "runtimeEventsResult",
+                t("runtime.disabled"),
+            );
             return;
         }
         const query = readInputValue("runtimeEventsQuery");
         if (!query) {
-            setListMessage("runtimeEventsMeta", "runtimeEventsResult", "q is required");
+            setListMessage(
+                "runtimeEventsMeta",
+                "runtimeEventsResult",
+                "q is required",
+            );
             return;
         }
         const params = new URLSearchParams();
         appendQueryParam(params, "q", query);
-        appendPositiveIntParam(params, "top_k", readInputValue("runtimeEventsTopK"));
-        appendQueryParam(params, "request_type", readInputValue("runtimeEventsRequestType"));
-        appendQueryParam(params, "target_user_id", readInputValue("runtimeEventsTargetUserId"));
-        appendQueryParam(params, "target_group_id", readInputValue("runtimeEventsTargetGroupId"));
-        appendQueryParam(params, "sender_id", readInputValue("runtimeEventsSenderId"));
-        appendQueryParam(params, "time_from", readInputValue("runtimeEventsTimeFrom"));
-        appendQueryParam(params, "time_to", readInputValue("runtimeEventsTimeTo"));
-        const data = await fetchJsonOrThrow(`/api/runtime/cognitive/events?${params.toString()}`);
+        appendPositiveIntParam(
+            params,
+            "top_k",
+            readInputValue("runtimeEventsTopK"),
+        );
+        appendQueryParam(
+            params,
+            "request_type",
+            readInputValue("runtimeEventsRequestType"),
+        );
+        appendQueryParam(
+            params,
+            "target_user_id",
+            readInputValue("runtimeEventsTargetUserId"),
+        );
+        appendQueryParam(
+            params,
+            "target_group_id",
+            readInputValue("runtimeEventsTargetGroupId"),
+        );
+        appendQueryParam(
+            params,
+            "sender_id",
+            readInputValue("runtimeEventsSenderId"),
+        );
+        appendQueryParam(
+            params,
+            "time_from",
+            readInputValue("runtimeEventsTimeFrom"),
+        );
+        appendQueryParam(
+            params,
+            "time_to",
+            readInputValue("runtimeEventsTimeTo"),
+        );
+        const data = await fetchJsonOrThrow(
+            `/api/runtime/cognitive/events?${params.toString()}`,
+        );
         renderCognitiveItems("runtimeEventsMeta", "runtimeEventsResult", data);
     }
 
     async function searchProfiles() {
         if (!(await ensureRuntimeEnabled())) {
-            setListMessage("runtimeProfilesMeta", "runtimeProfilesResult", t("runtime.disabled"));
+            setListMessage(
+                "runtimeProfilesMeta",
+                "runtimeProfilesResult",
+                t("runtime.disabled"),
+            );
             return;
         }
         const query = readInputValue("runtimeProfilesQuery");
         if (!query) {
-            setListMessage("runtimeProfilesMeta", "runtimeProfilesResult", "q is required");
+            setListMessage(
+                "runtimeProfilesMeta",
+                "runtimeProfilesResult",
+                "q is required",
+            );
             return;
         }
         const params = new URLSearchParams();
         appendQueryParam(params, "q", query);
-        appendPositiveIntParam(params, "top_k", readInputValue("runtimeProfilesTopK"));
-        appendQueryParam(params, "entity_type", readInputValue("runtimeProfilesEntityType"));
-        const data = await fetchJsonOrThrow(`/api/runtime/cognitive/profiles?${params.toString()}`);
-        renderCognitiveItems("runtimeProfilesMeta", "runtimeProfilesResult", data);
+        appendPositiveIntParam(
+            params,
+            "top_k",
+            readInputValue("runtimeProfilesTopK"),
+        );
+        appendQueryParam(
+            params,
+            "entity_type",
+            readInputValue("runtimeProfilesEntityType"),
+        );
+        const data = await fetchJsonOrThrow(
+            `/api/runtime/cognitive/profiles?${params.toString()}`,
+        );
+        renderCognitiveItems(
+            "runtimeProfilesMeta",
+            "runtimeProfilesResult",
+            data,
+        );
     }
 
     async function fetchProfileByEntity() {
         if (!(await ensureRuntimeEnabled())) {
-            setListMessage("runtimeProfileMeta", "runtimeProfileResult", t("runtime.disabled"));
+            setListMessage(
+                "runtimeProfileMeta",
+                "runtimeProfileResult",
+                t("runtime.disabled"),
+            );
             return;
         }
         const entityType = readInputValue("runtimeProfileEntityType");
         const entityId = readInputValue("runtimeProfileEntityId");
         if (!entityType || !entityId) {
-            setListMessage("runtimeProfileMeta", "runtimeProfileResult", "entity_type/entity_id are required");
+            setListMessage(
+                "runtimeProfileMeta",
+                "runtimeProfileResult",
+                "entity_type/entity_id are required",
+            );
             return;
         }
-        const data = await fetchJsonOrThrow(`/api/runtime/cognitive/profile/${encodeURIComponent(entityType)}/${encodeURIComponent(entityId)}`);
+        const data = await fetchJsonOrThrow(
+            `/api/runtime/cognitive/profile/${encodeURIComponent(entityType)}/${encodeURIComponent(entityId)}`,
+        );
         renderProfileDetail(data);
     }
 
@@ -782,7 +1091,7 @@
             showToast(
                 `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
                 "error",
-                5000
+                5000,
             );
         } finally {
             setButtonLoading(button, false);
@@ -829,7 +1138,9 @@
                 body: JSON.stringify({ message, stream: true }),
             });
 
-            const contentType = (res.headers.get("Content-Type") || "").toLowerCase();
+            const contentType = (
+                res.headers.get("Content-Type") || ""
+            ).toLowerCase();
             if (contentType.includes("text/event-stream") && res.body) {
                 let replied = false;
                 let streamError = "";
@@ -838,8 +1149,8 @@
                     if (event === "message") {
                         const content = String(
                             payload && (payload.content ?? payload.message)
-                                ? payload.content ?? payload.message
-                                : ""
+                                ? (payload.content ?? payload.message)
+                                : "",
                         ).trim();
                         if (!content) return;
                         appendChatMessage("bot", content);
@@ -850,7 +1161,7 @@
                         streamError = String(
                             payload && (payload.error || payload.message)
                                 ? payload.error || payload.message
-                                : "stream error"
+                                : "stream error",
                         );
                         return;
                     }
@@ -877,9 +1188,12 @@
                 throw new Error(buildRequestError(res, data));
             }
 
-            const messages = data && Array.isArray(data.messages) ? data.messages : [];
+            const messages =
+                data && Array.isArray(data.messages) ? data.messages : [];
             if (messages.length > 0) {
-                messages.forEach((msg) => appendChatMessage("bot", String(msg || "")));
+                messages.forEach((msg) =>
+                    appendChatMessage("bot", String(msg || "")),
+                );
             } else if (data && data.reply) {
                 appendChatMessage("bot", String(data.reply));
             } else {
@@ -890,7 +1204,7 @@
             showToast(
                 `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
                 "error",
-                5000
+                5000,
             );
         } finally {
             runtimeState.chatBusy = false;
@@ -906,7 +1220,8 @@
 
         try {
             for (const file of files) {
-                if (!file || !String(file.type || "").startsWith("image/")) continue;
+                if (!file || !String(file.type || "").startsWith("image/"))
+                    continue;
                 const dataUrl = await readFileAsDataUrl(file);
                 const base64 = String(dataUrl).split(",", 2)[1] || "";
                 if (!base64) continue;
@@ -921,7 +1236,7 @@
             showToast(
                 `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
                 "error",
-                5000
+                5000,
             );
         } finally {
             if (input) input.value = "";
@@ -930,19 +1245,22 @@
 
     async function refreshProbes() {
         try {
+            await fetchBootstrapProbe();
             if (!(await ensureRuntimeEnabled())) {
                 setProbeUnavailable(t("runtime.disabled"));
                 runtimeState.probesLoaded = true;
+                runtimeState.bootstrapLoaded = true;
                 return;
             }
 
             await Promise.all([fetchInternalProbe(), fetchExternalProbe()]);
             runtimeState.probesLoaded = true;
+            runtimeState.bootstrapLoaded = true;
         } catch (error) {
             showToast(
                 `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
                 "error",
-                5000
+                5000,
             );
         }
     }
@@ -960,7 +1278,7 @@
             showToast(
                 `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
                 "error",
-                5000
+                5000,
             );
         }
     }
@@ -988,12 +1306,25 @@
         if (probeRefresh) probeRefresh.addEventListener("click", refreshProbes);
 
         const memoryRefresh = get("btnMemoryRefresh");
-        if (memoryRefresh) memoryRefresh.addEventListener("click", refreshMemory);
+        if (memoryRefresh)
+            memoryRefresh.addEventListener("click", refreshMemory);
 
-        const runMemorySearch = () => runQueryAction("memory", "btnRuntimeMemorySearch", searchMemory);
-        const runEventsSearch = () => runQueryAction("events", "btnRuntimeEventsSearch", searchEvents);
-        const runProfilesSearch = () => runQueryAction("profiles", "btnRuntimeProfilesSearch", searchProfiles);
-        const runProfileGet = () => runQueryAction("profileGet", "btnRuntimeProfileGet", fetchProfileByEntity);
+        const runMemorySearch = () =>
+            runQueryAction("memory", "btnRuntimeMemorySearch", searchMemory);
+        const runEventsSearch = () =>
+            runQueryAction("events", "btnRuntimeEventsSearch", searchEvents);
+        const runProfilesSearch = () =>
+            runQueryAction(
+                "profiles",
+                "btnRuntimeProfilesSearch",
+                searchProfiles,
+            );
+        const runProfileGet = () =>
+            runQueryAction(
+                "profileGet",
+                "btnRuntimeProfileGet",
+                fetchProfileByEntity,
+            );
 
         const memoryBtn = get("btnRuntimeMemorySearch");
         if (memoryBtn) memoryBtn.addEventListener("click", runMemorySearch);
@@ -1004,7 +1335,7 @@
                 "runtimeMemoryTimeFrom",
                 "runtimeMemoryTimeTo",
             ],
-            runMemorySearch
+            runMemorySearch,
         );
 
         const eventsBtn = get("btnRuntimeEventsSearch");
@@ -1019,18 +1350,24 @@
                 "runtimeEventsTimeFrom",
                 "runtimeEventsTimeTo",
             ],
-            runEventsSearch
+            runEventsSearch,
         );
 
         const profilesBtn = get("btnRuntimeProfilesSearch");
-        if (profilesBtn) profilesBtn.addEventListener("click", runProfilesSearch);
+        if (profilesBtn)
+            profilesBtn.addEventListener("click", runProfilesSearch);
         bindEnterMany(
-            ["runtimeProfilesQuery", "runtimeProfilesTopK", "runtimeProfilesEntityType"],
-            runProfilesSearch
+            [
+                "runtimeProfilesQuery",
+                "runtimeProfilesTopK",
+                "runtimeProfilesEntityType",
+            ],
+            runProfilesSearch,
         );
 
         const profileGetBtn = get("btnRuntimeProfileGet");
-        if (profileGetBtn) profileGetBtn.addEventListener("click", runProfileGet);
+        if (profileGetBtn)
+            profileGetBtn.addEventListener("click", runProfileGet);
         bindEnter("runtimeProfileEntityType", runProfileGet);
         bindEnter("runtimeProfileEntityId", runProfileGet);
 
@@ -1061,7 +1398,10 @@
 
     function startProbeTimer() {
         stopProbeTimer();
-        runtimeState.probeTimer = setInterval(refreshProbes, PROBE_REFRESH_INTERVAL);
+        runtimeState.probeTimer = setInterval(
+            refreshProbes,
+            PROBE_REFRESH_INTERVAL,
+        );
     }
 
     function stopProbeTimer() {
@@ -1092,7 +1432,7 @@
                 showToast(
                     `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
                     "error",
-                    5000
+                    5000,
                 );
             });
         }
