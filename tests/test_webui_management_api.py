@@ -6,9 +6,11 @@ from typing import Any, cast
 
 from aiohttp import web
 
+from Undefined.api import app as runtime_api_app
+from Undefined.webui import app as webui_app
 from Undefined.webui.app import create_app
 from Undefined.webui.core import SessionStore
-from Undefined.webui.routes import _auth, _index, _system
+from Undefined.webui.routes import _auth, _index, _shared, _system
 from Undefined.webui.routes._shared import (
     REDIRECT_TO_CONFIG_ONCE_APP_KEY,
     SESSION_COOKIE,
@@ -191,3 +193,65 @@ async def test_index_handler_applies_launcher_mode_and_initial_view() -> None:
         '<script id="initial-view" type="application/json">"app"</script>'
         in payload_text
     )
+
+
+def test_webui_cors_only_allows_trusted_origins(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        webui_app,
+        "load_webui_settings",
+        lambda: SimpleNamespace(url="127.0.0.1", port=8787),
+    )
+    trusted_request = cast(
+        web.Request,
+        cast(Any, DummyRequest(headers={"Origin": "http://127.0.0.1:8787"})),
+    )
+    trusted_response = web.Response(status=200)
+    webui_app._apply_cors_headers(trusted_request, trusted_response)
+    assert trusted_response.headers.get("Access-Control-Allow-Origin") == (
+        "http://127.0.0.1:8787"
+    )
+    assert trusted_response.headers.get("Access-Control-Allow-Credentials") == "true"
+
+    untrusted_request = cast(
+        web.Request,
+        cast(Any, DummyRequest(headers={"Origin": "https://evil.example"})),
+    )
+    untrusted_response = web.Response(status=200)
+    webui_app._apply_cors_headers(untrusted_request, untrusted_response)
+    assert "Access-Control-Allow-Origin" not in untrusted_response.headers
+    assert "Access-Control-Allow-Credentials" not in untrusted_response.headers
+
+
+def test_runtime_api_cors_only_allows_trusted_origins(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        runtime_api_app,
+        "load_webui_settings",
+        lambda: SimpleNamespace(url="127.0.0.1", port=8787),
+    )
+    trusted_request = cast(
+        web.Request,
+        cast(Any, DummyRequest(headers={"Origin": "tauri://localhost"})),
+    )
+    trusted_response = web.Response(status=200)
+    runtime_api_app._apply_cors_headers(trusted_request, trusted_response)
+    assert trusted_response.headers.get("Access-Control-Allow-Origin") == (
+        "tauri://localhost"
+    )
+    assert trusted_response.headers.get("Access-Control-Allow-Credentials") == "true"
+
+    untrusted_request = cast(
+        web.Request,
+        cast(Any, DummyRequest(headers={"Origin": "https://evil.example"})),
+    )
+    untrusted_response = web.Response(status=200)
+    runtime_api_app._apply_cors_headers(untrusted_request, untrusted_response)
+    assert "Access-Control-Allow-Origin" not in untrusted_response.headers
+    assert "Access-Control-Allow-Credentials" not in untrusted_response.headers
+
+
+def test_get_refresh_token_prefers_cookie_when_payload_missing() -> None:
+    request = cast(
+        web.Request,
+        cast(Any, DummyRequest(cookies={_shared.TOKEN_COOKIE: "refresh-cookie"})),
+    )
+    assert _shared.get_refresh_token(request, payload={}) == "refresh-cookie"

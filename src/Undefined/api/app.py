@@ -17,6 +17,7 @@ from aiohttp import ClientSession, ClientTimeout, web
 from aiohttp.web_response import Response
 
 from Undefined import __version__
+from Undefined.config import load_webui_settings
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
 from Undefined.render import render_html_to_image, render_markdown_to_html  # noqa: F401
@@ -131,21 +132,42 @@ def _json_error(message: str, status: int = 400) -> Response:
     return web.json_response({"error": message}, status=status)
 
 
+def _normalize_origin(origin: str) -> str:
+    text = str(origin or "").strip().rstrip("/")
+    if not text:
+        return ""
+    return text.lower()
+
+
+def _allowed_cors_origins() -> set[str]:
+    origins = {
+        "http://localhost",
+        "http://127.0.0.1",
+        "https://localhost",
+        "https://127.0.0.1",
+        "tauri://localhost",
+    }
+    settings = load_webui_settings()
+    host = str(settings.url or "").strip()
+    if host:
+        for scheme in ("http", "https"):
+            origins.add(f"{scheme}://{host}")
+            origins.add(f"{scheme}://{host}:{settings.port}")
+    return {_normalize_origin(item) for item in origins if item}
+
+
 def _apply_cors_headers(request: web.Request, response: web.StreamResponse) -> None:
-    origin = str(request.headers.get("Origin") or "").strip()
-    allow_origin = origin or "*"
-    response.headers.setdefault("Access-Control-Allow-Origin", allow_origin)
+    origin = _normalize_origin(str(request.headers.get("Origin") or ""))
+    allowed_origins = _allowed_cors_origins()
     response.headers.setdefault("Vary", "Origin")
     response.headers.setdefault("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
-    request_headers = str(
-        request.headers.get("Access-Control-Request-Headers") or ""
-    ).strip()
     response.headers.setdefault(
         "Access-Control-Allow-Headers",
-        request_headers or "Authorization, Content-Type, X-Undefined-API-Key",
+        "Authorization, Content-Type, X-Undefined-API-Key",
     )
     response.headers.setdefault("Access-Control-Max-Age", "86400")
-    if origin:
+    if origin and origin in allowed_origins:
+        response.headers.setdefault("Access-Control-Allow-Origin", origin)
         response.headers.setdefault("Access-Control-Allow-Credentials", "true")
 
 

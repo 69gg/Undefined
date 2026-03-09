@@ -87,7 +87,11 @@ def get_refresh_token(
         text = str(value or "").strip()
         if text:
             return text
-    return request.headers.get("X-Refresh-Token") or get_bearer_token(request)
+    return (
+        request.cookies.get(TOKEN_COOKIE)
+        or request.headers.get("X-Refresh-Token")
+        or get_bearer_token(request)
+    )
 
 
 def check_auth(request: web.Request) -> bool:

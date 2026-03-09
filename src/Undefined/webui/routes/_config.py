@@ -72,17 +72,20 @@ async def validate_config_handler(request: web.Request) -> Response:
     strict_message = ""
     if syntax_valid:
         with NamedTemporaryFile(
-            "w", encoding="utf-8", suffix=".toml", delete=True
+            "w", encoding="utf-8", suffix=".toml", delete=False
         ) as f:
             f.write(content)
             f.flush()
-            try:
-                Config.load(Path(f.name), strict=True)
-                strict_valid = True
-                strict_message = "OK"
-            except Exception as exc:
-                strict_valid = False
-                strict_message = str(exc)
+            temp_path = Path(f.name)
+        try:
+            Config.load(temp_path, strict=True)
+            strict_valid = True
+            strict_message = "OK"
+        except Exception as exc:
+            strict_valid = False
+            strict_message = str(exc)
+        finally:
+            temp_path.unlink(missing_ok=True)
     return web.json_response(
         {
             "success": syntax_valid and strict_valid,
