@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit
-
 from aiohttp import ClientSession, ClientTimeout, web
 from aiohttp.web_response import Response
 
@@ -21,6 +20,7 @@ from Undefined.config import load_webui_settings
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
 from Undefined.render import render_html_to_image, render_markdown_to_html  # noqa: F401
+from Undefined.utils.cors import is_allowed_cors_origin, normalize_origin
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
 from Undefined.utils.xml import escape_xml_attr, escape_xml_text
 
@@ -132,33 +132,9 @@ def _json_error(message: str, status: int = 400) -> Response:
     return web.json_response({"error": message}, status=status)
 
 
-def _normalize_origin(origin: str) -> str:
-    text = str(origin or "").strip().rstrip("/")
-    if not text:
-        return ""
-    return text.lower()
-
-
-def _allowed_cors_origins() -> set[str]:
-    origins = {
-        "http://localhost",
-        "http://127.0.0.1",
-        "https://localhost",
-        "https://127.0.0.1",
-        "tauri://localhost",
-    }
-    settings = load_webui_settings()
-    host = str(settings.url or "").strip()
-    if host:
-        for scheme in ("http", "https"):
-            origins.add(f"{scheme}://{host}")
-            origins.add(f"{scheme}://{host}:{settings.port}")
-    return {_normalize_origin(item) for item in origins if item}
-
-
 def _apply_cors_headers(request: web.Request, response: web.StreamResponse) -> None:
-    origin = _normalize_origin(str(request.headers.get("Origin") or ""))
-    allowed_origins = _allowed_cors_origins()
+    origin = normalize_origin(str(request.headers.get("Origin") or ""))
+    settings = load_webui_settings()
     response.headers.setdefault("Vary", "Origin")
     response.headers.setdefault("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
     response.headers.setdefault(
@@ -166,7 +142,11 @@ def _apply_cors_headers(request: web.Request, response: web.StreamResponse) -> N
         "Authorization, Content-Type, X-Undefined-API-Key",
     )
     response.headers.setdefault("Access-Control-Max-Age", "86400")
-    if origin and origin in allowed_origins:
+    if origin and is_allowed_cors_origin(
+        origin,
+        configured_host=str(settings.url or ""),
+        configured_port=settings.port,
+    ):
         response.headers.setdefault("Access-Control-Allow-Origin", origin)
         response.headers.setdefault("Access-Control-Allow-Credentials", "true")
 

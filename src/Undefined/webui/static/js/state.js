@@ -61,29 +61,73 @@ function readBootstrapAuthPayload() {
     }
 }
 
-function persistBootstrapAuthPayload(payload) {
-    if (!payload) return;
+function readSessionStorage(key) {
     try {
-        if (payload.accessToken) {
-            window.localStorage.setItem(
-                "undefined_auth_access_token",
-                payload.accessToken,
-            );
-        }
-        if (payload.refreshToken) {
-            window.localStorage.setItem(
-                "undefined_auth_refresh_token",
-                payload.refreshToken,
-            );
-        }
-        if (payload.accessTokenExpiresAt) {
-            window.localStorage.setItem(
-                "undefined_auth_access_expires_at",
-                String(payload.accessTokenExpiresAt),
-            );
-        }
+        return window.sessionStorage.getItem(key) || "";
+    } catch (_error) {
+        return "";
+    }
+}
+
+function readStorage(key) {
+    try {
+        return window.localStorage.getItem(key) || "";
+    } catch (_error) {
+        return "";
+    }
+}
+
+function removeStorage(key) {
+    try {
+        window.localStorage.removeItem(key);
     } catch (_error) {
         // ignore storage failures in hardened browsers/private mode
+    }
+}
+
+function writeSessionStorage(key, value) {
+    try {
+        if (value === null || value === undefined || value === "") {
+            window.sessionStorage.removeItem(key);
+            return true;
+        }
+        window.sessionStorage.setItem(key, String(value));
+        return true;
+    } catch (_error) {
+        return false;
+    }
+}
+
+function readAuthStorage(key) {
+    const sessionValue = readSessionStorage(key);
+    if (sessionValue) return sessionValue;
+    const legacyValue = readStorage(key);
+    if (!legacyValue) return "";
+    if (writeSessionStorage(key, legacyValue)) {
+        removeStorage(key);
+    }
+    return legacyValue;
+}
+
+function writeAuthStorage(key, value) {
+    if (writeSessionStorage(key, value)) {
+        removeStorage(key);
+    }
+}
+
+function persistBootstrapAuthPayload(payload) {
+    if (!payload) return;
+    if (payload.accessToken) {
+        writeAuthStorage("undefined_auth_access_token", payload.accessToken);
+    }
+    if (payload.refreshToken) {
+        writeAuthStorage("undefined_auth_refresh_token", payload.refreshToken);
+    }
+    if (payload.accessTokenExpiresAt) {
+        writeAuthStorage(
+            "undefined_auth_access_expires_at",
+            String(payload.accessTokenExpiresAt),
+        );
     }
 }
 
@@ -113,15 +157,15 @@ const state = {
     returnTo: (initialState && initialState.return_to) || "",
     authAccessToken:
         (bootstrapAuth && bootstrapAuth.accessToken) ||
-        readStorage("undefined_auth_access_token"),
+        readAuthStorage("undefined_auth_access_token"),
     authRefreshToken:
         (bootstrapAuth && bootstrapAuth.refreshToken) ||
-        readStorage("undefined_auth_refresh_token"),
+        readAuthStorage("undefined_auth_refresh_token"),
     authAccessTokenExpiresAt:
         Number(
             (bootstrapAuth && bootstrapAuth.accessTokenExpiresAt) ||
                 Number.parseInt(
-                    readStorage("undefined_auth_access_expires_at") || "0",
+                    readAuthStorage("undefined_auth_access_expires_at") || "0",
                     10,
                 ) ||
                 0,
@@ -220,33 +264,13 @@ function setCookie(name, value, days = 30) {
     document.cookie = `${name}=${value};${expires};path=/;SameSite=Lax`;
 }
 
-function readStorage(key) {
-    try {
-        return window.localStorage.getItem(key) || "";
-    } catch (_error) {
-        return "";
-    }
-}
-
-function writeStorage(key, value) {
-    try {
-        if (value === null || value === undefined || value === "") {
-            window.localStorage.removeItem(key);
-            return;
-        }
-        window.localStorage.setItem(key, String(value));
-    } catch (_error) {
-        // ignore storage failures in hardened browsers/private mode
-    }
-}
-
 function clearStoredAuthTokens() {
     state.authAccessToken = "";
     state.authRefreshToken = "";
     state.authAccessTokenExpiresAt = 0;
-    writeStorage("undefined_auth_access_token", "");
-    writeStorage("undefined_auth_refresh_token", "");
-    writeStorage("undefined_auth_access_expires_at", "");
+    writeAuthStorage("undefined_auth_access_token", "");
+    writeAuthStorage("undefined_auth_refresh_token", "");
+    writeAuthStorage("undefined_auth_access_expires_at", "");
     if (state.authRefreshTimer) {
         clearTimeout(state.authRefreshTimer);
         state.authRefreshTimer = null;
@@ -265,9 +289,9 @@ function storeAuthTokens({
     )
         ? Number(accessTokenExpiresAt)
         : 0;
-    writeStorage("undefined_auth_access_token", state.authAccessToken);
-    writeStorage("undefined_auth_refresh_token", state.authRefreshToken);
-    writeStorage(
+    writeAuthStorage("undefined_auth_access_token", state.authAccessToken);
+    writeAuthStorage("undefined_auth_refresh_token", state.authRefreshToken);
+    writeAuthStorage(
         "undefined_auth_access_expires_at",
         state.authAccessTokenExpiresAt || "",
     );

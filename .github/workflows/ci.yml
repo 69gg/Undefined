@@ -78,10 +78,8 @@ jobs:
       - name: Cache npm and node_modules
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.npm
-            apps/undefined-console/node_modules
-          key: ${{ runner.os }}-undefined-console-npm-${{ hashFiles('apps/undefined-console/package.json', 'apps/undefined-console/biome.json') }}
+          path: ~/.npm
+          key: ${{ runner.os }}-undefined-console-npm-${{ hashFiles('apps/undefined-console/package-lock.json', 'apps/undefined-console/package.json', 'apps/undefined-console/biome.json') }}
           restore-keys: |
             ${{ runner.os }}-undefined-console-npm-
 
@@ -106,7 +104,7 @@ jobs:
 
       - name: Install app dependencies
         working-directory: apps/undefined-console
-        run: npm install
+        run: npm ci
 
       - name: Run console checks
         working-directory: apps/undefined-console

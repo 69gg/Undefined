@@ -404,13 +404,12 @@ async function openWebui(): Promise<void> {
 	let bootstrapAuth: AuthBootstrapPayload | null = null;
 	if (profile.password.trim()) {
 		try {
-			const loginResponse = await fetch(
+			const loginResponse = await request(
 				`${base}/api/v1/management/auth/login`,
 				{
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ password: profile.password.trim() }),
-					mode: "cors",
 				},
 			);
 			if (loginResponse.ok) {

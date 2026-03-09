@@ -212,6 +212,16 @@ def test_webui_cors_only_allows_trusted_origins(monkeypatch: Any) -> None:
     )
     assert trusted_response.headers.get("Access-Control-Allow-Credentials") == "true"
 
+    loopback_request = cast(
+        web.Request,
+        cast(Any, DummyRequest(headers={"Origin": "http://localhost:1420"})),
+    )
+    loopback_response = web.Response(status=200)
+    webui_app._apply_cors_headers(loopback_request, loopback_response)
+    assert loopback_response.headers.get("Access-Control-Allow-Origin") == (
+        "http://localhost:1420"
+    )
+
     untrusted_request = cast(
         web.Request,
         cast(Any, DummyRequest(headers={"Origin": "https://evil.example"})),
@@ -238,6 +248,16 @@ def test_runtime_api_cors_only_allows_trusted_origins(monkeypatch: Any) -> None:
         "tauri://localhost"
     )
     assert trusted_response.headers.get("Access-Control-Allow-Credentials") == "true"
+
+    loopback_request = cast(
+        web.Request,
+        cast(Any, DummyRequest(headers={"Origin": "http://localhost:1420"})),
+    )
+    loopback_response = web.Response(status=200)
+    runtime_api_app._apply_cors_headers(loopback_request, loopback_response)
+    assert loopback_response.headers.get("Access-Control-Allow-Origin") == (
+        "http://localhost:1420"
+    )
 
     untrusted_request = cast(
         web.Request,

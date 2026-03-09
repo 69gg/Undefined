@@ -99,10 +99,8 @@ jobs:
       - name: Cache npm and node_modules
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.npm
-            ${{ env.APP_DIR }}/node_modules
-          key: ${{ runner.os }}-undefined-console-npm-${{ hashFiles('apps/undefined-console/package.json', 'apps/undefined-console/biome.json') }}
+          path: ~/.npm
+          key: ${{ runner.os }}-undefined-console-npm-${{ hashFiles('apps/undefined-console/package-lock.json', 'apps/undefined-console/package.json', 'apps/undefined-console/biome.json') }}
           restore-keys: |
             ${{ runner.os }}-undefined-console-npm-
 
@@ -127,7 +125,7 @@ jobs:
 
       - name: Install app dependencies
         working-directory: ${{ env.APP_DIR }}
-        run: npm install
+        run: npm ci
 
       - name: Run console checks
         working-directory: ${{ env.APP_DIR }}
@@ -168,10 +166,8 @@ jobs:
       - name: Cache npm and node_modules
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.npm
-            ${{ env.APP_DIR }}/node_modules
-          key: ${{ runner.os }}-undefined-console-npm-${{ hashFiles('apps/undefined-console/package.json', 'apps/undefined-console/biome.json') }}
+          path: ~/.npm
+          key: ${{ runner.os }}-undefined-console-npm-${{ hashFiles('apps/undefined-console/package-lock.json', 'apps/undefined-console/package.json', 'apps/undefined-console/biome.json') }}
           restore-keys: |
             ${{ runner.os }}-undefined-console-npm-
 
@@ -197,7 +193,7 @@ jobs:
 
       - name: Install app dependencies
         working-directory: ${{ env.APP_DIR }}
-        run: npm install
+        run: npm ci
 
       - name: Build Tauri bundles
         working-directory: ${{ env.APP_DIR }}
@@ -215,23 +211,31 @@ jobs:
           TAG: ${{ github.ref_name }}
           LABEL: ${{ matrix.label }}
         run: |
+          copy_single_match() {
+            local search_root="$1"
+            local pattern="$2"
+            local destination="$3"
+            mapfile -t matches < <(find "$search_root" -type f -name "$pattern" | sort)
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "Expected exactly one match for $pattern under $search_root, found ${#matches[@]}" >&2
+              printf 'Matches:\n%s\n' "${matches[*]}" >&2
+              exit 1
+            fi
+            cp "${matches[0]}" "$destination"
+          }
+
           mkdir -p release-artifacts
           case "$LABEL" in
             linux-x64)
-              appimage=$(find "$APP_DIR/src-tauri/target/release/bundle" -type f -name '*.AppImage' | head -n 1)
-              deb=$(find "$APP_DIR/src-tauri/target/release/bundle" -type f -name '*.deb' | head -n 1)
-              cp "$appimage" "release-artifacts/Undefined-Console-${TAG}-${LABEL}.AppImage"
-              cp "$deb" "release-artifacts/Undefined-Console-${TAG}-${LABEL}.deb"
+              copy_single_match "$APP_DIR/src-tauri/target/release/bundle" '*.AppImage' "release-artifacts/Undefined-Console-${TAG}-${LABEL}.AppImage"
+              copy_single_match "$APP_DIR/src-tauri/target/release/bundle" '*.deb' "release-artifacts/Undefined-Console-${TAG}-${LABEL}.deb"
               ;;
             windows-x64)
-              exe=$(find "$APP_DIR/src-tauri/target/release/bundle" -type f -name '*.exe' | head -n 1)
-              msi=$(find "$APP_DIR/src-tauri/target/release/bundle" -type f -name '*.msi' | head -n 1)
-              cp "$exe" "release-artifacts/Undefined-Console-${TAG}-${LABEL}-setup.exe"
-              cp "$msi" "release-artifacts/Undefined-Console-${TAG}-${LABEL}.msi"
+              copy_single_match "$APP_DIR/src-tauri/target/release/bundle" '*.exe' "release-artifacts/Undefined-Console-${TAG}-${LABEL}-setup.exe"
+              copy_single_match "$APP_DIR/src-tauri/target/release/bundle" '*.msi' "release-artifacts/Undefined-Console-${TAG}-${LABEL}.msi"
               ;;
             macos-x64|macos-arm64)
-              dmg=$(find "$APP_DIR/src-tauri/target/release/bundle" -type f -name '*.dmg' | head -n 1)
-              cp "$dmg" "release-artifacts/Undefined-Console-${TAG}-${LABEL}.dmg"
+              copy_single_match "$APP_DIR/src-tauri/target/release/bundle" '*.dmg' "release-artifacts/Undefined-Console-${TAG}-${LABEL}.dmg"
               ;;
           esac
 
@@ -261,10 +265,8 @@ jobs:
       - name: Cache npm and node_modules
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.npm
-            ${{ env.APP_DIR }}/node_modules
-          key: ${{ runner.os }}-undefined-console-npm-${{ hashFiles('apps/undefined-console/package.json', 'apps/undefined-console/biome.json') }}
+          path: ~/.npm
+          key: ${{ runner.os }}-undefined-console-npm-${{ hashFiles('apps/undefined-console/package-lock.json', 'apps/undefined-console/package.json', 'apps/undefined-console/biome.json') }}
           restore-keys: |
             ${{ runner.os }}-undefined-console-npm-
 
@@ -314,7 +316,7 @@ jobs:
 
       - name: Install app dependencies
         working-directory: ${{ env.APP_DIR }}
-        run: npm install
+        run: npm ci
 
       - name: Initialize Android project for CI
         working-directory: ${{ env.APP_DIR }}
@@ -332,9 +334,21 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
+          copy_single_match() {
+            local search_root="$1"
+            local pattern="$2"
+            local destination="$3"
+            mapfile -t matches < <(find "$search_root" -type f -name "$pattern" | sort)
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "Expected exactly one match for $pattern under $search_root, found ${#matches[@]}" >&2
+              printf 'Matches:\n%s\n' "${matches[*]}" >&2
+              exit 1
+            fi
+            cp "${matches[0]}" "$destination"
+          }
+
           mkdir -p release-artifacts
-          apk=$(find "$APP_DIR/src-tauri" -type f -name '*.apk' | head -n 1)
-          cp "$apk" "release-artifacts/Undefined-Console-${TAG}-android-universal.apk"
+          copy_single_match "$APP_DIR/src-tauri" '*.apk' "release-artifacts/Undefined-Console-${TAG}-android-universal.apk"
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
