@@ -135,7 +135,11 @@ def _bootstrap_advice(data: dict[str, object]) -> list[str]:
         advice.append("config.toml 缺失，建议先在控制台补齐基础配置。")
     if not bool(data.get("toml_valid")):
         advice.append("配置文件存在 TOML 语法错误，请先修复语法。")
-    if bool(data.get("config_exists")) and not bool(data.get("config_valid")):
+    if (
+        bool(data.get("toml_valid"))
+        and bool(data.get("config_exists"))
+        and not bool(data.get("config_valid"))
+    ):
         error = str(data.get("validation_error") or "").strip()
         advice.append(error or "配置尚未通过严格校验，保存修复后即可启动 Bot。")
     if bool(data.get("using_default_password")):

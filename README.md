@@ -8,6 +8,7 @@
         <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11--3.13-blue.svg" alt="Python"></a>
         <a href="https://docs.astral.sh/uv/"><img src="https://img.shields.io/badge/uv-auto%20python%20manager-6a5acd.svg" alt="uv"></a>
         <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License"></a>
+        <a href="https://pypi.org/project/Undefined-bot"><img src="https://img.shields.io/pypi/v/Undefined-bot.svg" alt="PyPI"></a>
         <a href="https://deepwiki.com/69gg/Undefined"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
         <br/><br/>
         <p>大鹏一日同风起，扶摇直上九万里。</p>
