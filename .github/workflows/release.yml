@@ -215,7 +215,10 @@ jobs:
             local search_root="$1"
             local pattern="$2"
             local destination="$3"
-            mapfile -t matches < <(find "$search_root" -type f -name "$pattern" | sort)
+            local matches=()
+            while IFS= read -r line; do
+              matches+=("$line")
+            done < <(find "$search_root" -type f -name "$pattern" | sort)
             if [ "${#matches[@]}" -ne 1 ]; then
               echo "Expected exactly one match for $pattern under $search_root, found ${#matches[@]}" >&2
               printf 'Matches:\n%s\n' "${matches[*]}" >&2
@@ -338,7 +341,10 @@ jobs:
             local search_root="$1"
             local pattern="$2"
             local destination="$3"
-            mapfile -t matches < <(find "$search_root" -type f -name "$pattern" | sort)
+            local matches=()
+            while IFS= read -r line; do
+              matches+=("$line")
+            done < <(find "$search_root" -type f -name "$pattern" | sort)
             if [ "${#matches[@]}" -ne 1 ]; then
               echo "Expected exactly one match for $pattern under $search_root, found ${#matches[@]}" >&2
               printf 'Matches:\n%s\n' "${matches[*]}" >&2
