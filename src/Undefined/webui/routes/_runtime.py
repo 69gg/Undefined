@@ -388,8 +388,6 @@ async def runtime_chat_file_handler(request: web.Request) -> web.StreamResponse:
 # Tool Invoke API proxy
 # ------------------------------------------------------------------
 
-_TOOL_INVOKE_PROXY_TIMEOUT_SECONDS = 180.0
-
 
 @routes.get("/api/v1/management/runtime/tools")
 @routes.get("/api/runtime/tools")
@@ -412,9 +410,12 @@ async def runtime_tools_invoke_handler(request: web.Request) -> Response:
     except Exception:
         return web.json_response({"error": "Invalid JSON"}, status=400)
 
+    cfg = get_config(strict=False)
+    # 代理超时 = 工具调用超时 + 60s 缓冲（覆盖网络开销）
+    proxy_timeout = float(cfg.api.tool_invoke_timeout) + 60.0
     return await _proxy_runtime(
         method="POST",
         path="/api/v1/tools/invoke",
         payload=body,
-        timeout_seconds=_TOOL_INVOKE_PROXY_TIMEOUT_SECONDS,
+        timeout_seconds=proxy_timeout,
     )

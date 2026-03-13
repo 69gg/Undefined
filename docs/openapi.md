@@ -280,7 +280,7 @@ curl http://127.0.0.1:8788/openapi.json
 | 子字段 | 类型 | 必填 | 说明 |
 |--------|------|------|------|
 | `enabled` | `bool` | 是 | 是否启用回调 |
-| `url` | `string` | 是（当 enabled=true） | webhook URL（须 HTTPS，回环地址可 HTTP） |
+| `url` | `string` | 是（当 enabled=true） | webhook URL（支持 HTTP 和 HTTPS） |
 | `headers` | `object` | 否 | 自定义回调请求头（键值对） |
 
 **同步响应**（无回调）：

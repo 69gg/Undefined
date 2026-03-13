@@ -250,7 +250,6 @@ def _validate_callback_url(url: str) -> str | None:
     return None
 
 
-
 async def _probe_http_endpoint(
     *,
     name: str,
@@ -463,6 +462,7 @@ class RuntimeAPIServer:
         self._port = port
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
+        self._background_tasks: set[asyncio.Task[Any]] = set()
 
     async def start(self) -> None:
         app = self._create_app()
@@ -1111,8 +1111,17 @@ class RuntimeAPIServer:
         all_schemas: list[dict[str, Any]] = []
         if tool_reg is not None:
             all_schemas.extend(tool_reg.get_tools_schema())
+
+        # 收集 agent schema 并缓存名称集合（避免重复调用）
+        agent_names: set[str] = set()
         if agent_reg is not None:
-            all_schemas.extend(agent_reg.get_agents_schema())
+            agent_schemas = agent_reg.get_agents_schema()
+            all_schemas.extend(agent_schemas)
+            for schema in agent_schemas:
+                func = schema.get("function", {})
+                name = str(func.get("name", ""))
+                if name:
+                    agent_names.add(name)
 
         denylist: set[str] = set(api_cfg.tool_invoke_denylist)
         allowlist: set[str] = set(api_cfg.tool_invoke_allowlist)
@@ -1133,14 +1142,6 @@ class RuntimeAPIServer:
         # 3. 按 expose 过滤
         if expose == "all":
             return all_schemas
-
-        # 收集 agent 名称集合
-        agent_names: set[str] = set()
-        if agent_reg is not None:
-            for schema in agent_reg.get_agents_schema():
-                name = _get_name(schema)
-                if name:
-                    agent_names.add(name)
 
         def _is_tool(name: str) -> bool:
             return "." not in name and name not in agent_names
@@ -1243,7 +1244,7 @@ class RuntimeAPIServer:
 
         if use_callback:
             # 异步执行 + 回调
-            asyncio.create_task(
+            task = asyncio.create_task(
                 self._execute_and_callback(
                     request_id=request_id,
                     tool_name=tool_name,
@@ -1255,6 +1256,8 @@ class RuntimeAPIServer:
                     callback_timeout=cfg.api.tool_invoke_callback_timeout,
                 )
             )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
             return web.json_response(
                 {
                     "ok": True,
@@ -1439,12 +1442,11 @@ class RuntimeAPIServer:
         try:
             cb_timeout = ClientTimeout(total=callback_timeout)
             async with ClientSession(timeout=cb_timeout) as session:
-                headers = {"Content-Type": "application/json"}
-                headers.update(callback_headers)
+                # aiohttp json= 自动设置 Content-Type，无需手动指定
                 async with session.post(
                     callback_url,
                     json=payload,
-                    headers=headers,
+                    headers=callback_headers or None,
                 ) as resp:
                     logger.info(
                         "[ToolInvoke] 回调发送: request_id=%s url=%s status=%d",
