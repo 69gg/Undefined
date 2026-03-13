@@ -249,7 +249,6 @@ def _validate_callback_url(url: str) -> str | None:
 
     return None
 
-    return None
 
 
 async def _probe_http_endpoint(
