@@ -9,6 +9,10 @@ permissions:
   contents: write
   id-token: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "22"
@@ -57,14 +61,6 @@ jobs:
 
       - name: Run Mypy
         run: uv run mypy .
-
-      - name: Cache Pytest
-        uses: actions/cache@v4
-        with:
-          path: .pytest_cache
-          key: ${{ runner.os }}-pytest-${{ hashFiles('**/uv.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-pytest-
 
       - name: Run tests
         run: uv run pytest tests/
@@ -148,10 +144,11 @@ jobs:
           - os: windows-latest
             label: windows-x64
             bundles: nsis,msi
-          - os: macos-13
+          - os: macos-15
             label: macos-x64
             bundles: dmg
-          - os: macos-14
+            rust-target: x86_64-apple-darwin
+          - os: macos-15
             label: macos-arm64
             bundles: dmg
     steps:
@@ -173,10 +170,13 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
 
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
         with:
+          key: ${{ matrix.label }}
           workspaces: |
             apps/undefined-console/src-tauri -> target
 
@@ -199,10 +199,14 @@ jobs:
         working-directory: ${{ env.APP_DIR }}
         shell: bash
         run: |
+          TAURI_ARGS="--ci --bundles ${{ matrix.bundles }}"
+          if [ -n "${{ matrix.rust-target }}" ]; then
+            TAURI_ARGS="$TAURI_ARGS --target ${{ matrix.rust-target }}"
+          fi
           if [ "${{ runner.os }}" = "Linux" ]; then
-            NO_STRIP=true npm run tauri:build -- --ci --bundles ${{ matrix.bundles }}
+            NO_STRIP=true npm run tauri:build -- $TAURI_ARGS
           else
-            npm run tauri:build -- --ci --bundles ${{ matrix.bundles }}
+            npm run tauri:build -- $TAURI_ARGS
           fi
 
       - name: Collect release artifacts
@@ -210,6 +214,7 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
           LABEL: ${{ matrix.label }}
+          RUST_TARGET: ${{ matrix.rust-target }}
         run: |
           copy_single_match() {
             local search_root="$1"
@@ -227,18 +232,24 @@ jobs:
             cp "${matches[0]}" "$destination"
           }
 
+          if [ -n "$RUST_TARGET" ]; then
+            BUNDLE_ROOT="$APP_DIR/src-tauri/target/$RUST_TARGET/release/bundle"
+          else
+            BUNDLE_ROOT="$APP_DIR/src-tauri/target/release/bundle"
+          fi
+
           mkdir -p release-artifacts
           case "$LABEL" in
             linux-x64)
-              copy_single_match "$APP_DIR/src-tauri/target/release/bundle" '*.AppImage' "release-artifacts/Undefined-Console-${TAG}-${LABEL}.AppImage"
-              copy_single_match "$APP_DIR/src-tauri/target/release/bundle" '*.deb' "release-artifacts/Undefined-Console-${TAG}-${LABEL}.deb"
+              copy_single_match "$BUNDLE_ROOT" '*.AppImage' "release-artifacts/Undefined-Console-${TAG}-${LABEL}.AppImage"
+              copy_single_match "$BUNDLE_ROOT" '*.deb' "release-artifacts/Undefined-Console-${TAG}-${LABEL}.deb"
               ;;
             windows-x64)
-              copy_single_match "$APP_DIR/src-tauri/target/release/bundle" '*.exe' "release-artifacts/Undefined-Console-${TAG}-${LABEL}-setup.exe"
-              copy_single_match "$APP_DIR/src-tauri/target/release/bundle" '*.msi' "release-artifacts/Undefined-Console-${TAG}-${LABEL}.msi"
+              copy_single_match "$BUNDLE_ROOT" '*.exe' "release-artifacts/Undefined-Console-${TAG}-${LABEL}-setup.exe"
+              copy_single_match "$BUNDLE_ROOT" '*.msi' "release-artifacts/Undefined-Console-${TAG}-${LABEL}.msi"
               ;;
             macos-x64|macos-arm64)
-              copy_single_match "$APP_DIR/src-tauri/target/release/bundle" '*.dmg' "release-artifacts/Undefined-Console-${TAG}-${LABEL}.dmg"
+              copy_single_match "$BUNDLE_ROOT" '*.dmg' "release-artifacts/Undefined-Console-${TAG}-${LABEL}.dmg"
               ;;
           esac
 
@@ -275,16 +286,15 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
 
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
         with:
+          key: android
           workspaces: |
             apps/undefined-console/src-tauri -> target
-
-      - name: Add Android Rust targets
-        run: |
-          rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -295,17 +305,8 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Cache Android SDK packages
-        uses: actions/cache@v4
-        with:
-          path: /usr/local/lib/android/sdk
-          key: android-sdk-34-ndk-27.0.12077973
-        id: android-sdk-cache
-
-      - name: Install Android platform packages
-        if: steps.android-sdk-cache.outputs.cache-hit != 'true'
-        run: |
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;27.0.12077973"
+      - name: Ensure Android platform packages
+        run: sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
       - name: Cache Gradle
         uses: actions/cache@v4

@@ -4,6 +4,7 @@
 	"version": "3.2.0",
 	"type": "module",
 	"scripts": {
+		"tauri": "tauri",
 		"dev": "vite --host 0.0.0.0 --port 1420",
 		"lint": "biome check src package.json tsconfig.json vite.config.ts src-tauri/tauri.conf.json src-tauri/capabilities/default.json",
 		"lint:webui": "biome check --config-path ../../biome.json ../../src/Undefined/webui/static/js",
