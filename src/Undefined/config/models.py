@@ -221,3 +221,9 @@ class APIConfig:
     port: int = 8788
     auth_key: str = "changeme"
     openapi_enabled: bool = True
+    tool_invoke_enabled: bool = False
+    tool_invoke_expose: str = "tools+toolsets"
+    tool_invoke_allowlist: list[str] = field(default_factory=list)
+    tool_invoke_denylist: list[str] = field(default_factory=list)
+    tool_invoke_timeout: int = 120
+    tool_invoke_callback_timeout: int = 10

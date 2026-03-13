@@ -2428,12 +2428,36 @@ class Config:
 
         openapi_enabled = _coerce_bool(section.get("openapi_enabled"), True)
 
+        tool_invoke_enabled = _coerce_bool(section.get("tool_invoke_enabled"), False)
+        tool_invoke_expose = _coerce_str(
+            section.get("tool_invoke_expose"), "tools+toolsets"
+        )
+        valid_expose = {"tools", "toolsets", "tools+toolsets", "agents", "all"}
+        if tool_invoke_expose not in valid_expose:
+            tool_invoke_expose = "tools+toolsets"
+        tool_invoke_allowlist = _coerce_str_list(section.get("tool_invoke_allowlist"))
+        tool_invoke_denylist = _coerce_str_list(section.get("tool_invoke_denylist"))
+        tool_invoke_timeout = _coerce_int(section.get("tool_invoke_timeout"), 120)
+        if tool_invoke_timeout <= 0:
+            tool_invoke_timeout = 120
+        tool_invoke_callback_timeout = _coerce_int(
+            section.get("tool_invoke_callback_timeout"), 10
+        )
+        if tool_invoke_callback_timeout <= 0:
+            tool_invoke_callback_timeout = 10
+
         return APIConfig(
             enabled=enabled,
             host=host,
             port=port,
             auth_key=auth_key,
             openapi_enabled=openapi_enabled,
+            tool_invoke_enabled=tool_invoke_enabled,
+            tool_invoke_expose=tool_invoke_expose,
+            tool_invoke_allowlist=tool_invoke_allowlist,
+            tool_invoke_denylist=tool_invoke_denylist,
+            tool_invoke_timeout=tool_invoke_timeout,
+            tool_invoke_callback_timeout=tool_invoke_callback_timeout,
         )
 
     @staticmethod

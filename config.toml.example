@@ -733,6 +733,24 @@ auth_key = "changeme"
 # zh: 是否暴露 OpenAPI 文档（/openapi.json）。
 # en: Expose OpenAPI document (/openapi.json).
 openapi_enabled = true
+# zh: 是否启用工具调用 API（POST /api/v1/tools/invoke）。
+# en: Enable tool invocation API (POST /api/v1/tools/invoke).
+tool_invoke_enabled = false
+# zh: 暴露的工具范围。可选 "tools"、"toolsets"、"tools+toolsets"、"agents"、"all"。
+# en: Tool exposure scope. Options: "tools", "toolsets", "tools+toolsets", "agents", "all".
+tool_invoke_expose = "tools+toolsets"
+# zh: 工具白名单（非空时覆盖 expose 规则）。
+# en: Tool allowlist (overrides expose when non-empty).
+tool_invoke_allowlist = []
+# zh: 工具黑名单（始终优先于白名单和 expose）。
+# en: Tool denylist (always takes priority).
+tool_invoke_denylist = []
+# zh: 单次工具调用超时（秒）。
+# en: Per-invocation timeout in seconds.
+tool_invoke_timeout = 120
+# zh: 回调请求超时（秒）。
+# en: Callback request timeout in seconds.
+tool_invoke_callback_timeout = 10
 
 # zh: 认知记忆系统配置。启用后需配置 [models.embedding]，其余参数均有合理默认值。
 # en: Cognitive memory system. Requires [models.embedding] when enabled. All other params have sensible defaults.

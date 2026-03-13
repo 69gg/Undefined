@@ -382,3 +382,39 @@ async def runtime_chat_file_handler(request: web.Request) -> web.StreamResponse:
         path=target,
         headers={"Content-Disposition": disposition},
     )
+
+
+# ------------------------------------------------------------------
+# Tool Invoke API proxy
+# ------------------------------------------------------------------
+
+_TOOL_INVOKE_PROXY_TIMEOUT_SECONDS = 180.0
+
+
+@routes.get("/api/v1/management/runtime/tools")
+@routes.get("/api/runtime/tools")
+async def runtime_tools_list_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    return await _proxy_runtime(
+        method="GET",
+        path="/api/v1/tools",
+    )
+
+
+@routes.post("/api/v1/management/runtime/tools/invoke")
+@routes.post("/api/runtime/tools/invoke")
+async def runtime_tools_invoke_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+
+    return await _proxy_runtime(
+        method="POST",
+        path="/api/v1/tools/invoke",
+        payload=body,
+        timeout_seconds=_TOOL_INVOKE_PROXY_TIMEOUT_SECONDS,
+    )
