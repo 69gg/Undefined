@@ -73,14 +73,17 @@ def _comment_lines(comments: CommentMap | None, path_key: str) -> list[str]:
     zh = str(entry.get("zh", "")).strip()
     en = str(entry.get("en", "")).strip()
     if zh:
-        lines.append(f"# zh: {zh}")
+        for part in zh.split("\n"):
+            lines.append(f"# zh: {part}")
     if en:
-        lines.append(f"# en: {en}")
+        for part in en.split("\n"):
+            lines.append(f"# en: {part}")
     if not lines:
         for value in entry.values():
             text = str(value).strip()
             if text:
-                lines.append(f"# {text}")
+                for part in text.split("\n"):
+                    lines.append(f"# {part}")
     return lines
 
 

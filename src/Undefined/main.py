@@ -397,6 +397,16 @@ async def main() -> None:
     )
 
     if config.api.enabled:
+        # Naga 外部网关集成（需同时开启 nagaagent_mode_enabled 和 naga.enabled）
+        naga_store = None
+        if config.nagaagent_mode_enabled and config.naga.enabled:
+            from Undefined.api.naga_store import NagaStore
+
+            naga_store = NagaStore()
+            await naga_store.load()
+            handler.command_dispatcher.naga_store = naga_store
+            logger.info("[Naga] 绑定存储已加载")
+
         runtime_api_context = RuntimeAPIContext(
             config_getter=lambda: get_config(strict=False),
             onebot=onebot,
@@ -408,6 +418,7 @@ async def main() -> None:
             scheduler=handler.ai_coordinator.scheduler,
             cognitive_service=cognitive_service,
             cognitive_job_queue=job_queue,
+            naga_store=naga_store,
         )
         runtime_api_server = RuntimeAPIServer(
             runtime_api_context,

@@ -34,7 +34,7 @@ class RequestContext:
 
     def __init__(
         self,
-        request_type: str,  # "group" | "private"
+        request_type: str,  # "group" | "private" | "api"
         group_id: Optional[int] = None,
         user_id: Optional[int] = None,
         sender_id: Optional[int] = None,

@@ -733,6 +733,24 @@ auth_key = "changeme"
 # zh: 是否暴露 OpenAPI 文档（/openapi.json）。
 # en: Expose OpenAPI document (/openapi.json).
 openapi_enabled = true
+# zh: 是否启用工具调用 API（POST /api/v1/tools/invoke）。
+# en: Enable tool invocation API (POST /api/v1/tools/invoke).
+tool_invoke_enabled = false
+# zh: 暴露的工具范围。可选 "tools"、"toolsets"、"tools+toolsets"、"agents"、"all"。
+# en: Tool exposure scope. Options: "tools", "toolsets", "tools+toolsets", "agents", "all".
+tool_invoke_expose = "tools+toolsets"
+# zh: 工具白名单（非空时覆盖 expose 规则）。
+# en: Tool allowlist (overrides expose when non-empty).
+tool_invoke_allowlist = []
+# zh: 工具黑名单（始终优先于白名单和 expose）。
+# en: Tool denylist (always takes priority).
+tool_invoke_denylist = []
+# zh: 单次工具调用超时（秒）。
+# en: Per-invocation timeout in seconds.
+tool_invoke_timeout = 120
+# zh: 回调请求超时（秒）。
+# en: Callback request timeout in seconds.
+tool_invoke_callback_timeout = 10
 
 # zh: 认知记忆系统配置。启用后需配置 [models.embedding]，其余参数均有合理默认值。
 # en: Cognitive memory system. Requires [models.embedding] when enabled. All other params have sensible defaults.
@@ -837,3 +855,33 @@ failed_cleanup_interval = 100
 # zh: 单个任务最大自动重试次数（超过后移入 failed，0=不重试）。
 # en: Max auto-retries per job before moving to failed (0=no retry).
 job_max_retries = 3
+
+# zh: Naga 外部网关集成配置。
+# zh: 开关分层：
+# zh:   - [features].nagaagent_mode_enabled — 总开关，控制 AI 侧行为（提示词切换、工具暴露）
+# zh:   - [naga].enabled — 子开关，控制外部网关集成（回调 API、/naga 命令、绑定管理）
+# zh: 仅当两者均为 true 时，外部网关集成才生效。
+# zh: 若只需 NagaAgent 解答能力而不需要外部回调联动，可只开启 nagaagent_mode_enabled。
+# zh: ⚠️ 此功能面向与 NagaAgent 对接的高级场景，普通用户不建议开启。
+# en: Naga external gateway integration settings.
+# en: Switch hierarchy:
+# en:   - [features].nagaagent_mode_enabled — master switch for AI behavior (prompt, tool exposure)
+# en:   - [naga].enabled — sub-switch for external gateway (callback API, /naga command, bindings)
+# en: Both must be true for external gateway integration to work.
+# en: To get NagaAgent answering without external callbacks, only enable nagaagent_mode_enabled.
+# en: ⚠️ Advanced feature for NagaAgent integration. Not recommended for regular users.
+[naga]
+# zh: 是否启用外部网关集成（回调 API、/naga 命令、绑定管理）。
+# zh: 需同时开启 [features].nagaagent_mode_enabled 才生效。
+# en: Enable external gateway integration (callback API, /naga command, bindings).
+# en: Requires [features].nagaagent_mode_enabled = true to take effect.
+enabled = false
+# zh: Naga 服务器 API 地址。
+# en: Naga server API URL.
+api_url = ""
+# zh: 双方共享密钥（Undefined ↔ Naga 身份验证）。
+# en: Shared secret key for authentication between Undefined and Naga.
+api_key = ""
+# zh: Naga 服务群聊名单：绑定/回调群发仅限这些群。
+# en: Allowed groups for Naga binding and group callback delivery.
+allowed_groups = []

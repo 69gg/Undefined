@@ -3,10 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import platform
+from pathlib import Path
 import socket
 import sys
 import time
+import uuid as _uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
@@ -126,6 +129,7 @@ class RuntimeAPIContext:
     scheduler: Any = None
     cognitive_service: Any = None
     cognitive_job_queue: Any = None
+    naga_store: Any = None
 
 
 def _json_error(message: str, status: int = 400) -> Response:
@@ -236,6 +240,36 @@ def _registry_summary(registry: Any) -> dict[str, Any]:
         "loaded": sum(1 for i in items.values() if getattr(i, "loaded", False)),
         "items": summary_items,
     }
+
+
+def _validate_callback_url(url: str) -> str | None:
+    """校验回调 URL，返回错误信息或 None 表示通过。
+
+    拒绝非 HTTP(S) scheme，以及直接使用私有/回环 IP 字面量的 URL 以防止 SSRF。
+    域名形式的 URL 放行（DNS 解析阶段不适合在校验函数中做阻塞调用）。
+    """
+    import ipaddress
+
+    parsed = urlsplit(url)
+    scheme = (parsed.scheme or "").lower()
+
+    if scheme not in ("http", "https"):
+        return "callback.url must use http or https"
+
+    hostname = parsed.hostname or ""
+    if not hostname:
+        return "callback.url must include a hostname"
+
+    # 仅检查 IP 字面量（如 http://127.0.0.1/、http://[::1]/、http://10.0.0.1/）
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        pass  # 域名形式，放行
+    else:
+        if addr.is_private or addr.is_loopback or addr.is_link_local:
+            return "callback.url must not point to a private/loopback address"
+
+    return None
 
 
 async def _probe_http_endpoint(
@@ -415,6 +449,25 @@ def _build_openapi_spec(ctx: RuntimeAPIContext) -> dict[str, Any]:
             "/api/v1/chat/history": {
                 "get": {"summary": "Get virtual private chat history for WebUI"}
             },
+            "/api/v1/tools": {
+                "get": {
+                    "summary": "List available tools",
+                    "description": (
+                        "Returns currently available tools filtered by "
+                        "tool_invoke_expose / allowlist / denylist config. "
+                        "Each item follows the OpenAI function calling schema."
+                    ),
+                }
+            },
+            "/api/v1/tools/invoke": {
+                "post": {
+                    "summary": "Invoke a tool",
+                    "description": (
+                        "Execute a specific tool by name. Supports synchronous "
+                        "response and optional async webhook callback."
+                    ),
+                }
+            },
         },
     }
 
@@ -431,6 +484,7 @@ class RuntimeAPIServer:
         self._port = port
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
+        self._background_tasks: set[asyncio.Task[Any]] = set()
 
     async def start(self) -> None:
         app = self._create_app()
@@ -445,6 +499,13 @@ class RuntimeAPIServer:
         )
 
     async def stop(self) -> None:
+        # 取消所有后台任务（如异步 tool invoke 回调）
+        for task in self._background_tasks:
+            task.cancel()
+        if self._background_tasks:
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+            self._background_tasks.clear()
+
         if self._runner is not None:
             await self._runner.cleanup()
             logger.info("[RuntimeAPI] 已停止")
@@ -463,12 +524,19 @@ class RuntimeAPIServer:
                 _apply_cors_headers(request, response)
                 return response
             if request.path.startswith("/api/"):
-                expected = str(self._context.config_getter().api.auth_key or "")
-                provided = request.headers.get(_AUTH_HEADER, "")
-                if not expected or provided != expected:
-                    response = _json_error("Unauthorized", status=401)
-                    _apply_cors_headers(request, response)
-                    return response
+                # Naga 端点使用独立鉴权，仅在总开关+子开关均启用时跳过主 auth
+                cfg = self._context.config_getter()
+                is_naga_path = request.path.startswith("/api/v1/naga/")
+                skip_auth = (
+                    is_naga_path and cfg.nagaagent_mode_enabled and cfg.naga.enabled
+                )
+                if not skip_auth:
+                    expected = str(cfg.api.auth_key or "")
+                    provided = request.headers.get(_AUTH_HEADER, "")
+                    if not expected or provided != expected:
+                        response = _json_error("Unauthorized", status=401)
+                        _apply_cors_headers(request, response)
+                        return response
             response = await handler(request)
             _apply_cors_headers(request, response)
             return response
@@ -493,8 +561,24 @@ class RuntimeAPIServer:
                 ),
                 web.post("/api/v1/chat", self._chat_handler),
                 web.get("/api/v1/chat/history", self._chat_history_handler),
+                web.get("/api/v1/tools", self._tools_list_handler),
+                web.post("/api/v1/tools/invoke", self._tools_invoke_handler),
             ]
         )
+        # Naga 端点仅在总开关+子开关均启用时注册
+        cfg = self._context.config_getter()
+        if (
+            cfg.nagaagent_mode_enabled
+            and cfg.naga.enabled
+            and self._context.naga_store is not None
+        ):
+            app.add_routes(
+                [
+                    web.post("/api/v1/naga/callback", self._naga_callback_handler),
+                    web.get("/api/v1/naga/targets", self._naga_targets_handler),
+                ]
+            )
+            logger.info("[RuntimeAPI] Naga 端点已注册")
         return app
 
     @property
@@ -1058,3 +1142,595 @@ class RuntimeAPIServer:
                 await response.write_eof()
 
         return response
+
+    # ------------------------------------------------------------------
+    # Tool Invoke API
+    # ------------------------------------------------------------------
+
+    def _get_filtered_tools(self) -> list[dict[str, Any]]:
+        """按配置过滤可用工具，返回 OpenAI function calling schema 列表。"""
+        cfg = self._ctx.config_getter()
+        api_cfg = cfg.api
+        ai = self._ctx.ai
+        if ai is None:
+            return []
+
+        tool_reg = getattr(ai, "tool_registry", None)
+        agent_reg = getattr(ai, "agent_registry", None)
+
+        all_schemas: list[dict[str, Any]] = []
+        if tool_reg is not None:
+            all_schemas.extend(tool_reg.get_tools_schema())
+
+        # 收集 agent schema 并缓存名称集合（避免重复调用）
+        agent_names: set[str] = set()
+        if agent_reg is not None:
+            agent_schemas = agent_reg.get_agents_schema()
+            all_schemas.extend(agent_schemas)
+            for schema in agent_schemas:
+                func = schema.get("function", {})
+                name = str(func.get("name", ""))
+                if name:
+                    agent_names.add(name)
+
+        denylist: set[str] = set(api_cfg.tool_invoke_denylist)
+        allowlist: set[str] = set(api_cfg.tool_invoke_allowlist)
+        expose = api_cfg.tool_invoke_expose
+
+        def _get_name(schema: dict[str, Any]) -> str:
+            func = schema.get("function", {})
+            return str(func.get("name", ""))
+
+        # 1. 先排除黑名单
+        if denylist:
+            all_schemas = [s for s in all_schemas if _get_name(s) not in denylist]
+
+        # 2. 白名单非空时仅保留匹配项
+        if allowlist:
+            return [s for s in all_schemas if _get_name(s) in allowlist]
+
+        # 3. 按 expose 过滤
+        if expose == "all":
+            return all_schemas
+
+        def _is_tool(name: str) -> bool:
+            return "." not in name and name not in agent_names
+
+        def _is_toolset(name: str) -> bool:
+            return "." in name and not name.startswith("mcp.")
+
+        filtered: list[dict[str, Any]] = []
+        for schema in all_schemas:
+            name = _get_name(schema)
+            if not name:
+                continue
+            if expose == "tools" and _is_tool(name):
+                filtered.append(schema)
+            elif expose == "toolsets" and _is_toolset(name):
+                filtered.append(schema)
+            elif expose == "tools+toolsets" and (_is_tool(name) or _is_toolset(name)):
+                filtered.append(schema)
+            elif expose == "agents" and name in agent_names:
+                filtered.append(schema)
+
+        return filtered
+
+    async def _tools_list_handler(self, request: web.Request) -> Response:
+        _ = request
+        cfg = self._ctx.config_getter()
+        if not cfg.api.tool_invoke_enabled:
+            return _json_error("Tool invoke API is disabled", status=403)
+
+        tools = self._get_filtered_tools()
+        return web.json_response({"count": len(tools), "tools": tools})
+
+    async def _tools_invoke_handler(self, request: web.Request) -> Response:
+        cfg = self._ctx.config_getter()
+        if not cfg.api.tool_invoke_enabled:
+            return _json_error("Tool invoke API is disabled", status=403)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return _json_error("Invalid JSON", status=400)
+
+        if not isinstance(body, dict):
+            return _json_error("Request body must be a JSON object", status=400)
+
+        tool_name = str(body.get("tool_name", "") or "").strip()
+        if not tool_name:
+            return _json_error("tool_name is required", status=400)
+
+        args = body.get("args")
+        if not isinstance(args, dict):
+            return _json_error("args must be a JSON object", status=400)
+
+        # 验证工具是否在允许列表中
+        filtered_tools = self._get_filtered_tools()
+        available_names: set[str] = set()
+        for schema in filtered_tools:
+            func = schema.get("function", {})
+            name = str(func.get("name", ""))
+            if name:
+                available_names.add(name)
+
+        if tool_name not in available_names:
+            caller_ip = request.remote or "unknown"
+            logger.warning(
+                "[ToolInvoke] 请求拒绝: tool=%s reason=not_available caller_ip=%s",
+                tool_name,
+                caller_ip,
+            )
+            return _json_error(f"Tool '{tool_name}' is not available", status=404)
+
+        # 解析回调配置
+        callback_cfg = body.get("callback")
+        use_callback = False
+        callback_url = ""
+        callback_headers: dict[str, str] = {}
+        if isinstance(callback_cfg, dict) and _to_bool(callback_cfg.get("enabled")):
+            callback_url = str(callback_cfg.get("url", "") or "").strip()
+            if not callback_url:
+                return _json_error(
+                    "callback.url is required when callback is enabled",
+                    status=400,
+                )
+            url_error = _validate_callback_url(callback_url)
+            if url_error:
+                return _json_error(url_error, status=400)
+            raw_headers = callback_cfg.get("headers")
+            if isinstance(raw_headers, dict):
+                callback_headers = {str(k): str(v) for k, v in raw_headers.items()}
+            use_callback = True
+
+        request_id = _uuid.uuid4().hex
+        caller_ip = request.remote or "unknown"
+        logger.info(
+            "[ToolInvoke] 收到请求: request_id=%s tool=%s caller_ip=%s",
+            request_id,
+            tool_name,
+            caller_ip,
+        )
+
+        if use_callback:
+            # 异步执行 + 回调
+            task = asyncio.create_task(
+                self._execute_and_callback(
+                    request_id=request_id,
+                    tool_name=tool_name,
+                    args=args,
+                    body_context=body.get("context"),
+                    callback_url=callback_url,
+                    callback_headers=callback_headers,
+                    timeout=cfg.api.tool_invoke_timeout,
+                    callback_timeout=cfg.api.tool_invoke_callback_timeout,
+                )
+            )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+            return web.json_response(
+                {
+                    "ok": True,
+                    "request_id": request_id,
+                    "tool_name": tool_name,
+                    "status": "accepted",
+                }
+            )
+
+        # 同步执行
+        result = await self._execute_tool_invoke(
+            request_id=request_id,
+            tool_name=tool_name,
+            args=args,
+            body_context=body.get("context"),
+            timeout=cfg.api.tool_invoke_timeout,
+        )
+        return web.json_response(result)
+
+    async def _execute_tool_invoke(
+        self,
+        *,
+        request_id: str,
+        tool_name: str,
+        args: dict[str, Any],
+        body_context: Any,
+        timeout: int,
+    ) -> dict[str, Any]:
+        """执行工具调用并返回结果字典。"""
+        ai = self._ctx.ai
+        if ai is None:
+            return {
+                "ok": False,
+                "request_id": request_id,
+                "tool_name": tool_name,
+                "error": "AI client not ready",
+                "duration_ms": 0,
+            }
+
+        # 解析请求上下文
+        ctx_data: dict[str, Any] = {}
+        if isinstance(body_context, dict):
+            ctx_data = body_context
+        request_type = str(ctx_data.get("request_type", "api") or "api")
+        group_id = ctx_data.get("group_id")
+        user_id = ctx_data.get("user_id")
+        sender_id = ctx_data.get("sender_id")
+
+        args_keys = list(args.keys())
+        logger.info(
+            "[ToolInvoke] 开始执行: request_id=%s tool=%s args_keys=%s",
+            request_id,
+            tool_name,
+            args_keys,
+        )
+
+        start = time.perf_counter()
+        try:
+            async with RequestContext(
+                request_type=request_type,
+                group_id=int(group_id) if group_id is not None else None,
+                user_id=int(user_id) if user_id is not None else None,
+                sender_id=int(sender_id) if sender_id is not None else None,
+            ) as ctx:
+                # 注入核心服务资源
+                if self._ctx.sender is not None:
+                    ctx.set_resource("sender", self._ctx.sender)
+                if self._ctx.history_manager is not None:
+                    ctx.set_resource("history_manager", self._ctx.history_manager)
+                runtime_config = getattr(ai, "runtime_config", None)
+                if runtime_config is not None:
+                    ctx.set_resource("runtime_config", runtime_config)
+                memory_storage = getattr(ai, "memory_storage", None)
+                if memory_storage is not None:
+                    ctx.set_resource("memory_storage", memory_storage)
+                if self._ctx.onebot is not None:
+                    ctx.set_resource("onebot_client", self._ctx.onebot)
+                if self._ctx.scheduler is not None:
+                    ctx.set_resource("scheduler", self._ctx.scheduler)
+                if self._ctx.cognitive_service is not None:
+                    ctx.set_resource("cognitive_service", self._ctx.cognitive_service)
+
+                tool_context: dict[str, Any] = {
+                    "request_type": request_type,
+                    "request_id": request_id,
+                }
+                if group_id is not None:
+                    tool_context["group_id"] = int(group_id)
+                if user_id is not None:
+                    tool_context["user_id"] = int(user_id)
+                if sender_id is not None:
+                    tool_context["sender_id"] = int(sender_id)
+
+                tool_manager = getattr(ai, "tool_manager", None)
+                if tool_manager is None:
+                    raise RuntimeError("ToolManager not available")
+
+                raw_result = await asyncio.wait_for(
+                    tool_manager.execute_tool(tool_name, args, tool_context),
+                    timeout=timeout,
+                )
+
+            elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
+            result_str = str(raw_result or "")
+            logger.info(
+                "[ToolInvoke] 执行完成: request_id=%s tool=%s ok=true "
+                "duration_ms=%s result_len=%d",
+                request_id,
+                tool_name,
+                elapsed_ms,
+                len(result_str),
+            )
+            return {
+                "ok": True,
+                "request_id": request_id,
+                "tool_name": tool_name,
+                "result": result_str,
+                "duration_ms": elapsed_ms,
+            }
+
+        except asyncio.TimeoutError:
+            elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
+            logger.warning(
+                "[ToolInvoke] 执行超时: request_id=%s tool=%s timeout=%ds",
+                request_id,
+                tool_name,
+                timeout,
+            )
+            return {
+                "ok": False,
+                "request_id": request_id,
+                "tool_name": tool_name,
+                "error": f"Execution timed out after {timeout}s",
+                "duration_ms": elapsed_ms,
+            }
+        except Exception as exc:
+            elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
+            logger.exception(
+                "[ToolInvoke] 执行失败: request_id=%s tool=%s error=%s",
+                request_id,
+                tool_name,
+                exc,
+            )
+            return {
+                "ok": False,
+                "request_id": request_id,
+                "tool_name": tool_name,
+                "error": str(exc),
+                "duration_ms": elapsed_ms,
+            }
+
+    async def _execute_and_callback(
+        self,
+        *,
+        request_id: str,
+        tool_name: str,
+        args: dict[str, Any],
+        body_context: Any,
+        callback_url: str,
+        callback_headers: dict[str, str],
+        timeout: int,
+        callback_timeout: int,
+    ) -> None:
+        """异步执行工具并发送回调。"""
+        result = await self._execute_tool_invoke(
+            request_id=request_id,
+            tool_name=tool_name,
+            args=args,
+            body_context=body_context,
+            timeout=timeout,
+        )
+
+        payload = {
+            "request_id": result["request_id"],
+            "tool_name": result["tool_name"],
+            "ok": result["ok"],
+            "result": result.get("result"),
+            "duration_ms": result.get("duration_ms", 0),
+            "error": result.get("error"),
+        }
+
+        try:
+            cb_timeout = ClientTimeout(total=callback_timeout)
+            async with ClientSession(timeout=cb_timeout) as session:
+                # aiohttp json= 自动设置 Content-Type，无需手动指定
+                async with session.post(
+                    callback_url,
+                    json=payload,
+                    headers=callback_headers or None,
+                ) as resp:
+                    logger.info(
+                        "[ToolInvoke] 回调发送: request_id=%s url=%s status=%d",
+                        request_id,
+                        _mask_url(callback_url),
+                        resp.status,
+                    )
+        except Exception as exc:
+            logger.warning(
+                "[ToolInvoke] 回调失败: request_id=%s url=%s error=%s",
+                request_id,
+                _mask_url(callback_url),
+                exc,
+            )
+
+    # ------------------------------------------------------------------
+    # Naga Callback / Targets API
+    # ------------------------------------------------------------------
+
+    def _verify_naga_api_key(self, request: web.Request) -> str | None:
+        """校验 Naga 共享密钥，返回错误信息或 None 表示通过。"""
+        cfg = self._ctx.config_getter()
+        expected = cfg.naga.api_key
+        if not expected:
+            return "naga api_key not configured"
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return "missing or invalid Authorization header"
+        provided = auth_header[7:]
+        import secrets as _secrets
+
+        if not _secrets.compare_digest(provided, expected):
+            return "invalid api_key"
+        return None
+
+    async def _naga_callback_handler(self, request: web.Request) -> Response:
+        """POST /api/v1/naga/callback — Naga 消息回调"""
+        from Undefined.api.naga_store import mask_token
+
+        # 1. 共享密钥校验
+        auth_err = self._verify_naga_api_key(request)
+        if auth_err is not None:
+            logger.warning("[NagaCallback] 鉴权失败: %s", auth_err)
+            return _json_error("Unauthorized", status=401)
+
+        # 2. 解析 body
+        try:
+            body = await request.json()
+        except Exception:
+            return _json_error("Invalid JSON", status=400)
+
+        naga_id = str(body.get("naga_id", "") or "").strip()
+        token = str(body.get("token", "") or "").strip()
+        message = body.get("message")
+
+        if not naga_id or not token:
+            return _json_error("naga_id and token are required", status=400)
+        if not isinstance(message, dict):
+            return _json_error("message object is required", status=400)
+
+        fmt = str(message.get("format", "text") or "text").strip().lower()
+        content = str(message.get("content", "") or "").strip()
+        if not content:
+            return _json_error("message.content is required", status=400)
+        if fmt not in ("text", "markdown", "html"):
+            return _json_error(
+                "message.format must be 'text', 'markdown', or 'html'", status=400
+            )
+
+        # 3. scoped token 校验
+        naga_store = self._ctx.naga_store
+        if naga_store is None:
+            return _json_error("Naga integration not available", status=503)
+
+        valid, err_msg = naga_store.verify(naga_id, token)
+        if not valid:
+            logger.warning(
+                "[NagaCallback] token 校验失败: naga_id=%s reason=%s token=%s",
+                naga_id,
+                err_msg,
+                mask_token(token),
+            )
+            return _json_error(err_msg, status=403)
+
+        # 4. 获取绑定信息
+        binding = naga_store.get_binding(naga_id)
+        if binding is None:
+            return _json_error("binding not found", status=403)
+
+        cfg = self._ctx.config_getter()
+        sender = self._ctx.sender
+        if sender is None:
+            return _json_error("sender not available", status=503)
+
+        # 5. 按 format 渲染内容
+        send_content: str | None = None
+        image_path: str | None = None
+        tmp_path: str | None = None
+
+        if fmt == "text":
+            send_content = content
+        elif fmt in ("markdown", "html"):
+            import tempfile
+
+            html_str = content
+            if fmt == "markdown":
+                html_str = await render_markdown_to_html(content)
+            fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="naga_cb_")
+            os.close(fd)
+            try:
+                await render_html_to_image(html_str, tmp_path)
+                image_path = tmp_path
+            except Exception as exc:
+                logger.warning("[NagaCallback] 渲染失败: %s", exc)
+                # 回退到文本发送
+                send_content = content
+
+        # 6. 发送消息
+        sent_private = False
+        sent_group = False
+
+        try:
+            # 构建图片 CQ 码（跨平台 URI）
+            cq_image: str | None = None
+            if image_path is not None:
+                file_uri = Path(image_path).resolve().as_uri()
+                cq_image = f"[CQ:image,file={file_uri}]"
+
+            # 私聊发给绑定的 QQ 用户
+            try:
+                if send_content is not None:
+                    await sender.send_private_message(binding.qq_id, send_content)
+                elif cq_image is not None:
+                    await sender.send_private_message(binding.qq_id, cq_image)
+                sent_private = True
+            except Exception as exc:
+                logger.warning(
+                    "[NagaCallback] 私聊发送失败: naga_id=%s qq=%d error=%s",
+                    naga_id,
+                    binding.qq_id,
+                    exc,
+                )
+
+            # 群聊发到绑定时的群（须仍在 allowed_groups 内）
+            if binding.group_id in cfg.naga.allowed_groups:
+                try:
+                    if send_content is not None:
+                        await sender.send_group_message(binding.group_id, send_content)
+                    elif cq_image is not None:
+                        await sender.send_group_message(binding.group_id, cq_image)
+                    sent_group = True
+                except Exception as exc:
+                    logger.warning(
+                        "[NagaCallback] 群聊发送失败: naga_id=%s group=%d error=%s",
+                        naga_id,
+                        binding.group_id,
+                        exc,
+                    )
+            else:
+                logger.info(
+                    "[NagaCallback] 群 %d 不在 allowed_groups 中，跳过群发",
+                    binding.group_id,
+                )
+        finally:
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+        # 7. record_usage
+        await naga_store.record_usage(naga_id)
+
+        return web.json_response(
+            {
+                "ok": True,
+                "sent_private": sent_private,
+                "sent_group": sent_group,
+            }
+        )
+
+    async def _naga_targets_handler(self, request: web.Request) -> Response:
+        """GET /api/v1/naga/targets — 查询发送目标"""
+        # 1. 共享密钥校验
+        auth_err = self._verify_naga_api_key(request)
+        if auth_err is not None:
+            logger.warning("[NagaTargets] 鉴权失败: %s", auth_err)
+            return _json_error("Unauthorized", status=401)
+
+        # 2. 参数获取
+        naga_id = str(request.query.get("naga_id", "") or "").strip()
+        token = request.headers.get("X-Naga-Token", "")
+
+        if not naga_id or not token:
+            return _json_error("naga_id and X-Naga-Token are required", status=400)
+
+        # 3. scoped token 校验
+        naga_store = self._ctx.naga_store
+        if naga_store is None:
+            return _json_error("Naga integration not available", status=503)
+
+        valid, err_msg = naga_store.verify(naga_id, token)
+        if not valid:
+            return _json_error(err_msg, status=403)
+
+        binding = naga_store.get_binding(naga_id)
+        if binding is None:
+            return _json_error("binding not found", status=403)
+
+        cfg = self._ctx.config_getter()
+
+        # 4. 构建可用群列表
+        available_groups: list[dict[str, Any]] = []
+        if binding.group_id in cfg.naga.allowed_groups:
+            group_info: dict[str, Any] = {"group_id": binding.group_id}
+            # 尝试获取群名
+            onebot = self._ctx.onebot
+            if onebot is not None:
+                try:
+                    info = await onebot.get_group_info(binding.group_id)
+                    if isinstance(info, dict):
+                        data = info.get("data", info)
+                        if isinstance(data, dict):
+                            name = data.get("group_name", "")
+                            if name:
+                                group_info["group_name"] = str(name)
+                except Exception:
+                    pass
+            available_groups.append(group_info)
+
+        return web.json_response(
+            {
+                "naga_id": naga_id,
+                "bound_qq": binding.qq_id,
+                "groups": available_groups,
+            }
+        )

@@ -1,0 +1,10 @@
+{
+  "name": "naga",
+  "description": "NagaAgent 集成管理",
+  "usage": "/naga <bind|approve|reject|revoke|list|pending|info> [参数]",
+  "permission": "public",
+  "allow_in_private": true,
+  "show_in_help": true,
+  "order": 95,
+  "aliases": []
+}

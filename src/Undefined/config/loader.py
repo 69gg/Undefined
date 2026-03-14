@@ -35,6 +35,7 @@ from .models import (
     EmbeddingModelConfig,
     ModelPool,
     ModelPoolEntry,
+    NagaConfig,
     RerankModelConfig,
     SecurityModelConfig,
     VisionModelConfig,
@@ -544,6 +545,8 @@ class Config:
     bilibili_auto_extract_private_ids: list[int]
     # 认知记忆
     cognitive: CognitiveConfig
+    # Naga 集成
+    naga: NagaConfig
     _allowed_group_ids_set: set[int] = dataclass_field(
         default_factory=set,
         init=False,
@@ -1226,6 +1229,7 @@ class Config:
         api_config = cls._parse_api_config(data)
 
         cognitive = cls._parse_cognitive_config(data)
+        naga = cls._parse_naga_config(data)
 
         if strict:
             cls._verify_required_fields(
@@ -1357,6 +1361,7 @@ class Config:
             knowledge_enable_rerank=knowledge_enable_rerank,
             knowledge_rerank_top_k=knowledge_rerank_top_k,
             cognitive=cognitive,
+            naga=naga,
         )
 
     @property
@@ -2428,12 +2433,53 @@ class Config:
 
         openapi_enabled = _coerce_bool(section.get("openapi_enabled"), True)
 
+        tool_invoke_enabled = _coerce_bool(section.get("tool_invoke_enabled"), False)
+        tool_invoke_expose = _coerce_str(
+            section.get("tool_invoke_expose"), "tools+toolsets"
+        )
+        valid_expose = {"tools", "toolsets", "tools+toolsets", "agents", "all"}
+        if tool_invoke_expose not in valid_expose:
+            tool_invoke_expose = "tools+toolsets"
+        tool_invoke_allowlist = _coerce_str_list(section.get("tool_invoke_allowlist"))
+        tool_invoke_denylist = _coerce_str_list(section.get("tool_invoke_denylist"))
+        tool_invoke_timeout = _coerce_int(section.get("tool_invoke_timeout"), 120)
+        if tool_invoke_timeout <= 0:
+            tool_invoke_timeout = 120
+        tool_invoke_callback_timeout = _coerce_int(
+            section.get("tool_invoke_callback_timeout"), 10
+        )
+        if tool_invoke_callback_timeout <= 0:
+            tool_invoke_callback_timeout = 10
+
         return APIConfig(
             enabled=enabled,
             host=host,
             port=port,
             auth_key=auth_key,
             openapi_enabled=openapi_enabled,
+            tool_invoke_enabled=tool_invoke_enabled,
+            tool_invoke_expose=tool_invoke_expose,
+            tool_invoke_allowlist=tool_invoke_allowlist,
+            tool_invoke_denylist=tool_invoke_denylist,
+            tool_invoke_timeout=tool_invoke_timeout,
+            tool_invoke_callback_timeout=tool_invoke_callback_timeout,
+        )
+
+    @staticmethod
+    def _parse_naga_config(data: dict[str, Any]) -> NagaConfig:
+        section_raw = data.get("naga", {})
+        section = section_raw if isinstance(section_raw, dict) else {}
+
+        enabled = _coerce_bool(section.get("enabled"), False)
+        api_url = _coerce_str(section.get("api_url"), "")
+        api_key = _coerce_str(section.get("api_key"), "")
+        allowed_groups = frozenset(_coerce_int_list(section.get("allowed_groups")))
+
+        return NagaConfig(
+            enabled=enabled,
+            api_url=api_url,
+            api_key=api_key,
+            allowed_groups=allowed_groups,
         )
 
     @staticmethod

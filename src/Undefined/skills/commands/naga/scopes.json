@@ -1,0 +1,9 @@
+{
+  "bind": "group_only",
+  "approve": "superadmin",
+  "reject": "superadmin",
+  "revoke": "superadmin",
+  "list": "superadmin",
+  "pending": "superadmin",
+  "info": "superadmin"
+}

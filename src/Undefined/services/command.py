@@ -111,6 +111,7 @@ class CommandDispatcher:
         self.security = security
         self.queue_manager = queue_manager
         self.rate_limiter = rate_limiter
+        self.naga_store: Any = None
         self._token_usage_storage = TokenUsageStorage()
         # 存储 stats 分析结果，用于队列回调
         self._stats_analysis_results: dict[str, str] = {}

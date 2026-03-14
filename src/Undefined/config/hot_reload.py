@@ -33,6 +33,7 @@ _RESTART_REQUIRED_KEYS: set[str] = {
     "api.port",
     "api.auth_key",
     "api.openapi_enabled",
+    "naga",
 }
 
 _QUEUE_INTERVAL_KEYS: set[str] = {
