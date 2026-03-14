@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from ipaddress import ip_address
 from typing import Any
+
+
+def format_netloc(host: str, port: int) -> str:
+    """格式化 host:port 为合法 netloc，IPv6 地址自动加方括号。"""
+    if ":" in host:
+        return f"[{host}]:{port}"
+    return f"{host}:{port}"
 
 
 @dataclass
@@ -247,3 +255,24 @@ class APIConfig:
     tool_invoke_denylist: list[str] = field(default_factory=list)
     tool_invoke_timeout: int = 120
     tool_invoke_callback_timeout: int = 10
+
+    @property
+    def loopback_url(self) -> str:
+        """同机代理用的回环 URL（通配地址映射到 127.0.0.1 / ::1）。"""
+        host = self.host
+        if not host:
+            host = "127.0.0.1"
+        else:
+            try:
+                addr = ip_address(host)
+            except ValueError:
+                pass  # 域名，原样
+            else:
+                if addr.is_unspecified:
+                    host = "127.0.0.1" if addr.version == 4 else "::1"
+        return f"http://{format_netloc(host, self.port)}"
+
+    @property
+    def display_url(self) -> str:
+        """用于日志和展示的格式化 URL（保留原始 host，仅处理 IPv6 方括号）。"""
+        return f"http://{format_netloc(self.host or '0.0.0.0', self.port)}"

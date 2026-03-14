@@ -51,6 +51,8 @@ def _request(
             REDIRECT_TO_CONFIG_ONCE_APP_KEY: False,
         },
         remote="127.0.0.1",
+        scheme="http",
+        host="127.0.0.1:8787",
         transport=None,
     )
 

@@ -390,6 +390,13 @@ class WebUISettings:
     using_default_password: bool
     config_exists: bool
 
+    @property
+    def display_url(self) -> str:
+        """用于日志和展示的格式化 URL。"""
+        from Undefined.config.models import format_netloc
+
+        return f"http://{format_netloc(self.url or '0.0.0.0', self.port)}"
+
 
 def load_webui_settings(config_path: Optional[Path] = None) -> WebUISettings:
     data = load_toml_data(config_path)

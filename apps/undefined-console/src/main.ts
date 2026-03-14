@@ -276,18 +276,23 @@ function selectedProfile(): ConnectionProfile | undefined {
 	return state.profiles.find((profile) => profile.id === state.selectedId);
 }
 
+function formatHost(host: string): string {
+	if (host.includes(":")) return `[${host}]`;
+	return host;
+}
+
 function buildManagementUrl(profile: ConnectionProfile): string {
 	const host = profile.host.trim();
 	const port = profile.managementPort.trim();
 	if (!host || !port) return "";
-	return `http://${host}:${port}`;
+	return `http://${formatHost(host)}:${port}`;
 }
 
 function buildRuntimeUrl(profile: ConnectionProfile): string {
 	const host = profile.host.trim();
 	const port = profile.runtimePort.trim();
 	if (!host || !port) return "";
-	return `http://${host}:${port}`;
+	return `http://${formatHost(host)}:${port}`;
 }
 
 function badge(status: ProbeState["status"]): string {

@@ -364,8 +364,8 @@ async def _probe_ws_endpoint(url: str, timeout_seconds: float = 5.0) -> dict[str
         }
 
 
-def _build_openapi_spec(ctx: RuntimeAPIContext) -> dict[str, Any]:
-    cfg = ctx.config_getter()
+def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[str, Any]:
+    server_url = f"{request.scheme}://{request.host}"
     return {
         "openapi": "3.0.3",
         "info": {
@@ -375,8 +375,8 @@ def _build_openapi_spec(ctx: RuntimeAPIContext) -> dict[str, Any]:
         },
         "servers": [
             {
-                "url": f"http://{cfg.api.host}:{cfg.api.port}",
-                "description": "Local runtime endpoint",
+                "url": server_url,
+                "description": "Runtime endpoint",
             }
         ],
         "components": {
@@ -597,11 +597,10 @@ class RuntimeAPIServer:
         )
 
     async def _openapi_handler(self, request: web.Request) -> Response:
-        _ = request
         cfg = self._ctx.config_getter()
         if not bool(getattr(cfg.api, "openapi_enabled", True)):
             return _json_error("OpenAPI disabled", status=404)
-        return web.json_response(_build_openapi_spec(self._ctx))
+        return web.json_response(_build_openapi_spec(self._ctx, request))
 
     async def _internal_probe_handler(self, request: web.Request) -> Response:
         _ = request

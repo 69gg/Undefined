@@ -323,7 +323,7 @@ def run() -> None:
     host = settings.url
     port = settings.port
 
-    logger.info(f"Starting WebUI at http://{host}:{port}")
+    logger.info("Starting WebUI at %s", settings.display_url)
     if settings.using_default_password:
         logger.warning(
             "!!! USING DEFAULT PASSWORD !!! Please change 'webui.password' in config.toml"

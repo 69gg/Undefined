@@ -116,6 +116,8 @@ def _make_request(
     ns = SimpleNamespace(
         query=query or {},
         remote=remote,
+        scheme="http",
+        host=f"{remote}:8788",
     )
     if json_body is not None:
 

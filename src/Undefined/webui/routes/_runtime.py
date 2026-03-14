@@ -28,8 +28,7 @@ _ALLOWED_CHAT_IMAGE_EXTENSIONS = {
 
 
 def _runtime_base_url() -> str:
-    cfg = get_config(strict=False)
-    return f"http://{cfg.api.host}:{cfg.api.port}".rstrip("/")
+    return get_config(strict=False).api.loopback_url
 
 
 def _unauthorized() -> Response:

@@ -8,7 +8,7 @@ from aiohttp.web_response import Response
 
 from Undefined import __version__
 from Undefined.config import get_config
-from ._shared import auth_capabilities, routes, check_auth, get_settings
+from ._shared import auth_capabilities, routes, check_auth
 from ..utils import load_bootstrap_probe_data
 
 try:
@@ -119,7 +119,7 @@ async def _runtime_health_status() -> tuple[bool, bool, str]:
     cfg = get_config(strict=False)
     if not bool(cfg.api.enabled):
         return False, False, "disabled"
-    url = f"http://{cfg.api.host}:{cfg.api.port}/health"
+    url = f"{cfg.api.loopback_url}/health"
     try:
         timeout = ClientTimeout(total=3.0)
         async with ClientSession(timeout=timeout) as session:
@@ -161,7 +161,7 @@ async def bootstrap_probe_handler(request: web.Request) -> Response:
         "runtime_reachable": runtime_reachable,
         "runtime_detail": runtime_detail,
         "auth_mode": "token" if request.headers.get("Authorization") else "cookie",
-        "management_url": f"http://{get_settings(request).url}:{get_settings(request).port}",
+        "management_url": f"{request.scheme}://{request.host}",
     }
     payload["advice"] = _bootstrap_advice(payload)
     return web.json_response(payload)
