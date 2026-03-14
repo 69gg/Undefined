@@ -855,3 +855,20 @@ failed_cleanup_interval = 100
 # zh: 单个任务最大自动重试次数（超过后移入 failed，0=不重试）。
 # en: Max auto-retries per job before moving to failed (0=no retry).
 job_max_retries = 3
+
+# zh: Naga 集成配置。总开关为 [features].nagaagent_mode_enabled，
+# zh: 启用后允许 NagaAgent 通过绑定审批机制向 QQ 群/用户发送回调消息。
+# zh: ⚠️ 此功能面向与 NagaAgent 对接的高级场景，普通用户不建议开启。
+# en: Naga integration settings. Master switch is [features].nagaagent_mode_enabled.
+# en: When enabled, NagaAgent can send callback messages to QQ groups/users through a binding approval mechanism.
+# en: ⚠️ This feature is for advanced NagaAgent integration scenarios. Not recommended for regular users.
+[naga]
+# zh: Naga 服务器 API 地址。
+# en: Naga server API URL.
+api_url = ""
+# zh: 双方共享密钥（Undefined ↔ Naga 身份验证）。
+# en: Shared secret key for authentication between Undefined and Naga.
+api_key = ""
+# zh: Naga 服务群聊名单：绑定/回调群发仅限这些群。
+# en: Allowed groups for Naga binding and group callback delivery.
+allowed_groups = []

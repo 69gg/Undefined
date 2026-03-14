@@ -35,6 +35,7 @@ from .models import (
     EmbeddingModelConfig,
     ModelPool,
     ModelPoolEntry,
+    NagaConfig,
     RerankModelConfig,
     SecurityModelConfig,
     VisionModelConfig,
@@ -544,6 +545,8 @@ class Config:
     bilibili_auto_extract_private_ids: list[int]
     # 认知记忆
     cognitive: CognitiveConfig
+    # Naga 集成
+    naga: NagaConfig
     _allowed_group_ids_set: set[int] = dataclass_field(
         default_factory=set,
         init=False,
@@ -1226,6 +1229,7 @@ class Config:
         api_config = cls._parse_api_config(data)
 
         cognitive = cls._parse_cognitive_config(data)
+        naga = cls._parse_naga_config(data)
 
         if strict:
             cls._verify_required_fields(
@@ -1357,6 +1361,7 @@ class Config:
             knowledge_enable_rerank=knowledge_enable_rerank,
             knowledge_rerank_top_k=knowledge_rerank_top_k,
             cognitive=cognitive,
+            naga=naga,
         )
 
     @property
@@ -2458,6 +2463,21 @@ class Config:
             tool_invoke_denylist=tool_invoke_denylist,
             tool_invoke_timeout=tool_invoke_timeout,
             tool_invoke_callback_timeout=tool_invoke_callback_timeout,
+        )
+
+    @staticmethod
+    def _parse_naga_config(data: dict[str, Any]) -> NagaConfig:
+        section_raw = data.get("naga", {})
+        section = section_raw if isinstance(section_raw, dict) else {}
+
+        api_url = _coerce_str(section.get("api_url"), "")
+        api_key = _coerce_str(section.get("api_key"), "")
+        allowed_groups = _coerce_int_list(section.get("allowed_groups"))
+
+        return NagaConfig(
+            api_url=api_url,
+            api_key=api_key,
+            allowed_groups=allowed_groups,
         )
 
     @staticmethod

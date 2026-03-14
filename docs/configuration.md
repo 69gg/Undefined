@@ -635,6 +635,32 @@ model_name = "gpt-4o-mini"
 
 ---
 
+### 4.25 `[naga]` Naga 集成
+
+> **⚠️ 此功能面向与 NagaAgent 对接的高级场景，普通用户不建议开启。**
+
+启用后允许 NagaAgent 通过绑定审批机制向 QQ 群/用户发送回调消息。鉴权采用双层模型：共享密钥 `api_key` 验证服务器身份 + 每个绑定独立的 scoped token 验证调用权限。
+
+**总开关**：`[features].nagaagent_mode_enabled = true`。Naga 集成所有功能（`/naga` 命令、回调端点、绑定存储）均受此总开关控制。
+
+| 字段 | 默认值 | 说明 | 约束/回退 |
+|---|---:|---|---|
+| `api_url` | `""` | Naga 服务器 API 地址 | 为空时 token 同步/删除操作跳过 |
+| `api_key` | `""` | Undefined ↔ Naga 共享密钥 | 回调端点通过 `Authorization: Bearer` 校验 |
+| `allowed_groups` | `[]` | Naga 服务群聊名单 | 绑定命令和回调群发仅限名单内的群 |
+
+**作用域规则**：
+- `/naga bind` 仅在 `allowed_groups` 内的群可用
+- 回调群发仅发到绑定时的群（该群须仍在 `allowed_groups` 内）
+- 回调私聊只需总开关开启，不受 `allowed_groups` 限制
+- `/api/v1/naga/*` 端点仅在 `enabled=true` 时注册
+
+**数据存储**：绑定数据持久化在 `data/naga_bindings.json`，启动时自动 `chmod 600`。
+
+`naga.*` 变更需要重启进程才能生效。
+
+---
+
 ## 5. 热更新与重启边界
 
 ### 5.1 热更新监听对象
@@ -655,6 +681,7 @@ model_name = "gpt-4o-mini"
 - `webui.port`
 - `webui.password`
 - `api.*`（`enabled/host/port/auth_key/openapi_enabled`）
+- `naga.*`（`api_url/api_key/allowed_groups`）
 
 ### 5.3 明确“会执行热应用”的字段
 - 模型发车间隔 / 模型名 / 模型池变更（队列间隔刷新）

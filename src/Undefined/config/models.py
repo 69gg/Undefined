@@ -164,6 +164,20 @@ class AgentModelConfig:
 
 
 @dataclass
+class NagaConfig:
+    """Naga 集成配置
+
+    面向与 NagaAgent 对接的高级场景，普通用户不建议开启。
+    启用后允许 NagaAgent 通过绑定审批机制向 QQ 群/用户发送回调消息。
+    总开关为 features.nagaagent_mode_enabled。
+    """
+
+    api_url: str = ""
+    api_key: str = ""
+    allowed_groups: list[int] = field(default_factory=list)
+
+
+@dataclass
 class CognitiveConfig:
     """认知记忆系统配置"""
 

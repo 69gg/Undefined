@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import platform
 import socket
 import sys
@@ -127,6 +128,7 @@ class RuntimeAPIContext:
     scheduler: Any = None
     cognitive_service: Any = None
     cognitive_job_queue: Any = None
+    naga_store: Any = None
 
 
 def _json_error(message: str, status: int = 400) -> Response:
@@ -494,7 +496,9 @@ class RuntimeAPIServer:
                 response = web.Response(status=204)
                 _apply_cors_headers(request, response)
                 return response
-            if request.path.startswith("/api/"):
+            if request.path.startswith("/api/") and not request.path.startswith(
+                "/api/v1/naga/"
+            ):
                 expected = str(self._context.config_getter().api.auth_key or "")
                 provided = request.headers.get(_AUTH_HEADER, "")
                 if not expected or provided != expected:
@@ -529,6 +533,16 @@ class RuntimeAPIServer:
                 web.post("/api/v1/tools/invoke", self._tools_invoke_handler),
             ]
         )
+        # Naga 端点仅在启用时注册（总开关为 features.nagaagent_mode_enabled）
+        cfg = self._context.config_getter()
+        if cfg.nagaagent_mode_enabled and self._context.naga_store is not None:
+            app.add_routes(
+                [
+                    web.post("/api/v1/naga/callback", self._naga_callback_handler),
+                    web.get("/api/v1/naga/targets", self._naga_targets_handler),
+                ]
+            )
+            logger.info("[RuntimeAPI] Naga 端点已注册")
         return app
 
     @property
@@ -1461,3 +1475,214 @@ class RuntimeAPIServer:
                 _mask_url(callback_url),
                 exc,
             )
+
+    # ------------------------------------------------------------------
+    # Naga Callback / Targets API
+    # ------------------------------------------------------------------
+
+    def _verify_naga_api_key(self, request: web.Request) -> str | None:
+        """校验 Naga 共享密钥，返回错误信息或 None 表示通过。"""
+        cfg = self._ctx.config_getter()
+        expected = cfg.naga.api_key
+        if not expected:
+            return "naga api_key not configured"
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return "missing or invalid Authorization header"
+        provided = auth_header[7:]
+        import secrets as _secrets
+
+        if not _secrets.compare_digest(provided, expected):
+            return "invalid api_key"
+        return None
+
+    async def _naga_callback_handler(self, request: web.Request) -> Response:
+        """POST /api/v1/naga/callback — Naga 消息回调"""
+        from Undefined.api.naga_store import mask_token
+
+        # 1. 共享密钥校验
+        auth_err = self._verify_naga_api_key(request)
+        if auth_err is not None:
+            logger.warning("[NagaCallback] 鉴权失败: %s", auth_err)
+            return _json_error("Unauthorized", status=401)
+
+        # 2. 解析 body
+        try:
+            body = await request.json()
+        except Exception:
+            return _json_error("Invalid JSON", status=400)
+
+        naga_id = str(body.get("naga_id", "") or "").strip()
+        token = str(body.get("token", "") or "").strip()
+        message = body.get("message")
+
+        if not naga_id or not token:
+            return _json_error("naga_id and token are required", status=400)
+        if not isinstance(message, dict):
+            return _json_error("message object is required", status=400)
+
+        fmt = str(message.get("format", "text") or "text").strip().lower()
+        content = str(message.get("content", "") or "").strip()
+        if not content:
+            return _json_error("message.content is required", status=400)
+        if fmt not in ("text", "markdown", "html"):
+            return _json_error(
+                "message.format must be 'text', 'markdown', or 'html'", status=400
+            )
+
+        # 3. scoped token 校验
+        naga_store = self._ctx.naga_store
+        if naga_store is None:
+            return _json_error("Naga integration not available", status=503)
+
+        valid, err_msg = naga_store.verify(naga_id, token)
+        if not valid:
+            logger.warning(
+                "[NagaCallback] token 校验失败: naga_id=%s reason=%s token=%s",
+                naga_id,
+                err_msg,
+                mask_token(token),
+            )
+            return _json_error(err_msg, status=403)
+
+        # 4. 获取绑定信息
+        binding = naga_store.get_binding(naga_id)
+        if binding is None:
+            return _json_error("binding not found", status=403)
+
+        cfg = self._ctx.config_getter()
+        sender = self._ctx.sender
+        if sender is None:
+            return _json_error("sender not available", status=503)
+
+        # 5. 按 format 渲染内容
+        send_content: str | None = None
+        image_path: str | None = None
+
+        if fmt == "text":
+            send_content = content
+        elif fmt in ("markdown", "html"):
+            import tempfile
+
+            html_str = content
+            if fmt == "markdown":
+                html_str = await render_markdown_to_html(content)
+            fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="naga_cb_")
+            os.close(fd)
+            try:
+                await render_html_to_image(html_str, tmp_path)
+                image_path = tmp_path
+            except Exception as exc:
+                logger.warning("[NagaCallback] 渲染失败: %s", exc)
+                # 回退到文本发送
+                send_content = content
+
+        # 6. 发送消息
+        sent_private = False
+        sent_group = False
+
+        # 私聊发给绑定的 QQ 用户
+        try:
+            if send_content is not None:
+                await sender.send_private_message(binding.qq_id, send_content)
+            elif image_path is not None:
+                cq_image = f"[CQ:image,file=file:///{image_path}]"
+                await sender.send_private_message(binding.qq_id, cq_image)
+            sent_private = True
+        except Exception as exc:
+            logger.warning(
+                "[NagaCallback] 私聊发送失败: naga_id=%s qq=%d error=%s",
+                naga_id,
+                binding.qq_id,
+                exc,
+            )
+
+        # 群聊发到绑定时的群（须仍在 allowed_groups 内）
+        if binding.group_id in cfg.naga.allowed_groups:
+            try:
+                if send_content is not None:
+                    await sender.send_group_message(binding.group_id, send_content)
+                elif image_path is not None:
+                    cq_image = f"[CQ:image,file=file:///{image_path}]"
+                    await sender.send_group_message(binding.group_id, cq_image)
+                sent_group = True
+            except Exception as exc:
+                logger.warning(
+                    "[NagaCallback] 群聊发送失败: naga_id=%s group=%d error=%s",
+                    naga_id,
+                    binding.group_id,
+                    exc,
+                )
+        else:
+            logger.info(
+                "[NagaCallback] 群 %d 不在 allowed_groups 中，跳过群发",
+                binding.group_id,
+            )
+
+        # 7. record_usage
+        await naga_store.record_usage(naga_id)
+
+        return web.json_response(
+            {
+                "ok": True,
+                "sent_private": sent_private,
+                "sent_group": sent_group,
+            }
+        )
+
+    async def _naga_targets_handler(self, request: web.Request) -> Response:
+        """GET /api/v1/naga/targets — 查询发送目标"""
+        # 1. 共享密钥校验
+        auth_err = self._verify_naga_api_key(request)
+        if auth_err is not None:
+            logger.warning("[NagaTargets] 鉴权失败: %s", auth_err)
+            return _json_error("Unauthorized", status=401)
+
+        # 2. 参数获取
+        naga_id = str(request.query.get("naga_id", "") or "").strip()
+        token = request.headers.get("X-Naga-Token", "")
+
+        if not naga_id or not token:
+            return _json_error("naga_id and X-Naga-Token are required", status=400)
+
+        # 3. scoped token 校验
+        naga_store = self._ctx.naga_store
+        if naga_store is None:
+            return _json_error("Naga integration not available", status=503)
+
+        valid, err_msg = naga_store.verify(naga_id, token)
+        if not valid:
+            return _json_error(err_msg, status=403)
+
+        binding = naga_store.get_binding(naga_id)
+        if binding is None:
+            return _json_error("binding not found", status=403)
+
+        cfg = self._ctx.config_getter()
+
+        # 4. 构建可用群列表
+        available_groups: list[dict[str, Any]] = []
+        if binding.group_id in cfg.naga.allowed_groups:
+            group_info: dict[str, Any] = {"group_id": binding.group_id}
+            # 尝试获取群名
+            onebot = self._ctx.onebot
+            if onebot is not None:
+                try:
+                    info = await onebot.get_group_info(binding.group_id)
+                    if isinstance(info, dict):
+                        data = info.get("data", info)
+                        if isinstance(data, dict):
+                            name = data.get("group_name", "")
+                            if name:
+                                group_info["group_name"] = str(name)
+                except Exception:
+                    pass
+            available_groups.append(group_info)
+
+        return web.json_response(
+            {
+                "naga_id": naga_id,
+                "bound_qq": binding.qq_id,
+                "groups": available_groups,
+            }
+        )

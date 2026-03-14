@@ -24,11 +24,31 @@ def _is_private_scope(context: CommandContext) -> bool:
     return int(context.group_id) == 0
 
 
+def _can_see_command(permission: str, sender_id: int, context: CommandContext) -> bool:
+    """根据命令权限判断用户是否可见该命令。"""
+    if permission in ("public", ""):
+        return True
+    if permission == "superadmin":
+        return context.config.is_superadmin(sender_id)
+    if permission == "admin":
+        return context.config.is_admin(sender_id) or context.config.is_superadmin(
+            sender_id
+        )
+    return True
+
+
 def _format_command_list(context: CommandContext) -> str:
     commands = context.registry.list_commands(include_hidden=False)
     in_private = _is_private_scope(context)
     if in_private:
         commands = [item for item in commands if item.allow_in_private]
+
+    # 按权限过滤：非管理员看不到管理命令
+    commands = [
+        item
+        for item in commands
+        if _can_see_command(item.permission, context.sender_id, context)
+    ]
 
     command_lines = [
         (
@@ -84,6 +104,8 @@ def _format_command_detail(command_name: str, context: CommandContext) -> str | 
     if meta is None:
         return None
     if _is_private_scope(context) and not meta.allow_in_private:
+        return None
+    if not _can_see_command(meta.permission, context.sender_id, context):
         return None
 
     aliases = "、".join(f"/{alias}" for alias in meta.aliases) if meta.aliases else "无"
