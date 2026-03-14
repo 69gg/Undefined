@@ -1601,18 +1601,25 @@ class RuntimeAPIServer:
         elif fmt in ("markdown", "html"):
             import tempfile
 
-            html_str = content
+            html_str: str | None = content
             if fmt == "markdown":
-                html_str = await render_markdown_to_html(content)
-            fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="naga_cb_")
-            os.close(fd)
-            try:
-                await render_html_to_image(html_str, tmp_path)
-                image_path = tmp_path
-            except Exception as exc:
-                logger.warning("[NagaCallback] 渲染失败: %s", exc)
-                # 回退到文本发送
-                send_content = content
+                try:
+                    html_str = await render_markdown_to_html(content)
+                except Exception as exc:
+                    logger.warning(
+                        "[NagaCallback] Markdown 转换失败，回退文本: %s", exc
+                    )
+                    send_content = content
+                    html_str = None
+            if html_str is not None:
+                fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="naga_cb_")
+                os.close(fd)
+                try:
+                    await render_html_to_image(html_str, tmp_path)
+                    image_path = tmp_path
+                except Exception as exc:
+                    logger.warning("[NagaCallback] 图片渲染失败，回退文本: %s", exc)
+                    send_content = content
 
         # 6. 发送消息
         sent_private = False
