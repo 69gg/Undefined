@@ -483,20 +483,21 @@ class RuntimeAPIServer:
         self._host = host
         self._port = port
         self._runner: web.AppRunner | None = None
-        self._site: web.TCPSite | None = None
+        self._sites: list[web.TCPSite] = []
         self._background_tasks: set[asyncio.Task[Any]] = set()
 
     async def start(self) -> None:
+        from Undefined.config.models import resolve_bind_hosts
+
         app = self._create_app()
         self._runner = web.AppRunner(app)
         await self._runner.setup()
-        self._site = web.TCPSite(self._runner, host=self._host, port=self._port)
-        await self._site.start()
-        logger.info(
-            "[RuntimeAPI] 已启动: http://%s:%s",
-            self._host,
-            self._port,
-        )
+        for h in resolve_bind_hosts(self._host):
+            site = web.TCPSite(self._runner, host=h, port=self._port)
+            await site.start()
+            self._sites.append(site)
+        cfg = self._context.config_getter()
+        logger.info("[RuntimeAPI] 已启动: %s", cfg.api.display_url)
 
     async def stop(self) -> None:
         # 取消所有后台任务（如异步 tool invoke 回调）

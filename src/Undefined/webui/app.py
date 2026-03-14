@@ -329,10 +329,12 @@ def run() -> None:
             "!!! USING DEFAULT PASSWORD !!! Please change 'webui.password' in config.toml"
         )
 
+    from Undefined.config.models import resolve_bind_hosts
+
     try:
         web.run_app(
             app,
-            host=host,
+            host=resolve_bind_hosts(host),
             port=port,
             print=None,
             shutdown_timeout=1.0,

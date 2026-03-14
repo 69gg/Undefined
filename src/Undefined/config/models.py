@@ -14,6 +14,17 @@ def format_netloc(host: str, port: int) -> str:
     return f"{host}:{port}"
 
 
+def resolve_bind_hosts(host: str) -> list[str]:
+    """将监听地址展开为 aiohttp 绑定列表。
+
+    Python asyncio 对 IPv6 socket 设置 ``IPV6_V6ONLY=1``，
+    因此 ``::`` 只监听 IPv6。要实现双栈需同时绑定 IPv4 + IPv6。
+    """
+    if not host or host == "::":
+        return ["0.0.0.0", "::"]
+    return [host]
+
+
 @dataclass
 class ModelPoolEntry:
     """模型池中的单个模型条目（已合并缺省值后的完整配置）"""
