@@ -12,6 +12,8 @@ from .comment import CommentMap, parse_comment_map_text
 from .config_io import CONFIG_EXAMPLE_PATH, _resolve_config_example_path
 from .toml_render import TomlData, merge_defaults, render_toml
 
+_PASSTHROUGH_KEYS = {"request_params"}
+
 
 @dataclass(frozen=True)
 class ConfigTemplateSyncResult:
@@ -77,6 +79,8 @@ def _collect_removed_paths(
             continue
         default_value = defaults[key]
         if isinstance(current_value, dict) and isinstance(default_value, dict):
+            if _should_skip_passthrough_recursion(key, path, default_value):
+                continue
             removed.extend(_collect_removed_paths(default_value, current_value, path))
         elif _is_array_of_tables(current_value) and _is_array_of_tables(default_value):
             if not default_value:
@@ -98,15 +102,21 @@ def _collect_removed_paths(
     return removed
 
 
-def _prune_to_template(data: TomlData, template: TomlData) -> TomlData:
+def _prune_to_template(
+    data: TomlData, template: TomlData, prefix: str = ""
+) -> TomlData:
     """递归移除 data 中不存在于 template 的键。"""
     pruned: TomlData = {}
     for key, value in data.items():
+        path = f"{prefix}.{key}" if prefix else key
         if key not in template:
             continue
         template_value = template[key]
         if isinstance(value, dict) and isinstance(template_value, dict):
-            pruned[key] = _prune_to_template(value, template_value)
+            if _should_skip_passthrough_recursion(key, path, template_value):
+                pruned[key] = value
+            else:
+                pruned[key] = _prune_to_template(value, template_value, path)
         elif _is_array_of_tables(value) and _is_array_of_tables(template_value):
             if not template_value:
                 pruned[key] = list(value)
@@ -116,12 +126,23 @@ def _prune_to_template(data: TomlData, template: TomlData) -> TomlData:
                     _prune_to_template(
                         item,
                         template_value[idx] if idx < len(template_value) else tpl_item,
+                        f"{path}[{idx}]",
                     )
                     for idx, item in enumerate(value)
                 ]
         else:
             pruned[key] = value
     return pruned
+
+
+def _should_skip_passthrough_recursion(
+    key: str, path: str, template_value: TomlData
+) -> bool:
+    if template_value:
+        return False
+    return key in _PASSTHROUGH_KEYS or any(
+        path.endswith(passthrough_key) for passthrough_key in _PASSTHROUGH_KEYS
+    )
 
 
 def _is_array_of_tables(value: Any) -> bool:
