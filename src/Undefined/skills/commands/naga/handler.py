@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 _SCOPES_FILE = Path(__file__).parent / "scopes.json"
 
 
-def _load_scopes() -> dict[str, str]:
+def _load_scopes_sync() -> dict[str, str]:
     try:
         with open(_SCOPES_FILE, encoding="utf-8") as f:
             data = json.load(f)
@@ -24,13 +25,19 @@ def _load_scopes() -> dict[str, str]:
         return {}
 
 
+async def _load_scopes() -> dict[str, str]:
+    return await asyncio.to_thread(_load_scopes_sync)
+
+
 _SCOPE_ALIASES: dict[str, str] = {
     "admin_only": "admin",
     "superadmin_only": "superadmin",
 }
 
 
-def _check_scope(subcmd: str, sender_id: int, context: CommandContext) -> str | None:
+async def _check_scope(
+    subcmd: str, sender_id: int, context: CommandContext
+) -> str | None:
     """检查子命令权限与作用域，返回错误提示或 None 表示通过。
 
     支持的 scope 值:
@@ -40,7 +47,7 @@ def _check_scope(subcmd: str, sender_id: int, context: CommandContext) -> str | 
       - ``group_only``      — 任何人，但仅限群聊
       - ``private_only``    — 任何人，但仅限私聊
     """
-    scopes = _load_scopes()
+    scopes = await _load_scopes()
     raw = scopes.get(subcmd, "superadmin")
     scope = _SCOPE_ALIASES.get(raw, raw)
 
@@ -100,7 +107,7 @@ async def execute(args: list[str], context: CommandContext) -> None:
     sub_args = args[1:]
 
     # 权限检查
-    perm_err = _check_scope(subcmd, context.sender_id, context)
+    perm_err = await _check_scope(subcmd, context.sender_id, context)
     if perm_err is not None:
         await _reply(context, f"❌ {perm_err}")
         return

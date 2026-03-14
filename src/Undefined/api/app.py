@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import platform
+from pathlib import Path
 import socket
 import sys
 import time
@@ -1609,12 +1610,17 @@ class RuntimeAPIServer:
         sent_group = False
 
         try:
+            # 构建图片 CQ 码（跨平台 URI）
+            cq_image: str | None = None
+            if image_path is not None:
+                file_uri = Path(image_path).resolve().as_uri()
+                cq_image = f"[CQ:image,file={file_uri}]"
+
             # 私聊发给绑定的 QQ 用户
             try:
                 if send_content is not None:
                     await sender.send_private_message(binding.qq_id, send_content)
-                elif image_path is not None:
-                    cq_image = f"[CQ:image,file=file:///{image_path}]"
+                elif cq_image is not None:
                     await sender.send_private_message(binding.qq_id, cq_image)
                 sent_private = True
             except Exception as exc:
@@ -1630,8 +1636,7 @@ class RuntimeAPIServer:
                 try:
                     if send_content is not None:
                         await sender.send_group_message(binding.group_id, send_content)
-                    elif image_path is not None:
-                        cq_image = f"[CQ:image,file=file:///{image_path}]"
+                    elif cq_image is not None:
                         await sender.send_group_message(binding.group_id, cq_image)
                     sent_group = True
                 except Exception as exc:
