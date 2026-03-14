@@ -523,15 +523,18 @@ class RuntimeAPIServer:
                 response = web.Response(status=204)
                 _apply_cors_headers(request, response)
                 return response
-            if request.path.startswith("/api/") and not request.path.startswith(
-                "/api/v1/naga/"
-            ):
-                expected = str(self._context.config_getter().api.auth_key or "")
-                provided = request.headers.get(_AUTH_HEADER, "")
-                if not expected or provided != expected:
-                    response = _json_error("Unauthorized", status=401)
-                    _apply_cors_headers(request, response)
-                    return response
+            if request.path.startswith("/api/"):
+                # Naga 端点使用独立鉴权，仅在 naga 模式启用时跳过主 auth
+                cfg = self._context.config_getter()
+                is_naga_path = request.path.startswith("/api/v1/naga/")
+                skip_auth = is_naga_path and cfg.nagaagent_mode_enabled
+                if not skip_auth:
+                    expected = str(cfg.api.auth_key or "")
+                    provided = request.headers.get(_AUTH_HEADER, "")
+                    if not expected or provided != expected:
+                        response = _json_error("Unauthorized", status=401)
+                        _apply_cors_headers(request, response)
+                        return response
             response = await handler(request)
             _apply_cors_headers(request, response)
             return response

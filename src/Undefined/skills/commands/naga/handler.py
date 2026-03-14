@@ -81,6 +81,12 @@ async def _reply(context: CommandContext, text: str) -> None:
         await context.sender.send_group_message(context.group_id, text)
 
 
+async def _notify_user(context: CommandContext, user_id: int, text: str) -> None:
+    """直接私聊通知指定用户（绕过私聊代理，确保消息发给目标用户而非命令调用者）"""
+    real_sender = getattr(context.dispatcher, "sender", context.sender)
+    await real_sender.send_private_message(user_id, text)
+
+
 async def execute(args: list[str], context: CommandContext) -> None:
     """处理 /naga 命令"""
     # 前置检查: naga 是否启用（总开关为 features.nagaagent_mode_enabled）
@@ -182,7 +188,8 @@ async def _handle_bind(
     superadmin_qq = context.config.superadmin_qq
     if superadmin_qq:
         try:
-            await context.sender.send_private_message(
+            await _notify_user(
+                context,
                 superadmin_qq,
                 f"📋 Naga 绑定申请\n"
                 f"naga_id: {naga_id}\n"
@@ -225,9 +232,10 @@ async def _handle_approve(
         f"Naga 同步: {'成功' if sync_ok else '失败（请手动同步）'}",
     )
 
-    # 私聊通知申请人
+    # 私聊通知申请人（绕过代理，确保发给申请人而非调用者）
     try:
-        await context.sender.send_private_message(
+        await _notify_user(
+            context,
             binding.qq_id,
             f"🎉 你的 Naga 绑定申请已通过！\nnaga_id: {naga_id}",
         )
@@ -264,10 +272,11 @@ async def _handle_reject(
 
     await _reply(context, f"✅ 已拒绝 naga_id '{naga_id}' 的绑定申请")
 
-    # 私聊通知申请人
+    # 私聊通知申请人（绕过代理，确保发给申请人而非调用者）
     if pending_qq:
         try:
-            await context.sender.send_private_message(
+            await _notify_user(
+                context,
                 pending_qq,
                 f"❌ 你的 Naga 绑定申请已被拒绝\nnaga_id: {naga_id}",
             )
