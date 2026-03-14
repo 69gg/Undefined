@@ -65,6 +65,14 @@ def _confirm_prune(removed_paths: list[str]) -> bool:
     return answer.strip().lower() == "yes"
 
 
+def _initial_action_label(*, dry_run: bool, prune: bool) -> str:
+    if dry_run:
+        return "预览完成"
+    if prune:
+        return "分析完成"
+    return "同步完成"
+
+
 def main() -> int:
     args = build_parser().parse_args()
 
@@ -82,7 +90,7 @@ def main() -> int:
         print(f"[sync-config] 配置解析失败：{exc}", file=sys.stderr)
         return 1
 
-    action = "预览完成" if args.dry_run else "同步完成"
+    action = _initial_action_label(dry_run=args.dry_run, prune=args.prune)
     print(f"[sync-config] {action}: {args.config}")
     print(f"[sync-config] 新增路径数量: {len(result.added_paths)}")
     for path in result.added_paths:
@@ -125,7 +133,9 @@ def main() -> int:
                 write=True,
                 prune=False,
             )
-        print("[sync-config] 无多余配置项需要删除。")
+            print("[sync-config] 无多余配置项需要删除，已完成常规同步。")
+        else:
+            print("[sync-config] 无多余配置项需要删除。")
 
     if args.stdout:
         print("\n--- merged config.toml ---\n")

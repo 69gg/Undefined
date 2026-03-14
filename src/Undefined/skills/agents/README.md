@@ -44,8 +44,8 @@ responses_force_stateless_replay = false
 ```
 
 说明：
-- `api_mode = "chat_completions"` 时，旧 `thinking_*` 仍按原逻辑生效；若开启 `reasoning_enabled`，也会额外发送 `reasoning.effort`。
-- `api_mode = "responses"` 时，Agent 的多轮工具调用默认使用 `previous_response_id + function_call_output` 续轮；若开启 `responses_force_stateless_replay`，则会始终改为完整消息重放；旧 `thinking_*` 不会发到 `responses`。
+- `api_mode = "chat_completions"` 时，`thinking_*` 仍按原逻辑生效；若开启 `reasoning_enabled`，会额外发送 `reasoning.effort`。
+- `api_mode = "responses"` 时，`thinking_*` 与 `reasoning_*` 分别独立控制 `thinking` 和 `reasoning.effort` / `output_config.effort`；Agent 的多轮工具调用默认使用 `previous_response_id + function_call_output` 续轮；若开启 `responses_force_stateless_replay`，则会始终改为完整消息重放。
 - `thinking_tool_call_compat` 默认 `true`，会把 `reasoning_content` 回填到本地消息历史，便于日志、回放和兼容读取。
 
 兼容的环境变量（会覆盖 `config.toml`）：

@@ -27,7 +27,6 @@ from Undefined.ai.transports import (
     get_api_mode,
     get_effort_payload,
     get_effort_style,
-    get_reasoning_payload,
     get_thinking_payload,
     normalize_responses_result,
 )
@@ -876,6 +875,8 @@ def _build_effective_request_kwargs(
         getattr(model_config, "request_params", {}),
         overrides,
     )
+    thinking_override = overrides["thinking"] if "thinking" in overrides else None
+    has_thinking_override = "thinking" in overrides
     reserved_fields = (
         _RESPONSES_RESERVED_FIELDS
         if get_api_mode(model_config) == API_MODE_RESPONSES
@@ -885,11 +886,15 @@ def _build_effective_request_kwargs(
         merged,
         reserved_fields,
     )
+    if has_thinking_override:
+        ignored.pop("thinking", None)
     _warn_ignored_request_params(
         call_type=call_type,
         model_name=model_config.model_name,
         ignored=ignored,
     )
+    if has_thinking_override:
+        allowed["thinking"] = thinking_override
     return allowed
 
 
@@ -1453,10 +1458,17 @@ def build_request_body(
     """构建 API 请求体。"""
     api_mode = get_api_mode(model_config)
     extra_kwargs: dict[str, Any] = dict(kwargs)
-    reasoning_payload = get_reasoning_payload(model_config)
+
+    if "thinking" in extra_kwargs:
+        normalized = _normalize_thinking_override(
+            extra_kwargs.get("thinking"), model_config
+        )
+        if normalized is None:
+            extra_kwargs.pop("thinking", None)
+        else:
+            extra_kwargs["thinking"] = normalized
 
     if api_mode == API_MODE_RESPONSES:
-        extra_kwargs.pop("thinking", None)
         extra_kwargs.pop("reasoning", None)
         extra_kwargs.pop("reasoning_effort", None)
         extra_kwargs.pop("output_config", None)
@@ -1477,15 +1489,6 @@ def build_request_body(
         "max_tokens": max_tokens,
     }
 
-    if "thinking" in extra_kwargs:
-        normalized = _normalize_thinking_override(
-            extra_kwargs.get("thinking"), model_config
-        )
-        if normalized is None:
-            extra_kwargs.pop("thinking", None)
-        else:
-            extra_kwargs["thinking"] = normalized
-
     extra_kwargs.pop("reasoning", None)
     extra_kwargs.pop("reasoning_effort", None)
     extra_kwargs.pop("output_config", None)
@@ -1501,8 +1504,6 @@ def build_request_body(
             body["output_config"] = effort_payload
         else:
             body["reasoning"] = effort_payload
-    elif reasoning_payload is not None:
-        body["reasoning"] = reasoning_payload
 
     if tools:
         body["tools"] = tools

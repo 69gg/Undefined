@@ -26,22 +26,14 @@ def normalize_reasoning_effort(value: Any, default: str = "medium") -> str:
 
 
 def get_reasoning_payload(model_config: Any) -> dict[str, Any] | None:
-    if not bool(getattr(model_config, "reasoning_enabled", False)):
-        return None
-    return {
-        "effort": normalize_reasoning_effort(
-            getattr(model_config, "reasoning_effort", "medium")
-        )
-    }
+    return get_effort_payload(model_config)
 
 
 _VALID_REASONING_EFFORT_STYLES = {"openai", "anthropic"}
 
 
 def get_thinking_payload(model_config: Any) -> dict[str, Any] | None:
-    """构建 thinking 请求参数。reasoning_enabled 启用时用 adaptive，否则回退 legacy budget。"""
-    if bool(getattr(model_config, "reasoning_enabled", False)):
-        return {"type": "adaptive"}
+    """构建 thinking 请求参数，仅由 thinking_* 配置控制。"""
     if not bool(getattr(model_config, "thinking_enabled", False)):
         return None
     param: dict[str, Any] = {"type": "enabled"}
@@ -54,10 +46,11 @@ def get_effort_payload(model_config: Any) -> dict[str, Any] | None:
     """构建 effort 请求参数（仅在 reasoning_enabled 启用时生效）。"""
     if not bool(getattr(model_config, "reasoning_enabled", False)):
         return None
-    effort = str(getattr(model_config, "reasoning_effort", "") or "").strip().lower()
-    if not effort:
-        return None
-    return {"effort": effort}
+    return {
+        "effort": normalize_reasoning_effort(
+            getattr(model_config, "reasoning_effort", "medium")
+        )
+    }
 
 
 def get_effort_style(model_config: Any) -> str:
@@ -364,7 +357,6 @@ def build_responses_request_body(
         "model": getattr(model_config, "model_name"),
         "max_output_tokens": max_tokens,
     }
-    reasoning = get_reasoning_payload(model_config)
     thinking = get_thinking_payload(model_config)
     effort_payload = get_effort_payload(model_config)
     if effort_payload is not None:
@@ -373,8 +365,6 @@ def build_responses_request_body(
             body["output_config"] = effort_payload
         else:
             body["reasoning"] = effort_payload
-    elif reasoning is not None:
-        body["reasoning"] = reasoning
     if thinking is not None:
         body["thinking"] = thinking
     if tools:

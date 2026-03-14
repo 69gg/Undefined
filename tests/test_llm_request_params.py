@@ -118,7 +118,6 @@ async def test_chat_request_uses_model_reasoning_and_request_params(
     assert fake_client.chat.completions.last_kwargs["extra_body"] == {
         "metadata": {"source": "config"},
         "reasoning": {"effort": "high"},
-        "thinking": {"type": "adaptive"},
     }
     assert (
         "ignored_keys=model,stream" in caplog.text
@@ -194,7 +193,6 @@ async def test_responses_request_normalizes_tool_calls_and_usage() -> None:
             }
         ],
         tool_choice=cast(Any, {"type": "function", "function": {"name": "lookup"}}),
-        thinking={"enabled": False, "budget_tokens": 0},
     )
 
     assert fake_client.responses.last_kwargs is not None
@@ -218,10 +216,7 @@ async def test_responses_request_normalizes_tool_calls_and_usage() -> None:
         "name": "lookup",
     }
     assert fake_client.responses.last_kwargs["metadata"] == {"source": "config"}
-    assert fake_client.responses.last_kwargs["extra_body"] == {
-        "custom_flag": "on",
-        "thinking": {"type": "adaptive"},
-    }
+    assert fake_client.responses.last_kwargs["extra_body"] == {"custom_flag": "on"}
     assert "thinking" not in fake_client.responses.last_kwargs
 
     message = result["choices"][0]["message"]
@@ -238,6 +233,61 @@ async def test_responses_request_normalizes_tool_calls_and_usage() -> None:
         "previous_response_id": "resp_1",
         "tool_result_start_index": 2,
     }
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_responses_request_respects_explicit_thinking_override() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeClient(
+        responses=[
+            {
+                "id": "resp_1",
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "hi"}],
+                    },
+                ],
+                "usage": {"input_tokens": 5, "output_tokens": 3, "total_tokens": 8},
+            }
+        ]
+    )
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+        reasoning_enabled=True,
+        reasoning_effort="low",
+    )
+
+    await requester.request(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=128,
+        call_type="chat",
+        thinking={"enabled": False, "budget_tokens": 0},
+    )
+
+    assert fake_client.responses.last_kwargs is not None
+    assert fake_client.responses.last_kwargs["reasoning"] == {"effort": "low"}
+    assert fake_client.responses.last_kwargs["extra_body"] == {
+        "thinking": {"budget_tokens": 0, "type": "disabled"},
+    }
+
+    await requester._http_client.aclose()
 
 
 def test_normalize_responses_result_falls_back_to_output_text_and_scalar_content() -> (
@@ -936,7 +986,7 @@ async def test_responses_tools_and_tool_choice_use_sanitized_api_names() -> None
 
 @pytest.mark.asyncio
 async def test_thinking_effort_anthropic_style_chat_completions() -> None:
-    """reasoning_effort + anthropic style → adaptive thinking + output_config.effort."""
+    """thinking_enabled + anthropic style → legacy thinking + output_config.effort."""
     requester = ModelRequester(
         http_client=httpx.AsyncClient(),
         token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
@@ -952,6 +1002,8 @@ async def test_thinking_effort_anthropic_style_chat_completions() -> None:
         api_key="sk-test",
         model_name="claude-test",
         max_tokens=4096,
+        thinking_enabled=True,
+        thinking_budget_tokens=8000,
         reasoning_enabled=True,
         reasoning_effort="max",
         reasoning_effort_style="anthropic",
@@ -966,7 +1018,7 @@ async def test_thinking_effort_anthropic_style_chat_completions() -> None:
 
     kw = fake_client.chat.completions.last_kwargs
     assert kw is not None
-    assert kw["extra_body"]["thinking"] == {"type": "adaptive"}
+    assert kw["extra_body"]["thinking"] == {"type": "enabled", "budget_tokens": 8000}
     assert kw["extra_body"]["output_config"] == {"effort": "max"}
     assert "reasoning" not in kw.get("extra_body", {})
 
@@ -975,7 +1027,7 @@ async def test_thinking_effort_anthropic_style_chat_completions() -> None:
 
 @pytest.mark.asyncio
 async def test_thinking_effort_openai_style_responses() -> None:
-    """reasoning_effort + openai style → adaptive thinking + reasoning.effort."""
+    """thinking_enabled + openai style → legacy thinking + reasoning.effort."""
     requester = ModelRequester(
         http_client=httpx.AsyncClient(),
         token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
@@ -1006,6 +1058,8 @@ async def test_thinking_effort_openai_style_responses() -> None:
         model_name="gpt-test",
         max_tokens=4096,
         api_mode="responses",
+        thinking_enabled=True,
+        thinking_budget_tokens=8000,
         reasoning_enabled=True,
         reasoning_effort="high",
         reasoning_effort_style="openai",
@@ -1020,7 +1074,7 @@ async def test_thinking_effort_openai_style_responses() -> None:
 
     kw = fake_client.responses.last_kwargs
     assert kw is not None
-    assert kw["extra_body"]["thinking"] == {"type": "adaptive"}
+    assert kw["extra_body"]["thinking"] == {"type": "enabled", "budget_tokens": 8000}
     assert kw["reasoning"] == {"effort": "high"}
     assert "output_config" not in kw and "output_config" not in kw.get("extra_body", {})
 
