@@ -38,6 +38,7 @@ class ModelPoolEntry:
     thinking_enabled: bool = False
     thinking_budget_tokens: int = 0
     thinking_include_budget: bool = True
+    reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
     thinking_tool_call_compat: bool = True
     responses_tool_choice_compat: bool = False
     responses_force_stateless_replay: bool = False
@@ -68,6 +69,7 @@ class ChatModelConfig:
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
+    reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
     thinking_tool_call_compat: bool = (
         True  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
@@ -93,6 +95,7 @@ class VisionModelConfig:
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
+    reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
     thinking_tool_call_compat: bool = (
         True  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
@@ -118,6 +121,7 @@ class SecurityModelConfig:
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 0  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
+    reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
     thinking_tool_call_compat: bool = (
         True  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )
@@ -169,6 +173,7 @@ class AgentModelConfig:
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 0  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
+    reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
     thinking_tool_call_compat: bool = (
         True  # 思维链 + 工具调用兼容（回传 reasoning_content）
     )

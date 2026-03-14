@@ -10,7 +10,7 @@ from Undefined.api import app as runtime_api_app
 from Undefined.webui import app as webui_app
 from Undefined.webui.app import create_app
 from Undefined.webui.core import SessionStore
-from Undefined.webui.routes import _auth, _index, _shared, _system
+from Undefined.webui.routes import _auth, _config, _index, _shared, _system
 from Undefined.webui.routes._shared import (
     REDIRECT_TO_CONFIG_ONCE_APP_KEY,
     SESSION_COOKIE,
@@ -154,6 +154,106 @@ async def test_bootstrap_probe_handler_reports_management_state(
     assert payload["runtime_reachable"] is False
     assert payload["auth_mode"] == "token"
     assert payload["advice"]
+
+
+async def test_sync_config_template_handler_preview_skips_reload(
+    monkeypatch: Any,
+) -> None:
+    request = _request(query={"write": "false"})
+    calls: list[tuple[str, object, object]] = []
+
+    async def _fake_to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
+
+    def _fake_validate_required_config() -> tuple[bool, str]:
+        calls.append(("validate", None, None))
+        return True, "OK"
+
+    def _fake_sync_config_file(*, write: bool = True, prune: bool = False) -> Any:
+        calls.append(("sync", write, prune))
+        return SimpleNamespace(
+            added_paths=["models.chat.api_mode"],
+            removed_paths=["models.chat.extra"],
+        )
+
+    monkeypatch.setattr(_config, "check_auth", lambda _request: True)
+    monkeypatch.setattr(
+        cast(Any, getattr(_config, "asyncio")), "to_thread", _fake_to_thread
+    )
+    monkeypatch.setattr(_config, "sync_config_file", _fake_sync_config_file)
+    monkeypatch.setattr(
+        _config,
+        "get_config_manager",
+        lambda: SimpleNamespace(
+            reload=lambda: calls.append(("reload", None, None)),
+        ),
+    )
+    monkeypatch.setattr(
+        _config, "validate_required_config", _fake_validate_required_config
+    )
+
+    response = await _config.sync_config_template_handler(
+        cast(web.Request, cast(Any, request))
+    )
+    payload = _json_payload(response)
+
+    assert payload["success"] is True
+    assert payload["preview"] is True
+    assert payload["warning"] is None
+    assert payload["added_count"] == 1
+    assert payload["removed_count"] == 1
+    assert calls == [("sync", False, False)]
+
+
+async def test_sync_config_template_handler_write_reloads_and_validates(
+    monkeypatch: Any,
+) -> None:
+    request = _request(query={"prune": "true"})
+    calls: list[tuple[str, object, object]] = []
+
+    async def _fake_to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
+
+    def _fake_validate_required_config() -> tuple[bool, str]:
+        calls.append(("validate", None, None))
+        return False, "missing required field"
+
+    def _fake_sync_config_file(*, write: bool = True, prune: bool = False) -> Any:
+        calls.append(("sync", write, prune))
+        return SimpleNamespace(
+            added_paths=[],
+            removed_paths=["models.chat.extra"],
+        )
+
+    monkeypatch.setattr(_config, "check_auth", lambda _request: True)
+    monkeypatch.setattr(
+        cast(Any, getattr(_config, "asyncio")), "to_thread", _fake_to_thread
+    )
+    monkeypatch.setattr(_config, "sync_config_file", _fake_sync_config_file)
+    monkeypatch.setattr(
+        _config,
+        "get_config_manager",
+        lambda: SimpleNamespace(
+            reload=lambda: calls.append(("reload", None, None)),
+        ),
+    )
+    monkeypatch.setattr(
+        _config, "validate_required_config", _fake_validate_required_config
+    )
+
+    response = await _config.sync_config_template_handler(
+        cast(web.Request, cast(Any, request))
+    )
+    payload = _json_payload(response)
+
+    assert payload["success"] is True
+    assert payload["preview"] is False
+    assert payload["warning"] == "missing required field"
+    assert calls == [
+        ("sync", True, True),
+        ("reload", None, None),
+        ("validate", None, None),
+    ]
 
 
 def test_create_app_registers_management_routes() -> None:

@@ -1,7 +1,8 @@
 {
   "name": "naga",
-  "description": "NagaAgent 集成管理",
-  "usage": "/naga <bind|approve|reject|revoke|list|pending|info> [参数]",
+  "description": "NagaAgent 联动命令",
+  "usage": "/naga <子命令> [参数]",
+  "example": "/naga bind my-naga",
   "permission": "public",
   "allow_in_private": true,
   "show_in_help": true,

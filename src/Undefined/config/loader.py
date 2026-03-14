@@ -257,7 +257,14 @@ def _get_value(
 
 
 _VALID_API_MODES = {"chat_completions", "responses"}
-_VALID_REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
+_VALID_REASONING_EFFORT_STYLES = {"openai", "anthropic"}
+
+
+def _resolve_reasoning_effort_style(value: Any, default: str = "openai") -> str:
+    style = _coerce_str(value, default).strip().lower()
+    if style not in _VALID_REASONING_EFFORT_STYLES:
+        return default
+    return style
 
 
 def _resolve_thinking_compat_flags(
@@ -311,10 +318,7 @@ def _resolve_api_mode(
 
 
 def _resolve_reasoning_effort(value: Any, default: str = "medium") -> str:
-    effort = _coerce_str(value, default).strip().lower()
-    if effort not in _VALID_REASONING_EFFORTS:
-        return default
-    return effort
+    return _coerce_str(value, default).strip().lower()
 
 
 def _resolve_responses_tool_choice_compat(
@@ -1599,6 +1603,10 @@ class Config:
                         item.get("thinking_include_budget"),
                         primary_config.thinking_include_budget,
                     ),
+                    reasoning_effort_style=_resolve_reasoning_effort_style(
+                        item.get("reasoning_effort_style"),
+                        primary_config.reasoning_effort_style,
+                    ),
                     thinking_tool_call_compat=_coerce_bool(
                         item.get("thinking_tool_call_compat"),
                         primary_config.thinking_tool_call_compat,
@@ -1785,6 +1793,13 @@ class Config:
                 20000,
             ),
             thinking_include_budget=thinking_include_budget,
+            reasoning_effort_style=_resolve_reasoning_effort_style(
+                _get_value(
+                    data,
+                    ("models", "chat", "reasoning_effort_style"),
+                    "CHAT_MODEL_REASONING_EFFORT_STYLE",
+                ),
+            ),
             thinking_tool_call_compat=thinking_tool_call_compat,
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
@@ -1877,6 +1892,13 @@ class Config:
                 20000,
             ),
             thinking_include_budget=thinking_include_budget,
+            reasoning_effort_style=_resolve_reasoning_effort_style(
+                _get_value(
+                    data,
+                    ("models", "vision", "reasoning_effort_style"),
+                    "VISION_MODEL_REASONING_EFFORT_STYLE",
+                ),
+            ),
             thinking_tool_call_compat=thinking_tool_call_compat,
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
@@ -1983,6 +2005,13 @@ class Config:
                     0,
                 ),
                 thinking_include_budget=thinking_include_budget,
+                reasoning_effort_style=_resolve_reasoning_effort_style(
+                    _get_value(
+                        data,
+                        ("models", "security", "reasoning_effort_style"),
+                        "SECURITY_MODEL_REASONING_EFFORT_STYLE",
+                    ),
+                ),
                 thinking_tool_call_compat=thinking_tool_call_compat,
                 responses_tool_choice_compat=responses_tool_choice_compat,
                 responses_force_stateless_replay=responses_force_stateless_replay,
@@ -2002,6 +2031,7 @@ class Config:
             thinking_enabled=False,
             thinking_budget_tokens=0,
             thinking_include_budget=True,
+            reasoning_effort_style="openai",
             thinking_tool_call_compat=chat_model.thinking_tool_call_compat,
             responses_tool_choice_compat=chat_model.responses_tool_choice_compat,
             responses_force_stateless_replay=chat_model.responses_force_stateless_replay,
@@ -2092,6 +2122,13 @@ class Config:
                 0,
             ),
             thinking_include_budget=thinking_include_budget,
+            reasoning_effort_style=_resolve_reasoning_effort_style(
+                _get_value(
+                    data,
+                    ("models", "agent", "reasoning_effort_style"),
+                    "AGENT_MODEL_REASONING_EFFORT_STYLE",
+                ),
+            ),
             thinking_tool_call_compat=thinking_tool_call_compat,
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
@@ -2268,6 +2305,14 @@ class Config:
                 h.get("thinking_budget_tokens"), fallback.thinking_budget_tokens
             ),
             thinking_include_budget=thinking_include_budget,
+            reasoning_effort_style=_resolve_reasoning_effort_style(
+                _get_value(
+                    {"models": {"historian": h}},
+                    ("models", "historian", "reasoning_effort_style"),
+                    "HISTORIAN_MODEL_REASONING_EFFORT_STYLE",
+                ),
+                fallback.reasoning_effort_style,
+            ),
             thinking_tool_call_compat=thinking_tool_call_compat,
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,

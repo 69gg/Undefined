@@ -193,7 +193,6 @@ async def test_responses_request_normalizes_tool_calls_and_usage() -> None:
             }
         ],
         tool_choice=cast(Any, {"type": "function", "function": {"name": "lookup"}}),
-        thinking={"enabled": False, "budget_tokens": 0},
     )
 
     assert fake_client.responses.last_kwargs is not None
@@ -234,6 +233,61 @@ async def test_responses_request_normalizes_tool_calls_and_usage() -> None:
         "previous_response_id": "resp_1",
         "tool_result_start_index": 2,
     }
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_responses_request_respects_explicit_thinking_override() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeClient(
+        responses=[
+            {
+                "id": "resp_1",
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "hi"}],
+                    },
+                ],
+                "usage": {"input_tokens": 5, "output_tokens": 3, "total_tokens": 8},
+            }
+        ]
+    )
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+        reasoning_enabled=True,
+        reasoning_effort="low",
+    )
+
+    await requester.request(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=128,
+        call_type="chat",
+        thinking={"enabled": False, "budget_tokens": 0},
+    )
+
+    assert fake_client.responses.last_kwargs is not None
+    assert fake_client.responses.last_kwargs["reasoning"] == {"effort": "low"}
+    assert fake_client.responses.last_kwargs["extra_body"] == {
+        "thinking": {"budget_tokens": 0, "type": "disabled"},
+    }
+
+    await requester._http_client.aclose()
 
 
 def test_normalize_responses_result_falls_back_to_output_text_and_scalar_content() -> (
@@ -926,5 +980,138 @@ async def test_responses_tools_and_tool_choice_use_sanitized_api_names() -> None
     assert result["choices"][0]["message"]["tool_calls"][0]["function"]["name"] == (
         "lookup.weather@bj"
     )
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_thinking_effort_anthropic_style_chat_completions() -> None:
+    """thinking_enabled + anthropic style → legacy thinking + output_config.effort."""
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeClient()
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.anthropic.com/v1",
+        api_key="sk-test",
+        model_name="claude-test",
+        max_tokens=4096,
+        thinking_enabled=True,
+        thinking_budget_tokens=8000,
+        reasoning_enabled=True,
+        reasoning_effort="max",
+        reasoning_effort_style="anthropic",
+    )
+
+    await requester.request(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=1024,
+        call_type="chat",
+    )
+
+    kw = fake_client.chat.completions.last_kwargs
+    assert kw is not None
+    assert kw["extra_body"]["thinking"] == {"type": "enabled", "budget_tokens": 8000}
+    assert kw["extra_body"]["output_config"] == {"effort": "max"}
+    assert "reasoning" not in kw.get("extra_body", {})
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_thinking_effort_openai_style_responses() -> None:
+    """thinking_enabled + openai style → legacy thinking + reasoning.effort."""
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeClient(
+        responses=[
+            {
+                "id": "resp_1",
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "hi"}],
+                    },
+                ],
+                "usage": {"input_tokens": 5, "output_tokens": 3, "total_tokens": 8},
+            }
+        ]
+    )
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=4096,
+        api_mode="responses",
+        thinking_enabled=True,
+        thinking_budget_tokens=8000,
+        reasoning_enabled=True,
+        reasoning_effort="high",
+        reasoning_effort_style="openai",
+    )
+
+    await requester.request(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=1024,
+        call_type="chat",
+    )
+
+    kw = fake_client.responses.last_kwargs
+    assert kw is not None
+    assert kw["extra_body"]["thinking"] == {"type": "enabled", "budget_tokens": 8000}
+    assert kw["reasoning"] == {"effort": "high"}
+    assert "output_config" not in kw and "output_config" not in kw.get("extra_body", {})
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_thinking_enabled_legacy_budget_tokens() -> None:
+    """thinking_enabled=True + no effort → legacy budget_tokens mode."""
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeClient()
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=4096,
+        thinking_enabled=True,
+        thinking_budget_tokens=8000,
+    )
+
+    await requester.request(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=1024,
+        call_type="chat",
+    )
+
+    kw = fake_client.chat.completions.last_kwargs
+    assert kw is not None
+    assert kw["extra_body"]["thinking"] == {"type": "enabled", "budget_tokens": 8000}
 
     await requester._http_client.aclose()
