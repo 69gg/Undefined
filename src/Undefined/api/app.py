@@ -638,7 +638,6 @@ class RuntimeAPIServer:
                     "api_url": _mask_url(getattr(mcfg, "api_url", "")),
                     "api_mode": getattr(mcfg, "api_mode", "chat_completions"),
                     "thinking_enabled": getattr(mcfg, "thinking_enabled", False),
-                    "thinking_effort": getattr(mcfg, "thinking_effort", ""),
                     "thinking_tool_call_compat": getattr(
                         mcfg, "thinking_tool_call_compat", True
                     ),

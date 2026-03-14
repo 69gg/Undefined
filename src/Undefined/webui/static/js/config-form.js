@@ -251,7 +251,7 @@ function isLongText(value) {
 
 const FIELD_SELECT_OPTIONS = {
     api_mode: ["chat_completions", "responses"],
-    thinking_effort_style: ["openai", "anthropic"],
+    reasoning_effort_style: ["openai", "anthropic"],
 };
 
 function getFieldSelectOptions(path) {
@@ -908,18 +908,10 @@ function buildAotTemplate(path, arr) {
             if (
                 !Object.prototype.hasOwnProperty.call(
                     template,
-                    "thinking_effort",
+                    "reasoning_effort_style",
                 )
             ) {
-                template.thinking_effort = "";
-            }
-            if (
-                !Object.prototype.hasOwnProperty.call(
-                    template,
-                    "thinking_effort_style",
-                )
-            ) {
-                template.thinking_effort_style = "openai";
+                template.reasoning_effort_style = "openai";
             }
         }
         return template;
@@ -930,8 +922,7 @@ function buildAotTemplate(path, arr) {
         api_key: "",
         api_mode: "chat_completions",
         thinking_tool_call_compat: true,
-        thinking_effort: "",
-        thinking_effort_style: "openai",
+        reasoning_effort_style: "openai",
         responses_tool_choice_compat: false,
         responses_force_stateless_replay: false,
         reasoning_enabled: false,

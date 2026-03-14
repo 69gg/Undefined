@@ -6,7 +6,6 @@ from typing import Any
 API_MODE_CHAT_COMPLETIONS = "chat_completions"
 API_MODE_RESPONSES = "responses"
 _VALID_API_MODES = {API_MODE_CHAT_COMPLETIONS, API_MODE_RESPONSES}
-_VALID_REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 
 
 def normalize_api_mode(value: Any, default: str = API_MODE_CHAT_COMPLETIONS) -> str:
@@ -23,10 +22,7 @@ def get_api_mode(model_config: Any) -> str:
 
 
 def normalize_reasoning_effort(value: Any, default: str = "medium") -> str:
-    text = str(value or default).strip().lower()
-    if text not in _VALID_REASONING_EFFORTS:
-        return default
-    return text
+    return str(value or default).strip().lower()
 
 
 def get_reasoning_payload(model_config: Any) -> dict[str, Any] | None:
@@ -39,17 +35,12 @@ def get_reasoning_payload(model_config: Any) -> dict[str, Any] | None:
     }
 
 
-_VALID_THINKING_EFFORT_STYLES = {"openai", "anthropic"}
-
-
-def normalize_thinking_effort(value: Any) -> str:
-    return str(value or "").strip().lower()
+_VALID_REASONING_EFFORT_STYLES = {"openai", "anthropic"}
 
 
 def get_thinking_payload(model_config: Any) -> dict[str, Any] | None:
-    """构建 thinking 请求参数。thinking_effort 非空时用 adaptive，否则回退 legacy budget。"""
-    effort = normalize_thinking_effort(getattr(model_config, "thinking_effort", ""))
-    if effort:
+    """构建 thinking 请求参数。reasoning_enabled 启用时用 adaptive，否则回退 legacy budget。"""
+    if bool(getattr(model_config, "reasoning_enabled", False)):
         return {"type": "adaptive"}
     if not bool(getattr(model_config, "thinking_enabled", False)):
         return None
@@ -60,8 +51,10 @@ def get_thinking_payload(model_config: Any) -> dict[str, Any] | None:
 
 
 def get_effort_payload(model_config: Any) -> dict[str, Any] | None:
-    """构建 effort 请求参数（仅在 thinking_effort 非空时生效）。"""
-    effort = normalize_thinking_effort(getattr(model_config, "thinking_effort", ""))
+    """构建 effort 请求参数（仅在 reasoning_enabled 启用时生效）。"""
+    if not bool(getattr(model_config, "reasoning_enabled", False)):
+        return None
+    effort = str(getattr(model_config, "reasoning_effort", "") or "").strip().lower()
     if not effort:
         return None
     return {"effort": effort}
@@ -69,11 +62,11 @@ def get_effort_payload(model_config: Any) -> dict[str, Any] | None:
 
 def get_effort_style(model_config: Any) -> str:
     style = (
-        str(getattr(model_config, "thinking_effort_style", "openai") or "openai")
+        str(getattr(model_config, "reasoning_effort_style", "openai") or "openai")
         .strip()
         .lower()
     )
-    return style if style in _VALID_THINKING_EFFORT_STYLES else "openai"
+    return style if style in _VALID_REASONING_EFFORT_STYLES else "openai"
 
 
 def _stringify_content(value: Any) -> str:
@@ -372,18 +365,18 @@ def build_responses_request_body(
         "max_output_tokens": max_tokens,
     }
     reasoning = get_reasoning_payload(model_config)
-    if reasoning is not None:
-        body["reasoning"] = reasoning
     thinking = get_thinking_payload(model_config)
-    if thinking is not None:
-        body["thinking"] = thinking
     effort_payload = get_effort_payload(model_config)
     if effort_payload is not None:
         style = get_effort_style(model_config)
         if style == "anthropic":
             body["output_config"] = effort_payload
         else:
-            body.setdefault("reasoning", {}).update(effort_payload)
+            body["reasoning"] = effort_payload
+    elif reasoning is not None:
+        body["reasoning"] = reasoning
+    if thinking is not None:
+        body["thinking"] = thinking
     if tools:
         normalized_tools = _normalize_responses_tools(tools, internal_to_api)
         normalized_tool_choice, selected_tool_name = _normalize_responses_tool_choice(

@@ -1494,16 +1494,15 @@ def build_request_body(
     if thinking is not None:
         body["thinking"] = thinking
 
-    if reasoning_payload is not None:
-        body["reasoning"] = reasoning_payload
-
     effort_payload = get_effort_payload(model_config)
     if effort_payload is not None:
         style = get_effort_style(model_config)
         if style == "anthropic":
             body["output_config"] = effort_payload
         else:
-            body.setdefault("reasoning", {}).update(effort_payload)
+            body["reasoning"] = effort_payload
+    elif reasoning_payload is not None:
+        body["reasoning"] = reasoning_payload
 
     if tools:
         body["tools"] = tools

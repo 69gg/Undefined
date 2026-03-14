@@ -12,7 +12,6 @@ from .openai_transport import (
     normalize_api_mode,
     normalize_reasoning_effort,
     normalize_responses_result,
-    normalize_thinking_effort,
 )
 
 __all__ = [
@@ -27,5 +26,4 @@ __all__ = [
     "normalize_api_mode",
     "normalize_reasoning_effort",
     "normalize_responses_result",
-    "normalize_thinking_effort",
 ]

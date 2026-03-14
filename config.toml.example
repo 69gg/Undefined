@@ -95,8 +95,8 @@ api_mode = "chat_completions"
 # zh: 是否启用 reasoning.effort。
 # en: Enable reasoning.effort.
 reasoning_enabled = false
-# zh: reasoning.effort 档位：none / minimal / low / medium / high / xhigh。
-# en: reasoning.effort level: none / minimal / low / medium / high / xhigh.
+# zh: reasoning effort 档位。
+# en: reasoning effort level.
 reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
@@ -107,12 +107,9 @@ thinking_budget_tokens = 20000
 # zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
 # en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
 thinking_include_budget = true
-# zh: thinking effort 档位，如 low / medium / high / max。留空表示不启用。
-# en: Thinking effort level, e.g. low / medium / high / max. Empty = disabled.
-thinking_effort = ""
-# zh: thinking effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
-# en: Thinking effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
-thinking_effort_style = "openai"
+# zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
+# en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
+reasoning_effort_style = "openai"
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = true
@@ -161,8 +158,8 @@ api_mode = "chat_completions"
 # zh: 是否启用 reasoning.effort。
 # en: Enable reasoning.effort.
 reasoning_enabled = false
-# zh: reasoning.effort 档位：none / minimal / low / medium / high / xhigh。
-# en: reasoning.effort level: none / minimal / low / medium / high / xhigh.
+# zh: reasoning effort 档位。
+# en: reasoning effort level.
 reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
@@ -173,12 +170,9 @@ thinking_budget_tokens = 20000
 # zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
 # en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
 thinking_include_budget = true
-# zh: thinking effort 档位，如 low / medium / high / max。留空表示不启用。
-# en: Thinking effort level, e.g. low / medium / high / max. Empty = disabled.
-thinking_effort = ""
-# zh: thinking effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
-# en: Thinking effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
-thinking_effort_style = "openai"
+# zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
+# en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
+reasoning_effort_style = "openai"
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = true
@@ -220,8 +214,8 @@ api_mode = "chat_completions"
 # zh: 是否启用 reasoning.effort。
 # en: Enable reasoning.effort.
 reasoning_enabled = false
-# zh: reasoning.effort 档位：none / minimal / low / medium / high / xhigh。
-# en: reasoning.effort level: none / minimal / low / medium / high / xhigh.
+# zh: reasoning effort 档位。
+# en: reasoning effort level.
 reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
@@ -232,12 +226,9 @@ thinking_budget_tokens = 0
 # zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
 # en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
 thinking_include_budget = true
-# zh: thinking effort 档位，如 low / medium / high / max。留空表示不启用。
-# en: Thinking effort level, e.g. low / medium / high / max. Empty = disabled.
-thinking_effort = ""
-# zh: thinking effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
-# en: Thinking effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
-thinking_effort_style = "openai"
+# zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
+# en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
+reasoning_effort_style = "openai"
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = true
@@ -276,8 +267,8 @@ api_mode = "chat_completions"
 # zh: 是否启用 reasoning.effort。
 # en: Enable reasoning.effort.
 reasoning_enabled = false
-# zh: reasoning.effort 档位：none / minimal / low / medium / high / xhigh。
-# en: reasoning.effort level: none / minimal / low / medium / high / xhigh.
+# zh: reasoning effort 档位。
+# en: reasoning effort level.
 reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
@@ -288,12 +279,9 @@ thinking_budget_tokens = 0
 # zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
 # en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
 thinking_include_budget = true
-# zh: thinking effort 档位，如 low / medium / high / max。留空表示不启用。
-# en: Thinking effort level, e.g. low / medium / high / max. Empty = disabled.
-thinking_effort = ""
-# zh: thinking effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
-# en: Thinking effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
-thinking_effort_style = "openai"
+# zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
+# en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
+reasoning_effort_style = "openai"
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = true
@@ -345,8 +333,8 @@ api_mode = "chat_completions"
 # zh: 是否启用 reasoning.effort。
 # en: Enable reasoning.effort.
 reasoning_enabled = false
-# zh: reasoning.effort 档位：none / minimal / low / medium / high / xhigh。
-# en: reasoning.effort level: none / minimal / low / medium / high / xhigh.
+# zh: reasoning effort 档位。
+# en: reasoning effort level.
 reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
@@ -357,12 +345,9 @@ thinking_budget_tokens = 0
 # zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
 # en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
 thinking_include_budget = true
-# zh: thinking effort 档位，如 low / medium / high / max。留空表示不启用。
-# en: Thinking effort level, e.g. low / medium / high / max. Empty = disabled.
-thinking_effort = ""
-# zh: thinking effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
-# en: Thinking effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
-thinking_effort_style = "openai"
+# zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
+# en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
+reasoning_effort_style = "openai"
 # zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
 # en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
 thinking_tool_call_compat = true

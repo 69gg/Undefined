@@ -118,6 +118,7 @@ async def test_chat_request_uses_model_reasoning_and_request_params(
     assert fake_client.chat.completions.last_kwargs["extra_body"] == {
         "metadata": {"source": "config"},
         "reasoning": {"effort": "high"},
+        "thinking": {"type": "adaptive"},
     }
     assert (
         "ignored_keys=model,stream" in caplog.text
@@ -217,7 +218,10 @@ async def test_responses_request_normalizes_tool_calls_and_usage() -> None:
         "name": "lookup",
     }
     assert fake_client.responses.last_kwargs["metadata"] == {"source": "config"}
-    assert fake_client.responses.last_kwargs["extra_body"] == {"custom_flag": "on"}
+    assert fake_client.responses.last_kwargs["extra_body"] == {
+        "custom_flag": "on",
+        "thinking": {"type": "adaptive"},
+    }
     assert "thinking" not in fake_client.responses.last_kwargs
 
     message = result["choices"][0]["message"]
@@ -932,7 +936,7 @@ async def test_responses_tools_and_tool_choice_use_sanitized_api_names() -> None
 
 @pytest.mark.asyncio
 async def test_thinking_effort_anthropic_style_chat_completions() -> None:
-    """thinking_effort + anthropic style → adaptive thinking + output_config.effort."""
+    """reasoning_effort + anthropic style → adaptive thinking + output_config.effort."""
     requester = ModelRequester(
         http_client=httpx.AsyncClient(),
         token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
@@ -948,8 +952,9 @@ async def test_thinking_effort_anthropic_style_chat_completions() -> None:
         api_key="sk-test",
         model_name="claude-test",
         max_tokens=4096,
-        thinking_effort="max",
-        thinking_effort_style="anthropic",
+        reasoning_enabled=True,
+        reasoning_effort="max",
+        reasoning_effort_style="anthropic",
     )
 
     await requester.request(
@@ -970,7 +975,7 @@ async def test_thinking_effort_anthropic_style_chat_completions() -> None:
 
 @pytest.mark.asyncio
 async def test_thinking_effort_openai_style_responses() -> None:
-    """thinking_effort + openai style → adaptive thinking + reasoning.effort."""
+    """reasoning_effort + openai style → adaptive thinking + reasoning.effort."""
     requester = ModelRequester(
         http_client=httpx.AsyncClient(),
         token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
@@ -1001,8 +1006,9 @@ async def test_thinking_effort_openai_style_responses() -> None:
         model_name="gpt-test",
         max_tokens=4096,
         api_mode="responses",
-        thinking_effort="high",
-        thinking_effort_style="openai",
+        reasoning_enabled=True,
+        reasoning_effort="high",
+        reasoning_effort_style="openai",
     )
 
     await requester.request(
