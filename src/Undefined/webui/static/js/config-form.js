@@ -1067,63 +1067,73 @@ async function syncConfigTemplate(button) {
     setButtonLoading(button, true);
     showSaveStatus("saving", t("config.syncing"));
     try {
-        const res = await api("/api/config/sync-template", { method: "POST" });
-        const data = await res.json();
-        if (!data.success) {
+        const previewRes = await api("/api/config/sync-template?write=false", {
+            method: "POST",
+        });
+        const previewData = await previewRes.json();
+        if (!previewData.success) {
             showSaveStatus("error", t("config.save_error"));
             showToast(
-                `${t("common.error")}: ${data.error || t("config.sync_error")}`,
+                `${t("common.error")}: ${previewData.error || t("config.sync_error")}`,
                 "error",
                 5000,
             );
             return;
         }
+
+        let shouldPrune = false;
+        if (
+            Array.isArray(previewData.removed_paths) &&
+            previewData.removed_paths.length > 0
+        ) {
+            const listing = previewData.removed_paths
+                .map((p) => `  - ${p}`)
+                .join("\n");
+            shouldPrune = confirm(
+                `${t("config.prune_confirm")}\n\n${listing}\n\n${t("config.prune_confirm_action")}`,
+            );
+        }
+
+        const finalUrl = shouldPrune
+            ? "/api/config/sync-template?prune=true"
+            : "/api/config/sync-template";
+        const finalRes = await api(finalUrl, { method: "POST" });
+        const finalData = await finalRes.json();
+        if (!finalData.success) {
+            showSaveStatus("error", t("config.save_error"));
+            showToast(
+                `${t("common.error")}: ${finalData.error || t("config.sync_error")}`,
+                "error",
+                5000,
+            );
+            return;
+        }
+
         await loadConfig();
         showSaveStatus("saved", t("config.saved"));
-        if (data.warning) {
+        if (finalData.warning) {
             showToast(
-                `${t("common.warning")}: ${data.warning}`,
+                `${t("common.warning")}: ${finalData.warning}`,
                 "warning",
                 5000,
             );
         }
-        const suffix = Number.isFinite(data.added_count)
-            ? ` (+${data.added_count})`
-            : "";
-        showToast(`${t("config.sync_success")}${suffix}`, "info", 4000);
-
-        if (
-            Array.isArray(data.removed_paths) &&
-            data.removed_paths.length > 0
-        ) {
-            const listing = data.removed_paths
-                .map((p) => `  - ${p}`)
-                .join("\n");
-            if (
-                confirm(
-                    `${t("config.prune_confirm")}\n\n${listing}\n\n${t("config.prune_confirm_action")}`,
-                )
-            ) {
-                const pruneRes = await api(
-                    "/api/config/sync-template?prune=true",
-                    { method: "POST" },
-                );
-                const pruneData = await pruneRes.json();
-                if (pruneData.success) {
-                    await loadConfig();
-                    showToast(
-                        `${t("config.prune_success")} (-${data.removed_paths.length})`,
-                        "info",
-                        4000,
-                    );
-                } else {
-                    showToast(
-                        `${t("common.error")}: ${pruneData.error || t("config.sync_error")}`,
-                        "error",
-                        5000,
-                    );
-                }
-            }
+        if (shouldPrune) {
+            const removedCount = Number.isFinite(finalData.removed_count)
+                ? finalData.removed_count
+                : Array.isArray(finalData.removed_paths)
+                  ? finalData.removed_paths.length
+                  : 0;
+            showToast(
+                `${t("config.prune_success")} (-${removedCount})`,
+                "info",
+                4000,
+            );
+        } else {
+            const suffix = Number.isFinite(finalData.added_count)
+                ? ` (+${finalData.added_count})`
+                : "";
+            showToast(`${t("config.sync_success")}${suffix}`, "info", 4000);
         }
     } catch (e) {
         showSaveStatus("error", t("config.sync_error"));

@@ -1,3 +1,4 @@
+import asyncio
 import tomllib
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -152,14 +153,21 @@ async def sync_config_template_handler(request: web.Request) -> Response:
     if not check_auth(request):
         return web.json_response({"error": "Unauthorized"}, status=401)
     prune = request.query.get("prune") == "true"
+    write = request.query.get("write", "true").lower() != "false"
     try:
-        result = sync_config_file(prune=prune)
-        get_config_manager().reload()
-        validation_ok, validation_msg = validate_required_config()
+        result = await asyncio.to_thread(sync_config_file, prune=prune, write=write)
+        validation_ok = True
+        validation_msg: str | None = None
+        if write:
+            await asyncio.to_thread(get_config_manager().reload)
+            validation_ok, validation_msg = await asyncio.to_thread(
+                validate_required_config
+            )
         return web.json_response(
             {
                 "success": True,
                 "message": "Synced",
+                "preview": not write,
                 "added_paths": result.added_paths,
                 "added_count": len(result.added_paths),
                 "removed_paths": result.removed_paths,

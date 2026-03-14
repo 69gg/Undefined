@@ -79,12 +79,10 @@ def _collect_removed_paths(
             continue
         default_value = defaults[key]
         if isinstance(current_value, dict) and isinstance(default_value, dict):
-            if _should_skip_passthrough_recursion(key, path, default_value):
+            if _should_skip_passthrough_recursion(key, default_value):
                 continue
             removed.extend(_collect_removed_paths(default_value, current_value, path))
         elif _is_array_of_tables(current_value) and _is_array_of_tables(default_value):
-            if not default_value:
-                continue
             template_item = default_value[0]
             for index, current_item in enumerate(current_value):
                 default_item = (
@@ -113,36 +111,27 @@ def _prune_to_template(
             continue
         template_value = template[key]
         if isinstance(value, dict) and isinstance(template_value, dict):
-            if _should_skip_passthrough_recursion(key, path, template_value):
+            if _should_skip_passthrough_recursion(key, template_value):
                 pruned[key] = value
             else:
                 pruned[key] = _prune_to_template(value, template_value, path)
         elif _is_array_of_tables(value) and _is_array_of_tables(template_value):
-            if not template_value:
-                pruned[key] = list(value)
-            else:
-                tpl_item = template_value[0]
-                pruned[key] = [
-                    _prune_to_template(
-                        item,
-                        template_value[idx] if idx < len(template_value) else tpl_item,
-                        f"{path}[{idx}]",
-                    )
-                    for idx, item in enumerate(value)
-                ]
+            tpl_item = template_value[0]
+            pruned[key] = [
+                _prune_to_template(
+                    item,
+                    template_value[idx] if idx < len(template_value) else tpl_item,
+                    f"{path}[{idx}]",
+                )
+                for idx, item in enumerate(value)
+            ]
         else:
             pruned[key] = value
     return pruned
 
 
-def _should_skip_passthrough_recursion(
-    key: str, path: str, template_value: TomlData
-) -> bool:
-    if template_value:
-        return False
-    return key in _PASSTHROUGH_KEYS or any(
-        path.endswith(passthrough_key) for passthrough_key in _PASSTHROUGH_KEYS
-    )
+def _should_skip_passthrough_recursion(key: str, template_value: TomlData) -> bool:
+    return not template_value and key in _PASSTHROUGH_KEYS
 
 
 def _is_array_of_tables(value: Any) -> bool:

@@ -154,3 +154,35 @@ model_name = ""
     assert request_params["metadata"]["tier"] == "gold"
     assert request_params["tags"][0]["name"] == "alpha"
     assert "extra" not in parsed["models"]["chat"]
+
+
+def test_sync_config_text_prune_only_preserves_exact_passthrough_keys() -> None:
+    current = """
+[models.chat]
+api_url = "https://primary.example/v1"
+api_key = "primary-key"
+model_name = "primary-model"
+
+[models.chat.request_params]
+temperature = 0.2
+
+[models.chat.custom_request_params]
+temperature = 0.8
+"""
+    example = """
+[models.chat]
+api_url = ""
+api_key = ""
+model_name = ""
+
+[models.chat.request_params]
+
+[models.chat.custom_request_params]
+"""
+
+    result = sync_config_text(current, example, prune=True)
+    parsed = tomllib.loads(result.content)
+
+    assert result.removed_paths == ["models.chat.custom_request_params.temperature"]
+    assert parsed["models"]["chat"]["request_params"]["temperature"] == 0.2
+    assert parsed["models"]["chat"]["custom_request_params"] == {}
