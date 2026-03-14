@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from Undefined.services.commands.context import CommandContext
+from Undefined.skills.commands.naga.policy import is_naga_command_visible
 
 _DOC_MAX_CHARS = 8000
 
@@ -42,6 +43,11 @@ def _format_command_list(context: CommandContext) -> str:
     in_private = _is_private_scope(context)
     if in_private:
         commands = [item for item in commands if item.allow_in_private]
+    commands = [
+        item
+        for item in commands
+        if item.name != "naga" or is_naga_command_visible(context)
+    ]
 
     # 按权限过滤：非管理员看不到管理命令
     commands = [
@@ -102,6 +108,8 @@ def _load_command_doc(doc_path: Path | None) -> str:
 def _format_command_detail(command_name: str, context: CommandContext) -> str | None:
     meta = context.registry.resolve(command_name)
     if meta is None:
+        return None
+    if meta.name == "naga" and not is_naga_command_visible(context):
         return None
     if _is_private_scope(context) and not meta.allow_in_private:
         return None

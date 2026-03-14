@@ -195,7 +195,7 @@ class NagaConfig:
 
     开关分层：
     - ``features.nagaagent_mode_enabled`` — 控制 AI 侧行为（提示词切换、工具暴露）
-    - ``naga.enabled`` — 控制外部网关集成（回调 API、/naga 命令、绑定管理）
+    - ``naga.enabled`` — 控制外部网关集成（/naga、绑定回调、消息发送、解绑）
 
     两者均默认 False。可单独开启 ``nagaagent_mode_enabled`` 获得 NagaAgent 解答能力，
     无需启用外部回调联动。

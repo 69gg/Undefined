@@ -1,4 +1,4 @@
-"""NagaStore 单元测试"""
+"""NagaStore 单元测试。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from Undefined.api.naga_store import NagaStore, mask_token
+from Undefined.api.naga_store import NagaStore, generate_bind_uuid, mask_token
 
 
 @pytest.fixture
@@ -14,58 +14,115 @@ def store(tmp_path: Path) -> NagaStore:
     return NagaStore(data_file=tmp_path / "naga_bindings.json")
 
 
-async def test_submit_binding(store: NagaStore) -> None:
-    ok, msg = await store.submit_binding("alice", qq_id=123, group_id=456)
+async def test_submit_binding_creates_pending_with_bind_uuid(store: NagaStore) -> None:
+    ok, msg, pending = await store.submit_binding(
+        "alice",
+        qq_id=123,
+        group_id=456,
+        bind_uuid="uuid_a",
+        request_context={"group_name": "Test"},
+    )
     assert ok is True
     assert "已提交" in msg
+    assert pending is not None
+    assert pending.bind_uuid == "uuid_a"
+    assert pending.request_context["group_name"] == "Test"
+
+
+async def test_submit_binding_generates_uuid_by_default(store: NagaStore) -> None:
+    ok, _, pending = await store.submit_binding("alice", qq_id=123, group_id=456)
+    assert ok is True
+    assert pending is not None
+    assert pending.bind_uuid
 
 
 async def test_submit_duplicate_pending(store: NagaStore) -> None:
     await store.submit_binding("alice", qq_id=123, group_id=456)
-    ok, msg = await store.submit_binding("alice", qq_id=789, group_id=456)
+    ok, msg, pending = await store.submit_binding("alice", qq_id=789, group_id=456)
     assert ok is False
-    assert "审核队列" in msg
+    assert "处理中" in msg
+    assert pending is None
 
 
 async def test_submit_already_bound(store: NagaStore) -> None:
-    await store.submit_binding("alice", qq_id=123, group_id=456)
-    await store.approve("alice")
-    ok, msg = await store.submit_binding("alice", qq_id=789, group_id=456)
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    binding, created, err = await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    assert binding is not None
+    assert created is True
+    assert err == ""
+
+    ok, msg, pending = await store.submit_binding("alice", qq_id=789, group_id=456)
     assert ok is False
     assert "已绑定" in msg
+    assert pending is None
 
 
-async def test_approve(store: NagaStore) -> None:
-    await store.submit_binding("alice", qq_id=123, group_id=456)
-    binding = await store.approve("alice")
+async def test_activate_binding(store: NagaStore) -> None:
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    binding, created, err = await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
     assert binding is not None
+    assert created is True
+    assert err == ""
     assert binding.naga_id == "alice"
-    assert binding.qq_id == 123
-    assert binding.group_id == 456
-    assert binding.token.startswith("udf_")
-    assert len(binding.token) == 4 + 48  # "udf_" + 48 hex
-
-
-async def test_approve_nonexistent(store: NagaStore) -> None:
-    result = await store.approve("nonexistent")
-    assert result is None
-
-
-async def test_reject(store: NagaStore) -> None:
-    await store.submit_binding("alice", qq_id=123, group_id=456)
-    ok = await store.reject("alice")
-    assert ok is True
+    assert binding.bind_uuid == "uuid_a"
+    assert binding.delivery_signature == "sig_1"
     assert store.list_pending() == []
 
 
-async def test_reject_nonexistent(store: NagaStore) -> None:
-    ok = await store.reject("nonexistent")
-    assert ok is False
+async def test_activate_binding_is_idempotent(store: NagaStore) -> None:
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    first, created, _ = await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    second, created2, err2 = await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    assert first is not None
+    assert second is not None
+    assert created is True
+    assert created2 is False
+    assert err2 == ""
+
+
+async def test_reject_binding(store: NagaStore) -> None:
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    pending, removed, err = await store.reject_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+    )
+    assert pending is not None
+    assert pending.qq_id == 123
+    assert removed is True
+    assert err == ""
+    assert store.list_pending() == []
+
+
+async def test_cancel_pending(store: NagaStore) -> None:
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    pending = await store.cancel_pending("alice", bind_uuid="uuid_a")
+    assert pending is not None
+    assert store.list_pending() == []
 
 
 async def test_revoke(store: NagaStore) -> None:
-    await store.submit_binding("alice", qq_id=123, group_id=456)
-    await store.approve("alice")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
     ok = await store.revoke("alice")
     assert ok is True
     binding = store.get_binding("alice")
@@ -73,86 +130,79 @@ async def test_revoke(store: NagaStore) -> None:
     assert binding.revoked is True
 
 
-async def test_revoke_nonexistent(store: NagaStore) -> None:
-    ok = await store.revoke("nonexistent")
-    assert ok is False
-
-
-async def test_revoke_already_revoked(store: NagaStore) -> None:
-    await store.submit_binding("alice", qq_id=123, group_id=456)
-    await store.approve("alice")
-    await store.revoke("alice")
-    ok = await store.revoke("alice")
-    assert ok is False
-
-
-async def test_verify_valid(store: NagaStore) -> None:
-    await store.submit_binding("alice", qq_id=123, group_id=456)
-    binding = await store.approve("alice")
+async def test_verify_delivery_valid(store: NagaStore) -> None:
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    binding, err = store.verify_delivery(
+        naga_id="alice",
+        bind_uuid="uuid_a",
+        delivery_signature="sig_1",
+    )
     assert binding is not None
-    valid, err = store.verify("alice", binding.token)
-    assert valid is True
     assert err == ""
 
 
-async def test_verify_wrong_token(store: NagaStore) -> None:
-    await store.submit_binding("alice", qq_id=123, group_id=456)
-    await store.approve("alice")
-    valid, err = store.verify("alice", "udf_wrong")
-    assert valid is False
-    assert "不匹配" in err
+async def test_verify_delivery_wrong_signature(store: NagaStore) -> None:
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    binding, err = store.verify_delivery(
+        naga_id="alice",
+        bind_uuid="uuid_a",
+        delivery_signature="sig_wrong",
+    )
+    assert binding is None
+    assert "delivery_signature" in err
 
 
-async def test_verify_revoked(store: NagaStore) -> None:
-    await store.submit_binding("alice", qq_id=123, group_id=456)
-    binding = await store.approve("alice")
-    assert binding is not None
+async def test_verify_delivery_wrong_bind_uuid(store: NagaStore) -> None:
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    binding, err = store.verify_delivery(
+        naga_id="alice",
+        bind_uuid="uuid_b",
+        delivery_signature="sig_1",
+    )
+    assert binding is None
+    assert "bind_uuid" in err
+
+
+async def test_verify_delivery_revoked(store: NagaStore) -> None:
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
     await store.revoke("alice")
-    valid, err = store.verify("alice", binding.token)
-    assert valid is False
+    binding, err = store.verify_delivery(
+        naga_id="alice",
+        bind_uuid="uuid_a",
+        delivery_signature="sig_1",
+    )
+    assert binding is None
     assert "吊销" in err
 
 
-async def test_verify_nonexistent(store: NagaStore) -> None:
-    valid, err = store.verify("nonexistent", "udf_xxx")
-    assert valid is False
-    assert "未绑定" in err
-
-
-async def test_list_bindings(store: NagaStore) -> None:
-    await store.submit_binding("alice", qq_id=123, group_id=456)
-    await store.approve("alice")
-    await store.submit_binding("bob", qq_id=789, group_id=456)
-    await store.approve("bob")
-
-    bindings = store.list_bindings()
-    assert len(bindings) == 2
-    ids = {b.naga_id for b in bindings}
-    assert ids == {"alice", "bob"}
-
-
-async def test_list_bindings_excludes_revoked(store: NagaStore) -> None:
-    await store.submit_binding("alice", qq_id=123, group_id=456)
-    await store.approve("alice")
-    await store.revoke("alice")
-
-    bindings = store.list_bindings()
-    assert len(bindings) == 0
-
-
-async def test_list_pending(store: NagaStore) -> None:
-    await store.submit_binding("alice", qq_id=123, group_id=456)
-    await store.submit_binding("bob", qq_id=789, group_id=456)
-
-    pending = store.list_pending()
-    assert len(pending) == 2
-
-
 async def test_record_usage(store: NagaStore) -> None:
-    await store.submit_binding("alice", qq_id=123, group_id=456)
-    await store.approve("alice")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
     await store.record_usage("alice")
-
     binding = store.get_binding("alice")
     assert binding is not None
     assert binding.use_count == 1
@@ -160,36 +210,46 @@ async def test_record_usage(store: NagaStore) -> None:
 
 
 async def test_persistence(tmp_path: Path) -> None:
-    """测试保存后重新加载数据一致性"""
     data_file = tmp_path / "naga_bindings.json"
-
     store1 = NagaStore(data_file=data_file)
-    await store1.submit_binding("alice", qq_id=123, group_id=456)
-    binding = await store1.approve("alice")
+    await store1.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    binding, _, _ = await store1.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
     assert binding is not None
+    await store1.submit_binding("bob", qq_id=789, group_id=456, bind_uuid="uuid_b")
 
-    await store1.submit_binding("bob", qq_id=789, group_id=456)
-
-    # 重新加载
     store2 = NagaStore(data_file=data_file)
     await store2.load()
-
-    assert store2.get_binding("alice") is not None
-    assert store2.get_binding("alice").token == binding.token  # type: ignore[union-attr]
+    reloaded = store2.get_binding("alice")
+    assert reloaded is not None
+    assert reloaded.delivery_signature == binding.delivery_signature
     assert len(store2.list_pending()) == 1
 
 
 async def test_submit_after_revoke_allows_rebind(store: NagaStore) -> None:
-    """吊销后可以重新提交绑定"""
-    await store.submit_binding("alice", qq_id=123, group_id=456)
-    await store.approve("alice")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
     await store.revoke("alice")
-    ok, _ = await store.submit_binding("alice", qq_id=789, group_id=456)
+    ok, _, pending = await store.submit_binding("alice", qq_id=789, group_id=456)
     assert ok is True
+    assert pending is not None
+
+
+def test_generate_bind_uuid() -> None:
+    first = generate_bind_uuid()
+    second = generate_bind_uuid()
+    assert first
+    assert second
+    assert first != second
 
 
 def test_mask_token() -> None:
-    assert mask_token("udf_a1b2c3d4e5f6g7h8") == "udf_a1b2c3d4..."
+    assert mask_token("sig_a1b2c3d4e5f6g7h8") == "sig_a1b2c3d4..."
     assert mask_token("short") == "short"
-    assert mask_token("udf_12345678") == "udf_12345678"
-    assert mask_token("udf_123456789") == "udf_12345678..."

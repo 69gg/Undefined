@@ -243,6 +243,61 @@ responses_force_stateless_replay = false
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
 [models.security.request_params]
 
+# zh: Naga 外发消息审核模型配置（仅用于 Naga 通过 Runtime API 发消息前的内容审核）。
+# zh: 若无必要可不填写；未配置时回退到 [models.security]。
+# en: Naga outbound moderation model config (used only before Naga sends messages through the Runtime API).
+# en: Optional; falls back to [models.security] when omitted.
+[models.naga]
+# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
+# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
+api_url = ""
+# zh: Naga 审核模型 API Key。
+# en: Naga moderation model API key.
+api_key = ""
+# zh: Naga 审核模型名称。
+# en: Naga moderation model name.
+model_name = ""
+# zh: 可选限制：最大生成 tokens。
+# en: Optional limit: max generation tokens.
+max_tokens = 160
+# zh: 队列发车间隔（秒）。
+# en: Queue interval (seconds).
+queue_interval_seconds = 1.0
+# zh: API 模式：传统 chat.completions 或新版 responses。
+# en: API mode: classic chat.completions or the newer responses API.
+api_mode = "chat_completions"
+# zh: 是否启用 reasoning.effort。
+# en: Enable reasoning.effort.
+reasoning_enabled = false
+# zh: reasoning effort 档位。
+# en: reasoning effort level.
+reasoning_effort = "medium"
+# zh: 是否启用 thinking（思维链）。
+# en: Enable thinking (reasoning).
+thinking_enabled = false
+# zh: thinking 预算 tokens。
+# en: Thinking-budget tokens.
+thinking_budget_tokens = 0
+# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
+# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+thinking_include_budget = true
+# zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
+# en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
+reasoning_effort_style = "openai"
+# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
+# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+thinking_tool_call_compat = true
+# zh: Responses API 的 tool_choice 兼容模式。
+# en: Responses API tool_choice compatibility mode.
+responses_tool_choice_compat = false
+# zh: Responses API 续轮强制降级。
+# en: Responses API force stateless replay.
+responses_force_stateless_replay = false
+
+# zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
+# en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
+[models.naga.request_params]
+
 # zh: Agent 模型配置（用于执行 agents）。
 # en: Agent model config (used to run agents).
 [models.agent]
@@ -886,9 +941,9 @@ job_max_retries = 3
 # en: To get NagaAgent answering without external callbacks, only enable nagaagent_mode_enabled.
 # en: ⚠️ Advanced feature for NagaAgent integration. Not recommended for regular users.
 [naga]
-# zh: 是否启用外部网关集成（回调 API、/naga 命令、绑定管理）。
+# zh: 是否启用外部网关集成（/naga bind/unbind、远端绑定回调、消息发送、解绑 API）。
 # zh: 需同时开启 [features].nagaagent_mode_enabled 才生效。
-# en: Enable external gateway integration (callback API, /naga command, bindings).
+# en: Enable external gateway integration (/naga bind/unbind, bind callback, message send, unbind API).
 # en: Requires [features].nagaagent_mode_enabled = true to take effect.
 enabled = false
 # zh: Naga 服务器 API 地址。
@@ -897,6 +952,6 @@ api_url = ""
 # zh: 双方共享密钥（Undefined ↔ Naga 身份验证）。
 # en: Shared secret key for authentication between Undefined and Naga.
 api_key = ""
-# zh: Naga 服务群聊名单：绑定/回调群发仅限这些群。
-# en: Allowed groups for Naga binding and group callback delivery.
+# zh: Naga 白名单群：/naga 在这些群中才可见；绑定和群聊投递也仅限这些群。
+# en: Naga allowlisted groups: /naga is only visible here, and binding/group delivery are restricted to these groups.
 allowed_groups = []

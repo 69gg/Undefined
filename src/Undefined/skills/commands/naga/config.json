@@ -1,7 +1,7 @@
 {
   "name": "naga",
-  "description": "NagaAgent 联动命令",
-  "usage": "/naga <子命令> [参数]",
+  "description": "NagaAgent 绑定与解绑命令",
+  "usage": "/naga <bind|unbind> [参数]",
   "example": "/naga bind my-naga",
   "permission": "public",
   "allow_in_private": true,
