@@ -25,7 +25,10 @@ from Undefined.ai.transports import (
     API_MODE_RESPONSES,
     build_responses_request_body,
     get_api_mode,
+    get_effort_payload,
+    get_effort_style,
     get_reasoning_payload,
+    get_thinking_payload,
     normalize_responses_result,
 )
 from Undefined.ai.retrieval import RetrievalRequester
@@ -117,8 +120,10 @@ _CHAT_COMPLETIONS_RESERVED_FIELDS: frozenset[str] = (
             "tool_choice",
             "stream",
             "stream_options",
+            "thinking",
             "reasoning",
             "reasoning_effort",
+            "output_config",
         }
     )
     | _SDK_REQUEST_OPTION_FIELDS
@@ -139,6 +144,7 @@ _RESPONSES_RESERVED_FIELDS: frozenset[str] = (
             "thinking",
             "reasoning",
             "reasoning_effort",
+            "output_config",
         }
     )
     | _SDK_REQUEST_OPTION_FIELDS
@@ -1453,6 +1459,7 @@ def build_request_body(
         extra_kwargs.pop("thinking", None)
         extra_kwargs.pop("reasoning", None)
         extra_kwargs.pop("reasoning_effort", None)
+        extra_kwargs.pop("output_config", None)
         return build_responses_request_body(
             model_config,
             messages,
@@ -1481,17 +1488,22 @@ def build_request_body(
 
     extra_kwargs.pop("reasoning", None)
     extra_kwargs.pop("reasoning_effort", None)
+    extra_kwargs.pop("output_config", None)
 
-    if getattr(model_config, "thinking_enabled", False):
-        thinking_param: dict[str, Any] = {"type": "enabled"}
-        if getattr(model_config, "thinking_include_budget", True):
-            thinking_param["budget_tokens"] = getattr(
-                model_config, "thinking_budget_tokens", 0
-            )
-        body["thinking"] = thinking_param
+    thinking = get_thinking_payload(model_config)
+    if thinking is not None:
+        body["thinking"] = thinking
 
     if reasoning_payload is not None:
         body["reasoning"] = reasoning_payload
+
+    effort_payload = get_effort_payload(model_config)
+    if effort_payload is not None:
+        style = get_effort_style(model_config)
+        if style == "anthropic":
+            body["output_config"] = effort_payload
+        else:
+            body.setdefault("reasoning", {}).update(effort_payload)
 
     if tools:
         body["tools"] = tools

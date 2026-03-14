@@ -39,6 +39,43 @@ def get_reasoning_payload(model_config: Any) -> dict[str, Any] | None:
     }
 
 
+_VALID_THINKING_EFFORT_STYLES = {"openai", "anthropic"}
+
+
+def normalize_thinking_effort(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def get_thinking_payload(model_config: Any) -> dict[str, Any] | None:
+    """构建 thinking 请求参数。thinking_effort 非空时用 adaptive，否则回退 legacy budget。"""
+    effort = normalize_thinking_effort(getattr(model_config, "thinking_effort", ""))
+    if effort:
+        return {"type": "adaptive"}
+    if not bool(getattr(model_config, "thinking_enabled", False)):
+        return None
+    param: dict[str, Any] = {"type": "enabled"}
+    if bool(getattr(model_config, "thinking_include_budget", True)):
+        param["budget_tokens"] = int(getattr(model_config, "thinking_budget_tokens", 0))
+    return param
+
+
+def get_effort_payload(model_config: Any) -> dict[str, Any] | None:
+    """构建 effort 请求参数（仅在 thinking_effort 非空时生效）。"""
+    effort = normalize_thinking_effort(getattr(model_config, "thinking_effort", ""))
+    if not effort:
+        return None
+    return {"effort": effort}
+
+
+def get_effort_style(model_config: Any) -> str:
+    style = (
+        str(getattr(model_config, "thinking_effort_style", "openai") or "openai")
+        .strip()
+        .lower()
+    )
+    return style if style in _VALID_THINKING_EFFORT_STYLES else "openai"
+
+
 def _stringify_content(value: Any) -> str:
     if value is None:
         return ""
@@ -337,6 +374,16 @@ def build_responses_request_body(
     reasoning = get_reasoning_payload(model_config)
     if reasoning is not None:
         body["reasoning"] = reasoning
+    thinking = get_thinking_payload(model_config)
+    if thinking is not None:
+        body["thinking"] = thinking
+    effort_payload = get_effort_payload(model_config)
+    if effort_payload is not None:
+        style = get_effort_style(model_config)
+        if style == "anthropic":
+            body["output_config"] = effort_payload
+        else:
+            body.setdefault("reasoning", {}).update(effort_payload)
     if tools:
         normalized_tools = _normalize_responses_tools(tools, internal_to_api)
         normalized_tool_choice, selected_tool_name = _normalize_responses_tool_choice(
