@@ -650,12 +650,13 @@ model_name = "gpt-4o-mini"
 | `allowed_groups` | `[]` | Naga 服务群聊名单 | 绑定命令和回调群发仅限名单内的群 |
 
 **作用域规则**：
-- `/naga bind` 仅在 `allowed_groups` 内的群可用
+- 群聊场景下，所有 `/naga` 子命令仅在 `allowed_groups` 内的群可用
+- 私聊场景不受 `allowed_groups` 限制
 - 回调群发仅发到绑定时的群（该群须仍在 `allowed_groups` 内）
 - 回调私聊只需总开关开启，不受 `allowed_groups` 限制
-- `/api/v1/naga/*` 端点仅在 `enabled=true` 时注册
+- `/api/v1/naga/*` 端点仅在总开关开启时注册
 
-**数据存储**：绑定数据持久化在 `data/naga_bindings.json`，启动时自动 `chmod 600`。
+**数据存储**：绑定数据持久化在 `data/naga_bindings.json`，Unix 下自动 `chmod 600`。
 
 `naga.*` 变更需要重启进程才能生效。
 

@@ -242,12 +242,31 @@ def _registry_summary(registry: Any) -> dict[str, Any]:
 
 
 def _validate_callback_url(url: str) -> str | None:
-    """校验回调 URL，返回错误信息或 None 表示通过。"""
+    """校验回调 URL，返回错误信息或 None 表示通过。
+
+    拒绝非 HTTP(S) scheme，以及直接使用私有/回环 IP 字面量的 URL 以防止 SSRF。
+    域名形式的 URL 放行（DNS 解析阶段不适合在校验函数中做阻塞调用）。
+    """
+    import ipaddress
+
     parsed = urlsplit(url)
     scheme = (parsed.scheme or "").lower()
 
     if scheme not in ("http", "https"):
         return "callback.url must use http or https"
+
+    hostname = parsed.hostname or ""
+    if not hostname:
+        return "callback.url must include a hostname"
+
+    # 仅检查 IP 字面量（如 http://127.0.0.1/、http://[::1]/、http://10.0.0.1/）
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        pass  # 域名形式，放行
+    else:
+        if addr.is_private or addr.is_loopback or addr.is_link_local:
+            return "callback.url must not point to a private/loopback address"
 
     return None
 
@@ -479,6 +498,13 @@ class RuntimeAPIServer:
         )
 
     async def stop(self) -> None:
+        # 取消所有后台任务（如异步 tool invoke 回调）
+        for task in self._background_tasks:
+            task.cancel()
+        if self._background_tasks:
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+            self._background_tasks.clear()
+
         if self._runner is not None:
             await self._runner.cleanup()
             logger.info("[RuntimeAPI] 已停止")
@@ -1558,6 +1584,7 @@ class RuntimeAPIServer:
         # 5. 按 format 渲染内容
         send_content: str | None = None
         image_path: str | None = None
+        tmp_path: str | None = None
 
         if fmt == "text":
             send_content = content
@@ -1581,43 +1608,50 @@ class RuntimeAPIServer:
         sent_private = False
         sent_group = False
 
-        # 私聊发给绑定的 QQ 用户
         try:
-            if send_content is not None:
-                await sender.send_private_message(binding.qq_id, send_content)
-            elif image_path is not None:
-                cq_image = f"[CQ:image,file=file:///{image_path}]"
-                await sender.send_private_message(binding.qq_id, cq_image)
-            sent_private = True
-        except Exception as exc:
-            logger.warning(
-                "[NagaCallback] 私聊发送失败: naga_id=%s qq=%d error=%s",
-                naga_id,
-                binding.qq_id,
-                exc,
-            )
-
-        # 群聊发到绑定时的群（须仍在 allowed_groups 内）
-        if binding.group_id in cfg.naga.allowed_groups:
+            # 私聊发给绑定的 QQ 用户
             try:
                 if send_content is not None:
-                    await sender.send_group_message(binding.group_id, send_content)
+                    await sender.send_private_message(binding.qq_id, send_content)
                 elif image_path is not None:
                     cq_image = f"[CQ:image,file=file:///{image_path}]"
-                    await sender.send_group_message(binding.group_id, cq_image)
-                sent_group = True
+                    await sender.send_private_message(binding.qq_id, cq_image)
+                sent_private = True
             except Exception as exc:
                 logger.warning(
-                    "[NagaCallback] 群聊发送失败: naga_id=%s group=%d error=%s",
+                    "[NagaCallback] 私聊发送失败: naga_id=%s qq=%d error=%s",
                     naga_id,
-                    binding.group_id,
+                    binding.qq_id,
                     exc,
                 )
-        else:
-            logger.info(
-                "[NagaCallback] 群 %d 不在 allowed_groups 中，跳过群发",
-                binding.group_id,
-            )
+
+            # 群聊发到绑定时的群（须仍在 allowed_groups 内）
+            if binding.group_id in cfg.naga.allowed_groups:
+                try:
+                    if send_content is not None:
+                        await sender.send_group_message(binding.group_id, send_content)
+                    elif image_path is not None:
+                        cq_image = f"[CQ:image,file=file:///{image_path}]"
+                        await sender.send_group_message(binding.group_id, cq_image)
+                    sent_group = True
+                except Exception as exc:
+                    logger.warning(
+                        "[NagaCallback] 群聊发送失败: naga_id=%s group=%d error=%s",
+                        naga_id,
+                        binding.group_id,
+                        exc,
+                    )
+            else:
+                logger.info(
+                    "[NagaCallback] 群 %d 不在 allowed_groups 中，跳过群发",
+                    binding.group_id,
+                )
+        finally:
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
         # 7. record_usage
         await naga_store.record_usage(naga_id)

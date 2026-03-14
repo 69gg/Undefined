@@ -2472,7 +2472,7 @@ class Config:
 
         api_url = _coerce_str(section.get("api_url"), "")
         api_key = _coerce_str(section.get("api_key"), "")
-        allowed_groups = _coerce_int_list(section.get("allowed_groups"))
+        allowed_groups = frozenset(_coerce_int_list(section.get("allowed_groups")))
 
         return NagaConfig(
             api_url=api_url,

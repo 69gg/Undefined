@@ -174,7 +174,7 @@ class NagaConfig:
 
     api_url: str = ""
     api_key: str = ""
-    allowed_groups: list[int] = field(default_factory=list)
+    allowed_groups: frozenset[int] = field(default_factory=frozenset)
 
 
 @dataclass

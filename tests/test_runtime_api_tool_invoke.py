@@ -134,8 +134,6 @@ def _make_request(
 def test_callback_url_allows_http() -> None:
     assert _validate_callback_url("http://example.com/hook") is None
     assert _validate_callback_url("http://localhost:8000/hook") is None
-    assert _validate_callback_url("http://127.0.0.1:9000/hook") is None
-    assert _validate_callback_url("http://192.168.1.1/hook") is None
 
 
 def test_callback_url_allows_https() -> None:
@@ -146,6 +144,13 @@ def test_callback_url_rejects_bad_scheme() -> None:
     err = _validate_callback_url("ftp://example.com/file")
     assert err is not None
     assert "http" in err
+
+
+def test_callback_url_rejects_private_ip() -> None:
+    assert _validate_callback_url("http://127.0.0.1:9000/hook") is not None
+    assert _validate_callback_url("http://192.168.1.1/hook") is not None
+    assert _validate_callback_url("http://10.0.0.1/hook") is not None
+    assert _validate_callback_url("http://[::1]/hook") is not None
 
 
 # ---------------------------------------------------------------------------
