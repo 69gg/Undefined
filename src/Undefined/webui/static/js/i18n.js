@@ -79,6 +79,9 @@ const I18N = {
         "config.syncing": "同步模板中...",
         "config.sync_success": "模板同步完成",
         "config.sync_error": "模板同步失败",
+        "config.prune_confirm": "以下配置项不存在于模板中，是否删除？",
+        "config.prune_confirm_action": "点击「确定」将永久删除以上配置项。",
+        "config.prune_success": "已清理多余配置项",
         "config.search_placeholder": "搜索配置...",
         "config.clear_search": "清除搜索",
         "config.expand_all": "全部展开",
@@ -307,6 +310,11 @@ const I18N = {
         "config.syncing": "Syncing template...",
         "config.sync_success": "Template sync completed",
         "config.sync_error": "Template sync failed",
+        "config.prune_confirm":
+            "The following config keys do not exist in the template. Delete them?",
+        "config.prune_confirm_action":
+            "Click OK to permanently remove the listed keys.",
+        "config.prune_success": "Removed obsolete config keys",
         "config.search_placeholder": "Search config...",
         "config.clear_search": "Clear search",
         "config.expand_all": "Expand all",

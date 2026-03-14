@@ -1091,6 +1091,40 @@ async function syncConfigTemplate(button) {
             ? ` (+${data.added_count})`
             : "";
         showToast(`${t("config.sync_success")}${suffix}`, "info", 4000);
+
+        if (
+            Array.isArray(data.removed_paths) &&
+            data.removed_paths.length > 0
+        ) {
+            const listing = data.removed_paths
+                .map((p) => `  - ${p}`)
+                .join("\n");
+            if (
+                confirm(
+                    `${t("config.prune_confirm")}\n\n${listing}\n\n${t("config.prune_confirm_action")}`,
+                )
+            ) {
+                const pruneRes = await api(
+                    "/api/config/sync-template?prune=true",
+                    { method: "POST" },
+                );
+                const pruneData = await pruneRes.json();
+                if (pruneData.success) {
+                    await loadConfig();
+                    showToast(
+                        `${t("config.prune_success")} (-${data.removed_paths.length})`,
+                        "info",
+                        4000,
+                    );
+                } else {
+                    showToast(
+                        `${t("common.error")}: ${pruneData.error || t("config.sync_error")}`,
+                        "error",
+                        5000,
+                    );
+                }
+            }
+        }
     } catch (e) {
         showSaveStatus("error", t("config.sync_error"));
         showToast(`${t("common.error")}: ${e.message}`, "error", 5000);

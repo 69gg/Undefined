@@ -151,8 +151,9 @@ async def config_patch_handler(request: web.Request) -> Response:
 async def sync_config_template_handler(request: web.Request) -> Response:
     if not check_auth(request):
         return web.json_response({"error": "Unauthorized"}, status=401)
+    prune = request.query.get("prune") == "true"
     try:
-        result = sync_config_file()
+        result = sync_config_file(prune=prune)
         get_config_manager().reload()
         validation_ok, validation_msg = validate_required_config()
         return web.json_response(
@@ -161,6 +162,8 @@ async def sync_config_template_handler(request: web.Request) -> Response:
                 "message": "Synced",
                 "added_paths": result.added_paths,
                 "added_count": len(result.added_paths),
+                "removed_paths": result.removed_paths,
+                "removed_count": len(result.removed_paths),
                 "warning": None if validation_ok else validation_msg,
             }
         )

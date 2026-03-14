@@ -17,6 +17,7 @@ from .toml_render import TomlData, merge_defaults, render_toml
 class ConfigTemplateSyncResult:
     content: str
     added_paths: list[str]
+    removed_paths: list[str]
     comments: CommentMap
 
 
@@ -62,6 +63,65 @@ def _collect_added_paths(
                     )
                 )
     return added
+
+
+def _collect_removed_paths(
+    defaults: TomlData, current: TomlData, prefix: str = ""
+) -> list[str]:
+    """收集存在于 current 但不在 defaults 中的路径（与 _collect_added_paths 互逆）。"""
+    removed: list[str] = []
+    for key, current_value in current.items():
+        path = f"{prefix}.{key}" if prefix else key
+        if key not in defaults:
+            removed.append(path)
+            continue
+        default_value = defaults[key]
+        if isinstance(current_value, dict) and isinstance(default_value, dict):
+            removed.extend(_collect_removed_paths(default_value, current_value, path))
+        elif _is_array_of_tables(current_value) and _is_array_of_tables(default_value):
+            if not default_value:
+                continue
+            template_item = default_value[0]
+            for index, current_item in enumerate(current_value):
+                default_item = (
+                    default_value[index]
+                    if index < len(default_value)
+                    else template_item
+                )
+                removed.extend(
+                    _collect_removed_paths(
+                        default_item,
+                        current_item,
+                        f"{path}[{index}]",
+                    )
+                )
+    return removed
+
+
+def _prune_to_template(data: TomlData, template: TomlData) -> TomlData:
+    """递归移除 data 中不存在于 template 的键。"""
+    pruned: TomlData = {}
+    for key, value in data.items():
+        if key not in template:
+            continue
+        template_value = template[key]
+        if isinstance(value, dict) and isinstance(template_value, dict):
+            pruned[key] = _prune_to_template(value, template_value)
+        elif _is_array_of_tables(value) and _is_array_of_tables(template_value):
+            if not template_value:
+                pruned[key] = list(value)
+            else:
+                tpl_item = template_value[0]
+                pruned[key] = [
+                    _prune_to_template(
+                        item,
+                        template_value[idx] if idx < len(template_value) else tpl_item,
+                    )
+                    for idx, item in enumerate(value)
+                ]
+        else:
+            pruned[key] = value
+    return pruned
 
 
 def _is_array_of_tables(value: Any) -> bool:
@@ -163,12 +223,20 @@ def _merge_comment_maps(current: CommentMap, example: CommentMap) -> CommentMap:
     return merged
 
 
-def sync_config_text(current_text: str, example_text: str) -> ConfigTemplateSyncResult:
+def sync_config_text(
+    current_text: str,
+    example_text: str,
+    *,
+    prune: bool = False,
+) -> ConfigTemplateSyncResult:
     current_data = _parse_toml_text(current_text, label="current config")
     example_data = _parse_toml_text(example_text, label="config example")
     prepared_example_data = _prepare_pool_model_templates(example_data, current_data)
     added_paths = _collect_added_paths(prepared_example_data, current_data)
+    removed_paths = _collect_removed_paths(prepared_example_data, current_data)
     merged = merge_defaults(prepared_example_data, current_data)
+    if prune and removed_paths:
+        merged = _prune_to_template(merged, prepared_example_data)
     example_comments = parse_comment_map_text(example_text)
     comments = _merge_comment_maps(
         parse_comment_map_text(current_text),
@@ -178,6 +246,7 @@ def sync_config_text(current_text: str, example_text: str) -> ConfigTemplateSync
     return ConfigTemplateSyncResult(
         content=content,
         added_paths=added_paths,
+        removed_paths=removed_paths,
         comments=comments,
     )
 
@@ -187,6 +256,7 @@ def sync_config_file(
     example_path: Path = CONFIG_EXAMPLE_PATH,
     *,
     write: bool = True,
+    prune: bool = False,
 ) -> ConfigTemplateSyncResult:
     resolved_example = _resolve_config_example_path(example_path)
     if resolved_example is None or not resolved_example.exists():
@@ -196,7 +266,7 @@ def sync_config_file(
         config_path.read_text(encoding="utf-8") if config_path.exists() else ""
     )
     example_text = resolved_example.read_text(encoding="utf-8")
-    result = sync_config_text(current_text, example_text)
+    result = sync_config_text(current_text, example_text, prune=prune)
     if write:
         config_path.write_text(result.content, encoding="utf-8")
     return result
