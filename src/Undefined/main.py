@@ -397,9 +397,9 @@ async def main() -> None:
     )
 
     if config.api.enabled:
-        # Naga 集成（总开关为 features.nagaagent_mode_enabled）
+        # Naga 外部网关集成（需同时开启 nagaagent_mode_enabled 和 naga.enabled）
         naga_store = None
-        if config.nagaagent_mode_enabled:
+        if config.nagaagent_mode_enabled and config.naga.enabled:
             from Undefined.api.naga_store import NagaStore
 
             naga_store = NagaStore()

@@ -89,8 +89,8 @@ async def _notify_user(context: CommandContext, user_id: int, text: str) -> None
 
 async def execute(args: list[str], context: CommandContext) -> None:
     """处理 /naga 命令"""
-    # 前置检查: naga 是否启用（总开关为 features.nagaagent_mode_enabled）
-    if not context.config.nagaagent_mode_enabled:
+    # 前置检查: 需同时开启 nagaagent_mode_enabled（总开关）和 naga.enabled（网关子开关）
+    if not context.config.nagaagent_mode_enabled or not context.config.naga.enabled:
         await _reply(context, "Naga 集成未启用")
         return
 

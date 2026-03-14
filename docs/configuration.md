@@ -635,16 +635,26 @@ model_name = "gpt-4o-mini"
 
 ---
 
-### 4.25 `[naga]` Naga 集成
+### 4.25 `[naga]` Naga 外部网关集成
 
 > **⚠️ 此功能面向与 NagaAgent 对接的高级场景，普通用户不建议开启。**
 
 启用后允许 NagaAgent 通过绑定审批机制向 QQ 群/用户发送回调消息。鉴权采用双层模型：共享密钥 `api_key` 验证服务器身份 + 每个绑定独立的 scoped token 验证调用权限。
 
-**总开关**：`[features].nagaagent_mode_enabled = true`。Naga 集成所有功能（`/naga` 命令、回调端点、绑定存储）均受此总开关控制。
+**开关分层**：
+
+| 开关 | 控制范围 | 默认值 |
+|------|---------|--------|
+| `[features].nagaagent_mode_enabled` | 总开关：AI 侧行为（提示词切换、工具暴露） | `false` |
+| `[naga].enabled` | 子开关：外部网关集成（回调 API、`/naga` 命令、绑定管理） | `false` |
+
+- 仅当两者均为 `true` 时，外部网关集成生效（API 端点注册、`/naga` 命令可用）
+- 若只需 NagaAgent 解答能力而不需要外部回调联动，可只开启 `nagaagent_mode_enabled`
+- `nagaagent_mode_enabled = false` 时强制关闭所有 Naga 功能，无论 `naga.enabled` 值
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
+| `enabled` | `false` | 是否启用外部网关集成 | 需同时开启 `nagaagent_mode_enabled` |
 | `api_url` | `""` | Naga 服务器 API 地址 | 为空时 token 同步/删除操作跳过 |
 | `api_key` | `""` | Undefined ↔ Naga 共享密钥 | 回调端点通过 `Authorization: Bearer` 校验 |
 | `allowed_groups` | `[]` | Naga 服务群聊名单 | 绑定命令和回调群发仅限名单内的群 |
@@ -653,8 +663,8 @@ model_name = "gpt-4o-mini"
 - 群聊场景下，所有 `/naga` 子命令仅在 `allowed_groups` 内的群可用
 - 私聊场景不受 `allowed_groups` 限制
 - 回调群发仅发到绑定时的群（该群须仍在 `allowed_groups` 内）
-- 回调私聊只需总开关开启，不受 `allowed_groups` 限制
-- `/api/v1/naga/*` 端点仅在总开关开启时注册
+- 回调私聊只需开关开启，不受 `allowed_groups` 限制
+- `/api/v1/naga/*` 端点仅在两个开关均开启时注册
 
 **数据存储**：绑定数据持久化在 `data/naga_bindings.json`，Unix 下自动 `chmod 600`。
 
@@ -682,7 +692,7 @@ model_name = "gpt-4o-mini"
 - `webui.port`
 - `webui.password`
 - `api.*`（`enabled/host/port/auth_key/openapi_enabled`）
-- `naga.*`（`api_url/api_key/allowed_groups`）
+- `naga.*`（`enabled/api_url/api_key/allowed_groups`）
 
 ### 5.3 明确“会执行热应用”的字段
 - 模型发车间隔 / 模型名 / 模型池变更（队列间隔刷新）

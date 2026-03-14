@@ -524,10 +524,12 @@ class RuntimeAPIServer:
                 _apply_cors_headers(request, response)
                 return response
             if request.path.startswith("/api/"):
-                # Naga 端点使用独立鉴权，仅在 naga 模式启用时跳过主 auth
+                # Naga 端点使用独立鉴权，仅在总开关+子开关均启用时跳过主 auth
                 cfg = self._context.config_getter()
                 is_naga_path = request.path.startswith("/api/v1/naga/")
-                skip_auth = is_naga_path and cfg.nagaagent_mode_enabled
+                skip_auth = (
+                    is_naga_path and cfg.nagaagent_mode_enabled and cfg.naga.enabled
+                )
                 if not skip_auth:
                     expected = str(cfg.api.auth_key or "")
                     provided = request.headers.get(_AUTH_HEADER, "")
@@ -563,9 +565,13 @@ class RuntimeAPIServer:
                 web.post("/api/v1/tools/invoke", self._tools_invoke_handler),
             ]
         )
-        # Naga 端点仅在启用时注册（总开关为 features.nagaagent_mode_enabled）
+        # Naga 端点仅在总开关+子开关均启用时注册
         cfg = self._context.config_getter()
-        if cfg.nagaagent_mode_enabled and self._context.naga_store is not None:
+        if (
+            cfg.nagaagent_mode_enabled
+            and cfg.naga.enabled
+            and self._context.naga_store is not None
+        ):
             app.add_routes(
                 [
                     web.post("/api/v1/naga/callback", self._naga_callback_handler),

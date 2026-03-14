@@ -2470,11 +2470,13 @@ class Config:
         section_raw = data.get("naga", {})
         section = section_raw if isinstance(section_raw, dict) else {}
 
+        enabled = _coerce_bool(section.get("enabled"), False)
         api_url = _coerce_str(section.get("api_url"), "")
         api_key = _coerce_str(section.get("api_key"), "")
         allowed_groups = frozenset(_coerce_int_list(section.get("allowed_groups")))
 
         return NagaConfig(
+            enabled=enabled,
             api_url=api_url,
             api_key=api_key,
             allowed_groups=allowed_groups,

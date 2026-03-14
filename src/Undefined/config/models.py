@@ -168,10 +168,16 @@ class NagaConfig:
     """Naga 集成配置
 
     面向与 NagaAgent 对接的高级场景，普通用户不建议开启。
-    启用后允许 NagaAgent 通过绑定审批机制向 QQ 群/用户发送回调消息。
-    总开关为 features.nagaagent_mode_enabled。
+
+    开关分层：
+    - ``features.nagaagent_mode_enabled`` — 控制 AI 侧行为（提示词切换、工具暴露）
+    - ``naga.enabled`` — 控制外部网关集成（回调 API、/naga 命令、绑定管理）
+
+    两者均默认 False。可单独开启 ``nagaagent_mode_enabled`` 获得 NagaAgent 解答能力，
+    无需启用外部回调联动。
     """
 
+    enabled: bool = False
     api_url: str = ""
     api_key: str = ""
     allowed_groups: frozenset[int] = field(default_factory=frozenset)

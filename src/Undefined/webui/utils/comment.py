@@ -20,9 +20,9 @@ def _normalize_comment_buffer(buffer: list[str]) -> dict[str, str]:
             parts.setdefault("en", []).append(item[3:].strip())
         else:
             parts.setdefault("default", []).append(item)
-    default = " ".join(parts.get("default", [])).strip()
-    zh_value = " ".join(parts.get("zh", [])).strip()
-    en_value = " ".join(parts.get("en", [])).strip()
+    default = "\n".join(parts.get("default", [])).strip()
+    zh_value = "\n".join(parts.get("zh", [])).strip()
+    en_value = "\n".join(parts.get("en", [])).strip()
     result: dict[str, str] = {}
     if zh_value:
         result["zh"] = zh_value

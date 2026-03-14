@@ -856,13 +856,26 @@ failed_cleanup_interval = 100
 # en: Max auto-retries per job before moving to failed (0=no retry).
 job_max_retries = 3
 
-# zh: Naga 集成配置。总开关为 [features].nagaagent_mode_enabled，
-# zh: 启用后允许 NagaAgent 通过绑定审批机制向 QQ 群/用户发送回调消息。
+# zh: Naga 外部网关集成配置。
+# zh: 开关分层：
+# zh:   - [features].nagaagent_mode_enabled — 总开关，控制 AI 侧行为（提示词切换、工具暴露）
+# zh:   - [naga].enabled — 子开关，控制外部网关集成（回调 API、/naga 命令、绑定管理）
+# zh: 仅当两者均为 true 时，外部网关集成才生效。
+# zh: 若只需 NagaAgent 解答能力而不需要外部回调联动，可只开启 nagaagent_mode_enabled。
 # zh: ⚠️ 此功能面向与 NagaAgent 对接的高级场景，普通用户不建议开启。
-# en: Naga integration settings. Master switch is [features].nagaagent_mode_enabled.
-# en: When enabled, NagaAgent can send callback messages to QQ groups/users through a binding approval mechanism.
-# en: ⚠️ This feature is for advanced NagaAgent integration scenarios. Not recommended for regular users.
+# en: Naga external gateway integration settings.
+# en: Switch hierarchy:
+# en:   - [features].nagaagent_mode_enabled — master switch for AI behavior (prompt, tool exposure)
+# en:   - [naga].enabled — sub-switch for external gateway (callback API, /naga command, bindings)
+# en: Both must be true for external gateway integration to work.
+# en: To get NagaAgent answering without external callbacks, only enable nagaagent_mode_enabled.
+# en: ⚠️ Advanced feature for NagaAgent integration. Not recommended for regular users.
 [naga]
+# zh: 是否启用外部网关集成（回调 API、/naga 命令、绑定管理）。
+# zh: 需同时开启 [features].nagaagent_mode_enabled 才生效。
+# en: Enable external gateway integration (callback API, /naga command, bindings).
+# en: Requires [features].nagaagent_mode_enabled = true to take effect.
+enabled = false
 # zh: Naga 服务器 API 地址。
 # en: Naga server API URL.
 api_url = ""

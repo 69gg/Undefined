@@ -151,6 +151,22 @@ name = "child-b"
         assert "# en: Bot QQ number." in rendered
         assert "bot_qq = 1" in rendered
 
+    def test_multiline_comments_preserved(self) -> None:
+        """多行 zh/en 注释应保留为多行而非压成一行"""
+        src = (
+            "# zh: 第一行\n"
+            "# zh: 第二行\n"
+            "# en: Line one\n"
+            "# en: Line two\n"
+            "enabled = false\n"
+        )
+        comments = parse_comment_map_text(src)
+        rendered = render_toml({"enabled": False}, comments=comments)
+        assert "# zh: 第一行" in rendered
+        assert "# zh: 第二行" in rendered
+        assert "# en: Line one" in rendered
+        assert "# en: Line two" in rendered
+
     def test_multiline_string_roundtrip(self) -> None:
         """多行字符串应被渲染成合法 TOML，并可完整往返"""
         original = "第一行\n第二行\n第三行"
