@@ -19,7 +19,7 @@
       </p>
     </td>
     <td width="30%">
-      <img src="https://raw.githubusercontent.com/69gg/Undefined/main/img/head.jpg" width="100%" alt="Undefined" />
+      <img src="https://raw.githubusercontent.com/69gg/Undefined/main/img/head.png" width="100%" alt="Undefined" />
     </td>
   </tr>
 </table>
@@ -31,8 +31,6 @@
 ## ⚡ 立即体验
 
 [点击添加官方实例QQ](https://qm.qq.com/q/cvjJoNysGA)
-
-> **推荐上手方式**：优先运行 `uv run Undefined-webui`。它会先拉起管理控制台，你可以在浏览器里直接补配置、校验配置、查看日志、启动 Bot；后续也可以用桌面端或 Android App 连接这同一个管理入口，实现远程管理。
 
 ## ⚡ 核心特性
 
