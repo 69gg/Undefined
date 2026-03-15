@@ -13,7 +13,7 @@ from Undefined.skills.commands.help.handler import execute as help_execute
 from Undefined.skills.commands.naga import handler as naga_handler
 
 
-_COMMANDS_DIR = Path("/data0/Undefined/src/Undefined/skills/commands")
+_COMMANDS_DIR = Path(__file__).resolve().parents[1] / "src/Undefined/skills/commands"
 
 
 class _DummySender:
