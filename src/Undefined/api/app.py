@@ -1678,7 +1678,7 @@ class RuntimeAPIServer:
                 bind_uuid,
                 err,
             )
-            return _json_error(err, status=404)
+            return _json_error(err, status=_naga_callback_error_status(err))
         if removed and pending is not None and sender is not None:
             try:
                 detail = f"\n原因: {reason}" if reason else ""
@@ -2017,9 +2017,6 @@ class RuntimeAPIServer:
             if err == "delivery_signature 不匹配":
                 status = 403
             return _json_error(err or "binding not found", status=status)
-        if err:
-            status = 403 if err == "delivery_signature 不匹配" else 409
-            return _json_error(err, status=status)
         return web.json_response(
             {
                 "ok": True,

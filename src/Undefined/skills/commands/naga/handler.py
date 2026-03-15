@@ -133,12 +133,6 @@ async def _build_request_context(
 
 
 async def execute(args: list[str], context: CommandContext) -> None:
-    if (
-        context.scope == "group"
-        and context.group_id not in context.config.naga.allowed_groups
-    ):
-        return
-
     if not is_naga_command_visible(context):
         return
 

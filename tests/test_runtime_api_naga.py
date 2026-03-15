@@ -167,6 +167,37 @@ async def test_naga_bind_callback_reject_is_idempotent(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_naga_bind_callback_reject_returns_409_after_approval(
+    tmp_path: Path,
+) -> None:
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    sender = _FakeSender()
+    server = _make_server(store=store, sender=sender)
+
+    response = await server._naga_bind_callback_handler(
+        _make_request(
+            json_body={
+                "bind_uuid": "uuid_a",
+                "naga_id": "alice",
+                "status": "rejected",
+                "reason": "late reject",
+            },
+            headers={"Authorization": "Bearer shared-key"},
+        )
+    )
+
+    payload = _json(response)
+    assert response.status == 409
+    assert "already approved" in payload["error"]
+
+
+@pytest.mark.asyncio
 async def test_naga_bind_callback_approved_returns_404_when_pending_missing(
     tmp_path: Path,
 ) -> None:

@@ -11,6 +11,7 @@
 ## 可见性与作用域
 
 - `/naga` 只会在 `naga.allowed_groups` 白名单群中出现和生效
+- 同时要求 `[api].enabled = true`，否则命令会整体隐藏
 - 在非白名单群中，`/naga` 对用户是静默不可见的
 - `/naga bind` 仅限白名单群聊
 - `/naga unbind` 仅限超级管理员，可在私聊或白名单群中使用
@@ -29,6 +30,7 @@
 2. 请求会被发送到 Naga 端进行远端验证
 3. 等待 Naga 端通过 Runtime API 回调确认
 4. 回调成功后，Undefined 才会真正激活绑定并保存 `delivery_signature`
+5. 如果远端暂时不可达，本地 pending 会保留；再次执行同一个 `/naga bind` 会沿用原来的 `bind_uuid` 继续重试
 
 这意味着 `/naga bind` 的成功提示只代表“请求已提交到 Naga 端”，不代表绑定已经最终生效。
 

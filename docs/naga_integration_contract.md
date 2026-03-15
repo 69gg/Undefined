@@ -12,6 +12,7 @@ Authorization: Bearer <config.[naga].api_key>
 
 - `api_key` 是双方线下约定的共享密钥。
 - Undefined 侧所有 Naga 相关接口都直接挂在 Runtime API 下。
+- 这些端点只有在 `[api].enabled`、`[features].nagaagent_mode_enabled`、`[naga].enabled` 同时为 `true` 时才会注册。
 
 ## Undefined Provides
 
@@ -97,6 +98,7 @@ Authorization: Bearer <config.[naga].api_key>
 - 若 `mode` 包含 `group`，绑定群必须仍在 `config.[naga].allowed_groups`
 - `markdown/html` 会按当前 Runtime API 的渲染逻辑先尝试转图片
 - 若渲染失败，会回退为文本发送，并在响应中标记 `render_fallback=true`
+- 当 `mode=both` 时，只要私聊或群聊至少有一个发送成功，接口仍返回 `200`；由 `sent_private` / `sent_group` 表示实际投递结果
 
 审核规则：
 
@@ -223,9 +225,17 @@ Undefined 在本地 `/naga unbind` 成功后，会 best-effort 调用：
 ## Error Handling
 
 - `401 Unauthorized`: `Authorization` 缺失或 `api_key` 错误
-- `403`: 签名不匹配、目标不匹配、群不在白名单、审核拦截
-- `404`: 绑定或 pending 不存在
-- `409`: 状态冲突，例如重复激活一个不同签名的已存在绑定
+- `POST /api/v1/naga/bind/callback`
+  - `403`: `bind_uuid` / `delivery_signature` 不匹配
+  - `404`: `pending` 不存在
+  - `409`: 状态冲突，例如重复激活不同签名、请求已被其他结果终结
+- `POST /api/v1/naga/messages/send`
+  - `403`: 绑定不存在或已吊销、签名不匹配、目标不匹配、群不在白名单、审核拦截
+  - `502`: 所有目标投递失败
+- `POST /api/v1/naga/unbind`
+  - `403`: `delivery_signature` 不匹配
+  - `404`: 绑定不存在
+  - `409`: 绑定代际不一致或其它状态冲突
 - `502`: 目标投递失败
 
 ## Lifecycle Summary
