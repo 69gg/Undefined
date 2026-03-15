@@ -364,9 +364,8 @@ class NagaStore:
     ) -> tuple[bool, str, PendingBinding | None]:
         async with self._lock:
             now = time.time()
-            dirty = self._expire_pending_locked(
-                now
-            ) or self._prune_terminal_records_locked(now)
+            dirty = self._expire_pending_locked(now)
+            dirty = self._prune_terminal_records_locked(now) or dirty
 
             active = self._bindings.get(naga_id)
             if active is not None and not active.revoked:
@@ -427,9 +426,8 @@ class NagaStore:
     ) -> tuple[NagaBinding | None, bool, str]:
         async with self._lock:
             now = time.time()
-            dirty = self._expire_pending_locked(
-                now
-            ) or self._prune_terminal_records_locked(now)
+            dirty = self._expire_pending_locked(now)
+            dirty = self._prune_terminal_records_locked(now) or dirty
 
             binding = self._bindings.get(naga_id)
             if binding is not None and binding.bind_uuid == bind_uuid:
@@ -515,9 +513,8 @@ class NagaStore:
     ) -> tuple[PendingBinding | None, bool, str]:
         async with self._lock:
             now = time.time()
-            dirty = self._expire_pending_locked(
-                now
-            ) or self._prune_terminal_records_locked(now)
+            dirty = self._expire_pending_locked(now)
+            dirty = self._prune_terminal_records_locked(now) or dirty
 
             pending = self._pending.get(naga_id)
             if pending is not None and pending.bind_uuid == bind_uuid:
@@ -595,9 +592,8 @@ class NagaStore:
     ) -> tuple[NagaBinding | None, bool, str]:
         async with self._delivery_condition:
             now = time.time()
-            dirty = self._expire_pending_locked(
-                now
-            ) or self._prune_terminal_records_locked(now)
+            dirty = self._expire_pending_locked(now)
+            dirty = self._prune_terminal_records_locked(now) or dirty
 
             def _historical_match() -> NagaBinding | None:
                 if not expected_bind_uuid:

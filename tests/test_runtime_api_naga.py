@@ -204,6 +204,49 @@ async def test_naga_messages_send_rejects_target_mismatch(tmp_path: Path) -> Non
     assert response.status == 403
     payload = _json(response)
     assert "target does not match" in payload["error"]
+    assert store._active_deliveries == {}
+
+
+@pytest.mark.asyncio
+async def test_naga_messages_send_releases_delivery_when_group_not_allowed(
+    tmp_path: Path,
+) -> None:
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    sender = _FakeSender()
+    server = _make_server(
+        store=store,
+        sender=sender,
+        security_result=NagaModerationResult(
+            blocked=False,
+            status="passed",
+            categories=[],
+            message="ok",
+            model_name="naga-moderation",
+        ),
+    )
+    server._ctx.config_getter().naga.allowed_groups = set()
+
+    response = await server._naga_messages_send_handler(
+        _make_request(
+            json_body={
+                "bind_uuid": "uuid_a",
+                "naga_id": "alice",
+                "delivery_signature": "sig_1",
+                "target": {"qq_id": 123, "group_id": 456, "mode": "group"},
+                "message": {"format": "text", "content": "hello"},
+            },
+            headers={"Authorization": "Bearer shared-key"},
+        )
+    )
+
+    assert response.status == 403
+    assert store._active_deliveries == {}
 
 
 @pytest.mark.asyncio

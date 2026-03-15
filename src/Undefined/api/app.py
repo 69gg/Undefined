@@ -1764,21 +1764,23 @@ class RuntimeAPIServer:
                 mask_token(delivery_signature),
             )
             return _json_error(err_msg, status=403)
-        if target_qq != binding.qq_id or target_group != binding.group_id:
-            return _json_error("target does not match bound qq/group", status=403)
-
-        cfg = self._ctx.config_getter()
-        if (
-            mode in {"group", "both"}
-            and binding.group_id not in cfg.naga.allowed_groups
-        ):
-            return _json_error("bound group is not in naga.allowed_groups", status=403)
-
-        sender = self._ctx.sender
-        if sender is None:
-            await naga_store.release_delivery(bind_uuid=bind_uuid)
-            return _json_error("sender not available", status=503)
         try:
+            if target_qq != binding.qq_id or target_group != binding.group_id:
+                return _json_error("target does not match bound qq/group", status=403)
+
+            cfg = self._ctx.config_getter()
+            if (
+                mode in {"group", "both"}
+                and binding.group_id not in cfg.naga.allowed_groups
+            ):
+                return _json_error(
+                    "bound group is not in naga.allowed_groups", status=403
+                )
+
+            sender = self._ctx.sender
+            if sender is None:
+                return _json_error("sender not available", status=503)
+
             moderation = None
             security = getattr(self._ctx.command_dispatcher, "security", None)
             if security is None or not hasattr(security, "moderate_naga_message"):

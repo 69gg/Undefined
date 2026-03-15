@@ -6,7 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from Undefined.api.naga_store import NagaStore, generate_bind_uuid, mask_token
+from Undefined.api.naga_store import (
+    CompletedBindRequest,
+    HistoricalBinding,
+    NagaStore,
+    PendingBinding,
+    generate_bind_uuid,
+    mask_token,
+)
 
 
 @pytest.fixture
@@ -328,6 +335,42 @@ async def test_submit_after_revoke_allows_rebind(store: NagaStore) -> None:
     ok, _, pending = await store.submit_binding("alice", qq_id=789, group_id=456)
     assert ok is True
     assert pending is not None
+
+
+async def test_submit_binding_also_prunes_terminal_records(store: NagaStore) -> None:
+    store._pending["expired"] = PendingBinding(
+        naga_id="expired",
+        bind_uuid="uuid_expired",
+        qq_id=1,
+        group_id=2,
+        requested_at=0,
+    )
+    store._completed_requests["uuid_done"] = CompletedBindRequest(
+        naga_id="done",
+        bind_uuid="uuid_done",
+        qq_id=3,
+        group_id=4,
+        status="rejected",
+        resolved_at=0,
+    )
+    store._history["uuid_old"] = HistoricalBinding(
+        naga_id="old",
+        bind_uuid="uuid_old",
+        delivery_signature="sig_old",
+        qq_id=5,
+        group_id=6,
+        created_at=0,
+        revoked=True,
+        revoked_at=0,
+    )
+
+    ok, _, pending = await store.submit_binding("alice", qq_id=123, group_id=456)
+
+    assert ok is True
+    assert pending is not None
+    assert "expired" not in store._pending
+    assert "uuid_done" not in store._completed_requests
+    assert "uuid_old" not in store._history
 
 
 def test_generate_bind_uuid() -> None:
