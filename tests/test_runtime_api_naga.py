@@ -167,6 +167,62 @@ async def test_naga_bind_callback_reject_is_idempotent(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_naga_bind_callback_approved_returns_404_when_pending_missing(
+    tmp_path: Path,
+) -> None:
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    sender = _FakeSender()
+    server = _make_server(store=store, sender=sender)
+
+    response = await server._naga_bind_callback_handler(
+        _make_request(
+            json_body={
+                "bind_uuid": "uuid_a",
+                "naga_id": "alice",
+                "status": "approved",
+                "delivery_signature": "sig_1",
+            },
+            headers={"Authorization": "Bearer shared-key"},
+        )
+    )
+
+    payload = _json(response)
+    assert response.status == 404
+    assert "未处于待绑定状态" in payload["error"]
+
+
+@pytest.mark.asyncio
+async def test_naga_bind_callback_approved_returns_403_on_signature_mismatch(
+    tmp_path: Path,
+) -> None:
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    sender = _FakeSender()
+    server = _make_server(store=store, sender=sender)
+
+    response = await server._naga_bind_callback_handler(
+        _make_request(
+            json_body={
+                "bind_uuid": "uuid_a",
+                "naga_id": "alice",
+                "status": "approved",
+                "delivery_signature": "sig_wrong",
+            },
+            headers={"Authorization": "Bearer shared-key"},
+        )
+    )
+
+    payload = _json(response)
+    assert response.status == 403
+    assert "delivery_signature 不匹配" in payload["error"]
+
+
+@pytest.mark.asyncio
 async def test_naga_messages_send_rejects_target_mismatch(tmp_path: Path) -> None:
     store = NagaStore(tmp_path / "naga_bindings.json")
     await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
@@ -347,6 +403,58 @@ async def test_naga_messages_send_allows_render_with_fallback(
     assert payload["moderation"]["status"] == "error_allowed"
     assert sender.private_messages
     assert sender.group_messages
+
+
+@pytest.mark.asyncio
+async def test_naga_messages_send_falls_back_when_markdown_conversion_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    sender = _FakeSender()
+    server = _make_server(
+        store=store,
+        sender=sender,
+        security_result=NagaModerationResult(
+            blocked=False,
+            status="error_allowed",
+            categories=[],
+            message="moderation timeout",
+            model_name="naga-moderation",
+        ),
+    )
+
+    async def _render_markdown_to_html(_: str) -> str:
+        raise RuntimeError("markdown failed")
+
+    monkeypatch.setattr(
+        "Undefined.api.app.render_markdown_to_html", _render_markdown_to_html
+    )
+
+    response = await server._naga_messages_send_handler(
+        _make_request(
+            json_body={
+                "bind_uuid": "uuid_a",
+                "naga_id": "alice",
+                "delivery_signature": "sig_1",
+                "target": {"qq_id": 123, "group_id": 456, "mode": "private"},
+                "message": {"format": "markdown", "content": "# hello"},
+            },
+            headers={"Authorization": "Bearer shared-key"},
+        )
+    )
+
+    payload = _json(response)
+    assert response.status == 200
+    assert payload["ok"] is True
+    assert payload["render_fallback"] is True
+    assert sender.private_messages == [(123, "# hello")]
 
 
 @pytest.mark.asyncio

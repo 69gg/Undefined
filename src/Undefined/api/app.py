@@ -516,6 +516,14 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
     }
 
 
+def _naga_callback_error_status(error: str) -> int:
+    if "未处于待绑定状态" in error or "未绑定" in error:
+        return 404
+    if "不匹配" in error:
+        return 403
+    return 409
+
+
 class RuntimeAPIServer:
     def __init__(
         self,
@@ -1639,7 +1647,7 @@ class RuntimeAPIServer:
                     bind_uuid,
                     err,
                 )
-                return _json_error(err, status=409)
+                return _json_error(err, status=_naga_callback_error_status(err))
             if created and binding is not None and sender is not None:
                 try:
                     await sender.send_private_message(
@@ -1821,12 +1829,12 @@ class RuntimeAPIServer:
             if fmt in {"markdown", "html"}:
                 import tempfile
 
-                html_str = content
-                if fmt == "markdown":
-                    html_str = await render_markdown_to_html(content)
-                fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="naga_send_")
-                os.close(fd)
                 try:
+                    html_str = content
+                    if fmt == "markdown":
+                        html_str = await render_markdown_to_html(content)
+                    fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="naga_send_")
+                    os.close(fd)
                     await render_html_to_image(html_str, tmp_path)
                     image_path = tmp_path
                     rendered = True
