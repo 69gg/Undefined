@@ -10,6 +10,9 @@ def is_naga_group_visible(context: CommandContext) -> bool:
 
 
 def is_naga_command_visible(context: CommandContext) -> bool:
+    api_cfg = getattr(context.config, "api", None)
+    if not bool(getattr(api_cfg, "enabled", False)):
+        return False
     if not context.config.nagaagent_mode_enabled or not context.config.naga.enabled:
         return False
     if context.scope == "group":

@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from aiohttp import ClientSession, ClientTimeout
@@ -215,15 +216,39 @@ async def _handle_bind(
         await _reply(context, f"❌ {msg}")
         return
 
-    submitted = await _submit_bind_request_to_naga(context, pending)
-    if not submitted:
-        await naga_store.cancel_pending(naga_id, bind_uuid=pending.bind_uuid)
-        await _reply(context, "❌ 向 Naga 端发起绑定失败，请稍后重试")
+    pending, should_submit = await naga_store.begin_remote_submit(
+        naga_id,
+        bind_uuid=pending.bind_uuid,
+    )
+    if pending is None:
+        await _reply(context, "❌ 绑定状态已变化，请重新发起 /naga bind")
+        return
+
+    is_existing = "已存在" in msg
+    if not should_submit:
+        prefix = "ℹ️" if is_existing else "✅"
+        await _reply(
+            context,
+            f"{prefix} {msg}\nnaga_id: {naga_id}\n绑定请求已在处理中，请等待远端确认",
+        )
+        return
+
+    submit_status, detail = await _submit_bind_request_to_naga(context, pending)
+    if submit_status == "accepted":
+        verb = "已重新发送" if is_existing else "已发送"
+        await _reply(
+            context,
+            f"✅ {msg}\nnaga_id: {naga_id}\n绑定请求{verb}到 Naga 端，等待确认",
+        )
         return
 
     await _reply(
         context,
-        f"✅ {msg}\nnaga_id: {naga_id}\n绑定请求已发送到 Naga 端，等待确认",
+        "⚠️ 绑定申请已保留在本地，但未确认远端是否已接收\n"
+        f"naga_id: {naga_id}\n"
+        f"bind_uuid: {pending.bind_uuid}\n"
+        f"原因: {detail}\n"
+        "稍后重复执行同一个 /naga bind，会沿用这次申请继续重试",
     )
 
 
@@ -235,14 +260,15 @@ async def _handle_unbind(
         return
 
     naga_id = args[0].strip()
-    binding = naga_store.get_binding(naga_id)
+    binding, changed, err = await naga_store.revoke_binding(naga_id)
     if binding is None:
         await _reply(context, f"❌ 未找到 naga_id '{naga_id}' 的绑定")
         return
-
-    ok = await naga_store.revoke(naga_id)
-    if not ok:
-        await _reply(context, f"❌ naga_id '{naga_id}' 已被吊销或不存在")
+    if err:
+        await _reply(context, f"❌ {err}")
+        return
+    if not changed:
+        await _reply(context, f"ℹ️ naga_id '{naga_id}' 已处于解绑状态")
         return
 
     remote_synced = await _notify_remote_revoke(context, binding)
@@ -264,7 +290,7 @@ async def _handle_unbind(
 
 async def _submit_bind_request_to_naga(
     context: CommandContext, pending: PendingBinding
-) -> bool:
+) -> tuple[Literal["accepted", "remote_error", "transport_error"], str]:
     url = f"{context.config.naga.api_url.rstrip('/')}/api/integration/bind/request"
     headers = {
         "Authorization": f"Bearer {context.config.naga.api_key}",
@@ -286,7 +312,7 @@ async def _submit_bind_request_to_naga(
                         pending.bind_uuid,
                         resp.status,
                     )
-                    return True
+                    return "accepted", f"HTTP {resp.status}"
                 body = await resp.text()
                 logger.warning(
                     "[NagaCmd] 绑定请求失败: naga_id=%s bind_uuid=%s status=%d body=%s",
@@ -295,7 +321,8 @@ async def _submit_bind_request_to_naga(
                     resp.status,
                     body[:200],
                 )
-                return False
+                detail = body[:200].strip() or f"HTTP {resp.status}"
+                return "remote_error", detail
     except Exception as exc:
         logger.warning(
             "[NagaCmd] 绑定请求异常: naga_id=%s bind_uuid=%s err=%s",
@@ -303,7 +330,7 @@ async def _submit_bind_request_to_naga(
             pending.bind_uuid,
             exc,
         )
-        return False
+        return "transport_error", str(exc) or exc.__class__.__name__
 
 
 async def _notify_remote_revoke(context: CommandContext, binding: NagaBinding) -> bool:

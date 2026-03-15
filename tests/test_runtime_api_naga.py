@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -68,11 +69,16 @@ def _make_server(
     store: NagaStore,
     sender: _FakeSender,
     security_result: NagaModerationResult | None = None,
+    security: Any | None = None,
 ) -> RuntimeAPIServer:
-    security = (
-        _FakeSecurity(security_result)
-        if security_result is not None
-        else SimpleNamespace()
+    security_impl = (
+        security
+        if security is not None
+        else (
+            _FakeSecurity(security_result)
+            if security_result is not None
+            else SimpleNamespace()
+        )
     )
     cfg = SimpleNamespace(
         api=SimpleNamespace(
@@ -98,7 +104,7 @@ def _make_server(
         config_getter=lambda: cfg,
         onebot=SimpleNamespace(connection_status=lambda: {}),
         ai=SimpleNamespace(memory_storage=None),
-        command_dispatcher=SimpleNamespace(security=security),
+        command_dispatcher=SimpleNamespace(security=security_impl),
         queue_manager=SimpleNamespace(snapshot=lambda: {}),
         history_manager=SimpleNamespace(),
         sender=sender,
@@ -133,6 +139,31 @@ async def test_naga_bind_callback_activates_pending_binding(tmp_path: Path) -> N
     assert binding is not None
     assert binding.delivery_signature == "sig_1"
     assert sender.private_messages
+
+
+@pytest.mark.asyncio
+async def test_naga_bind_callback_reject_is_idempotent(tmp_path: Path) -> None:
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    sender = _FakeSender()
+    server = _make_server(store=store, sender=sender)
+    request = _make_request(
+        json_body={
+            "bind_uuid": "uuid_a",
+            "naga_id": "alice",
+            "status": "rejected",
+            "reason": "duplicate",
+        },
+        headers={"Authorization": "Bearer shared-key"},
+    )
+
+    first = await server._naga_bind_callback_handler(request)
+    second = await server._naga_bind_callback_handler(request)
+
+    assert first.status == 200
+    payload = _json(second)
+    assert second.status == 200
+    assert payload["idempotent"] is True
 
 
 @pytest.mark.asyncio
@@ -276,6 +307,83 @@ async def test_naga_messages_send_allows_render_with_fallback(
 
 
 @pytest.mark.asyncio
+async def test_naga_messages_send_aborts_when_revoked_mid_flight(
+    tmp_path: Path,
+) -> None:
+    class _BlockingSecurity:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def moderate_naga_message(
+            self, *, message_format: str, content: str
+        ) -> NagaModerationResult:
+            _ = message_format, content
+            self.started.set()
+            await self.release.wait()
+            return NagaModerationResult(
+                blocked=False,
+                status="passed",
+                categories=[],
+                message="ok",
+                model_name="naga-moderation",
+            )
+
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    sender = _FakeSender()
+    security = _BlockingSecurity()
+    server = _make_server(store=store, sender=sender, security=security)
+
+    send_task = asyncio.create_task(
+        server._naga_messages_send_handler(
+            _make_request(
+                json_body={
+                    "bind_uuid": "uuid_a",
+                    "naga_id": "alice",
+                    "delivery_signature": "sig_1",
+                    "target": {"qq_id": 123, "group_id": 456, "mode": "both"},
+                    "message": {"format": "text", "content": "hello"},
+                },
+                headers={"Authorization": "Bearer shared-key"},
+            )
+        )
+    )
+    await security.started.wait()
+
+    unbind_task = asyncio.create_task(
+        server._naga_unbind_handler(
+            _make_request(
+                json_body={
+                    "bind_uuid": "uuid_a",
+                    "naga_id": "alice",
+                    "delivery_signature": "sig_1",
+                },
+                headers={"Authorization": "Bearer shared-key"},
+            )
+        )
+    )
+
+    security.release.set()
+    send_response = await send_task
+    unbind_response = await unbind_task
+
+    send_payload = _json(send_response)
+    unbind_payload = _json(unbind_response)
+    assert send_response.status == 409
+    assert "吊销" in send_payload["error"]
+    assert sender.private_messages == []
+    assert sender.group_messages == []
+    assert unbind_response.status == 200
+    assert unbind_payload["idempotent"] is False
+
+
+@pytest.mark.asyncio
 async def test_naga_unbind_handler_revokes_binding(tmp_path: Path) -> None:
     store = NagaStore(tmp_path / "naga_bindings.json")
     await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
@@ -304,3 +412,66 @@ async def test_naga_unbind_handler_revokes_binding(tmp_path: Path) -> None:
     binding = store.get_binding("alice")
     assert binding is not None
     assert binding.revoked is True
+
+
+@pytest.mark.asyncio
+async def test_naga_unbind_handler_old_generation_is_idempotent_after_rebind(
+    tmp_path: Path,
+) -> None:
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    sender = _FakeSender()
+    server = _make_server(store=store, sender=sender)
+    old_request = _make_request(
+        json_body={
+            "bind_uuid": "uuid_a",
+            "naga_id": "alice",
+            "delivery_signature": "sig_1",
+        },
+        headers={"Authorization": "Bearer shared-key"},
+    )
+
+    first = await server._naga_unbind_handler(old_request)
+    assert first.status == 200
+
+    await store.submit_binding("alice", qq_id=789, group_id=456, bind_uuid="uuid_b")
+    await store.activate_binding(
+        bind_uuid="uuid_b",
+        naga_id="alice",
+        delivery_signature="sig_2",
+    )
+
+    second = await server._naga_unbind_handler(old_request)
+
+    payload = _json(second)
+    current = store.get_binding("alice")
+    assert second.status == 200
+    assert payload["idempotent"] is True
+    assert current is not None
+    assert current.bind_uuid == "uuid_b"
+    assert current.revoked is False
+
+
+@pytest.mark.asyncio
+async def test_openapi_only_exposes_enabled_naga_routes(tmp_path: Path) -> None:
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    sender = _FakeSender()
+    server = _make_server(store=store, sender=sender)
+
+    response = await server._openapi_handler(_make_request())
+    payload = _json(response)
+    assert "/api/v1/naga/messages/send" in payload["paths"]
+    assert payload["paths"]["/api/v1/naga/messages/send"]["post"]["security"] == [
+        {"BearerAuth": []}
+    ]
+
+    cfg = server._ctx.config_getter()
+    cfg.naga.enabled = False
+    response_disabled = await server._openapi_handler(_make_request())
+    payload_disabled = _json(response_disabled)
+    assert "/api/v1/naga/messages/send" not in payload_disabled["paths"]

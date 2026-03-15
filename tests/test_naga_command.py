@@ -40,8 +40,10 @@ def _config(
     *,
     allowed_groups: set[int],
     superadmin: bool = False,
+    api_enabled: bool = True,
 ) -> Any:
     return SimpleNamespace(
+        api=SimpleNamespace(enabled=api_enabled),
         nagaagent_mode_enabled=True,
         naga=SimpleNamespace(
             enabled=True,
@@ -137,6 +139,29 @@ async def test_naga_visible_in_help_for_superadmin_private(
 
 
 @pytest.mark.asyncio
+async def test_naga_hidden_when_runtime_api_disabled(
+    registry: CommandRegistry,
+) -> None:
+    sender = _DummySender()
+    context = _context(
+        sender=sender,
+        registry=registry,
+        scope="private",
+        group_id=0,
+        user_id=1,
+        superadmin=True,
+        allowed_groups={123},
+    )
+    context.config.api.enabled = False
+
+    await help_execute([], context)
+
+    assert sender.group_messages
+    output = sender.group_messages[-1][1]
+    assert "/naga <bind|unbind> [参数]" not in output
+
+
+@pytest.mark.asyncio
 async def test_naga_execute_silent_in_non_allowlisted_group(
     registry: CommandRegistry,
     tmp_path: Path,
@@ -176,8 +201,8 @@ async def test_naga_bind_submits_pending_and_replies(
         store=store,
     )
 
-    async def _accepted(*_: Any, **__: Any) -> bool:
-        return True
+    async def _accepted(*_: Any, **__: Any) -> tuple[str, str]:
+        return "accepted", "HTTP 202"
 
     monkeypatch.setattr(naga_handler, "_submit_bind_request_to_naga", _accepted)
 
@@ -187,6 +212,72 @@ async def test_naga_bind_submits_pending_and_replies(
     assert pending is not None
     assert sender.group_messages
     assert "等待 Naga 端确认" in sender.group_messages[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_naga_bind_reuses_existing_pending_without_duplicate_submit(
+    registry: CommandRegistry,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sender = _DummySender()
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    context = _context(
+        sender=sender,
+        registry=registry,
+        scope="group",
+        group_id=123,
+        allowed_groups={123},
+        store=store,
+    )
+    calls = 0
+
+    async def _accepted(*_: Any, **__: Any) -> tuple[str, str]:
+        nonlocal calls
+        calls += 1
+        return "accepted", "HTTP 202"
+
+    monkeypatch.setattr(naga_handler, "_submit_bind_request_to_naga", _accepted)
+
+    await naga_handler.execute(["bind", "alice"], context)
+    first_pending = store.get_pending("alice")
+    assert first_pending is not None
+
+    await naga_handler.execute(["bind", "alice"], context)
+    second_pending = store.get_pending("alice")
+    assert second_pending is not None
+    assert second_pending.bind_uuid == first_pending.bind_uuid
+    assert calls == 1
+    assert "已在处理中" in sender.group_messages[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_naga_bind_keeps_pending_on_transport_error(
+    registry: CommandRegistry,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sender = _DummySender()
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    context = _context(
+        sender=sender,
+        registry=registry,
+        scope="group",
+        group_id=123,
+        allowed_groups={123},
+        store=store,
+    )
+
+    async def _transport_error(*_: Any, **__: Any) -> tuple[str, str]:
+        return "transport_error", "timeout"
+
+    monkeypatch.setattr(naga_handler, "_submit_bind_request_to_naga", _transport_error)
+
+    await naga_handler.execute(["bind", "alice"], context)
+
+    pending = store.get_pending("alice")
+    assert pending is not None
+    assert "已保留在本地" in sender.group_messages[-1][1]
 
 
 @pytest.mark.asyncio

@@ -109,6 +109,20 @@ async def test_reject_binding(store: NagaStore) -> None:
     assert store.list_pending() == []
 
 
+async def test_reject_binding_is_idempotent(store: NagaStore) -> None:
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.reject_binding(bind_uuid="uuid_a", naga_id="alice")
+
+    pending, removed, err = await store.reject_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+    )
+
+    assert pending is None
+    assert removed is False
+    assert err == ""
+
+
 async def test_cancel_pending(store: NagaStore) -> None:
     await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
     pending = await store.cancel_pending("alice", bind_uuid="uuid_a")
@@ -202,11 +216,85 @@ async def test_record_usage(store: NagaStore) -> None:
         naga_id="alice",
         delivery_signature="sig_1",
     )
-    await store.record_usage("alice")
+    await store.record_usage("alice", bind_uuid="uuid_a")
     binding = store.get_binding("alice")
     assert binding is not None
     assert binding.use_count == 1
     assert binding.last_used_at is not None
+    history = store.get_binding_history("uuid_a")
+    assert history is not None
+    assert history.use_count == 1
+
+
+async def test_record_usage_does_not_shift_to_new_generation(store: NagaStore) -> None:
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    await store.revoke_binding(
+        "alice",
+        expected_bind_uuid="uuid_a",
+        delivery_signature="sig_1",
+        wait_for_delivery=False,
+    )
+    await store.submit_binding("alice", qq_id=789, group_id=456, bind_uuid="uuid_b")
+    await store.activate_binding(
+        bind_uuid="uuid_b",
+        naga_id="alice",
+        delivery_signature="sig_2",
+    )
+
+    await store.record_usage("alice", bind_uuid="uuid_a")
+
+    current = store.get_binding("alice")
+    assert current is not None
+    assert current.bind_uuid == "uuid_b"
+    assert current.use_count == 0
+    history = store.get_binding_history("uuid_a")
+    assert history is not None
+    assert history.use_count == 1
+
+
+async def test_revoke_binding_with_old_bind_uuid_is_idempotent(
+    store: NagaStore,
+) -> None:
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    await store.revoke_binding(
+        "alice",
+        expected_bind_uuid="uuid_a",
+        delivery_signature="sig_1",
+        wait_for_delivery=False,
+    )
+    await store.submit_binding("alice", qq_id=789, group_id=456, bind_uuid="uuid_b")
+    await store.activate_binding(
+        bind_uuid="uuid_b",
+        naga_id="alice",
+        delivery_signature="sig_2",
+    )
+
+    historical, changed, err = await store.revoke_binding(
+        "alice",
+        expected_bind_uuid="uuid_a",
+        delivery_signature="sig_1",
+        wait_for_delivery=False,
+    )
+
+    assert historical is not None
+    assert historical.bind_uuid == "uuid_a"
+    assert historical.revoked is True
+    assert changed is False
+    assert err == ""
+    current = store.get_binding("alice")
+    assert current is not None
+    assert current.bind_uuid == "uuid_b"
+    assert current.revoked is False
 
 
 async def test_persistence(tmp_path: Path) -> None:
