@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -53,6 +54,7 @@ def _write_command(
     handler_text: str = "v1",
     doc_text: str | None = None,
     allow_in_private: bool = False,
+    visibility_text: str | None = None,
 ) -> Path:
     command_dir = base_dir / command_dir_name
     command_dir.mkdir(parents=True, exist_ok=True)
@@ -77,6 +79,10 @@ def _write_command(
         )
 
     _write_handler(command_dir / "handler.py", handler_text)
+
+    if visibility_text is not None:
+        with open(command_dir / "policy.py", "w", encoding="utf-8") as f:
+            f.write(visibility_text)
 
     if doc_text is not None:
         with open(command_dir / "README.md", "w", encoding="utf-8") as f:
@@ -129,6 +135,46 @@ async def test_command_registry_hot_reload_handler_update(tmp_path: Path) -> Non
     assert updated_meta is not None
     await registry.execute(updated_meta, [], context)
     assert sender.messages[-1][1] == "v2"
+
+
+def test_command_registry_hot_reload_policy_update(tmp_path: Path) -> None:
+    commands_dir = tmp_path / "commands"
+    commands_dir.mkdir(parents=True)
+    command_dir = _write_command(
+        commands_dir,
+        "gated",
+        command_name="gated",
+        usage="/gated",
+        handler_text="ok",
+        visibility_text=(
+            "from __future__ import annotations\n\n"
+            "from Undefined.services.commands.context import CommandContext\n\n"
+            "def is_command_visible(context: CommandContext) -> bool:\n"
+            "    return False\n"
+        ),
+    )
+
+    registry = CommandRegistry(commands_dir)
+    registry.load_commands()
+    sender = _DummySender()
+    context = _build_context(registry, sender)
+    meta = registry.resolve("gated")
+    assert meta is not None
+    assert registry.is_visible(meta, context) is False
+
+    time.sleep(0.25)
+    with open(command_dir / "policy.py", "w", encoding="utf-8") as f:
+        f.write(
+            "from __future__ import annotations\n\n"
+            "from Undefined.services.commands.context import CommandContext\n\n"
+            "def is_command_visible(context: CommandContext) -> bool:\n"
+            "    return True\n"
+        )
+
+    assert registry.maybe_reload() is True
+    updated_meta = registry.resolve("gated")
+    assert updated_meta is not None
+    assert registry.is_visible(updated_meta, context) is True
 
 
 @pytest.mark.asyncio
@@ -250,6 +296,47 @@ async def test_help_detail_hides_group_only_command_in_private_scope(
     await help_execute(["grouponly"], private_context)
     output = sender.messages[-1][1]
     assert "未找到命令" in output
+
+
+@pytest.mark.asyncio
+async def test_help_uses_command_visibility_policy(tmp_path: Path) -> None:
+    commands_dir = tmp_path / "commands"
+    commands_dir.mkdir(parents=True)
+    _write_command(
+        commands_dir,
+        "visible",
+        command_name="visible",
+        usage="/visible",
+        handler_text="ok",
+    )
+    _write_command(
+        commands_dir,
+        "gated",
+        command_name="gated",
+        usage="/gated",
+        handler_text="ok",
+        visibility_text=(
+            "from __future__ import annotations\n\n"
+            "from Undefined.services.commands.context import CommandContext\n\n"
+            "def is_command_visible(context: CommandContext) -> bool:\n"
+            "    return context.sender_id == 42\n"
+        ),
+    )
+
+    registry = CommandRegistry(commands_dir)
+    registry.load_commands()
+    sender = _DummySender()
+    context = _build_context(registry, sender)
+
+    await help_execute([], context)
+    output = sender.messages[-1][1]
+    assert "/visible" in output
+    assert "/gated" not in output
+
+    sender.messages.clear()
+    context.sender_id = 42
+    await help_execute(["gated"], context)
+    assert "命令详情：/gated" in sender.messages[-1][1]
 
 
 @pytest.mark.asyncio

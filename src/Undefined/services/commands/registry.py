@@ -16,11 +16,13 @@ from Undefined.services.commands.context import CommandContext
 logger = logging.getLogger(__name__)
 
 CommandHandler = Callable[[list[str], CommandContext], Awaitable[None]]
-CommandSnapshot = tuple[int | None, int | None, int | None]
+CommandVisibilityChecker = Callable[[CommandContext], bool]
+CommandSnapshot = tuple[int | None, int | None, int | None, int | None]
 
 _COMMAND_CONFIG_FILENAME = "config.json"
 _COMMAND_HANDLER_FILENAME = "handler.py"
 _COMMAND_DOC_FILENAME = "README.md"
+_COMMAND_POLICY_FILENAME = "policy.py"
 _RELOAD_SCAN_INTERVAL_SECONDS = 0.2
 
 
@@ -51,7 +53,10 @@ class CommandMeta:
     handler_path: Path
     doc_path: Path | None
     module_name: str
+    visibility_path: Path | None
+    visibility_module_name: str | None
     handler: CommandHandler | None = None
+    visibility_checker: CommandVisibilityChecker | None = None
 
 
 class CommandRegistry:
@@ -165,6 +170,20 @@ class CommandRegistry:
                 if (command_dir / _COMMAND_DOC_FILENAME).exists()
                 else None,
                 module_name=module_name,
+                visibility_path=(command_dir / _COMMAND_POLICY_FILENAME)
+                if (command_dir / _COMMAND_POLICY_FILENAME).exists()
+                else None,
+                visibility_module_name=".".join(
+                    [
+                        "Undefined",
+                        "skills",
+                        "commands",
+                        command_dir.name,
+                        "policy",
+                    ]
+                )
+                if (command_dir / _COMMAND_POLICY_FILENAME).exists()
+                else None,
             )
             if name in commands:
                 logger.warning(
@@ -260,6 +279,7 @@ class CommandRegistry:
                 self._read_mtime_ns(command_dir / _COMMAND_CONFIG_FILENAME),
                 self._read_mtime_ns(command_dir / _COMMAND_HANDLER_FILENAME),
                 self._read_mtime_ns(command_dir / _COMMAND_DOC_FILENAME),
+                self._read_mtime_ns(command_dir / _COMMAND_POLICY_FILENAME),
             )
         return snapshot
 
@@ -290,6 +310,28 @@ class CommandRegistry:
             if not include_hidden:
                 items = [item for item in items if item.show_in_help]
             return sorted(items, key=lambda item: (item.order, item.name))
+
+    def is_visible(self, command: CommandMeta, context: CommandContext) -> bool:
+        self.maybe_reload()
+        with self._lock:
+            checker = command.visibility_checker
+            if (
+                checker is None
+                and command.visibility_path is not None
+                and command.visibility_module_name is not None
+            ):
+                checker = self._load_visibility_checker(command)
+                command.visibility_checker = checker
+        if checker is None:
+            return True
+        try:
+            return bool(checker(context))
+        except Exception:
+            logger.exception(
+                "[CommandRegistry] 命令可见性检查失败，已隐藏: /%s",
+                command.name,
+            )
+            return False
 
     async def execute(
         self,
@@ -330,18 +372,7 @@ class CommandRegistry:
             raise
 
     def _load_handler(self, command: CommandMeta) -> CommandHandler:
-        sys.modules.pop(command.module_name, None)
-        module = types.ModuleType(command.module_name)
-        module.__file__ = str(command.handler_path)
-        module.__package__ = command.module_name.rpartition(".")[0]
-        source = command.handler_path.read_text(encoding="utf-8")
-        code = compile(source, str(command.handler_path), "exec")
-        sys.modules[command.module_name] = module
-        try:
-            exec(code, module.__dict__)
-        except Exception:
-            sys.modules.pop(command.module_name, None)
-            raise
+        module = self._load_module(command.module_name, command.handler_path)
         execute = getattr(module, "execute", None)
         if execute is None:
             raise RuntimeError(f"命令处理器缺少 execute: {command.handler_path}")
@@ -357,3 +388,44 @@ class CommandRegistry:
             command.module_name,
         )
         return cast(CommandHandler, execute)
+
+    def _load_visibility_checker(
+        self, command: CommandMeta
+    ) -> CommandVisibilityChecker | None:
+        assert command.visibility_path is not None
+        assert command.visibility_module_name is not None
+        module = self._load_module(
+            command.visibility_module_name, command.visibility_path
+        )
+        checker = getattr(module, "is_command_visible", None)
+        if checker is None:
+            logger.debug(
+                "[CommandRegistry] 可见性模块未声明 is_command_visible: /%s",
+                command.name,
+            )
+            return None
+        if not callable(checker):
+            raise RuntimeError(f"命令可见性函数不可调用: {command.visibility_path}")
+        if asyncio.iscoroutinefunction(checker):
+            raise RuntimeError(f"命令可见性函数不能是 async: {command.visibility_path}")
+        logger.info(
+            "[CommandRegistry] 命令可见性策略已加载: /%s module=%s",
+            command.name,
+            command.visibility_module_name,
+        )
+        return cast(CommandVisibilityChecker, checker)
+
+    def _load_module(self, module_name: str, path: Path) -> types.ModuleType:
+        sys.modules.pop(module_name, None)
+        module = types.ModuleType(module_name)
+        module.__file__ = str(path)
+        module.__package__ = module_name.rpartition(".")[0]
+        source = path.read_text(encoding="utf-8")
+        code = compile(source, str(path), "exec")
+        sys.modules[module_name] = module
+        try:
+            exec(code, module.__dict__)
+        except Exception:
+            sys.modules.pop(module_name, None)
+            raise
+        return module

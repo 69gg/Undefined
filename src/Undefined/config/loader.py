@@ -464,6 +464,7 @@ class Config:
     vision_model: VisionModelConfig
     security_model_enabled: bool
     security_model: SecurityModelConfig
+    naga_model: SecurityModelConfig
     agent_model: AgentModelConfig
     historian_model: AgentModelConfig
     model_pool_enabled: bool
@@ -786,6 +787,7 @@ class Config:
             True,
         )
         security_model = cls._parse_security_model_config(data, chat_model)
+        naga_model = cls._parse_naga_model_config(data, security_model)
         agent_model = cls._parse_agent_model_config(data)
         historian_model = cls._parse_historian_model_config(data, agent_model)
 
@@ -1258,6 +1260,7 @@ class Config:
             chat_model,
             vision_model,
             security_model,
+            naga_model,
             agent_model,
         )
 
@@ -1286,6 +1289,7 @@ class Config:
             vision_model=vision_model,
             security_model_enabled=security_model_enabled,
             security_model=security_model,
+            naga_model=naga_model,
             agent_model=agent_model,
             historian_model=historian_model,
             model_pool_enabled=model_pool_enabled,
@@ -2041,6 +2045,135 @@ class Config:
         )
 
     @staticmethod
+    def _parse_naga_model_config(
+        data: dict[str, Any], security_model: SecurityModelConfig
+    ) -> SecurityModelConfig:
+        api_url = _coerce_str(
+            _get_value(data, ("models", "naga", "api_url"), "NAGA_MODEL_API_URL"),
+            "",
+        )
+        api_key = _coerce_str(
+            _get_value(data, ("models", "naga", "api_key"), "NAGA_MODEL_API_KEY"),
+            "",
+        )
+        model_name = _coerce_str(
+            _get_value(data, ("models", "naga", "model_name"), "NAGA_MODEL_NAME"),
+            "",
+        )
+        queue_interval_seconds = _coerce_float(
+            _get_value(
+                data,
+                ("models", "naga", "queue_interval_seconds"),
+                "NAGA_MODEL_QUEUE_INTERVAL",
+            ),
+            security_model.queue_interval_seconds,
+        )
+        if queue_interval_seconds <= 0:
+            queue_interval_seconds = 1.0
+
+        thinking_include_budget, thinking_tool_call_compat = (
+            _resolve_thinking_compat_flags(
+                data=data,
+                model_name="naga",
+                include_budget_env_key="NAGA_MODEL_THINKING_INCLUDE_BUDGET",
+                tool_call_compat_env_key="NAGA_MODEL_THINKING_TOOL_CALL_COMPAT",
+                legacy_env_key="NAGA_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+            )
+        )
+        api_mode = _resolve_api_mode(data, "naga", "NAGA_MODEL_API_MODE")
+        responses_tool_choice_compat = _resolve_responses_tool_choice_compat(
+            data, "naga", "NAGA_MODEL_RESPONSES_TOOL_CHOICE_COMPAT"
+        )
+        responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
+            data, "naga", "NAGA_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+        )
+        reasoning_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "naga", "reasoning_enabled"),
+                "NAGA_MODEL_REASONING_ENABLED",
+            ),
+            getattr(security_model, "reasoning_enabled", False),
+        )
+        reasoning_effort = _resolve_reasoning_effort(
+            _get_value(
+                data,
+                ("models", "naga", "reasoning_effort"),
+                "NAGA_MODEL_REASONING_EFFORT",
+            ),
+            getattr(security_model, "reasoning_effort", "medium"),
+        )
+
+        if api_url and api_key and model_name:
+            return SecurityModelConfig(
+                api_url=api_url,
+                api_key=api_key,
+                model_name=model_name,
+                max_tokens=_coerce_int(
+                    _get_value(
+                        data,
+                        ("models", "naga", "max_tokens"),
+                        "NAGA_MODEL_MAX_TOKENS",
+                    ),
+                    160,
+                ),
+                queue_interval_seconds=queue_interval_seconds,
+                api_mode=api_mode,
+                thinking_enabled=_coerce_bool(
+                    _get_value(
+                        data,
+                        ("models", "naga", "thinking_enabled"),
+                        "NAGA_MODEL_THINKING_ENABLED",
+                    ),
+                    False,
+                ),
+                thinking_budget_tokens=_coerce_int(
+                    _get_value(
+                        data,
+                        ("models", "naga", "thinking_budget_tokens"),
+                        "NAGA_MODEL_THINKING_BUDGET_TOKENS",
+                    ),
+                    0,
+                ),
+                thinking_include_budget=thinking_include_budget,
+                reasoning_effort_style=_resolve_reasoning_effort_style(
+                    _get_value(
+                        data,
+                        ("models", "naga", "reasoning_effort_style"),
+                        "NAGA_MODEL_REASONING_EFFORT_STYLE",
+                    ),
+                ),
+                thinking_tool_call_compat=thinking_tool_call_compat,
+                responses_tool_choice_compat=responses_tool_choice_compat,
+                responses_force_stateless_replay=responses_force_stateless_replay,
+                reasoning_enabled=reasoning_enabled,
+                reasoning_effort=reasoning_effort,
+                request_params=_get_model_request_params(data, "naga"),
+            )
+
+        logger.info(
+            "未配置 Naga 审核模型，将使用已解析的安全模型配置作为后备（安全模型本身可能已回退）"
+        )
+        return SecurityModelConfig(
+            api_url=security_model.api_url,
+            api_key=security_model.api_key,
+            model_name=security_model.model_name,
+            max_tokens=security_model.max_tokens,
+            queue_interval_seconds=security_model.queue_interval_seconds,
+            api_mode=security_model.api_mode,
+            thinking_enabled=security_model.thinking_enabled,
+            thinking_budget_tokens=security_model.thinking_budget_tokens,
+            thinking_include_budget=security_model.thinking_include_budget,
+            reasoning_effort_style=security_model.reasoning_effort_style,
+            thinking_tool_call_compat=security_model.thinking_tool_call_compat,
+            responses_tool_choice_compat=security_model.responses_tool_choice_compat,
+            responses_force_stateless_replay=security_model.responses_force_stateless_replay,
+            reasoning_enabled=security_model.reasoning_enabled,
+            reasoning_effort=security_model.reasoning_effort,
+            request_params=merge_request_params(security_model.request_params),
+        )
+
+    @staticmethod
     def _parse_agent_model_config(data: dict[str, Any]) -> AgentModelConfig:
         queue_interval_seconds = _coerce_float(
             _get_value(
@@ -2198,6 +2331,7 @@ class Config:
         chat_model: ChatModelConfig,
         vision_model: VisionModelConfig,
         security_model: SecurityModelConfig,
+        naga_model: SecurityModelConfig,
         agent_model: AgentModelConfig,
     ) -> None:
         configs: list[
@@ -2212,6 +2346,7 @@ class Config:
             ("chat", chat_model),
             ("vision", vision_model),
             ("security", security_model),
+            ("naga", naga_model),
             ("agent", agent_model),
         ]
         for name, cfg in configs:

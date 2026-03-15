@@ -125,7 +125,7 @@ model_name = "gpt-4o-mini"
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
-| `ws_url` | `"ws://127.0.0.1:3001"` | OneBot WebSocket 地址 | 严格模式必填 |
+| `ws_url` | `""` | OneBot WebSocket 地址 | 模板示例通常写 `ws://127.0.0.1:3001`；严格模式必填 |
 | `token` | `""` | OneBot token | 同时用于 URL 参数与 `Authorization` 头 |
 
 `onebot.*` 变更需要重启进程才能生效。
@@ -215,7 +215,28 @@ model_name = "gpt-4o-mini"
 - 若 `api_url/api_key/model_name` 任一缺失，会自动回退为 chat 模型（并告警）。
 - 回退时会继承 chat 的 `api_mode`、`reasoning_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`；旧 `thinking_*` 仍保持安全模型自身默认值。
 
-### 4.4.5 `[models.agent]` Agent 执行模型
+### 4.4.5 `[models.naga]` Naga 审核模型
+
+用途：
+- 仅用于 `POST /api/v1/naga/messages/send` 前的消息审核。
+
+默认：
+- `max_tokens=160`
+- `queue_interval_seconds=1.0`
+- `api_mode="chat_completions"`
+- `reasoning_enabled=false`
+- `reasoning_effort="medium"`
+- `thinking_enabled=false`
+- `thinking_budget_tokens=0`
+- `thinking_include_budget=true`
+- `thinking_tool_call_compat=true`
+- `responses_tool_choice_compat=false`
+- `responses_force_stateless_replay=false`
+
+关键回退逻辑：
+- 若整个节缺失或 `api_url/api_key/model_name` 任一缺失：完整回退到 `models.security`，并沿用安全模型的请求参数。
+
+### 4.4.6 `[models.agent]` Agent 执行模型
 
 默认：
 - `max_tokens=4096`
@@ -227,14 +248,14 @@ model_name = "gpt-4o-mini"
 - `responses_tool_choice_compat=false`
 - `responses_force_stateless_replay=false`
 
-### 4.4.6 `[models.historian]` 史官模型
+### 4.4.7 `[models.historian]` 史官模型
 
 - 用于认知记忆后台改写。
 - 若整个节缺失或为空：完整回退到 `models.agent`。
 - 若部分字段缺失：逐项继承 agent 配置，包括 `api_mode`、`reasoning_*`、`thinking_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`。
 - `queue_interval_seconds<=0` 时回退到 agent 的间隔。
 
-### 4.4.7 模型池
+### 4.4.8 模型池
 
 相关节：
 - `[models.chat.pool]`
@@ -266,7 +287,7 @@ model_name = "gpt-4o-mini"
 2. 对应池 `enabled=true`
 3. 池列表非空
 
-### 4.4.8 `[models.embedding]` 嵌入模型
+### 4.4.9 `[models.embedding]` 嵌入模型
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -279,7 +300,7 @@ model_name = "gpt-4o-mini"
 | `document_instruction` | `""` | 文档前缀 |
 | `request_params` | `{}` | 额外请求体参数；保留字段如 `model`/`input`/`dimensions` 会忽略 |
 
-### 4.4.9 `[models.rerank]` 重排模型
+### 4.4.10 `[models.rerank]` 重排模型
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -578,8 +599,6 @@ model_name = "gpt-4o-mini"
 | `enabled` | `true` | 开启认知记忆 |
 | `bot_name` | `Undefined` | 史官改写中使用的 bot 名称 |
 
-说明：当前版本解析器尚未从 `config.toml` 显式读取 `cognitive.bot_name`，运行时会保持默认值 `Undefined`。
-
 ### 4.24.2 `[cognitive.vector_store]`
 
 | 字段 | 默认值 | 说明 |
@@ -639,7 +658,7 @@ model_name = "gpt-4o-mini"
 
 > **⚠️ 此功能面向与 NagaAgent 对接的高级场景，普通用户不建议开启。**
 
-启用后允许 NagaAgent 通过绑定审批机制向 QQ 群/用户发送回调消息。鉴权采用双层模型：共享密钥 `api_key` 验证服务器身份 + 每个绑定独立的 scoped token 验证调用权限。
+启用后允许 NagaAgent 通过绑定审批机制向 QQ 群/用户发送回调消息。共享密钥统一使用 `Authorization: Bearer {naga.api_key}`，其中 `messages/send` 与 `unbind` 还会额外校验 `bind_uuid + naga_id + delivery_signature`。
 
 **开关分层**：
 
@@ -648,14 +667,14 @@ model_name = "gpt-4o-mini"
 | `[features].nagaagent_mode_enabled` | 总开关：AI 侧行为（提示词切换、工具暴露） | `false` |
 | `[naga].enabled` | 子开关：外部网关集成（回调 API、`/naga` 命令、绑定管理） | `false` |
 
-- 仅当两者均为 `true` 时，外部网关集成生效（API 端点注册、`/naga` 命令可用）
+- 仅当 `[api].enabled = true`、`[features].nagaagent_mode_enabled = true`、`[naga].enabled = true` 三者同时成立时，外部网关集成才会生效（API 端点注册、`/naga` 命令可用）
 - 若只需 NagaAgent 解答能力而不需要外部回调联动，可只开启 `nagaagent_mode_enabled`
 - `nagaagent_mode_enabled = false` 时强制关闭所有 Naga 功能，无论 `naga.enabled` 值
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
 | `enabled` | `false` | 是否启用外部网关集成 | 需同时开启 `nagaagent_mode_enabled` |
-| `api_url` | `""` | Naga 服务器 API 地址 | 为空时 token 同步/删除操作跳过 |
+| `api_url` | `""` | Naga 服务器 API 地址 | 为空时无法向远端提交 bind request / revoke 同步 |
 | `api_key` | `""` | Undefined ↔ Naga 共享密钥 | 回调端点通过 `Authorization: Bearer` 校验 |
 | `allowed_groups` | `[]` | Naga 服务群聊名单 | 绑定命令和回调群发仅限名单内的群 |
 
@@ -664,7 +683,8 @@ model_name = "gpt-4o-mini"
 - 私聊场景不受 `allowed_groups` 限制
 - 回调群发仅发到绑定时的群（该群须仍在 `allowed_groups` 内）
 - 回调私聊只需开关开启，不受 `allowed_groups` 限制
-- `/api/v1/naga/*` 端点仅在两个开关均开启时注册
+- `/api/v1/naga/*` 端点仅在 `api.enabled`、`nagaagent_mode_enabled`、`naga.enabled` 三者均开启时注册
+- Runtime API 关闭时，`/naga` 命令也不会在 `/help` 中显示
 
 **数据存储**：绑定数据持久化在 `data/naga_bindings.json`，Unix 下自动 `chmod 600`。
 
@@ -724,7 +744,7 @@ model_name = "gpt-4o-mini"
 - `ONEBOT_WS_URL` / `ONEBOT_TOKEN`
 - `CHAT_MODEL_API_URL` / `CHAT_MODEL_API_KEY` / `CHAT_MODEL_NAME`
 - `CHAT_MODEL_API_MODE` / `CHAT_MODEL_REASONING_ENABLED` / `CHAT_MODEL_REASONING_EFFORT` / `CHAT_MODEL_RESPONSES_TOOL_CHOICE_COMPAT` / `CHAT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY`
-- `VISION_MODEL_*` / `AGENT_MODEL_*` / `SECURITY_MODEL_*` / `HISTORIAN_MODEL_*`
+- `VISION_MODEL_*` / `AGENT_MODEL_*` / `SECURITY_MODEL_*` / `NAGA_MODEL_*` / `HISTORIAN_MODEL_*`
 - 上述模型环境变量同样覆盖 `*_THINKING_ENABLED`、`*_THINKING_BUDGET_TOKENS`、`*_THINKING_TOOL_CALL_COMPAT`、`*_RESPONSES_TOOL_CHOICE_COMPAT`、`*_RESPONSES_FORCE_STATELESS_REPLAY`
 - `EMBEDDING_MODEL_*` / `RERANK_MODEL_*`
 - `SEARXNG_URL`

@@ -202,3 +202,78 @@ def normalize_tool_arguments_json(raw_args: Any) -> str:
         return json.dumps({"_raw": raw_text}, **_JSON_DUMPS_KWARGS)
 
     return json.dumps({"_value": raw_args}, **_JSON_DUMPS_KWARGS)
+
+
+def extract_required_tool_call_arguments(
+    response: dict[str, Any],
+    *,
+    expected_tool_name: str,
+    stage: str,
+    logger: logging.Logger | None = None,
+    error_context: str = "",
+) -> dict[str, Any]:
+    """Extract arguments from the first required tool call in a model response."""
+    context_suffix = f" {error_context}" if error_context else ""
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        if logger:
+            logger.error("[工具错误] %s 响应缺少 choices%s", stage, context_suffix)
+        raise ValueError(f"{stage} 响应缺少 choices{context_suffix}")
+
+    choice = choices[0]
+    if not isinstance(choice, dict):
+        if logger:
+            logger.error("[工具错误] %s choice 类型非法%s", stage, context_suffix)
+        raise ValueError(f"{stage} choice 类型非法{context_suffix}")
+
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        if logger:
+            logger.error("[工具错误] %s 响应缺少 message%s", stage, context_suffix)
+        raise ValueError(f"{stage} 响应缺少 message{context_suffix}")
+
+    tool_calls = message.get("tool_calls")
+    if not isinstance(tool_calls, list) or not tool_calls:
+        if logger:
+            logger.error(
+                "[工具错误] %s 响应缺少 tool_calls%s content_preview=%s",
+                stage,
+                context_suffix,
+                format_log_payload(str(message.get("content", "")), max_length=200),
+            )
+        raise ValueError(f"{stage} 响应缺少 tool_calls{context_suffix}")
+
+    tool_call = tool_calls[0]
+    if not isinstance(tool_call, dict):
+        if logger:
+            logger.error("[工具错误] %s tool_call 类型非法%s", stage, context_suffix)
+        raise ValueError(f"{stage} tool_call 类型非法{context_suffix}")
+
+    function = tool_call.get("function")
+    if not isinstance(function, dict):
+        if logger:
+            logger.error("[工具错误] %s function 缺失%s", stage, context_suffix)
+        raise ValueError(f"{stage} function 缺失{context_suffix}")
+
+    tool_name = str(function.get("name", "")).strip()
+    if tool_name != expected_tool_name:
+        if logger:
+            logger.error(
+                "[工具错误] %s 工具名不匹配%s expected=%s actual=%s",
+                stage,
+                context_suffix,
+                expected_tool_name,
+                tool_name,
+            )
+        raise ValueError(f"{stage} 工具名不匹配{context_suffix}: {tool_name}")
+
+    parsed = parse_tool_arguments(
+        function.get("arguments"),
+        logger=logger,
+        tool_name=expected_tool_name,
+    )
+    if not isinstance(parsed, dict):
+        if logger:
+            logger.error("[工具错误] %s 工具参数类型非法", stage)
+        raise ValueError(f"{stage} 工具参数类型非法")
+    return parsed

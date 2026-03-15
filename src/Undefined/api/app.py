@@ -323,6 +323,15 @@ async def _probe_http_endpoint(
     }
 
 
+async def _skipped_probe(
+    *, name: str, reason: str, model_name: str = ""
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"name": name, "status": "skipped", "reason": reason}
+    if model_name:
+        payload["model_name"] = model_name
+    return payload
+
+
 async def _probe_ws_endpoint(url: str, timeout_seconds: float = 5.0) -> dict[str, Any]:
     normalized = str(url or "").strip()
     if not normalized:
@@ -366,6 +375,128 @@ async def _probe_ws_endpoint(url: str, timeout_seconds: float = 5.0) -> dict[str
 
 def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[str, Any]:
     server_url = f"{request.scheme}://{request.host}"
+    cfg = ctx.config_getter()
+    naga_cfg = getattr(cfg, "naga", None)
+    naga_routes_enabled = (
+        bool(getattr(cfg, "nagaagent_mode_enabled", False))
+        and bool(getattr(naga_cfg, "enabled", False))
+        and ctx.naga_store is not None
+    )
+    paths: dict[str, Any] = {
+        "/health": {
+            "get": {
+                "summary": "Health check",
+                "security": [],
+                "responses": {"200": {"description": "OK"}},
+            }
+        },
+        "/openapi.json": {
+            "get": {
+                "summary": "OpenAPI schema",
+                "security": [],
+                "responses": {"200": {"description": "Schema JSON"}},
+            }
+        },
+        "/api/v1/probes/internal": {
+            "get": {
+                "summary": "Internal runtime probes",
+                "description": (
+                    "Returns system info (version, Python, platform, uptime), "
+                    "OneBot connection status, request queue snapshot, "
+                    "memory count, cognitive service status, API config, "
+                    "skill statistics (tools/agents/anthropic_skills with call counts), "
+                    "and model configuration (names, masked URLs, thinking flags)."
+                ),
+            }
+        },
+        "/api/v1/probes/external": {
+            "get": {
+                "summary": "External dependency probes",
+                "description": (
+                    "Concurrently probes all configured model API endpoints "
+                    "(chat, vision, security, naga, agent, embedding, rerank) "
+                    "and OneBot WebSocket. Each result includes status, "
+                    "model name, masked URL, HTTP status code, and latency."
+                ),
+            }
+        },
+        "/api/v1/memory": {"get": {"summary": "List/search manual memories"}},
+        "/api/v1/cognitive/events": {
+            "get": {"summary": "Search cognitive event memories"}
+        },
+        "/api/v1/cognitive/profiles": {"get": {"summary": "Search cognitive profiles"}},
+        "/api/v1/cognitive/profile/{entity_type}/{entity_id}": {
+            "get": {"summary": "Get a profile by entity type/id"}
+        },
+        "/api/v1/chat": {
+            "post": {
+                "summary": "WebUI special private chat",
+                "description": (
+                    "POST JSON {message, stream?}. "
+                    "When stream=true, response is SSE with keep-alive comments."
+                ),
+            }
+        },
+        "/api/v1/chat/history": {
+            "get": {"summary": "Get virtual private chat history for WebUI"}
+        },
+        "/api/v1/tools": {
+            "get": {
+                "summary": "List available tools",
+                "description": (
+                    "Returns currently available tools filtered by "
+                    "tool_invoke_expose / allowlist / denylist config. "
+                    "Each item follows the OpenAI function calling schema."
+                ),
+            }
+        },
+        "/api/v1/tools/invoke": {
+            "post": {
+                "summary": "Invoke a tool",
+                "description": (
+                    "Execute a specific tool by name. Supports synchronous "
+                    "response and optional async webhook callback."
+                ),
+            }
+        },
+    }
+
+    if naga_routes_enabled:
+        paths.update(
+            {
+                "/api/v1/naga/bind/callback": {
+                    "post": {
+                        "summary": "Finalize a Naga bind request",
+                        "description": (
+                            "Internal callback used by Naga to approve or reject "
+                            "a bind_uuid."
+                        ),
+                        "security": [{"BearerAuth": []}],
+                    }
+                },
+                "/api/v1/naga/messages/send": {
+                    "post": {
+                        "summary": "Send a Naga-authenticated message",
+                        "description": (
+                            "Validates bind_uuid + delivery_signature, runs "
+                            "moderation, then delivers the message."
+                        ),
+                        "security": [{"BearerAuth": []}],
+                    }
+                },
+                "/api/v1/naga/unbind": {
+                    "post": {
+                        "summary": "Revoke an active Naga binding",
+                        "description": (
+                            "Allows Naga to proactively revoke a binding using "
+                            "Authorization: Bearer <naga.api_key>."
+                        ),
+                        "security": [{"BearerAuth": []}],
+                    }
+                },
+            }
+        )
+
     return {
         "openapi": "3.0.3",
         "info": {
@@ -385,90 +516,12 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
                     "type": "apiKey",
                     "in": "header",
                     "name": _AUTH_HEADER,
-                }
+                },
+                "BearerAuth": {"type": "http", "scheme": "bearer"},
             }
         },
         "security": [{"ApiKeyAuth": []}],
-        "paths": {
-            "/health": {
-                "get": {
-                    "summary": "Health check",
-                    "security": [],
-                    "responses": {"200": {"description": "OK"}},
-                }
-            },
-            "/openapi.json": {
-                "get": {
-                    "summary": "OpenAPI schema",
-                    "security": [],
-                    "responses": {"200": {"description": "Schema JSON"}},
-                }
-            },
-            "/api/v1/probes/internal": {
-                "get": {
-                    "summary": "Internal runtime probes",
-                    "description": (
-                        "Returns system info (version, Python, platform, uptime), "
-                        "OneBot connection status, request queue snapshot, "
-                        "memory count, cognitive service status, API config, "
-                        "skill statistics (tools/agents/anthropic_skills with call counts), "
-                        "and model configuration (names, masked URLs, thinking flags)."
-                    ),
-                }
-            },
-            "/api/v1/probes/external": {
-                "get": {
-                    "summary": "External dependency probes",
-                    "description": (
-                        "Concurrently probes all configured model API endpoints "
-                        "(chat, vision, security, agent, embedding, rerank) "
-                        "and OneBot WebSocket. Each result includes status, "
-                        "model name, masked URL, HTTP status code, and latency."
-                    ),
-                }
-            },
-            "/api/v1/memory": {"get": {"summary": "List/search manual memories"}},
-            "/api/v1/cognitive/events": {
-                "get": {"summary": "Search cognitive event memories"}
-            },
-            "/api/v1/cognitive/profiles": {
-                "get": {"summary": "Search cognitive profiles"}
-            },
-            "/api/v1/cognitive/profile/{entity_type}/{entity_id}": {
-                "get": {"summary": "Get a profile by entity type/id"}
-            },
-            "/api/v1/chat": {
-                "post": {
-                    "summary": "WebUI special private chat",
-                    "description": (
-                        "POST JSON {message, stream?}. "
-                        "When stream=true, response is SSE with keep-alive comments."
-                    ),
-                }
-            },
-            "/api/v1/chat/history": {
-                "get": {"summary": "Get virtual private chat history for WebUI"}
-            },
-            "/api/v1/tools": {
-                "get": {
-                    "summary": "List available tools",
-                    "description": (
-                        "Returns currently available tools filtered by "
-                        "tool_invoke_expose / allowlist / denylist config. "
-                        "Each item follows the OpenAI function calling schema."
-                    ),
-                }
-            },
-            "/api/v1/tools/invoke": {
-                "post": {
-                    "summary": "Invoke a tool",
-                    "description": (
-                        "Execute a specific tool by name. Supports synchronous "
-                        "response and optional async webhook callback."
-                    ),
-                }
-            },
-        },
+        "paths": paths,
     }
 
 
@@ -575,8 +628,15 @@ class RuntimeAPIServer:
         ):
             app.add_routes(
                 [
-                    web.post("/api/v1/naga/callback", self._naga_callback_handler),
-                    web.get("/api/v1/naga/targets", self._naga_targets_handler),
+                    web.post(
+                        "/api/v1/naga/bind/callback",
+                        self._naga_bind_callback_handler,
+                    ),
+                    web.post(
+                        "/api/v1/naga/messages/send",
+                        self._naga_messages_send_handler,
+                    ),
+                    web.post("/api/v1/naga/unbind", self._naga_unbind_handler),
                 ]
             )
             logger.info("[RuntimeAPI] Naga 端点已注册")
@@ -630,7 +690,13 @@ class RuntimeAPIServer:
 
         # 模型配置（脱敏）
         models_info: dict[str, Any] = {}
-        for label in ("chat_model", "vision_model", "agent_model", "security_model"):
+        for label in (
+            "chat_model",
+            "vision_model",
+            "agent_model",
+            "security_model",
+            "naga_model",
+        ):
             mcfg = getattr(cfg, label, None)
             if mcfg is not None:
                 models_info[label] = {
@@ -690,6 +756,20 @@ class RuntimeAPIServer:
     async def _external_probe_handler(self, request: web.Request) -> Response:
         _ = request
         cfg = self._ctx.config_getter()
+        naga_probe = (
+            _probe_http_endpoint(
+                name="naga_model",
+                base_url=cfg.naga_model.api_url,
+                api_key=cfg.naga_model.api_key,
+                model_name=cfg.naga_model.model_name,
+            )
+            if bool(cfg.api.enabled and cfg.nagaagent_mode_enabled and cfg.naga.enabled)
+            else _skipped_probe(
+                name="naga_model",
+                reason="naga_integration_disabled",
+                model_name=cfg.naga_model.model_name,
+            )
+        )
         checks = [
             _probe_http_endpoint(
                 name="chat_model",
@@ -709,6 +789,7 @@ class RuntimeAPIServer:
                 api_key=cfg.security_model.api_key,
                 model_name=cfg.security_model.model_name,
             ),
+            naga_probe,
             _probe_http_endpoint(
                 name="agent_model",
                 base_url=cfg.agent_model.api_url,
@@ -1513,7 +1594,7 @@ class RuntimeAPIServer:
             )
 
     # ------------------------------------------------------------------
-    # Naga Callback / Targets API
+    # Naga Bind / Send / Unbind API
     # ------------------------------------------------------------------
 
     def _verify_naga_api_key(self, request: web.Request) -> str | None:
@@ -1532,205 +1613,438 @@ class RuntimeAPIServer:
             return "invalid api_key"
         return None
 
-    async def _naga_callback_handler(self, request: web.Request) -> Response:
-        """POST /api/v1/naga/callback — Naga 消息回调"""
-        from Undefined.api.naga_store import mask_token
-
-        # 1. 共享密钥校验
+    async def _naga_bind_callback_handler(self, request: web.Request) -> Response:
+        """POST /api/v1/naga/bind/callback — Naga 绑定回调。"""
         auth_err = self._verify_naga_api_key(request)
         if auth_err is not None:
-            logger.warning("[NagaCallback] 鉴权失败: %s", auth_err)
+            logger.warning("[NagaBindCallback] 鉴权失败: %s", auth_err)
             return _json_error("Unauthorized", status=401)
 
-        # 2. 解析 body
         try:
             body = await request.json()
         except Exception:
             return _json_error("Invalid JSON", status=400)
 
+        bind_uuid = str(body.get("bind_uuid", "") or "").strip()
         naga_id = str(body.get("naga_id", "") or "").strip()
-        token = str(body.get("token", "") or "").strip()
-        message = body.get("message")
+        status = str(body.get("status", "") or "").strip().lower()
+        delivery_signature = str(body.get("delivery_signature", "") or "").strip()
+        reason = str(body.get("reason", "") or "").strip()
+        if not bind_uuid or not naga_id:
+            return _json_error("bind_uuid and naga_id are required", status=400)
+        if status not in {"approved", "rejected"}:
+            return _json_error("status must be 'approved' or 'rejected'", status=400)
 
-        if not naga_id or not token:
-            return _json_error("naga_id and token are required", status=400)
-        if not isinstance(message, dict):
-            return _json_error("message object is required", status=400)
-
-        fmt = str(message.get("format", "text") or "text").strip().lower()
-        content = str(message.get("content", "") or "").strip()
-        if not content:
-            return _json_error("message.content is required", status=400)
-        if fmt not in ("text", "markdown", "html"):
-            return _json_error(
-                "message.format must be 'text', 'markdown', or 'html'", status=400
-            )
-
-        # 3. scoped token 校验
         naga_store = self._ctx.naga_store
         if naga_store is None:
             return _json_error("Naga integration not available", status=503)
 
-        valid, err_msg = naga_store.verify(naga_id, token)
-        if not valid:
-            logger.warning(
-                "[NagaCallback] token 校验失败: naga_id=%s reason=%s token=%s",
-                naga_id,
-                err_msg,
-                mask_token(token),
-            )
-            return _json_error(err_msg, status=403)
-
-        # 4. 获取绑定信息
-        binding = naga_store.get_binding(naga_id)
-        if binding is None:
-            return _json_error("binding not found", status=403)
-
-        cfg = self._ctx.config_getter()
         sender = self._ctx.sender
-        if sender is None:
-            return _json_error("sender not available", status=503)
-
-        # 5. 按 format 渲染内容
-        send_content: str | None = None
-        image_path: str | None = None
-        tmp_path: str | None = None
-
-        if fmt == "text":
-            send_content = content
-        elif fmt in ("markdown", "html"):
-            import tempfile
-
-            html_str = content
-            if fmt == "markdown":
-                html_str = await render_markdown_to_html(content)
-            fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="naga_cb_")
-            os.close(fd)
-            try:
-                await render_html_to_image(html_str, tmp_path)
-                image_path = tmp_path
-            except Exception as exc:
-                logger.warning("[NagaCallback] 渲染失败: %s", exc)
-                # 回退到文本发送
-                send_content = content
-
-        # 6. 发送消息
-        sent_private = False
-        sent_group = False
-
-        try:
-            # 构建图片 CQ 码（跨平台 URI）
-            cq_image: str | None = None
-            if image_path is not None:
-                file_uri = Path(image_path).resolve().as_uri()
-                cq_image = f"[CQ:image,file={file_uri}]"
-
-            # 私聊发给绑定的 QQ 用户
-            try:
-                if send_content is not None:
-                    await sender.send_private_message(binding.qq_id, send_content)
-                elif cq_image is not None:
-                    await sender.send_private_message(binding.qq_id, cq_image)
-                sent_private = True
-            except Exception as exc:
+        if status == "approved":
+            if not delivery_signature:
+                return _json_error(
+                    "delivery_signature is required when approved", status=400
+                )
+            binding, created, err = await naga_store.activate_binding(
+                bind_uuid=bind_uuid,
+                naga_id=naga_id,
+                delivery_signature=delivery_signature,
+            )
+            if err:
                 logger.warning(
-                    "[NagaCallback] 私聊发送失败: naga_id=%s qq=%d error=%s",
+                    "[NagaBindCallback] 激活失败: naga_id=%s bind_uuid=%s err=%s",
                     naga_id,
-                    binding.qq_id,
-                    exc,
+                    bind_uuid,
+                    err.message,
                 )
-
-            # 群聊发到绑定时的群（须仍在 allowed_groups 内）
-            if binding.group_id in cfg.naga.allowed_groups:
+                return _json_error(err.message, status=err.http_status)
+            if created and binding is not None and sender is not None:
                 try:
-                    if send_content is not None:
-                        await sender.send_group_message(binding.group_id, send_content)
-                    elif cq_image is not None:
-                        await sender.send_group_message(binding.group_id, cq_image)
-                    sent_group = True
-                except Exception as exc:
-                    logger.warning(
-                        "[NagaCallback] 群聊发送失败: naga_id=%s group=%d error=%s",
-                        naga_id,
-                        binding.group_id,
-                        exc,
+                    await sender.send_private_message(
+                        binding.qq_id,
+                        f"🎉 你的 Naga 绑定已生效\nnaga_id: {naga_id}",
                     )
-            else:
-                logger.info(
-                    "[NagaCallback] 群 %d 不在 allowed_groups 中，跳过群发",
-                    binding.group_id,
+                except Exception as exc:
+                    logger.warning("[NagaBindCallback] 通知绑定成功失败: %s", exc)
+            return web.json_response(
+                {
+                    "ok": True,
+                    "status": "approved",
+                    "idempotent": not created,
+                    "naga_id": naga_id,
+                    "bind_uuid": bind_uuid,
+                }
+            )
+
+        pending, removed, err = await naga_store.reject_binding(
+            bind_uuid=bind_uuid,
+            naga_id=naga_id,
+            reason=reason,
+        )
+        if err:
+            logger.warning(
+                "[NagaBindCallback] 拒绝失败: naga_id=%s bind_uuid=%s err=%s",
+                naga_id,
+                bind_uuid,
+                err.message,
+            )
+            return _json_error(err.message, status=err.http_status)
+        if removed and pending is not None and sender is not None:
+            try:
+                detail = f"\n原因: {reason}" if reason else ""
+                await sender.send_private_message(
+                    pending.qq_id,
+                    f"❌ 你的 Naga 绑定被远端拒绝\nnaga_id: {naga_id}{detail}",
                 )
-        finally:
-            if tmp_path is not None:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-
-        # 7. record_usage
-        await naga_store.record_usage(naga_id)
-
+            except Exception as exc:
+                logger.warning("[NagaBindCallback] 通知绑定拒绝失败: %s", exc)
         return web.json_response(
             {
                 "ok": True,
-                "sent_private": sent_private,
-                "sent_group": sent_group,
+                "status": "rejected",
+                "idempotent": not removed,
+                "naga_id": naga_id,
+                "bind_uuid": bind_uuid,
             }
         )
 
-    async def _naga_targets_handler(self, request: web.Request) -> Response:
-        """GET /api/v1/naga/targets — 查询发送目标"""
-        # 1. 共享密钥校验
+    async def _naga_messages_send_handler(self, request: web.Request) -> Response:
+        """POST /api/v1/naga/messages/send — 验签后发送消息。"""
+        from Undefined.api.naga_store import mask_token
+
         auth_err = self._verify_naga_api_key(request)
         if auth_err is not None:
-            logger.warning("[NagaTargets] 鉴权失败: %s", auth_err)
+            logger.warning("[NagaSend] 鉴权失败: %s", auth_err)
             return _json_error("Unauthorized", status=401)
 
-        # 2. 参数获取
-        naga_id = str(request.query.get("naga_id", "") or "").strip()
-        token = request.headers.get("X-Naga-Token", "")
+        try:
+            body = await request.json()
+        except Exception:
+            return _json_error("Invalid JSON", status=400)
 
-        if not naga_id or not token:
-            return _json_error("naga_id and X-Naga-Token are required", status=400)
+        bind_uuid = str(body.get("bind_uuid", "") or "").strip()
+        naga_id = str(body.get("naga_id", "") or "").strip()
+        delivery_signature = str(body.get("delivery_signature", "") or "").strip()
+        target = body.get("target")
+        message = body.get("message")
+        if not bind_uuid or not naga_id or not delivery_signature:
+            return _json_error(
+                "bind_uuid, naga_id and delivery_signature are required",
+                status=400,
+            )
+        if not isinstance(target, dict):
+            return _json_error("target object is required", status=400)
+        if not isinstance(message, dict):
+            return _json_error("message object is required", status=400)
 
-        # 3. scoped token 校验
+        raw_target_qq = target.get("qq_id")
+        raw_target_group = target.get("group_id")
+        if raw_target_qq is None or raw_target_group is None:
+            return _json_error(
+                "target.qq_id and target.group_id are required", status=400
+            )
+        try:
+            target_qq = int(raw_target_qq)
+            target_group = int(raw_target_group)
+        except Exception:
+            return _json_error(
+                "target.qq_id and target.group_id must be integers", status=400
+            )
+        mode = str(target.get("mode", "") or "").strip().lower()
+        if mode not in {"private", "group", "both"}:
+            return _json_error(
+                "target.mode must be 'private', 'group', or 'both'", status=400
+            )
+
+        fmt = str(message.get("format", "text") or "text").strip().lower()
+        content = str(message.get("content", "") or "").strip()
+        if fmt not in {"text", "markdown", "html"}:
+            return _json_error(
+                "message.format must be 'text', 'markdown', or 'html'", status=400
+            )
+        if not content:
+            return _json_error("message.content is required", status=400)
+
+        naga_store = self._ctx.naga_store
+        if naga_store is None:
+            return _json_error("Naga integration not available", status=503)
+        binding, err_msg = await naga_store.acquire_delivery(
+            naga_id=naga_id,
+            bind_uuid=bind_uuid,
+            delivery_signature=delivery_signature,
+        )
+        if binding is None:
+            logger.warning(
+                "[NagaSend] 签名校验失败: naga_id=%s bind_uuid=%s reason=%s signature=%s",
+                naga_id,
+                bind_uuid,
+                err_msg.message if err_msg is not None else "unknown_error",
+                mask_token(delivery_signature),
+            )
+            return _json_error(
+                err_msg.message if err_msg is not None else "delivery not available",
+                status=err_msg.http_status if err_msg is not None else 403,
+            )
+        try:
+            if target_qq != binding.qq_id or target_group != binding.group_id:
+                return _json_error("target does not match bound qq/group", status=403)
+
+            cfg = self._ctx.config_getter()
+            if mode == "group" and binding.group_id not in cfg.naga.allowed_groups:
+                return _json_error(
+                    "bound group is not in naga.allowed_groups", status=403
+                )
+
+            sender = self._ctx.sender
+            if sender is None:
+                return _json_error("sender not available", status=503)
+
+            moderation = None
+            security = getattr(self._ctx.command_dispatcher, "security", None)
+            if security is None or not hasattr(security, "moderate_naga_message"):
+                moderation = {
+                    "status": "error_allowed",
+                    "blocked": False,
+                    "categories": [],
+                    "message": "Naga moderation service unavailable; message sent without moderation block",
+                    "model_name": "",
+                }
+            else:
+                result = await security.moderate_naga_message(
+                    message_format=fmt,
+                    content=content,
+                )
+                moderation = {
+                    "status": result.status,
+                    "blocked": result.blocked,
+                    "categories": result.categories,
+                    "message": result.message,
+                    "model_name": result.model_name,
+                }
+            if moderation["blocked"]:
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": "message blocked by moderation",
+                        "moderation": moderation,
+                    },
+                    status=403,
+                )
+
+            send_content: str | None = content if fmt == "text" else None
+            image_path: str | None = None
+            tmp_path: str | None = None
+            rendered = False
+            render_fallback = False
+            if fmt in {"markdown", "html"}:
+                import tempfile
+
+                try:
+                    html_str = content
+                    if fmt == "markdown":
+                        html_str = await render_markdown_to_html(content)
+                    fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="naga_send_")
+                    os.close(fd)
+                    await render_html_to_image(html_str, tmp_path)
+                    image_path = tmp_path
+                    rendered = True
+                except Exception as exc:
+                    logger.warning("[NagaSend] 渲染失败，回退文本发送: %s", exc)
+                    send_content = content
+                    render_fallback = True
+
+            sent_private = False
+            sent_group = False
+            group_policy_blocked = False
+
+            async def _ensure_delivery_active() -> tuple[Any, Response | None]:
+                current_binding, live_err = await naga_store.ensure_delivery_active(
+                    naga_id=naga_id,
+                    bind_uuid=bind_uuid,
+                )
+                if current_binding is None:
+                    return None, web.json_response(
+                        {
+                            "ok": False,
+                            "error": (
+                                live_err.message
+                                if live_err is not None
+                                else "delivery no longer active"
+                            ),
+                            "sent_private": sent_private,
+                            "sent_group": sent_group,
+                            "moderation": moderation,
+                        },
+                        status=live_err.http_status if live_err is not None else 409,
+                    )
+                return current_binding, None
+
+            try:
+                cq_image: str | None = None
+                if image_path is not None:
+                    file_uri = Path(image_path).resolve().as_uri()
+                    cq_image = f"[CQ:image,file={file_uri}]"
+
+                if mode in {"private", "both"}:
+                    current_binding, abort_response = await _ensure_delivery_active()
+                    if abort_response is not None:
+                        return abort_response
+                    try:
+                        if send_content is not None:
+                            await sender.send_private_message(
+                                current_binding.qq_id, send_content
+                            )
+                        elif cq_image is not None:
+                            await sender.send_private_message(
+                                current_binding.qq_id, cq_image
+                            )
+                        sent_private = True
+                    except Exception as exc:
+                        logger.warning(
+                            "[NagaSend] 私聊发送失败: naga_id=%s qq=%d err=%s",
+                            naga_id,
+                            current_binding.qq_id,
+                            exc,
+                        )
+
+                if mode in {"group", "both"}:
+                    current_binding, abort_response = await _ensure_delivery_active()
+                    if abort_response is not None:
+                        return abort_response
+                    current_cfg = self._ctx.config_getter()
+                    if current_binding.group_id not in current_cfg.naga.allowed_groups:
+                        group_policy_blocked = True
+                    else:
+                        try:
+                            if send_content is not None:
+                                await sender.send_group_message(
+                                    current_binding.group_id, send_content
+                                )
+                            elif cq_image is not None:
+                                await sender.send_group_message(
+                                    current_binding.group_id, cq_image
+                                )
+                            sent_group = True
+                        except Exception as exc:
+                            logger.warning(
+                                "[NagaSend] 群聊发送失败: naga_id=%s group=%d err=%s",
+                                naga_id,
+                                current_binding.group_id,
+                                exc,
+                            )
+            finally:
+                if tmp_path is not None:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+
+            if mode == "private" and not sent_private:
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": "private delivery failed",
+                        "sent_private": sent_private,
+                        "sent_group": sent_group,
+                        "moderation": moderation,
+                    },
+                    status=502,
+                )
+            if mode == "group" and not sent_group:
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": "group delivery failed",
+                        "sent_private": sent_private,
+                        "sent_group": sent_group,
+                        "moderation": moderation,
+                    },
+                    status=502,
+                )
+            if mode == "both" and not (sent_private or sent_group):
+                if group_policy_blocked:
+                    return web.json_response(
+                        {
+                            "ok": False,
+                            "error": "bound group is not in naga.allowed_groups",
+                            "sent_private": sent_private,
+                            "sent_group": sent_group,
+                            "moderation": moderation,
+                        },
+                        status=403,
+                    )
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": "all deliveries failed",
+                        "sent_private": sent_private,
+                        "sent_group": sent_group,
+                        "moderation": moderation,
+                    },
+                    status=502,
+                )
+
+            await naga_store.record_usage(naga_id, bind_uuid=bind_uuid)
+            partial_success = mode == "both" and (sent_private != sent_group)
+            return web.json_response(
+                {
+                    "ok": True,
+                    "naga_id": naga_id,
+                    "bind_uuid": bind_uuid,
+                    "sent_private": sent_private,
+                    "sent_group": sent_group,
+                    "partial_success": partial_success,
+                    "delivery_status": (
+                        "partial_success" if partial_success else "full_success"
+                    ),
+                    "rendered": rendered,
+                    "render_fallback": render_fallback,
+                    "moderation": moderation,
+                }
+            )
+        finally:
+            await naga_store.release_delivery(bind_uuid=bind_uuid)
+
+    async def _naga_unbind_handler(self, request: web.Request) -> Response:
+        """POST /api/v1/naga/unbind — 远端主动解绑。"""
+        auth_err = self._verify_naga_api_key(request)
+        if auth_err is not None:
+            logger.warning("[NagaUnbind] 鉴权失败: %s", auth_err)
+            return _json_error("Unauthorized", status=401)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return _json_error("Invalid JSON", status=400)
+
+        bind_uuid = str(body.get("bind_uuid", "") or "").strip()
+        naga_id = str(body.get("naga_id", "") or "").strip()
+        delivery_signature = str(body.get("delivery_signature", "") or "").strip()
+        if not bind_uuid or not naga_id or not delivery_signature:
+            return _json_error(
+                "bind_uuid, naga_id and delivery_signature are required",
+                status=400,
+            )
+
         naga_store = self._ctx.naga_store
         if naga_store is None:
             return _json_error("Naga integration not available", status=503)
 
-        valid, err_msg = naga_store.verify(naga_id, token)
-        if not valid:
-            return _json_error(err_msg, status=403)
-
-        binding = naga_store.get_binding(naga_id)
+        binding, changed, err = await naga_store.revoke_binding(
+            naga_id,
+            expected_bind_uuid=bind_uuid,
+            delivery_signature=delivery_signature,
+        )
         if binding is None:
-            return _json_error("binding not found", status=403)
-
-        cfg = self._ctx.config_getter()
-
-        # 4. 构建可用群列表
-        available_groups: list[dict[str, Any]] = []
-        if binding.group_id in cfg.naga.allowed_groups:
-            group_info: dict[str, Any] = {"group_id": binding.group_id}
-            # 尝试获取群名
-            onebot = self._ctx.onebot
-            if onebot is not None:
-                try:
-                    info = await onebot.get_group_info(binding.group_id)
-                    if isinstance(info, dict):
-                        data = info.get("data", info)
-                        if isinstance(data, dict):
-                            name = data.get("group_name", "")
-                            if name:
-                                group_info["group_name"] = str(name)
-                except Exception:
-                    pass
-            available_groups.append(group_info)
-
+            return _json_error(
+                err.message if err is not None else "binding not found",
+                status=err.http_status if err is not None else 404,
+            )
         return web.json_response(
             {
+                "ok": True,
+                "idempotent": not changed,
                 "naga_id": naga_id,
-                "bound_qq": binding.qq_id,
-                "groups": available_groups,
+                "bind_uuid": bind_uuid,
             }
         )

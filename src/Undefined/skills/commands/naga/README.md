@@ -2,65 +2,62 @@
 
 ## 这是什么？
 
-NagaAgent 是一个可以接入 Undefined 的外部 AI 助手。
-通过 `/naga` 命令，你可以把自己的 NagaAgent 绑定到 QQ 群，绑定之后，NagaAgent 里的特定功能就可以向你发送消息。
+`/naga` 用于把 QQ 用户与 NagaAgent 的远端身份绑定起来，并在需要时解除绑定。
+当前只保留两个子命令：
 
-## 普通用户
+- `/naga bind <naga_id>`
+- `/naga unbind <naga_id>`
 
-普通用户只需要用到一个子命令：`bind`（绑定）。
+## 可见性与作用域
 
-### 如何绑定？
+- `/naga` 只会在 `naga.allowed_groups` 白名单群中出现和生效
+- 同时要求 `[api].enabled = true`，否则命令会整体隐藏
+- 在非白名单群中，`/naga` 对用户是静默不可见的
+- `/naga bind` 仅限白名单群聊
+- `/naga unbind` 仅限超级管理员，可在私聊或白名单群中使用
 
-1. 在**群聊**中发送：`/naga bind <你的naga_id>`
-2. 系统会提示"申请已提交，等待超管审核"
-3. 超级管理员审核通过后，你会收到私聊通知
-4. 绑定完成！你的 NagaAgent 即可开始使用
+## /naga bind
 
-### 注意事项
+用户在白名单群中执行：
 
-- `naga_id` 是你在 NagaAgent 中设置的标识，不是 QQ 号
-- 每个 `naga_id` 只能绑定一次，不能重复申请
-- 如果已在审核队列中，无需重复提交
-
-## 管理员命令（仅超级管理员）
-
-以下命令仅超级管理员可使用，用于管理所有绑定：
-
-| 子命令 | 用法 | 说明 |
-|--------|------|------|
-| approve | `/naga approve <naga_id>` | 通过绑定申请，系统会自动生成 Token 并通知申请人 |
-| reject | `/naga reject <naga_id>` | 拒绝绑定申请，申请人会收到私聊通知 |
-| revoke | `/naga revoke <naga_id>` | 吊销已有绑定，该 NagaAgent 将无法继续使用 |
-| list | `/naga list` | 查看所有活跃的绑定（含使用次数） |
-| pending | `/naga pending` | 查看等待审核的申请列表 |
-| info | `/naga info <naga_id>` | 查看指定绑定的详细信息（Token、使用次数、创建时间等） |
-
-## 完整示例
-
+```text
+/naga bind <你的_naga_id>
 ```
-# 普通用户：在群聊中提交绑定申请
-/naga bind my-naga-001
 
-# 超级管理员：查看待审核列表
-/naga pending
+流程：
 
-# 超级管理员：通过申请
-/naga approve my-naga-001
+1. Undefined 本地记录一个待确认绑定，并生成唯一 `bind_uuid`
+2. 请求会被发送到 Naga 端进行远端验证
+3. 等待 Naga 端通过 Runtime API 回调确认
+4. 回调成功后，Undefined 才会真正激活绑定并保存 `delivery_signature`
+5. 如果远端暂时不可达，本地 pending 会保留；再次执行同一个 `/naga bind` 会沿用原来的 `bind_uuid` 继续重试
 
-# 超级管理员：查看绑定详情
-/naga info my-naga-001
+这意味着 `/naga bind` 的成功提示只代表“请求已提交到 Naga 端”，不代表绑定已经最终生效。
 
-# 超级管理员：吊销绑定
-/naga revoke my-naga-001
+## /naga unbind
+
+超级管理员执行：
+
+```text
+/naga unbind <naga_id>
 ```
+
+行为：
+
+- 本地立即吊销该绑定
+- 尝试通知远端 Naga 端同步吊销
+- 绑定用户会收到一条私聊通知
 
 ## 常见问题
 
-**Q: 提示"Naga 集成未启用"？**
-A: 请联系管理员开启相关配置开关。
+**Q: 在群里发 `/naga` 没反应？**
 
-**Q: 在群里发了 /naga bind 没有任何反应？**
-A: 该群可能不在白名单中，请联系管理员添加。
+A: 该群很可能不在 `naga.allowed_groups` 中；按设计这里会静默不可见。
 
-**Q: 绑定通过后 NagaAgent 怎么用？**
-A: 请参考 NagaAgent 相关文档，填入QQ号以及其他几个参数即可完成对接。
+**Q: 为什么 `/naga bind` 提示成功了，但还不能用？**
+
+A: 因为它只是“已提交到 Naga 端”。真正生效要等远端回调确认。
+
+**Q: 不配置 `models.naga` 可以吗？**
+
+A: 可以。未配置时，Naga 外发消息审核会回退到 `models.security`。

@@ -239,3 +239,22 @@ async def test_poll_loop_dispatches_without_waiting_previous_job_completion() ->
 
     assert started[:2] == ["job-1", "job-2"]
     assert "job-1" in finished and "job-2" in finished
+
+
+def test_extract_required_tool_args_preserves_job_context_in_error() -> None:
+    worker = _make_worker()
+
+    with pytest.raises(ValueError) as exc_info:
+        worker._extract_required_tool_args(
+            {},
+            expected_tool_name="submit_historian_result",
+            stage="historian_rewrite",
+            job_id="job-123",
+            attempt=2,
+            target="user:42",
+        )
+
+    message = str(exc_info.value)
+    assert "job_id=job-123" in message
+    assert "attempt=2" in message
+    assert "target=user:42" in message

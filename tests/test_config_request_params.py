@@ -148,6 +148,11 @@ priority = "high"
     assert cfg.security_model.responses_force_stateless_replay is True
     assert cfg.security_model.request_params == cfg.chat_model.request_params
 
+    assert cfg.naga_model.api_mode == cfg.security_model.api_mode
+    assert cfg.naga_model.reasoning_enabled == cfg.security_model.reasoning_enabled
+    assert cfg.naga_model.reasoning_effort == cfg.security_model.reasoning_effort
+    assert cfg.naga_model.request_params == cfg.security_model.request_params
+
     assert cfg.agent_model.api_mode == "responses"
     assert cfg.agent_model.reasoning_enabled is True
     assert cfg.agent_model.reasoning_effort == "minimal"
@@ -172,3 +177,49 @@ priority = "high"
         "metadata": {"source": "embed"},
     }
     assert cfg.rerank_model.request_params == {"priority": "high"}
+
+
+def test_naga_model_request_params_override_security_defaults(tmp_path: Path) -> None:
+    cfg = _load_config(
+        tmp_path / "config.toml",
+        """
+[onebot]
+ws_url = "ws://127.0.0.1:3001"
+
+[models.chat]
+api_url = "https://api.openai.com/v1"
+api_key = "sk-chat"
+model_name = "gpt-chat"
+
+[models.security]
+api_url = "https://api.openai.com/v1"
+api_key = "sk-security"
+model_name = "gpt-security"
+reasoning_enabled = true
+reasoning_effort = "high"
+
+[models.security.request_params]
+temperature = 0.1
+
+[models.naga]
+api_url = "https://api.openai.com/v1"
+api_key = "sk-naga"
+model_name = "gpt-naga"
+api_mode = "responses"
+reasoning_enabled = false
+reasoning_effort = "low"
+
+[models.naga.request_params]
+temperature = 0.6
+metadata = { source = "naga" }
+""",
+    )
+
+    assert cfg.naga_model.model_name == "gpt-naga"
+    assert cfg.naga_model.api_mode == "responses"
+    assert cfg.naga_model.reasoning_enabled is False
+    assert cfg.naga_model.reasoning_effort == "low"
+    assert cfg.naga_model.request_params == {
+        "temperature": 0.6,
+        "metadata": {"source": "naga"},
+    }

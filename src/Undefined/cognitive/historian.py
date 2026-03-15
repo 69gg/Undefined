@@ -9,6 +9,8 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from Undefined.utils.tool_calls import extract_required_tool_call_arguments
+
 logger = logging.getLogger(__name__)
 
 _MAX_LOG_PREVIEW_LEN = 200
@@ -367,60 +369,19 @@ class HistorianWorker:
             suffix += f" attempt={attempt}"
         if target:
             suffix += f" target={target}"
-
-        choices = response.get("choices")
-        if not isinstance(choices, list) or not choices:
-            logger.error("[史官] 任务 %s 响应缺少 choices:%s", job_id, suffix)
-            raise ValueError(f"{stage} 响应缺少 choices")
-
-        message = choices[0].get("message") if isinstance(choices[0], dict) else None
-        if not isinstance(message, dict):
-            logger.error("[史官] 任务 %s 响应缺少 message:%s", job_id, suffix)
-            raise ValueError(f"{stage} 响应缺少 message")
-
-        tool_calls = message.get("tool_calls")
-        if not isinstance(tool_calls, list) or not tool_calls:
-            logger.error(
-                "[史官] 任务 %s 响应缺少 tool_calls:%s content_preview=%s",
-                job_id,
-                suffix,
-                _preview_text(str(message.get("content", ""))),
-            )
-            raise ValueError(f"{stage} 响应缺少 tool_calls")
-
-        tool_call = tool_calls[0]
-        function = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
-        tool_name = str(function.get("name", "")).strip()
-        if tool_name != expected_tool_name:
-            logger.error(
-                "[史官] 任务 %s 工具名不匹配:%s actual_tool=%s",
-                job_id,
-                suffix,
-                tool_name,
-            )
-            raise ValueError(f"{stage} 工具名不匹配: {tool_name}")
-
-        raw_args = str(function.get("arguments", "{}"))
         try:
-            args = json.loads(raw_args)
-        except json.JSONDecodeError as exc:
+            return extract_required_tool_call_arguments(
+                response,
+                expected_tool_name=expected_tool_name,
+                stage=stage,
+                logger=logger,
+                error_context=f"job_id={job_id}{suffix}",
+            )
+        except Exception as exc:
             logger.error(
-                "[史官] 任务 %s 工具参数 JSON 解析失败:%s err=%s raw_preview=%s",
-                job_id,
-                suffix,
-                exc,
-                _preview_text(raw_args),
+                "[史官] 任务 %s 提取工具参数失败:%s err=%s", job_id, suffix, exc
             )
             raise
-        if not isinstance(args, dict):
-            logger.error(
-                "[史官] 任务 %s 工具参数类型非法:%s type=%s",
-                job_id,
-                suffix,
-                type(args).__name__,
-            )
-            raise ValueError(f"{stage} 工具参数类型非法")
-        return args
 
     async def _rewrite(
         self,
