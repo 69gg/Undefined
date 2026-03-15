@@ -38,6 +38,47 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --group ci -p ${{ env.PYTHON_VERSION }}
 
+      - name: Validate release tag matches package version
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          uv run python - <<'PY'
+          import os
+          import pathlib
+          import re
+          import sys
+          import tomllib
+
+          tag_name = os.environ["TAG_NAME"]
+          expected_version = tag_name.removeprefix("v")
+
+          pyproject = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
+          project_version = str(pyproject["project"]["version"]).strip()
+
+          init_text = pathlib.Path("src/Undefined/__init__.py").read_text(encoding="utf-8")
+          match = re.search(r'__version__\s*=\s*"([^"]+)"', init_text)
+          if match is None:
+              raise SystemExit("Could not find __version__ in src/Undefined/__init__.py")
+          init_version = match.group(1).strip()
+
+          errors: list[str] = []
+          if project_version != init_version:
+              errors.append(
+                  f"Version mismatch: pyproject.toml={project_version}, src/Undefined/__init__.py={init_version}"
+              )
+          if project_version != expected_version:
+              errors.append(
+                  f"Tag/version mismatch: tag={tag_name}, expected package version={expected_version}, actual={project_version}"
+              )
+
+          if errors:
+              raise SystemExit("\n".join(errors))
+
+          print(
+              f"Validated release version {project_version} from tag {tag_name}, pyproject.toml, and src/Undefined/__init__.py"
+          )
+          PY
+
       - name: Cache Ruff
         uses: actions/cache@v4
         with:
@@ -466,5 +507,31 @@ jobs:
           name: python-dist
           path: dist
 
+      - name: Verify downloaded distributions
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          uv run python - <<'PY'
+          import os
+          import pathlib
+
+          expected_version = os.environ["TAG_NAME"].removeprefix("v")
+          dist_dir = pathlib.Path("dist")
+          files = sorted(path.name for path in dist_dir.glob("*"))
+          if not files:
+              raise SystemExit("No Python distributions were downloaded")
+
+          bad = [name for name in files if f"-{expected_version}" not in name]
+          if bad:
+              raise SystemExit(
+                  "Downloaded distributions do not match release tag version "
+                  f"{expected_version}: {bad}"
+              )
+
+          print("Distributions ready for publish:")
+          for name in files:
+              print(f" - {name}")
+          PY
+
       - name: Publish to PyPI
-        run: uv publish dist/*
+        run: uv publish --check-url https://pypi.org/simple/ dist/*
