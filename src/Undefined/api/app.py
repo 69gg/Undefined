@@ -1790,10 +1790,7 @@ class RuntimeAPIServer:
                 return _json_error("target does not match bound qq/group", status=403)
 
             cfg = self._ctx.config_getter()
-            if (
-                mode in {"group", "both"}
-                and binding.group_id not in cfg.naga.allowed_groups
-            ):
+            if mode == "group" and binding.group_id not in cfg.naga.allowed_groups:
                 return _json_error(
                     "bound group is not in naga.allowed_groups", status=403
                 )
@@ -1858,6 +1855,7 @@ class RuntimeAPIServer:
 
             sent_private = False
             sent_group = False
+            group_policy_blocked = False
 
             async def _ensure_delivery_active() -> tuple[Any, Response | None]:
                 current_binding, live_err = await naga_store.ensure_delivery_active(
@@ -1915,33 +1913,25 @@ class RuntimeAPIServer:
                         return abort_response
                     current_cfg = self._ctx.config_getter()
                     if current_binding.group_id not in current_cfg.naga.allowed_groups:
-                        return web.json_response(
-                            {
-                                "ok": False,
-                                "error": "bound group is not in naga.allowed_groups",
-                                "sent_private": sent_private,
-                                "sent_group": sent_group,
-                                "moderation": moderation,
-                            },
-                            status=403,
-                        )
-                    try:
-                        if send_content is not None:
-                            await sender.send_group_message(
-                                current_binding.group_id, send_content
+                        group_policy_blocked = True
+                    else:
+                        try:
+                            if send_content is not None:
+                                await sender.send_group_message(
+                                    current_binding.group_id, send_content
+                                )
+                            elif cq_image is not None:
+                                await sender.send_group_message(
+                                    current_binding.group_id, cq_image
+                                )
+                            sent_group = True
+                        except Exception as exc:
+                            logger.warning(
+                                "[NagaSend] 群聊发送失败: naga_id=%s group=%d err=%s",
+                                naga_id,
+                                current_binding.group_id,
+                                exc,
                             )
-                        elif cq_image is not None:
-                            await sender.send_group_message(
-                                current_binding.group_id, cq_image
-                            )
-                        sent_group = True
-                    except Exception as exc:
-                        logger.warning(
-                            "[NagaSend] 群聊发送失败: naga_id=%s group=%d err=%s",
-                            naga_id,
-                            current_binding.group_id,
-                            exc,
-                        )
             finally:
                 if tmp_path is not None:
                     try:
@@ -1972,6 +1962,17 @@ class RuntimeAPIServer:
                     status=502,
                 )
             if mode == "both" and not (sent_private or sent_group):
+                if group_policy_blocked:
+                    return web.json_response(
+                        {
+                            "ok": False,
+                            "error": "bound group is not in naga.allowed_groups",
+                            "sent_private": sent_private,
+                            "sent_group": sent_group,
+                            "moderation": moderation,
+                        },
+                        status=403,
+                    )
                 return web.json_response(
                     {
                         "ok": False,

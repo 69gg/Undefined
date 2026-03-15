@@ -337,6 +337,56 @@ async def test_naga_messages_send_releases_delivery_when_group_not_allowed(
 
 
 @pytest.mark.asyncio
+async def test_naga_messages_send_both_mode_allows_private_when_group_not_allowed(
+    tmp_path: Path,
+) -> None:
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    sender = _FakeSender()
+    server = _make_server(
+        store=store,
+        sender=sender,
+        security_result=NagaModerationResult(
+            blocked=False,
+            status="passed",
+            categories=[],
+            message="ok",
+            model_name="naga-moderation",
+        ),
+    )
+    server._ctx.config_getter().naga.allowed_groups = set()
+
+    response = await server._naga_messages_send_handler(
+        _make_request(
+            json_body={
+                "bind_uuid": "uuid_a",
+                "naga_id": "alice",
+                "delivery_signature": "sig_1",
+                "target": {"qq_id": 123, "group_id": 456, "mode": "both"},
+                "message": {"format": "text", "content": "hello"},
+            },
+            headers={"Authorization": "Bearer shared-key"},
+        )
+    )
+
+    payload = _json(response)
+    assert response.status == 200
+    assert payload["ok"] is True
+    assert payload["sent_private"] is True
+    assert payload["sent_group"] is False
+    assert payload["partial_success"] is True
+    assert payload["delivery_status"] == "partial_success"
+    assert sender.private_messages == [(123, "hello")]
+    assert sender.group_messages == []
+    assert store._active_deliveries == {}
+
+
+@pytest.mark.asyncio
 async def test_naga_messages_send_blocks_on_moderation_hit(tmp_path: Path) -> None:
     store = NagaStore(tmp_path / "naga_bindings.json")
     await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
@@ -545,6 +595,58 @@ async def test_naga_messages_send_both_mode_reports_partial_success(
     assert payload["delivery_status"] == "partial_success"
     assert sender.private_messages == [(123, "hello")]
     assert sender.group_messages == []
+
+
+@pytest.mark.asyncio
+async def test_naga_messages_send_both_mode_returns_403_if_group_blocked_and_private_fails(
+    tmp_path: Path,
+) -> None:
+    class _PrivateFailingSender(_FakeSender):
+        async def send_private_message(
+            self, user_id: int, message: str, **_: Any
+        ) -> None:
+            del user_id, message
+            raise RuntimeError("private failed")
+
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    sender = _PrivateFailingSender()
+    server = _make_server(
+        store=store,
+        sender=sender,
+        security_result=NagaModerationResult(
+            blocked=False,
+            status="passed",
+            categories=[],
+            message="ok",
+            model_name="naga-moderation",
+        ),
+    )
+    server._ctx.config_getter().naga.allowed_groups = set()
+
+    response = await server._naga_messages_send_handler(
+        _make_request(
+            json_body={
+                "bind_uuid": "uuid_a",
+                "naga_id": "alice",
+                "delivery_signature": "sig_1",
+                "target": {"qq_id": 123, "group_id": 456, "mode": "both"},
+                "message": {"format": "text", "content": "hello"},
+            },
+            headers={"Authorization": "Bearer shared-key"},
+        )
+    )
+
+    payload = _json(response)
+    assert response.status == 403
+    assert payload["error"] == "bound group is not in naga.allowed_groups"
+    assert payload["sent_private"] is False
+    assert payload["sent_group"] is False
 
 
 @pytest.mark.asyncio
