@@ -8,6 +8,7 @@ from pathlib import Path
 from Undefined.ai import AIClient
 from Undefined.config import Config
 from Undefined.config.manager import ConfigManager
+from Undefined.services.security import SecurityService
 from Undefined.services.queue_manager import QueueManager
 from Undefined.skills.agents.intro_generator import AgentIntroGenConfig
 from Undefined.utils.queue_intervals import build_model_queue_intervals
@@ -80,6 +81,7 @@ class HotReloadContext:
     ai_client: AIClient
     queue_manager: QueueManager
     config_manager: ConfigManager
+    security_service: SecurityService
 
 
 def apply_config_updates(
@@ -93,6 +95,7 @@ def apply_config_updates(
     changed_keys = set(changes.keys())
     logger.debug("[配置] 热更新变更项: %s", ", ".join(sorted(changed_keys)))
     _log_restart_required(changed_keys)
+    context.security_service.apply_config(updated)
 
     if _needs_queue_interval_update(changed_keys):
         context.queue_manager.update_model_intervals(

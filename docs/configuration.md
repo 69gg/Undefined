@@ -255,7 +255,7 @@ model_name = "gpt-4o-mini"
 - 若部分字段缺失：逐项继承 agent 配置，包括 `api_mode`、`reasoning_*`、`thinking_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`。
 - `queue_interval_seconds<=0` 时回退到 agent 的间隔。
 
-### 4.4.7 模型池
+### 4.4.8 模型池
 
 相关节：
 - `[models.chat.pool]`
@@ -287,7 +287,7 @@ model_name = "gpt-4o-mini"
 2. 对应池 `enabled=true`
 3. 池列表非空
 
-### 4.4.8 `[models.embedding]` 嵌入模型
+### 4.4.9 `[models.embedding]` 嵌入模型
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -300,7 +300,7 @@ model_name = "gpt-4o-mini"
 | `document_instruction` | `""` | 文档前缀 |
 | `request_params` | `{}` | 额外请求体参数；保留字段如 `model`/`input`/`dimensions` 会忽略 |
 
-### 4.4.9 `[models.rerank]` 重排模型
+### 4.4.10 `[models.rerank]` 重排模型
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|

@@ -20,3 +20,7 @@ def is_naga_command_visible(context: CommandContext) -> bool:
     if context.scope == "private":
         return context.config.is_superadmin(context.sender_id)
     return False
+
+
+def is_command_visible(context: CommandContext) -> bool:
+    return is_naga_command_visible(context)

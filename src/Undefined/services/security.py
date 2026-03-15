@@ -159,6 +159,14 @@ class SecurityService:
             config.security_model, self._requester
         )
 
+    def apply_config(self, config: Config) -> None:
+        """应用热更新后的配置到安全服务。"""
+        self.config = config
+        self.rate_limiter.config = config
+        self.injection_response_agent = InjectionResponseAgent(
+            config.security_model, self._requester
+        )
+
     async def detect_injection(
         self, text: str, message_content: Optional[list[dict[str, Any]]] = None
     ) -> bool:

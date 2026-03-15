@@ -378,6 +378,7 @@ async def main() -> None:
         ai_client=ai,
         queue_manager=handler.queue_manager,
         config_manager=config_manager,
+        security_service=handler.security,
     )
 
     def _apply_config_updates(
