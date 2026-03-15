@@ -375,6 +375,7 @@ class HistorianWorker:
                 expected_tool_name=expected_tool_name,
                 stage=stage,
                 logger=logger,
+                error_context=f"job_id={job_id}{suffix}",
             )
         except Exception as exc:
             logger.error(

@@ -436,6 +436,11 @@ async def main() -> None:
             logger.exception("[RuntimeAPI] 启动失败，已跳过: %s", exc)
     else:
         logger.info("[RuntimeAPI] 已禁用（api.enabled=false）")
+        if config.nagaagent_mode_enabled and config.naga.enabled:
+            logger.warning(
+                "[Naga] 已启用 nagaagent_mode_enabled 与 naga.enabled，但 Runtime API 已关闭；"
+                "/naga 命令和 /api/v1/naga/* 端点都不会可用"
+            )
 
     try:
         await onebot.run_with_reconnect()

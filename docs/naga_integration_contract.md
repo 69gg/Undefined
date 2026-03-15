@@ -99,6 +99,7 @@ Authorization: Bearer <config.[naga].api_key>
 - `markdown/html` 会按当前 Runtime API 的渲染逻辑先尝试转图片
 - 若渲染失败，会回退为文本发送，并在响应中标记 `render_fallback=true`
 - 当 `mode=both` 时，只要私聊或群聊至少有一个发送成功，接口仍返回 `200`；由 `sent_private` / `sent_group` 表示实际投递结果
+- 成功响应会额外带 `partial_success` 与 `delivery_status`，用于显式区分“完全成功”和“部分成功”
 
 审核规则：
 
@@ -119,6 +120,8 @@ Authorization: Bearer <config.[naga].api_key>
   "bind_uuid": "unique-bind-uuid",
   "sent_private": true,
   "sent_group": true,
+  "partial_success": false,
+  "delivery_status": "full_success",
   "rendered": true,
   "render_fallback": false,
   "moderation": {

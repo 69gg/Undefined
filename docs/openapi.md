@@ -164,6 +164,7 @@ curl http://127.0.0.1:8788/openapi.json
 | `host` / `port` | `string` / `int` | WebSocket 端点的主机与端口 |
 
 说明：这里的 HTTP 探针是“可达性/连通性探测”。只要拿到 HTTP 响应就会记为 `status=ok`，真实业务状态应结合 `http_status` 一起解读。
+当 Naga 集成未启用时，`naga_model` 会以 `status=skipped`、`reason=naga_integration_disabled` 出现在结果中。
 
 ### 记忆（只读）
 
@@ -470,6 +471,7 @@ Naga 集成端点仅在以下条件同时满足时注册：
 - 发送前会进行一次审核；命中风险时返回 `403`，审核模型异常/超时时 fail-open，并在响应中返回 `moderation.status=error_allowed`。
 - `markdown` / `html` 会优先尝试渲染成图片；渲染失败时会回退为文本发送，并在响应中返回 `render_fallback=true`。
 - 当 `mode=both` 时，只要私聊或群聊至少有一个成功，接口仍返回 `200`，由 `sent_private` / `sent_group` 指示实际投递结果。
+- 成功响应会额外返回 `partial_success` 与 `delivery_status`：完全成功时为 `false` / `full_success`，部分成功时为 `true` / `partial_success`。
 
 ### 典型错误码
 

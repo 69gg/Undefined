@@ -256,10 +256,10 @@ async def _handle_unbind(
     naga_id = args[0].strip()
     binding, changed, err = await naga_store.revoke_binding(naga_id)
     if binding is None:
-        await _reply(context, f"❌ 未找到 naga_id '{naga_id}' 的绑定")
-        return
-    if err:
-        await _reply(context, f"❌ {err}")
+        detail = (
+            err.message if err is not None else f"未找到 naga_id '{naga_id}' 的绑定"
+        )
+        await _reply(context, f"❌ {detail}")
         return
     if not changed:
         await _reply(context, f"ℹ️ naga_id '{naga_id}' 已处于解绑状态")

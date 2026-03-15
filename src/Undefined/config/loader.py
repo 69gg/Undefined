@@ -2151,7 +2151,9 @@ class Config:
                 request_params=_get_model_request_params(data, "naga"),
             )
 
-        logger.info("未配置 Naga 审核模型，将使用安全模型作为后备")
+        logger.info(
+            "未配置 Naga 审核模型，将使用已解析的安全模型配置作为后备（安全模型本身可能已回退）"
+        )
         return SecurityModelConfig(
             api_url=security_model.api_url,
             api_key=security_model.api_key,

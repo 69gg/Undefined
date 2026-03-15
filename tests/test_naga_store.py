@@ -60,7 +60,7 @@ async def test_submit_already_bound(store: NagaStore) -> None:
     )
     assert binding is not None
     assert created is True
-    assert err == ""
+    assert err is None
 
     ok, msg, pending = await store.submit_binding("alice", qq_id=789, group_id=456)
     assert ok is False
@@ -77,7 +77,7 @@ async def test_activate_binding(store: NagaStore) -> None:
     )
     assert binding is not None
     assert created is True
-    assert err == ""
+    assert err is None
     assert binding.naga_id == "alice"
     assert binding.bind_uuid == "uuid_a"
     assert binding.delivery_signature == "sig_1"
@@ -100,7 +100,7 @@ async def test_activate_binding_is_idempotent(store: NagaStore) -> None:
     assert second is not None
     assert created is True
     assert created2 is False
-    assert err2 == ""
+    assert err2 is None
 
 
 async def test_reject_binding(store: NagaStore) -> None:
@@ -112,7 +112,7 @@ async def test_reject_binding(store: NagaStore) -> None:
     assert pending is not None
     assert pending.qq_id == 123
     assert removed is True
-    assert err == ""
+    assert err is None
     assert store.list_pending() == []
 
 
@@ -127,7 +127,7 @@ async def test_reject_binding_is_idempotent(store: NagaStore) -> None:
 
     assert pending is None
     assert removed is False
-    assert err == ""
+    assert err is None
 
 
 async def test_cancel_pending(store: NagaStore) -> None:
@@ -297,11 +297,41 @@ async def test_revoke_binding_with_old_bind_uuid_is_idempotent(
     assert historical.bind_uuid == "uuid_a"
     assert historical.revoked is True
     assert changed is False
-    assert err == ""
+    assert err is None
     current = store.get_binding("alice")
     assert current is not None
     assert current.bind_uuid == "uuid_b"
     assert current.revoked is False
+
+
+async def test_begin_remote_submit_persists_attempt_state(tmp_path: Path) -> None:
+    data_file = tmp_path / "naga_bindings.json"
+    store = NagaStore(data_file=data_file)
+    ok, _, pending = await store.submit_binding(
+        "alice",
+        qq_id=123,
+        group_id=456,
+        bind_uuid="uuid_a",
+    )
+    assert ok is True
+    assert pending is not None
+
+    updated, should_submit = await store.begin_remote_submit(
+        "alice",
+        bind_uuid="uuid_a",
+    )
+
+    assert should_submit is True
+    assert updated is not None
+    assert updated.submit_attempts == 1
+    assert updated.last_submit_attempt_at is not None
+
+    reloaded = NagaStore(data_file=data_file)
+    await reloaded.load()
+    reloaded_pending = reloaded.get_pending("alice")
+    assert reloaded_pending is not None
+    assert reloaded_pending.submit_attempts == 1
+    assert reloaded_pending.last_submit_attempt_at is not None
 
 
 async def test_persistence(tmp_path: Path) -> None:

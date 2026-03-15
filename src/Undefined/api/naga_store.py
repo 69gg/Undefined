@@ -22,6 +22,7 @@ _PENDING_TTL_SECONDS = 24 * 60 * 60
 _TERMINAL_RECORD_RETENTION_SECONDS = 30 * 24 * 60 * 60
 
 CompletedRequestStatus = Literal["rejected", "cancelled", "expired"]
+NagaStoreErrorCode = Literal["forbidden", "not_found", "conflict"]
 
 
 @dataclass
@@ -82,6 +83,22 @@ class CompletedBindRequest:
     status: CompletedRequestStatus
     resolved_at: float
     reason: str = ""
+
+
+@dataclass(frozen=True)
+class NagaStoreError:
+    """结构化错误，避免调用方靠字符串猜状态码。"""
+
+    code: NagaStoreErrorCode
+    message: str
+
+    @property
+    def http_status(self) -> int:
+        return {
+            "forbidden": 403,
+            "not_found": 404,
+            "conflict": 409,
+        }[self.code]
 
 
 def generate_bind_uuid() -> str:
@@ -415,6 +432,7 @@ class NagaStore:
                 return _clone_pending(pending), False
             pending.last_submit_attempt_at = now
             pending.submit_attempts += 1
+            await self.save()
             return _clone_pending(pending), True
 
     async def activate_binding(
@@ -423,7 +441,7 @@ class NagaStore:
         bind_uuid: str,
         naga_id: str,
         delivery_signature: str,
-    ) -> tuple[NagaBinding | None, bool, str]:
+    ) -> tuple[NagaBinding | None, bool, NagaStoreError | None]:
         async with self._lock:
             now = time.time()
             dirty = self._expire_pending_locked(now)
@@ -436,14 +454,22 @@ class NagaStore:
                 ):
                     if dirty:
                         await self.save()
-                    return None, False, "delivery_signature 不匹配"
+                    return (
+                        None,
+                        False,
+                        NagaStoreError("forbidden", "delivery_signature 不匹配"),
+                    )
                 if dirty:
                     await self.save()
-                return _clone_binding(binding), False, ""
+                return _clone_binding(binding), False, None
             if binding is not None and not binding.revoked:
                 if dirty:
                     await self.save()
-                return None, False, f"naga_id '{naga_id}' 已绑定"
+                return (
+                    None,
+                    False,
+                    NagaStoreError("conflict", f"naga_id '{naga_id}' 已绑定"),
+                )
 
             historical = self._history.get(bind_uuid)
             if historical is not None and historical.naga_id == naga_id:
@@ -452,26 +478,42 @@ class NagaStore:
                 ):
                     if dirty:
                         await self.save()
-                    return None, False, "delivery_signature 不匹配"
+                    return (
+                        None,
+                        False,
+                        NagaStoreError("forbidden", "delivery_signature 不匹配"),
+                    )
                 if dirty:
                     await self.save()
-                return _binding_from_history(historical), False, ""
+                return _binding_from_history(historical), False, None
 
             completed = self._completed_requests.get(bind_uuid)
             if completed is not None and completed.naga_id == naga_id:
                 if dirty:
                     await self.save()
-                return None, False, f"bind request already {completed.status}"
+                return (
+                    None,
+                    False,
+                    NagaStoreError(
+                        "conflict", f"bind request already {completed.status}"
+                    ),
+                )
 
             pending = self._pending.get(naga_id)
             if pending is None:
                 if dirty:
                     await self.save()
-                return None, False, f"naga_id '{naga_id}' 未处于待绑定状态"
+                return (
+                    None,
+                    False,
+                    NagaStoreError(
+                        "not_found", f"naga_id '{naga_id}' 未处于待绑定状态"
+                    ),
+                )
             if pending.bind_uuid != bind_uuid:
                 if dirty:
                     await self.save()
-                return None, False, "bind_uuid 不匹配"
+                return None, False, NagaStoreError("forbidden", "bind_uuid 不匹配")
 
             binding = NagaBinding(
                 naga_id=naga_id,
@@ -502,7 +544,7 @@ class NagaStore:
             mask_token(delivery_signature),
             bind_uuid,
         )
-        return _clone_binding(binding), True, ""
+        return _clone_binding(binding), True, None
 
     async def reject_binding(
         self,
@@ -510,7 +552,7 @@ class NagaStore:
         bind_uuid: str,
         naga_id: str,
         reason: str = "",
-    ) -> tuple[PendingBinding | None, bool, str]:
+    ) -> tuple[PendingBinding | None, bool, NagaStoreError | None]:
         async with self._lock:
             now = time.time()
             dirty = self._expire_pending_locked(now)
@@ -536,25 +578,39 @@ class NagaStore:
                     removed.group_id,
                     bind_uuid,
                 )
-                return _clone_pending(removed), True, ""
+                return _clone_pending(removed), True, None
 
             binding = self._bindings.get(naga_id)
             if binding is not None and binding.bind_uuid == bind_uuid:
                 if dirty:
                     await self.save()
-                return None, False, "bind request already approved"
+                return (
+                    None,
+                    False,
+                    NagaStoreError("conflict", "bind request already approved"),
+                )
 
             completed = self._completed_requests.get(bind_uuid)
             if completed is not None and completed.naga_id == naga_id:
                 if dirty:
                     await self.save()
                 if completed.status == "rejected":
-                    return None, False, ""
-                return None, False, f"bind request already {completed.status}"
+                    return None, False, None
+                return (
+                    None,
+                    False,
+                    NagaStoreError(
+                        "conflict", f"bind request already {completed.status}"
+                    ),
+                )
 
             if dirty:
                 await self.save()
-            return None, False, f"naga_id '{naga_id}' 未处于待绑定状态"
+            return (
+                None,
+                False,
+                NagaStoreError("not_found", f"naga_id '{naga_id}' 未处于待绑定状态"),
+            )
 
     async def cancel_pending(
         self,
@@ -589,7 +645,7 @@ class NagaStore:
         expected_bind_uuid: str | None = None,
         delivery_signature: str | None = None,
         wait_for_delivery: bool = True,
-    ) -> tuple[NagaBinding | None, bool, str]:
+    ) -> tuple[NagaBinding | None, bool, NagaStoreError | None]:
         async with self._delivery_condition:
             now = time.time()
             dirty = self._expire_pending_locked(now)
@@ -613,8 +669,8 @@ class NagaStore:
                 if dirty:
                     await self.save()
                 if historical_binding is not None and historical_binding.revoked:
-                    return historical_binding, False, ""
-                return None, False, "binding not found"
+                    return historical_binding, False, None
+                return None, False, NagaStoreError("not_found", "binding not found")
 
             if (
                 expected_bind_uuid is not None
@@ -624,17 +680,25 @@ class NagaStore:
                 if dirty:
                     await self.save()
                 if historical_binding is not None and historical_binding.revoked:
-                    return historical_binding, False, ""
+                    return historical_binding, False, None
                 if historical_binding is not None:
-                    return None, False, "binding generation is not current"
-                return None, False, "bind_uuid 不匹配"
+                    return (
+                        None,
+                        False,
+                        NagaStoreError("conflict", "binding generation is not current"),
+                    )
+                return None, False, NagaStoreError("conflict", "bind_uuid 不匹配")
 
             if delivery_signature is not None and not secrets.compare_digest(
                 current.delivery_signature, delivery_signature
             ):
                 if dirty:
                     await self.save()
-                return None, False, "delivery_signature 不匹配"
+                return (
+                    None,
+                    False,
+                    NagaStoreError("forbidden", "delivery_signature 不匹配"),
+                )
 
             changed = False
             if not current.revoked:
@@ -659,7 +723,7 @@ class NagaStore:
                 current.bind_uuid,
                 changed,
             )
-            return _clone_binding(current), changed, ""
+            return _clone_binding(current), changed, None
 
     async def revoke(self, naga_id: str) -> bool:
         binding, changed, _ = await self.revoke_binding(naga_id)
@@ -667,36 +731,40 @@ class NagaStore:
 
     async def acquire_delivery(
         self, *, naga_id: str, bind_uuid: str, delivery_signature: str
-    ) -> tuple[NagaBinding | None, str]:
+    ) -> tuple[NagaBinding | None, NagaStoreError | None]:
         async with self._lock:
             binding = self._bindings.get(naga_id)
             if binding is None:
-                return None, f"naga_id '{naga_id}' 未绑定"
+                return None, NagaStoreError("forbidden", f"naga_id '{naga_id}' 未绑定")
             if binding.revoked:
-                return None, f"naga_id '{naga_id}' 绑定已吊销"
+                return None, NagaStoreError(
+                    "forbidden", f"naga_id '{naga_id}' 绑定已吊销"
+                )
             if binding.bind_uuid != bind_uuid:
-                return None, "bind_uuid 不匹配"
+                return None, NagaStoreError("forbidden", "bind_uuid 不匹配")
             if not secrets.compare_digest(
                 binding.delivery_signature, delivery_signature
             ):
-                return None, "delivery_signature 不匹配"
+                return None, NagaStoreError("forbidden", "delivery_signature 不匹配")
             self._active_deliveries[bind_uuid] = (
                 self._active_deliveries.get(bind_uuid, 0) + 1
             )
-            return _clone_binding(binding), ""
+            return _clone_binding(binding), None
 
     async def ensure_delivery_active(
         self, *, naga_id: str, bind_uuid: str
-    ) -> tuple[NagaBinding | None, str]:
+    ) -> tuple[NagaBinding | None, NagaStoreError | None]:
         async with self._lock:
             binding = self._bindings.get(naga_id)
             if binding is None:
-                return None, f"naga_id '{naga_id}' 未绑定"
+                return None, NagaStoreError("conflict", f"naga_id '{naga_id}' 未绑定")
             if binding.bind_uuid != bind_uuid:
-                return None, "binding generation changed"
+                return None, NagaStoreError("conflict", "binding generation changed")
             if binding.revoked:
-                return None, f"naga_id '{naga_id}' 绑定已吊销"
-            return _clone_binding(binding), ""
+                return None, NagaStoreError(
+                    "conflict", f"naga_id '{naga_id}' 绑定已吊销"
+                )
+            return _clone_binding(binding), None
 
     async def release_delivery(self, *, bind_uuid: str) -> None:
         async with self._delivery_condition:

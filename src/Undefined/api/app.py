@@ -323,6 +323,15 @@ async def _probe_http_endpoint(
     }
 
 
+async def _skipped_probe(
+    *, name: str, reason: str, model_name: str = ""
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"name": name, "status": "skipped", "reason": reason}
+    if model_name:
+        payload["model_name"] = model_name
+    return payload
+
+
 async def _probe_ws_endpoint(url: str, timeout_seconds: float = 5.0) -> dict[str, Any]:
     normalized = str(url or "").strip()
     if not normalized:
@@ -514,14 +523,6 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
         "security": [{"ApiKeyAuth": []}],
         "paths": paths,
     }
-
-
-def _naga_callback_error_status(error: str) -> int:
-    if "未处于待绑定状态" in error or "未绑定" in error:
-        return 404
-    if "不匹配" in error:
-        return 403
-    return 409
 
 
 class RuntimeAPIServer:
@@ -755,6 +756,20 @@ class RuntimeAPIServer:
     async def _external_probe_handler(self, request: web.Request) -> Response:
         _ = request
         cfg = self._ctx.config_getter()
+        naga_probe = (
+            _probe_http_endpoint(
+                name="naga_model",
+                base_url=cfg.naga_model.api_url,
+                api_key=cfg.naga_model.api_key,
+                model_name=cfg.naga_model.model_name,
+            )
+            if bool(cfg.api.enabled and cfg.nagaagent_mode_enabled and cfg.naga.enabled)
+            else _skipped_probe(
+                name="naga_model",
+                reason="naga_integration_disabled",
+                model_name=cfg.naga_model.model_name,
+            )
+        )
         checks = [
             _probe_http_endpoint(
                 name="chat_model",
@@ -774,12 +789,7 @@ class RuntimeAPIServer:
                 api_key=cfg.security_model.api_key,
                 model_name=cfg.security_model.model_name,
             ),
-            _probe_http_endpoint(
-                name="naga_model",
-                base_url=cfg.naga_model.api_url,
-                api_key=cfg.naga_model.api_key,
-                model_name=cfg.naga_model.model_name,
-            ),
+            naga_probe,
             _probe_http_endpoint(
                 name="agent_model",
                 base_url=cfg.agent_model.api_url,
@@ -1645,9 +1655,9 @@ class RuntimeAPIServer:
                     "[NagaBindCallback] 激活失败: naga_id=%s bind_uuid=%s err=%s",
                     naga_id,
                     bind_uuid,
-                    err,
+                    err.message,
                 )
-                return _json_error(err, status=_naga_callback_error_status(err))
+                return _json_error(err.message, status=err.http_status)
             if created and binding is not None and sender is not None:
                 try:
                     await sender.send_private_message(
@@ -1676,9 +1686,9 @@ class RuntimeAPIServer:
                 "[NagaBindCallback] 拒绝失败: naga_id=%s bind_uuid=%s err=%s",
                 naga_id,
                 bind_uuid,
-                err,
+                err.message,
             )
-            return _json_error(err, status=_naga_callback_error_status(err))
+            return _json_error(err.message, status=err.http_status)
         if removed and pending is not None and sender is not None:
             try:
                 detail = f"\n原因: {reason}" if reason else ""
@@ -1768,10 +1778,13 @@ class RuntimeAPIServer:
                 "[NagaSend] 签名校验失败: naga_id=%s bind_uuid=%s reason=%s signature=%s",
                 naga_id,
                 bind_uuid,
-                err_msg,
+                err_msg.message if err_msg is not None else "unknown_error",
                 mask_token(delivery_signature),
             )
-            return _json_error(err_msg, status=403)
+            return _json_error(
+                err_msg.message if err_msg is not None else "delivery not available",
+                status=err_msg.http_status if err_msg is not None else 403,
+            )
         try:
             if target_qq != binding.qq_id or target_group != binding.group_id:
                 return _json_error("target does not match bound qq/group", status=403)
@@ -1855,12 +1868,16 @@ class RuntimeAPIServer:
                     return None, web.json_response(
                         {
                             "ok": False,
-                            "error": live_err,
+                            "error": (
+                                live_err.message
+                                if live_err is not None
+                                else "delivery no longer active"
+                            ),
                             "sent_private": sent_private,
                             "sent_group": sent_group,
                             "moderation": moderation,
                         },
-                        status=409,
+                        status=live_err.http_status if live_err is not None else 409,
                     )
                 return current_binding, None
 
@@ -1967,6 +1984,7 @@ class RuntimeAPIServer:
                 )
 
             await naga_store.record_usage(naga_id, bind_uuid=bind_uuid)
+            partial_success = mode == "both" and (sent_private != sent_group)
             return web.json_response(
                 {
                     "ok": True,
@@ -1974,6 +1992,10 @@ class RuntimeAPIServer:
                     "bind_uuid": bind_uuid,
                     "sent_private": sent_private,
                     "sent_group": sent_group,
+                    "partial_success": partial_success,
+                    "delivery_status": (
+                        "partial_success" if partial_success else "full_success"
+                    ),
                     "rendered": rendered,
                     "render_fallback": render_fallback,
                     "moderation": moderation,
@@ -2013,10 +2035,10 @@ class RuntimeAPIServer:
             delivery_signature=delivery_signature,
         )
         if binding is None:
-            status = 404 if err == "binding not found" else 409
-            if err == "delivery_signature 不匹配":
-                status = 403
-            return _json_error(err or "binding not found", status=status)
+            return _json_error(
+                err.message if err is not None else "binding not found",
+                status=err.http_status if err is not None else 404,
+            )
         return web.json_response(
             {
                 "ok": True,

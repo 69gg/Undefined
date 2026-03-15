@@ -431,6 +431,8 @@ async def test_naga_messages_send_allows_render_with_fallback(
     assert response.status == 200
     assert payload["ok"] is True
     assert payload["render_fallback"] is True
+    assert payload["partial_success"] is False
+    assert payload["delivery_status"] == "full_success"
     assert payload["moderation"]["status"] == "error_allowed"
     assert sender.private_messages
     assert sender.group_messages
@@ -485,7 +487,64 @@ async def test_naga_messages_send_falls_back_when_markdown_conversion_fails(
     assert response.status == 200
     assert payload["ok"] is True
     assert payload["render_fallback"] is True
+    assert payload["partial_success"] is False
+    assert payload["delivery_status"] == "full_success"
     assert sender.private_messages == [(123, "# hello")]
+
+
+@pytest.mark.asyncio
+async def test_naga_messages_send_both_mode_reports_partial_success(
+    tmp_path: Path,
+) -> None:
+    class _PartiallyFailingSender(_FakeSender):
+        async def send_group_message(
+            self, group_id: int, message: str, **_: Any
+        ) -> None:
+            del group_id, message
+            raise RuntimeError("group failed")
+
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    sender = _PartiallyFailingSender()
+    server = _make_server(
+        store=store,
+        sender=sender,
+        security_result=NagaModerationResult(
+            blocked=False,
+            status="passed",
+            categories=[],
+            message="ok",
+            model_name="naga-moderation",
+        ),
+    )
+
+    response = await server._naga_messages_send_handler(
+        _make_request(
+            json_body={
+                "bind_uuid": "uuid_a",
+                "naga_id": "alice",
+                "delivery_signature": "sig_1",
+                "target": {"qq_id": 123, "group_id": 456, "mode": "both"},
+                "message": {"format": "text", "content": "hello"},
+            },
+            headers={"Authorization": "Bearer shared-key"},
+        )
+    )
+
+    payload = _json(response)
+    assert response.status == 200
+    assert payload["ok"] is True
+    assert payload["sent_private"] is True
+    assert payload["sent_group"] is False
+    assert payload["partial_success"] is True
+    assert payload["delivery_status"] == "partial_success"
+    assert sender.private_messages == [(123, "hello")]
+    assert sender.group_messages == []
 
 
 @pytest.mark.asyncio
