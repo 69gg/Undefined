@@ -215,6 +215,17 @@ def _mask_url(url: str) -> str:
     return f"{scheme}://{host}{port_part}/..."
 
 
+def _naga_runtime_enabled(cfg: Any) -> bool:
+    naga_cfg = getattr(cfg, "naga", None)
+    return bool(getattr(cfg, "nagaagent_mode_enabled", False)) and bool(
+        getattr(naga_cfg, "enabled", False)
+    )
+
+
+def _naga_routes_enabled(cfg: Any, naga_store: Any) -> bool:
+    return _naga_runtime_enabled(cfg) and naga_store is not None
+
+
 def _short_text_preview(text: str, limit: int = 80) -> str:
     compact = " ".join(str(text or "").split())
     if len(compact) <= limit:
@@ -411,12 +422,7 @@ async def _probe_ws_endpoint(url: str, timeout_seconds: float = 5.0) -> dict[str
 def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[str, Any]:
     server_url = f"{request.scheme}://{request.host}"
     cfg = ctx.config_getter()
-    naga_cfg = getattr(cfg, "naga", None)
-    naga_routes_enabled = (
-        bool(getattr(cfg, "nagaagent_mode_enabled", False))
-        and bool(getattr(naga_cfg, "enabled", False))
-        and ctx.naga_store is not None
-    )
+    naga_routes_enabled = _naga_routes_enabled(cfg, ctx.naga_store)
     paths: dict[str, Any] = {
         "/health": {
             "get": {
@@ -618,9 +624,7 @@ class RuntimeAPIServer:
                 # Naga 端点使用独立鉴权，仅在总开关+子开关均启用时跳过主 auth
                 cfg = self._context.config_getter()
                 is_naga_path = request.path.startswith("/api/v1/naga/")
-                skip_auth = (
-                    is_naga_path and cfg.nagaagent_mode_enabled and cfg.naga.enabled
-                )
+                skip_auth = is_naga_path and _naga_runtime_enabled(cfg)
                 if not skip_auth:
                     expected = str(cfg.api.auth_key or "")
                     provided = request.headers.get(_AUTH_HEADER, "")
@@ -658,11 +662,7 @@ class RuntimeAPIServer:
         )
         # Naga 端点仅在总开关+子开关均启用时注册
         cfg = self._context.config_getter()
-        if (
-            cfg.nagaagent_mode_enabled
-            and cfg.naga.enabled
-            and self._context.naga_store is not None
-        ):
+        if _naga_routes_enabled(cfg, self._context.naga_store):
             app.add_routes(
                 [
                     web.post(
@@ -683,10 +683,11 @@ class RuntimeAPIServer:
                 "/api/v1/naga/unbind",
             )
         else:
+            naga_cfg = getattr(cfg, "naga", None)
             logger.info(
                 "[RuntimeAPI] Naga 端点未注册: mode_enabled=%s naga_enabled=%s store_ready=%s",
-                cfg.nagaagent_mode_enabled,
-                cfg.naga.enabled,
+                bool(getattr(cfg, "nagaagent_mode_enabled", False)),
+                bool(getattr(naga_cfg, "enabled", False)),
                 self._context.naga_store is not None,
             )
         return app
@@ -729,11 +730,7 @@ class RuntimeAPIServer:
                 "[RuntimeAPI] OpenAPI 请求被拒绝: disabled remote=%s", request.remote
             )
             return _json_error("OpenAPI disabled", status=404)
-        naga_routes_enabled = (
-            cfg.nagaagent_mode_enabled
-            and cfg.naga.enabled
-            and self._ctx.naga_store is not None
-        )
+        naga_routes_enabled = _naga_routes_enabled(cfg, self._ctx.naga_store)
         logger.info(
             "[RuntimeAPI] OpenAPI 请求: remote=%s naga_routes_enabled=%s",
             request.remote,

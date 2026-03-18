@@ -446,18 +446,6 @@ jobs:
             : > tag_message.txt
           fi
           cat >> tag_message.txt <<'NOTES'
-          ## 📦 Bundles
-          
-          - Python: wheel + sdist
-          - Desktop: Windows (`.exe`, `.msi`), Linux (`.AppImage`, `.deb`), macOS Intel/Apple Silicon (`.dmg`)
-          - Android: universal `.apk`
-          
-          ## 🔐 Signing expectations
-          
-          - Windows/Linux artifacts are built directly from CI.
-          - macOS signing/notarization can be added later via Apple secrets.
-          - Android currently ships an installable APK on every release; wire signing secrets into the generated Android project to promote it to a signed release build.
-          
           ## 📝 Detailed Changes
           NOTES
           FEAT_COMMITS=$(git log ${PREV_TAG}..${TAG_NAME} --grep='^feat' --pretty=format:'* %s (%h)' 2>/dev/null || true)
