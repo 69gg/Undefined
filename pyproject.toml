@@ -1,6 +1,6 @@
 [project]
 name = "Undefined-bot"
-version = "3.2.5"
+version = "3.2.6"
 description = "QQ bot platform with cognitive memory architecture and multi-agent Skills, via OneBot V11."
 readme = "README.md"
 authors = [
