@@ -749,6 +749,12 @@ class NagaStore:
             self._active_deliveries[bind_uuid] = (
                 self._active_deliveries.get(bind_uuid, 0) + 1
             )
+            logger.info(
+                "[NagaStore] 占用投递: naga_id=%s bind_uuid=%s active=%d",
+                naga_id,
+                bind_uuid,
+                self._active_deliveries[bind_uuid],
+            )
             return _clone_binding(binding), None
 
     async def ensure_delivery_active(
@@ -771,9 +777,19 @@ class NagaStore:
             count = self._active_deliveries.get(bind_uuid, 0)
             if count <= 1:
                 self._active_deliveries.pop(bind_uuid, None)
+                logger.info(
+                    "[NagaStore] 释放投递: bind_uuid=%s active=%d",
+                    bind_uuid,
+                    0,
+                )
                 self._delivery_condition.notify_all()
                 return
             self._active_deliveries[bind_uuid] = count - 1
+            logger.info(
+                "[NagaStore] 释放投递: bind_uuid=%s active=%d",
+                bind_uuid,
+                self._active_deliveries[bind_uuid],
+            )
             self._delivery_condition.notify_all()
 
     def list_bindings(self) -> list[NagaBinding]:

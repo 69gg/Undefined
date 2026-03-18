@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -212,6 +213,40 @@ def _mask_url(url: str) -> str:
     port_part = f":{parsed.port}" if parsed.port else ""
     scheme = parsed.scheme or "https"
     return f"{scheme}://{host}{port_part}/..."
+
+
+def _short_text_preview(text: str, limit: int = 80) -> str:
+    compact = " ".join(str(text or "").split())
+    if len(compact) <= limit:
+        return compact
+    return compact[:limit] + "..."
+
+
+def _naga_message_digest(
+    *,
+    bind_uuid: str,
+    naga_id: str,
+    target_qq: int,
+    target_group: int,
+    mode: str,
+    message_format: str,
+    content: str,
+) -> str:
+    raw = json.dumps(
+        {
+            "bind_uuid": bind_uuid,
+            "naga_id": naga_id,
+            "target_qq": target_qq,
+            "target_group": target_group,
+            "mode": mode,
+            "format": message_format,
+            "content": content,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
 def _registry_summary(registry: Any) -> dict[str, Any]:
@@ -538,6 +573,8 @@ class RuntimeAPIServer:
         self._runner: web.AppRunner | None = None
         self._sites: list[web.TCPSite] = []
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._naga_send_registry_lock = asyncio.Lock()
+        self._naga_send_inflight: dict[str, int] = {}
 
     async def start(self) -> None:
         from Undefined.config.models import resolve_bind_hosts
@@ -639,8 +676,36 @@ class RuntimeAPIServer:
                     web.post("/api/v1/naga/unbind", self._naga_unbind_handler),
                 ]
             )
-            logger.info("[RuntimeAPI] Naga 端点已注册")
+            logger.info(
+                "[RuntimeAPI] Naga 端点已注册: bind_callback=%s messages_send=%s unbind=%s",
+                "/api/v1/naga/bind/callback",
+                "/api/v1/naga/messages/send",
+                "/api/v1/naga/unbind",
+            )
+        else:
+            logger.info(
+                "[RuntimeAPI] Naga 端点未注册: mode_enabled=%s naga_enabled=%s store_ready=%s",
+                cfg.nagaagent_mode_enabled,
+                cfg.naga.enabled,
+                self._context.naga_store is not None,
+            )
         return app
+
+    async def _track_naga_send_start(self, message_key: str) -> int:
+        async with self._naga_send_registry_lock:
+            next_count = self._naga_send_inflight.get(message_key, 0) + 1
+            self._naga_send_inflight[message_key] = next_count
+            return next_count
+
+    async def _track_naga_send_done(self, message_key: str) -> int:
+        async with self._naga_send_registry_lock:
+            current = self._naga_send_inflight.get(message_key, 0)
+            if current <= 1:
+                self._naga_send_inflight.pop(message_key, None)
+                return 0
+            next_count = current - 1
+            self._naga_send_inflight[message_key] = next_count
+            return next_count
 
     @property
     def _ctx(self) -> RuntimeAPIContext:
@@ -660,7 +725,20 @@ class RuntimeAPIServer:
     async def _openapi_handler(self, request: web.Request) -> Response:
         cfg = self._ctx.config_getter()
         if not bool(getattr(cfg.api, "openapi_enabled", True)):
+            logger.info(
+                "[RuntimeAPI] OpenAPI 请求被拒绝: disabled remote=%s", request.remote
+            )
             return _json_error("OpenAPI disabled", status=404)
+        naga_routes_enabled = (
+            cfg.nagaagent_mode_enabled
+            and cfg.naga.enabled
+            and self._ctx.naga_store is not None
+        )
+        logger.info(
+            "[RuntimeAPI] OpenAPI 请求: remote=%s naga_routes_enabled=%s",
+            request.remote,
+            naga_routes_enabled,
+        )
         return web.json_response(_build_openapi_spec(self._ctx, request))
 
     async def _internal_probe_handler(self, request: web.Request) -> Response:
@@ -1615,9 +1693,15 @@ class RuntimeAPIServer:
 
     async def _naga_bind_callback_handler(self, request: web.Request) -> Response:
         """POST /api/v1/naga/bind/callback — Naga 绑定回调。"""
+        trace_id = _uuid.uuid4().hex[:8]
         auth_err = self._verify_naga_api_key(request)
         if auth_err is not None:
-            logger.warning("[NagaBindCallback] 鉴权失败: %s", auth_err)
+            logger.warning(
+                "[NagaBindCallback] 鉴权失败: trace=%s remote=%s err=%s",
+                trace_id,
+                getattr(request, "remote", None),
+                auth_err,
+            )
             return _json_error("Unauthorized", status=401)
 
         try:
@@ -1634,6 +1718,16 @@ class RuntimeAPIServer:
             return _json_error("bind_uuid and naga_id are required", status=400)
         if status not in {"approved", "rejected"}:
             return _json_error("status must be 'approved' or 'rejected'", status=400)
+        logger.info(
+            "[NagaBindCallback] 请求开始: trace=%s remote=%s naga_id=%s bind_uuid=%s status=%s reason=%s signature=%s",
+            trace_id,
+            getattr(request, "remote", None),
+            naga_id,
+            bind_uuid,
+            status,
+            _short_text_preview(reason, limit=60),
+            delivery_signature[:12] + "..." if delivery_signature else "",
+        )
 
         naga_store = self._ctx.naga_store
         if naga_store is None:
@@ -1652,12 +1746,21 @@ class RuntimeAPIServer:
             )
             if err:
                 logger.warning(
-                    "[NagaBindCallback] 激活失败: naga_id=%s bind_uuid=%s err=%s",
+                    "[NagaBindCallback] 激活失败: trace=%s naga_id=%s bind_uuid=%s err=%s",
+                    trace_id,
                     naga_id,
                     bind_uuid,
                     err.message,
                 )
                 return _json_error(err.message, status=err.http_status)
+            logger.info(
+                "[NagaBindCallback] 激活完成: trace=%s naga_id=%s bind_uuid=%s created=%s qq=%s",
+                trace_id,
+                naga_id,
+                bind_uuid,
+                created,
+                binding.qq_id if binding is not None else "",
+            )
             if created and binding is not None and sender is not None:
                 try:
                     await sender.send_private_message(
@@ -1683,12 +1786,21 @@ class RuntimeAPIServer:
         )
         if err:
             logger.warning(
-                "[NagaBindCallback] 拒绝失败: naga_id=%s bind_uuid=%s err=%s",
+                "[NagaBindCallback] 拒绝失败: trace=%s naga_id=%s bind_uuid=%s err=%s",
+                trace_id,
                 naga_id,
                 bind_uuid,
                 err.message,
             )
             return _json_error(err.message, status=err.http_status)
+        logger.info(
+            "[NagaBindCallback] 拒绝完成: trace=%s naga_id=%s bind_uuid=%s removed=%s qq=%s",
+            trace_id,
+            naga_id,
+            bind_uuid,
+            removed,
+            pending.qq_id if pending is not None else "",
+        )
         if removed and pending is not None and sender is not None:
             try:
                 detail = f"\n原因: {reason}" if reason else ""
@@ -1712,9 +1824,10 @@ class RuntimeAPIServer:
         """POST /api/v1/naga/messages/send — 验签后发送消息。"""
         from Undefined.api.naga_store import mask_token
 
+        trace_id = _uuid.uuid4().hex[:8]
         auth_err = self._verify_naga_api_key(request)
         if auth_err is not None:
-            logger.warning("[NagaSend] 鉴权失败: %s", auth_err)
+            logger.warning("[NagaSend] 鉴权失败: trace=%s err=%s", trace_id, auth_err)
             return _json_error("Unauthorized", status=401)
 
         try:
@@ -1765,9 +1878,98 @@ class RuntimeAPIServer:
         if not content:
             return _json_error("message.content is required", status=400)
 
+        message_key = _naga_message_digest(
+            bind_uuid=bind_uuid,
+            naga_id=naga_id,
+            target_qq=target_qq,
+            target_group=target_group,
+            mode=mode,
+            message_format=fmt,
+            content=content,
+        )
+        logger.info(
+            "[NagaSend] 请求开始: trace=%s remote=%s naga_id=%s bind_uuid=%s mode=%s fmt=%s qq=%s group=%s key=%s content_len=%s preview=%s signature=%s",
+            trace_id,
+            getattr(request, "remote", None),
+            naga_id,
+            bind_uuid,
+            mode,
+            fmt,
+            target_qq,
+            target_group,
+            message_key,
+            len(content),
+            _short_text_preview(content),
+            mask_token(delivery_signature),
+        )
+        if mode == "both":
+            logger.warning(
+                "[NagaSend] 上游请求显式要求双路投递: trace=%s naga_id=%s bind_uuid=%s key=%s",
+                trace_id,
+                naga_id,
+                bind_uuid,
+                message_key,
+            )
+        inflight_count = await self._track_naga_send_start(message_key)
+        if inflight_count > 1:
+            logger.warning(
+                "[NagaSend] 检测到相同 payload 并发请求: trace=%s naga_id=%s bind_uuid=%s key=%s inflight=%s",
+                trace_id,
+                naga_id,
+                bind_uuid,
+                message_key,
+                inflight_count,
+            )
+        try:
+            return await self._naga_messages_send_impl(
+                naga_id=naga_id,
+                bind_uuid=bind_uuid,
+                delivery_signature=delivery_signature,
+                target_qq=target_qq,
+                target_group=target_group,
+                mode=mode,
+                message_format=fmt,
+                content=content,
+                trace_id=trace_id,
+                message_key=message_key,
+            )
+        finally:
+            remaining = await self._track_naga_send_done(message_key)
+            logger.info(
+                "[NagaSend] 请求退出: trace=%s naga_id=%s bind_uuid=%s key=%s inflight_remaining=%s",
+                trace_id,
+                naga_id,
+                bind_uuid,
+                message_key,
+                remaining,
+            )
+
+    async def _naga_messages_send_impl(
+        self,
+        *,
+        naga_id: str,
+        bind_uuid: str,
+        delivery_signature: str,
+        target_qq: int,
+        target_group: int,
+        mode: str,
+        message_format: str,
+        content: str,
+        trace_id: str,
+        message_key: str,
+    ) -> Response:
+        from Undefined.api.naga_store import mask_token
+
         naga_store = self._ctx.naga_store
         if naga_store is None:
+            logger.warning(
+                "[NagaSend] NagaStore 不可用: trace=%s naga_id=%s bind_uuid=%s",
+                trace_id,
+                naga_id,
+                bind_uuid,
+            )
             return _json_error("Naga integration not available", status=503)
+
         binding, err_msg = await naga_store.acquire_delivery(
             naga_id=naga_id,
             bind_uuid=bind_uuid,
@@ -1775,7 +1977,8 @@ class RuntimeAPIServer:
         )
         if binding is None:
             logger.warning(
-                "[NagaSend] 签名校验失败: naga_id=%s bind_uuid=%s reason=%s signature=%s",
+                "[NagaSend] 签名校验失败: trace=%s naga_id=%s bind_uuid=%s reason=%s signature=%s",
+                trace_id,
                 naga_id,
                 bind_uuid,
                 err_msg.message if err_msg is not None else "unknown_error",
@@ -1785,21 +1988,54 @@ class RuntimeAPIServer:
                 err_msg.message if err_msg is not None else "delivery not available",
                 status=err_msg.http_status if err_msg is not None else 403,
             )
+
+        logger.info(
+            "[NagaSend] 投递凭证已占用: trace=%s naga_id=%s bind_uuid=%s key=%s qq=%s group=%s",
+            trace_id,
+            naga_id,
+            bind_uuid,
+            message_key,
+            binding.qq_id,
+            binding.group_id,
+        )
         try:
             if target_qq != binding.qq_id or target_group != binding.group_id:
+                logger.warning(
+                    "[NagaSend] 目标不匹配: trace=%s naga_id=%s bind_uuid=%s target_qq=%s target_group=%s bound_qq=%s bound_group=%s",
+                    trace_id,
+                    naga_id,
+                    bind_uuid,
+                    target_qq,
+                    target_group,
+                    binding.qq_id,
+                    binding.group_id,
+                )
                 return _json_error("target does not match bound qq/group", status=403)
 
             cfg = self._ctx.config_getter()
             if mode == "group" and binding.group_id not in cfg.naga.allowed_groups:
+                logger.warning(
+                    "[NagaSend] 群投递被策略拒绝: trace=%s naga_id=%s bind_uuid=%s group=%s",
+                    trace_id,
+                    naga_id,
+                    bind_uuid,
+                    binding.group_id,
+                )
                 return _json_error(
                     "bound group is not in naga.allowed_groups", status=403
                 )
 
             sender = self._ctx.sender
             if sender is None:
+                logger.warning(
+                    "[NagaSend] sender 不可用: trace=%s naga_id=%s bind_uuid=%s",
+                    trace_id,
+                    naga_id,
+                    bind_uuid,
+                )
                 return _json_error("sender not available", status=503)
 
-            moderation = None
+            moderation: dict[str, Any]
             security = getattr(self._ctx.command_dispatcher, "security", None)
             if security is None or not hasattr(security, "moderate_naga_message"):
                 moderation = {
@@ -1809,9 +2045,24 @@ class RuntimeAPIServer:
                     "message": "Naga moderation service unavailable; message sent without moderation block",
                     "model_name": "",
                 }
+                logger.warning(
+                    "[NagaSend] 审核服务不可用，按允许发送: trace=%s naga_id=%s bind_uuid=%s",
+                    trace_id,
+                    naga_id,
+                    bind_uuid,
+                )
             else:
+                logger.info(
+                    "[NagaSend] 审核开始: trace=%s naga_id=%s bind_uuid=%s key=%s fmt=%s content_len=%s",
+                    trace_id,
+                    naga_id,
+                    bind_uuid,
+                    message_key,
+                    message_format,
+                    len(content),
+                )
                 result = await security.moderate_naga_message(
-                    message_format=fmt,
+                    message_format=message_format,
                     content=content,
                 )
                 moderation = {
@@ -1821,7 +2072,26 @@ class RuntimeAPIServer:
                     "message": result.message,
                     "model_name": result.model_name,
                 }
+                logger.info(
+                    "[NagaSend] 审核完成: trace=%s naga_id=%s bind_uuid=%s key=%s blocked=%s status=%s model=%s categories=%s",
+                    trace_id,
+                    naga_id,
+                    bind_uuid,
+                    message_key,
+                    result.blocked,
+                    result.status,
+                    result.model_name,
+                    ",".join(result.categories) or "-",
+                )
             if moderation["blocked"]:
+                logger.warning(
+                    "[NagaSend] 审核拦截: trace=%s naga_id=%s bind_uuid=%s key=%s reason=%s",
+                    trace_id,
+                    naga_id,
+                    bind_uuid,
+                    message_key,
+                    moderation["message"],
+                )
                 return web.json_response(
                     {
                         "ok": False,
@@ -1831,25 +2101,41 @@ class RuntimeAPIServer:
                     status=403,
                 )
 
-            send_content: str | None = content if fmt == "text" else None
+            send_content: str | None = content if message_format == "text" else None
             image_path: str | None = None
             tmp_path: str | None = None
             rendered = False
             render_fallback = False
-            if fmt in {"markdown", "html"}:
+            if message_format in {"markdown", "html"}:
                 import tempfile
 
                 try:
                     html_str = content
-                    if fmt == "markdown":
+                    if message_format == "markdown":
                         html_str = await render_markdown_to_html(content)
                     fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="naga_send_")
                     os.close(fd)
                     await render_html_to_image(html_str, tmp_path)
                     image_path = tmp_path
                     rendered = True
+                    logger.info(
+                        "[NagaSend] 富文本渲染成功: trace=%s naga_id=%s bind_uuid=%s key=%s fmt=%s image=%s",
+                        trace_id,
+                        naga_id,
+                        bind_uuid,
+                        message_key,
+                        message_format,
+                        Path(tmp_path).name if tmp_path is not None else "",
+                    )
                 except Exception as exc:
-                    logger.warning("[NagaSend] 渲染失败，回退文本发送: %s", exc)
+                    logger.warning(
+                        "[NagaSend] 渲染失败，回退文本发送: trace=%s naga_id=%s bind_uuid=%s key=%s err=%s",
+                        trace_id,
+                        naga_id,
+                        bind_uuid,
+                        message_key,
+                        exc,
+                    )
                     send_content = content
                     render_fallback = True
 
@@ -1863,6 +2149,16 @@ class RuntimeAPIServer:
                     bind_uuid=bind_uuid,
                 )
                 if current_binding is None:
+                    logger.warning(
+                        "[NagaSend] 投递中止: trace=%s naga_id=%s bind_uuid=%s key=%s reason=%s",
+                        trace_id,
+                        naga_id,
+                        bind_uuid,
+                        message_key,
+                        live_err.message
+                        if live_err is not None
+                        else "delivery no longer active",
+                    )
                     return None, web.json_response(
                         {
                             "ok": False,
@@ -1889,6 +2185,14 @@ class RuntimeAPIServer:
                     current_binding, abort_response = await _ensure_delivery_active()
                     if abort_response is not None:
                         return abort_response
+                    logger.info(
+                        "[NagaSend] 私聊投递开始: trace=%s naga_id=%s bind_uuid=%s key=%s qq=%s",
+                        trace_id,
+                        naga_id,
+                        bind_uuid,
+                        message_key,
+                        current_binding.qq_id,
+                    )
                     try:
                         if send_content is not None:
                             await sender.send_private_message(
@@ -1899,11 +2203,21 @@ class RuntimeAPIServer:
                                 current_binding.qq_id, cq_image
                             )
                         sent_private = True
+                        logger.info(
+                            "[NagaSend] 私聊投递成功: trace=%s naga_id=%s bind_uuid=%s key=%s qq=%s",
+                            trace_id,
+                            naga_id,
+                            bind_uuid,
+                            message_key,
+                            current_binding.qq_id,
+                        )
                     except Exception as exc:
                         logger.warning(
-                            "[NagaSend] 私聊发送失败: naga_id=%s qq=%d err=%s",
+                            "[NagaSend] 私聊发送失败: trace=%s naga_id=%s qq=%d key=%s err=%s",
+                            trace_id,
                             naga_id,
                             current_binding.qq_id,
+                            message_key,
                             exc,
                         )
 
@@ -1914,7 +2228,23 @@ class RuntimeAPIServer:
                     current_cfg = self._ctx.config_getter()
                     if current_binding.group_id not in current_cfg.naga.allowed_groups:
                         group_policy_blocked = True
+                        logger.warning(
+                            "[NagaSend] 群投递被策略阻止: trace=%s naga_id=%s bind_uuid=%s key=%s group=%s",
+                            trace_id,
+                            naga_id,
+                            bind_uuid,
+                            message_key,
+                            current_binding.group_id,
+                        )
                     else:
+                        logger.info(
+                            "[NagaSend] 群投递开始: trace=%s naga_id=%s bind_uuid=%s key=%s group=%s",
+                            trace_id,
+                            naga_id,
+                            bind_uuid,
+                            message_key,
+                            current_binding.group_id,
+                        )
                         try:
                             if send_content is not None:
                                 await sender.send_group_message(
@@ -1925,11 +2255,21 @@ class RuntimeAPIServer:
                                     current_binding.group_id, cq_image
                                 )
                             sent_group = True
+                            logger.info(
+                                "[NagaSend] 群投递成功: trace=%s naga_id=%s bind_uuid=%s key=%s group=%s",
+                                trace_id,
+                                naga_id,
+                                bind_uuid,
+                                message_key,
+                                current_binding.group_id,
+                            )
                         except Exception as exc:
                             logger.warning(
-                                "[NagaSend] 群聊发送失败: naga_id=%s group=%d err=%s",
+                                "[NagaSend] 群聊发送失败: trace=%s naga_id=%s group=%d key=%s err=%s",
+                                trace_id,
                                 naga_id,
                                 current_binding.group_id,
+                                message_key,
                                 exc,
                             )
             finally:
@@ -1986,6 +2326,18 @@ class RuntimeAPIServer:
 
             await naga_store.record_usage(naga_id, bind_uuid=bind_uuid)
             partial_success = mode == "both" and (sent_private != sent_group)
+            logger.info(
+                "[NagaSend] 请求完成: trace=%s naga_id=%s bind_uuid=%s key=%s sent_private=%s sent_group=%s partial=%s rendered=%s fallback=%s",
+                trace_id,
+                naga_id,
+                bind_uuid,
+                message_key,
+                sent_private,
+                sent_group,
+                partial_success,
+                rendered,
+                render_fallback,
+            )
             return web.json_response(
                 {
                     "ok": True,
@@ -2007,9 +2359,15 @@ class RuntimeAPIServer:
 
     async def _naga_unbind_handler(self, request: web.Request) -> Response:
         """POST /api/v1/naga/unbind — 远端主动解绑。"""
+        trace_id = _uuid.uuid4().hex[:8]
         auth_err = self._verify_naga_api_key(request)
         if auth_err is not None:
-            logger.warning("[NagaUnbind] 鉴权失败: %s", auth_err)
+            logger.warning(
+                "[NagaUnbind] 鉴权失败: trace=%s remote=%s err=%s",
+                trace_id,
+                getattr(request, "remote", None),
+                auth_err,
+            )
             return _json_error("Unauthorized", status=401)
 
         try:
@@ -2025,6 +2383,14 @@ class RuntimeAPIServer:
                 "bind_uuid, naga_id and delivery_signature are required",
                 status=400,
             )
+        logger.info(
+            "[NagaUnbind] 请求开始: trace=%s remote=%s naga_id=%s bind_uuid=%s signature=%s",
+            trace_id,
+            getattr(request, "remote", None),
+            naga_id,
+            bind_uuid,
+            delivery_signature[:12] + "...",
+        )
 
         naga_store = self._ctx.naga_store
         if naga_store is None:
@@ -2036,10 +2402,26 @@ class RuntimeAPIServer:
             delivery_signature=delivery_signature,
         )
         if binding is None:
+            logger.warning(
+                "[NagaUnbind] 吊销失败: trace=%s naga_id=%s bind_uuid=%s err=%s",
+                trace_id,
+                naga_id,
+                bind_uuid,
+                err.message if err is not None else "binding not found",
+            )
             return _json_error(
                 err.message if err is not None else "binding not found",
                 status=err.http_status if err is not None else 404,
             )
+        logger.info(
+            "[NagaUnbind] 吊销完成: trace=%s naga_id=%s bind_uuid=%s changed=%s qq=%s group=%s",
+            trace_id,
+            naga_id,
+            bind_uuid,
+            changed,
+            binding.qq_id,
+            binding.group_id,
+        )
         return web.json_response(
             {
                 "ok": True,

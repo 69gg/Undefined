@@ -133,10 +133,28 @@ async def _build_request_context(
 
 
 async def execute(args: list[str], context: CommandContext) -> None:
+    trace_id = uuid4().hex[:8]
+    logger.info(
+        "[NagaCmd] 开始: trace=%s scope=%s sender=%s group=%s user=%s args=%s",
+        trace_id,
+        context.scope,
+        context.sender_id,
+        context.group_id,
+        context.user_id,
+        args,
+    )
     if not is_naga_command_visible(context):
+        logger.info(
+            "[NagaCmd] 忽略不可见命令: trace=%s scope=%s sender=%s group=%s",
+            trace_id,
+            context.scope,
+            context.sender_id,
+            context.group_id,
+        )
         return
 
     if not context.config.nagaagent_mode_enabled or not context.config.naga.enabled:
+        logger.warning("[NagaCmd] 集成未启用: trace=%s", trace_id)
         await _reply(context, "Naga 集成未启用")
         return
 
@@ -152,13 +170,28 @@ async def execute(args: list[str], context: CommandContext) -> None:
 
     subcmd = args[0].lower()
     sub_args = args[1:]
+    logger.info(
+        "[NagaCmd] 子命令解析: trace=%s subcmd=%s sub_args=%s",
+        trace_id,
+        subcmd,
+        sub_args,
+    )
     perm_err = await _check_scope(subcmd, context.sender_id, context)
     if perm_err is not None:
+        logger.warning(
+            "[NagaCmd] 权限/作用域拒绝: trace=%s subcmd=%s err=%s",
+            trace_id,
+            subcmd,
+            perm_err,
+        )
         await _reply(context, f"❌ {perm_err}")
         return
 
     store = _naga_store(context)
     if store is None:
+        logger.error(
+            "[NagaCmd] NagaStore 未初始化: trace=%s subcmd=%s", trace_id, subcmd
+        )
         await _reply(context, "❌ NagaStore 未初始化")
         return
 
@@ -168,11 +201,14 @@ async def execute(args: list[str], context: CommandContext) -> None:
     }
     handler = handlers.get(subcmd)
     if handler is None:
+        logger.warning("[NagaCmd] 未知子命令: trace=%s subcmd=%s", trace_id, subcmd)
         await _reply(context, f"❌ 未知子命令: {subcmd}")
         return
 
     try:
+        logger.info("[NagaCmd] 开始执行: trace=%s subcmd=%s", trace_id, subcmd)
         await handler(sub_args, context, store)  # type: ignore[operator]
+        logger.info("[NagaCmd] 执行完成: trace=%s subcmd=%s", trace_id, subcmd)
     except Exception as exc:
         error_id = uuid4().hex[:8]
         logger.exception("[NagaCmd] %s 执行失败: error_id=%s", subcmd, error_id)
@@ -182,6 +218,12 @@ async def execute(args: list[str], context: CommandContext) -> None:
 async def _handle_bind(
     args: list[str], context: CommandContext, naga_store: NagaStore
 ) -> None:
+    logger.info(
+        "[NagaCmd] bind 请求: sender=%s group=%s args=%s",
+        context.sender_id,
+        context.group_id,
+        args,
+    )
     if context.scope != "group":
         await _reply(context, "❌ bind 命令仅限群聊中使用")
         return
@@ -206,6 +248,13 @@ async def _handle_bind(
         group_id=context.group_id,
         request_context=request_context,
     )
+    logger.info(
+        "[NagaCmd] bind 本地登记结果: naga_id=%s ok=%s msg=%s bind_uuid=%s",
+        naga_id,
+        ok,
+        msg,
+        pending.bind_uuid if pending is not None else "",
+    )
     if not ok or pending is None:
         await _reply(context, f"❌ {msg}")
         return
@@ -213,6 +262,12 @@ async def _handle_bind(
     pending, should_submit = await naga_store.begin_remote_submit(
         naga_id,
         bind_uuid=pending.bind_uuid,
+    )
+    logger.info(
+        "[NagaCmd] bind 远端提交判定: naga_id=%s bind_uuid=%s should_submit=%s",
+        naga_id,
+        pending.bind_uuid if pending is not None else "",
+        should_submit,
     )
     if pending is None:
         await _reply(context, "❌ 绑定状态已变化，请重新发起 /naga bind")
@@ -228,6 +283,13 @@ async def _handle_bind(
         return
 
     submit_status, detail = await _submit_bind_request_to_naga(context, pending)
+    logger.info(
+        "[NagaCmd] bind 远端提交完成: naga_id=%s bind_uuid=%s status=%s detail=%s",
+        naga_id,
+        pending.bind_uuid,
+        submit_status,
+        detail,
+    )
     if submit_status == "accepted":
         verb = "已重新发送" if is_existing else "已发送"
         await _reply(
@@ -249,12 +311,25 @@ async def _handle_bind(
 async def _handle_unbind(
     args: list[str], context: CommandContext, naga_store: NagaStore
 ) -> None:
+    logger.info(
+        "[NagaCmd] unbind 请求: sender=%s scope=%s args=%s",
+        context.sender_id,
+        context.scope,
+        args,
+    )
     if not args:
         await _reply(context, "用法: /naga unbind <naga_id>")
         return
 
     naga_id = args[0].strip()
     binding, changed, err = await naga_store.revoke_binding(naga_id)
+    logger.info(
+        "[NagaCmd] unbind 本地吊销结果: naga_id=%s found=%s changed=%s err=%s",
+        naga_id,
+        binding is not None,
+        changed,
+        err.message if err is not None else "",
+    )
     if binding is None:
         detail = (
             err.message if err is not None else f"未找到 naga_id '{naga_id}' 的绑定"

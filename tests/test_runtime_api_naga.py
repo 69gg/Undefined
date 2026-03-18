@@ -295,6 +295,106 @@ async def test_naga_messages_send_rejects_target_mismatch(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_naga_messages_send_requires_explicit_target_mode(tmp_path: Path) -> None:
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    sender = _FakeSender()
+    server = _make_server(
+        store=store,
+        sender=sender,
+        security_result=NagaModerationResult(
+            blocked=False,
+            status="passed",
+            categories=[],
+            message="ok",
+            model_name="naga-moderation",
+        ),
+    )
+
+    response = await server._naga_messages_send_handler(
+        _make_request(
+            json_body={
+                "bind_uuid": "uuid_a",
+                "naga_id": "alice",
+                "delivery_signature": "sig_1",
+                "target": {"qq_id": 123, "group_id": 456},
+                "message": {"format": "text", "content": "hello"},
+            },
+            headers={"Authorization": "Bearer shared-key"},
+        )
+    )
+
+    payload = _json(response)
+    assert response.status == 400
+    assert "target.mode must be" in payload["error"]
+    assert sender.private_messages == []
+    assert sender.group_messages == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "expected_private", "expected_group"),
+    [
+        ("private", [(123, "hello")], []),
+        ("group", [], [(456, "hello")]),
+        ("both", [(123, "hello")], [(456, "hello")]),
+    ],
+)
+async def test_naga_messages_send_routes_only_requested_target(
+    tmp_path: Path,
+    mode: str,
+    expected_private: list[tuple[int, str]],
+    expected_group: list[tuple[int, str]],
+) -> None:
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    sender = _FakeSender()
+    server = _make_server(
+        store=store,
+        sender=sender,
+        security_result=NagaModerationResult(
+            blocked=False,
+            status="passed",
+            categories=[],
+            message="ok",
+            model_name="naga-moderation",
+        ),
+    )
+
+    response = await server._naga_messages_send_handler(
+        _make_request(
+            json_body={
+                "bind_uuid": "uuid_a",
+                "naga_id": "alice",
+                "delivery_signature": "sig_1",
+                "target": {"qq_id": 123, "group_id": 456, "mode": mode},
+                "message": {"format": "text", "content": "hello"},
+            },
+            headers={"Authorization": "Bearer shared-key"},
+        )
+    )
+
+    payload = _json(response)
+    assert response.status == 200
+    assert payload["ok"] is True
+    assert payload["sent_private"] is bool(expected_private)
+    assert payload["sent_group"] is bool(expected_group)
+    assert sender.private_messages == expected_private
+    assert sender.group_messages == expected_group
+    assert store._active_deliveries == {}
+
+
+@pytest.mark.asyncio
 async def test_naga_messages_send_releases_delivery_when_group_not_allowed(
     tmp_path: Path,
 ) -> None:
