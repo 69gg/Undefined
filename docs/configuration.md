@@ -142,7 +142,7 @@ model_name = "gpt-4o-mini"
 | `api_key` | API Key |
 | `model_name` | 模型名 |
 | `max_tokens` | 最大输出 token（vision 无此字段） |
-| `queue_interval_seconds` | 该模型请求队列发车间隔（秒） |
+| `queue_interval_seconds` | 该模型请求队列发车间隔（秒，`0` 表示立即发车） |
 | `api_mode` | 请求模式：`chat_completions` 或 `responses` |
 | `reasoning_enabled` | 是否启用 `reasoning.effort` |
 | `reasoning_effort` | `reasoning.effort` 档位：`none` / `minimal` / `low` / `medium` / `high` / `xhigh` |
@@ -182,7 +182,7 @@ model_name = "gpt-4o-mini"
 
 默认：
 - `max_tokens=8192`
-- `queue_interval_seconds=1.0`（`<=0` 回退 `1.0`）
+- `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
 - `api_mode="chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
@@ -198,7 +198,7 @@ model_name = "gpt-4o-mini"
 ### 4.4.3 `[models.vision]` 视觉模型
 
 默认：
-- `queue_interval_seconds=1.0`（`<=0` 回退 `1.0`）
+- `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
 - `api_mode="chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
@@ -211,7 +211,7 @@ model_name = "gpt-4o-mini"
 
 字段：
 - 额外开关：`enabled=true`
-- 默认：`max_tokens=100`、`api_mode="chat_completions"`、`reasoning_enabled=false`、`reasoning_effort="medium"`、`thinking_budget_tokens=0`、`thinking_tool_call_compat=true`、`responses_tool_choice_compat=false`、`responses_force_stateless_replay=false`
+- 默认：`max_tokens=100`、`queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）、`api_mode="chat_completions"`、`reasoning_enabled=false`、`reasoning_effort="medium"`、`thinking_budget_tokens=0`、`thinking_tool_call_compat=true`、`responses_tool_choice_compat=false`、`responses_force_stateless_replay=false`
 
 关键回退逻辑：
 - 若 `api_url/api_key/model_name` 任一缺失，会自动回退为 chat 模型（并告警）。
@@ -224,7 +224,7 @@ model_name = "gpt-4o-mini"
 
 默认：
 - `max_tokens=160`
-- `queue_interval_seconds=1.0`
+- `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
 - `api_mode="chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
@@ -242,7 +242,7 @@ model_name = "gpt-4o-mini"
 
 默认：
 - `max_tokens=4096`
-- `queue_interval_seconds=1.0`（`<=0` 回退 `1.0`）
+- `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
 - `api_mode="chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
@@ -255,7 +255,7 @@ model_name = "gpt-4o-mini"
 - 用于认知记忆后台改写。
 - 若整个节缺失或为空：完整回退到 `models.agent`。
 - 若部分字段缺失：逐项继承 agent 配置，包括 `api_mode`、`reasoning_*`、`thinking_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`。
-- `queue_interval_seconds<=0` 时回退到 agent 的间隔。
+- `queue_interval_seconds=0` 时立即发车，`<0` 时回退到 agent 的间隔。
 
 ### 4.4.8 模型池
 
@@ -279,6 +279,7 @@ model_name = "gpt-4o-mini"
 - `api_mode` / `reasoning_enabled` / `reasoning_effort` / `responses_tool_choice_compat` / `responses_force_stateless_replay`
 - `thinking_*` / `request_params`
 - 以上可选字段缺省继承主模型
+- `queue_interval_seconds=0` 表示立即发车；`<0` 时回退到主模型间隔。
 
 `request_params` 继承规则：
 - `[[models.chat.pool.models]]` 与 `[[models.agent.pool.models]]` 的 `request_params` 会与主模型按顶层键浅合并。
@@ -296,7 +297,7 @@ model_name = "gpt-4o-mini"
 | `api_url` | `""` | 嵌入 API 地址 |
 | `api_key` | `""` | API Key |
 | `model_name` | `""` | 模型名 |
-| `queue_interval_seconds` | `1.0` | 发车间隔 |
+| `queue_interval_seconds` | `1.0` | 发车间隔（`0` 立即发车，`<0` 回退 `1.0`） |
 | `dimensions` | `0` | 向量维度；`0`/空视为 `None`（模型默认） |
 | `query_instruction` | `""` | 查询前缀 |
 | `document_instruction` | `""` | 文档前缀 |
@@ -309,7 +310,7 @@ model_name = "gpt-4o-mini"
 | `api_url` | `""` | rerank API 地址 |
 | `api_key` | `""` | API Key |
 | `model_name` | `""` | 模型名 |
-| `queue_interval_seconds` | `1.0` | `<=0` 回退 `1.0` |
+| `queue_interval_seconds` | `1.0` | `0` 立即发车，`<0` 回退 `1.0` |
 | `query_instruction` | `""` | 查询前缀 |
 | `request_params` | `{}` | 额外请求体参数；保留字段如 `model`/`query`/`documents`/`top_n` 会忽略 |
 
@@ -420,7 +421,7 @@ model_name = "gpt-4o-mini"
 | `hot_reload_interval` | `2.0` | 扫描间隔（秒） |
 | `hot_reload_debounce` | `0.5` | 去抖时间（秒） |
 | `intro_autogen_enabled` | `true` | 是否自动生成 agent intro |
-| `intro_autogen_queue_interval` | `1.0` | intro 生成队列发车间隔 |
+| `intro_autogen_queue_interval` | `1.0` | intro 生成队列发车间隔（`0` 立即发车，`<0` 回退 `1.0`） |
 | `intro_autogen_max_tokens` | `8192` | intro 生成上限 |
 | `intro_hash_path` | `.cache/agent_intro_hashes.json` | intro hash 缓存 |
 | `prefetch_tools` | `["get_current_time"]` | 预先执行并注入 system 的工具列表 |

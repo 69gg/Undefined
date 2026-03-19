@@ -86,8 +86,8 @@ model_name = ""
 # zh: 最大生成 tokens。
 # en: Max generation tokens.
 max_tokens = 8192
-# zh: 队列发车间隔（秒）。
-# en: Queue interval (seconds).
+# zh: 队列发车间隔（秒，0 表示立即发车）。
+# en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
 # zh: API 模式：传统 chat.completions 或新版 responses。
 # en: API mode: classic chat.completions or the newer responses API.
@@ -149,8 +149,8 @@ api_key = ""
 # zh: Vision 模型名称。
 # en: Vision model name.
 model_name = ""
-# zh: 队列发车间隔（秒）。
-# en: Queue interval (seconds).
+# zh: 队列发车间隔（秒，0 表示立即发车）。
+# en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
 # zh: API 模式：传统 chat.completions 或新版 responses。
 # en: API mode: classic chat.completions or the newer responses API.
@@ -205,8 +205,8 @@ model_name = ""
 # zh: 可选限制：最大生成 tokens。
 # en: Optional limit: max generation tokens.
 max_tokens = 100
-# zh: 队列发车间隔（秒）。
-# en: Queue interval (seconds).
+# zh: 队列发车间隔（秒，0 表示立即发车）。
+# en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
 # zh: API 模式：传统 chat.completions 或新版 responses。
 # en: API mode: classic chat.completions or the newer responses API.
@@ -260,8 +260,8 @@ model_name = ""
 # zh: 可选限制：最大生成 tokens。
 # en: Optional limit: max generation tokens.
 max_tokens = 160
-# zh: 队列发车间隔（秒）。
-# en: Queue interval (seconds).
+# zh: 队列发车间隔（秒，0 表示立即发车）。
+# en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
 # zh: API 模式：传统 chat.completions 或新版 responses。
 # en: API mode: classic chat.completions or the newer responses API.
@@ -313,8 +313,8 @@ model_name = ""
 # zh: 可选限制：最大生成 tokens。
 # en: Optional limit: max generation tokens.
 max_tokens = 4096
-# zh: 队列发车间隔（秒）。
-# en: Queue interval (seconds).
+# zh: 队列发车间隔（秒，0 表示立即发车）。
+# en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
 # zh: API 模式：传统 chat.completions 或新版 responses。
 # en: API mode: classic chat.completions or the newer responses API.
@@ -379,8 +379,8 @@ model_name = ""
 # zh: 可选限制：最大生成 tokens。
 # en: Optional limit: max generation tokens.
 max_tokens = 4096
-# zh: 队列发车间隔（秒）。
-# en: Queue interval (seconds).
+# zh: 队列发车间隔（秒，0 表示立即发车）。
+# en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
 # zh: API 模式：传统 chat.completions 或新版 responses。
 # en: API mode: classic chat.completions or the newer responses API.
@@ -429,8 +429,8 @@ api_key = ""
 # zh: Embedding 模型名称。
 # en: Embedding model name.
 model_name = ""
-# zh: 队列发车间隔（秒）。
-# en: Queue interval (seconds).
+# zh: 队列发车间隔（秒，0 表示立即发车）。
+# en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
 # zh: 向量维度（可选）。0 或留空表示使用模型默认维度。
 # en: Embedding dimensions (optional). Use 0/empty to use model defaults.
@@ -458,8 +458,8 @@ api_key = ""
 # zh: Rerank 模型名称。
 # en: Rerank model name.
 model_name = ""
-# zh: 队列发车间隔（秒）。
-# en: Queue interval (seconds).
+# zh: 队列发车间隔（秒，0 表示立即发车）。
+# en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
 # zh: 查询端指令前缀（可选，部分 rerank 模型需要，如 "Instruct: ...\\nQuery: "）。
 # en: Query instruction prefix (optional, required by some rerank models, e.g. "Instruct: ...\\nQuery: ").
@@ -597,8 +597,8 @@ hot_reload_debounce = 0.5
 # zh: Agent intro 自动生成（推荐开启）。
 # en: Agent intro auto-generation (recommended).
 intro_autogen_enabled = true
-# zh: 队列发车间隔（秒）。
-# en: Queue interval (seconds).
+# zh: 队列发车间隔（秒，0 表示立即发车）。
+# en: Queue interval (seconds; 0 dispatches immediately).
 intro_autogen_queue_interval = 1.0
 # zh: 单次生成最大 token。
 # en: Max tokens per generation.

@@ -175,6 +175,15 @@ def _coerce_float(value: Any, default: float) -> float:
         return default
 
 
+def _normalize_queue_interval(value: float, default: float = 1.0) -> float:
+    """规范化队列发车间隔。
+
+    `0` 表示立即发车，负数回退到默认值。
+    """
+
+    return default if value < 0 else value
+
+
 def _coerce_bool(value: Any, default: bool) -> bool:
     if isinstance(value, bool):
         return value
@@ -992,6 +1001,9 @@ class Config:
             ),
             1.0,
         )
+        agent_intro_autogen_queue_interval = _normalize_queue_interval(
+            agent_intro_autogen_queue_interval
+        )
         agent_intro_autogen_max_tokens = _coerce_int(
             _get_value(
                 data,
@@ -1582,8 +1594,11 @@ class Config:
                     max_tokens=_coerce_int(
                         item.get("max_tokens"), primary_config.max_tokens
                     ),
-                    queue_interval_seconds=_coerce_float(
-                        item.get("queue_interval_seconds"),
+                    queue_interval_seconds=_normalize_queue_interval(
+                        _coerce_float(
+                            item.get("queue_interval_seconds"),
+                            primary_config.queue_interval_seconds,
+                        ),
                         primary_config.queue_interval_seconds,
                     ),
                     api_mode=(
@@ -1661,11 +1676,13 @@ class Config:
                 ),
                 "",
             ),
-            queue_interval_seconds=_coerce_float(
-                _get_value(
-                    data, ("models", "embedding", "queue_interval_seconds"), None
-                ),
-                1.0,
+            queue_interval_seconds=_normalize_queue_interval(
+                _coerce_float(
+                    _get_value(
+                        data, ("models", "embedding", "queue_interval_seconds"), None
+                    ),
+                    1.0,
+                )
             ),
             dimensions=_coerce_int(
                 _get_value(data, ("models", "embedding", "dimensions"), None), 0
@@ -1683,12 +1700,12 @@ class Config:
 
     @staticmethod
     def _parse_rerank_model_config(data: dict[str, Any]) -> RerankModelConfig:
-        queue_interval_seconds = _coerce_float(
-            _get_value(data, ("models", "rerank", "queue_interval_seconds"), None),
-            1.0,
+        queue_interval_seconds = _normalize_queue_interval(
+            _coerce_float(
+                _get_value(data, ("models", "rerank", "queue_interval_seconds"), None),
+                1.0,
+            )
         )
-        if queue_interval_seconds <= 0:
-            queue_interval_seconds = 1.0
         return RerankModelConfig(
             api_url=_coerce_str(
                 _get_value(
@@ -1717,16 +1734,16 @@ class Config:
 
     @staticmethod
     def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
-        queue_interval_seconds = _coerce_float(
-            _get_value(
-                data,
-                ("models", "chat", "queue_interval_seconds"),
-                "CHAT_MODEL_QUEUE_INTERVAL",
-            ),
-            1.0,
+        queue_interval_seconds = _normalize_queue_interval(
+            _coerce_float(
+                _get_value(
+                    data,
+                    ("models", "chat", "queue_interval_seconds"),
+                    "CHAT_MODEL_QUEUE_INTERVAL",
+                ),
+                1.0,
+            )
         )
-        if queue_interval_seconds <= 0:
-            queue_interval_seconds = 1.0
         thinking_include_budget, thinking_tool_call_compat = (
             _resolve_thinking_compat_flags(
                 data=data,
@@ -1816,16 +1833,16 @@ class Config:
 
     @staticmethod
     def _parse_vision_model_config(data: dict[str, Any]) -> VisionModelConfig:
-        queue_interval_seconds = _coerce_float(
-            _get_value(
-                data,
-                ("models", "vision", "queue_interval_seconds"),
-                "VISION_MODEL_QUEUE_INTERVAL",
-            ),
-            1.0,
+        queue_interval_seconds = _normalize_queue_interval(
+            _coerce_float(
+                _get_value(
+                    data,
+                    ("models", "vision", "queue_interval_seconds"),
+                    "VISION_MODEL_QUEUE_INTERVAL",
+                ),
+                1.0,
+            )
         )
-        if queue_interval_seconds <= 0:
-            queue_interval_seconds = 1.0
         thinking_include_budget, thinking_tool_call_compat = (
             _resolve_thinking_compat_flags(
                 data=data,
@@ -1941,8 +1958,7 @@ class Config:
             ),
             1.0,
         )
-        if queue_interval_seconds <= 0:
-            queue_interval_seconds = 1.0
+        queue_interval_seconds = _normalize_queue_interval(queue_interval_seconds)
 
         thinking_include_budget, thinking_tool_call_compat = (
             _resolve_thinking_compat_flags(
@@ -2068,8 +2084,7 @@ class Config:
             ),
             security_model.queue_interval_seconds,
         )
-        if queue_interval_seconds <= 0:
-            queue_interval_seconds = 1.0
+        queue_interval_seconds = _normalize_queue_interval(queue_interval_seconds)
 
         thinking_include_budget, thinking_tool_call_compat = (
             _resolve_thinking_compat_flags(
@@ -2175,16 +2190,16 @@ class Config:
 
     @staticmethod
     def _parse_agent_model_config(data: dict[str, Any]) -> AgentModelConfig:
-        queue_interval_seconds = _coerce_float(
-            _get_value(
-                data,
-                ("models", "agent", "queue_interval_seconds"),
-                "AGENT_MODEL_QUEUE_INTERVAL",
-            ),
-            1.0,
+        queue_interval_seconds = _normalize_queue_interval(
+            _coerce_float(
+                _get_value(
+                    data,
+                    ("models", "agent", "queue_interval_seconds"),
+                    "AGENT_MODEL_QUEUE_INTERVAL",
+                ),
+                1.0,
+            )
         )
-        if queue_interval_seconds <= 0:
-            queue_interval_seconds = 1.0
         thinking_include_budget, thinking_tool_call_compat = (
             _resolve_thinking_compat_flags(
                 data=data,
@@ -2397,8 +2412,9 @@ class Config:
         queue_interval_seconds = _coerce_float(
             h.get("queue_interval_seconds"), fallback.queue_interval_seconds
         )
-        if queue_interval_seconds <= 0:
-            queue_interval_seconds = fallback.queue_interval_seconds
+        queue_interval_seconds = _normalize_queue_interval(
+            queue_interval_seconds, fallback.queue_interval_seconds
+        )
         thinking_include_budget, thinking_tool_call_compat = (
             _resolve_thinking_compat_flags(
                 data={"models": {"historian": h}},

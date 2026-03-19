@@ -70,7 +70,7 @@ class QueueManager:
         model_intervals: dict[str, float] | None = None,
         max_retries: int = 2,
     ) -> None:
-        if ai_request_interval <= 0:
+        if ai_request_interval < 0:
             ai_request_interval = 1.0
         self.ai_request_interval = ai_request_interval
         self._default_interval = ai_request_interval
@@ -120,7 +120,7 @@ class QueueManager:
             value = float(interval)
         except (TypeError, ValueError):
             return self._default_interval
-        if value <= 0:
+        if value < 0:
             return self._default_interval
         return value
 

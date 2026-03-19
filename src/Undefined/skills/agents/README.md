@@ -92,7 +92,7 @@ AGENT_INTRO_HASH_PATH=.cache/agent_intro_hashes.json
 | 配置项（config.toml / env） | 说明 | 默认值 |
 |---------|------|-------|
 | `skills.intro_autogen_enabled` / `AGENT_INTRO_AUTOGEN_ENABLED` | 是否启动自动生成 | true |
-| `skills.intro_autogen_queue_interval` / `AGENT_INTRO_AUTOGEN_QUEUE_INTERVAL` | 队列发车间隔（秒） | 1.0 |
+| `skills.intro_autogen_queue_interval` / `AGENT_INTRO_AUTOGEN_QUEUE_INTERVAL` | 队列发车间隔（秒，`0` 立即发车，`<0` 回退 `1.0`） | 1.0 |
 | `skills.intro_autogen_max_tokens` / `AGENT_INTRO_AUTOGEN_MAX_TOKENS` | 生成最大 token | 700 |
 | `skills.intro_hash_path` / `AGENT_INTRO_HASH_PATH` | hash 缓存路径 | .cache/agent_intro_hashes.json |
 
