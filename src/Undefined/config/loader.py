@@ -2660,12 +2660,14 @@ class Config:
         enabled = _coerce_bool(section.get("enabled"), False)
         api_url = _coerce_str(section.get("api_url"), "")
         api_key = _coerce_str(section.get("api_key"), "")
+        moderation_enabled = _coerce_bool(section.get("moderation_enabled"), True)
         allowed_groups = frozenset(_coerce_int_list(section.get("allowed_groups")))
 
         return NagaConfig(
             enabled=enabled,
             api_url=api_url,
             api_key=api_key,
+            moderation_enabled=moderation_enabled,
             allowed_groups=allowed_groups,
         )
 

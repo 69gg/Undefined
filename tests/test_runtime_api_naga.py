@@ -92,6 +92,7 @@ def _make_server(
         naga=SimpleNamespace(
             enabled=True,
             api_key="shared-key",
+            moderation_enabled=True,
             allowed_groups={456},
         ),
         naga_model=SimpleNamespace(
@@ -529,6 +530,53 @@ async def test_naga_messages_send_blocks_on_moderation_hit(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_naga_messages_send_skips_moderation_when_disabled(
+    tmp_path: Path,
+) -> None:
+    class _ShouldNotRunSecurity:
+        async def moderate_naga_message(
+            self, *, message_format: str, content: str
+        ) -> NagaModerationResult:
+            del message_format, content
+            raise AssertionError("moderation should be skipped")
+
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    sender = _FakeSender()
+    server = _make_server(
+        store=store,
+        sender=sender,
+        security=_ShouldNotRunSecurity(),
+    )
+    server._ctx.config_getter().naga.moderation_enabled = False
+
+    response = await server._naga_messages_send_handler(
+        _make_request(
+            json_body={
+                "bind_uuid": "uuid_a",
+                "naga_id": "alice",
+                "delivery_signature": "sig_1",
+                "target": {"qq_id": 123, "group_id": 456, "mode": "group"},
+                "message": {"format": "text", "content": "hello"},
+            },
+            headers={"Authorization": "Bearer shared-key"},
+        )
+    )
+
+    payload = _json(response)
+    assert response.status == 200
+    assert payload["ok"] is True
+    assert payload["moderation"]["status"] == "skipped_disabled"
+    assert payload["sent_group"] is True
+    assert sender.group_messages == [(456, "hello")]
+
+
+@pytest.mark.asyncio
 async def test_naga_messages_send_allows_render_with_fallback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -695,6 +743,189 @@ async def test_naga_messages_send_both_mode_reports_partial_success(
     assert payload["delivery_status"] == "partial_success"
     assert sender.private_messages == [(123, "hello")]
     assert sender.group_messages == []
+
+
+@pytest.mark.asyncio
+async def test_naga_messages_send_deduplicates_completed_uuid(
+    tmp_path: Path,
+) -> None:
+    class _CountingSecurity:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def moderate_naga_message(
+            self, *, message_format: str, content: str
+        ) -> NagaModerationResult:
+            del message_format, content
+            self.calls += 1
+            return NagaModerationResult(
+                blocked=False,
+                status="passed",
+                categories=[],
+                message="ok",
+                model_name="naga-moderation",
+            )
+
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    sender = _FakeSender()
+    security = _CountingSecurity()
+    server = _make_server(store=store, sender=sender, security=security)
+    body = {
+        "bind_uuid": "uuid_a",
+        "naga_id": "alice",
+        "delivery_signature": "sig_1",
+        "uuid": "req-1",
+        "target": {"qq_id": 123, "group_id": 456, "mode": "group"},
+        "message": {"format": "text", "content": "hello"},
+    }
+
+    first = await server._naga_messages_send_handler(
+        _make_request(json_body=body, headers={"Authorization": "Bearer shared-key"})
+    )
+    second = await server._naga_messages_send_handler(
+        _make_request(json_body=body, headers={"Authorization": "Bearer shared-key"})
+    )
+
+    first_payload = _json(first)
+    second_payload = _json(second)
+    assert first.status == 200
+    assert second.status == 200
+    assert first_payload == second_payload
+    assert security.calls == 1
+    assert sender.group_messages == [(456, "hello")]
+
+
+@pytest.mark.asyncio
+async def test_naga_messages_send_deduplicates_inflight_uuid(
+    tmp_path: Path,
+) -> None:
+    class _BlockingSecurity:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def moderate_naga_message(
+            self, *, message_format: str, content: str
+        ) -> NagaModerationResult:
+            del message_format, content
+            self.calls += 1
+            self.started.set()
+            await self.release.wait()
+            return NagaModerationResult(
+                blocked=False,
+                status="passed",
+                categories=[],
+                message="ok",
+                model_name="naga-moderation",
+            )
+
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    sender = _FakeSender()
+    security = _BlockingSecurity()
+    server = _make_server(store=store, sender=sender, security=security)
+    body = {
+        "bind_uuid": "uuid_a",
+        "naga_id": "alice",
+        "delivery_signature": "sig_1",
+        "uuid": "req-2",
+        "target": {"qq_id": 123, "group_id": 456, "mode": "group"},
+        "message": {"format": "text", "content": "hello"},
+    }
+
+    first_task = asyncio.create_task(
+        server._naga_messages_send_handler(
+            _make_request(
+                json_body=body, headers={"Authorization": "Bearer shared-key"}
+            )
+        )
+    )
+    await security.started.wait()
+    second_task = asyncio.create_task(
+        server._naga_messages_send_handler(
+            _make_request(
+                json_body=body, headers={"Authorization": "Bearer shared-key"}
+            )
+        )
+    )
+    await asyncio.sleep(0)
+    security.release.set()
+
+    first = await first_task
+    second = await second_task
+
+    assert _json(first) == _json(second)
+    assert security.calls == 1
+    assert sender.group_messages == [(456, "hello")]
+
+
+@pytest.mark.asyncio
+async def test_naga_messages_send_rejects_uuid_payload_conflict(
+    tmp_path: Path,
+) -> None:
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a",
+        naga_id="alice",
+        delivery_signature="sig_1",
+    )
+    sender = _FakeSender()
+    server = _make_server(
+        store=store,
+        sender=sender,
+        security_result=NagaModerationResult(
+            blocked=False,
+            status="passed",
+            categories=[],
+            message="ok",
+            model_name="naga-moderation",
+        ),
+    )
+
+    first = await server._naga_messages_send_handler(
+        _make_request(
+            json_body={
+                "bind_uuid": "uuid_a",
+                "naga_id": "alice",
+                "delivery_signature": "sig_1",
+                "uuid": "req-3",
+                "target": {"qq_id": 123, "group_id": 456, "mode": "group"},
+                "message": {"format": "text", "content": "hello"},
+            },
+            headers={"Authorization": "Bearer shared-key"},
+        )
+    )
+    second = await server._naga_messages_send_handler(
+        _make_request(
+            json_body={
+                "bind_uuid": "uuid_a",
+                "naga_id": "alice",
+                "delivery_signature": "sig_1",
+                "uuid": "req-3",
+                "target": {"qq_id": 123, "group_id": 456, "mode": "group"},
+                "message": {"format": "text", "content": "hello again"},
+            },
+            headers={"Authorization": "Bearer shared-key"},
+        )
+    )
+
+    assert first.status == 200
+    assert second.status == 409
+    assert "uuid reused with different payload" in _json(second)["error"]
+    assert sender.group_messages == [(456, "hello")]
 
 
 @pytest.mark.asyncio

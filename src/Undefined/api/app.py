@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import hashlib
 import json
 import logging
@@ -35,6 +36,15 @@ _VIRTUAL_USER_NAME = "system"
 _AUTH_HEADER = "X-Undefined-API-Key"
 _CHAT_SSE_KEEPALIVE_SECONDS = 10.0
 _PROCESS_START_TIME = time.time()
+_NAGA_REQUEST_UUID_TTL_SECONDS = 6 * 60 * 60
+
+
+@dataclass
+class _NagaRequestResult:
+    payload_hash: str
+    status: int
+    payload: dict[str, Any]
+    finished_at: float
 
 
 class _WebUIVirtualSender:
@@ -258,6 +268,14 @@ def _naga_message_digest(
         separators=(",", ":"),
     )
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _parse_response_payload(response: Response) -> dict[str, Any]:
+    text = response.text or ""
+    if not text:
+        return {}
+    payload = json.loads(text)
+    return payload if isinstance(payload, dict) else {"data": payload}
 
 
 def _registry_summary(registry: Any) -> dict[str, Any]:
@@ -520,7 +538,8 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
                         "summary": "Send a Naga-authenticated message",
                         "description": (
                             "Validates bind_uuid + delivery_signature, runs "
-                            "moderation, then delivers the message."
+                            "moderation, then delivers the message. "
+                            "Caller may provide uuid for idempotent retry deduplication."
                         ),
                         "security": [{"BearerAuth": []}],
                     }
@@ -581,6 +600,11 @@ class RuntimeAPIServer:
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._naga_send_registry_lock = asyncio.Lock()
         self._naga_send_inflight: dict[str, int] = {}
+        self._naga_request_uuid_lock = asyncio.Lock()
+        self._naga_request_uuid_inflight: dict[
+            str, tuple[str, asyncio.Future[tuple[int, dict[str, Any]]]]
+        ] = {}
+        self._naga_request_uuid_results: dict[str, _NagaRequestResult] = {}
 
     async def start(self) -> None:
         from Undefined.config.models import resolve_bind_hosts
@@ -707,6 +731,79 @@ class RuntimeAPIServer:
             next_count = current - 1
             self._naga_send_inflight[message_key] = next_count
             return next_count
+
+    def _prune_naga_request_uuid_state_locked(self) -> None:
+        now = time.time()
+        expired = [
+            request_uuid
+            for request_uuid, result in self._naga_request_uuid_results.items()
+            if now - result.finished_at > _NAGA_REQUEST_UUID_TTL_SECONDS
+        ]
+        for request_uuid in expired:
+            self._naga_request_uuid_results.pop(request_uuid, None)
+
+    async def _register_naga_request_uuid(
+        self, request_uuid: str, payload_hash: str
+    ) -> tuple[str, Any]:
+        async with self._naga_request_uuid_lock:
+            self._prune_naga_request_uuid_state_locked()
+
+            cached = self._naga_request_uuid_results.get(request_uuid)
+            if cached is not None:
+                if cached.payload_hash != payload_hash:
+                    return "conflict", cached.payload_hash
+                return "cached", (cached.status, deepcopy(cached.payload))
+
+            inflight = self._naga_request_uuid_inflight.get(request_uuid)
+            if inflight is not None:
+                existing_hash, inflight_future = inflight
+                if existing_hash != payload_hash:
+                    return "conflict", existing_hash
+                return "await", inflight_future
+
+            owner_future: asyncio.Future[tuple[int, dict[str, Any]]] = (
+                asyncio.get_running_loop().create_future()
+            )
+            self._naga_request_uuid_inflight[request_uuid] = (
+                payload_hash,
+                owner_future,
+            )
+            return "owner", owner_future
+
+    async def _finish_naga_request_uuid(
+        self,
+        request_uuid: str,
+        payload_hash: str,
+        *,
+        status: int,
+        payload: dict[str, Any],
+    ) -> None:
+        async with self._naga_request_uuid_lock:
+            inflight = self._naga_request_uuid_inflight.pop(request_uuid, None)
+            future = inflight[1] if inflight is not None else None
+            result_payload = deepcopy(payload)
+            self._naga_request_uuid_results[request_uuid] = _NagaRequestResult(
+                payload_hash=payload_hash,
+                status=status,
+                payload=result_payload,
+                finished_at=time.time(),
+            )
+            self._prune_naga_request_uuid_state_locked()
+            if future is not None and not future.done():
+                future.set_result((status, deepcopy(result_payload)))
+
+    async def _fail_naga_request_uuid(
+        self,
+        request_uuid: str,
+        payload_hash: str,
+        exc: BaseException,
+    ) -> None:
+        async with self._naga_request_uuid_lock:
+            inflight = self._naga_request_uuid_inflight.pop(request_uuid, None)
+            future = inflight[1] if inflight is not None else None
+            self._prune_naga_request_uuid_state_locked()
+            if future is not None and not future.done():
+                future.set_exception(exc)
 
     @property
     def _ctx(self) -> RuntimeAPIContext:
@@ -1835,6 +1932,7 @@ class RuntimeAPIServer:
         bind_uuid = str(body.get("bind_uuid", "") or "").strip()
         naga_id = str(body.get("naga_id", "") or "").strip()
         delivery_signature = str(body.get("delivery_signature", "") or "").strip()
+        request_uuid = str(body.get("uuid", "") or "").strip()
         target = body.get("target")
         message = body.get("message")
         if not bind_uuid or not naga_id or not delivery_signature:
@@ -1885,11 +1983,12 @@ class RuntimeAPIServer:
             content=content,
         )
         logger.info(
-            "[NagaSend] 请求开始: trace=%s remote=%s naga_id=%s bind_uuid=%s mode=%s fmt=%s qq=%s group=%s key=%s content_len=%s preview=%s signature=%s",
+            "[NagaSend] 请求开始: trace=%s remote=%s naga_id=%s bind_uuid=%s request_uuid=%s mode=%s fmt=%s qq=%s group=%s key=%s content_len=%s preview=%s signature=%s",
             trace_id,
             getattr(request, "remote", None),
             naga_id,
             bind_uuid,
+            request_uuid,
             mode,
             fmt,
             target_qq,
@@ -1901,24 +2000,70 @@ class RuntimeAPIServer:
         )
         if mode == "both":
             logger.warning(
-                "[NagaSend] 上游请求显式要求双路投递: trace=%s naga_id=%s bind_uuid=%s key=%s",
+                "[NagaSend] 上游请求显式要求双路投递: trace=%s naga_id=%s bind_uuid=%s request_uuid=%s key=%s",
                 trace_id,
                 naga_id,
                 bind_uuid,
+                request_uuid,
                 message_key,
             )
         inflight_count = await self._track_naga_send_start(message_key)
         if inflight_count > 1:
             logger.warning(
-                "[NagaSend] 检测到相同 payload 并发请求: trace=%s naga_id=%s bind_uuid=%s key=%s inflight=%s",
+                "[NagaSend] 检测到相同 payload 并发请求: trace=%s naga_id=%s bind_uuid=%s request_uuid=%s key=%s inflight=%s",
                 trace_id,
                 naga_id,
                 bind_uuid,
+                request_uuid,
                 message_key,
                 inflight_count,
             )
         try:
-            return await self._naga_messages_send_impl(
+            if request_uuid:
+                dedupe_action, dedupe_value = await self._register_naga_request_uuid(
+                    request_uuid, message_key
+                )
+                if dedupe_action == "conflict":
+                    logger.warning(
+                        "[NagaSend] uuid 与历史 payload 冲突: trace=%s naga_id=%s bind_uuid=%s uuid=%s key=%s",
+                        trace_id,
+                        naga_id,
+                        bind_uuid,
+                        request_uuid,
+                        message_key,
+                    )
+                    return _json_error("uuid reused with different payload", status=409)
+                if dedupe_action == "cached":
+                    cached_status, cached_payload = dedupe_value
+                    logger.warning(
+                        "[NagaSend] 命中已完成幂等结果，直接复用: trace=%s naga_id=%s bind_uuid=%s request_uuid=%s key=%s",
+                        trace_id,
+                        naga_id,
+                        bind_uuid,
+                        request_uuid,
+                        message_key,
+                    )
+                    return web.json_response(
+                        deepcopy(cached_payload),
+                        status=int(cached_status),
+                    )
+                if dedupe_action == "await":
+                    wait_future = dedupe_value
+                    logger.warning(
+                        "[NagaSend] 命中进行中幂等请求，等待首个结果: trace=%s naga_id=%s bind_uuid=%s request_uuid=%s key=%s",
+                        trace_id,
+                        naga_id,
+                        bind_uuid,
+                        request_uuid,
+                        message_key,
+                    )
+                    cached_status, cached_payload = await wait_future
+                    return web.json_response(
+                        deepcopy(cached_payload),
+                        status=int(cached_status),
+                    )
+
+            response = await self._naga_messages_send_impl(
                 naga_id=naga_id,
                 bind_uuid=bind_uuid,
                 delivery_signature=delivery_signature,
@@ -1930,13 +2075,26 @@ class RuntimeAPIServer:
                 trace_id=trace_id,
                 message_key=message_key,
             )
+            if request_uuid:
+                await self._finish_naga_request_uuid(
+                    request_uuid,
+                    message_key,
+                    status=response.status,
+                    payload=_parse_response_payload(response),
+                )
+            return response
+        except Exception as exc:
+            if request_uuid:
+                await self._fail_naga_request_uuid(request_uuid, message_key, exc)
+            raise
         finally:
             remaining = await self._track_naga_send_done(message_key)
             logger.info(
-                "[NagaSend] 请求退出: trace=%s naga_id=%s bind_uuid=%s key=%s inflight_remaining=%s",
+                "[NagaSend] 请求退出: trace=%s naga_id=%s bind_uuid=%s request_uuid=%s key=%s inflight_remaining=%s",
                 trace_id,
                 naga_id,
                 bind_uuid,
+                request_uuid,
                 message_key,
                 remaining,
             )
@@ -2033,8 +2191,25 @@ class RuntimeAPIServer:
                 return _json_error("sender not available", status=503)
 
             moderation: dict[str, Any]
+            naga_cfg = getattr(cfg, "naga", None)
+            moderation_enabled = bool(getattr(naga_cfg, "moderation_enabled", True))
             security = getattr(self._ctx.command_dispatcher, "security", None)
-            if security is None or not hasattr(security, "moderate_naga_message"):
+            if not moderation_enabled:
+                moderation = {
+                    "status": "skipped_disabled",
+                    "blocked": False,
+                    "categories": [],
+                    "message": "Naga moderation disabled by config; message sent without moderation block",
+                    "model_name": "",
+                }
+                logger.warning(
+                    "[NagaSend] 审核已禁用，直接放行: trace=%s naga_id=%s bind_uuid=%s key=%s",
+                    trace_id,
+                    naga_id,
+                    bind_uuid,
+                    message_key,
+                )
+            elif security is None or not hasattr(security, "moderate_naga_message"):
                 moderation = {
                     "status": "error_allowed",
                     "blocked": False,

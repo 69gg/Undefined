@@ -68,10 +68,13 @@ async def test_moderate_naga_message_uses_tool_call_for_both_api_modes(
     assert requester.calls
     call = requester.calls[-1]
     assert call["tools"][0]["function"]["name"] == "submit_naga_moderation_result"
-    assert call["tool_choice"] == {
-        "type": "function",
-        "function": {"name": "submit_naga_moderation_result"},
-    }
+    if api_mode == "responses":
+        assert call["tool_choice"] == "required"
+    else:
+        assert call["tool_choice"] == {
+            "type": "function",
+            "function": {"name": "submit_naga_moderation_result"},
+        }
 
 
 @pytest.mark.asyncio

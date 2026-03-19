@@ -204,6 +204,7 @@ class NagaConfig:
     enabled: bool = False
     api_url: str = ""
     api_key: str = ""
+    moderation_enabled: bool = True
     allowed_groups: frozenset[int] = field(default_factory=frozenset)
 
 

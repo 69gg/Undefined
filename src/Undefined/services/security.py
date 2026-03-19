@@ -1,7 +1,8 @@
 import logging
 import re
 import time
-from dataclasses import dataclass
+from copy import copy
+from dataclasses import dataclass, is_dataclass, replace
 from html.parser import HTMLParser
 from typing import Any, Optional, cast
 import httpx
@@ -12,7 +13,11 @@ from Undefined.rate_limit import RateLimiter
 from Undefined.injection_response_agent import InjectionResponseAgent
 from Undefined.token_usage_storage import TokenUsageStorage
 from Undefined.ai.llm import ModelRequester
-from Undefined.ai.transports import API_MODE_CHAT_COMPLETIONS, get_api_mode
+from Undefined.ai.transports import (
+    API_MODE_CHAT_COMPLETIONS,
+    API_MODE_RESPONSES,
+    get_api_mode,
+)
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.utils.resources import read_text_resource
 from Undefined.utils.tool_calls import extract_required_tool_call_arguments
@@ -278,7 +283,31 @@ class SecurityService:
         self, *, message_format: str, content: str
     ) -> NagaModerationResult:
         """审核 Naga 外发消息。"""
-        model_config = getattr(self.config, "naga_model", self.config.security_model)
+        source_model_config = getattr(
+            self.config, "naga_model", self.config.security_model
+        )
+        model_config = source_model_config
+        if get_api_mode(source_model_config) == API_MODE_RESPONSES:
+            # Naga 审核必须稳定拿到 tool call。对部分 Responses 兼容层，
+            # 这里强制切到兼容模式并关闭额外推理参数，避免 tool_choice / tool_calls 失配。
+            if is_dataclass(source_model_config):
+                model_config = replace(
+                    cast(Any, source_model_config),
+                    responses_tool_choice_compat=True,
+                    thinking_enabled=False,
+                    thinking_budget_tokens=0,
+                    thinking_include_budget=False,
+                    reasoning_enabled=False,
+                    reasoning_effort="low",
+                )
+            else:
+                model_config = copy(source_model_config)
+                setattr(model_config, "responses_tool_choice_compat", True)
+                setattr(model_config, "thinking_enabled", False)
+                setattr(model_config, "thinking_budget_tokens", 0)
+                setattr(model_config, "thinking_include_budget", False)
+                setattr(model_config, "reasoning_enabled", False)
+                setattr(model_config, "reasoning_effort", "low")
         renderless_text = _renderless_text(message_format, content)
         start_time = time.perf_counter()
         request_kwargs: dict[str, Any] = {}
@@ -307,12 +336,16 @@ class SecurityService:
                     {"role": "user", "content": prompt_input},
                 ],
                 tools=[_NAGA_MESSAGE_MODERATION_TOOL],
-                tool_choice=cast(
-                    Any,
-                    {
-                        "type": "function",
-                        "function": {"name": "submit_naga_moderation_result"},
-                    },
+                tool_choice=(
+                    "required"
+                    if get_api_mode(model_config) == API_MODE_RESPONSES
+                    else cast(
+                        Any,
+                        {
+                            "type": "function",
+                            "function": {"name": "submit_naga_moderation_result"},
+                        },
+                    )
                 ),
                 max_tokens=160,
                 call_type="naga_message_moderation",

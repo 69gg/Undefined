@@ -676,6 +676,7 @@ model_name = "gpt-4o-mini"
 | `enabled` | `false` | 是否启用外部网关集成 | 需同时开启 `nagaagent_mode_enabled` |
 | `api_url` | `""` | Naga 服务器 API 地址 | 为空时无法向远端提交 bind request / revoke 同步 |
 | `api_key` | `""` | Undefined ↔ Naga 共享密钥 | 回调端点通过 `Authorization: Bearer` 校验 |
+| `moderation_enabled` | `true` | 是否启用 Naga 外发消息审核 | 关闭后 `messages/send` 直接跳过审核，返回 `moderation.status=skipped_disabled` |
 | `allowed_groups` | `[]` | Naga 服务群聊名单 | 绑定命令和回调群发仅限名单内的群 |
 
 **作用域规则**：
@@ -712,7 +713,7 @@ model_name = "gpt-4o-mini"
 - `webui.port`
 - `webui.password`
 - `api.*`（`enabled/host/port/auth_key/openapi_enabled`）
-- `naga.*`（`enabled/api_url/api_key/allowed_groups`）
+- `naga.*`（`enabled/api_url/api_key/moderation_enabled/allowed_groups`）
 
 ### 5.3 明确“会执行热应用”的字段
 - 模型发车间隔 / 模型名 / 模型池变更（队列间隔刷新）

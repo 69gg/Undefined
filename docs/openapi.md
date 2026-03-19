@@ -465,10 +465,12 @@ Naga 集成端点仅在以下条件同时满足时注册：
 
 - 绑定流程使用 `bind_uuid` 驱动，而不是早期的 scoped token。
 - 发送流程使用 `bind_uuid + naga_id + delivery_signature` 三元组验签。
+- 发送流程支持调用方提供 `uuid` 作为幂等键；相同键的重复请求会直接复用首个结果。
 - `target.qq_id` / `target.group_id` 必须显式提供，并且必须等于已绑定目标。
 - `target.mode` 支持 `private` / `group` / `both`。
 - `message.format` 支持 `text` / `markdown` / `html`。
 - 发送前会进行一次审核；命中风险时返回 `403`，审核模型异常/超时时 fail-open，并在响应中返回 `moderation.status=error_allowed`。
+- 若 `config.[naga].moderation_enabled = false`，则直接跳过审核，并返回 `moderation.status=skipped_disabled`。
 - `markdown` / `html` 会优先尝试渲染成图片；渲染失败时会回退为文本发送，并在响应中返回 `render_fallback=true`。
 - 当 `mode=both` 时，只要私聊或群聊至少有一个成功，接口仍返回 `200`，由 `sent_private` / `sent_group` 指示实际投递结果。
 - 成功响应会额外返回 `partial_success` 与 `delivery_status`：完全成功时为 `false` / `full_success`，部分成功时为 `true` / `partial_success`。

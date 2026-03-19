@@ -72,6 +72,7 @@ Authorization: Bearer <config.[naga].api_key>
   "bind_uuid": "unique-bind-uuid",
   "naga_id": "alice",
   "delivery_signature": "opaque-signature-from-naga",
+  "uuid": "ed1c5d4d-4bb0-4d33-a9e6-a4c56e9a8a1c",
   "target": {
     "qq_id": 123456,
     "group_id": 654321,
@@ -87,6 +88,7 @@ Authorization: Bearer <config.[naga].api_key>
 字段说明：
 
 - `bind_uuid` + `naga_id` + `delivery_signature`：三者一起校验绑定身份
+- `uuid`：由 Naga 侧生成的单次投递幂等键；若同一 `uuid` 被重复提交，Undefined 会直接复用首个结果，不再重复发消息
 - `target.qq_id` / `target.group_id`: 目标参数必须显式提供，但只允许等于已绑定 QQ / 已绑定群
 - `target.mode`: `private` / `group` / `both`
 - `message.format`: `text` / `markdown` / `html`
@@ -100,6 +102,9 @@ Authorization: Bearer <config.[naga].api_key>
 - 若渲染失败，会回退为文本发送，并在响应中标记 `render_fallback=true`
 - 当 `mode=both` 时，只要私聊或群聊至少有一个发送成功，接口仍返回 `200`；由 `sent_private` / `sent_group` 表示实际投递结果
 - 成功响应会额外带 `partial_success` 与 `delivery_status`，用于显式区分“完全成功”和“部分成功”
+- 对同一个 `uuid` 的重复调用：
+  - 若 payload 完全一致，则直接复用首个结果
+  - 若 payload 不一致，则返回 `409`
 
 审核规则：
 
@@ -110,6 +115,7 @@ Authorization: Bearer <config.[naga].api_key>
   - `politics_illegal`
   - `personal_privacy`
 - 审核模型异常/超时时不拦截，但响应会返回 `moderation.status=error_allowed`
+- 若 `config.[naga].moderation_enabled = false`，则会直接跳过审核，并返回 `moderation.status=skipped_disabled`
 
 成功响应示例：
 
