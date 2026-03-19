@@ -952,6 +952,11 @@ api_url = ""
 # zh: 双方共享密钥（Undefined ↔ Naga 身份验证）。
 # en: Shared secret key for authentication between Undefined and Naga.
 api_key = ""
+# zh: 是否启用 Naga 外发消息审核。
+# zh: 关闭后 /api/v1/naga/messages/send 会直接跳过本地审核，返回 moderation.status=skipped_disabled。
+# en: Whether to enable Naga outbound message moderation.
+# en: When disabled, /api/v1/naga/messages/send skips local moderation and returns moderation.status=skipped_disabled.
+moderation_enabled = true
 # zh: Naga 白名单群：/naga 在这些群中才可见；绑定和群聊投递也仅限这些群。
 # en: Naga allowlisted groups: /naga is only visible here, and binding/group delivery are restricted to these groups.
 allowed_groups = []
