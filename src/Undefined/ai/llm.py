@@ -22,6 +22,7 @@ from openai import (
 
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.ai.transports import (
+    API_MODE_CHAT_COMPLETIONS,
     API_MODE_RESPONSES,
     build_responses_request_body,
     get_api_mode,
@@ -66,7 +67,19 @@ __all__ = ["ModelRequester", "build_request_body", "ModelConfig"]
 _CHAT_COMPLETIONS_KNOWN_FIELDS: set[str] = {
     "model",
     "messages",
+    "audio",
+    "metadata",
+    "max_completion_tokens",
     "max_tokens",
+    "modalities",
+    "parallel_tool_calls",
+    "prediction",
+    "prompt_cache_key",
+    "prompt_cache_retention",
+    "reasoning_effort",
+    "safety_identifier",
+    "service_tier",
+    "store",
     "temperature",
     "top_p",
     "n",
@@ -83,6 +96,8 @@ _CHAT_COMPLETIONS_KNOWN_FIELDS: set[str] = {
     "tool_choice",
     "logprobs",
     "top_logprobs",
+    "verbosity",
+    "web_search_options",
 }
 
 _SDK_REQUEST_OPTION_FIELDS: frozenset[str] = frozenset(
@@ -90,13 +105,24 @@ _SDK_REQUEST_OPTION_FIELDS: frozenset[str] = frozenset(
 )
 
 _RESPONSES_KNOWN_FIELDS: set[str] = {
+    "background",
+    "context_management",
+    "conversation",
+    "include",
     "model",
     "input",
     "instructions",
     "max_output_tokens",
+    "max_tool_calls",
     "metadata",
     "previous_response_id",
+    "prompt",
+    "prompt_cache_key",
+    "prompt_cache_retention",
     "reasoning",
+    "safety_identifier",
+    "service_tier",
+    "store",
     "temperature",
     "top_p",
     "tools",
@@ -156,6 +182,9 @@ _THINKING_KEYS: tuple[str, ...] = (
     "chain_of_thought",
     "cot",
     "thoughts",
+)
+_CHAT_COMPLETION_INTERNAL_MESSAGE_KEYS: frozenset[str] = frozenset(
+    (*_THINKING_KEYS, "_responses_output_items")
 )
 
 _DEFAULT_TOOLS_DESCRIPTION_MAX_LEN = 1024
@@ -673,6 +702,43 @@ def _sanitize_openai_messages_tool_arguments(
     return sanitized_messages, changed
 
 
+def _sanitize_chat_completion_messages(
+    messages: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
+    """移除 Chat Completions 非标准消息字段。
+
+    本地历史里允许保留 reasoning_content 等兼容字段用于日志/回放，
+    但发往 OpenAI Chat Completions 时必须剥离这些内部字段。
+    """
+    if not messages:
+        return messages, 0, {}
+
+    changed = 0
+    stripped_fields: dict[str, int] = {}
+    sanitized_messages: list[dict[str, Any]] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            sanitized_messages.append(message)
+            continue
+
+        sanitized_message = message
+        removed = False
+        for key in _CHAT_COMPLETION_INTERNAL_MESSAGE_KEYS:
+            if key not in sanitized_message:
+                continue
+            if sanitized_message is message:
+                sanitized_message = dict(message)
+            sanitized_message.pop(key, None)
+            stripped_fields[key] = stripped_fields.get(key, 0) + 1
+            removed = True
+
+        if removed:
+            changed += 1
+        sanitized_messages.append(sanitized_message)
+
+    return sanitized_messages, changed, stripped_fields
+
+
 def _stringify_thinking_list(value: list[Any]) -> str:
     """将列表类型的思维链转换为字符串。
 
@@ -951,6 +1017,22 @@ class ModelRequester:
                 tool_args_fixed,
                 len(messages_for_api),
             )
+        if api_mode == API_MODE_CHAT_COMPLETIONS:
+            (
+                messages_for_api,
+                stripped_message_count,
+                stripped_message_fields,
+            ) = _sanitize_chat_completion_messages(messages_for_api)
+            if stripped_message_count and logger.isEnabledFor(logging.INFO):
+                details = ",".join(
+                    f"{key}={value}"
+                    for key, value in sorted(stripped_message_fields.items())
+                )
+                logger.info(
+                    "[chat_completions.standardize] stripped_internal_message_fields=%s messages=%s",
+                    details,
+                    stripped_message_count,
+                )
 
         tools_for_api = tools
         api_to_internal: dict[str, str] = {}
@@ -1485,7 +1567,7 @@ def build_request_body(
 
     body: dict[str, Any] = {
         "model": model_config.model_name,
-        "messages": messages,
+        "messages": _sanitize_chat_completion_messages(messages)[0],
         "max_tokens": max_tokens,
     }
 
@@ -1503,7 +1585,7 @@ def build_request_body(
         if style == "anthropic":
             body["output_config"] = effort_payload
         else:
-            body["reasoning"] = effort_payload
+            body["reasoning_effort"] = effort_payload["effort"]
 
     if tools:
         body["tools"] = tools

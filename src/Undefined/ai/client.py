@@ -18,6 +18,7 @@ from Undefined.ai.model_selector import ModelSelector
 from Undefined.ai.multimodal import MultimodalAnalyzer
 from Undefined.ai.prompts import PromptBuilder
 from Undefined.ai.summaries import SummaryService
+from Undefined.ai.transports.openai_transport import RESPONSES_OUTPUT_ITEMS_KEY
 from Undefined.ai.tokens import TokenCounter
 from Undefined.ai.tooling import ToolManager
 from Undefined.config import (
@@ -927,7 +928,7 @@ class AIClient:
                 if cot_compat and tools and log_thinking and not cot_compat_logged:
                     cot_compat_logged = True
                     logger.info(
-                        "[思维链兼容] 多轮工具调用 reasoning_content 回传已启用"
+                        "[思维链兼容] 多轮工具调用 reasoning_content 本地回填已启用"
                     )
                 if (
                     cot_compat
@@ -967,6 +968,9 @@ class AIClient:
                     "content": content,
                     "tool_calls": tool_calls,
                 }
+                output_items = message.get(RESPONSES_OUTPUT_ITEMS_KEY)
+                if isinstance(output_items, list):
+                    assistant_message[RESPONSES_OUTPUT_ITEMS_KEY] = output_items
                 if cot_compat and reasoning_content is not None:
                     assistant_message["reasoning_content"] = reasoning_content
                 messages.append(assistant_message)

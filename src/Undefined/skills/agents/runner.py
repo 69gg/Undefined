@@ -7,6 +7,7 @@ from typing import Any
 
 import aiofiles
 
+from Undefined.ai.transports.openai_transport import RESPONSES_OUTPUT_ITEMS_KEY
 from Undefined.skills.agents.agent_tool_registry import AgentToolRegistry
 from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
 from Undefined.utils.tool_calls import parse_tool_arguments
@@ -153,6 +154,9 @@ async def run_agent_with_tools(
                 "content": content,
                 "tool_calls": tool_calls,
             }
+            output_items = message.get(RESPONSES_OUTPUT_ITEMS_KEY)
+            if isinstance(output_items, list):
+                assistant_message[RESPONSES_OUTPUT_ITEMS_KEY] = output_items
             cot_compat = getattr(agent_config, "thinking_tool_call_compat", False)
             if cot_compat and reasoning_content is not None:
                 assistant_message["reasoning_content"] = reasoning_content

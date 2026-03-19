@@ -9,8 +9,15 @@ import pytest
 from openai import AsyncOpenAI, BadRequestError
 
 from Undefined.ai.client import AIClient
-from Undefined.ai.llm import ModelRequester, _encode_tool_name_for_api
-from Undefined.ai.transports.openai_transport import normalize_responses_result
+from Undefined.ai.llm import (
+    ModelRequester,
+    _encode_tool_name_for_api,
+    build_request_body,
+)
+from Undefined.ai.transports.openai_transport import (
+    RESPONSES_OUTPUT_ITEMS_KEY,
+    normalize_responses_result,
+)
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.config.models import ChatModelConfig
 from Undefined.token_usage_storage import TokenUsageStorage
@@ -115,14 +122,78 @@ async def test_chat_request_uses_model_reasoning_and_request_params(
     assert fake_client.chat.completions.last_kwargs["model"] == "gpt-test"
     assert fake_client.chat.completions.last_kwargs["max_tokens"] == 128
     assert fake_client.chat.completions.last_kwargs["temperature"] == 0.7
-    assert fake_client.chat.completions.last_kwargs["extra_body"] == {
-        "metadata": {"source": "config"},
-        "reasoning": {"effort": "high"},
-    }
+    assert fake_client.chat.completions.last_kwargs["metadata"] == {"source": "config"}
+    assert fake_client.chat.completions.last_kwargs["reasoning_effort"] == "high"
+    assert "extra_body" not in fake_client.chat.completions.last_kwargs
     assert (
         "ignored_keys=model,stream" in caplog.text
         or "ignored_keys=stream,model" in caplog.text
     )
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_chat_request_strips_internal_reasoning_fields_from_messages() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeClient()
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+    )
+    tool_calls = [
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+                "name": "lookup",
+                "arguments": '{"query":"weather"}',
+            },
+        }
+    ]
+
+    await requester.request(
+        model_config=cfg,
+        messages=[
+            {"role": "user", "content": "hello"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": tool_calls,
+                "reasoning_content": "内部思维链",
+                RESPONSES_OUTPUT_ITEMS_KEY: [
+                    {
+                        "type": "reasoning",
+                        "id": "rs_1",
+                        "summary": [{"type": "summary_text", "text": "先想一下"}],
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "done"},
+        ],
+        max_tokens=128,
+        call_type="chat",
+    )
+
+    assert fake_client.chat.completions.last_kwargs is not None
+    outbound_messages = fake_client.chat.completions.last_kwargs["messages"]
+    assert outbound_messages[1] == {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": tool_calls,
+    }
+    assert "reasoning_content" not in outbound_messages[1]
+    assert RESPONSES_OUTPUT_ITEMS_KEY not in outbound_messages[1]
 
     await requester._http_client.aclose()
 
@@ -223,6 +294,19 @@ async def test_responses_request_normalizes_tool_calls_and_usage() -> None:
     assert message["tool_calls"][0]["id"] == "call_1"
     assert message["tool_calls"][0]["function"]["name"] == "lookup"
     assert message["reasoning_content"] == "先想一下"
+    assert message[RESPONSES_OUTPUT_ITEMS_KEY] == [
+        {
+            "type": "reasoning",
+            "id": "rs_1",
+            "summary": [{"type": "summary_text", "text": "先想一下"}],
+        },
+        {
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "lookup",
+            "arguments": '{"query": "weather"}',
+        },
+    ]
     assert result["usage"] == {
         "prompt_tokens": 11,
         "completion_tokens": 7,
@@ -233,6 +317,62 @@ async def test_responses_request_normalizes_tool_calls_and_usage() -> None:
         "previous_response_id": "resp_1",
         "tool_result_start_index": 2,
     }
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_responses_request_maps_response_format_to_text_format() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeClient(
+        responses=[
+            {
+                "id": "resp_text",
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": '{"ok":true}'}],
+                    }
+                ],
+                "usage": {"input_tokens": 5, "output_tokens": 3, "total_tokens": 8},
+            }
+        ]
+    )
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+        request_params={
+            "response_format": {"type": "json_object"},
+            "verbosity": "low",
+        },
+    )
+
+    await requester.request(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=128,
+        call_type="chat",
+    )
+
+    assert fake_client.responses.last_kwargs is not None
+    assert fake_client.responses.last_kwargs["text"] == {
+        "format": {"type": "json_object"},
+        "verbosity": "low",
+    }
+    assert "response_format" not in fake_client.responses.last_kwargs
+    assert "extra_body" not in fake_client.responses.last_kwargs
 
     await requester._http_client.aclose()
 
@@ -317,6 +457,73 @@ def test_normalize_responses_result_falls_back_to_output_text_and_scalar_content
     assert scalar_content["choices"][0]["message"]["content"] == (
         "hello from content object"
     )
+
+
+def test_responses_stateless_replay_uses_standard_output_items() -> None:
+    normalized = normalize_responses_result(
+        {
+            "id": "resp_replay",
+            "output": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "summary": [{"type": "summary_text", "text": "先想一下"}],
+                    "encrypted_content": "enc_1",
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "lookup",
+                    "arguments": '{"query":"weather"}',
+                },
+            ],
+        }
+    )
+    assistant_message = normalized["choices"][0]["message"]
+
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+    )
+    request_body = build_request_body(
+        model_config=cfg,
+        messages=[
+            {"role": "user", "content": "hello"},
+            assistant_message,
+            {"role": "tool", "tool_call_id": "call_1", "content": "done"},
+        ],
+        max_tokens=128,
+        transport_state={"stateless_replay": True},
+    )
+
+    assert request_body["include"] == ["reasoning.encrypted_content"]
+    assert request_body["input"] == [
+        {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "hello"}],
+        },
+        {
+            "type": "reasoning",
+            "id": "rs_1",
+            "summary": [{"type": "summary_text", "text": "先想一下"}],
+            "encrypted_content": "enc_1",
+        },
+        {
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "lookup",
+            "arguments": '{"query":"weather"}',
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "done",
+        },
+    ]
 
 
 @pytest.mark.asyncio

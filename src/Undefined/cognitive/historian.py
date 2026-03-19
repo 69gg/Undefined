@@ -9,6 +9,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from Undefined.ai.transports.openai_transport import RESPONSES_OUTPUT_ITEMS_KEY
 from Undefined.utils.tool_calls import extract_required_tool_call_arguments
 
 logger = logging.getLogger(__name__)
@@ -860,6 +861,9 @@ class HistorianWorker:
             }
             if message.get("content"):
                 assistant_msg["content"] = message["content"]
+            output_items = message.get(RESPONSES_OUTPUT_ITEMS_KEY)
+            if isinstance(output_items, list):
+                assistant_msg[RESPONSES_OUTPUT_ITEMS_KEY] = output_items
             messages.append(assistant_msg)
 
             tool_results: list[dict[str, Any]] = []

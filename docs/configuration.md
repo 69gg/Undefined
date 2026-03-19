@@ -149,7 +149,7 @@ model_name = "gpt-4o-mini"
 | `thinking_enabled` | 是否启用旧式 `thinking` 参数 |
 | `thinking_budget_tokens` | thinking 预算 |
 | `thinking_include_budget` | 是否发送 `budget_tokens` |
-| `thinking_tool_call_compat` | Tool Calls 兼容模式：在多轮工具调用中回填 `reasoning_content`；默认 `true` |
+| `thinking_tool_call_compat` | Tool Calls 兼容模式：在本地历史中回填内部兼容字段 `reasoning_content`；默认 `true` |
 | `responses_tool_choice_compat` | `responses` 下的 `tool_choice` 兼容开关：仅建议在默认关闭时请求仍返回 500、怀疑上游不兼容对象型 `tool_choice` 时再尝试开启；开启后降级为字符串 `"required"`；默认 `false` |
 | `responses_force_stateless_replay` | `responses` 下的续轮强制降级开关：启用后多轮工具调用始终跳过 `previous_response_id`，改为完整消息重放；默认 `false` |
 | `request_params` | 额外请求体参数（透传给模型 API，保留字段会忽略） |
@@ -157,12 +157,14 @@ model_name = "gpt-4o-mini"
 请求模式说明：
 - `api_mode="chat_completions"`：走 `client.chat.completions.create(...)`
   - `thinking_enabled=true` 时发送旧式 `thinking`
-  - `reasoning_enabled=true` 时额外发送 `reasoning={ effort = ... }`
+  - `reasoning_enabled=true` 时按 OpenAI 标准发送顶层 `reasoning_effort="..."`；仅 `reasoning_effort_style="anthropic"` 时改发 `output_config={ effort = ... }`
+  - 多轮工具调用时，`reasoning_content` 只作为本地兼容字段保存在历史里，**不会**作为 message 字段回传给上游；OpenAI Chat Completions 没有标准 reasoning item / encrypted reasoning 续轮协议
 - `api_mode="responses"`：走 `client.responses.create(...)`
-  - 仅在 `reasoning_enabled=true` 时发送 `reasoning={ effort = ... }`
+  - 仅在 `reasoning_enabled=true` 时按 OpenAI 标准发送 `reasoning={ effort = ... }`
+  - 若 `request_params` 里带 `response_format` / `verbosity`，会自动映射到 `text.format` / `text.verbosity`
   - 默认使用官方对象格式：`{"type":"function","name":"..."}`
   - `responses_tool_choice_compat=true` 时，会把指定函数的 `tool_choice` 降级为字符串 `"required"`，并只保留目标工具，用于兼容部分不完整代理
-  - `responses_force_stateless_replay=true` 时，多轮工具调用会始终跳过 `previous_response_id`，直接走完整消息重放
+  - `responses_force_stateless_replay=true` 时，多轮工具调用会始终跳过 `previous_response_id`，直接走完整消息重放；续轮时会优先回放标准 `output` items（含 reasoning item），并自动补 `include=["reasoning.encrypted_content"]`
   - 仅建议在默认关闭时请求仍返回 500，再尝试开启这些兼容开关
   - 当前已知 `new-api v0.11.4-alpha.3` 存在这类兼容问题
   - 旧式 `thinking_*` 不会下发到 `responses`
@@ -191,7 +193,7 @@ model_name = "gpt-4o-mini"
 
 补充：
 - 若上游只对 `/v1/responses` 识别自定义参数，可将 `api_mode` 切到 `responses`。
-- `[models.chat.request_params]` 仍可放 `temperature`、`response_format` 或兼容网关私有字段，但不再用于 `reasoning` 配置。
+- `[models.chat.request_params]` 仍可放 `temperature`、`response_format`、`verbosity` 或兼容网关私有字段，但不再用于 `reasoning` 配置。
 
 ### 4.4.3 `[models.vision]` 视觉模型
 
@@ -313,8 +315,8 @@ model_name = "gpt-4o-mini"
 
 `request_params` 说明：
 - 仅用于**请求体**字段，不包含 `api_key`、`base_url`、`timeout`、`extra_headers` 等 client 选项。
-- 聊天类（`chat_completions`）保留字段：`model`、`messages`、`max_tokens`、`tools`、`tool_choice`、`stream`、`stream_options`、`reasoning`、`reasoning_effort`。
-- 聊天类（`responses`）保留字段：`model`、`input`、`instructions`、`max_output_tokens`、`tools`、`tool_choice`、`previous_response_id`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`。启用 `responses_force_stateless_replay` 时会主动跳过 `previous_response_id`。
+- 聊天类（`chat_completions`）保留字段：`model`、`messages`、`max_tokens`、`tools`、`tool_choice`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`、`output_config`。
+- 聊天类（`responses`）保留字段：`model`、`input`、`instructions`、`max_output_tokens`、`tools`、`tool_choice`、`previous_response_id`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`、`output_config`。启用 `responses_force_stateless_replay` 时会主动跳过 `previous_response_id`。
 - embedding 保留字段：`model`、`input`、`dimensions`。
 - rerank 保留字段：`model`、`query`、`documents`、`top_n`、`return_documents`。
 

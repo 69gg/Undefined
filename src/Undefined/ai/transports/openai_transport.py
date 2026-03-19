@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from typing import Any
 
 API_MODE_CHAT_COMPLETIONS = "chat_completions"
 API_MODE_RESPONSES = "responses"
 _VALID_API_MODES = {API_MODE_CHAT_COMPLETIONS, API_MODE_RESPONSES}
+RESPONSES_OUTPUT_ITEMS_KEY = "_responses_output_items"
 
 
 def normalize_api_mode(value: Any, default: str = API_MODE_CHAT_COMPLETIONS) -> str:
@@ -199,6 +201,13 @@ def _message_to_responses_input(
             }
         ]
 
+    if role == "assistant":
+        output_items = message.get(RESPONSES_OUTPUT_ITEMS_KEY)
+        if isinstance(output_items, list):
+            replay_items = _copy_responses_output_items(output_items, internal_to_api)
+            if replay_items:
+                return replay_items
+
     items: list[dict[str, Any]] = []
     content_parts = _content_to_response_parts(message.get("content"))
     if role in {"user", "assistant", "system", "developer"} and content_parts:
@@ -342,6 +351,47 @@ def _normalize_responses_tool_choice(
     return {"type": "function", "name": api_name}, None
 
 
+def _copy_responses_output_items(
+    items: list[Any],
+    name_mapping: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    copied: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        cloned = deepcopy(item)
+        item_type = str(cloned.get("type", "")).strip().lower()
+        if item_type == "function_call" and name_mapping:
+            name = str(cloned.get("name", "")).strip()
+            if name:
+                cloned["name"] = name_mapping.get(name, name)
+        copied.append(cloned)
+    return copied
+
+
+def _normalize_include_values(value: Any) -> list[str]:
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, list):
+        return [text for item in value if (text := str(item or "").strip())]
+    return []
+
+
+def _merge_responses_text_config(
+    value: Any,
+    *,
+    response_format: Any | None,
+    verbosity: Any | None,
+) -> dict[str, Any] | None:
+    text_config = dict(value) if isinstance(value, dict) else {}
+    if response_format is not None and "format" not in text_config:
+        text_config["format"] = response_format
+    if verbosity is not None and "verbosity" not in text_config:
+        text_config["verbosity"] = verbosity
+    return text_config or None
+
+
 def build_responses_request_body(
     model_config: Any,
     messages: list[dict[str, Any]],
@@ -402,6 +452,25 @@ def build_responses_request_body(
             start_index = 0
         if start_index < 0:
             start_index = 0
+
+    response_format = extra_kwargs.pop("response_format", None)
+    verbosity = extra_kwargs.pop("verbosity", None)
+    text_value = extra_kwargs.pop("text", None)
+    text_config = _merge_responses_text_config(
+        text_value,
+        response_format=response_format,
+        verbosity=verbosity,
+    )
+    if text_config is not None:
+        body["text"] = text_config
+    elif text_value is not None:
+        extra_kwargs["text"] = text_value
+
+    include_values = _normalize_include_values(extra_kwargs.pop("include", None))
+    if stateless_replay and "reasoning.encrypted_content" not in include_values:
+        include_values.append("reasoning.encrypted_content")
+    if include_values:
+        body["include"] = include_values
 
     if previous_response_id and not stateless_replay:
         body["previous_response_id"] = previous_response_id
@@ -500,6 +569,9 @@ def normalize_responses_result(
         "role": "assistant",
         "content": content,
     }
+    output_items = _copy_responses_output_items(output, api_to_internal)
+    if output_items:
+        message[RESPONSES_OUTPUT_ITEMS_KEY] = output_items
     reasoning_content = _collect_reasoning_text(output)
     if reasoning_content:
         message["reasoning_content"] = reasoning_content

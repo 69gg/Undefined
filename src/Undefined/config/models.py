@@ -71,7 +71,7 @@ class ChatModelConfig:
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
     thinking_tool_call_compat: bool = (
-        True  # 思维链 + 工具调用兼容（回传 reasoning_content）
+        True  # 思维链 + 工具调用兼容（本地回填 reasoning_content）
     )
     responses_tool_choice_compat: bool = (
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
@@ -97,7 +97,7 @@ class VisionModelConfig:
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
     thinking_tool_call_compat: bool = (
-        True  # 思维链 + 工具调用兼容（回传 reasoning_content）
+        True  # 思维链 + 工具调用兼容（本地回填 reasoning_content）
     )
     responses_tool_choice_compat: bool = (
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
@@ -123,7 +123,7 @@ class SecurityModelConfig:
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
     thinking_tool_call_compat: bool = (
-        True  # 思维链 + 工具调用兼容（回传 reasoning_content）
+        True  # 思维链 + 工具调用兼容（本地回填 reasoning_content）
     )
     responses_tool_choice_compat: bool = (
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
@@ -175,7 +175,7 @@ class AgentModelConfig:
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
     thinking_tool_call_compat: bool = (
-        True  # 思维链 + 工具调用兼容（回传 reasoning_content）
+        True  # 思维链 + 工具调用兼容（本地回填 reasoning_content）
     )
     responses_tool_choice_compat: bool = (
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
