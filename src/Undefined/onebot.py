@@ -190,15 +190,27 @@ class OneBotClient:
         user_id: int,
         message: str | list[dict[str, Any]],
         *,
+        group_id: int | None = None,
         mark_sent: bool = True,
     ) -> dict[str, Any]:
-        """发送私聊消息"""
+        """发送私聊消息
+
+        参数:
+            user_id: 用户 QQ 号
+            message: 消息内容
+            group_id: 共享群号；传入时通过该群的临时会话发送
+            mark_sent: 是否标记本轮已发送（用于 end 工具判定）
+        """
+        params: dict[str, Any] = {
+            "user_id": user_id,
+            "message": message,
+        }
+        if group_id is not None:
+            params["group_id"] = group_id
+
         result = await self._call_api(
             "send_private_msg",
-            {
-                "user_id": user_id,
-                "message": message,
-            },
+            params,
         )
         if mark_sent:
             _mark_message_sent_this_turn()

@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from Undefined.config import Config
 from Undefined.onebot import OneBotClient
@@ -200,6 +201,7 @@ class MessageSender:
         *,
         mark_sent: bool = True,
         reply_to: int | None = None,
+        preferred_temp_group_id: int | None = None,
     ) -> None:
         """发送私聊消息"""
         if not self.config.is_private_allowed(user_id):
@@ -231,13 +233,20 @@ class MessageSender:
             segments = message_to_segments(message)
             if reply_to is not None:
                 segments.insert(0, {"type": "reply", "data": {"id": str(reply_to)}})
-            result = await self.onebot.send_private_message(
-                user_id, segments, mark_sent=mark_sent
+            result, _ = await self._send_private_segments(
+                user_id,
+                segments,
+                mark_sent=mark_sent,
+                preferred_temp_group_id=preferred_temp_group_id,
             )
             bot_message_id = _extract_message_id(result)
         else:
             bot_message_id = await self._send_chunked_private(
-                user_id, message, mark_sent=mark_sent, reply_to=reply_to
+                user_id,
+                message,
+                mark_sent=mark_sent,
+                reply_to=reply_to,
+                preferred_temp_group_id=preferred_temp_group_id,
             )
 
         # 发送成功后写入历史记录
@@ -251,6 +260,127 @@ class MessageSender:
                 message_id=bot_message_id,
             )
 
+    async def _send_private_segments(
+        self,
+        user_id: int,
+        segments: list[dict[str, Any]],
+        *,
+        mark_sent: bool = True,
+        temp_group_id: int | None = None,
+        preferred_temp_group_id: int | None = None,
+    ) -> tuple[object, int | None]:
+        """发送私聊消息段，必要时回退到群临时会话。"""
+        if temp_group_id is not None:
+            try:
+                result = await self.onebot.send_private_message(
+                    user_id,
+                    segments,
+                    group_id=temp_group_id,
+                    mark_sent=mark_sent,
+                )
+                return result, temp_group_id
+            except Exception as exc:
+                logger.warning(
+                    "[发送消息] 复用群临时会话失败，尝试其他共享群: user=%s group=%s err=%s",
+                    user_id,
+                    temp_group_id,
+                    exc,
+                )
+                return await self._send_private_segments_via_temp_session(
+                    user_id,
+                    segments,
+                    mark_sent=mark_sent,
+                    skip_group_ids={temp_group_id},
+                    preferred_group_id=preferred_temp_group_id,
+                )
+
+        try:
+            result = await self.onebot.send_private_message(
+                user_id,
+                segments,
+                mark_sent=mark_sent,
+            )
+            return result, None
+        except Exception as exc:
+            logger.warning(
+                "[发送消息] 私聊直发失败，尝试群临时会话回退: user=%s err=%s",
+                user_id,
+                exc,
+            )
+            return await self._send_private_segments_via_temp_session(
+                user_id,
+                segments,
+                mark_sent=mark_sent,
+                preferred_group_id=preferred_temp_group_id,
+            )
+
+    async def _send_private_segments_via_temp_session(
+        self,
+        user_id: int,
+        segments: list[dict[str, Any]],
+        *,
+        mark_sent: bool = True,
+        skip_group_ids: set[int] | None = None,
+        preferred_group_id: int | None = None,
+    ) -> tuple[object, int]:
+        """遍历共享群，逐个尝试通过群临时会话发送。"""
+        skipped = skip_group_ids or set()
+        seen_group_ids: set[int] = set()
+        last_error: Exception | None = None
+
+        async def _try_group(group_id: int) -> tuple[object, int] | None:
+            nonlocal last_error
+            if group_id <= 0 or group_id in seen_group_ids or group_id in skipped:
+                return None
+            seen_group_ids.add(group_id)
+
+            try:
+                result = await self.onebot.send_private_message(
+                    user_id,
+                    segments,
+                    group_id=group_id,
+                    mark_sent=mark_sent,
+                )
+                logger.info(
+                    "[发送消息] 群临时会话发送成功: user=%s group=%s",
+                    user_id,
+                    group_id,
+                )
+                return result, group_id
+            except Exception as exc:
+                last_error = exc
+                logger.debug(
+                    "[发送消息] 群临时会话发送失败: user=%s group=%s err=%s",
+                    user_id,
+                    group_id,
+                    exc,
+                )
+                return None
+
+        if preferred_group_id is not None:
+            preferred_result = await _try_group(int(preferred_group_id))
+            if preferred_result is not None:
+                return preferred_result
+
+        group_list = await self.onebot.get_group_list()
+        for group in group_list:
+            try:
+                raw_group_id = group.get("group_id")
+                if raw_group_id is None:
+                    continue
+                group_id = int(raw_group_id)
+            except (AttributeError, TypeError, ValueError):
+                continue
+            result = await _try_group(group_id)
+            if result is not None:
+                return result
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError(
+            f"unable to find shared group temporary session for user {int(user_id)}"
+        )
+
     async def _send_chunked_private(
         self,
         user_id: int,
@@ -258,6 +388,7 @@ class MessageSender:
         *,
         mark_sent: bool = True,
         reply_to: int | None = None,
+        preferred_temp_group_id: int | None = None,
     ) -> int | None:
         """分段发送私聊消息，返回第一段的 message_id。"""
         logger.info(f"[消息分段] 消息过长 ({len(message)} 字符)，正在自动分段发送...")
@@ -266,6 +397,7 @@ class MessageSender:
         current_length = 0
         chunk_count = 0
         first_message_id: int | None = None
+        temp_group_id: int | None = None
 
         for line in lines:
             line_length = len(line) + 1
@@ -277,8 +409,12 @@ class MessageSender:
                 segments = message_to_segments(chunk_text)
                 if chunk_count == 1 and reply_to is not None:
                     segments.insert(0, {"type": "reply", "data": {"id": str(reply_to)}})
-                result = await self.onebot.send_private_message(
-                    user_id, segments, mark_sent=mark_sent
+                result, temp_group_id = await self._send_private_segments(
+                    user_id,
+                    segments,
+                    mark_sent=mark_sent,
+                    temp_group_id=temp_group_id,
+                    preferred_temp_group_id=preferred_temp_group_id,
                 )
                 if chunk_count == 1:
                     first_message_id = _extract_message_id(result)
@@ -295,8 +431,12 @@ class MessageSender:
             segments = message_to_segments(chunk_text)
             if chunk_count == 1 and reply_to is not None:
                 segments.insert(0, {"type": "reply", "data": {"id": str(reply_to)}})
-            result = await self.onebot.send_private_message(
-                user_id, segments, mark_sent=mark_sent
+            result, temp_group_id = await self._send_private_segments(
+                user_id,
+                segments,
+                mark_sent=mark_sent,
+                temp_group_id=temp_group_id,
+                preferred_temp_group_id=preferred_temp_group_id,
             )
             if chunk_count == 1:
                 first_message_id = _extract_message_id(result)

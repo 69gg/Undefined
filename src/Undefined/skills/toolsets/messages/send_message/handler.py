@@ -137,6 +137,11 @@ def _is_current_private_target(context: Dict[str, Any], target_id: int) -> bool:
     return context_user_id == target_id
 
 
+def _get_context_group_id(context: Dict[str, Any]) -> int | None:
+    group_id, _ = _parse_positive_int(context.get("group_id"), "group_id")
+    return group_id
+
+
 def _group_access_error(runtime_config: Any, target_id: int) -> str:
     reason_getter = getattr(runtime_config, "group_access_denied_reason", None)
     reason = reason_getter(target_id) if callable(reason_getter) else None
@@ -215,7 +220,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             else:
                 logger.info("[发送消息] 准备发送私聊 %s: %s", target_id, message[:100])
                 await sender.send_private_message(
-                    target_id, message, reply_to=reply_to_id
+                    target_id,
+                    message,
+                    reply_to=reply_to_id,
+                    preferred_temp_group_id=_get_context_group_id(context),
                 )
             context["message_sent_this_turn"] = True
             return "消息已发送"
