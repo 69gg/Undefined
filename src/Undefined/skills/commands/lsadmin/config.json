@@ -3,7 +3,7 @@
   "description": "查看当前机器人管理员列表",
   "usage": "/lsadmin",
   "example": "/lsadmin",
-  "permission": "public",
+  "permission": "admin",
   "rate_limit": {
     "user": 0,
     "admin": 0,
