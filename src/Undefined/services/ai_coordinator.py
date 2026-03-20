@@ -8,7 +8,7 @@ from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
 from Undefined.render import render_html_to_image, render_markdown_to_html
 from Undefined.services.model_pool import ModelPoolService
-from Undefined.services.queue_manager import QueueManager
+from Undefined.services.queue_manager import QueueManager, QUEUE_LANE_BACKGROUND
 from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.sender import MessageSender
 from Undefined.utils.scheduler import TaskScheduler
@@ -142,7 +142,12 @@ class AICoordinator:
             "trigger_message_id": trigger_message_id,
         }
 
-        if is_at_bot:
+        if sender_id == self.config.superadmin_qq:
+            logger.info("[AI] 投递至群聊超级管理员队列")
+            await self.queue_manager.add_group_superadmin_request(
+                request_data, model_name=self.config.chat_model.model_name
+            )
+        elif is_at_bot:
             logger.info(f"[AI] 触发原因: {'拍一拍' if is_poke else '@机器人'}")
             await self.queue_manager.add_group_mention_request(
                 request_data, model_name=self.config.chat_model.model_name
@@ -230,8 +235,8 @@ class AICoordinator:
             await self._execute_stats_analysis(request)
         elif req_type == "agent_intro_generation":
             await self._execute_agent_intro_generation(request)
-        elif req_type == "background_llm_call":
-            await self._execute_background_llm_call(request)
+        elif req_type in {"queued_llm_call", "background_llm_call"}:
+            await self._execute_queued_llm_call(request)
 
     async def _execute_auto_reply(self, request: dict[str, Any]) -> None:
         group_id = request["group_id"]
@@ -298,6 +303,8 @@ class AICoordinator:
                     ctx.set_resource(key, value)
             if trigger_message_id is not None:
                 ctx.set_resource("trigger_message_id", trigger_message_id)
+            if request.get("_queue_lane"):
+                ctx.set_resource("queue_lane", request.get("_queue_lane"))
             logger.debug(
                 "[上下文资源] group=%s keys=%s",
                 group_id,
@@ -391,6 +398,8 @@ class AICoordinator:
                     ctx.set_resource(key, value)
             if trigger_message_id is not None:
                 ctx.set_resource("trigger_message_id", trigger_message_id)
+            if request.get("_queue_lane"):
+                ctx.set_resource("queue_lane", request.get("_queue_lane"))
             logger.debug(
                 "[上下文资源] private user=%s keys=%s",
                 user_id,
@@ -464,11 +473,12 @@ class AICoordinator:
                 {"role": "user", "content": full_prompt},
             ]
 
-            result = await self.ai.request_model(
+            result = await self.ai.submit_queued_llm_call(
                 model_config=self.config.chat_model,
                 messages=messages,
                 max_tokens=2048,
                 call_type="stats_analysis",
+                queue_lane=request.get("_queue_lane"),
             )
 
             # 提取分析结果
@@ -503,22 +513,33 @@ class AICoordinator:
                     group_id, request_id, ""
                 )
 
-    async def _execute_background_llm_call(self, request: dict[str, Any]) -> None:
-        """执行后台 LLM 调用。成功时回调结果；失败时若重试未耗尽则交由 QueueManager 重试，
-        否则回调异常让调用方立即感知。"""
+    async def _execute_queued_llm_call(self, request: dict[str, Any]) -> None:
+        """执行队列中的 LLM 子请求。"""
         request_id = request.get("request_id", "")
+        retry_count = int(request.get("_retry_count", 0) or 0)
+        queue_lane = str(request.get("_queue_lane") or QUEUE_LANE_BACKGROUND)
+        call_type = str(request.get("call_type", "background") or "background")
         try:
             result = await self.ai.request_model(
                 model_config=request["model_config"],
                 messages=request["messages"],
                 tools=request.get("tools"),
                 tool_choice=request.get("tool_choice", "auto"),
-                call_type=request.get("call_type", "background"),
+                call_type=call_type,
                 max_tokens=request.get("max_tokens")
                 or getattr(request["model_config"], "max_tokens", 4096),
                 transport_state=request.get("transport_state"),
             )
             self.ai.set_llm_call_result(request_id, result)
+            if retry_count > 0:
+                logger.info(
+                    "[queued_llm_retry_success] request_id=%s call_type=%s model=%s lane=%s retry=%s",
+                    request_id,
+                    call_type,
+                    getattr(request["model_config"], "model_name", "default"),
+                    queue_lane,
+                    retry_count,
+                )
         except Exception as exc:
             retry_count = request.get("_retry_count", 0)
             if retry_count >= self.config.ai_request_max_retries:
@@ -558,11 +579,12 @@ class AICoordinator:
                 {"role": "user", "content": user_prompt},
             ]
 
-            result = await self.ai.request_model(
+            result = await self.ai.submit_queued_llm_call(
                 model_config=self.ai.agent_config,
                 messages=messages,
                 max_tokens=agent_intro_generator.config.max_tokens,
                 call_type=f"agent:{agent_name}",
+                queue_lane=request.get("_queue_lane"),
             )
 
             # 提取结果

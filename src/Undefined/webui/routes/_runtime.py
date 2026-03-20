@@ -10,12 +10,12 @@ from typing import Any
 from aiohttp import ClientSession, ClientTimeout, web
 from aiohttp.web_response import Response
 
+from Undefined.ai.queue_budget import compute_queued_llm_timeout_seconds
 from Undefined.config import get_config
 from Undefined.utils.paths import CACHE_DIR, WEBUI_FILE_CACHE_DIR
 from ._shared import check_auth, routes
 
 _AUTH_HEADER = "X-Undefined-API-Key"
-_CHAT_PROXY_TIMEOUT_SECONDS = 480.0
 _MAX_CHAT_IMAGE_SIZE = 12 * 1024 * 1024
 _ALLOWED_CHAT_IMAGE_EXTENSIONS = {
     ".png",
@@ -29,6 +29,11 @@ _ALLOWED_CHAT_IMAGE_EXTENSIONS = {
 
 def _runtime_base_url() -> str:
     return get_config(strict=False).api.loopback_url
+
+
+def _chat_proxy_timeout_seconds() -> float:
+    cfg = get_config(strict=False)
+    return compute_queued_llm_timeout_seconds(cfg, cfg.chat_model)
 
 
 def _unauthorized() -> Response:
@@ -123,13 +128,15 @@ async def _proxy_runtime_stream(
     method: str,
     path: str,
     payload: dict[str, Any] | None = None,
-    timeout_seconds: float = _CHAT_PROXY_TIMEOUT_SECONDS,
+    timeout_seconds: float | None = None,
 ) -> web.StreamResponse:
     cfg = get_config(strict=False)
     if not cfg.api.enabled:
         return _runtime_disabled()
 
     url = f"{_runtime_base_url()}{path}"
+    if timeout_seconds is None:
+        timeout_seconds = _chat_proxy_timeout_seconds()
     timeout = ClientTimeout(total=timeout_seconds)
     headers = {_AUTH_HEADER: str(cfg.api.auth_key or "")}
     accept = request.headers.get("Accept")
@@ -305,14 +312,14 @@ async def runtime_chat_handler(request: web.Request) -> web.StreamResponse:
             method="POST",
             path="/api/v1/chat",
             payload=payload,
-            timeout_seconds=_CHAT_PROXY_TIMEOUT_SECONDS,
+            timeout_seconds=_chat_proxy_timeout_seconds(),
         )
 
     return await _proxy_runtime(
         method="POST",
         path="/api/v1/chat",
         payload=payload,
-        timeout_seconds=_CHAT_PROXY_TIMEOUT_SECONDS,
+        timeout_seconds=_chat_proxy_timeout_seconds(),
     )
 
 

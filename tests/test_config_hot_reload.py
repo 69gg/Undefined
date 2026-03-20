@@ -17,9 +17,13 @@ class _FakeSecurityService:
 class _FakeQueueManager:
     def __init__(self) -> None:
         self.intervals: list[Any] = []
+        self.max_retries: list[int] = []
 
     def update_model_intervals(self, intervals: Any) -> None:
         self.intervals.append(intervals)
+
+    def update_max_retries(self, max_retries: int) -> None:
+        self.max_retries.append(max_retries)
 
 
 def test_apply_config_updates_propagates_to_security_service() -> None:
@@ -27,6 +31,7 @@ def test_apply_config_updates_propagates_to_security_service() -> None:
         Any,
         SimpleNamespace(
             searxng_url="",
+            ai_request_max_retries=7,
             agent_intro_autogen_enabled=False,
             agent_intro_autogen_queue_interval=60.0,
             agent_intro_autogen_max_tokens=512,
@@ -72,3 +77,56 @@ def test_apply_config_updates_propagates_to_security_service() -> None:
 
     assert security_service.applied == [updated]
     assert len(queue_manager.intervals) == 1
+    assert queue_manager.max_retries == []
+
+
+def test_apply_config_updates_hot_reloads_ai_request_max_retries() -> None:
+    updated = cast(
+        Any,
+        SimpleNamespace(
+            searxng_url="",
+            ai_request_max_retries=9,
+            agent_intro_autogen_enabled=False,
+            agent_intro_autogen_queue_interval=60.0,
+            agent_intro_autogen_max_tokens=512,
+            agent_intro_hash_path="data/intro.json",
+            chat_model=SimpleNamespace(
+                model_name="chat",
+                queue_interval_seconds=1.0,
+                pool=SimpleNamespace(enabled=False),
+            ),
+            agent_model=SimpleNamespace(
+                model_name="agent",
+                queue_interval_seconds=1.0,
+                pool=SimpleNamespace(enabled=False),
+            ),
+            vision_model=SimpleNamespace(
+                model_name="vision",
+                queue_interval_seconds=1.0,
+            ),
+            security_model=SimpleNamespace(
+                model_name="security",
+                queue_interval_seconds=1.0,
+            ),
+            naga_model=SimpleNamespace(
+                model_name="naga",
+                queue_interval_seconds=1.0,
+            ),
+        ),
+    )
+    security_service = _FakeSecurityService()
+    queue_manager = _FakeQueueManager()
+    context = HotReloadContext(
+        ai_client=cast(Any, SimpleNamespace()),
+        queue_manager=cast(Any, queue_manager),
+        config_manager=cast(Any, SimpleNamespace()),
+        security_service=cast(Any, security_service),
+    )
+
+    apply_config_updates(
+        updated,
+        {"ai_request_max_retries": (2, 9)},
+        context,
+    )
+
+    assert queue_manager.max_retries == [9]

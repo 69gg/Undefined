@@ -692,8 +692,6 @@ class Config:
         )
         if ai_request_max_retries < 0:
             ai_request_max_retries = 0
-        if ai_request_max_retries > 5:
-            ai_request_max_retries = 5
 
         nagaagent_mode_enabled = _coerce_bool(
             _get_value(

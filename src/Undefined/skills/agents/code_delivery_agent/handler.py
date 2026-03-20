@@ -59,8 +59,8 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         )
         return result
     except Exception as exc:
-        logger.exception("[CodeDelivery] 任务执行失败: %s", exc)
-        return f"任务执行失败: {exc}"
+        logger.exception("[CodeDelivery] 任务执行失败，已静默抑制: %s", exc)
+        return ""
     finally:
         if context.get("docker_initialized") and cleanup_on_finish:
             container_name = context.get("container_name")

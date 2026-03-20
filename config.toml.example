@@ -25,8 +25,8 @@ process_poke_message = true
 # zh: 注入给模型的最近历史消息条数上限（0-200，0 表示不注入历史）。
 # en: Max number of recent messages injected as model context (0-200; 0 disables history injection).
 context_recent_messages_limit = 20
-# zh: 模型调用失败时最大重试次数（0=不重试，默认2，最大5）。失败的请求将被放回队列最前端优先重试。
-# en: Max retries for failed model API requests (0=no retry, default 2, max 5). Failed requests are re-queued with highest priority.
+# zh: 单次 LLM 请求失败时最大静默重试次数（0=不重试，默认2）。失败的请求会回到原队列的第 2 个位置。
+# en: Max silent retries for a single failed LLM request (0=no retry, default 2). Failed requests are reinserted at position 2 of their original queue lane.
 ai_request_max_retries = 2
 
 # zh: 访问控制。mode 可选：off（不启用）/ blacklist（按黑名单）/ allowlist（按白名单）。

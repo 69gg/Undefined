@@ -105,6 +105,10 @@ include = [
 python_version = "3.12"
 strict = true
 ignore_missing_imports = true
+exclude = ["^code/"]
+
+[tool.ruff]
+exclude = ["code"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

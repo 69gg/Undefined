@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 _RESTART_REQUIRED_KEYS: set[str] = {
-    "ai_request_max_retries",
     "log_level",
     "log_file_path",
     "log_max_size",
@@ -96,6 +95,8 @@ def apply_config_updates(
     logger.debug("[配置] 热更新变更项: %s", ", ".join(sorted(changed_keys)))
     _log_restart_required(changed_keys)
     context.security_service.apply_config(updated)
+    if "ai_request_max_retries" in changed_keys:
+        context.queue_manager.update_max_retries(updated.ai_request_max_retries)
 
     if _needs_queue_interval_update(changed_keys):
         context.queue_manager.update_model_intervals(

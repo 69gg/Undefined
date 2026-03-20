@@ -25,6 +25,7 @@ from Undefined.config import load_webui_settings
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
 from Undefined.render import render_html_to_image, render_markdown_to_html  # noqa: F401
+from Undefined.services.queue_manager import QUEUE_LANE_SUPERADMIN
 from Undefined.utils.cors import is_allowed_cors_origin, normalize_origin
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
 from Undefined.utils.xml import escape_xml_attr, escape_xml_text
@@ -1215,6 +1216,7 @@ class RuntimeAPIServer:
             for key, value in resources.items():
                 if value is not None:
                     ctx.set_resource(key, value)
+            ctx.set_resource("queue_lane", QUEUE_LANE_SUPERADMIN)
 
             result = await self._ctx.ai.ask(
                 full_question,
@@ -1308,9 +1310,13 @@ class RuntimeAPIServer:
             )
 
         if not stream:
-            mode = await self._run_webui_chat(
-                text=text, send_output=_capture_private_message
-            )
+            try:
+                mode = await self._run_webui_chat(
+                    text=text, send_output=_capture_private_message
+                )
+            except Exception as exc:
+                logger.exception("[RuntimeAPI] chat failed: %s", exc)
+                return _json_error("Chat failed", status=502)
             return web.json_response(_build_chat_response_payload(mode, outputs))
 
         response = web.StreamResponse(

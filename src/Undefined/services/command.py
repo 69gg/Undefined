@@ -21,6 +21,10 @@ from Undefined.services.commands.context import CommandContext
 from Undefined.services.commands.registry import CommandMeta, CommandRegistry
 from Undefined.services.security import SecurityService
 from Undefined.token_usage_storage import TokenUsageStorage
+from Undefined.ai.queue_budget import (
+    compute_queued_llm_timeout_seconds,
+    resolve_effective_retry_count,
+)
 
 # 尝试导入 matplotlib
 plt: Any
@@ -406,20 +410,35 @@ class CommandDispatcher:
             "days": days,
             "scope": scope,
         }
-        await self.queue_manager.add_group_mention_request(
+        receipt = await self.queue_manager.add_group_mention_request(
             request_data, model_name=self.config.chat_model.model_name
         )
         logger.info("[Stats] 已投递 AI 分析请求: scope=%s target=%s", scope, scope_id)
 
+        wait_timeout = compute_queued_llm_timeout_seconds(
+            self.ai.runtime_config,
+            self.config.chat_model,
+            retry_count=resolve_effective_retry_count(
+                self.ai.runtime_config, self.queue_manager
+            ),
+            initial_wait_seconds=float(
+                getattr(receipt, "estimated_wait_seconds", 0.0) or 0.0
+            ),
+        )
         try:
-            await asyncio.wait_for(analysis_event.wait(), timeout=480.0)
+            await asyncio.wait_for(analysis_event.wait(), timeout=wait_timeout)
             ai_analysis = self._stats_analysis_results.pop(request_id, "")
             logger.info(
                 "[Stats] 已获取 AI 分析结果: scope=%s len=%s", scope, len(ai_analysis)
             )
             return ai_analysis
         except asyncio.TimeoutError:
-            logger.warning("[Stats] AI 分析超时: scope=%s target=%s", scope, scope_id)
+            logger.warning(
+                "[Stats] AI 分析超时: scope=%s target=%s timeout=%.1fs",
+                scope,
+                scope_id,
+                wait_timeout,
+            )
             return "AI 分析超时，已先发送图表与汇总数据。"
         finally:
             self._stats_analysis_events.pop(request_id, None)

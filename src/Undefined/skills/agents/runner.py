@@ -104,11 +104,18 @@ async def run_agent_with_tools(
         messages.extend(agent_history)
     messages.append({"role": "user", "content": user_content})
     transport_state: dict[str, Any] | None = None
+    queue_lane = context.get("queue_lane")
+    max_pre_tool_retries = max(
+        0, int(getattr(runtime_config, "ai_request_max_retries", 0) or 0)
+    )
+    pre_tool_failure_count = 0
 
     for iteration in range(1, max_iterations + 1):
         logger.debug("[Agent:%s] iteration=%s", agent_name, iteration)
+        message_checkpoint_len = len(messages)
+        transport_state_checkpoint = transport_state
         try:
-            result = await ai_client.request_model(
+            result = await ai_client.submit_queued_llm_call(
                 model_config=agent_config,
                 messages=messages,
                 max_tokens=agent_config.max_tokens,
@@ -116,8 +123,20 @@ async def run_agent_with_tools(
                 tools=tools if tools else None,
                 tool_choice="auto",
                 transport_state=transport_state,
+                queue_lane=queue_lane,
             )
+        except Exception as exc:
+            logger.exception(
+                "[Agent:%s] queued LLM 调用失败: lane=%s iteration=%s error=%s",
+                agent_name,
+                queue_lane,
+                iteration,
+                exc,
+            )
+            raise RuntimeError("智能体模型请求失败") from exc
 
+        try:
+            tool_execution_started = False
             tool_name_map = (
                 result.get("_tool_name_map") if isinstance(result, dict) else None
             )
@@ -239,6 +258,7 @@ async def run_agent_with_tools(
                     )
 
             if tool_tasks:
+                tool_execution_started = True
                 logger.info(
                     "[Agent:%s] executing tools in parallel: count=%s",
                     agent_name,
@@ -288,6 +308,7 @@ async def run_agent_with_tools(
                     )
                 else:
                     # end 单独调用，正常执行（参数已在循环中解析）
+                    tool_execution_started = True
                     end_result = await tool_registry.execute_tool(
                         "end", end_tool_args, context
                     )
@@ -299,9 +320,33 @@ async def run_agent_with_tools(
                             "content": str(end_result),
                         }
                     )
+            pre_tool_failure_count = 0
 
         except Exception as exc:
-            logger.exception("[Agent:%s] execution failed: %s", agent_name, exc)
-            return f"处理失败: {exc}"
+            if (
+                not tool_execution_started
+                and pre_tool_failure_count < max_pre_tool_retries
+            ):
+                pre_tool_failure_count += 1
+                del messages[message_checkpoint_len:]
+                transport_state = transport_state_checkpoint
+                logger.warning(
+                    "[Agent:%s] pre-tool 本地失败，重试当前 LLM 轮次: lane=%s retry=%s/%s iteration=%s error=%s",
+                    agent_name,
+                    queue_lane,
+                    pre_tool_failure_count,
+                    max_pre_tool_retries,
+                    iteration,
+                    exc,
+                )
+                continue
+            logger.exception(
+                "[Agent:%s] 执行失败，已静默抑制: lane=%s iteration=%s error=%s",
+                agent_name,
+                queue_lane,
+                iteration,
+                exc,
+            )
+            return ""
 
     return "达到最大迭代次数"

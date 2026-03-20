@@ -185,10 +185,10 @@ Agent 的执行逻辑，负责：
 
 为了简化 Agent 开发并确保 Token 统计一致性，建议所有 Agent 均遵循以下最佳实践：
 
-### 1. 使用 `ai_client.request_model`
-不要直接使用 `httpx` 调用 API，而是使用 `context` 中提供的 `ai_client.request_model`。它会自动：
+### 1. 使用 `ai_client.submit_queued_llm_call`
+不要直接使用 `httpx` 调用 API，而是使用 `context` 中提供的 `ai_client.submit_queued_llm_call`。它会自动：
 - 记录 Token 使用情况到系统统计中。
-- 处理重试和错误抛出。
+- 只对当前 LLM 请求执行静默重试。
 - 控制请求格式。
 
 ### 2. 实现临时对话上下文 (Temporary Context)
@@ -213,7 +213,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     messages.append({"role": "user", "content": f"用户需求：{user_prompt}"})
 
     # 3. 使用统一接口请求模型
-    result = await ai_client.request_model(
+    result = await ai_client.submit_queued_llm_call(
         model_config=agent_config,
         messages=messages,
         call_type="agent:your_agent_name",

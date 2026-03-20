@@ -17,6 +17,10 @@ from uuid import uuid4
 
 import aiofiles
 
+from Undefined.ai.queue_budget import (
+    compute_queued_llm_timeout_seconds,
+    resolve_effective_retry_count,
+)
 from Undefined.utils.resources import read_text_resource
 
 logger = logging.getLogger(__name__)
@@ -237,7 +241,7 @@ class AgentIntroGenerator:
                 "agent_dir": str(agent_dir),
             }
             try:
-                await self.queue_manager.add_agent_intro_request(
+                receipt = await self.queue_manager.add_agent_intro_request(
                     request_data,
                     model_name=getattr(
                         self.ai_client.agent_config, "model_name", "default"
@@ -252,11 +256,21 @@ class AgentIntroGenerator:
                 continue
 
             # 等待结果（带超时）
+            wait_timeout = compute_queued_llm_timeout_seconds(
+                self.ai_client.runtime_config,
+                self.ai_client.agent_config,
+                retry_count=resolve_effective_retry_count(
+                    self.ai_client.runtime_config, self.queue_manager
+                ),
+                initial_wait_seconds=float(
+                    getattr(receipt, "estimated_wait_seconds", 0.0) or 0.0
+                ),
+            )
             try:
-                await asyncio.wait_for(pending.event.wait(), timeout=480.0)
+                await asyncio.wait_for(pending.event.wait(), timeout=wait_timeout)
             except asyncio.TimeoutError:
                 logger.warning(
-                    f"[AgentIntro] 等待结果超时: {agent_name}, request_id={request_id}"
+                    f"[AgentIntro] 等待结果超时: {agent_name}, request_id={request_id}, timeout={wait_timeout:.1f}s"
                 )
                 self._pending_requests.pop(request_id, None)
                 continue

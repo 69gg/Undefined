@@ -71,6 +71,60 @@ async def test_runtime_internal_probe_includes_chat_model_transport_fields() -> 
 
 
 @pytest.mark.asyncio
+async def test_runtime_internal_probe_includes_group_superadmin_queue_snapshot() -> (
+    None
+):
+    context = RuntimeAPIContext(
+        config_getter=lambda: SimpleNamespace(
+            api=SimpleNamespace(
+                enabled=True,
+                host="127.0.0.1",
+                port=8788,
+                auth_key="changeme",
+                openapi_enabled=True,
+            ),
+            chat_model=SimpleNamespace(
+                model_name="gpt-5.4",
+                api_url="https://api.example.com/v1",
+                api_mode="responses",
+                thinking_enabled=False,
+                thinking_tool_call_compat=True,
+                responses_tool_choice_compat=False,
+                responses_force_stateless_replay=False,
+                reasoning_enabled=True,
+                reasoning_effort="high",
+            ),
+        ),
+        onebot=SimpleNamespace(connection_status=lambda: {}),
+        ai=SimpleNamespace(memory_storage=None),
+        command_dispatcher=SimpleNamespace(),
+        queue_manager=SimpleNamespace(
+            snapshot=lambda: {
+                "totals": {
+                    "retry": 1,
+                    "superadmin": 2,
+                    "group_superadmin": 3,
+                    "private": 4,
+                    "group_mention": 5,
+                    "group_normal": 6,
+                    "background": 7,
+                }
+            }
+        ),
+        history_manager=SimpleNamespace(),
+    )
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+
+    request = cast(web.Request, cast(Any, SimpleNamespace()))
+    response = await server._internal_probe_handler(request)
+    response_text = response.text
+    assert response_text is not None
+    payload = json.loads(response_text)
+
+    assert payload["queues"]["totals"]["group_superadmin"] == 3
+
+
+@pytest.mark.asyncio
 async def test_runtime_external_probe_skips_naga_model_when_integration_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

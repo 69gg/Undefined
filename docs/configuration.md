@@ -99,7 +99,7 @@ model_name = "gpt-4o-mini"
 | `process_private_message` | `true` | 是否处理私聊回复 | 关闭后私聊只记录历史，不回复 |
 | `process_poke_message` | `true` | 是否响应拍一拍 | 关闭后忽略 poke |
 | `context_recent_messages_limit` | `20` | 注入到提示词的最近历史条数 | 自动钳制到 `0..200` |
-| `ai_request_max_retries` | `2` | 模型请求失败重试次数 | 自动钳制到 `0..5`；此项变更需重启 |
+| `ai_request_max_retries` | `2` | 单次 LLM 请求失败重试次数 | `<0` 自动回退到 `0`；支持热更新 |
 
 ---
 
@@ -704,7 +704,6 @@ model_name = "gpt-4o-mini"
 
 ### 5.2 明确“需重启”的字段
 以下变更会被记录为“需重启生效”：
-- `core.ai_request_max_retries`
 - `logging.level`
 - `logging.file_path`
 - `logging.max_size_mb`
@@ -766,5 +765,5 @@ model_name = "gpt-4o-mini"
 2. 显式配置 `access.mode`，不要依赖 legacy 行为。
 3. 启用 `knowledge`/`cognitive` 前先验证 embedding/rerank 配置是否齐全。
 4. 若使用模型池，先确认 `features.pool_enabled=true`。
-5. 修改 `onebot`、`logging`、`webui`、`ai_request_max_retries` 后直接重启。
+5. 修改 `onebot`、`logging`、`webui` 后直接重启。
 6. 观察启动日志中的 `[配置]` 告警，优先处理“自动回退”信息。

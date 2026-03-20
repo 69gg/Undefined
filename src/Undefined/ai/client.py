@@ -17,6 +17,10 @@ from Undefined.ai.llm import ModelRequester
 from Undefined.ai.model_selector import ModelSelector
 from Undefined.ai.multimodal import MultimodalAnalyzer
 from Undefined.ai.prompts import PromptBuilder
+from Undefined.ai.queue_budget import (
+    compute_queued_llm_timeout_seconds,
+    resolve_effective_retry_count,
+)
 from Undefined.ai.summaries import SummaryService
 from Undefined.ai.transports.openai_transport import RESPONSES_OUTPUT_ITEMS_KEY
 from Undefined.ai.tokens import TokenCounter
@@ -38,6 +42,15 @@ from Undefined.skills.agents.intro_generator import (
 )
 from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
 from Undefined.skills.tools import ToolRegistry
+from Undefined.services.queue_manager import (
+    ALL_QUEUE_LANES,
+    QUEUE_LANE_BACKGROUND,
+    QUEUE_LANE_GROUP_MENTION,
+    QUEUE_LANE_GROUP_NORMAL,
+    QUEUE_LANE_GROUP_SUPERADMIN,
+    QUEUE_LANE_PRIVATE,
+    QUEUE_LANE_SUPERADMIN,
+)
 from Undefined.token_usage_storage import TokenUsageStorage
 from Undefined.utils.logging import log_debug_json, redact_string
 from Undefined.utils.tool_calls import parse_tool_arguments
@@ -313,7 +326,46 @@ class AIClient:
 
         logger.info("[清理] AIClient 已关闭")
 
-    async def submit_background_llm_call(
+    def _resolve_queue_lane(self, queue_lane: Any = None) -> str:
+        queue_lane_text = str(queue_lane or "").strip().lower()
+        if queue_lane_text in ALL_QUEUE_LANES:
+            return queue_lane_text
+
+        ctx = RequestContext.current()
+        if ctx is not None:
+            ctx_lane = str(ctx.get_resource("queue_lane") or "").strip().lower()
+            if ctx_lane in ALL_QUEUE_LANES:
+                return ctx_lane
+
+            runtime_config = self._get_runtime_config()
+            superadmin_qq = int(getattr(runtime_config, "superadmin_qq", 0) or 0)
+            if ctx.request_type == "private":
+                if superadmin_qq > 0 and (
+                    ctx.user_id == superadmin_qq or ctx.sender_id == superadmin_qq
+                ):
+                    return QUEUE_LANE_SUPERADMIN
+                return QUEUE_LANE_PRIVATE
+            if ctx.request_type == "group":
+                if superadmin_qq > 0 and ctx.sender_id == superadmin_qq:
+                    return QUEUE_LANE_GROUP_SUPERADMIN
+                if bool(ctx.get_resource("is_at_bot")):
+                    return QUEUE_LANE_GROUP_MENTION
+                return QUEUE_LANE_GROUP_NORMAL
+
+        return QUEUE_LANE_BACKGROUND
+
+    def _get_queued_llm_wait_timeout_seconds(self) -> float:
+        retry_count = resolve_effective_retry_count(
+            self._get_runtime_config(),
+            getattr(self, "_queue_manager", None),
+        )
+        return compute_queued_llm_timeout_seconds(
+            self._get_runtime_config(),
+            self.chat_config,
+            retry_count=retry_count,
+        )
+
+    async def submit_queued_llm_call(
         self,
         model_config: Any,
         messages: list[dict[str, Any]],
@@ -322,14 +374,16 @@ class AIClient:
         call_type: str = "background",
         max_tokens: int | None = None,
         transport_state: dict[str, Any] | None = None,
+        queue_lane: str | None = None,
     ) -> dict[str, Any]:
-        """将 LLM 调用投递到后台队列，走统一发车间隔和 Token 统计。
+        """将 LLM 调用投递到统一队列，走统一发车间隔和重试逻辑。
         无 queue_manager 时降级为直接调用。"""
         effective_max_tokens = (
             max_tokens
             if max_tokens is not None
             else getattr(model_config, "max_tokens", 4096)
         )
+        resolved_queue_lane = self._resolve_queue_lane(queue_lane)
         if self._queue_manager is None:
             return await self.request_model(
                 model_config=model_config,
@@ -344,28 +398,88 @@ class AIClient:
         event: asyncio.Event = asyncio.Event()
         self._pending_llm_calls[request_id] = (event, None)
         model_name = getattr(model_config, "model_name", "default")
-        await self._queue_manager.add_background_request(
-            {
-                "type": "background_llm_call",
-                "request_id": request_id,
-                "model_config": model_config,
-                "messages": messages,
-                "tools": tools,
-                "tool_choice": tool_choice,
-                "call_type": call_type,
-                "max_tokens": effective_max_tokens,
-                "transport_state": transport_state,
-            },
+        request: dict[str, Any] = {
+            "type": "queued_llm_call",
+            "request_id": request_id,
+            "model_config": model_config,
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": tool_choice,
+            "call_type": call_type,
+            "max_tokens": effective_max_tokens,
+            "transport_state": transport_state,
+        }
+        ctx = RequestContext.current()
+        if ctx is not None:
+            if ctx.group_id is not None:
+                request["group_id"] = ctx.group_id
+            if ctx.user_id is not None:
+                request["user_id"] = ctx.user_id
+        logger.info(
+            "[queued_llm_enqueue] request_id=%s call_type=%s model=%s lane=%s messages=%s tools=%s",
+            request_id,
+            call_type,
+            model_name,
+            resolved_queue_lane,
+            len(messages),
+            bool(tools),
+        )
+        receipt = await self._queue_manager.add_queued_llm_request(
+            request,
+            lane=resolved_queue_lane,
             model_name=model_name,
         )
+        wait_timeout = compute_queued_llm_timeout_seconds(
+            self._get_runtime_config(),
+            model_config,
+            retry_count=resolve_effective_retry_count(
+                self._get_runtime_config(), self._queue_manager
+            ),
+            initial_wait_seconds=float(
+                getattr(receipt, "estimated_wait_seconds", 0.0) or 0.0
+            ),
+            include_first_dispatch_interval=False,
+        )
         try:
-            await asyncio.wait_for(event.wait(), timeout=480.0)
+            await asyncio.wait_for(event.wait(), timeout=wait_timeout)
+        except asyncio.TimeoutError:
+            logger.exception(
+                "[queued_llm_wait_timeout] request_id=%s call_type=%s model=%s lane=%s timeout=%.1fs",
+                request_id,
+                call_type,
+                model_name,
+                resolved_queue_lane,
+                wait_timeout,
+            )
+            raise
         finally:
             entry = self._pending_llm_calls.pop(request_id, None)
         _, result = entry if entry is not None else (None, None)
         if isinstance(result, Exception):
             raise result
         return result or {}
+
+    async def submit_background_llm_call(
+        self,
+        model_config: Any,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any = "auto",
+        call_type: str = "background",
+        max_tokens: int | None = None,
+        transport_state: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """后台 LLM 提交兼容包装。"""
+        return await self.submit_queued_llm_call(
+            model_config=model_config,
+            messages=messages,
+            tools=tools,
+            tool_choice=tool_choice,
+            call_type=call_type,
+            max_tokens=max_tokens,
+            transport_state=transport_state,
+            queue_lane=QUEUE_LANE_BACKGROUND,
+        )
 
     def set_llm_call_result(
         self, request_id: str, result: dict[str, Any] | Exception
@@ -869,18 +983,25 @@ class AIClient:
         max_iterations = 1000
         iteration = 0
         conversation_ended = False
-        any_tool_executed = False
         cot_compat = getattr(effective_chat_config, "thinking_tool_call_compat", False)
         cot_compat_logged = False
         cot_missing_logged = False
         transport_state: dict[str, Any] | None = None
+        queue_lane = self._resolve_queue_lane(tool_context.get("queue_lane"))
+        pre_tool_failure_count = 0
+        max_pre_tool_retries = max(
+            0,
+            int(getattr(self._get_runtime_config(), "ai_request_max_retries", 0) or 0),
+        )
 
         while iteration < max_iterations:
             iteration += 1
             logger.info(f"[AI决策] 开始第 {iteration} 轮迭代...")
+            message_checkpoint_len = len(messages)
+            transport_state_checkpoint = transport_state
 
             try:
-                result = await self.request_model(
+                result = await self.submit_queued_llm_call(
                     model_config=effective_chat_config,
                     messages=messages,
                     max_tokens=8192,
@@ -888,8 +1009,20 @@ class AIClient:
                     tools=tools,
                     tool_choice="auto",
                     transport_state=transport_state,
+                    queue_lane=queue_lane,
                 )
+            except Exception as exc:
+                logger.exception(
+                    "[queued_llm_error] call_type=chat model=%s lane=%s iteration=%s error=%s",
+                    effective_chat_config.model_name,
+                    queue_lane,
+                    iteration,
+                    exc,
+                )
+                raise
 
+            try:
+                tool_execution_started = False
                 tool_name_map = (
                     result.get("_tool_name_map") if isinstance(result, dict) else None
                 )
@@ -1039,7 +1172,7 @@ class AIClient:
                     )
 
                 if tool_tasks:
-                    any_tool_executed = True
+                    tool_execution_started = True
                     logger.info(
                         "[工具执行] 开始并发执行 %s 个工具调用: %s",
                         len(tool_tasks),
@@ -1115,6 +1248,7 @@ class AIClient:
                         logger.info("[工具调用] end 与其他工具同时调用，已回填跳过响应")
                     else:
                         # end 单独调用，正常执行（参数已在循环中解析）
+                        tool_execution_started = True
                         end_result = await self.tool_manager.execute_tool(
                             "end", end_tool_args, tool_context
                         )
@@ -1133,13 +1267,34 @@ class AIClient:
                 if conversation_ended:
                     logger.info("[会话状态] 对话已结束（调用 end 工具）")
                     return ""
+                pre_tool_failure_count = 0
 
             except Exception as exc:
-                if not any_tool_executed:
-                    # 尚未执行任何工具（无消息发送等副作用），安全传播给上层重试
-                    raise
-                logger.exception("ask 处理失败: %s", exc)
-                return f"处理失败: {exc}"
+                if (
+                    not tool_execution_started
+                    and pre_tool_failure_count < max_pre_tool_retries
+                ):
+                    pre_tool_failure_count += 1
+                    del messages[message_checkpoint_len:]
+                    transport_state = transport_state_checkpoint
+                    logger.warning(
+                        "[chat.pre_tool_retry] model=%s lane=%s retry=%s/%s iteration=%s error=%s",
+                        effective_chat_config.model_name,
+                        queue_lane,
+                        pre_tool_failure_count,
+                        max_pre_tool_retries,
+                        iteration,
+                        exc,
+                    )
+                    continue
+                logger.exception(
+                    "[chat.suppressed_error] model=%s lane=%s iteration=%s error=%s",
+                    effective_chat_config.model_name,
+                    queue_lane,
+                    iteration,
+                    exc,
+                )
+                return ""
 
         logger.warning("[AI决策] 达到最大迭代次数，未能完成处理")
         return "达到最大迭代次数，未能完成处理"
