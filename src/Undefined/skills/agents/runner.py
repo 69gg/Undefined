@@ -27,6 +27,7 @@ async def run_agent_with_tools(
     *,
     agent_name: str,
     user_content: str,
+    context_messages: list[dict[str, str]] | None = None,
     empty_user_content_message: str,
     default_prompt: str,
     context: dict[str, Any],
@@ -102,6 +103,8 @@ async def run_agent_with_tools(
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
     if agent_history:
         messages.extend(agent_history)
+    if context_messages:
+        messages.extend(context_messages)
     messages.append({"role": "user", "content": user_content})
     transport_state: dict[str, Any] | None = None
     queue_lane = context.get("queue_lane")

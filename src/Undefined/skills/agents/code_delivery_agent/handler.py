@@ -51,9 +51,22 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     cleanup_on_finish = context["code_delivery_config"]["cleanup_on_finish"]
 
     try:
-        user_content = f"用户需求：{user_prompt}\n\n请开始工作。"
+        context_messages = [
+            {
+                "role": "system",
+                "content": f"当前初始化来源：{context['init_args']['source_type']}",
+            }
+        ]
+        git_url = str(context["init_args"].get("git_url", "")).strip()
+        git_ref = str(context["init_args"].get("git_ref", "")).strip()
+        if git_url:
+            git_message = f"当前 Git 仓库：{git_url}"
+            if git_ref:
+                git_message += f" @ {git_ref}"
+            context_messages.append({"role": "system", "content": git_message})
         result = await _run_agent_with_retry(
-            user_content=user_content,
+            user_content=user_prompt,
+            context_messages=context_messages,
             context=context,
             agent_dir=Path(__file__).parent,
         )
@@ -81,6 +94,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 async def _run_agent_with_retry(
     *,
     user_content: str,
+    context_messages: list[dict[str, str]] | None,
     context: dict[str, Any],
     agent_dir: Path,
 ) -> str:
@@ -90,6 +104,7 @@ async def _run_agent_with_retry(
     return await run_agent_with_tools(
         agent_name="code_delivery_agent",
         user_content=user_content,
+        context_messages=context_messages,
         empty_user_content_message="请提供任务目标描述",
         default_prompt="你是一个专业的代码交付助手。",
         context=context,

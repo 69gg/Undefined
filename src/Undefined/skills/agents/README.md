@@ -210,7 +210,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     messages = [{"role": "system", "content": system_prompt}]
     if agent_history:
         messages.extend(agent_history) # 注入历史
-    messages.append({"role": "user", "content": f"用户需求：{user_prompt}"})
+    messages.append({"role": "user", "content": user_prompt})
 
     # 3. 使用统一接口请求模型
     result = await ai_client.submit_queued_llm_call(
