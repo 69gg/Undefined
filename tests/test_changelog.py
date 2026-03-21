@@ -54,6 +54,7 @@ def test_get_entry_normalizes_version_without_v_prefix() -> None:
     )
 
     assert get_entry("1.0.0", entries=entries).version == "v1.0.0"
+    assert get_entry("V1.0.0", entries=entries).version == "v1.0.0"
     assert get_latest_entry(entries=entries).version == "v1.0.0"
     assert list_entries(limit=1, entries=entries)[0].version == "v1.0.0"
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -16,28 +17,58 @@ from Undefined.skills.commands.changelog import handler as changelog_handler
 class _DummySender:
     def __init__(self) -> None:
         self.messages: list[tuple[int, str, bool]] = []
+        self.private_messages: list[tuple[int, str, bool]] = []
 
     async def send_group_message(
         self, group_id: int, message: str, mark_sent: bool = False
     ) -> None:
         self.messages.append((group_id, message, mark_sent))
 
+    async def send_private_message(
+        self,
+        user_id: int,
+        message: str,
+        auto_history: bool = True,
+        *,
+        mark_sent: bool = True,
+    ) -> None:
+        _ = auto_history
+        self.private_messages.append((user_id, message, mark_sent))
 
-def _build_context(sender: _DummySender) -> CommandContext:
+
+def _build_context(
+    sender: _DummySender,
+    *,
+    group_id: int = 10001,
+    scope: str = "group",
+    user_id: int | None = None,
+    onebot: Any | None = None,
+    config: Any | None = None,
+) -> CommandContext:
     stub = cast(Any, SimpleNamespace())
+    resolved_onebot = (
+        onebot
+        if onebot is not None
+        else cast(Any, SimpleNamespace(send_forward_msg=None))
+    )
+    resolved_config = (
+        config if config is not None else cast(Any, SimpleNamespace(bot_qq=10000))
+    )
     return CommandContext(
-        group_id=10001,
+        group_id=group_id,
         sender_id=10002,
-        config=stub,
+        config=resolved_config,
         sender=cast(Any, sender),
         ai=stub,
         faq_storage=stub,
-        onebot=stub,
+        onebot=resolved_onebot,
         security=stub,
         queue_manager=None,
         rate_limiter=None,
         dispatcher=stub,
         registry=CommandRegistry(Path("/tmp/not-used")),
+        scope=scope,
+        user_id=user_id,
     )
 
 
@@ -68,7 +99,7 @@ async def test_changelog_command_lists_recent_versions(
     assert "Undefined CHANGELOG" in output
     assert "- v3.2.6 | 标题甲" in output
     assert "- v3.2.5 | 标题乙" in output
-    assert "/changelog show <version>" in output
+    assert "/changelog <version>" in output
 
 
 @pytest.mark.asyncio
@@ -92,6 +123,95 @@ async def test_changelog_command_show_supports_version_argument(
 
 
 @pytest.mark.asyncio
+async def test_changelog_command_inferrs_show_for_direct_version_argument(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sender = _DummySender()
+    context = _build_context(sender)
+    monkeypatch.setattr(
+        changelog_handler,
+        "get_entry",
+        lambda version: _entry("v3.2.6", "标题甲"),
+    )
+
+    await changelog_handler.execute(["V3.2.6"], context)
+
+    output = sender.messages[-1][1]
+    assert output.startswith("v3.2.6 标题甲")
+    assert "标题甲 摘要" in output
+
+
+@pytest.mark.asyncio
+async def test_changelog_command_inferrs_list_for_direct_limit_argument(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sender = _DummySender()
+    context = _build_context(sender)
+    captured: dict[str, int] = {}
+
+    def _list_entries(*, limit: int) -> tuple[ChangelogEntry, ...]:
+        captured["limit"] = limit
+        return (_entry("v3.2.6", "标题甲"),)
+
+    monkeypatch.setattr(changelog_handler, "list_entries", _list_entries)
+
+    await changelog_handler.execute(["12"], context)
+
+    assert captured["limit"] == 12
+    assert "- v3.2.6 | 标题甲" in sender.messages[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_changelog_command_large_list_uses_forward_in_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sender = _DummySender()
+    onebot = cast(Any, SimpleNamespace(send_forward_msg=AsyncMock()))
+    context = _build_context(sender, onebot=onebot)
+    monkeypatch.setattr(
+        changelog_handler,
+        "list_entries",
+        lambda *, limit: tuple(_entry(f"v3.2.{idx}", f"标题{idx}") for idx in range(6)),
+    )
+
+    await changelog_handler.execute(["list", "25"], context)
+
+    assert not sender.messages
+    onebot.send_forward_msg.assert_awaited_once()
+    group_id, nodes = onebot.send_forward_msg.await_args.args
+    assert group_id == 10001
+    assert nodes[0]["data"]["content"].startswith("Undefined CHANGELOG")
+    assert "1. v3.2.0 | 标题0" in nodes[1]["data"]["content"]
+
+
+@pytest.mark.asyncio
+async def test_changelog_command_large_list_uses_private_sender_in_private_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sender = _DummySender()
+    onebot = cast(Any, SimpleNamespace(send_forward_msg=AsyncMock()))
+    context = _build_context(
+        sender,
+        group_id=0,
+        scope="private",
+        user_id=20001,
+        onebot=onebot,
+    )
+    monkeypatch.setattr(
+        changelog_handler,
+        "list_entries",
+        lambda *, limit: (_entry("v3.2.6", "标题甲"), _entry("v3.2.5", "标题乙")),
+    )
+
+    await changelog_handler.execute(["25"], context)
+
+    assert not sender.messages
+    assert sender.private_messages[-1][0] == 20001
+    assert "Undefined CHANGELOG" in sender.private_messages[-1][1]
+    onebot.send_forward_msg.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_changelog_command_latest_uses_first_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -106,6 +226,25 @@ async def test_changelog_command_latest_uses_first_entry(
     await changelog_handler.execute(["latest"], context)
 
     assert sender.messages[-1][1].startswith("v3.2.6 标题甲")
+
+
+@pytest.mark.asyncio
+async def test_changelog_command_latest_uses_private_sender_in_private_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sender = _DummySender()
+    context = _build_context(sender, group_id=0, scope="private", user_id=20001)
+    monkeypatch.setattr(
+        changelog_handler,
+        "get_latest_entry",
+        lambda: _entry("v3.2.6", "标题甲"),
+    )
+
+    await changelog_handler.execute(["latest"], context)
+
+    assert not sender.messages
+    assert sender.private_messages[-1][0] == 20001
+    assert sender.private_messages[-1][1].startswith("v3.2.6 标题甲")
 
 
 @pytest.mark.asyncio
@@ -142,3 +281,4 @@ def test_changelog_command_is_registered_for_private_use() -> None:
     assert meta is not None
     assert meta.allow_in_private is True
     assert meta.rate_limit.user == 5
+    assert dispatcher.command_registry.resolve("cl") is not None

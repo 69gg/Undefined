@@ -34,8 +34,9 @@ def normalize_version(version: str) -> str:
     normalized = str(version or "").strip()
     if not normalized:
         raise ChangelogFormatError("版本号不能为空")
-    if not normalized.startswith("v"):
-        normalized = f"v{normalized}"
+    if normalized[:1].lower() == "v":
+        normalized = normalized[1:]
+    normalized = f"v{normalized}"
     if not _VERSION_RE.fullmatch(normalized):
         raise ChangelogFormatError(f"非法版本号格式: {version}")
     return normalized
