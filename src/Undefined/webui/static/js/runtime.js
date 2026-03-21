@@ -837,14 +837,14 @@
         html += `</div>`;
 
         const summary = [];
-        if (configExists) summary.push(t("probes.bootstrap_config_exists"));
-        if (!configExists) summary.push(t("probes.bootstrap_config_missing"));
+        //if (configExists) summary.push(t("probes.bootstrap_config_exists"));
+        //if (!configExists) summary.push(t("probes.bootstrap_config_missing"));
         if (configValid === false && data.validation_error)
             summary.push(String(data.validation_error));
         if (usingDefaultPassword) summary.push(t("auth.change_required"));
-        if (runtimeEnabled && runtimeReachable === false)
-            summary.push(t("probes.bootstrap_runtime_pending"));
-        if (!summary.length) summary.push(t("probes.bootstrap_ready"));
+        //if (runtimeEnabled && runtimeReachable === false)
+        //  summary.push(t("probes.bootstrap_runtime_pending"));
+        //if (!summary.length) summary.push(t("probes.bootstrap_ready"));
 
         html += `<div class="probe-advice-list">${summary
             .concat(advice)
