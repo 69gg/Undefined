@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -14,6 +16,9 @@ from numba import njit
 from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
+
+_QUERY_EMBEDDING_CACHE_TTL_SECONDS = 60.0
+_QUERY_EMBEDDING_CACHE_MAX_SIZE = 256
 
 
 def _clamp(value: float, lower: float, upper: float) -> float:
@@ -183,11 +188,17 @@ class CognitiveVectorStore:
             "cognitive_profiles", metadata={"hnsw:space": "cosine"}
         )
         self._embedder = embedder
+        self._query_embedding_cache: OrderedDict[
+            tuple[str, str, str, str], tuple[float, list[float]]
+        ] = OrderedDict()
+        self._query_embedding_cache_lock = asyncio.Lock()
         logger.info(
-            "[认知向量库] 初始化完成: path=%s events=%s profiles=%s",
+            "[认知向量库] 初始化完成: path=%s events=%s profiles=%s query_cache_ttl=%ss query_cache_size=%s",
             str(path),
             getattr(self._events, "name", "cognitive_events"),
             getattr(self._profiles, "name", "cognitive_profiles"),
+            _QUERY_EMBEDDING_CACHE_TTL_SECONDS,
+            _QUERY_EMBEDDING_CACHE_MAX_SIZE,
         )
 
     async def _embed(self, text: str) -> list[float]:
@@ -199,6 +210,81 @@ class CognitiveVectorStore:
             len(vector),
         )
         return vector
+
+    def _query_embedding_cache_key(self, query_text: str) -> tuple[str, str, str, str]:
+        model_config = getattr(self._embedder, "_embedding_model", None)
+        model_name = str(
+            getattr(model_config, "model_name", "")
+            or getattr(self._embedder, "model_name", "")
+            or ""
+        )
+        dimensions = str(getattr(model_config, "dimensions", "") or "")
+        query_instruction = str(getattr(self._embedder, "query_instruction", "") or "")
+        normalized_query = str(query_text or "").strip()
+        return (model_name, dimensions, query_instruction, normalized_query)
+
+    async def _get_or_create_query_embedding(
+        self,
+        query_text: str,
+    ) -> tuple[list[float], str]:
+        cache_key = self._query_embedding_cache_key(query_text)
+        now = time.monotonic()
+        async with self._query_embedding_cache_lock:
+            cached = self._query_embedding_cache.get(cache_key)
+            if cached is not None:
+                cached_at, cached_embedding = cached
+                if now - cached_at < _QUERY_EMBEDDING_CACHE_TTL_SECONDS:
+                    self._query_embedding_cache.move_to_end(cache_key)
+                    logger.debug(
+                        "[认知向量库] 查询向量缓存命中: model=%s dims=%s query_len=%s",
+                        cache_key[0],
+                        cache_key[1] or "default",
+                        len(cache_key[3]),
+                    )
+                    return list(cached_embedding), "cache_hit"
+                self._query_embedding_cache.pop(cache_key, None)
+
+        embedding = await self._embed(query_text)
+        now = time.monotonic()
+        async with self._query_embedding_cache_lock:
+            cached = self._query_embedding_cache.get(cache_key)
+            if cached is not None:
+                cached_at, cached_embedding = cached
+                if now - cached_at < _QUERY_EMBEDDING_CACHE_TTL_SECONDS:
+                    self._query_embedding_cache.move_to_end(cache_key)
+                    logger.debug(
+                        "[认知向量库] 查询向量缓存并发命中: model=%s dims=%s query_len=%s",
+                        cache_key[0],
+                        cache_key[1] or "default",
+                        len(cache_key[3]),
+                    )
+                    return list(cached_embedding), "cache_hit"
+                self._query_embedding_cache.pop(cache_key, None)
+
+            self._query_embedding_cache[cache_key] = (now, list(embedding))
+            self._query_embedding_cache.move_to_end(cache_key)
+            while len(self._query_embedding_cache) > _QUERY_EMBEDDING_CACHE_MAX_SIZE:
+                self._query_embedding_cache.popitem(last=False)
+        logger.debug(
+            "[认知向量库] 查询向量缓存写入: model=%s dims=%s query_len=%s",
+            cache_key[0],
+            cache_key[1] or "default",
+            len(cache_key[3]),
+        )
+        return list(embedding), "cache_miss"
+
+    async def embed_query(self, query_text: str) -> list[float]:
+        embedding, _ = await self._get_or_create_query_embedding(query_text)
+        return embedding
+
+    async def _resolve_query_embedding(
+        self,
+        query_text: str,
+        query_embedding: list[float] | None = None,
+    ) -> tuple[list[float], str]:
+        if query_embedding is not None:
+            return list(query_embedding), "provided"
+        return await self._get_or_create_query_embedding(query_text)
 
     async def upsert_event(
         self, event_id: str, document: str, metadata: dict[str, Any]
@@ -234,6 +320,7 @@ class CognitiveVectorStore:
         time_decay_boost: float = 0.2,
         time_decay_min_similarity: float = 0.35,
         apply_mmr: bool = False,
+        query_embedding: list[float] | None = None,
     ) -> list[dict[str, Any]]:
         logger.info(
             "[认知向量库] 查询事件: query_len=%s top_k=%s where=%s reranker=%s multiplier=%s decay_enabled=%s half_life_days=%s boost=%s min_sim=%s mmr=%s",
@@ -260,6 +347,7 @@ class CognitiveVectorStore:
             time_decay_boost=time_decay_boost,
             time_decay_min_similarity=time_decay_min_similarity,
             apply_mmr=apply_mmr,
+            query_embedding=query_embedding,
         )
 
     async def upsert_profile(
@@ -291,6 +379,7 @@ class CognitiveVectorStore:
         where: dict[str, Any] | None = None,
         reranker: Any = None,
         candidate_multiplier: int = 3,
+        query_embedding: list[float] | None = None,
     ) -> list[dict[str, Any]]:
         logger.info(
             "[认知向量库] 查询侧写: query_len=%s top_k=%s where=%s reranker=%s multiplier=%s",
@@ -301,7 +390,13 @@ class CognitiveVectorStore:
             candidate_multiplier,
         )
         return await self._query(
-            self._profiles, query_text, top_k, where, reranker, candidate_multiplier
+            self._profiles,
+            query_text,
+            top_k,
+            where,
+            reranker,
+            candidate_multiplier,
+            query_embedding=query_embedding,
         )
 
     async def _query(
@@ -318,10 +413,12 @@ class CognitiveVectorStore:
         time_decay_boost: float = 0.2,
         time_decay_min_similarity: float = 0.35,
         apply_mmr: bool = False,
+        query_embedding: list[float] | None = None,
     ) -> list[dict[str, Any]]:
         col_name = getattr(col, "name", "unknown")
         safe_top_k = _safe_positive_int(top_k, default=1)
         safe_multiplier = _safe_positive_int(candidate_multiplier, default=1)
+        total_started = time.perf_counter()
         logger.debug(
             "[认知向量库] 开始查询 collection=%s top_k=%s where=%s decay=%s mmr=%s",
             col_name,
@@ -330,7 +427,12 @@ class CognitiveVectorStore:
             apply_time_decay,
             apply_mmr,
         )
-        emb = await self._embed(query_text)
+        embed_started = time.perf_counter()
+        emb, embedding_source = await self._resolve_query_embedding(
+            query_text,
+            query_embedding=query_embedding,
+        )
+        embed_duration = time.perf_counter() - embed_started
         # 重排要求候选数 > 最终返回数，否则重排无意义
         use_reranker = bool(reranker) and safe_multiplier >= 2
         if reranker and safe_multiplier < 2:
@@ -356,7 +458,9 @@ class CognitiveVectorStore:
         def _q() -> Any:
             return col.query(**kwargs)
 
+        chroma_started = time.perf_counter()
         raw = await asyncio.to_thread(_q)
+        chroma_duration = time.perf_counter() - chroma_started
         docs: list[str] = (raw.get("documents") or [[]])[0]
         metas: list[dict[str, Any]] = (raw.get("metadatas") or [[]])[0]
         dists: list[float] = (raw.get("distances") or [[]])[0]
@@ -376,6 +480,7 @@ class CognitiveVectorStore:
             len(results),
         )
 
+        rerank_duration = 0.0
         if use_reranker and results:
             logger.info(
                 "[认知向量库] 开始重排: collection=%s candidates=%s top_k=%s",
@@ -384,6 +489,7 @@ class CognitiveVectorStore:
                 safe_top_k,
             )
             rerank_top_n = fetch_k if (apply_time_decay or apply_mmr) else safe_top_k
+            rerank_started = time.perf_counter()
             try:
                 reranked = await reranker.rerank(
                     query_text, [r["document"] for r in results], top_n=rerank_top_n
@@ -427,7 +533,9 @@ class CognitiveVectorStore:
                         safe_top_k,
                         len(results),
                     )
+            rerank_duration = time.perf_counter() - rerank_started
 
+        post_rank_started = time.perf_counter()
         if apply_time_decay and results:
             decay_top_k = fetch_k if apply_mmr else safe_top_k
             final = self._apply_time_decay_ranking(
@@ -450,11 +558,23 @@ class CognitiveVectorStore:
             final = self._apply_mmr(final, emb, safe_top_k)
             for item in final:
                 item.pop("embedding", None)
+        post_rank_duration = time.perf_counter() - post_rank_started
+        total_duration = time.perf_counter() - total_started
 
         logger.info(
             "[认知向量库] 返回查询结果: collection=%s final_count=%s",
             col_name,
             len(final),
+        )
+        logger.info(
+            "[认知向量库] 查询阶段耗时: collection=%s embed=%.3fs chroma_query=%.3fs rerank=%.3fs post_rank=%.3fs total=%.3fs embedding_source=%s",
+            col_name,
+            embed_duration,
+            chroma_duration,
+            rerank_duration,
+            post_rank_duration,
+            total_duration,
+            embedding_source,
         )
         return final
 

@@ -1759,8 +1759,9 @@ class Config:
                     _get_value(
                         data, ("models", "embedding", "queue_interval_seconds"), None
                     ),
-                    1.0,
-                )
+                    0.0,
+                ),
+                0.0,
             ),
             dimensions=_coerce_int(
                 _get_value(data, ("models", "embedding", "dimensions"), None), 0
@@ -1781,8 +1782,9 @@ class Config:
         queue_interval_seconds = _normalize_queue_interval(
             _coerce_float(
                 _get_value(data, ("models", "rerank", "queue_interval_seconds"), None),
-                1.0,
-            )
+                0.0,
+            ),
+            0.0,
         )
         return RerankModelConfig(
             api_url=_coerce_str(

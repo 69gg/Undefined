@@ -32,7 +32,7 @@ knowledge/                        # 项目根目录，仅存数据
 api_url = "https://api.openai.com/v1"
 api_key = "sk-xxx"
 model_name = "text-embedding-3-small"
-queue_interval_seconds = 1.0      # 发车间隔（秒，0 表示立即发车）
+queue_interval_seconds = 0.0      # 发车间隔（秒，0 表示立即发车）
 dimensions = 512                  # 向量维度（可选，0或不填则使用模型默认值）
 query_instruction = ""            # 查询端指令前缀（Qwen3-Embedding 等模型需要）
 document_instruction = ""         # 文档端指令前缀（E5 系列需要 "passage: "）
@@ -41,7 +41,7 @@ document_instruction = ""         # 文档端指令前缀（E5 系列需要 "pas
 api_url = "https://api.openai.com/v1"
 api_key = "sk-xxx"
 model_name = "text-rerank-001"
-queue_interval_seconds = 1.0      # 发车间隔（秒，0 表示立即发车）
+queue_interval_seconds = 0.0      # 发车间隔（秒，0 表示立即发车）
 query_instruction = ""            # 查询端指令前缀（部分重排模型需要）
 
 [knowledge]
@@ -186,7 +186,7 @@ chunk_size=4, chunk_overlap=1 → step=3
 
 ### 站台/发车队列
 
-嵌入与重排请求都通过内置队列串行发送，按各自 `queue_interval_seconds` 控制发车间隔；其中 `0` 表示立即发车，负数回退到默认值。多行文本按 `embed_batch_size` 分批，每批一次 API 调用。
+嵌入与重排请求都通过内置队列串行发送，按各自 `queue_interval_seconds` 控制发车间隔；embedding/rerank 默认值均为 `0.0`，表示立即发车，负数回退到 `0.0`。多行文本按 `embed_batch_size` 分批，每批一次 API 调用。
 
 ```
 texts → split_lines → [batch 1, batch 2, ...] → Queue → API (间隔发车)

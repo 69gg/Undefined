@@ -297,7 +297,7 @@ model_name = "gpt-4o-mini"
 | `api_url` | `""` | 嵌入 API 地址 |
 | `api_key` | `""` | API Key |
 | `model_name` | `""` | 模型名 |
-| `queue_interval_seconds` | `1.0` | 发车间隔（`0` 立即发车，`<0` 回退 `1.0`） |
+| `queue_interval_seconds` | `0.0` | 发车间隔（`0` 立即发车，`<0` 回退 `0.0`） |
 | `dimensions` | `0` | 向量维度；`0`/空视为 `None`（模型默认） |
 | `query_instruction` | `""` | 查询前缀 |
 | `document_instruction` | `""` | 文档前缀 |
@@ -310,7 +310,7 @@ model_name = "gpt-4o-mini"
 | `api_url` | `""` | rerank API 地址 |
 | `api_key` | `""` | API Key |
 | `model_name` | `""` | 模型名 |
-| `queue_interval_seconds` | `1.0` | `0` 立即发车，`<0` 回退 `1.0` |
+| `queue_interval_seconds` | `0.0` | `0` 立即发车，`<0` 回退 `0.0` |
 | `query_instruction` | `""` | 查询前缀 |
 | `request_params` | `{}` | 额外请求体参数；保留字段如 `model`/`query`/`documents`/`top_n` 会忽略 |
 

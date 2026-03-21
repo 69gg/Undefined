@@ -431,7 +431,7 @@ api_key = ""
 model_name = ""
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
-queue_interval_seconds = 1.0
+queue_interval_seconds = 0.0
 # zh: 向量维度（可选）。0 或留空表示使用模型默认维度。
 # en: Embedding dimensions (optional). Use 0/empty to use model defaults.
 dimensions = 0
@@ -460,7 +460,7 @@ api_key = ""
 model_name = ""
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
-queue_interval_seconds = 1.0
+queue_interval_seconds = 0.0
 # zh: 查询端指令前缀（可选，部分 rerank 模型需要，如 "Instruct: ...\\nQuery: "）。
 # en: Query instruction prefix (optional, required by some rerank models, e.g. "Instruct: ...\\nQuery: ").
 query_instruction = ""

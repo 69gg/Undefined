@@ -116,6 +116,11 @@ async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
     class _FakeVectorStore:
         def __init__(self) -> None:
             self.where_calls: list[dict[str, Any]] = []
+            self.embed_query_calls = 0
+
+        async def embed_query(self, _query: str) -> list[float]:
+            self.embed_query_calls += 1
+            return [0.56, 0.78]
 
         async def query_events(
             self, _query: str, **kwargs: Any
@@ -173,6 +178,7 @@ async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
     )
 
     assert result is False
+    assert vector_store.embed_query_calls == 1
     assert {"sender_id": "123456"} in vector_store.where_calls
     assert {"user_id": "123456"} in vector_store.where_calls
 

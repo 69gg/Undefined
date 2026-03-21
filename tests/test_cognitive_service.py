@@ -422,6 +422,82 @@ async def test_build_context_private_mode_queries_groups_and_current_private() -
     assert context.index("当前私聊上下文") < context.index("群聊公共经验")
 
 
+@pytest.mark.asyncio
+async def test_build_context_private_mode_reuses_single_query_embedding() -> None:
+    class _EmbeddingAwareVectorStore(_FakeVectorStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.embed_query_calls = 0
+
+        async def embed_query(self, _query: str) -> list[float]:
+            self.embed_query_calls += 1
+            return [0.12, 0.34]
+
+    vector_store = _EmbeddingAwareVectorStore()
+
+    def _resolve_events(kwargs: dict[str, Any]) -> list[dict[str, Any]]:
+        where = kwargs.get("where")
+        if where == {"request_type": "group"}:
+            return [
+                {
+                    "document": "群聊公共经验",
+                    "metadata": {
+                        "timestamp_local": "2026-02-24 11:00:00",
+                        "group_id": "9001",
+                        "request_type": "group",
+                    },
+                    "distance": 0.28,
+                }
+            ]
+        if isinstance(where, dict) and "$and" in where:
+            return [
+                {
+                    "document": "当前私聊上下文",
+                    "metadata": {
+                        "timestamp_local": "2026-02-24 12:00:00",
+                        "group_id": "",
+                        "request_type": "private",
+                        "user_id": "u1",
+                        "sender_id": "u2",
+                    },
+                    "distance": 0.40,
+                }
+            ]
+        return []
+
+    vector_store.event_resolver = _resolve_events
+    service = CognitiveService(
+        config_getter=lambda: SimpleNamespace(
+            enabled=True,
+            enable_rerank=False,
+            auto_top_k=2,
+            auto_scope_candidate_multiplier=2,
+            auto_current_private_boost=1.25,
+            rerank_candidate_multiplier=3,
+            time_decay_enabled=True,
+            time_decay_half_life_days_auto=14.0,
+            time_decay_boost=0.2,
+            time_decay_min_similarity=0.35,
+        ),
+        vector_store=vector_store,
+        job_queue=_FakeJobQueue(),
+        profile_storage=_FakeProfileStorage(),
+        reranker=None,
+    )
+
+    await service.build_context(
+        query="我这个报错之前怎么处理过",
+        user_id="u1",
+        sender_id="u2",
+        request_type="private",
+    )
+
+    assert vector_store.embed_query_calls == 1
+    assert len(vector_store.event_calls) == 2
+    assert vector_store.event_calls[0].get("query_embedding") == [0.12, 0.34]
+    assert vector_store.event_calls[1].get("query_embedding") == [0.12, 0.34]
+
+
 def test_merge_weighted_events_preserves_scope_rank_order() -> None:
     # scoped_events 已经是 query_events 的最终排序（含 time_decay/mmr/rerank），
     # merge 过程不应再按 base_score 重新洗牌。

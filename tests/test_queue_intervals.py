@@ -154,8 +154,30 @@ queue_interval_seconds = -1
     assert cfg.vision_model.queue_interval_seconds == 1.0
     assert cfg.agent_model.queue_interval_seconds == 0.5
     assert cfg.historian_model.queue_interval_seconds == 0.5
-    assert cfg.embedding_model.queue_interval_seconds == 1.0
-    assert cfg.rerank_model.queue_interval_seconds == 1.0
+    assert cfg.embedding_model.queue_interval_seconds == 0.0
+    assert cfg.rerank_model.queue_interval_seconds == 0.0
+
+
+def test_embedding_and_rerank_default_to_immediate_dispatch_when_unset(
+    tmp_path: Path,
+) -> None:
+    cfg = _load_config(
+        tmp_path / "config.toml",
+        """
+[models.embedding]
+api_url = "https://api.openai.com/v1"
+api_key = "sk-embed"
+model_name = "text-embedding-3-small"
+
+[models.rerank]
+api_url = "https://api.openai.com/v1"
+api_key = "sk-rerank"
+model_name = "text-rerank-001"
+""",
+    )
+
+    assert cfg.embedding_model.queue_interval_seconds == 0.0
+    assert cfg.rerank_model.queue_interval_seconds == 0.0
 
 
 def test_queue_manager_allows_zero_default_interval() -> None:
