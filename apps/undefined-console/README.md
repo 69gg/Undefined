@@ -44,4 +44,42 @@ This scaffold intentionally keeps the frontend shell lightweight. It is suitable
 
 ## Android notes
 
-The release workflow expects the Android SDK and Java 17. If signing secrets are configured, the workflow should be upgraded to emit a signed release APK/AAB. The current scaffold always emits an installable APK artifact and makes signing expectations explicit in the CI comments.
+The release workflow expects the Android SDK, Java 17, and Android signing secrets. It emits signed release APK artifacts per ABI.
+
+## Android release signing
+
+The Android application identifier is `com.undefined.console`.
+
+The release workflow now expects these GitHub Actions secrets in the `release` environment:
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+Generate a keystore locally, for example:
+
+```bash
+keytool -genkeypair \
+  -v \
+  -keystore undefined-console-release.jks \
+  -alias undefined-console \
+  -keyalg RSA \
+  -keysize 4096 \
+  -validity 3650
+```
+
+Encode it for GitHub Secrets:
+
+```bash
+base64 -w 0 undefined-console-release.jks
+```
+
+Then store the resulting single-line Base64 string in `ANDROID_KEYSTORE_BASE64`, and put the matching passwords and alias into the other three secrets.
+
+During the release workflow, CI will:
+
+1. Decode the keystore into the runner temp directory.
+2. Write `src-tauri/gen/android/keystore.properties`.
+3. Patch the generated Android Gradle app module to attach the release signing config.
+4. Build signed release APKs, one per ABI.
