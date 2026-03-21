@@ -76,7 +76,7 @@ button {
 
 .launcher-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 24px;
@@ -98,9 +98,7 @@ button {
   box-shadow: 0 0 0 6px rgba(156, 107, 61, 0.14);
 }
 
-.launcher-subtitle,
 .panel-copy,
-.input-help,
 .empty-state,
 .connection-meta,
 .status-meta {
@@ -143,23 +141,13 @@ button {
   padding: 22px;
 }
 
-.hero-title {
-  margin: 0;
-  font-size: clamp(30px, 4vw, 48px);
-  line-height: 1.08;
-  font-family: "IBM Plex Serif", Georgia, serif;
-}
-
-.hero-subtitle {
-  margin: 12px 0 0;
-}
-
-.hero-button-row {
-  margin-top: 22px;
+.hero-card {
+  display: grid;
+  gap: 14px;
 }
 
 .launcher-message {
-  margin-top: 14px;
+  margin: 0;
 }
 
 .launcher-grid {
