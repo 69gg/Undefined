@@ -34,7 +34,9 @@ async def test_simple_agents_pass_prompt_through_verbatim(
         captured.update(kwargs)
         return "raw answer"
 
-    monkeypatch.setattr(handler_module, "run_agent_with_tools", _fake_run_agent_with_tools)
+    monkeypatch.setattr(
+        handler_module, "run_agent_with_tools", _fake_run_agent_with_tools
+    )
 
     result = await handler_module.execute({"prompt": "  keep my original prompt  "}, {})
 
@@ -54,7 +56,9 @@ async def test_file_analysis_agent_keeps_prompt_raw_and_moves_file_to_context(
         captured.update(kwargs)
         return "analysis"
 
-    monkeypatch.setattr(file_handler, "run_agent_with_tools", _fake_run_agent_with_tools)
+    monkeypatch.setattr(
+        file_handler, "run_agent_with_tools", _fake_run_agent_with_tools
+    )
 
     context: dict[str, Any] = {}
     result = await file_handler.execute(
@@ -83,7 +87,9 @@ async def test_file_analysis_agent_uses_generic_prompt_when_missing(
         captured.update(kwargs)
         return "analysis"
 
-    monkeypatch.setattr(file_handler, "run_agent_with_tools", _fake_run_agent_with_tools)
+    monkeypatch.setattr(
+        file_handler, "run_agent_with_tools", _fake_run_agent_with_tools
+    )
 
     result = await file_handler.execute({"file_source": "file-123"}, {})
 
