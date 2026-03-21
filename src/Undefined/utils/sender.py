@@ -83,7 +83,7 @@ class MessageSender:
         *,
         mark_sent: bool = True,
         reply_to: int | None = None,
-    ) -> None:
+    ) -> int | None:
         """发送群消息"""
         if not self.config.is_group_allowed(group_id):
             enabled = self.config.access_control_enabled()
@@ -139,6 +139,7 @@ class MessageSender:
                 group_name="",
                 message_id=bot_message_id,
             )
+        return bot_message_id
 
     async def _send_chunked_group(
         self,
@@ -202,7 +203,7 @@ class MessageSender:
         mark_sent: bool = True,
         reply_to: int | None = None,
         preferred_temp_group_id: int | None = None,
-    ) -> None:
+    ) -> int | None:
         """发送私聊消息"""
         if not self.config.is_private_allowed(user_id):
             enabled = self.config.access_control_enabled()
@@ -259,6 +260,7 @@ class MessageSender:
                 user_name="Bot",
                 message_id=bot_message_id,
             )
+        return bot_message_id
 
     async def _send_private_segments(
         self,

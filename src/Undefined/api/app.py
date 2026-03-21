@@ -69,9 +69,12 @@ class _WebUIVirtualSender:
         auto_history: bool = True,
         *,
         mark_sent: bool = True,
-    ) -> None:
-        _ = user_id, auto_history, mark_sent
+        reply_to: int | None = None,
+        preferred_temp_group_id: int | None = None,
+    ) -> int | None:
+        _ = user_id, auto_history, mark_sent, reply_to, preferred_temp_group_id
         await self._send_private_callback(self._virtual_user_id, message)
+        return None
 
     async def send_group_message(
         self,
@@ -81,9 +84,11 @@ class _WebUIVirtualSender:
         history_prefix: str = "",
         *,
         mark_sent: bool = True,
-    ) -> None:
-        _ = group_id, auto_history, history_prefix, mark_sent
+        reply_to: int | None = None,
+    ) -> int | None:
+        _ = group_id, auto_history, history_prefix, mark_sent, reply_to
         await self._send_private_callback(self._virtual_user_id, message)
+        return None
 
     async def send_private_file(
         self,
@@ -1204,7 +1209,10 @@ class RuntimeAPIServer:
             onebot_client = self._ctx.onebot
             scheduler = self._ctx.scheduler
 
-            def send_message_callback(msg: str) -> Awaitable[None]:
+            def send_message_callback(
+                msg: str, reply_to: int | None = None
+            ) -> Awaitable[None]:
+                _ = reply_to
                 return send_output(_VIRTUAL_USER_ID, msg)
 
             get_recent_messages_callback = _get_recent_cb

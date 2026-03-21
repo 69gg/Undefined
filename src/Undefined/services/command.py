@@ -55,7 +55,7 @@ class _PrivateCommandSenderProxy:
     def __init__(
         self,
         user_id: int,
-        send_private_message: Callable[[int, str], Awaitable[None]],
+        send_private_message: Callable[[int, str], Awaitable[Any]],
     ) -> None:
         self._user_id = user_id
         self._send_private_message = send_private_message

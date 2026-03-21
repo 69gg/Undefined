@@ -8,7 +8,7 @@ import importlib.util
 import logging
 import re
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, Optional, Protocol, TYPE_CHECKING
 from uuid import uuid4
 
 import httpx
@@ -61,6 +61,18 @@ logger = logging.getLogger(__name__)
 _CONTENT_TAG_PATTERN = re.compile(
     r"<content>(.*?)</content>", re.DOTALL | re.IGNORECASE
 )
+
+
+class SendMessageCallback(Protocol):
+    def __call__(
+        self, message: str, reply_to: int | None = None
+    ) -> Awaitable[None]: ...
+
+
+class SendPrivateMessageCallback(Protocol):
+    def __call__(
+        self, user_id: int, message: str, reply_to: int | None = None
+    ) -> Awaitable[None]: ...
 
 
 # 尝试导入 langchain SearxSearchWrapper
@@ -137,9 +149,7 @@ class AIClient:
         self._cognitive_service: Any = cognitive_service
 
         # 私聊发送回调
-        self._send_private_message_callback: Optional[
-            Callable[[int, str], Awaitable[None]]
-        ] = None
+        self._send_private_message_callback: Optional[SendPrivateMessageCallback] = None
         # 发送图片回调
         self._send_image_callback: Optional[
             Callable[[int, str, str], Awaitable[None]]
@@ -854,7 +864,7 @@ class AIClient:
         self,
         question: str,
         context: str = "",
-        send_message_callback: Callable[[str], Awaitable[None]] | None = None,
+        send_message_callback: SendMessageCallback | None = None,
         get_recent_messages_callback: Callable[
             [str, str, int, int], Awaitable[list[dict[str, Any]]]
         ]
@@ -874,7 +884,7 @@ class AIClient:
         参数:
             question: 用户输入的问题
             context: 额外的上下文背景
-            send_message_callback: 发送消息的回调
+            send_message_callback: 发送消息的回调，支持可选的 reply_to
             get_recent_messages_callback: 获取上下文历史消息的回调
             get_image_url_callback: 获取图片 URL 的回调
             get_forward_msg_callback: 获取合并转发内容的回调

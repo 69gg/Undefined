@@ -122,6 +122,7 @@ class AICoordinator:
             sender_title,
             current_time,
             text,
+            trigger_message_id,
         )
         logger.debug(
             "[自动回复] full_question_len=%s group=%s sender=%s",
@@ -180,7 +181,10 @@ class AICoordinator:
 
         prompt_prefix = "(用户拍了拍你) " if is_poke else ""
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        full_question = f"""{prompt_prefix}<message sender="{escape_xml_attr(sender_name)}" sender_id="{escape_xml_attr(user_id)}" location="私聊" time="{escape_xml_attr(current_time)}">
+        message_id_attr = ""
+        if trigger_message_id is not None:
+            message_id_attr = f' message_id="{escape_xml_attr(trigger_message_id)}"'
+        full_question = f"""{prompt_prefix}<message{message_id_attr} sender="{escape_xml_attr(sender_name)}" sender_id="{escape_xml_attr(user_id)}" location="私聊" time="{escape_xml_attr(current_time)}">
  <content>{escape_xml_text(text)}</content>
  </message>
 
@@ -254,8 +258,10 @@ class AICoordinator:
             user_id=sender_id,
         ) as ctx:
 
-            async def send_msg_cb(message: str) -> None:
-                await self.sender.send_group_message(group_id, message)
+            async def send_msg_cb(message: str, reply_to: int | None = None) -> None:
+                await self.sender.send_group_message(
+                    group_id, message, reply_to=reply_to
+                )
 
             async def get_recent_cb(
                 chat_id: str, msg_type: str, start: int, end: int
@@ -271,8 +277,10 @@ class AICoordinator:
                     group_name_hint=group_name,
                 )
 
-            async def send_private_cb(uid: int, msg: str) -> None:
-                await self.sender.send_private_message(uid, msg)
+            async def send_private_cb(
+                uid: int, msg: str, reply_to: int | None = None
+            ) -> None:
+                await self.sender.send_private_message(uid, msg, reply_to=reply_to)
 
             async def send_img_cb(tid: int, mtype: str, path: str) -> None:
                 await self._send_image(tid, mtype, path)
@@ -350,8 +358,10 @@ class AICoordinator:
             sender_id=user_id,
         ) as ctx:
 
-            async def send_msg_cb(message: str) -> None:
-                await self.sender.send_private_message(user_id, message)
+            async def send_msg_cb(message: str, reply_to: int | None = None) -> None:
+                await self.sender.send_private_message(
+                    user_id, message, reply_to=reply_to
+                )
 
             async def get_recent_cb(
                 chat_id: str, msg_type: str, start: int, end: int
@@ -372,8 +382,10 @@ class AICoordinator:
             async def send_like_cb(uid: int, times: int = 1) -> None:
                 await self.onebot.send_like(uid, times)
 
-            async def send_private_cb(uid: int, msg: str) -> None:
-                await self.sender.send_private_message(uid, msg)
+            async def send_private_cb(
+                uid: int, msg: str, reply_to: int | None = None
+            ) -> None:
+                await self.sender.send_private_message(uid, msg, reply_to=reply_to)
 
             # 存储资源到上下文
             ai_client = self.ai
@@ -662,6 +674,7 @@ class AICoordinator:
         title: str,
         time_str: str,
         text: str,
+        message_id: int | None = None,
     ) -> str:
         """构建最终发送给 AI 的结构化 XML 消息 Prompt
 
@@ -676,7 +689,10 @@ class AICoordinator:
         safe_title = escape_xml_attr(title)
         safe_time = escape_xml_attr(time_str)
         safe_text = escape_xml_text(text)
-        return f"""{prefix}<message sender="{safe_name}" sender_id="{safe_uid}" group_id="{safe_gid}" group_name="{safe_gname}" location="{safe_loc}" role="{safe_role}" title="{safe_title}" time="{safe_time}">
+        message_id_attr = ""
+        if message_id is not None:
+            message_id_attr = f' message_id="{escape_xml_attr(message_id)}"'
+        return f"""{prefix}<message{message_id_attr} sender="{safe_name}" sender_id="{safe_uid}" group_id="{safe_gid}" group_name="{safe_gname}" location="{safe_loc}" role="{safe_role}" title="{safe_title}" time="{safe_time}">
  <content>{safe_text}</content>
  </message>
 
