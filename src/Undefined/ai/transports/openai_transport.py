@@ -8,6 +8,7 @@ API_MODE_CHAT_COMPLETIONS = "chat_completions"
 API_MODE_RESPONSES = "responses"
 _VALID_API_MODES = {API_MODE_CHAT_COMPLETIONS, API_MODE_RESPONSES}
 RESPONSES_OUTPUT_ITEMS_KEY = "_responses_output_items"
+_RESPONSES_REPLAY_STRIP_KEYS = {"status"}
 
 
 def normalize_api_mode(value: Any, default: str = API_MODE_CHAT_COMPLETIONS) -> str:
@@ -365,6 +366,8 @@ def _copy_responses_output_items(
             name = str(cloned.get("name", "")).strip()
             if name:
                 cloned["name"] = name_mapping.get(name, name)
+        for key in _RESPONSES_REPLAY_STRIP_KEYS:
+            cloned.pop(key, None)
         copied.append(cloned)
     return copied
 

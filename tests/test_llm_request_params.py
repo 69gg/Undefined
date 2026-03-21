@@ -720,6 +720,43 @@ async def test_responses_transport_state_uses_previous_response_id_and_tool_outp
     }
 
 
+def test_build_request_body_responses_stateless_replay_strips_output_item_status() -> (
+    None
+):
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+    )
+    body = build_request_body(
+        model_config=cfg,
+        messages=[
+            {"role": "user", "content": "hello"},
+            {
+                "role": "assistant",
+                "content": "",
+                RESPONSES_OUTPUT_ITEMS_KEY: [
+                    {
+                        "type": "message",
+                        "id": "msg_1",
+                        "role": "assistant",
+                        "status": "completed",
+                        "content": [{"type": "output_text", "text": "all done"}],
+                    }
+                ],
+            },
+        ],
+        max_tokens=128,
+        transport_state={"api_mode": "responses", "stateless_replay": True},
+    )
+
+    replayed_message = body["input"][0]
+    assert replayed_message["type"] == "message"
+    assert "status" not in replayed_message
+
+
 @pytest.mark.asyncio
 async def test_ai_client_request_model_prefetch_keeps_transport_count_from_caller_messages(
     monkeypatch: pytest.MonkeyPatch,
