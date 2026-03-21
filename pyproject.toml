@@ -89,12 +89,16 @@ only-include = [
 ]
 sources = ["src"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"CHANGELOG.md" = "Undefined/CHANGELOG.md"
+
 [tool.hatch.build.targets.sdist]
 include = [
     "/src/**",
     "/res/**",
     "/img/**",
     "/config/**",
+    "/CHANGELOG.md",
     "/config.toml.example",
     "/README.md",
     "/ARCHITECTURE.md",

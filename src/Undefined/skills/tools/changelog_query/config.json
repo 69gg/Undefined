@@ -1,0 +1,39 @@
+{
+    "type": "function",
+    "function": {
+        "name": "changelog_query",
+        "description": "查询 Undefined 自身的 CHANGELOG。支持查看最新版本、列出最近几个版本，或读取指定版本的标题、摘要和变更点。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["latest", "list", "show"],
+                    "description": "查询动作。latest 查看最新版本，list 查看最近多个版本，show 查看指定版本。默认 latest。",
+                    "default": "latest"
+                },
+                "version": {
+                    "type": "string",
+                    "description": "可选。show 动作时要查询的版本号，支持 v3.2.6 或 3.2.6。"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "可选。list 动作返回的最大版本数，默认 5，最大 20。",
+                    "default": 5
+                },
+                "include_summary": {
+                    "type": "boolean",
+                    "description": "可选。是否包含摘要。list 默认 false，latest/show 默认 true。"
+                },
+                "include_changes": {
+                    "type": "boolean",
+                    "description": "可选。是否包含变更点。list 默认 false，latest/show 默认 true。"
+                },
+                "max_changes": {
+                    "type": "integer",
+                    "description": "可选。最多返回多少条变更点。latest/show 默认 6，list 仅在 include_changes=true 时生效。"
+                }
+            }
+        }
+    }
+}
