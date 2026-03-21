@@ -96,8 +96,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .mypy_cache
-          key: ${{ runner.os }}-mypy-${{ hashFiles('**/uv.lock') }}
+          key: ${{ runner.os }}-mypy-${{ hashFiles('**/uv.lock') }}-${{ hashFiles('src/**/*.py') }}
           restore-keys: |
+            ${{ runner.os }}-mypy-${{ hashFiles('**/uv.lock') }}-
             ${{ runner.os }}-mypy-
 
       - name: Run Mypy
@@ -132,14 +133,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: ${{ env.APP_DIR }}/package-lock.json
 
-      - name: Cache npm and node_modules
+      - name: Cache node_modules
+        id: cache-node-modules
         uses: actions/cache@v4
         with:
-          path: ~/.npm
-          key: ${{ runner.os }}-undefined-console-npm-${{ hashFiles('apps/undefined-console/package-lock.json', 'apps/undefined-console/package.json', 'apps/undefined-console/biome.json') }}
-          restore-keys: |
-            ${{ runner.os }}-undefined-console-npm-
+          path: ${{ env.APP_DIR }}/node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('apps/undefined-console/package-lock.json') }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -161,6 +163,7 @@ jobs:
             patchelf
 
       - name: Install app dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
         working-directory: ${{ env.APP_DIR }}
         run: npm ci
 
@@ -200,14 +203,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: ${{ env.APP_DIR }}/package-lock.json
 
-      - name: Cache npm and node_modules
+      - name: Cache node_modules
+        id: cache-node-modules
         uses: actions/cache@v4
         with:
-          path: ~/.npm
-          key: ${{ runner.os }}-undefined-console-npm-${{ hashFiles('apps/undefined-console/package-lock.json', 'apps/undefined-console/package.json', 'apps/undefined-console/biome.json') }}
-          restore-keys: |
-            ${{ runner.os }}-undefined-console-npm-
+          path: ${{ env.APP_DIR }}/node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('apps/undefined-console/package-lock.json') }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -233,6 +237,7 @@ jobs:
             patchelf
 
       - name: Install app dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
         working-directory: ${{ env.APP_DIR }}
         run: npm ci
 
@@ -332,14 +337,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: ${{ env.APP_DIR }}/package-lock.json
 
-      - name: Cache npm and node_modules
+      - name: Cache node_modules
+        id: cache-node-modules
         uses: actions/cache@v4
         with:
-          path: ~/.npm
-          key: ${{ runner.os }}-undefined-console-npm-${{ hashFiles('apps/undefined-console/package-lock.json', 'apps/undefined-console/package.json', 'apps/undefined-console/biome.json') }}
-          restore-keys: |
-            ${{ runner.os }}-undefined-console-npm-
+          path: ${{ env.APP_DIR }}/node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('apps/undefined-console/package-lock.json') }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -376,6 +382,7 @@ jobs:
             ${{ runner.os }}-gradle-
 
       - name: Install app dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
         working-directory: ${{ env.APP_DIR }}
         run: npm ci
 
