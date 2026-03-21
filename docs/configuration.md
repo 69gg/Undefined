@@ -165,6 +165,7 @@ model_name = "gpt-4o-mini"
   - 默认使用官方对象格式：`{"type":"function","name":"..."}`
   - `responses_tool_choice_compat=true` 时，会把指定函数的 `tool_choice` 降级为字符串 `"required"`，并只保留目标工具，用于兼容部分不完整代理
   - `responses_force_stateless_replay=true` 时，多轮工具调用会始终跳过 `previous_response_id`，直接走完整消息重放；续轮时会优先回放标准 `output` items（含 reasoning item），并自动补 `include=["reasoning.encrypted_content"]`
+  - Responses 工具续轮遵循 OpenAI 的标准字段语义：工具结果使用 `function_call_output.call_id` 关联前一轮工具调用；`function_call.id` 若存在，必须是模型生成的 output item id（通常为 `fc_*`），不能把 `call_*` 误写进 `id`
   - 仅建议在默认关闭时请求仍返回 500，再尝试开启这些兼容开关
   - 当前已知 `new-api v0.11.4-alpha.3` 存在这类兼容问题
   - 旧式 `thinking_*` 不会下发到 `responses`
@@ -317,7 +318,7 @@ model_name = "gpt-4o-mini"
 `request_params` 说明：
 - 仅用于**请求体**字段，不包含 `api_key`、`base_url`、`timeout`、`extra_headers` 等 client 选项。
 - 聊天类（`chat_completions`）保留字段：`model`、`messages`、`max_tokens`、`tools`、`tool_choice`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`、`output_config`。
-- 聊天类（`responses`）保留字段：`model`、`input`、`instructions`、`max_output_tokens`、`tools`、`tool_choice`、`previous_response_id`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`、`output_config`。启用 `responses_force_stateless_replay` 时会主动跳过 `previous_response_id`。
+- 聊天类（`responses`）保留字段：`model`、`input`、`instructions`、`max_output_tokens`、`tools`、`tool_choice`、`previous_response_id`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`、`output_config`。启用 `responses_force_stateless_replay` 时会主动跳过 `previous_response_id`。历史 `output` items 由运行时自动维护；不要通过 `request_params` 手工注入或覆盖 `function_call.id` / `call_id`。
 - embedding 保留字段：`model`、`input`、`dimensions`。
 - rerank 保留字段：`model`、`query`、`documents`、`top_n`、`return_documents`。
 

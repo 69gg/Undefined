@@ -526,6 +526,62 @@ def test_responses_stateless_replay_uses_standard_output_items() -> None:
     ]
 
 
+def test_responses_stateless_replay_moves_call_like_function_call_id_to_call_id() -> (
+    None
+):
+    normalized = normalize_responses_result(
+        {
+            "id": "resp_replay_call_like_id",
+            "output": [
+                {
+                    "type": "function_call",
+                    "id": "call_1",
+                    "name": "lookup",
+                    "arguments": '{"query":"weather"}',
+                },
+            ],
+        }
+    )
+    assistant_message = normalized["choices"][0]["message"]
+
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+    )
+    request_body = build_request_body(
+        model_config=cfg,
+        messages=[
+            {"role": "user", "content": "hello"},
+            assistant_message,
+            {"role": "tool", "tool_call_id": "call_1", "content": "done"},
+        ],
+        max_tokens=128,
+        transport_state={"stateless_replay": True},
+    )
+
+    assert request_body["input"] == [
+        {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "hello"}],
+        },
+        {
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "lookup",
+            "arguments": '{"query":"weather"}',
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "done",
+        },
+    ]
+
+
 @pytest.mark.asyncio
 async def test_responses_tool_choice_compat_mode_uses_required_string() -> None:
     requester = ModelRequester(
