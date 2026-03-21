@@ -564,6 +564,14 @@ class Config:
     bilibili_oversize_strategy: str
     bilibili_auto_extract_group_ids: list[int]
     bilibili_auto_extract_private_ids: list[int]
+    # arXiv 论文提取
+    arxiv_auto_extract_enabled: bool
+    arxiv_max_file_size: int
+    arxiv_auto_extract_group_ids: list[int]
+    arxiv_auto_extract_private_ids: list[int]
+    arxiv_auto_extract_max_items: int
+    arxiv_author_preview_limit: int
+    arxiv_summary_preview_chars: int
     # 认知记忆
     cognitive: CognitiveConfig
     # Naga 集成
@@ -598,6 +606,16 @@ class Config:
         init=False,
         repr=False,
     )
+    _arxiv_group_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
+    _arxiv_private_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         # 访问控制属于高频热路径，启动后缓存为 set 降低重复构建开销。
@@ -614,6 +632,12 @@ class Config:
         }
         self._bilibili_private_ids_set = {
             int(item) for item in self.bilibili_auto_extract_private_ids
+        }
+        self._arxiv_group_ids_set = {
+            int(item) for item in self.arxiv_auto_extract_group_ids
+        }
+        self._arxiv_private_ids_set = {
+            int(item) for item in self.arxiv_auto_extract_private_ids
         }
 
     @classmethod
@@ -1154,6 +1178,43 @@ class Config:
             _get_value(data, ("bilibili", "auto_extract_private_ids"), None)
         )
 
+        # arXiv 配置
+        arxiv_auto_extract_enabled = _coerce_bool(
+            _get_value(data, ("arxiv", "auto_extract_enabled"), None), False
+        )
+        arxiv_max_file_size = _coerce_int(
+            _get_value(data, ("arxiv", "max_file_size"), None), 100
+        )
+        if arxiv_max_file_size < 0:
+            arxiv_max_file_size = 100
+        arxiv_auto_extract_group_ids = _coerce_int_list(
+            _get_value(data, ("arxiv", "auto_extract_group_ids"), None)
+        )
+        arxiv_auto_extract_private_ids = _coerce_int_list(
+            _get_value(data, ("arxiv", "auto_extract_private_ids"), None)
+        )
+        arxiv_auto_extract_max_items = _coerce_int(
+            _get_value(data, ("arxiv", "auto_extract_max_items"), None), 5
+        )
+        if arxiv_auto_extract_max_items <= 0:
+            arxiv_auto_extract_max_items = 5
+        if arxiv_auto_extract_max_items > 20:
+            arxiv_auto_extract_max_items = 20
+        arxiv_author_preview_limit = _coerce_int(
+            _get_value(data, ("arxiv", "author_preview_limit"), None), 20
+        )
+        if arxiv_author_preview_limit <= 0:
+            arxiv_author_preview_limit = 20
+        if arxiv_author_preview_limit > 100:
+            arxiv_author_preview_limit = 100
+        arxiv_summary_preview_chars = _coerce_int(
+            _get_value(data, ("arxiv", "summary_preview_chars"), None), 1000
+        )
+        if arxiv_summary_preview_chars <= 0:
+            arxiv_summary_preview_chars = 1000
+        if arxiv_summary_preview_chars > 8000:
+            arxiv_summary_preview_chars = 8000
+
         # Code Delivery Agent 配置
         code_delivery_enabled = _coerce_bool(
             _get_value(data, ("code_delivery", "enabled"), None), True
@@ -1372,6 +1433,13 @@ class Config:
             bilibili_oversize_strategy=bilibili_oversize_strategy,
             bilibili_auto_extract_group_ids=bilibili_auto_extract_group_ids,
             bilibili_auto_extract_private_ids=bilibili_auto_extract_private_ids,
+            arxiv_auto_extract_enabled=arxiv_auto_extract_enabled,
+            arxiv_max_file_size=arxiv_max_file_size,
+            arxiv_auto_extract_group_ids=arxiv_auto_extract_group_ids,
+            arxiv_auto_extract_private_ids=arxiv_auto_extract_private_ids,
+            arxiv_auto_extract_max_items=arxiv_auto_extract_max_items,
+            arxiv_author_preview_limit=arxiv_author_preview_limit,
+            arxiv_summary_preview_chars=arxiv_summary_preview_chars,
             embedding_model=embedding_model,
             rerank_model=rerank_model,
             knowledge_enabled=knowledge_enabled,
@@ -1523,6 +1591,18 @@ class Config:
         if self._bilibili_private_ids_set:
             return int(user_id) in self._bilibili_private_ids_set
         # 功能白名单为空时跟随全局 access 控制
+        return self.is_private_allowed(user_id)
+
+    def is_arxiv_auto_extract_allowed_group(self, group_id: int) -> bool:
+        """群聊是否允许 arXiv 自动提取。"""
+        if self._arxiv_group_ids_set:
+            return int(group_id) in self._arxiv_group_ids_set
+        return self.is_group_allowed(group_id)
+
+    def is_arxiv_auto_extract_allowed_private(self, user_id: int) -> bool:
+        """私聊是否允许 arXiv 自动提取。"""
+        if self._arxiv_private_ids_set:
+            return int(user_id) in self._arxiv_private_ids_set
         return self.is_private_allowed(user_id)
 
     def should_process_group_message(self, is_at_bot: bool) -> bool:

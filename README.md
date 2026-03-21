@@ -57,6 +57,7 @@
 - **Agent 私有 MCP**：可为单个 agent 提供独立 MCP 配置，按调用即时加载并释放，工具仅对该 agent 可见。
 - **Anthropic Skills**：支持 Anthropic Agent Skills（SKILL.md 格式），遵循 agentskills.io 开放标准，提供领域知识注入能力。
 - **Bilibili 视频提取**：自动检测消息中的 B 站视频链接/BV 号/小程序分享，下载 1080p 视频并通过 QQ 发送；同时提供 AI 工具调用入口。
+- **arXiv 论文提取与搜索**：自动检测消息中的 arXiv 链接/标识并发送论文信息与 PDF；同时提供 `arxiv_paper` 发送工具和 `arxiv_search` 检索工具。
 - **思维链支持**：支持开启思维链，提升复杂逻辑推理能力。
 - **高并发架构**：基于 `asyncio` 全异步设计，支持多队列消息处理与工具并发执行，轻松应对高并发场景。
 - **异步安全 I/O**：统一 IO 层通过线程池 + 跨平台文件锁（Linux/macOS `flock`，Windows `msvcrt`）+ 原子写入（`os.replace`）保证并发写入不损坏、且不阻塞主事件循环。

@@ -720,6 +720,31 @@ auto_extract_group_ids = []
 # en: Private chat allowlist for auto-extraction (empty = follow global access.allowed_private_ids).
 auto_extract_private_ids = []
 
+# zh: arXiv 论文自动提取配置。
+# en: arXiv paper auto-extraction settings.
+[arxiv]
+# zh: 是否启用自动提取（检测到 arXiv 链接 / arXiv:ID / 带 arxiv 关键词的新式编号时自动发送论文信息并尽力附带 PDF）。
+# en: Enable auto-extraction (auto-send paper info and best-effort PDF when arXiv links / arXiv:ID / keyword-scoped new-style IDs are detected).
+auto_extract_enabled = false
+# zh: 最大 PDF 文件大小（MB），超过则不上传 PDF，仅发送论文信息。0=不限。
+# en: Max PDF file size (MB); exceeding this skips PDF upload and sends paper info only. 0=unlimited.
+max_file_size = 100
+# zh: 自动提取功能的群聊白名单（空=跟随全局 access.allowed_group_ids）。
+# en: Group allowlist for auto-extraction (empty = follow global access.allowed_group_ids).
+auto_extract_group_ids = []
+# zh: 自动提取功能的私聊白名单（空=跟随全局 access.allowed_private_ids）。
+# en: Private chat allowlist for auto-extraction (empty = follow global access.allowed_private_ids).
+auto_extract_private_ids = []
+# zh: 单条消息最多自动处理几篇 arXiv 论文。<=0 回退 5。
+# en: Max number of arXiv papers to auto-process from one message. <=0 falls back to 5.
+auto_extract_max_items = 5
+# zh: 论文信息里最多展示多少位作者。<=0 回退 20。
+# en: Max number of authors shown in paper info. <=0 falls back to 20.
+author_preview_limit = 20
+# zh: 论文信息里摘要预览的最大字符数。<=0 回退 1000。
+# en: Max summary preview characters in paper info. <=0 falls back to 1000.
+summary_preview_chars = 1000
+
 # zh: Code Delivery Agent 配置（代码交付 Agent，在 Docker 容器中编写代码并打包上传）。
 # en: Code Delivery Agent settings (writes code in Docker containers and delivers packaged results).
 [code_delivery]

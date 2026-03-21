@@ -11,6 +11,7 @@ Undefined 欢迎开发者参与共建和进行二次开发！
 ```text
 src/Undefined/
 ├── ai/            # AI 运行时核心组件 (client, prompt, tooling 工具组装, summary 短期摘要, multimodal 多模态)
+├── arxiv/         # arXiv 论文解析、元信息获取、PDF 下载与发送
 ├── bilibili/      # B站视频流解析、分段下载与异步发送
 ├── cognitive/     # 认知记忆系统底座 (向量存储, 史官合并/改写, 侧写生成, 任务队列)
 ├── skills/        # 技能插件核心目录 (存放所有的工具与智能体)

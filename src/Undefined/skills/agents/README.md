@@ -274,9 +274,9 @@ mv skills/tools/my_tool skills/agents/my_agent/tools/
 - **子工具**：`read_file`, `search_code`, `analyze_structure`
 
 ### info_agent（信息查询助手）
-- **功能**：查询天气、热搜、历史、WHOIS、B 站信息等
-- **适用场景**：天气查询、热点榜单、域名查询、B 站视频和 UP 主信息查询
-- **子工具**：`weather_query`, `*hot`, `whois`, `bilibili_search`, `bilibili_user_info`
+- **功能**：查询天气、热搜、历史、WHOIS、B 站信息、arXiv 检索等
+- **适用场景**：天气查询、热点榜单、域名查询、B 站视频和 UP 主信息查询、论文搜索
+- **子工具**：`weather_query`, `*hot`, `whois`, `bilibili_search`, `bilibili_user_info`, `arxiv_search`
 
 ### entertainment_agent（娱乐助手）
 - **功能**：运势、小说、创意内容与随机视频推荐等娱乐功能

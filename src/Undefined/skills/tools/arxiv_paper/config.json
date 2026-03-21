@@ -1,0 +1,26 @@
+{
+    "type": "function",
+    "function": {
+        "name": "arxiv_paper",
+        "description": "下载并发送 arXiv 论文到群聊或私聊。支持 arXiv ID、arXiv: 前缀或 arXiv 链接。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "paper_id": {
+                    "type": "string",
+                    "description": "arXiv 论文标识：如 2501.01234、arXiv:2501.01234v2 或 https://arxiv.org/abs/2501.01234"
+                },
+                "target_type": {
+                    "type": "string",
+                    "enum": ["group", "private"],
+                    "description": "可选。目标会话类型"
+                },
+                "target_id": {
+                    "type": "integer",
+                    "description": "可选。目标会话 ID"
+                }
+            },
+            "required": ["paper_id"]
+        }
+    }
+}

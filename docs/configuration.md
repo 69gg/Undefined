@@ -536,6 +536,25 @@ model_name = "gpt-4o-mini"
 
 ---
 
+### 4.20.1 `[arxiv]` 自动提取
+
+| 字段 | 默认值 | 说明 | 约束/回退 |
+|---|---:|---|---|
+| `auto_extract_enabled` | `false` | 是否自动提取 arXiv 论文 | |
+| `max_file_size` | `100` | 最大 PDF 体积（MB），`0` 不限 | `<0` 回退 `100` |
+| `auto_extract_group_ids` | `[]` | 功能级群白名单 | 空时跟随全局 access |
+| `auto_extract_private_ids` | `[]` | 功能级私聊白名单 | 空时跟随全局 access |
+| `auto_extract_max_items` | `5` | 单条消息最多自动处理几篇论文 | `<=0` 回退 `5`，`>20` 截断到 `20` |
+| `author_preview_limit` | `20` | 信息消息中作者预览上限 | `<=0` 回退 `20`，`>100` 截断到 `100` |
+| `summary_preview_chars` | `1000` | 信息消息中摘要预览字符数上限 | `<=0` 回退 `1000`，`>8000` 截断到 `8000` |
+
+触发规则：
+- 命中 `arxiv.org/abs/...`、`arxiv.org/pdf/...` 或 `arXiv:<id>` 时直接触发。
+- 裸新式编号仅在消息中同时出现 `arxiv` 关键词时触发，避免误判普通数字串。
+- PDF 下载或上传失败时不会额外发送失败提示，只保留论文信息消息。
+
+---
+
 ### 4.21 `[code_delivery]` 代码交付 Agent
 
 | 字段 | 默认值 | 说明 | 约束/回退 |

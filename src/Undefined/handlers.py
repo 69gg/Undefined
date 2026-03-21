@@ -6,7 +6,7 @@ import logging
 import os
 from pathlib import Path
 import random
-from typing import Any
+from typing import Any, Coroutine
 
 from Undefined.ai import AIClient
 from Undefined.config import Config
@@ -111,6 +111,8 @@ class MessageHandler:
             self.security,
             command_dispatcher=self.command_dispatcher,
         )
+
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
         # 启动队列
         self.ai_coordinator.queue_manager.start(self.ai_coordinator.execute_reply)
@@ -295,10 +297,24 @@ class MessageHandler:
                         text, private_message_content
                     )
                     if bvids:
-                        asyncio.create_task(
+                        self._spawn_background_task(
+                            "bilibili_auto_extract_private",
                             self._handle_bilibili_extract(
                                 private_sender_id, bvids, "private"
-                            )
+                            ),
+                        )
+                        return
+
+            # arXiv 论文自动提取（私聊）
+            if self.config.arxiv_auto_extract_enabled:
+                if self.config.is_arxiv_auto_extract_allowed_private(private_sender_id):
+                    paper_ids = self._extract_arxiv_ids(text, private_message_content)
+                    if paper_ids:
+                        self._spawn_background_task(
+                            "arxiv_auto_extract_private",
+                            self._handle_arxiv_extract(
+                                private_sender_id, paper_ids, "private"
+                            ),
                         )
                         return
 
@@ -461,8 +477,20 @@ class MessageHandler:
             if self.config.is_bilibili_auto_extract_allowed_group(group_id):
                 bvids = await self._extract_bilibili_ids(text, message_content)
                 if bvids:
-                    asyncio.create_task(
-                        self._handle_bilibili_extract(group_id, bvids, "group")
+                    self._spawn_background_task(
+                        "bilibili_auto_extract_group",
+                        self._handle_bilibili_extract(group_id, bvids, "group"),
+                    )
+                    return
+
+        # arXiv 论文自动提取
+        if self.config.arxiv_auto_extract_enabled:
+            if self.config.is_arxiv_auto_extract_allowed_group(group_id):
+                paper_ids = self._extract_arxiv_ids(text, message_content)
+                if paper_ids:
+                    self._spawn_background_task(
+                        "arxiv_auto_extract_group",
+                        self._handle_arxiv_extract(group_id, paper_ids, "group"),
                     )
                     return
 
@@ -625,6 +653,29 @@ class MessageHandler:
             bvids = await extract_from_json_message(message_content)
         return bvids
 
+    def _extract_arxiv_ids(
+        self, text: str, message_content: list[dict[str, Any]]
+    ) -> list[str]:
+        """从文本和消息段中提取 arXiv 论文 ID。"""
+        from Undefined.arxiv.parser import extract_arxiv_ids, extract_from_json_message
+
+        paper_ids: list[str] = []
+        seen: set[str] = set()
+
+        for paper_id in extract_arxiv_ids(text):
+            if paper_id in seen:
+                continue
+            seen.add(paper_id)
+            paper_ids.append(paper_id)
+
+        for paper_id in extract_from_json_message(message_content):
+            if paper_id in seen:
+                continue
+            seen.add(paper_id)
+            paper_ids.append(paper_id)
+
+        return paper_ids
+
     async def _handle_bilibili_extract(
         self,
         target_id: int,
@@ -669,8 +720,83 @@ class MessageHandler:
                 except Exception:
                     pass
 
+    async def _handle_arxiv_extract(
+        self,
+        target_id: int,
+        paper_ids: list[str],
+        target_type: str,
+    ) -> None:
+        """处理 arXiv 论文自动提取和发送。"""
+        from Undefined.arxiv.sender import send_arxiv_paper
+
+        max_items = max(1, int(self.config.arxiv_auto_extract_max_items))
+
+        for paper_id in paper_ids[:max_items]:
+            try:
+                result = await send_arxiv_paper(
+                    paper_id=paper_id,
+                    sender=self.sender,
+                    target_type=target_type,  # type: ignore[arg-type]
+                    target_id=target_id,
+                    max_file_size=self.config.arxiv_max_file_size,
+                    author_preview_limit=self.config.arxiv_author_preview_limit,
+                    summary_preview_chars=self.config.arxiv_summary_preview_chars,
+                    context={
+                        "request_id": (
+                            f"arxiv_auto_extract:{target_type}:{target_id}:{paper_id}"
+                        )
+                    },
+                )
+                logger.info(
+                    "[arXiv] 自动提取完成 %s → %s:%s: %s",
+                    paper_id,
+                    target_type,
+                    target_id,
+                    result,
+                )
+            except Exception:
+                logger.exception(
+                    "[arXiv] 自动提取失败 %s → %s:%s",
+                    paper_id,
+                    target_type,
+                    target_id,
+                )
+
+    def _spawn_background_task(
+        self,
+        name: str,
+        coroutine: Coroutine[Any, Any, None],
+    ) -> None:
+        task = asyncio.create_task(coroutine, name=name)
+        self._background_tasks.add(task)
+
+        def _finalize(done_task: asyncio.Task[None]) -> None:
+            self._background_tasks.discard(done_task)
+            try:
+                exc = done_task.exception()
+            except asyncio.CancelledError:
+                logger.debug("[后台任务] 已取消: %s", name)
+                return
+            if exc is not None:
+                logger.exception(
+                    "[后台任务] 执行失败: name=%s",
+                    name,
+                    exc_info=(type(exc), exc, exc.__traceback__),
+                )
+
+        task.add_done_callback(_finalize)
+
     async def close(self) -> None:
         """关闭消息处理器"""
         logger.info("正在关闭消息处理器...")
+        if self._background_tasks:
+            logger.info(
+                "[后台任务] 等待自动提取任务收敛: count=%s",
+                len(self._background_tasks),
+            )
+            await asyncio.gather(
+                *list(self._background_tasks),
+                return_exceptions=True,
+            )
         await self.ai_coordinator.queue_manager.stop()
         logger.info("消息处理器已关闭")
