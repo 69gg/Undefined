@@ -182,26 +182,60 @@
             </div>
 
             <div id="appContent" style="display:none;">
-                <div class="mobile-nav">
-                    <div class="mobile-brand">
-                        <span class="brand-dot"></span>
-                        <span>Undefined</span>
+                <div class="mobile-shell">
+                    <div id="mobileDrawerBackdrop" class="mobile-drawer-backdrop" hidden></div>
+                    <div class="mobile-topbar">
+                        <div class="mobile-topbar-brand">
+                            <span class="brand-dot"></span>
+                            <span>Undefined</span>
+                        </div>
+                        <button
+                            id="mobileMenuBtn"
+                            class="btn ghost btn-sm mobile-menu-btn"
+                            type="button"
+                            aria-expanded="false"
+                            aria-controls="mobileDrawer"
+                            data-i18n="common.menu"
+                        >
+                            菜单
+                        </button>
                     </div>
-                    <div class="mobile-tabs">
-                        <button class="nav-item" data-view="landing" data-i18n="tabs.landing">Landing</button>
-                        <button class="nav-item active" data-tab="overview" data-i18n="tabs.overview">Overview</button>
-                        <button class="nav-item" data-tab="config" data-i18n="tabs.config">Configuration</button>
-                        <button class="nav-item" data-tab="logs" data-i18n="tabs.logs">Logs</button>
-                        <button class="nav-item" data-tab="probes" data-i18n="tabs.probes">探针诊断</button>
-                        <button class="nav-item" data-tab="memory" data-i18n="tabs.memory">记忆检索</button>
-                        <button class="nav-item" data-tab="chat" data-i18n="tabs.chat">智能对话</button>
-                        <button class="nav-item" data-tab="about" data-i18n="tabs.about">About</button>
-                    </div>
-                    <div class="mobile-actions">
-                        <button class="btn ghost btn-sm" data-action="toggle-lang">中文</button>
-                        <button class="btn ghost btn-sm" data-action="toggle-theme">Light</button>
-                        <button id="mobileLogoutBtn" class="btn danger btn-sm" data-i18n="auth.sign_out">Sign Out</button>
-                    </div>
+                    <aside
+                        id="mobileDrawer"
+                        class="mobile-drawer"
+                        aria-hidden="true"
+                        aria-labelledby="mobileDrawerTitle"
+                    >
+                        <div class="mobile-drawer-header">
+                            <div>
+                                <div id="mobileDrawerTitle" class="mobile-drawer-title">Undefined</div>
+                                <div id="mobileNavFooter" class="muted-sm">--</div>
+                            </div>
+                            <button
+                                id="mobileDrawerCloseBtn"
+                                class="btn ghost btn-sm mobile-drawer-close"
+                                type="button"
+                                data-i18n="common.close"
+                            >
+                                关闭
+                            </button>
+                        </div>
+                        <div class="mobile-drawer-section">
+                            <button class="nav-item" data-view="landing" data-i18n="tabs.landing">Landing</button>
+                            <button class="nav-item active" data-tab="overview" data-i18n="tabs.overview">Overview</button>
+                            <button class="nav-item" data-tab="config" data-i18n="tabs.config">Configuration</button>
+                            <button class="nav-item" data-tab="logs" data-i18n="tabs.logs">Logs</button>
+                            <button class="nav-item" data-tab="probes" data-i18n="tabs.probes">探针诊断</button>
+                            <button class="nav-item" data-tab="memory" data-i18n="tabs.memory">记忆检索</button>
+                            <button class="nav-item" data-tab="chat" data-i18n="tabs.chat">智能对话</button>
+                            <button class="nav-item" data-tab="about" data-i18n="tabs.about">About</button>
+                        </div>
+                        <div class="mobile-drawer-section mobile-drawer-actions">
+                            <button class="btn ghost btn-sm" data-action="toggle-lang">中文</button>
+                            <button class="btn ghost btn-sm" data-action="toggle-theme">Light</button>
+                            <button id="mobileLogoutBtn" class="btn danger btn-sm" data-i18n="auth.sign_out">Sign Out</button>
+                        </div>
+                    </aside>
                 </div>
 
                 <!-- Tab Overview -->
@@ -288,7 +322,7 @@
                             </div>
                         </div>
                         <div class="toolbar config-toolbar">
-                            <div class="toolbar-group">
+                            <div class="toolbar-group toolbar-group-primary">
                                 <div class="search-group">
                                     <input id="configSearchInput" type="search" class="form-control form-control-sm"
                                         data-i18n-placeholder="config.search_placeholder" placeholder="Search config..." />
@@ -296,7 +330,17 @@
                                         data-i18n="config.clear_search">清除</button>
                                 </div>
                             </div>
-                            <div class="toolbar-group">
+                            <button
+                                id="configMobileActionsToggle"
+                                class="btn ghost btn-sm mobile-inline-toggle"
+                                type="button"
+                                aria-expanded="false"
+                                aria-controls="configSecondaryActions"
+                                data-i18n="common.more_actions"
+                            >
+                                更多操作
+                            </button>
+                            <div id="configSecondaryActions" class="toolbar-group toolbar-group-secondary">
                                 <button id="btnExpandAll" class="btn ghost btn-sm"
                                     data-i18n="config.expand_all">全部展开</button>
                                 <button id="btnCollapseAll" class="btn ghost btn-sm"
@@ -323,29 +367,43 @@
                                 <button class="log-tab" data-log-type="all" data-i18n="logs.tab.all">其他日志</button>
                             </div>
                         </div>
-                        <div class="toolbar">
-                            <label class="toggle-wrapper">
-                                <span data-i18n="logs.auto" style="font-size: 13px;">自动刷新</span>
-                                <input type="checkbox" id="logAutoScroll" class="toggle-input" checked>
-                                <span class="toggle-track"><span class="toggle-handle"></span></span>
-                            </label>
-                            <button id="btnPauseLogs" class="btn btn-sm" data-i18n="logs.pause">暂停</button>
-                            <button id="btnRefreshLogs" class="btn btn-sm" data-i18n="logs.refresh">刷新</button>
-                            <select id="logFileSelect" class="form-control form-control-sm" aria-label="Log file">
-                            </select>
-                            <select id="logLevelFilter" class="form-control form-control-sm" aria-label="Log level">
-                            </select>
-                            <label class="toggle-wrapper">
-                                <span data-i18n="logs.level_gte" style="font-size: 13px;">该等级及以上</span>
-                                <input type="checkbox" id="logLevelGteToggle" class="toggle-input">
-                                <span class="toggle-track"><span class="toggle-handle"></span></span>
-                            </label>
-                            <input id="logSearchInput" type="search" class="form-control form-control-sm"
-                                data-i18n-placeholder="logs.search_placeholder" placeholder="搜索日志" />
-                            <button id="btnClearLogs" class="btn ghost btn-sm" data-i18n="logs.clear">清空</button>
-                            <button id="btnCopyLogs" class="btn ghost btn-sm" data-i18n="logs.copy">复制</button>
-                            <button id="btnDownloadLogs" class="btn ghost btn-sm" data-i18n="logs.download">下载</button>
-                            <button id="btnJumpLogs" class="btn ghost btn-sm" data-i18n="logs.jump_bottom">回到底部</button>
+                        <div class="toolbar logs-toolbar">
+                            <div class="toolbar-group toolbar-group-primary">
+                                <label class="toggle-wrapper">
+                                    <span data-i18n="logs.auto" style="font-size: 13px;">自动刷新</span>
+                                    <input type="checkbox" id="logAutoScroll" class="toggle-input" checked>
+                                    <span class="toggle-track"><span class="toggle-handle"></span></span>
+                                </label>
+                                <button id="btnPauseLogs" class="btn btn-sm" data-i18n="logs.pause">暂停</button>
+                                <button id="btnRefreshLogs" class="btn btn-sm" data-i18n="logs.refresh">刷新</button>
+                            </div>
+                            <button
+                                id="logsMobileActionsToggle"
+                                class="btn ghost btn-sm mobile-inline-toggle"
+                                type="button"
+                                aria-expanded="false"
+                                aria-controls="logsSecondaryActions"
+                                data-i18n="logs.more_filters"
+                            >
+                                更多筛选
+                            </button>
+                            <div id="logsSecondaryActions" class="toolbar-group toolbar-group-secondary">
+                                <select id="logFileSelect" class="form-control form-control-sm" aria-label="Log file">
+                                </select>
+                                <select id="logLevelFilter" class="form-control form-control-sm" aria-label="Log level">
+                                </select>
+                                <label class="toggle-wrapper">
+                                    <span data-i18n="logs.level_gte" style="font-size: 13px;">该等级及以上</span>
+                                    <input type="checkbox" id="logLevelGteToggle" class="toggle-input">
+                                    <span class="toggle-track"><span class="toggle-handle"></span></span>
+                                </label>
+                                <input id="logSearchInput" type="search" class="form-control form-control-sm"
+                                    data-i18n-placeholder="logs.search_placeholder" placeholder="搜索日志" />
+                                <button id="btnClearLogs" class="btn ghost btn-sm" data-i18n="logs.clear">清空</button>
+                                <button id="btnCopyLogs" class="btn ghost btn-sm" data-i18n="logs.copy">复制</button>
+                                <button id="btnDownloadLogs" class="btn ghost btn-sm" data-i18n="logs.download">下载</button>
+                                <button id="btnJumpLogs" class="btn ghost btn-sm" data-i18n="logs.jump_bottom">回到底部</button>
+                            </div>
                         </div>
                     </div>
                     <div class="log-meta" id="logMeta"></div>

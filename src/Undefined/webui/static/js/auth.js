@@ -94,8 +94,11 @@ async function checkSession() {
             warning.style.display = data.using_default_password
                 ? "block"
                 : "none";
+        const summary = data.summary || "";
         const navFooter = get("navFooter");
-        if (navFooter) navFooter.innerText = data.summary || "";
+        if (navFooter) navFooter.innerText = summary;
+        const mobileNavFooter = get("mobileNavFooter");
+        if (mobileNavFooter) mobileNavFooter.innerText = summary;
         updateAuthPanels();
         return data;
     } catch (e) {

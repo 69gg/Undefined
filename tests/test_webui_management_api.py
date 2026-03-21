@@ -297,6 +297,20 @@ async def test_index_handler_applies_launcher_mode_and_initial_view() -> None:
     )
 
 
+async def test_index_handler_renders_mobile_shell_and_action_toggles() -> None:
+    request = _request(query={"view": "app", "tab": "config"})
+
+    response = await _index.index_handler(cast(web.Request, cast(Any, request)))
+    payload_text = cast(web.Response, response).text
+
+    assert payload_text is not None
+    assert 'id="mobileMenuBtn"' in payload_text
+    assert 'id="mobileDrawer"' in payload_text
+    assert 'id="mobileNavFooter"' in payload_text
+    assert 'id="configMobileActionsToggle"' in payload_text
+    assert 'id="logsMobileActionsToggle"' in payload_text
+
+
 def test_webui_cors_only_allows_trusted_origins(monkeypatch: Any) -> None:
     monkeypatch.setattr(
         webui_app,
