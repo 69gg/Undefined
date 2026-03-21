@@ -140,7 +140,6 @@ const I18N = {
         "probes.section_queues": "请求队列",
         "probes.section_services": "服务状态",
         "probes.section_skills": "技能统计",
-        "probes.section_bootstrap": "引导与管理探针",
         "probes.version": "版本",
         "probes.platform": "平台",
         "probes.uptime": "运行时间",
@@ -153,18 +152,6 @@ const I18N = {
         "probes.api_listen": "监听地址",
         "probes.tools": "基础工具",
         "probes.agents": "智能体",
-        "probes.bootstrap_config": "配置文件",
-        "probes.bootstrap_validation": "严格校验",
-        "probes.bootstrap_auth": "认证状态",
-        "probes.bootstrap_runtime": "运行态",
-        "probes.bootstrap_config_exists":
-            "已检测到 config.toml，可继续在控制台编辑。",
-        "probes.bootstrap_config_missing":
-            "尚未检测到 config.toml，控制台会先生成模板供你补齐。",
-        "probes.bootstrap_runtime_pending":
-            "管理层在线，但运行态尚未就绪；完善配置后可直接启动 Bot。",
-        "probes.bootstrap_ready":
-            "管理入口已就绪，可继续编辑配置、查看日志或启动实例。",
         "probes.all_ok": "所有外部端点均正常",
         "probes.some_failed": "部分外部端点异常",
         "memory.title": "记忆检索",
@@ -373,7 +360,6 @@ const I18N = {
         "probes.section_queues": "Request Queues",
         "probes.section_services": "Service Status",
         "probes.section_skills": "Skill Statistics",
-        "probes.section_bootstrap": "Bootstrap & Management",
         "probes.version": "Version",
         "probes.platform": "Platform",
         "probes.uptime": "Uptime",
@@ -386,18 +372,6 @@ const I18N = {
         "probes.api_listen": "Listen Addr",
         "probes.tools": "Tools",
         "probes.agents": "Agents",
-        "probes.bootstrap_config": "Config File",
-        "probes.bootstrap_validation": "Strict Validation",
-        "probes.bootstrap_auth": "Auth",
-        "probes.bootstrap_runtime": "Runtime",
-        "probes.bootstrap_config_exists":
-            "config.toml is present and can be edited in the console.",
-        "probes.bootstrap_config_missing":
-            "config.toml is missing; the console will bootstrap a template for recovery.",
-        "probes.bootstrap_runtime_pending":
-            "Management is online but runtime is not ready yet; finish config and start the bot.",
-        "probes.bootstrap_ready":
-            "Management entry is ready for config edits, logs, and bot startup.",
         "probes.all_ok": "All external endpoints are healthy",
         "probes.some_failed": "Some external endpoints are unhealthy",
         "memory.title": "Memory Hub",
