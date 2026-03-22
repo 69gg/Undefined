@@ -184,7 +184,7 @@ _THINKING_KEYS: tuple[str, ...] = (
     "thoughts",
 )
 _CHAT_COMPLETION_INTERNAL_MESSAGE_KEYS: frozenset[str] = frozenset(
-    (*_THINKING_KEYS, "_responses_output_items")
+    (*_THINKING_KEYS, "_responses_output_items", "phase")
 )
 
 _DEFAULT_TOOLS_DESCRIPTION_MAX_LEN = 1024

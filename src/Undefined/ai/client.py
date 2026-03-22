@@ -1111,6 +1111,9 @@ class AIClient:
                     "content": content,
                     "tool_calls": tool_calls,
                 }
+                phase = message.get("phase")
+                if phase is not None:
+                    assistant_message["phase"] = phase
                 output_items = message.get(RESPONSES_OUTPUT_ITEMS_KEY)
                 if isinstance(output_items, list):
                     assistant_message[RESPONSES_OUTPUT_ITEMS_KEY] = output_items

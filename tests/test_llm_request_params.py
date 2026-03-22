@@ -169,6 +169,7 @@ async def test_chat_request_strips_internal_reasoning_fields_from_messages() -> 
             {
                 "role": "assistant",
                 "content": "",
+                "phase": "commentary",
                 "tool_calls": tool_calls,
                 "reasoning_content": "内部思维链",
                 RESPONSES_OUTPUT_ITEMS_KEY: [
@@ -194,6 +195,7 @@ async def test_chat_request_strips_internal_reasoning_fields_from_messages() -> 
     }
     assert "reasoning_content" not in outbound_messages[1]
     assert RESPONSES_OUTPUT_ITEMS_KEY not in outbound_messages[1]
+    assert "phase" not in outbound_messages[1]
 
     await requester._http_client.aclose()
 
@@ -579,6 +581,105 @@ def test_responses_stateless_replay_moves_call_like_function_call_id_to_call_id(
             "call_id": "call_1",
             "output": "done",
         },
+    ]
+
+
+def test_build_request_body_responses_encodes_assistant_history_as_output_text() -> (
+    None
+):
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+    )
+
+    body = build_request_body(
+        model_config=cfg,
+        messages=[
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi there"},
+            {"role": "user", "content": "continue"},
+        ],
+        max_tokens=128,
+    )
+
+    assert body["input"] == [
+        {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "hello"}],
+        },
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "hi there"}],
+        },
+        {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "continue"}],
+        },
+    ]
+
+
+def test_build_request_body_responses_preserves_assistant_phase() -> None:
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+    )
+
+    body = build_request_body(
+        model_config=cfg,
+        messages=[
+            {
+                "role": "assistant",
+                "content": "working through it",
+                "phase": "commentary",
+            }
+        ],
+        max_tokens=128,
+    )
+
+    assert body["input"] == [
+        {
+            "type": "message",
+            "role": "assistant",
+            "phase": "commentary",
+            "content": [{"type": "output_text", "text": "working through it"}],
+        }
+    ]
+
+
+def test_normalize_responses_result_preserves_assistant_phase() -> None:
+    normalized = normalize_responses_result(
+        {
+            "id": "resp_phase",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "phase": "final_answer",
+                    "content": [{"type": "output_text", "text": "done"}],
+                }
+            ],
+        }
+    )
+
+    message = normalized["choices"][0]["message"]
+    assert message["content"] == "done"
+    assert message["phase"] == "final_answer"
+    assert message[RESPONSES_OUTPUT_ITEMS_KEY] == [
+        {
+            "type": "message",
+            "role": "assistant",
+            "phase": "final_answer",
+            "content": [{"type": "output_text", "text": "done"}],
+        }
     ]
 
 
