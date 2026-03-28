@@ -33,6 +33,7 @@ from .models import (
     ChatModelConfig,
     CognitiveConfig,
     EmbeddingModelConfig,
+    GrokModelConfig,
     ModelPool,
     ModelPoolEntry,
     NagaConfig,
@@ -476,6 +477,7 @@ class Config:
     naga_model: SecurityModelConfig
     agent_model: AgentModelConfig
     historian_model: AgentModelConfig
+    grok_model: GrokModelConfig
     model_pool_enabled: bool
     log_level: str
     log_file_path: str
@@ -502,6 +504,7 @@ class Config:
     agent_intro_autogen_max_tokens: int
     agent_intro_hash_path: str
     searxng_url: str
+    grok_search_enabled: bool
     use_proxy: bool
     http_proxy: str
     https_proxy: str
@@ -821,6 +824,7 @@ class Config:
         naga_model = cls._parse_naga_model_config(data, security_model)
         agent_model = cls._parse_agent_model_config(data)
         historian_model = cls._parse_historian_model_config(data, agent_model)
+        grok_model = cls._parse_grok_model_config(data)
 
         model_pool_enabled = _coerce_bool(
             _get_value(data, ("features", "pool_enabled"), "MODEL_POOL_ENABLED"), False
@@ -1052,6 +1056,14 @@ class Config:
 
         searxng_url = _coerce_str(
             _get_value(data, ("search", "searxng_url"), "SEARXNG_URL"), ""
+        )
+        grok_search_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("search", "grok_search_enabled"),
+                "GROK_SEARCH_ENABLED",
+            ),
+            False,
         )
 
         use_proxy = _coerce_bool(
@@ -1333,6 +1345,7 @@ class Config:
             security_model,
             naga_model,
             agent_model,
+            grok_model,
         )
 
         return cls(
@@ -1363,6 +1376,7 @@ class Config:
             naga_model=naga_model,
             agent_model=agent_model,
             historian_model=historian_model,
+            grok_model=grok_model,
             model_pool_enabled=model_pool_enabled,
             log_level=log_level,
             log_file_path=log_file_path,
@@ -1389,6 +1403,7 @@ class Config:
             agent_intro_autogen_max_tokens=agent_intro_autogen_max_tokens,
             agent_intro_hash_path=agent_intro_hash_path,
             searxng_url=searxng_url,
+            grok_search_enabled=grok_search_enabled,
             use_proxy=use_proxy,
             http_proxy=http_proxy,
             https_proxy=https_proxy,
@@ -2368,6 +2383,88 @@ class Config:
         return config
 
     @staticmethod
+    def _parse_grok_model_config(data: dict[str, Any]) -> GrokModelConfig:
+        queue_interval_seconds = _normalize_queue_interval(
+            _coerce_float(
+                _get_value(
+                    data,
+                    ("models", "grok", "queue_interval_seconds"),
+                    "GROK_MODEL_QUEUE_INTERVAL",
+                ),
+                1.0,
+            )
+        )
+        return GrokModelConfig(
+            api_url=_coerce_str(
+                _get_value(data, ("models", "grok", "api_url"), "GROK_MODEL_API_URL"),
+                "",
+            ),
+            api_key=_coerce_str(
+                _get_value(data, ("models", "grok", "api_key"), "GROK_MODEL_API_KEY"),
+                "",
+            ),
+            model_name=_coerce_str(
+                _get_value(data, ("models", "grok", "model_name"), "GROK_MODEL_NAME"),
+                "",
+            ),
+            max_tokens=_coerce_int(
+                _get_value(
+                    data, ("models", "grok", "max_tokens"), "GROK_MODEL_MAX_TOKENS"
+                ),
+                8192,
+            ),
+            queue_interval_seconds=queue_interval_seconds,
+            thinking_enabled=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "grok", "thinking_enabled"),
+                    "GROK_MODEL_THINKING_ENABLED",
+                ),
+                False,
+            ),
+            thinking_budget_tokens=_coerce_int(
+                _get_value(
+                    data,
+                    ("models", "grok", "thinking_budget_tokens"),
+                    "GROK_MODEL_THINKING_BUDGET_TOKENS",
+                ),
+                20000,
+            ),
+            thinking_include_budget=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "grok", "thinking_include_budget"),
+                    "GROK_MODEL_THINKING_INCLUDE_BUDGET",
+                ),
+                True,
+            ),
+            reasoning_effort_style=_resolve_reasoning_effort_style(
+                _get_value(
+                    data,
+                    ("models", "grok", "reasoning_effort_style"),
+                    "GROK_MODEL_REASONING_EFFORT_STYLE",
+                ),
+            ),
+            reasoning_enabled=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "grok", "reasoning_enabled"),
+                    "GROK_MODEL_REASONING_ENABLED",
+                ),
+                False,
+            ),
+            reasoning_effort=_resolve_reasoning_effort(
+                _get_value(
+                    data,
+                    ("models", "grok", "reasoning_effort"),
+                    "GROK_MODEL_REASONING_EFFORT",
+                ),
+                "medium",
+            ),
+            request_params=_get_model_request_params(data, "grok"),
+        )
+
+    @staticmethod
     def _merge_admins(
         superadmin_qq: int, admin_qqs: list[int]
     ) -> tuple[int, list[int]]:
@@ -2428,6 +2525,7 @@ class Config:
         security_model: SecurityModelConfig,
         naga_model: SecurityModelConfig,
         agent_model: AgentModelConfig,
+        grok_model: GrokModelConfig,
     ) -> None:
         configs: list[
             tuple[
@@ -2435,7 +2533,8 @@ class Config:
                 ChatModelConfig
                 | VisionModelConfig
                 | SecurityModelConfig
-                | AgentModelConfig,
+                | AgentModelConfig
+                | GrokModelConfig,
             ]
         ] = [
             ("chat", chat_model),
@@ -2443,6 +2542,7 @@ class Config:
             ("security", security_model),
             ("naga", naga_model),
             ("agent", agent_model),
+            ("grok", grok_model),
         ]
         for name, cfg in configs:
             logger.debug(
@@ -2473,6 +2573,7 @@ class Config:
                     VisionModelConfig,
                     SecurityModelConfig,
                     AgentModelConfig,
+                    GrokModelConfig,
                 ),
             ):
                 changes.update(_update_dataclass(old_value, new_value, prefix=name))

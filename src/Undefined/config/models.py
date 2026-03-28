@@ -188,6 +188,24 @@ class AgentModelConfig:
 
 
 @dataclass
+class GrokModelConfig:
+    """Grok 搜索模型配置（仅用于 grok_search）"""
+
+    api_url: str
+    api_key: str
+    model_name: str
+    max_tokens: int = 8192
+    queue_interval_seconds: float = 1.0
+    thinking_enabled: bool = False  # 是否启用 thinking
+    thinking_budget_tokens: int = 20000  # 思维预算 token 数量
+    thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
+    reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
+    reasoning_enabled: bool = False  # 是否启用 reasoning.effort
+    reasoning_effort: str = "medium"  # reasoning effort 档位
+    request_params: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class NagaConfig:
     """Naga 集成配置
 

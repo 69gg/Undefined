@@ -23,6 +23,27 @@ async def load_prompt_text(agent_dir: Path, default_prompt: str) -> str:
     return default_prompt
 
 
+def _filter_tools_for_runtime_config(
+    agent_name: str,
+    tools: list[dict[str, Any]],
+    runtime_config: Any | None,
+) -> list[dict[str, Any]]:
+    if agent_name != "web_agent" or runtime_config is None:
+        return tools
+
+    if bool(getattr(runtime_config, "grok_search_enabled", False)):
+        return tools
+
+    filtered: list[dict[str, Any]] = []
+    for tool in tools:
+        function = tool.get("function") if isinstance(tool, dict) else None
+        name = function.get("name") if isinstance(function, dict) else None
+        if name == "grok_search":
+            continue
+        filtered.append(tool)
+    return filtered
+
+
 async def run_agent_with_tools(
     *,
     agent_name: str,
@@ -54,6 +75,8 @@ async def run_agent_with_tools(
         is_main_agent=False,
     )
     tools = tool_registry.get_tools_schema()
+    runtime_config = context.get("runtime_config")
+    tools = _filter_tools_for_runtime_config(agent_name, tools, runtime_config)
 
     # 发现并加载 agent 私有 Anthropic Skills（可选）
     agent_skills_dir = agent_dir / "anthropic_skills"
@@ -77,7 +100,6 @@ async def run_agent_with_tools(
     # 动态选择 agent 模型
     group_id = context.get("group_id", 0) or 0
     user_id = context.get("user_id", 0) or 0
-    runtime_config = context.get("runtime_config")
     global_enabled = runtime_config.model_pool_enabled if runtime_config else False
     agent_config = ai_client.model_selector.select_agent_config(
         agent_config, group_id=group_id, user_id=user_id, global_enabled=global_enabled

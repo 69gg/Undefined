@@ -53,6 +53,11 @@ async def test_ai_ask_reraises_queued_llm_error() -> None:
     client.memory_storage = None
     client._knowledge_manager = None
     client._cognitive_service = None
+    client._crawl4ai_capabilities = SimpleNamespace(
+        available=False,
+        error=None,
+        proxy_config_available=False,
+    )
 
     with pytest.raises(RuntimeError, match="boom"):
         await AIClient.ask(client, "hello")
@@ -97,6 +102,11 @@ async def test_ai_ask_retries_pre_tool_local_failure() -> None:
     client.memory_storage = None
     client._knowledge_manager = None
     client._cognitive_service = None
+    client._crawl4ai_capabilities = SimpleNamespace(
+        available=False,
+        error=None,
+        proxy_config_available=False,
+    )
 
     result = await AIClient.ask(client, "hello")
 

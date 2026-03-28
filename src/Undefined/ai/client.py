@@ -29,6 +29,7 @@ from Undefined.config import (
     ChatModelConfig,
     VisionModelConfig,
     AgentModelConfig,
+    GrokModelConfig,
     Config,
 )
 from Undefined.context import RequestContext
@@ -759,7 +760,9 @@ class AIClient:
 
     async def request_model(
         self,
-        model_config: ChatModelConfig | VisionModelConfig | AgentModelConfig,
+        model_config: (
+            ChatModelConfig | VisionModelConfig | AgentModelConfig | GrokModelConfig
+        ),
         messages: list[dict[str, Any]],
         max_tokens: int = 8192,
         call_type: str = "chat",

@@ -20,6 +20,7 @@ from Undefined.ai.transports.openai_transport import (
 )
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.config.models import ChatModelConfig
+from Undefined.config.models import GrokModelConfig
 from Undefined.token_usage_storage import TokenUsageStorage
 
 
@@ -129,6 +130,44 @@ async def test_chat_request_uses_model_reasoning_and_request_params(
         "ignored_keys=model,stream" in caplog.text
         or "ignored_keys=stream,model" in caplog.text
     )
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_grok_request_defaults_to_chat_completions() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeClient()
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = GrokModelConfig(
+        api_url="https://grok.example/v1",
+        api_key="sk-grok",
+        model_name="grok-4-search",
+        max_tokens=1024,
+        reasoning_enabled=True,
+        reasoning_effort="low",
+        request_params={"temperature": 0.3},
+    )
+
+    await requester.request(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "latest AI chip news"}],
+        max_tokens=256,
+        call_type="grok_search",
+    )
+
+    assert fake_client.chat.completions.last_kwargs is not None
+    assert fake_client.chat.completions.last_kwargs["model"] == "grok-4-search"
+    assert fake_client.chat.completions.last_kwargs["max_tokens"] == 256
+    assert fake_client.chat.completions.last_kwargs["temperature"] == 0.3
+    assert fake_client.chat.completions.last_kwargs["reasoning_effort"] == "low"
 
     await requester._http_client.aclose()
 

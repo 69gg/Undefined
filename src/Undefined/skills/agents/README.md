@@ -262,7 +262,7 @@ mv skills/tools/my_tool skills/agents/my_agent/tools/
 ### web_agent（网络搜索助手）
 - **功能**：网页搜索和网页内容获取
 - **适用场景**：获取互联网最新信息、搜索新闻、爬取网页内容
-- **子工具**：`search_web`, `fetch_web`
+- **子工具**：`grok_search`, `web_search`, `crawl_webpage`
 
 ### file_analysis_agent（文件分析助手）
 - **功能**：分析代码、PDF、Docx、Xlsx 等多种格式文件

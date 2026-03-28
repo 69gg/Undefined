@@ -417,6 +417,47 @@ responses_force_stateless_replay = false
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
 [models.historian.request_params]
 
+# zh: Grok 搜索模型配置（仅供 web_agent 内的 grok_search 使用；固定走 chat.completions，不支持 tool call 兼容字段）。
+# en: Grok search model config (used only by grok_search inside web_agent; always uses chat completions and does not expose tool-call compatibility fields).
+[models.grok]
+# zh: OpenAI-compatible 基址 URL，例如 https://api.example.com/v1。
+# en: OpenAI-compatible base URL, e.g. https://api.example.com/v1.
+api_url = ""
+# zh: Grok 搜索模型 API Key。
+# en: Grok search model API key.
+api_key = ""
+# zh: Grok 搜索模型名称。
+# en: Grok search model name.
+model_name = ""
+# zh: 可选限制：最大生成 tokens。
+# en: Optional limit: max generation tokens.
+max_tokens = 8192
+# zh: 队列发车间隔（秒，0 表示立即发车）。
+# en: Queue interval (seconds; 0 dispatches immediately).
+queue_interval_seconds = 1.0
+# zh: 是否启用 reasoning.effort。
+# en: Enable reasoning.effort.
+reasoning_enabled = false
+# zh: reasoning effort 档位。
+# en: reasoning effort level.
+reasoning_effort = "medium"
+# zh: 是否启用 thinking（思维链）。
+# en: Enable thinking (reasoning).
+thinking_enabled = false
+# zh: thinking 预算 tokens。
+# en: Thinking-budget tokens.
+thinking_budget_tokens = 20000
+# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
+# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+thinking_include_budget = true
+# zh: reasoning effort 传参风格：openai（reasoning_effort）/ anthropic（output_config.effort）。
+# en: Reasoning effort wire format: openai (reasoning_effort) / anthropic (output_config.effort).
+reasoning_effort_style = "openai"
+
+# zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
+# en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
+[models.grok.request_params]
+
 # zh: 嵌入模型配置（知识库语义检索使用）。
 # en: Embedding model config (used by knowledge semantic retrieval).
 [models.embedding]
@@ -612,12 +653,15 @@ prefetch_tools = ["get_current_time"]
 # zh: 隐藏已预取的工具声明。
 # en: Hide prefetched tools from the model's tool list.
 prefetch_tools_hide = true
-# zh: 搜索服务配置（SearXNG）。
-# en: Search service config (SearxNG).
+# zh: 搜索服务配置。
+# en: Search service config.
 [search]
 # zh: SearxNG 搜索服务地址，例如 http://127.0.0.1:8849。
 # en: SearxNG service URL, e.g. http://127.0.0.1:8849.
 searxng_url = ""
+# zh: 是否在 web_agent 中启用 grok_search。启用后该工具会优先于 web_search 暴露给模型。
+# en: Enable grok_search in web_agent. When enabled, this tool is exposed with higher priority than web_search.
+grok_search_enabled = false
 
 # zh: 代理设置（可选）。
 # en: Proxy settings (optional).

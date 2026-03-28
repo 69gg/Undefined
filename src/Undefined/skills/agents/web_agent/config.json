@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "web_agent",
-        "description": "网络搜索助手，提供网页搜索和网页内容获取功能，用于获取互联网上的最新信息。",
+        "description": "网络搜索助手，提供优先级最高的 grok_search、SearXNG 搜索和网页内容获取功能，用于获取互联网上的最新信息。",
         "parameters": {
             "type": "object",
             "properties": {

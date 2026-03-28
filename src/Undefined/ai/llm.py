@@ -39,6 +39,7 @@ from Undefined.config import (
     AgentModelConfig,
     SecurityModelConfig,
     EmbeddingModelConfig,
+    GrokModelConfig,
     RerankModelConfig,
     Config,
     get_config,
@@ -59,6 +60,7 @@ ModelConfig = (
     | AgentModelConfig
     | SecurityModelConfig
     | EmbeddingModelConfig
+    | GrokModelConfig
     | RerankModelConfig
 )
 

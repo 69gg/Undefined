@@ -258,7 +258,28 @@ model_name = "gpt-4o-mini"
 - 若部分字段缺失：逐项继承 agent 配置，包括 `api_mode`、`reasoning_*`、`thinking_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`。
 - `queue_interval_seconds=0` 时立即发车，`<0` 时回退到 agent 的间隔。
 
-### 4.4.8 模型池
+### 4.4.8 `[models.grok]` Grok 搜索模型
+
+用途：
+- 仅供 `web_agent` 内的 `grok_search` 子工具使用。
+
+默认：
+- `max_tokens=8192`
+- `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
+- 固定走 `chat_completions`
+- `reasoning_enabled=false`
+- `reasoning_effort="medium"`
+- `thinking_enabled=false`
+- `thinking_budget_tokens=20000`
+- `thinking_include_budget=true`
+- `reasoning_effort_style="openai"`
+
+补充：
+- 该模型节不提供 `api_mode`。
+- 该模型节不提供 `thinking_tool_call_compat`、`responses_tool_choice_compat`、`responses_force_stateless_replay`。
+- `[models.grok.request_params]` 的保留字段规则与 `chat_completions` 一致。
+
+### 4.4.9 模型池
 
 相关节：
 - `[models.chat.pool]`
@@ -291,7 +312,7 @@ model_name = "gpt-4o-mini"
 2. 对应池 `enabled=true`
 3. 池列表非空
 
-### 4.4.9 `[models.embedding]` 嵌入模型
+### 4.4.10 `[models.embedding]` 嵌入模型
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -304,7 +325,7 @@ model_name = "gpt-4o-mini"
 | `document_instruction` | `""` | 文档前缀 |
 | `request_params` | `{}` | 额外请求体参数；保留字段如 `model`/`input`/`dimensions` 会忽略 |
 
-### 4.4.10 `[models.rerank]` 重排模型
+### 4.4.11 `[models.rerank]` 重排模型
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -439,8 +460,11 @@ model_name = "gpt-4o-mini"
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `searxng_url` | `""` | SearXNG 地址；为空则禁用搜索包装器 |
+| `grok_search_enabled` | `false` | 是否在 `web_agent` 中暴露 `grok_search`；启用后该工具优先于 `web_search` |
 
-该项可热更新，运行时会重建搜索客户端。
+补充：
+- `searxng_url` 可热更新，运行时会重建搜索客户端。
+- `grok_search_enabled` 不需要重建客户端；它只影响 `web_agent` 的工具暴露。
 
 ---
 
@@ -739,6 +763,7 @@ model_name = "gpt-4o-mini"
 
 ### 5.3 明确“会执行热应用”的字段
 - 模型发车间隔 / 模型名 / 模型池变更（队列间隔刷新）
+- `models.grok.model_name` / `models.grok.queue_interval_seconds`（队列间隔刷新）
 - `skills.intro_autogen_*`（Agent intro 生成器配置刷新）
 - `search.searxng_url`（搜索客户端刷新）
 - `skills.hot_reload*`（技能热重载任务重启）

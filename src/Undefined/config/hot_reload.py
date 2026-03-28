@@ -42,6 +42,7 @@ _QUEUE_INTERVAL_KEYS: set[str] = {
     "security_model.queue_interval_seconds",
     "naga_model.queue_interval_seconds",
     "agent_model.queue_interval_seconds",
+    "grok_model.queue_interval_seconds",
     "chat_model.pool",
     "agent_model.pool",
 }
@@ -52,6 +53,7 @@ _MODEL_NAME_KEYS: set[str] = {
     "security_model.model_name",
     "naga_model.model_name",
     "agent_model.model_name",
+    "grok_model.model_name",
 }
 
 _AGENT_INTRO_KEYS: set[str] = {

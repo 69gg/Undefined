@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "grok_search",
+        "description": "最优先使用的联网搜索工具。适用于获取最新信息、开放式互联网检索和高质量综合答案。请使用详细的自然语言完整描述问题，尽量带上时间范围、对象、限定条件和你想要的结果。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "请用详细的自然语言完整描述搜索问题，而不是只给几个关键词。"
+                }
+            },
+            "required": ["query"]
+        }
+    }
+}

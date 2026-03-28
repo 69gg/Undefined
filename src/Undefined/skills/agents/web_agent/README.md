@@ -1,6 +1,10 @@
 # web_agent 智能体
 
 用于网络搜索与网页抓取，支持结合 MCP 的浏览器能力。
+默认子工具包括：
+- `grok_search`：优先级最高的联网搜索工具（需显式启用）
+- `web_search`：基于 SearXNG 的后备搜索工具
+- `crawl_webpage`：读取网页正文
 
 目录结构：
 - `config.json`：智能体定义
