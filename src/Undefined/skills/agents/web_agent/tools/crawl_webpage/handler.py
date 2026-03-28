@@ -1,9 +1,31 @@
-from typing import Any, Dict
 import logging
+from typing import Any, Dict
 
+from Undefined.ai.crawl4ai_support import get_crawl4ai_capabilities
 from Undefined.config import get_config
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_runtime_config(context: Dict[str, Any]) -> Any:
+    runtime_config = context.get("runtime_config")
+    if runtime_config is not None:
+        return runtime_config
+    return get_config(strict=False)
+
+
+def _resolve_playwright_install_hint(error: BaseException) -> str | None:
+    text = str(error)
+    if (
+        "Executable doesn't exist" in text
+        or "playwright install" in text
+        or "Looks like Playwright was just installed or updated" in text
+    ):
+        return (
+            "网页获取依赖的 Playwright 浏览器未安装，"
+            "请运行 `uv run playwright install` 后重试。"
+        )
+    return None
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
@@ -12,27 +34,24 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not url:
         return "URL 不能为空"
 
-    # 从 context 标志检查可用性或尝试导入
-    if not context.get("crawl4ai_available", False):
+    capabilities = get_crawl4ai_capabilities()
+    if (
+        not capabilities.available
+        or capabilities.async_web_crawler is None
+        or capabilities.browser_config is None
+        or capabilities.crawler_run_config is None
+    ):
         return "网页获取功能未启用（crawl4ai 未安装）"
 
-    try:
-        from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
-
-        try:
-            from crawl4ai import ProxyConfig
-
-            _PROXY_CONFIG_AVAILABLE = True
-        except ImportError:
-            _PROXY_CONFIG_AVAILABLE = False
-
-    except ImportError:
-        return "网页获取功能未启用（crawl4ai 未安装）"
+    AsyncWebCrawler = capabilities.async_web_crawler
+    BrowserConfig = capabilities.browser_config
+    CrawlerRunConfig = capabilities.crawler_run_config
+    ProxyConfig = capabilities.proxy_config
 
     max_chars = args.get("max_chars", 4096)
 
     try:
-        runtime_config = get_config(strict=False)
+        runtime_config = _resolve_runtime_config(context)
         use_proxy = runtime_config.use_proxy
         proxy = runtime_config.http_proxy or runtime_config.https_proxy
 
@@ -53,7 +72,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
         if use_proxy and proxy:
             logger.info(f"使用代理: {proxy}")
-            if _PROXY_CONFIG_AVAILABLE:
+            if capabilities.proxy_config_available and ProxyConfig is not None:
                 run_config_kwargs["proxy_config"] = ProxyConfig(server=proxy)
             else:
                 run_config_kwargs["proxy_config"] = proxy
@@ -89,6 +108,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 return f"网页抓取失败: {error_msg}"
 
     except RuntimeError as e:
+        install_hint = _resolve_playwright_install_hint(e)
+        if install_hint is not None:
+            logger.error(f"Playwright 浏览器缺失: {e}")
+            return install_hint
         if "ERR_NETWORK_CHANGED" in str(e) or "ERR_CONNECTION" in str(e):
             logger.error(f"网络连接错误: {e}")
             return "网络连接错误，可能是代理配置问题。请检查代理设置或关闭代理。"
@@ -96,5 +119,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             logger.error(f"抓取网页时发生错误: {e}")
             return "抓取网页时发生错误，请稍后重试"
     except Exception as e:
+        install_hint = _resolve_playwright_install_hint(e)
+        if install_hint is not None:
+            logger.error(f"Playwright 浏览器缺失: {e}")
+            return install_hint
         logger.error(f"网页获取失败: {e}")
         return "网页获取失败，请稍后重试"

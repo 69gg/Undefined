@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import html
-import importlib.util
 import logging
 import re
 from pathlib import Path
@@ -17,6 +16,7 @@ from Undefined.ai.llm import ModelRequester
 from Undefined.ai.model_selector import ModelSelector
 from Undefined.ai.multimodal import MultimodalAnalyzer
 from Undefined.ai.prompts import PromptBuilder
+from Undefined.ai.crawl4ai_support import get_crawl4ai_capabilities
 from Undefined.ai.queue_budget import (
     compute_queued_llm_timeout_seconds,
     resolve_effective_retry_count,
@@ -95,19 +95,6 @@ except Exception:
         "[初始化] langchain_community 未安装或 SearxSearchWrapper 不可用，搜索功能将禁用"
     )
 
-# 尝试导入 crawl4ai
-try:
-    importlib.util.find_spec("crawl4ai")
-    _CRAWL4AI_AVAILABLE = True
-    try:
-        _PROXY_CONFIG_AVAILABLE = True
-    except (ImportError, AttributeError):
-        _PROXY_CONFIG_AVAILABLE = False
-except Exception:
-    _CRAWL4AI_AVAILABLE = False
-    _PROXY_CONFIG_AVAILABLE = False
-    logger.warning("[初始化] crawl4ai 未安装，网页获取功能将禁用")
-
 
 class AIClient:
     """AI 模型客户端"""
@@ -140,6 +127,7 @@ class AIClient:
         self.runtime_config = runtime_config
         self.memory_storage = memory_storage
         self._end_summary_storage = end_summary_storage or EndSummaryStorage()
+        self._crawl4ai_capabilities = get_crawl4ai_capabilities()
 
         self._http_client = httpx.AsyncClient(timeout=480.0)
         self._token_usage_storage = TokenUsageStorage()
@@ -252,10 +240,17 @@ class AIClient:
             else:
                 logger.info("[初始化] SEARXNG_URL 未配置，搜索功能禁用")
 
-        if _CRAWL4AI_AVAILABLE:
+        if self._crawl4ai_capabilities.available:
             logger.info("[初始化] crawl4ai 可用，网页获取功能已启用")
         else:
-            logger.warning("[初始化] crawl4ai 不可用，网页获取功能将禁用")
+            detail = self._crawl4ai_capabilities.error
+            if detail:
+                logger.warning(
+                    "[初始化] crawl4ai 不可用，网页获取功能将禁用: %s",
+                    detail,
+                )
+            else:
+                logger.warning("[初始化] crawl4ai 不可用，网页获取功能将禁用")
 
         self._prompt_builder = PromptBuilder(
             bot_qq=self.bot_qq,
@@ -951,6 +946,13 @@ class AIClient:
         tool_context.setdefault("ai_client", self)
         tool_context.setdefault("runtime_config", self._get_runtime_config())
         tool_context.setdefault("search_wrapper", self._search_wrapper)
+        tool_context.setdefault(
+            "crawl4ai_available", self._crawl4ai_capabilities.available
+        )
+        tool_context.setdefault(
+            "crawl4ai_proxy_config_available",
+            self._crawl4ai_capabilities.proxy_config_available,
+        )
         tool_context.setdefault("end_summary_storage", self._end_summary_storage)
         tool_context.setdefault("end_summaries", self._prompt_builder.end_summaries)
         tool_context.setdefault(
