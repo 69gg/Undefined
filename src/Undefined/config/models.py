@@ -206,6 +206,42 @@ class GrokModelConfig:
 
 
 @dataclass
+class ImageGenModelConfig:
+    """生图模型配置（放在 [models] 下，与 chat/vision 平级）
+
+    空字符串 api_key/api_url 会在 handler 中降级到主模型配置。
+    """
+
+    api_url: str = ""
+    api_key: str = ""
+    model_name: str = ""
+    request_params: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ImageGenConfig:
+    """生图工具配置
+
+    provider:
+      - "xingzhige": 使用免费星之阁 API（api_xingzhige_base_url）
+      - "models": 使用 [models.image_gen] 配置的 OpenAI 兼容接口
+
+    OpenAI 兼容参数（openai_size/quality/style）空字符串不传，由上游 API 使用默认值。
+    """
+
+    # 生图 provider: "xingzhige" | "models"
+    provider: str = "xingzhige"
+    # xingzhige 模式下的默认图片比例
+    xingzhige_size: str = "1:1"
+    # models 模式下的 OpenAI 兼容参数（空字符串表示不传该字段）
+    openai_size: str = ""
+    openai_quality: str = ""
+    openai_style: str = ""
+    # models 模式请求超时（秒）
+    openai_timeout: float = 120.0
+
+
+@dataclass
 class NagaConfig:
     """Naga 集成配置
 

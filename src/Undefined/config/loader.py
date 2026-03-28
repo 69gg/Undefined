@@ -34,6 +34,8 @@ from .models import (
     CognitiveConfig,
     EmbeddingModelConfig,
     GrokModelConfig,
+    ImageGenConfig,
+    ImageGenModelConfig,
     ModelPool,
     ModelPoolEntry,
     NagaConfig,
@@ -579,6 +581,9 @@ class Config:
     cognitive: CognitiveConfig
     # Naga 集成
     naga: NagaConfig
+    # 生图工具配置
+    image_gen: ImageGenConfig
+    models_image_gen: ImageGenModelConfig
     _allowed_group_ids_set: set[int] = dataclass_field(
         default_factory=set,
         init=False,
@@ -1326,6 +1331,8 @@ class Config:
 
         cognitive = cls._parse_cognitive_config(data)
         naga = cls._parse_naga_config(data)
+        models_image_gen = cls._parse_image_gen_model_config(data)
+        image_gen = cls._parse_image_gen_config(data)
 
         if strict:
             cls._verify_required_fields(
@@ -1470,6 +1477,8 @@ class Config:
             knowledge_rerank_top_k=knowledge_rerank_top_k,
             cognitive=cognitive,
             naga=naga,
+            image_gen=image_gen,
+            models_image_gen=models_image_gen,
         )
 
     @property
@@ -2462,6 +2471,56 @@ class Config:
                 "medium",
             ),
             request_params=_get_model_request_params(data, "grok"),
+        )
+
+    @staticmethod
+    def _parse_image_gen_model_config(data: dict[str, Any]) -> ImageGenModelConfig:
+        """解析 [models.image_gen] 生图模型配置"""
+        return ImageGenModelConfig(
+            api_url=_coerce_str(
+                _get_value(
+                    data, ("models", "image_gen", "api_url"), "IMAGE_GEN_MODEL_API_URL"
+                ),
+                "",
+            ),
+            api_key=_coerce_str(
+                _get_value(
+                    data, ("models", "image_gen", "api_key"), "IMAGE_GEN_MODEL_API_KEY"
+                ),
+                "",
+            ),
+            model_name=_coerce_str(
+                _get_value(
+                    data, ("models", "image_gen", "model_name"), "IMAGE_GEN_MODEL_NAME"
+                ),
+                "",
+            ),
+            request_params=_get_model_request_params(data, "image_gen"),
+        )
+
+    @staticmethod
+    def _parse_image_gen_config(data: dict[str, Any]) -> ImageGenConfig:
+        """解析 [image_gen] 生图工具配置"""
+        return ImageGenConfig(
+            provider=_coerce_str(
+                _get_value(data, ("image_gen", "provider"), "IMAGE_GEN_PROVIDER"),
+                "xingzhige",
+            ),
+            xingzhige_size=_coerce_str(
+                _get_value(data, ("image_gen", "xingzhige_size"), None), "1:1"
+            ),
+            openai_size=_coerce_str(
+                _get_value(data, ("image_gen", "openai_size"), None), ""
+            ),
+            openai_quality=_coerce_str(
+                _get_value(data, ("image_gen", "openai_quality"), None), ""
+            ),
+            openai_style=_coerce_str(
+                _get_value(data, ("image_gen", "openai_style"), None), ""
+            ),
+            openai_timeout=_coerce_float(
+                _get_value(data, ("image_gen", "openai_timeout"), None), 120.0
+            ),
         )
 
     @staticmethod

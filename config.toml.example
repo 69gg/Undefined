@@ -510,6 +510,23 @@ query_instruction = ""
 # en: Extra request-body params (optional) for rerank-provider-specific fields.
 [models.rerank.request_params]
 
+# zh: 生图模型配置（用于 image_gen.provider="models" 时调用 OpenAI 兼容的图片生成接口）。
+# en: Image generation model config (used when image_gen.provider="models" to call OpenAI-compatible image generation API).
+[models.image_gen]
+# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（最终请求路径为 /v1/images/generations）。
+# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1 (final request path is /v1/images/generations).
+api_url = ""
+# zh: API Key。
+# en: API key.
+api_key = ""
+# zh: 模型名称（如 dall-e-3、minimax-image-01 等），空则使用上游默认。
+# en: Model name (e.g. dall-e-3, minimax-image-01, etc.), empty uses provider default.
+model_name = ""
+
+# zh: 额外请求体参数（可选）。
+# en: Extra request-body params (optional).
+[models.image_gen.request_params]
+
 # zh: 本地知识库配置。
 # en: Local knowledge base settings.
 [knowledge]
@@ -695,6 +712,28 @@ xxapi_base_url = "https://v2.xxapi.cn"
 # zh: 星之阁 API 基础地址。
 # en: Xingzhige API base URL.
 xingzhige_base_url = "https://api.xingzhige.com"
+
+# zh: 生图工具配置。
+# en: Image generation tool config.
+[image_gen]
+# zh: 生图 provider："xingzhige"（免费星之阁 API）或 "models"（使用 [models.image_gen] 配置的 OpenAI 兼容接口）。
+# en: Image generation provider: "xingzhige" (free Xingzhige API) or "models" (OpenAI-compatible via [models.image_gen]).
+provider = "xingzhige"
+# zh: 星之阁模式默认图片比例（仅 provider="xingzhige" 生效）。
+# en: Default image size for Xingzhige mode (only effective when provider="xingzhige").
+xingzhige_size = "1:1"
+# zh: OpenAI 模式图片尺寸（仅 provider="models" 生效；空表示不传，使用上游默认，如 dall-e-3 默认 1024x1024）。
+# en: Image size for OpenAI mode (only effective when provider="models"; empty means not sent, using provider default, e.g. dall-e-3 default 1024x1024).
+openai_size = ""
+# zh: OpenAI 模式图片质量（仅 provider="models" 生效；空表示不传；dall-e-3 支持 standard/hd）。
+# en: Image quality for OpenAI mode (only effective when provider="models"; empty means not sent; dall-e-3 supports standard/hd).
+openai_quality = ""
+# zh: OpenAI 模式图片风格（仅 provider="models" 生效；空表示不传；dall-e-3 支持 vivid/natural）。
+# en: Image style for OpenAI mode (only effective when provider="models"; empty means not sent; dall-e-3 supports vivid/natural).
+openai_style = ""
+# zh: OpenAI 模式请求超时（秒）。
+# en: Request timeout for OpenAI mode (seconds).
+openai_timeout = 120.0
 
 # zh: XXAPI API 配置。
 # en: XXAPI config.
