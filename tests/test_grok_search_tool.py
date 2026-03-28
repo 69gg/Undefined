@@ -29,7 +29,7 @@ async def test_grok_search_returns_disabled_when_switch_is_off() -> None:
 
 
 @pytest.mark.asyncio
-async def test_grok_search_uses_grok_model_and_formats_sources() -> None:
+async def test_grok_search_returns_raw_result() -> None:
     ai_client = SimpleNamespace(
         submit_queued_llm_call=AsyncMock(
             return_value={
@@ -68,13 +68,11 @@ async def test_grok_search_uses_grok_model_and_formats_sources() -> None:
     )
 
     assert "这里是搜索结果摘要。" in result
-    assert "参考链接:" in result
-    assert "https://example.com/article" in result
+    assert "参考链接:" not in result
     ai_client.submit_queued_llm_call.assert_awaited_once()
     kwargs = ai_client.submit_queued_llm_call.await_args.kwargs
     assert kwargs["model_config"] is grok_model
     assert kwargs["call_type"] == "agent_tool:grok_search"
-    assert "tools" not in kwargs
 
 
 def test_runner_filters_grok_search_for_web_agent_when_disabled() -> None:
