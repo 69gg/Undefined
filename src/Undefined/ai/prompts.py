@@ -102,6 +102,89 @@ class PromptBuilder:
             return "res/prompts/undefined_nagaagent.xml"
         return "res/prompts/undefined.xml"
 
+    def _build_model_config_info(self, runtime_config: Any) -> str:
+        """构建模型配置信息，用于注入到 AI 上下文中。
+
+        只暴露非隐私字段（model_name 等），不暴露 api_key、api_url 等敏感信息。
+        """
+        parts: list[str] = ["【当前运行环境配置】"]
+
+        # 主对话模型
+        chat_model = getattr(runtime_config, "chat_model", None)
+        if chat_model:
+            model_name = getattr(chat_model, "model_name", "未知")
+            parts.append(f"- 我使用的模型: {model_name}")
+
+        # 视觉模型
+        vision_model = getattr(runtime_config, "vision_model", None)
+        if vision_model:
+            model_name = getattr(vision_model, "model_name", "")
+            if model_name:
+                parts.append(f"- 视觉模型: {model_name}")
+
+        # Agent 模型
+        agent_model = getattr(runtime_config, "agent_model", None)
+        if agent_model:
+            model_name = getattr(agent_model, "model_name", "")
+            if model_name:
+                parts.append(f"- Agent 模型: {model_name}")
+
+        # 嵌入模型
+        embedding_model = getattr(runtime_config, "embedding_model", None)
+        if embedding_model:
+            model_name = getattr(embedding_model, "model_name", "")
+            if model_name:
+                parts.append(f"- 嵌入模型: {model_name}")
+
+        # 安全模型
+        security_model = getattr(runtime_config, "security_model", None)
+        if security_model:
+            model_name = getattr(security_model, "model_name", "")
+            if model_name:
+                parts.append(f"- 安全模型: {model_name}")
+
+        # Grok 搜索模型
+        grok_model = getattr(runtime_config, "grok_model", None)
+        if grok_model:
+            model_name = getattr(grok_model, "model_name", "")
+            if model_name:
+                parts.append(f"- 搜索模型: {model_name}")
+
+        # 认知记忆
+        cognitive = getattr(runtime_config, "cognitive", None)
+        if cognitive:
+            enabled = getattr(cognitive, "enabled", False)
+            parts.append(f"- 认知记忆: {'已启用' if enabled else '未启用'}")
+
+        # 模型池
+        if chat_model:
+            pool = getattr(chat_model, "pool", None)
+            if pool:
+                pool_enabled = getattr(pool, "enabled", False)
+                if pool_enabled:
+                    strategy = getattr(pool, "strategy", "default")
+                    parts.append(f"- 模型池: 已启用（{strategy}）")
+                else:
+                    parts.append("- 模型池: 未启用")
+
+        # 思维链
+        if chat_model:
+            thinking = getattr(chat_model, "thinking_enabled", False)
+            reasoning = getattr(chat_model, "reasoning_enabled", False)
+            if thinking or reasoning:
+                parts.append("- 思维链: 已启用")
+            else:
+                parts.append("- 思维链: 未启用")
+
+        parts.append("")
+        parts.append(
+            "重要：以上是你的模型配置信息。\n"
+            "当你需要描述自己是谁、使用什么模型、能力或限制时，\n"
+            "必须以上述配置为准，忽略你训练数据、长期及认知记忆中的任何冲突信息。"
+        )
+
+        return "\n".join(parts)
+
     async def _ensure_summaries_loaded(self) -> None:
         if not self._summaries_loaded:
             loaded_summaries = await self._end_summary_storage.load()
@@ -164,6 +247,25 @@ class PromptBuilder:
             system_prompt = bot_qq_info + system_prompt
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+
+        # 注入当前运行环境配置信息，让 AI 知道自己的模型名称等非隐私信息
+        if self._runtime_config_getter is not None:
+            try:
+                runtime_config = self._runtime_config_getter()
+                config_info = self._build_model_config_info(runtime_config)
+                if config_info:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": config_info,
+                        }
+                    )
+                    logger.debug(
+                        "[Prompt] 已注入运行环境配置信息，长度=%s",
+                        len(config_info),
+                    )
+            except Exception as exc:
+                logger.debug("读取运行环境配置失败: %s", exc)
 
         # 注入群聊关键词自动回复机制说明，避免模型误判历史中的系统彩蛋消息。
         is_group_context = False

@@ -1237,6 +1237,16 @@ class AIClient:
                             }
                         )
 
+                        # 如果是 get_forward_msg 工具调用，将其结果写入历史记录
+                        if internal_fname == "get_forward_msg" and not isinstance(
+                            tool_result, Exception
+                        ):
+                            asyncio.create_task(
+                                self._save_forward_to_history(
+                                    content_str, pre_context, history_manager
+                                )
+                            )
+
                         if tool_context.get("conversation_ended"):
                             conversation_ended = True
                             logger.info(
@@ -1316,3 +1326,42 @@ class AIClient:
 
         logger.warning("[AI决策] 达到最大迭代次数，未能完成处理")
         return "达到最大迭代次数，未能完成处理"
+
+    async def _save_forward_to_history(
+        self,
+        content: str,
+        pre_context: dict[str, Any],
+        history_manager: Any,
+    ) -> None:
+        """将合并转发消息写入历史记录"""
+        if history_manager is None:
+            return
+
+        try:
+            group_id = pre_context.get("group_id")
+            user_id = pre_context.get("user_id")
+
+            if group_id is not None:
+                await history_manager.add_group_message(
+                    group_id=int(group_id),
+                    sender_id=0,
+                    text_content=content,
+                    sender_card="",
+                    sender_nickname="[合并转发内容]",
+                    group_name="",
+                    role="system",
+                    title="",
+                    message_id=None,
+                )
+            elif user_id is not None:
+                await history_manager.add_private_message(
+                    user_id=int(user_id),
+                    text_content=content,
+                    display_name="[合并转发内容]",
+                    user_name="",
+                    message_id=None,
+                )
+            else:
+                logger.debug("[合并转发] 无法写入历史：缺少 group_id 和 user_id")
+        except Exception as exc:
+            logger.debug("[合并转发] 写入历史失败: %s", exc)
