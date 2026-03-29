@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import html
-import importlib.util
 import logging
 import re
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, Optional, Protocol, TYPE_CHECKING
 from uuid import uuid4
 
 import httpx
@@ -17,6 +16,7 @@ from Undefined.ai.llm import ModelRequester
 from Undefined.ai.model_selector import ModelSelector
 from Undefined.ai.multimodal import MultimodalAnalyzer
 from Undefined.ai.prompts import PromptBuilder
+from Undefined.ai.crawl4ai_support import get_crawl4ai_capabilities
 from Undefined.ai.queue_budget import (
     compute_queued_llm_timeout_seconds,
     resolve_effective_retry_count,
@@ -29,6 +29,7 @@ from Undefined.config import (
     ChatModelConfig,
     VisionModelConfig,
     AgentModelConfig,
+    GrokModelConfig,
     Config,
 )
 from Undefined.context import RequestContext
@@ -63,6 +64,18 @@ _CONTENT_TAG_PATTERN = re.compile(
 )
 
 
+class SendMessageCallback(Protocol):
+    def __call__(
+        self, message: str, reply_to: int | None = None
+    ) -> Awaitable[None]: ...
+
+
+class SendPrivateMessageCallback(Protocol):
+    def __call__(
+        self, user_id: int, message: str, reply_to: int | None = None
+    ) -> Awaitable[None]: ...
+
+
 # 尝试导入 langchain SearxSearchWrapper
 if TYPE_CHECKING:
     from langchain_community.utilities import (
@@ -82,19 +95,6 @@ except Exception:
     logger.warning(
         "[初始化] langchain_community 未安装或 SearxSearchWrapper 不可用，搜索功能将禁用"
     )
-
-# 尝试导入 crawl4ai
-try:
-    importlib.util.find_spec("crawl4ai")
-    _CRAWL4AI_AVAILABLE = True
-    try:
-        _PROXY_CONFIG_AVAILABLE = True
-    except (ImportError, AttributeError):
-        _PROXY_CONFIG_AVAILABLE = False
-except Exception:
-    _CRAWL4AI_AVAILABLE = False
-    _PROXY_CONFIG_AVAILABLE = False
-    logger.warning("[初始化] crawl4ai 未安装，网页获取功能将禁用")
 
 
 class AIClient:
@@ -128,6 +128,7 @@ class AIClient:
         self.runtime_config = runtime_config
         self.memory_storage = memory_storage
         self._end_summary_storage = end_summary_storage or EndSummaryStorage()
+        self._crawl4ai_capabilities = get_crawl4ai_capabilities()
 
         self._http_client = httpx.AsyncClient(timeout=480.0)
         self._token_usage_storage = TokenUsageStorage()
@@ -137,9 +138,7 @@ class AIClient:
         self._cognitive_service: Any = cognitive_service
 
         # 私聊发送回调
-        self._send_private_message_callback: Optional[
-            Callable[[int, str], Awaitable[None]]
-        ] = None
+        self._send_private_message_callback: Optional[SendPrivateMessageCallback] = None
         # 发送图片回调
         self._send_image_callback: Optional[
             Callable[[int, str, str], Awaitable[None]]
@@ -242,10 +241,17 @@ class AIClient:
             else:
                 logger.info("[初始化] SEARXNG_URL 未配置，搜索功能禁用")
 
-        if _CRAWL4AI_AVAILABLE:
+        if self._crawl4ai_capabilities.available:
             logger.info("[初始化] crawl4ai 可用，网页获取功能已启用")
         else:
-            logger.warning("[初始化] crawl4ai 不可用，网页获取功能将禁用")
+            detail = self._crawl4ai_capabilities.error
+            if detail:
+                logger.warning(
+                    "[初始化] crawl4ai 不可用，网页获取功能将禁用: %s",
+                    detail,
+                )
+            else:
+                logger.warning("[初始化] crawl4ai 不可用，网页获取功能将禁用")
 
         self._prompt_builder = PromptBuilder(
             bot_qq=self.bot_qq,
@@ -754,7 +760,9 @@ class AIClient:
 
     async def request_model(
         self,
-        model_config: ChatModelConfig | VisionModelConfig | AgentModelConfig,
+        model_config: (
+            ChatModelConfig | VisionModelConfig | AgentModelConfig | GrokModelConfig
+        ),
         messages: list[dict[str, Any]],
         max_tokens: int = 8192,
         call_type: str = "chat",
@@ -854,7 +862,7 @@ class AIClient:
         self,
         question: str,
         context: str = "",
-        send_message_callback: Callable[[str], Awaitable[None]] | None = None,
+        send_message_callback: SendMessageCallback | None = None,
         get_recent_messages_callback: Callable[
             [str, str, int, int], Awaitable[list[dict[str, Any]]]
         ]
@@ -874,7 +882,7 @@ class AIClient:
         参数:
             question: 用户输入的问题
             context: 额外的上下文背景
-            send_message_callback: 发送消息的回调
+            send_message_callback: 发送消息的回调，支持可选的 reply_to
             get_recent_messages_callback: 获取上下文历史消息的回调
             get_image_url_callback: 获取图片 URL 的回调
             get_forward_msg_callback: 获取合并转发内容的回调
@@ -941,6 +949,13 @@ class AIClient:
         tool_context.setdefault("ai_client", self)
         tool_context.setdefault("runtime_config", self._get_runtime_config())
         tool_context.setdefault("search_wrapper", self._search_wrapper)
+        tool_context.setdefault(
+            "crawl4ai_available", self._crawl4ai_capabilities.available
+        )
+        tool_context.setdefault(
+            "crawl4ai_proxy_config_available",
+            self._crawl4ai_capabilities.proxy_config_available,
+        )
         tool_context.setdefault("end_summary_storage", self._end_summary_storage)
         tool_context.setdefault("end_summaries", self._prompt_builder.end_summaries)
         tool_context.setdefault(
@@ -1101,6 +1116,9 @@ class AIClient:
                     "content": content,
                     "tool_calls": tool_calls,
                 }
+                phase = message.get("phase")
+                if phase is not None:
+                    assistant_message["phase"] = phase
                 output_items = message.get(RESPONSES_OUTPUT_ITEMS_KEY)
                 if isinstance(output_items, list):
                     assistant_message[RESPONSES_OUTPUT_ITEMS_KEY] = output_items
@@ -1219,6 +1237,16 @@ class AIClient:
                             }
                         )
 
+                        # 如果是 get_forward_msg 工具调用，将其结果写入历史记录
+                        if internal_fname == "get_forward_msg" and not isinstance(
+                            tool_result, Exception
+                        ):
+                            asyncio.create_task(
+                                self._save_forward_to_history(
+                                    content_str, pre_context, history_manager
+                                )
+                            )
+
                         if tool_context.get("conversation_ended"):
                             conversation_ended = True
                             logger.info(
@@ -1298,3 +1326,42 @@ class AIClient:
 
         logger.warning("[AI决策] 达到最大迭代次数，未能完成处理")
         return "达到最大迭代次数，未能完成处理"
+
+    async def _save_forward_to_history(
+        self,
+        content: str,
+        pre_context: dict[str, Any],
+        history_manager: Any,
+    ) -> None:
+        """将合并转发消息写入历史记录"""
+        if history_manager is None:
+            return
+
+        try:
+            group_id = pre_context.get("group_id")
+            user_id = pre_context.get("user_id")
+
+            if group_id is not None:
+                await history_manager.add_group_message(
+                    group_id=int(group_id),
+                    sender_id=0,
+                    text_content=content,
+                    sender_card="",
+                    sender_nickname="[合并转发内容]",
+                    group_name="",
+                    role="system",
+                    title="",
+                    message_id=None,
+                )
+            elif user_id is not None:
+                await history_manager.add_private_message(
+                    user_id=int(user_id),
+                    text_content=content,
+                    display_name="[合并转发内容]",
+                    user_name="",
+                    message_id=None,
+                )
+            else:
+                logger.debug("[合并转发] 无法写入历史：缺少 group_id 和 user_id")
+        except Exception as exc:
+            logger.debug("[合并转发] 写入历史失败: %s", exc)

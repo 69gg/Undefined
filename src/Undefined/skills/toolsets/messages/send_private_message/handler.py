@@ -30,6 +30,26 @@ def _private_access_error(runtime_config: Any, user_id: int) -> str:
     )
 
 
+def _normalize_message_id(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            parsed = int(text)
+            return parsed if parsed > 0 else None
+    return None
+
+
+def _format_send_success(user_id: int, message_id: Any) -> str:
+    resolved_message_id = _normalize_message_id(message_id)
+    if resolved_message_id is not None:
+        return f"私聊消息已发送给用户 {user_id}（message_id={resolved_message_id}）"
+    return f"私聊消息已发送给用户 {user_id}"
+
+
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """向指定用户发送私聊消息"""
     request_id = str(context.get("request_id", "-"))
@@ -60,9 +80,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     if sender:
         try:
-            await sender.send_private_message(user_id, message, reply_to=reply_to_id)
+            sent_message_id = await sender.send_private_message(
+                user_id, message, reply_to=reply_to_id
+            )
             context["message_sent_this_turn"] = True
-            return f"私聊消息已发送给用户 {user_id}"
+            return _format_send_success(user_id, sent_message_id)
         except Exception as e:
             logger.exception(
                 "[私聊发送] sender 发送失败: user=%s request_id=%s err=%s",
@@ -74,7 +96,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     if send_private_message_callback:
         try:
-            await send_private_message_callback(user_id, message)
+            await send_private_message_callback(user_id, message, reply_to=reply_to_id)
             context["message_sent_this_turn"] = True
             return f"私聊消息已发送给用户 {user_id}"
         except Exception as e:

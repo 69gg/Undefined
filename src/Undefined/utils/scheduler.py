@@ -496,14 +496,22 @@ class TaskScheduler:
                 sender_id=sender_id,
             ) as ctx:
 
-                async def send_msg_cb(message: str) -> None:
+                async def send_msg_cb(
+                    message: str, reply_to: int | None = None
+                ) -> None:
                     if request_type == "group" and target_id:
-                        await self.sender.send_group_message(target_id, message)
+                        await self.sender.send_group_message(
+                            target_id, message, reply_to=reply_to
+                        )
                     elif request_type == "private" and target_id:
-                        await self.sender.send_private_message(target_id, message)
+                        await self.sender.send_private_message(
+                            target_id, message, reply_to=reply_to
+                        )
 
-                async def send_private_cb(uid: int, msg: str) -> None:
-                    await self.sender.send_private_message(uid, msg)
+                async def send_private_cb(
+                    uid: int, msg: str, reply_to: int | None = None
+                ) -> None:
+                    await self.sender.send_private_message(uid, msg, reply_to=reply_to)
 
                 async def send_img_cb(tid: int, mtype: str, path: str) -> None:
                     if not os.path.exists(path):

@@ -10,7 +10,9 @@ Undefined 欢迎开发者参与共建和进行二次开发！
 
 ```text
 src/Undefined/
+├── changelog.py   # CHANGELOG.md 解析与版本查询公共层
 ├── ai/            # AI 运行时核心组件 (client, prompt, tooling 工具组装, summary 短期摘要, multimodal 多模态)
+├── arxiv/         # arXiv 论文解析、元信息获取、PDF 下载与发送
 ├── bilibili/      # B站视频流解析、分段下载与异步发送
 ├── cognitive/     # 认知记忆系统底座 (向量存储, 史官合并/改写, 侧写生成, 任务队列)
 ├── skills/        # 技能插件核心目录 (存放所有的工具与智能体)
@@ -33,6 +35,12 @@ src/Undefined/
 - **Tools 开发专版**：[tools/README.md](../../src/Undefined/skills/tools/README.md)
 - **Toolsets 开发专版**：[toolsets/README.md](../../src/Undefined/skills/toolsets/README.md)
 - **Commands 开发专版**：[详细斜杠指令开发指南](slash-commands.md)
+
+### CHANGELOG 维护约定
+
+- 仓库根目录的 `CHANGELOG.md` 是正式版本历史的唯一事实来源。
+- `src/Undefined/changelog.py` 负责解析和校验这份文档，供 `/changelog` 命令和 `changelog_query` tool 共用。
+- 新增或调整版本条目时，不要只改 tag 注释；应同步维护 `CHANGELOG.md`，确保运行时查询和仓库文档一致。
 
 ### callable.json 共享授权机制
 

@@ -252,9 +252,17 @@ function isLongText(value) {
 const FIELD_SELECT_OPTIONS = {
     api_mode: ["chat_completions", "responses"],
     reasoning_effort_style: ["openai", "anthropic"],
+    // path -> options key mapping (underscore-separated segments)
+    image_gen_provider: ["xingzhige", "models"],
 };
 
 function getFieldSelectOptions(path) {
+    // 先用完整路径的下划线拼接形式（支持嵌套路径如 image_gen.provider）
+    const underscoreKey = path.replace(/\./g, "_");
+    if (FIELD_SELECT_OPTIONS[underscoreKey]) {
+        return FIELD_SELECT_OPTIONS[underscoreKey];
+    }
+    // 回退到最后一个 key（兼容顶字段如 api_mode）
     const key = path.split(".").pop();
     return FIELD_SELECT_OPTIONS[key] || null;
 }

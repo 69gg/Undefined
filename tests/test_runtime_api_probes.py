@@ -33,6 +33,13 @@ async def test_runtime_internal_probe_includes_chat_model_transport_fields() -> 
                 reasoning_enabled=True,
                 reasoning_effort="high",
             ),
+            grok_model=SimpleNamespace(
+                model_name="grok-4-search",
+                api_url="https://grok.example/v1",
+                thinking_enabled=False,
+                reasoning_enabled=True,
+                reasoning_effort="low",
+            ),
             embedding_model=SimpleNamespace(
                 model_name="text-embedding-3-small",
                 api_url="https://api.example.com/v1",
@@ -67,6 +74,13 @@ async def test_runtime_internal_probe_includes_chat_model_transport_fields() -> 
     assert payload["models"]["embedding_model"] == {
         "model_name": "text-embedding-3-small",
         "api_url": "https://api.example.com/...",
+    }
+    assert payload["models"]["grok_model"] == {
+        "model_name": "grok-4-search",
+        "api_url": "https://grok.example/...",
+        "thinking_enabled": False,
+        "reasoning_enabled": True,
+        "reasoning_effort": "low",
     }
 
 
@@ -188,6 +202,11 @@ async def test_runtime_external_probe_skips_naga_model_when_integration_disabled
                 api_url="https://api.example.com/v1",
                 api_key="k5",
             ),
+            grok_model=SimpleNamespace(
+                model_name="grok",
+                api_url="https://grok.example/v1",
+                api_key="k55",
+            ),
             embedding_model=SimpleNamespace(
                 model_name="embed",
                 api_url="https://api.example.com/v1",
@@ -223,3 +242,8 @@ async def test_runtime_external_probe_skips_naga_model_when_integration_disabled
         "reason": "naga_integration_disabled",
         "model_name": "naga",
     }
+    grok_probe = next(
+        item for item in payload["results"] if item["name"] == "grok_model"
+    )
+    assert grok_probe["status"] == "ok"
+    assert grok_probe["model_name"] == "grok"

@@ -18,7 +18,11 @@ function refreshUI() {
             get("appContent").style.display = "none";
             state.configLoaded = false;
         }
+    } else {
+        state.mobileDrawerOpen = false;
     }
+
+    if (!state.authenticated) state.mobileDrawerOpen = false;
 
     const mainContent = document.querySelector(".main-content");
     if (mainContent) {
@@ -40,10 +44,12 @@ function refreshUI() {
     if (state.view === "app" && state.tab === "logs" && state.authenticated)
         fetchLogFiles();
     updateLogRefreshState();
+    syncMobileChrome();
 }
 
 function switchTab(tab) {
     state.tab = tab;
+    state.mobileDrawerOpen = false;
     const mainContent = document.querySelector(".main-content");
     if (mainContent) {
         mainContent.classList.toggle("chat-layout", tab === "chat");
@@ -81,6 +87,7 @@ function switchTab(tab) {
     ) {
         window.RuntimeController.onTabActivated(tab);
     }
+    syncMobileChrome();
 }
 
 function canReturnToLauncher(url) {
@@ -101,6 +108,59 @@ function canReturnToLauncher(url) {
     } catch (_error) {
         return false;
     }
+}
+
+function syncMobileInlinePanel(panelId, toggleId, open) {
+    const panel = get(panelId);
+    const toggle = get(toggleId);
+    if (panel) {
+        panel.classList.toggle("is-open", !!open);
+    }
+    if (toggle) {
+        toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+}
+
+function syncMobileChrome() {
+    const drawer = get("mobileDrawer");
+    const backdrop = get("mobileDrawerBackdrop");
+    const menuBtn = get("mobileMenuBtn");
+    const allowDrawer = state.view === "app" && state.authenticated;
+    const open = allowDrawer && !!state.mobileDrawerOpen;
+
+    if (drawer) {
+        drawer.classList.toggle("is-open", open);
+        drawer.setAttribute("aria-hidden", open ? "false" : "true");
+    }
+    if (backdrop) {
+        backdrop.hidden = !open;
+        backdrop.classList.toggle("is-active", open);
+    }
+    if (menuBtn) {
+        menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    document.body.classList.toggle("is-mobile-drawer-open", open);
+
+    syncMobileInlinePanel(
+        "configSecondaryActions",
+        "configMobileActionsToggle",
+        !!state.configMobileActionsOpen,
+    );
+    syncMobileInlinePanel(
+        "logsSecondaryActions",
+        "logsMobileActionsToggle",
+        !!state.logsMobileActionsOpen,
+    );
+}
+
+function setMobileDrawerOpen(open) {
+    state.mobileDrawerOpen = !!open;
+    syncMobileChrome();
+}
+
+function setMobileInlineActionsOpen(key, open) {
+    state[key] = !!open;
+    syncMobileChrome();
 }
 
 async function init() {
@@ -124,6 +184,22 @@ async function init() {
             applyTheme(state.theme === "dark" ? "light" : "dark"),
         );
     });
+
+    const mobileMenuBtn = get("mobileMenuBtn");
+    if (mobileMenuBtn) {
+        mobileMenuBtn.onclick = () =>
+            setMobileDrawerOpen(!state.mobileDrawerOpen);
+    }
+
+    const mobileDrawerCloseBtn = get("mobileDrawerCloseBtn");
+    if (mobileDrawerCloseBtn) {
+        mobileDrawerCloseBtn.onclick = () => setMobileDrawerOpen(false);
+    }
+
+    const mobileDrawerBackdrop = get("mobileDrawerBackdrop");
+    if (mobileDrawerBackdrop) {
+        mobileDrawerBackdrop.onclick = () => setMobileDrawerOpen(false);
+    }
 
     document.querySelectorAll('[data-action="open-app"]').forEach((el) => {
         el.onclick = () => {
@@ -224,6 +300,9 @@ async function init() {
                 state.view = "landing";
                 refreshUI();
             } else if (tab) switchTab(tab);
+            if (el.closest("#mobileDrawer")) {
+                setMobileDrawerOpen(false);
+            }
         });
         el.addEventListener("keydown", (e) => {
             if (e.key === "Enter" || e.key === " ") {
@@ -367,6 +446,15 @@ async function init() {
         };
     }
 
+    const logsMobileActionsToggle = get("logsMobileActionsToggle");
+    if (logsMobileActionsToggle) {
+        logsMobileActionsToggle.onclick = () =>
+            setMobileInlineActionsOpen(
+                "logsMobileActionsOpen",
+                !state.logsMobileActionsOpen,
+            );
+    }
+
     const configSearchInput = get("configSearchInput");
     if (configSearchInput) {
         configSearchInput.addEventListener("input", () => {
@@ -385,6 +473,15 @@ async function init() {
         };
     }
 
+    const configMobileActionsToggle = get("configMobileActionsToggle");
+    if (configMobileActionsToggle) {
+        configMobileActionsToggle.onclick = () =>
+            setMobileInlineActionsOpen(
+                "configMobileActionsOpen",
+                !state.configMobileActionsOpen,
+            );
+    }
+
     const expandAllBtn = get("btnExpandAll");
     if (expandAllBtn)
         expandAllBtn.onclick = () => setAllSectionsCollapsed(false);
@@ -397,6 +494,7 @@ async function init() {
         try {
             await api(authEndpointCandidates("logout"), { method: "POST" });
         } catch (e) {}
+        state.mobileDrawerOpen = false;
         clearStoredAuthTokens();
         state.authenticated = false;
         state.view = "landing";
@@ -412,6 +510,30 @@ async function init() {
     };
     get("logoutBtn").onclick = logout;
     get("mobileLogoutBtn").onclick = logout;
+
+    document.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return;
+        if (state.mobileDrawerOpen) {
+            setMobileDrawerOpen(false);
+            return;
+        }
+        if (state.configMobileActionsOpen) {
+            setMobileInlineActionsOpen("configMobileActionsOpen", false);
+            return;
+        }
+        if (state.logsMobileActionsOpen) {
+            setMobileInlineActionsOpen("logsMobileActionsOpen", false);
+        }
+    });
+
+    window.addEventListener("resize", () => {
+        if (window.innerWidth > 768) {
+            state.mobileDrawerOpen = false;
+            state.configMobileActionsOpen = false;
+            state.logsMobileActionsOpen = false;
+            syncMobileChrome();
+        }
+    });
 
     applyTheme(
         initialState && initialState.theme ? initialState.theme : "light",

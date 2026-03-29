@@ -18,14 +18,19 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     if not file_source:
         return "请提供文件 URL 或 file_id"
 
-    if user_prompt:
-        user_content = f"文件源：{file_source}\n\n用户需求：{user_prompt}"
-    else:
-        user_content = f"请分析这个文件：{file_source}"
+    context["file_source"] = file_source
+    context_messages = [
+        {
+            "role": "system",
+            "content": f"当前任务附带文件源：{file_source}",
+        }
+    ]
+    user_content = user_prompt if user_prompt else "请分析这个文件。"
 
     return await run_agent_with_tools(
         agent_name="file_analysis_agent",
         user_content=user_content,
+        context_messages=context_messages,
         empty_user_content_message="请提供文件 URL 或 file_id",
         default_prompt="你是一个专业的文件分析助手...",
         context=context,

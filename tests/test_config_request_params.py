@@ -87,6 +87,17 @@ reasoning_effort = "xhigh"
 temperature = 0.1
 metadata = { source = "historian" }
 
+[models.grok]
+api_url = "https://grok.example/v1"
+api_key = "sk-grok"
+model_name = "grok-4-search"
+reasoning_enabled = true
+reasoning_effort = "low"
+
+[models.grok.request_params]
+temperature = 0.5
+metadata = { source = "grok" }
+
 [models.embedding]
 api_url = "https://api.openai.com/v1"
 api_key = "sk-embed"
@@ -171,6 +182,12 @@ priority = "high"
         "metadata": {"source": "historian"},
         "response_format": {"type": "json_object"},
     }
+    assert cfg.grok_model.reasoning_enabled is True
+    assert cfg.grok_model.reasoning_effort == "low"
+    assert cfg.grok_model.request_params == {
+        "temperature": 0.5,
+        "metadata": {"source": "grok"},
+    }
 
     assert cfg.embedding_model.request_params == {
         "encoding_format": "base64",
@@ -223,3 +240,16 @@ metadata = { source = "naga" }
         "temperature": 0.6,
         "metadata": {"source": "naga"},
     }
+
+
+def test_grok_search_switch_defaults_false_and_can_enable(tmp_path: Path) -> None:
+    cfg = _load_config(
+        tmp_path / "config.toml",
+        """
+[search]
+grok_search_enabled = true
+""",
+    )
+
+    assert cfg.grok_search_enabled is True
+    assert cfg.grok_model.model_name == ""

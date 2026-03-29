@@ -141,7 +141,7 @@ class EmbeddingModelConfig:
     api_url: str
     api_key: str
     model_name: str
-    queue_interval_seconds: float = 1.0
+    queue_interval_seconds: float = 0.0
     dimensions: int | None = None
     query_instruction: str = ""  # 查询端指令前缀（如 Qwen3-Embedding 需要）
     document_instruction: str = ""  # 文档端指令前缀（如 E5 系列需要 "passage: "）
@@ -155,7 +155,7 @@ class RerankModelConfig:
     api_url: str
     api_key: str
     model_name: str
-    queue_interval_seconds: float = 1.0
+    queue_interval_seconds: float = 0.0
     query_instruction: str = ""  # 查询端指令前缀（如部分 rerank 模型需要）
     request_params: dict[str, Any] = field(default_factory=dict)
 
@@ -185,6 +185,60 @@ class AgentModelConfig:
     reasoning_effort: str = "medium"  # reasoning effort 档位
     request_params: dict[str, Any] = field(default_factory=dict)
     pool: ModelPool | None = None  # 模型池配置
+
+
+@dataclass
+class GrokModelConfig:
+    """Grok 搜索模型配置（仅用于 grok_search）"""
+
+    api_url: str
+    api_key: str
+    model_name: str
+    max_tokens: int = 8192
+    queue_interval_seconds: float = 1.0
+    thinking_enabled: bool = False  # 是否启用 thinking
+    thinking_budget_tokens: int = 20000  # 思维预算 token 数量
+    thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
+    reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
+    reasoning_enabled: bool = False  # 是否启用 reasoning.effort
+    reasoning_effort: str = "medium"  # reasoning effort 档位
+    request_params: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ImageGenModelConfig:
+    """生图模型配置（放在 [models] 下，与 chat/vision 平级）
+
+    空字符串 api_key/api_url 会在 handler 中降级到主模型配置。
+    """
+
+    api_url: str = ""
+    api_key: str = ""
+    model_name: str = ""
+    request_params: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ImageGenConfig:
+    """生图工具配置
+
+    provider:
+      - "xingzhige": 使用免费星之阁 API（api_xingzhige_base_url）
+      - "models": 使用 [models.image_gen] 配置的 OpenAI 兼容接口
+
+    OpenAI 兼容参数（openai_size/quality/style）空字符串不传，由上游 API 使用默认值。
+    """
+
+    # 生图 provider: "xingzhige" | "models"
+    provider: str = "xingzhige"
+    # xingzhige 模式下的默认图片比例
+    xingzhige_size: str = "1:1"
+    # models 模式下的 OpenAI 兼容参数（空字符串表示不传该字段）
+    openai_size: str = ""
+    openai_quality: str = ""
+    openai_style: str = ""
+    # models 模式请求超时（秒）
+    openai_timeout: float = 120.0
 
 
 @dataclass

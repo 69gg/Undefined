@@ -35,13 +35,9 @@ const PREFERENCE_STORAGE_KEY = "undefined.console.preferences";
 const messages = {
 	zh: {
 		brand: "Undefined Console",
-		subtitle: "保存连接、测试端点，然后直接进入真正的 WebUI。",
 		lang_toggle: "English",
 		theme_light: "浅色",
 		theme_dark: "深色",
-		hero_title: "连接后直接打开远程 WebUI",
-		hero_copy:
-			"Tauri 只负责保存连接与做基础探测；真正的管理界面直接使用现有 WebUI，因此样式和功能与浏览器版保持一致。",
 		button_open: "打开 WebUI",
 		button_test: "测试连接",
 		button_seed: "填入本地示例",
@@ -53,7 +49,6 @@ const messages = {
 		saved_profiles: "已保存连接",
 		saved_profiles_copy: "连接配置保存在当前设备本地。",
 		editor_title: "连接编辑器",
-		editor_copy: "填写同一个 IP/域名，再分别填写 Management 与 Runtime 端口。",
 		display_name: "显示名称",
 		host: "IP / 域名",
 		host_placeholder: "例如：192.168.2.1 或 example.com",
@@ -63,8 +58,6 @@ const messages = {
 		password_placeholder: "填写后打开 WebUI 时会自动尝试登录",
 		notes: "备注",
 		notes_placeholder: "例如：本机、预发布、Android 备用连接",
-		launcher_hint:
-			"Tauri 只负责连接管理；真正的后台功能与样式都以 WebUI 为准。",
 		empty_profiles: "还没有保存的连接。",
 		empty_probes: "点击“测试连接”后，这里会显示探针结果。",
 		profile_default_name: "本地管理入口",
@@ -98,13 +91,9 @@ const messages = {
 	},
 	en: {
 		brand: "Undefined Console",
-		subtitle: "Save connections, test endpoints, then open the real WebUI.",
 		lang_toggle: "中文",
 		theme_light: "Light",
 		theme_dark: "Dark",
-		hero_title: "Open the real remote WebUI after choosing a connection",
-		hero_copy:
-			"Tauri only stores connections and runs basic probes. The actual management interface uses the existing WebUI so the look and features stay aligned with the browser version.",
 		button_open: "Open WebUI",
 		button_test: "Test connection",
 		button_seed: "Seed local",
@@ -116,8 +105,6 @@ const messages = {
 		saved_profiles: "Saved profiles",
 		saved_profiles_copy: "Profiles are stored locally on this device.",
 		editor_title: "Profile editor",
-		editor_copy:
-			"Use one host/IP field, then provide dedicated Management and Runtime ports.",
 		display_name: "Display name",
 		host: "Host / IP",
 		host_placeholder: "For example: 192.168.2.1 or example.com",
@@ -127,8 +114,6 @@ const messages = {
 		password_placeholder: "If filled, WebUI will try to sign in automatically",
 		notes: "Notes",
 		notes_placeholder: "For example: local, staging, Android fallback",
-		launcher_hint:
-			"Tauri only manages connections; the real console UI and features stay in WebUI.",
 		empty_profiles: "No saved profiles yet.",
 		empty_probes:
 			"Probe results will appear here after you click test connection.",
@@ -625,7 +610,6 @@ function render(): void {
                 <header class="launcher-header">
                     <div>
                         <div class="brand"><span class="brand-dot"></span><span>${t("brand")}</span></div>
-                        <p class="launcher-subtitle">${t("subtitle")}</p>
                     </div>
                     <div class="sidebar-actions">
                         <button class="pref-chip" type="button" data-action="toggle-lang">${t("lang_toggle")}</button>
@@ -635,9 +619,7 @@ function render(): void {
 
                 <section class="hero">
                     <article class="hero-card">
-                        <h1 class="hero-title">${t("hero_title")}</h1>
-                        <p class="hero-subtitle">${t("hero_copy")}</p>
-                        <div class="button-row hero-button-row">
+                        <div class="button-row">
                             <button class="primary" type="button" data-action="open-webui">${t("button_open")}</button>
                             <button class="secondary" type="button" data-action="test-connection">${t("button_test")}</button>
                             <button class="secondary" type="button" data-action="seed-local">${t("button_seed")}</button>
@@ -654,7 +636,6 @@ function render(): void {
 
                         <section class="panel">
                             <h2 class="section-title">${t("editor_title")}</h2>
-                            <p class="panel-copy">${t("editor_copy")}</p>
                             <form id="profile-form" class="form-grid">
                                 <div class="field">
                                     <label for="profile-name">${t("display_name")}</label>
@@ -685,7 +666,6 @@ function render(): void {
                                         <button class="primary" type="submit">${t("button_save")}</button>
                                         <button class="secondary" type="button" data-action="new-profile">${t("button_new")}</button>
                                     </div>
-                                    <div class="input-help">${t("launcher_hint")}</div>
                                 </div>
                             </form>
                         </section>

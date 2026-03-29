@@ -2,7 +2,6 @@
     const runtimeState = {
         initialized: false,
         probesLoaded: false,
-        bootstrapLoaded: false,
         memoryLoaded: false,
         runtimeMetaLoaded: false,
         runtimeEnabled: true,
@@ -780,96 +779,6 @@
         </div>`;
     }
 
-    function renderBootstrapProbe(data) {
-        const el = get("managementBootstrapProbe");
-        if (!el) return;
-        if (!data || data.error) {
-            el.innerHTML = `<div class="empty-state">${escapeHtml(data?.error || "--")}</div>`;
-            return;
-        }
-
-        const configExists = !!data.config_exists;
-        const configValid =
-            data.config_valid === undefined ? null : !!data.config_valid;
-        const usingDefaultPassword = !!data.using_default_password;
-        const runtimeEnabled = !!data.runtime_enabled;
-        const runtimeReachable =
-            data.runtime_reachable === undefined
-                ? null
-                : !!data.runtime_reachable;
-        const authMode =
-            data.auth_mode || (state.authAccessToken ? "token" : "cookie");
-        const advice = Array.isArray(data.advice) ? data.advice : [];
-
-        const configStatus = configExists ? "ok" : "error";
-        const validationStatus =
-            configValid === null ? "skipped" : configValid ? "ok" : "error";
-        const authStatus = usingDefaultPassword ? "error" : "ok";
-        const runtimeStatus =
-            runtimeReachable === null
-                ? runtimeEnabled
-                    ? "skipped"
-                    : "error"
-                : runtimeReachable
-                  ? "ok"
-                  : runtimeEnabled
-                    ? "error"
-                    : "skipped";
-
-        let html = `<div class="probe-section"><div class="probe-section-title">${t("probes.section_bootstrap")}</div>`;
-        html += `<div class="probe-grid">`;
-        html += probeItem(
-            t("probes.bootstrap_config"),
-            probeStatusBadge(configStatus),
-        );
-        html += probeItem(
-            t("probes.bootstrap_validation"),
-            probeStatusBadge(validationStatus),
-        );
-        html += probeItem(
-            t("probes.bootstrap_auth"),
-            `${probeStatusBadge(authStatus)} <code>${escapeHtml(String(authMode))}</code>`,
-        );
-        html += probeItem(
-            t("probes.bootstrap_runtime"),
-            probeStatusBadge(runtimeStatus),
-        );
-        html += `</div>`;
-
-        const summary = [];
-        if (configExists) summary.push(t("probes.bootstrap_config_exists"));
-        if (!configExists) summary.push(t("probes.bootstrap_config_missing"));
-        if (configValid === false && data.validation_error)
-            summary.push(String(data.validation_error));
-        if (usingDefaultPassword) summary.push(t("auth.change_required"));
-        if (runtimeEnabled && runtimeReachable === false)
-            summary.push(t("probes.bootstrap_runtime_pending"));
-        if (!summary.length) summary.push(t("probes.bootstrap_ready"));
-
-        html += `<div class="probe-advice-list">${summary
-            .concat(advice)
-            .map(
-                (item) =>
-                    `<div class="probe-advice-item">${escapeHtml(item)}</div>`,
-            )
-            .join("")}</div>`;
-        html += `</div>`;
-        el.innerHTML = html;
-    }
-
-    function buildBootstrapFallback(meta, errorMessage = "") {
-        return {
-            config_exists: !!state.configExists,
-            config_valid: null,
-            using_default_password: !!state.usingDefaultPassword,
-            auth_mode: state.authAccessToken ? "token" : "cookie",
-            runtime_enabled: !!(meta && meta.enabled),
-            runtime_reachable: false,
-            validation_error: "",
-            advice: errorMessage ? [String(errorMessage)] : [],
-        };
-    }
-
     function setProbeUnavailable(message) {
         const msg = String(message || RUNTIME_DISABLED_ERROR);
         renderInternalProbe({ error: msg });
@@ -915,23 +824,6 @@
             "/api/runtime/probes/external",
         ]);
         renderExternalProbe(data);
-    }
-
-    async function fetchBootstrapProbe() {
-        try {
-            const data = await fetchJsonOrThrow([
-                "/api/v1/management/probes/bootstrap",
-                "/api/v1/management/probes/capabilities",
-            ]);
-            renderBootstrapProbe(data);
-        } catch (error) {
-            const meta = await fetchRuntimeMeta().catch(() => ({
-                enabled: false,
-            }));
-            renderBootstrapProbe(
-                buildBootstrapFallback(meta, error.message || error),
-            );
-        }
     }
 
     async function searchMemory() {
@@ -1245,17 +1137,14 @@
 
     async function refreshProbes() {
         try {
-            await fetchBootstrapProbe();
             if (!(await ensureRuntimeEnabled())) {
                 setProbeUnavailable(t("runtime.disabled"));
                 runtimeState.probesLoaded = true;
-                runtimeState.bootstrapLoaded = true;
                 return;
             }
 
             await Promise.all([fetchInternalProbe(), fetchExternalProbe()]);
             runtimeState.probesLoaded = true;
-            runtimeState.bootstrapLoaded = true;
         } catch (error) {
             showToast(
                 `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,

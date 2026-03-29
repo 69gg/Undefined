@@ -18,6 +18,7 @@ def build_model_queue_intervals(config: Config) -> dict[str, float]:
             config.naga_model.model_name,
             config.naga_model.queue_interval_seconds,
         ),
+        (config.grok_model.model_name, config.grok_model.queue_interval_seconds),
     )
     intervals: dict[str, float] = {}
     for model_name, interval in pairs:

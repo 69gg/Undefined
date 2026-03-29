@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "ai_draw_one",
-        "description": "AI 绘图工具 (DrawOne)。",
+        "description": "AI 绘图工具 (DrawOne)。支持星之阁免费 API 和 OpenAI 兼容接口（由 image_gen.provider 配置切换）。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -12,11 +12,19 @@
                 },
                 "model": {
                     "type": "string",
-                    "description": "绘图模型 (例如: anylora, anything-v5, etc. 可选)"
+                    "description": "绘图模型 (例如: anylora, dall-e-3, minimax-image-01；可选，默认由配置决定)"
                 },
                 "size": {
                     "type": "string",
-                    "description": "比例 (例如 2:3)"
+                    "description": "比例/尺寸 (例如 1:1, 2:3, 1024x1024；可选，默认由配置决定)"
+                },
+                "quality": {
+                    "type": "string",
+                    "description": "图片质量 (例如 standard, hd；可选，仅 OpenAI 模式生效)"
+                },
+                "style": {
+                    "type": "string",
+                    "description": "图片风格 (例如 vivid, natural；可选，仅 OpenAI 模式生效)"
                 },
                 "target_id": {
                     "type": "integer",

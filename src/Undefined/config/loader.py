@@ -33,6 +33,9 @@ from .models import (
     ChatModelConfig,
     CognitiveConfig,
     EmbeddingModelConfig,
+    GrokModelConfig,
+    ImageGenConfig,
+    ImageGenModelConfig,
     ModelPool,
     ModelPoolEntry,
     NagaConfig,
@@ -476,6 +479,7 @@ class Config:
     naga_model: SecurityModelConfig
     agent_model: AgentModelConfig
     historian_model: AgentModelConfig
+    grok_model: GrokModelConfig
     model_pool_enabled: bool
     log_level: str
     log_file_path: str
@@ -502,6 +506,7 @@ class Config:
     agent_intro_autogen_max_tokens: int
     agent_intro_hash_path: str
     searxng_url: str
+    grok_search_enabled: bool
     use_proxy: bool
     http_proxy: str
     https_proxy: str
@@ -564,10 +569,21 @@ class Config:
     bilibili_oversize_strategy: str
     bilibili_auto_extract_group_ids: list[int]
     bilibili_auto_extract_private_ids: list[int]
+    # arXiv 论文提取
+    arxiv_auto_extract_enabled: bool
+    arxiv_max_file_size: int
+    arxiv_auto_extract_group_ids: list[int]
+    arxiv_auto_extract_private_ids: list[int]
+    arxiv_auto_extract_max_items: int
+    arxiv_author_preview_limit: int
+    arxiv_summary_preview_chars: int
     # 认知记忆
     cognitive: CognitiveConfig
     # Naga 集成
     naga: NagaConfig
+    # 生图工具配置
+    image_gen: ImageGenConfig
+    models_image_gen: ImageGenModelConfig
     _allowed_group_ids_set: set[int] = dataclass_field(
         default_factory=set,
         init=False,
@@ -598,6 +614,16 @@ class Config:
         init=False,
         repr=False,
     )
+    _arxiv_group_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
+    _arxiv_private_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         # 访问控制属于高频热路径，启动后缓存为 set 降低重复构建开销。
@@ -614,6 +640,12 @@ class Config:
         }
         self._bilibili_private_ids_set = {
             int(item) for item in self.bilibili_auto_extract_private_ids
+        }
+        self._arxiv_group_ids_set = {
+            int(item) for item in self.arxiv_auto_extract_group_ids
+        }
+        self._arxiv_private_ids_set = {
+            int(item) for item in self.arxiv_auto_extract_private_ids
         }
 
     @classmethod
@@ -797,6 +829,7 @@ class Config:
         naga_model = cls._parse_naga_model_config(data, security_model)
         agent_model = cls._parse_agent_model_config(data)
         historian_model = cls._parse_historian_model_config(data, agent_model)
+        grok_model = cls._parse_grok_model_config(data)
 
         model_pool_enabled = _coerce_bool(
             _get_value(data, ("features", "pool_enabled"), "MODEL_POOL_ENABLED"), False
@@ -1029,6 +1062,14 @@ class Config:
         searxng_url = _coerce_str(
             _get_value(data, ("search", "searxng_url"), "SEARXNG_URL"), ""
         )
+        grok_search_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("search", "grok_search_enabled"),
+                "GROK_SEARCH_ENABLED",
+            ),
+            False,
+        )
 
         use_proxy = _coerce_bool(
             _get_value(data, ("proxy", "use_proxy"), "USE_PROXY"), True
@@ -1154,6 +1195,43 @@ class Config:
             _get_value(data, ("bilibili", "auto_extract_private_ids"), None)
         )
 
+        # arXiv 配置
+        arxiv_auto_extract_enabled = _coerce_bool(
+            _get_value(data, ("arxiv", "auto_extract_enabled"), None), False
+        )
+        arxiv_max_file_size = _coerce_int(
+            _get_value(data, ("arxiv", "max_file_size"), None), 100
+        )
+        if arxiv_max_file_size < 0:
+            arxiv_max_file_size = 100
+        arxiv_auto_extract_group_ids = _coerce_int_list(
+            _get_value(data, ("arxiv", "auto_extract_group_ids"), None)
+        )
+        arxiv_auto_extract_private_ids = _coerce_int_list(
+            _get_value(data, ("arxiv", "auto_extract_private_ids"), None)
+        )
+        arxiv_auto_extract_max_items = _coerce_int(
+            _get_value(data, ("arxiv", "auto_extract_max_items"), None), 5
+        )
+        if arxiv_auto_extract_max_items <= 0:
+            arxiv_auto_extract_max_items = 5
+        if arxiv_auto_extract_max_items > 20:
+            arxiv_auto_extract_max_items = 20
+        arxiv_author_preview_limit = _coerce_int(
+            _get_value(data, ("arxiv", "author_preview_limit"), None), 20
+        )
+        if arxiv_author_preview_limit <= 0:
+            arxiv_author_preview_limit = 20
+        if arxiv_author_preview_limit > 100:
+            arxiv_author_preview_limit = 100
+        arxiv_summary_preview_chars = _coerce_int(
+            _get_value(data, ("arxiv", "summary_preview_chars"), None), 1000
+        )
+        if arxiv_summary_preview_chars <= 0:
+            arxiv_summary_preview_chars = 1000
+        if arxiv_summary_preview_chars > 8000:
+            arxiv_summary_preview_chars = 8000
+
         # Code Delivery Agent 配置
         code_delivery_enabled = _coerce_bool(
             _get_value(data, ("code_delivery", "enabled"), None), True
@@ -1253,6 +1331,8 @@ class Config:
 
         cognitive = cls._parse_cognitive_config(data)
         naga = cls._parse_naga_config(data)
+        models_image_gen = cls._parse_image_gen_model_config(data)
+        image_gen = cls._parse_image_gen_config(data)
 
         if strict:
             cls._verify_required_fields(
@@ -1272,6 +1352,7 @@ class Config:
             security_model,
             naga_model,
             agent_model,
+            grok_model,
         )
 
         return cls(
@@ -1302,6 +1383,7 @@ class Config:
             naga_model=naga_model,
             agent_model=agent_model,
             historian_model=historian_model,
+            grok_model=grok_model,
             model_pool_enabled=model_pool_enabled,
             log_level=log_level,
             log_file_path=log_file_path,
@@ -1328,6 +1410,7 @@ class Config:
             agent_intro_autogen_max_tokens=agent_intro_autogen_max_tokens,
             agent_intro_hash_path=agent_intro_hash_path,
             searxng_url=searxng_url,
+            grok_search_enabled=grok_search_enabled,
             use_proxy=use_proxy,
             http_proxy=http_proxy,
             https_proxy=https_proxy,
@@ -1372,6 +1455,13 @@ class Config:
             bilibili_oversize_strategy=bilibili_oversize_strategy,
             bilibili_auto_extract_group_ids=bilibili_auto_extract_group_ids,
             bilibili_auto_extract_private_ids=bilibili_auto_extract_private_ids,
+            arxiv_auto_extract_enabled=arxiv_auto_extract_enabled,
+            arxiv_max_file_size=arxiv_max_file_size,
+            arxiv_auto_extract_group_ids=arxiv_auto_extract_group_ids,
+            arxiv_auto_extract_private_ids=arxiv_auto_extract_private_ids,
+            arxiv_auto_extract_max_items=arxiv_auto_extract_max_items,
+            arxiv_author_preview_limit=arxiv_author_preview_limit,
+            arxiv_summary_preview_chars=arxiv_summary_preview_chars,
             embedding_model=embedding_model,
             rerank_model=rerank_model,
             knowledge_enabled=knowledge_enabled,
@@ -1387,6 +1477,8 @@ class Config:
             knowledge_rerank_top_k=knowledge_rerank_top_k,
             cognitive=cognitive,
             naga=naga,
+            image_gen=image_gen,
+            models_image_gen=models_image_gen,
         )
 
     @property
@@ -1523,6 +1615,18 @@ class Config:
         if self._bilibili_private_ids_set:
             return int(user_id) in self._bilibili_private_ids_set
         # 功能白名单为空时跟随全局 access 控制
+        return self.is_private_allowed(user_id)
+
+    def is_arxiv_auto_extract_allowed_group(self, group_id: int) -> bool:
+        """群聊是否允许 arXiv 自动提取。"""
+        if self._arxiv_group_ids_set:
+            return int(group_id) in self._arxiv_group_ids_set
+        return self.is_group_allowed(group_id)
+
+    def is_arxiv_auto_extract_allowed_private(self, user_id: int) -> bool:
+        """私聊是否允许 arXiv 自动提取。"""
+        if self._arxiv_private_ids_set:
+            return int(user_id) in self._arxiv_private_ids_set
         return self.is_private_allowed(user_id)
 
     def should_process_group_message(self, is_at_bot: bool) -> bool:
@@ -1679,8 +1783,9 @@ class Config:
                     _get_value(
                         data, ("models", "embedding", "queue_interval_seconds"), None
                     ),
-                    1.0,
-                )
+                    0.0,
+                ),
+                0.0,
             ),
             dimensions=_coerce_int(
                 _get_value(data, ("models", "embedding", "dimensions"), None), 0
@@ -1701,8 +1806,9 @@ class Config:
         queue_interval_seconds = _normalize_queue_interval(
             _coerce_float(
                 _get_value(data, ("models", "rerank", "queue_interval_seconds"), None),
-                1.0,
-            )
+                0.0,
+            ),
+            0.0,
         )
         return RerankModelConfig(
             api_url=_coerce_str(
@@ -2286,6 +2392,138 @@ class Config:
         return config
 
     @staticmethod
+    def _parse_grok_model_config(data: dict[str, Any]) -> GrokModelConfig:
+        queue_interval_seconds = _normalize_queue_interval(
+            _coerce_float(
+                _get_value(
+                    data,
+                    ("models", "grok", "queue_interval_seconds"),
+                    "GROK_MODEL_QUEUE_INTERVAL",
+                ),
+                1.0,
+            )
+        )
+        return GrokModelConfig(
+            api_url=_coerce_str(
+                _get_value(data, ("models", "grok", "api_url"), "GROK_MODEL_API_URL"),
+                "",
+            ),
+            api_key=_coerce_str(
+                _get_value(data, ("models", "grok", "api_key"), "GROK_MODEL_API_KEY"),
+                "",
+            ),
+            model_name=_coerce_str(
+                _get_value(data, ("models", "grok", "model_name"), "GROK_MODEL_NAME"),
+                "",
+            ),
+            max_tokens=_coerce_int(
+                _get_value(
+                    data, ("models", "grok", "max_tokens"), "GROK_MODEL_MAX_TOKENS"
+                ),
+                8192,
+            ),
+            queue_interval_seconds=queue_interval_seconds,
+            thinking_enabled=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "grok", "thinking_enabled"),
+                    "GROK_MODEL_THINKING_ENABLED",
+                ),
+                False,
+            ),
+            thinking_budget_tokens=_coerce_int(
+                _get_value(
+                    data,
+                    ("models", "grok", "thinking_budget_tokens"),
+                    "GROK_MODEL_THINKING_BUDGET_TOKENS",
+                ),
+                20000,
+            ),
+            thinking_include_budget=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "grok", "thinking_include_budget"),
+                    "GROK_MODEL_THINKING_INCLUDE_BUDGET",
+                ),
+                True,
+            ),
+            reasoning_effort_style=_resolve_reasoning_effort_style(
+                _get_value(
+                    data,
+                    ("models", "grok", "reasoning_effort_style"),
+                    "GROK_MODEL_REASONING_EFFORT_STYLE",
+                ),
+            ),
+            reasoning_enabled=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "grok", "reasoning_enabled"),
+                    "GROK_MODEL_REASONING_ENABLED",
+                ),
+                False,
+            ),
+            reasoning_effort=_resolve_reasoning_effort(
+                _get_value(
+                    data,
+                    ("models", "grok", "reasoning_effort"),
+                    "GROK_MODEL_REASONING_EFFORT",
+                ),
+                "medium",
+            ),
+            request_params=_get_model_request_params(data, "grok"),
+        )
+
+    @staticmethod
+    def _parse_image_gen_model_config(data: dict[str, Any]) -> ImageGenModelConfig:
+        """解析 [models.image_gen] 生图模型配置"""
+        return ImageGenModelConfig(
+            api_url=_coerce_str(
+                _get_value(
+                    data, ("models", "image_gen", "api_url"), "IMAGE_GEN_MODEL_API_URL"
+                ),
+                "",
+            ),
+            api_key=_coerce_str(
+                _get_value(
+                    data, ("models", "image_gen", "api_key"), "IMAGE_GEN_MODEL_API_KEY"
+                ),
+                "",
+            ),
+            model_name=_coerce_str(
+                _get_value(
+                    data, ("models", "image_gen", "model_name"), "IMAGE_GEN_MODEL_NAME"
+                ),
+                "",
+            ),
+            request_params=_get_model_request_params(data, "image_gen"),
+        )
+
+    @staticmethod
+    def _parse_image_gen_config(data: dict[str, Any]) -> ImageGenConfig:
+        """解析 [image_gen] 生图工具配置"""
+        return ImageGenConfig(
+            provider=_coerce_str(
+                _get_value(data, ("image_gen", "provider"), "IMAGE_GEN_PROVIDER"),
+                "xingzhige",
+            ),
+            xingzhige_size=_coerce_str(
+                _get_value(data, ("image_gen", "xingzhige_size"), None), "1:1"
+            ),
+            openai_size=_coerce_str(
+                _get_value(data, ("image_gen", "openai_size"), None), ""
+            ),
+            openai_quality=_coerce_str(
+                _get_value(data, ("image_gen", "openai_quality"), None), ""
+            ),
+            openai_style=_coerce_str(
+                _get_value(data, ("image_gen", "openai_style"), None), ""
+            ),
+            openai_timeout=_coerce_float(
+                _get_value(data, ("image_gen", "openai_timeout"), None), 120.0
+            ),
+        )
+
+    @staticmethod
     def _merge_admins(
         superadmin_qq: int, admin_qqs: list[int]
     ) -> tuple[int, list[int]]:
@@ -2346,6 +2584,7 @@ class Config:
         security_model: SecurityModelConfig,
         naga_model: SecurityModelConfig,
         agent_model: AgentModelConfig,
+        grok_model: GrokModelConfig,
     ) -> None:
         configs: list[
             tuple[
@@ -2353,7 +2592,8 @@ class Config:
                 ChatModelConfig
                 | VisionModelConfig
                 | SecurityModelConfig
-                | AgentModelConfig,
+                | AgentModelConfig
+                | GrokModelConfig,
             ]
         ] = [
             ("chat", chat_model),
@@ -2361,6 +2601,7 @@ class Config:
             ("security", security_model),
             ("naga", naga_model),
             ("agent", agent_model),
+            ("grok", grok_model),
         ]
         for name, cfg in configs:
             logger.debug(
@@ -2391,6 +2632,7 @@ class Config:
                     VisionModelConfig,
                     SecurityModelConfig,
                     AgentModelConfig,
+                    GrokModelConfig,
                 ),
             ):
                 changes.update(_update_dataclass(old_value, new_value, prefix=name))

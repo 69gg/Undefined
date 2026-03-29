@@ -47,6 +47,7 @@ responses_force_stateless_replay = false
 - `api_mode = "chat_completions"` 时，`thinking_*` 仍按原逻辑生效；若开启 `reasoning_enabled`，会按 OpenAI 标准发送顶层 `reasoning_effort`。
 - `api_mode = "chat_completions"` 没有标准 reasoning item / encrypted reasoning 续轮协议；本地历史里的 `reasoning_content` 不会作为 message 字段发回上游。
 - `api_mode = "responses"` 时，`thinking_*` 与 `reasoning_*` 分别独立控制 `thinking` 和 `reasoning.effort` / `output_config.effort`；Agent 的多轮工具调用默认使用 `previous_response_id + function_call_output` 续轮；若开启 `responses_force_stateless_replay`，则会改为标准 `output` items 重放，并自动补 `reasoning.encrypted_content`。
+- `api_mode = "responses"` 的工具关联字段遵循 OpenAI 标准：工具结果回传使用 `function_call_output.call_id`；`function_call.id` 若存在，应为模型生成的 output item id（通常为 `fc_*`），不能把 `call_*` 写到 `id`。
 - `thinking_tool_call_compat` 默认 `true`，会把内部兼容字段 `reasoning_content` 回填到本地消息历史，便于日志、回放和兼容读取。
 
 兼容的环境变量（会覆盖 `config.toml`）：
@@ -210,7 +211,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     messages = [{"role": "system", "content": system_prompt}]
     if agent_history:
         messages.extend(agent_history) # 注入历史
-    messages.append({"role": "user", "content": f"用户需求：{user_prompt}"})
+    messages.append({"role": "user", "content": user_prompt})
 
     # 3. 使用统一接口请求模型
     result = await ai_client.submit_queued_llm_call(
@@ -261,7 +262,7 @@ mv skills/tools/my_tool skills/agents/my_agent/tools/
 ### web_agent（网络搜索助手）
 - **功能**：网页搜索和网页内容获取
 - **适用场景**：获取互联网最新信息、搜索新闻、爬取网页内容
-- **子工具**：`search_web`, `fetch_web`
+- **子工具**：`grok_search`, `web_search`, `crawl_webpage`
 
 ### file_analysis_agent（文件分析助手）
 - **功能**：分析代码、PDF、Docx、Xlsx 等多种格式文件
@@ -274,9 +275,9 @@ mv skills/tools/my_tool skills/agents/my_agent/tools/
 - **子工具**：`read_file`, `search_code`, `analyze_structure`
 
 ### info_agent（信息查询助手）
-- **功能**：查询天气、热搜、历史、WHOIS、B 站信息等
-- **适用场景**：天气查询、热点榜单、域名查询、B 站视频和 UP 主信息查询
-- **子工具**：`weather_query`, `*hot`, `whois`, `bilibili_search`, `bilibili_user_info`
+- **功能**：查询天气、热搜、历史、WHOIS、B 站信息、arXiv 检索等
+- **适用场景**：天气查询、热点榜单、域名查询、B 站视频和 UP 主信息查询、论文搜索
+- **子工具**：`weather_query`, `*hot`, `whois`, `bilibili_search`, `bilibili_user_info`, `arxiv_search`
 
 ### entertainment_agent（娱乐助手）
 - **功能**：运势、小说、创意内容与随机视频推荐等娱乐功能

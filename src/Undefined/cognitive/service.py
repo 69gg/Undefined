@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable, cast
 
@@ -143,6 +144,27 @@ class CognitiveService:
             return None
         return self._base_reranker()
 
+    async def _prepare_query_embedding(self, query: str) -> list[float] | None:
+        embed_query = getattr(self._vector_store, "embed_query", None)
+        if not callable(embed_query):
+            return None
+        try:
+            result = await embed_query(query)
+        except Exception as exc:
+            logger.warning("[认知服务] 预生成查询向量失败，回退即时计算: error=%s", exc)
+            return None
+        if not isinstance(result, list):
+            logger.warning("[认知服务] 预生成查询向量返回值非法，回退即时计算")
+            return None
+        normalized: list[float] = []
+        for item in result:
+            try:
+                normalized.append(float(item))
+            except (TypeError, ValueError):
+                logger.warning("[认知服务] 预生成查询向量包含非法元素，回退即时计算")
+                return None
+        return normalized
+
     @property
     def enabled(self) -> bool:
         return bool(self._config_getter().enabled)
@@ -247,6 +269,7 @@ class CognitiveService:
         )
         if current_private_boost <= 0:
             current_private_boost = 1.25
+        query_embedding = await self._prepare_query_embedding(query)
         common_kwargs: dict[str, Any] = {
             "reranker": self._current_reranker(),
             "candidate_multiplier": config.rerank_candidate_multiplier,
@@ -260,6 +283,8 @@ class CognitiveService:
             ),
             "apply_mmr": True,
         }
+        if query_embedding is not None:
+            common_kwargs["query_embedding"] = query_embedding
         uid_values = self._uid_candidates(user_id, sender_id)
 
         if request_type == "group":
@@ -269,19 +294,22 @@ class CognitiveService:
                 where={"request_type": "group"},
                 **common_kwargs,
             )
+            merge_started = time.perf_counter()
             merged = self._merge_weighted_events(
                 [(group_events, 1.0)],
                 top_k=safe_top_k,
                 current_group_id=group_id,
                 current_group_boost=current_group_boost,
             )
+            merge_duration = time.perf_counter() - merge_started
             logger.info(
-                "[认知服务] 自动检索（群聊）: group_candidates=%s merged=%s top_k=%s scope_multiplier=%s current_group_boost=%.2f",
+                "[认知服务] 自动检索（群聊）: group_candidates=%s merged=%s top_k=%s scope_multiplier=%s current_group_boost=%.2f merge=%.3fs",
                 len(group_events),
                 len(merged),
                 safe_top_k,
                 scope_candidate_multiplier,
                 current_group_boost,
+                merge_duration,
             )
             return merged
 
@@ -316,6 +344,7 @@ class CognitiveService:
             else:
                 group_events = cast(list[dict[str, Any]], await group_task)
                 private_events = []
+            merge_started = time.perf_counter()
             merged = self._merge_weighted_events(
                 [
                     (group_events, 1.0),
@@ -323,8 +352,9 @@ class CognitiveService:
                 ],
                 top_k=safe_top_k,
             )
+            merge_duration = time.perf_counter() - merge_started
             logger.info(
-                "[认知服务] 自动检索（私聊）: group_candidates=%s private_candidates=%s merged=%s top_k=%s scope_multiplier=%s private_boost=%.2f uid_candidates=%s",
+                "[认知服务] 自动检索（私聊）: group_candidates=%s private_candidates=%s merged=%s top_k=%s scope_multiplier=%s private_boost=%.2f uid_candidates=%s merge=%.3fs",
                 len(group_events),
                 len(private_events),
                 len(merged),
@@ -332,6 +362,7 @@ class CognitiveService:
                 scope_candidate_multiplier,
                 current_private_boost,
                 uid_values,
+                merge_duration,
             )
             return merged
 
@@ -670,6 +701,7 @@ class CognitiveService:
                 getattr(config, "time_decay_min_similarity", 0.35)
             ),
             apply_mmr=True,
+            query_embedding=await self._prepare_query_embedding(query),
         )
         logger.info("[认知服务] 搜索事件完成: count=%s", len(results))
         return results
@@ -720,6 +752,7 @@ class CognitiveService:
             where=where,
             reranker=self._current_reranker(),
             candidate_multiplier=config.rerank_candidate_multiplier,
+            query_embedding=await self._prepare_query_embedding(query),
         )
         logger.info("[认知服务] 搜索侧写完成: count=%s", len(results))
         return results

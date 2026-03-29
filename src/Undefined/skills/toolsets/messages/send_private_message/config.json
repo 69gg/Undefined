@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "send_private_message",
-        "description": "发送私聊消息给指定用户。可在群聊或私聊会话中使用；若未提供 user_id，默认使用当前会话用户。会受到访问控制白名单限制。最后必须调用 end 工具结束对话。",
+        "description": "发送私聊消息给指定用户。可在群聊或私聊会话中使用；若未提供 user_id，默认使用当前会话用户。会受到访问控制白名单限制。最后必须调用 end 工具结束对话。成功时工具结果会尽量返回新消息的 message_id，便于后续再次用 reply_to 引用任意已知 message_id 的消息，包括当前消息、历史消息、别人发的消息或 Bot 之前发出的消息。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -16,7 +16,7 @@
                 },
                 "reply_to": {
                     "type": "integer",
-                    "description": "可选。要引用回复的消息 ID (message_id)。设置后消息将以引用回复形式出现，可从历史消息的 message_id 属性获取。"
+                    "description": "可选。要引用回复的消息 ID (message_id)。设置后消息将以引用回复形式出现。可以使用任意已知的 message_id，包括当前消息 XML、历史消息、别人发的消息或 Bot 之前发出的消息。"
                 }
             },
             "required": ["message"]

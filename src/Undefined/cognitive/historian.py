@@ -187,6 +187,27 @@ class HistorianWorker:
         self._task: asyncio.Task[None] | None = None
         self._inflight_tasks: set[asyncio.Task[None]] = set()
 
+    async def _prepare_query_embedding(self, query_text: str) -> list[float] | None:
+        embed_query = getattr(self._vector_store, "embed_query", None)
+        if not callable(embed_query):
+            return None
+        try:
+            result = await embed_query(query_text)
+        except Exception as exc:
+            logger.warning("[史官] 预生成查询向量失败，回退即时计算: error=%s", exc)
+            return None
+        if not isinstance(result, list):
+            logger.warning("[史官] 预生成查询向量返回值非法，回退即时计算")
+            return None
+        normalized: list[float] = []
+        for item in result:
+            try:
+                normalized.append(float(item))
+            except (TypeError, ValueError):
+                logger.warning("[史官] 预生成查询向量包含非法元素，回退即时计算")
+                return None
+        return normalized
+
     async def start(self) -> None:
         logger.info("[史官] Worker 启动中")
         self._task = asyncio.create_task(self._poll_loop())
@@ -673,6 +694,7 @@ class HistorianWorker:
         query_text: str,
         entity_id: str,
         top_k: int,
+        query_embedding: list[float] | None = None,
     ) -> list[dict[str, Any]]:
         """用户历史检索兼容路径：分别按 sender_id/user_id 查询并合并去重。
 
@@ -680,17 +702,22 @@ class HistorianWorker:
         query sender_id/user_id separately, then merge and dedupe.
         """
         safe_top_k = max(1, int(top_k))
+        query_embedding_value = query_embedding
+        if query_embedding_value is None:
+            query_embedding_value = await self._prepare_query_embedding(query_text)
         sender_query = self._vector_store.query_events(
             query_text,
             top_k=safe_top_k,
             where={"sender_id": entity_id},
             apply_mmr=True,
+            query_embedding=query_embedding_value,
         )
         user_query = self._vector_store.query_events(
             query_text,
             top_k=safe_top_k,
             where={"user_id": entity_id},
             apply_mmr=True,
+            query_embedding=query_embedding_value,
         )
         sender_events_raw, user_events_raw = await asyncio.gather(
             sender_query, user_query
@@ -748,18 +775,21 @@ class HistorianWorker:
             if isinstance(observations_raw, list)
             else str(observations_raw)
         )
+        query_embedding = await self._prepare_query_embedding(observations_text)
         if entity_type == "group":
             historical_events = await self._vector_store.query_events(
                 observations_text,
                 top_k=8,
                 where={"group_id": entity_id},
                 apply_mmr=True,
+                query_embedding=query_embedding,
             )
         else:
             historical_events = await self._query_user_history_events_for_profile_merge(
                 query_text=observations_text,
                 entity_id=entity_id,
                 top_k=8,
+                query_embedding=query_embedding,
             )
         historical_lines = (
             "\n".join(

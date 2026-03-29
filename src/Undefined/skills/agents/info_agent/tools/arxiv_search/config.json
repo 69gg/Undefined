@@ -1,0 +1,25 @@
+{
+    "type": "function",
+    "function": {
+        "name": "arxiv_search",
+        "description": "搜索 arXiv 论文，返回标题、作者、分类、日期和 arXiv 标识。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "msg": {
+                    "type": "string",
+                    "description": "搜索内容"
+                },
+                "n": {
+                    "type": "integer",
+                    "description": "返回数据数量（默认 5，最大 20）"
+                },
+                "start": {
+                    "type": "integer",
+                    "description": "起始偏移（默认 0）"
+                }
+            },
+            "required": ["msg"]
+        }
+    }
+}

@@ -20,6 +20,7 @@ from Undefined.ai.transports.openai_transport import (
 )
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.config.models import ChatModelConfig
+from Undefined.config.models import GrokModelConfig
 from Undefined.token_usage_storage import TokenUsageStorage
 
 
@@ -134,6 +135,44 @@ async def test_chat_request_uses_model_reasoning_and_request_params(
 
 
 @pytest.mark.asyncio
+async def test_grok_request_defaults_to_chat_completions() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeClient()
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = GrokModelConfig(
+        api_url="https://grok.example/v1",
+        api_key="sk-grok",
+        model_name="grok-4-search",
+        max_tokens=1024,
+        reasoning_enabled=True,
+        reasoning_effort="low",
+        request_params={"temperature": 0.3},
+    )
+
+    await requester.request(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "latest AI chip news"}],
+        max_tokens=256,
+        call_type="grok_search",
+    )
+
+    assert fake_client.chat.completions.last_kwargs is not None
+    assert fake_client.chat.completions.last_kwargs["model"] == "grok-4-search"
+    assert fake_client.chat.completions.last_kwargs["max_tokens"] == 256
+    assert fake_client.chat.completions.last_kwargs["temperature"] == 0.3
+    assert fake_client.chat.completions.last_kwargs["reasoning_effort"] == "low"
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_chat_request_strips_internal_reasoning_fields_from_messages() -> None:
     requester = ModelRequester(
         http_client=httpx.AsyncClient(),
@@ -169,6 +208,7 @@ async def test_chat_request_strips_internal_reasoning_fields_from_messages() -> 
             {
                 "role": "assistant",
                 "content": "",
+                "phase": "commentary",
                 "tool_calls": tool_calls,
                 "reasoning_content": "内部思维链",
                 RESPONSES_OUTPUT_ITEMS_KEY: [
@@ -194,6 +234,7 @@ async def test_chat_request_strips_internal_reasoning_fields_from_messages() -> 
     }
     assert "reasoning_content" not in outbound_messages[1]
     assert RESPONSES_OUTPUT_ITEMS_KEY not in outbound_messages[1]
+    assert "phase" not in outbound_messages[1]
 
     await requester._http_client.aclose()
 
@@ -523,6 +564,161 @@ def test_responses_stateless_replay_uses_standard_output_items() -> None:
             "call_id": "call_1",
             "output": "done",
         },
+    ]
+
+
+def test_responses_stateless_replay_moves_call_like_function_call_id_to_call_id() -> (
+    None
+):
+    normalized = normalize_responses_result(
+        {
+            "id": "resp_replay_call_like_id",
+            "output": [
+                {
+                    "type": "function_call",
+                    "id": "call_1",
+                    "name": "lookup",
+                    "arguments": '{"query":"weather"}',
+                },
+            ],
+        }
+    )
+    assistant_message = normalized["choices"][0]["message"]
+
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+    )
+    request_body = build_request_body(
+        model_config=cfg,
+        messages=[
+            {"role": "user", "content": "hello"},
+            assistant_message,
+            {"role": "tool", "tool_call_id": "call_1", "content": "done"},
+        ],
+        max_tokens=128,
+        transport_state={"stateless_replay": True},
+    )
+
+    assert request_body["input"] == [
+        {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "hello"}],
+        },
+        {
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "lookup",
+            "arguments": '{"query":"weather"}',
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "done",
+        },
+    ]
+
+
+def test_build_request_body_responses_encodes_assistant_history_as_output_text() -> (
+    None
+):
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+    )
+
+    body = build_request_body(
+        model_config=cfg,
+        messages=[
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi there"},
+            {"role": "user", "content": "continue"},
+        ],
+        max_tokens=128,
+    )
+
+    assert body["input"] == [
+        {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "hello"}],
+        },
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "hi there"}],
+        },
+        {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "continue"}],
+        },
+    ]
+
+
+def test_build_request_body_responses_preserves_assistant_phase() -> None:
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+    )
+
+    body = build_request_body(
+        model_config=cfg,
+        messages=[
+            {
+                "role": "assistant",
+                "content": "working through it",
+                "phase": "commentary",
+            }
+        ],
+        max_tokens=128,
+    )
+
+    assert body["input"] == [
+        {
+            "type": "message",
+            "role": "assistant",
+            "phase": "commentary",
+            "content": [{"type": "output_text", "text": "working through it"}],
+        }
+    ]
+
+
+def test_normalize_responses_result_preserves_assistant_phase() -> None:
+    normalized = normalize_responses_result(
+        {
+            "id": "resp_phase",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "phase": "final_answer",
+                    "content": [{"type": "output_text", "text": "done"}],
+                }
+            ],
+        }
+    )
+
+    message = normalized["choices"][0]["message"]
+    assert message["content"] == "done"
+    assert message["phase"] == "final_answer"
+    assert message[RESPONSES_OUTPUT_ITEMS_KEY] == [
+        {
+            "type": "message",
+            "role": "assistant",
+            "phase": "final_answer",
+            "content": [{"type": "output_text", "text": "done"}],
+        }
     ]
 
 

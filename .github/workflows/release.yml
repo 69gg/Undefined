@@ -96,8 +96,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .mypy_cache
-          key: ${{ runner.os }}-mypy-${{ hashFiles('**/uv.lock') }}
+          key: ${{ runner.os }}-mypy-${{ hashFiles('**/uv.lock') }}-${{ hashFiles('src/**/*.py') }}
           restore-keys: |
+            ${{ runner.os }}-mypy-${{ hashFiles('**/uv.lock') }}-
             ${{ runner.os }}-mypy-
 
       - name: Run Mypy
@@ -132,14 +133,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: ${{ env.APP_DIR }}/package-lock.json
 
-      - name: Cache npm and node_modules
+      - name: Cache node_modules
+        id: cache-node-modules
         uses: actions/cache@v4
         with:
-          path: ~/.npm
-          key: ${{ runner.os }}-undefined-console-npm-${{ hashFiles('apps/undefined-console/package-lock.json', 'apps/undefined-console/package.json', 'apps/undefined-console/biome.json') }}
-          restore-keys: |
-            ${{ runner.os }}-undefined-console-npm-
+          path: ${{ env.APP_DIR }}/node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('apps/undefined-console/package-lock.json') }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -161,6 +163,7 @@ jobs:
             patchelf
 
       - name: Install app dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
         working-directory: ${{ env.APP_DIR }}
         run: npm ci
 
@@ -200,14 +203,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: ${{ env.APP_DIR }}/package-lock.json
 
-      - name: Cache npm and node_modules
+      - name: Cache node_modules
+        id: cache-node-modules
         uses: actions/cache@v4
         with:
-          path: ~/.npm
-          key: ${{ runner.os }}-undefined-console-npm-${{ hashFiles('apps/undefined-console/package-lock.json', 'apps/undefined-console/package.json', 'apps/undefined-console/biome.json') }}
-          restore-keys: |
-            ${{ runner.os }}-undefined-console-npm-
+          path: ${{ env.APP_DIR }}/node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('apps/undefined-console/package-lock.json') }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -233,6 +237,7 @@ jobs:
             patchelf
 
       - name: Install app dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
         working-directory: ${{ env.APP_DIR }}
         run: npm ci
 
@@ -302,12 +307,28 @@ jobs:
           if-no-files-found: error
 
   build-tauri-android:
-    name: Build Tauri Android
+    name: Build Tauri Android (${{ matrix.abi_label }})
     runs-on: ubuntu-latest
     environment: release
     needs:
       - verify-python
       - verify-console
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi_label: arm64-v8a
+            tauri_target: aarch64
+            rust_target: aarch64-linux-android
+          - abi_label: armeabi-v7a
+            tauri_target: armv7
+            rust_target: armv7-linux-androideabi
+          - abi_label: x86
+            tauri_target: i686
+            rust_target: i686-linux-android
+          - abi_label: x86_64
+            tauri_target: x86_64
+            rust_target: x86_64-linux-android
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -316,24 +337,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: ${{ env.APP_DIR }}/package-lock.json
 
-      - name: Cache npm and node_modules
+      - name: Cache node_modules
+        id: cache-node-modules
         uses: actions/cache@v4
         with:
-          path: ~/.npm
-          key: ${{ runner.os }}-undefined-console-npm-${{ hashFiles('apps/undefined-console/package-lock.json', 'apps/undefined-console/package.json', 'apps/undefined-console/biome.json') }}
-          restore-keys: |
-            ${{ runner.os }}-undefined-console-npm-
+          path: ${{ env.APP_DIR }}/node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('apps/undefined-console/package-lock.json') }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          targets: ${{ matrix.rust_target }}
 
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
         with:
-          key: android
+          key: android-${{ matrix.abi_label }}
           workspaces: |
             apps/undefined-console/src-tauri -> target
 
@@ -360,6 +382,7 @@ jobs:
             ${{ runner.os }}-gradle-
 
       - name: Install app dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
         working-directory: ${{ env.APP_DIR }}
         run: npm ci
 
@@ -367,17 +390,147 @@ jobs:
         working-directory: ${{ env.APP_DIR }}
         run: npm run tauri:android:init
 
-      - name: Build Android APK
-        # If signing secrets are wired into the generated Android project, replace the
-        # debug fallback with a release build. The scaffold keeps the expectation explicit
-        # while still publishing an installable APK on every non-iOS release.
-        working-directory: ${{ env.APP_DIR }}
-        run: npm run tauri:android:debug -- --ci --apk
+      - name: Validate Android signing secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          missing=0
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error title=Missing Android signing secret::${name} is required for release APK signing."
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
 
-      - name: Collect Android artifact
+      - name: Configure Android release signing
+        working-directory: ${{ env.APP_DIR }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          KEYSTORE_PATH="$RUNNER_TEMP/undefined-console-release.jks"
+          KEYSTORE_PROPERTIES_PATH="src-tauri/gen/android/keystore.properties"
+          APP_GRADLE_PATH=$(find "src-tauri/gen/android" -type f \( -path '*/app/build.gradle.kts' -o -path '*/app/build.gradle' \) | sort | head -n 1)
+
+          if [ -z "$APP_GRADLE_PATH" ]; then
+            echo "Could not find generated Android app Gradle file" >&2
+            exit 1
+          fi
+
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+
+          cat > "$KEYSTORE_PROPERTIES_PATH" <<EOF
+          storeFile=$KEYSTORE_PATH
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
+
+          APP_GRADLE_PATH="$APP_GRADLE_PATH" python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path(os.environ["APP_GRADLE_PATH"])
+          text = path.read_text(encoding="utf-8")
+
+          if path.suffix == ".kts":
+              imports = []
+              if "import java.io.FileInputStream" not in text:
+                  imports.append("import java.io.FileInputStream")
+              if "import java.util.Properties" not in text:
+                  imports.append("import java.util.Properties")
+              if imports:
+                  text = "\n".join(imports) + "\n" + text
+
+              keystore_setup = """android {
+              val keystorePropertiesFile = rootProject.file("keystore.properties")
+              val keystoreProperties = Properties()
+              if (keystorePropertiesFile.exists()) {
+                  FileInputStream(keystorePropertiesFile).use { keystoreProperties.load(it) }
+              }
+          """
+              if "keystorePropertiesFile" not in text:
+                  if "android {" not in text:
+                      raise SystemExit("Expected android block in generated build.gradle.kts")
+                  text = text.replace("android {", keystore_setup, 1)
+
+              signing_block = """    signingConfigs {
+                      create("release") {
+                          storeFile = keystoreProperties.getProperty("storeFile")?.let(::file)
+                          storePassword = keystoreProperties.getProperty("storePassword")
+                          keyAlias = keystoreProperties.getProperty("keyAlias")
+                          keyPassword = keystoreProperties.getProperty("keyPassword")
+                      }
+                  }
+
+                  buildTypes {"""
+              if 'create("release")' not in text:
+                  if "    buildTypes {" not in text:
+                      raise SystemExit("Expected buildTypes block in generated build.gradle.kts")
+                  text = text.replace("    buildTypes {", signing_block, 1)
+
+              release_marker = '        getByName("release") {'
+              release_signing = '        getByName("release") {\n            signingConfig = signingConfigs.getByName("release")'
+              if 'signingConfig = signingConfigs.getByName("release")' not in text:
+                  if release_marker not in text:
+                      raise SystemExit("Expected release buildType in generated build.gradle.kts")
+                  text = text.replace(release_marker, release_signing, 1)
+          else:
+              keystore_setup = """def keystorePropertiesFile = rootProject.file("keystore.properties")
+          def keystoreProperties = new Properties()
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+          }
+
+          android {"""
+              if "keystorePropertiesFile" not in text:
+                  if "android {" not in text:
+                      raise SystemExit("Expected android block in generated build.gradle")
+                  text = text.replace("android {", keystore_setup, 1)
+
+              signing_block = """    signingConfigs {
+                  release {
+                      storeFile file(keystoreProperties['storeFile'])
+                      storePassword keystoreProperties['storePassword']
+                      keyAlias keystoreProperties['keyAlias']
+                      keyPassword keystoreProperties['keyPassword']
+                  }
+              }
+
+              buildTypes {"""
+              if "signingConfigs {" not in text:
+                  if "    buildTypes {" not in text:
+                      raise SystemExit("Expected buildTypes block in generated build.gradle")
+                  text = text.replace("    buildTypes {", signing_block, 1)
+
+              release_marker = "        release {"
+              release_signing = "        release {\n            signingConfig signingConfigs.release"
+              if "signingConfig signingConfigs.release" not in text:
+                  if release_marker not in text:
+                      raise SystemExit("Expected release buildType in generated build.gradle")
+                  text = text.replace(release_marker, release_signing, 1)
+
+          path.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Build Android release APK
+        working-directory: ${{ env.APP_DIR }}
+        run: npm run tauri:android -- --ci --apk --target ${{ matrix.tauri_target }}
+
+      - name: Collect Android release artifact
         shell: bash
         env:
           TAG: ${{ github.ref_name }}
+          ABI_LABEL: ${{ matrix.abi_label }}
         run: |
           copy_single_match() {
             local search_root="$1"
@@ -386,7 +539,7 @@ jobs:
             local matches=()
             while IFS= read -r line; do
               matches+=("$line")
-            done < <(find "$search_root" -type f -name "$pattern" | sort)
+            done < <(find "$search_root" -type f -name "$pattern" ! -name '*-unsigned.apk' | sort)
             if [ "${#matches[@]}" -ne 1 ]; then
               echo "Expected exactly one match for $pattern under $search_root, found ${#matches[@]}" >&2
               printf 'Matches:\n%s\n' "${matches[*]}" >&2
@@ -396,12 +549,12 @@ jobs:
           }
 
           mkdir -p release-artifacts
-          copy_single_match "$APP_DIR/src-tauri" '*.apk' "release-artifacts/Undefined-Console-${TAG}-android-universal.apk"
+          copy_single_match "$APP_DIR/src-tauri" '*.apk' "release-artifacts/Undefined-Console-${TAG}-android-${ABI_LABEL}-release.apk"
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tauri-android
+          name: tauri-android-${{ matrix.abi_label }}
           path: release-artifacts/*
           if-no-files-found: error
 

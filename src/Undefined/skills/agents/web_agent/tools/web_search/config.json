@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "web_search",
-        "description": "使用 SearXNG 搜索引擎进行网页搜索，获取互联网上的信息。用于回答需要最新信息或你不确定的问题。",
+        "description": "使用 SearXNG 搜索引擎进行网页搜索。它是 grok_search 不可用时的后备联网搜索工具，适用于回答需要最新信息或你不确定的问题。",
         "parameters": {
             "type": "object",
             "properties": {

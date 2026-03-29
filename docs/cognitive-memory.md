@@ -34,6 +34,7 @@ enabled = true
 api_url = "https://api.openai.com/v1"
 api_key = "sk-xxx"
 model_name = "text-embedding-3-small"
+queue_interval_seconds = 0.0
 ```
 
 > `models.embedding` 是必要前提。未配置时，即使 `cognitive.enabled = true`，启动时也会自动降级并打印警告。
@@ -185,6 +186,7 @@ MMR_score = λ × relevance(doc, query) − (1 − λ) × max_similarity(doc, se
 说明：
 
 - 该规则影响自动注入路径下的语义召回与 rerank（两者使用同一 query）。
+- 同一轮自动检索会复用同一个 query embedding；短时间内的相同 query 还会命中本地短 TTL 缓存，避免 group/private 多作用域场景重复向量化。
 - 手动工具 `cognitive.search_events` / `cognitive.search_profiles` 仍使用调用方显式传入的 `query`。
 
 ### 自动注入场景的跨会话检索与加权
@@ -332,6 +334,7 @@ data/cognitive/
 | `api_url` | OpenAI 兼容 base URL |
 | `api_key` | API 密钥 |
 | `model_name` | 模型名称（推荐 `text-embedding-3-small`） |
+| `queue_interval_seconds` | 发车间隔（默认 `0.0`，立即发车；`<0` 回退 `0.0`） |
 | `dimensions` | 向量维度（可选，模型默认值） |
 
 ### 热更新说明

@@ -165,6 +165,7 @@ model_name = "gpt-4o-mini"
   - 默认使用官方对象格式：`{"type":"function","name":"..."}`
   - `responses_tool_choice_compat=true` 时，会把指定函数的 `tool_choice` 降级为字符串 `"required"`，并只保留目标工具，用于兼容部分不完整代理
   - `responses_force_stateless_replay=true` 时，多轮工具调用会始终跳过 `previous_response_id`，直接走完整消息重放；续轮时会优先回放标准 `output` items（含 reasoning item），并自动补 `include=["reasoning.encrypted_content"]`
+  - Responses 工具续轮遵循 OpenAI 的标准字段语义：工具结果使用 `function_call_output.call_id` 关联前一轮工具调用；`function_call.id` 若存在，必须是模型生成的 output item id（通常为 `fc_*`），不能把 `call_*` 误写进 `id`
   - 仅建议在默认关闭时请求仍返回 500，再尝试开启这些兼容开关
   - 当前已知 `new-api v0.11.4-alpha.3` 存在这类兼容问题
   - 旧式 `thinking_*` 不会下发到 `responses`
@@ -257,7 +258,28 @@ model_name = "gpt-4o-mini"
 - 若部分字段缺失：逐项继承 agent 配置，包括 `api_mode`、`reasoning_*`、`thinking_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`。
 - `queue_interval_seconds=0` 时立即发车，`<0` 时回退到 agent 的间隔。
 
-### 4.4.8 模型池
+### 4.4.8 `[models.grok]` Grok 搜索模型
+
+用途：
+- 仅供 `web_agent` 内的 `grok_search` 子工具使用。
+
+默认：
+- `max_tokens=8192`
+- `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
+- 固定走 `chat_completions`
+- `reasoning_enabled=false`
+- `reasoning_effort="medium"`
+- `thinking_enabled=false`
+- `thinking_budget_tokens=20000`
+- `thinking_include_budget=true`
+- `reasoning_effort_style="openai"`
+
+补充：
+- 该模型节不提供 `api_mode`。
+- 该模型节不提供 `thinking_tool_call_compat`、`responses_tool_choice_compat`、`responses_force_stateless_replay`。
+- `[models.grok.request_params]` 的保留字段规则与 `chat_completions` 一致。
+
+### 4.4.9 模型池
 
 相关节：
 - `[models.chat.pool]`
@@ -290,34 +312,34 @@ model_name = "gpt-4o-mini"
 2. 对应池 `enabled=true`
 3. 池列表非空
 
-### 4.4.9 `[models.embedding]` 嵌入模型
+### 4.4.10 `[models.embedding]` 嵌入模型
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `api_url` | `""` | 嵌入 API 地址 |
 | `api_key` | `""` | API Key |
 | `model_name` | `""` | 模型名 |
-| `queue_interval_seconds` | `1.0` | 发车间隔（`0` 立即发车，`<0` 回退 `1.0`） |
+| `queue_interval_seconds` | `0.0` | 发车间隔（`0` 立即发车，`<0` 回退 `0.0`） |
 | `dimensions` | `0` | 向量维度；`0`/空视为 `None`（模型默认） |
 | `query_instruction` | `""` | 查询前缀 |
 | `document_instruction` | `""` | 文档前缀 |
 | `request_params` | `{}` | 额外请求体参数；保留字段如 `model`/`input`/`dimensions` 会忽略 |
 
-### 4.4.10 `[models.rerank]` 重排模型
+### 4.4.11 `[models.rerank]` 重排模型
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `api_url` | `""` | rerank API 地址 |
 | `api_key` | `""` | API Key |
 | `model_name` | `""` | 模型名 |
-| `queue_interval_seconds` | `1.0` | `0` 立即发车，`<0` 回退 `1.0` |
+| `queue_interval_seconds` | `0.0` | `0` 立即发车，`<0` 回退 `0.0` |
 | `query_instruction` | `""` | 查询前缀 |
 | `request_params` | `{}` | 额外请求体参数；保留字段如 `model`/`query`/`documents`/`top_n` 会忽略 |
 
 `request_params` 说明：
 - 仅用于**请求体**字段，不包含 `api_key`、`base_url`、`timeout`、`extra_headers` 等 client 选项。
 - 聊天类（`chat_completions`）保留字段：`model`、`messages`、`max_tokens`、`tools`、`tool_choice`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`、`output_config`。
-- 聊天类（`responses`）保留字段：`model`、`input`、`instructions`、`max_output_tokens`、`tools`、`tool_choice`、`previous_response_id`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`、`output_config`。启用 `responses_force_stateless_replay` 时会主动跳过 `previous_response_id`。
+- 聊天类（`responses`）保留字段：`model`、`input`、`instructions`、`max_output_tokens`、`tools`、`tool_choice`、`previous_response_id`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`、`output_config`。启用 `responses_force_stateless_replay` 时会主动跳过 `previous_response_id`。历史 `output` items 由运行时自动维护；不要通过 `request_params` 手工注入或覆盖 `function_call.id` / `call_id`。
 - embedding 保留字段：`model`、`input`、`dimensions`。
 - rerank 保留字段：`model`、`query`、`documents`、`top_n`、`return_documents`。
 
@@ -438,8 +460,11 @@ model_name = "gpt-4o-mini"
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `searxng_url` | `""` | SearXNG 地址；为空则禁用搜索包装器 |
+| `grok_search_enabled` | `false` | 是否在 `web_agent` 中暴露 `grok_search`；启用后该工具优先于 `web_search` |
 
-该项可热更新，运行时会重建搜索客户端。
+补充：
+- `searxng_url` 可热更新，运行时会重建搜索客户端。
+- `grok_search_enabled` 不需要重建客户端；它只影响 `web_agent` 的工具暴露。
 
 ---
 
@@ -533,6 +558,25 @@ model_name = "gpt-4o-mini"
 | `oversize_strategy` | `"downgrade"` | 超限策略 | 仅 `downgrade/info`，非法回退 `downgrade` |
 | `auto_extract_group_ids` | `[]` | 功能级群白名单 | 空时跟随全局 access |
 | `auto_extract_private_ids` | `[]` | 功能级私聊白名单 | 空时跟随全局 access |
+
+---
+
+### 4.20.1 `[arxiv]` 自动提取
+
+| 字段 | 默认值 | 说明 | 约束/回退 |
+|---|---:|---|---|
+| `auto_extract_enabled` | `false` | 是否自动提取 arXiv 论文 | |
+| `max_file_size` | `100` | 最大 PDF 体积（MB），`0` 不限 | `<0` 回退 `100` |
+| `auto_extract_group_ids` | `[]` | 功能级群白名单 | 空时跟随全局 access |
+| `auto_extract_private_ids` | `[]` | 功能级私聊白名单 | 空时跟随全局 access |
+| `auto_extract_max_items` | `5` | 单条消息最多自动处理几篇论文 | `<=0` 回退 `5`，`>20` 截断到 `20` |
+| `author_preview_limit` | `20` | 信息消息中作者预览上限 | `<=0` 回退 `20`，`>100` 截断到 `100` |
+| `summary_preview_chars` | `1000` | 信息消息中摘要预览字符数上限 | `<=0` 回退 `1000`，`>8000` 截断到 `8000` |
+
+触发规则：
+- 命中 `arxiv.org/abs/...`、`arxiv.org/pdf/...` 或 `arXiv:<id>` 时直接触发。
+- 裸新式编号仅在消息中同时出现 `arxiv` 关键词时触发，避免误判普通数字串。
+- PDF 下载或上传失败时不会额外发送失败提示，只保留论文信息消息。
 
 ---
 
@@ -719,6 +763,7 @@ model_name = "gpt-4o-mini"
 
 ### 5.3 明确“会执行热应用”的字段
 - 模型发车间隔 / 模型名 / 模型池变更（队列间隔刷新）
+- `models.grok.model_name` / `models.grok.queue_interval_seconds`（队列间隔刷新）
 - `skills.intro_autogen_*`（Agent intro 生成器配置刷新）
 - `search.searxng_url`（搜索客户端刷新）
 - `skills.hot_reload*`（技能热重载任务重启）

@@ -417,6 +417,47 @@ responses_force_stateless_replay = false
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
 [models.historian.request_params]
 
+# zh: Grok 搜索模型配置（仅供 web_agent 内的 grok_search 使用；固定走 chat.completions，不支持 tool call 兼容字段）。
+# en: Grok search model config (used only by grok_search inside web_agent; always uses chat completions and does not expose tool-call compatibility fields).
+[models.grok]
+# zh: OpenAI-compatible 基址 URL，例如 https://api.example.com/v1。
+# en: OpenAI-compatible base URL, e.g. https://api.example.com/v1.
+api_url = ""
+# zh: Grok 搜索模型 API Key。
+# en: Grok search model API key.
+api_key = ""
+# zh: Grok 搜索模型名称。
+# en: Grok search model name.
+model_name = ""
+# zh: 可选限制：最大生成 tokens。
+# en: Optional limit: max generation tokens.
+max_tokens = 8192
+# zh: 队列发车间隔（秒，0 表示立即发车）。
+# en: Queue interval (seconds; 0 dispatches immediately).
+queue_interval_seconds = 1.0
+# zh: 是否启用 reasoning.effort。
+# en: Enable reasoning.effort.
+reasoning_enabled = false
+# zh: reasoning effort 档位。
+# en: reasoning effort level.
+reasoning_effort = "medium"
+# zh: 是否启用 thinking（思维链）。
+# en: Enable thinking (reasoning).
+thinking_enabled = false
+# zh: thinking 预算 tokens。
+# en: Thinking-budget tokens.
+thinking_budget_tokens = 20000
+# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
+# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+thinking_include_budget = true
+# zh: reasoning effort 传参风格：openai（reasoning_effort）/ anthropic（output_config.effort）。
+# en: Reasoning effort wire format: openai (reasoning_effort) / anthropic (output_config.effort).
+reasoning_effort_style = "openai"
+
+# zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
+# en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
+[models.grok.request_params]
+
 # zh: 嵌入模型配置（知识库语义检索使用）。
 # en: Embedding model config (used by knowledge semantic retrieval).
 [models.embedding]
@@ -431,7 +472,7 @@ api_key = ""
 model_name = ""
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
-queue_interval_seconds = 1.0
+queue_interval_seconds = 0.0
 # zh: 向量维度（可选）。0 或留空表示使用模型默认维度。
 # en: Embedding dimensions (optional). Use 0/empty to use model defaults.
 dimensions = 0
@@ -460,7 +501,7 @@ api_key = ""
 model_name = ""
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
-queue_interval_seconds = 1.0
+queue_interval_seconds = 0.0
 # zh: 查询端指令前缀（可选，部分 rerank 模型需要，如 "Instruct: ...\\nQuery: "）。
 # en: Query instruction prefix (optional, required by some rerank models, e.g. "Instruct: ...\\nQuery: ").
 query_instruction = ""
@@ -468,6 +509,23 @@ query_instruction = ""
 # zh: 额外请求体参数（可选），用于 rerank 供应商的扩展字段。
 # en: Extra request-body params (optional) for rerank-provider-specific fields.
 [models.rerank.request_params]
+
+# zh: 生图模型配置（用于 image_gen.provider="models" 时调用 OpenAI 兼容的图片生成接口）。
+# en: Image generation model config (used when image_gen.provider="models" to call OpenAI-compatible image generation API).
+[models.image_gen]
+# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（最终请求路径为 /v1/images/generations）。
+# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1 (final request path is /v1/images/generations).
+api_url = ""
+# zh: API Key。
+# en: API key.
+api_key = ""
+# zh: 模型名称（如 dall-e-3、minimax-image-01 等），空则使用上游默认。
+# en: Model name (e.g. dall-e-3, minimax-image-01, etc.), empty uses provider default.
+model_name = ""
+
+# zh: 额外请求体参数（可选）。
+# en: Extra request-body params (optional).
+[models.image_gen.request_params]
 
 # zh: 本地知识库配置。
 # en: Local knowledge base settings.
@@ -612,12 +670,15 @@ prefetch_tools = ["get_current_time"]
 # zh: 隐藏已预取的工具声明。
 # en: Hide prefetched tools from the model's tool list.
 prefetch_tools_hide = true
-# zh: 搜索服务配置（SearXNG）。
-# en: Search service config (SearxNG).
+# zh: 搜索服务配置。
+# en: Search service config.
 [search]
 # zh: SearxNG 搜索服务地址，例如 http://127.0.0.1:8849。
 # en: SearxNG service URL, e.g. http://127.0.0.1:8849.
 searxng_url = ""
+# zh: 是否在 web_agent 中启用 grok_search。启用后该工具会优先于 web_search 暴露给模型。
+# en: Enable grok_search in web_agent. When enabled, this tool is exposed with higher priority than web_search.
+grok_search_enabled = false
 
 # zh: 代理设置（可选）。
 # en: Proxy settings (optional).
@@ -651,6 +712,28 @@ xxapi_base_url = "https://v2.xxapi.cn"
 # zh: 星之阁 API 基础地址。
 # en: Xingzhige API base URL.
 xingzhige_base_url = "https://api.xingzhige.com"
+
+# zh: 生图工具配置。
+# en: Image generation tool config.
+[image_gen]
+# zh: 生图 provider："xingzhige"（免费星之阁 API）或 "models"（使用 [models.image_gen] 配置的 OpenAI 兼容接口）。
+# en: Image generation provider: "xingzhige" (free Xingzhige API) or "models" (OpenAI-compatible via [models.image_gen]).
+provider = "xingzhige"
+# zh: 星之阁模式默认图片比例（仅 provider="xingzhige" 生效）。
+# en: Default image size for Xingzhige mode (only effective when provider="xingzhige").
+xingzhige_size = "1:1"
+# zh: OpenAI 模式图片尺寸（仅 provider="models" 生效；空表示不传，使用上游默认，如 dall-e-3 默认 1024x1024）。
+# en: Image size for OpenAI mode (only effective when provider="models"; empty means not sent, using provider default, e.g. dall-e-3 default 1024x1024).
+openai_size = ""
+# zh: OpenAI 模式图片质量（仅 provider="models" 生效；空表示不传；dall-e-3 支持 standard/hd）。
+# en: Image quality for OpenAI mode (only effective when provider="models"; empty means not sent; dall-e-3 supports standard/hd).
+openai_quality = ""
+# zh: OpenAI 模式图片风格（仅 provider="models" 生效；空表示不传；dall-e-3 支持 vivid/natural）。
+# en: Image style for OpenAI mode (only effective when provider="models"; empty means not sent; dall-e-3 supports vivid/natural).
+openai_style = ""
+# zh: OpenAI 模式请求超时（秒）。
+# en: Request timeout for OpenAI mode (seconds).
+openai_timeout = 120.0
 
 # zh: XXAPI API 配置。
 # en: XXAPI config.
@@ -719,6 +802,31 @@ auto_extract_group_ids = []
 # zh: 自动提取功能的私聊白名单（空=跟随全局 access.allowed_private_ids）。
 # en: Private chat allowlist for auto-extraction (empty = follow global access.allowed_private_ids).
 auto_extract_private_ids = []
+
+# zh: arXiv 论文自动提取配置。
+# en: arXiv paper auto-extraction settings.
+[arxiv]
+# zh: 是否启用自动提取（检测到 arXiv 链接 / arXiv:ID / 带 arxiv 关键词的新式编号时自动发送论文信息并尽力附带 PDF）。
+# en: Enable auto-extraction (auto-send paper info and best-effort PDF when arXiv links / arXiv:ID / keyword-scoped new-style IDs are detected).
+auto_extract_enabled = false
+# zh: 最大 PDF 文件大小（MB），超过则不上传 PDF，仅发送论文信息。0=不限。
+# en: Max PDF file size (MB); exceeding this skips PDF upload and sends paper info only. 0=unlimited.
+max_file_size = 100
+# zh: 自动提取功能的群聊白名单（空=跟随全局 access.allowed_group_ids）。
+# en: Group allowlist for auto-extraction (empty = follow global access.allowed_group_ids).
+auto_extract_group_ids = []
+# zh: 自动提取功能的私聊白名单（空=跟随全局 access.allowed_private_ids）。
+# en: Private chat allowlist for auto-extraction (empty = follow global access.allowed_private_ids).
+auto_extract_private_ids = []
+# zh: 单条消息最多自动处理几篇 arXiv 论文。<=0 回退 5。
+# en: Max number of arXiv papers to auto-process from one message. <=0 falls back to 5.
+auto_extract_max_items = 5
+# zh: 论文信息里最多展示多少位作者。<=0 回退 20。
+# en: Max number of authors shown in paper info. <=0 falls back to 20.
+author_preview_limit = 20
+# zh: 论文信息里摘要预览的最大字符数。<=0 回退 1000。
+# en: Max summary preview characters in paper info. <=0 falls back to 1000.
+summary_preview_chars = 1000
 
 # zh: Code Delivery Agent 配置（代码交付 Agent，在 Docker 容器中编写代码并打包上传）。
 # en: Code Delivery Agent settings (writes code in Docker containers and delivers packaged results).

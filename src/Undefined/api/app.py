@@ -69,9 +69,12 @@ class _WebUIVirtualSender:
         auto_history: bool = True,
         *,
         mark_sent: bool = True,
-    ) -> None:
-        _ = user_id, auto_history, mark_sent
+        reply_to: int | None = None,
+        preferred_temp_group_id: int | None = None,
+    ) -> int | None:
+        _ = user_id, auto_history, mark_sent, reply_to, preferred_temp_group_id
         await self._send_private_callback(self._virtual_user_id, message)
+        return None
 
     async def send_group_message(
         self,
@@ -81,9 +84,11 @@ class _WebUIVirtualSender:
         history_prefix: str = "",
         *,
         mark_sent: bool = True,
-    ) -> None:
-        _ = group_id, auto_history, history_prefix, mark_sent
+        reply_to: int | None = None,
+    ) -> int | None:
+        _ = group_id, auto_history, history_prefix, mark_sent, reply_to
         await self._send_private_callback(self._virtual_user_id, message)
+        return None
 
     async def send_private_file(
         self,
@@ -394,6 +399,34 @@ async def _skipped_probe(
     payload: dict[str, Any] = {"name": name, "status": "skipped", "reason": reason}
     if model_name:
         payload["model_name"] = model_name
+    return payload
+
+
+def _build_internal_model_probe_payload(mcfg: Any) -> dict[str, Any]:
+    payload = {
+        "model_name": getattr(mcfg, "model_name", ""),
+        "api_url": _mask_url(getattr(mcfg, "api_url", "")),
+    }
+    if hasattr(mcfg, "api_mode"):
+        payload["api_mode"] = getattr(mcfg, "api_mode", "chat_completions")
+    if hasattr(mcfg, "thinking_enabled"):
+        payload["thinking_enabled"] = getattr(mcfg, "thinking_enabled", False)
+    if hasattr(mcfg, "thinking_tool_call_compat"):
+        payload["thinking_tool_call_compat"] = getattr(
+            mcfg, "thinking_tool_call_compat", True
+        )
+    if hasattr(mcfg, "responses_tool_choice_compat"):
+        payload["responses_tool_choice_compat"] = getattr(
+            mcfg, "responses_tool_choice_compat", False
+        )
+    if hasattr(mcfg, "responses_force_stateless_replay"):
+        payload["responses_force_stateless_replay"] = getattr(
+            mcfg, "responses_force_stateless_replay", False
+        )
+    if hasattr(mcfg, "reasoning_enabled"):
+        payload["reasoning_enabled"] = getattr(mcfg, "reasoning_enabled", False)
+    if hasattr(mcfg, "reasoning_effort"):
+        payload["reasoning_effort"] = getattr(mcfg, "reasoning_effort", "medium")
     return payload
 
 
@@ -869,26 +902,11 @@ class RuntimeAPIServer:
             "agent_model",
             "security_model",
             "naga_model",
+            "grok_model",
         ):
             mcfg = getattr(cfg, label, None)
             if mcfg is not None:
-                models_info[label] = {
-                    "model_name": getattr(mcfg, "model_name", ""),
-                    "api_url": _mask_url(getattr(mcfg, "api_url", "")),
-                    "api_mode": getattr(mcfg, "api_mode", "chat_completions"),
-                    "thinking_enabled": getattr(mcfg, "thinking_enabled", False),
-                    "thinking_tool_call_compat": getattr(
-                        mcfg, "thinking_tool_call_compat", True
-                    ),
-                    "responses_tool_choice_compat": getattr(
-                        mcfg, "responses_tool_choice_compat", False
-                    ),
-                    "responses_force_stateless_replay": getattr(
-                        mcfg, "responses_force_stateless_replay", False
-                    ),
-                    "reasoning_enabled": getattr(mcfg, "reasoning_enabled", False),
-                    "reasoning_effort": getattr(mcfg, "reasoning_effort", "medium"),
-                }
+                models_info[label] = _build_internal_model_probe_payload(mcfg)
         for label in ("embedding_model", "rerank_model"):
             mcfg = getattr(cfg, label, None)
             if mcfg is not None:
@@ -969,20 +987,34 @@ class RuntimeAPIServer:
                 api_key=cfg.agent_model.api_key,
                 model_name=cfg.agent_model.model_name,
             ),
-            _probe_http_endpoint(
-                name="embedding_model",
-                base_url=cfg.embedding_model.api_url,
-                api_key=cfg.embedding_model.api_key,
-                model_name=getattr(cfg.embedding_model, "model_name", ""),
-            ),
-            _probe_http_endpoint(
-                name="rerank_model",
-                base_url=cfg.rerank_model.api_url,
-                api_key=cfg.rerank_model.api_key,
-                model_name=getattr(cfg.rerank_model, "model_name", ""),
-            ),
-            _probe_ws_endpoint(cfg.onebot_ws_url),
         ]
+        grok_model = getattr(cfg, "grok_model", None)
+        if grok_model is not None:
+            checks.append(
+                _probe_http_endpoint(
+                    name="grok_model",
+                    base_url=getattr(grok_model, "api_url", ""),
+                    api_key=getattr(grok_model, "api_key", ""),
+                    model_name=getattr(grok_model, "model_name", ""),
+                )
+            )
+        checks.extend(
+            [
+                _probe_http_endpoint(
+                    name="embedding_model",
+                    base_url=cfg.embedding_model.api_url,
+                    api_key=cfg.embedding_model.api_key,
+                    model_name=getattr(cfg.embedding_model, "model_name", ""),
+                ),
+                _probe_http_endpoint(
+                    name="rerank_model",
+                    base_url=cfg.rerank_model.api_url,
+                    api_key=cfg.rerank_model.api_key,
+                    model_name=getattr(cfg.rerank_model, "model_name", ""),
+                ),
+                _probe_ws_endpoint(cfg.onebot_ws_url),
+            ]
+        )
         results = await asyncio.gather(*checks)
         ok = all(item.get("status") in {"ok", "skipped"} for item in results)
         return web.json_response(
@@ -1204,7 +1236,10 @@ class RuntimeAPIServer:
             onebot_client = self._ctx.onebot
             scheduler = self._ctx.scheduler
 
-            def send_message_callback(msg: str) -> Awaitable[None]:
+            def send_message_callback(
+                msg: str, reply_to: int | None = None
+            ) -> Awaitable[None]:
+                _ = reply_to
                 return send_output(_VIRTUAL_USER_ID, msg)
 
             get_recent_messages_callback = _get_recent_cb

@@ -58,6 +58,10 @@ def test_apply_config_updates_propagates_to_security_service() -> None:
                 model_name="naga",
                 queue_interval_seconds=1.0,
             ),
+            grok_model=SimpleNamespace(
+                model_name="grok",
+                queue_interval_seconds=1.0,
+            ),
         ),
     )
     security_service = _FakeSecurityService()
@@ -110,6 +114,10 @@ def test_apply_config_updates_hot_reloads_ai_request_max_retries() -> None:
             ),
             naga_model=SimpleNamespace(
                 model_name="naga",
+                queue_interval_seconds=1.0,
+            ),
+            grok_model=SimpleNamespace(
+                model_name="grok",
                 queue_interval_seconds=1.0,
             ),
         ),

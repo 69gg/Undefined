@@ -170,6 +170,26 @@ def _private_access_error(runtime_config: Any, target_id: int) -> str:
     )
 
 
+def _normalize_message_id(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            parsed = int(text)
+            return parsed if parsed > 0 else None
+    return None
+
+
+def _format_send_success(message_id: Any) -> str:
+    resolved_message_id = _normalize_message_id(message_id)
+    if resolved_message_id is not None:
+        return f"消息已发送（message_id={resolved_message_id}）"
+    return "消息已发送"
+
+
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """发送消息，支持群聊/私聊与 CQ 码格式"""
     request_id = str(context.get("request_id", "-"))
@@ -214,19 +234,19 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         try:
             if target_type == "group":
                 logger.info("[发送消息] 准备发送到群 %s: %s", target_id, message[:100])
-                await sender.send_group_message(
+                sent_message_id = await sender.send_group_message(
                     target_id, message, reply_to=reply_to_id
                 )
             else:
                 logger.info("[发送消息] 准备发送私聊 %s: %s", target_id, message[:100])
-                await sender.send_private_message(
+                sent_message_id = await sender.send_private_message(
                     target_id,
                     message,
                     reply_to=reply_to_id,
                     preferred_temp_group_id=_get_context_group_id(context),
                 )
             context["message_sent_this_turn"] = True
-            return "消息已发送"
+            return _format_send_success(sent_message_id)
         except Exception as e:
             logger.exception(
                 "[发送消息] 发送失败: target_type=%s target_id=%s request_id=%s err=%s",
@@ -241,7 +261,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if target_type == "group":
         if send_message_callback and _is_current_group_target(context, target_id):
             try:
-                await send_message_callback(message)
+                await send_message_callback(message, reply_to=reply_to_id)
                 context["message_sent_this_turn"] = True
                 return "消息已发送"
             except Exception as e:
@@ -262,7 +282,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     if send_private_message_callback:
         try:
-            await send_private_message_callback(target_id, message)
+            await send_private_message_callback(
+                target_id, message, reply_to=reply_to_id
+            )
             context["message_sent_this_turn"] = True
             return "消息已发送"
         except Exception as e:
@@ -276,7 +298,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     if send_message_callback and _is_current_private_target(context, target_id):
         try:
-            await send_message_callback(message)
+            await send_message_callback(message, reply_to=reply_to_id)
             context["message_sent_this_turn"] = True
             return "消息已发送"
         except Exception as e:

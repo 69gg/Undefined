@@ -14,10 +14,9 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
     user_prompt = str(args.get("prompt", "")).strip()
     agent_dir = Path(__file__).parent
-    user_content = f"用户需求：{user_prompt}" if user_prompt else ""
     return await run_agent_with_tools(
         agent_name="web_agent",
-        user_content=user_content,
+        user_content=user_prompt,
         empty_user_content_message="请提供您的搜索需求",
         default_prompt="你是一个网络搜索助手...",
         context=context,

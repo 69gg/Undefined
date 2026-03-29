@@ -1,20 +1,21 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
-import shutil
 import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Dict, Literal, cast
 from urllib.parse import unquote, urlparse
 
-import aiofiles
 import httpx
 
-from Undefined.skills.http_client import request_with_retry
 from Undefined.skills.http_config import get_request_timeout
+from Undefined.utils.http_download import (
+    cleanup_download_dir,
+    download_remote_file,
+    parse_content_length,
+    probe_remote_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -328,14 +329,15 @@ def _resolve_content_length(
 ) -> tuple[int | None, str | None]:
     if content_length_raw is None:
         return None, "无法获取文件大小（缺少 Content-Length）"
-
     try:
-        content_length = int(content_length_raw)
+        raw_value = int(content_length_raw)
     except (TypeError, ValueError):
         return None, "无法获取文件大小（Content-Length 非法）"
-
-    if content_length <= 0:
+    if raw_value <= 0:
         return None, "无法获取文件大小（Content-Length 非正数）"
+    content_length = parse_content_length(content_length_raw)
+    if content_length is None:
+        return None, "无法获取文件大小（Content-Length 非法）"
 
     return content_length, None
 
@@ -347,61 +349,19 @@ async def _download_to_local_file(
     max_file_size_bytes: int,
     timeout_seconds: float,
 ) -> tuple[str, int]:
-    part_path = target_path.with_suffix(f"{target_path.suffix}.part")
-
-    try:
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        downloaded_size = 0
-
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout_seconds),
-            follow_redirects=True,
-        ) as client:
-            async with client.stream("GET", url) as response:
-                response.raise_for_status()
-
-                get_size_raw = response.headers.get("content-length")
-                if get_size_raw is not None:
-                    get_size, get_size_error = _resolve_content_length(get_size_raw)
-                    if get_size_error or get_size is None:
-                        raise ValueError(get_size_error or "下载响应大小非法")
-                    if get_size != expected_size:
-                        raise ValueError("文件大小与预检不一致，已取消发送")
-
-                async with aiofiles.open(part_path, "wb") as f:
-                    async for chunk in response.aiter_bytes(
-                        chunk_size=DOWNLOAD_CHUNK_SIZE
-                    ):
-                        if not chunk:
-                            continue
-                        downloaded_size += len(chunk)
-                        if downloaded_size > max_file_size_bytes:
-                            raise ValueError("下载中发现文件超过大小限制，已取消发送")
-                        if downloaded_size > expected_size:
-                            raise ValueError("下载中发现文件超出预检大小，已取消发送")
-                        await f.write(chunk)
-                    await f.flush()
-
-        if downloaded_size != expected_size:
-            raise ValueError("下载完成后大小与预检不一致，已取消发送")
-
-        await asyncio.to_thread(os.replace, part_path, target_path)
-        abs_path = str(target_path.resolve())
-        return abs_path, downloaded_size
-    finally:
-        if part_path.exists():
-            try:
-                part_path.unlink()
-            except OSError:
-                pass
+    return await download_remote_file(
+        url,
+        target_path,
+        max_file_size_bytes=max_file_size_bytes,
+        timeout_seconds=timeout_seconds,
+        expected_size=expected_size,
+        follow_redirects=True,
+        chunk_size=DOWNLOAD_CHUNK_SIZE,
+    )
 
 
 async def _cleanup_directory(path: Path) -> None:
-    def sync_cleanup() -> None:
-        if path.exists():
-            shutil.rmtree(path, ignore_errors=True)
-
-    await asyncio.to_thread(sync_cleanup)
+    await cleanup_download_dir(path)
 
 
 def _group_access_error(runtime_config: Any, group_id: int) -> str:
@@ -461,10 +421,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     head_timeout_seconds = min(timeout_seconds, 60.0)
 
     try:
-        head_response = await request_with_retry(
-            "HEAD",
+        probe = await probe_remote_file(
             url,
-            timeout=head_timeout_seconds,
+            timeout_seconds=head_timeout_seconds,
             follow_redirects=True,
             context=context,
         )
@@ -477,8 +436,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         )
         return "发送失败：无法获取文件大小，已取消发送"
 
-    content_length, content_length_error = _resolve_content_length(
-        head_response.headers.get("content-length")
+    content_length = probe.content_length
+    content_length_error = (
+        None
+        if content_length is not None
+        else "无法获取文件大小（缺少 Content-Length）"
     )
     if content_length_error or content_length is None:
         logger.warning(
@@ -500,10 +462,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     task_uuid = uuid.uuid4().hex
     task_dir = ensure_dir(URL_FILE_CACHE_DIR / task_uuid)
 
-    final_url = str(head_response.url)
+    final_url = probe.final_url
     filename, filename_error = _resolve_filename(
         args,
-        head_response.headers,
+        probe.headers,
         final_url,
         task_uuid,
     )
