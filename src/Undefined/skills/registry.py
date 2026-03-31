@@ -254,7 +254,14 @@ class BaseRegistry:
             raise RuntimeError(f"加载处理器 spec 失败: {item.handler_path}")
 
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        sys.modules[item.module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            current = sys.modules.get(item.module_name)
+            if current is module:
+                del sys.modules[item.module_name]
+            raise
 
         if not hasattr(module, "execute"):
             raise RuntimeError(f"{item.handler_path} 的处理器缺少 'execute' 函数")

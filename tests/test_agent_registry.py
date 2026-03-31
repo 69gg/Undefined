@@ -49,3 +49,39 @@ async def test_agent_registry_executes_without_registry_timeout(
     assert result == "ok"
     assert registry.timeout_seconds == 0.0
     assert "timeout" not in seen
+
+
+@pytest.mark.asyncio
+async def test_agent_registry_loads_handler_with_dataclass(tmp_path: Path) -> None:
+    agent_dir = tmp_path / "demo_agent"
+    agent_dir.mkdir()
+    (agent_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "type": "function",
+                "function": {
+                    "name": "demo_agent",
+                    "description": "demo",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (agent_dir / "handler.py").write_text(
+        "from dataclasses import dataclass\n"
+        "\n"
+        "@dataclass\n"
+        "class Payload:\n"
+        "    value: str = 'ok'\n"
+        "\n"
+        "async def execute(args, context):\n"
+        "    return Payload().value\n",
+        encoding="utf-8",
+    )
+
+    registry = AgentRegistry(tmp_path)
+
+    result = await registry.execute_agent("demo_agent", {}, {})
+
+    assert result == "ok"
