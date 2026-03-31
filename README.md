@@ -1,6 +1,6 @@
 <table border="0">
   <tr>
-    <td width="70%" valign="top">
+    <td width="100%" valign="top">
       <div align="center">
         <h1>Undefined</h1>
         <em>QQ bot platform with cognitive memory architecture and multi-agent Skills, via OneBot V11.</em>
@@ -17,9 +17,6 @@
       <p>
         <strong>Undefined</strong> 是一个基于 Python 异步架构的高性能 QQ 机器人平台，搭载<strong>认知记忆架构</strong>，采用自研 <strong>Skills</strong> 系统，内置多个智能 Agent，支持代码分析、网络搜索、娱乐互动等多模态能力，并提供 <strong>Management-first WebUI</strong> 在线管理，以及可连接同一管理服务的 <strong>Desktop / Android App</strong>。
       </p>
-    </td>
-    <td width="30%">
-      <img src="https://raw.githubusercontent.com/69gg/Undefined/main/img/head.png" width="100%" alt="Undefined" />
     </td>
   </tr>
 </table>
