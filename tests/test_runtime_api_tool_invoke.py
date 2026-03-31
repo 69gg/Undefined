@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 from typing import Any, cast
@@ -350,6 +351,58 @@ async def test_invoke_sync_success() -> None:
     assert payload["result"] == "executed:get_current_time"
     assert "request_id" in payload
     assert "duration_ms" in payload
+
+
+@pytest.mark.asyncio
+async def test_invoke_tool_uses_runtime_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server = _make_server(_make_api_cfg(tool_invoke_timeout=7))
+    original_wait_for = asyncio.wait_for
+    seen: dict[str, float] = {}
+
+    async def _wait_for(awaitable: Any, timeout: float) -> Any:
+        seen["timeout"] = timeout
+        return await original_wait_for(awaitable, timeout)
+
+    monkeypatch.setattr("Undefined.api.app.asyncio.wait_for", _wait_for)
+
+    payload = await server._execute_tool_invoke(
+        request_id="req-tool",
+        tool_name="get_current_time",
+        args={},
+        body_context=None,
+        timeout=7,
+    )
+
+    assert payload["ok"] is True
+    assert seen["timeout"] == 7.0
+
+
+@pytest.mark.asyncio
+async def test_invoke_agent_bypasses_runtime_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server = _make_server(_make_api_cfg(tool_invoke_timeout=7))
+    original_wait_for = asyncio.wait_for
+    seen: dict[str, float] = {}
+
+    async def _wait_for(awaitable: Any, timeout: float) -> Any:
+        seen["timeout"] = timeout
+        return await original_wait_for(awaitable, timeout)
+
+    monkeypatch.setattr("Undefined.api.app.asyncio.wait_for", _wait_for)
+
+    payload = await server._execute_tool_invoke(
+        request_id="req-agent",
+        tool_name="web_agent",
+        args={},
+        body_context=None,
+        timeout=7,
+    )
+
+    assert payload["ok"] is True
+    assert "timeout" not in seen
 
 
 @pytest.mark.asyncio

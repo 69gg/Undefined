@@ -40,6 +40,10 @@ _PROCESS_START_TIME = time.time()
 _NAGA_REQUEST_UUID_TTL_SECONDS = 6 * 60 * 60
 
 
+class _ToolInvokeExecutionTimeoutError(asyncio.TimeoutError):
+    """由 Runtime API 工具调用超时包装器抛出的超时异常。"""
+
+
 @dataclass
 class _NagaRequestResult:
     payload_hash: str
@@ -1509,6 +1513,43 @@ class RuntimeAPIServer:
 
         return filtered
 
+    def _get_agent_tool_names(self) -> set[str]:
+        ai = self._ctx.ai
+        if ai is None:
+            return set()
+
+        agent_reg = getattr(ai, "agent_registry", None)
+        if agent_reg is None:
+            return set()
+
+        agent_names: set[str] = set()
+        for schema in agent_reg.get_agents_schema():
+            func = schema.get("function", {})
+            name = str(func.get("name", ""))
+            if name:
+                agent_names.add(name)
+        return agent_names
+
+    def _resolve_tool_invoke_timeout(
+        self, tool_name: str, timeout: int
+    ) -> float | None:
+        if tool_name in self._get_agent_tool_names():
+            return None
+        return float(timeout)
+
+    async def _await_tool_invoke_result(
+        self,
+        awaitable: Awaitable[Any],
+        *,
+        timeout: float | None,
+    ) -> Any:
+        if timeout is None or timeout <= 0:
+            return await awaitable
+        try:
+            return await asyncio.wait_for(awaitable, timeout=timeout)
+        except asyncio.TimeoutError as exc:
+            raise _ToolInvokeExecutionTimeoutError from exc
+
     async def _tools_list_handler(self, request: web.Request) -> Response:
         _ = request
         cfg = self._ctx.config_getter()
@@ -1659,6 +1700,7 @@ class RuntimeAPIServer:
         )
 
         start = time.perf_counter()
+        effective_timeout = self._resolve_tool_invoke_timeout(tool_name, timeout)
         try:
             async with RequestContext(
                 request_type=request_type,
@@ -1699,9 +1741,9 @@ class RuntimeAPIServer:
                 if tool_manager is None:
                     raise RuntimeError("ToolManager not available")
 
-                raw_result = await asyncio.wait_for(
+                raw_result = await self._await_tool_invoke_result(
                     tool_manager.execute_tool(tool_name, args, tool_context),
-                    timeout=timeout,
+                    timeout=effective_timeout,
                 )
 
             elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
@@ -1722,7 +1764,7 @@ class RuntimeAPIServer:
                 "duration_ms": elapsed_ms,
             }
 
-        except asyncio.TimeoutError:
+        except _ToolInvokeExecutionTimeoutError:
             elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
             logger.warning(
                 "[ToolInvoke] 执行超时: request_id=%s tool=%s timeout=%ds",

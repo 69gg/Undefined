@@ -36,6 +36,16 @@ def _chat_proxy_timeout_seconds() -> float:
     return compute_queued_llm_timeout_seconds(cfg, cfg.chat_model)
 
 
+def _tool_invoke_proxy_timeout_seconds(tool_name: str) -> float | None:
+    normalized_name = str(tool_name or "").strip()
+    if normalized_name.endswith("_agent"):
+        return None
+
+    cfg = get_config(strict=False)
+    # 普通 tool 保持 Runtime API 超时 + 60s 网络缓冲。
+    return float(cfg.api.tool_invoke_timeout) + 60.0
+
+
 def _unauthorized() -> Response:
     return web.json_response({"error": "Unauthorized"}, status=401)
 
@@ -82,7 +92,7 @@ async def _proxy_runtime(
     path: str,
     params: Mapping[str, str] | None = None,
     payload: dict[str, Any] | None = None,
-    timeout_seconds: float = 20.0,
+    timeout_seconds: float | None = 20.0,
 ) -> Response:
     cfg = get_config(strict=False)
     if not cfg.api.enabled:
@@ -416,9 +426,8 @@ async def runtime_tools_invoke_handler(request: web.Request) -> Response:
     except Exception:
         return web.json_response({"error": "Invalid JSON"}, status=400)
 
-    cfg = get_config(strict=False)
-    # 代理超时 = 工具调用超时 + 60s 缓冲（覆盖网络开销）
-    proxy_timeout = float(cfg.api.tool_invoke_timeout) + 60.0
+    tool_name = str(body.get("tool_name", "") or "").strip()
+    proxy_timeout = _tool_invoke_proxy_timeout_seconds(tool_name)
     return await _proxy_runtime(
         method="POST",
         path="/api/v1/tools/invoke",
