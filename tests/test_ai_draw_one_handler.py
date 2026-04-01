@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 
 from Undefined.skills.agents.entertainment_agent.tools.ai_draw_one import (
@@ -139,3 +140,98 @@ async def test_execute_models_rejects_invalid_size(
 
     assert "size 无效" in result
     assert "1024x1024" in result
+
+
+@pytest.mark.asyncio
+async def test_execute_models_reports_upstream_http_error_detail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "Undefined.config.get_config",
+        lambda strict=False: _make_runtime_config(),
+    )
+
+    request = httpx.Request("POST", "https://image.example.com/v1/images/generations")
+    response = httpx.Response(
+        503,
+        request=request,
+        json={
+            "error": {
+                "code": "upstream_error",
+                "message": "Image generation blocked or no valid final image",
+            }
+        },
+    )
+
+    async def _fake_request_with_retry(*_args: Any, **_kwargs: Any) -> Any:
+        raise httpx.HTTPStatusError("boom", request=request, response=response)
+
+    monkeypatch.setattr(ai_draw_handler, "request_with_retry", _fake_request_with_retry)
+
+    result = await ai_draw_handler.execute(
+        {
+            "prompt": "violet flowers",
+            "size": "1024x1024",
+            "target_id": 10001,
+            "message_type": "group",
+        },
+        {"send_image_callback": lambda *_args, **_kwargs: None},
+    )
+
+    assert "HTTP 503" in result
+    assert "upstream_error" in result
+    assert "Image generation blocked or no valid final image" in result
+
+
+@pytest.mark.asyncio
+async def test_execute_models_uses_configured_model_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "Undefined.config.get_config",
+        lambda strict=False: _make_runtime_config(),
+    )
+    monkeypatch.setattr("Undefined.utils.paths.IMAGE_CACHE_DIR", tmp_path)
+
+    payload_base64 = base64.b64encode(_PNG_BYTES).decode("ascii")
+    seen_request: dict[str, Any] = {}
+
+    class _FakeResponse:
+        text = ""
+
+        def json(self) -> dict[str, Any]:
+            return {"data": [{"base64": payload_base64}]}
+
+    async def _fake_request_with_retry(
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> _FakeResponse:
+        seen_request["method"] = method
+        seen_request["url"] = url
+        seen_request["json_data"] = kwargs.get("json_data")
+        return _FakeResponse()
+
+    async def _send_image(
+        target_id: int | str,
+        message_type: str,
+        file_path: str,
+    ) -> None:
+        _ = target_id, message_type, file_path
+
+    monkeypatch.setattr(ai_draw_handler, "request_with_retry", _fake_request_with_retry)
+
+    result = await ai_draw_handler.execute(
+        {
+            "prompt": "violet flowers",
+            "model": "dall-e-3",
+            "size": "1024x1024",
+            "target_id": 10001,
+            "message_type": "group",
+        },
+        {"send_image_callback": _send_image},
+    )
+
+    assert result == "AI 绘图已发送给 group 10001"
+    assert seen_request["json_data"]["model"] == "grok-imagine-1.0"

@@ -15,6 +15,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
+
 from Undefined.skills.http_client import request_with_retry
 from Undefined.skills.http_config import get_request_timeout, get_xingzhige_url
 
@@ -118,6 +120,31 @@ def _coerce_bool(value: Any) -> bool:
     if isinstance(value, (int, float)):
         return value != 0
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _format_upstream_error_message(response: httpx.Response) -> str:
+    default_message = response.text[:200] or f"HTTP {response.status_code}"
+    try:
+        data = response.json()
+    except Exception:
+        return default_message
+
+    if not isinstance(data, dict):
+        return default_message
+
+    error = data.get("error")
+    if isinstance(error, dict):
+        code = str(error.get("code", "") or "").strip()
+        message = str(error.get("message", "") or "").strip()
+        if code and message:
+            return f"{code}: {message}"
+        if message:
+            return message
+        if code:
+            return code
+
+    message = str(data.get("message", "") or "").strip()
+    return message or default_message
 
 
 def _build_openai_models_request_body(
@@ -298,14 +325,22 @@ async def _call_openai_models(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    response = await request_with_retry(
-        "POST",
-        url,
-        json_data=body,
-        headers=headers,
-        timeout=timeout_val,
-        context=context,
-    )
+    try:
+        response = await request_with_retry(
+            "POST",
+            url,
+            json_data=body,
+            headers=headers,
+            timeout=timeout_val,
+            context=context,
+        )
+    except httpx.HTTPStatusError as exc:
+        message = _format_upstream_error_message(exc.response)
+        return f"图片生成请求失败: HTTP {exc.response.status_code} {message}"
+    except httpx.TimeoutException:
+        return f"图片生成请求超时（{timeout_val:.0f}s）"
+    except httpx.RequestError as exc:
+        return f"图片生成请求失败: {exc}"
 
     try:
         data = response.json()
@@ -359,7 +394,6 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
     prompt_arg: str | None = args.get("prompt")
     size_arg: str | None = args.get("size")
-    model_arg: str | None = args.get("model")
     quality_arg: str | None = args.get("quality")
     style_arg: str | None = args.get("style")
     response_format_arg: str | None = args.get("response_format")
@@ -387,7 +421,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
             # 降级到 models.image_gen 配置，未填则降级到 chat_model
             api_url = gen_cfg.api_url or chat_cfg.api_url
             api_key = gen_cfg.api_key or chat_cfg.api_key
-            model_name = str(model_arg or gen_cfg.model_name or "").strip()
+            model_name = str(gen_cfg.model_name or "").strip()
             size = str(size_arg or cfg.openai_size or "").strip()
             quality = str(quality_arg or cfg.openai_quality or "").strip()
             style = str(style_arg or cfg.openai_style or "").strip()
