@@ -176,6 +176,8 @@ def _build_openai_models_request_body(
         body["style"] = style
     if response_format:
         body["response_format"] = response_format
+    else:
+        body.setdefault("response_format", "base64")
     return body
 
 
