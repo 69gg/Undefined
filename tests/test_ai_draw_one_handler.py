@@ -4,6 +4,7 @@ import base64
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -239,6 +240,48 @@ async def test_execute_models_reports_upstream_http_error_detail(
     assert "HTTP 503" in result
     assert "upstream_error" in result
     assert "Image generation blocked or no valid final image" in result
+
+
+@pytest.mark.asyncio
+async def test_execute_blocks_when_agent_moderation_rejects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "Undefined.config.get_config",
+        lambda strict=False: _make_runtime_config(),
+    )
+
+    async def _fail_if_called(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("image generation request should not be sent")
+
+    fake_ai_client = SimpleNamespace(
+        agent_config=SimpleNamespace(model_name="agent-model"),
+        request_model=AsyncMock(
+            return_value={
+                "choices": [
+                    {"message": {"content": "BLOCK: 露骨色情内容"}},
+                ]
+            }
+        ),
+    )
+
+    monkeypatch.setattr(ai_draw_handler, "request_with_retry", _fail_if_called)
+
+    result = await ai_draw_handler.execute(
+        {
+            "prompt": "explicit adult scene",
+            "delivery": "send",
+            "target_id": 10001,
+            "message_type": "group",
+        },
+        {
+            "ai_client": fake_ai_client,
+            "send_image_callback": lambda *_args, **_kwargs: None,
+        },
+    )
+
+    assert result == "图片生成请求被审核拦截：露骨色情内容"
+    fake_ai_client.request_model.assert_awaited_once()
 
 
 @pytest.mark.asyncio

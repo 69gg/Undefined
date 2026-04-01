@@ -18,8 +18,10 @@ from typing import Any
 import httpx
 
 from Undefined.attachments import scope_from_context
+from Undefined.ai.parsing import extract_choices_content
 from Undefined.skills.http_client import request_with_retry
 from Undefined.skills.http_config import get_request_timeout, get_xingzhige_url
+from Undefined.utils.resources import read_text_resource
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,7 @@ _ALLOWED_MODELS_IMAGE_SIZES = (
     "1024x1024",
 )
 _ALLOWED_IMAGE_RESPONSE_FORMATS = ("url", "b64_json", "base64")
+_IMAGE_GEN_MODERATION_PROMPT: str | None = None
 
 
 @dataclass
@@ -146,6 +149,93 @@ def _format_upstream_error_message(response: httpx.Response) -> str:
 
     message = str(data.get("message", "") or "").strip()
     return message or default_message
+
+
+def _get_image_gen_moderation_prompt() -> str:
+    global _IMAGE_GEN_MODERATION_PROMPT
+    if _IMAGE_GEN_MODERATION_PROMPT is not None:
+        return _IMAGE_GEN_MODERATION_PROMPT
+    try:
+        _IMAGE_GEN_MODERATION_PROMPT = read_text_resource(
+            "res/prompts/image_gen_moderation.txt"
+        )
+    except Exception as exc:
+        logger.error("加载生图审核提示词失败: %s", exc)
+        _IMAGE_GEN_MODERATION_PROMPT = (
+            "你是图片生成审核助手。"
+            "你只根据待生成图片的提示词判断是否允许生成。"
+            "如果安全则只输出 ALLOW。"
+            "如果应拒绝则输出 BLOCK: <简短中文原因>。"
+        )
+    return _IMAGE_GEN_MODERATION_PROMPT
+
+
+def _resolve_agent_model_for_moderation(context: dict[str, Any]) -> Any | None:
+    ai_client = context.get("ai_client")
+    if ai_client is None:
+        return None
+    model_config = getattr(ai_client, "agent_config", None)
+    if model_config is None:
+        return None
+
+    runtime_config = context.get("runtime_config")
+    model_selector = getattr(ai_client, "model_selector", None)
+    if runtime_config is not None and model_selector is not None:
+        try:
+            group_id = context.get("group_id", 0) or 0
+            user_id = context.get("user_id", 0) or 0
+            global_enabled = bool(getattr(runtime_config, "model_pool_enabled", False))
+            selected = model_selector.select_agent_config(
+                model_config,
+                group_id=group_id,
+                user_id=user_id,
+                global_enabled=global_enabled,
+            )
+            if selected is not None:
+                return selected
+        except Exception as exc:
+            logger.debug("生图审核选择 agent 模型失败，回退默认 agent_config: %s", exc)
+    return model_config
+
+
+async def _moderate_prompt_with_agent_model(
+    prompt: str,
+    context: dict[str, Any],
+) -> str | None:
+    text = str(prompt or "").strip()
+    if not text:
+        return None
+
+    ai_client = context.get("ai_client")
+    model_config = _resolve_agent_model_for_moderation(context)
+    if ai_client is None or model_config is None:
+        logger.debug("生图审核跳过：缺少 ai_client 或 agent 模型配置")
+        return None
+
+    try:
+        result = await ai_client.request_model(
+            model_config=model_config,
+            messages=[
+                {"role": "system", "content": _get_image_gen_moderation_prompt()},
+                {"role": "user", "content": f"待审核的生图提示词：\n{text}"},
+            ],
+            max_tokens=64,
+            call_type="image_gen_moderation",
+        )
+        content = extract_choices_content(result).strip()
+    except Exception as exc:
+        logger.warning("生图审核调用失败，按允许继续: %s", exc)
+        return None
+
+    upper = content.upper()
+    if upper.startswith("ALLOW"):
+        return None
+    if upper.startswith("BLOCK"):
+        reason = content.split(":", 1)[1].strip() if ":" in content else "命中敏感内容"
+        return f"图片生成请求被审核拦截：{reason or '命中敏感内容'}"
+
+    logger.warning("生图审核返回了无法识别的结果，按允许继续: %s", content)
+    return None
 
 
 def _build_openai_models_request_body(
@@ -486,6 +576,13 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     try:
         if delivery not in {"embed", "send"}:
             return f"delivery 无效：{delivery}。仅支持 embed 或 send"
+        moderation_error = await _moderate_prompt_with_agent_model(
+            prompt_arg or "",
+            context,
+        )
+        if moderation_error:
+            logger.warning("AI 绘图请求被 agent 审核拦截: prompt=%s", prompt_arg or "")
+            return moderation_error
 
         if provider == "xingzhige":
             prompt = prompt_arg or ""
