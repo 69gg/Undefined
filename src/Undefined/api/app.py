@@ -1215,6 +1215,7 @@ class RuntimeAPIServer:
             segments=input_segments,
             scope_key=webui_scope_key,
             resolve_image_url=self._ctx.onebot.get_image,
+            get_forward_messages=self._ctx.onebot.get_forward_msg,
         )
         normalized_text = registered_input.normalized_text or text
         await self._ctx.history_manager.add_private_message(

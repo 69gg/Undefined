@@ -73,6 +73,38 @@ async def test_register_message_attachments_normalizes_webui_base64_image(
 
 
 @pytest.mark.asyncio
+async def test_register_message_attachments_recurses_into_forward_images(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    payload = base64.b64encode(_PNG_BYTES).decode("ascii")
+
+    async def _fake_get_forward(_forward_id: str) -> list[dict[str, object]]:
+        return [
+            {
+                "message": [
+                    {"type": "text", "data": {"text": "转发内容"}},
+                    {"type": "image", "data": {"file": f"base64://{payload}"}},
+                ]
+            }
+        ]
+
+    result = await register_message_attachments(
+        registry=registry,
+        segments=[{"type": "forward", "data": {"id": "forward-1"}}],
+        scope_key="group:10001",
+        get_forward_messages=_fake_get_forward,
+    )
+
+    assert result.normalized_text == "[合并转发: forward-1]"
+    assert len(result.attachments) == 1
+    assert result.attachments[0]["uid"].startswith("pic_")
+
+
+@pytest.mark.asyncio
 async def test_render_message_with_pic_placeholders_uses_file_uri_and_shadow_text(
     tmp_path: Path,
 ) -> None:

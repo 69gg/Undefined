@@ -150,6 +150,9 @@ class MessageHandler:
             segments=message_content,
             scope_key=scope_key,
             resolve_image_url=resolve_image_url,
+            get_forward_messages=getattr(onebot, "get_forward_msg", None)
+            if onebot
+            else None,
         )
         return result.attachments
 

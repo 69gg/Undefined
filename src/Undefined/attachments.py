@@ -58,6 +58,7 @@ _MAGIC_IMAGE_SUFFIXES: tuple[tuple[bytes, str], ...] = (
     (b"GIF89a", ".gif"),
     (b"BM", ".bmp"),
 )
+_FORWARD_ATTACHMENT_MAX_DEPTH = 3
 
 
 @dataclass(frozen=True)
@@ -338,6 +339,37 @@ def _resolve_webui_file_id(file_id: str) -> Path | None:
     return None
 
 
+def _extract_forward_id(data: Mapping[str, Any]) -> str:
+    forward_id = data.get("id") or data.get("resid") or data.get("message_id")
+    return str(forward_id).strip() if forward_id is not None else ""
+
+
+def _normalize_message_segments(message: Any) -> list[Mapping[str, Any]]:
+    if isinstance(message, list):
+        normalized: list[Mapping[str, Any]] = []
+        for item in message:
+            if isinstance(item, Mapping):
+                normalized.append(item)
+            elif isinstance(item, str):
+                normalized.append({"type": "text", "data": {"text": item}})
+        return normalized
+    if isinstance(message, Mapping):
+        return [message]
+    if isinstance(message, str):
+        return [{"type": "text", "data": {"text": message}}]
+    return []
+
+
+def _normalize_forward_nodes(raw_nodes: Any) -> list[Mapping[str, Any]]:
+    if isinstance(raw_nodes, list):
+        return [node for node in raw_nodes if isinstance(node, Mapping)]
+    if isinstance(raw_nodes, Mapping):
+        messages = raw_nodes.get("messages")
+        if isinstance(messages, list):
+            return [node for node in messages if isinstance(node, Mapping)]
+    return []
+
+
 class AttachmentRegistry:
     """Persistent attachment registry scoped by conversation."""
 
@@ -560,6 +592,8 @@ async def register_message_attachments(
     segments: Sequence[Mapping[str, Any]],
     scope_key: str | None,
     resolve_image_url: Callable[[str], Awaitable[str | None]] | None = None,
+    get_forward_messages: Callable[[str], Awaitable[list[dict[str, Any]]]]
+    | None = None,
 ) -> RegisteredMessageAttachments:
     attachments: list[dict[str, str]] = []
     normalized_parts: list[str] = []
@@ -574,137 +608,189 @@ async def register_message_attachments(
             normalized_text="".join(normalized_parts).strip(),
         )
 
-    for index, segment in enumerate(segments):
-        type_ = str(segment.get("type", "") or "").strip().lower()
-        raw_data = segment.get("data", {})
-        data = raw_data if isinstance(raw_data, Mapping) else {}
-        ref: dict[str, str] | None = None
+    visited_forward_ids: set[str] = set()
 
-        try:
-            if type_ == "image":
-                raw_source = str(data.get("file") or data.get("url") or "").strip()
-                display_name = _display_name_from_source(
-                    raw_source,
-                    f"image_{index + 1}.png",
-                )
-                if raw_source.startswith("base64://"):
-                    payload = raw_source[len("base64://") :].strip()
-                    content = base64.b64decode(payload)
-                    record = await registry.register_bytes(
-                        scope_key,
-                        content,
-                        kind="image",
-                        display_name=display_name,
-                        source_kind="base64_image",
-                        source_ref=f"segment:{index}",
-                    )
-                    ref = record.prompt_ref()
-                elif _is_data_url(raw_source):
-                    record = await registry.register_data_url(
-                        scope_key,
+    async def _collect_from_segments(
+        current_segments: Sequence[Mapping[str, Any]],
+        *,
+        depth: int,
+        prefix: str,
+    ) -> None:
+        for index, segment in enumerate(current_segments):
+            type_ = str(segment.get("type", "") or "").strip().lower()
+            raw_data = segment.get("data", {})
+            data = raw_data if isinstance(raw_data, Mapping) else {}
+            ref: dict[str, str] | None = None
+
+            try:
+                if type_ == "image":
+                    raw_source = str(data.get("file") or data.get("url") or "").strip()
+                    display_name = _display_name_from_source(
                         raw_source,
-                        kind="image",
-                        display_name=display_name,
-                        source_kind="data_url_image",
-                        source_ref=f"segment:{index}",
+                        f"image_{index + 1}.png",
                     )
-                    ref = record.prompt_ref()
-                else:
-                    resolved_source = raw_source
-                    if raw_source and resolve_image_url is not None:
-                        try:
-                            resolved = await resolve_image_url(raw_source)
-                        except Exception as exc:
-                            logger.debug(
-                                "[AttachmentRegistry] image resolver failed: file=%s err=%s",
-                                raw_source,
-                                exc,
-                            )
-                            resolved = None
-                        if resolved:
-                            resolved_source = str(resolved)
-
-                    if _is_http_url(resolved_source):
-                        record = await registry.register_remote_url(
+                    if raw_source.startswith("base64://"):
+                        payload = raw_source[len("base64://") :].strip()
+                        content = base64.b64decode(payload)
+                        record = await registry.register_bytes(
                             scope_key,
-                            resolved_source,
+                            content,
                             kind="image",
                             display_name=display_name,
-                            source_kind="remote_image",
-                            source_ref=raw_source or resolved_source,
+                            source_kind="base64_image",
+                            source_ref=f"{prefix}segment:{index}",
                         )
                         ref = record.prompt_ref()
-                    elif _is_localish_path(resolved_source):
-                        local_path = (
-                            resolved_source[7:]
-                            if resolved_source.startswith("file://")
-                            else resolved_source
+                    elif _is_data_url(raw_source):
+                        record = await registry.register_data_url(
+                            scope_key,
+                            raw_source,
+                            kind="image",
+                            display_name=display_name,
+                            source_kind="data_url_image",
+                            source_ref=f"{prefix}segment:{index}",
                         )
+                        ref = record.prompt_ref()
+                    else:
+                        resolved_source = raw_source
+                        if raw_source and resolve_image_url is not None:
+                            try:
+                                resolved = await resolve_image_url(raw_source)
+                            except Exception as exc:
+                                logger.debug(
+                                    "[AttachmentRegistry] image resolver failed: file=%s err=%s",
+                                    raw_source,
+                                    exc,
+                                )
+                                resolved = None
+                            if resolved:
+                                resolved_source = str(resolved)
+
+                        if _is_http_url(resolved_source):
+                            record = await registry.register_remote_url(
+                                scope_key,
+                                resolved_source,
+                                kind="image",
+                                display_name=display_name,
+                                source_kind="remote_image",
+                                source_ref=raw_source or resolved_source,
+                            )
+                            ref = record.prompt_ref()
+                        elif _is_localish_path(resolved_source):
+                            local_path = (
+                                resolved_source[7:]
+                                if resolved_source.startswith("file://")
+                                else resolved_source
+                            )
+                            record = await registry.register_local_file(
+                                scope_key,
+                                local_path,
+                                kind="image",
+                                display_name=display_name,
+                                source_kind="local_image",
+                                source_ref=raw_source or resolved_source,
+                            )
+                            ref = record.prompt_ref()
+
+                elif type_ == "file":
+                    file_id = str(data.get("id", "") or "").strip()
+                    raw_source = str(data.get("file") or data.get("url") or "").strip()
+                    local_file_path: Path | None = None
+                    if file_id:
+                        local_file_path = _resolve_webui_file_id(file_id)
+                    elif _is_localish_path(raw_source):
+                        local_file_path = Path(
+                            raw_source[7:]
+                            if raw_source.startswith("file://")
+                            else raw_source
+                        )
+                    display_name = (
+                        str(data.get("name", "") or "").strip()
+                        or (local_file_path.name if local_file_path is not None else "")
+                        or _display_name_from_source(
+                            raw_source, f"file_{index + 1}.bin"
+                        )
+                    )
+                    if local_file_path is not None and local_file_path.is_file():
                         record = await registry.register_local_file(
                             scope_key,
-                            local_path,
-                            kind="image",
+                            local_file_path,
+                            kind="file",
                             display_name=display_name,
-                            source_kind="local_image",
-                            source_ref=raw_source or resolved_source,
+                            source_kind="webui_file" if file_id else "local_file",
+                            source_ref=file_id or raw_source or str(local_file_path),
+                        )
+                        ref = record.prompt_ref()
+                    elif _is_http_url(raw_source):
+                        record = await registry.register_remote_url(
+                            scope_key,
+                            raw_source,
+                            kind="file",
+                            display_name=display_name,
+                            source_kind="remote_file",
+                            source_ref=file_id or raw_source,
                         )
                         ref = record.prompt_ref()
 
-            elif type_ == "file":
-                file_id = str(data.get("id", "") or "").strip()
-                raw_source = str(data.get("file") or data.get("url") or "").strip()
-                local_file_path: Path | None = None
-                if file_id:
-                    local_file_path = _resolve_webui_file_id(file_id)
-                elif _is_localish_path(raw_source):
-                    local_file_path = Path(
-                        raw_source[7:]
-                        if raw_source.startswith("file://")
-                        else raw_source
-                    )
-                display_name = (
-                    str(data.get("name", "") or "").strip()
-                    or (local_file_path.name if local_file_path is not None else "")
-                    or _display_name_from_source(raw_source, f"file_{index + 1}.bin")
+                elif (
+                    type_ == "forward"
+                    and get_forward_messages is not None
+                    and depth < _FORWARD_ATTACHMENT_MAX_DEPTH
+                ):
+                    forward_id = _extract_forward_id(data)
+                    if forward_id and forward_id not in visited_forward_ids:
+                        visited_forward_ids.add(forward_id)
+                        try:
+                            nodes = _normalize_forward_nodes(
+                                await get_forward_messages(forward_id)
+                            )
+                        except Exception as exc:
+                            logger.debug(
+                                "[AttachmentRegistry] forward resolver failed: id=%s err=%s",
+                                forward_id,
+                                exc,
+                            )
+                            nodes = []
+                        for node_index, node in enumerate(nodes):
+                            raw_message = (
+                                node.get("content")
+                                or node.get("message")
+                                or node.get("raw_message")
+                            )
+                            nested_segments = _normalize_message_segments(raw_message)
+                            if not nested_segments:
+                                continue
+                            await _collect_from_segments(
+                                nested_segments,
+                                depth=depth + 1,
+                                prefix=f"{prefix}forward:{forward_id}:{node_index}:",
+                            )
+            except (
+                binascii.Error,
+                ValueError,
+                FileNotFoundError,
+                httpx.HTTPError,
+            ) as exc:
+                logger.warning(
+                    "[AttachmentRegistry] segment registration skipped: type=%s index=%s err=%s",
+                    type_,
+                    index,
+                    exc,
                 )
-                if local_file_path is not None and local_file_path.is_file():
-                    record = await registry.register_local_file(
-                        scope_key,
-                        local_file_path,
-                        kind="file",
-                        display_name=display_name,
-                        source_kind="webui_file" if file_id else "local_file",
-                        source_ref=file_id or raw_source or str(local_file_path),
-                    )
-                    ref = record.prompt_ref()
-                elif _is_http_url(raw_source):
-                    record = await registry.register_remote_url(
-                        scope_key,
-                        raw_source,
-                        kind="file",
-                        display_name=display_name,
-                        source_kind="remote_file",
-                        source_ref=file_id or raw_source,
-                    )
-                    ref = record.prompt_ref()
-        except (binascii.Error, ValueError, FileNotFoundError, httpx.HTTPError) as exc:
-            logger.warning(
-                "[AttachmentRegistry] segment registration skipped: type=%s index=%s err=%s",
-                type_,
-                index,
-                exc,
-            )
-        except Exception as exc:
-            logger.exception(
-                "[AttachmentRegistry] unexpected segment registration failure: type=%s index=%s err=%s",
-                type_,
-                index,
-                exc,
-            )
+            except Exception as exc:
+                logger.exception(
+                    "[AttachmentRegistry] unexpected segment registration failure: type=%s index=%s err=%s",
+                    type_,
+                    index,
+                    exc,
+                )
 
-        if ref is not None:
-            attachments.append(ref)
-        normalized_parts.append(_segment_text(type_, data, ref))
+            if ref is not None:
+                attachments.append(ref)
+            if depth == 0:
+                normalized_parts.append(_segment_text(type_, data, ref))
+
+    await _collect_from_segments(segments, depth=0, prefix="")
 
     return RegisteredMessageAttachments(
         attachments=attachments,
