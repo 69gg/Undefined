@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 import logging
+import mimetypes
+from pathlib import Path
 import time
 import uuid
 from dataclasses import dataclass
@@ -33,6 +36,7 @@ _ALLOWED_MODELS_IMAGE_SIZES = (
     "1024x1024",
 )
 _ALLOWED_IMAGE_RESPONSE_FORMATS = ("url", "b64_json", "base64")
+_MAX_REFERENCE_IMAGE_UIDS = 16
 _IMAGE_GEN_MODERATION_PROMPT: str | None = None
 
 
@@ -272,6 +276,69 @@ def _build_openai_models_request_body(
     return body
 
 
+def _coerce_reference_image_uids(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if not isinstance(value, list):
+        return []
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        resolved.append(text)
+    return resolved
+
+
+def _stringify_multipart_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (str, int, float)):
+        return str(value)
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _build_openai_models_edit_form(
+    *,
+    prompt: str,
+    model_name: str,
+    size: str,
+    quality: str,
+    style: str,
+    response_format: str,
+    n: int | None,
+    extra_params: dict[str, Any],
+) -> dict[str, str]:
+    from Undefined.utils.request_params import merge_request_params
+
+    body = merge_request_params(extra_params)
+    body["prompt"] = prompt
+    if n is not None:
+        body["n"] = n
+    else:
+        body.setdefault("n", 1)
+    if model_name:
+        body["model"] = model_name
+    if size:
+        body["size"] = size
+    if quality:
+        body["quality"] = quality
+    if style:
+        body["style"] = style
+    if response_format:
+        body["response_format"] = response_format
+    else:
+        body.setdefault("response_format", "base64")
+    return {key: _stringify_multipart_value(value) for key, value in body.items()}
+
+
 def _validate_openai_models_request_body(body: dict[str, Any]) -> str | None:
     size = str(body.get("size", "") or "").strip()
     if size and size not in _ALLOWED_MODELS_IMAGE_SIZES:
@@ -453,6 +520,145 @@ async def _call_openai_models(
     return generated_image
 
 
+def _guess_upload_media_type(path: Path) -> str:
+    guessed, _ = mimetypes.guess_type(path.name)
+    return str(guessed or "application/octet-stream")
+
+
+async def _resolve_reference_image_paths(
+    reference_image_uids: list[str],
+    context: dict[str, Any],
+) -> tuple[list[Path] | None, str | None]:
+    if not reference_image_uids:
+        return [], None
+    if len(reference_image_uids) > _MAX_REFERENCE_IMAGE_UIDS:
+        return (
+            None,
+            f"reference_image_uids 最多支持 {_MAX_REFERENCE_IMAGE_UIDS} 张参考图",
+        )
+
+    attachment_registry = context.get("attachment_registry")
+    scope_key = scope_from_context(context)
+    if attachment_registry is None or not scope_key:
+        return None, "当前会话未提供附件注册能力，无法解析参考图 UID"
+
+    resolved_paths: list[Path] = []
+    for uid in reference_image_uids:
+        record = attachment_registry.resolve(uid, scope_key)
+        if record is None:
+            return None, f"参考图 UID 不存在或不属于当前会话：{uid}"
+        if str(getattr(record, "media_type", "") or "").strip().lower() != "image":
+            return None, f"参考图 UID 不是图片：{uid}"
+        local_path = str(getattr(record, "local_path", "") or "").strip()
+        if not local_path:
+            return None, f"参考图 UID 缺少本地缓存文件：{uid}"
+        path = Path(local_path)
+        if not path.is_file():
+            return None, f"参考图 UID 的本地缓存文件不存在：{uid}"
+        resolved_paths.append(path)
+    return resolved_paths, None
+
+
+async def _call_openai_models_edit(
+    *,
+    prompt: str,
+    api_url: str,
+    api_key: str,
+    model_name: str,
+    size: str,
+    quality: str,
+    style: str,
+    response_format: str,
+    n: int | None,
+    timeout_val: float,
+    reference_image_paths: list[Path],
+    extra_params: dict[str, Any],
+    context: dict[str, Any],
+) -> _GeneratedImagePayload | str:
+    form_data = _build_openai_models_edit_form(
+        prompt=prompt,
+        model_name=model_name,
+        size=size,
+        quality=quality,
+        style=style,
+        response_format=response_format,
+        n=n,
+        extra_params=extra_params,
+    )
+    validation_error = _validate_openai_models_request_body(
+        {key: value for key, value in form_data.items()}
+    )
+    if validation_error:
+        return validation_error
+
+    base_url = api_url.rstrip("/")
+    if not base_url.endswith("/v1"):
+        base_url = f"{base_url}/v1"
+    url = f"{base_url}/images/edits"
+
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    file_handles: list[Any] = []
+    files: list[tuple[str, tuple[str, Any, str]]] = []
+    try:
+        for path in reference_image_paths:
+            file_handle = path.open("rb")
+            file_handles.append(file_handle)
+            files.append(
+                (
+                    "image",
+                    (
+                        path.name,
+                        file_handle,
+                        _guess_upload_media_type(path),
+                    ),
+                )
+            )
+
+        try:
+            response = await request_with_retry(
+                "POST",
+                url,
+                data=form_data,
+                files=files,
+                headers=headers or None,
+                timeout=timeout_val,
+                context=context,
+            )
+        except httpx.HTTPStatusError as exc:
+            message = _format_upstream_error_message(exc.response)
+            return f"参考图生图请求失败: HTTP {exc.response.status_code} {message}"
+        except httpx.TimeoutException:
+            return f"参考图生图请求超时（{timeout_val:.0f}s）"
+        except httpx.RequestError as exc:
+            return f"参考图生图请求失败: {exc}"
+
+        try:
+            data = response.json()
+        except Exception:
+            return f"API 返回错误 (非JSON): {response.text[:100]}"
+
+        generated_image = _parse_generated_image(data)
+        if generated_image is None:
+            logger.error(f"参考图生图 API 返回 (未找到图片内容): {data}")
+            return f"API 返回原文 (错误：未找到图片内容): {data}"
+
+        logger.info(f"参考图生图 API 返回: {data}")
+        if generated_image.image_url:
+            logger.info(f"提取图片链接: {generated_image.image_url}")
+        elif generated_image.image_bytes is not None:
+            logger.info("提取图片字节: bytes=%s", len(generated_image.image_bytes))
+        return generated_image
+    finally:
+        for handle in file_handles:
+            try:
+                handle.close()
+            except Exception:
+                pass
+
+
 async def _download_and_send(
     image_url: str,
     target_id: int | str,
@@ -559,12 +765,16 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     style_arg: str | None = args.get("style")
     response_format_arg: str | None = args.get("response_format")
     n_arg = args.get("n")
+    reference_image_uids = _coerce_reference_image_uids(
+        args.get("reference_image_uids")
+    )
     delivery = str(args.get("delivery", "embed") or "embed").strip().lower()
     target_id: int | str | None = args.get("target_id")
     message_type_arg: str | None = args.get("message_type")
 
     cfg = get_config(strict=False).image_gen
     gen_cfg = get_config(strict=False).models_image_gen
+    edit_cfg = get_config(strict=False).models_image_edit
     chat_cfg = get_config(strict=False).chat_model
     provider = cfg.provider
 
@@ -585,15 +795,32 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
             return moderation_error
 
         if provider == "xingzhige":
+            if reference_image_uids:
+                return "图片生成失败：xingzhige provider 不支持参考图生图"
             prompt = prompt_arg or ""
             size = size_arg or cfg.xingzhige_size
             generated_result = await _call_xingzhige(prompt, size, context)
         elif provider == "models":
             prompt = prompt_arg or ""
-            # 降级到 models.image_gen 配置，未填则降级到 chat_model
-            api_url = gen_cfg.api_url or chat_cfg.api_url
-            api_key = gen_cfg.api_key or chat_cfg.api_key
-            model_name = str(gen_cfg.model_name or "").strip()
+            use_reference_images = bool(reference_image_uids)
+            selected_cfg = edit_cfg if use_reference_images else gen_cfg
+            fallback_cfg = gen_cfg if use_reference_images else None
+            # 降级到独立的 image 配置，未填再降级到 chat_model
+            api_url = (
+                selected_cfg.api_url
+                or (fallback_cfg.api_url if fallback_cfg is not None else "")
+                or chat_cfg.api_url
+            )
+            api_key = (
+                selected_cfg.api_key
+                or (fallback_cfg.api_key if fallback_cfg is not None else "")
+                or chat_cfg.api_key
+            )
+            model_name = str(
+                selected_cfg.model_name
+                or (fallback_cfg.model_name if fallback_cfg is not None else "")
+                or ""
+            ).strip()
             size = str(size_arg or cfg.openai_size or "").strip()
             quality = str(quality_arg or cfg.openai_quality or "").strip()
             style = str(style_arg or cfg.openai_style or "").strip()
@@ -607,24 +834,60 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
                     return f"n 无效：{n_arg}。必须是 1 到 10 的整数"
 
             if not api_url:
-                return "图片生成失败：未配置 models.image_gen.api_url"
+                return (
+                    "图片生成失败：未配置 models.image_edit.api_url"
+                    if use_reference_images
+                    else "图片生成失败：未配置 models.image_gen.api_url"
+                )
             if not api_key:
-                return "图片生成失败：未配置 models.image_gen.api_key"
+                return (
+                    "图片生成失败：未配置 models.image_edit.api_key"
+                    if use_reference_images
+                    else "图片生成失败：未配置 models.image_gen.api_key"
+                )
 
             used_model = model_name or "openai-image-gen"
-            generated_result = await _call_openai_models(
-                prompt=prompt,
-                api_url=api_url,
-                api_key=api_key,
-                model_name=model_name,
-                size=size,
-                quality=quality,
-                style=style,
-                response_format=response_format,
-                n=n_value,
-                timeout_val=timeout_val,
-                context=context,
-            )
+            if use_reference_images:
+                from Undefined.utils.request_params import merge_request_params
+
+                (
+                    reference_image_paths,
+                    reference_error,
+                ) = await _resolve_reference_image_paths(reference_image_uids, context)
+                if reference_error:
+                    return reference_error
+                generated_result = await _call_openai_models_edit(
+                    prompt=prompt,
+                    api_url=api_url,
+                    api_key=api_key,
+                    model_name=model_name,
+                    size=size,
+                    quality=quality,
+                    style=style,
+                    response_format=response_format,
+                    n=n_value,
+                    timeout_val=timeout_val,
+                    reference_image_paths=reference_image_paths or [],
+                    extra_params=merge_request_params(
+                        gen_cfg.request_params,
+                        edit_cfg.request_params,
+                    ),
+                    context=context,
+                )
+            else:
+                generated_result = await _call_openai_models(
+                    prompt=prompt,
+                    api_url=api_url,
+                    api_key=api_key,
+                    model_name=model_name,
+                    size=size,
+                    quality=quality,
+                    style=style,
+                    response_format=response_format,
+                    n=n_value,
+                    timeout_val=timeout_val,
+                    context=context,
+                )
         else:
             return (
                 f"未知的生图 provider: {provider}，"

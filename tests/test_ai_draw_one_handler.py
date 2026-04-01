@@ -41,6 +41,12 @@ def _make_runtime_config(*, request_params: dict[str, Any] | None = None) -> Any
             model_name="grok-imagine-1.0",
             request_params=request_params or {},
         ),
+        models_image_edit=SimpleNamespace(
+            api_url="https://edit.example.com",
+            api_key="sk-edit",
+            model_name="grok-edit-1.0",
+            request_params={},
+        ),
         chat_model=SimpleNamespace(
             api_url="https://chat.example.com",
             api_key="sk-chat",
@@ -441,3 +447,108 @@ async def test_execute_send_infers_current_group_target(
     assert sent["target_id"] == 10001
     assert sent["message_type"] == "group"
     assert Path(sent["file_path"]).read_bytes() == _PNG_BYTES
+
+
+@pytest.mark.asyncio
+async def test_execute_models_reference_images_uses_edit_endpoint_and_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime_config = _make_runtime_config(request_params={})
+    runtime_config.models_image_edit.request_params = {"background": "transparent"}
+    monkeypatch.setattr(
+        "Undefined.config.get_config",
+        lambda strict=False: runtime_config,
+    )
+
+    payload_base64 = base64.b64encode(_PNG_BYTES).decode("ascii")
+    seen_request: dict[str, Any] = {}
+
+    class _FakeResponse:
+        text = ""
+
+        def json(self) -> dict[str, Any]:
+            return {"data": [{"base64": payload_base64}]}
+
+    async def _fake_request_with_retry(
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> _FakeResponse:
+        seen_request["method"] = method
+        seen_request["url"] = url
+        seen_request["data"] = kwargs.get("data")
+        seen_request["files"] = kwargs.get("files")
+        return _FakeResponse()
+
+    monkeypatch.setattr(ai_draw_handler, "request_with_retry", _fake_request_with_retry)
+
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    record = await registry.register_bytes(
+        "group:10001",
+        _PNG_BYTES,
+        kind="image",
+        display_name="ref.png",
+        source_kind="test",
+    )
+
+    result = await ai_draw_handler.execute(
+        {
+            "prompt": "use this as reference",
+            "size": "1024x1024",
+            "reference_image_uids": [record.uid],
+        },
+        {
+            "attachment_registry": registry,
+            "request_type": "group",
+            "group_id": 10001,
+        },
+    )
+
+    assert result.startswith('已生成图片，可在回复中插入 <pic uid="pic_')
+    assert seen_request["method"] == "POST"
+    assert seen_request["url"] == "https://edit.example.com/v1/images/edits"
+    assert seen_request["data"]["model"] == "grok-edit-1.0"
+    assert seen_request["data"]["background"] == "transparent"
+    assert len(seen_request["files"]) == 1
+    assert seen_request["files"][0][0] == "image"
+
+
+@pytest.mark.asyncio
+async def test_execute_models_reference_images_rejects_non_image_uid(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "Undefined.config.get_config",
+        lambda strict=False: _make_runtime_config(request_params={}),
+    )
+
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    record = await registry.register_bytes(
+        "group:10001",
+        b"hello",
+        kind="file",
+        display_name="demo.txt",
+        source_kind="test",
+    )
+
+    result = await ai_draw_handler.execute(
+        {
+            "prompt": "use this as reference",
+            "reference_image_uids": [record.uid],
+        },
+        {
+            "attachment_registry": registry,
+            "request_type": "group",
+            "group_id": 10001,
+        },
+    )
+
+    assert result == f"参考图 UID 不是图片：{record.uid}"

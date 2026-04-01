@@ -27,6 +27,7 @@ async def request_with_retry(
     params: dict[str, Any] | None = None,
     json_data: Any | None = None,
     data: Any | None = None,
+    files: Any | None = None,
     headers: dict[str, str] | None = None,
     timeout: float | None = None,
     default_timeout: float = 480.0,
@@ -55,6 +56,7 @@ async def request_with_retry(
                     params=params,
                     json=json_data,
                     data=data,
+                    files=files,
                     headers=headers,
                 )
                 if (
