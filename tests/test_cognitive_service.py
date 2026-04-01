@@ -21,6 +21,7 @@ class _FakeVectorStore:
     def __init__(self) -> None:
         self.last_event_kwargs: dict[str, Any] | None = None
         self.last_profile_kwargs: dict[str, Any] | None = None
+        self.last_upsert_profile: tuple[str, str, dict[str, Any]] | None = None
         self.event_calls: list[dict[str, Any]] = []
         self.event_resolver: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = (
             None
@@ -45,14 +46,35 @@ class _FakeVectorStore:
         self.last_profile_kwargs = dict(kwargs)
         return []
 
+    async def upsert_profile(
+        self,
+        profile_id: str,
+        document: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        self.last_upsert_profile = (profile_id, document, metadata)
+
 
 class _FakeProfileStorage:
+    def __init__(self, initial_profile: str | None = None) -> None:
+        self.profile = initial_profile
+        self.last_write: tuple[str, str, str] | None = None
+
     async def read_profile(
         self,
         _entity_type: str,
         _entity_id: str,
     ) -> str | None:
-        return None
+        return self.profile
+
+    async def write_profile(
+        self,
+        entity_type: str,
+        entity_id: str,
+        content: str,
+    ) -> None:
+        self.profile = content
+        self.last_write = (entity_type, entity_id, content)
 
 
 class _FakeRetrievalRuntime:
@@ -518,8 +540,80 @@ def test_merge_weighted_events_preserves_scope_rank_order() -> None:
         [(scoped_events, 1.0)],
         top_k=2,
     )
-
     assert [item["document"] for item in merged] == [
         "更新但稍弱相似度",
         "更老但更高相似度",
     ]
+
+
+@pytest.mark.asyncio
+async def test_sync_profile_display_name_updates_existing_profile_and_vector() -> None:
+    existing_profile = """---
+entity_type: user
+entity_id: "12345"
+name: 旧昵称
+nickname: 旧昵称
+tags:
+  - 开发者
+updated_at: "2026-04-01T00:00:00"
+---
+喜欢 Python
+"""
+    vector_store = _FakeVectorStore()
+    profile_storage = _FakeProfileStorage(existing_profile)
+    service = CognitiveService(
+        config_getter=lambda: SimpleNamespace(enabled=True),
+        vector_store=vector_store,
+        job_queue=_FakeJobQueue(),
+        profile_storage=profile_storage,
+        reranker=None,
+    )
+
+    updated = await service.sync_profile_display_name(
+        entity_type="user",
+        entity_id="12345",
+        preferred_name="新昵称",
+    )
+
+    assert updated is True
+    assert profile_storage.last_write is not None
+    assert "name: 新昵称" in profile_storage.last_write[2]
+    assert "nickname: 新昵称" in profile_storage.last_write[2]
+    assert vector_store.last_upsert_profile is not None
+    profile_id, document, metadata = vector_store.last_upsert_profile
+    assert profile_id == "user:12345"
+    assert "昵称: 新昵称" in document
+    assert metadata["name"] == "新昵称"
+    assert metadata["nickname"] == "新昵称"
+
+
+@pytest.mark.asyncio
+async def test_sync_profile_display_name_noops_when_name_unchanged() -> None:
+    existing_profile = """---
+entity_type: group
+entity_id: "10001"
+name: 测试群
+group_name: 测试群
+updated_at: "2026-04-01T00:00:00"
+---
+一个群聊
+"""
+    vector_store = _FakeVectorStore()
+    profile_storage = _FakeProfileStorage(existing_profile)
+    service = CognitiveService(
+        config_getter=lambda: SimpleNamespace(enabled=True),
+        vector_store=vector_store,
+        job_queue=_FakeJobQueue(),
+        profile_storage=profile_storage,
+        reranker=None,
+    )
+
+    updated = await service.sync_profile_display_name(
+        entity_type="group",
+        entity_id="10001",
+        preferred_name="测试群",
+    )
+
+    assert updated is False
+    assert profile_storage.last_write is None
+    assert vector_store.last_upsert_profile is None

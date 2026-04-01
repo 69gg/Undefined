@@ -156,6 +156,37 @@ class MessageHandler:
         )
         return result.attachments
 
+    async def _refresh_profile_display_names(
+        self,
+        *,
+        sender_id: int | None = None,
+        sender_name: str = "",
+        group_id: int | None = None,
+        group_name: str = "",
+    ) -> None:
+        ai_client = getattr(self, "ai", None)
+        cognitive_service = getattr(ai_client, "_cognitive_service", None)
+        if not cognitive_service or not getattr(cognitive_service, "enabled", False):
+            return
+
+        if sender_id and sender_name.strip():
+            await cognitive_service.sync_profile_display_name(
+                entity_type="user",
+                entity_id=str(sender_id),
+                preferred_name=sender_name.strip(),
+            )
+        if group_id and group_name.strip():
+            await cognitive_service.sync_profile_display_name(
+                entity_type="group",
+                entity_id=str(group_id),
+                preferred_name=group_name.strip(),
+            )
+
+    def _can_refresh_profile_display_names(self) -> bool:
+        ai_client = getattr(self, "ai", None)
+        cognitive_service = getattr(ai_client, "_cognitive_service", None)
+        return bool(cognitive_service and getattr(cognitive_service, "enabled", False))
+
     async def handle_message(self, event: dict[str, Any]) -> None:
         """处理收到的消息事件"""
         if logger.isEnabledFor(logging.DEBUG):
@@ -298,6 +329,15 @@ class MessageHandler:
                 user_name or private_sender_nickname,
                 safe_text[:100],
             )
+            resolved_private_name = (user_name or private_sender_nickname or "").strip()
+            if resolved_private_name and self._can_refresh_profile_display_names():
+                self._spawn_background_task(
+                    f"profile_name_refresh_private:{private_sender_id}",
+                    self._refresh_profile_display_names(
+                        sender_id=private_sender_id,
+                        sender_name=resolved_private_name,
+                    ),
+                )
 
             # 保存私聊消息到历史记录（保存处理后的内容）
             # 使用新的工具函数解析内容
@@ -439,6 +479,19 @@ class MessageHandler:
                 group_name = group_info.get("group_name", "")
         except Exception as e:
             logger.warning(f"获取群聊名失败: {e}")
+        resolved_group_sender_name = (sender_card or sender_nickname or "").strip()
+        if (resolved_group_sender_name or str(group_name or "").strip()) and (
+            self._can_refresh_profile_display_names()
+        ):
+            self._spawn_background_task(
+                f"profile_name_refresh_group:{group_id}:{sender_id}",
+                self._refresh_profile_display_names(
+                    sender_id=sender_id,
+                    sender_name=resolved_group_sender_name,
+                    group_id=group_id,
+                    group_name=str(group_name or "").strip(),
+                ),
+            )
 
         # 使用新的 utils
         parsed_content = await parse_message_content_for_history(
@@ -598,6 +651,14 @@ class MessageHandler:
         display_name = sender_nickname or user_name or f"QQ{user_id}"
         normalized_user_name = user_name or display_name
         poke_text = _format_poke_history_text(display_name, user_id)
+        if display_name.strip() and self._can_refresh_profile_display_names():
+            self._spawn_background_task(
+                f"profile_name_refresh_private_poke:{user_id}",
+                self._refresh_profile_display_names(
+                    sender_id=user_id,
+                    sender_name=display_name,
+                ),
+            )
 
         try:
             await self.history_manager.add_private_message(
@@ -667,6 +728,18 @@ class MessageHandler:
         display_name = sender_card or sender_nickname or f"QQ{sender_id}"
         poke_text = _format_poke_history_text(display_name, sender_id)
         normalized_group_name = group_name or f"群{group_id}"
+        if (display_name.strip() or normalized_group_name.strip()) and (
+            self._can_refresh_profile_display_names()
+        ):
+            self._spawn_background_task(
+                f"profile_name_refresh_group_poke:{group_id}:{sender_id}",
+                self._refresh_profile_display_names(
+                    sender_id=sender_id,
+                    sender_name=display_name,
+                    group_id=group_id,
+                    group_name=normalized_group_name,
+                ),
+            )
 
         try:
             await self.history_manager.add_group_message(
