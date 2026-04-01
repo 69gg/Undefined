@@ -27,21 +27,26 @@
                     "description": "图片响应格式（仅 models 模式生效）",
                     "enum": ["url", "b64_json", "base64"]
                 },
+                "delivery": {
+                    "type": "string",
+                    "description": "图片交付方式：embed 返回可插入回复的图片 UID；send 立即发送到当前或显式指定目标",
+                    "enum": ["embed", "send"]
+                },
                 "n": {
                     "type": "integer",
                     "description": "生成图片数量（仅 models 模式生效，1 到 10）"
                 },
                 "target_id": {
                     "type": "integer",
-                    "description": "发送目标的 ID"
+                    "description": "发送目标的 ID（delivery=send 时可显式提供；不提供则尝试从当前会话推断）"
                 },
                 "message_type": {
                     "type": "string",
-                    "description": "消息类型 (group 或 private)",
+                    "description": "消息类型 (group 或 private，delivery=send 时可显式提供；不提供则尝试从当前会话推断)",
                     "enum": ["group", "private"]
                 }
             },
-            "required": ["prompt", "target_id", "message_type"]
+            "required": ["prompt"]
         }
     }
 }

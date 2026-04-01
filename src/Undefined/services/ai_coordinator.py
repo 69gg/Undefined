@@ -3,6 +3,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from Undefined.attachments import (
+    attachment_refs_to_xml,
+    build_attachment_scope,
+    render_message_with_pic_placeholders,
+)
 from Undefined.config import Config
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
@@ -61,6 +66,7 @@ class AICoordinator:
         sender_id: int,
         text: str,
         message_content: list[dict[str, Any]],
+        attachments: list[dict[str, str]] | None = None,
         is_poke: bool = False,
         sender_name: str = "未知用户",
         group_name: str = "未知群聊",
@@ -122,7 +128,8 @@ class AICoordinator:
             sender_title,
             current_time,
             text,
-            trigger_message_id,
+            attachments=attachments,
+            message_id=trigger_message_id,
         )
         logger.debug(
             "[自动回复] full_question_len=%s group=%s sender=%s",
@@ -164,6 +171,7 @@ class AICoordinator:
         user_id: int,
         text: str,
         message_content: list[dict[str, Any]],
+        attachments: list[dict[str, str]] | None = None,
         is_poke: bool = False,
         sender_name: str = "未知用户",
         trigger_message_id: int | None = None,
@@ -184,8 +192,12 @@ class AICoordinator:
         message_id_attr = ""
         if trigger_message_id is not None:
             message_id_attr = f' message_id="{escape_xml_attr(trigger_message_id)}"'
+        attachment_xml = (
+            f"\n{attachment_refs_to_xml(attachments)}" if attachments else ""
+        )
         full_question = f"""{prompt_prefix}<message{message_id_attr} sender="{escape_xml_attr(sender_name)}" sender_id="{escape_xml_attr(user_id)}" location="私聊" time="{escape_xml_attr(current_time)}">
  <content>{escape_xml_text(text)}</content>
+{attachment_xml}
  </message>
 
 【私聊消息】
@@ -440,7 +452,21 @@ class AICoordinator:
                     },
                 )
                 if result:
-                    await self.sender.send_private_message(user_id, result)
+                    scope_key = build_attachment_scope(
+                        user_id=user_id,
+                        request_type="private",
+                    )
+                    rendered = await render_message_with_pic_placeholders(
+                        str(result),
+                        registry=self.ai.attachment_registry,
+                        scope_key=scope_key,
+                        strict=False,
+                    )
+                    await self.sender.send_private_message(
+                        user_id,
+                        rendered.delivery_text,
+                        history_message=rendered.history_text,
+                    )
             except Exception:
                 logger.exception("私聊回复执行出错")
                 raise
@@ -674,6 +700,7 @@ class AICoordinator:
         title: str,
         time_str: str,
         text: str,
+        attachments: list[dict[str, str]] | None = None,
         message_id: int | None = None,
     ) -> str:
         """构建最终发送给 AI 的结构化 XML 消息 Prompt
@@ -692,8 +719,11 @@ class AICoordinator:
         message_id_attr = ""
         if message_id is not None:
             message_id_attr = f' message_id="{escape_xml_attr(message_id)}"'
+        attachment_xml = (
+            f"\n{attachment_refs_to_xml(attachments)}" if attachments else ""
+        )
         return f"""{prefix}<message{message_id_attr} sender="{safe_name}" sender_id="{safe_uid}" group_id="{safe_gid}" group_name="{safe_gname}" location="{safe_loc}" role="{safe_role}" title="{safe_title}" time="{safe_time}">
- <content>{safe_text}</content>
+ <content>{safe_text}</content>{attachment_xml}
  </message>
 
  【回复策略 - 极低频参与】

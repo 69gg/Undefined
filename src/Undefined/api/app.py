@@ -21,11 +21,18 @@ from aiohttp import ClientSession, ClientTimeout, web
 from aiohttp.web_response import Response
 
 from Undefined import __version__
+from Undefined.attachments import (
+    attachment_refs_to_xml,
+    build_attachment_scope,
+    register_message_attachments,
+    render_message_with_pic_placeholders,
+)
 from Undefined.config import load_webui_settings
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
 from Undefined.render import render_html_to_image, render_markdown_to_html  # noqa: F401
 from Undefined.services.queue_manager import QUEUE_LANE_SUPERADMIN
+from Undefined.utils.common import message_to_segments
 from Undefined.utils.cors import is_allowed_cors_origin, normalize_origin
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
 from Undefined.utils.xml import escape_xml_attr, escape_xml_text
@@ -75,8 +82,16 @@ class _WebUIVirtualSender:
         mark_sent: bool = True,
         reply_to: int | None = None,
         preferred_temp_group_id: int | None = None,
+        history_message: str | None = None,
     ) -> int | None:
-        _ = user_id, auto_history, mark_sent, reply_to, preferred_temp_group_id
+        _ = (
+            user_id,
+            auto_history,
+            mark_sent,
+            reply_to,
+            preferred_temp_group_id,
+            history_message,
+        )
         await self._send_private_callback(self._virtual_user_id, message)
         return None
 
@@ -89,8 +104,16 @@ class _WebUIVirtualSender:
         *,
         mark_sent: bool = True,
         reply_to: int | None = None,
+        history_message: str | None = None,
     ) -> int | None:
-        _ = group_id, auto_history, history_prefix, mark_sent, reply_to
+        _ = (
+            group_id,
+            auto_history,
+            history_prefix,
+            mark_sent,
+            reply_to,
+            history_message,
+        )
         await self._send_private_callback(self._virtual_user_id, message)
         return None
 
@@ -1181,14 +1204,28 @@ class RuntimeAPIServer:
     ) -> str:
         cfg = self._ctx.config_getter()
         permission_sender_id = int(cfg.superadmin_qq)
+        webui_scope_key = build_attachment_scope(
+            user_id=_VIRTUAL_USER_ID,
+            request_type="private",
+            webui_session=True,
+        )
+        input_segments = message_to_segments(text)
+        registered_input = await register_message_attachments(
+            registry=self._ctx.ai.attachment_registry,
+            segments=input_segments,
+            scope_key=webui_scope_key,
+            resolve_image_url=self._ctx.onebot.get_image,
+        )
+        normalized_text = registered_input.normalized_text or text
         await self._ctx.history_manager.add_private_message(
             user_id=_VIRTUAL_USER_ID,
-            text_content=text,
+            text_content=normalized_text,
             display_name=_VIRTUAL_USER_NAME,
             user_name=_VIRTUAL_USER_NAME,
+            attachments=registered_input.attachments,
         )
 
-        command = self._ctx.command_dispatcher.parse_command(text)
+        command = self._ctx.command_dispatcher.parse_command(normalized_text)
         if command:
             await self._ctx.command_dispatcher.dispatch_private(
                 user_id=_VIRTUAL_USER_ID,
@@ -1200,8 +1237,13 @@ class RuntimeAPIServer:
             return "command"
 
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        attachment_xml = (
+            f"\n{attachment_refs_to_xml(registered_input.attachments)}"
+            if registered_input.attachments
+            else ""
+        )
         full_question = f"""<message sender="{escape_xml_attr(_VIRTUAL_USER_NAME)}" sender_id="{escape_xml_attr(_VIRTUAL_USER_ID)}" location="WebUI私聊" time="{escape_xml_attr(current_time)}">
- <content>{escape_xml_text(text)}</content>
+ <content>{escape_xml_text(normalized_text)}</content>{attachment_xml}
  </message>
 
 【WebUI 会话】
@@ -1334,18 +1376,32 @@ class RuntimeAPIServer:
 
         stream = _to_bool(body.get("stream"))
         outputs: list[str] = []
+        webui_scope_key = build_attachment_scope(
+            user_id=_VIRTUAL_USER_ID,
+            request_type="private",
+            webui_session=True,
+        )
 
         async def _capture_private_message(user_id: int, message: str) -> None:
             _ = user_id
             content = str(message or "").strip()
             if not content:
                 return
-            outputs.append(content)
+            rendered = await render_message_with_pic_placeholders(
+                content,
+                registry=self._ctx.ai.attachment_registry,
+                scope_key=webui_scope_key,
+                strict=False,
+            )
+            if not rendered.delivery_text.strip():
+                return
+            outputs.append(rendered.delivery_text)
             await self._ctx.history_manager.add_private_message(
                 user_id=_VIRTUAL_USER_ID,
-                text_content=content,
+                text_content=rendered.history_text,
                 display_name="Bot",
                 user_name="Bot",
+                attachments=rendered.attachments,
             )
 
         if not stream:
@@ -1373,7 +1429,13 @@ class RuntimeAPIServer:
 
         async def _capture_private_message_stream(user_id: int, message: str) -> None:
             await _capture_private_message(user_id, message)
-            content = str(message or "").strip()
+            rendered = await render_message_with_pic_placeholders(
+                str(message or "").strip(),
+                registry=self._ctx.ai.attachment_registry,
+                scope_key=webui_scope_key,
+                strict=False,
+            )
+            content = rendered.delivery_text.strip()
             if content:
                 await message_queue.put(content)
 

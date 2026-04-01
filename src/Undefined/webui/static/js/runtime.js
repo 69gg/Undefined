@@ -430,6 +430,12 @@
             const payload = raw.slice("base64://".length).trim();
             return payload ? `data:image/png;base64,${payload}` : "";
         }
+        if (raw.startsWith("file://")) {
+            const localPath = raw.slice("file://".length).trim();
+            return localPath
+                ? `/api/runtime/chat/image?path=${encodeURIComponent(localPath)}`
+                : "";
+        }
         if (raw.startsWith("/") || /^[A-Za-z]:[\\/]/.test(raw)) {
             return `/api/runtime/chat/image?path=${encodeURIComponent(raw)}`;
         }

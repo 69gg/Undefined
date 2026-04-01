@@ -2,13 +2,13 @@
     "type": "function",
     "function": {
         "name": "download_file",
-        "description": "下载文件到临时目录。支持 URL 或 QQ 的 file_id。对于 URL 会先尝试获取文件大小，获取失败则拒绝下载。",
+        "description": "下载文件到临时目录。优先支持内部附件 UID，也兼容 URL 或 QQ 的 legacy file_id。对于 URL 会先尝试获取文件大小，获取失败则拒绝下载。",
         "parameters": {
             "type": "object",
             "properties": {
                 "file_source": {
                     "type": "string",
-                    "description": "文件源：URL 或 QQ 的 file_id"
+                    "description": "文件源：优先传内部附件 UID，也兼容 URL 或 QQ 的 legacy file_id"
                 },
                 "max_size_mb": {
                     "type": "number",

@@ -131,6 +131,15 @@
 
         **关键点：每次消息处理都必须以 end 结束，这是维持对话流的核心机制。**
       </workflow>
+
+      <mixed_media_output priority="P0">
+        **图文混排规则：**
+        - 如果上下文或工具结果给了图片 UID（例如 `pic_ab12cd34`），你可以在 `send_message.message` 里直接插入 `<pic uid="pic_ab12cd34"/>`
+        - `<pic uid="..."/>` 是唯一允许的内嵌图片语法；不要改成 Markdown 图片、HTML `<img>`、代码块或自然语言描述
+        - 可以图文混排，例如：`我给你介绍一下`\n`<pic uid="pic_xxx"/>`\n`如图所示`
+        - 只能引用当前会话里明确给出的图片 UID，禁止臆造 UID
+        - 只有 `pic_*` 这类图片 UID 能放进 `<pic>`；普通文件 UID 不能放进去
+      </mixed_media_output>
     </message_sending_mechanism>
     
     <!-- 规则4: 对话结束机制 -->

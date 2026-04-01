@@ -11,6 +11,7 @@ from typing import Any, Callable, Awaitable, Literal
 
 import aiofiles
 
+from Undefined.attachments import attachment_refs_to_xml
 from Undefined.context import RequestContext
 from Undefined.end_summary_storage import (
     EndSummaryStorage,
@@ -26,7 +27,7 @@ from Undefined.utils.xml import escape_xml_attr, escape_xml_text
 logger = logging.getLogger(__name__)
 
 _CURRENT_MESSAGE_RE = re.compile(
-    r"<message\b(?P<attrs>[^>]*)>\s*<content>(?P<content>.*?)</content>\s*</message>",
+    r"<message\b(?P<attrs>[^>]*)>.*?<content>(?P<content>.*?)</content>.*?</message>",
     re.DOTALL | re.IGNORECASE,
 )
 _XML_ATTR_RE = re.compile(r'(?P<key>[a-zA-Z_][a-zA-Z0-9_-]*)="(?P<value>[^"]*)"')
@@ -648,6 +649,7 @@ class PromptBuilder:
                 chat_name = msg.get("chat_name", "未知群聊")
                 timestamp = msg.get("timestamp", "")
                 text = msg.get("message", "")
+                attachments = msg.get("attachments", [])
                 role = msg.get("role", "member")
                 title = msg.get("title", "")
                 message_id = msg.get("message_id")
@@ -664,6 +666,11 @@ class PromptBuilder:
                 msg_id_attr = ""
                 if message_id is not None:
                     msg_id_attr = f' message_id="{escape_xml_attr(str(message_id))}"'
+                attachment_xml = (
+                    f"\n{attachment_refs_to_xml(attachments)}"
+                    if isinstance(attachments, list) and attachments
+                    else ""
+                )
 
                 if msg_type_val == "group":
                     location = (
@@ -673,14 +680,14 @@ class PromptBuilder:
                     xml_msg = (
                         f'<message{msg_id_attr} sender="{safe_sender}" sender_id="{safe_sender_id}" group_id="{safe_chat_id}" '
                         f'group_name="{safe_chat_name}" location="{safe_location}" role="{safe_role}" title="{safe_title}" '
-                        f'time="{safe_time}">\n<content>{safe_text}</content>\n</message>'
+                        f'time="{safe_time}">\n<content>{safe_text}</content>{attachment_xml}\n</message>'
                     )
                 else:
                     location = "私聊"
                     safe_location = escape_xml_attr(location)
                     xml_msg = (
                         f'<message{msg_id_attr} sender="{safe_sender}" sender_id="{safe_sender_id}" location="{safe_location}" '
-                        f'time="{safe_time}">\n<content>{safe_text}</content>\n</message>'
+                        f'time="{safe_time}">\n<content>{safe_text}</content>{attachment_xml}\n</message>'
                     )
                 context_lines.append(xml_msg)
 

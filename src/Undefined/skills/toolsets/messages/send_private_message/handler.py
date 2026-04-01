@@ -1,6 +1,11 @@
 from typing import Any, Dict
 import logging
 
+from Undefined.attachments import (
+    render_message_with_pic_placeholders,
+    scope_from_context,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,6 +75,23 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not message:
         return "消息内容不能为空"
 
+    attachment_registry = context.get("attachment_registry")
+    scope_key = scope_from_context(context)
+    try:
+        rendered = await render_message_with_pic_placeholders(
+            message,
+            registry=attachment_registry,
+            scope_key=scope_key,
+            strict=True,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[私聊发送] 图片内嵌渲染失败: request_id=%s err=%s", request_id, exc
+        )
+        return f"发送失败：{exc}"
+    message = rendered.delivery_text
+    history_message = rendered.history_text
+
     runtime_config = context.get("runtime_config")
     if runtime_config is not None:
         if not runtime_config.is_private_allowed(user_id):
@@ -81,7 +103,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if sender:
         try:
             sent_message_id = await sender.send_private_message(
-                user_id, message, reply_to=reply_to_id
+                user_id,
+                message,
+                reply_to=reply_to_id,
+                history_message=history_message,
             )
             context["message_sent_this_turn"] = True
             return _format_send_success(user_id, sent_message_id)

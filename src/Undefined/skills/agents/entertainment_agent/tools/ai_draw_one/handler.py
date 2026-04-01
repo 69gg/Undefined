@@ -17,6 +17,7 @@ from typing import Any
 
 import httpx
 
+from Undefined.attachments import scope_from_context
 from Undefined.skills.http_client import request_with_retry
 from Undefined.skills.http_config import get_request_timeout, get_xingzhige_url
 
@@ -390,6 +391,74 @@ async def _save_and_send(
     return await _send_cached_image(filepath, target_id, message_type, context)
 
 
+def _resolve_send_target(
+    target_id: int | str | None,
+    message_type: str | None,
+    context: dict[str, Any],
+) -> tuple[int | str | None, str | None, str | None]:
+    if target_id is not None and message_type is not None:
+        return target_id, message_type, None
+
+    request_type = str(context.get("request_type", "") or "").strip().lower()
+    if request_type == "group":
+        resolved_group_id = context.get("group_id")
+        if resolved_group_id is not None:
+            return resolved_group_id, "group", None
+    if request_type == "private":
+        resolved_user_id = context.get("user_id")
+        if resolved_user_id is not None:
+            return resolved_user_id, "private", None
+
+    return None, None, "图片生成成功，但缺少发送目标参数"
+
+
+async def _register_generated_image(
+    generated_image: _GeneratedImagePayload,
+    context: dict[str, Any],
+) -> tuple[Any | None, str | None]:
+    attachment_registry = context.get("attachment_registry")
+    scope_key = scope_from_context(context)
+    if attachment_registry is None or not scope_key:
+        return None, "当前会话未提供附件注册能力，无法生成可嵌入图片 UID"
+
+    display_name = f"ai_draw_{uuid.uuid4().hex[:8]}.png"
+    if generated_image.image_bytes is not None:
+        record = await attachment_registry.register_bytes(
+            scope_key,
+            generated_image.image_bytes,
+            kind="image",
+            display_name=display_name,
+            source_kind="generated_image",
+            source_ref="ai_draw_one",
+        )
+        return record, None
+
+    if generated_image.image_url:
+        record = await attachment_registry.register_remote_url(
+            scope_key,
+            generated_image.image_url,
+            kind="image",
+            display_name=display_name,
+            source_kind="generated_image_url",
+            source_ref=generated_image.image_url,
+        )
+        return record, None
+
+    return None, "图片生成失败：未找到可保存的图片内容"
+
+
+async def _send_registered_record(
+    record: Any,
+    target_id: int | str,
+    message_type: str,
+    context: dict[str, Any],
+) -> str:
+    local_path = str(getattr(record, "local_path", "") or "").strip()
+    if not local_path:
+        return "图片生成失败：已生成图片，但本地缓存不可用"
+    return await _send_cached_image(local_path, target_id, message_type, context)
+
+
 async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     """执行 AI 绘图"""
     from Undefined.config import get_config
@@ -400,6 +469,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     style_arg: str | None = args.get("style")
     response_format_arg: str | None = args.get("response_format")
     n_arg = args.get("n")
+    delivery = str(args.get("delivery", "embed") or "embed").strip().lower()
     target_id: int | str | None = args.get("target_id")
     message_type_arg: str | None = args.get("message_type")
 
@@ -414,6 +484,9 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     generated_result: str | _GeneratedImagePayload
 
     try:
+        if delivery not in {"embed", "send"}:
+            return f"delivery 无效：{delivery}。仅支持 embed 或 send"
+
         if provider == "xingzhige":
             prompt = prompt_arg or ""
             size = size_arg or cfg.xingzhige_size
@@ -468,21 +541,49 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
                 return generated_result
             generated_image = _GeneratedImagePayload(image_url=generated_result)
 
-        if target_id is None or message_type_arg is None:
+        registered_record, register_error = await _register_generated_image(
+            generated_image,
+            context,
+        )
+        if delivery == "embed":
+            if register_error or registered_record is None:
+                return register_error or "图片生成失败：无法创建内嵌图片 UID"
+            success = True
+            uid = str(getattr(registered_record, "uid", "") or "").strip()
+            return f'已生成图片，可在回复中插入 <pic uid="{uid}"/>'
+
+        resolved_target_id, resolved_message_type, target_error = _resolve_send_target(
+            target_id,
+            message_type_arg,
+            context,
+        )
+        if target_error:
+            return target_error
+        if resolved_target_id is None or resolved_message_type is None:
             return "图片生成成功，但缺少发送目标参数"
 
         send_timeout = get_request_timeout(60.0)
-        if generated_image.image_url:
+        if registered_record is not None:
+            result = await _send_registered_record(
+                registered_record,
+                resolved_target_id,
+                resolved_message_type,
+                context,
+            )
+        elif generated_image.image_url:
             result = await _download_and_send(
                 generated_image.image_url,
-                target_id,
-                message_type_arg,
+                resolved_target_id,
+                resolved_message_type,
                 send_timeout,
                 context,
             )
         elif generated_image.image_bytes is not None:
             result = await _save_and_send(
-                generated_image.image_bytes, target_id, message_type_arg, context
+                generated_image.image_bytes,
+                resolved_target_id,
+                resolved_message_type,
+                context,
             )
         else:
             return "图片生成失败：未找到可发送的图片内容"

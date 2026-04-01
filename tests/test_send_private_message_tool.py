@@ -60,3 +60,9 @@ async def test_send_private_message_returns_sent_message_id_when_available() -> 
     )
 
     assert result == "私聊消息已发送给用户 12345（message_id=99999）"
+    sender.send_private_message.assert_awaited_once_with(
+        12345,
+        "hello sender private",
+        reply_to=None,
+        history_message="hello sender private",
+    )

@@ -8,6 +8,11 @@ from pathlib import Path
 import random
 from typing import Any, Coroutine
 
+from Undefined.attachments import (
+    append_attachment_text,
+    build_attachment_scope,
+    register_message_attachments,
+)
 from Undefined.ai import AIClient
 from Undefined.config import Config
 from Undefined.faq import FAQStorage
@@ -116,6 +121,37 @@ class MessageHandler:
 
         # 启动队列
         self.ai_coordinator.queue_manager.start(self.ai_coordinator.execute_reply)
+
+    async def _collect_message_attachments(
+        self,
+        message_content: list[dict[str, Any]],
+        *,
+        group_id: int | None = None,
+        user_id: int | None = None,
+        request_type: str,
+    ) -> list[dict[str, str]]:
+        scope_key = build_attachment_scope(
+            group_id=group_id,
+            user_id=user_id,
+            request_type=request_type,
+        )
+        if not scope_key:
+            return []
+        ai_client = getattr(self, "ai", None)
+        attachment_registry = (
+            getattr(ai_client, "attachment_registry", None) if ai_client else None
+        )
+        if attachment_registry is None:
+            return []
+        onebot = getattr(self, "onebot", None)
+        resolve_image_url = getattr(onebot, "get_image", None) if onebot else None
+        result = await register_message_attachments(
+            registry=attachment_registry,
+            segments=message_content,
+            scope_key=scope_key,
+            resolve_image_url=resolve_image_url,
+        )
+        return result.attachments
 
     async def handle_message(self, event: dict[str, Any]) -> None:
         """处理收到的消息事件"""
@@ -247,6 +283,11 @@ class MessageHandler:
                     logger.warning("获取用户昵称失败: %s", exc)
 
             text = extract_text(private_message_content, self.config.bot_qq)
+            private_attachments = await self._collect_message_attachments(
+                private_message_content,
+                user_id=private_sender_id,
+                request_type="private",
+            )
             safe_text = redact_string(text)
             logger.info(
                 "[私聊消息] 发送者=%s 昵称=%s 内容=%s",
@@ -263,6 +304,7 @@ class MessageHandler:
                 self.onebot.get_msg,
                 self.onebot.get_forward_msg,
             )
+            parsed_content = append_attachment_text(parsed_content, private_attachments)
             safe_parsed = redact_string(parsed_content)
             logger.debug(
                 "[历史记录] 保存私聊: user=%s content=%s...",
@@ -275,6 +317,7 @@ class MessageHandler:
                 display_name=private_sender_nickname,
                 user_name=user_name,
                 message_id=trigger_message_id,
+                attachments=private_attachments,
             )
 
             # 如果是 bot 自己的消息，只保存不触发回复，避免无限循环
@@ -337,6 +380,7 @@ class MessageHandler:
                 private_sender_id,
                 text,
                 private_message_content,
+                attachments=private_attachments,
                 sender_name=user_name,
                 trigger_message_id=trigger_message_id,
             )
@@ -372,6 +416,11 @@ class MessageHandler:
 
         # 提取文本内容
         text = extract_text(message_content, self.config.bot_qq)
+        group_attachments = await self._collect_message_attachments(
+            message_content,
+            group_id=group_id,
+            request_type="group",
+        )
         safe_text = redact_string(text)
         logger.info(
             f"[群消息] group={group_id} sender={sender_id} name={sender_card or sender_nickname} "
@@ -395,6 +444,7 @@ class MessageHandler:
             self.onebot.get_msg,
             self.onebot.get_forward_msg,
         )
+        parsed_content = append_attachment_text(parsed_content, group_attachments)
         safe_parsed = redact_string(parsed_content)
         logger.debug(
             f"[历史记录] 保存群聊: group={group_id}, sender={sender_id}, content={safe_parsed[:50]}..."
@@ -409,6 +459,7 @@ class MessageHandler:
             role=sender_role,
             title=sender_title,
             message_id=trigger_message_id,
+            attachments=group_attachments,
         )
 
         # 如果是 bot 自己的消息，只保存不触发回复，避免无限循环
@@ -511,6 +562,7 @@ class MessageHandler:
             sender_id,
             text,
             message_content,
+            attachments=group_attachments,
             sender_name=display_name,
             group_name=group_name,
             sender_role=sender_role,

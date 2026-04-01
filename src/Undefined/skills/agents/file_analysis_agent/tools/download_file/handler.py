@@ -5,6 +5,8 @@ import logging
 import httpx
 import aiofiles
 
+from Undefined.attachments import scope_from_context
+
 logger = logging.getLogger(__name__)
 
 SIZE_LIMITS = {
@@ -43,6 +45,21 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     from Undefined.utils.paths import DOWNLOAD_CACHE_DIR, ensure_dir
 
     temp_dir: Path = ensure_dir(DOWNLOAD_CACHE_DIR / task_uuid)
+
+    attachment_registry = context.get("attachment_registry")
+    scope_key = scope_from_context(context)
+    if attachment_registry and scope_key:
+        try:
+            record = attachment_registry.resolve(file_source, scope_key)
+        except Exception:
+            record = None
+        if record is not None:
+            return await _download_from_attachment_record(
+                record,
+                temp_dir=temp_dir,
+                max_size_mb=max_size_mb,
+                task_uuid=task_uuid,
+            )
 
     is_url: bool = file_source.startswith("http://") or file_source.startswith(
         "https://"
@@ -156,3 +173,49 @@ def _extract_filename_from_url(url: str) -> str:
         url = url.split("?")[0]
     filename = url.split("/")[-1]
     return filename
+
+
+async def _download_from_attachment_record(
+    record: Any,
+    *,
+    temp_dir: Path,
+    max_size_mb: float,
+    task_uuid: str,
+) -> str:
+    max_size_bytes: int = int(max_size_mb * 1024 * 1024)
+    local_path_raw = getattr(record, "local_path", None)
+    if local_path_raw:
+        local_path = Path(str(local_path_raw))
+        if local_path.is_file():
+            size = local_path.stat().st_size
+            if size > max_size_bytes:
+                return (
+                    f"错误：文件大小 ({size / 1024 / 1024:.2f}MB) "
+                    f"超过限制 ({max_size_mb}MB)"
+                )
+            display_name = str(getattr(record, "display_name", "") or "").strip()
+            filename = display_name or local_path.name or f"downloaded_{task_uuid}"
+            target = temp_dir / filename
+            async with aiofiles.open(local_path, "rb") as src:
+                content = await src.read()
+            target.write_bytes(content)
+            logger.info("附件 UID 已复制到: %s", target)
+            return str(target)
+
+    source_ref = str(getattr(record, "source_ref", "") or "").strip()
+    if source_ref.startswith("http://") or source_ref.startswith("https://"):
+        return await _download_from_url(source_ref, temp_dir, max_size_mb, task_uuid)
+
+    if source_ref:
+        candidate = Path(source_ref)
+        if candidate.exists() and candidate.is_file():
+            display_name = str(getattr(record, "display_name", "") or "").strip()
+            filename = display_name or candidate.name or f"downloaded_{task_uuid}"
+            target = temp_dir / filename
+            async with aiofiles.open(candidate, "rb") as src:
+                content = await src.read()
+            target.write_bytes(content)
+            logger.info("附件 UID 源文件已复制到: %s", target)
+            return str(target)
+
+    return f"错误：无法从附件 UID {getattr(record, 'uid', '')} 解析到可下载文件"

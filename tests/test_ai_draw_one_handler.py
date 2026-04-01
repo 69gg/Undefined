@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 import pytest
 
+from Undefined.attachments import AttachmentRegistry
 from Undefined.skills.agents.entertainment_agent.tools.ai_draw_one import (
     handler as ai_draw_handler,
 )
@@ -105,6 +106,7 @@ async def test_execute_models_supports_base64_response_and_preserves_explicit_si
             "prompt": "violet flowers",
             "size": "1024x1024",
             "response_format": response_key,
+            "delivery": "send",
             "target_id": 10001,
             "message_type": "group",
         },
@@ -132,6 +134,7 @@ async def test_execute_models_rejects_invalid_size(
         {
             "prompt": "violet flowers",
             "size": "1:1",
+            "delivery": "send",
             "target_id": 10001,
             "message_type": "group",
         },
@@ -185,6 +188,7 @@ async def test_execute_models_defaults_response_format_to_base64(
         {
             "prompt": "violet flowers",
             "size": "1024x1024",
+            "delivery": "send",
             "target_id": 10001,
             "message_type": "group",
         },
@@ -225,6 +229,7 @@ async def test_execute_models_reports_upstream_http_error_detail(
         {
             "prompt": "violet flowers",
             "size": "1024x1024",
+            "delivery": "send",
             "target_id": 10001,
             "message_type": "group",
         },
@@ -280,6 +285,7 @@ async def test_execute_models_uses_configured_model_only(
             "prompt": "violet flowers",
             "model": "dall-e-3",
             "size": "1024x1024",
+            "delivery": "send",
             "target_id": 10001,
             "message_type": "group",
         },
@@ -288,3 +294,107 @@ async def test_execute_models_uses_configured_model_only(
 
     assert result == "AI 绘图已发送给 group 10001"
     assert seen_request["json_data"]["model"] == "grok-imagine-1.0"
+
+
+@pytest.mark.asyncio
+async def test_execute_defaults_to_embed_and_returns_pic_uid(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "Undefined.config.get_config",
+        lambda strict=False: _make_runtime_config(request_params={}),
+    )
+
+    payload_base64 = base64.b64encode(_PNG_BYTES).decode("ascii")
+
+    class _FakeResponse:
+        text = ""
+
+        def json(self) -> dict[str, Any]:
+            return {"data": [{"base64": payload_base64}]}
+
+    async def _fake_request_with_retry(*_args: Any, **_kwargs: Any) -> _FakeResponse:
+        return _FakeResponse()
+
+    monkeypatch.setattr(ai_draw_handler, "request_with_retry", _fake_request_with_retry)
+
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    result = await ai_draw_handler.execute(
+        {
+            "prompt": "violet flowers",
+            "size": "1024x1024",
+        },
+        {
+            "attachment_registry": registry,
+            "request_type": "group",
+            "group_id": 10001,
+        },
+    )
+
+    assert result.startswith('已生成图片，可在回复中插入 <pic uid="pic_')
+    uid = result.split('uid="', 1)[1].split('"', 1)[0]
+    record = registry.resolve(uid, "group:10001")
+    assert record is not None
+    assert Path(str(record.local_path)).read_bytes() == _PNG_BYTES
+
+
+@pytest.mark.asyncio
+async def test_execute_send_infers_current_group_target(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "Undefined.config.get_config",
+        lambda strict=False: _make_runtime_config(request_params={}),
+    )
+
+    payload_base64 = base64.b64encode(_PNG_BYTES).decode("ascii")
+
+    class _FakeResponse:
+        text = ""
+
+        def json(self) -> dict[str, Any]:
+            return {"data": [{"base64": payload_base64}]}
+
+    async def _fake_request_with_retry(*_args: Any, **_kwargs: Any) -> _FakeResponse:
+        return _FakeResponse()
+
+    sent: dict[str, Any] = {}
+
+    async def _send_image(
+        target_id: int | str,
+        message_type: str,
+        file_path: str,
+    ) -> None:
+        sent["target_id"] = target_id
+        sent["message_type"] = message_type
+        sent["file_path"] = file_path
+
+    monkeypatch.setattr(ai_draw_handler, "request_with_retry", _fake_request_with_retry)
+
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    result = await ai_draw_handler.execute(
+        {
+            "prompt": "violet flowers",
+            "size": "1024x1024",
+            "delivery": "send",
+        },
+        {
+            "attachment_registry": registry,
+            "request_type": "group",
+            "group_id": 10001,
+            "send_image_callback": _send_image,
+        },
+    )
+
+    assert result == "AI 绘图已发送给 group 10001"
+    assert sent["target_id"] == 10001
+    assert sent["message_type"] == "group"
+    assert Path(sent["file_path"]).read_bytes() == _PNG_BYTES
