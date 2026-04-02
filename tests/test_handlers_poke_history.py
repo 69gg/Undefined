@@ -1,4 +1,5 @@
 """MessageHandler 拍一拍历史记录测试"""
+
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock

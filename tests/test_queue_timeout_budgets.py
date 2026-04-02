@@ -152,7 +152,9 @@ def test_tool_invoke_proxy_timeout_uses_local_schema_sets(
         lambda: {"messages.send_message"},
     )
 
-    assert runtime_routes._tool_invoke_proxy_timeout_seconds("custom_agent_runner") is None
+    assert (
+        runtime_routes._tool_invoke_proxy_timeout_seconds("custom_agent_runner") is None
+    )
     assert (
         runtime_routes._tool_invoke_proxy_timeout_seconds("messages.send_message")
         == 180.0
