@@ -2,18 +2,23 @@
     "type": "function",
     "function": {
         "name": "get_picture",
-        "description": "获取指定数量的指定类型的图片并发送到群聊或指定私聊。支持白丝、黑丝、头像、JK、二次元、小姐姐、壁纸、原神、历史上的今天、4K图片、美腿十一种类型。二次元类型支持选择手机端或PC端。4K图片支持选择二次元或风景。默认获取二次元图片，默认使用PC端。",
+        "description": "获取指定数量的指定类型的图片。默认返回可嵌入回复的图片 UID（embed），也可直接发送到群聊或指定私聊（send）。支持白丝、黑丝、头像、JK、二次元、小姐姐、壁纸、原神、历史上的今天、4K图片、美腿十一种类型。二次元类型支持选择手机端或PC端。4K图片支持选择二次元或风景。默认获取二次元图片，默认使用PC端。",
         "parameters": {
             "type": "object",
             "properties": {
+                "delivery": {
+                    "type": "string",
+                    "description": "图片交付方式：embed 返回可插入回复的图片 UID；send 立即发送到目标",
+                    "enum": ["embed", "send"]
+                },
                 "message_type": {
                     "type": "string",
-                    "description": "消息类型",
+                    "description": "消息类型（仅 delivery=send 时需要，不提供则从当前会话推断）",
                     "enum": ["group", "private"]
                 },
                 "target_id": {
                     "type": "integer",
-                    "description": "目标 ID（群聊为群号，私聊为用户 QQ 号）"
+                    "description": "目标 ID（群聊为群号，私聊为用户 QQ 号，仅 delivery=send 时需要，不提供则从当前会话推断）"
                 },
                 "picture_type": {
                     "type": "string",
@@ -39,7 +44,7 @@
                     "default": "acg"
                 }
             },
-            "required": ["message_type", "target_id"]
+            "required": []
         }
     }
 }

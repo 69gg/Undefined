@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 from typing import Any, Dict
 import logging
 import httpx
 
+from Undefined.attachments import scope_from_context
 from Undefined.skills.http_client import get_json_with_retry
 from Undefined.skills.http_config import get_xxapi_url
 
@@ -35,7 +38,25 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         result += f"【签文】\n{content}\n"
 
         if pic:
-            result += f"\n签文图片：{pic}"
+            # 尝试注册图片到附件系统
+            attachment_registry = context.get("attachment_registry")
+            scope_key = scope_from_context(context)
+            if attachment_registry is not None and scope_key:
+                try:
+                    record = await attachment_registry.register_remote_url(
+                        scope_key,
+                        pic,
+                        kind="image",
+                        display_name=f"wenchang_{fortune_id}.jpg",
+                        source_kind="wenchang_dijun",
+                        source_ref=pic,
+                    )
+                    result += f'\n签文图片：<pic uid="{record.uid}"/>'
+                except Exception as exc:
+                    logger.warning("注册文昌帝君签文图片失败: %s", exc)
+                    result += f"\n签文图片：{pic}"
+            else:
+                result += f"\n签文图片：{pic}"
 
         return result
 
