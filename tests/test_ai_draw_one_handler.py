@@ -515,6 +515,61 @@ async def test_execute_models_reference_images_uses_edit_endpoint_and_config(
     assert seen_request["data"]["background"] == "transparent"
     assert len(seen_request["files"]) == 1
     assert seen_request["files"][0][0] == "image"
+    assert isinstance(seen_request["files"][0][1][1], bytes)
+    assert seen_request["files"][0][1][1] == _PNG_BYTES
+
+
+@pytest.mark.asyncio
+async def test_call_openai_models_edit_uses_retry_safe_byte_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    payload_base64 = base64.b64encode(_PNG_BYTES).decode("ascii")
+    reference_path = tmp_path / "reference.png"
+    reference_path.write_bytes(_PNG_BYTES)
+
+    class _FakeResponse:
+        text = ""
+
+        def json(self) -> dict[str, Any]:
+            return {"data": [{"base64": payload_base64}]}
+
+    async def _fake_request_with_retry(
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> _FakeResponse:
+        assert method == "POST"
+        assert url == "https://edit.example.com/v1/images/edits"
+        files = kwargs["files"]
+        assert len(files) == 1
+        filename, payload, content_type = files[0][1]
+        assert filename == "reference.png"
+        assert payload == _PNG_BYTES
+        assert isinstance(payload, bytes)
+        assert content_type == "image/png"
+        return _FakeResponse()
+
+    monkeypatch.setattr(ai_draw_handler, "request_with_retry", _fake_request_with_retry)
+
+    result = await ai_draw_handler._call_openai_models_edit(
+        prompt="use this as reference",
+        api_url="https://edit.example.com",
+        api_key="sk-edit",
+        model_name="grok-edit-1.0",
+        size="1024x1024",
+        quality="",
+        style="",
+        response_format="base64",
+        n=None,
+        timeout_val=30.0,
+        reference_image_paths=[reference_path],
+        extra_params={},
+        context={},
+    )
+
+    assert isinstance(result, ai_draw_handler._GeneratedImagePayload)
+    assert result.image_bytes == _PNG_BYTES
 
 
 @pytest.mark.asyncio

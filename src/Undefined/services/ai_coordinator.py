@@ -196,8 +196,7 @@ class AICoordinator:
             f"\n{attachment_refs_to_xml(attachments)}" if attachments else ""
         )
         full_question = f"""{prompt_prefix}<message{message_id_attr} sender="{escape_xml_attr(sender_name)}" sender_id="{escape_xml_attr(user_id)}" location="私聊" time="{escape_xml_attr(current_time)}">
- <content>{escape_xml_text(text)}</content>
-{attachment_xml}
+ <content>{escape_xml_text(text)}</content>{attachment_xml}
  </message>
 
 【私聊消息】

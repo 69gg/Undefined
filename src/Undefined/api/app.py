@@ -1429,14 +1429,11 @@ class RuntimeAPIServer:
         message_queue: asyncio.Queue[str] = asyncio.Queue()
 
         async def _capture_private_message_stream(user_id: int, message: str) -> None:
+            output_count = len(outputs)
             await _capture_private_message(user_id, message)
-            rendered = await render_message_with_pic_placeholders(
-                str(message or "").strip(),
-                registry=self._ctx.ai.attachment_registry,
-                scope_key=webui_scope_key,
-                strict=False,
-            )
-            content = rendered.delivery_text.strip()
+            if len(outputs) <= output_count:
+                return
+            content = outputs[-1].strip()
             if content:
                 await message_queue.put(content)
 

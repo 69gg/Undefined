@@ -600,63 +600,53 @@ async def _call_openai_models_edit(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    file_handles: list[Any] = []
-    files: list[tuple[str, tuple[str, Any, str]]] = []
-    try:
-        for path in reference_image_paths:
-            file_handle = path.open("rb")
-            file_handles.append(file_handle)
-            files.append(
+    files: list[tuple[str, tuple[str, bytes, str]]] = []
+    for path in reference_image_paths:
+        files.append(
+            (
+                "image",
                 (
-                    "image",
-                    (
-                        path.name,
-                        file_handle,
-                        _guess_upload_media_type(path),
-                    ),
-                )
+                    path.name,
+                    path.read_bytes(),
+                    _guess_upload_media_type(path),
+                ),
             )
+        )
 
-        try:
-            response = await request_with_retry(
-                "POST",
-                url,
-                data=form_data,
-                files=files,
-                headers=headers or None,
-                timeout=timeout_val,
-                context=context,
-            )
-        except httpx.HTTPStatusError as exc:
-            message = _format_upstream_error_message(exc.response)
-            return f"参考图生图请求失败: HTTP {exc.response.status_code} {message}"
-        except httpx.TimeoutException:
-            return f"参考图生图请求超时（{timeout_val:.0f}s）"
-        except httpx.RequestError as exc:
-            return f"参考图生图请求失败: {exc}"
+    try:
+        response = await request_with_retry(
+            "POST",
+            url,
+            data=form_data,
+            files=files,
+            headers=headers or None,
+            timeout=timeout_val,
+            context=context,
+        )
+    except httpx.HTTPStatusError as exc:
+        message = _format_upstream_error_message(exc.response)
+        return f"参考图生图请求失败: HTTP {exc.response.status_code} {message}"
+    except httpx.TimeoutException:
+        return f"参考图生图请求超时（{timeout_val:.0f}s）"
+    except httpx.RequestError as exc:
+        return f"参考图生图请求失败: {exc}"
 
-        try:
-            data = response.json()
-        except Exception:
-            return f"API 返回错误 (非JSON): {response.text[:100]}"
+    try:
+        data = response.json()
+    except Exception:
+        return f"API 返回错误 (非JSON): {response.text[:100]}"
 
-        generated_image = _parse_generated_image(data)
-        if generated_image is None:
-            logger.error(f"参考图生图 API 返回 (未找到图片内容): {data}")
-            return f"API 返回原文 (错误：未找到图片内容): {data}"
+    generated_image = _parse_generated_image(data)
+    if generated_image is None:
+        logger.error(f"参考图生图 API 返回 (未找到图片内容): {data}")
+        return f"API 返回原文 (错误：未找到图片内容): {data}"
 
-        logger.info(f"参考图生图 API 返回: {data}")
-        if generated_image.image_url:
-            logger.info(f"提取图片链接: {generated_image.image_url}")
-        elif generated_image.image_bytes is not None:
-            logger.info("提取图片字节: bytes=%s", len(generated_image.image_bytes))
-        return generated_image
-    finally:
-        for handle in file_handles:
-            try:
-                handle.close()
-            except Exception:
-                pass
+    logger.info(f"参考图生图 API 返回: {data}")
+    if generated_image.image_url:
+        logger.info(f"提取图片链接: {generated_image.image_url}")
+    elif generated_image.image_bytes is not None:
+        logger.info("提取图片字节: bytes=%s", len(generated_image.image_bytes))
+    return generated_image
 
 
 async def _download_and_send(
