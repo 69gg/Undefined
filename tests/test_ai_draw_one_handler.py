@@ -529,14 +529,14 @@ async def test_call_openai_models_edit_uses_retry_safe_byte_payloads(
     reference_path.write_bytes(_PNG_BYTES)
     observed_read_paths: list[tuple[Path, bool]] = []
 
-    async def _fake_read_bytes(
-        file_path: str | Path, use_lock: bool = False
-    ) -> bytes:
+    async def _fake_read_bytes(file_path: str | Path, use_lock: bool = False) -> bytes:
         observed_read_paths.append((Path(file_path), use_lock))
         return _PNG_BYTES
 
     def _unexpected_sync_read_bytes(_self: Path) -> bytes:
-        raise AssertionError("should use async read_bytes helper instead of Path.read_bytes")
+        raise AssertionError(
+            "should use async read_bytes helper instead of Path.read_bytes"
+        )
 
     class _FakeResponse:
         text = ""
