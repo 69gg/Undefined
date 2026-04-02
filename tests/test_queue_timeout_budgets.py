@@ -134,16 +134,27 @@ def test_chat_proxy_timeout_uses_queue_budget(monkeypatch: pytest.MonkeyPatch) -
     )
 
 
-def test_tool_invoke_proxy_timeout_skips_agents(
+def test_tool_invoke_proxy_timeout_uses_local_schema_sets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = SimpleNamespace(api=SimpleNamespace(tool_invoke_timeout=120))
     monkeypatch.setattr(
         runtime_routes, "get_config", lambda strict=False: cast(Any, cfg)
     )
+    monkeypatch.setattr(
+        runtime_routes,
+        "_get_local_agent_tool_names",
+        lambda: {"custom_agent_runner"},
+    )
+    monkeypatch.setattr(
+        runtime_routes,
+        "_get_local_tool_names",
+        lambda: {"messages.send_message"},
+    )
 
-    assert runtime_routes._tool_invoke_proxy_timeout_seconds("web_agent") is None
+    assert runtime_routes._tool_invoke_proxy_timeout_seconds("custom_agent_runner") is None
     assert (
         runtime_routes._tool_invoke_proxy_timeout_seconds("messages.send_message")
         == 180.0
     )
+    assert runtime_routes._tool_invoke_proxy_timeout_seconds("unknown_tool") is None

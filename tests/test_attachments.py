@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -10,6 +11,7 @@ from Undefined.attachments import (
     register_message_attachments,
     render_message_with_pic_placeholders,
 )
+from Undefined.utils import io as io_utils
 
 
 _PNG_BYTES = (
@@ -40,8 +42,52 @@ async def test_attachment_registry_persists_and_respects_scope(
     )
 
     reloaded = AttachmentRegistry(registry_path=registry_path, cache_dir=cache_dir)
+    await reloaded.load()
     assert reloaded.resolve(record.uid, "group:10001") is not None
     assert reloaded.resolve(record.uid, "group:10002") is None
+
+
+@pytest.mark.asyncio
+async def test_attachment_registry_load_uses_async_read_json(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / "attachment_registry.json"
+    cache_dir = tmp_path / "attachments"
+    seen_calls: list[tuple[Path, bool]] = []
+    payload = {
+        "pic_async123": {
+            "uid": "pic_async123",
+            "scope_key": "group:10001",
+            "kind": "image",
+            "media_type": "image",
+            "display_name": "cat.png",
+            "source_kind": "test",
+            "source_ref": "test",
+            "local_path": str(cache_dir / "pic_async123.png"),
+            "mime_type": "image/png",
+            "sha256": "digest",
+            "created_at": "2026-04-02T00:00:00",
+        }
+    }
+
+    async def _fake_read_json(file_path: str | Path, use_lock: bool = False) -> Any:
+        seen_calls.append((Path(file_path), use_lock))
+        return payload
+
+    def _unexpected_sync_read_text(_self: Path, *_args: Any, **_kwargs: Any) -> str:
+        raise AssertionError(
+            "should use async read_json helper instead of Path.read_text"
+        )
+
+    monkeypatch.setattr(io_utils, "read_json", _fake_read_json)
+    monkeypatch.setattr(Path, "read_text", _unexpected_sync_read_text)
+
+    registry = AttachmentRegistry(registry_path=registry_path, cache_dir=cache_dir)
+    await registry.load()
+
+    assert seen_calls == [(registry_path, False)]
+    assert registry.resolve("pic_async123", "group:10001") is not None
 
 
 @pytest.mark.asyncio

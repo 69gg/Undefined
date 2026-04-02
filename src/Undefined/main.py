@@ -207,6 +207,7 @@ async def main() -> None:
             bot_qq=config.bot_qq,
             runtime_config=config,
         )
+        await ai.attachment_registry.load()
         faq_storage = FAQStorage()
         from Undefined.knowledge import RetrievalRuntime
 

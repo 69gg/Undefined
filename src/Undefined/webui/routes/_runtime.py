@@ -36,9 +36,46 @@ def _chat_proxy_timeout_seconds() -> float:
     return compute_queued_llm_timeout_seconds(cfg, cfg.chat_model)
 
 
+def _load_local_function_names(*roots: Path) -> set[str]:
+    names: set[str] = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        for config_path in root.rglob("config.json"):
+            try:
+                relative_parts = config_path.relative_to(root).parts
+            except ValueError:
+                relative_parts = config_path.parts
+            if any(part.startswith("_") for part in relative_parts):
+                continue
+            try:
+                raw = json.loads(config_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            function = raw.get("function", {})
+            if not isinstance(function, dict):
+                continue
+            name = str(function.get("name", "") or "").strip()
+            if name:
+                names.add(name)
+    return names
+
+
+def _get_local_agent_tool_names() -> set[str]:
+    skills_root = Path(__file__).resolve().parents[2] / "skills"
+    return _load_local_function_names(skills_root / "agents")
+
+
+def _get_local_tool_names() -> set[str]:
+    skills_root = Path(__file__).resolve().parents[2] / "skills"
+    return _load_local_function_names(skills_root / "tools", skills_root / "toolsets")
+
+
 def _tool_invoke_proxy_timeout_seconds(tool_name: str) -> float | None:
     normalized_name = str(tool_name or "").strip()
-    if normalized_name.endswith("_agent"):
+    if normalized_name in _get_local_agent_tool_names():
+        return None
+    if normalized_name not in _get_local_tool_names():
         return None
 
     cfg = get_config(strict=False)

@@ -385,18 +385,13 @@ class AttachmentRegistry:
         self._http_client = http_client
         self._lock = asyncio.Lock()
         self._records: dict[str, AttachmentRecord] = {}
+        self._loaded = False
+        self._load_task: asyncio.Task[None] | None = None
         self._load_from_disk()
 
-    def _load_from_disk(self) -> None:
-        if not self._registry_path.exists():
-            return
-        try:
-            raw = json.loads(self._registry_path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            logger.warning("[AttachmentRegistry] 读取失败: %s", exc)
-            return
+    def _load_records_from_payload(self, raw: Any) -> dict[str, AttachmentRecord]:
         if not isinstance(raw, dict):
-            return
+            return {}
         loaded: dict[str, AttachmentRecord] = {}
         for uid, item in raw.items():
             if not isinstance(item, dict):
@@ -421,7 +416,46 @@ class AttachmentRegistry:
                 )
             except Exception:
                 continue
-        self._records = loaded
+        return loaded
+
+    def _load_from_disk(self) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._load_from_disk_sync()
+            return
+        self._load_task = loop.create_task(self._load_from_disk_async())
+
+    def _load_from_disk_sync(self) -> None:
+        if not self._registry_path.exists():
+            self._loaded = True
+            return
+        try:
+            raw = json.loads(self._registry_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("[AttachmentRegistry] 读取失败: %s", exc)
+            self._loaded = True
+            return
+        self._records = self._load_records_from_payload(raw)
+        self._loaded = True
+
+    async def _load_from_disk_async(self) -> None:
+        try:
+            raw = await io.read_json(self._registry_path, use_lock=False)
+        except Exception as exc:
+            logger.warning("[AttachmentRegistry] 读取失败: %s", exc)
+            self._loaded = True
+            return
+        self._records = self._load_records_from_payload(raw)
+        self._loaded = True
+
+    async def load(self) -> None:
+        """等待注册表完成初始加载。"""
+        if self._loaded:
+            return
+        if self._load_task is None:
+            self._load_task = asyncio.create_task(self._load_from_disk_async())
+        await self._load_task
 
     async def _persist(self) -> None:
         payload = {uid: asdict(record) for uid, record in self._records.items()}
@@ -464,6 +498,7 @@ class AttachmentRegistry:
         source_ref: str = "",
         mime_type: str | None = None,
     ) -> AttachmentRecord:
+        await self.load()
         normalized_kind = _media_kind_from_value(kind)
         normalized_media_type = (
             "image" if normalized_kind == "image" else normalized_kind

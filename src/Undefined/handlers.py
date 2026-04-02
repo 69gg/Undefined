@@ -648,15 +648,16 @@ class MessageHandler:
                     exc,
                 )
 
-        display_name = sender_nickname or user_name or f"QQ{user_id}"
+        resolved_sender_name = (sender_nickname or user_name).strip()
+        display_name = resolved_sender_name or f"QQ{user_id}"
         normalized_user_name = user_name or display_name
         poke_text = _format_poke_history_text(display_name, user_id)
-        if display_name.strip() and self._can_refresh_profile_display_names():
+        if resolved_sender_name and self._can_refresh_profile_display_names():
             self._spawn_background_task(
                 f"profile_name_refresh_private_poke:{user_id}",
                 self._refresh_profile_display_names(
                     sender_id=user_id,
-                    sender_name=display_name,
+                    sender_name=resolved_sender_name,
                 ),
             )
 
@@ -725,19 +726,21 @@ class MessageHandler:
                 exc,
             )
 
-        display_name = sender_card or sender_nickname or f"QQ{sender_id}"
+        resolved_sender_name = (sender_card or sender_nickname).strip()
+        resolved_group_name = group_name.strip()
+        display_name = resolved_sender_name or f"QQ{sender_id}"
         poke_text = _format_poke_history_text(display_name, sender_id)
-        normalized_group_name = group_name or f"群{group_id}"
-        if (display_name.strip() or normalized_group_name.strip()) and (
+        normalized_group_name = resolved_group_name or f"群{group_id}"
+        if (resolved_sender_name or resolved_group_name) and (
             self._can_refresh_profile_display_names()
         ):
             self._spawn_background_task(
                 f"profile_name_refresh_group_poke:{group_id}:{sender_id}",
                 self._refresh_profile_display_names(
                     sender_id=sender_id,
-                    sender_name=display_name,
+                    sender_name=resolved_sender_name,
                     group_id=group_id,
-                    group_name=normalized_group_name,
+                    group_name=resolved_group_name,
                 ),
             )
 

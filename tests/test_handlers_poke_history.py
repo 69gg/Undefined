@@ -1,5 +1,4 @@
 """MessageHandler 拍一拍历史记录测试"""
-
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -26,10 +25,15 @@ def _build_handler() -> Any:
         handle_private_reply=AsyncMock(),
         handle_auto_reply=AsyncMock(),
     )
+    handler.ai = SimpleNamespace(_cognitive_service=None)
     handler.onebot = SimpleNamespace(
         get_stranger_info=AsyncMock(return_value={"nickname": "测试用户"}),
+        get_group_member_info=AsyncMock(
+            return_value={"card": "群名片", "nickname": "群昵称"}
+        ),
         get_group_info=AsyncMock(return_value={"group_name": "测试群"}),
     )
+    handler._background_tasks = set()
     return handler
 
 
@@ -117,3 +121,70 @@ async def test_group_poke_writes_history_and_triggers_reply() -> None:
 
     handler.history_manager.add_private_message.assert_not_called()
     handler.ai_coordinator.handle_private_reply.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_private_poke_skips_profile_refresh_for_placeholder_name() -> None:
+    handler = _build_handler()
+    handler.ai = SimpleNamespace(_cognitive_service=SimpleNamespace(enabled=True))
+    handler.onebot = SimpleNamespace(get_stranger_info=AsyncMock(return_value={}))
+    handler._refresh_profile_display_names = AsyncMock()
+    scheduled: list[tuple[str, Any]] = []
+
+    def _fake_spawn(name: str, coroutine: Any) -> None:
+        scheduled.append((name, coroutine))
+
+    handler._spawn_background_task = _fake_spawn
+    event = {
+        "post_type": "notice",
+        "notice_type": "poke",
+        "target_id": 10000,
+        "group_id": 0,
+        "user_id": 20001,
+        "sender": {"user_id": 20001},
+    }
+
+    await handler.handle_message(event)
+
+    assert scheduled == []
+    handler._refresh_profile_display_names.assert_not_awaited()
+    private_history_call = handler.history_manager.add_private_message.call_args
+    assert private_history_call is not None
+    assert private_history_call.kwargs["display_name"] == "QQ20001"
+
+
+@pytest.mark.asyncio
+async def test_group_poke_skips_profile_refresh_for_placeholder_names() -> None:
+    handler = _build_handler()
+    handler.ai = SimpleNamespace(_cognitive_service=SimpleNamespace(enabled=True))
+    handler.onebot = SimpleNamespace(
+        get_group_member_info=AsyncMock(return_value={}),
+        get_group_info=AsyncMock(return_value={}),
+    )
+    handler._refresh_profile_display_names = AsyncMock()
+    scheduled: list[tuple[str, Any]] = []
+
+    def _fake_spawn(name: str, coroutine: Any) -> None:
+        scheduled.append((name, coroutine))
+
+    handler._spawn_background_task = _fake_spawn
+    event = {
+        "post_type": "notice",
+        "notice_type": "poke",
+        "target_id": 10000,
+        "group_id": 30001,
+        "user_id": 20001,
+        "sender": {"user_id": 20001},
+    }
+
+    await handler.handle_message(event)
+
+    assert scheduled == []
+    handler._refresh_profile_display_names.assert_not_awaited()
+    group_history_call = handler.history_manager.add_group_message.call_args
+    assert group_history_call is not None
+    assert group_history_call.kwargs["group_name"] == "群30001"
+    assert (
+        group_history_call.kwargs["text_content"]
+        == "QQ20001(暱称)[20001(QQ号)] 拍了拍你。"
+    )
