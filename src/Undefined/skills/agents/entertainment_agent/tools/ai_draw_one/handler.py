@@ -24,6 +24,7 @@ from Undefined.attachments import scope_from_context
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.skills.http_client import request_with_retry
 from Undefined.skills.http_config import get_request_timeout, get_xingzhige_url
+from Undefined.utils.io import read_bytes
 from Undefined.utils.resources import read_text_resource
 
 logger = logging.getLogger(__name__)
@@ -602,12 +603,13 @@ async def _call_openai_models_edit(
 
     files: list[tuple[str, tuple[str, bytes, str]]] = []
     for path in reference_image_paths:
+        file_bytes = await read_bytes(path)
         files.append(
             (
                 "image",
                 (
                     path.name,
-                    path.read_bytes(),
+                    file_bytes,
                     _guess_upload_media_type(path),
                 ),
             )

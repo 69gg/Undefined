@@ -122,3 +122,69 @@ async def test_runtime_chat_stream_renders_each_message_once(
     assert "rendered stream reply" in payload
     assert "event: done" in payload
     assert response.eof_written is True
+
+
+@pytest.mark.asyncio
+async def test_run_webui_chat_avoids_extra_blank_line_without_attachments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_prompt: dict[str, str] = {}
+
+    async def _fake_register_message_attachments(**kwargs: Any) -> Any:
+        _ = kwargs
+        return SimpleNamespace(normalized_text="hello", attachments=[])
+
+    async def _fake_ask(full_question: str, **kwargs: Any) -> str:
+        _ = kwargs
+        captured_prompt["full_question"] = full_question
+        return ""
+
+    context = RuntimeAPIContext(
+        config_getter=lambda: SimpleNamespace(
+            api=SimpleNamespace(
+                enabled=True,
+                host="127.0.0.1",
+                port=8788,
+                auth_key="changeme",
+                openapi_enabled=True,
+            ),
+            superadmin_qq=10001,
+            bot_qq=20002,
+        ),
+        onebot=SimpleNamespace(
+            connection_status=lambda: {},
+            get_image=AsyncMock(),
+            get_forward_msg=AsyncMock(),
+        ),
+        ai=SimpleNamespace(
+            attachment_registry=object(),
+            ask=_fake_ask,
+            memory_storage=SimpleNamespace(count=lambda: 0),
+            runtime_config=SimpleNamespace(),
+        ),
+        command_dispatcher=SimpleNamespace(
+            parse_command=lambda _text: None,
+            dispatch_private=AsyncMock(),
+        ),
+        queue_manager=SimpleNamespace(snapshot=lambda: {}),
+        history_manager=SimpleNamespace(add_private_message=AsyncMock()),
+    )
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+
+    monkeypatch.setattr(
+        runtime_api_app,
+        "register_message_attachments",
+        _fake_register_message_attachments,
+    )
+    monkeypatch.setattr(runtime_api_app, "collect_context_resources", lambda _vars: {})
+
+    sent_messages: list[tuple[int, str]] = []
+
+    async def _send_output(user_id: int, message: str) -> None:
+        sent_messages.append((user_id, message))
+
+    result = await server._run_webui_chat(text="hello", send_output=_send_output)
+
+    assert result == "chat"
+    assert sent_messages == []
+    assert "</content>\n\n </message>" not in captured_prompt["full_question"]

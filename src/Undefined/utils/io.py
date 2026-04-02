@@ -231,6 +231,14 @@ def _read_text_sync(target: Path, use_lock: bool) -> str | None:
     return target.read_text(encoding="utf-8")
 
 
+def _read_bytes_sync(target: Path, use_lock: bool) -> bytes:
+    if use_lock:
+        lock_path = target.with_name(f"{target.name}.lock")
+        with FileLock(lock_path, shared=True):
+            return target.read_bytes()
+    return target.read_bytes()
+
+
 async def write_text(
     file_path: str | Path, content: str, use_lock: bool = True
 ) -> None:
@@ -243,3 +251,9 @@ async def read_text(file_path: str | Path, use_lock: bool = False) -> str | None
     """异步读取文本文件"""
     target = Path(file_path)
     return await asyncio.to_thread(_read_text_sync, target, use_lock)
+
+
+async def read_bytes(file_path: str | Path, use_lock: bool = False) -> bytes:
+    """异步读取二进制文件"""
+    target = Path(file_path)
+    return await asyncio.to_thread(_read_bytes_sync, target, use_lock)

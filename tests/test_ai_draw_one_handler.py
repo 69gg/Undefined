@@ -527,6 +527,16 @@ async def test_call_openai_models_edit_uses_retry_safe_byte_payloads(
     payload_base64 = base64.b64encode(_PNG_BYTES).decode("ascii")
     reference_path = tmp_path / "reference.png"
     reference_path.write_bytes(_PNG_BYTES)
+    observed_read_paths: list[tuple[Path, bool]] = []
+
+    async def _fake_read_bytes(
+        file_path: str | Path, use_lock: bool = False
+    ) -> bytes:
+        observed_read_paths.append((Path(file_path), use_lock))
+        return _PNG_BYTES
+
+    def _unexpected_sync_read_bytes(_self: Path) -> bytes:
+        raise AssertionError("should use async read_bytes helper instead of Path.read_bytes")
 
     class _FakeResponse:
         text = ""
@@ -550,6 +560,8 @@ async def test_call_openai_models_edit_uses_retry_safe_byte_payloads(
         assert content_type == "image/png"
         return _FakeResponse()
 
+    monkeypatch.setattr(ai_draw_handler, "read_bytes", _fake_read_bytes)
+    monkeypatch.setattr(type(reference_path), "read_bytes", _unexpected_sync_read_bytes)
     monkeypatch.setattr(ai_draw_handler, "request_with_retry", _fake_request_with_retry)
 
     result = await ai_draw_handler._call_openai_models_edit(
@@ -570,6 +582,7 @@ async def test_call_openai_models_edit_uses_retry_safe_byte_payloads(
 
     assert isinstance(result, ai_draw_handler._GeneratedImagePayload)
     assert result.image_bytes == _PNG_BYTES
+    assert observed_read_paths == [(reference_path, False)]
 
 
 @pytest.mark.asyncio
