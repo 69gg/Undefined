@@ -446,18 +446,10 @@ async def _call_openai_models(
     response_format: str,
     n: int | None,
     timeout_val: float,
+    extra_params: dict[str, Any],
     context: dict[str, Any],
 ) -> _GeneratedImagePayload | str:
     """调用 OpenAI 兼容的图片生成接口"""
-
-    # 追加 request_params
-    extra_params: dict[str, Any] = {}
-    try:
-        from Undefined.config import get_config
-
-        extra_params = get_config(strict=False).models_image_gen.request_params
-    except Exception:
-        extra_params = {}
 
     body = _build_openai_models_request_body(
         prompt=prompt,
@@ -878,6 +870,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
                     response_format=response_format,
                     n=n_value,
                     timeout_val=timeout_val,
+                    extra_params=gen_cfg.request_params,
                     context=context,
                 )
         else:

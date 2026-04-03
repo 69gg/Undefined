@@ -271,7 +271,10 @@ class AICoordinator:
 
             async def send_msg_cb(message: str, reply_to: int | None = None) -> None:
                 await self.sender.send_group_message(
-                    group_id, message, reply_to=reply_to
+                    group_id,
+                    message,
+                    reply_to=reply_to,
+                    history_message=message,
                 )
 
             async def get_recent_cb(

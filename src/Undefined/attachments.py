@@ -13,6 +13,7 @@ import logging
 import mimetypes
 from pathlib import Path
 import re
+import time
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 from urllib.parse import unquote, urlsplit
 
@@ -59,6 +60,8 @@ _MAGIC_IMAGE_SUFFIXES: tuple[tuple[bytes, str], ...] = (
     (b"BM", ".bmp"),
 )
 _FORWARD_ATTACHMENT_MAX_DEPTH = 3
+_ATTACHMENT_CACHE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+_ATTACHMENT_REGISTRY_MAX_RECORDS = 2000
 
 
 @dataclass(frozen=True)
@@ -141,8 +144,6 @@ def build_attachment_scope(
     request_type_text = str(request_type or "").strip().lower()
     if request_type_text == "private" and user is not None:
         return f"private:{user}"
-    if request_type_text == "group" and group is not None:
-        return f"group:{group}"
     if user is not None:
         return f"private:{user}"
     return None
@@ -379,15 +380,104 @@ class AttachmentRegistry:
         registry_path: Path = ATTACHMENT_REGISTRY_FILE,
         cache_dir: Path = ATTACHMENT_CACHE_DIR,
         http_client: httpx.AsyncClient | None = None,
+        max_records: int = _ATTACHMENT_REGISTRY_MAX_RECORDS,
+        max_age_seconds: int = _ATTACHMENT_CACHE_MAX_AGE_SECONDS,
     ) -> None:
         self._registry_path = registry_path
         self._cache_dir = cache_dir
         self._http_client = http_client
+        self._max_records = max(0, int(max_records))
+        self._max_age_seconds = max(0, int(max_age_seconds))
         self._lock = asyncio.Lock()
         self._records: dict[str, AttachmentRecord] = {}
         self._loaded = False
         self._load_task: asyncio.Task[None] | None = None
         self._load_from_disk()
+
+    def _resolve_managed_cache_path(self, raw_path: str | None) -> Path | None:
+        text = str(raw_path or "").strip()
+        if not text:
+            return None
+        try:
+            path = Path(text).expanduser().resolve()
+            cache_root = self._cache_dir.resolve()
+        except Exception:
+            return None
+        if path == cache_root or cache_root not in path.parents:
+            return None
+        return path
+
+    def _prune_records(self) -> bool:
+        dirty = False
+        now = time.time()
+        retained: list[tuple[str, AttachmentRecord, Path | None, float]] = []
+        removable_paths: set[Path] = set()
+
+        for uid, record in self._records.items():
+            cache_path = self._resolve_managed_cache_path(record.local_path)
+            if cache_path is None or not cache_path.is_file():
+                dirty = True
+                continue
+            try:
+                mtime = float(cache_path.stat().st_mtime)
+            except OSError:
+                dirty = True
+                removable_paths.add(cache_path)
+                continue
+            if self._max_age_seconds > 0 and now - mtime > self._max_age_seconds:
+                dirty = True
+                removable_paths.add(cache_path)
+                continue
+            retained.append((uid, record, cache_path, mtime))
+
+        if self._max_records > 0 and len(retained) > self._max_records:
+            retained.sort(key=lambda item: item[3])
+            overflow = len(retained) - self._max_records
+            for _uid, _record, cache_path, _mtime in retained[:overflow]:
+                if cache_path is not None:
+                    removable_paths.add(cache_path)
+            retained = retained[overflow:]
+            dirty = True
+
+        retained_records = {uid: record for uid, record, _path, _mtime in retained}
+        retained_paths = {
+            path.resolve()
+            for _uid, _record, path, _mtime in retained
+            if path is not None and path.exists()
+        }
+
+        for path in removable_paths:
+            try:
+                resolved = path.resolve()
+            except Exception:
+                resolved = path
+            if resolved in retained_paths:
+                continue
+            try:
+                path.unlink(missing_ok=True)
+                dirty = True
+            except OSError:
+                continue
+
+        if self._cache_dir.exists():
+            for item in self._cache_dir.iterdir():
+                if not item.is_file():
+                    continue
+                try:
+                    resolved = item.resolve()
+                except Exception:
+                    resolved = item
+                if resolved in retained_paths:
+                    continue
+                try:
+                    item.unlink()
+                    dirty = True
+                except OSError:
+                    continue
+
+        if dirty:
+            self._records = retained_records
+        return dirty
 
     def _load_records_from_payload(self, raw: Any) -> dict[str, AttachmentRecord]:
         if not isinstance(raw, dict):
@@ -428,6 +518,8 @@ class AttachmentRegistry:
 
     def _load_from_disk_sync(self) -> None:
         if not self._registry_path.exists():
+            self._records = {}
+            self._prune_records()
             self._loaded = True
             return
         try:
@@ -437,6 +529,7 @@ class AttachmentRegistry:
             self._loaded = True
             return
         self._records = self._load_records_from_payload(raw)
+        self._prune_records()
         self._loaded = True
 
     async def _load_from_disk_async(self) -> None:
@@ -447,6 +540,9 @@ class AttachmentRegistry:
             self._loaded = True
             return
         self._records = self._load_records_from_payload(raw)
+        dirty = self._prune_records()
+        if dirty:
+            await self._persist()
         self._loaded = True
 
     async def load(self) -> None:
@@ -460,6 +556,12 @@ class AttachmentRegistry:
     async def _persist(self) -> None:
         payload = {uid: asdict(record) for uid, record in self._records.items()}
         await io.write_json(self._registry_path, payload, use_lock=True)
+
+    async def flush(self) -> None:
+        """将当前注册表状态强制落盘。"""
+        await self.load()
+        async with self._lock:
+            await self._persist()
 
     def get(self, uid: str) -> AttachmentRecord | None:
         return self._records.get(str(uid).strip())
@@ -531,6 +633,7 @@ class AttachmentRegistry:
                 created_at=_now_iso(),
             )
             self._records[uid] = record
+            self._prune_records()
             await self._persist()
             return record
 

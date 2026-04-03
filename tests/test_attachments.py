@@ -54,6 +54,9 @@ async def test_attachment_registry_load_uses_async_read_json(
 ) -> None:
     registry_path = tmp_path / "attachment_registry.json"
     cache_dir = tmp_path / "attachments"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cached_file = cache_dir / "pic_async123.png"
+    cached_file.write_bytes(_PNG_BYTES)
     seen_calls: list[tuple[Path, bool]] = []
     payload = {
         "pic_async123": {
@@ -64,7 +67,7 @@ async def test_attachment_registry_load_uses_async_read_json(
             "display_name": "cat.png",
             "source_kind": "test",
             "source_ref": "test",
-            "local_path": str(cache_dir / "pic_async123.png"),
+            "local_path": str(cached_file),
             "mime_type": "image/png",
             "sha256": "digest",
             "created_at": "2026-04-02T00:00:00",
@@ -175,3 +178,55 @@ async def test_render_message_with_pic_placeholders_uses_file_uri_and_shadow_tex
 
     assert "[CQ:image,file=file://" in rendered.delivery_text
     assert f"[图片 uid={record.uid} name=cat.png]" in rendered.history_text
+
+
+@pytest.mark.asyncio
+async def test_attachment_registry_prunes_old_records_and_files(tmp_path: Path) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+        max_records=1,
+    )
+
+    first = await registry.register_bytes(
+        "group:10001",
+        _PNG_BYTES,
+        kind="image",
+        display_name="first.png",
+        source_kind="test",
+    )
+    first_path = Path(str(first.local_path))
+    second = await registry.register_bytes(
+        "group:10001",
+        _PNG_BYTES + b"2",
+        kind="image",
+        display_name="second.png",
+        source_kind="test",
+    )
+
+    assert registry.resolve(first.uid, "group:10001") is None
+    assert registry.resolve(second.uid, "group:10001") is not None
+    assert first_path.exists() is False
+    cache_files = [
+        item for item in (tmp_path / "attachments").iterdir() if item.is_file()
+    ]
+    assert len(cache_files) == 1
+    assert cache_files[0].name.startswith(second.uid)
+
+
+@pytest.mark.asyncio
+async def test_attachment_registry_load_prunes_orphan_cache_files(
+    tmp_path: Path,
+) -> None:
+    cache_dir = tmp_path / "attachments"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    orphan = cache_dir / "orphan.png"
+    orphan.write_bytes(_PNG_BYTES)
+
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=cache_dir,
+    )
+    await registry.load()
+
+    assert orphan.exists() is False

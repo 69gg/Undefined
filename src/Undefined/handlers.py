@@ -118,6 +118,7 @@ class MessageHandler:
         )
 
         self._background_tasks: set[asyncio.Task[None]] = set()
+        self._profile_name_refresh_cache: dict[tuple[str, int], str] = {}
 
         # 启动队列
         self.ai_coordinator.queue_manager.start(self.ai_coordinator.execute_reply)
@@ -186,6 +187,62 @@ class MessageHandler:
         ai_client = getattr(self, "ai", None)
         cognitive_service = getattr(ai_client, "_cognitive_service", None)
         return bool(cognitive_service and getattr(cognitive_service, "enabled", False))
+
+    def _schedule_profile_display_name_refresh(
+        self,
+        *,
+        task_name: str,
+        sender_id: int | None = None,
+        sender_name: str = "",
+        group_id: int | None = None,
+        group_name: str = "",
+    ) -> None:
+        if not self._can_refresh_profile_display_names():
+            return
+
+        cache = getattr(self, "_profile_name_refresh_cache", None)
+        if cache is None:
+            cache = {}
+            self._profile_name_refresh_cache = cache
+
+        updates: dict[str, Any] = {}
+        rollback: list[tuple[tuple[str, int], str | None]] = []
+
+        normalized_sender_name = sender_name.strip()
+        if sender_id and normalized_sender_name:
+            sender_key = ("user", int(sender_id))
+            previous = cache.get(sender_key)
+            if previous != normalized_sender_name:
+                cache[sender_key] = normalized_sender_name
+                rollback.append((sender_key, previous))
+                updates["sender_id"] = sender_id
+                updates["sender_name"] = normalized_sender_name
+
+        normalized_group_name = group_name.strip()
+        if group_id and normalized_group_name:
+            group_key = ("group", int(group_id))
+            previous = cache.get(group_key)
+            if previous != normalized_group_name:
+                cache[group_key] = normalized_group_name
+                rollback.append((group_key, previous))
+                updates["group_id"] = group_id
+                updates["group_name"] = normalized_group_name
+
+        if not updates:
+            return
+
+        async def _run_refresh() -> None:
+            try:
+                await self._refresh_profile_display_names(**updates)
+            except Exception:
+                for key, previous in rollback:
+                    if previous is None:
+                        cache.pop(key, None)
+                    else:
+                        cache[key] = previous
+                raise
+
+        self._spawn_background_task(task_name, _run_refresh())
 
     async def handle_message(self, event: dict[str, Any]) -> None:
         """处理收到的消息事件"""
@@ -330,14 +387,11 @@ class MessageHandler:
                 safe_text[:100],
             )
             resolved_private_name = (user_name or private_sender_nickname or "").strip()
-            if resolved_private_name and self._can_refresh_profile_display_names():
-                self._spawn_background_task(
-                    f"profile_name_refresh_private:{private_sender_id}",
-                    self._refresh_profile_display_names(
-                        sender_id=private_sender_id,
-                        sender_name=resolved_private_name,
-                    ),
-                )
+            self._schedule_profile_display_name_refresh(
+                task_name=f"profile_name_refresh_private:{private_sender_id}",
+                sender_id=private_sender_id,
+                sender_name=resolved_private_name,
+            )
 
             # 保存私聊消息到历史记录（保存处理后的内容）
             # 使用新的工具函数解析内容
@@ -480,18 +534,13 @@ class MessageHandler:
         except Exception as e:
             logger.warning(f"获取群聊名失败: {e}")
         resolved_group_sender_name = (sender_card or sender_nickname or "").strip()
-        if (resolved_group_sender_name or str(group_name or "").strip()) and (
-            self._can_refresh_profile_display_names()
-        ):
-            self._spawn_background_task(
-                f"profile_name_refresh_group:{group_id}:{sender_id}",
-                self._refresh_profile_display_names(
-                    sender_id=sender_id,
-                    sender_name=resolved_group_sender_name,
-                    group_id=group_id,
-                    group_name=str(group_name or "").strip(),
-                ),
-            )
+        self._schedule_profile_display_name_refresh(
+            task_name=f"profile_name_refresh_group:{group_id}:{sender_id}",
+            sender_id=sender_id,
+            sender_name=resolved_group_sender_name,
+            group_id=group_id,
+            group_name=str(group_name or "").strip(),
+        )
 
         # 使用新的 utils
         parsed_content = await parse_message_content_for_history(
@@ -652,14 +701,11 @@ class MessageHandler:
         display_name = resolved_sender_name or f"QQ{user_id}"
         normalized_user_name = user_name or display_name
         poke_text = _format_poke_history_text(display_name, user_id)
-        if resolved_sender_name and self._can_refresh_profile_display_names():
-            self._spawn_background_task(
-                f"profile_name_refresh_private_poke:{user_id}",
-                self._refresh_profile_display_names(
-                    sender_id=user_id,
-                    sender_name=resolved_sender_name,
-                ),
-            )
+        self._schedule_profile_display_name_refresh(
+            task_name=f"profile_name_refresh_private_poke:{user_id}",
+            sender_id=user_id,
+            sender_name=resolved_sender_name,
+        )
 
         try:
             await self.history_manager.add_private_message(
@@ -731,18 +777,13 @@ class MessageHandler:
         display_name = resolved_sender_name or f"QQ{sender_id}"
         poke_text = _format_poke_history_text(display_name, sender_id)
         normalized_group_name = resolved_group_name or f"群{group_id}"
-        if (resolved_sender_name or resolved_group_name) and (
-            self._can_refresh_profile_display_names()
-        ):
-            self._spawn_background_task(
-                f"profile_name_refresh_group_poke:{group_id}:{sender_id}",
-                self._refresh_profile_display_names(
-                    sender_id=sender_id,
-                    sender_name=resolved_sender_name,
-                    group_id=group_id,
-                    group_name=resolved_group_name,
-                ),
-            )
+        self._schedule_profile_display_name_refresh(
+            task_name=f"profile_name_refresh_group_poke:{group_id}:{sender_id}",
+            sender_id=sender_id,
+            sender_name=resolved_sender_name,
+            group_id=group_id,
+            group_name=resolved_group_name,
+        )
 
         try:
             await self.history_manager.add_group_message(

@@ -189,3 +189,40 @@ async def test_group_poke_skips_profile_refresh_for_placeholder_names() -> None:
         group_history_call.kwargs["text_content"]
         == "QQ20001(暱称)[20001(QQ号)] 拍了拍你。"
     )
+
+
+@pytest.mark.asyncio
+async def test_schedule_profile_display_name_refresh_deduplicates_same_name() -> None:
+    handler = _build_handler()
+    handler.ai = SimpleNamespace(_cognitive_service=SimpleNamespace(enabled=True))
+    handler._refresh_profile_display_names = AsyncMock()
+    scheduled: list[tuple[str, Any]] = []
+
+    def _fake_spawn(name: str, coroutine: Any) -> None:
+        scheduled.append((name, coroutine))
+
+    handler._spawn_background_task = _fake_spawn
+
+    handler._schedule_profile_display_name_refresh(
+        task_name="profile_name_refresh_group:30001:20001",
+        sender_id=20001,
+        sender_name="群名片",
+        group_id=30001,
+        group_name="测试群",
+    )
+    handler._schedule_profile_display_name_refresh(
+        task_name="profile_name_refresh_group:30001:20001",
+        sender_id=20001,
+        sender_name="群名片",
+        group_id=30001,
+        group_name="测试群",
+    )
+
+    assert len(scheduled) == 1
+    await scheduled[0][1]
+    handler._refresh_profile_display_names.assert_awaited_once_with(
+        sender_id=20001,
+        sender_name="群名片",
+        group_id=30001,
+        group_name="测试群",
+    )

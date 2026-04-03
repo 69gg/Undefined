@@ -327,6 +327,13 @@ class AIClient:
         if hasattr(self, "anthropic_skill_registry"):
             await self.anthropic_skill_registry.stop_hot_reload()
 
+        attachment_registry = getattr(self, "attachment_registry", None)
+        if attachment_registry is not None and hasattr(attachment_registry, "flush"):
+            try:
+                await attachment_registry.flush()
+            except Exception as exc:
+                logger.warning("[清理] 刷新附件注册表失败: %s", exc)
+
         # 3) 最后关闭共享 HTTP client
         if hasattr(self, "_http_client"):
             logger.info("[清理] 正在关闭 AIClient HTTP 客户端...")
