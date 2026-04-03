@@ -1299,6 +1299,8 @@ class RuntimeAPIServer:
                 if value is not None:
                     ctx.set_resource(key, value)
             ctx.set_resource("queue_lane", QUEUE_LANE_SUPERADMIN)
+            ctx.set_resource("webui_session", True)
+            ctx.set_resource("webui_permission", "superadmin")
 
             result = await self._ctx.ai.ask(
                 full_question,

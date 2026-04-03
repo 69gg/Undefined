@@ -129,13 +129,14 @@ async def test_run_webui_chat_avoids_extra_blank_line_without_attachments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured_prompt: dict[str, str] = {}
+    captured_extra_context: dict[str, Any] = {}
 
     async def _fake_register_message_attachments(**kwargs: Any) -> Any:
         _ = kwargs
         return SimpleNamespace(normalized_text="hello", attachments=[])
 
     async def _fake_ask(full_question: str, **kwargs: Any) -> str:
-        _ = kwargs
+        captured_extra_context.update(dict(kwargs.get("extra_context") or {}))
         captured_prompt["full_question"] = full_question
         return ""
 
@@ -188,3 +189,4 @@ async def test_run_webui_chat_avoids_extra_blank_line_without_attachments(
     assert result == "chat"
     assert sent_messages == []
     assert "</content>\n\n </message>" not in captured_prompt["full_question"]
+    assert captured_extra_context["webui_session"] is True

@@ -206,3 +206,48 @@ async def test_send_message_renders_pic_uid_before_sending(tmp_path: Path) -> No
     assert sent_args.kwargs["history_message"] == (
         f"图文并茂\n[图片 uid={record.uid} name=demo.png]\n结束"
     )
+
+
+@pytest.mark.asyncio
+async def test_send_message_renders_webui_scoped_pic_uid_before_sending(
+    tmp_path: Path,
+) -> None:
+    sender = SimpleNamespace(
+        send_group_message=AsyncMock(),
+        send_private_message=AsyncMock(return_value=88888),
+    )
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    record = await registry.register_bytes(
+        "webui",
+        b"\x89PNG\r\n\x1a\n",
+        kind="image",
+        display_name="webui.png",
+        source_kind="test",
+    )
+    context: dict[str, Any] = {
+        "request_type": "private",
+        "user_id": 42,
+        "sender_id": 10001,
+        "request_id": "req-webui-1",
+        "runtime_config": _build_runtime_config(),
+        "sender": sender,
+        "attachment_registry": registry,
+        "webui_session": True,
+    }
+
+    result = await execute(
+        {
+            "message": f'WebUI 图片\n<pic uid="{record.uid}"/>\n结束',
+        },
+        context,
+    )
+
+    assert result == "消息已发送（message_id=88888）"
+    sent_args = sender.send_private_message.await_args
+    assert "[CQ:image,file=file://" in sent_args.args[1]
+    assert sent_args.kwargs["history_message"] == (
+        f"WebUI 图片\n[图片 uid={record.uid} name=webui.png]\n结束"
+    )
