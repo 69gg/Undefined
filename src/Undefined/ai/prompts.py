@@ -327,6 +327,15 @@ class PromptBuilder:
                     len(self._anthropic_skill_registry.get_all_skills()),
                 )
 
+        each_rules = await self._load_each_rules()
+        if each_rules:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": f"【强制规则 - 必须在进行任何操作前仔细阅读并严格遵守】\n{each_rules}",
+                }
+            )
+
         if self._memory_storage:
             memories = self._memory_storage.get_all()
             if memories:
@@ -519,15 +528,6 @@ class PromptBuilder:
                 "content": f"【当前时间】\n{current_time}\n\n注意：以上是当前的系统时间，供你参考。",
             }
         )
-
-        each_rules = await self._load_each_rules()
-        if each_rules:
-            messages.append(
-                {
-                    "role": "system",
-                    "content": f"【强制规则 - 必须在进行任何操作前仔细阅读并严格遵守】\n{each_rules}",
-                }
-            )
 
         messages.append({"role": "user", "content": f"【当前消息】\n{question}"})
         logger.debug(
