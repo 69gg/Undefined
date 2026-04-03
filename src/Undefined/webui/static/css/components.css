@@ -368,6 +368,17 @@
   color: var(--text-tertiary);
 }
 .runtime-list { display: grid; gap: 12px; }
+.runtime-list-window {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
+}
+.meme-results-window {
+  max-height: clamp(280px, 34vh, 420px);
+  min-height: 220px;
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  padding-top: 12px;
+}
 .runtime-list-item {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
@@ -383,6 +394,18 @@
 .meme-list-item.is-selected {
   border-color: var(--accent-color);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 35%, transparent);
+}
+.runtime-list-window::-webkit-scrollbar {
+  width: 10px;
+}
+.runtime-list-window::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-tertiary) 36%, transparent);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.runtime-list-window::-webkit-scrollbar-track {
+  background: transparent;
 }
 .runtime-list-head {
   display: flex;
