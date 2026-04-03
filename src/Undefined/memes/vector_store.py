@@ -4,7 +4,7 @@ import asyncio
 import logging
 from pathlib import Path
 import re
-from typing import Any, Sequence, cast
+from typing import Any, cast
 
 import chromadb
 
@@ -45,8 +45,8 @@ class MemeVectorStore:
         if self._retrieval_runtime is None or not document_text:
             return
         embeddings = await self._retrieval_runtime.embed([document_text])
-        embedding: tuple[float, ...] = tuple(float(value) for value in embeddings[0])
-        embeddings_payload = cast(list[Sequence[float]], [embedding])
+        embedding: list[float] = [float(value) for value in embeddings[0]]
+        embeddings_payload = cast(Any, [embedding])
 
         def _run() -> None:
             self._collection.upsert(
