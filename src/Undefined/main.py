@@ -29,6 +29,8 @@ from Undefined.utils.paths import (
     DATA_DIR,
     DOWNLOAD_CACHE_DIR,
     IMAGE_CACHE_DIR,
+    MEMES_BLOBS_DIR,
+    MEMES_PREVIEWS_DIR,
     RENDER_CACHE_DIR,
     TEXT_FILE_CACHE_DIR,
     ensure_dir,
@@ -54,6 +56,8 @@ def ensure_runtime_dirs() -> None:
         IMAGE_CACHE_DIR,
         DOWNLOAD_CACHE_DIR,
         TEXT_FILE_CACHE_DIR,
+        MEMES_BLOBS_DIR,
+        MEMES_PREVIEWS_DIR,
     ]
     for path in runtime_dirs:
         ensure_dir(path)
@@ -189,6 +193,9 @@ async def main() -> None:
     cognitive_service = None
     historian_worker = None
     job_queue = None
+    meme_service = None
+    meme_worker = None
+    meme_job_queue = None
     retrieval_runtime = None
     runtime_api_server: RuntimeAPIServer | None = None
     _reranker: Any = None
@@ -334,6 +341,44 @@ async def main() -> None:
                 config.cognitive.profile_revision_keep,
             )
 
+        if config.memes.enabled:
+            from Undefined.cognitive import JobQueue
+            from Undefined.memes import (
+                MemeService,
+                MemeStore,
+                MemeVectorStore,
+                MemeWorker,
+            )
+
+            meme_store = MemeStore(config.memes.db_path)
+            meme_vector_store = MemeVectorStore(
+                config.memes.vector_store_path,
+                retrieval_runtime,
+            )
+            meme_job_queue = JobQueue(config.memes.queue_path)
+            meme_service = MemeService(
+                config_getter=lambda: get_config(strict=False).memes,
+                store=meme_store,
+                vector_store=meme_vector_store,
+                job_queue=meme_job_queue,
+                ai_client=ai,
+                attachment_registry=ai.attachment_registry,
+                retrieval_runtime=retrieval_runtime,
+            )
+            meme_worker = MemeWorker(
+                job_queue=meme_job_queue,
+                meme_service=meme_service,
+                poll_interval_seconds=1.0,
+                max_retries=3,
+            )
+            ai.set_meme_service(meme_service)
+            logger.info(
+                "[memes] 初始化完成: db=%s vector=%s queue=%s",
+                config.memes.db_path,
+                config.memes.vector_store_path,
+                config.memes.queue_path,
+            )
+
         handler = MessageHandler(config, onebot, ai, faq_storage, task_storage)
         onebot.set_message_handler(handler.handle_message)
         elapsed = time.perf_counter() - init_start
@@ -371,6 +416,13 @@ async def main() -> None:
         )
         await historian_worker.start()
         logger.info("[认知记忆] 史官后台任务已启动")
+
+    if meme_worker is not None:
+        if meme_job_queue is not None:
+            recovered = await meme_job_queue.recover_stale(timeout_seconds=300.0)
+            logger.info("[memes] 启动前陈旧任务恢复完成: recovered=%s", recovered)
+        await meme_worker.start()
+        logger.info("[memes] 后台任务已启动")
 
     config_manager = get_config_manager()
     config_manager.load(strict=True)
@@ -420,6 +472,7 @@ async def main() -> None:
             scheduler=handler.ai_coordinator.scheduler,
             cognitive_service=cognitive_service,
             cognitive_job_queue=job_queue,
+            meme_service=meme_service,
             naga_store=naga_store,
         )
         runtime_api_server = RuntimeAPIServer(
@@ -454,6 +507,8 @@ async def main() -> None:
         logger.info("[清理] 正在关闭机器人并释放资源...")
         if runtime_api_server is not None:
             await runtime_api_server.stop()
+        if meme_worker is not None:
+            await meme_worker.stop()
         if historian_worker:
             await historian_worker.stop()
         await onebot.disconnect()

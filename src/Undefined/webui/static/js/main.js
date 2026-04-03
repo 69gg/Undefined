@@ -14,6 +14,12 @@ function refreshUI() {
             ) {
                 window.RuntimeController.onTabActivated(state.tab);
             }
+            if (
+                window.MemesController &&
+                typeof window.MemesController.onTabActivated === "function"
+            ) {
+                window.MemesController.onTabActivated(state.tab);
+            }
         } else {
             get("appContent").style.display = "none";
             state.configLoaded = false;
@@ -86,6 +92,12 @@ function switchTab(tab) {
         typeof window.RuntimeController.onTabActivated === "function"
     ) {
         window.RuntimeController.onTabActivated(tab);
+    }
+    if (
+        window.MemesController &&
+        typeof window.MemesController.onTabActivated === "function"
+    ) {
+        window.MemesController.onTabActivated(tab);
     }
     syncMobileChrome();
 }
@@ -169,6 +181,12 @@ async function init() {
         typeof window.RuntimeController.init === "function"
     ) {
         window.RuntimeController.init();
+    }
+    if (
+        window.MemesController &&
+        typeof window.MemesController.init === "function"
+    ) {
+        window.MemesController.init();
     }
 
     document.querySelectorAll('[data-action="toggle-lang"]').forEach((btn) => {

@@ -374,6 +374,16 @@
   padding: 10px 12px;
   background: var(--bg-app);
 }
+.meme-list-item {
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.meme-list-item.is-selected {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 35%, transparent);
+}
 .runtime-list-head {
   display: flex;
   justify-content: space-between;

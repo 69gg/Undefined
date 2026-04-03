@@ -36,6 +36,7 @@ from .models import (
     GrokModelConfig,
     ImageGenConfig,
     ImageGenModelConfig,
+    MemeConfig,
     ModelPool,
     ModelPoolEntry,
     NagaConfig,
@@ -579,6 +580,8 @@ class Config:
     arxiv_summary_preview_chars: int
     # 认知记忆
     cognitive: CognitiveConfig
+    # 表情包库
+    memes: MemeConfig
     # Naga 集成
     naga: NagaConfig
     # 生图工具配置
@@ -1331,6 +1334,7 @@ class Config:
         api_config = cls._parse_api_config(data)
 
         cognitive = cls._parse_cognitive_config(data)
+        memes = cls._parse_memes_config(data)
         naga = cls._parse_naga_config(data)
         models_image_gen = cls._parse_image_gen_model_config(data)
         models_image_edit = cls._parse_image_edit_model_config(data)
@@ -1478,6 +1482,7 @@ class Config:
             knowledge_enable_rerank=knowledge_enable_rerank,
             knowledge_rerank_top_k=knowledge_rerank_top_k,
             cognitive=cognitive,
+            memes=memes,
             naga=naga,
             image_gen=image_gen,
             models_image_gen=models_image_gen,
@@ -2891,6 +2896,37 @@ class Config:
             job_max_retries=_coerce_int(
                 que.get("job_max_retries") if isinstance(que, dict) else None, 3
             ),
+        )
+
+    @staticmethod
+    def _parse_memes_config(data: dict[str, Any]) -> MemeConfig:
+        section_raw = data.get("memes", {})
+        section = section_raw if isinstance(section_raw, dict) else {}
+        return MemeConfig(
+            enabled=_coerce_bool(section.get("enabled"), True),
+            query_default_mode=_coerce_str(section.get("query_default_mode"), "hybrid"),
+            max_source_image_bytes=max(
+                1,
+                _coerce_int(section.get("max_source_image_bytes"), 1024 * 1024),
+            ),
+            blob_dir=_coerce_str(section.get("blob_dir"), "data/memes/blobs"),
+            preview_dir=_coerce_str(section.get("preview_dir"), "data/memes/previews"),
+            db_path=_coerce_str(section.get("db_path"), "data/memes/memes.sqlite3"),
+            vector_store_path=_coerce_str(
+                section.get("vector_store_path"), "data/memes/chromadb"
+            ),
+            queue_path=_coerce_str(section.get("queue_path"), "data/memes/queues"),
+            max_items=max(1, _coerce_int(section.get("max_items"), 10000)),
+            max_total_bytes=max(
+                1,
+                _coerce_int(section.get("max_total_bytes"), 5 * 1024 * 1024 * 1024),
+            ),
+            allow_gif=_coerce_bool(section.get("allow_gif"), True),
+            auto_ingest_group=_coerce_bool(section.get("auto_ingest_group"), True),
+            auto_ingest_private=_coerce_bool(section.get("auto_ingest_private"), True),
+            keyword_top_k=max(1, _coerce_int(section.get("keyword_top_k"), 30)),
+            semantic_top_k=max(1, _coerce_int(section.get("semantic_top_k"), 30)),
+            rerank_top_k=max(1, _coerce_int(section.get("rerank_top_k"), 20)),
         )
 
     @staticmethod

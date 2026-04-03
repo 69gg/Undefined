@@ -312,6 +312,28 @@ class CognitiveConfig:
 
 
 @dataclass
+class MemeConfig:
+    """表情包库配置。"""
+
+    enabled: bool = True
+    query_default_mode: str = "hybrid"
+    max_source_image_bytes: int = 1024 * 1024
+    blob_dir: str = "data/memes/blobs"
+    preview_dir: str = "data/memes/previews"
+    db_path: str = "data/memes/memes.sqlite3"
+    vector_store_path: str = "data/memes/chromadb"
+    queue_path: str = "data/memes/queues"
+    max_items: int = 10000
+    max_total_bytes: int = 5 * 1024 * 1024 * 1024
+    allow_gif: bool = True
+    auto_ingest_group: bool = True
+    auto_ingest_private: bool = True
+    keyword_top_k: int = 30
+    semantic_top_k: int = 30
+    rerank_top_k: int = 20
+
+
+@dataclass
 class APIConfig:
     """主进程 OpenAPI/Runtime API 配置"""
 
