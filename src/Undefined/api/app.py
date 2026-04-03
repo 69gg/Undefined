@@ -452,6 +452,8 @@ def _build_internal_model_probe_payload(mcfg: Any) -> dict[str, Any]:
         payload["responses_force_stateless_replay"] = getattr(
             mcfg, "responses_force_stateless_replay", False
         )
+    if hasattr(mcfg, "prompt_cache_enabled"):
+        payload["prompt_cache_enabled"] = getattr(mcfg, "prompt_cache_enabled", True)
     if hasattr(mcfg, "reasoning_enabled"):
         payload["reasoning_enabled"] = getattr(mcfg, "reasoning_enabled", False)
     if hasattr(mcfg, "reasoning_effort"):

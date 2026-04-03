@@ -152,6 +152,7 @@ model_name = "gpt-4o-mini"
 | `thinking_tool_call_compat` | Tool Calls 兼容模式：在本地历史中回填内部兼容字段 `reasoning_content`；默认 `true` |
 | `responses_tool_choice_compat` | `responses` 下的 `tool_choice` 兼容开关：仅建议在默认关闭时请求仍返回 500、怀疑上游不兼容对象型 `tool_choice` 时再尝试开启；开启后降级为字符串 `"required"`；默认 `false` |
 | `responses_force_stateless_replay` | `responses` 下的续轮强制降级开关：启用后多轮工具调用始终跳过 `previous_response_id`，改为完整消息重放；默认 `false` |
+| `prompt_cache_enabled` | 是否自动生成稳定的 `prompt_cache_key` 以提升相似请求缓存命中率；默认 `true` |
 | `request_params` | 额外请求体参数（透传给模型 API，保留字段会忽略） |
 
 请求模式说明：
@@ -169,6 +170,11 @@ model_name = "gpt-4o-mini"
   - 仅建议在默认关闭时请求仍返回 500，再尝试开启这些兼容开关
   - 当前已知 `new-api v0.11.4-alpha.3` 存在这类兼容问题
   - 旧式 `thinking_*` 不会下发到 `responses`
+
+Prompt caching 补充：
+- 当 `prompt_cache_enabled=true` 且未显式设置 `prompt_cache_key` 时，运行时会按“模型名 + call_type + 会话作用域”自动生成稳定 key。
+- 该 key 只用于提升路由稳定性，不改变 prompt 内容。
+- 想提高缓存命中率时，仍应尽量把静态内容放前面、把高频变化内容放后面。
 
 `request_params` 说明：
 - 适合放 provider 私有请求体字段，例如 `metadata`、`temperature`、兼容网关扩展参数等。

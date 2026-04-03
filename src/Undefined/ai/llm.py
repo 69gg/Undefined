@@ -33,6 +33,7 @@ from Undefined.ai.transports import (
 )
 from Undefined.ai.retrieval import RetrievalRequester
 from Undefined.ai.tokens import TokenCounter
+from Undefined.context import RequestContext
 from Undefined.config import (
     ChatModelConfig,
     VisionModelConfig,
@@ -200,6 +201,7 @@ _DEFAULT_TOOLS_DESCRIPTION_PREVIEW_LEN = 160
 _DEFAULT_TOOL_NAME_DOT_DELIMITER = "-_-"
 _TOOL_NAME_MAX_LEN = 64
 _TOOL_NAME_ALLOWED_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+_PROMPT_CACHE_KEY_MAX_LEN = 128
 
 
 def _tool_name_dot_delimiter() -> str:
@@ -222,6 +224,46 @@ def _tool_name_dot_delimiter() -> str:
 
 def _hash8(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
+
+
+def _normalize_prompt_cache_part(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return "none"
+    normalized_chars: list[str] = []
+    for char in text:
+        if char.isalnum() or char in {"-", "_", ":"}:
+            normalized_chars.append(char)
+        else:
+            normalized_chars.append("_")
+    normalized = "".join(normalized_chars).strip("_")
+    return normalized or "none"
+
+
+def _build_scope_prompt_cache_part() -> str:
+    ctx = RequestContext.current()
+    if ctx is None:
+        return "scope:global"
+    if ctx.group_id is not None:
+        return f"group:{int(ctx.group_id)}"
+    if ctx.user_id is not None:
+        return f"private:{int(ctx.user_id)}"
+    if ctx.sender_id is not None:
+        return f"sender:{int(ctx.sender_id)}"
+    request_type = _normalize_prompt_cache_part(ctx.request_type)
+    return f"type:{request_type}"
+
+
+def _build_default_prompt_cache_key(model_config: ModelConfig, call_type: str) -> str:
+    model_name = _normalize_prompt_cache_part(getattr(model_config, "model_name", ""))
+    scope_part = _build_scope_prompt_cache_part()
+    call_part = _normalize_prompt_cache_part(call_type)
+    key = f"pc:{model_name}:{call_part}:{scope_part}"
+    if len(key) <= _PROMPT_CACHE_KEY_MAX_LEN:
+        return key
+    suffix = "_" + _hash8(key)
+    prefix_len = max(1, _PROMPT_CACHE_KEY_MAX_LEN - len(suffix))
+    return key[:prefix_len] + suffix
 
 
 def _encode_tool_name_for_api(tool_name: str) -> str:
@@ -1085,6 +1127,13 @@ class ModelRequester:
             call_type=call_type,
             overrides=dict(kwargs),
         )
+        if bool(
+            getattr(model_config, "prompt_cache_enabled", True)
+        ) and not effective_kwargs.get("prompt_cache_key"):
+            effective_kwargs["prompt_cache_key"] = _build_default_prompt_cache_key(
+                model_config,
+                call_type,
+            )
         responses_stateless_replay = bool(
             getattr(model_config, "responses_force_stateless_replay", False)
         ) or bool(

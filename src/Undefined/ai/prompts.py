@@ -336,12 +336,14 @@ class PromptBuilder:
                 }
             )
 
+        deferred_messages: list[dict[str, Any]] = []
+
         if self._memory_storage:
             memories = self._memory_storage.get_all()
             if memories:
                 memory_lines = [f"- {mem.fact}" for mem in memories]
                 memory_text = "\n".join(memory_lines)
-                messages.append(
+                deferred_messages.append(
                     {
                         "role": "system",
                         "content": (
@@ -438,7 +440,9 @@ class PromptBuilder:
                 request_type=resolved_request_type or None,
             )
             if cognitive_context:
-                messages.append({"role": "system", "content": cognitive_context})
+                deferred_messages.append(
+                    {"role": "system", "content": cognitive_context}
+                )
                 logger.info(
                     "[AI会话] 已注入认知记忆上下文: context_len=%s",
                     len(cognitive_context),
@@ -469,7 +473,7 @@ class PromptBuilder:
                     )
                 recent_summary_text = "\n".join(recent_summary_lines).strip()
                 if recent_summary_text:
-                    messages.append(
+                    deferred_messages.append(
                         {
                             "role": "system",
                             "content": (
@@ -498,7 +502,7 @@ class PromptBuilder:
                     f"- [{item['timestamp']}] {item['summary']}{location_text}"
                 )
             summary_text = "\n".join(summary_lines)
-            messages.append(
+            deferred_messages.append(
                 {
                     "role": "system",
                     "content": (
@@ -518,8 +522,10 @@ class PromptBuilder:
 
         if get_recent_messages_callback:
             await self._inject_recent_messages(
-                messages, get_recent_messages_callback, extra_context, question
+                deferred_messages, get_recent_messages_callback, extra_context, question
             )
+
+        messages.extend(deferred_messages)
 
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         messages.append(

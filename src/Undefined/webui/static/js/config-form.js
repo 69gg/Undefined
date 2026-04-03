@@ -900,6 +900,14 @@ function buildAotTemplate(path, arr) {
             if (
                 !Object.prototype.hasOwnProperty.call(
                     template,
+                    "prompt_cache_enabled",
+                )
+            ) {
+                template.prompt_cache_enabled = true;
+            }
+            if (
+                !Object.prototype.hasOwnProperty.call(
+                    template,
                     "reasoning_enabled",
                 )
             ) {
@@ -933,6 +941,7 @@ function buildAotTemplate(path, arr) {
         reasoning_effort_style: "openai",
         responses_tool_choice_compat: false,
         responses_force_stateless_replay: false,
+        prompt_cache_enabled: true,
         reasoning_enabled: false,
         reasoning_effort: "medium",
         request_params: {},

@@ -1748,6 +1748,10 @@ class Config:
                         item.get("responses_force_stateless_replay"),
                         primary_config.responses_force_stateless_replay,
                     ),
+                    prompt_cache_enabled=_coerce_bool(
+                        item.get("prompt_cache_enabled"),
+                        primary_config.prompt_cache_enabled,
+                    ),
                     reasoning_enabled=_coerce_bool(
                         item.get("reasoning_enabled"),
                         primary_config.reasoning_enabled,
@@ -1872,6 +1876,14 @@ class Config:
         responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
             data, "chat", "CHAT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
         )
+        prompt_cache_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "chat", "prompt_cache_enabled"),
+                "CHAT_MODEL_PROMPT_CACHE_ENABLED",
+            ),
+            True,
+        )
         reasoning_enabled = _coerce_bool(
             _get_value(
                 data,
@@ -1936,6 +1948,7 @@ class Config:
             thinking_tool_call_compat=thinking_tool_call_compat,
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
+            prompt_cache_enabled=prompt_cache_enabled,
             reasoning_enabled=reasoning_enabled,
             reasoning_effort=reasoning_effort,
             request_params=_get_model_request_params(data, "chat"),
@@ -1970,6 +1983,14 @@ class Config:
         )
         responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
             data, "vision", "VISION_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+        )
+        prompt_cache_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "vision", "prompt_cache_enabled"),
+                "VISION_MODEL_PROMPT_CACHE_ENABLED",
+            ),
+            True,
         )
         reasoning_enabled = _coerce_bool(
             _get_value(
@@ -2035,6 +2056,7 @@ class Config:
             thinking_tool_call_compat=thinking_tool_call_compat,
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
+            prompt_cache_enabled=prompt_cache_enabled,
             reasoning_enabled=reasoning_enabled,
             reasoning_effort=reasoning_effort,
             request_params=_get_model_request_params(data, "vision"),
@@ -2087,6 +2109,14 @@ class Config:
         )
         responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
             data, "security", "SECURITY_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+        )
+        prompt_cache_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "security", "prompt_cache_enabled"),
+                "SECURITY_MODEL_PROMPT_CACHE_ENABLED",
+            ),
+            True,
         )
         reasoning_enabled = _coerce_bool(
             _get_value(
@@ -2147,6 +2177,7 @@ class Config:
                 thinking_tool_call_compat=thinking_tool_call_compat,
                 responses_tool_choice_compat=responses_tool_choice_compat,
                 responses_force_stateless_replay=responses_force_stateless_replay,
+                prompt_cache_enabled=prompt_cache_enabled,
                 reasoning_enabled=reasoning_enabled,
                 reasoning_effort=reasoning_effort,
                 request_params=_get_model_request_params(data, "security"),
@@ -2167,6 +2198,7 @@ class Config:
             thinking_tool_call_compat=chat_model.thinking_tool_call_compat,
             responses_tool_choice_compat=chat_model.responses_tool_choice_compat,
             responses_force_stateless_replay=chat_model.responses_force_stateless_replay,
+            prompt_cache_enabled=chat_model.prompt_cache_enabled,
             reasoning_enabled=chat_model.reasoning_enabled,
             reasoning_effort=chat_model.reasoning_effort,
             request_params=merge_request_params(chat_model.request_params),
@@ -2213,6 +2245,14 @@ class Config:
         )
         responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
             data, "naga", "NAGA_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+        )
+        prompt_cache_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "naga", "prompt_cache_enabled"),
+                "NAGA_MODEL_PROMPT_CACHE_ENABLED",
+            ),
+            getattr(security_model, "prompt_cache_enabled", True),
         )
         reasoning_enabled = _coerce_bool(
             _get_value(
@@ -2273,6 +2313,7 @@ class Config:
                 thinking_tool_call_compat=thinking_tool_call_compat,
                 responses_tool_choice_compat=responses_tool_choice_compat,
                 responses_force_stateless_replay=responses_force_stateless_replay,
+                prompt_cache_enabled=prompt_cache_enabled,
                 reasoning_enabled=reasoning_enabled,
                 reasoning_effort=reasoning_effort,
                 request_params=_get_model_request_params(data, "naga"),
@@ -2295,6 +2336,7 @@ class Config:
             thinking_tool_call_compat=security_model.thinking_tool_call_compat,
             responses_tool_choice_compat=security_model.responses_tool_choice_compat,
             responses_force_stateless_replay=security_model.responses_force_stateless_replay,
+            prompt_cache_enabled=security_model.prompt_cache_enabled,
             reasoning_enabled=security_model.reasoning_enabled,
             reasoning_effort=security_model.reasoning_effort,
             request_params=merge_request_params(security_model.request_params),
@@ -2327,6 +2369,14 @@ class Config:
         )
         responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
             data, "agent", "AGENT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+        )
+        prompt_cache_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "agent", "prompt_cache_enabled"),
+                "AGENT_MODEL_PROMPT_CACHE_ENABLED",
+            ),
+            True,
         )
         reasoning_enabled = _coerce_bool(
             _get_value(
@@ -2392,6 +2442,7 @@ class Config:
             thinking_tool_call_compat=thinking_tool_call_compat,
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
+            prompt_cache_enabled=prompt_cache_enabled,
             reasoning_enabled=reasoning_enabled,
             reasoning_effort=reasoning_effort,
             request_params=_get_model_request_params(data, "agent"),
@@ -2461,6 +2512,14 @@ class Config:
                     ("models", "grok", "reasoning_effort_style"),
                     "GROK_MODEL_REASONING_EFFORT_STYLE",
                 ),
+            ),
+            prompt_cache_enabled=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "grok", "prompt_cache_enabled"),
+                    "GROK_MODEL_PROMPT_CACHE_ENABLED",
+                ),
+                True,
             ),
             reasoning_enabled=_coerce_bool(
                 _get_value(
@@ -2721,6 +2780,14 @@ class Config:
             "HISTORIAN_MODEL_RESPONSES_FORCE_STATELESS_REPLAY",
             fallback.responses_force_stateless_replay,
         )
+        prompt_cache_enabled = _coerce_bool(
+            _get_value(
+                {"models": {"historian": h}},
+                ("models", "historian", "prompt_cache_enabled"),
+                "HISTORIAN_MODEL_PROMPT_CACHE_ENABLED",
+            ),
+            fallback.prompt_cache_enabled,
+        )
         return AgentModelConfig(
             api_url=_coerce_str(h.get("api_url"), fallback.api_url),
             api_key=_coerce_str(h.get("api_key"), fallback.api_key),
@@ -2746,6 +2813,7 @@ class Config:
             thinking_tool_call_compat=thinking_tool_call_compat,
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
+            prompt_cache_enabled=prompt_cache_enabled,
             reasoning_enabled=_coerce_bool(
                 _get_value(
                     {"models": {"historian": h}},
