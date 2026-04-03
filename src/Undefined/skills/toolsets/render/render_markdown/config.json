@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "render_markdown",
-        "description": "将 Markdown 文本渲染为图片并发送到指定目标（群聊或私聊）。支持标准 Markdown 格式，包括标题、列表、代码块、表格等。",
+        "description": "将 Markdown 文本渲染为图片。默认返回可嵌入回复的图片 UID（embed），也可直接发送到指定目标（send）。支持标准 Markdown 格式，包括标题、列表、代码块、表格等。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -10,17 +10,22 @@
                     "type": "string",
                     "description": "要渲染的 Markdown 内容。支持标准 Markdown 格式。"
                 },
+                "delivery": {
+                    "type": "string",
+                    "description": "图片交付方式：embed 返回可插入回复的图片 UID；send 立即发送到目标",
+                    "enum": ["embed", "send"]
+                },
                 "target_id": {
                     "type": "integer",
-                    "description": "目标 ID（群号或用户 QQ 号）"
+                    "description": "目标 ID（群号或用户 QQ 号，仅 delivery=send 时需要，不提供则从当前会话推断）"
                 },
                 "message_type": {
                     "type": "string",
-                    "description": "消息类型",
+                    "description": "消息类型（仅 delivery=send 时需要，不提供则从当前会话推断）",
                     "enum": ["group", "private"]
                 }
             },
-            "required": ["content", "target_id", "message_type"]
+            "required": ["content"]
         }
     }
 }

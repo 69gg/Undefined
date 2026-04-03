@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "fetch_image_uid",
+        "description": "从 URL 获取图片并注册到附件系统，返回可在回复中嵌入的图片 UID。仅支持图片类型（PNG, JPEG, GIF, WebP, BMP）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "图片 URL（必须是 http/https 链接）"
+                },
+                "display_name": {
+                    "type": "string",
+                    "description": "图片的显示名称（可选，默认从 URL 推断）"
+                }
+            },
+            "required": ["url"]
+        }
+    }
+}

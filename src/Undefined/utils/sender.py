@@ -83,6 +83,7 @@ class MessageSender:
         *,
         mark_sent: bool = True,
         reply_to: int | None = None,
+        history_message: str | None = None,
     ) -> int | None:
         """发送群消息"""
         if not self.config.is_group_allowed(group_id):
@@ -108,8 +109,11 @@ class MessageSender:
         # 准备历史记录文本（不含 reply 段）
         history_content: str | None = None
         if auto_history:
-            hist_segments = message_to_segments(message)
-            history_content = extract_text(hist_segments, self.bot_qq)
+            if history_message is not None:
+                history_content = history_message
+            else:
+                hist_segments = message_to_segments(message)
+                history_content = extract_text(hist_segments, self.bot_qq)
             if history_prefix:
                 history_content = f"{history_prefix}{history_content}"
 
@@ -203,6 +207,7 @@ class MessageSender:
         mark_sent: bool = True,
         reply_to: int | None = None,
         preferred_temp_group_id: int | None = None,
+        history_message: str | None = None,
     ) -> int | None:
         """发送私聊消息"""
         if not self.config.is_private_allowed(user_id):
@@ -225,8 +230,11 @@ class MessageSender:
         # 准备历史记录文本
         history_content: str | None = None
         if auto_history:
-            hist_segments = message_to_segments(message)
-            history_content = extract_text(hist_segments, self.bot_qq)
+            if history_message is not None:
+                history_content = history_message
+            else:
+                hist_segments = message_to_segments(message)
+                history_content = extract_text(hist_segments, self.bot_qq)
 
         # 发送消息
         bot_message_id: int | None = None

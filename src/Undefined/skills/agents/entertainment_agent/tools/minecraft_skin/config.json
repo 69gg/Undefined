@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "minecraft_skin",
-        "description": "获取 Minecraft 玩家皮肤/头像。",
+        "description": "获取 Minecraft 玩家皮肤/头像。默认返回可嵌入回复的图片 UID（embed），也可直接发送到目标（send）。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -27,17 +27,22 @@
                     "type": "integer",
                     "description": "体型大小 (1-10)"
                 },
+                "delivery": {
+                    "type": "string",
+                    "description": "图片交付方式：embed 返回可插入回复的图片 UID；send 立即发送到目标",
+                    "enum": ["embed", "send"]
+                },
                 "target_id": {
                     "type": "integer",
-                    "description": "发送目标的 ID (群号或 QQ 号)"
+                    "description": "发送目标的 ID (群号或 QQ 号，仅 delivery=send 时需要，不提供则从当前会话推断)"
                 },
                 "message_type": {
                     "type": "string",
-                    "description": "消息类型 (group 或 private)",
+                    "description": "消息类型 (group 或 private，仅 delivery=send 时需要，不提供则从当前会话推断)",
                     "enum": ["group", "private"]
                 }
             },
-            "required": ["name", "target_id", "message_type"]
+            "required": ["name"]
         }
     }
 }

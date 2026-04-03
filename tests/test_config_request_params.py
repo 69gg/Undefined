@@ -114,6 +114,22 @@ model_name = "text-rerank-001"
 
 [models.rerank.request_params]
 priority = "high"
+
+[models.image_gen]
+api_url = "https://image.example.com/v1"
+api_key = "sk-image"
+model_name = "gpt-image-gen"
+
+[models.image_gen.request_params]
+temperature = 0.8
+
+[models.image_edit]
+api_url = "https://edit.example.com/v1"
+api_key = "sk-image-edit"
+model_name = "gpt-image-edit"
+
+[models.image_edit.request_params]
+background = "transparent"
 """,
     )
 
@@ -194,6 +210,14 @@ priority = "high"
         "metadata": {"source": "embed"},
     }
     assert cfg.rerank_model.request_params == {"priority": "high"}
+    assert cfg.models_image_gen.api_url == "https://image.example.com/v1"
+    assert cfg.models_image_gen.api_key == "sk-image"
+    assert cfg.models_image_gen.model_name == "gpt-image-gen"
+    assert cfg.models_image_gen.request_params == {"temperature": 0.8}
+    assert cfg.models_image_edit.api_url == "https://edit.example.com/v1"
+    assert cfg.models_image_edit.api_key == "sk-image-edit"
+    assert cfg.models_image_edit.model_name == "gpt-image-edit"
+    assert cfg.models_image_edit.request_params == {"background": "transparent"}
 
 
 def test_naga_model_request_params_override_security_defaults(tmp_path: Path) -> None:

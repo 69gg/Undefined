@@ -1,6 +1,11 @@
 from typing import Any, Dict, Literal
 import logging
 
+from Undefined.attachments import (
+    render_message_with_pic_placeholders,
+    scope_from_context,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -198,6 +203,23 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         logger.warning("[发送消息] 收到空消息请求")
         return "消息内容不能为空"
 
+    attachment_registry = context.get("attachment_registry")
+    scope_key = scope_from_context(context)
+    try:
+        rendered = await render_message_with_pic_placeholders(
+            message,
+            registry=attachment_registry,
+            scope_key=scope_key,
+            strict=True,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[发送消息] 图片内嵌渲染失败: request_id=%s err=%s", request_id, exc
+        )
+        return f"发送失败：{exc}"
+    message = rendered.delivery_text
+    history_message = rendered.history_text
+
     # 解析 reply_to 参数（无效值静默忽略，视为未传）
     reply_to_id, _ = _parse_positive_int(args.get("reply_to"), "reply_to")
 
@@ -235,7 +257,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             if target_type == "group":
                 logger.info("[发送消息] 准备发送到群 %s: %s", target_id, message[:100])
                 sent_message_id = await sender.send_group_message(
-                    target_id, message, reply_to=reply_to_id
+                    target_id,
+                    message,
+                    reply_to=reply_to_id,
+                    history_message=history_message,
                 )
             else:
                 logger.info("[发送消息] 准备发送私聊 %s: %s", target_id, message[:100])
@@ -244,6 +269,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                     message,
                     reply_to=reply_to_id,
                     preferred_temp_group_id=_get_context_group_id(context),
+                    history_message=history_message,
                 )
             context["message_sent_this_turn"] = True
             return _format_send_success(sent_message_id)

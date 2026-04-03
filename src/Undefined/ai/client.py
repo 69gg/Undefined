@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import httpx
 
+from Undefined.attachments import AttachmentRegistry
 from Undefined.ai.llm import ModelRequester
 from Undefined.ai.model_selector import ModelSelector
 from Undefined.ai.multimodal import MultimodalAnalyzer
@@ -136,6 +137,7 @@ class AIClient:
         self._token_counter = TokenCounter()
         self._knowledge_manager: Any = None
         self._cognitive_service: Any = cognitive_service
+        self.attachment_registry = AttachmentRegistry(http_client=self._http_client)
 
         # 私聊发送回调
         self._send_private_message_callback: Optional[SendPrivateMessageCallback] = None
@@ -324,6 +326,13 @@ class AIClient:
             await self.agent_registry.stop_hot_reload()
         if hasattr(self, "anthropic_skill_registry"):
             await self.anthropic_skill_registry.stop_hot_reload()
+
+        attachment_registry = getattr(self, "attachment_registry", None)
+        if attachment_registry is not None and hasattr(attachment_registry, "flush"):
+            try:
+                await attachment_registry.flush()
+            except Exception as exc:
+                logger.warning("[清理] 刷新附件注册表失败: %s", exc)
 
         # 3) 最后关闭共享 HTTP client
         if hasattr(self, "_http_client"):
@@ -973,6 +982,10 @@ class AIClient:
         tool_context.setdefault("onebot_client", onebot_client)
         tool_context.setdefault("scheduler", scheduler)
         tool_context.setdefault("send_image_callback", self._send_image_callback)
+        tool_context.setdefault(
+            "attachment_registry",
+            getattr(self, "attachment_registry", None),
+        )
         tool_context.setdefault("memory_storage", self.memory_storage)
         tool_context.setdefault("knowledge_manager", self._knowledge_manager)
         tool_context.setdefault("cognitive_service", self._cognitive_service)

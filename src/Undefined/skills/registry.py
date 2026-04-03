@@ -14,6 +14,10 @@ from Undefined.utils.tool_calls import parse_tool_arguments
 logger = logging.getLogger(__name__)
 
 
+class RegistryExecutionTimeoutError(asyncio.TimeoutError):
+    """由注册表超时包装器抛出的超时异常。"""
+
+
 @dataclass
 class SkillStats:
     """技能执行统计数据类
@@ -107,6 +111,9 @@ class BaseRegistry:
 
     def set_watch_filenames(self, filenames: set[str]) -> None:
         self._watch_filenames = filenames
+
+    def _has_timeout(self) -> bool:
+        return self.timeout_seconds > 0
 
     def _log_event(self, event: str, name: str = "", **fields: Any) -> None:
         parts = [f"event={event}", f"kind={self.kind}"]
@@ -247,7 +254,14 @@ class BaseRegistry:
             raise RuntimeError(f"加载处理器 spec 失败: {item.handler_path}")
 
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        sys.modules[item.module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            current = sys.modules.get(item.module_name)
+            if current is module:
+                del sys.modules[item.module_name]
+            raise
 
         if not hasattr(module, "execute"):
             raise RuntimeError(f"{item.handler_path} 的处理器缺少 'execute' 函数")
@@ -366,7 +380,7 @@ class BaseRegistry:
                 result_payload = result
                 return_value = str(result)
 
-        except asyncio.TimeoutError:
+        except RegistryExecutionTimeoutError:
             duration = time.monotonic() - start_time
             self._stats[name].record_failure(duration, "timeout")
             self._log_event(
@@ -413,13 +427,24 @@ class BaseRegistry:
         args: Dict[str, Any],
         context: Dict[str, Any],
     ) -> Any:
+        if not self._has_timeout():
+            if asyncio.iscoroutinefunction(handler):
+                return await handler(args, context)
+            return await asyncio.to_thread(handler, args, context)
+
         if asyncio.iscoroutinefunction(handler):
+            try:
+                return await asyncio.wait_for(
+                    handler(args, context), timeout=self.timeout_seconds
+                )
+            except asyncio.TimeoutError as exc:
+                raise RegistryExecutionTimeoutError from exc
+        try:
             return await asyncio.wait_for(
-                handler(args, context), timeout=self.timeout_seconds
+                asyncio.to_thread(handler, args, context), timeout=self.timeout_seconds
             )
-        return await asyncio.wait_for(
-            asyncio.to_thread(handler, args, context), timeout=self.timeout_seconds
-        )
+        except asyncio.TimeoutError as exc:
+            raise RegistryExecutionTimeoutError from exc
 
     def _compute_snapshot(self) -> Dict[str, tuple[int, int]]:
         snapshot: Dict[str, tuple[int, int]] = {}

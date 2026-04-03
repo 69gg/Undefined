@@ -8,6 +8,11 @@ from pathlib import Path
 import random
 from typing import Any, Coroutine
 
+from Undefined.attachments import (
+    append_attachment_text,
+    build_attachment_scope,
+    register_message_attachments,
+)
 from Undefined.ai import AIClient
 from Undefined.config import Config
 from Undefined.faq import FAQStorage
@@ -113,9 +118,131 @@ class MessageHandler:
         )
 
         self._background_tasks: set[asyncio.Task[None]] = set()
+        self._profile_name_refresh_cache: dict[tuple[str, int], str] = {}
 
         # 启动队列
         self.ai_coordinator.queue_manager.start(self.ai_coordinator.execute_reply)
+
+    async def _collect_message_attachments(
+        self,
+        message_content: list[dict[str, Any]],
+        *,
+        group_id: int | None = None,
+        user_id: int | None = None,
+        request_type: str,
+    ) -> list[dict[str, str]]:
+        scope_key = build_attachment_scope(
+            group_id=group_id,
+            user_id=user_id,
+            request_type=request_type,
+        )
+        if not scope_key:
+            return []
+        ai_client = getattr(self, "ai", None)
+        attachment_registry = (
+            getattr(ai_client, "attachment_registry", None) if ai_client else None
+        )
+        if attachment_registry is None:
+            return []
+        onebot = getattr(self, "onebot", None)
+        resolve_image_url = getattr(onebot, "get_image", None) if onebot else None
+        result = await register_message_attachments(
+            registry=attachment_registry,
+            segments=message_content,
+            scope_key=scope_key,
+            resolve_image_url=resolve_image_url,
+            get_forward_messages=getattr(onebot, "get_forward_msg", None)
+            if onebot
+            else None,
+        )
+        return result.attachments
+
+    async def _refresh_profile_display_names(
+        self,
+        *,
+        sender_id: int | None = None,
+        sender_name: str = "",
+        group_id: int | None = None,
+        group_name: str = "",
+    ) -> None:
+        ai_client = getattr(self, "ai", None)
+        cognitive_service = getattr(ai_client, "_cognitive_service", None)
+        if not cognitive_service or not getattr(cognitive_service, "enabled", False):
+            return
+
+        if sender_id and sender_name.strip():
+            await cognitive_service.sync_profile_display_name(
+                entity_type="user",
+                entity_id=str(sender_id),
+                preferred_name=sender_name.strip(),
+            )
+        if group_id and group_name.strip():
+            await cognitive_service.sync_profile_display_name(
+                entity_type="group",
+                entity_id=str(group_id),
+                preferred_name=group_name.strip(),
+            )
+
+    def _can_refresh_profile_display_names(self) -> bool:
+        ai_client = getattr(self, "ai", None)
+        cognitive_service = getattr(ai_client, "_cognitive_service", None)
+        return bool(cognitive_service and getattr(cognitive_service, "enabled", False))
+
+    def _schedule_profile_display_name_refresh(
+        self,
+        *,
+        task_name: str,
+        sender_id: int | None = None,
+        sender_name: str = "",
+        group_id: int | None = None,
+        group_name: str = "",
+    ) -> None:
+        if not self._can_refresh_profile_display_names():
+            return
+
+        cache = getattr(self, "_profile_name_refresh_cache", None)
+        if cache is None:
+            cache = {}
+            self._profile_name_refresh_cache = cache
+
+        updates: dict[str, Any] = {}
+        rollback: list[tuple[tuple[str, int], str | None]] = []
+
+        normalized_sender_name = sender_name.strip()
+        if sender_id and normalized_sender_name:
+            sender_key = ("user", int(sender_id))
+            previous = cache.get(sender_key)
+            if previous != normalized_sender_name:
+                cache[sender_key] = normalized_sender_name
+                rollback.append((sender_key, previous))
+                updates["sender_id"] = sender_id
+                updates["sender_name"] = normalized_sender_name
+
+        normalized_group_name = group_name.strip()
+        if group_id and normalized_group_name:
+            group_key = ("group", int(group_id))
+            previous = cache.get(group_key)
+            if previous != normalized_group_name:
+                cache[group_key] = normalized_group_name
+                rollback.append((group_key, previous))
+                updates["group_id"] = group_id
+                updates["group_name"] = normalized_group_name
+
+        if not updates:
+            return
+
+        async def _run_refresh() -> None:
+            try:
+                await self._refresh_profile_display_names(**updates)
+            except Exception:
+                for key, previous in rollback:
+                    if previous is None:
+                        cache.pop(key, None)
+                    else:
+                        cache[key] = previous
+                raise
+
+        self._spawn_background_task(task_name, _run_refresh())
 
     async def handle_message(self, event: dict[str, Any]) -> None:
         """处理收到的消息事件"""
@@ -247,12 +374,23 @@ class MessageHandler:
                     logger.warning("获取用户昵称失败: %s", exc)
 
             text = extract_text(private_message_content, self.config.bot_qq)
+            private_attachments = await self._collect_message_attachments(
+                private_message_content,
+                user_id=private_sender_id,
+                request_type="private",
+            )
             safe_text = redact_string(text)
             logger.info(
                 "[私聊消息] 发送者=%s 昵称=%s 内容=%s",
                 private_sender_id,
                 user_name or private_sender_nickname,
                 safe_text[:100],
+            )
+            resolved_private_name = (user_name or private_sender_nickname or "").strip()
+            self._schedule_profile_display_name_refresh(
+                task_name=f"profile_name_refresh_private:{private_sender_id}",
+                sender_id=private_sender_id,
+                sender_name=resolved_private_name,
             )
 
             # 保存私聊消息到历史记录（保存处理后的内容）
@@ -263,6 +401,7 @@ class MessageHandler:
                 self.onebot.get_msg,
                 self.onebot.get_forward_msg,
             )
+            parsed_content = append_attachment_text(parsed_content, private_attachments)
             safe_parsed = redact_string(parsed_content)
             logger.debug(
                 "[历史记录] 保存私聊: user=%s content=%s...",
@@ -275,6 +414,7 @@ class MessageHandler:
                 display_name=private_sender_nickname,
                 user_name=user_name,
                 message_id=trigger_message_id,
+                attachments=private_attachments,
             )
 
             # 如果是 bot 自己的消息，只保存不触发回复，避免无限循环
@@ -337,6 +477,7 @@ class MessageHandler:
                 private_sender_id,
                 text,
                 private_message_content,
+                attachments=private_attachments,
                 sender_name=user_name,
                 trigger_message_id=trigger_message_id,
             )
@@ -372,6 +513,11 @@ class MessageHandler:
 
         # 提取文本内容
         text = extract_text(message_content, self.config.bot_qq)
+        group_attachments = await self._collect_message_attachments(
+            message_content,
+            group_id=group_id,
+            request_type="group",
+        )
         safe_text = redact_string(text)
         logger.info(
             f"[群消息] group={group_id} sender={sender_id} name={sender_card or sender_nickname} "
@@ -387,6 +533,14 @@ class MessageHandler:
                 group_name = group_info.get("group_name", "")
         except Exception as e:
             logger.warning(f"获取群聊名失败: {e}")
+        resolved_group_sender_name = (sender_card or sender_nickname or "").strip()
+        self._schedule_profile_display_name_refresh(
+            task_name=f"profile_name_refresh_group:{group_id}:{sender_id}",
+            sender_id=sender_id,
+            sender_name=resolved_group_sender_name,
+            group_id=group_id,
+            group_name=str(group_name or "").strip(),
+        )
 
         # 使用新的 utils
         parsed_content = await parse_message_content_for_history(
@@ -395,6 +549,7 @@ class MessageHandler:
             self.onebot.get_msg,
             self.onebot.get_forward_msg,
         )
+        parsed_content = append_attachment_text(parsed_content, group_attachments)
         safe_parsed = redact_string(parsed_content)
         logger.debug(
             f"[历史记录] 保存群聊: group={group_id}, sender={sender_id}, content={safe_parsed[:50]}..."
@@ -409,6 +564,7 @@ class MessageHandler:
             role=sender_role,
             title=sender_title,
             message_id=trigger_message_id,
+            attachments=group_attachments,
         )
 
         # 如果是 bot 自己的消息，只保存不触发回复，避免无限循环
@@ -511,6 +667,7 @@ class MessageHandler:
             sender_id,
             text,
             message_content,
+            attachments=group_attachments,
             sender_name=display_name,
             group_name=group_name,
             sender_role=sender_role,
@@ -540,9 +697,15 @@ class MessageHandler:
                     exc,
                 )
 
-        display_name = sender_nickname or user_name or f"QQ{user_id}"
+        resolved_sender_name = (sender_nickname or user_name).strip()
+        display_name = resolved_sender_name or f"QQ{user_id}"
         normalized_user_name = user_name or display_name
         poke_text = _format_poke_history_text(display_name, user_id)
+        self._schedule_profile_display_name_refresh(
+            task_name=f"profile_name_refresh_private_poke:{user_id}",
+            sender_id=user_id,
+            sender_name=resolved_sender_name,
+        )
 
         try:
             await self.history_manager.add_private_message(
@@ -609,9 +772,18 @@ class MessageHandler:
                 exc,
             )
 
-        display_name = sender_card or sender_nickname or f"QQ{sender_id}"
+        resolved_sender_name = (sender_card or sender_nickname).strip()
+        resolved_group_name = group_name.strip()
+        display_name = resolved_sender_name or f"QQ{sender_id}"
         poke_text = _format_poke_history_text(display_name, sender_id)
-        normalized_group_name = group_name or f"群{group_id}"
+        normalized_group_name = resolved_group_name or f"群{group_id}"
+        self._schedule_profile_display_name_refresh(
+            task_name=f"profile_name_refresh_group_poke:{group_id}:{sender_id}",
+            sender_id=sender_id,
+            sender_name=resolved_sender_name,
+            group_id=group_id,
+            group_name=resolved_group_name,
+        )
 
         try:
             await self.history_manager.add_group_message(

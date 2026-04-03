@@ -26,7 +26,7 @@ class AgentRegistry(BaseRegistry):
         else:
             agents_path = Path(agents_dir)
 
-        super().__init__(agents_path, kind="agent")
+        super().__init__(agents_path, kind="agent", timeout_seconds=0.0)
         self.set_watch_filenames(
             {"config.json", "handler.py", "intro.md", "intro.generated.md"}
         )

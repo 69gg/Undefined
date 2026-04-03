@@ -36,6 +36,50 @@ def _chat_proxy_timeout_seconds() -> float:
     return compute_queued_llm_timeout_seconds(cfg, cfg.chat_model)
 
 
+def _load_function_name(config_path: Path) -> str | None:
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    function = raw.get("function", {})
+    if not isinstance(function, dict):
+        return None
+    name = str(function.get("name", "") or "").strip()
+    return name or None
+
+
+def _load_top_level_agent_names(root: Path) -> set[str]:
+    names: set[str] = set()
+    if not root.exists():
+        return names
+    for item_dir in root.iterdir():
+        if not item_dir.is_dir() or item_dir.name.startswith("_"):
+            continue
+        config_path = item_dir / "config.json"
+        if not config_path.exists():
+            continue
+        name = _load_function_name(config_path)
+        if name:
+            names.add(name)
+    return names
+
+
+def _get_local_agent_tool_names() -> set[str]:
+    skills_root = Path(__file__).resolve().parents[2] / "skills"
+    return _load_top_level_agent_names(skills_root / "agents")
+
+
+def _tool_invoke_proxy_timeout_seconds(tool_name: str) -> float | None:
+    normalized_name = str(tool_name or "").strip()
+    if normalized_name in _get_local_agent_tool_names():
+        return None
+
+    cfg = get_config(strict=False)
+    # 非 agent 一律保留 Runtime API 超时 + 60s 网络缓冲，
+    # 包括 toolsets、MCP/external tools 以及本地未知名称。
+    return float(cfg.api.tool_invoke_timeout) + 60.0
+
+
 def _unauthorized() -> Response:
     return web.json_response({"error": "Unauthorized"}, status=401)
 
@@ -82,7 +126,7 @@ async def _proxy_runtime(
     path: str,
     params: Mapping[str, str] | None = None,
     payload: dict[str, Any] | None = None,
-    timeout_seconds: float = 20.0,
+    timeout_seconds: float | None = 20.0,
 ) -> Response:
     cfg = get_config(strict=False)
     if not cfg.api.enabled:
@@ -416,9 +460,8 @@ async def runtime_tools_invoke_handler(request: web.Request) -> Response:
     except Exception:
         return web.json_response({"error": "Invalid JSON"}, status=400)
 
-    cfg = get_config(strict=False)
-    # 代理超时 = 工具调用超时 + 60s 缓冲（覆盖网络开销）
-    proxy_timeout = float(cfg.api.tool_invoke_timeout) + 60.0
+    tool_name = str(body.get("tool_name", "") or "").strip()
+    proxy_timeout = _tool_invoke_proxy_timeout_seconds(tool_name)
     return await _proxy_runtime(
         method="POST",
         path="/api/v1/tools/invoke",

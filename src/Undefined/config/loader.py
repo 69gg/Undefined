@@ -584,6 +584,7 @@ class Config:
     # 生图工具配置
     image_gen: ImageGenConfig
     models_image_gen: ImageGenModelConfig
+    models_image_edit: ImageGenModelConfig
     _allowed_group_ids_set: set[int] = dataclass_field(
         default_factory=set,
         init=False,
@@ -1332,6 +1333,7 @@ class Config:
         cognitive = cls._parse_cognitive_config(data)
         naga = cls._parse_naga_config(data)
         models_image_gen = cls._parse_image_gen_model_config(data)
+        models_image_edit = cls._parse_image_edit_model_config(data)
         image_gen = cls._parse_image_gen_config(data)
 
         if strict:
@@ -1479,6 +1481,7 @@ class Config:
             naga=naga,
             image_gen=image_gen,
             models_image_gen=models_image_gen,
+            models_image_edit=models_image_edit,
         )
 
     @property
@@ -2496,6 +2499,37 @@ class Config:
                 "",
             ),
             request_params=_get_model_request_params(data, "image_gen"),
+        )
+
+    @staticmethod
+    def _parse_image_edit_model_config(data: dict[str, Any]) -> ImageGenModelConfig:
+        """解析 [models.image_edit] 参考图生图模型配置"""
+        return ImageGenModelConfig(
+            api_url=_coerce_str(
+                _get_value(
+                    data,
+                    ("models", "image_edit", "api_url"),
+                    "IMAGE_EDIT_MODEL_API_URL",
+                ),
+                "",
+            ),
+            api_key=_coerce_str(
+                _get_value(
+                    data,
+                    ("models", "image_edit", "api_key"),
+                    "IMAGE_EDIT_MODEL_API_KEY",
+                ),
+                "",
+            ),
+            model_name=_coerce_str(
+                _get_value(
+                    data,
+                    ("models", "image_edit", "model_name"),
+                    "IMAGE_EDIT_MODEL_NAME",
+                ),
+                "",
+            ),
+            request_params=_get_model_request_params(data, "image_edit"),
         )
 
     @staticmethod

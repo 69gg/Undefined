@@ -132,3 +132,45 @@ def test_chat_proxy_timeout_uses_queue_budget(monkeypatch: pytest.MonkeyPatch) -
             cfg.chat_model,
         )
     )
+
+
+def test_tool_invoke_proxy_timeout_uses_local_schema_sets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = SimpleNamespace(api=SimpleNamespace(tool_invoke_timeout=120))
+    monkeypatch.setattr(
+        runtime_routes, "get_config", lambda strict=False: cast(Any, cfg)
+    )
+    monkeypatch.setattr(
+        runtime_routes,
+        "_get_local_agent_tool_names",
+        lambda: {"custom_agent_runner"},
+    )
+
+    assert (
+        runtime_routes._tool_invoke_proxy_timeout_seconds("custom_agent_runner") is None
+    )
+    assert (
+        runtime_routes._tool_invoke_proxy_timeout_seconds("messages.send_message")
+        == 180.0
+    )
+    assert runtime_routes._tool_invoke_proxy_timeout_seconds("unknown_tool") == 180.0
+
+
+def test_load_top_level_agent_names_ignores_nested_agent_tools(tmp_path: Path) -> None:
+    agent_dir = tmp_path / "demo_agent"
+    agent_dir.mkdir()
+    (agent_dir / "config.json").write_text(
+        '{"function":{"name":"demo_agent"}}',
+        encoding="utf-8",
+    )
+    nested_tool_dir = agent_dir / "tools" / "helper"
+    nested_tool_dir.mkdir(parents=True)
+    (nested_tool_dir / "config.json").write_text(
+        '{"function":{"name":"helper_tool"}}',
+        encoding="utf-8",
+    )
+
+    names = runtime_routes._load_top_level_agent_names(tmp_path)
+
+    assert names == {"demo_agent"}

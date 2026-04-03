@@ -168,6 +168,36 @@ class MessageHistoryManager:
                         msg["timestamp"] = ""
                     if "message" not in msg or msg.get("message") is None:
                         msg["message"] = str(msg.get("content", ""))
+                    attachments = msg.get("attachments")
+                    if not isinstance(attachments, list):
+                        msg["attachments"] = []
+                    else:
+                        normalized_attachments: list[dict[str, str]] = []
+                        for item in attachments:
+                            if not isinstance(item, dict):
+                                continue
+                            uid = str(item.get("uid", "") or "").strip()
+                            if not uid:
+                                continue
+                            normalized_attachments.append(
+                                {
+                                    "uid": uid,
+                                    "kind": str(
+                                        item.get("kind")
+                                        or item.get("media_type")
+                                        or "file"
+                                    ),
+                                    "media_type": str(
+                                        item.get("media_type")
+                                        or item.get("kind")
+                                        or "file"
+                                    ),
+                                    "display_name": str(
+                                        item.get("display_name", "") or ""
+                                    ),
+                                }
+                            )
+                        msg["attachments"] = normalized_attachments
 
                     normalized_history.append(msg)
 
@@ -268,6 +298,7 @@ class MessageHistoryManager:
         role: str = "member",
         title: str = "",
         message_id: int | None = None,
+        attachments: list[dict[str, str]] | None = None,
     ) -> None:
         """异步保存群消息到历史记录"""
         await self._ensure_initialized()
@@ -299,6 +330,8 @@ class MessageHistoryManager:
             }
             if message_id is not None:
                 record["message_id"] = message_id
+            if attachments:
+                record["attachments"] = attachments
 
             self._message_history[group_id_str].append(record)
 
@@ -319,6 +352,7 @@ class MessageHistoryManager:
         display_name: str = "",
         user_name: str = "",
         message_id: int | None = None,
+        attachments: list[dict[str, str]] | None = None,
     ) -> None:
         """异步保存私聊消息到历史记录"""
         await self._ensure_initialized()
@@ -345,6 +379,8 @@ class MessageHistoryManager:
             }
             if message_id is not None:
                 record["message_id"] = message_id
+            if attachments:
+                record["attachments"] = attachments
 
             self._private_message_history[user_id_str].append(record)
 

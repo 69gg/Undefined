@@ -21,11 +21,18 @@ from aiohttp import ClientSession, ClientTimeout, web
 from aiohttp.web_response import Response
 
 from Undefined import __version__
+from Undefined.attachments import (
+    attachment_refs_to_xml,
+    build_attachment_scope,
+    register_message_attachments,
+    render_message_with_pic_placeholders,
+)
 from Undefined.config import load_webui_settings
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
 from Undefined.render import render_html_to_image, render_markdown_to_html  # noqa: F401
 from Undefined.services.queue_manager import QUEUE_LANE_SUPERADMIN
+from Undefined.utils.common import message_to_segments
 from Undefined.utils.cors import is_allowed_cors_origin, normalize_origin
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
 from Undefined.utils.xml import escape_xml_attr, escape_xml_text
@@ -38,6 +45,10 @@ _AUTH_HEADER = "X-Undefined-API-Key"
 _CHAT_SSE_KEEPALIVE_SECONDS = 10.0
 _PROCESS_START_TIME = time.time()
 _NAGA_REQUEST_UUID_TTL_SECONDS = 6 * 60 * 60
+
+
+class _ToolInvokeExecutionTimeoutError(asyncio.TimeoutError):
+    """由 Runtime API 工具调用超时包装器抛出的超时异常。"""
 
 
 @dataclass
@@ -71,8 +82,16 @@ class _WebUIVirtualSender:
         mark_sent: bool = True,
         reply_to: int | None = None,
         preferred_temp_group_id: int | None = None,
+        history_message: str | None = None,
     ) -> int | None:
-        _ = user_id, auto_history, mark_sent, reply_to, preferred_temp_group_id
+        _ = (
+            user_id,
+            auto_history,
+            mark_sent,
+            reply_to,
+            preferred_temp_group_id,
+            history_message,
+        )
         await self._send_private_callback(self._virtual_user_id, message)
         return None
 
@@ -85,8 +104,16 @@ class _WebUIVirtualSender:
         *,
         mark_sent: bool = True,
         reply_to: int | None = None,
+        history_message: str | None = None,
     ) -> int | None:
-        _ = group_id, auto_history, history_prefix, mark_sent, reply_to
+        _ = (
+            group_id,
+            auto_history,
+            history_prefix,
+            mark_sent,
+            reply_to,
+            history_message,
+        )
         await self._send_private_callback(self._virtual_user_id, message)
         return None
 
@@ -1177,14 +1204,29 @@ class RuntimeAPIServer:
     ) -> str:
         cfg = self._ctx.config_getter()
         permission_sender_id = int(cfg.superadmin_qq)
+        webui_scope_key = build_attachment_scope(
+            user_id=_VIRTUAL_USER_ID,
+            request_type="private",
+            webui_session=True,
+        )
+        input_segments = message_to_segments(text)
+        registered_input = await register_message_attachments(
+            registry=self._ctx.ai.attachment_registry,
+            segments=input_segments,
+            scope_key=webui_scope_key,
+            resolve_image_url=self._ctx.onebot.get_image,
+            get_forward_messages=self._ctx.onebot.get_forward_msg,
+        )
+        normalized_text = registered_input.normalized_text or text
         await self._ctx.history_manager.add_private_message(
             user_id=_VIRTUAL_USER_ID,
-            text_content=text,
+            text_content=normalized_text,
             display_name=_VIRTUAL_USER_NAME,
             user_name=_VIRTUAL_USER_NAME,
+            attachments=registered_input.attachments,
         )
 
-        command = self._ctx.command_dispatcher.parse_command(text)
+        command = self._ctx.command_dispatcher.parse_command(normalized_text)
         if command:
             await self._ctx.command_dispatcher.dispatch_private(
                 user_id=_VIRTUAL_USER_ID,
@@ -1196,8 +1238,13 @@ class RuntimeAPIServer:
             return "command"
 
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        attachment_xml = (
+            f"\n{attachment_refs_to_xml(registered_input.attachments)}"
+            if registered_input.attachments
+            else ""
+        )
         full_question = f"""<message sender="{escape_xml_attr(_VIRTUAL_USER_NAME)}" sender_id="{escape_xml_attr(_VIRTUAL_USER_ID)}" location="WebUI私聊" time="{escape_xml_attr(current_time)}">
- <content>{escape_xml_text(text)}</content>
+ <content>{escape_xml_text(normalized_text)}</content>{attachment_xml}
  </message>
 
 【WebUI 会话】
@@ -1252,6 +1299,8 @@ class RuntimeAPIServer:
                 if value is not None:
                     ctx.set_resource(key, value)
             ctx.set_resource("queue_lane", QUEUE_LANE_SUPERADMIN)
+            ctx.set_resource("webui_session", True)
+            ctx.set_resource("webui_permission", "superadmin")
 
             result = await self._ctx.ai.ask(
                 full_question,
@@ -1330,18 +1379,32 @@ class RuntimeAPIServer:
 
         stream = _to_bool(body.get("stream"))
         outputs: list[str] = []
+        webui_scope_key = build_attachment_scope(
+            user_id=_VIRTUAL_USER_ID,
+            request_type="private",
+            webui_session=True,
+        )
 
         async def _capture_private_message(user_id: int, message: str) -> None:
             _ = user_id
             content = str(message or "").strip()
             if not content:
                 return
-            outputs.append(content)
+            rendered = await render_message_with_pic_placeholders(
+                content,
+                registry=self._ctx.ai.attachment_registry,
+                scope_key=webui_scope_key,
+                strict=False,
+            )
+            if not rendered.delivery_text.strip():
+                return
+            outputs.append(rendered.delivery_text)
             await self._ctx.history_manager.add_private_message(
                 user_id=_VIRTUAL_USER_ID,
-                text_content=content,
+                text_content=rendered.history_text,
                 display_name="Bot",
                 user_name="Bot",
+                attachments=rendered.attachments,
             )
 
         if not stream:
@@ -1368,8 +1431,11 @@ class RuntimeAPIServer:
         message_queue: asyncio.Queue[str] = asyncio.Queue()
 
         async def _capture_private_message_stream(user_id: int, message: str) -> None:
+            output_count = len(outputs)
             await _capture_private_message(user_id, message)
-            content = str(message or "").strip()
+            if len(outputs) <= output_count:
+                return
+            content = outputs[-1].strip()
             if content:
                 await message_queue.put(content)
 
@@ -1508,6 +1574,43 @@ class RuntimeAPIServer:
                 filtered.append(schema)
 
         return filtered
+
+    def _get_agent_tool_names(self) -> set[str]:
+        ai = self._ctx.ai
+        if ai is None:
+            return set()
+
+        agent_reg = getattr(ai, "agent_registry", None)
+        if agent_reg is None:
+            return set()
+
+        agent_names: set[str] = set()
+        for schema in agent_reg.get_agents_schema():
+            func = schema.get("function", {})
+            name = str(func.get("name", ""))
+            if name:
+                agent_names.add(name)
+        return agent_names
+
+    def _resolve_tool_invoke_timeout(
+        self, tool_name: str, timeout: int
+    ) -> float | None:
+        if tool_name in self._get_agent_tool_names():
+            return None
+        return float(timeout)
+
+    async def _await_tool_invoke_result(
+        self,
+        awaitable: Awaitable[Any],
+        *,
+        timeout: float | None,
+    ) -> Any:
+        if timeout is None or timeout <= 0:
+            return await awaitable
+        try:
+            return await asyncio.wait_for(awaitable, timeout=timeout)
+        except asyncio.TimeoutError as exc:
+            raise _ToolInvokeExecutionTimeoutError from exc
 
     async def _tools_list_handler(self, request: web.Request) -> Response:
         _ = request
@@ -1659,6 +1762,7 @@ class RuntimeAPIServer:
         )
 
         start = time.perf_counter()
+        effective_timeout = self._resolve_tool_invoke_timeout(tool_name, timeout)
         try:
             async with RequestContext(
                 request_type=request_type,
@@ -1699,9 +1803,9 @@ class RuntimeAPIServer:
                 if tool_manager is None:
                     raise RuntimeError("ToolManager not available")
 
-                raw_result = await asyncio.wait_for(
+                raw_result = await self._await_tool_invoke_result(
                     tool_manager.execute_tool(tool_name, args, tool_context),
-                    timeout=timeout,
+                    timeout=effective_timeout,
                 )
 
             elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
@@ -1722,7 +1826,7 @@ class RuntimeAPIServer:
                 "duration_ms": elapsed_ms,
             }
 
-        except asyncio.TimeoutError:
+        except _ToolInvokeExecutionTimeoutError:
             elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
             logger.warning(
                 "[ToolInvoke] 执行超时: request_id=%s tool=%s timeout=%ds",

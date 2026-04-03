@@ -527,6 +527,23 @@ model_name = ""
 # en: Extra request-body params (optional).
 [models.image_gen.request_params]
 
+# zh: 参考图生图模型配置（用于 ai_draw_one 传入 reference_image_uids 时调用 OpenAI 兼容的图片编辑接口）。
+# en: Reference-image generation model config (used when ai_draw_one receives reference_image_uids and calls the OpenAI-compatible image editing API).
+[models.image_edit]
+# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（最终请求路径为 /v1/images/edits）。
+# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1 (final request path is /v1/images/edits).
+api_url = ""
+# zh: API Key。
+# en: API key.
+api_key = ""
+# zh: 模型名称，空则回退到 [models.image_gen] 的 model_name。
+# en: Model name, empty falls back to [models.image_gen].model_name.
+model_name = ""
+
+# zh: 额外请求体参数（可选）。
+# en: Extra request-body params (optional).
+[models.image_edit.request_params]
+
 # zh: 本地知识库配置。
 # en: Local knowledge base settings.
 [knowledge]

@@ -116,6 +116,77 @@ def _resolve_auto_request_type(
     return ""
 
 
+def _parse_profile_markdown(markdown: str) -> tuple[dict[str, Any], str] | None:
+    text = str(markdown or "")
+    if not text.startswith("---"):
+        return None
+    try:
+        import yaml
+
+        parts = text[3:].split("---", 1)
+        if len(parts) != 2:
+            return None
+        frontmatter = yaml.safe_load(parts[0])
+        if not isinstance(frontmatter, dict):
+            return None
+        body = parts[1].lstrip("\n")
+        return frontmatter, body
+    except Exception:
+        return None
+
+
+def _serialize_profile_markdown(frontmatter: dict[str, Any], body: str) -> str:
+    import yaml
+
+    return f"---\n{yaml.dump(frontmatter, allow_unicode=True)}---\n{body}"
+
+
+def _normalize_profile_tags(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _current_profile_name(entity_type: str, frontmatter: dict[str, Any]) -> str:
+    if entity_type == "user":
+        return str(frontmatter.get("nickname") or frontmatter.get("name") or "").strip()
+    return str(frontmatter.get("group_name") or frontmatter.get("name") or "").strip()
+
+
+def _build_profile_vector_payload(
+    *,
+    entity_type: str,
+    entity_id: str,
+    effective_name: str,
+    tags: list[str],
+    summary: str,
+) -> tuple[str, dict[str, Any]]:
+    profile_doc_lines: list[str] = []
+    if entity_type == "user":
+        profile_doc_lines.append(f"昵称: {effective_name}")
+        profile_doc_lines.append(f"QQ号: {entity_id}")
+    else:
+        profile_doc_lines.append(f"群名: {effective_name}")
+        profile_doc_lines.append(f"群号: {entity_id}")
+    if tags:
+        profile_doc_lines.append(f"标签: {', '.join(tags)}")
+    profile_doc_lines.append(summary)
+    profile_doc = "\n".join(line for line in profile_doc_lines if line.strip())
+
+    metadata: dict[str, Any] = {
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "name": effective_name,
+    }
+    if entity_type == "user":
+        metadata["nickname"] = effective_name
+        metadata["qq"] = entity_id
+    else:
+        metadata["group_name"] = effective_name
+        metadata["group_id"] = entity_id
+    return profile_doc, metadata
+
+
 class CognitiveService:
     def __init__(
         self,
@@ -168,6 +239,75 @@ class CognitiveService:
     @property
     def enabled(self) -> bool:
         return bool(self._config_getter().enabled)
+
+    async def sync_profile_display_name(
+        self,
+        *,
+        entity_type: str,
+        entity_id: str,
+        preferred_name: str,
+    ) -> bool:
+        normalized_entity_type = str(entity_type or "").strip().lower()
+        normalized_entity_id = str(entity_id or "").strip()
+        normalized_name = str(preferred_name or "").strip()
+        if normalized_entity_type not in {"user", "group"}:
+            return False
+        if not normalized_entity_id or not normalized_name:
+            return False
+        if self._profile_storage is None or self._vector_store is None:
+            return False
+
+        existing = await self._profile_storage.read_profile(
+            normalized_entity_type,
+            normalized_entity_id,
+        )
+        if not existing:
+            return False
+
+        parsed = _parse_profile_markdown(existing)
+        if parsed is None:
+            return False
+        frontmatter, summary = parsed
+        current_name = _current_profile_name(normalized_entity_type, frontmatter)
+        if current_name == normalized_name:
+            return False
+
+        frontmatter["name"] = normalized_name
+        frontmatter["updated_at"] = datetime.now().isoformat()
+        if normalized_entity_type == "user":
+            frontmatter["nickname"] = normalized_name
+            frontmatter["qq"] = normalized_entity_id
+        else:
+            frontmatter["group_name"] = normalized_name
+            frontmatter["group_id"] = normalized_entity_id
+
+        updated_markdown = _serialize_profile_markdown(frontmatter, summary)
+        await self._profile_storage.write_profile(
+            normalized_entity_type,
+            normalized_entity_id,
+            updated_markdown,
+        )
+
+        profile_doc, profile_metadata = _build_profile_vector_payload(
+            entity_type=normalized_entity_type,
+            entity_id=normalized_entity_id,
+            effective_name=normalized_name,
+            tags=_normalize_profile_tags(frontmatter.get("tags")),
+            summary=summary,
+        )
+        await self._vector_store.upsert_profile(
+            f"{normalized_entity_type}:{normalized_entity_id}",
+            profile_doc,
+            profile_metadata,
+        )
+        logger.info(
+            "[认知服务] 已刷新侧写展示名: entity_type=%s entity_id=%s old=%s new=%s",
+            normalized_entity_type,
+            normalized_entity_id,
+            current_name,
+            normalized_name,
+        )
+        return True
 
     @staticmethod
     def _uid_candidates(user_id: str, sender_id: str) -> list[str]:

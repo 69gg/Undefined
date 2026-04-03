@@ -6,10 +6,12 @@ DATA_DIR = Path("data")
 CACHE_DIR = DATA_DIR / "cache"
 RENDER_CACHE_DIR = CACHE_DIR / "render"
 IMAGE_CACHE_DIR = CACHE_DIR / "images"
+ATTACHMENT_CACHE_DIR = CACHE_DIR / "attachments"
 DOWNLOAD_CACHE_DIR = CACHE_DIR / "downloads"
 TEXT_FILE_CACHE_DIR = CACHE_DIR / "text_files"
 URL_FILE_CACHE_DIR = CACHE_DIR / "url_files"
 WEBUI_FILE_CACHE_DIR = CACHE_DIR / "webui_files"
+ATTACHMENT_REGISTRY_FILE = DATA_DIR / "attachment_registry.json"
 
 
 def ensure_dir(path: Path) -> Path:
