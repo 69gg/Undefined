@@ -323,7 +323,7 @@ class MemeConfig:
 
     enabled: bool = True
     query_default_mode: str = "hybrid"
-    max_source_image_bytes: int = 1024 * 1024
+    max_source_image_bytes: int = 500 * 1024
     blob_dir: str = "data/memes/blobs"
     preview_dir: str = "data/memes/previews"
     db_path: str = "data/memes/memes.sqlite3"

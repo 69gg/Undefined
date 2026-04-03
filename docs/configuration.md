@@ -713,7 +713,7 @@ Prompt caching 补充：
 |---|---:|---|---|
 | `enabled` | `true` | 是否启用全局表情包库 | 关闭后不会自动入库，也无法使用 `memes.*` 工具 |
 | `query_default_mode` | `"hybrid"` | 默认检索模式：`keyword` / `semantic` / `hybrid` | 非法值按 `hybrid` 处理 |
-| `max_source_image_bytes` | `1048576` | 入库前允许处理的原始图片大小上限（字节） | `<=0` 回退 `1048576` |
+| `max_source_image_bytes` | `512000` | 入库前允许处理的原始图片大小上限（字节） | `<=0` 回退 `512000` |
 | `blob_dir` | `data/memes/blobs` | 原图持久化目录 | 路径变更建议重启 |
 | `preview_dir` | `data/memes/previews` | 预览图目录（GIF 抽首帧） | 路径变更建议重启 |
 | `db_path` | `data/memes/memes.sqlite3` | SQLite 元数据路径 | 路径变更建议重启 |

@@ -1070,7 +1070,7 @@ enabled = true
 query_default_mode = "hybrid"
 # zh: 入库前允许处理的原始图片大小上限（字节）。
 # en: Max source image size in bytes before ingestion.
-max_source_image_bytes = 1048576
+max_source_image_bytes = 512000
 # zh: 原图持久化目录。
 # en: Directory for persisted meme blobs.
 blob_dir = "data/memes/blobs"

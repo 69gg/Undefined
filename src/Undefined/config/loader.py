@@ -2975,7 +2975,7 @@ class Config:
             query_default_mode=_coerce_str(section.get("query_default_mode"), "hybrid"),
             max_source_image_bytes=max(
                 1,
-                _coerce_int(section.get("max_source_image_bytes"), 1024 * 1024),
+                _coerce_int(section.get("max_source_image_bytes"), 500 * 1024),
             ),
             blob_dir=_coerce_str(section.get("blob_dir"), "data/memes/blobs"),
             preview_dir=_coerce_str(section.get("preview_dir"), "data/memes/previews"),
