@@ -87,6 +87,7 @@ async def test_attachment_registry_load_uses_async_read_json(
     monkeypatch.setattr(Path, "read_text", _unexpected_sync_read_text)
 
     registry = AttachmentRegistry(registry_path=registry_path, cache_dir=cache_dir)
+    assert seen_calls == []
     await registry.load()
 
     assert seen_calls == [(registry_path, False)]

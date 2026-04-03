@@ -8,7 +8,6 @@ import binascii
 from dataclasses import asdict, dataclass
 from datetime import datetime
 import hashlib
-import json
 import logging
 import mimetypes
 from pathlib import Path
@@ -392,7 +391,6 @@ class AttachmentRegistry:
         self._records: dict[str, AttachmentRecord] = {}
         self._loaded = False
         self._load_task: asyncio.Task[None] | None = None
-        self._load_from_disk()
 
     def _resolve_managed_cache_path(self, raw_path: str | None) -> Path | None:
         text = str(raw_path or "").strip()
@@ -507,30 +505,6 @@ class AttachmentRegistry:
             except Exception:
                 continue
         return loaded
-
-    def _load_from_disk(self) -> None:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            self._load_from_disk_sync()
-            return
-        self._load_task = loop.create_task(self._load_from_disk_async())
-
-    def _load_from_disk_sync(self) -> None:
-        if not self._registry_path.exists():
-            self._records = {}
-            self._prune_records()
-            self._loaded = True
-            return
-        try:
-            raw = json.loads(self._registry_path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            logger.warning("[AttachmentRegistry] 读取失败: %s", exc)
-            self._loaded = True
-            return
-        self._records = self._load_records_from_payload(raw)
-        self._prune_records()
-        self._loaded = True
 
     async def _load_from_disk_async(self) -> None:
         try:
