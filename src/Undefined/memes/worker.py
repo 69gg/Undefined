@@ -43,7 +43,12 @@ class MemeWorker:
         while not self._stop_event.is_set():
             result = await self._job_queue.dequeue()
             if result is None:
-                await asyncio.sleep(self._poll_interval_seconds)
+                try:
+                    await asyncio.wait_for(
+                        self._stop_event.wait(), timeout=self._poll_interval_seconds
+                    )
+                except asyncio.TimeoutError:
+                    pass
                 continue
             job_id, job = result
             task = asyncio.create_task(self._process_job(job_id, job))

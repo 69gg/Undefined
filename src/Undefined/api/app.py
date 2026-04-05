@@ -1194,12 +1194,18 @@ class RuntimeAPIServer:
         pinned_filter = _parse_optional_bool("pinned")
 
         if query or keyword_query or semantic_query:
+            has_post_filter = any(
+                f is not None for f in (enabled_filter, animated_filter, pinned_filter)
+            )
+            fetch_k = (
+                min(200, top_k * 4) if has_post_filter else max(1, min(200, top_k))
+            )
             search_payload = await meme_service.search_memes(
                 query,
                 query_mode=query_mode or meme_service.default_query_mode,
                 keyword_query=keyword_query or None,
                 semantic_query=semantic_query or None,
-                top_k=max(1, min(200, top_k)),
+                top_k=fetch_k,
                 include_disabled=enabled_filter is not True,
             )
             items: list[dict[str, Any]] = []

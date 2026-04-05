@@ -354,7 +354,10 @@ class MemeStore:
         if not raw_query:
             return []
         normalized = raw_query.lower()
-        like_query = f"%{normalized}%"
+        escaped = (
+            normalized.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
+        like_query = f"%{escaped}%"
         fts_expr = self._fts_expression(raw_query)
 
         def _run() -> list[dict[str, Any]]:
@@ -381,7 +384,7 @@ class MemeStore:
                             if row["fts_rank"] is not None
                             else 0.0
                         )
-                        keyword_score = 1.0 / (1.0 + max(0.0, fts_rank))
+                        keyword_score = 1.0 / (1.0 + abs(fts_rank))
                         found[record.uid] = {
                             "record": record,
                             "keyword_score": keyword_score,
@@ -394,8 +397,8 @@ class MemeStore:
                     WHERE status = 'ready'
                       AND (? OR enabled = 1)
                       AND (
-                        lower(search_text) LIKE ?
-                        OR lower(uid) LIKE ?
+                        lower(search_text) LIKE ? ESCAPE '\'
+                        OR lower(uid) LIKE ? ESCAPE '\'
                       )
                     ORDER BY pinned DESC, use_count DESC, updated_at DESC
                     LIMIT ?

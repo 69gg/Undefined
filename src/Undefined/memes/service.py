@@ -722,6 +722,7 @@ class MemeService:
         )
         if existing is not None:
             await self._store.add_source(replace(source, uid=existing.uid))
+            await self._vector_store.upsert(existing)
             return
 
         with Image.open(source_path) as image:
@@ -808,8 +809,14 @@ class MemeService:
             segment_data={"subType": "1"},
         )
         saved = await self._store.upsert_record(record)
-        await self._store.add_source(replace(source, uid=saved.uid))
-        await self._vector_store.upsert(saved)
+        try:
+            await self._store.add_source(replace(source, uid=saved.uid))
+            await self._vector_store.upsert(saved)
+        except Exception:
+            await asyncio.to_thread(self._delete_file_if_exists, blob_path)
+            if preview_path is not None and preview_path != blob_path:
+                await asyncio.to_thread(self._delete_file_if_exists, preview_path)
+            raise
         await self._prune_if_needed()
 
     async def _prepare_blob_and_preview(
