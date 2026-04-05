@@ -571,6 +571,7 @@ async def test_meme_ingest_serializes_same_sha256_jobs(
 ) -> None:
     source = tmp_path / "source.png"
     _write_test_png(source)
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
     config = _meme_config(tmp_path)
     store = MemeStore(config.db_path)
     attachment_registry = AttachmentRegistry(
@@ -638,6 +639,7 @@ async def test_meme_ingest_serializes_same_sha256_jobs(
     assert total == 1
     assert items[0].auto_description == "无语猫猫反应图"
     assert ai_client.describe_meme_image.await_count == 1
+    assert digest not in service._ingest_digest_locks
 
 
 @pytest.mark.asyncio
@@ -736,6 +738,7 @@ async def test_meme_ingest_cleans_partial_files_on_prepare_failure(
 ) -> None:
     source = tmp_path / "source.gif"
     _write_test_gif(source)
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
     config = _meme_config(tmp_path)
     store = MemeStore(config.db_path)
     vector_store = SimpleNamespace(
@@ -803,3 +806,4 @@ async def test_meme_ingest_cleans_partial_files_on_prepare_failure(
     assert items == []
     assert list((tmp_path / "blobs").glob("*")) == []
     assert list((tmp_path / "previews").glob("*")) == []
+    assert digest not in service._ingest_digest_locks

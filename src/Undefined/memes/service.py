@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 import hashlib
 import logging
@@ -77,6 +77,12 @@ def _normalize_tags(raw_tags: list[str] | str | None) -> list[str]:
     return normalize_string_list(raw_tags)
 
 
+@dataclass
+class _IngestDigestLockEntry:
+    lock: asyncio.Lock
+    users: int = 0
+
+
 class MemeService:
     def __init__(
         self,
@@ -97,7 +103,8 @@ class MemeService:
         self._attachment_registry = attachment_registry
         self._retrieval_runtime = retrieval_runtime
         # Serialize same-content ingest jobs within the process to avoid duplicates.
-        self._ingest_digest_locks: dict[str, asyncio.Lock] = {}
+        self._ingest_digest_locks: dict[str, _IngestDigestLockEntry] = {}
+        self._ingest_digest_locks_guard = asyncio.Lock()
 
     @property
     def enabled(self) -> bool:
@@ -121,6 +128,35 @@ class MemeService:
 
     def _blob_dir(self) -> Path:
         return ensure_dir(Path(self._cfg().blob_dir))
+
+    async def _acquire_ingest_digest_lock(self, digest: str) -> _IngestDigestLockEntry:
+        async with self._ingest_digest_locks_guard:
+            entry = self._ingest_digest_locks.get(digest)
+            if entry is None:
+                entry = _IngestDigestLockEntry(lock=asyncio.Lock())
+                self._ingest_digest_locks[digest] = entry
+            entry.users += 1
+        try:
+            await entry.lock.acquire()
+        except BaseException:
+            await self._release_ingest_digest_lock_reference(digest, entry)
+            raise
+        return entry
+
+    async def _release_ingest_digest_lock_reference(
+        self,
+        digest: str,
+        entry: _IngestDigestLockEntry,
+        *,
+        release_lock: bool = False,
+    ) -> None:
+        if release_lock and entry.lock.locked():
+            entry.lock.release()
+        async with self._ingest_digest_locks_guard:
+            entry.users = max(0, entry.users - 1)
+            current = self._ingest_digest_locks.get(digest)
+            if current is entry and entry.users == 0 and not entry.lock.locked():
+                self._ingest_digest_locks.pop(digest, None)
 
     def _preview_dir(self) -> Path:
         return ensure_dir(Path(self._cfg().preview_dir))
@@ -736,8 +772,8 @@ class MemeService:
             return
 
         digest = await asyncio.to_thread(self._hash_file, source_path)
-        digest_lock = self._ingest_digest_locks.setdefault(digest, asyncio.Lock())
-        async with digest_lock:
+        digest_lock_entry = await self._acquire_ingest_digest_lock(digest)
+        try:
             existing = await self._store.find_by_sha256(digest)
             if existing is not None and not Path(existing.blob_path).is_file():
                 logger.warning(
@@ -885,6 +921,12 @@ class MemeService:
                     preview_path=cleanup_preview_path,
                 )
                 raise
+        finally:
+            await self._release_ingest_digest_lock_reference(
+                digest,
+                digest_lock_entry,
+                release_lock=True,
+            )
         await self._prune_if_needed()
 
     async def _prepare_blob_and_preview(
