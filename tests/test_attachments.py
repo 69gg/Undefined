@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from Undefined.attachments import (
+    AttachmentRecord,
     AttachmentRegistry,
     register_message_attachments,
     render_message_with_pic_placeholders,
@@ -231,3 +232,43 @@ async def test_attachment_registry_load_prunes_orphan_cache_files(
     await registry.load()
 
     assert orphan.exists() is False
+
+
+@pytest.mark.asyncio
+async def test_attachment_registry_scope_mismatch_does_not_fallback_to_global(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    record = await registry.register_bytes(
+        "group:10001",
+        _PNG_BYTES,
+        kind="image",
+        display_name="cat.png",
+        source_kind="test",
+    )
+    resolver_calls: list[str] = []
+
+    def _global_resolver(uid: str) -> AttachmentRecord | None:
+        resolver_calls.append(uid)
+        return AttachmentRecord(
+            uid=uid,
+            scope_key="",
+            kind="image",
+            media_type="image",
+            display_name="global.png",
+            source_kind="meme_library",
+            source_ref="global",
+            local_path=record.local_path,
+            mime_type="image/png",
+            sha256="global",
+            created_at="2026-04-05T00:00:00",
+            segment_data={"subType": "1"},
+        )
+
+    registry.set_global_image_resolver(_global_resolver)
+
+    assert registry.resolve(record.uid, "group:10002") is None
+    assert resolver_calls == []

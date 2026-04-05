@@ -734,11 +734,14 @@ Prompt caching 补充：
   2. 对通过判定的图片生成纯文本描述与标签
 - 第一阶段失败时，按“不是表情包”处理，直接丢弃。
 - 第二阶段不做 OCR；向量存储和检索文本只使用纯文本 `description + tags + aliases`。
+- 同一图片内容在单进程内会按 `SHA256` 串行入库，避免并发表情包重复写入。
+- 若入库在写入来源记录或向量索引阶段失败，会回滚已写入的元数据与本地文件，避免残留孤儿记录。
 - 表情包与普通图片复用同一套图片 `uid` 语义。检索返回的 `uid` 既可用于 `memes.send_meme_by_uid`，也可直接用于 `<pic uid="..."/>`。
 - 检索模式：
-  - `keyword`：只跑 SQLite FTS / LIKE 关键词检索
+  - `keyword`：只跑 SQLite FTS / LIKE 关键词检索；按空白切分后的中文、英文关键词都会参与 FTS 匹配
   - `semantic`：只跑 Chroma 语义检索
   - `hybrid`：关键词与语义同时召回，再合并并按配置重排
+- 关键词检索会按空白切分查询词项并构造 FTS phrase，因此中文标签、别名或描述词同样可以走 FTS 召回。
 - `query_default_mode` 只影响 `memes.search_memes` 未显式传 `query_mode` 时的默认值。
 
 ### 4.26 `[naga]` Naga 外部网关集成

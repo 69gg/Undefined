@@ -4,15 +4,12 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-import re
 import sqlite3
 from typing import Any, Callable
 
 from Undefined.memes.models import MemeRecord, MemeSourceRecord, normalize_string_list
 
 logger = logging.getLogger(__name__)
-
-_ASCII_TOKEN_RE = re.compile(r"[0-9A-Za-z_]+")
 
 
 def _bool_to_int(value: bool) -> int:
@@ -49,6 +46,10 @@ def _json_loads_dict(value: Any) -> dict[str, str]:
         if key and text:
             normalized[key] = text
     return normalized
+
+
+def _escape_like_pattern(value: str) -> str:
+    return value.replace("!", "!!").replace("%", "!%").replace("_", "!_")
 
 
 def _row_to_record(row: sqlite3.Row) -> MemeRecord:
@@ -339,8 +340,16 @@ class MemeStore:
         await asyncio.to_thread(_run)
 
     def _fts_expression(self, query: str) -> str:
-        tokens = _ASCII_TOKEN_RE.findall(query)
-        return " ".join(token.lower() for token in tokens[:8]).strip()
+        expressions: list[str] = []
+        for raw_token in str(query or "").split():
+            token = raw_token.replace("\x00", " ").strip().strip('"')
+            if not token:
+                continue
+            escaped = token.replace('"', '""')
+            expressions.append(f'"{escaped}"')
+            if len(expressions) >= 8:
+                break
+        return " ".join(expressions)
 
     async def search_keyword(
         self,
@@ -460,7 +469,7 @@ class MemeStore:
         }
         order_by = order_map.get(sort, order_map["updated_at"])
         normalized_query = str(query or "").strip().lower()
-        like_query = f"%{normalized_query}%"
+        like_query = f"%{_escape_like_pattern(normalized_query)}%"
 
         def _run() -> tuple[list[MemeRecord], int]:
             clauses = ["status = 'ready'"]
@@ -475,7 +484,9 @@ class MemeStore:
                 clauses.append("pinned = ?")
                 params.append(_bool_to_int(pinned))
             if normalized_query:
-                clauses.append("(lower(search_text) LIKE ? OR lower(uid) LIKE ?)")
+                clauses.append(
+                    "(lower(search_text) LIKE ? ESCAPE '!' OR lower(uid) LIKE ? ESCAPE '!')"
+                )
                 params.extend([like_query, like_query])
             where_sql = " AND ".join(clauses)
 

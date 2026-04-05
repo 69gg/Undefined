@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from PIL import Image
 
 from Undefined.attachments import (
     AttachmentRecord,
@@ -34,6 +37,29 @@ def _meme_config(tmp_path: Path) -> Any:
         keyword_top_k=30,
         semantic_top_k=30,
         rerank_top_k=20,
+    )
+
+
+def _write_test_png(path: Path) -> None:
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + bytes.fromhex(
+            "0000000d49484452000000010000000108060000001f15c489"
+            "0000000a49444154789c6360000000020001e221bc330000000049454e44ae426082"
+        )
+    )
+
+
+def _write_test_gif(path: Path) -> None:
+    first = Image.new("RGBA", (1, 1), (255, 0, 0, 255))
+    second = Image.new("RGBA", (1, 1), (0, 255, 0, 255))
+    first.save(
+        path,
+        format="GIF",
+        save_all=True,
+        append_images=[second],
+        loop=0,
+        duration=100,
     )
 
 
@@ -264,17 +290,115 @@ async def test_search_memes_semantic_mode_skips_keyword_query(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_meme_store_search_keyword_supports_chinese_fts_queries(
+    tmp_path: Path,
+) -> None:
+    store = MemeStore(tmp_path / "memes.sqlite3")
+    await store.upsert_record(
+        MemeRecord(
+            uid="pic_keyword_zh",
+            content_sha256="sha256-zh",
+            blob_path=str(tmp_path / "blob.png"),
+            preview_path=None,
+            mime_type="image/png",
+            file_size=1,
+            width=1,
+            height=1,
+            is_animated=False,
+            enabled=True,
+            pinned=False,
+            auto_description="无语，猫猫",
+            manual_description="",
+            ocr_text="",
+            tags=[],
+            aliases=[],
+            search_text="无语，猫猫",
+            use_count=0,
+            last_used_at="",
+            created_at="2026-04-03T12:00:00",
+            updated_at="2026-04-03T12:00:00",
+            status="ready",
+            segment_data={"subType": "1"},
+        )
+    )
+
+    hits = await store.search_keyword("无语 猫猫", limit=5)
+
+    assert [item["record"].uid for item in hits] == ["pic_keyword_zh"]
+
+
+@pytest.mark.asyncio
+async def test_meme_store_list_memes_escapes_like_wildcards(
+    tmp_path: Path,
+) -> None:
+    store = MemeStore(tmp_path / "memes.sqlite3")
+    await store.upsert_record(
+        MemeRecord(
+            uid="pic_literal_percent",
+            content_sha256="sha256-literal",
+            blob_path=str(tmp_path / "literal.png"),
+            preview_path=None,
+            mime_type="image/png",
+            file_size=1,
+            width=1,
+            height=1,
+            is_animated=False,
+            enabled=True,
+            pinned=False,
+            auto_description="命中 100% 的猫猫",
+            manual_description="",
+            ocr_text="",
+            tags=[],
+            aliases=[],
+            search_text="命中 100% 的猫猫",
+            use_count=0,
+            last_used_at="",
+            created_at="2026-04-03T12:00:00",
+            updated_at="2026-04-03T12:00:00",
+            status="ready",
+            segment_data={"subType": "1"},
+        )
+    )
+    await store.upsert_record(
+        MemeRecord(
+            uid="pic_wildcard_other",
+            content_sha256="sha256-other",
+            blob_path=str(tmp_path / "other.png"),
+            preview_path=None,
+            mime_type="image/png",
+            file_size=1,
+            width=1,
+            height=1,
+            is_animated=False,
+            enabled=True,
+            pinned=False,
+            auto_description="命中 1000 的猫猫",
+            manual_description="",
+            ocr_text="",
+            tags=[],
+            aliases=[],
+            search_text="命中 1000 的猫猫",
+            use_count=0,
+            last_used_at="",
+            created_at="2026-04-03T12:00:00",
+            updated_at="2026-04-03T12:00:00",
+            status="ready",
+            segment_data={"subType": "1"},
+        )
+    )
+
+    items, total = await store.list_memes(query="100%")
+
+    assert total == 1
+    assert [item.uid for item in items] == ["pic_literal_percent"]
+
+
+@pytest.mark.asyncio
 async def test_meme_ingest_pipeline_uses_two_stage_llm_and_skips_on_judge_failure(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "source.png"
-    source.write_bytes(
-        b"\x89PNG\r\n\x1a\n"
-        + bytes.fromhex(
-            "0000000d49484452000000010000000108060000001f15c489"
-            "0000000a49444154789c6360000000020001e221bc330000000049454e44ae426082"
-        )
-    )
+    _write_test_png(source)
     config = _meme_config(tmp_path)
     store = MemeStore(config.db_path)
     vector_store = MemeVectorStore(config.vector_store_path, None)
@@ -325,13 +449,7 @@ async def test_meme_ingest_pipeline_describes_only_after_positive_judge(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "source.png"
-    source.write_bytes(
-        b"\x89PNG\r\n\x1a\n"
-        + bytes.fromhex(
-            "0000000d49484452000000010000000108060000001f15c489"
-            "0000000a49444154789c6360000000020001e221bc330000000049454e44ae426082"
-        )
-    )
+    _write_test_png(source)
     config = _meme_config(tmp_path)
     store = MemeStore(config.db_path)
     vector_store = MemeVectorStore(config.vector_store_path, None)
@@ -381,3 +499,307 @@ async def test_meme_ingest_pipeline_describes_only_after_positive_judge(
     assert items[0].auto_description == "无语猫猫反应图"
     assert items[0].tags == ["无语", "猫猫"]
     assert items[0].ocr_text == ""
+
+
+@pytest.mark.asyncio
+async def test_meme_ingest_rolls_back_record_when_vector_upsert_fails(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.png"
+    _write_test_png(source)
+    config = _meme_config(tmp_path)
+    store = MemeStore(config.db_path)
+    attachment_registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    await attachment_registry.register_local_file(
+        "group:10001",
+        source,
+        kind="image",
+        source_kind="test",
+        display_name="source.png",
+    )
+    attachment = next(iter(attachment_registry._records.values()))
+
+    ai_client = SimpleNamespace(
+        judge_meme_image=AsyncMock(return_value={"is_meme": True}),
+        describe_meme_image=AsyncMock(
+            return_value={"description": "无语猫猫反应图", "tags": ["无语", "猫猫"]}
+        ),
+    )
+    vector_store = SimpleNamespace(
+        upsert=AsyncMock(side_effect=[RuntimeError("vector boom"), None]),
+        delete=AsyncMock(return_value=None),
+    )
+    service = MemeService(
+        config_getter=lambda: config,
+        store=store,
+        vector_store=cast(Any, vector_store),
+        ai_client=ai_client,
+        attachment_registry=attachment_registry,
+    )
+    job = {
+        "kind": "ingest",
+        "attachment_uid": attachment.uid,
+        "scope_key": "group:10001",
+        "chat_type": "group",
+        "chat_id": "10001",
+        "sender_id": "20002",
+        "message_id": "30003",
+    }
+
+    with pytest.raises(RuntimeError, match="vector boom"):
+        await service.process_job(job)
+
+    first_pass_items, first_pass_total = await store.list_memes()
+    assert first_pass_total == 0
+    assert first_pass_items == []
+    vector_store.delete.assert_awaited_once()
+
+    await service.process_job(job)
+
+    second_pass_items, second_pass_total = await store.list_memes()
+    assert second_pass_total == 1
+    assert second_pass_items[0].auto_description == "无语猫猫反应图"
+    assert Path(second_pass_items[0].blob_path).is_file()
+
+
+@pytest.mark.asyncio
+async def test_meme_ingest_serializes_same_sha256_jobs(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.png"
+    _write_test_png(source)
+    config = _meme_config(tmp_path)
+    store = MemeStore(config.db_path)
+    attachment_registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    await attachment_registry.register_local_file(
+        "group:10001",
+        source,
+        kind="image",
+        source_kind="test",
+        display_name="source.png",
+    )
+    attachment = next(iter(attachment_registry._records.values()))
+    first_judge_started = asyncio.Event()
+    release_first_judge = asyncio.Event()
+    judge_call_count = 0
+
+    async def _judge_image(_path: str) -> dict[str, bool]:
+        nonlocal judge_call_count
+        judge_call_count += 1
+        if judge_call_count == 1:
+            first_judge_started.set()
+            await release_first_judge.wait()
+        return {"is_meme": True}
+
+    ai_client = SimpleNamespace(
+        judge_meme_image=AsyncMock(side_effect=_judge_image),
+        describe_meme_image=AsyncMock(
+            return_value={"description": "无语猫猫反应图", "tags": ["无语", "猫猫"]}
+        ),
+    )
+    vector_store = SimpleNamespace(
+        upsert=AsyncMock(return_value=None),
+        delete=AsyncMock(return_value=None),
+    )
+    service = MemeService(
+        config_getter=lambda: config,
+        store=store,
+        vector_store=cast(Any, vector_store),
+        ai_client=ai_client,
+        attachment_registry=attachment_registry,
+    )
+    job = {
+        "kind": "ingest",
+        "attachment_uid": attachment.uid,
+        "scope_key": "group:10001",
+        "chat_type": "group",
+        "chat_id": "10001",
+        "sender_id": "20002",
+        "message_id": "30003",
+    }
+
+    first_task = asyncio.create_task(service.process_job(job))
+    await first_judge_started.wait()
+    second_task = asyncio.create_task(service.process_job(job))
+    await asyncio.sleep(0.05)
+
+    assert judge_call_count == 1
+
+    release_first_judge.set()
+    await asyncio.gather(first_task, second_task)
+
+    items, total = await store.list_memes()
+    assert total == 1
+    assert items[0].auto_description == "无语猫猫反应图"
+    assert ai_client.describe_meme_image.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_meme_ingest_replaces_orphaned_sha256_record(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.png"
+    _write_test_png(source)
+    config = _meme_config(tmp_path)
+    store = MemeStore(config.db_path)
+    attachment_registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    await attachment_registry.register_local_file(
+        "group:10001",
+        source,
+        kind="image",
+        source_kind="test",
+        display_name="source.png",
+    )
+    attachment = next(iter(attachment_registry._records.values()))
+    orphan_blob = tmp_path / "missing.png"
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    await store.upsert_record(
+        MemeRecord(
+            uid="pic_orphan01",
+            content_sha256=digest,
+            blob_path=str(orphan_blob),
+            preview_path=None,
+            mime_type="image/png",
+            file_size=1,
+            width=1,
+            height=1,
+            is_animated=False,
+            enabled=True,
+            pinned=False,
+            auto_description="旧记录",
+            manual_description="",
+            ocr_text="",
+            tags=["旧"],
+            aliases=[],
+            search_text="旧记录",
+            use_count=0,
+            last_used_at="",
+            created_at="2026-04-03T12:00:00",
+            updated_at="2026-04-03T12:00:00",
+            status="ready",
+            segment_data={"subType": "1"},
+        )
+    )
+
+    ai_client = SimpleNamespace(
+        judge_meme_image=AsyncMock(return_value={"is_meme": True}),
+        describe_meme_image=AsyncMock(
+            return_value={"description": "无语猫猫反应图", "tags": ["无语", "猫猫"]}
+        ),
+    )
+    vector_store = SimpleNamespace(
+        upsert=AsyncMock(return_value=None),
+        delete=AsyncMock(return_value=None),
+    )
+    service = MemeService(
+        config_getter=lambda: config,
+        store=store,
+        vector_store=cast(Any, vector_store),
+        ai_client=ai_client,
+        attachment_registry=attachment_registry,
+    )
+
+    await service.process_job(
+        {
+            "kind": "ingest",
+            "attachment_uid": attachment.uid,
+            "scope_key": "group:10001",
+            "chat_type": "group",
+            "chat_id": "10001",
+            "sender_id": "20002",
+            "message_id": "30003",
+        }
+    )
+
+    items, total = await store.list_memes()
+    assert total == 1
+    assert items[0].uid != "pic_orphan01"
+    assert items[0].auto_description == "无语猫猫反应图"
+    assert Path(items[0].blob_path).is_file()
+    assert await store.get("pic_orphan01") is None
+    vector_store.delete.assert_awaited_once_with("pic_orphan01")
+
+
+@pytest.mark.asyncio
+async def test_meme_ingest_cleans_partial_files_on_prepare_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.gif"
+    _write_test_gif(source)
+    config = _meme_config(tmp_path)
+    store = MemeStore(config.db_path)
+    vector_store = SimpleNamespace(
+        upsert=AsyncMock(return_value=None),
+        delete=AsyncMock(return_value=None),
+    )
+    attachment_registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    await attachment_registry.register_local_file(
+        "group:10001",
+        source,
+        kind="image",
+        source_kind="test",
+        display_name="source.gif",
+    )
+    attachment = next(iter(attachment_registry._records.values()))
+    ai_client = SimpleNamespace(
+        judge_meme_image=AsyncMock(return_value={"is_meme": True}),
+        describe_meme_image=AsyncMock(
+            return_value={"description": "无语猫猫反应图", "tags": ["无语", "猫猫"]}
+        ),
+    )
+    service = MemeService(
+        config_getter=lambda: config,
+        store=store,
+        vector_store=cast(Any, vector_store),
+        ai_client=ai_client,
+        attachment_registry=attachment_registry,
+    )
+
+    async def _broken_prepare(
+        *,
+        source_path: Path,
+        target_uid: str,
+        suffix: str,
+        is_animated: bool,
+    ) -> Path | None:
+        blob_path = Path(config.blob_dir) / f"{target_uid}{suffix}"
+        preview_path = Path(config.preview_dir) / f"{target_uid}.png"
+        blob_path.parent.mkdir(parents=True, exist_ok=True)
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
+        blob_path.write_bytes(source_path.read_bytes())
+        preview_path.write_bytes(b"partial-preview")
+        raise RuntimeError("prepare boom")
+
+    monkeypatch.setattr(service, "_prepare_blob_and_preview", _broken_prepare)
+
+    with pytest.raises(RuntimeError, match="prepare boom"):
+        await service.process_job(
+            {
+                "kind": "ingest",
+                "attachment_uid": attachment.uid,
+                "scope_key": "group:10001",
+                "chat_type": "group",
+                "chat_id": "10001",
+                "sender_id": "20002",
+                "message_id": "30003",
+            }
+        )
+
+    items, total = await store.list_memes()
+    assert total == 0
+    assert items == []
+    assert list((tmp_path / "blobs").glob("*")) == []
+    assert list((tmp_path / "previews").glob("*")) == []

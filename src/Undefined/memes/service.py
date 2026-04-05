@@ -96,6 +96,8 @@ class MemeService:
         self._ai_client = ai_client
         self._attachment_registry = attachment_registry
         self._retrieval_runtime = retrieval_runtime
+        # Serialize same-content ingest jobs within the process to avoid duplicates.
+        self._ingest_digest_locks: dict[str, asyncio.Lock] = {}
 
     @property
     def enabled(self) -> bool:
@@ -294,6 +296,32 @@ class MemeService:
             path.unlink(missing_ok=True)
         except OSError:
             logger.debug("[memes] 删除文件失败: path=%s", path, exc_info=True)
+
+    async def _cleanup_meme_artifacts(
+        self,
+        *,
+        uid: str | None,
+        blob_path: Path,
+        preview_path: Path | None,
+    ) -> None:
+        if uid:
+            try:
+                await self._store.delete(uid)
+            except Exception:
+                logger.exception(
+                    "[memes] 清理记录失败: uid=%s",
+                    uid,
+                )
+            try:
+                await self._vector_store.delete(uid)
+            except Exception:
+                logger.exception(
+                    "[memes] 清理向量索引失败: uid=%s",
+                    uid,
+                )
+        await asyncio.to_thread(self._delete_file_if_exists, blob_path)
+        if preview_path is not None and preview_path != blob_path:
+            await asyncio.to_thread(self._delete_file_if_exists, preview_path)
 
     async def search_memes(
         self,
@@ -708,115 +736,155 @@ class MemeService:
             return
 
         digest = await asyncio.to_thread(self._hash_file, source_path)
-        existing = await self._store.find_by_sha256(digest)
-        source = MemeSourceRecord(
-            uid=existing.uid if existing is not None else "",
-            source_type="message_attachment",
-            chat_type=str(job.get("chat_type") or ""),
-            chat_id=str(job.get("chat_id") or ""),
-            sender_id=str(job.get("sender_id") or ""),
-            message_id=str(job.get("message_id") or ""),
-            attachment_uid=attachment_uid,
-            source_url=str(attachment.source_ref or ""),
-            seen_at=_now_iso(),
-        )
-        if existing is not None:
-            await self._store.add_source(replace(source, uid=existing.uid))
-            await self._vector_store.upsert(existing)
-            return
-
-        with Image.open(source_path) as image:
-            width, height = image.size
-            is_animated = bool(getattr(image, "is_animated", False))
-        if is_animated and not bool(cfg.allow_gif):
-            return
-
-        uid = await self._generate_uid()
-        suffix = _guess_suffix(source_path, str(attachment.mime_type or ""))
-        blob_path = self._blob_dir() / f"{uid}{suffix}"
-        preview_path = await self._prepare_blob_and_preview(
-            source_path=source_path,
-            target_uid=uid,
-            suffix=suffix,
-            is_animated=is_animated,
-        )
-        mime_type = str(
-            attachment.mime_type
-            or mimetypes.guess_type(source_path.name)[0]
-            or "application/octet-stream"
-        )
-        analyze_path = str(preview_path if preview_path is not None else blob_path)
-        try:
-            judgement = await self._ai_client.judge_meme_image(analyze_path)
-        except Exception as exc:
-            logger.exception(
-                "[memes] judge stage failed, treat as non-meme: uid=%s err=%s", uid, exc
+        digest_lock = self._ingest_digest_locks.setdefault(digest, asyncio.Lock())
+        async with digest_lock:
+            existing = await self._store.find_by_sha256(digest)
+            if existing is not None and not Path(existing.blob_path).is_file():
+                logger.warning(
+                    "[memes] 检测到孤儿记录，删除后重新入库: uid=%s blob_path=%s",
+                    existing.uid,
+                    existing.blob_path,
+                )
+                await self._cleanup_meme_artifacts(
+                    uid=existing.uid,
+                    blob_path=Path(existing.blob_path),
+                    preview_path=(
+                        Path(existing.preview_path) if existing.preview_path else None
+                    ),
+                )
+                existing = await self._store.find_by_sha256(digest)
+                if existing is not None and not Path(existing.blob_path).is_file():
+                    raise RuntimeError(
+                        f"stale meme record cleanup failed: uid={existing.uid}"
+                    )
+            source = MemeSourceRecord(
+                uid=existing.uid if existing is not None else "",
+                source_type="message_attachment",
+                chat_type=str(job.get("chat_type") or ""),
+                chat_id=str(job.get("chat_id") or ""),
+                sender_id=str(job.get("sender_id") or ""),
+                message_id=str(job.get("message_id") or ""),
+                attachment_uid=attachment_uid,
+                source_url=str(attachment.source_ref or ""),
+                seen_at=_now_iso(),
             )
-            judgement = {"is_meme": False}
-        if not bool(judgement.get("is_meme", False)):
-            await asyncio.to_thread(self._delete_file_if_exists, blob_path)
-            if preview_path is not None and preview_path != blob_path:
-                await asyncio.to_thread(self._delete_file_if_exists, preview_path)
-            return
+            if existing is not None:
+                await self._store.add_source(replace(source, uid=existing.uid))
+                await self._vector_store.upsert(existing)
+                return
 
-        try:
-            described = await self._ai_client.describe_meme_image(analyze_path)
-        except Exception as exc:
-            logger.exception(
-                "[memes] describe stage failed, drop uid=%s err=%s", uid, exc
+            with Image.open(source_path) as image:
+                width, height = image.size
+                is_animated = bool(getattr(image, "is_animated", False))
+            if is_animated and not bool(cfg.allow_gif):
+                return
+
+            uid = await self._generate_uid()
+            suffix = _guess_suffix(source_path, str(attachment.mime_type or ""))
+            blob_path = self._blob_dir() / f"{uid}{suffix}"
+            cleanup_preview_path = (
+                self._preview_dir() / f"{uid}.png" if is_animated else blob_path
             )
-            described = {"description": "", "tags": []}
-        tags = _normalize_tags(described.get("tags"))
-        auto_description = str(described.get("description") or "").strip()
-        if not auto_description and not tags:
-            logger.warning(
-                "[memes] describe stage returned empty result, drop uid=%s", uid
-            )
-            await asyncio.to_thread(self._delete_file_if_exists, blob_path)
-            if preview_path is not None and preview_path != blob_path:
-                await asyncio.to_thread(self._delete_file_if_exists, preview_path)
-            return
-        now = _now_iso()
-        record = MemeRecord(
-            uid=uid,
-            content_sha256=digest,
-            blob_path=str(blob_path),
-            preview_path=str(preview_path) if preview_path is not None else None,
-            mime_type=mime_type,
-            file_size=file_size,
-            width=width,
-            height=height,
-            is_animated=is_animated,
-            enabled=True,
-            pinned=False,
-            auto_description=auto_description,
-            manual_description="",
-            ocr_text="",
-            tags=tags,
-            aliases=[],
-            search_text=build_search_text(
-                manual_description="",
-                auto_description=auto_description,
-                ocr_text="",
-                tags=tags,
-                aliases=[],
-            ),
-            use_count=0,
-            last_used_at="",
-            created_at=now,
-            updated_at=now,
-            status="ready",
-            segment_data={"subType": "1"},
-        )
-        saved = await self._store.upsert_record(record)
-        try:
-            await self._store.add_source(replace(source, uid=saved.uid))
-            await self._vector_store.upsert(saved)
-        except Exception:
-            await asyncio.to_thread(self._delete_file_if_exists, blob_path)
-            if preview_path is not None and preview_path != blob_path:
-                await asyncio.to_thread(self._delete_file_if_exists, preview_path)
-            raise
+            persisted_uid: str | None = None
+
+            try:
+                preview_path = await self._prepare_blob_and_preview(
+                    source_path=source_path,
+                    target_uid=uid,
+                    suffix=suffix,
+                    is_animated=is_animated,
+                )
+                if preview_path is not None:
+                    cleanup_preview_path = preview_path
+                mime_type = str(
+                    attachment.mime_type
+                    or mimetypes.guess_type(source_path.name)[0]
+                    or "application/octet-stream"
+                )
+                analyze_path = str(
+                    preview_path if preview_path is not None else blob_path
+                )
+                try:
+                    judgement = await self._ai_client.judge_meme_image(analyze_path)
+                except Exception as exc:
+                    logger.exception(
+                        "[memes] judge stage failed, treat as non-meme: uid=%s err=%s",
+                        uid,
+                        exc,
+                    )
+                    judgement = {"is_meme": False}
+                if not bool(judgement.get("is_meme", False)):
+                    await self._cleanup_meme_artifacts(
+                        uid=None,
+                        blob_path=blob_path,
+                        preview_path=cleanup_preview_path,
+                    )
+                    return
+
+                try:
+                    described = await self._ai_client.describe_meme_image(analyze_path)
+                except Exception as exc:
+                    logger.exception(
+                        "[memes] describe stage failed, drop uid=%s err=%s", uid, exc
+                    )
+                    described = {"description": "", "tags": []}
+                tags = _normalize_tags(described.get("tags"))
+                auto_description = str(described.get("description") or "").strip()
+                if not auto_description and not tags:
+                    logger.warning(
+                        "[memes] describe stage returned empty result, drop uid=%s", uid
+                    )
+                    await self._cleanup_meme_artifacts(
+                        uid=None,
+                        blob_path=blob_path,
+                        preview_path=cleanup_preview_path,
+                    )
+                    return
+                now = _now_iso()
+                record = MemeRecord(
+                    uid=uid,
+                    content_sha256=digest,
+                    blob_path=str(blob_path),
+                    preview_path=(
+                        str(preview_path) if preview_path is not None else None
+                    ),
+                    mime_type=mime_type,
+                    file_size=file_size,
+                    width=width,
+                    height=height,
+                    is_animated=is_animated,
+                    enabled=True,
+                    pinned=False,
+                    auto_description=auto_description,
+                    manual_description="",
+                    ocr_text="",
+                    tags=tags,
+                    aliases=[],
+                    search_text=build_search_text(
+                        manual_description="",
+                        auto_description=auto_description,
+                        ocr_text="",
+                        tags=tags,
+                        aliases=[],
+                    ),
+                    use_count=0,
+                    last_used_at="",
+                    created_at=now,
+                    updated_at=now,
+                    status="ready",
+                    segment_data={"subType": "1"},
+                )
+                saved = await self._store.upsert_record(record)
+                persisted_uid = saved.uid
+                await self._store.add_source(replace(source, uid=saved.uid))
+                await self._vector_store.upsert(saved)
+            except Exception:
+                await self._cleanup_meme_artifacts(
+                    uid=persisted_uid,
+                    blob_path=blob_path,
+                    preview_path=cleanup_preview_path,
+                )
+                raise
         await self._prune_if_needed()
 
     async def _prepare_blob_and_preview(

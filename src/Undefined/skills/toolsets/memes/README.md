@@ -17,6 +17,7 @@
 - `query_mode=semantic`：只跑语义检索
 - `query_mode=hybrid`：同时跑关键词和语义检索，再合并排序
 - `keyword_query` 与 `semantic_query` 可分开传；未单独提供时，回退使用 `query`
+- 关键词检索会同时结合 SQLite FTS 与 `LIKE` 回退，对中文描述、标签和别名也可命中
 
 统一图片 `uid`：
 - 表情包与普通图片复用同一套 `uid` 语义

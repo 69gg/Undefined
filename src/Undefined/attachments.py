@@ -557,9 +557,11 @@ class AttachmentRegistry:
 
     def resolve(self, uid: str, scope_key: str | None) -> AttachmentRecord | None:
         record = self.get(uid)
-        if record is not None and scope_key and record.scope_key != scope_key:
-            record = None
-        if record is None and self._global_image_resolver is not None:
+        if record is not None:
+            if record.scope_key and scope_key and record.scope_key != scope_key:
+                return None
+            return record
+        if self._global_image_resolver is not None:
             try:
                 record = self._global_image_resolver(uid)
             except Exception:
