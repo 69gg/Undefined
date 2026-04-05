@@ -354,9 +354,7 @@ class MemeStore:
         if not raw_query:
             return []
         normalized = raw_query.lower()
-        escaped = (
-            normalized.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        )
+        escaped = normalized.replace("!", "!!").replace("%", "!%").replace("_", "!_")
         like_query = f"%{escaped}%"
         fts_expr = self._fts_expression(raw_query)
 
@@ -397,8 +395,8 @@ class MemeStore:
                     WHERE status = 'ready'
                       AND (? OR enabled = 1)
                       AND (
-                        lower(search_text) LIKE ? ESCAPE '\'
-                        OR lower(uid) LIKE ? ESCAPE '\'
+                        lower(search_text) LIKE ? ESCAPE '!'
+                        OR lower(uid) LIKE ? ESCAPE '!'
                       )
                     ORDER BY pinned DESC, use_count DESC, updated_at DESC
                     LIMIT ?
