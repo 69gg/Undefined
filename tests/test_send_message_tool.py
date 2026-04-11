@@ -206,6 +206,15 @@ async def test_send_message_renders_pic_uid_before_sending(tmp_path: Path) -> No
     assert sent_args.kwargs["history_message"] == (
         f"图文并茂\n[图片 uid={record.uid} name=demo.png]\n结束"
     )
+    assert sent_args.kwargs["attachments"] == [
+        {
+            "uid": record.uid,
+            "kind": "image",
+            "media_type": "image",
+            "display_name": "demo.png",
+            "source_kind": "test",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -251,6 +260,15 @@ async def test_send_message_renders_webui_scoped_pic_uid_before_sending(
     assert sent_args.kwargs["history_message"] == (
         f"WebUI 图片\n[图片 uid={record.uid} name=webui.png]\n结束"
     )
+    assert sent_args.kwargs["attachments"] == [
+        {
+            "uid": record.uid,
+            "kind": "image",
+            "media_type": "image",
+            "display_name": "webui.png",
+            "source_kind": "test",
+        }
+    ]
 
 
 @pytest.mark.asyncio

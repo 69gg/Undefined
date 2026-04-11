@@ -10,6 +10,7 @@ import mimetypes
 from pathlib import Path
 import re
 import shutil
+import threading
 from typing import Any
 from uuid import uuid4
 
@@ -25,7 +26,7 @@ from Undefined.memes.models import (
 )
 from Undefined.memes.store import MemeStore
 from Undefined.memes.vector_store import MemeVectorStore
-from Undefined.skills.toolsets.messages.send_message.handler import _resolve_target
+from Undefined.utils.message_targets import resolve_message_target
 from Undefined.utils.paths import ensure_dir
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,8 @@ class MemeService:
         # Serialize same-content ingest jobs within the process to avoid duplicates.
         self._ingest_digest_locks: dict[str, _IngestDigestLockEntry] = {}
         self._ingest_digest_locks_guard = asyncio.Lock()
+        self._global_image_cache: dict[str, AttachmentRecord] = {}
+        self._global_image_cache_lock = threading.Lock()
 
     @property
     def enabled(self) -> bool:
@@ -164,11 +167,27 @@ class MemeService:
     def _queue_enabled(self) -> bool:
         return self._job_queue is not None
 
+    def _invalidate_global_image_cache(self, uid: str) -> None:
+        normalized_uid = str(uid or "").strip()
+        if not normalized_uid:
+            return
+        with self._global_image_cache_lock:
+            self._global_image_cache.pop(normalized_uid, None)
+
     def resolve_global_image_sync(self, uid: str) -> AttachmentRecord | None:
-        record = self._store.get_sync(uid)
+        normalized_uid = str(uid or "").strip()
+        if not normalized_uid:
+            return None
+
+        with self._global_image_cache_lock:
+            cached = self._global_image_cache.get(normalized_uid)
+        if cached is not None:
+            return cached
+
+        record = self._store.get_sync(normalized_uid)
         if record is None or not record.enabled or record.status != "ready":
             return None
-        return AttachmentRecord(
+        attachment = AttachmentRecord(
             uid=record.uid,
             scope_key="",
             kind="image",
@@ -184,6 +203,9 @@ class MemeService:
             semantic_kind="meme",
             description=record.description,
         )
+        with self._global_image_cache_lock:
+            self._global_image_cache[normalized_uid] = attachment
+        return attachment
 
     async def resolve_global_image(self, uid: str) -> AttachmentRecord | None:
         return await asyncio.to_thread(self.resolve_global_image_sync, uid)
@@ -266,6 +288,8 @@ class MemeService:
         return {
             "ok": True,
             "total": total,
+            "window_total": total,
+            "total_exact": True,
             "page": max(1, int(page)),
             "page_size": max(1, min(200, int(page_size))),
             "has_more": max(1, int(page)) * max(1, min(200, int(page_size))) < total,
@@ -334,6 +358,7 @@ class MemeService:
         )
         if updated is None:
             return None
+        self._invalidate_global_image_cache(uid)
         await self._vector_store.upsert(updated)
         return self.serialize_record(updated)
 
@@ -341,6 +366,7 @@ class MemeService:
         record = await self._store.delete(uid)
         if record is None:
             return False
+        self._invalidate_global_image_cache(uid)
         await self._vector_store.delete(uid)
         await asyncio.to_thread(self._delete_file_if_exists, Path(record.blob_path))
         if record.preview_path and record.preview_path != record.blob_path:
@@ -366,6 +392,7 @@ class MemeService:
         if uid:
             try:
                 await self._store.delete(uid)
+                self._invalidate_global_image_cache(uid)
             except Exception:
                 logger.exception(
                     "[memes] 清理记录失败: uid=%s",
@@ -459,10 +486,6 @@ class MemeService:
                 "rerank_score": None,
             }
 
-        for item in semantic_hits:
-            uid = str(item.get("uid") or "").strip()
-            if not uid:
-                continue
         missing_semantic_uids = [
             str(item.get("uid") or "").strip()
             for item in semantic_hits
@@ -626,7 +649,7 @@ class MemeService:
             "target_type": context.get("target_type"),
             "target_id": context.get("target_id"),
         }
-        target, target_error = _resolve_target(tool_args, context)
+        target, target_error = resolve_message_target(tool_args, context)
         if target_error or target is None:
             return f"发送失败：{target_error or '无法确定目标会话'}"
         target_type, target_id = target
@@ -662,22 +685,9 @@ class MemeService:
             )
 
         now = _now_iso()
-        await self._store.update_fields(
-            uid,
-            {
-                "use_count": record.use_count + 1,
-                "last_used_at": now,
-                "updated_at": now,
-            },
-        )
-        await self._vector_store.upsert(
-            replace(
-                record,
-                use_count=record.use_count + 1,
-                last_used_at=now,
-                updated_at=now,
-            )
-        )
+        updated_record = await self._store.increment_use(uid, now)
+        if updated_record is not None:
+            await self._vector_store.upsert(updated_record)
         if sent_message_id is not None:
             return f"表情包已发送（message_id={sent_message_id}）"
         return "表情包已发送"
@@ -825,6 +835,7 @@ class MemeService:
             updated_at=_now_iso(),
         )
         saved = await self._store.upsert_record(next_record)
+        self._invalidate_global_image_cache(saved.uid)
         await self._vector_store.upsert(saved)
 
     async def _process_ingest_job(self, job: Mapping[str, Any]) -> None:
@@ -996,6 +1007,7 @@ class MemeService:
                     segment_data={"subType": "1"},
                 )
                 saved = await self._store.upsert_record(record)
+                self._invalidate_global_image_cache(saved.uid)
                 persisted_uid = saved.uid
                 await self._store.add_source(replace(source, uid=saved.uid))
                 await self._vector_store.upsert(saved)
@@ -1084,6 +1096,7 @@ class MemeService:
             deleted = await self._store.delete(candidate.uid)
             if deleted is None:
                 continue
+            self._invalidate_global_image_cache(candidate.uid)
             await self._vector_store.delete(candidate.uid)
             await asyncio.to_thread(
                 self._delete_file_if_exists, Path(deleted.blob_path)

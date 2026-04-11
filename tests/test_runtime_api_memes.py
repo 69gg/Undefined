@@ -73,7 +73,9 @@ async def test_runtime_meme_list_handler_supports_query_modes() -> None:
     payload = json.loads(response.text or "{}")
 
     assert payload["query_mode"] == "semantic"
-    assert payload["total"] == 1
+    assert payload["total"] is None
+    assert payload["window_total"] == 1
+    assert payload["total_exact"] is False
     assert payload["sort"] == "use_count"
     assert payload["items"][0]["uid"] == "pic_mode001"
     meme_service.search_memes.assert_awaited_once_with(

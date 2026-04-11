@@ -91,11 +91,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return f"发送失败：{exc}"
     message = rendered.delivery_text
     history_message = rendered.history_text
-    history_attachments = [
-        item
-        for item in rendered.attachments
-        if str(item.get("source_kind", "") or "").strip() == "meme_library"
-    ]
+    history_attachments = list(rendered.attachments)
 
     runtime_config = context.get("runtime_config")
     if runtime_config is not None:

@@ -1237,13 +1237,22 @@ class RuntimeAPIServer:
                 filtered_items.append(item)
             offset = (page - 1) * page_size
             paged_items = filtered_items[offset : offset + page_size]
+            window_total = len(filtered_items)
+            fetched_window_count = len(list(search_payload.get("items") or []))
+            window_exhausted = fetched_window_count < fetch_k
+            has_more = bool(paged_items) and (
+                offset + page_size < window_total
+                or (not window_exhausted and window_total >= offset + page_size)
+            )
             return web.json_response(
                 {
                     "ok": True,
-                    "total": len(filtered_items),
+                    "total": None,
+                    "window_total": window_total,
+                    "total_exact": False,
                     "page": page,
                     "page_size": page_size,
-                    "has_more": offset + page_size < len(filtered_items),
+                    "has_more": has_more,
                     "query_mode": search_payload.get("query_mode"),
                     "keyword_query": search_payload.get("keyword_query"),
                     "semantic_query": search_payload.get("semantic_query"),

@@ -34,22 +34,44 @@ def _normalize_plain_text(value: Any) -> str:
 
 class MemeVectorStore:
     def __init__(self, path: str | Path, retrieval_runtime: Any | None) -> None:
+        self._path = Path(path)
         self._retrieval_runtime = retrieval_runtime
-        client = chromadb.PersistentClient(path=str(path))
+        self._collection: Any | None = None
+        self._init_lock = asyncio.Lock()
+        self._initialized = False
+
+    def _init_sync(self) -> None:
+        client = chromadb.PersistentClient(path=str(self._path))
         self._collection = client.get_or_create_collection(
             "memes", metadata={"hnsw:space": "cosine"}
         )
+        self._initialized = True
+
+    async def initialize(self) -> None:
+        if self._initialized:
+            return
+        async with self._init_lock:
+            if self._initialized:
+                return
+            await asyncio.to_thread(self._init_sync)
+
+    def _require_collection(self) -> Any:
+        if self._collection is None:
+            raise RuntimeError("meme vector store is not initialized")
+        return self._collection
 
     async def upsert(self, record: MemeRecord) -> None:
+        await self.initialize()
         document_text = _normalize_plain_text(record.search_text)
         if self._retrieval_runtime is None or not document_text:
             return
         embeddings = await self._retrieval_runtime.embed([document_text])
         embedding: list[float] = [float(value) for value in embeddings[0]]
         embeddings_payload = cast(Any, [embedding])
+        collection = self._require_collection()
 
         def _run() -> None:
-            self._collection.upsert(
+            collection.upsert(
                 ids=[record.uid],
                 embeddings=embeddings_payload,
                 documents=[document_text],
@@ -66,8 +88,11 @@ class MemeVectorStore:
         await asyncio.to_thread(_run)
 
     async def delete(self, uid: str) -> None:
+        await self.initialize()
+        collection = self._require_collection()
+
         def _run() -> None:
-            self._collection.delete(ids=[uid])
+            collection.delete(ids=[uid])
 
         await asyncio.to_thread(_run)
 
@@ -78,6 +103,7 @@ class MemeVectorStore:
         top_k: int,
         include_disabled: bool = False,
     ) -> list[dict[str, Any]]:
+        await self.initialize()
         if self._retrieval_runtime is None or not query.strip():
             return []
         normalized_query = _normalize_plain_text(query)
@@ -85,12 +111,13 @@ class MemeVectorStore:
             return []
         embeddings = await self._retrieval_runtime.embed([normalized_query])
         embedding = list(embeddings[0])
+        collection = self._require_collection()
 
         def _run() -> dict[str, Any]:
             return cast(
                 dict[str, Any],
-                self._collection.query(
-                    query_embeddings=[embedding],  # type: ignore[arg-type]
+                collection.query(
+                    query_embeddings=[embedding],
                     n_results=top_k,
                     include=["documents", "metadatas", "distances"],
                 ),

@@ -337,6 +337,7 @@ class MemeConfig:
     keyword_top_k: int = 30
     semantic_top_k: int = 30
     rerank_top_k: int = 20
+    worker_max_concurrency: int = 4
 
 
 @dataclass

@@ -18,6 +18,7 @@
             keywordQuery: "",
             semanticQuery: "",
             sort: "updated_at",
+            totalExact: true,
         },
     };
 
@@ -133,12 +134,25 @@
     }
 
     function renderListMeta() {
-        const metaParts = [
-            t("runtime.total").replace("{count}", String(state.total || 0)),
-            t("memes.loaded_meta")
-                .replace("{loaded}", String(state.listItems.length))
-                .replace("{total}", String(state.total || 0)),
-        ];
+        const metaParts = [];
+        if (state.queryMeta.totalExact) {
+            metaParts.push(
+                t("runtime.total").replace("{count}", String(state.total || 0)),
+            );
+            metaParts.push(
+                t("memes.loaded_meta")
+                    .replace("{loaded}", String(state.listItems.length))
+                    .replace("{total}", String(state.total || 0)),
+            );
+        } else {
+            metaParts.push(
+                t("memes.window_total").replace(
+                    "{count}",
+                    String(state.total || 0),
+                ),
+            );
+            metaParts.push(`loaded=${state.listItems.length}`);
+        }
         if (state.queryMeta.queryMode) {
             metaParts.push(`mode=${state.queryMeta.queryMode}`);
         }
@@ -367,10 +381,15 @@
                 keywordQuery: String(payload?.keyword_query || ""),
                 semanticQuery: String(payload?.semantic_query || ""),
                 sort: String(payload?.sort || filters.sort || "updated_at"),
+                totalExact: payload?.total_exact !== false,
             };
             state.page = Number(payload?.page || page);
             state.pageSize = Number(payload?.page_size || filters.pageSize);
-            state.total = Number(payload?.total || 0);
+            state.total = Number(
+                payload?.total_exact === false
+                    ? payload?.window_total || 0
+                    : payload?.total || 0,
+            );
             state.hasMore = Boolean(
                 payload?.has_more ?? state.page * state.pageSize < state.total,
             );

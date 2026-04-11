@@ -370,6 +370,7 @@ async def main() -> None:
                 meme_service=meme_service,
                 poll_interval_seconds=1.0,
                 max_retries=3,
+                max_concurrency=config.memes.worker_max_concurrency,
             )
             ai.set_meme_service(meme_service)
             logger.info(

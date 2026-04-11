@@ -5,6 +5,7 @@ import json
 import logging
 from pathlib import Path
 import sqlite3
+import threading
 from typing import Any, Callable
 
 from Undefined.memes.models import MemeRecord, MemeSourceRecord, normalize_string_list
@@ -98,9 +99,8 @@ class MemeStore:
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path)
         self._init_lock = asyncio.Lock()
+        self._sync_init_lock = threading.Lock()
         self._initialized = False
-        self._init_sync()
-        self._initialized = True
 
     def _connect(self) -> sqlite3.Connection:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -178,14 +178,22 @@ class MemeStore:
             )
             conn.commit()
 
+    def _ensure_initialized_sync(self) -> None:
+        if self._initialized:
+            return
+        with self._sync_init_lock:
+            if self._initialized:
+                return
+            self._init_sync()
+            self._initialized = True
+
     async def initialize(self) -> None:
         if self._initialized:
             return
         async with self._init_lock:
             if self._initialized:
                 return
-            await asyncio.to_thread(self._init_sync)
-            self._initialized = True
+            await asyncio.to_thread(self._ensure_initialized_sync)
 
     async def get(self, uid: str) -> MemeRecord | None:
         await self.initialize()
@@ -193,6 +201,7 @@ class MemeStore:
         return await asyncio.to_thread(self.get_sync, uid)
 
     def get_sync(self, uid: str) -> MemeRecord | None:
+        self._ensure_initialized_sync()
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM memes WHERE uid = ? LIMIT 1",
@@ -607,17 +616,34 @@ class MemeStore:
         return await asyncio.to_thread(_run)
 
     async def increment_use(self, uid: str, used_at: str) -> MemeRecord | None:
-        current = await self.get(uid)
-        if current is None:
-            return None
-        return await self.update_fields(
-            uid,
-            {
-                "use_count": current.use_count + 1,
-                "last_used_at": used_at,
-                "updated_at": used_at,
-            },
-        )
+        await self.initialize()
+
+        def _run() -> MemeRecord | None:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM memes WHERE uid = ? LIMIT 1",
+                    (uid,),
+                ).fetchone()
+                if row is None:
+                    return None
+                conn.execute(
+                    """
+                    UPDATE memes
+                    SET use_count = use_count + 1,
+                        last_used_at = ?,
+                        updated_at = ?
+                    WHERE uid = ?
+                    """,
+                    (used_at, used_at, uid),
+                )
+                updated = conn.execute(
+                    "SELECT * FROM memes WHERE uid = ? LIMIT 1",
+                    (uid,),
+                ).fetchone()
+                conn.commit()
+                return _row_to_record(updated) if updated is not None else None
+
+        return await asyncio.to_thread(_run)
 
     async def delete(self, uid: str) -> MemeRecord | None:
         await self.initialize()

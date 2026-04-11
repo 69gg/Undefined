@@ -201,6 +201,118 @@ async def test_meme_service_search_and_send(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_meme_by_uid_concurrent_sends_increment_use_count_atomically(
+    tmp_path: Path,
+) -> None:
+    blob = tmp_path / "pic_race.png"
+    blob.write_bytes(b"\x89PNG\r\n\x1a\n")
+    config = _meme_config(tmp_path)
+    store = MemeStore(config.db_path)
+    await store.upsert_record(
+        MemeRecord(
+            uid="pic_race",
+            content_sha256="sha256-race",
+            blob_path=str(blob),
+            preview_path=str(blob),
+            mime_type="image/png",
+            file_size=blob.stat().st_size,
+            width=100,
+            height=100,
+            is_animated=False,
+            enabled=True,
+            pinned=False,
+            auto_description="并发表情包",
+            manual_description="",
+            ocr_text="",
+            tags=[],
+            aliases=[],
+            search_text="并发表情包",
+            use_count=0,
+            last_used_at="",
+            created_at="2026-04-11T12:00:00",
+            updated_at="2026-04-11T12:00:00",
+            status="ready",
+            segment_data={"subType": "1"},
+        )
+    )
+    sender = SimpleNamespace(
+        send_group_message=AsyncMock(return_value=778899),
+        send_private_message=AsyncMock(),
+    )
+    vector_store = SimpleNamespace(upsert=AsyncMock(return_value=None))
+    service = MemeService(
+        config_getter=lambda: config,
+        store=store,
+        vector_store=cast(Any, vector_store),
+    )
+
+    await asyncio.gather(
+        service.send_meme_by_uid(
+            "pic_race",
+            {"request_type": "group", "group_id": 12345, "sender": sender},
+        ),
+        service.send_meme_by_uid(
+            "pic_race",
+            {"request_type": "group", "group_id": 12345, "sender": sender},
+        ),
+    )
+
+    updated = await store.get("pic_race")
+    assert updated is not None
+    assert updated.use_count == 2
+
+
+def test_resolve_global_image_sync_reuses_cached_attachment() -> None:
+    record = MemeRecord(
+        uid="pic_cached",
+        content_sha256="sha256",
+        blob_path="/tmp/cached.png",
+        preview_path=None,
+        mime_type="image/png",
+        file_size=1,
+        width=1,
+        height=1,
+        is_animated=False,
+        enabled=True,
+        pinned=False,
+        auto_description="缓存表情包",
+        manual_description="",
+        ocr_text="",
+        tags=[],
+        aliases=[],
+        search_text="缓存表情包",
+        use_count=0,
+        last_used_at="",
+        created_at="2026-04-11T12:00:00",
+        updated_at="2026-04-11T12:00:00",
+        status="ready",
+        segment_data={"subType": "1"},
+    )
+
+    class _FakeStore:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def get_sync(self, uid: str) -> MemeRecord | None:
+            self.calls += 1
+            return record if uid == "pic_cached" else None
+
+    fake_store = _FakeStore()
+    service = MemeService(
+        config_getter=lambda: SimpleNamespace(enabled=True),
+        store=cast(Any, fake_store),
+        vector_store=cast(Any, SimpleNamespace()),
+    )
+
+    first = service.resolve_global_image_sync("pic_cached")
+    second = service.resolve_global_image_sync("pic_cached")
+
+    assert first is not None
+    assert second is first
+    assert fake_store.calls == 1
+
+
+@pytest.mark.asyncio
 async def test_search_memes_keyword_mode_skips_semantic_query(tmp_path: Path) -> None:
     config = _meme_config(tmp_path)
     record = MemeRecord(
@@ -922,6 +1034,55 @@ async def test_meme_store_connections_apply_synchronous_normal(tmp_path: Path) -
     synchronous_value = await asyncio.to_thread(_read_synchronous)
 
     assert synchronous_value == 1
+
+
+@pytest.mark.asyncio
+async def test_meme_store_constructor_defers_initialization(tmp_path: Path) -> None:
+    db_path = tmp_path / "memes.sqlite3"
+    store = MemeStore(db_path)
+
+    assert store._initialized is False
+    assert db_path.exists() is False
+
+    await store.list_memes()
+
+    assert store._initialized is True
+    assert db_path.exists() is True
+
+
+@pytest.mark.asyncio
+async def test_meme_vector_store_constructor_defers_client_creation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls = {"client": 0}
+
+    class _FakeCollection:
+        def query(self, **_kwargs: Any) -> dict[str, list[list[Any]]]:
+            return {"documents": [[]], "metadatas": [[]], "distances": [[]]}
+
+    class _FakeClient:
+        def __init__(self, path: str) -> None:
+            _ = path
+            calls["client"] += 1
+
+        def get_or_create_collection(
+            self, _name: str, metadata: dict[str, str]
+        ) -> _FakeCollection:
+            _ = metadata
+            return _FakeCollection()
+
+    monkeypatch.setattr(
+        "Undefined.memes.vector_store.chromadb.PersistentClient", _FakeClient
+    )
+    runtime = SimpleNamespace(embed=AsyncMock(return_value=[[0.1, 0.2, 0.3]]))
+    vector_store = MemeVectorStore(tmp_path / "chromadb", runtime)
+
+    assert calls["client"] == 0
+
+    await vector_store.query("测试", top_k=3)
+
+    assert calls["client"] == 1
 
 
 @pytest.mark.asyncio

@@ -10,7 +10,7 @@ from Undefined.api import app as runtime_api_app
 from Undefined.webui import app as webui_app
 from Undefined.webui.app import create_app
 from Undefined.webui.core import SessionStore
-from Undefined.webui.routes import _auth, _config, _index, _shared, _system
+from Undefined.webui.routes import _auth, _config, _index, _memes, _shared, _system
 from Undefined.webui.routes._shared import (
     REDIRECT_TO_CONFIG_ONCE_APP_KEY,
     SESSION_COOKIE,
@@ -391,3 +391,66 @@ def test_get_refresh_token_prefers_cookie_when_payload_missing() -> None:
         cast(Any, DummyRequest(cookies={_shared.TOKEN_COOKIE: "refresh-cookie"})),
     )
     assert _shared.get_refresh_token(request, payload={}) == "refresh-cookie"
+
+
+async def test_management_meme_update_handler_returns_400_on_invalid_json(
+    monkeypatch: Any,
+) -> None:
+    class _BadJsonRequest(SimpleNamespace):
+        async def json(self) -> dict[str, object]:
+            raise json.JSONDecodeError("bad", "x", 0)
+
+    monkeypatch.setattr(_memes, "check_auth", lambda _request: True)
+    request = cast(
+        web.Request,
+        cast(
+            Any,
+            _BadJsonRequest(
+                headers={},
+                cookies={},
+                query={},
+                match_info={"uid": "pic_demo"},
+                app=_request().app,
+            ),
+        ),
+    )
+
+    response = await _memes.management_meme_update_handler(request)
+    payload = _json_payload(response)
+
+    assert cast(web.Response, response).status == 400
+    assert payload["error"] == "Invalid JSON payload"
+
+
+async def test_management_meme_blob_handler_url_encodes_uid(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, str] = {}
+
+    async def _fake_proxy_binary(request: web.Request, path: str) -> web.Response:
+        _ = request
+        captured["path"] = path
+        return web.json_response({"ok": True})
+
+    monkeypatch.setattr(_memes, "check_auth", lambda _request: True)
+    monkeypatch.setattr(_memes, "_proxy_binary", _fake_proxy_binary)
+
+    request = cast(
+        web.Request,
+        cast(
+            Any,
+            SimpleNamespace(
+                headers={},
+                cookies={},
+                query={},
+                match_info={"uid": "pic a/b?"},
+                app=_request().app,
+            ),
+        ),
+    )
+
+    response = await _memes.management_meme_blob_handler(request)
+    payload = _json_payload(response)
+
+    assert payload["ok"] is True
+    assert captured["path"] == "/api/v1/memes/pic%20a%2Fb%3F/blob"

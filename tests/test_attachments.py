@@ -177,6 +177,41 @@ async def test_register_message_attachments_recurses_into_forward_images(
 
 
 @pytest.mark.asyncio
+async def test_register_message_attachments_preserves_segment_data_for_images(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    payload = base64.b64encode(_PNG_BYTES).decode("ascii")
+
+    result = await register_message_attachments(
+        registry=registry,
+        segments=[
+            {
+                "type": "image",
+                "data": {
+                    "file": f"base64://{payload}",
+                    "subType": "1",
+                },
+            }
+        ],
+        scope_key="group:10001",
+    )
+
+    uid = result.attachments[0]["uid"]
+    rendered = await render_message_with_pic_placeholders(
+        f'<pic uid="{uid}"/>',
+        registry=registry,
+        scope_key="group:10001",
+        strict=True,
+    )
+
+    assert "subType=1" in rendered.delivery_text
+
+
+@pytest.mark.asyncio
 async def test_render_message_with_pic_placeholders_uses_file_uri_and_shadow_text(
     tmp_path: Path,
 ) -> None:

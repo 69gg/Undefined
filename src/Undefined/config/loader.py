@@ -2995,6 +2995,9 @@ class Config:
             keyword_top_k=max(1, _coerce_int(section.get("keyword_top_k"), 30)),
             semantic_top_k=max(1, _coerce_int(section.get("semantic_top_k"), 30)),
             rerank_top_k=max(1, _coerce_int(section.get("rerank_top_k"), 20)),
+            worker_max_concurrency=max(
+                1, _coerce_int(section.get("worker_max_concurrency"), 4)
+            ),
         )
 
     @staticmethod

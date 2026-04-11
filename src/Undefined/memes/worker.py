@@ -15,14 +15,17 @@ class MemeWorker:
         meme_service: Any,
         poll_interval_seconds: float = 1.0,
         max_retries: int = 3,
+        max_concurrency: int = 4,
     ) -> None:
         self._job_queue = job_queue
         self._meme_service = meme_service
         self._poll_interval_seconds = max(0.1, float(poll_interval_seconds))
         self._max_retries = max(0, int(max_retries))
+        self._max_concurrency = max(1, int(max_concurrency))
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._inflight_tasks: set[asyncio.Task[None]] = set()
+        self._semaphore = asyncio.Semaphore(self._max_concurrency)
 
     async def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -41,7 +44,25 @@ class MemeWorker:
 
     async def _poll_loop(self) -> None:
         while not self._stop_event.is_set():
-            result = await self._job_queue.dequeue()
+            if len(self._inflight_tasks) >= self._max_concurrency:
+                try:
+                    await asyncio.wait_for(
+                        self._stop_event.wait(), timeout=self._poll_interval_seconds
+                    )
+                except asyncio.TimeoutError:
+                    pass
+                continue
+            try:
+                result = await self._job_queue.dequeue()
+            except Exception:
+                logger.exception("[memes] dequeue failed")
+                try:
+                    await asyncio.wait_for(
+                        self._stop_event.wait(), timeout=self._poll_interval_seconds
+                    )
+                except asyncio.TimeoutError:
+                    pass
+                continue
             if result is None:
                 try:
                     await asyncio.wait_for(
@@ -51,9 +72,13 @@ class MemeWorker:
                     pass
                 continue
             job_id, job = result
-            task = asyncio.create_task(self._process_job(job_id, job))
+            task = asyncio.create_task(self._process_job_with_permit(job_id, job))
             self._inflight_tasks.add(task)
             task.add_done_callback(self._inflight_tasks.discard)
+
+    async def _process_job_with_permit(self, job_id: str, job: dict[str, Any]) -> None:
+        async with self._semaphore:
+            await self._process_job(job_id, job)
 
     async def _process_job(self, job_id: str, job: dict[str, Any]) -> None:
         retry_count = int(job.get("_retry_count", 0) or 0)

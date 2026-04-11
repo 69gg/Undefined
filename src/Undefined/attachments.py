@@ -363,6 +363,26 @@ def _extract_forward_id(data: Mapping[str, Any]) -> str:
     return str(forward_id).strip() if forward_id is not None else ""
 
 
+def _segment_data_from_onebot_data(
+    data: Mapping[str, Any],
+    *,
+    exclude_keys: set[str] | None = None,
+) -> dict[str, str]:
+    excluded = {key.strip().lower() for key in (exclude_keys or set()) if key.strip()}
+    normalized: dict[str, str] = {}
+    for raw_key, raw_value in data.items():
+        key = str(raw_key or "").strip()
+        if not key:
+            continue
+        if key.lower() in excluded:
+            continue
+        text = str(raw_value or "").strip()
+        if not text:
+            continue
+        normalized[key] = text
+    return normalized
+
+
 def _normalize_message_segments(message: Any) -> list[Mapping[str, Any]]:
     if isinstance(message, list):
         normalized: list[Mapping[str, Any]] = []
@@ -810,6 +830,10 @@ async def register_message_attachments(
                             display_name=display_name,
                             source_kind="base64_image",
                             source_ref=f"{prefix}segment:{index}",
+                            segment_data=_segment_data_from_onebot_data(
+                                data,
+                                exclude_keys={"file", "url"},
+                            ),
                         )
                         ref = record.prompt_ref()
                     elif _is_data_url(raw_source):
@@ -820,6 +844,10 @@ async def register_message_attachments(
                             display_name=display_name,
                             source_kind="data_url_image",
                             source_ref=f"{prefix}segment:{index}",
+                            segment_data=_segment_data_from_onebot_data(
+                                data,
+                                exclude_keys={"file", "url"},
+                            ),
                         )
                         ref = record.prompt_ref()
                     else:
@@ -845,6 +873,10 @@ async def register_message_attachments(
                                 display_name=display_name,
                                 source_kind="remote_image",
                                 source_ref=raw_source or resolved_source,
+                                segment_data=_segment_data_from_onebot_data(
+                                    data,
+                                    exclude_keys={"file", "url"},
+                                ),
                             )
                             ref = record.prompt_ref()
                         elif _is_localish_path(resolved_source):
@@ -860,6 +892,10 @@ async def register_message_attachments(
                                 display_name=display_name,
                                 source_kind="local_image",
                                 source_ref=raw_source or resolved_source,
+                                segment_data=_segment_data_from_onebot_data(
+                                    data,
+                                    exclude_keys={"file", "url"},
+                                ),
                             )
                             ref = record.prompt_ref()
 
@@ -890,6 +926,10 @@ async def register_message_attachments(
                             display_name=display_name,
                             source_kind="webui_file" if file_id else "local_file",
                             source_ref=file_id or raw_source or str(local_file_path),
+                            segment_data=_segment_data_from_onebot_data(
+                                data,
+                                exclude_keys={"file", "url"},
+                            ),
                         )
                         ref = record.prompt_ref()
                     elif _is_http_url(raw_source):
@@ -900,6 +940,10 @@ async def register_message_attachments(
                             display_name=display_name,
                             source_kind="remote_file",
                             source_ref=file_id or raw_source,
+                            segment_data=_segment_data_from_onebot_data(
+                                data,
+                                exclude_keys={"file", "url"},
+                            ),
                         )
                         ref = record.prompt_ref()
 
