@@ -193,6 +193,30 @@ async def test_handle_private_reply_avoids_extra_blank_line_without_attachments(
     assert "</content>\n\n </message>" not in request_data["full_question"]
 
 
+def test_build_prompt_limits_proactive_participation_to_technical_contexts() -> None:
+    coordinator: Any = object.__new__(AICoordinator)
+
+    prompt = AICoordinator._build_prompt(
+        coordinator,
+        prefix="",
+        name="member",
+        uid=20001,
+        gid=12345,
+        gname="测试群",
+        loc="测试群",
+        role="member",
+        title="",
+        time_str="2026-04-11 12:00:00",
+        text="哈哈",
+    )
+
+    assert "群聊里的主动参与只保留给公开、开放的技术或项目讨论" in prompt
+    assert "轻松互动、玩梗、吐槽本身不构成参与许可" in prompt
+    assert "对于已经决定要回复的场景" in prompt
+    assert "默认先尝试 memes.search_memes" in prompt
+    assert "普通闲聊、玩梗、吐槽、轻松互动：" not in prompt
+
+
 @pytest.mark.asyncio
 async def test_execute_auto_reply_send_msg_cb_passes_history_message(
     monkeypatch: pytest.MonkeyPatch,
