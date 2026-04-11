@@ -88,6 +88,8 @@ async def test_render_message_with_global_meme_uid_supports_subtype(
                 sha256="deadbeef",
                 created_at="2026-04-03T12:00:00",
                 segment_data={"subType": "1"},
+                semantic_kind="meme",
+                description="无语猫猫表情包",
             )
             if uid == "pic_global01"
             else None
@@ -106,6 +108,17 @@ async def test_render_message_with_global_meme_uid_supports_subtype(
         == f"hello\n[CQ:image,file={blob.resolve().as_uri()},subType=1]"
     )
     assert rendered.history_text == "hello\n[图片 uid=pic_global01 name=meme.png]"
+    assert rendered.attachments == [
+        {
+            "uid": "pic_global01",
+            "kind": "image",
+            "media_type": "image",
+            "display_name": "meme.png",
+            "source_kind": "meme_library",
+            "semantic_kind": "meme",
+            "description": "无语猫猫表情包",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -169,6 +182,22 @@ async def test_meme_service_search_and_send(tmp_path: Path) -> None:
     sender.send_group_message.assert_awaited_once()
     sent_message = sender.send_group_message.await_args.args[1]
     assert sent_message == f"[CQ:image,file={blob.resolve().as_uri()},subType=1]"
+    sent_kwargs = sender.send_group_message.await_args.kwargs
+    assert (
+        sent_kwargs["history_message"]
+        == "[图片 uid=pic_deadbeef name=pic_deadbeef.png]"
+    )
+    assert sent_kwargs["attachments"] == [
+        {
+            "uid": "pic_deadbeef",
+            "kind": "image",
+            "media_type": "image",
+            "display_name": "pic_deadbeef.png",
+            "source_kind": "meme_library",
+            "semantic_kind": "meme",
+            "description": "一只无语的猫猫表情包",
+        }
+    ]
 
 
 @pytest.mark.asyncio

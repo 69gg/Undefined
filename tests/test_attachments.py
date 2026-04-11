@@ -9,6 +9,7 @@ import pytest
 from Undefined.attachments import (
     AttachmentRecord,
     AttachmentRegistry,
+    attachment_refs_to_xml,
     register_message_attachments,
     render_message_with_pic_placeholders,
 )
@@ -93,6 +94,26 @@ async def test_attachment_registry_load_uses_async_read_json(
 
     assert seen_calls == [(registry_path, False)]
     assert registry.resolve("pic_async123", "group:10001") is not None
+
+
+def test_attachment_refs_to_xml_includes_meme_semantic_metadata() -> None:
+    xml = attachment_refs_to_xml(
+        [
+            {
+                "uid": "pic_global01",
+                "kind": "image",
+                "media_type": "image",
+                "display_name": "meme.png",
+                "source_kind": "meme_library",
+                "semantic_kind": "meme",
+                "description": "无语猫猫表情包",
+            }
+        ]
+    )
+
+    assert 'source_kind="meme_library"' in xml
+    assert 'semantic_kind="meme"' in xml
+    assert 'description="无语猫猫表情包"' in xml
 
 
 @pytest.mark.asyncio

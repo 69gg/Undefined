@@ -22,3 +22,4 @@
 统一图片 `uid`：
 - 表情包与普通图片复用同一套 `uid` 语义
 - `memes.search_memes` 返回的 `uid` 既可用于 `memes.send_meme_by_uid`，也可直接插入 `<pic uid="..."/>`
+- 通过 `memes.send_meme_by_uid` 或引用表情包库 `uid` 发出的图片，会在历史记录里附带 `meme_library` 来源与表情包描述，便于后续对话继续理解“之前发的是哪种表情包”

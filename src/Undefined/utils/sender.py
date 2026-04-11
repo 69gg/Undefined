@@ -84,6 +84,7 @@ class MessageSender:
         mark_sent: bool = True,
         reply_to: int | None = None,
         history_message: str | None = None,
+        attachments: list[dict[str, str]] | None = None,
     ) -> int | None:
         """发送群消息"""
         if not self.config.is_group_allowed(group_id):
@@ -142,6 +143,7 @@ class MessageSender:
                 sender_nickname="Bot",
                 group_name="",
                 message_id=bot_message_id,
+                attachments=attachments,
             )
         return bot_message_id
 
@@ -208,6 +210,7 @@ class MessageSender:
         reply_to: int | None = None,
         preferred_temp_group_id: int | None = None,
         history_message: str | None = None,
+        attachments: list[dict[str, str]] | None = None,
     ) -> int | None:
         """发送私聊消息"""
         if not self.config.is_private_allowed(user_id):
@@ -267,6 +270,7 @@ class MessageSender:
                 display_name="Bot",
                 user_name="Bot",
                 message_id=bot_message_id,
+                attachments=attachments,
             )
         return bot_message_id
 

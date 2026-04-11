@@ -181,6 +181,8 @@ class MemeService:
             sha256=record.content_sha256,
             created_at=record.created_at,
             segment_data={"subType": "1"},
+            semantic_kind="meme",
+            description=record.description,
         )
 
     async def resolve_global_image(self, uid: str) -> AttachmentRecord | None:
@@ -560,12 +562,19 @@ class MemeService:
         file_uri = local_path.resolve().as_uri()
         cq_message = f"[CQ:image,file={file_uri},subType=1]"
         history_message = f"[图片 uid={record.uid} name={local_path.name}]"
+        history_attachment = self.resolve_global_image_sync(uid)
+        history_attachments = (
+            [history_attachment.prompt_ref()]
+            if history_attachment is not None
+            else None
+        )
 
         if target_type == "group":
             sent_message_id = await sender.send_group_message(
                 int(target_id),
                 cq_message,
                 history_message=history_message,
+                attachments=history_attachments,
             )
         else:
             preferred_temp_group_id = _safe_int(context.get("group_id"))
@@ -574,6 +583,7 @@ class MemeService:
                 cq_message,
                 preferred_temp_group_id=preferred_temp_group_id,
                 history_message=history_message,
+                attachments=history_attachments,
             )
 
         now = _now_iso()

@@ -219,6 +219,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return f"发送失败：{exc}"
     message = rendered.delivery_text
     history_message = rendered.history_text
+    history_attachments = [
+        item
+        for item in rendered.attachments
+        if str(item.get("source_kind", "") or "").strip() == "meme_library"
+    ]
 
     # 解析 reply_to 参数（无效值静默忽略，视为未传）
     reply_to_id, _ = _parse_positive_int(args.get("reply_to"), "reply_to")
@@ -256,20 +261,30 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         try:
             if target_type == "group":
                 logger.info("[发送消息] 准备发送到群 %s: %s", target_id, message[:100])
+                send_kwargs: dict[str, Any] = {
+                    "reply_to": reply_to_id,
+                    "history_message": history_message,
+                }
+                if history_attachments:
+                    send_kwargs["attachments"] = history_attachments
                 sent_message_id = await sender.send_group_message(
                     target_id,
                     message,
-                    reply_to=reply_to_id,
-                    history_message=history_message,
+                    **send_kwargs,
                 )
             else:
                 logger.info("[发送消息] 准备发送私聊 %s: %s", target_id, message[:100])
+                send_kwargs = {
+                    "reply_to": reply_to_id,
+                    "preferred_temp_group_id": _get_context_group_id(context),
+                    "history_message": history_message,
+                }
+                if history_attachments:
+                    send_kwargs["attachments"] = history_attachments
                 sent_message_id = await sender.send_private_message(
                     target_id,
                     message,
-                    reply_to=reply_to_id,
-                    preferred_temp_group_id=_get_context_group_id(context),
-                    history_message=history_message,
+                    **send_kwargs,
                 )
             context["message_sent_this_turn"] = True
             return _format_send_success(sent_message_id)

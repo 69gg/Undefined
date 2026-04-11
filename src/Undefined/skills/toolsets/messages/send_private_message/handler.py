@@ -91,6 +91,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return f"发送失败：{exc}"
     message = rendered.delivery_text
     history_message = rendered.history_text
+    history_attachments = [
+        item
+        for item in rendered.attachments
+        if str(item.get("source_kind", "") or "").strip() == "meme_library"
+    ]
 
     runtime_config = context.get("runtime_config")
     if runtime_config is not None:
@@ -102,11 +107,16 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     if sender:
         try:
+            send_kwargs: dict[str, Any] = {
+                "reply_to": reply_to_id,
+                "history_message": history_message,
+            }
+            if history_attachments:
+                send_kwargs["attachments"] = history_attachments
             sent_message_id = await sender.send_private_message(
                 user_id,
                 message,
-                reply_to=reply_to_id,
-                history_message=history_message,
+                **send_kwargs,
             )
             context["message_sent_this_turn"] = True
             return _format_send_success(user_id, sent_message_id)

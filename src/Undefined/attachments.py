@@ -77,14 +77,23 @@ class AttachmentRecord:
     sha256: str
     created_at: str
     segment_data: dict[str, str]
+    semantic_kind: str = ""
+    description: str = ""
 
     def prompt_ref(self) -> dict[str, str]:
-        return {
+        ref: dict[str, str] = {
             "uid": self.uid,
             "kind": self.kind,
             "media_type": self.media_type,
             "display_name": self.display_name,
         }
+        if self.source_kind.strip():
+            ref["source_kind"] = self.source_kind.strip()
+        if self.semantic_kind.strip():
+            ref["semantic_kind"] = self.semantic_kind.strip()
+        if self.description.strip():
+            ref["description"] = self.description.strip()
+        return ref
 
 
 @dataclass(frozen=True)
@@ -200,6 +209,15 @@ def attachment_refs_to_xml(
         ]
         if name:
             attrs.append(f'name="{escape_xml_attr(name)}"')
+        source_kind = str(item.get("source_kind", "") or "").strip()
+        if source_kind:
+            attrs.append(f'source_kind="{escape_xml_attr(source_kind)}"')
+        semantic_kind = str(item.get("semantic_kind", "") or "").strip()
+        if semantic_kind:
+            attrs.append(f'semantic_kind="{escape_xml_attr(semantic_kind)}"')
+        description = str(item.get("description", "") or "").strip()
+        if description:
+            attrs.append(f'description="{escape_xml_attr(description)}"')
         lines.append(f"{indent} <attachment {' '.join(attrs)} />")
     lines.append(f"{indent}</attachments>")
     return "\n".join(lines)
@@ -516,6 +534,8 @@ class AttachmentRegistry:
                         for k, v in dict(item.get("segment_data") or {}).items()
                         if str(k).strip() and str(v).strip()
                     },
+                    semantic_kind=str(item.get("semantic_kind", "") or ""),
+                    description=str(item.get("description", "") or ""),
                 )
             except Exception:
                 continue

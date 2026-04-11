@@ -289,6 +289,7 @@ class AICoordinator:
                     onebot_client=self.onebot,
                     history_manager=self.history_manager,
                     bot_qq=self.config.bot_qq,
+                    attachment_registry=getattr(self.ai, "attachment_registry", None),
                     group_name_hint=group_name,
                 )
 
@@ -389,6 +390,7 @@ class AICoordinator:
                     onebot_client=self.onebot,
                     history_manager=self.history_manager,
                     bot_qq=self.config.bot_qq,
+                    attachment_registry=getattr(self.ai, "attachment_registry", None),
                 )
 
             async def send_img_cb(tid: int, mtype: str, path: str) -> None:

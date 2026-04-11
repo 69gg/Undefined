@@ -1482,6 +1482,7 @@ class RuntimeAPIServer:
                 onebot_client=self._ctx.onebot,
                 history_manager=self._ctx.history_manager,
                 bot_qq=cfg.bot_qq,
+                attachment_registry=getattr(self._ctx.ai, "attachment_registry", None),
             )
 
         async with RequestContext(

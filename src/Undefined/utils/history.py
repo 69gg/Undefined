@@ -195,6 +195,15 @@ class MessageHistoryManager:
                                     "display_name": str(
                                         item.get("display_name", "") or ""
                                     ),
+                                    "source_kind": str(
+                                        item.get("source_kind", "") or ""
+                                    ),
+                                    "semantic_kind": str(
+                                        item.get("semantic_kind", "") or ""
+                                    ),
+                                    "description": str(
+                                        item.get("description", "") or ""
+                                    ),
                                 }
                             )
                         msg["attachments"] = normalized_attachments
