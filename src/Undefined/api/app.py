@@ -1188,18 +1188,26 @@ class RuntimeAPIServer:
             top_k = int(top_k_raw) if top_k_raw is not None else page_size
         except ValueError:
             return _json_error("page/page_size/top_k must be integers", status=400)
+        page = max(1, page)
+        page_size = max(1, min(200, page_size))
+        top_k = max(1, top_k)
+        sort = str(request.query.get("sort", "updated_at") or "updated_at").strip()
 
         enabled_filter = _parse_optional_bool("enabled")
         animated_filter = _parse_optional_bool("animated")
         pinned_filter = _parse_optional_bool("pinned")
+        if not (query or keyword_query or semantic_query) and sort == "relevance":
+            sort = "updated_at"
 
         if query or keyword_query or semantic_query:
             has_post_filter = any(
                 f is not None for f in (enabled_filter, animated_filter, pinned_filter)
             )
-            fetch_k = (
-                min(200, top_k * 4) if has_post_filter else max(1, min(200, top_k))
-            )
+            requested_window = max(page * page_size, top_k)
+            if has_post_filter or page > 1 or sort != "relevance":
+                fetch_k = min(500, max(requested_window * 4, top_k))
+            else:
+                fetch_k = min(500, requested_window)
             search_payload = await meme_service.search_memes(
                 query,
                 query_mode=query_mode or meme_service.default_query_mode,
@@ -1207,40 +1215,40 @@ class RuntimeAPIServer:
                 semantic_query=semantic_query or None,
                 top_k=fetch_k,
                 include_disabled=enabled_filter is not True,
+                sort=sort,
             )
-            items: list[dict[str, Any]] = []
+            filtered_items: list[dict[str, Any]] = []
             for item in list(search_payload.get("items") or []):
-                uid = str(item.get("uid", "") or "").strip()
-                if not uid:
-                    continue
-                record = await meme_service.get_record(uid)
-                if record is None:
-                    continue
-                if enabled_filter is not None and record.enabled != enabled_filter:
+                if (
+                    enabled_filter is not None
+                    and bool(item.get("enabled")) != enabled_filter
+                ):
                     continue
                 if (
                     animated_filter is not None
-                    and record.is_animated != animated_filter
+                    and bool(item.get("is_animated")) != animated_filter
                 ):
                     continue
-                if pinned_filter is not None and record.pinned != pinned_filter:
+                if (
+                    pinned_filter is not None
+                    and bool(item.get("pinned")) != pinned_filter
+                ):
                     continue
-                serialized = meme_service.serialize_record(record)
-                serialized["score"] = item.get("score")
-                serialized["keyword_score"] = item.get("keyword_score")
-                serialized["semantic_score"] = item.get("semantic_score")
-                serialized["rerank_score"] = item.get("rerank_score")
-                items.append(serialized)
+                filtered_items.append(item)
+            offset = (page - 1) * page_size
+            paged_items = filtered_items[offset : offset + page_size]
             return web.json_response(
                 {
                     "ok": True,
-                    "total": len(items),
-                    "page": 1,
-                    "page_size": len(items),
+                    "total": len(filtered_items),
+                    "page": page,
+                    "page_size": page_size,
+                    "has_more": offset + page_size < len(filtered_items),
                     "query_mode": search_payload.get("query_mode"),
                     "keyword_query": search_payload.get("keyword_query"),
                     "semantic_query": search_payload.get("semantic_query"),
-                    "items": items,
+                    "sort": search_payload.get("sort", sort),
+                    "items": paged_items,
                 }
             )
 
@@ -1249,9 +1257,10 @@ class RuntimeAPIServer:
             enabled=enabled_filter,
             animated=animated_filter,
             pinned=pinned_filter,
-            sort=str(request.query.get("sort", "updated_at") or "updated_at"),
+            sort=sort,
             page=page,
             page_size=page_size,
+            summary=True,
         )
         return web.json_response(payload)
 

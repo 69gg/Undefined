@@ -218,6 +218,33 @@ class MemeStore:
 
         return await asyncio.to_thread(_run)
 
+    async def get_many(self, uids: list[str]) -> dict[str, MemeRecord]:
+        await self.initialize()
+        normalized_uids: list[str] = []
+        seen: set[str] = set()
+        for item in uids:
+            uid = str(item or "").strip()
+            if not uid or uid in seen:
+                continue
+            seen.add(uid)
+            normalized_uids.append(uid)
+        if not normalized_uids:
+            return {}
+
+        def _run() -> dict[str, MemeRecord]:
+            placeholders = ", ".join("?" for _ in normalized_uids)
+            with self._connect() as conn:
+                rows = conn.execute(
+                    f"SELECT * FROM memes WHERE uid IN ({placeholders})",
+                    tuple(normalized_uids),
+                ).fetchall()
+                return {
+                    record.uid: record
+                    for record in (_row_to_record(row) for row in rows)
+                }
+
+        return await asyncio.to_thread(_run)
+
     async def find_by_sha256(self, content_sha256: str) -> MemeRecord | None:
         await self.initialize()
 

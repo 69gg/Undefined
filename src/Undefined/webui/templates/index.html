@@ -626,6 +626,7 @@
                                             <option value="updated_at" data-i18n="memes.sort_updated">最近更新</option>
                                             <option value="use_count" data-i18n="memes.sort_used">使用次数</option>
                                             <option value="created_at" data-i18n="memes.sort_created">最近入库</option>
+                                            <option value="relevance" data-i18n="memes.sort_relevance">相关性</option>
                                         </select>
                                         <input id="memesTopK" type="number" min="1" step="1" class="form-control form-control-sm"
                                             value="20" title="top_k" />
@@ -635,8 +636,11 @@
                                 </div>
                             </div>
                             <div id="memesMeta" class="log-meta"></div>
-                            <div class="runtime-list-window meme-results-window">
+                            <div id="memesListWindow" class="runtime-list-window meme-results-window">
                                 <div id="memesList" class="runtime-list"></div>
+                            </div>
+                            <div class="toolbar" style="justify-content:center; margin-top:12px;">
+                                <button id="btnMemesLoadMore" class="btn ghost" type="button" data-i18n="memes.load_more" style="display:none;">加载更多</button>
                             </div>
                         </div>
                     </div>

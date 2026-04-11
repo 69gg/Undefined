@@ -13,30 +13,6 @@ from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
 
 @pytest.mark.asyncio
 async def test_runtime_meme_list_handler_supports_query_modes() -> None:
-    record = SimpleNamespace(
-        uid="pic_mode001",
-        description="无语猫猫",
-        auto_description="无语猫猫",
-        manual_description="",
-        ocr_text="",
-        tags=["无语"],
-        aliases=["猫猫"],
-        enabled=True,
-        pinned=False,
-        is_animated=False,
-        mime_type="image/png",
-        file_size=123,
-        width=100,
-        height=100,
-        use_count=5,
-        last_used_at="",
-        created_at="2026-04-03T12:00:00",
-        updated_at="2026-04-03T12:00:00",
-        status="ready",
-        search_text="无语猫猫",
-        preview_path="/tmp/preview.png",
-        blob_path="/tmp/blob.png",
-    )
     meme_service = SimpleNamespace(
         enabled=True,
         default_query_mode="hybrid",
@@ -47,9 +23,17 @@ async def test_runtime_meme_list_handler_supports_query_modes() -> None:
                 "query_mode": "semantic",
                 "keyword_query": "",
                 "semantic_query": "表达很无语的猫猫表情包",
+                "sort": "use_count",
                 "items": [
                     {
                         "uid": "pic_mode001",
+                        "description": "无语猫猫",
+                        "enabled": True,
+                        "pinned": False,
+                        "is_animated": False,
+                        "created_at": "2026-04-03T12:00:00",
+                        "updated_at": "2026-04-03T12:00:00",
+                        "use_count": 5,
                         "score": 0.9,
                         "keyword_score": 0.0,
                         "semantic_score": 0.9,
@@ -58,14 +42,6 @@ async def test_runtime_meme_list_handler_supports_query_modes() -> None:
                 ],
             }
         ),
-        get_record=AsyncMock(return_value=record),
-        serialize_record=lambda item: {
-            "uid": item.uid,
-            "description": item.description,
-            "enabled": item.enabled,
-            "pinned": item.pinned,
-            "is_animated": item.is_animated,
-        },
         list_memes=AsyncMock(),
     )
     context = RuntimeAPIContext(
@@ -86,6 +62,7 @@ async def test_runtime_meme_list_handler_supports_query_modes() -> None:
                 query={
                     "query_mode": "semantic",
                     "semantic_query": "表达很无语的猫猫表情包",
+                    "sort": "use_count",
                     "top_k": "5",
                 },
             ),
@@ -97,13 +74,15 @@ async def test_runtime_meme_list_handler_supports_query_modes() -> None:
 
     assert payload["query_mode"] == "semantic"
     assert payload["total"] == 1
+    assert payload["sort"] == "use_count"
     assert payload["items"][0]["uid"] == "pic_mode001"
     meme_service.search_memes.assert_awaited_once_with(
         "",
         query_mode="semantic",
         keyword_query=None,
         semantic_query="表达很无语的猫猫表情包",
-        top_k=5,
+        top_k=200,
         include_disabled=True,
+        sort="use_count",
     )
     meme_service.list_memes.assert_not_called()

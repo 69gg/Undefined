@@ -285,6 +285,7 @@ async def test_search_memes_semantic_mode_skips_keyword_query(tmp_path: Path) ->
     fake_store = SimpleNamespace(
         search_keyword=AsyncMock(return_value=[]),
         get=AsyncMock(return_value=record),
+        get_many=AsyncMock(return_value={"pic_semantic01": record}),
     )
     fake_vector = SimpleNamespace(
         query=AsyncMock(
@@ -316,6 +317,89 @@ async def test_search_memes_semantic_mode_skips_keyword_query(tmp_path: Path) ->
     assert payload["count"] == 1
     fake_vector.query.assert_awaited_once()
     fake_store.search_keyword.assert_not_awaited()
+    fake_store.get_many.assert_awaited_once_with(["pic_semantic01"])
+
+
+@pytest.mark.asyncio
+async def test_search_memes_supports_use_count_sort(tmp_path: Path) -> None:
+    config = _meme_config(tmp_path)
+    older = MemeRecord(
+        uid="pic_old",
+        content_sha256="sha-old",
+        blob_path=str(tmp_path / "old.png"),
+        preview_path=None,
+        mime_type="image/png",
+        file_size=1,
+        width=1,
+        height=1,
+        is_animated=False,
+        enabled=True,
+        pinned=False,
+        auto_description="老猫猫",
+        manual_description="",
+        ocr_text="",
+        tags=[],
+        aliases=[],
+        search_text="老猫猫",
+        use_count=2,
+        last_used_at="",
+        created_at="2026-04-01T12:00:00",
+        updated_at="2026-04-01T12:00:00",
+        status="ready",
+        segment_data={"subType": "1"},
+    )
+    popular = MemeRecord(
+        uid="pic_popular",
+        content_sha256="sha-popular",
+        blob_path=str(tmp_path / "popular.png"),
+        preview_path=None,
+        mime_type="image/png",
+        file_size=1,
+        width=1,
+        height=1,
+        is_animated=False,
+        enabled=True,
+        pinned=False,
+        auto_description="热门猫猫",
+        manual_description="",
+        ocr_text="",
+        tags=[],
+        aliases=[],
+        search_text="热门猫猫",
+        use_count=20,
+        last_used_at="",
+        created_at="2026-04-02T12:00:00",
+        updated_at="2026-04-02T12:00:00",
+        status="ready",
+        segment_data={"subType": "1"},
+    )
+    fake_store = SimpleNamespace(
+        search_keyword=AsyncMock(
+            return_value=[
+                {"record": older, "keyword_score": 0.8},
+                {"record": popular, "keyword_score": 0.8},
+            ]
+        ),
+        get_many=AsyncMock(return_value={}),
+    )
+    fake_vector = SimpleNamespace(query=AsyncMock(return_value=[]))
+    service = MemeService(
+        config_getter=lambda: config,
+        store=cast(Any, fake_store),
+        vector_store=cast(Any, fake_vector),
+    )
+
+    payload = await service.search_memes(
+        "猫猫",
+        query_mode="keyword",
+        top_k=5,
+        sort="use_count",
+    )
+
+    assert [item["uid"] for item in payload["items"]] == [
+        "pic_popular",
+        "pic_old",
+    ]
 
 
 @pytest.mark.asyncio

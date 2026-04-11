@@ -57,7 +57,11 @@ class MemeSearchItem:
     description: str
     tags: list[str]
     aliases: list[str]
+    enabled: bool
+    pinned: bool
     is_animated: bool
+    created_at: str
+    updated_at: str
     score: float
     keyword_score: float
     semantic_score: float

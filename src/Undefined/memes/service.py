@@ -229,6 +229,19 @@ class MemeService:
             "preview_path": preview_path,
         }
 
+    def serialize_list_item(self, record: MemeRecord) -> dict[str, Any]:
+        return {
+            "uid": record.uid,
+            "description": record.description,
+            "enabled": bool(record.enabled),
+            "pinned": bool(record.pinned),
+            "is_animated": bool(record.is_animated),
+            "use_count": int(record.use_count),
+            "created_at": record.created_at,
+            "updated_at": record.updated_at,
+            "status": record.status,
+        }
+
     async def list_memes(
         self,
         *,
@@ -239,6 +252,7 @@ class MemeService:
         sort: str = "updated_at",
         page: int = 1,
         page_size: int = 50,
+        summary: bool = False,
     ) -> dict[str, Any]:
         items, total = await self._store.list_memes(
             query=query,
@@ -254,7 +268,14 @@ class MemeService:
             "total": total,
             "page": max(1, int(page)),
             "page_size": max(1, min(200, int(page_size))),
-            "items": [self.serialize_record(item) for item in items],
+            "has_more": max(1, int(page)) * max(1, min(200, int(page_size))) < total,
+            "sort": str(sort or "updated_at"),
+            "items": [
+                self.serialize_list_item(item)
+                if summary
+                else self.serialize_record(item)
+                for item in items
+            ],
         }
 
     async def stats(self) -> dict[str, Any]:
@@ -370,6 +391,7 @@ class MemeService:
         semantic_query: str | None = None,
         top_k: int = 8,
         include_disabled: bool = False,
+        sort: str = "relevance",
     ) -> dict[str, Any]:
         raw_query = str(query or "").strip()
         raw_keyword_query = str(keyword_query or "").strip()
@@ -441,9 +463,25 @@ class MemeService:
             uid = str(item.get("uid") or "").strip()
             if not uid:
                 continue
+        missing_semantic_uids = [
+            str(item.get("uid") or "").strip()
+            for item in semantic_hits
+            if str(item.get("uid") or "").strip()
+            and str(item.get("uid") or "").strip() not in merged
+        ]
+        missing_records = (
+            await self._store.get_many(missing_semantic_uids)
+            if missing_semantic_uids
+            else {}
+        )
+
+        for item in semantic_hits:
+            uid = str(item.get("uid") or "").strip()
+            if not uid:
+                continue
             existing = merged.get(uid)
             if existing is None:
-                stored_record = await self._store.get(uid)
+                stored_record = missing_records.get(uid)
                 if stored_record is None:
                     continue
                 existing = {
@@ -499,15 +537,47 @@ class MemeService:
                 float(item.get("semantic_score", 0.0)),
             )
 
-        ranked_candidates.sort(
-            key=lambda item: (
-                _final_score(item),
-                item["record"].pinned,
-                item["record"].use_count,
-                item["record"].updated_at,
-            ),
-            reverse=True,
-        )
+        normalized_sort = str(sort or "relevance").strip().lower()
+        if normalized_sort == "use_count":
+            ranked_candidates.sort(
+                key=lambda item: (
+                    item["record"].pinned,
+                    item["record"].use_count,
+                    item["record"].updated_at,
+                    _final_score(item),
+                ),
+                reverse=True,
+            )
+        elif normalized_sort == "created_at":
+            ranked_candidates.sort(
+                key=lambda item: (
+                    item["record"].pinned,
+                    item["record"].created_at,
+                    item["record"].updated_at,
+                    _final_score(item),
+                ),
+                reverse=True,
+            )
+        elif normalized_sort == "updated_at":
+            ranked_candidates.sort(
+                key=lambda item: (
+                    item["record"].pinned,
+                    item["record"].updated_at,
+                    item["record"].use_count,
+                    _final_score(item),
+                ),
+                reverse=True,
+            )
+        else:
+            ranked_candidates.sort(
+                key=lambda item: (
+                    _final_score(item),
+                    item["record"].pinned,
+                    item["record"].use_count,
+                    item["record"].updated_at,
+                ),
+                reverse=True,
+            )
 
         items: list[dict[str, Any]] = []
         for candidate in ranked_candidates[: max(1, int(top_k))]:
@@ -517,7 +587,11 @@ class MemeService:
                 description=record.description,
                 tags=list(record.tags),
                 aliases=list(record.aliases),
+                enabled=bool(record.enabled),
+                pinned=bool(record.pinned),
                 is_animated=record.is_animated,
+                created_at=record.created_at,
+                updated_at=record.updated_at,
                 score=round(_final_score(candidate), 6),
                 keyword_score=round(float(candidate.get("keyword_score", 0.0)), 6),
                 semantic_score=round(float(candidate.get("semantic_score", 0.0)), 6),
@@ -535,6 +609,7 @@ class MemeService:
             "query_mode": normalized_mode,
             "keyword_query": resolved_keyword_query,
             "semantic_query": resolved_semantic_query,
+            "sort": normalized_sort,
             "items": items,
         }
 
