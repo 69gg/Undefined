@@ -106,6 +106,7 @@ class MemeStore:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self._db_path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA synchronous=NORMAL")
         return conn
 
     def _init_sync(self) -> None:
@@ -677,7 +678,7 @@ class MemeStore:
                     ORDER BY
                         CASE WHEN status = 'ready' THEN 1 ELSE 0 END ASC,
                         pinned ASC,
-                        enabled DESC,
+                        enabled ASC,
                         use_count ASC,
                         CASE WHEN last_used_at = '' THEN created_at ELSE last_used_at END ASC,
                         updated_at ASC

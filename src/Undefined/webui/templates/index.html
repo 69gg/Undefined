@@ -583,9 +583,50 @@
                                 <div class="probe-item"><span class="probe-item-label" data-i18n="memes.bytes">总大小</span><span id="memesStatBytes" class="probe-item-value">--</span></div>
                                 <div class="probe-item"><span class="probe-item-label" data-i18n="memes.queue">队列</span><span id="memesStatQueue" class="probe-item-value">--</span></div>
                             </div>
+                            <div class="card-title" data-i18n="memes.filters_title" style="margin-top: 24px; border-top: 1px solid var(--border-color); padding-top: 16px;">高级筛选</div>
+                            <div class="runtime-filters" style="display: flex; flex-direction: column; gap: 8px;">
+                                <select id="memesQueryMode" class="form-control form-control-sm">
+                                    <option value="hybrid" data-i18n="memes.mode_hybrid">混合查询</option>
+                                    <option value="keyword" data-i18n="memes.mode_keyword">关键词查询</option>
+                                    <option value="semantic" data-i18n="memes.mode_semantic">语义查询</option>
+                                </select>
+                                <input id="memesKeywordQuery" type="text" class="form-control form-control-sm"
+                                    data-i18n-placeholder="memes.keyword_placeholder" placeholder="关键词查询词（可选）" />
+                                <input id="memesSemanticQuery" type="text" class="form-control form-control-sm"
+                                    data-i18n-placeholder="memes.semantic_placeholder" placeholder="语义查询词（可选）" />
+                                <div class="runtime-inline">
+                                    <select id="memesEnabledFilter" class="form-control form-control-sm" style="flex: 1;">
+                                        <option value="" data-i18n="memes.filter_enabled_all">全部状态</option>
+                                        <option value="true" data-i18n="memes.filter_enabled_true">仅启用</option>
+                                        <option value="false" data-i18n="memes.filter_enabled_false">仅禁用</option>
+                                    </select>
+                                    <select id="memesAnimatedFilter" class="form-control form-control-sm" style="flex: 1;">
+                                        <option value="" data-i18n="memes.filter_animated_all">全部类型</option>
+                                        <option value="false" data-i18n="memes.filter_animated_static">静图</option>
+                                        <option value="true" data-i18n="memes.filter_animated_true">动图</option>
+                                    </select>
+                                </div>
+                                <select id="memesPinnedFilter" class="form-control form-control-sm">
+                                    <option value="" data-i18n="memes.filter_pinned_all">全部置顶状态</option>
+                                    <option value="true" data-i18n="memes.filter_pinned_true">仅置顶</option>
+                                    <option value="false" data-i18n="memes.filter_pinned_false">仅未置顶</option>
+                                </select>
+                                <select id="memesSortSelect" class="form-control form-control-sm">
+                                    <option value="updated_at" data-i18n="memes.sort_updated">最近更新</option>
+                                    <option value="use_count" data-i18n="memes.sort_used">使用次数</option>
+                                    <option value="created_at" data-i18n="memes.sort_created">最近入库</option>
+                                    <option value="relevance" data-i18n="memes.sort_relevance">相关性</option>
+                                </select>
+                                <div class="runtime-inline">
+                                    <input id="memesTopK" type="number" min="1" step="1" class="form-control form-control-sm"
+                                        value="20" title="top_k" placeholder="top_k" />
+                                    <input id="memesPageSize" type="number" min="1" step="1" class="form-control form-control-sm"
+                                        value="50" title="page_size" placeholder="每页条数" />
+                                </div>
+                            </div>
                         </div>
 
-                        <div class="card runtime-card">
+                        <div class="card runtime-card" style="display:flex; flex-direction:column;">
                             <div class="panel-row runtime-head">
                                 <div class="card-title" data-i18n="memes.search_title">检索与列表</div>
                                 <div class="runtime-query-stack">
@@ -597,46 +638,10 @@
                                             <span class="sr-only" data-i18n="runtime.search">查询</span>
                                         </button>
                                     </div>
-                                    <div class="runtime-filters">
-                                        <select id="memesQueryMode" class="form-control form-control-sm">
-                                            <option value="hybrid" data-i18n="memes.mode_hybrid">混合查询</option>
-                                            <option value="keyword" data-i18n="memes.mode_keyword">关键词查询</option>
-                                            <option value="semantic" data-i18n="memes.mode_semantic">语义查询</option>
-                                        </select>
-                                        <input id="memesKeywordQuery" type="text" class="form-control form-control-sm"
-                                            data-i18n-placeholder="memes.keyword_placeholder" placeholder="关键词查询词（可选）" />
-                                        <input id="memesSemanticQuery" type="text" class="form-control form-control-sm"
-                                            data-i18n-placeholder="memes.semantic_placeholder" placeholder="语义查询词（可选）" />
-                                        <select id="memesEnabledFilter" class="form-control form-control-sm">
-                                            <option value="" data-i18n="memes.filter_enabled_all">全部状态</option>
-                                            <option value="true" data-i18n="memes.filter_enabled_true">仅启用</option>
-                                            <option value="false" data-i18n="memes.filter_enabled_false">仅禁用</option>
-                                        </select>
-                                        <select id="memesAnimatedFilter" class="form-control form-control-sm">
-                                            <option value="" data-i18n="memes.filter_animated_all">全部类型</option>
-                                            <option value="false" data-i18n="memes.filter_animated_static">静图</option>
-                                            <option value="true" data-i18n="memes.filter_animated_true">动图</option>
-                                        </select>
-                                        <select id="memesPinnedFilter" class="form-control form-control-sm">
-                                            <option value="" data-i18n="memes.filter_pinned_all">全部置顶状态</option>
-                                            <option value="true" data-i18n="memes.filter_pinned_true">仅置顶</option>
-                                            <option value="false" data-i18n="memes.filter_pinned_false">仅未置顶</option>
-                                        </select>
-                                        <select id="memesSortSelect" class="form-control form-control-sm">
-                                            <option value="updated_at" data-i18n="memes.sort_updated">最近更新</option>
-                                            <option value="use_count" data-i18n="memes.sort_used">使用次数</option>
-                                            <option value="created_at" data-i18n="memes.sort_created">最近入库</option>
-                                            <option value="relevance" data-i18n="memes.sort_relevance">相关性</option>
-                                        </select>
-                                        <input id="memesTopK" type="number" min="1" step="1" class="form-control form-control-sm"
-                                            value="20" title="top_k" />
-                                        <input id="memesPageSize" type="number" min="1" step="1" class="form-control form-control-sm"
-                                            value="50" title="page_size" />
-                                    </div>
                                 </div>
                             </div>
                             <div id="memesMeta" class="log-meta"></div>
-                            <div id="memesListWindow" class="runtime-list-window meme-results-window">
+                            <div id="memesListWindow" class="runtime-list-window meme-results-window" style="flex:1;">
                                 <div id="memesList" class="runtime-list"></div>
                             </div>
                             <div class="toolbar" style="justify-content:center; margin-top:12px;">

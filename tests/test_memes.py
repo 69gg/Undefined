@@ -845,6 +845,86 @@ async def test_meme_ingest_replaces_orphaned_sha256_record(
 
 
 @pytest.mark.asyncio
+async def test_meme_store_prune_candidates_prioritize_disabled_before_enabled(
+    tmp_path: Path,
+) -> None:
+    store = MemeStore(tmp_path / "memes.sqlite3")
+    await store.upsert_record(
+        MemeRecord(
+            uid="pic_enabled",
+            content_sha256="sha-enabled",
+            blob_path=str(tmp_path / "enabled.png"),
+            preview_path=None,
+            mime_type="image/png",
+            file_size=1,
+            width=1,
+            height=1,
+            is_animated=False,
+            enabled=True,
+            pinned=False,
+            auto_description="启用项",
+            manual_description="",
+            ocr_text="",
+            tags=[],
+            aliases=[],
+            search_text="启用项",
+            use_count=0,
+            last_used_at="",
+            created_at="2026-04-11T10:00:00",
+            updated_at="2026-04-11T10:00:00",
+            status="ready",
+            segment_data={"subType": "1"},
+        )
+    )
+    await store.upsert_record(
+        MemeRecord(
+            uid="pic_disabled",
+            content_sha256="sha-disabled",
+            blob_path=str(tmp_path / "disabled.png"),
+            preview_path=None,
+            mime_type="image/png",
+            file_size=1,
+            width=1,
+            height=1,
+            is_animated=False,
+            enabled=False,
+            pinned=False,
+            auto_description="禁用项",
+            manual_description="",
+            ocr_text="",
+            tags=[],
+            aliases=[],
+            search_text="禁用项",
+            use_count=0,
+            last_used_at="",
+            created_at="2026-04-11T09:00:00",
+            updated_at="2026-04-11T10:00:00",
+            status="ready",
+            segment_data={"subType": "1"},
+        )
+    )
+
+    candidates = await store.list_prune_candidates()
+
+    assert [item.uid for item in candidates[:2]] == ["pic_disabled", "pic_enabled"]
+
+
+@pytest.mark.asyncio
+async def test_meme_store_connections_apply_synchronous_normal(tmp_path: Path) -> None:
+    store = MemeStore(tmp_path / "memes.sqlite3")
+
+    def _read_synchronous() -> int:
+        with store._connect() as conn:
+            row = conn.execute("PRAGMA synchronous").fetchone()
+            assert row is not None
+            return int(row[0])
+
+    synchronous_value = await asyncio.to_thread(_read_synchronous)
+
+    assert synchronous_value == 1
+
+
+@pytest.mark.asyncio
 async def test_meme_ingest_cleans_partial_files_on_prepare_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -374,8 +374,9 @@
   padding-right: 6px;
 }
 .meme-results-window {
-  max-height: clamp(280px, 34vh, 420px);
-  min-height: 220px;
+  /* 扩大视口高度的阈值参数，让列表能展示更多数据 */
+  max-height: clamp(360px, 50vh, 660px);
+  min-height: 280px;
   border-top: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
   padding-top: 12px;
 }
