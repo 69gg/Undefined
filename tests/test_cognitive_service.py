@@ -520,6 +520,47 @@ async def test_build_context_private_mode_reuses_single_query_embedding() -> Non
     assert vector_store.event_calls[1].get("query_embedding") == [0.12, 0.34]
 
 
+@pytest.mark.asyncio
+async def test_build_context_downgrades_to_empty_when_auto_event_query_fails() -> None:
+    class _FailingVectorStore(_FakeVectorStore):
+        async def query_events(
+            self,
+            _query: str,
+            **kwargs: Any,
+        ) -> list[dict[str, Any]]:
+            self.last_event_kwargs = dict(kwargs)
+            raise RuntimeError("chroma transient failure")
+
+    service = CognitiveService(
+        config_getter=lambda: SimpleNamespace(
+            enabled=True,
+            auto_top_k=3,
+            auto_scope_candidate_multiplier=2,
+            auto_current_group_boost=1.15,
+            auto_current_private_boost=1.25,
+            rerank_candidate_multiplier=3,
+            time_decay_enabled=True,
+            time_decay_half_life_days_auto=14.0,
+            time_decay_boost=0.2,
+            time_decay_min_similarity=0.35,
+        ),
+        vector_store=_FailingVectorStore(),
+        job_queue=_FakeJobQueue(),
+        profile_storage=_FakeProfileStorage(),
+        reranker=None,
+    )
+
+    context = await service.build_context(
+        query="最近聊过什么",
+        request_type="group",
+        group_id="30001",
+        user_id="20001",
+        sender_id="20001",
+    )
+
+    assert context == ""
+
+
 def test_merge_weighted_events_preserves_scope_rank_order() -> None:
     # scoped_events 已经是 query_events 的最终排序（含 time_decay/mmr/rerank），
     # merge 过程不应再按 base_score 重新洗牌。

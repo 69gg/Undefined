@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import chromadb
+from chromadb.errors import InternalError as ChromaInternalError
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
@@ -19,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 _QUERY_EMBEDDING_CACHE_TTL_SECONDS = 60.0
 _QUERY_EMBEDDING_CACHE_MAX_SIZE = 256
+_CHROMA_TRANSIENT_QUERY_RETRIES = 3
+_CHROMA_TRANSIENT_RETRY_BASE_SECONDS = 0.05
 
 
 def _clamp(value: float, lower: float, upper: float) -> float:
@@ -181,6 +184,7 @@ def _mmr_select(
 class CognitiveVectorStore:
     def __init__(self, path: str | Path, embedder: Any) -> None:
         client = chromadb.PersistentClient(path=str(path))
+        self._client = client
         self._events = client.get_or_create_collection(
             "cognitive_events", metadata={"hnsw:space": "cosine"}
         )
@@ -188,6 +192,8 @@ class CognitiveVectorStore:
             "cognitive_profiles", metadata={"hnsw:space": "cosine"}
         )
         self._embedder = embedder
+        self._events_lock = asyncio.Lock()
+        self._profiles_lock = asyncio.Lock()
         self._query_embedding_cache: OrderedDict[
             tuple[str, str, str, str], tuple[float, list[float]]
         ] = OrderedDict()
@@ -286,6 +292,18 @@ class CognitiveVectorStore:
             return list(query_embedding), "provided"
         return await self._get_or_create_query_embedding(query_text)
 
+    @staticmethod
+    def _is_transient_query_error(exc: Exception) -> bool:
+        if not isinstance(exc, ChromaInternalError):
+            return False
+        text = str(exc).lower()
+        return "error finding id" in text or "error executing plan" in text
+
+    def _collection_lock(self, col: Any) -> asyncio.Lock:
+        if col is self._events:
+            return self._events_lock
+        return self._profiles_lock
+
     async def upsert_event(
         self, event_id: str, document: str, metadata: dict[str, Any]
     ) -> None:
@@ -298,14 +316,15 @@ class CognitiveVectorStore:
         )
         emb = await self._embed(document)
         col = self._events
-        await asyncio.to_thread(
-            lambda: col.upsert(
-                ids=[event_id],
-                documents=[document],
-                embeddings=[emb],  # type: ignore[arg-type]
-                metadatas=[safe_metadata],
+        async with self._events_lock:
+            await asyncio.to_thread(
+                lambda: col.upsert(
+                    ids=[event_id],
+                    documents=[document],
+                    embeddings=[emb],  # type: ignore[arg-type]
+                    metadatas=[safe_metadata],
+                )
             )
-        )
         logger.info("[认知向量库] 事件写入完成: event_id=%s", event_id)
 
     async def query_events(
@@ -362,14 +381,15 @@ class CognitiveVectorStore:
         )
         emb = await self._embed(document)
         col = self._profiles
-        await asyncio.to_thread(
-            lambda: col.upsert(
-                ids=[profile_id],
-                documents=[document],
-                embeddings=[emb],  # type: ignore[arg-type]
-                metadatas=[safe_metadata],
+        async with self._profiles_lock:
+            await asyncio.to_thread(
+                lambda: col.upsert(
+                    ids=[profile_id],
+                    documents=[document],
+                    embeddings=[emb],  # type: ignore[arg-type]
+                    metadatas=[safe_metadata],
+                )
             )
-        )
         logger.info("[认知向量库] 侧写向量写入完成: profile_id=%s", profile_id)
 
     async def query_profiles(
@@ -458,8 +478,36 @@ class CognitiveVectorStore:
         def _q() -> Any:
             return col.query(**kwargs)
 
+        query_lock = self._collection_lock(col)
         chroma_started = time.perf_counter()
-        raw = await asyncio.to_thread(_q)
+        last_exc: Exception | None = None
+        raw: dict[str, Any] | None = None
+        for attempt in range(1, _CHROMA_TRANSIENT_QUERY_RETRIES + 1):
+            try:
+                async with query_lock:
+                    raw = await asyncio.to_thread(_q)
+                last_exc = None
+                break
+            except Exception as exc:
+                if not self._is_transient_query_error(exc):
+                    raise
+                last_exc = exc
+                if attempt >= _CHROMA_TRANSIENT_QUERY_RETRIES:
+                    raise
+                backoff = _CHROMA_TRANSIENT_RETRY_BASE_SECONDS * attempt
+                logger.warning(
+                    "[认知向量库] Chroma 查询命中瞬时内部错误，准备重试: collection=%s attempt=%s/%s backoff=%.3fs err=%s",
+                    col_name,
+                    attempt,
+                    _CHROMA_TRANSIENT_QUERY_RETRIES,
+                    backoff,
+                    exc,
+                )
+                await asyncio.sleep(backoff)
+        if raw is None:
+            if last_exc is not None:
+                raise last_exc
+            raise RuntimeError(f"query returned no result for collection={col_name}")
         chroma_duration = time.perf_counter() - chroma_started
         docs: list[str] = (raw.get("documents") or [[]])[0]
         metas: list[dict[str, Any]] = (raw.get("metadatas") or [[]])[0]
