@@ -18,7 +18,7 @@ async def execute(args: list[str], context: CommandContext) -> None:
 
     try:
         entry = get_latest_entry()
-        lines.append(f"最新版本：{entry.version} {entry.title}")
+        lines.append(f"    - {entry.title}")
     except ChangelogError:
         logger.warning("changelog 解析失败，跳过版本标题")
     except Exception:
