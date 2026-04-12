@@ -660,7 +660,7 @@ class MemeService:
         file_uri = local_path.resolve().as_uri()
         cq_message = f"[CQ:image,file={file_uri},subType=1]"
         history_message = f"[图片 uid={record.uid} name={local_path.name}]"
-        history_attachment = self.resolve_global_image_sync(uid)
+        history_attachment = await self.resolve_global_image(uid)
         history_attachments = (
             [history_attachment.prompt_ref()]
             if history_attachment is not None

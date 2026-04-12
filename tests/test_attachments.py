@@ -239,6 +239,33 @@ async def test_render_message_with_pic_placeholders_uses_file_uri_and_shadow_tex
 
 
 @pytest.mark.asyncio
+async def test_render_message_with_pic_placeholders_escapes_segment_data_for_cq(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    record = await registry.register_bytes(
+        "group:10001",
+        _PNG_BYTES,
+        kind="image",
+        display_name="cat.png",
+        source_kind="test",
+        segment_data={"summary": "a,b]&["},
+    )
+
+    rendered = await render_message_with_pic_placeholders(
+        f'<pic uid="{record.uid}"/>',
+        registry=registry,
+        scope_key="group:10001",
+        strict=True,
+    )
+
+    assert "summary=a&#44;b&#93;&amp;&#91;" in rendered.delivery_text
+
+
+@pytest.mark.asyncio
 async def test_attachment_registry_prunes_old_records_and_files(tmp_path: Path) -> None:
     registry = AttachmentRegistry(
         registry_path=tmp_path / "attachment_registry.json",

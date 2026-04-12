@@ -117,6 +117,15 @@ def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def _escape_cq_component(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace("[", "&#91;")
+        .replace("]", "&#93;")
+        .replace(",", "&#44;")
+    )
+
+
 def _coerce_positive_int(value: Any) -> int | None:
     if isinstance(value, bool):
         return None
@@ -1076,7 +1085,9 @@ async def render_message_with_pic_placeholders(
             cleaned_value = str(value or "").strip()
             if not cleaned_key or not cleaned_value or cleaned_key == "file":
                 continue
-            cq_args.append(f"{cleaned_key}={cleaned_value}")
+            cq_args.append(
+                f"{_escape_cq_component(cleaned_key)}={_escape_cq_component(cleaned_value)}"
+            )
         delivery_parts.append(f"[CQ:image,{','.join(cq_args)}]")
         if record.display_name:
             history_parts.append(f"[图片 uid={uid} name={record.display_name}]")
