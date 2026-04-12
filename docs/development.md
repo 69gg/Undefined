@@ -30,10 +30,10 @@ src/Undefined/
 
 ## 开发指南
 
-- **添加新 Agent 与工具**：请参考项目内的详细指南 [src/Undefined/skills/README.md](../../src/Undefined/skills/README.md) 了解如何编写新的功能单元、注册工具和打包一个新的专业 Agent。
-- **Agents 开发专版**：[agents/README.md](../../src/Undefined/skills/agents/README.md)
-- **Tools 开发专版**：[tools/README.md](../../src/Undefined/skills/tools/README.md)
-- **Toolsets 开发专版**：[toolsets/README.md](../../src/Undefined/skills/toolsets/README.md)
+- **添加新 Agent 与工具**：请参考项目内的详细指南 [src/Undefined/skills/README.md](../src/Undefined/skills/README.md) 了解如何编写新的功能单元、注册工具和打包一个新的专业 Agent。
+- **Agents 开发专版**：[agents/README.md](../src/Undefined/skills/agents/README.md)
+- **Tools 开发专版**：[tools/README.md](../src/Undefined/skills/tools/README.md)
+- **Toolsets 开发专版**：[toolsets/README.md](../src/Undefined/skills/toolsets/README.md)
 - **Commands 开发专版**：[详细斜杠指令开发指南](slash-commands.md)
 
 ### CHANGELOG 维护约定

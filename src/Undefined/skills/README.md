@@ -1,6 +1,6 @@
 # 技能中心 (Skills Architecture)
 
-> 👈 **[返回项目主页](../../../../README.md)** | **[阅读详细扩展开发指南](../../../../docs/development.md)**
+> 👈 **[返回项目主页](../../../README.md)** | **[阅读详细扩展开发指南](../../../docs/development.md)**
 
 技能目录，包含基础工具（tools）、智能代理（agents）、工具集合（toolsets）和 Anthropic Skills（anthropic_skills）。它构成了 Undefined 机器人的所有核心能力基座。
 
@@ -27,7 +27,8 @@ skills/
 │   ├── file_analysis_agent/
 │   ├── naga_code_analysis_agent/
 │   ├── info_agent/
-│   └── entertainment_agent/
+│   ├── entertainment_agent/
+│   └── code_delivery_agent/
 │
 ├── toolsets/       # 工具集合，按功能分类组织
 │   ├── __init__.py
@@ -165,7 +166,7 @@ skills/
 
 ### 添加平台斜杠指令 (Commands)
 
-详细说明请参考 [顶级斜杠指令指南](../../../../docs/slash-commands.md)。
+详细说明请参考 [顶级斜杠指令指南](../../../docs/slash-commands.md)。
 1. 在 `skills/commands/` 下创建新目录
 2. 添加 `config.json`（设定命令的前缀、优先级和权限限定）
 3. 添加 `handler.py`（执行逻辑，接收和回复用户的直接指令）

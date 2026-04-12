@@ -55,8 +55,9 @@ OneBot WebSocket → onebot.py → handlers.py → SecurityService(注入检测)
 |------|------|
 | `ai/` | AI 核心：client.py(主入口)、llm.py(模型请求)、prompts.py(Prompt构建)、tooling.py(工具管理)、multimodal.py(多模态)、model_selector.py(模型选择) |
 | `services/` | 运行服务：ai_coordinator.py(协调器+队列投递)、queue_manager.py(车站-列车队列)、command.py(命令分发)、model_pool.py(多模型池)、security.py(安全防护) |
-| `skills/` | 热重载技能系统：tools/(原子工具)、toolsets/(9类工具集)、agents/(6个智能体)、commands/(斜杠指令)、anthropic_skills/(SKILL.md知识注入) |
+| `skills/` | 热重载技能系统：tools/(原子工具)、toolsets/(11类工具集)、agents/(6个智能体)、commands/(斜杠指令)、anthropic_skills/(SKILL.md知识注入) |
 | `cognitive/` | 认知记忆：service.py(入口)、vector_store.py(ChromaDB)、historian.py(后台史官异步改写+侧写合并)、job_queue.py、profile_storage.py |
+| `memes/` | 表情包库：service.py(两阶段AI管线)、worker.py(异步处理队列)、store.py(SQLite)、vector_store.py(ChromaDB)、models.py |
 | `config/` | 配置系统：loader.py(TOML解析+类型化)、models.py(数据模型)、hot_reload.py(热更新) |
 | `webui/` | aiohttp Web 管理控制台 |
 | `api/` | Management API + Runtime API |
@@ -81,6 +82,7 @@ OneBot WebSocket → onebot.py → handlers.py → SecurityService(注入检测)
 ### 存储与数据
 - `data/history/` — 消息历史（group_*.json / private_*.json，10000 条限制）
 - `data/cognitive/` — ChromaDB 向量库 + profiles/ 侧写 + queues/ 任务队列
+- `data/memes/` — 表情包库（blobs原图、previews预览图、memes.sqlite3元数据、chromadb向量检索）
 - `data/memory.json` — 置顶备忘录（500 条上限）
 - `data/faq/` — FAQ 存储
 - `data/token_usage.jsonl` — Token 统计（自动 gzip 归档）
