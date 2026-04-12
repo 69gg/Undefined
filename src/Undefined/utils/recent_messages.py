@@ -140,7 +140,7 @@ def _normalize_attachment_ref(item: Any) -> dict[str, str] | None:
     return normalized
 
 
-def _resolve_meme_attachment_ref(
+async def _resolve_meme_attachment_ref(
     attachment_registry: Any,
     uid: str,
     scope_key: str | None,
@@ -148,7 +148,11 @@ def _resolve_meme_attachment_ref(
     if attachment_registry is None:
         return None
     try:
-        record = attachment_registry.resolve(uid, scope_key)
+        resolve_async = getattr(attachment_registry, "resolve_async", None)
+        if callable(resolve_async):
+            record = await resolve_async(uid, scope_key)
+        else:
+            record = attachment_registry.resolve(uid, scope_key)
     except Exception as exc:
         logger.debug("补全历史附件失败: uid=%s err=%s", uid, exc)
         return None
@@ -179,7 +183,7 @@ def _merge_meme_attachment_ref(
     return merged
 
 
-def _augment_local_messages_with_meme_attachments(
+async def _augment_local_messages_with_meme_attachments(
     messages: list[dict[str, Any]],
     *,
     chat_id: str,
@@ -201,7 +205,7 @@ def _augment_local_messages_with_meme_attachments(
                 normalized = _normalize_attachment_ref(item)
                 if normalized is None:
                     continue
-                resolved = _resolve_meme_attachment_ref(
+                resolved = await _resolve_meme_attachment_ref(
                     attachment_registry,
                     normalized["uid"],
                     scope_key,
@@ -218,7 +222,7 @@ def _augment_local_messages_with_meme_attachments(
                 if not uid or uid in seen_uids:
                     continue
                 seen_uids.add(uid)
-                resolved = _resolve_meme_attachment_ref(
+                resolved = await _resolve_meme_attachment_ref(
                     attachment_registry,
                     uid,
                     scope_key,
@@ -258,7 +262,7 @@ async def get_recent_messages_prefer_local(
         norm_end,
     )
     if local_messages:
-        return _augment_local_messages_with_meme_attachments(
+        return await _augment_local_messages_with_meme_attachments(
             local_messages,
             chat_id=chat_id,
             msg_type=msg_type,

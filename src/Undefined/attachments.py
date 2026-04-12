@@ -442,12 +442,21 @@ class AttachmentRegistry:
         self._global_image_resolver: Callable[[str], AttachmentRecord | None] | None = (
             None
         )
+        self._global_image_resolver_async: (
+            Callable[[str], Awaitable[AttachmentRecord | None]] | None
+        ) = None
 
     def set_global_image_resolver(
         self,
         resolver: Callable[[str], AttachmentRecord | None] | None,
     ) -> None:
         self._global_image_resolver = resolver
+
+    def set_global_image_resolver_async(
+        self,
+        resolver: Callable[[str], Awaitable[AttachmentRecord | None]] | None,
+    ) -> None:
+        self._global_image_resolver_async = resolver
 
     def _resolve_managed_cache_path(self, raw_path: str | None) -> Path | None:
         text = str(raw_path or "").strip()
@@ -618,6 +627,39 @@ class AttachmentRegistry:
                     "[AttachmentRegistry] global image resolver failed: uid=%s", uid
                 )
                 record = None
+        if record is None:
+            return None
+        if record.scope_key and scope_key and record.scope_key != scope_key:
+            return None
+        return record
+
+    async def resolve_async(
+        self, uid: str, scope_key: str | None
+    ) -> AttachmentRecord | None:
+        record = self.get(uid)
+        if record is not None:
+            if record.scope_key and scope_key and record.scope_key != scope_key:
+                return None
+            return record
+        if self._global_image_resolver_async is not None:
+            try:
+                record = await self._global_image_resolver_async(uid)
+            except Exception:
+                logger.exception(
+                    "[AttachmentRegistry] async global image resolver failed: uid=%s",
+                    uid,
+                )
+                record = None
+        elif self._global_image_resolver is not None:
+            try:
+                record = self._global_image_resolver(uid)
+            except Exception:
+                logger.exception(
+                    "[AttachmentRegistry] global image resolver failed: uid=%s", uid
+                )
+                record = None
+        else:
+            record = None
         if record is None:
             return None
         if record.scope_key and scope_key and record.scope_key != scope_key:
@@ -1052,7 +1094,7 @@ async def render_message_with_pic_placeholders(
         history_parts.append(message[last_index : match.start()])
         last_index = match.end()
 
-        record = registry.resolve(uid, scope_key)
+        record = await registry.resolve_async(uid, scope_key)
         if record is None:
             replacement = f"[图片 uid={uid} 不可用]"
             if strict:

@@ -598,9 +598,13 @@ class AIClient:
     def set_meme_service(self, service: Any) -> None:
         self._meme_service = service
         resolver = None
+        async_resolver = None
         if service is not None and hasattr(service, "resolve_global_image_sync"):
             resolver = service.resolve_global_image_sync
+        if service is not None and hasattr(service, "resolve_global_image"):
+            async_resolver = service.resolve_global_image
         self.attachment_registry.set_global_image_resolver(resolver)
+        self.attachment_registry.set_global_image_resolver_async(async_resolver)
         logger.info(
             "[AI客户端] 表情包服务已挂载: enabled=%s",
             bool(getattr(service, "enabled", False)) if service is not None else False,

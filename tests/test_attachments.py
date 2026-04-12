@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 from pathlib import Path
 from typing import Any
@@ -263,6 +264,51 @@ async def test_render_message_with_pic_placeholders_escapes_segment_data_for_cq(
     )
 
     assert "summary=a&#44;b&#93;&amp;&#91;" in rendered.delivery_text
+
+
+@pytest.mark.asyncio
+async def test_render_message_with_pic_placeholders_supports_async_global_resolver(
+    tmp_path: Path,
+) -> None:
+    blob = tmp_path / "async-meme.png"
+    blob.write_bytes(_PNG_BYTES)
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+
+    async def _global_resolver(uid: str) -> AttachmentRecord | None:
+        await asyncio.sleep(0)
+        if uid != "pic_async_global":
+            return None
+        return AttachmentRecord(
+            uid=uid,
+            scope_key="",
+            kind="image",
+            media_type="image",
+            display_name="async-meme.png",
+            source_kind="meme_library",
+            source_ref=blob.resolve().as_uri(),
+            local_path=str(blob),
+            mime_type="image/png",
+            sha256="async-deadbeef",
+            created_at="2026-04-12T12:00:00",
+            segment_data={"subType": "1"},
+        )
+
+    registry.set_global_image_resolver_async(_global_resolver)
+
+    rendered = await render_message_with_pic_placeholders(
+        'hello\n<pic uid="pic_async_global"/>',
+        registry=registry,
+        scope_key="group:123",
+        strict=True,
+    )
+
+    assert (
+        rendered.delivery_text
+        == f"hello\n[CQ:image,file={blob.resolve().as_uri()},subType=1]"
+    )
 
 
 @pytest.mark.asyncio
