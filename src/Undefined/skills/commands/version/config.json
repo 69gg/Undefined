@@ -1,0 +1,12 @@
+{
+    "name": "version",
+    "description": "查看当前版本号与最新版本变更标题",
+    "usage": "/version",
+    "example": "/version",
+    "permission": "public",
+    "rate_limit": { "user": 5, "admin": 0, "superadmin": 0 },
+    "show_in_help": true,
+    "order": 16,
+    "allow_in_private": true,
+    "aliases": ["v"]
+}
