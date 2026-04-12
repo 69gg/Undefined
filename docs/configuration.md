@@ -152,6 +152,7 @@ model_name = "gpt-4o-mini"
 | `thinking_tool_call_compat` | Tool Calls 兼容模式：在本地历史中回填内部兼容字段 `reasoning_content`；默认 `true` |
 | `responses_tool_choice_compat` | `responses` 下的 `tool_choice` 兼容开关：仅建议在默认关闭时请求仍返回 500、怀疑上游不兼容对象型 `tool_choice` 时再尝试开启；开启后降级为字符串 `"required"`；默认 `false` |
 | `responses_force_stateless_replay` | `responses` 下的续轮强制降级开关：启用后多轮工具调用始终跳过 `previous_response_id`，改为完整消息重放；默认 `false` |
+| `prompt_cache_enabled` | 是否自动生成稳定的 `prompt_cache_key` 以提升相似请求缓存命中率；默认 `true` |
 | `request_params` | 额外请求体参数（透传给模型 API，保留字段会忽略） |
 
 请求模式说明：
@@ -169,6 +170,11 @@ model_name = "gpt-4o-mini"
   - 仅建议在默认关闭时请求仍返回 500，再尝试开启这些兼容开关
   - 当前已知 `new-api v0.11.4-alpha.3` 存在这类兼容问题
   - 旧式 `thinking_*` 不会下发到 `responses`
+
+Prompt caching 补充：
+- 当 `prompt_cache_enabled=true` 且未显式设置 `prompt_cache_key` 时，运行时会按“模型名 + call_type + 会话作用域”自动生成稳定 key。
+- 该 key 只用于提升路由稳定性，不改变 prompt 内容。
+- 想提高缓存命中率时，仍应尽量把静态内容放前面、把高频变化内容放后面。
 
 `request_params` 说明：
 - 适合放 provider 私有请求体字段，例如 `metadata`、`temperature`、兼容网关扩展参数等。
@@ -701,7 +707,44 @@ model_name = "gpt-4o-mini"
 
 ---
 
-### 4.25 `[naga]` Naga 外部网关集成
+### 4.25 `[memes]` 表情包库
+
+| 字段 | 默认值 | 说明 | 约束/回退 |
+|---|---:|---|---|
+| `enabled` | `true` | 是否启用全局表情包库 | 关闭后不会自动入库，也无法使用 `memes.*` 工具 |
+| `query_default_mode` | `"hybrid"` | 默认检索模式：`keyword` / `semantic` / `hybrid` | 非法值按 `hybrid` 处理 |
+| `max_source_image_bytes` | `512000` | 入库前允许处理的原始图片大小上限（字节） | `<=0` 回退 `512000` |
+| `blob_dir` | `data/memes/blobs` | 原图持久化目录 | 路径变更建议重启 |
+| `preview_dir` | `data/memes/previews` | 预览图目录（GIF 抽首帧） | 路径变更建议重启 |
+| `db_path` | `data/memes/memes.sqlite3` | SQLite 元数据路径 | 路径变更建议重启 |
+| `vector_store_path` | `data/memes/chromadb` | Chroma 向量索引目录 | 路径变更建议重启 |
+| `queue_path` | `data/memes/queues` | 后台任务队列目录 | 路径变更建议重启 |
+| `max_items` | `10000` | 表情包条目上限 | `<=0` 回退 `10000` |
+| `max_total_bytes` | `5368709120` | 表情包总磁盘占用上限（字节） | `<=0` 回退 `5368709120` |
+| `allow_gif` | `true` | 是否允许 GIF 入库 | |
+| `auto_ingest_group` | `true` | 是否自动处理群聊图片 | |
+| `auto_ingest_private` | `true` | 是否自动处理私聊图片 | |
+| `keyword_top_k` | `30` | 关键词候选召回数 | `<=0` 回退 `30` |
+| `semantic_top_k` | `30` | 语义候选召回数 | `<=0` 回退 `30` |
+| `rerank_top_k` | `20` | 重排候选数 | `<=0` 回退 `20` |
+
+说明：
+- 表情包入库走两阶段 LLM 管线：
+  1. 判定是否为表情包
+  2. 对通过判定的图片生成纯文本描述与标签
+- 第一阶段失败时，按“不是表情包”处理，直接丢弃。
+- 第二阶段不做 OCR；向量存储和检索文本只使用纯文本 `description + tags + aliases`。
+- 同一图片内容在单进程内会按 `SHA256` 串行入库，避免并发表情包重复写入。
+- 若入库在写入来源记录或向量索引阶段失败，会回滚已写入的元数据与本地文件，避免残留孤儿记录。
+- 表情包与普通图片复用同一套图片 `uid` 语义。检索返回的 `uid` 既可用于 `memes.send_meme_by_uid`，也可直接用于 `<pic uid="..."/>`。
+- 检索模式：
+  - `keyword`：只跑 SQLite FTS / LIKE 关键词检索；按空白切分后的中文、英文关键词都会参与 FTS 匹配
+  - `semantic`：只跑 Chroma 语义检索
+  - `hybrid`：关键词与语义同时召回，再合并并按配置重排
+- 关键词检索会按空白切分查询词项并构造 FTS phrase，因此中文标签、别名或描述词同样可以走 FTS 召回。
+- `query_default_mode` 只影响 `memes.search_memes` 未显式传 `query_mode` 时的默认值。
+
+### 4.26 `[naga]` Naga 外部网关集成
 
 > **⚠️ 此功能面向与 NagaAgent 对接的高级场景，普通用户不建议开启。**
 
@@ -759,6 +802,11 @@ model_name = "gpt-4o-mini"
 - `webui.port`
 - `webui.password`
 - `api.*`（`enabled/host/port/auth_key/openapi_enabled`）
+- `memes.blob_dir`
+- `memes.preview_dir`
+- `memes.db_path`
+- `memes.vector_store_path`
+- `memes.queue_path`
 - `naga.*`（`enabled/api_url/api_key/moderation_enabled/allowed_groups`）
 
 ### 5.3 明确“会执行热应用”的字段

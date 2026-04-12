@@ -157,6 +157,33 @@ class PromptBuilder:
             enabled = getattr(cognitive, "enabled", False)
             parts.append(f"- 认知记忆: {'已启用' if enabled else '未启用'}")
 
+        # 知识库
+        knowledge_enabled = bool(getattr(runtime_config, "knowledge_enabled", False))
+        parts.append(f"- 知识库: {'已启用' if knowledge_enabled else '未启用'}")
+
+        # 联网搜索
+        grok_search_enabled = bool(
+            getattr(runtime_config, "grok_search_enabled", False)
+        )
+        parts.append(f"- 联网搜索: {'已启用' if grok_search_enabled else '未启用'}")
+
+        # 表情包库
+        memes = getattr(runtime_config, "memes", None)
+        if memes is not None:
+            memes_enabled = bool(getattr(memes, "enabled", False))
+            if memes_enabled:
+                query_mode = str(
+                    getattr(memes, "query_default_mode", "hybrid") or "hybrid"
+                ).strip()
+                allow_gif = bool(getattr(memes, "allow_gif", True))
+                max_source_bytes = int(getattr(memes, "max_source_image_bytes", 0) or 0)
+                max_source_kb = max_source_bytes // 1024 if max_source_bytes > 0 else 0
+                parts.append(
+                    f"- 表情包库: 已启用（默认检索={query_mode}，GIF={'允许' if allow_gif else '禁用'}，入库上限={max_source_kb}KB）"
+                )
+            else:
+                parts.append("- 表情包库: 未启用")
+
         # 模型池
         if chat_model:
             pool = getattr(chat_model, "pool", None)
@@ -336,12 +363,14 @@ class PromptBuilder:
                 }
             )
 
+        deferred_messages: list[dict[str, Any]] = []
+
         if self._memory_storage:
             memories = self._memory_storage.get_all()
             if memories:
                 memory_lines = [f"- {mem.fact}" for mem in memories]
                 memory_text = "\n".join(memory_lines)
-                messages.append(
+                deferred_messages.append(
                     {
                         "role": "system",
                         "content": (
@@ -438,7 +467,9 @@ class PromptBuilder:
                 request_type=resolved_request_type or None,
             )
             if cognitive_context:
-                messages.append({"role": "system", "content": cognitive_context})
+                deferred_messages.append(
+                    {"role": "system", "content": cognitive_context}
+                )
                 logger.info(
                     "[AI会话] 已注入认知记忆上下文: context_len=%s",
                     len(cognitive_context),
@@ -469,7 +500,7 @@ class PromptBuilder:
                     )
                 recent_summary_text = "\n".join(recent_summary_lines).strip()
                 if recent_summary_text:
-                    messages.append(
+                    deferred_messages.append(
                         {
                             "role": "system",
                             "content": (
@@ -498,7 +529,7 @@ class PromptBuilder:
                     f"- [{item['timestamp']}] {item['summary']}{location_text}"
                 )
             summary_text = "\n".join(summary_lines)
-            messages.append(
+            deferred_messages.append(
                 {
                     "role": "system",
                     "content": (
@@ -518,8 +549,10 @@ class PromptBuilder:
 
         if get_recent_messages_callback:
             await self._inject_recent_messages(
-                messages, get_recent_messages_callback, extra_context, question
+                deferred_messages, get_recent_messages_callback, extra_context, question
             )
+
+        messages.extend(deferred_messages)
 
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         messages.append(

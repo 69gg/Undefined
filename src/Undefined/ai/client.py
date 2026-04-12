@@ -137,6 +137,7 @@ class AIClient:
         self._token_counter = TokenCounter()
         self._knowledge_manager: Any = None
         self._cognitive_service: Any = cognitive_service
+        self._meme_service: Any = None
         self.attachment_registry = AttachmentRegistry(http_client=self._http_client)
 
         # 私聊发送回调
@@ -594,6 +595,21 @@ class AIClient:
             bool(getattr(service, "enabled", False)) if service is not None else False,
         )
 
+    def set_meme_service(self, service: Any) -> None:
+        self._meme_service = service
+        resolver = None
+        async_resolver = None
+        if service is not None and hasattr(service, "resolve_global_image_sync"):
+            resolver = service.resolve_global_image_sync
+        if service is not None and hasattr(service, "resolve_global_image"):
+            async_resolver = service.resolve_global_image
+        self.attachment_registry.set_global_image_resolver(resolver)
+        self.attachment_registry.set_global_image_resolver_async(async_resolver)
+        logger.info(
+            "[AI客户端] 表情包服务已挂载: enabled=%s",
+            bool(getattr(service, "enabled", False)) if service is not None else False,
+        )
+
     def apply_search_config(self, searxng_url: str) -> None:
         """应用搜索服务配置（支持热更新）。"""
         if not _SEARX_AVAILABLE or _SearxSearchWrapper is None:
@@ -817,6 +833,12 @@ class AIClient:
     ) -> dict[str, str]:
         return await self._multimodal.describe_image(image_url, prompt_extra)
 
+    async def judge_meme_image(self, image_url: str) -> dict[str, Any]:
+        return await self._multimodal.judge_meme_image(image_url)
+
+    async def describe_meme_image(self, image_url: str) -> dict[str, Any]:
+        return await self._multimodal.describe_meme_image(image_url)
+
     def get_media_history(self, media_key: str) -> list[dict[str, str]]:
         """获取指定媒体键的多模态分析历史 Q&A 记录。"""
         return self._multimodal.get_history(media_key)
@@ -989,6 +1011,7 @@ class AIClient:
         tool_context.setdefault("memory_storage", self.memory_storage)
         tool_context.setdefault("knowledge_manager", self._knowledge_manager)
         tool_context.setdefault("cognitive_service", self._cognitive_service)
+        tool_context.setdefault("meme_service", self._meme_service)
         tool_context.setdefault("current_question", question)
         message_ids = tool_context.get("message_ids")
         if not isinstance(message_ids, list):

@@ -36,6 +36,7 @@ from .models import (
     GrokModelConfig,
     ImageGenConfig,
     ImageGenModelConfig,
+    MemeConfig,
     ModelPool,
     ModelPoolEntry,
     NagaConfig,
@@ -579,6 +580,8 @@ class Config:
     arxiv_summary_preview_chars: int
     # 认知记忆
     cognitive: CognitiveConfig
+    # 表情包库
+    memes: MemeConfig
     # Naga 集成
     naga: NagaConfig
     # 生图工具配置
@@ -1331,6 +1334,7 @@ class Config:
         api_config = cls._parse_api_config(data)
 
         cognitive = cls._parse_cognitive_config(data)
+        memes = cls._parse_memes_config(data)
         naga = cls._parse_naga_config(data)
         models_image_gen = cls._parse_image_gen_model_config(data)
         models_image_edit = cls._parse_image_edit_model_config(data)
@@ -1478,6 +1482,7 @@ class Config:
             knowledge_enable_rerank=knowledge_enable_rerank,
             knowledge_rerank_top_k=knowledge_rerank_top_k,
             cognitive=cognitive,
+            memes=memes,
             naga=naga,
             image_gen=image_gen,
             models_image_gen=models_image_gen,
@@ -1743,6 +1748,10 @@ class Config:
                         item.get("responses_force_stateless_replay"),
                         primary_config.responses_force_stateless_replay,
                     ),
+                    prompt_cache_enabled=_coerce_bool(
+                        item.get("prompt_cache_enabled"),
+                        primary_config.prompt_cache_enabled,
+                    ),
                     reasoning_enabled=_coerce_bool(
                         item.get("reasoning_enabled"),
                         primary_config.reasoning_enabled,
@@ -1867,6 +1876,14 @@ class Config:
         responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
             data, "chat", "CHAT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
         )
+        prompt_cache_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "chat", "prompt_cache_enabled"),
+                "CHAT_MODEL_PROMPT_CACHE_ENABLED",
+            ),
+            True,
+        )
         reasoning_enabled = _coerce_bool(
             _get_value(
                 data,
@@ -1931,6 +1948,7 @@ class Config:
             thinking_tool_call_compat=thinking_tool_call_compat,
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
+            prompt_cache_enabled=prompt_cache_enabled,
             reasoning_enabled=reasoning_enabled,
             reasoning_effort=reasoning_effort,
             request_params=_get_model_request_params(data, "chat"),
@@ -1965,6 +1983,14 @@ class Config:
         )
         responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
             data, "vision", "VISION_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+        )
+        prompt_cache_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "vision", "prompt_cache_enabled"),
+                "VISION_MODEL_PROMPT_CACHE_ENABLED",
+            ),
+            True,
         )
         reasoning_enabled = _coerce_bool(
             _get_value(
@@ -2030,6 +2056,7 @@ class Config:
             thinking_tool_call_compat=thinking_tool_call_compat,
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
+            prompt_cache_enabled=prompt_cache_enabled,
             reasoning_enabled=reasoning_enabled,
             reasoning_effort=reasoning_effort,
             request_params=_get_model_request_params(data, "vision"),
@@ -2082,6 +2109,14 @@ class Config:
         )
         responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
             data, "security", "SECURITY_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+        )
+        prompt_cache_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "security", "prompt_cache_enabled"),
+                "SECURITY_MODEL_PROMPT_CACHE_ENABLED",
+            ),
+            True,
         )
         reasoning_enabled = _coerce_bool(
             _get_value(
@@ -2142,6 +2177,7 @@ class Config:
                 thinking_tool_call_compat=thinking_tool_call_compat,
                 responses_tool_choice_compat=responses_tool_choice_compat,
                 responses_force_stateless_replay=responses_force_stateless_replay,
+                prompt_cache_enabled=prompt_cache_enabled,
                 reasoning_enabled=reasoning_enabled,
                 reasoning_effort=reasoning_effort,
                 request_params=_get_model_request_params(data, "security"),
@@ -2162,6 +2198,7 @@ class Config:
             thinking_tool_call_compat=chat_model.thinking_tool_call_compat,
             responses_tool_choice_compat=chat_model.responses_tool_choice_compat,
             responses_force_stateless_replay=chat_model.responses_force_stateless_replay,
+            prompt_cache_enabled=chat_model.prompt_cache_enabled,
             reasoning_enabled=chat_model.reasoning_enabled,
             reasoning_effort=chat_model.reasoning_effort,
             request_params=merge_request_params(chat_model.request_params),
@@ -2208,6 +2245,14 @@ class Config:
         )
         responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
             data, "naga", "NAGA_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+        )
+        prompt_cache_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "naga", "prompt_cache_enabled"),
+                "NAGA_MODEL_PROMPT_CACHE_ENABLED",
+            ),
+            getattr(security_model, "prompt_cache_enabled", True),
         )
         reasoning_enabled = _coerce_bool(
             _get_value(
@@ -2268,6 +2313,7 @@ class Config:
                 thinking_tool_call_compat=thinking_tool_call_compat,
                 responses_tool_choice_compat=responses_tool_choice_compat,
                 responses_force_stateless_replay=responses_force_stateless_replay,
+                prompt_cache_enabled=prompt_cache_enabled,
                 reasoning_enabled=reasoning_enabled,
                 reasoning_effort=reasoning_effort,
                 request_params=_get_model_request_params(data, "naga"),
@@ -2290,6 +2336,7 @@ class Config:
             thinking_tool_call_compat=security_model.thinking_tool_call_compat,
             responses_tool_choice_compat=security_model.responses_tool_choice_compat,
             responses_force_stateless_replay=security_model.responses_force_stateless_replay,
+            prompt_cache_enabled=security_model.prompt_cache_enabled,
             reasoning_enabled=security_model.reasoning_enabled,
             reasoning_effort=security_model.reasoning_effort,
             request_params=merge_request_params(security_model.request_params),
@@ -2322,6 +2369,14 @@ class Config:
         )
         responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
             data, "agent", "AGENT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+        )
+        prompt_cache_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("models", "agent", "prompt_cache_enabled"),
+                "AGENT_MODEL_PROMPT_CACHE_ENABLED",
+            ),
+            True,
         )
         reasoning_enabled = _coerce_bool(
             _get_value(
@@ -2387,6 +2442,7 @@ class Config:
             thinking_tool_call_compat=thinking_tool_call_compat,
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
+            prompt_cache_enabled=prompt_cache_enabled,
             reasoning_enabled=reasoning_enabled,
             reasoning_effort=reasoning_effort,
             request_params=_get_model_request_params(data, "agent"),
@@ -2456,6 +2512,14 @@ class Config:
                     ("models", "grok", "reasoning_effort_style"),
                     "GROK_MODEL_REASONING_EFFORT_STYLE",
                 ),
+            ),
+            prompt_cache_enabled=_coerce_bool(
+                _get_value(
+                    data,
+                    ("models", "grok", "prompt_cache_enabled"),
+                    "GROK_MODEL_PROMPT_CACHE_ENABLED",
+                ),
+                True,
             ),
             reasoning_enabled=_coerce_bool(
                 _get_value(
@@ -2716,6 +2780,14 @@ class Config:
             "HISTORIAN_MODEL_RESPONSES_FORCE_STATELESS_REPLAY",
             fallback.responses_force_stateless_replay,
         )
+        prompt_cache_enabled = _coerce_bool(
+            _get_value(
+                {"models": {"historian": h}},
+                ("models", "historian", "prompt_cache_enabled"),
+                "HISTORIAN_MODEL_PROMPT_CACHE_ENABLED",
+            ),
+            fallback.prompt_cache_enabled,
+        )
         return AgentModelConfig(
             api_url=_coerce_str(h.get("api_url"), fallback.api_url),
             api_key=_coerce_str(h.get("api_key"), fallback.api_key),
@@ -2741,6 +2813,7 @@ class Config:
             thinking_tool_call_compat=thinking_tool_call_compat,
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
+            prompt_cache_enabled=prompt_cache_enabled,
             reasoning_enabled=_coerce_bool(
                 _get_value(
                     {"models": {"historian": h}},
@@ -2890,6 +2963,40 @@ class Config:
             ),
             job_max_retries=_coerce_int(
                 que.get("job_max_retries") if isinstance(que, dict) else None, 3
+            ),
+        )
+
+    @staticmethod
+    def _parse_memes_config(data: dict[str, Any]) -> MemeConfig:
+        section_raw = data.get("memes", {})
+        section = section_raw if isinstance(section_raw, dict) else {}
+        return MemeConfig(
+            enabled=_coerce_bool(section.get("enabled"), True),
+            query_default_mode=_coerce_str(section.get("query_default_mode"), "hybrid"),
+            max_source_image_bytes=max(
+                1,
+                _coerce_int(section.get("max_source_image_bytes"), 500 * 1024),
+            ),
+            blob_dir=_coerce_str(section.get("blob_dir"), "data/memes/blobs"),
+            preview_dir=_coerce_str(section.get("preview_dir"), "data/memes/previews"),
+            db_path=_coerce_str(section.get("db_path"), "data/memes/memes.sqlite3"),
+            vector_store_path=_coerce_str(
+                section.get("vector_store_path"), "data/memes/chromadb"
+            ),
+            queue_path=_coerce_str(section.get("queue_path"), "data/memes/queues"),
+            max_items=max(1, _coerce_int(section.get("max_items"), 10000)),
+            max_total_bytes=max(
+                1,
+                _coerce_int(section.get("max_total_bytes"), 5 * 1024 * 1024 * 1024),
+            ),
+            allow_gif=_coerce_bool(section.get("allow_gif"), True),
+            auto_ingest_group=_coerce_bool(section.get("auto_ingest_group"), True),
+            auto_ingest_private=_coerce_bool(section.get("auto_ingest_private"), True),
+            keyword_top_k=max(1, _coerce_int(section.get("keyword_top_k"), 30)),
+            semantic_top_k=max(1, _coerce_int(section.get("semantic_top_k"), 30)),
+            rerank_top_k=max(1, _coerce_int(section.get("rerank_top_k"), 20)),
+            worker_max_concurrency=max(
+                1, _coerce_int(section.get("worker_max_concurrency"), 4)
             ),
         )
 

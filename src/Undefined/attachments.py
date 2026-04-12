@@ -76,14 +76,24 @@ class AttachmentRecord:
     mime_type: str
     sha256: str
     created_at: str
+    segment_data: dict[str, str]
+    semantic_kind: str = ""
+    description: str = ""
 
     def prompt_ref(self) -> dict[str, str]:
-        return {
+        ref: dict[str, str] = {
             "uid": self.uid,
             "kind": self.kind,
             "media_type": self.media_type,
             "display_name": self.display_name,
         }
+        if self.source_kind.strip():
+            ref["source_kind"] = self.source_kind.strip()
+        if self.semantic_kind.strip():
+            ref["semantic_kind"] = self.semantic_kind.strip()
+        if self.description.strip():
+            ref["description"] = self.description.strip()
+        return ref
 
 
 @dataclass(frozen=True)
@@ -105,6 +115,15 @@ class AttachmentRenderError(RuntimeError):
 
 def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+def _escape_cq_component(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace("[", "&#91;")
+        .replace("]", "&#93;")
+        .replace(",", "&#44;")
+    )
 
 
 def _coerce_positive_int(value: Any) -> int | None:
@@ -199,6 +218,15 @@ def attachment_refs_to_xml(
         ]
         if name:
             attrs.append(f'name="{escape_xml_attr(name)}"')
+        source_kind = str(item.get("source_kind", "") or "").strip()
+        if source_kind:
+            attrs.append(f'source_kind="{escape_xml_attr(source_kind)}"')
+        semantic_kind = str(item.get("semantic_kind", "") or "").strip()
+        if semantic_kind:
+            attrs.append(f'semantic_kind="{escape_xml_attr(semantic_kind)}"')
+        description = str(item.get("description", "") or "").strip()
+        if description:
+            attrs.append(f'description="{escape_xml_attr(description)}"')
         lines.append(f"{indent} <attachment {' '.join(attrs)} />")
     lines.append(f"{indent}</attachments>")
     return "\n".join(lines)
@@ -344,6 +372,26 @@ def _extract_forward_id(data: Mapping[str, Any]) -> str:
     return str(forward_id).strip() if forward_id is not None else ""
 
 
+def _segment_data_from_onebot_data(
+    data: Mapping[str, Any],
+    *,
+    exclude_keys: set[str] | None = None,
+) -> dict[str, str]:
+    excluded = {key.strip().lower() for key in (exclude_keys or set()) if key.strip()}
+    normalized: dict[str, str] = {}
+    for raw_key, raw_value in data.items():
+        key = str(raw_key or "").strip()
+        if not key:
+            continue
+        if key.lower() in excluded:
+            continue
+        text = str(raw_value or "").strip()
+        if not text:
+            continue
+        normalized[key] = text
+    return normalized
+
+
 def _normalize_message_segments(message: Any) -> list[Mapping[str, Any]]:
     if isinstance(message, list):
         normalized: list[Mapping[str, Any]] = []
@@ -391,6 +439,24 @@ class AttachmentRegistry:
         self._records: dict[str, AttachmentRecord] = {}
         self._loaded = False
         self._load_task: asyncio.Task[None] | None = None
+        self._global_image_resolver: Callable[[str], AttachmentRecord | None] | None = (
+            None
+        )
+        self._global_image_resolver_async: (
+            Callable[[str], Awaitable[AttachmentRecord | None]] | None
+        ) = None
+
+    def set_global_image_resolver(
+        self,
+        resolver: Callable[[str], AttachmentRecord | None] | None,
+    ) -> None:
+        self._global_image_resolver = resolver
+
+    def set_global_image_resolver_async(
+        self,
+        resolver: Callable[[str], Awaitable[AttachmentRecord | None]] | None,
+    ) -> None:
+        self._global_image_resolver_async = resolver
 
     def _resolve_managed_cache_path(self, raw_path: str | None) -> Path | None:
         text = str(raw_path or "").strip()
@@ -501,6 +567,13 @@ class AttachmentRegistry:
                     ),
                     sha256=str(item.get("sha256", "") or ""),
                     created_at=str(item.get("created_at", "") or ""),
+                    segment_data={
+                        str(k): str(v)
+                        for k, v in dict(item.get("segment_data") or {}).items()
+                        if str(k).strip() and str(v).strip()
+                    },
+                    semantic_kind=str(item.get("semantic_kind", "") or ""),
+                    description=str(item.get("description", "") or ""),
                 )
             except Exception:
                 continue
@@ -542,9 +615,54 @@ class AttachmentRegistry:
 
     def resolve(self, uid: str, scope_key: str | None) -> AttachmentRecord | None:
         record = self.get(uid)
+        if record is not None:
+            if record.scope_key and scope_key and record.scope_key != scope_key:
+                return None
+            return record
+        if self._global_image_resolver is not None:
+            try:
+                record = self._global_image_resolver(uid)
+            except Exception:
+                logger.exception(
+                    "[AttachmentRegistry] global image resolver failed: uid=%s", uid
+                )
+                record = None
         if record is None:
             return None
-        if scope_key and record.scope_key != scope_key:
+        if record.scope_key and scope_key and record.scope_key != scope_key:
+            return None
+        return record
+
+    async def resolve_async(
+        self, uid: str, scope_key: str | None
+    ) -> AttachmentRecord | None:
+        record = self.get(uid)
+        if record is not None:
+            if record.scope_key and scope_key and record.scope_key != scope_key:
+                return None
+            return record
+        if self._global_image_resolver_async is not None:
+            try:
+                record = await self._global_image_resolver_async(uid)
+            except Exception:
+                logger.exception(
+                    "[AttachmentRegistry] async global image resolver failed: uid=%s",
+                    uid,
+                )
+                record = None
+        elif self._global_image_resolver is not None:
+            try:
+                record = self._global_image_resolver(uid)
+            except Exception:
+                logger.exception(
+                    "[AttachmentRegistry] global image resolver failed: uid=%s", uid
+                )
+                record = None
+        else:
+            record = None
+        if record is None:
+            return None
+        if record.scope_key and scope_key and record.scope_key != scope_key:
             return None
         return record
 
@@ -573,6 +691,7 @@ class AttachmentRegistry:
         source_kind: str,
         source_ref: str = "",
         mime_type: str | None = None,
+        segment_data: Mapping[str, str] | None = None,
     ) -> AttachmentRecord:
         await self.load()
         normalized_kind = _media_kind_from_value(kind)
@@ -605,6 +724,11 @@ class AttachmentRegistry:
                 mime_type=normalized_mime,
                 sha256=digest,
                 created_at=_now_iso(),
+                segment_data={
+                    str(k): str(v)
+                    for k, v in dict(segment_data or {}).items()
+                    if str(k).strip() and str(v).strip()
+                },
             )
             self._records[uid] = record
             self._prune_records()
@@ -620,6 +744,7 @@ class AttachmentRegistry:
         display_name: str | None = None,
         source_kind: str = "local_file",
         source_ref: str = "",
+        segment_data: Mapping[str, str] | None = None,
     ) -> AttachmentRecord:
         path = Path(str(local_path)).expanduser()
         if not path.is_absolute():
@@ -641,6 +766,7 @@ class AttachmentRegistry:
             source_kind=source_kind,
             source_ref=source_ref or str(path),
             mime_type=mimetypes.guess_type(path.name)[0] or None,
+            segment_data=segment_data,
         )
 
     async def register_data_url(
@@ -652,6 +778,7 @@ class AttachmentRegistry:
         display_name: str,
         source_kind: str,
         source_ref: str = "",
+        segment_data: Mapping[str, str] | None = None,
     ) -> AttachmentRecord:
         content, mime_type = _decode_data_url(data_url)
         return await self.register_bytes(
@@ -662,6 +789,7 @@ class AttachmentRegistry:
             source_kind=source_kind,
             source_ref=source_ref,
             mime_type=mime_type,
+            segment_data=segment_data,
         )
 
     async def register_remote_url(
@@ -673,6 +801,7 @@ class AttachmentRegistry:
         display_name: str | None = None,
         source_kind: str = "remote_url",
         source_ref: str = "",
+        segment_data: Mapping[str, str] | None = None,
     ) -> AttachmentRecord:
         timeout = httpx.Timeout(_DEFAULT_REMOTE_TIMEOUT_SECONDS)
         if self._http_client is not None:
@@ -695,6 +824,7 @@ class AttachmentRegistry:
             source_kind=source_kind,
             source_ref=source_ref or url,
             mime_type=mime_type or None,
+            segment_data=segment_data,
         )
 
 
@@ -751,6 +881,10 @@ async def register_message_attachments(
                             display_name=display_name,
                             source_kind="base64_image",
                             source_ref=f"{prefix}segment:{index}",
+                            segment_data=_segment_data_from_onebot_data(
+                                data,
+                                exclude_keys={"file", "url"},
+                            ),
                         )
                         ref = record.prompt_ref()
                     elif _is_data_url(raw_source):
@@ -761,6 +895,10 @@ async def register_message_attachments(
                             display_name=display_name,
                             source_kind="data_url_image",
                             source_ref=f"{prefix}segment:{index}",
+                            segment_data=_segment_data_from_onebot_data(
+                                data,
+                                exclude_keys={"file", "url"},
+                            ),
                         )
                         ref = record.prompt_ref()
                     else:
@@ -786,6 +924,10 @@ async def register_message_attachments(
                                 display_name=display_name,
                                 source_kind="remote_image",
                                 source_ref=raw_source or resolved_source,
+                                segment_data=_segment_data_from_onebot_data(
+                                    data,
+                                    exclude_keys={"file", "url"},
+                                ),
                             )
                             ref = record.prompt_ref()
                         elif _is_localish_path(resolved_source):
@@ -801,6 +943,10 @@ async def register_message_attachments(
                                 display_name=display_name,
                                 source_kind="local_image",
                                 source_ref=raw_source or resolved_source,
+                                segment_data=_segment_data_from_onebot_data(
+                                    data,
+                                    exclude_keys={"file", "url"},
+                                ),
                             )
                             ref = record.prompt_ref()
 
@@ -831,6 +977,10 @@ async def register_message_attachments(
                             display_name=display_name,
                             source_kind="webui_file" if file_id else "local_file",
                             source_ref=file_id or raw_source or str(local_file_path),
+                            segment_data=_segment_data_from_onebot_data(
+                                data,
+                                exclude_keys={"file", "url"},
+                            ),
                         )
                         ref = record.prompt_ref()
                     elif _is_http_url(raw_source):
@@ -841,6 +991,10 @@ async def register_message_attachments(
                             display_name=display_name,
                             source_kind="remote_file",
                             source_ref=file_id or raw_source,
+                            segment_data=_segment_data_from_onebot_data(
+                                data,
+                                exclude_keys={"file", "url"},
+                            ),
                         )
                         ref = record.prompt_ref()
 
@@ -940,7 +1094,7 @@ async def render_message_with_pic_placeholders(
         history_parts.append(message[last_index : match.start()])
         last_index = match.end()
 
-        record = registry.resolve(uid, scope_key)
+        record = await registry.resolve_async(uid, scope_key)
         if record is None:
             replacement = f"[图片 uid={uid} 不可用]"
             if strict:
@@ -967,7 +1121,16 @@ async def render_message_with_pic_placeholders(
             history_parts.append(replacement)
             continue
 
-        delivery_parts.append(f"[CQ:image,file={image_source}]")
+        cq_args = [f"file={image_source}"]
+        for key, value in dict(getattr(record, "segment_data", {}) or {}).items():
+            cleaned_key = str(key or "").strip()
+            cleaned_value = str(value or "").strip()
+            if not cleaned_key or not cleaned_value or cleaned_key == "file":
+                continue
+            cq_args.append(
+                f"{_escape_cq_component(cleaned_key)}={_escape_cq_component(cleaned_value)}"
+            )
+        delivery_parts.append(f"[CQ:image,{','.join(cq_args)}]")
         if record.display_name:
             history_parts.append(f"[图片 uid={uid} name={record.display_name}]")
         else:

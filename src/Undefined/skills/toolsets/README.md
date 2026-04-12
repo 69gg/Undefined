@@ -8,6 +8,9 @@
 
 ```
 toolsets/
+├── memes/                   # 表情包工具集
+│   ├── search_memes/        # 表情包检索
+│   └── send_meme_by_uid/    # 按 uid 发送表情包
 ├── render/                  # 渲染工具集
 │   ├── render_html/         # HTML 渲染
 │   ├── render_latex/        # LaTeX 渲染
@@ -135,6 +138,11 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 - `render.render_html`: 将 HTML 渲染为图片
 - `render.render_latex`: 将 LaTeX 渲染为图片
 - `render.render_markdown`: 将 Markdown 渲染为图片
+
+### Memes（表情包）
+
+- `memes.search_memes`: 支持 `keyword` / `semantic` / `hybrid` 三种检索模式
+- `memes.send_meme_by_uid`: 根据统一图片 `uid` 发送独立表情包消息
 
 ### Scheduler（定时任务）
 

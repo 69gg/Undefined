@@ -1,149 +1,34 @@
-from typing import Any, Dict, Literal
+from typing import Any, Dict
 import logging
 
 from Undefined.attachments import (
     render_message_with_pic_placeholders,
     scope_from_context,
 )
+from Undefined.utils.message_targets import TargetType, parse_positive_int
+from Undefined.utils.message_targets import resolve_message_target
 
 logger = logging.getLogger(__name__)
-
-
-TargetType = Literal["group", "private"]
-
-
-def _parse_positive_int(value: Any, field_name: str) -> tuple[int | None, str | None]:
-    if value is None:
-        return None, None
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None, f"{field_name} 必须是整数"
-    if parsed <= 0:
-        return None, f"{field_name} 必须是正整数"
-    return parsed, None
 
 
 def _resolve_target(
     args: Dict[str, Any], context: Dict[str, Any]
 ) -> tuple[tuple[TargetType, int] | None, str | None]:
-    target_type_raw = args.get("target_type")
-    target_id_raw = args.get("target_id")
-    has_target_type = target_type_raw is not None
-    has_target_id = target_id_raw is not None
-
-    # 显式目标优先：target_type + target_id
-    if has_target_type or has_target_id:
-        if not has_target_type and has_target_id:
-            return None, "target_type 与 target_id 必须同时提供"
-
-        if not isinstance(target_type_raw, str):
-            return None, "target_type 必须是字符串（group 或 private）"
-        target_type = target_type_raw.strip().lower()
-        if target_type not in ("group", "private"):
-            return None, "target_type 只能是 group 或 private"
-
-        normalized_target_type: TargetType = (
-            "group" if target_type == "group" else "private"
-        )
-
-        if has_target_id:
-            target_id, id_error = _parse_positive_int(target_id_raw, "target_id")
-            if id_error or target_id is None:
-                return None, id_error or "target_id 非法"
-            return (normalized_target_type, target_id), None
-
-        request_type = context.get("request_type")
-        if request_type != normalized_target_type:
-            return None, "target_type 与当前会话类型不一致，无法推断 target_id"
-
-        if normalized_target_type == "group":
-            group_id, group_error = _parse_positive_int(
-                context.get("group_id"), "group_id"
-            )
-            if group_error or group_id is None:
-                return None, group_error or "无法根据 target_type 推断 target_id"
-            logger.info(
-                "[发送消息] 推断目标: request_id=%s target_type=%s target_id=%s",
-                context.get("request_id", "-"),
-                normalized_target_type,
-                group_id,
-            )
-            return ("group", group_id), None
-
-        user_id, user_error = _parse_positive_int(context.get("user_id"), "user_id")
-        if user_error or user_id is None:
-            return None, user_error or "无法根据 target_type 推断 target_id"
-        logger.info(
-            "[发送消息] 推断目标: request_id=%s target_type=%s target_id=%s",
-            context.get("request_id", "-"),
-            normalized_target_type,
-            user_id,
-        )
-        return ("private", user_id), None
-
-    # 兼容旧参数：group_id / user_id
-    legacy_group_id = args.get("group_id")
-    if legacy_group_id is not None:
-        group_id, group_error = _parse_positive_int(legacy_group_id, "group_id")
-        if group_error or group_id is None:
-            return None, group_error or "group_id 非法"
-        return ("group", group_id), None
-
-    legacy_user_id = args.get("user_id")
-    if legacy_user_id is not None:
-        user_id, user_error = _parse_positive_int(legacy_user_id, "user_id")
-        if user_error or user_id is None:
-            return None, user_error or "user_id 非法"
-        return ("private", user_id), None
-
-    # 自动回落：优先按 request_type 决定当前会话
-    request_type = context.get("request_type")
-    if request_type == "group":
-        group_id, group_error = _parse_positive_int(context.get("group_id"), "group_id")
-        if group_error:
-            return None, group_error
-        if group_id is not None:
-            return ("group", group_id), None
-    elif request_type == "private":
-        user_id, user_error = _parse_positive_int(context.get("user_id"), "user_id")
-        if user_error:
-            return None, user_error
-        if user_id is not None:
-            return ("private", user_id), None
-
-    # 最后兜底（兼容旧上下文）
-    fallback_group_id, fallback_group_error = _parse_positive_int(
-        context.get("group_id"), "group_id"
-    )
-    if fallback_group_error:
-        return None, fallback_group_error
-    if fallback_group_id is not None:
-        return ("group", fallback_group_id), None
-
-    fallback_user_id, fallback_user_error = _parse_positive_int(
-        context.get("user_id"), "user_id"
-    )
-    if fallback_user_error:
-        return None, fallback_user_error
-    if fallback_user_id is not None:
-        return ("private", fallback_user_id), None
-
-    return None, "无法确定目标会话，请提供 target_type 与 target_id"
+    return resolve_message_target(args, context)
 
 
 def _is_current_group_target(context: Dict[str, Any], target_id: int) -> bool:
-    context_group_id, _ = _parse_positive_int(context.get("group_id"), "group_id")
+    context_group_id, _ = parse_positive_int(context.get("group_id"), "group_id")
     return context_group_id == target_id
 
 
 def _is_current_private_target(context: Dict[str, Any], target_id: int) -> bool:
-    context_user_id, _ = _parse_positive_int(context.get("user_id"), "user_id")
+    context_user_id, _ = parse_positive_int(context.get("user_id"), "user_id")
     return context_user_id == target_id
 
 
 def _get_context_group_id(context: Dict[str, Any]) -> int | None:
-    group_id, _ = _parse_positive_int(context.get("group_id"), "group_id")
+    group_id, _ = parse_positive_int(context.get("group_id"), "group_id")
     return group_id
 
 
@@ -219,9 +104,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return f"发送失败：{exc}"
     message = rendered.delivery_text
     history_message = rendered.history_text
+    history_attachments = list(rendered.attachments)
 
     # 解析 reply_to 参数（无效值静默忽略，视为未传）
-    reply_to_id, _ = _parse_positive_int(args.get("reply_to"), "reply_to")
+    reply_to_id, _ = parse_positive_int(args.get("reply_to"), "reply_to")
 
     runtime_config = context.get("runtime_config")
 
@@ -256,20 +142,30 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         try:
             if target_type == "group":
                 logger.info("[发送消息] 准备发送到群 %s: %s", target_id, message[:100])
+                send_kwargs: dict[str, Any] = {
+                    "reply_to": reply_to_id,
+                    "history_message": history_message,
+                }
+                if history_attachments:
+                    send_kwargs["attachments"] = history_attachments
                 sent_message_id = await sender.send_group_message(
                     target_id,
                     message,
-                    reply_to=reply_to_id,
-                    history_message=history_message,
+                    **send_kwargs,
                 )
             else:
                 logger.info("[发送消息] 准备发送私聊 %s: %s", target_id, message[:100])
+                send_kwargs = {
+                    "reply_to": reply_to_id,
+                    "preferred_temp_group_id": _get_context_group_id(context),
+                    "history_message": history_message,
+                }
+                if history_attachments:
+                    send_kwargs["attachments"] = history_attachments
                 sent_message_id = await sender.send_private_message(
                     target_id,
                     message,
-                    reply_to=reply_to_id,
-                    preferred_temp_group_id=_get_context_group_id(context),
-                    history_message=history_message,
+                    **send_kwargs,
                 )
             context["message_sent_this_turn"] = True
             return _format_send_success(sent_message_id)

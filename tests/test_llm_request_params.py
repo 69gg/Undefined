@@ -21,6 +21,7 @@ from Undefined.ai.transports.openai_transport import (
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.config.models import ChatModelConfig
 from Undefined.config.models import GrokModelConfig
+from Undefined.context import RequestContext
 from Undefined.token_usage_storage import TokenUsageStorage
 
 
@@ -235,6 +236,77 @@ async def test_chat_request_strips_internal_reasoning_fields_from_messages() -> 
     assert "reasoning_content" not in outbound_messages[1]
     assert RESPONSES_OUTPUT_ITEMS_KEY not in outbound_messages[1]
     assert "phase" not in outbound_messages[1]
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_chat_request_auto_sets_prompt_cache_key_from_request_context() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeClient()
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        prompt_cache_enabled=True,
+    )
+
+    async with RequestContext(request_type="group", group_id=12345, sender_id=10001):
+        await requester.request(
+            model_config=cfg,
+            messages=[{"role": "user", "content": "hello"}],
+            max_tokens=128,
+            call_type="chat",
+        )
+
+    assert fake_client.chat.completions.last_kwargs is not None
+    assert (
+        fake_client.chat.completions.last_kwargs["prompt_cache_key"]
+        == "pc:gpt-test:chat:group:12345"
+    )
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_chat_request_respects_prompt_cache_enabled_false() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeClient()
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        prompt_cache_enabled=False,
+    )
+
+    async with RequestContext(request_type="group", group_id=12345, sender_id=10001):
+        await requester.request(
+            model_config=cfg,
+            messages=[{"role": "user", "content": "hello"}],
+            max_tokens=128,
+            call_type="chat",
+        )
+
+    assert fake_client.chat.completions.last_kwargs is not None
+    assert "prompt_cache_key" not in fake_client.chat.completions.last_kwargs
 
     await requester._http_client.aclose()
 

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from Undefined.attachments import AttachmentRegistry
+from Undefined.attachments import AttachmentRecord, AttachmentRegistry
 from Undefined.skills.toolsets.messages.send_message.handler import execute
 
 
@@ -206,6 +206,15 @@ async def test_send_message_renders_pic_uid_before_sending(tmp_path: Path) -> No
     assert sent_args.kwargs["history_message"] == (
         f"图文并茂\n[图片 uid={record.uid} name=demo.png]\n结束"
     )
+    assert sent_args.kwargs["attachments"] == [
+        {
+            "uid": record.uid,
+            "kind": "image",
+            "media_type": "image",
+            "display_name": "demo.png",
+            "source_kind": "test",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -251,3 +260,81 @@ async def test_send_message_renders_webui_scoped_pic_uid_before_sending(
     assert sent_args.kwargs["history_message"] == (
         f"WebUI 图片\n[图片 uid={record.uid} name=webui.png]\n结束"
     )
+    assert sent_args.kwargs["attachments"] == [
+        {
+            "uid": record.uid,
+            "kind": "image",
+            "media_type": "image",
+            "display_name": "webui.png",
+            "source_kind": "test",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_message_passes_meme_attachments_for_global_meme_uid(
+    tmp_path: Path,
+) -> None:
+    sender = SimpleNamespace(
+        send_group_message=AsyncMock(return_value=66666),
+        send_private_message=AsyncMock(),
+    )
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    blob = tmp_path / "meme.png"
+    blob.write_bytes(b"\x89PNG\r\n\x1a\n")
+    registry.set_global_image_resolver(
+        lambda uid: (
+            AttachmentRecord(
+                uid=uid,
+                scope_key="",
+                kind="image",
+                media_type="image",
+                display_name="meme.png",
+                source_kind="meme_library",
+                source_ref=blob.resolve().as_uri(),
+                local_path=str(blob),
+                mime_type="image/png",
+                sha256="deadbeef",
+                created_at="2026-04-11T10:00:00",
+                segment_data={"subType": "1"},
+                semantic_kind="meme",
+                description="无语猫猫表情包",
+            )
+            if uid == "pic_global01"
+            else None
+        )
+    )
+    context: dict[str, Any] = {
+        "request_type": "group",
+        "group_id": 10001,
+        "sender_id": 20002,
+        "request_id": "req-meme-1",
+        "runtime_config": _build_runtime_config(),
+        "sender": sender,
+        "attachment_registry": registry,
+    }
+
+    result = await execute(
+        {
+            "message": '发个图\n<pic uid="pic_global01"/>\n结束',
+        },
+        context,
+    )
+
+    assert result == "消息已发送（message_id=66666）"
+    sent_args = sender.send_group_message.await_args
+    assert sent_args is not None
+    assert sent_args.kwargs["attachments"] == [
+        {
+            "uid": "pic_global01",
+            "kind": "image",
+            "media_type": "image",
+            "display_name": "meme.png",
+            "source_kind": "meme_library",
+            "semantic_kind": "meme",
+            "description": "无语猫猫表情包",
+        }
+    ]

@@ -9,7 +9,7 @@ import json
 import logging
 from pathlib import Path
 import time
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 import aiofiles
@@ -18,6 +18,8 @@ import httpx
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.ai.llm import ModelRequester
 from Undefined.config import VisionModelConfig
+from Undefined.ai.transports import API_MODE_CHAT_COMPLETIONS, get_api_mode
+from Undefined.utils.tool_calls import extract_required_tool_call_arguments
 from Undefined.utils.logging import log_debug_json, redact_string
 from Undefined.utils.resources import read_text_resource
 
@@ -176,6 +178,58 @@ _MEDIA_TYPE_TO_FIELD = {
     "video": "subtitles",
 }
 
+_MEME_JUDGE_PROMPT_PATH = "res/prompts/judge_meme_image.txt"
+_MEME_DESCRIBE_PROMPT_PATH = "res/prompts/describe_meme_image.txt"
+
+_MEME_JUDGE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "submit_meme_judgement",
+        "description": "提交表情包判定结果",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "is_meme": {
+                    "type": "boolean",
+                    "description": "该图片是否适合进入表情包库",
+                },
+                "confidence": {
+                    "type": "number",
+                    "description": "0 到 1 的置信度",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "简短中文判定原因",
+                },
+            },
+            "required": ["is_meme", "confidence", "reason"],
+        },
+    },
+}
+
+_MEME_DESCRIBE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "submit_meme_description",
+        "description": "提交表情包描述与标签",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "description": "适合检索的简短中文描述",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "0 到 6 个短标签",
+                },
+            },
+            "required": ["description", "tags"],
+        },
+    },
+}
+
 
 # 错误消息映射
 _ERROR_MESSAGES = {
@@ -245,6 +299,70 @@ def _parse_analysis_response(content: str) -> dict[str, str]:
         result["description"] = content
 
     return result
+
+
+def _extract_json_object(content: str) -> dict[str, Any]:
+    text = str(content or "").strip()
+    if not text:
+        return {}
+    candidates = [text]
+    if "```" in text:
+        parts = text.split("```")
+        for part in parts:
+            stripped = part.strip()
+            if not stripped:
+                continue
+            if stripped.lower().startswith("json"):
+                stripped = stripped[4:].strip()
+            candidates.append(stripped)
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            parsed = json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def _normalize_meme_tags(tags_raw: Any) -> list[str]:
+    tags: list[str] = []
+    if isinstance(tags_raw, list):
+        seen: set[str] = set()
+        for item in tags_raw:
+            text = str(item or "").strip()
+            lowered = text.lower()
+            if not text or lowered in seen:
+                continue
+            seen.add(lowered)
+            tags.append(text)
+    return tags
+
+
+def _parse_meme_analysis_response(content: str) -> dict[str, Any]:
+    parsed = _extract_json_object(content)
+    return {
+        "is_meme": bool(parsed.get("is_meme", False)),
+        "confidence": _safe_float(parsed.get("confidence", 0.0), default=0.0),
+        "description": str(parsed.get("description") or "").strip(),
+        "tags": _normalize_meme_tags(parsed.get("tags")),
+    }
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 class MultimodalAnalyzer:
@@ -683,3 +801,112 @@ class MultimodalAnalyzer:
         if "ocr_text" not in result:
             result["ocr_text"] = ""
         return result
+
+    async def _load_prompt_text(self, prompt_path: str) -> str:
+        try:
+            return read_text_resource(prompt_path)
+        except Exception:
+            async with aiofiles.open(prompt_path, "r", encoding="utf-8") as f:
+                return await f.read()
+
+    def _build_tool_request_kwargs(self) -> dict[str, Any]:
+        request_kwargs: dict[str, Any] = {}
+        if (
+            get_api_mode(self._vision_config) == API_MODE_CHAT_COMPLETIONS
+            and not self._vision_config.thinking_enabled
+        ):
+            request_kwargs["thinking"] = {"enabled": False, "budget_tokens": 0}
+        return request_kwargs
+
+    async def _request_required_tool_args(
+        self,
+        *,
+        prompt_path: str,
+        image_url: str,
+        tool_schema: dict[str, Any],
+        tool_name: str,
+        call_type: str,
+        max_tokens: int,
+    ) -> dict[str, Any]:
+        media_content = await self._load_media_content(image_url, "image")
+        prompt = await self._load_prompt_text(prompt_path)
+        content_items = await self._build_content_items("image", media_content, prompt)
+        response = await self._requester.request(
+            model_config=self._vision_config,
+            messages=[{"role": "user", "content": content_items}],
+            max_tokens=max_tokens,
+            call_type=call_type,
+            tools=[tool_schema],
+            tool_choice=cast(
+                Any, {"type": "function", "function": {"name": tool_name}}
+            ),
+            **self._build_tool_request_kwargs(),
+        )
+        return extract_required_tool_call_arguments(
+            response,
+            expected_tool_name=tool_name,
+            stage=call_type,
+            logger=logger,
+            error_context=f"image={redact_string(image_url)[:120]}",
+        )
+
+    async def judge_meme_image(self, image_url: str) -> dict[str, Any]:
+        safe_url = redact_string(image_url)
+        try:
+            args = await self._request_required_tool_args(
+                prompt_path=_MEME_JUDGE_PROMPT_PATH,
+                image_url=image_url,
+                tool_schema=_MEME_JUDGE_TOOL,
+                tool_name="submit_meme_judgement",
+                call_type="vision_meme_judge",
+                max_tokens=256,
+            )
+        except Exception as exc:
+            logger.exception("[媒体分析] 表情包判定失败，按非表情包处理: %s", exc)
+            return {
+                "is_meme": False,
+                "confidence": 0.0,
+                "reason": "",
+            }
+
+        try:
+            parsed = {
+                "is_meme": bool(args.get("is_meme", False)),
+                "confidence": _safe_float(args.get("confidence", 0.0), default=0.0),
+                "reason": str(args.get("reason") or "").strip(),
+            }
+        except Exception:
+            parsed = {"is_meme": False, "confidence": 0.0, "reason": ""}
+        logger.info(
+            "[媒体分析] 表情包判定完成: url=%s is_meme=%s confidence=%.3f reason=%s",
+            safe_url[:50],
+            parsed.get("is_meme", False),
+            _safe_float(parsed.get("confidence", 0.0), default=0.0),
+            str(parsed.get("reason", ""))[:80],
+        )
+        return parsed
+
+    async def describe_meme_image(self, image_url: str) -> dict[str, Any]:
+        safe_url = redact_string(image_url)
+        try:
+            args = await self._request_required_tool_args(
+                prompt_path=_MEME_DESCRIBE_PROMPT_PATH,
+                image_url=image_url,
+                tool_schema=_MEME_DESCRIBE_TOOL,
+                tool_name="submit_meme_description",
+                call_type="vision_meme_describe",
+                max_tokens=512,
+            )
+        except Exception as exc:
+            logger.exception("[媒体分析] 表情包描述失败: %s", exc)
+            return {"description": "", "tags": []}
+
+        description = str(args.get("description") or "").strip()
+        tags = _normalize_meme_tags(args.get("tags"))
+        logger.info(
+            "[媒体分析] 表情包描述完成: url=%s desc_len=%s tags=%s",
+            safe_url[:50],
+            len(description),
+            tags,
+        )
+        return {"description": description, "tags": tags}

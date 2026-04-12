@@ -59,6 +59,8 @@ class _FakeMemoryStorage:
 def _make_builder() -> PromptBuilder:
     runtime_config = SimpleNamespace(
         keyword_reply_enabled=True,
+        knowledge_enabled=True,
+        grok_search_enabled=True,
         chat_model=SimpleNamespace(
             model_name="gpt-5.4",
             pool=SimpleNamespace(enabled=False),
@@ -71,6 +73,12 @@ def _make_builder() -> PromptBuilder:
         security_model=SimpleNamespace(model_name="gpt-4.1-mini"),
         grok_model=SimpleNamespace(model_name="grok-4-search"),
         cognitive=SimpleNamespace(enabled=True, recent_end_summaries_inject_k=1),
+        memes=SimpleNamespace(
+            enabled=True,
+            query_default_mode="hybrid",
+            allow_gif=True,
+            max_source_image_bytes=512000,
+        ),
     )
     return PromptBuilder(
         bot_qq=123456,
@@ -151,6 +159,18 @@ async def test_build_messages_places_each_rules_before_dynamic_context(
     assert positions["memory"] < positions["cognitive"] < positions["summary"]
     assert positions["summary"] < positions["history"] < positions["time"]
     assert positions["time"] < positions["current"]
+
+    runtime_config_message = next(
+        str(message.get("content", ""))
+        for message in messages
+        if "【当前运行环境配置】" in str(message.get("content", ""))
+    )
+    assert "- 知识库: 已启用" in runtime_config_message
+    assert "- 联网搜索: 已启用" in runtime_config_message
+    assert (
+        "- 表情包库: 已启用（默认检索=hybrid，GIF=允许，入库上限=500KB）"
+        in runtime_config_message
+    )
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,26 @@
+{
+    "type": "function",
+    "function": {
+        "name": "send_meme_by_uid",
+        "description": "根据表情包 uid 发送一条独立图片消息。默认发送到当前会话，也可显式指定 target_type + target_id。适合在轻松聊天场景中直接用图片完成表达，而不是改用文字描述。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "uid": {
+                    "type": "string",
+                    "description": "表情包图片 uid，例如 pic_ab12cd34"
+                },
+                "target_type": {
+                    "type": "string",
+                    "enum": ["group", "private"],
+                    "description": "可选。目标会话类型。"
+                },
+                "target_id": {
+                    "type": "integer",
+                    "description": "可选。目标群号或用户 QQ 号。"
+                }
+            },
+            "required": ["uid"]
+        }
+    }
+}

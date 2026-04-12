@@ -16,6 +16,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Awaitable, Callable
+from typing import cast
 from urllib.parse import urlsplit
 from aiohttp import ClientSession, ClientTimeout, web
 from aiohttp.web_response import Response
@@ -173,6 +174,7 @@ class RuntimeAPIContext:
     scheduler: Any = None
     cognitive_service: Any = None
     cognitive_job_queue: Any = None
+    meme_service: Any = None
     naga_store: Any = None
 
 
@@ -450,6 +452,8 @@ def _build_internal_model_probe_payload(mcfg: Any) -> dict[str, Any]:
         payload["responses_force_stateless_replay"] = getattr(
             mcfg, "responses_force_stateless_replay", False
         )
+    if hasattr(mcfg, "prompt_cache_enabled"):
+        payload["prompt_cache_enabled"] = getattr(mcfg, "prompt_cache_enabled", True)
     if hasattr(mcfg, "reasoning_enabled"):
         payload["reasoning_enabled"] = getattr(mcfg, "reasoning_enabled", False)
     if hasattr(mcfg, "reasoning_effort"):
@@ -541,6 +545,21 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
             }
         },
         "/api/v1/memory": {"get": {"summary": "List/search manual memories"}},
+        "/api/v1/memes": {"get": {"summary": "List/search meme library items"}},
+        "/api/v1/memes/stats": {"get": {"summary": "Get meme library stats"}},
+        "/api/v1/memes/{uid}": {
+            "get": {"summary": "Get a meme by uid"},
+            "patch": {"summary": "Update a meme by uid"},
+            "delete": {"summary": "Delete a meme by uid"},
+        },
+        "/api/v1/memes/{uid}/blob": {"get": {"summary": "Get meme blob file"}},
+        "/api/v1/memes/{uid}/preview": {"get": {"summary": "Get meme preview file"}},
+        "/api/v1/memes/{uid}/reanalyze": {
+            "post": {"summary": "Queue a meme reanalyze job"}
+        },
+        "/api/v1/memes/{uid}/reindex": {
+            "post": {"summary": "Queue a meme reindex job"}
+        },
         "/api/v1/cognitive/events": {
             "get": {"summary": "Search cognitive event memories"}
         },
@@ -730,6 +749,21 @@ class RuntimeAPIServer:
                 web.get("/api/v1/probes/internal", self._internal_probe_handler),
                 web.get("/api/v1/probes/external", self._external_probe_handler),
                 web.get("/api/v1/memory", self._memory_handler),
+                web.get("/api/v1/memes", self._meme_list_handler),
+                web.get("/api/v1/memes/stats", self._meme_stats_handler),
+                web.get("/api/v1/memes/{uid}", self._meme_detail_handler),
+                web.get("/api/v1/memes/{uid}/blob", self._meme_blob_handler),
+                web.get("/api/v1/memes/{uid}/preview", self._meme_preview_handler),
+                web.patch("/api/v1/memes/{uid}", self._meme_update_handler),
+                web.delete("/api/v1/memes/{uid}", self._meme_delete_handler),
+                web.post(
+                    "/api/v1/memes/{uid}/reanalyze",
+                    self._meme_reanalyze_handler,
+                ),
+                web.post(
+                    "/api/v1/memes/{uid}/reindex",
+                    self._meme_reindex_handler,
+                ),
                 web.get("/api/v1/cognitive/events", self._cognitive_events_handler),
                 web.get(
                     "/api/v1/cognitive/profiles",
@@ -1130,6 +1164,205 @@ class RuntimeAPIServer:
             }
         )
 
+    async def _meme_list_handler(self, request: web.Request) -> Response:
+        meme_service = self._ctx.meme_service
+        if meme_service is None or not meme_service.enabled:
+            return _json_error("Meme service disabled", status=400)
+
+        def _parse_optional_bool(name: str) -> bool | None:
+            raw = request.query.get(name)
+            if raw is None or str(raw).strip() == "":
+                return None
+            return _to_bool(raw)
+
+        page_raw = _optional_query_param(request, "page")
+        page_size_raw = _optional_query_param(request, "page_size")
+        top_k_raw = _optional_query_param(request, "top_k")
+        query = str(request.query.get("q", "") or "").strip()
+        query_mode = str(request.query.get("query_mode", "") or "").strip().lower()
+        keyword_query = str(request.query.get("keyword_query", "") or "").strip()
+        semantic_query = str(request.query.get("semantic_query", "") or "").strip()
+        try:
+            page = int(page_raw) if page_raw is not None else 1
+            page_size = int(page_size_raw) if page_size_raw is not None else 50
+            top_k = int(top_k_raw) if top_k_raw is not None else page_size
+        except ValueError:
+            return _json_error("page/page_size/top_k must be integers", status=400)
+        page = max(1, page)
+        page_size = max(1, min(200, page_size))
+        top_k = max(1, top_k)
+        sort = str(request.query.get("sort", "updated_at") or "updated_at").strip()
+
+        enabled_filter = _parse_optional_bool("enabled")
+        animated_filter = _parse_optional_bool("animated")
+        pinned_filter = _parse_optional_bool("pinned")
+        if not (query or keyword_query or semantic_query) and sort == "relevance":
+            sort = "updated_at"
+
+        if query or keyword_query or semantic_query:
+            has_post_filter = any(
+                f is not None for f in (enabled_filter, animated_filter, pinned_filter)
+            )
+            requested_window = max(page * page_size, top_k)
+            if has_post_filter or page > 1 or sort != "relevance":
+                fetch_k = min(500, max(requested_window * 4, top_k))
+            else:
+                fetch_k = min(500, requested_window)
+            search_payload = await meme_service.search_memes(
+                query,
+                query_mode=query_mode or meme_service.default_query_mode,
+                keyword_query=keyword_query or None,
+                semantic_query=semantic_query or None,
+                top_k=fetch_k,
+                include_disabled=enabled_filter is not True,
+                sort=sort,
+            )
+            filtered_items: list[dict[str, Any]] = []
+            for item in list(search_payload.get("items") or []):
+                if (
+                    enabled_filter is not None
+                    and bool(item.get("enabled")) != enabled_filter
+                ):
+                    continue
+                if (
+                    animated_filter is not None
+                    and bool(item.get("is_animated")) != animated_filter
+                ):
+                    continue
+                if (
+                    pinned_filter is not None
+                    and bool(item.get("pinned")) != pinned_filter
+                ):
+                    continue
+                filtered_items.append(item)
+            offset = (page - 1) * page_size
+            paged_items = filtered_items[offset : offset + page_size]
+            window_total = len(filtered_items)
+            fetched_window_count = len(list(search_payload.get("items") or []))
+            window_exhausted = fetched_window_count < fetch_k
+            has_more = bool(paged_items) and (
+                offset + page_size < window_total
+                or (not window_exhausted and window_total >= offset + page_size)
+            )
+            return web.json_response(
+                {
+                    "ok": True,
+                    "total": None,
+                    "window_total": window_total,
+                    "total_exact": False,
+                    "page": page,
+                    "page_size": page_size,
+                    "has_more": has_more,
+                    "query_mode": search_payload.get("query_mode"),
+                    "keyword_query": search_payload.get("keyword_query"),
+                    "semantic_query": search_payload.get("semantic_query"),
+                    "sort": search_payload.get("sort", sort),
+                    "items": paged_items,
+                }
+            )
+
+        payload = await meme_service.list_memes(
+            query=query,
+            enabled=enabled_filter,
+            animated=animated_filter,
+            pinned=pinned_filter,
+            sort=sort,
+            page=page,
+            page_size=page_size,
+            summary=True,
+        )
+        return web.json_response(payload)
+
+    async def _meme_stats_handler(self, request: web.Request) -> Response:
+        _ = request
+        meme_service = self._ctx.meme_service
+        if meme_service is None or not meme_service.enabled:
+            return _json_error("Meme service disabled", status=400)
+        return web.json_response(await meme_service.stats())
+
+    async def _meme_detail_handler(self, request: web.Request) -> Response:
+        meme_service = self._ctx.meme_service
+        if meme_service is None or not meme_service.enabled:
+            return _json_error("Meme service disabled", status=400)
+        uid = str(request.match_info.get("uid", "")).strip()
+        detail = await meme_service.get_meme(uid)
+        if detail is None:
+            return _json_error("Meme not found", status=404)
+        return web.json_response(detail)
+
+    async def _meme_blob_handler(self, request: web.Request) -> Response:
+        meme_service = self._ctx.meme_service
+        if meme_service is None or not meme_service.enabled:
+            return _json_error("Meme service disabled", status=400)
+        uid = str(request.match_info.get("uid", "")).strip()
+        path = await meme_service.blob_path_for_uid(uid, preview=False)
+        if path is None:
+            return _json_error("Meme blob not found", status=404)
+        return cast(Response, web.FileResponse(path=path))
+
+    async def _meme_preview_handler(self, request: web.Request) -> Response:
+        meme_service = self._ctx.meme_service
+        if meme_service is None or not meme_service.enabled:
+            return _json_error("Meme service disabled", status=400)
+        uid = str(request.match_info.get("uid", "")).strip()
+        path = await meme_service.blob_path_for_uid(uid, preview=True)
+        if path is None:
+            return _json_error("Meme preview not found", status=404)
+        return cast(Response, web.FileResponse(path=path))
+
+    async def _meme_update_handler(self, request: web.Request) -> Response:
+        meme_service = self._ctx.meme_service
+        if meme_service is None or not meme_service.enabled:
+            return _json_error("Meme service disabled", status=400)
+        uid = str(request.match_info.get("uid", "")).strip()
+        try:
+            payload = await request.json()
+        except Exception:
+            return _json_error("Invalid JSON body", status=400)
+        if not isinstance(payload, dict):
+            return _json_error("JSON body must be an object", status=400)
+        updated = await meme_service.update_meme(
+            uid,
+            manual_description=payload.get("manual_description"),
+            tags=payload.get("tags"),
+            aliases=payload.get("aliases"),
+            enabled=payload.get("enabled") if "enabled" in payload else None,
+            pinned=payload.get("pinned") if "pinned" in payload else None,
+        )
+        if updated is None:
+            return _json_error("Meme not found", status=404)
+        return web.json_response({"ok": True, "record": updated})
+
+    async def _meme_delete_handler(self, request: web.Request) -> Response:
+        meme_service = self._ctx.meme_service
+        if meme_service is None or not meme_service.enabled:
+            return _json_error("Meme service disabled", status=400)
+        uid = str(request.match_info.get("uid", "")).strip()
+        deleted = await meme_service.delete_meme(uid)
+        if not deleted:
+            return _json_error("Meme not found", status=404)
+        return web.json_response({"ok": True, "uid": uid})
+
+    async def _meme_reanalyze_handler(self, request: web.Request) -> Response:
+        meme_service = self._ctx.meme_service
+        if meme_service is None or not meme_service.enabled:
+            return _json_error("Meme service disabled", status=400)
+        uid = str(request.match_info.get("uid", "")).strip()
+        job_id = await meme_service.enqueue_reanalyze(uid)
+        if not job_id:
+            return _json_error("Meme queue unavailable", status=503)
+        return web.json_response({"ok": True, "uid": uid, "job_id": job_id})
+
+    async def _meme_reindex_handler(self, request: web.Request) -> Response:
+        meme_service = self._ctx.meme_service
+        if meme_service is None or not meme_service.enabled:
+            return _json_error("Meme service disabled", status=400)
+        uid = str(request.match_info.get("uid", "")).strip()
+        job_id = await meme_service.enqueue_reindex(uid)
+        if not job_id:
+            return _json_error("Meme queue unavailable", status=503)
+        return web.json_response({"ok": True, "uid": uid, "job_id": job_id})
+
     async def _cognitive_events_handler(self, request: web.Request) -> Response:
         cognitive_service = self._ctx.cognitive_service
         if not cognitive_service or not cognitive_service.enabled:
@@ -1267,6 +1500,7 @@ class RuntimeAPIServer:
                 onebot_client=self._ctx.onebot,
                 history_manager=self._ctx.history_manager,
                 bot_qq=cfg.bot_qq,
+                attachment_registry=getattr(self._ctx.ai, "attachment_registry", None),
             )
 
         async with RequestContext(
@@ -1787,6 +2021,8 @@ class RuntimeAPIServer:
                     ctx.set_resource("scheduler", self._ctx.scheduler)
                 if self._ctx.cognitive_service is not None:
                     ctx.set_resource("cognitive_service", self._ctx.cognitive_service)
+                if self._ctx.meme_service is not None:
+                    ctx.set_resource("meme_service", self._ctx.meme_service)
 
                 tool_context: dict[str, Any] = {
                     "request_type": request_type,

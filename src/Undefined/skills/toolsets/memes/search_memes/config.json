@@ -1,0 +1,38 @@
+{
+    "type": "function",
+    "function": {
+        "name": "search_memes",
+        "description": "在全局表情包库中按关键词和语义检索表情包，返回可直接发送或用于 <pic uid=\"...\"/> 的图片 uid。轻松聊天、吐槽、接梗、表达态度或情绪时，应优先使用这个工具找表情包，而不是用文字描述你本来想发的图。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "通用检索词。未单独提供 keyword_query / semantic_query 时，会按 query_mode 用作默认查询词。"
+                },
+                "query_mode": {
+                    "type": "string",
+                    "enum": ["keyword", "semantic", "hybrid"],
+                    "description": "查询模式：keyword 仅关键词，semantic 仅语义，hybrid 混合查询。默认使用配置中的 memes.query_default_mode，未配置时为 hybrid。"
+                },
+                "keyword_query": {
+                    "type": "string",
+                    "description": "可选。关键词查询词；适合精确命中特定词、标签、别名。"
+                },
+                "semantic_query": {
+                    "type": "string",
+                    "description": "可选。语义查询词；适合按含义、场景、情绪检索。"
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "最多返回多少个候选，默认 8"
+                },
+                "include_disabled": {
+                    "type": "boolean",
+                    "description": "是否包含已禁用的表情包，默认 false"
+                }
+            },
+            "required": ["query"]
+        }
+    }
+}

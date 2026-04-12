@@ -30,6 +30,7 @@ async def test_runtime_internal_probe_includes_chat_model_transport_fields() -> 
                 thinking_tool_call_compat=True,
                 responses_tool_choice_compat=False,
                 responses_force_stateless_replay=False,
+                prompt_cache_enabled=True,
                 reasoning_enabled=True,
                 reasoning_effort="high",
             ),
@@ -37,6 +38,7 @@ async def test_runtime_internal_probe_includes_chat_model_transport_fields() -> 
                 model_name="grok-4-search",
                 api_url="https://grok.example/v1",
                 thinking_enabled=False,
+                prompt_cache_enabled=True,
                 reasoning_enabled=True,
                 reasoning_effort="low",
             ),
@@ -68,6 +70,7 @@ async def test_runtime_internal_probe_includes_chat_model_transport_fields() -> 
         "thinking_tool_call_compat": True,
         "responses_tool_choice_compat": False,
         "responses_force_stateless_replay": False,
+        "prompt_cache_enabled": True,
         "reasoning_enabled": True,
         "reasoning_effort": "high",
     }
@@ -79,6 +82,7 @@ async def test_runtime_internal_probe_includes_chat_model_transport_fields() -> 
         "model_name": "grok-4-search",
         "api_url": "https://grok.example/...",
         "thinking_enabled": False,
+        "prompt_cache_enabled": True,
         "reasoning_enabled": True,
         "reasoning_effort": "low",
     }

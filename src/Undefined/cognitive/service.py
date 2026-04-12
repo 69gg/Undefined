@@ -735,15 +735,26 @@ class CognitiveService:
             top_k = default_top_k
         if top_k <= 0:
             top_k = default_top_k
-        events = await self._query_events_for_auto_context(
-            query=query,
-            request_type=safe_request_type,
-            group_id=safe_group_id,
-            user_id=safe_user_id,
-            sender_id=safe_sender_id,
-            top_k=top_k,
-            config=config,
-        )
+        try:
+            events = await self._query_events_for_auto_context(
+                query=query,
+                request_type=safe_request_type,
+                group_id=safe_group_id,
+                user_id=safe_user_id,
+                sender_id=safe_sender_id,
+                top_k=top_k,
+                config=config,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[认知服务] 自动上下文事件检索失败，降级为空结果: type=%s user=%s sender=%s group=%s err=%s",
+                safe_request_type,
+                safe_user_id,
+                safe_sender_id,
+                safe_group_id,
+                exc,
+            )
+            events = []
         if events:
             event_lines = "\n".join(
                 f"- [{e['metadata'].get('timestamp_local', '')}] {e['document']}"

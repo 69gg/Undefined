@@ -545,6 +545,9 @@ class TaskScheduler:
                         onebot_client=self.onebot,
                         history_manager=self.history_manager,
                         bot_qq=int(getattr(self.ai, "bot_qq", 0)),
+                        attachment_registry=getattr(
+                            self.ai, "attachment_registry", None
+                        ),
                     )
 
                 async def send_like_cb(uid: int, times: int = 1) -> None:

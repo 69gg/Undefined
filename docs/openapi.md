@@ -5,7 +5,7 @@
 > 职责边界：
 >
 > - **Management API**：配置、日志、Bot 启停、bootstrap probe、远程管理入口
-> - **Runtime API**：主进程运行态能力（探针、记忆、认知、AI Chat）
+> - **Runtime API**：主进程运行态能力（探针、记忆、认知、AI Chat、表情包库）
 >
 > 如果你想看控制面接口，请同时参考 [Management API 文档](management-api.md)。
 
@@ -106,7 +106,7 @@ curl http://127.0.0.1:8788/openapi.json
 | `cognitive` | `object` | 认知服务（`enabled`、`queue`） |
 | `api` | `object` | Runtime API 配置（`enabled`、`host`、`port`、`openapi_enabled`） |
 | `skills` | `object` | 技能统计，包含 `tools`、`agents`、`anthropic_skills` 三个子对象 |
-| `models` | `object` | 模型配置；聊天类模型包含 `model_name`、脱敏 `api_url`、`api_mode`、`thinking_enabled`、`thinking_tool_call_compat`、`responses_tool_choice_compat`、`responses_force_stateless_replay`、`reasoning_enabled`、`reasoning_effort` |
+| `models` | `object` | 模型配置；聊天类模型包含 `model_name`、脱敏 `api_url`、`api_mode`、`thinking_enabled`、`thinking_tool_call_compat`、`responses_tool_choice_compat`、`responses_force_stateless_replay`、`prompt_cache_enabled`、`reasoning_enabled`、`reasoning_effort` |
 
 `skills` 子对象结构：
 
@@ -175,6 +175,34 @@ curl http://127.0.0.1:8788/openapi.json
   - `time_from` / `time_to`：ISO 时间范围过滤（可选）
 
 说明：仅提供查看/查询，不提供写入接口，不改变现有记忆存储格式。
+
+### 表情包库
+
+- `GET /api/v1/memes`
+  - 查询参数：
+    - `q`：通用查询词或列表关键词过滤（可选）
+    - `query_mode`：`keyword` / `semantic` / `hybrid`
+    - `keyword_query`：单独的关键词查询词（可选）
+    - `semantic_query`：单独的语义查询词（可选）
+    - `top_k`：检索候选数；带查询词时优先用于检索
+    - `enabled`：`true/false`（可选）
+    - `animated`：`true/false`（可选）
+    - `pinned`：`true/false`（可选）
+    - `sort`：`updated_at` / `use_count` / `created_at`
+    - `page` / `page_size`
+- `GET /api/v1/memes/stats`
+- `GET /api/v1/memes/{uid}`
+- `GET /api/v1/memes/{uid}/blob`
+- `GET /api/v1/memes/{uid}/preview`
+- `PATCH /api/v1/memes/{uid}`
+- `DELETE /api/v1/memes/{uid}`
+- `POST /api/v1/memes/{uid}/reanalyze`
+- `POST /api/v1/memes/{uid}/reindex`
+
+说明：
+- 表情包库条目使用统一图片 `uid`，与普通图片 `<pic uid="..."/>` 语义一致。
+- 入库文本和向量索引只使用纯文本 `description + tags + aliases`，不依赖 OCR。
+- 后台重跑分析使用两阶段 LLM 管线：先判定，再描述。
 
 ### 认知记忆检索 / 侧写
 

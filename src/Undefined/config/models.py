@@ -42,6 +42,7 @@ class ModelPoolEntry:
     thinking_tool_call_compat: bool = True
     responses_tool_choice_compat: bool = False
     responses_force_stateless_replay: bool = False
+    prompt_cache_enabled: bool = True
     reasoning_enabled: bool = False
     reasoning_effort: str = "medium"
     request_params: dict[str, Any] = field(default_factory=dict)
@@ -77,6 +78,7 @@ class ChatModelConfig:
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
     )
     responses_force_stateless_replay: bool = False  # Responses API 续轮强制降级为 stateless replay（不使用 previous_response_id）
+    prompt_cache_enabled: bool = True  # 是否启用自动 prompt_cache_key
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位
     request_params: dict[str, Any] = field(default_factory=dict)
@@ -103,6 +105,7 @@ class VisionModelConfig:
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
     )
     responses_force_stateless_replay: bool = False  # Responses API 续轮强制降级为 stateless replay（不使用 previous_response_id）
+    prompt_cache_enabled: bool = True  # 是否启用自动 prompt_cache_key
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位
     request_params: dict[str, Any] = field(default_factory=dict)
@@ -129,6 +132,7 @@ class SecurityModelConfig:
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
     )
     responses_force_stateless_replay: bool = False  # Responses API 续轮强制降级为 stateless replay（不使用 previous_response_id）
+    prompt_cache_enabled: bool = True  # 是否启用自动 prompt_cache_key
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位
     request_params: dict[str, Any] = field(default_factory=dict)
@@ -181,6 +185,7 @@ class AgentModelConfig:
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
     )
     responses_force_stateless_replay: bool = False  # Responses API 续轮强制降级为 stateless replay（不使用 previous_response_id）
+    prompt_cache_enabled: bool = True  # 是否启用自动 prompt_cache_key
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位
     request_params: dict[str, Any] = field(default_factory=dict)
@@ -200,6 +205,7 @@ class GrokModelConfig:
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
     reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
+    prompt_cache_enabled: bool = True  # 是否启用自动 prompt_cache_key
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位
     request_params: dict[str, Any] = field(default_factory=dict)
@@ -309,6 +315,29 @@ class CognitiveConfig:
     historian_recent_message_line_max_len: int = 240
     # Max characters for the current source message attached to historian jobs.
     historian_source_message_max_len: int = 800
+
+
+@dataclass
+class MemeConfig:
+    """表情包库配置。"""
+
+    enabled: bool = True
+    query_default_mode: str = "hybrid"
+    max_source_image_bytes: int = 500 * 1024
+    blob_dir: str = "data/memes/blobs"
+    preview_dir: str = "data/memes/previews"
+    db_path: str = "data/memes/memes.sqlite3"
+    vector_store_path: str = "data/memes/chromadb"
+    queue_path: str = "data/memes/queues"
+    max_items: int = 10000
+    max_total_bytes: int = 5 * 1024 * 1024 * 1024
+    allow_gif: bool = True
+    auto_ingest_group: bool = True
+    auto_ingest_private: bool = True
+    keyword_top_k: int = 30
+    semantic_top_k: int = 30
+    rerank_top_k: int = 20
+    worker_max_concurrency: int = 4
 
 
 @dataclass

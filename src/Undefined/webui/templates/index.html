@@ -52,6 +52,8 @@
                         data-i18n="landing.probes">探针诊断</button>
                     <button class="btn ghost" data-action="open-app" data-tab="memory"
                         data-i18n="landing.memory">记忆检索</button>
+                    <button class="btn ghost" data-action="open-app" data-tab="memes"
+                        data-i18n="landing.memes">表情包库</button>
                     <button class="btn ghost" data-action="open-app" data-tab="chat"
                         data-i18n="landing.chat">智能对话</button>
                     <button class="btn ghost" data-action="open-app" data-tab="about"
@@ -130,6 +132,9 @@
                 </li>
                 <li class="nav-item" data-tab="memory" data-i18n="tabs.memory" role="button" tabindex="0">
                     记忆检索
+                </li>
+                <li class="nav-item" data-tab="memes" data-i18n="tabs.memes" role="button" tabindex="0">
+                    表情包库
                 </li>
                 <li class="nav-item" data-tab="chat" data-i18n="tabs.chat" role="button" tabindex="0">
                     智能对话
@@ -227,6 +232,7 @@
                             <button class="nav-item" data-tab="logs" data-i18n="tabs.logs">Logs</button>
                             <button class="nav-item" data-tab="probes" data-i18n="tabs.probes">探针诊断</button>
                             <button class="nav-item" data-tab="memory" data-i18n="tabs.memory">记忆检索</button>
+                            <button class="nav-item" data-tab="memes" data-i18n="tabs.memes">表情包库</button>
                             <button class="nav-item" data-tab="chat" data-i18n="tabs.chat">智能对话</button>
                             <button class="nav-item" data-tab="about" data-i18n="tabs.about">About</button>
                         </div>
@@ -554,6 +560,167 @@
                     </div>
                 </section>
 
+                <!-- Tab Memes -->
+                <section id="tab-memes" class="tab-content">
+                    <div class="header">
+                        <div>
+                            <h1 class="page-title" data-i18n="memes.title">表情包库</h1>
+                            <p class="page-subtitle" data-i18n="memes.subtitle">检索、编辑、删除与重跑表情包入库结果。</p>
+                        </div>
+                        <div class="toolbar">
+                            <button id="btnMemesRefresh" class="btn" data-i18n="memes.refresh">刷新</button>
+                        </div>
+                    </div>
+
+                    <div class="runtime-grid">
+                        <div class="card runtime-card">
+                            <div class="card-title" data-i18n="memes.stats">库存概览</div>
+                            <div class="probe-grid">
+                                <div class="probe-item"><span class="probe-item-label" data-i18n="memes.total">总数</span><span id="memesStatTotal" class="probe-item-value">--</span></div>
+                                <div class="probe-item"><span class="probe-item-label" data-i18n="memes.enabled">已启用</span><span id="memesStatEnabled" class="probe-item-value">--</span></div>
+                                <div class="probe-item"><span class="probe-item-label" data-i18n="memes.animated">动图</span><span id="memesStatAnimated" class="probe-item-value">--</span></div>
+                                <div class="probe-item"><span class="probe-item-label" data-i18n="memes.pinned">置顶</span><span id="memesStatPinned" class="probe-item-value">--</span></div>
+                                <div class="probe-item"><span class="probe-item-label" data-i18n="memes.bytes">总大小</span><span id="memesStatBytes" class="probe-item-value">--</span></div>
+                                <div class="probe-item"><span class="probe-item-label" data-i18n="memes.queue">队列</span><span id="memesStatQueue" class="probe-item-value">--</span></div>
+                            </div>
+                            <div class="card-title" data-i18n="memes.filters_title" style="margin-top: 24px; border-top: 1px solid var(--border-color); padding-top: 16px;">高级筛选</div>
+                            <div class="runtime-filters" style="display: flex; flex-direction: column; gap: 8px;">
+                                <select id="memesQueryMode" class="form-control form-control-sm">
+                                    <option value="hybrid" data-i18n="memes.mode_hybrid">混合查询</option>
+                                    <option value="keyword" data-i18n="memes.mode_keyword">关键词查询</option>
+                                    <option value="semantic" data-i18n="memes.mode_semantic">语义查询</option>
+                                </select>
+                                <input id="memesKeywordQuery" type="text" class="form-control form-control-sm"
+                                    data-i18n-placeholder="memes.keyword_placeholder" placeholder="关键词查询词（可选）" />
+                                <input id="memesSemanticQuery" type="text" class="form-control form-control-sm"
+                                    data-i18n-placeholder="memes.semantic_placeholder" placeholder="语义查询词（可选）" />
+                                <div class="runtime-inline">
+                                    <select id="memesEnabledFilter" class="form-control form-control-sm" style="flex: 1;">
+                                        <option value="" data-i18n="memes.filter_enabled_all">全部状态</option>
+                                        <option value="true" data-i18n="memes.filter_enabled_true">仅启用</option>
+                                        <option value="false" data-i18n="memes.filter_enabled_false">仅禁用</option>
+                                    </select>
+                                    <select id="memesAnimatedFilter" class="form-control form-control-sm" style="flex: 1;">
+                                        <option value="" data-i18n="memes.filter_animated_all">全部类型</option>
+                                        <option value="false" data-i18n="memes.filter_animated_static">静图</option>
+                                        <option value="true" data-i18n="memes.filter_animated_true">动图</option>
+                                    </select>
+                                </div>
+                                <select id="memesPinnedFilter" class="form-control form-control-sm">
+                                    <option value="" data-i18n="memes.filter_pinned_all">全部置顶状态</option>
+                                    <option value="true" data-i18n="memes.filter_pinned_true">仅置顶</option>
+                                    <option value="false" data-i18n="memes.filter_pinned_false">仅未置顶</option>
+                                </select>
+                                <select id="memesSortSelect" class="form-control form-control-sm">
+                                    <option value="updated_at" data-i18n="memes.sort_updated">最近更新</option>
+                                    <option value="use_count" data-i18n="memes.sort_used">使用次数</option>
+                                    <option value="created_at" data-i18n="memes.sort_created">最近入库</option>
+                                    <option value="relevance" data-i18n="memes.sort_relevance">相关性</option>
+                                </select>
+                                <div class="runtime-inline">
+                                    <input id="memesTopK" type="number" min="1" step="1" class="form-control form-control-sm"
+                                        value="20" title="top_k" placeholder="top_k" />
+                                    <input id="memesPageSize" type="number" min="1" step="1" class="form-control form-control-sm"
+                                        value="50" title="page_size" placeholder="每页条数" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card runtime-card" style="display:flex; flex-direction:column;">
+                            <div class="panel-row runtime-head">
+                                <div class="card-title" data-i18n="memes.search_title">检索与列表</div>
+                                <div class="runtime-query-stack">
+                                    <div class="runtime-inline runtime-inline-action">
+                                        <input id="memesSearchInput" type="search" class="form-control form-control-sm"
+                                            data-i18n-placeholder="memes.search_placeholder" placeholder="输入关键词..." />
+                                        <button id="btnMemesSearch" class="btn runtime-inline-submit-btn" type="button">
+                                            <span class="runtime-inline-submit-icon" aria-hidden="true">⏎</span>
+                                            <span class="sr-only" data-i18n="runtime.search">查询</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="memesMeta" class="log-meta"></div>
+                            <div id="memesListWindow" class="runtime-list-window meme-results-window" style="flex:1;">
+                                <div id="memesList" class="runtime-list"></div>
+                            </div>
+                            <div class="toolbar" style="justify-content:center; margin-top:12px;">
+                                <button id="btnMemesLoadMore" class="btn ghost" type="button" data-i18n="memes.load_more" style="display:none;">加载更多</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card runtime-card">
+                        <div class="panel-row runtime-head">
+                            <div class="card-title" data-i18n="memes.detail_title">详情与编辑</div>
+                            <div class="toolbar">
+                                <button id="btnMemesSave" class="btn primary" type="button" data-i18n="memes.save">保存</button>
+                                <button id="btnMemesReanalyze" class="btn" type="button" data-i18n="memes.reanalyze">重跑分析</button>
+                                <button id="btnMemesReindex" class="btn" type="button" data-i18n="memes.reindex">重建索引</button>
+                                <button id="btnMemesDelete" class="btn danger" type="button" data-i18n="memes.delete">删除</button>
+                            </div>
+                        </div>
+                        <div id="memesDetailEmpty" class="empty-state" data-i18n="memes.empty_detail">请选择一个表情包。</div>
+                        <div id="memesDetailPanel" style="display:none;">
+                            <div class="runtime-grid">
+                                <div class="card">
+                                    <div class="card-title" data-i18n="memes.preview">预览</div>
+                                    <div class="runtime-inline" style="margin-bottom:12px;">
+                                        <code id="memesDetailUid">--</code>
+                                        <span id="memesDetailState" class="runtime-tag">--</span>
+                                    </div>
+                                    <img id="memesDetailPreview" class="runtime-chat-image" alt="meme preview" />
+                                    <div class="runtime-tags" style="margin-top:12px;">
+                                        <span id="memesDetailAnimated" class="runtime-tag">--</span>
+                                        <span id="memesDetailUseCount" class="runtime-tag">--</span>
+                                        <span id="memesDetailFileSize" class="runtime-tag">--</span>
+                                    </div>
+                                </div>
+                                <div class="card">
+                                    <div class="card-title" data-i18n="memes.edit">编辑</div>
+                                    <div class="form-grid">
+                                        <div class="form-group">
+                                            <label data-i18n="memes.auto_description">自动描述</label>
+                                            <textarea id="memesDetailAutoDescription" class="form-control" rows="3" readonly></textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label data-i18n="memes.manual_description">人工描述</label>
+                                            <textarea id="memesDetailManualDescription" class="form-control" rows="3"></textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label data-i18n="memes.tags">标签</label>
+                                            <input id="memesDetailTags" type="text" class="form-control" />
+                                        </div>
+                                        <div class="form-group">
+                                            <label data-i18n="memes.aliases">别名</label>
+                                            <input id="memesDetailAliases" type="text" class="form-control" />
+                                        </div>
+                                        <div class="form-group">
+                                            <label data-i18n="memes.flags">状态</label>
+                                            <div class="runtime-inline">
+                                                <label class="toggle-wrapper">
+                                                    <span data-i18n="memes.enabled">已启用</span>
+                                                    <input id="memesDetailEnabled" type="checkbox" class="toggle-input">
+                                                    <span class="toggle-track"><span class="toggle-handle"></span></span>
+                                                </label>
+                                                <label class="toggle-wrapper">
+                                                    <span data-i18n="memes.pinned">置顶</span>
+                                                    <input id="memesDetailPinned" type="checkbox" class="toggle-input">
+                                                    <span class="toggle-track"><span class="toggle-handle"></span></span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card" style="margin-top:20px;">
+                                <div class="card-title" data-i18n="memes.sources">来源</div>
+                                <div id="memesSources" class="runtime-list"></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Tab Chat -->
                 <section id="tab-chat" class="tab-content">
                     <div class="header">
@@ -628,6 +795,7 @@
     <script src="/static/js/auth.js"></script>
     <script src="/static/js/bot.js"></script>
     <script src="/static/js/runtime.js"></script>
+    <script src="/static/js/memes.js"></script>
     <script src="/static/js/config-form.js"></script>
     <script src="/static/js/log-view.js"></script>
     <script src="/static/js/main.js"></script>

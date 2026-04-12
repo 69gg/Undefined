@@ -368,11 +368,45 @@
   color: var(--text-tertiary);
 }
 .runtime-list { display: grid; gap: 12px; }
+.runtime-list-window {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
+}
+.meme-results-window {
+  /* 扩大视口高度的阈值参数，让列表能展示更多数据 */
+  max-height: clamp(360px, 50vh, 660px);
+  min-height: 280px;
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  padding-top: 12px;
+}
 .runtime-list-item {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   padding: 10px 12px;
   background: var(--bg-app);
+}
+.meme-list-item {
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.meme-list-item.is-selected {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 35%, transparent);
+}
+.runtime-list-window::-webkit-scrollbar {
+  width: 10px;
+}
+.runtime-list-window::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-tertiary) 36%, transparent);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.runtime-list-window::-webkit-scrollbar-track {
+  background: transparent;
 }
 .runtime-list-head {
   display: flex;

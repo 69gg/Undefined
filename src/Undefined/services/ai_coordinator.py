@@ -202,6 +202,7 @@ class AICoordinator:
 【私聊消息】
 这是私聊消息，用户专门来找你说话。你可以自由选择是否回复：
 - 如果想回复，先调用 send_message 工具发送回复内容，然后调用 end 结束对话
+- 如果你已经决定回复，并且表情包能让表达更像真人，也可以先用 memes.search_memes 查表情包，再用 memes.send_meme_by_uid 单独发图
 - 如果不想回复，直接调用 end 结束对话即可"""
 
         request_data = {
@@ -288,6 +289,7 @@ class AICoordinator:
                     onebot_client=self.onebot,
                     history_manager=self.history_manager,
                     bot_qq=self.config.bot_qq,
+                    attachment_registry=getattr(self.ai, "attachment_registry", None),
                     group_name_hint=group_name,
                 )
 
@@ -388,6 +390,7 @@ class AICoordinator:
                     onebot_client=self.onebot,
                     history_manager=self.history_manager,
                     bot_qq=self.config.bot_qq,
+                    attachment_registry=getattr(self.ai, "attachment_registry", None),
                 )
 
             async def send_img_cb(tid: int, mtype: str, path: str) -> None:
@@ -728,19 +731,31 @@ class AICoordinator:
  <content>{safe_text}</content>{attachment_xml}
  </message>
 
- 【回复策略 - 极低频参与】
+ 【回复策略 - 更克制，且优先表情包】
  1. 如果用户 @ 了你或拍了拍你 → 【必须回复】
  2. 如果消息中明确提到了你（根据上下文判断用户是否在叫你或维持对话流） → 【必须回复】
  3. 如果问题明确涉及某个项目/代码/部署细节（用户明确点名或上下文明确指向） → 【酌情回复，必要时先查证再回答】
  4. 其他技术问题 → 【酌情回复，直接按用户提到的对象回答，不要引入无关的项目名/工具名作背景】
- 5. 普通闲聊、水群、吐槽：
-    - 【几乎不回复】（99.9% 以上情况直接调用 end 不回复）
-    - 不要发送任何敷衍消息（如'懒得掺和'、'哦'等），不想回复就直接调用 end
-    - 只有内容极其有趣、特别相关、能提供独特价值时才考虑回复
-    - 不要为了"参与"而参与，保持安静
+ 5. 先判断这条话是不是在对你说：
+    - 如果明显是在和别人说话 → 【不要回复】
+    - 如果你不能确定是不是在和你说话 → 【默认不回复】
+    - 只有明确在和你说，或多人公开讨论且对话明显开放时，才进入下一步
+  6. 群聊里的主动参与只保留给公开、开放的技术或项目讨论：
+    - 只在多人公开讨论代码、AI、开发工具、项目进展、技术 bug 等，且不是别人之间定向交流时，才可以【极低频参与】
+    - 默认更倾向不参与；不要长篇大论，一两句点到为止；如果别人已经在深入讨论且不需要你，保持沉默
+    - 轻松互动、玩梗、吐槽本身不构成参与许可；只有在你已经决定要回复时，才优先考虑表情包表达
+  7. 对于已经决定要回复的场景（包括被@、被拍一拍、轻量答疑，以及少量符合条件的主动参与）：
+    - 默认先尝试 memes.search_memes，再用 memes.send_meme_by_uid 单独发一条图片消息
+    - 对于吐槽、附和、接梗、表达态度或情绪的回复，默认由表情包承担主要表达；只要能发表情包，就不要先发文字描述来代替它
+    - 如果确实需要文字，也只补极短一句，并与表情包分开发送
+    - 不要发送任何敷衍消息（如'懒得掺和'、'哦'等）；不想回复就直接调用 end
+    - 严肃、任务型、高信息密度场景少发表情包，避免打断信息传递
     - 绝不要刷屏、绝不要每条都回
+  8. 对于本来就会回复的场景（私聊、被拍一拍、被@、轻量答疑）：
+    - 如果表情包能自然增强语气、缓和语气或让表达更像真人，也可以配合使用
+    - 但不要为了发表情包而牺牲信息传递；信息密度优先时仍以文字为主
  
- 简单说：像个极度安静的群友。被@或明确提到才回应，不刷屏，不抢话。"""
+ 简单说：像个极度安静的群友。主动插话只留给公开、开放的技术或项目讨论；明显对别人说或拿不准时就闭嘴。已经决定要回复时，再优先用表情包而不是文字。"""
 
     async def _send_image(self, tid: int, mtype: str, path: str) -> None:
         """发送图片或语音消息到群聊或私聊"""

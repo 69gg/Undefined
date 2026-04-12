@@ -45,6 +45,14 @@ logger = logging.getLogger(__name__)
 KEYWORD_REPLY_HISTORY_PREFIX = "[系统关键词自动回复] "
 
 
+def _safe_int(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
 def _format_poke_history_text(display_name: str, user_id: int) -> str:
     """格式化拍一拍历史文本。"""
     return f"{display_name}(暱称)[{user_id}(QQ号)] 拍了拍你。"
@@ -156,6 +164,33 @@ class MessageHandler:
             else None,
         )
         return result.attachments
+
+    def _schedule_meme_ingest(
+        self,
+        *,
+        attachments: list[dict[str, str]],
+        chat_type: str,
+        chat_id: int,
+        sender_id: int,
+        message_id: int | None,
+        scope_key: str | None,
+    ) -> None:
+        if not attachments or not scope_key:
+            return
+        meme_service = getattr(self.ai, "_meme_service", None)
+        if meme_service is None or not getattr(meme_service, "enabled", False):
+            return
+        self._spawn_background_task(
+            f"meme_ingest:{chat_type}:{chat_id}:{sender_id}:{message_id or 0}",
+            meme_service.enqueue_incoming_attachments(
+                attachments=attachments,
+                chat_type=chat_type,
+                chat_id=chat_id,
+                sender_id=sender_id,
+                message_id=message_id,
+                scope_key=scope_key,
+            ),
+        )
 
     async def _refresh_profile_display_names(
         self,
@@ -421,6 +456,18 @@ class MessageHandler:
             if private_sender_id == self.config.bot_qq:
                 return
 
+            self._schedule_meme_ingest(
+                attachments=private_attachments,
+                chat_type="private",
+                chat_id=private_sender_id,
+                sender_id=private_sender_id,
+                message_id=_safe_int(trigger_message_id),
+                scope_key=build_attachment_scope(
+                    user_id=private_sender_id,
+                    request_type="private",
+                ),
+            )
+
             if not self.config.should_process_private_message():
                 logger.debug(
                     "[消息策略] 已关闭私聊处理: user=%s",
@@ -570,6 +617,15 @@ class MessageHandler:
         # 如果是 bot 自己的消息，只保存不触发回复，避免无限循环
         if sender_id == self.config.bot_qq:
             return
+
+        self._schedule_meme_ingest(
+            attachments=group_attachments,
+            chat_type="group",
+            chat_id=group_id,
+            sender_id=sender_id,
+            message_id=_safe_int(trigger_message_id),
+            scope_key=build_attachment_scope(group_id=group_id, request_type="group"),
+        )
 
         # 检查是否 @ 了机器人（后续分流共用）
         is_at_bot = self.ai_coordinator._is_at_bot(message_content)

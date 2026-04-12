@@ -119,6 +119,9 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
+# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
+# en: Enable automatic prompt_cache_key generation (recommended).
+prompt_cache_enabled = true
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -182,6 +185,7 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
+prompt_cache_enabled = true
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -238,6 +242,7 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
+prompt_cache_enabled = true
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -346,6 +351,7 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
+prompt_cache_enabled = true
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -412,6 +418,7 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
+prompt_cache_enabled = true
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -453,6 +460,9 @@ thinking_include_budget = true
 # zh: reasoning effort 传参风格：openai（reasoning_effort）/ anthropic（output_config.effort）。
 # en: Reasoning effort wire format: openai (reasoning_effort) / anthropic (output_config.effort).
 reasoning_effort_style = "openai"
+# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
+# en: Enable automatic prompt_cache_key generation (recommended).
+prompt_cache_enabled = true
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -1050,6 +1060,56 @@ failed_cleanup_interval = 100
 # zh: 单个任务最大自动重试次数（超过后移入 failed，0=不重试）。
 # en: Max auto-retries per job before moving to failed (0=no retry).
 job_max_retries = 3
+
+[memes]
+# zh: 是否启用全局表情包库。
+# en: Enable the global meme library.
+enabled = true
+# zh: 默认查询模式：keyword / semantic / hybrid。
+# en: Default query mode: keyword / semantic / hybrid.
+query_default_mode = "hybrid"
+# zh: 入库前允许处理的原始图片大小上限（字节）。
+# en: Max source image size in bytes before ingestion.
+max_source_image_bytes = 512000
+# zh: 原图持久化目录。
+# en: Directory for persisted meme blobs.
+blob_dir = "data/memes/blobs"
+# zh: 预览图目录（动图会抽首帧预览）。
+# en: Directory for preview images (animated images use the first frame).
+preview_dir = "data/memes/previews"
+# zh: SQLite 元数据文件路径。
+# en: SQLite metadata database path.
+db_path = "data/memes/memes.sqlite3"
+# zh: 向量索引目录。
+# en: Vector index directory.
+vector_store_path = "data/memes/chromadb"
+# zh: 后台任务队列目录。
+# en: Background queue directory.
+queue_path = "data/memes/queues"
+# zh: 表情包条目上限。
+# en: Max number of meme items.
+max_items = 10000
+# zh: 表情包总磁盘占用上限（字节）。
+# en: Max total on-disk bytes for meme blobs.
+max_total_bytes = 5368709120
+# zh: 是否允许 GIF 入库。
+# en: Whether GIF files are allowed.
+allow_gif = true
+# zh: 是否自动处理群聊图片。
+# en: Auto-ingest group chat images.
+auto_ingest_group = true
+# zh: 是否自动处理私聊图片。
+# en: Auto-ingest private chat images.
+auto_ingest_private = true
+# zh: 关键词召回候选数。
+# en: Keyword recall candidate count.
+keyword_top_k = 30
+# zh: 语义召回候选数。
+# en: Semantic recall candidate count.
+semantic_top_k = 30
+# zh: 重排候选数。
+# en: Rerank candidate count.
+rerank_top_k = 20
 
 # zh: Naga 外部网关集成配置。
 # zh: 开关分层：
