@@ -204,6 +204,42 @@ class PromptBuilder:
             else:
                 parts.append("- 思维链: 未启用")
 
+        # 彩蛋功能状态
+        keyword_reply_enabled = bool(
+            getattr(runtime_config, "keyword_reply_enabled", False)
+        )
+        repeat_enabled = bool(getattr(runtime_config, "repeat_enabled", False))
+        inverted_question_enabled = bool(
+            getattr(runtime_config, "inverted_question_enabled", False)
+        )
+        agent_call_mode = str(
+            getattr(runtime_config, "easter_egg_agent_call_message_mode", "none")
+        )
+        easter_egg_parts: list[str] = []
+        if keyword_reply_enabled:
+            easter_egg_parts.append(
+                '关键词自动回复（触发词"心理委员"等，系统自动发送固定回复）'
+            )
+        if repeat_enabled:
+            desc = "复读（群聊连续3条相同消息时自动复读）"
+            if inverted_question_enabled:
+                desc += "，倒问号（复读触发时若消息为问号则发送¿）"
+            easter_egg_parts.append(desc)
+        elif inverted_question_enabled:
+            easter_egg_parts.append("倒问号（复读未启用，此功能不生效）")
+        if agent_call_mode != "none":
+            mode_desc = {
+                "agent": "Agent调用提示",
+                "tools": "工具调用提示",
+                "clean": "降噪调用提示",
+                "all": "全量调用提示",
+            }.get(agent_call_mode, agent_call_mode)
+            easter_egg_parts.append(f"调用提示模式={mode_desc}")
+        if easter_egg_parts:
+            parts.append("- 彩蛋功能: " + "；".join(easter_egg_parts))
+        else:
+            parts.append("- 彩蛋功能: 未启用")
+
         parts.append("")
         parts.append(
             "重要：以上是你的模型配置信息。\n"
@@ -304,14 +340,20 @@ class PromptBuilder:
             is_group_context = True
 
         keyword_reply_enabled = False
+        repeat_enabled = False
+        inverted_question_enabled = False
         if self._runtime_config_getter is not None:
             try:
                 runtime_config = self._runtime_config_getter()
                 keyword_reply_enabled = bool(
                     getattr(runtime_config, "keyword_reply_enabled", False)
                 )
+                repeat_enabled = bool(getattr(runtime_config, "repeat_enabled", False))
+                inverted_question_enabled = bool(
+                    getattr(runtime_config, "inverted_question_enabled", False)
+                )
             except Exception as exc:
-                logger.debug("读取关键词自动回复配置失败: %s", exc)
+                logger.debug("读取彩蛋功能配置失败: %s", exc)
 
         if is_group_context and keyword_reply_enabled:
             messages.append(
@@ -328,6 +370,25 @@ class PromptBuilder:
                     ),
                 }
             )
+
+        if is_group_context and repeat_enabled:
+            repeat_desc = (
+                "【系统行为说明】\n"
+                "当前群聊已开启复读彩蛋：当群聊中连续出现3条内容相同且来自不同人的消息时，"
+                "系统会自动复读一条相同的消息，并在历史中写入"
+                '以"[系统复读] "开头的消息。'
+            )
+            if inverted_question_enabled:
+                repeat_desc += (
+                    "\n此外，若复读触发时消息内容仅由问号组成（如?或???），"
+                    "系统会发送对应数量的倒问号（¿）代替。"
+                )
+            repeat_desc += (
+                "\n\n这类消息属于系统预设机制，不代表你在该轮主动决策。"
+                "阅读历史时请识别该前缀，避免误判为人格漂移或上下文异常。"
+                "除非用户主动询问，否则不要主动解释此机制。"
+            )
+            messages.append({"role": "system", "content": repeat_desc})
 
         # 注入 Anthropic Skills 元数据（Level 1: 始终加载 name + description）
         if (

@@ -43,6 +43,7 @@ from Undefined.utils.logging import log_debug_json, redact_string
 logger = logging.getLogger(__name__)
 
 KEYWORD_REPLY_HISTORY_PREFIX = "[系统关键词自动回复] "
+REPEAT_REPLY_HISTORY_PREFIX = "[系统复读] "
 
 
 def _safe_int(value: Any) -> int | None:
@@ -128,8 +129,20 @@ class MessageHandler:
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._profile_name_refresh_cache: dict[tuple[str, int], str] = {}
 
+        # 复读功能状态（按群跟踪最近消息文本与发送者）
+        self._repeat_counter: dict[int, list[tuple[str, int]]] = {}
+        self._repeat_locks: dict[int, asyncio.Lock] = {}
+
         # 启动队列
         self.ai_coordinator.queue_manager.start(self.ai_coordinator.execute_reply)
+
+    def _get_repeat_lock(self, group_id: int) -> asyncio.Lock:
+        """获取或创建指定群的复读竞态保护锁。"""
+        lock = self._repeat_locks.get(group_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._repeat_locks[group_id] = lock
+        return lock
 
     async def _collect_message_attachments(
         self,
@@ -683,6 +696,40 @@ class MessageHandler:
                 history_prefix=KEYWORD_REPLY_HISTORY_PREFIX,
             )
             return
+
+        # 复读功能：连续3条相同消息（来自不同发送者）时复读
+        if self.config.repeat_enabled:
+            async with self._get_repeat_lock(group_id):
+                counter = self._repeat_counter.setdefault(group_id, [])
+                counter.append((text, sender_id))
+                # 只保留最近5条
+                if len(counter) > 5:
+                    self._repeat_counter[group_id] = counter[-5:]
+                    counter = self._repeat_counter[group_id]
+
+                if len(counter) >= 3:
+                    last3 = counter[-3:]
+                    texts = [t for t, _ in last3]
+                    senders = [s for _, s in last3]
+                    if len(set(texts)) == 1 and len(set(senders)) == 3:
+                        reply_text = texts[0]
+                        if self.config.inverted_question_enabled:
+                            stripped = reply_text.strip()
+                            if set(stripped) <= {"?", "？"}:
+                                reply_text = "¿" * len(stripped)
+                        # 清空计数器防止重复触发
+                        self._repeat_counter[group_id] = []
+                        logger.info(
+                            "[复读] 触发复读: group=%s text=%s",
+                            group_id,
+                            redact_string(reply_text)[:50],
+                        )
+                        await self.sender.send_group_message(
+                            group_id,
+                            reply_text,
+                            history_prefix=REPEAT_REPLY_HISTORY_PREFIX,
+                        )
+                        return
 
         # Bilibili 视频自动提取
         if self.config.bilibili_auto_extract_enabled:

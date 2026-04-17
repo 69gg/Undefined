@@ -426,6 +426,8 @@ Prompt caching 补充：
 |---|---:|---|---|
 | `agent_call_message_enabled` | `"none"` | 调用提示模式 | `none` / `agent` / `tools` / `all` / `clean` |
 | `keyword_reply_enabled` | `false` | 群聊关键词自动回复 | 布尔 |
+| `repeat_enabled` | `false` | 群聊复读（连续3条相同消息时复读） | 布尔 |
+| `inverted_question_enabled` | `false` | 倒问号（复读触发时若消息为问号则发送¿） | 布尔 |
 
 兼容：历史字段 `[core].keyword_reply_enabled` 仍可读取，建议迁移到 `[easter_egg]`。
 

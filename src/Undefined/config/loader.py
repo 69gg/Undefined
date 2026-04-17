@@ -468,6 +468,8 @@ class Config:
     process_private_message: bool
     process_poke_message: bool
     keyword_reply_enabled: bool
+    repeat_enabled: bool
+    inverted_question_enabled: bool
     context_recent_messages_limit: int
     ai_request_max_retries: int
     nagaagent_mode_enabled: bool
@@ -705,6 +707,22 @@ class Config:
                 None,
             )
         keyword_reply_enabled = _coerce_bool(keyword_reply_raw, False)
+        repeat_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("easter_egg", "repeat_enabled"),
+                "EASTER_EGG_REPEAT_ENABLED",
+            ),
+            False,
+        )
+        inverted_question_enabled = _coerce_bool(
+            _get_value(
+                data,
+                ("easter_egg", "inverted_question_enabled"),
+                "EASTER_EGG_INVERTED_QUESTION_ENABLED",
+            ),
+            False,
+        )
         context_recent_messages_limit = _coerce_int(
             _get_value(
                 data,
@@ -1377,6 +1395,8 @@ class Config:
             process_private_message=process_private_message,
             process_poke_message=process_poke_message,
             keyword_reply_enabled=keyword_reply_enabled,
+            repeat_enabled=repeat_enabled,
+            inverted_question_enabled=inverted_question_enabled,
             context_recent_messages_limit=context_recent_messages_limit,
             ai_request_max_retries=ai_request_max_retries,
             nagaagent_mode_enabled=nagaagent_mode_enabled,
