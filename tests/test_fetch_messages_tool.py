@@ -9,6 +9,7 @@ import pytest
 from Undefined.skills.agents.summary_agent.tools.fetch_messages.handler import (
     _filter_by_time,
     _format_messages,
+    _format_message_xml,
     _parse_time_range,
     execute as fetch_messages_execute,
 )
@@ -126,114 +127,114 @@ def test_filter_by_time_invalid_timestamp() -> None:
 # -- _format_messages unit tests --
 
 
-def test_format_messages_basic() -> None:
-    """Basic formatting with timestamp, name, and message."""
+def test_format_message_xml_group_basic() -> None:
+    """Group message is formatted into main-AI-compatible XML."""
     messages = [
         {
+            "type": "group",
+            "chat_id": "123456",
+            "chat_name": "测试群",
             "timestamp": "2024-01-01 12:00:00",
             "display_name": "Alice",
+            "user_id": "10001",
             "message": "Hello",
-            "role": "",
-            "title": "",
-        },
-    ]
-
-    result = _format_messages(messages)
-    assert result == "[2024-01-01 12:00:00] Alice: Hello"
-
-
-def test_format_messages_with_role() -> None:
-    """Role is included when not 'member' or empty."""
-    messages = [
-        {
-            "timestamp": "2024-01-01 12:00:00",
-            "display_name": "Bob",
-            "message": "Hi",
-            "role": "admin",
-            "title": "",
-        },
-    ]
-
-    result = _format_messages(messages)
-    assert result == "[2024-01-01 12:00:00] (admin) Bob: Hi"
-
-
-def test_format_messages_with_title() -> None:
-    """Title is included when present."""
-    messages = [
-        {
-            "timestamp": "2024-01-01 12:00:00",
-            "display_name": "Charlie",
-            "message": "Test",
-            "role": "",
-            "title": "群主",
-        },
-    ]
-
-    result = _format_messages(messages)
-    assert result == "[2024-01-01 12:00:00] [群主] Charlie: Test"
-
-
-def test_format_messages_with_title_and_role() -> None:
-    """Both title and role are included."""
-    messages = [
-        {
-            "timestamp": "2024-01-01 12:00:00",
-            "display_name": "Dave",
-            "message": "Message",
-            "role": "owner",
-            "title": "管理员",
-        },
-    ]
-
-    result = _format_messages(messages)
-    assert result == "[2024-01-01 12:00:00] [管理员] (owner) Dave: Message"
-
-
-def test_format_messages_role_member_excluded() -> None:
-    """Role 'member' is not included."""
-    messages = [
-        {
-            "timestamp": "2024-01-01 12:00:00",
-            "display_name": "Eve",
-            "message": "Text",
             "role": "member",
-            "title": "",
+            "title": "群主",
+            "level": "42",
+            "message_id": 123,
         },
     ]
 
-    result = _format_messages(messages)
-    assert result == "[2024-01-01 12:00:00] Eve: Text"
+    result = _format_message_xml(messages[0])
+    assert 'message_id="123"' in result
+    assert 'sender="Alice"' in result
+    assert 'sender_id="10001"' in result
+    assert 'group_id="123456"' in result
+    assert 'group_name="测试群"' in result
+    assert 'location="测试群"' in result
+    assert 'role="member"' in result
+    assert 'title="群主"' in result
+    assert 'level="42"' in result
+    assert "<content>Hello</content>" in result
+
+
+def test_format_message_xml_private_basic() -> None:
+    """Private message uses the private XML shape."""
+    msg = {
+        "type": "private",
+        "timestamp": "2024-01-01 12:00:00",
+        "display_name": "Bob",
+        "user_id": "10002",
+        "message": "Hi",
+        "message_id": 456,
+    }
+
+    result = _format_message_xml(msg)
+    assert 'message_id="456"' in result
+    assert 'sender="Bob"' in result
+    assert 'sender_id="10002"' in result
+    assert 'location="私聊"' in result
+    assert "group_id=" not in result
+    assert "role=" not in result
+    assert "<content>Hi</content>" in result
+
+
+def test_format_message_xml_includes_attachments() -> None:
+    """Attachment refs are rendered as XML below content."""
+    msg = {
+        "type": "group",
+        "chat_id": "123456",
+        "chat_name": "测试群",
+        "timestamp": "2024-01-01 12:00:00",
+        "display_name": "Charlie",
+        "user_id": "10003",
+        "message": "看这个",
+        "attachments": [
+            {
+                "uid": "pic_abcd1234",
+                "kind": "image",
+                "media_type": "image",
+                "display_name": "a.png",
+                "description": "截图",
+            }
+        ],
+    }
+
+    result = _format_message_xml(msg)
+    assert "<attachments>" in result
+    assert 'uid="pic_abcd1234"' in result
+    assert 'type="image"' in result
+    assert 'description="截图"' in result
 
 
 def test_format_messages_multiple() -> None:
-    """Multiple messages are separated by newlines."""
+    """Multiple messages are separated by main-AI-style delimiters."""
     messages = [
         {
+            "type": "group",
+            "chat_id": "123456",
+            "chat_name": "测试群",
             "timestamp": "2024-01-01 12:00:00",
             "display_name": "Alice",
+            "user_id": "10001",
             "message": "First",
-            "role": "",
-            "title": "",
         },
         {
-            "timestamp": "2024-01-01 12:01:00",
+            "type": "private",
+            "timestamp": "2024-01-01 12:00:00",
             "display_name": "Bob",
+            "user_id": "10002",
             "message": "Second",
-            "role": "admin",
-            "title": "",
         },
     ]
 
     result = _format_messages(messages)
-    expected = (
-        "[2024-01-01 12:00:00] Alice: First\n[2024-01-01 12:01:00] (admin) Bob: Second"
-    )
-    assert result == expected
+    assert "\n---\n" in result
+    assert result.count("<message") == 2
 
 
 def test_format_messages_missing_fields() -> None:
-    """Missing fields default to empty or '未知用户'."""
+    """Missing fields still produce valid XML."""
     messages = [
         {
             "timestamp": "",
@@ -244,6 +245,7 @@ def test_format_messages_missing_fields() -> None:
     result = _format_messages(messages)
     assert "未知用户" in result
     assert "No timestamp" in result
+    assert "<message" in result
 
 
 # -- execute function tests --
@@ -279,8 +281,10 @@ async def test_fetch_messages_count_based_group() -> None:
     result = await fetch_messages_execute({"count": 50}, context)
 
     assert "共获取 2 条消息" in result
-    assert "Alice: Message 1" in result
-    assert "Bob: Message 2" in result
+    assert 'sender="Alice"' in result
+    assert "<content>Message 1</content>" in result
+    assert 'sender="Bob"' in result
+    assert "<content>Message 2</content>" in result
     history_manager.get_recent.assert_called_once_with("123456", "group", 0, 50)
 
 
@@ -307,7 +311,8 @@ async def test_fetch_messages_count_based_private() -> None:
     result = await fetch_messages_execute({"count": 20}, context)
 
     assert "共获取 1 条消息" in result
-    assert "Private message" in result
+    assert 'location="私聊"' in result
+    assert "<content>Private message</content>" in result
     history_manager.get_recent.assert_called_once_with("99999", "private", 0, 20)
 
 
@@ -349,8 +354,8 @@ async def test_fetch_messages_time_range() -> None:
 
     assert "共获取 1 条消息" in result
     assert "(时间范围: 1d)" in result
-    assert "Recent" in result
-    assert "Old" not in result
+    assert "<content>Recent</content>" in result
+    assert "<content>Old</content>" not in result
 
 
 @pytest.mark.asyncio

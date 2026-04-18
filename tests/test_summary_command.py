@@ -222,6 +222,9 @@ async def test_summary_agent_call_success() -> None:
     mock_agent.assert_called_once()
     call_args = mock_agent.call_args
     assert call_args[0][0]["prompt"] == "请总结最近 50 条聊天消息"
+    assert call_args[0][0]["count"] == 50
+    assert call_args[0][0]["time_range"] is None
+    assert call_args[0][0]["focus"] == ""
 
 
 @pytest.mark.asyncio
@@ -336,3 +339,32 @@ async def test_summary_passes_correct_context_to_agent() -> None:
     assert agent_context["user_id"] == 777666
     assert agent_context["request_type"] == "group"
     assert agent_context["runtime_config"] is ai.runtime_config
+
+
+@pytest.mark.asyncio
+async def test_summary_passes_time_range_and_focus_to_agent() -> None:
+    """Time range and focus are passed structurally to the agent."""
+    sender = _DummySender()
+    history_manager = AsyncMock()
+    ai = AsyncMock()
+
+    context = _build_context(
+        sender=sender,
+        history_manager=history_manager,
+        ai=ai,
+        scope="group",
+        group_id=123456,
+        sender_id=10002,
+    )
+
+    with patch(
+        "Undefined.skills.agents.summary_agent.handler.execute",
+        new=AsyncMock(return_value="总结"),
+    ) as mock_agent:
+        await summary_execute(["1d", "技术讨论"], context)
+
+    call_args = mock_agent.call_args
+    assert call_args[0][0]["prompt"] == "请总结过去 1d 内的聊天消息，重点关注：技术讨论"
+    assert call_args[0][0]["count"] is None
+    assert call_args[0][0]["time_range"] == "1d"
+    assert call_args[0][0]["focus"] == "技术讨论"

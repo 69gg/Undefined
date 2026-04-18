@@ -88,7 +88,15 @@ async def execute(args: list[str], context: CommandContext) -> None:
     try:
         from Undefined.skills.agents.summary_agent.handler import execute as run_summary
 
-        result = await run_summary({"prompt": prompt}, agent_context)
+        result = await run_summary(
+            {
+                "prompt": prompt,
+                "count": count,
+                "time_range": time_range,
+                "focus": custom_prompt,
+            },
+            agent_context,
+        )
     except Exception:
         logger.exception("[/summary] 执行总结失败")
         await _send(context, "❌ 消息总结失败，请稍后重试")

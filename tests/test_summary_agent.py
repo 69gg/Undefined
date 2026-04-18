@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from Undefined.skills.agents.summary_agent.handler import (
+    _build_user_content,
     execute as summary_agent_execute,
 )
 
@@ -39,7 +40,8 @@ async def test_summary_agent_normal_execution() -> None:
 
     call_kwargs = mock_run_agent.call_args.kwargs
     assert call_kwargs["agent_name"] == "summary_agent"
-    assert call_kwargs["user_content"] == "请总结最近 50 条消息"
+    assert "请总结最近 50 条消息" in call_kwargs["user_content"]
+    assert "count=50" in call_kwargs["user_content"]
     assert call_kwargs["empty_user_content_message"] == "请提供您的总结需求"
     assert "消息总结助手" in call_kwargs["default_prompt"]
     assert call_kwargs["context"] is context
@@ -128,7 +130,7 @@ async def test_summary_agent_complex_prompt() -> None:
     assert result == "详细总结内容"
     call_kwargs = mock_run_agent.call_args.kwargs
     assert (
-        call_kwargs["user_content"] == "请总结过去 1d 内的聊天消息，重点关注：技术讨论"
+        "请总结过去 1d 内的聊天消息，重点关注：技术讨论" in call_kwargs["user_content"]
     )
 
 
@@ -146,3 +148,19 @@ async def test_summary_agent_propagates_exception() -> None:
     ):
         with pytest.raises(RuntimeError, match="Agent failure"):
             await summary_agent_execute({"prompt": "test"}, context)
+
+
+def test_build_user_content_prefers_structured_args() -> None:
+    content = _build_user_content(
+        {
+            "prompt": "请总结最近 80 条聊天消息，重点关注：发布计划",
+            "count": 80,
+            "time_range": "",
+            "focus": "发布计划",
+        }
+    )
+
+    assert "请总结最近 80 条聊天消息，重点关注：发布计划" in content
+    assert "count=80" in content
+    assert "总结时重点关注：发布计划" in content
+    assert "2 到 3 个短段落" in content
