@@ -3,18 +3,20 @@ from __future__ import annotations
 import html
 import logging
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from Undefined.services.commands.context import CommandContext
-from Undefined.utils.paths import RENDER_CACHE_DIR, ensure_dir
+from Undefined.utils.paths import COGNITIVE_PROFILES_DIR, RENDER_CACHE_DIR, ensure_dir
 
 logger = logging.getLogger("profile")
 
 _MAX_PROFILE_LENGTH = 3000
 
-# 合并转发单条消息最大字符数（过长拆分）
-_FORWARD_NODE_LIMIT = 2000
+_MODE_TEXT = "text"
+_MODE_FORWARD = "forward"
+_MODE_RENDER = "render"
 
 
 def _is_private(context: CommandContext) -> bool:
@@ -27,24 +29,10 @@ def _truncate(text: str, limit: int = _MAX_PROFILE_LENGTH) -> str:
     return text[:limit].rstrip() + "\n\n[侧写过长,已截断]"
 
 
-# ── 输出模式枚举 ──────────────────────────────────────────────
-
-_MODE_TEXT = "text"
-_MODE_FORWARD = "forward"
-_MODE_RENDER = "render"
-
-
-def _parse_args(
-    args: list[str],
-) -> tuple[str, str]:
-    """解析参数，返回 (子命令, 输出模式)。
-
-    子命令: "" | "g" | "group"
-    输出模式: "text" | "forward" | "render"
-    """
+def _parse_args(args: list[str]) -> tuple[str, str]:
+    """解析参数，返回 (子命令, 输出模式)。"""
     sub = ""
     mode = ""
-
     for arg in args:
         lower = arg.lower().strip()
         if lower in ("-t", "--text"):
@@ -55,9 +43,36 @@ def _parse_args(
             mode = _MODE_RENDER
         elif lower in ("g", "group"):
             sub = lower
-        # 忽略无法识别的参数
-
     return sub, mode
+
+
+def _profile_mtime(entity_type: str, entity_id: str) -> str | None:
+    """读取侧写文件最后修改时间，返回人类可读字符串。"""
+    p = COGNITIVE_PROFILES_DIR / f"{entity_type}s" / f"{entity_id}.md"
+    try:
+        mtime = p.stat().st_mtime
+        dt = datetime.fromtimestamp(mtime, tz=timezone.utc).astimezone()
+        return dt.strftime("%Y-%m-%d %H:%M")
+    except OSError:
+        return None
+
+
+def _build_metadata(
+    entity_type: str,
+    entity_id: str,
+    profile_len: int,
+) -> str:
+    """构建元数据摘要文本。"""
+    type_label = "用户" if entity_type == "user" else "群聊"
+    lines = [
+        f"类型: {type_label}侧写",
+        f"ID: {entity_id}",
+        f"长度: {profile_len} 字",
+    ]
+    mtime = _profile_mtime(entity_type, entity_id)
+    if mtime:
+        lines.append(f"更新: {mtime}")
+    return "\n".join(lines)
 
 
 # ── 发送方法 ──────────────────────────────────────────────────
@@ -72,57 +87,83 @@ async def _send_text(context: CommandContext, text: str) -> None:
         await context.sender.send_group_message(context.group_id, text)
 
 
-async def _send_forward(context: CommandContext, title: str, profile_text: str) -> None:
-    """合并转发发送。"""
+async def _send_forward(
+    context: CommandContext,
+    metadata: str,
+    profile_text: str,
+) -> None:
+    """合并转发：节点1=元数据，节点2=完整侧写内容。"""
     bot_qq = str(getattr(context.config, "bot_qq", 0))
-    nodes: list[dict[str, Any]] = []
 
-    def _add_node(content: str) -> None:
-        nodes.append(
-            {
-                "type": "node",
-                "data": {"name": "Undefined", "uin": bot_qq, "content": content},
-            }
-        )
+    def _node(content: str) -> dict[str, Any]:
+        return {
+            "type": "node",
+            "data": {"name": "Undefined", "uin": bot_qq, "content": content},
+        }
 
-    _add_node(title)
-
-    # 按长度拆分成多个节点
-    remaining = profile_text
-    while remaining:
-        chunk = remaining[:_FORWARD_NODE_LIMIT]
-        remaining = remaining[_FORWARD_NODE_LIMIT:]
-        _add_node(chunk)
-
+    nodes = [_node(metadata), _node(profile_text)]
     await context.onebot.send_forward_msg(context.group_id, nodes)
 
 
-async def _send_render(context: CommandContext, title: str, profile_text: str) -> None:
-    """渲染为图片发送。"""
+async def _send_render(
+    context: CommandContext,
+    metadata: str,
+    profile_text: str,
+) -> None:
+    """渲染为图片发送——元数据区 + 侧写正文区。"""
     from Undefined.render import render_html_to_image
 
-    safe_title = html.escape(title)
+    safe_meta = html.escape(metadata)
     safe_body = html.escape(profile_text)
+
+    # 将元数据行拆分为 key: value 形式渲染
+    meta_rows = ""
+    for line in safe_meta.split("\n"):
+        if ": " in line:
+            key, _, val = line.partition(": ")
+            meta_rows += (
+                f'<tr><td class="mk">{key}</td><td class="mv">{val}</td></tr>\n'
+            )
+
     html_content = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{
-    font-family: 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif;
-    padding: 24px; max-width: 720px; margin: 0 auto;
-    background: #f8f9fa; color: #212529; line-height: 1.7;
+  font-family: 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC',
+               'Helvetica Neue', sans-serif;
+  background: #f0f2f5; color: #1a1a2e; padding: 28px;
 }}
-h2 {{ color: #495057; border-bottom: 2px solid #dee2e6; padding-bottom: 8px; }}
-pre {{
-    white-space: pre-wrap; word-wrap: break-word;
-    font-family: inherit; font-size: 14px; margin: 0;
+.card {{
+  max-width: 680px; margin: 0 auto;
+  background: #fff; border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0,0,0,.08);
+  overflow: hidden;
 }}
-</style></head><body>
-<h2>{safe_title}</h2>
-<pre>{safe_body}</pre>
+.meta {{
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff; padding: 20px 24px;
+}}
+.meta table {{ width: 100%; border-collapse: collapse; }}
+.meta .mk {{
+  font-weight: 600; white-space: nowrap;
+  padding: 3px 12px 3px 0; opacity: .85; font-size: 13px;
+  vertical-align: top;
+}}
+.meta .mv {{ font-size: 13px; padding: 3px 0; }}
+.body {{
+  padding: 24px; line-height: 1.8; font-size: 14px;
+  white-space: pre-wrap; word-wrap: break-word;
+}}
+</style></head>
+<body>
+<div class="card">
+  <div class="meta"><table>{meta_rows}</table></div>
+  <div class="body">{safe_body}</div>
+</div>
 </body></html>"""
 
     output_dir = ensure_dir(RENDER_CACHE_DIR)
     output_path = str(output_dir / f"profile_{uuid.uuid4().hex[:8]}.png")
-
     await render_html_to_image(html_content, output_path)
 
     abs_path = Path(output_path).resolve()
@@ -160,12 +201,10 @@ async def execute(args: list[str], context: CommandContext) -> None:
             return
         entity_type = "group"
         entity_id = str(context.group_id)
-        title = "📋 群聊侧写"
         empty_hint = "暂无群聊侧写数据"
     else:
         entity_type = "user"
         entity_id = str(context.sender_id)
-        title = "📋 用户侧写"
         empty_hint = "暂无侧写数据"
 
     profile = await cognitive_service.get_profile(entity_type, entity_id)
@@ -174,6 +213,7 @@ async def execute(args: list[str], context: CommandContext) -> None:
         return
 
     profile = _truncate(profile)
+    metadata = _build_metadata(entity_type, entity_id, len(profile))
 
     # 私聊始终纯文本
     if _is_private(context):
@@ -187,13 +227,13 @@ async def execute(args: list[str], context: CommandContext) -> None:
         await _send_text(context, profile)
     elif mode == _MODE_RENDER:
         try:
-            await _send_render(context, title, profile)
+            await _send_render(context, metadata, profile)
         except Exception:
             logger.exception("渲染侧写图片失败，回退到纯文本")
             await _send_text(context, profile)
     else:
         try:
-            await _send_forward(context, title, profile)
+            await _send_forward(context, metadata, profile)
         except Exception:
             logger.exception("发送合并转发失败，回退到纯文本")
             await _send_text(context, profile)
