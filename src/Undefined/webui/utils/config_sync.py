@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,7 @@ class ConfigTemplateSyncResult:
     added_paths: list[str]
     removed_paths: list[str]
     comments: CommentMap
+    updated_comment_paths: list[str] = dataclasses.field(default_factory=list)
 
 
 def _parse_toml_text(content: str, *, label: str) -> TomlData:
@@ -226,6 +228,17 @@ def _augment_pool_model_comments(
     return merged
 
 
+def _collect_updated_comment_paths(
+    current: CommentMap, example: CommentMap
+) -> list[str]:
+    """收集在 example 与 current 中都存在、但注释文本不同的路径。"""
+    return [
+        key
+        for key, example_value in example.items()
+        if key in current and current[key] != example_value
+    ]
+
+
 def _merge_comment_maps(current: CommentMap, example: CommentMap) -> CommentMap:
     merged: CommentMap = dict(current)
     for key, value in example.items():
@@ -248,16 +261,21 @@ def sync_config_text(
     if prune and removed_paths:
         merged = _prune_to_template(merged, prepared_example_data)
     example_comments = parse_comment_map_text(example_text)
-    comments = _merge_comment_maps(
-        parse_comment_map_text(current_text),
-        _augment_pool_model_comments(example_comments, example_data, current_data),
+    current_comments = parse_comment_map_text(current_text)
+    augmented_example_comments = _augment_pool_model_comments(
+        example_comments, example_data, current_data
     )
+    updated_comment_paths = _collect_updated_comment_paths(
+        current_comments, augmented_example_comments
+    )
+    comments = _merge_comment_maps(current_comments, augmented_example_comments)
     content = render_toml(merged, comments=comments)
     return ConfigTemplateSyncResult(
         content=content,
         added_paths=added_paths,
         removed_paths=removed_paths,
         comments=comments,
+        updated_comment_paths=updated_comment_paths,
     )
 
 

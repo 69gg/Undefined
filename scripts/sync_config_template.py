@@ -96,6 +96,11 @@ def main() -> int:
     for path in result.added_paths:
         print(f"  + {path}")
 
+    if result.updated_comment_paths:
+        print(f"[sync-config] 注释更新数量: {len(result.updated_comment_paths)}")
+        for path in result.updated_comment_paths:
+            print(f"  ~ {path}")
+
     if result.removed_paths:
         print(f"[sync-config] 多余路径数量: {len(result.removed_paths)}")
         for path in result.removed_paths:

@@ -251,6 +251,7 @@ function isLongText(value) {
 
 const FIELD_SELECT_OPTIONS = {
     api_mode: ["chat_completions", "responses"],
+    gif_analysis_mode: ["grid", "multi"],
     reasoning_effort_style: ["openai", "anthropic"],
     // path -> options key mapping (underscore-separated segments)
     image_gen_provider: ["xingzhige", "models"],
