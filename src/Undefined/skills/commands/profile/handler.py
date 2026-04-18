@@ -12,7 +12,7 @@ from Undefined.utils.paths import COGNITIVE_PROFILES_DIR, RENDER_CACHE_DIR, ensu
 
 logger = logging.getLogger("profile")
 
-_MAX_PROFILE_LENGTH = 3000
+_MAX_PROFILE_LENGTH = 5000
 
 _MODE_TEXT = "text"
 _MODE_FORWARD = "forward"
@@ -116,7 +116,6 @@ async def _send_render(
     safe_meta = html.escape(metadata)
     safe_body = html.escape(profile_text)
 
-    # 将元数据行拆分为 key: value 形式渲染
     meta_rows = ""
     for line in safe_meta.split("\n"):
         if ": " in line:
@@ -129,29 +128,29 @@ async def _send_render(
 <html><head><meta charset="utf-8"><style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{
-  font-family: 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC',
-               'Helvetica Neue', sans-serif;
-  background: #f0f2f5; color: #1a1a2e; padding: 28px;
+  font-family: 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif;
+  background: #f9f5f1; color: #3d3935; padding: 24px;
 }}
 .card {{
   max-width: 680px; margin: 0 auto;
-  background: #fff; border-radius: 12px;
-  box-shadow: 0 2px 12px rgba(0,0,0,.08);
+  background: #fff; border-radius: 10px;
+  border: 1px solid #e6e0d8;
   overflow: hidden;
 }}
 .meta {{
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: #fff; padding: 20px 24px;
+  background: #f9f5f1; border-bottom: 1px solid #e6e0d8;
+  padding: 16px 20px;
 }}
-.meta table {{ width: 100%; border-collapse: collapse; }}
-.meta .mk {{
-  font-weight: 600; white-space: nowrap;
-  padding: 3px 12px 3px 0; opacity: .85; font-size: 13px;
-  vertical-align: top;
+.meta table {{ border-collapse: collapse; }}
+.mk {{
+  font-size: 12px; color: #6e675f; padding: 2px 10px 2px 0;
+  white-space: nowrap; vertical-align: top;
 }}
-.meta .mv {{ font-size: 13px; padding: 3px 0; }}
+.mv {{
+  font-size: 12px; color: #3d3935; padding: 2px 0;
+}}
 .body {{
-  padding: 24px; line-height: 1.8; font-size: 14px;
+  padding: 20px; line-height: 1.75; font-size: 14px;
   white-space: pre-wrap; word-wrap: break-word;
 }}
 </style></head>

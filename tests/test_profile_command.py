@@ -273,10 +273,10 @@ async def test_profile_no_cognitive_service() -> None:
 
 @pytest.mark.asyncio
 async def test_profile_truncation() -> None:
-    """Profile > 3000 chars gets truncated."""
+    """Profile > 5000 chars gets truncated."""
     sender = _DummySender()
     cognitive_service = AsyncMock()
-    long_profile = "A" * 3500  # Longer than 3000 chars
+    long_profile = "A" * 5500  # Longer than 5000 chars
     cognitive_service.get_profile = AsyncMock(return_value=long_profile)
 
     context = _build_context(
@@ -291,6 +291,6 @@ async def test_profile_truncation() -> None:
 
     assert len(sender.group_messages) == 1
     message = sender.group_messages[0][1]
-    assert len(message) <= 3100  # 3000 + truncation notice
+    assert len(message) <= 5100  # 5000 + truncation notice
     assert "[侧写过长,已截断]" in message
-    assert message.count("A") == 3000  # Exactly 3000 'A's before truncation
+    assert message.count("A") == 5000  # Exactly 5000 'A's before truncation
