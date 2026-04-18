@@ -607,13 +607,13 @@ class MultimodalAnalyzer:
                 self._url_cache_locks.pop(key, None)
 
     async def _build_content_items(
-        self, media_type: str, media_content: str, prompt: str
+        self, media_type: str, media_content: str | list[str], prompt: str
     ) -> list[dict[str, Any]]:
         """构建请求内容项。
 
         Args:
             media_type: 媒体类型
-            media_content: 媒体内容（URL 或 data URL）
+            media_content: 媒体内容（URL/data URL），或其列表
             prompt: 提示词
 
         Returns:
@@ -623,9 +623,9 @@ class MultimodalAnalyzer:
 
         # 添加媒体内容项
         media_item_key = f"{media_type}_url"
-        content_items.append(
-            {"type": media_item_key, media_item_key: {"url": media_content}}
-        )
+        contents = media_content if isinstance(media_content, list) else [media_content]
+        for mc in contents:
+            content_items.append({"type": media_item_key, media_item_key: {"url": mc}})
 
         return content_items
 
@@ -822,13 +822,19 @@ class MultimodalAnalyzer:
         self,
         *,
         prompt_path: str,
-        image_url: str,
+        image_url: str | list[str],
         tool_schema: dict[str, Any],
         tool_name: str,
         call_type: str,
         max_tokens: int,
     ) -> dict[str, Any]:
-        media_content = await self._load_media_content(image_url, "image")
+        if isinstance(image_url, list):
+            media_contents: list[str] = []
+            for url in image_url:
+                media_contents.append(await self._load_media_content(url, "image"))
+            media_content: str | list[str] = media_contents
+        else:
+            media_content = await self._load_media_content(image_url, "image")
         prompt = await self._load_prompt_text(prompt_path)
         content_items = await self._build_content_items("image", media_content, prompt)
         response = await self._requester.request(
@@ -847,11 +853,13 @@ class MultimodalAnalyzer:
             expected_tool_name=tool_name,
             stage=call_type,
             logger=logger,
-            error_context=f"image={redact_string(image_url)[:120]}",
+            error_context=f"image={redact_string(str(image_url) if isinstance(image_url, list) else image_url)[:120]}",
         )
 
-    async def judge_meme_image(self, image_url: str) -> dict[str, Any]:
-        safe_url = redact_string(image_url)
+    async def judge_meme_image(self, image_url: str | list[str]) -> dict[str, Any]:
+        safe_url = redact_string(
+            str(image_url) if isinstance(image_url, list) else image_url
+        )
         try:
             args = await self._request_required_tool_args(
                 prompt_path=_MEME_JUDGE_PROMPT_PATH,
@@ -886,8 +894,10 @@ class MultimodalAnalyzer:
         )
         return parsed
 
-    async def describe_meme_image(self, image_url: str) -> dict[str, Any]:
-        safe_url = redact_string(image_url)
+    async def describe_meme_image(self, image_url: str | list[str]) -> dict[str, Any]:
+        safe_url = redact_string(
+            str(image_url) if isinstance(image_url, list) else image_url
+        )
         try:
             args = await self._request_required_tool_args(
                 prompt_path=_MEME_DESCRIBE_PROMPT_PATH,

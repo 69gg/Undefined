@@ -338,6 +338,8 @@ class MemeConfig:
     semantic_top_k: int = 30
     rerank_top_k: int = 20
     worker_max_concurrency: int = 4
+    gif_analysis_mode: str = "grid"
+    gif_analysis_frames: int = 6
 
 
 @dataclass
