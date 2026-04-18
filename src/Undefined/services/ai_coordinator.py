@@ -75,6 +75,7 @@ class AICoordinator:
         sender_title: str = "",
         sender_level: str = "",
         trigger_message_id: int | None = None,
+        is_fake_at: bool = False,
     ) -> None:
         """群聊自动回复入口：根据消息内容、命中情况和安全检测决定是否回复
 
@@ -88,13 +89,15 @@ class AICoordinator:
             group_name: 群名称
             sender_role: 发送者角色 (owner/admin/member)
             sender_title: 发送者群头衔
+            is_fake_at: 是否为假@（纯文本 @昵称）触发
         """
-        is_at_bot = is_poke or self._is_at_bot(message_content)
+        is_at_bot = is_poke or is_fake_at or self._is_at_bot(message_content)
         logger.debug(
-            "[自动回复] group=%s sender=%s at_bot=%s text_len=%s",
+            "[自动回复] group=%s sender=%s at_bot=%s fake_at=%s text_len=%s",
             group_id,
             sender_id,
             is_at_bot,
+            is_fake_at,
             len(text),
         )
 

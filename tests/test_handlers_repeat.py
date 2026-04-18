@@ -70,6 +70,9 @@ def _build_handler(
     handler._repeat_counter = {}
     handler._repeat_locks = {}
     handler._profile_name_refresh_cache = {}
+    handler._bot_nickname_cache = SimpleNamespace(
+        get_nicknames=AsyncMock(return_value=frozenset()),
+    )
     return handler
 
 

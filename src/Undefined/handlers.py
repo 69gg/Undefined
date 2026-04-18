@@ -28,6 +28,7 @@ from Undefined.utils.common import (
     parse_message_content_for_history,
     matches_xinliweiyuan,
 )
+from Undefined.utils.fake_at import BotNicknameCache, strip_fake_at
 from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.scheduler import TaskScheduler
 from Undefined.utils.sender import MessageSender
@@ -130,6 +131,7 @@ class MessageHandler:
 
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._profile_name_refresh_cache: dict[tuple[str, int], str] = {}
+        self._bot_nickname_cache = BotNicknameCache(onebot, config.bot_qq)
 
         # 复读功能状态（按群跟踪最近消息文本与发送者）
         self._repeat_counter: dict[int, list[tuple[str, int]]] = {}
@@ -732,6 +734,22 @@ class MessageHandler:
         # 检查是否 @ 了机器人（后续分流共用）
         is_at_bot = self.ai_coordinator._is_at_bot(message_content)
 
+        # 假@检测：识别 "@昵称" 纯文本形式
+        # normalized_text 用于命令解析和 AI 路由，原始 text 已用于历史/日志
+        is_fake_at = False
+        normalized_text = text
+        if not is_at_bot:
+            nicknames = await self._bot_nickname_cache.get_nicknames(group_id)
+            if nicknames:
+                is_fake_at, normalized_text = strip_fake_at(text, nicknames)
+                if is_fake_at:
+                    is_at_bot = True
+                    logger.info(
+                        "[假@] 识别到假@: group=%s sender=%s",
+                        group_id,
+                        sender_id,
+                    )
+
         # 关闭“每条消息处理”后，仅处理 @ 消息（私聊/拍一拍在其他分支中处理）
         if not self.config.should_process_group_message(is_at_bot=is_at_bot):
             logger.debug(
@@ -850,19 +868,19 @@ class MessageHandler:
         # 提取文本内容
         # (已在上方提取用于日志记录)
 
-        # 只有被@时才处理斜杠命令
+        # 只有被@时才处理斜杠命令（使用 normalized_text 以支持假@后的命令）
         if is_at_bot:
-            command = self.command_dispatcher.parse_command(text)
+            command = self.command_dispatcher.parse_command(normalized_text)
             if command:
                 await self.command_dispatcher.dispatch(group_id, sender_id, command)
                 return
 
-        # 自动回复处理
+        # 自动回复处理（使用 normalized_text 以去除假@前缀）
         display_name = sender_card or sender_nickname or str(sender_id)
         await self.ai_coordinator.handle_auto_reply(
             group_id,
             sender_id,
-            text,
+            normalized_text,
             message_content,
             attachments=group_attachments,
             sender_name=display_name,
@@ -871,6 +889,7 @@ class MessageHandler:
             sender_title=sender_title,
             sender_level=sender_level,
             trigger_message_id=trigger_message_id,
+            is_fake_at=is_fake_at,
         )
 
     async def _record_private_poke_history(
