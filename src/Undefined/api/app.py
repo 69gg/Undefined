@@ -957,6 +957,11 @@ class RuntimeAPIServer:
 
         # 模型配置（脱敏）
         models_info: dict[str, Any] = {}
+        summary_model = getattr(
+            cfg,
+            "summary_model",
+            getattr(cfg, "agent_model", getattr(cfg, "chat_model", None)),
+        )
         for label in (
             "chat_model",
             "vision_model",
@@ -968,6 +973,10 @@ class RuntimeAPIServer:
             mcfg = getattr(cfg, label, None)
             if mcfg is not None:
                 models_info[label] = _build_internal_model_probe_payload(mcfg)
+        if summary_model is not None:
+            models_info["summary_model"] = _build_internal_model_probe_payload(
+                summary_model
+            )
         for label in ("embedding_model", "rerank_model"):
             mcfg = getattr(cfg, label, None)
             if mcfg is not None:
@@ -1008,6 +1017,11 @@ class RuntimeAPIServer:
     async def _external_probe_handler(self, request: web.Request) -> Response:
         _ = request
         cfg = self._ctx.config_getter()
+        summary_model = getattr(
+            cfg,
+            "summary_model",
+            getattr(cfg, "agent_model", getattr(cfg, "chat_model", None)),
+        )
         naga_probe = (
             _probe_http_endpoint(
                 name="naga_model",
@@ -1049,6 +1063,15 @@ class RuntimeAPIServer:
                 model_name=cfg.agent_model.model_name,
             ),
         ]
+        if summary_model is not None:
+            checks.append(
+                _probe_http_endpoint(
+                    name="summary_model",
+                    base_url=summary_model.api_url,
+                    api_key=summary_model.api_key,
+                    model_name=summary_model.model_name,
+                )
+            )
         grok_model = getattr(cfg, "grok_model", None)
         if grok_model is not None:
             checks.append(

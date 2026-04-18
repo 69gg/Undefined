@@ -54,6 +54,15 @@ def _build_user_content(args: dict[str, Any]) -> str:
 async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     """执行 summary_agent。"""
     user_prompt = _build_user_content(args)
+    runtime_config = context.get("runtime_config")
+    run_context = context
+    if (
+        runtime_config is not None
+        and getattr(runtime_config, "summary_model_configured", False)
+        and getattr(runtime_config, "summary_model", None) is not None
+    ):
+        run_context = dict(context)
+        run_context["model_config_override"] = runtime_config.summary_model
     return await run_agent_with_tools(
         agent_name="summary_agent",
         user_content=user_prompt,
@@ -64,7 +73,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
             "不要擅自扩大范围。"
             "输出要简短、朴素、信息密度高。"
         ),
-        context=context,
+        context=run_context,
         agent_dir=Path(__file__).parent,
         logger=logger,
         max_iterations=10,

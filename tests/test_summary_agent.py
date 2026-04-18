@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from Undefined.config.models import AgentModelConfig
 from Undefined.skills.agents.summary_agent.handler import (
     _build_user_content,
     execute as summary_agent_execute,
@@ -164,3 +165,33 @@ def test_build_user_content_prefers_structured_args() -> None:
     assert "count=80" in content
     assert "总结时重点关注：发布计划" in content
     assert "2 到 3 个短段落" in content
+
+
+@pytest.mark.asyncio
+async def test_summary_agent_uses_summary_model_override_when_configured() -> None:
+    runtime_config = AsyncMock()
+    runtime_config.summary_model_configured = True
+    runtime_config.summary_model = AgentModelConfig(
+        api_url="https://summary.example/v1",
+        api_key="sk-summary",
+        model_name="summary-model",
+    )
+    context: dict[str, Any] = {
+        "ai_client": AsyncMock(),
+        "history_manager": AsyncMock(),
+        "runtime_config": runtime_config,
+    }
+
+    with patch(
+        "Undefined.skills.agents.summary_agent.handler.run_agent_with_tools",
+        new=AsyncMock(return_value="总结结果"),
+    ) as mock_run_agent:
+        result = await summary_agent_execute(
+            {"prompt": "请总结最近 20 条消息"}, context
+        )
+
+    assert result == "总结结果"
+    call_kwargs = mock_run_agent.call_args.kwargs
+    assert (
+        call_kwargs["context"]["model_config_override"] is runtime_config.summary_model
+    )

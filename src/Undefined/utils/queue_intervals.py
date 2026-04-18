@@ -6,6 +6,7 @@ from Undefined.config import Config
 
 
 def build_model_queue_intervals(config: Config) -> dict[str, float]:
+    summary_model = getattr(config, "summary_model", config.agent_model)
     pairs: Iterable[tuple[str, float]] = (
         (config.chat_model.model_name, config.chat_model.queue_interval_seconds),
         (config.agent_model.model_name, config.agent_model.queue_interval_seconds),
@@ -17,6 +18,10 @@ def build_model_queue_intervals(config: Config) -> dict[str, float]:
         (
             config.naga_model.model_name,
             config.naga_model.queue_interval_seconds,
+        ),
+        (
+            summary_model.model_name,
+            summary_model.queue_interval_seconds,
         ),
         (config.grok_model.model_name, config.grok_model.queue_interval_seconds),
     )

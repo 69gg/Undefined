@@ -424,6 +424,60 @@ prompt_cache_enabled = true
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
 [models.historian.request_params]
 
+# zh: 消息总结模型配置（/summary /sum 专用；未配置时回退到 agent 模型）。
+# en: Message-summary model config (used by /summary and /sum; falls back to the agent model when unset).
+[models.summary]
+# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
+# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
+api_url = ""
+# zh: 消息总结模型 API Key。
+# en: Message-summary model API key.
+api_key = ""
+# zh: 消息总结模型名称。
+# en: Message-summary model name.
+model_name = ""
+# zh: 可选限制：最大生成 tokens。
+# en: Optional limit: max generation tokens.
+max_tokens = 4096
+# zh: 队列发车间隔（秒，0 表示立即发车）。
+# en: Queue interval (seconds; 0 dispatches immediately).
+queue_interval_seconds = 1.0
+# zh: API 模式：传统 chat.completions 或新版 responses。
+# en: API mode: classic chat.completions or the newer responses API.
+api_mode = "chat_completions"
+# zh: 是否启用 reasoning.effort。
+# en: Enable reasoning.effort.
+reasoning_enabled = false
+# zh: reasoning effort 档位。
+# en: reasoning effort level.
+reasoning_effort = "medium"
+# zh: 是否启用 thinking（思维链）。
+# en: Enable thinking (reasoning).
+thinking_enabled = false
+# zh: thinking 预算 tokens。
+# en: Thinking-budget tokens.
+thinking_budget_tokens = 0
+# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
+# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+thinking_include_budget = true
+# zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
+# en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
+reasoning_effort_style = "openai"
+# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
+# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+thinking_tool_call_compat = true
+# zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。默认关闭。
+# en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. Disabled by default.
+responses_tool_choice_compat = false
+# zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
+# en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
+responses_force_stateless_replay = false
+prompt_cache_enabled = true
+
+# zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
+# en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
+[models.summary.request_params]
+
 # zh: Grok 搜索模型配置（仅供 web_agent 内的 grok_search 使用；固定走 chat.completions，不支持 tool call 兼容字段）。
 # en: Grok search model config (used only by grok_search inside web_agent; always uses chat completions and does not expose tool-call compatibility fields).
 [models.grok]
