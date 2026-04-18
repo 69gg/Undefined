@@ -85,8 +85,6 @@ async def execute(args: list[str], context: CommandContext) -> None:
         "queue_lane": None,
     }
 
-    await _send(context, "📝 正在总结消息，请稍候...")
-
     try:
         from Undefined.skills.agents.summary_agent.handler import execute as run_summary
 

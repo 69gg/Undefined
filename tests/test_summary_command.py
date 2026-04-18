@@ -217,9 +217,8 @@ async def test_summary_agent_call_success() -> None:
     ) as mock_agent:
         await summary_execute(["50"], context)
 
-    assert len(sender.group_messages) == 2
-    assert "📝 正在总结消息，请稍候..." in sender.group_messages[0][1]
-    assert "总结内容：最近讨论了技术话题。" in sender.group_messages[1][1]
+    assert len(sender.group_messages) == 1
+    assert "总结内容：最近讨论了技术话题。" in sender.group_messages[0][1]
     mock_agent.assert_called_once()
     call_args = mock_agent.call_args
     assert call_args[0][0]["prompt"] == "请总结最近 50 条聊天消息"
@@ -247,9 +246,8 @@ async def test_summary_agent_call_failure() -> None:
     ):
         await summary_execute([], context)
 
-    assert len(sender.group_messages) == 2
-    assert "📝 正在总结消息，请稍候..." in sender.group_messages[0][1]
-    assert "❌ 消息总结失败，请稍后重试" in sender.group_messages[1][1]
+    assert len(sender.group_messages) == 1
+    assert "❌ 消息总结失败，请稍后重试" in sender.group_messages[0][1]
 
 
 @pytest.mark.asyncio
@@ -274,8 +272,8 @@ async def test_summary_agent_returns_empty() -> None:
     ):
         await summary_execute([], context)
 
-    assert len(sender.group_messages) == 2
-    assert "📭 未能生成总结内容" in sender.group_messages[1][1]
+    assert len(sender.group_messages) == 1
+    assert "📭 未能生成总结内容" in sender.group_messages[0][1]
 
 
 @pytest.mark.asyncio
@@ -301,9 +299,8 @@ async def test_summary_private_chat() -> None:
     ):
         await summary_execute(["1d", "重要消息"], context)
 
-    assert len(sender.private_messages) == 2
-    assert "📝 正在总结消息，请稍候..." in sender.private_messages[0][1]
-    assert "私聊总结结果" in sender.private_messages[1][1]
+    assert len(sender.private_messages) == 1
+    assert "私聊总结结果" in sender.private_messages[0][1]
 
 
 @pytest.mark.asyncio
