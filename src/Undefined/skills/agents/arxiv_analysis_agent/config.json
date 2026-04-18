@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "arxiv_analysis_agent",
+        "description": "arXiv 论文深度分析助手，下载并解析 arXiv 论文 PDF 全文，进行结构化学术深度分析。支持按 arXiv ID 或 URL 获取论文。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "paper_id": {
+                    "type": "string",
+                    "description": "arXiv 论文 ID（如 '2301.07041'）、arXiv URL（如 'https://arxiv.org/abs/2301.07041'）或 'arXiv:2301.07041' 格式"
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "可选的分析需求，例如：'重点分析方法论和实验设计'、'关注与 diffusion model 的对比'"
+                }
+            },
+            "required": ["paper_id"]
+        }
+    }
+}

@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "read_paper_pages",
+        "description": "读取已下载论文 PDF 的指定页范围文本。必须先调用 fetch_paper 下载论文。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "start_page": {
+                    "type": "integer",
+                    "description": "起始页码（从 1 开始）"
+                },
+                "end_page": {
+                    "type": "integer",
+                    "description": "结束页码（包含该页）"
+                }
+            },
+            "required": ["start_page", "end_page"]
+        }
+    }
+}
