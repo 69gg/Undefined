@@ -716,8 +716,8 @@ grok_search_enabled = false
 # zh: 代理设置（可选）。
 # en: Proxy settings (optional).
 [proxy]
-# zh: 是否在 "web_agent" 中启用代理。
-# en: Enable proxy in "web_agent".
+# zh: 是否使用代理。
+# en: Whether to use proxy.
 use_proxy = true
 # zh: 例如 http://127.0.0.1:7890（也可使用环境变量 "HTTP_PROXY"）。
 # en: e.g. http://127.0.0.1:7890 (or use the "HTTP_PROXY" environment variable).

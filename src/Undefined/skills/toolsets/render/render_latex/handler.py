@@ -77,7 +77,9 @@ def _build_html(latex_content: str) -> str:
 </html>"""
 
 
-async def _render_latex_to_bytes(content: str, output_format: str) -> tuple[bytes, str]:
+async def _render_latex_to_bytes(
+    content: str, output_format: str, proxy: str | None = None
+) -> tuple[bytes, str]:
     """
     使用 MathJax + Playwright 渲染 LaTeX 内容。
 
@@ -95,8 +97,13 @@ async def _render_latex_to_bytes(content: str, output_format: str) -> tuple[byte
 
     html_content = _build_html(content)
 
+    launch_kwargs: dict[str, object] = {"headless": True}
+    if proxy:
+        launch_kwargs["proxy"] = {"server": proxy}
+        logger.info("LaTeX 渲染使用代理: %s", proxy)
+
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(**launch_kwargs)  # type: ignore[arg-type]
         try:
             page = await browser.new_page()
             await page.set_content(html_content)
@@ -143,6 +150,22 @@ async def _render_latex_to_bytes(content: str, output_format: str) -> tuple[byte
             await browser.close()
 
 
+async def _resolve_proxy(context: Dict[str, Any]) -> str | None:
+    """从 context 的 runtime_config 中解析代理地址。"""
+    from Undefined.config import get_config
+
+    runtime_config = context.get("runtime_config") or get_config(strict=False)
+    if runtime_config is None:
+        return None
+    use_proxy: bool = getattr(runtime_config, "use_proxy", False)
+    if not use_proxy:
+        return None
+    proxy: str = getattr(runtime_config, "http_proxy", "") or getattr(
+        runtime_config, "https_proxy", ""
+    )
+    return proxy or None
+
+
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """渲染 LaTeX 数学公式为图片或 PDF"""
     raw_content = str(args.get("content", "") or "")
@@ -159,9 +182,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         # 准备内容
         prepared_content = _prepare_content(raw_content)
 
+        # 解析代理
+        proxy = await _resolve_proxy(context)
+
         # 渲染
         rendered_bytes, mime_type = await _render_latex_to_bytes(
-            prepared_content, output_format
+            prepared_content, output_format, proxy=proxy
         )
 
         # 注册到附件系统
