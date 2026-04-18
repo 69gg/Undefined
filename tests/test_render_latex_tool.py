@@ -195,3 +195,14 @@ def test_prepare_content() -> None:
     result_newline = _prepare_content(r"x = 1\\ny = 2")
     assert "\n" in result_newline
     assert "\\n" not in result_newline.replace(r"\[", "").replace(r"\]", "")
+
+
+def test_build_html_contains_mathjax_ready_flag() -> None:
+    """HTML 模板包含 MathJax pageReady 回调设置 _mjReady 标记"""
+    from Undefined.skills.toolsets.render.render_latex.handler import _build_html
+
+    html = _build_html(r"\[ x = 1 \]")
+    assert "window._mjReady = true" in html
+    assert "pageReady" in html
+    assert "tex-svg.js" in html
+    assert "math-container" in html

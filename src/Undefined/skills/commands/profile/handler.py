@@ -31,18 +31,18 @@ async def execute(args: list[str], context: CommandContext) -> None:
         await _send(context, "❌ 侧写服务未启用")
         return
 
-    # Parse subcommand
+    # Parse subcommand: "g" or "group" → group profile
     sub = args[0].lower().strip() if args else ""
 
-    if sub == "group":
+    if sub in ("group", "g"):
         if _is_private(context):
             await _send(context, "❌ 私聊中不支持查看群聊侧写")
             return
-        entity_type = "groups"
+        entity_type = "group"
         entity_id = str(context.group_id)
         empty_hint = "暂无群聊侧写数据"
     else:
-        entity_type = "users"
+        entity_type = "user"
         entity_id = str(context.sender_id)
         empty_hint = "暂无侧写数据"
 

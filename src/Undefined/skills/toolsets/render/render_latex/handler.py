@@ -63,6 +63,18 @@ def _build_html(latex_content: str) -> str:
 <html>
 <head>
 <meta charset="utf-8">
+<script>
+window.MathJax = {{
+  tex: {{ inlineMath: [['$','$'], ['\\\\(','\\\\)']] }},
+  startup: {{
+    pageReady: function() {{
+      return MathJax.startup.defaultPageReady().then(function() {{
+        window._mjReady = true;
+      }});
+    }}
+  }}
+}};
+</script>
 <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
 <style>
   body {{ margin: 0; padding: 20px; background: white; }}
@@ -108,11 +120,11 @@ async def _render_latex_to_bytes(
             page = await browser.new_page()
             await page.set_content(html_content)
 
-            # 等待 MathJax 完成排版
+            # 等待 MathJax 完成排版（pageReady 回调设置 window._mjReady）
             try:
                 await page.wait_for_function(
-                    "() => window.MathJax?.startup?.promise?.then(() => true) ?? false",
-                    timeout=15000,
+                    "() => window._mjReady === true",
+                    timeout=30000,
                 )
             except PwTimeoutError:
                 logger.warning("MathJax 排版超时，内容可能过于复杂或网络不可达")

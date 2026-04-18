@@ -88,7 +88,7 @@ async def test_profile_private_own_profile_found() -> None:
     assert len(sender.private_messages) == 1
     assert sender.private_messages[0][0] == 99999
     assert "这是一个用户侧写" in sender.private_messages[0][1]
-    cognitive_service.get_profile.assert_called_once_with("users", "99999")
+    cognitive_service.get_profile.assert_called_once_with("user", "99999")
 
 
 @pytest.mark.asyncio
@@ -158,7 +158,7 @@ async def test_profile_group_own_profile() -> None:
     assert len(sender.group_messages) == 1
     assert sender.group_messages[0][0] == 123456
     assert "群成员侧写数据" in sender.group_messages[0][1]
-    cognitive_service.get_profile.assert_called_once_with("users", "55555")
+    cognitive_service.get_profile.assert_called_once_with("user", "55555")
 
 
 @pytest.mark.asyncio
@@ -181,7 +181,51 @@ async def test_profile_group_profile_subcommand() -> None:
     assert len(sender.group_messages) == 1
     assert sender.group_messages[0][0] == 654321
     assert "群聊整体侧写" in sender.group_messages[0][1]
-    cognitive_service.get_profile.assert_called_once_with("groups", "654321")
+    cognitive_service.get_profile.assert_called_once_with("group", "654321")
+
+
+@pytest.mark.asyncio
+async def test_profile_group_profile_g_shorthand() -> None:
+    """Group chat, `/p g` shorthand → shows group profile."""
+    sender = _DummySender()
+    cognitive_service = AsyncMock()
+    cognitive_service.get_profile = AsyncMock(return_value="群聊简称侧写")
+
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="group",
+        group_id=654321,
+        sender_id=44444,
+    )
+
+    await profile_execute(["g"], context)
+
+    assert len(sender.group_messages) == 1
+    assert "群聊简称侧写" in sender.group_messages[0][1]
+    cognitive_service.get_profile.assert_called_once_with("group", "654321")
+
+
+@pytest.mark.asyncio
+async def test_profile_private_g_shorthand_rejected() -> None:
+    """Private chat, `/p g` shorthand also rejected."""
+    sender = _DummySender()
+    cognitive_service = AsyncMock()
+
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="private",
+        group_id=0,
+        sender_id=77777,
+        user_id=77777,
+    )
+
+    await profile_execute(["g"], context)
+
+    assert len(sender.private_messages) == 1
+    assert "❌ 私聊中不支持查看群聊侧写" in sender.private_messages[0][1]
+    cognitive_service.get_profile.assert_not_called()
 
 
 @pytest.mark.asyncio

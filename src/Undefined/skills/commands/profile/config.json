@@ -1,8 +1,8 @@
 {
     "name": "profile",
-    "description": "查看用户或群聊侧写",
-    "usage": "/profile [group]",
-    "example": "/profile",
+    "description": "查看侧写。默认显示你的用户侧写；加 g 查看当前群聊侧写（仅群聊可用）",
+    "usage": "/p [g]",
+    "example": "/p g",
     "permission": "public",
     "rate_limit": {
         "user": 60,
