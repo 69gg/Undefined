@@ -17,6 +17,7 @@ from Undefined.handlers import (
 def _build_handler(
     *,
     repeat_enabled: bool = False,
+    repeat_threshold: int = 3,
     inverted_question_enabled: bool = False,
     keyword_reply_enabled: bool = False,
 ) -> Any:
@@ -24,6 +25,7 @@ def _build_handler(
     handler.config = SimpleNamespace(
         bot_qq=10000,
         repeat_enabled=repeat_enabled,
+        repeat_threshold=repeat_threshold,
         inverted_question_enabled=inverted_question_enabled,
         keyword_reply_enabled=keyword_reply_enabled,
         bilibili_auto_extract_enabled=False,
@@ -248,7 +250,7 @@ async def test_repeat_groups_are_independent() -> None:
     assert call.args[0] == 30002
 
 
-# ── 计数器窗口：只看最近5条 ──
+# ── 计数器窗口：只看最近 N 条 ──
 
 
 @pytest.mark.asyncio
@@ -264,3 +266,77 @@ async def test_repeat_counter_sliding_window() -> None:
     handler.sender.send_group_message.assert_called_once()
     call = handler.sender.send_group_message.call_args
     assert call.args[1] == "hello"
+
+
+# ── bot 自身发言后不触发复读 ──
+
+BOT_QQ = 10000
+
+
+@pytest.mark.asyncio
+async def test_repeat_no_trigger_when_bot_sends_before_users() -> None:
+    """bot 先发，后面用户再发相同消息，不应触发复读。"""
+    handler = _build_handler(repeat_enabled=True)
+    # bot 先发
+    await handler.handle_message(_group_event(sender_id=BOT_QQ, text="hello"))
+    # 两个用户跟发
+    for uid in [20001, 20002]:
+        await handler.handle_message(_group_event(sender_id=uid, text="hello"))
+
+    handler.sender.send_group_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_repeat_no_trigger_when_bot_sends_in_middle() -> None:
+    """用户发到一半，bot 插入相同消息，之后用户再凑满阈值，不应触发复读。"""
+    handler = _build_handler(repeat_enabled=True)
+    # 两个用户先发
+    await handler.handle_message(_group_event(sender_id=20001, text="hello"))
+    await handler.handle_message(_group_event(sender_id=20002, text="hello"))
+    # bot 插入
+    await handler.handle_message(_group_event(sender_id=BOT_QQ, text="hello"))
+    # 第三个用户发：此时窗口 [user2, bot, user3]，含 bot → 不触发
+    await handler.handle_message(_group_event(sender_id=20003, text="hello"))
+
+    handler.sender.send_group_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_repeat_triggers_after_bot_window_slides_out() -> None:
+    """bot 消息滑出窗口后，纯用户序列应正常触发复读（threshold=3）。"""
+    handler = _build_handler(repeat_enabled=True, repeat_threshold=3)
+    # bot 先发（进入窗口）
+    await handler.handle_message(_group_event(sender_id=BOT_QQ, text="hello"))
+    # 三个不同用户依次发：窗口变为 [user1, user2, user3]（bot 已滑出）
+    for uid in [20001, 20002, 20003]:
+        await handler.handle_message(_group_event(sender_id=uid, text="hello"))
+
+    handler.sender.send_group_message.assert_called_once()
+    assert handler.sender.send_group_message.call_args.args[1] == "hello"
+
+
+# ── 可配置阈值 ──
+
+
+@pytest.mark.asyncio
+async def test_repeat_custom_threshold_2() -> None:
+    """threshold=2 时，2 条不同发送者相同消息即触发复读。"""
+    handler = _build_handler(repeat_enabled=True, repeat_threshold=2)
+    for uid in [20001, 20002]:
+        await handler.handle_message(_group_event(sender_id=uid, text="hi"))
+
+    handler.sender.send_group_message.assert_called_once()
+    assert handler.sender.send_group_message.call_args.args[1] == "hi"
+
+
+@pytest.mark.asyncio
+async def test_repeat_custom_threshold_4() -> None:
+    """threshold=4 时，3 条不同发送者相同消息不触发，第 4 条才触发。"""
+    handler = _build_handler(repeat_enabled=True, repeat_threshold=4)
+    for uid in [20001, 20002, 20003]:
+        await handler.handle_message(_group_event(sender_id=uid, text="hey"))
+    handler.sender.send_group_message.assert_not_called()
+
+    await handler.handle_message(_group_event(sender_id=20004, text="hey"))
+    handler.sender.send_group_message.assert_called_once()
+    assert handler.sender.send_group_message.call_args.args[1] == "hey"

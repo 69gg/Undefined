@@ -659,9 +659,12 @@ agent_call_message_enabled = "none"
 # zh: 是否启用群聊关键词（"心理委员"）自动回复。
 # en: Enable keyword auto-replies("心理委员") in group chats.
 keyword_reply_enabled = false
-# zh: 是否启用群聊复读功能（连续3条相同消息时复读）。
-# en: Enable repeat feature in group chats (repeat when 3 consecutive identical messages).
+# zh: 是否启用群聊复读功能（连续 N 条相同消息时复读，N 由 repeat_threshold 控制；若期间有 bot 自身发言则重置链）。
+# en: Enable repeat feature in group chats (repeat when N consecutive identical messages arrive, N set by repeat_threshold; resets if bot itself sent the same text in between).
 repeat_enabled = false
+# zh: 复读触发所需的连续相同消息条数（来自不同发送者），范围 2–20，默认 3。
+# en: Number of consecutive identical messages (from different senders) required to trigger repeat, range 2–20, default 3.
+repeat_threshold = 3
 # zh: 是否启用倒问号（复读触发时，若消息为问号则发送倒问号 ¿）。
 # en: Enable inverted question mark (when repeat triggers on "?" messages, send "¿" instead).
 inverted_question_enabled = false

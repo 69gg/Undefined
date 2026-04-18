@@ -707,7 +707,17 @@ class MessageHandler:
         )
 
         # 如果是 bot 自己的消息，只保存不触发回复，避免无限循环
+        # 同时把 bot 自身的发言写入复读计数器，使窗口中留有 bot 标记，
+        # 后续触发检查时会排除含 bot 的窗口，防止"bot 先发 → 用户跟发"或
+        # "用户发到一半 bot 插入"等情况误触复读。
         if sender_id == self.config.bot_qq:
+            if self.config.repeat_enabled and text:
+                async with self._get_repeat_lock(group_id):
+                    counter = self._repeat_counter.setdefault(group_id, [])
+                    counter.append((text, sender_id))
+                    n = self.config.repeat_threshold
+                    if len(counter) > n:
+                        self._repeat_counter[group_id] = counter[-n:]
             return
 
         self._schedule_meme_ingest(
@@ -776,21 +786,26 @@ class MessageHandler:
             )
             return
 
-        # 复读功能：连续3条相同消息（来自不同发送者）时复读
+        # 复读功能：连续 N 条相同消息（来自不同发送者）时复读，N = repeat_threshold
         if self.config.repeat_enabled:
+            n = self.config.repeat_threshold
             async with self._get_repeat_lock(group_id):
                 counter = self._repeat_counter.setdefault(group_id, [])
                 counter.append((text, sender_id))
-                # 只保留最近5条
-                if len(counter) > 5:
-                    self._repeat_counter[group_id] = counter[-5:]
+                # 只保留最近 n 条
+                if len(counter) > n:
+                    self._repeat_counter[group_id] = counter[-n:]
                     counter = self._repeat_counter[group_id]
 
-                if len(counter) >= 3:
-                    last3 = counter[-3:]
-                    texts = [t for t, _ in last3]
-                    senders = [s for _, s in last3]
-                    if len(set(texts)) == 1 and len(set(senders)) == 3:
+                if len(counter) >= n:
+                    last_n = counter[-n:]
+                    texts = [t for t, _ in last_n]
+                    senders = [s for _, s in last_n]
+                    if (
+                        len(set(texts)) == 1
+                        and len(set(senders)) == n
+                        and self.config.bot_qq not in senders
+                    ):
                         reply_text = texts[0]
                         if self.config.inverted_question_enabled:
                             stripped = reply_text.strip()

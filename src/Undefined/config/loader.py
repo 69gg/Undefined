@@ -469,6 +469,7 @@ class Config:
     process_poke_message: bool
     keyword_reply_enabled: bool
     repeat_enabled: bool
+    repeat_threshold: int
     inverted_question_enabled: bool
     context_recent_messages_limit: int
     ai_request_max_retries: int
@@ -723,6 +724,18 @@ class Config:
             ),
             False,
         )
+        repeat_threshold = _coerce_int(
+            _get_value(
+                data,
+                ("easter_egg", "repeat_threshold"),
+                "EASTER_EGG_REPEAT_THRESHOLD",
+            ),
+            3,
+        )
+        if repeat_threshold < 2:
+            repeat_threshold = 2
+        if repeat_threshold > 20:
+            repeat_threshold = 20
         context_recent_messages_limit = _coerce_int(
             _get_value(
                 data,
@@ -1396,6 +1409,7 @@ class Config:
             process_poke_message=process_poke_message,
             keyword_reply_enabled=keyword_reply_enabled,
             repeat_enabled=repeat_enabled,
+            repeat_threshold=repeat_threshold,
             inverted_question_enabled=inverted_question_enabled,
             context_recent_messages_limit=context_recent_messages_limit,
             ai_request_max_retries=ai_request_max_retries,
