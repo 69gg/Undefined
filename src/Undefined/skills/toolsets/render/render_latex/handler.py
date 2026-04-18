@@ -1,14 +1,53 @@
 from __future__ import annotations
 
+from pathlib import Path
+import re
 from typing import Any, Dict
 import logging
 import uuid
-import matplotlib.pyplot as plt
+
 import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 from Undefined.attachments import scope_from_context
 
 logger = logging.getLogger(__name__)
+
+_DOCUMENT_PATTERN = re.compile(
+    r"^\s*\\begin\{document\}(?P<body>.*?)\\end\{document\}\s*$",
+    re.DOTALL,
+)
+
+
+def _strip_document_wrappers(content: str) -> str:
+    """去掉 \\begin{document}...\\end{document} 外层包装；matplotlib 会自行构造文档。"""
+    text = content.strip()
+    match = _DOCUMENT_PATTERN.fullmatch(text)
+    if match is None:
+        return text
+    return match.group("body").strip()
+
+
+def _render_latex_image(filepath: Path, content: str) -> None:
+    text = _strip_document_wrappers(content)
+    fig = plt.figure(figsize=(6, 2.5))
+    try:
+        fig.patch.set_facecolor("white")
+        fig.text(
+            0.5,
+            0.5,
+            text,
+            fontsize=20,
+            verticalalignment="center",
+            horizontalalignment="center",
+            usetex=True,
+            wrap=True,
+        )
+        fig.savefig(filepath, dpi=200, bbox_inches="tight", pad_inches=0.25)
+    finally:
+        plt.close(fig)
 
 
 def _resolve_send_target(
@@ -33,7 +72,7 @@ def _resolve_send_target(
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """渲染 LaTeX 数学公式为图片"""
-    content = args.get("content", "")
+    content = str(args.get("content", "") or "")
     delivery = str(args.get("delivery", "embed") or "embed").strip().lower()
     target_id = args.get("target_id")
     message_type = args.get("message_type")
@@ -53,26 +92,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         filename = f"render_{uuid.uuid4().hex[:16]}.png"
         filepath = ensure_dir(RENDER_CACHE_DIR) / filename
 
-        matplotlib.use("Agg")
-
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.axis("off")
-
-        ax.text(
-            0.5,
-            0.5,
-            content,
-            transform=ax.transAxes,
-            fontsize=12,
-            verticalalignment="center",
-            horizontalalignment="center",
-            usetex=True,
-            wrap=True,
-        )
-
-        plt.tight_layout()
-        plt.savefig(filepath, dpi=150, bbox_inches="tight", pad_inches=0.1)
-        plt.close(fig)
+        _render_latex_image(filepath, content)
 
         # 注册到附件系统
         attachment_registry = context.get("attachment_registry")
@@ -133,6 +153,13 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     except ImportError as e:
         missing_pkg = str(e).split("'")[1] if "'" in str(e) else "未知包"
         return f"渲染失败：缺少依赖包 {missing_pkg}，请运行: uv add {missing_pkg}"
+    except RuntimeError as e:
+        err = str(e).lower()
+        if "latex" in err or "dvipng" in err or "dvi" in err:
+            logger.error("LaTeX 渲染失败（系统 TeX 环境不可用）: %s", e)
+            return "渲染失败：系统 LaTeX 环境未安装或不完整，请按部署文档安装 TeX Live / MiKTeX 后重试。"
+        logger.exception("渲染并发送 LaTeX 图片失败: %s", e)
+        return "渲染失败，请稍后重试"
     except Exception as e:
         logger.exception(f"渲染并发送 LaTeX 图片失败: {e}")
         return "渲染失败，请稍后重试"

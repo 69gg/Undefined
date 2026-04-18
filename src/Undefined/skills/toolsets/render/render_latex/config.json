@@ -2,13 +2,13 @@
     "type": "function",
     "function": {
         "name": "render_latex",
-        "description": "将 LaTeX 文本渲染为图片。默认返回可嵌入回复的图片 UID（embed），也可直接发送到指定目标（send）。支持完整的 LaTeX 语法（包含 \\begin 和 \\end）。",
+        "description": "将 LaTeX 公式或文档渲染为图片，使用系统外部 LaTeX（需预先安装 TeX Live / MiKTeX）。默认返回可嵌入回复的图片 UID（embed），也可直接发送到指定目标（send）。",
         "parameters": {
             "type": "object",
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "要渲染的 LaTeX 内容。必须是完整格式（包含 \\begin 和 \\end）。"
+                    "description": "要渲染的 LaTeX 内容。支持 $...$、$$...$$、\\[...\\]、\\(...\\) 及完整环境（\\begin{align}...\\end{align} 等）；\\begin{document}...\\end{document} 外层包装会自动去掉。"
                 },
                 "delivery": {
                     "type": "string",

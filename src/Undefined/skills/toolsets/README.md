@@ -136,7 +136,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 ### Render（渲染）
 
 - `render.render_html`: 将 HTML 渲染为图片
-- `render.render_latex`: 将 LaTeX 渲染为图片
+- `render.render_latex`: 将 LaTeX 渲染为图片（依赖系统 TeX 环境，需安装 TeX Live / MiKTeX）
 - `render.render_markdown`: 将 Markdown 渲染为图片
 
 ### Memes（表情包）

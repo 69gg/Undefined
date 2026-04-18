@@ -47,7 +47,46 @@ uv sync
 uv run playwright install
 ```
 
-### 3. 配置环境
+### 3. 安装系统级依赖（必装）
+
+Bot 内置的数学公式等功能直接强依赖系统级的渲染环境，你**必须**提前在宿主机配置以下依赖。若是缺失该依赖，渲染图像或公式时后台将直接报错。
+
+**安装 LaTeX 与工具链**：
+
+- **Ubuntu / Debian**
+  直接无脑安装完整的 TeX Live 环境最为稳妥：
+  ```bash
+  sudo apt-get update
+  sudo apt-get install -y texlive-full dvipng ghostscript
+  ```
+
+- **Arch Linux**
+  通过 pacman 安装基础包：
+  ```bash
+  sudo pacman -S --needed texlive-basic texlive-bin texlive-latex texlive-latexrecommended texlive-latexextra texlive-fontsrecommended texlive-binextra texlive-mathscience ghostscript
+  ```
+
+- **macOS**
+  推荐通过 Homebrew 安装 MacTeX 环境，提供完整（省心，体积较大）或者精简两个版本：
+  ```bash
+  # 方式 1：完整环境（推荐）
+  brew install --cask mactex-no-gui
+
+  # 方式 2：精简版（体积小，需手动拉取补包）
+  brew install --cask basictex
+  sudo tlmgr update --self
+  sudo tlmgr install dvipng type1cm type1ec cm-super collection-fontsrecommended
+  ```
+
+- **Windows**
+  安装 [MiKTeX](https://miktex.org/download) （推荐，能自动下载缺失宏包）或者 [TeX Live](https://tug.org/texlive/windows.html)。
+  1. 打开 MiKTeX Console。
+  2. 搜索 `dvipng` 手动将其安装上。
+  3. 确认环境变量 `PATH` 中已经包含了 `latex.exe`。
+
+> 验证安装：使用 `latex --version` 与 `dvipng --version` 命令检测是否识别。如日志报错 `type1ec.sty not found` 或 `dvipng: command not found`，一般是由于所处的系统少安装了包或可执行文件不在环境变量中。
+
+### 4. 配置环境
 
 复制示例配置文件 `config.toml.example` 为 `config.toml` 并填写你的配置信息。
 
@@ -61,7 +100,7 @@ cp config.toml.example config.toml
 - **自定义图片资源**：修改 `img/` 下的对应文件（例如 `img/xlwy.jpg`）。
 - **优先级**：若你希望“运行目录覆盖优先”：在启动目录放置 `./res/...`，会优先于默认资源生效（便于一套安装，多套运行配置）。
 
-### 4. 启动运行
+### 5. 启动运行
 
 启动方式（二选一）：
 
@@ -75,7 +114,7 @@ uv run Undefined-webui
 
 > **重要**：两种方式 **二选一即可**，不要同时运行。若你选择 `Undefined-webui`，请在 WebUI 中管理机器人进程的启停。
 
-### 5. 跨平台与资源路径（重要）
+### 6. 跨平台与资源路径（重要）
 
 - **资源读取**：运行时会优先从运行目录加载同名 `res/...` / `img/...`（便于覆盖），若不存在再使用安装包自带资源；并提供仓库结构兜底查找，因此从任意目录启动也能正常加载提示词与资源文案。
 - **并发写入**：运行时会为 JSON/日志类文件使用”锁文件 + 原子替换”写入策略，Windows/Linux/macOS 行为一致（会生成 `*.lock` 文件）。
@@ -116,6 +155,8 @@ pip install uv
 uv tool install Undefined-bot
 uv tool run --from Undefined-bot playwright install
 ```
+
+> **系统依赖提醒**：同源码部署要求一致，你必须在宿主机上预先安装所需的 LaTeX/dvipng 渲染环境。请参考上文 [3. 安装系统级依赖（必装）](#3-安装系统级依赖必装) 查阅你操作系统的对应安装命令，未配置前若触发公式与 Markdown 的图片渲染则会报错执行失败。
 
 安装完成后，在任意目录准备 `config.toml` 并启动：
 
