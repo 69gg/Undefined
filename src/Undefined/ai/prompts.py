@@ -746,6 +746,7 @@ class PromptBuilder:
                 attachments = msg.get("attachments", [])
                 role = msg.get("role", "member")
                 title = msg.get("title", "")
+                level = msg.get("level", "")
                 message_id = msg.get("message_id")
 
                 safe_sender = escape_xml_attr(sender_name)
@@ -771,9 +772,10 @@ class PromptBuilder:
                         chat_name if chat_name.endswith("群") else f"{chat_name}群"
                     )
                     safe_location = escape_xml_attr(location)
+                    level_attr = f' level="{escape_xml_attr(level)}"' if level else ""
                     xml_msg = (
                         f'<message{msg_id_attr} sender="{safe_sender}" sender_id="{safe_sender_id}" group_id="{safe_chat_id}" '
-                        f'group_name="{safe_chat_name}" location="{safe_location}" role="{safe_role}" title="{safe_title}" '
+                        f'group_name="{safe_chat_name}" location="{safe_location}" role="{safe_role}" title="{safe_title}"{level_attr} '
                         f'time="{safe_time}">\n<content>{safe_text}</content>{attachment_xml}\n</message>'
                     )
                 else:

@@ -33,6 +33,14 @@ _PIC_TAG_PATTERN = re.compile(
     r"<pic\s+uid=(?P<quote>[\"'])(?P<uid>[^\"']+)(?P=quote)\s*/?>",
     re.IGNORECASE,
 )
+_ATTACHMENT_TAG_PATTERN = re.compile(
+    r"<attachment\s+uid=(?P<quote>[\"'])(?P<uid>[^\"']+)(?P=quote)\s*/?>",
+    re.IGNORECASE,
+)
+_UNIFIED_TAG_PATTERN = re.compile(
+    r"<(?P<tag>pic|attachment)\s+uid=(?P<quote>[\"'])(?P<uid>[^\"']+)(?P=quote)\s*/?>",
+    re.IGNORECASE,
+)
 _MEDIA_LABELS = {
     "image": "图片",
     "file": "文件",
@@ -107,10 +115,11 @@ class RenderedRichMessage:
     delivery_text: str
     history_text: str
     attachments: list[dict[str, str]]
+    pending_file_sends: tuple[AttachmentRecord, ...] = ()
 
 
 class AttachmentRenderError(RuntimeError):
-    """Raised when a `<pic uid="..."/>` tag cannot be rendered."""
+    """Raised when an attachment tag cannot be rendered."""
 
 
 def _now_iso() -> str:
@@ -681,6 +690,25 @@ class AttachmentRegistry:
             if uid not in self._records:
                 return uid
 
+    def _find_by_sha256(
+        self, scope_key: str, sha256: str, kind: str
+    ) -> AttachmentRecord | None:
+        """Find an existing record with matching scope, kind, and SHA-256.
+
+        Only returns a record whose *local_path* still exists on disk.
+        Must be called while ``self._lock`` is held.
+        """
+        for record in self._records.values():
+            if (
+                record.scope_key == scope_key
+                and record.sha256 == sha256
+                and record.kind == kind
+                and record.local_path
+                and Path(record.local_path).is_file()
+            ):
+                return record
+        return None
+
     async def register_bytes(
         self,
         scope_key: str,
@@ -703,15 +731,18 @@ class AttachmentRegistry:
         prefix = "pic" if normalized_media_type == "image" else "file"
 
         async with self._lock:
+            digest = await asyncio.to_thread(hashlib.sha256, content)
+            digest_hex = digest.hexdigest()
+
+            existing = self._find_by_sha256(scope_key, digest_hex, normalized_kind)
+            if existing is not None:
+                return existing
+
             uid = self._build_uid(prefix)
             file_name = f"{uid}{suffix}"
             cache_path = ensure_dir(self._cache_dir) / file_name
+            await asyncio.to_thread(cache_path.write_bytes, content)
 
-            def _write() -> str:
-                cache_path.write_bytes(content)
-                return hashlib.sha256(content).hexdigest()
-
-            digest = await asyncio.to_thread(_write)
             record = AttachmentRecord(
                 uid=uid,
                 scope_key=scope_key,
@@ -722,7 +753,7 @@ class AttachmentRegistry:
                 source_ref=source_ref,
                 local_path=str(cache_path),
                 mime_type=normalized_mime,
-                sha256=digest,
+                sha256=digest_hex,
                 created_at=_now_iso(),
                 segment_data={
                     str(k): str(v)
@@ -1064,31 +1095,38 @@ async def register_message_attachments(
     )
 
 
-async def render_message_with_pic_placeholders(
+async def render_message_with_attachments(
     message: str,
     *,
     registry: AttachmentRegistry | None,
     scope_key: str | None,
     strict: bool,
 ) -> RenderedRichMessage:
-    if (
-        not message
-        or registry is None
-        or not scope_key
-        or "<pic" not in message.lower()
-    ):
+    """Render ``<pic>`` and ``<attachment>`` tags into delivery/history text.
+
+    * ``<pic uid="pic_xxx"/>`` — backward-compatible, image-only.
+    * ``<attachment uid="..."/>`` — unified tag for any media type.
+      Images (``pic_*``) are inlined as CQ images; files (``file_*``)
+      are collected into *pending_file_sends* for later dispatch.
+    """
+    has_tags = message and (
+        "<pic" in message.lower() or "<attachment" in message.lower()
+    )
+    if not has_tags or registry is None or not scope_key:
         return RenderedRichMessage(
-            delivery_text=message,
-            history_text=message,
+            delivery_text=message or "",
+            history_text=message or "",
             attachments=[],
         )
 
     attachments: list[dict[str, str]] = []
     delivery_parts: list[str] = []
     history_parts: list[str] = []
+    pending_files: list[AttachmentRecord] = []
     last_index = 0
 
-    for match in _PIC_TAG_PATTERN.finditer(message):
+    for match in _UNIFIED_TAG_PATTERN.finditer(message):
+        tag_name = str(match.group("tag") or "").lower()
         uid = str(match.group("uid") or "").strip()
         delivery_parts.append(message[last_index : match.start()])
         history_parts.append(message[last_index : match.start()])
@@ -1096,13 +1134,16 @@ async def render_message_with_pic_placeholders(
 
         record = await registry.resolve_async(uid, scope_key)
         if record is None:
-            replacement = f"[图片 uid={uid} 不可用]"
+            label = _MEDIA_LABELS.get(tag_name, "附件")
+            replacement = f"[{label} uid={uid} 不可用]"
             if strict:
-                raise AttachmentRenderError(f"图片 UID 不可用或不属于当前会话：{uid}")
+                raise AttachmentRenderError(f"附件 UID 不可用或不属于当前会话：{uid}")
             delivery_parts.append(replacement)
             history_parts.append(replacement)
             continue
-        if record.media_type != "image":
+
+        # <pic> tag: strictly image-only
+        if tag_name == "pic" and record.media_type != "image":
             replacement = f"[图片 uid={uid} 类型错误]"
             if strict:
                 raise AttachmentRenderError(f"UID 不是图片，不能用于 <pic>：{uid}")
@@ -1110,31 +1151,19 @@ async def render_message_with_pic_placeholders(
             history_parts.append(replacement)
             continue
 
-        image_source = record.source_ref
-        if record.local_path:
-            image_source = Path(record.local_path).resolve().as_uri()
-        elif not image_source:
-            replacement = f"[图片 uid={uid} 缺少文件]"
-            if strict:
-                raise AttachmentRenderError(f"图片 UID 缺少可发送的文件：{uid}")
-            delivery_parts.append(replacement)
-            history_parts.append(replacement)
-            continue
-
-        cq_args = [f"file={image_source}"]
-        for key, value in dict(getattr(record, "segment_data", {}) or {}).items():
-            cleaned_key = str(key or "").strip()
-            cleaned_value = str(value or "").strip()
-            if not cleaned_key or not cleaned_value or cleaned_key == "file":
-                continue
-            cq_args.append(
-                f"{_escape_cq_component(cleaned_key)}={_escape_cq_component(cleaned_value)}"
-            )
-        delivery_parts.append(f"[CQ:image,{','.join(cq_args)}]")
-        if record.display_name:
-            history_parts.append(f"[图片 uid={uid} name={record.display_name}]")
+        # Route by media type
+        if record.media_type == "image":
+            _render_image_tag(record, uid, strict, delivery_parts, history_parts)
         else:
-            history_parts.append(f"[图片 uid={uid}]")
+            _render_file_tag(
+                record,
+                uid,
+                strict,
+                delivery_parts,
+                history_parts,
+                pending_files,
+            )
+
         attachments.append(record.prompt_ref())
 
     delivery_parts.append(message[last_index:])
@@ -1143,4 +1172,113 @@ async def render_message_with_pic_placeholders(
         delivery_text="".join(delivery_parts),
         history_text="".join(history_parts),
         attachments=attachments,
+        pending_file_sends=tuple(pending_files),
     )
+
+
+def _render_image_tag(
+    record: AttachmentRecord,
+    uid: str,
+    strict: bool,
+    delivery_parts: list[str],
+    history_parts: list[str],
+) -> None:
+    """Render an image attachment as an inline CQ:image."""
+    image_source = record.source_ref
+    if record.local_path:
+        image_source = Path(record.local_path).resolve().as_uri()
+    elif not image_source:
+        replacement = f"[图片 uid={uid} 缺少文件]"
+        if strict:
+            raise AttachmentRenderError(f"图片 UID 缺少可发送的文件：{uid}")
+        delivery_parts.append(replacement)
+        history_parts.append(replacement)
+        return
+
+    cq_args = [f"file={image_source}"]
+    for key, value in dict(getattr(record, "segment_data", {}) or {}).items():
+        cleaned_key = str(key or "").strip()
+        cleaned_value = str(value or "").strip()
+        if not cleaned_key or not cleaned_value or cleaned_key == "file":
+            continue
+        cq_args.append(
+            f"{_escape_cq_component(cleaned_key)}={_escape_cq_component(cleaned_value)}"
+        )
+    delivery_parts.append(f"[CQ:image,{','.join(cq_args)}]")
+    if record.display_name:
+        history_parts.append(f"[图片 uid={uid} name={record.display_name}]")
+    else:
+        history_parts.append(f"[图片 uid={uid}]")
+
+
+def _render_file_tag(
+    record: AttachmentRecord,
+    uid: str,
+    strict: bool,
+    delivery_parts: list[str],
+    history_parts: list[str],
+    pending_files: list[AttachmentRecord],
+) -> None:
+    """Render a non-image attachment as a pending file send."""
+    if not record.local_path or not Path(record.local_path).is_file():
+        replacement = f"[文件 uid={uid} 缺少本地文件]"
+        if strict:
+            raise AttachmentRenderError(f"文件 UID 缺少本地文件，无法发送：{uid}")
+        delivery_parts.append(replacement)
+        history_parts.append(replacement)
+        return
+
+    # Remove from delivery text (file sent separately)
+    # Keep a readable placeholder in history
+    name_part = f" name={record.display_name}" if record.display_name else ""
+    history_parts.append(f"[文件 uid={uid}{name_part}]")
+    pending_files.append(record)
+
+
+# Backward-compatible alias
+render_message_with_pic_placeholders = render_message_with_attachments
+
+
+async def dispatch_pending_file_sends(
+    rendered: RenderedRichMessage,
+    *,
+    sender: Any,
+    target_type: str,
+    target_id: int,
+) -> None:
+    """Send pending file attachments collected by *render_message_with_attachments*.
+
+    This is best-effort: each file send failure is logged but does not interrupt
+    the remaining sends or the caller.
+    """
+    if not rendered.pending_file_sends or sender is None:
+        return
+    for record in rendered.pending_file_sends:
+        if not record.local_path or not Path(record.local_path).is_file():
+            logger.warning(
+                "[文件发送] 跳过：本地文件缺失 uid=%s path=%s",
+                record.uid,
+                record.local_path,
+            )
+            continue
+        try:
+            if target_type == "group":
+                await sender.send_group_file(
+                    target_id,
+                    record.local_path,
+                    name=record.display_name or None,
+                )
+            else:
+                await sender.send_private_file(
+                    target_id,
+                    record.local_path,
+                    name=record.display_name or None,
+                )
+        except Exception:
+            logger.warning(
+                "[文件发送] 发送失败（最佳努力） uid=%s target=%s:%s",
+                record.uid,
+                target_type,
+                target_id,
+                exc_info=True,
+            )

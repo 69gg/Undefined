@@ -105,6 +105,9 @@ def _format_message_xml(msg: dict[str, Any]) -> str:
     timestamp = msg.get("timestamp", "")
     text = msg.get("message", "")
     message_id = msg.get("message_id")
+    role = msg.get("role", "")
+    title = msg.get("title", "")
+    level = msg.get("level", "")
 
     location = _format_message_location(msg_type_val, chat_name)
 
@@ -112,7 +115,16 @@ def _format_message_xml(msg: dict[str, Any]) -> str:
     if message_id is not None:
         msg_id_attr = f' message_id="{message_id}"'
 
-    return f"""<message{msg_id_attr} sender="{sender_name}" sender_id="{sender_id}" location="{location}" time="{timestamp}">
+    extra_attrs = ""
+    if msg_type_val == "group":
+        if role:
+            extra_attrs += f' role="{role}"'
+        if title:
+            extra_attrs += f' title="{title}"'
+        if level:
+            extra_attrs += f' level="{level}"'
+
+    return f"""<message{msg_id_attr} sender="{sender_name}" sender_id="{sender_id}" location="{location}"{extra_attrs} time="{timestamp}">
 <content>{text}</content>
 </message>"""
 

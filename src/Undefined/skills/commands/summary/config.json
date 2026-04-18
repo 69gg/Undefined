@@ -1,0 +1,16 @@
+{
+    "name": "summary",
+    "description": "总结聊天消息",
+    "usage": "/summary [条数|时间范围] [自定义描述]",
+    "example": "/summary 50",
+    "permission": "public",
+    "rate_limit": {
+        "user": 120,
+        "admin": 30,
+        "superadmin": 0
+    },
+    "show_in_help": true,
+    "order": 26,
+    "allow_in_private": true,
+    "aliases": ["sum"]
+}

@@ -1,0 +1,20 @@
+{
+    "type": "function",
+    "function": {
+        "name": "fetch_messages",
+        "description": "从当前会话拉取聊天消息。支持按条数或时间范围筛选。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "description": "要获取的消息条数,默认50,最大500。"
+                },
+                "time_range": {
+                    "type": "string",
+                    "description": "时间范围,如 '1h'、'6h'、'1d'、'7d'。与 count 互斥,优先使用 time_range。"
+                }
+            }
+        }
+    }
+}

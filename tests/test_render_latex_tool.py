@@ -1,98 +1,197 @@
+"""测试 LaTeX 渲染工具（MathJax + Playwright 实现）"""
+
 from __future__ import annotations
 
-from pathlib import Path
+import pytest
 from typing import Any
 
-import pytest
-
-from Undefined.attachments import AttachmentRegistry
-from Undefined.skills.toolsets.render.render_latex import handler
-from Undefined.utils import paths
-
-_PNG_HEADER = b"\x89PNG\r\n\x1a\n"
+# 这个测试需要 Playwright 浏览器运行时，所以标记为可选
+pytest_plugins = ("pytest_asyncio",)
 
 
-def _build_context(registry: AttachmentRegistry) -> dict[str, Any]:
-    return {
+class MockAttachmentRegistry:
+    """模拟附件注册表"""
+
+    def __init__(self) -> None:
+        self.registered_items: list[dict[str, Any]] = []
+
+    async def register_bytes(
+        self,
+        scope_key: str,
+        data: bytes,
+        kind: str,
+        display_name: str,
+        mime_type: str,
+        source_kind: str,
+        source_ref: str,
+    ) -> Any:
+        class MockRecord:
+            uid = "test-uid-12345"
+
+        record = MockRecord()
+        self.registered_items.append(
+            {
+                "scope_key": scope_key,
+                "size": len(data),
+                "kind": kind,
+                "display_name": display_name,
+                "mime_type": mime_type,
+                "source_kind": source_kind,
+                "source_ref": source_ref,
+                "uid": record.uid,
+            }
+        )
+        return record
+
+
+@pytest.mark.asyncio
+async def test_render_simple_equation() -> None:
+    """测试渲染简单方程（无分隔符，自动包装）"""
+    from Undefined.skills.toolsets.render.render_latex.handler import execute
+
+    mock_registry = MockAttachmentRegistry()
+    context = {
+        "attachment_registry": mock_registry,
         "request_type": "group",
-        "group_id": 10001,
-        "sender_id": 20002,
-        "user_id": 20002,
-        "attachment_registry": registry,
+        "group_id": 123456,
     }
 
+    args = {"content": "E = mc^2", "output_format": "png"}
 
-def test_strip_document_wrappers_removes_document_env() -> None:
-    content = (
-        "\\begin{document}\n"
-        "\\[\n"
-        "\\int_{-\\infty}^{+\\infty} e^{-x^2} dx = \\sqrt{\\pi}\n"
-        "\\]\n"
-        "\\end{document}"
-    )
-    assert handler._strip_document_wrappers(content) == (
-        "\\[\n\\int_{-\\infty}^{+\\infty} e^{-x^2} dx = \\sqrt{\\pi}\n\\]"
-    )
-
-
-def test_strip_document_wrappers_passthrough_for_plain_formula() -> None:
-    content = r"\[ E = mc^2 \]"
-    assert handler._strip_document_wrappers(content) == content
+    try:
+        result = await execute(args, context)
+        assert result == '<pic uid="test-uid-12345"/>'
+        assert len(mock_registry.registered_items) == 1
+        assert mock_registry.registered_items[0]["kind"] == "image"
+        assert mock_registry.registered_items[0]["mime_type"] == "image/png"
+        assert mock_registry.registered_items[0]["size"] > 0
+    except ImportError as e:
+        if "playwright" in str(e).lower():
+            pytest.skip("Playwright 未安装，跳过测试")
+        raise
 
 
 @pytest.mark.asyncio
-async def test_render_latex_embed_success(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    registry = AttachmentRegistry(
-        registry_path=tmp_path / "attachment_registry.json",
-        cache_dir=tmp_path / "attachments",
-    )
-    content = r"\[ \int_{-\infty}^{+\infty} e^{-x^2} dx = \sqrt{\pi} \]"
-    rendered_contents: list[str] = []
+async def test_render_with_delimiters() -> None:
+    """测试带分隔符的内容（不自动包装）"""
+    from Undefined.skills.toolsets.render.render_latex.handler import execute
 
-    monkeypatch.setattr(paths, "RENDER_CACHE_DIR", tmp_path / "render")
+    mock_registry = MockAttachmentRegistry()
+    context = {
+        "attachment_registry": mock_registry,
+        "request_type": "private",
+        "user_id": 987654,
+    }
 
-    def _fake_render(filepath: Path, render_content: str) -> None:
-        rendered_contents.append(render_content)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        filepath.write_bytes(_PNG_HEADER)
+    args = {"content": r"\[ \int_0^\infty e^{-x^2} dx = \frac{\sqrt{\pi}}{2} \]"}
 
-    monkeypatch.setattr(handler, "_render_latex_image", _fake_render)
-
-    result = await handler.execute(
-        {"content": content, "delivery": "embed"},
-        _build_context(registry),
-    )
-
-    assert result.startswith('<pic uid="')
-    assert rendered_contents == [content]
-    record = next(iter(registry._records.values()))
-    assert record.source_ref == "render_latex"
+    try:
+        result = await execute(args, context)
+        assert result == '<pic uid="test-uid-12345"/>'
+        assert len(mock_registry.registered_items) == 1
+    except ImportError as e:
+        if "playwright" in str(e).lower():
+            pytest.skip("Playwright 未安装，跳过测试")
+        raise
 
 
 @pytest.mark.asyncio
-async def test_render_latex_returns_helpful_message_when_tex_missing(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    registry = AttachmentRegistry(
-        registry_path=tmp_path / "attachment_registry.json",
-        cache_dir=tmp_path / "attachments",
+async def test_render_pdf_output() -> None:
+    """测试 PDF 输出格式使用 attachment 标签"""
+    from Undefined.skills.toolsets.render.render_latex.handler import execute
+
+    mock_registry = MockAttachmentRegistry()
+    context = {
+        "attachment_registry": mock_registry,
+        "request_type": "group",
+        "group_id": 123456,
+    }
+
+    args = {"content": r"\frac{a}{b} + \sqrt{c}", "output_format": "pdf"}
+
+    try:
+        result = await execute(args, context)
+        assert result == '<attachment uid="test-uid-12345"/>'
+        assert len(mock_registry.registered_items) == 1
+        assert mock_registry.registered_items[0]["kind"] == "file"
+        assert mock_registry.registered_items[0]["mime_type"] == "application/pdf"
+        assert mock_registry.registered_items[0]["display_name"] == "latex.pdf"
+    except ImportError as e:
+        if "playwright" in str(e).lower():
+            pytest.skip("Playwright 未安装，跳过测试")
+        raise
+
+
+@pytest.mark.asyncio
+async def test_empty_content_error() -> None:
+    """测试空内容错误处理"""
+    from Undefined.skills.toolsets.render.render_latex.handler import execute
+
+    context = {"attachment_registry": MockAttachmentRegistry()}
+
+    args = {"content": "   "}
+
+    result = await execute(args, context)
+    assert "不能为空" in result
+
+
+@pytest.mark.asyncio
+async def test_invalid_output_format() -> None:
+    """测试无效输出格式"""
+    from Undefined.skills.toolsets.render.render_latex.handler import execute
+
+    context = {"attachment_registry": MockAttachmentRegistry()}
+
+    args = {"content": "x = 1", "output_format": "svg"}
+
+    result = await execute(args, context)
+    assert "无效" in result or "仅支持" in result
+
+
+def test_strip_document_wrappers() -> None:
+    """测试去除 document 包装"""
+    from Undefined.skills.toolsets.render.render_latex.handler import (
+        _strip_document_wrappers,
     )
-    content = r"\[ a = b \]"
 
-    monkeypatch.setattr(paths, "RENDER_CACHE_DIR", tmp_path / "render")
+    content = r"\begin{document}E = mc^2\end{document}"
+    result = _strip_document_wrappers(content)
+    assert result == "E = mc^2"
 
-    def _raise_runtime(_: Path, __: str) -> None:
-        raise RuntimeError("latex was not able to process the following string")
+    # 没有包装的内容应该原样返回
+    content_no_wrapper = r"E = mc^2"
+    result_no_wrapper = _strip_document_wrappers(content_no_wrapper)
+    assert result_no_wrapper == "E = mc^2"
 
-    monkeypatch.setattr(handler, "_render_latex_image", _raise_runtime)
 
-    result = await handler.execute(
-        {"content": content, "delivery": "embed"},
-        _build_context(registry),
+def test_has_math_delimiters() -> None:
+    """测试数学分隔符检测"""
+    from Undefined.skills.toolsets.render.render_latex.handler import (
+        _has_math_delimiters,
     )
 
-    assert "TeX Live" in result or "MiKTeX" in result
+    assert _has_math_delimiters(r"\[ x = 1 \]") is True
+    assert _has_math_delimiters(r"\( x = 1 \)") is True
+    assert _has_math_delimiters(r"$$ x = 1 $$") is True
+    assert _has_math_delimiters(r"\begin{equation}") is True
+    assert _has_math_delimiters("x = 1") is False
+
+
+def test_prepare_content() -> None:
+    """测试内容准备逻辑"""
+    from Undefined.skills.toolsets.render.render_latex.handler import _prepare_content
+
+    # 无分隔符，自动包装
+    result = _prepare_content("E = mc^2")
+    assert result.startswith(r"\[")
+    assert result.endswith(r"\]")
+    assert "E = mc^2" in result
+
+    # 有分隔符，不包装
+    result_with_delim = _prepare_content(r"\[ E = mc^2 \]")
+    assert result_with_delim == r"\[ E = mc^2 \]"
+
+    # 字面量 \\n 处理
+    result_newline = _prepare_content(r"x = 1\\ny = 2")
+    assert "\n" in result_newline
+    assert "\\n" not in result_newline.replace(r"\[", "").replace(r"\]", "")

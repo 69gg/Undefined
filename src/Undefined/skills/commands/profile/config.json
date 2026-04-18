@@ -1,0 +1,16 @@
+{
+    "name": "profile",
+    "description": "查看用户或群聊侧写",
+    "usage": "/profile [group]",
+    "example": "/profile",
+    "permission": "public",
+    "rate_limit": {
+        "user": 60,
+        "admin": 10,
+        "superadmin": 0
+    },
+    "show_in_help": true,
+    "order": 25,
+    "allow_in_private": true,
+    "aliases": ["me", "p"]
+}

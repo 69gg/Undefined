@@ -178,6 +178,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             timestamp_str = msg.get("timestamp", "")
             text = msg.get("message", "")
             message_id = msg.get("message_id")
+            role = msg.get("role", "")
+            title = msg.get("title", "")
+            level = msg.get("level", "")
 
             if msg_type_val == "group":
                 # 确保群名以"群"结尾
@@ -189,8 +192,17 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             if message_id is not None:
                 msg_id_attr = f' message_id="{message_id}"'
 
+            extra_attrs = ""
+            if msg_type_val == "group":
+                if role:
+                    extra_attrs += f' role="{role}"'
+                if title:
+                    extra_attrs += f' title="{title}"'
+                if level:
+                    extra_attrs += f' level="{level}"'
+
             # 格式：XML 标准化
-            formatted.append(f"""<message{msg_id_attr} sender="{sender_name}" sender_id="{sender_id}" location="{location}" time="{timestamp_str}">
+            formatted.append(f"""<message{msg_id_attr} sender="{sender_name}" sender_id="{sender_id}" location="{location}"{extra_attrs} time="{timestamp_str}">
 <content>{text}</content>
 </message>""")
 

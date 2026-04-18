@@ -72,6 +72,7 @@ class GroupPokeRecord:
     group_name: str
     sender_role: str
     sender_title: str
+    sender_level: str
 
 
 class MessageHandler:
@@ -113,6 +114,7 @@ class MessageHandler:
             self.security,
             queue_manager=self.queue_manager,
             rate_limiter=self.rate_limiter,
+            history_manager=self.history_manager,
         )
         self.ai_coordinator = AICoordinator(
             config,
@@ -143,6 +145,77 @@ class MessageHandler:
             lock = asyncio.Lock()
             self._repeat_locks[group_id] = lock
         return lock
+
+    async def _annotate_meme_descriptions(
+        self,
+        attachments: list[dict[str, str]],
+        scope_key: str,
+    ) -> list[dict[str, str]]:
+        """为图片附件添加表情包描述（如果在表情库中找到）。
+
+        采用批量查询：收集所有 SHA256 哈希值，一次性查询，然后映射结果。
+        最佳努力：任何失败时返回原始列表。
+        """
+        if not attachments:
+            return attachments
+
+        ai_client = getattr(self, "ai", None)
+        if ai_client is None:
+            return attachments
+
+        attachment_registry = getattr(ai_client, "attachment_registry", None)
+        if attachment_registry is None:
+            return attachments
+
+        meme_service = getattr(ai_client, "_meme_service", None)
+        if meme_service is None or not getattr(meme_service, "enabled", False):
+            return attachments
+
+        meme_store = getattr(meme_service, "_store", None)
+        if meme_store is None:
+            return attachments
+
+        try:
+            # 1. 从图片附件收集唯一的 SHA256 哈希值
+            uid_to_hash: dict[str, str] = {}
+            for att in attachments:
+                uid = att.get("uid", "")
+                if not uid.startswith("pic_"):
+                    continue
+                record = attachment_registry.resolve(uid, scope_key)
+                if record and record.sha256:
+                    uid_to_hash[uid] = record.sha256
+
+            if not uid_to_hash:
+                return attachments
+
+            # 2. 批量查询：去重哈希值
+            unique_hashes = set(uid_to_hash.values())
+            hash_to_desc: dict[str, str] = {}
+            for h in unique_hashes:
+                meme = await meme_store.find_by_sha256(h)
+                if meme and meme.description:
+                    hash_to_desc[h] = meme.description
+
+            if not hash_to_desc:
+                return attachments
+
+            # 3. 构建带注释的新列表
+            result: list[dict[str, str]] = []
+            for att in attachments:
+                uid = att.get("uid", "")
+                sha = uid_to_hash.get(uid, "")
+                desc = hash_to_desc.get(sha, "")
+                if desc:
+                    new_att = dict(att)
+                    new_att["description"] = f"[表情包] {desc}"
+                    result.append(new_att)
+                else:
+                    result.append(att)
+            return result
+        except Exception:
+            logger.warning("表情包自动匹配失败，跳过", exc_info=True)
+            return attachments
 
     async def _collect_message_attachments(
         self,
@@ -176,7 +249,10 @@ class MessageHandler:
             if onebot
             else None,
         )
-        return result.attachments
+        attachments = result.attachments
+        # 为图片附件添加表情包描述
+        attachments = await self._annotate_meme_descriptions(attachments, scope_key)
+        return attachments
 
     def _schedule_meme_ingest(
         self,
@@ -384,6 +460,7 @@ class MessageHandler:
                     group_name=group_poke.group_name,
                     sender_role=group_poke.sender_role,
                     sender_title=group_poke.sender_title,
+                    sender_level=group_poke.sender_level,
                 )
             return
 
@@ -570,6 +647,7 @@ class MessageHandler:
         sender_nickname: str = group_sender.get("nickname", "")
         sender_role: str = group_sender.get("role", "member")
         sender_title: str = group_sender.get("title", "")
+        sender_level: str = str(group_sender.get("level", "")).strip()
 
         # 提取文本内容
         text = extract_text(message_content, self.config.bot_qq)
@@ -623,6 +701,7 @@ class MessageHandler:
             group_name=group_name,
             role=sender_role,
             title=sender_title,
+            level=sender_level,
             message_id=trigger_message_id,
             attachments=group_attachments,
         )
@@ -775,6 +854,7 @@ class MessageHandler:
             group_name=group_name,
             sender_role=sender_role,
             sender_title=sender_title,
+            sender_level=sender_level,
             trigger_message_id=trigger_message_id,
         )
 
@@ -837,11 +917,13 @@ class MessageHandler:
         sender_nickname = ""
         sender_role = "member"
         sender_title = ""
+        sender_level = ""
         if isinstance(sender, dict):
             sender_card = str(sender.get("card", "")).strip()
             sender_nickname = str(sender.get("nickname", "")).strip()
             sender_role = str(sender.get("role", "member")).strip() or "member"
             sender_title = str(sender.get("title", "")).strip()
+            sender_level = str(sender.get("level", "")).strip()
 
         if not sender_card and not sender_nickname:
             try:
@@ -855,6 +937,7 @@ class MessageHandler:
                         str(member_info.get("role", "member")).strip() or "member"
                     )
                     sender_title = str(member_info.get("title", "")).strip()
+                    sender_level = str(member_info.get("level", "")).strip()
             except Exception as exc:
                 logger.warning(
                     "[通知] 获取拍一拍群成员信息失败: group=%s user=%s err=%s",
@@ -898,6 +981,7 @@ class MessageHandler:
                 group_name=normalized_group_name,
                 role=sender_role,
                 title=sender_title,
+                level=sender_level,
             )
         except Exception as exc:
             logger.warning(
@@ -912,6 +996,7 @@ class MessageHandler:
             group_name=normalized_group_name,
             sender_role=sender_role,
             sender_title=sender_title,
+            sender_level=sender_level,
         )
 
     async def _extract_bilibili_ids(

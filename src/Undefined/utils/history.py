@@ -306,6 +306,7 @@ class MessageHistoryManager:
         group_name: str = "",
         role: str = "member",
         title: str = "",
+        level: str = "",
         message_id: int | None = None,
         attachments: list[dict[str, str]] | None = None,
     ) -> None:
@@ -334,6 +335,7 @@ class MessageHistoryManager:
                 "display_name": display_name,
                 "role": role,
                 "title": title,
+                "level": level,
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "message": text_content,
             }

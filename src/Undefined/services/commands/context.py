@@ -32,3 +32,5 @@ class CommandContext:
     scope: str = "group"
     user_id: int | None = None
     is_webui_session: bool = False
+    cognitive_service: Any = None
+    history_manager: Any = None
