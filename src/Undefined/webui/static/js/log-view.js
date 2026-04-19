@@ -49,6 +49,27 @@ function filterLogLines(raw) {
             line.toLowerCase().includes(query),
         );
 
+    // Time range filtering
+    const timeFrom = state.logTimeFrom
+        ? new Date(state.logTimeFrom).getTime()
+        : 0;
+    const timeTo = state.logTimeTo ? new Date(state.logTimeTo).getTime() : 0;
+    if (timeFrom || timeTo) {
+        const tsRe = /^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})/;
+        const result = [];
+        let include = true;
+        for (const line of filtered) {
+            const m = line.match(tsRe);
+            if (m) {
+                const ts = new Date(m[1].replace(" ", "T")).getTime();
+                include =
+                    (!timeFrom || ts >= timeFrom) && (!timeTo || ts <= timeTo);
+            }
+            if (include) result.push(line);
+        }
+        filtered = result;
+    }
+
     const total = base.total ?? rawLines.length;
     const matched = filtered.filter((line) => line.length > 0).length;
     return { filtered, total, matched };
@@ -115,7 +136,9 @@ function updateLogMeta(total, matched) {
     if (
         state.logLevel !== "all" ||
         state.logSearch.trim() ||
-        state.logLevelGte
+        state.logLevelGte ||
+        state.logTimeFrom ||
+        state.logTimeTo
     ) {
         parts.push(
             `${t("logs.filtered")}: ${total > 0 ? `${matched}/${total}` : "0/0"}`,

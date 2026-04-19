@@ -190,6 +190,8 @@ const state = {
     bot: { running: false, pid: null, uptime: 0 },
     logsRaw: "",
     logSearch: "",
+    logTimeFrom: "",
+    logTimeTo: "",
     logLevel: "all",
     logLevelGte: false,
     logType: "bot",

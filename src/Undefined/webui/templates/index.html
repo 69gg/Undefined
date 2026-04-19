@@ -299,6 +299,15 @@
                             </div>
                         </div>
 
+                        <div class="card" style="grid-column: 1 / -1;">
+                            <div class="card-title" data-i18n="overview.chart">资源趋势</div>
+                            <canvas id="metricsChart" width="800" height="200" style="width: 100%; height: 200px;"></canvas>
+                            <div style="display: flex; gap: 16px; margin-top: 8px; font-size: 12px; color: var(--text-secondary);">
+                                <span><span style="display:inline-block;width:12px;height:3px;background:var(--accent-color);vertical-align:middle;margin-right:4px;border-radius:2px;"></span>CPU</span>
+                                <span><span style="display:inline-block;width:12px;height:3px;background:var(--success);vertical-align:middle;margin-right:4px;border-radius:2px;"></span>Memory</span>
+                            </div>
+                        </div>
+
                         <div class="card">
                             <div class="card-title" data-i18n="overview.runtime">运行环境</div>
                             <div class="stat-row">
@@ -347,6 +356,7 @@
                                 更多操作
                             </button>
                             <div id="configSecondaryActions" class="toolbar-group toolbar-group-secondary">
+                                <button id="btnToggleToml" class="btn ghost btn-sm" data-i18n="config.view_toml">查看 TOML</button>
                                 <button id="btnExpandAll" class="btn ghost btn-sm"
                                     data-i18n="config.expand_all">全部展开</button>
                                 <button id="btnCollapseAll" class="btn ghost btn-sm"
@@ -359,6 +369,9 @@
                     </div>
                     <div id="configState" class="empty-state" style="display:none;"></div>
                     <div id="formSections" class="form-grid"></div>
+                    <div id="tomlViewer" style="display: none;">
+                        <pre id="tomlContent" class="log-viewer" style="height: auto; max-height: 600px; white-space: pre-wrap; word-wrap: break-word; user-select: text;"></pre>
+                    </div>
                 </section>
 
                 <!-- Tab Logs -->
@@ -403,6 +416,10 @@
                                     <input type="checkbox" id="logLevelGteToggle" class="toggle-input">
                                     <span class="toggle-track"><span class="toggle-handle"></span></span>
                                 </label>
+                                <input id="logTimeFrom" type="datetime-local" class="form-control form-control-sm" style="width: auto; min-width: 160px;"
+                                    title="Start time" />
+                                <input id="logTimeTo" type="datetime-local" class="form-control form-control-sm" style="width: auto; min-width: 160px;"
+                                    title="End time" />
                                 <input id="logSearchInput" type="search" class="form-control form-control-sm"
                                     data-i18n-placeholder="logs.search_placeholder" placeholder="搜索日志" />
                                 <button id="btnClearLogs" class="btn ghost btn-sm" data-i18n="logs.clear">清空</button>

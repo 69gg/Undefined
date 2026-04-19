@@ -462,6 +462,21 @@ async function init() {
         };
     }
 
+    const logTimeFrom = get("logTimeFrom");
+    if (logTimeFrom) {
+        logTimeFrom.addEventListener("change", () => {
+            state.logTimeFrom = logTimeFrom.value;
+            renderLogs();
+        });
+    }
+    const logTimeTo = get("logTimeTo");
+    if (logTimeTo) {
+        logTimeTo.addEventListener("change", () => {
+            state.logTimeTo = logTimeTo.value;
+            renderLogs();
+        });
+    }
+
     const logSearchInput = get("logSearchInput");
     if (logSearchInput) {
         logSearchInput.addEventListener("input", () => {
@@ -539,6 +554,32 @@ async function init() {
     const collapseAllBtn = get("btnCollapseAll");
     if (collapseAllBtn)
         collapseAllBtn.onclick = () => setAllSectionsCollapsed(true);
+
+    get("btnToggleToml").onclick = async function () {
+        const formGrid = get("formSections");
+        const tomlViewer = get("tomlViewer");
+        const btn = get("btnToggleToml");
+        if (!formGrid || !tomlViewer || !btn) return;
+
+        const isShowingToml = tomlViewer.style.display !== "none";
+        if (isShowingToml) {
+            tomlViewer.style.display = "none";
+            formGrid.style.display = "";
+            btn.innerText = t("config.view_toml");
+        } else {
+            try {
+                const res = await api("/api/config");
+                const data = await res.json();
+                const content = data.content || "";
+                get("tomlContent").textContent = content;
+                formGrid.style.display = "none";
+                tomlViewer.style.display = "block";
+                btn.innerText = t("config.view_form");
+            } catch (e) {
+                showToast(`${t("common.error")}: ${e.message}`, "error", 5000);
+            }
+        }
+    };
 
     const logout = async () => {
         try {
