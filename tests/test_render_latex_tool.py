@@ -58,17 +58,14 @@ async def test_render_simple_equation() -> None:
 
     args = {"content": "E = mc^2", "output_format": "png"}
 
-    try:
-        result = await execute(args, context)
-        assert result == '<pic uid="test-uid-12345"/>'
-        assert len(mock_registry.registered_items) == 1
-        assert mock_registry.registered_items[0]["kind"] == "image"
-        assert mock_registry.registered_items[0]["mime_type"] == "image/png"
-        assert mock_registry.registered_items[0]["size"] > 0
-    except ImportError as e:
-        if "playwright" in str(e).lower():
-            pytest.skip("Playwright 未安装，跳过测试")
-        raise
+    result = await execute(args, context)
+    if "渲染失败" in result and "Executable doesn't exist" in result:
+        pytest.skip("Playwright 浏览器未安装，跳过测试")
+    assert result == '<pic uid="test-uid-12345"/>'
+    assert len(mock_registry.registered_items) == 1
+    assert mock_registry.registered_items[0]["kind"] == "image"
+    assert mock_registry.registered_items[0]["mime_type"] == "image/png"
+    assert mock_registry.registered_items[0]["size"] > 0
 
 
 @pytest.mark.asyncio
@@ -85,14 +82,11 @@ async def test_render_with_delimiters() -> None:
 
     args = {"content": r"\[ \int_0^\infty e^{-x^2} dx = \frac{\sqrt{\pi}}{2} \]"}
 
-    try:
-        result = await execute(args, context)
-        assert result == '<pic uid="test-uid-12345"/>'
-        assert len(mock_registry.registered_items) == 1
-    except ImportError as e:
-        if "playwright" in str(e).lower():
-            pytest.skip("Playwright 未安装，跳过测试")
-        raise
+    result = await execute(args, context)
+    if "渲染失败" in result and "Executable doesn't exist" in result:
+        pytest.skip("Playwright 浏览器未安装，跳过测试")
+    assert result == '<pic uid="test-uid-12345"/>'
+    assert len(mock_registry.registered_items) == 1
 
 
 @pytest.mark.asyncio
@@ -109,17 +103,14 @@ async def test_render_pdf_output() -> None:
 
     args = {"content": r"\frac{a}{b} + \sqrt{c}", "output_format": "pdf"}
 
-    try:
-        result = await execute(args, context)
-        assert result == '<attachment uid="test-uid-12345"/>'
-        assert len(mock_registry.registered_items) == 1
-        assert mock_registry.registered_items[0]["kind"] == "file"
-        assert mock_registry.registered_items[0]["mime_type"] == "application/pdf"
-        assert mock_registry.registered_items[0]["display_name"] == "latex.pdf"
-    except ImportError as e:
-        if "playwright" in str(e).lower():
-            pytest.skip("Playwright 未安装，跳过测试")
-        raise
+    result = await execute(args, context)
+    if "渲染失败" in result and "Executable doesn't exist" in result:
+        pytest.skip("Playwright 浏览器未安装，跳过测试")
+    assert result == '<attachment uid="test-uid-12345"/>'
+    assert len(mock_registry.registered_items) == 1
+    assert mock_registry.registered_items[0]["kind"] == "file"
+    assert mock_registry.registered_items[0]["mime_type"] == "application/pdf"
+    assert mock_registry.registered_items[0]["display_name"] == "latex.pdf"
 
 
 @pytest.mark.asyncio
