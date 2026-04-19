@@ -461,7 +461,7 @@ class HistorianWorker:
             recent_messages = [
                 str(item).strip() for item in recent_messages_raw if str(item).strip()
             ]
-        recent_messages_text = "\n".join(f"- {line}" for line in recent_messages)
+        recent_messages_text = "\n---\n".join(recent_messages)
         prompt = template.format(
             request_id=job.get("request_id", ""),
             end_seq=job.get("end_seq", 0),

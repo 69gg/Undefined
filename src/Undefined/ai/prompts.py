@@ -11,7 +11,6 @@ from typing import Any, Callable, Awaitable, Literal
 
 import aiofiles
 
-from Undefined.attachments import attachment_refs_to_xml
 from Undefined.utils.coerce import safe_int
 from Undefined.context import RequestContext
 from Undefined.end_summary_storage import (
@@ -23,7 +22,7 @@ from Undefined.memory import MemoryStorage
 from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
 from Undefined.utils.logging import log_debug_json
 from Undefined.utils.resources import read_text_resource
-from Undefined.utils.xml import escape_xml_attr, escape_xml_text
+from Undefined.utils.xml import format_message_xml
 
 logger = logging.getLogger(__name__)
 
@@ -725,58 +724,7 @@ class PromptBuilder:
             recent_msgs = self._drop_current_message_if_duplicated(
                 recent_msgs, question
             )
-            context_lines: list[str] = []
-            for msg in recent_msgs:
-                msg_type_val = msg.get("type", "group")
-                sender_name = msg.get("display_name", "未知用户")
-                sender_id = msg.get("user_id", "")
-                chat_id = msg.get("chat_id", "")
-                chat_name = msg.get("chat_name", "未知群聊")
-                timestamp = msg.get("timestamp", "")
-                text = msg.get("message", "")
-                attachments = msg.get("attachments", [])
-                role = msg.get("role", "member")
-                title = msg.get("title", "")
-                level = msg.get("level", "")
-                message_id = msg.get("message_id")
-
-                safe_sender = escape_xml_attr(sender_name)
-                safe_sender_id = escape_xml_attr(sender_id)
-                safe_chat_id = escape_xml_attr(chat_id)
-                safe_chat_name = escape_xml_attr(chat_name)
-                safe_role = escape_xml_attr(role)
-                safe_title = escape_xml_attr(title)
-                safe_time = escape_xml_attr(timestamp)
-                safe_text = escape_xml_text(str(text))
-
-                msg_id_attr = ""
-                if message_id is not None:
-                    msg_id_attr = f' message_id="{escape_xml_attr(str(message_id))}"'
-                attachment_xml = (
-                    f"\n{attachment_refs_to_xml(attachments)}"
-                    if isinstance(attachments, list) and attachments
-                    else ""
-                )
-
-                if msg_type_val == "group":
-                    location = (
-                        chat_name if chat_name.endswith("群") else f"{chat_name}群"
-                    )
-                    safe_location = escape_xml_attr(location)
-                    level_attr = f' level="{escape_xml_attr(level)}"' if level else ""
-                    xml_msg = (
-                        f'<message{msg_id_attr} sender="{safe_sender}" sender_id="{safe_sender_id}" group_id="{safe_chat_id}" '
-                        f'group_name="{safe_chat_name}" location="{safe_location}" role="{safe_role}" title="{safe_title}"{level_attr} '
-                        f'time="{safe_time}">\n<content>{safe_text}</content>{attachment_xml}\n</message>'
-                    )
-                else:
-                    location = "私聊"
-                    safe_location = escape_xml_attr(location)
-                    xml_msg = (
-                        f'<message{msg_id_attr} sender="{safe_sender}" sender_id="{safe_sender_id}" location="{safe_location}" '
-                        f'time="{safe_time}">\n<content>{safe_text}</content>{attachment_xml}\n</message>'
-                    )
-                context_lines.append(xml_msg)
+            context_lines: list[str] = [format_message_xml(msg) for msg in recent_msgs]
 
             formatted_context = "\n---\n".join(context_lines)
 

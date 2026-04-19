@@ -178,10 +178,9 @@ async def test_end_uses_runtime_config_for_historian_reference_limits() -> None:
     cognitive_service = _FakeCognitiveService()
     runtime_config = SimpleNamespace(
         cognitive=SimpleNamespace(
-            historian_recent_messages_inject_k=2,
-            historian_recent_message_line_max_len=60,
             historian_source_message_max_len=40,
-        )
+        ),
+        get_context_recent_messages_limit=lambda: 2,
     )
     long_content = "A" * 300
     context: dict[str, Any] = {
@@ -207,6 +206,7 @@ async def test_end_uses_runtime_config_for_historian_reference_limits() -> None:
     assert len(source) <= 40
     assert isinstance(recent, list)
     assert len(recent) == 2
-    assert all(
-        len(str(line).split(": ", 1)[1]) <= 60 for line in recent if ": " in str(line)
-    )
+    # Recent messages now use XML format (same as main AI)
+    for line in recent:
+        assert "<message" in str(line)
+        assert "<content>" in str(line)

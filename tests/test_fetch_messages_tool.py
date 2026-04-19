@@ -8,11 +8,10 @@ import pytest
 
 from Undefined.skills.agents.summary_agent.tools.fetch_messages.handler import (
     _filter_by_time,
-    _format_messages,
-    _format_message_xml,
     _parse_time_range,
     execute as fetch_messages_execute,
 )
+from Undefined.utils.xml import format_message_xml, format_messages_xml
 
 
 # -- _parse_time_range unit tests --
@@ -124,10 +123,10 @@ def test_filter_by_time_invalid_timestamp() -> None:
     assert len(result) == 0
 
 
-# -- _format_messages unit tests --
+# -- format_messages_xml unit tests --
 
 
-def test_format_message_xml_group_basic() -> None:
+def testformat_message_xml_group_basic() -> None:
     """Group message is formatted into main-AI-compatible XML."""
     messages = [
         {
@@ -145,7 +144,7 @@ def test_format_message_xml_group_basic() -> None:
         },
     ]
 
-    result = _format_message_xml(messages[0])
+    result = format_message_xml(messages[0])
     assert 'message_id="123"' in result
     assert 'sender="Alice"' in result
     assert 'sender_id="10001"' in result
@@ -158,7 +157,7 @@ def test_format_message_xml_group_basic() -> None:
     assert "<content>Hello</content>" in result
 
 
-def test_format_message_xml_private_basic() -> None:
+def testformat_message_xml_private_basic() -> None:
     """Private message uses the private XML shape."""
     msg = {
         "type": "private",
@@ -169,7 +168,7 @@ def test_format_message_xml_private_basic() -> None:
         "message_id": 456,
     }
 
-    result = _format_message_xml(msg)
+    result = format_message_xml(msg)
     assert 'message_id="456"' in result
     assert 'sender="Bob"' in result
     assert 'sender_id="10002"' in result
@@ -179,7 +178,7 @@ def test_format_message_xml_private_basic() -> None:
     assert "<content>Hi</content>" in result
 
 
-def test_format_message_xml_includes_attachments() -> None:
+def testformat_message_xml_includes_attachments() -> None:
     """Attachment refs are rendered as XML below content."""
     msg = {
         "type": "group",
@@ -200,14 +199,14 @@ def test_format_message_xml_includes_attachments() -> None:
         ],
     }
 
-    result = _format_message_xml(msg)
+    result = format_message_xml(msg)
     assert "<attachments>" in result
     assert 'uid="pic_abcd1234"' in result
     assert 'type="image"' in result
     assert 'description="截图"' in result
 
 
-def test_format_messages_multiple() -> None:
+def testformat_messages_xml_multiple() -> None:
     """Multiple messages are separated by main-AI-style delimiters."""
     messages = [
         {
@@ -228,12 +227,12 @@ def test_format_messages_multiple() -> None:
         },
     ]
 
-    result = _format_messages(messages)
+    result = format_messages_xml(messages)
     assert "\n---\n" in result
     assert result.count("<message") == 2
 
 
-def test_format_messages_missing_fields() -> None:
+def testformat_messages_xml_missing_fields() -> None:
     """Missing fields still produce valid XML."""
     messages = [
         {
@@ -242,7 +241,7 @@ def test_format_messages_missing_fields() -> None:
         },
     ]
 
-    result = _format_messages(messages)
+    result = format_messages_xml(messages)
     assert "未知用户" in result
     assert "No timestamp" in result
     assert "<message" in result

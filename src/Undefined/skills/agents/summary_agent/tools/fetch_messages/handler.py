@@ -5,8 +5,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Any
 
-from Undefined.attachments import attachment_refs_to_xml
-from Undefined.utils.xml import escape_xml_attr, escape_xml_text
+from Undefined.utils.xml import format_messages_xml
 
 logger = logging.getLogger(__name__)
 
@@ -58,12 +57,6 @@ def _filter_by_time(
     return result
 
 
-def _format_message_location(msg_type_val: str, chat_name: str) -> str:
-    if msg_type_val == "group":
-        return chat_name if chat_name.endswith("群") else f"{chat_name}群"
-    return "私聊"
-
-
 def _normalize_messages_for_chat(
     messages: list[dict[str, Any]],
     *,
@@ -81,63 +74,6 @@ def _normalize_messages_for_chat(
             msg["chat_name"] = f"QQ用户{chat_id}"
         normalized.append(msg)
     return normalized
-
-
-def _format_message_xml(msg: dict[str, Any]) -> str:
-    msg_type_val = str(msg.get("type", "group") or "group")
-    sender_name = str(msg.get("display_name", "未知用户") or "未知用户")
-    sender_id = str(msg.get("user_id", "") or "")
-    chat_id = str(msg.get("chat_id", "") or "")
-    chat_name = str(msg.get("chat_name", "未知群聊") or "未知群聊")
-    timestamp = str(msg.get("timestamp", "") or "")
-    text = str(msg.get("message", "") or "")
-    message_id = msg.get("message_id")
-    role = str(msg.get("role", "member") or "member")
-    title = str(msg.get("title", "") or "")
-    level = str(msg.get("level", "") or "")
-    attachments = msg.get("attachments", [])
-
-    safe_sender = escape_xml_attr(sender_name)
-    safe_sender_id = escape_xml_attr(sender_id)
-    safe_chat_id = escape_xml_attr(chat_id)
-    safe_chat_name = escape_xml_attr(chat_name)
-    safe_role = escape_xml_attr(role)
-    safe_title = escape_xml_attr(title)
-    safe_time = escape_xml_attr(timestamp)
-    safe_text = escape_xml_text(text)
-    safe_location = escape_xml_attr(_format_message_location(msg_type_val, chat_name))
-
-    msg_id_attr = ""
-    if message_id is not None:
-        msg_id_attr = f' message_id="{escape_xml_attr(str(message_id))}"'
-
-    attachment_xml = (
-        f"\n{attachment_refs_to_xml(attachments)}"
-        if isinstance(attachments, list) and attachments
-        else ""
-    )
-
-    if msg_type_val == "group":
-        level_attr = f' level="{escape_xml_attr(level)}"' if level else ""
-        return (
-            f'<message{msg_id_attr} sender="{safe_sender}" sender_id="{safe_sender_id}" '
-            f'group_id="{safe_chat_id}" group_name="{safe_chat_name}" location="{safe_location}" '
-            f'role="{safe_role}" title="{safe_title}"{level_attr} time="{safe_time}">\n'
-            f"<content>{safe_text}</content>{attachment_xml}\n"
-            f"</message>"
-        )
-
-    return (
-        f'<message{msg_id_attr} sender="{safe_sender}" sender_id="{safe_sender_id}" '
-        f'location="{safe_location}" time="{safe_time}">\n'
-        f"<content>{safe_text}</content>{attachment_xml}\n"
-        f"</message>"
-    )
-
-
-def _format_messages(messages: list[dict[str, Any]]) -> str:
-    """Format messages into main-AI-compatible XML for the summary agent."""
-    return "\n---\n".join(_format_message_xml(msg) for msg in messages)
 
 
 async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
@@ -189,7 +125,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         messages, chat_type=chat_type, chat_id=chat_id
     )
 
-    formatted = _format_messages(messages)
+    formatted = format_messages_xml(messages)
     total = len(messages)
     header = f"共获取 {total} 条消息"
     if time_range_str:

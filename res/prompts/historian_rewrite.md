@@ -35,7 +35,7 @@ observations: {observations}
 当前消息原文（触发本轮）：
 {source_message}
 
-最近消息参考（用于消歧，不要求逐字复述）：
+最近消息参考（XML 格式，与主对话一致，消息间以 `---` 分隔，用于消歧，不要求逐字复述）：
 {recent_messages}
 
 必须通过 `submit_rewrite` 工具提交结果，禁止输出普通文本内容。
