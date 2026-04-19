@@ -12,7 +12,7 @@
   "show_in_help": true,
   "order": 10,
   "allow_in_private": true,
-  "aliases": [],
+  "aliases": ["h"],
   "help_footer": [
     "查看详细帮助：/help <command>",
     "详细版权与免责声明：/cprt",
