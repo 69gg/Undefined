@@ -1,5 +1,7 @@
 import asyncio
+import shutil
 import tomllib
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -23,6 +25,27 @@ from ..utils import (
     sync_config_file,
 )
 
+_BACKUP_DIR = Path("data") / "config_backups"
+_MAX_BACKUPS = 50
+
+
+def _backup_config() -> str | None:
+    """Create a timestamped backup of the current config.toml.
+
+    Returns the backup filename, or *None* if the source file does not exist.
+    """
+    if not CONFIG_PATH.exists():
+        return None
+    _BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    backup_name = f"config_{ts}.toml"
+    shutil.copy2(CONFIG_PATH, _BACKUP_DIR / backup_name)
+    # Trim old backups beyond the cap
+    backups = sorted(_BACKUP_DIR.glob("config_*.toml"))
+    while len(backups) > _MAX_BACKUPS:
+        backups.pop(0).unlink(missing_ok=True)
+    return backup_name
+
 
 @routes.get("/api/v1/management/config")
 @routes.get("/api/config")
@@ -45,6 +68,7 @@ async def save_config_handler(request: web.Request) -> Response:
     if not valid:
         return web.json_response({"success": False, "error": msg}, status=400)
     try:
+        _backup_config()
         CONFIG_PATH.write_text(content, encoding="utf-8")
         get_config_manager().reload()
         logic_valid, logic_msg = validate_required_config()
@@ -133,6 +157,7 @@ async def config_patch_handler(request: web.Request) -> Response:
         data = {}
 
     patched = apply_patch(data, patch)
+    _backup_config()
     CONFIG_PATH.write_text(
         render_toml(patched, comments=load_comment_map()), encoding="utf-8"
     )
@@ -181,3 +206,49 @@ async def sync_config_template_handler(request: web.Request) -> Response:
         return web.json_response({"success": False, "error": str(exc)}, status=400)
     except Exception as exc:
         return web.json_response({"success": False, "error": str(exc)}, status=500)
+
+
+# ---------------------------------------------------------------------------
+# Config version history
+# ---------------------------------------------------------------------------
+
+
+@routes.get("/api/v1/management/config/history")
+@routes.get("/api/config/history")
+async def config_history_handler(request: web.Request) -> Response:
+    """Return the list of config backups, newest first."""
+    if not check_auth(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+    if not _BACKUP_DIR.exists():
+        return web.json_response({"backups": []})
+    backups: list[dict[str, object]] = []
+    for f in sorted(_BACKUP_DIR.glob("config_*.toml"), reverse=True):
+        stat = f.stat()
+        backups.append({"name": f.name, "size": stat.st_size, "mtime": stat.st_mtime})
+    return web.json_response({"backups": backups})
+
+
+@routes.post("/api/v1/management/config/history/restore")
+@routes.post("/api/config/history/restore")
+async def config_restore_handler(request: web.Request) -> Response:
+    """Restore a config backup by name (auto-backs-up current config first)."""
+    if not check_auth(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+    name = str(data.get("name", ""))
+    if not name or ".." in name or "/" in name:
+        return web.json_response({"error": "Invalid backup name"}, status=400)
+    backup_path = _BACKUP_DIR / name
+    if not backup_path.exists():
+        return web.json_response({"error": "Backup not found"}, status=404)
+    content = backup_path.read_text(encoding="utf-8")
+    valid, msg = validate_toml(content)
+    if not valid:
+        return web.json_response({"error": f"Backup TOML invalid: {msg}"}, status=400)
+    _backup_config()
+    CONFIG_PATH.write_text(content, encoding="utf-8")
+    get_config_manager().reload()
+    return web.json_response({"success": True, "message": "Restored"})
