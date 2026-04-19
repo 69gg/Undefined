@@ -438,6 +438,7 @@ class MemeService:
                 self._delete_file_if_exists,
                 Path(record.preview_path),
             )
+        await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
         return True
 
     def _delete_file_if_exists(self, path: Path) -> None:
@@ -445,6 +446,17 @@ class MemeService:
             path.unlink(missing_ok=True)
         except OSError:
             logger.debug("[memes] 删除文件失败: path=%s", path, exc_info=True)
+
+    def _cleanup_gif_frame_files(self, uid: str) -> None:
+        """清理 GIF 多帧分析产生的临时帧文件 ({uid}_f{i}.png)。"""
+        preview_dir = self._preview_dir()
+        for frame_file in preview_dir.glob(f"{uid}_f*.png"):
+            try:
+                frame_file.unlink(missing_ok=True)
+            except OSError:
+                logger.debug(
+                    "[memes] 删除帧文件失败: path=%s", frame_file, exc_info=True
+                )
 
     async def _cleanup_meme_artifacts(
         self,
@@ -472,6 +484,8 @@ class MemeService:
         await asyncio.to_thread(self._delete_file_if_exists, blob_path)
         if preview_path is not None and preview_path != blob_path:
             await asyncio.to_thread(self._delete_file_if_exists, preview_path)
+        if uid:
+            await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
 
     async def search_memes(
         self,
@@ -1025,6 +1039,8 @@ class MemeService:
                     )
                     judgement = {"is_meme": False}
                 if not bool(judgement.get("is_meme", False)):
+                    if isinstance(analyze_path, list):
+                        await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
                     await self._cleanup_meme_artifacts(
                         uid=None,
                         blob_path=blob_path,
@@ -1041,6 +1057,9 @@ class MemeService:
                         "[memes] describe stage failed, drop uid=%s err=%s", uid, exc
                     )
                     described = {"description": "", "tags": []}
+                # GIF 多帧文件用完即清理
+                if isinstance(analyze_path, list):
+                    await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
                 tags = _normalize_tags(described.get("tags"))
                 auto_description = str(described.get("description") or "").strip()
                 if not auto_description and not tags:
