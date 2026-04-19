@@ -18,6 +18,7 @@ def _build_handler(
     *,
     repeat_enabled: bool = False,
     repeat_threshold: int = 3,
+    repeat_cooldown_minutes: int = 60,
     inverted_question_enabled: bool = False,
     keyword_reply_enabled: bool = False,
 ) -> Any:
@@ -26,6 +27,7 @@ def _build_handler(
         bot_qq=10000,
         repeat_enabled=repeat_enabled,
         repeat_threshold=repeat_threshold,
+        repeat_cooldown_minutes=repeat_cooldown_minutes,
         inverted_question_enabled=inverted_question_enabled,
         keyword_reply_enabled=keyword_reply_enabled,
         bilibili_auto_extract_enabled=False,
@@ -69,6 +71,7 @@ def _build_handler(
     handler._background_tasks = set()
     handler._repeat_counter = {}
     handler._repeat_locks = {}
+    handler._repeat_cooldown = {}
     handler._profile_name_refresh_cache = {}
     handler._bot_nickname_cache = SimpleNamespace(
         get_nicknames=AsyncMock(return_value=frozenset()),
@@ -155,14 +158,14 @@ async def test_repeat_does_not_trigger_for_different_texts() -> None:
 
 @pytest.mark.asyncio
 async def test_repeat_clears_counter_after_trigger() -> None:
-    handler = _build_handler(repeat_enabled=True)
+    handler = _build_handler(repeat_enabled=True, repeat_cooldown_minutes=0)
     # 第一轮：3条相同触发复读
     for uid in [20001, 20002, 20003]:
         await handler.handle_message(_group_event(sender_id=uid, text="hello"))
 
     assert handler.sender.send_group_message.call_count == 1
 
-    # 第二轮：再来3条相同应再次触发
+    # 第二轮：再来3条相同应再次触发（无冷却）
     for uid in [20004, 20005, 20006]:
         await handler.handle_message(_group_event(sender_id=uid, text="hello"))
 
@@ -343,3 +346,133 @@ async def test_repeat_custom_threshold_4() -> None:
     await handler.handle_message(_group_event(sender_id=20004, text="hey"))
     handler.sender.send_group_message.assert_called_once()
     assert handler.sender.send_group_message.call_args.args[1] == "hey"
+
+
+# ── 冷却机制：复读后同一内容在冷却期内不再触发 ──
+
+
+@pytest.mark.asyncio
+async def test_repeat_cooldown_suppresses_same_text() -> None:
+    """复读触发后，同一内容在冷却期内再次满足条件也不触发。"""
+    handler = _build_handler(repeat_enabled=True, repeat_cooldown_minutes=60)
+    # 第一轮：触发复读
+    for uid in [20001, 20002, 20003]:
+        await handler.handle_message(_group_event(sender_id=uid, text="草"))
+    assert handler.sender.send_group_message.call_count == 1
+
+    # 第二轮：同一内容，应被冷却抑制
+    for uid in [20004, 20005, 20006]:
+        await handler.handle_message(_group_event(sender_id=uid, text="草"))
+    assert handler.sender.send_group_message.call_count == 1  # 不增加
+
+
+@pytest.mark.asyncio
+async def test_repeat_cooldown_allows_different_text() -> None:
+    """复读 "草" 后，不同内容 "lol" 仍可正常复读。"""
+    handler = _build_handler(repeat_enabled=True, repeat_cooldown_minutes=60)
+    for uid in [20001, 20002, 20003]:
+        await handler.handle_message(_group_event(sender_id=uid, text="草"))
+    assert handler.sender.send_group_message.call_count == 1
+
+    for uid in [20004, 20005, 20006]:
+        await handler.handle_message(_group_event(sender_id=uid, text="lol"))
+    assert handler.sender.send_group_message.call_count == 2
+    assert handler.sender.send_group_message.call_args.args[1] == "lol"
+
+
+@pytest.mark.asyncio
+async def test_repeat_cooldown_expired_allows_retrigger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """冷却过期后，相同内容可以再次触发。"""
+    import time as _time
+
+    handler = _build_handler(repeat_enabled=True, repeat_cooldown_minutes=60)
+    # 第一轮：触发
+    for uid in [20001, 20002, 20003]:
+        await handler.handle_message(_group_event(sender_id=uid, text="草"))
+    assert handler.sender.send_group_message.call_count == 1
+
+    # 模拟时间流逝 61 分钟
+    original_monotonic = _time.monotonic
+    monkeypatch.setattr(_time, "monotonic", lambda: original_monotonic() + 3660)
+
+    # 第二轮：冷却已过期，应触发
+    for uid in [20004, 20005, 20006]:
+        await handler.handle_message(_group_event(sender_id=uid, text="草"))
+    assert handler.sender.send_group_message.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_repeat_cooldown_zero_disables() -> None:
+    """cooldown=0 时不启用冷却，连续复读同一内容仍可触发。"""
+    handler = _build_handler(repeat_enabled=True, repeat_cooldown_minutes=0)
+    for uid in [20001, 20002, 20003]:
+        await handler.handle_message(_group_event(sender_id=uid, text="草"))
+    assert handler.sender.send_group_message.call_count == 1
+
+    for uid in [20004, 20005, 20006]:
+        await handler.handle_message(_group_event(sender_id=uid, text="草"))
+    assert handler.sender.send_group_message.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_repeat_cooldown_question_mark_normalization() -> None:
+    """全角问号 ？ 和半角问号 ? 视为等价，复读后互相抑制。"""
+    handler = _build_handler(
+        repeat_enabled=True,
+        repeat_cooldown_minutes=60,
+        inverted_question_enabled=True,
+    )
+    # 全角问号触发复读
+    for uid in [20001, 20002, 20003]:
+        await handler.handle_message(_group_event(sender_id=uid, text="？？？"))
+    assert handler.sender.send_group_message.call_count == 1
+    assert handler.sender.send_group_message.call_args.args[1] == "¿¿¿"
+
+    # 半角问号——应被冷却抑制（？和 ? 等价）
+    for uid in [20004, 20005, 20006]:
+        await handler.handle_message(_group_event(sender_id=uid, text="???"))
+    assert handler.sender.send_group_message.call_count == 1  # 不增加
+
+
+@pytest.mark.asyncio
+async def test_repeat_cooldown_multiple_texts_tracked() -> None:
+    """多种不同内容各自独立冷却。"""
+    handler = _build_handler(repeat_enabled=True, repeat_cooldown_minutes=60)
+    # 复读 "草"
+    for uid in [20001, 20002, 20003]:
+        await handler.handle_message(_group_event(sender_id=uid, text="草"))
+    # 复读 "lol"
+    for uid in [20004, 20005, 20006]:
+        await handler.handle_message(_group_event(sender_id=uid, text="lol"))
+    assert handler.sender.send_group_message.call_count == 2
+
+    # "草" 再次满足条件 → 冷却中，不触发
+    for uid in [20007, 20008, 20009]:
+        await handler.handle_message(_group_event(sender_id=uid, text="草"))
+    assert handler.sender.send_group_message.call_count == 2
+
+    # "lol" 再次满足条件 → 冷却中，不触发
+    for uid in [20010, 20011, 20012]:
+        await handler.handle_message(_group_event(sender_id=uid, text="lol"))
+    assert handler.sender.send_group_message.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_repeat_cooldown_groups_independent() -> None:
+    """不同群的冷却互不影响。"""
+    handler = _build_handler(repeat_enabled=True, repeat_cooldown_minutes=60)
+    # 群A 复读 "草"
+    for uid in [20001, 20002, 20003]:
+        await handler.handle_message(
+            _group_event(group_id=30001, sender_id=uid, text="草")
+        )
+    assert handler.sender.send_group_message.call_count == 1
+
+    # 群B 复读 "草" — 不同群，不受群A冷却影响
+    for uid in [20004, 20005, 20006]:
+        await handler.handle_message(
+            _group_event(group_id=30002, sender_id=uid, text="草")
+        )
+    assert handler.sender.send_group_message.call_count == 2

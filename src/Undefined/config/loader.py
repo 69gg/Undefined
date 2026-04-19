@@ -219,6 +219,7 @@ class Config:
     keyword_reply_enabled: bool
     repeat_enabled: bool
     repeat_threshold: int
+    repeat_cooldown_minutes: int
     inverted_question_enabled: bool
     context_recent_messages_limit: int
     ai_request_max_retries: int
@@ -493,6 +494,16 @@ class Config:
             repeat_threshold = 2
         if repeat_threshold > 20:
             repeat_threshold = 20
+        repeat_cooldown_minutes = _coerce_int(
+            _get_value(
+                data,
+                ("easter_egg", "repeat_cooldown_minutes"),
+                "EASTER_EGG_REPEAT_COOLDOWN_MINUTES",
+            ),
+            60,
+        )
+        if repeat_cooldown_minutes < 0:
+            repeat_cooldown_minutes = 0
         context_recent_messages_limit = _coerce_int(
             _get_value(
                 data,
@@ -1241,6 +1252,7 @@ class Config:
             keyword_reply_enabled=keyword_reply_enabled,
             repeat_enabled=repeat_enabled,
             repeat_threshold=repeat_threshold,
+            repeat_cooldown_minutes=repeat_cooldown_minutes,
             inverted_question_enabled=inverted_question_enabled,
             context_recent_messages_limit=context_recent_messages_limit,
             ai_request_max_retries=ai_request_max_retries,

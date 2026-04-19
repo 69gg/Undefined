@@ -8,6 +8,7 @@ import logging
 import os
 from pathlib import Path
 import random
+import time
 from typing import Any, Coroutine
 
 from Undefined.attachments import (
@@ -131,6 +132,8 @@ class MessageHandler:
         # 复读功能状态（按群跟踪最近消息文本与发送者）
         self._repeat_counter: dict[int, list[tuple[str, int]]] = {}
         self._repeat_locks: dict[int, asyncio.Lock] = {}
+        # 复读冷却：group_id → {normalized_text → monotonic_timestamp}
+        self._repeat_cooldown: dict[int, dict[str, float]] = {}
 
         # 启动队列
         self.ai_coordinator.queue_manager.start(self.ai_coordinator.execute_reply)
@@ -142,6 +145,31 @@ class MessageHandler:
             lock = asyncio.Lock()
             self._repeat_locks[group_id] = lock
         return lock
+
+    @staticmethod
+    def _normalize_repeat_text(text: str) -> str:
+        """规范化复读文本用于冷却比较（？→?）。"""
+        return text.replace("？", "?")
+
+    def _is_repeat_on_cooldown(self, group_id: int, text: str) -> bool:
+        """检查指定群的文本是否在复读冷却期内。"""
+        cooldown_minutes = self.config.repeat_cooldown_minutes
+        if cooldown_minutes <= 0:
+            return False
+        group_cd = self._repeat_cooldown.get(group_id)
+        if not group_cd:
+            return False
+        key = self._normalize_repeat_text(text)
+        last_time = group_cd.get(key)
+        if last_time is None:
+            return False
+        return (time.monotonic() - last_time) < cooldown_minutes * 60
+
+    def _record_repeat_cooldown(self, group_id: int, text: str) -> None:
+        """记录复读冷却时间戳。"""
+        key = self._normalize_repeat_text(text)
+        group_cd = self._repeat_cooldown.setdefault(group_id, {})
+        group_cd[key] = time.monotonic()
 
     async def _annotate_meme_descriptions(
         self,
@@ -829,22 +857,32 @@ class MessageHandler:
                         and self.config.bot_qq not in senders
                     ):
                         reply_text = texts[0]
-                        if self.config.inverted_question_enabled:
-                            stripped = reply_text.strip()
-                            if set(stripped) <= {"?", "？"}:
-                                reply_text = "¿" * len(stripped)
-                        # 清空计数器防止重复触发
-                        self._repeat_counter[group_id] = []
-                        logger.info(
-                            "[复读] 触发复读: group=%s text=%s",
-                            group_id,
-                            redact_string(reply_text)[:50],
-                        )
-                        await self.sender.send_group_message(
-                            group_id,
-                            reply_text,
-                            history_prefix=REPEAT_REPLY_HISTORY_PREFIX,
-                        )
+                        # 冷却检查：同一内容在冷却期内不再复读
+                        if self._is_repeat_on_cooldown(group_id, reply_text):
+                            self._repeat_counter[group_id] = []
+                            logger.debug(
+                                "[复读] 冷却中跳过: group=%s text=%s",
+                                group_id,
+                                redact_string(reply_text)[:50],
+                            )
+                        else:
+                            if self.config.inverted_question_enabled:
+                                stripped = reply_text.strip()
+                                if set(stripped) <= {"?", "？"}:
+                                    reply_text = "¿" * len(stripped)
+                            # 清空计数器防止重复触发
+                            self._repeat_counter[group_id] = []
+                            self._record_repeat_cooldown(group_id, texts[0])
+                            logger.info(
+                                "[复读] 触发复读: group=%s text=%s",
+                                group_id,
+                                redact_string(reply_text)[:50],
+                            )
+                            await self.sender.send_group_message(
+                                group_id,
+                                reply_text,
+                                history_prefix=REPEAT_REPLY_HISTORY_PREFIX,
+                            )
                         return
 
         # Bilibili 视频自动提取
