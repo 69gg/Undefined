@@ -42,8 +42,8 @@ def _prepare_content(raw_content: str) -> str:
     3. 如果没有数学分隔符，自动用 \\[ ... \\] 包装
     """
     content = _strip_document_wrappers(raw_content)
-    # 替换字面量 \\n 为真实换行符
-    content = content.replace("\\n", "\n")
+    # 替换字面量 \\n 为真实换行符，但保留 LaTeX 命令如 \nu \nabla \neq 等
+    content = re.sub(r"\\n(?![a-zA-Z])", "\n", content)
 
     if not _has_math_delimiters(content):
         # 没有分隔符，自动包装为块级数学环境

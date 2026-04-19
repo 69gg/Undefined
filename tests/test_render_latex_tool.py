@@ -182,10 +182,17 @@ def test_prepare_content() -> None:
     result_with_delim = _prepare_content(r"\[ E = mc^2 \]")
     assert result_with_delim == r"\[ E = mc^2 \]"
 
-    # 字面量 \\n 处理
-    result_newline = _prepare_content(r"x = 1\\ny = 2")
+    # 字面量 \\n 处理（后面不跟字母时替换为换行）
+    result_newline = _prepare_content("x = 1\\n2 = y")
     assert "\n" in result_newline
-    assert "\\n" not in result_newline.replace(r"\[", "").replace(r"\]", "")
+    assert "x = 1" in result_newline
+    assert "2 = y" in result_newline
+
+    # LaTeX 命令不被破坏：\nu \nabla \neq 保持不变
+    result_latex = _prepare_content(r"\nu + \nabla \neq 0")
+    assert r"\nu" in result_latex
+    assert r"\nabla" in result_latex
+    assert r"\neq" in result_latex
 
 
 def test_build_html_contains_mathjax_ready_flag() -> None:
