@@ -696,7 +696,7 @@ class MultimodalAnalyzer:
             result = await self._requester.request(
                 model_config=self._vision_config,
                 messages=[{"role": "user", "content": content_items}],
-                max_tokens=8192,
+                max_tokens=self._vision_config.max_tokens,
                 call_type=f"vision_{detected_type}",
             )
             content = extract_choices_content(result)
@@ -861,7 +861,7 @@ class MultimodalAnalyzer:
                 tool_schema=_MEME_JUDGE_TOOL,
                 tool_name="submit_meme_judgement",
                 call_type="vision_meme_judge",
-                max_tokens=256,
+                max_tokens=self._vision_config.max_tokens,
             )
         except Exception as exc:
             logger.exception("[媒体分析] 表情包判定失败，按非表情包处理: %s", exc)
@@ -899,7 +899,7 @@ class MultimodalAnalyzer:
                 tool_schema=_MEME_DESCRIBE_TOOL,
                 tool_name="submit_meme_description",
                 call_type="vision_meme_describe",
-                max_tokens=512,
+                max_tokens=self._vision_config.max_tokens,
             )
         except Exception as exc:
             logger.exception("[媒体分析] 表情包描述失败: %s", exc)

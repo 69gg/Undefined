@@ -152,6 +152,9 @@ api_key = ""
 # zh: Vision 模型名称。
 # en: Vision model name.
 model_name = ""
+# zh: Vision 模型最大输出 tokens。启用 thinking 时建议设大（如 8192），确保思维链消耗后仍有余量输出工具调用。
+# en: Vision model max output tokens. When thinking is enabled, use a larger value (e.g. 8192) so there is still room for tool-call output after thinking.
+max_tokens = 8192
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0

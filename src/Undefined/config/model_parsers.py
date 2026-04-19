@@ -382,6 +382,14 @@ def _parse_vision_model_config(data: dict[str, Any]) -> VisionModelConfig:
             _get_value(data, ("models", "vision", "model_name"), "VISION_MODEL_NAME"),
             "",
         ),
+        max_tokens=_coerce_int(
+            _get_value(
+                data,
+                ("models", "vision", "max_tokens"),
+                "VISION_MODEL_MAX_TOKENS",
+            ),
+            8192,
+        ),
         queue_interval_seconds=queue_interval_seconds,
         api_mode=api_mode,
         thinking_enabled=_coerce_bool(

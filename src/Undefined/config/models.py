@@ -92,6 +92,7 @@ class VisionModelConfig:
     api_url: str
     api_key: str
     model_name: str
+    max_tokens: int = 8192  # 最大输出 tokens
     queue_interval_seconds: float = 1.0
     api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
