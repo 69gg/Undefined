@@ -417,6 +417,8 @@ async def test_repeat_cooldown_zero_disables() -> None:
     for uid in [20004, 20005, 20006]:
         await handler.handle_message(_group_event(sender_id=uid, text="草"))
     assert handler.sender.send_group_message.call_count == 2
+    # cooldown=0 不应写入任何冷却记录（防止内存泄漏）
+    assert len(handler._repeat_cooldown) == 0
 
 
 @pytest.mark.asyncio

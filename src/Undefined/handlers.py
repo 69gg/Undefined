@@ -167,17 +167,16 @@ class MessageHandler:
 
     def _record_repeat_cooldown(self, group_id: int, text: str) -> None:
         """记录复读冷却时间戳，同时清理已过期条目防止内存泄漏。"""
+        cooldown_seconds = self.config.repeat_cooldown_minutes * 60
+        if cooldown_seconds <= 0:
+            return
         key = self._normalize_repeat_text(text)
         group_cd = self._repeat_cooldown.setdefault(group_id, {})
         now = time.monotonic()
-        cooldown_seconds = self.config.repeat_cooldown_minutes * 60
         # 清理已过期条目
-        if cooldown_seconds > 0:
-            expired = [
-                k for k, ts in group_cd.items() if (now - ts) >= cooldown_seconds
-            ]
-            for k in expired:
-                del group_cd[k]
+        expired = [k for k, ts in group_cd.items() if (now - ts) >= cooldown_seconds]
+        for k in expired:
+            del group_cd[k]
         group_cd[key] = now
 
     async def _annotate_meme_descriptions(
