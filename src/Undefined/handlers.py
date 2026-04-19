@@ -883,7 +883,7 @@ class MessageHandler:
                                 reply_text,
                                 history_prefix=REPEAT_REPLY_HISTORY_PREFIX,
                             )
-                        return
+                            return
 
         # Bilibili 视频自动提取
         if self.config.bilibili_auto_extract_enabled:

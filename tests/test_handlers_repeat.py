@@ -353,17 +353,20 @@ async def test_repeat_custom_threshold_4() -> None:
 
 @pytest.mark.asyncio
 async def test_repeat_cooldown_suppresses_same_text() -> None:
-    """复读触发后，同一内容在冷却期内再次满足条件也不触发。"""
+    """复读触发后，同一内容在冷却期内再次满足条件也不触发，但消息继续处理。"""
     handler = _build_handler(repeat_enabled=True, repeat_cooldown_minutes=60)
     # 第一轮：触发复读
     for uid in [20001, 20002, 20003]:
         await handler.handle_message(_group_event(sender_id=uid, text="草"))
     assert handler.sender.send_group_message.call_count == 1
 
-    # 第二轮：同一内容，应被冷却抑制
+    # 第二轮：同一内容，应被冷却抑制——复读不发送
     for uid in [20004, 20005, 20006]:
         await handler.handle_message(_group_event(sender_id=uid, text="草"))
     assert handler.sender.send_group_message.call_count == 1  # 不增加
+
+    # 冷却抑制后消息应继续处理（到达 AI auto-reply），不应被 silently dropped
+    assert handler.ai_coordinator.handle_auto_reply.call_count > 0
 
 
 @pytest.mark.asyncio
