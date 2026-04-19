@@ -872,30 +872,52 @@ class MemeService:
             return
         if self._ai_client is None:
             raise RuntimeError("reanalyze requires ai_client")
-        analyze_path = record.preview_path if record.preview_path else record.blob_path
+        analyze_path: str | list[str] = (
+            record.preview_path if record.preview_path else record.blob_path
+        )
+        # GIF 多帧模式：与 ingest 路径保持一致
+        if record.is_animated:
+            cfg = self._cfg()
+            if str(getattr(cfg, "gif_analysis_mode", "grid")).lower() == "multi":
+                analyze_path = await self._prepare_gif_multi_frames(
+                    Path(record.blob_path), uid
+                )
         try:
             judgement = await self._ai_client.judge_meme_image(analyze_path)
         except Exception as exc:
             if _is_retryable_llm_error(exc):
+                if isinstance(analyze_path, list):
+                    await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
                 raise
             logger.exception(
                 "[memes] judge stage failed during reanalyze: uid=%s err=%s", uid, exc
             )
+            if isinstance(analyze_path, list):
+                await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
             return
         if not bool(judgement.get("is_meme", False)):
+            if isinstance(analyze_path, list):
+                await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
             await self.delete_meme(uid)
             return
         try:
             described = await self._ai_client.describe_meme_image(analyze_path)
         except Exception as exc:
             if _is_retryable_llm_error(exc):
+                if isinstance(analyze_path, list):
+                    await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
                 raise
             logger.exception(
                 "[memes] describe stage failed during reanalyze: uid=%s err=%s",
                 uid,
                 exc,
             )
+            if isinstance(analyze_path, list):
+                await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
             return
+        # GIF 多帧文件用完即清理
+        if isinstance(analyze_path, list):
+            await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
         auto_description = str(described.get("description") or "").strip()
         next_tags = _normalize_tags(described.get("tags"))
         if not auto_description and not next_tags:
@@ -1031,6 +1053,8 @@ class MemeService:
                     judgement = await self._ai_client.judge_meme_image(analyze_path)
                 except Exception as exc:
                     if _is_retryable_llm_error(exc):
+                        if isinstance(analyze_path, list):
+                            await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
                         raise
                     logger.exception(
                         "[memes] judge stage failed, treat as non-meme: uid=%s err=%s",
@@ -1052,6 +1076,8 @@ class MemeService:
                     described = await self._ai_client.describe_meme_image(analyze_path)
                 except Exception as exc:
                     if _is_retryable_llm_error(exc):
+                        if isinstance(analyze_path, list):
+                            await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
                         raise
                     logger.exception(
                         "[memes] describe stage failed, drop uid=%s err=%s", uid, exc
