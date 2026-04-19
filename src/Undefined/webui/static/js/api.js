@@ -31,7 +31,13 @@ function shouldRetryCandidate(res) {
 
 async function requestOnce(path, options = {}) {
     const headers = { ...(options.headers || {}) };
-    if (options.method === "POST" && options.body && !headers["Content-Type"]) {
+    const needsJson =
+        options.body &&
+        !headers["Content-Type"] &&
+        ["POST", "PATCH", "PUT", "DELETE"].includes(
+            String(options.method || "").toUpperCase(),
+        );
+    if (needsJson) {
         headers["Content-Type"] = "application/json";
     }
     if (state.authAccessToken && !headers.Authorization) {

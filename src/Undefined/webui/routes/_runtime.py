@@ -296,6 +296,51 @@ async def runtime_memory_handler(request: web.Request) -> Response:
     )
 
 
+@routes.post("/api/v1/management/runtime/memory")
+@routes.post("/api/runtime/memory")
+async def runtime_memory_create_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return web.json_response({"error": "Invalid JSON payload"}, status=400)
+    return await _proxy_runtime(
+        method="POST",
+        path="/api/v1/memory",
+        payload=payload,
+    )
+
+
+@routes.patch("/api/v1/management/runtime/memory/{uuid}")
+@routes.patch("/api/runtime/memory/{uuid}")
+async def runtime_memory_update_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    target_uuid = _url_quote(str(request.match_info.get("uuid", "")).strip(), safe="")
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return web.json_response({"error": "Invalid JSON payload"}, status=400)
+    return await _proxy_runtime(
+        method="PATCH",
+        path=f"/api/v1/memory/{target_uuid}",
+        payload=payload,
+    )
+
+
+@routes.delete("/api/v1/management/runtime/memory/{uuid}")
+@routes.delete("/api/runtime/memory/{uuid}")
+async def runtime_memory_delete_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    target_uuid = _url_quote(str(request.match_info.get("uuid", "")).strip(), safe="")
+    return await _proxy_runtime(
+        method="DELETE",
+        path=f"/api/v1/memory/{target_uuid}",
+    )
+
+
 @routes.get("/api/v1/management/runtime/cognitive/events")
 @routes.get("/api/runtime/cognitive/events")
 async def runtime_cognitive_events_handler(request: web.Request) -> Response:

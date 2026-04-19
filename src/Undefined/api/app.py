@@ -186,7 +186,9 @@ def _apply_cors_headers(request: web.Request, response: web.StreamResponse) -> N
     origin = normalize_origin(str(request.headers.get("Origin") or ""))
     settings = load_webui_settings()
     response.headers.setdefault("Vary", "Origin")
-    response.headers.setdefault("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+    response.headers.setdefault(
+        "Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS"
+    )
     response.headers.setdefault(
         "Access-Control-Allow-Headers",
         "Authorization, Content-Type, X-Undefined-API-Key",
@@ -544,7 +546,14 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
                 ),
             }
         },
-        "/api/v1/memory": {"get": {"summary": "List/search manual memories"}},
+        "/api/v1/memory": {
+            "get": {"summary": "List/search manual memories"},
+            "post": {"summary": "Create a manual memory"},
+        },
+        "/api/v1/memory/{uuid}": {
+            "patch": {"summary": "Update a manual memory by UUID"},
+            "delete": {"summary": "Delete a manual memory by UUID"},
+        },
         "/api/v1/memes": {"get": {"summary": "List/search meme library items"}},
         "/api/v1/memes/stats": {"get": {"summary": "Get meme library stats"}},
         "/api/v1/memes/{uid}": {
@@ -749,6 +758,9 @@ class RuntimeAPIServer:
                 web.get("/api/v1/probes/internal", self._internal_probe_handler),
                 web.get("/api/v1/probes/external", self._external_probe_handler),
                 web.get("/api/v1/memory", self._memory_handler),
+                web.post("/api/v1/memory", self._memory_create_handler),
+                web.patch("/api/v1/memory/{uuid}", self._memory_update_handler),
+                web.delete("/api/v1/memory/{uuid}", self._memory_delete_handler),
                 web.get("/api/v1/memes", self._meme_list_handler),
                 web.get("/api/v1/memes/stats", self._meme_stats_handler),
                 web.get("/api/v1/memes/{uid}", self._meme_detail_handler),
@@ -1186,6 +1198,63 @@ class RuntimeAPIServer:
                 },
             }
         )
+
+    async def _memory_create_handler(self, request: web.Request) -> Response:
+        memory_storage = getattr(self._ctx.ai, "memory_storage", None)
+        if memory_storage is None:
+            return _json_error("Memory storage not ready", status=503)
+        try:
+            body = await request.json()
+        except Exception:
+            return _json_error("Invalid JSON", status=400)
+        fact = str(body.get("fact", "") or "").strip()
+        if not fact:
+            return _json_error("fact must not be empty", status=400)
+        new_uuid = await memory_storage.add(fact)
+        if new_uuid is None:
+            return _json_error("Failed to create memory", status=500)
+        # add() returns existing UUID on duplicate
+        existing = [m for m in memory_storage.get_all() if m.uuid == new_uuid]
+        item = existing[0] if existing else None
+        return web.json_response(
+            {
+                "uuid": new_uuid,
+                "fact": item.fact if item else fact,
+                "created_at": item.created_at if item else "",
+            },
+            status=201,
+        )
+
+    async def _memory_update_handler(self, request: web.Request) -> Response:
+        memory_storage = getattr(self._ctx.ai, "memory_storage", None)
+        if memory_storage is None:
+            return _json_error("Memory storage not ready", status=503)
+        target_uuid = str(request.match_info.get("uuid", "")).strip()
+        if not target_uuid:
+            return _json_error("uuid is required", status=400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _json_error("Invalid JSON", status=400)
+        fact = str(body.get("fact", "") or "").strip()
+        if not fact:
+            return _json_error("fact must not be empty", status=400)
+        ok = await memory_storage.update(target_uuid, fact)
+        if not ok:
+            return _json_error(f"Memory {target_uuid} not found", status=404)
+        return web.json_response({"uuid": target_uuid, "fact": fact, "updated": True})
+
+    async def _memory_delete_handler(self, request: web.Request) -> Response:
+        memory_storage = getattr(self._ctx.ai, "memory_storage", None)
+        if memory_storage is None:
+            return _json_error("Memory storage not ready", status=503)
+        target_uuid = str(request.match_info.get("uuid", "")).strip()
+        if not target_uuid:
+            return _json_error("uuid is required", status=400)
+        ok = await memory_storage.delete(target_uuid)
+        if not ok:
+            return _json_error(f"Memory {target_uuid} not found", status=404)
+        return web.json_response({"uuid": target_uuid, "deleted": True})
 
     async def _meme_list_handler(self, request: web.Request) -> Response:
         meme_service = self._ctx.meme_service

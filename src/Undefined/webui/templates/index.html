@@ -446,7 +446,7 @@
                     <div class="header">
                         <div>
                             <h1 class="page-title" data-i18n="memory.title">记忆检索</h1>
-                            <p class="page-subtitle" data-i18n="memory.subtitle">只读检索记忆、认知事件与侧写。</p>
+                            <p class="page-subtitle" data-i18n="memory.subtitle">管理长期记忆，检索认知事件与侧写。</p>
                         </div>
                         <div class="toolbar">
                             <button id="btnMemoryRefresh" class="btn" data-i18n="memory.refresh">刷新</button>
@@ -535,7 +535,7 @@
 
                     <div class="card runtime-card">
                         <div class="panel-row runtime-head">
-                            <div class="card-title" data-i18n="runtime.memory_title">长期记忆查询</div>
+                            <div class="card-title" data-i18n="runtime.memory_title">长期记忆管理</div>
                             <div class="runtime-query-stack">
                                 <div class="runtime-inline runtime-inline-action">
                                     <input id="runtimeMemoryQuery" type="search" class="form-control form-control-sm"
@@ -553,6 +553,14 @@
                                     <input id="runtimeMemoryTimeTo" type="datetime-local" class="form-control form-control-sm"
                                         title="time_to" />
                                 </div>
+                            </div>
+                        </div>
+                        <!-- Inline create form -->
+                        <div id="memoryCreateForm" class="memory-create-form">
+                            <textarea id="memoryCreateInput" class="form-control" rows="2"
+                                placeholder="输入新的记忆内容..."></textarea>
+                            <div class="memory-create-actions">
+                                <button id="btnMemoryCreate" class="btn btn-sm" type="button">添加记忆</button>
                             </div>
                         </div>
                         <div id="runtimeMemoryMeta" class="log-meta"></div>
