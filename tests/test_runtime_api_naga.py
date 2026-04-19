@@ -608,9 +608,11 @@ async def test_naga_messages_send_allows_render_with_fallback(
         raise RuntimeError("render failed")
 
     monkeypatch.setattr(
-        "Undefined.api.app.render_markdown_to_html", _render_markdown_to_html
+        "Undefined.api.routes.naga.render_markdown_to_html", _render_markdown_to_html
     )
-    monkeypatch.setattr("Undefined.api.app.render_html_to_image", _render_html_to_image)
+    monkeypatch.setattr(
+        "Undefined.api.routes.naga.render_html_to_image", _render_html_to_image
+    )
 
     response = await server._naga_messages_send_handler(
         _make_request(
@@ -665,7 +667,7 @@ async def test_naga_messages_send_falls_back_when_markdown_conversion_fails(
         raise RuntimeError("markdown failed")
 
     monkeypatch.setattr(
-        "Undefined.api.app.render_markdown_to_html", _render_markdown_to_html
+        "Undefined.api.routes.naga.render_markdown_to_html", _render_markdown_to_html
     )
 
     response = await server._naga_messages_send_handler(

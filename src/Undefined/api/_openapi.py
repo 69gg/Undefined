@@ -10,7 +10,7 @@ from Undefined import __version__
 from ._helpers import _AUTH_HEADER, _naga_routes_enabled
 
 if TYPE_CHECKING:
-    from .app import RuntimeAPIContext
+    from ._context import RuntimeAPIContext
 
 
 def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[str, Any]:

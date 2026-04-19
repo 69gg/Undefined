@@ -365,7 +365,7 @@ async def test_invoke_tool_uses_runtime_timeout(
         seen["timeout"] = timeout
         return await original_wait_for(awaitable, timeout)
 
-    monkeypatch.setattr("Undefined.api.app.asyncio.wait_for", _wait_for)
+    monkeypatch.setattr("Undefined.api.routes.tools.asyncio.wait_for", _wait_for)
 
     payload = await server._execute_tool_invoke(
         request_id="req-tool",
@@ -391,7 +391,7 @@ async def test_invoke_agent_bypasses_runtime_timeout(
         seen["timeout"] = timeout
         return await original_wait_for(awaitable, timeout)
 
-    monkeypatch.setattr("Undefined.api.app.asyncio.wait_for", _wait_for)
+    monkeypatch.setattr("Undefined.api.routes.tools.asyncio.wait_for", _wait_for)
 
     payload = await server._execute_tool_invoke(
         request_id="req-agent",
