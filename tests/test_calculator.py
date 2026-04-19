@@ -150,6 +150,23 @@ class TestScientificFunctions:
     def test_perm(self) -> None:
         assert safe_eval("perm(5, 3)") == "60"
 
+    def test_factorial_too_large(self) -> None:
+        with pytest.raises(ValueError, match="参数过大"):
+            safe_eval("factorial(9999)")
+
+    def test_comb_too_large(self) -> None:
+        with pytest.raises(ValueError, match="参数过大"):
+            safe_eval("comb(9999, 5000)")
+
+    def test_perm_too_large(self) -> None:
+        with pytest.raises(ValueError, match="参数过大"):
+            safe_eval("perm(9999, 5000)")
+
+    def test_factorial_at_limit(self) -> None:
+        """factorial(1000) should succeed (within limit)."""
+        result = safe_eval("factorial(1000)")
+        assert int(result) > 0
+
     def test_hypot(self) -> None:
         assert safe_eval("hypot(3, 4)") == "5"
 

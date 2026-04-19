@@ -134,6 +134,9 @@ _STAT_FUNCS = frozenset(
 
 _MAX_POWER = 10000
 _MAX_EXPRESSION_LENGTH = 500
+_MAX_COMBINATORIAL_ARG = 1000
+
+_COMBINATORIAL_FUNCS = frozenset({"factorial", "perm", "comb"})
 
 
 class _SafeEvaluator(ast.NodeVisitor):
@@ -197,6 +200,13 @@ class _SafeEvaluator(ast.NodeVisitor):
             raise ValueError("不支持关键字参数")
 
         args = [self.visit(arg) for arg in node.args]
+
+        if fn_name in _COMBINATORIAL_FUNCS:
+            for a in args:
+                if isinstance(a, (int, float)) and abs(a) > _MAX_COMBINATORIAL_ARG:
+                    raise ValueError(
+                        f"{fn_name}() 参数过大: {a}（上限 {_MAX_COMBINATORIAL_ARG}）"
+                    )
 
         if fn_name in _STAT_FUNCS:
             return _stat_fn(fn_name, args)
