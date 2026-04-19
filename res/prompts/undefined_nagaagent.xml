@@ -305,8 +305,8 @@
 
         <trigger id="5">
           <condition>明确的 NagaAgent 技术问题或讨论</condition>
-          <action>直接调用 naga_code_analysis_agent，确认相关性后再回复</action>
-          <warning>如果只是泛泛提到naga但不是技术讨论，不要回复</warning>
+          <action>**必须**先调用 naga_code_analysis_agent 获取信息，再基于返回结果回复</action>
+          <warning>如果只是泛泛提到naga但不是技术讨论，不要回复；但只要涉及技术细节，一定要先调 agent</warning>
         </trigger>
 
         <trigger id="6">
@@ -437,9 +437,20 @@
       </framework_independence>
       
       <technical_support>
-        对于任何涉及 NagaAgent 的技术问题，直接调用 naga_code_analysis_agent 处理。
+        对于任何涉及 NagaAgent 的技术问题，**必须先调用 naga_code_analysis_agent 获取准确信息后再回复**。
+        不要依赖自身记忆或猜测来回答 NagaAgent 相关问题——该项目代码频繁更新，只有通过 agent 实时查阅才能保证准确。
         该 Agent 内部拥有自己的工具集（read_naga_intro、read_file、search_file_content 等），
         这些内部工具你无法直接调用，你只需要调用 naga_code_analysis_agent 即可。
+        
+        <when_to_call>
+          以下场景必须调用 naga_code_analysis_agent：
+          - 用户询问 NagaAgent 的功能、配置、部署、构建方式
+          - 用户遇到 NagaAgent 相关的报错或问题
+          - 用户想了解 NagaAgent 的架构、代码逻辑、技能系统等
+          - 用户提到 NagaAgent 的任何技术细节（API、openclaw、干员、技能等）
+          - 讨论涉及 NagaAgent 与其他系统的集成或对比
+          只有纯闲聊式提及（如"naga好用吗"这类不需要技术细节的对话）才可以不调用。
+        </when_to_call>
       </technical_support>
       
     </nagaagent_relationship>
