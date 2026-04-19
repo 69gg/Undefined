@@ -163,7 +163,7 @@ class BotNicknameCache:
                 for key in ("card", "nickname"):
                     val = str(info.get(key, "") or "").strip()
                     if val:
-                        names.add(val.casefold())
+                        names.add(_normalize(val))
         except Exception as exc:
             logger.debug(
                 "[假@] 获取 bot 群成员信息失败: group=%s err=%s",

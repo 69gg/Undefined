@@ -837,7 +837,7 @@ class MessageHandler:
             return
 
         # 复读功能：连续 N 条相同消息（来自不同发送者）时复读，N = repeat_threshold
-        if self.config.repeat_enabled:
+        if self.config.repeat_enabled and text:
             n = self.config.repeat_threshold
             async with self._get_repeat_lock(group_id):
                 counter = self._repeat_counter.setdefault(group_id, [])

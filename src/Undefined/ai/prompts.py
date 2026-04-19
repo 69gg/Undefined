@@ -222,7 +222,8 @@ class PromptBuilder:
                 '关键词自动回复（触发词"心理委员"等，系统自动发送固定回复）'
             )
         if repeat_enabled:
-            desc = "复读（群聊连续3条相同消息时自动复读）"
+            threshold = int(getattr(runtime_config, "repeat_threshold", 3))
+            desc = f"复读（群聊连续{threshold}条相同消息时自动复读）"
             if inverted_question_enabled:
                 desc += "，倒问号（复读触发时若消息为问号则发送¿）"
             easter_egg_parts.append(desc)
@@ -342,6 +343,7 @@ class PromptBuilder:
 
         keyword_reply_enabled = False
         repeat_enabled = False
+        repeat_threshold = 3
         inverted_question_enabled = False
         if self._runtime_config_getter is not None:
             try:
@@ -350,6 +352,7 @@ class PromptBuilder:
                     getattr(runtime_config, "keyword_reply_enabled", False)
                 )
                 repeat_enabled = bool(getattr(runtime_config, "repeat_enabled", False))
+                repeat_threshold = int(getattr(runtime_config, "repeat_threshold", 3))
                 inverted_question_enabled = bool(
                     getattr(runtime_config, "inverted_question_enabled", False)
                 )
@@ -375,7 +378,7 @@ class PromptBuilder:
         if is_group_context and repeat_enabled:
             repeat_desc = (
                 "【系统行为说明】\n"
-                "当前群聊已开启复读彩蛋：当群聊中连续出现3条内容相同且来自不同人的消息时，"
+                f"当前群聊已开启复读彩蛋：当群聊中连续出现{repeat_threshold}条内容相同且来自不同人的消息时，"
                 "系统会自动复读一条相同的消息，并在历史中写入"
                 '以"[系统复读] "开头的消息。'
             )

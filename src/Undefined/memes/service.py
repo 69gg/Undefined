@@ -739,7 +739,7 @@ class MemeService:
                 attachments=history_attachments,
             )
         else:
-            preferred_temp_group_id = safe_int(context.get("group_id"))
+            preferred_temp_group_id = safe_int(context.get("group_id")) or None
             sent_message_id = await sender.send_private_message(
                 int(target_id),
                 cq_message,
