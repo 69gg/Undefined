@@ -404,8 +404,8 @@ async def test_fetch_messages_no_history_manager() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fetch_messages_count_capped_at_500() -> None:
-    """Count is capped at 500."""
+async def test_fetch_messages_count_capped_at_config_limit() -> None:
+    """Count is capped at the configured summary fetch limit (fallback 1000)."""
     history_manager = MagicMock()
     history_manager.get_recent.return_value = []
 
@@ -416,7 +416,7 @@ async def test_fetch_messages_count_capped_at_500() -> None:
 
     await fetch_messages_execute({"count": 9999}, context)
 
-    history_manager.get_recent.assert_called_once_with("123456", "group", 0, 500)
+    history_manager.get_recent.assert_called_once_with("123456", "group", 0, 1000)
 
 
 @pytest.mark.asyncio
@@ -453,7 +453,7 @@ async def test_fetch_messages_invalid_count_defaults() -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_messages_time_range_fetch_larger_batch() -> None:
-    """Time range mode fetches larger batch (max(count*2, 2000))."""
+    """Time range mode fetches larger batch (max(count*2, fallback_time_limit))."""
     history_manager = MagicMock()
     history_manager.get_recent.return_value = []
 
@@ -467,5 +467,48 @@ async def test_fetch_messages_time_range_fetch_larger_batch() -> None:
         context,
     )
 
-    # max(50*2, 2000) = 2000
-    history_manager.get_recent.assert_called_once_with("123456", "group", 0, 2000)
+    # max(50*2, 5000) = 5000
+    history_manager.get_recent.assert_called_once_with("123456", "group", 0, 5000)
+
+
+@pytest.mark.asyncio
+async def test_fetch_messages_count_uses_runtime_config() -> None:
+    """When runtime_config provides history_summary_fetch_limit, use it."""
+    history_manager = MagicMock()
+    history_manager.get_recent.return_value = []
+
+    cfg = MagicMock()
+    cfg.history_summary_fetch_limit = 300
+    cfg.history_summary_time_fetch_limit = 800
+
+    context: dict[str, Any] = {
+        "history_manager": history_manager,
+        "group_id": 123456,
+        "runtime_config": cfg,
+    }
+
+    await fetch_messages_execute({"count": 9999}, context)
+
+    history_manager.get_recent.assert_called_once_with("123456", "group", 0, 300)
+
+
+@pytest.mark.asyncio
+async def test_fetch_messages_time_range_uses_runtime_config() -> None:
+    """When runtime_config provides history_summary_time_fetch_limit, use it."""
+    history_manager = MagicMock()
+    history_manager.get_recent.return_value = []
+
+    cfg = MagicMock()
+    cfg.history_summary_fetch_limit = 300
+    cfg.history_summary_time_fetch_limit = 800
+
+    context: dict[str, Any] = {
+        "history_manager": history_manager,
+        "group_id": 123456,
+        "runtime_config": cfg,
+    }
+
+    await fetch_messages_execute({"count": 50, "time_range": "1d"}, context)
+
+    # max(50*2, 800) = 800
+    history_manager.get_recent.assert_called_once_with("123456", "group", 0, 800)

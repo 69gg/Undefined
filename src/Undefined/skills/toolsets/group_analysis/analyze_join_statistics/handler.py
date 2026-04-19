@@ -34,7 +34,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         member_limit = int(member_limit_raw) if member_limit_raw is not None else 20
         if member_limit < 0:
             return "参数错误：member_limit 必须是非负整数"
-        member_limit = min(member_limit, 100)
+        cfg = context.get("runtime_config")
+        analysis_cap = getattr(cfg, "history_group_analysis_limit", 500) if cfg else 500
+        member_limit = min(member_limit, analysis_cap)
     except (ValueError, TypeError):
         return "参数类型错误：member_limit 必须是整数"
 

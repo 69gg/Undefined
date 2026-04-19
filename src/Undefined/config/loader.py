@@ -504,6 +504,12 @@ class Config:
     token_usage_max_total_mb: int
     token_usage_archive_prune_mode: str
     history_max_records: int
+    history_filtered_result_limit: int
+    history_search_scan_limit: int
+    history_summary_fetch_limit: int
+    history_summary_time_fetch_limit: int
+    history_onebot_fetch_limit: int
+    history_group_analysis_limit: int
     skills_hot_reload: bool
     skills_hot_reload_interval: float
     skills_hot_reload_debounce: float
@@ -1036,8 +1042,78 @@ class Config:
             "delete",
         )
 
-        history_max_records = _coerce_int(
-            _get_value(data, ("history", "max_records"), "HISTORY_MAX_RECORDS"), 10000
+        history_max_records = max(
+            0,
+            _coerce_int(
+                _get_value(data, ("history", "max_records"), "HISTORY_MAX_RECORDS"),
+                10000,
+            ),
+        )
+        history_filtered_result_limit = max(
+            1,
+            _coerce_int(
+                _get_value(
+                    data,
+                    ("history", "filtered_result_limit"),
+                    "HISTORY_FILTERED_RESULT_LIMIT",
+                ),
+                200,
+            ),
+        )
+        history_search_scan_limit = max(
+            1,
+            _coerce_int(
+                _get_value(
+                    data,
+                    ("history", "search_scan_limit"),
+                    "HISTORY_SEARCH_SCAN_LIMIT",
+                ),
+                10000,
+            ),
+        )
+        history_summary_fetch_limit = max(
+            1,
+            _coerce_int(
+                _get_value(
+                    data,
+                    ("history", "summary_fetch_limit"),
+                    "HISTORY_SUMMARY_FETCH_LIMIT",
+                ),
+                1000,
+            ),
+        )
+        history_summary_time_fetch_limit = max(
+            1,
+            _coerce_int(
+                _get_value(
+                    data,
+                    ("history", "summary_time_fetch_limit"),
+                    "HISTORY_SUMMARY_TIME_FETCH_LIMIT",
+                ),
+                5000,
+            ),
+        )
+        history_onebot_fetch_limit = max(
+            1,
+            _coerce_int(
+                _get_value(
+                    data,
+                    ("history", "onebot_fetch_limit"),
+                    "HISTORY_ONEBOT_FETCH_LIMIT",
+                ),
+                10000,
+            ),
+        )
+        history_group_analysis_limit = max(
+            1,
+            _coerce_int(
+                _get_value(
+                    data,
+                    ("history", "group_analysis_limit"),
+                    "HISTORY_GROUP_ANALYSIS_LIMIT",
+                ),
+                500,
+            ),
         )
 
         skills_hot_reload = _coerce_bool(
@@ -1451,6 +1527,12 @@ class Config:
             token_usage_archive_prune_mode=token_usage_archive_prune_mode,
             skills_hot_reload=skills_hot_reload,
             history_max_records=history_max_records,
+            history_filtered_result_limit=history_filtered_result_limit,
+            history_search_scan_limit=history_search_scan_limit,
+            history_summary_fetch_limit=history_summary_fetch_limit,
+            history_summary_time_fetch_limit=history_summary_time_fetch_limit,
+            history_onebot_fetch_limit=history_onebot_fetch_limit,
+            history_group_analysis_limit=history_group_analysis_limit,
             skills_hot_reload_interval=skills_hot_reload_interval,
             skills_hot_reload_debounce=skills_hot_reload_debounce,
             agent_intro_autogen_enabled=agent_intro_autogen_enabled,

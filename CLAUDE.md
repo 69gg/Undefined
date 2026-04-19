@@ -80,7 +80,7 @@ OneBot WebSocket → onebot.py → handlers.py → SecurityService(注入检测)
 车站-列车模型（QueueManager）：按模型隔离队列组，4 级优先级（超管 > 私聊 > @提及 > 普通群聊），普通队列自动修剪保留最新 2 条，非阻塞按节奏发车（默认 1Hz）。
 
 ### 存储与数据
-- `data/history/` — 消息历史（group_*.json / private_*.json，10000 条限制）
+- `data/history/` — 消息历史（group_*.json / private_*.json，默认 10000 条，可通过 `[history]` 配置节调整，0=无限制）
 - `data/cognitive/` — ChromaDB 向量库 + profiles/ 侧写 + queues/ 任务队列
 - `data/memes/` — 表情包库（blobs原图、previews预览图、memes.sqlite3元数据、chromadb向量检索）
 - `data/memory.json` — 置顶备忘录（500 条上限）

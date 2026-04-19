@@ -12,9 +12,21 @@ logger = logging.getLogger(__name__)
 
 _TIME_RANGE_PATTERN = re.compile(r"^(\d+)([hHdDwW])$")
 _TIME_UNIT_SECONDS = {"h": 3600, "d": 86400, "w": 604800}
-_MAX_COUNT = 500
 _DEFAULT_COUNT = 50
-_MAX_FETCH_FOR_TIME_FILTER = 2000
+
+# 以下值仅作为 runtime_config 缺失时的回退
+_FALLBACK_MAX_COUNT = 1000
+_FALLBACK_MAX_FETCH_FOR_TIME_FILTER = 5000
+
+
+def _get_history_limit(context: dict[str, Any], key: str, fallback: int) -> int:
+    """从 runtime_config 读取历史限制配置。"""
+    cfg = context.get("runtime_config")
+    if cfg is not None:
+        val = getattr(cfg, key, None)
+        if isinstance(val, int) and val > 0:
+            return val
+    return fallback
 
 
 def _parse_time_range(value: str) -> int | None:
@@ -146,8 +158,11 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
     time_range_str = str(args.get("time_range", "")).strip()
     raw_count = args.get("count", _DEFAULT_COUNT)
+    max_count = _get_history_limit(
+        context, "history_summary_fetch_limit", _FALLBACK_MAX_COUNT
+    )
     try:
-        count = min(max(int(raw_count), 1), _MAX_COUNT)
+        count = min(max(int(raw_count), 1), max_count)
     except (TypeError, ValueError):
         count = _DEFAULT_COUNT
 
@@ -155,7 +170,12 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         seconds = _parse_time_range(time_range_str)
         if seconds is None:
             return f"无法解析时间范围: {time_range_str}(支持格式: 1h, 6h, 1d, 7d)"
-        fetch_count = max(count * 2, _MAX_FETCH_FOR_TIME_FILTER)
+        max_time_fetch = _get_history_limit(
+            context,
+            "history_summary_time_fetch_limit",
+            _FALLBACK_MAX_FETCH_FOR_TIME_FILTER,
+        )
+        fetch_count = max(count * 2, max_time_fetch)
         messages = history_manager.get_recent(chat_id, chat_type, 0, fetch_count)
         if messages:
             messages = _filter_by_time(messages, seconds)

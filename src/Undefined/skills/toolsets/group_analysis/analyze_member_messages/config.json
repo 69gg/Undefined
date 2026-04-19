@@ -29,12 +29,12 @@
                 },
                 "message_limit": {
                     "type": "integer",
-                    "description": "返回消息内容的数量限制（最大100），默认 20",
+                    "description": "返回消息内容的数量限制，上限由服务器配置决定，默认 20",
                     "default": 20
                 },
                 "max_history_count": {
                     "type": "integer",
-                    "description": "最多获取的历史消息数量（最大5000），默认 2000",
+                    "description": "最多获取的历史消息数量，上限由服务器配置决定，默认 2000",
                     "default": 2000
                 }
             },

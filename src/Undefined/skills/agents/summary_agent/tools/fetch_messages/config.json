@@ -8,7 +8,7 @@
             "properties": {
                 "count": {
                     "type": "integer",
-                    "description": "要获取的消息条数,默认50,最大500。"
+                    "description": "要获取的消息条数,默认50,上限由服务器配置决定。"
                 },
                 "time_range": {
                     "type": "string",

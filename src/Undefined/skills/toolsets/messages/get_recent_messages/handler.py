@@ -2,7 +2,15 @@
 
 from typing import Any, Dict
 
-_FILTERED_RESULT_LIMIT = 50
+
+def _get_history_limit(context: Dict[str, Any], key: str, fallback: int) -> int:
+    """从 runtime_config 读取历史限制配置。"""
+    cfg = context.get("runtime_config")
+    if cfg is not None:
+        val = getattr(cfg, key, None)
+        if isinstance(val, int) and val > 0:
+            return val
+    return fallback
 
 
 def _find_group_id_by_name(chat_id: str, history_manager: Any) -> str | None:
@@ -230,8 +238,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     # 获取消息：有过滤条件时扩大获取范围
     messages = []
+    search_scan_limit = _get_history_limit(context, "history_search_scan_limit", 10000)
     fetch_start = 0 if has_filter else start
-    fetch_end = 10000 if has_filter else end
+    fetch_end = search_scan_limit if has_filter else end
 
     if get_recent_messages_callback:
         messages = await get_recent_messages_callback(
@@ -265,9 +274,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         # 对过滤结果进行分页切片
         messages = messages[start:end]
 
-        # 限制最多返回 50 条
-        if len(messages) > _FILTERED_RESULT_LIMIT:
-            messages = messages[:_FILTERED_RESULT_LIMIT]
+        filtered_result_limit = _get_history_limit(
+            context, "history_filtered_result_limit", 200
+        )
+        if len(messages) > filtered_result_limit:
+            messages = messages[:filtered_result_limit]
 
         # 格式化消息
         formatted = [_format_message_xml(msg) for msg in messages]

@@ -81,17 +81,20 @@ class MessageHistoryManager:
     async def _save_history_to_file(
         self, history: list[dict[str, Any]], path: str
     ) -> None:
-        """异步保存历史记录到文件（最多 10000 条）"""
+        """异步保存历史记录到文件"""
         from Undefined.utils import io
 
         try:
-            # 只保留最近的 self._max_records 条
-            truncated_history = (
-                history[-self._max_records :]
-                if len(history) > self._max_records
-                else history
-            )
-            truncated = len(history) > self._max_records
+            if self._max_records > 0:
+                truncated_history = (
+                    history[-self._max_records :]
+                    if len(history) > self._max_records
+                    else history
+                )
+                truncated = len(history) > self._max_records
+            else:
+                truncated_history = history
+                truncated = False
 
             logger.debug(
                 f"[历史记录] 准备保存: path={path}, total={len(history)}, truncated={truncated}"
@@ -210,12 +213,13 @@ class MessageHistoryManager:
 
                     normalized_history.append(msg)
 
-                # 只保留最近的 self._max_records 条
-                return (
-                    normalized_history[-self._max_records :]
-                    if len(normalized_history) > self._max_records
-                    else normalized_history
-                )
+                if self._max_records > 0:
+                    return (
+                        normalized_history[-self._max_records :]
+                        if len(normalized_history) > self._max_records
+                        else normalized_history
+                    )
+                return normalized_history
         except Exception as e:
             logger.error(f"加载历史记录失败 {path}: {e}")
 
@@ -346,7 +350,10 @@ class MessageHistoryManager:
 
             self._message_history[group_id_str].append(record)
 
-            if len(self._message_history[group_id_str]) > self._max_records:
+            if (
+                self._max_records > 0
+                and len(self._message_history[group_id_str]) > self._max_records
+            ):
                 self._message_history[group_id_str] = self._message_history[
                     group_id_str
                 ][-self._max_records :]
@@ -395,7 +402,10 @@ class MessageHistoryManager:
 
             self._private_message_history[user_id_str].append(record)
 
-            if len(self._private_message_history[user_id_str]) > self._max_records:
+            if (
+                self._max_records > 0
+                and len(self._private_message_history[user_id_str]) > self._max_records
+            ):
                 self._private_message_history[user_id_str] = (
                     self._private_message_history[user_id_str][-self._max_records :]
                 )

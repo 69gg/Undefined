@@ -726,9 +726,27 @@ inverted_question_enabled = false
 # zh: 历史记录配置。
 # en: History settings.
 [history]
-# zh: 每个会话最多保留的消息条数。
-# en: Max messages to keep per conversation.
+# zh: 每个会话最多保留的消息条数（0 = 无限制，注意内存占用）。
+# en: Max messages to keep per conversation (0 = unlimited, mind memory usage).
 max_records = 10000
+# zh: 工具过滤查询返回的最大消息条数。
+# en: Max messages returned by tool filtered queries.
+filtered_result_limit = 200
+# zh: 工具过滤搜索时扫描的最大消息条数。
+# en: Max messages to scan when tools perform filtered searches.
+search_scan_limit = 10000
+# zh: 总结 agent 单次拉取的最大消息条数。
+# en: Max messages the summary agent can fetch per call.
+summary_fetch_limit = 1000
+# zh: 总结 agent 按时间范围查询时的最大拉取条数。
+# en: Max messages the summary agent fetches for time-range queries.
+summary_time_fetch_limit = 5000
+# zh: OneBot API 回退获取的最大消息条数。
+# en: Max messages to fetch via OneBot API fallback.
+onebot_fetch_limit = 10000
+# zh: 群分析工具的消息/成员返回上限。
+# en: Max messages/members returned by group analysis tools.
+group_analysis_limit = 500
 
 # zh: Skills 热重载配置（可选）。
 # en: Skills hot reload settings (optional).
