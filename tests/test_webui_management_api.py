@@ -6,7 +6,7 @@ from typing import Any, cast
 
 from aiohttp import web
 
-from Undefined.api import app as runtime_api_app
+from Undefined.api import _helpers as runtime_api_helpers
 from Undefined.webui import app as webui_app
 from Undefined.webui.app import create_app
 from Undefined.webui.core import SessionStore
@@ -350,7 +350,7 @@ def test_webui_cors_only_allows_trusted_origins(monkeypatch: Any) -> None:
 
 def test_runtime_api_cors_only_allows_trusted_origins(monkeypatch: Any) -> None:
     monkeypatch.setattr(
-        runtime_api_app,
+        runtime_api_helpers,
         "load_webui_settings",
         lambda: SimpleNamespace(url="127.0.0.1", port=8787),
     )
@@ -359,7 +359,7 @@ def test_runtime_api_cors_only_allows_trusted_origins(monkeypatch: Any) -> None:
         cast(Any, DummyRequest(headers={"Origin": "tauri://localhost"})),
     )
     trusted_response = web.Response(status=200)
-    runtime_api_app._apply_cors_headers(trusted_request, trusted_response)
+    runtime_api_helpers._apply_cors_headers(trusted_request, trusted_response)
     assert trusted_response.headers.get("Access-Control-Allow-Origin") == (
         "tauri://localhost"
     )
@@ -370,7 +370,7 @@ def test_runtime_api_cors_only_allows_trusted_origins(monkeypatch: Any) -> None:
         cast(Any, DummyRequest(headers={"Origin": "http://localhost:1420"})),
     )
     loopback_response = web.Response(status=200)
-    runtime_api_app._apply_cors_headers(loopback_request, loopback_response)
+    runtime_api_helpers._apply_cors_headers(loopback_request, loopback_response)
     assert loopback_response.headers.get("Access-Control-Allow-Origin") == (
         "http://localhost:1420"
     )
@@ -380,7 +380,7 @@ def test_runtime_api_cors_only_allows_trusted_origins(monkeypatch: Any) -> None:
         cast(Any, DummyRequest(headers={"Origin": "https://evil.example"})),
     )
     untrusted_response = web.Response(status=200)
-    runtime_api_app._apply_cors_headers(untrusted_request, untrusted_response)
+    runtime_api_helpers._apply_cors_headers(untrusted_request, untrusted_response)
     assert "Access-Control-Allow-Origin" not in untrusted_response.headers
     assert "Access-Control-Allow-Credentials" not in untrusted_response.headers
 

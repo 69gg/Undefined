@@ -10,7 +10,7 @@ from aiohttp import web
 from aiohttp.web_response import Response
 
 from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
-from Undefined.api.app import _validate_callback_url
+from Undefined.api._helpers import _validate_callback_url
 
 
 def _json(response: Response) -> Any:

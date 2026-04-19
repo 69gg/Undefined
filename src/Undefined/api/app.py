@@ -1,14 +1,13 @@
+"""Runtime API server for Undefined."""
+
 from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
-import hashlib
-import json
 import logging
 import os
 import platform
 from pathlib import Path
-import socket
 import sys
 import time
 import uuid as _uuid
@@ -17,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Awaitable, Callable
 from typing import cast
-from urllib.parse import urlsplit
+
 from aiohttp import ClientSession, ClientTimeout, web
 from aiohttp.web_response import Response
 
@@ -28,138 +27,49 @@ from Undefined.attachments import (
     register_message_attachments,
     render_message_with_pic_placeholders,
 )
-from Undefined.config import load_webui_settings
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
 from Undefined.render import render_html_to_image, render_markdown_to_html  # noqa: F401
 from Undefined.services.queue_manager import QUEUE_LANE_SUPERADMIN
 from Undefined.utils.common import message_to_segments
-from Undefined.utils.cors import is_allowed_cors_origin, normalize_origin
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
 from Undefined.utils.xml import escape_xml_attr, escape_xml_text
 
-logger = logging.getLogger(__name__)
+from ._helpers import (
+    _apply_cors_headers,
+    _build_chat_response_payload,
+    _json_error,
+    _mask_url,
+    _naga_message_digest,
+    _naga_routes_enabled,
+    _naga_runtime_enabled,
+    _NagaRequestResult,
+    _optional_query_param,
+    _parse_query_time,
+    _parse_response_payload,
+    _registry_summary,
+    _short_text_preview,
+    _sse_event,
+    _to_bool,
+    _ToolInvokeExecutionTimeoutError,
+    _validate_callback_url,
+    _WebUIVirtualSender,
+    _AUTH_HEADER,
+    _VIRTUAL_USER_ID,
+)
+from ._probes import (
+    _build_internal_model_probe_payload,
+    _probe_http_endpoint,
+    _probe_ws_endpoint,
+    _skipped_probe,
+)
+from ._openapi import _build_openapi_spec
 
-_VIRTUAL_USER_ID = 42
+logger = logging.getLogger(__name__)
 _VIRTUAL_USER_NAME = "system"
-_AUTH_HEADER = "X-Undefined-API-Key"
 _CHAT_SSE_KEEPALIVE_SECONDS = 10.0
 _PROCESS_START_TIME = time.time()
 _NAGA_REQUEST_UUID_TTL_SECONDS = 6 * 60 * 60
-
-
-class _ToolInvokeExecutionTimeoutError(asyncio.TimeoutError):
-    """由 Runtime API 工具调用超时包装器抛出的超时异常。"""
-
-
-@dataclass
-class _NagaRequestResult:
-    payload_hash: str
-    status: int
-    payload: dict[str, Any]
-    finished_at: float
-
-
-class _WebUIVirtualSender:
-    """将工具发送行为重定向到 WebUI 会话，不触发 OneBot 实际发送。"""
-
-    def __init__(
-        self,
-        virtual_user_id: int,
-        send_private_callback: Callable[[int, str], Awaitable[None]],
-        onebot: Any = None,
-    ) -> None:
-        self._virtual_user_id = virtual_user_id
-        self._send_private_callback = send_private_callback
-        # 保留 onebot 属性，兼容依赖 sender.onebot 的工具读取能力。
-        self.onebot = onebot
-
-    async def send_private_message(
-        self,
-        user_id: int,
-        message: str,
-        auto_history: bool = True,
-        *,
-        mark_sent: bool = True,
-        reply_to: int | None = None,
-        preferred_temp_group_id: int | None = None,
-        history_message: str | None = None,
-    ) -> int | None:
-        _ = (
-            user_id,
-            auto_history,
-            mark_sent,
-            reply_to,
-            preferred_temp_group_id,
-            history_message,
-        )
-        await self._send_private_callback(self._virtual_user_id, message)
-        return None
-
-    async def send_group_message(
-        self,
-        group_id: int,
-        message: str,
-        auto_history: bool = True,
-        history_prefix: str = "",
-        *,
-        mark_sent: bool = True,
-        reply_to: int | None = None,
-        history_message: str | None = None,
-    ) -> int | None:
-        _ = (
-            group_id,
-            auto_history,
-            history_prefix,
-            mark_sent,
-            reply_to,
-            history_message,
-        )
-        await self._send_private_callback(self._virtual_user_id, message)
-        return None
-
-    async def send_private_file(
-        self,
-        user_id: int,
-        file_path: str,
-        name: str | None = None,
-        auto_history: bool = True,
-    ) -> None:
-        """将文件拷贝到 WebUI 缓存并发送文件卡片消息。"""
-        _ = user_id, auto_history
-        import shutil
-        import uuid as _uuid
-        from pathlib import Path as _Path
-
-        from Undefined.utils.paths import WEBUI_FILE_CACHE_DIR, ensure_dir
-
-        src = _Path(file_path)
-        display_name = name or src.name
-        file_id = _uuid.uuid4().hex
-        dest_dir = ensure_dir(WEBUI_FILE_CACHE_DIR / file_id)
-        dest = dest_dir / display_name
-
-        def _copy_and_stat() -> int:
-            shutil.copy2(src, dest)
-            return dest.stat().st_size
-
-        try:
-            file_size = await asyncio.to_thread(_copy_and_stat)
-        except OSError:
-            file_size = 0
-
-        message = f"[CQ:file,id={file_id},name={display_name},size={file_size}]"
-        await self._send_private_callback(self._virtual_user_id, message)
-
-    async def send_group_file(
-        self,
-        group_id: int,
-        file_path: str,
-        name: str | None = None,
-        auto_history: bool = True,
-    ) -> None:
-        """群文件在虚拟会话中同样重定向为文本消息。"""
-        await self.send_private_file(group_id, file_path, name, auto_history)
 
 
 @dataclass
@@ -176,502 +86,6 @@ class RuntimeAPIContext:
     cognitive_job_queue: Any = None
     meme_service: Any = None
     naga_store: Any = None
-
-
-def _json_error(message: str, status: int = 400) -> Response:
-    return web.json_response({"error": message}, status=status)
-
-
-def _apply_cors_headers(request: web.Request, response: web.StreamResponse) -> None:
-    origin = normalize_origin(str(request.headers.get("Origin") or ""))
-    settings = load_webui_settings()
-    response.headers.setdefault("Vary", "Origin")
-    response.headers.setdefault(
-        "Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS"
-    )
-    response.headers.setdefault(
-        "Access-Control-Allow-Headers",
-        "Authorization, Content-Type, X-Undefined-API-Key",
-    )
-    response.headers.setdefault("Access-Control-Max-Age", "86400")
-    if origin and is_allowed_cors_origin(
-        origin,
-        configured_host=str(settings.url or ""),
-        configured_port=settings.port,
-    ):
-        response.headers.setdefault("Access-Control-Allow-Origin", origin)
-        response.headers.setdefault("Access-Control-Allow-Credentials", "true")
-
-
-def _optional_query_param(request: web.Request, key: str) -> str | None:
-    raw = request.query.get(key)
-    if raw is None:
-        return None
-    text = str(raw).strip()
-    if not text:
-        return None
-    return text
-
-
-def _parse_query_time(value: str | None) -> datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    candidates = [text, text.replace("Z", "+00:00")]
-    if "T" in text:
-        candidates.append(text.replace("T", " "))
-    for candidate in candidates:
-        with suppress(ValueError):
-            return datetime.fromisoformat(candidate)
-    return None
-
-
-def _to_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return value != 0
-    text = str(value or "").strip().lower()
-    return text in {"1", "true", "yes", "on"}
-
-
-def _build_chat_response_payload(mode: str, outputs: list[str]) -> dict[str, Any]:
-    return {
-        "mode": mode,
-        "virtual_user_id": _VIRTUAL_USER_ID,
-        "permission": "superadmin",
-        "messages": outputs,
-        "reply": "\n\n".join(outputs).strip(),
-    }
-
-
-def _sse_event(event: str, payload: dict[str, Any]) -> bytes:
-    data = json.dumps(payload, ensure_ascii=False)
-    return f"event: {event}\ndata: {data}\n\n".encode("utf-8")
-
-
-def _mask_url(url: str) -> str:
-    """保留 scheme + host，隐藏 path 细节。"""
-    text = str(url or "").strip().rstrip("/")
-    if not text:
-        return ""
-    parsed = urlsplit(text)
-    host = parsed.hostname or ""
-    port_part = f":{parsed.port}" if parsed.port else ""
-    scheme = parsed.scheme or "https"
-    return f"{scheme}://{host}{port_part}/..."
-
-
-def _naga_runtime_enabled(cfg: Any) -> bool:
-    naga_cfg = getattr(cfg, "naga", None)
-    return bool(getattr(cfg, "nagaagent_mode_enabled", False)) and bool(
-        getattr(naga_cfg, "enabled", False)
-    )
-
-
-def _naga_routes_enabled(cfg: Any, naga_store: Any) -> bool:
-    return _naga_runtime_enabled(cfg) and naga_store is not None
-
-
-def _short_text_preview(text: str, limit: int = 80) -> str:
-    compact = " ".join(str(text or "").split())
-    if len(compact) <= limit:
-        return compact
-    return compact[:limit] + "..."
-
-
-def _naga_message_digest(
-    *,
-    bind_uuid: str,
-    naga_id: str,
-    target_qq: int,
-    target_group: int,
-    mode: str,
-    message_format: str,
-    content: str,
-) -> str:
-    raw = json.dumps(
-        {
-            "bind_uuid": bind_uuid,
-            "naga_id": naga_id,
-            "target_qq": target_qq,
-            "target_group": target_group,
-            "mode": mode,
-            "format": message_format,
-            "content": content,
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
-
-
-def _parse_response_payload(response: Response) -> dict[str, Any]:
-    text = response.text or ""
-    if not text:
-        return {}
-    payload = json.loads(text)
-    return payload if isinstance(payload, dict) else {"data": payload}
-
-
-def _registry_summary(registry: Any) -> dict[str, Any]:
-    """从 BaseRegistry 提取轻量摘要。"""
-    if registry is None:
-        return {"count": 0, "loaded": 0, "items": []}
-    items: dict[str, Any] = getattr(registry, "_items", {})
-    stats: dict[str, Any] = {}
-    get_stats = getattr(registry, "get_stats", None)
-    if callable(get_stats):
-        stats = get_stats()
-    summary_items: list[dict[str, Any]] = []
-    for name, item in items.items():
-        st = stats.get(name)
-        entry: dict[str, Any] = {
-            "name": name,
-            "loaded": getattr(item, "loaded", False),
-        }
-        if st is not None:
-            entry["calls"] = getattr(st, "count", 0)
-            entry["success"] = getattr(st, "success", 0)
-            entry["failure"] = getattr(st, "failure", 0)
-        summary_items.append(entry)
-    return {
-        "count": len(items),
-        "loaded": sum(1 for i in items.values() if getattr(i, "loaded", False)),
-        "items": summary_items,
-    }
-
-
-def _validate_callback_url(url: str) -> str | None:
-    """校验回调 URL，返回错误信息或 None 表示通过。
-
-    拒绝非 HTTP(S) scheme，以及直接使用私有/回环 IP 字面量的 URL 以防止 SSRF。
-    域名形式的 URL 放行（DNS 解析阶段不适合在校验函数中做阻塞调用）。
-    """
-    import ipaddress
-
-    parsed = urlsplit(url)
-    scheme = (parsed.scheme or "").lower()
-
-    if scheme not in ("http", "https"):
-        return "callback.url must use http or https"
-
-    hostname = parsed.hostname or ""
-    if not hostname:
-        return "callback.url must include a hostname"
-
-    # 仅检查 IP 字面量（如 http://127.0.0.1/、http://[::1]/、http://10.0.0.1/）
-    try:
-        addr = ipaddress.ip_address(hostname)
-    except ValueError:
-        pass  # 域名形式，放行
-    else:
-        if addr.is_private or addr.is_loopback or addr.is_link_local:
-            return "callback.url must not point to a private/loopback address"
-
-    return None
-
-
-async def _probe_http_endpoint(
-    *,
-    name: str,
-    base_url: str,
-    api_key: str,
-    model_name: str = "",
-    timeout_seconds: float = 5.0,
-) -> dict[str, Any]:
-    normalized = str(base_url or "").strip().rstrip("/")
-    if not normalized:
-        return {
-            "name": name,
-            "status": "skipped",
-            "reason": "empty_url",
-            "model_name": model_name,
-        }
-
-    headers: dict[str, str] = {}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    candidates = [normalized, f"{normalized}/models"]
-    last_error = ""
-    for url in candidates:
-        start = time.perf_counter()
-        try:
-            timeout = ClientTimeout(total=timeout_seconds)
-            async with ClientSession(timeout=timeout) as session:
-                async with session.get(url, headers=headers) as resp:
-                    elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
-                    return {
-                        "name": name,
-                        "status": "ok",
-                        "url": _mask_url(url),
-                        "http_status": resp.status,
-                        "latency_ms": elapsed_ms,
-                        "model_name": model_name,
-                    }
-        except Exception as exc:
-            last_error = str(exc)
-            continue
-
-    return {
-        "name": name,
-        "status": "error",
-        "url": _mask_url(normalized),
-        "error": last_error or "request_failed",
-        "model_name": model_name,
-    }
-
-
-async def _skipped_probe(
-    *, name: str, reason: str, model_name: str = ""
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {"name": name, "status": "skipped", "reason": reason}
-    if model_name:
-        payload["model_name"] = model_name
-    return payload
-
-
-def _build_internal_model_probe_payload(mcfg: Any) -> dict[str, Any]:
-    payload = {
-        "model_name": getattr(mcfg, "model_name", ""),
-        "api_url": _mask_url(getattr(mcfg, "api_url", "")),
-    }
-    if hasattr(mcfg, "api_mode"):
-        payload["api_mode"] = getattr(mcfg, "api_mode", "chat_completions")
-    if hasattr(mcfg, "thinking_enabled"):
-        payload["thinking_enabled"] = getattr(mcfg, "thinking_enabled", False)
-    if hasattr(mcfg, "thinking_tool_call_compat"):
-        payload["thinking_tool_call_compat"] = getattr(
-            mcfg, "thinking_tool_call_compat", True
-        )
-    if hasattr(mcfg, "responses_tool_choice_compat"):
-        payload["responses_tool_choice_compat"] = getattr(
-            mcfg, "responses_tool_choice_compat", False
-        )
-    if hasattr(mcfg, "responses_force_stateless_replay"):
-        payload["responses_force_stateless_replay"] = getattr(
-            mcfg, "responses_force_stateless_replay", False
-        )
-    if hasattr(mcfg, "prompt_cache_enabled"):
-        payload["prompt_cache_enabled"] = getattr(mcfg, "prompt_cache_enabled", True)
-    if hasattr(mcfg, "reasoning_enabled"):
-        payload["reasoning_enabled"] = getattr(mcfg, "reasoning_enabled", False)
-    if hasattr(mcfg, "reasoning_effort"):
-        payload["reasoning_effort"] = getattr(mcfg, "reasoning_effort", "medium")
-    return payload
-
-
-async def _probe_ws_endpoint(url: str, timeout_seconds: float = 5.0) -> dict[str, Any]:
-    normalized = str(url or "").strip()
-    if not normalized:
-        return {"name": "onebot_ws", "status": "skipped", "reason": "empty_url"}
-
-    parsed = urlsplit(normalized)
-    host = parsed.hostname
-    if not host:
-        return {"name": "onebot_ws", "status": "error", "error": "invalid_url"}
-
-    if parsed.port is not None:
-        port = parsed.port
-    elif parsed.scheme == "wss":
-        port = 443
-    else:
-        port = 80
-
-    start = time.perf_counter()
-    try:
-        conn = asyncio.open_connection(host, port)
-        reader, writer = await asyncio.wait_for(conn, timeout=timeout_seconds)
-        writer.close()
-        await writer.wait_closed()
-        elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
-        return {
-            "name": "onebot_ws",
-            "status": "ok",
-            "host": host,
-            "port": port,
-            "latency_ms": elapsed_ms,
-        }
-    except (OSError, TimeoutError, socket.gaierror, asyncio.TimeoutError) as exc:
-        return {
-            "name": "onebot_ws",
-            "status": "error",
-            "host": host,
-            "port": port,
-            "error": str(exc),
-        }
-
-
-def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[str, Any]:
-    server_url = f"{request.scheme}://{request.host}"
-    cfg = ctx.config_getter()
-    naga_routes_enabled = _naga_routes_enabled(cfg, ctx.naga_store)
-    paths: dict[str, Any] = {
-        "/health": {
-            "get": {
-                "summary": "Health check",
-                "security": [],
-                "responses": {"200": {"description": "OK"}},
-            }
-        },
-        "/openapi.json": {
-            "get": {
-                "summary": "OpenAPI schema",
-                "security": [],
-                "responses": {"200": {"description": "Schema JSON"}},
-            }
-        },
-        "/api/v1/probes/internal": {
-            "get": {
-                "summary": "Internal runtime probes",
-                "description": (
-                    "Returns system info (version, Python, platform, uptime), "
-                    "OneBot connection status, request queue snapshot, "
-                    "memory count, cognitive service status, API config, "
-                    "skill statistics (tools/agents/anthropic_skills with call counts), "
-                    "and model configuration (names, masked URLs, thinking flags)."
-                ),
-            }
-        },
-        "/api/v1/probes/external": {
-            "get": {
-                "summary": "External dependency probes",
-                "description": (
-                    "Concurrently probes all configured model API endpoints "
-                    "(chat, vision, security, naga, agent, embedding, rerank) "
-                    "and OneBot WebSocket. Each result includes status, "
-                    "model name, masked URL, HTTP status code, and latency."
-                ),
-            }
-        },
-        "/api/v1/memory": {
-            "get": {"summary": "List/search manual memories"},
-            "post": {"summary": "Create a manual memory"},
-        },
-        "/api/v1/memory/{uuid}": {
-            "patch": {"summary": "Update a manual memory by UUID"},
-            "delete": {"summary": "Delete a manual memory by UUID"},
-        },
-        "/api/v1/memes": {"get": {"summary": "List/search meme library items"}},
-        "/api/v1/memes/stats": {"get": {"summary": "Get meme library stats"}},
-        "/api/v1/memes/{uid}": {
-            "get": {"summary": "Get a meme by uid"},
-            "patch": {"summary": "Update a meme by uid"},
-            "delete": {"summary": "Delete a meme by uid"},
-        },
-        "/api/v1/memes/{uid}/blob": {"get": {"summary": "Get meme blob file"}},
-        "/api/v1/memes/{uid}/preview": {"get": {"summary": "Get meme preview file"}},
-        "/api/v1/memes/{uid}/reanalyze": {
-            "post": {"summary": "Queue a meme reanalyze job"}
-        },
-        "/api/v1/memes/{uid}/reindex": {
-            "post": {"summary": "Queue a meme reindex job"}
-        },
-        "/api/v1/cognitive/events": {
-            "get": {"summary": "Search cognitive event memories"}
-        },
-        "/api/v1/cognitive/profiles": {"get": {"summary": "Search cognitive profiles"}},
-        "/api/v1/cognitive/profile/{entity_type}/{entity_id}": {
-            "get": {"summary": "Get a profile by entity type/id"}
-        },
-        "/api/v1/chat": {
-            "post": {
-                "summary": "WebUI special private chat",
-                "description": (
-                    "POST JSON {message, stream?}. "
-                    "When stream=true, response is SSE with keep-alive comments."
-                ),
-            }
-        },
-        "/api/v1/chat/history": {
-            "get": {"summary": "Get virtual private chat history for WebUI"}
-        },
-        "/api/v1/tools": {
-            "get": {
-                "summary": "List available tools",
-                "description": (
-                    "Returns currently available tools filtered by "
-                    "tool_invoke_expose / allowlist / denylist config. "
-                    "Each item follows the OpenAI function calling schema."
-                ),
-            }
-        },
-        "/api/v1/tools/invoke": {
-            "post": {
-                "summary": "Invoke a tool",
-                "description": (
-                    "Execute a specific tool by name. Supports synchronous "
-                    "response and optional async webhook callback."
-                ),
-            }
-        },
-    }
-
-    if naga_routes_enabled:
-        paths.update(
-            {
-                "/api/v1/naga/bind/callback": {
-                    "post": {
-                        "summary": "Finalize a Naga bind request",
-                        "description": (
-                            "Internal callback used by Naga to approve or reject "
-                            "a bind_uuid."
-                        ),
-                        "security": [{"BearerAuth": []}],
-                    }
-                },
-                "/api/v1/naga/messages/send": {
-                    "post": {
-                        "summary": "Send a Naga-authenticated message",
-                        "description": (
-                            "Validates bind_uuid + delivery_signature, runs "
-                            "moderation, then delivers the message. "
-                            "Caller may provide uuid for idempotent retry deduplication."
-                        ),
-                        "security": [{"BearerAuth": []}],
-                    }
-                },
-                "/api/v1/naga/unbind": {
-                    "post": {
-                        "summary": "Revoke an active Naga binding",
-                        "description": (
-                            "Allows Naga to proactively revoke a binding using "
-                            "Authorization: Bearer <naga.api_key>."
-                        ),
-                        "security": [{"BearerAuth": []}],
-                    }
-                },
-            }
-        )
-
-    return {
-        "openapi": "3.0.3",
-        "info": {
-            "title": "Undefined Runtime API",
-            "version": __version__,
-            "description": "API exposed by the main Undefined process.",
-        },
-        "servers": [
-            {
-                "url": server_url,
-                "description": "Runtime endpoint",
-            }
-        ],
-        "components": {
-            "securitySchemes": {
-                "ApiKeyAuth": {
-                    "type": "apiKey",
-                    "in": "header",
-                    "name": _AUTH_HEADER,
-                },
-                "BearerAuth": {"type": "http", "scheme": "bearer"},
-            }
-        },
-        "security": [{"ApiKeyAuth": []}],
-        "paths": paths,
-    }
 
 
 class RuntimeAPIServer:
