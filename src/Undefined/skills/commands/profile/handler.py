@@ -129,28 +129,28 @@ async def _send_render(
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{
   font-family: 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif;
-  background: #f9f5f1; color: #3d3935; padding: 24px;
+  background: #f9f5f1; color: #3d3935; padding: 16px;
 }}
 .card {{
-  max-width: 680px; margin: 0 auto;
+  width: 100%;
   background: #fff; border-radius: 10px;
   border: 1px solid #e6e0d8;
   overflow: hidden;
 }}
 .meta {{
   background: #f9f5f1; border-bottom: 1px solid #e6e0d8;
-  padding: 16px 20px;
+  padding: 14px 18px;
 }}
 .meta table {{ border-collapse: collapse; }}
 .mk {{
-  font-size: 12px; color: #6e675f; padding: 2px 10px 2px 0;
-  white-space: nowrap; vertical-align: top;
+  font-size: 14px; color: #6e675f; padding: 3px 12px 3px 0;
+  white-space: nowrap; vertical-align: top; font-weight: 600;
 }}
 .mv {{
-  font-size: 12px; color: #3d3935; padding: 2px 0;
+  font-size: 14px; color: #3d3935; padding: 3px 0;
 }}
 .body {{
-  padding: 20px; line-height: 1.75; font-size: 14px;
+  padding: 18px; line-height: 1.8; font-size: 15px;
   white-space: pre-wrap; word-wrap: break-word;
 }}
 </style></head>
@@ -163,7 +163,7 @@ body {{
 
     output_dir = ensure_dir(RENDER_CACHE_DIR)
     output_path = str(output_dir / f"profile_{uuid.uuid4().hex[:8]}.png")
-    await render_html_to_image(html_content, output_path)
+    await render_html_to_image(html_content, output_path, viewport_width=480)
 
     abs_path = Path(output_path).resolve()
     image_cq = f"[CQ:image,file=file://{abs_path}]"
