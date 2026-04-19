@@ -1,3 +1,124 @@
+// Metrics history for time series chart
+const METRICS_HISTORY_SIZE = 120;
+const _metricsHistory = { cpu: [], memory: [], timestamps: [] };
+
+function pushMetrics(cpuPercent, memPercent) {
+    const now = new Date();
+    _metricsHistory.cpu.push(cpuPercent);
+    _metricsHistory.memory.push(memPercent);
+    _metricsHistory.timestamps.push(now);
+    if (_metricsHistory.cpu.length > METRICS_HISTORY_SIZE) {
+        _metricsHistory.cpu.shift();
+        _metricsHistory.memory.shift();
+        _metricsHistory.timestamps.shift();
+    }
+}
+
+function drawMetricsChart() {
+    const canvas = get("metricsChart");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+
+    const w = rect.width;
+    const h = rect.height;
+    const pad = { top: 10, right: 12, bottom: 24, left: 36 };
+    const plotW = w - pad.left - pad.right;
+    const plotH = h - pad.top - pad.bottom;
+
+    ctx.clearRect(0, 0, w, h);
+
+    const len = _metricsHistory.cpu.length;
+    if (len < 2) {
+        ctx.fillStyle =
+            getComputedStyle(document.documentElement)
+                .getPropertyValue("--text-tertiary")
+                .trim() || "#999";
+        ctx.font = "12px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("Collecting data...", w / 2, h / 2);
+        return;
+    }
+
+    const textColor =
+        getComputedStyle(document.documentElement)
+            .getPropertyValue("--text-tertiary")
+            .trim() || "#999";
+    const gridColor =
+        getComputedStyle(document.documentElement)
+            .getPropertyValue("--border-color")
+            .trim() || "#333";
+    const cpuColor =
+        getComputedStyle(document.documentElement)
+            .getPropertyValue("--accent-color")
+            .trim() || "#d97757";
+    const memColor =
+        getComputedStyle(document.documentElement)
+            .getPropertyValue("--success")
+            .trim() || "#4a7c59";
+
+    // Y axis gridlines
+    ctx.strokeStyle = gridColor;
+    ctx.lineWidth = 0.5;
+    ctx.fillStyle = textColor;
+    ctx.font = "10px sans-serif";
+    ctx.textAlign = "right";
+    for (let pct = 0; pct <= 100; pct += 25) {
+        const y = pad.top + plotH - (pct / 100) * plotH;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(pad.left + plotW, y);
+        ctx.stroke();
+        ctx.fillText(`${pct}%`, pad.left - 4, y + 3);
+    }
+
+    // X axis time labels
+    ctx.textAlign = "center";
+    const timestamps = _metricsHistory.timestamps;
+    const labelCount = Math.min(4, len);
+    for (let i = 0; i < labelCount; i++) {
+        const idx = Math.round((i / (labelCount - 1)) * (len - 1));
+        const x = pad.left + (idx / (len - 1)) * plotW;
+        const t = timestamps[idx];
+        const label = `${String(t.getMinutes()).padStart(2, "0")}:${String(t.getSeconds()).padStart(2, "0")}`;
+        ctx.fillText(label, x, h - 4);
+    }
+
+    function drawLine(data, color) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        for (let i = 0; i < data.length; i++) {
+            const x = pad.left + (i / (len - 1)) * plotW;
+            const y =
+                pad.top +
+                plotH -
+                (Math.min(100, Math.max(0, data[i])) / 100) * plotH;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        ctx.globalAlpha = 0.08;
+        ctx.fillStyle = color;
+        ctx.lineTo(pad.left + plotW, pad.top + plotH);
+        ctx.lineTo(pad.left, pad.top + plotH);
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    }
+
+    drawLine(_metricsHistory.cpu, cpuColor);
+    drawLine(_metricsHistory.memory, memColor);
+}
+
 async function fetchStatus() {
     if (!shouldFetch("status")) return;
     try {
@@ -136,6 +257,8 @@ async function fetchSystemInfo() {
         get("systemMemoryBar").style.width =
             `${Math.min(100, Math.max(0, memUsage))}%`;
         recordFetchSuccess("system");
+        pushMetrics(cpuUsage, memUsage);
+        drawMetricsChart();
     } catch (e) {
         recordFetchError("system");
     }

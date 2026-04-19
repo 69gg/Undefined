@@ -186,6 +186,46 @@ function showToast(message, type = "info", duration = 3000) {
     }, duration);
 }
 
+// Focus trap for modals
+const _focusTrapStack = [];
+
+function trapFocus(container) {
+    if (!container) return;
+    const focusable = container.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    function handler(e) {
+        if (e.key !== "Tab") return;
+        if (e.shiftKey) {
+            if (document.activeElement === first) {
+                e.preventDefault();
+                last.focus();
+            }
+        } else {
+            if (document.activeElement === last) {
+                e.preventDefault();
+                first.focus();
+            }
+        }
+    }
+
+    container.addEventListener("keydown", handler);
+    _focusTrapStack.push({ container, handler });
+    first.focus();
+}
+
+function releaseFocus(container) {
+    const idx = _focusTrapStack.findIndex((t) => t.container === container);
+    if (idx === -1) return;
+    const entry = _focusTrapStack[idx];
+    entry.container.removeEventListener("keydown", entry.handler);
+    _focusTrapStack.splice(idx, 1);
+}
+
 function setConfigState(mode) {
     const stateEl = get("configState");
     const grid = get("formSections");

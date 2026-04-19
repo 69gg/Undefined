@@ -1,3 +1,31 @@
+// Active request controllers for cancellation on tab switch
+const _activeControllers = new Map();
+
+function abortPendingRequests(kind) {
+    if (kind) {
+        const controller = _activeControllers.get(kind);
+        if (controller) {
+            controller.abort();
+            _activeControllers.delete(kind);
+        }
+    } else {
+        for (const controller of _activeControllers.values()) {
+            controller.abort();
+        }
+        _activeControllers.clear();
+    }
+}
+
+function getAbortSignal(kind) {
+    if (kind) {
+        abortPendingRequests(kind);
+        const controller = new AbortController();
+        _activeControllers.set(kind, controller);
+        return controller.signal;
+    }
+    return undefined;
+}
+
 const AUTH_ENDPOINTS = {
     login: [
         "/api/v1/management/auth/login",
@@ -31,7 +59,13 @@ function shouldRetryCandidate(res) {
 
 async function requestOnce(path, options = {}) {
     const headers = { ...(options.headers || {}) };
-    if (options.method === "POST" && options.body && !headers["Content-Type"]) {
+    const needsJson =
+        options.body &&
+        !headers["Content-Type"] &&
+        ["POST", "PATCH", "PUT", "DELETE"].includes(
+            String(options.method || "").toUpperCase(),
+        );
+    if (needsJson) {
         headers["Content-Type"] = "application/json";
     }
     if (state.authAccessToken && !headers.Authorization) {
@@ -41,6 +75,7 @@ async function requestOnce(path, options = {}) {
         ...options,
         headers,
         credentials: options.credentials || "same-origin",
+        signal: options.signal || undefined,
     });
 }
 

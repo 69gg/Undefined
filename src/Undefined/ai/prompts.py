@@ -11,7 +11,7 @@ from typing import Any, Callable, Awaitable, Literal
 
 import aiofiles
 
-from Undefined.attachments import attachment_refs_to_xml
+from Undefined.utils.coerce import safe_int
 from Undefined.context import RequestContext
 from Undefined.end_summary_storage import (
     EndSummaryStorage,
@@ -22,7 +22,7 @@ from Undefined.memory import MemoryStorage
 from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
 from Undefined.utils.logging import log_debug_json
 from Undefined.utils.resources import read_text_resource
-from Undefined.utils.xml import escape_xml_attr, escape_xml_text
+from Undefined.utils.xml import format_message_xml
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +204,43 @@ class PromptBuilder:
             else:
                 parts.append("- 思维链: 未启用")
 
+        # 彩蛋功能状态
+        keyword_reply_enabled = bool(
+            getattr(runtime_config, "keyword_reply_enabled", False)
+        )
+        repeat_enabled = bool(getattr(runtime_config, "repeat_enabled", False))
+        inverted_question_enabled = bool(
+            getattr(runtime_config, "inverted_question_enabled", False)
+        )
+        agent_call_mode = str(
+            getattr(runtime_config, "easter_egg_agent_call_message_mode", "none")
+        )
+        easter_egg_parts: list[str] = []
+        if keyword_reply_enabled:
+            easter_egg_parts.append(
+                '关键词自动回复（触发词"心理委员"等，系统自动发送固定回复）'
+            )
+        if repeat_enabled:
+            threshold = int(getattr(runtime_config, "repeat_threshold", 3))
+            desc = f"复读（群聊连续{threshold}条相同消息时自动复读）"
+            if inverted_question_enabled:
+                desc += "，倒问号（复读触发时若消息为问号则发送¿）"
+            easter_egg_parts.append(desc)
+        elif inverted_question_enabled:
+            easter_egg_parts.append("倒问号（复读未启用，此功能不生效）")
+        if agent_call_mode != "none":
+            mode_desc = {
+                "agent": "Agent调用提示",
+                "tools": "工具调用提示",
+                "clean": "降噪调用提示",
+                "all": "全量调用提示",
+            }.get(agent_call_mode, agent_call_mode)
+            easter_egg_parts.append(f"调用提示模式={mode_desc}")
+        if easter_egg_parts:
+            parts.append("- 彩蛋功能: " + "；".join(easter_egg_parts))
+        else:
+            parts.append("- 彩蛋功能: 未启用")
+
         parts.append("")
         parts.append(
             "重要：以上是你的模型配置信息。\n"
@@ -304,30 +341,59 @@ class PromptBuilder:
             is_group_context = True
 
         keyword_reply_enabled = False
+        repeat_enabled = False
+        repeat_threshold = 3
+        inverted_question_enabled = False
         if self._runtime_config_getter is not None:
             try:
                 runtime_config = self._runtime_config_getter()
                 keyword_reply_enabled = bool(
                     getattr(runtime_config, "keyword_reply_enabled", False)
                 )
+                repeat_enabled = bool(getattr(runtime_config, "repeat_enabled", False))
+                repeat_threshold = int(getattr(runtime_config, "repeat_threshold", 3))
+                inverted_question_enabled = bool(
+                    getattr(runtime_config, "inverted_question_enabled", False)
+                )
             except Exception as exc:
-                logger.debug("读取关键词自动回复配置失败: %s", exc)
+                logger.debug("读取彩蛋功能配置失败: %s", exc)
 
         if is_group_context and keyword_reply_enabled:
             messages.append(
                 {
                     "role": "system",
                     "content": (
-                        "【系统行为说明】\n"
+                        "【系统行为说明 — 关键词自动回复】\n"
                         '当前群聊已开启关键词自动回复彩蛋（例如触发词"心理委员"）。'
-                        "命中时，系统可能直接发送固定回复，并在历史中写入"
-                        '以"[系统关键词自动回复] "开头的消息。\n\n'
-                        "这类消息属于系统预设机制，不代表你在该轮主动决策。"
+                        "该功能由 handlers.py 中的独立代码路径处理，"
+                        "在消息到达你之前就已完成发送。\n\n"
+                        '发送后，历史中会出现以"[系统关键词自动回复] "开头的消息。'
+                        "这些消息完全由系统代码生成（固定文案如'受着''那咋了'等），"
+                        "不经过你的工具调用，与你的决策无关。\n\n"
                         "阅读历史时请识别该前缀，避免误判为人格漂移或上下文异常。"
                         "除非用户主动询问，否则不要主动解释此机制。"
                     ),
                 }
             )
+
+        if is_group_context and repeat_enabled:
+            repeat_desc = (
+                "【系统行为说明】\n"
+                f"当前群聊已开启复读彩蛋：当群聊中连续出现{repeat_threshold}条内容相同且来自不同人的消息时，"
+                "系统会自动复读一条相同的消息，并在历史中写入"
+                '以"[系统复读] "开头的消息。'
+            )
+            if inverted_question_enabled:
+                repeat_desc += (
+                    "\n此外，若复读触发时消息内容仅由问号组成（如?或???），"
+                    "系统会发送对应数量的倒问号（¿）代替。"
+                )
+            repeat_desc += (
+                "\n\n这类消息属于系统预设机制，不代表你在该轮主动决策。"
+                "阅读历史时请识别该前缀，避免误判为人格漂移或上下文异常。"
+                "除非用户主动询问，否则不要主动解释此机制。"
+            )
+            messages.append({"role": "system", "content": repeat_desc})
 
         # 注入 Anthropic Skills 元数据（Level 1: 始终加载 name + description）
         if (
@@ -575,39 +641,24 @@ class PromptBuilder:
     ) -> tuple[Literal["group", "private"], int] | None:
         ctx = RequestContext.current()
 
-        def _safe_int(value: Any) -> int | None:
-            if isinstance(value, bool):
-                return None
-            if isinstance(value, int):
-                return value
-            if isinstance(value, str):
-                text = value.strip()
-                if not text:
-                    return None
-                try:
-                    return int(text)
-                except ValueError:
-                    return None
-            return None
-
         if ctx and ctx.request_type == "group" and ctx.group_id is not None:
-            group_id = _safe_int(ctx.group_id)
+            group_id = safe_int(ctx.group_id)
             if group_id is not None:
                 return ("group", group_id)
             return None
         if ctx and ctx.request_type == "private" and ctx.user_id is not None:
-            user_id = _safe_int(ctx.user_id)
+            user_id = safe_int(ctx.user_id)
             if user_id is not None:
                 return ("private", user_id)
             return None
 
         if extra_context and extra_context.get("group_id") is not None:
-            group_id = _safe_int(extra_context.get("group_id"))
+            group_id = safe_int(extra_context.get("group_id"))
             if group_id is not None:
                 return ("group", group_id)
             return None
         if extra_context and extra_context.get("user_id") is not None:
-            user_id = _safe_int(extra_context.get("user_id"))
+            user_id = safe_int(extra_context.get("user_id"))
             if user_id is not None:
                 return ("private", user_id)
             return None
@@ -673,56 +724,7 @@ class PromptBuilder:
             recent_msgs = self._drop_current_message_if_duplicated(
                 recent_msgs, question
             )
-            context_lines: list[str] = []
-            for msg in recent_msgs:
-                msg_type_val = msg.get("type", "group")
-                sender_name = msg.get("display_name", "未知用户")
-                sender_id = msg.get("user_id", "")
-                chat_id = msg.get("chat_id", "")
-                chat_name = msg.get("chat_name", "未知群聊")
-                timestamp = msg.get("timestamp", "")
-                text = msg.get("message", "")
-                attachments = msg.get("attachments", [])
-                role = msg.get("role", "member")
-                title = msg.get("title", "")
-                message_id = msg.get("message_id")
-
-                safe_sender = escape_xml_attr(sender_name)
-                safe_sender_id = escape_xml_attr(sender_id)
-                safe_chat_id = escape_xml_attr(chat_id)
-                safe_chat_name = escape_xml_attr(chat_name)
-                safe_role = escape_xml_attr(role)
-                safe_title = escape_xml_attr(title)
-                safe_time = escape_xml_attr(timestamp)
-                safe_text = escape_xml_text(str(text))
-
-                msg_id_attr = ""
-                if message_id is not None:
-                    msg_id_attr = f' message_id="{escape_xml_attr(str(message_id))}"'
-                attachment_xml = (
-                    f"\n{attachment_refs_to_xml(attachments)}"
-                    if isinstance(attachments, list) and attachments
-                    else ""
-                )
-
-                if msg_type_val == "group":
-                    location = (
-                        chat_name if chat_name.endswith("群") else f"{chat_name}群"
-                    )
-                    safe_location = escape_xml_attr(location)
-                    xml_msg = (
-                        f'<message{msg_id_attr} sender="{safe_sender}" sender_id="{safe_sender_id}" group_id="{safe_chat_id}" '
-                        f'group_name="{safe_chat_name}" location="{safe_location}" role="{safe_role}" title="{safe_title}" '
-                        f'time="{safe_time}">\n<content>{safe_text}</content>{attachment_xml}\n</message>'
-                    )
-                else:
-                    location = "私聊"
-                    safe_location = escape_xml_attr(location)
-                    xml_msg = (
-                        f'<message{msg_id_attr} sender="{safe_sender}" sender_id="{safe_sender_id}" location="{safe_location}" '
-                        f'time="{safe_time}">\n<content>{safe_text}</content>{attachment_xml}\n</message>'
-                    )
-                context_lines.append(xml_msg)
+            context_lines: list[str] = [format_message_xml(msg) for msg in recent_msgs]
 
             formatted_context = "\n---\n".join(context_lines)
 

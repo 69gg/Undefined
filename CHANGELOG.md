@@ -1,3 +1,21 @@
+## v3.3.2 架构重构、假@检测与认知侧写增强
+
+围绕核心架构进行了大规模重构与功能增强：Runtime API 拆分为路由子模块、配置系统模块化拆分、新增假@检测机制与 /profile 多输出模式。同步引入复读机制全面升级（可配置阈值与冷却）、消息预处理并行化、WebUI 多项交互功能，以及 arXiv 论文分析 Agent 和安全计算器工具。测试覆盖从约 800 提升至 1438+。
+
+- 新增假@检测：群聊中 `@+Bot昵称` 的文本形式也被识别为@消息，自动获取昵称（防竞态），`@昵称 /命令` 可正常触发斜杠指令。
+- `/profile` 命令支持三种输出模式：`-f` 合并转发（默认）、`-r` 渲染为图片、`-t` 直接文本发送；超管可通过 `/p <QQ号>` 和 `/p g <群号>` 跨目标查看。
+- 复读系统全面升级：触发阈值可配置（`repeat_threshold`）、Bot 发言不计入复读链、新增冷却机制（`repeat_cooldown_minutes`，？与 ? 等价）。
+- Vision 模型 `max_tokens` 可配置（`[models.vision].max_tokens`，默认 8192），解决 thinking 模型 token 耗尽导致工具调用截断。
+- 新增 arXiv 论文深度分析 Agent 与 `calculator` 安全计算器工具；新增消息历史限制可配置化（`[history].max_records`）。
+- Runtime API 拆分为 8 个路由子模块（`api/routes/`）；配置系统拆为 `loader.py`、`models.py`、`hot_reload.py`。
+- 消息预处理并行化（`asyncio.gather`），认知史官改用 XML 格式并统一至 `utils/xml.py`。
+- WebUI：Cmd/Ctrl+K 命令面板、骨架屏、日志时间过滤、资源趋势图、TOML 原始视图、配置版本历史与回滚、长期记忆 CRUD、Modal 焦点陷阱。
+- WebUI 修复 top_k 溢出崩溃（四层防护）、表情包搜索防抖、仪表盘布局优化。
+- 修复 AI 模仿系统关键词自动回复前缀、LaTeX `\n` 替换破坏数学命令、复读冷却消息丢弃与内存泄漏、historian 热重载追踪缺失、GIF 多帧分析与临时文件泄漏、附件渲染异常等多项问题。
+- 修复 `/profile` 渲染留白和字体过小问题，使用 WebUI 配色并提高截断上限至 5000 字符。
+
+---
+
 ## v3.3.1 /version 命令的添加
 
 添加了 /version 命令以查看版本号和更改内容。

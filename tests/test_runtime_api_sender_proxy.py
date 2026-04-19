@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from Undefined.api.app import _WebUIVirtualSender
+from Undefined.api._helpers import _WebUIVirtualSender
 
 
 @pytest.mark.asyncio

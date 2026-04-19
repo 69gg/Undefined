@@ -90,6 +90,15 @@ reasoning_effort = "xhigh"
 temperature = 0.1
 metadata = { source = "historian" }
 
+[models.summary]
+model_name = "gpt-summary"
+api_mode = "chat_completions"
+reasoning_effort = "xhigh"
+
+[models.summary.request_params]
+temperature = 0.15
+metadata = { source = "summary" }
+
 [models.grok]
 api_url = "https://grok.example/v1"
 api_key = "sk-grok"
@@ -205,6 +214,18 @@ background = "transparent"
     assert cfg.historian_model.request_params == {
         "temperature": 0.1,
         "metadata": {"source": "historian"},
+        "response_format": {"type": "json_object"},
+    }
+    assert cfg.summary_model.api_mode == "chat_completions"
+    assert cfg.summary_model.reasoning_enabled is True
+    assert cfg.summary_model.reasoning_effort == "xhigh"
+    assert cfg.summary_model.thinking_tool_call_compat is True
+    assert cfg.summary_model.responses_tool_choice_compat is True
+    assert cfg.summary_model.responses_force_stateless_replay is True
+    assert cfg.summary_model.prompt_cache_enabled is False
+    assert cfg.summary_model.request_params == {
+        "temperature": 0.15,
+        "metadata": {"source": "summary"},
         "response_format": {"type": "json_object"},
     }
     assert cfg.grok_model.reasoning_enabled is True

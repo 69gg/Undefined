@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING, Literal
 
 from Undefined.arxiv.client import get_paper_info
@@ -18,6 +19,31 @@ logger = logging.getLogger(__name__)
 
 _INFLIGHT_LOCK = asyncio.Lock()
 _INFLIGHT_SENDS: dict[tuple[str, int, str], asyncio.Future[str]] = {}
+
+# Time-based dedup: maps (target_type, target_id, paper_id) → monotonic timestamp
+_RECENT_SENDS: dict[tuple[str, int, str], float] = {}
+_DEDUP_COOLDOWN_SECONDS: float = 3600.0  # 1 hour
+_RECENT_SENDS_MAX_SIZE: int = 1000
+
+
+def _cleanup_expired_recent_sends() -> None:
+    """Remove expired entries from _RECENT_SENDS. Must be called under _INFLIGHT_LOCK."""
+    now = time.monotonic()
+    expired = [
+        k for k, v in _RECENT_SENDS.items() if now - v >= _DEDUP_COOLDOWN_SECONDS
+    ]
+    for k in expired:
+        del _RECENT_SENDS[k]
+
+
+def _evict_oldest_recent_sends() -> None:
+    """Evict oldest entries if _RECENT_SENDS exceeds max size. Must be called under _INFLIGHT_LOCK."""
+    if len(_RECENT_SENDS) <= _RECENT_SENDS_MAX_SIZE:
+        return
+    sorted_keys = sorted(_RECENT_SENDS, key=lambda k: _RECENT_SENDS[k])
+    excess = len(_RECENT_SENDS) - _RECENT_SENDS_MAX_SIZE
+    for k in sorted_keys[:excess]:
+        del _RECENT_SENDS[k]
 
 
 def _build_abs_url(paper_id: str) -> str:
@@ -203,6 +229,24 @@ async def send_arxiv_paper(
     created = False
 
     async with _INFLIGHT_LOCK:
+        # Lazy cleanup of expired entries
+        _cleanup_expired_recent_sends()
+
+        # Check time-based dedup first
+        recent_ts = _RECENT_SENDS.get(key)
+        if (
+            recent_ts is not None
+            and (time.monotonic() - recent_ts) < _DEDUP_COOLDOWN_SECONDS
+        ):
+            logger.info(
+                "[arXiv] 论文近期已发送，跳过: paper=%s target=%s:%s",
+                normalized,
+                target_type,
+                target_id,
+            )
+            return f"论文 {normalized} 近期已发送过，已跳过"
+
+        # Check inflight dedup
         future = _INFLIGHT_SENDS.get(key)
         if future is None:
             future = asyncio.get_running_loop().create_future()
@@ -242,3 +286,7 @@ async def send_arxiv_paper(
             current = _INFLIGHT_SENDS.get(key)
             if current is future:
                 _INFLIGHT_SENDS.pop(key, None)
+            # Record successful send time for dedup cooldown
+            if future.done() and not future.cancelled() and future.exception() is None:
+                _RECENT_SENDS[key] = time.monotonic()
+                _evict_oldest_recent_sends()

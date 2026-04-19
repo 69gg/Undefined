@@ -303,12 +303,12 @@
         params.set(key, text);
     }
 
-    function appendPositiveIntParam(params, key, value) {
+    function appendPositiveIntParam(params, key, value, max = 500) {
         const text = String(value || "").trim();
         if (!text) return;
         const num = Number.parseInt(text, 10);
         if (!Number.isFinite(num) || num <= 0) return;
-        params.set(key, String(num));
+        params.set(key, String(Math.min(num, max)));
     }
 
     function formatNumeric(value, digits = 4) {
@@ -636,6 +636,8 @@
         if (buffer.trim()) emitBlock(buffer);
     }
 
+    let _memoryMutating = false;
+
     function renderMemoryItems(payload) {
         const container = get("runtimeMemoryList");
         const meta = get("runtimeMemoryMeta");
@@ -666,9 +668,155 @@
                 const uuid = escapeHtml(item.uuid || "");
                 const fact = escapeHtml(item.fact || "");
                 const created = escapeHtml(item.created_at || "");
-                return `<div class="runtime-list-item"><div class="runtime-list-head"><code>${uuid}</code><span>${created}</span></div><div class="runtime-list-fact">${fact}</div></div>`;
+                return `<div class="runtime-list-item" data-uuid="${uuid}"><div class="runtime-list-head"><code>${uuid}</code><div class="memory-item-actions"><button class="memory-btn-edit" title="编辑" data-uuid="${uuid}">✏️</button><button class="memory-btn-delete" title="删除" data-uuid="${uuid}">🗑️</button></div></div><div class="runtime-list-head" style="margin-bottom:0"><span>${created}</span></div><div class="runtime-list-fact">${fact}</div></div>`;
             })
             .join("");
+
+        container.querySelectorAll(".memory-btn-edit").forEach((btn) => {
+            btn.addEventListener("click", () =>
+                startEditMemory(btn.dataset.uuid),
+            );
+        });
+        container.querySelectorAll(".memory-btn-delete").forEach((btn) => {
+            btn.addEventListener("click", () => deleteMemory(btn.dataset.uuid));
+        });
+    }
+
+    function startEditMemory(uuid) {
+        const container = get("runtimeMemoryList");
+        if (!container) return;
+        const itemEl = container.querySelector(
+            `.runtime-list-item[data-uuid="${CSS.escape(uuid)}"]`,
+        );
+        if (!itemEl) return;
+        const factEl = itemEl.querySelector(".runtime-list-fact");
+        if (!factEl || factEl.dataset.editing === "true") return;
+
+        const currentText = factEl.textContent || "";
+        factEl.dataset.editing = "true";
+        factEl.innerHTML = "";
+
+        const textarea = document.createElement("textarea");
+        textarea.className = "form-control memory-edit-area";
+        textarea.value = currentText;
+
+        const actions = document.createElement("div");
+        actions.className = "memory-edit-actions";
+        const saveBtn = document.createElement("button");
+        saveBtn.className = "btn btn-sm";
+        saveBtn.textContent = "保存";
+        const cancelBtn = document.createElement("button");
+        cancelBtn.className = "btn btn-sm";
+        cancelBtn.textContent = "取消";
+        actions.append(saveBtn, cancelBtn);
+        factEl.append(textarea, actions);
+        textarea.focus();
+
+        cancelBtn.addEventListener("click", () => {
+            delete factEl.dataset.editing;
+            factEl.innerHTML = "";
+            factEl.textContent = currentText;
+        });
+
+        saveBtn.addEventListener("click", () =>
+            updateMemory(uuid, textarea.value),
+        );
+
+        textarea.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") {
+                e.preventDefault();
+                cancelBtn.click();
+            }
+            if (e.key === "Enter" && e.ctrlKey) {
+                e.preventDefault();
+                saveBtn.click();
+            }
+        });
+    }
+
+    async function createMemory() {
+        if (_memoryMutating) return;
+        const input = get("memoryCreateInput");
+        if (!input) return;
+        const fact = String(input.value || "").trim();
+        if (!fact) {
+            showToast("记忆内容不能为空", "warning");
+            return;
+        }
+        _memoryMutating = true;
+        const btn = get("btnMemoryCreate");
+        if (btn) btn.disabled = true;
+        try {
+            const res = await api("/api/runtime/memory", {
+                method: "POST",
+                body: JSON.stringify({ fact }),
+            });
+            const data = await parseJsonSafe(res);
+            if (!res.ok || (data && data.error)) {
+                throw new Error(buildRequestError(res, data));
+            }
+            showToast("记忆已添加", "success");
+            input.value = "";
+            await searchMemory();
+        } catch (err) {
+            showToast(`添加失败: ${err.message || err}`, "error");
+        } finally {
+            _memoryMutating = false;
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    async function updateMemory(uuid, newFact) {
+        const fact = String(newFact || "").trim();
+        if (!fact) {
+            showToast("记忆内容不能为空", "warning");
+            return;
+        }
+        if (_memoryMutating) return;
+        _memoryMutating = true;
+        try {
+            const res = await api(
+                `/api/runtime/memory/${encodeURIComponent(uuid)}`,
+                {
+                    method: "PATCH",
+                    body: JSON.stringify({ fact }),
+                },
+            );
+            const data = await parseJsonSafe(res);
+            if (!res.ok || (data && data.error)) {
+                throw new Error(buildRequestError(res, data));
+            }
+            showToast("记忆已更新", "success");
+            await searchMemory();
+        } catch (err) {
+            showToast(`更新失败: ${err.message || err}`, "error");
+        } finally {
+            _memoryMutating = false;
+        }
+    }
+
+    async function deleteMemory(uuid) {
+        if (_memoryMutating) return;
+        if (!confirm(`确认删除记忆 ${uuid.slice(0, 8)}…？`)) return;
+        _memoryMutating = true;
+        try {
+            const res = await api(
+                `/api/runtime/memory/${encodeURIComponent(uuid)}`,
+                {
+                    method: "DELETE",
+                },
+            );
+            const data = await parseJsonSafe(res);
+            if (!res.ok || (data && data.error)) {
+                throw new Error(buildRequestError(res, data));
+            }
+            showToast("记忆已删除", "success");
+            await searchMemory();
+        } catch (err) {
+            showToast(`删除失败: ${err.message || err}`, "error");
+        } finally {
+            _memoryMutating = false;
+        }
     }
 
     function setListMessage(metaId, listId, message) {
@@ -1203,6 +1351,10 @@
         const memoryRefresh = get("btnMemoryRefresh");
         if (memoryRefresh)
             memoryRefresh.addEventListener("click", refreshMemory);
+
+        const memoryCreateBtn = get("btnMemoryCreate");
+        if (memoryCreateBtn)
+            memoryCreateBtn.addEventListener("click", createMemory);
 
         const runMemorySearch = () =>
             runQueryAction("memory", "btnRuntimeMemorySearch", searchMemory);

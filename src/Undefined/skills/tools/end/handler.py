@@ -1,9 +1,14 @@
+from __future__ import annotations
+
 from collections import deque
 from typing import Any, Dict
 import logging
 import re
 
 from Undefined.context import RequestContext
+from Undefined.utils.coerce import safe_int
+from Undefined.utils.xml import format_message_xml
+
 from Undefined.end_summary_storage import (
     EndSummaryLocation,
     EndSummaryRecord,
@@ -80,13 +85,6 @@ def _clip_text(value: Any, max_len: int) -> str:
     return text[: max_len - 3].rstrip() + "..."
 
 
-def _safe_int(value: Any, default: int) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
 def _clamp_int(value: int, min_value: int, max_value: int) -> int:
     if value < min_value:
         return min_value
@@ -95,37 +93,38 @@ def _clamp_int(value: int, min_value: int, max_value: int) -> int:
     return value
 
 
-def _resolve_historian_limits(context: Dict[str, Any]) -> tuple[int, int, int]:
+def _resolve_historian_limits(context: Dict[str, Any]) -> tuple[int, int]:
+    """Return (max_source_len, recent_k) for historian context injection.
+
+    ``recent_k`` is derived from ``context_recent_messages_limit`` (same as
+    main AI) so the historian sees the same message window.
+    """
     max_source_len = _DEFAULT_HISTORIAN_TEXT_LEN
     recent_k = _DEFAULT_HISTORIAN_LINES
-    max_recent_line_len = _DEFAULT_HISTORIAN_LINE_LEN
 
     runtime_config = context.get("runtime_config")
+
+    # 消息数量：优先使用 context_recent_messages_limit（与主 AI 一致）
+    if runtime_config is not None and hasattr(
+        runtime_config, "get_context_recent_messages_limit"
+    ):
+        try:
+            recent_k = int(runtime_config.get_context_recent_messages_limit())
+        except Exception:
+            pass
+
     cognitive = getattr(runtime_config, "cognitive", None) if runtime_config else None
     if cognitive is not None:
-        max_source_len = _safe_int(
+        max_source_len = safe_int(
             getattr(cognitive, "historian_source_message_max_len", max_source_len),
             max_source_len,
-        )
-        recent_k = _safe_int(
-            getattr(cognitive, "historian_recent_messages_inject_k", recent_k),
-            recent_k,
-        )
-        max_recent_line_len = _safe_int(
-            getattr(
-                cognitive, "historian_recent_message_line_max_len", max_recent_line_len
-            ),
-            max_recent_line_len,
         )
 
     max_source_len = _clamp_int(
         max_source_len, _MIN_HISTORIAN_TEXT_LEN, _MAX_HISTORIAN_TEXT_LEN
     )
     recent_k = _clamp_int(recent_k, _MIN_HISTORIAN_LINES, _MAX_HISTORIAN_LINES)
-    max_recent_line_len = _clamp_int(
-        max_recent_line_len, _MIN_HISTORIAN_LINE_LEN, _MAX_HISTORIAN_LINE_LEN
-    )
-    return max_source_len, recent_k, max_recent_line_len
+    return max_source_len, recent_k
 
 
 def _extract_current_content_from_question(question: str, *, max_len: int) -> str:
@@ -139,8 +138,13 @@ def _extract_current_content_from_question(question: str, *, max_len: int) -> st
 
 
 def _build_historian_recent_messages(
-    context: Dict[str, Any], *, recent_k: int, max_line_len: int
+    context: Dict[str, Any], *, recent_k: int
 ) -> list[str]:
+    """Build XML-formatted recent messages for historian context.
+
+    Uses the same XML schema as the main AI prompt so the historian LLM
+    sees identical message structure for better disambiguation.
+    """
     if recent_k <= 0:
         return []
 
@@ -176,24 +180,14 @@ def _build_historian_recent_messages(
     for msg in recent:
         if not isinstance(msg, dict):
             continue
-        timestamp = str(msg.get("timestamp", "")).strip()
-        display_name = str(msg.get("display_name", "")).strip()
-        user_id = str(msg.get("user_id", "")).strip()
-        message_text = _clip_text(msg.get("message", ""), max_line_len)
-        if not message_text:
+        if not str(msg.get("message", "") or "").strip():
             continue
-        who = display_name or (f"UID:{user_id}" if user_id else "未知用户")
-        if user_id:
-            who = f"{who}({user_id})"
-        if timestamp:
-            lines.append(f"[{timestamp}] {who}: {message_text}")
-        else:
-            lines.append(f"{who}: {message_text}")
+        lines.append(format_message_xml(msg))
     return lines[-recent_k:]
 
 
 def _inject_historian_reference_context(context: Dict[str, Any]) -> None:
-    max_source_len, recent_k, max_recent_line_len = _resolve_historian_limits(context)
+    max_source_len, recent_k = _resolve_historian_limits(context)
     current_question = str(context.get("current_question") or "").strip()
     source_message = _extract_current_content_from_question(
         current_question, max_len=max_source_len
@@ -205,9 +199,7 @@ def _inject_historian_reference_context(context: Dict[str, Any]) -> None:
             current_question, max_source_len
         )
 
-    recent_lines = _build_historian_recent_messages(
-        context, recent_k=recent_k, max_line_len=max_recent_line_len
-    )
+    recent_lines = _build_historian_recent_messages(context, recent_k=recent_k)
     if recent_lines:
         context["historian_recent_messages"] = recent_lines
 

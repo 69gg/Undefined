@@ -20,7 +20,7 @@
                 },
                 "max_history_count": {
                     "type": "integer",
-                    "description": "最多获取的历史消息数量（最大5000），默认 2000",
+                    "description": "最多获取的历史消息数量，上限由服务器配置决定，默认 2000",
                     "default": 2000
                 },
                 "top_count": {

@@ -6,6 +6,7 @@ from typing import Any, Optional
 from Undefined.attachments import (
     attachment_refs_to_xml,
     build_attachment_scope,
+    dispatch_pending_file_sends,
     render_message_with_pic_placeholders,
 )
 from Undefined.config import Config
@@ -72,7 +73,9 @@ class AICoordinator:
         group_name: str = "未知群聊",
         sender_role: str = "member",
         sender_title: str = "",
+        sender_level: str = "",
         trigger_message_id: int | None = None,
+        is_fake_at: bool = False,
     ) -> None:
         """群聊自动回复入口：根据消息内容、命中情况和安全检测决定是否回复
 
@@ -86,13 +89,15 @@ class AICoordinator:
             group_name: 群名称
             sender_role: 发送者角色 (owner/admin/member)
             sender_title: 发送者群头衔
+            is_fake_at: 是否为假@（纯文本 @昵称）触发
         """
-        is_at_bot = is_poke or self._is_at_bot(message_content)
+        is_at_bot = is_poke or is_fake_at or self._is_at_bot(message_content)
         logger.debug(
-            "[自动回复] group=%s sender=%s at_bot=%s text_len=%s",
+            "[自动回复] group=%s sender=%s at_bot=%s fake_at=%s text_len=%s",
             group_id,
             sender_id,
             is_at_bot,
+            is_fake_at,
             len(text),
         )
 
@@ -130,6 +135,7 @@ class AICoordinator:
             text,
             attachments=attachments,
             message_id=trigger_message_id,
+            level=sender_level,
         )
         logger.debug(
             "[自动回复] full_question_len=%s group=%s sender=%s",
@@ -472,6 +478,12 @@ class AICoordinator:
                         rendered.delivery_text,
                         history_message=rendered.history_text,
                     )
+                    await dispatch_pending_file_sends(
+                        rendered,
+                        sender=self.sender,
+                        target_type="private",
+                        target_id=user_id,
+                    )
             except Exception:
                 logger.exception("私聊回复执行出错")
                 raise
@@ -707,6 +719,7 @@ class AICoordinator:
         text: str,
         attachments: list[dict[str, str]] | None = None,
         message_id: int | None = None,
+        level: str = "",
     ) -> str:
         """构建最终发送给 AI 的结构化 XML 消息 Prompt
 
@@ -724,10 +737,11 @@ class AICoordinator:
         message_id_attr = ""
         if message_id is not None:
             message_id_attr = f' message_id="{escape_xml_attr(message_id)}"'
+        level_attr = f' level="{escape_xml_attr(level)}"' if level else ""
         attachment_xml = (
             f"\n{attachment_refs_to_xml(attachments)}" if attachments else ""
         )
-        return f"""{prefix}<message{message_id_attr} sender="{safe_name}" sender_id="{safe_uid}" group_id="{safe_gid}" group_name="{safe_gname}" location="{safe_loc}" role="{safe_role}" title="{safe_title}" time="{safe_time}">
+        return f"""{prefix}<message{message_id_attr} sender="{safe_name}" sender_id="{safe_uid}" group_id="{safe_gid}" group_name="{safe_gname}" location="{safe_loc}" role="{safe_role}" title="{safe_title}"{level_attr} time="{safe_time}">
  <content>{safe_text}</content>{attachment_xml}
  </message>
 

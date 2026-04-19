@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable, cast
 
 from Undefined.context import RequestContext
+from Undefined.utils.coerce import safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +40,6 @@ def _compose_where(clauses: list[dict[str, Any]]) -> dict[str, Any] | None:
     return {"$and": clauses}
 
 
-def _safe_float(value: Any, default: float = 0.0) -> float:
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value.strip())
-        except Exception:
-            return default
-    return default
-
-
 def _event_base_score(item: dict[str, Any]) -> float:
     rerank_score = item.get("rerank_score")
     if isinstance(rerank_score, (int, float)):
@@ -59,7 +49,7 @@ def _event_base_score(item: dict[str, Any]) -> float:
             return max(0.0, float(rerank_score.strip()))
         except Exception:
             pass
-    similarity = 1.0 - _safe_float(item.get("distance"), default=1.0)
+    similarity = 1.0 - safe_float(item.get("distance"), default=1.0)
     if similarity < 0.0:
         return 0.0
     if similarity > 1.0:
@@ -336,7 +326,7 @@ class CognitiveService:
         ] = []
         serial = 0
         for scoped_events, scope_weight in scoped_results:
-            safe_scope_weight = max(0.0, _safe_float(scope_weight, default=1.0))
+            safe_scope_weight = max(0.0, safe_float(scope_weight, default=1.0))
             scope_size = max(1, len(scoped_events))
             for rank_idx, event in enumerate(scoped_events):
                 dedupe_key = _event_dedupe_key(event)
@@ -399,12 +389,12 @@ class CognitiveService:
         if scope_candidate_multiplier <= 0:
             scope_candidate_multiplier = 2
         scoped_top_k = max(safe_top_k, safe_top_k * scope_candidate_multiplier)
-        current_group_boost = _safe_float(
+        current_group_boost = safe_float(
             getattr(config, "auto_current_group_boost", 1.15), default=1.15
         )
         if current_group_boost <= 0:
             current_group_boost = 1.15
-        current_private_boost = _safe_float(
+        current_private_boost = safe_float(
             getattr(config, "auto_current_private_boost", 1.25), default=1.25
         )
         if current_private_boost <= 0:
@@ -735,6 +725,7 @@ class CognitiveService:
             top_k = default_top_k
         if top_k <= 0:
             top_k = default_top_k
+        top_k = min(top_k, 500)
         try:
             events = await self._query_events_for_auto_context(
                 query=query,
@@ -829,6 +820,7 @@ class CognitiveService:
             top_k = default_top_k
         if top_k <= 0:
             top_k = default_top_k
+        top_k = min(top_k, 500)
         logger.info(
             "[认知服务] 搜索事件: query_len=%s top_k=%s where=%s time_from=%s time_to=%s",
             len(query or ""),
@@ -882,6 +874,7 @@ class CognitiveService:
             top_k = default_top_k
         if top_k <= 0:
             top_k = default_top_k
+        top_k = min(top_k, 500)
 
         where: dict[str, Any] | None = None
         entity_type_raw = kwargs.get("entity_type")

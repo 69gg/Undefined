@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "calculator",
+        "description": "安全的多功能数学计算器。支持算术运算、科学函数、统计函数和常量。输入数学表达式即可计算。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "expression": {
+                    "type": "string",
+                    "description": "数学表达式，例如：'2+3*4'、'sqrt(144)'、'sin(pi/6)'、'log(1000,10)'、'mean(1,2,3,4,5)'、'2**10'、'factorial(10)'、'gcd(48,18)'"
+                }
+            },
+            "required": ["expression"]
+        }
+    }
+}

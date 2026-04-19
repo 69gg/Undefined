@@ -42,7 +42,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         message_limit = int(message_limit_raw) if message_limit_raw is not None else 20
         if message_limit < 0:
             return "参数错误：message_limit 必须是非负整数"
-        message_limit = min(message_limit, 100)
+        cfg = context.get("runtime_config")
+        analysis_cap = getattr(cfg, "history_group_analysis_limit", 500) if cfg else 500
+        message_limit = min(message_limit, analysis_cap)
     except (ValueError, TypeError):
         return "参数类型错误：message_limit 必须是整数"
 
@@ -53,7 +55,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         )
         if max_history_count < 0:
             return "参数错误：max_history_count 必须是非负整数"
-        max_history_count = min(max_history_count, 5000)
+        fetch_cap = getattr(cfg, "history_search_scan_limit", 10000) if cfg else 10000
+        max_history_count = min(max_history_count, fetch_cap)
     except (ValueError, TypeError):
         return "参数类型错误：max_history_count 必须是整数"
 

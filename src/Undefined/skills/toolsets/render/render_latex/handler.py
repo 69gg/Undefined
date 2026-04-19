@@ -1,138 +1,241 @@
 from __future__ import annotations
 
-from typing import Any, Dict
 import logging
-import uuid
-import matplotlib.pyplot as plt
-import matplotlib
+import re
+from typing import Any, Dict
 
 from Undefined.attachments import scope_from_context
 
 logger = logging.getLogger(__name__)
 
+_DOCUMENT_PATTERN = re.compile(
+    r"^\s*\\begin\{document\}(?P<body>.*?)\\end\{document\}\s*$",
+    re.DOTALL,
+)
 
-def _resolve_send_target(
-    target_id: Any,
-    message_type: Any,
-    context: Dict[str, Any],
-) -> tuple[int | str | None, str | None, str | None]:
-    """从参数或 context 推断发送目标。"""
-    if target_id is not None and message_type is not None:
-        return target_id, message_type, None
-    request_type = str(context.get("request_type", "") or "").strip().lower()
-    if request_type == "group":
-        gid = context.get("group_id")
-        if gid is not None:
-            return gid, "group", None
-    if request_type == "private":
-        uid = context.get("user_id")
-        if uid is not None:
-            return uid, "private", None
-    return None, None, "渲染成功，但缺少发送目标参数"
+# MathJax 数学分隔符模式
+_MATH_DELIMITER_PATTERN = re.compile(
+    r"(\$\$|\\\[|\\\(|\\begin\{)",
+    re.MULTILINE,
+)
+
+
+def _strip_document_wrappers(content: str) -> str:
+    """去掉 \\begin{document}...\\end{document} 外层包装。"""
+    text = content.strip()
+    match = _DOCUMENT_PATTERN.fullmatch(text)
+    if match is None:
+        return text
+    return match.group("body").strip()
+
+
+def _has_math_delimiters(content: str) -> bool:
+    """检查内容是否已包含数学分隔符。"""
+    return bool(_MATH_DELIMITER_PATTERN.search(content))
+
+
+def _prepare_content(raw_content: str) -> str:
+    """
+    准备 LaTeX 内容：
+    1. 去掉 document 包装
+    2. 处理字面量 \\n（LLM 输出常见问题）
+    3. 如果没有数学分隔符，自动用 \\[ ... \\] 包装
+    """
+    content = _strip_document_wrappers(raw_content)
+    # 替换字面量 \\n 为真实换行符，但保留 LaTeX 命令如 \nu \nabla \neq 等
+    content = re.sub(r"\\n(?![a-zA-Z])", "\n", content)
+
+    if not _has_math_delimiters(content):
+        # 没有分隔符，自动包装为块级数学环境
+        content = f"\\[\n{content}\n\\]"
+
+    return content
+
+
+def _build_html(latex_content: str) -> str:
+    """构建包含 MathJax 的 HTML 页面。"""
+    # HTML 转义（防止内容中的 < > & 破坏结构）
+    import html
+
+    escaped_content = html.escape(latex_content)
+
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script>
+window.MathJax = {{
+  tex: {{ inlineMath: [['$','$'], ['\\\\(','\\\\)']] }},
+  startup: {{
+    pageReady: function() {{
+      return MathJax.startup.defaultPageReady().then(function() {{
+        window._mjReady = true;
+      }});
+    }}
+  }}
+}};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+<style>
+  body {{ margin: 0; padding: 20px; background: white; }}
+  #math-container {{ display: inline-block; font-size: 18px; }}
+</style>
+</head>
+<body>
+<div id="math-container">
+{escaped_content}
+</div>
+</body>
+</html>"""
+
+
+async def _render_latex_to_bytes(
+    content: str, output_format: str, proxy: str | None = None
+) -> tuple[bytes, str]:
+    """
+    使用 MathJax + Playwright 渲染 LaTeX 内容。
+
+    返回: (渲染后的字节流, MIME 类型)
+    """
+    try:
+        from playwright.async_api import (
+            async_playwright,
+            TimeoutError as PwTimeoutError,
+        )
+    except ImportError:
+        raise ImportError(
+            "请运行 `uv run playwright install` 安装浏览器运行时"
+        ) from None
+
+    html_content = _build_html(content)
+
+    launch_kwargs: dict[str, object] = {"headless": True}
+    if proxy:
+        launch_kwargs["proxy"] = {"server": proxy}
+        logger.info("LaTeX 渲染使用代理: %s", proxy)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(**launch_kwargs)  # type: ignore[arg-type]
+        try:
+            page = await browser.new_page()
+            await page.set_content(html_content)
+
+            # 等待 MathJax 完成排版（pageReady 回调设置 window._mjReady）
+            try:
+                await page.wait_for_function(
+                    "() => window._mjReady === true",
+                    timeout=30000,
+                )
+            except PwTimeoutError:
+                logger.warning("MathJax 排版超时，内容可能过于复杂或网络不可达")
+                raise RuntimeError(
+                    "LaTeX 内容可能过于复杂或网络不可达（MathJax 加载超时）"
+                ) from None
+
+            if output_format == "pdf":
+                # 获取容器尺寸
+                container = await page.query_selector("#math-container")
+                if container is None:
+                    raise RuntimeError("无法定位数学容器元素")
+
+                bbox = await container.bounding_box()
+                if bbox is None:
+                    raise RuntimeError("无法获取数学容器的边界框")
+
+                # PDF 输出，设置合适的页面尺寸
+                pdf_bytes = await page.pdf(
+                    width=f"{bbox['width'] + 40}px",
+                    height=f"{bbox['height'] + 40}px",
+                    print_background=True,
+                )
+                return pdf_bytes, "application/pdf"
+            else:
+                # PNG 输出
+                container = await page.query_selector("#math-container")
+                if container is None:
+                    raise RuntimeError("无法定位数学容器元素")
+
+                screenshot_bytes = await container.screenshot(type="png")
+                return screenshot_bytes, "image/png"
+
+        finally:
+            await browser.close()
+
+
+async def _resolve_proxy(context: Dict[str, Any]) -> str | None:
+    """从 context 的 runtime_config 中解析代理地址。"""
+    from Undefined.config import get_config
+
+    runtime_config = context.get("runtime_config") or get_config(strict=False)
+    if runtime_config is None:
+        return None
+    use_proxy: bool = getattr(runtime_config, "use_proxy", False)
+    if not use_proxy:
+        return None
+    proxy: str = getattr(runtime_config, "http_proxy", "") or getattr(
+        runtime_config, "https_proxy", ""
+    )
+    return proxy or None
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
-    """渲染 LaTeX 数学公式为图片"""
-    content = args.get("content", "")
-    delivery = str(args.get("delivery", "embed") or "embed").strip().lower()
-    target_id = args.get("target_id")
-    message_type = args.get("message_type")
+    """渲染 LaTeX 数学公式为图片或 PDF"""
+    raw_content = str(args.get("content", "") or "")
+    output_format = str(args.get("output_format", "png") or "png").strip().lower()
 
-    if not content:
-        return "内容不能为空"
-    if delivery not in {"embed", "send"}:
-        return f"delivery 无效：{delivery}。仅支持 embed 或 send"
+    # 参数校验
+    if not raw_content or not raw_content.strip():
+        return "LaTeX 内容不能为空"
 
-    if delivery == "send" and message_type and message_type not in ("group", "private"):
-        return "消息类型必须是 group 或 private"
+    if output_format not in {"png", "pdf"}:
+        return f"output_format 无效：{output_format}。仅支持 png 或 pdf"
 
     try:
-        from Undefined.utils.cache import cleanup_cache_dir
-        from Undefined.utils.paths import RENDER_CACHE_DIR, ensure_dir
+        # 准备内容
+        prepared_content = _prepare_content(raw_content)
 
-        filename = f"render_{uuid.uuid4().hex[:16]}.png"
-        filepath = ensure_dir(RENDER_CACHE_DIR) / filename
+        # 解析代理
+        proxy = await _resolve_proxy(context)
 
-        matplotlib.use("Agg")
-
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.axis("off")
-
-        ax.text(
-            0.5,
-            0.5,
-            content,
-            transform=ax.transAxes,
-            fontsize=12,
-            verticalalignment="center",
-            horizontalalignment="center",
-            usetex=True,
-            wrap=True,
+        # 渲染
+        rendered_bytes, mime_type = await _render_latex_to_bytes(
+            prepared_content, output_format, proxy=proxy
         )
-
-        plt.tight_layout()
-        plt.savefig(filepath, dpi=150, bbox_inches="tight", pad_inches=0.1)
-        plt.close(fig)
 
         # 注册到附件系统
         attachment_registry = context.get("attachment_registry")
         scope_key = scope_from_context(context)
-        record: Any = None
-        if attachment_registry is not None and scope_key:
-            try:
-                record = await attachment_registry.register_local_file(
-                    scope_key,
-                    filepath,
-                    kind="image",
-                    display_name=filename,
-                    source_kind="rendered_image",
-                    source_ref="render_latex",
-                )
-            except Exception as exc:
-                logger.warning("注册渲染图片到附件系统失败: %s", exc)
 
-        if delivery == "embed":
-            cleanup_cache_dir(RENDER_CACHE_DIR)
-            if record is None:
-                return "渲染成功，但无法注册到附件系统（缺少 attachment_registry 或 scope_key）"
-            return f'<pic uid="{record.uid}"/>'
+        if attachment_registry is None or not scope_key:
+            return "渲染成功，但无法注册到附件系统（缺少 attachment_registry 或 scope_key）"
 
-        # delivery == "send"
-        resolved_target_id, resolved_message_type, target_error = _resolve_send_target(
-            target_id, message_type, context
-        )
-        if target_error or resolved_target_id is None or resolved_message_type is None:
-            return target_error or "渲染成功，但缺少发送目标参数"
+        kind = "image" if output_format == "png" else "file"
+        extension = "png" if output_format == "png" else "pdf"
+        display_name = f"latex.{extension}"
 
-        sender = context.get("sender")
-        send_image_callback = context.get("send_image_callback")
-
-        if sender:
-            from pathlib import Path
-
-            cq_message = f"[CQ:image,file={Path(filepath).resolve().as_uri()}]"
-            if resolved_message_type == "group":
-                await sender.send_group_message(int(resolved_target_id), cq_message)
-            elif resolved_message_type == "private":
-                await sender.send_private_message(int(resolved_target_id), cq_message)
-            cleanup_cache_dir(RENDER_CACHE_DIR)
-            return (
-                f"LaTeX 图片已渲染并发送到 {resolved_message_type} {resolved_target_id}"
+        try:
+            record = await attachment_registry.register_bytes(
+                scope_key,
+                rendered_bytes,
+                kind=kind,
+                display_name=display_name,
+                mime_type=mime_type,
+                source_kind="rendered_latex",
+                source_ref="render_latex",
             )
-        elif send_image_callback:
-            await send_image_callback(
-                resolved_target_id, resolved_message_type, str(filepath)
-            )
-            cleanup_cache_dir(RENDER_CACHE_DIR)
-            return (
-                f"LaTeX 图片已渲染并发送到 {resolved_message_type} {resolved_target_id}"
-            )
-        else:
-            return "发送图片回调未设置"
+            tag = "pic" if output_format == "png" else "attachment"
+            return f'<{tag} uid="{record.uid}"/>'
+
+        except Exception as exc:
+            logger.exception("注册渲染结果到附件系统失败: %s", exc)
+            return f"渲染成功，但注册到附件系统失败: {exc}"
 
     except ImportError as e:
-        missing_pkg = str(e).split("'")[1] if "'" in str(e) else "未知包"
-        return f"渲染失败：缺少依赖包 {missing_pkg}，请运行: uv add {missing_pkg}"
+        logger.error("Playwright 导入失败: %s", e)
+        return "请运行 `uv run playwright install` 安装浏览器运行时"
+    except RuntimeError as e:
+        logger.error("LaTeX 渲染运行时错误: %s", e)
+        return str(e)
     except Exception as e:
-        logger.exception(f"渲染并发送 LaTeX 图片失败: {e}")
-        return "渲染失败，请稍后重试"
+        logger.exception("渲染 LaTeX 失败: %s", e)
+        return f"渲染失败：{e}"

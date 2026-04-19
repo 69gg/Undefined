@@ -1,4 +1,4 @@
 {
     "enabled": true,
-    "allowed_callers": ["naga_code_analysis_agent", "code_delivery_agent", "info_agent"]
+    "allowed_callers": ["naga_code_analysis_agent", "code_delivery_agent", "info_agent", "summary_agent", "arxiv_analysis_agent"]
 }

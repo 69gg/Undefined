@@ -10,6 +10,7 @@ from typing import Any, Callable, TypeAlias
 from openai import NOT_GIVEN, AsyncOpenAI
 
 from Undefined.ai.tokens import TokenCounter
+from Undefined.utils.coerce import safe_int
 from Undefined.config import EmbeddingModelConfig, RerankModelConfig
 from Undefined.utils.request_params import split_reserved_request_params
 
@@ -224,13 +225,13 @@ class RetrievalRequester:
         usage = response_dict.get("usage", {}) or {}
         if not isinstance(usage, dict):
             usage = {}
-        prompt_tokens = self._safe_int(
-            usage.get("prompt_tokens", usage.get("input_tokens", 0))
+        prompt_tokens = safe_int(
+            usage.get("prompt_tokens", usage.get("input_tokens", 0)), 0
         )
-        completion_tokens = self._safe_int(
-            usage.get("completion_tokens", usage.get("output_tokens", 0))
+        completion_tokens = safe_int(
+            usage.get("completion_tokens", usage.get("output_tokens", 0)), 0
         )
-        total_tokens = self._safe_int(usage.get("total_tokens", 0))
+        total_tokens = safe_int(usage.get("total_tokens", 0), 0)
         if total_tokens <= 0 and (prompt_tokens > 0 or completion_tokens > 0):
             total_tokens = prompt_tokens + completion_tokens
         return prompt_tokens, completion_tokens, total_tokens
@@ -275,7 +276,7 @@ class RetrievalRequester:
         for idx, item in enumerate(raw_results):
             if not isinstance(item, dict):
                 continue
-            doc_index = self._safe_int(item.get("index", idx))
+            doc_index = safe_int(item.get("index", idx), 0)
             if doc_index < 0:
                 continue
 
@@ -322,9 +323,3 @@ class RetrievalRequester:
             }
             for i in range(limit)
         ]
-
-    def _safe_int(self, value: Any) -> int:
-        try:
-            return int(value or 0)
-        except (TypeError, ValueError):
-            return 0

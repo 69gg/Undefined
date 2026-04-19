@@ -8,7 +8,7 @@ import pytest
 from aiohttp import web
 
 from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
-from Undefined.api import app as runtime_api_app
+from Undefined.api.routes import chat as runtime_api_chat
 
 
 class _DummyTransport:
@@ -90,18 +90,18 @@ async def test_runtime_chat_stream_renders_each_message_once(
     )
     server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
 
-    async def _fake_run_webui_chat(*, text: str, send_output: Any) -> str:
+    async def _fake_run_webui_chat(_ctx: Any, *, text: str, send_output: Any) -> str:
         assert text == "hello"
         await send_output(42, "bot reply with <pic>")
         return "chat"
 
     monkeypatch.setattr(
-        runtime_api_app,
+        runtime_api_chat,
         "render_message_with_pic_placeholders",
         _fake_render_message_with_pic_placeholders,
     )
     monkeypatch.setattr(web, "StreamResponse", _DummyStreamResponse)
-    monkeypatch.setattr(server, "_run_webui_chat", _fake_run_webui_chat)
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
 
     request = cast(
         web.Request,
@@ -173,11 +173,11 @@ async def test_run_webui_chat_avoids_extra_blank_line_without_attachments(
     server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
 
     monkeypatch.setattr(
-        runtime_api_app,
+        runtime_api_chat,
         "register_message_attachments",
         _fake_register_message_attachments,
     )
-    monkeypatch.setattr(runtime_api_app, "collect_context_resources", lambda _vars: {})
+    monkeypatch.setattr(runtime_api_chat, "collect_context_resources", lambda _vars: {})
 
     sent_messages: list[tuple[int, str]] = []
 

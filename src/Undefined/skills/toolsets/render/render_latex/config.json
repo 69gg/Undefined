@@ -2,27 +2,18 @@
     "type": "function",
     "function": {
         "name": "render_latex",
-        "description": "将 LaTeX 文本渲染为图片。默认返回可嵌入回复的图片 UID（embed），也可直接发送到指定目标（send）。支持完整的 LaTeX 语法（包含 \\begin 和 \\end）。",
+        "description": "将 LaTeX 数学公式渲染为图片或 PDF 文档，使用 MathJax（不依赖系统 TeX 安装）。支持 LaTeX 数学子集（amsmath、equation、align、matrix 等），但不支持自定义 TeX 包。返回可嵌入回复的附件 UID。",
         "parameters": {
             "type": "object",
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "要渲染的 LaTeX 内容。必须是完整格式（包含 \\begin 和 \\end）。"
+                    "description": "要渲染的 LaTeX 数学内容。支持 $...$（行内）、$$...$$（块级）、\\[...\\]、\\(...\\) 及标准数学环境（\\begin{align}、\\begin{equation}、\\begin{matrix} 等）。如果不包含分隔符，会自动用 \\[ ... \\] 包装。\\begin{document}...\\end{document} 外层包装会自动去掉。"
                 },
-                "delivery": {
+                "output_format": {
                     "type": "string",
-                    "description": "图片交付方式：embed 返回可插入回复的图片 UID；send 立即发送到目标",
-                    "enum": ["embed", "send"]
-                },
-                "target_id": {
-                    "type": "integer",
-                    "description": "目标 ID（群号或用户 QQ 号，仅 delivery=send 时需要，不提供则从当前会话推断）"
-                },
-                "message_type": {
-                    "type": "string",
-                    "description": "消息类型（仅 delivery=send 时需要，不提供则从当前会话推断）",
-                    "enum": ["group", "private"]
+                    "description": "输出格式：\"png\"（默认，图片）或 \"pdf\"（PDF 文档）",
+                    "enum": ["png", "pdf"]
                 }
             },
             "required": ["content"]

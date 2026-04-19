@@ -1,0 +1,16 @@
+{
+    "name": "profile",
+    "description": "查看侧写。默认显示你的用户侧写；加 g 查看当前群聊侧写（仅群聊可用）。群聊默认合并转发，可用 -t 直接发送、-r 渲染图片",
+    "usage": "/p [g] [-t|-f|-r]",
+    "example": "/p g -r",
+    "permission": "public",
+    "rate_limit": {
+        "user": 60,
+        "admin": 10,
+        "superadmin": 0
+    },
+    "show_in_help": true,
+    "order": 25,
+    "allow_in_private": true,
+    "aliases": ["me", "p"]
+}

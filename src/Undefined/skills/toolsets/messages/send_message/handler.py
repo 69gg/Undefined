@@ -2,6 +2,7 @@ from typing import Any, Dict
 import logging
 
 from Undefined.attachments import (
+    dispatch_pending_file_sends,
     render_message_with_pic_placeholders,
     scope_from_context,
 )
@@ -168,6 +169,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                     **send_kwargs,
                 )
             context["message_sent_this_turn"] = True
+            await dispatch_pending_file_sends(
+                rendered,
+                sender=sender,
+                target_type=target_type,
+                target_id=target_id,
+            )
             return _format_send_success(sent_message_id)
         except Exception as e:
             logger.exception(

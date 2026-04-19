@@ -17,6 +17,7 @@ import Undefined.arxiv.sender as arxiv_sender
 @pytest.fixture(autouse=True)
 def _clear_inflight() -> None:
     arxiv_sender._INFLIGHT_SENDS.clear()
+    arxiv_sender._RECENT_SENDS.clear()
 
 
 def _paper_info() -> PaperInfo:
@@ -165,3 +166,187 @@ async def test_send_arxiv_paper_deduplicates_inflight_requests(
     assert first_result == "ok"
     assert second_result == "ok"
     assert called == 1
+
+
+@pytest.mark.asyncio
+async def test_recent_send_blocks_duplicate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After a successful send, duplicate should be blocked within cooldown."""
+    sender = _sender()
+    call_count = 0
+
+    async def _fake_once(**_: object) -> str:
+        nonlocal call_count
+        call_count += 1
+        return "ok"
+
+    monkeypatch.setattr(arxiv_sender, "_send_arxiv_paper_once", _fake_once)
+
+    # First send should succeed
+    result1 = await send_arxiv_paper(
+        paper_id="2501.01234",
+        sender=sender,
+        target_type="group",
+        target_id=123456,
+        max_file_size=100,
+        author_preview_limit=20,
+        summary_preview_chars=1000,
+    )
+    assert result1 == "ok"
+    assert call_count == 1
+
+    # Second send should be blocked by time-based dedup
+    result2 = await send_arxiv_paper(
+        paper_id="2501.01234",
+        sender=sender,
+        target_type="group",
+        target_id=123456,
+        max_file_size=100,
+        author_preview_limit=20,
+        summary_preview_chars=1000,
+    )
+    assert "近期已发送过" in result2
+    assert call_count == 1  # Still only 1 call
+
+
+@pytest.mark.asyncio
+async def test_recent_send_expires_after_cooldown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After cooldown expires, the same paper can be sent again."""
+    sender = _sender()
+    call_count = 0
+    mock_time = 0.0
+
+    async def _fake_once(**_: object) -> str:
+        nonlocal call_count
+        call_count += 1
+        return "ok"
+
+    def _fake_monotonic() -> float:
+        return mock_time
+
+    monkeypatch.setattr(arxiv_sender, "_send_arxiv_paper_once", _fake_once)
+    # Patch time.monotonic in the arxiv_sender module
+    monkeypatch.setattr(
+        arxiv_sender, "time", SimpleNamespace(monotonic=_fake_monotonic)
+    )
+
+    # First send at time 0
+    result1 = await send_arxiv_paper(
+        paper_id="2501.01234",
+        sender=sender,
+        target_type="group",
+        target_id=123456,
+        max_file_size=100,
+        author_preview_limit=20,
+        summary_preview_chars=1000,
+    )
+    assert result1 == "ok"
+    assert call_count == 1
+
+    # Advance time past cooldown
+    mock_time = arxiv_sender._DEDUP_COOLDOWN_SECONDS + 1.0
+
+    # Second send should succeed now
+    result2 = await send_arxiv_paper(
+        paper_id="2501.01234",
+        sender=sender,
+        target_type="group",
+        target_id=123456,
+        max_file_size=100,
+        author_preview_limit=20,
+        summary_preview_chars=1000,
+    )
+    assert result2 == "ok"
+    assert call_count == 2  # Second call executed
+
+
+@pytest.mark.asyncio
+async def test_recent_send_capacity_limit() -> None:
+    """When _RECENT_SENDS exceeds max size, oldest entries are evicted."""
+    # Fill with max_size + 100 entries
+    for i in range(arxiv_sender._RECENT_SENDS_MAX_SIZE + 100):
+        key = ("group", i, f"paper_{i}")
+        arxiv_sender._RECENT_SENDS[key] = float(i)
+
+    # Trigger eviction
+    arxiv_sender._evict_oldest_recent_sends()
+
+    # Should have evicted back to max size
+    assert len(arxiv_sender._RECENT_SENDS) == arxiv_sender._RECENT_SENDS_MAX_SIZE
+
+    # Oldest 100 should be gone
+    for i in range(100):
+        key = ("group", i, f"paper_{i}")
+        assert key not in arxiv_sender._RECENT_SENDS
+
+    # Newest max_size should remain
+    for i in range(100, arxiv_sender._RECENT_SENDS_MAX_SIZE + 100):
+        key = ("group", i, f"paper_{i}")
+        assert key in arxiv_sender._RECENT_SENDS
+
+
+@pytest.mark.asyncio
+async def test_cleanup_expired_recent_sends() -> None:
+    """Test that expired entries are removed while non-expired remain."""
+    import time as time_module
+
+    # Get current time
+    now = time_module.monotonic()
+
+    # Add expired entries (old timestamps, more than 1 hour ago)
+    expired_key1 = ("group", 1, "expired1")
+    expired_key2 = ("group", 2, "expired2")
+    arxiv_sender._RECENT_SENDS[expired_key1] = (
+        now - arxiv_sender._DEDUP_COOLDOWN_SECONDS - 100.0
+    )
+    arxiv_sender._RECENT_SENDS[expired_key2] = (
+        now - arxiv_sender._DEDUP_COOLDOWN_SECONDS - 50.0
+    )
+
+    # Add non-expired entries (recent timestamps, within 1 hour)
+    recent_key1 = ("group", 3, "recent1")
+    recent_key2 = ("group", 4, "recent2")
+    arxiv_sender._RECENT_SENDS[recent_key1] = now - 100.0  # 100 seconds ago
+    arxiv_sender._RECENT_SENDS[recent_key2] = now - 10.0  # 10 seconds ago
+
+    # Cleanup
+    arxiv_sender._cleanup_expired_recent_sends()
+
+    # Expired should be gone
+    assert expired_key1 not in arxiv_sender._RECENT_SENDS
+    assert expired_key2 not in arxiv_sender._RECENT_SENDS
+
+    # Recent should remain
+    assert recent_key1 in arxiv_sender._RECENT_SENDS
+    assert recent_key2 in arxiv_sender._RECENT_SENDS
+
+
+@pytest.mark.asyncio
+async def test_failed_send_not_recorded_in_recent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed send should NOT record in _RECENT_SENDS."""
+    sender = _sender()
+
+    async def _fake_once(**_: object) -> str:
+        raise RuntimeError("Send failed")
+
+    monkeypatch.setattr(arxiv_sender, "_send_arxiv_paper_once", _fake_once)
+
+    # Attempt send, should fail
+    with pytest.raises(RuntimeError, match="Send failed"):
+        await send_arxiv_paper(
+            paper_id="2501.01234",
+            sender=sender,
+            target_type="group",
+            target_id=123456,
+            max_file_size=100,
+            author_preview_limit=20,
+            summary_preview_chars=1000,
+        )
+
+    # Should NOT be recorded in recent sends
+    assert len(arxiv_sender._RECENT_SENDS) == 0

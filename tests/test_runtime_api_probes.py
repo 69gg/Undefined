@@ -8,7 +8,7 @@ import pytest
 from aiohttp import web
 
 from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
-from Undefined.api import app as runtime_api_app
+from Undefined.api.routes import system as runtime_api_system
 
 
 @pytest.mark.asyncio
@@ -166,9 +166,11 @@ async def test_runtime_external_probe_skips_naga_model_when_integration_disabled
         }
 
     monkeypatch.setattr(
-        runtime_api_app, "_probe_http_endpoint", _fake_probe_http_endpoint
+        runtime_api_system, "_probe_http_endpoint", _fake_probe_http_endpoint
     )
-    monkeypatch.setattr(runtime_api_app, "_probe_ws_endpoint", _fake_probe_ws_endpoint)
+    monkeypatch.setattr(
+        runtime_api_system, "_probe_ws_endpoint", _fake_probe_ws_endpoint
+    )
 
     context = RuntimeAPIContext(
         config_getter=lambda: SimpleNamespace(

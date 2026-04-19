@@ -247,9 +247,14 @@ async def get_recent_messages_prefer_local(
     bot_qq: int,
     attachment_registry: Any | None = None,
     group_name_hint: str | None = None,
-    max_onebot_count: int = 5000,
+    max_onebot_count: int | None = None,
 ) -> list[dict[str, Any]]:
     """优先从本地 history 获取最近消息，必要时回退到 OneBot。"""
+    if max_onebot_count is None:
+        from Undefined.config import get_config
+
+        cfg = get_config(strict=False)
+        max_onebot_count = getattr(cfg, "history_onebot_fetch_limit", 10000)
     norm_start, norm_end = _normalize_range(start, end)
     if norm_end <= 0:
         return []
@@ -311,7 +316,7 @@ async def get_recent_messages_prefer_onebot(
     bot_qq: int,
     attachment_registry: Any | None = None,
     group_name_hint: str | None = None,
-    max_onebot_count: int = 5000,
+    max_onebot_count: int | None = None,
 ) -> list[dict[str, Any]]:
     """兼容旧名称，当前行为等同于本地优先。"""
     return await get_recent_messages_prefer_local(

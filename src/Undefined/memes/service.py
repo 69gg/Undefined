@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 import hashlib
 import logging
+import math
 import mimetypes
 from pathlib import Path
 import re
@@ -14,6 +15,7 @@ import threading
 from typing import Any
 from uuid import uuid4
 
+from openai import APIConnectionError, APIStatusError, APITimeoutError
 from PIL import Image
 
 from Undefined.attachments import AttachmentRecord
@@ -27,6 +29,7 @@ from Undefined.memes.models import (
 from Undefined.memes.store import MemeStore
 from Undefined.memes.vector_store import MemeVectorStore
 from Undefined.utils.message_targets import resolve_message_target
+from Undefined.utils.coerce import safe_int
 from Undefined.utils.paths import ensure_dir
 
 logger = logging.getLogger(__name__)
@@ -44,16 +47,6 @@ _TAG_SPLIT_RE = re.compile(r"[,，\n]+")
 
 def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
-
-
-def _safe_int(value: Any) -> int | None:
-    if value is None:
-        return None
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed > 0 else None
 
 
 def _guess_suffix(path: Path, mime_type: str) -> str:
@@ -76,6 +69,77 @@ def _normalize_tags(raw_tags: list[str] | str | None) -> list[str]:
         parts = [part.strip() for part in _TAG_SPLIT_RE.split(raw_tags)]
         return normalize_string_list(parts)
     return normalize_string_list(raw_tags)
+
+
+def _is_retryable_llm_error(exc: Exception) -> bool:
+    """判断 LLM 调用异常是否应触发 worker 级重试。"""
+    if isinstance(exc, (APIConnectionError, APITimeoutError)):
+        return True
+    if isinstance(exc, APIStatusError):
+        return exc.status_code == 429 or exc.status_code >= 500
+    return False
+
+
+def _extract_gif_frames(source_path: Path, n_frames: int) -> list[Image.Image]:
+    """从 GIF 中均匀采样 *n_frames* 帧（含首末帧），返回 RGBA Image 列表。"""
+    with Image.open(source_path) as image:
+        total = getattr(image, "n_frames", 1)
+        if total <= 1:
+            image.seek(0)
+            return [image.convert("RGBA").copy()]
+        n = min(n_frames, total)
+        if n <= 1:
+            image.seek(0)
+            return [image.convert("RGBA").copy()]
+        indices = _sample_frame_indices(total, n)
+        frames: list[Image.Image] = []
+        for idx in indices:
+            image.seek(idx)
+            frames.append(image.convert("RGBA").copy())
+        return frames
+
+
+def _sample_frame_indices(total: int, n: int) -> list[int]:
+    """生成均匀采样的帧索引列表（始终包含首帧和末帧）。"""
+    if n >= total:
+        return list(range(total))
+    if n == 1:
+        return [0]
+    if n == 2:
+        return [0, total - 1]
+    indices = [round(i * (total - 1) / (n - 1)) for i in range(n)]
+    # 去重并保持顺序
+    seen: set[int] = set()
+    result: list[int] = []
+    for idx in indices:
+        if idx not in seen:
+            seen.add(idx)
+            result.append(idx)
+    return result
+
+
+def _compose_grid(frames: list[Image.Image], output_path: Path) -> None:
+    """将多帧拼接为网格图并保存为 PNG。"""
+    n = len(frames)
+    if n == 0:
+        return
+    if n == 1:
+        frames[0].save(output_path, format="PNG")
+        return
+    cols = math.ceil(math.sqrt(n))
+    rows = math.ceil(n / cols)
+    fw, fh = frames[0].size
+    grid = Image.new("RGBA", (cols * fw, rows * fh), (0, 0, 0, 0))
+    for i, frame in enumerate(frames):
+        resized = (
+            frame.resize((fw, fh), Image.Resampling.LANCZOS)
+            if frame.size != (fw, fh)
+            else frame
+        )
+        x = (i % cols) * fw
+        y = (i // cols) * fh
+        grid.paste(resized, (x, y))
+    grid.save(output_path, format="PNG")
 
 
 @dataclass
@@ -374,6 +438,7 @@ class MemeService:
                 self._delete_file_if_exists,
                 Path(record.preview_path),
             )
+        await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
         return True
 
     def _delete_file_if_exists(self, path: Path) -> None:
@@ -381,6 +446,17 @@ class MemeService:
             path.unlink(missing_ok=True)
         except OSError:
             logger.debug("[memes] 删除文件失败: path=%s", path, exc_info=True)
+
+    def _cleanup_gif_frame_files(self, uid: str) -> None:
+        """清理 GIF 多帧分析产生的临时帧文件 ({uid}_f{i}.png)。"""
+        preview_dir = self._preview_dir()
+        for frame_file in preview_dir.glob(f"{uid}_f*.png"):
+            try:
+                frame_file.unlink(missing_ok=True)
+            except OSError:
+                logger.debug(
+                    "[memes] 删除帧文件失败: path=%s", frame_file, exc_info=True
+                )
 
     async def _cleanup_meme_artifacts(
         self,
@@ -408,6 +484,8 @@ class MemeService:
         await asyncio.to_thread(self._delete_file_if_exists, blob_path)
         if preview_path is not None and preview_path != blob_path:
             await asyncio.to_thread(self._delete_file_if_exists, preview_path)
+        if uid:
+            await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
 
     async def search_memes(
         self,
@@ -675,7 +753,7 @@ class MemeService:
                 attachments=history_attachments,
             )
         else:
-            preferred_temp_group_id = _safe_int(context.get("group_id"))
+            preferred_temp_group_id = safe_int(context.get("group_id")) or None
             sent_message_id = await sender.send_private_message(
                 int(target_id),
                 cq_message,
@@ -794,25 +872,52 @@ class MemeService:
             return
         if self._ai_client is None:
             raise RuntimeError("reanalyze requires ai_client")
+        analyze_path: str | list[str] = (
+            record.preview_path if record.preview_path else record.blob_path
+        )
+        # GIF 多帧模式：与 ingest 路径保持一致
+        if record.is_animated:
+            cfg = self._cfg()
+            if str(getattr(cfg, "gif_analysis_mode", "grid")).lower() == "multi":
+                analyze_path = await self._prepare_gif_multi_frames(
+                    Path(record.blob_path), uid
+                )
         try:
-            judgement = await self._ai_client.judge_meme_image(record.blob_path)
+            judgement = await self._ai_client.judge_meme_image(analyze_path)
         except Exception as exc:
+            if _is_retryable_llm_error(exc):
+                if isinstance(analyze_path, list):
+                    await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
+                raise
             logger.exception(
                 "[memes] judge stage failed during reanalyze: uid=%s err=%s", uid, exc
             )
+            if isinstance(analyze_path, list):
+                await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
             return
         if not bool(judgement.get("is_meme", False)):
+            if isinstance(analyze_path, list):
+                await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
             await self.delete_meme(uid)
             return
         try:
-            described = await self._ai_client.describe_meme_image(record.blob_path)
+            described = await self._ai_client.describe_meme_image(analyze_path)
         except Exception as exc:
+            if _is_retryable_llm_error(exc):
+                if isinstance(analyze_path, list):
+                    await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
+                raise
             logger.exception(
                 "[memes] describe stage failed during reanalyze: uid=%s err=%s",
                 uid,
                 exc,
             )
+            if isinstance(analyze_path, list):
+                await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
             return
+        # GIF 多帧文件用完即清理
+        if isinstance(analyze_path, list):
+            await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
         auto_description = str(described.get("description") or "").strip()
         next_tags = _normalize_tags(described.get("tags"))
         if not auto_description and not next_tags:
@@ -933,12 +1038,24 @@ class MemeService:
                     or mimetypes.guess_type(source_path.name)[0]
                     or "application/octet-stream"
                 )
-                analyze_path = str(
+                analyze_path: str | list[str] = str(
                     preview_path if preview_path is not None else blob_path
                 )
+                if (
+                    is_animated
+                    and str(getattr(cfg, "gif_analysis_mode", "grid")).lower()
+                    == "multi"
+                ):
+                    analyze_path = await self._prepare_gif_multi_frames(
+                        source_path, uid
+                    )
                 try:
                     judgement = await self._ai_client.judge_meme_image(analyze_path)
                 except Exception as exc:
+                    if _is_retryable_llm_error(exc):
+                        if isinstance(analyze_path, list):
+                            await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
+                        raise
                     logger.exception(
                         "[memes] judge stage failed, treat as non-meme: uid=%s err=%s",
                         uid,
@@ -946,6 +1063,8 @@ class MemeService:
                     )
                     judgement = {"is_meme": False}
                 if not bool(judgement.get("is_meme", False)):
+                    if isinstance(analyze_path, list):
+                        await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
                     await self._cleanup_meme_artifacts(
                         uid=None,
                         blob_path=blob_path,
@@ -956,10 +1075,17 @@ class MemeService:
                 try:
                     described = await self._ai_client.describe_meme_image(analyze_path)
                 except Exception as exc:
+                    if _is_retryable_llm_error(exc):
+                        if isinstance(analyze_path, list):
+                            await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
+                        raise
                     logger.exception(
                         "[memes] describe stage failed, drop uid=%s err=%s", uid, exc
                     )
                     described = {"description": "", "tags": []}
+                # GIF 多帧文件用完即清理
+                if isinstance(analyze_path, list):
+                    await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
                 tags = _normalize_tags(described.get("tags"))
                 auto_description = str(described.get("description") or "").strip()
                 if not auto_description and not tags:
@@ -1043,16 +1169,43 @@ class MemeService:
         if not is_animated:
             return blob_path
 
+        cfg = self._cfg()
+        mode = str(getattr(cfg, "gif_analysis_mode", "grid")).lower()
+        n_frames = max(2, int(getattr(cfg, "gif_analysis_frames", 6)))
         preview_path = self._preview_dir() / f"{target_uid}.png"
 
         def _render_preview() -> None:
-            with Image.open(source_path) as image:
-                image.seek(0)
-                frame = image.convert("RGBA")
-                frame.save(preview_path, format="PNG")
+            frames = _extract_gif_frames(source_path, n_frames)
+            if mode == "multi":
+                # multi 模式也需要生成一张预览用于存储/展示，取首帧
+                frames[0].save(preview_path, format="PNG")
+            else:
+                _compose_grid(frames, preview_path)
+            for f in frames:
+                f.close()
 
         await asyncio.to_thread(_render_preview)
         return preview_path
+
+    async def _prepare_gif_multi_frames(
+        self, source_path: Path, target_uid: str
+    ) -> list[str]:
+        """multi 模式：将 GIF 各帧单独保存为 PNG，返回路径列表。"""
+        cfg = self._cfg()
+        n_frames = max(2, int(getattr(cfg, "gif_analysis_frames", 6)))
+        preview_dir = self._preview_dir()
+
+        def _render_frames() -> list[str]:
+            frames = _extract_gif_frames(source_path, n_frames)
+            paths: list[str] = []
+            for i, frame in enumerate(frames):
+                p = preview_dir / f"{target_uid}_f{i}.png"
+                frame.save(p, format="PNG")
+                frame.close()
+                paths.append(str(p))
+            return paths
+
+        return await asyncio.to_thread(_render_frames)
 
     def _hash_file(self, path: Path) -> str:
         hasher = hashlib.sha256()

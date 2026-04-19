@@ -94,6 +94,7 @@ class CommandDispatcher:
         security: SecurityService,
         queue_manager: Any = None,
         rate_limiter: Any = None,
+        history_manager: Any = None,
     ) -> None:
         """初始化命令分发器
 
@@ -106,6 +107,7 @@ class CommandDispatcher:
             security: 安全审计与限流服务
             queue_manager: AI 请求队列管理器
             rate_limiter: 速率限制器
+            history_manager: 消息历史记录管理器
         """
         self.config = config
         self.sender = sender
@@ -115,6 +117,7 @@ class CommandDispatcher:
         self.security = security
         self.queue_manager = queue_manager
         self.rate_limiter = rate_limiter
+        self.history_manager = history_manager
         self.naga_store: Any = None
         self._token_usage_storage = TokenUsageStorage()
         # 存储 stats 分析结果，用于队列回调
@@ -1078,6 +1081,8 @@ class CommandDispatcher:
             scope=scope,
             user_id=user_id,
             is_webui_session=is_webui_session,
+            cognitive_service=getattr(self.ai, "_cognitive_service", None),
+            history_manager=self.history_manager,
         )
 
         try:

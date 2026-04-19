@@ -16,6 +16,7 @@ import aiofiles
 import httpx
 
 from Undefined.ai.parsing import extract_choices_content
+from Undefined.utils.coerce import safe_float
 from Undefined.ai.llm import ModelRequester
 from Undefined.config import VisionModelConfig
 from Undefined.ai.transports import API_MODE_CHAT_COMPLETIONS, get_api_mode
@@ -352,17 +353,10 @@ def _parse_meme_analysis_response(content: str) -> dict[str, Any]:
     parsed = _extract_json_object(content)
     return {
         "is_meme": bool(parsed.get("is_meme", False)),
-        "confidence": _safe_float(parsed.get("confidence", 0.0), default=0.0),
+        "confidence": safe_float(parsed.get("confidence", 0.0), default=0.0),
         "description": str(parsed.get("description") or "").strip(),
         "tags": _normalize_meme_tags(parsed.get("tags")),
     }
-
-
-def _safe_float(value: Any, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
 
 
 class MultimodalAnalyzer:
@@ -607,13 +601,13 @@ class MultimodalAnalyzer:
                 self._url_cache_locks.pop(key, None)
 
     async def _build_content_items(
-        self, media_type: str, media_content: str, prompt: str
+        self, media_type: str, media_content: str | list[str], prompt: str
     ) -> list[dict[str, Any]]:
         """构建请求内容项。
 
         Args:
             media_type: 媒体类型
-            media_content: 媒体内容（URL 或 data URL）
+            media_content: 媒体内容（URL/data URL），或其列表
             prompt: 提示词
 
         Returns:
@@ -623,9 +617,9 @@ class MultimodalAnalyzer:
 
         # 添加媒体内容项
         media_item_key = f"{media_type}_url"
-        content_items.append(
-            {"type": media_item_key, media_item_key: {"url": media_content}}
-        )
+        contents = media_content if isinstance(media_content, list) else [media_content]
+        for mc in contents:
+            content_items.append({"type": media_item_key, media_item_key: {"url": mc}})
 
         return content_items
 
@@ -702,7 +696,7 @@ class MultimodalAnalyzer:
             result = await self._requester.request(
                 model_config=self._vision_config,
                 messages=[{"role": "user", "content": content_items}],
-                max_tokens=8192,
+                max_tokens=self._vision_config.max_tokens,
                 call_type=f"vision_{detected_type}",
             )
             content = extract_choices_content(result)
@@ -822,13 +816,19 @@ class MultimodalAnalyzer:
         self,
         *,
         prompt_path: str,
-        image_url: str,
+        image_url: str | list[str],
         tool_schema: dict[str, Any],
         tool_name: str,
         call_type: str,
         max_tokens: int,
     ) -> dict[str, Any]:
-        media_content = await self._load_media_content(image_url, "image")
+        if isinstance(image_url, list):
+            media_contents: list[str] = []
+            for url in image_url:
+                media_contents.append(await self._load_media_content(url, "image"))
+            media_content: str | list[str] = media_contents
+        else:
+            media_content = await self._load_media_content(image_url, "image")
         prompt = await self._load_prompt_text(prompt_path)
         content_items = await self._build_content_items("image", media_content, prompt)
         response = await self._requester.request(
@@ -847,11 +847,13 @@ class MultimodalAnalyzer:
             expected_tool_name=tool_name,
             stage=call_type,
             logger=logger,
-            error_context=f"image={redact_string(image_url)[:120]}",
+            error_context=f"image={redact_string(str(image_url) if isinstance(image_url, list) else image_url)[:120]}",
         )
 
-    async def judge_meme_image(self, image_url: str) -> dict[str, Any]:
-        safe_url = redact_string(image_url)
+    async def judge_meme_image(self, image_url: str | list[str]) -> dict[str, Any]:
+        safe_url = redact_string(
+            str(image_url) if isinstance(image_url, list) else image_url
+        )
         try:
             args = await self._request_required_tool_args(
                 prompt_path=_MEME_JUDGE_PROMPT_PATH,
@@ -859,7 +861,7 @@ class MultimodalAnalyzer:
                 tool_schema=_MEME_JUDGE_TOOL,
                 tool_name="submit_meme_judgement",
                 call_type="vision_meme_judge",
-                max_tokens=256,
+                max_tokens=self._vision_config.max_tokens,
             )
         except Exception as exc:
             logger.exception("[媒体分析] 表情包判定失败，按非表情包处理: %s", exc)
@@ -872,7 +874,7 @@ class MultimodalAnalyzer:
         try:
             parsed = {
                 "is_meme": bool(args.get("is_meme", False)),
-                "confidence": _safe_float(args.get("confidence", 0.0), default=0.0),
+                "confidence": safe_float(args.get("confidence", 0.0), default=0.0),
                 "reason": str(args.get("reason") or "").strip(),
             }
         except Exception:
@@ -881,13 +883,15 @@ class MultimodalAnalyzer:
             "[媒体分析] 表情包判定完成: url=%s is_meme=%s confidence=%.3f reason=%s",
             safe_url[:50],
             parsed.get("is_meme", False),
-            _safe_float(parsed.get("confidence", 0.0), default=0.0),
+            safe_float(parsed.get("confidence", 0.0), default=0.0),
             str(parsed.get("reason", ""))[:80],
         )
         return parsed
 
-    async def describe_meme_image(self, image_url: str) -> dict[str, Any]:
-        safe_url = redact_string(image_url)
+    async def describe_meme_image(self, image_url: str | list[str]) -> dict[str, Any]:
+        safe_url = redact_string(
+            str(image_url) if isinstance(image_url, list) else image_url
+        )
         try:
             args = await self._request_required_tool_args(
                 prompt_path=_MEME_DESCRIBE_PROMPT_PATH,
@@ -895,7 +899,7 @@ class MultimodalAnalyzer:
                 tool_schema=_MEME_DESCRIBE_TOOL,
                 tool_name="submit_meme_description",
                 call_type="vision_meme_describe",
-                max_tokens=512,
+                max_tokens=self._vision_config.max_tokens,
             )
         except Exception as exc:
             logger.exception("[媒体分析] 表情包描述失败: %s", exc)

@@ -1,0 +1,28 @@
+{
+    "type": "function",
+    "function": {
+        "name": "summary_agent",
+        "description": "消息总结助手,拉取指定范围的聊天消息并进行智能总结。支持按条数或时间范围筛选。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "用户的总结需求,例如:'总结最近50条消息'、'总结过去1小时的聊天'、'总结今天的技术讨论'"
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "要总结的最近消息条数。与 time_range 二选一。"
+                },
+                "time_range": {
+                    "type": "string",
+                    "description": "要总结的时间范围,如 '1h'、'6h'、'1d'、'7d'。与 count 二选一。"
+                },
+                "focus": {
+                    "type": "string",
+                    "description": "可选的重点关注主题。"
+                }
+            }
+        }
+    }
+}

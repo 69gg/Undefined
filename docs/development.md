@@ -22,8 +22,14 @@ src/Undefined/
 │   ├── agents/          # 智能体 (独立自主的子 AI，负责处理诸如 Web 搜索、文件分析的具体长时任务)
 │   ├── commands/        # 中心化斜杠指令系统 (实现如 /help, /stats, /addadmin 等平台功能)
 │   └── anthropic_skills/# Anthropic 协议集成的外部 Skills (兼容 SKILL.md 格式)
+├── config/        # 配置系统 (loader.py TOML 解析, models.py 数据模型, hot_reload.py 热更新)
+├── api/           # Management API + Runtime API
+│   ├── routes/    # 路由子模块 (chat, tools, naga, system, memes, memory, cognitive, health)
+│   ├── app.py     # aiohttp 服务主入口 (薄包装委派到 routes/)
+│   └── _openapi.py # OpenAPI 文档生成
+├── memes/         # 表情包库 (两阶段 AI 管线, SQLite + ChromaDB)
 ├── services/      # 核心运行服务 (Queue 任务队列, Command 命令分发, Security 安全防护拦截)
-├── utils/         # 通用支持工具组 (包含历史处理、JSON原子读写加锁 IO 操作等)
+├── utils/         # 通用支持工具组 (io.py 异步原子读写, history.py, coerce.py 类型强转, fake_at.py 假@检测)
 ├── handlers.py    # 最外层 OneBot 消息分流处理层
 └── onebot.py      # OneBot WebSocket 客户端核心连接
 ```

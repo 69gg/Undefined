@@ -10,7 +10,7 @@ from aiohttp import web
 from aiohttp.web_response import Response
 
 from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
-from Undefined.api.app import _validate_callback_url
+from Undefined.api._helpers import _validate_callback_url
 
 
 def _json(response: Response) -> Any:
@@ -365,7 +365,7 @@ async def test_invoke_tool_uses_runtime_timeout(
         seen["timeout"] = timeout
         return await original_wait_for(awaitable, timeout)
 
-    monkeypatch.setattr("Undefined.api.app.asyncio.wait_for", _wait_for)
+    monkeypatch.setattr("Undefined.api.routes.tools.asyncio.wait_for", _wait_for)
 
     payload = await server._execute_tool_invoke(
         request_id="req-tool",
@@ -391,7 +391,7 @@ async def test_invoke_agent_bypasses_runtime_timeout(
         seen["timeout"] = timeout
         return await original_wait_for(awaitable, timeout)
 
-    monkeypatch.setattr("Undefined.api.app.asyncio.wait_for", _wait_for)
+    monkeypatch.setattr("Undefined.api.routes.tools.asyncio.wait_for", _wait_for)
 
     payload = await server._execute_tool_invoke(
         request_id="req-agent",

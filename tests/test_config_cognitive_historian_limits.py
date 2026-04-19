@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from Undefined.config.loader import Config
+from Undefined.config.domain_parsers import _parse_cognitive_config
 
 
 def test_parse_cognitive_historian_reference_limits() -> None:
-    cfg = Config._parse_cognitive_config(
+    cfg = _parse_cognitive_config(
         {
             "cognitive": {
                 "query": {
@@ -32,7 +32,7 @@ def test_parse_cognitive_historian_reference_limits() -> None:
 
 
 def test_parse_cognitive_historian_reference_limits_defaults() -> None:
-    cfg = Config._parse_cognitive_config({"cognitive": {}})
+    cfg = _parse_cognitive_config({"cognitive": {}})
 
     assert cfg.historian_recent_messages_inject_k == 12
     assert cfg.historian_recent_message_line_max_len == 240

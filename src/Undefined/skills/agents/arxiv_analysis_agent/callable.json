@@ -1,0 +1,4 @@
+{
+    "enabled": true,
+    "allowed_callers": ["info_agent", "web_agent", "naga_code_analysis_agent"]
+}

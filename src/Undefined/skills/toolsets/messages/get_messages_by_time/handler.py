@@ -1,7 +1,15 @@
 from typing import Any, Dict
 from datetime import datetime
 
-_FILTERED_RESULT_LIMIT = 50
+
+def _get_history_limit(context: Dict[str, Any], key: str, fallback: int) -> int:
+    """从 runtime_config 读取历史限制配置。"""
+    cfg = context.get("runtime_config")
+    if cfg is not None:
+        val = getattr(cfg, key, None)
+        if isinstance(val, int) and val > 0:
+            return val
+    return fallback
 
 
 def _resolve_chat_id(chat_id: str, msg_type: str, history_manager: Any) -> str:
@@ -151,8 +159,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     resolved_chat_id = _resolve_chat_id(chat_id, msg_type, history_manager)
 
     if get_recent_messages_callback:
+        search_scan_limit = _get_history_limit(
+            context, "history_search_scan_limit", 10000
+        )
         messages = await get_recent_messages_callback(
-            resolved_chat_id, msg_type, 0, 10000
+            resolved_chat_id, msg_type, 0, search_scan_limit
         )
 
         # 时间范围过滤
@@ -164,10 +175,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 filtered_messages, keyword, sender
             )
 
-        # 限制最多返回 50 条
+        filtered_result_limit = _get_history_limit(
+            context, "history_filtered_result_limit", 200
+        )
         total_matched = len(filtered_messages)
-        if total_matched > _FILTERED_RESULT_LIMIT:
-            filtered_messages = filtered_messages[:_FILTERED_RESULT_LIMIT]
+        if total_matched > filtered_result_limit:
+            filtered_messages = filtered_messages[:filtered_result_limit]
 
         formatted = []
         for msg in filtered_messages:
@@ -178,6 +191,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             timestamp_str = msg.get("timestamp", "")
             text = msg.get("message", "")
             message_id = msg.get("message_id")
+            role = msg.get("role", "")
+            title = msg.get("title", "")
+            level = msg.get("level", "")
 
             if msg_type_val == "group":
                 # 确保群名以"群"结尾
@@ -189,8 +205,17 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             if message_id is not None:
                 msg_id_attr = f' message_id="{message_id}"'
 
+            extra_attrs = ""
+            if msg_type_val == "group":
+                if role:
+                    extra_attrs += f' role="{role}"'
+                if title:
+                    extra_attrs += f' title="{title}"'
+                if level:
+                    extra_attrs += f' level="{level}"'
+
             # 格式：XML 标准化
-            formatted.append(f"""<message{msg_id_attr} sender="{sender_name}" sender_id="{sender_id}" location="{location}" time="{timestamp_str}">
+            formatted.append(f"""<message{msg_id_attr} sender="{sender_name}" sender_id="{sender_id}" location="{location}"{extra_attrs} time="{timestamp_str}">
 <content>{text}</content>
 </message>""")
 

@@ -91,19 +91,28 @@ async def render_markdown_to_html(md_text: str) -> str:
     return full_html
 
 
-async def render_html_to_image(html_content: str, output_path: str) -> None:
+async def render_html_to_image(
+    html_content: str,
+    output_path: str,
+    *,
+    viewport_width: int = 1280,
+) -> None:
     """
     将 HTML 字符串转换为 PNG 图片
 
     参数:
         html_content: 完整的 HTML 字符串
         output_path: 输出图片路径 (例如 'result.png')
+        viewport_width: 视口宽度（像素），默认 1280
     """
     async with async_playwright() as p:
         # 启动无头浏览器
         browser = await p.chromium.launch(headless=True)
         # 设置上下文，可以指定缩放比例(device_scale_factor)，2代表2倍清晰度(Retina)
-        context = await browser.new_context(device_scale_factor=2)
+        context = await browser.new_context(
+            device_scale_factor=2,
+            viewport={"width": viewport_width, "height": 800},
+        )
         page = await context.new_page()
 
         # 设置页面内容

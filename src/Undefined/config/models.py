@@ -92,6 +92,7 @@ class VisionModelConfig:
     api_url: str
     api_key: str
     model_name: str
+    max_tokens: int = 8192  # 最大输出 tokens
     queue_interval_seconds: float = 1.0
     api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
@@ -338,6 +339,8 @@ class MemeConfig:
     semantic_top_k: int = 30
     rerank_top_k: int = 20
     worker_max_concurrency: int = 4
+    gif_analysis_mode: str = "grid"
+    gif_analysis_frames: int = 6
 
 
 @dataclass

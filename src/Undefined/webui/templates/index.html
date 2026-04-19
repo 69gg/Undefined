@@ -314,6 +314,15 @@
                                 <span id="systemKernel" class="stat-value">--</span>
                             </div>
                         </div>
+
+                        <div class="card" style="grid-column: 1 / -1;">
+                            <div class="card-title" data-i18n="overview.chart">资源趋势</div>
+                            <canvas id="metricsChart" width="800" height="200" style="width: 100%; height: 200px;"></canvas>
+                            <div style="display: flex; gap: 16px; margin-top: 8px; font-size: 12px; color: var(--text-secondary);">
+                                <span><span style="display:inline-block;width:12px;height:3px;background:var(--accent-color);vertical-align:middle;margin-right:4px;border-radius:2px;"></span>CPU</span>
+                                <span><span style="display:inline-block;width:12px;height:3px;background:var(--success);vertical-align:middle;margin-right:4px;border-radius:2px;"></span>Memory</span>
+                            </div>
+                        </div>
                     </div>
                 </section>
 
@@ -347,18 +356,30 @@
                                 更多操作
                             </button>
                             <div id="configSecondaryActions" class="toolbar-group toolbar-group-secondary">
+                                <button id="btnToggleToml" class="btn ghost btn-sm" data-i18n="config.view_toml">查看 TOML</button>
                                 <button id="btnExpandAll" class="btn ghost btn-sm"
                                     data-i18n="config.expand_all">全部展开</button>
                                 <button id="btnCollapseAll" class="btn ghost btn-sm"
                                     data-i18n="config.collapse_all">全部折叠</button>
                                 <button id="btnSyncConfigTemplate" class="btn ghost btn-sm"
                                     data-i18n="config.sync_template">同步模板</button>
+                                <button id="btnConfigHistory" class="btn ghost btn-sm"
+                                    data-i18n="config.history">版本历史</button>
                                 <button id="btnResetConfig" class="btn ghost" data-i18n="config.reset">重置更改</button>
                             </div>
                         </div>
                     </div>
                     <div id="configState" class="empty-state" style="display:none;"></div>
                     <div id="formSections" class="form-grid"></div>
+                    <div id="tomlViewer" style="display: none;">
+                        <pre id="tomlContent" class="log-viewer" style="height: auto; max-height: 600px; white-space: pre-wrap; word-wrap: break-word; user-select: text;"></pre>
+                    </div>
+                    <div id="configHistoryPanel" style="display: none;">
+                        <div class="card" style="padding: 20px;">
+                            <div style="font-weight:600;margin-bottom:12px;" data-i18n="config.history">版本历史</div>
+                            <div id="configHistoryList" style="max-height: 400px; overflow-y: auto;"></div>
+                        </div>
+                    </div>
                 </section>
 
                 <!-- Tab Logs -->
@@ -403,6 +424,10 @@
                                     <input type="checkbox" id="logLevelGteToggle" class="toggle-input">
                                     <span class="toggle-track"><span class="toggle-handle"></span></span>
                                 </label>
+                                <input id="logTimeFrom" type="datetime-local" class="form-control form-control-sm" style="width: auto; min-width: 160px;"
+                                    title="Start time" />
+                                <input id="logTimeTo" type="datetime-local" class="form-control form-control-sm" style="width: auto; min-width: 160px;"
+                                    title="End time" />
                                 <input id="logSearchInput" type="search" class="form-control form-control-sm"
                                     data-i18n-placeholder="logs.search_placeholder" placeholder="搜索日志" />
                                 <button id="btnClearLogs" class="btn ghost btn-sm" data-i18n="logs.clear">清空</button>
@@ -446,7 +471,7 @@
                     <div class="header">
                         <div>
                             <h1 class="page-title" data-i18n="memory.title">记忆检索</h1>
-                            <p class="page-subtitle" data-i18n="memory.subtitle">只读检索记忆、认知事件与侧写。</p>
+                            <p class="page-subtitle" data-i18n="memory.subtitle">管理长期记忆，检索认知事件与侧写。</p>
                         </div>
                         <div class="toolbar">
                             <button id="btnMemoryRefresh" class="btn" data-i18n="memory.refresh">刷新</button>
@@ -467,7 +492,7 @@
                                         </button>
                                     </div>
                                     <div class="runtime-filters">
-                                        <input id="runtimeEventsTopK" type="number" min="1" step="1" class="form-control form-control-sm"
+                                        <input id="runtimeEventsTopK" type="number" min="1" max="500" step="1" class="form-control form-control-sm"
                                             data-i18n-placeholder="runtime.topk_placeholder" placeholder="top_k" />
                                         <select id="runtimeEventsRequestType" class="form-control form-control-sm">
                                             <option value="" data-i18n="runtime.request_type_all">全部类型</option>
@@ -503,7 +528,7 @@
                                         </button>
                                     </div>
                                     <div class="runtime-filters">
-                                        <input id="runtimeProfilesTopK" type="number" min="1" step="1" class="form-control form-control-sm"
+                                        <input id="runtimeProfilesTopK" type="number" min="1" max="500" step="1" class="form-control form-control-sm"
                                             data-i18n-placeholder="runtime.topk_placeholder" placeholder="top_k" />
                                         <input id="runtimeProfilesEntityType" type="text" class="form-control form-control-sm"
                                             data-i18n-placeholder="runtime.entity_type_placeholder" placeholder="entity_type" />
@@ -535,7 +560,7 @@
 
                     <div class="card runtime-card">
                         <div class="panel-row runtime-head">
-                            <div class="card-title" data-i18n="runtime.memory_title">长期记忆查询</div>
+                            <div class="card-title" data-i18n="runtime.memory_title">长期记忆管理</div>
                             <div class="runtime-query-stack">
                                 <div class="runtime-inline runtime-inline-action">
                                     <input id="runtimeMemoryQuery" type="search" class="form-control form-control-sm"
@@ -546,13 +571,21 @@
                                     </button>
                                 </div>
                                 <div class="runtime-filters">
-                                    <input id="runtimeMemoryTopK" type="number" min="1" step="1" class="form-control form-control-sm"
+                                    <input id="runtimeMemoryTopK" type="number" min="1" max="500" step="1" class="form-control form-control-sm"
                                         data-i18n-placeholder="runtime.topk_placeholder" placeholder="top_k" />
                                     <input id="runtimeMemoryTimeFrom" type="datetime-local" class="form-control form-control-sm"
                                         title="time_from" />
                                     <input id="runtimeMemoryTimeTo" type="datetime-local" class="form-control form-control-sm"
                                         title="time_to" />
                                 </div>
+                            </div>
+                        </div>
+                        <!-- Inline create form -->
+                        <div id="memoryCreateForm" class="memory-create-form">
+                            <textarea id="memoryCreateInput" class="form-control" rows="2"
+                                placeholder="输入新的记忆内容..."></textarea>
+                            <div class="memory-create-actions">
+                                <button id="btnMemoryCreate" class="btn btn-sm" type="button">添加记忆</button>
                             </div>
                         </div>
                         <div id="runtimeMemoryMeta" class="log-meta"></div>
@@ -782,6 +815,14 @@
                         </pre>
                     </div>
                 </section>
+            </div>
+
+            <!-- Command Palette -->
+            <div id="cmdPaletteOverlay" class="cmd-palette-overlay" style="display:none;" role="dialog" aria-label="Command Palette">
+                <div class="cmd-palette">
+                    <input id="cmdPaletteInput" class="cmd-palette-input" type="text" placeholder="Type a command..." autocomplete="off" />
+                    <div id="cmdPaletteList" class="cmd-palette-list"></div>
+                </div>
             </div>
         </main>
     </div>

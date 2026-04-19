@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "fetch_paper",
+        "description": "获取 arXiv 论文元数据并下载 PDF，返回论文基本信息（标题、作者、摘要、页数）。调用后可用 read_paper_pages 分页阅读正文。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "paper_id": {
+                    "type": "string",
+                    "description": "arXiv 论文 ID，如 '2301.07041'"
+                }
+            },
+            "required": ["paper_id"]
+        }
+    }
+}

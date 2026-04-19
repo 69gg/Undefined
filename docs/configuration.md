@@ -426,6 +426,10 @@ Prompt caching 补充：
 |---|---:|---|---|
 | `agent_call_message_enabled` | `"none"` | 调用提示模式 | `none` / `agent` / `tools` / `all` / `clean` |
 | `keyword_reply_enabled` | `false` | 群聊关键词自动回复 | 布尔 |
+| `repeat_enabled` | `false` | 群聊复读（连续 N 条相同消息时复读） | 布尔 |
+| `repeat_threshold` | `3` | 触发复读所需的连续相同消息条数（来自不同发送者） | 整数，2–20 |
+| `repeat_cooldown_minutes` | `60` | 复读冷却时间（分钟）。同一内容被复读后，在冷却期内不再重复复读。？和 ? 视为等价。0 = 无冷却 | 整数，≥ 0 |
+| `inverted_question_enabled` | `false` | 倒问号（复读触发时若消息为问号则发送 ¿） | 布尔 |
 
 兼容：历史字段 `[core].keyword_reply_enabled` 仍可读取，建议迁移到 `[easter_egg]`。
 
@@ -722,6 +726,8 @@ Prompt caching 补充：
 | `max_items` | `10000` | 表情包条目上限 | `<=0` 回退 `10000` |
 | `max_total_bytes` | `5368709120` | 表情包总磁盘占用上限（字节） | `<=0` 回退 `5368709120` |
 | `allow_gif` | `true` | 是否允许 GIF 入库 | |
+| `gif_analysis_mode` | `"grid"` | GIF 动图判定分析模式：`"grid"` (网格拼图)、`"multi"` (多图逐帧)、`"first_frame"` (仅第一帧) | 非法值回退 `"grid"` |
+| `gif_analysis_frames` | `6` | GIF 动图抽帧供模型识别的数量 | `<=0` 回退 `6` |
 | `auto_ingest_group` | `true` | 是否自动处理群聊图片 | |
 | `auto_ingest_private` | `true` | 是否自动处理私聊图片 | |
 | `keyword_top_k` | `30` | 关键词候选召回数 | `<=0` 回退 `30` |
@@ -732,7 +738,8 @@ Prompt caching 补充：
 - 表情包入库走两阶段 LLM 管线：
   1. 判定是否为表情包
   2. 对通过判定的图片生成纯文本描述与标签
-- 第一阶段失败时，按“不是表情包”处理，直接丢弃。
+- 第一阶段失败时，按“不是表情包”处理，直接丢弃（如果是网络和服务器限流等异常，系统会在后台自动重试）。
+- 对于 GIF 格式图片的分析，`"grid"` 模式会将多个抽帧横向并排或拼接在一张大图中降低计费单元，`"multi"` 模式则将各帧作为独立图像输入至多模态大模型。
 - 第二阶段不做 OCR；向量存储和检索文本只使用纯文本 `description + tags + aliases`。
 - 同一图片内容在单进程内会按 `SHA256` 串行入库，避免并发表情包重复写入。
 - 若入库在写入来源记录或向量索引阶段失败，会回滚已写入的元数据与本地文件，避免残留孤儿记录。

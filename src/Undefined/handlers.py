@@ -1,11 +1,14 @@
 """消息处理和命令分发"""
 
+from __future__ import annotations
+
 import asyncio
 from dataclasses import dataclass
 import logging
 import os
 from pathlib import Path
 import random
+import time
 from typing import Any, Coroutine
 
 from Undefined.attachments import (
@@ -28,6 +31,7 @@ from Undefined.utils.common import (
     parse_message_content_for_history,
     matches_xinliweiyuan,
 )
+from Undefined.utils.fake_at import BotNicknameCache, strip_fake_at
 from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.scheduler import TaskScheduler
 from Undefined.utils.sender import MessageSender
@@ -39,18 +43,12 @@ from Undefined.utils.queue_intervals import build_model_queue_intervals
 
 from Undefined.scheduled_task_storage import ScheduledTaskStorage
 from Undefined.utils.logging import log_debug_json, redact_string
+from Undefined.utils.coerce import safe_int
 
 logger = logging.getLogger(__name__)
 
 KEYWORD_REPLY_HISTORY_PREFIX = "[系统关键词自动回复] "
-
-
-def _safe_int(value: Any) -> int | None:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed > 0 else None
+REPEAT_REPLY_HISTORY_PREFIX = "[系统复读] "
 
 
 def _format_poke_history_text(display_name: str, user_id: int) -> str:
@@ -71,6 +69,7 @@ class GroupPokeRecord:
     group_name: str
     sender_role: str
     sender_title: str
+    sender_level: str
 
 
 class MessageHandler:
@@ -112,6 +111,7 @@ class MessageHandler:
             self.security,
             queue_manager=self.queue_manager,
             rate_limiter=self.rate_limiter,
+            history_manager=self.history_manager,
         )
         self.ai_coordinator = AICoordinator(
             config,
@@ -127,9 +127,128 @@ class MessageHandler:
 
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._profile_name_refresh_cache: dict[tuple[str, int], str] = {}
+        self._bot_nickname_cache = BotNicknameCache(onebot, config.bot_qq)
+
+        # 复读功能状态（按群跟踪最近消息文本与发送者）
+        self._repeat_counter: dict[int, list[tuple[str, int]]] = {}
+        self._repeat_locks: dict[int, asyncio.Lock] = {}
+        # 复读冷却：group_id → {normalized_text → monotonic_timestamp}
+        self._repeat_cooldown: dict[int, dict[str, float]] = {}
 
         # 启动队列
         self.ai_coordinator.queue_manager.start(self.ai_coordinator.execute_reply)
+
+    def _get_repeat_lock(self, group_id: int) -> asyncio.Lock:
+        """获取或创建指定群的复读竞态保护锁。"""
+        lock = self._repeat_locks.get(group_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._repeat_locks[group_id] = lock
+        return lock
+
+    @staticmethod
+    def _normalize_repeat_text(text: str) -> str:
+        """规范化复读文本用于冷却比较（？→?）。"""
+        return text.replace("？", "?")
+
+    def _is_repeat_on_cooldown(self, group_id: int, text: str) -> bool:
+        """检查指定群的文本是否在复读冷却期内。"""
+        cooldown_minutes = self.config.repeat_cooldown_minutes
+        if cooldown_minutes <= 0:
+            return False
+        group_cd = self._repeat_cooldown.get(group_id)
+        if not group_cd:
+            return False
+        key = self._normalize_repeat_text(text)
+        last_time = group_cd.get(key)
+        if last_time is None:
+            return False
+        return (time.monotonic() - last_time) < cooldown_minutes * 60
+
+    def _record_repeat_cooldown(self, group_id: int, text: str) -> None:
+        """记录复读冷却时间戳，同时清理已过期条目防止内存泄漏。"""
+        cooldown_seconds = self.config.repeat_cooldown_minutes * 60
+        if cooldown_seconds <= 0:
+            return
+        key = self._normalize_repeat_text(text)
+        group_cd = self._repeat_cooldown.setdefault(group_id, {})
+        now = time.monotonic()
+        # 清理已过期条目
+        expired = [k for k, ts in group_cd.items() if (now - ts) >= cooldown_seconds]
+        for k in expired:
+            del group_cd[k]
+        group_cd[key] = now
+
+    async def _annotate_meme_descriptions(
+        self,
+        attachments: list[dict[str, str]],
+        scope_key: str,
+    ) -> list[dict[str, str]]:
+        """为图片附件添加表情包描述（如果在表情库中找到）。
+
+        采用批量查询：收集所有 SHA256 哈希值，一次性查询，然后映射结果。
+        最佳努力：任何失败时返回原始列表。
+        """
+        if not attachments:
+            return attachments
+
+        ai_client = getattr(self, "ai", None)
+        if ai_client is None:
+            return attachments
+
+        attachment_registry = getattr(ai_client, "attachment_registry", None)
+        if attachment_registry is None:
+            return attachments
+
+        meme_service = getattr(ai_client, "_meme_service", None)
+        if meme_service is None or not getattr(meme_service, "enabled", False):
+            return attachments
+
+        meme_store = getattr(meme_service, "_store", None)
+        if meme_store is None:
+            return attachments
+
+        try:
+            # 1. 从图片附件收集唯一的 SHA256 哈希值
+            uid_to_hash: dict[str, str] = {}
+            for att in attachments:
+                uid = att.get("uid", "")
+                if not uid.startswith("pic_"):
+                    continue
+                record = attachment_registry.resolve(uid, scope_key)
+                if record and record.sha256:
+                    uid_to_hash[uid] = record.sha256
+
+            if not uid_to_hash:
+                return attachments
+
+            # 2. 批量查询：去重哈希值
+            unique_hashes = set(uid_to_hash.values())
+            hash_to_desc: dict[str, str] = {}
+            for h in unique_hashes:
+                meme = await meme_store.find_by_sha256(h)
+                if meme and meme.description:
+                    hash_to_desc[h] = meme.description
+
+            if not hash_to_desc:
+                return attachments
+
+            # 3. 构建带注释的新列表
+            result: list[dict[str, str]] = []
+            for att in attachments:
+                uid = att.get("uid", "")
+                sha = uid_to_hash.get(uid, "")
+                desc = hash_to_desc.get(sha, "")
+                if desc:
+                    new_att = dict(att)
+                    new_att["description"] = f"[表情包] {desc}"
+                    result.append(new_att)
+                else:
+                    result.append(att)
+            return result
+        except Exception:
+            logger.warning("表情包自动匹配失败，跳过", exc_info=True)
+            return attachments
 
     async def _collect_message_attachments(
         self,
@@ -163,7 +282,10 @@ class MessageHandler:
             if onebot
             else None,
         )
-        return result.attachments
+        attachments = result.attachments
+        # 为图片附件添加表情包描述
+        attachments = await self._annotate_meme_descriptions(attachments, scope_key)
+        return attachments
 
     def _schedule_meme_ingest(
         self,
@@ -371,6 +493,7 @@ class MessageHandler:
                     group_name=group_poke.group_name,
                     sender_role=group_poke.sender_role,
                     sender_title=group_poke.sender_title,
+                    sender_level=group_poke.sender_level,
                 )
             return
 
@@ -409,10 +532,19 @@ class MessageHandler:
                     logger.warning("获取用户昵称失败: %s", exc)
 
             text = extract_text(private_message_content, self.config.bot_qq)
-            private_attachments = await self._collect_message_attachments(
-                private_message_content,
-                user_id=private_sender_id,
-                request_type="private",
+            # 并行执行附件收集和历史内容解析
+            private_attachments, parsed_content_raw = await asyncio.gather(
+                self._collect_message_attachments(
+                    private_message_content,
+                    user_id=private_sender_id,
+                    request_type="private",
+                ),
+                parse_message_content_for_history(
+                    private_message_content,
+                    self.config.bot_qq,
+                    self.onebot.get_msg,
+                    self.onebot.get_forward_msg,
+                ),
             )
             safe_text = redact_string(text)
             logger.info(
@@ -428,15 +560,10 @@ class MessageHandler:
                 sender_name=resolved_private_name,
             )
 
-            # 保存私聊消息到历史记录（保存处理后的内容）
-            # 使用新的工具函数解析内容
-            parsed_content = await parse_message_content_for_history(
-                private_message_content,
-                self.config.bot_qq,
-                self.onebot.get_msg,
-                self.onebot.get_forward_msg,
+            # 保存私聊消息到历史记录
+            parsed_content = append_attachment_text(
+                parsed_content_raw, private_attachments
             )
-            parsed_content = append_attachment_text(parsed_content, private_attachments)
             safe_parsed = redact_string(parsed_content)
             logger.debug(
                 "[历史记录] 保存私聊: user=%s content=%s...",
@@ -461,7 +588,7 @@ class MessageHandler:
                 chat_type="private",
                 chat_id=private_sender_id,
                 sender_id=private_sender_id,
-                message_id=_safe_int(trigger_message_id),
+                message_id=safe_int(trigger_message_id),
                 scope_key=build_attachment_scope(
                     user_id=private_sender_id,
                     request_type="private",
@@ -557,29 +684,41 @@ class MessageHandler:
         sender_nickname: str = group_sender.get("nickname", "")
         sender_role: str = group_sender.get("role", "member")
         sender_title: str = group_sender.get("title", "")
+        sender_level: str = str(group_sender.get("level", "")).strip()
 
         # 提取文本内容
         text = extract_text(message_content, self.config.bot_qq)
-        group_attachments = await self._collect_message_attachments(
-            message_content,
-            group_id=group_id,
-            request_type="group",
-        )
         safe_text = redact_string(text)
         logger.info(
             f"[群消息] group={group_id} sender={sender_id} name={sender_card or sender_nickname} "
             f"role={sender_role} | {safe_text[:100]}"
         )
 
-        # 保存消息到历史记录 (使用处理后的内容)
-        # 获取群聊名
-        group_name = ""
-        try:
-            group_info = await self.onebot.get_group_info(group_id)
-            if group_info:
-                group_name = group_info.get("group_name", "")
-        except Exception as e:
-            logger.warning(f"获取群聊名失败: {e}")
+        # 并行执行 3 个独立的异步操作：附件收集、群信息获取、历史内容解析
+        async def _fetch_group_name() -> str:
+            try:
+                info = await self.onebot.get_group_info(group_id)
+                if info:
+                    return str(info.get("group_name", "") or "")
+            except Exception as e:
+                logger.warning(f"获取群聊名失败: {e}")
+            return ""
+
+        group_attachments, group_name, parsed_content_raw = await asyncio.gather(
+            self._collect_message_attachments(
+                message_content,
+                group_id=group_id,
+                request_type="group",
+            ),
+            _fetch_group_name(),
+            parse_message_content_for_history(
+                message_content,
+                self.config.bot_qq,
+                self.onebot.get_msg,
+                self.onebot.get_forward_msg,
+            ),
+        )
+
         resolved_group_sender_name = (sender_card or sender_nickname or "").strip()
         self._schedule_profile_display_name_refresh(
             task_name=f"profile_name_refresh_group:{group_id}:{sender_id}",
@@ -589,14 +728,8 @@ class MessageHandler:
             group_name=str(group_name or "").strip(),
         )
 
-        # 使用新的 utils
-        parsed_content = await parse_message_content_for_history(
-            message_content,
-            self.config.bot_qq,
-            self.onebot.get_msg,
-            self.onebot.get_forward_msg,
-        )
-        parsed_content = append_attachment_text(parsed_content, group_attachments)
+        # 保存消息到历史记录
+        parsed_content = append_attachment_text(parsed_content_raw, group_attachments)
         safe_parsed = redact_string(parsed_content)
         logger.debug(
             f"[历史记录] 保存群聊: group={group_id}, sender={sender_id}, content={safe_parsed[:50]}..."
@@ -610,12 +743,23 @@ class MessageHandler:
             group_name=group_name,
             role=sender_role,
             title=sender_title,
+            level=sender_level,
             message_id=trigger_message_id,
             attachments=group_attachments,
         )
 
         # 如果是 bot 自己的消息，只保存不触发回复，避免无限循环
+        # 同时把 bot 自身的发言写入复读计数器，使窗口中留有 bot 标记，
+        # 后续触发检查时会排除含 bot 的窗口，防止"bot 先发 → 用户跟发"或
+        # "用户发到一半 bot 插入"等情况误触复读。
         if sender_id == self.config.bot_qq:
+            if self.config.repeat_enabled and text:
+                async with self._get_repeat_lock(group_id):
+                    counter = self._repeat_counter.setdefault(group_id, [])
+                    counter.append((text, sender_id))
+                    n = self.config.repeat_threshold
+                    if len(counter) > n:
+                        self._repeat_counter[group_id] = counter[-n:]
             return
 
         self._schedule_meme_ingest(
@@ -623,12 +767,28 @@ class MessageHandler:
             chat_type="group",
             chat_id=group_id,
             sender_id=sender_id,
-            message_id=_safe_int(trigger_message_id),
+            message_id=safe_int(trigger_message_id),
             scope_key=build_attachment_scope(group_id=group_id, request_type="group"),
         )
 
         # 检查是否 @ 了机器人（后续分流共用）
         is_at_bot = self.ai_coordinator._is_at_bot(message_content)
+
+        # 假@检测：识别 "@昵称" 纯文本形式
+        # normalized_text 用于命令解析和 AI 路由，原始 text 已用于历史/日志
+        is_fake_at = False
+        normalized_text = text
+        if not is_at_bot:
+            nicknames = await self._bot_nickname_cache.get_nicknames(group_id)
+            if nicknames:
+                is_fake_at, normalized_text = strip_fake_at(text, nicknames)
+                if is_fake_at:
+                    is_at_bot = True
+                    logger.info(
+                        "[假@] 识别到假@: group=%s sender=%s",
+                        group_id,
+                        sender_id,
+                    )
 
         # 关闭“每条消息处理”后，仅处理 @ 消息（私聊/拍一拍在其他分支中处理）
         if not self.config.should_process_group_message(is_at_bot=is_at_bot):
@@ -684,6 +844,55 @@ class MessageHandler:
             )
             return
 
+        # 复读功能：连续 N 条相同消息（来自不同发送者）时复读，N = repeat_threshold
+        if self.config.repeat_enabled and text:
+            n = self.config.repeat_threshold
+            async with self._get_repeat_lock(group_id):
+                counter = self._repeat_counter.setdefault(group_id, [])
+                counter.append((text, sender_id))
+                # 只保留最近 n 条
+                if len(counter) > n:
+                    self._repeat_counter[group_id] = counter[-n:]
+                    counter = self._repeat_counter[group_id]
+
+                if len(counter) >= n:
+                    last_n = counter[-n:]
+                    texts = [t for t, _ in last_n]
+                    senders = [s for _, s in last_n]
+                    if (
+                        len(set(texts)) == 1
+                        and len(set(senders)) == n
+                        and self.config.bot_qq not in senders
+                    ):
+                        reply_text = texts[0]
+                        # 冷却检查：同一内容在冷却期内不再复读
+                        if self._is_repeat_on_cooldown(group_id, reply_text):
+                            self._repeat_counter[group_id] = []
+                            logger.debug(
+                                "[复读] 冷却中跳过: group=%s text=%s",
+                                group_id,
+                                redact_string(reply_text)[:50],
+                            )
+                        else:
+                            if self.config.inverted_question_enabled:
+                                stripped = reply_text.strip()
+                                if set(stripped) <= {"?", "？"}:
+                                    reply_text = "¿" * len(stripped)
+                            # 清空计数器防止重复触发
+                            self._repeat_counter[group_id] = []
+                            self._record_repeat_cooldown(group_id, texts[0])
+                            logger.info(
+                                "[复读] 触发复读: group=%s text=%s",
+                                group_id,
+                                redact_string(reply_text)[:50],
+                            )
+                            await self.sender.send_group_message(
+                                group_id,
+                                reply_text,
+                                history_prefix=REPEAT_REPLY_HISTORY_PREFIX,
+                            )
+                            return
+
         # Bilibili 视频自动提取
         if self.config.bilibili_auto_extract_enabled:
             if self.config.is_bilibili_auto_extract_allowed_group(group_id):
@@ -709,26 +918,28 @@ class MessageHandler:
         # 提取文本内容
         # (已在上方提取用于日志记录)
 
-        # 只有被@时才处理斜杠命令
+        # 只有被@时才处理斜杠命令（使用 normalized_text 以支持假@后的命令）
         if is_at_bot:
-            command = self.command_dispatcher.parse_command(text)
+            command = self.command_dispatcher.parse_command(normalized_text)
             if command:
                 await self.command_dispatcher.dispatch(group_id, sender_id, command)
                 return
 
-        # 自动回复处理
+        # 自动回复处理（使用 normalized_text 以去除假@前缀）
         display_name = sender_card or sender_nickname or str(sender_id)
         await self.ai_coordinator.handle_auto_reply(
             group_id,
             sender_id,
-            text,
+            normalized_text,
             message_content,
             attachments=group_attachments,
             sender_name=display_name,
             group_name=group_name,
             sender_role=sender_role,
             sender_title=sender_title,
+            sender_level=sender_level,
             trigger_message_id=trigger_message_id,
+            is_fake_at=is_fake_at,
         )
 
     async def _record_private_poke_history(
@@ -790,11 +1001,13 @@ class MessageHandler:
         sender_nickname = ""
         sender_role = "member"
         sender_title = ""
+        sender_level = ""
         if isinstance(sender, dict):
             sender_card = str(sender.get("card", "")).strip()
             sender_nickname = str(sender.get("nickname", "")).strip()
             sender_role = str(sender.get("role", "member")).strip() or "member"
             sender_title = str(sender.get("title", "")).strip()
+            sender_level = str(sender.get("level", "")).strip()
 
         if not sender_card and not sender_nickname:
             try:
@@ -808,6 +1021,7 @@ class MessageHandler:
                         str(member_info.get("role", "member")).strip() or "member"
                     )
                     sender_title = str(member_info.get("title", "")).strip()
+                    sender_level = str(member_info.get("level", "")).strip()
             except Exception as exc:
                 logger.warning(
                     "[通知] 获取拍一拍群成员信息失败: group=%s user=%s err=%s",
@@ -851,6 +1065,7 @@ class MessageHandler:
                 group_name=normalized_group_name,
                 role=sender_role,
                 title=sender_title,
+                level=sender_level,
             )
         except Exception as exc:
             logger.warning(
@@ -865,6 +1080,7 @@ class MessageHandler:
             group_name=normalized_group_name,
             sender_role=sender_role,
             sender_title=sender_title,
+            sender_level=sender_level,
         )
 
     async def _extract_bilibili_ids(

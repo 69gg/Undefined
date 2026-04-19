@@ -43,6 +43,7 @@ def test_prune_mode_reports_analysis_before_write(
             added_paths=[],
             removed_paths=["models.chat.extra"],
             comments={},
+            updated_comment_paths=[],
         )
 
     monkeypatch.setattr(module, "sync_config_file", fake_sync_config_file)

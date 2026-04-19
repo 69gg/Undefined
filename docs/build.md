@@ -28,6 +28,57 @@ uv sync --group dev -p 3.12
 uv run playwright install
 ```
 
+### 系统级 LaTeX 环境（必装，用于 `render.render_latex`）
+
+`render.render_latex` 使用系统外部 LaTeX（`usetex=True`）渲染公式，**必须提前安装**，否则渲染会失败并返回错误。
+
+**Debian / Ubuntu**
+
+```bash
+sudo apt-get update
+sudo apt-get install -y texlive-full dvipng ghostscript
+```
+
+**Arch Linux**
+
+```bash
+sudo pacman -S --needed \
+  texlive-basic \
+  texlive-bin \
+  texlive-latex \
+  texlive-latexrecommended \
+  texlive-latexextra \
+  texlive-fontsrecommended \
+  texlive-binextra \
+  texlive-mathscience \
+  ghostscript
+```
+
+**macOS**
+
+```bash
+# 推荐 MacTeX（完整，约 4 GB）
+brew install --cask mactex-no-gui
+
+# 或体积更小的 BasicTeX，之后按需补包
+brew install --cask basictex
+sudo tlmgr update --self
+sudo tlmgr install dvipng type1cm type1ec cm-super collection-fontsrecommended
+```
+
+**Windows**
+
+安装 [MiKTeX](https://miktex.org/download)（推荐，缺包时自动下载）或 [TeX Live](https://tug.org/texlive/windows.html)。安装完成后在 MiKTeX Console 里手动安装 `dvipng` 包，并确保 `latex.exe` 在 PATH 中。
+
+**验证**
+
+```bash
+latex --version
+dvipng --version
+```
+
+若日志出现 `type1ec.sty not found` 或 `latex was not able to process`，TeX 包仍不完整：Debian / Ubuntu 已装 `texlive-full` 则无需额外操作；Arch 补装 `texlive-latexextra` `texlive-fontsrecommended` `texlive-binextra`；macOS BasicTeX 用户运行 `sudo tlmgr install cm-super`。
+
 ### Node.js / Rust / Tauri
 
 如果需要构建跨平台控制台，请额外准备：

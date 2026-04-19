@@ -30,7 +30,7 @@
                 },
                 "member_limit": {
                     "type": "integer",
-                    "description": "返回成员列表的数量限制（最大100），默认 20",
+                    "description": "返回成员列表的数量限制，上限由服务器配置决定，默认 20",
                     "default": 20
                 }
             },
