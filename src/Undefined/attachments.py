@@ -47,6 +47,7 @@ _MEDIA_LABELS = {
     "audio": "音频",
     "video": "视频",
     "record": "语音",
+    "pic": "图片",
 }
 _WINDOWS_ABS_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 _DEFAULT_REMOTE_TIMEOUT_SECONDS = 120.0

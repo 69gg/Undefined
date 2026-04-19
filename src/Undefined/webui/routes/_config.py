@@ -239,9 +239,11 @@ async def config_restore_handler(request: web.Request) -> Response:
     except Exception:
         return web.json_response({"error": "Invalid JSON"}, status=400)
     name = str(data.get("name", ""))
-    if not name or ".." in name or "/" in name:
+    if not name or ".." in name or "/" in name or "\\" in name:
         return web.json_response({"error": "Invalid backup name"}, status=400)
-    backup_path = _BACKUP_DIR / name
+    backup_path = (_BACKUP_DIR / name).resolve()
+    if not str(backup_path).startswith(str(_BACKUP_DIR.resolve())):
+        return web.json_response({"error": "Invalid backup name"}, status=400)
     if not backup_path.exists():
         return web.json_response({"error": "Backup not found"}, status=404)
     content = backup_path.read_text(encoding="utf-8")
