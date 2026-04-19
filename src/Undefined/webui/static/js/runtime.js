@@ -303,12 +303,12 @@
         params.set(key, text);
     }
 
-    function appendPositiveIntParam(params, key, value) {
+    function appendPositiveIntParam(params, key, value, max = 500) {
         const text = String(value || "").trim();
         if (!text) return;
         const num = Number.parseInt(text, 10);
         if (!Number.isFinite(num) || num <= 0) return;
-        params.set(key, String(num));
+        params.set(key, String(Math.min(num, max)));
     }
 
     function formatNumeric(value, digits = 4) {

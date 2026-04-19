@@ -725,6 +725,7 @@ class CognitiveService:
             top_k = default_top_k
         if top_k <= 0:
             top_k = default_top_k
+        top_k = min(top_k, 500)
         try:
             events = await self._query_events_for_auto_context(
                 query=query,
@@ -819,6 +820,7 @@ class CognitiveService:
             top_k = default_top_k
         if top_k <= 0:
             top_k = default_top_k
+        top_k = min(top_k, 500)
         logger.info(
             "[认知服务] 搜索事件: query_len=%s top_k=%s where=%s time_from=%s time_to=%s",
             len(query or ""),
@@ -872,6 +874,7 @@ class CognitiveService:
             top_k = default_top_k
         if top_k <= 0:
             top_k = default_top_k
+        top_k = min(top_k, 500)
 
         where: dict[str, Any] | None = None
         entity_type_raw = kwargs.get("entity_type")

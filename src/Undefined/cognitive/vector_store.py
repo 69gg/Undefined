@@ -34,13 +34,15 @@ def _clamp(value: float, lower: float, upper: float) -> float:
     return value
 
 
-def _safe_positive_int(value: Any, default: int) -> int:
+def _safe_positive_int(value: Any, default: int, maximum: int = 0) -> int:
     try:
         parsed = int(value)
     except Exception:
         return max(1, int(default))
     if parsed <= 0:
         return max(1, int(default))
+    if maximum > 0 and parsed > maximum:
+        return maximum
     return parsed
 
 
@@ -427,7 +429,7 @@ class CognitiveVectorStore:
         query_embedding: list[float] | None = None,
     ) -> list[dict[str, Any]]:
         col_name = getattr(col, "name", "unknown")
-        safe_top_k = _safe_positive_int(top_k, default=1)
+        safe_top_k = _safe_positive_int(top_k, default=1, maximum=500)
         safe_multiplier = _safe_positive_int(candidate_multiplier, default=1)
         total_started = time.perf_counter()
         logger.debug(
@@ -455,6 +457,7 @@ class CognitiveVectorStore:
             use_reranker or apply_time_decay or apply_mmr
         )
         fetch_k = safe_top_k * safe_multiplier if use_extra_candidates else safe_top_k
+        fetch_k = min(fetch_k, 10000)
         include: list[str] = ["documents", "metadatas", "distances"]
         if apply_mmr:
             include.append("embeddings")

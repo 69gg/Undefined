@@ -314,6 +314,27 @@
         return payload;
     }
 
+    let _debounceTimer = null;
+    let _pendingRefresh = false;
+
+    function debouncedFetchList(delayMs = 350) {
+        if (_debounceTimer !== null) {
+            clearTimeout(_debounceTimer);
+        }
+        _debounceTimer = setTimeout(() => {
+            _debounceTimer = null;
+            fetchList().catch(showError);
+        }, delayMs);
+    }
+
+    function flushDebouncedFetchList() {
+        if (_debounceTimer !== null) {
+            clearTimeout(_debounceTimer);
+            _debounceTimer = null;
+        }
+        fetchList().catch(showError);
+    }
+
     async function fetchList(options = {}) {
         const append = !!options.append;
         if (append) {
@@ -321,6 +342,7 @@
                 return null;
             }
         } else if (state.loading) {
+            _pendingRefresh = true;
             return null;
         }
 
@@ -414,6 +436,10 @@
                     state.loading = false;
                 }
                 renderLoadMore();
+            }
+            if (!append && _pendingRefresh) {
+                _pendingRefresh = false;
+                fetchList().catch(showError);
             }
         }
     }
@@ -558,7 +584,7 @@
             state.initialized = true;
             get("btnMemesRefresh")?.addEventListener("click", refreshAll);
             get("btnMemesSearch")?.addEventListener("click", () => {
-                fetchList().catch(showError);
+                flushDebouncedFetchList();
             });
             get("btnMemesLoadMore")?.addEventListener("click", () => {
                 fetchList({ append: true }).catch(showError);
@@ -579,14 +605,17 @@
             get("btnMemesDelete")?.addEventListener("click", () => {
                 deleteSelected().catch(showError);
             });
-            bindEnter("memesSearchInput", () => {
-                fetchList().catch(showError);
-            });
-            bindEnter("memesKeywordQuery", () => {
-                fetchList().catch(showError);
-            });
-            bindEnter("memesSemanticQuery", () => {
-                fetchList().catch(showError);
+            bindEnter("memesSearchInput", flushDebouncedFetchList);
+            bindEnter("memesKeywordQuery", flushDebouncedFetchList);
+            bindEnter("memesSemanticQuery", flushDebouncedFetchList);
+            [
+                "memesSearchInput",
+                "memesKeywordQuery",
+                "memesSemanticQuery",
+            ].forEach((id) => {
+                const el = get(id);
+                if (el)
+                    el.addEventListener("input", () => debouncedFetchList());
             });
             [
                 "memesQueryMode",
