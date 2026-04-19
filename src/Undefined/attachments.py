@@ -1154,9 +1154,9 @@ async def render_message_with_attachments(
 
         # Route by media type
         if record.media_type == "image":
-            _render_image_tag(record, uid, strict, delivery_parts, history_parts)
+            ok = _render_image_tag(record, uid, strict, delivery_parts, history_parts)
         else:
-            _render_file_tag(
+            ok = _render_file_tag(
                 record,
                 uid,
                 strict,
@@ -1165,7 +1165,8 @@ async def render_message_with_attachments(
                 pending_files,
             )
 
-        attachments.append(record.prompt_ref())
+        if ok:
+            attachments.append(record.prompt_ref())
 
     delivery_parts.append(message[last_index:])
     history_parts.append(message[last_index:])
@@ -1183,8 +1184,8 @@ def _render_image_tag(
     strict: bool,
     delivery_parts: list[str],
     history_parts: list[str],
-) -> None:
-    """Render an image attachment as an inline CQ:image."""
+) -> bool:
+    """Render an image attachment as an inline CQ:image. Returns True on success."""
     image_source = record.source_ref
     if record.local_path:
         image_source = Path(record.local_path).resolve().as_uri()
@@ -1194,7 +1195,7 @@ def _render_image_tag(
             raise AttachmentRenderError(f"图片 UID 缺少可发送的文件：{uid}")
         delivery_parts.append(replacement)
         history_parts.append(replacement)
-        return
+        return False
 
     cq_args = [f"file={image_source}"]
     for key, value in dict(getattr(record, "segment_data", {}) or {}).items():
@@ -1210,6 +1211,7 @@ def _render_image_tag(
         history_parts.append(f"[图片 uid={uid} name={record.display_name}]")
     else:
         history_parts.append(f"[图片 uid={uid}]")
+    return True
 
 
 def _render_file_tag(
@@ -1219,21 +1221,22 @@ def _render_file_tag(
     delivery_parts: list[str],
     history_parts: list[str],
     pending_files: list[AttachmentRecord],
-) -> None:
-    """Render a non-image attachment as a pending file send."""
+) -> bool:
+    """Render a non-image attachment as a pending file send. Returns True on success."""
     if not record.local_path or not Path(record.local_path).is_file():
         replacement = f"[文件 uid={uid} 缺少本地文件]"
         if strict:
             raise AttachmentRenderError(f"文件 UID 缺少本地文件，无法发送：{uid}")
         delivery_parts.append(replacement)
         history_parts.append(replacement)
-        return
+        return False
 
     # Remove from delivery text (file sent separately)
     # Keep a readable placeholder in history
     name_part = f" name={record.display_name}" if record.display_name else ""
     history_parts.append(f"[文件 uid={uid}{name_part}]")
     pending_files.append(record)
+    return True
 
 
 # Backward-compatible alias
