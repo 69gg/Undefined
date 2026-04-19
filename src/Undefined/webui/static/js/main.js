@@ -247,12 +247,14 @@ function openCmdPalette() {
     input.value = "";
     _cmdActiveIndex = 0;
     _renderCmdList("");
-    input.focus();
+    trapFocus(overlay);
 }
 
 function closeCmdPalette() {
     const overlay = get("cmdPaletteOverlay");
-    if (overlay) overlay.style.display = "none";
+    if (!overlay) return;
+    releaseFocus(overlay);
+    overlay.style.display = "none";
 }
 
 function _renderCmdList(query) {
