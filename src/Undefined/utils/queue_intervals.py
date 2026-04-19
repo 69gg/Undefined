@@ -24,6 +24,10 @@ def build_model_queue_intervals(config: Config) -> dict[str, float]:
             summary_model.queue_interval_seconds,
         ),
         (config.grok_model.model_name, config.grok_model.queue_interval_seconds),
+        (
+            config.historian_model.model_name,
+            config.historian_model.queue_interval_seconds,
+        ),
     )
     intervals: dict[str, float] = {}
     for model_name, interval in pairs:

@@ -62,6 +62,10 @@ def test_apply_config_updates_propagates_to_security_service() -> None:
                 model_name="grok",
                 queue_interval_seconds=1.0,
             ),
+            historian_model=SimpleNamespace(
+                model_name="historian",
+                queue_interval_seconds=1.0,
+            ),
         ),
     )
     security_service = _FakeSecurityService()
@@ -118,6 +122,10 @@ def test_apply_config_updates_hot_reloads_ai_request_max_retries() -> None:
             ),
             grok_model=SimpleNamespace(
                 model_name="grok",
+                queue_interval_seconds=1.0,
+            ),
+            historian_model=SimpleNamespace(
+                model_name="historian",
                 queue_interval_seconds=1.0,
             ),
         ),
