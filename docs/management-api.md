@@ -25,6 +25,8 @@ uv run Undefined-webui
 4. 直接在控制台启动 Bot
 5. 如需远程管理，再让桌面端或 Android App 连接同一个 Management API 地址
 
+> WebUI 各页面的功能和操作详见 [WebUI 使用指南](webui-guide.md)。
+
 ## 2. 鉴权模型
 
 Management API 兼容两套鉴权：

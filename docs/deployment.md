@@ -113,6 +113,8 @@ uv run Undefined-webui
 ```
 
 > **重要**：两种方式 **二选一即可**，不要同时运行。若你选择 `Undefined-webui`，请在 WebUI 中管理机器人进程的启停。
+>
+> WebUI 功能详见 [WebUI 使用指南](webui-guide.md)。
 
 ### 6. 跨平台与资源路径（重要）
 
