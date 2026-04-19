@@ -172,6 +172,8 @@ def _parse_memes_config(data: dict[str, Any]) -> MemeConfig:
         worker_max_concurrency=max(
             1, _coerce_int(section.get("worker_max_concurrency"), 4)
         ),
+        gif_analysis_mode=_coerce_str(section.get("gif_analysis_mode"), "grid"),
+        gif_analysis_frames=max(1, _coerce_int(section.get("gif_analysis_frames"), 6)),
     )
 
 
