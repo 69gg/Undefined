@@ -496,10 +496,19 @@ class MessageHandler:
                     logger.warning("获取用户昵称失败: %s", exc)
 
             text = extract_text(private_message_content, self.config.bot_qq)
-            private_attachments = await self._collect_message_attachments(
-                private_message_content,
-                user_id=private_sender_id,
-                request_type="private",
+            # 并行执行附件收集和历史内容解析
+            private_attachments, parsed_content_raw = await asyncio.gather(
+                self._collect_message_attachments(
+                    private_message_content,
+                    user_id=private_sender_id,
+                    request_type="private",
+                ),
+                parse_message_content_for_history(
+                    private_message_content,
+                    self.config.bot_qq,
+                    self.onebot.get_msg,
+                    self.onebot.get_forward_msg,
+                ),
             )
             safe_text = redact_string(text)
             logger.info(
@@ -515,15 +524,10 @@ class MessageHandler:
                 sender_name=resolved_private_name,
             )
 
-            # 保存私聊消息到历史记录（保存处理后的内容）
-            # 使用新的工具函数解析内容
-            parsed_content = await parse_message_content_for_history(
-                private_message_content,
-                self.config.bot_qq,
-                self.onebot.get_msg,
-                self.onebot.get_forward_msg,
+            # 保存私聊消息到历史记录
+            parsed_content = append_attachment_text(
+                parsed_content_raw, private_attachments
             )
-            parsed_content = append_attachment_text(parsed_content, private_attachments)
             safe_parsed = redact_string(parsed_content)
             logger.debug(
                 "[历史记录] 保存私聊: user=%s content=%s...",
@@ -648,26 +652,37 @@ class MessageHandler:
 
         # 提取文本内容
         text = extract_text(message_content, self.config.bot_qq)
-        group_attachments = await self._collect_message_attachments(
-            message_content,
-            group_id=group_id,
-            request_type="group",
-        )
         safe_text = redact_string(text)
         logger.info(
             f"[群消息] group={group_id} sender={sender_id} name={sender_card or sender_nickname} "
             f"role={sender_role} | {safe_text[:100]}"
         )
 
-        # 保存消息到历史记录 (使用处理后的内容)
-        # 获取群聊名
-        group_name = ""
-        try:
-            group_info = await self.onebot.get_group_info(group_id)
-            if group_info:
-                group_name = group_info.get("group_name", "")
-        except Exception as e:
-            logger.warning(f"获取群聊名失败: {e}")
+        # 并行执行 3 个独立的异步操作：附件收集、群信息获取、历史内容解析
+        async def _fetch_group_name() -> str:
+            try:
+                info = await self.onebot.get_group_info(group_id)
+                if info:
+                    return str(info.get("group_name", "") or "")
+            except Exception as e:
+                logger.warning(f"获取群聊名失败: {e}")
+            return ""
+
+        group_attachments, group_name, parsed_content_raw = await asyncio.gather(
+            self._collect_message_attachments(
+                message_content,
+                group_id=group_id,
+                request_type="group",
+            ),
+            _fetch_group_name(),
+            parse_message_content_for_history(
+                message_content,
+                self.config.bot_qq,
+                self.onebot.get_msg,
+                self.onebot.get_forward_msg,
+            ),
+        )
+
         resolved_group_sender_name = (sender_card or sender_nickname or "").strip()
         self._schedule_profile_display_name_refresh(
             task_name=f"profile_name_refresh_group:{group_id}:{sender_id}",
@@ -677,14 +692,8 @@ class MessageHandler:
             group_name=str(group_name or "").strip(),
         )
 
-        # 使用新的 utils
-        parsed_content = await parse_message_content_for_history(
-            message_content,
-            self.config.bot_qq,
-            self.onebot.get_msg,
-            self.onebot.get_forward_msg,
-        )
-        parsed_content = append_attachment_text(parsed_content, group_attachments)
+        # 保存消息到历史记录
+        parsed_content = append_attachment_text(parsed_content_raw, group_attachments)
         safe_parsed = redact_string(parsed_content)
         logger.debug(
             f"[历史记录] 保存群聊: group={group_id}, sender={sender_id}, content={safe_parsed[:50]}..."
