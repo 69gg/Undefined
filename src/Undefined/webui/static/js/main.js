@@ -176,6 +176,142 @@ function setMobileInlineActionsOpen(key, open) {
     syncMobileChrome();
 }
 
+// Command Palette
+const _cmdCommands = [
+    {
+        id: "overview",
+        label: () => t("cmd.tab_overview"),
+        action: () => switchTab("overview"),
+        keys: "1",
+    },
+    {
+        id: "config",
+        label: () => t("cmd.tab_config"),
+        action: () => switchTab("config"),
+        keys: "2",
+    },
+    {
+        id: "logs",
+        label: () => t("cmd.tab_logs"),
+        action: () => switchTab("logs"),
+        keys: "3",
+    },
+    {
+        id: "probes",
+        label: () => t("cmd.tab_probes"),
+        action: () => switchTab("probes"),
+        keys: "4",
+    },
+    {
+        id: "memory",
+        label: () => t("cmd.tab_memory"),
+        action: () => switchTab("memory"),
+        keys: "5",
+    },
+    {
+        id: "memes",
+        label: () => t("cmd.tab_memes"),
+        action: () => switchTab("memes"),
+        keys: "6",
+    },
+    {
+        id: "cognitive",
+        label: () => t("cmd.tab_cognitive"),
+        action: () => switchTab("cognitive"),
+        keys: "7",
+    },
+    {
+        id: "refresh",
+        label: () => t("cmd.refresh"),
+        action: () => location.reload(),
+        keys: "R",
+    },
+    {
+        id: "logout",
+        label: () => t("cmd.logout"),
+        action: () => {
+            get("btnLogout")?.click();
+        },
+        keys: "",
+    },
+];
+
+let _cmdActiveIndex = 0;
+
+function openCmdPalette() {
+    const overlay = get("cmdPaletteOverlay");
+    const input = get("cmdPaletteInput");
+    if (!overlay || !input) return;
+    input.placeholder = t("cmd.placeholder");
+    overlay.style.display = "flex";
+    input.value = "";
+    _cmdActiveIndex = 0;
+    _renderCmdList("");
+    input.focus();
+}
+
+function closeCmdPalette() {
+    const overlay = get("cmdPaletteOverlay");
+    if (overlay) overlay.style.display = "none";
+}
+
+function _renderCmdList(query) {
+    const list = get("cmdPaletteList");
+    if (!list) return;
+    const q = query.trim().toLowerCase();
+    const filtered = q
+        ? _cmdCommands.filter(
+              (c) => c.label().toLowerCase().includes(q) || c.id.includes(q),
+          )
+        : _cmdCommands;
+    if (filtered.length === 0) {
+        list.innerHTML = `<div class="cmd-palette-empty">${escapeHtml(t("cmd.empty"))}</div>`;
+        return;
+    }
+    _cmdActiveIndex = Math.min(_cmdActiveIndex, filtered.length - 1);
+    list.innerHTML = filtered
+        .map(
+            (c, i) =>
+                `<div class="cmd-palette-item${i === _cmdActiveIndex ? " active" : ""}" data-cmd-idx="${i}">${escapeHtml(c.label())}${c.keys ? `<span class="cmd-key">${escapeHtml(c.keys)}</span>` : ""}</div>`,
+        )
+        .join("");
+    list.querySelectorAll(".cmd-palette-item").forEach((el, i) => {
+        el.addEventListener("click", () => {
+            closeCmdPalette();
+            filtered[i].action();
+        });
+        el.addEventListener("mouseenter", () => {
+            _cmdActiveIndex = i;
+            _renderCmdList(query);
+        });
+    });
+}
+
+function _handleCmdKey(e, query) {
+    const list = get("cmdPaletteList");
+    if (!list) return;
+    const q = query.trim().toLowerCase();
+    const filtered = q
+        ? _cmdCommands.filter(
+              (c) => c.label().toLowerCase().includes(q) || c.id.includes(q),
+          )
+        : _cmdCommands;
+    if (e.key === "ArrowDown") {
+        e.preventDefault();
+        _cmdActiveIndex = (_cmdActiveIndex + 1) % filtered.length;
+        _renderCmdList(query);
+    } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        _cmdActiveIndex =
+            (_cmdActiveIndex - 1 + filtered.length) % filtered.length;
+        _renderCmdList(query);
+    } else if (e.key === "Enter" && filtered.length > 0) {
+        e.preventDefault();
+        closeCmdPalette();
+        filtered[_cmdActiveIndex].action();
+    }
+}
+
 async function init() {
     // Global error handlers
     window.onerror = function (message, source, lineno, colno, error) {
@@ -558,8 +694,11 @@ async function init() {
     get("btnToggleToml").onclick = async function () {
         const formGrid = get("formSections");
         const tomlViewer = get("tomlViewer");
+        const historyPanel = get("configHistoryPanel");
         const btn = get("btnToggleToml");
         if (!formGrid || !tomlViewer || !btn) return;
+
+        if (historyPanel) historyPanel.style.display = "none";
 
         const isShowingToml = tomlViewer.style.display !== "none";
         if (isShowingToml) {
@@ -580,6 +719,80 @@ async function init() {
             }
         }
     };
+
+    get("btnConfigHistory")?.addEventListener("click", async () => {
+        const panel = get("configHistoryPanel");
+        const formGrid = get("formSections");
+        const tomlViewer = get("tomlViewer");
+        if (!panel) return;
+
+        const isShowing = panel.style.display !== "none";
+        if (isShowing) {
+            panel.style.display = "none";
+            if (formGrid) formGrid.style.display = "";
+            return;
+        }
+
+        try {
+            const res = await api("/api/config/history");
+            const data = await res.json();
+            const backups = data.backups || [];
+            const list = get("configHistoryList");
+            if (!list) return;
+
+            if (backups.length === 0) {
+                list.innerHTML = `<p style="color:var(--text-tertiary);padding:12px;">${escapeHtml(t("config.history_empty"))}</p>`;
+            } else {
+                list.innerHTML = backups
+                    .map((b) => {
+                        const date = new Date(b.mtime * 1000);
+                        const sizeKB = (b.size / 1024).toFixed(1);
+                        return `<div class="panel" style="margin-bottom:8px;padding:10px 14px;">
+                            <div class="panel-row" style="margin-bottom:0;">
+                                <div>
+                                    <span style="font-weight:600;font-size:13px;">${escapeHtml(b.name)}</span>
+                                    <span style="font-size:12px;color:var(--text-tertiary);margin-left:8px;">${sizeKB} KB · ${date.toLocaleString()}</span>
+                                </div>
+                                <button class="btn btn-sm ghost" data-restore-name="${escapeHtml(b.name)}">${escapeHtml(t("config.history_restore"))}</button>
+                            </div>
+                        </div>`;
+                    })
+                    .join("");
+
+                list.querySelectorAll("[data-restore-name]").forEach((btn) => {
+                    btn.addEventListener("click", async () => {
+                        const name = btn.getAttribute("data-restore-name");
+                        if (!confirm(t("config.history_restore_confirm")))
+                            return;
+                        try {
+                            await api("/api/config/history/restore", {
+                                method: "POST",
+                                headers: {
+                                    "Content-Type": "application/json",
+                                },
+                                body: JSON.stringify({ name }),
+                            });
+                            showToast(t("config.history_restored"), "success");
+                            panel.style.display = "none";
+                            if (formGrid) formGrid.style.display = "";
+                            loadConfig();
+                        } catch (e) {
+                            showToast(
+                                `${t("common.error")}: ${e.message}`,
+                                "error",
+                            );
+                        }
+                    });
+                });
+            }
+
+            if (formGrid) formGrid.style.display = "none";
+            if (tomlViewer) tomlViewer.style.display = "none";
+            panel.style.display = "block";
+        } catch (e) {
+            showToast(`${t("common.error")}: ${e.message}`, "error");
+        }
+    });
 
     const logout = async () => {
         try {
@@ -654,6 +867,40 @@ async function init() {
     if (shouldRedirectToConfig) {
         state.view = "app";
         switchTab("config");
+    }
+
+    // Command Palette keybinding
+    document.addEventListener("keydown", (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+            e.preventDefault();
+            const overlay = get("cmdPaletteOverlay");
+            if (overlay && overlay.style.display !== "none") {
+                closeCmdPalette();
+            } else {
+                openCmdPalette();
+            }
+        }
+        if (e.key === "Escape") {
+            closeCmdPalette();
+        }
+    });
+
+    const cmdInput = get("cmdPaletteInput");
+    if (cmdInput) {
+        cmdInput.addEventListener("input", () => {
+            _cmdActiveIndex = 0;
+            _renderCmdList(cmdInput.value);
+        });
+        cmdInput.addEventListener("keydown", (e) => {
+            _handleCmdKey(e, cmdInput.value);
+        });
+    }
+
+    const cmdOverlay = get("cmdPaletteOverlay");
+    if (cmdOverlay) {
+        cmdOverlay.addEventListener("click", (e) => {
+            if (e.target === cmdOverlay) closeCmdPalette();
+        });
     }
 
     document.addEventListener("visibilitychange", () => {

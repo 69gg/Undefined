@@ -363,6 +363,8 @@
                                     data-i18n="config.collapse_all">全部折叠</button>
                                 <button id="btnSyncConfigTemplate" class="btn ghost btn-sm"
                                     data-i18n="config.sync_template">同步模板</button>
+                                <button id="btnConfigHistory" class="btn ghost btn-sm"
+                                    data-i18n="config.history">版本历史</button>
                                 <button id="btnResetConfig" class="btn ghost" data-i18n="config.reset">重置更改</button>
                             </div>
                         </div>
@@ -371,6 +373,12 @@
                     <div id="formSections" class="form-grid"></div>
                     <div id="tomlViewer" style="display: none;">
                         <pre id="tomlContent" class="log-viewer" style="height: auto; max-height: 600px; white-space: pre-wrap; word-wrap: break-word; user-select: text;"></pre>
+                    </div>
+                    <div id="configHistoryPanel" style="display: none;">
+                        <div class="card" style="padding: 20px;">
+                            <div style="font-weight:600;margin-bottom:12px;" data-i18n="config.history">版本历史</div>
+                            <div id="configHistoryList" style="max-height: 400px; overflow-y: auto;"></div>
+                        </div>
                     </div>
                 </section>
 
@@ -807,6 +815,14 @@
                         </pre>
                     </div>
                 </section>
+            </div>
+
+            <!-- Command Palette -->
+            <div id="cmdPaletteOverlay" class="cmd-palette-overlay" style="display:none;" role="dialog" aria-label="Command Palette">
+                <div class="cmd-palette">
+                    <input id="cmdPaletteInput" class="cmd-palette-input" type="text" placeholder="Type a command..." autocomplete="off" />
+                    <div id="cmdPaletteList" class="cmd-palette-list"></div>
+                </div>
             </div>
         </main>
     </div>
