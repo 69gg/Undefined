@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 import chromadb
+
+from Undefined.utils.coerce import safe_float
 from chromadb.errors import InternalError as ChromaInternalError
 import numpy as np
 from numba import njit
@@ -30,17 +32,6 @@ def _clamp(value: float, lower: float, upper: float) -> float:
     if value > upper:
         return upper
     return value
-
-
-def _safe_float(value: Any, default: float = 0.0) -> float:
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value.strip())
-        except Exception:
-            return default
-    return default
 
 
 def _safe_positive_int(value: Any, default: int) -> int:
@@ -120,7 +111,7 @@ def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
 
 
 def _similarity_from_distance(distance: Any) -> float:
-    dist = _safe_float(distance, default=1.0)
+    dist = safe_float(distance, default=1.0)
     return _clamp(1.0 - dist, 0.0, 1.0)
 
 
@@ -553,14 +544,14 @@ class CognitiveVectorStore:
             else:
                 reranked_results: list[dict[str, Any]] = []
                 for item in reranked[:rerank_top_n]:
-                    index = int(_safe_float(item.get("index"), default=-1))
+                    index = int(safe_float(item.get("index"), default=-1))
                     if index < 0 or index >= len(results):
                         continue
                     entry: dict[str, Any] = {
                         "document": item.get("document", results[index]["document"]),
                         "metadata": results[index]["metadata"],
                         "distance": results[index]["distance"],
-                        "rerank_score": _safe_float(
+                        "rerank_score": safe_float(
                             item.get("relevance_score"), default=0.0
                         ),
                     }
@@ -637,11 +628,9 @@ class CognitiveVectorStore:
         collection_name: str,
     ) -> list[dict[str, Any]]:
         safe_top_k = max(1, int(top_k))
-        safe_half_life_days = _safe_float(half_life_days, default=14.0)
-        safe_boost = max(0.0, _safe_float(boost, default=0.2))
-        safe_min_similarity = _clamp(
-            _safe_float(min_similarity, default=0.35), 0.0, 1.0
-        )
+        safe_half_life_days = safe_float(half_life_days, default=14.0)
+        safe_boost = max(0.0, safe_float(boost, default=0.2))
+        safe_min_similarity = _clamp(safe_float(min_similarity, default=0.35), 0.0, 1.0)
         if safe_half_life_days <= 0:
             logger.warning(
                 "[认知向量库] 时间衰减参数非法，跳过时间加权: collection=%s half_life_days=%s",

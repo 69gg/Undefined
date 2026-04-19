@@ -41,14 +41,18 @@ def _build_context(
     group_id: int = 123456,
     sender_id: int = 10002,
     user_id: int | None = None,
+    superadmin_qq: int = 0,
 ) -> CommandContext:
+    config_stub = cast(Any, SimpleNamespace())
+    config_stub.is_superadmin = lambda qq: qq == superadmin_qq
+    config_stub.bot_qq = 0
     stub = cast(Any, SimpleNamespace())
     if sender is None:
         sender = _DummySender()
     return CommandContext(
         group_id=group_id,
         sender_id=sender_id,
-        config=stub,
+        config=config_stub,
         sender=cast(Any, sender),
         ai=stub,
         faq_storage=stub,
@@ -294,3 +298,145 @@ async def test_profile_truncation() -> None:
     assert len(message) <= 5100  # 5000 + truncation notice
     assert "[侧写过长,已截断]" in message
     assert message.count("A") == 5000  # Exactly 5000 'A's before truncation
+
+
+# -- Superadmin target tests --
+
+
+@pytest.mark.asyncio
+async def test_profile_superadmin_target_user() -> None:
+    """Superadmin can query another user's profile with /p <QQ号>."""
+    sender = _DummySender()
+    cognitive_service = AsyncMock()
+    cognitive_service.get_profile = AsyncMock(return_value="目标用户侧写")
+
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="group",
+        group_id=123456,
+        sender_id=10001,
+        superadmin_qq=10001,
+    )
+
+    await profile_execute(["99999"], context)
+
+    assert len(sender.group_messages) == 1
+    assert "目标用户侧写" in sender.group_messages[0][1]
+    cognitive_service.get_profile.assert_called_once_with("user", "99999")
+
+
+@pytest.mark.asyncio
+async def test_profile_superadmin_target_group() -> None:
+    """Superadmin can query a group profile with /p g <群号>."""
+    sender = _DummySender()
+    cognitive_service = AsyncMock()
+    cognitive_service.get_profile = AsyncMock(return_value="目标群侧写")
+
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="group",
+        group_id=123456,
+        sender_id=10001,
+        superadmin_qq=10001,
+    )
+
+    await profile_execute(["g", "789000"], context)
+
+    assert len(sender.group_messages) == 1
+    assert "目标群侧写" in sender.group_messages[0][1]
+    cognitive_service.get_profile.assert_called_once_with("group", "789000")
+
+
+@pytest.mark.asyncio
+async def test_profile_nonadmin_target_rejected() -> None:
+    """Non-superadmin cannot specify a target QQ → permission error."""
+    sender = _DummySender()
+    cognitive_service = AsyncMock()
+
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="group",
+        group_id=123456,
+        sender_id=22222,
+        superadmin_qq=10001,
+    )
+
+    await profile_execute(["99999"], context)
+
+    assert len(sender.group_messages) == 1
+    assert "❌ 仅超级管理员可查看他人侧写" in sender.group_messages[0][1]
+    cognitive_service.get_profile.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_profile_superadmin_target_with_mode() -> None:
+    """Superadmin with render mode + target: /p -r 12345."""
+    sender = _DummySender()
+    cognitive_service = AsyncMock()
+    cognitive_service.get_profile = AsyncMock(return_value="带模式的侧写")
+
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="group",
+        group_id=123456,
+        sender_id=10001,
+        superadmin_qq=10001,
+    )
+
+    # render mode will fail (no Playwright) → fallback to text
+    await profile_execute(["-t", "12345"], context)
+
+    assert len(sender.group_messages) == 1
+    assert "带模式的侧写" in sender.group_messages[0][1]
+    cognitive_service.get_profile.assert_called_once_with("user", "12345")
+
+
+@pytest.mark.asyncio
+async def test_profile_superadmin_private_group_with_target() -> None:
+    """Superadmin in private chat can query a group with /p g <群号>."""
+    sender = _DummySender()
+    cognitive_service = AsyncMock()
+    cognitive_service.get_profile = AsyncMock(return_value="远程群侧写")
+
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="private",
+        group_id=0,
+        sender_id=10001,
+        user_id=10001,
+        superadmin_qq=10001,
+    )
+
+    await profile_execute(["g", "654321"], context)
+
+    # Private + group + target → still works for superadmin
+    assert len(sender.private_messages) == 1
+    assert "远程群侧写" in sender.private_messages[0][1]
+    cognitive_service.get_profile.assert_called_once_with("group", "654321")
+
+
+@pytest.mark.asyncio
+async def test_profile_superadmin_target_not_found() -> None:
+    """Superadmin queries non-existent target → '暂无侧写数据'."""
+    sender = _DummySender()
+    cognitive_service = AsyncMock()
+    cognitive_service.get_profile = AsyncMock(return_value=None)
+
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="group",
+        group_id=123456,
+        sender_id=10001,
+        superadmin_qq=10001,
+    )
+
+    await profile_execute(["11111"], context)
+
+    assert len(sender.group_messages) == 1
+    assert "📭 暂无侧写数据" in sender.group_messages[0][1]

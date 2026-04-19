@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 from collections import deque
 from typing import Any, Dict
 import logging
 import re
 
 from Undefined.context import RequestContext
+from Undefined.utils.coerce import safe_int
+
 from Undefined.end_summary_storage import (
     EndSummaryLocation,
     EndSummaryRecord,
@@ -80,13 +84,6 @@ def _clip_text(value: Any, max_len: int) -> str:
     return text[: max_len - 3].rstrip() + "..."
 
 
-def _safe_int(value: Any, default: int) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
 def _clamp_int(value: int, min_value: int, max_value: int) -> int:
     if value < min_value:
         return min_value
@@ -103,15 +100,15 @@ def _resolve_historian_limits(context: Dict[str, Any]) -> tuple[int, int, int]:
     runtime_config = context.get("runtime_config")
     cognitive = getattr(runtime_config, "cognitive", None) if runtime_config else None
     if cognitive is not None:
-        max_source_len = _safe_int(
+        max_source_len = safe_int(
             getattr(cognitive, "historian_source_message_max_len", max_source_len),
             max_source_len,
         )
-        recent_k = _safe_int(
+        recent_k = safe_int(
             getattr(cognitive, "historian_recent_messages_inject_k", recent_k),
             recent_k,
         )
-        max_recent_line_len = _safe_int(
+        max_recent_line_len = safe_int(
             getattr(
                 cognitive, "historian_recent_message_line_max_len", max_recent_line_len
             ),

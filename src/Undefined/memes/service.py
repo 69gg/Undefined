@@ -29,6 +29,7 @@ from Undefined.memes.models import (
 from Undefined.memes.store import MemeStore
 from Undefined.memes.vector_store import MemeVectorStore
 from Undefined.utils.message_targets import resolve_message_target
+from Undefined.utils.coerce import safe_int
 from Undefined.utils.paths import ensure_dir
 
 logger = logging.getLogger(__name__)
@@ -46,16 +47,6 @@ _TAG_SPLIT_RE = re.compile(r"[,，\n]+")
 
 def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
-
-
-def _safe_int(value: Any) -> int | None:
-    if value is None:
-        return None
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed > 0 else None
 
 
 def _guess_suffix(path: Path, mime_type: str) -> str:
@@ -748,7 +739,7 @@ class MemeService:
                 attachments=history_attachments,
             )
         else:
-            preferred_temp_group_id = _safe_int(context.get("group_id"))
+            preferred_temp_group_id = safe_int(context.get("group_id"))
             sent_message_id = await sender.send_private_message(
                 int(target_id),
                 cq_message,

@@ -1,5 +1,7 @@
 """消息处理和命令分发"""
 
+from __future__ import annotations
+
 import asyncio
 from dataclasses import dataclass
 import logging
@@ -40,19 +42,12 @@ from Undefined.utils.queue_intervals import build_model_queue_intervals
 
 from Undefined.scheduled_task_storage import ScheduledTaskStorage
 from Undefined.utils.logging import log_debug_json, redact_string
+from Undefined.utils.coerce import safe_int
 
 logger = logging.getLogger(__name__)
 
 KEYWORD_REPLY_HISTORY_PREFIX = "[系统关键词自动回复] "
 REPEAT_REPLY_HISTORY_PREFIX = "[系统复读] "
-
-
-def _safe_int(value: Any) -> int | None:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed > 0 else None
 
 
 def _format_poke_history_text(display_name: str, user_id: int) -> str:
@@ -553,7 +548,7 @@ class MessageHandler:
                 chat_type="private",
                 chat_id=private_sender_id,
                 sender_id=private_sender_id,
-                message_id=_safe_int(trigger_message_id),
+                message_id=safe_int(trigger_message_id),
                 scope_key=build_attachment_scope(
                     user_id=private_sender_id,
                     request_type="private",
@@ -727,7 +722,7 @@ class MessageHandler:
             chat_type="group",
             chat_id=group_id,
             sender_id=sender_id,
-            message_id=_safe_int(trigger_message_id),
+            message_id=safe_int(trigger_message_id),
             scope_key=build_attachment_scope(group_id=group_id, request_type="group"),
         )
 

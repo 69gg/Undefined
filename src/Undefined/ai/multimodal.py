@@ -16,6 +16,7 @@ import aiofiles
 import httpx
 
 from Undefined.ai.parsing import extract_choices_content
+from Undefined.utils.coerce import safe_float
 from Undefined.ai.llm import ModelRequester
 from Undefined.config import VisionModelConfig
 from Undefined.ai.transports import API_MODE_CHAT_COMPLETIONS, get_api_mode
@@ -352,17 +353,10 @@ def _parse_meme_analysis_response(content: str) -> dict[str, Any]:
     parsed = _extract_json_object(content)
     return {
         "is_meme": bool(parsed.get("is_meme", False)),
-        "confidence": _safe_float(parsed.get("confidence", 0.0), default=0.0),
+        "confidence": safe_float(parsed.get("confidence", 0.0), default=0.0),
         "description": str(parsed.get("description") or "").strip(),
         "tags": _normalize_meme_tags(parsed.get("tags")),
     }
-
-
-def _safe_float(value: Any, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
 
 
 class MultimodalAnalyzer:
@@ -880,7 +874,7 @@ class MultimodalAnalyzer:
         try:
             parsed = {
                 "is_meme": bool(args.get("is_meme", False)),
-                "confidence": _safe_float(args.get("confidence", 0.0), default=0.0),
+                "confidence": safe_float(args.get("confidence", 0.0), default=0.0),
                 "reason": str(args.get("reason") or "").strip(),
             }
         except Exception:
@@ -889,7 +883,7 @@ class MultimodalAnalyzer:
             "[媒体分析] 表情包判定完成: url=%s is_meme=%s confidence=%.3f reason=%s",
             safe_url[:50],
             parsed.get("is_meme", False),
-            _safe_float(parsed.get("confidence", 0.0), default=0.0),
+            safe_float(parsed.get("confidence", 0.0), default=0.0),
             str(parsed.get("reason", ""))[:80],
         )
         return parsed

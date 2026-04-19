@@ -12,6 +12,7 @@ from typing import Any, Callable, Awaitable, Literal
 import aiofiles
 
 from Undefined.attachments import attachment_refs_to_xml
+from Undefined.utils.coerce import safe_int
 from Undefined.context import RequestContext
 from Undefined.end_summary_storage import (
     EndSummaryStorage,
@@ -636,39 +637,24 @@ class PromptBuilder:
     ) -> tuple[Literal["group", "private"], int] | None:
         ctx = RequestContext.current()
 
-        def _safe_int(value: Any) -> int | None:
-            if isinstance(value, bool):
-                return None
-            if isinstance(value, int):
-                return value
-            if isinstance(value, str):
-                text = value.strip()
-                if not text:
-                    return None
-                try:
-                    return int(text)
-                except ValueError:
-                    return None
-            return None
-
         if ctx and ctx.request_type == "group" and ctx.group_id is not None:
-            group_id = _safe_int(ctx.group_id)
+            group_id = safe_int(ctx.group_id)
             if group_id is not None:
                 return ("group", group_id)
             return None
         if ctx and ctx.request_type == "private" and ctx.user_id is not None:
-            user_id = _safe_int(ctx.user_id)
+            user_id = safe_int(ctx.user_id)
             if user_id is not None:
                 return ("private", user_id)
             return None
 
         if extra_context and extra_context.get("group_id") is not None:
-            group_id = _safe_int(extra_context.get("group_id"))
+            group_id = safe_int(extra_context.get("group_id"))
             if group_id is not None:
                 return ("group", group_id)
             return None
         if extra_context and extra_context.get("user_id") is not None:
-            user_id = _safe_int(extra_context.get("user_id"))
+            user_id = safe_int(extra_context.get("user_id"))
             if user_id is not None:
                 return ("private", user_id)
             return None

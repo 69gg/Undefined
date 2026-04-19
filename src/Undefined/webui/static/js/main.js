@@ -54,6 +54,7 @@ function refreshUI() {
 }
 
 function switchTab(tab) {
+    abortPendingRequests(); // Cancel pending requests from previous tab
     state.tab = tab;
     state.mobileDrawerOpen = false;
     const mainContent = document.querySelector(".main-content");
@@ -176,6 +177,37 @@ function setMobileInlineActionsOpen(key, open) {
 }
 
 async function init() {
+    // Global error handlers
+    window.onerror = function (message, source, lineno, colno, error) {
+        console.error("[GlobalError]", {
+            message,
+            source,
+            lineno,
+            colno,
+            error,
+        });
+        if (typeof showToast === "function") {
+            showToast(`⚠️ ${message}`, "error", 5000);
+        }
+        return false;
+    };
+
+    window.onunhandledrejection = function (event) {
+        const reason = event.reason;
+        const msg = reason instanceof Error ? reason.message : String(reason);
+        // Don't toast for routine auth errors or aborted requests
+        if (
+            msg === "Unauthorized" ||
+            msg === "The user aborted a request." ||
+            reason?.name === "AbortError"
+        )
+            return;
+        console.error("[UnhandledRejection]", reason);
+        if (typeof showToast === "function") {
+            showToast(`⚠️ ${msg}`, "error", 5000);
+        }
+    };
+
     if (
         window.RuntimeController &&
         typeof window.RuntimeController.init === "function"

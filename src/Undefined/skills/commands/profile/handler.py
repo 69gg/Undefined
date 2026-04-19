@@ -29,10 +29,14 @@ def _truncate(text: str, limit: int = _MAX_PROFILE_LENGTH) -> str:
     return text[:limit].rstrip() + "\n\n[侧写过长,已截断]"
 
 
-def _parse_args(args: list[str]) -> tuple[str, str]:
-    """解析参数，返回 (子命令, 输出模式)。"""
+def _parse_args(args: list[str]) -> tuple[str, str, str]:
+    """解析参数，返回 (子命令, 输出模式, 目标ID)。
+
+    目标 ID 为纯数字参数，仅超级管理员可使用。
+    """
     sub = ""
     mode = ""
+    target = ""
     for arg in args:
         lower = arg.lower().strip()
         if lower in ("-t", "--text"):
@@ -43,7 +47,9 @@ def _parse_args(args: list[str]) -> tuple[str, str]:
             mode = _MODE_RENDER
         elif lower in ("g", "group"):
             sub = lower
-    return sub, mode
+        elif arg.strip().isdigit():
+            target = arg.strip()
+    return sub, mode, target
 
 
 def _profile_mtime(entity_type: str, entity_id: str) -> str | None:
@@ -181,29 +187,36 @@ body {{
 async def execute(args: list[str], context: CommandContext) -> None:
     """处理 /profile 命令。
 
-    用法: /p [g] [-t|--text] [-f|--forward] [-r|--render]
+    用法: /p [g] [-t|--text] [-f|--forward] [-r|--render] [目标ID]
       g / group      查看群聊侧写（仅群聊可用）
       -t / --text    纯文本直接发出
       -f / --forward 合并转发发出（群聊默认）
       -r / --render  渲染为图片发出
+      目标ID          指定查询对象（仅超级管理员）
     """
     cognitive_service = context.cognitive_service
     if cognitive_service is None:
         await _send_text(context, "❌ 侧写服务未启用")
         return
 
-    sub, mode = _parse_args(args)
+    sub, mode, target = _parse_args(args)
+
+    # 超管指定目标
+    if target:
+        if not context.config.is_superadmin(context.sender_id):
+            await _send_text(context, "❌ 仅超级管理员可查看他人侧写")
+            return
 
     if sub in ("group", "g"):
-        if _is_private(context):
-            await _send_text(context, "❌ 私聊中不支持查看群聊侧写")
+        if _is_private(context) and not target:
+            await _send_text(context, "❌ 私聊中不支持查看群聊侧写（可指定群号）")
             return
         entity_type = "group"
-        entity_id = str(context.group_id)
+        entity_id = target or str(context.group_id)
         empty_hint = "暂无群聊侧写数据"
     else:
         entity_type = "user"
-        entity_id = str(context.sender_id)
+        entity_id = target or str(context.sender_id)
         empty_hint = "暂无侧写数据"
 
     profile = await cognitive_service.get_profile(entity_type, entity_id)
