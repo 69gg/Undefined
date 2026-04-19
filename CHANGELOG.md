@@ -2,19 +2,44 @@
 
 围绕核心架构进行了大规模重构与功能增强：Runtime API 拆分为路由子模块、配置系统模块化拆分、新增假@检测机制与 /profile 多输出模式。同步引入复读机制全面升级（可配置阈值与冷却）、消息预处理并行化、WebUI 多项交互功能，以及 arXiv 论文分析 Agent 和安全计算器工具。测试覆盖从约 800 提升至 1438+。
 
+### 新功能
+
 - 新增假@检测：群聊中 `@+Bot昵称` 的文本形式也被识别为@消息，自动从群上下文获取昵称（防竞态），`@昵称 /命令` 可正常触发斜杠指令。
 - `/profile` 命令支持三种输出模式：`-f` 合并转发（默认，分元数据与内容两条消息）、`-r` 渲染为图片、`-t` 直接文本发送。
 - 超级管理员可通过 `/p <QQ号>` 和 `/p g <群号>` 跨目标查看任意用户或群聊的认知侧写。
 - 复读系统全面升级：触发阈值可配置（`repeat_threshold`，2–20）、Bot 发言不计入复读链、新增复读冷却机制（`repeat_cooldown_minutes`，默认 60 分钟，？与 ? 等价）。
-- Runtime API 从 2491 行的单体 `app.py` 拆分为 8 个路由子模块 (`api/routes/`)，主文件仅保留薄包装委派层。
-- 配置系统模块化拆分：`config/` 拆为 `loader.py`、`models.py`、`hot_reload.py`，`sync_config_template` 脚本支持报告注释变更路径。
-- 消息预处理流程并行化：使用 `asyncio.gather` 并行执行安全检查、认知检索和假@检测，降低消息处理延迟。
+- Vision 模型 `max_tokens` 可配置（`[models.vision].max_tokens`，默认 8192），解决 thinking 模型消耗全部 token 导致工具调用截断的问题。
 - 新增 arXiv 论文深度分析 Agent，提供论文搜索、摘要提取与关键信息分析能力。
 - 新增 `calculator` 多功能安全计算器工具。
 - 新增消息历史限制全面可配置化（`[history].max_records`）。
-- 新增 `utils/coerce.py`（安全类型强转）与 `utils/fake_at.py`（假@文本检测与解析）公共模块。
-- WebUI 新增功能：Cmd/Ctrl+K 命令面板、骨架屏加载态、日志时间过滤、资源趋势图、TOML 原始视图、配置版本历史与回滚、长期记忆完整 CRUD 管理、Modal 焦点陷阱。
+- 新增 `utils/coerce.py`（安全类型强转）、`utils/fake_at.py`（假@检测与解析）与 `utils/xml.py`（统一 XML 消息格式化）公共模块。
+
+### 架构重构
+
+- Runtime API 从 2491 行的单体 `app.py` 拆分为 8 个路由子模块 (`api/routes/`)，主文件仅保留薄包装委派层。
+- 配置系统模块化拆分：`config/` 拆为 `loader.py`、`models.py`、`hot_reload.py`，`sync_config_template` 脚本支持报告注释变更路径。
+- 消息预处理流程并行化：使用 `asyncio.gather` 并行执行安全检查、认知检索和假@检测，降低消息处理延迟。
+- 认知史官（historian）消息格式从纯文本改为 XML，与主 AI 上下文格式统一；消息数量改用 `context_recent_messages_limit`（默认 20）。
+- 统一 XML 消息格式化逻辑至 `utils/xml.py`，消除 `prompts.py`、`fetch_messages` 和 `end` tool 之间的重复代码。
+
+### WebUI
+
+- Cmd/Ctrl+K 命令面板、骨架屏加载态、日志时间过滤、资源趋势图、TOML 原始视图、配置版本历史与回滚、长期记忆完整 CRUD 管理、Modal 焦点陷阱。
+- 修复 top_k 参数溢出导致 ChromaDB Rust 整数越界崩溃的问题，前端/后端四层防护（HTML max 属性、JS 参数上限、Service 层 clamp、向量存储 fetch_k 硬上限）。
+- 表情包搜索页新增 350ms 防抖自动搜索，Enter 立即刷新，`_pendingRefresh` 模式防止并发请求返回过期结果。
+- 仪表盘布局优化：三张信息卡共占一行，资源趋势图全宽置底。
+
+### Bug 修复
+
+- 修复 AI 模仿系统关键词自动回复前缀生成伪系统消息的问题，在提示词中明确标注该前缀仅由代码路径使用。
+- 修复 LaTeX 渲染中 `\n` 替换破坏 `\nu`、`\nabla`、`\neq` 等命令的问题，改用负向前瞻正则 `\\n(?![a-zA-Z])`。
+- 修复复读冷却抑制后错误丢弃消息（不再触发自动回复）的问题。
+- 修复 `repeat_cooldown_minutes=0` 时 `_repeat_cooldown` 字典持续积累不被清理的内存泄漏。
+- 修复 `historian_model` 未加入热重载追踪集导致配置热更新后队列间隔和模型名失效的问题。
 - 修复队列系统 historian 模型未注册的调度问题。
+- 修复表情包 GIF 多帧分析 `_process_reanalyze_job` 未检查 `gif_analysis_mode` 的问题。
+- 修复表情包 GIF 帧临时文件在可重试 LLM 错误时未被清理的资源泄漏。
+- 修复附件渲染错误时仍追加 `prompt_ref` 导致后续异常的问题。
 - 修复 `/profile` 渲染留白和字体过小问题，使用 WebUI 配色方案并提高截断上限至 5000 字符。
 - 测试覆盖大幅补齐（804 → 1438+），ruff + mypy 零错误。
 
