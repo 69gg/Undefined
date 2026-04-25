@@ -639,6 +639,30 @@ class AIClient:
             self._search_wrapper = None
             logger.info("[配置] 搜索服务已回退为禁用")
 
+    def apply_model_configs(
+        self,
+        *,
+        chat_config: ChatModelConfig,
+        vision_config: VisionModelConfig,
+        agent_config: AgentModelConfig,
+        runtime_config: Config,
+    ) -> None:
+        """应用热更新后的模型配置。"""
+        self.chat_config = chat_config
+        self.vision_config = vision_config
+        self.agent_config = agent_config
+        self.runtime_config = runtime_config
+        self._multimodal = MultimodalAnalyzer(self._requester, self.vision_config)
+        self._summary_service = SummaryService(
+            self._requester, self.chat_config, self._token_counter
+        )
+        logger.info(
+            "[配置] AI 模型配置已热更新: chat=%s vision=%s agent=%s",
+            self.chat_config.model_name,
+            self.vision_config.model_name,
+            self.agent_config.model_name,
+        )
+
     def count_tokens(self, text: str) -> int:
         return self._token_counter.count(text)
 

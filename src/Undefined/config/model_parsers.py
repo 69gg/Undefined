@@ -133,6 +133,10 @@ def _parse_model_pool(
                     item.get("reasoning_effort"),
                     primary_config.reasoning_effort,
                 ),
+                stream_enabled=_coerce_bool(
+                    item.get("stream_enabled"),
+                    getattr(primary_config, "stream_enabled", False),
+                ),
                 request_params=merge_request_params(
                     primary_config.request_params,
                     item.get("request_params"),
@@ -265,6 +269,14 @@ def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
         ),
         "medium",
     )
+    stream_enabled = _coerce_bool(
+        _get_value(
+            data,
+            ("models", "chat", "stream_enabled"),
+            "CHAT_MODEL_STREAM_ENABLED",
+        ),
+        False,
+    )
     config = ChatModelConfig(
         api_url=_coerce_str(
             _get_value(data, ("models", "chat", "api_url"), "CHAT_MODEL_API_URL"),
@@ -314,6 +326,7 @@ def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
         prompt_cache_enabled=prompt_cache_enabled,
         reasoning_enabled=reasoning_enabled,
         reasoning_effort=reasoning_effort,
+        stream_enabled=stream_enabled,
         request_params=_get_model_request_params(data, "chat"),
     )
     config.pool = _parse_model_pool(data, "chat", config)
@@ -369,6 +382,14 @@ def _parse_vision_model_config(data: dict[str, Any]) -> VisionModelConfig:
         ),
         "medium",
     )
+    stream_enabled = _coerce_bool(
+        _get_value(
+            data,
+            ("models", "vision", "stream_enabled"),
+            "VISION_MODEL_STREAM_ENABLED",
+        ),
+        False,
+    )
     return VisionModelConfig(
         api_url=_coerce_str(
             _get_value(data, ("models", "vision", "api_url"), "VISION_MODEL_API_URL"),
@@ -422,6 +443,7 @@ def _parse_vision_model_config(data: dict[str, Any]) -> VisionModelConfig:
         prompt_cache_enabled=prompt_cache_enabled,
         reasoning_enabled=reasoning_enabled,
         reasoning_effort=reasoning_effort,
+        stream_enabled=stream_enabled,
         request_params=_get_model_request_params(data, "vision"),
     )
 
@@ -489,6 +511,14 @@ def _parse_security_model_config(
         ),
         "medium",
     )
+    stream_enabled = _coerce_bool(
+        _get_value(
+            data,
+            ("models", "security", "stream_enabled"),
+            "SECURITY_MODEL_STREAM_ENABLED",
+        ),
+        False,
+    )
 
     if api_url and api_key and model_name:
         return SecurityModelConfig(
@@ -535,6 +565,7 @@ def _parse_security_model_config(
             prompt_cache_enabled=prompt_cache_enabled,
             reasoning_enabled=reasoning_enabled,
             reasoning_effort=reasoning_effort,
+            stream_enabled=stream_enabled,
             request_params=_get_model_request_params(data, "security"),
         )
 
@@ -556,6 +587,7 @@ def _parse_security_model_config(
         prompt_cache_enabled=chat_model.prompt_cache_enabled,
         reasoning_enabled=chat_model.reasoning_enabled,
         reasoning_effort=chat_model.reasoning_effort,
+        stream_enabled=chat_model.stream_enabled,
         request_params=merge_request_params(chat_model.request_params),
     )
 
@@ -623,6 +655,14 @@ def _parse_naga_model_config(
         ),
         getattr(security_model, "reasoning_effort", "medium"),
     )
+    stream_enabled = _coerce_bool(
+        _get_value(
+            data,
+            ("models", "naga", "stream_enabled"),
+            "NAGA_MODEL_STREAM_ENABLED",
+        ),
+        getattr(security_model, "stream_enabled", False),
+    )
 
     if api_url and api_key and model_name:
         return SecurityModelConfig(
@@ -669,6 +709,7 @@ def _parse_naga_model_config(
             prompt_cache_enabled=prompt_cache_enabled,
             reasoning_enabled=reasoning_enabled,
             reasoning_effort=reasoning_effort,
+            stream_enabled=stream_enabled,
             request_params=_get_model_request_params(data, "naga"),
         )
 
@@ -692,6 +733,7 @@ def _parse_naga_model_config(
         prompt_cache_enabled=security_model.prompt_cache_enabled,
         reasoning_enabled=security_model.reasoning_enabled,
         reasoning_effort=security_model.reasoning_effort,
+        stream_enabled=security_model.stream_enabled,
         request_params=merge_request_params(security_model.request_params),
     )
 
@@ -745,6 +787,14 @@ def _parse_agent_model_config(data: dict[str, Any]) -> AgentModelConfig:
         ),
         "medium",
     )
+    stream_enabled = _coerce_bool(
+        _get_value(
+            data,
+            ("models", "agent", "stream_enabled"),
+            "AGENT_MODEL_STREAM_ENABLED",
+        ),
+        False,
+    )
     config = AgentModelConfig(
         api_url=_coerce_str(
             _get_value(data, ("models", "agent", "api_url"), "AGENT_MODEL_API_URL"),
@@ -796,6 +846,7 @@ def _parse_agent_model_config(data: dict[str, Any]) -> AgentModelConfig:
         prompt_cache_enabled=prompt_cache_enabled,
         reasoning_enabled=reasoning_enabled,
         reasoning_effort=reasoning_effort,
+        stream_enabled=stream_enabled,
         request_params=_get_model_request_params(data, "agent"),
     )
     config.pool = _parse_model_pool(data, "agent", config)
@@ -885,6 +936,14 @@ def _parse_grok_model_config(data: dict[str, Any]) -> GrokModelConfig:
                 "GROK_MODEL_REASONING_EFFORT",
             ),
             "medium",
+        ),
+        stream_enabled=_coerce_bool(
+            _get_value(
+                data,
+                ("models", "grok", "stream_enabled"),
+                "GROK_MODEL_STREAM_ENABLED",
+            ),
+            False,
         ),
         request_params=_get_model_request_params(data, "grok"),
     )
@@ -1154,6 +1213,14 @@ def _parse_historian_model_config(
             ),
             fallback.reasoning_effort,
         ),
+        stream_enabled=_coerce_bool(
+            _get_value(
+                {"models": {"historian": h}},
+                ("models", "historian", "stream_enabled"),
+                "HISTORIAN_MODEL_STREAM_ENABLED",
+            ),
+            fallback.stream_enabled,
+        ),
         request_params=merge_request_params(
             fallback.request_params,
             h.get("request_params"),
@@ -1248,6 +1315,14 @@ def _parse_summary_model_config(
                     "SUMMARY_MODEL_REASONING_EFFORT",
                 ),
                 fallback.reasoning_effort,
+            ),
+            stream_enabled=_coerce_bool(
+                _get_value(
+                    {"models": {"summary": s}},
+                    ("models", "summary", "stream_enabled"),
+                    "SUMMARY_MODEL_STREAM_ENABLED",
+                ),
+                fallback.stream_enabled,
             ),
             request_params=merge_request_params(
                 fallback.request_params,

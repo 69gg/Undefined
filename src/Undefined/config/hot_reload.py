@@ -60,6 +60,15 @@ _MODEL_NAME_KEYS: set[str] = {
     "grok_model.model_name",
 }
 
+_AI_MODEL_CONFIG_PREFIXES: tuple[str, ...] = (
+    "chat_model",
+    "vision_model",
+    "agent_model",
+    "summary_model",
+    "historian_model",
+    "grok_model",
+)
+
 _AGENT_INTRO_KEYS: set[str] = {
     "agent_intro_autogen_enabled",
     "agent_intro_autogen_queue_interval",
@@ -121,6 +130,14 @@ def apply_config_updates(
     if _needs_search_update(changed_keys):
         context.ai_client.apply_search_config(updated.searxng_url)
 
+    if _needs_ai_model_update(changed_keys):
+        context.ai_client.apply_model_configs(
+            chat_config=updated.chat_model,
+            vision_config=updated.vision_model,
+            agent_config=updated.agent_model,
+            runtime_config=updated,
+        )
+
     if _needs_skills_hot_reload_update(changed_keys):
         asyncio.create_task(_apply_skills_hot_reload(updated, context.ai_client))
 
@@ -158,6 +175,14 @@ def _needs_config_hot_reload_update(changed_keys: set[str]) -> bool:
 
 def _needs_search_update(changed_keys: set[str]) -> bool:
     return bool(changed_keys & _SEARCH_KEYS)
+
+
+def _needs_ai_model_update(changed_keys: set[str]) -> bool:
+    return any(
+        key == prefix or key.startswith(f"{prefix}.")
+        for key in changed_keys
+        for prefix in _AI_MODEL_CONFIG_PREFIXES
+    )
 
 
 async def _apply_skills_hot_reload(updated: Config, ai_client: AIClient) -> None:

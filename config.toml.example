@@ -122,6 +122,9 @@ responses_force_stateless_replay = false
 # zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
 # en: Enable automatic prompt_cache_key generation (recommended).
 prompt_cache_enabled = true
+# zh: 是否对上游模型 API 启用流式请求；仅影响 Runtime -> 模型提供商，不改变 WebUI 协议。
+# en: Enable streaming requests to the upstream model API; this only affects Runtime -> provider transport and does not change the WebUI protocol.
+stream_enabled = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -189,6 +192,9 @@ responses_tool_choice_compat = false
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
 prompt_cache_enabled = true
+# zh: 是否对上游模型 API 启用流式请求；仅影响 Runtime -> 模型提供商，不改变 WebUI 协议。
+# en: Enable streaming requests to the upstream model API; this only affects Runtime -> provider transport and does not change the WebUI protocol.
+stream_enabled = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -246,6 +252,9 @@ responses_tool_choice_compat = false
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
 prompt_cache_enabled = true
+# zh: 是否对上游模型 API 启用流式请求；仅影响 Runtime -> 模型提供商，不改变 WebUI 协议。
+# en: Enable streaming requests to the upstream model API; this only affects Runtime -> provider transport and does not change the WebUI protocol.
+stream_enabled = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -301,6 +310,9 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级。
 # en: Responses API force stateless replay.
 responses_force_stateless_replay = false
+# zh: 是否对上游模型 API 启用流式请求；仅影响 Runtime -> 模型提供商，不改变 WebUI 协议。
+# en: Enable streaming requests to the upstream model API; this only affects Runtime -> provider transport and does not change the WebUI protocol.
+stream_enabled = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -355,6 +367,9 @@ responses_tool_choice_compat = false
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
 prompt_cache_enabled = true
+# zh: 是否对上游模型 API 启用流式请求；仅影响 Runtime -> 模型提供商，不改变 WebUI 协议。
+# en: Enable streaming requests to the upstream model API; this only affects Runtime -> provider transport and does not change the WebUI protocol.
+stream_enabled = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -422,6 +437,9 @@ responses_tool_choice_compat = false
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
 prompt_cache_enabled = true
+# zh: 是否对上游模型 API 启用流式请求；仅影响 Runtime -> 模型提供商，不改变 WebUI 协议。
+# en: Enable streaming requests to the upstream model API; this only affects Runtime -> provider transport and does not change the WebUI protocol.
+stream_enabled = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -520,6 +538,9 @@ reasoning_effort_style = "openai"
 # zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
 # en: Enable automatic prompt_cache_key generation (recommended).
 prompt_cache_enabled = true
+# zh: 是否对上游模型 API 启用流式请求；仅影响 Runtime -> 模型提供商，不改变 WebUI 协议。
+# en: Enable streaming requests to the upstream model API; this only affects Runtime -> provider transport and does not change the WebUI protocol.
+stream_enabled = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.

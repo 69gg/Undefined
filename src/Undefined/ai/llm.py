@@ -502,6 +502,125 @@ def _split_responses_params(
     return known, extra
 
 
+def _without_stream_request_fields(body: dict[str, Any]) -> dict[str, Any]:
+    stripped = dict(body)
+    stripped.pop("stream", None)
+    stripped.pop("stream_options", None)
+    return stripped
+
+
+def _should_fallback_from_stream(exc: Exception) -> bool:
+    return isinstance(
+        exc,
+        (
+            APIStatusError,
+            AttributeError,
+            KeyError,
+            TypeError,
+            ValueError,
+            NotImplementedError,
+        ),
+    )
+
+
+def _stringify_stream_delta(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = [_stringify_stream_delta(item) for item in value]
+        return "".join(part for part in parts if part)
+    if isinstance(value, dict):
+        for key in ("text", "content", "delta", "value"):
+            if value.get(key) is not None:
+                return _stringify_stream_delta(value.get(key))
+        return ""
+    return str(value)
+
+
+def _extract_stream_response_item(event: dict[str, Any]) -> dict[str, Any] | None:
+    for key in ("item", "output_item", "data"):
+        value = event.get(key)
+        if isinstance(value, dict):
+            return value
+    response = event.get("response")
+    if isinstance(response, dict) and isinstance(response.get("output"), list):
+        return None
+    if isinstance(response, dict):
+        return response
+    return None
+
+
+def _extract_stream_usage(
+    event: dict[str, Any], *, api_mode: str
+) -> dict[str, Any] | None:
+    usage = event.get("usage")
+    if not isinstance(usage, dict):
+        response = event.get("response")
+        if isinstance(response, dict) and isinstance(response.get("usage"), dict):
+            usage = response.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    if api_mode == API_MODE_RESPONSES:
+        return {
+            "input_tokens": int(usage.get("input_tokens", 0) or 0),
+            "output_tokens": int(usage.get("output_tokens", 0) or 0),
+            "total_tokens": int(usage.get("total_tokens", 0) or 0),
+        }
+    return {
+        "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
+        "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
+        "total_tokens": int(usage.get("total_tokens", 0) or 0),
+    }
+
+
+def _ensure_tool_call_slot(
+    tool_calls: list[dict[str, Any]], index: int
+) -> dict[str, Any]:
+    while len(tool_calls) <= index:
+        tool_calls.append(
+            {
+                "id": "",
+                "type": "function",
+                "function": {"name": "", "arguments": ""},
+            }
+        )
+    return tool_calls[index]
+
+
+def _merge_tool_call_delta(
+    target_tool_calls: list[dict[str, Any]], tool_delta: dict[str, Any]
+) -> None:
+    index = tool_delta.get("index")
+    try:
+        slot_index = int(index) if index is not None else len(target_tool_calls)
+    except (TypeError, ValueError):
+        slot_index = len(target_tool_calls)
+    tool_call = _ensure_tool_call_slot(target_tool_calls, slot_index)
+    call_id = str(tool_delta.get("id") or "").strip()
+    if call_id:
+        tool_call["id"] = call_id
+    tool_type = str(tool_delta.get("type") or "").strip()
+    if tool_type:
+        tool_call["type"] = tool_type
+    function_delta = tool_delta.get("function")
+    if not isinstance(function_delta, dict):
+        return
+    function = tool_call.setdefault("function", {"name": "", "arguments": ""})
+    if not isinstance(function, dict):
+        function = {"name": "", "arguments": ""}
+        tool_call["function"] = function
+    function_name = str(function_delta.get("name") or "").strip()
+    if function_name:
+        function["name"] = function_name
+    arguments_delta = function_delta.get("arguments")
+    if arguments_delta is not None:
+        function["arguments"] = str(function.get("arguments") or "") + str(
+            arguments_delta
+        )
+
+
 def _is_deepseek_provider(model_config: ModelConfig) -> bool:
     model_name = str(getattr(model_config, "model_name", "") or "").lower()
     if model_name.startswith("deepseek"):
@@ -1380,6 +1499,21 @@ class ModelRequester:
         self, model_config: ModelConfig, request_body: dict[str, Any]
     ) -> dict[str, Any]:
         client = self._get_openai_client_for_model(model_config)
+        if bool(getattr(model_config, "stream_enabled", False)):
+            try:
+                return await self._request_with_openai_streaming(
+                    client, model_config, request_body
+                )
+            except Exception as exc:
+                if not _should_fallback_from_stream(exc):
+                    raise
+                logger.warning(
+                    "[API流式回退] model=%s api_mode=%s reason=%s",
+                    getattr(model_config, "model_name", ""),
+                    get_api_mode(model_config),
+                    type(exc).__name__,
+                )
+                request_body = _without_stream_request_fields(request_body)
         if get_api_mode(model_config) == API_MODE_RESPONSES:
             params, extra_body = _split_responses_params(request_body)
             if extra_body:
@@ -1391,6 +1525,140 @@ class ModelRequester:
             params["extra_body"] = extra_body
         response = await client.chat.completions.create(**params)
         return self._response_to_dict(response)
+
+    async def _request_with_openai_streaming(
+        self,
+        client: AsyncOpenAI,
+        model_config: ModelConfig,
+        request_body: dict[str, Any],
+    ) -> dict[str, Any]:
+        api_mode = get_api_mode(model_config)
+        stream_body = dict(request_body)
+        stream_body["stream"] = True
+        if api_mode == API_MODE_RESPONSES:
+            return await self._stream_responses_request(client, stream_body)
+        return await self._stream_chat_completions_request(client, stream_body)
+
+    async def _stream_chat_completions_request(
+        self, client: AsyncOpenAI, request_body: dict[str, Any]
+    ) -> dict[str, Any]:
+        params, extra_body = _split_chat_completion_params(request_body)
+        if extra_body:
+            params["extra_body"] = extra_body
+        response = await client.chat.completions.create(**params)
+
+        content_parts: list[str] = []
+        tool_calls: list[dict[str, Any]] = []
+        usage: dict[str, Any] | None = None
+        finish_reason = "stop"
+        role = "assistant"
+
+        async for chunk in response:
+            chunk_dict = self._response_to_dict(chunk)
+            usage = (
+                _extract_stream_usage(chunk_dict, api_mode=API_MODE_CHAT_COMPLETIONS)
+                or usage
+            )
+            choices = chunk_dict.get("choices")
+            if not isinstance(choices, list):
+                continue
+            for choice in choices:
+                if not isinstance(choice, dict):
+                    continue
+                delta = choice.get("delta")
+                if not isinstance(delta, dict):
+                    continue
+                role_value = str(delta.get("role") or "").strip()
+                if role_value:
+                    role = role_value
+                content_delta = _stringify_stream_delta(delta.get("content"))
+                if content_delta:
+                    content_parts.append(content_delta)
+                raw_tool_calls = delta.get("tool_calls")
+                if isinstance(raw_tool_calls, list):
+                    for tool_delta in raw_tool_calls:
+                        if isinstance(tool_delta, dict):
+                            _merge_tool_call_delta(tool_calls, tool_delta)
+                current_finish_reason = str(choice.get("finish_reason") or "").strip()
+                if current_finish_reason:
+                    finish_reason = current_finish_reason
+
+        message: dict[str, Any] = {
+            "role": role,
+            "content": "".join(content_parts).strip(),
+        }
+        if tool_calls:
+            message["tool_calls"] = tool_calls
+        result: dict[str, Any] = {
+            "choices": [
+                {
+                    "index": 0,
+                    "message": message,
+                    "finish_reason": finish_reason,
+                }
+            ]
+        }
+        if usage is not None:
+            result["usage"] = usage
+        return result
+
+    async def _stream_responses_request(
+        self, client: AsyncOpenAI, request_body: dict[str, Any]
+    ) -> dict[str, Any]:
+        params, extra_body = _split_responses_params(request_body)
+        if extra_body:
+            params["extra_body"] = extra_body
+        stream = await client.responses.create(**params)
+
+        output_items: list[dict[str, Any]] = []
+        output_text_parts: list[str] = []
+        usage: dict[str, Any] | None = None
+        final_response: dict[str, Any] | None = None
+
+        async for event in stream:
+            event_dict = self._response_to_dict(event)
+            usage = (
+                _extract_stream_usage(event_dict, api_mode=API_MODE_RESPONSES) or usage
+            )
+            event_type = str(event_dict.get("type") or "").strip().lower()
+            response = event_dict.get("response")
+            if isinstance(response, dict):
+                final_response = response
+            if event_type == "response.output_text.delta":
+                delta = _stringify_stream_delta(event_dict.get("delta"))
+                if delta:
+                    output_text_parts.append(delta)
+                continue
+            if event_type == "response.completed":
+                if isinstance(response, dict):
+                    final_response = response
+                continue
+            item = _extract_stream_response_item(event_dict)
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get("type") or "").strip().lower()
+            if item_type == "message":
+                output_items.append(item)
+                continue
+            if item_type == "function_call":
+                output_items.append(item)
+                continue
+            if item_type == "reasoning":
+                output_items.append(item)
+
+        if final_response is not None:
+            if usage is not None and not isinstance(final_response.get("usage"), dict):
+                final_response = dict(final_response)
+                final_response["usage"] = usage
+            return final_response
+
+        synthesized: dict[str, Any] = {
+            "output": output_items,
+            "output_text": "".join(output_text_parts).strip(),
+        }
+        if usage is not None:
+            synthesized["usage"] = usage
+        return synthesized
 
     async def embed(
         self,

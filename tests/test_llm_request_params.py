@@ -47,6 +47,19 @@ class _FakeChatCompletionsAPI:
         }
 
 
+class _FakeAsyncStream:
+    def __init__(self, events: list[Any]) -> None:
+        self._events = list(events)
+
+    def __aiter__(self) -> _FakeAsyncStream:
+        return self
+
+    async def __anext__(self) -> Any:
+        if not self._events:
+            raise StopAsyncIteration
+        return self._events.pop(0)
+
+
 class _FakeResponsesAPI:
     def __init__(self, responses: list[Any] | None = None) -> None:
         self.last_kwargs: dict[str, Any] | None = None
@@ -81,6 +94,47 @@ class _FakeClient:
             "_Chat", (), {"completions": _FakeChatCompletionsAPI(chat_responses)}
         )()
         self.responses = _FakeResponsesAPI(responses)
+
+
+class _FakeStreamingClient:
+    def __init__(
+        self,
+        *,
+        chat_events: list[dict[str, Any]] | None = None,
+        response_events: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self.chat = type(
+            "_Chat",
+            (),
+            {
+                "completions": SimpleNamespace(
+                    last_kwargs=None,
+                    calls=[],
+                    create=self._create_chat(chat_events or []),
+                )
+            },
+        )()
+        self.responses = SimpleNamespace(
+            last_kwargs=None,
+            calls=[],
+            create=self._create_responses(response_events or []),
+        )
+
+    def _create_chat(self, events: list[dict[str, Any]]) -> Any:
+        async def _create(**kwargs: Any) -> _FakeAsyncStream:
+            self.chat.completions.last_kwargs = dict(kwargs)
+            self.chat.completions.calls.append(dict(kwargs))
+            return _FakeAsyncStream(events)
+
+        return _create
+
+    def _create_responses(self, events: list[dict[str, Any]]) -> Any:
+        async def _create(**kwargs: Any) -> _FakeAsyncStream:
+            self.responses.last_kwargs = dict(kwargs)
+            self.responses.calls.append(dict(kwargs))
+            return _FakeAsyncStream(events)
+
+        return _create
 
 
 @pytest.mark.asyncio
@@ -1625,5 +1679,163 @@ async def test_thinking_enabled_legacy_budget_tokens() -> None:
     kw = fake_client.chat.completions.last_kwargs
     assert kw is not None
     assert kw["extra_body"]["thinking"] == {"type": "enabled", "budget_tokens": 8000}
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_chat_request_streaming_aggregates_content_and_tool_calls() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeStreamingClient(
+        chat_events=[
+            {
+                "choices": [
+                    {
+                        "delta": {"role": "assistant", "content": "hel"},
+                        "finish_reason": None,
+                    }
+                ]
+            },
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "content": "lo",
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {"name": "lookup", "arguments": '{"q"'},
+                                }
+                            ],
+                        },
+                        "finish_reason": None,
+                    }
+                ]
+            },
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "function": {"arguments": ':"weather"}'},
+                                }
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 3,
+                    "completion_tokens": 4,
+                    "total_tokens": 7,
+                },
+            },
+        ]
+    )
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        stream_enabled=True,
+    )
+
+    result = await requester.request(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=128,
+        call_type="chat",
+    )
+
+    assert fake_client.chat.completions.last_kwargs is not None
+    assert fake_client.chat.completions.last_kwargs["stream"] is True
+    assert extract_choices_content(result) == "hello"
+    assert result["choices"][0]["finish_reason"] == "tool_calls"
+    assert result["choices"][0]["message"]["tool_calls"][0]["id"] == "call_1"
+    assert (
+        result["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+        == '{"q":"weather"}'
+    )
+    assert result["usage"] == {
+        "prompt_tokens": 3,
+        "completion_tokens": 4,
+        "total_tokens": 7,
+    }
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_responses_request_streaming_prefers_completed_response_payload() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeStreamingClient(
+        response_events=[
+            {"type": "response.output_text.delta", "delta": "partial "},
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_stream",
+                    "output": [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {"type": "output_text", "text": "final answer"}
+                            ],
+                        }
+                    ],
+                    "usage": {
+                        "input_tokens": 8,
+                        "output_tokens": 5,
+                        "total_tokens": 13,
+                    },
+                },
+            },
+        ]
+    )
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+        stream_enabled=True,
+    )
+
+    result = await requester.request(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=128,
+        call_type="chat",
+    )
+
+    assert fake_client.responses.last_kwargs is not None
+    assert fake_client.responses.last_kwargs["stream"] is True
+    assert extract_choices_content(result) == "final answer"
+    assert result["usage"] == {
+        "prompt_tokens": 8,
+        "completion_tokens": 5,
+        "total_tokens": 13,
+    }
 
     await requester._http_client.aclose()

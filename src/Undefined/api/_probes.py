@@ -99,6 +99,8 @@ def _build_internal_model_probe_payload(mcfg: Any) -> dict[str, Any]:
         )
     if hasattr(mcfg, "prompt_cache_enabled"):
         payload["prompt_cache_enabled"] = getattr(mcfg, "prompt_cache_enabled", True)
+    if hasattr(mcfg, "stream_enabled"):
+        payload["stream_enabled"] = getattr(mcfg, "stream_enabled", False)
     if hasattr(mcfg, "reasoning_enabled"):
         payload["reasoning_enabled"] = getattr(mcfg, "reasoning_enabled", False)
     if hasattr(mcfg, "reasoning_effort"):

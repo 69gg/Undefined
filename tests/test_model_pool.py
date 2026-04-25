@@ -321,6 +321,7 @@ class TestModelSelectorSelection:
                         api_mode="responses",
                         responses_tool_choice_compat=True,
                         responses_force_stateless_replay=True,
+                        stream_enabled=True,
                     )
                 ],
             ),
@@ -332,6 +333,7 @@ class TestModelSelectorSelection:
         assert result.api_mode == "responses"
         assert result.responses_tool_choice_compat is True
         assert result.responses_force_stateless_replay is True
+        assert result.stream_enabled is True
 
     def test_select_agent_config_preserves_responses_flags(
         self,
@@ -354,6 +356,7 @@ class TestModelSelectorSelection:
                         api_mode="responses",
                         responses_tool_choice_compat=True,
                         responses_force_stateless_replay=True,
+                        stream_enabled=True,
                     )
                 ],
             ),
@@ -365,6 +368,7 @@ class TestModelSelectorSelection:
         assert result.api_mode == "responses"
         assert result.responses_tool_choice_compat is True
         assert result.responses_force_stateless_replay is True
+        assert result.stream_enabled is True
 
 
 class TestModelPoolServiceHandleMessage:

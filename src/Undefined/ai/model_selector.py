@@ -251,6 +251,7 @@ class ModelSelector:
             prompt_cache_enabled=entry.prompt_cache_enabled,
             reasoning_enabled=entry.reasoning_enabled,
             reasoning_effort=entry.reasoning_effort,
+            stream_enabled=entry.stream_enabled,
             request_params=entry.request_params,
             pool=primary.pool,
         )
@@ -276,6 +277,7 @@ class ModelSelector:
             prompt_cache_enabled=entry.prompt_cache_enabled,
             reasoning_enabled=entry.reasoning_enabled,
             reasoning_effort=entry.reasoning_effort,
+            stream_enabled=entry.stream_enabled,
             request_params=entry.request_params,
             pool=primary.pool,
         )

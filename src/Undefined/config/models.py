@@ -45,6 +45,7 @@ class ModelPoolEntry:
     prompt_cache_enabled: bool = True
     reasoning_enabled: bool = False
     reasoning_effort: str = "medium"
+    stream_enabled: bool = False
     request_params: dict[str, Any] = field(default_factory=dict)
 
 
@@ -81,6 +82,7 @@ class ChatModelConfig:
     prompt_cache_enabled: bool = True  # 是否启用自动 prompt_cache_key
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位
+    stream_enabled: bool = False  # 是否对上游启用流式请求
     request_params: dict[str, Any] = field(default_factory=dict)
     pool: ModelPool | None = None  # 模型池配置
 
@@ -109,6 +111,7 @@ class VisionModelConfig:
     prompt_cache_enabled: bool = True  # 是否启用自动 prompt_cache_key
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位
+    stream_enabled: bool = False  # 是否对上游启用流式请求
     request_params: dict[str, Any] = field(default_factory=dict)
 
 
@@ -136,6 +139,7 @@ class SecurityModelConfig:
     prompt_cache_enabled: bool = True  # 是否启用自动 prompt_cache_key
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位
+    stream_enabled: bool = False  # 是否对上游启用流式请求
     request_params: dict[str, Any] = field(default_factory=dict)
 
 
@@ -189,6 +193,7 @@ class AgentModelConfig:
     prompt_cache_enabled: bool = True  # 是否启用自动 prompt_cache_key
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位
+    stream_enabled: bool = False  # 是否对上游启用流式请求
     request_params: dict[str, Any] = field(default_factory=dict)
     pool: ModelPool | None = None  # 模型池配置
 
@@ -209,6 +214,7 @@ class GrokModelConfig:
     prompt_cache_enabled: bool = True  # 是否启用自动 prompt_cache_key
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
     reasoning_effort: str = "medium"  # reasoning effort 档位
+    stream_enabled: bool = False  # 是否对上游启用流式请求
     request_params: dict[str, Any] = field(default_factory=dict)
 
 
