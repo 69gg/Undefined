@@ -87,6 +87,23 @@ def _patch_profile_render(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def _patch_profile_render_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    import Undefined.render as render_module
+
+    async def fake_render_html_to_image(
+        _html_content: str,
+        _output_path: str,
+        *,
+        viewport_width: int = 1280,
+    ) -> None:
+        assert viewport_width == 480
+        raise RuntimeError("render failed")
+
+    monkeypatch.setattr(
+        render_module, "render_html_to_image", fake_render_html_to_image
+    )
+
+
 # -- Private chat tests --
 
 
@@ -210,6 +227,64 @@ async def test_profile_group_default_renders_image(
     assert len(sender.group_messages) == 1
     assert sender.group_messages[0][1].startswith("[CQ:image,file=file://")
     cognitive_service.get_profile.assert_called_once_with("user", "55555")
+
+
+@pytest.mark.asyncio
+async def test_profile_group_render_failure_falls_back_to_forward(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Group chat render failure falls back to merged forward instead of plain text."""
+    _patch_profile_render_failure(monkeypatch)
+    sender = _DummySender()
+    cognitive_service = AsyncMock()
+    cognitive_service.get_profile = AsyncMock(return_value="群成员侧写数据")
+
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="group",
+        group_id=123456,
+        sender_id=55555,
+    )
+
+    await profile_execute([], context)
+
+    assert sender.group_messages == []
+    send_forward_msg = cast(Any, context.onebot.send_forward_msg)
+    send_forward_msg.assert_called_once()
+    call = send_forward_msg.call_args
+    assert call.args[0] == 123456
+    nodes = call.args[1]
+    assert len(nodes) == 2
+    assert "类型: 用户侧写" in nodes[0]["data"]["content"]
+    assert nodes[1]["data"]["content"] == "群成员侧写数据"
+
+
+@pytest.mark.asyncio
+async def test_profile_private_render_failure_falls_back_to_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Private chat render failure still falls back to plain text."""
+    _patch_profile_render_failure(monkeypatch)
+    sender = _DummySender()
+    cognitive_service = AsyncMock()
+    cognitive_service.get_profile = AsyncMock(return_value="这是一个用户侧写")
+
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="private",
+        group_id=0,
+        sender_id=99999,
+        user_id=99999,
+    )
+
+    await profile_execute([], context)
+
+    assert len(sender.private_messages) == 1
+    assert sender.private_messages[0][1] == "这是一个用户侧写"
+    send_forward_msg = cast(Any, context.onebot.send_forward_msg)
+    send_forward_msg.assert_not_called()
 
 
 @pytest.mark.asyncio

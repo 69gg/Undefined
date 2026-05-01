@@ -181,6 +181,22 @@ body {{
         await context.sender.send_group_message(context.group_id, image_cq)
 
 
+async def _handle_render_fallback(
+    context: CommandContext,
+    metadata: str,
+    profile_text: str,
+) -> None:
+    if _is_private(context):
+        await _send_text(context, profile_text)
+        return
+
+    try:
+        await _send_forward(context, metadata, profile_text)
+    except Exception:
+        logger.exception("渲染侧写图片失败后发送合并转发也失败，回退到纯文本")
+        await _send_text(context, profile_text)
+
+
 # ── 入口 ─────────────────────────────────────────────────────
 
 
@@ -237,8 +253,8 @@ async def execute(args: list[str], context: CommandContext) -> None:
         try:
             await _send_render(context, metadata, profile)
         except Exception:
-            logger.exception("渲染侧写图片失败，回退到纯文本")
-            await _send_text(context, profile)
+            logger.exception("渲染侧写图片失败，回退到合并转发")
+            await _handle_render_fallback(context, metadata, profile)
     else:
         if _is_private(context):
             await _send_text(context, profile)
