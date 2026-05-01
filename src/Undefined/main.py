@@ -42,6 +42,7 @@ from Undefined.utils.self_update import (
     format_update_result,
     restart_process,
 )
+from Undefined.render import close_browser as close_render_browser
 
 
 def ensure_runtime_dirs() -> None:
@@ -517,6 +518,7 @@ async def main() -> None:
         if retrieval_runtime is not None:
             await retrieval_runtime.stop()
         await config_manager.stop_hot_reload()
+        await close_render_browser()
         logger.info("[退出] 机器人已停止运行")
 
 

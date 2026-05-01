@@ -100,3 +100,30 @@ tool_invoke_callback_timeout = 0
     )
     assert cfg.api.tool_invoke_timeout == 120
     assert cfg.api.tool_invoke_callback_timeout == 10
+
+
+def test_render_config_defaults_to_auto(tmp_path: Path) -> None:
+    cfg = _load_config(tmp_path / "config.toml", "")
+    assert cfg.render_browser_max_concurrency == 0
+
+
+def test_render_config_accepts_custom_value(tmp_path: Path) -> None:
+    cfg = _load_config(
+        tmp_path / "config.toml",
+        """
+[render]
+browser_max_concurrency = 4
+""",
+    )
+    assert cfg.render_browser_max_concurrency == 4
+
+
+def test_render_config_invalid_values_fallback_to_auto(tmp_path: Path) -> None:
+    cfg = _load_config(
+        tmp_path / "config.toml",
+        """
+[render]
+browser_max_concurrency = -3
+""",
+    )
+    assert cfg.render_browser_max_concurrency == 0

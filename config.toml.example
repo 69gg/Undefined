@@ -840,6 +840,13 @@ request_timeout_seconds = 30.0
 # en: Default retry count (0-5).
 request_retries = 0
 
+# zh: HTML/Markdown 图片渲染配置。
+# en: HTML/Markdown image rendering settings.
+[render]
+# zh: 渲染浏览器最大同时开启数量。0 表示自动：Linux 默认 1，其它平台默认 2。
+# en: Max concurrent render browser pages. 0 = auto: Linux defaults to 1, other platforms default to 2.
+browser_max_concurrency = 0
+
 # zh: 第三方 API 基础地址（便于自定义镜像或私有网关）。
 # en: Third-party API base URLs (for mirrors or private gateways).
 [api_endpoints]

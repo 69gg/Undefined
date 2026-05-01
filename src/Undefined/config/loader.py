@@ -274,6 +274,7 @@ class Config:
     https_proxy: str
     network_request_timeout: float
     network_request_retries: int
+    render_browser_max_concurrency: int
     api_xxapi_base_url: str
     api_xingzhige_base_url: str
     api_jkyai_base_url: str
@@ -1011,6 +1012,18 @@ class Config:
         if network_request_retries > 5:
             network_request_retries = 5
 
+        render_browser_max_concurrency = max(
+            0,
+            _coerce_int(
+                _get_value(
+                    data,
+                    ("render", "browser_max_concurrency"),
+                    "RENDER_BROWSER_MAX_CONCURRENCY",
+                ),
+                0,
+            ),
+        )
+
         api_xxapi_base_url = _normalize_base_url(
             _coerce_str(
                 _get_value(data, ("api_endpoints", "xxapi_base_url"), "XXAPI_BASE_URL"),
@@ -1354,6 +1367,7 @@ class Config:
             https_proxy=https_proxy,
             network_request_timeout=network_request_timeout,
             network_request_retries=network_request_retries,
+            render_browser_max_concurrency=render_browser_max_concurrency,
             api_xxapi_base_url=api_xxapi_base_url,
             api_xingzhige_base_url=api_xingzhige_base_url,
             api_jkyai_base_url=api_jkyai_base_url,
