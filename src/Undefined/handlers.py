@@ -771,7 +771,7 @@ class MessageHandler:
         # normalized_text 用于命令解析和 AI 路由，原始 text 已用于历史/日志
         is_fake_at = False
         normalized_text = text
-        if not is_at_bot:
+        if not is_at_bot and ("@" in text or "＠" in text):
             nicknames = await self._bot_nickname_cache.get_nicknames(group_id)
             if nicknames:
                 is_fake_at, normalized_text = strip_fake_at(text, nicknames)

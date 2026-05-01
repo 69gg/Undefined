@@ -295,6 +295,24 @@ class CommandRegistry:
             return CommandRateLimit(user=3600, admin=0, superadmin=0)
         return CommandRateLimit()
 
+    def _merge_rate_limit(
+        self, value: Any, parent_rate_limit: CommandRateLimit
+    ) -> CommandRateLimit:
+        if not isinstance(value, dict):
+            return parent_rate_limit
+        try:
+            return CommandRateLimit(
+                user=int(value.get("user", parent_rate_limit.user)),
+                admin=int(value.get("admin", parent_rate_limit.admin)),
+                superadmin=int(value.get("superadmin", parent_rate_limit.superadmin)),
+            )
+        except (ValueError, TypeError):
+            logger.warning(
+                "[CommandRegistry] 子命令限流配置解析失败，继承父命令: %s",
+                value,
+            )
+            return parent_rate_limit
+
     def _normalize_aliases(self, value: Any) -> list[str]:
         if not isinstance(value, list):
             return []
@@ -338,10 +356,8 @@ class CommandRegistry:
             sub_allow_private = bool(
                 sub_cfg.get("allow_in_private", parent_allow_private)
             )
-            sub_rate_limit = (
-                self._normalize_rate_limit(sub_cfg.get("rate_limit", parent_rate_limit))
-                if isinstance(sub_cfg.get("rate_limit"), dict)
-                else parent_rate_limit
+            sub_rate_limit = self._merge_rate_limit(
+                sub_cfg.get("rate_limit"), parent_rate_limit
             )
             result[name] = SubcommandMeta(
                 name=name,

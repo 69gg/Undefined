@@ -177,6 +177,38 @@ def test_command_registry_hot_reload_policy_update(tmp_path: Path) -> None:
     assert registry.is_visible(updated_meta, context) is True
 
 
+def test_subcommand_rate_limit_partially_overrides_parent(tmp_path: Path) -> None:
+    commands_dir = tmp_path / "commands"
+    commands_dir.mkdir(parents=True)
+    command_dir = _write_command(
+        commands_dir,
+        "limited",
+        command_name="limited",
+        usage="/limited",
+        handler_text="ok",
+    )
+    config_path = command_dir / "config.json"
+    config = json.loads(config_path.read_text("utf-8"))
+    config["rate_limit"] = {"user": 60, "admin": 5, "superadmin": 0}
+    config["subcommands"] = {
+        "fast": {
+            "description": "fast subcommand",
+            "rate_limit": {"user": 30},
+        }
+    }
+    config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), "utf-8")
+
+    registry = CommandRegistry(commands_dir)
+    registry.load_commands()
+
+    meta = registry.resolve("limited")
+    assert meta is not None
+    sub_meta = meta.subcommands["fast"]
+    assert sub_meta.rate_limit.user == 30
+    assert sub_meta.rate_limit.admin == 5
+    assert sub_meta.rate_limit.superadmin == 0
+
+
 @pytest.mark.asyncio
 async def test_help_command_detail_includes_template_and_readme(tmp_path: Path) -> None:
     commands_dir = tmp_path / "commands"

@@ -136,6 +136,7 @@ async def test_repeat_triggers_on_3_identical_from_different_senders() -> None:
     assert call.kwargs.get("history_prefix") == REPEAT_REPLY_HISTORY_PREFIX
     handler.auto_pipeline_registry.run.assert_not_called()
     handler.ai_coordinator.handle_auto_reply.assert_not_called()
+    handler._bot_nickname_cache.get_nicknames.assert_not_called()
 
 
 # ── 不触发：3条相同消息来自同一人 ──
