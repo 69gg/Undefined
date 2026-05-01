@@ -198,14 +198,69 @@ async def test_help_command_detail_includes_template_and_readme(tmp_path: Path) 
     sender = _DummySender()
     context = _build_context(registry, sender)
 
-    await help_execute(["foo"], context)
+    await help_execute(["foo", "--text"], context)
     output = sender.messages[-1][1]
     assert "/foo(/f)" in output
     assert "Foo 命令描述" in output
+    assert "用法：/foo(/f) <name>" in output
+    assert "示例：/foo alice" in output
     assert "权限：公开 | 作用域：仅群聊" in output
     assert "别名：/f" in output
     assert "说明文档：" in output
     assert "这是 Foo 的详细说明。" in output
+
+
+@pytest.mark.asyncio
+async def test_help_command_detail_defaults_to_rendered_image(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands_dir = tmp_path / "commands"
+    commands_dir.mkdir(parents=True)
+    _write_command(
+        commands_dir,
+        "foo",
+        command_name="foo",
+        description="Foo 命令描述",
+        usage="/foo <name>",
+        example="/foo alice",
+        aliases=["f"],
+        handler_text="ok",
+        doc_text="# Foo 文档\n\n这是 Foo 的详细说明。",
+    )
+
+    rendered: dict[str, Any] = {}
+
+    async def fake_render_html_to_image(
+        html_content: str,
+        output_path: str,
+        *,
+        viewport_width: int = 1280,
+    ) -> None:
+        rendered["html"] = html_content
+        rendered["output_path"] = output_path
+        rendered["viewport_width"] = viewport_width
+
+    monkeypatch.setattr(
+        "Undefined.render.render_html_to_image",
+        fake_render_html_to_image,
+    )
+
+    registry = CommandRegistry(commands_dir)
+    registry.load_commands()
+    sender = _DummySender()
+    context = _build_context(registry, sender)
+
+    await help_execute(["foo"], context)
+
+    assert sender.messages
+    output = sender.messages[-1][1]
+    assert output.startswith("[CQ:image,file=file://")
+    assert rendered["viewport_width"] == 760
+    assert "Foo 命令描述" in rendered["html"]
+    assert "/foo(/f)" in rendered["html"]
+    assert "说明文档" in rendered["html"]
+    assert "这是 Foo 的详细说明。" in rendered["html"]
 
 
 @pytest.mark.asyncio
@@ -333,7 +388,7 @@ async def test_help_uses_command_visibility_policy(tmp_path: Path) -> None:
 
     sender.messages.clear()
     context.sender_id = 42
-    await help_execute(["gated"], context)
+    await help_execute(["gated", "--text"], context)
     assert "/gated" in sender.messages[-1][1]
 
 

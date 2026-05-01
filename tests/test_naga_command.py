@@ -133,8 +133,8 @@ async def test_naga_visible_in_help_for_superadmin_private(
 
     await help_execute([], context)
 
-    assert sender.group_messages
-    output = sender.group_messages[-1][1]
+    assert sender.private_messages
+    output = sender.private_messages[-1][1]
     assert "/naga" in output
     assert "NagaAgent" in output
 
@@ -157,8 +157,8 @@ async def test_naga_hidden_when_runtime_api_disabled(
 
     await help_execute([], context)
 
-    assert sender.group_messages
-    output = sender.group_messages[-1][1]
+    assert sender.private_messages
+    output = sender.private_messages[-1][1]
     assert "/naga <bind|unbind> [参数]" not in output
 
 
