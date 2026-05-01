@@ -43,7 +43,7 @@
 - **Management API + Runtime API 分层**：配置、日志、Bot 启停和管理探针由 Management API 提供；主进程 Runtime API 则专注探针、记忆只读查询、认知侧写检索和 WebUI AI Chat。详见 [docs/management-api.md](docs/management-api.md) 与 [docs/openapi.md](docs/openapi.md)。
 - **多模型池**：支持配置多个 AI 模型，可轮询、随机选择或用户指定；支持多模型并发比较，选择最佳结果继续对话。详见 [多模型功能文档](docs/multi-model.md)。
 - **本地知识库**：将纯文本文件向量化存入 ChromaDB，AI 可通过关键词搜索或语义搜索查询领域知识；支持增量嵌入与自动扫描。详见 [知识库文档](docs/knowledge.md)。
-- **全局表情包库**：收到图片后可异步判定是否为表情包，通过两阶段 LLM 管线生成纯文本描述与标签，支持关键词检索、语义检索和混合检索，并可直接按统一图片 `uid` 发送或插入 `<pic uid="..."/>`。详见 [表情包库说明](docs/memes.md)。
+- **全局表情包库**：收到图片后可异步判定是否为表情包，通过两阶段 LLM 管线生成纯文本描述与标签，支持关键词检索、语义检索和混合检索，并可直接按统一图片 `uid` 发送或插入 `<attachment uid="..."/>`。详见 [表情包库说明](docs/memes.md)。
 - **访问控制（群/私聊）**：支持 `access.mode` 三种模式（`off` / `blacklist` / `allowlist`）和群/私聊黑白名单；可按策略限制收发范围，避免误触发与误投递。详见 [docs/access-control.md](docs/access-control.md)。
 - **版本变更可查询**：仓库根目录维护 `CHANGELOG.md`，并提供 `/changelog` 命令在运行时查看最近版本和单版本摘要。
 - **并行工具执行**：无论是主 AI 还是子 Agent，均支持 `asyncio` 并发工具调用，大幅提升多任务处理速度（如同时读取多个文件或搜索多个关键词）。

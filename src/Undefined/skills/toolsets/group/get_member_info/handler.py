@@ -56,9 +56,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
         if brief:
             display_name = card.strip() if card.strip() else nickname.strip()
-            if not display_name:
-                return f"QQ {user_id} 在群 {group_id} 中没有昵称信息"
-            return f"QQ {user_id} 在群 {group_id} 的昵称是：{display_name}"
+            return display_name or str(user_id)
 
         result_parts = []
         result_parts.append(f"【群成员信息】群号: {group_id}")

@@ -17,6 +17,14 @@ _SIZE_MAP = {
 }
 
 
+def _normalize_size(value: Any) -> int:
+    try:
+        size = int(value)
+    except (TypeError, ValueError):
+        return 100
+    return size if size in _SIZE_MAP else 100
+
+
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """获取 QQ 用户头像并注册到附件系统，返回图片 UID。"""
     user_id = args.get("user_id")
@@ -33,7 +41,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if user_id <= 0:
         return "QQ 号必须为正整数"
 
-    size_code = _SIZE_MAP.get(size, 1)
+    size_code = _SIZE_MAP[_normalize_size(size)]
     avatar_url = _QQ_AVATAR_URL.format(user_id=user_id, size_code=size_code)
 
     attachment_registry = context.get("attachment_registry")
