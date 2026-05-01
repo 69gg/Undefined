@@ -90,7 +90,13 @@ class MessageHandler:
         self.faq_storage = faq_storage
         # 初始化工具组件
         self.history_manager = MessageHistoryManager(config.history_max_records)
-        self.sender = MessageSender(onebot, self.history_manager, config.bot_qq, config)
+        self.sender = MessageSender(
+            onebot,
+            self.history_manager,
+            config.bot_qq,
+            config,
+            attachment_registry=getattr(ai, "attachment_registry", None),
+        )
 
         # 初始化服务
         self.security = SecurityService(config, ai._http_client)

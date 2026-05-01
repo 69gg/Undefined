@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -23,6 +25,51 @@ def sender() -> MessageSender:
     config.private_access_denied_reason.return_value = None
 
     return MessageSender(onebot, history_manager, bot_qq=10000, config=config)
+
+
+@pytest.mark.asyncio
+async def test_send_group_file_registers_attachment_in_history(
+    tmp_path: Path,
+) -> None:
+    file_path = tmp_path / "paper.pdf"
+    file_path.write_bytes(b"pdf")
+    onebot = MagicMock()
+    onebot.upload_group_file = AsyncMock()
+    history_manager = MagicMock()
+    history_manager.add_group_message = AsyncMock()
+    config = MagicMock()
+    config.is_group_allowed.return_value = True
+    config.access_control_enabled.return_value = False
+    config.group_access_denied_reason.return_value = None
+
+    record = SimpleNamespace(
+        prompt_ref=lambda: {
+            "uid": "file_test",
+            "kind": "file",
+            "media_type": "file",
+            "display_name": "paper.pdf",
+        }
+    )
+    attachment_registry = SimpleNamespace(
+        register_local_file=AsyncMock(return_value=record)
+    )
+    sender = MessageSender(
+        onebot,
+        history_manager,
+        bot_qq=10000,
+        config=config,
+        attachment_registry=attachment_registry,
+    )
+
+    await sender.send_group_file(12345, str(file_path), "paper.pdf")
+
+    attachment_registry.register_local_file.assert_awaited_once()
+    history_mock = cast(AsyncMock, history_manager.add_group_message)
+    assert history_mock.await_count == 1
+    assert history_mock.await_args is not None
+    kwargs = history_mock.await_args.kwargs
+    assert kwargs["attachments"][0]["uid"] == "file_test"
+    assert "uid=file_test" in kwargs["text_content"]
 
 
 @pytest.mark.asyncio

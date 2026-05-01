@@ -2,8 +2,9 @@
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+from Undefined.attachments import attachment_refs_to_text, build_attachment_scope
 from Undefined.config import Config
 from Undefined.onebot import OneBotClient
 from Undefined.utils.history import MessageHistoryManager
@@ -52,6 +53,18 @@ def _build_file_history_message(file_name: str, size_bytes: int | None) -> str:
     return f"[文件] {file_name} ({_format_size(size_bytes)})"
 
 
+def _append_attachment_refs(
+    history_content: str,
+    attachments: list[dict[str, str]] | None,
+) -> str:
+    refs_text = attachment_refs_to_text(attachments or [])
+    if not refs_text or refs_text in history_content:
+        return history_content
+    if not history_content:
+        return refs_text
+    return f"{history_content}\n{refs_text}"
+
+
 def _get_file_size(file_path: str) -> int | None:
     try:
         return Path(file_path).stat().st_size
@@ -68,11 +81,57 @@ class MessageSender:
         history_manager: MessageHistoryManager,
         bot_qq: int,
         config: Config,
+        attachment_registry: Any | None = None,
     ):
         self.onebot = onebot
         self.history_manager = history_manager
         self.bot_qq = bot_qq
         self.config = config
+        self.attachment_registry = attachment_registry
+
+    async def register_sent_file_attachment(
+        self,
+        target_type: Literal["group", "private"],
+        target_id: int,
+        file_path: str,
+        name: str | None = None,
+        *,
+        kind: str = "file",
+        source_kind: str = "sent_file",
+        source_ref: str = "",
+    ) -> list[dict[str, str]]:
+        """将发送出的本地文件登记为当前会话可见的统一附件 UID。"""
+        registry = self.attachment_registry
+        if registry is None:
+            return []
+
+        scope_key = build_attachment_scope(
+            group_id=target_id if target_type == "group" else None,
+            user_id=target_id if target_type == "private" else None,
+            request_type=target_type,
+        )
+        if scope_key is None:
+            return []
+
+        file_name = name or Path(file_path).name
+        try:
+            record = await registry.register_local_file(
+                scope_key,
+                file_path,
+                kind=kind,
+                display_name=file_name,
+                source_kind=source_kind,
+                source_ref=source_ref or str(Path(file_path).resolve()),
+            )
+            return [record.prompt_ref()]
+        except Exception:
+            logger.exception(
+                "[附件登记] 发送文件登记失败: target=%s:%s file=%s",
+                target_type,
+                target_id,
+                file_name,
+            )
+            return []
 
     async def send_group_message(
         self,
@@ -117,6 +176,7 @@ class MessageSender:
                 history_content = extract_text(hist_segments, self.bot_qq)
             if history_prefix:
                 history_content = f"{history_prefix}{history_content}"
+            history_content = _append_attachment_refs(history_content, attachments)
 
         # 发送消息
         bot_message_id: int | None = None
@@ -238,6 +298,7 @@ class MessageSender:
             else:
                 hist_segments = message_to_segments(message)
                 history_content = extract_text(hist_segments, self.bot_qq)
+            history_content = _append_attachment_refs(history_content, attachments)
 
         # 发送消息
         bot_message_id: int | None = None
@@ -540,6 +601,13 @@ class MessageSender:
 
         file_size = _get_file_size(file_path)
         history_content = _build_file_history_message(file_name, file_size)
+        attachments = await self.register_sent_file_attachment(
+            "group",
+            group_id,
+            file_path,
+            file_name,
+        )
+        history_content = _append_attachment_refs(history_content, attachments)
         try:
             await self.history_manager.add_group_message(
                 group_id=group_id,
@@ -547,6 +615,7 @@ class MessageSender:
                 text_content=history_content,
                 sender_nickname="Bot",
                 group_name="",
+                attachments=attachments,
             )
         except Exception:
             logger.exception(
@@ -587,12 +656,20 @@ class MessageSender:
 
         file_size = _get_file_size(file_path)
         history_content = _build_file_history_message(file_name, file_size)
+        attachments = await self.register_sent_file_attachment(
+            "private",
+            user_id,
+            file_path,
+            file_name,
+        )
+        history_content = _append_attachment_refs(history_content, attachments)
         try:
             await self.history_manager.add_private_message(
                 user_id=user_id,
                 text_content=history_content,
                 display_name="Bot",
                 user_name="Bot",
+                attachments=attachments,
             )
         except Exception:
             logger.exception(

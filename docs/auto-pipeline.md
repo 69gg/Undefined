@@ -8,7 +8,7 @@
 2. 用户消息先写入历史。
 3. `AutoPipelineRegistry` 并行调用所有已注册管线的 `detect(context)`。
 4. 对所有命中的管线，并行调用对应的 `process(detection, context)`。
-5. 管线发送出的信息、图片、文件或视频摘要通过统一发送器写入历史。
+5. 管线发送出的信息、图片、文件或视频摘要通过统一发送器写入历史；本地图片、文件和视频会登记为当前会话可见的统一附件 UID。
 6. 自动处理完成后，当前消息和管线输出一起进入 AI 自动回复/Agent 循环。
 
 命中自动处理管线的消息不会再进入斜杠命令分发；它会继续进入 AI 自动回复，让 AI 基于用户消息和刚写入的自动处理结果判断后续行为。
@@ -76,7 +76,7 @@ async def process(
         await sender.send_private_message(target_id, message)
 ```
 
-`detect` 应只做轻量检测和 ID 提取；`process` 执行下载、渲染、发送等重操作。发送消息应优先走 `MessageSender`，不要绕过历史写入。
+`detect` 应只做轻量检测和 ID 提取；`process` 执行下载、渲染、发送等重操作。发送消息应优先走 `MessageSender`，不要绕过历史写入。若管线发送本地生成的图片、文件或视频，需通过 `MessageSender.register_sent_file_attachment(...)` 或 `send_group_file` / `send_private_file` 登记附件，让历史中带上 `pic_*` / `file_*` UID，便于后续 AI 回复引用。
 
 ## Context 字段
 
