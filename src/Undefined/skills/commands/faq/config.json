@@ -12,5 +12,18 @@
     "show_in_help": true,
     "order": 30,
     "allow_in_private": false,
-    "aliases": ["f"]
+    "aliases": ["f"],
+    "subcommands": {
+        "ls":    { "description": "列出所有FAQ" },
+        "view":  { "description": "查看FAQ详情", "args": "<ID>" },
+        "search":{ "description": "搜索FAQ", "args": "<关键词>" },
+        "del":   { "description": "删除FAQ", "permission": "admin", "args": "<ID>" }
+    },
+    "inference": {
+        "default": "ls",
+        "rules": [
+            { "pattern": "^\\d{8}-\\d{3}$", "subcommand": "view" }
+        ],
+        "fallback": "search"
+    }
 }

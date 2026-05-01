@@ -1,8 +1,10 @@
 `/naga` 用于把 QQ 用户与 NagaAgent 的远端身份绑定起来，并在需要时解除绑定。
 
 当前可用命令：
-- `/naga bind <nagaagent_id>`
-- `/naga unbind <nagaagent_id>`
+- `/naga bind <nagaagent_id>` — 公开，仅群聊
+- `/naga unbind <nagaagent_id>` — 超级管理员
+
+权限在 `config.json` 的 `subcommands` 中声明，分发层自动检查，无需 handler 内部判断。
 
 ## /naga bind
 执行：

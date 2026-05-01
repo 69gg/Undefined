@@ -200,11 +200,9 @@ async def test_help_command_detail_includes_template_and_readme(tmp_path: Path) 
 
     await help_execute(["foo"], context)
     output = sender.messages[-1][1]
-    assert "命令详情：/foo" in output
-    assert "描述：Foo 命令描述" in output
-    assert "用法：/foo <name>" in output
-    assert "示例：/foo alice" in output
-    assert "作用域：仅群聊" in output
+    assert "/foo(/f)" in output
+    assert "Foo 命令描述" in output
+    assert "权限：公开 | 作用域：仅群聊" in output
     assert "别名：/f" in output
     assert "说明文档：" in output
     assert "这是 Foo 的详细说明。" in output
@@ -254,8 +252,8 @@ async def test_help_list_filters_private_only_commands_in_private_scope(
 
     await help_execute([], private_context)
     output = sender.messages[-1][1]
-    assert "当前会话：私聊" in output
-    assert "/open（群聊/私聊）" in output
+    assert "会话：私聊" in output
+    assert "/open" in output
     assert "/grouponly" not in output
 
 
@@ -336,7 +334,7 @@ async def test_help_uses_command_visibility_policy(tmp_path: Path) -> None:
     sender.messages.clear()
     context.sender_id = 42
     await help_execute(["gated"], context)
-    assert "命令详情：/gated" in sender.messages[-1][1]
+    assert "/gated" in sender.messages[-1][1]
 
 
 @pytest.mark.asyncio

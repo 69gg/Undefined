@@ -203,7 +203,7 @@ async def execute(args: list[str], context: CommandContext) -> None:
 
     # 超管指定目标
     if target:
-        if not context.config.is_superadmin(context.sender_id):
+        if not context.check_permission("superadmin"):
             await _send_text(context, "❌ 仅超级管理员可查看他人侧写")
             return
 

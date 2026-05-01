@@ -1,28 +1,12 @@
 from __future__ import annotations
 
-import re
-
 from Undefined.services.commands.context import CommandContext
-
-_FAQ_ID_RE = re.compile(r"^\d{8}-\d{3}$")
-
-_SUBCOMMANDS = {"ls", "view", "search", "del"}
 
 _USAGE_TEXT = (
     "用法：/faq [ls|view|search|del] [参数]\n"
     "子命令：ls（列表）、view <ID>（查看）、search <关键词>（搜索）、del <ID>（删除，需管理员）\n"
     "自动推断：无参数→ls，ID格式→view，非ID→search"
 )
-
-
-def _infer_subcommand(args: list[str]) -> tuple[str, list[str]]:
-    """根据参数自动推断子命令。"""
-    if not args:
-        return ("ls", [])
-    first = args[0]
-    if _FAQ_ID_RE.match(first):
-        return ("view", args)
-    return ("search", args)
 
 
 async def _send(message: str, context: CommandContext) -> None:
@@ -85,11 +69,6 @@ async def _handle_search(args: list[str], context: CommandContext) -> None:
 
 
 async def _handle_del(args: list[str], context: CommandContext) -> None:
-    if not context.config.is_admin(
-        context.sender_id
-    ) and not context.config.is_superadmin(context.sender_id):
-        await _send("⚠️ 权限不足：只有管理员可以删除 FAQ", context)
-        return
     if not args:
         await _send("❌ 用法: /faq del <ID>\n示例: /faq del 20241205-001", context)
         return
@@ -105,18 +84,13 @@ async def _handle_del(args: list[str], context: CommandContext) -> None:
 
 
 async def execute(args: list[str], context: CommandContext) -> None:
-    """处理 /faq。"""
+    """处理 /faq。分发层已处理子命令推断和权限检查，args 格式为 [子命令, *子参数]。"""
     if not args:
         await _handle_ls(context)
         return
 
-    first = args[0].lower()
-
-    if first in _SUBCOMMANDS:
-        subcommand = first
-        sub_args = args[1:]
-    else:
-        subcommand, sub_args = _infer_subcommand(args)
+    subcommand = args[0].lower()
+    sub_args = args[1:]
 
     if subcommand == "ls":
         await _handle_ls(context)

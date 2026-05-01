@@ -1,6 +1,6 @@
 {
     "name": "profile",
-    "description": "查看侧写。默认显示你的用户侧写；加 g 查看当前群聊侧写（仅群聊可用）。群聊默认合并转发，可用 -t 直接发送、-r 渲染图片",
+    "description": "查看认知侧写。默认你的用户侧写；g查看群聊侧写；-t直接文本；-r渲染图片。超管可指定ID查看他人", 
     "usage": "/profile [g] [-t|-f|-r]",
     "example": "/profile g -r",
     "permission": "public",

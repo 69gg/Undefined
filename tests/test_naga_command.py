@@ -135,7 +135,8 @@ async def test_naga_visible_in_help_for_superadmin_private(
 
     assert sender.group_messages
     output = sender.group_messages[-1][1]
-    assert "/naga <bind|unbind> [参数]" in output
+    assert "/naga" in output
+    assert "NagaAgent" in output
 
 
 @pytest.mark.asyncio

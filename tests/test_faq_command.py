@@ -1,7 +1,8 @@
-"""FAQ 合并命令 handler 单元测试"""
+"""FAQ 合并命令单元测试（含注册表子命令推断）"""
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -11,6 +12,7 @@ import pytest
 from Undefined.faq import FAQ
 from Undefined.services.command import CommandDispatcher
 from Undefined.services.commands.context import CommandContext
+from Undefined.services.commands.registry import CommandRegistry
 from Undefined.skills.commands.faq import handler as faq_handler
 
 
@@ -75,36 +77,96 @@ def _build_context(
 
 
 # ---------------------------------------------------------------------------
-# 自动推断
+# 注册表：子命令推断
 # ---------------------------------------------------------------------------
 
 
-def test_infer_no_args_returns_ls() -> None:
-    subcmd, sub_args = faq_handler._infer_subcommand([])
+def _commands_dir() -> Path:
+    return Path(__import__("Undefined").__path__[0]) / "skills" / "commands"
+
+
+def _load_faq_meta() -> Any:
+    registry = CommandRegistry(_commands_dir())
+    registry.load_commands()
+    return registry.resolve("faq")
+
+
+def test_registry_faq_has_subcommands() -> None:
+    meta = _load_faq_meta()
+    assert meta is not None
+    assert "ls" in meta.subcommands
+    assert "view" in meta.subcommands
+    assert "search" in meta.subcommands
+    assert "del" in meta.subcommands
+
+
+def test_registry_faq_has_inference() -> None:
+    meta = _load_faq_meta()
+    assert meta is not None
+    assert meta.inference is not None
+    assert meta.inference.default == "ls"
+    assert meta.inference.fallback == "search"
+    assert len(meta.inference.rules) == 1
+
+
+def test_registry_resolve_explicit_subcommand() -> None:
+    registry = CommandRegistry(_commands_dir())
+    registry.load_commands()
+    meta = registry.resolve("faq")
+    assert meta is not None
+    subcmd, args, submeta = registry.resolve_subcommand(meta, ["del", "20241205-001"])
+    assert subcmd == "del"
+    assert args == ["del", "20241205-001"]
+    assert submeta is not None
+    assert submeta.permission == "admin"
+
+
+def test_registry_infer_no_args_default_ls() -> None:
+    registry = CommandRegistry(_commands_dir())
+    registry.load_commands()
+    meta = registry.resolve("faq")
+    assert meta is not None
+    subcmd, args, submeta = registry.resolve_subcommand(meta, [])
     assert subcmd == "ls"
-    assert sub_args == []
+    assert args == ["ls"]
+    assert submeta is not None
 
 
-def test_infer_id_format_returns_view() -> None:
-    subcmd, sub_args = faq_handler._infer_subcommand(["20241205-001"])
+def test_registry_infer_id_pattern_view() -> None:
+    registry = CommandRegistry(_commands_dir())
+    registry.load_commands()
+    meta = registry.resolve("faq")
+    assert meta is not None
+    subcmd, args, submeta = registry.resolve_subcommand(meta, ["20241205-001"])
     assert subcmd == "view"
-    assert sub_args == ["20241205-001"]
+    assert args == ["view", "20241205-001"]
+    assert submeta is not None
 
 
-def test_infer_non_id_format_returns_search() -> None:
-    subcmd, sub_args = faq_handler._infer_subcommand(["登录"])
+def test_registry_infer_non_id_fallback_search() -> None:
+    registry = CommandRegistry(_commands_dir())
+    registry.load_commands()
+    meta = registry.resolve("faq")
+    assert meta is not None
+    subcmd, args, submeta = registry.resolve_subcommand(meta, ["登录"])
     assert subcmd == "search"
-    assert sub_args == ["登录"]
+    assert args == ["search", "登录"]
+    assert submeta is not None
 
 
-def test_infer_multi_word_non_id_returns_search() -> None:
-    subcmd, sub_args = faq_handler._infer_subcommand(["数据", "导入"])
+def test_registry_infer_multi_word_fallback_search() -> None:
+    registry = CommandRegistry(_commands_dir())
+    registry.load_commands()
+    meta = registry.resolve("faq")
+    assert meta is not None
+    subcmd, args, submeta = registry.resolve_subcommand(meta, ["数据", "导入"])
     assert subcmd == "search"
-    assert sub_args == ["数据", "导入"]
+    assert args == ["search", "数据", "导入"]
+    assert submeta is not None
 
 
 # ---------------------------------------------------------------------------
-# ls 子命令
+# handler：args 格式为 [subcmd, *sub_args]
 # ---------------------------------------------------------------------------
 
 
@@ -124,7 +186,7 @@ async def test_ls_shows_faq_list() -> None:
     )
     context = _build_context(sender, faq_storage=storage)
 
-    await faq_handler.execute([], context)
+    await faq_handler.execute(["ls"], context)
 
     output = sender.messages[-1][1]
     assert "FAQ 列表" in output
@@ -140,41 +202,10 @@ async def test_ls_shows_empty() -> None:
     storage = cast(Any, SimpleNamespace(list_all=AsyncMock(return_value=[])))
     context = _build_context(sender, faq_storage=storage)
 
-    await faq_handler.execute([], context)
-
-    output = sender.messages[-1][1]
-    assert "没有保存的 FAQ" in output
-
-
-@pytest.mark.asyncio
-async def test_ls_explicit_subcommand() -> None:
-    sender = _DummySender()
-    storage = cast(Any, SimpleNamespace(list_all=AsyncMock(return_value=[])))
-    context = _build_context(sender, faq_storage=storage)
-
     await faq_handler.execute(["ls"], context)
 
     output = sender.messages[-1][1]
     assert "没有保存的 FAQ" in output
-
-
-# ---------------------------------------------------------------------------
-# view 子命令
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_view_by_id_inferred() -> None:
-    sender = _DummySender()
-    faq = _make_faq()
-    storage = cast(Any, SimpleNamespace(get=AsyncMock(return_value=faq)))
-    context = _build_context(sender, faq_storage=storage)
-
-    await faq_handler.execute(["20241205-001"], context)
-
-    output = sender.messages[-1][1]
-    assert "FAQ: 测试FAQ" in output
-    assert "20241205-001" in output
 
 
 @pytest.mark.asyncio
@@ -213,25 +244,6 @@ async def test_view_no_args_shows_usage() -> None:
     assert "用法" in output
 
 
-# ---------------------------------------------------------------------------
-# search 子命令
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_search_by_keyword_inferred() -> None:
-    sender = _DummySender()
-    faq = _make_faq(title="登录问题")
-    storage = cast(Any, SimpleNamespace(search=AsyncMock(return_value=[faq])))
-    context = _build_context(sender, faq_storage=storage)
-
-    await faq_handler.execute(["登录"], context)
-
-    output = sender.messages[-1][1]
-    assert "搜索" in output
-    assert "登录" in output
-
-
 @pytest.mark.asyncio
 async def test_search_explicit_subcommand() -> None:
     sender = _DummySender()
@@ -253,22 +265,6 @@ async def test_search_no_args_shows_usage() -> None:
 
     output = sender.messages[-1][1]
     assert "用法" in output
-
-
-# ---------------------------------------------------------------------------
-# del 子命令
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_del_requires_admin() -> None:
-    sender = _DummySender()
-    context = _build_context(sender, is_admin=False, is_superadmin=False)
-
-    await faq_handler.execute(["del", "20241205-001"], context)
-
-    output = sender.messages[-1][1]
-    assert "权限不足" in output
 
 
 @pytest.mark.asyncio
@@ -356,6 +352,10 @@ def test_faq_command_is_registered() -> None:
     assert meta is not None
     assert meta.allow_in_private is False
     assert "f" in meta.aliases
+    assert "del" in meta.subcommands
+    assert meta.subcommands["del"].permission == "admin"
+    assert meta.inference is not None
+    assert meta.inference.default == "ls"
 
 
 def test_faq_alias_f_resolves() -> None:
@@ -374,3 +374,38 @@ def test_faq_alias_f_resolves() -> None:
     meta = dispatcher.command_registry.resolve("f")
     assert meta is not None
     assert meta.name == "faq"
+
+
+# ---------------------------------------------------------------------------
+# CommandContext.check_permission
+# ---------------------------------------------------------------------------
+
+
+def test_context_check_permission_public() -> None:
+    sender = _DummySender()
+    context = _build_context(sender)
+    assert context.check_permission("public") is True
+
+
+def test_context_check_permission_admin_as_admin() -> None:
+    sender = _DummySender()
+    context = _build_context(sender, is_admin=True)
+    assert context.check_permission("admin") is True
+
+
+def test_context_check_permission_admin_as_normal() -> None:
+    sender = _DummySender()
+    context = _build_context(sender, is_admin=False)
+    assert context.check_permission("admin") is False
+
+
+def test_context_check_permission_superadmin_as_super() -> None:
+    sender = _DummySender()
+    context = _build_context(sender, is_superadmin=True)
+    assert context.check_permission("superadmin") is True
+
+
+def test_context_check_permission_superadmin_as_admin() -> None:
+    sender = _DummySender()
+    context = _build_context(sender, is_admin=True, is_superadmin=False)
+    assert context.check_permission("superadmin") is False

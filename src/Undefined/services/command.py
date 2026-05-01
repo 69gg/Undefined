@@ -18,7 +18,10 @@ from Undefined.onebot import (
 )
 from Undefined.utils.sender import MessageSender
 from Undefined.services.commands.context import CommandContext
-from Undefined.services.commands.registry import CommandMeta, CommandRegistry
+from Undefined.services.commands.registry import (
+    CommandRateLimit,
+    CommandRegistry,
+)
 from Undefined.services.security import SecurityService
 from Undefined.token_usage_storage import TokenUsageStorage
 from Undefined.ai.queue_budget import (
@@ -996,17 +999,6 @@ class CommandDispatcher:
             )
             return
 
-        if scope == "private" and not meta.allow_in_private:
-            logger.info(
-                "[命令] 私聊作用域禁用: /%s user=%s",
-                meta.name,
-                user_id,
-            )
-            await _send_target_message(
-                f"⚠️ /{meta.name} 当前不支持私聊使用。请在群聊中 @机器人 后执行。"
-            )
-            return
-
         logger.info(
             "[命令] 命令匹配成功: input=/%s resolved=/%s permission=%s rate_limit=%s private=%s",
             cmd_name,
@@ -1022,11 +1014,46 @@ class CommandDispatcher:
             )
             return
 
-        allowed, role_name = self._check_command_permission(meta, sender_id)
+        # ── 子命令解析与推断 ──
+        subcmd_name: str | None = None
+        subcmd_meta = None
+        if meta.subcommands:
+            subcmd_name, cmd_args, subcmd_meta = (
+                self.command_registry.resolve_subcommand(meta, cmd_args)
+            )
+
+        # 确定实际用于权限/作用域/限流检查的元信息
+        effective_permission = (
+            subcmd_meta.permission if subcmd_meta else meta.permission
+        )
+        effective_allow_private = (
+            subcmd_meta.allow_in_private if subcmd_meta else meta.allow_in_private
+        )
+        effective_rate_limit = (
+            subcmd_meta.rate_limit if subcmd_meta else meta.rate_limit
+        )
+
+        # 作用域检查（子命令可能覆盖 allow_in_private）
+        if scope == "private" and not effective_allow_private:
+            logger.info(
+                "[命令] 私聊作用域禁用: /%s subcmd=%s user=%s",
+                meta.name,
+                subcmd_name,
+                user_id,
+            )
+            await _send_target_message(
+                f"⚠️ /{meta.name} 当前不支持私聊使用。请在群聊中 @机器人 后执行。"
+            )
+            return
+
+        allowed, role_name = self._check_command_permission_raw(
+            effective_permission, sender_id
+        )
         if not allowed:
             logger.warning(
-                "[命令] 权限校验失败: cmd=/%s sender=%s required=%s",
+                "[命令] 权限校验失败: cmd=/%s subcmd=%s sender=%s required=%s",
                 meta.name,
+                subcmd_name,
                 sender_id,
                 role_name,
             )
@@ -1041,13 +1068,15 @@ class CommandDispatcher:
         logger.debug("[命令] 权限校验通过: cmd=/%s sender=%s", meta.name, sender_id)
 
         if not await self._check_command_rate_limit(
-            command_meta=meta,
+            rate_limit=effective_rate_limit,
+            command_name=meta.name,
             sender_id=sender_id,
             send_message=_send_target_message,
         ):
             logger.warning(
-                "[命令] 速率限制拦截: cmd=/%s scope=%s sender=%s",
+                "[命令] 速率限制拦截: cmd=/%s subcmd=%s scope=%s sender=%s",
                 meta.name,
+                subcmd_name,
                 scope,
                 sender_id,
             )
@@ -1083,6 +1112,7 @@ class CommandDispatcher:
             is_webui_session=is_webui_session,
             cognitive_service=getattr(self.ai, "_cognitive_service", None),
             history_manager=self.history_manager,
+            resolved_subcommand=subcmd_name,
         )
 
         try:
@@ -1108,12 +1138,11 @@ class CommandDispatcher:
                 f"❌ 命令执行失败，请稍后重试（错误码: {error_id}）"
             )
 
-    def _check_command_permission(
+    def _check_command_permission_raw(
         self,
-        command_meta: CommandMeta,
+        permission: str,
         sender_id: int,
     ) -> tuple[bool, str]:
-        permission = command_meta.permission
         if permission == "superadmin":
             return self.config.is_superadmin(sender_id), "超级管理员"
         if permission == "admin":
@@ -1122,12 +1151,11 @@ class CommandDispatcher:
 
     async def _check_command_rate_limit(
         self,
-        command_meta: CommandMeta,
+        rate_limit: CommandRateLimit,
+        command_name: str,
         sender_id: int,
         send_message: Callable[[str], Awaitable[None]],
     ) -> bool:
-        rate_limit = command_meta.rate_limit
-
         # 获取 rate_limiter 实例
         limiter = self.rate_limiter
         if limiter is None and hasattr(self.security, "rate_limiter"):
@@ -1136,13 +1164,11 @@ class CommandDispatcher:
         if limiter is None:
             logger.warning(
                 "[命令] 限流器缺失，跳过限流: cmd=/%s",
-                command_meta.name,
+                command_name,
             )
             return True
 
-        allowed, remaining = limiter.check_command(
-            sender_id, command_meta.name, rate_limit
-        )
+        allowed, remaining = limiter.check_command(sender_id, command_name, rate_limit)
         if not allowed:
             if remaining >= 60:
                 minutes = remaining // 60
@@ -1151,15 +1177,13 @@ class CommandDispatcher:
             else:
                 time_str = f"{remaining}秒"
 
-            await send_message(
-                f"⏳ /{command_meta.name} 命令太频繁，请 {time_str}后再试"
-            )
+            await send_message(f"⏳ /{command_name} 命令太频繁，请 {time_str}后再试")
             return False
 
-        limiter.record_command(sender_id, command_meta.name, rate_limit)
+        limiter.record_command(sender_id, command_name, rate_limit)
         logger.debug(
             "[命令] 动态限流记录成功: cmd=/%s sender=%s limits=%s",
-            command_meta.name,
+            command_name,
             sender_id,
             f"U:{rate_limit.user}/A:{rate_limit.admin}",
         )
