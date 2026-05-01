@@ -122,14 +122,20 @@ async def test_repeat_disabled_does_not_repeat() -> None:
 @pytest.mark.asyncio
 async def test_repeat_triggers_on_3_identical_from_different_senders() -> None:
     handler = _build_handler(repeat_enabled=True)
-    for uid in [20001, 20002, 20003]:
+    for uid in [20001, 20002]:
         await handler.handle_message(_group_event(sender_id=uid, text="hello"))
+
+    handler.auto_pipeline_registry.run.reset_mock()
+    handler.ai_coordinator.handle_auto_reply.reset_mock()
+    await handler.handle_message(_group_event(sender_id=20003, text="hello"))
 
     handler.sender.send_group_message.assert_called_once()
     call = handler.sender.send_group_message.call_args
     assert call.args[0] == 30001
     assert call.args[1] == "hello"
     assert call.kwargs.get("history_prefix") == REPEAT_REPLY_HISTORY_PREFIX
+    handler.auto_pipeline_registry.run.assert_not_called()
+    handler.ai_coordinator.handle_auto_reply.assert_not_called()
 
 
 # ── 不触发：3条相同消息来自同一人 ──
