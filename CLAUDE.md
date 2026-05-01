@@ -61,6 +61,7 @@ bash scripts/install_git_hooks.sh
 | `knowledge/` | 本地知识库：文本切分、嵌入、重排、ChromaDB 存储与运行时检索 |
 | `arxiv/` | arXiv 论文解析、元信息获取、PDF 下载与发送 |
 | `bilibili/` | B 站链接/BV 解析、视频下载与发送 |
+| `github/` | GitHub public 仓库解析、API 获取与图片卡片发送 |
 | `api/` | Runtime API / Management API 相关服务；路由拆分在 `api/routes/`，包含 `chat`、`cognitive`、`health`、`memes`、`memory`、`naga`、`system`、`tools` |
 | `webui/` | aiohttp 管理控制台；路由拆分在 `webui/routes/`，覆盖配置、日志、运行态、表情包与系统管理 |
 | `mcp/` | MCP 工具注册、连接与转换 |
@@ -74,7 +75,7 @@ bash scripts/install_git_hooks.sh
 OneBot WebSocket → onebot.py → handlers.py
   → 附件登记 / 访问控制 / 表情包入库
   → SecurityService(注入检测)
-  → Bilibili / arXiv 自动提取 或 CommandDispatcher(斜杠指令)
+  → Bilibili / arXiv / GitHub 自动提取 或 CommandDispatcher(斜杠指令)
   → AICoordinator → QueueManager(按模型隔离, 4 级优先级)
   → AIClient → LLM API / Skills / MCP
 

@@ -963,6 +963,25 @@ author_preview_limit = 20
 # en: Max summary preview characters in paper info. <=0 falls back to 1000.
 summary_preview_chars = 1000
 
+# zh: GitHub 仓库自动提取配置（仅获取 public 仓库信息）。
+# en: GitHub repository auto-extraction settings (public repositories only).
+[github]
+# zh: 是否启用自动提取（检测到 GitHub 仓库链接或 owner/repo 仓库 ID 时自动发送图片卡片）。
+# en: Enable auto-extraction (auto-send an image card when GitHub repository links or owner/repo IDs are detected).
+auto_extract_enabled = false
+# zh: GitHub API 请求超时（秒）。<=0 回退 10，>60 截断到 60。
+# en: GitHub API request timeout (seconds). <=0 falls back to 10, >60 is clamped to 60.
+request_timeout_seconds = 10.0
+# zh: 自动提取功能的群聊白名单（空=跟随全局 access.allowed_group_ids）。
+# en: Group allowlist for auto-extraction (empty = follow global access.allowed_group_ids).
+auto_extract_group_ids = []
+# zh: 自动提取功能的私聊白名单（空=跟随全局 access.allowed_private_ids）。
+# en: Private chat allowlist for auto-extraction (empty = follow global access.allowed_private_ids).
+auto_extract_private_ids = []
+# zh: 单条消息最多自动处理几个 GitHub 仓库。<=0 回退 3，>10 截断到 10。
+# en: Max number of GitHub repositories to auto-process from one message. <=0 falls back to 3, >10 is clamped to 10.
+auto_extract_max_items = 3
+
 # zh: Code Delivery Agent 配置（代码交付 Agent，在 Docker 容器中编写代码并打包上传）。
 # en: Code Delivery Agent settings (writes code in Docker containers and delivers packaged results).
 [code_delivery]

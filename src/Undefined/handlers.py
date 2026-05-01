@@ -632,6 +632,23 @@ class MessageHandler:
                         )
                         return
 
+            # GitHub 仓库自动提取（私聊）
+            if getattr(self.config, "github_auto_extract_enabled", False):
+                if self.config.is_github_auto_extract_allowed_private(
+                    private_sender_id
+                ):
+                    repo_ids = self._extract_github_repo_ids(
+                        text, private_message_content
+                    )
+                    if repo_ids:
+                        self._spawn_background_task(
+                            "github_auto_extract_private",
+                            self._handle_github_extract(
+                                private_sender_id, repo_ids, "private"
+                            ),
+                        )
+                        return
+
             # 私聊消息直接触发回复
             if await self.ai_coordinator.model_pool.handle_private_message(
                 private_sender_id, text
@@ -915,6 +932,17 @@ class MessageHandler:
                     )
                     return
 
+        # GitHub 仓库自动提取
+        if getattr(self.config, "github_auto_extract_enabled", False):
+            if self.config.is_github_auto_extract_allowed_group(group_id):
+                repo_ids = self._extract_github_repo_ids(text, message_content)
+                if repo_ids:
+                    self._spawn_background_task(
+                        "github_auto_extract_group",
+                        self._handle_github_extract(group_id, repo_ids, "group"),
+                    )
+                    return
+
         # 提取文本内容
         # (已在上方提取用于日志记录)
 
@@ -1120,6 +1148,34 @@ class MessageHandler:
 
         return paper_ids
 
+    def _extract_github_repo_ids(
+        self, text: str, message_content: list[dict[str, Any]]
+    ) -> list[str]:
+        """从文本和消息段中提取 GitHub 仓库 ID。"""
+        from Undefined.github.parser import (
+            extract_from_json_message,
+            extract_github_repo_ids,
+        )
+
+        repo_ids: list[str] = []
+        seen: set[str] = set()
+
+        for repo_id in extract_github_repo_ids(text):
+            key = repo_id.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            repo_ids.append(repo_id)
+
+        for repo_id in extract_from_json_message(message_content):
+            key = repo_id.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            repo_ids.append(repo_id)
+
+        return repo_ids
+
     async def _handle_bilibili_extract(
         self,
         target_id: int,
@@ -1204,6 +1260,52 @@ class MessageHandler:
                     paper_id,
                     target_type,
                     target_id,
+                )
+
+    async def _handle_github_extract(
+        self,
+        target_id: int,
+        repo_ids: list[str],
+        target_type: str,
+    ) -> None:
+        """处理 GitHub 仓库自动提取和发送。"""
+        from Undefined.github.sender import send_github_repo_card
+
+        max_items = max(
+            1, int(getattr(self.config, "github_auto_extract_max_items", 3))
+        )
+        request_timeout = float(
+            getattr(self.config, "github_request_timeout_seconds", 10.0)
+        )
+
+        for repo_id in repo_ids[:max_items]:
+            try:
+                result = await send_github_repo_card(
+                    repo_id=repo_id,
+                    sender=self.sender,
+                    target_type=target_type,  # type: ignore[arg-type]
+                    target_id=target_id,
+                    request_timeout=request_timeout,
+                    context={
+                        "request_id": (
+                            f"github_auto_extract:{target_type}:{target_id}:{repo_id}"
+                        )
+                    },
+                )
+                logger.info(
+                    "[GitHub] 自动提取完成 %s → %s:%s: %s",
+                    repo_id,
+                    target_type,
+                    target_id,
+                    result,
+                )
+            except Exception as exc:
+                logger.info(
+                    "[GitHub] 自动提取跳过 %s → %s:%s: %s",
+                    repo_id,
+                    target_type,
+                    target_id,
+                    exc,
                 )
 
     def _spawn_background_task(

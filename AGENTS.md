@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`src/Undefined/` contains the main runtime package. Core areas include `ai/`, `services/`, `skills/`, `cognitive/`, `memes/`, `knowledge/`, `api/`, `webui/`, `config/`, and `mcp/`; media-facing integrations live in `arxiv/`, `bilibili/`, and `attachments.py`. `tests/` holds the pytest suite. `apps/undefined-console/` is the primary Tauri + Vite management client, while `code/NagaAgent/` remains a git submodule and should be updated deliberately, with upstream syncs kept separate from repo-local changes. Runtime and generated state primarily lives under `data/`, `logs/`, and `dist/`; the root `knowledge/` directory stores knowledge-base data rather than application code. Prefer editing source files and docs over generated outputs unless the task is explicitly about runtime state.
+`src/Undefined/` contains the main runtime package. Core areas include `ai/`, `services/`, `skills/`, `cognitive/`, `memes/`, `knowledge/`, `api/`, `webui/`, `config/`, and `mcp/`; media-facing integrations live in `arxiv/`, `bilibili/`, `github/`, and `attachments.py`. `tests/` holds the pytest suite. `apps/undefined-console/` is the primary Tauri + Vite management client, while `code/NagaAgent/` remains a git submodule and should be updated deliberately, with upstream syncs kept separate from repo-local changes. Runtime and generated state primarily lives under `data/`, `logs/`, and `dist/`; the root `knowledge/` directory stores knowledge-base data rather than application code. Prefer editing source files and docs over generated outputs unless the task is explicitly about runtime state.
 
 ## Build, Test, and Development Commands
 Use `uv` for the root project:

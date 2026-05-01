@@ -590,6 +590,23 @@ Prompt caching 补充：
 
 ---
 
+### 4.20.2 `[github]` 仓库自动提取
+
+| 字段 | 默认值 | 说明 | 约束/回退 |
+|---|---:|---|---|
+| `auto_extract_enabled` | `false` | 是否自动提取 GitHub 仓库链接或 `owner/repo` 仓库 ID | |
+| `request_timeout_seconds` | `10.0` | GitHub API 请求超时（秒） | `<=0` 回退 `10`，`>60` 截断到 `60` |
+| `auto_extract_group_ids` | `[]` | 功能级群白名单 | 空时跟随全局 access |
+| `auto_extract_private_ids` | `[]` | 功能级私聊白名单 | 空时跟随全局 access |
+| `auto_extract_max_items` | `3` | 单条消息最多自动处理几个仓库 | `<=0` 回退 `3`，`>10` 截断到 `10` |
+
+触发规则：
+- 命中 `https://github.com/owner/repo`、`github.com/owner/repo` 或 `git@github.com:owner/repo.git` 时触发。
+- 裸 `owner/repo` 会作为 GitHub 仓库 ID 尝试一次 public API 请求；失败时只记录日志，不向会话发送错误消息。
+- 仅支持 public 仓库。卡片渲染为图片，包含仓库 ID、作者头像、简介、stars、forks、issues、contributors、watchers、语言、许可证、默认分支和更新时间等信息。
+
+---
+
 ### 4.21 `[code_delivery]` 代码交付 Agent
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
