@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import pytest
 from typing import Any
 
@@ -137,6 +138,24 @@ async def test_invalid_output_format() -> None:
 
     result = await execute(args, context)
     assert "无效" in result or "仅支持" in result
+
+
+@pytest.mark.asyncio
+async def test_render_mathtext_runs_in_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    import Undefined.skills.toolsets.render.render_latex.handler as handler
+
+    calls: list[Any] = []
+
+    async def _fake_to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:
+        calls.append((func, args, kwargs))
+        return b"image", "image/png"
+
+    monkeypatch.setattr(asyncio, "to_thread", _fake_to_thread)
+
+    result = await handler._render_mathtext_to_bytes("x", "png")
+
+    assert result == (b"image", "image/png")
+    assert calls == [(handler._render_mathtext_sync, ("x", "png"), {})]
 
 
 def test_strip_document_wrappers() -> None:

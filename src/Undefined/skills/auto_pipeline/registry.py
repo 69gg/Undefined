@@ -54,11 +54,14 @@ class AutoPipelineRegistry:
 
     def load_items(self) -> None:
         """从磁盘加载所有自动处理管线。"""
+        self._items = self._load_items_sync()
+
+    def _load_items_sync(self) -> dict[str, AutoPipelineItem]:
+        """同步加载管线定义；热重载路径会在线程中调用。"""
         items: dict[str, AutoPipelineItem] = {}
         if not self.base_dir.exists():
             logger.warning("[auto_pipeline] 目录不存在: %s", self.base_dir)
-            self._items = items
-            return
+            return items
 
         for item_dir in sorted(self.base_dir.iterdir()):
             if not item_dir.is_dir() or item_dir.name.startswith("_"):
@@ -67,12 +70,13 @@ class AutoPipelineRegistry:
             if item is not None:
                 items[item.name] = item
 
-        self._items = dict(sorted(items.items(), key=lambda pair: pair[1].order))
+        loaded_items = dict(sorted(items.items(), key=lambda pair: pair[1].order))
         logger.info(
             "[auto_pipeline] 已加载自动处理管线: count=%s names=%s",
-            len(self._items),
-            ",".join(self._items),
+            len(loaded_items),
+            ",".join(loaded_items),
         )
+        return loaded_items
 
     def _load_item(self, item_dir: Path) -> AutoPipelineItem | None:
         config_path = item_dir / "config.json"
@@ -240,16 +244,17 @@ class AutoPipelineRegistry:
         return snapshot
 
     async def _reload_items(self) -> None:
+        items = await asyncio.to_thread(self._load_items_sync)
         async with self._items_lock:
-            self.load_items()
+            self._items = items
 
     async def _watch_loop(self, interval: float, debounce: float) -> None:
-        self._last_snapshot = self._compute_snapshot()
+        self._last_snapshot = await asyncio.to_thread(self._compute_snapshot)
         last_change = 0.0
         pending = False
         while self._watch_stop and not self._watch_stop.is_set():
             await asyncio.sleep(interval)
-            snapshot = self._compute_snapshot()
+            snapshot = await asyncio.to_thread(self._compute_snapshot)
             if snapshot != self._last_snapshot:
                 self._last_snapshot = snapshot
                 last_change = time.monotonic()

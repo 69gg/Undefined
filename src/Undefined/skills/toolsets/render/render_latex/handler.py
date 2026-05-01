@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any, Dict, cast
@@ -106,9 +107,7 @@ def _strip_math_wrappers(content: str) -> str:
     return text
 
 
-async def _render_mathtext_to_bytes(
-    content: str, output_format: str
-) -> tuple[bytes, str]:
+def _render_mathtext_sync(content: str, output_format: str) -> tuple[bytes, str]:
     """使用 matplotlib mathtext 在本地渲染常见数学公式。"""
     import io
 
@@ -150,6 +149,12 @@ async def _render_mathtext_to_bytes(
 
     image.save(buffer, format="PNG")
     return buffer.getvalue(), "image/png"
+
+
+async def _render_mathtext_to_bytes(
+    content: str, output_format: str
+) -> tuple[bytes, str]:
+    return await asyncio.to_thread(_render_mathtext_sync, content, output_format)
 
 
 async def _render_latex_to_bytes(
