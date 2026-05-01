@@ -113,6 +113,10 @@ async def test_private_command_skips_auto_pipeline_and_ai(
         sender_id=20001,
         command=command,
     )
+    handler.history_manager.add_private_message.assert_awaited_once()
+    assert handler.history_manager.add_private_message.await_args is not None
+    private_history = handler.history_manager.add_private_message.await_args.kwargs
+    assert private_history["text_content"] == "/help"
     handler.auto_pipeline_registry.run.assert_not_awaited()
     handler.ai_coordinator.model_pool.handle_private_message.assert_not_awaited()
     handler.ai_coordinator.handle_private_reply.assert_not_awaited()
@@ -182,5 +186,9 @@ async def test_group_command_skips_auto_pipeline_and_ai(
         20001,
         command,
     )
+    handler.history_manager.add_group_message.assert_awaited_once()
+    assert handler.history_manager.add_group_message.await_args is not None
+    group_history = handler.history_manager.add_group_message.await_args.kwargs
+    assert group_history["text_content"] == "/help"
     handler.auto_pipeline_registry.run.assert_not_awaited()
     handler.ai_coordinator.handle_auto_reply.assert_not_awaited()

@@ -440,6 +440,47 @@ class MessageSender:
             )
         return bot_message_id
 
+    async def send_group_forward_message(
+        self,
+        group_id: int,
+        messages: list[dict[str, Any]],
+        *,
+        history_message: str,
+        auto_history: bool = True,
+    ) -> None:
+        """发送群合并转发，并将可读摘要写入历史。"""
+        if not self.config.is_group_allowed(group_id):
+            enabled = self.config.access_control_enabled()
+            reason = self.config.group_access_denied_reason(group_id) or "unknown"
+            logger.warning(
+                "[访问控制] 已拦截群合并转发: group=%s reason=%s (access enabled=%s)",
+                group_id,
+                reason,
+                enabled,
+            )
+            raise PermissionError(
+                "blocked by access control: "
+                f"type=group reason={reason} group_id={int(group_id)} enabled={enabled}"
+            )
+
+        logger.info("[发送合并转发] 目标群:%s | 节点数:%s", group_id, len(messages))
+        await self.onebot.send_forward_msg(group_id, messages)
+
+        text_content = str(history_message or "").strip()
+        if not auto_history or not text_content:
+            return
+
+        try:
+            await self.history_manager.add_group_message(
+                group_id=group_id,
+                sender_id=self.bot_qq,
+                text_content=text_content,
+                sender_nickname="Bot",
+                group_name="",
+            )
+        except Exception:
+            logger.exception("[历史记录] 记录群合并转发失败: group=%s", group_id)
+
     async def _send_private_segments(
         self,
         user_id: int,

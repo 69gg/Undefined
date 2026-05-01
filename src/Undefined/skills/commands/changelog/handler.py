@@ -104,6 +104,14 @@ async def _send_list(limit: int, context: CommandContext) -> None:
     ):
         bot_qq = getattr(context.config, "bot_qq", 0)
         forward_nodes = _build_list_forward_nodes(entries, bot_qq=bot_qq)
+        send_forward = getattr(context.sender, "send_group_forward_message", None)
+        if callable(send_forward):
+            await send_forward(
+                context.group_id,
+                forward_nodes,
+                history_message=_format_list_entries(entries),
+            )
+            return
         await context.onebot.send_forward_msg(context.group_id, forward_nodes)
         return
     await _send_message(_format_list_entries(entries), context)

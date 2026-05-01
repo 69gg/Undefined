@@ -108,6 +108,17 @@ async def _send_forward(
         }
 
     nodes = [_node(metadata), _node(profile_text)]
+    history_message = (
+        f"[命令输出] /profile 合并转发\n{metadata}\n\n{_truncate(profile_text)}"
+    )
+    send_forward = getattr(context.sender, "send_group_forward_message", None)
+    if callable(send_forward):
+        await send_forward(
+            context.group_id,
+            nodes,
+            history_message=history_message,
+        )
+        return
     await context.onebot.send_forward_msg(context.group_id, nodes)
 
 

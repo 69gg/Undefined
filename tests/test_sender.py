@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -136,6 +136,35 @@ async def test_send_group_message_registers_local_cq_media(
     ]
     assert "uid=pic_card" in kwargs["text_content"]
     assert "uid=file_clip" in kwargs["text_content"]
+
+
+@pytest.mark.asyncio
+async def test_send_group_forward_message_records_history(
+    sender: MessageSender,
+) -> None:
+    onebot = cast(Any, sender.onebot)
+    onebot.send_forward_msg = AsyncMock()
+    nodes = [
+        {
+            "type": "node",
+            "data": {"name": "Bot", "uin": "10000", "content": "长内容"},
+        }
+    ]
+
+    await sender.send_group_forward_message(
+        12345,
+        nodes,
+        history_message="[命令输出] 合并转发摘要",
+    )
+
+    onebot.send_forward_msg.assert_awaited_once_with(12345, nodes)
+    history_mock = cast(AsyncMock, sender.history_manager.add_group_message)
+    history_mock.assert_awaited_once()
+    assert history_mock.await_args is not None
+    kwargs = history_mock.await_args.kwargs
+    assert kwargs["group_id"] == 12345
+    assert kwargs["sender_id"] == 10000
+    assert kwargs["text_content"] == "[命令输出] 合并转发摘要"
 
 
 @pytest.mark.asyncio

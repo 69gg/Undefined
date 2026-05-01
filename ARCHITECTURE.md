@@ -215,7 +215,7 @@ graph TB
     SecurityService -->|"注入攻击"| InjectionAgent
 
     MessageHandler -->|"2. 指令?"| CommandDispatcher
-    CommandDispatcher -->|"执行结果"| OneBotClient
+    CommandDispatcher -->|"执行结果经统一发送层写历史"| OneBotClient
     MessageHandler -->|"2.5 非命令自动管线"| BilibiliParser
     BilibiliParser -->|"BV号"| BilibiliDownloader
     BilibiliDownloader -->|"视频文件"| BilibiliSender
@@ -366,6 +366,7 @@ sequenceDiagram
         MH->>CD: 解析斜杠命令
         alt 是命令
             CD->>ST: FAQ/管理员操作
+            CD->>ST: 写入命令输出历史
             CD-->>OB: 返回结果
             OB->>U: 发送响应
         else 非命令消息

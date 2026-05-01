@@ -36,6 +36,21 @@ class _DummySender:
         self.private_messages.append((user_id, message, mark_sent))
 
 
+class _ForwardSender(_DummySender):
+    def __init__(self) -> None:
+        super().__init__()
+        self.forward_messages: list[tuple[int, list[dict[str, Any]], str]] = []
+
+    async def send_group_forward_message(
+        self,
+        group_id: int,
+        messages: list[dict[str, Any]],
+        *,
+        history_message: str,
+    ) -> None:
+        self.forward_messages.append((group_id, messages, history_message))
+
+
 def _build_context(
     sender: _DummySender,
     *,
@@ -182,6 +197,30 @@ async def test_changelog_command_large_list_uses_forward_in_group(
     assert group_id == 10001
     assert nodes[0]["data"]["content"].startswith("Undefined CHANGELOG")
     assert "1. v3.2.0 | 标题0" in nodes[1]["data"]["content"]
+
+
+@pytest.mark.asyncio
+async def test_changelog_large_list_uses_sender_history_layer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sender = _ForwardSender()
+    onebot = cast(Any, SimpleNamespace(send_forward_msg=AsyncMock()))
+    context = _build_context(sender, onebot=onebot)
+    monkeypatch.setattr(
+        changelog_handler,
+        "list_entries",
+        lambda *, limit: tuple(_entry(f"v3.2.{idx}", f"标题{idx}") for idx in range(6)),
+    )
+
+    await changelog_handler.execute(["list", "25"], context)
+
+    assert not sender.messages
+    assert len(sender.forward_messages) == 1
+    group_id, nodes, history_message = sender.forward_messages[0]
+    assert group_id == 10001
+    assert nodes[0]["data"]["content"].startswith("Undefined CHANGELOG")
+    assert "- v3.2.0 | 标题0" in history_message
+    onebot.send_forward_msg.assert_not_awaited()
 
 
 @pytest.mark.asyncio

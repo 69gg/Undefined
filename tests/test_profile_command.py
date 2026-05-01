@@ -34,6 +34,21 @@ class _DummySender:
         self.private_messages.append((user_id, message))
 
 
+class _ForwardSender(_DummySender):
+    def __init__(self) -> None:
+        super().__init__()
+        self.forward_messages: list[tuple[int, list[dict[str, Any]], str]] = []
+
+    async def send_group_forward_message(
+        self,
+        group_id: int,
+        messages: list[dict[str, Any]],
+        *,
+        history_message: str,
+    ) -> None:
+        self.forward_messages.append((group_id, messages, history_message))
+
+
 def _build_context(
     *,
     sender: _DummySender | None = None,
@@ -313,6 +328,32 @@ async def test_profile_forward_flag_sends_forward_message() -> None:
     assert len(nodes) == 2
     assert "类型: 用户侧写" in nodes[0]["data"]["content"]
     assert nodes[1]["data"]["content"] == "群成员侧写数据"
+
+
+@pytest.mark.asyncio
+async def test_profile_forward_uses_sender_history_layer() -> None:
+    """Production sender path records merged-forward command output in history."""
+    sender = _ForwardSender()
+    cognitive_service = AsyncMock()
+    cognitive_service.get_profile = AsyncMock(return_value="群成员侧写数据")
+
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="group",
+        group_id=123456,
+        sender_id=55555,
+    )
+
+    await profile_execute(["-f"], context)
+
+    assert len(sender.forward_messages) == 1
+    group_id, nodes, history_message = sender.forward_messages[0]
+    assert group_id == 123456
+    assert len(nodes) == 2
+    assert "群成员侧写数据" in history_message
+    send_forward_msg = cast(Any, context.onebot.send_forward_msg)
+    send_forward_msg.assert_not_called()
 
 
 @pytest.mark.asyncio

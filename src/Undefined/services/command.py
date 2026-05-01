@@ -293,7 +293,15 @@ class CommandDispatcher:
             forward_messages = self._build_stats_forward_nodes(
                 summary, img_dir, days, ai_analysis
             )
-            await self.onebot.send_forward_msg(group_id, forward_messages)
+            await self._send_group_forward_message(
+                group_id,
+                forward_messages,
+                history_message=self._build_stats_history_message(
+                    summary,
+                    days,
+                    ai_analysis,
+                ),
+            )
 
             from Undefined.utils.cache import cleanup_cache_dir
 
@@ -308,6 +316,49 @@ class CommandDispatcher:
                 group_id,
                 f"❌ 生成统计图表失败，请稍后重试（错误码: {error_id}）",
             )
+
+    async def _send_group_forward_message(
+        self,
+        group_id: int,
+        messages: list[dict[str, Any]],
+        *,
+        history_message: str,
+    ) -> None:
+        send_forward = getattr(self.sender, "send_group_forward_message", None)
+        if callable(send_forward):
+            await send_forward(group_id, messages, history_message=history_message)
+            return
+
+        await self.onebot.send_forward_msg(group_id, messages)
+        if self.history_manager is None:
+            return
+        text_content = history_message.strip()
+        if not text_content:
+            return
+        await self.history_manager.add_group_message(
+            group_id=group_id,
+            sender_id=getattr(self.config, "bot_qq", 0),
+            text_content=text_content,
+            sender_nickname="Bot",
+            group_name="",
+        )
+
+    @staticmethod
+    def _build_stats_history_message(
+        summary: dict[str, Any],
+        days: int,
+        ai_analysis: str,
+    ) -> str:
+        lines = [
+            f"[命令输出] /stats 最近 {days} 天 Token 使用统计",
+            f"总调用: {summary.get('total_calls', 0)}",
+            f"总 Token: {summary.get('total_tokens', 0)}",
+            f"输入 Token: {summary.get('prompt_tokens', 0)}",
+            f"输出 Token: {summary.get('completion_tokens', 0)}",
+        ]
+        if ai_analysis.strip():
+            lines.extend(["", "AI 分析:", ai_analysis.strip()])
+        return "\n".join(lines)
 
     async def _handle_stats_private(
         self,
