@@ -37,3 +37,13 @@ def test_extract_from_json_message_collects_nested_links() -> None:
 def test_invalid_github_repo_ids_are_ignored() -> None:
     assert normalize_github_repo_id("https://gist.github.com/user/123") is None
     assert normalize_github_repo_id("bad_owner/repo") is None
+
+
+def test_numeric_bare_repo_like_text_is_ignored() -> None:
+    assert normalize_github_repo_id("1/2") is None
+    assert normalize_github_repo_id("2024/12") is None
+    assert extract_github_repo_ids("今天 1/2，计划 2024/12 完成") == []
+
+
+def test_numeric_url_repo_is_still_allowed() -> None:
+    assert normalize_github_repo_id("https://github.com/1/2") == "1/2"

@@ -37,7 +37,7 @@ def _strip_wrapper_chars(value: str) -> str:
     return stripped
 
 
-def _normalize_owner_repo(owner: str, repo: str) -> str | None:
+def _normalize_owner_repo(owner: str, repo: str, *, bare: bool = False) -> str | None:
     normalized_owner = _strip_wrapper_chars(html.unescape(owner)).strip()
     normalized_repo = _strip_wrapper_chars(html.unescape(repo)).strip()
     normalized_repo = normalized_repo.split("?", 1)[0].split("#", 1)[0]
@@ -51,6 +51,8 @@ def _normalize_owner_repo(owner: str, repo: str) -> str | None:
     if normalized_repo in {".", ".."}:
         return None
     if not _REPO_REGEX.fullmatch(normalized_repo):
+        return None
+    if bare and normalized_owner.isdigit() and normalized_repo.isdigit():
         return None
     return f"{normalized_owner}/{normalized_repo}"
 
@@ -80,7 +82,7 @@ def normalize_github_repo_id(identifier: str) -> str | None:
     bare_match = _BARE_REPO_REGEX.fullmatch(raw)
     if bare_match:
         owner, repo = bare_match.group(1).split("/", 1)
-        return _normalize_owner_repo(owner, repo)
+        return _normalize_owner_repo(owner, repo, bare=True)
     return None
 
 
