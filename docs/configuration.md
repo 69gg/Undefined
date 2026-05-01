@@ -623,6 +623,13 @@ Prompt caching 补充：
 - 仅支持 public 仓库。卡片渲染为图片，包含仓库 ID、作者头像、简介、stars、forks、issues、contributors、watchers、语言、许可证、默认分支和更新时间等信息。
 - GitHub API 请求默认复用全局 `[proxy]` 代理设置。
 
+自动提取调度说明：
+- 同一条消息内，自动处理管线会并行检测 Bilibili、arXiv、GitHub 等已注册管线。
+- 检测到多个管线时会并行处理全部命中结果；通常单条消息只会命中一个管线，因此不手动维护优先级。
+- 自动提取发送出的信息消息、图片卡片、文件或视频摘要会写入消息历史，随后才进入 AI 自动回复，因此 AI 可以读取刚刚的自动提取结果。
+- 命中自动提取的这条消息不会再进入斜杠命令分发，而是直接流向 AI 自动回复。
+- 管线实现位于 `src/Undefined/skills/auto_pipeline/`，跟随 `[skills]` 热重载配置自动重新加载。开发新管线请参考 [自动处理管线开发指南](auto-pipeline.md)。
+
 ---
 
 ### 4.22 `[code_delivery]` 代码交付 Agent

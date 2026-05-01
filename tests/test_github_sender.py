@@ -50,9 +50,11 @@ async def test_send_github_repo_card_renders_and_sends_image(
         output_path: str,
         *,
         viewport_width: int = 1280,
+        screenshot_selector: str | None = None,
     ) -> None:
         rendered_html.append(html_content)
         assert viewport_width == 768
+        assert screenshot_selector == ".card"
         Path(output_path).write_bytes(b"png")
 
     monkeypatch.setattr(
@@ -84,4 +86,6 @@ async def test_send_github_repo_card_renders_and_sends_image(
     sender.send_group_message.assert_called_once()
     sent_message = sender.send_group_message.call_args.args[1]
     assert sent_message.startswith("[CQ:image,file=file://")
-    assert sender.send_group_message.call_args.kwargs["auto_history"] is False
+    history_message = sender.send_group_message.call_args.kwargs["history_message"]
+    assert history_message.startswith("GitHub: 69gg/Undefined")
+    assert "auto_history" not in sender.send_group_message.call_args.kwargs

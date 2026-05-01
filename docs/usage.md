@@ -129,7 +129,7 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 | 工具 | 说明 |
 |---|---|
 | `render.render_markdown` | 将 Markdown 文本（含表格、代码块、标题等）渲染为图片发送 |
-| `render.render_latex` | 将 LaTeX 数学公式渲染为图片（**依赖系统 TeX 环境**，需提前安装，详见[部署文档](deployment.md#3-安装系统级依赖必装)） |
+| `render.render_latex` | 将 LaTeX 数学公式渲染为图片；常见公式本地渲染，复杂内容回退 MathJax + Playwright（详见[部署文档](deployment.md#3-安装渲染运行时)） |
 | `render.render_html` | 将 HTML 内容渲染为图片 |
 
 支持 `embed`（嵌入回复）和 `send`（直接发送）两种图片交付方式。

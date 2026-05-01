@@ -277,7 +277,12 @@ def _build_fallback_message(info: GitHubRepoInfo) -> str:
 
 async def _render_repo_card(info: GitHubRepoInfo, output_path: Path) -> None:
     html_content = _build_repo_card_html(info)
-    await render_html_to_image(html_content, str(output_path), viewport_width=768)
+    await render_html_to_image(
+        html_content,
+        str(output_path),
+        viewport_width=768,
+        screenshot_selector=".card",
+    )
 
 
 async def _send_message(
@@ -285,11 +290,21 @@ async def _send_message(
     target_type: Literal["group", "private"],
     target_id: int,
     message: str,
+    *,
+    history_message: str | None = None,
 ) -> None:
     if target_type == "group":
-        await sender.send_group_message(target_id, message, auto_history=False)
+        await sender.send_group_message(
+            target_id,
+            message,
+            history_message=history_message,
+        )
     else:
-        await sender.send_private_message(target_id, message, auto_history=False)
+        await sender.send_private_message(
+            target_id,
+            message,
+            history_message=history_message,
+        )
 
 
 async def send_github_repo_card(
@@ -320,5 +335,11 @@ async def send_github_repo_card(
         logger.exception("[GitHub] 渲染仓库卡片失败，回退到文本: repo=%s", info.repo_id)
         message = _build_fallback_message(info)
 
-    await _send_message(sender, target_type, target_id, message)
+    await _send_message(
+        sender,
+        target_type,
+        target_id,
+        message,
+        history_message=_build_fallback_message(info),
+    )
     return f"已发送 GitHub 仓库卡片: {info.repo_id}"

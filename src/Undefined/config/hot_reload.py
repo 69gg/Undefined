@@ -4,6 +4,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from Undefined.ai import AIClient
 from Undefined.config import Config
@@ -12,6 +13,9 @@ from Undefined.services.security import SecurityService
 from Undefined.services.queue_manager import QueueManager
 from Undefined.skills.agents.intro_generator import AgentIntroGenConfig
 from Undefined.utils.queue_intervals import build_model_queue_intervals
+
+if TYPE_CHECKING:
+    from Undefined.handlers import MessageHandler
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +100,7 @@ class HotReloadContext:
     queue_manager: QueueManager
     config_manager: ConfigManager
     security_service: SecurityService
+    message_handler: MessageHandler | None = None
 
 
 def apply_config_updates(
@@ -140,6 +145,12 @@ def apply_config_updates(
 
     if _needs_skills_hot_reload_update(changed_keys):
         asyncio.create_task(_apply_skills_hot_reload(updated, context.ai_client))
+        asyncio.create_task(
+            _apply_message_handler_skills_hot_reload(
+                updated,
+                context.message_handler,
+            )
+        )
 
     if _needs_config_hot_reload_update(changed_keys):
         asyncio.create_task(
@@ -206,6 +217,19 @@ async def _apply_skills_hot_reload(updated: Config, ai_client: AIClient) -> None
         "[配置] 技能热重载已更新: interval=%.2fs debounce=%.2fs",
         updated.skills_hot_reload_interval,
         updated.skills_hot_reload_debounce,
+    )
+
+
+async def _apply_message_handler_skills_hot_reload(
+    updated: Config,
+    message_handler: MessageHandler | None,
+) -> None:
+    if message_handler is None:
+        return
+    await message_handler.apply_skills_hot_reload_config(
+        enabled=updated.skills_hot_reload,
+        interval=updated.skills_hot_reload_interval,
+        debounce=updated.skills_hot_reload_debounce,
     )
 
 

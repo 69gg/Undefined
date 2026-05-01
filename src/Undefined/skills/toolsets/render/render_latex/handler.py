@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 from Undefined.attachments import scope_from_context
 
@@ -89,14 +89,82 @@ window.MathJax = {{
 </html>"""
 
 
+def _strip_math_wrappers(content: str) -> str:
+    """去掉 mathtext 可直接处理的外层数学分隔符。"""
+    text = content.strip()
+    wrapper_patterns = (
+        r"^\\\[(?P<body>.*?)\\\]$",
+        r"^\\\((?P<body>.*?)\\\)$",
+        r"^\$\$(?P<body>.*?)\$\$$",
+        r"^\$(?P<body>.*?)\$$",
+        r"^\\begin\{equation\*?\}(?P<body>.*?)\\end\{equation\*?\}$",
+    )
+    for pattern in wrapper_patterns:
+        match = re.fullmatch(pattern, text, re.DOTALL)
+        if match is not None:
+            return match.group("body").strip()
+    return text
+
+
+async def _render_mathtext_to_bytes(
+    content: str, output_format: str
+) -> tuple[bytes, str]:
+    """使用 matplotlib mathtext 在本地渲染常见数学公式。"""
+    import io
+
+    from matplotlib import mathtext
+    from matplotlib.font_manager import FontProperties
+    import numpy as np
+    from PIL import Image
+
+    expression = _strip_math_wrappers(content)
+    if not expression or "\\begin{" in expression:
+        raise RuntimeError("内容不是 mathtext 可直接渲染的简单公式")
+
+    parser = mathtext.MathTextParser("agg")
+    font_properties = FontProperties(size=18)
+    parsed = parser.parse(
+        f"${expression}$",
+        dpi=200,
+        prop=font_properties,
+    )
+    alpha = np.asarray(parsed.image)
+    if alpha.size == 0 or int(alpha.max()) == 0:
+        raise RuntimeError("mathtext 未生成有效图像")
+
+    mask = Image.fromarray(cast(Any, alpha), mode="L")
+    padding = 20
+    image = Image.new(
+        "RGBA",
+        (mask.width + padding * 2, mask.height + padding * 2),
+        "white",
+    )
+    glyph = Image.new("RGBA", mask.size, "black")
+    glyph.putalpha(mask)
+    image.alpha_composite(glyph, (padding, padding))
+
+    buffer = io.BytesIO()
+    if output_format == "pdf":
+        image.convert("RGB").save(buffer, format="PDF", resolution=200)
+        return buffer.getvalue(), "application/pdf"
+
+    image.save(buffer, format="PNG")
+    return buffer.getvalue(), "image/png"
+
+
 async def _render_latex_to_bytes(
     content: str, output_format: str, proxy: str | None = None
 ) -> tuple[bytes, str]:
     """
-    使用 MathJax + Playwright 渲染 LaTeX 内容。
+    优先使用本地 mathtext 渲染，复杂内容再回退到 MathJax + Playwright。
 
     返回: (渲染后的字节流, MIME 类型)
     """
+    try:
+        return await _render_mathtext_to_bytes(content, output_format)
+    except Exception as exc:
+        logger.debug("本地 mathtext 渲染失败，回退到 MathJax: %s", exc)
+
     try:
         from playwright.async_api import (
             async_playwright,

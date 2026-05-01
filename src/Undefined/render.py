@@ -180,6 +180,7 @@ async def render_html_to_image(
     output_path: str,
     *,
     viewport_width: int = 1280,
+    screenshot_selector: str | None = None,
     timeout_ms: int = 60000,
 ) -> None:
     """
@@ -189,6 +190,7 @@ async def render_html_to_image(
         html_content: 完整的 HTML 字符串
         output_path: 输出图片路径 (例如 'result.png')
         viewport_width: 视口宽度（像素），默认 1280
+        screenshot_selector: 仅截图匹配的元素，默认截整页
         timeout_ms: 截图超时时间（毫秒），默认 60000
     """
     browser = await _get_browser()
@@ -212,7 +214,17 @@ async def render_html_to_image(
             await asyncio.sleep(1)
 
             # 截图（带超时保护）
-            await page.screenshot(path=output_path, full_page=True, timeout=timeout_ms)
+            if screenshot_selector:
+                await page.locator(screenshot_selector).first.screenshot(
+                    path=output_path,
+                    timeout=timeout_ms,
+                )
+            else:
+                await page.screenshot(
+                    path=output_path,
+                    full_page=True,
+                    timeout=timeout_ms,
+                )
 
         finally:
             await context.close()

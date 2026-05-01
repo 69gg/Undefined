@@ -47,6 +47,9 @@ def _build_handler(
         send_group_message=AsyncMock(),
         send_private_message=AsyncMock(),
     )
+    handler.auto_pipeline_registry = SimpleNamespace(
+        run=AsyncMock(return_value=[]),
+    )
     handler.ai_coordinator = SimpleNamespace(
         handle_auto_reply=AsyncMock(),
         handle_private_reply=AsyncMock(),

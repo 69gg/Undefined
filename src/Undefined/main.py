@@ -434,6 +434,7 @@ async def main() -> None:
         queue_manager=handler.queue_manager,
         config_manager=config_manager,
         security_service=handler.security,
+        message_handler=handler,
     )
 
     def _apply_config_updates(

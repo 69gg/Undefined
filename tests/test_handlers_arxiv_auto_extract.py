@@ -8,10 +8,11 @@ import pytest
 
 import Undefined.handlers as handlers_module
 from Undefined.handlers import MessageHandler
+from Undefined.skills.auto_pipeline import AutoPipelineRegistry
 
 
 @pytest.mark.asyncio
-async def test_private_message_schedules_arxiv_auto_extract(
+async def test_private_message_runs_arxiv_auto_extract_before_ai_reply(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -35,6 +36,7 @@ async def test_private_message_schedules_arxiv_auto_extract(
         get_msg=AsyncMock(),
         get_forward_msg=AsyncMock(),
     )
+    handler.sender = SimpleNamespace()
     handler.history_manager = SimpleNamespace(add_private_message=AsyncMock())
     handler.ai_coordinator = SimpleNamespace(
         model_pool=SimpleNamespace(
@@ -42,14 +44,15 @@ async def test_private_message_schedules_arxiv_auto_extract(
         ),
         handle_private_reply=AsyncMock(),
     )
-    handler.command_dispatcher = SimpleNamespace(parse_command=lambda _text: None)
+    handler.command_dispatcher = SimpleNamespace(
+        parse_command=MagicMock(return_value=None)
+    )
     handler._background_tasks = set()
     handler._extract_arxiv_ids = MagicMock(return_value=["2501.01234"])
-
-    def _fake_spawn_background_task(_name: str, coroutine: Any) -> None:
-        coroutine.close()
-
-    handler._spawn_background_task = MagicMock(side_effect=_fake_spawn_background_task)
+    handler._handle_arxiv_extract = AsyncMock()
+    handler.auto_pipeline_registry = AutoPipelineRegistry()
+    handler.auto_pipeline_registry.load_items()
+    handler._spawn_background_task = MagicMock()
 
     event = {
         "post_type": "message",
@@ -63,5 +66,12 @@ async def test_private_message_schedules_arxiv_auto_extract(
     await handler.handle_message(event)
 
     handler._extract_arxiv_ids.assert_called_once()
-    handler._spawn_background_task.assert_called_once()
-    handler.ai_coordinator.handle_private_reply.assert_not_called()
+    handler._handle_arxiv_extract.assert_awaited_once_with(
+        20001,
+        ["2501.01234"],
+        "private",
+    )
+    handler._spawn_background_task.assert_not_called()
+    handler.ai_coordinator.model_pool.handle_private_message.assert_not_called()
+    handler.command_dispatcher.parse_command.assert_not_called()
+    handler.ai_coordinator.handle_private_reply.assert_awaited_once()

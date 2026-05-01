@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any, cast
+
+import pytest
 
 from Undefined.config.hot_reload import HotReloadContext, apply_config_updates
 
@@ -46,6 +49,44 @@ class _FakeAIClient:
                 "runtime": runtime_config,
             }
         )
+
+
+class _FakeReloadRegistry:
+    def __init__(self) -> None:
+        self.started: list[tuple[float, float]] = []
+        self.stopped = 0
+
+    async def stop_hot_reload(self) -> None:
+        self.stopped += 1
+
+    def start_hot_reload(self, *, interval: float, debounce: float) -> None:
+        self.started.append((interval, debounce))
+
+
+class _FakeMessageHandler:
+    def __init__(self) -> None:
+        self.reload_updates: list[tuple[bool, float, float]] = []
+
+    async def apply_skills_hot_reload_config(
+        self,
+        *,
+        enabled: bool,
+        interval: float,
+        debounce: float,
+    ) -> None:
+        self.reload_updates.append((enabled, interval, debounce))
+
+
+class _FakeConfigManager:
+    def __init__(self) -> None:
+        self.stopped = 0
+        self.started: list[tuple[float, float]] = []
+
+    async def stop_hot_reload(self) -> None:
+        self.stopped += 1
+
+    def start_hot_reload(self, *, interval: float, debounce: float) -> None:
+        self.started.append((interval, debounce))
 
 
 def test_apply_config_updates_propagates_to_security_service() -> None:
@@ -235,3 +276,43 @@ def test_apply_config_updates_hot_reloads_ai_model_configs() -> None:
     assert ai_client.model_updates[0]["chat"].stream_enabled is True
     assert ai_client.model_updates[0]["vision"].stream_enabled is True
     assert ai_client.model_updates[0]["agent"].stream_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_apply_config_updates_refreshes_auto_pipeline_hot_reload() -> None:
+    updated = cast(
+        Any,
+        SimpleNamespace(
+            searxng_url="",
+            skills_hot_reload=True,
+            skills_hot_reload_interval=3.0,
+            skills_hot_reload_debounce=0.75,
+        ),
+    )
+    tool_registry = _FakeReloadRegistry()
+    agent_registry = _FakeReloadRegistry()
+    message_handler = _FakeMessageHandler()
+    config_manager = _FakeConfigManager()
+    ai_client = SimpleNamespace(
+        tool_registry=tool_registry,
+        agent_registry=agent_registry,
+    )
+    context = HotReloadContext(
+        ai_client=cast(Any, ai_client),
+        queue_manager=cast(Any, _FakeQueueManager()),
+        config_manager=cast(Any, config_manager),
+        security_service=cast(Any, _FakeSecurityService()),
+        message_handler=cast(Any, message_handler),
+    )
+
+    apply_config_updates(
+        updated,
+        {"skills_hot_reload_interval": (2.0, 3.0)},
+        context,
+    )
+    await asyncio.sleep(0)
+
+    assert tool_registry.started == [(3.0, 0.75)]
+    assert agent_registry.started == [(3.0, 0.75)]
+    assert message_handler.reload_updates == [(True, 3.0, 0.75)]
+    assert config_manager.started == [(3.0, 0.75)]
