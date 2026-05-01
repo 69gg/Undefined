@@ -93,6 +93,8 @@ _CONFIG_HOT_RELOAD_KEYS: set[str] = {
 
 _SEARCH_KEYS: set[str] = {"searxng_url"}
 
+_ATTACHMENT_KEYS: set[str] = {"attachment_remote_download_max_size_mb"}
+
 
 @dataclass
 class HotReloadContext:
@@ -134,6 +136,9 @@ def apply_config_updates(
 
     if _needs_search_update(changed_keys):
         context.ai_client.apply_search_config(updated.searxng_url)
+
+    if _needs_attachment_update(changed_keys):
+        context.ai_client.apply_attachment_config(updated)
 
     if _needs_ai_model_update(changed_keys):
         context.ai_client.apply_model_configs(
@@ -186,6 +191,10 @@ def _needs_config_hot_reload_update(changed_keys: set[str]) -> bool:
 
 def _needs_search_update(changed_keys: set[str]) -> bool:
     return bool(changed_keys & _SEARCH_KEYS)
+
+
+def _needs_attachment_update(changed_keys: set[str]) -> bool:
+    return bool(changed_keys & _ATTACHMENT_KEYS)
 
 
 def _needs_ai_model_update(changed_keys: set[str]) -> bool:

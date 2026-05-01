@@ -32,6 +32,7 @@ class _FakeQueueManager:
 class _FakeAIClient:
     def __init__(self) -> None:
         self.model_updates: list[dict[str, Any]] = []
+        self.attachment_updates: list[Any] = []
 
     def apply_model_configs(
         self,
@@ -49,6 +50,9 @@ class _FakeAIClient:
                 "runtime": runtime_config,
             }
         )
+
+    def apply_attachment_config(self, runtime_config: Any) -> None:
+        self.attachment_updates.append(runtime_config)
 
 
 class _FakeReloadRegistry:
@@ -276,6 +280,62 @@ def test_apply_config_updates_hot_reloads_ai_model_configs() -> None:
     assert ai_client.model_updates[0]["chat"].stream_enabled is True
     assert ai_client.model_updates[0]["vision"].stream_enabled is True
     assert ai_client.model_updates[0]["agent"].stream_enabled is False
+
+
+def test_apply_config_updates_hot_reloads_attachment_config() -> None:
+    updated = cast(
+        Any,
+        SimpleNamespace(
+            searxng_url="",
+            ai_request_max_retries=2,
+            attachment_remote_download_max_size_mb=8,
+            chat_model=SimpleNamespace(
+                model_name="chat",
+                queue_interval_seconds=1.0,
+                pool=SimpleNamespace(enabled=False),
+            ),
+            agent_model=SimpleNamespace(
+                model_name="agent",
+                queue_interval_seconds=1.0,
+                pool=SimpleNamespace(enabled=False),
+            ),
+            vision_model=SimpleNamespace(
+                model_name="vision",
+                queue_interval_seconds=1.0,
+            ),
+            security_model=SimpleNamespace(
+                model_name="security",
+                queue_interval_seconds=1.0,
+            ),
+            naga_model=SimpleNamespace(
+                model_name="naga",
+                queue_interval_seconds=1.0,
+            ),
+            grok_model=SimpleNamespace(
+                model_name="grok",
+                queue_interval_seconds=1.0,
+            ),
+            historian_model=SimpleNamespace(
+                model_name="historian",
+                queue_interval_seconds=1.0,
+            ),
+        ),
+    )
+    ai_client = _FakeAIClient()
+    context = HotReloadContext(
+        ai_client=cast(Any, ai_client),
+        queue_manager=cast(Any, _FakeQueueManager()),
+        config_manager=cast(Any, SimpleNamespace()),
+        security_service=cast(Any, _FakeSecurityService()),
+    )
+
+    apply_config_updates(
+        updated,
+        {"attachment_remote_download_max_size_mb": (25, 8)},
+        context,
+    )
+
+    assert ai_client.attachment_updates == [updated]
 
 
 @pytest.mark.asyncio

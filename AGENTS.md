@@ -31,6 +31,7 @@ The tool supports a `brief` boolean parameter (`default: false`). When `brief: t
 
 ### Unified attachment tag
 Use `<attachment uid="..."/>` for both images and files. The legacy `<pic uid="..."/>` tag is still supported for backward compatibility but `attachment` is the recommended unified syntax. The system distinguishes image vs file based on the UID prefix (`pic_`/`file_`).
+Remote attachments are cached only up to `[attachments].remote_download_max_size_mb`; larger items, or all remote items when the value is `0`, are registered as URL references with `source_ref` instead of downloaded file content.
 
 ### Auto processing pipelines
 Automatic extraction pipelines live under `src/Undefined/skills/auto_pipeline/pipelines/<name>/` and use `config.json + handler.py`. Slash commands have higher priority; when a command is dispatched, automatic pipelines and AI auto-reply are skipped. Command inputs and command outputs should be recorded in message history so later AI turns can see the result. For non-command messages, all pipelines detect in parallel and all matches process in parallel before AI auto-reply. Outputs should go through `MessageSender`, which writes history and automatically registers local CQ media or uploaded files as session attachment UIDs.

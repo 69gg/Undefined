@@ -98,6 +98,11 @@ except Exception:
     )
 
 
+def _attachment_remote_download_max_bytes(runtime_config: Config) -> int:
+    value = int(runtime_config.attachment_remote_download_max_size_mb)
+    return max(0, value) * 1024 * 1024
+
+
 class AIClient:
     """AI 模型客户端"""
 
@@ -138,7 +143,15 @@ class AIClient:
         self._knowledge_manager: Any = None
         self._cognitive_service: Any = cognitive_service
         self._meme_service: Any = None
-        self.attachment_registry = AttachmentRegistry(http_client=self._http_client)
+        if self.runtime_config is not None:
+            self.attachment_registry = AttachmentRegistry(
+                http_client=self._http_client,
+                remote_download_max_bytes=_attachment_remote_download_max_bytes(
+                    self.runtime_config
+                ),
+            )
+        else:
+            self.attachment_registry = AttachmentRegistry(http_client=self._http_client)
 
         # 私聊发送回调
         self._send_private_message_callback: Optional[SendPrivateMessageCallback] = None
@@ -656,11 +669,17 @@ class AIClient:
         self._summary_service = SummaryService(
             self._requester, self.chat_config, self._token_counter
         )
+        self.apply_attachment_config(runtime_config)
         logger.info(
             "[配置] AI 模型配置已热更新: chat=%s vision=%s agent=%s",
             self.chat_config.model_name,
             self.vision_config.model_name,
             self.agent_config.model_name,
+        )
+
+    def apply_attachment_config(self, runtime_config: Config) -> None:
+        self.attachment_registry.set_remote_download_max_bytes(
+            _attachment_remote_download_max_bytes(runtime_config)
         )
 
     def count_tokens(self, text: str) -> int:

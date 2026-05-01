@@ -70,6 +70,7 @@ _MAGIC_IMAGE_SUFFIXES: tuple[tuple[bytes, str], ...] = (
 _FORWARD_ATTACHMENT_MAX_DEPTH = 3
 _ATTACHMENT_CACHE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 _ATTACHMENT_REGISTRY_MAX_RECORDS = 2000
+_DEFAULT_REMOTE_DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,8 @@ class AttachmentRecord:
         }
         if self.source_kind.strip():
             ref["source_kind"] = self.source_kind.strip()
+        if self.local_path is None and self.source_ref.strip():
+            ref["source_ref"] = self.source_ref.strip()
         if self.semantic_kind.strip():
             ref["semantic_kind"] = self.semantic_kind.strip()
         if self.description.strip():
@@ -121,6 +124,11 @@ class RenderedRichMessage:
 
 class AttachmentRenderError(RuntimeError):
     """Raised when an attachment tag cannot be rendered."""
+
+
+class _RemoteAttachmentTooLarge(Exception):
+    def __init__(self, mime_type: str = "") -> None:
+        self.mime_type = mime_type
 
 
 def _now_iso() -> str:
@@ -231,6 +239,9 @@ def attachment_refs_to_xml(
         source_kind = str(item.get("source_kind", "") or "").strip()
         if source_kind:
             attrs.append(f'source_kind="{escape_xml_attr(source_kind)}"')
+        source_ref = str(item.get("source_ref", "") or "").strip()
+        if source_ref:
+            attrs.append(f'source_ref="{escape_xml_attr(source_ref)}"')
         semantic_kind = str(item.get("semantic_kind", "") or "").strip()
         if semantic_kind:
             attrs.append(f'semantic_kind="{escape_xml_attr(semantic_kind)}"')
@@ -320,6 +331,15 @@ def _media_kind_from_value(value: str) -> str:
     if text in {"image", "file", "audio", "video", "record"}:
         return text
     return "file"
+
+
+def _remote_reference_source_kind(source_kind: str) -> str:
+    cleaned = str(source_kind or "").strip()
+    if not cleaned:
+        return "remote_url_reference"
+    if cleaned.endswith("_reference"):
+        return cleaned
+    return f"{cleaned}_reference"
 
 
 def _segment_text(
@@ -439,12 +459,14 @@ class AttachmentRegistry:
         http_client: httpx.AsyncClient | None = None,
         max_records: int = _ATTACHMENT_REGISTRY_MAX_RECORDS,
         max_age_seconds: int = _ATTACHMENT_CACHE_MAX_AGE_SECONDS,
+        remote_download_max_bytes: int = _DEFAULT_REMOTE_DOWNLOAD_MAX_BYTES,
     ) -> None:
         self._registry_path = registry_path
         self._cache_dir = cache_dir
         self._http_client = http_client
         self._max_records = max(0, int(max_records))
         self._max_age_seconds = max(0, int(max_age_seconds))
+        self._remote_download_max_bytes = max(0, int(remote_download_max_bytes))
         self._lock = asyncio.Lock()
         self._records: dict[str, AttachmentRecord] = {}
         self._loaded = False
@@ -455,6 +477,9 @@ class AttachmentRegistry:
         self._global_image_resolver_async: (
             Callable[[str], Awaitable[AttachmentRecord | None]] | None
         ) = None
+
+    def set_remote_download_max_bytes(self, value: int) -> None:
+        self._remote_download_max_bytes = max(0, int(value))
 
     def set_global_image_resolver(
         self,
@@ -489,6 +514,16 @@ class AttachmentRegistry:
 
         for uid, record in self._records.items():
             cache_path = self._resolve_managed_cache_path(record.local_path)
+            if record.local_path is None:
+                try:
+                    mtime = datetime.fromisoformat(record.created_at).timestamp()
+                except ValueError:
+                    mtime = now
+                if self._max_age_seconds > 0 and now - mtime > self._max_age_seconds:
+                    dirty = True
+                    continue
+                retained.append((uid, record, None, mtime))
+                continue
             if cache_path is None or not cache_path.is_file():
                 dirty = True
                 continue
@@ -835,26 +870,149 @@ class AttachmentRegistry:
         source_ref: str = "",
         segment_data: Mapping[str, str] | None = None,
     ) -> AttachmentRecord:
-        timeout = httpx.Timeout(_DEFAULT_REMOTE_TIMEOUT_SECONDS)
-        if self._http_client is not None:
-            response = await self._http_client.get(
-                url, timeout=timeout, follow_redirects=True
-            )
-        else:
-            async with httpx.AsyncClient(
-                timeout=timeout, follow_redirects=True
-            ) as client:
-                response = await client.get(url)
-        response.raise_for_status()
         name = display_name or _display_name_from_source(url, "attachment.bin")
-        mime_type = response.headers.get("content-type", "").split(";", 1)[0].strip()
-        return await self.register_bytes(
+        return await self._register_remote_url_or_reference(
             scope_key,
-            response.content,
+            url,
             kind=kind,
             display_name=name,
             source_kind=source_kind,
             source_ref=source_ref or url,
+            segment_data=segment_data,
+        )
+
+    async def register_remote_reference(
+        self,
+        scope_key: str,
+        url: str,
+        *,
+        kind: str,
+        display_name: str | None = None,
+        source_kind: str = "remote_url_reference",
+        source_ref: str = "",
+        mime_type: str | None = None,
+        segment_data: Mapping[str, str] | None = None,
+        description: str = "",
+    ) -> AttachmentRecord:
+        await self.load()
+        normalized_kind = _media_kind_from_value(kind)
+        normalized_media_type = (
+            "image" if normalized_kind == "image" else normalized_kind
+        )
+        prefix = "pic" if normalized_media_type == "image" else "file"
+        ref = source_ref or url
+        name = display_name or _display_name_from_source(url, "attachment.bin")
+        digest_hex = hashlib.sha256(ref.encode("utf-8")).hexdigest()
+
+        async with self._lock:
+            for existing in self._records.values():
+                if (
+                    existing.scope_key == scope_key
+                    and existing.kind == normalized_kind
+                    and existing.local_path is None
+                    and existing.source_ref == ref
+                ):
+                    return existing
+
+            uid = self._build_uid(prefix)
+            record = AttachmentRecord(
+                uid=uid,
+                scope_key=scope_key,
+                kind=normalized_kind,
+                media_type=normalized_media_type,
+                display_name=name,
+                source_kind=source_kind,
+                source_ref=ref,
+                local_path=None,
+                mime_type=mime_type or mimetypes.guess_type(name)[0] or "",
+                sha256=digest_hex,
+                created_at=_now_iso(),
+                segment_data={
+                    str(k): str(v)
+                    for k, v in dict(segment_data or {}).items()
+                    if str(k).strip() and str(v).strip()
+                },
+                description=description,
+            )
+            self._records[uid] = record
+            self._prune_records()
+            await self._persist()
+            return record
+
+    async def _register_remote_url_or_reference(
+        self,
+        scope_key: str,
+        url: str,
+        *,
+        kind: str,
+        display_name: str,
+        source_kind: str,
+        source_ref: str,
+        segment_data: Mapping[str, str] | None,
+    ) -> AttachmentRecord:
+        timeout = httpx.Timeout(_DEFAULT_REMOTE_TIMEOUT_SECONDS)
+        max_bytes = self._remote_download_max_bytes
+        if max_bytes <= 0:
+            return await self.register_remote_reference(
+                scope_key,
+                url,
+                kind=kind,
+                display_name=display_name,
+                source_kind=_remote_reference_source_kind(source_kind),
+                source_ref=source_ref,
+                segment_data=segment_data,
+                description="远程附件未下载：remote_download_max_size_mb=0",
+            )
+
+        async def _stream(client: httpx.AsyncClient) -> tuple[bytes, str]:
+            async with client.stream(
+                "GET", url, timeout=timeout, follow_redirects=True
+            ) as response:
+                response.raise_for_status()
+                mime_type = (
+                    response.headers.get("content-type", "").split(";", 1)[0].strip()
+                )
+                raw_length = response.headers.get("content-length", "").strip()
+                if raw_length.isdigit() and int(raw_length) > max_bytes:
+                    raise _RemoteAttachmentTooLarge(mime_type)
+
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in response.aiter_bytes():
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise _RemoteAttachmentTooLarge(mime_type)
+                    chunks.append(chunk)
+                return b"".join(chunks), mime_type
+
+        try:
+            if self._http_client is not None:
+                content, mime_type = await _stream(self._http_client)
+            else:
+                async with httpx.AsyncClient(
+                    timeout=timeout, follow_redirects=True
+                ) as client:
+                    content, mime_type = await _stream(client)
+        except _RemoteAttachmentTooLarge as exc:
+            return await self.register_remote_reference(
+                scope_key,
+                url,
+                kind=kind,
+                display_name=display_name,
+                source_kind=_remote_reference_source_kind(source_kind),
+                source_ref=source_ref,
+                mime_type=exc.mime_type,
+                segment_data=segment_data,
+                description=f"远程附件超过下载上限 {max_bytes} bytes，保留 URL 引用。",
+            )
+
+        return await self.register_bytes(
+            scope_key,
+            content,
+            kind=kind,
+            display_name=display_name,
+            source_kind=source_kind,
+            source_ref=source_ref,
             mime_type=mime_type or None,
             segment_data=segment_data,
         )

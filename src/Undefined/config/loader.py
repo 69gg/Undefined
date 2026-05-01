@@ -260,6 +260,7 @@ class Config:
     history_summary_time_fetch_limit: int
     history_onebot_fetch_limit: int
     history_group_analysis_limit: int
+    attachment_remote_download_max_size_mb: int
     skills_hot_reload: bool
     skills_hot_reload_interval: float
     skills_hot_reload_debounce: float
@@ -898,6 +899,17 @@ class Config:
                 500,
             ),
         )
+        attachment_remote_download_max_size_mb = max(
+            0,
+            _coerce_int(
+                _get_value(
+                    data,
+                    ("attachments", "remote_download_max_size_mb"),
+                    "ATTACHMENTS_REMOTE_DOWNLOAD_MAX_SIZE_MB",
+                ),
+                25,
+            ),
+        )
 
         skills_hot_reload = _coerce_bool(
             _get_value(data, ("skills", "hot_reload"), "SKILLS_HOT_RELOAD"), True
@@ -1354,6 +1366,7 @@ class Config:
             history_summary_time_fetch_limit=history_summary_time_fetch_limit,
             history_onebot_fetch_limit=history_onebot_fetch_limit,
             history_group_analysis_limit=history_group_analysis_limit,
+            attachment_remote_download_max_size_mb=attachment_remote_download_max_size_mb,
             skills_hot_reload_interval=skills_hot_reload_interval,
             skills_hot_reload_debounce=skills_hot_reload_debounce,
             agent_intro_autogen_enabled=agent_intro_autogen_enabled,

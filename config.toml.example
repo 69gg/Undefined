@@ -775,6 +775,13 @@ onebot_fetch_limit = 10000
 # en: Max messages/members returned by group analysis tools.
 group_analysis_limit = 500
 
+# zh: 附件缓存配置。
+# en: Attachment cache settings.
+[attachments]
+# zh: 远程附件自动下载并缓存的最大大小（MB）。超过上限或设为 0 时只保留 URL 引用，不下载文件内容。
+# en: Max remote attachment size (MB) to download into cache. Above the limit, or 0, keeps only a URL reference.
+remote_download_max_size_mb = 25
+
 # zh: Skills 热重载配置（可选）。
 # en: Skills hot reload settings (optional).
 [skills]

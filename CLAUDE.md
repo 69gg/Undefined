@@ -107,6 +107,7 @@ Management / Runtime 请求 → webui/app.py 或 api/app.py → routes/*
 - `group.get_member_info`：支持 `brief` 参数（默认 false）。当 `brief=true` 时只返回当前昵称（群名片优先，否则 QQ 昵称），便于快速称呼用户。
 - `group.get_avatar`：接受 `user_id` 与可选 `size`（40/100/140/640），下载 QQ 头像并注册为附件，返回 `<attachment uid="..."/>` 标签。
 - 统一附件标签：推荐使用 `<attachment uid="..."/>`，系统根据 UID 前缀（`pic_`/`file_`）自动区分图片与文件。旧 `<pic uid="..."/>` 语法向后兼容。
+- 远程附件默认按 `[attachments].remote_download_max_size_mb` 限制下载缓存；超过上限或配置为 `0` 时只登记 URL 引用（`source_ref`），避免大文件造成磁盘和延迟压力。
 
 ### 队列模型
 

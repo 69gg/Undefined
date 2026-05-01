@@ -81,7 +81,7 @@ async def process(
 
 ## 附件 UID 绑定语义
 
-- 外部接收的远程图片或文件会先下载并写入附件缓存，UID 绑定的是缓存中的文件内容；原始 URL、OneBot `file` 标识或 WebUI 文件 ID 会保存在 `source_ref` / `segment_data` 中用于追溯。
+- 外部接收的远程图片或文件默认会先下载并写入附件缓存，UID 绑定的是缓存中的文件内容；超过 `[attachments].remote_download_max_size_mb` 时会降级为 URL 引用，UID 绑定原始 URL 而不下载文件内容。原始 URL、OneBot `file` 标识或 WebUI 文件 ID 会保存在 `source_ref` / `segment_data` 中用于追溯。
 - 外部接收的本地路径、`file://` 路径或 WebUI 已上传文件会被复制到附件缓存，UID 同样绑定缓存副本，而不是直接绑定原路径。
 - 内部生成或发送的本地媒体、视频、语音和上传文件由 `MessageSender` 在发送成功后读取并登记，UID 绑定发送当时复制进缓存的内容；原始本地路径或 CQ `file` 字段作为来源信息保留。
 
