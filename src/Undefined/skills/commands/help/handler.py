@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from Undefined.services.commands.context import CommandContext
+from Undefined.services.commands.registry import CommandMeta
 
 _DOC_MAX_CHARS = 8000
 
@@ -37,6 +38,21 @@ def _can_see_command(permission: str, sender_id: int, context: CommandContext) -
     return True
 
 
+def _format_usage_with_alias(item: CommandMeta) -> str:
+    """格式化命令用法，自动附上最短别名（如 /changelog(/cl)）。
+
+    如果最短别名的长度 >= 原名长度，则不附加。
+    """
+    usage = item.usage
+    if not item.aliases:
+        return usage
+    shortest = min(item.aliases, key=len)
+    if len(shortest) >= len(item.name):
+        return usage
+    # Replace /name with /name(/alias) in usage
+    return usage.replace(f"/{item.name}", f"/{item.name}(/{shortest})", 1)
+
+
 def _format_command_list(context: CommandContext) -> str:
     commands = context.registry.list_commands(include_hidden=False)
     in_private = _is_private_scope(context)
@@ -53,7 +69,7 @@ def _format_command_list(context: CommandContext) -> str:
 
     command_lines = [
         (
-            f"- {item.usage}（{_scope_label(item.allow_in_private)}）："
+            f"- {_format_usage_with_alias(item)}（{_scope_label(item.allow_in_private)}）："
             f"{item.description or '暂无说明'}"
         )
         for item in commands
