@@ -109,7 +109,7 @@ async def test_naga_hidden_from_help_in_non_allowlisted_group(
         allowed_groups={123},
     )
 
-    await help_execute([], context)
+    await help_execute(["-t"], context)
 
     assert sender.group_messages
     output = sender.group_messages[-1][1]
@@ -131,7 +131,7 @@ async def test_naga_visible_in_help_for_superadmin_private(
         allowed_groups={123},
     )
 
-    await help_execute([], context)
+    await help_execute(["-t"], context)
 
     assert sender.private_messages
     output = sender.private_messages[-1][1]
@@ -155,7 +155,7 @@ async def test_naga_hidden_when_runtime_api_disabled(
     )
     context.config.api.enabled = False
 
-    await help_execute([], context)
+    await help_execute(["-t"], context)
 
     assert sender.private_messages
     output = sender.private_messages[-1][1]

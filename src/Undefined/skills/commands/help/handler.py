@@ -5,11 +5,14 @@ import logging
 import uuid
 from pathlib import Path
 
+import markdown
+
 from Undefined.services.commands.context import CommandContext
 from Undefined.services.commands.registry import CommandMeta, SubcommandMeta
 
 _DOC_MAX_CHARS = 8000
-_TEXT_FLAGS = {"-t", "--text", "--plain", "--plaintext", "--raw"}
+_TEXT_FLAG = "-t"
+_MARKDOWN_EXTENSIONS = ["tables", "fenced_code", "sane_lists"]
 
 logger = logging.getLogger("help")
 
@@ -83,7 +86,7 @@ def _format_usage_with_alias(item: CommandMeta) -> str:
     return usage.replace(f"/{item.name}", f"/{item.name}(/{shortest})", 1)
 
 
-def _format_command_list(context: CommandContext) -> str:
+def _visible_commands(context: CommandContext) -> list[CommandMeta]:
     commands = context.registry.list_commands(include_hidden=False)
     in_private = _is_private_scope(context)
     if in_private:
@@ -96,7 +99,13 @@ def _format_command_list(context: CommandContext) -> str:
         for item in commands
         if _can_see_command(item.permission, context.sender_id, context)
     ]
+    return commands
 
+
+def _format_command_list(context: CommandContext) -> str:
+    commands = _visible_commands(context)
+
+    in_private = _is_private_scope(context)
     scope_hint = "私聊" if in_private else "群聊"
     perm_hint = _sender_permission_label(context)
 
@@ -138,7 +147,7 @@ def _parse_detail_args(args: list[str]) -> tuple[str | None, bool]:
     force_text = False
     for arg in args:
         normalized = arg.strip().lower()
-        if normalized in _TEXT_FLAGS:
+        if normalized == _TEXT_FLAG:
             force_text = True
             continue
         if command_name is None:
@@ -254,6 +263,10 @@ def _html_code(text: str) -> str:
     return f"<code>{_html_text(text)}</code>"
 
 
+def _markdown_to_html(markdown_text: str) -> str:
+    return str(markdown.markdown(markdown_text, extensions=_MARKDOWN_EXTENSIONS))
+
+
 def _build_meta_item(label: str, value: str, *, code: bool = False) -> str:
     value_html = _html_code(value) if code else _html_text(value)
     return (
@@ -289,6 +302,179 @@ def _format_subcommands_html(meta: CommandMeta) -> str:
     )
 
 
+def _format_command_list_html(context: CommandContext) -> str:
+    commands = _visible_commands(context)
+    in_private = _is_private_scope(context)
+    scope_hint = "私聊" if in_private else "群聊"
+    perm_hint = _sender_permission_label(context)
+    help_meta = context.registry.resolve("help")
+    footer_lines = (
+        help_meta.help_footer
+        if help_meta is not None and help_meta.help_footer
+        else [
+            "/help <命令> 查看详情 | /copyright 版权声明",
+        ]
+    )
+
+    command_rows: list[str] = []
+    for item in commands:
+        command_label = _format_command_name_with_alias(item)
+        subcommand_badge = ""
+        if item.subcommands:
+            subcommand_badge = (
+                f'<span class="badge">{len(item.subcommands)} 个子命令</span>'
+            )
+        command_rows.append(
+            "<tr>"
+            f'<td class="command-name">{_html_code(command_label)}</td>'
+            f'<td><div class="command-desc">{_html_text(item.description or "暂无说明")}{subcommand_badge}</div></td>'
+            "</tr>"
+        )
+
+    footer_html = "".join(f"<li>{_html_text(line)}</li>" for line in footer_lines)
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        {_base_help_css()}
+        .summary {{
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }}
+        .chip {{
+            display: inline-flex;
+            align-items: center;
+            min-height: 26px;
+            padding: 3px 9px;
+            border: 1px solid #d1fae5;
+            border-radius: 5px;
+            background: #ecfdf5;
+            color: #065f46;
+            font-size: 13px;
+            font-weight: 700;
+        }}
+        .commands {{ width: 100%; border-collapse: collapse; }}
+        .commands tr:first-child td {{ border-top: 0; }}
+        .commands td {{
+            padding: 11px 0;
+            border-top: 1px solid #e5e7eb;
+            vertical-align: top;
+        }}
+        .command-name {{ width: 38%; padding-right: 14px; }}
+        .command-desc {{ color: #374151; overflow-wrap: anywhere; }}
+        .footer-list {{
+            margin: 0;
+            padding-left: 18px;
+            color: #4b5563;
+        }}
+        .footer-list li + li {{ margin-top: 4px; }}
+    </style>
+</head>
+<body>
+    <main class="panel">
+        <header class="header">
+            <p class="eyebrow">Undefined 命令帮助</p>
+            <h1>可用命令</h1>
+            <p class="description">当前会话可见的斜杠命令速查表</p>
+            <div class="summary">
+                <span class="chip">会话：{_html_text(scope_hint)}</span>
+                <span class="chip">权限：{_html_text(perm_hint)}</span>
+                <span class="chip">命令：{len(commands)}</span>
+            </div>
+        </header>
+        <div class="content">
+            <table class="commands"><tbody>{"".join(command_rows)}</tbody></table>
+            <section class="section">
+                <h2>提示</h2>
+                <ul class="footer-list">{footer_html}</ul>
+            </section>
+        </div>
+    </main>
+</body>
+</html>"""
+
+
+def _base_help_css() -> str:
+    return """
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            padding: 24px;
+            background: #f5f7fb;
+            color: #1f2937;
+            font-family: 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', Arial, sans-serif;
+            font-size: 15px;
+            line-height: 1.65;
+        }
+        .panel {
+            width: 100%;
+            max-width: 720px;
+            margin: 0 auto;
+            background: #ffffff;
+            border: 1px solid #d8dee9;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+        }
+        .header {
+            padding: 22px 26px 18px;
+            border-bottom: 1px solid #e5e7eb;
+            background: #f9fafb;
+        }
+        .eyebrow {
+            margin: 0 0 6px;
+            color: #0f766e;
+            font-size: 13px;
+            font-weight: 700;
+        }
+        h1 {
+            margin: 0;
+            color: #111827;
+            font-size: 26px;
+            line-height: 1.25;
+            font-weight: 800;
+        }
+        .description {
+            margin: 8px 0 0;
+            color: #4b5563;
+            font-size: 15px;
+        }
+        .content { padding: 20px 26px 26px; }
+        code {
+            font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+            color: #075985;
+            background: #eff6ff;
+            border: 1px solid #dbeafe;
+            border-radius: 4px;
+            padding: 1px 5px;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+        .section { margin-top: 20px; }
+        h2 {
+            margin: 0 0 10px;
+            color: #111827;
+            font-size: 16px;
+            line-height: 1.35;
+        }
+        .badge {
+            display: inline-block;
+            margin-left: 8px;
+            color: #7c2d12;
+            background: #ffedd5;
+            border: 1px solid #fed7aa;
+            border-radius: 4px;
+            padding: 0 5px;
+            font-size: 12px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+    """
+
+
 def _format_command_detail_html(meta: CommandMeta, doc_content: str) -> str:
     aliases = "、".join(f"/{alias}" for alias in meta.aliases) if meta.aliases else "无"
     inference_hint = _format_inference_hint(meta)
@@ -318,7 +504,7 @@ def _format_command_detail_html(meta: CommandMeta, doc_content: str) -> str:
         doc_section = (
             '<section class="section">'
             "<h2>说明文档</h2>"
-            f'<pre class="doc">{_html_text(doc_content)}</pre>'
+            f'<article class="doc-body">{_markdown_to_html(doc_content)}</article>'
             "</section>"
         )
 
@@ -329,50 +515,7 @@ def _format_command_detail_html(meta: CommandMeta, doc_content: str) -> str:
 <head>
     <meta charset="utf-8">
     <style>
-        * {{ box-sizing: border-box; }}
-        body {{
-            margin: 0;
-            padding: 24px;
-            background: #f5f7fb;
-            color: #1f2937;
-            font-family: 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', Arial, sans-serif;
-            font-size: 15px;
-            line-height: 1.65;
-        }}
-        .panel {{
-            width: 100%;
-            max-width: 720px;
-            margin: 0 auto;
-            background: #ffffff;
-            border: 1px solid #d8dee9;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
-        }}
-        .header {{
-            padding: 22px 26px 18px;
-            border-bottom: 1px solid #e5e7eb;
-            background: #f9fafb;
-        }}
-        .eyebrow {{
-            margin: 0 0 6px;
-            color: #0f766e;
-            font-size: 13px;
-            font-weight: 700;
-        }}
-        h1 {{
-            margin: 0;
-            color: #111827;
-            font-size: 26px;
-            line-height: 1.25;
-            font-weight: 800;
-        }}
-        .description {{
-            margin: 8px 0 0;
-            color: #4b5563;
-            font-size: 15px;
-        }}
-        .content {{ padding: 20px 26px 26px; }}
+        {_base_help_css()}
         .meta-grid {{
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -393,23 +536,6 @@ def _format_command_detail_html(meta: CommandMeta, doc_content: str) -> str:
             margin-bottom: 4px;
         }}
         .meta-value {{ color: #111827; overflow-wrap: anywhere; }}
-        code {{
-            font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
-            color: #075985;
-            background: #eff6ff;
-            border: 1px solid #dbeafe;
-            border-radius: 4px;
-            padding: 1px 5px;
-            white-space: pre-wrap;
-            overflow-wrap: anywhere;
-        }}
-        .section {{ margin-top: 20px; }}
-        h2 {{
-            margin: 0 0 10px;
-            color: #111827;
-            font-size: 16px;
-            line-height: 1.35;
-        }}
         .subcommands {{ width: 100%; border-collapse: collapse; }}
         .subcommands td {{
             padding: 10px 0;
@@ -417,18 +543,6 @@ def _format_command_detail_html(meta: CommandMeta, doc_content: str) -> str:
             vertical-align: top;
         }}
         .subcommands td:first-child {{ width: 42%; padding-right: 14px; }}
-        .badge {{
-            display: inline-block;
-            margin-left: 8px;
-            color: #7c2d12;
-            background: #ffedd5;
-            border: 1px solid #fed7aa;
-            border-radius: 4px;
-            padding: 0 5px;
-            font-size: 12px;
-            font-weight: 700;
-            white-space: nowrap;
-        }}
         .hint {{
             margin: 0;
             padding: 10px 12px;
@@ -438,18 +552,57 @@ def _format_command_detail_html(meta: CommandMeta, doc_content: str) -> str:
             color: #134e4a;
             overflow-wrap: anywhere;
         }}
-        .doc {{
-            margin: 0;
+        .doc-body {{
             padding: 14px;
             border: 1px solid #e5e7eb;
             border-radius: 6px;
             background: #f9fafb;
             color: #374151;
-            font-family: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
-            font-size: 13px;
-            line-height: 1.7;
+            overflow-wrap: anywhere;
+        }}
+        .doc-body > :first-child {{ margin-top: 0; }}
+        .doc-body > :last-child {{ margin-bottom: 0; }}
+        .doc-body h1, .doc-body h2, .doc-body h3 {{
+            margin: 16px 0 8px;
+            color: #111827;
+            line-height: 1.35;
+        }}
+        .doc-body h1 {{ font-size: 20px; }}
+        .doc-body h2 {{ font-size: 17px; }}
+        .doc-body h3 {{ font-size: 15px; }}
+        .doc-body p {{ margin: 8px 0; }}
+        .doc-body ul, .doc-body ol {{ margin: 8px 0; padding-left: 22px; }}
+        .doc-body li + li {{ margin-top: 4px; }}
+        .doc-body pre {{
+            margin: 10px 0;
+            padding: 10px 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            background: #111827;
+            color: #f9fafb;
             white-space: pre-wrap;
             overflow-wrap: anywhere;
+        }}
+        .doc-body pre code {{
+            padding: 0;
+            border: 0;
+            background: transparent;
+            color: inherit;
+        }}
+        .doc-body table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
+        .doc-body th, .doc-body td {{
+            padding: 7px 8px;
+            border: 1px solid #e5e7eb;
+            text-align: left;
+            vertical-align: top;
+        }}
+        .doc-body th {{ background: #eef2ff; color: #1f2937; }}
+        .doc-body blockquote {{
+            margin: 10px 0;
+            padding: 8px 12px;
+            border-left: 4px solid #14b8a6;
+            background: #f0fdfa;
+            color: #134e4a;
         }}
     </style>
 </head>
@@ -471,31 +624,46 @@ def _format_command_detail_html(meta: CommandMeta, doc_content: str) -> str:
 </html>"""
 
 
-async def _send_rendered_detail(
+async def _send_rendered_html(
     context: CommandContext,
-    meta: CommandMeta,
-    doc_content: str,
+    html_content: str,
+    filename_prefix: str,
 ) -> None:
     from Undefined.render import render_html_to_image
     from Undefined.utils.paths import RENDER_CACHE_DIR, ensure_dir
 
     output_dir = ensure_dir(RENDER_CACHE_DIR)
-    output_path = output_dir / f"help_{meta.name}_{uuid.uuid4().hex[:8]}.png"
-    html_content = _format_command_detail_html(meta, doc_content)
+    output_path = output_dir / f"{filename_prefix}_{uuid.uuid4().hex[:8]}.png"
     await render_html_to_image(html_content, str(output_path), viewport_width=760)
     image_cq = f"[CQ:image,file={output_path.resolve().as_uri()}]"
     await _send_message(context, image_cq)
 
 
+async def _send_rendered_list(context: CommandContext) -> None:
+    await _send_rendered_html(context, _format_command_list_html(context), "help_list")
+
+
+async def _send_rendered_detail(
+    context: CommandContext,
+    meta: CommandMeta,
+    doc_content: str,
+) -> None:
+    html_content = _format_command_detail_html(meta, doc_content)
+    await _send_rendered_html(context, html_content, f"help_{meta.name}")
+
+
 async def execute(args: list[str], context: CommandContext) -> None:
     """处理 /help。"""
-    if not args:
-        await _send_message(context, _format_command_list(context))
-        return
-
     command_arg, force_text = _parse_detail_args(args)
     if command_arg is None:
-        await _send_message(context, _format_command_list(context))
+        if force_text:
+            await _send_message(context, _format_command_list(context))
+            return
+        try:
+            await _send_rendered_list(context)
+        except Exception:
+            logger.exception("渲染命令列表图片失败，回退到纯文本")
+            await _send_message(context, _format_command_list(context))
         return
 
     meta = _resolve_visible_command(_normalize_command_name(command_arg), context)

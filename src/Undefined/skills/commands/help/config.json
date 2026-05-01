@@ -1,8 +1,8 @@
 {
   "name": "help",
   "description": "显示命令列表或命令详细帮助",
-  "usage": "/help [命令名] [-t|--text]",
-  "example": "/help stats --text",
+  "usage": "/help [命令名] [-t]",
+  "example": "/help stats -t",
   "permission": "public",
   "rate_limit": {
     "user": 0,
@@ -14,7 +14,7 @@
   "allow_in_private": true,
   "aliases": ["h"],
   "help_footer": [
-    "查看详细帮助：/h <cmd>（默认图片，纯文本加 --text）",
+    "查看帮助：/h [cmd]（默认图片，纯文本加 -t）",
     "详细版权与免责声明：/cprt",
     "Copyright (c) 2025 Null <pylindex@qq.com>. Licensed under the MIT License."
   ]

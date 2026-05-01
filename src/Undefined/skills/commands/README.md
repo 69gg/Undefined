@@ -25,6 +25,6 @@ commands/
 
 - `config.json`：命令元信息（名称、权限、限流、子命令、自动推断、帮助摘要等）
 - `handler.py`：命令执行逻辑
-- `README.md`：详细帮助文档（会被 `/help <command>` 自动读取并默认渲染为图片展示；需要纯文本时使用 `/help <command> --text`）
+- `README.md`：详细帮助文档（会被 `/help <command>` 自动读取并作为 Markdown 渲染到帮助图片中；需要纯文本时使用 `/help <command> -t`）
 
 关于 `config.json` 的具体参数格式（包括子命令声明、自动推断配置、限流规则）以及 `handler.py` 的执行上下文和逻辑编写，请前往 **[斜杠指令开发指南](../../../../docs/slash-commands.md#🛠️-第二部分如何自定义扩展新的斜杠命令)** 查阅最新的开发说明。

@@ -111,7 +111,7 @@ async def test_help_list_contains_copyright_hint(tmp_path: Path) -> None:
     sender = _DummySender()
     context = _build_context(registry, sender)
 
-    await help_execute([], context)
+    await help_execute(["-t"], context)
 
     assert sender.messages
     output = sender.messages[-1][1]
