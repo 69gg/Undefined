@@ -3,7 +3,8 @@
 围绕核心架构进行了大规模重构与功能增强：Runtime API 拆分为路由子模块、配置系统模块化拆分、新增假@检测机制与 /profile 多输出模式。同步引入复读机制全面升级（可配置阈值与冷却）、消息预处理并行化、WebUI 多项交互功能，以及 arXiv 论文分析 Agent 和安全计算器工具。测试覆盖从约 800 提升至 1438+。
 
 - 新增假@检测：群聊中 `@+Bot昵称` 的文本形式也被识别为@消息，自动获取昵称（防竞态），`@昵称 /命令` 可正常触发斜杠指令。
-- `/profile` 命令支持三种输出模式：`-f` 合并转发（默认）、`-r` 渲染为图片、`-t` 直接文本发送；超管可通过 `/p <QQ号>` 和 `/p g <群号>` 跨目标查看。
+- `/profile` 命令默认渲染为图片，并支持 `-f` 合并转发、`-t` 直接文本、`-r` 显式图片；超管可通过 `/p <QQ号>` 和 `/p g <群号>` 跨目标查看。
+- 新增 GitHub 仓库自动卡片：可检测 GitHub 链接或 `owner/repo` 仓库 ID，获取 public 仓库信息并发送包含头像、简介、stars、forks、issues、contributors 等信息的图片卡片。
 - 复读系统全面升级：触发阈值可配置（`repeat_threshold`）、Bot 发言不计入复读链、新增冷却机制（`repeat_cooldown_minutes`，？与 ? 等价）。
 - Vision 模型 `max_tokens` 可配置（`[models.vision].max_tokens`，默认 8192），解决 thinking 模型 token 耗尽导致工具调用截断。
 - 新增 arXiv 论文深度分析 Agent 与 `calculator` 安全计算器工具；新增消息历史限制可配置化（`[history].max_records`）。
