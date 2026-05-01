@@ -291,8 +291,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 source_kind="rendered_latex",
                 source_ref="render_latex",
             )
-            tag = "pic" if output_format == "png" else "attachment"
-            return f'<{tag} uid="{record.uid}"/>'
+            return f'<attachment uid="{record.uid}"/>'
 
         except Exception as exc:
             logger.exception("注册渲染结果到附件系统失败: %s", exc)

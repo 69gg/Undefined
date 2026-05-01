@@ -73,5 +73,5 @@ async def test_private_message_runs_arxiv_auto_extract_before_ai_reply(
     )
     handler._spawn_background_task.assert_not_called()
     handler.ai_coordinator.model_pool.handle_private_message.assert_not_called()
-    handler.command_dispatcher.parse_command.assert_not_called()
+    handler.command_dispatcher.parse_command.assert_called_once_with("arxiv 2501.01234")
     handler.ai_coordinator.handle_private_reply.assert_awaited_once()

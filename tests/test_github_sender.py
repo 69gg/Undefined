@@ -70,16 +70,6 @@ async def test_send_github_repo_card_renders_and_sends_image(
     sender: Any = SimpleNamespace(
         send_group_message=AsyncMock(),
         send_private_message=AsyncMock(),
-        register_sent_file_attachment=AsyncMock(
-            return_value=[
-                {
-                    "uid": "pic_github",
-                    "kind": "image",
-                    "media_type": "image",
-                    "display_name": "github.png",
-                }
-            ]
-        ),
     )
 
     result = await sender_module.send_github_repo_card(
@@ -93,14 +83,9 @@ async def test_send_github_repo_card_renders_and_sends_image(
     assert "69gg/Undefined" in rendered_html[0]
     assert "QQ bot platform" in rendered_html[0]
     assert "1,234" in rendered_html[0]
-    sender.register_sent_file_attachment.assert_awaited_once()
     sender.send_group_message.assert_called_once()
     sent_message = sender.send_group_message.call_args.args[1]
     assert sent_message.startswith("[CQ:image,file=file://")
     history_message = sender.send_group_message.call_args.kwargs["history_message"]
     assert history_message.startswith("GitHub: 69gg/Undefined")
-    assert (
-        sender.send_group_message.call_args.kwargs["attachments"][0]["uid"]
-        == "pic_github"
-    )
     assert "auto_history" not in sender.send_group_message.call_args.kwargs

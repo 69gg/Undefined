@@ -32,6 +32,9 @@ The tool supports a `brief` boolean parameter (`default: false`). When `brief: t
 ### Unified attachment tag
 Use `<attachment uid="..."/>` for both images and files. The legacy `<pic uid="..."/>` tag is still supported for backward compatibility but `attachment` is the recommended unified syntax. The system distinguishes image vs file based on the UID prefix (`pic_`/`file_`).
 
+### Auto processing pipelines
+Automatic extraction pipelines live under `src/Undefined/skills/auto_pipeline/pipelines/<name>/` and use `config.json + handler.py`. Slash commands have higher priority; when a command is dispatched, automatic pipelines and AI auto-reply are skipped. For non-command messages, all pipelines detect in parallel and all matches process in parallel before AI auto-reply. Outputs should go through `MessageSender`, which writes history and automatically registers local CQ media or uploaded files as session attachment UIDs.
+
 ### User identification in prompts
 The system prompt now includes a rule: **recognize and address users by their QQ ID (`sender_id`)** because nicknames can change. When needing to address a user, use the latest nickname obtained via `group.get_member_info(brief=true)`. Observations recorded in cognitive memory should always include the QQ ID, e.g., “QQ号12345678（昵称张三）做了某事”.
 

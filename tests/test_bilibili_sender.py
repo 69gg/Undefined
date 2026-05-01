@@ -31,16 +31,6 @@ async def test_send_bilibili_video_records_history_for_video_message(
     sender: Any = SimpleNamespace(
         send_group_message=AsyncMock(),
         send_private_message=AsyncMock(),
-        register_sent_file_attachment=AsyncMock(
-            return_value=[
-                {
-                    "uid": "file_video",
-                    "kind": "video",
-                    "media_type": "video",
-                    "display_name": "video.mp4",
-                }
-            ]
-        ),
     )
 
     monkeypatch.setattr(
@@ -66,12 +56,10 @@ async def test_send_bilibili_video_records_history_for_video_message(
     )
 
     assert "已发送视频" in result
-    sender.register_sent_file_attachment.assert_awaited_once()
     assert sender.send_group_message.await_count == 2
     video_call = sender.send_group_message.await_args_list[1]
     assert video_call.args[1].startswith("[CQ:video,file=file://")
     history_message = video_call.kwargs["history_message"]
     assert history_message.startswith("[视频] 「测试视频」")
     assert "BV1xx411c7mD" in history_message
-    assert video_call.kwargs["attachments"][0]["uid"] == "file_video"
     cleanup_mock.assert_called_once_with(video_path)

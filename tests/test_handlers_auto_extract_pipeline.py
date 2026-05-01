@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import Undefined.handlers as handlers_module
 from Undefined.handlers import MessageHandler
 from Undefined.skills.auto_pipeline import AutoPipelineRegistry
 
@@ -55,3 +56,131 @@ async def test_auto_extract_pipeline_processes_all_matches() -> None:
         ["69gg/Undefined"],
         "private",
     )
+
+
+@pytest.mark.asyncio
+async def test_private_command_skips_auto_pipeline_and_ai(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        handlers_module,
+        "parse_message_content_for_history",
+        AsyncMock(return_value="/help"),
+    )
+    command = object()
+    handler: Any = MessageHandler.__new__(MessageHandler)
+    handler.config = SimpleNamespace(
+        bot_qq=10000,
+        is_private_allowed=lambda _uid: True,
+        access_control_enabled=lambda: False,
+        should_process_private_message=lambda: True,
+    )
+    handler.onebot = SimpleNamespace(
+        get_stranger_info=AsyncMock(return_value={"nickname": "测试用户"}),
+        get_msg=AsyncMock(),
+        get_forward_msg=AsyncMock(),
+    )
+    handler.history_manager = SimpleNamespace(add_private_message=AsyncMock())
+    handler.ai_coordinator = SimpleNamespace(
+        model_pool=SimpleNamespace(
+            handle_private_message=AsyncMock(return_value=False)
+        ),
+        handle_private_reply=AsyncMock(),
+    )
+    handler.command_dispatcher = SimpleNamespace(
+        parse_command=MagicMock(return_value=command),
+        dispatch_private=AsyncMock(),
+    )
+    handler.auto_pipeline_registry = SimpleNamespace(
+        run=AsyncMock(return_value=[]),
+    )
+    handler._background_tasks = set()
+    handler._profile_name_refresh_cache = {}
+
+    event = {
+        "post_type": "message",
+        "message_type": "private",
+        "user_id": 20001,
+        "message_id": 30001,
+        "message": [{"type": "text", "data": {"text": "/help"}}],
+        "sender": {"user_id": 20001, "nickname": "测试用户"},
+    }
+
+    await handler.handle_message(event)
+
+    handler.command_dispatcher.dispatch_private.assert_awaited_once_with(
+        user_id=20001,
+        sender_id=20001,
+        command=command,
+    )
+    handler.auto_pipeline_registry.run.assert_not_awaited()
+    handler.ai_coordinator.model_pool.handle_private_message.assert_not_awaited()
+    handler.ai_coordinator.handle_private_reply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_group_command_skips_auto_pipeline_and_ai(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        handlers_module,
+        "parse_message_content_for_history",
+        AsyncMock(return_value="/help"),
+    )
+    command = object()
+    handler: Any = MessageHandler.__new__(MessageHandler)
+    handler.config = SimpleNamespace(
+        bot_qq=10000,
+        is_group_allowed=lambda _gid: True,
+        access_control_enabled=lambda: False,
+        should_process_group_message=lambda is_at_bot=False: True,
+        process_every_message=True,
+        keyword_reply_enabled=False,
+        repeat_enabled=False,
+    )
+    handler.onebot = SimpleNamespace(
+        get_group_info=AsyncMock(return_value={"group_name": "测试群"}),
+        get_msg=AsyncMock(),
+        get_forward_msg=AsyncMock(),
+    )
+    handler.history_manager = SimpleNamespace(add_group_message=AsyncMock())
+    handler.ai_coordinator = SimpleNamespace(
+        _is_at_bot=MagicMock(return_value=True),
+        handle_auto_reply=AsyncMock(),
+    )
+    handler.command_dispatcher = SimpleNamespace(
+        parse_command=MagicMock(return_value=command),
+        dispatch=AsyncMock(),
+    )
+    handler.auto_pipeline_registry = SimpleNamespace(
+        run=AsyncMock(return_value=[]),
+    )
+    handler._schedule_profile_display_name_refresh = MagicMock()
+    handler._schedule_meme_ingest = MagicMock()
+    handler._background_tasks = set()
+
+    event = {
+        "post_type": "message",
+        "message_type": "group",
+        "group_id": 30001,
+        "user_id": 20001,
+        "message_id": 30001,
+        "sender": {
+            "user_id": 20001,
+            "card": "测试用户",
+            "nickname": "测试用户",
+            "role": "member",
+            "title": "",
+        },
+        "message": [{"type": "text", "data": {"text": "/help"}}],
+    }
+
+    await handler.handle_message(event)
+
+    handler.command_dispatcher.dispatch.assert_awaited_once_with(
+        30001,
+        20001,
+        command,
+    )
+    handler.auto_pipeline_registry.run.assert_not_awaited()
+    handler.ai_coordinator.handle_auto_reply.assert_not_awaited()

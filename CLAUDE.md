@@ -75,7 +75,8 @@ bash scripts/install_git_hooks.sh
 OneBot WebSocket → onebot.py → handlers.py
   → 附件登记 / 访问控制 / 表情包入库
   → SecurityService(注入检测)
-  → Bilibili / arXiv / GitHub 自动提取 或 CommandDispatcher(斜杠指令)
+  → CommandDispatcher(斜杠指令，命中即结束后续处理)
+  → skills/auto_pipeline(Bilibili / arXiv / GitHub 并行自动提取)
   → AICoordinator → QueueManager(按模型隔离, 4 级优先级)
   → AIClient → LLM API / Skills / MCP
 
@@ -95,6 +96,7 @@ Management / Runtime 请求 → webui/app.py 或 api/app.py → routes/*
 ### Skills 系统
 
 - **热重载**：自动扫描 `skills/` 下 `config.json` / `handler.py` 变更并重载
+- **自动处理管线**：`skills/auto_pipeline/pipelines/<name>/` 使用 `config.json + handler.py`，在斜杠命令之后、AI 自动回复之前并行检测/处理；管线输出通过 `MessageSender` 自动写历史并登记本地媒体/文件附件 UID。
 - **Skills handler 不引用 `skills/` 外的本地模块**，依赖通过 context 注入
 - **Agent 标准结构**：`config.json` + `handler.py` + `prompt.md` + `intro.md` + `mcp.json`(可选) + `anthropic_skills/`(可选)
 - **共享授权**：通过 `callable.json` 将工具或 Agent 白名单暴露给其他 Agent

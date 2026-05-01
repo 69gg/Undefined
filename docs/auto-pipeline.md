@@ -1,17 +1,18 @@
 # 自动处理管线开发指南
 
-自动处理管线位于 `src/Undefined/skills/auto_pipeline/`，用于在普通消息进入斜杠命令和 AI 自动回复前执行自动提取，例如 Bilibili 视频、arXiv 论文和 GitHub 仓库卡片。
+自动处理管线位于 `src/Undefined/skills/auto_pipeline/`，用于在普通消息进入 AI 自动回复前执行自动提取，例如 Bilibili 视频、arXiv 论文和 GitHub 仓库卡片。斜杠命令优先级高于自动处理管线，命中命令后不会继续触发自动提取或 AI 回复。
 
 ## 运行顺序
 
 1. `MessageHandler` 先并行执行消息预处理：附件收集、历史文本解析、昵称或群信息读取等。
 2. 用户消息先写入历史。
-3. `AutoPipelineRegistry` 并行调用所有已注册管线的 `detect(context)`。
-4. 对所有命中的管线，并行调用对应的 `process(detection, context)`。
-5. 管线发送出的信息、图片、文件或视频摘要通过统一发送器写入历史；本地图片、文件和视频会登记为当前会话可见的统一附件 UID。
-6. 自动处理完成后，当前消息和管线输出一起进入 AI 自动回复/Agent 循环。
+3. 若消息命中斜杠命令，立即分发命令并结束本轮后续流程。
+4. 未命中命令时，`AutoPipelineRegistry` 并行调用所有已注册管线的 `detect(context)`。
+5. 对所有命中的管线，并行调用对应的 `process(detection, context)`。
+6. 管线发送出的信息、图片、文件或视频摘要通过统一发送器写入历史；本地图片、文件和视频会自动登记为当前会话可见的统一附件 UID。
+7. 自动处理完成后，当前消息和管线输出一起进入 AI 自动回复/Agent 循环。
 
-命中自动处理管线的消息不会再进入斜杠命令分发；它会继续进入 AI 自动回复，让 AI 基于用户消息和刚写入的自动处理结果判断后续行为。
+命中自动处理管线的消息会继续进入 AI 自动回复，让 AI 基于用户消息和刚写入的自动处理结果判断后续行为。
 
 ## 目录结构
 
@@ -76,7 +77,7 @@ async def process(
         await sender.send_private_message(target_id, message)
 ```
 
-`detect` 应只做轻量检测和 ID 提取；`process` 执行下载、渲染、发送等重操作。发送消息应优先走 `MessageSender`，不要绕过历史写入。若管线发送本地生成的图片、文件或视频，需通过 `MessageSender.register_sent_file_attachment(...)` 或 `send_group_file` / `send_private_file` 登记附件，让历史中带上 `pic_*` / `file_*` UID，便于后续 AI 回复引用。
+`detect` 应只做轻量检测和 ID 提取；`process` 执行下载、渲染、发送等重操作。发送消息应优先走 `MessageSender`，不要绕过历史写入。`MessageSender` 会自动将本地 CQ 图片、视频、语音以及 `send_group_file` / `send_private_file` 上传的文件登记为会话附件，让历史中带上 `pic_*` / `file_*` UID，便于后续 AI 回复引用；管线通常不需要单独处理附件登记。
 
 ## Context 字段
 

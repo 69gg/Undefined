@@ -8,7 +8,7 @@
 
 ```
 skills/
-├── auto_pipeline/   # 自动处理管线，消息进入 AI 前并行检测/处理
+├── auto_pipeline/   # 自动处理管线，斜杠命令之后、AI 之前并行检测/处理
 │   ├── __init__.py
 │   ├── registry.py
 │   └── pipelines/
@@ -72,11 +72,11 @@ skills/
 
 ### 自动处理管线
 
-- **定位**: 消息进入命令/AI 前的自动预处理能力，例如 Bilibili、arXiv、GitHub 链接提取。
+- **定位**: 消息进入 AI 前的自动预处理能力，例如 Bilibili、arXiv、GitHub 链接提取；斜杠命令优先级更高，命中后不触发管线。
 - **调用方式**: `MessageHandler` 自动调用，不暴露给 AI 主动调用。
 - **命名规则**: `pipelines/<name>/`，`config.json` 中的 `name` 必须与命中结果一致。
 - **目录结构**: `auto_pipeline/pipelines/{pipeline_name}/config.json + handler.py`。
-- **执行方式**: 同一条消息会并行检测全部管线，并行处理全部命中结果；处理产出的消息写入历史后再进入 AI 自动回复。
+- **执行方式**: 同一条非命令消息会并行检测全部管线，并行处理全部命中结果；处理产出的消息通过统一发送层写入历史并自动登记本地媒体/文件附件后，再进入 AI 自动回复。
 - **热重载**: 跟随 `[skills]` 的 `hot_reload`、`hot_reload_interval`、`hot_reload_debounce` 配置。
 - **示例**: `bilibili`, `arxiv`, `github`
 

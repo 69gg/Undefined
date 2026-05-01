@@ -176,16 +176,6 @@ async def send_bilibili_video(
             pre_video_card = _build_info_card(video_info, truncate_desc=False)
             await _send_message(sender, target_type, target_id, pre_video_card)
 
-            video_attachments = await sender.register_sent_file_attachment(
-                target_type,
-                target_id,
-                abs_path,
-                video_path.name,
-                kind="video",
-                source_kind="bilibili_video",
-                source_ref=f"https://www.bilibili.com/video/{video_info.bvid}",
-            )
-
             await _send_message(
                 sender,
                 target_type,
@@ -196,7 +186,6 @@ async def send_bilibili_video(
                     quality_name=quality_name,
                     file_size_mb=file_size_mb,
                 ),
-                attachments=video_attachments,
             )
             result = f"已发送视频「{video_info.title}」({quality_name}, {file_size_mb:.1f}MB)"
         except Exception as exc:

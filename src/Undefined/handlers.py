@@ -616,6 +616,15 @@ class MessageHandler:
                 )
                 return
 
+            private_command = self.command_dispatcher.parse_command(text)
+            if private_command:
+                await self.command_dispatcher.dispatch_private(
+                    user_id=private_sender_id,
+                    sender_id=private_sender_id,
+                    command=private_command,
+                )
+                return
+
             auto_extract_triggered = await self._run_auto_extract_pipeline(
                 target_id=private_sender_id,
                 target_type="private",
@@ -623,21 +632,13 @@ class MessageHandler:
                 message_content=private_message_content,
             )
 
-            if not auto_extract_triggered:
-                # 私聊消息直接触发回复
-                if await self.ai_coordinator.model_pool.handle_private_message(
+            if (
+                not auto_extract_triggered
+                and await self.ai_coordinator.model_pool.handle_private_message(
                     private_sender_id, text
-                ):
-                    return
-
-                private_command = self.command_dispatcher.parse_command(text)
-                if private_command:
-                    await self.command_dispatcher.dispatch_private(
-                        user_id=private_sender_id,
-                        sender_id=private_sender_id,
-                        command=private_command,
-                    )
-                    return
+                )
+            ):
+                return
 
             await self.ai_coordinator.handle_private_reply(
                 private_sender_id,
@@ -793,6 +794,14 @@ class MessageHandler:
             )
             return
 
+        # 只有被@时才处理斜杠命令（使用 normalized_text 以支持假@后的命令）。
+        # 命令优先于自动处理管线，命中后不触发后续自动提取或 AI 回复。
+        if is_at_bot:
+            command = self.command_dispatcher.parse_command(normalized_text)
+            if command:
+                await self.command_dispatcher.dispatch(group_id, sender_id, command)
+                return
+
         # 关键词自动回复：心理委员 (使用原始消息内容提取文本，保证关键词触发不受影响)
         if self.config.keyword_reply_enabled and matches_xinliweiyuan(text):
             rand_val = random.random()
@@ -885,7 +894,7 @@ class MessageHandler:
                             )
                             return
 
-        auto_extract_triggered = await self._run_auto_extract_pipeline(
+        await self._run_auto_extract_pipeline(
             target_id=group_id,
             target_type="group",
             text=text,
@@ -894,13 +903,6 @@ class MessageHandler:
 
         # 提取文本内容
         # (已在上方提取用于日志记录)
-
-        # 只有被@时才处理斜杠命令（使用 normalized_text 以支持假@后的命令）
-        if is_at_bot and not auto_extract_triggered:
-            command = self.command_dispatcher.parse_command(normalized_text)
-            if command:
-                await self.command_dispatcher.dispatch(group_id, sender_id, command)
-                return
 
         # 自动回复处理（使用 normalized_text 以去除假@前缀）
         display_name = sender_card or sender_nickname or str(sender_id)

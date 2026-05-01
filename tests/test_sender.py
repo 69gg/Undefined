@@ -73,6 +73,72 @@ async def test_send_group_file_registers_attachment_in_history(
 
 
 @pytest.mark.asyncio
+async def test_send_group_message_registers_local_cq_media(
+    sender: MessageSender,
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "card.png"
+    video_path = tmp_path / "clip.mp4"
+    image_path.write_bytes(b"png")
+    video_path.write_bytes(b"video")
+
+    image_record = SimpleNamespace(
+        prompt_ref=lambda: {
+            "uid": "pic_card",
+            "kind": "image",
+            "media_type": "image",
+            "display_name": "card.png",
+        }
+    )
+    video_record = SimpleNamespace(
+        prompt_ref=lambda: {
+            "uid": "file_clip",
+            "kind": "video",
+            "media_type": "video",
+            "display_name": "clip.mp4",
+        }
+    )
+    sender.attachment_registry = SimpleNamespace(
+        register_local_file=AsyncMock(side_effect=[image_record, video_record])
+    )
+    sender.onebot.send_group_message = AsyncMock(  # type: ignore[method-assign]
+        return_value={"message_id": 123}
+    )
+    message = (
+        f"[CQ:image,file={image_path.resolve().as_uri()}]"
+        f"[CQ:video,file={video_path.resolve().as_uri()}]"
+    )
+
+    await sender.send_group_message(12345, message, history_message="媒体预处理")
+
+    sender.attachment_registry.register_local_file.assert_any_await(
+        "group:12345",
+        str(image_path.resolve()),
+        kind="image",
+        display_name="card.png",
+        source_kind="sent_image",
+        source_ref=image_path.resolve().as_uri(),
+    )
+    sender.attachment_registry.register_local_file.assert_any_await(
+        "group:12345",
+        str(video_path.resolve()),
+        kind="video",
+        display_name="clip.mp4",
+        source_kind="sent_video",
+        source_ref=video_path.resolve().as_uri(),
+    )
+    history_mock = cast(AsyncMock, sender.history_manager.add_group_message)
+    assert history_mock.await_args is not None
+    kwargs = history_mock.await_args.kwargs
+    assert [item["uid"] for item in kwargs["attachments"]] == [
+        "pic_card",
+        "file_clip",
+    ]
+    assert "uid=pic_card" in kwargs["text_content"]
+    assert "uid=file_clip" in kwargs["text_content"]
+
+
+@pytest.mark.asyncio
 async def test_send_group_message_reads_message_id_from_onebot_envelope(
     sender: MessageSender,
 ) -> None:

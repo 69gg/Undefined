@@ -61,7 +61,7 @@ async def test_render_simple_equation() -> None:
     result = await execute(args, context)
     if "渲染失败" in result and "Executable doesn't exist" in result:
         pytest.skip("Playwright 浏览器未安装，跳过测试")
-    assert result == '<pic uid="test-uid-12345"/>'
+    assert result == '<attachment uid="test-uid-12345"/>'
     assert len(mock_registry.registered_items) == 1
     assert mock_registry.registered_items[0]["kind"] == "image"
     assert mock_registry.registered_items[0]["mime_type"] == "image/png"
@@ -85,7 +85,7 @@ async def test_render_with_delimiters() -> None:
     result = await execute(args, context)
     if "渲染失败" in result and "Executable doesn't exist" in result:
         pytest.skip("Playwright 浏览器未安装，跳过测试")
-    assert result == '<pic uid="test-uid-12345"/>'
+    assert result == '<attachment uid="test-uid-12345"/>'
     assert len(mock_registry.registered_items) == 1
 
 

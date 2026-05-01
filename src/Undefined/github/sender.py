@@ -334,19 +334,9 @@ async def send_github_repo_card(
     try:
         await _render_repo_card(info, output_path)
         message = f"[CQ:image,file={output_path.resolve().as_uri()}]"
-        attachments = await sender.register_sent_file_attachment(
-            target_type,
-            target_id,
-            str(output_path.resolve()),
-            output_path.name,
-            kind="image",
-            source_kind="github_repo_card",
-            source_ref=info.html_url or info.repo_id,
-        )
     except Exception:
         logger.exception("[GitHub] 渲染仓库卡片失败，回退到文本: repo=%s", info.repo_id)
         message = _build_fallback_message(info)
-        attachments = None
 
     await _send_message(
         sender,
@@ -354,6 +344,5 @@ async def send_github_repo_card(
         target_id,
         message,
         history_message=_build_fallback_message(info),
-        attachments=attachments,
     )
     return f"已发送 GitHub 仓库卡片: {info.repo_id}"
