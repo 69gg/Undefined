@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -47,6 +48,7 @@ def _build_context(
     config_stub.is_superadmin = lambda qq: qq == superadmin_qq
     config_stub.bot_qq = 0
     stub = cast(Any, SimpleNamespace())
+    stub.send_forward_msg = AsyncMock()
     if sender is None:
         sender = _DummySender()
     return CommandContext(
@@ -68,12 +70,32 @@ def _build_context(
     )
 
 
+def _patch_profile_render(monkeypatch: pytest.MonkeyPatch) -> None:
+    import Undefined.render as render_module
+
+    async def fake_render_html_to_image(
+        _html_content: str,
+        output_path: str,
+        *,
+        viewport_width: int = 1280,
+    ) -> None:
+        assert viewport_width == 480
+        Path(output_path).write_bytes(b"png")
+
+    monkeypatch.setattr(
+        render_module, "render_html_to_image", fake_render_html_to_image
+    )
+
+
 # -- Private chat tests --
 
 
 @pytest.mark.asyncio
-async def test_profile_private_own_profile_found() -> None:
-    """Private chat, own profile found → sends profile via send_private_message."""
+async def test_profile_private_own_profile_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Private chat, own profile found → default renders image."""
+    _patch_profile_render(monkeypatch)
     sender = _DummySender()
     cognitive_service = AsyncMock()
     cognitive_service.get_profile = AsyncMock(return_value="这是一个用户侧写")
@@ -91,7 +113,7 @@ async def test_profile_private_own_profile_found() -> None:
 
     assert len(sender.private_messages) == 1
     assert sender.private_messages[0][0] == 99999
-    assert "这是一个用户侧写" in sender.private_messages[0][1]
+    assert sender.private_messages[0][1].startswith("[CQ:image,file=file://")
     cognitive_service.get_profile.assert_called_once_with("user", "99999")
 
 
@@ -144,7 +166,33 @@ async def test_profile_private_group_subcommand_rejected() -> None:
 
 @pytest.mark.asyncio
 async def test_profile_group_own_profile() -> None:
-    """Group chat, own profile → sends profile via send_group_message."""
+    """Group chat, own profile with -t → sends text via send_group_message."""
+    sender = _DummySender()
+    cognitive_service = AsyncMock()
+    cognitive_service.get_profile = AsyncMock(return_value="群成员侧写数据")
+
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="group",
+        group_id=123456,
+        sender_id=55555,
+    )
+
+    await profile_execute(["-t"], context)
+
+    assert len(sender.group_messages) == 1
+    assert sender.group_messages[0][0] == 123456
+    assert "群成员侧写数据" in sender.group_messages[0][1]
+    cognitive_service.get_profile.assert_called_once_with("user", "55555")
+
+
+@pytest.mark.asyncio
+async def test_profile_group_default_renders_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Group chat without output flag renders profile as image by default."""
+    _patch_profile_render(monkeypatch)
     sender = _DummySender()
     cognitive_service = AsyncMock()
     cognitive_service.get_profile = AsyncMock(return_value="群成员侧写数据")
@@ -160,14 +208,41 @@ async def test_profile_group_own_profile() -> None:
     await profile_execute([], context)
 
     assert len(sender.group_messages) == 1
-    assert sender.group_messages[0][0] == 123456
-    assert "群成员侧写数据" in sender.group_messages[0][1]
+    assert sender.group_messages[0][1].startswith("[CQ:image,file=file://")
     cognitive_service.get_profile.assert_called_once_with("user", "55555")
 
 
 @pytest.mark.asyncio
+async def test_profile_forward_flag_sends_forward_message() -> None:
+    """Group chat with -f sends a merged forward message."""
+    sender = _DummySender()
+    cognitive_service = AsyncMock()
+    cognitive_service.get_profile = AsyncMock(return_value="群成员侧写数据")
+
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="group",
+        group_id=123456,
+        sender_id=55555,
+    )
+
+    await profile_execute(["-f"], context)
+
+    assert sender.group_messages == []
+    send_forward_msg = cast(Any, context.onebot.send_forward_msg)
+    send_forward_msg.assert_called_once()
+    call = send_forward_msg.call_args
+    assert call.args[0] == 123456
+    nodes = call.args[1]
+    assert len(nodes) == 2
+    assert "类型: 用户侧写" in nodes[0]["data"]["content"]
+    assert nodes[1]["data"]["content"] == "群成员侧写数据"
+
+
+@pytest.mark.asyncio
 async def test_profile_group_profile_subcommand() -> None:
-    """Group chat, `/profile group` → sends group profile via send_group_message."""
+    """Group chat, `/profile group -t` → sends group profile as text."""
     sender = _DummySender()
     cognitive_service = AsyncMock()
     cognitive_service.get_profile = AsyncMock(return_value="群聊整体侧写")
@@ -180,7 +255,7 @@ async def test_profile_group_profile_subcommand() -> None:
         sender_id=44444,
     )
 
-    await profile_execute(["GROUP"], context)  # Test case-insensitive
+    await profile_execute(["GROUP", "-t"], context)  # Test case-insensitive
 
     assert len(sender.group_messages) == 1
     assert sender.group_messages[0][0] == 654321
@@ -190,7 +265,7 @@ async def test_profile_group_profile_subcommand() -> None:
 
 @pytest.mark.asyncio
 async def test_profile_group_profile_g_shorthand() -> None:
-    """Group chat, `/p g` shorthand → shows group profile."""
+    """Group chat, `/p g -t` shorthand → shows group profile as text."""
     sender = _DummySender()
     cognitive_service = AsyncMock()
     cognitive_service.get_profile = AsyncMock(return_value="群聊简称侧写")
@@ -203,7 +278,7 @@ async def test_profile_group_profile_g_shorthand() -> None:
         sender_id=44444,
     )
 
-    await profile_execute(["g"], context)
+    await profile_execute(["g", "-t"], context)
 
     assert len(sender.group_messages) == 1
     assert "群聊简称侧写" in sender.group_messages[0][1]
@@ -291,7 +366,7 @@ async def test_profile_truncation() -> None:
         sender_id=11111,
     )
 
-    await profile_execute([], context)
+    await profile_execute(["-t"], context)
 
     assert len(sender.group_messages) == 1
     message = sender.group_messages[0][1]
@@ -305,7 +380,7 @@ async def test_profile_truncation() -> None:
 
 @pytest.mark.asyncio
 async def test_profile_superadmin_target_user() -> None:
-    """Superadmin can query another user's profile with /p <QQ号>."""
+    """Superadmin can query another user's profile with /p <QQ号> -t."""
     sender = _DummySender()
     cognitive_service = AsyncMock()
     cognitive_service.get_profile = AsyncMock(return_value="目标用户侧写")
@@ -319,7 +394,7 @@ async def test_profile_superadmin_target_user() -> None:
         superadmin_qq=10001,
     )
 
-    await profile_execute(["99999"], context)
+    await profile_execute(["99999", "-t"], context)
 
     assert len(sender.group_messages) == 1
     assert "目标用户侧写" in sender.group_messages[0][1]
@@ -328,7 +403,7 @@ async def test_profile_superadmin_target_user() -> None:
 
 @pytest.mark.asyncio
 async def test_profile_superadmin_target_group() -> None:
-    """Superadmin can query a group profile with /p g <群号>."""
+    """Superadmin can query a group profile with /p g <群号> -t."""
     sender = _DummySender()
     cognitive_service = AsyncMock()
     cognitive_service.get_profile = AsyncMock(return_value="目标群侧写")
@@ -342,7 +417,7 @@ async def test_profile_superadmin_target_group() -> None:
         superadmin_qq=10001,
     )
 
-    await profile_execute(["g", "789000"], context)
+    await profile_execute(["g", "789000", "-t"], context)
 
     assert len(sender.group_messages) == 1
     assert "目标群侧写" in sender.group_messages[0][1]
@@ -412,7 +487,7 @@ async def test_profile_superadmin_private_group_with_target() -> None:
         superadmin_qq=10001,
     )
 
-    await profile_execute(["g", "654321"], context)
+    await profile_execute(["g", "654321", "-t"], context)
 
     # Private + group + target → still works for superadmin
     assert len(sender.private_messages) == 1

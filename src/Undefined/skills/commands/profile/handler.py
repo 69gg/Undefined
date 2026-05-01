@@ -187,12 +187,12 @@ body {{
 async def execute(args: list[str], context: CommandContext) -> None:
     """处理 /profile 命令。
 
-    用法: /p [g] [-t|--text] [-f|--forward] [-r|--render] [目标ID]
-      g / group      查看群聊侧写（仅群聊可用）
-      -t / --text    纯文本直接发出
-      -f / --forward 合并转发发出（群聊默认）
-      -r / --render  渲染为图片发出
-      目标ID          指定查询对象（仅超级管理员）
+      用法: /p [g] [-t|--text] [-f|--forward] [-r|--render] [目标ID]
+    g / group      查看群聊侧写（仅群聊可用）
+    -t / --text    纯文本直接发出
+          -f / --forward 合并转发发出
+          -r / --render  渲染为图片发出（默认）
+    目标ID          指定查询对象（仅超级管理员）
     """
     cognitive_service = context.cognitive_service
     if cognitive_service is None:
@@ -227,13 +227,9 @@ async def execute(args: list[str], context: CommandContext) -> None:
     profile = _truncate(profile)
     metadata = _build_metadata(entity_type, entity_id, len(profile))
 
-    # 私聊始终纯文本
-    if _is_private(context):
-        mode = _MODE_TEXT
-
-    # 未指定模式：群聊默认合并转发
+    # 未指定模式：默认渲染图片
     if not mode:
-        mode = _MODE_FORWARD
+        mode = _MODE_RENDER
 
     if mode == _MODE_TEXT:
         await _send_text(context, profile)
@@ -244,6 +240,9 @@ async def execute(args: list[str], context: CommandContext) -> None:
             logger.exception("渲染侧写图片失败，回退到纯文本")
             await _send_text(context, profile)
     else:
+        if _is_private(context):
+            await _send_text(context, profile)
+            return
         try:
             await _send_forward(context, metadata, profile)
         except Exception:
