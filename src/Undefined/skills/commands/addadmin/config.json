@@ -1,8 +1,8 @@
 {
   "name": "addadmin",
-  "description": "添加管理员（仅超级管理员）",
-  "usage": "/addadmin <QQ号>",
-  "example": "/addadmin 123456789",
+  "description": "添加管理员（仅超级管理员），支持 @ 提及",
+  "usage": "/addadmin <QQ号|@用户>",
+  "example": "/addadmin 123456789 或 /addadmin @某人",
   "permission": "superadmin",
   "rate_limit": {
     "user": 0,

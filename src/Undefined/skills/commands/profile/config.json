@@ -1,7 +1,7 @@
 {
     "name": "profile",
-    "description": "查看认知侧写。默认你的用户侧写；g查看群聊侧写；-t直接文本；-r渲染图片。超管可指定ID查看他人", 
-    "usage": "/profile [g] [-t|-f|-r]",
+    "description": "查看认知侧写。默认你的用户侧写；g查看群聊侧写；-t直接文本；-r渲染图片。超管可指定QQ号或 @ 提及查看他人",
+    "usage": "/profile [g] [-t|-f|-r] [QQ号|@用户]",
     "example": "/profile g -r",
     "permission": "public",
     "rate_limit": {

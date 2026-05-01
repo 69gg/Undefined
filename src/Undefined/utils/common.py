@@ -17,6 +17,7 @@ CQ_PATTERN = re.compile(r"\[CQ:([a-zA-Z0-9_-]+),?([^\]]*)\]")
 # 匹配 [@QQ号] 格式的 @ 提及（兼容 [@{QQ号}] 误加花括号的情况）
 AT_MENTION_PATTERN = re.compile(r"\[@\{?(\d{5,15})\}?\]")
 
+
 # 标点符号和空白字符正则（用于字数统计和触发规则匹配）
 # 包含：空白、常见中英文标点
 PUNC_PATTERN = re.compile(

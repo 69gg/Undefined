@@ -51,6 +51,21 @@ _STATS_DATA_SUMMARY_MAX_CHARS = 12000
 _STATS_AI_FLAGS = {"--ai", "-a"}
 _STATS_TIME_RANGE_RE = re.compile(r"^\d+[dwm]?$", re.IGNORECASE)
 
+# 命令参数中的 @ 提及：[@QQ] / [@QQ(昵称)] / [@{QQ}]
+_AT_ARG_RE = re.compile(r"^\[@\s*\{?(\d{5,15})\}?(?:\(.*?\))?\]$")
+
+
+def _normalize_qq_arg(arg: str) -> str:
+    """将命令参数里的 @ 提及归一化为纯数字 QQ 号。
+
+    命中 ``[@QQ号]`` / ``[@QQ号(昵称)]`` / ``[@{QQ号}]`` 时返回 ``"QQ号"``，
+    否则原样返回。命令实现因此可以始终把参数当作纯数字处理。
+    """
+    if not arg:
+        return arg
+    match = _AT_ARG_RE.match(arg.strip())
+    return match.group(1) if match else arg
+
 
 class _PrivateCommandSenderProxy:
     """将命令处理器里的 send_group_message 代理到私聊发送。"""
@@ -141,14 +156,21 @@ class CommandDispatcher:
 
         返回:
             包含命令名(name)和参数列表(args)的字典，解析失败则返回 None
+
+        说明:
+            - 仅剥离开头的 @ 机器人提及，保留命令参数中的真 @
+            - 自动将参数里的 ``[@QQ号]`` / ``[@QQ号(昵称)]`` / ``[@{QQ号}]``
+              归一化为纯数字 QQ 号，命令实现无需关心格式差异
         """
-        clean_text = re.sub(r"\[@\s*\d+(?:\(.*?\))?\]", "", text).strip()
+        clean_text = re.sub(r"^(?:\[@\s*\d+(?:\(.*?\))?\]\s*)+", "", text).strip()
         match = re.match(r"/(\w+)\s*(.*)", clean_text)
         if not match:
             return None
 
         cmd_name = match.group(1).lower()
         args_str = match.group(2).strip()
+        raw_args = args_str.split() if args_str else []
+        args = [_normalize_qq_arg(arg) for arg in raw_args]
 
         logger.debug(
             "[命令] 解析命令: text_len=%s cmd=%s args=%s",
@@ -158,7 +180,7 @@ class CommandDispatcher:
         )
         return {
             "name": cmd_name,
-            "args": args_str.split() if args_str else [],
+            "args": args,
         }
 
     def _parse_time_range(self, time_str: str) -> int:
@@ -1262,7 +1284,7 @@ class CommandDispatcher:
         """解析 bugfix 命令的参数"""
         if len(args) < 3:
             return (
-                "❌ 用法: /bugfix <QQ号1> [QQ号2] ... <开始时间> <结束时间>\n"
+                "❌ 用法: /bugfix <QQ号|@用户1> [QQ号|@用户2] ... <开始时间> <结束时间>\n"
                 "时间格式: YYYY/MM/DD/HH:MM，结束时间可用 now\n"
                 "示例: /bugfix 123456 2024/12/01/09:00 now"
             )
@@ -1282,7 +1304,7 @@ class CommandDispatcher:
 
             return target_qqs, start_date, end_date, start_str, end_str
         except ValueError:
-            return "❌ 参数格式错误：QQ号应为数字，时间格式应为 YYYY/MM/DD/HH:MM。"
+            return "❌ 参数格式错误：QQ号应为数字或 @ 提及，时间格式应为 YYYY/MM/DD/HH:MM。"
 
     async def _obtain_bugfix_summary(self, group_id: int, processed_text: str) -> str:
         """利用 AI 生成聊天记录的 Bug 分析摘要"""
