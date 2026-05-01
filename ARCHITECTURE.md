@@ -95,7 +95,7 @@ graph TB
             TS_Messages["messages.*<br/>• send_message<br/>• get_recent_messages<br/>• get_forward_msg"]
             TS_Memory["memory.*<br/>• add / delete<br/>• list / update"]
             TS_Contacts["contacts.*<br/>• query_friends<br/>• query_groups"]
-            TS_GroupAnalysis["group_analysis.*<br/>• analyze_member_messages<br/>• analyze_join_statistics<br/>• analyze_new_member_activity"]
+            TS_GroupAnalysis["group_analysis.*<br/>• member_structure<br/>• message_mix<br/>• member_activity<br/>• activity_trend<br/>• inactive_risk<br/>• member_messages<br/>• join_statistics<br/>• new_member_activity"]
             TS_Notices["notices.*<br/>• list / get / stats"]
             TS_Render["render.*<br/>• render_html<br/>• render_latex<br/>• render_markdown"]
             TS_Scheduler["scheduler.*<br/>• create_schedule_task<br/>• delete_schedule_task<br/>• list_schedule_tasks"]

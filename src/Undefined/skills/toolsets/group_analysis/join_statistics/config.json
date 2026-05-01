@@ -1,7 +1,7 @@
 {
     "type": "function",
     "function": {
-        "name": "analyze_join_statistics",
+        "name": "join_statistics",
         "description": "分析群的加群情况，提供加群人数统计和趋势分析。包含：按时间筛选成员、人数统计、加群趋势分析、可选的成员列表。",
         "parameters": {
             "type": "object",

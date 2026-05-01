@@ -1,0 +1,44 @@
+{
+    "type": "function",
+    "function": {
+        "name": "message_mix",
+        "description": "统计群消息构成事实数据（历史数据来自 OneBot get_group_msg_history）。返回消息类型分布、活跃时段、活跃星期、时间覆盖和可选最近样本，适合 AI 进一步分析群聊内容形态。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "群号。如果已在群聊中，通常会自动获取。"
+                },
+                "start_time": {
+                    "type": "string",
+                    "description": "开始时间，格式：YYYY-MM-DD HH:MM:SS。未指定时使用最近 days 天。"
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": "结束时间，格式：YYYY-MM-DD HH:MM:SS。未指定时使用当前时间。"
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "未指定 start_time 时使用最近 N 天窗口，默认 30 天，最大 365 天。",
+                    "default": 30
+                },
+                "max_history_count": {
+                    "type": "integer",
+                    "description": "最多读取历史消息数量，默认 5000，上限受运行时配置 history_search_scan_limit 约束。",
+                    "default": 5000
+                },
+                "include_samples": {
+                    "type": "boolean",
+                    "description": "是否返回最近消息样本，默认 true。",
+                    "default": true
+                },
+                "sample_count": {
+                    "type": "integer",
+                    "description": "最近消息样本数量，默认 3，最大 10。",
+                    "default": 3
+                }
+            }
+        }
+    }
+}

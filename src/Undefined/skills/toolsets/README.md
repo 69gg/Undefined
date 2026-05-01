@@ -151,3 +151,17 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 - `scheduler.list_schedule_tasks`: 列出所有定时任务
 - `scheduler.update_schedule_task`: 更新定时任务
 - `scheduler.create_schedule_task` / `scheduler.update_schedule_task` 支持 `self_instruction` 参数，可在未来时刻调用 AI 自己执行一条延迟指令
+
+### Group Analysis（群聊深度分析）
+
+- `group_analysis.member_structure`: 统计成员结构事实
+- `group_analysis.message_mix`: 统计消息构成事实
+- `group_analysis.member_activity`: 分析群成员活跃度
+- `group_analysis.rank_members`: 对群成员进行多维度排名
+- `group_analysis.filter_members`: 按条件过滤群成员
+- `group_analysis.inactive_risk`: 检测长期潜水或新成员沉默等活跃风险
+- `group_analysis.activity_trend`: 分析群活跃趋势变化
+- `group_analysis.level_distribution`: 统计群成员等级分布
+- `group_analysis.member_messages`: 分析指定成员消息情况
+- `group_analysis.join_statistics`: 统计群成员加入趋势
+- `group_analysis.new_member_activity`: 分析新成员活跃度变化

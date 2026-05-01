@@ -1,7 +1,7 @@
 {
     "type": "function",
     "function": {
-        "name": "analyze_new_member_activity",
+        "name": "new_member_activity",
         "description": "分析新成员的活跃情况，帮助了解新成员的融入程度。包含：活跃度统计、最活跃成员排行、发言分布分析。",
         "parameters": {
             "type": "object",

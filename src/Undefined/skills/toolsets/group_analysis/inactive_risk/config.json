@@ -1,7 +1,7 @@
 {
     "type": "function",
     "function": {
-        "name": "detect_inactive_risk",
+        "name": "inactive_risk",
         "description": "识别群成员活跃风险（成员数据来自 OneBot get_group_member_list）。检测从未发言、长期潜水、新成员沉默、高等级低活跃等治理候选并打分排序。",
         "parameters": {
             "type": "object",

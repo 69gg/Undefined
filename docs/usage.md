@@ -180,13 +180,9 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 | `group.find_member` | 按昵称/备注搜索群成员 |
 | `group.get_member_title` | 获取成员群头衔 |
 | `group.get_honor_info` | 查询群荣誉（龙王、话唠等） |
-| `group.get_member_activity` | 分析群成员活跃度（支持 member_list / history / hybrid 三种数据源模式） |
-| `group.rank_members` | 对群成员进行多维度排名 |
-| `group.filter_members` | 按条件过滤群成员 |
-| `group.detect_inactive_risk` | 检测长期潜水有流失风险的成员 |
-| `group.activity_trend` | 分析群活跃度趋势变化 |
-| `group.level_distribution` | 统计群成员等级分布 |
 | `group.get_files` | 获取群文件列表 |
+
+群聊统计、排行、活跃度和风险识别等分析类能力统一归入 `group_analysis.*`。
 
 **示例：**
 > *"帮我查一下这个群里近 30 天没说过话的成员有哪些。"*
@@ -198,9 +194,21 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 
 | 工具 | 说明 |
 |---|---|
-| `group_analysis.analyze_member_messages` | 深度分析指定成员的消息数量、类型分布和活跃时段 |
-| `group_analysis.analyze_join_statistics` | 统计群成员加入趋势与留存情况 |
-| `group_analysis.analyze_new_member_activity` | 分析新成员加入后的活跃度变化 |
+| `group_analysis.member_structure` | 统计角色分布、等级概览、入群时间覆盖和最后发言分层等成员结构事实 |
+| `group_analysis.message_mix` | 统计消息类型分布、活跃时段、活跃星期、时间覆盖和最近消息样本 |
+| `group_analysis.member_activity` | 分析群成员活跃度（支持 member_list / history / hybrid 三种数据源模式） |
+| `group_analysis.rank_members` | 对群成员进行多维度排名 |
+| `group_analysis.filter_members` | 按角色、等级、入群时间、活跃时间等条件过滤群成员 |
+| `group_analysis.inactive_risk` | 检测长期潜水或新成员沉默等活跃风险 |
+| `group_analysis.activity_trend` | 分析群活跃趋势变化 |
+| `group_analysis.level_distribution` | 统计群成员等级分布 |
+| `group_analysis.member_messages` | 深度分析指定成员的消息数量、类型分布和活跃时段 |
+| `group_analysis.join_statistics` | 统计群成员加入趋势与留存情况 |
+| `group_analysis.new_member_activity` | 分析新成员加入后的活跃度变化 |
+
+**示例：**
+> *"帮我分析一下这个群最近整体活跃度怎么样。"*
+> *"这个群有没有潜水风险比较高的成员？顺便看看新人加入情况。"*
 
 ---
 

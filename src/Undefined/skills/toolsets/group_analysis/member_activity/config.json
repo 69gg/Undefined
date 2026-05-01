@@ -1,7 +1,7 @@
 {
     "type": "function",
     "function": {
-        "name": "get_member_activity",
+        "name": "member_activity",
         "description": "分析群成员活跃度（数据统一来自 OneBot 接口）。支持 member_list/history/hybrid 三种模式：可结合最近发言与历史消息窗口，输出活跃统计、活跃榜和潜水成员。",
         "parameters": {
             "type": "object",

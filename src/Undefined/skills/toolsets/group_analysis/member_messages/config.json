@@ -1,7 +1,7 @@
 {
     "type": "function",
     "function": {
-        "name": "analyze_member_messages",
+        "name": "member_messages",
         "description": "分析指定群成员的消息情况，提供全面的消息统计和活跃度分析。包含：消息数量统计、消息类型分布、活跃时段分析、可选的消息内容获取。",
         "parameters": {
             "type": "object",

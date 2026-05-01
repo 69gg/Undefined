@@ -1,0 +1,26 @@
+{
+    "type": "function",
+    "function": {
+        "name": "member_structure",
+        "description": "统计群成员结构事实数据（成员数据来自 OneBot get_group_member_list）。返回角色分布、等级概览、入群时间覆盖、近期入群人数、最后发言分层和可选样例；详细等级分布请使用 group_analysis.level_distribution。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer",
+                    "description": "群号。如果已在群聊中，通常会自动获取。"
+                },
+                "include_examples": {
+                    "type": "boolean",
+                    "description": "是否展示各角色的成员样例，默认 true。",
+                    "default": true
+                },
+                "example_count": {
+                    "type": "integer",
+                    "description": "每类样例数量，默认 3，最大 10。",
+                    "default": 3
+                }
+            }
+        }
+    }
+}
