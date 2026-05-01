@@ -65,7 +65,7 @@ bash scripts/install_git_hooks.sh
 | `webui/` | aiohttp 管理控制台；路由拆分在 `webui/routes/`，覆盖配置、日志、运行态、表情包与系统管理 |
 | `mcp/` | MCP 工具注册、连接与转换 |
 | `config/` | 配置系统：`loader.py`(TOML 解析+类型化)、`models.py`(数据模型)、`hot_reload.py`(热更新) |
-| `attachments.py` | 富媒体/附件注册、作用域隔离、`<pic uid="..."/>` / `<attachment uid="..."/>` 渲染 |
+| `attachments.py` | 富媒体/附件注册、作用域隔离、`<attachment uid="..."/>` 统一标签（`<pic>` 向后兼容）渲染 |
 | `utils/` | `io.py`(异步 IO)、`history.py`(消息历史)、`paths.py`、`logging.py`、`sender.py` 等通用能力 |
 
 ### 消息处理流程
@@ -99,6 +99,12 @@ Management / Runtime 请求 → webui/app.py 或 api/app.py → routes/*
 - **共享授权**：通过 `callable.json` 将工具或 Agent 白名单暴露给其他 Agent
 - **Anthropic Skills**：支持 SKILL.md 目录结构与渐进式披露
 
+#### 关键工具说明
+
+- `group.get_member_info`：支持 `brief` 参数（默认 false）。当 `brief=true` 时只返回当前昵称（群名片优先，否则 QQ 昵称），便于快速称呼用户。
+- `group.get_avatar`：接受 `user_id` 与可选 `size`（40/100/140/640），下载 QQ 头像并注册为附件，返回 `<attachment uid="..."/>` 标签。
+- 统一附件标签：推荐使用 `<attachment uid="..."/>`，系统根据 UID 前缀（`pic_`/`file_`）自动区分图片与文件。旧 `<pic uid="..."/>` 语法向后兼容。
+
 ### 队列模型
 
 车站-列车模型（QueueManager）：按模型隔离队列组，4 级优先级（超管 > 私聊 > @提及 > 普通群聊），普通队列自动修剪保留最新 2 条，非阻塞按节奏发车（默认 1Hz）。
@@ -117,6 +123,13 @@ Management / Runtime 请求 → webui/app.py 或 api/app.py → routes/*
 - `data/token_usage.jsonl` — Token 统计（自动 gzip 归档）
 - `knowledge/` — 本地知识库数据目录（`texts/`、`intro.md`、`chroma/` 等）
 - `res/prompts/` — 系统提示词模板
+
+## 提示词约定
+
+系统提示词（`res/prompts/undefined.xml`）包含用户识别规则：
+- 以 QQ 号（`sender_id`）为用户唯一标识，昵称可能随时变动
+- 称呼用户时使用当前最新昵称，不确定时可调用 `group.get_member_info(brief=true)` 查询
+- 认知记忆（observations）必须包含 QQ 号，格式如：“QQ号12345678（昵称张三）做了某事”
 
 ## 配置系统
 

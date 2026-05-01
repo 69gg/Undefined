@@ -21,6 +21,20 @@ For the console app, run `cd apps/undefined-console && npm ci && npm run check`.
 ## Coding Style & Naming Conventions
 Use 4-space indentation. Python code must be fully type-annotated and pass strict mypy checks. Disk I/O should go through `src/Undefined/utils/io.py` so writes stay async-safe and atomic. Follow `snake_case` for modules and functions, `PascalCase` for classes, and prefer extending existing services/helpers over introducing one-off abstractions. Skills handlers must not import repo-local modules outside `skills/`; pass dependencies through the execution context instead. WebUI JavaScript in `src/Undefined/webui/static/js/` is formatted with Biome, and `apps/undefined-console/` changes must satisfy Biome, TypeScript, and Cargo checks.
 
+## Tools & Features
+
+### `group.get_member_info` — brief parameter
+The tool supports a `brief` boolean parameter (`default: false`). When `brief: true`, it returns only the current nickname (group card or QQ nickname) in a single line, suitable for quick queries where the AI needs to address a user by their latest name.
+
+### `group.get_avatar` — fetch user avatar
+`group.get_avatar` accepts `user_id` (required) and optional `size` (40, 100, 140, 640, default 100). It downloads the QQ avatar and registers it as an attachment, returning an `<attachment uid="..."/>` tag that can be embedded in messages.
+
+### Unified attachment tag
+Use `<attachment uid="..."/>` for both images and files. The legacy `<pic uid="..."/>` tag is still supported for backward compatibility but `attachment` is the recommended unified syntax. The system distinguishes image vs file based on the UID prefix (`pic_`/`file_`).
+
+### User identification in prompts
+The system prompt now includes a rule: **recognize and address users by their QQ ID (`sender_id`)** because nicknames can change. When needing to address a user, use the latest nickname obtained via `group.get_member_info(brief=true)`. Observations recorded in cognitive memory should always include the QQ ID, e.g., “QQ号12345678（昵称张三）做了某事”.
+
 ## Testing Guidelines
 Write tests as `tests/test_<feature>.py`. Async tests use `pytest-asyncio`. Add or update coverage for behavior changes in APIs, config loading/hot reload, cognitive memory, meme or knowledge flows, and WebUI/runtime routes. If you touch `apps/undefined-console/` or `src/Undefined/webui/static/js/`, run `npm run check` in `apps/undefined-console/` in addition to the Python checks. No fixed coverage threshold is configured, so cover touched paths well.
 
