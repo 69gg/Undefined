@@ -200,7 +200,7 @@ curl http://127.0.0.1:8788/openapi.json
 - `POST /api/v1/memes/{uid}/reindex`
 
 说明：
-- 表情包库条目使用统一图片 `uid`，与普通图片 `<pic uid="..."/>` 语义一致。
+- 表情包库条目使用统一图片 `uid`，与普通图片 `<attachment uid="..."/>` 语义一致。
 - 入库文本和向量索引只使用纯文本 `description + tags + aliases`，不依赖 OCR。
 - 后台重跑分析使用两阶段 LLM 管线：先判定，再描述。
 

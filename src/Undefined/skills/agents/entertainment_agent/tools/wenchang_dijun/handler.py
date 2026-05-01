@@ -51,7 +51,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                         source_kind="wenchang_dijun",
                         source_ref=pic,
                     )
-                    result += f'\n签文图片：<pic uid="{record.uid}"/>'
+                    result += f'\n签文图片：<attachment uid="{record.uid}"/>'
                 except Exception as exc:
                     logger.warning("注册文昌帝君签文图片失败: %s", exc)
                     result += f"\n签文图片：{pic}"

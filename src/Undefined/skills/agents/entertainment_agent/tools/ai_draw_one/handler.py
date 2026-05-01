@@ -895,7 +895,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
                 return register_error or "图片生成失败：无法创建内嵌图片 UID"
             success = True
             uid = str(getattr(registered_record, "uid", "") or "").strip()
-            return f'已生成图片，可在回复中插入 <pic uid="{uid}"/>'
+            return f'已生成图片，可在回复中插入 <attachment uid="{uid}"/>'
 
         resolved_target_id, resolved_message_type, target_error = _resolve_send_target(
             target_id,

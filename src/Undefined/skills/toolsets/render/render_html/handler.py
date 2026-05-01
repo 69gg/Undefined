@@ -78,7 +78,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             cleanup_cache_dir(RENDER_CACHE_DIR)
             if record is None:
                 return "渲染成功，但无法注册到附件系统（缺少 attachment_registry 或 scope_key）"
-            return f'<pic uid="{record.uid}"/>'
+            return f'<attachment uid="{record.uid}"/>'
 
         # delivery == "send"
         resolved_target_id, resolved_message_type, target_error = _resolve_send_target(
