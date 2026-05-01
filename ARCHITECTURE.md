@@ -38,7 +38,7 @@ graph TB
             InjectionAgent["InjectionResponseAgent<br/>注入响应生成<br/>[injection_response_agent.py]"]
         end
         
-        CommandDispatcher["CommandDispatcher<br/>命令分发器<br/>• /help /stats /lsadmin<br/>• /addadmin /rmadmin<br/>• /bugfix /lsfaq<br/>[services/command.py]"]
+        CommandDispatcher["CommandDispatcher<br/>命令分发器<br/>• /help /stats /lsadmin<br/>• /addadmin /rmadmin<br/>• /bugfix /faq<br/>[services/command.py]"]
         
         subgraph QueueSystem["车站-列车 队列系统 (services/)"]
             AICoordinator["AICoordinator<br/>AI 协调器<br/>• Prompt 构建<br/>• 队列管理<br/>• 回复执行<br/>[ai_coordinator.py]"]
@@ -116,7 +116,7 @@ graph TB
         subgraph CommandsLayer["平台指令 (skills/commands/)"]
             Cmd_Core["核心指令<br/>• help • stats"]
             Cmd_Admin["管理指令<br/>• addadmin<br/>• rmadmin • lsadmin"]
-            Cmd_FAQ["FAQ 指令<br/>• lsfaq • viewfaq<br/>• searchfaq • delfaq"]
+            Cmd_FAQ["FAQ 指令<br/>• faq (ls/view/search/del)"]
             Cmd_Fun["娱乐指令<br/>• bugfix"]
         end
         

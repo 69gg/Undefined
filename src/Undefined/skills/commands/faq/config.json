@@ -1,0 +1,16 @@
+{
+    "name": "faq",
+    "description": "FAQ 管理：列表/查看/搜索/删除（支持自动推断子命令）",
+    "usage": "/faq(/f) [ls|view|search|del] [参数]",
+    "example": "/faq 20241205-001",
+    "permission": "public",
+    "rate_limit": {
+        "user": 10,
+        "admin": 5,
+        "superadmin": 0
+    },
+    "show_in_help": true,
+    "order": 30,
+    "allow_in_private": false,
+    "aliases": ["f"]
+}

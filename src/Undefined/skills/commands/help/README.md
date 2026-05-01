@@ -10,7 +10,7 @@
 ## 示例
 - `/help`
 - `/help stats`
-- `/help /lsfaq`
+- `/help /faq`
 
 ## 说明
 - `<command>` 支持带或不带 `/` 前缀。
