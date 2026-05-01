@@ -820,6 +820,8 @@ grok_search_enabled = false
 [proxy]
 # zh: 是否使用代理。
 # en: Whether to use proxy.
+# zh: 作用于 GitHub/arXiv 自动提取等走统一 HTTP 客户端的联网请求；关闭后也不会再读取代理环境变量。
+# en: Applies to GitHub/arXiv auto extraction and other shared HTTP-client requests; when disabled, proxy env vars are ignored.
 use_proxy = true
 # zh: 例如 http://127.0.0.1:7890（也可使用环境变量 "HTTP_PROXY"）。
 # en: e.g. http://127.0.0.1:7890 (or use the "HTTP_PROXY" environment variable).

@@ -489,6 +489,10 @@ Prompt caching 补充：
 环境变量兜底：
 - 若 TOML 未配置 `http_proxy` / `https_proxy`，会尝试 `HTTP_PROXY` / `HTTPS_PROXY`。
 
+说明：
+- 该配置会影响走统一 HTTP 请求封装的联网能力，例如 GitHub 仓库自动提取、arXiv 查询及部分第三方 API 请求。
+- 当 `use_proxy = false` 时，上述请求不会使用代理，也不会再读取代理环境变量。
+
 ---
 
 ### 4.14 `[network]` 网络请求默认参数
@@ -604,6 +608,7 @@ Prompt caching 补充：
 - 命中 `https://github.com/owner/repo`、`github.com/owner/repo` 或 `git@github.com:owner/repo.git` 时触发。
 - 裸 `owner/repo` 会作为 GitHub 仓库 ID 尝试一次 public API 请求；失败时只记录日志，不向会话发送错误消息。
 - 仅支持 public 仓库。卡片渲染为图片，包含仓库 ID、作者头像、简介、stars、forks、issues、contributors、watchers、语言、许可证、默认分支和更新时间等信息。
+- GitHub API 请求默认复用全局 `[proxy]` 代理设置。
 
 ---
 
