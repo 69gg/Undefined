@@ -38,6 +38,11 @@
                     "type": "boolean",
                     "description": "是否不使用缓存获取最新信息，默认 false",
                     "default": false
+                },
+                "brief": {
+                    "type": "boolean",
+                    "description": "简洁模式：只返回昵称（群名片优先，其次QQ昵称），不包含其他信息。适用于需要称呼用户时快速查询当前昵称。",
+                    "default": false
                 }
             },
             "required": [
