@@ -120,7 +120,10 @@ async def execute(args: list[str], context: CommandContext) -> None:
         return
 
     subcmd = resolved_subcommand or args[0].lower()
-    sub_args = args if resolved_subcommand else args[1:]
+    if resolved_subcommand:
+        sub_args = args[1:] if args and args[0].lower() == resolved_subcommand else args
+    else:
+        sub_args = args[1:]
     logger.info(
         "[NagaCmd] 子命令解析: trace=%s subcmd=%s sub_args=%s",
         trace_id,

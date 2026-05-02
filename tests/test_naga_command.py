@@ -238,10 +238,11 @@ async def test_naga_bind_uses_dispatch_resolved_subcommand(
 
     monkeypatch.setattr(naga_handler, "_submit_bind_request_to_naga", _accepted)
 
-    await naga_handler.execute(["alice"], context)
+    await naga_handler.execute(["bind", "alice"], context)
 
     pending = store.get_pending("alice")
     assert pending is not None
+    assert store.get_pending("bind") is None
     assert sender.group_messages
     assert "等待 Naga 端确认" in sender.group_messages[-1][1]
 
