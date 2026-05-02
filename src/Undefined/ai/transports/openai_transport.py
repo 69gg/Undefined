@@ -598,9 +598,9 @@ def normalize_responses_result(
                 }
             )
 
-    content = "\n".join(text for text in assistant_texts if text).strip()
+    content = "\n".join(text for text in assistant_texts if text)
     if not content and "output_text" in result:
-        content = str(result["output_text"]).strip()
+        content = str(result["output_text"])
 
     message: dict[str, Any] = {
         "role": "assistant",

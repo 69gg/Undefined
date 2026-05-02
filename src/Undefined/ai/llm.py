@@ -1585,7 +1585,7 @@ class ModelRequester:
 
         message: dict[str, Any] = {
             "role": role,
-            "content": "".join(content_parts).strip(),
+            "content": "".join(content_parts),
         }
         if tool_calls:
             message["tool_calls"] = tool_calls
@@ -1654,7 +1654,7 @@ class ModelRequester:
 
         synthesized: dict[str, Any] = {
             "output": output_items,
-            "output_text": "".join(output_text_parts).strip(),
+            "output_text": "".join(output_text_parts),
         }
         if usage is not None:
             synthesized["usage"] = usage

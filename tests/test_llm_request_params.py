@@ -1778,6 +1778,43 @@ async def test_chat_request_streaming_aggregates_content_and_tool_calls() -> Non
 
 
 @pytest.mark.asyncio
+async def test_chat_request_streaming_preserves_content_whitespace() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeStreamingClient(
+        chat_events=[
+            {"choices": [{"delta": {"role": "assistant", "content": "  code"}}]},
+            {"choices": [{"delta": {"content": "\n  indented  "}}]},
+        ]
+    )
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        stream_enabled=True,
+    )
+
+    result = await requester.request(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=128,
+        call_type="chat",
+    )
+
+    assert extract_choices_content(result) == "  code\n  indented  "
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_responses_request_streaming_prefers_completed_response_payload() -> None:
     requester = ModelRequester(
         http_client=httpx.AsyncClient(),
@@ -1837,5 +1874,44 @@ async def test_responses_request_streaming_prefers_completed_response_payload() 
         "completion_tokens": 5,
         "total_tokens": 13,
     }
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_responses_request_streaming_preserves_synthesized_whitespace() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeStreamingClient(
+        response_events=[
+            {"type": "response.output_text.delta", "delta": "  code"},
+            {"type": "response.output_text.delta", "delta": "\n  indented  "},
+        ]
+    )
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+        stream_enabled=True,
+    )
+
+    result = await requester.request(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=128,
+        call_type="chat",
+    )
+
+    assert extract_choices_content(result) == "  code\n  indented  "
+    assert result["output_text"] == "  code\n  indented  "
 
     await requester._http_client.aclose()
