@@ -199,6 +199,12 @@ def _parse_message_batcher_config(data: dict[str, Any]) -> MessageBatcherConfig:
     max_messages = _coerce_int(section.get("max_messages_per_batch"), 0)
     if max_messages < 0:
         max_messages = 0
+    pre_send_seconds = _coerce_float(section.get("pre_send_seconds"), 0.0)
+    if pre_send_seconds < 0:
+        pre_send_seconds = 0.0
+    # pre_send 必须严格小于 window 才有意义；不满足则直接关闭投机
+    if pre_send_seconds >= window_seconds:
+        pre_send_seconds = 0.0
     return MessageBatcherConfig(
         enabled=_coerce_bool(section.get("enabled"), True),
         window_seconds=window_seconds,
@@ -208,6 +214,10 @@ def _parse_message_batcher_config(data: dict[str, Any]) -> MessageBatcherConfig:
         group_enabled=_coerce_bool(section.get("group_enabled"), True),
         private_enabled=_coerce_bool(section.get("private_enabled"), True),
         flush_on_command=_coerce_bool(section.get("flush_on_command"), False),
+        pre_send_seconds=pre_send_seconds,
+        allow_cancel_after_send=_coerce_bool(
+            section.get("allow_cancel_after_send"), False
+        ),
     )
 
 

@@ -298,3 +298,141 @@ async def test_max_window_seconds_zero_means_unlimited() -> None:
     await asyncio.sleep(0.1)
     assert len(rec.batches) == 1
     assert len(rec.batches[0]) == 6
+
+
+# ---------------------------------------------------------------------------
+# 投机预发送（speculative pre-fire）测试
+# ---------------------------------------------------------------------------
+
+
+class _FakeRequestContext:
+    """模拟 RequestContext，仅暴露 get_resource。"""
+
+    def __init__(self) -> None:
+        self._resources: dict[str, object] = {}
+
+    def set_resource(self, key: str, value: object) -> None:
+        self._resources[key] = value
+
+    def get_resource(self, key: str, default: object = None) -> object:
+        return self._resources.get(key, default)
+
+
+@pytest.mark.asyncio
+async def test_speculative_prefire_fires_at_t2_but_batch_continues() -> None:
+    """T2 < T1：T2 到期先发车，items 不弹出；T1 之前再来消息会取消投机。"""
+    cfg = MessageBatcherConfig(
+        enabled=True,
+        window_seconds=0.3,
+        pre_send_seconds=0.1,
+        strategy="extend",
+    )
+    rec = _Recorder()
+    batcher = MessageBatcher(cfg, rec)
+
+    await batcher.submit(_make_item(text="m1"))
+    # 等待 T2 触发（~100ms）但远未到 T1（300ms）
+    await asyncio.sleep(0.18)
+    assert len(rec.batches) == 1, "T2 应已 pre-fire"
+    # 桶仍存在
+    assert batcher.has_buffer("group:1", 100)
+
+
+@pytest.mark.asyncio
+async def test_speculative_cancelled_when_new_message_and_no_send() -> None:
+    """投机调用尚未发出消息时，新消息到达应取消 inflight 并把它合进新一轮。"""
+    cfg = MessageBatcherConfig(
+        enabled=True,
+        window_seconds=0.3,
+        pre_send_seconds=0.05,
+        strategy="extend",
+    )
+
+    cancelled = asyncio.Event()
+    fake_ctx = _FakeRequestContext()  # 默认 message_sent_this_turn=False
+
+    async def slow_flush(items: list[BufferedMessage]) -> None:
+        try:
+            await asyncio.sleep(2.0)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    batcher = MessageBatcher(cfg, slow_flush)
+
+    await batcher.submit(_make_item(text="m1"))
+    # 等待 T2 触发
+    await asyncio.sleep(0.1)
+    # 模拟 coordinator 上报 inflight
+    inflight_task = next(iter(batcher._pending_tasks))
+    batcher.register_inflight("group:1", 100, inflight_task, fake_ctx)
+    # 第二条消息到达，应取消 inflight
+    await batcher.submit(_make_item(text="m2"))
+    await asyncio.wait_for(cancelled.wait(), timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_speculative_not_cancelled_when_already_sent_default() -> None:
+    """已经发过消息时默认不取消 inflight，新消息开新 batch。"""
+    cfg = MessageBatcherConfig(
+        enabled=True,
+        window_seconds=0.3,
+        pre_send_seconds=0.05,
+        strategy="extend",
+        allow_cancel_after_send=False,
+    )
+
+    fake_ctx = _FakeRequestContext()
+    fake_ctx.set_resource("message_sent_this_turn", True)
+
+    finished = asyncio.Event()
+
+    async def flush(items: list[BufferedMessage]) -> None:
+        try:
+            await asyncio.sleep(0.1)
+        finally:
+            finished.set()
+
+    batcher = MessageBatcher(cfg, flush)
+
+    await batcher.submit(_make_item(text="m1"))
+    await asyncio.sleep(0.08)
+    inflight_task = next(iter(batcher._pending_tasks))
+    batcher.register_inflight("group:1", 100, inflight_task, fake_ctx)
+    # 新消息到达：投机已发过消息，inflight 不应被 cancel
+    await batcher.submit(_make_item(text="m2"))
+    # 等 inflight 自然完成
+    await asyncio.wait_for(finished.wait(), timeout=1.0)
+    assert not inflight_task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_speculative_disabled_when_pre_send_zero() -> None:
+    """pre_send_seconds=0 时投机关闭，仅 T1 静默到期发车。"""
+    cfg = MessageBatcherConfig(
+        enabled=True,
+        window_seconds=0.1,
+        pre_send_seconds=0.0,
+    )
+    rec = _Recorder()
+    batcher = MessageBatcher(cfg, rec)
+    assert not batcher.speculative_enabled
+
+    await batcher.submit(_make_item(text="m1"))
+    await asyncio.sleep(0.05)
+    assert rec.batches == []
+    await asyncio.sleep(0.1)
+    assert len(rec.batches) == 1
+
+
+@pytest.mark.asyncio
+async def test_snapshot_includes_phase() -> None:
+    cfg = MessageBatcherConfig(enabled=True, window_seconds=0.5, pre_send_seconds=0.05)
+    rec = _Recorder()
+    batcher = MessageBatcher(cfg, rec)
+    await batcher.submit(_make_item(text="m1"))
+    snap = batcher.snapshot()
+    assert snap["pending_buckets"] == 1
+    assert snap["buckets"][0]["phase"] in {"typing", "speculating"}
+    assert "speculative_enabled" in snap["config"]
+    assert snap["config"]["speculative_enabled"] is True

@@ -465,6 +465,8 @@ Prompt caching 补充：
 | `group_enabled` | `true` | 群聊是否启用合并 |
 | `private_enabled` | `true` | 私聊是否启用合并 |
 | `flush_on_command` | `true` | 命中斜杠命令时是否 flush 该 sender 的 buffer（保留字段，当前未消费） |
+| `pre_send_seconds` | `0.0` | 投机预发送阈值（秒）。`0 < pre_send_seconds < window_seconds` 时启用：静默到该阈值先把当前 batch 提前发给 LLM 抢时间（speculative pre-fire），但 batch 仍要等到 `window_seconds` 才正式结束；新消息在投机期间到达且 inflight 调用尚未发出消息时会取消 inflight 并把消息合并入下一轮调用。`0` 或 `>= window_seconds` 视为关闭 |
+| `allow_cancel_after_send` | `false` | 投机调用已向用户发出消息后是否仍允许新消息取消该 inflight。默认 `false`（安全：不取消，新消息开新 batch）；启用后可能造成重复发送 |
 
 启用后，同一发送者在窗口内连续发送的多条消息会合并到同一轮 AI 调用，`<message>` 块按时间顺序排列，AI 一次性处理整批意图。拍一拍永远旁路立即处理；群聊已有 buffer 时新到的 @bot 也会单独立即处理（不打断 buffer）；首条 @bot 进入 buffer 时整批发车走 `add_group_mention_request`。配置支持热更新，关停时会 `flush_all` 避免丢消息。详细行为矩阵与设计要点见 [docs/message-batching.md](message-batching.md)。
 

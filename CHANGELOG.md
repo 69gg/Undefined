@@ -1,6 +1,7 @@
 ## Unreleased
 
 - 新增同 sender 短时消息合并：同一发送者在 `[message_batcher].window_seconds`（默认 5s）内连续发送的多条消息会合并到同一轮 AI 调用，AI 一次性处理整批意图，避免"画猫"→"改成狗"等场景出现重复回复或行为打架。配置项见 `[message_batcher]`，支持 `extend`/`fixed` 两种策略与 `max_window_seconds`、`max_messages_per_batch` 硬顶；拍一拍永远旁路立即处理，群聊已有 buffer 时新到的 @bot 也会单独立即处理；启用合并后历史记录写入逻辑保持不变。详见 [docs/message-batching.md](docs/message-batching.md)。
+- 消息合并新增**投机预发送（speculative pre-fire）**：双计时器状态机 `T2 = pre_send_seconds < T1 = window_seconds`，静默到 T2 先把当前 batch 提前发给 LLM 抢时间，T1 才正式结束 batch。新消息在 inflight 尚未发出任何回复时可取消该 LLM 调用并合并入下一轮；通过 `[message_batcher].allow_cancel_after_send` 控制 inflight 已发消息后是否仍允许取消（默认 false 安全）。`pre_send_seconds = 0` 退化为旧行为。
 
 ## v3.3.3 命令推断、自动处理管线与统一附件上下文
 

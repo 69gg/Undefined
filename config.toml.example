@@ -780,6 +780,12 @@ private_enabled = true
 # zh: 收到斜杠命令时是否顺便把当前 buffer 一起发出（默认 false：命令独立执行，buffer 继续等到时间到再发）。
 # en: When a slash command arrives, also flush the current buffer to the AI (default false: commands are executed independently and the buffer keeps waiting).
 flush_on_command = false
+# zh: 投机预发送阈值（秒）。0 < pre_send_seconds < window_seconds 时启用：静默到该阈值就提前把当前 batch 发给 LLM 抢时间，但 batch 不结束；T1（window_seconds）才正式结束。0 或 >= window_seconds 视为关闭。
+# en: Speculative pre-fire threshold in seconds. Enabled when 0 < pre_send_seconds < window_seconds: once the user has been silent that long, the current batch is dispatched to the LLM early to save latency, while the batch itself only ends at window_seconds. 0 or >= window_seconds disables speculation.
+pre_send_seconds = 0.0
+# zh: 投机调用已经向用户发出过任何消息后，新消息到达是否仍然取消该 inflight 调用。默认 false（安全：不取消，新消息开新 batch），开启后可能造成重复发送。
+# en: Whether to cancel an in-flight speculative LLM call even when it has already sent at least one message to the user. Default false (safe: do not cancel; the new message starts a new batch). Enabling this may cause duplicate replies.
+allow_cancel_after_send = false
 
 # zh: 历史记录配置。
 # en: History settings.

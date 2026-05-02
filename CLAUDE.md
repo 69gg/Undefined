@@ -116,7 +116,7 @@ Management / Runtime 请求 → webui/app.py 或 api/app.py → routes/*
 
 ### 同 sender 短时消息合并（MessageBatcher）
 
-同一 sender 在 `[message_batcher].window_seconds` 内连续发送的多条消息会合并到同一轮 AI 调用，AI 一次性看到全部 `<message>` 块自行识别"独立请求/修正/打断"。拍一拍永远旁路立即处理；群聊已有 buffer 时新到的 @bot 也单独立即处理；首条 @bot 进入 buffer 时整批走 mention 队列。`enabled=false` 行为退化回旧版。详见 [docs/message-batching.md](docs/message-batching.md)。
+同一 sender 在 `[message_batcher].window_seconds` 内连续发送的多条消息会合并到同一轮 AI 调用，AI 一次性看到全部 `<message>` 块自行识别“独立请求/修正/打断”。拍一拍永远旁路立即处理；群聊已有 buffer 时新到的 @bot 也单独立即处理；首条 @bot 进入 buffer 时整批走 mention 队列。可选开启投机预发送 `pre_send_seconds < window_seconds`：静默到该阈值先把 batch 提前发给 LLM 抢时间，新消息在 inflight 未发出任何消息时可取消该调用。`enabled=false` 行为退化回旧版。详见 [docs/message-batching.md](docs/message-batching.md)。
 
 ### 存储与数据
 

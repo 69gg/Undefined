@@ -51,6 +51,11 @@ group_enabled = true
 private_enabled = true
 # 命中斜杠命令时是否 flush 当前 sender 的 buffer（保留字段，当前未消费）
 flush_on_command = true
+# 投机预发送阈值（秒）。0 < pre_send_seconds < window_seconds 时启用 "speculative pre-fire"：
+# 静默到该阈值就先把当前 batch 提前发给 LLM 抢时间，但 batch 仍要等到 window_seconds 才结束
+pre_send_seconds = 0.0
+# 投机调用已经向用户发出过任何消息后，新消息到达是否仍然取消该 inflight 调用（默认 false：不取消）
+allow_cancel_after_send = false
 ```
 
 支持热更新：修改后通过 WebUI 或 SIGHUP 重新加载配置即可生效，正在排队的桶会沿用新配置参数。
@@ -81,3 +86,43 @@ flush_on_command = true
 - 热更新：[src/Undefined/config/hot_reload.py](src/Undefined/config/hot_reload.py)
 - 提示词：[res/prompts/undefined.xml](res/prompts/undefined.xml)、[res/prompts/undefined_nagaagent.xml](res/prompts/undefined_nagaagent.xml)
 - 测试：[tests/test_message_batcher.py](tests/test_message_batcher.py)
+
+## 投机预发送（Speculative Pre-fire）
+
+> 目标：当用户处于"打字停顿"状态时，让 LLM 抢先开始处理，而不必等到完整的 `window_seconds` 静默才开始。
+
+### 双计时器状态机
+
+每个 `(scope, sender_id)` 桶维护两条独立的"静默计时器"：
+
+- **T1 = `window_seconds`** —— 打字静默阈值，决定 batch 何时结束。
+- **T2 = `pre_send_seconds`** —— 投机预发送阈值，要求严格 `0 < T2 < T1`。
+  达到 T2 时把当前 batch 提前发给 LLM（"speculative pre-fire"），但 batch **不结束**，T1 才正式结束。
+
+桶状态：
+
+| Phase | 含义 |
+|---|---|
+| `TYPING` | 等待 T1/T2 静默 |
+| `SPECULATING` | T2 已触发，inflight LLM 在跑；T1 仍未到 |
+| `FINALIZING` | T1 已到，等 inflight（若有）自然结束 |
+
+### 新消息到来时的决策
+
+- **TYPING**：append 到 items，重置 T1/T2。
+- **SPECULATING**：
+  - 检查 inflight 是否已经向用户发出过任何消息（来自 `RequestContext.get_resource("message_sent_this_turn")`）。
+  - inflight **尚未发消息** → 调 `inflight_task.cancel()`，桶回到 `TYPING`，新消息追加进去，重置 T1/T2；inflight 协程在 `RequestContext` 里清理后退出，**不写入回复历史**。
+  - inflight **已经发过消息** 且 `allow_cancel_after_send=False`（默认安全） → 不取消 inflight，**新消息开新 batch**（旧桶在 inflight 自然结束后清理）。
+  - inflight **已经发过消息** 且 `allow_cancel_after_send=True` → 仍取消，可能造成重复发送，仅极端场景启用。
+
+### 防竞态设计
+
+- 所有桶状态变更在 `MessageBatcher._lock` 内完成；`flush_callback` 与 `task.cancel()` 在锁外发起。
+- timer 触发后由 `asyncio.create_task` 创建 flush 协程，强引用挂到 `_pending_tasks: set[Task]`，`task.add_done_callback(self._pending_tasks.discard)` 清理（asyncio 文档要求避免被 GC）。
+- `flush_all()` 在关停时遍历所有桶执行等价 T1 路径，并 `await` 所有未完成的 flush task。
+- coordinator 在 `execute_reply` 入口调用 `register_inflight(scope, sender_id, task, ctx)`，在 `finally` 调 `unregister_inflight(...)`；`asyncio.CancelledError` 被识别为 "投机抢占"，仅记录信息日志且不重试。
+
+### 兼容回退
+
+`pre_send_seconds <= 0` 或 `>= window_seconds` 时投机模式自动关闭，行为退化为旧版"T1 静默到期才发车"。`enabled=false` 时整体退化为逐条触发。

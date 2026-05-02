@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 from datetime import datetime
@@ -291,6 +292,8 @@ class AICoordinator:
         group_name = str(request.get("group_name") or "未知群聊")
         full_question = request["full_question"]
         trigger_message_id = request.get("trigger_message_id")
+        # 用于向 batcher 注册 inflight 任务（仅当本请求源自合并桶时生效）
+        batcher_scope: str | None = make_scope(group_id=group_id) if group_id else None
 
         # 创建请求上下文
         async with RequestContext(
@@ -366,27 +369,50 @@ class AICoordinator:
             )
 
             try:
-                await self.ai.ask(
-                    full_question,
-                    send_message_callback=send_msg_cb,
-                    get_recent_messages_callback=get_recent_cb,
-                    get_image_url_callback=self.onebot.get_image,
-                    get_forward_msg_callback=self.onebot.get_forward_msg,
-                    send_like_callback=send_like_cb,
-                    sender=self.sender,
-                    history_manager=self.history_manager,
-                    onebot_client=self.onebot,
-                    scheduler=self.scheduler,
-                    extra_context={
-                        "render_html_to_image": render_html_to_image,
-                        "render_markdown_to_html": render_markdown_to_html,
-                        "group_id": group_id,
-                        "user_id": sender_id,
-                        "is_at_bot": bool(request.get("is_at_bot", False)),
-                        "sender_name": sender_name,
-                        "group_name": group_name,
-                    },
+                # 把当前 task 注册到 batcher，使其有能力在新消息到达时取消本次 LLM 调用
+                batcher = getattr(self, "_batcher", None)
+                current_task = asyncio.current_task()
+                if (
+                    batcher is not None
+                    and batcher_scope is not None
+                    and current_task is not None
+                ):
+                    batcher.register_inflight(
+                        batcher_scope, sender_id, current_task, ctx
+                    )
+                try:
+                    await self.ai.ask(
+                        full_question,
+                        send_message_callback=send_msg_cb,
+                        get_recent_messages_callback=get_recent_cb,
+                        get_image_url_callback=self.onebot.get_image,
+                        get_forward_msg_callback=self.onebot.get_forward_msg,
+                        send_like_callback=send_like_cb,
+                        sender=self.sender,
+                        history_manager=self.history_manager,
+                        onebot_client=self.onebot,
+                        scheduler=self.scheduler,
+                        extra_context={
+                            "render_html_to_image": render_html_to_image,
+                            "render_markdown_to_html": render_markdown_to_html,
+                            "group_id": group_id,
+                            "user_id": sender_id,
+                            "is_at_bot": bool(request.get("is_at_bot", False)),
+                            "sender_name": sender_name,
+                            "group_name": group_name,
+                        },
+                    )
+                finally:
+                    if batcher is not None and batcher_scope is not None:
+                        batcher.unregister_inflight(batcher_scope, sender_id)
+            except asyncio.CancelledError:
+                # 投机预发送被新消息抢占取消：不写错误日志、不重试
+                logger.info(
+                    "[自动回复] 任务被取消（投机抢占）: group=%s sender=%s",
+                    group_id,
+                    sender_id,
                 )
+                raise
             except Exception:
                 logger.exception("自动回复执行出错")
                 raise
@@ -396,6 +422,7 @@ class AICoordinator:
         sender_name = str(request.get("sender_name") or "未知用户")
         full_question = request["full_question"]
         trigger_message_id = request.get("trigger_message_id")
+        batcher_scope: str | None = make_scope(user_id=user_id)
 
         # 创建请求上下文
         async with RequestContext(
@@ -466,26 +493,38 @@ class AICoordinator:
             )
 
             try:
-                result = await self.ai.ask(
-                    full_question,
-                    send_message_callback=send_msg_cb,
-                    get_recent_messages_callback=get_recent_cb,
-                    get_image_url_callback=self.onebot.get_image,
-                    get_forward_msg_callback=self.onebot.get_forward_msg,
-                    send_like_callback=send_like_cb,
-                    sender=self.sender,
-                    history_manager=self.history_manager,
-                    onebot_client=self.onebot,
-                    scheduler=self.scheduler,
-                    extra_context={
-                        "render_html_to_image": render_html_to_image,
-                        "render_markdown_to_html": render_markdown_to_html,
-                        "user_id": user_id,
-                        "is_private_chat": True,
-                        "sender_name": sender_name,
-                        "selected_model_name": request.get("selected_model_name"),
-                    },
-                )
+                batcher = getattr(self, "_batcher", None)
+                current_task = asyncio.current_task()
+                if (
+                    batcher is not None
+                    and batcher_scope is not None
+                    and current_task is not None
+                ):
+                    batcher.register_inflight(batcher_scope, user_id, current_task, ctx)
+                try:
+                    result = await self.ai.ask(
+                        full_question,
+                        send_message_callback=send_msg_cb,
+                        get_recent_messages_callback=get_recent_cb,
+                        get_image_url_callback=self.onebot.get_image,
+                        get_forward_msg_callback=self.onebot.get_forward_msg,
+                        send_like_callback=send_like_cb,
+                        sender=self.sender,
+                        history_manager=self.history_manager,
+                        onebot_client=self.onebot,
+                        scheduler=self.scheduler,
+                        extra_context={
+                            "render_html_to_image": render_html_to_image,
+                            "render_markdown_to_html": render_markdown_to_html,
+                            "user_id": user_id,
+                            "is_private_chat": True,
+                            "sender_name": sender_name,
+                            "selected_model_name": request.get("selected_model_name"),
+                        },
+                    )
+                finally:
+                    if batcher is not None and batcher_scope is not None:
+                        batcher.unregister_inflight(batcher_scope, user_id)
                 if result:
                     scope_key = build_attachment_scope(
                         user_id=user_id,
@@ -508,6 +547,9 @@ class AICoordinator:
                         target_type="private",
                         target_id=user_id,
                     )
+            except asyncio.CancelledError:
+                logger.info("[私聊回复] 任务被取消（投机抢占）: user=%s", user_id)
+                raise
             except Exception:
                 logger.exception("私聊回复执行出错")
                 raise
