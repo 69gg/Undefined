@@ -18,7 +18,7 @@ import pytest
 
 from Undefined.config.models import MessageBatcherConfig
 from Undefined.services.ai_coordinator import AICoordinator
-from Undefined.services.message_batcher import MessageBatcher
+from Undefined.services.message_batcher import BatchDispatchToken, MessageBatcher
 
 
 def _make_coordinator(
@@ -270,3 +270,23 @@ async def test_superadmin_batched_routes_to_superadmin_lane() -> None:
     assert await_args is not None
     req = await_args.args[0]
     assert req["batched_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_reply_skips_cancelled_batch_token() -> None:
+    coordinator: Any = object.__new__(AICoordinator)
+    execute_auto = AsyncMock()
+    coordinator._execute_auto_reply = execute_auto
+    token = BatchDispatchToken(
+        scope="group:1",
+        sender_id=2,
+        batch_id=1,
+        speculative=True,
+        cancelled=True,
+    )
+
+    await coordinator.execute_reply(
+        {"type": "auto_reply", "_message_batcher_token": token}
+    )
+
+    execute_auto.assert_not_called()

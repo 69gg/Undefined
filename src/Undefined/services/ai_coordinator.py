@@ -274,6 +274,16 @@ class AICoordinator:
         """执行回复请求（由 QueueManager 调用）"""
         req_type = request.get("type", "unknown")
         logger.debug("[执行请求] type=%s keys=%s", req_type, list(request.keys()))
+        batch_token = request.get("_message_batcher_token")
+        if bool(getattr(batch_token, "cancelled", False)):
+            logger.info(
+                "[MessageBatcher] 跳过已取消的投机请求: type=%s scope=%s sender=%s batch=%s",
+                req_type,
+                getattr(batch_token, "scope", ""),
+                getattr(batch_token, "sender_id", ""),
+                getattr(batch_token, "batch_id", ""),
+            )
+            return
         if req_type == "auto_reply":
             await self._execute_auto_reply(request)
         elif req_type == "private_reply":
@@ -404,7 +414,9 @@ class AICoordinator:
                     )
                 finally:
                     if batcher is not None and batcher_scope is not None:
-                        batcher.unregister_inflight(batcher_scope, sender_id)
+                        batcher.unregister_inflight(
+                            batcher_scope, sender_id, current_task
+                        )
             except asyncio.CancelledError:
                 # 投机预发送被新消息抢占取消：不写错误日志、不重试
                 logger.info(
@@ -524,7 +536,9 @@ class AICoordinator:
                     )
                 finally:
                     if batcher is not None and batcher_scope is not None:
-                        batcher.unregister_inflight(batcher_scope, user_id)
+                        batcher.unregister_inflight(
+                            batcher_scope, user_id, current_task
+                        )
                 if result:
                     scope_key = build_attachment_scope(
                         user_id=user_id,
@@ -902,6 +916,8 @@ class AICoordinator:
                 "trigger_message_id": last.trigger_message_id,
                 "batched_count": len(items),
             }
+            if first.batch_token is not None:
+                request_data["_message_batcher_token"] = first.batch_token
             effective_config = self.model_pool.select_chat_config(
                 self.config.chat_model, user_id=user_id
             )
@@ -937,6 +953,8 @@ class AICoordinator:
             "trigger_message_id": last.trigger_message_id,
             "batched_count": len(items),
         }
+        if first.batch_token is not None:
+            request_data["_message_batcher_token"] = first.batch_token
         logger.debug(
             "[自动回复] full_question_len=%s group=%s sender=%s batched=%s",
             len(full_question),

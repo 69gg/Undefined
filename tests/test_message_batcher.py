@@ -9,6 +9,7 @@ import pytest
 
 from Undefined.config.models import MessageBatcherConfig
 from Undefined.services.message_batcher import (
+    BatchDispatchToken,
     BufferedMessage,
     MessageBatcher,
     make_scope,
@@ -339,6 +340,26 @@ async def test_speculative_prefire_fires_at_t2_but_batch_continues() -> None:
 
 
 @pytest.mark.asyncio
+async def test_t1_after_speculative_prefire_does_not_dispatch_twice() -> None:
+    """T2 已经投机发车后，T1 只结束 batch，不能再次调用 callback。"""
+    cfg = MessageBatcherConfig(
+        enabled=True,
+        window_seconds=0.12,
+        pre_send_seconds=0.03,
+        strategy="extend",
+    )
+    rec = _Recorder()
+    batcher = MessageBatcher(cfg, rec)
+
+    await batcher.submit(_make_item(text="m1"))
+    await asyncio.wait_for(rec.event.wait(), timeout=0.5)
+    await asyncio.sleep(0.18)
+
+    assert len(rec.batches) == 1
+    assert not batcher.has_buffer("group:1", 100)
+
+
+@pytest.mark.asyncio
 async def test_speculative_cancelled_when_new_message_and_no_send() -> None:
     """投机调用尚未发出消息时，新消息到达应取消 inflight 并把它合进新一轮。"""
     cfg = MessageBatcherConfig(
@@ -511,3 +532,82 @@ async def test_speculative_cancelled_before_inflight_registered() -> None:
     # 新消息：inflight 是 None，应走"cancel flush task"分支
     await batcher.submit(_make_item(text="m2"))
     await asyncio.wait_for(callback_cancelled.wait(), timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_speculative_queued_token_cancelled_before_inflight_registered() -> None:
+    """T2 callback 已完成入队但 inflight 未注册时，新消息应取消旧 token。"""
+    cfg = MessageBatcherConfig(
+        enabled=True,
+        window_seconds=0.5,
+        pre_send_seconds=0.05,
+        strategy="extend",
+    )
+
+    callbacks = 0
+    first_callback_done = asyncio.Event()
+    second_callback_done = asyncio.Event()
+    seen_tokens: list[BatchDispatchToken | None] = []
+
+    async def enqueue_only(items: list[BufferedMessage]) -> None:
+        nonlocal callbacks
+        callbacks += 1
+        seen_tokens.append(items[0].batch_token)
+        if callbacks == 1:
+            first_callback_done.set()
+        elif callbacks == 2:
+            second_callback_done.set()
+
+    batcher = MessageBatcher(cfg, enqueue_only)
+
+    await batcher.submit(_make_item(text="m1"))
+    await asyncio.wait_for(first_callback_done.wait(), timeout=0.5)
+    old_token = seen_tokens[0]
+    assert old_token is not None
+    assert old_token.speculative is True
+    assert old_token.cancelled is False
+
+    await batcher.submit(_make_item(text="m2"))
+    assert old_token.cancelled is True
+
+    await asyncio.wait_for(second_callback_done.wait(), timeout=0.5)
+    new_token = seen_tokens[1]
+    assert new_token is not None
+    assert new_token is not old_token
+    assert new_token.cancelled is False
+
+
+@pytest.mark.asyncio
+async def test_stale_unregister_does_not_clear_new_inflight() -> None:
+    """旧 inflight 的 finally 不能把新一轮已注册的 inflight 清掉。"""
+    cfg = MessageBatcherConfig(
+        enabled=True,
+        window_seconds=0.4,
+        pre_send_seconds=0.05,
+        strategy="extend",
+    )
+
+    async def enqueue_only(items: list[BufferedMessage]) -> None:
+        return None
+
+    batcher = MessageBatcher(cfg, enqueue_only)
+    fake_ctx = _FakeRequestContext()
+    old_task = asyncio.create_task(asyncio.sleep(10.0))
+    new_task = asyncio.create_task(asyncio.sleep(10.0))
+
+    try:
+        await batcher.submit(_make_item(text="m1"))
+        await asyncio.sleep(0.08)
+        batcher.register_inflight("group:1", 100, old_task, fake_ctx)
+
+        await batcher.submit(_make_item(text="m2"))
+        await asyncio.sleep(0.08)
+        batcher.register_inflight("group:1", 100, new_task, fake_ctx)
+
+        batcher.unregister_inflight("group:1", 100, old_task)
+        snap = batcher.snapshot()
+        assert snap["buckets"][0]["has_inflight"] is True
+    finally:
+        old_task.cancel()
+        new_task.cancel()
+        await asyncio.gather(old_task, new_task, return_exceptions=True)

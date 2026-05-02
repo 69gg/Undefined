@@ -46,7 +46,7 @@ graph TB
         
         CommandDispatcher["CommandDispatcher<br/>命令分发器<br/>• /help /stats /lsadmin<br/>• /addadmin /rmadmin<br/>• /bugfix /faq<br/>[services/command.py]"]
 
-        MessageBatcher["MessageBatcher<br/>同 sender 短时合并<br/>• 按 (scope, sender_id) 分桶<br/>• window_seconds 内合并 N 条<br/>• 拍一拍/buffer 内 @bot 旁路<br/>• 首条 @bot 整批走 mention 队列<br/>[services/message_batcher.py]"]
+        MessageBatcher["MessageBatcher<br/>同 sender 短时合并<br/>• 按 (scope, sender_id) 分桶<br/>• T1=window_seconds 结束 batch<br/>• T2=pre_send_seconds 投机预发送<br/>• 拍一拍/buffer 内 @bot 旁路<br/>• 首条 @bot 整批走 mention 队列<br/>[services/message_batcher.py]"]
 
         subgraph QueueSystem["车站-列车 队列系统 (services/)"]
             AICoordinator["AICoordinator<br/>AI 协调器<br/>• Prompt 构建<br/>• 队列管理<br/>• 回复执行<br/>[ai_coordinator.py]"]
@@ -389,9 +389,16 @@ sequenceDiagram
                 AC->>QM: 立即按优先级入队
             else 普通消息进合并桶
                 AC->>MB: submit(BufferedMessage)
-                MB-->>MB: 同 sender 短窗合并 (window_seconds)
-                MB->>AC: handle_batched_dispatch(批次)
-                AC->>QM: 按首条触发的优先级入队
+                MB-->>MB: TYPING: 重置 T1/T2 静默计时
+                opt T2=pre_send_seconds 到期
+                    MB->>AC: handle_batched_dispatch(投机批次 + BatchDispatchToken)
+                    AC->>QM: 提前入队抢时间
+                end
+                MB-->>MB: T1=window_seconds 到期结束 batch
+                opt 未启用投机或尚未预发送
+                    MB->>AC: handle_batched_dispatch(最终批次)
+                    AC->>QM: 按首条触发的优先级入队
+                end
             end
 
             %% 上下文创建

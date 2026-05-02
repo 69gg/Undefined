@@ -15,7 +15,7 @@
 新消息到来：
 
 - 若桶处于 ``TYPING``（尚未 pre-fire）：append 后重置 T1/T2。
-- 若桶处于 ``SPECULATING``（已 pre-fire，inflight 在跑）：
+- 若桶处于 ``SPECULATING``（已 pre-fire，请求已入队或 inflight 在跑）：
   - 检查 inflight 是否已经 "向用户发出过任何消息"
     （来自 ``RequestContext.get_resource("message_sent_this_turn")``）。
   - inflight 尚未发消息 → 调 ``inflight_task.cancel()``，桶回到 TYPING；
@@ -43,6 +43,20 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class BatchDispatchToken:
+    """一次 batch 发车的身份令牌，用于取消已入队但尚未执行的投机请求。"""
+
+    scope: str
+    sender_id: int
+    batch_id: int
+    speculative: bool = False
+    cancelled: bool = False
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+
+@dataclass
 class BufferedMessage:
     """缓冲中的单条消息上下文。"""
 
@@ -64,6 +78,7 @@ class BufferedMessage:
     sender_role: str = "member"
     sender_title: str = ""
     sender_level: str = ""
+    batch_token: BatchDispatchToken | None = None
 
 
 FlushCallback = Callable[[list[BufferedMessage]], Awaitable[None]]
@@ -81,7 +96,7 @@ class BatchPhase(enum.Enum):
     """桶状态机。"""
 
     TYPING = "typing"  # 等待 T1/T2 静默
-    SPECULATING = "speculating"  # T2 已触发，inflight LLM 在跑；T1 仍未到
+    SPECULATING = "speculating"  # T2 已触发，请求已入队或 inflight 在跑；T1 仍未到
     FINALIZING = "finalizing"  # T1 已到，等 inflight（若有）自然结束
 
 
@@ -109,6 +124,9 @@ class _BatchState:
     inflight: _InflightInfo | None = None
     # T2 fire 时由 batcher 创建的 flush task；inflight 还未上报前用于兜底取消
     speculative_flush_task: asyncio.Task[None] | None = None
+    # 当前 batch 的身份令牌；T2 入队后若又来新消息，可将旧 token 标记取消，
+    # coordinator 在真正执行前会跳过它。
+    dispatch_token: BatchDispatchToken | None = None
 
 
 def make_scope(*, group_id: int | None = None, user_id: int | None = None) -> str:
@@ -155,6 +173,7 @@ class MessageBatcher:
         self._lock = asyncio.Lock()
         # 持有 timer 触发后创建的 flush task 强引用，避免被 GC（asyncio 文档要求）
         self._pending_tasks: set[asyncio.Task[None]] = set()
+        self._next_batch_id = 0
 
     # ------------------------------------------------------------------ public
 
@@ -202,7 +221,6 @@ class MessageBatcher:
         cfg = self._config
         key = (item.scope, item.sender_id)
         # 异步路径里只在锁内修改桶；invoke callback 在锁外执行
-        speculative_fire_items: list[BufferedMessage] | None = None
         immediate_fire_items: list[BufferedMessage] | None = None
 
         async with self._lock:
@@ -215,6 +233,7 @@ class MessageBatcher:
                 state = _BatchState(
                     phase=BatchPhase.TYPING,
                     first_arrival_monotonic=now_mono,
+                    dispatch_token=self._new_token(item.scope, item.sender_id),
                 )
                 self._buckets[key] = state
                 state.items.append(item)
@@ -237,28 +256,32 @@ class MessageBatcher:
                         already_sent,
                         cfg.allow_cancel_after_send,
                     )
+                    if state.dispatch_token is not None:
+                        state.dispatch_token.cancel()
                     inflight.task.cancel()
                     state.inflight = None
                     state.phase = BatchPhase.TYPING
                     # 新消息追加到现有 items 后面
                     state.items.append(item)
-                elif inflight is None and state.speculative_flush_task is not None:
+                    self._retokenize_locked(state, item.scope, item.sender_id)
+                elif inflight is None:
                     # inflight 尚未注册（coordinator 还没进入 execute_reply）：
-                    # 退而求其次，cancel batcher 自己创建的 flush task。
-                    # 该 task cancel 后 _flush_callback 入队的请求若已发出，
-                    # coordinator 那侧的真正 LLM task 可能已存在但未注册——
-                    # 我们无法精确取消它；但绝大多数情况下 flush_callback 还在
-                    # 走"组装 request + 入队"阶段，cancel 即可阻止入队。
+                    # 1) 若 flush task 仍在跑，先 cancel；
+                    # 2) 若它已经把请求入队，则取消旧 token，execute_reply 入口会跳过旧请求。
                     logger.info(
-                        "[MessageBatcher] inflight 未注册，cancel 投机 flush task: "
+                        "[MessageBatcher] inflight 未注册，取消投机 token/flush task: "
                         "scope=%s sender=%s",
                         item.scope,
                         item.sender_id,
                     )
-                    state.speculative_flush_task.cancel()
-                    state.speculative_flush_task = None
+                    if state.dispatch_token is not None:
+                        state.dispatch_token.cancel()
+                    if state.speculative_flush_task is not None:
+                        state.speculative_flush_task.cancel()
+                        state.speculative_flush_task = None
                     state.phase = BatchPhase.TYPING
                     state.items.append(item)
+                    self._retokenize_locked(state, item.scope, item.sender_id)
                 else:
                     # 已发过消息且不允许取消：丢弃当前桶，新消息开新桶
                     logger.info(
@@ -276,6 +299,7 @@ class MessageBatcher:
                     state = _BatchState(
                         phase=BatchPhase.TYPING,
                         first_arrival_monotonic=now_mono,
+                        dispatch_token=self._new_token(item.scope, item.sender_id),
                     )
                     self._buckets[key] = state
                     state.items.append(item)
@@ -291,11 +315,14 @@ class MessageBatcher:
                 state = _BatchState(
                     phase=BatchPhase.TYPING,
                     first_arrival_monotonic=now_mono,
+                    dispatch_token=self._new_token(item.scope, item.sender_id),
                 )
                 self._buckets[key] = state
                 state.items.append(item)
             else:  # TYPING：直接 append
                 state.items.append(item)
+
+            self._bind_items_to_token_locked(state)
 
             # === 阶段 2: 重置 T1/T2 timer ===
             self._cancel_t1(state)
@@ -345,8 +372,12 @@ class MessageBatcher:
                 )
 
                 # T2 delay（仅当投机启用，且本桶尚未 pre-fire 时设置）
-                if self.speculative_enabled and state.phase is BatchPhase.TYPING:
-                    t2_delay = min(cfg.pre_send_seconds, t1_delay)
+                if (
+                    self.speculative_enabled
+                    and state.phase is BatchPhase.TYPING
+                    and cfg.pre_send_seconds < t1_delay
+                ):
+                    t2_delay = cfg.pre_send_seconds
                     state.t2_handle = loop.call_later(
                         max(0.0, t2_delay), self._on_t2_timer, key
                     )
@@ -375,8 +406,6 @@ class MessageBatcher:
         # 锁外执行 callback
         if immediate_fire_items is not None:
             await self._invoke_callback(immediate_fire_items)
-        elif speculative_fire_items is not None:  # 此分支当前不会触发，预留扩展
-            await self._invoke_callback(speculative_fire_items)
 
     # ----------------------------------------------------------- inflight API
 
@@ -404,11 +433,28 @@ class MessageBatcher:
             sender_id,
         )
 
-    def unregister_inflight(self, scope: str, sender_id: int) -> None:
+    def unregister_inflight(
+        self,
+        scope: str,
+        sender_id: int,
+        task: asyncio.Task[Any] | None = None,
+    ) -> None:
         """coordinator 在 ``execute_reply`` 结束（含异常/取消）时上报。"""
         key = (scope, sender_id)
         state = self._buckets.get(key)
         if state is None:
+            return
+        if (
+            task is not None
+            and state.inflight is not None
+            and state.inflight.task is not task
+        ):
+            logger.debug(
+                "[MessageBatcher] 忽略过期 inflight 注销: scope=%s sender=%s phase=%s",
+                scope,
+                sender_id,
+                state.phase.value,
+            )
             return
         state.inflight = None
         # 若 phase 是 SPECULATING 且 T1 已经 fire 过（FINALIZING 才 unregister），
@@ -434,6 +480,27 @@ class MessageBatcher:
             state.t2_handle.cancel()
             state.t2_handle = None
 
+    def _new_token(self, scope: str, sender_id: int) -> BatchDispatchToken:
+        self._next_batch_id += 1
+        return BatchDispatchToken(
+            scope=scope,
+            sender_id=sender_id,
+            batch_id=self._next_batch_id,
+        )
+
+    def _retokenize_locked(
+        self, state: _BatchState, scope: str, sender_id: int
+    ) -> None:
+        state.dispatch_token = self._new_token(scope, sender_id)
+        self._bind_items_to_token_locked(state)
+
+    @staticmethod
+    def _bind_items_to_token_locked(state: _BatchState) -> None:
+        if state.dispatch_token is None:
+            return
+        for buffered in state.items:
+            buffered.batch_token = state.dispatch_token
+
     def _pop_locked(self, key: tuple[str, int]) -> list[BufferedMessage] | None:
         state = self._buckets.pop(key, None)
         if state is None or not state.items:
@@ -457,37 +524,52 @@ class MessageBatcher:
     async def _handle_t1(self, key: tuple[str, int]) -> None:
         items_to_fire: list[BufferedMessage] | None = None
         wait_inflight: asyncio.Task[Any] | None = None
+        wait_prefire: asyncio.Task[None] | None = None
         finalizing_state: _BatchState | None = None
         async with self._lock:
             state = self._buckets.get(key)
             if state is None:
                 return
             self._cancel_t2(state)
-            if state.phase is BatchPhase.SPECULATING and state.inflight is not None:
-                # T1 到了但投机调用还在跑：等它完成，桶状态切到 FINALIZING
+            if state.phase is BatchPhase.SPECULATING:
+                # T1 到了，投机请求已经发出/入队；这里只结束 batch，不能再次发车。
                 state.phase = BatchPhase.FINALIZING
-                wait_inflight = state.inflight.task
                 finalizing_state = state
-                # 桶将在 inflight 结束后清理
+                if state.inflight is not None:
+                    wait_inflight = state.inflight.task
+                elif (
+                    state.speculative_flush_task is not None
+                    and not state.speculative_flush_task.done()
+                ):
+                    wait_prefire = state.speculative_flush_task
+                else:
+                    self._buckets.pop(key, None)
+                    logger.debug(
+                        "[MessageBatcher] T1 结束已投机 batch，不重复发车: "
+                        "scope=%s sender=%s",
+                        key[0],
+                        key[1],
+                    )
             else:
                 # 普通模式或 SPECULATING 但 inflight 已结束：直接 fire
                 items_to_fire = self._pop_locked(key)
                 if items_to_fire is not None:
                     state.phase = BatchPhase.FINALIZING
 
-        if wait_inflight is not None:
+        wait_task: asyncio.Task[Any] | None = wait_inflight or wait_prefire
+        if wait_task is not None:
             try:
-                await wait_inflight
+                await wait_task
             except asyncio.CancelledError:
-                # inflight 已被 cancel（极少同时发生），让 cancel 路径自然走
+                # inflight/prefire 已被 cancel（极少同时发生），让 cancel 路径自然走
                 logger.info(
-                    "[MessageBatcher] T1 等待 inflight 时被取消: scope=%s sender=%s",
+                    "[MessageBatcher] T1 等待投机任务时被取消: scope=%s sender=%s",
                     key[0],
                     key[1],
                 )
             except Exception:
                 logger.exception(
-                    "[MessageBatcher] T1 等待 inflight 失败: scope=%s sender=%s",
+                    "[MessageBatcher] T1 等待投机任务失败: scope=%s sender=%s",
                     key[0],
                     key[1],
                 )
@@ -517,6 +599,10 @@ class MessageBatcher:
             # 切到 SPECULATING，但**不**清空 items（保留以便后续 T1 也能用 / 抢占回收）
             state.phase = BatchPhase.SPECULATING
             self._cancel_t2(state)
+            if state.dispatch_token is None:
+                state.dispatch_token = self._new_token(key[0], key[1])
+                self._bind_items_to_token_locked(state)
+            state.dispatch_token.speculative = True
             # 记录"承担投机职责"的当前 task，便于 inflight 注册前被新消息抢占取消
             state.speculative_flush_task = asyncio.current_task()
             speculative_items = list(state.items)
@@ -615,6 +701,11 @@ class MessageBatcher:
                     ),
                     "phase": state.phase.value,
                     "has_inflight": state.inflight is not None,
+                    "has_speculative_dispatch": (
+                        state.dispatch_token is not None
+                        and state.dispatch_token.speculative
+                        and not state.dispatch_token.cancelled
+                    ),
                 }
             )
         return {
