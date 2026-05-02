@@ -1,7 +1,19 @@
-## Unreleased
+## v3.4.0 消息合并、当前输入批次与运行态可观测性
 
-- 新增同 sender 短时消息合并：同一发送者在 `[message_batcher].window_seconds`（默认 5s）内连续发送的多条消息会合并到同一轮 AI 调用，AI 一次性处理整批意图，避免"画猫"→"改成狗"等场景出现重复回复或行为打架。配置项见 `[message_batcher]`，支持 `extend`/`fixed` 两种策略与 `max_window_seconds`、`max_messages_per_batch` 硬顶；拍一拍永远旁路立即处理，群聊已有 buffer 时新到的 @bot 也会单独立即处理；启用合并后历史记录写入逻辑保持不变。详见 [docs/message-batching.md](docs/message-batching.md)。
-- 消息合并新增**投机预发送（speculative pre-fire）**：双计时器状态机 `T2 = pre_send_seconds < T1 = window_seconds`，静默到 T2 先把当前 batch 提前发给 LLM 抢时间，T1 才正式结束 batch。新消息在 inflight 尚未发出任何回复时可取消该 LLM 调用并合并入下一轮；通过 `[message_batcher].allow_cancel_after_send` 控制 inflight 已发消息后是否仍允许取消（默认 false 安全）。`pre_send_seconds = 0` 退化为旧行为。
+本版本围绕“用户连续发消息时只形成一个清晰输入批次”重构了主对话入口、提示词边界和记忆写入语义。默认启用同 sender 短时消息合并，AI 会在同一轮里按时间顺序看到整批 `<message>`，自行区分独立请求、补充、修正与打断；配套加入可取消的投机预发送以降低停顿后的首响延迟，并系统性补齐异步竞态、shutdown drain、Runtime 探针和文档测试。提示词、防幽灵任务、认知记忆和 `end` 工具统一改为围绕“当前输入批次”工作，减少连续补充被误判为历史旧任务或只记录最后一条消息的情况。
+
+- 新增同 sender 短时消息合并器：默认开启，可分别控制群聊/私聊合并窗口、最大批次大小与硬上限；同一 sender 的短时间连续消息会合并为一轮 AI 请求，AI 一次理解完整意图，避免“先触发旧请求、再触发修正请求”的重复回复和工具打架。
+- 引入投机预发送：在用户停顿但静默窗口未完全结束时可提前启动 LLM，请求在真正发出回复前仍可被后续新消息取消；`max_window_seconds=0` 现表示不设硬上限，适合只依赖静默窗口收束的配置。
+- 强化批处理异步安全：为 T1/T2 定时任务持有强引用，使用 token 取消尚未登记 in-flight 的投机请求；T2 失败会回滚等待 T1 重试，旧任务完成不会清掉新桶，shutdown 时会先 flush batcher、等待队列 drain 和在途任务收敛，再停止队列与历史落盘。
+- 统一“当前输入批次”提示词语义：主提示词、NagaAgent 提示词与 `each.md` 均明确把【连续消息说明】下的多段 `<message>` 视为同一轮输入；防幽灵任务仍隔离批次之外的历史消息，但不会把同批前几条误判为旧任务。
+- 适配记忆记录链路：`end.memo` / `end.observations` 必须覆盖整个当前输入批次，后台史官收到的 `source_message` 会按时间顺序列出本批全部消息；同时移除 `end` 的旧参数兼容，只保留 `memo`、`observations`、`perspective` 与 `force`。
+- 优化表情包调用策略：提示词要求“文字 + 表情包”场景先发送必要文字，再在后续轮次检索和发送表情包；只有纯表情包/纯反应图回复才允许首轮直接搜索，避免表情包检索拖慢正经文字回复。
+- 加强 AI 工具调用鲁棒性：AI 客户端会拦截空函数名或缺失函数名的 tool call，返回结构化工具错误而不是继续执行空工具，避免日志出现“准备调用: (ID=)”和“未找到项目: ”一类无效调用。
+- 扩展 Runtime 内部探针：新增消息合并器状态快照（配置、pending buckets、phase、in-flight、投机状态），并把技能统计扩展到可调用工具、工具集、Agent、自动处理管线、斜杠命令和 Anthropic Skills，WebUI 探针页同步展示这些运行态指标。
+- 补齐配置、架构与使用文档：新增 [docs/message-batching.md](docs/message-batching.md)，同步更新 README、配置文档、OpenAPI、WebUI 指南与架构图，明确 batcher 默认开启以及关闭后提示词语义可能退回逐条触发的风险。
+- 提升回归覆盖：新增消息合并器状态机、投机取消、shutdown drain、队列收敛、当前输入批次提示词、`end` 记忆记录、空工具调用守卫和 Runtime 探针统计等测试，总测试用例提升至 1620+ 项。
+
+---
 
 ## v3.3.3 命令推断、自动处理管线与统一附件上下文
 
