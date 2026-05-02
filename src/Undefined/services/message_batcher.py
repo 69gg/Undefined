@@ -105,8 +105,10 @@ class _BatchState:
     t1_handle: asyncio.TimerHandle | None = None
     # T2 = pre_send_seconds 静默 timer（决定 pre-fire）；投机关闭时为 None
     t2_handle: asyncio.TimerHandle | None = None
-    # SPECULATING 阶段记录 inflight LLM 任务
+    # SPECULATING 阶段记录 inflight LLM 任务（由 coordinator 通过 register_inflight 注入）
     inflight: _InflightInfo | None = None
+    # T2 fire 时由 batcher 创建的 flush task；inflight 还未上报前用于兜底取消
+    speculative_flush_task: asyncio.Task[None] | None = None
 
 
 def make_scope(*, group_id: int | None = None, user_id: int | None = None) -> str:
@@ -239,6 +241,23 @@ class MessageBatcher:
                     state.inflight = None
                     state.phase = BatchPhase.TYPING
                     # 新消息追加到现有 items 后面
+                    state.items.append(item)
+                elif inflight is None and state.speculative_flush_task is not None:
+                    # inflight 尚未注册（coordinator 还没进入 execute_reply）：
+                    # 退而求其次，cancel batcher 自己创建的 flush task。
+                    # 该 task cancel 后 _flush_callback 入队的请求若已发出，
+                    # coordinator 那侧的真正 LLM task 可能已存在但未注册——
+                    # 我们无法精确取消它；但绝大多数情况下 flush_callback 还在
+                    # 走"组装 request + 入队"阶段，cancel 即可阻止入队。
+                    logger.info(
+                        "[MessageBatcher] inflight 未注册，cancel 投机 flush task: "
+                        "scope=%s sender=%s",
+                        item.scope,
+                        item.sender_id,
+                    )
+                    state.speculative_flush_task.cancel()
+                    state.speculative_flush_task = None
+                    state.phase = BatchPhase.TYPING
                     state.items.append(item)
                 else:
                     # 已发过消息且不允许取消：丢弃当前桶，新消息开新桶
@@ -498,6 +517,8 @@ class MessageBatcher:
             # 切到 SPECULATING，但**不**清空 items（保留以便后续 T1 也能用 / 抢占回收）
             state.phase = BatchPhase.SPECULATING
             self._cancel_t2(state)
+            # 记录"承担投机职责"的当前 task，便于 inflight 注册前被新消息抢占取消
+            state.speculative_flush_task = asyncio.current_task()
             speculative_items = list(state.items)
             logger.info(
                 "[MessageBatcher] 投机预发送: scope=%s sender=%s count=%s",
@@ -507,7 +528,17 @@ class MessageBatcher:
             )
 
         if speculative_items is not None:
-            await self._invoke_callback(speculative_items, speculative=True)
+            try:
+                await self._invoke_callback(speculative_items, speculative=True)
+            finally:
+                # 清掉自身引用，避免 state 残留指向已结束 task
+                async with self._lock:
+                    state2 = self._buckets.get(key)
+                    if (
+                        state2 is not None
+                        and state2.speculative_flush_task is asyncio.current_task()
+                    ):
+                        state2.speculative_flush_task = None
 
     async def _invoke_callback(
         self,

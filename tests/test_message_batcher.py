@@ -480,3 +480,34 @@ async def test_t1_finalizing_does_not_clobber_new_bucket() -> None:
     await asyncio.sleep(0.05)
     # 新桶不该被旧 _handle_t1 finally 清掉
     assert batcher.has_buffer("group:1", 100), "新桶被旧 _handle_t1 finally 误删"
+
+
+@pytest.mark.asyncio
+async def test_speculative_cancelled_before_inflight_registered() -> None:
+    """T2 fire 后 inflight 还没 register 就被新消息抢占：应取消 flush task。"""
+    cfg = MessageBatcherConfig(
+        enabled=True,
+        window_seconds=0.5,
+        pre_send_seconds=0.05,
+        strategy="extend",
+    )
+
+    callback_started = asyncio.Event()
+    callback_cancelled = asyncio.Event()
+
+    async def slow_flush(items: list[BufferedMessage]) -> None:
+        callback_started.set()
+        try:
+            await asyncio.sleep(2.0)
+        except asyncio.CancelledError:
+            callback_cancelled.set()
+            raise
+
+    batcher = MessageBatcher(cfg, slow_flush)
+
+    await batcher.submit(_make_item(text="m1"))
+    # 等 T2 触发并 callback 启动，但**不**调 register_inflight
+    await asyncio.wait_for(callback_started.wait(), timeout=0.5)
+    # 新消息：inflight 是 None，应走"cancel flush task"分支
+    await batcher.submit(_make_item(text="m2"))
+    await asyncio.wait_for(callback_cancelled.wait(), timeout=1.0)
