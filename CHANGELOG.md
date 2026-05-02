@@ -13,9 +13,11 @@
 - 统一多模态附件标签：全系统推行 `<attachment uid="..."/>` 作为标准分发标签（继续兼容旧 `<pic>`），配套统一了表情包提示词，新增 `group.get_avatar` 头像专用工具。
 - 稳定用户识别体系：底层认知逻辑固定以 QQ 号为唯一绑定标识，辅以 `group.get_member_info(brief=true)` 快速拉取当前昵称，有效解决群友频繁更换名片引发的识别错乱。
 - 增强模型连接配置：新增 `stream_enabled` 独立控制推流行为，增加 `request_params` 以支持向不同厂商端点透传特殊参数。
+- 完善流式 usage 统计：Chat Completions 启用上游流式请求时会自动附带 `stream_options.include_usage=true`，避免流式路径丢失 token 用量。
+- 细化子命令限流：声明式子命令按父命令与子命令分别记录冷却时间，避免同一复合命令下不同操作互相挤占。
 - 提升基础工程质量：对命令推断、群分析、附件处理、配置参数等进行了全面的单元与集成测试补强，总测试用例数提升至 1500+ 项。
 - 修复图片渲染超时：重构 `render.py` 为浏览器实例单例复用模式，并引入可配置的并发信号量，防止低资源设备多任务抢占导致截图超时。
-- 改进 LaTeX 渲染稳定性：常见公式优先使用本地 `matplotlib` mathtext 渲染，复杂内容再回退 MathJax + Playwright，避免简单公式依赖外部网络或系统 TeX 环境。
+- 改进 LaTeX 渲染稳定性：常见公式优先使用本地 `matplotlib` mathtext 渲染，复杂内容再回退共享浏览器实例中的 MathJax + Playwright，避免简单公式依赖外部网络或系统 TeX 环境。
 - 修复流式输出一致性：Chat Completions 与 Responses 流式聚合结果不再裁剪模型输出前后空白，与非流式路径保持一致，避免代码块缩进或刻意留白被改写。
 
 ---

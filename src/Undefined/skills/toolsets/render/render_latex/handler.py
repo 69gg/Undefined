@@ -172,67 +172,52 @@ async def _render_latex_to_bytes(
 
     try:
         from playwright.async_api import (
-            async_playwright,
+            Page,
             TimeoutError as PwTimeoutError,
         )
+        from Undefined.render import render_html_with_page
     except ImportError:
         raise ImportError(
             "请运行 `uv run playwright install` 安装浏览器运行时"
         ) from None
 
     html_content = _build_html(content)
-
-    launch_kwargs: dict[str, object] = {"headless": True}
     if proxy:
-        launch_kwargs["proxy"] = {"server": proxy}
         logger.info("LaTeX 渲染使用代理: %s", proxy)
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(**launch_kwargs)  # type: ignore[arg-type]
+    async def _render_page(page: Page) -> tuple[bytes, str]:
+        # 等待 MathJax 完成排版（pageReady 回调设置 window._mjReady）
         try:
-            page = await browser.new_page()
-            await page.set_content(html_content)
+            await page.wait_for_function(
+                "() => window._mjReady === true",
+                timeout=30000,
+            )
+        except PwTimeoutError:
+            logger.warning("MathJax 排版超时，内容可能过于复杂或网络不可达")
+            raise RuntimeError(
+                "LaTeX 内容可能过于复杂或网络不可达（MathJax 加载超时）"
+            ) from None
 
-            # 等待 MathJax 完成排版（pageReady 回调设置 window._mjReady）
-            try:
-                await page.wait_for_function(
-                    "() => window._mjReady === true",
-                    timeout=30000,
-                )
-            except PwTimeoutError:
-                logger.warning("MathJax 排版超时，内容可能过于复杂或网络不可达")
-                raise RuntimeError(
-                    "LaTeX 内容可能过于复杂或网络不可达（MathJax 加载超时）"
-                ) from None
+        container = await page.query_selector("#math-container")
+        if container is None:
+            raise RuntimeError("无法定位数学容器元素")
 
-            if output_format == "pdf":
-                # 获取容器尺寸
-                container = await page.query_selector("#math-container")
-                if container is None:
-                    raise RuntimeError("无法定位数学容器元素")
+        if output_format == "pdf":
+            bbox = await container.bounding_box()
+            if bbox is None:
+                raise RuntimeError("无法获取数学容器的边界框")
 
-                bbox = await container.bounding_box()
-                if bbox is None:
-                    raise RuntimeError("无法获取数学容器的边界框")
+            pdf_bytes = await page.pdf(
+                width=f"{bbox['width'] + 40}px",
+                height=f"{bbox['height'] + 40}px",
+                print_background=True,
+            )
+            return pdf_bytes, "application/pdf"
 
-                # PDF 输出，设置合适的页面尺寸
-                pdf_bytes = await page.pdf(
-                    width=f"{bbox['width'] + 40}px",
-                    height=f"{bbox['height'] + 40}px",
-                    print_background=True,
-                )
-                return pdf_bytes, "application/pdf"
-            else:
-                # PNG 输出
-                container = await page.query_selector("#math-container")
-                if container is None:
-                    raise RuntimeError("无法定位数学容器元素")
+        screenshot_bytes = await container.screenshot(type="png")
+        return screenshot_bytes, "image/png"
 
-                screenshot_bytes = await container.screenshot(type="png")
-                return screenshot_bytes, "image/png"
-
-        finally:
-            await browser.close()
+    return await render_html_with_page(html_content, _render_page, proxy=proxy)
 
 
 async def _resolve_proxy(context: Dict[str, Any]) -> str | None:

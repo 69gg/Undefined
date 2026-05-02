@@ -346,6 +346,7 @@ Prompt caching 补充：
 - 仅用于**请求体**字段，不包含 `api_key`、`base_url`、`timeout`、`extra_headers` 等 client 选项。
 - 聊天类（`chat_completions`）保留字段：`model`、`messages`、`max_tokens`、`tools`、`tool_choice`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`、`output_config`。
 - 聊天类（`responses`）保留字段：`model`、`input`、`instructions`、`max_output_tokens`、`tools`、`tool_choice`、`previous_response_id`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`、`output_config`。启用 `responses_force_stateless_replay` 时会主动跳过 `previous_response_id`。历史 `output` items 由运行时自动维护；不要通过 `request_params` 手工注入或覆盖 `function_call.id` / `call_id`。
+- 启用 `stream_enabled` 且使用 `chat_completions` 时，运行时会自动发送 `stream_options.include_usage=true`，以便 OpenAI 兼容接口在流式尾包返回 usage 并维持 token 统计。
 - embedding 保留字段：`model`、`input`、`dimensions`。
 - rerank 保留字段：`model`、`query`、`documents`、`top_n`、`return_documents`。
 

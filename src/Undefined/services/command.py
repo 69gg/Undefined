@@ -1105,6 +1105,9 @@ class CommandDispatcher:
         effective_rate_limit = (
             subcmd_meta.rate_limit if subcmd_meta else meta.rate_limit
         )
+        rate_limit_key = (
+            meta.name if subcmd_name is None else f"{meta.name}:{subcmd_name}"
+        )
 
         # 作用域检查（子命令可能覆盖 allow_in_private）
         if scope == "private" and not effective_allow_private:
@@ -1143,6 +1146,7 @@ class CommandDispatcher:
         if not await self._check_command_rate_limit(
             rate_limit=effective_rate_limit,
             command_name=meta.name,
+            rate_limit_key=rate_limit_key,
             sender_id=sender_id,
             send_message=_send_target_message,
         ):
@@ -1226,6 +1230,7 @@ class CommandDispatcher:
         self,
         rate_limit: CommandRateLimit,
         command_name: str,
+        rate_limit_key: str,
         sender_id: int,
         send_message: Callable[[str], Awaitable[None]],
     ) -> bool:
@@ -1241,7 +1246,9 @@ class CommandDispatcher:
             )
             return True
 
-        allowed, remaining = limiter.check_command(sender_id, command_name, rate_limit)
+        allowed, remaining = limiter.check_command(
+            sender_id, rate_limit_key, rate_limit
+        )
         if not allowed:
             if remaining >= 60:
                 minutes = remaining // 60
@@ -1253,10 +1260,11 @@ class CommandDispatcher:
             await send_message(f"⏳ /{command_name} 命令太频繁，请 {time_str}后再试")
             return False
 
-        limiter.record_command(sender_id, command_name, rate_limit)
+        limiter.record_command(sender_id, rate_limit_key, rate_limit)
         logger.debug(
-            "[命令] 动态限流记录成功: cmd=/%s sender=%s limits=%s",
+            "[命令] 动态限流记录成功: cmd=/%s key=%s sender=%s limits=%s",
             command_name,
+            rate_limit_key,
             sender_id,
             f"U:{rate_limit.user}/A:{rate_limit.admin}",
         )

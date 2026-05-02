@@ -4,9 +4,10 @@ import asyncio
 import logging
 import markdown
 import sys
-from playwright.async_api import async_playwright, Browser, Playwright
+from collections.abc import Awaitable, Callable
+from playwright.async_api import async_playwright, Browser, Page, Playwright
 
-from typing import Any
+from typing import Any, TypeVar
 
 from Undefined.config import get_config
 
@@ -54,6 +55,7 @@ _render_semaphore_limit: int | None = None
 
 # 默认并发限制：Linux 默认 1，其它平台默认 2
 _DEFAULT_MAX_CONCURRENT = 1 if sys.platform == "linux" else 2
+_RenderResult = TypeVar("_RenderResult")
 
 
 def _resolve_render_browser_max_concurrency() -> int:
@@ -192,38 +194,60 @@ async def render_html_to_image(
         screenshot_selector: 仅截图匹配的元素，默认截整页
         timeout_ms: 截图超时时间（毫秒），默认 60000
     """
+
+    async def _capture(page: Page) -> None:
+        # 等待网络空闲（确保 CDN 上的 MathJax/Mermaid 脚本加载完）
+        await page.wait_for_load_state("networkidle", timeout=timeout_ms)
+
+        # 给 Mermaid 一点时间执行 JS 绘图
+        await asyncio.sleep(1)
+
+        # 截图（带超时保护）
+        if screenshot_selector:
+            await page.locator(screenshot_selector).first.screenshot(
+                path=output_path,
+                timeout=timeout_ms,
+            )
+        else:
+            await page.screenshot(
+                path=output_path,
+                full_page=True,
+                timeout=timeout_ms,
+            )
+
+    await render_html_with_page(
+        html_content,
+        _capture,
+        viewport_width=viewport_width,
+        timeout_ms=timeout_ms,
+    )
+
+
+async def render_html_with_page(
+    html_content: str,
+    callback: Callable[[Page], Awaitable[_RenderResult]],
+    *,
+    viewport_width: int = 1280,
+    timeout_ms: int = 60000,
+    proxy: str | None = None,
+) -> _RenderResult:
+    """在共享浏览器实例中打开 HTML 页面并交给调用方渲染。"""
     browser = await _get_browser()
     semaphore = await _get_semaphore()
 
     async with semaphore:
-        context = await browser.new_context(
-            device_scale_factor=2,
-            viewport={"width": viewport_width, "height": 800},
-        )
+        context_kwargs: dict[str, Any] = {
+            "device_scale_factor": 2,
+            "viewport": {"width": viewport_width, "height": 800},
+        }
+        if proxy:
+            context_kwargs["proxy"] = {"server": proxy}
+        context = await browser.new_context(**context_kwargs)
         page = await context.new_page()
+        page.set_default_timeout(timeout_ms)
 
         try:
-            # 设置页面内容
             await page.set_content(html_content)
-
-            # 等待网络空闲（确保 CDN 上的 MathJax/Mermaid 脚本加载完）
-            await page.wait_for_load_state("networkidle")
-
-            # 给 Mermaid 一点时间执行 JS 绘图
-            await asyncio.sleep(1)
-
-            # 截图（带超时保护）
-            if screenshot_selector:
-                await page.locator(screenshot_selector).first.screenshot(
-                    path=output_path,
-                    timeout=timeout_ms,
-                )
-            else:
-                await page.screenshot(
-                    path=output_path,
-                    full_page=True,
-                    timeout=timeout_ms,
-                )
-
+            return await callback(page)
         finally:
             await context.close()

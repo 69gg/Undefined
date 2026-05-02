@@ -509,6 +509,15 @@ def _without_stream_request_fields(body: dict[str, Any]) -> dict[str, Any]:
     return stripped
 
 
+def _ensure_chat_stream_usage_options(body: dict[str, Any]) -> None:
+    stream_options = body.get("stream_options")
+    if stream_options is None:
+        body["stream_options"] = {"include_usage": True}
+        return
+    if isinstance(stream_options, dict) and "include_usage" not in stream_options:
+        body["stream_options"] = {**stream_options, "include_usage": True}
+
+
 def _should_fallback_from_stream(exc: Exception) -> bool:
     return isinstance(
         exc,
@@ -1537,6 +1546,7 @@ class ModelRequester:
         stream_body["stream"] = True
         if api_mode == API_MODE_RESPONSES:
             return await self._stream_responses_request(client, stream_body)
+        _ensure_chat_stream_usage_options(stream_body)
         return await self._stream_chat_completions_request(client, stream_body)
 
     async def _stream_chat_completions_request(

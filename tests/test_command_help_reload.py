@@ -24,6 +24,21 @@ class _DummySender:
         self.messages.append((group_id, message, mark_sent))
 
 
+class _RecordingCommandRateLimiter:
+    def __init__(self) -> None:
+        self.checks: list[str] = []
+        self.records: list[str] = []
+
+    def check_command(
+        self, _user_id: int, command_name: str, _limits: Any
+    ) -> tuple[bool, int]:
+        self.checks.append(command_name)
+        return True, 0
+
+    def record_command(self, _user_id: int, command_name: str, _limits: Any) -> None:
+        self.records.append(command_name)
+
+
 def _build_context(registry: CommandRegistry, sender: _DummySender) -> CommandContext:
     stub = cast(Any, SimpleNamespace())
     return CommandContext(
@@ -494,3 +509,48 @@ async def test_dispatch_rejects_help_flag_with_new_help_style() -> None:
     assert sender.messages
     assert "参数 --help 已弃用" in sender.messages[-1][1]
     assert "/help stats" in sender.messages[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_rate_limits_subcommands_independently(tmp_path: Path) -> None:
+    commands_dir = tmp_path / "commands"
+    commands_dir.mkdir(parents=True)
+    command_dir = _write_command(
+        commands_dir,
+        "limited",
+        command_name="limited",
+        usage="/limited <sub>",
+        handler_text="ok",
+    )
+    config_path = command_dir / "config.json"
+    config = json.loads(config_path.read_text("utf-8"))
+    config["rate_limit"] = {"user": 60, "admin": 0, "superadmin": 0}
+    config["subcommands"] = {
+        "alpha": {"description": "alpha subcommand"},
+        "beta": {"description": "beta subcommand"},
+    }
+    config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), "utf-8")
+
+    registry = CommandRegistry(commands_dir)
+    registry.load_commands()
+
+    sender = _DummySender()
+    rate_limiter = _RecordingCommandRateLimiter()
+    config_obj = cast(Any, SimpleNamespace())
+    security = cast(Any, SimpleNamespace(rate_limiter=None))
+    dispatcher = CommandDispatcher(
+        config=config_obj,
+        sender=cast(Any, sender),
+        ai=cast(Any, SimpleNamespace()),
+        faq_storage=cast(Any, SimpleNamespace()),
+        onebot=cast(Any, SimpleNamespace()),
+        security=security,
+        rate_limiter=rate_limiter,
+    )
+    dispatcher.command_registry = registry
+
+    await dispatcher.dispatch(12345, 67890, {"name": "limited", "args": ["alpha"]})
+    await dispatcher.dispatch(12345, 67890, {"name": "limited", "args": ["beta"]})
+
+    assert rate_limiter.checks == ["limited:alpha", "limited:beta"]
+    assert rate_limiter.records == ["limited:alpha", "limited:beta"]

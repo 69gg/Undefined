@@ -442,6 +442,8 @@ async def execute(args: list[str], context: CommandContext) -> None:
 - `rate_limit` — 限流配置，默认继承父命令（仅覆盖指定字段）
 - `args` — 参数格式如 `<ID>`，用于 `/help` 详情展示
 
+子命令限流按父命令与解析后的子命令共同计数，例如 `/faq ls` 与 `/faq search` 不会互相占用冷却时间。
+
 #### 自动推断
 
 ```json

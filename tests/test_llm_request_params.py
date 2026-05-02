@@ -1761,6 +1761,9 @@ async def test_chat_request_streaming_aggregates_content_and_tool_calls() -> Non
 
     assert fake_client.chat.completions.last_kwargs is not None
     assert fake_client.chat.completions.last_kwargs["stream"] is True
+    assert fake_client.chat.completions.last_kwargs["stream_options"] == {
+        "include_usage": True
+    }
     assert extract_choices_content(result) == "hello"
     assert result["choices"][0]["finish_reason"] == "tool_calls"
     assert result["choices"][0]["message"]["tool_calls"][0]["id"] == "call_1"
