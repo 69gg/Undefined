@@ -134,7 +134,11 @@ class MessageBatcher:
             self._cancel_timer(state)
 
             elapsed = now_mono - state.first_arrival_monotonic
-            remaining_max = cfg.max_window_seconds - elapsed
+            # max_window_seconds <= 0 表示不限硬顶
+            unlimited_window = cfg.max_window_seconds <= 0
+            remaining_max = (
+                float("inf") if unlimited_window else cfg.max_window_seconds - elapsed
+            )
 
             should_flush = False
             if (
@@ -149,7 +153,7 @@ class MessageBatcher:
                     item.sender_id,
                 )
                 should_flush = True
-            elif remaining_max <= 0:
+            elif not unlimited_window and remaining_max <= 0:
                 logger.info(
                     "[MessageBatcher] 已超 max_window_seconds 硬顶 立即发车: "
                     "scope=%s sender=%s elapsed=%.2fs",
@@ -167,8 +171,9 @@ class MessageBatcher:
                     delay = max(0.0, target - now_mono)
                 else:  # extend
                     delay = cfg.window_seconds
-                # 不超过 max_window 硬顶
-                delay = min(delay, remaining_max)
+                # 不超过 max_window 硬顶（unlimited_window 时跳过该上界）
+                if not unlimited_window:
+                    delay = min(delay, remaining_max)
                 loop = asyncio.get_running_loop()
                 state.timer_handle = loop.call_later(
                     max(0.0, delay), self._on_timer, key

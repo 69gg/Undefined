@@ -190,8 +190,11 @@ def _parse_message_batcher_config(data: dict[str, Any]) -> MessageBatcherConfig:
     window_seconds = _coerce_float(section.get("window_seconds"), 5.0)
     if window_seconds < 0:
         window_seconds = 0.0
+    # max_window_seconds <= 0 视为不限制（仅靠 window_seconds + max_messages_per_batch 触发）
     max_window_seconds = _coerce_float(section.get("max_window_seconds"), 30.0)
-    if max_window_seconds < window_seconds:
+    if max_window_seconds < 0:
+        max_window_seconds = 0.0
+    if 0 < max_window_seconds < window_seconds:
         max_window_seconds = window_seconds
     max_messages = _coerce_int(section.get("max_messages_per_batch"), 0)
     if max_messages < 0:

@@ -274,3 +274,27 @@ async def test_flush_all_awaits_in_flight_tasks() -> None:
     # callback 仍在 sleep 中调 flush_all 应阻塞直到完成
     await batcher.flush_all()
     assert finished == [True]
+
+
+@pytest.mark.asyncio
+async def test_max_window_seconds_zero_means_unlimited() -> None:
+    """max_window_seconds=0 表示不限制硬顶，只要 extend 持续刷新就一直等。"""
+    cfg = MessageBatcherConfig(
+        enabled=True,
+        window_seconds=0.05,
+        strategy="extend",
+        max_window_seconds=0.0,
+    )
+    rec = _Recorder()
+    batcher = MessageBatcher(cfg, rec)
+
+    # 连续 6 次提交，每次间隔 30ms（< window_seconds），如果 max_window 仍生效会被强行 flush
+    for i in range(6):
+        await batcher.submit(_make_item(text=f"m{i}"))
+        await asyncio.sleep(0.03)
+    # 此时距首条已 ~180ms（远超旧 max_window 的虚假"硬顶"，但 0=不限），仍应在 buffer 中
+    assert rec.batches == []
+    # 停止追加，让 timer 自然到期
+    await asyncio.sleep(0.1)
+    assert len(rec.batches) == 1
+    assert len(rec.batches[0]) == 6

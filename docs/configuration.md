@@ -460,7 +460,7 @@ Prompt caching 补充：
 | `enabled` | `true` | 总开关；关闭后行为退化为旧版的逐条独立 AI 调用 |
 | `window_seconds` | `5.0` | 同 sender 合并的等待窗口（秒） |
 | `strategy` | `"extend"` | `extend` = 新消息重置窗口；`fixed` = 从首条算起的固定窗口 |
-| `max_window_seconds` | `30.0` | 从首条算起最长等待，硬顶 `extend` 不被无限延长 |
+| `max_window_seconds` | `30.0` | 从首条算起最长等待，硬顶 `extend` 不被无限延长；`0` 表示不限制（仅靠 `window_seconds` + `max_messages_per_batch` 触发发车） |
 | `max_messages_per_batch` | `0` | 单批最多条数；达到立即发车，`0` = 不限 |
 | `group_enabled` | `true` | 群聊是否启用合并 |
 | `private_enabled` | `true` | 私聊是否启用合并 |

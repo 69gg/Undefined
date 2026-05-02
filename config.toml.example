@@ -765,8 +765,8 @@ window_seconds = 5.0
 # zh: 等待策略：extend（每来一条新消息重置 timer，"打字就继续等"）/ fixed（首条到达起定时，期间到达的消息只合并不重置）。
 # en: Wait strategy: extend (reset timer on each new message; keeps waiting while the user types) / fixed (timer fixed at the first message; new arrivals only merge but do not reset).
 strategy = "extend"
-# zh: extend 模式下的硬顶（秒），防止用户一直打字导致永远不发车。
-# en: Hard cap in seconds for extend mode, prevents the timer from being reset forever.
+# zh: extend 模式下的硬顶（秒），防止用户一直打字导致永远不发车；0 = 不限制（仅靠 window_seconds + max_messages_per_batch 触发发车）。
+# en: Hard cap in seconds for extend mode, prevents the timer from being reset forever; 0 = no limit (rely on window_seconds + max_messages_per_batch).
 max_window_seconds = 30.0
 # zh: 单批最多消息条数，超出立即发车；0 = 不限制。
 # en: Max messages per batch; exceeding triggers immediate dispatch. 0 = no limit.

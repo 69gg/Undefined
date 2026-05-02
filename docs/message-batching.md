@@ -10,7 +10,7 @@
 - **窗口策略**：
   - `extend`（默认）：每条新消息重置定时器，并以 `max_window_seconds` 作为硬顶。
   - `fixed`：定时器从首条算起；窗口期结束统一发车。
-- **硬顶**：`max_window_seconds` 防止极端情况下窗口被无限延长；`max_messages_per_batch` 达到立即发车（`0` = 不限）。
+- **硬顶**：`max_window_seconds` 防止极端情况下窗口被无限延长（`0` = 不限制，仅靠 `window_seconds` + `max_messages_per_batch` 触发发车）；`max_messages_per_batch` 达到立即发车（`0` = 不限）。
 - **历史记录不变**：每条消息照旧由 `handlers.py` 写入 history；batcher 只决定何时调用 AI。
 - **拍一拍永远旁路**：拍一拍触发不进入 batcher，直接立即处理。
 - **群聊 @bot 规则**：
