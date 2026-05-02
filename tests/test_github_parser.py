@@ -49,7 +49,14 @@ def test_numeric_url_repo_is_still_allowed() -> None:
     assert normalize_github_repo_id("https://github.com/1/2") == "1/2"
 
 
-def test_common_path_like_bare_repo_text_is_ignored() -> None:
+def test_path_like_bare_repo_text_is_ignored_without_context() -> None:
     assert extract_github_repo_ids("看 docs/usage、api/v1 和 src/main") == []
-    assert normalize_github_repo_id("docs/usage") is None
-    assert normalize_github_repo_id("src/main") is None
+    assert normalize_github_repo_id("docs/usage") == "docs/usage"
+    assert normalize_github_repo_id("src/main") == "src/main"
+
+
+def test_bare_repo_text_accepts_repo_context_or_strong_shape() -> None:
+    assert extract_github_repo_ids("GitHub 仓库 microsoft/vscode") == [
+        "microsoft/vscode"
+    ]
+    assert extract_github_repo_ids("看 69gg/Undefined") == ["69gg/Undefined"]

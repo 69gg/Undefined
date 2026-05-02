@@ -156,6 +156,7 @@ async def test_private_command_skips_auto_pipeline_and_ai(
         get_msg=AsyncMock(),
         get_forward_msg=AsyncMock(),
     )
+    handler.sender = SimpleNamespace()
     handler.history_manager = SimpleNamespace(add_private_message=AsyncMock())
     handler.ai_coordinator = SimpleNamespace(
         model_pool=SimpleNamespace(
@@ -220,6 +221,7 @@ async def test_private_model_pool_command_runs_before_command_dispatch(
         get_msg=AsyncMock(),
         get_forward_msg=AsyncMock(),
     )
+    handler.sender = SimpleNamespace()
     handler.history_manager = SimpleNamespace(add_private_message=AsyncMock())
     handler.ai_coordinator = SimpleNamespace(
         model_pool=SimpleNamespace(handle_private_message=AsyncMock(return_value=True)),
@@ -233,6 +235,12 @@ async def test_private_model_pool_command_runs_before_command_dispatch(
     handler._background_tasks = set()
     handler._profile_name_refresh_cache = {}
     handler._collect_message_attachments = AsyncMock(return_value=[])
+    handler._extract_bilibili_ids = AsyncMock(return_value=[])
+    handler._extract_arxiv_ids = MagicMock(return_value=[])
+    handler._extract_github_repo_ids = MagicMock(return_value=[])
+    handler._handle_bilibili_extract = AsyncMock()
+    handler._handle_arxiv_extract = AsyncMock()
+    handler._handle_github_extract = AsyncMock()
     handler._schedule_profile_display_name_refresh = MagicMock()
     handler._schedule_meme_ingest = MagicMock()
 
@@ -255,6 +263,69 @@ async def test_private_model_pool_command_runs_before_command_dispatch(
     handler.command_dispatcher.dispatch_private.assert_not_awaited()
     handler.auto_pipeline_registry.run.assert_not_awaited()
     handler.ai_coordinator.handle_private_reply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_private_message_starting_with_select_does_not_touch_model_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        handlers_module,
+        "parse_message_content_for_history",
+        AsyncMock(return_value="选择 69gg/Undefined 看看"),
+    )
+    handler: Any = MessageHandler.__new__(MessageHandler)
+    handler.config = SimpleNamespace(
+        bot_qq=10000,
+        is_private_allowed=lambda _uid: True,
+        access_control_enabled=lambda: False,
+        should_process_private_message=lambda: True,
+    )
+    handler.onebot = SimpleNamespace(
+        get_stranger_info=AsyncMock(return_value={"nickname": "测试用户"}),
+        get_msg=AsyncMock(),
+        get_forward_msg=AsyncMock(),
+    )
+    handler.sender = SimpleNamespace()
+    handler.history_manager = SimpleNamespace(add_private_message=AsyncMock())
+    handler.ai_coordinator = SimpleNamespace(
+        model_pool=SimpleNamespace(
+            handle_private_message=AsyncMock(return_value=False)
+        ),
+        handle_private_reply=AsyncMock(),
+    )
+    handler.command_dispatcher = SimpleNamespace(
+        parse_command=MagicMock(return_value=None),
+        dispatch_private=AsyncMock(),
+    )
+    handler.auto_pipeline_registry = SimpleNamespace(run=AsyncMock(return_value=[]))
+    handler._auto_pipeline_initialized = True
+    handler._background_tasks = set()
+    handler._profile_name_refresh_cache = {}
+    handler._collect_message_attachments = AsyncMock(return_value=[])
+    handler._extract_bilibili_ids = AsyncMock(return_value=[])
+    handler._extract_arxiv_ids = MagicMock(return_value=[])
+    handler._extract_github_repo_ids = MagicMock(return_value=[])
+    handler._handle_bilibili_extract = AsyncMock()
+    handler._handle_arxiv_extract = AsyncMock()
+    handler._handle_github_extract = AsyncMock()
+    handler._schedule_profile_display_name_refresh = MagicMock()
+    handler._schedule_meme_ingest = MagicMock()
+
+    event = {
+        "post_type": "message",
+        "message_type": "private",
+        "user_id": 20001,
+        "message_id": 30001,
+        "message": [{"type": "text", "data": {"text": "选择 69gg/Undefined 看看"}}],
+        "sender": {"user_id": 20001, "nickname": "测试用户"},
+    }
+
+    await handler.handle_message(event)
+
+    handler.ai_coordinator.model_pool.handle_private_message.assert_not_awaited()
+    handler.auto_pipeline_registry.run.assert_awaited_once()
+    handler.ai_coordinator.handle_private_reply.assert_awaited_once()
 
 
 @pytest.mark.asyncio

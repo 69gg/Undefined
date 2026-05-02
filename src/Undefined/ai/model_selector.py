@@ -156,7 +156,7 @@ class ModelSelector:
             self._pending_compares.pop(key, None)
             return None
 
-        match = re.match(r"选\s*(\d+)", text.strip())
+        match = re.fullmatch(r"选\s*(\d+)", text.strip())
         if not match:
             return None
         idx = int(match.group(1))

@@ -154,6 +154,9 @@ class TestModelSelectorCompare:
         result = model_selector.try_resolve_compare(0, user_id, "选择1")
         assert result is None
 
+        result = model_selector.try_resolve_compare(0, user_id, "选1继续")
+        assert result is None
+
         result = model_selector.try_resolve_compare(0, user_id, "1")
         assert result is None
 
@@ -485,6 +488,13 @@ class TestModelPoolServiceHandleMessage:
 
         assert consumed is False
 
+        consumed = await model_pool_service.handle_private_message(
+            user_id,
+            "选择一个 GitHub 仓库看看",
+        )
+
+        assert consumed is False
+
     @pytest.mark.asyncio
     async def test_handle_message_when_pool_disabled(
         self, model_pool_service: ModelPoolService, mock_config: MagicMock
@@ -502,6 +512,17 @@ class TestModelPoolServiceHandleMessage:
 
 class TestModelPoolServiceCompare:
     """测试 ModelPoolService 的 compare 功能"""
+
+    def test_private_control_text_is_strict(self) -> None:
+        """测试只有明确模型池控制消息才会被提前拦截"""
+        assert ModelPoolService.is_private_control_text("/compare") is True
+        assert ModelPoolService.is_private_control_text("/compare 你好") is True
+        assert ModelPoolService.is_private_control_text("/pk\t你好") is True
+        assert ModelPoolService.is_private_control_text("选1") is True
+        assert ModelPoolService.is_private_control_text("选 2") is True
+        assert ModelPoolService.is_private_control_text("选择一个仓库") is False
+        assert ModelPoolService.is_private_control_text("选1继续") is False
+        assert ModelPoolService.is_private_control_text("/comparex 你好") is False
 
     @pytest.mark.asyncio
     async def test_compare_without_space(

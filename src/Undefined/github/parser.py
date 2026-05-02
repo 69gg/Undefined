@@ -26,44 +26,9 @@ _BARE_REPO_REGEX = re.compile(
 )
 _OWNER_REGEX = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 _REPO_REGEX = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
-_COMMON_PATH_LIKE_BARE_OWNERS = {
-    "api",
-    "app",
-    "apps",
-    "asset",
-    "assets",
-    "bin",
-    "build",
-    "cache",
-    "code",
-    "config",
-    "configs",
-    "data",
-    "dist",
-    "doc",
-    "docs",
-    "example",
-    "examples",
-    "img",
-    "image",
-    "images",
-    "lib",
-    "log",
-    "logs",
-    "node_modules",
-    "public",
-    "res",
-    "resource",
-    "resources",
-    "script",
-    "scripts",
-    "src",
-    "static",
-    "test",
-    "tests",
-    "tmp",
-    "vendor",
-}
+_BARE_REPO_CONTEXT_CUE_REGEX = re.compile(
+    r"(?:github|\brepos?\b|\brepository\b|仓库)", re.I
+)
 
 
 def _strip_wrapper_chars(value: str) -> str:
@@ -90,12 +55,37 @@ def _normalize_owner_repo(owner: str, repo: str, *, bare: bool = False) -> str |
         return None
     if not _REPO_REGEX.fullmatch(normalized_repo):
         return None
-    if bare:
-        if normalized_owner.isdigit() and normalized_repo.isdigit():
-            return None
-        if normalized_owner.lower() in _COMMON_PATH_LIKE_BARE_OWNERS:
-            return None
+    if bare and normalized_owner.isdigit() and normalized_repo.isdigit():
+        return None
     return f"{normalized_owner}/{normalized_repo}"
+
+
+def _has_strong_bare_repo_shape(candidate: str) -> bool:
+    owner, repo = candidate.split("/", 1)
+    return (
+        any(char.isupper() for char in candidate)
+        or any(char.isdigit() for char in owner)
+        or any(char in ".-_" for char in owner)
+        or any(char in ".-_" for char in repo)
+    )
+
+
+def _has_bare_repo_context_cue(text: str, start: int, end: int) -> bool:
+    prefix = text[max(0, start - 32) : start]
+    suffix = text[end : end + 32]
+    return bool(
+        _BARE_REPO_CONTEXT_CUE_REGEX.search(prefix)
+        or _BARE_REPO_CONTEXT_CUE_REGEX.search(suffix)
+    )
+
+
+def _should_accept_bare_repo_match(text: str, match: re.Match[str]) -> bool:
+    candidate = match.group(1)
+    return _has_strong_bare_repo_shape(candidate) or _has_bare_repo_context_cue(
+        text,
+        match.start(),
+        match.end(),
+    )
 
 
 def normalize_github_repo_id(identifier: str) -> str | None:
@@ -155,7 +145,8 @@ def extract_github_repo_ids(text: str) -> list[str]:
         _append_candidate(match.group(0), results=results, seen=seen)
 
     for match in _BARE_REPO_REGEX.finditer(text):
-        _append_candidate(match.group(1), results=results, seen=seen)
+        if _should_accept_bare_repo_match(text, match):
+            _append_candidate(match.group(1), results=results, seen=seen)
 
     return results
 

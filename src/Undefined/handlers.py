@@ -38,6 +38,7 @@ from Undefined.utils.sender import MessageSender
 from Undefined.services.security import SecurityService
 from Undefined.services.command import CommandDispatcher
 from Undefined.services.ai_coordinator import AICoordinator
+from Undefined.services.model_pool import ModelPoolService
 from Undefined.skills.auto_pipeline import AutoPipelineRegistry
 from Undefined.utils.resources import resolve_resource_path
 from Undefined.utils.queue_intervals import build_model_queue_intervals
@@ -53,10 +54,7 @@ REPEAT_REPLY_HISTORY_PREFIX = "[系统复读] "
 
 
 def _is_private_model_pool_control_text(text: str) -> bool:
-    stripped = text.strip()
-    return stripped in {"/compare", "/pk"} or stripped.startswith(
-        ("/compare ", "/pk ", "选")
-    )
+    return ModelPoolService.is_private_control_text(text)
 
 
 def _format_poke_history_text(display_name: str, user_id: int) -> str:

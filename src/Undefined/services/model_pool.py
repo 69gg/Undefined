@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import TYPE_CHECKING, Any
 
 from Undefined.config.models import ChatModelConfig
@@ -13,6 +14,9 @@ if TYPE_CHECKING:
     from Undefined.config import Config
 
 logger = logging.getLogger(__name__)
+
+_COMPARE_COMMAND_RE = re.compile(r"^/(?:compare|pk)(?:\s+(?P<prompt>.*))?$")
+_SELECT_COMMAND_RE = re.compile(r"^选\s*\d+\s*$")
 
 
 class ModelPoolService:
@@ -26,8 +30,9 @@ class ModelPoolService:
     @staticmethod
     def is_private_control_text(text: str) -> bool:
         stripped = text.strip()
-        return stripped in {"/compare", "/pk"} or stripped.startswith(
-            ("/compare ", "/pk ", "选")
+        return bool(
+            _COMPARE_COMMAND_RE.fullmatch(stripped)
+            or _SELECT_COMMAND_RE.fullmatch(stripped)
         )
 
     async def handle_private_message(self, user_id: int, text: str) -> bool:
@@ -35,25 +40,23 @@ class ModelPoolService:
         if not self._config.model_pool_enabled:
             return False
 
-        selector = self._ai.model_selector
-
-        selected = selector.try_resolve_compare(0, user_id, text)
-        if selected:
-            selector.set_preference(0, user_id, "chat", selected)
-            await selector.save_preferences()
-            await self._sender.send_private_message(
-                user_id, f"已切换到模型: {selected}"
+        stripped = text.strip()
+        compare_match = _COMPARE_COMMAND_RE.fullmatch(stripped)
+        if compare_match:
+            await self._run_compare(
+                user_id, (compare_match.group("prompt") or "").strip()
             )
             return True
 
-        stripped = text.strip()
-        if stripped in {"/compare", "/pk"}:
-            await self._run_compare(user_id, "")
-            return True
-
-        for prefix in ("/compare ", "/pk "):
-            if stripped.startswith(prefix):
-                await self._run_compare(user_id, stripped[len(prefix) :].strip())
+        if _SELECT_COMMAND_RE.fullmatch(stripped):
+            selector = self._ai.model_selector
+            selected = selector.try_resolve_compare(0, user_id, stripped)
+            if selected:
+                selector.set_preference(0, user_id, "chat", selected)
+                await selector.save_preferences()
+                await self._sender.send_private_message(
+                    user_id, f"已切换到模型: {selected}"
+                )
                 return True
 
         return False
