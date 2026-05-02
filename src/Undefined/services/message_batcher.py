@@ -434,21 +434,14 @@ class MessageBatcher:
         )
 
     def unregister_inflight(
-        self,
-        scope: str,
-        sender_id: int,
-        task: asyncio.Task[Any] | None = None,
+        self, scope: str, sender_id: int, task: asyncio.Task[Any]
     ) -> None:
         """coordinator 在 ``execute_reply`` 结束（含异常/取消）时上报。"""
         key = (scope, sender_id)
         state = self._buckets.get(key)
         if state is None:
             return
-        if (
-            task is not None
-            and state.inflight is not None
-            and state.inflight.task is not task
-        ):
+        if state.inflight is not None and state.inflight.task is not task:
             logger.debug(
                 "[MessageBatcher] 忽略过期 inflight 注销: scope=%s sender=%s phase=%s",
                 scope,
@@ -614,10 +607,14 @@ class MessageBatcher:
             )
 
         if speculative_items is not None:
+            success = False
             try:
-                await self._invoke_callback(speculative_items, speculative=True)
+                success = await self._invoke_callback(
+                    speculative_items, speculative=True
+                )
             finally:
-                # 清掉自身引用，避免 state 残留指向已结束 task
+                # 清掉自身引用，避免 state 残留指向已结束 task；若投机 callback
+                # 异常/取消且桶仍是本次 SPECULATING，则回滚为 TYPING，等待 T1 正常重试。
                 async with self._lock:
                     state2 = self._buckets.get(key)
                     if (
@@ -625,15 +622,26 @@ class MessageBatcher:
                         and state2.speculative_flush_task is asyncio.current_task()
                     ):
                         state2.speculative_flush_task = None
+                        if state2.phase is BatchPhase.SPECULATING and not success:
+                            if state2.dispatch_token is not None:
+                                state2.dispatch_token.cancel()
+                            state2.phase = BatchPhase.TYPING
+                            self._retokenize_locked(state2, key[0], key[1])
+                            logger.warning(
+                                "[MessageBatcher] 投机预发送失败，回滚等待 T1 重试: "
+                                "scope=%s sender=%s",
+                                key[0],
+                                key[1],
+                            )
 
     async def _invoke_callback(
         self,
         items: list[BufferedMessage],
         *,
         speculative: bool = False,
-    ) -> None:
+    ) -> bool:
         if not items:
-            return
+            return True
         first = items[0]
         logger.info(
             "[MessageBatcher] 发车: scope=%s sender=%s count=%s speculative=%s",
@@ -644,6 +652,7 @@ class MessageBatcher:
         )
         try:
             await self._flush_callback(items)
+            return True
         except asyncio.CancelledError:
             # 投机被新消息取消是预期行为
             logger.info(
@@ -653,6 +662,7 @@ class MessageBatcher:
                 first.sender_id,
                 speculative,
             )
+            return False
         except Exception:
             logger.exception(
                 "[MessageBatcher] flush_callback 异常: scope=%s sender=%s count=%s",
@@ -660,6 +670,7 @@ class MessageBatcher:
                 first.sender_id,
                 len(items),
             )
+            return False
 
     # ------------------------------------------------------------ shutdown
 
@@ -668,9 +679,11 @@ class MessageBatcher:
 
         关停时直接对所有桶执行 T1 等价路径并等 inflight 收尾。
         """
-        async with self._lock:
-            keys = list(self._buckets.keys())
-        if keys:
+        while True:
+            async with self._lock:
+                keys = list(self._buckets.keys())
+            if not keys:
+                break
             logger.info("[MessageBatcher] flush_all: pending_buckets=%s", len(keys))
             for key in keys:
                 await self._handle_t1(key)

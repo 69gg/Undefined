@@ -382,6 +382,7 @@ class AICoordinator:
                 # 把当前 task 注册到 batcher，使其有能力在新消息到达时取消本次 LLM 调用
                 batcher = getattr(self, "_batcher", None)
                 current_task = asyncio.current_task()
+                registered_task: asyncio.Task[Any] | None = None
                 if (
                     batcher is not None
                     and batcher_scope is not None
@@ -390,6 +391,7 @@ class AICoordinator:
                     batcher.register_inflight(
                         batcher_scope, sender_id, current_task, ctx
                     )
+                    registered_task = current_task
                 try:
                     await self.ai.ask(
                         full_question,
@@ -413,9 +415,13 @@ class AICoordinator:
                         },
                     )
                 finally:
-                    if batcher is not None and batcher_scope is not None:
+                    if (
+                        batcher is not None
+                        and batcher_scope is not None
+                        and registered_task is not None
+                    ):
                         batcher.unregister_inflight(
-                            batcher_scope, sender_id, current_task
+                            batcher_scope, sender_id, registered_task
                         )
             except asyncio.CancelledError:
                 # 投机预发送被新消息抢占取消：不写错误日志、不重试
@@ -507,12 +513,14 @@ class AICoordinator:
             try:
                 batcher = getattr(self, "_batcher", None)
                 current_task = asyncio.current_task()
+                registered_task: asyncio.Task[Any] | None = None
                 if (
                     batcher is not None
                     and batcher_scope is not None
                     and current_task is not None
                 ):
                     batcher.register_inflight(batcher_scope, user_id, current_task, ctx)
+                    registered_task = current_task
                 try:
                     result = await self.ai.ask(
                         full_question,
@@ -535,9 +543,13 @@ class AICoordinator:
                         },
                     )
                 finally:
-                    if batcher is not None and batcher_scope is not None:
+                    if (
+                        batcher is not None
+                        and batcher_scope is not None
+                        and registered_task is not None
+                    ):
                         batcher.unregister_inflight(
-                            batcher_scope, user_id, current_task
+                            batcher_scope, user_id, registered_task
                         )
                 if result:
                     scope_key = build_attachment_scope(

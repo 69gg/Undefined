@@ -115,16 +115,18 @@ allow_cancel_after_send = false
   - inflight **尚未发消息** → 调 `inflight_task.cancel()`，桶回到 `TYPING`，新消息追加进去，重置 T1/T2；inflight 协程在 `RequestContext` 里清理后退出，**不写入回复历史**。
   - T2 已经把请求入队但 coordinator 还没注册 inflight → 取消旧 `BatchDispatchToken`；旧请求即使稍后被队列取出，也会在 `execute_reply` 入口跳过，新消息继续合并进重新计时的 batch。
   - inflight **已经发过消息** 且 `allow_cancel_after_send=False`（默认安全） → 不取消 inflight，**新消息开新 batch**（旧桶在 inflight 自然结束后清理）。
-  - inflight **已经发过消息** 且 `allow_cancel_after_send=True` → 仍取消，可能造成重复发送，仅极端场景启用。
+- **FINALIZING**：旧 batch 已到 T1，若此时又来新消息，直接开新桶，不阻塞旧 inflight 收尾。
+- `allow_cancel_after_send=True` 会在 inflight 已发过消息后仍取消，可能造成半截回复、重复回复或上下文撕裂，仅极端场景启用。
 
 ### 防竞态设计
 
 - 所有桶状态变更在 `MessageBatcher._lock` 内完成；LLM/队列等待不会发生在锁内。
 - timer 触发后由 `asyncio.create_task` 创建 flush 协程，强引用挂到 `_pending_tasks: set[Task]`，`task.add_done_callback(self._pending_tasks.discard)` 清理（asyncio 文档要求避免被 GC）。
 - T2 预发送会给队列请求附带 `BatchDispatchToken`。新消息抢占时先取消旧 token；若旧请求已入队但尚未执行，`AICoordinator.execute_reply()` 会直接跳过，避免队列拥堵窗口里的陈旧回复。
+- T2 的 `flush_callback` 若异常或被取消，桶会从 `SPECULATING` 回滚到 `TYPING` 并换新 token，保留原 items 等 T1 正常重试，避免静默丢消息。
 - T1 到期时如果 batch 已经被 T2 投机发出，只负责结束 bucket/等待已知 inflight，不会再次调用 `flush_callback`，避免同一批消息重复入队。
-- `unregister_inflight(scope, sender_id, task)` 会校验 task 身份；旧任务的 `finally` 不会误清理新一轮已注册的 inflight。
-- `flush_all()` 在关停时遍历所有桶执行等价 T1 路径，并 `await` 所有未完成的 flush task。
+- `unregister_inflight(scope, sender_id, task)` 必须携带 task 身份并校验；旧任务的 `finally` 不会误清理新一轮已注册的 inflight。
+- `flush_all()` 在关停时循环遍历所有桶执行等价 T1 路径，并 `await` 所有未完成的 flush task；若收尾过程中又出现新桶，会继续清空直到没有 pending bucket。
 - coordinator 在 `execute_reply` 入口调用 `register_inflight(scope, sender_id, task, ctx)`，在 `finally` 调 `unregister_inflight(...)`；`asyncio.CancelledError` 被识别为 "投机抢占"，仅记录信息日志且不重试。
 
 ### 兼容回退

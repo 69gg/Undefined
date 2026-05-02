@@ -535,6 +535,35 @@ async def test_speculative_cancelled_before_inflight_registered() -> None:
 
 
 @pytest.mark.asyncio
+async def test_speculative_callback_failure_rolls_back_for_t1_retry() -> None:
+    """T2 callback 失败不能丢消息；应回到 TYPING，等 T1 再发一次。"""
+    cfg = MessageBatcherConfig(
+        enabled=True,
+        window_seconds=0.12,
+        pre_send_seconds=0.03,
+        strategy="extend",
+    )
+
+    calls = 0
+    recovered = asyncio.Event()
+
+    async def flaky_flush(items: list[BufferedMessage]) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("temporary enqueue failure")
+        recovered.set()
+
+    batcher = MessageBatcher(cfg, flaky_flush)
+
+    await batcher.submit(_make_item(text="m1"))
+    await asyncio.wait_for(recovered.wait(), timeout=0.5)
+
+    assert calls == 2
+    assert not batcher.has_buffer("group:1", 100)
+
+
+@pytest.mark.asyncio
 async def test_speculative_queued_token_cancelled_before_inflight_registered() -> None:
     """T2 callback 已完成入队但 inflight 未注册时，新消息应取消旧 token。"""
     cfg = MessageBatcherConfig(
@@ -611,3 +640,27 @@ async def test_stale_unregister_does_not_clear_new_inflight() -> None:
         old_task.cancel()
         new_task.cancel()
         await asyncio.gather(old_task, new_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_flush_all_loops_until_concurrent_bucket_is_flushed() -> None:
+    """flush_all 快照后若 callback 又创建新桶，也应继续清空。"""
+    cfg = MessageBatcherConfig(enabled=True, window_seconds=10.0)
+    batches: list[list[str]] = []
+    injected = False
+    batcher: MessageBatcher
+
+    async def callback(items: list[BufferedMessage]) -> None:
+        nonlocal injected
+        batches.append([item.text for item in items])
+        if not injected:
+            injected = True
+            await batcher.submit(_make_item(sender_id=101, text="late"))
+
+    batcher = MessageBatcher(cfg, callback)
+
+    await batcher.submit(_make_item(sender_id=100, text="first"))
+    await batcher.flush_all()
+
+    assert batches == [["first"], ["late"]]
+    assert batcher.snapshot()["pending_buckets"] == 0
