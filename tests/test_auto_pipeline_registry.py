@@ -58,6 +58,27 @@ async def test_auto_pipeline_registry_loads_and_runs_configured_pipeline(
 
 
 @pytest.mark.asyncio
+async def test_auto_pipeline_registry_initial_async_load_uses_thread(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = AutoPipelineRegistry(tmp_path)
+    calls: list[Any] = []
+
+    async def _fake_to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:
+        calls.append(func)
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", _fake_to_thread)
+    monkeypatch.setattr(registry, "_load_items_sync", lambda: {})
+
+    await registry.load_items_async()
+
+    assert calls == [registry._load_items_sync]
+    assert registry._items == {}
+
+
+@pytest.mark.asyncio
 async def test_auto_pipeline_reload_loads_items_in_thread(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -56,6 +56,11 @@ class AutoPipelineRegistry:
         """从磁盘加载所有自动处理管线。"""
         self._items = self._load_items_sync()
 
+    async def load_items_async(self) -> None:
+        """在线程中加载所有自动处理管线，避免阻塞事件循环。"""
+        async with self._reload_lock:
+            await self._reload_items()
+
     def _load_items_sync(self) -> dict[str, AutoPipelineItem]:
         """同步加载管线定义；热重载路径会在线程中调用。"""
         items: dict[str, AutoPipelineItem] = {}

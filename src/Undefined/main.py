@@ -382,6 +382,7 @@ async def main() -> None:
             )
 
         handler = MessageHandler(config, onebot, ai, faq_storage, task_storage)
+        await handler.initialize()
         onebot.set_message_handler(handler.handle_message)
         elapsed = time.perf_counter() - init_start
         logger.info("[初始化] 核心组件加载完成: elapsed=%.3fs", elapsed)

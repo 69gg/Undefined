@@ -2,6 +2,8 @@
 
 自动处理管线位于 `src/Undefined/skills/auto_pipeline/`，用于在普通消息进入 AI 自动回复前执行自动提取，例如 Bilibili 视频、arXiv 论文和 GitHub 仓库卡片。斜杠命令优先级高于自动处理管线，命中命令后不会继续触发自动提取或 AI 回复。
 
+`MessageHandler` 启动时会通过异步初始化在线程中加载管线配置和 handler 模块，避免目录扫描、`config.json` 读取和模块导入阻塞事件循环；注册 OneBot 消息回调前会等待首次加载完成，后续热重载也在线程中执行。
+
 ## 运行顺序
 
 1. `MessageHandler` 先并行执行消息预处理：附件收集、历史文本解析、昵称或群信息读取等。

@@ -136,12 +136,8 @@ class MessageHandler:
         self._profile_name_refresh_cache: dict[tuple[str, int], str] = {}
         self._bot_nickname_cache = BotNicknameCache(onebot, config.bot_qq)
         self.auto_pipeline_registry = AutoPipelineRegistry()
-        self.auto_pipeline_registry.load_items()
-        if config.skills_hot_reload:
-            self.auto_pipeline_registry.start_hot_reload(
-                interval=config.skills_hot_reload_interval,
-                debounce=config.skills_hot_reload_debounce,
-            )
+        self._auto_pipeline_initialized = False
+        self._auto_pipeline_init_lock = asyncio.Lock()
 
         # 复读功能状态（按群跟踪最近消息文本与发送者）
         self._repeat_counter: dict[int, list[tuple[str, int]]] = {}
@@ -151,6 +147,29 @@ class MessageHandler:
 
         # 启动队列
         self.ai_coordinator.queue_manager.start(self.ai_coordinator.execute_reply)
+
+    async def initialize(self) -> None:
+        """完成需要事件循环承载的异步初始化。"""
+        await self.initialize_auto_pipeline()
+
+    async def initialize_auto_pipeline(self) -> None:
+        """异步加载自动处理管线并按配置启动热重载。"""
+        if self._auto_pipeline_initialized:
+            return
+        init_lock = getattr(self, "_auto_pipeline_init_lock", None)
+        if init_lock is None:
+            init_lock = asyncio.Lock()
+            self._auto_pipeline_init_lock = init_lock
+        async with init_lock:
+            if self._auto_pipeline_initialized:
+                return
+            await self.auto_pipeline_registry.load_items_async()
+            self._auto_pipeline_initialized = True
+            if self.config.skills_hot_reload:
+                self.auto_pipeline_registry.start_hot_reload(
+                    interval=self.config.skills_hot_reload_interval,
+                    debounce=self.config.skills_hot_reload_debounce,
+                )
 
     def _get_repeat_lock(self, group_id: int) -> asyncio.Lock:
         """获取或创建指定群的复读竞态保护锁。"""
@@ -1085,6 +1104,8 @@ class MessageHandler:
         message_content: list[dict[str, Any]],
     ) -> bool:
         """并行检测并处理所有命中的自动处理管线。"""
+        if not getattr(self, "_auto_pipeline_initialized", True):
+            await self.initialize_auto_pipeline()
         detections = await self.auto_pipeline_registry.run(
             {
                 "config": self.config,

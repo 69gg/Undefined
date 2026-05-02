@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -9,6 +10,41 @@ import pytest
 import Undefined.handlers as handlers_module
 from Undefined.handlers import MessageHandler
 from Undefined.skills.auto_pipeline import AutoPipelineRegistry
+
+
+@pytest.mark.asyncio
+async def test_message_handler_initializes_auto_pipeline_async() -> None:
+    class _FakeAutoPipelineRegistry:
+        def __init__(self) -> None:
+            self.load_count = 0
+            self.started: list[tuple[float, float]] = []
+
+        async def load_items_async(self) -> None:
+            await asyncio.sleep(0)
+            self.load_count += 1
+
+        def start_hot_reload(self, *, interval: float, debounce: float) -> None:
+            self.started.append((interval, debounce))
+
+    registry = _FakeAutoPipelineRegistry()
+    handler: Any = MessageHandler.__new__(MessageHandler)
+    handler.config = SimpleNamespace(
+        skills_hot_reload=True,
+        skills_hot_reload_interval=3.0,
+        skills_hot_reload_debounce=0.75,
+    )
+    handler.auto_pipeline_registry = registry
+    handler._auto_pipeline_initialized = False
+
+    await asyncio.gather(
+        handler.initialize_auto_pipeline(),
+        handler.initialize_auto_pipeline(),
+    )
+    await handler.initialize_auto_pipeline()
+
+    assert registry.load_count == 1
+    assert registry.started == [(3.0, 0.75)]
+    assert handler._auto_pipeline_initialized is True
 
 
 @pytest.mark.asyncio
