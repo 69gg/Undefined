@@ -102,6 +102,7 @@ curl http://127.0.0.1:8788/openapi.json
 | `uptime_seconds` | `float` | 进程运行时长（秒） |
 | `onebot` | `object` | OneBot 连接状态（`connected`、`running`、`ws_url` 等） |
 | `queues` | `object` | 请求队列快照（`processor_count`、`inflight_count`、`totals` 按优先级分布；lane 包含 `superadmin`、`group_superadmin`、`private`、`group_mention`、`group_normal`、`background`，`retry` 表示各 lane 中待执行的 LLM 重试请求数） |
+| `message_batcher` | `object` | 消息合并器快照（`config` 含 `enabled`/`window_seconds`/`pre_send_seconds`/`speculative_enabled`/`strategy`/`max_window_seconds`/`max_messages_per_batch`/`group_enabled`/`private_enabled`/`allow_cancel_after_send`；`pending_buckets` 当前缓冲桶数；`buckets[]` 列出每个桶的 `scope`/`sender_id`/`count`/`elapsed_seconds`/`phase`（`typing`/`speculating`/`finalizing`）/`has_inflight`） |
 | `memory` | `object` | 长期记忆（`count`：条数） |
 | `cognitive` | `object` | 认知服务（`enabled`、`queue`） |
 | `api` | `object` | Runtime API 配置（`enabled`、`host`、`port`、`openapi_enabled`） |

@@ -186,13 +186,27 @@
                 t("probes.batcher_private"),
                 cfg.private_enabled ? "✓" : "✗",
             );
+            html += probeItem(
+                t("probes.batcher_speculative"),
+                probeStatusBadge(cfg.speculative_enabled ? "ok" : "skipped"),
+            );
+            if (cfg.speculative_enabled) {
+                html += probeItem(
+                    t("probes.batcher_pre_send"),
+                    `<code>${escapeHtml(String(cfg.pre_send_seconds))}s</code>`,
+                );
+            }
             html += `</div>`;
             const buckets = Array.isArray(mb.buckets) ? mb.buckets : [];
             if (buckets.length > 0) {
                 html += `<div class="probe-queue-row" style="margin-top:8px">`;
                 for (const b of buckets.slice(0, 10)) {
                     const label = `${escapeHtml(String(b.scope || ""))}/${escapeHtml(String(b.sender_id || ""))}`;
-                    html += `<span class="probe-queue-tag"><span class="probe-queue-label">${label}</span> ${b.count}×@${b.elapsed_seconds}s</span>`;
+                    const phase = b.phase
+                        ? ` ${escapeHtml(String(b.phase))}`
+                        : "";
+                    const inflight = b.has_inflight ? " ⚡" : "";
+                    html += `<span class="probe-queue-tag"><span class="probe-queue-label">${label}</span> ${b.count}×@${b.elapsed_seconds}s${phase}${inflight}</span>`;
                 }
                 html += `</div>`;
             }
