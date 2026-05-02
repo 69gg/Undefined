@@ -48,6 +48,46 @@ async def test_message_handler_initializes_auto_pipeline_async() -> None:
 
 
 @pytest.mark.asyncio
+async def test_auto_extract_pipeline_initializes_when_flag_missing() -> None:
+    class _FakeAutoPipelineRegistry:
+        def __init__(self) -> None:
+            self.loaded = False
+            self.run_context: dict[str, Any] | None = None
+
+        async def load_items_async(self) -> None:
+            self.loaded = True
+
+        async def run(self, context: dict[str, Any]) -> list[object]:
+            self.run_context = context
+            return [object()] if self.loaded else []
+
+    registry = _FakeAutoPipelineRegistry()
+    handler: Any = MessageHandler.__new__(MessageHandler)
+    handler.config = SimpleNamespace(skills_hot_reload=False)
+    handler.sender = SimpleNamespace()
+    handler.onebot = SimpleNamespace()
+    handler.auto_pipeline_registry = registry
+    handler._extract_bilibili_ids = AsyncMock(return_value=[])
+    handler._extract_arxiv_ids = MagicMock(return_value=[])
+    handler._extract_github_repo_ids = MagicMock(return_value=[])
+    handler._handle_bilibili_extract = AsyncMock()
+    handler._handle_arxiv_extract = AsyncMock()
+    handler._handle_github_extract = AsyncMock()
+
+    handled = await handler._run_auto_extract_pipeline(
+        target_id=20001,
+        target_type="private",
+        text="hello",
+        message_content=[],
+    )
+
+    assert handled is True
+    assert registry.loaded is True
+    assert registry.run_context is not None
+    assert handler._auto_pipeline_initialized is True
+
+
+@pytest.mark.asyncio
 async def test_auto_extract_pipeline_processes_all_matches() -> None:
     handler: Any = MessageHandler.__new__(MessageHandler)
     handler.sender = SimpleNamespace()

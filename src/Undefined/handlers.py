@@ -161,18 +161,18 @@ class MessageHandler:
 
     async def initialize_auto_pipeline(self) -> None:
         """异步加载自动处理管线并按配置启动热重载。"""
-        if self._auto_pipeline_initialized:
+        if getattr(self, "_auto_pipeline_initialized", False):
             return
         init_lock = getattr(self, "_auto_pipeline_init_lock", None)
         if init_lock is None:
             init_lock = asyncio.Lock()
             self._auto_pipeline_init_lock = init_lock
         async with init_lock:
-            if self._auto_pipeline_initialized:
+            if getattr(self, "_auto_pipeline_initialized", False):
                 return
             await self.auto_pipeline_registry.load_items_async()
             self._auto_pipeline_initialized = True
-            if self.config.skills_hot_reload:
+            if getattr(self.config, "skills_hot_reload", False):
                 self.auto_pipeline_registry.start_hot_reload(
                     interval=self.config.skills_hot_reload_interval,
                     debounce=self.config.skills_hot_reload_debounce,
@@ -1111,7 +1111,7 @@ class MessageHandler:
         message_content: list[dict[str, Any]],
     ) -> bool:
         """并行检测并处理所有命中的自动处理管线。"""
-        if not getattr(self, "_auto_pipeline_initialized", True):
+        if not getattr(self, "_auto_pipeline_initialized", False):
             await self.initialize_auto_pipeline()
         detections = await self.auto_pipeline_registry.run(
             {

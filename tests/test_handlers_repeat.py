@@ -50,6 +50,7 @@ def _build_handler(
     handler.auto_pipeline_registry = SimpleNamespace(
         run=AsyncMock(return_value=[]),
     )
+    handler._auto_pipeline_initialized = True
     handler.ai_coordinator = SimpleNamespace(
         handle_auto_reply=AsyncMock(),
         handle_private_reply=AsyncMock(),
