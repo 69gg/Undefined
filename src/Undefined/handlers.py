@@ -1373,7 +1373,9 @@ class MessageHandler:
                 *list(self._background_tasks),
                 return_exceptions=True,
             )
-        await self.history_manager.flush_pending_saves()
         await self.auto_pipeline_registry.stop_hot_reload()
+        await self.message_batcher.flush_all()
+        await self.ai_coordinator.queue_manager.drain()
         await self.ai_coordinator.queue_manager.stop()
+        await self.history_manager.flush_pending_saves()
         logger.info("消息处理器已关闭")

@@ -511,9 +511,9 @@ async def main() -> None:
     finally:
         logger.info("[清理] 正在关闭机器人并释放资源...")
         try:
-            await handler.message_batcher.flush_all()
+            await handler.close()
         except Exception:
-            logger.exception("[清理] MessageBatcher flush_all 失败")
+            logger.exception("[清理] MessageHandler close 失败")
         if runtime_api_server is not None:
             await runtime_api_server.stop()
         if meme_worker is not None:

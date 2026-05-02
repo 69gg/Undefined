@@ -664,3 +664,23 @@ async def test_flush_all_loops_until_concurrent_bucket_is_flushed() -> None:
 
     assert batches == [["first"], ["late"]]
     assert batcher.snapshot()["pending_buckets"] == 0
+
+
+@pytest.mark.asyncio
+async def test_submit_after_flush_all_dispatches_immediately() -> None:
+    """进入关停模式后新消息不再建桶，避免 flush_all 与 submit 互相追逐。"""
+    cfg = MessageBatcherConfig(enabled=True, window_seconds=10.0)
+    rec = _Recorder()
+    batcher = MessageBatcher(cfg, rec)
+
+    await batcher.submit(_make_item(text="before-shutdown"))
+    await batcher.flush_all()
+    await batcher.submit(_make_item(text="after-shutdown"))
+
+    assert [[item.text for item in batch] for batch in rec.batches] == [
+        ["before-shutdown"],
+        ["after-shutdown"],
+    ]
+    snap = batcher.snapshot()
+    assert snap["pending_buckets"] == 0
+    assert snap["config"]["shutdown"] is True

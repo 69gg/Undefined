@@ -147,6 +147,46 @@ async def test_enqueue_receipt_counts_remaining_current_dispatch_interval() -> N
 
 
 @pytest.mark.asyncio
+async def test_drain_waits_for_pending_and_inflight_requests() -> None:
+    queue_manager = QueueManager(ai_request_interval=0.0)
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    handled: list[str] = []
+
+    async def _handler(request: dict[str, Any]) -> None:
+        request_id = str(request["request_id"])
+        handled.append(request_id)
+        if request_id == "first":
+            first_started.set()
+            await release_first.wait()
+
+    queue_manager.start(_handler)
+    await queue_manager.add_private_request(
+        {"type": "private_reply", "request_id": "first"},
+        model_name="chat-model",
+    )
+    await queue_manager.add_private_request(
+        {"type": "private_reply", "request_id": "second"},
+        model_name="chat-model",
+    )
+
+    drain_task = asyncio.create_task(queue_manager.drain())
+    try:
+        await asyncio.wait_for(first_started.wait(), timeout=1.0)
+        assert not drain_task.done()
+        release_first.set()
+        await asyncio.wait_for(drain_task, timeout=1.0)
+    finally:
+        release_first.set()
+        if not drain_task.done():
+            drain_task.cancel()
+            await asyncio.gather(drain_task, return_exceptions=True)
+        await queue_manager.stop()
+
+    assert handled == ["first", "second"]
+
+
+@pytest.mark.asyncio
 async def test_non_llm_request_failure_is_not_retried_and_snapshot_counts_retry() -> (
     None
 ):

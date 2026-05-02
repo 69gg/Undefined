@@ -174,6 +174,7 @@ class MessageBatcher:
         # 持有 timer 触发后创建的 flush task 强引用，避免被 GC（asyncio 文档要求）
         self._pending_tasks: set[asyncio.Task[None]] = set()
         self._next_batch_id = 0
+        self._shutdown = False
 
     # ------------------------------------------------------------------ public
 
@@ -224,78 +225,20 @@ class MessageBatcher:
         immediate_fire_items: list[BufferedMessage] | None = None
 
         async with self._lock:
-            state = self._buckets.get(key)
-            now_mono = time.monotonic()
-
-            # === 阶段 1: 决定本条消息怎么进桶 ===
-            if state is None:
-                # 全新桶
-                state = _BatchState(
-                    phase=BatchPhase.TYPING,
-                    first_arrival_monotonic=now_mono,
-                    dispatch_token=self._new_token(item.scope, item.sender_id),
+            if self._shutdown:
+                logger.info(
+                    "[MessageBatcher] 已进入关停模式，新消息立即发车: scope=%s sender=%s",
+                    item.scope,
+                    item.sender_id,
                 )
-                self._buckets[key] = state
-                state.items.append(item)
-            elif state.phase is BatchPhase.SPECULATING:
-                # 已 pre-fire，决定是否 cancel inflight
-                inflight = state.inflight
-                already_sent = (
-                    _was_message_sent_this_turn(inflight.request_context)
-                    if inflight is not None
-                    else False
-                )
-                allow_cancel = (not already_sent) or cfg.allow_cancel_after_send
+                immediate_fire_items = [item]
+            else:
+                now_mono = time.monotonic()
+                state = self._buckets.get(key)
 
-                if inflight is not None and allow_cancel:
-                    logger.info(
-                        "[MessageBatcher] 投机调用被新消息抢占取消: scope=%s sender=%s "
-                        "already_sent=%s allow_cancel_after_send=%s",
-                        item.scope,
-                        item.sender_id,
-                        already_sent,
-                        cfg.allow_cancel_after_send,
-                    )
-                    if state.dispatch_token is not None:
-                        state.dispatch_token.cancel()
-                    inflight.task.cancel()
-                    state.inflight = None
-                    state.phase = BatchPhase.TYPING
-                    # 新消息追加到现有 items 后面
-                    state.items.append(item)
-                    self._retokenize_locked(state, item.scope, item.sender_id)
-                elif inflight is None:
-                    # inflight 尚未注册（coordinator 还没进入 execute_reply）：
-                    # 1) 若 flush task 仍在跑，先 cancel；
-                    # 2) 若它已经把请求入队，则取消旧 token，execute_reply 入口会跳过旧请求。
-                    logger.info(
-                        "[MessageBatcher] inflight 未注册，取消投机 token/flush task: "
-                        "scope=%s sender=%s",
-                        item.scope,
-                        item.sender_id,
-                    )
-                    if state.dispatch_token is not None:
-                        state.dispatch_token.cancel()
-                    if state.speculative_flush_task is not None:
-                        state.speculative_flush_task.cancel()
-                        state.speculative_flush_task = None
-                    state.phase = BatchPhase.TYPING
-                    state.items.append(item)
-                    self._retokenize_locked(state, item.scope, item.sender_id)
-                else:
-                    # 已发过消息且不允许取消：丢弃当前桶，新消息开新桶
-                    logger.info(
-                        "[MessageBatcher] 投机调用已发出消息且不允许取消，新消息开新 batch: "
-                        "scope=%s sender=%s",
-                        item.scope,
-                        item.sender_id,
-                    )
-                    self._cancel_t1(state)
-                    self._cancel_t2(state)
-                    state.phase = BatchPhase.FINALIZING
-                    # 旧桶让 inflight 自然结束；从 _buckets pop 以释放 key 给新 batch
-                    self._buckets.pop(key, None)
-                    # 新桶
+                # === 阶段 1: 决定本条消息怎么进桶 ===
+                if state is None:
+                    # 全新桶
                     state = _BatchState(
                         phase=BatchPhase.TYPING,
                         first_arrival_monotonic=now_mono,
@@ -303,105 +246,173 @@ class MessageBatcher:
                     )
                     self._buckets[key] = state
                     state.items.append(item)
-            elif state.phase is BatchPhase.FINALIZING:
-                # 极少见：T1 已到、inflight 未上报但 task 已不可控；当作新桶处理
-                logger.warning(
-                    "[MessageBatcher] 桶处于 FINALIZING 期间收到新消息，开新 batch: "
-                    "scope=%s sender=%s",
-                    item.scope,
-                    item.sender_id,
+                elif state.phase is BatchPhase.SPECULATING:
+                    # 已 pre-fire，决定是否 cancel inflight
+                    inflight = state.inflight
+                    already_sent = (
+                        _was_message_sent_this_turn(inflight.request_context)
+                        if inflight is not None
+                        else False
+                    )
+                    allow_cancel = (not already_sent) or cfg.allow_cancel_after_send
+
+                    if inflight is not None and allow_cancel:
+                        logger.info(
+                            "[MessageBatcher] 投机调用被新消息抢占取消: scope=%s sender=%s "
+                            "already_sent=%s allow_cancel_after_send=%s",
+                            item.scope,
+                            item.sender_id,
+                            already_sent,
+                            cfg.allow_cancel_after_send,
+                        )
+                        if state.dispatch_token is not None:
+                            state.dispatch_token.cancel()
+                        inflight.task.cancel()
+                        state.inflight = None
+                        state.phase = BatchPhase.TYPING
+                        # 新消息追加到现有 items 后面
+                        state.items.append(item)
+                        self._retokenize_locked(state, item.scope, item.sender_id)
+                    elif inflight is None:
+                        # inflight 尚未注册（coordinator 还没进入 execute_reply）：
+                        # 1) 若 flush task 仍在跑，先 cancel；
+                        # 2) 若它已经把请求入队，则取消旧 token，execute_reply 入口会跳过旧请求。
+                        logger.info(
+                            "[MessageBatcher] inflight 未注册，取消投机 token/flush task: "
+                            "scope=%s sender=%s",
+                            item.scope,
+                            item.sender_id,
+                        )
+                        if state.dispatch_token is not None:
+                            state.dispatch_token.cancel()
+                        if state.speculative_flush_task is not None:
+                            state.speculative_flush_task.cancel()
+                            state.speculative_flush_task = None
+                        state.phase = BatchPhase.TYPING
+                        state.items.append(item)
+                        self._retokenize_locked(state, item.scope, item.sender_id)
+                    else:
+                        # 已发过消息且不允许取消：丢弃当前桶，新消息开新桶
+                        logger.info(
+                            "[MessageBatcher] 投机调用已发出消息且不允许取消，新消息开新 batch: "
+                            "scope=%s sender=%s",
+                            item.scope,
+                            item.sender_id,
+                        )
+                        self._cancel_t1(state)
+                        self._cancel_t2(state)
+                        state.phase = BatchPhase.FINALIZING
+                        # 旧桶让 inflight 自然结束；从 _buckets pop 以释放 key 给新 batch
+                        self._buckets.pop(key, None)
+                        # 新桶
+                        state = _BatchState(
+                            phase=BatchPhase.TYPING,
+                            first_arrival_monotonic=now_mono,
+                            dispatch_token=self._new_token(item.scope, item.sender_id),
+                        )
+                        self._buckets[key] = state
+                        state.items.append(item)
+                elif state.phase is BatchPhase.FINALIZING:
+                    # 极少见：T1 已到、inflight 未上报但 task 已不可控；当作新桶处理
+                    logger.warning(
+                        "[MessageBatcher] 桶处于 FINALIZING 期间收到新消息，开新 batch: "
+                        "scope=%s sender=%s",
+                        item.scope,
+                        item.sender_id,
+                    )
+                    self._buckets.pop(key, None)
+                    state = _BatchState(
+                        phase=BatchPhase.TYPING,
+                        first_arrival_monotonic=now_mono,
+                        dispatch_token=self._new_token(item.scope, item.sender_id),
+                    )
+                    self._buckets[key] = state
+                    state.items.append(item)
+                else:  # TYPING：直接 append
+                    state.items.append(item)
+
+                self._bind_items_to_token_locked(state)
+
+                # === 阶段 2: 重置 T1/T2 timer ===
+                self._cancel_t1(state)
+                self._cancel_t2(state)
+
+                elapsed = now_mono - state.first_arrival_monotonic
+                unlimited_window = cfg.max_window_seconds <= 0
+                remaining_max = (
+                    float("inf")
+                    if unlimited_window
+                    else cfg.max_window_seconds - elapsed
                 )
-                self._buckets.pop(key, None)
-                state = _BatchState(
-                    phase=BatchPhase.TYPING,
-                    first_arrival_monotonic=now_mono,
-                    dispatch_token=self._new_token(item.scope, item.sender_id),
-                )
-                self._buckets[key] = state
-                state.items.append(item)
-            else:  # TYPING：直接 append
-                state.items.append(item)
 
-            self._bind_items_to_token_locked(state)
-
-            # === 阶段 2: 重置 T1/T2 timer ===
-            self._cancel_t1(state)
-            self._cancel_t2(state)
-
-            elapsed = now_mono - state.first_arrival_monotonic
-            unlimited_window = cfg.max_window_seconds <= 0
-            remaining_max = (
-                float("inf") if unlimited_window else cfg.max_window_seconds - elapsed
-            )
-
-            # 硬顶：max_messages_per_batch 立即发车（结束 batch）
-            if (
-                cfg.max_messages_per_batch > 0
-                and len(state.items) >= cfg.max_messages_per_batch
-            ):
-                logger.info(
-                    "[MessageBatcher] 达到 max_messages_per_batch=%s 立即发车: "
-                    "scope=%s sender=%s",
-                    cfg.max_messages_per_batch,
-                    item.scope,
-                    item.sender_id,
-                )
-                immediate_fire_items = self._pop_locked(key)
-            elif not unlimited_window and remaining_max <= 0:
-                logger.info(
-                    "[MessageBatcher] 已超 max_window_seconds 硬顶 立即发车: "
-                    "scope=%s sender=%s elapsed=%.2fs",
-                    item.scope,
-                    item.sender_id,
-                    elapsed,
-                )
-                immediate_fire_items = self._pop_locked(key)
-            else:
-                # T1 delay
-                if cfg.strategy == "fixed":
-                    target = state.first_arrival_monotonic + cfg.window_seconds
-                    t1_delay = max(0.0, target - now_mono)
-                else:  # extend
-                    t1_delay = cfg.window_seconds
-                if not unlimited_window:
-                    t1_delay = min(t1_delay, remaining_max)
-
-                loop = asyncio.get_running_loop()
-                state.t1_handle = loop.call_later(
-                    max(0.0, t1_delay), self._on_t1_timer, key
-                )
-
-                # T2 delay（仅当投机启用，且本桶尚未 pre-fire 时设置）
+                # 硬顶：max_messages_per_batch 立即发车（结束 batch）
                 if (
-                    self.speculative_enabled
-                    and state.phase is BatchPhase.TYPING
-                    and cfg.pre_send_seconds < t1_delay
+                    cfg.max_messages_per_batch > 0
+                    and len(state.items) >= cfg.max_messages_per_batch
                 ):
-                    t2_delay = cfg.pre_send_seconds
-                    state.t2_handle = loop.call_later(
-                        max(0.0, t2_delay), self._on_t2_timer, key
-                    )
-                    logger.debug(
-                        "[MessageBatcher] 缓冲: scope=%s sender=%s count=%s "
-                        "t1=%.2fs t2=%.2fs strategy=%s",
+                    logger.info(
+                        "[MessageBatcher] 达到 max_messages_per_batch=%s 立即发车: "
+                        "scope=%s sender=%s",
+                        cfg.max_messages_per_batch,
                         item.scope,
                         item.sender_id,
-                        len(state.items),
-                        t1_delay,
-                        t2_delay,
-                        cfg.strategy,
                     )
+                    immediate_fire_items = self._pop_locked(key)
+                elif not unlimited_window and remaining_max <= 0:
+                    logger.info(
+                        "[MessageBatcher] 已超 max_window_seconds 硬顶 立即发车: "
+                        "scope=%s sender=%s elapsed=%.2fs",
+                        item.scope,
+                        item.sender_id,
+                        elapsed,
+                    )
+                    immediate_fire_items = self._pop_locked(key)
                 else:
-                    logger.debug(
-                        "[MessageBatcher] 缓冲: scope=%s sender=%s count=%s "
-                        "t1=%.2fs strategy=%s phase=%s",
-                        item.scope,
-                        item.sender_id,
-                        len(state.items),
-                        t1_delay,
-                        cfg.strategy,
-                        state.phase.value,
+                    # T1 delay
+                    if cfg.strategy == "fixed":
+                        target = state.first_arrival_monotonic + cfg.window_seconds
+                        t1_delay = max(0.0, target - now_mono)
+                    else:  # extend
+                        t1_delay = cfg.window_seconds
+                    if not unlimited_window:
+                        t1_delay = min(t1_delay, remaining_max)
+
+                    loop = asyncio.get_running_loop()
+                    state.t1_handle = loop.call_later(
+                        max(0.0, t1_delay), self._on_t1_timer, key
                     )
+
+                    # T2 delay（仅当投机启用，且本桶尚未 pre-fire 时设置）
+                    if (
+                        self.speculative_enabled
+                        and state.phase is BatchPhase.TYPING
+                        and cfg.pre_send_seconds < t1_delay
+                    ):
+                        t2_delay = cfg.pre_send_seconds
+                        state.t2_handle = loop.call_later(
+                            max(0.0, t2_delay), self._on_t2_timer, key
+                        )
+                        logger.debug(
+                            "[MessageBatcher] 缓冲: scope=%s sender=%s count=%s "
+                            "t1=%.2fs t2=%.2fs strategy=%s",
+                            item.scope,
+                            item.sender_id,
+                            len(state.items),
+                            t1_delay,
+                            t2_delay,
+                            cfg.strategy,
+                        )
+                    else:
+                        logger.debug(
+                            "[MessageBatcher] 缓冲: scope=%s sender=%s count=%s "
+                            "t1=%.2fs strategy=%s phase=%s",
+                            item.scope,
+                            item.sender_id,
+                            len(state.items),
+                            t1_delay,
+                            cfg.strategy,
+                            state.phase.value,
+                        )
 
         # 锁外执行 callback
         if immediate_fire_items is not None:
@@ -681,6 +692,7 @@ class MessageBatcher:
         """
         while True:
             async with self._lock:
+                self._shutdown = True
                 keys = list(self._buckets.keys())
             if not keys:
                 break
@@ -733,6 +745,7 @@ class MessageBatcher:
                 "group_enabled": cfg.group_enabled,
                 "private_enabled": cfg.private_enabled,
                 "allow_cancel_after_send": cfg.allow_cancel_after_send,
+                "shutdown": self._shutdown,
             },
             "pending_buckets": len(buckets),
             "buckets": buckets,

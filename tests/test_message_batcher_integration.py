@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from Undefined.config.models import MessageBatcherConfig
+from Undefined.handlers import MessageHandler
 from Undefined.services.ai_coordinator import AICoordinator
 from Undefined.services.message_batcher import BatchDispatchToken, MessageBatcher
 
@@ -290,3 +291,34 @@ async def test_execute_reply_skips_cancelled_batch_token() -> None:
     )
 
     execute_auto.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_message_handler_close_flushes_batcher_then_drains_queue() -> None:
+    handler: Any = object.__new__(MessageHandler)
+    order: list[str] = []
+    handler._background_tasks = set()
+    handler.message_batcher = SimpleNamespace(
+        flush_all=AsyncMock(side_effect=lambda: order.append("flush_batcher"))
+    )
+    queue_manager = SimpleNamespace(
+        drain=AsyncMock(side_effect=lambda: order.append("drain_queue")),
+        stop=AsyncMock(side_effect=lambda: order.append("stop_queue")),
+    )
+    handler.ai_coordinator = SimpleNamespace(queue_manager=queue_manager)
+    handler.history_manager = SimpleNamespace(
+        flush_pending_saves=AsyncMock(side_effect=lambda: order.append("flush_history"))
+    )
+    handler.auto_pipeline_registry = SimpleNamespace(
+        stop_hot_reload=AsyncMock(side_effect=lambda: order.append("stop_pipeline"))
+    )
+
+    await handler.close()
+
+    assert order == [
+        "stop_pipeline",
+        "flush_batcher",
+        "drain_queue",
+        "stop_queue",
+        "flush_history",
+    ]

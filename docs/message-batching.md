@@ -16,7 +16,7 @@
 - **群聊 @bot 规则**：
   - 当前桶**为空**且新消息 @bot → 进入 buffer，本批走 `add_group_mention_request`（提及优先级）。
   - 当前桶**非空**且新消息 @bot → 不打断现有 buffer，**单独立即处理**这条 @bot 消息。
-- **关停**：`MessageBatcher.flush_all()` 在进程退出前 flush 所有未发车的桶，避免丢消息。
+- **关停**：`MessageBatcher.flush_all()` 在进程退出前 flush 所有未发车的桶，并进入 shutdown 模式；之后新消息不再进入缓冲桶，而是立即直送，避免关停期间出现无限等待或漏桶。`MessageHandler.close()` 会在停止队列前等待队列 drain 完成。
 
 ## Prompt 行为
 
@@ -126,7 +126,8 @@ allow_cancel_after_send = false
 - T2 的 `flush_callback` 若异常或被取消，桶会从 `SPECULATING` 回滚到 `TYPING` 并换新 token，保留原 items 等 T1 正常重试，避免静默丢消息。
 - T1 到期时如果 batch 已经被 T2 投机发出，只负责结束 bucket/等待已知 inflight，不会再次调用 `flush_callback`，避免同一批消息重复入队。
 - `unregister_inflight(scope, sender_id, task)` 必须携带 task 身份并校验；旧任务的 `finally` 不会误清理新一轮已注册的 inflight。
-- `flush_all()` 在关停时循环遍历所有桶执行等价 T1 路径，并 `await` 所有未完成的 flush task；若收尾过程中又出现新桶，会继续清空直到没有 pending bucket。
+- `flush_all()` 在关停时设置 shutdown 标记，循环遍历所有桶执行等价 T1 路径，并 `await` 所有未完成的 flush task；若收尾过程中又出现新桶，会继续清空直到没有 pending bucket。shutdown 之后的新消息直接发车，不再开缓冲桶。
+- `MessageHandler.close()` 的顺序是：停止自动管线热重载 → `message_batcher.flush_all()` → `queue_manager.drain()` 等待已入队/在途回复自然收敛 → `queue_manager.stop()` → flush 历史落盘。
 - coordinator 在 `execute_reply` 入口调用 `register_inflight(scope, sender_id, task, ctx)`，在 `finally` 调 `unregister_inflight(...)`；`asyncio.CancelledError` 被识别为 "投机抢占"，仅记录信息日志且不重试。
 
 ### 兼容回退
