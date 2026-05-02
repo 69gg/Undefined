@@ -243,10 +243,9 @@ async def render_html_with_page(
         if proxy:
             context_kwargs["proxy"] = {"server": proxy}
         context = await browser.new_context(**context_kwargs)
-        page = await context.new_page()
-        page.set_default_timeout(timeout_ms)
-
         try:
+            page = await context.new_page()
+            page.set_default_timeout(timeout_ms)
             await page.set_content(html_content)
             return await callback(page)
         finally:
