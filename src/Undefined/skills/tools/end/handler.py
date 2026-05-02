@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+import html
 from typing import Any, Dict
 import logging
 import re
@@ -20,10 +21,11 @@ logger = logging.getLogger(__name__)
 
 _TRUE_BOOL_TOKENS = {"1", "true", "yes", "y", "on"}
 _FALSE_BOOL_TOKENS = {"0", "false", "no", "n", "off", ""}
-_CONTENT_TAG_RE = re.compile(
-    r"<message\b[^>]*>\s*<content>(?P<content>.*?)</content>\s*</message>",
+_MESSAGE_TAG_RE = re.compile(
+    r"<message\b(?P<attrs>[^>]*)>\s*<content>(?P<content>.*?)</content>.*?</message>",
     re.DOTALL | re.IGNORECASE,
 )
+_MESSAGE_ATTR_RE = re.compile(r'(?P<name>[\w:-]+)="(?P<value>[^"]*)"')
 _DEFAULT_HISTORIAN_TEXT_LEN = 800
 _DEFAULT_HISTORIAN_LINES = 12
 _DEFAULT_HISTORIAN_LINE_LEN = 240
@@ -127,13 +129,57 @@ def _resolve_historian_limits(context: Dict[str, Any]) -> tuple[int, int]:
     return max_source_len, recent_k
 
 
-def _extract_current_content_from_question(question: str, *, max_len: int) -> str:
+def _parse_message_attrs(attrs_text: str) -> dict[str, str]:
+    return {
+        match.group("name"): html.unescape(match.group("value"))
+        for match in _MESSAGE_ATTR_RE.finditer(attrs_text)
+    }
+
+
+def _format_source_message_line(
+    index: int,
+    attrs: dict[str, str],
+    content: str,
+    *,
+    content_max_len: int,
+) -> str:
+    label_parts = []
+    for key in (
+        "message_id",
+        "sender",
+        "sender_id",
+        "group_id",
+        "group_name",
+        "location",
+        "time",
+    ):
+        value = attrs.get(key)
+        if value:
+            label_parts.append(f"{key}={value}")
+    label = " ".join(label_parts) or "message"
+    return f"[{index}] {label}: {_clip_text(content, content_max_len)}"
+
+
+def _extract_current_input_batch_from_question(question: str, *, max_len: int) -> str:
     text = str(question or "").strip()
     if not text:
         return ""
-    matched = _CONTENT_TAG_RE.search(text)
-    if matched:
-        return _clip_text(matched.group("content"), max_len)
+    matches = list(_MESSAGE_TAG_RE.finditer(text))
+    if matches:
+        if len(matches) == 1:
+            return _clip_text(html.unescape(matches[0].group("content")), max_len)
+
+        content_max_len = max(32, max_len // max(len(matches), 1))
+        lines = [
+            _format_source_message_line(
+                index,
+                _parse_message_attrs(match.group("attrs")),
+                html.unescape(match.group("content")),
+                content_max_len=content_max_len,
+            )
+            for index, match in enumerate(matches, start=1)
+        ]
+        return _clip_text("\n".join(lines), max_len)
     return _clip_text(text, max_len)
 
 
@@ -189,7 +235,7 @@ def _build_historian_recent_messages(
 def _inject_historian_reference_context(context: Dict[str, Any]) -> None:
     max_source_len, recent_k = _resolve_historian_limits(context)
     current_question = str(context.get("current_question") or "").strip()
-    source_message = _extract_current_content_from_question(
+    source_message = _extract_current_input_batch_from_question(
         current_question, max_len=max_source_len
     )
     if source_message:

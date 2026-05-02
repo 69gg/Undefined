@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -56,6 +57,39 @@ def test_each_rules_define_batched_current_input() -> None:
     assert "当前输入批次定义（适配 MessageBatcher）" in text
     assert "同批前几条不是历史旧任务" in text
     assert "当前输入批次之外的历史消息" in text
+
+
+@pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_tell_end_to_record_whole_current_input_batch(
+    path: Path,
+) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    assert "memo / observations 必须覆盖整个【当前输入批次】" in text
+    assert "不要只根据最后一条消息记录" in text
+    assert "end.observations 必须覆盖整批消息中值得留存的信息" in text
+    assert "系统会围绕当前输入批次自动检索相关内容" in text
+
+
+def test_end_tool_schema_mentions_current_input_batch() -> None:
+    schema = json.loads(
+        Path("src/Undefined/skills/tools/end/config.json").read_text(encoding="utf-8")
+    )
+    function = schema["function"]
+    observations = function["parameters"]["properties"]["observations"]
+
+    assert "当前输入批次" in function["description"]
+    assert "必须覆盖整批消息内容" in observations["description"]
+    assert "不能只记录最后一条" in observations["description"]
+
+
+def test_historian_prompts_reference_current_input_batch_source() -> None:
+    rewrite = Path("res/prompts/historian_rewrite.md").read_text(encoding="utf-8")
+    merge = Path("res/prompts/historian_profile_merge.md").read_text(encoding="utf-8")
+
+    assert "当前输入批次提取到的一条新记忆" in rewrite
+    assert "当前输入批次原文（触发本轮；连续消息会按时间顺序列出多条）" in rewrite
+    assert "当前输入批次原文" in merge
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)

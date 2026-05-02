@@ -30,7 +30,7 @@
 - sender_name: {sender_name}
 - message_ids: {message_ids}
 - memo: {memo}
-- 当前消息原文: {source_message}
+- 当前输入批次原文: {source_message}
 - 最近消息参考:
 {recent_messages}
 

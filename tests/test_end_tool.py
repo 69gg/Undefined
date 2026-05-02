@@ -158,6 +158,46 @@ async def test_end_enriches_historian_reference_context() -> None:
     assert cognitive_service.last_force is True
 
 
+@pytest.mark.asyncio
+async def test_end_historian_source_message_includes_batched_messages() -> None:
+    cognitive_service = _FakeCognitiveService()
+    context: dict[str, Any] = {
+        "request_id": "req-historian-batch",
+        "request_type": "group",
+        "group_id": "1082837821",
+        "user_id": "120218451",
+        "sender_id": "120218451",
+        "cognitive_service": cognitive_service,
+        "current_question": (
+            '<message message_id="101" sender="洛泫" sender_id="120218451" '
+            'group_id="1082837821" group_name="bot测试群" '
+            'location="bot测试群" time="2026-02-23 19:02:12">'
+            "<content>我周三要发版</content></message>"
+            '<message message_id="102" sender="洛泫" sender_id="120218451" '
+            'group_id="1082837821" group_name="bot测试群" '
+            'location="bot测试群" time="2026-02-23 19:02:14">'
+            "<content>补充：是后端服务发版</content></message>"
+            "\n\n 【连续消息说明】以上 2 条 <message> 共同构成【当前输入批次】"
+        ),
+    }
+
+    result = await execute(
+        {"observations": ["洛泫周三要进行后端服务发版"], "force": True},
+        context,
+    )
+
+    assert result == "对话已结束"
+    source = str(context.get("historian_source_message", ""))
+    assert "[1]" in source
+    assert "[2]" in source
+    assert "message_id=101" in source
+    assert "message_id=102" in source
+    assert "我周三要发版" in source
+    assert "补充：是后端服务发版" in source
+    assert cognitive_service.last_context is not None
+    assert cognitive_service.last_context.get("historian_source_message") == source
+
+
 class _ManyHistoryManager:
     def get_recent(
         self, chat_id: str, msg_type: str, start: int, end: int
