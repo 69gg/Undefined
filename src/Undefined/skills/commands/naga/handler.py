@@ -108,7 +108,8 @@ async def execute(args: list[str], context: CommandContext) -> None:
         await _reply(context, "Naga 集成未启用")
         return
 
-    if not args:
+    resolved_subcommand = (context.resolved_subcommand or "").strip().lower()
+    if not resolved_subcommand and not args:
         await _reply(
             context,
             "用法: /naga <bind|unbind> [参数]\n"
@@ -118,8 +119,8 @@ async def execute(args: list[str], context: CommandContext) -> None:
         )
         return
 
-    subcmd = args[0].lower()
-    sub_args = args[1:]
+    subcmd = resolved_subcommand or args[0].lower()
+    sub_args = args if resolved_subcommand else args[1:]
     logger.info(
         "[NagaCmd] 子命令解析: trace=%s subcmd=%s sub_args=%s",
         trace_id,

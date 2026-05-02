@@ -216,6 +216,37 @@ async def test_naga_bind_submits_pending_and_replies(
 
 
 @pytest.mark.asyncio
+async def test_naga_bind_uses_dispatch_resolved_subcommand(
+    registry: CommandRegistry,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sender = _DummySender()
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    context = _context(
+        sender=sender,
+        registry=registry,
+        scope="group",
+        group_id=123,
+        allowed_groups={123},
+        store=store,
+    )
+    context.resolved_subcommand = "bind"
+
+    async def _accepted(*_: Any, **__: Any) -> tuple[str, str]:
+        return "accepted", "HTTP 202"
+
+    monkeypatch.setattr(naga_handler, "_submit_bind_request_to_naga", _accepted)
+
+    await naga_handler.execute(["alice"], context)
+
+    pending = store.get_pending("alice")
+    assert pending is not None
+    assert sender.group_messages
+    assert "等待 Naga 端确认" in sender.group_messages[-1][1]
+
+
+@pytest.mark.asyncio
 async def test_naga_bind_reuses_existing_pending_without_duplicate_submit(
     registry: CommandRegistry,
     tmp_path: Path,

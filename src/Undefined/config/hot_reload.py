@@ -64,10 +64,13 @@ _MODEL_NAME_KEYS: set[str] = {
     "grok_model.model_name",
 }
 
-_AI_MODEL_CONFIG_PREFIXES: tuple[str, ...] = (
+_CORE_AI_MODEL_CONFIG_PREFIXES: tuple[str, ...] = (
     "chat_model",
     "vision_model",
     "agent_model",
+)
+
+_RUNTIME_AI_MODEL_CONFIG_PREFIXES: tuple[str, ...] = (
     "summary_model",
     "historian_model",
     "grok_model",
@@ -140,13 +143,15 @@ def apply_config_updates(
     if _needs_attachment_update(changed_keys):
         context.ai_client.apply_attachment_config(updated)
 
-    if _needs_ai_model_update(changed_keys):
+    if _needs_core_ai_model_update(changed_keys):
         context.ai_client.apply_model_configs(
             chat_config=updated.chat_model,
             vision_config=updated.vision_model,
             agent_config=updated.agent_model,
             runtime_config=updated,
         )
+    elif _needs_runtime_ai_model_update(changed_keys):
+        context.ai_client.apply_runtime_config(updated)
 
     if _needs_skills_hot_reload_update(changed_keys):
         asyncio.create_task(_apply_skills_hot_reload(updated, context.ai_client))
@@ -197,12 +202,20 @@ def _needs_attachment_update(changed_keys: set[str]) -> bool:
     return bool(changed_keys & _ATTACHMENT_KEYS)
 
 
-def _needs_ai_model_update(changed_keys: set[str]) -> bool:
+def _matches_prefixes(changed_keys: set[str], prefixes: tuple[str, ...]) -> bool:
     return any(
         key == prefix or key.startswith(f"{prefix}.")
         for key in changed_keys
-        for prefix in _AI_MODEL_CONFIG_PREFIXES
+        for prefix in prefixes
     )
+
+
+def _needs_core_ai_model_update(changed_keys: set[str]) -> bool:
+    return _matches_prefixes(changed_keys, _CORE_AI_MODEL_CONFIG_PREFIXES)
+
+
+def _needs_runtime_ai_model_update(changed_keys: set[str]) -> bool:
+    return _matches_prefixes(changed_keys, _RUNTIME_AI_MODEL_CONFIG_PREFIXES)
 
 
 async def _apply_skills_hot_reload(updated: Config, ai_client: AIClient) -> None:

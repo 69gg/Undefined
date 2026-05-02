@@ -677,6 +677,11 @@ class AIClient:
             self.agent_config.model_name,
         )
 
+    def apply_runtime_config(self, runtime_config: Config) -> None:
+        """应用不需要重建模型客户端的运行时配置。"""
+        self.runtime_config = runtime_config
+        logger.info("[配置] AI 运行时配置已热更新")
+
     def apply_attachment_config(self, runtime_config: Config) -> None:
         self.attachment_registry.set_remote_download_max_bytes(
             _attachment_remote_download_max_bytes(runtime_config)
