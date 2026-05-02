@@ -60,34 +60,6 @@ async def test_end_accepts_message_sent_flag_from_request_context_string_true() 
     assert context["conversation_ended"] is True
 
 
-@pytest.mark.asyncio
-async def test_end_backward_compat_action_summary_param() -> None:
-    """向后兼容：旧参数名 action_summary 仍能正常工作。"""
-    context: dict[str, Any] = {"request_id": "req-compat-summary"}
-
-    result = await execute(
-        {"action_summary": "已发送消息", "force": True},
-        context,
-    )
-
-    assert result == "对话已结束"
-    assert context["conversation_ended"] is True
-
-
-@pytest.mark.asyncio
-async def test_end_backward_compat_new_info_param() -> None:
-    """向后兼容：旧参数名 new_info 仍能正常工作。"""
-    context: dict[str, Any] = {"request_id": "req-compat-new-info"}
-
-    result = await execute(
-        {"new_info": ["一条旧格式信息"], "force": True},
-        context,
-    )
-
-    assert result == "对话已结束"
-    assert context["conversation_ended"] is True
-
-
 class _FakeHistoryManager:
     def get_recent(
         self, chat_id: str, msg_type: str, start: int, end: int
@@ -120,6 +92,29 @@ class _FakeCognitiveService:
         self.last_context = dict(context)
         self.last_force = bool(force)
         return "job-test"
+
+
+@pytest.mark.asyncio
+async def test_end_ignores_removed_legacy_param_names() -> None:
+    cognitive_service = _FakeCognitiveService()
+    context: dict[str, Any] = {
+        "request_id": "req-removed-compat",
+        "cognitive_service": cognitive_service,
+    }
+
+    result = await execute(
+        {
+            "action_summary": "旧字段不应写入 memo",
+            "summary": "旧摘要字段不应写入 memo",
+            "new_info": ["旧字段不应写入 observations"],
+            "force": True,
+        },
+        context,
+    )
+
+    assert result == "对话已结束"
+    assert context["conversation_ended"] is True
+    assert cognitive_service.last_context is None
 
 
 @pytest.mark.asyncio

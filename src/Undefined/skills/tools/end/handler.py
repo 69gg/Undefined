@@ -275,17 +275,9 @@ def _build_location(context: Dict[str, Any]) -> EndSummaryLocation | None:
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
-    # memo 优先新名，fallback 旧名 action_summary 和 summary
-    memo_raw = (
-        args.get("memo")
-        if "memo" in args
-        else (args.get("action_summary") or args.get("summary", ""))
-    )
+    memo_raw = args.get("memo", "")
     memo = memo_raw.strip() if isinstance(memo_raw, str) else ""
-    # observations 优先新名，fallback 旧名 new_info
-    observations_raw = (
-        args.get("observations") if "observations" in args else args.get("new_info", [])
-    )
+    observations_raw = args.get("observations", [])
     if isinstance(observations_raw, str):
         observations = [observations_raw.strip()] if observations_raw.strip() else []
     elif isinstance(observations_raw, list):
@@ -296,8 +288,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         observations = []
     perspective_raw = args.get("perspective", "")
     perspective = perspective_raw.strip() if isinstance(perspective_raw, str) else ""
-    # 兼容旧版 summary 字段
-    summary = memo
     force_raw = args.get("force", False)
     force, force_recognized = _parse_force_flag(force_raw)
     if "force" in args and not force_recognized:
@@ -309,7 +299,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         )
 
     # memo 非空且本轮未发送消息时拒绝（force=true 可跳过）
-    if summary and not force and not _was_message_sent_this_turn(context):
+    if memo and not force and not _was_message_sent_this_turn(context):
         logger.warning(
             "[end工具] 拒绝执行：本轮未发送消息，request_id=%s",
             context.get("request_id", "-"),
@@ -321,21 +311,19 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             "若你获取到了新信息，应填写 observations 字段以保存这些信息，而不是放在 memo 里。"
         )
 
-    if summary:
+    if memo:
         location = _build_location(context)
         record: EndSummaryRecord | None = None
         end_summary_storage = context.get("end_summary_storage")
         if isinstance(end_summary_storage, EndSummaryStorage):
-            record = await end_summary_storage.append_summary(
-                summary, location=location
-            )
+            record = await end_summary_storage.append_summary(memo, location=location)
         elif end_summary_storage is not None:
             logger.warning(
                 "[end工具] end_summary_storage 类型异常: %s", type(end_summary_storage)
             )
 
         if record is None:
-            record = EndSummaryStorage.make_record(summary, location=location)
+            record = EndSummaryStorage.make_record(memo, location=location)
 
         end_summaries = context.get("end_summaries")
         if end_summaries is not None:
@@ -349,7 +337,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                     "[end工具] end_summaries 类型异常: %s", type(end_summaries)
                 )
 
-        logger.info("保存end记录: %s...", summary[:50])
+        logger.info("保存end记录: %s...", memo[:50])
     else:
         logger.info("[end工具] memo 为空，跳过 end 摘要写入")
 

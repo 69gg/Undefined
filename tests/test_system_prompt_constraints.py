@@ -69,6 +69,9 @@ def test_system_prompts_tell_end_to_record_whole_current_input_batch(
     assert "不要只根据最后一条消息记录" in text
     assert "end.observations 必须覆盖整批消息中值得留存的信息" in text
     assert "系统会围绕当前输入批次自动检索相关内容" in text
+    assert "何时应该填写 memo" in text
+    assert "何时应该填写 summary" not in text
+    assert "summary 应该是对未来有帮助的信息" not in text
 
 
 def test_end_tool_schema_mentions_current_input_batch() -> None:
@@ -76,11 +79,15 @@ def test_end_tool_schema_mentions_current_input_batch() -> None:
         Path("src/Undefined/skills/tools/end/config.json").read_text(encoding="utf-8")
     )
     function = schema["function"]
-    observations = function["parameters"]["properties"]["observations"]
+    properties = function["parameters"]["properties"]
+    observations = properties["observations"]
 
     assert "当前输入批次" in function["description"]
     assert "必须覆盖整批消息内容" in observations["description"]
     assert "不能只记录最后一条" in observations["description"]
+    assert "summary" not in properties
+    assert "action_summary" not in properties
+    assert "new_info" not in properties
 
 
 def test_historian_prompts_reference_current_input_batch_source() -> None:
