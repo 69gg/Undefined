@@ -42,6 +42,7 @@ from Undefined.utils.self_update import (
     format_update_result,
     restart_process,
 )
+from Undefined.render import close_browser as close_render_browser
 
 
 def ensure_runtime_dirs() -> None:
@@ -381,6 +382,7 @@ async def main() -> None:
             )
 
         handler = MessageHandler(config, onebot, ai, faq_storage, task_storage)
+        await handler.initialize()
         onebot.set_message_handler(handler.handle_message)
         elapsed = time.perf_counter() - init_start
         logger.info("[初始化] 核心组件加载完成: elapsed=%.3fs", elapsed)
@@ -433,6 +435,7 @@ async def main() -> None:
         queue_manager=handler.queue_manager,
         config_manager=config_manager,
         security_service=handler.security,
+        message_handler=handler,
     )
 
     def _apply_config_updates(
@@ -517,6 +520,7 @@ async def main() -> None:
         if retrieval_runtime is not None:
             await retrieval_runtime.stop()
         await config_manager.stop_hot_reload()
+        await close_render_browser()
         logger.info("[退出] 机器人已停止运行")
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any, Dict
@@ -89,77 +90,123 @@ window.MathJax = {{
 </html>"""
 
 
+def _strip_math_wrappers(content: str) -> str:
+    """去掉 mathtext 可直接处理的外层数学分隔符。"""
+    text = content.strip()
+    wrapper_patterns = (
+        r"^\\\[(?P<body>.*?)\\\]$",
+        r"^\\\((?P<body>.*?)\\\)$",
+        r"^\$\$(?P<body>.*?)\$\$$",
+        r"^\$(?P<body>.*?)\$$",
+        r"^\\begin\{equation\*?\}(?P<body>.*?)\\end\{equation\*?\}$",
+    )
+    for pattern in wrapper_patterns:
+        match = re.fullmatch(pattern, text, re.DOTALL)
+        if match is not None:
+            return match.group("body").strip()
+    return text
+
+
+def _render_mathtext_sync(content: str, output_format: str) -> tuple[bytes, str]:
+    """使用 matplotlib mathtext 在本地渲染常见数学公式。"""
+    import io
+
+    from matplotlib import mathtext
+    from matplotlib.font_manager import FontProperties
+
+    expression = _strip_math_wrappers(content)
+    if not expression or "\\begin{" in expression:
+        raise RuntimeError("内容不是 mathtext 可直接渲染的简单公式")
+
+    font_properties = FontProperties(size=18)
+    buffer = io.BytesIO()
+    if output_format == "pdf":
+        mathtext.math_to_image(
+            f"${expression}$",
+            buffer,
+            prop=font_properties,
+            dpi=200,
+            format="pdf",
+        )
+        return buffer.getvalue(), "application/pdf"
+
+    mathtext.math_to_image(
+        f"${expression}$",
+        buffer,
+        prop=font_properties,
+        dpi=200,
+        format="png",
+    )
+    return buffer.getvalue(), "image/png"
+
+
+async def _render_mathtext_to_bytes(
+    content: str, output_format: str
+) -> tuple[bytes, str]:
+    return await asyncio.to_thread(_render_mathtext_sync, content, output_format)
+
+
 async def _render_latex_to_bytes(
     content: str, output_format: str, proxy: str | None = None
 ) -> tuple[bytes, str]:
     """
-    使用 MathJax + Playwright 渲染 LaTeX 内容。
+    优先使用本地 mathtext 渲染，复杂内容再回退到 MathJax + Playwright。
 
     返回: (渲染后的字节流, MIME 类型)
     """
     try:
+        return await _render_mathtext_to_bytes(content, output_format)
+    except Exception as exc:
+        logger.debug("本地 mathtext 渲染失败，回退到 MathJax: %s", exc)
+
+    try:
         from playwright.async_api import (
-            async_playwright,
+            Page,
             TimeoutError as PwTimeoutError,
         )
+        from Undefined.render import render_html_with_page
     except ImportError:
         raise ImportError(
             "请运行 `uv run playwright install` 安装浏览器运行时"
         ) from None
 
     html_content = _build_html(content)
-
-    launch_kwargs: dict[str, object] = {"headless": True}
     if proxy:
-        launch_kwargs["proxy"] = {"server": proxy}
         logger.info("LaTeX 渲染使用代理: %s", proxy)
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(**launch_kwargs)  # type: ignore[arg-type]
+    async def _render_page(page: Page) -> tuple[bytes, str]:
+        # 等待 MathJax 完成排版（pageReady 回调设置 window._mjReady）
         try:
-            page = await browser.new_page()
-            await page.set_content(html_content)
+            await page.wait_for_function(
+                "() => window._mjReady === true",
+                timeout=30000,
+            )
+        except PwTimeoutError:
+            logger.warning("MathJax 排版超时，内容可能过于复杂或网络不可达")
+            raise RuntimeError(
+                "LaTeX 内容可能过于复杂或网络不可达（MathJax 加载超时）"
+            ) from None
 
-            # 等待 MathJax 完成排版（pageReady 回调设置 window._mjReady）
-            try:
-                await page.wait_for_function(
-                    "() => window._mjReady === true",
-                    timeout=30000,
-                )
-            except PwTimeoutError:
-                logger.warning("MathJax 排版超时，内容可能过于复杂或网络不可达")
-                raise RuntimeError(
-                    "LaTeX 内容可能过于复杂或网络不可达（MathJax 加载超时）"
-                ) from None
+        container = await page.query_selector("#math-container")
+        if container is None:
+            raise RuntimeError("无法定位数学容器元素")
 
-            if output_format == "pdf":
-                # 获取容器尺寸
-                container = await page.query_selector("#math-container")
-                if container is None:
-                    raise RuntimeError("无法定位数学容器元素")
+        if output_format == "pdf":
+            bbox = await container.bounding_box()
+            if bbox is None:
+                raise RuntimeError("无法获取数学容器的边界框")
 
-                bbox = await container.bounding_box()
-                if bbox is None:
-                    raise RuntimeError("无法获取数学容器的边界框")
+            pdf_bytes = await page.pdf(
+                width=f"{bbox['width'] + 40}px",
+                height=f"{bbox['height'] + 40}px",
+                print_background=True,
+            )
+            return pdf_bytes, "application/pdf"
 
-                # PDF 输出，设置合适的页面尺寸
-                pdf_bytes = await page.pdf(
-                    width=f"{bbox['width'] + 40}px",
-                    height=f"{bbox['height'] + 40}px",
-                    print_background=True,
-                )
-                return pdf_bytes, "application/pdf"
-            else:
-                # PNG 输出
-                container = await page.query_selector("#math-container")
-                if container is None:
-                    raise RuntimeError("无法定位数学容器元素")
+        screenshot_bytes = await container.screenshot(type="png")
+        return screenshot_bytes, "image/png"
 
-                screenshot_bytes = await container.screenshot(type="png")
-                return screenshot_bytes, "image/png"
-
-        finally:
-            await browser.close()
+    return await render_html_with_page(html_content, _render_page, proxy=proxy)
 
 
 async def _resolve_proxy(context: Dict[str, Any]) -> str | None:
@@ -223,8 +270,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 source_kind="rendered_latex",
                 source_ref="render_latex",
             )
-            tag = "pic" if output_format == "png" else "attachment"
-            return f'<{tag} uid="{record.uid}"/>'
+            return f'<attachment uid="{record.uid}"/>'
 
         except Exception as exc:
             logger.exception("注册渲染结果到附件系统失败: %s", exc)

@@ -156,7 +156,7 @@ class ModelSelector:
             self._pending_compares.pop(key, None)
             return None
 
-        match = re.match(r"选\s*(\d+)", text.strip())
+        match = re.fullmatch(r"选\s*(\d+)", text.strip())
         if not match:
             return None
         idx = int(match.group(1))
@@ -251,6 +251,8 @@ class ModelSelector:
             prompt_cache_enabled=entry.prompt_cache_enabled,
             reasoning_enabled=entry.reasoning_enabled,
             reasoning_effort=entry.reasoning_effort,
+            reasoning_effort_style=entry.reasoning_effort_style,
+            stream_enabled=entry.stream_enabled,
             request_params=entry.request_params,
             pool=primary.pool,
         )
@@ -276,6 +278,8 @@ class ModelSelector:
             prompt_cache_enabled=entry.prompt_cache_enabled,
             reasoning_enabled=entry.reasoning_enabled,
             reasoning_effort=entry.reasoning_effort,
+            reasoning_effort_style=entry.reasoning_effort_style,
+            stream_enabled=entry.stream_enabled,
             request_params=entry.request_params,
             pool=primary.pool,
         )

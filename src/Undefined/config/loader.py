@@ -260,6 +260,7 @@ class Config:
     history_summary_time_fetch_limit: int
     history_onebot_fetch_limit: int
     history_group_analysis_limit: int
+    attachment_remote_download_max_size_mb: int
     skills_hot_reload: bool
     skills_hot_reload_interval: float
     skills_hot_reload_debounce: float
@@ -274,6 +275,7 @@ class Config:
     https_proxy: str
     network_request_timeout: float
     network_request_retries: int
+    render_browser_max_concurrency: int
     api_xxapi_base_url: str
     api_xingzhige_base_url: str
     api_jkyai_base_url: str
@@ -339,6 +341,12 @@ class Config:
     arxiv_auto_extract_max_items: int
     arxiv_author_preview_limit: int
     arxiv_summary_preview_chars: int
+    # GitHub 仓库自动提取
+    github_auto_extract_enabled: bool
+    github_request_timeout_seconds: float
+    github_auto_extract_group_ids: list[int]
+    github_auto_extract_private_ids: list[int]
+    github_auto_extract_max_items: int
     # 认知记忆
     cognitive: CognitiveConfig
     # 表情包库
@@ -389,6 +397,16 @@ class Config:
         init=False,
         repr=False,
     )
+    _github_group_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
+    _github_private_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         # 访问控制属于高频热路径，启动后缓存为 set 降低重复构建开销。
@@ -411,6 +429,12 @@ class Config:
         }
         self._arxiv_private_ids_set = {
             int(item) for item in self.arxiv_auto_extract_private_ids
+        }
+        self._github_group_ids_set = {
+            int(item) for item in self.github_auto_extract_group_ids
+        }
+        self._github_private_ids_set = {
+            int(item) for item in self.github_auto_extract_private_ids
         }
 
     @classmethod
@@ -875,6 +899,17 @@ class Config:
                 500,
             ),
         )
+        attachment_remote_download_max_size_mb = max(
+            0,
+            _coerce_int(
+                _get_value(
+                    data,
+                    ("attachments", "remote_download_max_size_mb"),
+                    "ATTACHMENTS_REMOTE_DOWNLOAD_MAX_SIZE_MB",
+                ),
+                25,
+            ),
+        )
 
         skills_hot_reload = _coerce_bool(
             _get_value(data, ("skills", "hot_reload"), "SKILLS_HOT_RELOAD"), True
@@ -988,6 +1023,18 @@ class Config:
             network_request_retries = 0
         if network_request_retries > 5:
             network_request_retries = 5
+
+        render_browser_max_concurrency = max(
+            0,
+            _coerce_int(
+                _get_value(
+                    data,
+                    ("render", "browser_max_concurrency"),
+                    "RENDER_BROWSER_MAX_CONCURRENCY",
+                ),
+                0,
+            ),
+        )
 
         api_xxapi_base_url = _normalize_base_url(
             _coerce_str(
@@ -1107,6 +1154,31 @@ class Config:
             arxiv_summary_preview_chars = 1000
         if arxiv_summary_preview_chars > 8000:
             arxiv_summary_preview_chars = 8000
+
+        # GitHub 配置
+        github_auto_extract_enabled = _coerce_bool(
+            _get_value(data, ("github", "auto_extract_enabled"), None), False
+        )
+        github_request_timeout_seconds = _coerce_float(
+            _get_value(data, ("github", "request_timeout_seconds"), None), 10.0
+        )
+        if github_request_timeout_seconds <= 0:
+            github_request_timeout_seconds = 10.0
+        if github_request_timeout_seconds > 60.0:
+            github_request_timeout_seconds = 60.0
+        github_auto_extract_group_ids = _coerce_int_list(
+            _get_value(data, ("github", "auto_extract_group_ids"), None)
+        )
+        github_auto_extract_private_ids = _coerce_int_list(
+            _get_value(data, ("github", "auto_extract_private_ids"), None)
+        )
+        github_auto_extract_max_items = _coerce_int(
+            _get_value(data, ("github", "auto_extract_max_items"), None), 3
+        )
+        if github_auto_extract_max_items <= 0:
+            github_auto_extract_max_items = 3
+        if github_auto_extract_max_items > 10:
+            github_auto_extract_max_items = 10
 
         # Code Delivery Agent 配置
         code_delivery_enabled = _coerce_bool(
@@ -1294,6 +1366,7 @@ class Config:
             history_summary_time_fetch_limit=history_summary_time_fetch_limit,
             history_onebot_fetch_limit=history_onebot_fetch_limit,
             history_group_analysis_limit=history_group_analysis_limit,
+            attachment_remote_download_max_size_mb=attachment_remote_download_max_size_mb,
             skills_hot_reload_interval=skills_hot_reload_interval,
             skills_hot_reload_debounce=skills_hot_reload_debounce,
             agent_intro_autogen_enabled=agent_intro_autogen_enabled,
@@ -1307,6 +1380,7 @@ class Config:
             https_proxy=https_proxy,
             network_request_timeout=network_request_timeout,
             network_request_retries=network_request_retries,
+            render_browser_max_concurrency=render_browser_max_concurrency,
             api_xxapi_base_url=api_xxapi_base_url,
             api_xingzhige_base_url=api_xingzhige_base_url,
             api_jkyai_base_url=api_jkyai_base_url,
@@ -1353,6 +1427,11 @@ class Config:
             arxiv_auto_extract_max_items=arxiv_auto_extract_max_items,
             arxiv_author_preview_limit=arxiv_author_preview_limit,
             arxiv_summary_preview_chars=arxiv_summary_preview_chars,
+            github_auto_extract_enabled=github_auto_extract_enabled,
+            github_request_timeout_seconds=github_request_timeout_seconds,
+            github_auto_extract_group_ids=github_auto_extract_group_ids,
+            github_auto_extract_private_ids=github_auto_extract_private_ids,
+            github_auto_extract_max_items=github_auto_extract_max_items,
             embedding_model=embedding_model,
             rerank_model=rerank_model,
             knowledge_enabled=knowledge_enabled,
@@ -1520,6 +1599,18 @@ class Config:
         """私聊是否允许 arXiv 自动提取。"""
         if self._arxiv_private_ids_set:
             return int(user_id) in self._arxiv_private_ids_set
+        return self.is_private_allowed(user_id)
+
+    def is_github_auto_extract_allowed_group(self, group_id: int) -> bool:
+        """群聊是否允许 GitHub 仓库自动提取。"""
+        if self._github_group_ids_set:
+            return int(group_id) in self._github_group_ids_set
+        return self.is_group_allowed(group_id)
+
+    def is_github_auto_extract_allowed_private(self, user_id: int) -> bool:
+        """私聊是否允许 GitHub 仓库自动提取。"""
+        if self._github_private_ids_set:
+            return int(user_id) in self._github_private_ids_set
         return self.is_private_allowed(user_id)
 
     def should_process_group_message(self, is_at_bot: bool) -> bool:

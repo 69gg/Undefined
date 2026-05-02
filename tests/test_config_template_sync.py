@@ -94,6 +94,7 @@ max_tokens = 4096
 api_mode = "responses"
 responses_tool_choice_compat = true
 responses_force_stateless_replay = true
+stream_enabled = true
 
 [models.chat.request_params]
 temperature = 0.2
@@ -112,6 +113,7 @@ models = []
     assert model["api_mode"] == "responses"
     assert model["responses_tool_choice_compat"] is True
     assert model["responses_force_stateless_replay"] is True
+    assert model["stream_enabled"] is True
     assert model["request_params"]["temperature"] == 0.2
     assert "models.chat.pool.models[0].api_mode" in result.added_paths
     assert "models.chat.pool.models[0].request_params" in result.added_paths

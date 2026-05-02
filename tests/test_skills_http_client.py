@@ -1,8 +1,28 @@
-"""Tests for Undefined.skills.http_client module (pure functions only)."""
+"""Tests for Undefined.skills.http_client and http_config helpers."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any
+
+import httpx
+import pytest
+
+import Undefined.skills.http_client as http_client_module
+import Undefined.skills.http_config as http_config_module
 from Undefined.skills.http_client import _retry_delay, _should_retry_http_status
+
+
+class _FakeResponse:
+    def __init__(self, status_code: int = 200) -> None:
+        self.status_code = status_code
+        self.headers: dict[str, str] = {}
+        self.text = ""
+        self.content = b""
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise AssertionError("unexpected status in fake response")
 
 
 class TestShouldRetryHttpStatus:
@@ -74,3 +94,143 @@ class TestRetryDelay:
 
     def test_returns_float(self) -> None:
         assert isinstance(_retry_delay(0), float)
+
+
+class TestRequestProxy:
+    def test_prefers_scheme_specific_proxy(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            http_config_module,
+            "get_config",
+            lambda strict=False: SimpleNamespace(
+                use_proxy=True,
+                http_proxy="http://http-proxy.local:7890",
+                https_proxy="http://https-proxy.local:7890",
+            ),
+        )
+
+        assert (
+            http_config_module.get_request_proxy(
+                "https://api.github.com/repos/69gg/Undefined"
+            )
+            == "http://https-proxy.local:7890"
+        )
+        assert (
+            http_config_module.get_request_proxy("http://example.com/resource")
+            == "http://http-proxy.local:7890"
+        )
+
+    def test_returns_none_when_proxy_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            http_config_module,
+            "get_config",
+            lambda strict=False: SimpleNamespace(
+                use_proxy=False,
+                http_proxy="http://http-proxy.local:7890",
+                https_proxy="http://https-proxy.local:7890",
+            ),
+        )
+
+        assert (
+            http_config_module.get_request_proxy(
+                "https://api.github.com/repos/69gg/Undefined"
+            )
+            is None
+        )
+
+
+class TestRequestWithRetryProxy:
+    @pytest.mark.asyncio
+    async def test_passes_proxy_to_async_client(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client_init_kwargs: dict[str, Any] = {}
+        request_kwargs: dict[str, Any] = {}
+
+        class FakeAsyncClient:
+            def __init__(self, **kwargs: Any) -> None:
+                client_init_kwargs.update(kwargs)
+
+            async def __aenter__(self) -> FakeAsyncClient:
+                return self
+
+            async def __aexit__(
+                self,
+                _exc_type: object,
+                _exc: object,
+                _tb: object,
+            ) -> None:
+                return None
+
+            async def request(self, **kwargs: Any) -> _FakeResponse:
+                request_kwargs.update(kwargs)
+                return _FakeResponse()
+
+        monkeypatch.setattr(
+            http_client_module, "get_request_timeout", lambda _default: 12.0
+        )
+        monkeypatch.setattr(
+            http_client_module, "get_request_retries", lambda _default: 0
+        )
+        monkeypatch.setattr(
+            http_client_module,
+            "get_request_proxy",
+            lambda _url: "http://proxy.local:7890",
+        )
+        monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+        response = await http_client_module.request_with_retry(
+            "GET",
+            "https://api.github.com/repos/69gg/Undefined",
+            headers={"Accept": "application/json"},
+            follow_redirects=True,
+        )
+
+        assert response.status_code == 200
+        assert client_init_kwargs["proxy"] == "http://proxy.local:7890"
+        assert client_init_kwargs["trust_env"] is False
+        assert request_kwargs["url"] == "https://api.github.com/repos/69gg/Undefined"
+
+    @pytest.mark.asyncio
+    async def test_skips_proxy_when_not_configured(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client_init_kwargs: dict[str, Any] = {}
+
+        class FakeAsyncClient:
+            def __init__(self, **kwargs: Any) -> None:
+                client_init_kwargs.update(kwargs)
+
+            async def __aenter__(self) -> FakeAsyncClient:
+                return self
+
+            async def __aexit__(
+                self,
+                _exc_type: object,
+                _exc: object,
+                _tb: object,
+            ) -> None:
+                return None
+
+            async def request(self, **_kwargs: Any) -> _FakeResponse:
+                return _FakeResponse()
+
+        monkeypatch.setattr(
+            http_client_module, "get_request_timeout", lambda _default: 12.0
+        )
+        monkeypatch.setattr(
+            http_client_module, "get_request_retries", lambda _default: 0
+        )
+        monkeypatch.setattr(http_client_module, "get_request_proxy", lambda _url: None)
+        monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+        await http_client_module.request_with_retry(
+            "GET",
+            "https://api.github.com/repos/69gg/Undefined",
+        )
+
+        assert "proxy" not in client_init_kwargs
+        assert client_init_kwargs["trust_env"] is False

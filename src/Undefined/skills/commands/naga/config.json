@@ -7,5 +7,9 @@
   "allow_in_private": true,
   "show_in_help": true,
   "order": 95,
-  "aliases": []
+  "aliases": [],
+  "subcommands": {
+    "bind":   { "description": "发起绑定", "permission": "public", "allow_in_private": false },
+    "unbind": { "description": "解绑并吊销", "permission": "superadmin" }
+  }
 }

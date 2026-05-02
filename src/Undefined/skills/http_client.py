@@ -7,7 +7,11 @@ from typing import Any
 
 import httpx
 
-from Undefined.skills.http_config import get_request_retries, get_request_timeout
+from Undefined.skills.http_config import (
+    get_request_proxy,
+    get_request_retries,
+    get_request_timeout,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,15 +43,21 @@ async def request_with_retry(
         timeout if timeout is not None else get_request_timeout(default_timeout)
     )
     request_retries = retries if retries is not None else get_request_retries(0)
+    request_proxy = get_request_proxy(url)
     request_id = "-"
     if context is not None:
         request_id = str(context.get("request_id", "-"))
 
     last_exception: Exception | None = None
-    async with httpx.AsyncClient(
-        timeout=request_timeout,
-        follow_redirects=follow_redirects,
-    ) as client:
+    client_kwargs: dict[str, Any] = {
+        "timeout": request_timeout,
+        "follow_redirects": follow_redirects,
+        "trust_env": False,
+    }
+    if request_proxy is not None:
+        client_kwargs["proxy"] = request_proxy
+
+    async with httpx.AsyncClient(**client_kwargs) as client:
         for attempt in range(request_retries + 1):
             try:
                 response = await client.request(

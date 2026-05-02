@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import random
 import time
-from typing import Any, Coroutine
+from typing import Any, Coroutine, Literal
 
 from Undefined.attachments import (
     append_attachment_text,
@@ -38,6 +38,8 @@ from Undefined.utils.sender import MessageSender
 from Undefined.services.security import SecurityService
 from Undefined.services.command import CommandDispatcher
 from Undefined.services.ai_coordinator import AICoordinator
+from Undefined.services.model_pool import ModelPoolService
+from Undefined.skills.auto_pipeline import AutoPipelineRegistry
 from Undefined.utils.resources import resolve_resource_path
 from Undefined.utils.queue_intervals import build_model_queue_intervals
 
@@ -49,6 +51,10 @@ logger = logging.getLogger(__name__)
 
 KEYWORD_REPLY_HISTORY_PREFIX = "[系统关键词自动回复] "
 REPEAT_REPLY_HISTORY_PREFIX = "[系统复读] "
+
+
+def _is_private_model_pool_control_text(text: str) -> bool:
+    return ModelPoolService.is_private_control_text(text)
 
 
 def _format_poke_history_text(display_name: str, user_id: int) -> str:
@@ -89,7 +95,13 @@ class MessageHandler:
         self.faq_storage = faq_storage
         # 初始化工具组件
         self.history_manager = MessageHistoryManager(config.history_max_records)
-        self.sender = MessageSender(onebot, self.history_manager, config.bot_qq, config)
+        self.sender = MessageSender(
+            onebot,
+            self.history_manager,
+            config.bot_qq,
+            config,
+            attachment_registry=getattr(ai, "attachment_registry", None),
+        )
 
         # 初始化服务
         self.security = SecurityService(config, ai._http_client)
@@ -128,6 +140,9 @@ class MessageHandler:
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._profile_name_refresh_cache: dict[tuple[str, int], str] = {}
         self._bot_nickname_cache = BotNicknameCache(onebot, config.bot_qq)
+        self.auto_pipeline_registry = AutoPipelineRegistry()
+        self._auto_pipeline_initialized = False
+        self._auto_pipeline_init_lock = asyncio.Lock()
 
         # 复读功能状态（按群跟踪最近消息文本与发送者）
         self._repeat_counter: dict[int, list[tuple[str, int]]] = {}
@@ -137,6 +152,29 @@ class MessageHandler:
 
         # 启动队列
         self.ai_coordinator.queue_manager.start(self.ai_coordinator.execute_reply)
+
+    async def initialize(self) -> None:
+        """完成需要事件循环承载的异步初始化。"""
+        await self.initialize_auto_pipeline()
+
+    async def initialize_auto_pipeline(self) -> None:
+        """异步加载自动处理管线并按配置启动热重载。"""
+        if getattr(self, "_auto_pipeline_initialized", False):
+            return
+        init_lock = getattr(self, "_auto_pipeline_init_lock", None)
+        if init_lock is None:
+            init_lock = asyncio.Lock()
+            self._auto_pipeline_init_lock = init_lock
+        async with init_lock:
+            if getattr(self, "_auto_pipeline_initialized", False):
+                return
+            await self.auto_pipeline_registry.load_items_async()
+            self._auto_pipeline_initialized = True
+            if getattr(self.config, "skills_hot_reload", False):
+                self.auto_pipeline_registry.start_hot_reload(
+                    interval=self.config.skills_hot_reload_interval,
+                    debounce=self.config.skills_hot_reload_debounce,
+                )
 
     def _get_repeat_lock(self, group_id: int) -> asyncio.Lock:
         """获取或创建指定群的复读竞态保护锁。"""
@@ -602,39 +640,12 @@ class MessageHandler:
                 )
                 return
 
-            # Bilibili 视频自动提取（私聊）
-            if self.config.bilibili_auto_extract_enabled:
-                if self.config.is_bilibili_auto_extract_allowed_private(
-                    private_sender_id
-                ):
-                    bvids = await self._extract_bilibili_ids(
-                        text, private_message_content
-                    )
-                    if bvids:
-                        self._spawn_background_task(
-                            "bilibili_auto_extract_private",
-                            self._handle_bilibili_extract(
-                                private_sender_id, bvids, "private"
-                            ),
-                        )
-                        return
-
-            # arXiv 论文自动提取（私聊）
-            if self.config.arxiv_auto_extract_enabled:
-                if self.config.is_arxiv_auto_extract_allowed_private(private_sender_id):
-                    paper_ids = self._extract_arxiv_ids(text, private_message_content)
-                    if paper_ids:
-                        self._spawn_background_task(
-                            "arxiv_auto_extract_private",
-                            self._handle_arxiv_extract(
-                                private_sender_id, paper_ids, "private"
-                            ),
-                        )
-                        return
-
-            # 私聊消息直接触发回复
-            if await self.ai_coordinator.model_pool.handle_private_message(
-                private_sender_id, text
+            if (
+                getattr(self.config, "model_pool_enabled", False)
+                and _is_private_model_pool_control_text(text)
+            ) and await self.ai_coordinator.model_pool.handle_private_message(
+                private_sender_id,
+                text,
             ):
                 return
 
@@ -646,6 +657,13 @@ class MessageHandler:
                     command=private_command,
                 )
                 return
+
+            await self._run_auto_extract_pipeline(
+                target_id=private_sender_id,
+                target_type="private",
+                text=text,
+                message_content=private_message_content,
+            )
 
             await self.ai_coordinator.handle_private_reply(
                 private_sender_id,
@@ -778,7 +796,7 @@ class MessageHandler:
         # normalized_text 用于命令解析和 AI 路由，原始 text 已用于历史/日志
         is_fake_at = False
         normalized_text = text
-        if not is_at_bot:
+        if not is_at_bot and ("@" in text or "＠" in text):
             nicknames = await self._bot_nickname_cache.get_nicknames(group_id)
             if nicknames:
                 is_fake_at, normalized_text = strip_fake_at(text, nicknames)
@@ -800,6 +818,14 @@ class MessageHandler:
                 is_at_bot,
             )
             return
+
+        # 只有被@时才处理斜杠命令（使用 normalized_text 以支持假@后的命令）。
+        # 命令优先于自动处理管线，命中后不触发后续自动提取或 AI 回复。
+        if is_at_bot:
+            command = self.command_dispatcher.parse_command(normalized_text)
+            if command:
+                await self.command_dispatcher.dispatch(group_id, sender_id, command)
+                return
 
         # 关键词自动回复：心理委员 (使用原始消息内容提取文本，保证关键词触发不受影响)
         if self.config.keyword_reply_enabled and matches_xinliweiyuan(text):
@@ -893,37 +919,15 @@ class MessageHandler:
                             )
                             return
 
-        # Bilibili 视频自动提取
-        if self.config.bilibili_auto_extract_enabled:
-            if self.config.is_bilibili_auto_extract_allowed_group(group_id):
-                bvids = await self._extract_bilibili_ids(text, message_content)
-                if bvids:
-                    self._spawn_background_task(
-                        "bilibili_auto_extract_group",
-                        self._handle_bilibili_extract(group_id, bvids, "group"),
-                    )
-                    return
-
-        # arXiv 论文自动提取
-        if self.config.arxiv_auto_extract_enabled:
-            if self.config.is_arxiv_auto_extract_allowed_group(group_id):
-                paper_ids = self._extract_arxiv_ids(text, message_content)
-                if paper_ids:
-                    self._spawn_background_task(
-                        "arxiv_auto_extract_group",
-                        self._handle_arxiv_extract(group_id, paper_ids, "group"),
-                    )
-                    return
+        await self._run_auto_extract_pipeline(
+            target_id=group_id,
+            target_type="group",
+            text=text,
+            message_content=message_content,
+        )
 
         # 提取文本内容
         # (已在上方提取用于日志记录)
-
-        # 只有被@时才处理斜杠命令（使用 normalized_text 以支持假@后的命令）
-        if is_at_bot:
-            command = self.command_dispatcher.parse_command(normalized_text)
-            if command:
-                await self.command_dispatcher.dispatch(group_id, sender_id, command)
-                return
 
         # 自动回复处理（使用 normalized_text 以去除假@前缀）
         display_name = sender_card or sender_nickname or str(sender_id)
@@ -1097,6 +1101,55 @@ class MessageHandler:
             bvids = await extract_from_json_message(message_content)
         return bvids
 
+    async def _run_auto_extract_pipeline(
+        self,
+        *,
+        target_id: int,
+        target_type: Literal["group", "private"],
+        text: str,
+        message_content: list[dict[str, Any]],
+    ) -> bool:
+        """并行检测并处理所有命中的自动处理管线。"""
+        if not getattr(self, "_auto_pipeline_initialized", False):
+            await self.initialize_auto_pipeline()
+        detections = await self.auto_pipeline_registry.run(
+            {
+                "config": self.config,
+                "sender": self.sender,
+                "onebot": self.onebot,
+                "target_id": target_id,
+                "target_type": target_type,
+                "text": text,
+                "message_content": message_content,
+                "extract_bilibili_ids": self._extract_bilibili_ids,
+                "extract_arxiv_ids": self._extract_arxiv_ids,
+                "extract_github_repo_ids": self._extract_github_repo_ids,
+                "handle_bilibili_extract": self._handle_bilibili_extract,
+                "handle_arxiv_extract": self._handle_arxiv_extract,
+                "handle_github_extract": self._handle_github_extract,
+            }
+        )
+        return bool(detections)
+
+    async def apply_skills_hot_reload_config(
+        self,
+        *,
+        enabled: bool,
+        interval: float,
+        debounce: float,
+    ) -> None:
+        """跟随全局 skills 热重载配置更新自动处理管线。"""
+        if not enabled:
+            await self.auto_pipeline_registry.stop_hot_reload()
+            logger.info("[auto_pipeline] 热重载已随配置禁用")
+            return
+
+        await self.auto_pipeline_registry.stop_hot_reload()
+        self.auto_pipeline_registry.start_hot_reload(
+            interval=interval,
+            debounce=debounce,
+        )
+
     def _extract_arxiv_ids(
         self, text: str, message_content: list[dict[str, Any]]
     ) -> list[str]:
@@ -1119,6 +1172,34 @@ class MessageHandler:
             paper_ids.append(paper_id)
 
         return paper_ids
+
+    def _extract_github_repo_ids(
+        self, text: str, message_content: list[dict[str, Any]]
+    ) -> list[str]:
+        """从文本和消息段中提取 GitHub 仓库 ID。"""
+        from Undefined.github.parser import (
+            extract_from_json_message,
+            extract_github_repo_ids,
+        )
+
+        repo_ids: list[str] = []
+        seen: set[str] = set()
+
+        for repo_id in extract_github_repo_ids(text):
+            key = repo_id.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            repo_ids.append(repo_id)
+
+        for repo_id in extract_from_json_message(message_content):
+            key = repo_id.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            repo_ids.append(repo_id)
+
+        return repo_ids
 
     async def _handle_bilibili_extract(
         self,
@@ -1154,13 +1235,9 @@ class MessageHandler:
                 try:
                     error_msg = f"视频提取失败: {exc}"
                     if target_type == "group":
-                        await self.sender.send_group_message(
-                            target_id, error_msg, auto_history=False
-                        )
+                        await self.sender.send_group_message(target_id, error_msg)
                     else:
-                        await self.sender.send_private_message(
-                            target_id, error_msg, auto_history=False
-                        )
+                        await self.sender.send_private_message(target_id, error_msg)
                 except Exception:
                     pass
 
@@ -1206,6 +1283,52 @@ class MessageHandler:
                     target_id,
                 )
 
+    async def _handle_github_extract(
+        self,
+        target_id: int,
+        repo_ids: list[str],
+        target_type: str,
+    ) -> None:
+        """处理 GitHub 仓库自动提取和发送。"""
+        from Undefined.github.sender import send_github_repo_card
+
+        max_items = max(
+            1, int(getattr(self.config, "github_auto_extract_max_items", 3))
+        )
+        request_timeout = float(
+            getattr(self.config, "github_request_timeout_seconds", 10.0)
+        )
+
+        for repo_id in repo_ids[:max_items]:
+            try:
+                result = await send_github_repo_card(
+                    repo_id=repo_id,
+                    sender=self.sender,
+                    target_type=target_type,  # type: ignore[arg-type]
+                    target_id=target_id,
+                    request_timeout=request_timeout,
+                    context={
+                        "request_id": (
+                            f"github_auto_extract:{target_type}:{target_id}:{repo_id}"
+                        )
+                    },
+                )
+                logger.info(
+                    "[GitHub] 自动提取完成 %s → %s:%s: %s",
+                    repo_id,
+                    target_type,
+                    target_id,
+                    result,
+                )
+            except Exception as exc:
+                logger.info(
+                    "[GitHub] 自动提取跳过 %s → %s:%s: %s",
+                    repo_id,
+                    target_type,
+                    target_id,
+                    exc,
+                )
+
     def _spawn_background_task(
         self,
         name: str,
@@ -1242,5 +1365,7 @@ class MessageHandler:
                 *list(self._background_tasks),
                 return_exceptions=True,
             )
+        await self.history_manager.flush_pending_saves()
+        await self.auto_pipeline_registry.stop_hot_reload()
         await self.ai_coordinator.queue_manager.stop()
         logger.info("消息处理器已关闭")

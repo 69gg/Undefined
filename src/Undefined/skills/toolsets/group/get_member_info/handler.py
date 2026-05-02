@@ -26,6 +26,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     user_id = args.get("user_id")
     fields = args.get("fields")
     no_cache = args.get("no_cache", False)
+    brief = args.get("brief", False)
 
     if group_id is None:
         return "请提供群号（group_id 参数），或者在群聊中调用"
@@ -50,12 +51,15 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         if not member_info:
             return f"未找到群 {group_id} 中 QQ {user_id} 的成员信息，可能该用户已退群、从未入群或群号不正确"
 
-        result_parts = []
         nickname = member_info.get("nickname", "")
         card = member_info.get("card", "")
 
-        result_parts.append(f"【群成员信息】群号: {group_id}")
+        if brief:
+            display_name = card.strip() if card.strip() else nickname.strip()
+            return display_name or str(user_id)
 
+        result_parts = []
+        result_parts.append(f"【群成员信息】群号: {group_id}")
         display_name = card if card else nickname
         if display_name:
             result_parts.append(f"昵称: {display_name}")

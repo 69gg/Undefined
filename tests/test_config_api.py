@@ -23,6 +23,19 @@ def test_api_config_defaults_when_missing(tmp_path: Path) -> None:
     assert cfg.api.tool_invoke_denylist == []
     assert cfg.api.tool_invoke_timeout == 120
     assert cfg.api.tool_invoke_callback_timeout == 10
+    assert cfg.attachment_remote_download_max_size_mb == 25
+
+
+def test_attachment_remote_download_limit_config(tmp_path: Path) -> None:
+    cfg = _load_config(
+        tmp_path / "config.toml",
+        """
+[attachments]
+remote_download_max_size_mb = 8
+""",
+    )
+
+    assert cfg.attachment_remote_download_max_size_mb == 8
 
 
 def test_api_config_custom_values(tmp_path: Path) -> None:
@@ -100,3 +113,30 @@ tool_invoke_callback_timeout = 0
     )
     assert cfg.api.tool_invoke_timeout == 120
     assert cfg.api.tool_invoke_callback_timeout == 10
+
+
+def test_render_config_defaults_to_auto(tmp_path: Path) -> None:
+    cfg = _load_config(tmp_path / "config.toml", "")
+    assert cfg.render_browser_max_concurrency == 0
+
+
+def test_render_config_accepts_custom_value(tmp_path: Path) -> None:
+    cfg = _load_config(
+        tmp_path / "config.toml",
+        """
+[render]
+browser_max_concurrency = 4
+""",
+    )
+    assert cfg.render_browser_max_concurrency == 4
+
+
+def test_render_config_invalid_values_fallback_to_auto(tmp_path: Path) -> None:
+    cfg = _load_config(
+        tmp_path / "config.toml",
+        """
+[render]
+browser_max_concurrency = -3
+""",
+    )
+    assert cfg.render_browser_max_concurrency == 0

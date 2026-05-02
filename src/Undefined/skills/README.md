@@ -8,6 +8,14 @@
 
 ```
 skills/
+├── auto_pipeline/   # 自动处理管线，斜杠命令之后、AI 之前并行检测/处理
+│   ├── __init__.py
+│   ├── registry.py
+│   └── pipelines/
+│       ├── bilibili/
+│       ├── arxiv/
+│       └── github/
+│
 ├── tools/          # 基础小工具，直接暴露给 AI 调用
 │   ├── __init__.py
 │   ├── send_message/
@@ -62,6 +70,16 @@ skills/
 
 ## 工具、智能体、工具集与 Anthropic Skills 对比
 
+### 自动处理管线
+
+- **定位**: 消息进入 AI 前的自动预处理能力，例如 Bilibili、arXiv、GitHub 链接提取；斜杠命令优先级更高，命中后不触发管线。
+- **调用方式**: `MessageHandler` 自动调用，不暴露给 AI 主动调用。
+- **命名规则**: `pipelines/<name>/`，`config.json` 中的 `name` 必须与命中结果一致。
+- **目录结构**: `auto_pipeline/pipelines/{pipeline_name}/config.json + handler.py`。
+- **执行方式**: 同一条非命令消息会并行检测全部管线，并行处理全部命中结果；处理产出的消息通过统一发送层写入历史并自动登记本地媒体/文件附件后，再进入 AI 自动回复。
+- **热重载**: 跟随 `[skills]` 的 `hot_reload`、`hot_reload_interval`、`hot_reload_debounce` 配置。
+- **示例**: `bilibili`, `arxiv`, `github`
+
 ### 基础工具
 
 - **定位**: 单一功能的原子操作
@@ -110,15 +128,24 @@ skills/
 
 ## 选择指南
 
-| 特性 | 基础工具 | 工具集 | 智能体 | 平台指令 (Commands) | Anthropic Skills |
-|------|----------|--------|--------|------------------|------------------|
-| 复杂度 | 低 | 中 | 高 | 中（独立执行逻辑） | 低（纯提示词） |
-| 调用层级 | 直接调用 | 直接调用 | 间接调用 | 被群聊拦截器直接执行 | 直接调用（tool） |
-| 内部工具 | 无 | 无 | 可包含多个子工具 | 无 | 无（知识注入） |
-| 适用场景 | 通用原子操作 | 功能分组工具 | 领域复杂任务 | 基础系统管理与控制 | 领域知识/指导 |
-| 格式 | config.json + handler.py | config.json + handler.py | config.json + handler.py + prompt.md | config.json + handler.py | SKILL.md |
+| 特性 | 自动处理管线 | 基础工具 | 工具集 | 智能体 | 平台指令 (Commands) | Anthropic Skills |
+|------|--------------|----------|--------|--------|------------------|------------------|
+| 复杂度 | 中 | 低 | 中 | 高 | 中（独立执行逻辑） | 低（纯提示词） |
+| 调用层级 | 消息预处理自动调用 | 直接调用 | 直接调用 | 间接调用 | 被群聊拦截器直接执行 | 直接调用（tool） |
+| 内部工具 | 无 | 无 | 无 | 可包含多个子工具 | 无 | 无（知识注入） |
+| 适用场景 | 链接/内容自动提取 | 通用原子操作 | 功能分组工具 | 领域复杂任务 | 基础系统管理与控制 | 领域知识/指导 |
+| 格式 | config.json + handler.py | config.json + handler.py | config.json + handler.py | config.json + handler.py + prompt.md | config.json + handler.py | SKILL.md |
 
 ## 添加新技能
+
+### 添加自动处理管线
+
+1. 在 `skills/auto_pipeline/pipelines/` 下创建新目录
+2. 添加 `config.json`，包含 `name`、`description`、`order` 和 `enabled`
+3. 添加 `handler.py`，必须包含 `async def detect(context)` 与 `async def process(detection, context)`
+4. 自动被 `AutoPipelineRegistry` 发现和注册，并支持热重载
+
+详细说明请参考 [自动处理管线开发指南](../../../docs/auto-pipeline.md)。
 
 ### 添加基础工具
 

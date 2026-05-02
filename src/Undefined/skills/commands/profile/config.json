@@ -1,8 +1,8 @@
 {
     "name": "profile",
-    "description": "查看侧写。默认显示你的用户侧写；加 g 查看当前群聊侧写（仅群聊可用）。群聊默认合并转发，可用 -t 直接发送、-r 渲染图片",
-    "usage": "/p [g] [-t|-f|-r]",
-    "example": "/p g -r",
+    "description": "查看认知侧写。默认渲染图片；g查看群聊侧写；-f合并转发；-t直接文本。超管可指定QQ号或 @ 提及查看他人",
+    "usage": "/profile [g] [-t|-f|-r] [QQ号|@用户]",
+    "example": "/profile g",
     "permission": "public",
     "rate_limit": {
         "user": 60,

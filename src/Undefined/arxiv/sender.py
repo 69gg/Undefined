@@ -126,9 +126,9 @@ async def _send_text_message(
     message: str,
 ) -> None:
     if target_type == "group":
-        await sender.send_group_message(target_id, message, auto_history=False)
+        await sender.send_group_message(target_id, message)
     else:
-        await sender.send_private_message(target_id, message, auto_history=False)
+        await sender.send_private_message(target_id, message)
 
 
 async def _send_file_message(
@@ -139,13 +139,9 @@ async def _send_file_message(
     file_name: str,
 ) -> None:
     if target_type == "group":
-        await sender.send_group_file(
-            target_id, file_path, file_name, auto_history=False
-        )
+        await sender.send_group_file(target_id, file_path, file_name)
     else:
-        await sender.send_private_file(
-            target_id, file_path, file_name, auto_history=False
-        )
+        await sender.send_private_file(target_id, file_path, file_name)
 
 
 async def _send_arxiv_paper_once(

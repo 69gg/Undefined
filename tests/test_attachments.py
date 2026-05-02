@@ -5,6 +5,7 @@ import base64
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from Undefined.attachments import (
@@ -115,6 +116,238 @@ def test_attachment_refs_to_xml_includes_meme_semantic_metadata() -> None:
     assert 'source_kind="meme_library"' in xml
     assert 'semantic_kind="meme"' in xml
     assert 'description="无语猫猫表情包"' in xml
+
+
+def test_attachment_refs_to_xml_includes_url_reference_source() -> None:
+    xml = attachment_refs_to_xml(
+        [
+            {
+                "uid": "file_remote01",
+                "kind": "file",
+                "media_type": "file",
+                "display_name": "big.zip",
+                "source_kind": "remote_file_reference",
+                "source_ref": "https://example.com/big.zip",
+            }
+        ]
+    )
+
+    assert 'source_ref="https://example.com/big.zip"' in xml
+
+
+@pytest.mark.asyncio
+async def test_remote_attachment_above_limit_keeps_url_reference(
+    tmp_path: Path,
+) -> None:
+    async def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "content-length": "4096",
+                "content-type": "application/zip",
+            },
+            content=b"",
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as client:
+        registry = AttachmentRegistry(
+            registry_path=tmp_path / "attachment_registry.json",
+            cache_dir=tmp_path / "attachments",
+            http_client=client,
+            remote_download_max_bytes=1024,
+        )
+
+        record = await registry.register_remote_url(
+            "group:10001",
+            "https://example.com/big.zip",
+            kind="file",
+            display_name="big.zip",
+            source_kind="remote_file",
+        )
+
+    assert record.uid.startswith("file_")
+    assert record.local_path is None
+    assert record.source_kind == "remote_file_reference"
+    assert record.source_ref == "https://example.com/big.zip"
+    assert record.mime_type == "application/zip"
+    assert "超过下载上限" in record.description
+    assert record.prompt_ref()["source_ref"] == "https://example.com/big.zip"
+
+    reloaded = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    await reloaded.load()
+    resolved = await reloaded.resolve_async(record.uid, "group:10001")
+
+    assert resolved is not None
+    assert resolved.local_path is None
+    assert resolved.source_ref == "https://example.com/big.zip"
+
+
+@pytest.mark.asyncio
+async def test_remote_attachment_zero_limit_does_not_request_url(
+    tmp_path: Path,
+) -> None:
+    requests = 0
+
+    async def _handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        return httpx.Response(200, content=b"unexpected")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as client:
+        registry = AttachmentRegistry(
+            registry_path=tmp_path / "attachment_registry.json",
+            cache_dir=tmp_path / "attachments",
+            http_client=client,
+            remote_download_max_bytes=0,
+        )
+
+        record = await registry.register_remote_url(
+            "group:10001",
+            "https://example.com/remote.bin",
+            kind="file",
+            display_name="remote.bin",
+        )
+
+    assert requests == 0
+    assert record.local_path is None
+    assert record.source_ref == "https://example.com/remote.bin"
+    assert "remote_download_max_size_mb=0" in record.description
+
+
+@pytest.mark.asyncio
+async def test_remote_reference_uses_url_not_provenance_source_ref(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+        remote_download_max_bytes=0,
+    )
+
+    record = await registry.register_remote_url(
+        "group:10001",
+        "https://example.com/avatar.jpg",
+        kind="image",
+        display_name="avatar.jpg",
+        source_kind="get_avatar",
+        source_ref="qq:12345",
+    )
+    rendered = await render_message_with_pic_placeholders(
+        f'<attachment uid="{record.uid}"/>',
+        registry=registry,
+        scope_key="group:10001",
+        strict=True,
+    )
+
+    assert record.local_path is None
+    assert record.source_ref == "https://example.com/avatar.jpg"
+    assert record.segment_data["original_source_ref"] == "qq:12345"
+    assert "file=https://example.com/avatar.jpg" in rendered.delivery_text
+    assert "original_source_ref" not in rendered.delivery_text
+
+
+@pytest.mark.asyncio
+async def test_register_message_attachments_remote_reference_keeps_resolved_url(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+        remote_download_max_bytes=0,
+    )
+
+    async def _resolve_image_url(_file_id: str) -> str:
+        return "https://example.com/onebot-image.jpg"
+
+    result = await register_message_attachments(
+        registry=registry,
+        segments=[{"type": "image", "data": {"file": "onebot-file-id"}}],
+        scope_key="group:10001",
+        resolve_image_url=_resolve_image_url,
+    )
+    uid = result.attachments[0]["uid"]
+    record = registry.resolve(uid, "group:10001")
+    assert record is not None
+
+    rendered = await render_message_with_pic_placeholders(
+        f'<attachment uid="{uid}"/>',
+        registry=registry,
+        scope_key="group:10001",
+        strict=True,
+    )
+
+    assert record.source_ref == "https://example.com/onebot-image.jpg"
+    assert record.segment_data["original_source_ref"] == "onebot-file-id"
+    assert "file=https://example.com/onebot-image.jpg" in rendered.delivery_text
+    assert "original_source_ref" not in rendered.delivery_text
+
+
+@pytest.mark.asyncio
+async def test_remote_attachment_stream_over_limit_keeps_url_reference(
+    tmp_path: Path,
+) -> None:
+    async def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/octet-stream"},
+            content=b"x" * 2048,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as client:
+        registry = AttachmentRegistry(
+            registry_path=tmp_path / "attachment_registry.json",
+            cache_dir=tmp_path / "attachments",
+            http_client=client,
+            remote_download_max_bytes=1024,
+        )
+
+        record = await registry.register_remote_url(
+            "group:10001",
+            "https://example.com/stream.bin",
+            kind="file",
+            display_name="stream.bin",
+        )
+
+    assert record.local_path is None
+    assert record.source_ref == "https://example.com/stream.bin"
+
+
+@pytest.mark.asyncio
+async def test_remote_attachment_under_limit_is_cached(tmp_path: Path) -> None:
+    payload = b"small file"
+
+    async def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "content-length": str(len(payload)),
+                "content-type": "text/plain",
+            },
+            content=payload,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as client:
+        registry = AttachmentRegistry(
+            registry_path=tmp_path / "attachment_registry.json",
+            cache_dir=tmp_path / "attachments",
+            http_client=client,
+            remote_download_max_bytes=1024,
+        )
+
+        record = await registry.register_remote_url(
+            "group:10001",
+            "https://example.com/small.txt",
+            kind="file",
+            display_name="small.txt",
+            source_kind="remote_file",
+        )
+
+    assert record.local_path is not None
+    assert Path(record.local_path).read_bytes() == payload
+    assert record.source_kind == "remote_file"
 
 
 @pytest.mark.asyncio

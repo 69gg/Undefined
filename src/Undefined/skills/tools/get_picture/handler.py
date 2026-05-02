@@ -272,7 +272,7 @@ async def _deliver_embed(
                 source_kind="get_picture",
                 source_ref=f"get_picture:{picture_type}",
             )
-            uid_tags.append(f'<pic uid="{record.uid}"/>')
+            uid_tags.append(f'<attachment uid="{record.uid}"/>')
         except Exception as exc:
             logger.warning("注册图片到附件系统失败: %s", exc)
             register_fail += 1

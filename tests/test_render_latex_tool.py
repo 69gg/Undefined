@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import pytest
-from typing import Any
+from typing import Any, cast
 
 # 这个测试需要 Playwright 浏览器运行时，所以标记为可选
 pytest_plugins = ("pytest_asyncio",)
@@ -61,7 +62,7 @@ async def test_render_simple_equation() -> None:
     result = await execute(args, context)
     if "渲染失败" in result and "Executable doesn't exist" in result:
         pytest.skip("Playwright 浏览器未安装，跳过测试")
-    assert result == '<pic uid="test-uid-12345"/>'
+    assert result == '<attachment uid="test-uid-12345"/>'
     assert len(mock_registry.registered_items) == 1
     assert mock_registry.registered_items[0]["kind"] == "image"
     assert mock_registry.registered_items[0]["mime_type"] == "image/png"
@@ -85,7 +86,7 @@ async def test_render_with_delimiters() -> None:
     result = await execute(args, context)
     if "渲染失败" in result and "Executable doesn't exist" in result:
         pytest.skip("Playwright 浏览器未安装，跳过测试")
-    assert result == '<pic uid="test-uid-12345"/>'
+    assert result == '<attachment uid="test-uid-12345"/>'
     assert len(mock_registry.registered_items) == 1
 
 
@@ -137,6 +138,72 @@ async def test_invalid_output_format() -> None:
 
     result = await execute(args, context)
     assert "无效" in result or "仅支持" in result
+
+
+@pytest.mark.asyncio
+async def test_render_mathtext_runs_in_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    import Undefined.skills.toolsets.render.render_latex.handler as handler
+
+    calls: list[Any] = []
+
+    async def _fake_to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:
+        calls.append((func, args, kwargs))
+        return b"image", "image/png"
+
+    monkeypatch.setattr(asyncio, "to_thread", _fake_to_thread)
+
+    result = await handler._render_mathtext_to_bytes("x", "png")
+
+    assert result == (b"image", "image/png")
+    assert calls == [(handler._render_mathtext_sync, ("x", "png"), {})]
+
+
+@pytest.mark.asyncio
+async def test_mathjax_fallback_uses_shared_render_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import Undefined.render as render
+    import Undefined.skills.toolsets.render.render_latex.handler as handler
+
+    async def _fail_mathtext(_content: str, _output_format: str) -> tuple[bytes, str]:
+        raise RuntimeError("force fallback")
+
+    class _FakeContainer:
+        async def screenshot(self, *, type: str) -> bytes:
+            assert type == "png"
+            return b"png-bytes"
+
+    class _FakePage:
+        async def wait_for_function(self, expression: str, *, timeout: int) -> None:
+            assert expression == "() => window._mjReady === true"
+            assert timeout == 30000
+
+        async def query_selector(self, selector: str) -> _FakeContainer | None:
+            assert selector == "#math-container"
+            return _FakeContainer()
+
+    calls: list[dict[str, Any]] = []
+
+    async def _fake_render_html_with_page(
+        html_content: str,
+        callback: Any,
+        **kwargs: Any,
+    ) -> tuple[bytes, str]:
+        calls.append({"html": html_content, "kwargs": kwargs})
+        return cast(tuple[bytes, str], await callback(_FakePage()))
+
+    monkeypatch.setattr(handler, "_render_mathtext_to_bytes", _fail_mathtext)
+    monkeypatch.setattr(render, "render_html_with_page", _fake_render_html_with_page)
+
+    result = await handler._render_latex_to_bytes(
+        r"\begin{aligned}x&=1\\y&=2\end{aligned}",
+        "png",
+        proxy="http://127.0.0.1:7890",
+    )
+
+    assert result == (b"png-bytes", "image/png")
+    assert calls[0]["kwargs"]["proxy"] == "http://127.0.0.1:7890"
+    assert "math-container" in calls[0]["html"]
 
 
 def test_strip_document_wrappers() -> None:

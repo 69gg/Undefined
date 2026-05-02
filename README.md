@@ -43,7 +43,7 @@
 - **Management API + Runtime API 分层**：配置、日志、Bot 启停和管理探针由 Management API 提供；主进程 Runtime API 则专注探针、记忆只读查询、认知侧写检索和 WebUI AI Chat。详见 [docs/management-api.md](docs/management-api.md) 与 [docs/openapi.md](docs/openapi.md)。
 - **多模型池**：支持配置多个 AI 模型，可轮询、随机选择或用户指定；支持多模型并发比较，选择最佳结果继续对话。详见 [多模型功能文档](docs/multi-model.md)。
 - **本地知识库**：将纯文本文件向量化存入 ChromaDB，AI 可通过关键词搜索或语义搜索查询领域知识；支持增量嵌入与自动扫描。详见 [知识库文档](docs/knowledge.md)。
-- **全局表情包库**：收到图片后可异步判定是否为表情包，通过两阶段 LLM 管线生成纯文本描述与标签，支持关键词检索、语义检索和混合检索，并可直接按统一图片 `uid` 发送或插入 `<pic uid="..."/>`。详见 [表情包库说明](docs/memes.md)。
+- **全局表情包库**：收到图片后可异步判定是否为表情包，通过两阶段 LLM 管线生成纯文本描述与标签，支持关键词检索、语义检索和混合检索，并可直接按统一图片 `uid` 发送或插入 `<attachment uid="..."/>`。详见 [表情包库说明](docs/memes.md)。
 - **访问控制（群/私聊）**：支持 `access.mode` 三种模式（`off` / `blacklist` / `allowlist`）和群/私聊黑白名单；可按策略限制收发范围，避免误触发与误投递。详见 [docs/access-control.md](docs/access-control.md)。
 - **版本变更可查询**：仓库根目录维护 `CHANGELOG.md`，并提供 `/changelog` 命令在运行时查看最近版本和单版本摘要。
 - **并行工具执行**：无论是主 AI 还是子 Agent，均支持 `asyncio` 并发工具调用，大幅提升多任务处理速度（如同时读取多个文件或搜索多个关键词）。
@@ -57,6 +57,8 @@
 - **Anthropic Skills**：支持 Anthropic Agent Skills（SKILL.md 格式），遵循 agentskills.io 开放标准，提供领域知识注入能力。
 - **Bilibili 视频提取**：自动检测消息中的 B 站视频链接/BV 号/小程序分享，下载 1080p 视频并通过 QQ 发送；同时提供 AI 工具调用入口。
 - **arXiv 论文提取与搜索**：自动检测消息中的 arXiv 链接/标识并发送论文信息与 PDF；同时提供 `arxiv_paper` 发送工具和 `arxiv_search` 检索工具。
+- **GitHub 仓库卡片**：自动检测 GitHub 仓库链接或 `owner/repo` 仓库 ID，获取 public 仓库信息并发送简洁图片卡片，展示头像、简介、stars、forks、issues、contributors 等概览。
+- **自动处理管线**：Bilibili、arXiv、GitHub 等自动提取统一运行在 `skills/auto_pipeline` 中，斜杠命令优先级更高；命令输入/输出会写入历史，非命令消息会并行检测和处理命中管线，结果通过统一发送层写入历史并登记附件 UID 后再进入 AI 回复。远程大附件超过 `[attachments].remote_download_max_size_mb` 时只登记 URL 引用，避免无界下载和缓存膨胀。
 - **思维链支持**：支持开启思维链，提升复杂逻辑推理能力。
 - **高并发架构**：基于 `asyncio` 全异步设计，支持多队列消息处理与工具并发执行，轻松应对高并发场景。
 - **异步安全 I/O**：统一 IO 层通过线程池 + 跨平台文件锁（Linux/macOS `flock`，Windows `msvcrt`）+ 原子写入（`os.replace`）保证并发写入不损坏、且不阻塞主事件循环。

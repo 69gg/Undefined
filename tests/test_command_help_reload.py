@@ -24,6 +24,21 @@ class _DummySender:
         self.messages.append((group_id, message, mark_sent))
 
 
+class _RecordingCommandRateLimiter:
+    def __init__(self) -> None:
+        self.checks: list[str] = []
+        self.records: list[str] = []
+
+    def check_command(
+        self, _user_id: int, command_name: str, _limits: Any
+    ) -> tuple[bool, int]:
+        self.checks.append(command_name)
+        return True, 0
+
+    def record_command(self, _user_id: int, command_name: str, _limits: Any) -> None:
+        self.records.append(command_name)
+
+
 def _build_context(registry: CommandRegistry, sender: _DummySender) -> CommandContext:
     stub = cast(Any, SimpleNamespace())
     return CommandContext(
@@ -177,6 +192,38 @@ def test_command_registry_hot_reload_policy_update(tmp_path: Path) -> None:
     assert registry.is_visible(updated_meta, context) is True
 
 
+def test_subcommand_rate_limit_partially_overrides_parent(tmp_path: Path) -> None:
+    commands_dir = tmp_path / "commands"
+    commands_dir.mkdir(parents=True)
+    command_dir = _write_command(
+        commands_dir,
+        "limited",
+        command_name="limited",
+        usage="/limited",
+        handler_text="ok",
+    )
+    config_path = command_dir / "config.json"
+    config = json.loads(config_path.read_text("utf-8"))
+    config["rate_limit"] = {"user": 60, "admin": 5, "superadmin": 0}
+    config["subcommands"] = {
+        "fast": {
+            "description": "fast subcommand",
+            "rate_limit": {"user": 30},
+        }
+    }
+    config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), "utf-8")
+
+    registry = CommandRegistry(commands_dir)
+    registry.load_commands()
+
+    meta = registry.resolve("limited")
+    assert meta is not None
+    sub_meta = meta.subcommands["fast"]
+    assert sub_meta.rate_limit.user == 30
+    assert sub_meta.rate_limit.admin == 5
+    assert sub_meta.rate_limit.superadmin == 0
+
+
 @pytest.mark.asyncio
 async def test_help_command_detail_includes_template_and_readme(tmp_path: Path) -> None:
     commands_dir = tmp_path / "commands"
@@ -198,16 +245,120 @@ async def test_help_command_detail_includes_template_and_readme(tmp_path: Path) 
     sender = _DummySender()
     context = _build_context(registry, sender)
 
-    await help_execute(["foo"], context)
+    await help_execute(["foo", "-t"], context)
     output = sender.messages[-1][1]
-    assert "命令详情：/foo" in output
-    assert "描述：Foo 命令描述" in output
-    assert "用法：/foo <name>" in output
+    assert "/foo(/f)" in output
+    assert "Foo 命令描述" in output
+    assert "用法：/foo(/f) <name>" in output
     assert "示例：/foo alice" in output
-    assert "作用域：仅群聊" in output
+    assert "权限：公开 | 作用域：仅群聊" in output
     assert "别名：/f" in output
     assert "说明文档：" in output
     assert "这是 Foo 的详细说明。" in output
+
+
+@pytest.mark.asyncio
+async def test_help_command_detail_defaults_to_rendered_image(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands_dir = tmp_path / "commands"
+    commands_dir.mkdir(parents=True)
+    _write_command(
+        commands_dir,
+        "foo",
+        command_name="foo",
+        description="Foo 命令描述",
+        usage="/foo <name>",
+        example="/foo alice",
+        aliases=["f"],
+        handler_text="ok",
+        doc_text="# Foo 文档\n\n这是 Foo 的详细说明。\n\n- 第一项\n- 第二项",
+    )
+
+    rendered: dict[str, Any] = {}
+
+    async def fake_render_html_to_image(
+        html_content: str,
+        output_path: str,
+        *,
+        viewport_width: int = 1280,
+    ) -> None:
+        rendered["html"] = html_content
+        rendered["output_path"] = output_path
+        rendered["viewport_width"] = viewport_width
+
+    monkeypatch.setattr(
+        "Undefined.render.render_html_to_image",
+        fake_render_html_to_image,
+    )
+
+    registry = CommandRegistry(commands_dir)
+    registry.load_commands()
+    sender = _DummySender()
+    context = _build_context(registry, sender)
+
+    await help_execute(["foo"], context)
+
+    assert sender.messages
+    output = sender.messages[-1][1]
+    assert output.startswith("[CQ:image,file=file://")
+    assert rendered["viewport_width"] == 760
+    assert "Foo 命令描述" in rendered["html"]
+    assert "/foo(/f)" in rendered["html"]
+    assert "说明文档" in rendered["html"]
+    assert '<article class="doc-body"><h1' in rendered["html"]
+    assert "# Foo 文档" not in rendered["html"]
+    assert "<li>第一项</li>" in rendered["html"]
+    assert "这是 Foo 的详细说明。" in rendered["html"]
+
+
+@pytest.mark.asyncio
+async def test_help_list_defaults_to_rendered_image(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands_dir = tmp_path / "commands"
+    commands_dir.mkdir(parents=True)
+    _write_command(
+        commands_dir,
+        "open",
+        command_name="open",
+        usage="/open",
+        allow_in_private=True,
+        handler_text="ok",
+    )
+
+    rendered: dict[str, Any] = {}
+
+    async def fake_render_html_to_image(
+        html_content: str,
+        output_path: str,
+        *,
+        viewport_width: int = 1280,
+    ) -> None:
+        rendered["html"] = html_content
+        rendered["output_path"] = output_path
+        rendered["viewport_width"] = viewport_width
+
+    monkeypatch.setattr(
+        "Undefined.render.render_html_to_image",
+        fake_render_html_to_image,
+    )
+
+    registry = CommandRegistry(commands_dir)
+    registry.load_commands()
+    sender = _DummySender()
+    context = _build_context(registry, sender)
+
+    await help_execute([], context)
+
+    assert sender.messages
+    assert sender.messages[-1][1].startswith("[CQ:image,file=file://")
+    assert rendered["viewport_width"] == 760
+    assert "可用命令" in rendered["html"]
+    assert "/open" in rendered["html"]
+    assert "当前会话可见的斜杠命令速查表" in rendered["html"]
 
 
 @pytest.mark.asyncio
@@ -252,10 +403,10 @@ async def test_help_list_filters_private_only_commands_in_private_scope(
         registry=registry,
     )
 
-    await help_execute([], private_context)
+    await help_execute(["-t"], private_context)
     output = sender.messages[-1][1]
-    assert "当前会话：私聊" in output
-    assert "/open（群聊/私聊）" in output
+    assert "会话：私聊" in output
+    assert "/open" in output
     assert "/grouponly" not in output
 
 
@@ -328,15 +479,15 @@ async def test_help_uses_command_visibility_policy(tmp_path: Path) -> None:
     sender = _DummySender()
     context = _build_context(registry, sender)
 
-    await help_execute([], context)
+    await help_execute(["-t"], context)
     output = sender.messages[-1][1]
     assert "/visible" in output
     assert "/gated" not in output
 
     sender.messages.clear()
     context.sender_id = 42
-    await help_execute(["gated"], context)
-    assert "命令详情：/gated" in sender.messages[-1][1]
+    await help_execute(["gated", "-t"], context)
+    assert "/gated" in sender.messages[-1][1]
 
 
 @pytest.mark.asyncio
@@ -358,3 +509,48 @@ async def test_dispatch_rejects_help_flag_with_new_help_style() -> None:
     assert sender.messages
     assert "参数 --help 已弃用" in sender.messages[-1][1]
     assert "/help stats" in sender.messages[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_rate_limits_subcommands_independently(tmp_path: Path) -> None:
+    commands_dir = tmp_path / "commands"
+    commands_dir.mkdir(parents=True)
+    command_dir = _write_command(
+        commands_dir,
+        "limited",
+        command_name="limited",
+        usage="/limited <sub>",
+        handler_text="ok",
+    )
+    config_path = command_dir / "config.json"
+    config = json.loads(config_path.read_text("utf-8"))
+    config["rate_limit"] = {"user": 60, "admin": 0, "superadmin": 0}
+    config["subcommands"] = {
+        "alpha": {"description": "alpha subcommand"},
+        "beta": {"description": "beta subcommand"},
+    }
+    config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), "utf-8")
+
+    registry = CommandRegistry(commands_dir)
+    registry.load_commands()
+
+    sender = _DummySender()
+    rate_limiter = _RecordingCommandRateLimiter()
+    config_obj = cast(Any, SimpleNamespace())
+    security = cast(Any, SimpleNamespace(rate_limiter=None))
+    dispatcher = CommandDispatcher(
+        config=config_obj,
+        sender=cast(Any, sender),
+        ai=cast(Any, SimpleNamespace()),
+        faq_storage=cast(Any, SimpleNamespace()),
+        onebot=cast(Any, SimpleNamespace()),
+        security=security,
+        rate_limiter=rate_limiter,
+    )
+    dispatcher.command_registry = registry
+
+    await dispatcher.dispatch(12345, 67890, {"name": "limited", "args": ["alpha"]})
+    await dispatcher.dispatch(12345, 67890, {"name": "limited", "args": ["beta"]})
+
+    assert rate_limiter.checks == ["limited:alpha", "limited:beta"]
+    assert rate_limiter.records == ["limited:alpha", "limited:beta"]

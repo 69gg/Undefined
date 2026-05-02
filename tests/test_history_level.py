@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -37,6 +38,7 @@ async def test_add_group_message_with_level_stores_level_field(
         level="Lv.5",
         message_id=123456,
     )
+    await manager.flush_pending_saves()
 
     assert "20001" in manager._message_history
     assert len(manager._message_history["20001"]) == 1
@@ -78,10 +80,57 @@ async def test_add_group_message_without_level_stores_empty_level(
         sender_card="测试用户",
         group_name="测试群",
     )
+    await manager.flush_pending_saves()
 
     assert "20001" in manager._message_history
     record = manager._message_history["20001"][0]
     assert record["level"] == ""
+
+
+@pytest.mark.asyncio
+async def test_history_save_failure_keeps_pending_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from Undefined.utils import io
+
+    manager = MessageHistoryManager.__new__(MessageHistoryManager)
+    manager._max_records = 10000
+    manager._pending_history_saves = {}
+    manager._history_save_tasks = {}
+    path = str(tmp_path / "group_20001.json")
+    attempts = 0
+    saved_data: list[list[dict[str, object]]] = []
+
+    async def fake_write_json(
+        saved_path: str,
+        data: list[dict[str, object]],
+        *,
+        use_lock: bool = True,
+    ) -> None:
+        nonlocal attempts
+        assert saved_path == path
+        assert use_lock is True
+        attempts += 1
+        if attempts == 1:
+            raise OSError("disk full")
+        saved_data.append(data)
+
+    monkeypatch.setattr(io, "write_json", fake_write_json)
+
+    first_snapshot = [{"message": "first"}]
+    manager._queue_history_save(first_snapshot, path)
+    await manager.flush_pending_saves()
+
+    assert manager._pending_history_saves[path] == first_snapshot
+    assert path not in manager._history_save_tasks
+
+    second_snapshot = [{"message": "second"}]
+    manager._queue_history_save(second_snapshot, path)
+    await manager.flush_pending_saves()
+
+    assert manager._pending_history_saves == {}
+    assert saved_data == [second_snapshot]
 
 
 @pytest.mark.asyncio
@@ -168,7 +217,88 @@ async def test_add_group_message_with_empty_level_string(
         text_content="测试消息",
         level="",
     )
+    await manager.flush_pending_saves()
 
     record = manager._message_history["20001"][0]
     assert "level" in record
     assert record["level"] == ""
+
+
+@pytest.mark.asyncio
+async def test_add_group_message_does_not_wait_for_disk_save(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = MessageHistoryManager.__new__(MessageHistoryManager)
+    manager._message_history = {}
+    manager._max_records = 10000
+    manager._initialized = asyncio.Event()
+    manager._initialized.set()
+    manager._group_locks = {}
+
+    save_started = asyncio.Event()
+    allow_save = asyncio.Event()
+    saved_data: list[list[dict[str, object]]] = []
+
+    async def fake_save(data: list[dict[str, object]], path: str) -> None:
+        _ = path
+        save_started.set()
+        await allow_save.wait()
+        saved_data.append(data)
+
+    monkeypatch.setattr(manager, "_save_history_to_file", fake_save)
+
+    await asyncio.wait_for(
+        manager.add_group_message(
+            group_id=20001,
+            sender_id=10001,
+            text_content="测试消息",
+        ),
+        timeout=1,
+    )
+
+    assert manager._message_history["20001"][0]["message"] == "测试消息"
+    assert saved_data == []
+
+    await asyncio.wait_for(save_started.wait(), timeout=1)
+    allow_save.set()
+    await manager.flush_pending_saves()
+
+    assert saved_data[-1][0]["message"] == "测试消息"
+
+
+@pytest.mark.asyncio
+async def test_group_message_disk_saves_are_coalesced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = MessageHistoryManager.__new__(MessageHistoryManager)
+    manager._message_history = {}
+    manager._max_records = 10000
+    manager._initialized = asyncio.Event()
+    manager._initialized.set()
+    manager._group_locks = {}
+
+    first_save_started = asyncio.Event()
+    allow_first_save = asyncio.Event()
+    saved_messages: list[list[str]] = []
+
+    async def fake_save(data: list[dict[str, object]], path: str) -> None:
+        _ = path
+        saved_messages.append([str(item["message"]) for item in data])
+        if len(saved_messages) == 1:
+            first_save_started.set()
+            await allow_first_save.wait()
+
+    monkeypatch.setattr(manager, "_save_history_to_file", fake_save)
+
+    await manager.add_group_message(20001, 10001, "第一条")
+    await asyncio.wait_for(first_save_started.wait(), timeout=1)
+    await manager.add_group_message(20001, 10002, "第二条")
+    await manager.add_group_message(20001, 10003, "第三条")
+
+    allow_first_save.set()
+    await manager.flush_pending_saves()
+
+    assert saved_messages == [
+        ["第一条"],
+        ["第一条", "第二条", "第三条"],
+    ]

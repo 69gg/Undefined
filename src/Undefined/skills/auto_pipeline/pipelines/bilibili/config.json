@@ -1,0 +1,6 @@
+{
+    "name": "bilibili",
+    "description": "检测并处理 Bilibili 链接、AV 号或 BV 号自动提取。",
+    "order": 10,
+    "enabled": true
+}

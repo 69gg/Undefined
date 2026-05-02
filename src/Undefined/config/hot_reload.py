@@ -4,6 +4,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from Undefined.ai import AIClient
 from Undefined.config import Config
@@ -12,6 +13,9 @@ from Undefined.services.security import SecurityService
 from Undefined.services.queue_manager import QueueManager
 from Undefined.skills.agents.intro_generator import AgentIntroGenConfig
 from Undefined.utils.queue_intervals import build_model_queue_intervals
+
+if TYPE_CHECKING:
+    from Undefined.handlers import MessageHandler
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +64,18 @@ _MODEL_NAME_KEYS: set[str] = {
     "grok_model.model_name",
 }
 
+_CORE_AI_MODEL_CONFIG_PREFIXES: tuple[str, ...] = (
+    "chat_model",
+    "vision_model",
+    "agent_model",
+)
+
+_RUNTIME_AI_MODEL_CONFIG_PREFIXES: tuple[str, ...] = (
+    "summary_model",
+    "historian_model",
+    "grok_model",
+)
+
 _AGENT_INTRO_KEYS: set[str] = {
     "agent_intro_autogen_enabled",
     "agent_intro_autogen_queue_interval",
@@ -80,6 +96,8 @@ _CONFIG_HOT_RELOAD_KEYS: set[str] = {
 
 _SEARCH_KEYS: set[str] = {"searxng_url"}
 
+_ATTACHMENT_KEYS: set[str] = {"attachment_remote_download_max_size_mb"}
+
 
 @dataclass
 class HotReloadContext:
@@ -87,6 +105,7 @@ class HotReloadContext:
     queue_manager: QueueManager
     config_manager: ConfigManager
     security_service: SecurityService
+    message_handler: MessageHandler | None = None
 
 
 def apply_config_updates(
@@ -121,8 +140,27 @@ def apply_config_updates(
     if _needs_search_update(changed_keys):
         context.ai_client.apply_search_config(updated.searxng_url)
 
+    if _needs_attachment_update(changed_keys):
+        context.ai_client.apply_attachment_config(updated)
+
+    if _needs_core_ai_model_update(changed_keys):
+        context.ai_client.apply_model_configs(
+            chat_config=updated.chat_model,
+            vision_config=updated.vision_model,
+            agent_config=updated.agent_model,
+            runtime_config=updated,
+        )
+    elif _needs_runtime_ai_model_update(changed_keys):
+        context.ai_client.apply_runtime_config(updated)
+
     if _needs_skills_hot_reload_update(changed_keys):
         asyncio.create_task(_apply_skills_hot_reload(updated, context.ai_client))
+        asyncio.create_task(
+            _apply_message_handler_skills_hot_reload(
+                updated,
+                context.message_handler,
+            )
+        )
 
     if _needs_config_hot_reload_update(changed_keys):
         asyncio.create_task(
@@ -160,27 +198,61 @@ def _needs_search_update(changed_keys: set[str]) -> bool:
     return bool(changed_keys & _SEARCH_KEYS)
 
 
+def _needs_attachment_update(changed_keys: set[str]) -> bool:
+    return bool(changed_keys & _ATTACHMENT_KEYS)
+
+
+def _matches_prefixes(changed_keys: set[str], prefixes: tuple[str, ...]) -> bool:
+    return any(
+        key == prefix or key.startswith(f"{prefix}.")
+        for key in changed_keys
+        for prefix in prefixes
+    )
+
+
+def _needs_core_ai_model_update(changed_keys: set[str]) -> bool:
+    return _matches_prefixes(changed_keys, _CORE_AI_MODEL_CONFIG_PREFIXES)
+
+
+def _needs_runtime_ai_model_update(changed_keys: set[str]) -> bool:
+    return _matches_prefixes(changed_keys, _RUNTIME_AI_MODEL_CONFIG_PREFIXES)
+
+
 async def _apply_skills_hot_reload(updated: Config, ai_client: AIClient) -> None:
+    registries: list[Any] = [ai_client.tool_registry, ai_client.agent_registry]
+    anthropic_skill_registry = getattr(ai_client, "anthropic_skill_registry", None)
+    if anthropic_skill_registry is not None:
+        registries.append(anthropic_skill_registry)
+
     if not updated.skills_hot_reload:
-        await ai_client.tool_registry.stop_hot_reload()
-        await ai_client.agent_registry.stop_hot_reload()
+        for registry in registries:
+            await registry.stop_hot_reload()
         logger.info("[配置] 技能热重载已禁用")
         return
 
-    await ai_client.tool_registry.stop_hot_reload()
-    await ai_client.agent_registry.stop_hot_reload()
-    ai_client.tool_registry.start_hot_reload(
-        interval=updated.skills_hot_reload_interval,
-        debounce=updated.skills_hot_reload_debounce,
-    )
-    ai_client.agent_registry.start_hot_reload(
-        interval=updated.skills_hot_reload_interval,
-        debounce=updated.skills_hot_reload_debounce,
-    )
+    for registry in registries:
+        await registry.stop_hot_reload()
+        registry.start_hot_reload(
+            interval=updated.skills_hot_reload_interval,
+            debounce=updated.skills_hot_reload_debounce,
+        )
     logger.info(
         "[配置] 技能热重载已更新: interval=%.2fs debounce=%.2fs",
         updated.skills_hot_reload_interval,
         updated.skills_hot_reload_debounce,
+    )
+
+
+async def _apply_message_handler_skills_hot_reload(
+    updated: Config,
+    message_handler: MessageHandler | None,
+) -> None:
+    if message_handler is None:
+        return
+    await message_handler.apply_skills_hot_reload_config(
+        enabled=updated.skills_hot_reload,
+        interval=updated.skills_hot_reload_interval,
+        debounce=updated.skills_hot_reload_debounce,
     )
 
 

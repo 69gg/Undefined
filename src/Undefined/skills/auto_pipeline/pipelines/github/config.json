@@ -1,0 +1,6 @@
+{
+    "name": "github",
+    "description": "检测并处理 GitHub public 仓库链接或 owner/repo 自动提取。",
+    "order": 30,
+    "enabled": true
+}

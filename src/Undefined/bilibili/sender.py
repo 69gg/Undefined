@@ -40,6 +40,23 @@ def _build_info_card(info: "VideoInfo", truncate_desc: bool = True) -> str:
     return "\n".join(parts)
 
 
+def _build_video_history_message(
+    info: "VideoInfo",
+    *,
+    quality_name: str,
+    file_size_mb: float,
+) -> str:
+    return "\n".join(
+        [
+            f"[视频] 「{info.title}」",
+            f"UP主: {info.up_name}",
+            f"清晰度: {quality_name}",
+            f"大小: {file_size_mb:.1f}MB",
+            f"https://www.bilibili.com/video/{info.bvid}",
+        ]
+    )
+
+
 async def send_bilibili_video(
     video_id: str,
     sender: MessageSender,
@@ -159,7 +176,17 @@ async def send_bilibili_video(
             pre_video_card = _build_info_card(video_info, truncate_desc=False)
             await _send_message(sender, target_type, target_id, pre_video_card)
 
-            await _send_message(sender, target_type, target_id, video_message)
+            await _send_message(
+                sender,
+                target_type,
+                target_id,
+                video_message,
+                history_message=_build_video_history_message(
+                    video_info,
+                    quality_name=quality_name,
+                    file_size_mb=file_size_mb,
+                ),
+            )
             result = f"已发送视频「{video_info.title}」({quality_name}, {file_size_mb:.1f}MB)"
         except Exception as exc:
             logger.warning("[Bilibili] 视频发送失败：", exc)
@@ -201,9 +228,22 @@ async def _send_message(
     target_type: Literal["group", "private"],
     target_id: int,
     message: str,
+    *,
+    history_message: str | None = None,
+    attachments: list[dict[str, str]] | None = None,
 ) -> None:
     """根据目标类型发送消息。"""
     if target_type == "group":
-        await sender.send_group_message(target_id, message, auto_history=False)
+        await sender.send_group_message(
+            target_id,
+            message,
+            history_message=history_message,
+            attachments=attachments,
+        )
     else:
-        await sender.send_private_message(target_id, message, auto_history=False)
+        await sender.send_private_message(
+            target_id,
+            message,
+            history_message=history_message,
+            attachments=attachments,
+        )

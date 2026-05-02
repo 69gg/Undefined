@@ -18,7 +18,10 @@ from Undefined.onebot import (
 )
 from Undefined.utils.sender import MessageSender
 from Undefined.services.commands.context import CommandContext
-from Undefined.services.commands.registry import CommandMeta, CommandRegistry
+from Undefined.services.commands.registry import (
+    CommandRateLimit,
+    CommandRegistry,
+)
 from Undefined.services.security import SecurityService
 from Undefined.token_usage_storage import TokenUsageStorage
 from Undefined.ai.queue_budget import (
@@ -47,6 +50,29 @@ _STATS_CALL_TYPE_TOP_N = 12
 _STATS_DATA_SUMMARY_MAX_CHARS = 12000
 _STATS_AI_FLAGS = {"--ai", "-a"}
 _STATS_TIME_RANGE_RE = re.compile(r"^\d+[dwm]?$", re.IGNORECASE)
+
+# 命令参数中的 @ 提及：[@QQ] / [@QQ(昵称)] / [@{QQ}]
+_AT_ARG_RE = re.compile(r"^\[@\s*\{?(\d{5,15})\}?(?:\(.*?\))?\]$")
+_ARG_TOKEN_RE = re.compile(r"\[@\s*\{?\d{5,15}\}?(?:\([^\]]*\))?\]|\S+")
+
+
+def _normalize_qq_arg(arg: str) -> str:
+    """将命令参数里的 @ 提及归一化为纯数字 QQ 号。
+
+    命中 ``[@QQ号]`` / ``[@QQ号(昵称)]`` / ``[@{QQ号}]`` 时返回 ``"QQ号"``，
+    否则原样返回。命令实现因此可以始终把参数当作纯数字处理。
+    """
+    if not arg:
+        return arg
+    match = _AT_ARG_RE.match(arg.strip())
+    return match.group(1) if match else arg
+
+
+def _split_command_args(args_str: str) -> list[str]:
+    """按空白拆分命令参数，同时保留完整的 ``[@QQ(昵称)]`` 片段。"""
+    if not args_str.strip():
+        return []
+    return [match.group(0) for match in _ARG_TOKEN_RE.finditer(args_str)]
 
 
 class _PrivateCommandSenderProxy:
@@ -138,14 +164,21 @@ class CommandDispatcher:
 
         返回:
             包含命令名(name)和参数列表(args)的字典，解析失败则返回 None
+
+        说明:
+            - 仅剥离开头的 @ 机器人提及，保留命令参数中的真 @
+            - 自动将参数里的 ``[@QQ号]`` / ``[@QQ号(昵称)]`` / ``[@{QQ号}]``
+              归一化为纯数字 QQ 号，命令实现无需关心格式差异
         """
-        clean_text = re.sub(r"\[@\s*\d+(?:\(.*?\))?\]", "", text).strip()
+        clean_text = re.sub(r"^(?:\[@\s*\d+(?:\(.*?\))?\]\s*)+", "", text).strip()
         match = re.match(r"/(\w+)\s*(.*)", clean_text)
         if not match:
             return None
 
         cmd_name = match.group(1).lower()
         args_str = match.group(2).strip()
+        raw_args = _split_command_args(args_str)
+        args = [_normalize_qq_arg(arg) for arg in raw_args]
 
         logger.debug(
             "[命令] 解析命令: text_len=%s cmd=%s args=%s",
@@ -155,7 +188,7 @@ class CommandDispatcher:
         )
         return {
             "name": cmd_name,
-            "args": args_str.split() if args_str else [],
+            "args": args,
         }
 
     def _parse_time_range(self, time_str: str) -> int:
@@ -268,7 +301,15 @@ class CommandDispatcher:
             forward_messages = self._build_stats_forward_nodes(
                 summary, img_dir, days, ai_analysis
             )
-            await self.onebot.send_forward_msg(group_id, forward_messages)
+            await self._send_group_forward_message(
+                group_id,
+                forward_messages,
+                history_message=self._build_stats_history_message(
+                    summary,
+                    days,
+                    ai_analysis,
+                ),
+            )
 
             from Undefined.utils.cache import cleanup_cache_dir
 
@@ -283,6 +324,49 @@ class CommandDispatcher:
                 group_id,
                 f"❌ 生成统计图表失败，请稍后重试（错误码: {error_id}）",
             )
+
+    async def _send_group_forward_message(
+        self,
+        group_id: int,
+        messages: list[dict[str, Any]],
+        *,
+        history_message: str,
+    ) -> None:
+        send_forward = getattr(self.sender, "send_group_forward_message", None)
+        if callable(send_forward):
+            await send_forward(group_id, messages, history_message=history_message)
+            return
+
+        await self.onebot.send_forward_msg(group_id, messages)
+        if self.history_manager is None:
+            return
+        text_content = history_message.strip()
+        if not text_content:
+            return
+        await self.history_manager.add_group_message(
+            group_id=group_id,
+            sender_id=getattr(self.config, "bot_qq", 0),
+            text_content=text_content,
+            sender_nickname="Bot",
+            group_name="",
+        )
+
+    @staticmethod
+    def _build_stats_history_message(
+        summary: dict[str, Any],
+        days: int,
+        ai_analysis: str,
+    ) -> str:
+        lines = [
+            f"[命令输出] /stats 最近 {days} 天 Token 使用统计",
+            f"总调用: {summary.get('total_calls', 0)}",
+            f"总 Token: {summary.get('total_tokens', 0)}",
+            f"输入 Token: {summary.get('prompt_tokens', 0)}",
+            f"输出 Token: {summary.get('completion_tokens', 0)}",
+        ]
+        if ai_analysis.strip():
+            lines.extend(["", "AI 分析:", ai_analysis.strip()])
+        return "\n".join(lines)
 
     async def _handle_stats_private(
         self,
@@ -996,17 +1080,6 @@ class CommandDispatcher:
             )
             return
 
-        if scope == "private" and not meta.allow_in_private:
-            logger.info(
-                "[命令] 私聊作用域禁用: /%s user=%s",
-                meta.name,
-                user_id,
-            )
-            await _send_target_message(
-                f"⚠️ /{meta.name} 当前不支持私聊使用。请在群聊中 @机器人 后执行。"
-            )
-            return
-
         logger.info(
             "[命令] 命令匹配成功: input=/%s resolved=/%s permission=%s rate_limit=%s private=%s",
             cmd_name,
@@ -1022,11 +1095,49 @@ class CommandDispatcher:
             )
             return
 
-        allowed, role_name = self._check_command_permission(meta, sender_id)
+        # ── 子命令解析与推断 ──
+        subcmd_name: str | None = None
+        subcmd_meta = None
+        if meta.subcommands:
+            subcmd_name, cmd_args, subcmd_meta = (
+                self.command_registry.resolve_subcommand(meta, cmd_args)
+            )
+
+        # 确定实际用于权限/作用域/限流检查的元信息
+        effective_permission = (
+            subcmd_meta.permission if subcmd_meta else meta.permission
+        )
+        effective_allow_private = (
+            subcmd_meta.allow_in_private if subcmd_meta else meta.allow_in_private
+        )
+        effective_rate_limit = (
+            subcmd_meta.rate_limit if subcmd_meta else meta.rate_limit
+        )
+        rate_limit_key = (
+            meta.name if subcmd_name is None else f"{meta.name}:{subcmd_name}"
+        )
+
+        # 作用域检查（子命令可能覆盖 allow_in_private）
+        if scope == "private" and not effective_allow_private:
+            logger.info(
+                "[命令] 私聊作用域禁用: /%s subcmd=%s user=%s",
+                meta.name,
+                subcmd_name,
+                user_id,
+            )
+            await _send_target_message(
+                f"⚠️ /{meta.name} 当前不支持私聊使用。请在群聊中 @机器人 后执行。"
+            )
+            return
+
+        allowed, role_name = self._check_command_permission_raw(
+            effective_permission, sender_id
+        )
         if not allowed:
             logger.warning(
-                "[命令] 权限校验失败: cmd=/%s sender=%s required=%s",
+                "[命令] 权限校验失败: cmd=/%s subcmd=%s sender=%s required=%s",
                 meta.name,
+                subcmd_name,
                 sender_id,
                 role_name,
             )
@@ -1041,13 +1152,16 @@ class CommandDispatcher:
         logger.debug("[命令] 权限校验通过: cmd=/%s sender=%s", meta.name, sender_id)
 
         if not await self._check_command_rate_limit(
-            command_meta=meta,
+            rate_limit=effective_rate_limit,
+            command_name=meta.name,
+            rate_limit_key=rate_limit_key,
             sender_id=sender_id,
             send_message=_send_target_message,
         ):
             logger.warning(
-                "[命令] 速率限制拦截: cmd=/%s scope=%s sender=%s",
+                "[命令] 速率限制拦截: cmd=/%s subcmd=%s scope=%s sender=%s",
                 meta.name,
+                subcmd_name,
                 scope,
                 sender_id,
             )
@@ -1083,6 +1197,7 @@ class CommandDispatcher:
             is_webui_session=is_webui_session,
             cognitive_service=getattr(self.ai, "_cognitive_service", None),
             history_manager=self.history_manager,
+            resolved_subcommand=subcmd_name,
         )
 
         try:
@@ -1108,26 +1223,27 @@ class CommandDispatcher:
                 f"❌ 命令执行失败，请稍后重试（错误码: {error_id}）"
             )
 
-    def _check_command_permission(
+    def _check_command_permission_raw(
         self,
-        command_meta: CommandMeta,
+        permission: str,
         sender_id: int,
     ) -> tuple[bool, str]:
-        permission = command_meta.permission
         if permission == "superadmin":
             return self.config.is_superadmin(sender_id), "超级管理员"
         if permission == "admin":
-            return self.config.is_admin(sender_id), "管理员"
+            return (
+                self.config.is_admin(sender_id) or self.config.is_superadmin(sender_id)
+            ), "管理员"
         return True, ""
 
     async def _check_command_rate_limit(
         self,
-        command_meta: CommandMeta,
+        rate_limit: CommandRateLimit,
+        command_name: str,
+        rate_limit_key: str,
         sender_id: int,
         send_message: Callable[[str], Awaitable[None]],
     ) -> bool:
-        rate_limit = command_meta.rate_limit
-
         # 获取 rate_limiter 实例
         limiter = self.rate_limiter
         if limiter is None and hasattr(self.security, "rate_limiter"):
@@ -1136,12 +1252,12 @@ class CommandDispatcher:
         if limiter is None:
             logger.warning(
                 "[命令] 限流器缺失，跳过限流: cmd=/%s",
-                command_meta.name,
+                command_name,
             )
             return True
 
         allowed, remaining = limiter.check_command(
-            sender_id, command_meta.name, rate_limit
+            sender_id, rate_limit_key, rate_limit
         )
         if not allowed:
             if remaining >= 60:
@@ -1151,15 +1267,14 @@ class CommandDispatcher:
             else:
                 time_str = f"{remaining}秒"
 
-            await send_message(
-                f"⏳ /{command_meta.name} 命令太频繁，请 {time_str}后再试"
-            )
+            await send_message(f"⏳ /{command_name} 命令太频繁，请 {time_str}后再试")
             return False
 
-        limiter.record_command(sender_id, command_meta.name, rate_limit)
+        limiter.record_command(sender_id, rate_limit_key, rate_limit)
         logger.debug(
-            "[命令] 动态限流记录成功: cmd=/%s sender=%s limits=%s",
-            command_meta.name,
+            "[命令] 动态限流记录成功: cmd=/%s key=%s sender=%s limits=%s",
+            command_name,
+            rate_limit_key,
             sender_id,
             f"U:{rate_limit.user}/A:{rate_limit.admin}",
         )
@@ -1238,7 +1353,7 @@ class CommandDispatcher:
         """解析 bugfix 命令的参数"""
         if len(args) < 3:
             return (
-                "❌ 用法: /bugfix <QQ号1> [QQ号2] ... <开始时间> <结束时间>\n"
+                "❌ 用法: /bugfix <QQ号|@用户1> [QQ号|@用户2] ... <开始时间> <结束时间>\n"
                 "时间格式: YYYY/MM/DD/HH:MM，结束时间可用 now\n"
                 "示例: /bugfix 123456 2024/12/01/09:00 now"
             )
@@ -1258,7 +1373,7 @@ class CommandDispatcher:
 
             return target_qqs, start_date, end_date, start_str, end_str
         except ValueError:
-            return "❌ 参数格式错误：QQ号应为数字，时间格式应为 YYYY/MM/DD/HH:MM。"
+            return "❌ 参数格式错误：QQ号应为数字或 @ 提及，时间格式应为 YYYY/MM/DD/HH:MM。"
 
     async def _obtain_bugfix_summary(self, group_id: int, processed_text: str) -> str:
         """利用 AI 生成聊天记录的 Bug 分析摘要"""

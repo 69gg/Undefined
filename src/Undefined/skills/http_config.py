@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 from Undefined.config import get_config
 
 
@@ -25,6 +27,22 @@ def get_request_retries(default_retries: int = 0) -> int:
     if retries < 0:
         return default_retries
     return retries
+
+
+def get_request_proxy(url: str) -> str | None:
+    config = get_config(strict=False)
+    if not bool(getattr(config, "use_proxy", False)):
+        return None
+
+    http_proxy = str(getattr(config, "http_proxy", "") or "").strip()
+    https_proxy = str(getattr(config, "https_proxy", "") or "").strip()
+    scheme = urlsplit(url).scheme.lower()
+
+    if scheme == "https":
+        return https_proxy or http_proxy or None
+    if scheme == "http":
+        return http_proxy or https_proxy or None
+    return https_proxy or http_proxy or None
 
 
 def get_xxapi_url(path: str) -> str:

@@ -29,6 +29,7 @@ reasoning_effort = "high"
 responses_tool_choice_compat = true
 responses_force_stateless_replay = true
 prompt_cache_enabled = false
+stream_enabled = true
 
 [models.chat.request_params]
 temperature = 0.2
@@ -45,6 +46,7 @@ api_key = "sk-pool"
 api_mode = "chat_completions"
 reasoning_enabled = false
 reasoning_effort = "low"
+stream_enabled = true
 
 [models.chat.pool.models.request_params]
 temperature = 0.6
@@ -60,6 +62,7 @@ reasoning_effort = "low"
 responses_tool_choice_compat = true
 responses_force_stateless_replay = true
 prompt_cache_enabled = false
+stream_enabled = true
 
 [models.vision.request_params]
 temperature = 0.4
@@ -75,6 +78,7 @@ reasoning_effort = "minimal"
 responses_tool_choice_compat = true
 responses_force_stateless_replay = true
 prompt_cache_enabled = false
+stream_enabled = true
 
 [models.agent.request_params]
 temperature = 0.3
@@ -85,6 +89,7 @@ response_format = { type = "json_object" }
 model_name = "gpt-historian"
 api_mode = "chat_completions"
 reasoning_effort = "xhigh"
+stream_enabled = true
 
 [models.historian.request_params]
 temperature = 0.1
@@ -94,6 +99,7 @@ metadata = { source = "historian" }
 model_name = "gpt-summary"
 api_mode = "chat_completions"
 reasoning_effort = "xhigh"
+stream_enabled = true
 
 [models.summary.request_params]
 temperature = 0.15
@@ -105,6 +111,7 @@ api_key = "sk-grok"
 model_name = "grok-4-search"
 reasoning_enabled = true
 reasoning_effort = "low"
+stream_enabled = true
 
 [models.grok.request_params]
 temperature = 0.5
@@ -152,6 +159,7 @@ background = "transparent"
     assert cfg.chat_model.responses_tool_choice_compat is True
     assert cfg.chat_model.responses_force_stateless_replay is True
     assert cfg.chat_model.prompt_cache_enabled is False
+    assert cfg.chat_model.stream_enabled is True
     assert cfg.chat_model.request_params == {
         "temperature": 0.2,
         "metadata": {"source": "chat"},
@@ -165,6 +173,7 @@ background = "transparent"
     assert cfg.chat_model.pool.models[0].responses_tool_choice_compat is True
     assert cfg.chat_model.pool.models[0].responses_force_stateless_replay is True
     assert cfg.chat_model.pool.models[0].prompt_cache_enabled is False
+    assert cfg.chat_model.pool.models[0].stream_enabled is True
     assert cfg.chat_model.pool.models[0].request_params == {
         "temperature": 0.6,
         "metadata": {"source": "chat"},
@@ -177,6 +186,7 @@ background = "transparent"
     assert cfg.vision_model.responses_tool_choice_compat is True
     assert cfg.vision_model.responses_force_stateless_replay is True
     assert cfg.vision_model.prompt_cache_enabled is False
+    assert cfg.vision_model.stream_enabled is True
     assert cfg.vision_model.request_params == {
         "temperature": 0.4,
         "metadata": {"source": "vision"},
@@ -189,11 +199,13 @@ background = "transparent"
     assert cfg.security_model.responses_tool_choice_compat is True
     assert cfg.security_model.responses_force_stateless_replay is True
     assert cfg.security_model.prompt_cache_enabled is False
+    assert cfg.security_model.stream_enabled is True
     assert cfg.security_model.request_params == cfg.chat_model.request_params
 
     assert cfg.naga_model.api_mode == cfg.security_model.api_mode
     assert cfg.naga_model.reasoning_enabled == cfg.security_model.reasoning_enabled
     assert cfg.naga_model.reasoning_effort == cfg.security_model.reasoning_effort
+    assert cfg.naga_model.stream_enabled is True
     assert cfg.naga_model.request_params == cfg.security_model.request_params
 
     assert cfg.agent_model.api_mode == "responses"
@@ -203,6 +215,7 @@ background = "transparent"
     assert cfg.agent_model.responses_tool_choice_compat is True
     assert cfg.agent_model.responses_force_stateless_replay is True
     assert cfg.agent_model.prompt_cache_enabled is False
+    assert cfg.agent_model.stream_enabled is True
 
     assert cfg.historian_model.api_mode == "chat_completions"
     assert cfg.historian_model.reasoning_enabled is True
@@ -211,6 +224,7 @@ background = "transparent"
     assert cfg.historian_model.responses_tool_choice_compat is True
     assert cfg.historian_model.responses_force_stateless_replay is True
     assert cfg.historian_model.prompt_cache_enabled is False
+    assert cfg.historian_model.stream_enabled is True
     assert cfg.historian_model.request_params == {
         "temperature": 0.1,
         "metadata": {"source": "historian"},
@@ -223,6 +237,7 @@ background = "transparent"
     assert cfg.summary_model.responses_tool_choice_compat is True
     assert cfg.summary_model.responses_force_stateless_replay is True
     assert cfg.summary_model.prompt_cache_enabled is False
+    assert cfg.summary_model.stream_enabled is True
     assert cfg.summary_model.request_params == {
         "temperature": 0.15,
         "metadata": {"source": "summary"},
@@ -231,6 +246,7 @@ background = "transparent"
     assert cfg.grok_model.reasoning_enabled is True
     assert cfg.grok_model.reasoning_effort == "low"
     assert cfg.grok_model.prompt_cache_enabled is True
+    assert cfg.grok_model.stream_enabled is True
     assert cfg.grok_model.request_params == {
         "temperature": 0.5,
         "metadata": {"source": "grok"},

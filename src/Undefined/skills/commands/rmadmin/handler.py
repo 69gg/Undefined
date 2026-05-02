@@ -14,7 +14,7 @@ async def execute(args: list[str], context: CommandContext) -> None:
     if not args:
         await context.sender.send_group_message(
             context.group_id,
-            "❌ 用法: /rmadmin <QQ号>\n示例: /rmadmin 123456789",
+            "❌ 用法: /rmadmin <QQ号|@用户>\n示例: /rmadmin 123456789 或 /rmadmin @某人",
         )
         return
 
@@ -23,7 +23,7 @@ async def execute(args: list[str], context: CommandContext) -> None:
     except ValueError:
         await context.sender.send_group_message(
             context.group_id,
-            "❌ QQ 号格式错误，必须为数字",
+            "❌ QQ 号格式错误，必须为数字或 @ 提及",
         )
         return
 

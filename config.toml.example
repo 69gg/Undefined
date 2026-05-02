@@ -122,6 +122,9 @@ responses_force_stateless_replay = false
 # zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
 # en: Enable automatic prompt_cache_key generation (recommended).
 prompt_cache_enabled = true
+# zh: 是否对上游模型 API 启用流式请求。
+# en: Enable streaming requests to the upstream model API.
+stream_enabled = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -189,6 +192,9 @@ responses_tool_choice_compat = false
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
 prompt_cache_enabled = true
+# zh: 是否对上游模型 API 启用流式请求。
+# en: Enable streaming requests to the upstream model API.
+stream_enabled = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -246,6 +252,9 @@ responses_tool_choice_compat = false
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
 prompt_cache_enabled = true
+# zh: 是否对上游模型 API 启用流式请求。
+# en: Enable streaming requests to the upstream model API.
+stream_enabled = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -301,6 +310,9 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级。
 # en: Responses API force stateless replay.
 responses_force_stateless_replay = false
+# zh: 是否对上游模型 API 启用流式请求。
+# en: Enable streaming requests to the upstream model API.
+stream_enabled = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -355,6 +367,9 @@ responses_tool_choice_compat = false
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
 prompt_cache_enabled = true
+# zh: 是否对上游模型 API 启用流式请求。
+# en: Enable streaming requests to the upstream model API.
+stream_enabled = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -422,6 +437,9 @@ responses_tool_choice_compat = false
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
 prompt_cache_enabled = true
+# zh: 是否对上游模型 API 启用流式请求。
+# en: Enable streaming requests to the upstream model API.
+stream_enabled = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -476,6 +494,9 @@ responses_tool_choice_compat = false
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
 prompt_cache_enabled = true
+# zh: 是否对上游模型 API 启用流式请求。
+# en: Enable streaming requests to the upstream model API.
+stream_enabled = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -520,6 +541,9 @@ reasoning_effort_style = "openai"
 # zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
 # en: Enable automatic prompt_cache_key generation (recommended).
 prompt_cache_enabled = true
+# zh: 是否对上游模型 API 启用流式请求。
+# en: Enable streaming requests to the upstream model API.
+stream_enabled = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
@@ -754,6 +778,13 @@ onebot_fetch_limit = 10000
 # en: Max messages/members returned by group analysis tools.
 group_analysis_limit = 500
 
+# zh: 附件缓存配置。
+# en: Attachment cache settings.
+[attachments]
+# zh: 远程附件自动下载并缓存的最大大小（MB）。超过上限或设为 0 时只保留 URL 引用，不下载文件内容。
+# en: Max remote attachment size (MB) to download into cache. Above the limit, or 0, keeps only a URL reference.
+remote_download_max_size_mb = 25
+
 # zh: Skills 热重载配置（可选）。
 # en: Skills hot reload settings (optional).
 [skills]
@@ -799,6 +830,8 @@ grok_search_enabled = false
 [proxy]
 # zh: 是否使用代理。
 # en: Whether to use proxy.
+# zh: 作用于 GitHub/arXiv 自动提取等走统一 HTTP 客户端的联网请求；关闭后也不会再读取代理环境变量。
+# en: Applies to GitHub/arXiv auto extraction and other shared HTTP-client requests; when disabled, proxy env vars are ignored.
 use_proxy = true
 # zh: 例如 http://127.0.0.1:7890（也可使用环境变量 "HTTP_PROXY"）。
 # en: e.g. http://127.0.0.1:7890 (or use the "HTTP_PROXY" environment variable).
@@ -816,6 +849,13 @@ request_timeout_seconds = 30.0
 # zh: 默认重试次数（0-5）。
 # en: Default retry count (0-5).
 request_retries = 0
+
+# zh: HTML/Markdown 图片渲染配置。
+# en: HTML/Markdown image rendering settings.
+[render]
+# zh: 渲染浏览器最大同时开启数量。0 表示自动：Linux 默认 1，其它平台默认 2。
+# en: Max concurrent render browser pages. 0 = auto: Linux defaults to 1, other platforms default to 2.
+browser_max_concurrency = 0
 
 # zh: 第三方 API 基础地址（便于自定义镜像或私有网关）。
 # en: Third-party API base URLs (for mirrors or private gateways).
@@ -941,6 +981,25 @@ author_preview_limit = 20
 # zh: 论文信息里摘要预览的最大字符数。<=0 回退 1000。
 # en: Max summary preview characters in paper info. <=0 falls back to 1000.
 summary_preview_chars = 1000
+
+# zh: GitHub 仓库自动提取配置（仅获取 public 仓库信息）。
+# en: GitHub repository auto-extraction settings (public repositories only).
+[github]
+# zh: 是否启用自动提取（检测到 GitHub 仓库链接或 owner/repo 仓库 ID 时自动发送图片卡片）。
+# en: Enable auto-extraction (auto-send an image card when GitHub repository links or owner/repo IDs are detected).
+auto_extract_enabled = false
+# zh: GitHub API 请求超时（秒）。<=0 回退 10，>60 截断到 60。
+# en: GitHub API request timeout (seconds). <=0 falls back to 10, >60 is clamped to 60.
+request_timeout_seconds = 10.0
+# zh: 自动提取功能的群聊白名单（空=跟随全局 access.allowed_group_ids）。
+# en: Group allowlist for auto-extraction (empty = follow global access.allowed_group_ids).
+auto_extract_group_ids = []
+# zh: 自动提取功能的私聊白名单（空=跟随全局 access.allowed_private_ids）。
+# en: Private chat allowlist for auto-extraction (empty = follow global access.allowed_private_ids).
+auto_extract_private_ids = []
+# zh: 单条消息最多自动处理几个 GitHub 仓库。<=0 回退 3，>10 截断到 10。
+# en: Max number of GitHub repositories to auto-process from one message. <=0 falls back to 3, >10 is clamped to 10.
+auto_extract_max_items = 3
 
 # zh: Code Delivery Agent 配置（代码交付 Agent，在 Docker 容器中编写代码并打包上传）。
 # en: Code Delivery Agent settings (writes code in Docker containers and delivers packaged results).

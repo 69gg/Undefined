@@ -1,0 +1,23 @@
+{
+    "type": "function",
+    "function": {
+        "name": "get_avatar",
+        "description": "获取指定QQ用户的头像，返回可在回复中嵌入的图片 UID。适用于需要展示用户头像的场景。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "user_id": {
+                    "type": "integer",
+                    "description": "要获取头像的QQ号"
+                },
+                "size": {
+                    "type": "integer",
+                    "description": "头像尺寸（像素），可选值：40、100、140、640。默认 100。",
+                    "default": 100,
+                    "enum": [40, 100, 140, 640]
+                }
+            },
+            "required": ["user_id"]
+        }
+    }
+}

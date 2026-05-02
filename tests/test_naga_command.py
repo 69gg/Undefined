@@ -109,7 +109,7 @@ async def test_naga_hidden_from_help_in_non_allowlisted_group(
         allowed_groups={123},
     )
 
-    await help_execute([], context)
+    await help_execute(["-t"], context)
 
     assert sender.group_messages
     output = sender.group_messages[-1][1]
@@ -131,11 +131,12 @@ async def test_naga_visible_in_help_for_superadmin_private(
         allowed_groups={123},
     )
 
-    await help_execute([], context)
+    await help_execute(["-t"], context)
 
-    assert sender.group_messages
-    output = sender.group_messages[-1][1]
-    assert "/naga <bind|unbind> [参数]" in output
+    assert sender.private_messages
+    output = sender.private_messages[-1][1]
+    assert "/naga" in output
+    assert "NagaAgent" in output
 
 
 @pytest.mark.asyncio
@@ -154,10 +155,10 @@ async def test_naga_hidden_when_runtime_api_disabled(
     )
     context.config.api.enabled = False
 
-    await help_execute([], context)
+    await help_execute(["-t"], context)
 
-    assert sender.group_messages
-    output = sender.group_messages[-1][1]
+    assert sender.private_messages
+    output = sender.private_messages[-1][1]
     assert "/naga <bind|unbind> [参数]" not in output
 
 
@@ -210,6 +211,38 @@ async def test_naga_bind_submits_pending_and_replies(
 
     pending = store.get_pending("alice")
     assert pending is not None
+    assert sender.group_messages
+    assert "等待 Naga 端确认" in sender.group_messages[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_naga_bind_uses_dispatch_resolved_subcommand(
+    registry: CommandRegistry,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sender = _DummySender()
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    context = _context(
+        sender=sender,
+        registry=registry,
+        scope="group",
+        group_id=123,
+        allowed_groups={123},
+        store=store,
+    )
+    context.resolved_subcommand = "bind"
+
+    async def _accepted(*_: Any, **__: Any) -> tuple[str, str]:
+        return "accepted", "HTTP 202"
+
+    monkeypatch.setattr(naga_handler, "_submit_bind_request_to_naga", _accepted)
+
+    await naga_handler.execute(["bind", "alice"], context)
+
+    pending = store.get_pending("alice")
+    assert pending is not None
+    assert store.get_pending("bind") is None
     assert sender.group_messages
     assert "等待 Naga 端确认" in sender.group_messages[-1][1]
 

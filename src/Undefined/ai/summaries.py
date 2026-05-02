@@ -10,7 +10,7 @@ import aiofiles
 from Undefined.ai.llm import ModelRequester
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.ai.tokens import TokenCounter
-from Undefined.config import ChatModelConfig
+from Undefined.config import AgentModelConfig, ChatModelConfig
 from Undefined.utils.logging import log_debug_json
 from Undefined.utils.resources import read_text_resource
 
@@ -32,7 +32,7 @@ class SummaryService:
     def __init__(
         self,
         requester: ModelRequester,
-        chat_config: ChatModelConfig,
+        chat_config: ChatModelConfig | AgentModelConfig,
         token_counter: TokenCounter,
         summarize_prompt_path: str = "res/prompts/summarize.txt",
         merge_prompt_path: str = "res/prompts/merge_summaries.txt",

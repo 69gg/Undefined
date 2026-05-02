@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import cast
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -23,6 +25,146 @@ def sender() -> MessageSender:
     config.private_access_denied_reason.return_value = None
 
     return MessageSender(onebot, history_manager, bot_qq=10000, config=config)
+
+
+@pytest.mark.asyncio
+async def test_send_group_file_registers_attachment_in_history(
+    tmp_path: Path,
+) -> None:
+    file_path = tmp_path / "paper.pdf"
+    file_path.write_bytes(b"pdf")
+    onebot = MagicMock()
+    onebot.upload_group_file = AsyncMock()
+    history_manager = MagicMock()
+    history_manager.add_group_message = AsyncMock()
+    config = MagicMock()
+    config.is_group_allowed.return_value = True
+    config.access_control_enabled.return_value = False
+    config.group_access_denied_reason.return_value = None
+
+    record = SimpleNamespace(
+        prompt_ref=lambda: {
+            "uid": "file_test",
+            "kind": "file",
+            "media_type": "file",
+            "display_name": "paper.pdf",
+        }
+    )
+    attachment_registry = SimpleNamespace(
+        register_local_file=AsyncMock(return_value=record)
+    )
+    sender = MessageSender(
+        onebot,
+        history_manager,
+        bot_qq=10000,
+        config=config,
+        attachment_registry=attachment_registry,
+    )
+
+    await sender.send_group_file(12345, str(file_path), "paper.pdf")
+
+    attachment_registry.register_local_file.assert_awaited_once()
+    history_mock = cast(AsyncMock, history_manager.add_group_message)
+    assert history_mock.await_count == 1
+    assert history_mock.await_args is not None
+    kwargs = history_mock.await_args.kwargs
+    assert kwargs["attachments"][0]["uid"] == "file_test"
+    assert "uid=file_test" in kwargs["text_content"]
+
+
+@pytest.mark.asyncio
+async def test_send_group_message_registers_local_cq_media(
+    sender: MessageSender,
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "card.png"
+    video_path = tmp_path / "clip.mp4"
+    image_path.write_bytes(b"png")
+    video_path.write_bytes(b"video")
+
+    image_record = SimpleNamespace(
+        prompt_ref=lambda: {
+            "uid": "pic_card",
+            "kind": "image",
+            "media_type": "image",
+            "display_name": "card.png",
+        }
+    )
+    video_record = SimpleNamespace(
+        prompt_ref=lambda: {
+            "uid": "file_clip",
+            "kind": "video",
+            "media_type": "video",
+            "display_name": "clip.mp4",
+        }
+    )
+    sender.attachment_registry = SimpleNamespace(
+        register_local_file=AsyncMock(side_effect=[image_record, video_record])
+    )
+    sender.onebot.send_group_message = AsyncMock(  # type: ignore[method-assign]
+        return_value={"message_id": 123}
+    )
+    message = (
+        f"[CQ:image,file={image_path.resolve().as_uri()}]"
+        f"[CQ:video,file={video_path.resolve().as_uri()}]"
+    )
+
+    await sender.send_group_message(12345, message, history_message="媒体预处理")
+
+    sender.attachment_registry.register_local_file.assert_any_await(
+        "group:12345",
+        str(image_path.resolve()),
+        kind="image",
+        display_name="card.png",
+        source_kind="sent_image",
+        source_ref=image_path.resolve().as_uri(),
+    )
+    sender.attachment_registry.register_local_file.assert_any_await(
+        "group:12345",
+        str(video_path.resolve()),
+        kind="video",
+        display_name="clip.mp4",
+        source_kind="sent_video",
+        source_ref=video_path.resolve().as_uri(),
+    )
+    history_mock = cast(AsyncMock, sender.history_manager.add_group_message)
+    assert history_mock.await_args is not None
+    kwargs = history_mock.await_args.kwargs
+    assert [item["uid"] for item in kwargs["attachments"]] == [
+        "pic_card",
+        "file_clip",
+    ]
+    assert "uid=pic_card" in kwargs["text_content"]
+    assert "uid=file_clip" in kwargs["text_content"]
+
+
+@pytest.mark.asyncio
+async def test_send_group_forward_message_records_history(
+    sender: MessageSender,
+) -> None:
+    onebot = cast(Any, sender.onebot)
+    onebot.send_forward_msg = AsyncMock()
+    nodes = [
+        {
+            "type": "node",
+            "data": {"name": "Bot", "uin": "10000", "content": "长内容"},
+        }
+    ]
+
+    await sender.send_group_forward_message(
+        12345,
+        nodes,
+        history_message="[命令输出] 合并转发摘要",
+    )
+
+    onebot.send_forward_msg.assert_awaited_once_with(12345, nodes)
+    history_mock = cast(AsyncMock, sender.history_manager.add_group_message)
+    history_mock.assert_awaited_once()
+    assert history_mock.await_args is not None
+    kwargs = history_mock.await_args.kwargs
+    assert kwargs["group_id"] == 12345
+    assert kwargs["sender_id"] == 10000
+    assert kwargs["text_content"] == "[命令输出] 合并转发摘要"
 
 
 @pytest.mark.asyncio

@@ -30,6 +30,8 @@ class MessageHistoryManager:
         self._private_message_history: dict[str, list[dict[str, Any]]] = {}
         self._group_locks: dict[str, asyncio.Lock] = {}
         self._private_locks: dict[str, asyncio.Lock] = {}
+        self._pending_history_saves: dict[str, list[dict[str, Any]]] = {}
+        self._history_save_tasks: dict[str, asyncio.Task[None]] = {}
 
         # Lazy Load 初始化标志
         self._initialized = asyncio.Event()
@@ -54,6 +56,60 @@ class MessageHistoryManager:
             lock = asyncio.Lock()
             self._private_locks[user_id] = lock
         return lock
+
+    def _ensure_save_state(self) -> None:
+        if not hasattr(self, "_pending_history_saves"):
+            self._pending_history_saves = {}
+        if not hasattr(self, "_history_save_tasks"):
+            self._history_save_tasks = {}
+
+    def _snapshot_history(self, history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if self._max_records > 0 and len(history) > self._max_records:
+            return list(history[-self._max_records :])
+        return list(history)
+
+    def _queue_history_save(self, history: list[dict[str, Any]], path: str) -> None:
+        self._ensure_save_state()
+        self._pending_history_saves[path] = self._snapshot_history(history)
+        task = self._history_save_tasks.get(path)
+        if task is None or task.done():
+            self._history_save_tasks[path] = asyncio.create_task(
+                self._drain_history_save(path),
+                name=f"history_save:{path}",
+            )
+
+    async def _drain_history_save(self, path: str) -> None:
+        failed = False
+        try:
+            while True:
+                self._ensure_save_state()
+                history = self._pending_history_saves.pop(path, None)
+                if history is None:
+                    break
+                try:
+                    await self._save_history_to_file(history, path)
+                except Exception:
+                    logger.exception("[历史记录错误] 保存历史失败: path=%s", path)
+                    self._pending_history_saves.setdefault(path, history)
+                    failed = True
+                    break
+        finally:
+            self._ensure_save_state()
+            current_task = asyncio.current_task()
+            if self._history_save_tasks.get(path) is current_task:
+                self._history_save_tasks.pop(path, None)
+            if not failed and path in self._pending_history_saves:
+                self._history_save_tasks[path] = asyncio.create_task(
+                    self._drain_history_save(path),
+                    name=f"history_save:{path}",
+                )
+
+    async def flush_pending_saves(self) -> None:
+        self._ensure_save_state()
+        while self._history_save_tasks:
+            tasks = list(self._history_save_tasks.values())
+            await asyncio.gather(*tasks, return_exceptions=True)
+            self._ensure_save_state()
 
     async def _lazy_init(self) -> None:
         """后台异步加载所有历史记录"""
@@ -105,6 +161,7 @@ class MessageHistoryManager:
             logger.debug(f"[历史记录] 保存成功: path={path}")
         except Exception as e:
             logger.error(f"[历史记录错误] 保存历史记录失败 {path}: {e}")
+            raise
 
     async def _load_history_from_file(self, path: str) -> list[dict[str, Any]]:
         """异步从文件加载历史记录"""
@@ -358,7 +415,7 @@ class MessageHistoryManager:
                     group_id_str
                 ][-self._max_records :]
 
-            await self._save_history_to_file(
+            self._queue_history_save(
                 self._message_history[group_id_str],
                 self._get_group_history_path(group_id),
             )
@@ -410,7 +467,7 @@ class MessageHistoryManager:
                     self._private_message_history[user_id_str][-self._max_records :]
                 )
 
-            await self._save_history_to_file(
+            self._queue_history_save(
                 self._private_message_history[user_id_str],
                 self._get_private_history_path(user_id),
             )
@@ -486,8 +543,8 @@ class MessageHistoryManager:
                         f"old_len={old_length}, new_len={new_length}"
                     )
 
-                    # 原子保存
-                    await self._save_history_to_file(
+                    # 后台合并保存，避免安全检测路径阻塞在全量落盘上。
+                    self._queue_history_save(
                         self._message_history[group_id_str],
                         self._get_group_history_path(group_id),
                     )
@@ -523,8 +580,8 @@ class MessageHistoryManager:
                     f"old_len={old_length}, new_len={new_length}"
                 )
 
-                # 原子保存
-                await self._save_history_to_file(
+                # 后台合并保存，避免安全检测路径阻塞在全量落盘上。
+                self._queue_history_save(
                     self._private_message_history[user_id_str],
                     self._get_private_history_path(user_id),
                 )

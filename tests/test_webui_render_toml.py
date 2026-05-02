@@ -75,6 +75,7 @@ responses_tool_choice_compat = true
 responses_force_stateless_replay = true
 reasoning_enabled = true
 reasoning_effort = "high"
+stream_enabled = true
 
 [models.chat.pool.models.request_params]
 temperature = 0.7
@@ -96,6 +97,7 @@ name = "beta"
         assert model["responses_force_stateless_replay"] is True
         assert model["reasoning_enabled"] is True
         assert model["reasoning_effort"] == "high"
+        assert model["stream_enabled"] is True
         params = model["request_params"]
         assert params["temperature"] == 0.7
         assert params["metadata"]["source"] == "webui"

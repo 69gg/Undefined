@@ -384,7 +384,7 @@ async def test_execute_defaults_to_embed_and_returns_pic_uid(
         },
     )
 
-    assert result.startswith('已生成图片，可在回复中插入 <pic uid="pic_')
+    assert result.startswith('已生成图片，可在回复中插入 <attachment uid="pic_')
     uid = result.split('uid="', 1)[1].split('"', 1)[0]
     record = registry.resolve(uid, "group:10001")
     assert record is not None
@@ -508,7 +508,7 @@ async def test_execute_models_reference_images_uses_edit_endpoint_and_config(
         },
     )
 
-    assert result.startswith('已生成图片，可在回复中插入 <pic uid="pic_')
+    assert result.startswith('已生成图片，可在回复中插入 <attachment uid="pic_')
     assert seen_request["method"] == "POST"
     assert seen_request["url"] == "https://edit.example.com/v1/images/edits"
     assert seen_request["data"]["model"] == "grok-edit-1.0"

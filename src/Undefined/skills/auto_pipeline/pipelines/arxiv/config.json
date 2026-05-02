@@ -1,0 +1,6 @@
+{
+    "name": "arxiv",
+    "description": "检测并处理 arXiv 论文链接或论文编号自动提取。",
+    "order": 20,
+    "enabled": true
+}

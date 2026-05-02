@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
@@ -15,53 +12,6 @@ from Undefined.services.commands.context import CommandContext
 from .policy import is_naga_command_visible
 
 logger = logging.getLogger(__name__)
-
-_SCOPES_FILE = Path(__file__).parent / "scopes.json"
-
-
-def _load_scopes_sync() -> dict[str, str]:
-    try:
-        with open(_SCOPES_FILE, encoding="utf-8") as f:
-            data = json.load(f)
-        return {str(k): str(v) for k, v in data.items()}
-    except Exception:
-        return {}
-
-
-async def _load_scopes() -> dict[str, str]:
-    return await asyncio.to_thread(_load_scopes_sync)
-
-
-_SCOPE_ALIASES: dict[str, str] = {
-    "admin_only": "admin",
-    "superadmin_only": "superadmin",
-}
-
-
-async def _check_scope(
-    subcmd: str, sender_id: int, context: CommandContext
-) -> str | None:
-    scopes = await _load_scopes()
-    raw = scopes.get(subcmd, "superadmin")
-    scope = _SCOPE_ALIASES.get(raw, raw)
-
-    if scope == "group_only":
-        if context.scope != "group":
-            return "该子命令仅限群聊使用"
-        return None
-    if scope == "private_only":
-        if context.scope != "private":
-            return "该子命令仅限私聊使用"
-        return None
-    if scope == "public":
-        return None
-    if scope == "superadmin" and context.config.is_superadmin(sender_id):
-        return None
-    if scope == "admin" and (
-        context.config.is_admin(sender_id) or context.config.is_superadmin(sender_id)
-    ):
-        return None
-    return "权限不足"
 
 
 async def _reply(context: CommandContext, text: str) -> None:
@@ -158,7 +108,8 @@ async def execute(args: list[str], context: CommandContext) -> None:
         await _reply(context, "Naga 集成未启用")
         return
 
-    if not args:
+    resolved_subcommand = (context.resolved_subcommand or "").strip().lower()
+    if not resolved_subcommand and not args:
         await _reply(
             context,
             "用法: /naga <bind|unbind> [参数]\n"
@@ -168,24 +119,17 @@ async def execute(args: list[str], context: CommandContext) -> None:
         )
         return
 
-    subcmd = args[0].lower()
-    sub_args = args[1:]
+    subcmd = resolved_subcommand or args[0].lower()
+    if resolved_subcommand:
+        sub_args = args[1:] if args and args[0].lower() == resolved_subcommand else args
+    else:
+        sub_args = args[1:]
     logger.info(
         "[NagaCmd] 子命令解析: trace=%s subcmd=%s sub_args=%s",
         trace_id,
         subcmd,
         sub_args,
     )
-    perm_err = await _check_scope(subcmd, context.sender_id, context)
-    if perm_err is not None:
-        logger.warning(
-            "[NagaCmd] 权限/作用域拒绝: trace=%s subcmd=%s err=%s",
-            trace_id,
-            subcmd,
-            perm_err,
-        )
-        await _reply(context, f"❌ {perm_err}")
-        return
 
     store = _naga_store(context)
     if store is None:
@@ -224,9 +168,6 @@ async def _handle_bind(
         context.group_id,
         args,
     )
-    if context.scope != "group":
-        await _reply(context, "❌ bind 命令仅限群聊中使用")
-        return
     if not args:
         await _reply(context, "用法: /naga bind <naga_id>")
         return

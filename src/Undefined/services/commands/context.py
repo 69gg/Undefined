@@ -34,3 +34,14 @@ class CommandContext:
     is_webui_session: bool = False
     cognitive_service: Any = None
     history_manager: Any = None
+    resolved_subcommand: str | None = None
+
+    def check_permission(self, permission: str) -> bool:
+        """统一权限检查入口，供 handler 内部提权场景使用。"""
+        if permission == "superadmin":
+            return self.config.is_superadmin(self.sender_id)
+        if permission == "admin":
+            return self.config.is_admin(self.sender_id) or self.config.is_superadmin(
+                self.sender_id
+            )
+        return True

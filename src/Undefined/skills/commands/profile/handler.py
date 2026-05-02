@@ -108,6 +108,17 @@ async def _send_forward(
         }
 
     nodes = [_node(metadata), _node(profile_text)]
+    history_message = (
+        f"[命令输出] /profile 合并转发\n{metadata}\n\n{_truncate(profile_text)}"
+    )
+    send_forward = getattr(context.sender, "send_group_forward_message", None)
+    if callable(send_forward):
+        await send_forward(
+            context.group_id,
+            nodes,
+            history_message=history_message,
+        )
+        return
     await context.onebot.send_forward_msg(context.group_id, nodes)
 
 
@@ -181,18 +192,34 @@ body {{
         await context.sender.send_group_message(context.group_id, image_cq)
 
 
+async def _handle_render_fallback(
+    context: CommandContext,
+    metadata: str,
+    profile_text: str,
+) -> None:
+    if _is_private(context):
+        await _send_text(context, profile_text)
+        return
+
+    try:
+        await _send_forward(context, metadata, profile_text)
+    except Exception:
+        logger.exception("渲染侧写图片失败后发送合并转发也失败，回退到纯文本")
+        await _send_text(context, profile_text)
+
+
 # ── 入口 ─────────────────────────────────────────────────────
 
 
 async def execute(args: list[str], context: CommandContext) -> None:
     """处理 /profile 命令。
 
-    用法: /p [g] [-t|--text] [-f|--forward] [-r|--render] [目标ID]
-      g / group      查看群聊侧写（仅群聊可用）
-      -t / --text    纯文本直接发出
-      -f / --forward 合并转发发出（群聊默认）
-      -r / --render  渲染为图片发出
-      目标ID          指定查询对象（仅超级管理员）
+      用法: /p [g] [-t|--text] [-f|--forward] [-r|--render] [目标ID]
+    g / group      查看群聊侧写（仅群聊可用）
+    -t / --text    纯文本直接发出
+          -f / --forward 合并转发发出
+          -r / --render  渲染为图片发出（默认）
+    目标ID          指定查询对象（仅超级管理员）
     """
     cognitive_service = context.cognitive_service
     if cognitive_service is None:
@@ -203,7 +230,7 @@ async def execute(args: list[str], context: CommandContext) -> None:
 
     # 超管指定目标
     if target:
-        if not context.config.is_superadmin(context.sender_id):
+        if not context.check_permission("superadmin"):
             await _send_text(context, "❌ 仅超级管理员可查看他人侧写")
             return
 
@@ -227,13 +254,9 @@ async def execute(args: list[str], context: CommandContext) -> None:
     profile = _truncate(profile)
     metadata = _build_metadata(entity_type, entity_id, len(profile))
 
-    # 私聊始终纯文本
-    if _is_private(context):
-        mode = _MODE_TEXT
-
-    # 未指定模式：群聊默认合并转发
+    # 未指定模式：默认渲染图片
     if not mode:
-        mode = _MODE_FORWARD
+        mode = _MODE_RENDER
 
     if mode == _MODE_TEXT:
         await _send_text(context, profile)
@@ -241,9 +264,12 @@ async def execute(args: list[str], context: CommandContext) -> None:
         try:
             await _send_render(context, metadata, profile)
         except Exception:
-            logger.exception("渲染侧写图片失败，回退到纯文本")
-            await _send_text(context, profile)
+            logger.exception("渲染侧写图片失败，回退到合并转发")
+            await _handle_render_fallback(context, metadata, profile)
     else:
+        if _is_private(context):
+            await _send_text(context, profile)
+            return
         try:
             await _send_forward(context, metadata, profile)
         except Exception:

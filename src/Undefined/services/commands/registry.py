@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import sys
 import threading
 import time
 import types
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, cast
 
@@ -36,6 +37,35 @@ class CommandRateLimit:
 
 
 @dataclass
+class SubcommandInferenceRule:
+    """子命令推断规则：正则匹配 args[0] 推断为指定子命令。"""
+
+    pattern: re.Pattern[str]
+    subcommand: str
+
+
+@dataclass
+class SubcommandInference:
+    """子命令自动推断配置。"""
+
+    default: str | None = None
+    rules: list[SubcommandInferenceRule] = field(default_factory=list)
+    fallback: str | None = None
+
+
+@dataclass
+class SubcommandMeta:
+    """子命令元信息。"""
+
+    name: str
+    description: str
+    permission: str
+    allow_in_private: bool
+    rate_limit: CommandRateLimit
+    args: str = ""
+
+
+@dataclass
 class CommandMeta:
     """命令元信息。"""
 
@@ -55,6 +85,8 @@ class CommandMeta:
     module_name: str
     visibility_path: Path | None
     visibility_module_name: str | None
+    subcommands: dict[str, SubcommandMeta] = field(default_factory=dict)
+    inference: SubcommandInference | None = None
     handler: CommandHandler | None = None
     visibility_checker: CommandVisibilityChecker | None = None
 
@@ -153,17 +185,21 @@ class CommandRegistry:
                 ]
             )
 
+            parent_rate_limit = self._normalize_rate_limit(config.get("rate_limit"))
+            parent_permission = self._normalize_permission(config.get("permission"))
+            parent_allow_private = bool(config.get("allow_in_private", False))
+
             meta = CommandMeta(
                 name=name,
                 description=str(config.get("description") or "").strip(),
                 usage=str(config.get("usage") or f"/{name}").strip(),
                 example=str(config.get("example") or "").strip(),
-                permission=self._normalize_permission(config.get("permission")),
-                rate_limit=self._normalize_rate_limit(config.get("rate_limit")),
+                permission=parent_permission,
+                rate_limit=parent_rate_limit,
                 show_in_help=bool(config.get("show_in_help", True)),
                 order=int(config.get("order", 999)),
                 aliases=self._normalize_aliases(config.get("aliases")),
-                allow_in_private=bool(config.get("allow_in_private", False)),
+                allow_in_private=parent_allow_private,
                 help_footer=self._normalize_help_footer(config.get("help_footer")),
                 handler_path=handler_path,
                 doc_path=(command_dir / _COMMAND_DOC_FILENAME)
@@ -184,6 +220,13 @@ class CommandRegistry:
                 )
                 if (command_dir / _COMMAND_POLICY_FILENAME).exists()
                 else None,
+                subcommands=self._normalize_subcommands(
+                    config.get("subcommands"),
+                    parent_permission,
+                    parent_allow_private,
+                    parent_rate_limit,
+                ),
+                inference=self._normalize_inference(config.get("inference")),
             )
             if name in commands:
                 logger.warning(
@@ -192,13 +235,17 @@ class CommandRegistry:
                     command_dir,
                 )
             commands[name] = meta
+            subcmd_info = (
+                f" subcommands={len(meta.subcommands)}" if meta.subcommands else ""
+            )
             logger.info(
-                "[CommandRegistry] 已注册命令: /%s permission=%s rate_limit=%s private=%s aliases=%s",
+                "[CommandRegistry] 已注册命令: /%s permission=%s rate_limit=%s private=%s aliases=%s%s",
                 meta.name,
                 meta.permission,
                 f"U:{meta.rate_limit.user}s/A:{meta.rate_limit.admin}s/S:{meta.rate_limit.superadmin}s",
                 meta.allow_in_private,
                 meta.aliases or "[]",
+                subcmd_info,
             )
             for alias in meta.aliases:
                 existing = aliases.get(alias)
@@ -248,6 +295,24 @@ class CommandRegistry:
             return CommandRateLimit(user=3600, admin=0, superadmin=0)
         return CommandRateLimit()
 
+    def _merge_rate_limit(
+        self, value: Any, parent_rate_limit: CommandRateLimit
+    ) -> CommandRateLimit:
+        if not isinstance(value, dict):
+            return parent_rate_limit
+        try:
+            return CommandRateLimit(
+                user=int(value.get("user", parent_rate_limit.user)),
+                admin=int(value.get("admin", parent_rate_limit.admin)),
+                superadmin=int(value.get("superadmin", parent_rate_limit.superadmin)),
+            )
+        except (ValueError, TypeError):
+            logger.warning(
+                "[CommandRegistry] 子命令限流配置解析失败，继承父命令: %s",
+                value,
+            )
+            return parent_rate_limit
+
     def _normalize_aliases(self, value: Any) -> list[str]:
         if not isinstance(value, list):
             return []
@@ -267,6 +332,122 @@ class CommandRegistry:
             if line:
                 footer.append(line)
         return footer
+
+    def _normalize_subcommands(
+        self,
+        value: Any,
+        parent_permission: str,
+        parent_allow_private: bool,
+        parent_rate_limit: CommandRateLimit,
+    ) -> dict[str, SubcommandMeta]:
+        if not isinstance(value, dict):
+            return {}
+        result: dict[str, SubcommandMeta] = {}
+        for sub_name, sub_cfg in value.items():
+            if not isinstance(sub_cfg, dict):
+                logger.warning("[CommandRegistry] 子命令配置无效，跳过: %s", sub_name)
+                continue
+            name = str(sub_name).strip().lower()
+            if not name:
+                continue
+            sub_permission = self._normalize_permission(
+                sub_cfg.get("permission", parent_permission)
+            )
+            sub_allow_private = bool(
+                sub_cfg.get("allow_in_private", parent_allow_private)
+            )
+            sub_rate_limit = self._merge_rate_limit(
+                sub_cfg.get("rate_limit"), parent_rate_limit
+            )
+            result[name] = SubcommandMeta(
+                name=name,
+                description=str(sub_cfg.get("description") or "").strip(),
+                permission=sub_permission,
+                allow_in_private=sub_allow_private,
+                rate_limit=sub_rate_limit,
+                args=str(sub_cfg.get("args") or "").strip(),
+            )
+        return result
+
+    def _normalize_inference(self, value: Any) -> SubcommandInference | None:
+        if not isinstance(value, dict):
+            return None
+        default = None
+        if "default" in value:
+            default = str(value["default"]).strip().lower() or None
+        rules: list[SubcommandInferenceRule] = []
+        raw_rules = value.get("rules")
+        if isinstance(raw_rules, list):
+            for rule_cfg in raw_rules:
+                if not isinstance(rule_cfg, dict):
+                    continue
+                pattern_str = str(rule_cfg.get("pattern") or "").strip()
+                subcmd = str(rule_cfg.get("subcommand") or "").strip().lower()
+                if pattern_str and subcmd:
+                    try:
+                        compiled = re.compile(pattern_str)
+                        rules.append(
+                            SubcommandInferenceRule(pattern=compiled, subcommand=subcmd)
+                        )
+                    except re.error:
+                        logger.warning(
+                            "[CommandRegistry] 推断规则正则编译失败: %s",
+                            pattern_str,
+                        )
+        fallback = None
+        if "fallback" in value:
+            fallback = str(value["fallback"]).strip().lower() or None
+        if default is None and not rules and fallback is None:
+            return None
+        return SubcommandInference(default=default, rules=rules, fallback=fallback)
+
+    def resolve_subcommand(
+        self, meta: CommandMeta, args: list[str]
+    ) -> tuple[str | None, list[str], SubcommandMeta | None]:
+        """解析/推断子命令，返回 (subcmd_name, rewritten_args, subcmd_meta)。
+
+        rewritten_args 为 [subcmd, *sub_args]，handler 统一按此格式分发。
+        若无法推断则 subcmd_name=None, subcmd_meta=None, args 不变。
+        """
+        if not meta.subcommands:
+            return None, args, None
+
+        # 1. args[0] 显式匹配子命令名
+        if args:
+            first = args[0].strip().lower()
+            if first in meta.subcommands:
+                return first, args, meta.subcommands[first]
+
+        # 2. 推断流程
+        inference = meta.inference
+        if inference is None:
+            return None, args, None
+
+        # 2a. 无参数 + default
+        if not args and inference.default is not None:
+            subcmd_name = inference.default
+            if subcmd_name in meta.subcommands:
+                return subcmd_name, [subcmd_name], meta.subcommands[subcmd_name]
+
+        # 2b. rules 匹配 args[0]
+        if args and inference.rules:
+            for rule in inference.rules:
+                if rule.pattern.fullmatch(args[0]):
+                    subcmd_name = rule.subcommand
+                    if subcmd_name in meta.subcommands:
+                        return (
+                            subcmd_name,
+                            [subcmd_name, *args],
+                            meta.subcommands[subcmd_name],
+                        )
+
+        # 2c. fallback
+        if args and inference.fallback is not None:
+            subcmd_name = inference.fallback
+            if subcmd_name in meta.subcommands:
+                return subcmd_name, [subcmd_name, *args], meta.subcommands[subcmd_name]
+
+        return None, args, None
 
     def _build_snapshot(self) -> dict[str, CommandSnapshot]:
         if not self.base_dir.exists():

@@ -43,4 +43,4 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if mime and not mime.startswith(_IMAGE_MIME_PREFIX):
         return f"URL 内容不是图片类型（检测到 {mime}），仅支持图片"
 
-    return f'<pic uid="{record.uid}"/>'
+    return f'<attachment uid="{record.uid}"/>'

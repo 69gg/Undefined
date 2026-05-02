@@ -346,6 +346,8 @@ Prompt caching 补充：
 - 仅用于**请求体**字段，不包含 `api_key`、`base_url`、`timeout`、`extra_headers` 等 client 选项。
 - 聊天类（`chat_completions`）保留字段：`model`、`messages`、`max_tokens`、`tools`、`tool_choice`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`、`output_config`。
 - 聊天类（`responses`）保留字段：`model`、`input`、`instructions`、`max_output_tokens`、`tools`、`tool_choice`、`previous_response_id`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`、`output_config`。启用 `responses_force_stateless_replay` 时会主动跳过 `previous_response_id`。历史 `output` items 由运行时自动维护；不要通过 `request_params` 手工注入或覆盖 `function_call.id` / `call_id`。
+- 启用 `stream_enabled` 且使用 `chat_completions` 时，运行时会自动发送 `stream_options.include_usage=true`，以便 OpenAI 兼容接口在流式尾包返回 usage 并维持 token 统计。
+- 流式请求仅在明确的流式参数不兼容错误或 SDK 未实现时回退到非流式请求；鉴权、限流、网络、超时、解析或代码异常会直接暴露，便于定位真实问题。
 - embedding 保留字段：`model`、`input`、`dimensions`。
 - rerank 保留字段：`model`、`query`、`documents`、`top_n`、`return_documents`。
 
@@ -441,7 +443,15 @@ Prompt caching 补充：
 |---|---:|---|
 | `max_records` | `10000` | 每个会话最多保留条数 |
 
-说明：该值主要在 `MessageHistoryManager` 初始化时使用，运行中修改建议重启后再观察效果。
+说明：该值主要在 `MessageHistoryManager` 初始化时使用，运行中修改建议重启后再观察效果。消息进入后会先同步写入内存历史，供命令、自动管线与 AI 后续流程立即读取；磁盘 JSON 持久化按会话在后台串行合并写入，连续消息会合并为最新快照，降低复读等快路径被大历史文件全量落盘阻塞的概率。
+
+### 4.10.1 `[attachments]` 附件缓存
+
+| 字段 | 默认值 | 说明 |
+|---|---:|---|
+| `remote_download_max_size_mb` | `25` | 远程附件自动下载并缓存的最大大小（MB）。超过上限时只登记 URL 引用；设为 `0` 可完全禁用远程附件下载 |
+
+外部接收的远程图片或文件默认会先下载到附件缓存再生成 UID，避免后续 URL 失效；大文件超过阈值时，UID 仍会生成，但绑定的是 URL 引用而不是缓存文件，AI 可在上下文中看到原始 `source_ref`。
 
 ---
 
@@ -489,6 +499,10 @@ Prompt caching 补充：
 环境变量兜底：
 - 若 TOML 未配置 `http_proxy` / `https_proxy`，会尝试 `HTTP_PROXY` / `HTTPS_PROXY`。
 
+说明：
+- 该配置会影响走统一 HTTP 请求封装的联网能力，例如 GitHub 仓库自动提取、arXiv 查询及部分第三方 API 请求。
+- 当 `use_proxy = false` 时，上述请求不会使用代理，也不会再读取代理环境变量。
+
 ---
 
 ### 4.14 `[network]` 网络请求默认参数
@@ -500,7 +514,20 @@ Prompt caching 补充：
 
 ---
 
-### 4.15 `[api_endpoints]` 第三方 API 基址
+### 4.15 `[render]` HTML/Markdown 图片渲染
+
+| 字段 | 默认值 | 说明 | 约束/回退 |
+|---|---:|---|---|
+| `browser_max_concurrency` | `0` | 渲染浏览器最大同时开启数量 | `<=0` 时启用自动值：Linux=`1`，其它平台=`2` |
+
+说明：
+- 该配置只影响 `render.py` 的 HTML/Markdown 图片渲染链路，不影响 `crawl_webpage` 等独立浏览器实现。
+- 渲染浏览器当前采用单例复用，因此这里限制的是并发页面/上下文数量，而不是浏览器进程数量。
+- 配置变更会对后续新的渲染请求生效；已在执行中的渲染任务不受影响。
+
+---
+
+### 4.16 `[api_endpoints]` 第三方 API 基址
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -511,7 +538,7 @@ Prompt caching 补充：
 
 ---
 
-### 4.16 `[xxapi]` 与 `[weather]`
+### 4.17 `[xxapi]` 与 `[weather]`
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -521,7 +548,7 @@ Prompt caching 补充：
 
 ---
 
-### 4.17 `[token_usage]` Token 归档
+### 4.18 `[token_usage]` Token 归档
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -537,7 +564,7 @@ Prompt caching 补充：
 
 ---
 
-### 4.18 `[mcp]`
+### 4.19 `[mcp]`
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -547,7 +574,7 @@ Prompt caching 补充：
 
 ---
 
-### 4.19 `[messages]` 消息工具限制
+### 4.20 `[messages]` 消息工具限制
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
@@ -556,7 +583,7 @@ Prompt caching 补充：
 
 ---
 
-### 4.20 `[bilibili]` 自动提取
+### 4.21 `[bilibili]` 自动提取
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
@@ -590,7 +617,32 @@ Prompt caching 补充：
 
 ---
 
-### 4.21 `[code_delivery]` 代码交付 Agent
+### 4.20.2 `[github]` 仓库自动提取
+
+| 字段 | 默认值 | 说明 | 约束/回退 |
+|---|---:|---|---|
+| `auto_extract_enabled` | `false` | 是否自动提取 GitHub 仓库链接或 `owner/repo` 仓库 ID | |
+| `request_timeout_seconds` | `10.0` | GitHub API 请求超时（秒） | `<=0` 回退 `10`，`>60` 截断到 `60` |
+| `auto_extract_group_ids` | `[]` | 功能级群白名单 | 空时跟随全局 access |
+| `auto_extract_private_ids` | `[]` | 功能级私聊白名单 | 空时跟随全局 access |
+| `auto_extract_max_items` | `3` | 单条消息最多自动处理几个仓库 | `<=0` 回退 `3`，`>10` 截断到 `10` |
+
+触发规则：
+- 命中 `https://github.com/owner/repo`、`github.com/owner/repo` 或 `git@github.com:owner/repo.git` 时触发。
+- 裸 `owner/repo` 会作为 GitHub 仓库 ID 尝试一次 public API 请求；失败时只记录日志，不向会话发送错误消息。
+- 仅支持 public 仓库。卡片渲染为图片，包含仓库 ID、作者头像、简介、stars、forks、issues、contributors、watchers、语言、许可证、默认分支和更新时间等信息。
+- GitHub API 请求默认复用全局 `[proxy]` 代理设置。
+
+自动提取调度说明：
+- 斜杠命令优先级高于自动处理管线；命中命令后直接分发并结束本轮后续处理，不会触发自动提取或 AI 自动回复。命令输入和命令输出会写入历史，供后续 AI 轮次读取。
+- 同一条消息内，自动处理管线会并行检测 Bilibili、arXiv、GitHub 等已注册管线。
+- 检测到多个管线时会并行处理全部命中结果；通常单条消息只会命中一个管线，因此不手动维护优先级。
+- 自动提取发送出的信息消息、图片卡片、文件或视频摘要会通过统一发送层写入消息历史，本地媒体和文件会自动登记为会话附件 UID，随后才进入 AI 自动回复，因此 AI 可以读取刚刚的自动提取结果。
+- 管线实现位于 `src/Undefined/skills/auto_pipeline/`，跟随 `[skills]` 热重载配置自动重新加载。开发新管线请参考 [自动处理管线开发指南](auto-pipeline.md)。
+
+---
+
+### 4.22 `[code_delivery]` 代码交付 Agent
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
@@ -613,7 +665,7 @@ Prompt caching 补充：
 
 ---
 
-### 4.22 `[webui]`
+### 4.23 `[webui]`
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -628,7 +680,7 @@ Prompt caching 补充：
 
 ---
 
-### 4.23 `[api]` Runtime API / OpenAPI
+### 4.24 `[api]` Runtime API / OpenAPI
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -647,7 +699,7 @@ Prompt caching 补充：
 
 ---
 
-### 4.24 `[cognitive]` 认知记忆
+### 4.25 `[cognitive]` 认知记忆
 
 ### 4.24.1 根配置
 
@@ -711,7 +763,7 @@ Prompt caching 补充：
 
 ---
 
-### 4.25 `[memes]` 表情包库
+### 4.26 `[memes]` 表情包库
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
@@ -743,7 +795,7 @@ Prompt caching 补充：
 - 第二阶段不做 OCR；向量存储和检索文本只使用纯文本 `description + tags + aliases`。
 - 同一图片内容在单进程内会按 `SHA256` 串行入库，避免并发表情包重复写入。
 - 若入库在写入来源记录或向量索引阶段失败，会回滚已写入的元数据与本地文件，避免残留孤儿记录。
-- 表情包与普通图片复用同一套图片 `uid` 语义。检索返回的 `uid` 既可用于 `memes.send_meme_by_uid`，也可直接用于 `<pic uid="..."/>`。
+- 表情包与普通图片复用同一套图片 `uid` 语义。检索返回的 `uid` 既可用于 `memes.send_meme_by_uid`，也可直接用于 `<attachment uid="..."/>`。
 - 检索模式：
   - `keyword`：只跑 SQLite FTS / LIKE 关键词检索；按空白切分后的中文、英文关键词都会参与 FTS 匹配
   - `semantic`：只跑 Chroma 语义检索
@@ -751,7 +803,7 @@ Prompt caching 补充：
 - 关键词检索会按空白切分查询词项并构造 FTS phrase，因此中文标签、别名或描述词同样可以走 FTS 召回。
 - `query_default_mode` 只影响 `memes.search_memes` 未显式传 `query_mode` 时的默认值。
 
-### 4.26 `[naga]` Naga 外部网关集成
+### 4.27 `[naga]` Naga 外部网关集成
 
 > **⚠️ 此功能面向与 NagaAgent 对接的高级场景，普通用户不建议开启。**
 
@@ -819,6 +871,8 @@ Prompt caching 补充：
 ### 5.3 明确“会执行热应用”的字段
 - 模型发车间隔 / 模型名 / 模型池变更（队列间隔刷新）
 - `models.grok.model_name` / `models.grok.queue_interval_seconds`（队列间隔刷新）
+- `models.summary` / `models.historian` / `models.grok` 的非队列字段会刷新 AI 运行时配置，但不会重建聊天、视觉或 Agent 模型客户端；其中 `models.summary` 热更新会重建摘要服务，聊天总结、摘要合并和标题生成会立即使用专用 summary 模型配置。
+- `render.browser_max_concurrency` 会在当前渲染任务空闲后重建渲染并发信号量。
 - `skills.intro_autogen_*`（Agent intro 生成器配置刷新）
 - `search.searxng_url`（搜索客户端刷新）
 - `skills.hot_reload*`（技能热重载任务重启）

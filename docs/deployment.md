@@ -47,44 +47,15 @@ uv sync
 uv run playwright install
 ```
 
-### 3. 安装系统级依赖（必装）
+### 3. 安装渲染运行时
 
-Bot 内置的数学公式等功能直接强依赖系统级的渲染环境，你**必须**提前在宿主机配置以下依赖。若是缺失该依赖，渲染图像或公式时后台将直接报错。
+网页截图、Markdown 渲染和复杂 LaTeX 公式回退渲染依赖 Playwright 浏览器内核。源码部署时请执行：
 
-**安装 LaTeX 与工具链**：
+```bash
+uv run playwright install
+```
 
-- **Ubuntu / Debian**
-  直接无脑安装完整的 TeX Live 环境最为稳妥：
-  ```bash
-  sudo apt-get update
-  sudo apt-get install -y texlive-full dvipng ghostscript
-  ```
-
-- **Arch Linux**
-  通过 pacman 安装基础包：
-  ```bash
-  sudo pacman -S --needed texlive-basic texlive-bin texlive-latex texlive-latexrecommended texlive-latexextra texlive-fontsrecommended texlive-binextra texlive-mathscience ghostscript
-  ```
-
-- **macOS**
-  推荐通过 Homebrew 安装 MacTeX 环境，提供完整（省心，体积较大）或者精简两个版本：
-  ```bash
-  # 方式 1：完整环境（推荐）
-  brew install --cask mactex-no-gui
-
-  # 方式 2：精简版（体积小，需手动拉取补包）
-  brew install --cask basictex
-  sudo tlmgr update --self
-  sudo tlmgr install dvipng type1cm type1ec cm-super collection-fontsrecommended
-  ```
-
-- **Windows**
-  安装 [MiKTeX](https://miktex.org/download) （推荐，能自动下载缺失宏包）或者 [TeX Live](https://tug.org/texlive/windows.html)。
-  1. 打开 MiKTeX Console。
-  2. 搜索 `dvipng` 手动将其安装上。
-  3. 确认环境变量 `PATH` 中已经包含了 `latex.exe`。
-
-> 验证安装：使用 `latex --version` 与 `dvipng --version` 命令检测是否识别。如日志报错 `type1ec.sty not found` 或 `dvipng: command not found`，一般是由于所处的系统少安装了包或可执行文件不在环境变量中。
+`render.render_latex` 会优先使用 Python 依赖中的 `matplotlib` mathtext 在本地渲染常见数学公式，不需要额外安装系统 TeX。mathtext 无法处理的复杂内容会回退到 MathJax + Playwright；如果运行环境无法访问 MathJax CDN，请在配置中启用 HTTP/HTTPS 代理。
 
 ### 4. 配置环境
 
@@ -158,7 +129,7 @@ uv tool install Undefined-bot
 uv tool run --from Undefined-bot playwright install
 ```
 
-> **系统依赖提醒**：同源码部署要求一致，你必须在宿主机上预先安装所需的 LaTeX/dvipng 渲染环境。请参考上文 [3. 安装系统级依赖（必装）](#3-安装系统级依赖必装) 查阅你操作系统的对应安装命令，未配置前若触发公式与 Markdown 的图片渲染则会报错执行失败。
+> **渲染依赖提醒**：同源码部署要求一致，你需要在宿主机上预先安装 Playwright 浏览器内核。请参考上文 [3. 安装渲染运行时](#3-安装渲染运行时)。未配置前，网页截图、Markdown 渲染和复杂 LaTeX 公式回退渲染可能会失败。
 
 安装完成后，在任意目录准备 `config.toml` 并启动：
 
