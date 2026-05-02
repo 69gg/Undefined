@@ -103,6 +103,18 @@ def _attachment_remote_download_max_bytes(runtime_config: Config) -> int:
     return max(0, value) * 1024 * 1024
 
 
+def _resolve_summary_model_config(
+    runtime_config: Config | None,
+    chat_config: ChatModelConfig,
+) -> ChatModelConfig | AgentModelConfig:
+    if runtime_config is None:
+        return chat_config
+    if not getattr(runtime_config, "summary_model_configured", False):
+        return chat_config
+    summary_model = getattr(runtime_config, "summary_model", None)
+    return summary_model if summary_model is not None else chat_config
+
+
 class AIClient:
     """AI 模型客户端"""
 
@@ -279,7 +291,9 @@ class AIClient:
         )
         self._multimodal = MultimodalAnalyzer(self._requester, self.vision_config)
         self._summary_service = SummaryService(
-            self._requester, self.chat_config, self._token_counter
+            self._requester,
+            _resolve_summary_model_config(runtime_config, self.chat_config),
+            self._token_counter,
         )
 
         async def init_mcp_async() -> None:
@@ -667,7 +681,9 @@ class AIClient:
         self.runtime_config = runtime_config
         self._multimodal = MultimodalAnalyzer(self._requester, self.vision_config)
         self._summary_service = SummaryService(
-            self._requester, self.chat_config, self._token_counter
+            self._requester,
+            _resolve_summary_model_config(runtime_config, self.chat_config),
+            self._token_counter,
         )
         self.apply_attachment_config(runtime_config)
         logger.info(

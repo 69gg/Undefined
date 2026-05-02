@@ -143,6 +143,17 @@ def test_registry_infer_id_pattern_view() -> None:
     assert submeta is not None
 
 
+def test_registry_inference_rule_requires_full_match() -> None:
+    registry = CommandRegistry(_commands_dir())
+    registry.load_commands()
+    meta = registry.resolve("faq")
+    assert meta is not None
+    subcmd, args, submeta = registry.resolve_subcommand(meta, ["20241205-001-extra"])
+    assert subcmd == "search"
+    assert args == ["search", "20241205-001-extra"]
+    assert submeta is not None
+
+
 def test_registry_infer_non_id_fallback_search() -> None:
     registry = CommandRegistry(_commands_dir())
     registry.load_commands()

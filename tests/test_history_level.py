@@ -87,6 +87,42 @@ async def test_add_group_message_without_level_stores_empty_level(
 
 
 @pytest.mark.asyncio
+async def test_history_save_failure_keeps_pending_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = MessageHistoryManager.__new__(MessageHistoryManager)
+    manager._max_records = 10000
+    manager._pending_history_saves = {}
+    manager._history_save_tasks = {}
+    path = "data/history/group_20001.json"
+    attempts = 0
+    saved_data: list[list[dict[str, object]]] = []
+
+    async def fake_save(data: list[dict[str, object]], _path: str) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("disk full")
+        saved_data.append(data)
+
+    monkeypatch.setattr(manager, "_save_history_to_file", fake_save)
+
+    first_snapshot = [{"message": "first"}]
+    manager._queue_history_save(first_snapshot, path)
+    await manager.flush_pending_saves()
+
+    assert manager._pending_history_saves[path] == first_snapshot
+    assert path not in manager._history_save_tasks
+
+    second_snapshot = [{"message": "second"}]
+    manager._queue_history_save(second_snapshot, path)
+    await manager.flush_pending_saves()
+
+    assert manager._pending_history_saves == {}
+    assert saved_data == [second_snapshot]
+
+
+@pytest.mark.asyncio
 async def test_get_recent_returns_messages_with_level_intact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

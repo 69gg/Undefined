@@ -432,7 +432,7 @@ class CommandRegistry:
         # 2b. rules 匹配 args[0]
         if args and inference.rules:
             for rule in inference.rules:
-                if rule.pattern.match(args[0]):
+                if rule.pattern.fullmatch(args[0]):
                     subcmd_name = rule.subcommand
                     if subcmd_name in meta.subcommands:
                         return (

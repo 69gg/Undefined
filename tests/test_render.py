@@ -61,7 +61,7 @@ async def test_get_semaphore_uses_configured_browser_limit(
 
 
 @pytest.mark.asyncio
-async def test_get_semaphore_keeps_existing_instance_when_limit_changes(
+async def test_get_semaphore_recreates_idle_instance_when_limit_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime_config = SimpleNamespace(render_browser_max_concurrency=2)
@@ -75,9 +75,33 @@ async def test_get_semaphore_keeps_existing_instance_when_limit_changes(
     runtime_config.render_browser_max_concurrency = 4
     second = await render_module._get_semaphore()
 
-    assert first is second
-    assert render_module._render_semaphore_limit == 2
-    assert second._value == 2
+    assert first is not second
+    assert render_module._render_semaphore_limit == 4
+    assert second._value == 4
+
+
+@pytest.mark.asyncio
+async def test_get_semaphore_waits_for_active_instance_before_recreating(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_config = SimpleNamespace(render_browser_max_concurrency=2)
+    monkeypatch.setattr(
+        render_module,
+        "get_config",
+        lambda strict=False: runtime_config,
+    )
+
+    first = await render_module._get_semaphore()
+    await first.acquire()
+    runtime_config.render_browser_max_concurrency = 4
+    active = await render_module._get_semaphore()
+    first.release()
+    recreated = await render_module._get_semaphore()
+
+    assert active is first
+    assert recreated is not first
+    assert render_module._render_semaphore_limit == 4
+    assert recreated._value == 4
 
 
 @pytest.mark.asyncio

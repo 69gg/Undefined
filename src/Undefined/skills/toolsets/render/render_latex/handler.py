@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import Any, Dict, cast
+from typing import Any, Dict
 
 from Undefined.attachments import scope_from_context
 
@@ -113,41 +113,30 @@ def _render_mathtext_sync(content: str, output_format: str) -> tuple[bytes, str]
 
     from matplotlib import mathtext
     from matplotlib.font_manager import FontProperties
-    import numpy as np
-    from PIL import Image
 
     expression = _strip_math_wrappers(content)
     if not expression or "\\begin{" in expression:
         raise RuntimeError("内容不是 mathtext 可直接渲染的简单公式")
 
-    parser = mathtext.MathTextParser("agg")
     font_properties = FontProperties(size=18)
-    parsed = parser.parse(
-        f"${expression}$",
-        dpi=200,
-        prop=font_properties,
-    )
-    alpha = np.asarray(parsed.image)
-    if alpha.size == 0 or int(alpha.max()) == 0:
-        raise RuntimeError("mathtext 未生成有效图像")
-
-    mask = Image.fromarray(cast(Any, alpha), mode="L")
-    padding = 20
-    image = Image.new(
-        "RGBA",
-        (mask.width + padding * 2, mask.height + padding * 2),
-        "white",
-    )
-    glyph = Image.new("RGBA", mask.size, "black")
-    glyph.putalpha(mask)
-    image.alpha_composite(glyph, (padding, padding))
-
     buffer = io.BytesIO()
     if output_format == "pdf":
-        image.convert("RGB").save(buffer, format="PDF", resolution=200)
+        mathtext.math_to_image(
+            f"${expression}$",
+            buffer,
+            prop=font_properties,
+            dpi=200,
+            format="pdf",
+        )
         return buffer.getvalue(), "application/pdf"
 
-    image.save(buffer, format="PNG")
+    mathtext.math_to_image(
+        f"${expression}$",
+        buffer,
+        prop=font_properties,
+        dpi=200,
+        format="png",
+    )
     return buffer.getvalue(), "image/png"
 
 

@@ -79,19 +79,26 @@ class MessageHistoryManager:
             )
 
     async def _drain_history_save(self, path: str) -> None:
+        failed = False
         try:
             while True:
                 self._ensure_save_state()
                 history = self._pending_history_saves.pop(path, None)
                 if history is None:
                     break
-                await self._save_history_to_file(history, path)
+                try:
+                    await self._save_history_to_file(history, path)
+                except Exception:
+                    logger.exception("[历史记录错误] 保存历史失败: path=%s", path)
+                    self._pending_history_saves.setdefault(path, history)
+                    failed = True
+                    break
         finally:
             self._ensure_save_state()
             current_task = asyncio.current_task()
             if self._history_save_tasks.get(path) is current_task:
                 self._history_save_tasks.pop(path, None)
-            if path in self._pending_history_saves:
+            if not failed and path in self._pending_history_saves:
                 self._history_save_tasks[path] = asyncio.create_task(
                     self._drain_history_save(path),
                     name=f"history_save:{path}",

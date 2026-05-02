@@ -104,10 +104,15 @@ async def _get_semaphore() -> asyncio.Semaphore:
     """获取渲染并发信号量"""
     global _render_semaphore, _render_semaphore_limit
 
+    configured_limit = _resolve_render_browser_max_concurrency()
     if _render_semaphore is None:
-        configured_limit = _resolve_render_browser_max_concurrency()
         _render_semaphore = asyncio.Semaphore(configured_limit)
         _render_semaphore_limit = configured_limit
+    elif _render_semaphore_limit != configured_limit:
+        active_count = (_render_semaphore_limit or 0) - _render_semaphore._value
+        if active_count <= 0:
+            _render_semaphore = asyncio.Semaphore(configured_limit)
+            _render_semaphore_limit = configured_limit
     return _render_semaphore
 
 
