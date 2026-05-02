@@ -479,6 +479,7 @@ async def main() -> None:
             meme_service=meme_service,
             naga_store=naga_store,
             message_batcher=handler.message_batcher,
+            auto_pipeline_registry=handler.auto_pipeline_registry,
         )
         runtime_api_server = RuntimeAPIServer(
             runtime_api_context,

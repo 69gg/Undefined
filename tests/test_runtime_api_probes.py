@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 from typing import Any, cast
@@ -144,6 +145,125 @@ async def test_runtime_internal_probe_includes_group_superadmin_queue_snapshot()
     payload = json.loads(response_text)
 
     assert payload["queues"]["totals"]["group_superadmin"] == 3
+
+
+@pytest.mark.asyncio
+async def test_runtime_internal_probe_includes_all_skill_directory_summaries() -> None:
+    class FakeCommandRegistry:
+        def __init__(self, commands: list[Any]) -> None:
+            self._commands = commands
+
+        def list_commands(self, *, include_hidden: bool = False) -> list[Any]:
+            if include_hidden:
+                return self._commands
+            return [command for command in self._commands if command.show_in_help]
+
+    tool_registry = SimpleNamespace(
+        _items={
+            "get_current_time": SimpleNamespace(loaded=False),
+            "messages.send_message": SimpleNamespace(loaded=True),
+        },
+        get_stats=lambda: {
+            "messages.send_message": SimpleNamespace(count=3, success=2, failure=1)
+        },
+    )
+    agent_registry = SimpleNamespace(
+        _items={"web_agent": SimpleNamespace(loaded=False)},
+        get_stats=lambda: {},
+    )
+    anthropic_registry = SimpleNamespace(
+        _items={"code-review": SimpleNamespace()},
+        get_stats=lambda: {},
+    )
+    auto_pipeline_registry = SimpleNamespace(
+        _items_lock=asyncio.Lock(),
+        _items={
+            "github": SimpleNamespace(order=30, description="GitHub repo cards"),
+            "arxiv": SimpleNamespace(order=10, description="arXiv papers"),
+        },
+        _watch_task=None,
+    )
+    command_dispatcher = SimpleNamespace(
+        command_registry=FakeCommandRegistry(
+            [
+                SimpleNamespace(
+                    name="help",
+                    handler=None,
+                    aliases=[],
+                    subcommands={},
+                    permission="public",
+                    allow_in_private=True,
+                    show_in_help=True,
+                ),
+                SimpleNamespace(
+                    name="faq",
+                    handler=object(),
+                    aliases=["f"],
+                    subcommands={"ls": object(), "view": object()},
+                    permission="public",
+                    allow_in_private=False,
+                    show_in_help=True,
+                ),
+            ]
+        )
+    )
+    context = RuntimeAPIContext(
+        config_getter=lambda: SimpleNamespace(
+            api=SimpleNamespace(
+                enabled=True,
+                host="127.0.0.1",
+                port=8788,
+                auth_key="changeme",
+                openapi_enabled=True,
+            ),
+            chat_model=SimpleNamespace(
+                model_name="gpt-5.4",
+                api_url="https://api.example.com/v1",
+                api_mode="responses",
+                thinking_enabled=False,
+                thinking_tool_call_compat=True,
+                responses_tool_choice_compat=False,
+                responses_force_stateless_replay=False,
+                reasoning_enabled=True,
+                reasoning_effort="high",
+            ),
+        ),
+        onebot=SimpleNamespace(connection_status=lambda: {}),
+        ai=SimpleNamespace(
+            memory_storage=None,
+            tool_registry=tool_registry,
+            agent_registry=agent_registry,
+            anthropic_skill_registry=anthropic_registry,
+        ),
+        command_dispatcher=command_dispatcher,
+        queue_manager=SimpleNamespace(snapshot=lambda: {}),
+        history_manager=SimpleNamespace(),
+        auto_pipeline_registry=auto_pipeline_registry,
+    )
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+
+    request = cast(web.Request, cast(Any, SimpleNamespace()))
+    response = await server._internal_probe_handler(request)
+    response_text = response.text
+    assert response_text is not None
+    payload = json.loads(response_text)
+
+    skills = payload["skills"]
+    assert skills["tools"]["count"] == 2
+    assert skills["toolsets"]["count"] == 1
+    assert skills["toolsets"]["categories"] == [
+        {"name": "messages", "count": 1, "loaded": 1}
+    ]
+    assert skills["agents"]["count"] == 1
+    assert skills["auto_pipelines"]["count"] == 2
+    assert [item["name"] for item in skills["auto_pipelines"]["items"]] == [
+        "arxiv",
+        "github",
+    ]
+    assert skills["commands"]["count"] == 2
+    assert skills["commands"]["aliases"] == 1
+    assert skills["commands"]["subcommands"] == 2
+    assert skills["anthropic_skills"]["loaded"] == 1
 
 
 @pytest.mark.asyncio

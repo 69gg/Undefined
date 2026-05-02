@@ -40,7 +40,7 @@
   详见 [认知记忆文档](docs/cognitive-memory.md)。
 - **Management-first WebUI**：继续保留 `uv run Undefined-webui` 一键入口；即使 `config.toml` 缺失或未配完，也能先进入管理态补配置、看日志、校验并启动 Bot。
 - **远程管理 + 多端客户端**：浏览器版 WebUI 与新的跨平台控制台共享同一管理面，支持远程管理，并覆盖 `Windows / macOS / Linux / Android` 发布链路。
-- **Management API + Runtime API 分层**：配置、日志、Bot 启停和管理探针由 Management API 提供；主进程 Runtime API 则专注探针、记忆只读查询、认知侧写检索和 WebUI AI Chat。详见 [docs/management-api.md](docs/management-api.md) 与 [docs/openapi.md](docs/openapi.md)。
+- **Management API + Runtime API 分层**：配置、日志、Bot 启停和管理探针由 Management API 提供；主进程 Runtime API 则专注探针、记忆只读查询、认知侧写检索和 WebUI AI Chat；内部探针的技能统计覆盖可调用工具、工具集、Agent、自动处理管线、斜杠命令与 Anthropic Skills。详见 [docs/management-api.md](docs/management-api.md) 与 [docs/openapi.md](docs/openapi.md)。
 - **多模型池**：支持配置多个 AI 模型，可轮询、随机选择或用户指定；支持多模型并发比较，选择最佳结果继续对话。详见 [多模型功能文档](docs/multi-model.md)。
 - **本地知识库**：将纯文本文件向量化存入 ChromaDB，AI 可通过关键词搜索或语义搜索查询领域知识；支持增量嵌入与自动扫描。详见 [知识库文档](docs/knowledge.md)。
 - **全局表情包库**：收到图片后可异步判定是否为表情包，通过两阶段 LLM 管线生成纯文本描述与标签，支持关键词检索、语义检索和混合检索，并可直接按统一图片 `uid` 发送或插入 `<attachment uid="..."/>`。详见 [表情包库说明](docs/memes.md)。

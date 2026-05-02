@@ -21,3 +21,4 @@ class RuntimeAPIContext:
     meme_service: Any = None
     naga_store: Any = None
     message_batcher: Any = None
+    auto_pipeline_registry: Any = None

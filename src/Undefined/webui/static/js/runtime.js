@@ -238,29 +238,31 @@
 
         // Skills
         const sk = data.skills || {};
-        if (sk.tools || sk.agents || sk.anthropic_skills) {
+        const skillRegs = [
+            { key: "tools", label: t("probes.tools") },
+            { key: "toolsets", label: t("probes.toolsets") },
+            { key: "agents", label: t("probes.agents") },
+            { key: "auto_pipelines", label: t("probes.auto_pipelines") },
+            { key: "commands", label: t("probes.commands") },
+            { key: "anthropic_skills", label: "Anthropic Skills" },
+        ];
+        if (skillRegs.some((reg) => sk[reg.key])) {
             html += `<div class="probe-section">`;
             html += `<div class="probe-section-title">${t("probes.section_skills")}</div>`;
             html += `<div class="probe-grid" style="margin-bottom:8px">`;
-            if (sk.tools)
+            for (const regMeta of skillRegs) {
+                const reg = sk[regMeta.key];
+                if (!reg) continue;
                 html += probeItem(
-                    t("probes.tools"),
-                    `${sk.tools.loaded ?? 0} / ${sk.tools.count ?? 0}`,
+                    regMeta.label,
+                    `${reg.loaded ?? 0} / ${reg.count ?? 0}`,
                 );
-            if (sk.agents)
-                html += probeItem(
-                    t("probes.agents"),
-                    `${sk.agents.loaded ?? 0} / ${sk.agents.count ?? 0}`,
-                );
-            if (sk.anthropic_skills)
-                html += probeItem(
-                    "Anthropic Skills",
-                    `${sk.anthropic_skills.loaded ?? 0} / ${sk.anthropic_skills.count ?? 0}`,
-                );
+            }
             html += `</div>`;
             // Show active skills (ones with calls > 0)
             const activeItems = [];
-            for (const reg of [sk.tools, sk.agents, sk.anthropic_skills]) {
+            for (const { key } of skillRegs) {
+                const reg = sk[key];
                 if (reg && reg.items) {
                     for (const item of reg.items) {
                         if (item.calls > 0) activeItems.push(item);

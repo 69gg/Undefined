@@ -39,7 +39,7 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
                     "Returns system info (version, Python, platform, uptime), "
                     "OneBot connection status, request queue snapshot, "
                     "memory count, cognitive service status, API config, "
-                    "skill statistics (tools/agents/anthropic_skills with call counts), "
+                    "skill statistics (tools/toolsets/agents/auto_pipelines/commands/anthropic_skills), "
                     "and model configuration (names, masked URLs, thinking flags)."
                 ),
             }
