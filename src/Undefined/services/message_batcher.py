@@ -438,6 +438,7 @@ class MessageBatcher:
     async def _handle_t1(self, key: tuple[str, int]) -> None:
         items_to_fire: list[BufferedMessage] | None = None
         wait_inflight: asyncio.Task[Any] | None = None
+        finalizing_state: _BatchState | None = None
         async with self._lock:
             state = self._buckets.get(key)
             if state is None:
@@ -447,7 +448,8 @@ class MessageBatcher:
                 # T1 到了但投机调用还在跑：等它完成，桶状态切到 FINALIZING
                 state.phase = BatchPhase.FINALIZING
                 wait_inflight = state.inflight.task
-                # 桶将在 inflight 结束后通过 unregister_inflight 路径或这里 finally 弹出
+                finalizing_state = state
+                # 桶将在 inflight 结束后清理
             else:
                 # 普通模式或 SPECULATING 但 inflight 已结束：直接 fire
                 items_to_fire = self._pop_locked(key)
@@ -471,9 +473,13 @@ class MessageBatcher:
                     key[1],
                 )
             finally:
-                # 清桶
+                # 仅当桶仍是 finalizing_state（同一对象）时才 pop；
+                # 否则 submit 已经在 SPECULATING/FINALIZING 分支把旧桶 pop 并建立新桶，
+                # 不能误删新桶。
                 async with self._lock:
-                    self._buckets.pop(key, None)
+                    current = self._buckets.get(key)
+                    if current is finalizing_state:
+                        self._buckets.pop(key, None)
             return
 
         if items_to_fire is not None:

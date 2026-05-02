@@ -436,3 +436,47 @@ async def test_snapshot_includes_phase() -> None:
     assert snap["buckets"][0]["phase"] in {"typing", "speculating"}
     assert "speculative_enabled" in snap["config"]
     assert snap["config"]["speculative_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_t1_finalizing_does_not_clobber_new_bucket() -> None:
+    """T1 await inflight 时新消息走 FINALIZING 分支建新桶，finally 不能误删新桶。"""
+    cfg = MessageBatcherConfig(
+        enabled=True,
+        window_seconds=0.1,
+        pre_send_seconds=0.04,
+        strategy="extend",
+    )
+
+    fake_ctx = (
+        _FakeRequestContext()
+    )  # message_sent_this_turn 默认 False，inflight 可被取消
+    # 但本测试要让 T1 fire，inflight 仍未结束 → FINALIZING 分支
+
+    release_inflight = asyncio.Event()
+    inflight_started = asyncio.Event()
+
+    async def flush(items: list[BufferedMessage]) -> None:
+        inflight_started.set()
+        try:
+            await release_inflight.wait()
+        except asyncio.CancelledError:
+            release_inflight.set()
+            raise
+
+    batcher = MessageBatcher(cfg, flush)
+
+    await batcher.submit(_make_item(text="m1"))
+    await asyncio.wait_for(inflight_started.wait(), timeout=0.5)
+    inflight_task = next(iter(batcher._pending_tasks))
+    batcher.register_inflight("group:1", 100, inflight_task, fake_ctx)
+    # 等到 T1 触发，桶切到 FINALIZING 等 inflight
+    await asyncio.sleep(0.12)
+    # 此刻新消息进入 FINALIZING 分支，开新桶
+    await batcher.submit(_make_item(text="m2"))
+    assert batcher.has_buffer("group:1", 100)
+    # 释放 inflight，让 _handle_t1 finally 运行
+    release_inflight.set()
+    await asyncio.sleep(0.05)
+    # 新桶不该被旧 _handle_t1 finally 清掉
+    assert batcher.has_buffer("group:1", 100), "新桶被旧 _handle_t1 finally 误删"
