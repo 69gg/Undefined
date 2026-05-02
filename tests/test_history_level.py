@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -89,23 +90,33 @@ async def test_add_group_message_without_level_stores_empty_level(
 @pytest.mark.asyncio
 async def test_history_save_failure_keeps_pending_snapshot(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    from Undefined.utils import io
+
     manager = MessageHistoryManager.__new__(MessageHistoryManager)
     manager._max_records = 10000
     manager._pending_history_saves = {}
     manager._history_save_tasks = {}
-    path = "data/history/group_20001.json"
+    path = str(tmp_path / "group_20001.json")
     attempts = 0
     saved_data: list[list[dict[str, object]]] = []
 
-    async def fake_save(data: list[dict[str, object]], _path: str) -> None:
+    async def fake_write_json(
+        saved_path: str,
+        data: list[dict[str, object]],
+        *,
+        use_lock: bool = True,
+    ) -> None:
         nonlocal attempts
+        assert saved_path == path
+        assert use_lock is True
         attempts += 1
         if attempts == 1:
             raise OSError("disk full")
         saved_data.append(data)
 
-    monkeypatch.setattr(manager, "_save_history_to_file", fake_save)
+    monkeypatch.setattr(io, "write_json", fake_write_json)
 
     first_snapshot = [{"message": "first"}]
     manager._queue_history_save(first_snapshot, path)

@@ -210,3 +210,45 @@ async def test_render_html_with_page_decrements_active_count_when_new_context_fa
         await render_module.render_html_with_page("<html></html>", _unused_callback)
 
     assert render_module._render_active_count == 0
+
+
+@pytest.mark.asyncio
+async def test_render_html_with_page_active_count_stays_non_negative_after_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakePage:
+        def set_default_timeout(self, _timeout_ms: int) -> None:
+            pass
+
+        async def set_content(self, _html_content: str) -> None:
+            pass
+
+    class _FakeContext:
+        async def new_page(self) -> _FakePage:
+            return _FakePage()
+
+        async def close(self) -> None:
+            pass
+
+    class _FakeBrowser:
+        async def new_context(self, **_kwargs: Any) -> _FakeContext:
+            return _FakeContext()
+
+    async def _fake_get_browser() -> _FakeBrowser:
+        return _FakeBrowser()
+
+    async def _fake_get_semaphore() -> asyncio.Semaphore:
+        return asyncio.Semaphore(1)
+
+    async def _callback(_page: Any) -> str:
+        assert render_module._render_active_count == 1
+        await render_module.close_browser()
+        return "ok"
+
+    monkeypatch.setattr(render_module, "_get_browser", _fake_get_browser)
+    monkeypatch.setattr(render_module, "_get_semaphore", _fake_get_semaphore)
+
+    result = await render_module.render_html_with_page("<html></html>", _callback)
+
+    assert result == "ok"
+    assert render_module._render_active_count == 0

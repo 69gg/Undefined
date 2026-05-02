@@ -273,4 +273,4 @@ async def render_html_with_page(
                 if context is not None:
                     await context.close()
             finally:
-                _render_active_count -= 1
+                _render_active_count = max(0, _render_active_count - 1)

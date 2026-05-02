@@ -161,6 +161,7 @@ class MessageHistoryManager:
             logger.debug(f"[历史记录] 保存成功: path={path}")
         except Exception as e:
             logger.error(f"[历史记录错误] 保存历史记录失败 {path}: {e}")
+            raise
 
     async def _load_history_from_file(self, path: str) -> list[dict[str, Any]]:
         """异步从文件加载历史记录"""
