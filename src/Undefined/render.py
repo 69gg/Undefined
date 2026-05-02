@@ -52,6 +52,7 @@ _browser: Browser | None = None
 _browser_lock = asyncio.Lock()
 _render_semaphore: asyncio.Semaphore | None = None
 _render_semaphore_limit: int | None = None
+_render_active_count = 0
 
 # 默认并发限制：Linux 默认 1，其它平台默认 2
 _DEFAULT_MAX_CONCURRENT = 1 if sys.platform == "linux" else 2
@@ -109,8 +110,7 @@ async def _get_semaphore() -> asyncio.Semaphore:
         _render_semaphore = asyncio.Semaphore(configured_limit)
         _render_semaphore_limit = configured_limit
     elif _render_semaphore_limit != configured_limit:
-        active_count = (_render_semaphore_limit or 0) - _render_semaphore._value
-        if active_count <= 0:
+        if _render_active_count <= 0:
             _render_semaphore = asyncio.Semaphore(configured_limit)
             _render_semaphore_limit = configured_limit
     return _render_semaphore
@@ -119,6 +119,7 @@ async def _get_semaphore() -> asyncio.Semaphore:
 async def close_browser() -> None:
     """关闭浏览器实例，应在程序退出时调用"""
     global _playwright, _browser, _render_semaphore, _render_semaphore_limit
+    global _render_active_count
 
     async with _browser_lock:
         if _browser is not None:
@@ -132,6 +133,7 @@ async def close_browser() -> None:
 
         _render_semaphore = None
         _render_semaphore_limit = None
+        _render_active_count = 0
 
 
 async def render_markdown_to_html(md_text: str) -> str:
@@ -249,18 +251,26 @@ async def render_html_with_page(
     browser = await _get_browser()
     semaphore = await _get_semaphore()
 
+    global _render_active_count
+
     async with semaphore:
-        context_kwargs: dict[str, Any] = {
-            "device_scale_factor": 2,
-            "viewport": {"width": viewport_width, "height": 800},
-        }
-        if proxy:
-            context_kwargs["proxy"] = {"server": proxy}
-        context = await browser.new_context(**context_kwargs)
+        _render_active_count += 1
+        context = None
         try:
+            context_kwargs: dict[str, Any] = {
+                "device_scale_factor": 2,
+                "viewport": {"width": viewport_width, "height": 800},
+            }
+            if proxy:
+                context_kwargs["proxy"] = {"server": proxy}
+            context = await browser.new_context(**context_kwargs)
             page = await context.new_page()
             page.set_default_timeout(timeout_ms)
             await page.set_content(html_content)
             return await callback(page)
         finally:
-            await context.close()
+            try:
+                if context is not None:
+                    await context.close()
+            finally:
+                _render_active_count -= 1

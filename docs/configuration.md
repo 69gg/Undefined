@@ -871,7 +871,7 @@ Prompt caching 补充：
 ### 5.3 明确“会执行热应用”的字段
 - 模型发车间隔 / 模型名 / 模型池变更（队列间隔刷新）
 - `models.grok.model_name` / `models.grok.queue_interval_seconds`（队列间隔刷新）
-- `models.summary` / `models.historian` / `models.grok` 的非队列字段会刷新 AI 运行时配置，但不会重建聊天、视觉或 Agent 模型客户端；聊天总结会在配置了 `models.summary` 时使用专用 summary 模型配置。
+- `models.summary` / `models.historian` / `models.grok` 的非队列字段会刷新 AI 运行时配置，但不会重建聊天、视觉或 Agent 模型客户端；其中 `models.summary` 热更新会重建摘要服务，聊天总结、摘要合并和标题生成会立即使用专用 summary 模型配置。
 - `render.browser_max_concurrency` 会在当前渲染任务空闲后重建渲染并发信号量。
 - `skills.intro_autogen_*`（Agent intro 生成器配置刷新）
 - `search.searxng_url`（搜索客户端刷新）

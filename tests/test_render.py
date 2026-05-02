@@ -15,6 +15,7 @@ def _reset_render_state() -> None:
     render_module._browser = None
     render_module._render_semaphore = None
     render_module._render_semaphore_limit = None
+    render_module._render_active_count = 0
 
 
 @pytest.fixture(autouse=True)
@@ -92,10 +93,10 @@ async def test_get_semaphore_waits_for_active_instance_before_recreating(
     )
 
     first = await render_module._get_semaphore()
-    await first.acquire()
+    render_module._render_active_count = 1
     runtime_config.render_browser_max_concurrency = 4
     active = await render_module._get_semaphore()
-    first.release()
+    render_module._render_active_count = 0
     recreated = await render_module._get_semaphore()
 
     assert active is first
@@ -182,3 +183,30 @@ async def test_render_html_with_page_closes_context_when_new_page_fails(
         await render_module.render_html_with_page("<html></html>", _unused_callback)
 
     assert context.closed is True
+    assert render_module._render_active_count == 0
+
+
+@pytest.mark.asyncio
+async def test_render_html_with_page_decrements_active_count_when_new_context_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeBrowser:
+        async def new_context(self, **_kwargs: Any) -> Any:
+            raise RuntimeError("new context failed")
+
+    async def _fake_get_browser() -> _FakeBrowser:
+        return _FakeBrowser()
+
+    async def _fake_get_semaphore() -> asyncio.Semaphore:
+        return asyncio.Semaphore(1)
+
+    async def _unused_callback(_page: Any) -> None:
+        raise AssertionError("callback should not run")
+
+    monkeypatch.setattr(render_module, "_get_browser", _fake_get_browser)
+    monkeypatch.setattr(render_module, "_get_semaphore", _fake_get_semaphore)
+
+    with pytest.raises(RuntimeError, match="new context failed"):
+        await render_module.render_html_with_page("<html></html>", _unused_callback)
+
+    assert render_module._render_active_count == 0

@@ -290,11 +290,7 @@ class AIClient:
             cognitive_service=self._cognitive_service,
         )
         self._multimodal = MultimodalAnalyzer(self._requester, self.vision_config)
-        self._summary_service = SummaryService(
-            self._requester,
-            _resolve_summary_model_config(runtime_config, self.chat_config),
-            self._token_counter,
-        )
+        self._rebuild_summary_service()
 
         async def init_mcp_async() -> None:
             try:
@@ -680,11 +676,7 @@ class AIClient:
         self.agent_config = agent_config
         self.runtime_config = runtime_config
         self._multimodal = MultimodalAnalyzer(self._requester, self.vision_config)
-        self._summary_service = SummaryService(
-            self._requester,
-            _resolve_summary_model_config(runtime_config, self.chat_config),
-            self._token_counter,
-        )
+        self._rebuild_summary_service()
         self.apply_attachment_config(runtime_config)
         logger.info(
             "[配置] AI 模型配置已热更新: chat=%s vision=%s agent=%s",
@@ -696,7 +688,15 @@ class AIClient:
     def apply_runtime_config(self, runtime_config: Config) -> None:
         """应用不需要重建模型客户端的运行时配置。"""
         self.runtime_config = runtime_config
+        self._rebuild_summary_service()
         logger.info("[配置] AI 运行时配置已热更新")
+
+    def _rebuild_summary_service(self) -> None:
+        self._summary_service = SummaryService(
+            self._requester,
+            _resolve_summary_model_config(self.runtime_config, self.chat_config),
+            self._token_counter,
+        )
 
     def apply_attachment_config(self, runtime_config: Config) -> None:
         self.attachment_registry.set_remote_download_max_bytes(

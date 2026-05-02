@@ -26,7 +26,7 @@
 - 修正 `/naga` 子命令分发：handler 直接使用分发层解析出的子命令，并兼容改写后的 `[subcmd, *args]` 参数格式，避免把子命令名和 `naga_id` 相互误判。
 - 收窄模型热更新范围：`summary`、`historian`、`grok` 专用模型变化只刷新 AI 运行时配置，不再重建聊天、视觉和 Agent 模型对象。
 - 修复配置热更新细节：`skills.hot_reload` 变化会同步刷新 Anthropic Skills 注册表；模型池条目会保留 `reasoning_effort_style`；配置模板补齐 `models.summary.stream_enabled`。
-- 修复总结模型选择：配置了 `models.summary` 时，聊天总结、摘要合并和标题生成会使用专用 summary 模型配置。
+- 修复总结模型选择：配置了 `models.summary` 时，聊天总结、摘要合并和标题生成会使用专用 summary 模型配置；仅热更新 summary 模型时也会重建摘要服务，避免继续沿用旧模型。
 - 提升基础工程质量：对命令推断、群分析、附件处理、配置参数等进行了全面的单元与集成测试补强，总测试用例数提升至 1500+ 项。
 - 修复图片渲染超时：重构 `render.py` 为浏览器实例单例复用模式，并引入可配置的并发信号量；共享渲染上下文会在页面创建失败时正确释放，防止低资源设备多任务抢占导致截图超时或资源残留。
 - 改进渲染热更新：`render.browser_max_concurrency` 运行时变化会在当前渲染任务空闲后重建信号量；本地 LaTeX mathtext 渲染改用 Matplotlib 公共 `math_to_image` 接口。

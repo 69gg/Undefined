@@ -640,8 +640,9 @@ class MessageHandler:
                 )
                 return
 
-            if _is_private_model_pool_control_text(
-                text
+            if (
+                getattr(self.config, "model_pool_enabled", False)
+                and _is_private_model_pool_control_text(text)
             ) and await self.ai_coordinator.model_pool.handle_private_message(
                 private_sender_id,
                 text,
