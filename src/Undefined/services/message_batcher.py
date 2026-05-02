@@ -80,6 +80,8 @@ class MessageBatcher:
         self._flush_callback = flush_callback
         self._buckets: dict[tuple[str, int], _BatchState] = {}
         self._lock = asyncio.Lock()
+        # 持有 timer 触发后创建的 flush task 强引用，避免 GC（asyncio 文档要求）
+        self._pending_tasks: set[asyncio.Task[None]] = set()
 
     def update_config(self, config: MessageBatcherConfig) -> None:
         """配置热更新。"""
@@ -198,7 +200,9 @@ class MessageBatcher:
 
     def _on_timer(self, key: tuple[str, int]) -> None:
         # call_later 在事件循环里同步触发，调度到 task 里 await
-        asyncio.create_task(self._flush_key(key))
+        task = asyncio.create_task(self._flush_key(key))
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._pending_tasks.discard)
 
     async def _flush_key(self, key: tuple[str, int]) -> None:
         async with self._lock:
@@ -227,14 +231,24 @@ class MessageBatcher:
             )
 
     async def flush_all(self) -> None:
-        """立即 flush 所有 buckets（用于关停）。"""
+        """立即 flush 所有 buckets（用于关停）。
+
+        会等待 timer 触发但尚未完成的 flush task 全部结束，避免关机漏发。
+        """
         async with self._lock:
             keys = list(self._buckets.keys())
-        if not keys:
-            return
-        logger.info("[MessageBatcher] flush_all: pending_buckets=%s", len(keys))
-        for key in keys:
-            await self._flush_key(key)
+        if keys:
+            logger.info("[MessageBatcher] flush_all: pending_buckets=%s", len(keys))
+            for key in keys:
+                await self._flush_key(key)
+        # 等待 timer 已触发、callback 仍在跑的孤儿 task 收尾
+        pending = [t for t in self._pending_tasks if not t.done()]
+        if pending:
+            logger.info(
+                "[MessageBatcher] flush_all: 等待 %s 个 in-flight flush task",
+                len(pending),
+            )
+            await asyncio.gather(*pending, return_exceptions=True)
 
     def snapshot(self) -> dict[str, Any]:
         """返回当前 buckets 状态的非阻塞快照（供 Runtime API / WebUI 展示）。"""

@@ -233,3 +233,44 @@ async def test_callback_exception_does_not_break_batcher() -> None:
     await batcher.submit(_make_item(text="b"))
     await asyncio.sleep(0.2)
     assert calls == [1, 1]
+
+
+@pytest.mark.asyncio
+async def test_timer_task_strong_reference_survives_gc() -> None:
+    """timer 触发后创建的 flush task 必须被强引用，避免被 GC 回收。
+
+    asyncio 文档明确警告 ``create_task`` 返回值若不被保留，可能在执行前被 GC。
+    """
+    import gc
+
+    cfg = MessageBatcherConfig(enabled=True, window_seconds=0.05, strategy="extend")
+    rec = _Recorder()
+    batcher = MessageBatcher(cfg, rec)
+
+    await batcher.submit(_make_item(text="x"))
+    # 在 timer 触发后但 callback 未必完成时强制 GC
+    await asyncio.sleep(0.06)
+    gc.collect()
+    await asyncio.wait_for(rec.event.wait(), timeout=1.0)
+    assert len(rec.batches) == 1
+
+
+@pytest.mark.asyncio
+async def test_flush_all_awaits_in_flight_tasks() -> None:
+    """flush_all 应等待 timer 触发但 callback 仍在执行的 task 收尾。"""
+    cfg = MessageBatcherConfig(enabled=True, window_seconds=0.05)
+    finished: list[bool] = []
+    started = asyncio.Event()
+
+    async def slow_callback(items: list[BufferedMessage]) -> None:
+        started.set()
+        await asyncio.sleep(0.15)
+        finished.append(True)
+
+    batcher = MessageBatcher(cfg, slow_callback)
+    await batcher.submit(_make_item(text="x"))
+    # 等 timer 触发并进入 callback
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    # callback 仍在 sleep 中调 flush_all 应阻塞直到完成
+    await batcher.flush_all()
+    assert finished == [True]
