@@ -6,12 +6,13 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from openai import AsyncOpenAI, BadRequestError
+from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, BadRequestError
 
 from Undefined.ai.client import AIClient
 from Undefined.ai.llm import (
     ModelRequester,
     _encode_tool_name_for_api,
+    _should_fallback_from_stream,
     build_request_body,
 )
 from Undefined.ai.transports.openai_transport import (
@@ -1815,6 +1816,20 @@ async def test_chat_request_streaming_preserves_content_whitespace() -> None:
     assert extract_choices_content(result) == "  code\n  indented  "
 
     await requester._http_client.aclose()
+
+
+def test_stream_fallback_keeps_programming_errors_visible() -> None:
+    request = httpx.Request("POST", "https://api.example.com/v1/chat/completions")
+
+    assert _should_fallback_from_stream(
+        _make_bad_request_error("streaming unsupported", {"error": "bad request"})
+    )
+    assert _should_fallback_from_stream(APIConnectionError(request=request))
+    assert _should_fallback_from_stream(APITimeoutError(request=request))
+    assert _should_fallback_from_stream(NotImplementedError("streaming unavailable"))
+    assert not _should_fallback_from_stream(AttributeError("parser bug"))
+    assert not _should_fallback_from_stream(TypeError("unexpected event shape"))
+    assert not _should_fallback_from_stream(ValueError("malformed internal state"))
 
 
 @pytest.mark.asyncio

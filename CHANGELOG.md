@@ -14,6 +14,7 @@
 - 稳定用户识别体系：底层认知逻辑固定以 QQ 号为唯一绑定标识，辅以 `group.get_member_info(brief=true)` 快速拉取当前昵称，有效解决群友频繁更换名片引发的识别错乱。
 - 增强模型连接配置：新增 `stream_enabled` 独立控制推流行为，增加 `request_params` 以支持向不同厂商端点透传特殊参数。
 - 完善流式 usage 统计：Chat Completions 启用上游流式请求时会自动附带 `stream_options.include_usage=true`，避免流式路径丢失 token 用量。
+- 收窄流式回退范围：仅在 API/网络/未实现类错误时降级到非流式请求，避免解析或代码异常被静默吞掉。
 - 细化子命令限流：声明式子命令按父命令与子命令分别记录冷却时间，避免同一复合命令下不同操作互相挤占。
 - 修正 `/naga` 子命令分发：handler 直接使用分发层解析出的子命令，避免把 `naga_id` 误当成子命令名。
 - 收窄模型热更新范围：`summary`、`historian`、`grok` 专用模型变化只刷新 AI 运行时配置，不再重建聊天、视觉和 Agent 模型对象。

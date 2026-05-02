@@ -522,11 +522,9 @@ def _should_fallback_from_stream(exc: Exception) -> bool:
     return isinstance(
         exc,
         (
+            APIConnectionError,
             APIStatusError,
-            AttributeError,
-            KeyError,
-            TypeError,
-            ValueError,
+            APITimeoutError,
             NotImplementedError,
         ),
     )
