@@ -51,10 +51,12 @@ async def test_send_github_repo_card_renders_and_sends_image(
         *,
         viewport_width: int = 1280,
         screenshot_selector: str | None = None,
+        proxy: str | None = None,
     ) -> None:
         rendered_html.append(html_content)
         assert viewport_width == 768
         assert screenshot_selector == ".card"
+        assert proxy is None
         Path(output_path).write_bytes(b"png")
 
     monkeypatch.setattr(
@@ -65,6 +67,7 @@ async def test_send_github_repo_card_renders_and_sends_image(
     monkeypatch.setattr(
         sender_module, "render_html_to_image", fake_render_html_to_image
     )
+    monkeypatch.setattr(sender_module, "get_request_proxy", lambda _url: None)
     monkeypatch.setattr(sender_module, "RENDER_CACHE_DIR", tmp_path)
 
     sender: Any = SimpleNamespace(
@@ -86,6 +89,10 @@ async def test_send_github_repo_card_renders_and_sends_image(
     sender.send_group_message.assert_called_once()
     sent_message = sender.send_group_message.call_args.args[1]
     assert sent_message.startswith("[CQ:image,file=file://")
+    rendered_file = Path(
+        sent_message.split("file=", 1)[1].rstrip("]").removeprefix("file://")
+    )
+    assert not rendered_file.exists()
     history_message = sender.send_group_message.call_args.kwargs["history_message"]
     assert history_message.startswith("GitHub: 69gg/Undefined")
     assert "auto_history" not in sender.send_group_message.call_args.kwargs

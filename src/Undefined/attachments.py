@@ -952,6 +952,9 @@ class AttachmentRegistry:
     ) -> AttachmentRecord:
         timeout = httpx.Timeout(_DEFAULT_REMOTE_TIMEOUT_SECONDS)
         max_bytes = self._remote_download_max_bytes
+        reference_segment_data = dict(segment_data or {})
+        if source_ref and source_ref != url:
+            reference_segment_data.setdefault("original_source_ref", source_ref)
         if max_bytes <= 0:
             return await self.register_remote_reference(
                 scope_key,
@@ -959,8 +962,8 @@ class AttachmentRegistry:
                 kind=kind,
                 display_name=display_name,
                 source_kind=_remote_reference_source_kind(source_kind),
-                source_ref=source_ref,
-                segment_data=segment_data,
+                source_ref=url,
+                segment_data=reference_segment_data,
                 description="远程附件未下载：remote_download_max_size_mb=0",
             )
 
@@ -1000,9 +1003,9 @@ class AttachmentRegistry:
                 kind=kind,
                 display_name=display_name,
                 source_kind=_remote_reference_source_kind(source_kind),
-                source_ref=source_ref,
+                source_ref=url,
                 mime_type=exc.mime_type,
-                segment_data=segment_data,
+                segment_data=reference_segment_data,
                 description=f"远程附件超过下载上限 {max_bytes} bytes，保留 URL 引用。",
             )
 
@@ -1359,7 +1362,11 @@ def _render_image_tag(
     for key, value in dict(getattr(record, "segment_data", {}) or {}).items():
         cleaned_key = str(key or "").strip()
         cleaned_value = str(value or "").strip()
-        if not cleaned_key or not cleaned_value or cleaned_key == "file":
+        if (
+            not cleaned_key
+            or not cleaned_value
+            or cleaned_key in {"file", "original_source_ref"}
+        ):
             continue
         cq_args.append(
             f"{_escape_cq_component(cleaned_key)}={_escape_cq_component(cleaned_value)}"

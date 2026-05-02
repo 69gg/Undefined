@@ -1,0 +1,15 @@
+{
+    "name": "searchfaq",
+    "description": "兼容旧命令：搜索 FAQ（请迁移到 /faq search）",
+    "usage": "/searchfaq <关键词>",
+    "example": "/faq search 登录",
+    "permission": "public",
+    "rate_limit": {
+        "user": 10,
+        "admin": 5,
+        "superadmin": 0
+    },
+    "show_in_help": false,
+    "order": 33,
+    "allow_in_private": false
+}

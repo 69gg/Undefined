@@ -518,16 +518,44 @@ def _ensure_chat_stream_usage_options(body: dict[str, Any]) -> None:
         body["stream_options"] = {**stream_options, "include_usage": True}
 
 
+_STREAM_FALLBACK_STATUS_CODES = {400, 404, 405, 422, 501}
+_STREAM_FALLBACK_ERROR_MARKERS = (
+    "stream",
+    "stream_options",
+    "streaming",
+    "not support",
+    "unsupported",
+    "unrecognized",
+    "unknown parameter",
+    "unexpected parameter",
+)
+
+
+def _status_error_text(exc: APIStatusError) -> str:
+    parts = [str(exc)]
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        parts.append(json.dumps(body, ensure_ascii=False, default=str))
+    elif body is not None:
+        parts.append(str(body))
+    response = getattr(exc, "response", None)
+    if response is not None:
+        try:
+            parts.append(response.text)
+        except Exception:
+            pass
+    return "\n".join(part for part in parts if part).lower()
+
+
 def _should_fallback_from_stream(exc: Exception) -> bool:
-    return isinstance(
-        exc,
-        (
-            APIConnectionError,
-            APIStatusError,
-            APITimeoutError,
-            NotImplementedError,
-        ),
-    )
+    if isinstance(exc, NotImplementedError):
+        return True
+    if not isinstance(exc, APIStatusError):
+        return False
+    if exc.status_code not in _STREAM_FALLBACK_STATUS_CODES:
+        return False
+    text = _status_error_text(exc)
+    return any(marker in text for marker in _STREAM_FALLBACK_ERROR_MARKERS)
 
 
 def _stringify_stream_delta(value: Any) -> str:

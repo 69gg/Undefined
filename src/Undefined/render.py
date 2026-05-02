@@ -88,8 +88,14 @@ async def _get_browser() -> Browser:
         if _browser is not None:
             return _browser
 
-        _playwright = await async_playwright().start()
-        _browser = await _playwright.chromium.launch(headless=True)
+        playwright = await async_playwright().start()
+        try:
+            browser = await playwright.chromium.launch(headless=True)
+        except Exception:
+            await playwright.stop()
+            raise
+        _playwright = playwright
+        _browser = browser
         logger.info("[渲染] 浏览器实例已启动")
         return _browser
 
@@ -183,6 +189,7 @@ async def render_html_to_image(
     viewport_width: int = 1280,
     screenshot_selector: str | None = None,
     timeout_ms: int = 60000,
+    proxy: str | None = None,
 ) -> None:
     """
     将 HTML 字符串转换为 PNG 图片
@@ -193,6 +200,7 @@ async def render_html_to_image(
         viewport_width: 视口宽度（像素），默认 1280
         screenshot_selector: 仅截图匹配的元素，默认截整页
         timeout_ms: 截图超时时间（毫秒），默认 60000
+        proxy: 可选浏览器代理地址
     """
 
     async def _capture(page: Page) -> None:
@@ -220,6 +228,7 @@ async def render_html_to_image(
         _capture,
         viewport_width=viewport_width,
         timeout_ms=timeout_ms,
+        proxy=proxy,
     )
 
 

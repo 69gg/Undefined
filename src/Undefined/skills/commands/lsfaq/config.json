@@ -1,0 +1,15 @@
+{
+    "name": "lsfaq",
+    "description": "兼容旧命令：列出 FAQ（请迁移到 /faq ls）",
+    "usage": "/lsfaq",
+    "example": "/faq ls",
+    "permission": "public",
+    "rate_limit": {
+        "user": 10,
+        "admin": 5,
+        "superadmin": 0
+    },
+    "show_in_help": false,
+    "order": 31,
+    "allow_in_private": false
+}

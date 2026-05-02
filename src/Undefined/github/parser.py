@@ -26,6 +26,44 @@ _BARE_REPO_REGEX = re.compile(
 )
 _OWNER_REGEX = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 _REPO_REGEX = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+_COMMON_PATH_LIKE_BARE_OWNERS = {
+    "api",
+    "app",
+    "apps",
+    "asset",
+    "assets",
+    "bin",
+    "build",
+    "cache",
+    "code",
+    "config",
+    "configs",
+    "data",
+    "dist",
+    "doc",
+    "docs",
+    "example",
+    "examples",
+    "img",
+    "image",
+    "images",
+    "lib",
+    "log",
+    "logs",
+    "node_modules",
+    "public",
+    "res",
+    "resource",
+    "resources",
+    "script",
+    "scripts",
+    "src",
+    "static",
+    "test",
+    "tests",
+    "tmp",
+    "vendor",
+}
 
 
 def _strip_wrapper_chars(value: str) -> str:
@@ -52,8 +90,11 @@ def _normalize_owner_repo(owner: str, repo: str, *, bare: bool = False) -> str |
         return None
     if not _REPO_REGEX.fullmatch(normalized_repo):
         return None
-    if bare and normalized_owner.isdigit() and normalized_repo.isdigit():
-        return None
+    if bare:
+        if normalized_owner.isdigit() and normalized_repo.isdigit():
+            return None
+        if normalized_owner.lower() in _COMMON_PATH_LIKE_BARE_OWNERS:
+            return None
     return f"{normalized_owner}/{normalized_repo}"
 
 

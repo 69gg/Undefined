@@ -53,6 +53,7 @@ _STATS_TIME_RANGE_RE = re.compile(r"^\d+[dwm]?$", re.IGNORECASE)
 
 # 命令参数中的 @ 提及：[@QQ] / [@QQ(昵称)] / [@{QQ}]
 _AT_ARG_RE = re.compile(r"^\[@\s*\{?(\d{5,15})\}?(?:\(.*?\))?\]$")
+_ARG_TOKEN_RE = re.compile(r"\[@\s*\{?\d{5,15}\}?(?:\([^\]]*\))?\]|\S+")
 
 
 def _normalize_qq_arg(arg: str) -> str:
@@ -65,6 +66,13 @@ def _normalize_qq_arg(arg: str) -> str:
         return arg
     match = _AT_ARG_RE.match(arg.strip())
     return match.group(1) if match else arg
+
+
+def _split_command_args(args_str: str) -> list[str]:
+    """按空白拆分命令参数，同时保留完整的 ``[@QQ(昵称)]`` 片段。"""
+    if not args_str.strip():
+        return []
+    return [match.group(0) for match in _ARG_TOKEN_RE.finditer(args_str)]
 
 
 class _PrivateCommandSenderProxy:
@@ -169,7 +177,7 @@ class CommandDispatcher:
 
         cmd_name = match.group(1).lower()
         args_str = match.group(2).strip()
-        raw_args = args_str.split() if args_str else []
+        raw_args = _split_command_args(args_str)
         args = [_normalize_qq_arg(arg) for arg in raw_args]
 
         logger.debug(
@@ -1223,7 +1231,9 @@ class CommandDispatcher:
         if permission == "superadmin":
             return self.config.is_superadmin(sender_id), "超级管理员"
         if permission == "admin":
-            return self.config.is_admin(sender_id), "管理员"
+            return (
+                self.config.is_admin(sender_id) or self.config.is_superadmin(sender_id)
+            ), "管理员"
         return True, ""
 
     async def _check_command_rate_limit(

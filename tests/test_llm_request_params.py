@@ -6,7 +6,13 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, BadRequestError
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncOpenAI,
+    BadRequestError,
+)
 
 from Undefined.ai.client import AIClient
 from Undefined.ai.llm import (
@@ -82,6 +88,16 @@ def _make_bad_request_error(message: str, body: dict[str, Any]) -> BadRequestErr
     request = httpx.Request("POST", "https://api.example.com/v1/responses")
     response = httpx.Response(400, request=request)
     return BadRequestError(message, response=response, body=body)
+
+
+def _make_api_status_error(
+    status_code: int,
+    message: str,
+    body: dict[str, Any],
+) -> APIStatusError:
+    request = httpx.Request("POST", "https://api.example.com/v1/chat/completions")
+    response = httpx.Response(status_code, request=request, json=body)
+    return APIStatusError(message, response=response, body=body)
 
 
 class _FakeClient:
@@ -1822,11 +1838,28 @@ def test_stream_fallback_keeps_programming_errors_visible() -> None:
     request = httpx.Request("POST", "https://api.example.com/v1/chat/completions")
 
     assert _should_fallback_from_stream(
-        _make_bad_request_error("streaming unsupported", {"error": "bad request"})
+        _make_bad_request_error(
+            "streaming unsupported",
+            {"error": {"message": "streaming unsupported"}},
+        )
     )
-    assert _should_fallback_from_stream(APIConnectionError(request=request))
-    assert _should_fallback_from_stream(APITimeoutError(request=request))
     assert _should_fallback_from_stream(NotImplementedError("streaming unavailable"))
+    assert not _should_fallback_from_stream(
+        _make_api_status_error(
+            401,
+            "invalid api key",
+            {"error": {"message": "invalid api key"}},
+        )
+    )
+    assert not _should_fallback_from_stream(
+        _make_api_status_error(
+            429,
+            "rate limit",
+            {"error": {"message": "rate limit exceeded"}},
+        )
+    )
+    assert not _should_fallback_from_stream(APIConnectionError(request=request))
+    assert not _should_fallback_from_stream(APITimeoutError(request=request))
     assert not _should_fallback_from_stream(AttributeError("parser bug"))
     assert not _should_fallback_from_stream(TypeError("unexpected event shape"))
     assert not _should_fallback_from_stream(ValueError("malformed internal state"))

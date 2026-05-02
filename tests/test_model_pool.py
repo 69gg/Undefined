@@ -321,6 +321,7 @@ class TestModelSelectorSelection:
                         api_mode="responses",
                         responses_tool_choice_compat=True,
                         responses_force_stateless_replay=True,
+                        reasoning_effort_style="anthropic",
                         stream_enabled=True,
                     )
                 ],
@@ -333,6 +334,7 @@ class TestModelSelectorSelection:
         assert result.api_mode == "responses"
         assert result.responses_tool_choice_compat is True
         assert result.responses_force_stateless_replay is True
+        assert result.reasoning_effort_style == "anthropic"
         assert result.stream_enabled is True
 
     def test_select_agent_config_preserves_responses_flags(
@@ -356,6 +358,7 @@ class TestModelSelectorSelection:
                         api_mode="responses",
                         responses_tool_choice_compat=True,
                         responses_force_stateless_replay=True,
+                        reasoning_effort_style="anthropic",
                         stream_enabled=True,
                     )
                 ],
@@ -368,6 +371,7 @@ class TestModelSelectorSelection:
         assert result.api_mode == "responses"
         assert result.responses_tool_choice_compat is True
         assert result.responses_force_stateless_replay is True
+        assert result.reasoning_effort_style == "anthropic"
         assert result.stream_enabled is True
 
 
@@ -503,13 +507,16 @@ class TestModelPoolServiceCompare:
     async def test_compare_without_space(
         self, model_pool_service: ModelPoolService, mock_sender: MagicMock
     ) -> None:
-        """测试 /compare 后面没有空格不会被识别"""
+        """测试 /compare 后面没有参数时返回用法"""
         user_id = 12345
 
         consumed = await model_pool_service.handle_private_message(user_id, "/compare")
 
-        assert consumed is False
-        mock_sender.send_private_message.assert_not_called()
+        assert consumed is True
+        mock_sender.send_private_message.assert_called_once_with(
+            user_id,
+            "用法: /compare <问题>",
+        )
 
     @pytest.mark.asyncio
     async def test_compare_single_model(

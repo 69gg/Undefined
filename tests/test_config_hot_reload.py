@@ -426,11 +426,13 @@ async def test_apply_config_updates_refreshes_auto_pipeline_hot_reload() -> None
     )
     tool_registry = _FakeReloadRegistry()
     agent_registry = _FakeReloadRegistry()
+    anthropic_skill_registry = _FakeReloadRegistry()
     message_handler = _FakeMessageHandler()
     config_manager = _FakeConfigManager()
     ai_client = SimpleNamespace(
         tool_registry=tool_registry,
         agent_registry=agent_registry,
+        anthropic_skill_registry=anthropic_skill_registry,
     )
     context = HotReloadContext(
         ai_client=cast(Any, ai_client),
@@ -449,5 +451,6 @@ async def test_apply_config_updates_refreshes_auto_pipeline_hot_reload() -> None
 
     assert tool_registry.started == [(3.0, 0.75)]
     assert agent_registry.started == [(3.0, 0.75)]
+    assert anthropic_skill_registry.started == [(3.0, 0.75)]
     assert message_handler.reload_updates == [(True, 3.0, 0.75)]
     assert config_manager.started == [(3.0, 0.75)]

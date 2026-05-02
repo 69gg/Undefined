@@ -494,6 +494,9 @@ responses_tool_choice_compat = false
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
 prompt_cache_enabled = true
+# zh: 是否对上游模型 API 启用流式请求。
+# en: Enable streaming requests to the upstream model API.
+stream_enabled = false
 
 # zh: 额外请求体参数（可选），可用于 temperature 或供应商私有参数。
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.

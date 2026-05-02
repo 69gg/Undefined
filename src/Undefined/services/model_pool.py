@@ -23,6 +23,13 @@ class ModelPoolService:
         self._config = config
         self._sender = sender
 
+    @staticmethod
+    def is_private_control_text(text: str) -> bool:
+        stripped = text.strip()
+        return stripped in {"/compare", "/pk"} or stripped.startswith(
+            ("/compare ", "/pk ", "选")
+        )
+
     async def handle_private_message(self, user_id: int, text: str) -> bool:
         """处理私聊多模型指令，返回 True 表示消息已被消费"""
         if not self._config.model_pool_enabled:
@@ -40,6 +47,10 @@ class ModelPoolService:
             return True
 
         stripped = text.strip()
+        if stripped in {"/compare", "/pk"}:
+            await self._run_compare(user_id, "")
+            return True
+
         for prefix in ("/compare ", "/pk "):
             if stripped.startswith(prefix):
                 await self._run_compare(user_id, stripped[len(prefix) :].strip())

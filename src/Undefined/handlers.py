@@ -52,6 +52,13 @@ KEYWORD_REPLY_HISTORY_PREFIX = "[系统关键词自动回复] "
 REPEAT_REPLY_HISTORY_PREFIX = "[系统复读] "
 
 
+def _is_private_model_pool_control_text(text: str) -> bool:
+    stripped = text.strip()
+    return stripped in {"/compare", "/pk"} or stripped.startswith(
+        ("/compare ", "/pk ", "选")
+    )
+
+
 def _format_poke_history_text(display_name: str, user_id: int) -> str:
     """格式化拍一拍历史文本。"""
     return f"{display_name}(暱称)[{user_id}(QQ号)] 拍了拍你。"
@@ -635,6 +642,14 @@ class MessageHandler:
                 )
                 return
 
+            if _is_private_model_pool_control_text(
+                text
+            ) and await self.ai_coordinator.model_pool.handle_private_message(
+                private_sender_id,
+                text,
+            ):
+                return
+
             private_command = self.command_dispatcher.parse_command(text)
             if private_command:
                 await self.command_dispatcher.dispatch_private(
@@ -644,20 +659,12 @@ class MessageHandler:
                 )
                 return
 
-            auto_extract_triggered = await self._run_auto_extract_pipeline(
+            await self._run_auto_extract_pipeline(
                 target_id=private_sender_id,
                 target_type="private",
                 text=text,
                 message_content=private_message_content,
             )
-
-            if (
-                not auto_extract_triggered
-                and await self.ai_coordinator.model_pool.handle_private_message(
-                    private_sender_id, text
-                )
-            ):
-                return
 
             await self.ai_coordinator.handle_private_reply(
                 private_sender_id,

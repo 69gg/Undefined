@@ -4,7 +4,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from Undefined.ai import AIClient
 from Undefined.config import Config
@@ -219,22 +219,23 @@ def _needs_runtime_ai_model_update(changed_keys: set[str]) -> bool:
 
 
 async def _apply_skills_hot_reload(updated: Config, ai_client: AIClient) -> None:
+    registries: list[Any] = [ai_client.tool_registry, ai_client.agent_registry]
+    anthropic_skill_registry = getattr(ai_client, "anthropic_skill_registry", None)
+    if anthropic_skill_registry is not None:
+        registries.append(anthropic_skill_registry)
+
     if not updated.skills_hot_reload:
-        await ai_client.tool_registry.stop_hot_reload()
-        await ai_client.agent_registry.stop_hot_reload()
+        for registry in registries:
+            await registry.stop_hot_reload()
         logger.info("[配置] 技能热重载已禁用")
         return
 
-    await ai_client.tool_registry.stop_hot_reload()
-    await ai_client.agent_registry.stop_hot_reload()
-    ai_client.tool_registry.start_hot_reload(
-        interval=updated.skills_hot_reload_interval,
-        debounce=updated.skills_hot_reload_debounce,
-    )
-    ai_client.agent_registry.start_hot_reload(
-        interval=updated.skills_hot_reload_interval,
-        debounce=updated.skills_hot_reload_debounce,
-    )
+    for registry in registries:
+        await registry.stop_hot_reload()
+        registry.start_hot_reload(
+            interval=updated.skills_hot_reload_interval,
+            debounce=updated.skills_hot_reload_debounce,
+        )
     logger.info(
         "[配置] 技能热重载已更新: interval=%.2fs debounce=%.2fs",
         updated.skills_hot_reload_interval,

@@ -11,6 +11,7 @@ import uuid
 from Undefined.github.client import get_public_repo_info
 from Undefined.github.models import GitHubRepoInfo
 from Undefined.render import render_html_to_image
+from Undefined.skills.http_config import get_request_proxy
 from Undefined.utils.paths import RENDER_CACHE_DIR, ensure_dir
 
 if TYPE_CHECKING:
@@ -282,6 +283,7 @@ async def _render_repo_card(info: GitHubRepoInfo, output_path: Path) -> None:
         str(output_path),
         viewport_width=768,
         screenshot_selector=".card",
+        proxy=get_request_proxy(info.html_url or "https://github.com"),
     )
 
 
@@ -332,17 +334,28 @@ async def send_github_repo_card(
     )
 
     try:
-        await _render_repo_card(info, output_path)
-        message = f"[CQ:image,file={output_path.resolve().as_uri()}]"
-    except Exception:
-        logger.exception("[GitHub] 渲染仓库卡片失败，回退到文本: repo=%s", info.repo_id)
-        message = _build_fallback_message(info)
+        try:
+            await _render_repo_card(info, output_path)
+            message = f"[CQ:image,file={output_path.resolve().as_uri()}]"
+        except Exception:
+            logger.exception(
+                "[GitHub] 渲染仓库卡片失败，回退到文本: repo=%s", info.repo_id
+            )
+            message = _build_fallback_message(info)
 
-    await _send_message(
-        sender,
-        target_type,
-        target_id,
-        message,
-        history_message=_build_fallback_message(info),
-    )
+        await _send_message(
+            sender,
+            target_type,
+            target_id,
+            message,
+            history_message=_build_fallback_message(info),
+        )
+    finally:
+        if output_path.exists():
+            try:
+                output_path.unlink()
+            except OSError:
+                logger.debug(
+                    "[GitHub] 清理渲染缓存失败: %s", output_path, exc_info=True
+                )
     return f"已发送 GitHub 仓库卡片: {info.repo_id}"

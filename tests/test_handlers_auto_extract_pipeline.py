@@ -159,6 +159,65 @@ async def test_private_command_skips_auto_pipeline_and_ai(
 
 
 @pytest.mark.asyncio
+async def test_private_model_pool_command_runs_before_command_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        handlers_module,
+        "parse_message_content_for_history",
+        AsyncMock(return_value="/compare hello"),
+    )
+    command = object()
+    handler: Any = MessageHandler.__new__(MessageHandler)
+    handler.config = SimpleNamespace(
+        bot_qq=10000,
+        is_private_allowed=lambda _uid: True,
+        access_control_enabled=lambda: False,
+        should_process_private_message=lambda: True,
+    )
+    handler.onebot = SimpleNamespace(
+        get_stranger_info=AsyncMock(return_value={"nickname": "测试用户"}),
+        get_msg=AsyncMock(),
+        get_forward_msg=AsyncMock(),
+    )
+    handler.history_manager = SimpleNamespace(add_private_message=AsyncMock())
+    handler.ai_coordinator = SimpleNamespace(
+        model_pool=SimpleNamespace(handle_private_message=AsyncMock(return_value=True)),
+        handle_private_reply=AsyncMock(),
+    )
+    handler.command_dispatcher = SimpleNamespace(
+        parse_command=MagicMock(return_value=command),
+        dispatch_private=AsyncMock(),
+    )
+    handler.auto_pipeline_registry = SimpleNamespace(run=AsyncMock(return_value=[]))
+    handler._background_tasks = set()
+    handler._profile_name_refresh_cache = {}
+    handler._collect_message_attachments = AsyncMock(return_value=[])
+    handler._schedule_profile_display_name_refresh = MagicMock()
+    handler._schedule_meme_ingest = MagicMock()
+
+    event = {
+        "post_type": "message",
+        "message_type": "private",
+        "user_id": 20001,
+        "message_id": 30001,
+        "message": [{"type": "text", "data": {"text": "/compare hello"}}],
+        "sender": {"user_id": 20001, "nickname": "测试用户"},
+    }
+
+    await handler.handle_message(event)
+
+    handler.ai_coordinator.model_pool.handle_private_message.assert_awaited_once_with(
+        20001,
+        "/compare hello",
+    )
+    handler.command_dispatcher.parse_command.assert_not_called()
+    handler.command_dispatcher.dispatch_private.assert_not_awaited()
+    handler.auto_pipeline_registry.run.assert_not_awaited()
+    handler.ai_coordinator.handle_private_reply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_group_command_skips_auto_pipeline_and_ai(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

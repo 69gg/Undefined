@@ -218,6 +218,74 @@ async def test_remote_attachment_zero_limit_does_not_request_url(
 
 
 @pytest.mark.asyncio
+async def test_remote_reference_uses_url_not_provenance_source_ref(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+        remote_download_max_bytes=0,
+    )
+
+    record = await registry.register_remote_url(
+        "group:10001",
+        "https://example.com/avatar.jpg",
+        kind="image",
+        display_name="avatar.jpg",
+        source_kind="get_avatar",
+        source_ref="qq:12345",
+    )
+    rendered = await render_message_with_pic_placeholders(
+        f'<attachment uid="{record.uid}"/>',
+        registry=registry,
+        scope_key="group:10001",
+        strict=True,
+    )
+
+    assert record.local_path is None
+    assert record.source_ref == "https://example.com/avatar.jpg"
+    assert record.segment_data["original_source_ref"] == "qq:12345"
+    assert "file=https://example.com/avatar.jpg" in rendered.delivery_text
+    assert "original_source_ref" not in rendered.delivery_text
+
+
+@pytest.mark.asyncio
+async def test_register_message_attachments_remote_reference_keeps_resolved_url(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+        remote_download_max_bytes=0,
+    )
+
+    async def _resolve_image_url(_file_id: str) -> str:
+        return "https://example.com/onebot-image.jpg"
+
+    result = await register_message_attachments(
+        registry=registry,
+        segments=[{"type": "image", "data": {"file": "onebot-file-id"}}],
+        scope_key="group:10001",
+        resolve_image_url=_resolve_image_url,
+    )
+    uid = result.attachments[0]["uid"]
+    record = registry.resolve(uid, "group:10001")
+    assert record is not None
+
+    rendered = await render_message_with_pic_placeholders(
+        f'<attachment uid="{uid}"/>',
+        registry=registry,
+        scope_key="group:10001",
+        strict=True,
+    )
+
+    assert record.source_ref == "https://example.com/onebot-image.jpg"
+    assert record.segment_data["original_source_ref"] == "onebot-file-id"
+    assert "file=https://example.com/onebot-image.jpg" in rendered.delivery_text
+    assert "original_source_ref" not in rendered.delivery_text
+
+
+@pytest.mark.asyncio
 async def test_remote_attachment_stream_over_limit_keeps_url_reference(
     tmp_path: Path,
 ) -> None:

@@ -81,6 +81,45 @@ async def test_get_semaphore_keeps_existing_instance_when_limit_changes(
 
 
 @pytest.mark.asyncio
+async def test_get_browser_stops_playwright_when_launch_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeChromium:
+        async def launch(self, *, headless: bool) -> Any:
+            assert headless is True
+            raise RuntimeError("launch failed")
+
+    class _FakePlaywright:
+        def __init__(self) -> None:
+            self.chromium = _FakeChromium()
+            self.stopped = False
+
+        async def stop(self) -> None:
+            self.stopped = True
+
+    class _FakePlaywrightFactory:
+        def __init__(self, playwright: _FakePlaywright) -> None:
+            self.playwright = playwright
+
+        async def start(self) -> _FakePlaywright:
+            return self.playwright
+
+    playwright = _FakePlaywright()
+    monkeypatch.setattr(
+        render_module,
+        "async_playwright",
+        lambda: _FakePlaywrightFactory(playwright),
+    )
+
+    with pytest.raises(RuntimeError, match="launch failed"):
+        await render_module._get_browser()
+
+    assert playwright.stopped is True
+    assert render_module._playwright is None
+    assert render_module._browser is None
+
+
+@pytest.mark.asyncio
 async def test_render_html_with_page_closes_context_when_new_page_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

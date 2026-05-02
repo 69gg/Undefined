@@ -13,7 +13,11 @@ from Undefined.faq import FAQ
 from Undefined.services.command import CommandDispatcher
 from Undefined.services.commands.context import CommandContext
 from Undefined.services.commands.registry import CommandRegistry
+from Undefined.skills.commands.delfaq import handler as delfaq_handler
 from Undefined.skills.commands.faq import handler as faq_handler
+from Undefined.skills.commands.lsfaq import handler as lsfaq_handler
+from Undefined.skills.commands.searchfaq import handler as searchfaq_handler
+from Undefined.skills.commands.viewfaq import handler as viewfaq_handler
 
 
 class _DummySender:
@@ -374,6 +378,66 @@ def test_faq_alias_f_resolves() -> None:
     meta = dispatcher.command_registry.resolve("f")
     assert meta is not None
     assert meta.name == "faq"
+
+
+def test_legacy_faq_commands_remain_registered_but_hidden() -> None:
+    registry = CommandRegistry(_commands_dir())
+    registry.load_commands()
+
+    for name in ("lsfaq", "viewfaq", "searchfaq", "delfaq"):
+        meta = registry.resolve(name)
+        assert meta is not None
+        assert meta.show_in_help is False
+    delfaq_meta = registry.resolve("delfaq")
+    assert delfaq_meta is not None
+    assert delfaq_meta.permission == "admin"
+
+
+@pytest.mark.asyncio
+async def test_legacy_faq_wrappers_delegate_to_new_subcommands() -> None:
+    sender = _DummySender()
+    faq = _make_faq()
+    storage = cast(
+        Any,
+        SimpleNamespace(
+            list_all=AsyncMock(return_value=[faq]),
+            get=AsyncMock(return_value=faq),
+            search=AsyncMock(return_value=[faq]),
+            delete=AsyncMock(return_value=True),
+        ),
+    )
+    context = _build_context(sender, is_admin=True, faq_storage=storage)
+
+    await lsfaq_handler.execute([], context)
+    await viewfaq_handler.execute(["20241205-001"], context)
+    await searchfaq_handler.execute(["测试"], context)
+    await delfaq_handler.execute(["20241205-001"], context)
+
+    outputs = [message for _, message, _ in sender.messages]
+    assert any("FAQ 列表" in message for message in outputs)
+    assert any("FAQ: 测试FAQ" in message for message in outputs)
+    assert any("搜索" in message for message in outputs)
+    assert any("已删除" in message for message in outputs)
+
+
+def test_dispatcher_admin_permission_allows_superadmin() -> None:
+    dispatcher = CommandDispatcher(
+        config=cast(
+            Any,
+            SimpleNamespace(
+                is_superadmin=lambda sender_id: sender_id == 10002,
+                is_admin=lambda _sender_id: False,
+            ),
+        ),
+        sender=cast(Any, _DummySender()),
+        ai=cast(Any, SimpleNamespace()),
+        faq_storage=cast(Any, SimpleNamespace()),
+        onebot=cast(Any, SimpleNamespace()),
+        security=cast(Any, SimpleNamespace(rate_limiter=None)),
+    )
+
+    assert dispatcher._check_command_permission_raw("admin", 10002) == (True, "管理员")
+    assert dispatcher._check_command_permission_raw("admin", 10003) == (False, "管理员")
 
 
 # ---------------------------------------------------------------------------

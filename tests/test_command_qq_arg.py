@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from Undefined.services.command import CommandDispatcher, _normalize_qq_arg
+from Undefined.services.command import (
+    CommandDispatcher,
+    _normalize_qq_arg,
+    _split_command_args,
+)
 
 
 def _dispatcher() -> CommandDispatcher:
@@ -37,6 +41,14 @@ def test_normalize_passthrough_non_qq() -> None:
     assert _normalize_qq_arg("") == ""
 
 
+def test_split_command_args_keeps_at_name_with_spaces() -> None:
+    assert _split_command_args("g [@1708213363(Null User)] -r") == [
+        "g",
+        "[@1708213363(Null User)]",
+        "-r",
+    ]
+
+
 # ---------------------------------------------------------------------------
 # parse_command
 # ---------------------------------------------------------------------------
@@ -52,6 +64,12 @@ def test_parse_command_keeps_inline_at_normalized() -> None:
     d = _dispatcher()
     cmd = d.parse_command("[@123456(Bot)] /addadmin [@1708213363(Null)]")
     assert cmd == {"name": "addadmin", "args": ["1708213363"]}
+
+
+def test_parse_command_keeps_inline_at_with_space_name_normalized() -> None:
+    d = _dispatcher()
+    cmd = d.parse_command("/profile [@1708213363(Null User)] -r")
+    assert cmd == {"name": "profile", "args": ["1708213363", "-r"]}
 
 
 def test_parse_command_multiple_at_args() -> None:
