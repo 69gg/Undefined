@@ -59,7 +59,7 @@
 - **arXiv 论文提取与搜索**：自动检测消息中的 arXiv 链接/标识并发送论文信息与 PDF；同时提供 `arxiv_paper` 发送工具和 `arxiv_search` 检索工具。
 - **GitHub 仓库卡片**：自动检测 GitHub 仓库链接或 `owner/repo` 仓库 ID，获取 public 仓库信息并发送简洁图片卡片，展示头像、简介、stars、forks、issues、contributors 等概览。
 - **自动处理管线**：Bilibili、arXiv、GitHub 等自动提取统一运行在 `skills/auto_pipeline` 中，斜杠命令优先级更高；命令输入/输出会写入历史，非命令消息会并行检测和处理命中管线，结果通过统一发送层写入历史并登记附件 UID 后再进入 AI 回复。远程大附件超过 `[attachments].remote_download_max_size_mb` 时只登记 URL 引用，避免无界下载和缓存膨胀。
-- **同 sender 短时消息合并**：连续发的多条消息会合并到同一轮 AI 调用，AI 一次看到全部意图自行识别"独立请求/修正/打断"；告别"画猫→改成狗"的重复触发与回复打架。可选投机预发送让用户停顿时 LLM 提前开跑、新消息可在未发出回复前取消，进一步压低响应延迟。详见 [docs/message-batching.md](docs/message-batching.md)。
+- **同 sender 短时消息合并**：默认开启。连续发的多条消息会合并到同一轮 AI 调用，AI 一次看到全部意图自行识别"独立请求/修正/打断"；告别"画猫→改成狗"的重复触发与回复打架。主提示词按 batcher 的"当前输入批次"语义适配，关闭该功能可能导致连续补充/修正消息与提示词不匹配，需要单独适配。可选投机预发送让用户停顿时 LLM 提前开跑、新消息可在未发出回复前取消，进一步压低响应延迟。详见 [docs/message-batching.md](docs/message-batching.md)。
 - **思维链支持**：支持开启思维链，提升复杂逻辑推理能力。
 - **高并发架构**：基于 `asyncio` 全异步设计，支持多队列消息处理与工具并发执行，轻松应对高并发场景。
 - **异步安全 I/O**：统一 IO 层通过线程池 + 跨平台文件锁（Linux/macOS `flock`，Windows `msvcrt`）+ 原子写入（`os.replace`）保证并发写入不损坏、且不阻塞主事件循环。

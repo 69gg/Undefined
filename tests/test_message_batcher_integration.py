@@ -102,6 +102,8 @@ async def test_two_group_messages_merge_into_single_request() -> None:
     assert "帮我画一只猫" in request_data["full_question"]
     assert "改成狗" in request_data["full_question"]
     assert "【连续消息说明】" in request_data["full_question"]
+    assert "共同构成【当前输入批次】" in request_data["full_question"]
+    assert "不要把同批前几条误判为历史旧任务" in request_data["full_question"]
 
 
 @pytest.mark.asyncio

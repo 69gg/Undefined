@@ -457,7 +457,7 @@ Prompt caching 补充：
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
-| `enabled` | `true` | 总开关；关闭后行为退化为旧版的逐条独立 AI 调用 |
+| `enabled` | `true` | 总开关，默认开启；关闭后行为退化为旧版的逐条独立 AI 调用。当前主提示词按 batcher 开启后的"当前输入批次"语义适配，若关闭可能导致连续补充/修正消息与提示词语义不匹配，需要单独调整提示词或接受旧版逐条触发行为 |
 | `window_seconds` | `5.0` | 同 sender 合并的等待窗口（秒） |
 | `strategy` | `"extend"` | `extend` = 新消息重置窗口；`fixed` = 从首条算起的固定窗口 |
 | `max_window_seconds` | `30.0` | 从首条算起最长等待，硬顶 `extend` 不被无限延长；`0` 表示不限制（仅靠 `window_seconds` + `max_messages_per_batch` 触发发车） |
@@ -468,7 +468,7 @@ Prompt caching 补充：
 | `pre_send_seconds` | `0.0` | 投机预发送阈值（秒）。`0 < pre_send_seconds < window_seconds` 时启用：静默到该阈值先把当前 batch 提前发给 LLM 抢时间（speculative pre-fire），但 batch 仍要等到 `window_seconds` 才正式结束；新消息在投机期间到达且 inflight 调用尚未发出消息时会取消 inflight 并把消息合并入下一轮调用。`0` 或 `>= window_seconds` 视为关闭 |
 | `allow_cancel_after_send` | `false` | 投机调用已向用户发出消息后是否仍允许新消息取消该 inflight。默认 `false`（安全：不取消，新消息开新 batch）；启用后可能造成重复发送 |
 
-启用后，同一发送者在窗口内连续发送的多条消息会合并到同一轮 AI 调用，`<message>` 块按时间顺序排列，AI 一次性处理整批意图。拍一拍永远旁路立即处理；群聊已有 buffer 时新到的 @bot 也会单独立即处理（不打断 buffer）；首条 @bot 进入 buffer 时整批发车走 `add_group_mention_request`。配置支持热更新，关停时会 `flush_all` 并等待队列 drain，避免缓冲消息只入队未执行。详细行为矩阵与设计要点见 [docs/message-batching.md](message-batching.md)。
+启用后，同一发送者在窗口内连续发送的多条消息会合并到同一轮 AI 调用，`<message>` 块按时间顺序排列，并带有"当前输入批次"说明，AI 一次性处理整批意图。拍一拍永远旁路立即处理；群聊已有 buffer 时新到的 @bot 也会单独立即处理（不打断 buffer）；首条 @bot 进入 buffer 时整批发车走 `add_group_mention_request`。配置支持热更新，关停时会 `flush_all` 并等待队列 drain，避免缓冲消息只入队未执行。详细行为矩阵与设计要点见 [docs/message-batching.md](message-batching.md)。
 
 ---
 

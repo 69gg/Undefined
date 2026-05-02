@@ -23,11 +23,14 @@
 合并时构造的 `<message>` 块按时间先后排列；当 `count >= 2` 时追加"连续消息说明"：
 
 > 把整批 `<message>` 视作本轮的全部输入：
+> 0. 这些 `<message>` 共同构成"当前输入批次"，同批前几条不是历史旧任务；批次之外的历史消息仍只作为背景，不能回溯拾荒。
 > 1. 区分每条意图：【独立请求】各自回应不要遗漏（与平时一样，可多次 send_message 自然分发）；【修正/否定/补充/打断】则以最后一次明确意图为准，旧的不再执行。
 > 2. 拿不准时偏向"独立请求"，宁多勿漏。
 > 3. 整批在本轮一次性处理完，不要为同一意图重复输出。
 
-`res/prompts/undefined.xml` 与 `res/prompts/undefined_nagaagent.xml` 的 `trigger id="4"` 也已同步更新为相同语义。
+`res/prompts/undefined.xml`、`res/prompts/undefined_nagaagent.xml` 与 `res/IMPORTANT/each.md` 均按"当前输入批次"适配：有【连续消息说明】时整批当前 `<message>` 都属于本轮输入；没有连续说明时，当前输入批次退化为最后一条消息。防幽灵任务规则仍然生效，但它只隔离当前输入批次之外的历史消息。
+
+> **重要**：当前主提示词按 MessageBatcher 默认开启设计。`[message_batcher].enabled = true` 是推荐和默认配置；如果关闭 batcher，连续补充/修正会退化为逐条独立 AI 调用，提示词中的"当前输入批次"语义可能不再覆盖这些连续消息，需要单独调整提示词或接受旧版逐条触发行为。
 
 ## 配置
 

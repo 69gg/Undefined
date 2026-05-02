@@ -39,6 +39,26 @@ def test_naga_prompt_requires_scope_before_naga_analysis() -> None:
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_define_batched_current_input(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    assert "MessageBatcher 合并的多条当前 `<message>`" in text
+    assert "共同构成【当前输入批次】" in text
+    assert "同批前几条不是历史旧任务" in text
+    assert "你唯一的主人是【当前输入批次】" in text
+    assert "你唯一的主人是【最后一条消息】" not in text
+    assert "只围绕最后一条消息判断四件事" not in text
+
+
+def test_each_rules_define_batched_current_input() -> None:
+    text = Path("res/IMPORTANT/each.md").read_text(encoding="utf-8")
+
+    assert "当前输入批次定义（适配 MessageBatcher）" in text
+    assert "同批前几条不是历史旧任务" in text
+    assert "当前输入批次之外的历史消息" in text
+
+
+@pytest.mark.parametrize("path", PROMPT_PATHS)
 def test_system_prompts_keep_proactive_participation_narrow_and_meme_post_reply(
     path: Path,
 ) -> None:
