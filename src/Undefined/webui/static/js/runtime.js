@@ -155,6 +155,50 @@
             html += `</div>`;
         }
 
+        // Message Batcher
+        const mb = data.message_batcher || {};
+        if (mb.config) {
+            const cfg = mb.config || {};
+            html += `<div class="probe-section">`;
+            html += `<div class="probe-section-title">${t("probes.section_message_batcher")}</div>`;
+            html += `<div class="probe-grid">`;
+            html += probeItem(
+                t("probes.batcher_enabled"),
+                probeStatusBadge(cfg.enabled ? "ok" : "skipped"),
+            );
+            html += probeItem(
+                t("probes.batcher_window"),
+                `<code>${escapeHtml(String(cfg.window_seconds))}s</code>`,
+            );
+            html += probeItem(
+                t("probes.batcher_strategy"),
+                `<code>${escapeHtml(cfg.strategy || "")}</code>`,
+            );
+            html += probeItem(
+                t("probes.batcher_pending"),
+                String(mb.pending_buckets ?? 0),
+            );
+            html += probeItem(
+                t("probes.batcher_group"),
+                cfg.group_enabled ? "✓" : "✗",
+            );
+            html += probeItem(
+                t("probes.batcher_private"),
+                cfg.private_enabled ? "✓" : "✗",
+            );
+            html += `</div>`;
+            const buckets = Array.isArray(mb.buckets) ? mb.buckets : [];
+            if (buckets.length > 0) {
+                html += `<div class="probe-queue-row" style="margin-top:8px">`;
+                for (const b of buckets.slice(0, 10)) {
+                    const label = `${escapeHtml(String(b.scope || ""))}/${escapeHtml(String(b.sender_id || ""))}`;
+                    html += `<span class="probe-queue-tag"><span class="probe-queue-label">${label}</span> ${b.count}×@${b.elapsed_seconds}s</span>`;
+                }
+                html += `</div>`;
+            }
+            html += `</div>`;
+        }
+
         // Memory & Cognitive
         const mem = data.memory || {};
         const cog = data.cognitive || {};

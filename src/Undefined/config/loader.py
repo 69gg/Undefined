@@ -36,6 +36,7 @@ from .models import (
     ImageGenConfig,
     ImageGenModelConfig,
     MemeConfig,
+    MessageBatcherConfig,
     NagaConfig,
     RerankModelConfig,
     SecurityModelConfig,
@@ -98,6 +99,7 @@ from .domain_parsers import (
     _parse_cognitive_config,
     _parse_easter_egg_call_mode,
     _parse_memes_config,
+    _parse_message_batcher_config,
     _parse_naga_config,
     _update_dataclass,
 )
@@ -351,6 +353,8 @@ class Config:
     cognitive: CognitiveConfig
     # 表情包库
     memes: MemeConfig
+    # 同 sender 短时多消息合并器
+    message_batcher: MessageBatcherConfig
     # Naga 集成
     naga: NagaConfig
     # 生图工具配置
@@ -1279,6 +1283,7 @@ class Config:
 
         cognitive = _parse_cognitive_config(data)
         memes = _parse_memes_config(data)
+        message_batcher = _parse_message_batcher_config(data)
         naga = _parse_naga_config(data)
         models_image_gen = _parse_image_gen_model_config(data)
         models_image_edit = _parse_image_edit_model_config(data)
@@ -1447,6 +1452,7 @@ class Config:
             knowledge_rerank_top_k=knowledge_rerank_top_k,
             cognitive=cognitive,
             memes=memes,
+            message_batcher=message_batcher,
             naga=naga,
             image_gen=image_gen,
             models_image_gen=models_image_gen,

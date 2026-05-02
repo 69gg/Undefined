@@ -60,6 +60,9 @@ async def internal_probe_handler(
     cognitive_queue_snapshot = (
         ctx.cognitive_job_queue.snapshot() if ctx.cognitive_job_queue else {}
     )
+    message_batcher_snapshot = (
+        ctx.message_batcher.snapshot() if ctx.message_batcher else {}
+    )
     memory_storage = getattr(ctx.ai, "memory_storage", None)
     memory_count = memory_storage.count() if memory_storage is not None else 0
 
@@ -113,6 +116,7 @@ async def internal_probe_handler(
         "uptime_seconds": uptime_seconds,
         "onebot": ctx.onebot.connection_status() if ctx.onebot is not None else {},
         "queues": queue_snapshot,
+        "message_batcher": message_batcher_snapshot,
         "memory": {"count": memory_count, "virtual_user_id": _VIRTUAL_USER_ID},
         "cognitive": {
             "enabled": bool(ctx.cognitive_service and ctx.cognitive_service.enabled),

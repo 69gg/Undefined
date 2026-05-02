@@ -54,7 +54,7 @@ bash scripts/install_git_hooks.sh
 | 目录 / 文件 | 职责 |
 |---|---|
 | `ai/` | AI 运行时核心：`client.py`(主入口)、`llm.py`(模型请求)、`prompts.py`(Prompt 构建)、`tooling.py`(工具管理)、`multimodal.py`(多模态)、`model_selector.py`(模型选择)、`summaries.py`(短期总结) |
-| `services/` | 运行服务：`ai_coordinator.py`(协调器+队列投递)、`queue_manager.py`(车站-列车队列)、`command.py`(命令分发)、`model_pool.py`(多模型池)、`security.py`(安全防护) |
+| `services/` | 运行服务：`ai_coordinator.py`(协调器+队列投递)、`queue_manager.py`(车站-列车队列)、`message_batcher.py`(同 sender 短时合并)、`command.py`(命令分发)、`model_pool.py`(多模型池)、`security.py`(安全防护) |
 | `skills/` | 热重载技能系统：`tools/`(原子工具)、`toolsets/`(按域分组工具)、`agents/`(智能体)、`commands/`(斜杠指令)、`anthropic_skills/`(SKILL.md 知识注入) |
 | `cognitive/` | 认知记忆：`service.py`(入口)、`vector_store.py`(ChromaDB)、`historian.py`(后台史官异步改写+侧写合并)、`job_queue.py`、`profile_storage.py` |
 | `memes/` | 表情包库：两阶段 AI 管线、异步处理队列、SQLite 元数据、ChromaDB 向量检索 |
@@ -77,6 +77,7 @@ OneBot WebSocket → onebot.py → handlers.py
   → SecurityService(注入检测)
   → CommandDispatcher(斜杠指令，命中即结束后续处理)
   → skills/auto_pipeline(Bilibili / arXiv / GitHub 并行自动提取)
+  → MessageBatcher(同 sender 短时合并；拍一拍/buffer 内 @bot 旁路)
   → AICoordinator → QueueManager(按模型隔离, 4 级优先级)
   → AIClient → LLM API / Skills / MCP
 
@@ -112,6 +113,10 @@ Management / Runtime 请求 → webui/app.py 或 api/app.py → routes/*
 ### 队列模型
 
 车站-列车模型（QueueManager）：按模型隔离队列组，4 级优先级（超管 > 私聊 > @提及 > 普通群聊），普通队列自动修剪保留最新 2 条，非阻塞按节奏发车（默认 1Hz）。
+
+### 同 sender 短时消息合并（MessageBatcher）
+
+同一 sender 在 `[message_batcher].window_seconds` 内连续发送的多条消息会合并到同一轮 AI 调用，AI 一次性看到全部 `<message>` 块自行识别"独立请求/修正/打断"。拍一拍永远旁路立即处理；群聊已有 buffer 时新到的 @bot 也单独立即处理；首条 @bot 进入 buffer 时整批走 mention 队列。`enabled=false` 行为退化回旧版。详见 [docs/message-batching.md](docs/message-batching.md)。
 
 ### 存储与数据
 

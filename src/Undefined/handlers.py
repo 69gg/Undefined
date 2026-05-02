@@ -38,6 +38,7 @@ from Undefined.utils.sender import MessageSender
 from Undefined.services.security import SecurityService
 from Undefined.services.command import CommandDispatcher
 from Undefined.services.ai_coordinator import AICoordinator
+from Undefined.services.message_batcher import MessageBatcher
 from Undefined.services.model_pool import ModelPoolService
 from Undefined.skills.auto_pipeline import AutoPipelineRegistry
 from Undefined.utils.resources import resolve_resource_path
@@ -136,6 +137,13 @@ class MessageHandler:
             self.security,
             command_dispatcher=self.command_dispatcher,
         )
+
+        # 同 sender 短时多消息合并器；coordinator 决定是否旁路
+        self.message_batcher = MessageBatcher(
+            config.message_batcher,
+            flush_callback=self.ai_coordinator.handle_batched_dispatch,
+        )
+        self.ai_coordinator.set_batcher(self.message_batcher)
 
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._profile_name_refresh_cache: dict[tuple[str, int], str] = {}

@@ -17,6 +17,7 @@ from .models import (
     APIConfig,
     CognitiveConfig,
     MemeConfig,
+    MessageBatcherConfig,
     NagaConfig,
 )
 
@@ -174,6 +175,36 @@ def _parse_memes_config(data: dict[str, Any]) -> MemeConfig:
         ),
         gif_analysis_mode=_coerce_str(section.get("gif_analysis_mode"), "grid"),
         gif_analysis_frames=max(1, _coerce_int(section.get("gif_analysis_frames"), 6)),
+    )
+
+
+_VALID_BATCHER_STRATEGIES: set[str] = {"extend", "fixed"}
+
+
+def _parse_message_batcher_config(data: dict[str, Any]) -> MessageBatcherConfig:
+    section_raw = data.get("message_batcher", {})
+    section = section_raw if isinstance(section_raw, dict) else {}
+    strategy = _coerce_str(section.get("strategy"), "extend").strip().lower()
+    if strategy not in _VALID_BATCHER_STRATEGIES:
+        strategy = "extend"
+    window_seconds = _coerce_float(section.get("window_seconds"), 5.0)
+    if window_seconds < 0:
+        window_seconds = 0.0
+    max_window_seconds = _coerce_float(section.get("max_window_seconds"), 30.0)
+    if max_window_seconds < window_seconds:
+        max_window_seconds = window_seconds
+    max_messages = _coerce_int(section.get("max_messages_per_batch"), 0)
+    if max_messages < 0:
+        max_messages = 0
+    return MessageBatcherConfig(
+        enabled=_coerce_bool(section.get("enabled"), True),
+        window_seconds=window_seconds,
+        strategy=strategy,
+        max_window_seconds=max_window_seconds,
+        max_messages_per_batch=max_messages,
+        group_enabled=_coerce_bool(section.get("group_enabled"), True),
+        private_enabled=_coerce_bool(section.get("private_enabled"), True),
+        flush_on_command=_coerce_bool(section.get("flush_on_command"), False),
     )
 
 

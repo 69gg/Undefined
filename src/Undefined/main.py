@@ -478,6 +478,7 @@ async def main() -> None:
             cognitive_job_queue=job_queue,
             meme_service=meme_service,
             naga_store=naga_store,
+            message_batcher=handler.message_batcher,
         )
         runtime_api_server = RuntimeAPIServer(
             runtime_api_context,
@@ -509,6 +510,10 @@ async def main() -> None:
         logger.exception("[异常] 运行期间发生未捕获的错误: %s", exc)
     finally:
         logger.info("[清理] 正在关闭机器人并释放资源...")
+        try:
+            await handler.message_batcher.flush_all()
+        except Exception:
+            logger.exception("[清理] MessageBatcher flush_all 失败")
         if runtime_api_server is not None:
             await runtime_api_server.stop()
         if meme_worker is not None:

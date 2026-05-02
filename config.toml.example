@@ -753,6 +753,34 @@ repeat_cooldown_minutes = 60
 # en: Enable inverted question mark (when repeat triggers on "?" messages, send "¿" instead).
 inverted_question_enabled = false
 
+# zh: 同 sender 短时多消息合并器。把同一用户在短时间内连续发送的多条消息合并到同一轮 AI 触发，避免重复回复 / 行为打架。
+# en: Same-sender short-window message batcher. Merges several messages a single user sends in quick succession into one AI turn to avoid duplicate replies / conflicting actions.
+[message_batcher]
+# zh: 是否启用合并器（关闭后所有消息按现行流程逐条触发 AI）。
+# en: Enable the batcher (when disabled all messages trigger the AI individually as before).
+enabled = true
+# zh: 等待窗口（秒）。期间同一用户发的新消息合并到同一批；<= 0 等同于关闭。
+# en: Wait window in seconds. New messages from the same sender within this window are merged; <= 0 disables the feature.
+window_seconds = 5.0
+# zh: 等待策略：extend（每来一条新消息重置 timer，"打字就继续等"）/ fixed（首条到达起定时，期间到达的消息只合并不重置）。
+# en: Wait strategy: extend (reset timer on each new message; keeps waiting while the user types) / fixed (timer fixed at the first message; new arrivals only merge but do not reset).
+strategy = "extend"
+# zh: extend 模式下的硬顶（秒），防止用户一直打字导致永远不发车。
+# en: Hard cap in seconds for extend mode, prevents the timer from being reset forever.
+max_window_seconds = 30.0
+# zh: 单批最多消息条数，超出立即发车；0 = 不限制。
+# en: Max messages per batch; exceeding triggers immediate dispatch. 0 = no limit.
+max_messages_per_batch = 0
+# zh: 是否在群聊启用合并。
+# en: Enable batching in group chats.
+group_enabled = true
+# zh: 是否在私聊启用合并。
+# en: Enable batching in private chats.
+private_enabled = true
+# zh: 收到斜杠命令时是否顺便把当前 buffer 一起发出（默认 false：命令独立执行，buffer 继续等到时间到再发）。
+# en: When a slash command arrives, also flush the current buffer to the AI (default false: commands are executed independently and the buffer keeps waiting).
+flush_on_command = false
+
 # zh: 历史记录配置。
 # en: History settings.
 [history]

@@ -1,3 +1,7 @@
+## Unreleased
+
+- 新增同 sender 短时消息合并：同一发送者在 `[message_batcher].window_seconds`（默认 5s）内连续发送的多条消息会合并到同一轮 AI 调用，AI 一次性处理整批意图，避免"画猫"→"改成狗"等场景出现重复回复或行为打架。配置项见 `[message_batcher]`，支持 `extend`/`fixed` 两种策略与 `max_window_seconds`、`max_messages_per_batch` 硬顶；拍一拍永远旁路立即处理，群聊已有 buffer 时新到的 @bot 也会单独立即处理；启用合并后历史记录写入逻辑保持不变。详见 [docs/message-batching.md](docs/message-batching.md)。
+
 ## v3.3.3 命令推断、自动处理管线与统一附件上下文
 
 本版本重点优化了命令系统的交互体验、AI 工具边界和消息前置处理链路。新增 GitHub 链接自动卡片生成，并将 Bilibili、arXiv、GitHub 等自动提取迁入 `skills/auto_pipeline` 热重载管线，使预处理结果能写入历史并进入后续 AI 回复上下文。同时，帮助说明与用户侧写默认改为图片输出，系统剥离独立群聊分析工具集，全面推行统一附件标签，并为远程附件加入可配置下载上限和 URL 引用降级，完善底层用户识别机制与模型高级透传配置。

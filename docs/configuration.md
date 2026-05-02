@@ -453,6 +453,21 @@ Prompt caching 补充：
 
 外部接收的远程图片或文件默认会先下载到附件缓存再生成 UID，避免后续 URL 失效；大文件超过阈值时，UID 仍会生成，但绑定的是 URL 引用而不是缓存文件，AI 可在上下文中看到原始 `source_ref`。
 
+### 4.10.2 `[message_batcher]` 同 sender 短时消息合并
+
+| 字段 | 默认值 | 说明 |
+|---|---:|---|
+| `enabled` | `true` | 总开关；关闭后行为退化为旧版的逐条独立 AI 调用 |
+| `window_seconds` | `5.0` | 同 sender 合并的等待窗口（秒） |
+| `strategy` | `"extend"` | `extend` = 新消息重置窗口；`fixed` = 从首条算起的固定窗口 |
+| `max_window_seconds` | `30.0` | 从首条算起最长等待，硬顶 `extend` 不被无限延长 |
+| `max_messages_per_batch` | `0` | 单批最多条数；达到立即发车，`0` = 不限 |
+| `group_enabled` | `true` | 群聊是否启用合并 |
+| `private_enabled` | `true` | 私聊是否启用合并 |
+| `flush_on_command` | `true` | 命中斜杠命令时是否 flush 该 sender 的 buffer（保留字段，当前未消费） |
+
+启用后，同一发送者在窗口内连续发送的多条消息会合并到同一轮 AI 调用，`<message>` 块按时间顺序排列，AI 一次性处理整批意图。拍一拍永远旁路立即处理；群聊已有 buffer 时新到的 @bot 也会单独立即处理（不打断 buffer）；首条 @bot 进入 buffer 时整批发车走 `add_group_mention_request`。配置支持热更新，关停时会 `flush_all` 避免丢消息。详细行为矩阵与设计要点见 [docs/message-batching.md](message-batching.md)。
+
 ---
 
 ### 4.11 `[skills]` 技能系统与 Agent 介绍

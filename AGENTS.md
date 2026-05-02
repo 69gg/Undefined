@@ -36,6 +36,9 @@ Remote attachments are cached only up to `[attachments].remote_download_max_size
 ### Auto processing pipelines
 Automatic extraction pipelines live under `src/Undefined/skills/auto_pipeline/pipelines/<name>/` and use `config.json + handler.py`. Slash commands have higher priority; when a command is dispatched, automatic pipelines and AI auto-reply are skipped. Command inputs and command outputs should be recorded in message history so later AI turns can see the result. For non-command messages, all pipelines detect in parallel and all matches process in parallel before AI auto-reply. Outputs should go through `MessageSender`, which writes history and automatically registers local CQ media or uploaded files as session attachment UIDs.
 
+### Same-sender short-window message batching
+Consecutive messages from the same sender within `[message_batcher].window_seconds` are merged into a single AI invocation, so the AI sees the whole batch as `<message>` blocks and decides per-intent (independent request vs. correction/interruption). Pokes always bypass; an at-bot message arriving while a buffer already exists is processed individually so it is not blocked; a first at-bot message that opens the buffer routes the eventual batch through the mention lane. History writes remain unchanged. Configure under `[message_batcher]` (`enabled`, `window_seconds`, `strategy`, `max_window_seconds`, `max_messages_per_batch`, `group_enabled`, `private_enabled`); details in [docs/message-batching.md](docs/message-batching.md).
+
 ### User identification in prompts
 The system prompt now includes a rule: **recognize and address users by their QQ ID (`sender_id`)** because nicknames can change. When needing to address a user, use the latest nickname obtained via `group.get_member_info(brief=true)`. Observations recorded in cognitive memory should always include the QQ ID, e.g., “QQ号12345678（昵称张三）做了某事”.
 

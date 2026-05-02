@@ -350,6 +350,24 @@ class MemeConfig:
 
 
 @dataclass
+class MessageBatcherConfig:
+    """同 sender 短时多消息合并器配置。
+
+    将同一 sender 在 ``window_seconds`` 内连续发送的消息合并到同一轮 AI 触发，
+    避免重复回复 / 行为打架。详见 ``services/message_batcher.py``。
+    """
+
+    enabled: bool = True
+    window_seconds: float = 5.0
+    strategy: str = "extend"  # extend | fixed
+    max_window_seconds: float = 30.0
+    max_messages_per_batch: int = 0  # 0 = 不限制
+    group_enabled: bool = True
+    private_enabled: bool = True
+    flush_on_command: bool = False
+
+
+@dataclass
 class APIConfig:
     """主进程 OpenAPI/Runtime API 配置"""
 
