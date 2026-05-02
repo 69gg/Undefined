@@ -46,7 +46,8 @@ src/Undefined/
 
 - 仓库根目录的 `CHANGELOG.md` 是正式版本历史的唯一事实来源。
 - `src/Undefined/changelog.py` 负责解析和校验这份文档，供 `/changelog` 命令和 `changelog_query` tool 共用。
-- 新增或调整版本条目时，不要只改 tag 注释；应同步维护 `CHANGELOG.md`，确保运行时查询和仓库文档一致。
+- 新增或调整版本条目时，不要只改 tag 注释；应同步维护 `CHANGELOG.md`，确保运行时查询、仓库文档和 GitHub Release 说明一致。
+- 发布流水线会校验构建版本、tag 版本和 `CHANGELOG.md` 最新版本一致，并从最新 changelog 条目生成 Release notes。
 
 ### callable.json 共享授权机制
 
