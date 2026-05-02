@@ -49,7 +49,9 @@ def test_system_prompts_keep_proactive_participation_narrow_and_meme_post_reply(
         in text
     )
     assert "表情包相关规则只决定“怎么回复”，不单独构成“该不该回复”的参与许可" in text
-    assert "只要你已经决定要回复，并且表情包能让表达更像真人" in text
+    assert "只有当本轮回复目标明确是“纯表情包/纯反应图”" in text
+    assert "不要为了“增强语气”在首轮抢先调用 `memes.search_memes`" in text
+    assert "第一轮必须优先把必要文字回复做好并调用 `send_message`" in text
     assert "如果本轮既需要文字发言又想配表情包" in text
     assert "先调用 `send_message` 发出必要文字" in text
     assert "表情包检索可能拖慢首条回复体验" in text

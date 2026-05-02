@@ -212,8 +212,9 @@ def test_build_prompt_limits_proactive_participation_to_technical_contexts() -> 
 
     assert "群聊里的主动参与只保留给公开、开放的技术或项目讨论" in prompt
     assert "轻松互动、玩梗、吐槽本身不构成参与许可" in prompt
-    assert "对于已经决定要回复的场景" in prompt
-    assert "默认先尝试 memes.search_memes" in prompt
+    assert "只有明确纯表情包回复才先检索表情包" in prompt
+    assert "第一轮必须优先把必要文字回复做好并调用 send_message" in prompt
+    assert "默认先尝试 memes.search_memes" not in prompt
     assert "普通闲聊、玩梗、吐槽、轻松互动：" not in prompt
 
 

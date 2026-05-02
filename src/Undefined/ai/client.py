@@ -64,6 +64,28 @@ _CONTENT_TAG_PATTERN = re.compile(
     r"<content>(.*?)</content>", re.DOTALL | re.IGNORECASE
 )
 
+_INVALID_TOOL_CALL_CONTENT = (
+    "无效工具调用：工具名称为空或格式非法，系统已跳过执行。"
+    "请使用可用工具名重新调用，或调用 end 结束本轮。"
+)
+
+
+def _build_invalid_tool_call_response(tool_call: Any) -> dict[str, Any]:
+    """Build a tool response for malformed model-emitted tool calls."""
+    call_id = ""
+    tool_name = ""
+    if isinstance(tool_call, dict):
+        call_id = str(tool_call.get("id", "") or "")
+        function = tool_call.get("function")
+        if isinstance(function, dict):
+            tool_name = str(function.get("name", "") or "").strip()
+    return {
+        "role": "tool",
+        "tool_call_id": call_id,
+        "name": tool_name,
+        "content": _INVALID_TOOL_CALL_CONTENT,
+    }
+
 
 class SendMessageCallback(Protocol):
     def __call__(
@@ -1234,13 +1256,31 @@ class AIClient:
                 end_tool_args: dict[str, Any] = {}
 
                 for tool_call in tool_calls:
-                    call_id = tool_call.get("id", "")
-                    function = tool_call.get("function", {})
-                    api_function_name = function.get("name", "")
+                    call_id = ""
+                    if isinstance(tool_call, dict):
+                        call_id = str(tool_call.get("id", "") or "")
+                        function = tool_call.get("function")
+                    else:
+                        function = None
+                    if not isinstance(function, dict):
+                        logger.warning(
+                            "[工具调用] 跳过无效工具调用: missing_function ID=%s",
+                            call_id,
+                        )
+                        messages.append(_build_invalid_tool_call_response(tool_call))
+                        continue
+                    api_function_name = str(function.get("name", "") or "").strip()
+                    if not api_function_name:
+                        logger.warning(
+                            "[工具调用] 跳过无效工具调用: empty_name ID=%s",
+                            call_id,
+                        )
+                        messages.append(_build_invalid_tool_call_response(tool_call))
+                        continue
                     raw_args = function.get("arguments")
 
                     internal_function_name = api_to_internal.get(
-                        str(api_function_name), str(api_function_name)
+                        api_function_name, api_function_name
                     )
 
                     if internal_function_name != api_function_name:
