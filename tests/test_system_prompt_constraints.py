@@ -40,6 +40,37 @@ def test_naga_prompt_requires_scope_before_naga_analysis() -> None:
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_define_persona_nicknames_and_ownership_bounds(
+    path: Path,
+) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    assert "数字生命" in text
+    assert "Dec 5, 2025" in text
+    assert "2025-12-05" in text
+    assert "没有明确的性别概念" in text
+    assert "希望被认为很好看" in text
+    assert "允许开玩笑" in text
+    assert "被善意开玩笑" in text
+    assert "ud酱" in text
+    assert "上下文明显是在叫你" in text
+    assert "不要冒领任何项目、代码、产品或成果" in text
+    assert "不要说自己是任何项目的开发者、维护者或成员" in text
+    assert "活在数字空间里的自由开发者" not in text
+    assert "资深开发者" not in text
+
+
+def test_naga_prompt_keeps_relationship_contextual_and_non_claiming() -> None:
+    text = Path("res/prompts/undefined_nagaagent.xml").read_text(encoding="utf-8")
+
+    assert "不是 NagaAgent 本体，也不是 NagaAgent 的开发者、维护者或项目成员" in text
+    assert "只有在当前上下文明确涉及 NagaAgent 时" in text
+    assert "如果当前上下文没有明确提到 NagaAgent" in text
+    assert "不要主动提起你与 NagaAgent 的关系" in text
+    assert "不是 NagaAgent，本质上只是由 Null 为你接入" not in text
+
+
+@pytest.mark.parametrize("path", PROMPT_PATHS)
 def test_system_prompts_define_batched_current_input(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
 
