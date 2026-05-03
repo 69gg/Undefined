@@ -74,6 +74,16 @@
 .progress { height: 8px; border-radius: 999px; background: var(--bg-deep); border: 1px solid var(--border-color); overflow: hidden; }
 .progress-bar { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent-color), var(--accent-hover)); transition: width 0.4s ease; }
 
+/* About */
+.about-changelog-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.about-changelog-header h3 { margin: 0; }
+.about-changelog-select { width: auto; min-width: 220px; max-width: 100%; }
+.about-changelog-status { min-height: 18px; margin-bottom: 14px; }
+.about-changelog-entry { border-top: 1px dashed var(--border-color); padding-top: 16px; }
+.about-changelog-title { font-size: 18px; line-height: 1.35; margin: 0 0 12px; color: var(--text-primary); }
+.about-changelog-summary { margin: 0 0 16px; color: var(--text-secondary); line-height: 1.7; white-space: pre-wrap; }
+.about-changelog-list { margin: 0; padding-left: 20px; display: grid; gap: 8px; color: var(--text-primary); line-height: 1.6; }
+
 /* Log Viewer */
 .log-viewer { background: #1e1e1a; color: #e0dbd1; font-family: var(--font-mono); font-size: 13px; padding: 24px; border-radius: var(--radius-md); height: 600px; overflow-y: auto; white-space: pre-wrap; border: 1px solid var(--border-color); }
 #logLevelFilter { min-width: 120px; max-width: 100%; }

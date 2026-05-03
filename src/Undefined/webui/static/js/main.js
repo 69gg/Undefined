@@ -1,3 +1,116 @@
+const ABOUT_CHANGELOG_ENDPOINTS = [
+    "/api/v1/management/changelog",
+    "/api/changelog",
+];
+
+let aboutChangelogPayload = null;
+let aboutChangelogLoading = false;
+
+function setAboutChangelogStatus(message) {
+    const status = get("about-changelog-status");
+    if (status) status.innerText = message || "";
+}
+
+function renderAboutChangelogEntry(entry) {
+    const container = get("about-changelog-entry");
+    if (!container) return;
+    container.innerHTML = "";
+    if (!entry) return;
+
+    const title = document.createElement("h4");
+    title.className = "about-changelog-title";
+    title.textContent = `${entry.version || "--"} ${entry.title || ""}`.trim();
+    container.appendChild(title);
+
+    const summary = document.createElement("p");
+    summary.className = "about-changelog-summary";
+    summary.textContent = entry.summary || "";
+    container.appendChild(summary);
+
+    const changes = Array.isArray(entry.changes) ? entry.changes : [];
+    if (!changes.length) {
+        const empty = document.createElement("p");
+        empty.className = "muted-sm";
+        empty.textContent = t("about.changelog_empty");
+        container.appendChild(empty);
+        return;
+    }
+    const list = document.createElement("ul");
+    list.className = "about-changelog-list";
+    changes.forEach((change) => {
+        const item = document.createElement("li");
+        item.textContent = String(change || "");
+        list.appendChild(item);
+    });
+    container.appendChild(list);
+}
+
+function renderAboutChangelog(payload) {
+    aboutChangelogPayload = payload;
+    const select = get("about-changelog-select");
+    const versions = Array.isArray(payload?.versions) ? payload.versions : [];
+    if (select) {
+        select.replaceChildren();
+        versions.forEach((item) => {
+            const option = document.createElement("option");
+            option.value = item.version || "";
+            option.textContent =
+                `${item.version || "--"} ${item.title || ""}`.trim();
+            select.appendChild(option);
+        });
+        select.value =
+            payload?.selected_version || payload?.entry?.version || "";
+        select.disabled = versions.length === 0 || aboutChangelogLoading;
+    }
+    const current = payload?.current_version || "--";
+    const latest = payload?.latest_version || "--";
+    setAboutChangelogStatus(
+        `${t("about.current_version")}: ${current} · ${t("about.latest_version")}: ${latest}`,
+    );
+    renderAboutChangelogEntry(payload?.entry || null);
+}
+
+async function loadAboutChangelog(version = "") {
+    if (aboutChangelogLoading) return;
+    aboutChangelogLoading = true;
+    const select = get("about-changelog-select");
+    if (select) select.disabled = true;
+    setAboutChangelogStatus(t("about.changelog_loading"));
+    try {
+        const suffix = version
+            ? `?version=${encodeURIComponent(String(version))}`
+            : "";
+        const response = await api(
+            ABOUT_CHANGELOG_ENDPOINTS.map((endpoint) => `${endpoint}${suffix}`),
+            { signal: getAbortSignal("about-changelog") },
+        );
+        const payload = await response.json();
+        if (!response.ok || payload?.success === false) {
+            throw new Error(payload?.error || t("about.changelog_error"));
+        }
+        renderAboutChangelog(payload);
+    } catch (error) {
+        if (error?.name === "AbortError") return;
+        const message = error instanceof Error ? error.message : String(error);
+        setAboutChangelogStatus(`${t("about.changelog_error")}: ${message}`);
+        renderAboutChangelogEntry(null);
+    } finally {
+        aboutChangelogLoading = false;
+        const latestSelect = get("about-changelog-select");
+        if (latestSelect)
+            latestSelect.disabled = latestSelect.options.length === 0;
+    }
+}
+
+function maybeLoadAboutChangelog() {
+    if (state.view !== "app" || state.tab !== "about" || !state.authenticated) {
+        return;
+    }
+    if (!aboutChangelogPayload && !aboutChangelogLoading) {
+        loadAboutChangelog();
+    }
+}
+
 function refreshUI() {
     updateI18N();
     get("view-landing").className =
@@ -39,8 +152,10 @@ function refreshUI() {
         get("about-version-display").innerText = initialState.version;
     if (initialState && initialState.license)
         get("about-license-display").innerText = initialState.license;
+    if (aboutChangelogPayload) renderAboutChangelog(aboutChangelogPayload);
 
     updateAuthPanels();
+    maybeLoadAboutChangelog();
 
     if (state.view !== "app" || !state.authenticated) {
         stopSystemTimer();
@@ -99,6 +214,9 @@ function switchTab(tab) {
         typeof window.MemesController.onTabActivated === "function"
     ) {
         window.MemesController.onTabActivated(tab);
+    }
+    if (tab === "about") {
+        maybeLoadAboutChangelog();
     }
     syncMobileChrome();
 }
@@ -551,6 +669,13 @@ async function init() {
                 fetchLogs(true);
             }
         };
+    }
+
+    const aboutChangelogSelect = get("about-changelog-select");
+    if (aboutChangelogSelect) {
+        aboutChangelogSelect.addEventListener("change", () => {
+            loadAboutChangelog(aboutChangelogSelect.value || "");
+        });
     }
 
     document.querySelectorAll(".log-tab").forEach((tab) => {

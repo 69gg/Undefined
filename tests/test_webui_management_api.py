@@ -7,6 +7,7 @@ from typing import Any, cast
 from aiohttp import web
 
 from Undefined.api import _helpers as runtime_api_helpers
+from Undefined.changelog import ChangelogEntry
 from Undefined.webui import app as webui_app
 from Undefined.webui.app import create_app
 from Undefined.webui.core import SessionStore
@@ -61,6 +62,15 @@ def _json_payload(response: web.StreamResponse) -> dict[str, object]:
     payload_text = cast(web.Response, response).text
     assert payload_text is not None
     return cast(dict[str, object], json.loads(payload_text))
+
+
+def _changelog_entry(version: str, title: str) -> ChangelogEntry:
+    return ChangelogEntry(
+        version=version,
+        title=title,
+        summary=f"{title} 摘要",
+        changes=(f"{title} 变更一", f"{title} 变更二"),
+    )
 
 
 def test_session_store_issues_and_refreshes_auth_tokens() -> None:
@@ -154,6 +164,71 @@ async def test_bootstrap_probe_handler_reports_management_state(
     assert payload["runtime_reachable"] is False
     assert payload["auth_mode"] == "token"
     assert payload["advice"]
+
+
+async def test_changelog_handler_defaults_to_current_version(monkeypatch: Any) -> None:
+    request = _request()
+    monkeypatch.setattr(_system, "check_auth", lambda _request: True)
+    monkeypatch.setattr(_system, "__version__", "1.2.3")
+    monkeypatch.setattr(
+        _system,
+        "list_entries",
+        lambda: (
+            _changelog_entry("v1.3.0", "最新版本"),
+            _changelog_entry("v1.2.3", "当前版本"),
+        ),
+    )
+
+    response = await _system.changelog_handler(cast(web.Request, cast(Any, request)))
+    payload = _json_payload(response)
+
+    assert payload["success"] is True
+    assert payload["current_version"] == "v1.2.3"
+    assert payload["latest_version"] == "v1.3.0"
+    assert payload["selected_version"] == "v1.2.3"
+    assert cast(dict[str, object], payload["entry"])["title"] == "当前版本"
+    assert cast(list[object], payload["versions"])[0] == {
+        "version": "v1.3.0",
+        "title": "最新版本",
+    }
+
+
+async def test_changelog_handler_selects_requested_version(monkeypatch: Any) -> None:
+    request = _request(query={"version": "1.3.0"})
+    monkeypatch.setattr(_system, "check_auth", lambda _request: True)
+    monkeypatch.setattr(_system, "__version__", "1.2.3")
+    monkeypatch.setattr(
+        _system,
+        "list_entries",
+        lambda: (
+            _changelog_entry("v1.3.0", "最新版本"),
+            _changelog_entry("v1.2.3", "当前版本"),
+        ),
+    )
+
+    response = await _system.changelog_handler(cast(web.Request, cast(Any, request)))
+    payload = _json_payload(response)
+
+    assert payload["selected_version"] == "v1.3.0"
+    assert cast(dict[str, object], payload["entry"])["title"] == "最新版本"
+
+
+async def test_changelog_handler_reports_missing_version(monkeypatch: Any) -> None:
+    request = _request(query={"version": "9.9.9"})
+    monkeypatch.setattr(_system, "check_auth", lambda _request: True)
+    monkeypatch.setattr(_system, "__version__", "1.2.3")
+    monkeypatch.setattr(
+        _system,
+        "list_entries",
+        lambda: (_changelog_entry("v1.2.3", "当前版本"),),
+    )
+
+    response = await _system.changelog_handler(cast(web.Request, cast(Any, request)))
+    payload = _json_payload(response)
+
+    assert cast(web.Response, response).status == 404
+    assert payload["success"] is False
+    assert payload["error"] == "未找到版本: v9.9.9"
 
 
 async def test_sync_config_template_handler_preview_skips_reload(
@@ -267,6 +342,7 @@ def test_create_app_registers_management_routes() -> None:
     assert ("POST", "/api/v1/management/auth/login") in routes
     assert ("POST", "/api/v1/management/auth/refresh") in routes
     assert ("GET", "/api/v1/management/probes/bootstrap") in routes
+    assert ("GET", "/api/v1/management/changelog") in routes
     assert ("GET", "/api/v1/management/runtime/meta") in routes
     assert ("POST", "/api/v1/management/config/validate") in routes
     assert ("POST", "/api/v1/management/bot/start") in routes
