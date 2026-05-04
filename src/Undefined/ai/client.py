@@ -1228,11 +1228,29 @@ class AIClient:
                     content = ""
 
                 if not tool_calls:
-                    logger.info(
-                        "[AI回复] 会话结束，返回最终内容: length=%s",
+                    if conversation_ended:
+                        logger.info(
+                            "[AI回复] 会话结束，返回最终内容: length=%s",
+                            len(content),
+                        )
+                        return content
+
+                    logger.warning(
+                        "[AI回复] 模型返回文本但未调用工具（iteration=%s content_len=%s），要求重试",
+                        iteration,
                         len(content),
                     )
-                    return content
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "注意：你不能直接返回纯文本作为最终回复。"
+                                "请调用 send_message 工具来发送你的回复消息，"
+                                "然后调用 end 工具结束对话。"
+                            ),
+                        }
+                    )
+                    continue
 
                 assistant_message: dict[str, Any] = {
                     "role": "assistant",

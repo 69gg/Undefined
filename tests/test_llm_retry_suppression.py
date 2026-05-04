@@ -79,7 +79,22 @@ async def test_ai_ask_retries_pre_tool_local_failure() -> None:
             end_summaries=[],
         ),
     )
-    client.tool_manager = cast(Any, SimpleNamespace(get_openai_tools=lambda: []))
+
+    async def _execute_tool(
+        name: str, args: dict[str, Any], ctx: dict[str, Any]
+    ) -> str:
+        if name == "end":
+            ctx["conversation_ended"] = True
+            return "对话已结束"
+        return "ok"
+
+    client.tool_manager = cast(
+        Any,
+        SimpleNamespace(
+            get_openai_tools=lambda: [],
+            execute_tool=_execute_tool,
+        ),
+    )
     client._filter_tools_for_runtime_config = lambda tools: tools
     client._get_runtime_config = cast(Any, lambda: client.runtime_config)
     client.model_selector = cast(Any, SimpleNamespace(wait_ready=AsyncMock()))
@@ -93,7 +108,24 @@ async def test_ai_ask_retries_pre_tool_local_failure() -> None:
     client.submit_queued_llm_call = AsyncMock(
         side_effect=[
             {"choices": []},
-            {"choices": [{"message": {"content": "ok"}}]},
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_end",
+                                    "function": {
+                                        "name": "end",
+                                        "arguments": "{}",
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+            },
         ]
     )
     client._search_wrapper = None
@@ -112,7 +144,7 @@ async def test_ai_ask_retries_pre_tool_local_failure() -> None:
 
     result = await AIClient.ask(client, "hello")
 
-    assert result == "ok"
+    assert result == ""
     assert cast(AsyncMock, client.submit_queued_llm_call).await_count == 2
 
 
