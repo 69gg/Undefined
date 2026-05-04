@@ -175,7 +175,7 @@ async def test_runtime_internal_probe_includes_all_skill_directory_summaries() -
         _items={"code-review": SimpleNamespace()},
         get_stats=lambda: {},
     )
-    auto_pipeline_registry = SimpleNamespace(
+    pipeline_registry = SimpleNamespace(
         _items_lock=asyncio.Lock(),
         _items={
             "github": SimpleNamespace(order=30, description="GitHub repo cards"),
@@ -238,7 +238,7 @@ async def test_runtime_internal_probe_includes_all_skill_directory_summaries() -
         command_dispatcher=command_dispatcher,
         queue_manager=SimpleNamespace(snapshot=lambda: {}),
         history_manager=SimpleNamespace(),
-        auto_pipeline_registry=auto_pipeline_registry,
+        pipeline_registry=pipeline_registry,
     )
     server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
 
@@ -255,8 +255,8 @@ async def test_runtime_internal_probe_includes_all_skill_directory_summaries() -
         {"name": "messages", "count": 1, "loaded": 1}
     ]
     assert skills["agents"]["count"] == 1
-    assert skills["auto_pipelines"]["count"] == 2
-    assert [item["name"] for item in skills["auto_pipelines"]["items"]] == [
+    assert skills["pipelines"]["count"] == 2
+    assert [item["name"] for item in skills["pipelines"]["items"]] == [
         "arxiv",
         "github",
     ]

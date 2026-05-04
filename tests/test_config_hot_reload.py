@@ -414,7 +414,7 @@ def test_apply_config_updates_hot_reloads_attachment_config() -> None:
 
 
 @pytest.mark.asyncio
-async def test_apply_config_updates_refreshes_auto_pipeline_hot_reload() -> None:
+async def test_apply_config_updates_refreshes_pipelines_hot_reload() -> None:
     updated = cast(
         Any,
         SimpleNamespace(

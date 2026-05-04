@@ -655,7 +655,7 @@ Prompt caching 补充：
 - 同一条消息内，自动处理管线会并行检测 Bilibili、arXiv、GitHub 等已注册管线。
 - 检测到多个管线时会并行处理全部命中结果；通常单条消息只会命中一个管线，因此不手动维护优先级。
 - 自动提取发送出的信息消息、图片卡片、文件或视频摘要会通过统一发送层写入消息历史，本地媒体和文件会自动登记为会话附件 UID，随后才进入 AI 自动回复，因此 AI 可以读取刚刚的自动提取结果。
-- 管线实现位于 `src/Undefined/skills/auto_pipeline/`，跟随 `[skills]` 热重载配置自动重新加载。开发新管线请参考 [自动处理管线开发指南](auto-pipeline.md)。
+- 管线实现位于 `src/Undefined/skills/pipelines/`，跟随 `[skills]` 热重载配置自动重新加载。开发新管线请参考 [自动处理管线开发指南](pipelines.md)。
 
 ---
 

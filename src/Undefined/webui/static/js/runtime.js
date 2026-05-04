@@ -242,7 +242,7 @@
             { key: "tools", label: t("probes.tools") },
             { key: "toolsets", label: t("probes.toolsets") },
             { key: "agents", label: t("probes.agents") },
-            { key: "auto_pipelines", label: t("probes.auto_pipelines") },
+            { key: "pipelines", label: t("probes.pipelines") },
             { key: "commands", label: t("probes.commands") },
             { key: "anthropic_skills", label: "Anthropic Skills" },
         ];

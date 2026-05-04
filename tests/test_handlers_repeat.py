@@ -47,10 +47,10 @@ def _build_handler(
         send_group_message=AsyncMock(),
         send_private_message=AsyncMock(),
     )
-    handler.auto_pipeline_registry = SimpleNamespace(
+    handler.pipeline_registry = SimpleNamespace(
         run=AsyncMock(return_value=[]),
     )
-    handler._auto_pipeline_initialized = True
+    handler._pipelines_initialized = True
     handler.ai_coordinator = SimpleNamespace(
         handle_auto_reply=AsyncMock(),
         handle_private_reply=AsyncMock(),
@@ -126,7 +126,7 @@ async def test_repeat_triggers_on_3_identical_from_different_senders() -> None:
     for uid in [20001, 20002]:
         await handler.handle_message(_group_event(sender_id=uid, text="hello"))
 
-    handler.auto_pipeline_registry.run.reset_mock()
+    handler.pipeline_registry.run.reset_mock()
     handler.ai_coordinator.handle_auto_reply.reset_mock()
     await handler.handle_message(_group_event(sender_id=20003, text="hello"))
 
@@ -135,7 +135,7 @@ async def test_repeat_triggers_on_3_identical_from_different_senders() -> None:
     assert call.args[0] == 30001
     assert call.args[1] == "hello"
     assert call.kwargs.get("history_prefix") == REPEAT_REPLY_HISTORY_PREFIX
-    handler.auto_pipeline_registry.run.assert_not_called()
+    handler.pipeline_registry.run.assert_not_called()
     handler.ai_coordinator.handle_auto_reply.assert_not_called()
     handler._bot_nickname_cache.get_nicknames.assert_not_called()
 

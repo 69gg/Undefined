@@ -5,12 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping
 
-AutoPipelineTargetType = Literal["group", "private"]
-AutoPipelineContext = dict[str, Any]
+PipelineTargetType = Literal["group", "private"]
+PipelineContext = dict[str, Any]
 
 
 @dataclass(frozen=True)
-class AutoPipelineDetection:
+class PipelineDetection:
     """单条自动处理管线的命中结果。"""
 
     name: str

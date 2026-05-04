@@ -8,7 +8,7 @@ import pytest
 
 import Undefined.handlers as handlers_module
 from Undefined.handlers import MessageHandler
-from Undefined.skills.auto_pipeline import AutoPipelineRegistry
+from Undefined.skills.pipelines import PipelineRegistry
 
 
 @pytest.mark.asyncio
@@ -50,8 +50,8 @@ async def test_private_message_runs_arxiv_auto_extract_before_ai_reply(
     handler._background_tasks = set()
     handler._extract_arxiv_ids = MagicMock(return_value=["2501.01234"])
     handler._handle_arxiv_extract = AsyncMock()
-    handler.auto_pipeline_registry = AutoPipelineRegistry()
-    handler.auto_pipeline_registry.load_items()
+    handler.pipeline_registry = PipelineRegistry()
+    handler.pipeline_registry.load_items()
     handler._spawn_background_task = MagicMock()
 
     event = {

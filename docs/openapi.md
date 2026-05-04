@@ -106,10 +106,10 @@ curl http://127.0.0.1:8788/openapi.json
 | `memory` | `object` | 长期记忆（`count`：条数） |
 | `cognitive` | `object` | 认知服务（`enabled`、`queue`） |
 | `api` | `object` | Runtime API 配置（`enabled`、`host`、`port`、`openapi_enabled`） |
-| `skills` | `object` | 技能统计，包含 `tools`、`toolsets`、`agents`、`auto_pipelines`、`commands`、`anthropic_skills` 子对象 |
+| `skills` | `object` | 技能统计，包含 `tools`、`toolsets`、`agents`、`pipelines`、`commands`、`anthropic_skills` 子对象 |
 | `models` | `object` | 模型配置；聊天类模型包含 `model_name`、脱敏 `api_url`、`api_mode`、`thinking_enabled`、`thinking_tool_call_compat`、`responses_tool_choice_compat`、`responses_force_stateless_replay`、`prompt_cache_enabled`、`reasoning_enabled`、`reasoning_effort` |
 
-`skills` 下各分类均提供轻量摘要：`tools` 是当前可调用工具总表，`toolsets` 单独拆出 `skills/toolsets/` 下的工具集工具，`agents` 对应 `skills/agents/`，`auto_pipelines` 对应 `skills/auto_pipeline/`，`commands` 对应 `skills/commands/`，`anthropic_skills` 对应全局 Anthropic Skills。常规注册表子对象结构：
+`skills` 下各分类均提供轻量摘要：`tools` 是当前可调用工具总表，`toolsets` 单独拆出 `skills/toolsets/` 下的工具集工具，`agents` 对应 `skills/agents/`，`pipelines` 对应 `skills/pipelines/`，`commands` 对应 `skills/commands/`，`anthropic_skills` 对应全局 Anthropic Skills。常规注册表子对象结构：
 
 ```json
 {
@@ -121,7 +121,7 @@ curl http://127.0.0.1:8788/openapi.json
 }
 ```
 
-`toolsets` 额外包含 `categories[]`，用于按工具集类别汇总；`commands` 额外包含 `aliases` 与 `subcommands` 总数；`auto_pipelines` 额外包含 `hot_reload`，用于观察自动管线热重载 watcher 是否正在运行。
+`toolsets` 额外包含 `categories[]`，用于按工具集类别汇总；`commands` 额外包含 `aliases` 与 `subcommands` 总数；`pipelines` 额外包含 `hot_reload`，用于观察管线热重载 watcher 是否正在运行。
 
 `models` 子对象结构（URL 经脱敏处理，仅保留 scheme + host；embedding/rerank 仅返回 `model_name` 与 `api_url`）：
 

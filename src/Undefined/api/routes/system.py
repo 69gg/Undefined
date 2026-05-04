@@ -84,8 +84,8 @@ def _toolsets_summary(tool_registry: Any) -> dict[str, Any]:
     }
 
 
-async def _auto_pipeline_summary(registry: Any) -> dict[str, Any]:
-    """生成 skills/auto_pipeline 的探针摘要。"""
+async def _pipelines_summary(registry: Any) -> dict[str, Any]:
+    """生成 skills/pipelines 的探针摘要。"""
     if registry is None:
         return {"count": 0, "loaded": 0, "items": [], "hot_reload": False}
 
@@ -215,7 +215,7 @@ async def internal_probe_handler(
         "tools": _registry_summary(tool_reg),
         "toolsets": _toolsets_summary(tool_reg),
         "agents": _registry_summary(agent_reg),
-        "auto_pipelines": await _auto_pipeline_summary(ctx.auto_pipeline_registry),
+        "pipelines": await _pipelines_summary(ctx.pipeline_registry),
         "commands": _commands_summary(ctx.command_dispatcher),
         "anthropic_skills": _registry_summary(anthropic_reg),
     }

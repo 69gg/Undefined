@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from Undefined.skills.auto_pipeline import AutoPipelineRegistry
+from Undefined.skills.pipelines import PipelineRegistry
 
 
 def _write_pipeline(base_dir: Path) -> None:
@@ -27,12 +27,12 @@ def _write_pipeline(base_dir: Path) -> None:
         """
 from __future__ import annotations
 
-from Undefined.skills.auto_pipeline.models import AutoPipelineDetection
+from Undefined.skills.pipelines.models import PipelineDetection
 
 
 async def detect(context):
     context["events"].append("detect")
-    return AutoPipelineDetection(name="example", items=("item",))
+    return PipelineDetection(name="example", items=("item",))
 
 
 async def process(detection, context):
@@ -43,11 +43,11 @@ async def process(detection, context):
 
 
 @pytest.mark.asyncio
-async def test_auto_pipeline_registry_loads_and_runs_configured_pipeline(
+async def test_pipelines_registry_loads_and_runs_configured_pipeline(
     tmp_path: Path,
 ) -> None:
     _write_pipeline(tmp_path)
-    registry = AutoPipelineRegistry(tmp_path)
+    registry = PipelineRegistry(tmp_path)
     registry.load_items()
     context: dict[str, Any] = {"events": []}
 
@@ -58,11 +58,12 @@ async def test_auto_pipeline_registry_loads_and_runs_configured_pipeline(
 
 
 @pytest.mark.asyncio
-async def test_auto_pipeline_registry_initial_async_load_uses_thread(
+async def test_pipelines_registry_initial_async_load_uses_thread(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    registry = AutoPipelineRegistry(tmp_path)
+    _write_pipeline(tmp_path)
+    registry = PipelineRegistry(tmp_path)
     calls: list[Any] = []
 
     async def _fake_to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:
@@ -79,11 +80,11 @@ async def test_auto_pipeline_registry_initial_async_load_uses_thread(
 
 
 @pytest.mark.asyncio
-async def test_auto_pipeline_reload_loads_items_in_thread(
+async def test_pipelines_reload_loads_items_in_thread(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    registry = AutoPipelineRegistry(tmp_path)
+    registry = PipelineRegistry(tmp_path)
     calls: list[Any] = []
 
     async def _fake_to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:

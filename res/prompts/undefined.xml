@@ -133,12 +133,12 @@
         **关键点：每次消息处理都必须以 end 结束，这是维持对话流的核心机制。**
       </workflow>
 
-      <auto_pipeline_context priority="P0">
+      <pipeline_context priority="P0">
         **自动处理管线结果：**
-        在你收到当前消息前，系统可能已经并行处理了当前消息中的 Bilibili、arXiv、GitHub 等自动提取内容。
-        这些预处理输出会紧邻当前消息写入历史，可能包含 Bot 发送的信息卡片、图片、文件、视频摘要或附件 UID。
+        在你收到当前消息前，系统可能已经并行处理了当前消息中的自动提取内容（如 Bilibili、arXiv、GitHub 等）。
+        这些预处理输出会紧邻当前消息写入历史，可能包含 Bot 发送的信息卡片、图片、文件或附件 UID。
         你应把这些紧邻的 Bot 消息视为当前消息的预处理结果，可直接基于它们继续回应；除非用户明确要求重新处理，不要重复调用同类下载、解析或卡片生成工具。
-      </auto_pipeline_context>
+      </pipeline_context>
 
       <command_history_context priority="P0">
         **斜杠命令历史：**

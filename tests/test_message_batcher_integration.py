@@ -311,7 +311,7 @@ async def test_message_handler_close_flushes_batcher_then_drains_queue() -> None
     handler.history_manager = SimpleNamespace(
         flush_pending_saves=AsyncMock(side_effect=lambda: order.append("flush_history"))
     )
-    handler.auto_pipeline_registry = SimpleNamespace(
+    handler.pipeline_registry = SimpleNamespace(
         stop_hot_reload=AsyncMock(side_effect=lambda: order.append("stop_pipeline"))
     )
 

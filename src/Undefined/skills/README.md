@@ -8,7 +8,7 @@
 
 ```
 skills/
-├── auto_pipeline/   # 自动处理管线，斜杠命令之后、AI 之前并行检测/处理
+├── pipelines/        # 自动处理管线，斜杠命令之后、AI 之前并行检测/处理
 │   ├── __init__.py
 │   ├── registry.py
 │   └── pipelines/
@@ -75,7 +75,7 @@ skills/
 - **定位**: 消息进入 AI 前的自动预处理能力，例如 Bilibili、arXiv、GitHub 链接提取；斜杠命令优先级更高，命中后不触发管线。
 - **调用方式**: `MessageHandler` 自动调用，不暴露给 AI 主动调用。
 - **命名规则**: `pipelines/<name>/`，`config.json` 中的 `name` 必须与命中结果一致。
-- **目录结构**: `auto_pipeline/pipelines/{pipeline_name}/config.json + handler.py`。
+- **目录结构**: `pipelines/{pipeline_name}/config.json + handler.py`。
 - **执行方式**: 同一条非命令消息会并行检测全部管线，并行处理全部命中结果；处理产出的消息通过统一发送层写入历史并自动登记本地媒体/文件附件后，再进入 AI 自动回复。
 - **热重载**: 跟随 `[skills]` 的 `hot_reload`、`hot_reload_interval`、`hot_reload_debounce` 配置。
 - **示例**: `bilibili`, `arxiv`, `github`
@@ -140,12 +140,12 @@ skills/
 
 ### 添加自动处理管线
 
-1. 在 `skills/auto_pipeline/pipelines/` 下创建新目录
+1. 在 `skills/pipelines/` 下创建新目录
 2. 添加 `config.json`，包含 `name`、`description`、`order` 和 `enabled`
 3. 添加 `handler.py`，必须包含 `async def detect(context)` 与 `async def process(detection, context)`
-4. 自动被 `AutoPipelineRegistry` 发现和注册，并支持热重载
+4. 自动被 `PipelineRegistry` 发现和注册，并支持热重载
 
-详细说明请参考 [自动处理管线开发指南](../../../docs/auto-pipeline.md)。
+详细说明请参考 [自动处理管线开发指南](../../../docs/pipelines.md)。
 
 ### 添加基础工具
 
