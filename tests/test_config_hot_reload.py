@@ -357,6 +357,31 @@ def test_apply_config_updates_runtime_model_config_without_rebuilding_core_model
     assert len(queue_manager.intervals) == 1
 
 
+def test_apply_config_updates_hot_reloads_missing_tool_call_retries() -> None:
+    updated = cast(
+        Any,
+        SimpleNamespace(
+            searxng_url="",
+            missing_tool_call_retries=4,
+        ),
+    )
+    ai_client = _FakeAIClient()
+    context = HotReloadContext(
+        ai_client=cast(Any, ai_client),
+        queue_manager=cast(Any, _FakeQueueManager()),
+        config_manager=cast(Any, SimpleNamespace()),
+        security_service=cast(Any, _FakeSecurityService()),
+    )
+
+    apply_config_updates(
+        updated,
+        {"missing_tool_call_retries": (3, 4)},
+        context,
+    )
+
+    assert ai_client.runtime_updates == [updated]
+
+
 def test_apply_config_updates_hot_reloads_attachment_config() -> None:
     updated = cast(
         Any,

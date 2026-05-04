@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import time
 from pathlib import Path
 from typing import TypedDict
@@ -41,6 +42,7 @@ class HtmlRenderCache:
     _cache_file: Path
     _max_entries: int
     _max_size_bytes: int
+    _image_dir: Path
 
     def __init__(
         self,
@@ -51,6 +53,7 @@ class HtmlRenderCache:
     ) -> None:
         ensure_dir(cache_file.parent)
         self._cache_file = cache_file
+        self._image_dir = ensure_dir(cache_file.parent / "html")
         self._max_entries = max_entries
         self._max_size_bytes = max(1, max_size_mb) * 1024 * 1024
         self._entries = {}
@@ -70,7 +73,14 @@ class HtmlRenderCache:
         try:
             if self._cache_file.exists():
                 raw = json.loads(self._cache_file.read_text(encoding="utf-8"))
-                self._entries = {k: _CacheEntry(**v) for k, v in raw.items()}  # type: ignore
+                loaded = {k: _CacheEntry(**v) for k, v in raw.items()}  # type: ignore
+                self._entries = {
+                    k: v
+                    for k, v in loaded.items()
+                    if self._is_cache_owned_path(Path(v["path"]))
+                }
+                if len(self._entries) != len(loaded):
+                    self._dirty = True
                 logger.info("[渲染缓存] 已加载 %d 条缓存记录", len(self._entries))
         except Exception:
             logger.warning("[渲染缓存] 加载缓存文件失败，将使用空缓存", exc_info=True)
@@ -121,31 +131,51 @@ class HtmlRenderCache:
             except OSError:
                 pass
 
+    def _cache_path_for_key(self, key: str) -> Path:
+        safe_key = "".join(ch for ch in key if ch.isalnum() or ch in {"-", "_"})
+        return self._image_dir / f"{safe_key}.png"
+
+    def _is_cache_owned_path(self, path: Path) -> bool:
+        try:
+            path.resolve().relative_to(self._image_dir.resolve())
+            return True
+        except ValueError:
+            return False
+
     async def get(self, key: str) -> Path | None:
         async with self._lock:
             entry = self._entries.get(key)
             if entry is None:
                 return None
             path = Path(entry["path"])
-            if not path.exists():
+            if not self._is_cache_owned_path(path) or not path.exists():
                 del self._entries[key]
                 self._dirty = True
                 return None
             entry["last_accessed_at"] = time.time()
+            await self._save_locked()
             return path
 
     async def put(self, key: str, image_path: str | Path, size_bytes: int) -> None:
-        path = Path(image_path)
+        source_path = Path(image_path)
+        if not source_path.exists():
+            return
         async with self._lock:
-            if key in self._entries:
-                existing_path = Path(self._entries[key]["path"])
-                if existing_path.exists():
-                    self._entries[key]["last_accessed_at"] = time.time()
+            cache_path = self._cache_path_for_key(key)
+            existing = self._entries.get(key)
+            if existing is not None:
+                existing_path = Path(existing["path"])
+                if self._is_cache_owned_path(existing_path) and existing_path.exists():
+                    existing["last_accessed_at"] = time.time()
+                    await self._save_locked()
                     return
 
+            if source_path.resolve() != cache_path.resolve():
+                shutil.copy2(source_path, cache_path)
+            actual_size = cache_path.stat().st_size
             self._entries[key] = _CacheEntry(
-                path=str(path),
-                size_bytes=size_bytes,
+                path=str(cache_path),
+                size_bytes=actual_size if actual_size > 0 else size_bytes,
                 created_at=time.time(),
                 last_accessed_at=time.time(),
             )

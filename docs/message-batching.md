@@ -54,8 +54,8 @@ max_messages_per_batch = 0
 group_enabled = true
 # 私聊是否启用合并
 private_enabled = true
-# 命中斜杠命令时是否 flush 当前 sender 的 buffer（保留字段，当前未消费）
-flush_on_command = true
+# 命中斜杠命令时是否先 flush 当前 sender 的 buffer（默认关闭，保持命令独立执行）
+flush_on_command = false
 # 投机预发送阈值（秒）。0 < pre_send_seconds < window_seconds 时启用 "speculative pre-fire"：
 # 静默到该阈值就先把当前 batch 提前发给 LLM 抢时间，但 batch 仍要等到 window_seconds 才结束
 pre_send_seconds = 0.0

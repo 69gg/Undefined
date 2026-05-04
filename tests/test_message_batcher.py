@@ -228,12 +228,14 @@ async def test_callback_exception_does_not_break_batcher() -> None:
     batcher = MessageBatcher(cfg, bad_callback)
     await batcher.submit(_make_item(text="a"))
     await asyncio.sleep(0.2)
-    assert calls == [1]
+    assert calls == [1, 1]
+    assert batcher.has_buffer("group:1", 100)
 
     # 应能继续接受新消息
     await batcher.submit(_make_item(text="b"))
     await asyncio.sleep(0.2)
-    assert calls == [1, 1]
+    assert calls == [1, 1, 2]
+    assert batcher.has_buffer("group:1", 100)
 
 
 @pytest.mark.asyncio
@@ -684,3 +686,71 @@ async def test_submit_after_flush_all_dispatches_immediately() -> None:
     snap = batcher.snapshot()
     assert snap["pending_buckets"] == 0
     assert snap["config"]["shutdown"] is True
+
+
+@pytest.mark.asyncio
+async def test_regular_callback_failure_restores_for_retry() -> None:
+    cfg = MessageBatcherConfig(enabled=True, window_seconds=0.03, strategy="extend")
+    calls = 0
+    recovered = asyncio.Event()
+
+    async def flaky_flush(items: list[BufferedMessage]) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("temporary enqueue failure")
+        assert [item.text for item in items] == ["m1"]
+        recovered.set()
+
+    batcher = MessageBatcher(cfg, flaky_flush)
+
+    await batcher.submit(_make_item(text="m1"))
+    await asyncio.wait_for(recovered.wait(), timeout=0.5)
+
+    assert calls == 2
+    assert not batcher.has_buffer("group:1", 100)
+
+
+@pytest.mark.asyncio
+async def test_immediate_callback_failure_restores_for_retry() -> None:
+    cfg = MessageBatcherConfig(
+        enabled=True,
+        window_seconds=0.03,
+        max_messages_per_batch=2,
+    )
+    calls = 0
+    recovered = asyncio.Event()
+
+    async def flaky_flush(items: list[BufferedMessage]) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("temporary enqueue failure")
+        assert [item.text for item in items] == ["x", "y"]
+        recovered.set()
+
+    batcher = MessageBatcher(cfg, flaky_flush)
+
+    await batcher.submit(_make_item(text="x"))
+    await batcher.submit(_make_item(text="y"))
+    await asyncio.wait_for(recovered.wait(), timeout=0.5)
+
+    assert calls == 2
+    assert not batcher.has_buffer("group:1", 100)
+
+
+@pytest.mark.asyncio
+async def test_flush_all_callback_failure_raises_and_keeps_buffer() -> None:
+    cfg = MessageBatcherConfig(enabled=True, window_seconds=10.0)
+
+    async def failing_flush(items: list[BufferedMessage]) -> None:
+        raise RuntimeError("temporary enqueue failure")
+
+    batcher = MessageBatcher(cfg, failing_flush)
+
+    await batcher.submit(_make_item(text="m1"))
+
+    with pytest.raises(RuntimeError, match="message batcher flush callback failed"):
+        await batcher.flush_all()
+
+    assert batcher.has_buffer("group:1", 100)

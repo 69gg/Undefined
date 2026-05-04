@@ -1127,9 +1127,16 @@ class AIClient:
         transport_state: dict[str, Any] | None = None
         queue_lane = self._resolve_queue_lane(tool_context.get("queue_lane"))
         pre_tool_failure_count = 0
+        missing_tool_call_count = 0
+        last_missing_tool_call_content = ""
+        runtime_config = self._get_runtime_config()
         max_pre_tool_retries = max(
             0,
-            int(getattr(self._get_runtime_config(), "ai_request_max_retries", 0) or 0),
+            int(getattr(runtime_config, "ai_request_max_retries", 0) or 0),
+        )
+        max_missing_tool_call_retries = max(
+            0,
+            int(getattr(runtime_config, "missing_tool_call_retries", 3) or 0),
         )
 
         while iteration < max_iterations:
@@ -1235,9 +1242,37 @@ class AIClient:
                         )
                         return content
 
+                    if content.strip():
+                        last_missing_tool_call_content = content.strip()
+                    missing_tool_call_count += 1
+                    if missing_tool_call_count > max_missing_tool_call_retries:
+                        logger.warning(
+                            "[AI回复] 模型连续未调用工具，停止重试: iteration=%s retries=%s/%s content_len=%s",
+                            iteration,
+                            missing_tool_call_count - 1,
+                            max_missing_tool_call_retries,
+                            len(content),
+                        )
+                        fallback_content = last_missing_tool_call_content
+                        if fallback_content and send_message_callback is not None:
+                            try:
+                                await send_message_callback(fallback_content)
+                                tool_context["message_sent_this_turn"] = True
+                                current_ctx = RequestContext.current()
+                                if current_ctx is not None:
+                                    current_ctx.set_resource(
+                                        "message_sent_this_turn", True
+                                    )
+                                return ""
+                            except Exception:
+                                logger.exception("[AI回复] fallback 发送失败")
+                        return fallback_content
+
                     logger.warning(
-                        "[AI回复] 模型返回文本但未调用工具（iteration=%s content_len=%s），要求重试",
+                        "[AI回复] 模型返回文本但未调用工具（iteration=%s retry=%s/%s content_len=%s），要求重试",
                         iteration,
+                        missing_tool_call_count,
+                        max_missing_tool_call_retries,
                         len(content),
                     )
                     messages.append(
@@ -1257,6 +1292,8 @@ class AIClient:
                     "content": content,
                     "tool_calls": tool_calls,
                 }
+                missing_tool_call_count = 0
+                last_missing_tool_call_content = ""
                 phase = message.get("phase")
                 if phase is not None:
                     assistant_message["phase"] = phase

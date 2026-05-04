@@ -123,7 +123,7 @@ class _BatchState:
     # SPECULATING 阶段记录 inflight LLM 任务（由 coordinator 通过 register_inflight 注入）
     inflight: _InflightInfo | None = None
     # T2 fire 时由 batcher 创建的 flush task；inflight 还未上报前用于兜底取消
-    speculative_flush_task: asyncio.Task[None] | None = None
+    speculative_flush_task: asyncio.Task[Any] | None = None
     # 当前 batch 的身份令牌；T2 入队后若又来新消息，可将旧 token 标记取消，
     # coordinator 在真正执行前会跳过它。
     dispatch_token: BatchDispatchToken | None = None
@@ -170,9 +170,10 @@ class MessageBatcher:
         self._config = config
         self._flush_callback = flush_callback
         self._buckets: dict[tuple[str, int], _BatchState] = {}
+        self._flush_failure_counts: dict[tuple[str, int], int] = {}
         self._lock = asyncio.Lock()
         # 持有 timer 触发后创建的 flush task 强引用，避免被 GC（asyncio 文档要求）
-        self._pending_tasks: set[asyncio.Task[None]] = set()
+        self._pending_tasks: set[asyncio.Task[Any]] = set()
         self._next_batch_id = 0
         self._shutdown = False
 
@@ -208,6 +209,9 @@ class MessageBatcher:
 
     def has_buffer(self, scope: str, sender_id: int) -> bool:
         return (scope, sender_id) in self._buckets
+
+    async def flush_sender(self, scope: str, sender_id: int) -> bool:
+        return await self._handle_t1((scope, sender_id), raise_on_failure=False)
 
     @property
     def speculative_enabled(self) -> bool:
@@ -416,7 +420,13 @@ class MessageBatcher:
 
         # 锁外执行 callback
         if immediate_fire_items is not None:
-            await self._invoke_callback(immediate_fire_items)
+            success = await self._invoke_callback(immediate_fire_items)
+            if success:
+                self._flush_failure_counts.pop(key, None)
+            else:
+                await self._restore_items_after_failed_flush(
+                    key, immediate_fire_items, schedule_retry=True
+                )
 
     # ----------------------------------------------------------- inflight API
 
@@ -525,15 +535,17 @@ class MessageBatcher:
         self._pending_tasks.add(task)
         task.add_done_callback(self._pending_tasks.discard)
 
-    async def _handle_t1(self, key: tuple[str, int]) -> None:
+    async def _handle_t1(
+        self, key: tuple[str, int], *, raise_on_failure: bool = False
+    ) -> bool:
         items_to_fire: list[BufferedMessage] | None = None
         wait_inflight: asyncio.Task[Any] | None = None
-        wait_prefire: asyncio.Task[None] | None = None
+        wait_prefire: asyncio.Task[Any] | None = None
         finalizing_state: _BatchState | None = None
         async with self._lock:
             state = self._buckets.get(key)
             if state is None:
-                return
+                return True
             self._cancel_t2(state)
             if state.phase is BatchPhase.SPECULATING:
                 # T1 到了，投机请求已经发出/入队；这里只结束 batch，不能再次发车。
@@ -585,10 +597,20 @@ class MessageBatcher:
                     current = self._buckets.get(key)
                     if current is finalizing_state:
                         self._buckets.pop(key, None)
-            return
+            return True
 
         if items_to_fire is not None:
-            await self._invoke_callback(items_to_fire, speculative=False)
+            success = await self._invoke_callback(items_to_fire, speculative=False)
+            if success:
+                self._flush_failure_counts.pop(key, None)
+            else:
+                await self._restore_items_after_failed_flush(
+                    key, items_to_fire, schedule_retry=not self._shutdown
+                )
+                if raise_on_failure:
+                    raise RuntimeError("message batcher flush callback failed")
+            return success
+        return True
 
     async def _handle_t2(self, key: tuple[str, int]) -> None:
         speculative_items: list[BufferedMessage] | None = None
@@ -683,6 +705,48 @@ class MessageBatcher:
             )
             return False
 
+    async def _restore_items_after_failed_flush(
+        self,
+        key: tuple[str, int],
+        items: list[BufferedMessage],
+        *,
+        schedule_retry: bool,
+    ) -> None:
+        if not items:
+            return
+        async with self._lock:
+            state = self._buckets.get(key)
+            if state is None:
+                state = _BatchState(
+                    phase=BatchPhase.TYPING,
+                    first_arrival_monotonic=time.monotonic(),
+                    dispatch_token=self._new_token(key[0], key[1]),
+                )
+                self._buckets[key] = state
+                state.items = list(items)
+            else:
+                self._cancel_t1(state)
+                self._cancel_t2(state)
+                state.phase = BatchPhase.TYPING
+                state.items = list(items) + state.items
+                state.first_arrival_monotonic = time.monotonic()
+            state.inflight = None
+            if state.dispatch_token is not None:
+                state.dispatch_token.cancel()
+            self._retokenize_locked(state, key[0], key[1])
+            logger.warning(
+                "[MessageBatcher] flush 失败，已恢复 batch: scope=%s sender=%s count=%s",
+                key[0],
+                key[1],
+                len(state.items),
+            )
+            failure_count = self._flush_failure_counts.get(key, 0) + 1
+            self._flush_failure_counts[key] = failure_count
+            if schedule_retry and not self._shutdown and failure_count <= 1:
+                loop = asyncio.get_running_loop()
+                delay = max(0.0, self._config.window_seconds)
+                state.t1_handle = loop.call_later(delay, self._on_t1_timer, key)
+
     # ------------------------------------------------------------ shutdown
 
     async def flush_all(self) -> None:
@@ -698,7 +762,7 @@ class MessageBatcher:
                 break
             logger.info("[MessageBatcher] flush_all: pending_buckets=%s", len(keys))
             for key in keys:
-                await self._handle_t1(key)
+                await self._handle_t1(key, raise_on_failure=True)
         # 等 timer 已触发但回调仍在跑的 task
         pending = [t for t in self._pending_tasks if not t.done()]
         if pending:
@@ -744,6 +808,7 @@ class MessageBatcher:
                 "max_messages_per_batch": cfg.max_messages_per_batch,
                 "group_enabled": cfg.group_enabled,
                 "private_enabled": cfg.private_enabled,
+                "flush_on_command": cfg.flush_on_command,
                 "allow_cancel_after_send": cfg.allow_cancel_after_send,
                 "shutdown": self._shutdown,
             },

@@ -225,6 +225,7 @@ class Config:
     inverted_question_enabled: bool
     context_recent_messages_limit: int
     ai_request_max_retries: int
+    missing_tool_call_retries: int
     nagaagent_mode_enabled: bool
     onebot_ws_url: str
     onebot_token: str
@@ -555,6 +556,17 @@ class Config:
         )
         if ai_request_max_retries < 0:
             ai_request_max_retries = 0
+
+        missing_tool_call_retries = _coerce_int(
+            _get_value(
+                data,
+                ("core", "missing_tool_call_retries"),
+                "MISSING_TOOL_CALL_RETRIES",
+            ),
+            3,
+        )
+        if missing_tool_call_retries < 0:
+            missing_tool_call_retries = 0
 
         nagaagent_mode_enabled = _coerce_bool(
             _get_value(
@@ -1333,6 +1345,7 @@ class Config:
             inverted_question_enabled=inverted_question_enabled,
             context_recent_messages_limit=context_recent_messages_limit,
             ai_request_max_retries=ai_request_max_retries,
+            missing_tool_call_retries=missing_tool_call_retries,
             nagaagent_mode_enabled=nagaagent_mode_enabled,
             onebot_ws_url=onebot_ws_url,
             onebot_token=onebot_token,

@@ -324,3 +324,33 @@ async def test_message_handler_close_flushes_batcher_then_drains_queue() -> None
         "stop_queue",
         "flush_history",
     ]
+
+
+@pytest.mark.asyncio
+async def test_message_handler_flush_command_buffer_respects_disabled_config() -> None:
+    handler: Any = object.__new__(MessageHandler)
+    handler.config = SimpleNamespace(
+        message_batcher=MessageBatcherConfig(flush_on_command=False)
+    )
+    handler.message_batcher = SimpleNamespace(flush_sender=AsyncMock(return_value=True))
+
+    await handler._flush_command_buffer(scope="group:1", sender_id=2)
+
+    cast(AsyncMock, handler.message_batcher.flush_sender).assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_message_handler_flush_command_buffer_calls_batcher_when_enabled() -> (
+    None
+):
+    handler: Any = object.__new__(MessageHandler)
+    handler.config = SimpleNamespace(
+        message_batcher=MessageBatcherConfig(flush_on_command=True)
+    )
+    handler.message_batcher = SimpleNamespace(flush_sender=AsyncMock(return_value=True))
+
+    await handler._flush_command_buffer(scope="group:1", sender_id=2)
+
+    cast(AsyncMock, handler.message_batcher.flush_sender).assert_awaited_once_with(
+        "group:1", 2
+    )

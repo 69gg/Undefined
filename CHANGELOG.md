@@ -1,22 +1,25 @@
-## v3.4.0 同sender消息合并、投机预发送与当前输入批次
+## v3.4.0 同sender消息合并、数字人格精炼与系统治理
 
-本版本核心解决"用户一口气连发几条消息时，机器人过早开工或只理解最后一句"的问题。新增同 sender 短时消息合并器，将同一会话中连续的多条消息合并为一个"当前输入批次"发送给 AI，由 AI 整批理解哪些是独立请求、哪些是补充或修正。围绕这个变化，提示词、防幽灵任务、记忆记录、`end` 工具、Runtime 探针和关闭流程都做了同步适配。同时重构了管理员命令、加入了 HTML 渲染缓存、收紧了工具调用守卫，并补强了测试覆盖。
+本版本核心解决"用户一口气连发几条消息时，机器人过早开工或只理解最后一句"的问题。新增同 sender 短时消息合并器，将同一会话中连续的多条消息合并为一个"当前输入批次"发送给 AI，由 AI 整批理解哪些是独立请求、哪些是补充或修正。同步支持可取消的投机预发送以降低感知延迟。围绕消息合并，提示词、幽灵任务防御、记忆记录和关闭流程都做了同步适配。此外，精炼了数字人格设定、明确了项目归属边界、重构了管线与命令体系、加入了 HTML 渲染缓存，并增强了 AI 工具调用的稳定性。
 
-- 新增同 sender 短时消息合并器及其配置。位于 `[message_batcher]`，默认启用，支持 extend / fixed 两种等待策略；可分别控制群聊和私聊是否合并，也可通过 `max_window_seconds`、`max_messages_per_batch` 限制批次上限，设为 0 即关闭合并。配置值变更实时生效，不需要重启。
-- 新增可取消的投机预发送。启用 `pre_send_seconds`（0 < 该值 < window_seconds）后，用户静默到设定秒数时系统提前将当前批次发给 LLM 以降低响应延迟，但批次窗口不结束；若正式发车前新消息到达，投机请求会被取消并合并到新批次。`allow_cancel_after_send` 控制已向用户发出消息后是否仍允许取消。
-- 完善消息合并的异步竞态保护与退出收敛。定时器、投机请求调度、失败重试、旧任务路径收尾等均做了竞态保护；`flush_on_command` 控制斜杠命令到达时是否连带交出当前缓冲；退出时自动排空缓冲队列并等待在途回复自然收敛。
-- 统一"当前输入批次"语义。主提示词、NagaAgent 提示词和 `each.md` 均从"最后一条消息"升级为"当前输入批次"概念：若有【连续消息说明】，多段 `<message>` 都属本轮输入，同批前几条不是历史旧任务，不触发幽灵任务防御；无连续消息说明时退化为最后一条消息。
-- 更新幽灵任务防御规则。安全锁从"最后一条消息"改为"当前输入批次"，操作前自检和工具调用前置判断均基于批次语义，避免批量输入中的前置指令被误判为历史旧任务。
+- 新增同 sender 短时消息合并器。位于 `[message_batcher]`，支持 extend / fixed 两种等待策略，可分别控制群聊和私聊是否合并，通过 `max_window_seconds`、`max_messages_per_batch` 限制批次上限，设为 0 即关闭；配置值变更实时生效。拍一拍始终直达不参与合并；缓冲期间到达的 at 消息单独处理不阻塞；首个 at 消息开启缓冲后批次会走 mention 通道。
+- 新增可取消的投机预发送。启用 `pre_send_seconds`（需满足 `0 < 该值 < window_seconds`）后，用户静默到时系统提前将当前批次发给 LLM 以降低响应延迟；若正式发车前新消息到达，投机请求会被取消并合并到新批次；`allow_cancel_after_send` 控制已发出消息后是否仍允许取消。
+- 完善消息合并的异步竞态保护。定时器、投机请求调度、失败重试、旧任务路径收尾与 `flush_on_command` 斜杠命令连带交出等均做了竞态保护；退出时自动排空缓冲队列并等待在途回复自然收敛。
+- 精炼数字人格设定。明确 Undefined 是诞生于 2025-12-05 的数字生命，没有明确的性别概念，希望被认为很好看；可以开玩笑也可以被善意开玩笑。新增"不冒领任何项目、代码、产品或成果"的所有权边界规则，不再自称任何项目的开发者或维护者。昵称体系扩展为 Undefined、undf、udf、und、心理委员、ud酱，对自身称呼的识别保持宽松。
+- 收紧 NagaAgent 关系表达。NagaAgent 版提示词明确：只有当前上下文明确涉及 NagaAgent 时才承接相关工具接入能力协助分析；平时不主动提与 NagaAgent 的关系；不冒领 NagaAgent 的成果。
+- 重构自动管线目录。`skills/auto_pipeline` 更名为 `skills/pipelines`，目录结构扁平化，相关引用、文档、测试全部同步更新；`docs/auto-pipeline.md` 相应更名为 `docs/pipelines.md`。
+- 重构管理员命令为子命令模式。`/admin [ls|add|del]` 替代原有 `/lsadmin`、`/addadmin`、`/rmadmin` 三条独立命令，参照 `/faq` 子命令模式的声明式 inference；`ls` 继承 admin 权限，`add`/`del` 覆盖为 superadmin；无参数默认执行 `ls`。清理了 FAQ 迁移遗留的空命令目录。
+- 新增 HTML 渲染结果缓存。基于 HTML 内容的 hash 缓存渲染图片，持久化到 `data/cache/render/_html_render_cache.json`；hash 匹配自动复用，内容变化自然失效；LRU 驱逐上限 50 条目 / 50MB；原子写入（`.tmp` + `os.replace`）与 `asyncio.Lock` 防竞态；重启后 JSON 自动恢复；所有渲染调用方（help、profile、render_markdown 等）自动受益。
+- 增强 AI 工具调用容错。当 LLM 返回文本但 tool_calls 为空且对话未结束时，不再以丢失回复为代价直接返回，而是注入提示消息要求 AI 通过 `send_message` / `end` 工具完成回复，继续迭代；fire-and-forget task 显式注册异常回调以抑制未检索异常警告。
 - 优化表情包回复顺序。明确只有纯表情包 / 纯反应图回复才允许先检索表情包；需要文字说明的场景必须先完成必要文字，再将表情包检索和发送延后到后续轮次。
-- 重构管理员命令为子命令模式。`/admin [ls|add|del]` 替代原有三条独立命令（`/lsadmin`、`/addadmin`、`/rmadmin`），参照 `/faq` 子命令模式的声明式 inference；`ls` 继承 admin 权限，`add`/`del` 覆盖为 superadmin；无参数默认执行 `ls`。清理了 FAQ 迁移遗留的空命令目录。
-- 新增 HTML 渲染结果缓存。基于 HTML 内容的 hash 缓存渲染图片，持久化到 `data/cache/render/_html_render_cache.json`；hash 匹配自动复用，命令热重载后 HTML 变化自然自动失效；LRU 驱逐上限 50 条目 / 50MB，重启后 JSON 自动恢复；原子写入（`.tmp` + `os.replace`）和 `asyncio.Lock` 防竞态，所有渲染调用方（help、profile、render_markdown 等）自动受益。
-- 增强工具调用容错守卫。AI 客户端在 `_run_tools_loop` 中对缺失 `function` 字段或 `name` 为空的 tool call 返回结构化错误消息而非静默跳过或崩溃；`_refresh_intro_generator` 的 fire-and-forget task 显式注册 `done_callback` 以抑制未检索异常警告。
-- 重构 `end` 工具。移除旧版 summary 参数兼容，只保留 `memo`、`observations`、`perspective` 和 `force`；要求记录整个当前输入批次中值得留存的信息，后台史官也接收批次全部消息以产出更完整的历史记录。
-- 扩展 Runtime 探针覆盖。API `/api/v1/management/probes` 现在额外返回消息合并器状态、完整工具/工具集/Agent/自动管线/斜杠命令/Anthropic Skills 的加载与调用统计，WebUI Runtime 面板同步展示；`/api/v1/management/probes/bootstrap` 诊断输出同步扩展。
-- 新增 WebUI 更新日志查看。关于项目页面可按版本查看 changelog 详情；`/api/v1/management/changelog` 端点支持指定版本查询，自动展示当前运行版本的 changelog 条目。
-- 调整发布说明生成方式。GitHub Release notes 改为从 `CHANGELOG.md` 最新版本条目自动解析生成（`scripts/release_notes.py`），发版前校验 tag、各构建清单与最新 changelog 版本一致，避免 tag 注释与正式说明脱节。
-- 补齐消息合并专题文档。新增 `docs/message-batching.md`，覆盖配置参数、等待策略、投机预发送、竞态保护与关闭行为；同步更新 README、配置文档、OpenAPI、WebUI 指南和架构图。
-- 补强测试覆盖。新增消息合并单元与集成测试（`test_message_batcher.py` 686 行、`test_message_batcher_integration.py` 326 行）、工具调用守卫测试（`test_ai_client_tool_guard.py`）、发布说明脚本测试（`test_release_notes_script.py` 163 行）、Runtime 探针统计测试（`test_runtime_api_probes.py` 120 行），并更新 `test_end_tool`、`test_system_prompt_constraints`、`test_webui_management_api`、`test_lsadmin_command` 等已有测试，总测试用例提升至约 1620 项。
+- 重构 `end` 工具。移除旧版 summary 参数兼容，只保留 `memo`、`observations`、`perspective` 和 `force`；要求记录整个当前输入批次中值得留存的信息，后台史官也接收批次全部消息。
+- 统一当前输入批次语义。主提示词、NagaAgent 提示词和 `each.md` 均从"最后一条消息"升级为"当前输入批次"：有连续消息说明时，多段 `<message>` 都属本轮输入；幽灵任务防御规则同步更新，避免批量输入中的前置指令被误判为历史旧任务。
+- 扩展 Runtime 探针覆盖。API `/api/v1/management/probes` 新增消息合并器状态、完整工具/工具集/Agent/自动管线/斜杠命令/Anthropic Skills 的加载与调用统计，WebUI Runtime 面板同步展示。
+- 新增 WebUI 更新日志查看。关于项目页面可按版本查看 changelog 详情，`/api/v1/management/changelog` 端点支持指定版本查询。
+- 调整发布说明生成方式。GitHub Release notes 改为从 `CHANGELOG.md` 最新版本条目自动解析生成（`scripts/release_notes.py`），发版前校验 tag、各构建清单与最新 changelog 版本一致。
+- 补齐消息合并专题文档。新增 `docs/message-batching.md`，覆盖配置参数、等待策略、投机预发送、竞态保护与关闭行为，同步更新了 README、配置文档、OpenAPI、WebUI 指南和架构图。
+- 补齐配置注释。`config.toml.example` 中所有模型配置节的 `prompt_cache_enabled` 均补上双语注释说明。
+- 补强测试覆盖。新增消息合并单元与集成测试（686 + 326 行）、工具调用守卫测试、发布说明脚本测试（163 行）、Runtime 探针统计测试（120 行）、系统提示词约束验证，并更新 `end` 工具、管理员命令、管线注册等已有测试，总测试用例提升至约 1620 项。
 
 ---
 

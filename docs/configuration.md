@@ -100,6 +100,7 @@ model_name = "gpt-4o-mini"
 | `process_poke_message` | `true` | 是否响应拍一拍 | 关闭后忽略 poke |
 | `context_recent_messages_limit` | `20` | 注入到提示词的最近历史条数 | 自动钳制到 `0..200` |
 | `ai_request_max_retries` | `2` | 单次 LLM 请求失败重试次数 | `<0` 自动回退到 `0`；支持热更新 |
+| `missing_tool_call_retries` | `3` | 模型返回纯文本但未调用 `send_message` / `end` 等工具时的纠正重试次数 | `<0` 自动回退到 `0`；支持热更新 |
 
 ---
 
@@ -464,7 +465,7 @@ Prompt caching 补充：
 | `max_messages_per_batch` | `0` | 单批最多条数；达到立即发车，`0` = 不限 |
 | `group_enabled` | `true` | 群聊是否启用合并 |
 | `private_enabled` | `true` | 私聊是否启用合并 |
-| `flush_on_command` | `true` | 命中斜杠命令时是否 flush 该 sender 的 buffer（保留字段，当前未消费） |
+| `flush_on_command` | `false` | 命中斜杠命令时是否先 flush 该 sender 的 buffer；默认关闭以保持命令独立执行 |
 | `pre_send_seconds` | `0.0` | 投机预发送阈值（秒）。`0 < pre_send_seconds < window_seconds` 时启用：静默到该阈值先把当前 batch 提前发给 LLM 抢时间（speculative pre-fire），但 batch 仍要等到 `window_seconds` 才正式结束；新消息在投机期间到达且 inflight 调用尚未发出消息时会取消 inflight 并把消息合并入下一轮调用。`0` 或 `>= window_seconds` 视为关闭 |
 | `allow_cancel_after_send` | `false` | 投机调用已向用户发出消息后是否仍允许新消息取消该 inflight。默认 `false`（安全：不取消，新消息开新 batch）；启用后可能造成重复发送 |
 

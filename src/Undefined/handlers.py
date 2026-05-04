@@ -38,7 +38,7 @@ from Undefined.utils.sender import MessageSender
 from Undefined.services.security import SecurityService
 from Undefined.services.command import CommandDispatcher
 from Undefined.services.ai_coordinator import AICoordinator
-from Undefined.services.message_batcher import MessageBatcher
+from Undefined.services.message_batcher import MessageBatcher, make_scope
 from Undefined.services.model_pool import ModelPoolService
 from Undefined.skills.pipelines import PipelineRegistry
 from Undefined.skills.pipelines.context import build_pipeline_context
@@ -660,6 +660,10 @@ class MessageHandler:
 
             private_command = self.command_dispatcher.parse_command(text)
             if private_command:
+                await self._flush_command_buffer(
+                    scope=make_scope(user_id=private_sender_id),
+                    sender_id=private_sender_id,
+                )
                 await self.command_dispatcher.dispatch_private(
                     user_id=private_sender_id,
                     sender_id=private_sender_id,
@@ -833,6 +837,10 @@ class MessageHandler:
         if is_at_bot:
             command = self.command_dispatcher.parse_command(normalized_text)
             if command:
+                await self._flush_command_buffer(
+                    scope=make_scope(group_id=group_id),
+                    sender_id=sender_id,
+                )
                 await self.command_dispatcher.dispatch(group_id, sender_id, command)
                 return
 
@@ -1109,6 +1117,21 @@ class MessageHandler:
         if not bvids:
             bvids = await extract_from_json_message(message_content)
         return bvids
+
+    async def _flush_command_buffer(self, *, scope: str, sender_id: int) -> None:
+        batcher_config = getattr(self.config, "message_batcher", None)
+        if not getattr(batcher_config, "flush_on_command", False):
+            return
+        batcher = getattr(self, "message_batcher", None)
+        if batcher is None:
+            return
+        flushed = await batcher.flush_sender(scope, sender_id)
+        if not flushed:
+            logger.warning(
+                "[MessageBatcher] 命令触发 flush 当前 buffer 失败: scope=%s sender=%s",
+                scope,
+                sender_id,
+            )
 
     async def _run_pipelines(
         self,
