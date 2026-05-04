@@ -8,7 +8,7 @@ import pytest
 
 from Undefined.services.command import CommandDispatcher
 from Undefined.services.commands.context import CommandContext
-from Undefined.skills.commands.lsadmin.handler import execute
+from Undefined.skills.commands.admin.handler import execute
 
 
 class _DummySender:
@@ -48,7 +48,7 @@ def _build_context(
 
 
 @pytest.mark.asyncio
-async def test_lsadmin_outputs_names_without_qq_leakage() -> None:
+async def test_admin_ls_outputs_names_without_qq_leakage() -> None:
     sender = _DummySender()
     onebot = SimpleNamespace(
         get_group_member_list=AsyncMock(
@@ -77,7 +77,7 @@ async def test_lsadmin_outputs_names_without_qq_leakage() -> None:
 
 
 @pytest.mark.asyncio
-async def test_lsadmin_falls_back_to_unknown_name_without_exposing_qq() -> None:
+async def test_admin_ls_falls_back_to_unknown_name_without_exposing_qq() -> None:
     sender = _DummySender()
     onebot = SimpleNamespace(
         get_group_member_list=AsyncMock(side_effect=RuntimeError("boom")),
@@ -96,7 +96,7 @@ async def test_lsadmin_falls_back_to_unknown_name_without_exposing_qq() -> None:
     assert onebot.get_stranger_info.await_args_list == [call(20001), call(20002)]
 
 
-def test_lsadmin_requires_admin_permission() -> None:
+def test_admin_requires_admin_permission() -> None:
     dispatcher = CommandDispatcher(
         config=cast(Any, SimpleNamespace()),
         sender=cast(Any, _DummySender()),
@@ -106,7 +106,7 @@ def test_lsadmin_requires_admin_permission() -> None:
         security=cast(Any, SimpleNamespace(rate_limiter=None)),
     )
 
-    meta = dispatcher.command_registry.resolve("lsadmin")
+    meta = dispatcher.command_registry.resolve("admin")
 
     assert meta is not None
     assert meta.permission == "admin"

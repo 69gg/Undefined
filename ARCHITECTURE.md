@@ -44,7 +44,7 @@ graph TB
             InjectionAgent["InjectionResponseAgent<br/>注入响应生成<br/>[injection_response_agent.py]"]
         end
         
-        CommandDispatcher["CommandDispatcher<br/>命令分发器<br/>• /help /stats /lsadmin<br/>• /addadmin /rmadmin<br/>• /bugfix /faq<br/>[services/command.py]"]
+        CommandDispatcher["CommandDispatcher<br/>命令分发器<br/>• /help /stats /admin<br/>• /bugfix /faq<br/>[services/command.py]"]
 
         MessageBatcher["MessageBatcher<br/>同 sender 短时合并<br/>• 按 (scope, sender_id) 分桶<br/>• T1=window_seconds 结束 batch<br/>• T2=pre_send_seconds 投机预发送<br/>• 拍一拍/buffer 内 @bot 旁路<br/>• 首条 @bot 整批走 mention 队列<br/>[services/message_batcher.py]"]
 
@@ -123,7 +123,7 @@ graph TB
         
         subgraph CommandsLayer["平台指令 (skills/commands/)"]
             Cmd_Core["核心指令<br/>• help • stats"]
-            Cmd_Admin["管理指令<br/>• addadmin<br/>• rmadmin • lsadmin"]
+            Cmd_Admin["管理指令<br/>• admin (ls/add/del)"]
             Cmd_FAQ["FAQ 指令<br/>• faq (ls/view/search/del)"]
             Cmd_Fun["娱乐指令<br/>• bugfix"]
         end

@@ -55,7 +55,7 @@ skills/
 │   ├── __init__.py
 │   ├── help/
 │   ├── stats/
-│   ├── addadmin/
+│   ├── admin/
 │   └── ...
 │
 └── anthropic_skills/  # Anthropic Skills（SKILL.md 格式）
