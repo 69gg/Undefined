@@ -7,7 +7,7 @@ import logging
 import re
 
 from Undefined.context import RequestContext
-from Undefined.utils.coerce import safe_int
+from Undefined.utils.coerce import coerce_truthy, is_truthy, safe_int, was_message_sent
 from Undefined.utils.xml import format_message_xml
 
 from Undefined.end_summary_storage import (
@@ -19,8 +19,6 @@ from Undefined.end_summary_storage import (
 
 logger = logging.getLogger(__name__)
 
-_TRUE_BOOL_TOKENS = {"1", "true", "yes", "y", "on"}
-_FALSE_BOOL_TOKENS = {"0", "false", "no", "n", "off", ""}
 _MESSAGE_TAG_RE = re.compile(
     r"<message\b(?P<attrs>[^>]*)>\s*<content>(?P<content>.*?)</content>.*?</message>",
     re.DOTALL | re.IGNORECASE,
@@ -37,47 +35,16 @@ _MIN_HISTORIAN_LINE_LEN = 16
 _MAX_HISTORIAN_LINE_LEN = 1000
 
 
-def _coerce_bool(value: Any) -> tuple[bool, bool]:
-    """宽松布尔解析。
-
-    返回:
-        (parsed_value, recognized)
-    """
-    if isinstance(value, bool):
-        return value, True
-
-    if isinstance(value, int):
-        return value != 0, True
-
-    if isinstance(value, str):
-        token = value.strip().lower()
-        if token in _TRUE_BOOL_TOKENS:
-            return True, True
-        if token in _FALSE_BOOL_TOKENS:
-            return False, True
-
-    return False, False
-
-
 def _parse_force_flag(value: Any) -> tuple[bool, bool]:
     """force 支持宽松布尔解析（字符串大小写、0/1 等）。"""
-    return _coerce_bool(value)
-
-
-def _is_true_flag(value: Any) -> bool:
-    """上下文标记采用宽松布尔解析。"""
-    parsed, _recognized = _coerce_bool(value)
-    return parsed
+    return coerce_truthy(value)
 
 
 def _was_message_sent_this_turn(context: Dict[str, Any]) -> bool:
-    if _is_true_flag(context.get("message_sent_this_turn", False)):
+    """统一入口：先看 context 里的标记，回落到当前 RequestContext。"""
+    if is_truthy(context.get("message_sent_this_turn", False)):
         return True
-
-    ctx = RequestContext.current()
-    if ctx is None:
-        return False
-    return _is_true_flag(ctx.get_resource("message_sent_this_turn", False))
+    return was_message_sent(RequestContext.current())
 
 
 def _clip_text(value: Any, max_len: int) -> str:

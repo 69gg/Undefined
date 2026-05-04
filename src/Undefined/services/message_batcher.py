@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from Undefined.config.models import MessageBatcherConfig
+from Undefined.utils.coerce import was_message_sent
 
 logger = logging.getLogger(__name__)
 
@@ -138,27 +139,6 @@ def make_scope(*, group_id: int | None = None, user_id: int | None = None) -> st
     return "unknown"
 
 
-def _was_message_sent_this_turn(ctx: Any) -> bool:
-    """判断 inflight RequestContext 是否已经向用户发出过任何消息。
-
-    与 ``skills/tools/end/handler.py::_was_message_sent_this_turn`` 同语义；
-    这里采用宽松布尔解析。
-    """
-    if ctx is None:
-        return False
-    try:
-        value = ctx.get_resource("message_sent_this_turn", False)
-    except Exception:  # noqa: BLE001 - ctx 可能已失效
-        return False
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int):
-        return value != 0
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
-    return False
-
-
 class MessageBatcher:
     """同 sender 短时合并器（含 T2 投机预发送）。"""
 
@@ -254,7 +234,7 @@ class MessageBatcher:
                     # 已 pre-fire，决定是否 cancel inflight
                     inflight = state.inflight
                     already_sent = (
-                        _was_message_sent_this_turn(inflight.request_context)
+                        was_message_sent(inflight.request_context)
                         if inflight is not None
                         else False
                     )
@@ -629,7 +609,10 @@ class MessageBatcher:
                 state.dispatch_token = self._new_token(key[0], key[1])
                 self._bind_items_to_token_locked(state)
             state.dispatch_token.speculative = True
-            # 记录"承担投机职责"的当前 task，便于 inflight 注册前被新消息抢占取消
+            # 记录"承担投机职责"的当前 task；此处指向 _handle_t2 协程本身
+            # （pre-fire 协程），不是 LLM inflight task。
+            # 后续 submit() 抢占判定通过 `state.speculative_flush_task is asyncio.current_task()`
+            # 区分新旧 pre-fire 协程，避免误清理新 batch。
             state.speculative_flush_task = asyncio.current_task()
             speculative_items = list(state.items)
             logger.info(
@@ -712,6 +695,16 @@ class MessageBatcher:
         *,
         schedule_retry: bool,
     ) -> None:
+        """flush callback 失败后回滚到 TYPING 阶段。
+
+        重试策略（fail-fast）：
+        - 每次失败累加 ``self._flush_failure_counts[key]``；
+        - 仅在 ``failure_count <= 1``（即首次失败）时安排一次延后 T1 重试；
+        - 第二次起仅恢复 batch、等待用户新消息或 ``flush_all`` 触发，
+          避免 LLM 端持续故障时形成"无限重试风暴"；
+        - 桶在成功一次后 ``failure_count`` 会被 pop 清零。
+        - ``flush_all`` 路径会 raise，从而暴露持续失败。
+        """
         if not items:
             return
         async with self._lock:

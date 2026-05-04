@@ -430,6 +430,46 @@ async def test_speculative_not_cancelled_when_already_sent_default() -> None:
 
 
 @pytest.mark.asyncio
+async def test_speculative_cancelled_when_already_sent_with_allow_flag() -> None:
+    """``allow_cancel_after_send=True`` 时即便已发过消息也强制取消 inflight。
+
+    inflight 协程会捕获 ``CancelledError`` 转记日志（_invoke_callback 默认行为），
+    所以仅靠 ``Task.cancelled()`` 不足以判断 — 必须看 callback 是否真的收到 cancel 信号。
+    """
+    cfg = MessageBatcherConfig(
+        enabled=True,
+        window_seconds=0.2,
+        pre_send_seconds=0.05,
+        strategy="extend",
+        allow_cancel_after_send=True,
+    )
+
+    fake_ctx = _FakeRequestContext()
+    fake_ctx.set_resource("message_sent_this_turn", True)
+
+    cancelled_event = asyncio.Event()
+
+    async def flush(items: list[BufferedMessage]) -> None:
+        try:
+            await asyncio.sleep(5.0)
+        except asyncio.CancelledError:
+            cancelled_event.set()
+            raise
+
+    batcher = MessageBatcher(cfg, flush)
+
+    await batcher.submit(_make_item(text="m1"))
+    await asyncio.sleep(0.08)
+    assert batcher._pending_tasks
+    inflight_task = next(iter(batcher._pending_tasks))
+    batcher.register_inflight("group:1", 100, inflight_task, fake_ctx)
+
+    await batcher.submit(_make_item(text="m2"))
+    # 正常情况下 cancel 信号会在 50ms 内传到 callback；超时即视为未取消
+    await asyncio.wait_for(cancelled_event.wait(), timeout=1.0)
+
+
+@pytest.mark.asyncio
 async def test_speculative_disabled_when_pre_send_zero() -> None:
     """pre_send_seconds=0 时投机关闭，仅 T1 静默到期发车。"""
     cfg = MessageBatcherConfig(

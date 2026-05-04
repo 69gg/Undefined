@@ -9,7 +9,7 @@
 - 收紧 NagaAgent 关系表达。NagaAgent 版提示词明确：只有当前上下文明确涉及 NagaAgent 时才承接相关工具接入能力协助分析；平时不主动提与 NagaAgent 的关系；不冒领 NagaAgent 的成果。
 - 重构自动管线目录。`skills/auto_pipeline` 更名为 `skills/pipelines`，目录结构扁平化，相关引用、文档、测试全部同步更新；`docs/auto-pipeline.md` 相应更名为 `docs/pipelines.md`。
 - 重构管理员命令为子命令模式。`/admin [ls|add|del]` 替代原有 `/lsadmin`、`/addadmin`、`/rmadmin` 三条独立命令，参照 `/faq` 子命令模式的声明式 inference；`ls` 继承 admin 权限，`add`/`del` 覆盖为 superadmin；无参数默认执行 `ls`。清理了 FAQ 迁移遗留的空命令目录。
-- 新增 HTML 渲染结果缓存。基于 HTML 内容的 hash 缓存渲染图片，持久化到 `data/cache/render/_html_render_cache.json`；hash 匹配自动复用，内容变化自然失效；LRU 驱逐上限 50 条目 / 50MB；原子写入（`.tmp` + `os.replace`）与 `asyncio.Lock` 防竞态；重启后 JSON 自动恢复；所有渲染调用方（help、profile、render_markdown 等）自动受益。
+- 新增 HTML 渲染结果缓存。基于 HTML 内容的 hash 缓存渲染图片，持久化到 `data/cache/render/_html_render_cache.json`；hash 匹配自动复用，内容变化自然失效；新增 `[render.cache]` 配置段（`enabled` / `max_entries` / `max_size_mb` / `flush_interval_seconds`，默认 50 条 / 50MB / 2.0s），元数据通过 `utils/io.py` 的 `read_json` / `write_json` 异步落盘（`asyncio.to_thread` + 文件锁 + 原子替换），所有 `stat` / `unlink` / `copy` 也走线程池避免阻塞事件循环；`asyncio.Lock` 防竞态、重启后 JSON 自动恢复；进程关停时通过 `close_render_cache` 强制刷盘，保证最近访问时间不丢失；所有渲染调用方（help、profile、render_markdown 等）自动受益。
 - 增强 AI 工具调用容错。当 LLM 返回文本但 tool_calls 为空且对话未结束时，不再以丢失回复为代价直接返回，而是注入提示消息要求 AI 通过 `send_message` / `end` 工具完成回复，继续迭代；fire-and-forget task 显式注册异常回调以抑制未检索异常警告。
 - 优化表情包回复顺序。明确只有纯表情包 / 纯反应图回复才允许先检索表情包；需要文字说明的场景必须先完成必要文字，再将表情包检索和发送延后到后续轮次。
 - 重构 `end` 工具。移除旧版 summary 参数兼容，只保留 `memo`、`observations`、`perspective` 和 `force`；要求记录整个当前输入批次中值得留存的信息，后台史官也接收批次全部消息。
@@ -19,7 +19,7 @@
 - 调整发布说明生成方式。GitHub Release notes 改为从 `CHANGELOG.md` 最新版本条目自动解析生成（`scripts/release_notes.py`），发版前校验 tag、各构建清单与最新 changelog 版本一致。
 - 补齐消息合并专题文档。新增 `docs/message-batching.md`，覆盖配置参数、等待策略、投机预发送、竞态保护与关闭行为，同步更新了 README、配置文档、OpenAPI、WebUI 指南和架构图。
 - 补齐配置注释。`config.toml.example` 中所有模型配置节的 `prompt_cache_enabled` 均补上双语注释说明。
-- 补强测试覆盖。新增消息合并单元与集成测试（686 + 326 行）、工具调用守卫测试、发布说明脚本测试（163 行）、Runtime 探针统计测试（120 行）、系统提示词约束验证，并更新 `end` 工具、管理员命令、管线注册等已有测试，总测试用例提升至约 1620 项。
+- 补强测试覆盖。新增消息合并单元与集成测试（686 + 326 行）、工具调用守卫测试、发布说明脚本测试（163 行）、Runtime 探针统计测试（120 行）、系统提示词约束验证，并更新 `end` 工具、管理员命令、管线注册等已有测试；额外补齐渲染缓存（LRU 驱逐 / 容量驱逐 / 重启恢复 / 节流后强刷 / 并发 put / 禁用短路）、`/admin add|del` 全路径、`allow_cancel_after_send=true` 取消语义等盲点。总测试用例提升至约 1660 项。
 
 ---
 

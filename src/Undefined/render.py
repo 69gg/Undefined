@@ -2,10 +2,9 @@
 
 import asyncio
 import logging
-import os
-import shutil
 import sys
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from playwright.async_api import async_playwright, Browser, Page, Playwright
 
 import markdown
@@ -61,6 +60,14 @@ _render_active_count = 0
 # 默认并发限制：Linux 默认 1，其它平台默认 2
 _DEFAULT_MAX_CONCURRENT = 1 if sys.platform == "linux" else 2
 _RenderResult = TypeVar("_RenderResult")
+
+
+def _safe_file_size(path: Path) -> int:
+    """同步取文件大小（在 ``asyncio.to_thread`` 中调用）；不存在/不可读时返回 0。"""
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
 
 
 def _resolve_render_browser_max_concurrency() -> int:
@@ -218,13 +225,8 @@ async def render_html_to_image(
         html_content, viewport_width, screenshot_selector, proxy
     )
 
-    cached_path = await cache.get(cache_key)
-    if cached_path is not None:
-        try:
-            shutil.copy2(cached_path, output_path)
-            return
-        except OSError:
-            pass
+    if await cache.copy_to(cache_key, output_path):
+        return
 
     async def _capture(page: Page) -> None:
         await page.wait_for_load_state("networkidle", timeout=timeout_ms)
@@ -249,8 +251,9 @@ async def render_html_to_image(
         proxy=proxy,
     )
 
-    if os.path.exists(output_path):
-        await cache.put(cache_key, output_path, os.path.getsize(output_path))
+    output_size = await asyncio.to_thread(_safe_file_size, Path(output_path))
+    if output_size > 0:
+        await cache.put(cache_key, output_path, output_size)
 
 
 async def render_html_with_page(

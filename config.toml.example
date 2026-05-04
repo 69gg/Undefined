@@ -904,6 +904,22 @@ request_retries = 0
 # en: Max concurrent render browser pages. 0 = auto: Linux defaults to 1, other platforms default to 2.
 browser_max_concurrency = 0
 
+# zh: HTML 渲染结果缓存：基于 HTML 内容 hash 复用同一张图片，避免重复渲染。
+# en: HTML render result cache: reuse rendered images by content hash to skip re-rendering.
+[render.cache]
+# zh: 是否启用渲染缓存。设为 false 时所有渲染请求都会走 playwright 重新截图。
+# en: Whether to enable the render cache. When false, every request re-renders via playwright.
+enabled = true
+# zh: LRU 条目数上限（>=1）。超过时按 last_accessed_at 淘汰最久未用的条目。
+# en: Maximum LRU entries (>=1). Beyond this, the least-recently-used items are evicted.
+max_entries = 50
+# zh: 缓存总占用上限（MB，>=1）。超过时按 LRU 顺序持续淘汰，直到回到上限以内。
+# en: Maximum total cache size (MB, >=1). Evicts in LRU order until within budget.
+max_size_mb = 50
+# zh: 元数据落盘最小间隔（秒，>=0）。频繁访问期间合并写盘，避免热点 IO。
+# en: Minimum interval between metadata flushes (seconds, >=0). Coalesces hot-path writes.
+flush_interval_seconds = 2.0
+
 # zh: 第三方 API 基础地址（便于自定义镜像或私有网关）。
 # en: Third-party API base URLs (for mirrors or private gateways).
 [api_endpoints]

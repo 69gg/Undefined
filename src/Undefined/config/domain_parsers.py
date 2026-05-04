@@ -19,6 +19,7 @@ from .models import (
     MemeConfig,
     MessageBatcherConfig,
     NagaConfig,
+    RenderCacheConfig,
 )
 
 DEFAULT_API_HOST = "127.0.0.1"
@@ -218,6 +219,31 @@ def _parse_message_batcher_config(data: dict[str, Any]) -> MessageBatcherConfig:
         allow_cancel_after_send=_coerce_bool(
             section.get("allow_cancel_after_send"), False
         ),
+    )
+
+
+def _parse_render_cache_config(data: dict[str, Any]) -> RenderCacheConfig:
+    """解析 ``[render.cache]`` 段，落到 :class:`RenderCacheConfig`。
+
+    所有上限会做下界保护（>=1 / >=0.0），避免负值导致驱逐失控。
+    """
+    render_raw = data.get("render", {})
+    render_section = render_raw if isinstance(render_raw, dict) else {}
+    cache_raw = render_section.get("cache", {})
+    cache_section = cache_raw if isinstance(cache_raw, dict) else {}
+
+    enabled = _coerce_bool(cache_section.get("enabled"), True)
+    max_entries = max(1, _coerce_int(cache_section.get("max_entries"), 50))
+    max_size_mb = max(1, _coerce_int(cache_section.get("max_size_mb"), 50))
+    flush_interval = max(
+        0.0,
+        _coerce_float(cache_section.get("flush_interval_seconds"), 2.0),
+    )
+    return RenderCacheConfig(
+        enabled=enabled,
+        max_entries=max_entries,
+        max_size_mb=max_size_mb,
+        flush_interval_seconds=flush_interval,
     )
 
 

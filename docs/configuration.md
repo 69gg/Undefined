@@ -543,6 +543,23 @@ Prompt caching 补充：
 - 渲染浏览器当前采用单例复用，因此这里限制的是并发页面/上下文数量，而不是浏览器进程数量。
 - 配置变更会对后续新的渲染请求生效；已在执行中的渲染任务不受影响。
 
+#### `[render.cache]` HTML 渲染结果缓存
+
+基于 HTML 内容 hash 复用同一张图片，避免重复渲染（help、profile、render_markdown 等链路自动受益）。
+
+| 字段 | 默认值 | 说明 | 约束/回退 |
+|---|---:|---|---|
+| `enabled` | `true` | 是否启用渲染缓存 | 关闭时所有请求都会走 playwright 重新截图 |
+| `max_entries` | `50` | LRU 条目数上限 | 自动钳制到 `>=1`；超过时按 `last_accessed_at` 淘汰 |
+| `max_size_mb` | `50` | 缓存总占用上限（MB） | 自动钳制到 `>=1`；超过时按 LRU 顺序持续淘汰 |
+| `flush_interval_seconds` | `2.0` | 元数据落盘最小间隔（秒） | 自动钳制到 `>=0`；关停时强制刷盘 |
+
+说明：
+- 元数据通过 `utils/io.py` 的 `read_json` / `write_json` 写入，自带文件锁与原子替换。
+- 缓存图片落在 `data/cache/render/html/` 目录，元数据为同目录下 `_html_render_cache.json`。
+- 进程关停（含 Ctrl+C）时会调用 `close_render_cache` 强制刷盘，保证最近访问时间不丢失。
+- 配置改动后下次启动生效。运行期热更新仅影响新建的缓存实例，已加载的单例沿用启动时参数。
+
 ---
 
 ### 4.16 `[api_endpoints]` 第三方 API 基址

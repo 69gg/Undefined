@@ -376,6 +376,20 @@ class MessageBatcherConfig:
 
 
 @dataclass
+class RenderCacheConfig:
+    """HTML 渲染结果缓存配置。
+
+    缓存单例由 :func:`Undefined.utils.render_cache.get_render_cache` 加载，
+    在程序退出时通过 :func:`close_render_cache` 强制刷盘。
+    """
+
+    enabled: bool = True
+    max_entries: int = 50
+    max_size_mb: int = 50
+    flush_interval_seconds: float = 2.0
+
+
+@dataclass
 class APIConfig:
     """主进程 OpenAPI/Runtime API 配置"""
 
