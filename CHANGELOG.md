@@ -1,19 +1,22 @@
-## v3.4.0 连续消息合并与当前输入批次
+## v3.4.0 同sender消息合并、投机预发送与当前输入批次
 
-本版本主要解决“用户一口气连发几条消息时，机器人过早开工或只理解最后一句”的问题。现在同一个 sender 在短时间内连续发送的消息会默认合并成一个当前输入批次，AI 会一次看到整批内容，再判断哪些是独立请求、哪些是补充或修正。围绕这个变化，提示词、防幽灵任务、记忆记录、Runtime 探针和关闭流程都做了同步适配，让连续对话更自然，也让异常和运行状态更容易排查。
+本版本核心解决"用户一口气连发几条消息时，机器人过早开工或只理解最后一句"的问题。新增同 sender 短时消息合并器，将同一会话中连续的多条消息合并为一个"当前输入批次"发送给 AI，由 AI 整批理解哪些是独立请求、哪些是补充或修正。围绕这个变化，提示词、防幽灵任务、记忆记录、`end` 工具、Runtime 探针和关闭流程都做了同步适配。同时重构了管理员命令、加入了 HTML 渲染缓存、收紧了工具调用守卫，并补强了测试覆盖。
 
-- 新增并默认启用同 sender 短时消息合并。连续消息会合并为一轮 AI 请求，适合“先说需求、再补充限制”“上一句说错了马上修正”等场景，减少重复回复、重复工具调用和互相打架的结果。
-- 加入可取消的提前处理机制。用户停顿到一定时间后，系统可以先让 LLM 开始生成以降低等待感；如果真正回复发出前又来了新消息，这次处理会被取消并合并到新批次里。
-- 加强消息合并的异步稳定性。定时器、投机请求、失败重试、旧任务收尾和关机 flush 都做了竞态保护；退出时会先把缓冲消息发完，并等待队列和在途回复自然收敛。
-- 统一当前输入批次语义。主提示词、NagaAgent 提示词和 `each.md` 都明确：有【连续消息说明】时，多段 `<message>` 都属于本轮输入；批次之外的历史消息仍只作背景，不会被误当成本轮要执行的旧任务。
-- 让记忆记录覆盖整批消息。`end.memo` 和 `end.observations` 现在要求记录整个当前输入批次中值得留存的信息，后台史官也会收到本批全部消息；同时移除了 `end` 的旧参数兼容，只保留 `memo`、`observations`、`perspective` 和 `force`。
-- 优化表情包回复顺序。需要文字说明时会先发必要文字，再把表情包检索和发送放到后续轮次；只有纯表情包/纯反应图回复才会一上来搜索表情包。
-- 提升工具调用容错。AI 客户端会拦截空函数名或缺失函数名的 tool call，返回明确的工具错误，不再继续执行空工具并刷出“未找到项目”类日志。
-- 扩展 Runtime 探针和 WebUI 展示。内部探针现在能看到消息合并器状态，也能统计可调用工具、工具集、Agent、自动处理管线、斜杠命令和 Anthropic Skills；WebUI 关于项目页也可查看当前版本和其他版本的 changelog 详情。
-- 调整发布说明来源。GitHub Release notes 现在从 `CHANGELOG.md` 最新版本条目生成，发版前会校验 tag、各构建清单和最新 changelog 版本一致，避免 tag 注释与正式版本说明不一致。
-- 补齐配置、架构和使用文档。新增消息合并专题文档，并同步更新 README、配置文档、OpenAPI、WebUI 指南和架构图，说明默认开启、可调参数以及关闭后可能带来的提示词语义差异。
-- 补强测试覆盖。新增消息合并、投机取消、shutdown drain、当前输入批次提示词、`end` 记忆记录、空工具调用守卫和 Runtime 探针统计等回归测试，总测试用例提升至 1620+ 项。
-- 优化提示词，补齐人设。
+- 新增同 sender 短时消息合并器及其配置。位于 `[message_batcher]`，默认启用，支持 extend / fixed 两种等待策略；可分别控制群聊和私聊是否合并，也可通过 `max_window_seconds`、`max_messages_per_batch` 限制批次上限，设为 0 即关闭合并。配置值变更实时生效，不需要重启。
+- 新增可取消的投机预发送。启用 `pre_send_seconds`（0 < 该值 < window_seconds）后，用户静默到设定秒数时系统提前将当前批次发给 LLM 以降低响应延迟，但批次窗口不结束；若正式发车前新消息到达，投机请求会被取消并合并到新批次。`allow_cancel_after_send` 控制已向用户发出消息后是否仍允许取消。
+- 完善消息合并的异步竞态保护与退出收敛。定时器、投机请求调度、失败重试、旧任务路径收尾等均做了竞态保护；`flush_on_command` 控制斜杠命令到达时是否连带交出当前缓冲；退出时自动排空缓冲队列并等待在途回复自然收敛。
+- 统一"当前输入批次"语义。主提示词、NagaAgent 提示词和 `each.md` 均从"最后一条消息"升级为"当前输入批次"概念：若有【连续消息说明】，多段 `<message>` 都属本轮输入，同批前几条不是历史旧任务，不触发幽灵任务防御；无连续消息说明时退化为最后一条消息。
+- 更新幽灵任务防御规则。安全锁从"最后一条消息"改为"当前输入批次"，操作前自检和工具调用前置判断均基于批次语义，避免批量输入中的前置指令被误判为历史旧任务。
+- 优化表情包回复顺序。明确只有纯表情包 / 纯反应图回复才允许先检索表情包；需要文字说明的场景必须先完成必要文字，再将表情包检索和发送延后到后续轮次。
+- 重构管理员命令为子命令模式。`/admin [ls|add|del]` 替代原有三条独立命令（`/lsadmin`、`/addadmin`、`/rmadmin`），参照 `/faq` 子命令模式的声明式 inference；`ls` 继承 admin 权限，`add`/`del` 覆盖为 superadmin；无参数默认执行 `ls`。清理了 FAQ 迁移遗留的空命令目录。
+- 新增 HTML 渲染结果缓存。基于 HTML 内容的 hash 缓存渲染图片，持久化到 `data/cache/render/_html_render_cache.json`；hash 匹配自动复用，命令热重载后 HTML 变化自然自动失效；LRU 驱逐上限 50 条目 / 50MB，重启后 JSON 自动恢复；原子写入（`.tmp` + `os.replace`）和 `asyncio.Lock` 防竞态，所有渲染调用方（help、profile、render_markdown 等）自动受益。
+- 增强工具调用容错守卫。AI 客户端在 `_run_tools_loop` 中对缺失 `function` 字段或 `name` 为空的 tool call 返回结构化错误消息而非静默跳过或崩溃；`_refresh_intro_generator` 的 fire-and-forget task 显式注册 `done_callback` 以抑制未检索异常警告。
+- 重构 `end` 工具。移除旧版 summary 参数兼容，只保留 `memo`、`observations`、`perspective` 和 `force`；要求记录整个当前输入批次中值得留存的信息，后台史官也接收批次全部消息以产出更完整的历史记录。
+- 扩展 Runtime 探针覆盖。API `/api/v1/management/probes` 现在额外返回消息合并器状态、完整工具/工具集/Agent/自动管线/斜杠命令/Anthropic Skills 的加载与调用统计，WebUI Runtime 面板同步展示；`/api/v1/management/probes/bootstrap` 诊断输出同步扩展。
+- 新增 WebUI 更新日志查看。关于项目页面可按版本查看 changelog 详情；`/api/v1/management/changelog` 端点支持指定版本查询，自动展示当前运行版本的 changelog 条目。
+- 调整发布说明生成方式。GitHub Release notes 改为从 `CHANGELOG.md` 最新版本条目自动解析生成（`scripts/release_notes.py`），发版前校验 tag、各构建清单与最新 changelog 版本一致，避免 tag 注释与正式说明脱节。
+- 补齐消息合并专题文档。新增 `docs/message-batching.md`，覆盖配置参数、等待策略、投机预发送、竞态保护与关闭行为；同步更新 README、配置文档、OpenAPI、WebUI 指南和架构图。
+- 补强测试覆盖。新增消息合并单元与集成测试（`test_message_batcher.py` 686 行、`test_message_batcher_integration.py` 326 行）、工具调用守卫测试（`test_ai_client_tool_guard.py`）、发布说明脚本测试（`test_release_notes_script.py` 163 行）、Runtime 探针统计测试（`test_runtime_api_probes.py` 120 行），并更新 `test_end_tool`、`test_system_prompt_constraints`、`test_webui_management_api`、`test_lsadmin_command` 等已有测试，总测试用例提升至约 1620 项。
 
 ---
 
