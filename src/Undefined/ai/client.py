@@ -577,7 +577,8 @@ class AIClient:
         self._intro_config = config
         if self._queue_manager is None:
             return
-        asyncio.create_task(self._refresh_intro_generator(config))
+        task = asyncio.create_task(self._refresh_intro_generator(config))
+        task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
     async def _refresh_intro_generator(self, config: AgentIntroGenConfig) -> None:
         if not config.enabled:
@@ -1381,10 +1382,13 @@ class AIClient:
                         if internal_fname == "get_forward_msg" and not isinstance(
                             tool_result, Exception
                         ):
-                            asyncio.create_task(
+                            task = asyncio.create_task(
                                 self._save_forward_to_history(
                                     content_str, pre_context, history_manager
                                 )
+                            )
+                            task.add_done_callback(
+                                lambda t: t.exception() if not t.cancelled() else None
                             )
 
                         if tool_context.get("conversation_ended"):
