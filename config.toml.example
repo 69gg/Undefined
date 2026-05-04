@@ -191,6 +191,8 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
+# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
+# en: Enable automatic prompt_cache_key generation (recommended).
 prompt_cache_enabled = true
 # zh: 是否对上游模型 API 启用流式请求。
 # en: Enable streaming requests to the upstream model API.
@@ -251,6 +253,8 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
+# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
+# en: Enable automatic prompt_cache_key generation (recommended).
 prompt_cache_enabled = true
 # zh: 是否对上游模型 API 启用流式请求。
 # en: Enable streaming requests to the upstream model API.
@@ -366,6 +370,8 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
+# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
+# en: Enable automatic prompt_cache_key generation (recommended).
 prompt_cache_enabled = true
 # zh: 是否对上游模型 API 启用流式请求。
 # en: Enable streaming requests to the upstream model API.
@@ -436,6 +442,8 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
+# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
+# en: Enable automatic prompt_cache_key generation (recommended).
 prompt_cache_enabled = true
 # zh: 是否对上游模型 API 启用流式请求。
 # en: Enable streaming requests to the upstream model API.
@@ -493,6 +501,8 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
+# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
+# en: Enable automatic prompt_cache_key generation (recommended).
 prompt_cache_enabled = true
 # zh: 是否对上游模型 API 启用流式请求。
 # en: Enable streaming requests to the upstream model API.
