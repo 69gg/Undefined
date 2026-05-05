@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from collections import deque
+import html
 from typing import Any, Dict
 import logging
 import re
 
 from Undefined.context import RequestContext
-from Undefined.utils.coerce import safe_int
+from Undefined.utils.coerce import coerce_truthy, is_truthy, safe_int, was_message_sent
 from Undefined.utils.xml import format_message_xml
 
 from Undefined.end_summary_storage import (
@@ -18,12 +19,11 @@ from Undefined.end_summary_storage import (
 
 logger = logging.getLogger(__name__)
 
-_TRUE_BOOL_TOKENS = {"1", "true", "yes", "y", "on"}
-_FALSE_BOOL_TOKENS = {"0", "false", "no", "n", "off", ""}
-_CONTENT_TAG_RE = re.compile(
-    r"<message\b[^>]*>\s*<content>(?P<content>.*?)</content>\s*</message>",
+_MESSAGE_TAG_RE = re.compile(
+    r"<message\b(?P<attrs>[^>]*)>\s*<content>(?P<content>.*?)</content>.*?</message>",
     re.DOTALL | re.IGNORECASE,
 )
+_MESSAGE_ATTR_RE = re.compile(r'(?P<name>[\w:-]+)="(?P<value>[^"]*)"')
 _DEFAULT_HISTORIAN_TEXT_LEN = 800
 _DEFAULT_HISTORIAN_LINES = 12
 _DEFAULT_HISTORIAN_LINE_LEN = 240
@@ -35,47 +35,16 @@ _MIN_HISTORIAN_LINE_LEN = 16
 _MAX_HISTORIAN_LINE_LEN = 1000
 
 
-def _coerce_bool(value: Any) -> tuple[bool, bool]:
-    """宽松布尔解析。
-
-    返回:
-        (parsed_value, recognized)
-    """
-    if isinstance(value, bool):
-        return value, True
-
-    if isinstance(value, int):
-        return value != 0, True
-
-    if isinstance(value, str):
-        token = value.strip().lower()
-        if token in _TRUE_BOOL_TOKENS:
-            return True, True
-        if token in _FALSE_BOOL_TOKENS:
-            return False, True
-
-    return False, False
-
-
 def _parse_force_flag(value: Any) -> tuple[bool, bool]:
     """force 支持宽松布尔解析（字符串大小写、0/1 等）。"""
-    return _coerce_bool(value)
-
-
-def _is_true_flag(value: Any) -> bool:
-    """上下文标记采用宽松布尔解析。"""
-    parsed, _recognized = _coerce_bool(value)
-    return parsed
+    return coerce_truthy(value)
 
 
 def _was_message_sent_this_turn(context: Dict[str, Any]) -> bool:
-    if _is_true_flag(context.get("message_sent_this_turn", False)):
+    """统一入口：先看 context 里的标记，回落到当前 RequestContext。"""
+    if is_truthy(context.get("message_sent_this_turn", False)):
         return True
-
-    ctx = RequestContext.current()
-    if ctx is None:
-        return False
-    return _is_true_flag(ctx.get_resource("message_sent_this_turn", False))
+    return was_message_sent(RequestContext.current())
 
 
 def _clip_text(value: Any, max_len: int) -> str:
@@ -127,13 +96,57 @@ def _resolve_historian_limits(context: Dict[str, Any]) -> tuple[int, int]:
     return max_source_len, recent_k
 
 
-def _extract_current_content_from_question(question: str, *, max_len: int) -> str:
+def _parse_message_attrs(attrs_text: str) -> dict[str, str]:
+    return {
+        match.group("name"): html.unescape(match.group("value"))
+        for match in _MESSAGE_ATTR_RE.finditer(attrs_text)
+    }
+
+
+def _format_source_message_line(
+    index: int,
+    attrs: dict[str, str],
+    content: str,
+    *,
+    content_max_len: int,
+) -> str:
+    label_parts = []
+    for key in (
+        "message_id",
+        "sender",
+        "sender_id",
+        "group_id",
+        "group_name",
+        "location",
+        "time",
+    ):
+        value = attrs.get(key)
+        if value:
+            label_parts.append(f"{key}={value}")
+    label = " ".join(label_parts) or "message"
+    return f"[{index}] {label}: {_clip_text(content, content_max_len)}"
+
+
+def _extract_current_input_batch_from_question(question: str, *, max_len: int) -> str:
     text = str(question or "").strip()
     if not text:
         return ""
-    matched = _CONTENT_TAG_RE.search(text)
-    if matched:
-        return _clip_text(matched.group("content"), max_len)
+    matches = list(_MESSAGE_TAG_RE.finditer(text))
+    if matches:
+        if len(matches) == 1:
+            return _clip_text(html.unescape(matches[0].group("content")), max_len)
+
+        content_max_len = max(32, max_len // max(len(matches), 1))
+        lines = [
+            _format_source_message_line(
+                index,
+                _parse_message_attrs(match.group("attrs")),
+                html.unescape(match.group("content")),
+                content_max_len=content_max_len,
+            )
+            for index, match in enumerate(matches, start=1)
+        ]
+        return _clip_text("\n".join(lines), max_len)
     return _clip_text(text, max_len)
 
 
@@ -189,7 +202,7 @@ def _build_historian_recent_messages(
 def _inject_historian_reference_context(context: Dict[str, Any]) -> None:
     max_source_len, recent_k = _resolve_historian_limits(context)
     current_question = str(context.get("current_question") or "").strip()
-    source_message = _extract_current_content_from_question(
+    source_message = _extract_current_input_batch_from_question(
         current_question, max_len=max_source_len
     )
     if source_message:
@@ -229,17 +242,9 @@ def _build_location(context: Dict[str, Any]) -> EndSummaryLocation | None:
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
-    # memo 优先新名，fallback 旧名 action_summary 和 summary
-    memo_raw = (
-        args.get("memo")
-        if "memo" in args
-        else (args.get("action_summary") or args.get("summary", ""))
-    )
+    memo_raw = args.get("memo", "")
     memo = memo_raw.strip() if isinstance(memo_raw, str) else ""
-    # observations 优先新名，fallback 旧名 new_info
-    observations_raw = (
-        args.get("observations") if "observations" in args else args.get("new_info", [])
-    )
+    observations_raw = args.get("observations", [])
     if isinstance(observations_raw, str):
         observations = [observations_raw.strip()] if observations_raw.strip() else []
     elif isinstance(observations_raw, list):
@@ -250,8 +255,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         observations = []
     perspective_raw = args.get("perspective", "")
     perspective = perspective_raw.strip() if isinstance(perspective_raw, str) else ""
-    # 兼容旧版 summary 字段
-    summary = memo
     force_raw = args.get("force", False)
     force, force_recognized = _parse_force_flag(force_raw)
     if "force" in args and not force_recognized:
@@ -263,7 +266,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         )
 
     # memo 非空且本轮未发送消息时拒绝（force=true 可跳过）
-    if summary and not force and not _was_message_sent_this_turn(context):
+    if memo and not force and not _was_message_sent_this_turn(context):
         logger.warning(
             "[end工具] 拒绝执行：本轮未发送消息，request_id=%s",
             context.get("request_id", "-"),
@@ -275,21 +278,19 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             "若你获取到了新信息，应填写 observations 字段以保存这些信息，而不是放在 memo 里。"
         )
 
-    if summary:
+    if memo:
         location = _build_location(context)
         record: EndSummaryRecord | None = None
         end_summary_storage = context.get("end_summary_storage")
         if isinstance(end_summary_storage, EndSummaryStorage):
-            record = await end_summary_storage.append_summary(
-                summary, location=location
-            )
+            record = await end_summary_storage.append_summary(memo, location=location)
         elif end_summary_storage is not None:
             logger.warning(
                 "[end工具] end_summary_storage 类型异常: %s", type(end_summary_storage)
             )
 
         if record is None:
-            record = EndSummaryStorage.make_record(summary, location=location)
+            record = EndSummaryStorage.make_record(memo, location=location)
 
         end_summaries = context.get("end_summaries")
         if end_summaries is not None:
@@ -303,7 +304,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                     "[end工具] end_summaries 类型异常: %s", type(end_summaries)
                 )
 
-        logger.info("保存end记录: %s...", summary[:50])
+        logger.info("保存end记录: %s...", memo[:50])
     else:
         logger.info("[end工具] memo 为空，跳过 end 摘要写入")
 

@@ -20,7 +20,7 @@
 - 已有 `config.toml` 想补齐新增配置项/注释时，可用 WebUI 的“同步模板”按钮，或运行 `python scripts/sync_config_template.py`（也支持 `uv run python scripts/sync_config_template.py`）。
 
 ### 1.2 运行时本地文件
-- `config.local.json`：运行时维护的本地管理员列表（如 `/addadmin`）。
+- `config.local.json`：运行时维护的本地管理员列表（如 `/admin add`）。
 - 该文件会与 `core.admin_qq` 合并。
 - 该文件也在热更新监听范围内。
 
@@ -100,6 +100,7 @@ model_name = "gpt-4o-mini"
 | `process_poke_message` | `true` | 是否响应拍一拍 | 关闭后忽略 poke |
 | `context_recent_messages_limit` | `20` | 注入到提示词的最近历史条数 | 自动钳制到 `0..200` |
 | `ai_request_max_retries` | `2` | 单次 LLM 请求失败重试次数 | `<0` 自动回退到 `0`；支持热更新 |
+| `missing_tool_call_retries` | `3` | 模型返回纯文本但未调用 `send_message` / `end` 等工具时的纠正重试次数 | `<0` 自动回退到 `0`；支持热更新 |
 
 ---
 
@@ -453,6 +454,23 @@ Prompt caching 补充：
 
 外部接收的远程图片或文件默认会先下载到附件缓存再生成 UID，避免后续 URL 失效；大文件超过阈值时，UID 仍会生成，但绑定的是 URL 引用而不是缓存文件，AI 可在上下文中看到原始 `source_ref`。
 
+### 4.10.2 `[message_batcher]` 同 sender 短时消息合并
+
+| 字段 | 默认值 | 说明 |
+|---|---:|---|
+| `enabled` | `true` | 总开关，默认开启；关闭后行为退化为旧版的逐条独立 AI 调用。当前主提示词按 batcher 开启后的"当前输入批次"语义适配，若关闭可能导致连续补充/修正消息与提示词语义不匹配，需要单独调整提示词或接受旧版逐条触发行为 |
+| `window_seconds` | `5.0` | 同 sender 合并的等待窗口（秒） |
+| `strategy` | `"extend"` | `extend` = 新消息重置窗口；`fixed` = 从首条算起的固定窗口 |
+| `max_window_seconds` | `30.0` | 从首条算起最长等待，硬顶 `extend` 不被无限延长；`0` 表示不限制（仅靠 `window_seconds` + `max_messages_per_batch` 触发发车） |
+| `max_messages_per_batch` | `0` | 单批最多条数；达到立即发车，`0` = 不限 |
+| `group_enabled` | `true` | 群聊是否启用合并 |
+| `private_enabled` | `true` | 私聊是否启用合并 |
+| `flush_on_command` | `false` | 命中斜杠命令时是否先 flush 该 sender 的 buffer；默认关闭以保持命令独立执行 |
+| `pre_send_seconds` | `0.0` | 投机预发送阈值（秒）。`0 < pre_send_seconds < window_seconds` 时启用：静默到该阈值先把当前 batch 提前发给 LLM 抢时间（speculative pre-fire），但 batch 仍要等到 `window_seconds` 才正式结束；新消息在投机期间到达且 inflight 调用尚未发出消息时会取消 inflight 并把消息合并入下一轮调用。`0` 或 `>= window_seconds` 视为关闭 |
+| `allow_cancel_after_send` | `false` | 投机调用已向用户发出消息后是否仍允许新消息取消该 inflight。默认 `false`（安全：不取消，新消息开新 batch）；启用后可能造成重复发送 |
+
+启用后，同一发送者在窗口内连续发送的多条消息会合并到同一轮 AI 调用，`<message>` 块按时间顺序排列，并带有"当前输入批次"说明，AI 一次性处理整批意图。拍一拍永远旁路立即处理；群聊已有 buffer 时新到的 @bot 也会单独立即处理（不打断 buffer）；首条 @bot 进入 buffer 时整批发车走 `add_group_mention_request`。配置支持热更新，关停时会 `flush_all` 并等待队列 drain，避免缓冲消息只入队未执行。详细行为矩阵与设计要点见 [docs/message-batching.md](message-batching.md)。
+
 ---
 
 ### 4.11 `[skills]` 技能系统与 Agent 介绍
@@ -524,6 +542,23 @@ Prompt caching 补充：
 - 该配置只影响 `render.py` 的 HTML/Markdown 图片渲染链路，不影响 `crawl_webpage` 等独立浏览器实现。
 - 渲染浏览器当前采用单例复用，因此这里限制的是并发页面/上下文数量，而不是浏览器进程数量。
 - 配置变更会对后续新的渲染请求生效；已在执行中的渲染任务不受影响。
+
+#### `[render.cache]` HTML 渲染结果缓存
+
+基于 HTML 内容 hash 复用同一张图片，避免重复渲染（help、profile、render_markdown 等链路自动受益）。
+
+| 字段 | 默认值 | 说明 | 约束/回退 |
+|---|---:|---|---|
+| `enabled` | `true` | 是否启用渲染缓存 | 关闭时所有请求都会走 playwright 重新截图 |
+| `max_entries` | `50` | LRU 条目数上限 | 自动钳制到 `>=1`；超过时按 `last_accessed_at` 淘汰 |
+| `max_size_mb` | `50` | 缓存总占用上限（MB） | 自动钳制到 `>=1`；超过时按 LRU 顺序持续淘汰 |
+| `flush_interval_seconds` | `2.0` | 元数据落盘最小间隔（秒） | 自动钳制到 `>=0`；关停时强制刷盘 |
+
+说明：
+- 元数据通过 `utils/io.py` 的 `read_json` / `write_json` 写入，自带文件锁与原子替换。
+- 缓存图片落在 `data/cache/render/html/` 目录，元数据为同目录下 `_html_render_cache.json`。
+- 进程关停（含 Ctrl+C）时会调用 `close_render_cache` 强制刷盘，保证最近访问时间不丢失。
+- 配置改动后下次启动生效。运行期热更新仅影响新建的缓存实例，已加载的单例沿用启动时参数。
 
 ---
 
@@ -638,7 +673,7 @@ Prompt caching 补充：
 - 同一条消息内，自动处理管线会并行检测 Bilibili、arXiv、GitHub 等已注册管线。
 - 检测到多个管线时会并行处理全部命中结果；通常单条消息只会命中一个管线，因此不手动维护优先级。
 - 自动提取发送出的信息消息、图片卡片、文件或视频摘要会通过统一发送层写入消息历史，本地媒体和文件会自动登记为会话附件 UID，随后才进入 AI 自动回复，因此 AI 可以读取刚刚的自动提取结果。
-- 管线实现位于 `src/Undefined/skills/auto_pipeline/`，跟随 `[skills]` 热重载配置自动重新加载。开发新管线请参考 [自动处理管线开发指南](auto-pipeline.md)。
+- 管线实现位于 `src/Undefined/skills/pipelines/`，跟随 `[skills]` 热重载配置自动重新加载。开发新管线请参考 [自动处理管线开发指南](pipelines.md)。
 
 ---
 

@@ -38,8 +38,10 @@ from Undefined.utils.sender import MessageSender
 from Undefined.services.security import SecurityService
 from Undefined.services.command import CommandDispatcher
 from Undefined.services.ai_coordinator import AICoordinator
+from Undefined.services.message_batcher import MessageBatcher, make_scope
 from Undefined.services.model_pool import ModelPoolService
-from Undefined.skills.auto_pipeline import AutoPipelineRegistry
+from Undefined.skills.pipelines import PipelineRegistry
+from Undefined.skills.pipelines.context import build_pipeline_context
 from Undefined.utils.resources import resolve_resource_path
 from Undefined.utils.queue_intervals import build_model_queue_intervals
 
@@ -137,12 +139,19 @@ class MessageHandler:
             command_dispatcher=self.command_dispatcher,
         )
 
+        # 同 sender 短时多消息合并器；coordinator 决定是否旁路
+        self.message_batcher = MessageBatcher(
+            config.message_batcher,
+            flush_callback=self.ai_coordinator.handle_batched_dispatch,
+        )
+        self.ai_coordinator.set_batcher(self.message_batcher)
+
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._profile_name_refresh_cache: dict[tuple[str, int], str] = {}
         self._bot_nickname_cache = BotNicknameCache(onebot, config.bot_qq)
-        self.auto_pipeline_registry = AutoPipelineRegistry()
-        self._auto_pipeline_initialized = False
-        self._auto_pipeline_init_lock = asyncio.Lock()
+        self.pipeline_registry = PipelineRegistry()
+        self._pipelines_initialized = False
+        self._pipelines_init_lock = asyncio.Lock()
 
         # 复读功能状态（按群跟踪最近消息文本与发送者）
         self._repeat_counter: dict[int, list[tuple[str, int]]] = {}
@@ -155,23 +164,23 @@ class MessageHandler:
 
     async def initialize(self) -> None:
         """完成需要事件循环承载的异步初始化。"""
-        await self.initialize_auto_pipeline()
+        await self.init_pipelines()
 
-    async def initialize_auto_pipeline(self) -> None:
+    async def init_pipelines(self) -> None:
         """异步加载自动处理管线并按配置启动热重载。"""
-        if getattr(self, "_auto_pipeline_initialized", False):
+        if getattr(self, "_pipelines_initialized", False):
             return
-        init_lock = getattr(self, "_auto_pipeline_init_lock", None)
+        init_lock = getattr(self, "_pipelines_init_lock", None)
         if init_lock is None:
             init_lock = asyncio.Lock()
-            self._auto_pipeline_init_lock = init_lock
+            self._pipelines_init_lock = init_lock
         async with init_lock:
-            if getattr(self, "_auto_pipeline_initialized", False):
+            if getattr(self, "_pipelines_initialized", False):
                 return
-            await self.auto_pipeline_registry.load_items_async()
-            self._auto_pipeline_initialized = True
+            await self.pipeline_registry.load_items_async()
+            self._pipelines_initialized = True
             if getattr(self.config, "skills_hot_reload", False):
-                self.auto_pipeline_registry.start_hot_reload(
+                self.pipeline_registry.start_hot_reload(
                     interval=self.config.skills_hot_reload_interval,
                     debounce=self.config.skills_hot_reload_debounce,
                 )
@@ -651,6 +660,10 @@ class MessageHandler:
 
             private_command = self.command_dispatcher.parse_command(text)
             if private_command:
+                await self._flush_command_buffer(
+                    scope=make_scope(user_id=private_sender_id),
+                    sender_id=private_sender_id,
+                )
                 await self.command_dispatcher.dispatch_private(
                     user_id=private_sender_id,
                     sender_id=private_sender_id,
@@ -658,7 +671,7 @@ class MessageHandler:
                 )
                 return
 
-            await self._run_auto_extract_pipeline(
+            await self._run_pipelines(
                 target_id=private_sender_id,
                 target_type="private",
                 text=text,
@@ -824,6 +837,10 @@ class MessageHandler:
         if is_at_bot:
             command = self.command_dispatcher.parse_command(normalized_text)
             if command:
+                await self._flush_command_buffer(
+                    scope=make_scope(group_id=group_id),
+                    sender_id=sender_id,
+                )
                 await self.command_dispatcher.dispatch(group_id, sender_id, command)
                 return
 
@@ -919,7 +936,7 @@ class MessageHandler:
                             )
                             return
 
-        await self._run_auto_extract_pipeline(
+        await self._run_pipelines(
             target_id=group_id,
             target_type="group",
             text=text,
@@ -1101,7 +1118,22 @@ class MessageHandler:
             bvids = await extract_from_json_message(message_content)
         return bvids
 
-    async def _run_auto_extract_pipeline(
+    async def _flush_command_buffer(self, *, scope: str, sender_id: int) -> None:
+        batcher_config = getattr(self.config, "message_batcher", None)
+        if not getattr(batcher_config, "flush_on_command", False):
+            return
+        batcher = getattr(self, "message_batcher", None)
+        if batcher is None:
+            return
+        flushed = await batcher.flush_sender(scope, sender_id)
+        if not flushed:
+            logger.warning(
+                "[MessageBatcher] 命令触发 flush 当前 buffer 失败: scope=%s sender=%s",
+                scope,
+                sender_id,
+            )
+
+    async def _run_pipelines(
         self,
         *,
         target_id: int,
@@ -1110,25 +1142,16 @@ class MessageHandler:
         message_content: list[dict[str, Any]],
     ) -> bool:
         """并行检测并处理所有命中的自动处理管线。"""
-        if not getattr(self, "_auto_pipeline_initialized", False):
-            await self.initialize_auto_pipeline()
-        detections = await self.auto_pipeline_registry.run(
-            {
-                "config": self.config,
-                "sender": self.sender,
-                "onebot": self.onebot,
-                "target_id": target_id,
-                "target_type": target_type,
-                "text": text,
-                "message_content": message_content,
-                "extract_bilibili_ids": self._extract_bilibili_ids,
-                "extract_arxiv_ids": self._extract_arxiv_ids,
-                "extract_github_repo_ids": self._extract_github_repo_ids,
-                "handle_bilibili_extract": self._handle_bilibili_extract,
-                "handle_arxiv_extract": self._handle_arxiv_extract,
-                "handle_github_extract": self._handle_github_extract,
-            }
+        if not getattr(self, "_pipelines_initialized", False):
+            await self.init_pipelines()
+        context = build_pipeline_context(
+            self,
+            target_id=target_id,
+            target_type=target_type,
+            text=text,
+            message_content=message_content,
         )
+        detections = await self.pipeline_registry.run(context)
         return bool(detections)
 
     async def apply_skills_hot_reload_config(
@@ -1138,14 +1161,14 @@ class MessageHandler:
         interval: float,
         debounce: float,
     ) -> None:
-        """跟随全局 skills 热重载配置更新自动处理管线。"""
+        """跟随全局 skills 热重载配置更新管线。"""
         if not enabled:
-            await self.auto_pipeline_registry.stop_hot_reload()
-            logger.info("[auto_pipeline] 热重载已随配置禁用")
+            await self.pipeline_registry.stop_hot_reload()
+            logger.info("[pipelines] 热重载已随配置禁用")
             return
 
-        await self.auto_pipeline_registry.stop_hot_reload()
-        self.auto_pipeline_registry.start_hot_reload(
+        await self.pipeline_registry.stop_hot_reload()
+        self.pipeline_registry.start_hot_reload(
             interval=interval,
             debounce=debounce,
         )
@@ -1365,7 +1388,9 @@ class MessageHandler:
                 *list(self._background_tasks),
                 return_exceptions=True,
             )
-        await self.history_manager.flush_pending_saves()
-        await self.auto_pipeline_registry.stop_hot_reload()
+        await self.pipeline_registry.stop_hot_reload()
+        await self.message_batcher.flush_all()
+        await self.ai_coordinator.queue_manager.drain()
         await self.ai_coordinator.queue_manager.stop()
+        await self.history_manager.flush_pending_saves()
         logger.info("消息处理器已关闭")

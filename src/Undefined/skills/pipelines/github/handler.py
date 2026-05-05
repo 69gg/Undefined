@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from Undefined.skills.auto_pipeline.models import (
-    AutoPipelineContext,
-    AutoPipelineDetection,
+from Undefined.skills.pipelines.models import (
+    PipelineContext,
+    PipelineDetection,
 )
 
 
@@ -16,7 +16,7 @@ def _is_allowed(config: Any, target_type: str, target_id: int) -> bool:
     return bool(config.is_github_auto_extract_allowed_private(target_id))
 
 
-async def detect(context: AutoPipelineContext) -> AutoPipelineDetection | None:
+async def detect(context: PipelineContext) -> PipelineDetection | None:
     target_id = int(context["target_id"])
     target_type = str(context["target_type"])
     config = context["config"]
@@ -27,14 +27,12 @@ async def detect(context: AutoPipelineContext) -> AutoPipelineDetection | None:
     repo_ids = extractor(context["text"], context["message_content"])
     if not repo_ids:
         return None
-    return AutoPipelineDetection(
-        name="github", items=tuple(str(item) for item in repo_ids)
-    )
+    return PipelineDetection(name="github", items=tuple(str(item) for item in repo_ids))
 
 
 async def process(
-    detection: AutoPipelineDetection,
-    context: AutoPipelineContext,
+    detection: PipelineDetection,
+    context: PipelineContext,
 ) -> None:
     handler = context["handle_github_extract"]
     await handler(

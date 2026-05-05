@@ -164,6 +164,8 @@ class QueueManager:
         self._model_queues: dict[str, ModelQueue] = {}
         self._processor_tasks: dict[str, asyncio.Task[None]] = {}
         self._inflight_tasks: set[asyncio.Task[None]] = set()
+        self._work_changed = asyncio.Event()
+        self._work_changed.set()
         self._next_dispatch_at: dict[str, float] = {}
         self._request_handler: (
             Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None
@@ -255,6 +257,37 @@ class QueueManager:
 
         logger.info("[队列服务] 所有队列处理任务已停止")
 
+    def _pending_request_count(self) -> int:
+        return sum(
+            lane_queue.qsize()
+            for queue in self._model_queues.values()
+            for lane_queue in queue.lane_queues().values()
+        )
+
+    def _active_inflight_count(self) -> int:
+        return sum(1 for task in self._inflight_tasks if not task.done())
+
+    async def drain(self) -> None:
+        """等待已入队请求和在途请求自然收敛，不取消处理器。"""
+        logger.info(
+            "[队列服务] 开始等待队列收敛: pending=%s inflight=%s",
+            self._pending_request_count(),
+            self._active_inflight_count(),
+        )
+        while True:
+            pending = self._pending_request_count()
+            inflight = self._active_inflight_count()
+            if pending == 0 and inflight == 0:
+                logger.info("[队列服务] 队列已收敛")
+                return
+            self._work_changed.clear()
+            pending = self._pending_request_count()
+            inflight = self._active_inflight_count()
+            if pending == 0 and inflight == 0:
+                logger.info("[队列服务] 队列已收敛")
+                return
+            await self._work_changed.wait()
+
     def _track_inflight_task(self, task: asyncio.Task[None]) -> None:
         """追踪在途任务，并在完成时自动移除。"""
 
@@ -262,6 +295,7 @@ class QueueManager:
 
         def _cleanup(done_task: asyncio.Task[None]) -> None:
             self._inflight_tasks.discard(done_task)
+            self._work_changed.set()
 
         task.add_done_callback(_cleanup)
 
@@ -373,6 +407,7 @@ class QueueManager:
             await lane_queue.put_second(request)
         else:
             await lane_queue.put(request)
+        self._work_changed.set()
         logger.info(
             "[队列入队][%s] %s: size=%s %s",
             model_name,
@@ -540,6 +575,7 @@ class QueueManager:
                     ]
 
                 if request is not None:
+                    self._work_changed.set()
                     request_type = request.get("type", "unknown")
                     retry_count = int(request.get("_retry_count", 0) or 0)
                     retry_suffix = (

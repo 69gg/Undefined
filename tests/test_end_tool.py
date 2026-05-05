@@ -60,34 +60,6 @@ async def test_end_accepts_message_sent_flag_from_request_context_string_true() 
     assert context["conversation_ended"] is True
 
 
-@pytest.mark.asyncio
-async def test_end_backward_compat_action_summary_param() -> None:
-    """向后兼容：旧参数名 action_summary 仍能正常工作。"""
-    context: dict[str, Any] = {"request_id": "req-compat-summary"}
-
-    result = await execute(
-        {"action_summary": "已发送消息", "force": True},
-        context,
-    )
-
-    assert result == "对话已结束"
-    assert context["conversation_ended"] is True
-
-
-@pytest.mark.asyncio
-async def test_end_backward_compat_new_info_param() -> None:
-    """向后兼容：旧参数名 new_info 仍能正常工作。"""
-    context: dict[str, Any] = {"request_id": "req-compat-new-info"}
-
-    result = await execute(
-        {"new_info": ["一条旧格式信息"], "force": True},
-        context,
-    )
-
-    assert result == "对话已结束"
-    assert context["conversation_ended"] is True
-
-
 class _FakeHistoryManager:
     def get_recent(
         self, chat_id: str, msg_type: str, start: int, end: int
@@ -120,6 +92,29 @@ class _FakeCognitiveService:
         self.last_context = dict(context)
         self.last_force = bool(force)
         return "job-test"
+
+
+@pytest.mark.asyncio
+async def test_end_ignores_removed_legacy_param_names() -> None:
+    cognitive_service = _FakeCognitiveService()
+    context: dict[str, Any] = {
+        "request_id": "req-removed-compat",
+        "cognitive_service": cognitive_service,
+    }
+
+    result = await execute(
+        {
+            "action_summary": "旧字段不应写入 memo",
+            "summary": "旧摘要字段不应写入 memo",
+            "new_info": ["旧字段不应写入 observations"],
+            "force": True,
+        },
+        context,
+    )
+
+    assert result == "对话已结束"
+    assert context["conversation_ended"] is True
+    assert cognitive_service.last_context is None
 
 
 @pytest.mark.asyncio
@@ -156,6 +151,46 @@ async def test_end_enriches_historian_reference_context() -> None:
     assert cognitive_service.last_context.get("historian_source_message")
     assert cognitive_service.last_context.get("historian_recent_messages")
     assert cognitive_service.last_force is True
+
+
+@pytest.mark.asyncio
+async def test_end_historian_source_message_includes_batched_messages() -> None:
+    cognitive_service = _FakeCognitiveService()
+    context: dict[str, Any] = {
+        "request_id": "req-historian-batch",
+        "request_type": "group",
+        "group_id": "1082837821",
+        "user_id": "120218451",
+        "sender_id": "120218451",
+        "cognitive_service": cognitive_service,
+        "current_question": (
+            '<message message_id="101" sender="洛泫" sender_id="120218451" '
+            'group_id="1082837821" group_name="bot测试群" '
+            'location="bot测试群" time="2026-02-23 19:02:12">'
+            "<content>我周三要发版</content></message>"
+            '<message message_id="102" sender="洛泫" sender_id="120218451" '
+            'group_id="1082837821" group_name="bot测试群" '
+            'location="bot测试群" time="2026-02-23 19:02:14">'
+            "<content>补充：是后端服务发版</content></message>"
+            "\n\n 【连续消息说明】以上 2 条 <message> 共同构成【当前输入批次】"
+        ),
+    }
+
+    result = await execute(
+        {"observations": ["洛泫周三要进行后端服务发版"], "force": True},
+        context,
+    )
+
+    assert result == "对话已结束"
+    source = str(context.get("historian_source_message", ""))
+    assert "[1]" in source
+    assert "[2]" in source
+    assert "message_id=101" in source
+    assert "message_id=102" in source
+    assert "我周三要发版" in source
+    assert "补充：是后端服务发版" in source
+    assert cognitive_service.last_context is not None
+    assert cognitive_service.last_context.get("historian_source_message") == source
 
 
 class _ManyHistoryManager:

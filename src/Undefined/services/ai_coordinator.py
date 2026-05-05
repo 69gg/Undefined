@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -15,6 +17,11 @@ from Undefined.context_resource_registry import collect_context_resources
 from Undefined.render import render_html_to_image, render_markdown_to_html
 from Undefined.services.model_pool import ModelPoolService
 from Undefined.services.queue_manager import QueueManager, QUEUE_LANE_BACKGROUND
+from Undefined.services.message_batcher import (
+    BufferedMessage,
+    MessageBatcher,
+    make_scope,
+)
 from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.sender import MessageSender
 from Undefined.utils.scheduler import TaskScheduler
@@ -33,6 +40,44 @@ _STATS_ANALYSIS_FALLBACK_PROMPT = (
     "请从整体概况、趋势、模型效率、成本结构、异常点和优化建议进行总结，"
     "语言简洁，建议可执行。"
 )
+
+
+_GROUP_STRATEGY_FOOTER = """
+
+ 【回复策略 - 更克制，纯表情包才前置检索】
+ 1. 如果用户 @ 了你或拍了拍你 → 【必须回复】
+ 2. 如果消息中明确提到了你（根据上下文判断用户是否在叫你或维持对话流） → 【必须回复】
+ 3. 如果问题明确涉及某个项目/代码/部署细节（用户明确点名或上下文明确指向） → 【酌情回复，必要时先查证再回答】
+ 4. 其他技术问题 → 【酌情回复，直接按用户提到的对象回答，不要引入无关的项目名/工具名作背景】
+ 5. 先判断当前输入批次（无连续消息说明时就是最后一条消息）是不是在对你说：
+    - 如果明显是在和别人说话 → 【不要回复】
+    - 如果你不能确定是不是在和你说话 → 【默认不回复】
+    - 只有明确在和你说，或多人公开讨论且对话明显开放时，才进入下一步
+  6. 群聊里的主动参与只保留给公开、开放的技术或项目讨论：
+    - 只在多人公开讨论代码、AI、开发工具、项目进展、技术 bug 等，且不是别人之间定向交流时，才可以【极低频参与】
+    - 默认更倾向不参与；不要长篇大论，一两句点到为止；如果别人已经在深入讨论且不需要你，保持沉默
+    - 轻松互动、玩梗、吐槽本身不构成参与许可；只有在你已经决定要回复，且本轮明确是纯表情包/纯反应图时，才优先考虑表情包表达
+  7. 对于已经决定要回复的场景（包括被@、被拍一拍、轻量答疑，以及少量符合条件的主动参与）：
+    - 只有明确纯表情包回复才先检索表情包，再用 memes.send_meme_by_uid 单独发一条图片消息
+    - 其他需要文字承接、解释、答疑、推进任务、确认操作或表达具体态度的场景，第一轮必须优先把必要文字回复做好并调用 send_message
+    - 如果确实还想补表情包，把 memes.search_memes 和 memes.send_meme_by_uid 放到文字发送后的后续响应轮次，不要阻塞首条文字回复
+    - 不要发送任何敷衍消息（如'懒得掺和'、'哦'等）；不想回复就直接调用 end
+    - 严肃、任务型、高信息密度场景少发表情包，避免打断信息传递
+    - 绝不要刷屏、绝不要每条都回
+  8. 对于本来就会回复的场景（私聊、被拍一拍、被@、轻量答疑）：
+    - 如果表情包能自然增强语气、缓和语气或让表达更像真人，也只能作为后续可选补充
+    - 但不要为了发表情包而牺牲信息传递；信息密度优先时仍以文字为主
+
+ 简单说：像个极度安静的群友。主动插话只留给公开、开放的技术或项目讨论；明显对别人说或拿不准时就闭嘴。已经决定要回复时，除非明确是纯表情包回复，否则先把文字回复做好，表情包最后再搜。"""
+
+
+_PRIVATE_STRATEGY_FOOTER = """
+
+【私聊消息】
+这是私聊消息，用户专门来找你说话。你可以自由选择是否回复：
+- 如果想回复，先调用 send_message 工具发送回复内容，然后调用 end 结束对话
+- 只有明确纯表情包回复时，才先用 memes.search_memes 查表情包，再用 memes.send_meme_by_uid 单独发图；其他场景先把文字回复做好，表情包最后再搜或不搜
+- 如果不想回复，直接调用 end 结束对话即可"""
 
 
 class AICoordinator:
@@ -60,6 +105,22 @@ class AICoordinator:
         self.security = security
         self.command_dispatcher = command_dispatcher
         self.model_pool = ModelPoolService(ai, config, sender)
+        # batcher 由外部（handlers.py）创建并通过 set_batcher 注入；未注入时所有消息按单条流程直送。
+        self._batcher: MessageBatcher | None = None
+
+    def set_batcher(self, batcher: MessageBatcher | None) -> None:
+        """注入消息合并器；传 None 等同于禁用合并。"""
+        self._batcher = batcher
+
+    @property
+    def batcher(self) -> MessageBatcher | None:
+        return self._batcher
+
+    async def handle_batched_dispatch(self, items: list[BufferedMessage]) -> None:
+        """:class:`MessageBatcher` 的 flush_callback：把一批消息组装为单次请求并入队。"""
+        if not items:
+            return
+        await self._dispatch_grouped_request(items)
 
     async def handle_auto_reply(
         self,
@@ -116,61 +177,47 @@ class AICoordinator:
                     )
                 return
 
-        prompt_prefix = (
-            "(用户拍了拍你) " if is_poke else ("(用户 @ 了你) " if is_at_bot else "")
-        )
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        location = group_name if group_name.endswith("群") else f"{group_name}群"
-
-        full_question = self._build_prompt(
-            prompt_prefix,
-            sender_name,
-            sender_id,
-            group_id,
-            group_name,
-            location,
-            sender_role,
-            sender_title,
-            current_time,
-            text,
-            attachments=attachments,
-            message_id=trigger_message_id,
-            level=sender_level,
-        )
-        logger.debug(
-            "[自动回复] full_question_len=%s group=%s sender=%s",
-            len(full_question),
-            group_id,
-            sender_id,
+        scope = make_scope(group_id=group_id)
+        item = BufferedMessage(
+            scope=scope,
+            sender_id=sender_id,
+            text=text,
+            message_content=list(message_content),
+            attachments=list(attachments or []),
+            sender_name=sender_name,
+            arrival_time=time.time(),
+            is_private=False,
+            trigger_message_id=trigger_message_id,
+            is_poke=is_poke,
+            is_at_bot=is_at_bot,
+            is_fake_at=is_fake_at,
+            group_id=group_id,
+            group_name=group_name,
+            sender_role=sender_role,
+            sender_title=sender_title,
+            sender_level=sender_level,
         )
 
-        request_data = {
-            "type": "auto_reply",
-            "group_id": group_id,
-            "sender_id": sender_id,
-            "sender_name": sender_name,
-            "group_name": group_name,
-            "text": text,
-            "full_question": full_question,
-            "is_at_bot": is_at_bot,
-            "trigger_message_id": trigger_message_id,
-        }
+        # 路由：拍一拍 → 永远旁路；否则按 batcher 启用情况与 @bot 处理规则决定
+        if is_poke:
+            await self._dispatch_grouped_request([item])
+            return
 
-        if sender_id == self.config.superadmin_qq:
-            logger.info("[AI] 投递至群聊超级管理员队列")
-            await self.queue_manager.add_group_superadmin_request(
-                request_data, model_name=self.config.chat_model.model_name
-            )
-        elif is_at_bot:
-            logger.info(f"[AI] 触发原因: {'拍一拍' if is_poke else '@机器人'}")
-            await self.queue_manager.add_group_mention_request(
-                request_data, model_name=self.config.chat_model.model_name
-            )
-        else:
-            logger.info("[AI] 投递至普通请求队列")
-            await self.queue_manager.add_group_normal_request(
-                request_data, model_name=self.config.chat_model.model_name
-            )
+        batcher = getattr(self, "_batcher", None)
+        if batcher is not None and batcher.is_enabled_for(is_group=True):
+            if is_at_bot and batcher.has_buffer(scope, sender_id):
+                # 已有 buffer 时再来一条 @bot：单独立即处理，不打断现有 buffer
+                logger.info(
+                    "[自动回复] batch 内 @bot 旁路立即处理: group=%s sender=%s",
+                    group_id,
+                    sender_id,
+                )
+                await self._dispatch_grouped_request([item])
+                return
+            await batcher.submit(item)
+            return
+
+        await self._dispatch_grouped_request([item])
 
     async def handle_private_reply(
         self,
@@ -193,52 +240,30 @@ class AICoordinator:
                 await self._handle_injection_response(user_id, text, is_private=True)
                 return
 
-        prompt_prefix = "(用户拍了拍你) " if is_poke else ""
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        message_id_attr = ""
-        if trigger_message_id is not None:
-            message_id_attr = f' message_id="{escape_xml_attr(trigger_message_id)}"'
-        attachment_xml = (
-            f"\n{attachment_refs_to_xml(attachments)}" if attachments else ""
-        )
-        full_question = f"""{prompt_prefix}<message{message_id_attr} sender="{escape_xml_attr(sender_name)}" sender_id="{escape_xml_attr(user_id)}" location="私聊" time="{escape_xml_attr(current_time)}">
- <content>{escape_xml_text(text)}</content>{attachment_xml}
- </message>
-
-【私聊消息】
-这是私聊消息，用户专门来找你说话。你可以自由选择是否回复：
-- 如果想回复，先调用 send_message 工具发送回复内容，然后调用 end 结束对话
-- 如果你已经决定回复，并且表情包能让表达更像真人，也可以先用 memes.search_memes 查表情包，再用 memes.send_meme_by_uid 单独发图
-- 如果不想回复，直接调用 end 结束对话即可"""
-
-        request_data = {
-            "type": "private_reply",
-            "user_id": user_id,
-            "sender_name": sender_name,
-            "text": text,
-            "full_question": full_question,
-            "trigger_message_id": trigger_message_id,
-        }
-        logger.debug(
-            "[私聊回复] full_question_len=%s user=%s",
-            len(full_question),
-            user_id,
+        scope = make_scope(user_id=user_id)
+        item = BufferedMessage(
+            scope=scope,
+            sender_id=user_id,
+            text=text,
+            message_content=list(message_content),
+            attachments=list(attachments or []),
+            sender_name=sender_name,
+            arrival_time=time.time(),
+            is_private=True,
+            trigger_message_id=trigger_message_id,
+            is_poke=is_poke,
         )
 
-        # 动态选择模型（私聊 group_id=0）
-        effective_config = self.model_pool.select_chat_config(
-            self.config.chat_model, user_id=user_id
-        )
-        request_data["selected_model_name"] = effective_config.model_name
+        if is_poke:
+            await self._dispatch_grouped_request([item])
+            return
 
-        if user_id == self.config.superadmin_qq:
-            await self.queue_manager.add_superadmin_request(
-                request_data, model_name=effective_config.model_name
-            )
-        else:
-            await self.queue_manager.add_private_request(
-                request_data, model_name=effective_config.model_name
-            )
+        batcher = getattr(self, "_batcher", None)
+        if batcher is not None and batcher.is_enabled_for(is_group=False):
+            await batcher.submit(item)
+            return
+
+        await self._dispatch_grouped_request([item])
 
     async def execute_reply(self, request: dict[str, Any]) -> None:
         """执行排队中的回复请求（由 QueueManager 分发调用）
@@ -249,6 +274,16 @@ class AICoordinator:
         """执行回复请求（由 QueueManager 调用）"""
         req_type = request.get("type", "unknown")
         logger.debug("[执行请求] type=%s keys=%s", req_type, list(request.keys()))
+        batch_token = request.get("_message_batcher_token")
+        if bool(getattr(batch_token, "cancelled", False)):
+            logger.info(
+                "[MessageBatcher] 跳过已取消的投机请求: type=%s scope=%s sender=%s batch=%s",
+                req_type,
+                getattr(batch_token, "scope", ""),
+                getattr(batch_token, "sender_id", ""),
+                getattr(batch_token, "batch_id", ""),
+            )
+            return
         if req_type == "auto_reply":
             await self._execute_auto_reply(request)
         elif req_type == "private_reply":
@@ -267,6 +302,8 @@ class AICoordinator:
         group_name = str(request.get("group_name") or "未知群聊")
         full_question = request["full_question"]
         trigger_message_id = request.get("trigger_message_id")
+        # 用于向 batcher 注册 inflight 任务（仅当本请求源自合并桶时生效）
+        batcher_scope: str | None = make_scope(group_id=group_id) if group_id else None
 
         # 创建请求上下文
         async with RequestContext(
@@ -342,27 +379,58 @@ class AICoordinator:
             )
 
             try:
-                await self.ai.ask(
-                    full_question,
-                    send_message_callback=send_msg_cb,
-                    get_recent_messages_callback=get_recent_cb,
-                    get_image_url_callback=self.onebot.get_image,
-                    get_forward_msg_callback=self.onebot.get_forward_msg,
-                    send_like_callback=send_like_cb,
-                    sender=self.sender,
-                    history_manager=self.history_manager,
-                    onebot_client=self.onebot,
-                    scheduler=self.scheduler,
-                    extra_context={
-                        "render_html_to_image": render_html_to_image,
-                        "render_markdown_to_html": render_markdown_to_html,
-                        "group_id": group_id,
-                        "user_id": sender_id,
-                        "is_at_bot": bool(request.get("is_at_bot", False)),
-                        "sender_name": sender_name,
-                        "group_name": group_name,
-                    },
+                # 把当前 task 注册到 batcher，使其有能力在新消息到达时取消本次 LLM 调用
+                batcher = getattr(self, "_batcher", None)
+                current_task = asyncio.current_task()
+                registered_task: asyncio.Task[Any] | None = None
+                if (
+                    batcher is not None
+                    and batcher_scope is not None
+                    and current_task is not None
+                ):
+                    batcher.register_inflight(
+                        batcher_scope, sender_id, current_task, ctx
+                    )
+                    registered_task = current_task
+                try:
+                    await self.ai.ask(
+                        full_question,
+                        send_message_callback=send_msg_cb,
+                        get_recent_messages_callback=get_recent_cb,
+                        get_image_url_callback=self.onebot.get_image,
+                        get_forward_msg_callback=self.onebot.get_forward_msg,
+                        send_like_callback=send_like_cb,
+                        sender=self.sender,
+                        history_manager=self.history_manager,
+                        onebot_client=self.onebot,
+                        scheduler=self.scheduler,
+                        extra_context={
+                            "render_html_to_image": render_html_to_image,
+                            "render_markdown_to_html": render_markdown_to_html,
+                            "group_id": group_id,
+                            "user_id": sender_id,
+                            "is_at_bot": bool(request.get("is_at_bot", False)),
+                            "sender_name": sender_name,
+                            "group_name": group_name,
+                        },
+                    )
+                finally:
+                    if (
+                        batcher is not None
+                        and batcher_scope is not None
+                        and registered_task is not None
+                    ):
+                        batcher.unregister_inflight(
+                            batcher_scope, sender_id, registered_task
+                        )
+            except asyncio.CancelledError:
+                # 投机预发送被新消息抢占取消：不写错误日志、不重试
+                logger.info(
+                    "[自动回复] 任务被取消（投机抢占）: group=%s sender=%s",
+                    group_id,
+                    sender_id,
                 )
+                raise
             except Exception:
                 logger.exception("自动回复执行出错")
                 raise
@@ -372,6 +440,7 @@ class AICoordinator:
         sender_name = str(request.get("sender_name") or "未知用户")
         full_question = request["full_question"]
         trigger_message_id = request.get("trigger_message_id")
+        batcher_scope: str | None = make_scope(user_id=user_id)
 
         # 创建请求上下文
         async with RequestContext(
@@ -442,26 +511,46 @@ class AICoordinator:
             )
 
             try:
-                result = await self.ai.ask(
-                    full_question,
-                    send_message_callback=send_msg_cb,
-                    get_recent_messages_callback=get_recent_cb,
-                    get_image_url_callback=self.onebot.get_image,
-                    get_forward_msg_callback=self.onebot.get_forward_msg,
-                    send_like_callback=send_like_cb,
-                    sender=self.sender,
-                    history_manager=self.history_manager,
-                    onebot_client=self.onebot,
-                    scheduler=self.scheduler,
-                    extra_context={
-                        "render_html_to_image": render_html_to_image,
-                        "render_markdown_to_html": render_markdown_to_html,
-                        "user_id": user_id,
-                        "is_private_chat": True,
-                        "sender_name": sender_name,
-                        "selected_model_name": request.get("selected_model_name"),
-                    },
-                )
+                batcher = getattr(self, "_batcher", None)
+                current_task = asyncio.current_task()
+                registered_task: asyncio.Task[Any] | None = None
+                if (
+                    batcher is not None
+                    and batcher_scope is not None
+                    and current_task is not None
+                ):
+                    batcher.register_inflight(batcher_scope, user_id, current_task, ctx)
+                    registered_task = current_task
+                try:
+                    result = await self.ai.ask(
+                        full_question,
+                        send_message_callback=send_msg_cb,
+                        get_recent_messages_callback=get_recent_cb,
+                        get_image_url_callback=self.onebot.get_image,
+                        get_forward_msg_callback=self.onebot.get_forward_msg,
+                        send_like_callback=send_like_cb,
+                        sender=self.sender,
+                        history_manager=self.history_manager,
+                        onebot_client=self.onebot,
+                        scheduler=self.scheduler,
+                        extra_context={
+                            "render_html_to_image": render_html_to_image,
+                            "render_markdown_to_html": render_markdown_to_html,
+                            "user_id": user_id,
+                            "is_private_chat": True,
+                            "sender_name": sender_name,
+                            "selected_model_name": request.get("selected_model_name"),
+                        },
+                    )
+                finally:
+                    if (
+                        batcher is not None
+                        and batcher_scope is not None
+                        and registered_task is not None
+                    ):
+                        batcher.unregister_inflight(
+                            batcher_scope, user_id, registered_task
+                        )
                 if result:
                     scope_key = build_attachment_scope(
                         user_id=user_id,
@@ -484,6 +573,9 @@ class AICoordinator:
                         target_type="private",
                         target_id=user_id,
                     )
+            except asyncio.CancelledError:
+                logger.info("[私聊回复] 任务被取消（投机抢占）: user=%s", user_id)
+                raise
             except Exception:
                 logger.exception("私聊回复执行出错")
                 raise
@@ -705,6 +797,202 @@ class AICoordinator:
                 tid, self.config.bot_qq, "<对注入消息的回复>", "Bot", ""
             )
 
+    def _format_group_message_segment(self, item: BufferedMessage) -> str:
+        """格式化群聊单条 ``<message>`` 块。"""
+        time_str = datetime.fromtimestamp(item.arrival_time).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        group_name = item.group_name or "未知群聊"
+        location = group_name if group_name.endswith("群") else f"{group_name}群"
+        safe_name = escape_xml_attr(item.sender_name or "未知用户")
+        safe_uid = escape_xml_attr(item.sender_id)
+        safe_gid = escape_xml_attr(item.group_id or 0)
+        safe_gname = escape_xml_attr(group_name)
+        safe_loc = escape_xml_attr(location)
+        safe_role = escape_xml_attr(item.sender_role or "member")
+        safe_title = escape_xml_attr(item.sender_title or "")
+        safe_time = escape_xml_attr(time_str)
+        safe_text = escape_xml_text(item.text)
+        message_id_attr = ""
+        if item.trigger_message_id is not None:
+            message_id_attr = (
+                f' message_id="{escape_xml_attr(item.trigger_message_id)}"'
+            )
+        level_attr = (
+            f' level="{escape_xml_attr(item.sender_level)}"'
+            if item.sender_level
+            else ""
+        )
+        attachment_xml = (
+            f"\n{attachment_refs_to_xml(item.attachments)}" if item.attachments else ""
+        )
+        return (
+            f'<message{message_id_attr} sender="{safe_name}" sender_id="{safe_uid}" '
+            f'group_id="{safe_gid}" group_name="{safe_gname}" location="{safe_loc}" '
+            f'role="{safe_role}" title="{safe_title}"{level_attr} time="{safe_time}">\n'
+            f" <content>{safe_text}</content>{attachment_xml}\n"
+            f" </message>"
+        )
+
+    def _format_private_message_segment(self, item: BufferedMessage) -> str:
+        """格式化私聊单条 ``<message>`` 块。"""
+        time_str = datetime.fromtimestamp(item.arrival_time).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        safe_name = escape_xml_attr(item.sender_name or "未知用户")
+        safe_uid = escape_xml_attr(item.sender_id)
+        safe_time = escape_xml_attr(time_str)
+        safe_text = escape_xml_text(item.text)
+        message_id_attr = ""
+        if item.trigger_message_id is not None:
+            message_id_attr = (
+                f' message_id="{escape_xml_attr(item.trigger_message_id)}"'
+            )
+        attachment_xml = (
+            f"\n{attachment_refs_to_xml(item.attachments)}" if item.attachments else ""
+        )
+        return (
+            f'<message{message_id_attr} sender="{safe_name}" sender_id="{safe_uid}" '
+            f'location="私聊" time="{safe_time}">\n'
+            f" <content>{safe_text}</content>{attachment_xml}\n"
+            f" </message>"
+        )
+
+    @staticmethod
+    def _build_continuous_messages_note(items: list[BufferedMessage]) -> str:
+        """生成"连续消息说明"段。仅在 ``len(items) >= 2`` 时使用。"""
+        count = len(items)
+        first_t = items[0].arrival_time
+        last_t = items[-1].arrival_time
+        span = max(0.0, last_t - first_t)
+        return (
+            f"\n\n 【连续消息说明】以上 {count} 条 <message> 是同一用户在约 "
+            f"{span:.1f} 秒内连续发送的消息（按时间先后排列），代表本轮要回应的全部输入：\n"
+            f" - 这些 <message> 共同构成【当前输入批次】，不要把同批前几条误判为历史旧任务；"
+            f"批次之外的历史消息仍只作为背景，不能回溯拾荒\n"
+            f" - 先识别每条的意图，分清是【独立请求】还是【对前一条的修正/否定/补充/打断】\n"
+            f'   · 若是【多个独立的不同意图/问题】（如"先帮我查 A，再翻译 B")'
+            f" → 每个都要回应，不要遗漏；与平时一样，可以多次 send_message 自然分发\n"
+            f'   · 若后发是【对前发的修正/否定/补充/打断】（如"画猫" → "改成狗")'
+            f" → 以最后一次明确意图为准，旧的不再执行，可简短说明已采纳更新\n"
+            f'   · 拿不准时偏向"独立请求"，宁多勿漏\n'
+            f" - 整批在本轮一次性处理完即可，不要为同一意图重复输出（不要"
+            f'"中间一波、结尾再来一波"重复相同回复）\n'
+            f" - history 中若出现与当前轮 <message> 相同的条目，视为同一来源，不要重复处理"
+        )
+
+    def _build_grouped_prompt(self, items: list[BufferedMessage]) -> str:
+        """根据 BufferedMessage 列表构造合并后的完整 prompt。"""
+        if not items:
+            return ""
+        is_private = items[0].is_private
+        # prefix：拍一拍优先；否则任一 @bot
+        any_poke = any(it.is_poke for it in items)
+        any_at_bot = any(it.is_at_bot for it in items)
+        if any_poke:
+            prefix = "(用户拍了拍你) "
+        elif any_at_bot:
+            prefix = "(用户 @ 了你) "
+        else:
+            prefix = ""
+
+        if is_private:
+            segments = [self._format_private_message_segment(it) for it in items]
+        else:
+            segments = [self._format_group_message_segment(it) for it in items]
+        body = prefix + "\n".join(segments)
+        if len(items) >= 2:
+            body += self._build_continuous_messages_note(items)
+        body += _GROUP_STRATEGY_FOOTER if not is_private else _PRIVATE_STRATEGY_FOOTER
+        return body
+
+    async def _dispatch_grouped_request(self, items: list[BufferedMessage]) -> None:
+        """根据一组 BufferedMessage 决定优先级、构造 prompt 并入队。
+
+        既是单条直送路径的统一出口，也是 :class:`MessageBatcher` 的 flush_callback。
+        """
+        if not items:
+            return
+        first = items[0]
+        last = items[-1]
+        full_question = self._build_grouped_prompt(items)
+        any_poke = any(it.is_poke for it in items)
+        any_at_bot = any(it.is_at_bot for it in items)
+
+        if first.is_private:
+            user_id = first.sender_id
+            request_data: dict[str, Any] = {
+                "type": "private_reply",
+                "user_id": user_id,
+                "sender_name": first.sender_name,
+                "text": last.text,
+                "full_question": full_question,
+                "trigger_message_id": last.trigger_message_id,
+                "batched_count": len(items),
+            }
+            if first.batch_token is not None:
+                request_data["_message_batcher_token"] = first.batch_token
+            effective_config = self.model_pool.select_chat_config(
+                self.config.chat_model, user_id=user_id
+            )
+            request_data["selected_model_name"] = effective_config.model_name
+            logger.debug(
+                "[私聊回复] full_question_len=%s user=%s batched=%s",
+                len(full_question),
+                user_id,
+                len(items),
+            )
+            if user_id == self.config.superadmin_qq:
+                await self.queue_manager.add_superadmin_request(
+                    request_data, model_name=effective_config.model_name
+                )
+            else:
+                await self.queue_manager.add_private_request(
+                    request_data, model_name=effective_config.model_name
+                )
+            return
+
+        # 群聊
+        group_id = first.group_id or 0
+        sender_id = first.sender_id
+        request_data = {
+            "type": "auto_reply",
+            "group_id": group_id,
+            "sender_id": sender_id,
+            "sender_name": first.sender_name,
+            "group_name": first.group_name,
+            "text": last.text,
+            "full_question": full_question,
+            "is_at_bot": any_at_bot,
+            "trigger_message_id": last.trigger_message_id,
+            "batched_count": len(items),
+        }
+        if first.batch_token is not None:
+            request_data["_message_batcher_token"] = first.batch_token
+        logger.debug(
+            "[自动回复] full_question_len=%s group=%s sender=%s batched=%s",
+            len(full_question),
+            group_id,
+            sender_id,
+            len(items),
+        )
+        if sender_id == self.config.superadmin_qq:
+            logger.info("[AI] 投递至群聊超级管理员队列 (batched=%s)", len(items))
+            await self.queue_manager.add_group_superadmin_request(
+                request_data, model_name=self.config.chat_model.model_name
+            )
+        elif any_at_bot:
+            trigger = "拍一拍" if any_poke else "@机器人"
+            logger.info("[AI] 触发原因: %s (batched=%s)", trigger, len(items))
+            await self.queue_manager.add_group_mention_request(
+                request_data, model_name=self.config.chat_model.model_name
+            )
+        else:
+            logger.info("[AI] 投递至普通请求队列 (batched=%s)", len(items))
+            await self.queue_manager.add_group_normal_request(
+                request_data, model_name=self.config.chat_model.model_name
+            )
+
     def _build_prompt(
         self,
         prefix: str,
@@ -745,31 +1033,31 @@ class AICoordinator:
  <content>{safe_text}</content>{attachment_xml}
  </message>
 
- 【回复策略 - 更克制，且优先表情包】
+ 【回复策略 - 更克制，纯表情包才前置检索】
  1. 如果用户 @ 了你或拍了拍你 → 【必须回复】
  2. 如果消息中明确提到了你（根据上下文判断用户是否在叫你或维持对话流） → 【必须回复】
  3. 如果问题明确涉及某个项目/代码/部署细节（用户明确点名或上下文明确指向） → 【酌情回复，必要时先查证再回答】
  4. 其他技术问题 → 【酌情回复，直接按用户提到的对象回答，不要引入无关的项目名/工具名作背景】
- 5. 先判断这条话是不是在对你说：
+ 5. 先判断当前输入批次（无连续消息说明时就是最后一条消息）是不是在对你说：
     - 如果明显是在和别人说话 → 【不要回复】
     - 如果你不能确定是不是在和你说话 → 【默认不回复】
     - 只有明确在和你说，或多人公开讨论且对话明显开放时，才进入下一步
   6. 群聊里的主动参与只保留给公开、开放的技术或项目讨论：
     - 只在多人公开讨论代码、AI、开发工具、项目进展、技术 bug 等，且不是别人之间定向交流时，才可以【极低频参与】
     - 默认更倾向不参与；不要长篇大论，一两句点到为止；如果别人已经在深入讨论且不需要你，保持沉默
-    - 轻松互动、玩梗、吐槽本身不构成参与许可；只有在你已经决定要回复时，才优先考虑表情包表达
+    - 轻松互动、玩梗、吐槽本身不构成参与许可；只有在你已经决定要回复，且本轮明确是纯表情包/纯反应图时，才优先考虑表情包表达
   7. 对于已经决定要回复的场景（包括被@、被拍一拍、轻量答疑，以及少量符合条件的主动参与）：
-    - 默认先尝试 memes.search_memes，再用 memes.send_meme_by_uid 单独发一条图片消息
-    - 对于吐槽、附和、接梗、表达态度或情绪的回复，默认由表情包承担主要表达；只要能发表情包，就不要先发文字描述来代替它
-    - 如果确实需要文字，也只补极短一句，并与表情包分开发送
+    - 只有明确纯表情包回复才先检索表情包，再用 memes.send_meme_by_uid 单独发一条图片消息
+    - 其他需要文字承接、解释、答疑、推进任务、确认操作或表达具体态度的场景，第一轮必须优先把必要文字回复做好并调用 send_message
+    - 如果确实还想补表情包，把 memes.search_memes 和 memes.send_meme_by_uid 放到文字发送后的后续响应轮次，不要阻塞首条文字回复
     - 不要发送任何敷衍消息（如'懒得掺和'、'哦'等）；不想回复就直接调用 end
     - 严肃、任务型、高信息密度场景少发表情包，避免打断信息传递
     - 绝不要刷屏、绝不要每条都回
   8. 对于本来就会回复的场景（私聊、被拍一拍、被@、轻量答疑）：
-    - 如果表情包能自然增强语气、缓和语气或让表达更像真人，也可以配合使用
+    - 如果表情包能自然增强语气、缓和语气或让表达更像真人，也只能作为后续可选补充
     - 但不要为了发表情包而牺牲信息传递；信息密度优先时仍以文字为主
  
- 简单说：像个极度安静的群友。主动插话只留给公开、开放的技术或项目讨论；明显对别人说或拿不准时就闭嘴。已经决定要回复时，再优先用表情包而不是文字。"""
+ 简单说：像个极度安静的群友。主动插话只留给公开、开放的技术或项目讨论；明显对别人说或拿不准时就闭嘴。已经决定要回复时，除非明确是纯表情包回复，否则先把文字回复做好，表情包最后再搜。"""
 
     async def _send_image(self, tid: int, mtype: str, path: str) -> None:
         """发送图片或语音消息到群聊或私聊"""

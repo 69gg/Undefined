@@ -155,6 +155,64 @@
             html += `</div>`;
         }
 
+        // Message Batcher
+        const mb = data.message_batcher || {};
+        if (mb.config) {
+            const cfg = mb.config || {};
+            html += `<div class="probe-section">`;
+            html += `<div class="probe-section-title">${t("probes.section_message_batcher")}</div>`;
+            html += `<div class="probe-grid">`;
+            html += probeItem(
+                t("probes.batcher_enabled"),
+                probeStatusBadge(cfg.enabled ? "ok" : "skipped"),
+            );
+            html += probeItem(
+                t("probes.batcher_window"),
+                `<code>${escapeHtml(String(cfg.window_seconds))}s</code>`,
+            );
+            html += probeItem(
+                t("probes.batcher_strategy"),
+                `<code>${escapeHtml(cfg.strategy || "")}</code>`,
+            );
+            html += probeItem(
+                t("probes.batcher_pending"),
+                String(mb.pending_buckets ?? 0),
+            );
+            html += probeItem(
+                t("probes.batcher_group"),
+                cfg.group_enabled ? "✓" : "✗",
+            );
+            html += probeItem(
+                t("probes.batcher_private"),
+                cfg.private_enabled ? "✓" : "✗",
+            );
+            html += probeItem(
+                t("probes.batcher_speculative"),
+                probeStatusBadge(cfg.speculative_enabled ? "ok" : "skipped"),
+            );
+            if (cfg.speculative_enabled) {
+                html += probeItem(
+                    t("probes.batcher_pre_send"),
+                    `<code>${escapeHtml(String(cfg.pre_send_seconds))}s</code>`,
+                );
+            }
+            html += `</div>`;
+            const buckets = Array.isArray(mb.buckets) ? mb.buckets : [];
+            if (buckets.length > 0) {
+                html += `<div class="probe-queue-row" style="margin-top:8px">`;
+                for (const b of buckets.slice(0, 10)) {
+                    const label = `${escapeHtml(String(b.scope || ""))}/${escapeHtml(String(b.sender_id || ""))}`;
+                    const phase = b.phase
+                        ? ` ${escapeHtml(String(b.phase))}`
+                        : "";
+                    const inflight = b.has_inflight ? " ⚡" : "";
+                    html += `<span class="probe-queue-tag"><span class="probe-queue-label">${label}</span> ${b.count}×@${b.elapsed_seconds}s${phase}${inflight}</span>`;
+                }
+                html += `</div>`;
+            }
+            html += `</div>`;
+        }
+
         // Memory & Cognitive
         const mem = data.memory || {};
         const cog = data.cognitive || {};
@@ -180,29 +238,31 @@
 
         // Skills
         const sk = data.skills || {};
-        if (sk.tools || sk.agents || sk.anthropic_skills) {
+        const skillRegs = [
+            { key: "tools", label: t("probes.tools") },
+            { key: "toolsets", label: t("probes.toolsets") },
+            { key: "agents", label: t("probes.agents") },
+            { key: "pipelines", label: t("probes.pipelines") },
+            { key: "commands", label: t("probes.commands") },
+            { key: "anthropic_skills", label: "Anthropic Skills" },
+        ];
+        if (skillRegs.some((reg) => sk[reg.key])) {
             html += `<div class="probe-section">`;
             html += `<div class="probe-section-title">${t("probes.section_skills")}</div>`;
             html += `<div class="probe-grid" style="margin-bottom:8px">`;
-            if (sk.tools)
+            for (const regMeta of skillRegs) {
+                const reg = sk[regMeta.key];
+                if (!reg) continue;
                 html += probeItem(
-                    t("probes.tools"),
-                    `${sk.tools.loaded ?? 0} / ${sk.tools.count ?? 0}`,
+                    regMeta.label,
+                    `${reg.loaded ?? 0} / ${reg.count ?? 0}`,
                 );
-            if (sk.agents)
-                html += probeItem(
-                    t("probes.agents"),
-                    `${sk.agents.loaded ?? 0} / ${sk.agents.count ?? 0}`,
-                );
-            if (sk.anthropic_skills)
-                html += probeItem(
-                    "Anthropic Skills",
-                    `${sk.anthropic_skills.loaded ?? 0} / ${sk.anthropic_skills.count ?? 0}`,
-                );
+            }
             html += `</div>`;
             // Show active skills (ones with calls > 0)
             const activeItems = [];
-            for (const reg of [sk.tools, sk.agents, sk.anthropic_skills]) {
+            for (const { key } of skillRegs) {
+                const reg = sk[key];
                 if (reg && reg.items) {
                     for (const item of reg.items) {
                         if (item.calls > 0) activeItems.push(item);

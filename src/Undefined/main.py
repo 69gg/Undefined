@@ -43,6 +43,7 @@ from Undefined.utils.self_update import (
     restart_process,
 )
 from Undefined.render import close_browser as close_render_browser
+from Undefined.utils.render_cache import close_render_cache
 
 
 def ensure_runtime_dirs() -> None:
@@ -478,6 +479,8 @@ async def main() -> None:
             cognitive_job_queue=job_queue,
             meme_service=meme_service,
             naga_store=naga_store,
+            message_batcher=handler.message_batcher,
+            pipeline_registry=handler.pipeline_registry,
         )
         runtime_api_server = RuntimeAPIServer(
             runtime_api_context,
@@ -509,6 +512,10 @@ async def main() -> None:
         logger.exception("[异常] 运行期间发生未捕获的错误: %s", exc)
     finally:
         logger.info("[清理] 正在关闭机器人并释放资源...")
+        try:
+            await handler.close()
+        except Exception:
+            logger.exception("[清理] MessageHandler close 失败")
         if runtime_api_server is not None:
             await runtime_api_server.stop()
         if meme_worker is not None:
@@ -521,6 +528,7 @@ async def main() -> None:
             await retrieval_runtime.stop()
         await config_manager.stop_hot_reload()
         await close_render_browser()
+        await close_render_cache()
         logger.info("[退出] 机器人已停止运行")
 
 

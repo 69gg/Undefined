@@ -1,0 +1,34 @@
+{
+    "name": "admin",
+    "description": "管理员管理：列表/添加/移除",
+    "usage": "/admin [ls|add|del] [参数]",
+    "example": "/admin ls",
+    "permission": "admin",
+    "rate_limit": {
+        "user": 0,
+        "admin": 0,
+        "superadmin": 0
+    },
+    "show_in_help": true,
+    "order": 70,
+    "allow_in_private": true,
+    "aliases": [],
+    "subcommands": {
+        "ls": {
+            "description": "查看管理员列表"
+        },
+        "add": {
+            "description": "添加管理员",
+            "permission": "superadmin",
+            "args": "<QQ号|@用户>"
+        },
+        "del": {
+            "description": "移除管理员",
+            "permission": "superadmin",
+            "args": "<QQ号|@用户>"
+        }
+    },
+    "inference": {
+        "default": "ls"
+    }
+}

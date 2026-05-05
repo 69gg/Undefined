@@ -7,6 +7,14 @@ from aiohttp import web
 from aiohttp.web_response import Response
 
 from Undefined import __version__
+from Undefined.changelog import (
+    ChangelogEntry,
+    ChangelogError,
+    ChangelogFormatError,
+    entry_to_dict,
+    list_entries,
+    normalize_version,
+)
 from Undefined.config import get_config
 from ._shared import auth_capabilities, routes, check_auth
 from ..utils import load_bootstrap_probe_data
@@ -149,6 +157,25 @@ def _bootstrap_advice(data: dict[str, object]) -> list[str]:
     return advice
 
 
+def _find_changelog_entry(
+    entries: tuple[ChangelogEntry, ...], version: str
+) -> ChangelogEntry:
+    normalized = normalize_version(version)
+    for entry in entries:
+        if entry.version == normalized:
+            return entry
+    raise ChangelogError(f"未找到版本: {normalized}")
+
+
+def _compact_changelog_entries(
+    entries: tuple[ChangelogEntry, ...],
+) -> list[dict[str, object]]:
+    return [
+        entry_to_dict(entry, include_summary=False, include_changes=False)
+        for entry in entries
+    ]
+
+
 @routes.get("/api/v1/management/probes/bootstrap")
 async def bootstrap_probe_handler(request: web.Request) -> Response:
     if not check_auth(request):
@@ -187,6 +214,7 @@ async def capabilities_probe_handler(request: web.Request) -> Response:
                 "sync_template": True,
             },
             "logs": {"read": True, "stream": True},
+            "changelog": {"read": True},
             "bot": {
                 "status": True,
                 "start": True,
@@ -200,6 +228,39 @@ async def capabilities_probe_handler(request: web.Request) -> Response:
             },
         }
     )
+
+
+@routes.get("/api/v1/management/changelog")
+@routes.get("/api/changelog")
+async def changelog_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+    requested_version = str(request.query.get("version") or "").strip()
+    try:
+        entries = list_entries()
+        current_version = normalize_version(__version__)
+        latest_version = entries[0].version
+        if requested_version:
+            selected_entry = _find_changelog_entry(entries, requested_version)
+        else:
+            try:
+                selected_entry = _find_changelog_entry(entries, current_version)
+            except ChangelogError:
+                selected_entry = entries[0]
+        return web.json_response(
+            {
+                "success": True,
+                "current_version": current_version,
+                "latest_version": latest_version,
+                "selected_version": selected_entry.version,
+                "versions": _compact_changelog_entries(entries),
+                "entry": entry_to_dict(selected_entry),
+            }
+        )
+    except ChangelogFormatError as exc:
+        return web.json_response({"success": False, "error": str(exc)}, status=400)
+    except (FileNotFoundError, ChangelogError) as exc:
+        return web.json_response({"success": False, "error": str(exc)}, status=404)
 
 
 @routes.get("/api/v1/management/system")

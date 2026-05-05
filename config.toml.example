@@ -28,6 +28,9 @@ context_recent_messages_limit = 20
 # zh: 单次 LLM 请求失败时最大静默重试次数（0=不重试，默认2）。失败的请求会回到原队列的第 2 个位置。
 # en: Max silent retries for a single failed LLM request (0=no retry, default 2). Failed requests are reinserted at position 2 of their original queue lane.
 ai_request_max_retries = 2
+# zh: 模型返回纯文本但未调用 send_message/end 等工具时的最大纠正重试次数（0=不重试，默认3）。
+# en: Max correction retries when the model returns plain text without tool calls (0=no retry, default 3).
+missing_tool_call_retries = 3
 
 # zh: 访问控制。mode 可选：off（不启用）/ blacklist（按黑名单）/ allowlist（按白名单）。
 # en: Access control. mode options: off (disabled) / blacklist / allowlist.
@@ -191,6 +194,8 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
+# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
+# en: Enable automatic prompt_cache_key generation (recommended).
 prompt_cache_enabled = true
 # zh: 是否对上游模型 API 启用流式请求。
 # en: Enable streaming requests to the upstream model API.
@@ -251,6 +256,8 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
+# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
+# en: Enable automatic prompt_cache_key generation (recommended).
 prompt_cache_enabled = true
 # zh: 是否对上游模型 API 启用流式请求。
 # en: Enable streaming requests to the upstream model API.
@@ -366,6 +373,8 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
+# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
+# en: Enable automatic prompt_cache_key generation (recommended).
 prompt_cache_enabled = true
 # zh: 是否对上游模型 API 启用流式请求。
 # en: Enable streaming requests to the upstream model API.
@@ -436,6 +445,8 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
+# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
+# en: Enable automatic prompt_cache_key generation (recommended).
 prompt_cache_enabled = true
 # zh: 是否对上游模型 API 启用流式请求。
 # en: Enable streaming requests to the upstream model API.
@@ -493,6 +504,8 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
+# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
+# en: Enable automatic prompt_cache_key generation (recommended).
 prompt_cache_enabled = true
 # zh: 是否对上游模型 API 启用流式请求。
 # en: Enable streaming requests to the upstream model API.
@@ -753,6 +766,40 @@ repeat_cooldown_minutes = 60
 # en: Enable inverted question mark (when repeat triggers on "?" messages, send "¿" instead).
 inverted_question_enabled = false
 
+# zh: 同 sender 短时多消息合并器。把同一用户在短时间内连续发送的多条消息合并到同一轮 AI 触发，避免重复回复 / 行为打架。
+# en: Same-sender short-window message batcher. Merges several messages a single user sends in quick succession into one AI turn to avoid duplicate replies / conflicting actions.
+[message_batcher]
+# zh: 是否启用合并器（关闭后所有消息按现行流程逐条触发 AI）。
+# en: Enable the batcher (when disabled all messages trigger the AI individually as before).
+enabled = true
+# zh: 等待窗口（秒）。期间同一用户发的新消息合并到同一批；<= 0 等同于关闭。
+# en: Wait window in seconds. New messages from the same sender within this window are merged; <= 0 disables the feature.
+window_seconds = 5.0
+# zh: 等待策略：extend（每来一条新消息重置 timer，"打字就继续等"）/ fixed（首条到达起定时，期间到达的消息只合并不重置）。
+# en: Wait strategy: extend (reset timer on each new message; keeps waiting while the user types) / fixed (timer fixed at the first message; new arrivals only merge but do not reset).
+strategy = "extend"
+# zh: extend 模式下的硬顶（秒），防止用户一直打字导致永远不发车；0 = 不限制（仅靠 window_seconds + max_messages_per_batch 触发发车）。
+# en: Hard cap in seconds for extend mode, prevents the timer from being reset forever; 0 = no limit (rely on window_seconds + max_messages_per_batch).
+max_window_seconds = 30.0
+# zh: 单批最多消息条数，超出立即发车；0 = 不限制。
+# en: Max messages per batch; exceeding triggers immediate dispatch. 0 = no limit.
+max_messages_per_batch = 0
+# zh: 是否在群聊启用合并。
+# en: Enable batching in group chats.
+group_enabled = true
+# zh: 是否在私聊启用合并。
+# en: Enable batching in private chats.
+private_enabled = true
+# zh: 收到斜杠命令时是否顺便把当前 buffer 一起发出（默认 false：命令独立执行，buffer 继续等到时间到再发）。
+# en: When a slash command arrives, also flush the current buffer to the AI (default false: commands are executed independently and the buffer keeps waiting).
+flush_on_command = false
+# zh: 投机预发送阈值（秒）。0 < pre_send_seconds < window_seconds 时启用：静默到该阈值就提前把当前 batch 发给 LLM 抢时间，但 batch 不结束；T1（window_seconds）才正式结束。0 或 >= window_seconds 视为关闭。
+# en: Speculative pre-fire threshold in seconds. Enabled when 0 < pre_send_seconds < window_seconds: once the user has been silent that long, the current batch is dispatched to the LLM early to save latency, while the batch itself only ends at window_seconds. 0 or >= window_seconds disables speculation.
+pre_send_seconds = 0.0
+# zh: 投机调用已经向用户发出过任何消息后，新消息到达是否仍然取消该 inflight 调用。默认 false（安全：不取消，新消息开新 batch），开启后可能造成重复发送。
+# en: Whether to cancel an in-flight speculative LLM call even when it has already sent at least one message to the user. Default false (safe: do not cancel; the new message starts a new batch). Enabling this may cause duplicate replies.
+allow_cancel_after_send = false
+
 # zh: 历史记录配置。
 # en: History settings.
 [history]
@@ -856,6 +903,22 @@ request_retries = 0
 # zh: 渲染浏览器最大同时开启数量。0 表示自动：Linux 默认 1，其它平台默认 2。
 # en: Max concurrent render browser pages. 0 = auto: Linux defaults to 1, other platforms default to 2.
 browser_max_concurrency = 0
+
+# zh: HTML 渲染结果缓存：基于 HTML 内容 hash 复用同一张图片，避免重复渲染。
+# en: HTML render result cache: reuse rendered images by content hash to skip re-rendering.
+[render.cache]
+# zh: 是否启用渲染缓存。设为 false 时所有渲染请求都会走 playwright 重新截图。
+# en: Whether to enable the render cache. When false, every request re-renders via playwright.
+enabled = true
+# zh: LRU 条目数上限（>=1）。超过时按 last_accessed_at 淘汰最久未用的条目。
+# en: Maximum LRU entries (>=1). Beyond this, the least-recently-used items are evicted.
+max_entries = 50
+# zh: 缓存总占用上限（MB，>=1）。超过时按 LRU 顺序持续淘汰，直到回到上限以内。
+# en: Maximum total cache size (MB, >=1). Evicts in LRU order until within budget.
+max_size_mb = 50
+# zh: 元数据落盘最小间隔（秒，>=0）。频繁访问期间合并写盘，避免热点 IO。
+# en: Minimum interval between metadata flushes (seconds, >=0). Coalesces hot-path writes.
+flush_interval_seconds = 2.0
 
 # zh: 第三方 API 基础地址（便于自定义镜像或私有网关）。
 # en: Third-party API base URLs (for mirrors or private gateways).

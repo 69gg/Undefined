@@ -36,7 +36,9 @@ from .models import (
     ImageGenConfig,
     ImageGenModelConfig,
     MemeConfig,
+    MessageBatcherConfig,
     NagaConfig,
+    RenderCacheConfig,
     RerankModelConfig,
     SecurityModelConfig,
     VisionModelConfig,
@@ -98,7 +100,9 @@ from .domain_parsers import (
     _parse_cognitive_config,
     _parse_easter_egg_call_mode,
     _parse_memes_config,
+    _parse_message_batcher_config,
     _parse_naga_config,
+    _parse_render_cache_config,
     _update_dataclass,
 )
 
@@ -223,6 +227,7 @@ class Config:
     inverted_question_enabled: bool
     context_recent_messages_limit: int
     ai_request_max_retries: int
+    missing_tool_call_retries: int
     nagaagent_mode_enabled: bool
     onebot_ws_url: str
     onebot_token: str
@@ -351,6 +356,10 @@ class Config:
     cognitive: CognitiveConfig
     # 表情包库
     memes: MemeConfig
+    # 同 sender 短时多消息合并器
+    message_batcher: MessageBatcherConfig
+    # HTML 渲染结果缓存
+    render_cache: RenderCacheConfig
     # Naga 集成
     naga: NagaConfig
     # 生图工具配置
@@ -551,6 +560,17 @@ class Config:
         )
         if ai_request_max_retries < 0:
             ai_request_max_retries = 0
+
+        missing_tool_call_retries = _coerce_int(
+            _get_value(
+                data,
+                ("core", "missing_tool_call_retries"),
+                "MISSING_TOOL_CALL_RETRIES",
+            ),
+            3,
+        )
+        if missing_tool_call_retries < 0:
+            missing_tool_call_retries = 0
 
         nagaagent_mode_enabled = _coerce_bool(
             _get_value(
@@ -1279,6 +1299,8 @@ class Config:
 
         cognitive = _parse_cognitive_config(data)
         memes = _parse_memes_config(data)
+        message_batcher = _parse_message_batcher_config(data)
+        render_cache = _parse_render_cache_config(data)
         naga = _parse_naga_config(data)
         models_image_gen = _parse_image_gen_model_config(data)
         models_image_edit = _parse_image_edit_model_config(data)
@@ -1328,6 +1350,7 @@ class Config:
             inverted_question_enabled=inverted_question_enabled,
             context_recent_messages_limit=context_recent_messages_limit,
             ai_request_max_retries=ai_request_max_retries,
+            missing_tool_call_retries=missing_tool_call_retries,
             nagaagent_mode_enabled=nagaagent_mode_enabled,
             onebot_ws_url=onebot_ws_url,
             onebot_token=onebot_token,
@@ -1447,6 +1470,8 @@ class Config:
             knowledge_rerank_top_k=knowledge_rerank_top_k,
             cognitive=cognitive,
             memes=memes,
+            message_batcher=message_batcher,
+            render_cache=render_cache,
             naga=naga,
             image_gen=image_gen,
             models_image_gen=models_image_gen,

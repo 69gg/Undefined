@@ -38,46 +38,10 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --group ci -p ${{ env.PYTHON_VERSION }}
 
-      - name: Validate release tag matches package version
+      - name: Validate release tag, build versions, and changelog
         env:
           TAG_NAME: ${{ github.ref_name }}
-        run: |
-          uv run python - <<'PY'
-          import os
-          import pathlib
-          import re
-          import sys
-          import tomllib
-
-          tag_name = os.environ["TAG_NAME"]
-          expected_version = tag_name.removeprefix("v")
-
-          pyproject = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
-          project_version = str(pyproject["project"]["version"]).strip()
-
-          init_text = pathlib.Path("src/Undefined/__init__.py").read_text(encoding="utf-8")
-          match = re.search(r'__version__\s*=\s*"([^"]+)"', init_text)
-          if match is None:
-              raise SystemExit("Could not find __version__ in src/Undefined/__init__.py")
-          init_version = match.group(1).strip()
-
-          errors: list[str] = []
-          if project_version != init_version:
-              errors.append(
-                  f"Version mismatch: pyproject.toml={project_version}, src/Undefined/__init__.py={init_version}"
-              )
-          if project_version != expected_version:
-              errors.append(
-                  f"Tag/version mismatch: tag={tag_name}, expected package version={expected_version}, actual={project_version}"
-              )
-
-          if errors:
-              raise SystemExit("\n".join(errors))
-
-          print(
-              f"Validated release version {project_version} from tag {tag_name}, pyproject.toml, and src/Undefined/__init__.py"
-          )
-          PY
+        run: uv run python scripts/release_notes.py validate --tag "$TAG_NAME"
 
       - name: Cache Ruff
         uses: actions/cache@v4
@@ -572,9 +536,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Fetch tags
-        run: git fetch --tags --force
-
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -583,39 +544,7 @@ jobs:
 
       - name: Build release notes
         shell: bash
-        run: |
-          TAG_NAME="${{ github.ref_name }}"
-          TAG_TYPE=$(git cat-file -t "$TAG_NAME")
-          TAG_CONTENT=""
-          if [ "$TAG_TYPE" = "tag" ]; then
-            TAG_CONTENT=$(git tag -l --format='%(contents)' "$TAG_NAME")
-            TAG_CONTENT=$(echo "$TAG_CONTENT" | sed '/-----BEGIN PGP SIGNATURE-----/,/-----END PGP SIGNATURE-----/d')
-          fi
-          PREV_TAG=$(git describe --tags --abbrev=0 "${TAG_NAME}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)
-          if [ -n "$TAG_CONTENT" ]; then
-            echo "$TAG_CONTENT" > tag_message.txt
-            printf '\n---\n\n' >> tag_message.txt
-          else
-            : > tag_message.txt
-          fi
-          cat >> tag_message.txt <<'NOTES'
-          ## 📝 Detailed Changes
-          NOTES
-          FEAT_COMMITS=$(git log ${PREV_TAG}..${TAG_NAME} --grep='^feat' --pretty=format:'* %s (%h)' 2>/dev/null || true)
-          if [ -n "$FEAT_COMMITS" ]; then
-            echo -e "\n### 🚀 Features" >> tag_message.txt
-            echo "$FEAT_COMMITS" >> tag_message.txt
-          fi
-          FIX_COMMITS=$(git log ${PREV_TAG}..${TAG_NAME} --grep='^fix' --pretty=format:'* %s (%h)' 2>/dev/null || true)
-          if [ -n "$FIX_COMMITS" ]; then
-            echo -e "\n### 🐛 Bug Fixes" >> tag_message.txt
-            echo "$FIX_COMMITS" >> tag_message.txt
-          fi
-          OTHER_COMMITS=$(git log ${PREV_TAG}..${TAG_NAME} --grep='^feat\|^fix' --invert-grep --pretty=format:'* %s (%h)' 2>/dev/null || true)
-          if [ -n "$OTHER_COMMITS" ]; then
-            echo -e "\n### 🛠 Maintenance & Others" >> tag_message.txt
-            echo "$OTHER_COMMITS" >> tag_message.txt
-          fi
+        run: python3 scripts/release_notes.py notes --tag "${{ github.ref_name }}" --output release_notes.md
 
       - name: Create GitHub release
         env:
@@ -623,7 +552,7 @@ jobs:
         run: |
           gh release create ${{ github.ref_name }} release-downloads/* \
             --title "Undefined ${{ github.ref_name }}" \
-            --notes-file tag_message.txt
+            --notes-file release_notes.md
 
   publish-pypi:
     name: Publish Python package to PyPI

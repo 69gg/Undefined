@@ -64,6 +64,28 @@ _CONTENT_TAG_PATTERN = re.compile(
     r"<content>(.*?)</content>", re.DOTALL | re.IGNORECASE
 )
 
+_INVALID_TOOL_CALL_CONTENT = (
+    "无效工具调用：工具名称为空或格式非法，系统已跳过执行。"
+    "请使用可用工具名重新调用，或调用 end 结束本轮。"
+)
+
+
+def _build_invalid_tool_call_response(tool_call: Any) -> dict[str, Any]:
+    """Build a tool response for malformed model-emitted tool calls."""
+    call_id = ""
+    tool_name = ""
+    if isinstance(tool_call, dict):
+        call_id = str(tool_call.get("id", "") or "")
+        function = tool_call.get("function")
+        if isinstance(function, dict):
+            tool_name = str(function.get("name", "") or "").strip()
+    return {
+        "role": "tool",
+        "tool_call_id": call_id,
+        "name": tool_name,
+        "content": _INVALID_TOOL_CALL_CONTENT,
+    }
+
 
 class SendMessageCallback(Protocol):
     def __call__(
@@ -555,7 +577,8 @@ class AIClient:
         self._intro_config = config
         if self._queue_manager is None:
             return
-        asyncio.create_task(self._refresh_intro_generator(config))
+        task = asyncio.create_task(self._refresh_intro_generator(config))
+        task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
     async def _refresh_intro_generator(self, config: AgentIntroGenConfig) -> None:
         if not config.enabled:
@@ -1104,9 +1127,16 @@ class AIClient:
         transport_state: dict[str, Any] | None = None
         queue_lane = self._resolve_queue_lane(tool_context.get("queue_lane"))
         pre_tool_failure_count = 0
+        missing_tool_call_count = 0
+        last_missing_tool_call_content = ""
+        runtime_config = self._get_runtime_config()
         max_pre_tool_retries = max(
             0,
-            int(getattr(self._get_runtime_config(), "ai_request_max_retries", 0) or 0),
+            int(getattr(runtime_config, "ai_request_max_retries", 0) or 0),
+        )
+        max_missing_tool_call_retries = max(
+            0,
+            int(getattr(runtime_config, "missing_tool_call_retries", 3) or 0),
         )
 
         while iteration < max_iterations:
@@ -1205,17 +1235,65 @@ class AIClient:
                     content = ""
 
                 if not tool_calls:
-                    logger.info(
-                        "[AI回复] 会话结束，返回最终内容: length=%s",
+                    if conversation_ended:
+                        logger.info(
+                            "[AI回复] 会话结束，返回最终内容: length=%s",
+                            len(content),
+                        )
+                        return content
+
+                    if content.strip():
+                        last_missing_tool_call_content = content.strip()
+                    missing_tool_call_count += 1
+                    if missing_tool_call_count > max_missing_tool_call_retries:
+                        logger.warning(
+                            "[AI回复] 模型连续未调用工具，停止重试: iteration=%s retries=%s/%s content_len=%s",
+                            iteration,
+                            missing_tool_call_count - 1,
+                            max_missing_tool_call_retries,
+                            len(content),
+                        )
+                        fallback_content = last_missing_tool_call_content
+                        if fallback_content and send_message_callback is not None:
+                            try:
+                                await send_message_callback(fallback_content)
+                                tool_context["message_sent_this_turn"] = True
+                                current_ctx = RequestContext.current()
+                                if current_ctx is not None:
+                                    current_ctx.set_resource(
+                                        "message_sent_this_turn", True
+                                    )
+                                return ""
+                            except Exception:
+                                logger.exception("[AI回复] fallback 发送失败")
+                        return fallback_content
+
+                    logger.warning(
+                        "[AI回复] 模型返回文本但未调用工具（iteration=%s retry=%s/%s content_len=%s），要求重试",
+                        iteration,
+                        missing_tool_call_count,
+                        max_missing_tool_call_retries,
                         len(content),
                     )
-                    return content
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "注意：你不能直接返回纯文本作为最终回复。"
+                                "请调用 send_message 工具来发送你的回复消息，"
+                                "然后调用 end 工具结束对话。"
+                            ),
+                        }
+                    )
+                    continue
 
                 assistant_message: dict[str, Any] = {
                     "role": "assistant",
                     "content": content,
                     "tool_calls": tool_calls,
                 }
+                missing_tool_call_count = 0
+                last_missing_tool_call_content = ""
                 phase = message.get("phase")
                 if phase is not None:
                     assistant_message["phase"] = phase
@@ -1234,13 +1312,31 @@ class AIClient:
                 end_tool_args: dict[str, Any] = {}
 
                 for tool_call in tool_calls:
-                    call_id = tool_call.get("id", "")
-                    function = tool_call.get("function", {})
-                    api_function_name = function.get("name", "")
+                    call_id = ""
+                    if isinstance(tool_call, dict):
+                        call_id = str(tool_call.get("id", "") or "")
+                        function = tool_call.get("function")
+                    else:
+                        function = None
+                    if not isinstance(function, dict):
+                        logger.warning(
+                            "[工具调用] 跳过无效工具调用: missing_function ID=%s",
+                            call_id,
+                        )
+                        messages.append(_build_invalid_tool_call_response(tool_call))
+                        continue
+                    api_function_name = str(function.get("name", "") or "").strip()
+                    if not api_function_name:
+                        logger.warning(
+                            "[工具调用] 跳过无效工具调用: empty_name ID=%s",
+                            call_id,
+                        )
+                        messages.append(_build_invalid_tool_call_response(tool_call))
+                        continue
                     raw_args = function.get("arguments")
 
                     internal_function_name = api_to_internal.get(
-                        str(api_function_name), str(api_function_name)
+                        api_function_name, api_function_name
                     )
 
                     if internal_function_name != api_function_name:
@@ -1341,10 +1437,13 @@ class AIClient:
                         if internal_fname == "get_forward_msg" and not isinstance(
                             tool_result, Exception
                         ):
-                            asyncio.create_task(
+                            task = asyncio.create_task(
                                 self._save_forward_to_history(
                                     content_str, pre_context, history_manager
                                 )
+                            )
+                            task.add_done_callback(
+                                lambda t: t.exception() if not t.cancelled() else None
                             )
 
                         if tool_context.get("conversation_ended"):

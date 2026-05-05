@@ -59,3 +59,25 @@ uv run python scripts/reembed_cognitive.py -v
 - 运行期间不要同时启动机器人，避免 ChromaDB 写入冲突
 - 大量记录时注意 API 限速，可通过 `--batch-size` 降低并发
 - 建议先用 `--dry-run` 确认记录数量和配置正确性
+
+### release_notes.py — 发布版本校验与 Release notes 生成
+
+Release workflow 使用这个脚本在构建前校验版本一致性，并在发布阶段从 `CHANGELOG.md` 最新版本条目生成 GitHub Release 说明。
+
+```bash
+# 校验 tag、构建版本和 CHANGELOG 最新版本一致
+uv run python scripts/release_notes.py validate --tag v3.4.0
+
+# 从 CHANGELOG 最新条目生成 Release notes
+python3 scripts/release_notes.py notes --tag v3.4.0 --output release_notes.md
+```
+
+**校验范围**：
+
+- `pyproject.toml`
+- `src/Undefined/__init__.py`
+- `apps/undefined-console/package.json`
+- `apps/undefined-console/package-lock.json`
+- `apps/undefined-console/src-tauri/Cargo.toml`
+- `apps/undefined-console/src-tauri/tauri.conf.json`
+- `CHANGELOG.md` 最新版本条目

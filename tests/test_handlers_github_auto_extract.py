@@ -8,7 +8,7 @@ import pytest
 
 import Undefined.handlers as handlers_module
 from Undefined.handlers import MessageHandler
-from Undefined.skills.auto_pipeline import AutoPipelineRegistry
+from Undefined.skills.pipelines import PipelineRegistry
 
 
 @pytest.mark.asyncio
@@ -51,8 +51,8 @@ async def test_private_message_runs_github_auto_extract_before_ai_reply(
     handler._background_tasks = set()
     handler._extract_github_repo_ids = MagicMock(return_value=["69gg/Undefined"])
     handler._handle_github_extract = AsyncMock()
-    handler.auto_pipeline_registry = AutoPipelineRegistry()
-    handler.auto_pipeline_registry.load_items()
+    handler.pipeline_registry = PipelineRegistry()
+    handler.pipeline_registry.load_items()
     handler._spawn_background_task = MagicMock()
 
     event = {

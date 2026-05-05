@@ -20,3 +20,5 @@ class RuntimeAPIContext:
     cognitive_job_queue: Any = None
     meme_service: Any = None
     naga_store: Any = None
+    message_batcher: Any = None
+    pipeline_registry: Any = None

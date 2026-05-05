@@ -6,6 +6,6 @@ Skills Package
 
 from Undefined.skills.tools import ToolRegistry
 from Undefined.skills.agents import AgentRegistry
-from Undefined.skills.auto_pipeline import AutoPipelineRegistry
+from Undefined.skills.pipelines import PipelineRegistry
 
-__all__ = ["ToolRegistry", "AgentRegistry", "AutoPipelineRegistry"]
+__all__ = ["ToolRegistry", "AgentRegistry", "PipelineRegistry"]

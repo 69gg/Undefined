@@ -56,14 +56,14 @@ def test_split_command_args_keeps_at_name_with_spaces() -> None:
 
 def test_parse_command_strips_leading_bot_at() -> None:
     d = _dispatcher()
-    cmd = d.parse_command("[@123456(Bot)] /addadmin 7777777")
-    assert cmd == {"name": "addadmin", "args": ["7777777"]}
+    cmd = d.parse_command("[@123456(Bot)] /admin add 7777777")
+    assert cmd == {"name": "admin", "args": ["add", "7777777"]}
 
 
 def test_parse_command_keeps_inline_at_normalized() -> None:
     d = _dispatcher()
-    cmd = d.parse_command("[@123456(Bot)] /addadmin [@1708213363(Null)]")
-    assert cmd == {"name": "addadmin", "args": ["1708213363"]}
+    cmd = d.parse_command("[@123456(Bot)] /admin add [@1708213363(Null)]")
+    assert cmd == {"name": "admin", "args": ["add", "1708213363"]}
 
 
 def test_parse_command_keeps_inline_at_with_space_name_normalized() -> None:

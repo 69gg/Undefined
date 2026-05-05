@@ -74,6 +74,7 @@ _RUNTIME_AI_MODEL_CONFIG_PREFIXES: tuple[str, ...] = (
     "summary_model",
     "historian_model",
     "grok_model",
+    "missing_tool_call_retries",
 )
 
 _AGENT_INTRO_KEYS: set[str] = {
@@ -97,6 +98,18 @@ _CONFIG_HOT_RELOAD_KEYS: set[str] = {
 _SEARCH_KEYS: set[str] = {"searxng_url"}
 
 _ATTACHMENT_KEYS: set[str] = {"attachment_remote_download_max_size_mb"}
+
+_MESSAGE_BATCHER_KEYS: set[str] = {
+    "message_batcher",
+    "message_batcher.enabled",
+    "message_batcher.window_seconds",
+    "message_batcher.strategy",
+    "message_batcher.max_window_seconds",
+    "message_batcher.max_messages_per_batch",
+    "message_batcher.group_enabled",
+    "message_batcher.private_enabled",
+    "message_batcher.flush_on_command",
+}
 
 
 @dataclass
@@ -142,6 +155,14 @@ def apply_config_updates(
 
     if _needs_attachment_update(changed_keys):
         context.ai_client.apply_attachment_config(updated)
+
+    if _needs_message_batcher_update(changed_keys):
+        handler = context.message_handler
+        if (
+            handler is not None
+            and getattr(handler, "message_batcher", None) is not None
+        ):
+            handler.message_batcher.update_config(updated.message_batcher)
 
     if _needs_core_ai_model_update(changed_keys):
         context.ai_client.apply_model_configs(
@@ -200,6 +221,13 @@ def _needs_search_update(changed_keys: set[str]) -> bool:
 
 def _needs_attachment_update(changed_keys: set[str]) -> bool:
     return bool(changed_keys & _ATTACHMENT_KEYS)
+
+
+def _needs_message_batcher_update(changed_keys: set[str]) -> bool:
+    return any(
+        key == "message_batcher" or key.startswith("message_batcher.")
+        for key in changed_keys
+    )
 
 
 def _matches_prefixes(changed_keys: set[str], prefixes: tuple[str, ...]) -> bool:

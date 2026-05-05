@@ -287,9 +287,10 @@ def _registry_summary(registry: Any) -> dict[str, Any]:
     summary_items: list[dict[str, Any]] = []
     for name, item in items.items():
         st = stats.get(name)
+        loaded = getattr(item, "loaded", True)
         entry: dict[str, Any] = {
             "name": name,
-            "loaded": getattr(item, "loaded", False),
+            "loaded": bool(loaded),
         }
         if st is not None:
             entry["calls"] = getattr(st, "count", 0)
@@ -298,7 +299,7 @@ def _registry_summary(registry: Any) -> dict[str, Any]:
         summary_items.append(entry)
     return {
         "count": len(items),
-        "loaded": sum(1 for i in items.values() if getattr(i, "loaded", False)),
+        "loaded": sum(1 for item in items.values() if getattr(item, "loaded", True)),
         "items": summary_items,
     }
 

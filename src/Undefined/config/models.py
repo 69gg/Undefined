@@ -350,6 +350,46 @@ class MemeConfig:
 
 
 @dataclass
+class MessageBatcherConfig:
+    """同 sender 短时多消息合并器配置。
+
+    将同一 sender 在 ``window_seconds`` 内连续发送的消息合并到同一轮 AI 触发，
+    避免重复回复 / 行为打架。详见 ``services/message_batcher.py``。
+    """
+
+    enabled: bool = True
+    window_seconds: float = 5.0
+    strategy: str = "extend"  # extend | fixed
+    max_window_seconds: float = 30.0
+    max_messages_per_batch: int = 0  # 0 = 不限制
+    group_enabled: bool = True
+    private_enabled: bool = True
+    flush_on_command: bool = False
+    # 投机预发送：在 window_seconds 静默达到 pre_send_seconds（< window_seconds）时，
+    # 提前把当前批次发给 LLM 抢时间；若 LLM 出结果前又来新消息，则取消该投机调用并重新计时。
+    # 设为 0 或 >= window_seconds 时关闭投机模式（行为退化为旧版：仅 window_seconds 触发）。
+    pre_send_seconds: float = 0.0
+    # 投机调用已发出过消息后再来新消息时是否仍取消该调用：
+    # false（默认安全）— LLM 已经发出消息就不再取消，新消息开新 batch；
+    # true  — 仍取消（可能导致重复发送，仅在极端场景启用）。
+    allow_cancel_after_send: bool = False
+
+
+@dataclass
+class RenderCacheConfig:
+    """HTML 渲染结果缓存配置。
+
+    缓存单例由 :func:`Undefined.utils.render_cache.get_render_cache` 加载，
+    在程序退出时通过 :func:`close_render_cache` 强制刷盘。
+    """
+
+    enabled: bool = True
+    max_entries: int = 50
+    max_size_mb: int = 50
+    flush_interval_seconds: float = 2.0
+
+
+@dataclass
 class APIConfig:
     """主进程 OpenAPI/Runtime API 配置"""
 

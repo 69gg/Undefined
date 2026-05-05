@@ -67,7 +67,8 @@ def _record_image_gen_usage(
             call_type="image_gen",
             success=success,
         )
-        asyncio.create_task(storage.record(usage))
+        task = asyncio.create_task(storage.record(usage))
+        task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
     except Exception:
         pass
 

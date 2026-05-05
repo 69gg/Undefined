@@ -20,7 +20,7 @@ src/Undefined/
 │   ├── toolsets/        # 聚合工具集 (分组后的工具组)
 │   │   └── cognitive/   # 认知记忆主动暴露工具 (search_events, get_profile 等)
 │   ├── agents/          # 智能体 (独立自主的子 AI，负责处理诸如 Web 搜索、文件分析的具体长时任务)
-│   ├── commands/        # 中心化斜杠指令系统 (实现如 /help, /stats, /addadmin 等平台功能)
+│   ├── commands/        # 中心化斜杠指令系统 (实现如 /help, /stats, /admin 等平台功能)
 │   └── anthropic_skills/# Anthropic 协议集成的外部 Skills (兼容 SKILL.md 格式)
 ├── config/        # 配置系统 (loader.py TOML 解析, models.py 数据模型, hot_reload.py 热更新)
 ├── api/           # Management API + Runtime API
@@ -46,7 +46,8 @@ src/Undefined/
 
 - 仓库根目录的 `CHANGELOG.md` 是正式版本历史的唯一事实来源。
 - `src/Undefined/changelog.py` 负责解析和校验这份文档，供 `/changelog` 命令和 `changelog_query` tool 共用。
-- 新增或调整版本条目时，不要只改 tag 注释；应同步维护 `CHANGELOG.md`，确保运行时查询和仓库文档一致。
+- 新增或调整版本条目时，不要只改 tag 注释；应同步维护 `CHANGELOG.md`，确保运行时查询、仓库文档和 GitHub Release 说明一致。
+- 发布流水线会校验构建版本、tag 版本和 `CHANGELOG.md` 最新版本一致，并从最新 changelog 条目生成 Release notes。
 
 ### callable.json 共享授权机制
 

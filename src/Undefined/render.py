@@ -2,14 +2,17 @@
 
 import asyncio
 import logging
-import markdown
 import sys
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from playwright.async_api import async_playwright, Browser, Page, Playwright
+
+import markdown
 
 from typing import Any, TypeVar
 
 from Undefined.config import get_config
+from Undefined.utils.render_cache import compute_render_cache_key, get_render_cache
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +60,14 @@ _render_active_count = 0
 # 默认并发限制：Linux 默认 1，其它平台默认 2
 _DEFAULT_MAX_CONCURRENT = 1 if sys.platform == "linux" else 2
 _RenderResult = TypeVar("_RenderResult")
+
+
+def _safe_file_size(path: Path) -> int:
+    """同步取文件大小（在 ``asyncio.to_thread`` 中调用）；不存在/不可读时返回 0。"""
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
 
 
 def _resolve_render_browser_max_concurrency() -> int:
@@ -209,15 +220,17 @@ async def render_html_to_image(
         timeout_ms: 截图超时时间（毫秒），默认 60000
         proxy: 可选浏览器代理地址
     """
+    cache = await get_render_cache()
+    cache_key = compute_render_cache_key(
+        html_content, viewport_width, screenshot_selector, proxy
+    )
+
+    if await cache.copy_to(cache_key, output_path):
+        return
 
     async def _capture(page: Page) -> None:
-        # 等待网络空闲（确保 CDN 上的 MathJax/Mermaid 脚本加载完）
         await page.wait_for_load_state("networkidle", timeout=timeout_ms)
-
-        # 给 Mermaid 一点时间执行 JS 绘图
         await asyncio.sleep(1)
-
-        # 截图（带超时保护）
         if screenshot_selector:
             await page.locator(screenshot_selector).first.screenshot(
                 path=output_path,
@@ -237,6 +250,10 @@ async def render_html_to_image(
         timeout_ms=timeout_ms,
         proxy=proxy,
     )
+
+    output_size = await asyncio.to_thread(_safe_file_size, Path(output_path))
+    if output_size > 0:
+        await cache.put(cache_key, output_path, output_size)
 
 
 async def render_html_with_page(

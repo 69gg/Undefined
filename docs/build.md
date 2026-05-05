@@ -278,22 +278,11 @@ npm install
 
 工作流主要阶段：
 
-1. `verify-python`
-   - `ruff`
-   - `mypy`
-   - `pytest`
-   - `uv build`
-2. `build-tauri-desktop`
-   - Linux：`.AppImage` + `.deb`
-   - Windows：`.exe` + `.msi`
-   - macOS x64：`.dmg`
-   - macOS arm64：`.dmg`
-3. `build-tauri-android`
-   - Android 通用 `.apk`
-4. `publish-release`
-   - 汇总所有产物并上传 GitHub Release
-5. `publish-pypi`
-   - 发布 Python 包到 PyPI
+1. `verify-python`：校验 tag、构建版本和 `CHANGELOG.md` 最新版本一致，并执行 `ruff`、`mypy`、`pytest`、`uv build`。
+2. `build-tauri-desktop`：构建 Linux `.AppImage` / `.deb`、Windows `.exe` / `.msi`、macOS x64 `.dmg` 和 macOS arm64 `.dmg`。
+3. `build-tauri-android`：构建 Android 通用 `.apk`。
+4. `publish-release`：汇总所有产物并上传 GitHub Release；Release notes 从 `CHANGELOG.md` 最新版本条目生成，不读取 tag 注释。
+5. `publish-pypi`：发布 Python 包到 PyPI。
 
 ## 8. Release 产物矩阵
 

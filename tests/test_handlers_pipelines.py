@@ -9,12 +9,12 @@ import pytest
 
 import Undefined.handlers as handlers_module
 from Undefined.handlers import MessageHandler
-from Undefined.skills.auto_pipeline import AutoPipelineRegistry
+from Undefined.skills.pipelines import PipelineRegistry
 
 
 @pytest.mark.asyncio
-async def test_message_handler_initializes_auto_pipeline_async() -> None:
-    class _FakeAutoPipelineRegistry:
+async def test_message_handler_initializes_pipelines_async() -> None:
+    class _FakePipelineRegistry:
         def __init__(self) -> None:
             self.load_count = 0
             self.started: list[tuple[float, float]] = []
@@ -26,30 +26,30 @@ async def test_message_handler_initializes_auto_pipeline_async() -> None:
         def start_hot_reload(self, *, interval: float, debounce: float) -> None:
             self.started.append((interval, debounce))
 
-    registry = _FakeAutoPipelineRegistry()
+    registry = _FakePipelineRegistry()
     handler: Any = MessageHandler.__new__(MessageHandler)
     handler.config = SimpleNamespace(
         skills_hot_reload=True,
         skills_hot_reload_interval=3.0,
         skills_hot_reload_debounce=0.75,
     )
-    handler.auto_pipeline_registry = registry
-    handler._auto_pipeline_initialized = False
+    handler.pipeline_registry = registry
+    handler._pipelines_initialized = False
 
     await asyncio.gather(
-        handler.initialize_auto_pipeline(),
-        handler.initialize_auto_pipeline(),
+        handler.init_pipelines(),
+        handler.init_pipelines(),
     )
-    await handler.initialize_auto_pipeline()
+    await handler.init_pipelines()
 
     assert registry.load_count == 1
     assert registry.started == [(3.0, 0.75)]
-    assert handler._auto_pipeline_initialized is True
+    assert handler._pipelines_initialized is True
 
 
 @pytest.mark.asyncio
-async def test_auto_extract_pipeline_initializes_when_flag_missing() -> None:
-    class _FakeAutoPipelineRegistry:
+async def test_pipelines_initializes_when_flag_missing() -> None:
+    class _FakePipelineRegistry:
         def __init__(self) -> None:
             self.loaded = False
             self.run_context: dict[str, Any] | None = None
@@ -61,12 +61,12 @@ async def test_auto_extract_pipeline_initializes_when_flag_missing() -> None:
             self.run_context = context
             return [object()] if self.loaded else []
 
-    registry = _FakeAutoPipelineRegistry()
+    registry = _FakePipelineRegistry()
     handler: Any = MessageHandler.__new__(MessageHandler)
     handler.config = SimpleNamespace(skills_hot_reload=False)
     handler.sender = SimpleNamespace()
     handler.onebot = SimpleNamespace()
-    handler.auto_pipeline_registry = registry
+    handler.pipeline_registry = registry
     handler._extract_bilibili_ids = AsyncMock(return_value=[])
     handler._extract_arxiv_ids = MagicMock(return_value=[])
     handler._extract_github_repo_ids = MagicMock(return_value=[])
@@ -74,7 +74,7 @@ async def test_auto_extract_pipeline_initializes_when_flag_missing() -> None:
     handler._handle_arxiv_extract = AsyncMock()
     handler._handle_github_extract = AsyncMock()
 
-    handled = await handler._run_auto_extract_pipeline(
+    handled = await handler._run_pipelines(
         target_id=20001,
         target_type="private",
         text="hello",
@@ -84,11 +84,11 @@ async def test_auto_extract_pipeline_initializes_when_flag_missing() -> None:
     assert handled is True
     assert registry.loaded is True
     assert registry.run_context is not None
-    assert handler._auto_pipeline_initialized is True
+    assert handler._pipelines_initialized is True
 
 
 @pytest.mark.asyncio
-async def test_auto_extract_pipeline_processes_all_matches() -> None:
+async def test_pipelines_processes_all_matches() -> None:
     handler: Any = MessageHandler.__new__(MessageHandler)
     handler.sender = SimpleNamespace()
     handler.onebot = SimpleNamespace()
@@ -106,10 +106,10 @@ async def test_auto_extract_pipeline_processes_all_matches() -> None:
     handler._handle_bilibili_extract = AsyncMock()
     handler._handle_arxiv_extract = AsyncMock()
     handler._handle_github_extract = AsyncMock()
-    handler.auto_pipeline_registry = AutoPipelineRegistry()
-    handler.auto_pipeline_registry.load_items()
+    handler.pipeline_registry = PipelineRegistry()
+    handler.pipeline_registry.load_items()
 
-    handled = await handler._run_auto_extract_pipeline(
+    handled = await handler._run_pipelines(
         target_id=20001,
         target_type="private",
         text="BV1xx411c7mD 69gg/Undefined",
@@ -135,7 +135,7 @@ async def test_auto_extract_pipeline_processes_all_matches() -> None:
 
 
 @pytest.mark.asyncio
-async def test_private_command_skips_auto_pipeline_and_ai(
+async def test_private_command_skips_pipelines_and_ai(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -169,7 +169,7 @@ async def test_private_command_skips_auto_pipeline_and_ai(
         parse_command=MagicMock(return_value=command),
         dispatch_private=AsyncMock(),
     )
-    handler.auto_pipeline_registry = SimpleNamespace(
+    handler.pipeline_registry = SimpleNamespace(
         run=AsyncMock(return_value=[]),
     )
     handler._background_tasks = set()
@@ -195,7 +195,7 @@ async def test_private_command_skips_auto_pipeline_and_ai(
     assert handler.history_manager.add_private_message.await_args is not None
     private_history = handler.history_manager.add_private_message.await_args.kwargs
     assert private_history["text_content"] == "/help"
-    handler.auto_pipeline_registry.run.assert_not_awaited()
+    handler.pipeline_registry.run.assert_not_awaited()
     handler.ai_coordinator.model_pool.handle_private_message.assert_not_awaited()
     handler.ai_coordinator.handle_private_reply.assert_not_awaited()
 
@@ -233,7 +233,7 @@ async def test_private_model_pool_command_runs_before_command_dispatch(
         parse_command=MagicMock(return_value=command),
         dispatch_private=AsyncMock(),
     )
-    handler.auto_pipeline_registry = SimpleNamespace(run=AsyncMock(return_value=[]))
+    handler.pipeline_registry = SimpleNamespace(run=AsyncMock(return_value=[]))
     handler._background_tasks = set()
     handler._profile_name_refresh_cache = {}
     handler._collect_message_attachments = AsyncMock(return_value=[])
@@ -263,7 +263,7 @@ async def test_private_model_pool_command_runs_before_command_dispatch(
     )
     handler.command_dispatcher.parse_command.assert_not_called()
     handler.command_dispatcher.dispatch_private.assert_not_awaited()
-    handler.auto_pipeline_registry.run.assert_not_awaited()
+    handler.pipeline_registry.run.assert_not_awaited()
     handler.ai_coordinator.handle_private_reply.assert_not_awaited()
 
 
@@ -300,8 +300,8 @@ async def test_private_message_starting_with_select_does_not_touch_model_pool(
         parse_command=MagicMock(return_value=None),
         dispatch_private=AsyncMock(),
     )
-    handler.auto_pipeline_registry = SimpleNamespace(run=AsyncMock(return_value=[]))
-    handler._auto_pipeline_initialized = True
+    handler.pipeline_registry = SimpleNamespace(run=AsyncMock(return_value=[]))
+    handler._pipelines_initialized = True
     handler._background_tasks = set()
     handler._profile_name_refresh_cache = {}
     handler._collect_message_attachments = AsyncMock(return_value=[])
@@ -326,7 +326,7 @@ async def test_private_message_starting_with_select_does_not_touch_model_pool(
     await handler.handle_message(event)
 
     handler.ai_coordinator.model_pool.handle_private_message.assert_not_awaited()
-    handler.auto_pipeline_registry.run.assert_awaited_once()
+    handler.pipeline_registry.run.assert_awaited_once()
     handler.ai_coordinator.handle_private_reply.assert_awaited_once()
 
 
@@ -364,8 +364,8 @@ async def test_private_model_pool_command_ignored_when_pool_disabled(
         parse_command=MagicMock(return_value=None),
         dispatch_private=AsyncMock(),
     )
-    handler.auto_pipeline_registry = SimpleNamespace(run=AsyncMock(return_value=[]))
-    handler._auto_pipeline_initialized = True
+    handler.pipeline_registry = SimpleNamespace(run=AsyncMock(return_value=[]))
+    handler._pipelines_initialized = True
     handler._background_tasks = set()
     handler._profile_name_refresh_cache = {}
     handler._collect_message_attachments = AsyncMock(return_value=[])
@@ -391,12 +391,12 @@ async def test_private_model_pool_command_ignored_when_pool_disabled(
 
     handler.ai_coordinator.model_pool.handle_private_message.assert_not_awaited()
     handler.command_dispatcher.parse_command.assert_called_once_with("/compare hello")
-    handler.auto_pipeline_registry.run.assert_awaited_once()
+    handler.pipeline_registry.run.assert_awaited_once()
     handler.ai_coordinator.handle_private_reply.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_group_command_skips_auto_pipeline_and_ai(
+async def test_group_command_skips_pipelines_and_ai(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -429,7 +429,7 @@ async def test_group_command_skips_auto_pipeline_and_ai(
         parse_command=MagicMock(return_value=command),
         dispatch=AsyncMock(),
     )
-    handler.auto_pipeline_registry = SimpleNamespace(
+    handler.pipeline_registry = SimpleNamespace(
         run=AsyncMock(return_value=[]),
     )
     handler._schedule_profile_display_name_refresh = MagicMock()
@@ -463,5 +463,5 @@ async def test_group_command_skips_auto_pipeline_and_ai(
     assert handler.history_manager.add_group_message.await_args is not None
     group_history = handler.history_manager.add_group_message.await_args.kwargs
     assert group_history["text_content"] == "/help"
-    handler.auto_pipeline_registry.run.assert_not_awaited()
+    handler.pipeline_registry.run.assert_not_awaited()
     handler.ai_coordinator.handle_auto_reply.assert_not_awaited()
