@@ -23,7 +23,3 @@
 - 普通用户可以查看全部反馈的公开内容，但只显示反馈 ID 和内容，不显示提交者 QQ、群号、私聊用户 ID、创建时间等元数据。
 - 超级管理员查看列表或详情时会显示完整审计信息，包括 ID、时间、来源类型、提交者 QQ、群号或私聊用户 ID。
 - 反馈 ID 可公开展示；ID 格式为 `YYYYMMDD-N`，同一天从 1 递增，不限制 999。
-
-## 存储位置
-
-反馈记录保存到 `data/feedback/feedback.json`。记录字段包括 `id`、`content`、`scope`、`group_id`、`user_id`、`sender_id`、`created_at`。
