@@ -831,6 +831,21 @@ group_analysis_limit = 500
 # zh: 远程附件自动下载并缓存的最大大小（MB）。超过上限或设为 0 时只保留 URL 引用，不下载文件内容。
 # en: Max remote attachment size (MB) to download into cache. Above the limit, or 0, keeps only a URL reference.
 remote_download_max_size_mb = 25
+# zh: 附件缓存文件总大小上限（MB）。0 表示不按总容量清理；达到上限时优先删除最旧的本地缓存副本，若记录有 URL 则保留 UID 与 URL 以便后续回源。
+# en: Total attachment cache file size limit (MB). 0 disables total-size pruning; when exceeded, oldest local cache copies are removed while URL-backed UIDs keep their URL for later re-download.
+cache_max_total_size_mb = 0
+# zh: 附件登记记录最大数量。0 表示不限制数量。
+# en: Max attachment registry records. 0 disables record-count pruning.
+cache_max_records = 2000
+# zh: 附件本地缓存最长保留天数。0 表示不按时间清理；有 URL 的记录只删除本地副本并保留 UID/URL，无 URL 的老记录会被删除。
+# en: Max local attachment cache age in days. 0 disables age-based pruning; URL-backed records keep UID/URL while their local copy is removed, records without URL are deleted.
+cache_max_age_days = 7
+# zh: 仅 URL 引用的附件记录最大数量。0 表示不限制。
+# en: Max URL-only attachment reference records. 0 disables URL-reference-count pruning.
+url_reference_max_records = 2000
+# zh: 允许登记的远程附件 URL 最大长度。0 表示不限制长度。
+# en: Max remote attachment URL length. 0 disables URL length checks.
+url_max_length = 8192
 
 # zh: Skills 热重载配置（可选）。
 # en: Skills hot reload settings (optional).

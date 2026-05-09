@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -348,6 +350,178 @@ async def test_remote_attachment_under_limit_is_cached(tmp_path: Path) -> None:
     assert record.local_path is not None
     assert Path(record.local_path).read_bytes() == payload
     assert record.source_kind == "remote_file"
+    assert record.source_ref == "https://example.com/small.txt"
+
+
+@pytest.mark.asyncio
+async def test_attachment_cache_total_limit_prunes_local_copy_keeps_url(
+    tmp_path: Path,
+) -> None:
+    async def _handler(request: httpx.Request) -> httpx.Response:
+        name = request.url.path.rsplit("/", 1)[-1]
+        size = 40 if name.startswith("first") else 8
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/plain"},
+            content=name.encode("utf-8")[:1] * size,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as client:
+        registry = AttachmentRegistry(
+            registry_path=tmp_path / "attachment_registry.json",
+            cache_dir=tmp_path / "attachments",
+            http_client=client,
+            max_cache_bytes=32,
+        )
+        first = await registry.register_remote_url(
+            "group:10001",
+            "https://example.com/first.txt",
+            kind="file",
+            display_name="first.txt",
+        )
+        first_path = Path(str(first.local_path))
+        second = await registry.register_remote_url(
+            "group:10001",
+            "https://example.com/second.txt",
+            kind="file",
+            display_name="second.txt",
+        )
+
+    first_after = registry.resolve(first.uid, "group:10001")
+    second_after = registry.resolve(second.uid, "group:10001")
+
+    assert first_after is not None
+    assert first_after.local_path is None
+    assert first_after.source_ref == "https://example.com/first.txt"
+    assert first_after.prompt_ref()["source_ref"] == "https://example.com/first.txt"
+    assert first_path.exists() is False
+    assert second_after is not None
+    assert second_after.local_path is not None
+
+
+@pytest.mark.asyncio
+async def test_attachment_url_length_limit_rejects_remote_url(tmp_path: Path) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+        url_max_length=20,
+    )
+
+    with pytest.raises(ValueError, match="URL"):
+        await registry.register_remote_url(
+            "group:10001",
+            "https://example.com/too-long.png",
+            kind="image",
+            display_name="too-long.png",
+        )
+
+
+@pytest.mark.asyncio
+async def test_url_reference_count_limit_prunes_oldest_reference(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+        remote_download_max_bytes=0,
+        url_reference_max_records=1,
+    )
+    first = await registry.register_remote_url(
+        "group:10001",
+        "https://example.com/first.png",
+        kind="image",
+        display_name="first.png",
+    )
+    second = await registry.register_remote_url(
+        "group:10001",
+        "https://example.com/second.png",
+        kind="image",
+        display_name="second.png",
+    )
+
+    assert registry.resolve(first.uid, "group:10001") is None
+    assert registry.resolve(second.uid, "group:10001") is not None
+
+
+@pytest.mark.asyncio
+async def test_ensure_local_file_keeps_existing_dedup_record(
+    tmp_path: Path,
+) -> None:
+    payload = b"same content"
+
+    async def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/plain"},
+            content=payload,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as client:
+        registry = AttachmentRegistry(
+            registry_path=tmp_path / "attachment_registry.json",
+            cache_dir=tmp_path / "attachments",
+            http_client=client,
+        )
+        cached = await registry.register_bytes(
+            "group:10001",
+            payload,
+            kind="file",
+            display_name="cached.txt",
+            source_kind="test",
+        )
+        reference = await registry.register_remote_reference(
+            "group:10001",
+            "https://example.com/same.txt",
+            kind="file",
+            display_name="same.txt",
+        )
+
+        restored = await registry.ensure_local_file(reference)
+
+    assert restored.uid == reference.uid
+    assert restored.local_path == cached.local_path
+    assert registry.resolve(cached.uid, "group:10001") is not None
+    assert registry.resolve(reference.uid, "group:10001") is not None
+
+
+@pytest.mark.asyncio
+async def test_attachment_age_limit_keeps_url_backed_record(
+    tmp_path: Path,
+) -> None:
+    async def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"old cache")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as client:
+        registry = AttachmentRegistry(
+            registry_path=tmp_path / "attachment_registry.json",
+            cache_dir=tmp_path / "attachments",
+            http_client=client,
+            max_age_seconds=1,
+        )
+        record = await registry.register_remote_url(
+            "group:10001",
+            "https://example.com/old.txt",
+            kind="file",
+            display_name="old.txt",
+        )
+
+        assert record.local_path is not None
+        old_time = time.time() - 10
+        os.utime(record.local_path, (old_time, old_time))
+        fresh = await registry.register_bytes(
+            "group:10001",
+            b"fresh cache",
+            kind="file",
+            display_name="fresh.txt",
+            source_kind="test",
+        )
+
+    resolved = registry.resolve(record.uid, "group:10001")
+
+    assert resolved is not None
+    assert resolved.local_path is None
+    assert resolved.source_ref == "https://example.com/old.txt"
+    assert registry.resolve(fresh.uid, "group:10001") is not None
 
 
 @pytest.mark.asyncio

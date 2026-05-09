@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from dataclasses import replace
 
 import pytest
 
@@ -334,3 +335,48 @@ async def test_dispatch_no_pending_is_noop() -> None:
     await dispatch_pending_file_sends(
         rendered, sender=None, target_type="group", target_id=1
     )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_pending_file_sends_redownloads_with_registry(
+    tmp_path: Path,
+) -> None:
+    """Missing local file can be restored through the registry before dispatch."""
+    rec = await _make_registry(tmp_path).register_remote_reference(
+        "group:1",
+        "https://example.com/doc.pdf",
+        kind="file",
+        display_name="doc.pdf",
+    )
+    restored = tmp_path / "restored.pdf"
+
+    class FakeRegistry:
+        async def ensure_local_file(self, record: Any) -> Any:
+            restored.write_bytes(_PDF_BYTES)
+            return replace(record, local_path=str(restored))
+
+    calls: list[tuple[int, str, str | None]] = []
+
+    class FakeSender:
+        async def send_group_file(
+            self, group_id: int, file_path: str, name: str | None = None
+        ) -> None:
+            calls.append((group_id, file_path, name))
+
+        async def send_private_file(self, *a: Any, **kw: Any) -> None:
+            raise AssertionError("private send should not be used")
+
+    await dispatch_pending_file_sends(
+        RenderedRichMessage(
+            delivery_text="text",
+            history_text="text",
+            attachments=[],
+            pending_file_sends=(rec,),
+        ),
+        sender=FakeSender(),
+        target_type="group",
+        target_id=10001,
+        registry=FakeRegistry(),  # type: ignore[arg-type]
+    )
+
+    assert calls == [(10001, str(restored), "doc.pdf")]

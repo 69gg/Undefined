@@ -125,6 +125,16 @@ def _attachment_remote_download_max_bytes(runtime_config: Config) -> int:
     return max(0, value) * 1024 * 1024
 
 
+def _attachment_cache_max_bytes(runtime_config: Config) -> int:
+    value = int(runtime_config.attachment_cache_max_total_size_mb)
+    return max(0, value) * 1024 * 1024
+
+
+def _attachment_cache_max_age_seconds(runtime_config: Config) -> int:
+    value = int(runtime_config.attachment_cache_max_age_days)
+    return max(0, value) * 24 * 60 * 60
+
+
 def _resolve_summary_model_config(
     runtime_config: Config | None,
     chat_config: ChatModelConfig,
@@ -183,6 +193,13 @@ class AIClient:
                 remote_download_max_bytes=_attachment_remote_download_max_bytes(
                     self.runtime_config
                 ),
+                max_cache_bytes=_attachment_cache_max_bytes(self.runtime_config),
+                max_records=self.runtime_config.attachment_cache_max_records,
+                max_age_seconds=_attachment_cache_max_age_seconds(self.runtime_config),
+                url_reference_max_records=(
+                    self.runtime_config.attachment_url_reference_max_records
+                ),
+                url_max_length=self.runtime_config.attachment_url_max_length,
             )
         else:
             self.attachment_registry = AttachmentRegistry(http_client=self._http_client)
@@ -722,8 +739,17 @@ class AIClient:
         )
 
     def apply_attachment_config(self, runtime_config: Config) -> None:
-        self.attachment_registry.set_remote_download_max_bytes(
-            _attachment_remote_download_max_bytes(runtime_config)
+        self.attachment_registry.set_limits(
+            remote_download_max_bytes=_attachment_remote_download_max_bytes(
+                runtime_config
+            ),
+            max_cache_bytes=_attachment_cache_max_bytes(runtime_config),
+            max_records=runtime_config.attachment_cache_max_records,
+            max_age_seconds=_attachment_cache_max_age_seconds(runtime_config),
+            url_reference_max_records=(
+                runtime_config.attachment_url_reference_max_records
+            ),
+            url_max_length=runtime_config.attachment_url_max_length,
         )
 
     def count_tokens(self, text: str) -> int:

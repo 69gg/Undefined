@@ -24,18 +24,55 @@ def test_api_config_defaults_when_missing(tmp_path: Path) -> None:
     assert cfg.api.tool_invoke_timeout == 120
     assert cfg.api.tool_invoke_callback_timeout == 10
     assert cfg.attachment_remote_download_max_size_mb == 25
+    assert cfg.attachment_cache_max_total_size_mb == 0
+    assert cfg.attachment_cache_max_records == 2000
+    assert cfg.attachment_cache_max_age_days == 7
+    assert cfg.attachment_url_reference_max_records == 2000
+    assert cfg.attachment_url_max_length == 8192
 
 
-def test_attachment_remote_download_limit_config(tmp_path: Path) -> None:
+def test_attachment_limits_config(tmp_path: Path) -> None:
     cfg = _load_config(
         tmp_path / "config.toml",
         """
 [attachments]
 remote_download_max_size_mb = 8
+cache_max_total_size_mb = 512
+cache_max_records = 300
+cache_max_age_days = 14
+url_reference_max_records = 150
+url_max_length = 4096
 """,
     )
 
     assert cfg.attachment_remote_download_max_size_mb == 8
+    assert cfg.attachment_cache_max_total_size_mb == 512
+    assert cfg.attachment_cache_max_records == 300
+    assert cfg.attachment_cache_max_age_days == 14
+    assert cfg.attachment_url_reference_max_records == 150
+    assert cfg.attachment_url_max_length == 4096
+
+
+def test_attachment_limits_invalid_values_fallback(tmp_path: Path) -> None:
+    cfg = _load_config(
+        tmp_path / "config.toml",
+        """
+[attachments]
+remote_download_max_size_mb = -1
+cache_max_total_size_mb = -512
+cache_max_records = -300
+cache_max_age_days = -14
+url_reference_max_records = -150
+url_max_length = -4096
+""",
+    )
+
+    assert cfg.attachment_remote_download_max_size_mb == 0
+    assert cfg.attachment_cache_max_total_size_mb == 0
+    assert cfg.attachment_cache_max_records == 0
+    assert cfg.attachment_cache_max_age_days == 0
+    assert cfg.attachment_url_reference_max_records == 0
+    assert cfg.attachment_url_max_length == 0
 
 
 def test_api_config_custom_values(tmp_path: Path) -> None:

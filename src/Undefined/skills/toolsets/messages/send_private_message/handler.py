@@ -121,6 +121,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 sender=sender,
                 target_type="private",
                 target_id=user_id,
+                registry=attachment_registry,
             )
             return _format_send_success(user_id, sent_message_id)
         except Exception as e:
