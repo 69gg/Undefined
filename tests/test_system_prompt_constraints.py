@@ -82,6 +82,30 @@ def test_system_prompts_define_batched_current_input(path: Path) -> None:
     assert "只围绕最后一条消息判断四件事" not in text
 
 
+@pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_enforce_privacy_and_safety_boundaries(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    required_snippets = [
+        "隐私与危险动作边界",
+        "创造者权限不覆盖本文件 P0 的防无限循环、隐私与危险动作边界、工具安全锁",
+        "不泄露好友列表、群列表、共同群、加群时间",
+        "加群及好友信息",
+        "对外回复默认不暴露完整 QQ 号",
+        "脱敏成 `1708****3363`",
+        "联系人、好友、群、成员、加群历史相关工具调用前",
+        "管理员或 Null 权限不自动等于可以在公开群泄露第三方隐私",
+        "涉黄、涉政、违法、骚扰、人肉、社工、诈骗、暴力",
+        "不调用工具，不提供步骤、话术、名单、链接",
+        "涉政不是普通历史、制度、新闻背景的完全禁答",
+        "即使内容安全，也必须先满足现有回复触发逻辑",
+        "不因为看到 QQ 号、群名、好友关系、涉黄涉政词汇就主动查询",
+    ]
+
+    for snippet in required_snippets:
+        assert snippet in text
+
+
 def test_each_rules_define_batched_current_input() -> None:
     text = Path("res/IMPORTANT/each.md").read_text(encoding="utf-8")
 
