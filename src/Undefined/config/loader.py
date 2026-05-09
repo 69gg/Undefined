@@ -341,6 +341,9 @@ class Config:
     bilibili_max_duration: int
     bilibili_max_file_size: int
     bilibili_oversize_strategy: str
+    bilibili_danmaku_enabled: bool
+    bilibili_danmaku_batch_size: int
+    bilibili_danmaku_max_count: int
     bilibili_auto_extract_group_ids: list[int]
     bilibili_auto_extract_private_ids: list[int]
     # arXiv 论文提取
@@ -1191,6 +1194,19 @@ class Config:
         )
         if bilibili_oversize_strategy not in ("downgrade", "info"):
             bilibili_oversize_strategy = "downgrade"
+        bilibili_danmaku_enabled = _coerce_bool(
+            _get_value(data, ("bilibili", "danmaku_enabled"), None), True
+        )
+        bilibili_danmaku_batch_size = _coerce_int(
+            _get_value(data, ("bilibili", "danmaku_batch_size"), None), 100
+        )
+        if bilibili_danmaku_batch_size <= 0:
+            bilibili_danmaku_batch_size = 100
+        bilibili_danmaku_max_count = _coerce_int(
+            _get_value(data, ("bilibili", "danmaku_max_count"), None), 0
+        )
+        if bilibili_danmaku_max_count < 0:
+            bilibili_danmaku_max_count = 0
         bilibili_auto_extract_group_ids = _coerce_int_list(
             _get_value(data, ("bilibili", "auto_extract_group_ids"), None)
         )
@@ -1506,6 +1522,9 @@ class Config:
             bilibili_max_duration=bilibili_max_duration,
             bilibili_max_file_size=bilibili_max_file_size,
             bilibili_oversize_strategy=bilibili_oversize_strategy,
+            bilibili_danmaku_enabled=bilibili_danmaku_enabled,
+            bilibili_danmaku_batch_size=bilibili_danmaku_batch_size,
+            bilibili_danmaku_max_count=bilibili_danmaku_max_count,
             bilibili_auto_extract_group_ids=bilibili_auto_extract_group_ids,
             bilibili_auto_extract_private_ids=bilibili_auto_extract_private_ids,
             arxiv_auto_extract_enabled=arxiv_auto_extract_enabled,

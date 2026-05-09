@@ -168,6 +168,84 @@ async def test_send_group_forward_message_records_history(
 
 
 @pytest.mark.asyncio
+async def test_send_group_forward_message_registers_nested_local_video(
+    sender: MessageSender,
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(b"video")
+    video_record = SimpleNamespace(
+        prompt_ref=lambda: {
+            "uid": "file_clip",
+            "kind": "video",
+            "media_type": "video",
+            "display_name": "clip.mp4",
+        }
+    )
+    sender.attachment_registry = SimpleNamespace(
+        register_local_file=AsyncMock(return_value=video_record)
+    )
+    onebot = cast(Any, sender.onebot)
+    onebot.send_forward_msg = AsyncMock()
+    nodes = [
+        {
+            "type": "node",
+            "data": {
+                "name": "Bot",
+                "uin": "10000",
+                "content": [
+                    {
+                        "type": "video",
+                        "data": {"file": video_path.resolve().as_uri()},
+                    }
+                ],
+            },
+        }
+    ]
+
+    await sender.send_group_forward_message(
+        12345,
+        nodes,
+        history_message="[Bilibili] 合并转发摘要",
+    )
+
+    sender.attachment_registry.register_local_file.assert_awaited_once()
+    history_mock = cast(AsyncMock, sender.history_manager.add_group_message)
+    assert history_mock.await_args is not None
+    kwargs = history_mock.await_args.kwargs
+    assert kwargs["attachments"][0]["uid"] == "file_clip"
+    assert "uid=file_clip" in kwargs["text_content"]
+
+
+@pytest.mark.asyncio
+async def test_send_private_forward_message_records_history(
+    sender: MessageSender,
+) -> None:
+    onebot = cast(Any, sender.onebot)
+    onebot.send_private_forward_msg = AsyncMock()
+    nodes = [
+        {
+            "type": "node",
+            "data": {"name": "Bot", "uin": "10000", "content": "长内容"},
+        }
+    ]
+
+    await sender.send_private_forward_message(
+        54321,
+        nodes,
+        history_message="[命令输出] 私聊合并转发摘要",
+    )
+
+    onebot.send_private_forward_msg.assert_awaited_once_with(54321, nodes)
+    history_mock = cast(AsyncMock, sender.history_manager.add_private_message)
+    history_mock.assert_awaited_once()
+    assert history_mock.await_args is not None
+    kwargs = history_mock.await_args.kwargs
+    assert kwargs["user_id"] == 54321
+    assert kwargs["text_content"] == "[命令输出] 私聊合并转发摘要"
+
+
+@pytest.mark.asyncio
 async def test_send_group_message_reads_message_id_from_onebot_envelope(
     sender: MessageSender,
 ) -> None:

@@ -75,6 +75,38 @@ url_max_length = -4096
     assert cfg.attachment_url_max_length == 0
 
 
+def test_bilibili_danmaku_config_defaults_and_fallback(tmp_path: Path) -> None:
+    cfg = _load_config(
+        tmp_path / "config.toml",
+        """
+[bilibili]
+danmaku_enabled = true
+danmaku_batch_size = -1
+danmaku_max_count = -99
+""",
+    )
+
+    assert cfg.bilibili_danmaku_enabled is True
+    assert cfg.bilibili_danmaku_batch_size == 100
+    assert cfg.bilibili_danmaku_max_count == 0
+
+
+def test_bilibili_danmaku_config_custom(tmp_path: Path) -> None:
+    cfg = _load_config(
+        tmp_path / "config.toml",
+        """
+[bilibili]
+danmaku_enabled = false
+danmaku_batch_size = 50
+danmaku_max_count = 500
+""",
+    )
+
+    assert cfg.bilibili_danmaku_enabled is False
+    assert cfg.bilibili_danmaku_batch_size == 50
+    assert cfg.bilibili_danmaku_max_count == 500
+
+
 def test_api_config_custom_values(tmp_path: Path) -> None:
     cfg = _load_config(
         tmp_path / "config.toml",

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import Undefined.bilibili.sender as bilibili_sender
+from Undefined.bilibili.models import DanmakuItem, VideoStats
 
 
 def _video_info() -> Any:
@@ -17,7 +18,12 @@ def _video_info() -> Any:
         desc="视频简介",
         cover_url="",
         bvid="BV1xx411c7mD",
+        url="https://www.bilibili.com/video/BV1xx411c7mD",
         duration=120,
+        page_duration=120,
+        aid=123,
+        cid=456,
+        stats=VideoStats(view=1000, like=88, coin=9, favorite=10, danmaku=101),
     )
 
 
@@ -29,8 +35,8 @@ async def test_send_bilibili_video_records_history_for_video_message(
     video_path = tmp_path / "video.mp4"
     video_path.write_bytes(b"video")
     sender: Any = SimpleNamespace(
-        send_group_message=AsyncMock(),
-        send_private_message=AsyncMock(),
+        send_group_forward_message=AsyncMock(),
+        send_private_forward_message=AsyncMock(),
     )
 
     monkeypatch.setattr(
@@ -42,6 +48,16 @@ async def test_send_bilibili_video_records_history_for_video_message(
         bilibili_sender,
         "download_video",
         AsyncMock(return_value=(video_path, _video_info(), 80)),
+    )
+    monkeypatch.setattr(
+        bilibili_sender,
+        "fetch_danmaku",
+        AsyncMock(
+            return_value=[
+                DanmakuItem(progress_ms=index * 1000, content=f"弹幕{index}")
+                for index in range(101)
+            ]
+        ),
     )
     cleanup_mock = MagicMock()
     monkeypatch.setattr(bilibili_sender, "cleanup_file", cleanup_mock)
@@ -55,11 +71,22 @@ async def test_send_bilibili_video_records_history_for_video_message(
         max_file_size=100,
     )
 
-    assert "已发送视频" in result
-    assert sender.send_group_message.await_count == 2
-    video_call = sender.send_group_message.await_args_list[1]
-    assert video_call.args[1].startswith("[CQ:video,file=file://")
-    history_message = video_call.kwargs["history_message"]
-    assert history_message.startswith("[视频] 「测试视频」")
+    assert "已发送 Bilibili 合并转发" in result
+    sender.send_group_forward_message.assert_awaited_once()
+    call = sender.send_group_forward_message.await_args
+    assert call is not None
+    assert call.args[0] == 123456
+    nodes = call.args[1]
+    assert len(nodes) == 3
+    assert "播放 1000" in nodes[0]["data"]["content"][0]["data"]["text"]
+    assert nodes[1]["data"]["content"][0]["type"] == "video"
+    assert nodes[1]["data"]["content"][0]["data"]["file"].startswith("file://")
+    danmaku_groups = nodes[2]["data"]["content"]
+    assert len(danmaku_groups) == 2
+    assert len(danmaku_groups[0]["data"]["content"]) == 100
+    assert len(danmaku_groups[1]["data"]["content"]) == 1
+    assert danmaku_groups[0]["data"]["content"][0]["data"]["content"].endswith("弹幕0")
+    history_message = call.kwargs["history_message"]
+    assert history_message.startswith("[Bilibili] 「测试视频」")
     assert "BV1xx411c7mD" in history_message
     cleanup_mock.assert_called_once_with(video_path)

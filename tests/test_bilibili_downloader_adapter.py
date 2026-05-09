@@ -6,7 +6,7 @@ from types import TracebackType
 import pytest
 
 from Undefined.bilibili import downloader
-from Undefined.bilibili.models import DownloadResult, VideoInfo
+from Undefined.bilibili.models import DownloadResult, VideoInfo, VideoStats
 
 
 @pytest.mark.asyncio
@@ -35,12 +35,15 @@ async def test_get_video_info_uses_internal_api_client(
             called["video"] = video
             return VideoInfo(
                 bvid=video,
+                aid=1,
                 title="demo",
                 duration=12,
                 cover_url="https://img.example/1.jpg",
                 up_name="up",
                 desc="desc",
                 cid=123,
+                page_duration=12,
+                stats=VideoStats(),
             )
 
     monkeypatch.setattr(downloader, "BilibiliApiClient", _FakeApiClient)
@@ -65,12 +68,15 @@ async def test_download_video_returns_info_when_duration_exceeds_limit(
     ) -> downloader.VideoInfo:
         return downloader.VideoInfo(
             bvid="BV1xx411c7mD",
+            aid=1,
             title="long",
             duration=999,
             cover_url="",
             up_name="",
             desc="",
             cid=1,
+            page_duration=999,
+            stats=VideoStats(),
         )
 
     def _fake_download_video_sync(*_args: object, **_kwargs: object) -> object:
@@ -136,12 +142,15 @@ async def test_download_video_uses_internal_download_core(
         output.write_bytes(b"video")
         info = VideoInfo(
             bvid=bvid,
+            aid=1,
             title="from-download",
             duration=30,
             cover_url="",
             up_name="up",
             desc="desc",
             cid=2,
+            page_duration=30,
+            stats=VideoStats(),
         )
         return DownloadResult(
             path=output,

@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 
 from Undefined.bilibili.errors import ApiResponseError
-from Undefined.bilibili.models import VideoInfo
+from Undefined.bilibili.models import VideoInfo, VideoStats
 from Undefined.bilibili.wbi import build_signed_params_sync, parse_cookie_string
 
 _BILIBILI_API_VIEW = "https://api.bilibili.com/x/web-interface/view"
@@ -27,6 +27,14 @@ DEFAULT_HEADERS: dict[str, str] = {
 
 def _api_message(data: dict[str, Any]) -> str:
     return str(data.get("message") or data.get("msg") or "未知错误")
+
+
+def _int_field(data: dict[str, Any], key: str, default: int = 0) -> int:
+    raw = data.get(key, default)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
 
 
 class BilibiliApiClient:
@@ -129,14 +137,30 @@ class BilibiliApiClient:
         if isinstance(owner, dict):
             owner_name = str(owner.get("name", ""))
 
+        stat = data.get("stat")
+        stats = VideoStats()
+        if isinstance(stat, dict):
+            stats = VideoStats(
+                view=_int_field(stat, "view"),
+                danmaku=_int_field(stat, "danmaku"),
+                reply=_int_field(stat, "reply"),
+                favorite=_int_field(stat, "favorite"),
+                coin=_int_field(stat, "coin"),
+                share=_int_field(stat, "share"),
+                like=_int_field(stat, "like"),
+            )
+
         return VideoInfo(
             bvid=bvid,
+            aid=_int_field(data, "aid"),
             title=str(data.get("title", "")),
             duration=int(data.get("duration", 0)),
             cover_url=str(data.get("pic", "")),
             up_name=owner_name,
             desc=str(data.get("desc", "")),
             cid=int(page0["cid"]),
+            page_duration=_int_field(page0, "duration"),
+            stats=stats,
         )
 
     def get_playurl(self, bvid: str, cid: int) -> dict[str, Any]:

@@ -1246,6 +1246,9 @@ class MessageHandler:
                     max_duration=self.config.bilibili_max_duration,
                     max_file_size=self.config.bilibili_max_file_size,
                     oversize_strategy=self.config.bilibili_oversize_strategy,
+                    danmaku_enabled=self.config.bilibili_danmaku_enabled,
+                    danmaku_batch_size=self.config.bilibili_danmaku_batch_size,
+                    danmaku_max_count=self.config.bilibili_danmaku_max_count,
                 )
             except Exception as exc:
                 logger.error(

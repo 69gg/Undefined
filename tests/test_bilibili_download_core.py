@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from Undefined.bilibili import download_core
-from Undefined.bilibili.models import VideoInfo
+from Undefined.bilibili.models import VideoInfo, VideoStats
 
 
 class _FakeResponse:
@@ -37,12 +37,15 @@ class _FakeApiClient:
     def get_video_info(self, bvid: str) -> VideoInfo:
         return VideoInfo(
             bvid=bvid,
+            aid=1,
             title="bad/name: demo",
             duration=30,
             cover_url="",
             up_name="up",
             desc="desc",
             cid=123,
+            page_duration=30,
+            stats=VideoStats(),
         )
 
     def get_playurl(self, bvid: str, cid: int) -> dict[str, Any]:

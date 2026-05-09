@@ -1028,6 +1028,15 @@ max_file_size = 100
 # zh: 超限策略: "downgrade"=降低清晰度重试, "info"=发送封面+标题+简介。
 # en: Oversize strategy: "downgrade"=retry at lower quality, "info"=send cover+title+description.
 oversize_strategy = "downgrade"
+# zh: 是否在自动提取合并转发中附带弹幕。
+# en: Include danmaku in the auto-extraction merged-forward message.
+danmaku_enabled = true
+# zh: 每个内层弹幕合并转发包含的弹幕条数。
+# en: Number of danmaku messages per nested forward group.
+danmaku_batch_size = 100
+# zh: 最多提取多少条弹幕，0=不限。
+# en: Max danmaku count to extract. 0=unlimited.
+danmaku_max_count = 0
 # zh: 自动提取功能的群聊白名单（空=跟随全局 access.allowed_group_ids）。
 # en: Group allowlist for auto-extraction (empty = follow global access.allowed_group_ids).
 auto_extract_group_ids = []

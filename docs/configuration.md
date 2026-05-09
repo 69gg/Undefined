@@ -633,8 +633,17 @@ Prompt caching 补充：
 | `max_duration` | `600` | 最大时长（秒），`0` 不限 | |
 | `max_file_size` | `100` | 最大体积（MB），`0` 不限 | |
 | `oversize_strategy` | `"downgrade"` | 超限策略 | 仅 `downgrade/info`，非法回退 `downgrade` |
+| `danmaku_enabled` | `true` | 是否在自动提取合并转发中附带弹幕 | |
+| `danmaku_batch_size` | `100` | 每个内层弹幕合并转发包含的弹幕条数 | `<=0` 回退 `100` |
+| `danmaku_max_count` | `0` | 最多提取多少条弹幕，`0` 不限 | `<0` 回退 `0` |
 | `auto_extract_group_ids` | `[]` | 功能级群白名单 | 空时跟随全局 access |
 | `auto_extract_private_ids` | `[]` | 功能级私聊白名单 | 空时跟随全局 access |
+
+自动提取行为：
+- 命中 B 站链接、BV 号或 AV 号后，自动提取会发送一次外层合并转发，固定包含三个节点：视频信息、视频文件或视频状态、弹幕列表。
+- 弹幕通过 Bilibili protobuf 接口分段拉取；项目内置了解码逻辑，无需安装 `protoc` 或额外生成 protobuf 代码。
+- 弹幕列表节点会按每 100 条弹幕生成一个内层合并转发；每条弹幕对应内层合并转发中的一个节点，便于在客户端逐条查看。
+- 视频文件下载、清晰度、时长和体积限制仍由本节配置控制；自动提取的转发消息也会通过统一发送层写入历史，供后续 AI 回复读取。
 
 ---
 
