@@ -1,0 +1,14 @@
+{
+  "type": "function",
+  "function": {
+    "name": "get_url_by_uid",
+    "description": "通过附件 UID 查询对应的 URL（source_ref）。适用于需要从已注册的附件追溯其来源链接的场景。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "附件 UID，如 pic_xxx 或 file_xxx" }
+      },
+      "required": ["uid"]
+    }
+  }
+}

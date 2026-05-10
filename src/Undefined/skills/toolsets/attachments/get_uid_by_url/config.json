@@ -1,0 +1,14 @@
+{
+  "type": "function",
+  "function": {
+    "name": "get_uid_by_url",
+    "description": "通过 URL 查询对应的附件 UID。适用于需要从已知来源链接查找已注册附件的场景。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": { "type": "string", "description": "来源 URL" }
+      },
+      "required": ["url"]
+    }
+  }
+}
