@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import threading
 import time
 from http.cookies import CookieError, SimpleCookie
 from typing import Any, Mapping
@@ -84,9 +85,12 @@ _MIXIN_KEY_ENC_TAB: tuple[int, ...] = (
 )
 
 _WBI_CACHE_TTL_SECONDS = 3600
-_cached_mixin_key: str | None = None
-_cached_at: float = 0.0
-_cache_lock = asyncio.Lock()
+_cached_mixin_key_async: str | None = None
+_cached_at_async: float = 0.0
+_cached_mixin_key_sync: str | None = None
+_cached_at_sync: float = 0.0
+_cache_lock_async = asyncio.Lock()
+_cache_lock_sync = threading.Lock()
 
 
 def parse_cookie_string(cookie: str = "") -> dict[str, str]:
@@ -188,28 +192,28 @@ async def get_mixin_key(
     force_refresh: bool = False,
 ) -> str:
     """获取可复用的 mixin_key。"""
-    global _cached_mixin_key, _cached_at
+    global _cached_mixin_key_async, _cached_at_async
 
     now = time.time()
     if (
         not force_refresh
-        and _cached_mixin_key
-        and now - _cached_at < _WBI_CACHE_TTL_SECONDS
+        and _cached_mixin_key_async
+        and now - _cached_at_async < _WBI_CACHE_TTL_SECONDS
     ):
-        return _cached_mixin_key
+        return _cached_mixin_key_async
 
-    async with _cache_lock:
+    async with _cache_lock_async:
         now = time.time()
         if (
             not force_refresh
-            and _cached_mixin_key
-            and now - _cached_at < _WBI_CACHE_TTL_SECONDS
+            and _cached_mixin_key_async
+            and now - _cached_at_async < _WBI_CACHE_TTL_SECONDS
         ):
-            return _cached_mixin_key
+            return _cached_mixin_key_async
 
-        _cached_mixin_key = await _refresh_mixin_key(client)
-        _cached_at = time.time()
-        return _cached_mixin_key
+        _cached_mixin_key_async = await _refresh_mixin_key(client)
+        _cached_at_async = time.time()
+        return _cached_mixin_key_async
 
 
 def sign_params(
@@ -248,4 +252,79 @@ async def build_signed_params(
 ) -> dict[str, str]:
     """构造带 WBI 签名的参数。"""
     mixin_key = await get_mixin_key(client, force_refresh=force_refresh)
+    return sign_params(params, mixin_key)
+
+
+def _refresh_mixin_key_sync(client: httpx.Client) -> str:
+    resp = client.get(_BILIBILI_API_NAV)
+    resp.raise_for_status()
+    payload = resp.json()
+
+    if not isinstance(payload, dict):
+        raise ValueError("nav 接口返回格式异常")
+
+    code = int(payload.get("code", -1))
+    if code not in (0, -101):
+        message = payload.get("message", "未知错误")
+        raise ValueError(f"获取 wbi key 失败: {message} (code={code})")
+
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise ValueError("nav 接口 data 字段异常")
+
+    wbi_img = data.get("wbi_img")
+    if not isinstance(wbi_img, dict):
+        raise ValueError("nav 接口 wbi_img 字段缺失")
+
+    img_url = str(wbi_img.get("img_url", "")).strip()
+    sub_url = str(wbi_img.get("sub_url", "")).strip()
+    if not img_url or not sub_url:
+        raise ValueError("nav 接口未返回有效的 img_url/sub_url")
+
+    img_key = _extract_key_from_url(img_url)
+    sub_key = _extract_key_from_url(sub_url)
+    if not img_key or not sub_key:
+        raise ValueError("无法提取有效的 img_key/sub_key")
+
+    return _compute_mixin_key(img_key, sub_key)
+
+
+def get_mixin_key_sync(
+    client: httpx.Client,
+    *,
+    force_refresh: bool = False,
+) -> str:
+    """同步获取可复用的 mixin_key。"""
+    global _cached_mixin_key_sync, _cached_at_sync
+
+    now = time.time()
+    if (
+        not force_refresh
+        and _cached_mixin_key_sync
+        and now - _cached_at_sync < _WBI_CACHE_TTL_SECONDS
+    ):
+        return _cached_mixin_key_sync
+
+    with _cache_lock_sync:
+        now = time.time()
+        if (
+            not force_refresh
+            and _cached_mixin_key_sync
+            and now - _cached_at_sync < _WBI_CACHE_TTL_SECONDS
+        ):
+            return _cached_mixin_key_sync
+
+        _cached_mixin_key_sync = _refresh_mixin_key_sync(client)
+        _cached_at_sync = time.time()
+        return _cached_mixin_key_sync
+
+
+def build_signed_params_sync(
+    client: httpx.Client,
+    params: Mapping[str, Any],
+    *,
+    force_refresh: bool = False,
+) -> dict[str, str]:
+    """同步构造带 WBI 签名的参数。"""
+    mixin_key = get_mixin_key_sync(client, force_refresh=force_refresh)
     return sign_params(params, mixin_key)

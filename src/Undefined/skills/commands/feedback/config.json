@@ -1,0 +1,40 @@
+{
+  "name": "feedback",
+  "description": "意见反馈：提交、查看和删除公开反馈",
+  "usage": "/feedback(/fb) [add|view|del] [内容或ID]",
+  "example": "/fb 希望增加夜间静默模式",
+  "permission": "public",
+  "rate_limit": {
+    "user": 10,
+    "admin": 5,
+    "superadmin": 0
+  },
+  "show_in_help": true,
+  "order": 35,
+  "allow_in_private": true,
+  "aliases": ["fb"],
+  "subcommands": {
+    "add": {
+      "description": "提交反馈",
+      "permission": "public",
+      "args": "<内容>"
+    },
+    "view": {
+      "description": "查看反馈列表或指定反馈",
+      "permission": "public",
+      "args": "[ID]"
+    },
+    "del": {
+      "description": "删除反馈",
+      "permission": "superadmin",
+      "args": "<ID>"
+    }
+  },
+  "inference": {
+    "default": "view",
+    "rules": [
+      { "pattern": "^\\d{8}-\\d+$", "subcommand": "view" }
+    ],
+    "fallback": "add"
+  }
+}

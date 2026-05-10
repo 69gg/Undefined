@@ -456,6 +456,15 @@ class OneBotClient:
             "send_forward_msg", {"group_id": group_id, "messages": messages}
         )
 
+    async def send_private_forward_msg(
+        self, user_id: int, messages: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """发送合并转发消息到私聊。"""
+        return await self._call_api(
+            "send_private_forward_msg",
+            {"user_id": user_id, "messages": messages},
+        )
+
     async def send_like(self, user_id: int, times: int = 1) -> dict[str, Any]:
         """给用户点赞
 

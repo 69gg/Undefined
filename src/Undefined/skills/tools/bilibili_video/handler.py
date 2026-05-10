@@ -73,6 +73,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     max_duration = 600
     max_file_size = 100
     oversize_strategy = "downgrade"
+    danmaku_enabled = True
+    danmaku_batch_size = 100
+    danmaku_max_count = 0
 
     if runtime_config:
         cookie = getattr(
@@ -86,6 +89,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         oversize_strategy = getattr(
             runtime_config, "bilibili_oversize_strategy", "downgrade"
         )
+        danmaku_enabled = getattr(runtime_config, "bilibili_danmaku_enabled", True)
+        danmaku_batch_size = getattr(runtime_config, "bilibili_danmaku_batch_size", 100)
+        danmaku_max_count = getattr(runtime_config, "bilibili_danmaku_max_count", 0)
 
     try:
         result = await send_bilibili_video(
@@ -99,6 +105,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             max_duration=max_duration,
             max_file_size=max_file_size,
             oversize_strategy=oversize_strategy,
+            danmaku_enabled=danmaku_enabled,
+            danmaku_batch_size=danmaku_batch_size,
+            danmaku_max_count=danmaku_max_count,
         )
         return result
     except Exception as exc:

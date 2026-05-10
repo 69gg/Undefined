@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 import hashlib
 import logging
@@ -70,6 +70,9 @@ _MAGIC_IMAGE_SUFFIXES: tuple[tuple[bytes, str], ...] = (
 _FORWARD_ATTACHMENT_MAX_DEPTH = 3
 _ATTACHMENT_CACHE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 _ATTACHMENT_REGISTRY_MAX_RECORDS = 2000
+_ATTACHMENT_CACHE_MAX_BYTES = 0
+_ATTACHMENT_URL_REFERENCE_MAX_RECORDS = 2000
+_ATTACHMENT_URL_MAX_LENGTH = 8192
 _DEFAULT_REMOTE_DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024
 
 
@@ -91,6 +94,12 @@ class AttachmentRecord:
     description: str = ""
 
     def prompt_ref(self) -> dict[str, str]:
+        local_available = False
+        if self.local_path is not None:
+            try:
+                local_available = Path(self.local_path).is_file()
+            except OSError:
+                local_available = False
         ref: dict[str, str] = {
             "uid": self.uid,
             "kind": self.kind,
@@ -99,7 +108,7 @@ class AttachmentRecord:
         }
         if self.source_kind.strip():
             ref["source_kind"] = self.source_kind.strip()
-        if self.local_path is None and self.source_ref.strip():
+        if not local_available and self.source_ref.strip():
             ref["source_ref"] = self.source_ref.strip()
         if self.semantic_kind.strip():
             ref["semantic_kind"] = self.semantic_kind.strip()
@@ -459,6 +468,9 @@ class AttachmentRegistry:
         http_client: httpx.AsyncClient | None = None,
         max_records: int = _ATTACHMENT_REGISTRY_MAX_RECORDS,
         max_age_seconds: int = _ATTACHMENT_CACHE_MAX_AGE_SECONDS,
+        max_cache_bytes: int = _ATTACHMENT_CACHE_MAX_BYTES,
+        url_reference_max_records: int = _ATTACHMENT_URL_REFERENCE_MAX_RECORDS,
+        url_max_length: int = _ATTACHMENT_URL_MAX_LENGTH,
         remote_download_max_bytes: int = _DEFAULT_REMOTE_DOWNLOAD_MAX_BYTES,
     ) -> None:
         self._registry_path = registry_path
@@ -466,6 +478,9 @@ class AttachmentRegistry:
         self._http_client = http_client
         self._max_records = max(0, int(max_records))
         self._max_age_seconds = max(0, int(max_age_seconds))
+        self._max_cache_bytes = max(0, int(max_cache_bytes))
+        self._url_reference_max_records = max(0, int(url_reference_max_records))
+        self._url_max_length = max(0, int(url_max_length))
         self._remote_download_max_bytes = max(0, int(remote_download_max_bytes))
         self._lock = asyncio.Lock()
         self._records: dict[str, AttachmentRecord] = {}
@@ -480,6 +495,29 @@ class AttachmentRegistry:
 
     def set_remote_download_max_bytes(self, value: int) -> None:
         self._remote_download_max_bytes = max(0, int(value))
+
+    def set_limits(
+        self,
+        *,
+        remote_download_max_bytes: int | None = None,
+        max_cache_bytes: int | None = None,
+        max_records: int | None = None,
+        max_age_seconds: int | None = None,
+        url_reference_max_records: int | None = None,
+        url_max_length: int | None = None,
+    ) -> None:
+        if remote_download_max_bytes is not None:
+            self._remote_download_max_bytes = max(0, int(remote_download_max_bytes))
+        if max_cache_bytes is not None:
+            self._max_cache_bytes = max(0, int(max_cache_bytes))
+        if max_records is not None:
+            self._max_records = max(0, int(max_records))
+        if max_age_seconds is not None:
+            self._max_age_seconds = max(0, int(max_age_seconds))
+        if url_reference_max_records is not None:
+            self._url_reference_max_records = max(0, int(url_reference_max_records))
+        if url_max_length is not None:
+            self._url_max_length = max(0, int(url_max_length))
 
     def set_global_image_resolver(
         self,
@@ -506,52 +544,158 @@ class AttachmentRegistry:
             return None
         return path
 
+    def _normalized_url_ref(self, value: str) -> str:
+        text = str(value or "").strip()
+        if not _is_http_url(text):
+            return ""
+        if self._url_max_length > 0 and len(text) > self._url_max_length:
+            return ""
+        return text
+
+    def _record_with_local_path(
+        self, record: AttachmentRecord, local_path: str | None
+    ) -> AttachmentRecord:
+        return replace(
+            record,
+            local_path=local_path,
+            source_kind=_remote_reference_source_kind(record.source_kind)
+            if local_path is None and _is_http_url(record.source_ref)
+            else record.source_kind,
+        )
+
+    def _remove_cached_content(
+        self,
+        record: AttachmentRecord,
+        cache_path: Path | None,
+        removable_paths: set[Path],
+    ) -> AttachmentRecord | None:
+        source_ref = self._normalized_url_ref(record.source_ref)
+        if source_ref:
+            if cache_path is not None:
+                removable_paths.add(cache_path)
+            return self._record_with_local_path(record, None)
+        if cache_path is not None:
+            removable_paths.add(cache_path)
+        return None
+
     def _prune_records(self) -> bool:
         dirty = False
         now = time.time()
-        retained: list[tuple[str, AttachmentRecord, Path | None, float]] = []
+        retained: list[tuple[str, AttachmentRecord, Path | None, float, int]] = []
         removable_paths: set[Path] = set()
 
         for uid, record in self._records.items():
             cache_path = self._resolve_managed_cache_path(record.local_path)
             if record.local_path is None:
+                has_url_ref = bool(self._normalized_url_ref(record.source_ref))
+                if _is_http_url(record.source_ref) and not has_url_ref:
+                    dirty = True
+                    continue
                 try:
                     mtime = datetime.fromisoformat(record.created_at).timestamp()
                 except ValueError:
                     mtime = now
-                if self._max_age_seconds > 0 and now - mtime > self._max_age_seconds:
+                if (
+                    not has_url_ref
+                    and self._max_age_seconds > 0
+                    and now - mtime > self._max_age_seconds
+                ):
                     dirty = True
                     continue
-                retained.append((uid, record, None, mtime))
+                retained.append((uid, record, None, mtime, 0))
                 continue
-            if cache_path is None or not cache_path.is_file():
+            if cache_path is None:
+                replacement = self._remove_cached_content(record, None, removable_paths)
+                if replacement is not None:
+                    retained.append((uid, replacement, None, now, 0))
                 dirty = True
                 continue
             try:
-                mtime = float(cache_path.stat().st_mtime)
+                stat_result = cache_path.stat()
+                mtime = float(stat_result.st_mtime)
+                size = int(stat_result.st_size)
             except OSError:
+                replacement = self._remove_cached_content(
+                    record, cache_path, removable_paths
+                )
+                if replacement is not None:
+                    retained.append((uid, replacement, None, now, 0))
                 dirty = True
-                removable_paths.add(cache_path)
+                continue
+            if not cache_path.is_file():
+                replacement = self._remove_cached_content(
+                    record, cache_path, removable_paths
+                )
+                if replacement is not None:
+                    retained.append((uid, replacement, None, mtime, 0))
+                dirty = True
                 continue
             if self._max_age_seconds > 0 and now - mtime > self._max_age_seconds:
+                replacement = self._remove_cached_content(
+                    record, cache_path, removable_paths
+                )
+                if replacement is not None:
+                    retained.append((uid, replacement, None, mtime, 0))
                 dirty = True
-                removable_paths.add(cache_path)
                 continue
-            retained.append((uid, record, cache_path, mtime))
+            retained.append((uid, record, cache_path, mtime, size))
 
         if self._max_records > 0 and len(retained) > self._max_records:
             retained.sort(key=lambda item: item[3])
             overflow = len(retained) - self._max_records
-            for _uid, _record, cache_path, _mtime in retained[:overflow]:
+            for _uid, _record, cache_path, _mtime, _size in retained[:overflow]:
                 if cache_path is not None:
                     removable_paths.add(cache_path)
             retained = retained[overflow:]
             dirty = True
 
-        retained_records = {uid: record for uid, record, _path, _mtime in retained}
+        if self._max_cache_bytes > 0:
+            cache_total = sum(
+                size
+                for _uid, _record, path, _mtime, size in retained
+                if path is not None
+            )
+            if cache_total > self._max_cache_bytes:
+                reduced: list[
+                    tuple[str, AttachmentRecord, Path | None, float, int]
+                ] = []
+                for uid, record, cache_path, mtime, size in sorted(
+                    retained, key=lambda item: item[3]
+                ):
+                    if cache_path is not None and cache_total > self._max_cache_bytes:
+                        replacement = self._remove_cached_content(
+                            record, cache_path, removable_paths
+                        )
+                        if replacement is not None:
+                            reduced.append((uid, replacement, None, mtime, 0))
+                        cache_total -= size
+                        dirty = True
+                    else:
+                        reduced.append((uid, record, cache_path, mtime, size))
+                retained = reduced
+
+        if self._url_reference_max_records > 0:
+            url_refs = [
+                item
+                for item in retained
+                if item[2] is None and _is_http_url(item[1].source_ref)
+            ]
+            if len(url_refs) > self._url_reference_max_records:
+                url_ref_ids = {
+                    uid
+                    for uid, _record, _path, _mtime, _size in sorted(
+                        url_refs, key=lambda item: item[3]
+                    )[: len(url_refs) - self._url_reference_max_records]
+                }
+                retained = [item for item in retained if item[0] not in url_ref_ids]
+                dirty = True
+
+        retained_records = {
+            uid: record for uid, record, _path, _mtime, _size in retained
+        }
         retained_paths = {
             path.resolve()
-            for _uid, _record, path, _mtime in retained
+            for _uid, _record, path, _mtime, _size in retained
             if path is not None and path.exists()
         }
 
@@ -718,6 +862,25 @@ class AttachmentRegistry:
     ) -> AttachmentRecord | None:
         return self.resolve(uid, scope_from_context(context))
 
+    async def get_url_by_uid(self, uid: str) -> str | None:
+        """通过附件 UID 获取 source_ref（URL）。"""
+        await self.load()
+        record = self.get(uid)
+        if record is None or not record.source_ref.strip():
+            return None
+        return record.source_ref.strip()
+
+    async def get_uid_by_url(self, url: str) -> str | None:
+        """通过 URL 查找对应的附件 UID。"""
+        await self.load()
+        url = url.strip()
+        if not url:
+            return None
+        for record in self._records.values():
+            if record.source_ref.strip() == url:
+                return record.uid
+        return None
+
     def _build_uid(self, prefix: str) -> str:
         from uuid import uuid4
 
@@ -800,7 +963,7 @@ class AttachmentRegistry:
             self._records[uid] = record
             self._prune_records()
             await self._persist()
-            return record
+            return self._records.get(uid, record)
 
     async def register_local_file(
         self,
@@ -895,12 +1058,17 @@ class AttachmentRegistry:
         description: str = "",
     ) -> AttachmentRecord:
         await self.load()
+        if not self._normalized_url_ref(url):
+            raise ValueError("远程附件 URL 为空或超过长度上限")
         normalized_kind = _media_kind_from_value(kind)
         normalized_media_type = (
             "image" if normalized_kind == "image" else normalized_kind
         )
         prefix = "pic" if normalized_media_type == "image" else "file"
-        ref = source_ref or url
+        ref = url
+        normalized_segment_data = dict(segment_data or {})
+        if source_ref and source_ref != url:
+            normalized_segment_data.setdefault("original_source_ref", source_ref)
         name = display_name or _display_name_from_source(url, "attachment.bin")
         digest_hex = hashlib.sha256(ref.encode("utf-8")).hexdigest()
 
@@ -929,7 +1097,7 @@ class AttachmentRegistry:
                 created_at=_now_iso(),
                 segment_data={
                     str(k): str(v)
-                    for k, v in dict(segment_data or {}).items()
+                    for k, v in normalized_segment_data.items()
                     if str(k).strip() and str(v).strip()
                 },
                 description=description,
@@ -937,7 +1105,7 @@ class AttachmentRegistry:
             self._records[uid] = record
             self._prune_records()
             await self._persist()
-            return record
+            return self._records.get(uid, record)
 
     async def _register_remote_url_or_reference(
         self,
@@ -950,6 +1118,8 @@ class AttachmentRegistry:
         source_ref: str,
         segment_data: Mapping[str, str] | None,
     ) -> AttachmentRecord:
+        if not self._normalized_url_ref(url):
+            raise ValueError("远程附件 URL 为空或超过长度上限")
         timeout = httpx.Timeout(_DEFAULT_REMOTE_TIMEOUT_SECONDS)
         max_bytes = self._remote_download_max_bytes
         reference_segment_data = dict(segment_data or {})
@@ -1015,10 +1185,48 @@ class AttachmentRegistry:
             kind=kind,
             display_name=display_name,
             source_kind=source_kind,
-            source_ref=source_ref,
+            source_ref=url,
             mime_type=mime_type or None,
-            segment_data=segment_data,
+            segment_data=reference_segment_data,
         )
+
+    async def ensure_local_file(self, record: AttachmentRecord) -> AttachmentRecord:
+        await self.load()
+        if record.local_path and Path(record.local_path).is_file():
+            return record
+        source_ref = self._normalized_url_ref(record.source_ref)
+        if not source_ref:
+            return record
+        existing_uids = set(self._records)
+        refreshed = await self._register_remote_url_or_reference(
+            record.scope_key,
+            source_ref,
+            kind=record.kind,
+            display_name=record.display_name,
+            source_kind=record.source_kind,
+            source_ref=source_ref,
+            segment_data=record.segment_data,
+        )
+        if refreshed.local_path is None:
+            return refreshed
+        async with self._lock:
+            current = self._records.get(record.uid)
+            if current is None:
+                return refreshed
+            updated = replace(
+                current,
+                local_path=refreshed.local_path,
+                mime_type=refreshed.mime_type,
+                sha256=refreshed.sha256,
+                source_kind=refreshed.source_kind,
+                segment_data=refreshed.segment_data,
+            )
+            self._records[record.uid] = updated
+            if refreshed.uid != record.uid and refreshed.uid not in existing_uids:
+                self._records.pop(refreshed.uid, None)
+            self._prune_records()
+            await self._persist()
+            return self._records.get(record.uid, updated)
 
 
 async def register_message_attachments(
@@ -1389,6 +1597,11 @@ def _render_file_tag(
 ) -> bool:
     """Render a non-image attachment as a pending file send. Returns True on success."""
     if not record.local_path or not Path(record.local_path).is_file():
+        if _is_http_url(record.source_ref):
+            name_part = f" name={record.display_name}" if record.display_name else ""
+            history_parts.append(f"[文件 uid={uid}{name_part}]")
+            pending_files.append(record)
+            return True
         replacement = f"[文件 uid={uid} 缺少本地文件]"
         if strict:
             raise AttachmentRenderError(f"文件 UID 缺少本地文件，无法发送：{uid}")
@@ -1414,6 +1627,7 @@ async def dispatch_pending_file_sends(
     sender: Any,
     target_type: str,
     target_id: int,
+    registry: AttachmentRegistry | None = None,
 ) -> None:
     """Send pending file attachments collected by *render_message_with_attachments*.
 
@@ -1423,30 +1637,43 @@ async def dispatch_pending_file_sends(
     if not rendered.pending_file_sends or sender is None:
         return
     for record in rendered.pending_file_sends:
-        if not record.local_path or not Path(record.local_path).is_file():
+        send_record = record
+        if (
+            not send_record.local_path or not Path(send_record.local_path).is_file()
+        ) and registry is not None:
+            try:
+                send_record = await registry.ensure_local_file(send_record)
+            except Exception:
+                logger.warning(
+                    "[文件发送] 回源下载失败 uid=%s source=%s",
+                    send_record.uid,
+                    send_record.source_ref,
+                    exc_info=True,
+                )
+        if not send_record.local_path or not Path(send_record.local_path).is_file():
             logger.warning(
                 "[文件发送] 跳过：本地文件缺失 uid=%s path=%s",
-                record.uid,
-                record.local_path,
+                send_record.uid,
+                send_record.local_path,
             )
             continue
         try:
             if target_type == "group":
                 await sender.send_group_file(
                     target_id,
-                    record.local_path,
-                    name=record.display_name or None,
+                    send_record.local_path,
+                    name=send_record.display_name or None,
                 )
             else:
                 await sender.send_private_file(
                     target_id,
-                    record.local_path,
-                    name=record.display_name or None,
+                    send_record.local_path,
+                    name=send_record.display_name or None,
                 )
         except Exception:
             logger.warning(
                 "[文件发送] 发送失败（最佳努力） uid=%s target=%s:%s",
-                record.uid,
+                send_record.uid,
                 target_type,
                 target_id,
                 exc_info=True,

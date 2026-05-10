@@ -82,6 +82,28 @@ def _merge_attachment_refs(
     return merged
 
 
+def _iter_segments_deep(value: object) -> list[dict[str, Any]]:
+    """递归收集消息段，用于合并转发中的本地媒体登记。"""
+    segments: list[dict[str, Any]] = []
+    if isinstance(value, dict):
+        type_value = value.get("type")
+        data = value.get("data")
+        if type_value is not None and isinstance(data, dict):
+            segments.append(value)
+            content = data.get("content")
+            if isinstance(content, (list, dict)):
+                segments.extend(_iter_segments_deep(content))
+        else:
+            for child in value.values():
+                if isinstance(child, (list, dict)):
+                    segments.extend(_iter_segments_deep(child))
+    elif isinstance(value, list):
+        for child in value:
+            if isinstance(child, (list, dict)):
+                segments.extend(_iter_segments_deep(child))
+    return segments
+
+
 def _local_path_from_segment_source(source: Any) -> Path | None:
     raw_source = str(source or "").strip()
     if not raw_source:
@@ -471,15 +493,78 @@ class MessageSender:
             return
 
         try:
+            history_attachments = await self._register_local_segment_attachments(
+                "group",
+                group_id,
+                _iter_segments_deep(messages),
+            )
+            text_content = _append_attachment_refs(text_content, history_attachments)
             await self.history_manager.add_group_message(
                 group_id=group_id,
                 sender_id=self.bot_qq,
                 text_content=text_content,
                 sender_nickname="Bot",
                 group_name="",
+                attachments=history_attachments,
             )
         except Exception:
             logger.exception("[历史记录] 记录群合并转发失败: group=%s", group_id)
+
+    async def send_private_forward_message(
+        self,
+        user_id: int,
+        messages: list[dict[str, Any]],
+        *,
+        history_message: str,
+        auto_history: bool = True,
+    ) -> None:
+        """发送私聊合并转发，并将可读摘要写入历史。"""
+        if not self.config.is_private_allowed(user_id):
+            enabled = self.config.access_control_enabled()
+            reason = self.config.private_access_denied_reason(user_id) or "unknown"
+            logger.warning(
+                "[访问控制] 已拦截私聊合并转发: user=%s reason=%s (access enabled=%s)",
+                user_id,
+                reason,
+                enabled,
+            )
+            raise PermissionError(
+                "blocked by access control: "
+                f"type=private reason={reason} user_id={int(user_id)} enabled={enabled}"
+            )
+
+        send_private_forward = getattr(self.onebot, "send_private_forward_msg", None)
+        if not callable(send_private_forward):
+            raise RuntimeError("OneBot 客户端不支持私聊合并转发")
+
+        logger.info(
+            "[发送私聊合并转发] 目标用户:%s | 节点数:%s", user_id, len(messages)
+        )
+        try:
+            await send_private_forward(user_id, messages)
+        except TypeError:
+            await send_private_forward(user_id=user_id, messages=messages)
+
+        text_content = str(history_message or "").strip()
+        if not auto_history or not text_content:
+            return
+
+        try:
+            history_attachments = await self._register_local_segment_attachments(
+                "private",
+                user_id,
+                _iter_segments_deep(messages),
+            )
+            text_content = _append_attachment_refs(text_content, history_attachments)
+            await self.history_manager.add_private_message(
+                user_id=user_id,
+                text_content=text_content,
+                display_name="Bot",
+                user_name="Bot",
+                attachments=history_attachments,
+            )
+        except Exception:
+            logger.exception("[历史记录] 记录私聊合并转发失败: user=%s", user_id)
 
     async def _send_private_segments(
         self,

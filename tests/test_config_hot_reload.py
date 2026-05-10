@@ -389,6 +389,11 @@ def test_apply_config_updates_hot_reloads_attachment_config() -> None:
             searxng_url="",
             ai_request_max_retries=2,
             attachment_remote_download_max_size_mb=8,
+            attachment_cache_max_total_size_mb=512,
+            attachment_cache_max_records=300,
+            attachment_cache_max_age_days=14,
+            attachment_url_reference_max_records=150,
+            attachment_url_max_length=4096,
             chat_model=SimpleNamespace(
                 model_name="chat",
                 queue_interval_seconds=1.0,
@@ -431,7 +436,13 @@ def test_apply_config_updates_hot_reloads_attachment_config() -> None:
 
     apply_config_updates(
         updated,
-        {"attachment_remote_download_max_size_mb": (25, 8)},
+        {
+            "attachment_cache_max_total_size_mb": (0, 512),
+            "attachment_cache_max_records": (2000, 300),
+            "attachment_cache_max_age_days": (7, 14),
+            "attachment_url_reference_max_records": (2000, 150),
+            "attachment_url_max_length": (8192, 4096),
+        },
         context,
     )
 

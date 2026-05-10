@@ -25,6 +25,58 @@ def _load_script() -> ModuleType:
 release_notes = _load_script()
 
 
+def _patch_release_git_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_git_stdout(
+        project_root: Path,
+        *args: str,
+        check: bool = True,
+    ) -> str:
+        del project_root, check
+        if args == ("describe", "--tags", "--abbrev=0", "v1.2.3^"):
+            return "v1.2.2"
+        if args == (
+            "log",
+            "v1.2.2..v1.2.3",
+            "--grep=^feat",
+            "--pretty=format:* %s (%h)",
+        ):
+            return "* feat: add release feature (abc1234)"
+        if args == (
+            "log",
+            "v1.2.2..v1.2.3",
+            "--grep=^fix",
+            "--pretty=format:* %s (%h)",
+        ):
+            return "* fix: patch release bug (def5678)"
+        if args == (
+            "log",
+            "v1.2.2..v1.2.3",
+            "--grep=^feat\\|^fix",
+            "--invert-grep",
+            "--pretty=format:* %s (%h)",
+        ):
+            return "* docs: update release docs (fedcba9)"
+        raise AssertionError(f"Unexpected git command: {args!r}")
+
+    monkeypatch.setattr(release_notes, "_git_stdout", fake_git_stdout)
+
+
+def _patch_empty_release_git_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_git_stdout(
+        project_root: Path,
+        *args: str,
+        check: bool = True,
+    ) -> str:
+        del project_root, check
+        if args == ("describe", "--tags", "--abbrev=0", "v1.2.3^"):
+            return "v1.2.2"
+        if args[0] == "log":
+            return ""
+        raise AssertionError(f"Unexpected git command: {args!r}")
+
+    monkeypatch.setattr(release_notes, "_git_stdout", fake_git_stdout)
+
+
 def _write_release_project(
     root: Path,
     *,
@@ -117,8 +169,12 @@ def test_validate_release_versions_rejects_app_manifest_mismatch(
         )
 
 
-def test_write_release_notes_uses_latest_changelog_entry(tmp_path: Path) -> None:
+def test_write_release_notes_uses_latest_changelog_entry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _write_release_project(tmp_path)
+    _patch_release_git_history(monkeypatch)
     output = tmp_path / "release_notes.md"
 
     entry = release_notes.write_release_notes(
@@ -128,7 +184,8 @@ def test_write_release_notes_uses_latest_changelog_entry(tmp_path: Path) -> None
     )
 
     assert entry.version == "v1.2.3"
-    assert output.read_text(encoding="utf-8") == (
+    rendered = output.read_text(encoding="utf-8")
+    assert rendered.startswith(
         "## v1.2.3 测试版本\n"
         "\n"
         "这是一段发布说明。\n"
@@ -137,11 +194,60 @@ def test_write_release_notes_uses_latest_changelog_entry(tmp_path: Path) -> None
         "\n"
         "- 变更一\n"
         "- 变更二\n"
+        "\n"
+        "---\n"
+        "\n"
+        "## 📝 Detailed Changes\n"
+        "\n"
+        "### 🚀 Features\n"
+        "* feat: add release feature "
+    )
+    assert "### 🐛 Bug Fixes\n* fix: patch release bug " in rendered
+    assert "### 🛠 Maintenance & Others\n* docs: update release docs " in rendered
+
+
+def test_render_detailed_changes_groups_commits_by_conventional_type(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_release_project(tmp_path)
+    _patch_release_git_history(monkeypatch)
+
+    rendered = release_notes.render_detailed_changes(
+        tag_name="v1.2.3",
+        project_root=tmp_path,
+    )
+
+    assert rendered.startswith("## 📝 Detailed Changes\n")
+    assert "### 🚀 Features\n* feat: add release feature " in rendered
+    assert "### 🐛 Bug Fixes\n* fix: patch release bug " in rendered
+    assert "### 🛠 Maintenance & Others\n* docs: update release docs " in rendered
+    assert "_No commit details found" not in rendered
+
+
+def test_render_detailed_changes_handles_empty_ranges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_release_project(tmp_path)
+    _patch_empty_release_git_history(monkeypatch)
+
+    rendered = release_notes.render_detailed_changes(
+        tag_name="v1.2.3",
+        project_root=tmp_path,
+    )
+
+    assert rendered == (
+        "## 📝 Detailed Changes\n\n_No commit details found for this release._\n"
     )
 
 
-def test_cli_notes_writes_output_file(tmp_path: Path) -> None:
+def test_cli_notes_writes_output_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _write_release_project(tmp_path)
+    _patch_release_git_history(monkeypatch)
     output = tmp_path / "notes.md"
 
     exit_code = cast(
@@ -161,3 +267,4 @@ def test_cli_notes_writes_output_file(tmp_path: Path) -> None:
 
     assert exit_code == 0
     assert output.read_text(encoding="utf-8").startswith("## v1.2.3 测试版本")
+    assert "\n---\n\n## 📝 Detailed Changes\n" in output.read_text(encoding="utf-8")

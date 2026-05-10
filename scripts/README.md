@@ -62,13 +62,13 @@ uv run python scripts/reembed_cognitive.py -v
 
 ### release_notes.py — 发布版本校验与 Release notes 生成
 
-Release workflow 使用这个脚本在构建前校验版本一致性，并在发布阶段从 `CHANGELOG.md` 最新版本条目生成 GitHub Release 说明。
+Release workflow 使用这个脚本在构建前校验版本一致性，并在发布阶段从 `CHANGELOG.md` 最新版本条目生成 GitHub Release 说明。Release notes 会先写入 changelog 自动提取内容，再用 `---` 分隔并追加 `Detailed Changes`，按上一个 tag 到当前 tag 的 commit 主题分类列出 features、bug fixes 和 maintenance/others。
 
 ```bash
 # 校验 tag、构建版本和 CHANGELOG 最新版本一致
 uv run python scripts/release_notes.py validate --tag v3.4.0
 
-# 从 CHANGELOG 最新条目生成 Release notes
+# 从 CHANGELOG 最新条目生成 Release notes，并追加 Detailed Changes
 python3 scripts/release_notes.py notes --tag v3.4.0 --output release_notes.md
 ```
 

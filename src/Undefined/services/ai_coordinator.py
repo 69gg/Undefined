@@ -572,6 +572,7 @@ class AICoordinator:
                         sender=self.sender,
                         target_type="private",
                         target_id=user_id,
+                        registry=self.ai.attachment_registry,
                     )
             except asyncio.CancelledError:
                 logger.info("[私聊回复] 任务被取消（投机抢占）: user=%s", user_id)

@@ -97,7 +97,14 @@ _CONFIG_HOT_RELOAD_KEYS: set[str] = {
 
 _SEARCH_KEYS: set[str] = {"searxng_url"}
 
-_ATTACHMENT_KEYS: set[str] = {"attachment_remote_download_max_size_mb"}
+_ATTACHMENT_KEYS: set[str] = {
+    "attachment_remote_download_max_size_mb",
+    "attachment_cache_max_total_size_mb",
+    "attachment_cache_max_records",
+    "attachment_cache_max_age_days",
+    "attachment_url_reference_max_records",
+    "attachment_url_max_length",
+}
 
 _MESSAGE_BATCHER_KEYS: set[str] = {
     "message_batcher",

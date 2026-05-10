@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 import tomllib
 from typing import Any, cast
@@ -43,10 +44,42 @@ class ReleaseValidationResult:
     sources: tuple[VersionSource, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class DetailedChangeSection:
+    heading: str
+    commits: tuple[str, ...]
+
+
 def _read_required_text(path: Path) -> str:
     if not path.is_file():
         raise ReleaseValidationError(f"Missing required file: {path}")
     return path.read_text(encoding="utf-8")
+
+
+def _run_git(
+    project_root: Path,
+    *args: str,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=project_root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if check and result.returncode != 0:
+        command = " ".join(("git", *args))
+        raise ReleaseValidationError(
+            f"Git command failed while generating release notes: {command}\n"
+            f"{result.stderr.strip()}"
+        )
+    return result
+
+
+def _git_stdout(project_root: Path, *args: str, check: bool = True) -> str:
+    return _run_git(project_root, *args, check=check).stdout.strip()
 
 
 def _require_non_empty_string(value: object, label: str) -> str:
@@ -192,6 +225,101 @@ def render_release_notes(entry: ChangelogEntry) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _previous_release_ref(project_root: Path, tag_name: str) -> str:
+    normalized_tag = normalize_version(tag_name)
+    previous_tag = _git_stdout(
+        project_root,
+        "describe",
+        "--tags",
+        "--abbrev=0",
+        f"{normalized_tag}^",
+        check=False,
+    )
+    if previous_tag:
+        return previous_tag
+    return _git_stdout(project_root, "rev-list", "--max-parents=0", "HEAD")
+
+
+def _categorized_commits(
+    project_root: Path,
+    revision_range: str,
+    *,
+    grep: str,
+    invert_grep: bool = False,
+) -> tuple[str, ...]:
+    args = ["log", revision_range, f"--grep={grep}"]
+    if invert_grep:
+        args.append("--invert-grep")
+    args.append("--pretty=format:* %s (%h)")
+    output = _git_stdout(project_root, *args)
+    if not output:
+        return ()
+    return tuple(line for line in output.splitlines() if line.strip())
+
+
+def build_detailed_change_sections(
+    *,
+    tag_name: str,
+    project_root: Path = _PROJECT_ROOT,
+) -> tuple[DetailedChangeSection, ...]:
+    root = project_root.resolve()
+    normalized_tag = normalize_version(tag_name)
+    previous_ref = _previous_release_ref(root, normalized_tag)
+    revision_range = f"{previous_ref}..{normalized_tag}"
+    return (
+        DetailedChangeSection(
+            "### 🚀 Features",
+            _categorized_commits(root, revision_range, grep="^feat"),
+        ),
+        DetailedChangeSection(
+            "### 🐛 Bug Fixes",
+            _categorized_commits(root, revision_range, grep="^fix"),
+        ),
+        DetailedChangeSection(
+            "### 🛠 Maintenance & Others",
+            _categorized_commits(
+                root,
+                revision_range,
+                grep="^feat\\|^fix",
+                invert_grep=True,
+            ),
+        ),
+    )
+
+
+def render_detailed_changes(
+    *,
+    tag_name: str,
+    project_root: Path = _PROJECT_ROOT,
+) -> str:
+    lines = ["## 📝 Detailed Changes"]
+    has_commits = False
+    for section in build_detailed_change_sections(
+        tag_name=tag_name, project_root=project_root
+    ):
+        if not section.commits:
+            continue
+        has_commits = True
+        lines.extend(["", section.heading])
+        lines.extend(section.commits)
+    if not has_commits:
+        lines.extend(["", "_No commit details found for this release._"])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_full_release_notes(
+    *,
+    entry: ChangelogEntry,
+    tag_name: str,
+    project_root: Path = _PROJECT_ROOT,
+) -> str:
+    changelog_notes = render_release_notes(entry).rstrip()
+    detailed_changes = render_detailed_changes(
+        tag_name=tag_name, project_root=project_root
+    ).rstrip()
+    return f"{changelog_notes}\n\n---\n\n{detailed_changes}\n"
+
+
 def write_release_notes(
     *,
     output_path: Path,
@@ -201,7 +329,14 @@ def write_release_notes(
     validate_release_versions(tag_name=tag_name, project_root=project_root)
     entry = read_latest_changelog_entry(project_root)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(render_release_notes(entry), encoding="utf-8")
+    output_path.write_text(
+        render_full_release_notes(
+            entry=entry,
+            tag_name=tag_name or entry.version,
+            project_root=project_root,
+        ),
+        encoding="utf-8",
+    )
     return entry
 
 

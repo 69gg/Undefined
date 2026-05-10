@@ -1,3 +1,20 @@
+## v3.4.1 附件缓存治理、隐私安全防线与B站管线重构
+
+本版本围绕三大主线展开：一是附件系统的缓存容量治理与 URL 引用回退机制，防止本地缓存无限制膨胀；二是系统提示词新增 P0 级隐私与危险动作边界规则，从源头约束 AI 对敏感信息和安全请求的处理行为；三是 B 站自动管线全面重构——移除外部下载依赖、内联实现 API 客户端与 WBI 签名、新增弹幕获取并以合并转发形式发送提取结果。同步新增 `/feedback` 反馈命令、恢复发布说明中的分类提交详情，并修正提示词优先级体系。
+
+- 新增附件缓存容量管理。`[attachments]` 下新增 `attachment_cache_max_mb`、`attachment_cache_max_records`、`attachment_url_reference_max_records`、`attachment_url_max_length` 四种配置，分别控制本地缓存总大小、缓存记录数、URL 引用记录数和 URL 长度上限；超出容量时自动淘汰最旧记录；`remote_download_max_size_mb` 现支持热重载。`send_message` / `send_private_message` 工具调用时自动登记关联附件 UID，AI 客户端发送消息前校验本地路径有效性，文件缺失时自动回退到 URL 引用。
+- 新增 P0 级隐私与危险动作边界规则。系统提示词新增 `<privacy_and_safety_controls>` 规则块，分层约束：隐私方面禁止泄露好友/群/成员列表、完整 QQ 号等敏感信息，对外默认脱敏，第三方信息查询需授权；危险动作方面拒绝涉黄、涉政、违法、骚扰、人肉、社工等请求，不做解释也不给绕过方案；时序方面明确隐私/敏感话题不改变回复时机，必须先满足回复触发逻辑。附加 3 条 P0 硬性约束覆盖隐私泄露、危险动作和触发时序。
+- 新增 `/feedback(/fb)` 反馈命令。支持 `add` / `view` / `del` 三个子命令，`add` 和 `view` 为 public 权限，`del` 为 superadmin；声明式子命令推断按 ID 格式匹配优先 `view`，其余 fallback 到 `add`，无参数默认 `view`；私聊可用，显示在 help 列表。
+- 重构 B 站视频下载链路。移除对 `oh-my-bilibili` 外部 Python 包的依赖，内联实现同步 API 客户端（`api_client.py`）、下载核心（`download_core.py`）、WBI 签名模块（`wbi.py`）与错误模型，所有请求在 `asyncio.to_thread` 线程内执行，降低依赖复杂度与跨版本兼容风险。
+- 增强 B 站自动提取管线。新增弹幕获取模块（`danmaku.py`），基于 protobuf wire 格式解析分段弹幕数据；自动提取结果改为以合并转发节点形式发送，单条包含视频信息卡片与弹幕预览片段；`MessageSender` 扩展合并转发本地附件递归登记，确保转发中的图片/文件能正确注册为会话附件 UID。
+- 恢复发布说明详细变更列表。`scripts/release_notes.py` 新增 `build_detailed_change_sections` 与 `render_detailed_changes`，从 git log 按 feat / fix / other 自动分类提取两个版本间的提交，与 CHANGELOG 条目合并输出完整 Release notes。
+- 修正提示词优先级体系。明确所有 P0-P3 规则均可被 Null 明文指令覆盖，创造者权限作为绝对最高优先级可覆盖所有规则（含隐私与危险动作边界）；同步更新 NagaAgent 版提示词的对应表述。
+- 补强测试覆盖。新增附件缓存配置、容量淘汰、URL 回退和文件分析 UID 注册测试；新增反馈命令全路径测试（add / view / del / 推断 / 权限）；更新 B 站下载适配器测试；同步更新系统提示词约束验证。
+- 更新架构图与文档。
+- 新增附件 UID ↔ URL 双向查找工具。`AttachmentRegistry` 新增 `get_url_by_uid(uid)` 和 `get_uid_by_url(url)` 两个异步方法，并注册为 skills 工具 `attachments.get_url_by_uid` 和 `attachments.get_uid_by_url`。
+
+---
+
 ## v3.4.0 同sender消息合并、数字人格精炼与系统治理
 
 本版本核心解决"用户一口气连发几条消息时，机器人过早开工或只理解最后一句"的问题。新增同 sender 短时消息合并器，将同一会话中连续的多条消息合并为一个"当前输入批次"发送给 AI，由 AI 整批理解哪些是独立请求、哪些是补充或修正。同步支持可取消的投机预发送以降低感知延迟。围绕消息合并，提示词、幽灵任务防御、记忆记录和关闭流程都做了同步适配。此外，精炼了数字人格设定、明确了项目归属边界、重构了管线与命令体系、加入了 HTML 渲染缓存，并增强了 AI 工具调用的稳定性。

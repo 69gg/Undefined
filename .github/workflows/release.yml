@@ -542,7 +542,7 @@ jobs:
           path: release-downloads
           merge-multiple: true
 
-      - name: Build release notes
+      - name: Build release notes with detailed changes
         shell: bash
         run: python3 scripts/release_notes.py notes --tag "${{ github.ref_name }}" --output release_notes.md
 
