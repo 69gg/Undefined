@@ -143,13 +143,13 @@ def _build_danmaku_groups(
     for group_index, batch in enumerate(_chunked(danmaku, batch_size), start=1):
         start = (group_index - 1) * batch_size + 1
         end = start + len(batch) - 1
-        inner_nodes = [
-            _node(_build_danmaku_text(item), name=_format_progress(item.progress_ms))
+        segments: list[dict[str, Any]] = [
+            {"type": "text", "data": {"text": _build_danmaku_text(item)}}
             for item in batch
         ]
         groups.append(
             _node(
-                inner_nodes,
+                segments,
                 name=f"弹幕 {start}-{end}",
             )
         )
@@ -179,14 +179,13 @@ def _build_forward_nodes(
         video_content = video_status
     video_node = _node(video_content, name="视频")
 
-    danmaku_content: str | list[dict[str, Any]]
     if danmaku_error:
-        danmaku_content = f"弹幕获取失败: {danmaku_error}"
+        danmaku_node = _node(f"弹幕获取失败: {danmaku_error}", name="弹幕")
+        return [info_node, video_node, danmaku_node]
     else:
         danmaku_items = danmaku or []
-        danmaku_content = _build_danmaku_groups(danmaku_items, batch_size=batch_size)
-    danmaku_node = _node(danmaku_content, name="弹幕")
-    return [info_node, video_node, danmaku_node]
+        danmaku_groups = _build_danmaku_groups(danmaku_items, batch_size=batch_size)
+        return [info_node, video_node] + danmaku_groups
 
 
 async def _send_forward(

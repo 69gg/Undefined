@@ -535,8 +535,6 @@ class MessageSender:
 
         send_private_forward = getattr(self.onebot, "send_private_forward_msg", None)
         if not callable(send_private_forward):
-            send_private_forward = getattr(self.onebot, "send_forward_msg", None)
-        if not callable(send_private_forward):
             raise RuntimeError("OneBot 客户端不支持私聊合并转发")
 
         logger.info(
