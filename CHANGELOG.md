@@ -11,6 +11,11 @@
 - 修正提示词优先级体系。明确所有 P0-P3 规则均可被 Null 明文指令覆盖，创造者权限作为绝对最高优先级可覆盖所有规则（含隐私与危险动作边界）；同步更新 NagaAgent 版提示词的对应表述。
 - 补强测试覆盖。新增附件缓存配置、容量淘汰、URL 回退和文件分析 UID 注册测试；新增反馈命令全路径测试（add / view / del / 推断 / 权限）；更新 B 站下载适配器测试；同步更新系统提示词约束验证。
 - 更新架构图与文档。
+- 新增附件 UID ↔ URL 双向查找工具。`AttachmentRegistry` 新增 `get_url_by_uid(uid)` 和 `get_uid_by_url(url)` 两个异步方法，并注册为 skills 工具 `attachments.get_url_by_uid` 和 `attachments.get_uid_by_url`。
+- 修复 B 站合并转发弹幕嵌套问题。`_build_danmaku_groups` 内部弹幕条目改为直接文本段而非嵌套合并转发节点，`_build_forward_nodes` 中弹幕组扁平化为顶层节点，避免部分 OneBot 适配器拒绝嵌套节点。
+- 修复私聊合并转发不安全回退。`send_private_forward_msg` 不可用时不再回退到群合并转发 API `send_forward_msg`，防止私聊消息误发到群聊。
+- 修复 WBI 签名异步/同步缓存竞态。`get_mixin_key` 与 `get_mixin_key_sync` 的全局缓存拆分独立，消除异步弹幕请求与同步 API 请求并发时共享变量不一致的风险。
+- 修复 B 站发送异常路径 `video_info` 空指针风险。异常处理块中增加 `video_info` 为 `None` 时的防御检查。
 
 ---
 
