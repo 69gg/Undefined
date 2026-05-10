@@ -115,15 +115,30 @@ def _build_video_history_message(
     video_status: str,
     danmaku_count: int,
 ) -> str:
+    stats = info.stats
     lines = [
         f"[Bilibili] 「{info.title}」",
         f"UP主: {info.up_name}",
-        f"视频: {video_status}",
-        f"弹幕: {danmaku_count} 条",
-        info.url,
+        f"时长: {_format_duration(info.duration)}",
+        (
+            "数据: "
+            f"播放 {_format_count(stats.view)} | "
+            f"点赞 {_format_count(stats.like)} | "
+            f"投币 {_format_count(stats.coin)} | "
+            f"收藏 {_format_count(stats.favorite)} | "
+            f"弹幕 {_format_count(stats.danmaku)} | "
+            f"评论 {_format_count(stats.reply)} | "
+            f"分享 {_format_count(stats.share)}"
+        ),
     ]
     if quality_name and file_size_mb is not None:
-        lines.insert(3, f"清晰度: {quality_name} | 大小: {file_size_mb:.1f}MB")
+        lines.append(f"清晰度: {quality_name} | 大小: {file_size_mb:.1f}MB")
+    lines.append(f"视频: {video_status}")
+    lines.append(f"弹幕: {danmaku_count} 条")
+    desc = info.desc.strip()
+    if desc:
+        lines.append(f"简介: {desc}")
+    lines.append(info.url)
     return "\n".join(lines)
 
 
