@@ -862,6 +862,25 @@ class AttachmentRegistry:
     ) -> AttachmentRecord | None:
         return self.resolve(uid, scope_from_context(context))
 
+    async def get_url_by_uid(self, uid: str) -> str | None:
+        """通过附件 UID 获取 source_ref（URL）。"""
+        await self.load()
+        record = self.get(uid)
+        if record is None or not record.source_ref.strip():
+            return None
+        return record.source_ref.strip()
+
+    async def get_uid_by_url(self, url: str) -> str | None:
+        """通过 URL 查找对应的附件 UID。"""
+        await self.load()
+        url = url.strip()
+        if not url:
+            return None
+        for record in self._records.values():
+            if record.source_ref.strip() == url:
+                return record.uid
+        return None
+
     def _build_uid(self, prefix: str) -> str:
         from uuid import uuid4
 

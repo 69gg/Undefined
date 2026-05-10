@@ -349,6 +349,8 @@ async def send_bilibili_video(
         try:
             if video_info is None:
                 video_info = await get_video_info(bvid, cookie=cookie)
+            if video_info is None:
+                return f"视频处理失败：无法获取视频信息: {exc}"
             danmaku, danmaku_error = await _fetch_danmaku_best_effort(
                 video_info,
                 cookie=cookie,

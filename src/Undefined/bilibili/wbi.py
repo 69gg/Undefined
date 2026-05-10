@@ -85,10 +85,12 @@ _MIXIN_KEY_ENC_TAB: tuple[int, ...] = (
 )
 
 _WBI_CACHE_TTL_SECONDS = 3600
-_cached_mixin_key: str | None = None
-_cached_at: float = 0.0
-_cache_lock = asyncio.Lock()
-_sync_cache_lock = threading.Lock()
+_cached_mixin_key_async: str | None = None
+_cached_at_async: float = 0.0
+_cached_mixin_key_sync: str | None = None
+_cached_at_sync: float = 0.0
+_cache_lock_async = asyncio.Lock()
+_cache_lock_sync = threading.Lock()
 
 
 def parse_cookie_string(cookie: str = "") -> dict[str, str]:
@@ -190,28 +192,28 @@ async def get_mixin_key(
     force_refresh: bool = False,
 ) -> str:
     """获取可复用的 mixin_key。"""
-    global _cached_mixin_key, _cached_at
+    global _cached_mixin_key_async, _cached_at_async
 
     now = time.time()
     if (
         not force_refresh
-        and _cached_mixin_key
-        and now - _cached_at < _WBI_CACHE_TTL_SECONDS
+        and _cached_mixin_key_async
+        and now - _cached_at_async < _WBI_CACHE_TTL_SECONDS
     ):
-        return _cached_mixin_key
+        return _cached_mixin_key_async
 
-    async with _cache_lock:
+    async with _cache_lock_async:
         now = time.time()
         if (
             not force_refresh
-            and _cached_mixin_key
-            and now - _cached_at < _WBI_CACHE_TTL_SECONDS
+            and _cached_mixin_key_async
+            and now - _cached_at_async < _WBI_CACHE_TTL_SECONDS
         ):
-            return _cached_mixin_key
+            return _cached_mixin_key_async
 
-        _cached_mixin_key = await _refresh_mixin_key(client)
-        _cached_at = time.time()
-        return _cached_mixin_key
+        _cached_mixin_key_async = await _refresh_mixin_key(client)
+        _cached_at_async = time.time()
+        return _cached_mixin_key_async
 
 
 def sign_params(
@@ -293,28 +295,28 @@ def get_mixin_key_sync(
     force_refresh: bool = False,
 ) -> str:
     """同步获取可复用的 mixin_key。"""
-    global _cached_mixin_key, _cached_at
+    global _cached_mixin_key_sync, _cached_at_sync
 
     now = time.time()
     if (
         not force_refresh
-        and _cached_mixin_key
-        and now - _cached_at < _WBI_CACHE_TTL_SECONDS
+        and _cached_mixin_key_sync
+        and now - _cached_at_sync < _WBI_CACHE_TTL_SECONDS
     ):
-        return _cached_mixin_key
+        return _cached_mixin_key_sync
 
-    with _sync_cache_lock:
+    with _cache_lock_sync:
         now = time.time()
         if (
             not force_refresh
-            and _cached_mixin_key
-            and now - _cached_at < _WBI_CACHE_TTL_SECONDS
+            and _cached_mixin_key_sync
+            and now - _cached_at_sync < _WBI_CACHE_TTL_SECONDS
         ):
-            return _cached_mixin_key
+            return _cached_mixin_key_sync
 
-        _cached_mixin_key = _refresh_mixin_key_sync(client)
-        _cached_at = time.time()
-        return _cached_mixin_key
+        _cached_mixin_key_sync = _refresh_mixin_key_sync(client)
+        _cached_at_sync = time.time()
+        return _cached_mixin_key_sync
 
 
 def build_signed_params_sync(
