@@ -23,6 +23,8 @@
 
 ### _与 [NagaAgent](https://github.com/Xxiii8322766509/NagaAgent) 进行联动！_
 
+> 学业繁忙，暂缓更新至六月下旬，在此期间仅作必要bugfix。
+
 ---
 
 ## ⚡ 立即体验
