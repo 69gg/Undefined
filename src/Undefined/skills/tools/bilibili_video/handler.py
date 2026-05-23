@@ -23,7 +23,6 @@ def _resolve_target(
             return None, "target_id 必须是整数"
         return (target_type, target_id), None  # type: ignore[return-value]
 
-    # 从上下文推断
     request_type = context.get("request_type")
     if request_type == "group":
         group_id = context.get("group_id")
@@ -34,7 +33,6 @@ def _resolve_target(
         if user_id:
             return ("private", int(user_id)), None
 
-    # 兜底
     group_id = context.get("group_id")
     if group_id:
         return ("group", int(group_id)), None
@@ -51,13 +49,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not video_id:
         return "video_id 不能为空"
 
-    # 解析目标
     target, error = _resolve_target(args, context)
     if error or target is None:
         return f"目标解析失败: {error or '参数错误'}"
     target_type, target_id = target
 
-    # 获取配置
     runtime_config = context.get("runtime_config")
     sender = context.get("sender")
     onebot = context.get("onebot_client") or context.get("onebot")
@@ -67,7 +63,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not sender or not onebot:
         return "缺少必要的运行时组件（sender/onebot）"
 
-    # 读取 bilibili 配置
     cookie = ""
     prefer_quality = 80
     max_duration = 600

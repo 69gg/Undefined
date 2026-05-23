@@ -23,7 +23,6 @@ class JobQueue:
         self._failed_dir = base / "failed"
         for d in (self._pending_dir, self._processing_dir, self._failed_dir):
             d.mkdir(parents=True, exist_ok=True)
-        # 启动时清理所有遗留的 lock 文件
         stale_lock_count = 0
         for d in (self._pending_dir, self._processing_dir, self._failed_dir):
             for lock_file in d.glob("*.lock"):
@@ -65,7 +64,6 @@ class JobQueue:
 
                     with open(dst, "r", encoding="utf-8") as fh:
                         data = json.load(fh)
-                    # 清理遗留的 lock 文件
                     lock_file = f.with_name(f"{f.name}.lock")
                     lock_file.unlink(missing_ok=True)
                     return f.stem, data
@@ -123,7 +121,6 @@ class JobQueue:
         data = await read_json(src) or {}
         data["_retry_count"] = data.get("_retry_count", 0) + 1
         data["_last_error"] = error
-        # 先原子更新 processing 内容，再原子移动到 pending
         await write_json(src, data)
         await asyncio.to_thread(lambda: os.replace(src, dst))
         logger.info(

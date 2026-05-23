@@ -11,27 +11,43 @@ Undefined 欢迎开发者参与共建和进行二次开发！
 ```text
 src/Undefined/
 ├── changelog.py   # CHANGELOG.md 解析与版本查询公共层
-├── ai/            # AI 运行时核心组件 (client, prompt, tooling 工具组装, summary 短期摘要, multimodal 多模态)
+├── ai/            # AI 运行时核心（子包 + 根级 shim：client.py / llm.py / prompts.py / multimodal.py）
+│   ├── client/    # AIClient 组合：setup / queue / ask_loop
+│   ├── llm/       # ModelRequester、streaming、thinking、sanitize
+│   ├── prompts/   # PromptBuilder、system_context、cognitive 片段
+│   └── multimodal/# 多模态检测、解析与分析
+├── attachments/   # 附件注册、渲染、作用域隔离（attachments.py shim）
 ├── arxiv/         # arXiv 论文解析、元信息获取、PDF 下载与发送
 ├── bilibili/      # B站视频流解析、分段下载与异步发送
-├── cognitive/     # 认知记忆系统底座 (向量存储, 史官合并/改写, 侧写生成, 任务队列)
+├── cognitive/     # 认知记忆系统（service/ 门面 + historian/ 史官后台）
+├── config/        # 配置系统（parsers/ 域解析 + load_sections/ 分段加载 + loader shim）
+├── handlers/      # OneBot 消息分流（message_flow / poke / repeat / auto_extract；handlers.py shim）
+├── onebot/        # OneBot WebSocket 客户端（onebot.py shim）
 ├── skills/        # 技能插件核心目录 (存放所有的工具与智能体)
 │   ├── tools/           # 基础原子的工具 (独立的功能单元，如读写文件、网络请求等)
 │   ├── toolsets/        # 聚合工具集 (分组后的工具组)
 │   │   └── cognitive/   # 认知记忆主动暴露工具 (search_events, get_profile 等)
-│   ├── agents/          # 智能体 (独立自主的子 AI，负责处理诸如 Web 搜索、文件分析的具体长时任务)
+│   ├── agents/          # 智能体 (含 runner/ 通用循环子包)
 │   ├── commands/        # 中心化斜杠指令系统 (实现如 /help, /stats, /admin 等平台功能)
+│   ├── pipelines/     # 自动提取管线 (bilibili / arxiv / github 等)
 │   └── anthropic_skills/# Anthropic 协议集成的外部 Skills (兼容 SKILL.md 格式)
-├── config/        # 配置系统 (loader.py TOML 解析, models.py 数据模型, hot_reload.py 热更新)
 ├── api/           # Management API + Runtime API
-│   ├── routes/    # 路由子模块 (chat, tools, naga, system, memes, memory, cognitive, health)
+│   ├── routes/    # 路由子模块 (chat, tools, naga/, system, memes, memory, cognitive, health)
 │   ├── app.py     # aiohttp 服务主入口 (薄包装委派到 routes/)
 │   └── _openapi.py # OpenAPI 文档生成
-├── memes/         # 表情包库 (两阶段 AI 管线, SQLite + ChromaDB)
-├── services/      # 核心运行服务 (Queue 任务队列, Command 命令分发, Security 安全防护拦截)
-├── utils/         # 通用支持工具组 (io.py 异步原子读写, history.py, coerce.py 类型强转, fake_at.py 假@检测)
-├── handlers.py    # 最外层 OneBot 消息分流处理层
-└── onebot.py      # OneBot WebSocket 客户端核心连接
+├── memes/         # 表情包库 (_service 门面 + ingest/ + search/ + store + vector_store)
+├── services/      # 核心运行服务
+│   ├── coordinator/     # AICoordinator mixins（ai_coordinator.py shim）
+│   ├── commands/          # CommandDispatcher mixins（stats / bugfix）
+│   ├── message_batcher/   # 同 sender 短时合并（message_batcher.py shim）
+│   ├── command.py         # 命令分发门面 + shim 组合
+│   ├── queue_manager.py   # 车站-列车队列
+│   └── security.py        # 注入检测与速率限制
+├── utils/         # 通用支持工具组 (__init__.py 聚合 io/paths/resources；io.py 异步原子读写, history.py, coerce.py 类型强转)
+├── handlers.py    # compatibility shim → handlers/
+├── onebot.py      # compatibility shim → onebot/
+├── attachments.py # compatibility shim → attachments/
+└── ai_coordinator.py  # compatibility shim → services/coordinator/
 ```
 
 ## 开发指南
@@ -96,3 +112,107 @@ bash scripts/install_git_hooks.sh
 - 当提交包含 JS / Tauri / WebUI 前端相关改动时，还会自动执行 `Biome + TypeScript + cargo fmt/check`
 
 > **注意**：项目严格遵守类型注释规范，`mypy .` 通过是代码入库的前提条件；跨平台控制台相关改动则以 `npm run check` 通过为准。
+
+## 注释规范
+
+库化重构期间，各 Track 在拆分与注释 Wave 中须遵守以下 docstring 与行内注释约定。目标：提升可读性、支撑 `fuck-u-code` 注释比例达标（<30%），且**不改变运行时行为**。
+
+### 模块 docstring
+
+每个 `.py` 文件（shim 除外）顶部须有**一行摘要** + 可选段落说明职责边界：
+
+```python
+"""OneBot WebSocket 客户端连接管理。
+
+负责与 NapCat/Lagrange 建立 WS 连接、心跳与事件分发；不处理业务消息逻辑。
+"""
+```
+
+- 使用中文或英文均可，与同目录现有风格保持一致。
+- Shim 文件仅保留一行：`# <path>.py — compatibility shim; do not add logic here.`
+
+### 类 docstring
+
+公开类（`class X` 无 leading `_`）须有 docstring，说明**职责**与**主要协作对象**：
+
+```python
+class CognitiveService:
+    """认知记忆运行时入口。
+
+    协调向量检索、侧写读写与史官后台任务队列；由 main 进程持有单例。
+    """
+```
+
+- 内部辅助类（`_Foo`、`SkillStats` 等 dataclass）鼓励简短一行说明。
+- 禁止复制类型签名（mypy 已覆盖）；重点写「为什么存在」。
+
+### 公开方法 / 函数 docstring
+
+模块级公开函数与类公开方法（无 leading `_`）须有 docstring，推荐 Google 风格精简版：
+
+```python
+def get_config(strict: bool = True) -> Config:
+    """获取全局配置单例。
+
+    Args:
+        strict: 为 True 时缺少必填项则抛错；False 时使用默认值填充。
+
+    Returns:
+        已加载的 Config 实例。
+    """
+```
+
+- `@property` 公开 getter 视同方法。
+- 异步公开方法同样适用；注明可能抛出的业务异常（若有）。
+- 复杂算法或非 obvious 分支：**行内注释**说明意图，而非复述代码。
+
+### 行内注释
+
+- 仅用于解释**非 obvious 的业务规则**、兼容分支、性能/并发考量。
+- 禁止「递增 i」「返回结果」类冗余注释。
+- 魔法数字须命名常量或注释来源（配置项名 / 协议字段）。
+
+### Skills handler 统一模板
+
+`skills/tools/**/handler.py`、`skills/toolsets/**/handler.py`、`skills/agents/**/handler.py`、`skills/commands/**/handler.py`、`skills/pipelines/**/handler.py` 在注释 Wave 中统一采用：
+
+```python
+"""<工具/Agent/命令/管线的人类可读名称>。
+
+<一句话说明能力边界与主要输入输出；可列 1~3 条 bullet 行为要点。>
+
+config.json 关键字段：<field> — <含义>（若非 obvious）。
+"""
+
+from __future__ import annotations
+
+# ... 实现 ...
+
+
+async def execute(args: dict[str, Any], context: dict[str, Any]) -> Any:
+    """执行入口（由 Registry 调用）。
+
+    Args:
+        args: LLM tool call 解析后的参数字典。
+        context: 运行时注入上下文（sender、session、registry 等）。
+
+    Returns:
+        工具结果字符串或结构化 payload；异常由 Registry 捕获并记录。
+    """
+```
+
+- **禁止**在 handler 注释 Wave 中修改 `config.json`、目录结构或 handler 签名。
+- handler 内私有函数 `_foo` 可选一行 docstring；复杂解析逻辑建议补充。
+
+### 注释 Track 自检
+
+注释-only PR 合并前：
+
+```bash
+uv run ruff format .
+uv run ruff check .
+uv run mypy src/Undefined/<changed-path>/
+uv run pytest tests/  # 全量由 Phase 3 Integrator 执行
+```
+
+公共 API 说明见 [`docs/python-api.md`](python-api.md)。

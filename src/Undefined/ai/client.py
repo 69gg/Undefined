@@ -216,9 +216,7 @@ class AIClient:
         else:
             self.attachment_registry = AttachmentRegistry(http_client=self._http_client)
 
-        # 私聊发送回调
         self._send_private_message_callback: Optional[SendPrivateMessageCallback] = None
-        # 发送图片回调
         self._send_image_callback: Optional[
             Callable[[int, str, str], Awaitable[None]]
         ] = None
@@ -227,7 +225,6 @@ class AIClient:
         self.current_group_id: Optional[int] = None
         self.current_user_id: Optional[int] = None
 
-        # 初始化工具注册表
         base_dir = Path(__file__).resolve().parents[1]
         self.tool_registry = ToolRegistry(base_dir / "skills" / "tools")
         self.agent_registry = AgentRegistry(base_dir / "skills" / "agents")
@@ -245,7 +242,6 @@ class AIClient:
             anthropic_skill_registry=self.anthropic_skill_registry,
         )
 
-        # 初始化模型选择器
         self.model_selector = ModelSelector()
 
         # 绑定上下文资源扫描路径（基于注册表 watch_paths）
@@ -275,7 +271,6 @@ class AIClient:
         # 后台任务引用集合（防止被 GC）
         self._background_tasks: set[asyncio.Task[Any]] = set()
 
-        # 保存配置供后续使用
         runtime_config = self._get_runtime_config()
         self._intro_config = AgentIntroGenConfig(
             enabled=runtime_config.agent_intro_autogen_enabled,
@@ -351,7 +346,6 @@ class AIClient:
 
         self._mcp_init_task = asyncio.create_task(init_mcp_async())
 
-        # 异步加载模型偏好
         async def load_preferences_async() -> None:
             try:
                 await self.model_selector.load_preferences()
@@ -365,7 +359,6 @@ class AIClient:
     async def close(self) -> None:
         logger.info("[清理] 正在关闭 AIClient...")
 
-        # 1) 停止后台任务（避免关闭 HTTP client 后仍有请求在跑）
         intro_gen = getattr(self, "_agent_intro_generator", None)
         if intro_gen is not None:
             await intro_gen.stop()
@@ -390,7 +383,6 @@ class AIClient:
             if hasattr(self, "_prompt_builder") and self._prompt_builder is not None:
                 self._prompt_builder.set_cognitive_service(None)
 
-        # 2) 等待 MCP 初始化完成，再关闭 MCP toolsets
         if hasattr(self, "_mcp_init_task") and not self._mcp_init_task.done():
             await self._mcp_init_task
 
@@ -409,7 +401,6 @@ class AIClient:
             except Exception as exc:
                 logger.warning("[清理] 刷新附件注册表失败: %s", exc)
 
-        # 3) 最后关闭共享 HTTP client
         if hasattr(self, "_http_client"):
             logger.info("[清理] 正在关闭 AIClient HTTP 客户端...")
             await self._http_client.aclose()
@@ -932,7 +923,6 @@ class AIClient:
         results: list[tuple[str, Any]] = []
         for name in to_run:
             try:
-                # 为特定工具准备参数
                 tool_args: dict[str, Any] = {}
                 if name == "get_current_time":
                     tool_args = {"format": "text", "include_lunar": True}

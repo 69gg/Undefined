@@ -307,7 +307,6 @@ class HistorianWorker:
             len(job.get("profile_targets", []) or []),
         )
 
-        # 兼容旧版：优先 observations，fallback new_info
         raw_observations = (
             job.get("observations")
             if "observations" in job
@@ -363,7 +362,6 @@ class HistorianWorker:
                     len(canonical),
                 )
 
-        # 侧写合并：传入所有 canonical 文本
         has_obs = (
             job.get("has_observations")
             if "has_observations" in job
@@ -413,9 +411,7 @@ class HistorianWorker:
     ) -> str:
         from Undefined.utils.resources import read_text_resource
 
-        # 向后兼容：优先 memo，fallback action_summary
         memo = str(job.get("memo") if "memo" in job else job.get("action_summary", ""))
-        # 向后兼容：优先 observations，fallback new_info
         observations = str(
             job.get("observations")
             if "observations" in job
@@ -537,7 +533,6 @@ class HistorianWorker:
         if targets:
             return targets
 
-        # 向后兼容旧任务：沿用单目标策略。
         entity_type = "group" if str(job.get("group_id", "")).strip() else "user"
         entity_id = str(
             job.get("group_id") or job.get("user_id") or job.get("sender_id", "")
@@ -768,7 +763,6 @@ class HistorianWorker:
 
         preferred_name = str(target.get("preferred_name", "")).strip()
 
-        # 检索该实体的历史事件作为 merge 参考
         observations_raw = job.get("observations", job.get("new_info", []))
         observations_text = (
             "\n".join(observations_raw)
@@ -884,7 +878,6 @@ class HistorianWorker:
                 )
                 break
 
-            # 追加 assistant 轮次
             assistant_msg: dict[str, Any] = {
                 "role": "assistant",
                 "tool_calls": tool_calls,

@@ -415,7 +415,6 @@ def _sanitize_openai_tool_names_in_request(
 
             new_message = message
 
-            # 重写 role=tool 的 name 字段（可选字段）。
             msg_name = message.get("name")
             if isinstance(msg_name, str) and msg_name:
                 mapped = internal_to_api.get(msg_name)
@@ -1164,7 +1163,6 @@ def _extract_thinking_content(result: dict[str, Any]) -> str:
         if thinking:
             return thinking
 
-    # 尝试从响应根对象中提取
     return _extract_from_result(result)
 
 

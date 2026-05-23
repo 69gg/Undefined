@@ -305,7 +305,6 @@ class AICoordinator:
         # 用于向 batcher 注册 inflight 任务（仅当本请求源自合并桶时生效）
         batcher_scope: str | None = make_scope(group_id=group_id) if group_id else None
 
-        # 创建请求上下文
         async with RequestContext(
             request_type="group",
             group_id=group_id,
@@ -347,7 +346,6 @@ class AICoordinator:
             async def send_like_cb(uid: int, times: int = 1) -> None:
                 await self.onebot.send_like(uid, times)
 
-            # 存储资源到上下文
             ai_client = self.ai
             memory_storage = self.ai.memory_storage
             runtime_config = self.ai.runtime_config
@@ -442,7 +440,6 @@ class AICoordinator:
         trigger_message_id = request.get("trigger_message_id")
         batcher_scope: str | None = make_scope(user_id=user_id)
 
-        # 创建请求上下文
         async with RequestContext(
             request_type="private",
             user_id=user_id,
@@ -479,7 +476,6 @@ class AICoordinator:
             ) -> None:
                 await self.sender.send_private_message(uid, msg, reply_to=reply_to)
 
-            # 存储资源到上下文
             ai_client = self.ai
             memory_storage = self.ai.memory_storage
             runtime_config = self.ai.runtime_config
@@ -591,7 +587,6 @@ class AICoordinator:
             logger.warning("[统计分析] 缺少 request_id，群=%s", group_id)
             return
         try:
-            # 加载提示词模板
             prompt_template = _STATS_ANALYSIS_FALLBACK_PROMPT
             try:
                 loaded_prompt = read_text_resource(_STATS_ANALYSIS_PROMPT_PATH).strip()
@@ -615,7 +610,6 @@ class AICoordinator:
                     data_summary=safe_data_summary
                 )
 
-            # 调用 AI 进行分析
             messages = [
                 {"role": "system", "content": "你是一位专业的数据分析师。"},
                 {"role": "user", "content": full_prompt},
@@ -629,7 +623,6 @@ class AICoordinator:
                 queue_lane=request.get("_queue_lane"),
             )
 
-            # 提取分析结果
             choices = result.get("choices", [{}])
             if choices:
                 content = choices[0].get("message", {}).get("content", "")
@@ -647,7 +640,6 @@ class AICoordinator:
                 request_id,
             )
 
-            # 设置分析结果（通知等待的 _handle_stats 方法）
             if self.command_dispatcher:
                 self.command_dispatcher.set_stats_analysis_result(
                     group_id, request_id, analysis
@@ -655,7 +647,6 @@ class AICoordinator:
 
         except Exception as exc:
             logger.exception("[统计分析] AI 分析失败: %s", exc)
-            # 出错时也通知等待，但返回空字符串
             if self.command_dispatcher:
                 self.command_dispatcher.set_stats_analysis_result(
                     group_id, request_id, ""
@@ -708,7 +699,6 @@ class AICoordinator:
             return
 
         try:
-            # 获取提示词
             from Undefined.skills.agents.intro_generator import AgentIntroGenerator
 
             agent_intro_generator = self.ai._agent_intro_generator
@@ -721,7 +711,6 @@ class AICoordinator:
                 user_prompt,
             ) = await agent_intro_generator.get_intro_prompt_and_context(agent_name)
 
-            # 调用 AI 生成
             messages = [
                 {"role": "system", "content": system_prompt or "你是一位智能助手。"},
                 {"role": "user", "content": user_prompt},
@@ -735,7 +724,6 @@ class AICoordinator:
                 queue_lane=request.get("_queue_lane"),
             )
 
-            # 提取结果
             choices = result.get("choices", [{}])
             if choices:
                 content = choices[0].get("message", {}).get("content", "")
@@ -750,7 +738,6 @@ class AICoordinator:
                 request_id,
             )
 
-            # 通知结果
             agent_intro_generator.set_intro_generation_result(
                 request_id, generated_content if generated_content else None
             )
@@ -761,7 +748,6 @@ class AICoordinator:
                 agent_name,
                 exc,
             )
-            # 出错时也通知，返回 None
             try:
                 agent_intro_generator = self.ai._agent_intro_generator
                 agent_intro_generator.set_intro_generation_result(request_id, None)

@@ -2,6 +2,7 @@
 
 本文档是 Undefined 当前配置系统的完整说明，覆盖：
 - 配置加载顺序与解析规则
+- **库嵌入**（`Config.from_mapping` / `set_config`）程序化配置
 - 严格模式必填项
 - 每个配置节与字段的用途、默认值、约束、回退行为
 - 热更新与重启生效边界
@@ -41,7 +42,99 @@
 
 ---
 
-## 2. 严格模式（`strict=True`）必填项
+## 2. 库嵌入配置
+
+除 CLI / WebUI 从 CWD 读取 `config.toml` 外，Undefined 支持在 Python 代码中**程序化构建配置**，供测试、脚本或其它应用嵌入库组件时使用。
+
+> 完整 API 说明见 [Python 库 API 参考](python-api.md)。
+
+### 2.1 适用场景
+
+- 单元测试 / 集成测试：无需准备真实 `config.toml`
+- 下游应用：只复用 `AIClient`、`KnowledgeManager` 等模块，不启动 QQ Bot
+- CI / 容器：通过环境变量 + 空 mapping 注入密钥，配置文件只保留非敏感项
+
+### 2.2 加载优先级
+
+```
+Python 显式 mapping / builder.override  >  config.toml  >  环境变量  >  代码默认值
+```
+
+| 入口 | 是否读 `config.toml` | 说明 |
+|------|---------------------|------|
+| `Config.load()` | 是 | CLI / WebUI 默认路径 |
+| `Config.from_mapping(dict)` | 否 | 纯内存构建 |
+| `Config.builder().with_mapping(...).build()` | 否 | 在 mapping 上链式覆盖 |
+| `get_config()` | 视情况 | 未 `set_config()` 时等价于 `Config.load()` |
+
+`from_mapping` / `builder` 仍会读取进程环境变量中**已注册**的兜底项（TOML / mapping 未提供的字段）。注册表见 [`env_registry.py`](../src/Undefined/config/env_registry.py) 与本文 [§8 环境变量兜底](#8-环境变量兜底迁移建议)。
+
+### 2.3 `Config.from_mapping`
+
+结构与 `config.toml` 一致，例如：
+
+```python
+from Undefined.config import Config
+
+cfg = Config.from_mapping(
+    {
+        "onebot": {"ws_url": "ws://127.0.0.1:3001"},
+        "models": {
+            "chat": {
+                "api_url": "https://api.example/v1",
+                "api_key": "sk-xxx",
+                "model_name": "gpt-4o-mini",
+            },
+            "vision": {
+                "api_url": "https://api.example/v1",
+                "api_key": "sk-xxx",
+                "model_name": "gpt-4o-mini",
+            },
+            "agent": {
+                "api_url": "https://api.example/v1",
+                "api_key": "sk-xxx",
+                "model_name": "gpt-4o-mini",
+            },
+        },
+    },
+    strict=False,
+)
+```
+
+- `strict=True`：与 CLI 相同，缺失 [§3 严格模式](#3-严格模式stricttrue必填项) 必填项时报错退出。
+- `strict=False`：适合测试与渐进式嵌入；生产 Bot 仍建议 `strict=True`。
+
+### 2.4 `Config.builder`
+
+```python
+cfg = (
+    Config.builder()
+    .with_mapping(base_mapping)
+    .override(log_level="DEBUG")
+    .build(strict=False)
+)
+```
+
+`override()` 目前覆盖 mapping 顶层键；嵌套结构请直接在 `with_mapping` 的 dict 中提供。
+
+### 2.5 `set_config()`（opt-in）
+
+```python
+from Undefined.config import Config, get_config, set_config
+
+cfg = Config.from_mapping({...}, strict=False)
+set_config(cfg)
+assert get_config(strict=False) is cfg
+```
+
+**硬约束**：
+
+- `set_config()` 仅供库嵌入 opt-in；**CLI / WebUI 启动链不得调用**。
+- 未调用 `set_config()` 时，`get_config()` 仍从 CWD 加载 `./config.toml`，与独立运行 Bot 行为一致。
+
+---
+
+## 3. 严格模式（`strict=True`）必填项
 
 程序主流程使用严格模式加载配置。缺失以下字段会报错退出：
 - `core.bot_qq`
@@ -56,7 +149,7 @@
 
 ---
 
-## 3. 最小可运行配置示例
+## 4. 最小可运行配置示例
 
 ```toml
 [core]
@@ -85,7 +178,7 @@ model_name = "gpt-4o-mini"
 
 ---
 
-## 4. 全量字段说明
+## 5. 全量字段说明
 
 ### 4.1 `[core]` 机器人核心行为
 
@@ -914,7 +1007,7 @@ Prompt caching 补充：
 
 ---
 
-## 5. 热更新与重启边界
+## 6. 热更新与重启边界
 
 ### 5.1 热更新监听对象
 - `config.toml`
@@ -967,7 +1060,7 @@ Prompt caching 补充：
 
 ---
 
-## 6. 兼容旧字段与隐藏字段
+## 7. 兼容旧字段与隐藏字段
 
 - `models.<x>.deepseek_new_cot_support`：旧 thinking 兼容开关。
 - `[core].keyword_reply_enabled`：旧位置，建议迁移到 `[easter_egg]`。
@@ -976,26 +1069,250 @@ Prompt caching 补充：
 
 ---
 
-## 7. 环境变量兜底（迁移建议）
+## 8. 环境变量兜底（迁移建议）
 
-虽然推荐统一写入 `config.toml`，但当前仍支持大量环境变量兜底，常用示例：
-- `BOT_QQ` / `SUPERADMIN_QQ`
-- `ONEBOT_WS_URL` / `ONEBOT_TOKEN`
-- `CHAT_MODEL_API_URL` / `CHAT_MODEL_API_KEY` / `CHAT_MODEL_NAME`
-- `CHAT_MODEL_API_MODE` / `CHAT_MODEL_REASONING_ENABLED` / `CHAT_MODEL_REASONING_EFFORT` / `CHAT_MODEL_RESPONSES_TOOL_CHOICE_COMPAT` / `CHAT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY`
-- `VISION_MODEL_*` / `AGENT_MODEL_*` / `SECURITY_MODEL_*` / `NAGA_MODEL_*` / `HISTORIAN_MODEL_*`
-- 上述模型环境变量同样覆盖 `*_THINKING_ENABLED`、`*_THINKING_BUDGET_TOKENS`、`*_THINKING_TOOL_CALL_COMPAT`、`*_RESPONSES_TOOL_CHOICE_COMPAT`、`*_RESPONSES_FORCE_STATELESS_REPLAY`
-- `EMBEDDING_MODEL_*` / `RERANK_MODEL_*`
-- `SEARXNG_URL`
-- `HTTP_PROXY` / `HTTPS_PROXY`
+虽然推荐统一写入 `config.toml`，当前仍支持环境变量兜底。规则：
+
+1. **仅当 TOML / `from_mapping` 未提供对应项** 时读取环境变量。
+2. 检测到 env 兜底时可能输出 `[配置]` 告警，建议迁移到 TOML。
+3. 主注册表由 `src/Undefined/config/env_registry.py` 维护；变更注册表时请同步更新本节表格。
+
+<!-- env-registry:begin -->
+
+以下环境变量在 **TOML 对应项缺失** 时作为兜底读取。
+完整注册表见 `src/Undefined/config/env_registry.py`。
+
+#### `access`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `access.allowed_group_ids` | `ALLOWED_GROUP_IDS` |
+| `access.allowed_private_ids` | `ALLOWED_PRIVATE_IDS` |
+| `access.blocked_group_ids` | `BLOCKED_GROUP_IDS` |
+| `access.blocked_private_ids` | `BLOCKED_PRIVATE_IDS` |
+| `access.mode` | `ACCESS_MODE` |
+
+#### `api_endpoints`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `api_endpoints.jkyai_base_url` | `JKYAI_BASE_URL` |
+| `api_endpoints.xxapi_base_url` | `XXAPI_BASE_URL` |
+
+#### `core`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `core.admin_qq` | `ADMIN_QQ` |
+| `core.bot_qq` | `BOT_QQ` |
+| `core.forward_proxy_qq` | `FORWARD_PROXY_QQ` |
+| `core.superadmin_qq` | `SUPERADMIN_QQ` |
+
+#### `features`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `features.pool_enabled` | `MODEL_POOL_ENABLED` |
+
+#### `history`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `history.max_records` | `HISTORY_MAX_RECORDS` |
+
+#### `image_gen`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `image_gen.provider` | `IMAGE_GEN_PROVIDER` |
+
+#### `logging`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `logging.backup_count` | `LOG_BACKUP_COUNT` |
+| `logging.file_path` | `LOG_FILE_PATH` |
+| `logging.level` | `LOG_LEVEL` |
+| `logging.log_thinking` | `LOG_THINKING` |
+| `logging.max_size_mb` | `LOG_MAX_SIZE_MB` |
+| `logging.tty_enabled` | `LOG_TTY_ENABLED` |
+
+#### `mcp`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `mcp.config_path` | `MCP_CONFIG_PATH` |
+
+#### `models.agent`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `models.agent.api_key` | `AGENT_MODEL_API_KEY` |
+| `models.agent.api_mode` | `AGENT_MODEL_API_MODE` |
+| `models.agent.api_url` | `AGENT_MODEL_API_URL` |
+| `models.agent.context_window_tokens` | `AGENT_MODEL_CONTEXT_WINDOW_TOKENS` |
+| `models.agent.model_name` | `AGENT_MODEL_NAME` |
+| `models.agent.reasoning_content_replay` | `AGENT_MODEL_REASONING_CONTENT_REPLAY` |
+| `models.agent.responses_force_stateless_replay` | `AGENT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY` |
+| `models.agent.responses_tool_choice_compat` | `AGENT_MODEL_RESPONSES_TOOL_CHOICE_COMPAT` |
+| `models.agent.system_prompt_as_user` | `AGENT_MODEL_SYSTEM_PROMPT_AS_USER` |
+
+#### `models.chat`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `models.chat.api_key` | `CHAT_MODEL_API_KEY` |
+| `models.chat.api_mode` | `CHAT_MODEL_API_MODE` |
+| `models.chat.api_url` | `CHAT_MODEL_API_URL` |
+| `models.chat.context_window_tokens` | `CHAT_MODEL_CONTEXT_WINDOW_TOKENS` |
+| `models.chat.max_tokens` | `CHAT_MODEL_MAX_TOKENS` |
+| `models.chat.model_name` | `CHAT_MODEL_NAME` |
+| `models.chat.reasoning_content_replay` | `CHAT_MODEL_REASONING_CONTENT_REPLAY` |
+| `models.chat.responses_force_stateless_replay` | `CHAT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY` |
+| `models.chat.responses_tool_choice_compat` | `CHAT_MODEL_RESPONSES_TOOL_CHOICE_COMPAT` |
+| `models.chat.system_prompt_as_user` | `CHAT_MODEL_SYSTEM_PROMPT_AS_USER` |
+
+#### `models.embedding`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `models.embedding.context_window_tokens` | `EMBEDDING_MODEL_CONTEXT_WINDOW_TOKENS` |
+
+#### `models.grok`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `models.grok.api_key` | `GROK_MODEL_API_KEY` |
+| `models.grok.api_url` | `GROK_MODEL_API_URL` |
+| `models.grok.context_window_tokens` | `GROK_MODEL_CONTEXT_WINDOW_TOKENS` |
+| `models.grok.max_tokens` | `GROK_MODEL_MAX_TOKENS` |
+| `models.grok.model_name` | `GROK_MODEL_NAME` |
+
+#### `models.naga`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `models.naga.api_key` | `NAGA_MODEL_API_KEY` |
+| `models.naga.api_mode` | `NAGA_MODEL_API_MODE` |
+| `models.naga.api_url` | `NAGA_MODEL_API_URL` |
+| `models.naga.context_window_tokens` | `NAGA_MODEL_CONTEXT_WINDOW_TOKENS` |
+| `models.naga.model_name` | `NAGA_MODEL_NAME` |
+| `models.naga.reasoning_content_replay` | `NAGA_MODEL_REASONING_CONTENT_REPLAY` |
+| `models.naga.responses_force_stateless_replay` | `NAGA_MODEL_RESPONSES_FORCE_STATELESS_REPLAY` |
+| `models.naga.responses_tool_choice_compat` | `NAGA_MODEL_RESPONSES_TOOL_CHOICE_COMPAT` |
+| `models.naga.system_prompt_as_user` | `NAGA_MODEL_SYSTEM_PROMPT_AS_USER` |
+
+#### `models.rerank`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `models.rerank.api_key` | `RERANK_MODEL_API_KEY` |
+| `models.rerank.api_url` | `RERANK_MODEL_API_URL` |
+| `models.rerank.context_window_tokens` | `RERANK_MODEL_CONTEXT_WINDOW_TOKENS` |
+| `models.rerank.model_name` | `RERANK_MODEL_NAME` |
+
+#### `models.security`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `models.security.api_key` | `SECURITY_MODEL_API_KEY` |
+| `models.security.api_mode` | `SECURITY_MODEL_API_MODE` |
+| `models.security.api_url` | `SECURITY_MODEL_API_URL` |
+| `models.security.context_window_tokens` | `SECURITY_MODEL_CONTEXT_WINDOW_TOKENS` |
+| `models.security.model_name` | `SECURITY_MODEL_NAME` |
+| `models.security.reasoning_content_replay` | `SECURITY_MODEL_REASONING_CONTENT_REPLAY` |
+| `models.security.responses_force_stateless_replay` | `SECURITY_MODEL_RESPONSES_FORCE_STATELESS_REPLAY` |
+| `models.security.responses_tool_choice_compat` | `SECURITY_MODEL_RESPONSES_TOOL_CHOICE_COMPAT` |
+| `models.security.system_prompt_as_user` | `SECURITY_MODEL_SYSTEM_PROMPT_AS_USER` |
+
+#### `models.vision`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `models.vision.api_key` | `VISION_MODEL_API_KEY` |
+| `models.vision.api_mode` | `VISION_MODEL_API_MODE` |
+| `models.vision.api_url` | `VISION_MODEL_API_URL` |
+| `models.vision.context_window_tokens` | `VISION_MODEL_CONTEXT_WINDOW_TOKENS` |
+| `models.vision.model_name` | `VISION_MODEL_NAME` |
+| `models.vision.reasoning_content_replay` | `VISION_MODEL_REASONING_CONTENT_REPLAY` |
+| `models.vision.responses_force_stateless_replay` | `VISION_MODEL_RESPONSES_FORCE_STATELESS_REPLAY` |
+| `models.vision.responses_tool_choice_compat` | `VISION_MODEL_RESPONSES_TOOL_CHOICE_COMPAT` |
+| `models.vision.system_prompt_as_user` | `VISION_MODEL_SYSTEM_PROMPT_AS_USER` |
+
+#### `onebot`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `onebot.token` | `ONEBOT_TOKEN` |
+| `onebot.ws_url` | `ONEBOT_WS_URL` |
+
+#### `proxy`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `proxy.use_proxy` | `USE_PROXY` |
+
+#### `search`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `search.searxng_url` | `SEARXNG_URL` |
+
+#### `skills`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `skills.hot_reload` | `SKILLS_HOT_RELOAD` |
+| `skills.intro_hash_path` | `AGENT_INTRO_HASH_PATH` |
+| `skills.prefetch_tools_hide` | `PREFETCH_TOOLS_HIDE` |
+
+#### `token_usage`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `token_usage.max_archives` | `TOKEN_USAGE_MAX_ARCHIVES` |
+| `token_usage.max_size_mb` | `TOKEN_USAGE_MAX_SIZE_MB` |
+| `token_usage.max_total_mb` | `TOKEN_USAGE_MAX_TOTAL_MB` |
+
+#### `tools`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `tools.description_max_len` | `TOOLS_DESCRIPTION_MAX_LEN` |
+| `tools.dot_delimiter` | `TOOLS_DOT_DELIMITER` |
+| `tools.sanitize_verbose` | `TOOLS_SANITIZE_VERBOSE` |
+
+#### `weather`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `weather.api_key` | `WEATHER_API_KEY` |
+
+#### `xxapi`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `xxapi.api_token` | `XXAPI_API_TOKEN` |
+
+#### 备用 / 兼容环境变量
+
+以下变量不在主注册表中，但在解析时仍会被读取：
+
+| 环境变量 | 映射 TOML 路径 |
+|----------|----------------|
+| `EASTER_EGG_AGENT_CALL_MESSAGE_MODE` | `easter_egg.agent_call_message_enabled` |
+| `EASTER_EGG_CALL_MESSAGE_MODE` | `easter_egg.agent_call_message_enabled` |
+| `HTTPS_PROXY` | `proxy.https_proxy` |
+| `HTTP_PROXY` | `proxy.http_proxy` |
+
+<!-- env-registry:end -->
 
 建议：
+
 1. 把长期配置迁移到 `config.toml`。
-2. 环境变量只保留临时覆写或 CI 场景。
+2. 环境变量只保留临时覆写、CI 密钥或库嵌入场景的敏感项注入。
 
----
-
-## 8. 运维建议（生产环境）
+## 9. 运维建议（生产环境）
 
 1. 首次部署先改 `webui.password`，避免默认密码模式。
 2. 显式配置 `access.mode`，不要依赖 legacy 行为。

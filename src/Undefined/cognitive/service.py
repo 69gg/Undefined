@@ -320,7 +320,6 @@ class CognitiveService:
         safe_group_boost = max(0.0, float(current_group_boost))
         seen_keys: set[tuple[str, str, str, str, str, str]] = set()
         # 排序主键优先使用“作用域内原始排名”（已含 time_decay/mmr/rerank 效果），
-        # 再使用相似度分值兜底，避免跨 scope 合并时打乱衰减后的顺序。
         scored_items: list[
             tuple[float, float, float, float, float, int, dict[str, Any]]
         ] = []
@@ -547,7 +546,6 @@ class CognitiveService:
             else str(context.get("request_id", "")).strip()
         )
         if not safe_request_id:
-            # 最终兜底由 JobQueue 生成 request_id。
             safe_request_id = ""
 
         end_seq_raw = context.get("_end_seq", 0)
@@ -699,7 +697,6 @@ class CognitiveService:
             getattr(config, "auto_top_k", 5),
         )
 
-        # 用户侧写（优先 sender_id，与 enqueue_job 写入侧一致）
         uid = safe_sender_id or safe_user_id
         if uid:
             profile = await self._profile_storage.read_profile("user", uid)
@@ -707,7 +704,6 @@ class CognitiveService:
                 label = f"{sender_name}（UID: {uid}）" if sender_name else f"UID: {uid}"
                 parts.append(f"## 用户侧写 — {label}\n{profile}")
 
-        # 群聊侧写
         if safe_group_id:
             gprofile = await self._profile_storage.read_profile("group", safe_group_id)
             if gprofile:

@@ -37,7 +37,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             indent=2,
         )
 
-    # 默认返回 ISO 格式
     return now.isoformat(timespec="seconds")
 
 
@@ -51,7 +50,6 @@ def _format_text(
     """生成人类可读的文本格式"""
     lines = []
 
-    # 公历信息
     weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
     weekday = weekdays[now.weekday()]
     tz_offset = now.strftime("%z")
@@ -62,7 +60,6 @@ def _format_text(
         f"{now.hour:02d}:{now.minute:02d}:{now.second:02d} ({tz_str})"
     )
 
-    # 农历信息
     if include_lunar and lunar:
         year_gz = lunar.getYearInGanZhi()
         zodiac = lunar.getYearShengXiao()
@@ -70,19 +67,15 @@ def _format_text(
         day_cn = lunar.getDayInChinese()
         lines.append(f"农历：{year_gz}年({zodiac}年) {month_cn}{day_cn}")
 
-        # 干支信息
         month_gz = lunar.getMonthInGanZhi()
         day_gz = lunar.getDayInGanZhi()
         lines.append(f"干支：{year_gz}年 {month_gz}月 {day_gz}日")
 
-    # 黄历信息
     if include_almanac and lunar:
-        # 节气
         jieqi = lunar.getCurrentJieQi()
         if jieqi:
             lines.append(f"节气：{jieqi.getName()}")
 
-        # 节日
         festivals = []
         if solar:
             solar_festivals = solar.getFestivals()
@@ -92,7 +85,6 @@ def _format_text(
         if festivals:
             lines.append(f"节日：{' '.join(festivals)}")
 
-        # 宜忌
         yi = lunar.getDayYi()
         if yi:
             lines.append(f"宜：{' '.join(yi)}")
@@ -100,7 +92,6 @@ def _format_text(
         if ji:
             lines.append(f"忌：{' '.join(ji)}")
 
-        # 冲煞
         chong = lunar.getDayChongDesc()
         sha = lunar.getDaySha()
         if chong or sha:
@@ -109,7 +100,6 @@ def _format_text(
                 chong_sha += f"煞{sha}"
             lines.append(f"冲煞：{chong_sha}")
 
-        # 胎神
         tai = lunar.getDayPositionTai()
         if tai:
             lines.append(f"胎神：{tai}")
@@ -127,7 +117,6 @@ def _format_json(
     """生成结构化 JSON 格式"""
     result: Dict[str, Any] = {}
 
-    # 公历信息
     weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
     weekday = weekdays[now.weekday()]
     tz_offset = now.strftime("%z")
@@ -145,7 +134,6 @@ def _format_json(
         "timezone": tz_str,
     }
 
-    # 农历信息
     if include_lunar and lunar:
         result["lunar"] = {
             "year_cn": lunar.getYearInGanZhi(),
@@ -159,16 +147,13 @@ def _format_json(
             },
         }
 
-    # 黄历信息
     if include_almanac and lunar:
         almanac: Dict[str, Any] = {}
 
-        # 节气
         jieqi = lunar.getCurrentJieQi()
         if jieqi:
             almanac["solar_term"] = {"current": jieqi.getName()}
 
-        # 节日
         festivals = []
         if solar:
             solar_festivals = solar.getFestivals()
@@ -178,7 +163,6 @@ def _format_json(
         if festivals:
             almanac["festivals"] = festivals
 
-        # 宜忌
         yi = lunar.getDayYi()
         if yi:
             almanac["yi"] = yi
@@ -186,7 +170,6 @@ def _format_json(
         if ji:
             almanac["ji"] = ji
 
-        # 冲煞
         chong = lunar.getDayChongDesc()
         sha = lunar.getDaySha()
         if chong or sha:
@@ -195,7 +178,6 @@ def _format_json(
                 chong_sha += f"煞{sha}"
             almanac["chong"] = chong_sha
 
-        # 胎神
         tai = lunar.getDayPositionTai()
         if tai:
             almanac["fetal_god"] = tai

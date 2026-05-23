@@ -164,7 +164,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     libraries: list[str] = args.get("libraries") or []
     send_files: list[str] = args.get("send_files") or []
 
-    # 验证库名
     for lib in libraries:
         if not _SAFE_LIB_PATTERN.match(lib):
             return f"错误: 无效的库名 '{lib}'。"
@@ -173,12 +172,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     memory = MEMORY_LIMIT_WITH_LIBS if has_libs else MEMORY_LIMIT
     timeout = TIMEOUT_WITH_LIBS if has_libs else TIMEOUT
 
-    # 创建宿主机临时目录，绑定挂载到容器 /tmp
     host_tmpdir = tempfile.mkdtemp(prefix="pyinterp_")
     defer_cleanup = False
 
     try:
-        # 验证文件路径必须绑定到容器 /tmp，并且不能逃逸宿主机临时目录
         for fpath in send_files:
             if _resolve_output_host_path(fpath, host_tmpdir) is None:
                 return f"错误: 输出文件路径必须位于容器 /tmp 目录内: '{fpath}'"
@@ -235,7 +232,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 timeout=exec_timeout,
             )
 
-            # 构建结果
             parts: list[str] = []
             if exit_code == 0:
                 parts.append(
@@ -246,7 +242,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                     f"代码执行失败 (退出代码: {exit_code}):\n{error_output}\n{response}"
                 )
 
-            # 执行成功时发送文件
             if send_files and exit_code == 0:
                 file_result = await _send_output_files(send_files, host_tmpdir, context)
                 if file_result:

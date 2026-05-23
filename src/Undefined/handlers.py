@@ -223,6 +223,7 @@ class MessageHandler:
         # 清理已过期条目
         expired = [k for k, ts in group_cd.items() if (now - ts) >= cooldown_seconds]
         for k in expired:
+            # delete
             del group_cd[k]
         group_cd[key] = now
 

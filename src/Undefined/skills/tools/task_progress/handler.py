@@ -61,11 +61,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not isinstance(tasks_input, list) or len(tasks_input) == 0:
         return "tasks 必须是非空数组"
 
-    # 从 context 获取或初始化任务列表
     task_store: list[dict[str, Any]] = context.get("_task_progress", [])
 
     if action == "plan":
-        # 创建/替换计划
         new_tasks: list[dict[str, Any]] = []
         for item in tasks_input:
             tid_raw = item.get("id")
@@ -80,7 +78,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 status = "pending"
             new_tasks.append({"id": tid, "description": desc, "status": status})
 
-        # 按 id 排序
         new_tasks.sort(key=lambda t: t.get("id", 0))
         task_store = new_tasks
         context["_task_progress"] = task_store
@@ -88,11 +85,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         logger.info(f"[task_progress] 创建计划，共 {len(task_store)} 个步骤")
         return f"计划已创建\n{_format_task_list(task_store)}"
 
-    # action == "update"
     if not task_store:
         return "还没有任务计划，请先用 plan 动作创建"
 
-    # 构建 id -> index 映射
     id_to_idx = {t["id"]: i for i, t in enumerate(task_store)}
 
     updated: list[int] = []
@@ -112,7 +107,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             return f"不存在 id={tid} 的步骤"
 
         task_store[idx]["status"] = new_status
-        # 允许更新描述
         new_desc = item.get("description")
         if new_desc:
             task_store[idx]["description"] = new_desc

@@ -1177,7 +1177,6 @@ class MemeService:
         def _render_preview() -> None:
             frames = _extract_gif_frames(source_path, n_frames)
             if mode == "multi":
-                # multi 模式也需要生成一张预览用于存储/展示，取首帧
                 frames[0].save(preview_path, format="PNG")
             else:
                 _compose_grid(frames, preview_path)

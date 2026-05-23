@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from Undefined.services import ai_coordinator as ai_coordinator_module
 from Undefined.services.ai_coordinator import AICoordinator
+from Undefined.services.coordinator import group as coordinator_group_module
 
 
 @pytest.mark.asyncio
@@ -245,7 +245,9 @@ async def test_execute_auto_reply_send_msg_cb_passes_history_message(
     coordinator.scheduler = SimpleNamespace()
 
     monkeypatch.setattr(
-        ai_coordinator_module, "collect_context_resources", lambda _vars: {}
+        coordinator_group_module,
+        "collect_context_resources",
+        lambda _vars: {},
     )
 
     await coordinator._execute_auto_reply(

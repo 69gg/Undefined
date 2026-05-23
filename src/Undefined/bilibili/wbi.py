@@ -192,6 +192,7 @@ async def get_mixin_key(
     force_refresh: bool = False,
 ) -> str:
     """获取可复用的 mixin_key。"""
+    # global
     global _cached_mixin_key_async, _cached_at_async
 
     now = time.time()
@@ -295,6 +296,7 @@ def get_mixin_key_sync(
     force_refresh: bool = False,
 ) -> str:
     """同步获取可复用的 mixin_key。"""
+    # global
     global _cached_mixin_key_sync, _cached_at_sync
 
     now = time.time()

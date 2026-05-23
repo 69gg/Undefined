@@ -110,13 +110,11 @@ class PromptBuilder:
         """
         parts: list[str] = ["【当前运行环境配置】"]
 
-        # 主对话模型
         chat_model = getattr(runtime_config, "chat_model", None)
         if chat_model:
             model_name = getattr(chat_model, "model_name", "未知")
             parts.append(f"- 我使用的模型: {model_name}")
 
-        # 视觉模型
         vision_model = getattr(runtime_config, "vision_model", None)
         if vision_model:
             model_name = getattr(vision_model, "model_name", "")
@@ -130,14 +128,12 @@ class PromptBuilder:
             if model_name:
                 parts.append(f"- Agent 模型: {model_name}")
 
-        # 嵌入模型
         embedding_model = getattr(runtime_config, "embedding_model", None)
         if embedding_model:
             model_name = getattr(embedding_model, "model_name", "")
             if model_name:
                 parts.append(f"- 嵌入模型: {model_name}")
 
-        # 安全模型
         security_model = getattr(runtime_config, "security_model", None)
         if security_model:
             model_name = getattr(security_model, "model_name", "")
@@ -151,23 +147,19 @@ class PromptBuilder:
             if model_name:
                 parts.append(f"- 搜索模型: {model_name}")
 
-        # 认知记忆
         cognitive = getattr(runtime_config, "cognitive", None)
         if cognitive:
             enabled = getattr(cognitive, "enabled", False)
             parts.append(f"- 认知记忆: {'已启用' if enabled else '未启用'}")
 
-        # 知识库
         knowledge_enabled = bool(getattr(runtime_config, "knowledge_enabled", False))
         parts.append(f"- 知识库: {'已启用' if knowledge_enabled else '未启用'}")
 
-        # 联网搜索
         grok_search_enabled = bool(
             getattr(runtime_config, "grok_search_enabled", False)
         )
         parts.append(f"- 联网搜索: {'已启用' if grok_search_enabled else '未启用'}")
 
-        # 表情包库
         memes = getattr(runtime_config, "memes", None)
         if memes is not None:
             memes_enabled = bool(getattr(memes, "enabled", False))
@@ -184,7 +176,6 @@ class PromptBuilder:
             else:
                 parts.append("- 表情包库: 未启用")
 
-        # 模型池
         if chat_model:
             pool = getattr(chat_model, "pool", None)
             if pool:
@@ -195,7 +186,6 @@ class PromptBuilder:
                 else:
                     parts.append("- 模型池: 未启用")
 
-        # 思维链
         if chat_model:
             thinking = getattr(chat_model, "thinking_enabled", False)
             reasoning = getattr(chat_model, "reasoning_enabled", False)
@@ -204,7 +194,6 @@ class PromptBuilder:
             else:
                 parts.append("- 思维链: 未启用")
 
-        # 彩蛋功能状态
         keyword_reply_enabled = bool(
             getattr(runtime_config, "keyword_reply_enabled", False)
         )

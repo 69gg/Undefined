@@ -29,11 +29,9 @@ logger = logging.getLogger(__name__)
 # 每个文件名最多保留的历史 Q&A 条数
 _MAX_QA_HISTORY = 5
 
-# 磁盘持久化路径
 _HISTORY_FILE_PATH = Path("data/media_qa_history.json")
 
 # 远程媒体缓存目录（用于先下载 URL 再转 data URL）
-# Remote media cache directory (download URL first, then convert to data URL).
 _MEDIA_URL_CACHE_DIR = Path("data/cache/multimodal_media")
 
 # 远程媒体缓存清理策略：仅保留最近 6 小时 + 最多 256 个文件。
@@ -42,18 +40,14 @@ _MEDIA_URL_CACHE_TTL_SECONDS = 6 * 60 * 60
 _MEDIA_URL_CACHE_MAX_FILES = 256
 
 # 两次自动清理之间的最小间隔（秒），避免每次请求都全量扫描目录。
-# Minimum interval between cleanup runs (seconds) to avoid full scan on every call.
 _MEDIA_URL_CACHE_CLEANUP_INTERVAL_SECONDS = 60.0
 
 # 下载 URL 到本地缓存时的网络超时（秒）。
-# Network timeout (seconds) when downloading URL to local cache.
 _MEDIA_URL_DOWNLOAD_TIMEOUT_SECONDS = 120.0
 
 # 下载阶段临时文件后缀（追加在缓存文件名后），用于区分真实缓存文件。
-# Download-stage temporary suffix (appended to cache filename) to avoid clashes.
 _MEDIA_URL_DOWNLOAD_TMP_SUFFIX = ".downloading"
 
-# 文件扩展名常量
 _IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg")
 _AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma")
 _VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".webm", ".mkv", ".flv", ".wmv")
@@ -106,16 +100,13 @@ def _get_media_type_by_extension(url_lower: str) -> str:
 
 def detect_media_type(media_url: str, specified_type: str = "auto") -> str:
     """检测媒体文件的类型（图片、音频或视频）。"""
-    # 1. 优先级最高：手动指定类型
     if specified_type and specified_type != "auto":
         return specified_type
 
-    # 2. 检查 data URL
     media_type = _detect_from_data_url(media_url)
     if media_type:
         return media_type
 
-    # 3. 使用 mimetypes 或扩展名猜测
     return _detect_by_mimetypes(media_url)
 
 
@@ -172,7 +163,6 @@ def get_media_mime_type(media_type: str, file_path: str = "") -> str:
     return _DEFAULT_MIME_TYPES.get(media_type, "application/octet-stream")
 
 
-# 响应内容类型到字段名的映射
 _MEDIA_TYPE_TO_FIELD = {
     "image": "ocr_text",
     "audio": "transcript",
@@ -232,7 +222,6 @@ _MEME_DESCRIBE_TOOL = {
 }
 
 
-# 错误消息映射
 _ERROR_MESSAGES = {
     "read": {
         "image": "[图片无法读取]",
@@ -280,7 +269,6 @@ def _parse_analysis_response(content: str) -> dict[str, str]:
         "subtitles": ("字幕：", "字幕:"),
     }
 
-    # 初始化所有字段为空
     result = {
         "description": "",
         "ocr_text": "",
@@ -288,7 +276,6 @@ def _parse_analysis_response(content: str) -> dict[str, str]:
         "subtitles": "",
     }
 
-    # 解析每一行
     for line in content.split("\n"):
         line = line.strip()
         for field, prefixes in field_prefixes.items():
@@ -615,7 +602,6 @@ class MultimodalAnalyzer:
         """
         content_items: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
 
-        # 添加媒体内容项
         media_item_key = f"{media_type}_url"
         contents = media_content if isinstance(media_content, list) else [media_content]
         for mc in contents:
@@ -652,13 +638,11 @@ class MultimodalAnalyzer:
             len(prompt_extra),
         )
 
-        # 检查缓存
         cache_key = f"{detected_type}:{media_url[:100]}:{prompt_extra}"
         if cache_key in self._cache:
             logger.debug("[媒体分析] 命中缓存: key=%s", cache_key[:120])
             return self._cache[cache_key]
 
-        # 加载媒体内容
         try:
             media_content = await self._load_media_content(media_url, detected_type)
         except Exception as exc:
@@ -669,7 +653,6 @@ class MultimodalAnalyzer:
                 )
             }
 
-        # 加载提示词
         try:
             prompt = read_text_resource(self._prompt_path)
         except Exception:
@@ -682,16 +665,13 @@ class MultimodalAnalyzer:
             self._prompt_path,
         )
 
-        # 添加补充提示词
         if prompt_extra:
             prompt += f"\n\n【补充指令】\n{prompt_extra}"
 
-        # 构建请求内容
         content_items = await self._build_content_items(
             detected_type, media_content, prompt
         )
 
-        # 发送分析请求
         try:
             result = await self._requester.request(
                 model_config=self._vision_config,
@@ -703,16 +683,13 @@ class MultimodalAnalyzer:
             if logger.isEnabledFor(logging.DEBUG):
                 log_debug_json(logger, "[媒体分析] 原始响应内容", content)
 
-            # 解析响应内容
             parsed = _parse_analysis_response(content)
 
-            # 根据媒体类型构建结果字典
             result_dict: dict[str, str] = {"description": parsed["description"]}
             field_name = _MEDIA_TYPE_TO_FIELD.get(detected_type)
             if field_name:
                 result_dict[field_name] = parsed[field_name]
 
-            # 缓存结果
             self._cache[cache_key] = result_dict
             logger.info(f"[媒体分析] 完成并缓存: {safe_url[:50]}... ({detected_type})")
             return result_dict
