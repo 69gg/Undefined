@@ -1,0 +1,267 @@
+"""Load integrations config section."""
+
+from __future__ import annotations
+
+# 配置分段加载：按 table 解析 TOML → ctx 字段 dict
+
+import logging
+from pathlib import Path
+from typing import Any, Optional
+
+from ..coercers import (
+    _coerce_bool,
+    _coerce_float,
+    _coerce_int,
+    _coerce_int_list,
+    _coerce_str,
+    _get_value,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def load_integrations(
+    data: dict[str, Any], *, config_path: Optional[Path] = None
+) -> dict[str, Any]:
+    bilibili_auto_extract_enabled = _coerce_bool(
+        _get_value(data, ("bilibili", "auto_extract_enabled"), None), False
+    )
+    # 功能级白名单为空时，运行时回退到全局 access 控制（见 Config.is_*_allowed）
+    bilibili_cookie = _coerce_str(_get_value(data, ("bilibili", "cookie"), None), "")
+    if not bilibili_cookie:
+        # 兼容旧配置项：bilibili.sessdata
+        bilibili_cookie = _coerce_str(
+            _get_value(data, ("bilibili", "sessdata"), None), ""
+        )
+    bilibili_prefer_quality = _coerce_int(
+        _get_value(data, ("bilibili", "prefer_quality"), None), 80
+    )
+    bilibili_max_duration = _coerce_int(
+        _get_value(data, ("bilibili", "max_duration"), None), 600
+    )
+    bilibili_max_file_size = _coerce_int(
+        _get_value(data, ("bilibili", "max_file_size"), None), 100
+    )
+    bilibili_oversize_strategy = _coerce_str(
+        _get_value(data, ("bilibili", "oversize_strategy"), None), "downgrade"
+    )
+    if bilibili_oversize_strategy not in ("downgrade", "info"):
+        bilibili_oversize_strategy = "downgrade"
+    bilibili_danmaku_enabled = _coerce_bool(
+        _get_value(data, ("bilibili", "danmaku_enabled"), None), True
+    )
+    bilibili_danmaku_batch_size = _coerce_int(
+        _get_value(data, ("bilibili", "danmaku_batch_size"), None), 100
+    )
+    if bilibili_danmaku_batch_size <= 0:
+        bilibili_danmaku_batch_size = 100
+    bilibili_danmaku_max_count = _coerce_int(
+        _get_value(data, ("bilibili", "danmaku_max_count"), None), 0
+    )
+    if bilibili_danmaku_max_count < 0:
+        bilibili_danmaku_max_count = 0
+    bilibili_auto_extract_group_ids = _coerce_int_list(
+        _get_value(data, ("bilibili", "auto_extract_group_ids"), None)
+    )
+    bilibili_auto_extract_private_ids = _coerce_int_list(
+        _get_value(data, ("bilibili", "auto_extract_private_ids"), None)
+    )
+
+    # arXiv 配置
+    arxiv_auto_extract_enabled = _coerce_bool(
+        _get_value(data, ("arxiv", "auto_extract_enabled"), None), False
+    )
+    arxiv_max_file_size = _coerce_int(
+        _get_value(data, ("arxiv", "max_file_size"), None), 100
+    )
+    if arxiv_max_file_size < 0:
+        arxiv_max_file_size = 100
+    arxiv_auto_extract_group_ids = _coerce_int_list(
+        _get_value(data, ("arxiv", "auto_extract_group_ids"), None)
+    )
+    arxiv_auto_extract_private_ids = _coerce_int_list(
+        _get_value(data, ("arxiv", "auto_extract_private_ids"), None)
+    )
+    arxiv_auto_extract_max_items = _coerce_int(
+        _get_value(data, ("arxiv", "auto_extract_max_items"), None), 5
+    )
+    if arxiv_auto_extract_max_items <= 0:
+        arxiv_auto_extract_max_items = 5
+    if arxiv_auto_extract_max_items > 20:
+        arxiv_auto_extract_max_items = 20
+    arxiv_author_preview_limit = _coerce_int(
+        _get_value(data, ("arxiv", "author_preview_limit"), None), 20
+    )
+    if arxiv_author_preview_limit <= 0:
+        arxiv_author_preview_limit = 20
+    if arxiv_author_preview_limit > 100:
+        arxiv_author_preview_limit = 100
+    arxiv_summary_preview_chars = _coerce_int(
+        _get_value(data, ("arxiv", "summary_preview_chars"), None), 1000
+    )
+    if arxiv_summary_preview_chars <= 0:
+        arxiv_summary_preview_chars = 1000
+    if arxiv_summary_preview_chars > 8000:
+        arxiv_summary_preview_chars = 8000
+
+    # GitHub 配置
+    github_auto_extract_enabled = _coerce_bool(
+        _get_value(data, ("github", "auto_extract_enabled"), None), False
+    )
+    github_request_timeout_seconds = _coerce_float(
+        _get_value(data, ("github", "request_timeout_seconds"), None), 10.0
+    )
+    if github_request_timeout_seconds <= 0:
+        github_request_timeout_seconds = 10.0
+    if github_request_timeout_seconds > 60.0:
+        github_request_timeout_seconds = 60.0
+    github_auto_extract_group_ids = _coerce_int_list(
+        _get_value(data, ("github", "auto_extract_group_ids"), None)
+    )
+    github_auto_extract_private_ids = _coerce_int_list(
+        _get_value(data, ("github", "auto_extract_private_ids"), None)
+    )
+    github_auto_extract_max_items = _coerce_int(
+        _get_value(data, ("github", "auto_extract_max_items"), None), 3
+    )
+    if github_auto_extract_max_items <= 0:
+        github_auto_extract_max_items = 3
+    if github_auto_extract_max_items > 10:
+        github_auto_extract_max_items = 10
+
+    # Code Delivery Agent 配置
+    code_delivery_enabled = _coerce_bool(
+        _get_value(data, ("code_delivery", "enabled"), None), True
+    )
+    code_delivery_task_root = _coerce_str(
+        _get_value(data, ("code_delivery", "task_root"), None),
+        "data/code_delivery",
+    )
+    code_delivery_docker_image = _coerce_str(
+        _get_value(data, ("code_delivery", "docker_image"), None),
+        "ubuntu:24.04",
+    )
+    code_delivery_container_name_prefix = _coerce_str(
+        _get_value(data, ("code_delivery", "container_name_prefix"), None),
+        "code_delivery_",
+    )
+    code_delivery_container_name_suffix = _coerce_str(
+        _get_value(data, ("code_delivery", "container_name_suffix"), None),
+        "_runner",
+    )
+    code_delivery_command_timeout = _coerce_int(
+        _get_value(data, ("code_delivery", "default_command_timeout_seconds"), None),
+        600,
+    )
+    code_delivery_max_command_output = _coerce_int(
+        _get_value(data, ("code_delivery", "max_command_output_chars"), None),
+        20000,
+    )
+    code_delivery_default_archive_format = _coerce_str(
+        _get_value(data, ("code_delivery", "default_archive_format"), None),
+        "zip",
+    )
+    if code_delivery_default_archive_format not in ("zip", "tar.gz"):
+        code_delivery_default_archive_format = "zip"
+    code_delivery_max_archive_size_mb = _coerce_int(
+        _get_value(data, ("code_delivery", "max_archive_size_mb"), None), 200
+    )
+    code_delivery_cleanup_on_finish = _coerce_bool(
+        _get_value(data, ("code_delivery", "cleanup_on_finish"), None), True
+    )
+    code_delivery_cleanup_on_start = _coerce_bool(
+        _get_value(data, ("code_delivery", "cleanup_on_start"), None), True
+    )
+    code_delivery_llm_max_retries = _coerce_int(
+        _get_value(data, ("code_delivery", "llm_max_retries_per_request"), None),
+        5,
+    )
+    code_delivery_notify_on_llm_failure = _coerce_bool(
+        _get_value(data, ("code_delivery", "notify_on_llm_failure"), None),
+        True,
+    )
+    code_delivery_container_memory_limit = _coerce_str(
+        _get_value(data, ("code_delivery", "container_memory_limit"), None),
+        "",
+    )
+    code_delivery_container_cpu_limit = _coerce_str(
+        _get_value(data, ("code_delivery", "container_cpu_limit"), None),
+        "",
+    )
+    code_delivery_command_blacklist_raw = _get_value(
+        data, ("code_delivery", "command_blacklist"), None
+    )
+    if isinstance(code_delivery_command_blacklist_raw, list):
+        code_delivery_command_blacklist = [
+            str(x) for x in code_delivery_command_blacklist_raw
+        ]
+    # 否则分支
+    else:
+        code_delivery_command_blacklist = []
+
+    # messages 工具集配置
+    messages_send_text_file_max_size_kb = _coerce_int(
+        _get_value(
+            data,
+            ("messages", "send_text_file_max_size_kb"),
+            "MESSAGES_SEND_TEXT_FILE_MAX_SIZE_KB",
+        ),
+        512,
+    )
+    if messages_send_text_file_max_size_kb <= 0:
+        messages_send_text_file_max_size_kb = 512
+
+    messages_send_url_file_max_size_mb = _coerce_int(
+        _get_value(
+            data,
+            ("messages", "send_url_file_max_size_mb"),
+            "MESSAGES_SEND_URL_FILE_MAX_SIZE_MB",
+        ),
+        100,
+    )
+    if messages_send_url_file_max_size_mb <= 0:
+        messages_send_url_file_max_size_mb = 100
+
+    return {
+        "bilibili_auto_extract_enabled": bilibili_auto_extract_enabled,
+        "bilibili_cookie": bilibili_cookie,
+        "bilibili_prefer_quality": bilibili_prefer_quality,
+        "bilibili_max_duration": bilibili_max_duration,
+        "bilibili_max_file_size": bilibili_max_file_size,
+        "bilibili_oversize_strategy": bilibili_oversize_strategy,
+        "bilibili_danmaku_enabled": bilibili_danmaku_enabled,
+        "bilibili_danmaku_batch_size": bilibili_danmaku_batch_size,
+        "bilibili_danmaku_max_count": bilibili_danmaku_max_count,
+        "bilibili_auto_extract_group_ids": bilibili_auto_extract_group_ids,
+        "bilibili_auto_extract_private_ids": bilibili_auto_extract_private_ids,
+        "arxiv_auto_extract_enabled": arxiv_auto_extract_enabled,
+        "arxiv_max_file_size": arxiv_max_file_size,
+        "arxiv_auto_extract_group_ids": arxiv_auto_extract_group_ids,
+        "arxiv_auto_extract_private_ids": arxiv_auto_extract_private_ids,
+        "arxiv_auto_extract_max_items": arxiv_auto_extract_max_items,
+        "arxiv_author_preview_limit": arxiv_author_preview_limit,
+        "arxiv_summary_preview_chars": arxiv_summary_preview_chars,
+        "github_auto_extract_enabled": github_auto_extract_enabled,
+        "github_request_timeout_seconds": github_request_timeout_seconds,
+        "github_auto_extract_group_ids": github_auto_extract_group_ids,
+        "github_auto_extract_private_ids": github_auto_extract_private_ids,
+        "github_auto_extract_max_items": github_auto_extract_max_items,
+        "code_delivery_enabled": code_delivery_enabled,
+        "code_delivery_task_root": code_delivery_task_root,
+        "code_delivery_docker_image": code_delivery_docker_image,
+        "code_delivery_container_name_prefix": code_delivery_container_name_prefix,
+        "code_delivery_container_name_suffix": code_delivery_container_name_suffix,
+        "code_delivery_command_timeout": code_delivery_command_timeout,
+        "code_delivery_max_command_output": code_delivery_max_command_output,
+        "code_delivery_default_archive_format": code_delivery_default_archive_format,
+        "code_delivery_max_archive_size_mb": code_delivery_max_archive_size_mb,
+        "code_delivery_cleanup_on_finish": code_delivery_cleanup_on_finish,
+        "code_delivery_cleanup_on_start": code_delivery_cleanup_on_start,
+        "code_delivery_llm_max_retries": code_delivery_llm_max_retries,
+        "code_delivery_notify_on_llm_failure": code_delivery_notify_on_llm_failure,
+        "code_delivery_container_memory_limit": code_delivery_container_memory_limit,
+        "code_delivery_container_cpu_limit": code_delivery_container_cpu_limit,
+        "code_delivery_command_blacklist": code_delivery_command_blacklist,
+        "messages_send_text_file_max_size_kb": messages_send_text_file_max_size_kb,
+        "messages_send_url_file_max_size_mb": messages_send_url_file_max_size_mb,
+    }

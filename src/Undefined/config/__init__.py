@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from .loader import Config, WebUISettings, load_webui_settings
+from .config_class import Config, ConfigBuilder
 from .manager import ConfigManager
 from .models import (
     APIConfig,
@@ -19,9 +19,11 @@ from .models import (
     SecurityModelConfig,
     VisionModelConfig,
 )
+from .webui_settings import WebUISettings, load_webui_settings
 
 __all__ = [
     "Config",
+    "ConfigBuilder",
     "ChatModelConfig",
     "VisionModelConfig",
     "SecurityModelConfig",
@@ -37,11 +39,11 @@ __all__ = [
     "RenderCacheConfig",
     "get_config",
     "get_config_manager",
+    "set_config",
     "load_webui_settings",
     "WebUISettings",
 ]
 
-# 全局配置实例
 _config: Optional[Config] = None
 _config_manager: Optional[ConfigManager] = None
 
@@ -60,3 +62,9 @@ def get_config(strict: bool = True) -> Config:
     if _config is None:
         _config = get_config_manager().load(strict=strict)
     return _config
+
+
+def set_config(config: Config) -> None:
+    """注入 Config 单例（库嵌入 opt-in；CLI / WebUI 启动链不得调用）。"""
+    global _config
+    _config = config
