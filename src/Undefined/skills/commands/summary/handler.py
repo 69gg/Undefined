@@ -36,17 +36,17 @@ def _parse_args(args: list[str]) -> tuple[int | None, str | None, str]:
 
 def _build_prompt(count: int | None, time_range: str | None, custom_prompt: str) -> str:
     """Build the natural language instruction for message summary."""
-    parts: list[str] = ["请总结"]
     if time_range:
-        parts.append(f"过去 {time_range} 内的聊天消息")
+        scope = f"过去 {time_range} 内的聊天消息"
     elif count:
-        parts.append(f"最近 {count} 条聊天消息")
+        scope = f"最近 {count} 条聊天消息"
     else:
-        parts.append(f"最近 {_DEFAULT_COUNT} 条聊天消息")
+        scope = f"最近 {_DEFAULT_COUNT} 条聊天消息"
 
+    parts = [f"请总结{scope}。"]
     if custom_prompt:
-        parts.append(f"，重点关注：{custom_prompt}")
-
+        parts.append(f"重点关注：{custom_prompt}。")
+    parts.append("只能依据下方原始聊天记录总结，不得编造或推测未出现的信息。")
     return "".join(parts)
 
 

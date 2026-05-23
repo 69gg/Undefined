@@ -768,12 +768,12 @@ class AIClient:
             return summaries[0]
 
         model_config = self._resolve_summary_model_for_requests()
-        messages = await self._summary_service.build_merge_messages(summaries)
+        messages = await self._summary_service.build_message_merge_messages(summaries)
         result = await self.submit_queued_llm_call(
             model_config=model_config,
             messages=messages,
             tools=None,
-            call_type="merge_summaries",
+            call_type="merge_message_summaries",
             max_tokens=8192,
         )
         return extract_choices_content(result).strip()
@@ -796,6 +796,7 @@ class AIClient:
             count=count,
             time_range=time_range,
             runtime_config=self.runtime_config,
+            include_header=False,
         )
         if not messages_text:
             return "当前会话暂无消息记录"

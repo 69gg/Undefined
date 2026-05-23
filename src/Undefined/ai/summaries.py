@@ -40,6 +40,7 @@ class SummaryService:
         merge_prompt_path: str = "res/prompts/merge_summaries.txt",
         title_prompt_path: str = "res/prompts/generate_title.txt",
         message_summary_prompt_path: str = "res/prompts/message_summary.txt",
+        message_merge_prompt_path: str = "res/prompts/merge_message_summaries.txt",
     ) -> None:
         self._requester = requester
         self._chat_config = chat_config
@@ -48,6 +49,7 @@ class SummaryService:
         self._merge_prompt_path = merge_prompt_path
         self._title_prompt_path = title_prompt_path
         self._message_summary_prompt_path = message_summary_prompt_path
+        self._message_merge_prompt_path = message_merge_prompt_path
 
     async def _load_message_summary_prompt(self) -> str:
         try:
@@ -64,14 +66,42 @@ class SummaryService:
         instruction: str = "",
     ) -> list[dict[str, str]]:
         system_prompt = await self._load_message_summary_prompt()
-        user_parts: list[str] = []
-        cleaned_instruction = instruction.strip()
-        if cleaned_instruction:
-            user_parts.append(cleaned_instruction)
-        user_parts.append(f"以下是聊天记录：\n{messages_text}")
+        cleaned_instruction = instruction.strip() or "请总结下方聊天记录。"
+        user_content = (
+            "【总结任务】\n"
+            f"{cleaned_instruction}\n\n"
+            "【原始聊天记录】\n"
+            "以下 XML 是唯一信息来源。每条 <message> 代表一条消息，正文在 <content> 内；"
+            "只能依据这些内容总结，不得编造、推测或补全。\n\n"
+            f"{messages_text.strip()}\n\n"
+            "【输出要求】\n"
+            "直接输出总结正文，不要复述 XML，不要输出任务说明或过程描述。"
+        )
         return [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": "\n\n".join(user_parts)},
+            {"role": "user", "content": user_content},
+        ]
+
+    async def _load_message_merge_prompt(self) -> str:
+        try:
+            return read_text_resource(self._message_merge_prompt_path)
+        except Exception:
+            async with aiofiles.open(
+                self._message_merge_prompt_path, "r", encoding="utf-8"
+            ) as f:
+                return await f.read()
+
+    async def build_message_merge_messages(
+        self, summaries: list[str]
+    ) -> list[dict[str, str]]:
+        segments = [f"分段 {i + 1}:\n{s.strip()}" for i, s in enumerate(summaries)]
+        segments_text = "\n---\n".join(segments)
+        system_prompt = await self._load_message_summary_prompt()
+        merge_prompt = await self._load_message_merge_prompt()
+        user_content = f"{merge_prompt.rstrip()}\n\n{segments_text}"
+        return [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
         ]
 
     def _resolve_context_window_tokens(self) -> int:

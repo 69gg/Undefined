@@ -81,11 +81,15 @@ async def fetch_session_messages(
     count: int | None = None,
     time_range: str | None = None,
     runtime_config: Any = None,
+    include_header: bool = True,
 ) -> str:
     """Fetch formatted XML messages for the current session.
 
     Returns formatted message text, empty string when no messages exist,
     or an error message string for invalid input.
+
+    When ``include_header`` is False, returns only ``<message>`` XML blocks
+    (suitable for direct LLM summarization).
     """
     if int(group_id) > 0:
         chat_type = "group"
@@ -130,6 +134,9 @@ async def fetch_session_messages(
         messages, chat_type=chat_type, chat_id=chat_id
     )
     formatted = format_messages_xml(messages)
+    if not include_header:
+        return formatted
+
     total = len(messages)
     header = f"共获取 {total} 条消息"
     if time_range_str:

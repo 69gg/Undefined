@@ -102,12 +102,14 @@ def test_parse_args_count_with_custom_prompt() -> None:
 
 def test_build_prompt_with_count() -> None:
     prompt = _build_prompt(100, None, "")
-    assert "请总结最近 100 条聊天消息" in prompt
+    assert "请总结最近 100 条聊天消息。" in prompt
+    assert "不得编造" in prompt
 
 
 def test_build_prompt_with_time_range() -> None:
     prompt = _build_prompt(None, "1d", "")
-    assert "请总结过去 1d 内的聊天消息" in prompt
+    assert "请总结过去 1d 内的聊天消息。" in prompt
+    assert "不得编造" in prompt
 
 
 @pytest.mark.asyncio
@@ -155,7 +157,7 @@ async def test_summary_direct_call_success() -> None:
         user_id=10002,
         count=50,
         time_range=None,
-        instruction="请总结最近 50 条聊天消息",
+        instruction="请总结最近 50 条聊天消息。只能依据下方原始聊天记录总结，不得编造或推测未出现的信息。",
     )
 
 
@@ -230,7 +232,7 @@ async def test_summary_private_chat() -> None:
         user_id=88888,
         count=None,
         time_range="1d",
-        instruction="请总结过去 1d 内的聊天消息，重点关注：重要消息",
+        instruction="请总结过去 1d 内的聊天消息。重点关注：重要消息。只能依据下方原始聊天记录总结，不得编造或推测未出现的信息。",
     )
 
 
@@ -258,5 +260,5 @@ async def test_summary_passes_time_range_and_focus() -> None:
         user_id=10002,
         count=None,
         time_range="1d",
-        instruction="请总结过去 1d 内的聊天消息，重点关注：技术讨论",
+        instruction="请总结过去 1d 内的聊天消息。重点关注：技术讨论。只能依据下方原始聊天记录总结，不得编造或推测未出现的信息。",
     )

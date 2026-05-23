@@ -56,6 +56,84 @@ async def test_fetch_session_messages_invalid_time_range() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fetch_session_messages_without_header() -> None:
+    history_manager = MagicMock()
+    history_manager.get_recent.return_value = [
+        {
+            "type": "group",
+            "chat_id": "123",
+            "chat_name": "测试群",
+            "display_name": "Alice",
+            "user_id": "1",
+            "timestamp": "2026-01-01 12:00:00",
+            "message": "hello",
+        }
+    ]
+
+    result = await fetch_session_messages(
+        history_manager,
+        group_id=123,
+        user_id=456,
+        count=1,
+        include_header=False,
+    )
+
+    assert result.startswith("<message")
+    assert "共获取" not in result
+
+
+@pytest.mark.asyncio
+async def test_build_message_summary_messages_structure() -> None:
+    service = SummaryService(
+        AsyncMock(),
+        _agent_config("summary-model"),
+        MagicMock(),
+    )
+    with patch.object(
+        service,
+        "_load_message_summary_prompt",
+        new=AsyncMock(return_value="system rules"),
+    ):
+        messages = await service.build_message_summary_messages(
+            "<message><content>hi</content></message>",
+            "请总结最近 10 条聊天消息。",
+        )
+
+    assert messages[0]["content"] == "system rules"
+    assert "【总结任务】" in messages[1]["content"]
+    assert "【原始聊天记录】" in messages[1]["content"]
+    assert "<message>" in messages[1]["content"]
+    assert "不得编造" in messages[1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_build_message_merge_messages_uses_chat_merge_prompt() -> None:
+    service = SummaryService(
+        AsyncMock(),
+        _agent_config("summary-model"),
+        MagicMock(),
+    )
+    with (
+        patch.object(
+            service,
+            "_load_message_summary_prompt",
+            new=AsyncMock(return_value="system rules"),
+        ),
+        patch.object(
+            service,
+            "_load_message_merge_prompt",
+            new=AsyncMock(return_value="merge rules"),
+        ),
+    ):
+        messages = await service.build_message_merge_messages(["part-1", "part-2"])
+
+    assert messages[0]["content"] == "system rules"
+    assert "merge rules" in messages[1]["content"]
+    assert "part-1" in messages[1]["content"]
+    assert "Bug 问题描述" not in messages[1]["content"]
+
+
+@pytest.mark.asyncio
 async def test_summarize_command_session_uses_queued_llm_without_tools() -> None:
     ai_client = cast(Any, AIClient.__new__(AIClient))
     ai_client.runtime_config = SimpleNamespace(
@@ -117,8 +195,11 @@ async def test_summarize_command_session_splits_long_history() -> None:
     ai_client._summary_service.resolve_message_input_budget = AsyncMock(
         return_value=1000
     )
-    ai_client._summary_service.build_merge_messages = AsyncMock(
-        return_value=[{"role": "user", "content": "merge prompt"}]
+    ai_client._summary_service.build_message_merge_messages = AsyncMock(
+        return_value=[
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "merge prompt"},
+        ]
     )
     ai_client.count_tokens = MagicMock(return_value=10000)
     ai_client.split_messages_by_tokens = MagicMock(return_value=["chunk-1", "chunk-2"])
@@ -146,8 +227,8 @@ async def test_summarize_command_session_splits_long_history() -> None:
     assert result == "合并总结"
     assert ai_client.submit_queued_llm_call.call_count == 3
     merge_call = ai_client.submit_queued_llm_call.call_args_list[-1].kwargs
-    assert merge_call["call_type"] == "merge_summaries"
-    ai_client._summary_service.build_merge_messages.assert_awaited_once_with(
+    assert merge_call["call_type"] == "merge_message_summaries"
+    ai_client._summary_service.build_message_merge_messages.assert_awaited_once_with(
         ["part-1", "part-2"]
     )
 
