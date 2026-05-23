@@ -100,7 +100,7 @@ model_name = "gpt-4o-mini"
 | `process_poke_message` | `true` | 是否响应拍一拍 | 关闭后忽略 poke |
 | `context_recent_messages_limit` | `20` | 注入到提示词的最近历史条数 | `<0` 视为 `0`（关闭注入）；无固定上限，受 `max_records` 与存储约束 |
 | `ai_request_max_retries` | `2` | 单次 LLM 请求失败重试次数 | `<0` 自动回退到 `0`；支持热更新 |
-| `missing_tool_call_retries` | `3` | 模型返回纯文本但未调用 `send_message` / `end` 等工具时的纠正重试次数 | `<0` 自动回退到 `0`；支持热更新 |
+| `missing_tool_call_retries` | `3` | 模型返回纯文本但未调用任何工具时的纠正重试次数（保留 assistant 纯文本 + 通用纠正提示，不写死具体 tool） | `<0` 自动回退到 `0`；支持热更新 |
 
 ---
 

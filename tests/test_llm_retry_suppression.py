@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from Undefined.ai.client import AIClient
+from Undefined.ai.client import AIClient, MISSING_TOOL_CALL_RETRY_HINT
 from Undefined.ai.queue_budget import compute_queued_llm_timeout_seconds
 from Undefined.config.models import (
     AgentModelConfig,
@@ -185,13 +185,22 @@ async def test_ai_ask_limits_missing_tool_call_retries() -> None:
         max_tokens=1024,
     )
     client._find_chat_config_by_name = lambda _name: client.chat_config
-    client.submit_queued_llm_call = AsyncMock(
-        side_effect=[
-            {"choices": [{"message": {"content": "plain 1", "tool_calls": []}}]},
-            {"choices": [{"message": {"content": "plain 2", "tool_calls": []}}]},
-            {"choices": [{"message": {"content": "plain 3", "tool_calls": []}}]},
-        ]
-    )
+    llm_responses = [
+        {"choices": [{"message": {"content": "plain 1", "tool_calls": []}}]},
+        {"choices": [{"message": {"content": "plain 2", "tool_calls": []}}]},
+        {"choices": [{"message": {"content": "plain 3", "tool_calls": []}}]},
+    ]
+    submit_calls: list[list[dict[str, Any]]] = []
+
+    async def _submit_queued_llm_call(
+        *,
+        messages: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        submit_calls.append(list(messages))
+        return llm_responses[len(submit_calls) - 1]
+
+    client.submit_queued_llm_call = AsyncMock(side_effect=_submit_queued_llm_call)
     client._search_wrapper = None
     client._end_summary_storage = cast(Any, None)
     client._send_private_message_callback = None
@@ -212,6 +221,13 @@ async def test_ai_ask_limits_missing_tool_call_retries() -> None:
     assert result == ""
     assert cast(AsyncMock, client.submit_queued_llm_call).await_count == 3
     send_message.assert_awaited_once_with("plain 3")
+
+    second_call_messages = submit_calls[1]
+    assert second_call_messages[-2:] == [
+        {"role": "assistant", "content": "plain 1"},
+        {"role": "user", "content": MISSING_TOOL_CALL_RETRY_HINT},
+    ]
+    assert "send_message" not in MISSING_TOOL_CALL_RETRY_HINT
 
 
 @pytest.mark.asyncio

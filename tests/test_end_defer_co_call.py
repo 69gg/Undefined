@@ -72,7 +72,7 @@ def _build_minimal_ai_client(
         messages: list[dict[str, Any]],
         **kwargs: Any,
     ) -> dict[str, Any]:
-        submit_calls.append(messages)
+        submit_calls.append(list(messages))
         index = len(submit_calls) - 1
         if index >= len(llm_responses):
             raise RuntimeError("unexpected extra llm call")

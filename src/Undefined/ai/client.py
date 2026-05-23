@@ -61,6 +61,14 @@ from Undefined.utils.tool_calls import parse_tool_arguments
 
 logger = logging.getLogger(__name__)
 
+# 模型返回纯文本但未调用 tool 时，追加到 messages 的纠正提示（不写死具体 tool）
+MISSING_TOOL_CALL_RETRY_HINT = (
+    "【系统提示】你上一轮输出了纯文本且未调用任何工具。"
+    "本环境必须通过工具调用来完成对外动作与结束本轮处理。"
+    "请结合上文完整对话历史与已有 tool 返回结果，自行决定下一步应调用的工具；"
+    "不要直接以纯文本作为最终对外回复。"
+)
+
 
 _CONTENT_TAG_PATTERN = re.compile(
     r"<content>(.*?)</content>", re.DOTALL | re.IGNORECASE
@@ -1410,14 +1418,17 @@ class AIClient:
                         max_missing_tool_call_retries,
                         len(content),
                     )
+                    assistant_retry_message: dict[str, Any] = {
+                        "role": "assistant",
+                        "content": content,
+                    }
+                    if capture_reasoning and reasoning_content is not None:
+                        assistant_retry_message["reasoning_content"] = reasoning_content
+                    messages.append(assistant_retry_message)
                     messages.append(
                         {
                             "role": "user",
-                            "content": (
-                                "注意：你不能直接返回纯文本作为最终回复。"
-                                "请调用 send_message 工具来发送你的回复消息，"
-                                "然后调用 end 工具结束对话。"
-                            ),
+                            "content": MISSING_TOOL_CALL_RETRY_HINT,
                         }
                     )
                     continue
