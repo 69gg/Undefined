@@ -152,11 +152,7 @@ def _compute_mixin_key(img_key: str, sub_key: str) -> str:
     return mixed[:32]
 
 
-async def _refresh_mixin_key(client: httpx.AsyncClient) -> str:
-    resp = await client.get(_BILIBILI_API_NAV)
-    resp.raise_for_status()
-    payload = resp.json()
-
+def _mixin_key_from_nav_payload(payload: Any) -> str:
     if not isinstance(payload, dict):
         raise ValueError("nav 接口返回格式异常")
 
@@ -186,13 +182,18 @@ async def _refresh_mixin_key(client: httpx.AsyncClient) -> str:
     return _compute_mixin_key(img_key, sub_key)
 
 
+async def _refresh_mixin_key(client: httpx.AsyncClient) -> str:
+    resp = await client.get(_BILIBILI_API_NAV)
+    resp.raise_for_status()
+    return _mixin_key_from_nav_payload(resp.json())
+
+
 async def get_mixin_key(
     client: httpx.AsyncClient,
     *,
     force_refresh: bool = False,
 ) -> str:
     """获取可复用的 mixin_key。"""
-    # global
     global _cached_mixin_key_async, _cached_at_async
 
     now = time.time()
@@ -259,35 +260,7 @@ async def build_signed_params(
 def _refresh_mixin_key_sync(client: httpx.Client) -> str:
     resp = client.get(_BILIBILI_API_NAV)
     resp.raise_for_status()
-    payload = resp.json()
-
-    if not isinstance(payload, dict):
-        raise ValueError("nav 接口返回格式异常")
-
-    code = int(payload.get("code", -1))
-    if code not in (0, -101):
-        message = payload.get("message", "未知错误")
-        raise ValueError(f"获取 wbi key 失败: {message} (code={code})")
-
-    data = payload.get("data")
-    if not isinstance(data, dict):
-        raise ValueError("nav 接口 data 字段异常")
-
-    wbi_img = data.get("wbi_img")
-    if not isinstance(wbi_img, dict):
-        raise ValueError("nav 接口 wbi_img 字段缺失")
-
-    img_url = str(wbi_img.get("img_url", "")).strip()
-    sub_url = str(wbi_img.get("sub_url", "")).strip()
-    if not img_url or not sub_url:
-        raise ValueError("nav 接口未返回有效的 img_url/sub_url")
-
-    img_key = _extract_key_from_url(img_url)
-    sub_key = _extract_key_from_url(sub_url)
-    if not img_key or not sub_key:
-        raise ValueError("无法提取有效的 img_key/sub_key")
-
-    return _compute_mixin_key(img_key, sub_key)
+    return _mixin_key_from_nav_payload(resp.json())
 
 
 def get_mixin_key_sync(
@@ -296,7 +269,6 @@ def get_mixin_key_sync(
     force_refresh: bool = False,
 ) -> str:
     """同步获取可复用的 mixin_key。"""
-    # global
     global _cached_mixin_key_sync, _cached_at_sync
 
     now = time.time()
