@@ -28,6 +28,7 @@ from Undefined.config import (
     GrokModelConfig,
 )
 from Undefined.context import RequestContext
+from Undefined.utils.paths import PACKAGE_ROOT
 from Undefined.context_resource_registry import set_context_resource_scan_paths
 from Undefined.end_summary_storage import EndSummaryStorage
 from Undefined.memory import MemoryStorage
@@ -212,12 +213,11 @@ class ClientSetupMixin:
         self.current_group_id: Optional[int] = None
         self.current_user_id: Optional[int] = None
 
-        base_dir = Path(__file__).resolve().parents[1]
-        self.tool_registry = ToolRegistry(base_dir / "skills" / "tools")
-        self.agent_registry = AgentRegistry(base_dir / "skills" / "agents")
+        self.tool_registry = ToolRegistry(PACKAGE_ROOT / "skills" / "tools")
+        self.agent_registry = AgentRegistry(PACKAGE_ROOT / "skills" / "agents")
 
         # 初始化 Anthropic Agent Skills 注册表（可选，目录不存在时自动跳过）
-        anthropic_skills_dir = base_dir / "skills" / "anthropic_skills"
+        anthropic_skills_dir = PACKAGE_ROOT / "skills" / "anthropic_skills"
         dot_delimiter = self._get_runtime_config().tools_dot_delimiter
         self.anthropic_skill_registry = AnthropicSkillRegistry(
             anthropic_skills_dir,
