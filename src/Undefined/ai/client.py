@@ -22,7 +22,9 @@ from Undefined.ai.queue_budget import (
     compute_queued_llm_timeout_seconds,
     resolve_effective_retry_count,
 )
+from Undefined.ai.parsing import extract_choices_content
 from Undefined.ai.summaries import SummaryService
+from Undefined.services.message_summary_fetch import fetch_session_messages
 from Undefined.ai.transports.openai_transport import RESPONSES_OUTPUT_ITEMS_KEY
 from Undefined.ai.tokens import TokenCounter
 from Undefined.ai.tooling import ToolManager
@@ -137,14 +139,16 @@ def _attachment_cache_max_age_seconds(runtime_config: Config) -> int:
 
 def _resolve_summary_model_config(
     runtime_config: Config | None,
-    chat_config: ChatModelConfig,
-) -> ChatModelConfig | AgentModelConfig:
+    fallback: AgentModelConfig,
+) -> AgentModelConfig:
     if runtime_config is None:
-        return chat_config
+        return fallback
     if not getattr(runtime_config, "summary_model_configured", False):
-        return chat_config
+        return fallback
     summary_model = getattr(runtime_config, "summary_model", None)
-    return summary_model if summary_model is not None else chat_config
+    if isinstance(summary_model, AgentModelConfig):
+        return summary_model
+    return fallback
 
 
 class AIClient:
@@ -734,9 +738,86 @@ class AIClient:
     def _rebuild_summary_service(self) -> None:
         self._summary_service = SummaryService(
             self._requester,
-            _resolve_summary_model_config(self.runtime_config, self.chat_config),
+            _resolve_summary_model_config(self.runtime_config, self.agent_config),
             self._token_counter,
         )
+
+    def _resolve_summary_model_for_requests(self) -> AgentModelConfig:
+        return _resolve_summary_model_config(self.runtime_config, self.agent_config)
+
+    async def _summarize_message_history_queued(
+        self,
+        messages_text: str,
+        instruction: str = "",
+    ) -> str:
+        model_config = self._resolve_summary_model_for_requests()
+        built_messages = await self._summary_service.build_message_summary_messages(
+            messages_text, instruction
+        )
+        result = await self.submit_queued_llm_call(
+            model_config=model_config,
+            messages=built_messages,
+            tools=None,
+            call_type="message_summary",
+            max_tokens=model_config.max_tokens,
+        )
+        return extract_choices_content(result).strip()
+
+    async def _merge_summaries_queued(self, summaries: list[str]) -> str:
+        if len(summaries) == 1:
+            return summaries[0]
+
+        model_config = self._resolve_summary_model_for_requests()
+        messages = await self._summary_service.build_message_merge_messages(summaries)
+        result = await self.submit_queued_llm_call(
+            model_config=model_config,
+            messages=messages,
+            tools=None,
+            call_type="merge_message_summaries",
+            max_tokens=8192,
+        )
+        return extract_choices_content(result).strip()
+
+    async def summarize_command_session(
+        self,
+        history_manager: Any,
+        *,
+        group_id: int,
+        user_id: int,
+        count: int | None = None,
+        time_range: str | None = None,
+        instruction: str = "",
+    ) -> str:
+        """Fetch session messages and summarize via summary model without tools."""
+        messages_text = await fetch_session_messages(
+            history_manager,
+            group_id=group_id,
+            user_id=user_id,
+            count=count,
+            time_range=time_range,
+            runtime_config=self.runtime_config,
+            include_header=False,
+        )
+        if not messages_text:
+            return "当前会话暂无消息记录"
+        if messages_text.startswith("无法解析时间范围"):
+            return messages_text
+
+        input_budget = await self._summary_service.resolve_message_input_budget(
+            instruction
+        )
+        total_tokens = self.count_tokens(messages_text)
+        if total_tokens <= input_budget:
+            return await self._summarize_message_history_queued(
+                messages_text, instruction
+            )
+
+        chunks = self.split_messages_by_tokens(messages_text, input_budget)
+        summaries = [
+            await self._summarize_message_history_queued(chunk, instruction)
+            for chunk in chunks
+        ]
+        return await self._merge_summaries_queued(summaries)
 
     def apply_attachment_config(self, runtime_config: Config) -> None:
         self.attachment_registry.set_limits(
@@ -1109,6 +1190,26 @@ class AIClient:
         tool_context.setdefault(
             "get_recent_messages_callback", get_recent_messages_callback
         )
+
+        async def fetch_session_messages_callback(
+            *,
+            group_id: int,
+            user_id: int,
+            count: int | None = None,
+            time_range: str | None = None,
+        ) -> str:
+            return await fetch_session_messages(
+                history_manager,
+                group_id=group_id,
+                user_id=user_id,
+                count=count,
+                time_range=time_range,
+                runtime_config=self._get_runtime_config(),
+            )
+
+        tool_context.setdefault(
+            "fetch_session_messages_callback", fetch_session_messages_callback
+        )
         tool_context.setdefault("get_image_url_callback", get_image_url_callback)
         tool_context.setdefault("get_forward_msg_callback", get_forward_msg_callback)
         tool_context.setdefault("send_like_callback", send_like_callback)
@@ -1148,6 +1249,9 @@ class AIClient:
         iteration = 0
         conversation_ended = False
         cot_compat = getattr(effective_chat_config, "thinking_tool_call_compat", False)
+        capture_reasoning = cot_compat or bool(
+            getattr(effective_chat_config, "reasoning_content_replay", False)
+        )
         cot_compat_logged = False
         cot_missing_logged = False
         transport_state: dict[str, Any] | None = None
@@ -1229,13 +1333,18 @@ class AIClient:
                         log_debug_json(logger, "[AI工具调用]", tool_calls)
 
                 log_thinking = self._get_runtime_config().log_thinking
-                if cot_compat and tools and log_thinking and not cot_compat_logged:
+                if (
+                    capture_reasoning
+                    and tools
+                    and log_thinking
+                    and not cot_compat_logged
+                ):
                     cot_compat_logged = True
                     logger.info(
                         "[思维链兼容] 多轮工具调用 reasoning_content 本地回填已启用"
                     )
                 if (
-                    cot_compat
+                    capture_reasoning
                     and log_thinking
                     and tools
                     and getattr(effective_chat_config, "thinking_enabled", False)
@@ -1326,7 +1435,7 @@ class AIClient:
                 output_items = message.get(RESPONSES_OUTPUT_ITEMS_KEY)
                 if isinstance(output_items, list):
                     assistant_message[RESPONSES_OUTPUT_ITEMS_KEY] = output_items
-                if cot_compat and reasoning_content is not None:
+                if capture_reasoning and reasoning_content is not None:
                     assistant_message["reasoning_content"] = reasoning_content
                 messages.append(assistant_message)
 

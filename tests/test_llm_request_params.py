@@ -1966,3 +1966,209 @@ async def test_responses_request_streaming_preserves_synthesized_whitespace() ->
     assert result["output_text"] == "  code\n  indented  "
 
     await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_chat_request_preserves_reasoning_when_replay_enabled() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeClient()
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        reasoning_content_replay=True,
+    )
+    tool_calls = [
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+                "name": "lookup",
+                "arguments": '{"query":"weather"}',
+            },
+        }
+    ]
+
+    await requester.request(
+        model_config=cfg,
+        messages=[
+            {"role": "user", "content": "hello"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": tool_calls,
+                "reasoning_content": "内部思维链",
+                RESPONSES_OUTPUT_ITEMS_KEY: [{"type": "reasoning", "id": "rs_1"}],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "done"},
+        ],
+        max_tokens=128,
+        call_type="chat",
+    )
+
+    assert fake_client.chat.completions.last_kwargs is not None
+    outbound_messages = fake_client.chat.completions.last_kwargs["messages"]
+    assert outbound_messages[1]["reasoning_content"] == "内部思维链"
+    assert RESPONSES_OUTPUT_ITEMS_KEY not in outbound_messages[1]
+
+    await requester._http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_replay_accumulates_reasoning_content() -> None:
+    requester = ModelRequester(
+        http_client=httpx.AsyncClient(),
+        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+    )
+    fake_client = _FakeStreamingClient(
+        chat_events=[
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "role": "assistant",
+                            "reasoning_content": "think",
+                        },
+                        "finish_reason": None,
+                    }
+                ]
+            },
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "content": "ok",
+                            "reasoning_content": "-more",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        ]
+    )
+    setattr(
+        requester,
+        "_get_openai_client_for_model",
+        lambda _cfg: cast(AsyncOpenAI, fake_client),
+    )
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        stream_enabled=True,
+        reasoning_content_replay=True,
+    )
+
+    result = await requester.request(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=128,
+        call_type="chat",
+    )
+
+    assert result["choices"][0]["message"]["reasoning_content"] == "think-more"
+    assert extract_choices_content(result) == "ok"
+
+    await requester._http_client.aclose()
+
+
+def test_responses_replay_requests_encrypted_reasoning_on_first_call() -> None:
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+        reasoning_content_replay=True,
+    )
+    request_body = build_request_body(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=128,
+    )
+    assert request_body["include"] == ["reasoning.encrypted_content"]
+    assert "previous_response_id" not in request_body
+
+
+def test_responses_replay_keeps_previous_response_id_incremental_path() -> None:
+    normalized = normalize_responses_result(
+        {
+            "id": "resp_incr",
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "lookup",
+                    "arguments": '{"query":"weather"}',
+                },
+            ],
+        }
+    )
+    assistant_message = normalized["choices"][0]["message"]
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="responses",
+        reasoning_content_replay=True,
+    )
+    request_body = build_request_body(
+        model_config=cfg,
+        messages=[
+            {"role": "user", "content": "hello"},
+            assistant_message,
+            {"role": "tool", "tool_call_id": "call_1", "content": "done"},
+        ],
+        max_tokens=128,
+        transport_state={
+            "previous_response_id": "resp_incr",
+            "tool_result_start_index": 2,
+        },
+    )
+    assert request_body["previous_response_id"] == "resp_incr"
+    assert request_body["input"] == [
+        {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "done",
+        }
+    ]
+    assert "instructions" not in request_body
+
+
+def test_system_prompt_as_user_merges_system_into_first_user() -> None:
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        system_prompt_as_user=True,
+    )
+    request_body = build_request_body(
+        model_config=cfg,
+        messages=[
+            {"role": "system", "content": "系统提示 A"},
+            {"role": "developer", "content": "系统提示 B"},
+            {"role": "user", "content": "用户问题"},
+            {"role": "assistant", "content": "上一轮"},
+        ],
+        max_tokens=128,
+    )
+    outbound = request_body["messages"]
+    assert all(msg.get("role") not in ("system", "developer") for msg in outbound)
+    assert outbound[0]["role"] == "user"
+    assert "系统提示 A" in outbound[0]["content"]
+    assert "系统提示 B" in outbound[0]["content"]
+    assert "用户问题" in outbound[0]["content"]
+    assert outbound[1] == {"role": "assistant", "content": "上一轮"}

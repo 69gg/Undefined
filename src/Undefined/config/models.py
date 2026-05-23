@@ -33,6 +33,7 @@ class ModelPoolEntry:
     api_key: str
     model_name: str
     max_tokens: int
+    context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = "chat_completions"
     thinking_enabled: bool = False
@@ -40,6 +41,8 @@ class ModelPoolEntry:
     thinking_include_budget: bool = True
     reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
     thinking_tool_call_compat: bool = True
+    reasoning_content_replay: bool = False
+    system_prompt_as_user: bool = False
     responses_tool_choice_compat: bool = False
     responses_force_stateless_replay: bool = False
     prompt_cache_enabled: bool = True
@@ -66,6 +69,7 @@ class ChatModelConfig:
     api_key: str
     model_name: str
     max_tokens: int
+    context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
@@ -74,6 +78,10 @@ class ChatModelConfig:
     reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
     thinking_tool_call_compat: bool = (
         True  # 思维链 + 工具调用兼容（本地回填 reasoning_content）
+    )
+    reasoning_content_replay: bool = False  # 多轮工具调用时向上游续传 CoT
+    system_prompt_as_user: bool = (
+        False  # 将 system 合并注入首条 user（chat_completions）
     )
     responses_tool_choice_compat: bool = (
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
@@ -95,6 +103,7 @@ class VisionModelConfig:
     api_key: str
     model_name: str
     max_tokens: int = 8192  # 最大输出 tokens
+    context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
@@ -104,6 +113,8 @@ class VisionModelConfig:
     thinking_tool_call_compat: bool = (
         True  # 思维链 + 工具调用兼容（本地回填 reasoning_content）
     )
+    reasoning_content_replay: bool = False
+    system_prompt_as_user: bool = False
     responses_tool_choice_compat: bool = (
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
     )
@@ -123,6 +134,7 @@ class SecurityModelConfig:
     api_key: str
     model_name: str
     max_tokens: int
+    context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
@@ -132,6 +144,8 @@ class SecurityModelConfig:
     thinking_tool_call_compat: bool = (
         True  # 思维链 + 工具调用兼容（本地回填 reasoning_content）
     )
+    reasoning_content_replay: bool = False
+    system_prompt_as_user: bool = False
     responses_tool_choice_compat: bool = (
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
     )
@@ -150,6 +164,7 @@ class EmbeddingModelConfig:
     api_url: str
     api_key: str
     model_name: str
+    context_window_tokens: int = 8192
     queue_interval_seconds: float = 0.0
     dimensions: int | None = None
     query_instruction: str = ""  # 查询端指令前缀（如 Qwen3-Embedding 需要）
@@ -164,6 +179,7 @@ class RerankModelConfig:
     api_url: str
     api_key: str
     model_name: str
+    context_window_tokens: int = 8192
     queue_interval_seconds: float = 0.0
     query_instruction: str = ""  # 查询端指令前缀（如部分 rerank 模型需要）
     request_params: dict[str, Any] = field(default_factory=dict)
@@ -177,6 +193,7 @@ class AgentModelConfig:
     api_key: str
     model_name: str
     max_tokens: int = 4096
+    context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
@@ -186,6 +203,8 @@ class AgentModelConfig:
     thinking_tool_call_compat: bool = (
         True  # 思维链 + 工具调用兼容（本地回填 reasoning_content）
     )
+    reasoning_content_replay: bool = False
+    system_prompt_as_user: bool = False
     responses_tool_choice_compat: bool = (
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
     )
@@ -206,6 +225,7 @@ class GrokModelConfig:
     api_key: str
     model_name: str
     max_tokens: int = 8192
+    context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
@@ -228,6 +248,7 @@ class ImageGenModelConfig:
     api_url: str = ""
     api_key: str = ""
     model_name: str = ""
+    context_window_tokens: int = 0
     request_params: dict[str, Any] = field(default_factory=dict)
 
 

@@ -54,15 +54,6 @@ def _build_user_content(args: dict[str, Any]) -> str:
 async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     """执行 summary_agent。"""
     user_prompt = _build_user_content(args)
-    runtime_config = context.get("runtime_config")
-    run_context = context
-    if (
-        runtime_config is not None
-        and getattr(runtime_config, "summary_model_configured", False)
-        and getattr(runtime_config, "summary_model", None) is not None
-    ):
-        run_context = dict(context)
-        run_context["model_config_override"] = runtime_config.summary_model
     return await run_agent_with_tools(
         agent_name="summary_agent",
         user_content=user_prompt,
@@ -71,9 +62,11 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
             "你是一个消息总结助手。"
             "必须严格按照用户给定的 count/time_range/focus 约束调用 fetch_messages，"
             "不要擅自扩大范围。"
+            "只能基于 fetch_messages 返回内容总结，禁止编造未出现的参与者、链接、决策或待办；"
+            "信息不足时说明「消息中未提及」，不得推测补全。"
             "输出要简短、朴素、信息密度高。"
         ),
-        context=run_context,
+        context=context,
         agent_dir=Path(__file__).parent,
         logger=logger,
         max_iterations=10,

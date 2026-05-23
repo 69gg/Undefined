@@ -3,12 +3,12 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any, cast
 
+from Undefined.config import AgentModelConfig
 from Undefined.ai.client import AIClient, _resolve_summary_model_config
-from Undefined.config import AgentModelConfig, ChatModelConfig, Config
 
 
-def _chat_config(model_name: str = "chat-model") -> ChatModelConfig:
-    return ChatModelConfig(
+def _agent_config(model_name: str = "agent-model") -> AgentModelConfig:
+    return AgentModelConfig(
         api_url="https://api.example.com/v1",
         api_key="key",
         model_name=model_name,
@@ -25,46 +25,46 @@ def _summary_config(model_name: str = "summary-model") -> AgentModelConfig:
     )
 
 
-def test_resolve_summary_model_uses_chat_when_not_configured() -> None:
-    chat_config = _chat_config()
+def test_resolve_summary_model_uses_agent_when_not_configured() -> None:
+    agent_config = _agent_config()
     runtime_config = cast(
-        Config,
+        Any,
         SimpleNamespace(
             summary_model_configured=False,
             summary_model=_summary_config(),
         ),
     )
 
-    assert _resolve_summary_model_config(runtime_config, chat_config) is chat_config
+    assert _resolve_summary_model_config(runtime_config, agent_config) is agent_config
 
 
 def test_resolve_summary_model_uses_dedicated_summary_when_configured() -> None:
-    chat_config = _chat_config()
+    agent_config = _agent_config()
     summary_config = _summary_config()
     runtime_config = cast(
-        Config,
+        Any,
         SimpleNamespace(
             summary_model_configured=True,
             summary_model=summary_config,
         ),
     )
 
-    assert _resolve_summary_model_config(runtime_config, chat_config) is summary_config
+    assert _resolve_summary_model_config(runtime_config, agent_config) is summary_config
 
 
 def test_apply_runtime_config_rebuilds_summary_service_for_summary_model() -> None:
-    chat_config = _chat_config()
+    agent_config = _agent_config()
     old_summary_config = _summary_config("summary-old")
     new_summary_config = _summary_config("summary-new")
     old_runtime_config = cast(
-        Config,
+        Any,
         SimpleNamespace(
             summary_model_configured=True,
             summary_model=old_summary_config,
         ),
     )
     new_runtime_config = cast(
-        Config,
+        Any,
         SimpleNamespace(
             summary_model_configured=True,
             summary_model=new_summary_config,
@@ -72,7 +72,7 @@ def test_apply_runtime_config_rebuilds_summary_service_for_summary_model() -> No
     )
 
     ai_client = cast(Any, AIClient.__new__(AIClient))
-    ai_client.chat_config = chat_config
+    ai_client.agent_config = agent_config
     ai_client.runtime_config = old_runtime_config
     ai_client._requester = object()
     ai_client._token_counter = object()

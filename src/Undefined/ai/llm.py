@@ -186,8 +186,16 @@ _THINKING_KEYS: tuple[str, ...] = (
     "cot",
     "thoughts",
 )
+_CHAT_COMPLETION_STRIP_THINKING_KEYS: frozenset[str] = frozenset(
+    ("thinking", "reasoning", "chain_of_thought", "cot", "thoughts")
+)
 _CHAT_COMPLETION_INTERNAL_MESSAGE_KEYS: frozenset[str] = frozenset(
-    (*_THINKING_KEYS, "_responses_output_items", "phase")
+    (
+        "reasoning_content",
+        *_CHAT_COMPLETION_STRIP_THINKING_KEYS,
+        "_responses_output_items",
+        "phase",
+    )
 )
 
 _DEFAULT_TOOLS_DESCRIPTION_MAX_LEN = 1024
@@ -902,11 +910,14 @@ def _sanitize_openai_messages_tool_arguments(
 
 def _sanitize_chat_completion_messages(
     messages: list[dict[str, Any]],
+    *,
+    preserve_reasoning_content: bool = False,
 ) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
     """移除 Chat Completions 非标准消息字段。
 
-    本地历史里允许保留 reasoning_content 等兼容字段用于日志/回放，
-    但发往 OpenAI Chat Completions 时必须剥离这些内部字段。
+    本地历史里允许保留 reasoning_content 等兼容字段用于日志/回放；
+    发往上游时默认剥离。``preserve_reasoning_content=True`` 时保留
+    ``reasoning_content`` 供多轮 CoT 续传，仍剥离其它内部字段。
     """
     if not messages:
         return messages, 0, {}
@@ -922,6 +933,8 @@ def _sanitize_chat_completion_messages(
         sanitized_message = message
         removed = False
         for key in _CHAT_COMPLETION_INTERNAL_MESSAGE_KEYS:
+            if preserve_reasoning_content and key == "reasoning_content":
+                continue
             if key not in sanitized_message:
                 continue
             if sanitized_message is message:
@@ -935,6 +948,77 @@ def _sanitize_chat_completion_messages(
         sanitized_messages.append(sanitized_message)
 
     return sanitized_messages, changed, stripped_fields
+
+
+def _relocate_system_to_first_user(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """将 system/developer 消息合并注入首条 user 消息（chat_completions 适配）。"""
+    if not messages:
+        return messages
+
+    system_parts: list[str] = []
+    remaining: list[dict[str, Any]] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            remaining.append(message)
+            continue
+        role = str(message.get("role") or "").strip().lower()
+        if role in ("system", "developer"):
+            content = message.get("content")
+            if content is not None:
+                text = content if isinstance(content, str) else str(content)
+                if text.strip():
+                    system_parts.append(text.strip())
+            continue
+        remaining.append(message)
+
+    if not system_parts:
+        return messages
+
+    merged_system = "\n\n".join(system_parts)
+    first_user_idx: int | None = None
+    for idx, message in enumerate(remaining):
+        if (
+            isinstance(message, dict)
+            and str(message.get("role") or "").strip().lower() == "user"
+        ):
+            first_user_idx = idx
+            break
+
+    if first_user_idx is None:
+        remaining.insert(0, {"role": "user", "content": merged_system})
+        return remaining
+
+    first_user = dict(remaining[first_user_idx])
+    old_content = first_user.get("content")
+    old_text = (
+        old_content
+        if isinstance(old_content, str)
+        else (str(old_content) if old_content is not None else "")
+    )
+    if old_text.strip():
+        first_user["content"] = f"{merged_system}\n\n{old_text}"
+    else:
+        first_user["content"] = merged_system
+    updated = list(remaining)
+    updated[first_user_idx] = first_user
+    return updated
+
+
+def _prepare_chat_completion_messages(
+    model_config: ModelConfig,
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """按模型配置整理 Chat Completions 出站消息。"""
+    preserve_reasoning = bool(getattr(model_config, "reasoning_content_replay", False))
+    prepared, _, _ = _sanitize_chat_completion_messages(
+        messages,
+        preserve_reasoning_content=preserve_reasoning,
+    )
+    if bool(getattr(model_config, "system_prompt_as_user", False)):
+        prepared = _relocate_system_to_first_user(prepared)
+    return prepared
 
 
 def _stringify_thinking_list(value: list[Any]) -> str:
@@ -1200,6 +1284,9 @@ class ModelRequester:
         """发送请求到模型 API。"""
         start_time = time.perf_counter()
         cot_compat = getattr(model_config, "thinking_tool_call_compat", False)
+        reasoning_replay = bool(
+            getattr(model_config, "reasoning_content_replay", False)
+        )
         api_mode = get_api_mode(model_config)
         transport_message_count = (
             message_count_for_transport
@@ -1220,7 +1307,12 @@ class ModelRequester:
                 messages_for_api,
                 stripped_message_count,
                 stripped_message_fields,
-            ) = _sanitize_chat_completion_messages(messages_for_api)
+            ) = _sanitize_chat_completion_messages(
+                messages_for_api,
+                preserve_reasoning_content=reasoning_replay,
+            )
+            if bool(getattr(model_config, "system_prompt_as_user", False)):
+                messages_for_api = _relocate_system_to_first_user(messages_for_api)
             if stripped_message_count and logger.isEnabledFor(logging.INFO):
                 details = ",".join(
                     f"{key}={value}"
@@ -1573,10 +1665,15 @@ class ModelRequester:
         if api_mode == API_MODE_RESPONSES:
             return await self._stream_responses_request(client, stream_body)
         _ensure_chat_stream_usage_options(stream_body)
-        return await self._stream_chat_completions_request(client, stream_body)
+        return await self._stream_chat_completions_request(
+            client, stream_body, model_config
+        )
 
     async def _stream_chat_completions_request(
-        self, client: AsyncOpenAI, request_body: dict[str, Any]
+        self,
+        client: AsyncOpenAI,
+        request_body: dict[str, Any],
+        model_config: ModelConfig,
     ) -> dict[str, Any]:
         params, extra_body = _split_chat_completion_params(request_body)
         if extra_body:
@@ -1584,10 +1681,14 @@ class ModelRequester:
         response = await client.chat.completions.create(**params)
 
         content_parts: list[str] = []
+        reasoning_parts: list[str] = []
         tool_calls: list[dict[str, Any]] = []
         usage: dict[str, Any] | None = None
         finish_reason = "stop"
         role = "assistant"
+        reasoning_replay = bool(
+            getattr(model_config, "reasoning_content_replay", False)
+        )
 
         async for chunk in response:
             chunk_dict = self._response_to_dict(chunk)
@@ -1610,6 +1711,12 @@ class ModelRequester:
                 content_delta = _stringify_stream_delta(delta.get("content"))
                 if content_delta:
                     content_parts.append(content_delta)
+                if reasoning_replay:
+                    reasoning_delta = _stringify_thinking(
+                        delta.get("reasoning_content")
+                    )
+                    if reasoning_delta:
+                        reasoning_parts.append(reasoning_delta)
                 raw_tool_calls = delta.get("tool_calls")
                 if isinstance(raw_tool_calls, list):
                     for tool_delta in raw_tool_calls:
@@ -1623,6 +1730,10 @@ class ModelRequester:
             "role": role,
             "content": "".join(content_parts),
         }
+        if reasoning_replay:
+            reasoning_text = "".join(reasoning_parts).strip()
+            if reasoning_text:
+                message["reasoning_content"] = reasoning_text
         if tool_calls:
             message["tool_calls"] = tool_calls
         result: dict[str, Any] = {
@@ -1922,7 +2033,7 @@ def build_request_body(
 
     body: dict[str, Any] = {
         "model": model_config.model_name,
-        "messages": _sanitize_chat_completion_messages(messages)[0],
+        "messages": _prepare_chat_completion_messages(model_config, messages),
         "max_tokens": max_tokens,
     }
 

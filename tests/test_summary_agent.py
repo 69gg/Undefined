@@ -168,7 +168,7 @@ def test_build_user_content_prefers_structured_args() -> None:
 
 
 @pytest.mark.asyncio
-async def test_summary_agent_uses_summary_model_override_when_configured() -> None:
+async def test_summary_agent_does_not_use_summary_model_override() -> None:
     runtime_config = AsyncMock()
     runtime_config.summary_model_configured = True
     runtime_config.summary_model = AgentModelConfig(
@@ -192,6 +192,5 @@ async def test_summary_agent_uses_summary_model_override_when_configured() -> No
 
     assert result == "总结结果"
     call_kwargs = mock_run_agent.call_args.kwargs
-    assert (
-        call_kwargs["context"]["model_config_override"] is runtime_config.summary_model
-    )
+    assert call_kwargs["context"] is context
+    assert "model_config_override" not in call_kwargs["context"]
