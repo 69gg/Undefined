@@ -81,10 +81,6 @@ def _build_internal_model_probe_payload(mcfg: Any) -> dict[str, Any]:
         "model_name": getattr(mcfg, "model_name", ""),
         "api_url": _mask_url(getattr(mcfg, "api_url", "")),
     }
-    if hasattr(mcfg, "max_tokens"):
-        payload["max_tokens"] = getattr(mcfg, "max_tokens", 0)
-    if hasattr(mcfg, "context_window_tokens"):
-        payload["context_window_tokens"] = getattr(mcfg, "context_window_tokens", 8192)
     if hasattr(mcfg, "api_mode"):
         payload["api_mode"] = getattr(mcfg, "api_mode", "chat_completions")
     if hasattr(mcfg, "thinking_enabled"):
@@ -93,12 +89,6 @@ def _build_internal_model_probe_payload(mcfg: Any) -> dict[str, Any]:
         payload["thinking_tool_call_compat"] = getattr(
             mcfg, "thinking_tool_call_compat", True
         )
-    if hasattr(mcfg, "reasoning_content_replay"):
-        payload["reasoning_content_replay"] = getattr(
-            mcfg, "reasoning_content_replay", False
-        )
-    if hasattr(mcfg, "system_prompt_as_user"):
-        payload["system_prompt_as_user"] = getattr(mcfg, "system_prompt_as_user", False)
     if hasattr(mcfg, "responses_tool_choice_compat"):
         payload["responses_tool_choice_compat"] = getattr(
             mcfg, "responses_tool_choice_compat", False

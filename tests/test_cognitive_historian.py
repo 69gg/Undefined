@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -265,11 +264,3 @@ def test_extract_required_tool_args_preserves_job_context_in_error() -> None:
     assert "job_id=job-123" in message
     assert "attempt=2" in message
     assert "target=user:42" in message
-
-
-def test_historian_profile_merge_prompt_profile_only_constraints() -> None:
-    merge = Path("res/prompts/historian_profile_merge.md").read_text(encoding="utf-8")
-    assert "长期高层画像" in merge
-    assert "skip=true" in merge
-    assert "具体事件" in merge
-    assert "曾/刚/最近" in merge

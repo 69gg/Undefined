@@ -555,6 +555,8 @@ class Config:
         )
         if context_recent_messages_limit < 0:
             context_recent_messages_limit = 0
+        if context_recent_messages_limit > 200:
+            context_recent_messages_limit = 200
 
         ai_request_max_retries = _coerce_int(
             _get_value(
@@ -1743,6 +1745,8 @@ class Config:
         limit = int(self.context_recent_messages_limit)
         if limit < 0:
             return 0
+        if limit > 200:
+            return 200
         return limit
 
     def security_check_enabled(self) -> bool:

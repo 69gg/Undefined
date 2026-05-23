@@ -77,7 +77,6 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 | `send_private_message_callback` | `Callable` | 发送私聊消息的回调（建议使用 sender） |
 | `send_image_callback` | `Callable` | 发送图片的回调 |
 | `get_recent_messages_callback` | `Callable` | 获取历史消息的回调（建议使用 history_manager） |
-| `fetch_session_messages_callback` | `Callable` | 拉取当前会话消息用于总结（`/summary` 与 `summary_agent.fetch_messages`） |
 | `memory_storage` | `MemoryStorage` | 记忆存储实例 |
 | `ai_client` | `AIClient` | AI 客户端实例（用于调用图片描述等） |
 | `base_path` | `Path` | 默认基础路径（通常锁定在 `code/NagaAgent`） |

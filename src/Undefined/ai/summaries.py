@@ -16,8 +16,6 @@ from Undefined.utils.resources import read_text_resource
 
 logger = logging.getLogger(__name__)
 
-_SUMMARY_FIXED_OVERHEAD_TOKENS = 512
-
 
 def _template_fields(template: str) -> list[str]:
     fields: list[str] = []
@@ -39,8 +37,6 @@ class SummaryService:
         summarize_prompt_path: str = "res/prompts/summarize.txt",
         merge_prompt_path: str = "res/prompts/merge_summaries.txt",
         title_prompt_path: str = "res/prompts/generate_title.txt",
-        message_summary_prompt_path: str = "res/prompts/message_summary.txt",
-        message_merge_prompt_path: str = "res/prompts/merge_message_summaries.txt",
     ) -> None:
         self._requester = requester
         self._chat_config = chat_config
@@ -48,79 +44,6 @@ class SummaryService:
         self._summarize_prompt_path = summarize_prompt_path
         self._merge_prompt_path = merge_prompt_path
         self._title_prompt_path = title_prompt_path
-        self._message_summary_prompt_path = message_summary_prompt_path
-        self._message_merge_prompt_path = message_merge_prompt_path
-
-    async def _load_message_summary_prompt(self) -> str:
-        try:
-            return read_text_resource(self._message_summary_prompt_path)
-        except Exception:
-            async with aiofiles.open(
-                self._message_summary_prompt_path, "r", encoding="utf-8"
-            ) as f:
-                return await f.read()
-
-    async def build_message_summary_messages(
-        self,
-        messages_text: str,
-        instruction: str = "",
-    ) -> list[dict[str, str]]:
-        system_prompt = await self._load_message_summary_prompt()
-        cleaned_instruction = instruction.strip() or "请总结下方聊天记录。"
-        user_content = (
-            "【总结任务】\n"
-            f"{cleaned_instruction}\n\n"
-            "【原始聊天记录】\n"
-            "以下 XML 是唯一信息来源。每条 <message> 代表一条消息，正文在 <content> 内；"
-            "只能依据这些内容总结，不得编造、推测或补全。\n\n"
-            f"{messages_text.strip()}\n\n"
-            "【输出要求】\n"
-            "直接输出总结正文，不要复述 XML，不要输出任务说明或过程描述。"
-        )
-        return [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ]
-
-    async def _load_message_merge_prompt(self) -> str:
-        try:
-            return read_text_resource(self._message_merge_prompt_path)
-        except Exception:
-            async with aiofiles.open(
-                self._message_merge_prompt_path, "r", encoding="utf-8"
-            ) as f:
-                return await f.read()
-
-    async def build_message_merge_messages(
-        self, summaries: list[str]
-    ) -> list[dict[str, str]]:
-        segments = [f"分段 {i + 1}:\n{s.strip()}" for i, s in enumerate(summaries)]
-        segments_text = "\n---\n".join(segments)
-        system_prompt = await self._load_message_summary_prompt()
-        merge_prompt = await self._load_message_merge_prompt()
-        user_content = f"{merge_prompt.rstrip()}\n\n{segments_text}"
-        return [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ]
-
-    def _resolve_context_window_tokens(self) -> int:
-        configured = int(getattr(self._chat_config, "context_window_tokens", 8192))
-        return max(1, configured)
-
-    async def resolve_message_input_budget(self, instruction: str = "") -> int:
-        """Estimate how many input tokens are available for raw chat history text."""
-        system_prompt = await self._load_message_summary_prompt()
-        output_reserve = max(512, int(getattr(self._chat_config, "max_tokens", 4096)))
-        prompt_overhead = (
-            self._token_counter.count(system_prompt)
-            + self._token_counter.count(instruction)
-            + _SUMMARY_FIXED_OVERHEAD_TOKENS
-        )
-        budget = (
-            self._resolve_context_window_tokens() - output_reserve - prompt_overhead
-        )
-        return max(1024, budget)
 
     async def summarize_chat(self, messages: str, context: str = "") -> str:
         """对聊天记录进行总结
@@ -168,7 +91,18 @@ class SummaryService:
             logger.exception(f"[总结] 聊天记录总结失败: {exc}")
             return f"总结失败: {exc}"
 
-    async def build_merge_messages(self, summaries: list[str]) -> list[dict[str, str]]:
+    async def merge_summaries(self, summaries: list[str]) -> str:
+        """将多个分段总结整合为一个最终总结
+
+        参数:
+            summaries: 分段总结列表
+
+        返回:
+            合并后的最终总结
+        """
+        if len(summaries) == 1:
+            return summaries[0]
+
         segments = [f"分段 {i + 1}:\n{s}" for i, s in enumerate(summaries)]
         segments_text = "---".join(segments)
         logger.debug(
@@ -188,26 +122,11 @@ class SummaryService:
             self._merge_prompt_path,
         )
         prompt += segments_text
-        return [{"role": "user", "content": prompt}]
-
-    async def merge_summaries(self, summaries: list[str]) -> str:
-        """将多个分段总结整合为一个最终总结
-
-        参数:
-            summaries: 分段总结列表
-
-        返回:
-            合并后的最终总结
-        """
-        if len(summaries) == 1:
-            return summaries[0]
-
-        messages = await self.build_merge_messages(summaries)
 
         try:
             result = await self._requester.request(
                 model_config=self._chat_config,
-                messages=messages,
+                messages=[{"role": "user", "content": prompt}],
                 max_tokens=8192,
                 call_type="merge_summaries",
             )
@@ -219,33 +138,6 @@ class SummaryService:
             logger.exception(f"合并总结失败: {exc}")
             return "\n\n---\n\n".join(summaries)
 
-    def _split_text_by_tokens(self, text: str, max_tokens: int) -> list[str]:
-        if max_tokens <= 0:
-            return [text] if text else []
-        if self._token_counter.count(text) <= max_tokens:
-            return [text]
-
-        parts: list[str] = []
-        start = 0
-        text_len = len(text)
-        while start < text_len:
-            lo = start + 1
-            hi = text_len
-            best = start + 1
-            while lo <= hi:
-                mid = (lo + hi) // 2
-                segment = text[start:mid]
-                if self._token_counter.count(segment) <= max_tokens:
-                    best = mid
-                    lo = mid + 1
-                else:
-                    hi = mid - 1
-            if best <= start:
-                best = min(start + 1, text_len)
-            parts.append(text[start:best])
-            start = best
-        return parts
-
     def split_messages_by_tokens(self, messages: str, max_tokens: int) -> list[str]:
         """按 token 限制切分长消息
 
@@ -256,22 +148,21 @@ class SummaryService:
         返回:
             切分后的消息段列表
         """
-        effective_max = max(256, max_tokens - 500)
+        effective_max = max_tokens - 500
         lines = messages.split("\n")
         chunks: list[str] = []
         current_chunk: list[str] = []
         current_tokens = 0
 
         for line in lines:
-            for segment in self._split_text_by_tokens(line, effective_max):
-                segment_tokens = self._token_counter.count(segment)
-                if current_tokens + segment_tokens > effective_max and current_chunk:
-                    chunks.append("\n".join(current_chunk))
-                    current_chunk = []
-                    current_tokens = 0
+            line_tokens = self._token_counter.count(line)
+            if current_tokens + line_tokens > effective_max and current_chunk:
+                chunks.append("\n".join(current_chunk))
+                current_chunk = []
+                current_tokens = 0
 
-                current_chunk.append(segment)
-                current_tokens += segment_tokens
+            current_chunk.append(line)
+            current_tokens += line_tokens
 
         if current_chunk:
             chunks.append("\n".join(current_chunk))

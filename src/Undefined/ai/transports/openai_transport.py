@@ -501,10 +501,7 @@ def build_responses_request_body(
         extra_kwargs["text"] = text_value
 
     include_values = _normalize_include_values(extra_kwargs.pop("include", None))
-    reasoning_replay = bool(getattr(model_config, "reasoning_content_replay", False))
-    if (
-        stateless_replay or reasoning_replay
-    ) and "reasoning.encrypted_content" not in include_values:
+    if stateless_replay and "reasoning.encrypted_content" not in include_values:
         include_values.append("reasoning.encrypted_content")
     if include_values:
         body["include"] = include_values

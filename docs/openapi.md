@@ -107,7 +107,7 @@ curl http://127.0.0.1:8788/openapi.json
 | `cognitive` | `object` | 认知服务（`enabled`、`queue`） |
 | `api` | `object` | Runtime API 配置（`enabled`、`host`、`port`、`openapi_enabled`） |
 | `skills` | `object` | 技能统计，包含 `tools`、`toolsets`、`agents`、`pipelines`、`commands`、`anthropic_skills` 子对象 |
-| `models` | `object` | 模型配置；聊天类模型包含 `model_name`、脱敏 `api_url`、`api_mode`、`thinking_enabled`、`thinking_tool_call_compat`、`reasoning_content_replay`、`system_prompt_as_user`、`responses_tool_choice_compat`、`responses_force_stateless_replay`、`prompt_cache_enabled`、`reasoning_enabled`、`reasoning_effort` |
+| `models` | `object` | 模型配置；聊天类模型包含 `model_name`、脱敏 `api_url`、`api_mode`、`thinking_enabled`、`thinking_tool_call_compat`、`responses_tool_choice_compat`、`responses_force_stateless_replay`、`prompt_cache_enabled`、`reasoning_enabled`、`reasoning_effort` |
 
 `skills` 下各分类均提供轻量摘要：`tools` 是当前可调用工具总表，`toolsets` 单独拆出 `skills/toolsets/` 下的工具集工具，`agents` 对应 `skills/agents/`，`pipelines` 对应 `skills/pipelines/`，`commands` 对应 `skills/commands/`，`anthropic_skills` 对应全局 Anthropic Skills。常规注册表子对象结构：
 
@@ -133,8 +133,6 @@ curl http://127.0.0.1:8788/openapi.json
     "api_mode": "responses",
     "thinking_enabled": false,
     "thinking_tool_call_compat": true,
-    "reasoning_content_replay": false,
-    "system_prompt_as_user": false,
     "responses_tool_choice_compat": false,
     "responses_force_stateless_replay": false,
     "reasoning_enabled": true,

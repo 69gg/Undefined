@@ -6,7 +6,6 @@ from typing import Any
 
 from .coercers import (
     _coerce_bool,
-    _coerce_int,
     _coerce_str,
     _get_value,
     _VALID_API_MODES,
@@ -104,58 +103,4 @@ def _resolve_responses_force_stateless_replay(
             env_key,
         ),
         default,
-    )
-
-
-def _resolve_reasoning_content_replay(
-    data: dict[str, Any],
-    model_name: str,
-    env_key: str,
-    *,
-    default: bool = False,
-) -> bool:
-    return _coerce_bool(
-        _get_value(
-            data,
-            ("models", model_name, "reasoning_content_replay"),
-            env_key,
-        ),
-        default,
-    )
-
-
-def _resolve_system_prompt_as_user(
-    data: dict[str, Any],
-    model_name: str,
-    env_key: str,
-    *,
-    default: bool = False,
-) -> bool:
-    return _coerce_bool(
-        _get_value(
-            data,
-            ("models", model_name, "system_prompt_as_user"),
-            env_key,
-        ),
-        default,
-    )
-
-
-def _resolve_context_window_tokens(
-    data: dict[str, Any],
-    model_name: str,
-    env_key: str,
-    *,
-    default: int = 8192,
-) -> int:
-    return max(
-        1,
-        _coerce_int(
-            _get_value(
-                data,
-                ("models", model_name, "context_window_tokens"),
-                env_key,
-            ),
-            default,
-        ),
     )

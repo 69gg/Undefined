@@ -6,99 +6,68 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from Undefined.services.message_summary_fetch import (
-    fetch_session_messages,
-    filter_by_time,
-    parse_time_range,
-)
 from Undefined.skills.agents.summary_agent.tools.fetch_messages.handler import (
+    _filter_by_time,
+    _parse_time_range,
     execute as fetch_messages_execute,
 )
 from Undefined.utils.xml import format_message_xml, format_messages_xml
 
 
-def _build_fetch_context(**overrides: Any) -> dict[str, Any]:
-    history_manager = overrides.pop("history_manager", MagicMock())
-    runtime_config = overrides.get("runtime_config")
-
-    async def fetch_cb(
-        *,
-        group_id: int,
-        user_id: int,
-        count: int | None = None,
-        time_range: str | None = None,
-    ) -> str:
-        return await fetch_session_messages(
-            history_manager,
-            group_id=group_id,
-            user_id=user_id,
-            count=count,
-            time_range=time_range,
-            runtime_config=runtime_config,
-        )
-
-    context: dict[str, Any] = {
-        "history_manager": history_manager,
-        "fetch_session_messages_callback": fetch_cb,
-    }
-    context.update(overrides)
-    return context
-
-
-# -- parse_time_range unit tests --
+# -- _parse_time_range unit tests --
 
 
 def test_parse_time_range_1h() -> None:
     """'1h' → 3600."""
-    assert parse_time_range("1h") == 3600
+    assert _parse_time_range("1h") == 3600
 
 
 def test_parse_time_range_6h() -> None:
     """'6h' → 21600."""
-    assert parse_time_range("6h") == 21600
+    assert _parse_time_range("6h") == 21600
 
 
 def test_parse_time_range_1d() -> None:
     """'1d' → 86400."""
-    assert parse_time_range("1d") == 86400
+    assert _parse_time_range("1d") == 86400
 
 
 def test_parse_time_range_7d() -> None:
     """'7d' → 604800."""
-    assert parse_time_range("7d") == 604800
+    assert _parse_time_range("7d") == 604800
 
 
 def test_parse_time_range_1w() -> None:
     """'1w' → 604800."""
-    assert parse_time_range("1w") == 604800
+    assert _parse_time_range("1w") == 604800
 
 
 def test_parse_time_range_case_insensitive() -> None:
     """'1H', '1D' → correct values."""
-    assert parse_time_range("1H") == 3600
-    assert parse_time_range("1D") == 86400
-    assert parse_time_range("1W") == 604800
+    assert _parse_time_range("1H") == 3600
+    assert _parse_time_range("1D") == 86400
+    assert _parse_time_range("1W") == 604800
 
 
 def test_parse_time_range_invalid() -> None:
     """'invalid' → None."""
-    assert parse_time_range("invalid") is None
-    assert parse_time_range("") is None
-    assert parse_time_range("abc") is None
-    assert parse_time_range("1x") is None
+    assert _parse_time_range("invalid") is None
+    assert _parse_time_range("") is None
+    assert _parse_time_range("abc") is None
+    assert _parse_time_range("1x") is None
 
 
 def test_parse_time_range_with_whitespace() -> None:
     """'  1d  ' → 86400 (strips whitespace)."""
-    assert parse_time_range("  1d  ") == 86400
+    assert _parse_time_range("  1d  ") == 86400
 
 
 def test_parse_time_range_multi_digit() -> None:
     """'24h' → 86400."""
-    assert parse_time_range("24h") == 86400
+    assert _parse_time_range("24h") == 86400
 
 
-# -- filter_by_time unit tests --
+# -- _filter_by_time unit tests --
 
 
 def test_filter_by_time_keeps_recent() -> None:
@@ -112,7 +81,7 @@ def test_filter_by_time_keeps_recent() -> None:
         {"timestamp": old, "message": "old"},
     ]
 
-    result = filter_by_time(messages, 3600)  # 1 hour
+    result = _filter_by_time(messages, 3600)  # 1 hour
     assert len(result) == 1
     assert result[0]["message"] == "recent"
 
@@ -128,7 +97,7 @@ def test_filter_by_time_removes_old() -> None:
         {"timestamp": old2, "message": "old2"},
     ]
 
-    result = filter_by_time(messages, 86400)  # 1 day
+    result = _filter_by_time(messages, 86400)  # 1 day
     assert len(result) == 0
 
 
@@ -139,7 +108,7 @@ def test_filter_by_time_missing_timestamp() -> None:
         {"timestamp": "", "message": "empty timestamp"},
     ]
 
-    result = filter_by_time(messages, 3600)
+    result = _filter_by_time(messages, 3600)
     assert len(result) == 0
 
 
@@ -150,7 +119,7 @@ def test_filter_by_time_invalid_timestamp() -> None:
         {"timestamp": "2024-13-45 99:99:99", "message": "impossible date"},
     ]
 
-    result = filter_by_time(messages, 3600)
+    result = _filter_by_time(messages, 3600)
     assert len(result) == 0
 
 
@@ -302,11 +271,11 @@ async def test_fetch_messages_count_based_group() -> None:
         },
     ]
 
-    context = _build_fetch_context(
-        history_manager=history_manager,
-        group_id=123456,
-        user_id=0,
-    )
+    context: dict[str, Any] = {
+        "history_manager": history_manager,
+        "group_id": 123456,
+        "user_id": 0,
+    }
 
     result = await fetch_messages_execute({"count": 50}, context)
 
@@ -332,11 +301,11 @@ async def test_fetch_messages_count_based_private() -> None:
         },
     ]
 
-    context = _build_fetch_context(
-        history_manager=history_manager,
-        group_id=0,
-        user_id=99999,
-    )
+    context: dict[str, Any] = {
+        "history_manager": history_manager,
+        "group_id": 0,
+        "user_id": 99999,
+    }
 
     result = await fetch_messages_execute({"count": 20}, context)
 
@@ -371,11 +340,11 @@ async def test_fetch_messages_time_range() -> None:
         },
     ]
 
-    context = _build_fetch_context(
-        history_manager=history_manager,
-        group_id=123456,
-        user_id=0,
-    )
+    context: dict[str, Any] = {
+        "history_manager": history_manager,
+        "group_id": 123456,
+        "user_id": 0,
+    }
 
     result = await fetch_messages_execute(
         {"count": 50, "time_range": "1d"},
@@ -391,7 +360,10 @@ async def test_fetch_messages_time_range() -> None:
 @pytest.mark.asyncio
 async def test_fetch_messages_invalid_time_range() -> None:
     """Invalid time range returns error message."""
-    context = _build_fetch_context(group_id=123456)
+    context: dict[str, Any] = {
+        "history_manager": MagicMock(),
+        "group_id": 123456,
+    }
 
     result = await fetch_messages_execute(
         {"time_range": "invalid"},
@@ -408,27 +380,14 @@ async def test_fetch_messages_empty_history() -> None:
     history_manager = MagicMock()
     history_manager.get_recent.return_value = []
 
-    context = _build_fetch_context(
-        history_manager=history_manager,
-        group_id=123456,
-    )
-
-    result = await fetch_messages_execute({}, context)
-
-    assert "当前会话暂无消息记录" in result
-
-
-@pytest.mark.asyncio
-async def test_fetch_messages_missing_callback() -> None:
-    """Missing fetch callback returns error."""
     context: dict[str, Any] = {
-        "history_manager": MagicMock(),
+        "history_manager": history_manager,
         "group_id": 123456,
     }
 
     result = await fetch_messages_execute({}, context)
 
-    assert "消息拉取服务未配置" in result
+    assert "当前会话暂无消息记录" in result
 
 
 @pytest.mark.asyncio
@@ -449,10 +408,10 @@ async def test_fetch_messages_count_capped_at_config_limit() -> None:
     history_manager = MagicMock()
     history_manager.get_recent.return_value = []
 
-    context = _build_fetch_context(
-        history_manager=history_manager,
-        group_id=123456,
-    )
+    context: dict[str, Any] = {
+        "history_manager": history_manager,
+        "group_id": 123456,
+    }
 
     await fetch_messages_execute({"count": 9999}, context)
 
@@ -465,10 +424,10 @@ async def test_fetch_messages_default_count() -> None:
     history_manager = MagicMock()
     history_manager.get_recent.return_value = []
 
-    context = _build_fetch_context(
-        history_manager=history_manager,
-        group_id=123456,
-    )
+    context: dict[str, Any] = {
+        "history_manager": history_manager,
+        "group_id": 123456,
+    }
 
     await fetch_messages_execute({}, context)
 
@@ -481,10 +440,10 @@ async def test_fetch_messages_invalid_count_defaults() -> None:
     history_manager = MagicMock()
     history_manager.get_recent.return_value = []
 
-    context = _build_fetch_context(
-        history_manager=history_manager,
-        group_id=123456,
-    )
+    context: dict[str, Any] = {
+        "history_manager": history_manager,
+        "group_id": 123456,
+    }
 
     await fetch_messages_execute({"count": "invalid"}, context)
 
@@ -497,10 +456,10 @@ async def test_fetch_messages_time_range_fetch_larger_batch() -> None:
     history_manager = MagicMock()
     history_manager.get_recent.return_value = []
 
-    context = _build_fetch_context(
-        history_manager=history_manager,
-        group_id=123456,
-    )
+    context: dict[str, Any] = {
+        "history_manager": history_manager,
+        "group_id": 123456,
+    }
 
     await fetch_messages_execute(
         {"count": 50, "time_range": "1d"},
@@ -521,11 +480,11 @@ async def test_fetch_messages_count_uses_runtime_config() -> None:
     cfg.history_summary_fetch_limit = 300
     cfg.history_summary_time_fetch_limit = 800
 
-    context = _build_fetch_context(
-        history_manager=history_manager,
-        group_id=123456,
-        runtime_config=cfg,
-    )
+    context: dict[str, Any] = {
+        "history_manager": history_manager,
+        "group_id": 123456,
+        "runtime_config": cfg,
+    }
 
     await fetch_messages_execute({"count": 9999}, context)
 
@@ -542,11 +501,11 @@ async def test_fetch_messages_time_range_uses_runtime_config() -> None:
     cfg.history_summary_fetch_limit = 300
     cfg.history_summary_time_fetch_limit = 800
 
-    context = _build_fetch_context(
-        history_manager=history_manager,
-        group_id=123456,
-        runtime_config=cfg,
-    )
+    context: dict[str, Any] = {
+        "history_manager": history_manager,
+        "group_id": 123456,
+        "runtime_config": cfg,
+    }
 
     await fetch_messages_execute({"count": 50, "time_range": "1d"}, context)
 

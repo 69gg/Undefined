@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 from Undefined.services.commands.context import CommandContext
 
@@ -25,28 +26,29 @@ def _parse_args(args: list[str]) -> tuple[int | None, str | None, str]:
     rest = " ".join(args[1:]).strip()
 
     if first.isdigit():
-        count = max(1, int(first))
+        count = max(1, min(int(first), 500))
         return count, None, rest
 
     if _TIME_RANGE_RE.match(first):
         return None, first, rest
 
+    # First arg is not a number or time range — treat everything as prompt
     return _DEFAULT_COUNT, None, " ".join(args).strip()
 
 
 def _build_prompt(count: int | None, time_range: str | None, custom_prompt: str) -> str:
-    """Build the natural language instruction for message summary."""
+    """Build the natural language prompt for summary_agent."""
+    parts: list[str] = ["请总结"]
     if time_range:
-        scope = f"过去 {time_range} 内的聊天消息"
+        parts.append(f"过去 {time_range} 内的聊天消息")
     elif count:
-        scope = f"最近 {count} 条聊天消息"
+        parts.append(f"最近 {count} 条聊天消息")
     else:
-        scope = f"最近 {_DEFAULT_COUNT} 条聊天消息"
+        parts.append(f"最近 {_DEFAULT_COUNT} 条聊天消息")
 
-    parts = [f"请总结{scope}。"]
     if custom_prompt:
-        parts.append(f"重点关注：{custom_prompt}。")
-    parts.append("只能依据下方原始聊天记录总结，不得编造或推测未出现的信息。")
+        parts.append(f"，重点关注：{custom_prompt}")
+
     return "".join(parts)
 
 
@@ -69,24 +71,31 @@ async def execute(args: list[str], context: CommandContext) -> None:
         return
 
     count, time_range, custom_prompt = _parse_args(args)
-    instruction = _build_prompt(count, time_range, custom_prompt)
+    prompt = _build_prompt(count, time_range, custom_prompt)
 
-    ai = context.ai
-    if ai is None or not hasattr(ai, "summarize_command_session"):
-        await _send(context, "❌ 消息总结服务未配置")
-        return
-
-    group_id = int(context.group_id or 0)
-    user_id = int(context.user_id or context.sender_id)
+    # Build agent context
+    agent_context: dict[str, Any] = {
+        "ai_client": context.ai,
+        "history_manager": context.history_manager,
+        "group_id": context.group_id,
+        "user_id": int(context.user_id or context.sender_id),
+        "sender_id": context.sender_id,
+        "request_type": "group" if int(context.group_id) > 0 else "private",
+        "runtime_config": getattr(context.ai, "runtime_config", None),
+        "queue_lane": None,
+    }
 
     try:
-        result = await ai.summarize_command_session(
-            context.history_manager,
-            group_id=group_id,
-            user_id=user_id,
-            count=count,
-            time_range=time_range,
-            instruction=instruction,
+        from Undefined.skills.agents.summary_agent.handler import execute as run_summary
+
+        result = await run_summary(
+            {
+                "prompt": prompt,
+                "count": count,
+                "time_range": time_range,
+                "focus": custom_prompt,
+            },
+            agent_context,
         )
     except Exception:
         logger.exception("[/summary] 执行总结失败")

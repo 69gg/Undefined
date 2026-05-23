@@ -28,7 +28,7 @@
 > 2. 拿不准时偏向"独立请求"，宁多勿漏。
 > 3. 整批在本轮一次性处理完，不要为同一意图重复输出。
 
-`res/prompts/undefined.xml`、`res/prompts/undefined_nagaagent.xml` 与 `res/IMPORTANT/each.md` 均按"当前输入批次"适配：有【连续消息说明】时整批当前 `<message>` 都属于本轮输入；没有连续说明时，当前输入批次退化为最后一条消息。防幽灵任务规则仍然生效，但它只隔离当前输入批次之外的历史消息；「催促/在吗」不等于新任务，历史同类或语义等价操作不得自动重跑（与 each.md 硬性熔断一致）。
+`res/prompts/undefined.xml`、`res/prompts/undefined_nagaagent.xml` 与 `res/IMPORTANT/each.md` 均按"当前输入批次"适配：有【连续消息说明】时整批当前 `<message>` 都属于本轮输入；没有连续说明时，当前输入批次退化为最后一条消息。防幽灵任务规则仍然生效，但它只隔离当前输入批次之外的历史消息。
 
 `end.memo` / `end.observations` 也按同一语义适配：当前输入批次包含多条连续消息时，短期 memo 要概括整批处理结果，认知 observations 要覆盖整批消息中值得留存的信息；后台史官收到的 `source_message` 会按时间顺序列出本批所有 `<message>`，不会只取最后一条。
 

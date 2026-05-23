@@ -33,13 +33,10 @@ from .models import (
 )
 from .resolvers import (
     _resolve_api_mode,
-    _resolve_context_window_tokens,
     _resolve_reasoning_effort,
     _resolve_reasoning_effort_style,
-    _resolve_reasoning_content_replay,
     _resolve_responses_force_stateless_replay,
     _resolve_responses_tool_choice_compat,
-    _resolve_system_prompt_as_user,
     _resolve_thinking_compat_flags,
 )
 
@@ -77,10 +74,6 @@ def _parse_model_pool(
                 api_url=_coerce_str(item.get("api_url"), primary_config.api_url),
                 api_key=_coerce_str(item.get("api_key"), primary_config.api_key),
                 model_name=name,
-                context_window_tokens=_coerce_int(
-                    item.get("context_window_tokens"),
-                    primary_config.context_window_tokens,
-                ),
                 max_tokens=_coerce_int(
                     item.get("max_tokens"), primary_config.max_tokens
                 ),
@@ -119,14 +112,6 @@ def _parse_model_pool(
                 thinking_tool_call_compat=_coerce_bool(
                     item.get("thinking_tool_call_compat"),
                     primary_config.thinking_tool_call_compat,
-                ),
-                reasoning_content_replay=_coerce_bool(
-                    item.get("reasoning_content_replay"),
-                    primary_config.reasoning_content_replay,
-                ),
-                system_prompt_as_user=_coerce_bool(
-                    item.get("system_prompt_as_user"),
-                    primary_config.system_prompt_as_user,
                 ),
                 responses_tool_choice_compat=_coerce_bool(
                     item.get("responses_tool_choice_compat"),
@@ -198,9 +183,6 @@ def _parse_embedding_model_config(data: dict[str, Any]) -> EmbeddingModelConfig:
         query_instruction=_coerce_str(
             _get_value(data, ("models", "embedding", "query_instruction"), None), ""
         ),
-        context_window_tokens=_resolve_context_window_tokens(
-            data, "embedding", "EMBEDDING_MODEL_CONTEXT_WINDOW_TOKENS"
-        ),
         document_instruction=_coerce_str(
             _get_value(data, ("models", "embedding", "document_instruction"), None),
             "",
@@ -231,9 +213,6 @@ def _parse_rerank_model_config(data: dict[str, Any]) -> RerankModelConfig:
             "",
         ),
         queue_interval_seconds=queue_interval_seconds,
-        context_window_tokens=_resolve_context_window_tokens(
-            data, "rerank", "RERANK_MODEL_CONTEXT_WINDOW_TOKENS"
-        ),
         query_instruction=_coerce_str(
             _get_value(data, ("models", "rerank", "query_instruction"), None), ""
         ),
@@ -265,12 +244,6 @@ def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
     )
     responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
         data, "chat", "CHAT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
-    )
-    reasoning_content_replay = _resolve_reasoning_content_replay(
-        data, "chat", "CHAT_MODEL_REASONING_CONTENT_REPLAY"
-    )
-    system_prompt_as_user = _resolve_system_prompt_as_user(
-        data, "chat", "CHAT_MODEL_SYSTEM_PROMPT_AS_USER"
     )
     prompt_cache_enabled = _coerce_bool(
         _get_value(
@@ -304,9 +277,6 @@ def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
         ),
         False,
     )
-    context_window_tokens = _resolve_context_window_tokens(
-        data, "chat", "CHAT_MODEL_CONTEXT_WINDOW_TOKENS"
-    )
     config = ChatModelConfig(
         api_url=_coerce_str(
             _get_value(data, ("models", "chat", "api_url"), "CHAT_MODEL_API_URL"),
@@ -320,7 +290,6 @@ def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
             _get_value(data, ("models", "chat", "model_name"), "CHAT_MODEL_NAME"),
             "",
         ),
-        context_window_tokens=context_window_tokens,
         max_tokens=_coerce_int(
             _get_value(data, ("models", "chat", "max_tokens"), "CHAT_MODEL_MAX_TOKENS"),
             8192,
@@ -352,8 +321,6 @@ def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
             ),
         ),
         thinking_tool_call_compat=thinking_tool_call_compat,
-        reasoning_content_replay=reasoning_content_replay,
-        system_prompt_as_user=system_prompt_as_user,
         responses_tool_choice_compat=responses_tool_choice_compat,
         responses_force_stateless_replay=responses_force_stateless_replay,
         prompt_cache_enabled=prompt_cache_enabled,
@@ -391,12 +358,6 @@ def _parse_vision_model_config(data: dict[str, Any]) -> VisionModelConfig:
     responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
         data, "vision", "VISION_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
     )
-    reasoning_content_replay = _resolve_reasoning_content_replay(
-        data, "vision", "VISION_MODEL_REASONING_CONTENT_REPLAY"
-    )
-    system_prompt_as_user = _resolve_system_prompt_as_user(
-        data, "vision", "VISION_MODEL_SYSTEM_PROMPT_AS_USER"
-    )
     prompt_cache_enabled = _coerce_bool(
         _get_value(
             data,
@@ -429,9 +390,6 @@ def _parse_vision_model_config(data: dict[str, Any]) -> VisionModelConfig:
         ),
         False,
     )
-    context_window_tokens = _resolve_context_window_tokens(
-        data, "vision", "VISION_MODEL_CONTEXT_WINDOW_TOKENS"
-    )
     return VisionModelConfig(
         api_url=_coerce_str(
             _get_value(data, ("models", "vision", "api_url"), "VISION_MODEL_API_URL"),
@@ -453,7 +411,6 @@ def _parse_vision_model_config(data: dict[str, Any]) -> VisionModelConfig:
             ),
             8192,
         ),
-        context_window_tokens=context_window_tokens,
         queue_interval_seconds=queue_interval_seconds,
         api_mode=api_mode,
         thinking_enabled=_coerce_bool(
@@ -481,8 +438,6 @@ def _parse_vision_model_config(data: dict[str, Any]) -> VisionModelConfig:
             ),
         ),
         thinking_tool_call_compat=thinking_tool_call_compat,
-        reasoning_content_replay=reasoning_content_replay,
-        system_prompt_as_user=system_prompt_as_user,
         responses_tool_choice_compat=responses_tool_choice_compat,
         responses_force_stateless_replay=responses_force_stateless_replay,
         prompt_cache_enabled=prompt_cache_enabled,
@@ -532,12 +487,6 @@ def _parse_security_model_config(
     responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
         data, "security", "SECURITY_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
     )
-    reasoning_content_replay = _resolve_reasoning_content_replay(
-        data, "security", "SECURITY_MODEL_REASONING_CONTENT_REPLAY"
-    )
-    system_prompt_as_user = _resolve_system_prompt_as_user(
-        data, "security", "SECURITY_MODEL_SYSTEM_PROMPT_AS_USER"
-    )
     prompt_cache_enabled = _coerce_bool(
         _get_value(
             data,
@@ -571,9 +520,6 @@ def _parse_security_model_config(
         False,
     )
 
-    context_window_tokens = _resolve_context_window_tokens(
-        data, "security", "SECURITY_MODEL_CONTEXT_WINDOW_TOKENS"
-    )
     if api_url and api_key and model_name:
         return SecurityModelConfig(
             api_url=api_url,
@@ -587,7 +533,6 @@ def _parse_security_model_config(
                 ),
                 100,
             ),
-            context_window_tokens=context_window_tokens,
             queue_interval_seconds=queue_interval_seconds,
             api_mode=api_mode,
             thinking_enabled=_coerce_bool(
@@ -615,8 +560,6 @@ def _parse_security_model_config(
                 ),
             ),
             thinking_tool_call_compat=thinking_tool_call_compat,
-            reasoning_content_replay=reasoning_content_replay,
-            system_prompt_as_user=system_prompt_as_user,
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
             prompt_cache_enabled=prompt_cache_enabled,
@@ -631,7 +574,6 @@ def _parse_security_model_config(
         api_url=chat_model.api_url,
         api_key=chat_model.api_key,
         model_name=chat_model.model_name,
-        context_window_tokens=chat_model.context_window_tokens,
         max_tokens=chat_model.max_tokens,
         queue_interval_seconds=chat_model.queue_interval_seconds,
         api_mode=chat_model.api_mode,
@@ -640,8 +582,6 @@ def _parse_security_model_config(
         thinking_include_budget=True,
         reasoning_effort_style="openai",
         thinking_tool_call_compat=chat_model.thinking_tool_call_compat,
-        reasoning_content_replay=chat_model.reasoning_content_replay,
-        system_prompt_as_user=chat_model.system_prompt_as_user,
         responses_tool_choice_compat=chat_model.responses_tool_choice_compat,
         responses_force_stateless_replay=chat_model.responses_force_stateless_replay,
         prompt_cache_enabled=chat_model.prompt_cache_enabled,
@@ -691,18 +631,6 @@ def _parse_naga_model_config(
     responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
         data, "naga", "NAGA_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
     )
-    reasoning_content_replay = _resolve_reasoning_content_replay(
-        data,
-        "naga",
-        "NAGA_MODEL_REASONING_CONTENT_REPLAY",
-        default=security_model.reasoning_content_replay,
-    )
-    system_prompt_as_user = _resolve_system_prompt_as_user(
-        data,
-        "naga",
-        "NAGA_MODEL_SYSTEM_PROMPT_AS_USER",
-        default=security_model.system_prompt_as_user,
-    )
     prompt_cache_enabled = _coerce_bool(
         _get_value(
             data,
@@ -737,12 +665,6 @@ def _parse_naga_model_config(
     )
 
     if api_url and api_key and model_name:
-        context_window_tokens = _resolve_context_window_tokens(
-            data,
-            "naga",
-            "NAGA_MODEL_CONTEXT_WINDOW_TOKENS",
-            default=security_model.context_window_tokens,
-        )
         return SecurityModelConfig(
             api_url=api_url,
             api_key=api_key,
@@ -755,7 +677,6 @@ def _parse_naga_model_config(
                 ),
                 160,
             ),
-            context_window_tokens=context_window_tokens,
             queue_interval_seconds=queue_interval_seconds,
             api_mode=api_mode,
             thinking_enabled=_coerce_bool(
@@ -783,8 +704,6 @@ def _parse_naga_model_config(
                 ),
             ),
             thinking_tool_call_compat=thinking_tool_call_compat,
-            reasoning_content_replay=reasoning_content_replay,
-            system_prompt_as_user=system_prompt_as_user,
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
             prompt_cache_enabled=prompt_cache_enabled,
@@ -802,7 +721,6 @@ def _parse_naga_model_config(
         api_key=security_model.api_key,
         model_name=security_model.model_name,
         max_tokens=security_model.max_tokens,
-        context_window_tokens=security_model.context_window_tokens,
         queue_interval_seconds=security_model.queue_interval_seconds,
         api_mode=security_model.api_mode,
         thinking_enabled=security_model.thinking_enabled,
@@ -810,8 +728,6 @@ def _parse_naga_model_config(
         thinking_include_budget=security_model.thinking_include_budget,
         reasoning_effort_style=security_model.reasoning_effort_style,
         thinking_tool_call_compat=security_model.thinking_tool_call_compat,
-        reasoning_content_replay=security_model.reasoning_content_replay,
-        system_prompt_as_user=security_model.system_prompt_as_user,
         responses_tool_choice_compat=security_model.responses_tool_choice_compat,
         responses_force_stateless_replay=security_model.responses_force_stateless_replay,
         prompt_cache_enabled=security_model.prompt_cache_enabled,
@@ -847,12 +763,6 @@ def _parse_agent_model_config(data: dict[str, Any]) -> AgentModelConfig:
     responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
         data, "agent", "AGENT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
     )
-    reasoning_content_replay = _resolve_reasoning_content_replay(
-        data, "agent", "AGENT_MODEL_REASONING_CONTENT_REPLAY"
-    )
-    system_prompt_as_user = _resolve_system_prompt_as_user(
-        data, "agent", "AGENT_MODEL_SYSTEM_PROMPT_AS_USER"
-    )
     prompt_cache_enabled = _coerce_bool(
         _get_value(
             data,
@@ -885,9 +795,6 @@ def _parse_agent_model_config(data: dict[str, Any]) -> AgentModelConfig:
         ),
         False,
     )
-    context_window_tokens = _resolve_context_window_tokens(
-        data, "agent", "AGENT_MODEL_CONTEXT_WINDOW_TOKENS"
-    )
     config = AgentModelConfig(
         api_url=_coerce_str(
             _get_value(data, ("models", "agent", "api_url"), "AGENT_MODEL_API_URL"),
@@ -907,7 +814,6 @@ def _parse_agent_model_config(data: dict[str, Any]) -> AgentModelConfig:
             ),
             4096,
         ),
-        context_window_tokens=context_window_tokens,
         queue_interval_seconds=queue_interval_seconds,
         api_mode=api_mode,
         thinking_enabled=_coerce_bool(
@@ -935,8 +841,6 @@ def _parse_agent_model_config(data: dict[str, Any]) -> AgentModelConfig:
             ),
         ),
         thinking_tool_call_compat=thinking_tool_call_compat,
-        reasoning_content_replay=reasoning_content_replay,
-        system_prompt_as_user=system_prompt_as_user,
         responses_tool_choice_compat=responses_tool_choice_compat,
         responses_force_stateless_replay=responses_force_stateless_replay,
         prompt_cache_enabled=prompt_cache_enabled,
@@ -960,9 +864,6 @@ def _parse_grok_model_config(data: dict[str, Any]) -> GrokModelConfig:
             1.0,
         )
     )
-    context_window_tokens = _resolve_context_window_tokens(
-        data, "grok", "GROK_MODEL_CONTEXT_WINDOW_TOKENS"
-    )
     return GrokModelConfig(
         api_url=_coerce_str(
             _get_value(data, ("models", "grok", "api_url"), "GROK_MODEL_API_URL"),
@@ -980,7 +881,6 @@ def _parse_grok_model_config(data: dict[str, Any]) -> GrokModelConfig:
             _get_value(data, ("models", "grok", "max_tokens"), "GROK_MODEL_MAX_TOKENS"),
             8192,
         ),
-        context_window_tokens=context_window_tokens,
         queue_interval_seconds=queue_interval_seconds,
         thinking_enabled=_coerce_bool(
             _get_value(
@@ -1070,14 +970,6 @@ def _parse_image_gen_model_config(data: dict[str, Any]) -> ImageGenModelConfig:
             ),
             "",
         ),
-        context_window_tokens=_coerce_int(
-            _get_value(
-                data,
-                ("models", "image_gen", "context_window_tokens"),
-                None,
-            ),
-            0,
-        ),
         request_params=_get_model_request_params(data, "image_gen"),
     )
 
@@ -1108,14 +1000,6 @@ def _parse_image_edit_model_config(data: dict[str, Any]) -> ImageGenModelConfig:
                 "IMAGE_EDIT_MODEL_NAME",
             ),
             "",
-        ),
-        context_window_tokens=_coerce_int(
-            _get_value(
-                data,
-                ("models", "image_edit", "context_window_tokens"),
-                None,
-            ),
-            0,
         ),
         request_params=_get_model_request_params(data, "image_edit"),
     )
@@ -1287,15 +1171,11 @@ def _parse_historian_model_config(
         ),
         fallback.prompt_cache_enabled,
     )
-    context_window_tokens = _coerce_int(
-        h.get("context_window_tokens"), fallback.context_window_tokens
-    )
     return AgentModelConfig(
         api_url=_coerce_str(h.get("api_url"), fallback.api_url),
         api_key=_coerce_str(h.get("api_key"), fallback.api_key),
         model_name=_coerce_str(h.get("model_name"), fallback.model_name),
         max_tokens=_coerce_int(h.get("max_tokens"), fallback.max_tokens),
-        context_window_tokens=context_window_tokens,
         queue_interval_seconds=queue_interval_seconds,
         api_mode=api_mode,
         thinking_enabled=_coerce_bool(
@@ -1314,12 +1194,6 @@ def _parse_historian_model_config(
             fallback.reasoning_effort_style,
         ),
         thinking_tool_call_compat=thinking_tool_call_compat,
-        reasoning_content_replay=_coerce_bool(
-            h.get("reasoning_content_replay"), fallback.reasoning_content_replay
-        ),
-        system_prompt_as_user=_coerce_bool(
-            h.get("system_prompt_as_user"), fallback.system_prompt_as_user
-        ),
         responses_tool_choice_compat=responses_tool_choice_compat,
         responses_force_stateless_replay=responses_force_stateless_replay,
         prompt_cache_enabled=prompt_cache_enabled,
@@ -1399,16 +1273,12 @@ def _parse_summary_model_config(
         ),
         fallback.prompt_cache_enabled,
     )
-    context_window_tokens = _coerce_int(
-        s.get("context_window_tokens"), fallback.context_window_tokens
-    )
     return (
         AgentModelConfig(
             api_url=_coerce_str(s.get("api_url"), fallback.api_url),
             api_key=_coerce_str(s.get("api_key"), fallback.api_key),
             model_name=_coerce_str(s.get("model_name"), fallback.model_name),
             max_tokens=_coerce_int(s.get("max_tokens"), fallback.max_tokens),
-            context_window_tokens=context_window_tokens,
             queue_interval_seconds=queue_interval_seconds,
             api_mode=api_mode,
             thinking_enabled=_coerce_bool(
@@ -1427,12 +1297,6 @@ def _parse_summary_model_config(
                 fallback.reasoning_effort_style,
             ),
             thinking_tool_call_compat=thinking_tool_call_compat,
-            reasoning_content_replay=_coerce_bool(
-                s.get("reasoning_content_replay"), fallback.reasoning_content_replay
-            ),
-            system_prompt_as_user=_coerce_bool(
-                s.get("system_prompt_as_user"), fallback.system_prompt_as_user
-            ),
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
             prompt_cache_enabled=prompt_cache_enabled,

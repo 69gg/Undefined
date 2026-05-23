@@ -709,6 +709,8 @@ class PromptBuilder:
 
             if recent_limit < 0:
                 recent_limit = 0
+            if recent_limit > 200:
+                recent_limit = 200
             if recent_limit == 0:
                 logger.debug("上下文历史消息注入已关闭 (limit=0)")
                 return
