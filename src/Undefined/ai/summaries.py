@@ -37,6 +37,7 @@ class SummaryService:
         summarize_prompt_path: str = "res/prompts/summarize.txt",
         merge_prompt_path: str = "res/prompts/merge_summaries.txt",
         title_prompt_path: str = "res/prompts/generate_title.txt",
+        message_summary_prompt_path: str = "res/prompts/message_summary.txt",
     ) -> None:
         self._requester = requester
         self._chat_config = chat_config
@@ -44,6 +45,58 @@ class SummaryService:
         self._summarize_prompt_path = summarize_prompt_path
         self._merge_prompt_path = merge_prompt_path
         self._title_prompt_path = title_prompt_path
+        self._message_summary_prompt_path = message_summary_prompt_path
+
+    async def _load_message_summary_prompt(self) -> str:
+        try:
+            return read_text_resource(self._message_summary_prompt_path)
+        except Exception:
+            async with aiofiles.open(
+                self._message_summary_prompt_path, "r", encoding="utf-8"
+            ) as f:
+                return await f.read()
+
+    async def build_message_summary_messages(
+        self,
+        messages_text: str,
+        instruction: str = "",
+    ) -> list[dict[str, str]]:
+        system_prompt = await self._load_message_summary_prompt()
+        user_parts: list[str] = []
+        cleaned_instruction = instruction.strip()
+        if cleaned_instruction:
+            user_parts.append(cleaned_instruction)
+        user_parts.append(f"以下是聊天记录：\n{messages_text}")
+        return [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "\n\n".join(user_parts)},
+        ]
+
+    async def summarize_message_history(
+        self,
+        messages_text: str,
+        instruction: str = "",
+    ) -> str:
+        """Summarize fetched chat history for slash-command style requests."""
+        built_messages = await self.build_message_summary_messages(
+            messages_text, instruction
+        )
+        max_tokens = getattr(self._chat_config, "max_tokens", 4096)
+        try:
+            result = await self._requester.request(
+                model_config=self._chat_config,
+                messages=built_messages,
+                max_tokens=max_tokens,
+                call_type="message_summary",
+            )
+            content = extract_choices_content(result)
+            logger.info("[总结] 消息总结完成, length=%s", len(content))
+            if logger.isEnabledFor(logging.DEBUG):
+                log_debug_json(logger, "[总结] 消息总结输出", content)
+            return content
+        except Exception as exc:
+            logger.exception("[总结] 消息总结失败: %s", exc)
+            return f"总结失败: {exc}"
 
     async def summarize_chat(self, messages: str, context: str = "") -> str:
         """对聊天记录进行总结

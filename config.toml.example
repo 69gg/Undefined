@@ -492,8 +492,8 @@ stream_enabled = false
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
 [models.historian.request_params]
 
-# zh: 消息总结模型配置（/summary /sum 专用；未配置时回退到 agent 模型）。
-# en: Message-summary model config (used by /summary and /sum; falls back to the agent model when unset).
+# zh: 消息总结模型配置（/summary /sum 与 SummaryService 专用；未配置时回退到 agent 模型；主 AI 调用 summary_agent 不使用此段配置）。
+# en: Message-summary model config (used by /summary, /sum, and SummaryService; falls back to the agent model when unset; summary_agent invoked by the main AI does not use this section).
 [models.summary]
 # zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
 # en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.

@@ -6,68 +6,70 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from Undefined.services.message_summary_fetch import (
+    filter_by_time,
+    parse_time_range,
+)
 from Undefined.skills.agents.summary_agent.tools.fetch_messages.handler import (
-    _filter_by_time,
-    _parse_time_range,
     execute as fetch_messages_execute,
 )
 from Undefined.utils.xml import format_message_xml, format_messages_xml
 
 
-# -- _parse_time_range unit tests --
+# -- parse_time_range unit tests --
 
 
 def test_parse_time_range_1h() -> None:
     """'1h' → 3600."""
-    assert _parse_time_range("1h") == 3600
+    assert parse_time_range("1h") == 3600
 
 
 def test_parse_time_range_6h() -> None:
     """'6h' → 21600."""
-    assert _parse_time_range("6h") == 21600
+    assert parse_time_range("6h") == 21600
 
 
 def test_parse_time_range_1d() -> None:
     """'1d' → 86400."""
-    assert _parse_time_range("1d") == 86400
+    assert parse_time_range("1d") == 86400
 
 
 def test_parse_time_range_7d() -> None:
     """'7d' → 604800."""
-    assert _parse_time_range("7d") == 604800
+    assert parse_time_range("7d") == 604800
 
 
 def test_parse_time_range_1w() -> None:
     """'1w' → 604800."""
-    assert _parse_time_range("1w") == 604800
+    assert parse_time_range("1w") == 604800
 
 
 def test_parse_time_range_case_insensitive() -> None:
     """'1H', '1D' → correct values."""
-    assert _parse_time_range("1H") == 3600
-    assert _parse_time_range("1D") == 86400
-    assert _parse_time_range("1W") == 604800
+    assert parse_time_range("1H") == 3600
+    assert parse_time_range("1D") == 86400
+    assert parse_time_range("1W") == 604800
 
 
 def test_parse_time_range_invalid() -> None:
     """'invalid' → None."""
-    assert _parse_time_range("invalid") is None
-    assert _parse_time_range("") is None
-    assert _parse_time_range("abc") is None
-    assert _parse_time_range("1x") is None
+    assert parse_time_range("invalid") is None
+    assert parse_time_range("") is None
+    assert parse_time_range("abc") is None
+    assert parse_time_range("1x") is None
 
 
 def test_parse_time_range_with_whitespace() -> None:
     """'  1d  ' → 86400 (strips whitespace)."""
-    assert _parse_time_range("  1d  ") == 86400
+    assert parse_time_range("  1d  ") == 86400
 
 
 def test_parse_time_range_multi_digit() -> None:
     """'24h' → 86400."""
-    assert _parse_time_range("24h") == 86400
+    assert parse_time_range("24h") == 86400
 
 
-# -- _filter_by_time unit tests --
+# -- filter_by_time unit tests --
 
 
 def test_filter_by_time_keeps_recent() -> None:
@@ -81,7 +83,7 @@ def test_filter_by_time_keeps_recent() -> None:
         {"timestamp": old, "message": "old"},
     ]
 
-    result = _filter_by_time(messages, 3600)  # 1 hour
+    result = filter_by_time(messages, 3600)  # 1 hour
     assert len(result) == 1
     assert result[0]["message"] == "recent"
 
@@ -97,7 +99,7 @@ def test_filter_by_time_removes_old() -> None:
         {"timestamp": old2, "message": "old2"},
     ]
 
-    result = _filter_by_time(messages, 86400)  # 1 day
+    result = filter_by_time(messages, 86400)  # 1 day
     assert len(result) == 0
 
 
@@ -108,7 +110,7 @@ def test_filter_by_time_missing_timestamp() -> None:
         {"timestamp": "", "message": "empty timestamp"},
     ]
 
-    result = _filter_by_time(messages, 3600)
+    result = filter_by_time(messages, 3600)
     assert len(result) == 0
 
 
@@ -119,7 +121,7 @@ def test_filter_by_time_invalid_timestamp() -> None:
         {"timestamp": "2024-13-45 99:99:99", "message": "impossible date"},
     ]
 
-    result = _filter_by_time(messages, 3600)
+    result = filter_by_time(messages, 3600)
     assert len(result) == 0
 
 
