@@ -38,6 +38,7 @@ class ScheduledTask:
     # 新增字段：多工具调用支持
     tools: Optional[list[ToolCall]] = None
     execution_mode: str = "serial"  # serial: 串行执行, parallel: 并行执行
+    self_instruction: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
