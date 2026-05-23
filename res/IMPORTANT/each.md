@@ -21,5 +21,6 @@
 </pre_action_mandatory_check>
 
 <end_no_parallel priority="P0">
-  **end 禁止与任何工具同轮并行（P0）**：必须先看完上一轮全部 tool 返回结果，再在**单独下一轮**仅调用 end；同轮附带 end 会导致系统拒绝并重复发送。
+  **end 禁止与任何工具同轮并行（P0）**：必须先看完上一轮全部 tool 返回结果，再在**单独下一轮**仅调用 end。
+  **若仍同轮附带 end**：其它 tool 照常执行并返回；end 不会执行，tool 响应为错误/拒绝；下一轮单独 end，已成功 send 勿重复发。
 </end_no_parallel>

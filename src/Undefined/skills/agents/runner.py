@@ -11,6 +11,7 @@ from Undefined.config.models import AgentModelConfig
 from Undefined.ai.transports.openai_transport import RESPONSES_OUTPUT_ITEMS_KEY
 from Undefined.skills.agents.agent_tool_registry import AgentToolRegistry
 from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
+from Undefined.ai.tooling import END_CO_CALL_REJECT_CONTENT
 from Undefined.utils.tool_calls import parse_tool_arguments
 
 
@@ -252,7 +253,7 @@ async def run_agent_with_tools(
                     if len(tool_calls) > 1:
                         logger.warning(
                             "[Agent:%s] end 与其他工具同时调用，"
-                            "将先执行其他工具，再执行 end",
+                            "将先执行其他工具，end 将返回拒绝结果",
                             agent_name,
                         )
                     end_tool_call = tool_call
@@ -324,45 +325,19 @@ async def run_agent_with_tools(
                 end_call_id = str(end_tool_call.get("id", ""))
                 end_api_name = end_tool_call.get("function", {}).get("name", "end")
                 if tool_tasks:
-                    other_tools_failed = any(
-                        isinstance(tool_result, Exception) for tool_result in results
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": end_call_id,
+                            "name": end_api_name,
+                            "content": END_CO_CALL_REJECT_CONTENT,
+                        }
                     )
-                    if other_tools_failed:
-                        skip_content = (
-                            "end 与其他工具同轮调用，且其它工具执行失败，"
-                            "本轮未执行 end；请根据工具结果继续决策。"
-                        )
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": end_call_id,
-                                "name": end_api_name,
-                                "content": skip_content,
-                            }
-                        )
-                        logger.info(
-                            "[Agent:%s] end 与其他工具同时调用，"
-                            "其它工具失败，已回填跳过响应",
-                            agent_name,
-                        )
-                    else:
-                        tool_execution_started = True
-                        end_result = await tool_registry.execute_tool(
-                            "end", end_tool_args, context
-                        )
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": end_call_id,
-                                "name": end_api_name,
-                                "content": str(end_result),
-                            }
-                        )
-                        logger.info(
-                            "[Agent:%s] end 与其他工具同时调用，"
-                            "已在其它工具完成后执行 end",
-                            agent_name,
-                        )
+                    logger.info(
+                        "[Agent:%s] end 与其他工具同时调用，"
+                        "其它工具已执行，end 已回填拒绝响应",
+                        agent_name,
+                    )
                 else:
                     # end 单独调用，正常执行（参数已在循环中解析）
                     tool_execution_started = True

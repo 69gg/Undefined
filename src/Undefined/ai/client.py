@@ -27,7 +27,7 @@ from Undefined.ai.summaries import SummaryService
 from Undefined.services.message_summary_fetch import fetch_session_messages
 from Undefined.ai.transports.openai_transport import RESPONSES_OUTPUT_ITEMS_KEY
 from Undefined.ai.tokens import TokenCounter
-from Undefined.ai.tooling import ToolManager
+from Undefined.ai.tooling import END_CO_CALL_REJECT_CONTENT, ToolManager
 from Undefined.config import (
     ChatModelConfig,
     VisionModelConfig,
@@ -1506,7 +1506,7 @@ class AIClient:
                         if len(tool_calls) > 1:
                             logger.warning(
                                 "[工具调用] end 与其他工具同时调用，"
-                                "将先执行其他工具，再执行 end"
+                                "将先执行其他工具，end 将返回拒绝结果"
                             )
                         end_tool_call = tool_call
                         end_tool_args = function_args
@@ -1594,46 +1594,18 @@ class AIClient:
                     end_call_id = end_tool_call.get("id", "")
                     end_api_name = end_tool_call.get("function", {}).get("name", "end")
                     if tool_tasks:
-                        other_tools_failed = any(
-                            isinstance(tool_result, Exception)
-                            for tool_result in tool_results
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": end_call_id,
+                                "name": end_api_name,
+                                "content": END_CO_CALL_REJECT_CONTENT,
+                            }
                         )
-                        if other_tools_failed:
-                            skip_content = (
-                                "end 与其他工具同轮调用，且其它工具执行失败，"
-                                "本轮未执行 end；请根据工具结果继续决策。"
-                            )
-                            messages.append(
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": end_call_id,
-                                    "name": end_api_name,
-                                    "content": skip_content,
-                                }
-                            )
-                            logger.info(
-                                "[工具调用] end 与其他工具同时调用，"
-                                "其它工具失败，已回填跳过响应"
-                            )
-                        else:
-                            tool_execution_started = True
-                            end_result = await self.tool_manager.execute_tool(
-                                "end", end_tool_args, tool_context
-                            )
-                            messages.append(
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": end_call_id,
-                                    "name": end_api_name,
-                                    "content": str(end_result),
-                                }
-                            )
-                            if tool_context.get("conversation_ended"):
-                                conversation_ended = True
-                            logger.info(
-                                "[工具调用] end 与其他工具同时调用，"
-                                "已在其它工具完成后执行 end"
-                            )
+                        logger.info(
+                            "[工具调用] end 与其他工具同时调用，"
+                            "其它工具已执行，end 已回填拒绝响应"
+                        )
                     else:
                         # end 单独调用，正常执行（参数已在循环中解析）
                         tool_execution_started = True

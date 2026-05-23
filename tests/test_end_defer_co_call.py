@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from Undefined.ai.client import AIClient
+from Undefined.ai.tooling import END_CO_CALL_REJECT_CONTENT
 from Undefined.config.models import ChatModelConfig
 
 
@@ -50,7 +51,6 @@ def _build_minimal_ai_client(
         max_tokens=1024,
     )
     client._find_chat_config_by_name = lambda _name: client.chat_config
-    client.submit_queued_llm_call = AsyncMock(side_effect=llm_responses)
     client._search_wrapper = None
     client._end_summary_storage = cast(Any, None)
     client._send_private_message_callback = None
@@ -64,11 +64,27 @@ def _build_minimal_ai_client(
         error=None,
         proxy_config_available=False,
     )
+
+    submit_calls: list[list[dict[str, Any]]] = []
+
+    async def _submit_queued_llm_call(
+        *,
+        messages: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        submit_calls.append(messages)
+        index = len(submit_calls) - 1
+        if index >= len(llm_responses):
+            raise RuntimeError("unexpected extra llm call")
+        return llm_responses[index]
+
+    client.submit_queued_llm_call = AsyncMock(side_effect=_submit_queued_llm_call)
+    client._submit_calls = submit_calls
     return client
 
 
 @pytest.mark.asyncio
-async def test_ai_ask_defers_end_after_send_message_in_same_round() -> None:
+async def test_ai_ask_rejects_end_when_co_called_with_send_message() -> None:
     execute_calls: list[str] = []
 
     async def _execute_tool(
@@ -110,7 +126,25 @@ async def test_ai_ask_defers_end_after_send_message_in_same_round() -> None:
                         }
                     }
                 ],
-            }
+            },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_end_only",
+                                    "function": {
+                                        "name": "end",
+                                        "arguments": "{}",
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+            },
         ],
     )
 
@@ -118,11 +152,19 @@ async def test_ai_ask_defers_end_after_send_message_in_same_round() -> None:
 
     assert result == ""
     assert execute_calls == ["send_message", "end"]
-    assert cast(AsyncMock, client.submit_queued_llm_call).await_count == 1
+    assert len(client._submit_calls) == 2
+
+    end_tool_messages = [
+        m
+        for m in client._submit_calls[1]
+        if m.get("role") == "tool" and m.get("tool_call_id") == "call_end"
+    ]
+    assert len(end_tool_messages) == 1
+    assert end_tool_messages[0]["content"] == END_CO_CALL_REJECT_CONTENT
 
 
 @pytest.mark.asyncio
-async def test_ai_ask_skips_deferred_end_when_other_tool_failed() -> None:
+async def test_ai_ask_rejects_end_when_other_tool_failed() -> None:
     execute_calls: list[str] = []
 
     async def _execute_tool(
@@ -189,4 +231,11 @@ async def test_ai_ask_skips_deferred_end_when_other_tool_failed() -> None:
 
     assert result == ""
     assert execute_calls == ["send_message", "end"]
-    assert cast(AsyncMock, client.submit_queued_llm_call).await_count == 2
+    assert len(client._submit_calls) == 2
+
+    end_tool_messages = [
+        m
+        for m in client._submit_calls[1]
+        if m.get("role") == "tool" and m.get("tool_call_id") == "call_end"
+    ]
+    assert end_tool_messages[0]["content"] == END_CO_CALL_REJECT_CONTENT
