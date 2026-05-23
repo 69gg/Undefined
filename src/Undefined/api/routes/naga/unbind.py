@@ -20,10 +20,7 @@ logger = logging.getLogger(__name__)
 # POST /api/v1/naga/unbind
 # ------------------------------------------------------------------
 
-# ------------------------------------------------------------------
 
-
-# POST /api/v1/naga/unbind — 远端主动解绑
 async def naga_unbind_handler(ctx: RuntimeAPIContext, request: web.Request) -> Response:
     """POST /api/v1/naga/unbind — 远端主动解绑。"""
     trace_id = _uuid.uuid4().hex[:8]

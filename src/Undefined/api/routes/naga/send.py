@@ -29,10 +29,7 @@ logger = logging.getLogger(__name__)
 # POST /api/v1/naga/messages/send
 # ------------------------------------------------------------------
 
-# ------------------------------------------------------------------
 
-
-# POST /api/v1/naga/messages/send — 验签后发送消息
 async def naga_messages_send_handler(
     ctx: RuntimeAPIContext,
     naga_state: NagaState,
@@ -228,9 +225,6 @@ async def naga_messages_send_handler(
 
 # ------------------------------------------------------------------
 # Core send implementation
-# ------------------------------------------------------------------
-
-# Core send implementation (no NagaState dependency)
 # ------------------------------------------------------------------
 
 

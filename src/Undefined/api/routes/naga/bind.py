@@ -21,10 +21,7 @@ logger = logging.getLogger(__name__)
 # POST /api/v1/naga/bind/callback
 # ------------------------------------------------------------------
 
-# ------------------------------------------------------------------
 
-
-# POST /api/v1/naga/bind/callback — Naga 绑定回调
 async def naga_bind_callback_handler(
     ctx: RuntimeAPIContext, request: web.Request
 ) -> Response:

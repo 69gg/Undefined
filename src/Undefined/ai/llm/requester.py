@@ -416,7 +416,6 @@ class ModelRequester:
         )
         if bool(
             getattr(model_config, "prompt_cache_enabled", True)
-            # ) and not effective_kwargs.get("prompt_cache_key"):
         ) and not effective_kwargs.get("prompt_cache_key"):
             effective_kwargs["prompt_cache_key"] = _build_default_prompt_cache_key(
                 model_config,
