@@ -16,6 +16,14 @@ from Undefined.utils.resources import read_text_resource
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_SUMMARY_CONTEXT_TOKENS = 128_000
+_SUMMARY_FIXED_OVERHEAD_TOKENS = 512
+_CONTEXT_LENGTH_REQUEST_PARAM_KEYS = (
+    "context_length",
+    "max_context_tokens",
+    "max_model_len",
+)
+
 
 def _template_fields(template: str) -> list[str]:
     fields: list[str] = []
@@ -72,31 +80,36 @@ class SummaryService:
             {"role": "user", "content": "\n\n".join(user_parts)},
         ]
 
-    async def summarize_message_history(
-        self,
-        messages_text: str,
-        instruction: str = "",
-    ) -> str:
-        """Summarize fetched chat history for slash-command style requests."""
-        built_messages = await self.build_message_summary_messages(
-            messages_text, instruction
+    def _resolve_context_window_tokens(self) -> int:
+        context_tokens = _DEFAULT_SUMMARY_CONTEXT_TOKENS
+        request_params = getattr(self._chat_config, "request_params", None)
+        if isinstance(request_params, dict):
+            for key in _CONTEXT_LENGTH_REQUEST_PARAM_KEYS:
+                raw = request_params.get(key)
+                if isinstance(raw, bool):
+                    continue
+                try:
+                    parsed = int(raw)  # type: ignore[arg-type]
+                except (TypeError, ValueError):
+                    continue
+                if parsed > 0:
+                    context_tokens = parsed
+                    break
+        return context_tokens
+
+    async def resolve_message_input_budget(self, instruction: str = "") -> int:
+        """Estimate how many input tokens are available for raw chat history text."""
+        system_prompt = await self._load_message_summary_prompt()
+        output_reserve = max(512, int(getattr(self._chat_config, "max_tokens", 4096)))
+        prompt_overhead = (
+            self._token_counter.count(system_prompt)
+            + self._token_counter.count(instruction)
+            + _SUMMARY_FIXED_OVERHEAD_TOKENS
         )
-        max_tokens = getattr(self._chat_config, "max_tokens", 4096)
-        try:
-            result = await self._requester.request(
-                model_config=self._chat_config,
-                messages=built_messages,
-                max_tokens=max_tokens,
-                call_type="message_summary",
-            )
-            content = extract_choices_content(result)
-            logger.info("[总结] 消息总结完成, length=%s", len(content))
-            if logger.isEnabledFor(logging.DEBUG):
-                log_debug_json(logger, "[总结] 消息总结输出", content)
-            return content
-        except Exception as exc:
-            logger.exception("[总结] 消息总结失败: %s", exc)
-            return f"总结失败: {exc}"
+        budget = (
+            self._resolve_context_window_tokens() - output_reserve - prompt_overhead
+        )
+        return max(1024, budget)
 
     async def summarize_chat(self, messages: str, context: str = "") -> str:
         """对聊天记录进行总结
@@ -144,18 +157,7 @@ class SummaryService:
             logger.exception(f"[总结] 聊天记录总结失败: {exc}")
             return f"总结失败: {exc}"
 
-    async def merge_summaries(self, summaries: list[str]) -> str:
-        """将多个分段总结整合为一个最终总结
-
-        参数:
-            summaries: 分段总结列表
-
-        返回:
-            合并后的最终总结
-        """
-        if len(summaries) == 1:
-            return summaries[0]
-
+    async def build_merge_messages(self, summaries: list[str]) -> list[dict[str, str]]:
         segments = [f"分段 {i + 1}:\n{s}" for i, s in enumerate(summaries)]
         segments_text = "---".join(segments)
         logger.debug(
@@ -175,11 +177,26 @@ class SummaryService:
             self._merge_prompt_path,
         )
         prompt += segments_text
+        return [{"role": "user", "content": prompt}]
+
+    async def merge_summaries(self, summaries: list[str]) -> str:
+        """将多个分段总结整合为一个最终总结
+
+        参数:
+            summaries: 分段总结列表
+
+        返回:
+            合并后的最终总结
+        """
+        if len(summaries) == 1:
+            return summaries[0]
+
+        messages = await self.build_merge_messages(summaries)
 
         try:
             result = await self._requester.request(
                 model_config=self._chat_config,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 max_tokens=8192,
                 call_type="merge_summaries",
             )
@@ -191,6 +208,33 @@ class SummaryService:
             logger.exception(f"合并总结失败: {exc}")
             return "\n\n---\n\n".join(summaries)
 
+    def _split_text_by_tokens(self, text: str, max_tokens: int) -> list[str]:
+        if max_tokens <= 0:
+            return [text] if text else []
+        if self._token_counter.count(text) <= max_tokens:
+            return [text]
+
+        parts: list[str] = []
+        start = 0
+        text_len = len(text)
+        while start < text_len:
+            lo = start + 1
+            hi = text_len
+            best = start + 1
+            while lo <= hi:
+                mid = (lo + hi) // 2
+                segment = text[start:mid]
+                if self._token_counter.count(segment) <= max_tokens:
+                    best = mid
+                    lo = mid + 1
+                else:
+                    hi = mid - 1
+            if best <= start:
+                best = min(start + 1, text_len)
+            parts.append(text[start:best])
+            start = best
+        return parts
+
     def split_messages_by_tokens(self, messages: str, max_tokens: int) -> list[str]:
         """按 token 限制切分长消息
 
@@ -201,21 +245,22 @@ class SummaryService:
         返回:
             切分后的消息段列表
         """
-        effective_max = max_tokens - 500
+        effective_max = max(256, max_tokens - 500)
         lines = messages.split("\n")
         chunks: list[str] = []
         current_chunk: list[str] = []
         current_tokens = 0
 
         for line in lines:
-            line_tokens = self._token_counter.count(line)
-            if current_tokens + line_tokens > effective_max and current_chunk:
-                chunks.append("\n".join(current_chunk))
-                current_chunk = []
-                current_tokens = 0
+            for segment in self._split_text_by_tokens(line, effective_max):
+                segment_tokens = self._token_counter.count(segment)
+                if current_tokens + segment_tokens > effective_max and current_chunk:
+                    chunks.append("\n".join(current_chunk))
+                    current_chunk = []
+                    current_tokens = 0
 
-            current_chunk.append(line)
-            current_tokens += line_tokens
+                current_chunk.append(segment)
+                current_tokens += segment_tokens
 
         if current_chunk:
             chunks.append("\n".join(current_chunk))

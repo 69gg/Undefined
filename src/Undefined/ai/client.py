@@ -763,6 +763,21 @@ class AIClient:
         )
         return extract_choices_content(result).strip()
 
+    async def _merge_summaries_queued(self, summaries: list[str]) -> str:
+        if len(summaries) == 1:
+            return summaries[0]
+
+        model_config = self._resolve_summary_model_for_requests()
+        messages = await self._summary_service.build_merge_messages(summaries)
+        result = await self.submit_queued_llm_call(
+            model_config=model_config,
+            messages=messages,
+            tools=None,
+            call_type="merge_summaries",
+            max_tokens=8192,
+        )
+        return extract_choices_content(result).strip()
+
     async def summarize_command_session(
         self,
         history_manager: Any,
@@ -774,7 +789,7 @@ class AIClient:
         instruction: str = "",
     ) -> str:
         """Fetch session messages and summarize via summary model without tools."""
-        messages_text = fetch_session_messages(
+        messages_text = await fetch_session_messages(
             history_manager,
             group_id=group_id,
             user_id=user_id,
@@ -787,20 +802,21 @@ class AIClient:
         if messages_text.startswith("无法解析时间范围"):
             return messages_text
 
-        model_config = self._resolve_summary_model_for_requests()
+        input_budget = await self._summary_service.resolve_message_input_budget(
+            instruction
+        )
         total_tokens = self.count_tokens(messages_text)
-        max_tokens = model_config.max_tokens
-        if total_tokens <= max_tokens:
+        if total_tokens <= input_budget:
             return await self._summarize_message_history_queued(
                 messages_text, instruction
             )
 
-        chunks = self.split_messages_by_tokens(messages_text, max_tokens)
+        chunks = self.split_messages_by_tokens(messages_text, input_budget)
         summaries = [
             await self._summarize_message_history_queued(chunk, instruction)
             for chunk in chunks
         ]
-        return str(await self.merge_summaries(summaries))
+        return await self._merge_summaries_queued(summaries)
 
     def apply_attachment_config(self, runtime_config: Config) -> None:
         self.attachment_registry.set_limits(
@@ -1029,13 +1045,6 @@ class AIClient:
     async def summarize_chat(self, messages: str, context: str = "") -> str:
         return await self._summary_service.summarize_chat(messages, context)
 
-    async def summarize_message_history(
-        self, messages_text: str, instruction: str = ""
-    ) -> str:
-        return await self._summary_service.summarize_message_history(
-            messages_text, instruction
-        )
-
     async def merge_summaries(self, summaries: list[str]) -> str:
         return await self._summary_service.merge_summaries(summaries)
 
@@ -1179,6 +1188,26 @@ class AIClient:
         tool_context.setdefault("send_message_callback", send_message_callback)
         tool_context.setdefault(
             "get_recent_messages_callback", get_recent_messages_callback
+        )
+
+        async def fetch_session_messages_callback(
+            *,
+            group_id: int,
+            user_id: int,
+            count: int | None = None,
+            time_range: str | None = None,
+        ) -> str:
+            return await fetch_session_messages(
+                history_manager,
+                group_id=group_id,
+                user_id=user_id,
+                count=count,
+                time_range=time_range,
+                runtime_config=self._get_runtime_config(),
+            )
+
+        tool_context.setdefault(
+            "fetch_session_messages_callback", fetch_session_messages_callback
         )
         tool_context.setdefault("get_image_url_callback", get_image_url_callback)
         tool_context.setdefault("get_forward_msg_callback", get_forward_msg_callback)

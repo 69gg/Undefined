@@ -21,11 +21,12 @@ def _agent_config(model_name: str = "agent-model") -> AgentModelConfig:
     )
 
 
-def test_fetch_session_messages_returns_empty_when_no_history() -> None:
+@pytest.mark.asyncio
+async def test_fetch_session_messages_returns_empty_when_no_history() -> None:
     history_manager = MagicMock()
     history_manager.get_recent.return_value = []
 
-    result = fetch_session_messages(
+    result = await fetch_session_messages(
         history_manager,
         group_id=123,
         user_id=456,
@@ -35,10 +36,11 @@ def test_fetch_session_messages_returns_empty_when_no_history() -> None:
     assert result == ""
 
 
-def test_fetch_session_messages_invalid_time_range() -> None:
+@pytest.mark.asyncio
+async def test_fetch_session_messages_invalid_time_range() -> None:
     history_manager = MagicMock()
 
-    result = fetch_session_messages(
+    result = await fetch_session_messages(
         history_manager,
         group_id=123,
         user_id=456,
@@ -63,9 +65,11 @@ async def test_summarize_command_session_uses_queued_llm_without_tools() -> None
             {"role": "user", "content": "user"},
         ]
     )
+    ai_client._summary_service.resolve_message_input_budget = AsyncMock(
+        return_value=100_000
+    )
     ai_client.count_tokens = MagicMock(return_value=100)
     ai_client.split_messages_by_tokens = MagicMock()
-    ai_client.merge_summaries = AsyncMock()
     ai_client.submit_queued_llm_call = AsyncMock(
         return_value={"choices": [{"message": {"content": "总结结果"}}]}
     )
@@ -73,7 +77,9 @@ async def test_summarize_command_session_uses_queued_llm_without_tools() -> None
     history_manager = MagicMock()
     with patch(
         "Undefined.ai.client.fetch_session_messages",
-        return_value="共获取 2 条消息\n\n<message>...</message>",
+        new=AsyncMock(
+            return_value="共获取 2 条消息\n\n<message>...</message>",
+        ),
     ):
         result = await ai_client.summarize_command_session(
             history_manager,
@@ -103,20 +109,26 @@ async def test_summarize_command_session_splits_long_history() -> None:
             {"role": "user", "content": f"{instruction}\n{text}"},
         ]
     )
+    ai_client._summary_service.resolve_message_input_budget = AsyncMock(
+        return_value=1000
+    )
+    ai_client._summary_service.build_merge_messages = AsyncMock(
+        return_value=[{"role": "user", "content": "merge prompt"}]
+    )
     ai_client.count_tokens = MagicMock(return_value=10000)
     ai_client.split_messages_by_tokens = MagicMock(return_value=["chunk-1", "chunk-2"])
-    ai_client.merge_summaries = AsyncMock(return_value="合并总结")
     ai_client.submit_queued_llm_call = AsyncMock(
         side_effect=[
             {"choices": [{"message": {"content": "part-1"}}]},
             {"choices": [{"message": {"content": "part-2"}}]},
+            {"choices": [{"message": {"content": "合并总结"}}]},
         ]
     )
 
     history_manager = MagicMock()
     with patch(
         "Undefined.ai.client.fetch_session_messages",
-        return_value="很长的聊天记录",
+        new=AsyncMock(return_value="很长的聊天记录"),
     ):
         result = await ai_client.summarize_command_session(
             history_manager,
@@ -127,38 +139,47 @@ async def test_summarize_command_session_splits_long_history() -> None:
         )
 
     assert result == "合并总结"
-    assert ai_client.submit_queued_llm_call.call_count == 2
-    ai_client.merge_summaries.assert_awaited_once_with(["part-1", "part-2"])
+    assert ai_client.submit_queued_llm_call.call_count == 3
+    merge_call = ai_client.submit_queued_llm_call.call_args_list[-1].kwargs
+    assert merge_call["call_type"] == "merge_summaries"
+    ai_client._summary_service.build_merge_messages.assert_awaited_once_with(
+        ["part-1", "part-2"]
+    )
 
 
 @pytest.mark.asyncio
-async def test_summary_service_summarize_message_history() -> None:
-    requester = AsyncMock()
-    requester.request = AsyncMock(
-        return_value={"choices": [{"message": {"content": "直连总结"}}]}
-    )
+async def test_summary_service_resolve_message_input_budget() -> None:
+    token_counter = MagicMock()
+    token_counter.count.side_effect = lambda text: len(str(text))
     service = SummaryService(
-        requester,
+        AsyncMock(),
         _agent_config("summary-model"),
-        MagicMock(),
+        token_counter,
     )
 
     with patch.object(
         service,
-        "build_message_summary_messages",
-        new=AsyncMock(
-            return_value=[
-                {"role": "system", "content": "system"},
-                {"role": "user", "content": "user"},
-            ]
-        ),
+        "_load_message_summary_prompt",
+        new=AsyncMock(return_value="system prompt"),
     ):
-        result = await service.summarize_message_history("messages", "instruction")
+        budget = await service.resolve_message_input_budget("请总结")
 
-    assert result == "直连总结"
-    requester.request.assert_awaited_once()
-    call_kwargs = requester.request.call_args.kwargs
-    assert call_kwargs["call_type"] == "message_summary"
+    assert budget == 128_000 - 4096 - len("system prompt") - len("请总结") - 512
+
+
+def test_summary_service_split_messages_splits_long_line() -> None:
+    token_counter = MagicMock()
+    token_counter.count.side_effect = lambda text: len(str(text))
+    service = SummaryService(
+        AsyncMock(),
+        _agent_config(),
+        token_counter,
+    )
+
+    chunks = service.split_messages_by_tokens("a" * 5000, max_tokens=1000)
+
+    assert len(chunks) >= 2
+    assert all(token_counter.count(chunk) <= 500 for chunk in chunks)
 
 
 def test_resolve_summary_model_falls_back_to_agent() -> None:

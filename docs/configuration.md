@@ -185,6 +185,21 @@ Prompt caching 补充：
 `request_params` 说明：
 - 适合放 provider 私有请求体字段，例如 `metadata`、`temperature`、兼容网关扩展参数等。
 - 不要再通过 `request_params` 传 `reasoning` / `reasoning_effort` / `thinking`；这些现在有正式配置字段控制。
+- 消息总结分块会读取 `request_params.context_length` / `max_context_tokens` / `max_model_len`（若存在）作为上下文窗口估算；未配置时默认按 128K 估算输入预算。
+
+#### 思维链续传迁移说明
+
+旧文档曾将 `thinking_tool_call_compat=true` 描述为“向上游回传 `reasoning_content`”。当前实现已拆分为两个独立开关：
+
+| 开关 | 作用 |
+|------|------|
+| `thinking_tool_call_compat=true`（默认） | 多轮工具调用时在**本地历史**回填 `reasoning_content` / `_responses_output_items`，供日志与回放；**出站请求仍剥离**该字段 |
+| `reasoning_content_replay=true`（默认 `false`） | 多轮工具调用时将 CoT **续传给上游**（Chat：`reasoning_content`；Responses：`reasoning.encrypted_content` 等） |
+
+**升级建议**：
+- 若你使用的 thinking 模型在多轮工具调用时返回 400，且错误提示缺少 `reasoning_content` / reasoning item，请在对应模型节开启 `reasoning_content_replay = true`。
+- 仅需要本地调试/回放思维链、不希望增大上游 payload 时，保持 `reasoning_content_replay = false` 即可。
+- MiMo / DeepSeek 等常见组合：`api_mode = "chat_completions"` + `reasoning_content_replay = true`（必要时叠加 `responses_force_stateless_replay = true`）。
 
 兼容字段（旧配置）：
 - `models.<x>.deepseek_new_cot_support`
@@ -928,6 +943,16 @@ Prompt caching 补充：
 - 模型发车间隔 / 模型名 / 模型池变更（队列间隔刷新）
 - `models.grok.model_name` / `models.grok.queue_interval_seconds`（队列间隔刷新）
 - `models.summary` / `models.historian` / `models.grok` 的非队列字段会刷新 AI 运行时配置，但不会重建聊天、视觉或 Agent 模型客户端；其中 `models.summary` 热更新会重建摘要服务，`/summary`/`/sum`、SummaryService（如 `/bugfix`）会立即使用专用 summary 模型配置；主 AI 调用的 `summary_agent` 始终走 `models.agent`（及 agent 模型池）。
+
+#### 消息总结模型路由（易混淆）
+
+| 入口 | 使用的模型配置 | 是否走 Agent / 工具 |
+|------|----------------|---------------------|
+| `/summary`、`/sum` 斜杠命令 | `[models.summary]`，未配置时回退 `[models.agent]` | 否：程序拉取历史后直连 summary 模型（队列 `call_type=message_summary`） |
+| 主 AI 调用 `summary_agent` | `[models.agent]`（及 agent 模型池） | 是：Agent 通过 `fetch_messages` 工具拉取后再总结 |
+| `/bugfix` 等使用 `SummaryService` 的路径 | 同 `/summary`（summary 模型） | 否 |
+
+因此：**单独配置 `[models.summary]` 只影响斜杠命令与 SummaryService，不会改变主 AI 对话里 `summary_agent` 的行为。** 若希望对话内总结也使用专用模型，需调整 `[models.agent]` 或模型池，而不是只改 `[models.summary]`。
 - `render.browser_max_concurrency` 会在当前渲染任务空闲后重建渲染并发信号量。
 - `skills.intro_autogen_*`（Agent intro 生成器配置刷新）
 - `search.searxng_url`（搜索客户端刷新）

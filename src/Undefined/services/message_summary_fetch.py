@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime, timedelta
 from typing import Any
@@ -72,7 +73,7 @@ def normalize_messages_for_chat(
     return normalized
 
 
-def fetch_session_messages(
+async def fetch_session_messages(
     history_manager: Any,
     *,
     group_id: int,
@@ -112,11 +113,15 @@ def fetch_session_messages(
             _FALLBACK_MAX_FETCH_FOR_TIME_FILTER,
         )
         fetch_count = max(resolved_count * 2, max_time_fetch)
-        messages = history_manager.get_recent(chat_id, chat_type, 0, fetch_count)
+        messages = await asyncio.to_thread(
+            history_manager.get_recent, chat_id, chat_type, 0, fetch_count
+        )
         if messages:
             messages = filter_by_time(messages, seconds)
     else:
-        messages = history_manager.get_recent(chat_id, chat_type, 0, resolved_count)
+        messages = await asyncio.to_thread(
+            history_manager.get_recent, chat_id, chat_type, 0, resolved_count
+        )
 
     if not messages:
         return ""

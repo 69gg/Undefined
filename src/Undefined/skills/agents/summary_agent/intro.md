@@ -5,6 +5,8 @@
 
 注意：`/summary` 与 `/sum` 斜杠命令不走本 Agent，而是由程序直接拉取消息并调用专用 summary 模型。
 
+**模型配置**：本 Agent 使用 `[models.agent]`（及 agent 模型池），**不会**读取 `[models.summary]`。若已为斜杠命令配置了专用 summary 模型，对话内调用本 Agent 时仍走 agent 模型。
+
 ## 擅长
 - ✅ 按**条数**拉取消息 (默认50条; 上限由 `[history].summary_fetch_limit` 配置)
 - ✅ 按**时间范围**拉取消息 (支持1h/6h/1d/7d等格式)
