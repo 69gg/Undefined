@@ -12,12 +12,17 @@ from Undefined.config.models import AgentModelConfig
 from Undefined.services.message_summary_fetch import fetch_session_messages
 
 
-def _agent_config(model_name: str = "agent-model") -> AgentModelConfig:
+def _agent_config(
+    model_name: str = "agent-model",
+    *,
+    context_window_tokens: int = 32768,
+) -> AgentModelConfig:
     return AgentModelConfig(
         api_url="https://api.example.com/v1",
         api_key="key",
         model_name=model_name,
         max_tokens=4096,
+        context_window_tokens=context_window_tokens,
     )
 
 
@@ -164,7 +169,7 @@ async def test_summary_service_resolve_message_input_budget() -> None:
     ):
         budget = await service.resolve_message_input_budget("请总结")
 
-    assert budget == 128_000 - 4096 - len("system prompt") - len("请总结") - 512
+    assert budget == 32768 - 4096 - len("system prompt") - len("请总结") - 512
 
 
 def test_summary_service_split_messages_splits_long_line() -> None:

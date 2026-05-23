@@ -885,6 +885,14 @@ function buildAotTemplate(path, arr) {
             if (
                 !Object.prototype.hasOwnProperty.call(
                     template,
+                    "context_window_tokens",
+                )
+            ) {
+                template.context_window_tokens = 8192;
+            }
+            if (
+                !Object.prototype.hasOwnProperty.call(
+                    template,
                     "reasoning_content_replay",
                 )
             ) {
@@ -954,6 +962,7 @@ function buildAotTemplate(path, arr) {
         api_url: "",
         api_key: "",
         api_mode: "chat_completions",
+        context_window_tokens: 8192,
         thinking_tool_call_compat: true,
         reasoning_content_replay: false,
         system_prompt_as_user: false,

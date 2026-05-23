@@ -16,13 +16,7 @@ from Undefined.utils.resources import read_text_resource
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_SUMMARY_CONTEXT_TOKENS = 128_000
 _SUMMARY_FIXED_OVERHEAD_TOKENS = 512
-_CONTEXT_LENGTH_REQUEST_PARAM_KEYS = (
-    "context_length",
-    "max_context_tokens",
-    "max_model_len",
-)
 
 
 def _template_fields(template: str) -> list[str]:
@@ -81,21 +75,8 @@ class SummaryService:
         ]
 
     def _resolve_context_window_tokens(self) -> int:
-        context_tokens = _DEFAULT_SUMMARY_CONTEXT_TOKENS
-        request_params = getattr(self._chat_config, "request_params", None)
-        if isinstance(request_params, dict):
-            for key in _CONTEXT_LENGTH_REQUEST_PARAM_KEYS:
-                raw = request_params.get(key)
-                if isinstance(raw, bool):
-                    continue
-                try:
-                    parsed = int(raw)  # type: ignore[arg-type]
-                except (TypeError, ValueError):
-                    continue
-                if parsed > 0:
-                    context_tokens = parsed
-                    break
-        return context_tokens
+        configured = int(getattr(self._chat_config, "context_window_tokens", 8192))
+        return max(1, configured)
 
     async def resolve_message_input_budget(self, instruction: str = "") -> int:
         """Estimate how many input tokens are available for raw chat history text."""

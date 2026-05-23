@@ -33,6 +33,7 @@ class ModelPoolEntry:
     api_key: str
     model_name: str
     max_tokens: int
+    context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = "chat_completions"
     thinking_enabled: bool = False
@@ -68,6 +69,7 @@ class ChatModelConfig:
     api_key: str
     model_name: str
     max_tokens: int
+    context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
@@ -101,6 +103,7 @@ class VisionModelConfig:
     api_key: str
     model_name: str
     max_tokens: int = 8192  # 最大输出 tokens
+    context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
@@ -131,6 +134,7 @@ class SecurityModelConfig:
     api_key: str
     model_name: str
     max_tokens: int
+    context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
@@ -160,6 +164,7 @@ class EmbeddingModelConfig:
     api_url: str
     api_key: str
     model_name: str
+    context_window_tokens: int = 8192
     queue_interval_seconds: float = 0.0
     dimensions: int | None = None
     query_instruction: str = ""  # 查询端指令前缀（如 Qwen3-Embedding 需要）
@@ -174,6 +179,7 @@ class RerankModelConfig:
     api_url: str
     api_key: str
     model_name: str
+    context_window_tokens: int = 8192
     queue_interval_seconds: float = 0.0
     query_instruction: str = ""  # 查询端指令前缀（如部分 rerank 模型需要）
     request_params: dict[str, Any] = field(default_factory=dict)
@@ -187,6 +193,7 @@ class AgentModelConfig:
     api_key: str
     model_name: str
     max_tokens: int = 4096
+    context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = "chat_completions"  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
@@ -218,6 +225,7 @@ class GrokModelConfig:
     api_key: str
     model_name: str
     max_tokens: int = 8192
+    context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
@@ -240,6 +248,7 @@ class ImageGenModelConfig:
     api_url: str = ""
     api_key: str = ""
     model_name: str = ""
+    context_window_tokens: int = 0
     request_params: dict[str, Any] = field(default_factory=dict)
 
 

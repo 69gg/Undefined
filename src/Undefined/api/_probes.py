@@ -81,6 +81,10 @@ def _build_internal_model_probe_payload(mcfg: Any) -> dict[str, Any]:
         "model_name": getattr(mcfg, "model_name", ""),
         "api_url": _mask_url(getattr(mcfg, "api_url", "")),
     }
+    if hasattr(mcfg, "max_tokens"):
+        payload["max_tokens"] = getattr(mcfg, "max_tokens", 0)
+    if hasattr(mcfg, "context_window_tokens"):
+        payload["context_window_tokens"] = getattr(mcfg, "context_window_tokens", 8192)
     if hasattr(mcfg, "api_mode"):
         payload["api_mode"] = getattr(mcfg, "api_mode", "chat_completions")
     if hasattr(mcfg, "thinking_enabled"):

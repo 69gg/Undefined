@@ -143,6 +143,7 @@ model_name = "gpt-4o-mini"
 | `api_key` | API Key |
 | `model_name` | 模型名 |
 | `max_tokens` | 最大输出 token（vision 无此字段） |
+| `context_window_tokens` | 模型上下文窗口上限（token），用于 `/summary` 分块与 Prompt 预算；解析默认 `8192`，须按上游模型能力配置 |
 | `queue_interval_seconds` | 该模型请求队列发车间隔（秒，`0` 表示立即发车） |
 | `api_mode` | 请求模式：`chat_completions` 或 `responses` |
 | `reasoning_enabled` | 是否启用 `reasoning.effort` |
@@ -185,7 +186,7 @@ Prompt caching 补充：
 `request_params` 说明：
 - 适合放 provider 私有请求体字段，例如 `metadata`、`temperature`、兼容网关扩展参数等。
 - 不要再通过 `request_params` 传 `reasoning` / `reasoning_effort` / `thinking`；这些现在有正式配置字段控制。
-- 消息总结分块会读取 `request_params.context_length` / `max_context_tokens` / `max_model_len`（若存在）作为上下文窗口估算；未配置时默认按 128K 估算输入预算。
+- 消息总结分块读取 `[models.summary].context_window_tokens`（未单独配置时回退 `[models.agent]`）；不再使用硬编码窗口或 `request_params` 里的 `context_length` 类字段。
 
 #### 思维链续传迁移说明
 

@@ -89,6 +89,10 @@ model_name = ""
 # zh: 最大生成 tokens。
 # en: Max generation tokens.
 max_tokens = 8192
+
+# zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
+# en: Model context window cap (tokens) for /summary chunking and prompt budgeting; must match upstream capability.
+context_window_tokens = 32768
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
@@ -167,6 +171,10 @@ model_name = ""
 # zh: Vision 模型最大输出 tokens。启用 thinking 时建议设大（如 8192），确保思维链消耗后仍有余量输出工具调用。
 # en: Vision model max output tokens. When thinking is enabled, use a larger value (e.g. 8192) so there is still room for tool-call output after thinking.
 max_tokens = 8192
+
+# zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
+# en: Model context window cap (tokens) for /summary chunking and prompt budgeting; must match upstream capability.
+context_window_tokens = 32768
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
@@ -235,6 +243,10 @@ model_name = ""
 # zh: 可选限制：最大生成 tokens。
 # en: Optional limit: max generation tokens.
 max_tokens = 100
+
+# zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
+# en: Model context window cap (tokens) for /summary chunking and prompt budgeting; must match upstream capability.
+context_window_tokens = 8192
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
@@ -302,6 +314,10 @@ model_name = ""
 # zh: 可选限制：最大生成 tokens。
 # en: Optional limit: max generation tokens.
 max_tokens = 160
+
+# zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
+# en: Model context window cap (tokens) for /summary chunking and prompt budgeting; must match upstream capability.
+context_window_tokens = 8192
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
@@ -364,6 +380,10 @@ model_name = ""
 # zh: 可选限制：最大生成 tokens。
 # en: Optional limit: max generation tokens.
 max_tokens = 4096
+
+# zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
+# en: Model context window cap (tokens) for /summary chunking and prompt budgeting; must match upstream capability.
+context_window_tokens = 32768
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
@@ -442,6 +462,10 @@ model_name = ""
 # zh: 可选限制：最大生成 tokens。
 # en: Optional limit: max generation tokens.
 max_tokens = 4096
+
+# zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
+# en: Model context window cap (tokens) for /summary chunking and prompt budgeting; must match upstream capability.
+context_window_tokens = 32768
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
@@ -507,6 +531,10 @@ model_name = ""
 # zh: 可选限制：最大生成 tokens。
 # en: Optional limit: max generation tokens.
 max_tokens = 4096
+
+# zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
+# en: Model context window cap (tokens) for /summary chunking and prompt budgeting; must match upstream capability.
+context_window_tokens = 32768
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
@@ -572,6 +600,10 @@ model_name = ""
 # zh: 可选限制：最大生成 tokens。
 # en: Optional limit: max generation tokens.
 max_tokens = 8192
+
+# zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
+# en: Model context window cap (tokens) for /summary chunking and prompt budgeting; must match upstream capability.
+context_window_tokens = 32768
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
@@ -616,6 +648,10 @@ api_key = ""
 # zh: Embedding 模型名称。
 # en: Embedding model name.
 model_name = ""
+
+# zh: 模型上下文窗口上限（token，可选）；嵌入/重排场景通常保持默认即可。
+# en: Model context window cap (tokens, optional); embedding/rerank can usually keep the default.
+context_window_tokens = 8192
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 0.0
@@ -645,6 +681,10 @@ api_key = ""
 # zh: Rerank 模型名称。
 # en: Rerank model name.
 model_name = ""
+
+# zh: 模型上下文窗口上限（token，可选）；嵌入/重排场景通常保持默认即可。
+# en: Model context window cap (tokens, optional); embedding/rerank can usually keep the default.
+context_window_tokens = 8192
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 0.0
