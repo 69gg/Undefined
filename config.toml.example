@@ -22,8 +22,8 @@ process_private_message = true
 # zh: 是否响应拍一拍。关闭后拍一拍事件将被忽略。
 # en: Respond to poke events. If disabled, poke events are ignored.
 process_poke_message = true
-# zh: 注入给模型的最近历史消息条数上限（0-200，0 表示不注入历史）。
-# en: Max number of recent messages injected as model context (0-200; 0 disables history injection).
+# zh: 注入给模型的最近历史消息条数（0 表示不注入；无固定上限，受 max_records 与存储约束）。
+# en: Recent messages injected as model context (0 disables; no fixed cap; bounded by max_records/storage).
 context_recent_messages_limit = 20
 # zh: 单次 LLM 请求失败时最大静默重试次数（0=不重试，默认2）。失败的请求会回到原队列的第 2 个位置。
 # en: Max silent retries for a single failed LLM request (0=no retry, default 2). Failed requests are reinserted at position 2 of their original queue lane.
@@ -113,9 +113,15 @@ thinking_include_budget = true
 # zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
 # en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
 reasoning_effort_style = "openai"
-# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
-# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+# zh: 思维链工具调用兼容：多轮工具调用时在本地历史回填 reasoning_content（日志/回放），不向上游续传。
+# en: Thinking tool-call compatibility: locally store reasoning_content in history for multi-turn tool calls (logging/replay), not upstream replay.
 thinking_tool_call_compat = true
+# zh: 多轮工具调用时是否将 CoT 续传给上游（Chat: reasoning_content；Responses: output items）。默认 false。
+# en: Relay chain-of-thought to upstream on multi-turn tool calls (Chat: reasoning_content; Responses: output items). Default false.
+reasoning_content_replay = false
+# zh: 是否将所有 system 提示词合并注入第一条 user 消息（适配不支持 system role 的模型）。默认 false。
+# en: Merge all system prompts into the first user message (for models without system role). Default false.
+system_prompt_as_user = false
 # zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。当前已在 new-api v0.11.4-alpha.3 发现该问题。默认关闭。
 # en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. This issue is currently observed on new-api v0.11.4-alpha.3. Disabled by default.
 responses_tool_choice_compat = false
@@ -185,9 +191,15 @@ thinking_include_budget = true
 # zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
 # en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
 reasoning_effort_style = "openai"
-# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
-# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+# zh: 思维链工具调用兼容：多轮工具调用时在本地历史回填 reasoning_content（日志/回放），不向上游续传。
+# en: Thinking tool-call compatibility: locally store reasoning_content in history for multi-turn tool calls (logging/replay), not upstream replay.
 thinking_tool_call_compat = true
+# zh: 多轮工具调用时是否将 CoT 续传给上游（Chat: reasoning_content；Responses: output items）。默认 false。
+# en: Relay chain-of-thought to upstream on multi-turn tool calls (Chat: reasoning_content; Responses: output items). Default false.
+reasoning_content_replay = false
+# zh: 是否将所有 system 提示词合并注入第一条 user 消息（适配不支持 system role 的模型）。默认 false。
+# en: Merge all system prompts into the first user message (for models without system role). Default false.
+system_prompt_as_user = false
 # zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。当前已在 new-api v0.11.4-alpha.3 发现该问题。默认关闭。
 # en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. This issue is currently observed on new-api v0.11.4-alpha.3. Disabled by default.
 responses_tool_choice_compat = false
@@ -247,9 +259,15 @@ thinking_include_budget = true
 # zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
 # en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
 reasoning_effort_style = "openai"
-# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
-# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+# zh: 思维链工具调用兼容：多轮工具调用时在本地历史回填 reasoning_content（日志/回放），不向上游续传。
+# en: Thinking tool-call compatibility: locally store reasoning_content in history for multi-turn tool calls (logging/replay), not upstream replay.
 thinking_tool_call_compat = true
+# zh: 多轮工具调用时是否将 CoT 续传给上游（Chat: reasoning_content；Responses: output items）。默认 false。
+# en: Relay chain-of-thought to upstream on multi-turn tool calls (Chat: reasoning_content; Responses: output items). Default false.
+reasoning_content_replay = false
+# zh: 是否将所有 system 提示词合并注入第一条 user 消息（适配不支持 system role 的模型）。默认 false。
+# en: Merge all system prompts into the first user message (for models without system role). Default false.
+system_prompt_as_user = false
 # zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。当前已在 new-api v0.11.4-alpha.3 发现该问题。默认关闭。
 # en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. This issue is currently observed on new-api v0.11.4-alpha.3. Disabled by default.
 responses_tool_choice_compat = false
@@ -308,9 +326,15 @@ thinking_include_budget = true
 # zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
 # en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
 reasoning_effort_style = "openai"
-# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
-# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+# zh: 思维链工具调用兼容：多轮工具调用时在本地历史回填 reasoning_content（日志/回放），不向上游续传。
+# en: Thinking tool-call compatibility: locally store reasoning_content in history for multi-turn tool calls (logging/replay), not upstream replay.
 thinking_tool_call_compat = true
+# zh: 多轮工具调用时是否将 CoT 续传给上游（Chat: reasoning_content；Responses: output items）。默认 false。
+# en: Relay chain-of-thought to upstream on multi-turn tool calls (Chat: reasoning_content; Responses: output items). Default false.
+reasoning_content_replay = false
+# zh: 是否将所有 system 提示词合并注入第一条 user 消息（适配不支持 system role 的模型）。默认 false。
+# en: Merge all system prompts into the first user message (for models without system role). Default false.
+system_prompt_as_user = false
 # zh: Responses API 的 tool_choice 兼容模式。
 # en: Responses API tool_choice compatibility mode.
 responses_tool_choice_compat = false
@@ -364,9 +388,15 @@ thinking_include_budget = true
 # zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
 # en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
 reasoning_effort_style = "openai"
-# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
-# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+# zh: 思维链工具调用兼容：多轮工具调用时在本地历史回填 reasoning_content（日志/回放），不向上游续传。
+# en: Thinking tool-call compatibility: locally store reasoning_content in history for multi-turn tool calls (logging/replay), not upstream replay.
 thinking_tool_call_compat = true
+# zh: 多轮工具调用时是否将 CoT 续传给上游（Chat: reasoning_content；Responses: output items）。默认 false。
+# en: Relay chain-of-thought to upstream on multi-turn tool calls (Chat: reasoning_content; Responses: output items). Default false.
+reasoning_content_replay = false
+# zh: 是否将所有 system 提示词合并注入第一条 user 消息（适配不支持 system role 的模型）。默认 false。
+# en: Merge all system prompts into the first user message (for models without system role). Default false.
+system_prompt_as_user = false
 # zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。当前已在 new-api v0.11.4-alpha.3 发现该问题。默认关闭。
 # en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. This issue is currently observed on new-api v0.11.4-alpha.3. Disabled by default.
 responses_tool_choice_compat = false
@@ -436,9 +466,15 @@ thinking_include_budget = true
 # zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
 # en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
 reasoning_effort_style = "openai"
-# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
-# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+# zh: 思维链工具调用兼容：多轮工具调用时在本地历史回填 reasoning_content（日志/回放），不向上游续传。
+# en: Thinking tool-call compatibility: locally store reasoning_content in history for multi-turn tool calls (logging/replay), not upstream replay.
 thinking_tool_call_compat = true
+# zh: 多轮工具调用时是否将 CoT 续传给上游（Chat: reasoning_content；Responses: output items）。默认 false。
+# en: Relay chain-of-thought to upstream on multi-turn tool calls (Chat: reasoning_content; Responses: output items). Default false.
+reasoning_content_replay = false
+# zh: 是否将所有 system 提示词合并注入第一条 user 消息（适配不支持 system role 的模型）。默认 false。
+# en: Merge all system prompts into the first user message (for models without system role). Default false.
+system_prompt_as_user = false
 # zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。当前已在 new-api v0.11.4-alpha.3 发现该问题。默认关闭。
 # en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. This issue is currently observed on new-api v0.11.4-alpha.3. Disabled by default.
 responses_tool_choice_compat = false
@@ -495,9 +531,15 @@ thinking_include_budget = true
 # zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
 # en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
 reasoning_effort_style = "openai"
-# zh: 思维链工具调用兼容：启用后在多轮工具调用中回传 reasoning_content，避免部分模型返回 400。
-# en: Thinking tool-call compatibility: pass back reasoning_content in multi-turn tool calls to avoid 400 errors from some models.
+# zh: 思维链工具调用兼容：多轮工具调用时在本地历史回填 reasoning_content（日志/回放），不向上游续传。
+# en: Thinking tool-call compatibility: locally store reasoning_content in history for multi-turn tool calls (logging/replay), not upstream replay.
 thinking_tool_call_compat = true
+# zh: 多轮工具调用时是否将 CoT 续传给上游（Chat: reasoning_content；Responses: output items）。默认 false。
+# en: Relay chain-of-thought to upstream on multi-turn tool calls (Chat: reasoning_content; Responses: output items). Default false.
+reasoning_content_replay = false
+# zh: 是否将所有 system 提示词合并注入第一条 user 消息（适配不支持 system role 的模型）。默认 false。
+# en: Merge all system prompts into the first user message (for models without system role). Default false.
+system_prompt_as_user = false
 # zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。默认关闭。
 # en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. Disabled by default.
 responses_tool_choice_compat = false
@@ -812,11 +854,11 @@ filtered_result_limit = 200
 # zh: 工具过滤搜索时扫描的最大消息条数。
 # en: Max messages to scan when tools perform filtered searches.
 search_scan_limit = 10000
-# zh: 总结 agent 单次拉取的最大消息条数。
-# en: Max messages the summary agent can fetch per call.
+# zh: /summary 按条数拉取时的最大消息条数（可配置，无固定 500 上限；受 max_records 约束）。
+# en: Max messages fetched per /summary count request (configurable; no fixed 500 cap; bounded by max_records).
 summary_fetch_limit = 1000
-# zh: 总结 agent 按时间范围查询时的最大拉取条数。
-# en: Max messages the summary agent fetches for time-range queries.
+# zh: /summary 按时间范围查询时的最大扫描条数（可配置）。
+# en: Max messages scanned for /summary time-range queries (configurable).
 summary_time_fetch_limit = 5000
 # zh: OneBot API 回退获取的最大消息条数。
 # en: Max messages to fetch via OneBot API fallback.

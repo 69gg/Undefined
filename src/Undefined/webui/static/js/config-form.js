@@ -885,6 +885,22 @@ function buildAotTemplate(path, arr) {
             if (
                 !Object.prototype.hasOwnProperty.call(
                     template,
+                    "reasoning_content_replay",
+                )
+            ) {
+                template.reasoning_content_replay = false;
+            }
+            if (
+                !Object.prototype.hasOwnProperty.call(
+                    template,
+                    "system_prompt_as_user",
+                )
+            ) {
+                template.system_prompt_as_user = false;
+            }
+            if (
+                !Object.prototype.hasOwnProperty.call(
+                    template,
                     "responses_tool_choice_compat",
                 )
             ) {
@@ -939,6 +955,8 @@ function buildAotTemplate(path, arr) {
         api_key: "",
         api_mode: "chat_completions",
         thinking_tool_call_compat: true,
+        reasoning_content_replay: false,
+        system_prompt_as_user: false,
         reasoning_effort_style: "openai",
         responses_tool_choice_compat: false,
         responses_force_stateless_replay: false,

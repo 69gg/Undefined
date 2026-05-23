@@ -156,6 +156,8 @@ background = "transparent"
     assert cfg.chat_model.reasoning_enabled is True
     assert cfg.chat_model.reasoning_effort == "high"
     assert cfg.chat_model.thinking_tool_call_compat is True
+    assert cfg.chat_model.reasoning_content_replay is False
+    assert cfg.chat_model.system_prompt_as_user is False
     assert cfg.chat_model.responses_tool_choice_compat is True
     assert cfg.chat_model.responses_force_stateless_replay is True
     assert cfg.chat_model.prompt_cache_enabled is False
@@ -170,6 +172,8 @@ background = "transparent"
     assert cfg.chat_model.pool.models[0].reasoning_enabled is False
     assert cfg.chat_model.pool.models[0].reasoning_effort == "low"
     assert cfg.chat_model.pool.models[0].thinking_tool_call_compat is True
+    assert cfg.chat_model.pool.models[0].reasoning_content_replay is False
+    assert cfg.chat_model.pool.models[0].system_prompt_as_user is False
     assert cfg.chat_model.pool.models[0].responses_tool_choice_compat is True
     assert cfg.chat_model.pool.models[0].responses_force_stateless_replay is True
     assert cfg.chat_model.pool.models[0].prompt_cache_enabled is False

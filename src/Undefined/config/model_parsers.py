@@ -35,8 +35,10 @@ from .resolvers import (
     _resolve_api_mode,
     _resolve_reasoning_effort,
     _resolve_reasoning_effort_style,
+    _resolve_reasoning_content_replay,
     _resolve_responses_force_stateless_replay,
     _resolve_responses_tool_choice_compat,
+    _resolve_system_prompt_as_user,
     _resolve_thinking_compat_flags,
 )
 
@@ -112,6 +114,14 @@ def _parse_model_pool(
                 thinking_tool_call_compat=_coerce_bool(
                     item.get("thinking_tool_call_compat"),
                     primary_config.thinking_tool_call_compat,
+                ),
+                reasoning_content_replay=_coerce_bool(
+                    item.get("reasoning_content_replay"),
+                    primary_config.reasoning_content_replay,
+                ),
+                system_prompt_as_user=_coerce_bool(
+                    item.get("system_prompt_as_user"),
+                    primary_config.system_prompt_as_user,
                 ),
                 responses_tool_choice_compat=_coerce_bool(
                     item.get("responses_tool_choice_compat"),
@@ -245,6 +255,12 @@ def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
     responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
         data, "chat", "CHAT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
     )
+    reasoning_content_replay = _resolve_reasoning_content_replay(
+        data, "chat", "CHAT_MODEL_REASONING_CONTENT_REPLAY"
+    )
+    system_prompt_as_user = _resolve_system_prompt_as_user(
+        data, "chat", "CHAT_MODEL_SYSTEM_PROMPT_AS_USER"
+    )
     prompt_cache_enabled = _coerce_bool(
         _get_value(
             data,
@@ -321,6 +337,8 @@ def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
             ),
         ),
         thinking_tool_call_compat=thinking_tool_call_compat,
+        reasoning_content_replay=reasoning_content_replay,
+        system_prompt_as_user=system_prompt_as_user,
         responses_tool_choice_compat=responses_tool_choice_compat,
         responses_force_stateless_replay=responses_force_stateless_replay,
         prompt_cache_enabled=prompt_cache_enabled,
@@ -357,6 +375,12 @@ def _parse_vision_model_config(data: dict[str, Any]) -> VisionModelConfig:
     )
     responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
         data, "vision", "VISION_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+    )
+    reasoning_content_replay = _resolve_reasoning_content_replay(
+        data, "vision", "VISION_MODEL_REASONING_CONTENT_REPLAY"
+    )
+    system_prompt_as_user = _resolve_system_prompt_as_user(
+        data, "vision", "VISION_MODEL_SYSTEM_PROMPT_AS_USER"
     )
     prompt_cache_enabled = _coerce_bool(
         _get_value(
@@ -438,6 +462,8 @@ def _parse_vision_model_config(data: dict[str, Any]) -> VisionModelConfig:
             ),
         ),
         thinking_tool_call_compat=thinking_tool_call_compat,
+        reasoning_content_replay=reasoning_content_replay,
+        system_prompt_as_user=system_prompt_as_user,
         responses_tool_choice_compat=responses_tool_choice_compat,
         responses_force_stateless_replay=responses_force_stateless_replay,
         prompt_cache_enabled=prompt_cache_enabled,
@@ -486,6 +512,12 @@ def _parse_security_model_config(
     )
     responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
         data, "security", "SECURITY_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+    )
+    reasoning_content_replay = _resolve_reasoning_content_replay(
+        data, "security", "SECURITY_MODEL_REASONING_CONTENT_REPLAY"
+    )
+    system_prompt_as_user = _resolve_system_prompt_as_user(
+        data, "security", "SECURITY_MODEL_SYSTEM_PROMPT_AS_USER"
     )
     prompt_cache_enabled = _coerce_bool(
         _get_value(
@@ -560,6 +592,8 @@ def _parse_security_model_config(
                 ),
             ),
             thinking_tool_call_compat=thinking_tool_call_compat,
+            reasoning_content_replay=reasoning_content_replay,
+            system_prompt_as_user=system_prompt_as_user,
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
             prompt_cache_enabled=prompt_cache_enabled,
@@ -582,6 +616,8 @@ def _parse_security_model_config(
         thinking_include_budget=True,
         reasoning_effort_style="openai",
         thinking_tool_call_compat=chat_model.thinking_tool_call_compat,
+        reasoning_content_replay=chat_model.reasoning_content_replay,
+        system_prompt_as_user=chat_model.system_prompt_as_user,
         responses_tool_choice_compat=chat_model.responses_tool_choice_compat,
         responses_force_stateless_replay=chat_model.responses_force_stateless_replay,
         prompt_cache_enabled=chat_model.prompt_cache_enabled,
@@ -630,6 +666,18 @@ def _parse_naga_model_config(
     )
     responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
         data, "naga", "NAGA_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+    )
+    reasoning_content_replay = _resolve_reasoning_content_replay(
+        data,
+        "naga",
+        "NAGA_MODEL_REASONING_CONTENT_REPLAY",
+        default=security_model.reasoning_content_replay,
+    )
+    system_prompt_as_user = _resolve_system_prompt_as_user(
+        data,
+        "naga",
+        "NAGA_MODEL_SYSTEM_PROMPT_AS_USER",
+        default=security_model.system_prompt_as_user,
     )
     prompt_cache_enabled = _coerce_bool(
         _get_value(
@@ -704,6 +752,8 @@ def _parse_naga_model_config(
                 ),
             ),
             thinking_tool_call_compat=thinking_tool_call_compat,
+            reasoning_content_replay=reasoning_content_replay,
+            system_prompt_as_user=system_prompt_as_user,
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
             prompt_cache_enabled=prompt_cache_enabled,
@@ -728,6 +778,8 @@ def _parse_naga_model_config(
         thinking_include_budget=security_model.thinking_include_budget,
         reasoning_effort_style=security_model.reasoning_effort_style,
         thinking_tool_call_compat=security_model.thinking_tool_call_compat,
+        reasoning_content_replay=security_model.reasoning_content_replay,
+        system_prompt_as_user=security_model.system_prompt_as_user,
         responses_tool_choice_compat=security_model.responses_tool_choice_compat,
         responses_force_stateless_replay=security_model.responses_force_stateless_replay,
         prompt_cache_enabled=security_model.prompt_cache_enabled,
@@ -762,6 +814,12 @@ def _parse_agent_model_config(data: dict[str, Any]) -> AgentModelConfig:
     )
     responses_force_stateless_replay = _resolve_responses_force_stateless_replay(
         data, "agent", "AGENT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY"
+    )
+    reasoning_content_replay = _resolve_reasoning_content_replay(
+        data, "agent", "AGENT_MODEL_REASONING_CONTENT_REPLAY"
+    )
+    system_prompt_as_user = _resolve_system_prompt_as_user(
+        data, "agent", "AGENT_MODEL_SYSTEM_PROMPT_AS_USER"
     )
     prompt_cache_enabled = _coerce_bool(
         _get_value(
@@ -841,6 +899,8 @@ def _parse_agent_model_config(data: dict[str, Any]) -> AgentModelConfig:
             ),
         ),
         thinking_tool_call_compat=thinking_tool_call_compat,
+        reasoning_content_replay=reasoning_content_replay,
+        system_prompt_as_user=system_prompt_as_user,
         responses_tool_choice_compat=responses_tool_choice_compat,
         responses_force_stateless_replay=responses_force_stateless_replay,
         prompt_cache_enabled=prompt_cache_enabled,
@@ -1194,6 +1254,12 @@ def _parse_historian_model_config(
             fallback.reasoning_effort_style,
         ),
         thinking_tool_call_compat=thinking_tool_call_compat,
+        reasoning_content_replay=_coerce_bool(
+            h.get("reasoning_content_replay"), fallback.reasoning_content_replay
+        ),
+        system_prompt_as_user=_coerce_bool(
+            h.get("system_prompt_as_user"), fallback.system_prompt_as_user
+        ),
         responses_tool_choice_compat=responses_tool_choice_compat,
         responses_force_stateless_replay=responses_force_stateless_replay,
         prompt_cache_enabled=prompt_cache_enabled,
@@ -1297,6 +1363,12 @@ def _parse_summary_model_config(
                 fallback.reasoning_effort_style,
             ),
             thinking_tool_call_compat=thinking_tool_call_compat,
+            reasoning_content_replay=_coerce_bool(
+                s.get("reasoning_content_replay"), fallback.reasoning_content_replay
+            ),
+            system_prompt_as_user=_coerce_bool(
+                s.get("system_prompt_as_user"), fallback.system_prompt_as_user
+            ),
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
             prompt_cache_enabled=prompt_cache_enabled,

@@ -89,6 +89,12 @@ def _build_internal_model_probe_payload(mcfg: Any) -> dict[str, Any]:
         payload["thinking_tool_call_compat"] = getattr(
             mcfg, "thinking_tool_call_compat", True
         )
+    if hasattr(mcfg, "reasoning_content_replay"):
+        payload["reasoning_content_replay"] = getattr(
+            mcfg, "reasoning_content_replay", False
+        )
+    if hasattr(mcfg, "system_prompt_as_user"):
+        payload["system_prompt_as_user"] = getattr(mcfg, "system_prompt_as_user", False)
     if hasattr(mcfg, "responses_tool_choice_compat"):
         payload["responses_tool_choice_compat"] = getattr(
             mcfg, "responses_tool_choice_compat", False

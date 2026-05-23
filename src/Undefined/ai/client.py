@@ -1148,6 +1148,9 @@ class AIClient:
         iteration = 0
         conversation_ended = False
         cot_compat = getattr(effective_chat_config, "thinking_tool_call_compat", False)
+        capture_reasoning = cot_compat or bool(
+            getattr(effective_chat_config, "reasoning_content_replay", False)
+        )
         cot_compat_logged = False
         cot_missing_logged = False
         transport_state: dict[str, Any] | None = None
@@ -1229,13 +1232,18 @@ class AIClient:
                         log_debug_json(logger, "[AI工具调用]", tool_calls)
 
                 log_thinking = self._get_runtime_config().log_thinking
-                if cot_compat and tools and log_thinking and not cot_compat_logged:
+                if (
+                    capture_reasoning
+                    and tools
+                    and log_thinking
+                    and not cot_compat_logged
+                ):
                     cot_compat_logged = True
                     logger.info(
                         "[思维链兼容] 多轮工具调用 reasoning_content 本地回填已启用"
                     )
                 if (
-                    cot_compat
+                    capture_reasoning
                     and log_thinking
                     and tools
                     and getattr(effective_chat_config, "thinking_enabled", False)
@@ -1326,7 +1334,7 @@ class AIClient:
                 output_items = message.get(RESPONSES_OUTPUT_ITEMS_KEY)
                 if isinstance(output_items, list):
                     assistant_message[RESPONSES_OUTPUT_ITEMS_KEY] = output_items
-                if cot_compat and reasoning_content is not None:
+                if capture_reasoning and reasoning_content is not None:
                     assistant_message["reasoning_content"] = reasoning_content
                 messages.append(assistant_message)
 

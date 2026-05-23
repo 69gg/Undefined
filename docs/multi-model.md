@@ -70,7 +70,7 @@ api_key = "sk-ant-xxx"
 | `round_robin` | 按顺序轮流使用池中模型 |
 | `random` | 每次随机选择池中模型 |
 
-> `pool.models` 中只有 `model_name` 必填，其余字段缺省时继承主模型配置。
+> `pool.models` 中只有 `model_name` 必填，其余字段缺省时继承主模型配置（含 `thinking_tool_call_compat`、`reasoning_content_replay`、`system_prompt_as_user` 等请求行为开关）。
 
 ## 私聊使用方法
 

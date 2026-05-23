@@ -26,7 +26,7 @@ def _parse_args(args: list[str]) -> tuple[int | None, str | None, str]:
     rest = " ".join(args[1:]).strip()
 
     if first.isdigit():
-        count = max(1, min(int(first), 500))
+        count = max(1, int(first))
         return count, None, rest
 
     if _TIME_RANGE_RE.match(first):

@@ -209,8 +209,10 @@ async def run_agent_with_tools(
             output_items = message.get(RESPONSES_OUTPUT_ITEMS_KEY)
             if isinstance(output_items, list):
                 assistant_message[RESPONSES_OUTPUT_ITEMS_KEY] = output_items
-            cot_compat = getattr(agent_config, "thinking_tool_call_compat", False)
-            if cot_compat and reasoning_content is not None:
+            capture_reasoning = bool(
+                getattr(agent_config, "thinking_tool_call_compat", False)
+            ) or bool(getattr(agent_config, "reasoning_content_replay", False))
+            if capture_reasoning and reasoning_content is not None:
                 assistant_message["reasoning_content"] = reasoning_content
             messages.append(assistant_message)
 

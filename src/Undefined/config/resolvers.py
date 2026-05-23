@@ -104,3 +104,37 @@ def _resolve_responses_force_stateless_replay(
         ),
         default,
     )
+
+
+def _resolve_reasoning_content_replay(
+    data: dict[str, Any],
+    model_name: str,
+    env_key: str,
+    *,
+    default: bool = False,
+) -> bool:
+    return _coerce_bool(
+        _get_value(
+            data,
+            ("models", model_name, "reasoning_content_replay"),
+            env_key,
+        ),
+        default,
+    )
+
+
+def _resolve_system_prompt_as_user(
+    data: dict[str, Any],
+    model_name: str,
+    env_key: str,
+    *,
+    default: bool = False,
+) -> bool:
+    return _coerce_bool(
+        _get_value(
+            data,
+            ("models", model_name, "system_prompt_as_user"),
+            env_key,
+        ),
+        default,
+    )

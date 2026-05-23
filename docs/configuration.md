@@ -98,7 +98,7 @@ model_name = "gpt-4o-mini"
 | `process_every_message` | `true` | 群聊是否处理每条消息 | 关闭后仅处理 @ 触发 |
 | `process_private_message` | `true` | 是否处理私聊回复 | 关闭后私聊只记录历史，不回复 |
 | `process_poke_message` | `true` | 是否响应拍一拍 | 关闭后忽略 poke |
-| `context_recent_messages_limit` | `20` | 注入到提示词的最近历史条数 | 自动钳制到 `0..200` |
+| `context_recent_messages_limit` | `20` | 注入到提示词的最近历史条数 | `<0` 视为 `0`（关闭注入）；无固定上限，受 `max_records` 与存储约束 |
 | `ai_request_max_retries` | `2` | 单次 LLM 请求失败重试次数 | `<0` 自动回退到 `0`；支持热更新 |
 | `missing_tool_call_retries` | `3` | 模型返回纯文本但未调用 `send_message` / `end` 等工具时的纠正重试次数 | `<0` 自动回退到 `0`；支持热更新 |
 
@@ -150,7 +150,9 @@ model_name = "gpt-4o-mini"
 | `thinking_enabled` | 是否启用旧式 `thinking` 参数 |
 | `thinking_budget_tokens` | thinking 预算 |
 | `thinking_include_budget` | 是否发送 `budget_tokens` |
-| `thinking_tool_call_compat` | Tool Calls 兼容模式：在本地历史中回填内部兼容字段 `reasoning_content`；默认 `true` |
+| `thinking_tool_call_compat` | Tool Calls 兼容模式：在**本地历史**回填 `reasoning_content` / `_responses_output_items`（日志与回放）；**不**向上游续传；默认 `true` |
+| `reasoning_content_replay` | 多轮工具调用时是否将 CoT **续传给上游**（Chat：`reasoning_content`；Responses：output items + `reasoning.encrypted_content`）；默认 `false` |
+| `system_prompt_as_user` | 是否将所有 `system`/`developer` 消息合并注入首条 `user`（仅 `chat_completions`）；默认 `false` |
 | `responses_tool_choice_compat` | `responses` 下的 `tool_choice` 兼容开关：仅建议在默认关闭时请求仍返回 500、怀疑上游不兼容对象型 `tool_choice` 时再尝试开启；开启后降级为字符串 `"required"`；默认 `false` |
 | `responses_force_stateless_replay` | `responses` 下的续轮强制降级开关：启用后多轮工具调用始终跳过 `previous_response_id`，改为完整消息重放；默认 `false` |
 | `prompt_cache_enabled` | 是否自动生成稳定的 `prompt_cache_key` 以提升相似请求缓存命中率；默认 `true` |
@@ -160,13 +162,16 @@ model_name = "gpt-4o-mini"
 - `api_mode="chat_completions"`：走 `client.chat.completions.create(...)`
   - `thinking_enabled=true` 时发送旧式 `thinking`
   - `reasoning_enabled=true` 时按 OpenAI 标准发送顶层 `reasoning_effort="..."`；仅 `reasoning_effort_style="anthropic"` 时改发 `output_config={ effort = ... }`
-  - 多轮工具调用时，`reasoning_content` 只作为本地兼容字段保存在历史里，**不会**作为 message 字段回传给上游；OpenAI Chat Completions 没有标准 reasoning item / encrypted reasoning 续轮协议
+  - 默认（`reasoning_content_replay=false`）：`reasoning_content` 仅保存在本地历史，出站 Chat 请求会剥离该字段
+  - `reasoning_content_replay=true` 时：多轮工具调用会在 Chat 出站消息中保留 `reasoning_content`；流式响应会累积 `delta.reasoning_content`
+  - MiMo 等 thinking 模型常见组合：`api_mode=chat_completions` + `reasoning_content_replay=true`
 - `api_mode="responses"`：走 `client.responses.create(...)`
   - 仅在 `reasoning_enabled=true` 时按 OpenAI 标准发送 `reasoning={ effort = ... }`
   - 若 `request_params` 里带 `response_format` / `verbosity`，会自动映射到 `text.format` / `text.verbosity`
   - 默认使用官方对象格式：`{"type":"function","name":"..."}`
   - `responses_tool_choice_compat=true` 时，会把指定函数的 `tool_choice` 降级为字符串 `"required"`，并只保留目标工具，用于兼容部分不完整代理
   - `responses_force_stateless_replay=true` 时，多轮工具调用会始终跳过 `previous_response_id`，直接走完整消息重放；续轮时会优先回放标准 `output` items（含 reasoning item），并自动补 `include=["reasoning.encrypted_content"]`
+  - `reasoning_content_replay=true` 时，**首次** Responses 请求也会请求 `reasoning.encrypted_content`，便于后续 stateless replay；与 `responses_force_stateless_replay` 可组合使用（网关弱时建议同时开启后者）
   - Responses 工具续轮遵循 OpenAI 的标准字段语义：工具结果使用 `function_call_output.call_id` 关联前一轮工具调用；`function_call.id` 若存在，必须是模型生成的 output item id（通常为 `fc_*`），不能把 `call_*` 误写进 `id`
   - 仅建议在默认关闭时请求仍返回 500，再尝试开启这些兼容开关
   - 当前已知 `new-api v0.11.4-alpha.3` 存在这类兼容问题
@@ -443,8 +448,10 @@ Prompt caching 补充：
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `max_records` | `10000` | 每个会话最多保留条数 |
+| `summary_fetch_limit` | `1000` | `/summary` 按条数拉取时的最大消息条数（可配置，无固定 500 硬编码；受 `max_records` 约束） |
+| `summary_time_fetch_limit` | `5000` | `/summary` 按时间范围查询时的最大扫描条数（可配置） |
 
-说明：该值主要在 `MessageHistoryManager` 初始化时使用，运行中修改建议重启后再观察效果。消息进入后会先同步写入内存历史，供命令、自动管线与 AI 后续流程立即读取；磁盘 JSON 持久化按会话在后台串行合并写入，连续消息会合并为最新快照，降低复读等快路径被大历史文件全量落盘阻塞的概率。
+说明：该值主要在 `MessageHistoryManager` 初始化时使用，运行中修改建议重启后再观察效果。消息进入后会先同步写入内存历史，供命令、自动管线与 AI 后续流程立即读取；磁盘 JSON 持久化按会话在后台串行合并写入，连续消息会合并为最新快照，降低复读等快路径被大历史文件全量落盘阻塞的概率。`/summary` 命令本身不再将条数钳制到 500，实际上限由 `summary_fetch_limit` 与 `max_records` 决定。
 
 ### 4.10.1 `[attachments]` 附件缓存
 

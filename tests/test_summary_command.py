@@ -122,10 +122,10 @@ def test_parse_args_custom_prompt_only() -> None:
     assert custom_prompt == "技术讨论"
 
 
-def test_parse_args_count_capped_at_500() -> None:
-    """['999'] → (500, None, '') (capped)."""
+def test_parse_args_count_not_capped_at_500() -> None:
+    """['999'] → (999, None, '') (no 500 cap)."""
     count, time_range, custom_prompt = _parse_args(["999"])
-    assert count == 500
+    assert count == 999
     assert time_range is None
     assert custom_prompt == ""
 

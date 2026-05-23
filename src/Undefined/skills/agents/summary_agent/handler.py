@@ -71,6 +71,8 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
             "你是一个消息总结助手。"
             "必须严格按照用户给定的 count/time_range/focus 约束调用 fetch_messages，"
             "不要擅自扩大范围。"
+            "只能基于 fetch_messages 返回内容总结，禁止编造未出现的参与者、链接、决策或待办；"
+            "信息不足时说明「消息中未提及」，不得推测补全。"
             "输出要简短、朴素、信息密度高。"
         ),
         context=run_context,
