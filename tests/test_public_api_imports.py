@@ -11,6 +11,7 @@ import pytest
 _ROOT_EXPORTS: tuple[str, ...] = (
     "Config",
     "get_config",
+    "set_config",
     "AIClient",
     "ToolRegistry",
     "AgentRegistry",
@@ -51,6 +52,13 @@ def test_root_package_exports(symbol: str) -> None:
 
     assert hasattr(Undefined, symbol), f"Undefined.{symbol} missing from root exports"
     getattr(Undefined, symbol)
+
+
+def test_root_package_all_matches_exports() -> None:
+    import Undefined
+
+    expected = {"__version__", *_ROOT_EXPORTS}
+    assert set(Undefined.__all__) == expected
 
 
 def test_root_package_lazy_import_does_not_load_cli_modules() -> None:

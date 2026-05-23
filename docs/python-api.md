@@ -18,11 +18,13 @@ pip install Undefined-bot
 
 Python 版本要求：`3.11` ~ `3.13`。
 
+包内附带 [`py.typed`](../src/Undefined/py.typed) 标记，mypy / Pyright / IDE 可直接消费类型信息。
+
 ---
 
 ## 推荐 import 路径
 
-### 根包（`stable`，Phase 3 lazy re-export）
+### 根包（`stable`，lazy re-export）
 
 以下符号承诺通过 `from Undefined import …` 长期稳定（完整清单见下文 [公共 API 符号表](#公共-api-符号表)）：
 
@@ -47,7 +49,7 @@ from Undefined import (
 )
 ```
 
-> **注意**：Phase 3 之前根包 lazy re-export 可能尚未全部启用；若 `from Undefined import X` 失败，请使用下方子包路径，二者语义等价。
+根包符号与 [公共 API 符号表](#公共-api-符号表) 一致；若需更细粒度导入，可使用下方子包路径，二者语义等价。
 
 ### 子包（`stable` / `subpackage`）
 

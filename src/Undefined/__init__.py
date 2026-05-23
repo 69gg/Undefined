@@ -11,6 +11,7 @@ __all__ = [
     "__version__",
     "Config",
     "get_config",
+    "set_config",
     "AIClient",
     "ToolRegistry",
     "AgentRegistry",
@@ -29,6 +30,7 @@ __all__ = [
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "Config": ("Undefined.config", "Config"),
     "get_config": ("Undefined.config", "get_config"),
+    "set_config": ("Undefined.config", "set_config"),
     "AIClient": ("Undefined.ai", "AIClient"),
     "ToolRegistry": ("Undefined.skills.tools", "ToolRegistry"),
     "AgentRegistry": ("Undefined.skills.agents", "AgentRegistry"),
