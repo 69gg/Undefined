@@ -68,3 +68,4 @@ def set_config(config: Config) -> None:
     """注入 Config 单例（库嵌入 opt-in；CLI / WebUI 启动链不得调用）。"""
     global _config
     _config = config
+    get_config_manager().replace(config)

@@ -11,7 +11,7 @@
   - `extend`（默认）：每条新消息重置定时器，并以 `max_window_seconds` 作为硬顶。
   - `fixed`：定时器从首条算起；窗口期结束统一发车。
 - **硬顶**：`max_window_seconds` 防止极端情况下窗口被无限延长（`0` = 不限制，仅靠 `window_seconds` + `max_messages_per_batch` 触发发车）；`max_messages_per_batch` 达到立即发车（`0` = 不限）。
-- **历史记录不变**：每条消息照旧由 `handlers.py` 写入 history；batcher 只决定何时调用 AI。
+- **历史记录不变**：每条消息照旧由 `handlers/message_flow` 写入 history；batcher 只决定何时调用 AI。
 - **拍一拍永远旁路**：拍一拍触发不进入 batcher，直接立即处理。
 - **群聊 @bot 规则**：
   - 当前桶**为空**且新消息 @bot → 进入 buffer，本批走 `add_group_mention_request`（提及优先级）。
@@ -84,9 +84,9 @@ allow_cancel_after_send = false
 
 ## 相关文件
 
-- 实现：[src/Undefined/services/message_batcher.py](src/Undefined/services/message_batcher.py)
+- 实现：[src/Undefined/services/message_batcher/](src/Undefined/services/message_batcher/)
 - 接入：[src/Undefined/services/ai_coordinator.py](src/Undefined/services/ai_coordinator.py) 中 `handle_auto_reply` / `handle_private_reply` / `_dispatch_grouped_request`
-- 创建/注入：[src/Undefined/handlers.py](src/Undefined/handlers.py)
+- 创建/注入：[src/Undefined/handlers/message_flow.py](src/Undefined/handlers/message_flow.py)
 - 关停 flush：[src/Undefined/main.py](src/Undefined/main.py)
 - 热更新：[src/Undefined/config/hot_reload.py](src/Undefined/config/hot_reload.py)
 - 提示词：[res/prompts/undefined.xml](res/prompts/undefined.xml)、[res/prompts/undefined_nagaagent.xml](res/prompts/undefined_nagaagent.xml)

@@ -105,7 +105,7 @@ class AICoordinator:
         self.security = security
         self.command_dispatcher = command_dispatcher
         self.model_pool = ModelPoolService(ai, config, sender)
-        # batcher 由外部（handlers.py）创建并通过 set_batcher 注入；未注入时所有消息按单条流程直送。
+        # batcher 由外部（handlers/message_flow）创建并通过 set_batcher 注入；未注入时所有消息按单条流程直送。
         self._batcher: MessageBatcher | None = None
 
     def set_batcher(self, batcher: MessageBatcher | None) -> None:

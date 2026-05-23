@@ -1,7 +1,6 @@
 """LLM 模型请求子包。
 
-对外稳定入口：``ModelRequester``、``build_request_body``、``ModelConfig``；
-旧路径 ``Undefined.ai.llm`` 通过包根与 ``llm.py`` shim 保持兼容。
+对外稳定入口：``ModelRequester``、``build_request_body``、``ModelConfig``。
 """
 
 from Undefined.ai.llm.requester import ModelRequester, build_request_body

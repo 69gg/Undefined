@@ -120,17 +120,19 @@ cfg = (
 ### 2.5 `set_config()`（opt-in）
 
 ```python
-from Undefined.config import Config, get_config, set_config
+from Undefined.config import Config, get_config, get_config_manager, set_config
 
 cfg = Config.from_mapping({...}, strict=False)
 set_config(cfg)
 assert get_config(strict=False) is cfg
+assert get_config_manager().load(strict=False) is cfg
 ```
 
 **硬约束**：
 
 - `set_config()` 仅供库嵌入 opt-in；**CLI / WebUI 启动链不得调用**。
 - 未调用 `set_config()` 时，`get_config()` 仍从 CWD 加载 `./config.toml`，与独立运行 Bot 行为一致。
+- 调用 `set_config()` 会同步更新 `get_config()` 与 `get_config_manager().load()` 的缓存，避免双轨读到不同实例。
 
 ---
 

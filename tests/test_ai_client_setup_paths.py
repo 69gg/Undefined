@@ -10,12 +10,26 @@ from Undefined.skills.pipelines.registry import PipelineRegistry
 from Undefined.skills.tools import ToolRegistry
 from Undefined.utils.paths import PACKAGE_ROOT
 
-# Snapshot counts from skills/*/config.json inventory (excluding MCP).
-EXPECTED_BASIC_TOOL_COUNT = 15
-EXPECTED_TOOLSET_COUNT = 53
-EXPECTED_AGENT_COUNT = 8
-EXPECTED_COMMAND_COUNT = 12
-EXPECTED_PIPELINE_COUNT = 3
+
+def _skill_dirs(base: Path) -> set[str]:
+    if not base.is_dir():
+        return set()
+    return {
+        item.name
+        for item in base.iterdir()
+        if item.is_dir() and (item / "config.json").exists()
+    }
+
+
+def _toolset_tool_names(base: Path) -> set[str]:
+    if not base.is_dir():
+        return set()
+    names: set[str] = set()
+    for config_path in base.rglob("config.json"):
+        rel = config_path.parent.relative_to(base)
+        if len(rel.parts) == 2:
+            names.add(".".join(rel.parts))
+    return names
 
 
 def test_package_root_matches_undefined_package_directory() -> None:
@@ -38,23 +52,22 @@ def test_setup_wrong_path_does_not_exist() -> None:
 
 
 def test_tool_registry_loads_all_skill_directories() -> None:
-    registry = ToolRegistry(PACKAGE_ROOT / "skills" / "tools")
+    tools_dir = PACKAGE_ROOT / "skills" / "tools"
+    toolsets_dir = PACKAGE_ROOT / "skills" / "toolsets"
+    registry = ToolRegistry(tools_dir)
     basic = [name for name in registry._items if "." not in name]
     toolsets = [
         name for name in registry._items if "." in name and not name.startswith("mcp.")
     ]
 
-    assert len(basic) == EXPECTED_BASIC_TOOL_COUNT
-    assert len(toolsets) == EXPECTED_TOOLSET_COUNT
-    assert len(registry._items) == EXPECTED_BASIC_TOOL_COUNT + EXPECTED_TOOLSET_COUNT
+    basic_dirs = _skill_dirs(tools_dir)
+    toolset_names = _toolset_tool_names(toolsets_dir)
 
-    tool_dirs = [
-        item.name
-        for item in (PACKAGE_ROOT / "skills" / "tools").iterdir()
-        if item.is_dir() and (item / "config.json").exists()
-    ]
-    assert len(tool_dirs) == EXPECTED_BASIC_TOOL_COUNT
-    assert set(basic) == set(tool_dirs)
+    assert len(basic) == len(basic_dirs)
+    assert len(toolsets) == len(toolset_names)
+    assert len(registry._items) == len(basic) + len(toolsets)
+    assert set(basic) == basic_dirs
+    assert set(toolsets) == toolset_names
 
 
 def test_all_registered_tools_import_handlers() -> None:
@@ -73,14 +86,23 @@ def test_all_registered_tools_import_handlers() -> None:
 
 
 def test_agent_registry_loads_expected_agents() -> None:
-    registry = AgentRegistry(PACKAGE_ROOT / "skills" / "agents")
-    assert len(registry._items) == EXPECTED_AGENT_COUNT
+    agents_dir = PACKAGE_ROOT / "skills" / "agents"
+    registry = AgentRegistry(agents_dir)
+    assert len(registry._items) == len(_skill_dirs(agents_dir))
+    assert set(registry._items) == _skill_dirs(agents_dir)
 
 
 def test_command_registry_loads_expected_commands() -> None:
-    registry = CommandRegistry(PACKAGE_ROOT / "skills" / "commands")
+    commands_dir = PACKAGE_ROOT / "skills" / "commands"
+    registry = CommandRegistry(commands_dir)
     registry.load_commands()
-    assert len(registry._commands) == EXPECTED_COMMAND_COUNT
+    command_dirs = {
+        item.name
+        for item in commands_dir.iterdir()
+        if item.is_dir() and (item / "handler.py").exists()
+    }
+    assert len(registry._commands) == len(command_dirs)
+    assert set(registry._commands) == command_dirs
 
 
 def test_pipeline_registry_loads_expected_pipelines() -> None:
@@ -90,5 +112,4 @@ def test_pipeline_registry_loads_expected_pipelines() -> None:
         return registry
 
     registry = asyncio.run(_load())
-    assert len(registry._items) == EXPECTED_PIPELINE_COUNT
     assert set(registry._items) == {"arxiv", "bilibili", "github"}

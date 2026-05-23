@@ -1,7 +1,6 @@
 """多模态分析子包。
 
-对外稳定入口：``MultimodalAnalyzer``、``detect_media_type``、``get_media_mime_type``；
-旧路径 ``Undefined.ai.multimodal`` 通过包根与 ``multimodal.py`` shim 保持兼容。
+对外稳定入口：``MultimodalAnalyzer``、``detect_media_type``、``get_media_mime_type``。
 """
 
 from Undefined.ai.multimodal import constants as _constants

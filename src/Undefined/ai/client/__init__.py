@@ -1,6 +1,6 @@
 """AI 客户端子包。
 
-对外稳定入口：``AIClient``；旧路径 ``Undefined.ai.client`` 通过 shim 保持兼容。
+对外稳定入口：``AIClient``；导入路径 ``Undefined.ai.client`` 指向本子包。
 """
 
 from Undefined.ai.client.ask_loop import ClientAskLoopMixin

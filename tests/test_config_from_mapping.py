@@ -44,9 +44,11 @@ def test_set_config_injects_singleton(monkeypatch: pytest.MonkeyPatch) -> None:
     import Undefined.config as config_pkg
 
     monkeypatch.setattr(config_pkg, "_config", None)
+    monkeypatch.setattr(config_pkg, "_config_manager", None)
     cfg = Config.from_mapping(_MINIMAL_MAPPING, strict=False)
     set_config(cfg)
     assert config_pkg.get_config(strict=False) is cfg
+    assert config_pkg.get_config_manager().load(strict=False) is cfg
 
 
 def test_from_mapping_matches_load(tmp_path: Path) -> None:

@@ -67,9 +67,9 @@ from Undefined import (
 | subpackage | `Undefined.skills.anthropic_skills` | `AnthropicSkillRegistry` |
 | subpackage | `Undefined.mcp` | `MCPToolRegistry`, `MCPToolSetRegistry` |
 
-### 向后兼容 shim 路径
+### 向后兼容 import 路径
 
-拆分后旧路径仍可用（测试与下游代码可继续引用）：
+拆分后下列 import 路径仍可用（指向子包公开 API，而非并列的 `.py` 单文件）：
 
 ```python
 from Undefined.config.loader import Config          # → Undefined.config.Config
@@ -82,7 +82,7 @@ from Undefined.memes.service import MemeService
 from Undefined.api.app import RuntimeAPIServer
 ```
 
-拆分后的各模块旁保留 compatibility shim 文件，旧 import 路径仍可用（见各 shim 文件顶部的 re-export）。
+> **注意**：请勿在同名包目录旁保留完整 `.py` 副本（如 `handlers.py` + `handlers/`）。Python 只会加载包目录，并列单文件会成为不可达死代码；仓库通过 `tests/test_package_layout.py` 回归检测。
 
 ### 内部模块（不承诺稳定）
 
@@ -160,21 +160,23 @@ cfg = (
 
 ### `set_config`（opt-in 单例注入）
 
-将已构建的 `Config` 注入全局单例，供 `get_config()` 读取：
+将已构建的 `Config` 注入全局单例，供 `get_config()` 与 `get_config_manager().load()` 读取：
 
 ```python
-from Undefined.config import Config, get_config, set_config
+from Undefined.config import Config, get_config, get_config_manager, set_config
 
 cfg = Config.from_mapping({...}, strict=False)
 set_config(cfg)
 
 assert get_config(strict=False) is cfg
+assert get_config_manager().load(strict=False) is cfg
 ```
 
 **约束**：
 
 - `set_config()` 仅供库嵌入 opt-in 使用；**CLI / WebUI 启动链不得调用**。
 - 未调用 `set_config()` 时，`get_config()` 仍走 CWD 下 `./config.toml`（与 CLI 行为一致）。
+- 注入后会同步 `ConfigManager` 缓存，库嵌入代码不应再混用独立的 `Config.load()` 实例。
 
 ### 纯环境变量构建
 

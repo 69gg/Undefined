@@ -147,3 +147,4 @@ model_name = "from-file"
     )
     set_config(injected)
     assert config_module.get_config(strict=False) is injected
+    assert config_module.get_config_manager().load(strict=False) is injected

@@ -11,18 +11,18 @@ Undefined 欢迎开发者参与共建和进行二次开发！
 ```text
 src/Undefined/
 ├── changelog.py   # CHANGELOG.md 解析与版本查询公共层
-├── ai/            # AI 运行时核心（子包 + 根级 shim：client.py / llm.py / prompts.py / multimodal.py）
+├── ai/            # AI 运行时核心
 │   ├── client/    # AIClient 组合：setup / queue / ask_loop
 │   ├── llm/       # ModelRequester、streaming、thinking、sanitize
 │   ├── prompts/   # PromptBuilder、system_context、cognitive 片段
 │   └── multimodal/# 多模态检测、解析与分析
-├── attachments/   # 附件注册、渲染、作用域隔离（attachments.py shim）
+├── attachments/   # 附件注册、渲染、作用域隔离
 ├── arxiv/         # arXiv 论文解析、元信息获取、PDF 下载与发送
 ├── bilibili/      # B站视频流解析、分段下载与异步发送
 ├── cognitive/     # 认知记忆系统（service/ 门面 + historian/ 史官后台）
 ├── config/        # 配置系统（parsers/ 域解析 + load_sections/ 分段加载 + loader shim）
-├── handlers/      # OneBot 消息分流（message_flow / poke / repeat / auto_extract；handlers.py shim）
-├── onebot/        # OneBot WebSocket 客户端（onebot.py shim）
+├── handlers/      # OneBot 消息分流（message_flow / poke / repeat / auto_extract）
+├── onebot/        # OneBot WebSocket 客户端
 ├── skills/        # 技能插件核心目录 (存放所有的工具与智能体)
 │   ├── tools/           # 基础原子的工具 (独立的功能单元，如读写文件、网络请求等)
 │   ├── toolsets/        # 聚合工具集 (分组后的工具组)
@@ -35,19 +35,16 @@ src/Undefined/
 │   ├── routes/    # 路由子模块 (chat, tools, naga/, system, memes, memory, cognitive, health)
 │   ├── app.py     # aiohttp 服务主入口 (薄包装委派到 routes/)
 │   └── _openapi.py # OpenAPI 文档生成
-├── memes/         # 表情包库 (_service 门面 + ingest/ + search/ + store + vector_store)
+├── memes/         # 表情包库 (service + ingest/ + search/ + store + vector_store)
 ├── services/      # 核心运行服务
-│   ├── coordinator/     # AICoordinator mixins（ai_coordinator.py shim）
+│   ├── coordinator/     # AICoordinator mixins（ai_coordinator.py 门面）
 │   ├── commands/          # CommandDispatcher mixins（stats / bugfix）
-│   ├── message_batcher/   # 同 sender 短时合并（message_batcher.py shim）
+│   ├── message_batcher/   # 同 sender 短时合并
 │   ├── command.py         # 命令分发门面 + shim 组合
 │   ├── queue_manager.py   # 车站-列车队列
 │   └── security.py        # 注入检测与速率限制
 ├── utils/         # 通用支持工具组 (__init__.py 聚合 io/paths/resources；io.py 异步原子读写, history.py, coerce.py 类型强转)
-├── handlers.py    # compatibility shim → handlers/
-├── onebot.py      # compatibility shim → onebot/
-├── attachments.py # compatibility shim → attachments/
-└── ai_coordinator.py  # compatibility shim → services/coordinator/
+└── py.typed       # PEP 561 类型标记（wheel 通过 pyproject force-include 打包）
 ```
 
 ## 开发指南
