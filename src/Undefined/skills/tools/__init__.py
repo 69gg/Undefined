@@ -114,13 +114,9 @@ class ToolRegistry(BaseRegistry):
         """
         tool_names = list(self._items.keys())
 
-        # 分类工具
         basic_tools, toolset_tools, mcp_tools = self._categorize_tools(tool_names)
-
-        # 按类别分组工具集工具
         toolset_by_category = self._group_toolsets_by_category(toolset_tools)
 
-        # 输出统计信息
         logger.info("=" * 60)
         if include_mcp:
             logger.info("工具加载完成统计 (包含 MCP)")

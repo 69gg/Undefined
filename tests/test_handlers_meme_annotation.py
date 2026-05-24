@@ -1,4 +1,4 @@
-"""测试 handlers.py 中的表情包自动匹配功能"""
+"""测试 handlers/message_flow 中的表情包自动匹配功能"""
 
 from __future__ import annotations
 

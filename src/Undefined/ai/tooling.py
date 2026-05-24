@@ -16,6 +16,13 @@ from Undefined.utils.logging import log_debug_json, redact_string
 
 logger = logging.getLogger(__name__)
 
+# end 与同轮其它 tool 一并调用时，回填给 end 的 tool 响应（end 本身不执行）
+END_CO_CALL_REJECT_CONTENT = (
+    "错误：end 不得与其他工具同轮调用，本轮未执行 end，对话未结束。"
+    "其它工具已正常执行并返回其结果。"
+    "请根据其它 tool 结果在下一轮单独调用 end；若 send_message 已成功，勿重复发送相同内容。"
+)
+
 
 class ToolManager:
     """工具与智能体（Agent）执行管理器

@@ -65,8 +65,9 @@ def _load_top_level_agent_names(root: Path) -> set[str]:
 
 
 def _get_local_agent_tool_names() -> set[str]:
-    skills_root = Path(__file__).resolve().parents[2] / "skills"
-    return _load_top_level_agent_names(skills_root / "agents")
+    from Undefined.utils.paths import PACKAGE_ROOT
+
+    return _load_top_level_agent_names(PACKAGE_ROOT / "skills" / "agents")
 
 
 def _tool_invoke_proxy_timeout_seconds(tool_name: str) -> float | None:

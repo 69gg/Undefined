@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -49,6 +50,12 @@ class MemeSourceRecord:
     attachment_uid: str
     source_url: str
     seen_at: str
+
+
+@dataclass
+class IngestDigestLockEntry:
+    lock: asyncio.Lock
+    users: int = 0
 
 
 @dataclass(frozen=True)

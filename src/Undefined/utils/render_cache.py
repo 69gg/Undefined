@@ -362,6 +362,7 @@ async def get_render_cache() -> HtmlRenderCache:
     单例的 enabled / 容量由 ``[render.cache]`` 决定；
     禁用时仍返回单例对象，但所有 get/put 立即短路。
     """
+    # global
     global _cache
     if _cache is not None:
         await _cache.initialize()
@@ -387,6 +388,7 @@ async def get_render_cache() -> HtmlRenderCache:
 
 async def close_render_cache() -> None:
     """关停时调用：刷盘并丢弃单例。"""
+    # global
     global _cache
     cache = _cache
     if cache is None:
@@ -399,5 +401,6 @@ async def close_render_cache() -> None:
 
 def reset_render_cache() -> None:
     """仅供测试使用：丢弃单例（不刷盘），下次调用重新加载。"""
+    # global
     global _cache
     _cache = None

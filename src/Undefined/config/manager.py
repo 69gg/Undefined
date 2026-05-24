@@ -30,6 +30,10 @@ class ConfigManager:
             self._config = Config.load(config_path=self.config_path, strict=strict)
         return self._config
 
+    def replace(self, config: Config) -> None:
+        """替换缓存的配置实例（库嵌入 ``set_config`` 注入时使用）。"""
+        self._config = config
+
     def reload(self, strict: bool = False) -> dict[str, tuple[Any, Any]]:
         if self._config is None:
             self._config = Config.load(config_path=self.config_path, strict=strict)
