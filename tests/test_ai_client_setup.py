@@ -6,8 +6,6 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
-import pytest
-
 from Undefined.ai.client.setup import (
     MISSING_TOOL_CALL_RETRY_HINT,
     ClientSetupMixin,
@@ -26,7 +24,7 @@ from Undefined.ai.client.setup import (
 
 def _make_runtime_config(**kwargs: Any) -> Any:
     """Build a minimal SimpleNamespace that satisfies the runtime_config interface."""
-    defaults = {
+    defaults: dict[str, Any] = {
         "attachment_remote_download_max_size_mb": 50,
         "attachment_cache_max_total_size_mb": 200,
         "attachment_cache_max_age_days": 7,
@@ -156,11 +154,15 @@ class TestBuildInvalidToolCallResponseEdgeCases:
         assert response["name"] == "my_tool"
 
     def test_none_id_becomes_empty_string(self) -> None:
-        response = _build_invalid_tool_call_response({"id": None, "function": {"name": "foo"}})
+        response = _build_invalid_tool_call_response(
+            {"id": None, "function": {"name": "foo"}}
+        )
         assert response["tool_call_id"] == ""
 
     def test_function_key_not_dict_yields_empty_name(self) -> None:
-        response = _build_invalid_tool_call_response({"id": "c1", "function": "not_a_dict"})
+        response = _build_invalid_tool_call_response(
+            {"id": "c1", "function": "not_a_dict"}
+        )
         assert response["name"] == ""
 
     def test_content_is_invalid_tool_call_constant(self) -> None:
@@ -168,7 +170,7 @@ class TestBuildInvalidToolCallResponseEdgeCases:
         assert response["content"] == _INVALID_TOOL_CALL_CONTENT
 
     def test_list_input_treated_as_non_dict(self) -> None:
-        response = _build_invalid_tool_call_response([1, 2, 3])  # type: ignore[arg-type]
+        response = _build_invalid_tool_call_response(cast(Any, [1, 2, 3]))
         assert response["role"] == "tool"
         assert response["tool_call_id"] == ""
 
@@ -249,7 +251,9 @@ class TestExtractMessageExcerpt:
         assert result == "Hello world"
 
     def test_content_tag_extracted(self) -> None:
-        result = self.client._extract_message_excerpt("<content>important text</content>")
+        result = self.client._extract_message_excerpt(
+            "<content>important text</content>"
+        )
         assert result == "important text"
 
     def test_long_text_truncated_to_120(self) -> None:
@@ -263,7 +267,9 @@ class TestExtractMessageExcerpt:
         assert result == "(无文本内容)"
 
     def test_html_entities_unescaped_in_content_tag(self) -> None:
-        result = self.client._extract_message_excerpt("<content>&lt;b&gt;text&lt;/b&gt;</content>")
+        result = self.client._extract_message_excerpt(
+            "<content>&lt;b&gt;text&lt;/b&gt;</content>"
+        )
         assert "<b>" in result
 
     def test_multiple_spaces_collapsed(self) -> None:

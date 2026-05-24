@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import patch
-
-import pytest
+from typing import Any, cast
 
 from Undefined.ai.llm.sanitize import (
     CHAT_COMPLETION_INTERNAL_MESSAGE_KEYS,
@@ -74,9 +71,8 @@ class TestEncodeToolNameForApi:
 
     def test_illegal_chars_replaced(self) -> None:
         result = _encode_tool_name_for_api("my tool@name")
-        assert _encode_tool_name_for_api.__module__
-        # result must match allowed pattern
         import re
+
         assert re.match(r"^[a-zA-Z0-9_-]+$", result)
 
     def test_long_name_truncated_to_64(self) -> None:
@@ -141,7 +137,10 @@ class TestNormalizeToolDescription:
 
 class TestSanitizeOpenaiTools:
     def _make_tool(self, name: str, description: Any) -> dict[str, Any]:
-        return {"type": "function", "function": {"name": name, "description": description}}
+        return {
+            "type": "function",
+            "function": {"name": name, "description": description},
+        }
 
     def test_empty_tools_returned_unchanged(self) -> None:
         result, changed, changes = sanitize_openai_tools([])
@@ -178,9 +177,9 @@ class TestSanitizeOpenaiTools:
         assert "whitespace" in changes[0]["reasons"]
 
     def test_non_dict_tools_passed_through(self) -> None:
-        tools = ["not_a_dict"]  # type: ignore[list-item]
+        tools = cast(list[dict[str, Any]], ["not_a_dict"])
         result, changed, _ = sanitize_openai_tools(tools)
-        assert result == ["not_a_dict"]
+        assert result == cast(list[dict[str, Any]], ["not_a_dict"])
         assert changed == 0
 
     def test_tool_without_function_key_passed_through(self) -> None:
@@ -200,10 +199,11 @@ class TestSanitizeOpenaiTools:
         assert "\n" not in result[1]["function"]["description"]
 
     def test_non_string_description_marked_non_string(self) -> None:
-        tools = [self._make_tool("t", 42)]
+        tools = [self._make_tool("t", None)]
         result, changed, changes = sanitize_openai_tools(tools)
         assert changed == 1
         assert "non_string" in changes[0]["reasons"]
+        assert result[0]["function"]["description"] == "Tool function t"
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +249,10 @@ class TestSanitizeOpenaiToolNamesInRequest:
                 {
                     "role": "assistant",
                     "tool_calls": [
-                        {"id": "c1", "function": {"name": "group.send", "arguments": "{}"}}
+                        {
+                            "id": "c1",
+                            "function": {"name": "group.send", "arguments": "{}"},
+                        }
                     ],
                 }
             ],
@@ -262,9 +265,7 @@ class TestSanitizeOpenaiToolNamesInRequest:
     def test_message_name_field_rewritten(self) -> None:
         body: dict[str, Any] = {
             "tools": [{"type": "function", "function": {"name": "group.send"}}],
-            "messages": [
-                {"role": "tool", "name": "group.send", "content": "result"}
-            ],
+            "messages": [{"role": "tool", "name": "group.send", "content": "result"}],
         }
         sanitize_openai_tool_names_in_request(body)
         # The message name should be rewritten to the api name
@@ -296,17 +297,18 @@ class TestSanitizeOpenaiMessagesToolArguments:
         assert changed == 0
 
     def test_valid_json_arguments_unchanged(self) -> None:
+        arguments = '{"key":"val"}'
         messages = [
             {
                 "role": "assistant",
                 "tool_calls": [
-                    {"id": "c1", "function": {"name": "tool", "arguments": '{"key": "val"}'}}
+                    {"id": "c1", "function": {"name": "tool", "arguments": arguments}}
                 ],
             }
         ]
         result, changed = sanitize_openai_messages_tool_arguments(messages)
         assert changed == 0
-        assert result[0]["tool_calls"][0]["function"]["arguments"] == '{"key": "val"}'
+        assert result[0]["tool_calls"][0]["function"]["arguments"] == arguments
 
     def test_none_arguments_normalized(self) -> None:
         messages = [
@@ -322,12 +324,13 @@ class TestSanitizeOpenaiMessagesToolArguments:
         # Result should be a valid JSON string (e.g. "{}")
         args = result[0]["tool_calls"][0]["function"]["arguments"]
         import json
+
         json.loads(args)  # should not raise
 
     def test_non_dict_message_passed_through(self) -> None:
-        messages = ["not_a_dict"]  # type: ignore[list-item]
+        messages = cast(list[dict[str, Any]], ["not_a_dict"])
         result, changed = sanitize_openai_messages_tool_arguments(messages)
-        assert result == ["not_a_dict"]
+        assert result == cast(list[dict[str, Any]], ["not_a_dict"])
         assert changed == 0
 
 
@@ -344,14 +347,18 @@ class TestSanitizeChatCompletionMessages:
         assert stripped == {}
 
     def test_reasoning_content_stripped_by_default(self) -> None:
-        messages = [{"role": "assistant", "content": "hi", "reasoning_content": "thoughts"}]
+        messages = [
+            {"role": "assistant", "content": "hi", "reasoning_content": "thoughts"}
+        ]
         result, changed, stripped = sanitize_chat_completion_messages(messages)
         assert changed == 1
         assert "reasoning_content" not in result[0]
         assert stripped.get("reasoning_content", 0) == 1
 
     def test_reasoning_content_preserved_when_flag_set(self) -> None:
-        messages = [{"role": "assistant", "content": "hi", "reasoning_content": "thoughts"}]
+        messages = [
+            {"role": "assistant", "content": "hi", "reasoning_content": "thoughts"}
+        ]
         result, changed, stripped = sanitize_chat_completion_messages(
             messages, preserve_reasoning_content=True
         )
@@ -365,7 +372,9 @@ class TestSanitizeChatCompletionMessages:
         assert "phase" not in result[0]
 
     def test_responses_output_items_stripped(self) -> None:
-        messages = [{"role": "assistant", "content": "ok", "_responses_output_items": []}]
+        messages = [
+            {"role": "assistant", "content": "ok", "_responses_output_items": []}
+        ]
         result, changed, stripped = sanitize_chat_completion_messages(messages)
         assert changed == 1
         assert "_responses_output_items" not in result[0]
@@ -387,9 +396,9 @@ class TestSanitizeChatCompletionMessages:
         assert result == messages
 
     def test_non_dict_message_passed_through(self) -> None:
-        messages = ["not_a_dict"]  # type: ignore[list-item]
+        messages = cast(list[dict[str, Any]], ["not_a_dict"])
         result, changed, _ = sanitize_chat_completion_messages(messages)
-        assert result == ["not_a_dict"]
+        assert result == cast(list[dict[str, Any]], ["not_a_dict"])
         assert changed == 0
 
     def test_all_internal_keys_listed_in_constant(self) -> None:
@@ -463,10 +472,13 @@ class TestRelocateSystemToFirstUser:
         assert content.index("SYS") < content.index("USER")
 
     def test_non_dict_messages_passed_through(self) -> None:
-        messages = ["not_dict", {"role": "user", "content": "hi"}]  # type: ignore[list-item]
+        messages = cast(
+            list[dict[str, Any]],
+            ["not_dict", {"role": "user", "content": "hi"}],
+        )
         result = relocate_system_to_first_user(messages)
         # non-dict item treated as "remaining" (no role to strip)
-        assert "not_dict" in result
+        assert "not_dict" in cast(list[Any], result)
 
 
 # ---------------------------------------------------------------------------

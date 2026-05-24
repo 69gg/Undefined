@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-import pytest
 from openai import APIStatusError
 
 from Undefined.ai.llm.streaming import (
@@ -76,7 +75,7 @@ class TestSplitResponsesParams:
         assert extra == {}
 
     def test_tools_is_known_in_responses(self) -> None:
-        body = {"tools": []}
+        body: dict[str, Any] = {"tools": []}
         known, _ = split_responses_params(body)
         assert "tools" in known
 
@@ -88,7 +87,11 @@ class TestSplitResponsesParams:
 
 class TestWithoutStreamRequestFields:
     def test_removes_stream_fields(self) -> None:
-        body = {"model": "gpt-4", "stream": True, "stream_options": {"include_usage": True}}
+        body = {
+            "model": "gpt-4",
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
         result = without_stream_request_fields(body)
         assert "stream" not in result
         assert "stream_options" not in result
@@ -145,10 +148,14 @@ class TestShouldFallbackFromStream:
     def _make_status_error(self, status_code: int, message: str) -> APIStatusError:
         request = httpx.Request("POST", "https://api.example.com/v1/chat/completions")
         response = httpx.Response(status_code, request=request)
-        return APIStatusError(message, response=response, body={"error": {"message": message}})
+        return APIStatusError(
+            message, response=response, body={"error": {"message": message}}
+        )
 
     def test_not_implemented_error_falls_back(self) -> None:
-        assert should_fallback_from_stream(NotImplementedError("streaming not supported"))
+        assert should_fallback_from_stream(
+            NotImplementedError("streaming not supported")
+        )
 
     def test_generic_exception_does_not_fall_back(self) -> None:
         assert not should_fallback_from_stream(ValueError("something else"))
@@ -258,9 +265,15 @@ class TestExtractStreamResponseItem:
 
 class TestExtractStreamUsage:
     def test_chat_completions_usage(self) -> None:
-        event = {"usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
+        event = {
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        }
         result = extract_stream_usage(event, api_mode="chat_completions")
-        assert result == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert result == {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+        }
 
     def test_responses_usage(self) -> None:
         event = {"usage": {"input_tokens": 8, "output_tokens": 4, "total_tokens": 12}}
@@ -282,7 +295,7 @@ class TestExtractStreamUsage:
         assert result == {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}
 
     def test_missing_usage_fields_default_to_zero(self) -> None:
-        event = {"usage": {}}
+        event: dict[str, Any] = {"usage": {}}
         result = extract_stream_usage(event, api_mode="chat_completions")
         assert result is not None
         assert result["prompt_tokens"] == 0
@@ -311,7 +324,11 @@ class TestEnsureToolCallSlot:
         assert slot is tool_calls[2]
 
     def test_existing_slot_returned(self) -> None:
-        existing = {"id": "call_1", "type": "function", "function": {"name": "foo", "arguments": ""}}
+        existing = {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "foo", "arguments": ""},
+        }
         tool_calls = [existing]
         slot = ensure_tool_call_slot(tool_calls, 0)
         assert slot is existing
@@ -326,15 +343,25 @@ class TestEnsureToolCallSlot:
 class TestMergeToolCallDelta:
     def test_creates_slot_and_sets_id(self) -> None:
         tool_calls: list[dict[str, Any]] = []
-        delta = {"index": 0, "id": "call_abc", "type": "function", "function": {"name": "my_tool", "arguments": ""}}
+        delta = {
+            "index": 0,
+            "id": "call_abc",
+            "type": "function",
+            "function": {"name": "my_tool", "arguments": ""},
+        }
         merge_tool_call_delta(tool_calls, delta)
         assert tool_calls[0]["id"] == "call_abc"
         assert tool_calls[0]["function"]["name"] == "my_tool"
 
     def test_appends_arguments_delta(self) -> None:
         tool_calls: list[dict[str, Any]] = []
-        merge_tool_call_delta(tool_calls, {"index": 0, "id": "c1", "function": {"name": "foo", "arguments": '{"k"'}})
-        merge_tool_call_delta(tool_calls, {"index": 0, "function": {"arguments": ': "v"}'}})
+        merge_tool_call_delta(
+            tool_calls,
+            {"index": 0, "id": "c1", "function": {"name": "foo", "arguments": '{"k"'}},
+        )
+        merge_tool_call_delta(
+            tool_calls, {"index": 0, "function": {"arguments": ': "v"}'}}
+        )
         assert tool_calls[0]["function"]["arguments"] == '{"k": "v"}'
 
     def test_non_dict_function_delta_ignored(self) -> None:
@@ -363,7 +390,9 @@ class TestMergeToolCallDelta:
 class TestAggregateChatCompletionsStream:
     def _text_chunk(self, content: str, role: str = "assistant") -> dict[str, Any]:
         return {
-            "choices": [{"delta": {"role": role, "content": content}, "finish_reason": None}]
+            "choices": [
+                {"delta": {"role": role, "content": content}, "finish_reason": None}
+            ]
         }
 
     def _final_chunk(self, finish_reason: str = "stop") -> dict[str, Any]:
@@ -398,13 +427,21 @@ class TestAggregateChatCompletionsStream:
         assert result["usage"]["total_tokens"] == 8
 
     def test_tool_calls_aggregated(self) -> None:
-        chunks = [
+        chunks: list[dict[str, Any]] = [
             {
                 "choices": [
                     {
                         "delta": {
                             "tool_calls": [
-                                {"index": 0, "id": "call_1", "type": "function", "function": {"name": "send_message", "arguments": '{"msg"'}}
+                                {
+                                    "index": 0,
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "send_message",
+                                        "arguments": '{"msg"',
+                                    },
+                                }
                             ]
                         },
                         "finish_reason": None,
@@ -430,10 +467,13 @@ class TestAggregateChatCompletionsStream:
         assert msg["tool_calls"][0]["function"]["arguments"] == '{"msg": "hello"}'
 
     def test_reasoning_content_collected_when_replay_enabled(self) -> None:
-        chunks = [
+        chunks: list[dict[str, Any]] = [
             {
                 "choices": [
-                    {"delta": {"reasoning_content": "thinking step 1"}, "finish_reason": None}
+                    {
+                        "delta": {"reasoning_content": "thinking step 1"},
+                        "finish_reason": None,
+                    }
                 ]
             },
             {
@@ -451,7 +491,10 @@ class TestAggregateChatCompletionsStream:
         chunks = [
             {
                 "choices": [
-                    {"delta": {"reasoning_content": "thoughts"}, "finish_reason": "stop"}
+                    {
+                        "delta": {"reasoning_content": "thoughts"},
+                        "finish_reason": "stop",
+                    }
                 ]
             }
         ]
@@ -503,7 +546,7 @@ class TestAggregateResponsesStream:
             "usage": {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}
         }
         final_resp = {"id": "resp_789", "output": []}
-        events = [
+        events: list[dict[str, Any]] = [
             usage_event,
             {"type": "response.completed", "response": final_resp},
         ]
@@ -511,7 +554,7 @@ class TestAggregateResponsesStream:
         assert result["usage"]["total_tokens"] == 5
 
     def test_message_output_items_collected_without_completed(self) -> None:
-        events = [
+        events: list[dict[str, Any]] = [
             {"item": {"type": "message", "content": "hello"}},
             {"item": {"type": "function_call", "name": "end"}},
         ]

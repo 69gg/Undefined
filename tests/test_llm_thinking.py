@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
-
-import pytest
+from typing import Any, cast
 
 from Undefined.ai.llm.thinking import (
     _is_deepseek_provider,
@@ -105,7 +103,7 @@ class TestExtractThinkingContent:
         assert extract_thinking_content(result) == ""
 
     def test_empty_choices_returns_empty(self) -> None:
-        result = {"choices": []}
+        result: dict[str, Any] = {"choices": []}
         assert extract_thinking_content(result) == ""
 
     def test_no_choices_key_falls_back_to_root(self) -> None:
@@ -113,7 +111,14 @@ class TestExtractThinkingContent:
         assert extract_thinking_content(result) == "cot content"
 
     def test_all_thinking_keys_supported(self) -> None:
-        thinking_keys = ("thinking", "reasoning", "reasoning_content", "chain_of_thought", "cot", "thoughts")
+        thinking_keys = (
+            "thinking",
+            "reasoning",
+            "reasoning_content",
+            "chain_of_thought",
+            "cot",
+            "thoughts",
+        )
         for key in thinking_keys:
             result = {"choices": [{"message": {key: f"value for {key}"}}]}
             extracted = extract_thinking_content(result)
@@ -127,24 +132,32 @@ class TestExtractThinkingContent:
 
 class TestIsDeepseekProvider:
     def test_deepseek_model_name_prefix(self) -> None:
-        config = SimpleNamespace(model_name="deepseek-r1", api_url="https://api.openai.com/v1")
-        assert _is_deepseek_provider(config) is True
+        config = SimpleNamespace(
+            model_name="deepseek-r1", api_url="https://api.openai.com/v1"
+        )
+        assert _is_deepseek_provider(cast(Any, config)) is True
 
     def test_deepseek_in_api_url(self) -> None:
-        config = SimpleNamespace(model_name="some-model", api_url="https://api.deepseek.com/v1")
-        assert _is_deepseek_provider(config) is True
+        config = SimpleNamespace(
+            model_name="some-model", api_url="https://api.deepseek.com/v1"
+        )
+        assert _is_deepseek_provider(cast(Any, config)) is True
 
     def test_non_deepseek_returns_false(self) -> None:
-        config = SimpleNamespace(model_name="gpt-4o", api_url="https://api.openai.com/v1")
-        assert _is_deepseek_provider(config) is False
+        config = SimpleNamespace(
+            model_name="gpt-4o", api_url="https://api.openai.com/v1"
+        )
+        assert _is_deepseek_provider(cast(Any, config)) is False
 
     def test_deepseek_in_model_name_uppercase(self) -> None:
-        config = SimpleNamespace(model_name="DeepSeek-V3", api_url="https://other.com/v1")
-        assert _is_deepseek_provider(config) is True
+        config = SimpleNamespace(
+            model_name="DeepSeek-V3", api_url="https://other.com/v1"
+        )
+        assert _is_deepseek_provider(cast(Any, config)) is True
 
     def test_missing_attributes_returns_false(self) -> None:
         config = SimpleNamespace()
-        assert _is_deepseek_provider(config) is False
+        assert _is_deepseek_provider(cast(Any, config)) is False
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +170,9 @@ class TestNormalizeThinkingOverride:
         return SimpleNamespace(model_name="gpt-4o", api_url="https://api.openai.com/v1")
 
     def _deepseek_config(self) -> Any:
-        return SimpleNamespace(model_name="deepseek-r1", api_url="https://api.deepseek.com/v1")
+        return SimpleNamespace(
+            model_name="deepseek-r1", api_url="https://api.deepseek.com/v1"
+        )
 
     def test_none_returns_none(self) -> None:
         assert normalize_thinking_override(None, self._non_deepseek_config()) is None

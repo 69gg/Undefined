@@ -9,10 +9,6 @@ Covers behaviors not already tested in test_public_api_imports.py:
 
 from __future__ import annotations
 
-import importlib
-import sys
-from typing import Any
-
 import pytest
 
 
@@ -23,12 +19,14 @@ import pytest
 
 def test_version_is_string() -> None:
     import Undefined
+
     assert isinstance(Undefined.__version__, str)
     assert len(Undefined.__version__) > 0
 
 
 def test_version_format_is_semver_like() -> None:
     import Undefined
+
     parts = Undefined.__version__.split(".")
     assert len(parts) == 3
     for part in parts:
@@ -42,11 +40,13 @@ def test_version_format_is_semver_like() -> None:
 
 def test_all_contains_version_string() -> None:
     import Undefined
+
     assert "__version__" in Undefined.__all__
 
 
 def test_all_is_list_of_strings() -> None:
     import Undefined
+
     assert isinstance(Undefined.__all__, list)
     for item in Undefined.__all__:
         assert isinstance(item, str), f"Non-string in __all__: {item!r}"
@@ -69,14 +69,16 @@ def test_lazy_imports_keys_match_all_except_version() -> None:
 
 def test_getattr_unknown_attribute_raises() -> None:
     import Undefined
+
     with pytest.raises(AttributeError, match="no attribute"):
-        _ = Undefined.NonExistentSymbol  # type: ignore[attr-defined]
+        getattr(Undefined, "NonExistentSymbol")
 
 
 def test_getattr_dunder_attribute_raises() -> None:
     import Undefined
+
     with pytest.raises(AttributeError):
-        _ = Undefined.__nonexistent__  # type: ignore[attr-defined]
+        getattr(Undefined, "__nonexistent__")
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +117,9 @@ def test_lazy_imports_values_are_tuples_of_two_strings() -> None:
         assert isinstance(entry, tuple), f"Entry for {symbol!r} is not a tuple"
         assert len(entry) == 2, f"Entry for {symbol!r} does not have 2 elements"
         module_path, attr = entry
-        assert isinstance(module_path, str), f"Module path for {symbol!r} is not a string"
+        assert isinstance(module_path, str), (
+            f"Module path for {symbol!r} is not a string"
+        )
         assert isinstance(attr, str), f"Attribute for {symbol!r} is not a string"
         assert module_path.startswith("Undefined."), (
             f"Module path for {symbol!r} doesn't start with 'Undefined.': {module_path!r}"
@@ -180,22 +184,27 @@ def test_ai_client_module_all_contains_expected_symbols() -> None:
 
 def test_llm_module_exports_model_requester() -> None:
     from Undefined.ai.llm import ModelRequester
+
     assert ModelRequester is not None
 
 
 def test_llm_module_exports_model_config_type() -> None:
     from Undefined.ai.llm import ModelConfig
+
     # Should be a union type alias, not None
     assert ModelConfig is not None
 
 
 def test_llm_module_exports_encode_tool_name() -> None:
     from Undefined.ai.llm import _encode_tool_name_for_api
+
     assert callable(_encode_tool_name_for_api)
 
 
 def test_llm_module_exports_should_fallback_alias() -> None:
-    from Undefined.ai.llm import _should_fallback_from_stream, should_fallback_from_stream
+    from Undefined.ai.llm import _should_fallback_from_stream
+    from Undefined.ai.llm.streaming import should_fallback_from_stream
+
     # The private alias should point to the same function
     assert _should_fallback_from_stream is should_fallback_from_stream
 
@@ -203,6 +212,11 @@ def test_llm_module_exports_should_fallback_alias() -> None:
 def test_llm_module_all_contains_expected_symbols() -> None:
     import Undefined.ai.llm as llm_mod
 
-    for symbol in ("ModelRequester", "build_request_body", "ModelConfig",
-                   "_encode_tool_name_for_api", "_should_fallback_from_stream"):
+    for symbol in (
+        "ModelRequester",
+        "build_request_body",
+        "ModelConfig",
+        "_encode_tool_name_for_api",
+        "_should_fallback_from_stream",
+    ):
         assert symbol in llm_mod.__all__, f"{symbol!r} missing from llm __all__"
