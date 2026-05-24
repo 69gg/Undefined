@@ -6,40 +6,25 @@ import importlib
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .ai import AIClient
-    from .api._context import RuntimeAPIContext
-    from .api.app import RuntimeAPIServer
-    from .attachments import AttachmentRegistry
-    from .cognitive.service import CognitiveService
-    from .config import Config, get_config, set_config
-    from .knowledge.manager import KnowledgeManager
-    from .memes.service import MemeService
-    from .skills.agents import AgentRegistry
-    from .skills.anthropic_skills import AnthropicSkillRegistry
-    from .skills.pipelines.registry import PipelineRegistry
-    from .skills.registry import BaseRegistry
-    from .skills.tools import ToolRegistry
+    from .ai import AIClient as AIClient
+    from .api._context import RuntimeAPIContext as RuntimeAPIContext
+    from .api.app import RuntimeAPIServer as RuntimeAPIServer
+    from .attachments import AttachmentRegistry as AttachmentRegistry
+    from .cognitive.service import CognitiveService as CognitiveService
+    from .config import Config as Config
+    from .config import get_config as get_config
+    from .config import set_config as set_config
+    from .knowledge.manager import KnowledgeManager as KnowledgeManager
+    from .memes.service import MemeService as MemeService
+    from .skills.agents import AgentRegistry as AgentRegistry
+    from .skills.anthropic_skills import (
+        AnthropicSkillRegistry as AnthropicSkillRegistry,
+    )
+    from .skills.pipelines.registry import PipelineRegistry as PipelineRegistry
+    from .skills.registry import BaseRegistry as BaseRegistry
+    from .skills.tools import ToolRegistry as ToolRegistry
 
 __version__ = "3.5.0"
-
-__all__ = [
-    "__version__",
-    "Config",
-    "get_config",
-    "set_config",
-    "AIClient",
-    "ToolRegistry",
-    "AgentRegistry",
-    "PipelineRegistry",
-    "BaseRegistry",
-    "AnthropicSkillRegistry",
-    "CognitiveService",
-    "KnowledgeManager",
-    "MemeService",
-    "AttachmentRegistry",
-    "RuntimeAPIServer",
-    "RuntimeAPIContext",
-]
 
 # symbol -> (module_path, attribute_name)；首次访问时才 importlib 加载
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
@@ -62,6 +47,8 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "RuntimeAPIServer": ("Undefined.api.app", "RuntimeAPIServer"),
     "RuntimeAPIContext": ("Undefined.api._context", "RuntimeAPIContext"),
 }
+
+__all__ = ["__version__", *_LAZY_IMPORTS]
 
 
 def __getattr__(name: str) -> Any:
