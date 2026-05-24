@@ -10,7 +10,7 @@ from Undefined.utils.coerce import safe_float
 
 def _parse_line_value(line: str, prefix: str) -> str:
     """解析行内容，提取指定前缀后的值。"""
-    value = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+    value = line[len(prefix) :].strip() if line.startswith(prefix) else line.strip()
     return "" if value == "无" else value
 
 
@@ -34,7 +34,10 @@ def _parse_analysis_response(content: str) -> dict[str, str]:
         line = line.strip()
         for field, prefixes in field_prefixes.items():
             if line.startswith(prefixes):
-                result[field] = _parse_line_value(line, prefixes[0])
+                matched_prefix = (
+                    prefixes[0] if line.startswith(prefixes[0]) else prefixes[1]
+                )
+                result[field] = _parse_line_value(line, matched_prefix)
 
     if not result["description"]:
         result["description"] = content

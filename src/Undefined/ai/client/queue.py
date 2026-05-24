@@ -134,36 +134,36 @@ class ClientQueueMixin(ClientSetupMixin):
             len(messages),
             bool(tools),
         )
-        receipt = await self._queue_manager.add_queued_llm_request(
-            request,
-            lane=resolved_queue_lane,
-            model_name=model_name,
-        )
-        wait_timeout = compute_queued_llm_timeout_seconds(
-            self._get_runtime_config(),
-            model_config,
-            retry_count=resolve_effective_retry_count(
-                self._get_runtime_config(), self._queue_manager
-            ),
-            initial_wait_seconds=float(
-                getattr(receipt, "estimated_wait_seconds", 0.0) or 0.0
-            ),
-            # 首次 dispatch 间隔已含在 estimated_wait 中，避免重复计入
-            include_first_dispatch_interval=False,
-        )
         try:
-            await asyncio.wait_for(event.wait(), timeout=wait_timeout)
-        except asyncio.TimeoutError:
-            logger.exception(
-                "[queued_llm_wait_timeout] request_id=%s call_type=%s model=%s lane=%s timeout=%.1fs",
-                request_id,
-                call_type,
-                model_name,
-                resolved_queue_lane,
-                wait_timeout,
+            receipt = await self._queue_manager.add_queued_llm_request(
+                request,
+                lane=resolved_queue_lane,
+                model_name=model_name,
             )
-            raise
-        # finally：无论成败都执行清理
+            wait_timeout = compute_queued_llm_timeout_seconds(
+                self._get_runtime_config(),
+                model_config,
+                retry_count=resolve_effective_retry_count(
+                    self._get_runtime_config(), self._queue_manager
+                ),
+                initial_wait_seconds=float(
+                    getattr(receipt, "estimated_wait_seconds", 0.0) or 0.0
+                ),
+                # 首次 dispatch 间隔已含在 estimated_wait 中，避免重复计入
+                include_first_dispatch_interval=False,
+            )
+            try:
+                await asyncio.wait_for(event.wait(), timeout=wait_timeout)
+            except asyncio.TimeoutError:
+                logger.exception(
+                    "[queued_llm_wait_timeout] request_id=%s call_type=%s model=%s lane=%s timeout=%.1fs",
+                    request_id,
+                    call_type,
+                    model_name,
+                    resolved_queue_lane,
+                    wait_timeout,
+                )
+                raise
         finally:
             entry = self._pending_llm_calls.pop(request_id, None)
         _, result = entry if entry is not None else (None, None)

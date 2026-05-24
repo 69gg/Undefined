@@ -358,8 +358,6 @@ def aggregate_responses_stream(events: list[dict[str, Any]]) -> dict[str, Any]:
         usage = extract_stream_usage(event_dict, api_mode=API_MODE_RESPONSES) or usage
         event_type = str(event_dict.get("type") or "").strip().lower()
         response = event_dict.get("response")
-        if isinstance(response, dict):
-            final_response = response
         if event_type == "response.output_text.delta":
             delta = stringify_stream_delta(event_dict.get("delta"))
             if delta:

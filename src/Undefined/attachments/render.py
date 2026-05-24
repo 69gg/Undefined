@@ -149,7 +149,7 @@ def _render_image_tag(
 ) -> bool:
     """Render an image attachment as an inline CQ:image. Returns True on success."""
     image_source = record.source_ref
-    if record.local_path:
+    if record.local_path and Path(record.local_path).is_file():
         image_source = Path(record.local_path).resolve().as_uri()
     elif not image_source:
         replacement = f"[图片 uid={uid} 缺少文件]"
@@ -264,12 +264,19 @@ async def dispatch_pending_file_sends(
                     send_record.local_path,
                     name=send_record.display_name or None,
                 )
-            else:
+            elif target_type == "private":
                 await sender.send_private_file(
                     target_id,
                     send_record.local_path,
                     name=send_record.display_name or None,
                 )
+            else:
+                logger.warning(
+                    "[文件发送] 跳过：不支持的 target_type=%s uid=%s",
+                    target_type,
+                    send_record.uid,
+                )
+                continue
         except Exception:
             logger.warning(
                 "[文件发送] 发送失败（最佳努力） uid=%s target=%s:%s",

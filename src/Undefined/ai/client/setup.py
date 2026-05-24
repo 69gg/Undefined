@@ -249,6 +249,7 @@ class ClientSetupMixin:
         # Agent intro 生成器（延迟初始化，需要外部设置 queue_manager）
         self._agent_intro_generator: Any | None = None
         self._agent_intro_task: asyncio.Task[None] | None = None
+        self._intro_refresh_task: asyncio.Task[None] | None = None
         self._queue_manager: Any | None = None
         self._intro_config: Any | None = None
         # 后台 LLM 调用挂起表（走队列的后台请求）
@@ -350,6 +351,14 @@ class ClientSetupMixin:
         intro_gen = getattr(self, "_agent_intro_generator", None)
         if intro_gen is not None:
             await intro_gen.stop()
+        intro_refresh_task = getattr(self, "_intro_refresh_task", None)
+        if intro_refresh_task is not None and not intro_refresh_task.done():
+            intro_refresh_task.cancel()
+            try:
+                await intro_refresh_task
+            except asyncio.CancelledError:
+                pass
+        self._intro_refresh_task = None
         if hasattr(self, "_agent_intro_task") and self._agent_intro_task:
             if not self._agent_intro_task.done():
                 await self._agent_intro_task
@@ -420,8 +429,31 @@ class ClientSetupMixin:
         self._intro_config = config
         if self._queue_manager is None:
             return
-        task = asyncio.create_task(self._refresh_intro_generator(config))
-        task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+        existing = self._intro_refresh_task
+        if existing is not None and not existing.done():
+            existing.cancel()
+
+        async def _run_refresh() -> None:
+            try:
+                await self._refresh_intro_generator(config)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("[Agent介绍] 刷新 intro 生成器失败")
+
+        task = asyncio.create_task(_run_refresh())
+
+        def _finalize(done_task: asyncio.Task[None]) -> None:
+            if getattr(self, "_intro_refresh_task", None) is done_task:
+                self._intro_refresh_task = None
+            if done_task.cancelled():
+                return
+            exc = done_task.exception()
+            if exc is not None:
+                logger.error("[Agent介绍] intro 刷新任务异常结束", exc_info=exc)
+
+        task.add_done_callback(_finalize)
+        self._intro_refresh_task = task
 
     async def _refresh_intro_generator(self, config: AgentIntroGenConfig) -> None:
         if not config.enabled:
@@ -742,6 +774,8 @@ class ClientSetupMixin:
         **kwargs: Any,
     ) -> dict[str, Any]:
         tools = self.tool_manager.maybe_merge_agent_tools(call_type, tools)
+        if tools is not None:
+            tools = self._filter_tools_for_runtime_config(tools)
         message_count_for_transport = len(messages)
         # Responses 续轮（previous_response_id）时跳过 prefetch，避免重复注入系统消息
         if not (

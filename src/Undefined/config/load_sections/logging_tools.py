@@ -37,9 +37,13 @@ def load_logging_tools(
     log_max_size_mb = _coerce_int(
         _get_value(data, ("logging", "max_size_mb"), "LOG_MAX_SIZE_MB"), 10
     )
+    if log_max_size_mb <= 0:
+        log_max_size_mb = 10
     log_backup_count = _coerce_int(
         _get_value(data, ("logging", "backup_count"), "LOG_BACKUP_COUNT"), 5
     )
+    if log_backup_count < 0:
+        log_backup_count = 0
     log_tty_enabled = _coerce_bool(
         _get_value(data, ("logging", "tty_enabled"), "LOG_TTY_ENABLED"),
         False,

@@ -30,14 +30,17 @@ def _extract_mime_type_from_data_url(media_url: str) -> str | None:
 
 def _get_media_type_by_extension(url_lower: str) -> str:
     """根据文件扩展名判断媒体类型。"""
+    from urllib.parse import urlsplit
+
+    path = urlsplit(url_lower).path
     for ext in IMAGE_EXTENSIONS:
-        if ext in url_lower:
+        if path.endswith(ext):
             return "image"
     for ext in AUDIO_EXTENSIONS:
-        if ext in url_lower:
+        if path.endswith(ext):
             return "audio"
     for ext in VIDEO_EXTENSIONS:
-        if ext in url_lower:
+        if path.endswith(ext):
             return "video"
     return "image"
 

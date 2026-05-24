@@ -41,6 +41,8 @@ async def naga_bind_callback_handler(
         body = await request.json()
     except Exception:
         return _json_error("Invalid JSON", status=400)
+    if not isinstance(body, dict):
+        return _json_error("JSON body must be an object", status=400)
 
     bind_uuid = str(body.get("bind_uuid", "") or "").strip()
     naga_id = str(body.get("naga_id", "") or "").strip()

@@ -221,6 +221,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
             message_checkpoint_len = len(messages)
             transport_state_checkpoint = transport_state
 
+            tool_execution_started = False
             try:
                 result = await self.submit_queued_llm_call(
                     model_config=effective_chat_config,
@@ -232,18 +233,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
                     transport_state=transport_state,
                     queue_lane=queue_lane,
                 )
-            except Exception as exc:
-                logger.exception(
-                    "[queued_llm_error] call_type=chat model=%s lane=%s iteration=%s error=%s",
-                    effective_chat_config.model_name,
-                    queue_lane,
-                    iteration,
-                    exc,
-                )
-                raise
 
-            try:
-                tool_execution_started = False
                 tool_name_map = (
                     result.get("_tool_name_map") if isinstance(result, dict) else None
                 )
@@ -609,7 +599,6 @@ class ClientAskLoopMixin(ClientQueueMixin):
                         exc,
                     )
                     continue
-                # 工具已执行或重试用尽：吞掉异常，避免向用户暴露内部错误
                 logger.exception(
                     "[chat.suppressed_error] model=%s lane=%s iteration=%s error=%s",
                     effective_chat_config.model_name,

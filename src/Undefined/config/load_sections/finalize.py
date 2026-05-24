@@ -23,12 +23,14 @@ def load_finalize(ctx: dict[str, Any], *, strict: bool = True) -> None:
             embedding_model=ctx["embedding_model"],
         )
 
-    _log_debug_info(
-        ctx["chat_model"],
-        ctx["vision_model"],
-        ctx["security_model"],
-        ctx["naga_model"],
-        ctx["agent_model"],
-        ctx["summary_model"],
-        ctx["grok_model"],
+    debug_keys = (
+        "chat_model",
+        "vision_model",
+        "security_model",
+        "naga_model",
+        "agent_model",
+        "summary_model",
+        "grok_model",
     )
+    if all(key in ctx for key in debug_keys):
+        _log_debug_info(*(ctx[key] for key in debug_keys))

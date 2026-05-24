@@ -62,6 +62,8 @@ def load_knowledge(
     )
     if knowledge_chunk_overlap < 0:
         knowledge_chunk_overlap = 0
+    if knowledge_chunk_overlap >= knowledge_chunk_size:
+        knowledge_chunk_overlap = max(0, knowledge_chunk_size - 1)
     knowledge_default_top_k = _coerce_int(
         _get_value(data, ("knowledge", "default_top_k"), None), 5
     )

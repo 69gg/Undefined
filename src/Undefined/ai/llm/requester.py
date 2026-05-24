@@ -161,11 +161,11 @@ def _build_scope_prompt_cache_part() -> str:
     if ctx is None:
         return "scope:global"
     if ctx.group_id is not None:
-        return f"group:{int(ctx.group_id)}"
+        return f"group:{_hash8(str(int(ctx.group_id)))}"
     if ctx.user_id is not None:
-        return f"private:{int(ctx.user_id)}"
+        return f"private:{_hash8(str(int(ctx.user_id)))}"
     if ctx.sender_id is not None:
-        return f"sender:{int(ctx.sender_id)}"
+        return f"sender:{_hash8(str(int(ctx.sender_id)))}"
     request_type = _normalize_prompt_cache_part(ctx.request_type)
     return f"type:{request_type}"
 

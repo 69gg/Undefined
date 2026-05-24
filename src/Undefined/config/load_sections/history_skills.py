@@ -195,12 +195,14 @@ def load_history_skills(
         ),
         2.0,
     )
+    skills_hot_reload_interval = _normalize_queue_interval(skills_hot_reload_interval)
     skills_hot_reload_debounce = _coerce_float(
         _get_value(
             data, ("skills", "hot_reload_debounce"), "SKILLS_HOT_RELOAD_DEBOUNCE"
         ),
         0.5,
     )
+    skills_hot_reload_debounce = _normalize_queue_interval(skills_hot_reload_debounce)
 
     agent_intro_autogen_enabled = _coerce_bool(
         _get_value(

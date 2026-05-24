@@ -153,10 +153,14 @@ def load_integrations(
         _get_value(data, ("code_delivery", "default_command_timeout_seconds"), None),
         600,
     )
+    if code_delivery_command_timeout < 1:
+        code_delivery_command_timeout = 600
     code_delivery_max_command_output = _coerce_int(
         _get_value(data, ("code_delivery", "max_command_output_chars"), None),
         20000,
     )
+    if code_delivery_max_command_output < 1:
+        code_delivery_max_command_output = 20000
     code_delivery_default_archive_format = _coerce_str(
         _get_value(data, ("code_delivery", "default_archive_format"), None),
         "zip",
@@ -166,6 +170,8 @@ def load_integrations(
     code_delivery_max_archive_size_mb = _coerce_int(
         _get_value(data, ("code_delivery", "max_archive_size_mb"), None), 200
     )
+    if code_delivery_max_archive_size_mb < 1:
+        code_delivery_max_archive_size_mb = 200
     code_delivery_cleanup_on_finish = _coerce_bool(
         _get_value(data, ("code_delivery", "cleanup_on_finish"), None), True
     )
@@ -176,6 +182,8 @@ def load_integrations(
         _get_value(data, ("code_delivery", "llm_max_retries_per_request"), None),
         5,
     )
+    if code_delivery_llm_max_retries < 0:
+        code_delivery_llm_max_retries = 5
     code_delivery_notify_on_llm_failure = _coerce_bool(
         _get_value(data, ("code_delivery", "notify_on_llm_failure"), None),
         True,

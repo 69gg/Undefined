@@ -24,7 +24,7 @@ def select_system_prompt_path(
     # NagaAgent 模式切换专用系统提示词模板
     if enabled:
         return "res/prompts/undefined_nagaagent.xml"
-    return "res/prompts/undefined.xml"
+    return default_path
 
 
 def build_model_config_info(runtime_config: Any) -> str:

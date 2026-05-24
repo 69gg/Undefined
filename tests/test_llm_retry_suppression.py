@@ -21,8 +21,11 @@ from Undefined.skills.agents.runner import run_agent_with_tools
 
 
 @pytest.mark.asyncio
-async def test_ai_ask_reraises_queued_llm_error() -> None:
+async def test_ai_ask_suppresses_queued_llm_error_when_retries_exhausted() -> None:
     client: Any = object.__new__(AIClient)
+    client.runtime_config = cast(
+        Any, SimpleNamespace(log_thinking=False, ai_request_max_retries=0)
+    )
     client._prompt_builder = cast(
         Any,
         SimpleNamespace(
@@ -34,9 +37,7 @@ async def test_ai_ask_reraises_queued_llm_error() -> None:
     )
     client.tool_manager = cast(Any, SimpleNamespace(get_openai_tools=lambda: []))
     client._filter_tools_for_runtime_config = lambda tools: tools
-    client._get_runtime_config = cast(
-        Any, lambda: cast(Any, SimpleNamespace(log_thinking=False))
-    )
+    client._get_runtime_config = cast(Any, lambda: client.runtime_config)
     client.model_selector = cast(Any, SimpleNamespace(wait_ready=AsyncMock()))
     client.chat_config = ChatModelConfig(
         api_url="https://api.openai.com/v1",
@@ -60,8 +61,9 @@ async def test_ai_ask_reraises_queued_llm_error() -> None:
         proxy_config_available=False,
     )
 
-    with pytest.raises(RuntimeError, match="boom"):
-        await AIClient.ask(client, "hello")
+    result = await AIClient.ask(client, "hello")
+
+    assert result == ""
 
 
 @pytest.mark.asyncio
