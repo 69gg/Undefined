@@ -8,10 +8,11 @@ from pathlib import Path
 import shutil
 import tempfile
 
+from Undefined.utils.paths import PACKAGE_ROOT
+
 
 def _candidate_paths(relative_path: str) -> list[Path]:
-    module_path = Path(__file__).resolve()
-    package_root = module_path.parents[1]
+    package_root = PACKAGE_ROOT
     candidates = [
         Path.cwd() / relative_path,
         # If installed from wheel, extra files may live under site-packages/

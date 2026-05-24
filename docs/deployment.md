@@ -2,6 +2,8 @@
 
 提供源码部署与 pip/uv tool 安装两种方式：**源码部署是推荐的首选方式**，功能完整且经过充分测试；pip/uv tool 安装适合快速体验，但部分功能支持尚不完善。
 
+> **作为 Python 库嵌入**：若你不需要启动 QQ Bot CLI，而是要在自己的应用或测试中复用 Undefined 组件（配置、`AIClient`、Skills、认知记忆等），请参阅 [Python 库 API 参考](python-api.md) 与 [配置详解 — 库嵌入配置](configuration.md#2-库嵌入配置)。CLI 入口（`Undefined` / `Undefined-webui`）行为不受库嵌入 API 影响。
+
 > Python 版本要求：`3.11`~`3.13`（包含）。
 >
 > 若使用 `uv`，通常不需要你手动限制系统 Python 版本；`uv` 会根据项目约束自动选择/下载兼容解释器。
@@ -131,7 +133,7 @@ uv tool run --from Undefined-bot playwright install
 
 > **渲染依赖提醒**：同源码部署要求一致，你需要在宿主机上预先安装 Playwright 浏览器内核。请参考上文 [3. 安装渲染运行时](#3-安装渲染运行时)。未配置前，网页截图、Markdown 渲染和复杂 LaTeX 公式回退渲染可能会失败。
 
-安装完成后，在任意目录准备 `config.toml` 并启动：
+安装完成后，在任意目录准备 `config.toml` 并启动（库嵌入场景也可用 `Config.from_mapping()` 代替配置文件，见 [python-api.md](python-api.md)）：
 
 ```bash
 # 启动方式（二选一）

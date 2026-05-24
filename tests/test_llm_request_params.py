@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -339,10 +340,11 @@ async def test_chat_request_auto_sets_prompt_cache_key_from_request_context() ->
             call_type="chat",
         )
 
+    group_scope = hashlib.sha1(b"12345", usedforsecurity=False).hexdigest()[:8]
     assert fake_client.chat.completions.last_kwargs is not None
     assert (
         fake_client.chat.completions.last_kwargs["prompt_cache_key"]
-        == "pc:gpt-test:chat:group:12345"
+        == f"pc:gpt-test:chat:group:{group_scope}"
     )
 
     await requester._http_client.aclose()
@@ -1130,6 +1132,7 @@ async def test_ai_client_request_model_prefetch_keeps_transport_count_from_calle
         "tool_manager",
         SimpleNamespace(maybe_merge_agent_tools=lambda _call_type, tools: tools),
     )
+    setattr(client, "_filter_tools_for_runtime_config", lambda tools: tools)
     monkeypatch.setattr(client, "_maybe_prefetch_tools", prefetch_mock)
 
     cfg = ChatModelConfig(

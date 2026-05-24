@@ -74,7 +74,6 @@ class ProfileStorage:
                 p.parent.mkdir(parents=True, exist_ok=True)
                 hist_dir.mkdir(parents=True, exist_ok=True)
 
-                # 备份现有版本
                 if p.exists():
                     ts = datetime.now().strftime("%Y%m%d%H%M%S%f")
                     (hist_dir / f"{ts}.md").write_text(
@@ -87,7 +86,6 @@ class ProfileStorage:
                         ts,
                     )
 
-                # 原子写入
                 fd, tmp = tempfile.mkstemp(
                     prefix=f".{p.name}.", suffix=".tmp", dir=str(p.parent)
                 )
@@ -102,7 +100,6 @@ class ProfileStorage:
                         pass
                     raise
 
-                # 清理旧快照
                 snapshots = sorted(hist_dir.glob("*.md"))
                 for old in snapshots[: max(0, len(snapshots) - self._revision_keep)]:
                     try:
@@ -140,7 +137,6 @@ class ProfileStorage:
     def _sanitize_profile(content: str, entity_type: str, entity_id: str) -> str:
         import yaml
 
-        # 剥离 ```markdown / ``` 包裹
         stripped = content.strip()
         if stripped.startswith("```"):
             lines = stripped.splitlines()
@@ -151,7 +147,6 @@ class ProfileStorage:
             if end:
                 stripped = "\n".join(lines[1:end])
 
-        # 解析 frontmatter
         if stripped.startswith("---"):
             parts = stripped[3:].split("---", 1)
             if len(parts) == 2:

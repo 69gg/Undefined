@@ -129,7 +129,6 @@ def _mmr_select(
     if n <= top_k:
         return np.arange(n)
 
-    # 预计算 query-doc 相关性（cosine similarity）
     query_norm = np.sqrt(np.sum(query_embedding * query_embedding))
     relevance = np.empty(n, dtype=np.float64)
     norms = np.empty(n, dtype=np.float64)
@@ -161,7 +160,6 @@ def _mmr_select(
             return selected[:step]
         selected[step] = best_idx
         chosen[best_idx] = True
-        # 更新 max_sim_to_selected：新选中项与所有未选中项的相似度
         if norms[best_idx] > 0.0:
             for j in range(n):
                 if not chosen[j] and norms[j] > 0.0:
@@ -446,7 +444,6 @@ class CognitiveVectorStore:
             query_embedding=query_embedding,
         )
         embed_duration = time.perf_counter() - embed_started
-        # 重排要求候选数 > 最终返回数，否则重排无意义
         use_reranker = bool(reranker) and safe_multiplier >= 2
         if reranker and safe_multiplier < 2:
             logger.warning(

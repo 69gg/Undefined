@@ -38,7 +38,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         logger.exception("fetch_image_uid 注册失败: %s", exc)
         return f"获取图片失败：{exc}"
 
-    # 验证是否为图片类型
     mime = str(getattr(record, "mime_type", "") or "").strip().lower()
     if mime and not mime.startswith(_IMAGE_MIME_PREFIX):
         return f"URL 内容不是图片类型（检测到 {mime}），仅支持图片"

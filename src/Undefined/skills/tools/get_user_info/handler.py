@@ -32,7 +32,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "获取用户信息功能不可用（OneBot 客户端未设置）"
 
     try:
-        # 使用 get_stranger_info 获取详细信息
         user_info = await onebot_client.get_stranger_info(user_id)
 
         if not user_info:
@@ -40,12 +39,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
         result_parts = ["【QQ用户信息】"]
 
-        # 添加头像 URL (常用 API)
         result_parts.append(
             f"头像: http://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640"
         )
 
-        # 处理性别
         sex = user_info.get("sex")
         if sex == "male":
             user_info["sex"] = "男"
@@ -59,8 +56,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             if value is not None and value != "":
                 result_parts.append(f"{display_name}: {value}")
 
-        # 如果有其他字段（取决于 OneBot 实现，如 NapCat/Go-CQHttp 可能有更多）
-        # 我们可以尝试输出一些常见的额外字段
         extra_fields = {
             "remark": "备注",
             "signature": "签名",

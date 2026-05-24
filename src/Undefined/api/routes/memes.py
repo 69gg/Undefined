@@ -1,4 +1,4 @@
-"""Meme management route handlers."""
+"""Meme API route handlers."""
 
 from __future__ import annotations
 
@@ -11,10 +11,21 @@ from Undefined.api._context import RuntimeAPIContext
 from Undefined.api._helpers import _json_error, _optional_query_param, _to_bool
 
 
-async def meme_list_handler(ctx: RuntimeAPIContext, request: web.Request) -> Response:
+def _require_meme_service(ctx: RuntimeAPIContext) -> tuple[Any, Response | None]:
     meme_service = ctx.meme_service
     if meme_service is None or not meme_service.enabled:
-        return _json_error("Meme service disabled", status=400)
+        return None, _json_error("Meme service disabled", status=400)
+    return meme_service, None
+
+
+def _meme_uid(request: web.Request) -> str:
+    return str(request.match_info.get("uid", "")).strip()
+
+
+async def meme_list_handler(ctx: RuntimeAPIContext, request: web.Request) -> Response:
+    meme_service, error = _require_meme_service(ctx)
+    if error is not None:
+        return error
 
     def _parse_optional_bool(name: str) -> bool | None:
         raw = request.query.get(name)
@@ -120,17 +131,17 @@ async def meme_list_handler(ctx: RuntimeAPIContext, request: web.Request) -> Res
 
 async def meme_stats_handler(ctx: RuntimeAPIContext, request: web.Request) -> Response:
     _ = request
-    meme_service = ctx.meme_service
-    if meme_service is None or not meme_service.enabled:
-        return _json_error("Meme service disabled", status=400)
+    meme_service, error = _require_meme_service(ctx)
+    if error is not None:
+        return error
     return web.json_response(await meme_service.stats())
 
 
 async def meme_detail_handler(ctx: RuntimeAPIContext, request: web.Request) -> Response:
-    meme_service = ctx.meme_service
-    if meme_service is None or not meme_service.enabled:
-        return _json_error("Meme service disabled", status=400)
-    uid = str(request.match_info.get("uid", "")).strip()
+    meme_service, error = _require_meme_service(ctx)
+    if error is not None:
+        return error
+    uid = _meme_uid(request)
     detail = await meme_service.get_meme(uid)
     if detail is None:
         return _json_error("Meme not found", status=404)
@@ -138,10 +149,10 @@ async def meme_detail_handler(ctx: RuntimeAPIContext, request: web.Request) -> R
 
 
 async def meme_blob_handler(ctx: RuntimeAPIContext, request: web.Request) -> Response:
-    meme_service = ctx.meme_service
-    if meme_service is None or not meme_service.enabled:
-        return _json_error("Meme service disabled", status=400)
-    uid = str(request.match_info.get("uid", "")).strip()
+    meme_service, error = _require_meme_service(ctx)
+    if error is not None:
+        return error
+    uid = _meme_uid(request)
     path = await meme_service.blob_path_for_uid(uid, preview=False)
     if path is None:
         return _json_error("Meme blob not found", status=404)
@@ -151,10 +162,10 @@ async def meme_blob_handler(ctx: RuntimeAPIContext, request: web.Request) -> Res
 async def meme_preview_handler(
     ctx: RuntimeAPIContext, request: web.Request
 ) -> Response:
-    meme_service = ctx.meme_service
-    if meme_service is None or not meme_service.enabled:
-        return _json_error("Meme service disabled", status=400)
-    uid = str(request.match_info.get("uid", "")).strip()
+    meme_service, error = _require_meme_service(ctx)
+    if error is not None:
+        return error
+    uid = _meme_uid(request)
     path = await meme_service.blob_path_for_uid(uid, preview=True)
     if path is None:
         return _json_error("Meme preview not found", status=404)
@@ -162,10 +173,10 @@ async def meme_preview_handler(
 
 
 async def meme_update_handler(ctx: RuntimeAPIContext, request: web.Request) -> Response:
-    meme_service = ctx.meme_service
-    if meme_service is None or not meme_service.enabled:
-        return _json_error("Meme service disabled", status=400)
-    uid = str(request.match_info.get("uid", "")).strip()
+    meme_service, error = _require_meme_service(ctx)
+    if error is not None:
+        return error
+    uid = _meme_uid(request)
     try:
         payload = await request.json()
     except Exception:
@@ -186,10 +197,10 @@ async def meme_update_handler(ctx: RuntimeAPIContext, request: web.Request) -> R
 
 
 async def meme_delete_handler(ctx: RuntimeAPIContext, request: web.Request) -> Response:
-    meme_service = ctx.meme_service
-    if meme_service is None or not meme_service.enabled:
-        return _json_error("Meme service disabled", status=400)
-    uid = str(request.match_info.get("uid", "")).strip()
+    meme_service, error = _require_meme_service(ctx)
+    if error is not None:
+        return error
+    uid = _meme_uid(request)
     deleted = await meme_service.delete_meme(uid)
     if not deleted:
         return _json_error("Meme not found", status=404)
@@ -199,10 +210,10 @@ async def meme_delete_handler(ctx: RuntimeAPIContext, request: web.Request) -> R
 async def meme_reanalyze_handler(
     ctx: RuntimeAPIContext, request: web.Request
 ) -> Response:
-    meme_service = ctx.meme_service
-    if meme_service is None or not meme_service.enabled:
-        return _json_error("Meme service disabled", status=400)
-    uid = str(request.match_info.get("uid", "")).strip()
+    meme_service, error = _require_meme_service(ctx)
+    if error is not None:
+        return error
+    uid = _meme_uid(request)
     job_id = await meme_service.enqueue_reanalyze(uid)
     if not job_id:
         return _json_error("Meme queue unavailable", status=503)
@@ -212,10 +223,10 @@ async def meme_reanalyze_handler(
 async def meme_reindex_handler(
     ctx: RuntimeAPIContext, request: web.Request
 ) -> Response:
-    meme_service = ctx.meme_service
-    if meme_service is None or not meme_service.enabled:
-        return _json_error("Meme service disabled", status=400)
-    uid = str(request.match_info.get("uid", "")).strip()
+    meme_service, error = _require_meme_service(ctx)
+    if error is not None:
+        return error
+    uid = _meme_uid(request)
     job_id = await meme_service.enqueue_reindex(uid)
     if not job_id:
         return _json_error("Meme queue unavailable", status=503)

@@ -20,7 +20,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if target_user_id is None:
         return "请提供要点赞的目标QQ号（target_user_id参数）"
 
-    # 验证参数类型
     try:
         target_user_id = int(target_user_id)
         times = int(times)
@@ -37,7 +36,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "点赞功能不可用（回调函数未设置）"
 
     try:
-        # 调用点赞回调
         await send_like_callback(target_user_id, times)
 
         if times == 1:
@@ -49,7 +47,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         logger.exception(f"点赞失败: {e}")
         error_msg = str(e)
 
-        # 根据错误消息提供更友好的提示
         if "SVIP 上限" in error_msg:
             return "点赞失败：今日给同一好友的点赞数已达SVIP上限"
         elif "点赞失败" in error_msg:

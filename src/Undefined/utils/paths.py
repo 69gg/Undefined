@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+
 DATA_DIR = Path("data")
 CACHE_DIR = DATA_DIR / "cache"
 RENDER_CACHE_DIR = CACHE_DIR / "render"

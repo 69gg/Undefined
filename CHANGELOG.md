@@ -1,3 +1,17 @@
+## v3.5.0 模块拆分、库嵌入与工具链收敛
+
+本版本是一次以可维护性与可嵌入性为主线的架构整理：将 AI 客户端、消息处理、附件、认知、表情包、协调器、OneBot 与 Agent 运行器等原先体量过大的单文件拆成职责清晰的子包，同时保留向后兼容的 import 路径与 CLI 行为不变。并行修复了 `end` 与同轮业务工具并行调用时可能重复发送或误结束会话的问题，并补齐 Python 库嵌入所需的 `set_config`、`Config.from_mapping`、根包 lazy re-export 与 `py.typed` 类型标记。配置加载改为分段解析 + 域级 parser，文档与测试同步覆盖库嵌入、包布局与公共 API 契约，让 Undefined 既能继续作为 QQ Bot 运行，也能更可靠地被脚本、测试与其它服务按需复用。
+
+- 重构核心运行时模块结构。`ai/client`、`ai/llm`、`ai/prompts`、`ai/multimodal` 分别承载客户端组合、模型请求、Prompt 构建与多模态解析；`handlers/`、`onebot/`、`attachments/`、`cognitive/service` + `cognitive/historian`、`memes/`（ingest / search / 图像工具）、`services/coordinator`、`services/message_batcher`、`skills/agents/runner` 与 `api/routes/naga/` 等子包按域拆分；原 monolith 文件以兼容 shim 或 `__init__` 重导出保留，删除被 shadow 的不可达死代码，降低单文件复杂度与后续改动风险。
+- 完善 Python 库嵌入能力。根包新增 lazy re-export（`Config`、`get_config`、`set_config`、`AIClient`、Skills 注册表、认知/知识库/表情包/附件/Runtime API 等稳定符号）；`Config.from_mapping` / `ConfigBuilder` 支持无 `config.toml` 的内存构建，`env_registry` 统一管理环境变量兜底；`set_config()` 为 opt-in 注入全局单例，CLI 启动链不调用。wheel 打包 `py.typed`（PEP 561），新增 `docs/python-api.md` 公共 API 参考，README 补充嵌入示例与文档索引。
+- 收敛 `end` 工具与同轮并行调用的运行时语义。当模型在同一轮将 `end` 与 `send_message` 或其它业务工具一并调用时：其它工具照常并行执行并返回结果，`end` 不执行并回填明确拒绝响应，避免重复发送与「未读 tool 结果就结束」；提示词、`each.md` 与决策回归用例同步写入 P0 级「end 禁止并行」规则与运行时效果说明。
+- 改进缺失 tool call 时的重试策略。模型返回纯文本但未调用任何工具时，保留 assistant 原文于 messages，注入通用纠正提示而非硬编码 `send_message`/`end`，减少误导性后续 tool 调用；拆分后修复 Skills 路径解析，`PACKAGE_ROOT` 统一指向包根，避免内置工具零加载回归。
+- 加固队列化 LLM 与运行时边界。收紧 queued LLM 重试与 pending-call 清理、配置分段加载的边界校验、附件渲染容错，以及 Prompt 缓存键的隐私安全处理（系统上下文只暴露非敏感模型名等字段）；表情包入库锁与图像工具去重，Naga API 路由守卫与 B 站 WBI 导航解析小幅简化。
+- 更新架构图、开发指南与配置文档。`docs/development.md` 反映拆分后的目录树；`docs/configuration.md` 新增库嵌入专节（`from_mapping` / `set_config` / 环境变量注册表）；`ARCHITECTURE.md` 与相关运维文档同步引用路径。
+- 补强测试与工程契约。新增包布局、公共 API import、CLI 启动兼容、`Config.from_mapping` / 纯环境变量构建、`end` 同轮拒绝与 defer、`AIClient` setup 路径等回归测试；更新 LLM 重试抑制与请求参数相关用例，总测试覆盖库嵌入与拆分后的关键路径。
+
+---
+
 ## v3.4.2 总结更准、上下文可配、高并发更稳
 
 本版本主要解决三类实际问题：群聊消息变长、合并发送变多之后，`/summary` 容易慢、容易编、分块预算也不准；主对话注入历史的 200 条硬顶与模型真实窗口脱节；高并发下用户连问「在吗」「好了吗」时，机器人仍可能把旧任务当新活重跑。围绕这些痛点，版本把「用户主动要总结」和「AI 自己调总结能力」拆成两条更合适的链路，用可配置的上下文窗口统一约束注入与分块，并同步收紧提示词、史官侧写与定时任务持久化，让总结更可信、配置更贴近上游模型、并发场景下更少重复劳动。

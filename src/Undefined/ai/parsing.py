@@ -24,23 +24,18 @@ def _get_content_from_message(message: Any) -> str | None:
 
 def _extract_from_choice(choice: Any) -> str:
     """从单个选项结构中提取最终的文本内容"""
-    # 如果选项是字符串，直接返回
     if isinstance(choice, str):
         return choice
 
-    # 如果选项不是字典，返回空字符串
     if not isinstance(choice, dict):
         return ""
 
-    # 尝试从消息中获取 content
     message = choice.get("message")
     content = _get_content_from_message(message)
 
-    # 如果消息中没有 content，尝试从选项直接获取
     if content is None:
         content = choice.get("content")
 
-    # 如果有 tool_calls 但没有 content，返回空字符串
     if not content and choice.get("message", {}).get("tool_calls"):
         return ""
 
@@ -67,13 +62,11 @@ def _find_first_choice(result: dict[str, Any]) -> dict[str, Any] | None:
     Returns:
         第一个选项字典，未找到时返回 None
     """
-    # 直接检查 choices 字段
     if "choices" in result and result["choices"]:
         choice = result["choices"][0]
         if isinstance(choice, dict):
             return choice
 
-    # 检查 data.choices 字段
     data = result.get("data")
     if isinstance(data, dict) and data.get("choices"):
         choice = data["choices"][0]
@@ -125,12 +118,9 @@ def extract_choices_content(result: dict[str, Any]) -> str:
     if output_text:
         return output_text
 
-    # 查找第一个选项
     choice = _find_first_choice(result)
 
-    # 如果没有找到选项，抛出错误
     if choice is None:
         raise KeyError(_build_error_message(result))
 
-    # 从选项中提取内容
     return _extract_from_choice(choice)

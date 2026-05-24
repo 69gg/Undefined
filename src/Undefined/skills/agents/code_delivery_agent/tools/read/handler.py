@@ -39,6 +39,7 @@ async def _read_single_file(
             async with aiofiles.open(
                 full_path, "r", encoding="utf-8", errors="replace"
             ) as f:
+                # async for 循环
                 async for _ in f:
                     line_count += 1
 

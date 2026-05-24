@@ -98,7 +98,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     device = args.get("device", "pc")
     fourk_type = args.get("fourk_type", "acg")
 
-    # 参数验证
     if delivery not in {"embed", "send"}:
         return f"delivery 无效：{delivery}。仅支持 embed 或 send"
 
@@ -117,14 +116,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if picture_type == "random4kPic" and fourk_type not in ("acg", "wallpaper"):
         return "4K图片类型必须是 acg（二次元）或 wallpaper（风景）"
 
-    # 构造请求参数
     params: Dict[str, Any] = {"return": "json"}
     if picture_type == "acg":
         params["type"] = device
     elif picture_type == "random4kPic":
         params["type"] = fourk_type
 
-    # 创建图片保存目录
     from Undefined.utils.paths import IMAGE_CACHE_DIR, ensure_dir
 
     img_dir = ensure_dir(IMAGE_CACHE_DIR)
@@ -133,7 +130,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     base_url = _get_xxapi_base_url()
     api_url = f"{base_url}{API_PATHS[picture_type]}"
 
-    # 获取图片
     success_count = 0
     fail_count = 0
     local_image_paths: list[str] = []
@@ -153,14 +149,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
             # 美腿类型直接返回 JPEG 图片，不需要解析 JSON
             if picture_type == "meitui":
-                # 验证响应内容类型
                 content_type = response.headers.get("content-type", "")
                 if "image" not in content_type.lower():
                     logger.error(f"响应不是图片格式: {content_type}")
                     fail_count += 1
                     continue
 
-                # 保存图片
                 filename = f"{picture_type}_{uuid.uuid4().hex[:16]}.jpg"
                 filepath = img_dir / filename
                 filepath.write_bytes(response.content)
@@ -171,13 +165,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             else:
                 data = response.json()
 
-                # 检查响应
                 if data.get("code") != 200:
                     logger.error(f"获取图片失败: {data.get('msg')}")
                     fail_count += 1
                     continue
 
-                # 获取图片 URL
                 image_url = data.get("data")
                 if not image_url:
                     logger.error("响应中未找到图片 URL")
@@ -186,7 +178,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
                 logger.info(f"图片 URL: {image_url}")
 
-                # 下载图片到本地
                 logger.info("正在下载图片到本地...")
                 image_response = await request_with_retry(
                     "GET",
@@ -195,7 +186,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                     context=context,
                 )
 
-                # 保存图片
                 filename = f"{picture_type}_{uuid.uuid4().hex[:16]}.jpg"
                 filepath = img_dir / filename
                 filepath.write_bytes(image_response.content)
@@ -214,7 +204,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             logger.exception(f"获取图片失败: {e}")
             fail_count += 1
 
-    # 如果没有获取到任何图片
     if success_count == 0:
         return f"获取 {TYPE_NAMES[picture_type]} 图片失败，请稍后重试"
 

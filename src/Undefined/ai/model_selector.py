@@ -38,7 +38,6 @@ class ModelSelector:
         self._rr_lock = threading.Lock()
         self._rr_counters: dict[str, int] = {}
         self._preferences: dict[tuple[int, int], dict[str, str]] = {}
-        # pending_compares 只存模型名列表，不存配置对象
         self._pending_compares: dict[tuple[int, int], tuple[list[str], float]] = {}
         self._loaded = asyncio.Event()
 
