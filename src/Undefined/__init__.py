@@ -3,7 +3,22 @@
 from __future__ import annotations
 
 import importlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .ai import AIClient
+    from .api._context import RuntimeAPIContext
+    from .api.app import RuntimeAPIServer
+    from .attachments import AttachmentRegistry
+    from .cognitive.service import CognitiveService
+    from .config import Config, get_config, set_config
+    from .knowledge.manager import KnowledgeManager
+    from .memes.service import MemeService
+    from .skills.agents import AgentRegistry
+    from .skills.anthropic_skills import AnthropicSkillRegistry
+    from .skills.pipelines.registry import PipelineRegistry
+    from .skills.registry import BaseRegistry
+    from .skills.tools import ToolRegistry
 
 __version__ = "3.5.0"
 
