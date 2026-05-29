@@ -314,6 +314,8 @@ class GroupReplyMixin:
     ) -> None:
         """当检测到注入攻击时，生成并发送特定的防御性回复"""
         reply = await self.security.generate_injection_response(text)
+        if not reply.strip():
+            return
         if is_private:
             await self.sender.send_private_message(tid, reply, auto_history=False)
             await self.history_manager.add_private_message(

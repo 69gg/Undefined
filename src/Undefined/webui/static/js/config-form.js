@@ -249,15 +249,107 @@ function isLongText(value) {
     );
 }
 
+const FIELD_SELECT_EMPTY_OPTION = {
+    value: "",
+    label: "（空 / 不传，使用默认）",
+};
+
+const FIELD_SELECT_OPTION_RULES = [
+    {
+        match: (path) => path.endsWith(".pool.strategy"),
+        options: ["default", "round_robin", "random"],
+    },
+    {
+        match: (path) => path === "message_batcher.strategy",
+        options: ["extend", "fixed"],
+    },
+];
+
+/** @type {Record<string, Array<string | { value: string, label: string }>>} */
 const FIELD_SELECT_OPTIONS = {
     api_mode: ["chat_completions", "responses"],
-    gif_analysis_mode: ["grid", "multi"],
     reasoning_effort_style: ["openai", "anthropic"],
+    mode: ["off", "blacklist", "allowlist"],
+    agent_call_message_enabled: ["none", "agent", "tools", "clean", "all"],
+    level: ["DEBUG", "INFO", "WARNING", "ERROR"],
+    archive_prune_mode: ["delete", "merge", "none"],
+    oversize_strategy: ["downgrade", "info"],
+    prefer_quality: ["80", "64", "32"],
+    default_archive_format: ["zip", "tar.gz"],
+    tool_invoke_expose: [
+        "tools",
+        "toolsets",
+        "tools+toolsets",
+        "agents",
+        "all",
+    ],
+    query_default_mode: ["keyword", "semantic", "hybrid"],
+    gif_analysis_mode: ["grid", "multi"],
+    provider: ["xingzhige", "models"],
+    xingzhige_size: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+    openai_quality: [FIELD_SELECT_EMPTY_OPTION, "standard", "hd"],
+    openai_style: [FIELD_SELECT_EMPTY_OPTION, "vivid", "natural"],
+    openai_size: [
+        FIELD_SELECT_EMPTY_OPTION,
+        "1024x1024",
+        "1280x720",
+        "720x1280",
+        "1792x1024",
+        "1024x1792",
+    ],
     // path -> options key mapping (underscore-separated segments)
     image_gen_provider: ["xingzhige", "models"],
 };
 
+function normalizeSelectOption(option) {
+    if (typeof option === "string") {
+        return { value: option, label: option };
+    }
+    return {
+        value: String(option.value ?? ""),
+        label: String(option.label ?? option.value ?? ""),
+    };
+}
+
+function populateSelectInput(select, options, currentValue) {
+    const current = currentValue == null ? "" : String(currentValue);
+    const normalized = options.map(normalizeSelectOption);
+    const seen = new Set(normalized.map((item) => item.value));
+    if (current && !seen.has(current)) {
+        normalized.unshift({
+            value: current,
+            label: `${current} (当前值)`,
+        });
+    }
+    for (const { value, label } of normalized) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.innerText = label || value || "（空）";
+        option.selected = current === value;
+        select.appendChild(option);
+    }
+}
+
+function getSelectValueType(options) {
+    const values = options
+        .map(normalizeSelectOption)
+        .map((item) => item.value)
+        .filter((value) => value !== "");
+    if (values.length === 0) {
+        return "string";
+    }
+    const allNumeric = values.every((value) =>
+        /^-?\d+(?:\.\d+)?$/.test(value.trim()),
+    );
+    return allNumeric ? "number" : "string";
+}
+
 function getFieldSelectOptions(path) {
+    for (const rule of FIELD_SELECT_OPTION_RULES) {
+        if (rule.match(path)) {
+            return rule.options;
+        }
+    }
     // 先用完整路径的下划线拼接形式（支持嵌套路径如 image_gen.provider）
     const underscoreKey = path.replace(/\./g, "_");
     if (FIELD_SELECT_OPTIONS[underscoreKey]) {
@@ -318,14 +410,8 @@ function createField(path, val) {
         if (selectOptions) {
             input = document.createElement("select");
             input.className = "form-control config-input";
-            input.dataset.valueType = "string";
-            selectOptions.forEach((optionValue) => {
-                const option = document.createElement("option");
-                option.value = optionValue;
-                option.innerText = optionValue;
-                option.selected = String(val ?? "") === optionValue;
-                input.appendChild(option);
-            });
+            input.dataset.valueType = getSelectValueType(selectOptions);
+            populateSelectInput(input, selectOptions, val);
         } else if (isLongText(val)) {
             input = document.createElement("textarea");
             input.className = "form-control form-textarea config-input";
