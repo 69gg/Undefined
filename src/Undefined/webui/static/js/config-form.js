@@ -330,6 +330,20 @@ function populateSelectInput(select, options, currentValue) {
     }
 }
 
+function getSelectValueType(options) {
+    const values = options
+        .map(normalizeSelectOption)
+        .map((item) => item.value)
+        .filter((value) => value !== "");
+    if (values.length === 0) {
+        return "string";
+    }
+    const allNumeric = values.every((value) =>
+        /^-?\d+(?:\.\d+)?$/.test(value.trim()),
+    );
+    return allNumeric ? "number" : "string";
+}
+
 function getFieldSelectOptions(path) {
     for (const rule of FIELD_SELECT_OPTION_RULES) {
         if (rule.match(path)) {
@@ -396,8 +410,7 @@ function createField(path, val) {
         if (selectOptions) {
             input = document.createElement("select");
             input.className = "form-control config-input";
-            input.dataset.valueType =
-                typeof val === "number" ? "number" : "string";
+            input.dataset.valueType = getSelectValueType(selectOptions);
             populateSelectInput(input, selectOptions, val);
         } else if (isLongText(val)) {
             input = document.createElement("textarea");
