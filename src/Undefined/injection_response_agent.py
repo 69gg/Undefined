@@ -99,8 +99,7 @@ class InjectionResponseAgent:
         except Exception as exc:
             duration = time.perf_counter() - start_time
             logger.exception("[注入回复] 生成失败: %s elapsed=%.2fs", exc, duration)
-            # 失败时返回默认回复
-            return "有病？"
+            return ""
 
     async def close(self) -> None:
         """关闭 HTTP 客户端"""
