@@ -304,6 +304,10 @@ async def test_runtime_chat_stream_uses_webchat_lifecycle_events_only(
     payload = b"".join(response.writes).decode("utf-8")
     assert "event: token_delta" not in payload
     assert "event: tool_delta" not in payload
+    assert "event: stage" in payload
+    assert '"stage": "received"' in payload
+    assert '"elapsed_ms":' in payload
+    assert '"duration_ms":' in payload
     assert "event: tool_start" in payload
     assert "event: tool_end" in payload
     assert "event: message" in payload

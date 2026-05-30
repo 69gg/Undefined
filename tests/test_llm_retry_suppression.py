@@ -151,7 +151,7 @@ async def test_ai_ask_retries_pre_tool_local_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ai_ask_webchat_events_are_tool_lifecycle_only() -> None:
+async def test_ai_ask_webchat_events_include_stage_and_tool_lifecycle() -> None:
     client: Any = object.__new__(AIClient)
     client.runtime_config = cast(
         Any,
@@ -268,16 +268,25 @@ async def test_ai_ask_webchat_events_are_tool_lifecycle_only() -> None:
         extra_context={"webchat_event_callback": _webchat_event_callback},
     )
 
-    assert [event for event, _payload in events] == [
+    event_names = [event for event, _payload in events]
+    assert "stage" in event_names
+    assert [event for event, _payload in events if event != "stage"] == [
         "tool_start",
         "tool_end",
         "tool_start",
         "tool_end",
     ]
-    assert events[0][1]["name"] == "lookup"
-    assert events[1][1]["result"] == "tool result"
-    assert events[2][1]["name"] == "end"
-    assert events[3][1]["result"] == "对话已结束"
+    stage_names = [
+        str(payload.get("stage") or "") for event, payload in events if event == "stage"
+    ]
+    assert "building_context" in stage_names
+    assert "waiting_model" in stage_names
+    assert "waiting_tools" in stage_names
+    lifecycle_payloads = [payload for event, payload in events if event != "stage"]
+    assert lifecycle_payloads[0]["name"] == "lookup"
+    assert lifecycle_payloads[1]["result"] == "tool result"
+    assert lifecycle_payloads[2]["name"] == "end"
+    assert lifecycle_payloads[3]["result"] == "对话已结束"
 
 
 @pytest.mark.asyncio

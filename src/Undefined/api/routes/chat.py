@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 _VIRTUAL_USER_NAME = "system"
 _CHAT_SSE_KEEPALIVE_SECONDS = 10.0
+_CHAT_STAGE_REFRESH_SECONDS = 1.0
 _CHAT_JOB_EVENT_BUFFER_LIMIT = 1000
 _PREVIEW_LIMIT = 800
 _WEBCHAT_SEND_MESSAGE_TOOLS = frozenset(
@@ -55,6 +56,7 @@ _WEBCHAT_LIFECYCLE_EVENTS = frozenset(
     {"tool_start", "tool_end", "agent_start", "agent_end"}
 )
 _WEBCHAT_HISTORY_EVENTS = _WEBCHAT_LIFECYCLE_EVENTS | frozenset({"message"})
+_WEBCHAT_STAGE_EVENTS = frozenset({"stage"})
 
 
 @dataclass
@@ -72,6 +74,11 @@ class ChatJob:
     updated_at: float
     status: str = "queued"
     mode: str = "chat"
+    finished_at: float | None = None
+    duration_ms: int | None = None
+    current_stage: str = "queued"
+    current_stage_detail: str = ""
+    current_stage_started_at: float = 0.0
     outputs: list[str] = field(default_factory=list)
     history_outputs: list[str] = field(default_factory=list)
     history_attachments: list[dict[str, str]] = field(default_factory=list)
@@ -85,20 +92,47 @@ class ChatJob:
     history_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     done: asyncio.Event = field(default_factory=asyncio.Event)
     changed: asyncio.Condition = field(default_factory=asyncio.Condition)
+    tool_started_at: dict[str, float] = field(default_factory=dict)
 
     def snapshot(self) -> dict[str, Any]:
+        now = time.time()
+        elapsed_ms = _job_elapsed_ms(self, now)
+        stage_elapsed_ms = _stage_elapsed_ms(self, now)
         return {
             "job_id": self.job_id,
             "status": self.status,
             "mode": self.mode,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "finished_at": self.finished_at,
+            "elapsed_ms": elapsed_ms,
+            "duration_ms": self.duration_ms,
+            "current_stage": self.current_stage,
+            "current_stage_detail": self.current_stage_detail or None,
+            "current_stage_started_at": self.current_stage_started_at or None,
+            "current_stage_elapsed_ms": stage_elapsed_ms,
             "last_seq": self.next_seq - 1,
             "error": self.error or None,
             "reply": "\n\n".join(self.outputs).strip(),
             "messages": list(self.outputs),
             "history_finalized": self.history_finalized,
         }
+
+    def current_stage_event(self) -> ChatJobEvent | None:
+        if self.done.is_set() or not self.current_stage:
+            return None
+        now = time.time()
+        payload: dict[str, Any] = {
+            "job_id": self.job_id,
+            "stage": self.current_stage,
+            "elapsed_ms": _job_elapsed_ms(self, now),
+        }
+        if self.current_stage_started_at > 0:
+            payload["started_at"] = self.current_stage_started_at
+            payload["stage_elapsed_ms"] = _stage_elapsed_ms(self, now)
+        if self.current_stage_detail:
+            payload["detail"] = self.current_stage_detail
+        return ChatJobEvent(seq=self.next_seq - 1, event="stage", payload=payload)
 
 
 class ChatJobManager:
@@ -126,6 +160,7 @@ class ChatJobManager:
                 "permission": "superadmin",
             },
         )
+        await self._append_stage(job, "received")
         job.task = asyncio.create_task(self._run_job(job), name=f"webchat:{job.job_id}")
         return job
 
@@ -173,7 +208,7 @@ class ChatJobManager:
         if job.status in {"done", "error", "cancelled"}:
             return job
         job.status = "cancelled"
-        job.updated_at = time.time()
+        self._mark_job_finished(job)
         if job.task is not None and not job.task.done():
             job.task.cancel()
             self._schedule_cancel_finalizer(job)
@@ -184,7 +219,11 @@ class ChatJobManager:
             await self._append_event(
                 job,
                 "error",
-                {"error": "cancelled", "job_id": job.job_id},
+                {
+                    "error": "cancelled",
+                    "job_id": job.job_id,
+                    "duration_ms": job.duration_ms,
+                },
             )
         if job.task is None or job.task.done():
             job.history_finalized = True
@@ -254,6 +293,7 @@ class ChatJobManager:
             content = str(message or "").strip()
             if not content:
                 return
+            await self._append_stage(job, "sending_message")
             rendered = await render_message_with_pic_placeholders(
                 content,
                 registry=self._ctx.ai.attachment_registry,
@@ -266,16 +306,41 @@ class ChatJobManager:
             job.outputs.append(rendered.delivery_text)
             job.history_outputs.append(rendered.history_text)
             job.history_attachments.extend(rendered.attachments)
+            now = time.time()
             await self._append_event(
                 job,
                 "message",
-                {"content": rendered.delivery_text, "job_id": job.job_id},
+                {
+                    "content": rendered.delivery_text,
+                    "job_id": job.job_id,
+                    "elapsed_ms": _job_elapsed_ms(job, now),
+                },
             )
 
         async def _webchat_event_callback(event: str, payload: dict[str, Any]) -> None:
+            if event in _WEBCHAT_STAGE_EVENTS:
+                await self._append_stage(
+                    job,
+                    str(payload.get("stage") or payload.get("key") or ""),
+                    detail=payload.get("detail"),
+                )
+                return
             if event not in {"tool_start", "tool_end", "agent_start", "agent_end"}:
                 return
             event_payload = _sanitize_webchat_event_payload(event, payload)
+            event_time = time.time()
+            output_event = str(event_payload.get("_event", event) or event)
+            tool_key = _webchat_tool_event_key(event_payload)
+            if output_event in {"tool_start", "agent_start"}:
+                job.tool_started_at[tool_key] = event_time
+                event_payload["started_at"] = event_time
+            elif output_event in {"tool_end", "agent_end"}:
+                started_at = job.tool_started_at.pop(tool_key, None)
+                if started_at is not None:
+                    event_payload["duration_ms"] = max(
+                        0, int((event_time - started_at) * 1000)
+                    )
+            event_payload["elapsed_ms"] = _job_elapsed_ms(job, event_time)
             event_payload["job_id"] = job.job_id
             await self._append_event(job, event, event_payload)
 
@@ -286,12 +351,20 @@ class ChatJobManager:
             }
             if "webchat_event_callback" in inspect.signature(run_webui_chat).parameters:
                 run_kwargs["webchat_event_callback"] = _webchat_event_callback
+            await self._append_stage(job, "processing")
             mode = await run_webui_chat(self._ctx, **run_kwargs)
             job.mode = mode
             job.status = "done"
-            job.updated_at = time.time()
+            self._mark_job_finished(job)
             done_payload = _build_chat_response_payload(mode, outputs)
-            done_payload.update({"job_id": job.job_id, "status": job.status})
+            done_payload.update(
+                {
+                    "job_id": job.job_id,
+                    "status": job.status,
+                    "duration_ms": job.duration_ms,
+                }
+            )
+            await self._append_stage(job, "done")
             await self._append_event(
                 job,
                 "done",
@@ -299,7 +372,7 @@ class ChatJobManager:
             )
         except asyncio.CancelledError:
             job.status = "cancelled"
-            job.updated_at = time.time()
+            self._mark_job_finished(job)
             if not any(
                 event.event == "error" and event.payload.get("error") == "cancelled"
                 for event in job.events
@@ -307,17 +380,25 @@ class ChatJobManager:
                 await self._append_event(
                     job,
                     "error",
-                    {"error": "cancelled", "job_id": job.job_id},
+                    {
+                        "error": "cancelled",
+                        "job_id": job.job_id,
+                        "duration_ms": job.duration_ms,
+                    },
                 )
         except Exception as exc:
             logger.exception("[RuntimeAPI] chat job failed: %s", exc)
             job.status = "error"
             job.error = str(exc)
-            job.updated_at = time.time()
+            self._mark_job_finished(job)
             await self._append_event(
                 job,
                 "error",
-                {"error": str(exc), "job_id": job.job_id},
+                {
+                    "error": str(exc),
+                    "job_id": job.job_id,
+                    "duration_ms": job.duration_ms,
+                },
             )
         finally:
             try:
@@ -352,6 +433,37 @@ class ChatJobManager:
             job.changed.notify_all()
             return item
 
+    async def _append_stage(
+        self,
+        job: ChatJob,
+        stage: str,
+        *,
+        detail: Any | None = None,
+    ) -> ChatJobEvent | None:
+        stage_key = str(stage or "").strip()
+        if not stage_key:
+            return None
+        now = time.time()
+        payload: dict[str, Any] = {
+            "job_id": job.job_id,
+            "stage": stage_key,
+            "started_at": now,
+            "elapsed_ms": _job_elapsed_ms(job, now),
+        }
+        detail_text = _preview(detail, 120)
+        job.current_stage = stage_key
+        job.current_stage_detail = detail_text
+        job.current_stage_started_at = now
+        if detail_text:
+            payload["detail"] = detail_text
+        return await self._append_event(job, "stage", payload)
+
+    def _mark_job_finished(self, job: ChatJob) -> None:
+        now = time.time()
+        job.finished_at = now
+        job.duration_ms = _job_elapsed_ms(job, now)
+        job.updated_at = now
+
     async def _finalize_job_history(self, job: ChatJob) -> None:
         async with job.history_lock:
             if job.history_finalized:
@@ -375,6 +487,27 @@ class ChatJobManager:
                     if inspect.isawaitable(maybe_awaitable):
                         await maybe_awaitable
             job.history_finalized = True
+
+
+def _job_elapsed_ms(job: ChatJob, now: float | None = None) -> int:
+    measured_at = time.time() if now is None else now
+    return max(0, int((measured_at - job.created_at) * 1000))
+
+
+def _stage_elapsed_ms(job: ChatJob, now: float | None = None) -> int:
+    if job.current_stage_started_at <= 0:
+        return 0
+    measured_at = time.time() if now is None else now
+    return max(0, int((measured_at - job.current_stage_started_at) * 1000))
+
+
+def _webchat_tool_event_key(payload: dict[str, Any]) -> str:
+    return (
+        str(payload.get("tool_call_id") or "").strip()
+        or str(payload.get("name") or "").strip()
+        or str(payload.get("api_name") or "").strip()
+        or "tool"
+    )
 
 
 def _preview(value: Any, limit: int = _PREVIEW_LIMIT) -> str:
@@ -474,6 +607,9 @@ def _build_webchat_history_payload(job: ChatJob) -> dict[str, Any]:
         "job_id": job.job_id,
         "mode": job.mode,
         "status": job.status,
+        "created_at": job.created_at,
+        "finished_at": job.finished_at,
+        "duration_ms": job.duration_ms,
         "events": [
             {
                 "seq": item.seq,
@@ -580,6 +716,9 @@ def _history_record_to_item(item: dict[str, Any]) -> dict[str, Any] | None:
             "job_id": str(webchat.get("job_id", "") or "").strip(),
             "mode": str(webchat.get("mode", "") or "").strip(),
             "status": str(webchat.get("status", "") or "").strip(),
+            "created_at": webchat.get("created_at"),
+            "finished_at": webchat.get("finished_at"),
+            "duration_ms": webchat.get("duration_ms"),
             "events": webchat_events,
         }
     return mapped
@@ -594,6 +733,14 @@ async def run_webui_chat(
     | None = None,
 ) -> str:
     """Execute a single WebUI chat turn (command dispatch or AI ask)."""
+
+    async def emit_stage(stage: str, detail: Any | None = None) -> None:
+        if webchat_event_callback is None:
+            return
+        await webchat_event_callback(
+            "stage",
+            {"stage": stage, **({"detail": detail} if detail is not None else {})},
+        )
 
     cfg = ctx.config_getter()
     permission_sender_id = int(cfg.superadmin_qq)
@@ -611,6 +758,7 @@ async def run_webui_chat(
         get_forward_messages=ctx.onebot.get_forward_msg,
     )
     normalized_text = registered_input.normalized_text or text
+    await emit_stage("recording_history")
     await ctx.history_manager.add_private_message(
         user_id=_VIRTUAL_USER_ID,
         text_content=normalized_text,
@@ -621,6 +769,7 @@ async def run_webui_chat(
 
     command = ctx.command_dispatcher.parse_command(normalized_text)
     if command:
+        await emit_stage("running_command")
         await ctx.command_dispatcher.dispatch_private(
             user_id=_VIRTUAL_USER_ID,
             sender_id=permission_sender_id,
@@ -628,6 +777,7 @@ async def run_webui_chat(
             send_private_callback=send_output,
             is_webui_session=True,
         )
+        await emit_stage("command_done")
         return "command"
 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -696,6 +846,7 @@ async def run_webui_chat(
         rctx.set_resource("webui_session", True)
         rctx.set_resource("webui_permission", "superadmin")
 
+        await emit_stage("asking_ai")
         result = await ctx.ai.ask(
             full_question,
             send_message_callback=send_message_callback,
@@ -872,10 +1023,15 @@ async def chat_handler(
             events = await job_manager.wait_for_events_after(
                 job,
                 after,
-                timeout=_CHAT_SSE_KEEPALIVE_SECONDS,
+                timeout=min(_CHAT_STAGE_REFRESH_SECONDS, _CHAT_SSE_KEEPALIVE_SECONDS),
             )
             if not events:
-                await response.write(b": keep-alive\n\n")
+                stage_event = job.current_stage_event()
+                if stage_event is not None:
+                    await _write_sse_event(response, stage_event)
+                    after = max(after, stage_event.seq)
+                else:
+                    await response.write(b": keep-alive\n\n")
                 if job.done.is_set():
                     break
                 continue
@@ -981,10 +1137,15 @@ async def chat_job_events_handler(
             events = await job_manager.wait_for_events_after(
                 job,
                 after,
-                timeout=_CHAT_SSE_KEEPALIVE_SECONDS,
+                timeout=min(_CHAT_STAGE_REFRESH_SECONDS, _CHAT_SSE_KEEPALIVE_SECONDS),
             )
             if not events:
-                await response.write(b": keep-alive\n\n")
+                stage_event = job.current_stage_event()
+                if stage_event is not None:
+                    await _write_sse_event(response, stage_event)
+                    after = max(after, stage_event.seq)
+                else:
+                    await response.write(b": keep-alive\n\n")
                 if job.done.is_set():
                     break
                 continue

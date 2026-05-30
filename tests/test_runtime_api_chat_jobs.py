@@ -192,6 +192,8 @@ async def test_chat_job_events_after_reconnect_and_disconnect_does_not_cancel(
         if detail_payload["status"] == "done":
             break
         await asyncio.sleep(0.01)
+    assert isinstance(detail_payload["duration_ms"], int)
+    assert detail_payload["finished_at"] is not None
 
     second_request = cast(
         web.Request,
@@ -209,8 +211,13 @@ async def test_chat_job_events_after_reconnect_and_disconnect_does_not_cancel(
     second_events = _decode_sse(cast(_DummyStreamResponse, second_response).writes)
 
     assert cancelled is False
-    assert [event["event"] for event in second_events] == ["message", "done"]
-    assert second_events[0]["payload"]["content"] == "rendered second"
+    assert "stage" in [event["event"] for event in second_events]
+    assert [event["event"] for event in second_events if event["event"] != "stage"] == [
+        "message",
+        "done",
+    ]
+    message_events = [event for event in second_events if event["event"] == "message"]
+    assert message_events[0]["payload"]["content"] == "rendered second"
 
 
 @pytest.mark.asyncio
@@ -226,6 +233,46 @@ async def test_chat_job_cancel_unknown_returns_404() -> None:
 
     assert response.status == 404
     assert payload["error"] == "Job not found"
+
+
+@pytest.mark.asyncio
+async def test_chat_job_events_refreshes_stage_without_advancing_seq(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = asyncio.Event()
+
+    async def _fake_run_webui_chat(_ctx: Any, **_kwargs: Any) -> str:
+        await release.wait()
+        return "chat"
+
+    context = _context()
+    monkeypatch.setattr(web, "StreamResponse", _DummyStreamResponse)
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+    job = await server._chat_job_manager.create_job("hello")
+    await asyncio.sleep(0.01)
+    request = cast(
+        web.Request,
+        cast(
+            Any,
+            _DummyRequest(
+                match_info={"job_id": job.job_id},
+                query={"after": str(job.next_seq - 1)},
+                headers={},
+                transport=_DummyTransport(closing_after_writes=1),
+            ),
+        ),
+    )
+
+    response = await server._chat_job_events_handler(request)
+    events = _decode_sse(cast(_DummyStreamResponse, response).writes)
+
+    assert events[0]["event"] == "stage"
+    assert events[0]["seq"] == job.next_seq - 1
+    assert events[0]["payload"]["stage"] == job.current_stage
+    assert isinstance(events[0]["payload"]["elapsed_ms"], int)
+    release.set()
+    await server._chat_job_manager.cancel_job(job.job_id)
 
 
 @pytest.mark.asyncio
@@ -264,6 +311,7 @@ async def test_chat_job_persists_webchat_lifecycle_history(
     ) -> str:
         assert text == "hello"
         assert webchat_event_callback is not None
+        await webchat_event_callback("stage", {"stage": "waiting_model"})
         await webchat_event_callback("token_delta", {"delta": "ignored"})
         await webchat_event_callback(
             "tool_start",
@@ -321,6 +369,8 @@ async def test_chat_job_persists_webchat_lifecycle_history(
     webchat = call["webchat"]
     assert webchat["display_only"] is True
     assert webchat["job_id"] == job_id
+    assert isinstance(webchat["duration_ms"], int)
+    assert webchat["finished_at"] is not None
     assert [event["event"] for event in webchat["events"]] == [
         "tool_start",
         "tool_end",
@@ -328,4 +378,5 @@ async def test_chat_job_persists_webchat_lifecycle_history(
     ]
     assert webchat["events"][0]["payload"]["arguments_preview"] == ""
     assert webchat["events"][1]["payload"]["result_preview"] == ""
+    assert "duration_ms" in webchat["events"][1]["payload"]
     assert webchat["events"][2]["payload"]["content"] == "rendered final"

@@ -234,6 +234,7 @@ curl http://127.0.0.1:8788/openapi.json
 - `stream = false` 保持同步响应。
 - 当 `stream = true` 时，Runtime 会创建 WebChat job，并返回 `text/event-stream`（SSE）：
   - `event: meta`：会话元信息。
+  - `event: stage`：当前处理阶段，用于 WebUI 在 AI 标签后实时显示状态和已用时；payload 形如 `{"job_id":"...","stage":"waiting_model","elapsed_ms":1234,"detail":"..."}`。阶段和计时由 Runtime job 统一计算，客户端只展示 payload。
   - `event: tool_start` / `tool_end`：主对话工具开始与结束。
   - `event: agent_start` / `agent_end`：主对话调用 Agent 开始与结束。
   - `event: message`：AI/命令最终输出片段。
@@ -241,7 +242,9 @@ curl http://127.0.0.1:8788/openapi.json
   - `event: error`：任务失败或取消。
   - 在长时间无内容时会发送 `: keep-alive` 注释帧，防止中间层空闲断连。
   - SSE 帧包含 `id: <seq>`，客户端可用 `after=<seq>` 续接 job 事件。
+  - `stage` 是实时 UI 状态事件，不写入 `webchat.events` 历史；刷新后只恢复已落盘的工具 / Agent / 正文时序。
   - WebChat SSE 不发布模型 token 级文本增量，也不发布工具参数增量；正文以 `message` 事件展示，工具只按生命周期事件展示。
+  - 工具结束事件 payload 会尽量带 `duration_ms`，用于 WebUI 在工具块状态后显示本次调用耗时；`done` / `error` payload 会带 `duration_ms` 表示整轮 job 总耗时。总耗时从 job 创建开始计，到 `done`/`error`/`cancelled` 收尾为止。
   - 工具事件 payload 可能带 `ui_hint`。当前用于 WebChat 展示降噪：`webchat_private_send` 表示同一 WebChat 私聊回复已通过 `message` 事件展示，工具块只需显示发送状态；`webchat_end` 表示 `end` 成功结束，工具块可隐藏重复的成功结果。
 
 行为约定：
@@ -266,6 +269,9 @@ curl http://127.0.0.1:8788/openapi.json
     "job_id": "9c1...",
     "mode": "chat",
     "status": "done",
+    "created_at": 1780123200.0,
+    "finished_at": 1780123201.5,
+    "duration_ms": 1500,
     "events": [
       {
         "seq": 2,
@@ -294,6 +300,7 @@ curl http://127.0.0.1:8788/openapi.json
           "tool_call_id": "call_1",
           "name": "search",
           "ok": true,
+          "duration_ms": 420,
           "result_preview": "摘要",
           "is_agent": false
         }

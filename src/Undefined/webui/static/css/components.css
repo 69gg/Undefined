@@ -634,6 +634,40 @@
   letter-spacing: 1px;
   color: var(--text-tertiary);
   margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 18px;
+  flex-wrap: wrap;
+}
+.runtime-chat-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: min(260px, 100%);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1.25;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.runtime-chat-stage[hidden] {
+  display: none;
+}
+.runtime-chat-stage::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: currentColor;
+  animation: runtime-chat-stage-pulse 1.2s ease-in-out infinite;
 }
 .runtime-chat-content {
   font-size: 15px;
@@ -892,9 +926,21 @@
     opacity: 0;
   }
 }
+@keyframes runtime-chat-stage-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .runtime-chat-item,
-  .runtime-chat-item.streaming .runtime-chat-content::after {
+  .runtime-chat-item.streaming .runtime-chat-content::after,
+  .runtime-chat-stage::before {
     animation: none;
   }
 }

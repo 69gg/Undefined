@@ -153,6 +153,22 @@ class PromptBuilder:
         返回:
             构建好的消息列表 (role/content 结构)
         """
+        webchat_event_callback = (
+            extra_context.get("webchat_event_callback")
+            if isinstance(extra_context, dict)
+            else None
+        )
+        if not callable(webchat_event_callback):
+            webchat_event_callback = None
+
+        async def emit_webchat_stage(stage: str, detail: Any | None = None) -> None:
+            if webchat_event_callback is None:
+                return
+            payload: dict[str, Any] = {"stage": stage}
+            if detail is not None:
+                payload["detail"] = detail
+            await webchat_event_callback("stage", payload)
+
         system_prompt = await self._load_system_prompt()
         logger.debug(
             "[Prompt] system_prompt_len=%s path=%s",
@@ -292,6 +308,7 @@ class PromptBuilder:
         # 长期记忆 / 认知 / end 摘要 / 历史等延迟注入块（排在主 system 之后）
 
         if self._memory_storage:
+            await emit_webchat_stage("checking_long_term_memory")
             memories = self._memory_storage.get_all()
             if memories:
                 memory_lines = [f"- {mem.fact}" for mem in memories]
@@ -379,6 +396,7 @@ class PromptBuilder:
                 resolved_user_id or "",
                 resolved_sender_id or "",
             )
+            await emit_webchat_stage("searching_cognitive_memory")
             cognitive_context = await self._cognitive_service.build_context(
                 query=cognitive_query,
                 group_id=resolved_group_id,
@@ -474,6 +492,7 @@ class PromptBuilder:
                 )
 
         if get_recent_messages_callback:
+            await emit_webchat_stage("loading_chat_history")
             await self._inject_recent_messages(
                 deferred_messages, get_recent_messages_callback, extra_context, question
             )

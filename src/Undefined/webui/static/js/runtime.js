@@ -468,7 +468,10 @@
         item.className = `runtime-chat-item ${role}`;
         if (options.id) item.dataset.messageId = options.id;
         if (options.jobId) item.dataset.jobId = options.jobId;
-        item.innerHTML = `<div class="runtime-chat-role">${role === "user" ? "You" : "AI"}</div><div class="${contentClass}">${renderChatContent(content, isBot)}</div>`;
+        const roleHtml = isBot
+            ? `<span class="runtime-chat-role-label">AI</span><span class="runtime-chat-stage" hidden></span>`
+            : `<span class="runtime-chat-role-label">You</span>`;
+        item.innerHTML = `<div class="runtime-chat-role">${roleHtml}</div><div class="${contentClass}">${renderChatContent(content, isBot)}</div>`;
         if (options.prepend) {
             log.insertBefore(item, log.firstChild);
         } else {
@@ -476,6 +479,17 @@
             if (options.scroll !== false) scrollChatToBottom();
         }
         return item;
+    }
+
+    function formatDurationMs(value) {
+        const ms = Number(value);
+        if (!Number.isFinite(ms) || ms < 0) return "";
+        if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+        const seconds = ms / 1000;
+        if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+        const minutes = Math.floor(seconds / 60);
+        const remainder = Math.floor(seconds % 60);
+        return `${minutes}m ${remainder}s`;
     }
 
     function scrollChatToBottom() {
@@ -580,8 +594,39 @@
     }
 
     function finalizeActiveChatMessage() {
+        const item = findActiveChatMessage();
+        if (item) setChatStage(item, null);
         finishStreamingMessage();
         runtimeState.activeChatMessageId = null;
+    }
+
+    function chatStageLabel(stage) {
+        const key = `runtime.chat_stage_${String(stage || "").trim()}`;
+        const label = t(key);
+        if (label !== key) return label;
+        return String(stage || "").replace(/_/g, " ");
+    }
+
+    function setChatStage(item, payload) {
+        if (!item) return;
+        const stageEl = item.querySelector(".runtime-chat-stage");
+        if (!stageEl) return;
+        const stage = payload && payload.stage ? String(payload.stage) : "";
+        if (!stage) {
+            stageEl.hidden = true;
+            stageEl.textContent = "";
+            stageEl.removeAttribute("title");
+            return;
+        }
+        const label = chatStageLabel(stage);
+        const detail = String((payload && payload.detail) || "").trim();
+        const elapsedMs = Number(payload && payload.elapsed_ms);
+        const duration = Number.isFinite(elapsedMs)
+            ? formatDurationMs(elapsedMs)
+            : "";
+        stageEl.hidden = false;
+        stageEl.textContent = duration ? `${label} · ${duration}` : label;
+        stageEl.title = detail ? `${label} · ${detail}` : label;
     }
 
     function toolStatusLabel(block) {
@@ -613,6 +658,10 @@
     function renderToolBlock(block) {
         const label = toolDisplayLabel(block);
         const statusLabel = toolStatusLabel(block);
+        const durationLabel = formatDurationMs(block.durationMs);
+        const metaLabel = durationLabel
+            ? `${statusLabel} · ${durationLabel}`
+            : statusLabel;
         const args = block.argumentsPreview
             ? `<pre>${escapeHtml(block.argumentsPreview)}</pre>`
             : "";
@@ -625,7 +674,7 @@
             : "";
         return (
             `<details class="runtime-tool-block ${escapeHtml(block.status)}${hintClass}"${openAttr}>` +
-            `<summary><span>${escapeHtml(label)}</span><code>${escapeHtml(block.name || "--")}</code><em>${escapeHtml(statusLabel)}</em></summary>` +
+            `<summary><span>${escapeHtml(label)}</span><code>${escapeHtml(block.name || "--")}</code><em>${escapeHtml(metaLabel)}</em></summary>` +
             args +
             result +
             `</details>`
@@ -687,6 +736,10 @@
                               "",
                       ),
             uiHint: nextUiHint,
+            durationMs:
+                payload && payload.duration_ms !== undefined
+                    ? Number(payload.duration_ms)
+                    : previous.durationMs,
         };
         blocks.set(key, block);
         return block;
@@ -1626,6 +1679,12 @@
                 );
                 if (existing) existing.dataset.jobId = runtimeState.activeJobId;
             }
+            return;
+        }
+        if (event === "stage") {
+            const item = ensureStreamingMessage(eventJobId);
+            if (!item) return;
+            setChatStage(item, payload || {});
             return;
         }
         if (

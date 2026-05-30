@@ -4,6 +4,8 @@ from pathlib import Path
 
 
 RUNTIME_JS = Path("src/Undefined/webui/static/js/runtime.js")
+RUNTIME_CSS = Path("src/Undefined/webui/static/css/components.css")
+I18N_JS = Path("src/Undefined/webui/static/js/i18n.js")
 
 
 def test_webchat_frontend_reuses_job_message_for_final_message() -> None:
@@ -33,6 +35,25 @@ def test_webchat_frontend_handles_tool_lifecycle_and_webchat_hints() -> None:
     assert 'block.uiHint === "webchat_private_send"' in source
     assert 'block.uiHint === "webchat_end"' in source
     assert 'nextUiHint === "webchat_private_send"' in source
+
+
+def test_webchat_frontend_renders_live_stage_after_ai_label() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    css = RUNTIME_CSS.read_text(encoding="utf-8")
+    i18n = I18N_JS.read_text(encoding="utf-8")
+
+    assert 'runtime-chat-role-label">AI' in source
+    assert "runtime-chat-stage" in source
+    assert 'if (event === "stage")' in source
+    assert "setChatStage(item, payload || {})" in source
+    assert "setChatStage(item, null)" in source
+    assert "formatDurationMs" in source
+    assert "payload && payload.elapsed_ms" in source
+    assert "Date.now() - runtimeState.activeStageStartedAt" not in source
+    assert "runtime.chat_stage_waiting_model" in i18n
+    assert "runtime.chat_stage_searching_cognitive_memory" in i18n
+    assert ".runtime-chat-stage" in css
+    assert "runtime-chat-stage-pulse" in css
 
 
 def test_webchat_frontend_restores_history_tool_blocks_without_stream_state() -> None:
@@ -67,3 +88,11 @@ def test_webchat_frontend_renders_chat_as_event_timeline() -> None:
     assert 'appendTimelineMessage(item, content, "bot")' in message_branch
     assert 'updateChatMessage(item, content, "bot")' not in message_branch
     assert "timeline.appendChild(node)" in timeline_helper
+
+
+def test_webchat_frontend_renders_tool_duration() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+
+    assert "block.durationMs" in source
+    assert "payload.duration_ms" in source
+    assert "statusLabel} · ${durationLabel}" in source
