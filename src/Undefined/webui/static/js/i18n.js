@@ -262,9 +262,6 @@ const I18N = {
         "runtime.profiles_placeholder": "输入侧写关键词...",
         "runtime.cognitive_profile_get": "按实体查看侧写",
         "runtime.fetch": "获取",
-        "runtime.chat_title": "AI Chat（虚拟私聊 system#42）",
-        "runtime.chat_hint":
-            "该会话由 WebUI 发起，权限为 superadmin；私聊里可直接使用 /命令。",
         "runtime.chat_placeholder": "输入消息，或直接 /help 这样的命令",
         "runtime.chat_clear": "清空历史",
         "runtime.chat_clear_confirm":
@@ -296,7 +293,8 @@ const I18N = {
         "runtime.not_found": "未命中",
         "runtime.api_start_hint": "请先在 WebUI 中启动机器人进程。",
         "chat.title": "智能对话",
-        "chat.subtitle": "虚拟私聊 system#42。",
+        "chat.subtitle":
+            "虚拟私聊 system#42。该会话由 WebUI 发起，权限为 superadmin；私聊里可直接使用 /命令。",
         "about.title": "项目信息",
         "about.subtitle": "关于 Undefined 项目的作者及许可协议。",
         "about.author": "作者",
@@ -603,9 +601,6 @@ const I18N = {
         "runtime.profiles_placeholder": "Search profile keyword...",
         "runtime.cognitive_profile_get": "Get Profile by Entity",
         "runtime.fetch": "Fetch",
-        "runtime.chat_title": "AI Chat (virtual private chat system#42)",
-        "runtime.chat_hint":
-            "This WebUI session runs as superadmin; slash commands work directly in private chat.",
         "runtime.chat_placeholder": "Type a message, or run /help directly",
         "runtime.chat_clear": "Clear History",
         "runtime.chat_clear_confirm":
@@ -638,7 +633,8 @@ const I18N = {
         "runtime.api_start_hint":
             "Please start the bot process in WebUI first.",
         "chat.title": "AI Dialog",
-        "chat.subtitle": "Virtual private session system#42.",
+        "chat.subtitle":
+            "Virtual private session system#42. This WebUI session runs as superadmin; slash commands work directly in private chat.",
         "about.title": "About Project",
         "about.subtitle": "Information about authors and open source licenses.",
         "about.author": "Author",
