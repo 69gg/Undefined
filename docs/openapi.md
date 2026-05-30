@@ -246,7 +246,7 @@ curl http://127.0.0.1:8788/openapi.json
 - 工具结束事件 payload 会尽量带 `duration_ms`，用于 WebUI 在工具块状态后显示本次调用耗时；并发工具按实际完成时间发布结束事件，LLM tool message 回填仍保持模型要求的原始顺序。`done` / `error` payload 会带 `duration_ms` 表示整轮 job 总耗时。总耗时从 job 创建开始计，到 `done`/`error`/`cancelled` 收尾为止。
 - 工具 / Agent 事件 payload 由后端补齐调用链字段：`webchat_call_id`、`parent_webchat_call_id`、`depth`、`agent_path`。Agent 内部工具、子 Agent 和 Agent 内发送的正文会以父子关系和 timeline 嵌套，前端只按这些字段展示。
 - 工具 / Agent 事件 payload 由后端补齐 `status`，取值通常为 `running`、`done`、`error`、`cancelled`。如果 job 失败或取消时仍有未闭合调用，历史 metadata 会在统一落盘阶段补齐失败 / 取消终态，避免刷新后继续显示为运行中。
-- WebUI 展开工具 / Agent 调用块时，会按输入 / 输出分区展示脱敏截断后的 `arguments_preview` 和 `result_preview`；结构化预览会渲染为带颜色的键值字段。
+- WebUI 展开工具 / Agent 调用块时，会按输入 / 输出分区展示由 Runtime 生成的 `arguments_preview` 和 `result_preview`。预览会递归遮蔽常见敏感字段名（如 `api_key`、`authorization`、`token`、`password`、`secret`、`cookie` 等）并按长度截断；结构化预览会渲染为带颜色的键值字段。预览不是权限边界，工具实现仍应避免把完整凭证写入结果正文。
 - 工具事件 payload 可能带 `ui_hint`。当前用于 WebChat 展示降噪：`webchat_private_send` 表示同一 WebChat 私聊回复已通过 `message` 事件展示，工具块只需显示发送状态；`webchat_end` 表示 `end` 成功结束，工具块可隐藏重复的成功结果。
 
 行为约定：
@@ -420,6 +420,8 @@ curl http://127.0.0.1:8788/openapi.json
 ```
 
 `events` 只包含 `after` 之后的持久事件以及当前运行阶段快照。快照使用当前 `last_seq`，便于刷新或断线后以 `job_id + seq` 轮询续接，但不会推进序号或重复写入历史。
+
+Runtime 在同一个 job 条件锁内维护事件、顶层阶段、Agent 阶段和耗时快照，因此 JSON 查询和兼容 SSE 都应看到一致的 job 状态。
 - `GET /api/v1/chat/jobs/{job_id}/events?after=<seq>` 加请求头 `Accept: text/event-stream`：兼容 SSE 订阅；SSE 帧包含 `id: <seq>`，长时间无事件时会发送 keep-alive 注释帧。
 - `POST /api/v1/chat/jobs/{job_id}/cancel`：取消运行中的 job。
 

@@ -17,6 +17,8 @@
         activeChatMessageId: null,
         chatPollTimer: null,
         chatPollBackoffMs: 1000,
+        activeJobResumeTimer: null,
+        activeJobResumeAttempts: 0,
         toolBlocks: new Map(),
         toolCollapseTimers: new Map(),
         probeTimer: null,
@@ -30,6 +32,18 @@
     const RUNTIME_DISABLED_ERROR = "Runtime API disabled";
     const CHAT_AUTO_SCROLL_STORAGE_KEY = "undefined_webchat_auto_scroll";
     const TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS = 2000;
+    const ACTIVE_JOB_RESUME_MAX_ATTEMPTS = 20;
+
+    function prefersReducedMotion() {
+        return (
+            typeof window.matchMedia === "function" &&
+            window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        );
+    }
+
+    function chatScrollBehavior() {
+        return prefersReducedMotion() ? "auto" : "smooth";
+    }
 
     function i18nFormat(key, params = {}) {
         let text = t(key);
@@ -501,13 +515,19 @@
         if (!runtimeState.chatAutoScroll) return;
         const log = get("runtimeChatLog");
         if (!log) return;
-        log.scrollTo({ top: log.scrollHeight, behavior: "smooth" });
+        log.scrollTo({
+            top: log.scrollHeight,
+            behavior: chatScrollBehavior(),
+        });
     }
 
     function forceScrollChatToBottom() {
         const log = get("runtimeChatLog");
         if (!log) return;
-        log.scrollTo({ top: log.scrollHeight, behavior: "smooth" });
+        log.scrollTo({
+            top: log.scrollHeight,
+            behavior: chatScrollBehavior(),
+        });
     }
 
     function scrollChatToBottomSoon() {
@@ -657,6 +677,11 @@
     function stopChatPolling() {
         clearTimeout(runtimeState.chatPollTimer);
         runtimeState.chatPollTimer = null;
+    }
+
+    function stopActiveJobResumeTimer() {
+        clearTimeout(runtimeState.activeJobResumeTimer);
+        runtimeState.activeJobResumeTimer = null;
     }
 
     function finishStreamingMessage() {
@@ -1582,6 +1607,48 @@
         );
     }
 
+    function isSafeRenderedUrl(url) {
+        const text = String(url || "").trim();
+        if (!text) return false;
+        try {
+            const parsed = new URL(text, window.location.origin);
+            return ["http:", "https:", "mailto:"].includes(parsed.protocol);
+        } catch (_error) {
+            return false;
+        }
+    }
+
+    function createSafeMarkedRenderer() {
+        if (typeof marked === "undefined" || !marked.Renderer) return null;
+        const renderer = new marked.Renderer();
+        renderer.html = ({ text }) => escapeHtml(text || "");
+        renderer.link = ({ href, title, tokens }) => {
+            const parser = renderer.parser || marked.Parser;
+            const label =
+                parser && typeof parser.parseInline === "function"
+                    ? parser.parseInline(tokens || [])
+                    : escapeHtml(href || "");
+            if (!isSafeRenderedUrl(href)) return label;
+            const rawHref = String(href || "").trim();
+            const parsed = new URL(rawHref, window.location.origin);
+            const safeHref = escapeHtml(
+                parsed.origin === window.location.origin &&
+                    !rawHref.match(/^[a-z][a-z0-9+.-]*:/i)
+                    ? `${parsed.pathname}${parsed.search}${parsed.hash}`
+                    : parsed.toString(),
+            );
+            const safeTitle = title
+                ? ` title="${escapeHtml(String(title))}"`
+                : "";
+            return (
+                `<a href="${safeHref}"${safeTitle} rel="noreferrer">` +
+                `${label}</a>`
+            );
+        };
+        renderer.image = ({ text }) => escapeHtml(text || "");
+        return renderer;
+    }
+
     function renderChatContent(content, useMarkdown) {
         const text = String(content || "");
 
@@ -1614,7 +1681,11 @@
         let html;
         if (useMarkdown && typeof marked !== "undefined" && marked.parse) {
             try {
-                html = marked.parse(processed, { breaks: true, gfm: true });
+                html = marked.parse(processed, {
+                    breaks: true,
+                    gfm: true,
+                    renderer: createSafeMarkedRenderer(),
+                });
             } catch (_e) {
                 html = escapeHtml(processed);
             }
@@ -2468,7 +2539,13 @@
                 "/api/runtime/chat/jobs/active",
             );
             const job = data && data.job ? data.job : null;
-            if (!job || !job.job_id) return;
+            if (!job || !job.job_id) {
+                stopActiveJobResumeTimer();
+                runtimeState.activeJobResumeAttempts = 0;
+                return;
+            }
+            stopActiveJobResumeTimer();
+            runtimeState.activeJobResumeAttempts = 0;
             runtimeState.activeJobId = String(job.job_id);
             ensureStreamingMessage(runtimeState.activeJobId);
             attachChatJob(
@@ -2476,7 +2553,23 @@
                 runtimeState.lastEventSeq,
             ).catch(() => {});
         } catch (_error) {
-            // Runtime disabled/unreachable is surfaced by normal chat actions.
+            if (runtimeState.activeJobId) return;
+            runtimeState.activeJobResumeAttempts += 1;
+            if (
+                runtimeState.activeJobResumeAttempts >
+                ACTIVE_JOB_RESUME_MAX_ATTEMPTS
+            ) {
+                stopActiveJobResumeTimer();
+                return;
+            }
+            const delay = Math.min(
+                8000,
+                1000 * runtimeState.activeJobResumeAttempts,
+            );
+            stopActiveJobResumeTimer();
+            runtimeState.activeJobResumeTimer = setTimeout(() => {
+                resumeActiveChatJob().catch(() => {});
+            }, delay);
         }
     }
 
@@ -2805,7 +2898,15 @@
                     "error",
                     5000,
                 );
+                resumeActiveChatJob().catch(() => {});
             });
+            window.addEventListener(
+                "online",
+                () => {
+                    resumeActiveChatJob().catch(() => {});
+                },
+                { once: true },
+            );
         }
     }
 

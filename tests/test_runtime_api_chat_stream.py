@@ -149,6 +149,46 @@ def test_sanitize_webchat_event_payload_compacts_successful_end_tool() -> None:
     assert payload["result_preview"] == "对话已结束"
 
 
+def test_sanitize_webchat_event_payload_redacts_secret_previews() -> None:
+    payload = runtime_api_chat._sanitize_webchat_event_payload(
+        "tool_start",
+        {
+            "tool_call_id": "call_secret",
+            "name": "external.search",
+            "arguments": {
+                "q": "weather",
+                "api_key": "sk-live-secret",
+                "headers": {
+                    "Authorization": "Bearer token-secret",
+                    "Cookie": "sid=session-secret",
+                },
+            },
+        },
+    )
+
+    preview = payload["arguments_preview"]
+    assert "weather" in preview
+    assert "sk-live-secret" not in preview
+    assert "token-secret" not in preview
+    assert "session-secret" not in preview
+    assert "[redacted]" in preview
+
+    payload = runtime_api_chat._sanitize_webchat_event_payload(
+        "tool_end",
+        {
+            "tool_call_id": "call_secret",
+            "name": "external.search",
+            "ok": True,
+            "result": "Authorization: Bearer result-secret password=plain-secret",
+        },
+    )
+
+    result_preview = payload["result_preview"]
+    assert "result-secret" not in result_preview
+    assert "plain-secret" not in result_preview
+    assert "[redacted]" in result_preview
+
+
 @pytest.mark.asyncio
 async def test_runtime_chat_stream_renders_each_message_once(
     monkeypatch: pytest.MonkeyPatch,

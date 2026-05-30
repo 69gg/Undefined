@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import logging
+import re
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -61,6 +62,54 @@ _WEBCHAT_HISTORY_EVENTS = (
     _WEBCHAT_LIFECYCLE_EVENTS | _WEBCHAT_AGENT_STAGE_EVENTS | frozenset({"message"})
 )
 _WEBCHAT_STAGE_EVENTS = frozenset({"stage"})
+_REDACTED_PREVIEW_VALUE = "[redacted]"
+_SENSITIVE_KEY_EXACT = frozenset(
+    {
+        "apikey",
+        "authorization",
+        "authtoken",
+        "bearertoken",
+        "clientsecret",
+        "cookie",
+        "credentials",
+        "idtoken",
+        "password",
+        "passwd",
+        "privatekey",
+        "refreshtoken",
+        "secret",
+        "secretkey",
+        "sessioncookie",
+        "sessionid",
+        "sessiontoken",
+        "setcookie",
+        "token",
+    }
+)
+_SENSITIVE_KEY_SUFFIXES = (
+    "apikey",
+    "authtoken",
+    "bearertoken",
+    "clientsecret",
+    "idtoken",
+    "privatekey",
+    "refreshtoken",
+    "secretkey",
+    "sessioncookie",
+    "sessionid",
+    "sessiontoken",
+)
+_SECRET_TEXT_PATTERNS = (
+    re.compile(
+        r"(?i)\b(authorization)\s*[:=]\s*(bearer\s+)?([^\s,;]+)",
+    ),
+    re.compile(
+        r"(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|"
+        r"client[_-]?secret|password|passwd|secret|private[_-]?key|session[_-]?id|"
+        r"session[_-]?token|cookie|set-cookie)\s*[:=]\s*(['\"]?)([^,\s;&\n'\"]+)",
+    ),
+    re.compile(r"(?i)\b(bearer)\s+([A-Za-z0-9._~+/=-]{16,})"),
+)
 
 
 @dataclass
@@ -223,6 +272,10 @@ class ChatJobManager:
             return None
         return max(candidates, key=lambda item: item.created_at)
 
+    async def snapshot(self, job: ChatJob) -> dict[str, Any]:
+        async with job.changed:
+            return job.snapshot()
+
     async def has_running_job(self) -> bool:
         async with self._lock:
             return any(
@@ -316,6 +369,58 @@ class ChatJobManager:
             live_events = _current_webchat_live_events(job, after, events)
             return events, snapshot, live_events
 
+    async def update_agent_stage(
+        self, job: ChatJob, payload: dict[str, Any]
+    ) -> ChatJobEvent | None:
+        event_payload = _sanitize_webchat_event_payload("agent_stage", payload)
+        event_time = time.time()
+        call_id = _webchat_tool_event_key(event_payload)
+        stage_key = str(event_payload.get("stage") or "").strip()
+        if not stage_key:
+            return None
+        async with job.changed:
+            previous_stage = job.agent_current_stage.get(call_id)
+            if previous_stage != stage_key:
+                job.agent_current_stage[call_id] = stage_key
+                job.agent_stage_started_at[call_id] = event_time
+            started_at = job.agent_stage_started_at.get(call_id, event_time)
+            event_payload["started_at"] = started_at
+            event_payload["stage_elapsed_ms"] = max(
+                0, int((event_time - started_at) * 1000)
+            )
+            event_payload["elapsed_ms"] = _job_elapsed_ms(job, event_time)
+            event_payload["job_id"] = job.job_id
+            job.agent_stage_payloads[call_id] = dict(event_payload)
+            return self._append_event_locked(job, "agent_stage", event_payload)
+
+    async def append_lifecycle_event(
+        self, job: ChatJob, event: str, payload: dict[str, Any]
+    ) -> ChatJobEvent | None:
+        if event not in _WEBCHAT_LIFECYCLE_EVENTS:
+            return None
+        event_payload = _sanitize_webchat_event_payload(event, payload)
+        event_time = time.time()
+        output_event = str(event_payload.get("_event", event) or event)
+        tool_key = _webchat_tool_event_key(event_payload)
+        async with job.changed:
+            if output_event in {"tool_start", "agent_start"}:
+                job.tool_started_at[tool_key] = event_time
+                event_payload["started_at"] = event_time
+            elif output_event in {"tool_end", "agent_end"}:
+                lifecycle_started_at = job.tool_started_at.get(tool_key)
+                job.tool_started_at.pop(tool_key, 0.0)
+                if lifecycle_started_at is not None:
+                    event_payload["duration_ms"] = max(
+                        0, int((event_time - lifecycle_started_at) * 1000)
+                    )
+                if output_event == "agent_end":
+                    job.agent_current_stage.pop(tool_key, None)
+                    job.agent_stage_started_at.pop(tool_key, None)
+                    job.agent_stage_payloads.pop(tool_key, None)
+            event_payload["elapsed_ms"] = _job_elapsed_ms(job, event_time)
+            event_payload["job_id"] = job.job_id
+            return self._append_event_locked(job, event, event_payload)
+
     async def wait_for_events_after(
         self,
         job: ChatJob,
@@ -382,49 +487,11 @@ class ChatJobManager:
                 )
                 return
             if event in _WEBCHAT_AGENT_STAGE_EVENTS:
-                event_payload = _sanitize_webchat_event_payload(event, payload)
-                event_time = time.time()
-                call_id = _webchat_tool_event_key(event_payload)
-                stage_key = str(event_payload.get("stage") or "").strip()
-                if not stage_key:
-                    return
-                previous_stage = job.agent_current_stage.get(call_id)
-                if stage_key and previous_stage != stage_key:
-                    job.agent_current_stage[call_id] = stage_key
-                    job.agent_stage_started_at[call_id] = event_time
-                started_at = job.agent_stage_started_at.get(call_id, event_time)
-                event_payload["started_at"] = started_at
-                event_payload["stage_elapsed_ms"] = max(
-                    0, int((event_time - started_at) * 1000)
-                )
-                event_payload["elapsed_ms"] = _job_elapsed_ms(job, event_time)
-                event_payload["job_id"] = job.job_id
-                job.agent_stage_payloads[call_id] = dict(event_payload)
-                await self._append_event(job, event, event_payload)
+                await self.update_agent_stage(job, payload)
                 return
             if event not in _WEBCHAT_LIFECYCLE_EVENTS:
                 return
-            event_payload = _sanitize_webchat_event_payload(event, payload)
-            event_time = time.time()
-            output_event = str(event_payload.get("_event", event) or event)
-            tool_key = _webchat_tool_event_key(event_payload)
-            if output_event in {"tool_start", "agent_start"}:
-                job.tool_started_at[tool_key] = event_time
-                event_payload["started_at"] = event_time
-            elif output_event in {"tool_end", "agent_end"}:
-                lifecycle_started_at = job.tool_started_at.get(tool_key)
-                job.tool_started_at.pop(tool_key, 0.0)
-                if lifecycle_started_at is not None:
-                    event_payload["duration_ms"] = max(
-                        0, int((event_time - lifecycle_started_at) * 1000)
-                    )
-                if output_event == "agent_end":
-                    job.agent_current_stage.pop(tool_key, None)
-                    job.agent_stage_started_at.pop(tool_key, None)
-                    job.agent_stage_payloads.pop(tool_key, None)
-            event_payload["elapsed_ms"] = _job_elapsed_ms(job, event_time)
-            event_payload["job_id"] = job.job_id
-            await self._append_event(job, event, event_payload)
+            await self.append_lifecycle_event(job, event, payload)
 
         try:
             run_kwargs: dict[str, Any] = {
@@ -496,24 +563,27 @@ class ChatJobManager:
         self, job: ChatJob, event: str, payload: dict[str, Any]
     ) -> ChatJobEvent:
         async with job.changed:
-            payload_copy = dict(payload)
-            normalized_event = str(payload_copy.pop("_event", event) or event)
-            item = ChatJobEvent(
-                seq=job.next_seq, event=normalized_event, payload=payload_copy
-            )
-            job.next_seq += 1
-            job.updated_at = time.time()
-            job.events.append(item)
-            if len(job.events) > _CHAT_JOB_EVENT_BUFFER_LIMIT:
-                job.events = job.events[-_CHAT_JOB_EVENT_BUFFER_LIMIT:]
-            if item.event in _WEBCHAT_HISTORY_EVENTS:
-                job.webchat_events.append(item)
-                if len(job.webchat_events) > _CHAT_JOB_EVENT_BUFFER_LIMIT:
-                    job.webchat_events = job.webchat_events[
-                        -_CHAT_JOB_EVENT_BUFFER_LIMIT:
-                    ]
-            job.changed.notify_all()
-            return item
+            return self._append_event_locked(job, event, payload)
+
+    def _append_event_locked(
+        self, job: ChatJob, event: str, payload: dict[str, Any]
+    ) -> ChatJobEvent:
+        payload_copy = dict(payload)
+        normalized_event = str(payload_copy.pop("_event", event) or event)
+        item = ChatJobEvent(
+            seq=job.next_seq, event=normalized_event, payload=payload_copy
+        )
+        job.next_seq += 1
+        job.updated_at = time.time()
+        job.events.append(item)
+        if len(job.events) > _CHAT_JOB_EVENT_BUFFER_LIMIT:
+            job.events = job.events[-_CHAT_JOB_EVENT_BUFFER_LIMIT:]
+        if item.event in _WEBCHAT_HISTORY_EVENTS:
+            job.webchat_events.append(item)
+            if len(job.webchat_events) > _CHAT_JOB_EVENT_BUFFER_LIMIT:
+                job.webchat_events = job.webchat_events[-_CHAT_JOB_EVENT_BUFFER_LIMIT:]
+        job.changed.notify_all()
+        return item
 
     async def _append_stage(
         self,
@@ -533,12 +603,13 @@ class ChatJobManager:
             "elapsed_ms": _job_elapsed_ms(job, now),
         }
         detail_text = _preview(detail, 120)
-        job.current_stage = stage_key
-        job.current_stage_detail = detail_text
-        job.current_stage_started_at = now
         if detail_text:
             payload["detail"] = detail_text
-        return await self._append_event(job, "stage", payload)
+        async with job.changed:
+            job.current_stage = stage_key
+            job.current_stage_detail = detail_text
+            job.current_stage_started_at = now
+            return self._append_event_locked(job, "stage", payload)
 
     def _mark_job_finished(self, job: ChatJob) -> None:
         now = time.time()
@@ -685,14 +756,100 @@ def _legacy_webchat_tool_event_key(payload: dict[str, Any]) -> str:
 
 
 def _preview(value: Any, limit: int = _PREVIEW_LIMIT) -> str:
-    if isinstance(value, dict | list):
-        text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    redacted = _redact_preview_value(value)
+    if isinstance(redacted, dict | list):
+        text = json.dumps(redacted, ensure_ascii=False, separators=(",", ":"))
     else:
-        text = str(value or "")
+        text = _redact_secret_text(str(redacted or ""))
     compact = " ".join(text.split())
     if len(compact) <= limit:
         return compact
     return compact[:limit] + "..."
+
+
+def _preview_existing_text(raw: Any, limit: int = _PREVIEW_LIMIT) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    with suppress(json.JSONDecodeError, TypeError, ValueError):
+        return _preview(json.loads(text), limit)
+    return _preview(text, limit)
+
+
+def _normalize_sensitive_key(key: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(key or "").lower())
+
+
+def _is_sensitive_preview_key(key: Any) -> bool:
+    normalized = _normalize_sensitive_key(key)
+    if not normalized:
+        return False
+    if normalized in _SENSITIVE_KEY_EXACT:
+        return True
+    return any(normalized.endswith(suffix) for suffix in _SENSITIVE_KEY_SUFFIXES)
+
+
+def _redact_secret_text(text: str) -> str:
+    redacted = str(text or "")
+    redacted = _SECRET_TEXT_PATTERNS[0].sub(
+        lambda match: (
+            f"{match.group(1)}: {match.group(2) or ''}{_REDACTED_PREVIEW_VALUE}"
+        ),
+        redacted,
+    )
+    redacted = _SECRET_TEXT_PATTERNS[1].sub(
+        lambda match: (
+            f"{match.group(1)}={match.group(2)}"
+            f"{_REDACTED_PREVIEW_VALUE}{match.group(2) or ''}"
+        ),
+        redacted,
+    )
+    redacted = _SECRET_TEXT_PATTERNS[2].sub(
+        lambda match: f"{match.group(1)} {_REDACTED_PREVIEW_VALUE}",
+        redacted,
+    )
+    return redacted
+
+
+def _redact_preview_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        redacted_dict: dict[str, Any] = {}
+        for key, item in value.items():
+            text_key = str(key)
+            redacted_dict[text_key] = (
+                _REDACTED_PREVIEW_VALUE
+                if _is_sensitive_preview_key(text_key)
+                else _redact_preview_value(item)
+            )
+        return redacted_dict
+    if isinstance(value, list):
+        return [_redact_preview_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_redact_preview_value(item) for item in value]
+    if isinstance(value, str):
+        return _redact_secret_text(value)
+    return value
+
+
+def _redact_webchat_display_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    result = dict(payload)
+    for key in ("arguments_preview", "result_preview", "current_stage_detail"):
+        if key in result:
+            result[key] = _preview_existing_text(result.get(key))
+    if "detail" in result:
+        result["detail"] = _preview_existing_text(result.get("detail"), 160)
+    return result
+
+
+def _redact_webchat_display_tree(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_redact_webchat_display_tree(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result = {
+        str(key): _redact_webchat_display_tree(item) for key, item in value.items()
+    }
+    return _redact_webchat_display_payload(result)
 
 
 def _webchat_tool_ui_hint(
@@ -1185,7 +1342,13 @@ def _webchat_history_events(webchat: Any) -> list[dict[str, Any]]:
             seq = max(0, int(seq_raw))
         except (TypeError, ValueError):
             seq = 0
-        events.append({"seq": seq, "event": event, "payload": dict(payload)})
+        events.append(
+            {
+                "seq": seq,
+                "event": event,
+                "payload": _redact_webchat_display_payload(payload),
+            }
+        )
     return events
 
 
@@ -1194,7 +1357,11 @@ def _webchat_history_calls(webchat: Any) -> list[dict[str, Any]]:
         return []
     raw_calls = webchat.get("calls")
     if isinstance(raw_calls, list):
-        return [item for item in raw_calls if isinstance(item, dict)]
+        return [
+            _redact_webchat_display_tree(item)
+            for item in raw_calls
+            if isinstance(item, dict)
+        ]
     return _build_webchat_call_tree(_webchat_history_events(webchat))
 
 
@@ -1203,7 +1370,11 @@ def _webchat_history_timeline(webchat: Any) -> list[dict[str, Any]]:
         return []
     raw_timeline = webchat.get("timeline")
     if isinstance(raw_timeline, list):
-        return [item for item in raw_timeline if isinstance(item, dict)]
+        return [
+            _redact_webchat_display_tree(item)
+            for item in raw_timeline
+            if isinstance(item, dict)
+        ]
     return _build_webchat_timeline(_webchat_history_events(webchat))
 
 
@@ -1591,15 +1762,18 @@ async def chat_handler(
                 timeout=min(_CHAT_STAGE_REFRESH_SECONDS, _CHAT_SSE_KEEPALIVE_SECONDS),
             )
             if not events:
-                stage_event = job.current_stage_event()
-                if stage_event is not None:
-                    await _write_sse_event(response, stage_event)
-                    after = max(after, stage_event.seq)
-                agent_stage_events = job.current_agent_stage_events()
-                for agent_stage_event in agent_stage_events:
-                    await _write_sse_event(response, agent_stage_event)
-                    after = max(after, agent_stage_event.seq)
-                if stage_event is not None or agent_stage_events:
+                (
+                    events,
+                    _snapshot,
+                    live_events,
+                ) = await job_manager.events_after_with_snapshot(job, after)
+                for item in events:
+                    await _write_sse_event(response, item)
+                    after = item.seq
+                for live_event in live_events:
+                    await _write_sse_event(response, live_event)
+                    after = max(after, live_event.seq)
+                if events or live_events:
                     if job.done.is_set():
                         break
                     continue
@@ -1641,7 +1815,7 @@ async def chat_job_create_handler(
     if not text:
         return _json_error("message is required", status=400)
     job = await job_manager.create_job(text)
-    return web.json_response(job.snapshot(), status=202)
+    return web.json_response(await job_manager.snapshot(job), status=202)
 
 
 async def chat_job_active_handler(
@@ -1651,7 +1825,8 @@ async def chat_job_active_handler(
 ) -> Response:
     _ = ctx, request
     job = await job_manager.get_active_job()
-    return web.json_response({"job": job.snapshot() if job is not None else None})
+    snapshot = await job_manager.snapshot(job) if job is not None else None
+    return web.json_response({"job": snapshot})
 
 
 async def chat_job_detail_handler(
@@ -1664,7 +1839,7 @@ async def chat_job_detail_handler(
     job = await job_manager.get_job(job_id)
     if job is None:
         return _json_error("Job not found", status=404)
-    return web.json_response(job.snapshot())
+    return web.json_response(await job_manager.snapshot(job))
 
 
 async def chat_job_cancel_handler(
@@ -1677,7 +1852,7 @@ async def chat_job_cancel_handler(
     job = await job_manager.cancel_job(job_id)
     if job is None:
         return _json_error("Job not found", status=404)
-    return web.json_response(job.snapshot())
+    return web.json_response(await job_manager.snapshot(job))
 
 
 async def chat_job_events_handler(
@@ -1737,15 +1912,18 @@ async def chat_job_events_handler(
                 timeout=min(_CHAT_STAGE_REFRESH_SECONDS, _CHAT_SSE_KEEPALIVE_SECONDS),
             )
             if not events:
-                stage_event = job.current_stage_event()
-                if stage_event is not None:
-                    await _write_sse_event(response, stage_event)
-                    after = max(after, stage_event.seq)
-                agent_stage_events = job.current_agent_stage_events()
-                for agent_stage_event in agent_stage_events:
-                    await _write_sse_event(response, agent_stage_event)
-                    after = max(after, agent_stage_event.seq)
-                if stage_event is not None or agent_stage_events:
+                (
+                    events,
+                    _snapshot,
+                    live_events,
+                ) = await job_manager.events_after_with_snapshot(job, after)
+                for item in events:
+                    await _write_sse_event(response, item)
+                    after = item.seq
+                for live_event in live_events:
+                    await _write_sse_event(response, live_event)
+                    after = max(after, live_event.seq)
+                if events or live_events:
                     if job.done.is_set():
                         break
                     continue

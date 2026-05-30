@@ -192,6 +192,20 @@ def test_webchat_frontend_polls_job_events_incrementally() -> None:
     assert 'Accept: "text/event-stream"' not in source
 
 
+def test_webchat_frontend_retries_active_job_resume_after_refresh_failure() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    resume_helper = source.split("async function resumeActiveChatJob", 1)[1].split(
+        "async function clearChatHistory", 1
+    )[0]
+
+    assert "activeJobResumeTimer" in source
+    assert "ACTIVE_JOB_RESUME_MAX_ATTEMPTS = 20" in source
+    assert "runtimeState.activeJobResumeAttempts += 1" in resume_helper
+    assert "setTimeout(() => {" in resume_helper
+    assert "resumeActiveChatJob().catch" in resume_helper
+    assert 'window.addEventListener(\n                "online"' in source
+
+
 def test_webchat_tool_summary_uses_compact_single_line_order() -> None:
     source = RUNTIME_JS.read_text(encoding="utf-8")
     css = RUNTIME_CSS.read_text(encoding="utf-8")
@@ -247,6 +261,7 @@ def test_webchat_auto_scroll_toggle_controls_stream_scroll() -> None:
     template = Path("src/Undefined/webui/templates/index.html").read_text(
         encoding="utf-8"
     )
+    css = RUNTIME_CSS.read_text(encoding="utf-8")
 
     assert "runtimeChatAutoScroll" in template
     assert "runtime.chat_auto_scroll" in template
@@ -255,6 +270,11 @@ def test_webchat_auto_scroll_toggle_controls_stream_scroll() -> None:
     assert "setChatAutoScroll(autoScrollToggle.checked)" in source
     assert "if (!runtimeState.chatAutoScroll) return;" in source
     assert "forceScrollChatToBottom()" in source
+    assert "prefersReducedMotion()" in source
+    assert "chatScrollBehavior()" in source
+    assert "behavior: chatScrollBehavior()" in source
+    assert ".toggle-input:focus-visible + .toggle-track" in css
+    assert ".toggle-input { display: none;" not in css
 
 
 def test_webchat_frontend_renders_tool_duration() -> None:
@@ -292,6 +312,20 @@ def test_webchat_tool_previews_render_structured_input_output() -> None:
     assert "runtime.tool_output" in i18n
 
 
+def test_webchat_frontend_escapes_markdown_html_and_unsafe_links() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    render_helper = source.split("function createSafeMarkedRenderer", 1)[1].split(
+        "function renderChatContent", 1
+    )[0]
+
+    assert "renderer.html" in render_helper
+    assert 'escapeHtml(text || "")' in render_helper
+    assert "isSafeRenderedUrl(href)" in render_helper
+    assert 'rel="noreferrer"' in render_helper
+    assert "renderer.image" in render_helper
+    assert "renderer: createSafeMarkedRenderer()" in source
+
+
 def test_webchat_tool_error_status_uses_error_color() -> None:
     css = RUNTIME_CSS.read_text(encoding="utf-8")
     error_block = css.split(
@@ -323,6 +357,9 @@ def test_webchat_layout_keeps_input_at_bottom_and_log_scrollable() -> None:
     app_css = APP_CSS.read_text(encoding="utf-8")
     responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
     main_js = MAIN_JS.read_text(encoding="utf-8")
+    template = Path("src/Undefined/webui/templates/index.html").read_text(
+        encoding="utf-8"
+    )
 
     assert ".main-content.chat-layout {" in app_css
     assert "display: flex;" in app_css
@@ -359,3 +396,29 @@ def test_webchat_layout_keeps_input_at_bottom_and_log_scrollable() -> None:
     assert (
         'appContent.style.display = state.tab === "chat" ? "grid" : "block";' in main_js
     )
+    assert 'role="log"' in template
+    assert 'aria-live="polite"' in template
+    assert 'data-i18n-aria-label="runtime.chat_log_label"' in template
+
+
+def test_webchat_mobile_tool_rows_have_overflow_guards() -> None:
+    css = RUNTIME_CSS.read_text(encoding="utf-8")
+    responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
+
+    status_css = css.split(".runtime-tool-block summary .runtime-tool-status", 1)[
+        1
+    ].split(".runtime-tool-block summary .runtime-tool-kind", 1)[0]
+    kind_css = css.split(".runtime-tool-block summary .runtime-tool-kind", 1)[1].split(
+        ".runtime-tool-block.webchat-private-send", 1
+    )[0]
+    structured_css = css.split(".runtime-tool-structured-row", 1)[1].split(
+        ".runtime-tool-key", 1
+    )[0]
+
+    assert "min-width: 0;" in status_css
+    assert "text-overflow: ellipsis;" in status_css
+    assert "overflow: hidden;" in kind_css
+    assert "grid-template-columns: minmax(64px, min(34%, 180px))" in structured_css
+    assert ".runtime-tool-block summary .runtime-tool-kind" in responsive_css
+    assert "display: none;" in responsive_css
+    assert "max-width: 32vw;" in responsive_css

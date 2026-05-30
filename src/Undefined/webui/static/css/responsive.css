@@ -287,6 +287,25 @@
   .main-content.chat-layout #tab-chat .runtime-chat-action-icon {
     font-size: 18px;
   }
+  .runtime-tool-block summary {
+    grid-template-columns: auto minmax(0, 1fr) minmax(52px, auto);
+  }
+  .runtime-tool-block summary .runtime-tool-status {
+    justify-self: end;
+    max-width: 32vw;
+  }
+  .runtime-tool-block summary .runtime-tool-kind {
+    display: none;
+  }
+  .runtime-tool-structured-row {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+  .runtime-tool-children {
+    margin-left: 6px;
+    padding-left: 8px;
+    padding-right: 6px;
+  }
 }
 
 @media (max-width: 480px) {

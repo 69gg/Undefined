@@ -263,6 +263,7 @@ const I18N = {
         "runtime.cognitive_profile_get": "按实体查看侧写",
         "runtime.fetch": "获取",
         "runtime.chat_placeholder": "输入消息，或直接 /help 这样的命令",
+        "runtime.chat_log_label": "聊天消息",
         "runtime.chat_auto_scroll": "自动滚动到底部",
         "runtime.chat_clear": "清空历史",
         "runtime.chat_clear_confirm":
@@ -625,6 +626,7 @@ const I18N = {
         "runtime.cognitive_profile_get": "Get Profile by Entity",
         "runtime.fetch": "Fetch",
         "runtime.chat_placeholder": "Type a message, or run /help directly",
+        "runtime.chat_log_label": "Chat messages",
         "runtime.chat_auto_scroll": "Auto-scroll",
         "runtime.chat_clear": "Clear History",
         "runtime.chat_clear_confirm":

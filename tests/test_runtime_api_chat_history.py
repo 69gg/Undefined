@@ -212,6 +212,95 @@ async def test_runtime_chat_history_endpoint_returns_webchat_metadata_only_item(
 
 
 @pytest.mark.asyncio
+async def test_runtime_chat_history_endpoint_redacts_legacy_webchat_metadata() -> None:
+    history = _DummyHistoryManager()
+    history.records = [
+        {
+            "display_name": "Bot",
+            "message": "",
+            "timestamp": "2026-02-25 22:00:02",
+            "webchat": {
+                "display_only": True,
+                "job_id": "job_1",
+                "mode": "chat",
+                "status": "done",
+                "calls": [
+                    {
+                        "webchat_call_id": "call_1",
+                        "name": "search",
+                        "is_agent": False,
+                        "status": "done",
+                        "arguments_preview": ('{"api_key":"sk-legacy","q":"test"}'),
+                        "result_preview": ("Authorization: Bearer legacy-token"),
+                        "children": [],
+                    }
+                ],
+                "timeline": [
+                    {
+                        "type": "call",
+                        "seq": 2,
+                        "call": {
+                            "webchat_call_id": "call_1",
+                            "name": "search",
+                            "is_agent": False,
+                            "status": "done",
+                            "result_preview": "password=legacy-password",
+                            "children": [],
+                        },
+                    }
+                ],
+                "events": [
+                    {
+                        "seq": 2,
+                        "event": "tool_start",
+                        "payload": {
+                            "job_id": "job_1",
+                            "tool_call_id": "call_1",
+                            "name": "search",
+                            "arguments_preview": (
+                                '{"cookie":"sid=legacy-cookie","q":"test"}'
+                            ),
+                            "is_agent": False,
+                        },
+                    },
+                ],
+            },
+        }
+    ]
+    context = RuntimeAPIContext(
+        config_getter=lambda: SimpleNamespace(
+            api=SimpleNamespace(
+                enabled=True,
+                host="127.0.0.1",
+                port=8788,
+                auth_key="changeme",
+                openapi_enabled=True,
+            ),
+            superadmin_qq=10001,
+            bot_qq=20002,
+        ),
+        onebot=SimpleNamespace(connection_status=lambda: {}),
+        ai=SimpleNamespace(memory_storage=SimpleNamespace(count=lambda: 0)),
+        command_dispatcher=SimpleNamespace(parse_command=lambda _text: None),
+        queue_manager=SimpleNamespace(snapshot=lambda: {}),
+        history_manager=history,
+    )
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+
+    response = await server._chat_history_handler(
+        cast(web.Request, cast(Any, SimpleNamespace(query={"limit": "1"})))
+    )
+    payload = json.loads(response.text or "{}")
+    dumped = json.dumps(payload["items"][0]["webchat"], ensure_ascii=False)
+
+    assert "sk-legacy" not in dumped
+    assert "legacy-token" not in dumped
+    assert "legacy-password" not in dumped
+    assert "legacy-cookie" not in dumped
+    assert "[redacted]" in dumped
+
+
+@pytest.mark.asyncio
 async def test_runtime_chat_history_endpoint_supports_before_pagination() -> None:
     history = _DummyHistoryManager()
     history.records = [

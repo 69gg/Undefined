@@ -103,11 +103,21 @@
 
 /* Toggle */
 .toggle-wrapper { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-.toggle-input { display: none; }
+.toggle-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
 .toggle-track { width: 40px; height: 22px; background: var(--border-color); border-radius: 99px; position: relative; transition: 0.2s; }
 .toggle-handle { width: 18px; height: 18px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: 0.2s; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); }
 .toggle-input:checked + .toggle-track { background: var(--accent-color); }
 .toggle-input:checked + .toggle-track .toggle-handle { transform: translateX(18px); }
+.toggle-input:focus-visible + .toggle-track {
+  outline: 2px solid color-mix(in srgb, var(--accent-color) 68%, transparent);
+  outline-offset: 3px;
+}
 
 /* Utility */
 .w-full { width: 100%; }
@@ -938,12 +948,17 @@
   font-weight: 650;
 }
 .runtime-tool-block summary .runtime-tool-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-style: normal;
   white-space: nowrap;
   color: var(--text-tertiary);
 }
 .runtime-tool-block summary .runtime-tool-kind {
   min-width: 44px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   text-align: right;
   white-space: nowrap;
   color: var(--text-secondary);
@@ -1017,7 +1032,7 @@
 }
 .runtime-tool-structured-row {
   display: grid;
-  grid-template-columns: minmax(80px, max-content) minmax(0, 1fr);
+  grid-template-columns: minmax(64px, min(34%, 180px)) minmax(0, 1fr);
   align-items: start;
   gap: 8px;
   min-width: 0;

@@ -684,3 +684,80 @@ async def test_chat_job_finalizes_unclosed_webchat_calls_as_error(
     assert webchat["events"][1]["payload"]["status"] == "error"
     assert webchat["calls"][0]["status"] == "error"
     assert webchat["timeline"][0]["call"]["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_chat_job_history_persists_redacted_webchat_previews(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    history_calls: list[dict[str, Any]] = []
+
+    class _History:
+        async def add_private_message(self, **kwargs: Any) -> None:
+            history_calls.append(dict(kwargs))
+
+    async def _fake_run_webui_chat(
+        _ctx: Any,
+        *,
+        text: str,
+        send_output: Any,
+        webchat_event_callback: Any = None,
+    ) -> str:
+        _ = text, send_output
+        assert webchat_event_callback is not None
+        await webchat_event_callback(
+            "tool_start",
+            {
+                "tool_call_id": "call_secret",
+                "webchat_call_id": "call_secret",
+                "name": "external.search",
+                "arguments": {
+                    "q": "test",
+                    "api_key": "sk-history-secret",
+                    "headers": {"Authorization": "Bearer auth-history-secret"},
+                },
+            },
+        )
+        await webchat_event_callback(
+            "tool_end",
+            {
+                "tool_call_id": "call_secret",
+                "webchat_call_id": "call_secret",
+                "name": "external.search",
+                "ok": True,
+                "result": {"password": "history-password", "summary": "ok"},
+            },
+        )
+        return "chat"
+
+    context = _context()
+    context.history_manager = _History()
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+
+    response = await server._chat_job_create_handler(
+        cast(
+            web.Request, cast(Any, _DummyRequest(_json={"message": "hello"}, query={}))
+        )
+    )
+    job_id = str(json.loads(response.text or "{}")["job_id"])
+    detail_request = cast(
+        web.Request,
+        cast(Any, _DummyRequest(match_info={"job_id": job_id}, query={})),
+    )
+    for _ in range(20):
+        detail_response = await server._chat_job_detail_handler(detail_request)
+        detail_payload = json.loads(detail_response.text or "{}")
+        if detail_payload["history_finalized"] is True:
+            break
+        await asyncio.sleep(0.01)
+
+    webchat = history_calls[0]["webchat"]
+    dumped = json.dumps(webchat, ensure_ascii=False)
+    assert "sk-history-secret" not in dumped
+    assert "auth-history-secret" not in dumped
+    assert "history-password" not in dumped
+    assert "[redacted]" in dumped
+    assert webchat["calls"][0]["result_preview"] == (
+        '{"password":"[redacted]","summary":"ok"}'
+    )

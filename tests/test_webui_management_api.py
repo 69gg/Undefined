@@ -11,7 +11,15 @@ from Undefined.changelog import ChangelogEntry
 from Undefined.webui import app as webui_app
 from Undefined.webui.app import create_app
 from Undefined.webui.core import SessionStore
-from Undefined.webui.routes import _auth, _config, _index, _memes, _shared, _system
+from Undefined.webui.routes import (
+    _auth,
+    _config,
+    _index,
+    _memes,
+    _runtime,
+    _shared,
+    _system,
+)
 from Undefined.webui.routes._shared import (
     REDIRECT_TO_CONFIG_ONCE_APP_KEY,
     SESSION_COOKIE,
@@ -536,3 +544,159 @@ async def test_management_meme_blob_handler_url_encodes_uid(
 
     assert payload["ok"] is True
     assert captured["path"] == "/api/v1/memes/pic%20a%2Fb%3F/blob"
+
+
+async def test_runtime_chat_job_proxy_routes_require_management_auth() -> None:
+    request = cast(
+        web.Request,
+        cast(
+            Any,
+            SimpleNamespace(
+                headers={},
+                cookies={},
+                query={},
+                match_info={"job_id": "job_1"},
+                app=_request().app,
+            ),
+        ),
+    )
+
+    handlers = [
+        _runtime.runtime_chat_history_clear_handler,
+        _runtime.runtime_chat_job_create_handler,
+        _runtime.runtime_chat_job_active_handler,
+        _runtime.runtime_chat_job_detail_handler,
+        _runtime.runtime_chat_job_events_handler,
+        _runtime.runtime_chat_job_cancel_handler,
+    ]
+    for handler in handlers:
+        response = await handler(request)
+        assert cast(web.Response, response).status == 401
+
+
+async def test_runtime_chat_job_proxy_json_injects_runtime_api_key(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _fake_proxy_runtime(**kwargs: Any) -> web.Response:
+        captured.update(kwargs)
+        return web.json_response({"ok": True})
+
+    monkeypatch.setattr(_runtime, "_proxy_runtime", _fake_proxy_runtime)
+    monkeypatch.setattr(_runtime, "check_auth", lambda _request: True)
+    request = cast(
+        web.Request,
+        cast(
+            Any,
+            SimpleNamespace(
+                headers={"Accept": "application/json"},
+                cookies={},
+                query={"after": "7", "format": "json"},
+                match_info={"job_id": "job /secret"},
+                app=_request().app,
+            ),
+        ),
+    )
+
+    response = await _runtime.runtime_chat_job_events_handler(request)
+    payload = _json_payload(response)
+
+    assert payload["ok"] is True
+    assert captured["method"] == "GET"
+    assert captured["path"] == "/api/v1/chat/jobs/job%20%2Fsecret/events"
+    assert captured["params"]["after"] == "7"
+    assert captured["timeout_seconds"] == 20.0
+
+
+async def test_runtime_chat_job_proxy_sse_uses_stream_proxy(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _fake_proxy_runtime_stream(
+        request: web.Request,
+        **kwargs: Any,
+    ) -> web.Response:
+        captured["accept"] = request.headers.get("Accept")
+        captured.update(kwargs)
+        return web.json_response({"stream": True})
+
+    monkeypatch.setattr(_runtime, "_proxy_runtime_stream", _fake_proxy_runtime_stream)
+    monkeypatch.setattr(_runtime, "check_auth", lambda _request: True)
+    monkeypatch.setattr(_runtime, "_chat_proxy_timeout_seconds", lambda: 123.0)
+    request = cast(
+        web.Request,
+        cast(
+            Any,
+            SimpleNamespace(
+                headers={"Accept": "text/event-stream"},
+                cookies={},
+                query={"after": "0"},
+                match_info={"job_id": "job_1"},
+                app=_request().app,
+            ),
+        ),
+    )
+
+    response = await _runtime.runtime_chat_job_events_handler(request)
+    payload = _json_payload(response)
+
+    assert payload["stream"] is True
+    assert captured["method"] == "GET"
+    assert captured["path"] == "/api/v1/chat/jobs/job_1/events"
+    assert captured["params"]["after"] == "0"
+    assert captured["timeout_seconds"] == 123.0
+    assert captured["accept"] == "text/event-stream"
+
+
+async def test_proxy_runtime_injects_runtime_api_key(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+
+    class _FakeResponse:
+        status = 200
+        headers = {"Content-Type": "application/json"}
+        content_type = "application/json"
+        charset = "utf-8"
+
+        async def __aenter__(self) -> _FakeResponse:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def text(self) -> str:
+            return '{"ok": true}'
+
+    class _FakeSession:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            _ = args, kwargs
+
+        async def __aenter__(self) -> _FakeSession:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def request(self, **kwargs: Any) -> _FakeResponse:
+            captured.update(kwargs)
+            return _FakeResponse()
+
+    monkeypatch.setattr(
+        _runtime,
+        "get_config",
+        lambda strict=False: SimpleNamespace(
+            api=SimpleNamespace(
+                enabled=True,
+                loopback_url="http://127.0.0.1:8788",
+                auth_key="runtime-secret",
+            )
+        ),
+    )
+    monkeypatch.setattr(_runtime, "ClientSession", _FakeSession)
+
+    response = await _runtime._proxy_runtime(method="GET", path="/api/v1/chat/jobs")
+    payload = _json_payload(response)
+
+    assert payload["ok"] is True
+    assert captured["headers"] == {"X-Undefined-API-Key": "runtime-secret"}
