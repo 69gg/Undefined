@@ -548,6 +548,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
                     call_context = tool_context.copy()
                     if is_agent_call:
                         call_context["webchat_parent_call_id"] = webchat_call_id
+                        call_context["webchat_call_parent_id"] = webchat_parent_call_id
                         call_context["webchat_depth"] = webchat_depth + 1
                         call_context["webchat_agent_path"] = [
                             *webchat_agent_path,

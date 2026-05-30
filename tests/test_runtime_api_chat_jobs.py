@@ -170,7 +170,7 @@ async def test_chat_job_events_after_reconnect_and_disconnect_does_not_cancel(
             _DummyRequest(
                 match_info={"job_id": job_id},
                 query={"after": "0"},
-                headers={},
+                headers={"Accept": "text/event-stream"},
                 transport=_DummyTransport(closing_after_writes=1),
             ),
         ),
@@ -202,7 +202,7 @@ async def test_chat_job_events_after_reconnect_and_disconnect_does_not_cancel(
             _DummyRequest(
                 match_info={"job_id": job_id},
                 query={"after": str(first_last_seq)},
-                headers={},
+                headers={"Accept": "text/event-stream"},
                 transport=_DummyTransport(),
             ),
         ),
@@ -258,7 +258,7 @@ async def test_chat_job_events_refreshes_stage_without_advancing_seq(
             _DummyRequest(
                 match_info={"job_id": job.job_id},
                 query={"after": str(job.next_seq - 1)},
-                headers={},
+                headers={"Accept": "text/event-stream"},
                 transport=_DummyTransport(closing_after_writes=1),
             ),
         ),
@@ -271,6 +271,173 @@ async def test_chat_job_events_refreshes_stage_without_advancing_seq(
     assert events[0]["seq"] == job.next_seq - 1
     assert events[0]["payload"]["stage"] == job.current_stage
     assert isinstance(events[0]["payload"]["elapsed_ms"], int)
+    release.set()
+    await server._chat_job_manager.cancel_job(job.job_id)
+
+
+@pytest.mark.asyncio
+async def test_chat_job_events_refreshes_agent_stage_without_advancing_seq(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = asyncio.Event()
+
+    async def _fake_run_webui_chat(
+        _ctx: Any,
+        *,
+        webchat_event_callback: Any = None,
+        **_kwargs: Any,
+    ) -> str:
+        assert webchat_event_callback is not None
+        await webchat_event_callback(
+            "tool_start",
+            {
+                "tool_call_id": "call_agent",
+                "webchat_call_id": "call_agent",
+                "name": "web_agent",
+                "api_name": "web_agent",
+                "arguments": {"prompt": "search"},
+                "is_agent": True,
+            },
+        )
+        await webchat_event_callback(
+            "agent_stage",
+            {
+                "webchat_call_id": "call_agent",
+                "agent_name": "web_agent",
+                "stage": "waiting_model",
+                "detail": "iteration=1",
+            },
+        )
+        await release.wait()
+        await webchat_event_callback(
+            "tool_end",
+            {
+                "tool_call_id": "call_agent",
+                "webchat_call_id": "call_agent",
+                "name": "web_agent",
+                "api_name": "web_agent",
+                "ok": True,
+                "result": "ok",
+                "is_agent": True,
+            },
+        )
+        return "chat"
+
+    monkeypatch.setattr(web, "StreamResponse", _DummyStreamResponse)
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    job = await server._chat_job_manager.create_job("hello")
+
+    for _ in range(20):
+        if any(event.event == "agent_stage" for event in job.events):
+            break
+        await asyncio.sleep(0.01)
+    after = job.next_seq - 1
+    request = cast(
+        web.Request,
+        cast(
+            Any,
+            _DummyRequest(
+                match_info={"job_id": job.job_id},
+                query={"after": str(after)},
+                headers={"Accept": "text/event-stream"},
+                transport=_DummyTransport(closing_after_writes=2),
+            ),
+        ),
+    )
+
+    response = await server._chat_job_events_handler(request)
+    events = _decode_sse(cast(_DummyStreamResponse, response).writes)
+
+    agent_stage_events = [event for event in events if event["event"] == "agent_stage"]
+    assert agent_stage_events
+    assert agent_stage_events[0]["seq"] == after
+    assert agent_stage_events[0]["payload"]["webchat_call_id"] == "call_agent"
+    assert agent_stage_events[0]["payload"]["stage"] == "waiting_model"
+    assert isinstance(agent_stage_events[0]["payload"]["stage_elapsed_ms"], int)
+    release.set()
+    await server._chat_job_manager.cancel_job(job.job_id)
+
+
+@pytest.mark.asyncio
+async def test_chat_job_events_json_returns_incremental_events_and_live_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = asyncio.Event()
+
+    async def _fake_run_webui_chat(
+        _ctx: Any,
+        *,
+        webchat_event_callback: Any = None,
+        **_kwargs: Any,
+    ) -> str:
+        assert webchat_event_callback is not None
+        await webchat_event_callback(
+            "tool_start",
+            {
+                "tool_call_id": "call_agent",
+                "webchat_call_id": "call_agent",
+                "name": "web_agent",
+                "api_name": "web_agent",
+                "arguments": {"prompt": "search"},
+                "is_agent": True,
+            },
+        )
+        await webchat_event_callback(
+            "agent_stage",
+            {
+                "webchat_call_id": "call_agent",
+                "agent_name": "web_agent",
+                "stage": "waiting_model",
+            },
+        )
+        await release.wait()
+        await webchat_event_callback(
+            "tool_end",
+            {
+                "tool_call_id": "call_agent",
+                "webchat_call_id": "call_agent",
+                "name": "web_agent",
+                "api_name": "web_agent",
+                "ok": True,
+                "result": "ok",
+                "is_agent": True,
+            },
+        )
+        return "chat"
+
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    job = await server._chat_job_manager.create_job("hello")
+
+    for _ in range(20):
+        if any(event.event == "agent_stage" for event in job.events):
+            break
+        await asyncio.sleep(0.01)
+    after = job.next_seq - 1
+    request = cast(
+        web.Request,
+        cast(
+            Any,
+            _DummyRequest(
+                match_info={"job_id": job.job_id},
+                query={"after": str(after), "format": "json"},
+                headers={"Accept": "application/json"},
+                transport=_DummyTransport(),
+            ),
+        ),
+    )
+
+    response = cast(web.Response, await server._chat_job_events_handler(request))
+    payload = json.loads(response.text or "{}")
+
+    assert payload["after"] == after
+    assert payload["last_seq"] == after
+    assert payload["job"]["current_agent_stages"][0]["stage"] == "waiting_model"
+    assert payload["events"][0]["event"] == "stage"
+    assert payload["events"][1]["event"] == "agent_stage"
+    assert payload["events"][1]["seq"] == after
+    assert payload["events"][1]["payload"]["transient"] is True
     release.set()
     await server._chat_job_manager.cancel_job(job.job_id)
 
@@ -321,6 +488,17 @@ async def test_chat_job_persists_webchat_lifecycle_history(
                 "name": "web_agent",
                 "api_name": "web_agent",
                 "arguments": {"prompt": "search"},
+                "is_agent": True,
+            },
+        )
+        await webchat_event_callback(
+            "agent_stage",
+            {
+                "webchat_call_id": "agent_1",
+                "name": "web_agent",
+                "agent_name": "web_agent",
+                "stage": "waiting_model",
+                "detail": "iteration=1",
                 "is_agent": True,
             },
         )
@@ -406,32 +584,39 @@ async def test_chat_job_persists_webchat_lifecycle_history(
     assert webchat["finished_at"] is not None
     assert [event["event"] for event in webchat["events"]] == [
         "agent_start",
+        "agent_stage",
         "tool_start",
         "tool_end",
         "message",
         "agent_end",
     ]
     assert webchat["events"][0]["payload"]["webchat_call_id"] == "agent_1"
-    assert webchat["events"][1]["payload"]["parent_webchat_call_id"] == "agent_1"
-    assert webchat["events"][2]["payload"]["result_preview"] == "nested result"
-    assert "duration_ms" in webchat["events"][2]["payload"]
-    assert webchat["events"][3]["payload"]["content"] == "rendered final"
-    assert webchat["events"][3]["payload"]["parent_webchat_call_id"] == "agent_1"
-    assert webchat["events"][4]["payload"]["result_preview"] == "agent result"
+    assert webchat["events"][1]["payload"]["stage"] == "waiting_model"
+    assert webchat["events"][1]["payload"]["job_id"] == job_id
+    assert isinstance(webchat["events"][1]["payload"]["stage_elapsed_ms"], int)
+    assert webchat["events"][2]["payload"]["parent_webchat_call_id"] == "agent_1"
+    assert webchat["events"][3]["payload"]["result_preview"] == "nested result"
+    assert "duration_ms" in webchat["events"][3]["payload"]
+    assert webchat["events"][4]["payload"]["content"] == "rendered final"
+    assert webchat["events"][4]["payload"]["parent_webchat_call_id"] == "agent_1"
+    assert webchat["events"][5]["payload"]["result_preview"] == "agent result"
     assert len(webchat["calls"]) == 1
     assert webchat["calls"][0]["webchat_call_id"] == "agent_1"
     assert webchat["calls"][0]["is_agent"] is True
+    assert webchat["calls"][0]["current_stage"] == "waiting_model"
     assert webchat["calls"][0]["children"][0]["webchat_call_id"] == "agent_1/search_1"
     assert webchat["calls"][0]["children"][0]["result_preview"] == "nested result"
     assert [item["type"] for item in webchat["timeline"]] == ["call"]
     assert webchat["timeline"][0]["call"]["webchat_call_id"] == "agent_1"
     assert webchat["timeline"][0]["call"]["children"][0]["name"] == "search"
     assert [item["type"] for item in webchat["calls"][0]["timeline"]] == [
+        "stage",
         "call",
         "message",
     ]
-    assert webchat["calls"][0]["timeline"][0]["call"]["name"] == "search"
-    assert webchat["calls"][0]["timeline"][1]["content"] == "rendered final"
+    assert webchat["calls"][0]["timeline"][0]["stage"] == "waiting_model"
+    assert webchat["calls"][0]["timeline"][1]["call"]["name"] == "search"
+    assert webchat["calls"][0]["timeline"][2]["content"] == "rendered final"
 
 
 @pytest.mark.asyncio

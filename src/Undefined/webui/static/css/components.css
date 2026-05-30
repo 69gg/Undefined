@@ -665,6 +665,10 @@
 .runtime-chat-stage[hidden] {
   display: none;
 }
+.runtime-chat-stage.is-final {
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--success);
+}
 .runtime-chat-stage::before {
   content: "";
   width: 5px;
@@ -673,6 +677,9 @@
   border-radius: 999px;
   background: currentColor;
   animation: runtime-chat-stage-pulse 1.2s ease-in-out infinite;
+}
+.runtime-chat-stage.is-final::before {
+  animation: none;
 }
 .runtime-chat-content {
   font-size: 15px;
@@ -1077,6 +1084,26 @@
 }
 .runtime-tool-message > *:last-child {
   margin-bottom: 0;
+}
+.runtime-tool-stage {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--tool-accent) 22%, var(--border-color));
+  background: color-mix(in srgb, var(--tool-accent) 9%, transparent);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.2;
+  animation: runtime-tool-reveal 0.18s ease-out;
+}
+.runtime-tool-stage span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 @keyframes runtime-chat-enter {
   from {

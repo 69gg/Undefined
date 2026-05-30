@@ -232,23 +232,22 @@ curl http://127.0.0.1:8788/openapi.json
 ```
 
 - `stream = false` 保持同步响应。
-- 当 `stream = true` 时，Runtime 会创建 WebChat job，并返回 `text/event-stream`（SSE）：
-  - `event: meta`：会话元信息。
-  - `event: stage`：当前处理阶段，用于 WebUI 在 AI 标签后实时显示状态和已用时；payload 形如 `{"job_id":"...","stage":"waiting_model","elapsed_ms":1234,"detail":"..."}`。阶段和计时由 Runtime job 统一计算，客户端只展示 payload。
-  - `event: tool_start` / `tool_end`：主对话工具开始与结束。
-  - `event: agent_start` / `agent_end`：主对话调用 Agent 开始与结束。
-  - `event: message`：AI/命令最终输出片段。
-  - `event: done`：最终汇总（与非流式 JSON 结构一致）。
-  - `event: error`：任务失败或取消。
-  - 在长时间无内容时会发送 `: keep-alive` 注释帧，防止中间层空闲断连。
-  - SSE 帧包含 `id: <seq>`，客户端可用 `after=<seq>` 续接 job 事件。
-  - `stage` 是实时 UI 状态事件，不写入 `webchat.events` 历史；刷新后只恢复已落盘的工具 / Agent / 正文时序。
-  - WebChat SSE 不发布模型 token 级文本增量，也不发布工具参数增量；正文以 `message` 事件展示，工具只按生命周期事件展示。
-  - 工具结束事件 payload 会尽量带 `duration_ms`，用于 WebUI 在工具块状态后显示本次调用耗时；并发工具按实际完成时间发布结束事件，LLM tool message 回填仍保持模型要求的原始顺序。`done` / `error` payload 会带 `duration_ms` 表示整轮 job 总耗时。总耗时从 job 创建开始计，到 `done`/`error`/`cancelled` 收尾为止。
-  - 工具 / Agent 事件 payload 由后端补齐调用链字段：`webchat_call_id`、`parent_webchat_call_id`、`depth`、`agent_path`。Agent 内部工具、子 Agent 和 Agent 内发送的正文会以父子关系和 timeline 嵌套，前端只按这些字段展示。
-  - 工具 / Agent 事件 payload 由后端补齐 `status`，取值通常为 `running`、`done`、`error`、`cancelled`。如果 job 失败或取消时仍有未闭合调用，历史 metadata 会在统一落盘阶段补齐失败 / 取消终态，避免刷新后继续显示为运行中。
-  - WebUI 展开工具 / Agent 调用块时，会按输入 / 输出分区展示脱敏截断后的 `arguments_preview` 和 `result_preview`；结构化预览会渲染为带颜色的键值字段。
-  - 工具事件 payload 可能带 `ui_hint`。当前用于 WebChat 展示降噪：`webchat_private_send` 表示同一 WebChat 私聊回复已通过 `message` 事件展示，工具块只需显示发送状态；`webchat_end` 表示 `end` 成功结束，工具块可隐藏重复的成功结果。
+- 当 `stream = true` 时，Runtime 会创建 WebChat job。旧接口仍可返回 SSE，但 WebUI 默认使用 job 查询接口续接事件。
+- WebChat job 事件格式：
+  - `meta`：会话元信息。
+  - `stage`：顶层 AI 当前处理阶段，用于 WebUI 在 `AI` 标签后实时显示状态和已用时；payload 形如 `{"job_id":"...","stage":"waiting_model","elapsed_ms":1234,"detail":"..."}`。阶段和计时由 Runtime job 统一计算，客户端只展示 payload。
+  - `agent_stage`：某个 Agent 内部当前阶段，payload 包含 `webchat_call_id`、`stage`、`stage_elapsed_ms`、`elapsed_ms`、`agent_name`。运行中查询可能返回 `transient=true` 的当前快照；这类快照不写入历史，已落盘的非 transient `agent_stage` 会进入对应 Agent 节点 timeline。
+  - `tool_start` / `tool_end`：工具开始与结束。
+  - `agent_start` / `agent_end`：Agent 调用开始与结束。
+  - `message`：AI/命令最终输出片段。
+  - `done`：最终汇总（与非流式 JSON 结构一致）。
+  - `error`：任务失败或取消。
+- WebChat 不发布模型 token 级文本增量，也不发布工具参数增量；正文以 `message` 事件展示，工具只按生命周期事件展示。
+- 工具结束事件 payload 会尽量带 `duration_ms`，用于 WebUI 在工具块状态后显示本次调用耗时；并发工具按实际完成时间发布结束事件，LLM tool message 回填仍保持模型要求的原始顺序。`done` / `error` payload 会带 `duration_ms` 表示整轮 job 总耗时。总耗时从 job 创建开始计，到 `done`/`error`/`cancelled` 收尾为止。
+- 工具 / Agent 事件 payload 由后端补齐调用链字段：`webchat_call_id`、`parent_webchat_call_id`、`depth`、`agent_path`。Agent 内部工具、子 Agent 和 Agent 内发送的正文会以父子关系和 timeline 嵌套，前端只按这些字段展示。
+- 工具 / Agent 事件 payload 由后端补齐 `status`，取值通常为 `running`、`done`、`error`、`cancelled`。如果 job 失败或取消时仍有未闭合调用，历史 metadata 会在统一落盘阶段补齐失败 / 取消终态，避免刷新后继续显示为运行中。
+- WebUI 展开工具 / Agent 调用块时，会按输入 / 输出分区展示脱敏截断后的 `arguments_preview` 和 `result_preview`；结构化预览会渲染为带颜色的键值字段。
+- 工具事件 payload 可能带 `ui_hint`。当前用于 WebChat 展示降噪：`webchat_private_send` 表示同一 WebChat 私聊回复已通过 `message` 事件展示，工具块只需显示发送状态；`webchat_end` 表示 `end` 成功结束，工具块可隐藏重复的成功结果。
 
 行为约定：
 
@@ -378,7 +377,50 @@ curl http://127.0.0.1:8788/openapi.json
 - `POST /api/v1/chat/jobs`：创建后台 job，Body 为 `{"message":"..."}`。
 - `GET /api/v1/chat/jobs/active`：返回当前运行中的 WebChat job（没有则为 `null`）。
 - `GET /api/v1/chat/jobs/{job_id}`：查询 job 状态、最后事件序号和已汇总输出。
-- `GET /api/v1/chat/jobs/{job_id}/events?after=<seq>`：订阅或续接 job SSE 事件。
+- `GET /api/v1/chat/jobs/{job_id}/events?after=<seq>`：查询 `seq` 之后的增量事件，默认返回 JSON。
+- `GET /api/v1/chat/jobs/{job_id}/events?after=<seq>&format=json` 或请求头 `Accept: application/json`：显式查询 JSON。响应包含：
+
+```json
+{
+  "job": {
+    "job_id": "9c1...",
+    "status": "running",
+    "last_seq": 5,
+    "elapsed_ms": 2400,
+    "duration_ms": null,
+    "current_stage": "waiting_tools",
+    "current_stage_elapsed_ms": 1200,
+    "current_agent_stages": [
+      {
+        "job_id": "9c1...",
+        "webchat_call_id": "call_agent",
+        "agent_name": "web_agent",
+        "stage": "waiting_model",
+        "stage_elapsed_ms": 900,
+        "elapsed_ms": 2400,
+        "transient": true
+      }
+    ]
+  },
+  "after": 5,
+  "last_seq": 5,
+  "events": [
+    {
+      "seq": 5,
+      "event": "agent_stage",
+      "payload": {
+        "webchat_call_id": "call_agent",
+        "stage": "waiting_model",
+        "stage_elapsed_ms": 900,
+        "transient": true
+      }
+    }
+  ]
+}
+```
+
+`events` 只包含 `after` 之后的持久事件以及当前运行阶段快照。快照使用当前 `last_seq`，便于刷新或断线后以 `job_id + seq` 轮询续接，但不会推进序号或重复写入历史。
+- `GET /api/v1/chat/jobs/{job_id}/events?after=<seq>` 加请求头 `Accept: text/event-stream`：兼容 SSE 订阅；SSE 帧包含 `id: <seq>`，长时间无事件时会发送 keep-alive 注释帧。
 - `POST /api/v1/chat/jobs/{job_id}/cancel`：取消运行中的 job。
 
 Runtime API 进程重启后不会恢复未完成 job；已落盘的聊天历史仍可通过 history 接口读取。
@@ -560,6 +602,9 @@ JOB_ID="$(curl -s -H "X-Undefined-API-Key: $KEY" \
   -H "Content-Type: application/json" \
   -d '{"message":"你好"}' \
   "$API/api/v1/chat/jobs" | jq -r .job_id)"
+curl -H "X-Undefined-API-Key: $KEY" \
+  "$API/api/v1/chat/jobs/$JOB_ID/events?after=0&format=json"
+
 curl -N -H "X-Undefined-API-Key: $KEY" \
   -H "Accept: text/event-stream" \
   "$API/api/v1/chat/jobs/$JOB_ID/events?after=0"
@@ -603,7 +648,7 @@ WebUI 不直接在前端暴露 `auth_key`，而是通过后端代理访问主进
 - `POST /api/runtime/tools/invoke`
 
 WebUI 后端会自动从 `config.toml` 读取 `[api].auth_key` 并注入 Header。
-`/api/runtime/chat` 与 `/api/runtime/chat/jobs/{job_id}/events` 会透传 SSE keep-alive，聊天代理超时按当前聊天模型队列预算计算。
+`/api/runtime/chat/jobs/{job_id}/events` 默认代理 JSON 增量查询；显式请求 `Accept: text/event-stream` 时会透传 SSE keep-alive，聊天代理超时按当前聊天模型队列预算计算。
 
 ## 7. 故障排查
 

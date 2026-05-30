@@ -15,7 +15,8 @@
         chatAutoScroll: true,
         streamingMessageId: null,
         activeChatMessageId: null,
-        chatReconnectTimer: null,
+        chatPollTimer: null,
+        chatPollBackoffMs: 1000,
         toolBlocks: new Map(),
         toolCollapseTimers: new Map(),
         probeTimer: null,
@@ -653,6 +654,11 @@
         runtimeState.toolCollapseTimers.clear();
     }
 
+    function stopChatPolling() {
+        clearTimeout(runtimeState.chatPollTimer);
+        runtimeState.chatPollTimer = null;
+    }
+
     function finishStreamingMessage() {
         if (!runtimeState.streamingMessageId) return;
         const item = document.querySelector(
@@ -662,9 +668,20 @@
         runtimeState.streamingMessageId = null;
     }
 
-    function finalizeActiveChatMessage() {
+    function finalizeActiveChatMessage(payload = null) {
         const item = findActiveChatMessage();
-        if (item) setChatStage(item, null);
+        if (item) {
+            const durationMs = Number(payload && payload.duration_ms);
+            if (Number.isFinite(durationMs) && durationMs >= 0) {
+                setChatStage(item, {
+                    stage: "done",
+                    elapsed_ms: durationMs,
+                    final: true,
+                });
+            } else {
+                setChatStage(item, null);
+            }
+        }
         finishStreamingMessage();
         runtimeState.activeChatMessageId = null;
     }
@@ -685,6 +702,7 @@
             stageEl.hidden = true;
             stageEl.textContent = "";
             stageEl.removeAttribute("title");
+            stageEl.classList.remove("is-final");
             return;
         }
         const label = chatStageLabel(stage);
@@ -694,6 +712,7 @@
             ? formatDurationMs(elapsedMs)
             : "";
         stageEl.hidden = false;
+        stageEl.classList.toggle("is-final", !!(payload && payload.final));
         stageEl.textContent = duration ? `${label} · ${duration}` : label;
         stageEl.title = detail ? `${label} · ${detail}` : label;
     }
@@ -837,9 +856,22 @@
         const label = toolDisplayLabel(block);
         const statusLabel = toolStatusLabel(block);
         const durationLabel = formatDurationMs(block.durationMs);
-        const metaLabel = durationLabel
+        const baseMetaLabel = durationLabel
             ? `${statusLabel} · ${durationLabel}`
             : statusLabel;
+        const stageLabel = block.currentStage
+            ? chatStageLabel(block.currentStage)
+            : "";
+        const stageDuration = formatDurationMs(block.currentStageElapsedMs);
+        const showLiveAgentStage =
+            block.isAgent &&
+            stageLabel &&
+            !["done", "error", "cancelled"].includes(block.status);
+        const metaLabel = showLiveAgentStage
+            ? stageDuration
+                ? `${stageLabel} · ${stageDuration}`
+                : stageLabel
+            : baseMetaLabel;
         const args = renderToolPreviewSection(
             "runtime.tool_input",
             block.argumentsPreview,
@@ -883,6 +915,15 @@
             if (!content) return "";
             return `<div class="runtime-tool-message">${renderChatContent(content, true)}</div>`;
         }
+        if (entry.type === "stage") {
+            const stage = String(entry.stage || "").trim();
+            if (!stage) return "";
+            const label = chatStageLabel(stage);
+            const detail = String(entry.detail || "").trim();
+            const duration = formatDurationMs(entry.stageElapsedMs);
+            const meta = duration ? `${label} · ${duration}` : label;
+            return `<div class="runtime-tool-stage" title="${escapeHtml(detail || label)}"><span>${escapeHtml(meta)}</span></div>`;
+        }
         if (entry.type === "call" && entry.call) {
             return renderToolBlock(entry.call);
         }
@@ -923,6 +964,12 @@
                 node.duration_ms !== undefined
                     ? Number(node.duration_ms)
                     : undefined,
+            currentStage: String(node.current_stage || ""),
+            currentStageDetail: String(node.current_stage_detail || ""),
+            currentStageElapsedMs:
+                node.current_stage_elapsed_ms !== undefined
+                    ? Number(node.current_stage_elapsed_ms)
+                    : undefined,
             children,
             timeline,
             autoOpen: false,
@@ -936,6 +983,21 @@
             return {
                 type,
                 content: String(node.content || ""),
+            };
+        }
+        if (type === "stage") {
+            return {
+                type,
+                stage: String(node.stage || ""),
+                detail: String(node.detail || ""),
+                elapsedMs:
+                    node.elapsed_ms !== undefined
+                        ? Number(node.elapsed_ms)
+                        : undefined,
+                stageElapsedMs:
+                    node.stage_elapsed_ms !== undefined
+                        ? Number(node.stage_elapsed_ms)
+                        : undefined,
             };
         }
         if (type === "call") {
@@ -1010,6 +1072,18 @@
                 payload && payload.duration_ms !== undefined
                     ? Number(payload.duration_ms)
                     : previous.durationMs,
+            currentStage:
+                isEnd && !(payload && payload.current_stage)
+                    ? ""
+                    : previous.currentStage || "",
+            currentStageDetail:
+                isEnd && !(payload && payload.current_stage_detail)
+                    ? ""
+                    : previous.currentStageDetail || "",
+            currentStageElapsedMs:
+                isEnd && !(payload && payload.current_stage_elapsed_ms)
+                    ? undefined
+                    : previous.currentStageElapsedMs,
             autoOpen: isStart ? true : !!previous.autoOpen,
             localStartedAtMs: isStart
                 ? monotonicNowMs()
@@ -1067,8 +1141,82 @@
             parent.timeline = timeline;
             return;
         }
+        if (entry.type === "stage") {
+            const entrySeq = Number(entry.seq);
+            const existingIndex = timeline.findIndex(
+                (item) =>
+                    item.type === "stage" &&
+                    Number(item.seq) === entrySeq &&
+                    String(item.stage || "") === String(entry.stage || ""),
+            );
+            if (existingIndex >= 0) {
+                timeline[existingIndex] = entry;
+            } else {
+                timeline.push(entry);
+            }
+            parent.timeline = timeline;
+            return;
+        }
         timeline.push(entry);
         parent.timeline = timeline;
+    }
+
+    function reduceAgentStageBlock(blocks, payload, seq = 0) {
+        const key = toolBlockKey(payload, blocks);
+        const previous = blocks.get(key) || {};
+        const parentCandidate = String(
+            (payload && payload.parent_webchat_call_id) ||
+                previous.parentWebchatCallId ||
+                "",
+        ).trim();
+        const parentKey = parentCandidate === key ? "" : parentCandidate;
+        const stage = String((payload && payload.stage) || "").trim();
+        const block = {
+            ...previous,
+            webchatCallId: key,
+            name: String(
+                (payload && (payload.agent_name || payload.name)) ||
+                    previous.name ||
+                    "",
+            ),
+            isAgent: true,
+            status: String(
+                (payload && payload.status) || previous.status || "running",
+            ),
+            argumentsPreview: previous.argumentsPreview || "",
+            resultPreview: previous.resultPreview || "",
+            uiHint: previous.uiHint || "",
+            durationMs: previous.durationMs,
+            currentStage: stage || previous.currentStage || "",
+            currentStageDetail: String(
+                (payload && payload.detail) ||
+                    previous.currentStageDetail ||
+                    "",
+            ),
+            currentStageElapsedMs:
+                payload && payload.stage_elapsed_ms !== undefined
+                    ? Number(payload.stage_elapsed_ms)
+                    : previous.currentStageElapsedMs,
+            autoOpen: !!previous.autoOpen,
+            parentWebchatCallId: parentKey,
+            children: Array.isArray(previous.children) ? previous.children : [],
+            timeline: Array.isArray(previous.timeline) ? previous.timeline : [],
+        };
+        if (stage && !(payload && payload.transient)) {
+            appendToolTimelineEntry(block, {
+                type: "stage",
+                seq,
+                stage,
+                detail: block.currentStageDetail,
+                elapsedMs:
+                    payload && payload.elapsed_ms !== undefined
+                        ? Number(payload.elapsed_ms)
+                        : undefined,
+                stageElapsedMs: block.currentStageElapsedMs,
+            });
+        }
+        blocks.set(key, block);
+        return block;
     }
 
     function redrawToolTimelineNode(item, blocks, key) {
@@ -1191,6 +1339,41 @@
         scrollChatToBottomSoon();
     }
 
+    function upsertAgentStageBlock(payload, jobId = "", seq = 0) {
+        const item = ensureStreamingMessage(jobId);
+        if (!item) return;
+        const blocks = runtimeState.toolBlocks;
+        const key = timelineToolKey(payload, blocks);
+        const block = reduceAgentStageBlock(blocks, payload, seq);
+        const parentKey = String(block.parentWebchatCallId || "").trim();
+        const timeline = ensureTimelineNodeContainer(item);
+        if (!timeline) return;
+        if (parentKey && blocks.has(parentKey)) {
+            const parent = blocks.get(parentKey);
+            const blockIdentity = toolCallIdentity(block);
+            const siblings = Array.isArray(parent.children)
+                ? parent.children.filter(
+                      (child) => toolCallIdentity(child) !== blockIdentity,
+                  )
+                : [];
+            parent.children = [...siblings, block];
+            appendToolTimelineEntry(parent, { type: "call", call: block });
+            redrawToolTimelineNode(item, blocks, parentKey);
+        } else {
+            let node = timeline.querySelector(
+                `[data-tool-key="${CSS.escape(key)}"]`,
+            );
+            if (!node) {
+                node = document.createElement("div");
+                node.className = "runtime-chat-tools";
+                node.dataset.toolKey = key;
+                timeline.appendChild(node);
+            }
+            node.innerHTML = renderToolBlock(block);
+        }
+        scrollChatToBottomSoon();
+    }
+
     function historyWebchatEvents(item) {
         const webchat = item && item.webchat;
         const events =
@@ -1202,6 +1385,7 @@
                 event === "tool_end" ||
                 event === "agent_start" ||
                 event === "agent_end" ||
+                event === "agent_stage" ||
                 event === "message"
             );
         });
@@ -1305,6 +1489,15 @@
             if (!message.dataset.rawContent && content) {
                 appendTimelineMessage(message, content, role);
             }
+        }
+        const webchat = item && item.webchat;
+        const durationMs = Number(webchat && webchat.duration_ms);
+        if (role === "bot" && Number.isFinite(durationMs) && durationMs >= 0) {
+            setChatStage(message, {
+                stage: "done",
+                elapsed_ms: durationMs,
+                final: true,
+            });
         }
         if (!content && !message.dataset.rawContent) {
             message.classList.add("tool-only");
@@ -1499,61 +1692,6 @@
         const hint = t("runtime.api_start_hint");
         if (!hint || text.includes(hint)) return text;
         return `${text} ${hint}`;
-    }
-
-    async function consumeSse(res, onEvent) {
-        if (!res.body) return;
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        function emitBlock(rawBlock) {
-            const block = String(rawBlock || "").trim();
-            if (!block) return;
-            let event = "message";
-            let seq = 0;
-            const dataLines = [];
-            block.split("\n").forEach((line) => {
-                if (line.startsWith(":")) return;
-                if (line.startsWith("id:")) {
-                    const parsed = Number(line.slice(3).trim());
-                    seq = Number.isFinite(parsed) ? parsed : 0;
-                    return;
-                }
-                if (line.startsWith("event:")) {
-                    event = line.slice(6).trim() || "message";
-                    return;
-                }
-                if (line.startsWith("data:")) {
-                    dataLines.push(line.slice(5).trimStart());
-                }
-            });
-            if (dataLines.length === 0) return;
-            const rawData = dataLines.join("\n");
-            let payload = {};
-            try {
-                payload = JSON.parse(rawData);
-            } catch (_error) {
-                payload = { raw: rawData };
-            }
-            onEvent(event, payload, seq);
-        }
-
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            buffer = buffer.replace(/\r\n/g, "\n");
-            let boundary = buffer.indexOf("\n\n");
-            while (boundary !== -1) {
-                const block = buffer.slice(0, boundary);
-                buffer = buffer.slice(boundary + 2);
-                emitBlock(block);
-                boundary = buffer.indexOf("\n\n");
-            }
-        }
-        buffer += decoder.decode();
-        if (buffer.trim()) emitBlock(buffer);
     }
 
     let _memoryMutating = false;
@@ -2163,6 +2301,10 @@
             setChatStage(item, payload || {});
             return;
         }
+        if (event === "agent_stage") {
+            upsertAgentStageBlock(payload || {}, eventJobId, seq);
+            return;
+        }
         if (
             event === "tool_start" ||
             event === "tool_end" ||
@@ -2193,6 +2335,7 @@
             return;
         }
         if (event === "done") {
+            stopChatPolling();
             if (
                 payload &&
                 payload.reply &&
@@ -2210,7 +2353,7 @@
                     scrollChatToBottomSoon();
                 }
             }
-            finalizeActiveChatMessage();
+            finalizeActiveChatMessage(payload || {});
             runtimeState.activeJobId = null;
             runtimeState.chatBusy = false;
             runtimeState.chatHistoryLoaded = true;
@@ -2218,6 +2361,7 @@
             return;
         }
         if (event === "error") {
+            stopChatPolling();
             finalizeActiveChatMessage();
             runtimeState.activeJobId = null;
             runtimeState.chatBusy = false;
@@ -2235,57 +2379,60 @@
         }
     }
 
-    async function attachChatJob(jobId, after = 0) {
-        runtimeState.activeJobId = jobId;
-        runtimeState.lastEventSeq = Number(after || 0);
+    function applyChatEventsPayload(data, jobId) {
+        const events = data && Array.isArray(data.events) ? data.events : [];
+        events
+            .filter((entry) => entry && typeof entry === "object")
+            .sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0))
+            .forEach((entry) => {
+                applyChatEvent(
+                    String(entry.event || ""),
+                    entry.payload || {},
+                    Number(entry.seq || 0),
+                );
+            });
+        const job = data && data.job ? data.job : null;
+        if (
+            job &&
+            runtimeState.activeJobId === jobId &&
+            ["done", "error", "cancelled"].includes(String(job.status || ""))
+        ) {
+            applyChatEvent(
+                job.status === "done" ? "done" : "error",
+                job.status === "done"
+                    ? job
+                    : {
+                          error: job.error || job.status,
+                          job_id: job.job_id || jobId,
+                          duration_ms: job.duration_ms,
+                      },
+                Number(job.last_seq || runtimeState.lastEventSeq),
+            );
+        }
+    }
+
+    async function pollChatJob(jobId) {
+        if (runtimeState.activeJobId !== jobId) return;
         runtimeState.chatBusy = true;
         setButtonLoading(get("btnRuntimeChatSend"), true);
         try {
             const params = new URLSearchParams({
                 after: String(runtimeState.lastEventSeq),
+                format: "json",
             });
-            const res = await api(
+            const data = await fetchJsonOrThrow([
+                `/api/v1/management/runtime/chat/jobs/${encodeURIComponent(jobId)}/events?${params.toString()}`,
                 `/api/runtime/chat/jobs/${encodeURIComponent(jobId)}/events?${params.toString()}`,
-                { headers: { Accept: "text/event-stream" } },
-            );
-            const contentType = (
-                res.headers.get("Content-Type") || ""
-            ).toLowerCase();
-            if (
-                !res.ok ||
-                !contentType.includes("text/event-stream") ||
-                !res.body
-            ) {
-                const data = await parseJsonSafe(res);
-                throw new Error(buildRequestError(res, data));
-            }
-            await consumeSse(res, applyChatEvent);
-            if (runtimeState.activeJobId === jobId && runtimeState.chatBusy) {
-                const detail = await fetchJsonOrThrow(
-                    `/api/runtime/chat/jobs/${encodeURIComponent(jobId)}`,
-                );
-                if (
-                    detail &&
-                    ["done", "error", "cancelled"].includes(detail.status)
-                ) {
-                    applyChatEvent(
-                        detail.status === "done" ? "done" : "error",
-                        detail.status === "done"
-                            ? detail
-                            : { error: detail.error || detail.status },
-                        detail.last_seq || runtimeState.lastEventSeq,
-                    );
-                }
-            }
+            ]);
+            runtimeState.chatPollBackoffMs = 1000;
+            applyChatEventsPayload(data, jobId);
         } catch (error) {
             if (runtimeState.activeJobId === jobId) {
                 showToast(t("runtime.chat_reconnecting"), "warning", 1800);
-                clearTimeout(runtimeState.chatReconnectTimer);
-                runtimeState.chatReconnectTimer = setTimeout(() => {
-                    attachChatJob(jobId, runtimeState.lastEventSeq).catch(
-                        () => {},
-                    );
-                }, 1200);
+                runtimeState.chatPollBackoffMs = Math.min(
+                    8000,
+                    Math.max(1200, runtimeState.chatPollBackoffMs * 1.6),
+                );
             } else {
                 showToast(
                     `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
@@ -2294,6 +2441,24 @@
                 );
             }
         }
+        if (runtimeState.activeJobId !== jobId || !runtimeState.chatBusy) {
+            stopChatPolling();
+            return;
+        }
+        stopChatPolling();
+        runtimeState.chatPollTimer = setTimeout(() => {
+            pollChatJob(jobId).catch(() => {});
+        }, runtimeState.chatPollBackoffMs);
+    }
+
+    async function attachChatJob(jobId, after = 0) {
+        stopChatPolling();
+        runtimeState.activeJobId = jobId;
+        runtimeState.lastEventSeq = Number(after || 0);
+        runtimeState.chatBusy = true;
+        runtimeState.chatPollBackoffMs = 1000;
+        setButtonLoading(get("btnRuntimeChatSend"), true);
+        pollChatJob(jobId).catch(() => {});
     }
 
     async function resumeActiveChatJob() {
@@ -2305,6 +2470,7 @@
             const job = data && data.job ? data.job : null;
             if (!job || !job.job_id) return;
             runtimeState.activeJobId = String(job.job_id);
+            ensureStreamingMessage(runtimeState.activeJobId);
             attachChatJob(
                 runtimeState.activeJobId,
                 runtimeState.lastEventSeq,
@@ -2334,6 +2500,7 @@
             runtimeState.chatHistoryLoaded = true;
             runtimeState.chatHistoryCursor = null;
             runtimeState.chatHistoryHasMore = false;
+            stopChatPolling();
             showToast(t("runtime.chat_cleared"), "success", 2200);
         } catch (error) {
             showToast(
@@ -2357,6 +2524,7 @@
         runtimeState.chatBusy = true;
         setButtonLoading(button, true);
         clearToolCollapseTimers();
+        stopChatPolling();
         runtimeState.toolBlocks.clear();
         runtimeState.streamingMessageId = null;
         runtimeState.activeChatMessageId = null;

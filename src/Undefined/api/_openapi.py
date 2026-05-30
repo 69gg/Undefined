@@ -107,7 +107,13 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
             "get": {"summary": "Get a WebUI chat job by id"}
         },
         "/api/v1/chat/jobs/{job_id}/events": {
-            "get": {"summary": "Subscribe to WebUI chat job SSE events"}
+            "get": {
+                "summary": "Subscribe to or query WebUI chat job events",
+                "description": (
+                    "Returns SSE by default. With Accept: application/json or "
+                    "format=json, returns a JSON snapshot with events after seq."
+                ),
+            }
         },
         "/api/v1/chat/jobs/{job_id}/cancel": {
             "post": {"summary": "Cancel a WebUI chat job"}

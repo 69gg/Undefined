@@ -56,7 +56,10 @@ _WEBCHAT_SEND_MESSAGE_TOOLS = frozenset(
 _WEBCHAT_LIFECYCLE_EVENTS = frozenset(
     {"tool_start", "tool_end", "agent_start", "agent_end"}
 )
-_WEBCHAT_HISTORY_EVENTS = _WEBCHAT_LIFECYCLE_EVENTS | frozenset({"message"})
+_WEBCHAT_AGENT_STAGE_EVENTS = frozenset({"agent_stage"})
+_WEBCHAT_HISTORY_EVENTS = (
+    _WEBCHAT_LIFECYCLE_EVENTS | _WEBCHAT_AGENT_STAGE_EVENTS | frozenset({"message"})
+)
 _WEBCHAT_STAGE_EVENTS = frozenset({"stage"})
 
 
@@ -94,6 +97,9 @@ class ChatJob:
     done: asyncio.Event = field(default_factory=asyncio.Event)
     changed: asyncio.Condition = field(default_factory=asyncio.Condition)
     tool_started_at: dict[str, float] = field(default_factory=dict)
+    agent_current_stage: dict[str, str] = field(default_factory=dict)
+    agent_stage_started_at: dict[str, float] = field(default_factory=dict)
+    agent_stage_payloads: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def snapshot(self) -> dict[str, Any]:
         now = time.time()
@@ -116,6 +122,7 @@ class ChatJob:
             "error": self.error or None,
             "reply": "\n\n".join(self.outputs).strip(),
             "messages": list(self.outputs),
+            "current_agent_stages": self.current_agent_stage_snapshots(now),
             "history_finalized": self.history_finalized,
         }
 
@@ -134,6 +141,42 @@ class ChatJob:
         if self.current_stage_detail:
             payload["detail"] = self.current_stage_detail
         return ChatJobEvent(seq=self.next_seq - 1, event="stage", payload=payload)
+
+    def current_agent_stage_events(self) -> list[ChatJobEvent]:
+        if self.done.is_set():
+            return []
+        now = time.time()
+        payloads = self.current_agent_stage_snapshots(now)
+        return [
+            ChatJobEvent(seq=self.next_seq - 1, event="agent_stage", payload=payload)
+            for payload in payloads
+        ]
+
+    def current_agent_stage_snapshots(
+        self, now: float | None = None
+    ) -> list[dict[str, Any]]:
+        if self.done.is_set():
+            return []
+        measured_at = time.time() if now is None else now
+        payloads: list[dict[str, Any]] = []
+        for call_id, stage in self.agent_current_stage.items():
+            if not stage:
+                continue
+            payload = dict(self.agent_stage_payloads.get(call_id, {}))
+            started_at = self.agent_stage_started_at.get(call_id, measured_at)
+            payload.update(
+                {
+                    "job_id": self.job_id,
+                    "webchat_call_id": call_id,
+                    "stage": stage,
+                    "transient": True,
+                    "started_at": started_at,
+                    "stage_elapsed_ms": max(0, int((measured_at - started_at) * 1000)),
+                    "elapsed_ms": _job_elapsed_ms(self, measured_at),
+                }
+            )
+            payloads.append(payload)
+        return payloads
 
 
 class ChatJobManager:
@@ -262,6 +305,17 @@ class ChatJobManager:
         async with job.changed:
             return [event for event in job.events if event.seq > after]
 
+    async def events_after_with_snapshot(
+        self,
+        job: ChatJob,
+        after: int,
+    ) -> tuple[list[ChatJobEvent], dict[str, Any], list[ChatJobEvent]]:
+        async with job.changed:
+            events = [event for event in job.events if event.seq > after]
+            snapshot = job.snapshot()
+            live_events = _current_webchat_live_events(job, after, events)
+            return events, snapshot, live_events
+
     async def wait_for_events_after(
         self,
         job: ChatJob,
@@ -327,7 +381,28 @@ class ChatJobManager:
                     detail=payload.get("detail"),
                 )
                 return
-            if event not in {"tool_start", "tool_end", "agent_start", "agent_end"}:
+            if event in _WEBCHAT_AGENT_STAGE_EVENTS:
+                event_payload = _sanitize_webchat_event_payload(event, payload)
+                event_time = time.time()
+                call_id = _webchat_tool_event_key(event_payload)
+                stage_key = str(event_payload.get("stage") or "").strip()
+                if not stage_key:
+                    return
+                previous_stage = job.agent_current_stage.get(call_id)
+                if stage_key and previous_stage != stage_key:
+                    job.agent_current_stage[call_id] = stage_key
+                    job.agent_stage_started_at[call_id] = event_time
+                started_at = job.agent_stage_started_at.get(call_id, event_time)
+                event_payload["started_at"] = started_at
+                event_payload["stage_elapsed_ms"] = max(
+                    0, int((event_time - started_at) * 1000)
+                )
+                event_payload["elapsed_ms"] = _job_elapsed_ms(job, event_time)
+                event_payload["job_id"] = job.job_id
+                job.agent_stage_payloads[call_id] = dict(event_payload)
+                await self._append_event(job, event, event_payload)
+                return
+            if event not in _WEBCHAT_LIFECYCLE_EVENTS:
                 return
             event_payload = _sanitize_webchat_event_payload(event, payload)
             event_time = time.time()
@@ -337,11 +412,16 @@ class ChatJobManager:
                 job.tool_started_at[tool_key] = event_time
                 event_payload["started_at"] = event_time
             elif output_event in {"tool_end", "agent_end"}:
-                started_at = job.tool_started_at.pop(tool_key, None)
-                if started_at is not None:
+                lifecycle_started_at = job.tool_started_at.get(tool_key)
+                job.tool_started_at.pop(tool_key, 0.0)
+                if lifecycle_started_at is not None:
                     event_payload["duration_ms"] = max(
-                        0, int((event_time - started_at) * 1000)
+                        0, int((event_time - lifecycle_started_at) * 1000)
                     )
+                if output_event == "agent_end":
+                    job.agent_current_stage.pop(tool_key, None)
+                    job.agent_stage_started_at.pop(tool_key, None)
+                    job.agent_stage_payloads.pop(tool_key, None)
             event_payload["elapsed_ms"] = _job_elapsed_ms(job, event_time)
             event_payload["job_id"] = job.job_id
             await self._append_event(job, event, event_payload)
@@ -501,6 +581,39 @@ def _stage_elapsed_ms(job: ChatJob, now: float | None = None) -> int:
         return 0
     measured_at = time.time() if now is None else now
     return max(0, int((measured_at - job.current_stage_started_at) * 1000))
+
+
+def _current_webchat_live_events(
+    job: ChatJob,
+    after: int,
+    events: list[ChatJobEvent],
+) -> list[ChatJobEvent]:
+    live_events: list[ChatJobEvent] = []
+    current_stage_event = job.current_stage_event()
+    if (
+        current_stage_event is not None
+        and current_stage_event.seq >= after
+        and not any(
+            existing.event == current_stage_event.event
+            and existing.payload.get("stage")
+            == current_stage_event.payload.get("stage")
+            for existing in events
+        )
+    ):
+        live_events.append(current_stage_event)
+    live_events.extend(
+        event
+        for event in job.current_agent_stage_events()
+        if event.seq >= after
+        and not any(
+            existing.event == event.event
+            and existing.payload.get("webchat_call_id")
+            == event.payload.get("webchat_call_id")
+            and existing.payload.get("stage") == event.payload.get("stage")
+            for existing in events
+        )
+    )
+    return live_events
 
 
 def _current_webchat_agent_call_id(job: ChatJob) -> str:
@@ -664,6 +777,23 @@ def _sanitize_webchat_event_payload(
             **_webchat_payload_lineage(payload),
             **({"ui_hint": ui_hint} if ui_hint else {}),
         }
+    if event == "agent_stage":
+        stage = str(payload.get("stage") or payload.get("key") or "").strip()
+        agent_name = str(payload.get("agent_name") or payload.get("name") or "")
+        call_id = str(payload.get("webchat_call_id") or "").strip()
+        parent_call_id = str(payload.get("parent_webchat_call_id") or "").strip()
+        if not call_id:
+            call_id = parent_call_id or agent_name or "agent"
+            payload = {**payload, "webchat_call_id": call_id}
+        return {
+            "stage": stage,
+            "detail": _preview(payload.get("detail"), 160),
+            "status": str(payload.get("status") or "running"),
+            "name": agent_name,
+            "agent_name": agent_name,
+            "is_agent": True,
+            **_webchat_payload_lineage(payload),
+        }
     return {key: value for key, value in payload.items() if key != "arguments"}
 
 
@@ -779,6 +909,9 @@ def _call_preview_node(payload: dict[str, Any]) -> dict[str, Any]:
         "duration_ms": payload.get("duration_ms"),
         "elapsed_ms": payload.get("elapsed_ms"),
         "started_at": payload.get("started_at"),
+        "current_stage": str(payload.get("current_stage") or "").strip(),
+        "current_stage_detail": str(payload.get("current_stage_detail") or "").strip(),
+        "current_stage_elapsed_ms": payload.get("current_stage_elapsed_ms"),
         "depth": payload.get("depth", 0),
         "agent_path": payload.get("agent_path")
         if isinstance(payload.get("agent_path"), list)
@@ -796,6 +929,13 @@ def _webchat_event_call_id(event: dict[str, Any]) -> str:
     return call_id or _legacy_webchat_tool_event_key(payload)
 
 
+def _history_agent_stage_seq(event: dict[str, Any]) -> int:
+    if str(event.get("event") or "") != "agent_stage":
+        return _webchat_event_seq(event)
+    seq = _webchat_event_seq(event)
+    return max(0, seq - 1)
+
+
 def _build_webchat_call_graph(
     events: list[dict[str, Any]],
 ) -> tuple[dict[str, dict[str, Any]], list[str], list[dict[str, Any]]]:
@@ -803,7 +943,7 @@ def _build_webchat_call_graph(
     order: list[str] = []
     for item in events:
         event = str(item.get("event") or "")
-        if event not in _WEBCHAT_LIFECYCLE_EVENTS:
+        if event not in _WEBCHAT_LIFECYCLE_EVENTS and event != "agent_stage":
             continue
         payload = item.get("payload")
         if not isinstance(payload, dict):
@@ -815,10 +955,41 @@ def _build_webchat_call_graph(
         if node is None:
             node = _call_preview_node({**payload, "webchat_call_id": call_id})
             nodes[call_id] = node
-            order.append(call_id)
+            if event == "agent_stage":
+                insert_after = _history_agent_stage_seq(item)
+                insert_at = len(order)
+                for index, existing_call_id in enumerate(order):
+                    existing = nodes.get(existing_call_id)
+                    if existing is None:
+                        continue
+                    started_seq = int(existing.get("_started_seq", 0) or 0)
+                    if started_seq > insert_after:
+                        insert_at = index
+                        break
+                order.insert(insert_at, call_id)
+            else:
+                order.append(call_id)
+        if event == "agent_stage":
+            node.update(
+                {
+                    "current_stage": str(payload.get("stage") or "").strip(),
+                    "current_stage_detail": str(payload.get("detail") or "").strip(),
+                    "current_stage_elapsed_ms": payload.get("stage_elapsed_ms"),
+                    "elapsed_ms": payload.get("elapsed_ms"),
+                    "is_agent": True,
+                    "name": str(
+                        payload.get("agent_name")
+                        or payload.get("name")
+                        or node.get("name")
+                        or ""
+                    ).strip(),
+                }
+            )
+            continue
         if event in {"tool_start", "agent_start"}:
             node.update(_call_preview_node({**payload, "webchat_call_id": call_id}))
             node["status"] = "running"
+            node["_started_seq"] = _webchat_event_seq(item)
             continue
         if event in {"tool_end", "agent_end"}:
             node.update(
@@ -848,6 +1019,8 @@ def _build_webchat_call_graph(
         else:
             roots.append(node)
     _populate_webchat_node_timelines(nodes, events)
+    for node in nodes.values():
+        node.pop("_started_seq", None)
     return nodes, order, roots
 
 
@@ -880,6 +1053,25 @@ def _webchat_message_timeline_item(
     }
 
 
+def _webchat_agent_stage_timeline_item(
+    *,
+    event: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    stage = str(payload.get("stage") or "").strip()
+    if not stage:
+        return None
+    detail = str(payload.get("detail") or "").strip()
+    return {
+        "type": "stage",
+        "seq": _webchat_event_seq(event),
+        "stage": stage,
+        "detail": detail,
+        "elapsed_ms": payload.get("elapsed_ms"),
+        "stage_elapsed_ms": payload.get("stage_elapsed_ms"),
+    }
+
+
 def _populate_webchat_node_timelines(
     nodes: dict[str, dict[str, Any]],
     events: list[dict[str, Any]],
@@ -900,6 +1092,15 @@ def _populate_webchat_node_timelines(
             message_item = _webchat_message_timeline_item(event=item, payload=payload)
             if message_item is not None:
                 parent.setdefault("timeline", []).append(message_item)
+            continue
+        if event == "agent_stage":
+            call_id = _webchat_event_call_id(item)
+            parent = nodes.get(call_id)
+            if parent is None:
+                continue
+            stage_item = _webchat_agent_stage_timeline_item(event=item, payload=payload)
+            if stage_item is not None:
+                parent.setdefault("timeline", []).append(stage_item)
             continue
         if event not in _WEBCHAT_LIFECYCLE_EVENTS:
             continue
@@ -938,6 +1139,14 @@ def _build_webchat_timeline(events: list[dict[str, Any]]) -> list[dict[str, Any]
             message_item = _webchat_message_timeline_item(event=item, payload=payload)
             if message_item is not None:
                 timeline.append(message_item)
+            continue
+        if event == "agent_stage":
+            call_id = _webchat_event_call_id(item)
+            if call_id and call_id in nodes:
+                continue
+            stage_item = _webchat_agent_stage_timeline_item(event=item, payload=payload)
+            if stage_item is not None:
+                timeline.append(stage_item)
             continue
         if event not in _WEBCHAT_LIFECYCLE_EVENTS:
             continue
@@ -1386,8 +1595,15 @@ async def chat_handler(
                 if stage_event is not None:
                     await _write_sse_event(response, stage_event)
                     after = max(after, stage_event.seq)
-                else:
-                    await response.write(b": keep-alive\n\n")
+                agent_stage_events = job.current_agent_stage_events()
+                for agent_stage_event in agent_stage_events:
+                    await _write_sse_event(response, agent_stage_event)
+                    after = max(after, agent_stage_event.seq)
+                if stage_event is not None or agent_stage_events:
+                    if job.done.is_set():
+                        break
+                    continue
+                await response.write(b": keep-alive\n\n")
                 if job.done.is_set():
                     break
                 continue
@@ -1475,6 +1691,31 @@ async def chat_job_events_handler(
     if job is None:
         return _json_error("Job not found", status=404)
     after = _parse_after(request)
+    accept_header = str(request.headers.get("Accept", "") or "").strip().lower()
+    wants_sse = "text/event-stream" in accept_header
+    wants_json = not wants_sse or (
+        str(request.query.get("format", "") or "").strip().lower() == "json"
+        or "application/json" in accept_header
+    )
+    if wants_json:
+        events, snapshot, live_events = await job_manager.events_after_with_snapshot(
+            job, after
+        )
+        return web.json_response(
+            {
+                "job": snapshot,
+                "after": after,
+                "last_seq": job.next_seq - 1,
+                "events": [
+                    {
+                        "seq": event.seq,
+                        "event": event.event,
+                        "payload": dict(event.payload),
+                    }
+                    for event in [*events, *live_events]
+                ],
+            }
+        )
 
     response = web.StreamResponse(
         status=200,
@@ -1500,8 +1741,15 @@ async def chat_job_events_handler(
                 if stage_event is not None:
                     await _write_sse_event(response, stage_event)
                     after = max(after, stage_event.seq)
-                else:
-                    await response.write(b": keep-alive\n\n")
+                agent_stage_events = job.current_agent_stage_events()
+                for agent_stage_event in agent_stage_events:
+                    await _write_sse_event(response, agent_stage_event)
+                    after = max(after, agent_stage_event.seq)
+                if stage_event is not None or agent_stage_events:
+                    if job.done.is_set():
+                        break
+                    continue
+                await response.write(b": keep-alive\n\n")
                 if job.done.is_set():
                     break
                 continue

@@ -420,6 +420,9 @@ class AgentToolRegistry(BaseRegistry):
                 parent_call_id = str(context.get("webchat_parent_call_id") or "")
                 if parent_call_id:
                     callee_context["webchat_parent_call_id"] = parent_call_id
+                call_parent_id = str(context.get("webchat_call_parent_id") or "")
+                if call_parent_id:
+                    callee_context["webchat_call_parent_id"] = call_parent_id
                 try:
                     callee_context["webchat_depth"] = max(
                         0, int(context.get("webchat_depth", 0) or 0)

@@ -481,6 +481,18 @@ async def runtime_chat_job_events_handler(request: web.Request) -> web.StreamRes
     if not check_auth(request):
         return _unauthorized()
     job_id = _url_quote(str(request.match_info.get("job_id", "")).strip(), safe="")
+    wants_json = (
+        str(request.query.get("format", "") or "").strip().lower() == "json"
+        or "application/json"
+        in str(request.headers.get("Accept", "") or "").strip().lower()
+    )
+    if wants_json:
+        return await _proxy_runtime(
+            method="GET",
+            path=f"/api/v1/chat/jobs/{job_id}/events",
+            params=request.query,
+            timeout_seconds=20.0,
+        )
     return await _proxy_runtime_stream(
         request,
         method="GET",

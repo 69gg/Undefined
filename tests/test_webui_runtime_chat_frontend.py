@@ -31,6 +31,9 @@ def test_webchat_frontend_handles_tool_lifecycle_and_webchat_hints() -> None:
     assert 'event === "tool_delta"' not in source
     assert "pendingToolDeltas" not in source
     assert "appendTokenDelta" not in source
+    assert "consumeSse" not in source
+    assert "attachChatJobSse" not in source
+    assert "text/event-stream" not in source
     assert 'event === "tool_start"' in source
     assert 'event === "tool_end"' in source
     assert 'event === "agent_start"' in source
@@ -58,6 +61,28 @@ def test_webchat_frontend_renders_live_stage_after_ai_label() -> None:
     assert "runtime.chat_stage_searching_cognitive_memory" in i18n
     assert ".runtime-chat-stage" in css
     assert "runtime-chat-stage-pulse" in css
+    assert "is-final" in css
+
+
+def test_webchat_frontend_keeps_final_duration_after_done() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+
+    done_branch = source.split('if (event === "done")', 1)[1].split(
+        'if (event === "error")', 1
+    )[0]
+    finalize_helper = source.split("function finalizeActiveChatMessage", 1)[1].split(
+        "function chatStageLabel", 1
+    )[0]
+    history_helper = source.split("function appendHistoryChatItem", 1)[1].split(
+        "function clearChatMessages", 1
+    )[0]
+
+    assert "finalizeActiveChatMessage(payload || {})" in done_branch
+    assert "payload && payload.duration_ms" in finalize_helper
+    assert 'stage: "done"' in finalize_helper
+    assert "final: true" in finalize_helper
+    assert "webchat.duration_ms" in history_helper
+    assert "setChatStage(message, {" in history_helper
 
 
 def test_webchat_frontend_restores_history_tool_blocks_without_stream_state() -> None:
@@ -138,6 +163,33 @@ def test_webchat_frontend_renders_nested_tool_timeline() -> None:
     assert "runtime-tool-reveal" in css
     assert ".runtime-tool-block::before" in css
     assert ".runtime-tool-block summary::before" in css
+
+
+def test_webchat_frontend_renders_agent_stage_timeline() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    css = RUNTIME_CSS.read_text(encoding="utf-8")
+
+    assert 'event === "agent_stage"' in source
+    assert "function upsertAgentStageBlock" in source
+    assert "function reduceAgentStageBlock" in source
+    assert 'entry.type === "stage"' in source
+    assert "currentStage" in source
+    assert "current_stage_elapsed_ms" in source
+    assert "runtime-tool-stage" in source
+    assert ".runtime-tool-stage" in css
+
+
+def test_webchat_frontend_polls_job_events_incrementally() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+
+    assert "function pollChatJob" in source
+    assert 'format: "json"' in source
+    assert "after: String(runtimeState.lastEventSeq)" in source
+    assert "function applyChatEventsPayload" in source
+    assert "runtimeState.chatPollTimer" in source
+    assert "runtimeState.chatPollBackoffMs" in source
+    assert "pollChatJob(jobId).catch" in source
+    assert 'Accept: "text/event-stream"' not in source
 
 
 def test_webchat_tool_summary_uses_compact_single_line_order() -> None:

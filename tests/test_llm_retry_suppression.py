@@ -411,6 +411,78 @@ async def test_agent_runner_reraises_queued_llm_error(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_runner_emits_nested_webchat_agent_stage(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    agent_dir = tmp_path / "demo_agent"
+    (agent_dir / "tools").mkdir(parents=True)
+
+    agent_config = AgentModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="agent-model",
+        max_tokens=512,
+    )
+    ai_client = SimpleNamespace(
+        agent_config=agent_config,
+        model_selector=SimpleNamespace(
+            select_agent_config=lambda config, **_kwargs: config
+        ),
+        submit_queued_llm_call=AsyncMock(
+            return_value={"choices": [{"message": {"content": "done"}}]}
+        ),
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    async def _webchat_event_callback(event: str, payload: dict[str, Any]) -> None:
+        events.append((event, dict(payload)))
+
+    monkeypatch.setattr(
+        "Undefined.skills.agents.runner.context.AgentToolRegistry",
+        lambda *_args, **_kwargs: SimpleNamespace(get_tools_schema=lambda: []),
+    )
+
+    result = await run_agent_with_tools(
+        agent_name="demo_agent",
+        user_content="用户需求：测试",
+        empty_user_content_message="empty",
+        default_prompt="你是一个测试助手。",
+        context={
+            "ai_client": cast(Any, ai_client),
+            "runtime_config": SimpleNamespace(
+                model_pool_enabled=False,
+                ai_request_max_retries=0,
+            ),
+            "queue_lane": "private",
+            "webchat_event_callback": _webchat_event_callback,
+            "webchat_parent_call_id": "call_agent",
+            "webchat_call_parent_id": "root_agent",
+            "webchat_depth": 1,
+            "webchat_agent_path": ["web_agent"],
+        },
+        agent_dir=agent_dir,
+        logger=logging.getLogger("test_agent_runner_emits_webchat_agent_stage"),
+        max_iterations=3,
+    )
+
+    assert result == "done"
+    agent_stage_payloads = [
+        payload for event, payload in events if event == "agent_stage"
+    ]
+    assert [str(payload.get("stage") or "") for payload in agent_stage_payloads] == [
+        "context_ready",
+        "waiting_model",
+        "done",
+    ]
+    assert agent_stage_payloads[0]["webchat_call_id"] == "call_agent"
+    assert agent_stage_payloads[0]["parent_webchat_call_id"] == "root_agent"
+    assert agent_stage_payloads[0]["depth"] == 1
+    assert agent_stage_payloads[0]["agent_path"] == ["web_agent"]
+    assert "model=agent-model" in str(agent_stage_payloads[1]["detail"])
+
+
+@pytest.mark.asyncio
 async def test_submit_queued_llm_call_enqueues_requested_lane() -> None:
     client: Any = object.__new__(AIClient)
     client._queue_manager = cast(Any, SimpleNamespace())

@@ -160,6 +160,7 @@ async def execute_assistant_tool_calls(
         tool_context = context.copy()
         if is_nested_agent:
             tool_context["webchat_parent_call_id"] = webchat_call_id
+            tool_context["webchat_call_parent_id"] = parent_call_id
             tool_context["webchat_depth"] = depth + 1
             tool_context["webchat_agent_path"] = [
                 *agent_path,
