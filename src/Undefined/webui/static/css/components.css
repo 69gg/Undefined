@@ -754,7 +754,7 @@
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
-  background: var(--bg-app);
+  background: color-mix(in srgb, var(--bg-app) 88%, var(--bg-deep));
   overflow-x: auto;
 }
 .runtime-chat-content.markdown pre code {
@@ -767,6 +767,24 @@
   line-height: 1.5;
   white-space: pre;
 }
+.runtime-code-block .runtime-code-token.keyword { color: #8f4ec7; font-weight: 600; }
+.runtime-code-block .runtime-code-token.string { color: #2f7d57; }
+.runtime-code-block .runtime-code-token.comment { color: var(--text-tertiary); font-style: italic; }
+.runtime-code-block .runtime-code-token.number { color: #b45f2b; }
+.runtime-code-block .runtime-code-token.function { color: #1f6fb2; }
+.runtime-code-block .runtime-code-token.operator { color: #8a6350; }
+.runtime-code-block .runtime-code-token.property { color: #b25577; }
+.runtime-code-block .runtime-code-token.tag { color: #b24d4d; }
+.runtime-code-block .runtime-code-token.attr { color: #7b6bb8; }
+[data-theme="dark"] .runtime-code-block .runtime-code-token.keyword { color: #c792ea; }
+[data-theme="dark"] .runtime-code-block .runtime-code-token.string { color: #89d39a; }
+[data-theme="dark"] .runtime-code-block .runtime-code-token.comment { color: #7f8a91; }
+[data-theme="dark"] .runtime-code-block .runtime-code-token.number { color: #f2b86d; }
+[data-theme="dark"] .runtime-code-block .runtime-code-token.function { color: #82b8ff; }
+[data-theme="dark"] .runtime-code-block .runtime-code-token.operator { color: #c6a58d; }
+[data-theme="dark"] .runtime-code-block .runtime-code-token.property { color: #f08bad; }
+[data-theme="dark"] .runtime-code-block .runtime-code-token.tag { color: #ff8d8d; }
+[data-theme="dark"] .runtime-code-block .runtime-code-token.attr { color: #b8a5ff; }
 .runtime-chat-content code {
   display: inline-block;
   padding: 2px 6px;

@@ -361,6 +361,29 @@ def test_webchat_frontend_escapes_markdown_html_and_unsafe_links() -> None:
     assert "renderer: createSafeMarkedRenderer()" in source
 
 
+def test_webchat_frontend_highlights_markdown_code_blocks() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    css = RUNTIME_CSS.read_text(encoding="utf-8")
+
+    assert "function highlightCodeBlock" in source
+    assert "function highlightJsonCode" in source
+    assert "function highlightGenericCode" in source
+    assert "renderer.code" in source
+    assert "runtime-code-block" in source
+    assert "runtime-code-token" in source
+    assert "highlightCodeBlock(codeText, normalizedLanguage)" in source
+    assert "escapeHtml(code.slice" in source
+    assert "language-${escapeHtml(normalizedLanguage)}" in source
+
+    assert ".runtime-code-block .runtime-code-token.keyword" in css
+    assert ".runtime-code-block .runtime-code-token.string" in css
+    assert ".runtime-code-block .runtime-code-token.comment" in css
+    assert ".runtime-code-block .runtime-code-token.number" in css
+    assert ".runtime-code-block .runtime-code-token.function" in css
+    assert ".runtime-code-block .runtime-code-token.property" in css
+    assert '[data-theme="dark"] .runtime-code-block' in css
+
+
 def test_webchat_tool_status_colors_drive_left_bar_and_status_text() -> None:
     css = RUNTIME_CSS.read_text(encoding="utf-8")
     running_block = css.split(".runtime-tool-block.running {", 1)[1].split(

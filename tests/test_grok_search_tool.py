@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,6 +10,19 @@ import pytest
 
 from Undefined.skills.agents.runner import _filter_tools_for_runtime_config
 from Undefined.skills.agents.web_agent.tools.grok_search import handler as grok_handler
+
+
+def test_grok_search_system_prompt_uses_provided_time_and_search_rules() -> None:
+    prompt = grok_handler._build_grok_search_system_prompt(
+        datetime(2026, 5, 30, 12, 34, 56, tzinfo=timezone.utc)
+    )
+
+    assert "2026-05-30T12:34:56+00:00" in prompt
+    assert "不要以模型内部时间为准" in prompt
+    assert "必须先调用搜索" in prompt
+    assert "多个搜索工具" in prompt
+    assert "不可胡编乱造" in prompt
+    assert "必须给出来源" in prompt
 
 
 def test_grok_search_schema_requires_natural_language_search_request() -> None:
@@ -104,15 +118,18 @@ async def test_grok_search_returns_message_content_from_dict_response() -> None:
     kwargs = ai_client.submit_queued_llm_call.await_args.kwargs
     assert kwargs["model_config"] is grok_model
     assert kwargs["call_type"] == "agent_tool:grok_search"
-    assert kwargs["messages"] == [
-        {
-            "role": "user",
-            "content": (
-                "请搜索 2026 年最新 AI 芯片发布信息，重点比较发布时间、"
-                "供应商、面向推理还是训练、公开性能指标和权威来源。"
-            ),
-        }
-    ]
+    assert kwargs["messages"][0]["role"] == "system"
+    assert "不要以模型内部时间为准" in kwargs["messages"][0]["content"]
+    assert "必须先调用搜索" in kwargs["messages"][0]["content"]
+    assert "多个搜索工具" in kwargs["messages"][0]["content"]
+    assert "必须给出来源" in kwargs["messages"][0]["content"]
+    assert kwargs["messages"][1] == {
+        "role": "user",
+        "content": (
+            "请搜索 2026 年最新 AI 芯片发布信息，重点比较发布时间、"
+            "供应商、面向推理还是训练、公开性能指标和权威来源。"
+        ),
+    }
 
 
 @pytest.mark.asyncio
@@ -204,7 +221,7 @@ async def test_grok_search_keeps_legacy_query_fallback() -> None:
 
     assert result == "ok"
     kwargs = ai_client.submit_queued_llm_call.await_args.kwargs
-    assert kwargs["messages"][0]["content"] == (
+    assert kwargs["messages"][1]["content"] == (
         "请搜索 grok search 工具兼容旧 query 字段的测试资料"
     )
 

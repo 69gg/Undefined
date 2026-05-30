@@ -1799,10 +1799,199 @@
         }
     }
 
+    const CODE_LANGUAGE_ALIASES = {
+        cjs: "javascript",
+        htm: "html",
+        js: "javascript",
+        jsx: "javascript",
+        md: "markdown",
+        mjs: "javascript",
+        py: "python",
+        sh: "bash",
+        shell: "bash",
+        ts: "typescript",
+        tsx: "typescript",
+        yml: "yaml",
+    };
+    const CODE_KEYWORDS = new Set(
+        [
+            "and",
+            "as",
+            "async",
+            "await",
+            "break",
+            "case",
+            "catch",
+            "class",
+            "const",
+            "continue",
+            "def",
+            "default",
+            "del",
+            "do",
+            "elif",
+            "else",
+            "enum",
+            "except",
+            "export",
+            "extends",
+            "false",
+            "finally",
+            "for",
+            "from",
+            "function",
+            "if",
+            "import",
+            "in",
+            "interface",
+            "is",
+            "let",
+            "new",
+            "none",
+            "not",
+            "null",
+            "or",
+            "pass",
+            "raise",
+            "return",
+            "switch",
+            "then",
+            "this",
+            "throw",
+            "true",
+            "try",
+            "type",
+            "undefined",
+            "var",
+            "while",
+            "with",
+            "yield",
+        ].map((item) => item.toLowerCase()),
+    );
+
+    function normalizeCodeLanguage(language) {
+        const raw = String(language || "")
+            .trim()
+            .toLowerCase()
+            .replace(/^language-/, "")
+            .split(/\s+/)[0]
+            .replace(/[^a-z0-9_+#.-]/g, "");
+        return CODE_LANGUAGE_ALIASES[raw] || raw || "text";
+    }
+
+    function renderCodeToken(value, type) {
+        return `<span class="runtime-code-token ${type}">${escapeHtml(value)}</span>`;
+    }
+
+    function highlightCodeByPattern(code, pattern, classify) {
+        let html = "";
+        let lastIndex = 0;
+        code.replace(pattern, (...args) => {
+            const match = String(args[0] || "");
+            const offset = Number(args[args.length - 2]);
+            if (!match || !Number.isFinite(offset) || offset < lastIndex) {
+                return match;
+            }
+            html += escapeHtml(code.slice(lastIndex, offset));
+            html += renderCodeToken(match, classify(match, args));
+            lastIndex = offset + match.length;
+            return match;
+        });
+        html += escapeHtml(code.slice(lastIndex));
+        return html;
+    }
+
+    function highlightJsonCode(code) {
+        const pattern =
+            /("(?:\\.|[^"\\])*"(?=\s*:))|("(?:\\.|[^"\\])*")|(-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|\b(true|false|null)\b|([{}\[\],:])/g;
+        return highlightCodeByPattern(code, pattern, (_match, args) => {
+            if (args[1]) return "property";
+            if (args[2]) return "string";
+            if (args[3]) return "number";
+            if (args[4]) return "keyword";
+            return "operator";
+        });
+    }
+
+    function highlightMarkupCode(code) {
+        const pattern =
+            /(<!--[\s\S]*?-->)|(<!?\w[\s\S]*?>|<\/\w[\s\S]*?>)|\b([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?=\=)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g;
+        return highlightCodeByPattern(code, pattern, (_match, args) => {
+            if (args[1]) return "comment";
+            if (args[2]) return "tag";
+            if (args[3]) return "attr";
+            return "string";
+        });
+    }
+
+    function highlightCssCode(code) {
+        const pattern =
+            /(\/\*[\s\S]*?\*\/)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|(@[-a-zA-Z]+)|(\b[-a-zA-Z_][-\w]*)(?=\s*:)|(-?\b\d+(?:\.\d+)?(?:%|[a-z]+)?\b)|([{}()[\].,;:+\-*/%=&|!<>?#]+)/g;
+        return highlightCodeByPattern(code, pattern, (_match, args) => {
+            if (args[1]) return "comment";
+            if (args[2]) return "string";
+            if (args[3]) return "keyword";
+            if (args[4]) return "property";
+            if (args[5]) return "number";
+            return "operator";
+        });
+    }
+
+    function highlightGenericCode(code) {
+        const pattern =
+            /(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/)|(`(?:\\[\s\S]|[^`\\])*`|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*")|(\b[A-Za-z_$][\w$]*(?=\s*\())|(\b[A-Za-z_$][\w$]*\b)|(-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|([{}()[\].,;:+\-*/%=&|!<>?]+)/g;
+        return highlightCodeByPattern(code, pattern, (match, args) => {
+            if (args[1]) return "comment";
+            if (args[2]) return "string";
+            if (args[3]) return "function";
+            if (args[4] && CODE_KEYWORDS.has(match.toLowerCase())) {
+                return "keyword";
+            }
+            if (args[4]) return "plain";
+            if (args[5]) return "number";
+            return "operator";
+        });
+    }
+
+    function highlightCodeBlock(code, language) {
+        const lang = normalizeCodeLanguage(language);
+        if (["json", "jsonc"].includes(lang)) return highlightJsonCode(code);
+        if (["html", "xml", "svg", "vue"].includes(lang)) {
+            return highlightMarkupCode(code);
+        }
+        if (["css", "scss", "less"].includes(lang))
+            return highlightCssCode(code);
+        if (lang === "text" || lang === "plain" || lang === "plaintext") {
+            return escapeHtml(code);
+        }
+        return highlightGenericCode(code);
+    }
+
     function createSafeMarkedRenderer() {
         if (typeof marked === "undefined" || !marked.Renderer) return null;
         const renderer = new marked.Renderer();
         renderer.html = ({ text }) => escapeHtml(text || "");
+        renderer.code = (token, legacyLanguage) => {
+            const codeText =
+                token && typeof token === "object"
+                    ? String(token.text || "")
+                    : String(token || "");
+            const language =
+                token && typeof token === "object"
+                    ? token.lang
+                    : legacyLanguage;
+            const normalizedLanguage = normalizeCodeLanguage(language);
+            const languageClass =
+                normalizedLanguage && normalizedLanguage !== "text"
+                    ? ` language-${escapeHtml(normalizedLanguage)}`
+                    : "";
+            return (
+                `<pre class="runtime-code-block" data-language="${escapeHtml(normalizedLanguage)}">` +
+                `<code class="${languageClass.trim()}">` +
+                `${highlightCodeBlock(codeText, normalizedLanguage)}` +
+                `</code></pre>`
+            );
+        };
         renderer.link = ({ href, title, tokens }) => {
             const parser = renderer.parser || marked.Parser;
             const label =
