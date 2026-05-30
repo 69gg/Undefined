@@ -671,7 +671,12 @@
         if (!toolsEl) {
             toolsEl = document.createElement("div");
             toolsEl.className = "runtime-chat-tools";
-            item.appendChild(toolsEl);
+            const contentEl = item.querySelector(".runtime-chat-content");
+            if (contentEl) {
+                item.insertBefore(toolsEl, contentEl);
+            } else {
+                item.appendChild(toolsEl);
+            }
         }
         toolsEl.innerHTML = renderToolBlocks(blocks);
     }

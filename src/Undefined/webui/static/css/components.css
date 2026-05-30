@@ -585,6 +585,7 @@
   padding: 12px;
   margin-bottom: 12px;
   display: grid;
+  align-content: start;
   gap: 10px;
 }
 .chat-workspace-head {
@@ -812,10 +813,10 @@
 .runtime-chat-tools {
   display: grid;
   gap: 8px;
-  margin-top: 10px;
+  margin-bottom: 10px;
 }
 .runtime-chat-item.tool-only .runtime-chat-tools {
-  margin-top: 0;
+  margin-bottom: 0;
 }
 .runtime-tool-block {
   border: 1px solid var(--border-color);

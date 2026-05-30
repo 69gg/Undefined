@@ -52,3 +52,13 @@ def test_webchat_frontend_restores_history_tool_blocks_without_stream_state() ->
     assert "upsertToolBlock(" not in history_helper
     assert "ensureStreamingMessage(" not in history_helper
     assert "data-job-id" not in history_helper
+
+
+def test_webchat_frontend_places_tools_before_message_content() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    attach_helper = source.split("function attachToolBlocks", 1)[1].split(
+        "function upsertToolBlock", 1
+    )[0]
+
+    assert 'item.querySelector(".runtime-chat-content")' in attach_helper
+    assert "item.insertBefore(toolsEl, contentEl)" in attach_helper
