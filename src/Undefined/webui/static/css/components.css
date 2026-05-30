@@ -891,12 +891,14 @@
 }
 .runtime-tool-block summary {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   cursor: pointer;
-  padding: 9px 10px 9px 13px;
+  min-height: 34px;
+  padding: 4px 10px 4px 13px;
   font-size: 12px;
+  line-height: 1.2;
   color: var(--text-secondary);
   list-style: none;
 }
@@ -916,7 +918,7 @@
 .runtime-tool-block[open] summary::before {
   transform: rotate(45deg);
 }
-.runtime-tool-block summary code {
+.runtime-tool-block summary .runtime-tool-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -924,10 +926,19 @@
   border: 0;
   background: transparent;
   padding: 0;
+  color: var(--text-primary);
+  font-size: 12px;
 }
-.runtime-tool-block summary em {
+.runtime-tool-block summary .runtime-tool-status {
   font-style: normal;
+  white-space: nowrap;
   color: var(--text-tertiary);
+}
+.runtime-tool-block summary .runtime-tool-kind {
+  min-width: 44px;
+  text-align: right;
+  white-space: nowrap;
+  color: var(--text-secondary);
 }
 .runtime-tool-block.webchat-private-send,
 .runtime-tool-block.webchat-end {
@@ -935,18 +946,19 @@
 }
 .runtime-tool-block.webchat-private-send summary,
 .runtime-tool-block.webchat-end summary {
-  padding-block: 6px;
+  min-height: 32px;
+  padding-block: 3px;
 }
-.runtime-tool-block.running summary em {
+.runtime-tool-block.running summary .runtime-tool-status {
   color: var(--accent-color);
 }
-.runtime-tool-block.done summary em {
+.runtime-tool-block.done summary .runtime-tool-status {
   color: var(--success);
 }
-.runtime-tool-block.error summary em {
+.runtime-tool-block.error summary .runtime-tool-status {
   color: var(--error);
 }
-.runtime-tool-block.cancelled summary em {
+.runtime-tool-block.cancelled summary .runtime-tool-status {
   color: var(--warning);
 }
 .runtime-tool-preview {

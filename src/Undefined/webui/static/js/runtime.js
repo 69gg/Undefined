@@ -859,7 +859,7 @@
         const kindClass = block.isAgent ? " is-agent" : " is-tool";
         return (
             `<details class="runtime-tool-block ${escapeHtml(block.status)}${kindClass}${hintClass}"${openAttr}>` +
-            `<summary><span>${escapeHtml(label)}</span><code>${escapeHtml(block.name || "--")}</code><em>${escapeHtml(metaLabel)}</em></summary>` +
+            `<summary><code class="runtime-tool-name">${escapeHtml(block.name || "--")}</code><em class="runtime-tool-status">${escapeHtml(metaLabel)}</em><span class="runtime-tool-kind">${escapeHtml(label)}</span></summary>` +
             args +
             childHtml +
             result +

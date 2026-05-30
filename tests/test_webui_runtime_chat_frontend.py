@@ -139,6 +139,30 @@ def test_webchat_frontend_renders_nested_tool_timeline() -> None:
     assert ".runtime-tool-block summary::before" in css
 
 
+def test_webchat_tool_summary_uses_compact_single_line_order() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    css = RUNTIME_CSS.read_text(encoding="utf-8")
+    render_helper = source.split("function renderToolBlock", 1)[1].split(
+        "function renderToolTimelineItem", 1
+    )[0]
+    summary_css = css.split(".runtime-tool-block summary {", 1)[1].split(
+        ".runtime-tool-block summary::-webkit-details-marker", 1
+    )[0]
+
+    assert "runtime-tool-name" in render_helper
+    assert "runtime-tool-status" in render_helper
+    assert "runtime-tool-kind" in render_helper
+    assert (
+        render_helper.index("runtime-tool-name")
+        < render_helper.index("runtime-tool-status")
+        < render_helper.index("runtime-tool-kind")
+    )
+    assert "grid-template-columns: auto minmax(0, 1fr) auto auto;" in summary_css
+    assert "min-height: 34px;" in summary_css
+    assert "padding: 4px 10px 4px 13px;" in summary_css
+    assert "line-height: 1.2;" in summary_css
+
+
 def test_webchat_auto_scroll_toggle_controls_stream_scroll() -> None:
     source = RUNTIME_JS.read_text(encoding="utf-8")
     template = Path("src/Undefined/webui/templates/index.html").read_text(
@@ -191,12 +215,12 @@ def test_webchat_tool_previews_render_structured_input_output() -> None:
 
 def test_webchat_tool_error_status_uses_error_color() -> None:
     css = RUNTIME_CSS.read_text(encoding="utf-8")
-    error_block = css.split(".runtime-tool-block.error summary em", 1)[1].split(
-        ".runtime-tool-preview", 1
-    )[0]
+    error_block = css.split(
+        ".runtime-tool-block.error summary .runtime-tool-status", 1
+    )[1].split(".runtime-tool-preview", 1)[0]
 
     assert "color: var(--error);" in error_block
-    assert ".runtime-tool-block.cancelled summary em" in error_block
+    assert ".runtime-tool-block.cancelled summary .runtime-tool-status" in error_block
     assert "var(--danger)" not in error_block
 
 
