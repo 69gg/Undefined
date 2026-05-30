@@ -882,7 +882,7 @@
   color: var(--success);
 }
 .runtime-tool-block.error summary em {
-  color: var(--danger);
+  color: var(--error);
 }
 .runtime-tool-block pre,
 .runtime-tool-result {

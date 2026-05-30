@@ -101,6 +101,16 @@ def test_webchat_frontend_renders_tool_duration() -> None:
     assert "statusLabel} · ${durationLabel}" in source
 
 
+def test_webchat_tool_error_status_uses_error_color() -> None:
+    css = RUNTIME_CSS.read_text(encoding="utf-8")
+    error_block = css.split(".runtime-tool-block.error summary em", 1)[1].split(
+        ".runtime-tool-block pre", 1
+    )[0]
+
+    assert "color: var(--error);" in error_block
+    assert "var(--danger)" not in error_block
+
+
 def test_webchat_layout_keeps_input_at_bottom_and_log_scrollable() -> None:
     app_css = APP_CSS.read_text(encoding="utf-8")
     responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
