@@ -151,6 +151,136 @@ async def test_ai_ask_retries_pre_tool_local_failure() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ai_ask_webchat_events_are_tool_lifecycle_only() -> None:
+    client: Any = object.__new__(AIClient)
+    client.runtime_config = cast(
+        Any,
+        SimpleNamespace(
+            log_thinking=False,
+            ai_request_max_retries=0,
+            missing_tool_call_retries=0,
+        ),
+    )
+    client._prompt_builder = cast(
+        Any,
+        SimpleNamespace(
+            build_messages=AsyncMock(
+                return_value=[{"role": "user", "content": "hello"}]
+            ),
+            end_summaries=[],
+        ),
+    )
+
+    async def _execute_tool(
+        name: str, args: dict[str, Any], ctx: dict[str, Any]
+    ) -> str:
+        _ = args
+        if name == "end":
+            ctx["conversation_ended"] = True
+            return "对话已结束"
+        return "tool result"
+
+    client.tool_manager = cast(
+        Any,
+        SimpleNamespace(
+            get_openai_tools=lambda: [],
+            execute_tool=_execute_tool,
+        ),
+    )
+    client._filter_tools_for_runtime_config = lambda tools: tools
+    client._get_runtime_config = cast(Any, lambda: client.runtime_config)
+    client.model_selector = cast(Any, SimpleNamespace(wait_ready=AsyncMock()))
+    client.chat_config = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="chat-model",
+        max_tokens=1024,
+    )
+    client._find_chat_config_by_name = lambda _name: client.chat_config
+
+    llm_results = [
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "function": {
+                                    "name": "lookup",
+                                    "arguments": '{"q":"weather"}',
+                                },
+                            }
+                        ],
+                    }
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_end",
+                                "function": {"name": "end", "arguments": "{}"},
+                            }
+                        ],
+                    }
+                }
+            ]
+        },
+    ]
+
+    submit_index = 0
+
+    async def _submit_queued_llm_call(**kwargs: Any) -> dict[str, Any]:
+        nonlocal submit_index
+        assert "stream_event_callback" not in kwargs
+        result = llm_results[submit_index]
+        submit_index += 1
+        return result
+
+    client.submit_queued_llm_call = AsyncMock(side_effect=_submit_queued_llm_call)
+    client._search_wrapper = None
+    client._end_summary_storage = cast(Any, None)
+    client._send_private_message_callback = None
+    client._send_image_callback = None
+    client.memory_storage = None
+    client._knowledge_manager = None
+    client._cognitive_service = None
+    client._meme_service = None
+    client._crawl4ai_capabilities = SimpleNamespace(
+        available=False,
+        error=None,
+        proxy_config_available=False,
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    async def _webchat_event_callback(event: str, payload: dict[str, Any]) -> None:
+        events.append((event, dict(payload)))
+
+    await AIClient.ask(
+        client,
+        "hello",
+        extra_context={"webchat_event_callback": _webchat_event_callback},
+    )
+
+    assert [event for event, _payload in events] == [
+        "tool_start",
+        "tool_end",
+        "tool_start",
+        "tool_end",
+    ]
+    assert events[0][1]["name"] == "lookup"
+    assert events[1][1]["result"] == "tool result"
+    assert events[2][1]["name"] == "end"
+    assert events[3][1]["result"] == "对话已结束"
+
+
+@pytest.mark.asyncio
 async def test_ai_ask_limits_missing_tool_call_retries() -> None:
     client: Any = object.__new__(AIClient)
     client.runtime_config = cast(

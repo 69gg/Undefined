@@ -771,8 +771,6 @@ class ClientSetupMixin:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str = "auto",
         transport_state: dict[str, Any] | None = None,
-        stream_event_callback: Callable[[str, dict[str, Any]], Awaitable[None]]
-        | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         tools = self.tool_manager.maybe_merge_agent_tools(call_type, tools)
@@ -799,7 +797,6 @@ class ClientSetupMixin:
             tool_choice=tool_choice,
             transport_state=transport_state,
             message_count_for_transport=message_count_for_transport,
-            stream_event_callback=stream_event_callback,
             **kwargs,
         )
 

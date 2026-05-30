@@ -91,7 +91,7 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
                 "description": (
                     "POST JSON {message, stream?}. "
                     "stream=false runs synchronously; stream=true creates a "
-                    "WebChat job and bridges its events as SSE."
+                    "WebChat job and streams lifecycle events as SSE."
                 ),
             }
         },

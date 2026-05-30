@@ -539,16 +539,6 @@
         return item;
     }
 
-    function appendTokenDelta(delta, jobId = "") {
-        const item = ensureStreamingMessage(jobId);
-        if (!item) return;
-        const current = item.dataset.rawContent || "";
-        const next = current + String(delta || "");
-        item.dataset.rawContent = next;
-        updateChatMessage(item, next, "bot");
-        scrollChatToBottom();
-    }
-
     function finishStreamingMessage() {
         if (!runtimeState.streamingMessageId) return;
         const item = document.querySelector(
@@ -612,32 +602,36 @@
     }
 
     function upsertToolBlock(payload, status, jobId = "") {
-        const hasArgumentsDelta =
-            payload && Object.hasOwn(payload, "arguments_delta");
         const key =
             String(
                 payload && payload.tool_call_id ? payload.tool_call_id : "",
             ) ||
             String(payload && payload.name ? payload.name : "") ||
-            String(
-                payload && payload.index !== undefined
-                    ? `tool-index-${payload.index}`
-                    : "",
-            ) ||
             `tool-${runtimeState.toolBlocks.size + 1}`;
+        if (
+            !runtimeState.toolBlocks.has(key) &&
+            payload &&
+            payload.tool_call_id
+        ) {
+            const nameKey = String(payload.name || "");
+            if (nameKey && runtimeState.toolBlocks.has(nameKey)) {
+                runtimeState.toolBlocks.set(
+                    key,
+                    runtimeState.toolBlocks.get(nameKey),
+                );
+                runtimeState.toolBlocks.delete(nameKey);
+            }
+        }
         const previous = runtimeState.toolBlocks.get(key) || {};
         const previousUiHint = String(previous.uiHint || "");
         const nextUiHint = String(
             (payload && payload.ui_hint) || previousUiHint,
         );
-        const previousArguments = String(previous.argumentsPreview || "");
-        const nextArguments = hasArgumentsDelta
-            ? `${previousArguments}${String(payload.arguments_delta || "")}`
-            : String(
-                  (payload && payload.arguments_preview) ||
-                      previous.argumentsPreview ||
-                      "",
-              );
+        const nextArguments = String(
+            (payload && payload.arguments_preview) ||
+                previous.argumentsPreview ||
+                "",
+        );
         const block = {
             ...previous,
             name: String((payload && payload.name) || previous.name || ""),
@@ -1535,15 +1529,7 @@
             }
             return;
         }
-        if (event === "token_delta") {
-            appendTokenDelta(
-                payload && payload.delta ? payload.delta : "",
-                eventJobId,
-            );
-            return;
-        }
         if (
-            event === "tool_delta" ||
             event === "tool_start" ||
             event === "tool_end" ||
             event === "agent_start" ||
@@ -1578,7 +1564,13 @@
                     )?.dataset.rawContent || ""
                 ).trim()
             ) {
-                appendTokenDelta(String(payload.reply));
+                const item = ensureStreamingMessage(eventJobId);
+                if (item) {
+                    const content = String(payload.reply);
+                    item.dataset.rawContent = content;
+                    updateChatMessage(item, content, "bot");
+                    scrollChatToBottom();
+                }
             }
             finalizeActiveChatMessage();
             runtimeState.activeJobId = null;

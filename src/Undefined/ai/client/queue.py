@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable
+from typing import Any
 from uuid import uuid4
 
 from Undefined.ai.parsing import extract_choices_content
@@ -83,8 +83,6 @@ class ClientQueueMixin(ClientSetupMixin):
         max_tokens: int | None = None,
         transport_state: dict[str, Any] | None = None,
         queue_lane: str | None = None,
-        stream_event_callback: Callable[[str, dict[str, Any]], Awaitable[None]]
-        | None = None,
     ) -> dict[str, Any]:
         """将 LLM 调用投递到统一队列，走统一发车间隔和重试逻辑。
         无 queue_manager 时降级为直接调用。"""
@@ -104,7 +102,6 @@ class ClientQueueMixin(ClientSetupMixin):
                 call_type=call_type,
                 max_tokens=effective_max_tokens,
                 transport_state=transport_state,
-                stream_event_callback=stream_event_callback,
             )
         request_id = uuid4().hex
         event: asyncio.Event = asyncio.Event()
@@ -122,8 +119,6 @@ class ClientQueueMixin(ClientSetupMixin):
             "max_tokens": effective_max_tokens,
             "transport_state": transport_state,
         }
-        if stream_event_callback is not None:
-            request["stream_event_callback"] = stream_event_callback
         ctx = RequestContext.current()
         if ctx is not None:
             if ctx.group_id is not None:

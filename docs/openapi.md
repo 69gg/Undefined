@@ -234,8 +234,6 @@ curl http://127.0.0.1:8788/openapi.json
 - `stream = false` 保持同步响应。
 - 当 `stream = true` 时，Runtime 会创建 WebChat job，并返回 `text/event-stream`（SSE）：
   - `event: meta`：会话元信息。
-  - `event: token_delta`：模型文本增量。
-  - `event: tool_delta`：工具参数增量预览。
   - `event: tool_start` / `tool_end`：主对话工具开始与结束。
   - `event: agent_start` / `agent_end`：主对话调用 Agent 开始与结束。
   - `event: message`：AI/命令最终输出片段。
@@ -243,6 +241,7 @@ curl http://127.0.0.1:8788/openapi.json
   - `event: error`：任务失败或取消。
   - 在长时间无内容时会发送 `: keep-alive` 注释帧，防止中间层空闲断连。
   - SSE 帧包含 `id: <seq>`，客户端可用 `after=<seq>` 续接 job 事件。
+  - WebChat SSE 不发布模型 token 级文本增量，也不发布工具参数增量；正文以 `message` 事件展示，工具只按生命周期事件展示。
   - 工具事件 payload 可能带 `ui_hint`。当前用于 WebChat 展示降噪：`webchat_private_send` 表示同一 WebChat 私聊回复已通过 `message` 事件展示，工具块只需显示发送状态；`webchat_end` 表示 `end` 成功结束，工具块可隐藏重复的成功结果。
 
 行为约定：

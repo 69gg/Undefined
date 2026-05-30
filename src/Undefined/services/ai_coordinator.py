@@ -668,7 +668,6 @@ class AICoordinator:
                 max_tokens=request.get("max_tokens")
                 or getattr(request["model_config"], "max_tokens", 4096),
                 transport_state=request.get("transport_state"),
-                stream_event_callback=request.get("stream_event_callback"),
             )
             self.ai.set_llm_call_result(request_id, result)
             if retry_count > 0:

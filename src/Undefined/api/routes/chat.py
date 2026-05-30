@@ -217,20 +217,20 @@ class ChatJobManager:
                 {"content": rendered.delivery_text, "job_id": job.job_id},
             )
 
-        async def _stream_event_callback(event: str, payload: dict[str, Any]) -> None:
-            await self._append_event(
-                job,
-                event,
-                {**_sanitize_stream_payload(event, payload), "job_id": job.job_id},
-            )
+        async def _webchat_event_callback(event: str, payload: dict[str, Any]) -> None:
+            if event not in {"tool_start", "tool_end", "agent_start", "agent_end"}:
+                return
+            event_payload = _sanitize_webchat_event_payload(event, payload)
+            event_payload["job_id"] = job.job_id
+            await self._append_event(job, event, event_payload)
 
         try:
             run_kwargs: dict[str, Any] = {
                 "text": job.text,
                 "send_output": _capture_private_message,
             }
-            if "stream_event_callback" in inspect.signature(run_webui_chat).parameters:
-                run_kwargs["stream_event_callback"] = _stream_event_callback
+            if "webchat_event_callback" in inspect.signature(run_webui_chat).parameters:
+                run_kwargs["webchat_event_callback"] = _webchat_event_callback
             mode = await run_webui_chat(self._ctx, **run_kwargs)
             job.mode = mode
             job.status = "done"
@@ -319,16 +319,9 @@ def _webchat_tool_ui_hint(
     return None
 
 
-def _sanitize_stream_payload(event: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if event == "token_delta":
-        return {"delta": str(payload.get("delta") or "")}
-    if event == "tool_delta":
-        return {
-            "index": payload.get("index"),
-            "tool_call_id": str(payload.get("id") or ""),
-            "name": str(payload.get("name") or ""),
-            "arguments_delta": _preview(payload.get("arguments_delta") or "", 300),
-        }
+def _sanitize_webchat_event_payload(
+    event: str, payload: dict[str, Any]
+) -> dict[str, Any]:
     if event in {"tool_start", "agent_start"}:
         is_agent = bool(payload.get("is_agent")) or event == "agent_start"
         output_event = "agent_start" if is_agent else "tool_start"
@@ -435,7 +428,7 @@ async def run_webui_chat(
     *,
     text: str,
     send_output: Callable[[int, str], Awaitable[None]],
-    stream_event_callback: Callable[[str, dict[str, Any]], Awaitable[None]]
+    webchat_event_callback: Callable[[str, dict[str, Any]], Awaitable[None]]
     | None = None,
 ) -> str:
     """Execute a single WebUI chat turn (command dispatch or AI ask)."""
@@ -557,7 +550,7 @@ async def run_webui_chat(
                 "sender_name": _VIRTUAL_USER_NAME,
                 "webui_session": True,
                 "webui_permission": "superadmin",
-                "stream_event_callback": stream_event_callback,
+                "webchat_event_callback": webchat_event_callback,
             },
         )
 

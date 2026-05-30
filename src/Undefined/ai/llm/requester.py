@@ -13,7 +13,7 @@ import logging
 import re
 import time
 from datetime import datetime
-from typing import Any, Awaitable, Callable
+from typing import Any
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 import httpx
@@ -320,8 +320,6 @@ class ModelRequester:
         tool_choice: str = "auto",
         transport_state: dict[str, Any] | None = None,
         message_count_for_transport: int | None = None,
-        stream_event_callback: Callable[[str, dict[str, Any]], Awaitable[None]]
-        | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """发送请求到模型 API。"""
@@ -477,7 +475,6 @@ class ModelRequester:
                 raw_result = await self._request_with_openai(
                     model_config,
                     request_body,
-                    stream_event_callback=stream_event_callback,
                 )
             except APIStatusError as exc:
                 # Responses 续轮失败：自动切换 stateless replay 重发全量 input
@@ -515,7 +512,6 @@ class ModelRequester:
                     raw_result = await self._request_with_openai(
                         model_config,
                         request_body,
-                        stream_event_callback=stream_event_callback,
                     )
                 else:
                     raise
@@ -677,9 +673,6 @@ class ModelRequester:
         self,
         model_config: ModelConfig,
         request_body: dict[str, Any],
-        *,
-        stream_event_callback: Callable[[str, dict[str, Any]], Awaitable[None]]
-        | None = None,
     ) -> dict[str, Any]:
         client = self._get_openai_client_for_model(model_config)
         if bool(getattr(model_config, "stream_enabled", False)):
@@ -689,7 +682,6 @@ class ModelRequester:
                     client,
                     model_config,
                     request_body,
-                    stream_event_callback=stream_event_callback,
                 )
             except Exception as exc:
                 # 上游不支持流式时，剥离 stream 字段后降级为非流式重试
@@ -719,9 +711,6 @@ class ModelRequester:
         client: AsyncOpenAI,
         model_config: ModelConfig,
         request_body: dict[str, Any],
-        *,
-        stream_event_callback: Callable[[str, dict[str, Any]], Awaitable[None]]
-        | None = None,
     ) -> dict[str, Any]:
         api_mode = get_api_mode(model_config)
         stream_body = dict(request_body)
@@ -730,7 +719,6 @@ class ModelRequester:
             return await self._stream_responses_request(
                 client,
                 stream_body,
-                stream_event_callback=stream_event_callback,
             )
         ensure_chat_stream_usage_options(stream_body)
         return await self._stream_chat_completions_request(
@@ -738,7 +726,6 @@ class ModelRequester:
             client,
             stream_body,
             model_config,
-            stream_event_callback=stream_event_callback,
         )
 
     async def _stream_chat_completions_request(
@@ -746,9 +733,6 @@ class ModelRequester:
         client: AsyncOpenAI,
         request_body: dict[str, Any],
         model_config: ModelConfig,
-        *,
-        stream_event_callback: Callable[[str, dict[str, Any]], Awaitable[None]]
-        | None = None,
     ) -> dict[str, Any]:
         params, extra_body = split_chat_completion_params(request_body)
         if extra_body:
@@ -762,11 +746,6 @@ class ModelRequester:
         async for chunk in response:
             chunk_dict = self._response_to_dict(chunk)
             chunks.append(chunk_dict)
-            if stream_event_callback is not None:
-                await self._emit_chat_stream_events(
-                    chunk_dict,
-                    stream_event_callback=stream_event_callback,
-                )
         return aggregate_chat_completions_stream(
             chunks,
             reasoning_replay=reasoning_replay,
@@ -776,9 +755,6 @@ class ModelRequester:
         self,
         client: AsyncOpenAI,
         request_body: dict[str, Any],
-        *,
-        stream_event_callback: Callable[[str, dict[str, Any]], Awaitable[None]]
-        | None = None,
     ) -> dict[str, Any]:
         params, extra_body = split_responses_params(request_body)
         if extra_body:
@@ -789,81 +765,7 @@ class ModelRequester:
         async for event in stream:
             event_dict = self._response_to_dict(event)
             events.append(event_dict)
-            if stream_event_callback is not None:
-                await self._emit_responses_stream_events(
-                    event_dict,
-                    stream_event_callback=stream_event_callback,
-                )
         return aggregate_responses_stream(events)
-
-    async def _emit_chat_stream_events(
-        self,
-        chunk: dict[str, Any],
-        *,
-        stream_event_callback: Callable[[str, dict[str, Any]], Awaitable[None]],
-    ) -> None:
-        choices = chunk.get("choices")
-        if not isinstance(choices, list):
-            return
-        for choice in choices:
-            if not isinstance(choice, dict):
-                continue
-            delta = choice.get("delta")
-            if not isinstance(delta, dict):
-                continue
-            content_delta = delta.get("content")
-            if content_delta:
-                await stream_event_callback(
-                    "token_delta",
-                    {"delta": str(content_delta)},
-                )
-            raw_tool_calls = delta.get("tool_calls")
-            if not isinstance(raw_tool_calls, list):
-                continue
-            for tool_delta in raw_tool_calls:
-                if not isinstance(tool_delta, dict):
-                    continue
-                function = tool_delta.get("function")
-                payload: dict[str, Any] = {
-                    "index": tool_delta.get("index"),
-                    "id": str(tool_delta.get("id") or ""),
-                    "name": "",
-                    "arguments_delta": "",
-                }
-                if isinstance(function, dict):
-                    payload["name"] = str(function.get("name") or "")
-                    payload["arguments_delta"] = str(function.get("arguments") or "")
-                if payload["name"] or payload["arguments_delta"] or payload["id"]:
-                    await stream_event_callback("tool_delta", payload)
-
-    async def _emit_responses_stream_events(
-        self,
-        event: dict[str, Any],
-        *,
-        stream_event_callback: Callable[[str, dict[str, Any]], Awaitable[None]],
-    ) -> None:
-        event_type = str(event.get("type") or "").strip()
-        if event_type == "response.output_text.delta":
-            delta = event.get("delta")
-            if delta:
-                await stream_event_callback("token_delta", {"delta": str(delta)})
-            return
-        lowered = event_type.lower()
-        if "function_call" not in lowered:
-            return
-        delta = event.get("delta") or event.get("arguments_delta")
-        item = event.get("item") or event.get("output_item")
-        payload: dict[str, Any] = {
-            "index": event.get("output_index") or event.get("item_index"),
-            "id": "",
-            "name": "",
-            "arguments_delta": str(delta or ""),
-        }
-        if isinstance(item, dict):
-            payload["id"] = str(item.get("id") or item.get("call_id") or "")
-            payload["name"] = str(item.get("name") or "")
-        if payload["name"] or payload["arguments_delta"] or payload["id"]:
-            await stream_event_callback("tool_delta", payload)
 
     async def embed(
         self,

@@ -19,11 +19,17 @@ def test_webchat_frontend_reuses_job_message_for_final_message() -> None:
     assert 'appendChatMessage("bot", content)' not in message_branch
 
 
-def test_webchat_frontend_handles_tool_delta_and_webchat_hints() -> None:
+def test_webchat_frontend_handles_tool_lifecycle_and_webchat_hints() -> None:
     source = RUNTIME_JS.read_text(encoding="utf-8")
 
-    assert 'event === "tool_delta"' in source
-    assert 'payload && Object.hasOwn(payload, "arguments_delta")' in source
+    assert 'event === "token_delta"' not in source
+    assert 'event === "tool_delta"' not in source
+    assert "pendingToolDeltas" not in source
+    assert "appendTokenDelta" not in source
+    assert 'event === "tool_start"' in source
+    assert 'event === "tool_end"' in source
+    assert 'event === "agent_start"' in source
+    assert 'event === "agent_end"' in source
     assert 'block.uiHint === "webchat_private_send"' in source
     assert 'block.uiHint === "webchat_end"' in source
     assert 'nextUiHint === "webchat_private_send"' in source

@@ -46,8 +46,8 @@ class _DummyStreamResponse:
         self.eof_written = True
 
 
-def test_sanitize_stream_payload_compacts_webchat_private_send_tool() -> None:
-    payload = runtime_api_chat._sanitize_stream_payload(
+def test_sanitize_webchat_event_payload_compacts_webchat_private_send_tool() -> None:
+    payload = runtime_api_chat._sanitize_webchat_event_payload(
         "tool_start",
         {
             "tool_call_id": "call_1",
@@ -64,7 +64,7 @@ def test_sanitize_stream_payload_compacts_webchat_private_send_tool() -> None:
     assert payload["ui_hint"] == "webchat_private_send"
     assert payload["arguments_preview"] == ""
 
-    payload = runtime_api_chat._sanitize_stream_payload(
+    payload = runtime_api_chat._sanitize_webchat_event_payload(
         "tool_start",
         {
             "tool_call_id": "call_2",
@@ -81,8 +81,8 @@ def test_sanitize_stream_payload_compacts_webchat_private_send_tool() -> None:
     assert payload["arguments_preview"] == ""
 
 
-def test_sanitize_stream_payload_keeps_group_send_message_details() -> None:
-    payload = runtime_api_chat._sanitize_stream_payload(
+def test_sanitize_webchat_event_payload_keeps_group_send_message_details() -> None:
+    payload = runtime_api_chat._sanitize_webchat_event_payload(
         "tool_start",
         {
             "tool_call_id": "call_1",
@@ -100,8 +100,8 @@ def test_sanitize_stream_payload_keeps_group_send_message_details() -> None:
     assert "群聊消息" in payload["arguments_preview"]
 
 
-def test_sanitize_stream_payload_compacts_successful_end_tool() -> None:
-    payload = runtime_api_chat._sanitize_stream_payload(
+def test_sanitize_webchat_event_payload_compacts_successful_end_tool() -> None:
+    payload = runtime_api_chat._sanitize_webchat_event_payload(
         "tool_end",
         {
             "tool_call_id": "call_end",
@@ -192,6 +192,114 @@ async def test_runtime_chat_stream_renders_each_message_once(
     assert "rendered stream reply" in payload
     assert "event: done" in payload
     assert response.eof_written is True
+
+
+@pytest.mark.asyncio
+async def test_runtime_chat_stream_uses_webchat_lifecycle_events_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_render_message_with_pic_placeholders(
+        message: str,
+        *,
+        registry: Any,
+        scope_key: str,
+        strict: bool,
+    ) -> Any:
+        _ = registry, scope_key, strict
+        return SimpleNamespace(
+            delivery_text=message,
+            history_text=message,
+            attachments=[],
+        )
+
+    context = RuntimeAPIContext(
+        config_getter=lambda: SimpleNamespace(
+            api=SimpleNamespace(
+                enabled=True,
+                host="127.0.0.1",
+                port=8788,
+                auth_key="changeme",
+                openapi_enabled=True,
+            ),
+            superadmin_qq=10001,
+            bot_qq=20002,
+        ),
+        onebot=SimpleNamespace(connection_status=lambda: {}),
+        ai=SimpleNamespace(
+            attachment_registry=object(),
+            memory_storage=SimpleNamespace(count=lambda: 0),
+        ),
+        command_dispatcher=SimpleNamespace(),
+        queue_manager=SimpleNamespace(snapshot=lambda: {}),
+        history_manager=SimpleNamespace(add_private_message=AsyncMock()),
+    )
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+
+    async def _fake_run_webui_chat(
+        _ctx: Any,
+        *,
+        text: str,
+        send_output: Any,
+        webchat_event_callback: Any = None,
+    ) -> str:
+        assert text == "hello"
+        assert webchat_event_callback is not None
+        await webchat_event_callback("token_delta", {"delta": "ignored"})
+        await webchat_event_callback(
+            "tool_delta",
+            {"id": "call_1", "arguments_delta": '{"q"'},
+        )
+        await webchat_event_callback(
+            "tool_start",
+            {
+                "tool_call_id": "call_1",
+                "name": "search",
+                "api_name": "search",
+                "arguments": {"q": "weather"},
+                "is_agent": False,
+            },
+        )
+        await webchat_event_callback(
+            "tool_end",
+            {
+                "tool_call_id": "call_1",
+                "name": "search",
+                "api_name": "search",
+                "ok": True,
+                "result": "sunny",
+                "is_agent": False,
+            },
+        )
+        await send_output(42, "final")
+        return "chat"
+
+    monkeypatch.setattr(
+        runtime_api_chat,
+        "render_message_with_pic_placeholders",
+        _fake_render_message_with_pic_placeholders,
+    )
+    monkeypatch.setattr(web, "StreamResponse", _DummyStreamResponse)
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+
+    request = cast(
+        web.Request,
+        cast(
+            Any,
+            _DummyRequest(
+                transport=_DummyTransport(),
+            ),
+        ),
+    )
+
+    response = await server._chat_handler(request)
+
+    assert isinstance(response, _DummyStreamResponse)
+    payload = b"".join(response.writes).decode("utf-8")
+    assert "event: token_delta" not in payload
+    assert "event: tool_delta" not in payload
+    assert "event: tool_start" in payload
+    assert "event: tool_end" in payload
+    assert "event: message" in payload
 
 
 @pytest.mark.asyncio

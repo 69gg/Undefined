@@ -77,9 +77,9 @@ class ClientAskLoopMixin(ClientQueueMixin):
             pre_context["request_id"] = ctx.request_id
         if extra_context:
             pre_context.update(extra_context)
-        stream_event_callback = pre_context.get("stream_event_callback")
-        if not callable(stream_event_callback):
-            stream_event_callback = None
+        webchat_event_callback = pre_context.get("webchat_event_callback")
+        if not callable(webchat_event_callback):
+            webchat_event_callback = None
 
         # ===== 阶段二：构建 LLM messages 与 OpenAI tools schema =====
         messages = await self._prompt_builder.build_messages(
@@ -208,9 +208,13 @@ class ClientAskLoopMixin(ClientQueueMixin):
         missing_tool_call_count = 0
         last_missing_tool_call_content = ""
         runtime_config = self._get_runtime_config()
+        agent_registry = getattr(self, "agent_registry", None)
+        get_agent_schemas = getattr(agent_registry, "get_agents_schema", None)
+        raw_agent_schemas = get_agent_schemas() if callable(get_agent_schemas) else []
         agent_tool_names = {
             str(schema.get("function", {}).get("name") or "")
-            for schema in self.agent_registry.get_agents_schema()
+            for schema in raw_agent_schemas
+            if isinstance(schema, dict)
         }
         max_pre_tool_retries = max(
             0,
@@ -230,13 +234,6 @@ class ClientAskLoopMixin(ClientQueueMixin):
 
             tool_execution_started = False
             try:
-                pending_stream_events: list[tuple[str, dict[str, Any]]] = []
-
-                async def _collect_stream_event(
-                    event: str, payload: dict[str, Any]
-                ) -> None:
-                    pending_stream_events.append((event, payload))
-
                 result = await self.submit_queued_llm_call(
                     model_config=effective_chat_config,
                     messages=messages,
@@ -246,11 +243,6 @@ class ClientAskLoopMixin(ClientQueueMixin):
                     tool_choice="auto",
                     transport_state=transport_state,
                     queue_lane=queue_lane,
-                    stream_event_callback=(
-                        _collect_stream_event
-                        if stream_event_callback is not None
-                        else None
-                    ),
                 )
 
                 tool_name_map = (
@@ -329,9 +321,6 @@ class ClientAskLoopMixin(ClientQueueMixin):
 
                 # 无 tool_calls 与有 tool_calls 走不同分支
                 if not tool_calls:
-                    if stream_event_callback is not None:
-                        for event, payload in pending_stream_events:
-                            await stream_event_callback(event, payload)
                     if conversation_ended:
                         logger.info(
                             "[AI回复] 会话结束，返回最终内容: length=%s",
@@ -393,10 +382,6 @@ class ClientAskLoopMixin(ClientQueueMixin):
                     "content": content,
                     "tool_calls": tool_calls,
                 }
-                if stream_event_callback is not None:
-                    for event, payload in pending_stream_events:
-                        if event != "token_delta":
-                            await stream_event_callback(event, payload)
                 missing_tool_call_count = 0
                 last_missing_tool_call_content = ""
                 phase = message.get("phase")
@@ -472,8 +457,8 @@ class ClientAskLoopMixin(ClientQueueMixin):
 
                     if not isinstance(function_args, dict):
                         function_args = {}
-                    if stream_event_callback is not None:
-                        await stream_event_callback(
+                    if webchat_event_callback is not None:
+                        await webchat_event_callback(
                             "tool_start",
                             {
                                 "tool_call_id": call_id,
@@ -494,18 +479,6 @@ class ClientAskLoopMixin(ClientQueueMixin):
                             )
                         end_tool_call = tool_call
                         end_tool_args = function_args
-                        if stream_event_callback is not None:
-                            await stream_event_callback(
-                                "tool_end",
-                                {
-                                    "tool_call_id": call_id,
-                                    "name": internal_function_name,
-                                    "api_name": api_function_name,
-                                    "ok": True,
-                                    "result": "会话结束请求已接收",
-                                    "is_agent": False,
-                                },
-                            )
                         continue
 
                     tool_call_ids.append(call_id)
@@ -556,8 +529,8 @@ class ClientAskLoopMixin(ClientQueueMixin):
                                     f"[工具响应体] {internal_fname} (ID={call_id})",
                                     content_str,
                                 )
-                        if stream_event_callback is not None:
-                            await stream_event_callback(
+                        if webchat_event_callback is not None:
+                            await webchat_event_callback(
                                 "tool_end",
                                 {
                                     "tool_call_id": call_id,
@@ -605,6 +578,18 @@ class ClientAskLoopMixin(ClientQueueMixin):
                     end_call_id = end_tool_call.get("id", "")
                     end_api_name = end_tool_call.get("function", {}).get("name", "end")
                     if tool_tasks:
+                        if webchat_event_callback is not None:
+                            await webchat_event_callback(
+                                "tool_end",
+                                {
+                                    "tool_call_id": end_call_id,
+                                    "name": "end",
+                                    "api_name": end_api_name,
+                                    "ok": False,
+                                    "result": END_CO_CALL_REJECT_CONTENT,
+                                    "is_agent": False,
+                                },
+                            )
                         messages.append(
                             {
                                 "role": "tool",
@@ -620,15 +605,34 @@ class ClientAskLoopMixin(ClientQueueMixin):
                     else:
                         # end 单独调用，正常执行（参数已在循环中解析）
                         tool_execution_started = True
-                        end_result = await self.tool_manager.execute_tool(
-                            "end", end_tool_args, tool_context
-                        )
+                        try:
+                            end_result_raw = await self.tool_manager.execute_tool(
+                                "end", end_tool_args, tool_context
+                            )
+                            end_result = str(end_result_raw)
+                            end_ok = True
+                        except Exception as exc:
+                            logger.exception("[工具异常] end 执行抛出异常: %s", exc)
+                            end_result = f"执行失败: {str(exc)}"
+                            end_ok = False
+                        if webchat_event_callback is not None:
+                            await webchat_event_callback(
+                                "tool_end",
+                                {
+                                    "tool_call_id": end_call_id,
+                                    "name": "end",
+                                    "api_name": end_api_name,
+                                    "ok": end_ok,
+                                    "result": end_result,
+                                    "is_agent": False,
+                                },
+                            )
                         messages.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": end_call_id,
                                 "name": end_api_name,
-                                "content": str(end_result),
+                                "content": end_result,
                             }
                         )
                         # 会话是否已由 end 工具标记结束
