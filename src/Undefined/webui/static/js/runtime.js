@@ -17,6 +17,7 @@
         activeChatMessageId: null,
         chatReconnectTimer: null,
         toolBlocks: new Map(),
+        toolCollapseTimers: new Map(),
         probeTimer: null,
         queryBusy: {
             memory: false,
@@ -27,6 +28,7 @@
     };
     const RUNTIME_DISABLED_ERROR = "Runtime API disabled";
     const CHAT_AUTO_SCROLL_STORAGE_KEY = "undefined_webchat_auto_scroll";
+    const TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS = 2000;
 
     function i18nFormat(key, params = {}) {
         let text = t(key);
@@ -644,6 +646,13 @@
         if (runtimeState.chatAutoScroll) scrollChatToBottomSoon();
     }
 
+    function clearToolCollapseTimers() {
+        runtimeState.toolCollapseTimers.forEach((timer) => {
+            clearTimeout(timer);
+        });
+        runtimeState.toolCollapseTimers.clear();
+    }
+
     function finishStreamingMessage() {
         if (!runtimeState.streamingMessageId) return;
         const item = document.querySelector(
@@ -852,7 +861,7 @@
         const childHtml = childContent
             ? `<div class="runtime-tool-children">${childContent}</div>`
             : "";
-        const openAttr = block.status === "running" ? " open" : "";
+        const openAttr = block.autoOpen ? " open" : "";
         const hintClass = block.uiHint
             ? ` ${escapeHtml(String(block.uiHint).replace(/_/g, "-"))}`
             : "";
@@ -916,6 +925,7 @@
                     : undefined,
             children,
             timeline,
+            autoOpen: false,
         };
     }
 
@@ -935,6 +945,21 @@
         return null;
     }
 
+    function monotonicNowMs() {
+        return typeof performance !== "undefined" &&
+            typeof performance.now === "function"
+            ? performance.now()
+            : Date.now();
+    }
+
+    function isToolLifecycleStart(status) {
+        return status === "tool_start" || status === "agent_start";
+    }
+
+    function isToolLifecycleEnd(status) {
+        return status === "tool_end" || status === "agent_end";
+    }
+
     function reduceToolBlock(blocks, payload, status) {
         const key = toolBlockKey(payload, blocks);
         if (!blocks.has(key) && payload && payload.tool_call_id) {
@@ -945,6 +970,8 @@
             }
         }
         const previous = blocks.get(key) || {};
+        const isStart = isToolLifecycleStart(status);
+        const isEnd = isToolLifecycleEnd(status);
         const previousUiHint = String(previous.uiHint || "");
         const nextUiHint = String(
             (payload && payload.ui_hint) || previousUiHint,
@@ -987,6 +1014,11 @@
                 payload && payload.duration_ms !== undefined
                     ? Number(payload.duration_ms)
                     : previous.durationMs,
+            autoOpen: isStart ? true : !!previous.autoOpen,
+            localStartedAtMs: isStart
+                ? monotonicNowMs()
+                : previous.localStartedAtMs,
+            finishedAtMs: isEnd ? monotonicNowMs() : previous.finishedAtMs,
             parentWebchatCallId: String(
                 (payload && payload.parent_webchat_call_id) ||
                     previous.parentWebchatCallId ||
@@ -1062,6 +1094,43 @@
         return node;
     }
 
+    function scheduleToolAutoCollapse(item, blocks, key, block) {
+        if (!item || !block || block.status === "running") return;
+        const timerKey = String(key || "").trim();
+        if (!timerKey) return;
+        if (runtimeState.toolCollapseTimers.has(timerKey)) {
+            clearTimeout(runtimeState.toolCollapseTimers.get(timerKey));
+            runtimeState.toolCollapseTimers.delete(timerKey);
+        }
+        const durationMs = Number(block.durationMs);
+        const startedAt = Number(block.localStartedAtMs);
+        const finishedAt = Number(block.finishedAtMs);
+        const elapsedMs = Number.isFinite(durationMs)
+            ? Math.max(0, durationMs)
+            : Number.isFinite(startedAt) && Number.isFinite(finishedAt)
+              ? Math.max(0, finishedAt - startedAt)
+              : 0;
+        const delayMs = Math.max(
+            0,
+            TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS - elapsedMs,
+        );
+        const collapse = () => {
+            runtimeState.toolCollapseTimers.delete(timerKey);
+            const latest = blocks.get(timerKey);
+            if (!latest) return;
+            latest.autoOpen = false;
+            redrawToolTimelineNode(item, blocks, timerKey);
+        };
+        if (delayMs <= 0) {
+            collapse();
+            return;
+        }
+        runtimeState.toolCollapseTimers.set(
+            timerKey,
+            setTimeout(collapse, delayMs),
+        );
+    }
+
     function upsertTimelineToolBlock(item, blocks, payload, status) {
         if (!item) return null;
         const key = timelineToolKey(payload, blocks);
@@ -1086,6 +1155,9 @@
             );
             if (parentNode) {
                 parentNode.innerHTML = renderToolBlock(parent);
+                if (isToolLifecycleEnd(status)) {
+                    scheduleToolAutoCollapse(item, blocks, key, block);
+                }
                 return parentNode;
             }
             const rootKey = topLevelToolKey(blocks, parentKey);
@@ -1095,6 +1167,9 @@
             );
             if (root && rootNode) {
                 rootNode.innerHTML = renderToolBlock(root);
+                if (isToolLifecycleEnd(status)) {
+                    scheduleToolAutoCollapse(item, blocks, key, block);
+                }
                 return rootNode;
             }
         }
@@ -1108,6 +1183,9 @@
             timeline.appendChild(node);
         }
         node.innerHTML = renderToolBlock(block);
+        if (isToolLifecycleEnd(status)) {
+            scheduleToolAutoCollapse(item, blocks, key, block);
+        }
         return node;
     }
 
@@ -1257,6 +1335,7 @@
     function clearChatMessages() {
         const log = get("runtimeChatLog");
         if (!log) return;
+        clearToolCollapseTimers();
         log.innerHTML = "";
         runtimeState.streamingMessageId = null;
         runtimeState.activeChatMessageId = null;
@@ -2297,6 +2376,7 @@
 
         runtimeState.chatBusy = true;
         setButtonLoading(button, true);
+        clearToolCollapseTimers();
         runtimeState.toolBlocks.clear();
         runtimeState.streamingMessageId = null;
         runtimeState.activeChatMessageId = null;

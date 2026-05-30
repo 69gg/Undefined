@@ -928,6 +928,7 @@
   padding: 0;
   color: var(--text-primary);
   font-size: 12px;
+  font-weight: 650;
 }
 .runtime-tool-block summary .runtime-tool-status {
   font-style: normal;

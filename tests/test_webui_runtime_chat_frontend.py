@@ -161,6 +161,33 @@ def test_webchat_tool_summary_uses_compact_single_line_order() -> None:
     assert "min-height: 34px;" in summary_css
     assert "padding: 4px 10px 4px 13px;" in summary_css
     assert "line-height: 1.2;" in summary_css
+    name_css = css.split(".runtime-tool-block summary .runtime-tool-name", 1)[1].split(
+        ".runtime-tool-block summary .runtime-tool-status", 1
+    )[0]
+    assert "font-weight: 650;" in name_css
+
+
+def test_webchat_tool_blocks_auto_collapse_after_minimum_visible_time() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    assert "TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS = 2000" in source
+    assert "runtimeState.toolCollapseTimers" in source
+    assert "function scheduleToolAutoCollapse" in source
+    assert 'block.autoOpen ? " open" : ""' in source
+    assert "autoOpen: isStart ? true : !!previous.autoOpen" in source
+    assert "localStartedAtMs: isStart" in source
+    assert "finishedAtMs: isEnd" in source
+    collapse_helper = source.split("function scheduleToolAutoCollapse", 1)[1].split(
+        "function upsertTimelineToolBlock", 1
+    )[0]
+    assert "const durationMs = Number(block.durationMs)" in collapse_helper
+    assert "TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS - elapsedMs" in collapse_helper
+    assert "latest.autoOpen = false" in collapse_helper
+    assert "redrawToolTimelineNode(item, blocks, timerKey)" in collapse_helper
+    assert "setTimeout(collapse, delayMs)" in collapse_helper
+    clear_helper = source.split("function clearToolCollapseTimers", 1)[1].split(
+        "function finishStreamingMessage", 1
+    )[0]
+    assert "clearTimeout(timer)" in clear_helper
 
 
 def test_webchat_auto_scroll_toggle_controls_stream_scroll() -> None:
