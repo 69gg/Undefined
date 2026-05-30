@@ -7,9 +7,9 @@ logger = logging.getLogger(__name__)
 
 
 async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
-    query = str(args.get("query") or "").strip()
+    query = str(args.get("search_request") or args.get("query") or "").strip()
     if not query:
-        return "请提供详细的自然语言搜索问题。"
+        return "请用 search_request 提供完整的自然语言搜索要求。"
 
     runtime_config = context.get("runtime_config")
     if runtime_config is None:

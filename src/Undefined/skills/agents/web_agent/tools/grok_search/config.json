@@ -2,16 +2,20 @@
     "type": "function",
     "function": {
         "name": "grok_search",
-        "description": "最优先使用的联网搜索工具，适用于获取最新信息、开放式互联网检索和高质量综合答案。提问时请使用详细自然语言，尽量带上时间范围、对象、限定条件和想要的结果。",
+        "description": "最优先使用的联网搜索工具，适用于获取最新信息、开放式互联网检索和高质量综合答案。调用时必须用自然语言完整叙述搜索要求，写清搜索对象、时间范围、限定条件、排除项、希望得到的结果格式或对比维度，不要只给关键词。",
         "parameters": {
             "type": "object",
             "properties": {
+                "search_request": {
+                    "type": "string",
+                    "description": "用自然语言完整叙述搜索要求。应包含要查什么、为什么查、时间/地区/版本/来源限制、需要排除什么、希望输出哪些要点或比较维度。不要写成关键词列表。"
+                },
                 "query": {
                     "type": "string",
-                    "description": "请用详细自然语言完整描述搜索问题，而不是只给几个关键词。"
+                    "description": "兼容旧字段。新调用请优先使用 search_request。"
                 }
             },
-            "required": ["query"]
+            "required": ["search_request"]
         }
     }
 }

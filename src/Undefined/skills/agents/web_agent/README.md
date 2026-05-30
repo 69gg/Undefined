@@ -2,7 +2,7 @@
 
 用于网络搜索与网页抓取，支持结合 MCP 的浏览器能力。
 默认子工具包括：
-- `grok_search`：优先级最高的联网搜索工具（需显式启用）
+- `grok_search`：优先级最高的联网搜索工具（需显式启用），调用时使用 `search_request` 自然语言完整叙述搜索要求
 - `web_search`：基于 SearXNG 的后备搜索工具
 - `crawl_webpage`：读取网页正文
 
