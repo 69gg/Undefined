@@ -245,6 +245,7 @@ curl http://127.0.0.1:8788/openapi.json
   - `stage` 是实时 UI 状态事件，不写入 `webchat.events` 历史；刷新后只恢复已落盘的工具 / Agent / 正文时序。
   - WebChat SSE 不发布模型 token 级文本增量，也不发布工具参数增量；正文以 `message` 事件展示，工具只按生命周期事件展示。
   - 工具结束事件 payload 会尽量带 `duration_ms`，用于 WebUI 在工具块状态后显示本次调用耗时；`done` / `error` payload 会带 `duration_ms` 表示整轮 job 总耗时。总耗时从 job 创建开始计，到 `done`/`error`/`cancelled` 收尾为止。
+  - WebUI 展开工具 / Agent 调用块时，会按输入 / 输出分区展示脱敏截断后的 `arguments_preview` 和 `result_preview`；若预览文本本身是 JSON 字符串，前端会格式化展示。
   - 工具事件 payload 可能带 `ui_hint`。当前用于 WebChat 展示降噪：`webchat_private_send` 表示同一 WebChat 私聊回复已通过 `message` 事件展示，工具块只需显示发送状态；`webchat_end` 表示 `end` 成功结束，工具块可隐藏重复的成功结果。
 
 行为约定：

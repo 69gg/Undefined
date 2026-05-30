@@ -884,16 +884,55 @@
 .runtime-tool-block.error summary em {
   color: var(--error);
 }
-.runtime-tool-block pre,
-.runtime-tool-result {
-  margin: 0;
-  padding: 9px 10px;
+.runtime-tool-preview {
   border-top: 1px solid var(--border-color);
+  padding: 8px 10px 10px;
+}
+.runtime-tool-preview + .runtime-tool-preview {
+  border-top-style: dashed;
+}
+.runtime-tool-preview-label {
+  margin-bottom: 6px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+}
+.runtime-tool-preview-body {
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+}
+.runtime-tool-preview-body > *:first-child {
+  margin-top: 0;
+}
+.runtime-tool-preview-body > *:last-child {
+  margin-bottom: 0;
+}
+.runtime-tool-preview-body pre {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.runtime-tool-preview-body.is-json {
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-card) 70%, var(--bg-app));
+}
+.runtime-tool-preview-body .runtime-chat-image {
+  max-width: min(420px, 100%);
+}
+.runtime-tool-preview-body .runtime-chat-file-card {
+  max-width: min(340px, 100%);
 }
 @keyframes runtime-chat-enter {
   from {

@@ -655,6 +655,41 @@
         return block.isAgent ? t("runtime.agent") : t("runtime.tool");
     }
 
+    function formatToolPreview(raw) {
+        const text = String(raw || "").trim();
+        if (!text) return { text: "", isJson: false };
+        try {
+            const parsed = JSON.parse(text);
+            return {
+                text: JSON.stringify(parsed, null, 2),
+                isJson: parsed !== null && typeof parsed === "object",
+            };
+        } catch (_error) {
+            return { text, isJson: false };
+        }
+    }
+
+    function renderToolPreviewSection(labelKey, raw, options = {}) {
+        const preview = formatToolPreview(raw);
+        if (!preview.text) return "";
+        const label = t(labelKey);
+        const bodyClass = preview.isJson
+            ? "runtime-tool-preview-body is-json"
+            : "runtime-tool-preview-body";
+        const body = preview.isJson
+            ? `<pre>${escapeHtml(preview.text)}</pre>`
+            : `<div class="${bodyClass}">${renderChatContent(preview.text, !!options.markdown)}</div>`;
+        const bodyHtml = preview.isJson
+            ? `<div class="${bodyClass}">${body}</div>`
+            : body;
+        return (
+            `<div class="runtime-tool-preview">` +
+            `<div class="runtime-tool-preview-label">${escapeHtml(label)}</div>` +
+            bodyHtml +
+            `</div>`
+        );
+    }
+
     function renderToolBlock(block) {
         const label = toolDisplayLabel(block);
         const statusLabel = toolStatusLabel(block);
@@ -662,12 +697,16 @@
         const metaLabel = durationLabel
             ? `${statusLabel} · ${durationLabel}`
             : statusLabel;
-        const args = block.argumentsPreview
-            ? `<pre>${escapeHtml(block.argumentsPreview)}</pre>`
-            : "";
-        const result = block.resultPreview
-            ? `<div class="runtime-tool-result">${escapeHtml(block.resultPreview)}</div>`
-            : "";
+        const args = renderToolPreviewSection(
+            "runtime.tool_input",
+            block.argumentsPreview,
+            { markdown: false },
+        );
+        const result = renderToolPreviewSection(
+            "runtime.tool_output",
+            block.resultPreview,
+            { markdown: true },
+        );
         const openAttr = block.status === "running" ? " open" : "";
         const hintClass = block.uiHint
             ? ` ${escapeHtml(String(block.uiHint).replace(/_/g, "-"))}`
