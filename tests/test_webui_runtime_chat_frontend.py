@@ -37,7 +37,8 @@ def test_webchat_frontend_handles_tool_lifecycle_and_webchat_hints() -> None:
     assert 'event === "agent_end"' in source
     assert 'block.uiHint === "webchat_private_send"' in source
     assert 'block.uiHint === "webchat_end"' in source
-    assert 'nextUiHint === "webchat_private_send"' in source
+    assert "payload && payload.result_preview" in source
+    assert 'nextUiHint === "webchat_end"' not in source
 
 
 def test_webchat_frontend_renders_live_stage_after_ai_label() -> None:

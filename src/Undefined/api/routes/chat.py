@@ -659,9 +659,7 @@ def _sanitize_webchat_event_payload(
             "api_name": api_name,
             "ok": bool(payload.get("ok", True)),
             "status": "error" if payload.get("ok") is False else "done",
-            "result_preview": ""
-            if ui_hint in {"webchat_private_send", "webchat_end"}
-            else _preview(result),
+            "result_preview": _preview(result),
             "is_agent": is_agent,
             **_webchat_payload_lineage(payload),
             **({"ui_hint": ui_hint} if ui_hint else {}),

@@ -1000,15 +1000,11 @@
                         : "done"
                     : "running"),
             argumentsPreview: nextArguments,
-            resultPreview:
-                nextUiHint === "webchat_private_send" ||
-                nextUiHint === "webchat_end"
-                    ? ""
-                    : String(
-                          (payload && payload.result_preview) ||
-                              previous.resultPreview ||
-                              "",
-                      ),
+            resultPreview: String(
+                (payload && payload.result_preview) ||
+                    previous.resultPreview ||
+                    "",
+            ),
             uiHint: nextUiHint,
             durationMs:
                 payload && payload.duration_ms !== undefined

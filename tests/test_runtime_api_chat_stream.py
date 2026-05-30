@@ -66,6 +66,33 @@ def test_sanitize_webchat_event_payload_compacts_webchat_private_send_tool() -> 
     assert payload["arguments_preview"] == ""
 
     payload = runtime_api_chat._sanitize_webchat_event_payload(
+        "tool_end",
+        {
+            "tool_call_id": "call_1",
+            "name": "messages.send_message",
+            "api_name": "messages-_-send_message",
+            "ok": True,
+            "result": "消息已发送（message_id=123）",
+        },
+    )
+
+    assert payload["result_preview"] == "消息已发送（message_id=123）"
+
+    payload = runtime_api_chat._sanitize_webchat_event_payload(
+        "tool_end",
+        {
+            "tool_call_id": "call_2",
+            "name": "messages.send_private_message",
+            "api_name": "messages-_-send_private_message",
+            "ok": True,
+            "result": "私聊消息已发送给用户 42（message_id=456）",
+        },
+    )
+
+    assert payload["ui_hint"] == "webchat_private_send"
+    assert payload["result_preview"] == "私聊消息已发送给用户 42（message_id=456）"
+
+    payload = runtime_api_chat._sanitize_webchat_event_payload(
         "tool_start",
         {
             "tool_call_id": "call_2",
@@ -119,7 +146,7 @@ def test_sanitize_webchat_event_payload_compacts_successful_end_tool() -> None:
     )
 
     assert payload["ui_hint"] == "webchat_end"
-    assert payload["result_preview"] == ""
+    assert payload["result_preview"] == "对话已结束"
 
 
 @pytest.mark.asyncio
