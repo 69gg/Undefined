@@ -243,7 +243,7 @@ curl http://127.0.0.1:8788/openapi.json
   - `done`：最终汇总（与非流式 JSON 结构一致）。
   - `error`：任务失败或取消。
 - WebChat 不发布模型 token 级文本增量，也不发布工具参数增量；正文以 `message` 事件展示，工具只按生命周期事件展示。
-- 工具结束事件 payload 会尽量带 `duration_ms`，用于 WebUI 在工具 / Agent 名称旁显示本次调用耗时；并发工具按实际完成时间发布结束事件，LLM tool message 回填仍保持模型要求的原始顺序。`done` / `error` payload 会带 `duration_ms` 表示整轮 job 总耗时。总耗时从 job 创建开始计，到 `done`/`error`/`cancelled` 收尾为止。
+- 工具结束事件 payload 会尽量带 `duration_ms`，用于 WebUI 在工具 / Agent 名称旁显示本次调用耗时；运行中的 job 快照会在 `current_tool_calls` 中返回仍在执行的工具 / Agent 及其后端计算的 `duration_ms`。WebUI 每 0.5 秒查询一次，查询间隙只用本地时间临时递增显示，下一次查询后以 Runtime 返回值校准；结束后固定展示结束事件的总耗时。并发工具按实际完成时间发布结束事件，LLM tool message 回填仍保持模型要求的原始顺序。`done` / `error` payload 会带 `duration_ms` 表示整轮 job 总耗时。总耗时从 job 创建开始计，到 `done`/`error`/`cancelled` 收尾为止。
 - 工具 / Agent 事件 payload 由后端补齐调用链字段：`webchat_call_id`、`parent_webchat_call_id`、`depth`、`agent_path`。Agent 内部工具、子 Agent 和 Agent 内发送的正文会以父子关系和 timeline 嵌套，前端只按这些字段展示。
 - 工具 / Agent 事件 payload 由后端补齐 `status`，取值通常为 `running`、`done`、`error`、`cancelled`。WebUI 会按状态给调用块左侧状态条分色：运行中、成功、失败 / 取消分别使用不同提示色。如果 job 失败或取消时仍有未闭合调用，历史 metadata 会在统一落盘阶段补齐失败 / 取消终态，避免刷新后继续显示为运行中。
 - WebUI 展开工具 / Agent 调用块时，会按输入 / 输出分区展示由 Runtime 生成的 `arguments_preview` 和 `result_preview`。预览会递归遮蔽常见敏感字段名（如 `api_key`、`authorization`、`token`、`password`、`secret`、`cookie` 等）并按长度截断；结构化预览会渲染为带颜色的键值字段。预览不是权限边界，工具实现仍应避免把完整凭证写入结果正文。
@@ -399,6 +399,19 @@ curl http://127.0.0.1:8788/openapi.json
         "stage_elapsed_ms": 900,
         "elapsed_ms": 2400,
         "transient": true
+      }
+    ],
+    "current_tool_calls": [
+      {
+        "job_id": "9c1...",
+        "webchat_call_id": "call_agent",
+        "name": "web_agent",
+        "status": "running",
+        "is_agent": true,
+        "started_at": 1760000000.0,
+        "duration_ms": 2400,
+        "current_stage": "waiting_model",
+        "current_stage_elapsed_ms": 900
       }
     ]
   },

@@ -54,6 +54,9 @@ def test_webchat_frontend_renders_live_stage_after_ai_label() -> None:
     assert 'if (event === "stage")' in source
     assert "setChatStage(item, payload || {})" in source
     assert "setChatStage(item, null)" in source
+    assert "function updateChatStageDisplay" in source
+    assert "function refreshActiveChatTimers" in source
+    assert "updateToolDurationDisplay(block)" in source
     assert "formatDurationMs" in source
     assert "payload && payload.elapsed_ms" in source
     assert "Date.now() - runtimeState.activeStageStartedAt" not in source
@@ -186,6 +189,7 @@ def test_webchat_frontend_updates_agent_stage_summary_without_timeline_noise() -
     assert 'type: "stage"' not in reduce_helper
     assert "function agentStageRenderSignature" in source
     assert "previousSignature === agentStageRenderSignature(block)" in source
+    assert "currentStage: stage || previous.currentStage" in source
     assert "runtime-tool-stage" not in source
     assert ".runtime-tool-stage" not in css
 
@@ -194,9 +198,14 @@ def test_webchat_frontend_polls_job_events_incrementally() -> None:
     source = RUNTIME_JS.read_text(encoding="utf-8")
 
     assert "function pollChatJob" in source
+    assert "CHAT_POLL_INTERVAL_MS = 500" in source
+    assert "CHAT_CLOCK_INTERVAL_MS = 500" in source
     assert 'format: "json"' in source
     assert "after: String(runtimeState.lastEventSeq)" in source
     assert "function applyChatEventsPayload" in source
+    assert "function applyChatJobSnapshot" in source
+    assert "job.current_tool_calls" in source
+    assert "upsertToolSnapshot" in source
     assert "runtimeState.chatPollTimer" in source
     assert "runtimeState.chatPollBackoffMs" in source
     assert "pollChatJob(jobId).catch" in source
@@ -258,7 +267,7 @@ def test_webchat_tool_blocks_auto_collapse_after_minimum_visible_time() -> None:
     assert "runtimeState.toolCollapseTimers" in source
     assert "function scheduleToolAutoCollapse" in source
     assert 'block.autoOpen ? " open" : ""' in source
-    assert "autoOpen: isStart ? true : !!previous.autoOpen" in source
+    assert "autoOpen: isStart || isSnapshot ? true : !!previous.autoOpen" in source
     assert "localStartedAtMs: isStart" in source
     assert "finishedAtMs: isEnd" in source
     collapse_helper = source.split("function scheduleToolAutoCollapse", 1)[1].split(
@@ -301,7 +310,13 @@ def test_webchat_frontend_renders_tool_duration() -> None:
     assert "block.durationMs" in source
     assert "payload.duration_ms" in source
     assert "runtime-tool-duration" in source
-    assert "formatDurationMs(block.durationMs)" in source
+    assert "formatDurationMs(runningDurationMs(block))" in source
+    assert "function runningDurationMs" in source
+    assert "function backendDurationClock" in source
+    assert "function updateToolDurationDisplay" in source
+    assert "function toolRenderSignature" in source
+    assert "durationBaseMs" in source
+    assert "durationReceivedAtMs" in source
     assert "statusLabel} · ${durationLabel}" not in source
 
 

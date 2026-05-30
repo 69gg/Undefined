@@ -146,6 +146,7 @@ class ChatJob:
     done: asyncio.Event = field(default_factory=asyncio.Event)
     changed: asyncio.Condition = field(default_factory=asyncio.Condition)
     tool_started_at: dict[str, float] = field(default_factory=dict)
+    tool_start_payloads: dict[str, dict[str, Any]] = field(default_factory=dict)
     agent_current_stage: dict[str, str] = field(default_factory=dict)
     agent_stage_started_at: dict[str, float] = field(default_factory=dict)
     agent_stage_payloads: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -172,6 +173,7 @@ class ChatJob:
             "reply": "\n\n".join(self.outputs).strip(),
             "messages": list(self.outputs),
             "current_agent_stages": self.current_agent_stage_snapshots(now),
+            "current_tool_calls": self.current_tool_call_snapshots(now),
             "history_finalized": self.history_finalized,
         }
 
@@ -224,6 +226,47 @@ class ChatJob:
                     "elapsed_ms": _job_elapsed_ms(self, measured_at),
                 }
             )
+            payloads.append(payload)
+        return payloads
+
+    def current_tool_call_snapshots(
+        self, now: float | None = None
+    ) -> list[dict[str, Any]]:
+        if self.done.is_set():
+            return []
+        measured_at = time.time() if now is None else now
+        payloads: list[dict[str, Any]] = []
+        for call_id, started_at in self.tool_started_at.items():
+            payload = dict(self.tool_start_payloads.get(call_id, {}))
+            if not payload:
+                continue
+            payload.update(
+                {
+                    "job_id": self.job_id,
+                    "webchat_call_id": call_id,
+                    "status": "running",
+                    "started_at": started_at,
+                    "duration_ms": max(0, int((measured_at - started_at) * 1000)),
+                    "elapsed_ms": _job_elapsed_ms(self, measured_at),
+                }
+            )
+            if bool(payload.get("is_agent")):
+                stage_payload = self.agent_stage_payloads.get(call_id, {})
+                stage_started_at = self.agent_stage_started_at.get(call_id, measured_at)
+                current_stage = self.agent_current_stage.get(call_id, "")
+                if current_stage:
+                    payload.update(
+                        {
+                            "current_stage": current_stage,
+                            "current_stage_detail": str(
+                                stage_payload.get("detail") or ""
+                            ).strip(),
+                            "current_stage_elapsed_ms": max(
+                                0,
+                                int((measured_at - stage_started_at) * 1000),
+                            ),
+                        }
+                    )
             payloads.append(payload)
         return payloads
 
@@ -406,9 +449,11 @@ class ChatJobManager:
             if output_event in {"tool_start", "agent_start"}:
                 job.tool_started_at[tool_key] = event_time
                 event_payload["started_at"] = event_time
+                job.tool_start_payloads[tool_key] = dict(event_payload)
             elif output_event in {"tool_end", "agent_end"}:
                 lifecycle_started_at = job.tool_started_at.get(tool_key)
                 job.tool_started_at.pop(tool_key, 0.0)
+                job.tool_start_payloads.pop(tool_key, None)
                 if lifecycle_started_at is not None:
                     event_payload["duration_ms"] = max(
                         0, int((event_time - lifecycle_started_at) * 1000)

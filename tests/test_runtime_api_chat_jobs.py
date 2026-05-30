@@ -434,6 +434,12 @@ async def test_chat_job_events_json_returns_incremental_events_and_live_stage(
     assert payload["after"] == after
     assert payload["last_seq"] == after
     assert payload["job"]["current_agent_stages"][0]["stage"] == "waiting_model"
+    assert payload["job"]["current_tool_calls"][0]["webchat_call_id"] == "call_agent"
+    assert payload["job"]["current_tool_calls"][0]["status"] == "running"
+    assert payload["job"]["current_tool_calls"][0]["is_agent"] is True
+    assert isinstance(payload["job"]["current_tool_calls"][0]["duration_ms"], int)
+    assert isinstance(payload["job"]["current_tool_calls"][0]["started_at"], float)
+    assert payload["job"]["current_tool_calls"][0]["current_stage"] == "waiting_model"
     assert payload["events"][0]["event"] == "stage"
     assert payload["events"][1]["event"] == "agent_stage"
     assert payload["events"][1]["seq"] == after

@@ -16,7 +16,8 @@
         streamingMessageId: null,
         activeChatMessageId: null,
         chatPollTimer: null,
-        chatPollBackoffMs: 1000,
+        chatPollBackoffMs: 500,
+        chatClockTimer: null,
         activeJobResumeTimer: null,
         activeJobResumeAttempts: 0,
         toolBlocks: new Map(),
@@ -31,6 +32,8 @@
     };
     const RUNTIME_DISABLED_ERROR = "Runtime API disabled";
     const CHAT_AUTO_SCROLL_STORAGE_KEY = "undefined_webchat_auto_scroll";
+    const CHAT_POLL_INTERVAL_MS = 500;
+    const CHAT_CLOCK_INTERVAL_MS = 500;
     const TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS = 2000;
     const ACTIVE_JOB_RESUME_MAX_ATTEMPTS = 20;
 
@@ -674,9 +677,36 @@
         runtimeState.toolCollapseTimers.clear();
     }
 
+    function refreshActiveChatTimers() {
+        const item = findActiveChatMessage();
+        if (item) {
+            item.querySelectorAll(".runtime-chat-stage").forEach((stageEl) => {
+                updateChatStageDisplay(stageEl);
+            });
+        }
+        if (!runtimeState.toolBlocks.size) return;
+        runtimeState.toolBlocks.forEach((block) => {
+            if (!["done", "error", "cancelled"].includes(block.status)) {
+                updateToolDurationDisplay(block);
+            }
+        });
+    }
+
     function stopChatPolling() {
         clearTimeout(runtimeState.chatPollTimer);
         runtimeState.chatPollTimer = null;
+    }
+
+    function stopChatClock() {
+        clearInterval(runtimeState.chatClockTimer);
+        runtimeState.chatClockTimer = null;
+    }
+
+    function startChatClock() {
+        if (runtimeState.chatClockTimer) return;
+        runtimeState.chatClockTimer = setInterval(() => {
+            refreshActiveChatTimers();
+        }, CHAT_CLOCK_INTERVAL_MS);
     }
 
     function stopActiveJobResumeTimer() {
@@ -709,6 +739,7 @@
         }
         finishStreamingMessage();
         runtimeState.activeChatMessageId = null;
+        stopChatClock();
     }
 
     function chatStageLabel(stage) {
@@ -727,19 +758,38 @@
             stageEl.hidden = true;
             stageEl.textContent = "";
             stageEl.removeAttribute("title");
+            delete stageEl.dataset.stageLabel;
+            delete stageEl.dataset.stageDetail;
+            delete stageEl.dataset.stageBaseMs;
+            delete stageEl.dataset.stageReceivedAtMs;
             stageEl.classList.remove("is-final");
             return;
         }
         const label = chatStageLabel(stage);
         const detail = String((payload && payload.detail) || "").trim();
         const elapsedMs = Number(payload && payload.elapsed_ms);
-        const duration = Number.isFinite(elapsedMs)
-            ? formatDurationMs(elapsedMs)
-            : "";
+        const duration = Number.isFinite(elapsedMs) ? elapsedMs : 0;
         stageEl.hidden = false;
         stageEl.classList.toggle("is-final", !!(payload && payload.final));
-        stageEl.textContent = duration ? `${label} · ${duration}` : label;
+        stageEl.dataset.stageLabel = label;
+        stageEl.dataset.stageDetail = detail;
+        stageEl.dataset.stageBaseMs = String(duration);
+        stageEl.dataset.stageReceivedAtMs = String(monotonicNowMs());
         stageEl.title = detail ? `${label} · ${detail}` : label;
+        updateChatStageDisplay(stageEl);
+    }
+
+    function updateChatStageDisplay(stageEl) {
+        if (!stageEl || stageEl.hidden) return;
+        const label = String(stageEl.dataset.stageLabel || "").trim();
+        if (!label) return;
+        const baseMs = Number(stageEl.dataset.stageBaseMs);
+        const receivedAtMs = Number(stageEl.dataset.stageReceivedAtMs);
+        const elapsedMs = stageEl.classList.contains("is-final")
+            ? baseMs
+            : baseMs + Math.max(0, monotonicNowMs() - receivedAtMs);
+        const duration = formatDurationMs(elapsedMs);
+        stageEl.textContent = duration ? `${label} · ${duration}` : label;
     }
 
     function toolStatusLabel(block) {
@@ -880,7 +930,8 @@
     function renderToolBlock(block) {
         const label = toolDisplayLabel(block);
         const statusLabel = toolStatusLabel(block);
-        const durationLabel = formatDurationMs(block.durationMs);
+        const durationLabel = formatDurationMs(runningDurationMs(block));
+        const callId = toolCallIdentity(block);
         const stageLabel = block.currentStage
             ? chatStageLabel(block.currentStage)
             : "";
@@ -892,9 +943,7 @@
         const titleHtml =
             `<span class="runtime-tool-title">` +
             `<code class="runtime-tool-name">${escapeHtml(block.name || "--")}</code>` +
-            (durationLabel
-                ? `<span class="runtime-tool-duration">${escapeHtml(durationLabel)}</span>`
-                : "") +
+            `<span class="runtime-tool-duration" data-tool-duration-for="${escapeHtml(callId)}"${durationLabel ? "" : " hidden"}>${escapeHtml(durationLabel)}</span>` +
             `</span>`;
         const args = renderToolPreviewSection(
             "runtime.tool_input",
@@ -1032,6 +1081,43 @@
             : Date.now();
     }
 
+    function backendDurationClock(payload, field = "duration_ms") {
+        const durationMs = Number(payload && payload[field]);
+        if (!Number.isFinite(durationMs) || durationMs < 0) return null;
+        return {
+            baseMs: durationMs,
+            receivedAtMs: monotonicNowMs(),
+        };
+    }
+
+    function runningDurationMs(block) {
+        const baseMs = Number(block && block.durationBaseMs);
+        const receivedAtMs = Number(block && block.durationReceivedAtMs);
+        if (!Number.isFinite(baseMs) || baseMs < 0) {
+            return Number(block && block.durationMs);
+        }
+        if (
+            ["done", "error", "cancelled"].includes(String(block.status || ""))
+        ) {
+            return baseMs;
+        }
+        if (!Number.isFinite(receivedAtMs) || receivedAtMs <= 0) {
+            return baseMs;
+        }
+        return Math.max(0, baseMs + monotonicNowMs() - receivedAtMs);
+    }
+
+    function updateToolDurationDisplay(block) {
+        const identity = toolCallIdentity(block);
+        if (!identity) return;
+        const durationLabel = formatDurationMs(runningDurationMs(block));
+        const selector = `[data-tool-duration-for="${CSS.escape(identity)}"]`;
+        document.querySelectorAll(selector).forEach((node) => {
+            node.textContent = durationLabel;
+            node.hidden = !durationLabel;
+        });
+    }
+
     function isToolLifecycleStart(status) {
         return status === "tool_start" || status === "agent_start";
     }
@@ -1052,6 +1138,8 @@
         const previous = blocks.get(key) || {};
         const isStart = isToolLifecycleStart(status);
         const isEnd = isToolLifecycleEnd(status);
+        const isSnapshot = status === "tool_snapshot";
+        const durationClock = backendDurationClock(payload);
         const previousUiHint = String(previous.uiHint || "");
         const nextUiHint = String(
             (payload && payload.ui_hint) || previousUiHint,
@@ -1087,22 +1175,51 @@
             ),
             uiHint: nextUiHint,
             durationMs:
-                payload && payload.duration_ms !== undefined
-                    ? Number(payload.duration_ms)
-                    : previous.durationMs,
+                durationClock && isEnd
+                    ? durationClock.baseMs
+                    : payload && payload.duration_ms !== undefined
+                      ? Number(payload.duration_ms)
+                      : previous.durationMs,
+            durationBaseMs:
+                durationClock && (isSnapshot || isEnd)
+                    ? durationClock.baseMs
+                    : isStart
+                      ? 0
+                      : previous.durationBaseMs,
+            durationReceivedAtMs:
+                durationClock && (isSnapshot || isEnd)
+                    ? durationClock.receivedAtMs
+                    : isStart
+                      ? monotonicNowMs()
+                      : previous.durationReceivedAtMs,
+            backendStartedAt: Number(
+                (payload && payload.started_at) ||
+                    previous.backendStartedAt ||
+                    0,
+            ),
             currentStage:
                 isEnd && !(payload && payload.current_stage)
                     ? ""
-                    : previous.currentStage || "",
+                    : String(
+                          (payload && payload.current_stage) ||
+                              previous.currentStage ||
+                              "",
+                      ),
             currentStageDetail:
                 isEnd && !(payload && payload.current_stage_detail)
                     ? ""
-                    : previous.currentStageDetail || "",
+                    : String(
+                          (payload && payload.current_stage_detail) ||
+                              previous.currentStageDetail ||
+                              "",
+                      ),
             currentStageElapsedMs:
                 isEnd && !(payload && payload.current_stage_elapsed_ms)
                     ? undefined
-                    : previous.currentStageElapsedMs,
-            autoOpen: isStart ? true : !!previous.autoOpen,
+                    : payload && payload.current_stage_elapsed_ms !== undefined
+                      ? Number(payload.current_stage_elapsed_ms)
+                      : previous.currentStageElapsedMs,
+            autoOpen: isStart || isSnapshot ? true : !!previous.autoOpen,
             localStartedAtMs: isStart
                 ? monotonicNowMs()
                 : previous.localStartedAtMs,
@@ -1139,6 +1256,26 @@
     function toolCallIdentity(block) {
         if (!block) return "";
         return String(block.webchatCallId || block.name || "").trim();
+    }
+
+    function toolRenderSignature(block) {
+        if (!block) return "";
+        return [
+            block.webchatCallId,
+            block.parentWebchatCallId,
+            block.name,
+            block.isAgent,
+            block.status,
+            block.argumentsPreview,
+            block.resultPreview,
+            block.uiHint,
+            block.currentStage,
+            block.currentStageDetail,
+            Array.isArray(block.children) ? block.children.length : 0,
+            Array.isArray(block.timeline) ? block.timeline.length : 0,
+        ]
+            .map((value) => String(value || ""))
+            .join("\u001f");
     }
 
     function appendToolTimelineEntry(parent, entry) {
@@ -1204,7 +1341,6 @@
             argumentsPreview: previous.argumentsPreview || "",
             resultPreview: previous.resultPreview || "",
             uiHint: previous.uiHint || "",
-            durationMs: previous.durationMs,
             currentStage: stage || previous.currentStage || "",
             currentStageDetail: String(
                 (payload && payload.detail) ||
@@ -1215,6 +1351,10 @@
                 payload && payload.stage_elapsed_ms !== undefined
                     ? Number(payload.stage_elapsed_ms)
                     : previous.currentStageElapsedMs,
+            durationMs: previous.durationMs,
+            durationBaseMs: previous.durationBaseMs,
+            durationReceivedAtMs: previous.durationReceivedAtMs,
+            backendStartedAt: previous.backendStartedAt,
             autoOpen: !!previous.autoOpen,
             parentWebchatCallId: parentKey,
             children: Array.isArray(previous.children) ? previous.children : [],
@@ -1281,6 +1421,9 @@
     function upsertTimelineToolBlock(item, blocks, payload, status) {
         if (!item) return null;
         const key = timelineToolKey(payload, blocks);
+        const previousRootKey = topLevelToolKey(blocks, key);
+        const previousRoot = blocks.get(previousRootKey);
+        const previousSignature = toolRenderSignature(previousRoot);
         const block = reduceToolBlock(blocks, payload, status);
         const timeline = ensureTimelineNodeContainer(item);
         if (!timeline) return null;
@@ -1301,6 +1444,15 @@
                 `[data-tool-key="${CSS.escape(parentKey)}"]`,
             );
             if (parentNode) {
+                const nextSignature = toolRenderSignature(parent);
+                if (
+                    status === "tool_snapshot" &&
+                    previousSignature &&
+                    previousSignature === nextSignature
+                ) {
+                    updateToolDurationDisplay(block);
+                    return parentNode;
+                }
                 parentNode.innerHTML = renderToolBlock(parent);
                 if (isToolLifecycleEnd(status)) {
                     scheduleToolAutoCollapse(item, blocks, key, block);
@@ -1313,6 +1465,15 @@
                 `[data-tool-key="${CSS.escape(rootKey)}"]`,
             );
             if (root && rootNode) {
+                const nextSignature = toolRenderSignature(root);
+                if (
+                    status === "tool_snapshot" &&
+                    previousSignature &&
+                    previousSignature === nextSignature
+                ) {
+                    updateToolDurationDisplay(block);
+                    return rootNode;
+                }
                 rootNode.innerHTML = renderToolBlock(root);
                 if (isToolLifecycleEnd(status)) {
                     scheduleToolAutoCollapse(item, blocks, key, block);
@@ -1328,6 +1489,13 @@
             node.className = "runtime-chat-tools";
             node.dataset.toolKey = key;
             timeline.appendChild(node);
+        }
+        if (status === "tool_snapshot" && previousSignature) {
+            const nextSignature = toolRenderSignature(block);
+            if (previousSignature === nextSignature) {
+                updateToolDurationDisplay(block);
+                return node;
+            }
         }
         node.innerHTML = renderToolBlock(block);
         if (isToolLifecycleEnd(status)) {
@@ -1356,6 +1524,17 @@
         if (!item) return;
         upsertTimelineToolBlock(item, runtimeState.toolBlocks, payload, status);
         scrollChatToBottomSoon();
+    }
+
+    function upsertToolSnapshot(payload, jobId = "") {
+        const item = ensureStreamingMessage(jobId);
+        if (!item) return;
+        upsertTimelineToolBlock(
+            item,
+            runtimeState.toolBlocks,
+            payload,
+            "tool_snapshot",
+        );
     }
 
     function upsertAgentStageBlock(payload, jobId = "", seq = 0) {
@@ -1539,6 +1718,7 @@
         runtimeState.streamingMessageId = null;
         runtimeState.activeChatMessageId = null;
         runtimeState.toolBlocks.clear();
+        stopChatClock();
     }
 
     function parseCqAttributes(raw) {
@@ -2464,6 +2644,7 @@
                 );
             });
         const job = data && data.job ? data.job : null;
+        applyChatJobSnapshot(job, jobId);
         if (
             job &&
             runtimeState.activeJobId === jobId &&
@@ -2483,6 +2664,39 @@
         }
     }
 
+    function applyChatJobSnapshot(job, jobId) {
+        if (!job || runtimeState.activeJobId !== jobId) return;
+        const item = ensureStreamingMessage(jobId);
+        if (!item) return;
+        const status = String(job.status || "");
+        if (!["done", "error", "cancelled"].includes(status)) {
+            const stage = String(job.current_stage || "").trim();
+            if (stage) {
+                setChatStage(item, {
+                    stage,
+                    detail: job.current_stage_detail || "",
+                    elapsed_ms: job.elapsed_ms,
+                });
+            }
+        }
+        const toolCalls = Array.isArray(job.current_tool_calls)
+            ? job.current_tool_calls
+            : [];
+        toolCalls.forEach((payload) => {
+            upsertToolSnapshot(payload || {}, jobId);
+        });
+        const agentStages = Array.isArray(job.current_agent_stages)
+            ? job.current_agent_stages
+            : [];
+        agentStages.forEach((payload) => {
+            upsertAgentStageBlock(
+                payload || {},
+                jobId,
+                Number(job.last_seq || 0),
+            );
+        });
+    }
+
     async function pollChatJob(jobId) {
         if (runtimeState.activeJobId !== jobId) return;
         runtimeState.chatBusy = true;
@@ -2496,14 +2710,17 @@
                 `/api/v1/management/runtime/chat/jobs/${encodeURIComponent(jobId)}/events?${params.toString()}`,
                 `/api/runtime/chat/jobs/${encodeURIComponent(jobId)}/events?${params.toString()}`,
             ]);
-            runtimeState.chatPollBackoffMs = 1000;
+            runtimeState.chatPollBackoffMs = CHAT_POLL_INTERVAL_MS;
             applyChatEventsPayload(data, jobId);
         } catch (error) {
             if (runtimeState.activeJobId === jobId) {
                 showToast(t("runtime.chat_reconnecting"), "warning", 1800);
                 runtimeState.chatPollBackoffMs = Math.min(
                     8000,
-                    Math.max(1200, runtimeState.chatPollBackoffMs * 1.6),
+                    Math.max(
+                        CHAT_POLL_INTERVAL_MS,
+                        runtimeState.chatPollBackoffMs * 1.6,
+                    ),
                 );
             } else {
                 showToast(
@@ -2528,7 +2745,8 @@
         runtimeState.activeJobId = jobId;
         runtimeState.lastEventSeq = Number(after || 0);
         runtimeState.chatBusy = true;
-        runtimeState.chatPollBackoffMs = 1000;
+        runtimeState.chatPollBackoffMs = CHAT_POLL_INTERVAL_MS;
+        startChatClock();
         setButtonLoading(get("btnRuntimeChatSend"), true);
         pollChatJob(jobId).catch(() => {});
     }
@@ -2619,6 +2837,7 @@
         setButtonLoading(button, true);
         clearToolCollapseTimers();
         stopChatPolling();
+        stopChatClock();
         runtimeState.toolBlocks.clear();
         runtimeState.streamingMessageId = null;
         runtimeState.activeChatMessageId = null;

@@ -979,6 +979,9 @@
   line-height: 1.4;
   white-space: nowrap;
 }
+.runtime-tool-block summary .runtime-tool-duration[hidden] {
+  display: none;
+}
 .runtime-tool-block summary .runtime-tool-status {
   min-width: 0;
   overflow: hidden;
