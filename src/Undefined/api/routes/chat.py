@@ -54,6 +54,7 @@ _WEBCHAT_SEND_MESSAGE_TOOLS = frozenset(
 _WEBCHAT_LIFECYCLE_EVENTS = frozenset(
     {"tool_start", "tool_end", "agent_start", "agent_end"}
 )
+_WEBCHAT_HISTORY_EVENTS = _WEBCHAT_LIFECYCLE_EVENTS | frozenset({"message"})
 
 
 @dataclass
@@ -342,7 +343,7 @@ class ChatJobManager:
             job.events.append(item)
             if len(job.events) > _CHAT_JOB_EVENT_BUFFER_LIMIT:
                 job.events = job.events[-_CHAT_JOB_EVENT_BUFFER_LIMIT:]
-            if item.event in _WEBCHAT_LIFECYCLE_EVENTS:
+            if item.event in _WEBCHAT_HISTORY_EVENTS:
                 job.webchat_events.append(item)
                 if len(job.webchat_events) > _CHAT_JOB_EVENT_BUFFER_LIMIT:
                     job.webchat_events = job.webchat_events[
@@ -495,7 +496,7 @@ def _webchat_history_events(webchat: Any) -> list[dict[str, Any]]:
         if not isinstance(item, dict):
             continue
         event = str(item.get("event", "") or "").strip()
-        if event not in _WEBCHAT_LIFECYCLE_EVENTS:
+        if event not in _WEBCHAT_HISTORY_EVENTS:
             continue
         payload = item.get("payload")
         if not isinstance(payload, dict):

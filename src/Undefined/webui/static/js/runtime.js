@@ -539,6 +539,37 @@
         return item;
     }
 
+    function ensureTimelineNodeContainer(item) {
+        if (!item) return null;
+        let container = item.querySelector(".runtime-chat-timeline");
+        if (!container) {
+            container = document.createElement("div");
+            container.className = "runtime-chat-timeline";
+            const contentEl = item.querySelector(".runtime-chat-content");
+            if (contentEl) contentEl.remove();
+            item.appendChild(container);
+        }
+        return container;
+    }
+
+    function appendTimelineMessage(item, content, role = "bot") {
+        const text = String(content || "").trim();
+        if (!item || !text) return null;
+        const timeline = ensureTimelineNodeContainer(item);
+        if (!timeline) return null;
+        const node = document.createElement("div");
+        const isBot = role !== "user";
+        node.className = isBot
+            ? "runtime-chat-content markdown"
+            : "runtime-chat-content";
+        node.innerHTML = renderChatContent(text, isBot);
+        timeline.appendChild(node);
+        item.dataset.rawContent = [item.dataset.rawContent || "", text]
+            .filter(Boolean)
+            .join("\n\n");
+        return node;
+    }
+
     function finishStreamingMessage() {
         if (!runtimeState.streamingMessageId) return;
         const item = document.querySelector(
@@ -661,31 +692,33 @@
         return block;
     }
 
-    function renderToolBlocks(blocks) {
-        return Array.from(blocks.values()).map(renderToolBlock).join("");
+    function timelineToolKey(payload, blocks) {
+        return toolBlockKey(payload, blocks);
     }
 
-    function attachToolBlocks(item, blocks) {
-        if (!item || !blocks || blocks.size === 0) return;
-        let toolsEl = item.querySelector(".runtime-chat-tools");
-        if (!toolsEl) {
-            toolsEl = document.createElement("div");
-            toolsEl.className = "runtime-chat-tools";
-            const contentEl = item.querySelector(".runtime-chat-content");
-            if (contentEl) {
-                item.insertBefore(toolsEl, contentEl);
-            } else {
-                item.appendChild(toolsEl);
-            }
+    function upsertTimelineToolBlock(item, blocks, payload, status) {
+        if (!item) return null;
+        const key = timelineToolKey(payload, blocks);
+        const block = reduceToolBlock(blocks, payload, status);
+        const timeline = ensureTimelineNodeContainer(item);
+        if (!timeline) return null;
+        let node = timeline.querySelector(
+            `[data-tool-key="${CSS.escape(key)}"]`,
+        );
+        if (!node) {
+            node = document.createElement("div");
+            node.className = "runtime-chat-tools";
+            node.dataset.toolKey = key;
+            timeline.appendChild(node);
         }
-        toolsEl.innerHTML = renderToolBlocks(blocks);
+        node.innerHTML = renderToolBlock(block);
+        return node;
     }
 
     function upsertToolBlock(payload, status, jobId = "") {
-        reduceToolBlock(runtimeState.toolBlocks, payload, status);
         const item = ensureStreamingMessage(jobId);
         if (!item) return;
-        attachToolBlocks(item, runtimeState.toolBlocks);
+        upsertTimelineToolBlock(item, runtimeState.toolBlocks, payload, status);
         scrollChatToBottom();
     }
 
@@ -699,31 +732,54 @@
                 event === "tool_start" ||
                 event === "tool_end" ||
                 event === "agent_start" ||
-                event === "agent_end"
+                event === "agent_end" ||
+                event === "message"
             );
         });
     }
 
-    function renderHistoryToolBlocks(item) {
+    function renderHistoryTimeline(item, message) {
         const events = historyWebchatEvents(item);
-        if (!events.length) return null;
+        if (!message || !events.length) return false;
         const blocks = new Map();
         events.forEach((entry) => {
-            reduceToolBlock(blocks, entry.payload || {}, entry.event);
+            if (entry.event === "message") {
+                appendTimelineMessage(
+                    message,
+                    entry.payload &&
+                        (entry.payload.content ?? entry.payload.message),
+                    "bot",
+                );
+                return;
+            }
+            upsertTimelineToolBlock(
+                message,
+                blocks,
+                entry.payload || {},
+                entry.event,
+            );
         });
-        return blocks;
+        return true;
     }
 
     function appendHistoryChatItem(item, options = {}) {
         const role = item && item.role === "bot" ? "bot" : "user";
         const content = String((item && item.content) || "").trim();
-        const blocks = role === "bot" ? renderHistoryToolBlocks(item) : null;
-        if (!content && (!blocks || blocks.size === 0)) return null;
+        const hasTimeline =
+            role === "bot" && historyWebchatEvents(item).length > 0;
+        if (!content && !hasTimeline) return null;
         const message = appendChatMessage(role, content, options);
         if (!message) return null;
-        if (!content) message.classList.add("tool-only");
-        if (blocks && blocks.size > 0) {
-            attachToolBlocks(message, blocks);
+        if (hasTimeline) {
+            const contentEl = message.querySelector(".runtime-chat-content");
+            if (contentEl) contentEl.innerHTML = "";
+            renderHistoryTimeline(item, message);
+            if (!message.dataset.rawContent && content) {
+                appendTimelineMessage(message, content, role);
+            }
+        }
+        if (!content && !message.dataset.rawContent) {
+            message.classList.add("tool-only");
         }
         return message;
     }
@@ -1590,8 +1646,7 @@
             if (!content) return;
             const item = ensureStreamingMessage(eventJobId);
             if (!item) return;
-            item.dataset.rawContent = content;
-            updateChatMessage(item, content, "bot");
+            appendTimelineMessage(item, content, "bot");
             finishStreamingMessage();
             scrollChatToBottom();
             return;
@@ -1610,8 +1665,7 @@
                 const item = ensureStreamingMessage(eventJobId);
                 if (item) {
                     const content = String(payload.reply);
-                    item.dataset.rawContent = content;
-                    updateChatMessage(item, content, "bot");
+                    appendTimelineMessage(item, content, "bot");
                     scrollChatToBottom();
                 }
             }

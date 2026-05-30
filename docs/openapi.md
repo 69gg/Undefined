@@ -279,7 +279,15 @@ curl http://127.0.0.1:8788/openapi.json
         }
       },
       {
-        "seq": 3,
+        "seq": 4,
+        "event": "message",
+        "payload": {
+          "job_id": "9c1...",
+          "content": "中间回复文本"
+        }
+      },
+      {
+        "seq": 5,
         "event": "tool_end",
         "payload": {
           "job_id": "9c1...",
@@ -295,7 +303,7 @@ curl http://127.0.0.1:8788/openapi.json
 }
 ```
 
-`webchat.events` 只用于 WebUI 恢复工具/Agent 展示块，不作为 AI 后续对话上下文注入。若一次 job 没有正文但有工具事件，历史 API 仍会返回该 Bot 项，`content` 为空字符串。
+`webchat.events` 只用于 WebUI 按事件时序恢复同一 AI 气泡里的工具 / Agent 展示块和正文节点，不作为 AI 后续对话上下文注入。若一次 job 没有正文但有工具事件，历史 API 仍会返回该 Bot 项，`content` 为空字符串。
 - `DELETE /api/v1/chat/history`
 - 仅清空 `system#42` 聊天历史 JSON 和内存历史，不删除长期记忆、认知记忆或 profile。
 - 如果存在运行中或正在收尾落盘的 WebChat job，返回 `409`，避免旧任务继续写回已清空的历史。

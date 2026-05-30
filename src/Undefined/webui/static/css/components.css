@@ -641,6 +641,10 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+.runtime-chat-timeline {
+  display: grid;
+  gap: 10px;
+}
 .runtime-chat-item.tool-only .runtime-chat-content {
   display: none;
 }
@@ -813,10 +817,6 @@
 .runtime-chat-tools {
   display: grid;
   gap: 8px;
-  margin-bottom: 10px;
-}
-.runtime-chat-item.tool-only .runtime-chat-tools {
-  margin-bottom: 0;
 }
 .runtime-tool-block {
   border: 1px solid var(--border-color);

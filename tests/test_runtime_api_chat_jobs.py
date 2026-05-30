@@ -324,6 +324,8 @@ async def test_chat_job_persists_webchat_lifecycle_history(
     assert [event["event"] for event in webchat["events"]] == [
         "tool_start",
         "tool_end",
+        "message",
     ]
     assert webchat["events"][0]["payload"]["arguments_preview"] == ""
     assert webchat["events"][1]["payload"]["result_preview"] == ""
+    assert webchat["events"][2]["payload"]["content"] == "rendered final"
