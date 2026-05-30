@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from Undefined.cognitive.chroma_scheduler import CHROMA_PRIORITY_MAINTENANCE
 from Undefined.cognitive.historian import HistorianWorker
 
 
@@ -117,6 +118,7 @@ async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
     class _FakeVectorStore:
         def __init__(self) -> None:
             self.where_calls: list[dict[str, Any]] = []
+            self.priority_calls: list[str] = []
             self.embed_query_calls = 0
 
         async def embed_query(self, _query: str) -> list[float]:
@@ -129,6 +131,7 @@ async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
             where = kwargs.get("where")
             if isinstance(where, dict):
                 self.where_calls.append(where)
+            self.priority_calls.append(str(kwargs.get("priority", "")))
             return []
 
     class _FakeAIClient:
@@ -182,6 +185,10 @@ async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
     assert vector_store.embed_query_calls == 1
     assert {"sender_id": "123456"} in vector_store.where_calls
     assert {"user_id": "123456"} in vector_store.where_calls
+    assert vector_store.priority_calls == [
+        CHROMA_PRIORITY_MAINTENANCE,
+        CHROMA_PRIORITY_MAINTENANCE,
+    ]
 
 
 @pytest.mark.asyncio

@@ -11,12 +11,19 @@ from pathlib import Path
 from typing import Any
 
 import chromadb
-
-from Undefined.utils.coerce import safe_float
 from chromadb.errors import InternalError as ChromaInternalError
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
+
+from Undefined.cognitive.chroma_scheduler import (
+    CHROMA_PRIORITY_BACKGROUND,
+    CHROMA_PRIORITY_FOREGROUND,
+    ChromaOperationReceipt,
+    ChromaOperationScheduler,
+    normalize_chroma_priority,
+)
+from Undefined.utils.coerce import safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +180,13 @@ def _mmr_select(
 
 
 class CognitiveVectorStore:
-    def __init__(self, path: str | Path, embedder: Any) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        embedder: Any,
+        *,
+        scheduler_foreground_burst: int = 8,
+    ) -> None:
         client = chromadb.PersistentClient(path=str(path))
         self._client = client
         self._events = client.get_or_create_collection(
@@ -183,19 +196,21 @@ class CognitiveVectorStore:
             "cognitive_profiles", metadata={"hnsw:space": "cosine"}
         )
         self._embedder = embedder
-        self._events_lock = asyncio.Lock()
-        self._profiles_lock = asyncio.Lock()
+        self._chroma_scheduler = ChromaOperationScheduler(
+            foreground_burst=scheduler_foreground_burst
+        )
         self._query_embedding_cache: OrderedDict[
             tuple[str, str, str, str], tuple[float, list[float]]
         ] = OrderedDict()
         self._query_embedding_cache_lock = asyncio.Lock()
         logger.info(
-            "[认知向量库] 初始化完成: path=%s events=%s profiles=%s query_cache_ttl=%ss query_cache_size=%s",
+            "[认知向量库] 初始化完成: path=%s events=%s profiles=%s query_cache_ttl=%ss query_cache_size=%s scheduler_foreground_burst=%s",
             str(path),
             getattr(self._events, "name", "cognitive_events"),
             getattr(self._profiles, "name", "cognitive_profiles"),
             _QUERY_EMBEDDING_CACHE_TTL_SECONDS,
             _QUERY_EMBEDDING_CACHE_MAX_SIZE,
+            self._chroma_scheduler.foreground_burst,
         )
 
     async def _embed(self, text: str) -> list[float]:
@@ -290,33 +305,62 @@ class CognitiveVectorStore:
         text = str(exc).lower()
         return "error finding id" in text or "error executing plan" in text
 
-    def _collection_lock(self, col: Any) -> asyncio.Lock:
-        if col is self._events:
-            return self._events_lock
-        return self._profiles_lock
+    async def stop(self) -> None:
+        await self._chroma_scheduler.stop()
+
+    async def _run_chroma_operation(
+        self,
+        *,
+        priority: str,
+        operation: str,
+        collection: str,
+        callback: Any,
+    ) -> tuple[Any, ChromaOperationReceipt]:
+        return await self._chroma_scheduler.run(
+            priority=priority,
+            operation=operation,
+            collection=collection,
+            callback=callback,
+        )
 
     async def upsert_event(
-        self, event_id: str, document: str, metadata: dict[str, Any]
+        self,
+        event_id: str,
+        document: str,
+        metadata: dict[str, Any],
+        *,
+        priority: str = CHROMA_PRIORITY_BACKGROUND,
     ) -> None:
         safe_metadata = _sanitize_metadata(metadata)
+        safe_priority = normalize_chroma_priority(priority, CHROMA_PRIORITY_BACKGROUND)
         logger.info(
-            "[认知向量库] 写入事件: event_id=%s doc_len=%s metadata_keys=%s",
+            "[认知向量库] 写入事件: event_id=%s doc_len=%s metadata_keys=%s priority=%s",
             event_id,
             len(document or ""),
             sorted(safe_metadata.keys()),
+            safe_priority,
         )
         emb = await self._embed(document)
         col = self._events
-        async with self._events_lock:
-            await asyncio.to_thread(
-                lambda: col.upsert(
-                    ids=[event_id],
-                    documents=[document],
-                    embeddings=[emb],  # type: ignore[arg-type]
-                    metadatas=[safe_metadata],
-                )
-            )
-        logger.info("[认知向量库] 事件写入完成: event_id=%s", event_id)
+        col_name = getattr(col, "name", "cognitive_events")
+        _, receipt = await self._run_chroma_operation(
+            priority=safe_priority,
+            operation="upsert_event",
+            collection=col_name,
+            callback=lambda: col.upsert(
+                ids=[event_id],
+                documents=[document],
+                embeddings=[emb],  # type: ignore[arg-type]
+                metadatas=[safe_metadata],
+            ),
+        )
+        logger.info(
+            "[认知向量库] 事件写入完成: event_id=%s priority=%s chroma_wait=%.3fs chroma_exec=%.3fs",
+            event_id,
+            safe_priority,
+            receipt.queue_wait_seconds,
+            receipt.exec_seconds,
+        )
 
     async def query_events(
         self,
@@ -331,9 +375,11 @@ class CognitiveVectorStore:
         time_decay_min_similarity: float = 0.35,
         apply_mmr: bool = False,
         query_embedding: list[float] | None = None,
+        priority: str = CHROMA_PRIORITY_FOREGROUND,
     ) -> list[dict[str, Any]]:
+        safe_priority = normalize_chroma_priority(priority, CHROMA_PRIORITY_FOREGROUND)
         logger.info(
-            "[认知向量库] 查询事件: query_len=%s top_k=%s where=%s reranker=%s multiplier=%s decay_enabled=%s half_life_days=%s boost=%s min_sim=%s mmr=%s",
+            "[认知向量库] 查询事件: query_len=%s top_k=%s where=%s reranker=%s multiplier=%s decay_enabled=%s half_life_days=%s boost=%s min_sim=%s mmr=%s priority=%s",
             len(query_text or ""),
             top_k,
             where or {},
@@ -344,6 +390,7 @@ class CognitiveVectorStore:
             time_decay_boost,
             time_decay_min_similarity,
             apply_mmr,
+            safe_priority,
         )
         return await self._query(
             self._events,
@@ -358,30 +405,47 @@ class CognitiveVectorStore:
             time_decay_min_similarity=time_decay_min_similarity,
             apply_mmr=apply_mmr,
             query_embedding=query_embedding,
+            priority=safe_priority,
         )
 
     async def upsert_profile(
-        self, profile_id: str, document: str, metadata: dict[str, Any]
+        self,
+        profile_id: str,
+        document: str,
+        metadata: dict[str, Any],
+        *,
+        priority: str = CHROMA_PRIORITY_BACKGROUND,
     ) -> None:
         safe_metadata = _sanitize_metadata(metadata)
+        safe_priority = normalize_chroma_priority(priority, CHROMA_PRIORITY_BACKGROUND)
         logger.info(
-            "[认知向量库] 写入侧写向量: profile_id=%s doc_len=%s metadata_keys=%s",
+            "[认知向量库] 写入侧写向量: profile_id=%s doc_len=%s metadata_keys=%s priority=%s",
             profile_id,
             len(document or ""),
             sorted(safe_metadata.keys()),
+            safe_priority,
         )
         emb = await self._embed(document)
         col = self._profiles
-        async with self._profiles_lock:
-            await asyncio.to_thread(
-                lambda: col.upsert(
-                    ids=[profile_id],
-                    documents=[document],
-                    embeddings=[emb],  # type: ignore[arg-type]
-                    metadatas=[safe_metadata],
-                )
-            )
-        logger.info("[认知向量库] 侧写向量写入完成: profile_id=%s", profile_id)
+        col_name = getattr(col, "name", "cognitive_profiles")
+        _, receipt = await self._run_chroma_operation(
+            priority=safe_priority,
+            operation="upsert_profile",
+            collection=col_name,
+            callback=lambda: col.upsert(
+                ids=[profile_id],
+                documents=[document],
+                embeddings=[emb],  # type: ignore[arg-type]
+                metadatas=[safe_metadata],
+            ),
+        )
+        logger.info(
+            "[认知向量库] 侧写向量写入完成: profile_id=%s priority=%s chroma_wait=%.3fs chroma_exec=%.3fs",
+            profile_id,
+            safe_priority,
+            receipt.queue_wait_seconds,
+            receipt.exec_seconds,
+        )
 
     async def query_profiles(
         self,
@@ -391,14 +455,17 @@ class CognitiveVectorStore:
         reranker: Any = None,
         candidate_multiplier: int = 3,
         query_embedding: list[float] | None = None,
+        priority: str = CHROMA_PRIORITY_FOREGROUND,
     ) -> list[dict[str, Any]]:
+        safe_priority = normalize_chroma_priority(priority, CHROMA_PRIORITY_FOREGROUND)
         logger.info(
-            "[认知向量库] 查询侧写: query_len=%s top_k=%s where=%s reranker=%s multiplier=%s",
+            "[认知向量库] 查询侧写: query_len=%s top_k=%s where=%s reranker=%s multiplier=%s priority=%s",
             len(query_text or ""),
             top_k,
             where or {},
             bool(reranker),
             candidate_multiplier,
+            safe_priority,
         )
         return await self._query(
             self._profiles,
@@ -408,6 +475,7 @@ class CognitiveVectorStore:
             reranker,
             candidate_multiplier,
             query_embedding=query_embedding,
+            priority=safe_priority,
         )
 
     async def _query(
@@ -425,18 +493,21 @@ class CognitiveVectorStore:
         time_decay_min_similarity: float = 0.35,
         apply_mmr: bool = False,
         query_embedding: list[float] | None = None,
+        priority: str = CHROMA_PRIORITY_FOREGROUND,
     ) -> list[dict[str, Any]]:
         col_name = getattr(col, "name", "unknown")
+        safe_priority = normalize_chroma_priority(priority, CHROMA_PRIORITY_FOREGROUND)
         safe_top_k = _safe_positive_int(top_k, default=1, maximum=500)
         safe_multiplier = _safe_positive_int(candidate_multiplier, default=1)
         total_started = time.perf_counter()
         logger.debug(
-            "[认知向量库] 开始查询 collection=%s top_k=%s where=%s decay=%s mmr=%s",
+            "[认知向量库] 开始查询 collection=%s top_k=%s where=%s decay=%s mmr=%s priority=%s",
             col_name,
             safe_top_k,
             where or {},
             apply_time_decay,
             apply_mmr,
+            safe_priority,
         )
         embed_started = time.perf_counter()
         emb, embedding_source = await self._resolve_query_embedding(
@@ -469,14 +540,21 @@ class CognitiveVectorStore:
         def _q() -> Any:
             return col.query(**kwargs)
 
-        query_lock = self._collection_lock(col)
-        chroma_started = time.perf_counter()
+        chroma_wait_duration = 0.0
+        chroma_exec_duration = 0.0
         last_exc: Exception | None = None
         raw: dict[str, Any] | None = None
         for attempt in range(1, _CHROMA_TRANSIENT_QUERY_RETRIES + 1):
             try:
-                async with query_lock:
-                    raw = await asyncio.to_thread(_q)
+                raw_result, receipt = await self._run_chroma_operation(
+                    priority=safe_priority,
+                    operation="query",
+                    collection=col_name,
+                    callback=_q,
+                )
+                raw = raw_result
+                chroma_wait_duration += receipt.queue_wait_seconds
+                chroma_exec_duration += receipt.exec_seconds
                 last_exc = None
                 break
             except Exception as exc:
@@ -499,7 +577,6 @@ class CognitiveVectorStore:
             if last_exc is not None:
                 raise last_exc
             raise RuntimeError(f"query returned no result for collection={col_name}")
-        chroma_duration = time.perf_counter() - chroma_started
         docs: list[str] = (raw.get("documents") or [[]])[0]
         metas: list[dict[str, Any]] = (raw.get("metadatas") or [[]])[0]
         dists: list[float] = (raw.get("distances") or [[]])[0]
@@ -606,14 +683,16 @@ class CognitiveVectorStore:
             len(final),
         )
         logger.info(
-            "[认知向量库] 查询阶段耗时: collection=%s embed=%.3fs chroma_query=%.3fs rerank=%.3fs post_rank=%.3fs total=%.3fs embedding_source=%s",
+            "[认知向量库] 查询阶段耗时: collection=%s embed=%.3fs chroma_wait=%.3fs chroma_exec=%.3fs rerank=%.3fs post_rank=%.3fs total=%.3fs embedding_source=%s priority=%s",
             col_name,
             embed_duration,
-            chroma_duration,
+            chroma_wait_duration,
+            chroma_exec_duration,
             rerank_duration,
             post_rank_duration,
             total_duration,
             embedding_source,
+            safe_priority,
         )
         return final
 

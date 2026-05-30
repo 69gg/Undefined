@@ -880,6 +880,7 @@ Prompt caching 补充：
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `path` | `data/cognitive/chromadb` | Chroma 存储目录 |
+| `scheduler_foreground_burst` | `8` | Chroma 前台连续处理上限；达到后若有维护/后台任务，会让出一次执行机会。需重启 |
 
 ### 4.24.3 `[cognitive.query]`
 

@@ -175,6 +175,19 @@ MMR_score = λ × relevance(doc, query) − (1 − λ) × max_similarity(doc, se
 
 史官合并侧写时，会在 merge LLM 调用前用当前 observations 作为 query 从 ChromaDB 检索该实体的 top-8 历史事件，注入 merge prompt。这让史官拥有更丰富的上下文来判断哪些特征应保留，避免因本轮未提及而误删长期稳定特征。
 
+### ChromaDB 前后台调度
+
+`cognitive_events` / `cognitive_profiles` 的 ChromaDB `query/upsert` 由进程内单 worker 串行执行，避免多群聊、WebChat 与史官后台同时访问 Chroma collection 时互相踩踏。调度只覆盖真正的 Chroma 读写；embedding 与 rerank 仍走各自模型队列，避免后台向量化长尾占住 Chroma worker。
+
+优先级：
+
+- `foreground_critical`：显式用户工具/API 检索（如 `cognitive.search_events` / `cognitive.search_profiles`）。
+- `foreground`：自动上下文注入、用户触发的侧写展示名同步。
+- `maintenance`：史官合并侧写前的历史查询。
+- `background`：史官事件/侧写向量写入。
+
+前台请求优先；连续处理 `scheduler_foreground_burst` 个前台操作后，如果维护/后台队列中有等待任务，会让出一次执行机会，防止史官长期饥饿。日志中的 `chroma_wait` 表示在调度器里等待的时间，`chroma_exec` 表示真正执行 Chroma 调用的时间。
+
 ### 自动注入场景的 Query 构造
 
 每轮对话自动注入认知记忆（`PromptBuilder -> cognitive.build_context`）时，检索 `query` 的构造规则如下：
@@ -266,6 +279,7 @@ data/cognitive/
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `path` | str | `data/cognitive/chromadb` | ChromaDB 存储路径 |
+| `scheduler_foreground_burst` | int | `8` | Chroma 前台连续处理上限；达到后若有维护/后台任务，会让出一次执行机会（需重启） |
 
 ### [cognitive.query]
 
@@ -340,7 +354,7 @@ data/cognitive/
 ### 热更新说明
 
 - **支持热更新**：`cognitive.query.*`、`cognitive.historian.poll_interval_seconds`、`cognitive.historian.rewrite_max_retry`、`cognitive.historian.recent_messages_inject_k`、`cognitive.historian.recent_message_line_max_len`、`cognitive.historian.source_message_max_len`
-- **需重启**：`cognitive.enabled`、`models.embedding.*`、`models.rerank.*`
+- **需重启**：`cognitive.enabled`、`cognitive.vector_store.*`、`models.embedding.*`、`models.rerank.*`
 
 说明：
 - `knowledge.enable_rerank` 仅控制知识库检索重排。

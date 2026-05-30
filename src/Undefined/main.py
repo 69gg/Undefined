@@ -313,6 +313,7 @@ async def main() -> None:
             vector_store = CognitiveVectorStore(
                 str(_cog_chroma),
                 retrieval_runtime,
+                scheduler_foreground_burst=config.cognitive.vector_store_scheduler_foreground_burst,
             )
             job_queue = JobQueue(str(_cog_queues))
             profile_storage = ProfileStorage(

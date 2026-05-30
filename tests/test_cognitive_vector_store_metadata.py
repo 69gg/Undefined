@@ -8,6 +8,7 @@ from typing import Any, cast
 import pytest
 from chromadb.errors import InternalError as ChromaInternalError
 
+from Undefined.cognitive.chroma_scheduler import ChromaOperationScheduler
 from Undefined.cognitive.vector_store import _sanitize_metadata
 from Undefined.cognitive.vector_store import CognitiveVectorStore
 
@@ -89,8 +90,7 @@ async def test_query_retries_transient_chroma_internal_error() -> None:
             }
 
     store = CognitiveVectorStore.__new__(CognitiveVectorStore)
-    store._events_lock = asyncio.Lock()
-    store._profiles_lock = asyncio.Lock()
+    store._chroma_scheduler = ChromaOperationScheduler()
     fake_collection = _FakeCollection()
     store._events = cast(Any, fake_collection)
     store._profiles = cast(Any, object())
