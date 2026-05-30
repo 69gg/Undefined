@@ -346,6 +346,12 @@ def test_create_app_registers_management_routes() -> None:
     assert ("GET", "/api/v1/management/runtime/meta") in routes
     assert ("POST", "/api/v1/management/config/validate") in routes
     assert ("POST", "/api/v1/management/bot/start") in routes
+    assert ("POST", "/api/v1/management/runtime/chat/jobs") in routes
+    assert ("GET", "/api/v1/management/runtime/chat/jobs/active") in routes
+    assert ("GET", "/api/v1/management/runtime/chat/jobs/{job_id}") in routes
+    assert ("GET", "/api/v1/management/runtime/chat/jobs/{job_id}/events") in routes
+    assert ("POST", "/api/v1/management/runtime/chat/jobs/{job_id}/cancel") in routes
+    assert ("DELETE", "/api/v1/management/runtime/chat/history") in routes
 
 
 async def test_index_handler_applies_launcher_mode_and_initial_view() -> None:

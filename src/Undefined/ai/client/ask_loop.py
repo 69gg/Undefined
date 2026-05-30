@@ -77,6 +77,9 @@ class ClientAskLoopMixin(ClientQueueMixin):
             pre_context["request_id"] = ctx.request_id
         if extra_context:
             pre_context.update(extra_context)
+        stream_event_callback = pre_context.get("stream_event_callback")
+        if not callable(stream_event_callback):
+            stream_event_callback = None
 
         # ===== 阶段二：构建 LLM messages 与 OpenAI tools schema =====
         messages = await self._prompt_builder.build_messages(
@@ -205,6 +208,10 @@ class ClientAskLoopMixin(ClientQueueMixin):
         missing_tool_call_count = 0
         last_missing_tool_call_content = ""
         runtime_config = self._get_runtime_config()
+        agent_tool_names = {
+            str(schema.get("function", {}).get("name") or "")
+            for schema in self.agent_registry.get_agents_schema()
+        }
         max_pre_tool_retries = max(
             0,
             int(getattr(runtime_config, "ai_request_max_retries", 0) or 0),
@@ -223,6 +230,13 @@ class ClientAskLoopMixin(ClientQueueMixin):
 
             tool_execution_started = False
             try:
+                pending_stream_events: list[tuple[str, dict[str, Any]]] = []
+
+                async def _collect_stream_event(
+                    event: str, payload: dict[str, Any]
+                ) -> None:
+                    pending_stream_events.append((event, payload))
+
                 result = await self.submit_queued_llm_call(
                     model_config=effective_chat_config,
                     messages=messages,
@@ -232,6 +246,11 @@ class ClientAskLoopMixin(ClientQueueMixin):
                     tool_choice="auto",
                     transport_state=transport_state,
                     queue_lane=queue_lane,
+                    stream_event_callback=(
+                        _collect_stream_event
+                        if stream_event_callback is not None
+                        else None
+                    ),
                 )
 
                 tool_name_map = (
@@ -310,6 +329,9 @@ class ClientAskLoopMixin(ClientQueueMixin):
 
                 # 无 tool_calls 与有 tool_calls 走不同分支
                 if not tool_calls:
+                    if stream_event_callback is not None:
+                        for event, payload in pending_stream_events:
+                            await stream_event_callback(event, payload)
                     if conversation_ended:
                         logger.info(
                             "[AI回复] 会话结束，返回最终内容: length=%s",
@@ -371,6 +393,10 @@ class ClientAskLoopMixin(ClientQueueMixin):
                     "content": content,
                     "tool_calls": tool_calls,
                 }
+                if stream_event_callback is not None:
+                    for event, payload in pending_stream_events:
+                        if event != "token_delta":
+                            await stream_event_callback(event, payload)
                 missing_tool_call_count = 0
                 last_missing_tool_call_content = ""
                 phase = message.get("phase")
@@ -446,6 +472,17 @@ class ClientAskLoopMixin(ClientQueueMixin):
 
                     if not isinstance(function_args, dict):
                         function_args = {}
+                    if stream_event_callback is not None:
+                        await stream_event_callback(
+                            "tool_start",
+                            {
+                                "tool_call_id": call_id,
+                                "name": internal_function_name,
+                                "api_name": api_function_name,
+                                "arguments": function_args,
+                                "is_agent": internal_function_name in agent_tool_names,
+                            },
+                        )
 
                     # 检测 end 工具，暂存后统一处理
                     if internal_function_name == "end":
@@ -457,6 +494,18 @@ class ClientAskLoopMixin(ClientQueueMixin):
                             )
                         end_tool_call = tool_call
                         end_tool_args = function_args
+                        if stream_event_callback is not None:
+                            await stream_event_callback(
+                                "tool_end",
+                                {
+                                    "tool_call_id": call_id,
+                                    "name": internal_function_name,
+                                    "api_name": api_function_name,
+                                    "ok": True,
+                                    "result": "会话结束请求已接收",
+                                    "is_agent": False,
+                                },
+                            )
                         continue
 
                     tool_call_ids.append(call_id)
@@ -507,6 +556,18 @@ class ClientAskLoopMixin(ClientQueueMixin):
                                     f"[工具响应体] {internal_fname} (ID={call_id})",
                                     content_str,
                                 )
+                        if stream_event_callback is not None:
+                            await stream_event_callback(
+                                "tool_end",
+                                {
+                                    "tool_call_id": call_id,
+                                    "name": internal_fname,
+                                    "api_name": api_fname,
+                                    "ok": not isinstance(tool_result, Exception),
+                                    "result": content_str,
+                                    "is_agent": internal_fname in agent_tool_names,
+                                },
+                            )
 
                         messages.append(
                             {

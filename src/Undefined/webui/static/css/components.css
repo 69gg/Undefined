@@ -587,17 +587,45 @@
   display: grid;
   gap: 10px;
 }
+.chat-workspace-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+.chat-workspace-head .muted-sm {
+  margin-bottom: 0;
+}
+.runtime-chat-load-more {
+  min-height: 20px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  text-align: center;
+}
 .runtime-chat-item {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
-  padding: 10px 12px;
+  padding: 12px 14px;
   background: var(--bg-card);
+  animation: runtime-chat-enter 0.18s ease-out;
 }
 .runtime-chat-item.user {
   border-color: rgba(217, 119, 87, 0.35);
 }
 .runtime-chat-item.bot {
   border-color: var(--border-color);
+}
+.runtime-chat-item.streaming .runtime-chat-content::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 1.1em;
+  margin-left: 4px;
+  vertical-align: -0.15em;
+  background: var(--accent);
+  animation: runtime-chat-cursor 0.9s steps(2, start) infinite;
 }
 .runtime-chat-role {
   font-size: 11px;
@@ -607,7 +635,7 @@
   margin-bottom: 6px;
 }
 .runtime-chat-content {
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
@@ -777,6 +805,83 @@
   min-height: 88px;
   resize: vertical;
   line-height: 1.5;
+}
+.runtime-chat-tools {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+.runtime-tool-block {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-app);
+  overflow: hidden;
+}
+.runtime-tool-block summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.runtime-tool-block summary code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+.runtime-tool-block summary em {
+  font-style: normal;
+  color: var(--text-tertiary);
+}
+.runtime-tool-block.done summary em {
+  color: var(--success);
+}
+.runtime-tool-block.error summary em {
+  color: var(--danger);
+}
+.runtime-tool-block pre,
+.runtime-tool-result {
+  margin: 0;
+  padding: 9px 10px;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+@keyframes runtime-chat-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes runtime-chat-cursor {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  46%,
+  100% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .runtime-chat-item,
+  .runtime-chat-item.streaming .runtime-chat-content::after {
+    animation: none;
+  }
 }
 .sr-only {
   position: absolute;

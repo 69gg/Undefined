@@ -173,6 +173,7 @@ async def _proxy_runtime_stream(
     method: str,
     path: str,
     payload: dict[str, Any] | None = None,
+    params: Mapping[str, str] | None = None,
     timeout_seconds: float | None = None,
 ) -> web.StreamResponse:
     cfg = get_config(strict=False)
@@ -193,6 +194,7 @@ async def _proxy_runtime_stream(
             async with session.request(
                 method=method,
                 url=url,
+                params=params,
                 json=payload,
                 headers=headers,
             ) as upstream:
@@ -422,6 +424,82 @@ async def runtime_chat_history_handler(request: web.Request) -> Response:
         method="GET",
         path="/api/v1/chat/history",
         params=request.query,
+    )
+
+
+@routes.delete("/api/v1/management/runtime/chat/history")
+@routes.delete("/api/runtime/chat/history")
+async def runtime_chat_history_clear_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    return await _proxy_runtime(
+        method="DELETE",
+        path="/api/v1/chat/history",
+    )
+
+
+@routes.post("/api/v1/management/runtime/chat/jobs")
+@routes.post("/api/runtime/chat/jobs")
+async def runtime_chat_job_create_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+    message = str(body.get("message", "") or "").strip()
+    if not message:
+        return web.json_response({"error": "message is required"}, status=400)
+    return await _proxy_runtime(
+        method="POST",
+        path="/api/v1/chat/jobs",
+        payload={"message": message},
+        timeout_seconds=20.0,
+    )
+
+
+@routes.get("/api/v1/management/runtime/chat/jobs/active")
+@routes.get("/api/runtime/chat/jobs/active")
+async def runtime_chat_job_active_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    return await _proxy_runtime(method="GET", path="/api/v1/chat/jobs/active")
+
+
+@routes.get("/api/v1/management/runtime/chat/jobs/{job_id}")
+@routes.get("/api/runtime/chat/jobs/{job_id}")
+async def runtime_chat_job_detail_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    job_id = _url_quote(str(request.match_info.get("job_id", "")).strip(), safe="")
+    return await _proxy_runtime(method="GET", path=f"/api/v1/chat/jobs/{job_id}")
+
+
+@routes.get("/api/v1/management/runtime/chat/jobs/{job_id}/events")
+@routes.get("/api/runtime/chat/jobs/{job_id}/events")
+async def runtime_chat_job_events_handler(request: web.Request) -> web.StreamResponse:
+    if not check_auth(request):
+        return _unauthorized()
+    job_id = _url_quote(str(request.match_info.get("job_id", "")).strip(), safe="")
+    return await _proxy_runtime_stream(
+        request,
+        method="GET",
+        path=f"/api/v1/chat/jobs/{job_id}/events",
+        params=request.query,
+        timeout_seconds=_chat_proxy_timeout_seconds(),
+    )
+
+
+@routes.post("/api/v1/management/runtime/chat/jobs/{job_id}/cancel")
+@routes.post("/api/runtime/chat/jobs/{job_id}/cancel")
+async def runtime_chat_job_cancel_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    job_id = _url_quote(str(request.match_info.get("job_id", "")).strip(), safe="")
+    return await _proxy_runtime(
+        method="POST",
+        path=f"/api/v1/chat/jobs/{job_id}/cancel",
+        timeout_seconds=20.0,
     )
 
 

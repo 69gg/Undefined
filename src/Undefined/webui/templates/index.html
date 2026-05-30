@@ -763,9 +763,15 @@
                         </div>
                     </div>
 
-                    <div class="card runtime-card chat-runtime-card">
-                        <div class="card-title" data-i18n="runtime.chat_title">AI Chat（虚拟私聊 system#42）</div>
-                        <p class="muted-sm" data-i18n="runtime.chat_hint">该会话由 WebUI 发起，权限为 superadmin；私聊里可直接使用 /命令。</p>
+                    <div class="runtime-card chat-runtime-card">
+                        <div class="chat-workspace-head">
+                            <div>
+                                <div class="card-title" data-i18n="runtime.chat_title">AI Chat（虚拟私聊 system#42）</div>
+                                <p class="muted-sm" data-i18n="runtime.chat_hint">该会话由 WebUI 发起，权限为 superadmin；私聊里可直接使用 /命令。</p>
+                            </div>
+                            <button id="btnRuntimeChatClear" class="btn ghost" type="button" data-i18n="runtime.chat_clear">清空历史</button>
+                        </div>
+                        <div id="runtimeChatLoadMore" class="runtime-chat-load-more" aria-live="polite"></div>
                         <div id="runtimeChatLog" class="runtime-chat-log"></div>
                         <div class="runtime-chat-input-row">
                             <textarea id="runtimeChatInput" class="form-control runtime-chat-input"

@@ -43,6 +43,7 @@ class RuntimeAPIServer:
         self._sites: list[web.TCPSite] = []
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._naga_state = NagaState()
+        self._chat_job_manager = chat.ChatJobManager(context)
 
     async def start(self) -> None:
         from Undefined.config.models import resolve_bind_hosts
@@ -134,6 +135,18 @@ class RuntimeAPIServer:
                 ),
                 web.post("/api/v1/chat", self._chat_handler),
                 web.get("/api/v1/chat/history", self._chat_history_handler),
+                web.delete("/api/v1/chat/history", self._chat_history_clear_handler),
+                web.post("/api/v1/chat/jobs", self._chat_job_create_handler),
+                web.get("/api/v1/chat/jobs/active", self._chat_job_active_handler),
+                web.get("/api/v1/chat/jobs/{job_id}", self._chat_job_detail_handler),
+                web.get(
+                    "/api/v1/chat/jobs/{job_id}/events",
+                    self._chat_job_events_handler,
+                ),
+                web.post(
+                    "/api/v1/chat/jobs/{job_id}/cancel",
+                    self._chat_job_cancel_handler,
+                ),
                 web.get("/api/v1/tools", self._tools_list_handler),
                 web.post("/api/v1/tools/invoke", self._tools_invoke_handler),
             ]
@@ -253,8 +266,40 @@ class RuntimeAPIServer:
     async def _chat_history_handler(self, request: web.Request) -> Response:
         return await chat.chat_history_handler(self._ctx, request)
 
+    async def _chat_history_clear_handler(self, request: web.Request) -> Response:
+        return await chat.chat_history_clear_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
     async def _chat_handler(self, request: web.Request) -> web.StreamResponse:
-        return await chat.chat_handler(self._ctx, request)
+        return await chat.chat_handler(self._ctx, self._chat_job_manager, request)
+
+    async def _chat_job_create_handler(self, request: web.Request) -> Response:
+        return await chat.chat_job_create_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
+    async def _chat_job_active_handler(self, request: web.Request) -> Response:
+        return await chat.chat_job_active_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
+    async def _chat_job_detail_handler(self, request: web.Request) -> Response:
+        return await chat.chat_job_detail_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
+    async def _chat_job_events_handler(
+        self, request: web.Request
+    ) -> web.StreamResponse:
+        return await chat.chat_job_events_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
+    async def _chat_job_cancel_handler(self, request: web.Request) -> Response:
+        return await chat.chat_job_cancel_handler(
+            self._ctx, self._chat_job_manager, request
+        )
 
     # Tools
     def _get_filtered_tools(self) -> list[dict[str, Any]]:

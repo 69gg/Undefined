@@ -231,11 +231,18 @@ curl http://127.0.0.1:8788/openapi.json
 }
 ```
 
-- 当 `stream = true` 时，返回 `text/event-stream`（SSE）：
+- `stream = false` 保持同步响应。
+- 当 `stream = true` 时，Runtime 会创建 WebChat job，并返回 `text/event-stream`（SSE）：
   - `event: meta`：会话元信息。
-  - `event: message`：AI/命令输出片段。
+  - `event: token_delta`：模型文本增量。
+  - `event: tool_delta`：工具参数增量预览。
+  - `event: tool_start` / `tool_end`：主对话工具开始与结束。
+  - `event: agent_start` / `agent_end`：主对话调用 Agent 开始与结束。
+  - `event: message`：AI/命令最终输出片段。
   - `event: done`：最终汇总（与非流式 JSON 结构一致）。
+  - `event: error`：任务失败或取消。
   - 在长时间无内容时会发送 `: keep-alive` 注释帧，防止中间层空闲断连。
+  - SSE 帧包含 `id: <seq>`，客户端可用 `after=<seq>` 续接 job 事件。
 
 行为约定：
 
@@ -245,9 +252,21 @@ curl http://127.0.0.1:8788/openapi.json
 
 ### WebUI AI Chat 历史记录
 
-- `GET /api/v1/chat/history?limit=200`
-- 用于读取虚拟私聊 `system#42` 的历史记录（只读）。
-- 返回中包含 `role/content/timestamp`，用于 WebUI 自动恢复会话视图。
+- `GET /api/v1/chat/history?limit=50&before=<cursor>`
+- 用于分页读取虚拟私聊 `system#42` 的历史记录。默认返回最新一页，响应包含 `items/has_more/next_before/total`。
+- `DELETE /api/v1/chat/history`
+- 仅清空 `system#42` 聊天历史 JSON 和内存历史，不删除长期记忆、认知记忆或 profile。
+- 如果存在运行中的 WebChat job，返回 `409`，避免旧任务继续写回已清空的历史。
+
+### WebUI AI Chat Jobs
+
+- `POST /api/v1/chat/jobs`：创建后台 job，Body 为 `{"message":"..."}`。
+- `GET /api/v1/chat/jobs/active`：返回当前运行中的 WebChat job（没有则为 `null`）。
+- `GET /api/v1/chat/jobs/{job_id}`：查询 job 状态、最后事件序号和已汇总输出。
+- `GET /api/v1/chat/jobs/{job_id}/events?after=<seq>`：订阅或续接 job SSE 事件。
+- `POST /api/v1/chat/jobs/{job_id}/cancel`：取消运行中的 job。
+
+Runtime API 进程重启后不会恢复未完成 job；已落盘的聊天历史仍可通过 history 接口读取。
 
 ### 工具调用 API
 
@@ -422,6 +441,14 @@ curl -N -H "X-Undefined-API-Key: $KEY" \
   -d '{"message":"你好","stream":true}' \
   "$API/api/v1/chat"
 
+JOB_ID="$(curl -s -H "X-Undefined-API-Key: $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"你好"}' \
+  "$API/api/v1/chat/jobs" | jq -r .job_id)"
+curl -N -H "X-Undefined-API-Key: $KEY" \
+  -H "Accept: text/event-stream" \
+  "$API/api/v1/chat/jobs/$JOB_ID/events?after=0"
+
 # 列出可用工具（需 tool_invoke_enabled = true）
 curl -H "X-Undefined-API-Key: $KEY" "$API/api/v1/tools"
 
@@ -450,12 +477,18 @@ WebUI 不直接在前端暴露 `auth_key`，而是通过后端代理访问主进
 - `GET /api/runtime/cognitive/profile/{entity_type}/{entity_id}`
 - `POST /api/runtime/chat`
 - `GET /api/runtime/chat/history`
+- `DELETE /api/runtime/chat/history`
+- `POST /api/runtime/chat/jobs`
+- `GET /api/runtime/chat/jobs/active`
+- `GET /api/runtime/chat/jobs/{job_id}`
+- `GET /api/runtime/chat/jobs/{job_id}/events`
+- `POST /api/runtime/chat/jobs/{job_id}/cancel`
 - `GET /api/runtime/openapi`
 - `GET /api/runtime/tools`
 - `POST /api/runtime/tools/invoke`
 
 WebUI 后端会自动从 `config.toml` 读取 `[api].auth_key` 并注入 Header。
-`/api/runtime/chat` 代理超时为 `480s`，并透传 SSE keep-alive。
+`/api/runtime/chat` 与 `/api/runtime/chat/jobs/{job_id}/events` 会透传 SSE keep-alive，聊天代理超时按当前聊天模型队列预算计算。
 
 ## 7. 故障排查
 

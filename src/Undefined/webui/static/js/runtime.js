@@ -7,6 +7,14 @@
         runtimeEnabled: true,
         chatBusy: false,
         chatHistoryLoaded: false,
+        activeJobId: null,
+        lastEventSeq: 0,
+        chatHistoryCursor: null,
+        chatHistoryHasMore: false,
+        chatHistoryLoading: false,
+        streamingMessageId: null,
+        chatReconnectTimer: null,
+        toolBlocks: new Map(),
         probeTimer: null,
         queryBusy: {
             memory: false,
@@ -448,24 +456,156 @@
         );
     }
 
-    function appendChatMessage(role, content) {
+    function appendChatMessage(role, content, options = {}) {
         const log = get("runtimeChatLog");
-        if (!log) return;
+        if (!log) return null;
         const isBot = role !== "user";
         const contentClass = isBot
             ? "runtime-chat-content markdown"
             : "runtime-chat-content";
         const item = document.createElement("div");
         item.className = `runtime-chat-item ${role}`;
+        if (options.id) item.dataset.messageId = options.id;
         item.innerHTML = `<div class="runtime-chat-role">${role === "user" ? "You" : "AI"}</div><div class="${contentClass}">${renderChatContent(content, isBot)}</div>`;
-        log.appendChild(item);
+        if (options.prepend) {
+            log.insertBefore(item, log.firstChild);
+        } else {
+            log.appendChild(item);
+            if (options.scroll !== false) scrollChatToBottom();
+        }
+        return item;
+    }
+
+    function scrollChatToBottom() {
+        const log = get("runtimeChatLog");
+        if (!log) return;
         log.scrollTop = log.scrollHeight;
+    }
+
+    function updateChatMessage(item, content, role = "bot") {
+        if (!item) return;
+        const contentEl = item.querySelector(".runtime-chat-content");
+        if (!contentEl) return;
+        const isBot = role !== "user";
+        contentEl.innerHTML = renderChatContent(content, isBot);
+    }
+
+    function ensureStreamingMessage() {
+        if (runtimeState.streamingMessageId) {
+            const existing = document.querySelector(
+                `[data-message-id="${runtimeState.streamingMessageId}"]`,
+            );
+            if (existing) return existing;
+        }
+        const id = `stream-${Date.now()}`;
+        runtimeState.streamingMessageId = id;
+        const item = appendChatMessage("bot", "", { id });
+        if (item) item.classList.add("streaming");
+        return item;
+    }
+
+    function appendTokenDelta(delta) {
+        const item = ensureStreamingMessage();
+        if (!item) return;
+        const current = item.dataset.rawContent || "";
+        const next = current + String(delta || "");
+        item.dataset.rawContent = next;
+        updateChatMessage(item, next, "bot");
+        scrollChatToBottom();
+    }
+
+    function finishStreamingMessage() {
+        if (!runtimeState.streamingMessageId) return;
+        const item = document.querySelector(
+            `[data-message-id="${runtimeState.streamingMessageId}"]`,
+        );
+        if (item) item.classList.remove("streaming");
+        runtimeState.streamingMessageId = null;
+    }
+
+    function renderToolBlock(block) {
+        const label = block.isAgent ? t("runtime.agent") : t("runtime.tool");
+        const statusLabel =
+            block.status === "done"
+                ? t("runtime.done")
+                : block.status === "error"
+                  ? t("runtime.error")
+                  : t("runtime.running");
+        const args = block.argumentsPreview
+            ? `<pre>${escapeHtml(block.argumentsPreview)}</pre>`
+            : "";
+        const result = block.resultPreview
+            ? `<div class="runtime-tool-result">${escapeHtml(block.resultPreview)}</div>`
+            : "";
+        const openAttr = block.status === "running" ? " open" : "";
+        return (
+            `<details class="runtime-tool-block ${escapeHtml(block.status)}"${openAttr}>` +
+            `<summary><span>${escapeHtml(label)}</span><code>${escapeHtml(block.name || "--")}</code><em>${escapeHtml(statusLabel)}</em></summary>` +
+            args +
+            result +
+            `</details>`
+        );
+    }
+
+    function upsertToolBlock(payload, status) {
+        const key =
+            String(
+                payload && payload.tool_call_id ? payload.tool_call_id : "",
+            ) ||
+            String(payload && payload.name ? payload.name : "") ||
+            `tool-${runtimeState.toolBlocks.size + 1}`;
+        const previous = runtimeState.toolBlocks.get(key) || {};
+        const block = {
+            ...previous,
+            name: String((payload && payload.name) || previous.name || ""),
+            isAgent: !!(
+                (payload && payload.is_agent) ||
+                previous.isAgent ||
+                status === "agent_start" ||
+                status === "agent_end"
+            ),
+            status:
+                status === "tool_end" || status === "agent_end"
+                    ? payload && payload.ok === false
+                        ? "error"
+                        : "done"
+                    : "running",
+            argumentsPreview: String(
+                (payload && payload.arguments_preview) ||
+                    previous.argumentsPreview ||
+                    "",
+            ),
+            resultPreview: String(
+                (payload && payload.result_preview) ||
+                    previous.resultPreview ||
+                    "",
+            ),
+        };
+        runtimeState.toolBlocks.set(key, block);
+        const item = ensureStreamingMessage();
+        if (!item) return;
+        const toolsEl = item.querySelector(".runtime-chat-tools");
+        if (toolsEl) {
+            toolsEl.innerHTML = Array.from(runtimeState.toolBlocks.values())
+                .map(renderToolBlock)
+                .join("");
+            return;
+        }
+        const container = document.createElement("div");
+        container.className = "runtime-chat-tools";
+        container.innerHTML = Array.from(runtimeState.toolBlocks.values())
+            .map(renderToolBlock)
+            .join("");
+        item.appendChild(container);
+        scrollChatToBottom();
     }
 
     function clearChatMessages() {
         const log = get("runtimeChatLog");
         if (!log) return;
         log.innerHTML = "";
+        runtimeState.streamingMessageId = null;
+        runtimeState.toolBlocks.clear();
     }
 
     function parseCqAttributes(raw) {
@@ -657,9 +797,15 @@
             const block = String(rawBlock || "").trim();
             if (!block) return;
             let event = "message";
+            let seq = 0;
             const dataLines = [];
             block.split("\n").forEach((line) => {
                 if (line.startsWith(":")) return;
+                if (line.startsWith("id:")) {
+                    const parsed = Number(line.slice(3).trim());
+                    seq = Number.isFinite(parsed) ? parsed : 0;
+                    return;
+                }
                 if (line.startsWith("event:")) {
                     event = line.slice(6).trim() || "message";
                     return;
@@ -676,7 +822,7 @@
             } catch (_error) {
                 payload = { raw: rawData };
             }
-            onEvent(event, payload);
+            onEvent(event, payload, seq);
         }
 
         while (true) {
@@ -1207,9 +1353,11 @@
 
     async function loadChatHistory(force = false) {
         if (runtimeState.chatHistoryLoaded && !force) return;
-        const res = await api("/api/runtime/chat/history?limit=200");
+        runtimeState.chatHistoryLoading = true;
+        const res = await api("/api/runtime/chat/history?limit=50");
         const data = await parseJsonSafe(res);
         if (!res.ok || (data && data.error)) {
+            runtimeState.chatHistoryLoading = false;
             throw new Error(buildRequestError(res, data));
         }
 
@@ -1219,9 +1367,265 @@
             const role = item && item.role === "bot" ? "bot" : "user";
             const content = String((item && item.content) || "").trim();
             if (!content) return;
-            appendChatMessage(role, content);
+            appendChatMessage(role, content, { scroll: false });
         });
+        runtimeState.chatHistoryCursor =
+            data && data.next_before !== undefined ? data.next_before : null;
+        runtimeState.chatHistoryHasMore = !!(data && data.has_more);
         runtimeState.chatHistoryLoaded = true;
+        runtimeState.chatHistoryLoading = false;
+        scrollChatToBottom();
+        await resumeActiveChatJob();
+    }
+
+    async function loadOlderChatHistory() {
+        const log = get("runtimeChatLog");
+        if (
+            !log ||
+            runtimeState.chatHistoryLoading ||
+            !runtimeState.chatHistoryHasMore
+        )
+            return;
+        runtimeState.chatHistoryLoading = true;
+        const loader = get("runtimeChatLoadMore");
+        if (loader) loader.textContent = t("runtime.chat_loading_more");
+        const previousHeight = log.scrollHeight;
+        const before = runtimeState.chatHistoryCursor;
+        try {
+            const params = new URLSearchParams({ limit: "50" });
+            if (before !== null && before !== undefined) {
+                params.set("before", String(before));
+            }
+            const res = await api(
+                `/api/runtime/chat/history?${params.toString()}`,
+            );
+            const data = await parseJsonSafe(res);
+            if (!res.ok || (data && data.error)) {
+                throw new Error(buildRequestError(res, data));
+            }
+            const items = data && Array.isArray(data.items) ? data.items : [];
+            for (let idx = items.length - 1; idx >= 0; idx -= 1) {
+                const item = items[idx];
+                const role = item && item.role === "bot" ? "bot" : "user";
+                const content = String((item && item.content) || "").trim();
+                if (!content) continue;
+                appendChatMessage(role, content, {
+                    prepend: true,
+                    scroll: false,
+                });
+            }
+            runtimeState.chatHistoryCursor =
+                data && data.next_before !== undefined
+                    ? data.next_before
+                    : null;
+            runtimeState.chatHistoryHasMore = !!(data && data.has_more);
+            log.scrollTop = log.scrollHeight - previousHeight;
+        } catch (error) {
+            showToast(
+                `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
+                "error",
+                5000,
+            );
+        } finally {
+            runtimeState.chatHistoryLoading = false;
+            if (loader) loader.textContent = "";
+        }
+    }
+
+    function applyChatEvent(event, payload, seq = 0) {
+        if (seq)
+            runtimeState.lastEventSeq = Math.max(
+                runtimeState.lastEventSeq,
+                seq,
+            );
+        if (event === "meta") {
+            if (payload && payload.job_id) {
+                runtimeState.activeJobId = String(payload.job_id);
+            }
+            return;
+        }
+        if (event === "token_delta") {
+            appendTokenDelta(payload && payload.delta ? payload.delta : "");
+            return;
+        }
+        if (
+            event === "tool_start" ||
+            event === "tool_end" ||
+            event === "agent_start" ||
+            event === "agent_end"
+        ) {
+            upsertToolBlock(payload || {}, event);
+            return;
+        }
+        if (event === "message") {
+            const content = String(
+                payload && (payload.content ?? payload.message)
+                    ? (payload.content ?? payload.message)
+                    : "",
+            ).trim();
+            if (!content) return;
+            const streaming = runtimeState.streamingMessageId
+                ? document.querySelector(
+                      `[data-message-id="${runtimeState.streamingMessageId}"]`,
+                  )
+                : null;
+            if (streaming && !(streaming.dataset.rawContent || "").trim()) {
+                streaming.dataset.rawContent = content;
+                updateChatMessage(streaming, content, "bot");
+                finishStreamingMessage();
+            } else {
+                finishStreamingMessage();
+                appendChatMessage("bot", content);
+            }
+            return;
+        }
+        if (event === "done") {
+            if (
+                payload &&
+                payload.reply &&
+                runtimeState.streamingMessageId &&
+                !(
+                    document.querySelector(
+                        `[data-message-id="${runtimeState.streamingMessageId}"]`,
+                    )?.dataset.rawContent || ""
+                ).trim()
+            ) {
+                appendTokenDelta(String(payload.reply));
+            }
+            finishStreamingMessage();
+            runtimeState.activeJobId = null;
+            runtimeState.chatBusy = false;
+            runtimeState.chatHistoryLoaded = true;
+            setButtonLoading(get("btnRuntimeChatSend"), false);
+            return;
+        }
+        if (event === "error") {
+            finishStreamingMessage();
+            runtimeState.activeJobId = null;
+            runtimeState.chatBusy = false;
+            setButtonLoading(get("btnRuntimeChatSend"), false);
+            const message = String(
+                payload && (payload.error || payload.message)
+                    ? payload.error || payload.message
+                    : "stream error",
+            );
+            showToast(
+                `${t("runtime.failed")}: ${appendRuntimeApiHint(message)}`,
+                "error",
+                5000,
+            );
+        }
+    }
+
+    async function attachChatJob(jobId, after = 0) {
+        runtimeState.activeJobId = jobId;
+        runtimeState.lastEventSeq = Number(after || 0);
+        runtimeState.chatBusy = true;
+        setButtonLoading(get("btnRuntimeChatSend"), true);
+        try {
+            const params = new URLSearchParams({
+                after: String(runtimeState.lastEventSeq),
+            });
+            const res = await api(
+                `/api/runtime/chat/jobs/${encodeURIComponent(jobId)}/events?${params.toString()}`,
+                { headers: { Accept: "text/event-stream" } },
+            );
+            const contentType = (
+                res.headers.get("Content-Type") || ""
+            ).toLowerCase();
+            if (
+                !res.ok ||
+                !contentType.includes("text/event-stream") ||
+                !res.body
+            ) {
+                const data = await parseJsonSafe(res);
+                throw new Error(buildRequestError(res, data));
+            }
+            await consumeSse(res, applyChatEvent);
+            if (runtimeState.activeJobId === jobId && runtimeState.chatBusy) {
+                const detail = await fetchJsonOrThrow(
+                    `/api/runtime/chat/jobs/${encodeURIComponent(jobId)}`,
+                );
+                if (
+                    detail &&
+                    ["done", "error", "cancelled"].includes(detail.status)
+                ) {
+                    applyChatEvent(
+                        detail.status === "done" ? "done" : "error",
+                        detail.status === "done"
+                            ? detail
+                            : { error: detail.error || detail.status },
+                        detail.last_seq || runtimeState.lastEventSeq,
+                    );
+                }
+            }
+        } catch (error) {
+            if (runtimeState.activeJobId === jobId) {
+                showToast(t("runtime.chat_reconnecting"), "warning", 1800);
+                clearTimeout(runtimeState.chatReconnectTimer);
+                runtimeState.chatReconnectTimer = setTimeout(() => {
+                    attachChatJob(jobId, runtimeState.lastEventSeq).catch(
+                        () => {},
+                    );
+                }, 1200);
+            } else {
+                showToast(
+                    `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
+                    "error",
+                    5000,
+                );
+            }
+        }
+    }
+
+    async function resumeActiveChatJob() {
+        if (runtimeState.activeJobId) return;
+        try {
+            const data = await fetchJsonOrThrow(
+                "/api/runtime/chat/jobs/active",
+            );
+            const job = data && data.job ? data.job : null;
+            if (!job || !job.job_id) return;
+            runtimeState.activeJobId = String(job.job_id);
+            attachChatJob(
+                runtimeState.activeJobId,
+                runtimeState.lastEventSeq,
+            ).catch(() => {});
+        } catch (_error) {
+            // Runtime disabled/unreachable is surfaced by normal chat actions.
+        }
+    }
+
+    async function clearChatHistory() {
+        if (runtimeState.chatBusy || runtimeState.activeJobId) {
+            showToast(t("runtime.chat_running"), "warning", 3000);
+            return;
+        }
+        if (!window.confirm(t("runtime.chat_clear_confirm"))) return;
+        const button = get("btnRuntimeChatClear");
+        setButtonLoading(button, true);
+        try {
+            const res = await api("/api/runtime/chat/history", {
+                method: "DELETE",
+            });
+            const data = await parseJsonSafe(res);
+            if (!res.ok || (data && data.error)) {
+                throw new Error(buildRequestError(res, data));
+            }
+            clearChatMessages();
+            runtimeState.chatHistoryLoaded = true;
+            runtimeState.chatHistoryCursor = null;
+            runtimeState.chatHistoryHasMore = false;
+            showToast(t("runtime.chat_cleared"), "success", 2200);
+        } catch (error) {
+            showToast(
+                `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
+                "error",
+                5000,
+            );
+        } finally {
+            setButtonLoading(button, false);
+        }
     }
 
     async function sendChatMessage() {
@@ -1234,87 +1638,35 @@
 
         runtimeState.chatBusy = true;
         setButtonLoading(button, true);
+        runtimeState.toolBlocks.clear();
+        runtimeState.streamingMessageId = null;
+        runtimeState.lastEventSeq = 0;
         appendChatMessage("user", message);
         input.value = "";
 
         try {
-            const res = await api("/api/runtime/chat", {
+            const res = await api("/api/runtime/chat/jobs", {
                 method: "POST",
-                headers: { Accept: "text/event-stream" },
-                body: JSON.stringify({ message, stream: true }),
+                body: JSON.stringify({ message }),
             });
-
-            const contentType = (
-                res.headers.get("Content-Type") || ""
-            ).toLowerCase();
-            if (contentType.includes("text/event-stream") && res.body) {
-                let replied = false;
-                let streamError = "";
-                let donePayload = null;
-                await consumeSse(res, (event, payload) => {
-                    if (event === "message") {
-                        const content = String(
-                            payload && (payload.content ?? payload.message)
-                                ? (payload.content ?? payload.message)
-                                : "",
-                        ).trim();
-                        if (!content) return;
-                        appendChatMessage("bot", content);
-                        replied = true;
-                        return;
-                    }
-                    if (event === "error") {
-                        streamError = String(
-                            payload && (payload.error || payload.message)
-                                ? payload.error || payload.message
-                                : "stream error",
-                        );
-                        return;
-                    }
-                    if (event === "done") {
-                        donePayload = payload;
-                    }
-                });
-                if (streamError) {
-                    throw new Error(streamError);
-                }
-                if (!replied && donePayload && donePayload.reply) {
-                    appendChatMessage("bot", String(donePayload.reply));
-                    replied = true;
-                }
-                if (!replied) {
-                    appendChatMessage("bot", t("runtime.empty"));
-                }
-                runtimeState.chatHistoryLoaded = true;
-                return;
-            }
-
             const data = await parseJsonSafe(res);
             if (!res.ok || (data && data.error)) {
                 throw new Error(buildRequestError(res, data));
             }
-
-            const messages =
-                data && Array.isArray(data.messages) ? data.messages : [];
-            if (messages.length > 0) {
-                messages.forEach((msg) =>
-                    appendChatMessage("bot", String(msg || "")),
-                );
-            } else if (data && data.reply) {
-                appendChatMessage("bot", String(data.reply));
-            } else {
-                appendChatMessage("bot", t("runtime.empty"));
+            const jobId = data && data.job_id ? String(data.job_id) : "";
+            if (!jobId) {
+                throw new Error("missing job_id");
             }
-            runtimeState.chatHistoryLoaded = true;
+            ensureStreamingMessage();
+            await attachChatJob(jobId, 0);
         } catch (error) {
+            runtimeState.chatBusy = false;
+            setButtonLoading(button, false);
             showToast(
                 `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
                 "error",
                 5000,
             );
-        } finally {
-            runtimeState.chatBusy = false;
-            setButtonLoading(button, false);
         }
     }
 
@@ -1480,6 +1832,19 @@
 
         const sendBtn = get("btnRuntimeChatSend");
         if (sendBtn) sendBtn.addEventListener("click", sendChatMessage);
+
+        const clearChatBtn = get("btnRuntimeChatClear");
+        if (clearChatBtn)
+            clearChatBtn.addEventListener("click", clearChatHistory);
+
+        const chatLog = get("runtimeChatLog");
+        if (chatLog) {
+            chatLog.addEventListener("scroll", () => {
+                if (chatLog.scrollTop <= 32) {
+                    loadOlderChatHistory();
+                }
+            });
+        }
 
         const imageBtn = get("btnRuntimeChatImage");
         const imageInput = get("runtimeChatImageInput");

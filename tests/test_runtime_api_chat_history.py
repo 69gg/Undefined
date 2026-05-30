@@ -1,19 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from aiohttp import web
 
 from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
+from Undefined.api.routes import chat as runtime_api_chat
 
 
 class _DummyHistoryManager:
-    def get_recent_private(self, user_id: int, count: int) -> list[dict[str, Any]]:
-        _ = user_id, count
-        return [
+    def __init__(self) -> None:
+        self.records = [
             {
                 "display_name": "system",
                 "message": "你好",
@@ -25,6 +27,38 @@ class _DummyHistoryManager:
                 "timestamp": "2026-02-25 22:00:01",
             },
         ]
+
+    def get_recent_private(self, user_id: int, count: int) -> list[dict[str, Any]]:
+        _ = user_id, count
+        return self.records[-count:]
+
+    def get_private_page(
+        self,
+        user_id: int,
+        *,
+        limit: int,
+        before: int | None = None,
+    ) -> tuple[list[dict[str, Any]], bool, int | None, int]:
+        _ = user_id
+        end = len(self.records) if before is None else before
+        start = max(0, end - limit)
+        return (
+            self.records[start:end],
+            start > 0,
+            start if start > 0 else None,
+            len(self.records),
+        )
+
+    async def clear_private_history(self, user_id: int) -> int:
+        _ = user_id
+        count = len(self.records)
+        self.records = []
+        return count
+
+
+class _JsonRequest(SimpleNamespace):
+    async def json(self) -> dict[str, object]:
+        return dict(getattr(self, "_json", {}))
 
 
 @pytest.mark.asyncio
@@ -68,3 +102,129 @@ async def test_runtime_chat_history_endpoint_returns_role_mapped_items() -> None
     assert payload["items"][0]["content"] == "你好"
     assert payload["items"][1]["role"] == "bot"
     assert payload["items"][1]["content"] == "你好，我在。"
+
+
+@pytest.mark.asyncio
+async def test_runtime_chat_history_endpoint_supports_before_pagination() -> None:
+    history = _DummyHistoryManager()
+    history.records = [
+        {"display_name": "system", "message": f"user {idx}", "timestamp": str(idx)}
+        for idx in range(5)
+    ]
+    context = RuntimeAPIContext(
+        config_getter=lambda: SimpleNamespace(
+            api=SimpleNamespace(
+                enabled=True,
+                host="127.0.0.1",
+                port=8788,
+                auth_key="changeme",
+                openapi_enabled=True,
+            ),
+            superadmin_qq=10001,
+            bot_qq=20002,
+        ),
+        onebot=SimpleNamespace(connection_status=lambda: {}),
+        ai=SimpleNamespace(memory_storage=SimpleNamespace(count=lambda: 0)),
+        command_dispatcher=SimpleNamespace(parse_command=lambda _text: None),
+        queue_manager=SimpleNamespace(snapshot=lambda: {}),
+        history_manager=history,
+    )
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+
+    request = cast(
+        web.Request,
+        cast(Any, SimpleNamespace(query={"limit": "2", "before": "3"})),
+    )
+    response = await server._chat_history_handler(request)
+    payload = json.loads(response.text or "{}")
+
+    assert [item["content"] for item in payload["items"]] == ["user 1", "user 2"]
+    assert payload["has_more"] is True
+    assert payload["next_before"] == 1
+    assert payload["total"] == 5
+
+
+@pytest.mark.asyncio
+async def test_runtime_chat_history_clear_clears_only_when_no_active_job() -> None:
+    history = _DummyHistoryManager()
+    context = RuntimeAPIContext(
+        config_getter=lambda: SimpleNamespace(
+            api=SimpleNamespace(
+                enabled=True,
+                host="127.0.0.1",
+                port=8788,
+                auth_key="changeme",
+                openapi_enabled=True,
+            ),
+            superadmin_qq=10001,
+            bot_qq=20002,
+        ),
+        onebot=SimpleNamespace(connection_status=lambda: {}),
+        ai=SimpleNamespace(
+            attachment_registry=object(),
+            memory_storage=SimpleNamespace(count=lambda: 0),
+        ),
+        command_dispatcher=SimpleNamespace(parse_command=lambda _text: None),
+        queue_manager=SimpleNamespace(snapshot=lambda: {}),
+        history_manager=history,
+    )
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+    request = cast(web.Request, cast(Any, SimpleNamespace(query={})))
+
+    response = await server._chat_history_clear_handler(request)
+    payload = json.loads(response.text or "{}")
+
+    assert payload["success"] is True
+    assert payload["cleared"] == 2
+    assert history.records == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_chat_history_clear_returns_409_for_running_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_run_webui_chat(_ctx: Any, *, text: str, send_output: Any) -> str:
+        _ = text, send_output
+        await asyncio.Event().wait()
+        return "chat"
+
+    history = _DummyHistoryManager()
+    context = RuntimeAPIContext(
+        config_getter=lambda: SimpleNamespace(
+            api=SimpleNamespace(
+                enabled=True,
+                host="127.0.0.1",
+                port=8788,
+                auth_key="changeme",
+                openapi_enabled=True,
+            ),
+            superadmin_qq=10001,
+            bot_qq=20002,
+        ),
+        onebot=SimpleNamespace(connection_status=lambda: {}),
+        ai=SimpleNamespace(
+            attachment_registry=object(),
+            memory_storage=SimpleNamespace(count=lambda: 0),
+        ),
+        command_dispatcher=SimpleNamespace(),
+        queue_manager=SimpleNamespace(snapshot=lambda: {}),
+        history_manager=SimpleNamespace(
+            add_private_message=AsyncMock(),
+            clear_private_history=history.clear_private_history,
+        ),
+    )
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+    create_request = cast(
+        web.Request,
+        cast(Any, _JsonRequest(query={}, _json={"message": "hello"})),
+    )
+    await server._chat_job_create_handler(create_request)
+
+    response = await server._chat_history_clear_handler(
+        cast(web.Request, cast(Any, SimpleNamespace(query={})))
+    )
+    payload = json.loads(response.text or "{}")
+
+    assert response.status == 409
+    assert payload["error"] == "Chat job is still running"

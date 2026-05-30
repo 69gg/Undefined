@@ -90,12 +90,27 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
                 "summary": "WebUI special private chat",
                 "description": (
                     "POST JSON {message, stream?}. "
-                    "When stream=true, response is SSE with keep-alive comments."
+                    "stream=false runs synchronously; stream=true creates a "
+                    "WebChat job and bridges its events as SSE."
                 ),
             }
         },
         "/api/v1/chat/history": {
-            "get": {"summary": "Get virtual private chat history for WebUI"}
+            "get": {"summary": "Get paged virtual private chat history for WebUI"},
+            "delete": {"summary": "Clear WebUI virtual private chat history"},
+        },
+        "/api/v1/chat/jobs": {"post": {"summary": "Create a WebUI chat job"}},
+        "/api/v1/chat/jobs/active": {
+            "get": {"summary": "Get the active WebUI chat job"}
+        },
+        "/api/v1/chat/jobs/{job_id}": {
+            "get": {"summary": "Get a WebUI chat job by id"}
+        },
+        "/api/v1/chat/jobs/{job_id}/events": {
+            "get": {"summary": "Subscribe to WebUI chat job SSE events"}
+        },
+        "/api/v1/chat/jobs/{job_id}/cancel": {
+            "post": {"summary": "Cancel a WebUI chat job"}
         },
         "/api/v1/tools": {
             "get": {

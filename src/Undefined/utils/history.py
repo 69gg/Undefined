@@ -514,6 +514,46 @@ class MessageHistoryManager:
             return []
         return self._private_message_history[user_id_str][-count:] if count > 0 else []
 
+    def get_private_page(
+        self,
+        user_id: int,
+        *,
+        limit: int,
+        before: int | None = None,
+    ) -> tuple[list[dict[str, Any]], bool, int | None, int]:
+        """按时间倒序游标分页读取私聊历史，返回结果保持正序。
+
+        ``before`` 是完整历史数组里的结束下标（exclusive）。不传时从最新
+        消息开始读取；返回的 ``next_before`` 可用于继续向更早历史翻页。
+        """
+        user_id_str = str(user_id)
+        history = self._private_message_history.get(user_id_str, [])
+        total = len(history)
+        if total == 0 or limit <= 0:
+            return [], False, None, total
+
+        end = total if before is None else max(0, min(before, total))
+        start = max(0, end - limit)
+        items = history[start:end]
+        has_more = start > 0
+        next_before = start if has_more else None
+        return items, has_more, next_before, total
+
+    async def clear_private_history(self, user_id: int) -> int:
+        """清空指定私聊会话的内存与落盘历史，返回清空前记录数。"""
+        await self._ensure_initialized()
+
+        user_id_str = str(user_id)
+        path = self._get_private_history_path(user_id)
+        async with self._get_private_lock(user_id_str):
+            previous_count = len(self._private_message_history.get(user_id_str, []))
+            self._private_message_history[user_id_str] = []
+            self._queue_history_save([], path)
+
+        # 等待空数组写入，避免正在运行的旧保存任务最终把旧历史恢复到文件。
+        await self.flush_pending_saves()
+        return previous_count
+
     async def modify_last_group_message(
         self,
         group_id: int,

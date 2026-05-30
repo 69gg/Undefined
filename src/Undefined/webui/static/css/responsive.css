@@ -12,7 +12,7 @@
     padding-right: 30px;
   }
   .search-group .form-control { min-width: 0; }
-  .main-content.chat-layout #tab-chat .chat-runtime-card { height: clamp(460px, calc(100vh - 220px), 760px); }
+  .main-content.chat-layout #tab-chat .chat-runtime-card { height: clamp(560px, calc(100vh - 170px), 860px); }
 }
 
 @media (max-width: 768px) {
@@ -256,7 +256,11 @@
     align-items: stretch;
   }
   .runtime-chat-actions { justify-content: flex-start; }
-  .main-content.chat-layout #tab-chat .chat-runtime-card { height: clamp(480px, calc(100vh - 180px), 720px); }
+  .chat-workspace-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .main-content.chat-layout #tab-chat .chat-runtime-card { height: clamp(540px, calc(100vh - 140px), 760px); }
   .main-content.chat-layout #tab-chat .runtime-chat-input {
     height: auto;
     min-height: 88px;
