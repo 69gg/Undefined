@@ -840,6 +840,14 @@
   font-style: normal;
   color: var(--text-tertiary);
 }
+.runtime-tool-block.webchat-private-send,
+.runtime-tool-block.webchat-end {
+  background: color-mix(in srgb, var(--bg-app) 72%, var(--bg-card));
+}
+.runtime-tool-block.webchat-private-send summary,
+.runtime-tool-block.webchat-end summary {
+  padding-block: 6px;
+}
 .runtime-tool-block.done summary em {
   color: var(--success);
 }

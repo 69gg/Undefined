@@ -46,6 +46,76 @@ class _DummyStreamResponse:
         self.eof_written = True
 
 
+def test_sanitize_stream_payload_compacts_webchat_private_send_tool() -> None:
+    payload = runtime_api_chat._sanitize_stream_payload(
+        "tool_start",
+        {
+            "tool_call_id": "call_1",
+            "name": "messages.send_message",
+            "api_name": "messages-_-send_message",
+            "arguments": {
+                "target_type": "private",
+                "target_id": 42,
+                "message": "这段正文会作为 message 事件展示",
+            },
+        },
+    )
+
+    assert payload["ui_hint"] == "webchat_private_send"
+    assert payload["arguments_preview"] == ""
+
+    payload = runtime_api_chat._sanitize_stream_payload(
+        "tool_start",
+        {
+            "tool_call_id": "call_2",
+            "name": "messages.send_private_message",
+            "api_name": "messages-_-send_private_message",
+            "arguments": {
+                "target_id": 42,
+                "message": "私聊正文",
+            },
+        },
+    )
+
+    assert payload["ui_hint"] == "webchat_private_send"
+    assert payload["arguments_preview"] == ""
+
+
+def test_sanitize_stream_payload_keeps_group_send_message_details() -> None:
+    payload = runtime_api_chat._sanitize_stream_payload(
+        "tool_start",
+        {
+            "tool_call_id": "call_1",
+            "name": "messages.send_message",
+            "api_name": "messages-_-send_message",
+            "arguments": {
+                "target_type": "group",
+                "target_id": 10001,
+                "message": "群聊消息",
+            },
+        },
+    )
+
+    assert "ui_hint" not in payload
+    assert "群聊消息" in payload["arguments_preview"]
+
+
+def test_sanitize_stream_payload_compacts_successful_end_tool() -> None:
+    payload = runtime_api_chat._sanitize_stream_payload(
+        "tool_end",
+        {
+            "tool_call_id": "call_end",
+            "name": "end",
+            "api_name": "end",
+            "ok": True,
+            "result": "对话已结束",
+        },
+    )
+
+    assert payload["ui_hint"] == "webchat_end"
+    assert payload["result_preview"] == ""
+
+
 @pytest.mark.asyncio
 async def test_runtime_chat_stream_renders_each_message_once(
     monkeypatch: pytest.MonkeyPatch,

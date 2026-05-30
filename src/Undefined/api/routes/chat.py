@@ -43,6 +43,14 @@ _VIRTUAL_USER_NAME = "system"
 _CHAT_SSE_KEEPALIVE_SECONDS = 10.0
 _CHAT_JOB_EVENT_BUFFER_LIMIT = 1000
 _PREVIEW_LIMIT = 800
+_WEBCHAT_SEND_MESSAGE_TOOLS = frozenset(
+    {
+        "messages.send_message",
+        "send_message",
+        "messages.send_private_message",
+        "send_private_message",
+    }
+)
 
 
 @dataclass
@@ -283,6 +291,34 @@ def _preview(value: Any, limit: int = _PREVIEW_LIMIT) -> str:
     return compact[:limit] + "..."
 
 
+def _webchat_tool_ui_hint(
+    event: str,
+    *,
+    name: str,
+    api_name: str,
+    arguments: Any | None = None,
+    result: Any | None = None,
+    is_agent: bool = False,
+) -> str | None:
+    if is_agent:
+        return None
+    tool_names = {name, api_name}
+    if tool_names & _WEBCHAT_SEND_MESSAGE_TOOLS:
+        if tool_names & {"messages.send_private_message", "send_private_message"}:
+            return "webchat_private_send"
+        if not isinstance(arguments, dict):
+            return None
+        target_type = str(arguments.get("target_type") or "").strip().lower()
+        if target_type in {"", "private"}:
+            return "webchat_private_send"
+        return None
+    if "end" in tool_names and event in {"tool_end", "agent_end"}:
+        result_text = str(result or "").strip()
+        if result_text == "对话已结束":
+            return "webchat_end"
+    return None
+
+
 def _sanitize_stream_payload(event: str, payload: dict[str, Any]) -> dict[str, Any]:
     if event == "token_delta":
         return {"delta": str(payload.get("delta") or "")}
@@ -296,25 +332,51 @@ def _sanitize_stream_payload(event: str, payload: dict[str, Any]) -> dict[str, A
     if event in {"tool_start", "agent_start"}:
         is_agent = bool(payload.get("is_agent")) or event == "agent_start"
         output_event = "agent_start" if is_agent else "tool_start"
+        name = str(payload.get("name") or "")
+        api_name = str(payload.get("api_name") or "")
+        arguments = payload.get("arguments")
+        ui_hint = _webchat_tool_ui_hint(
+            output_event,
+            name=name,
+            api_name=api_name,
+            arguments=arguments,
+            is_agent=is_agent,
+        )
         return {
             "_event": output_event,
             "tool_call_id": str(payload.get("tool_call_id") or ""),
-            "name": str(payload.get("name") or ""),
-            "api_name": str(payload.get("api_name") or ""),
-            "arguments_preview": _preview(payload.get("arguments")),
+            "name": name,
+            "api_name": api_name,
+            "arguments_preview": ""
+            if ui_hint == "webchat_private_send"
+            else _preview(arguments),
             "is_agent": is_agent,
+            **({"ui_hint": ui_hint} if ui_hint else {}),
         }
     if event in {"tool_end", "agent_end"}:
         is_agent = bool(payload.get("is_agent")) or event == "agent_end"
         output_event = "agent_end" if is_agent else "tool_end"
+        name = str(payload.get("name") or "")
+        api_name = str(payload.get("api_name") or "")
+        result = payload.get("result")
+        ui_hint = _webchat_tool_ui_hint(
+            output_event,
+            name=name,
+            api_name=api_name,
+            result=result,
+            is_agent=is_agent,
+        )
         return {
             "_event": output_event,
             "tool_call_id": str(payload.get("tool_call_id") or ""),
-            "name": str(payload.get("name") or ""),
-            "api_name": str(payload.get("api_name") or ""),
+            "name": name,
+            "api_name": api_name,
             "ok": bool(payload.get("ok", True)),
-            "result_preview": _preview(payload.get("result")),
+            "result_preview": ""
+            if ui_hint in {"webchat_private_send", "webchat_end"}
+            else _preview(result),
             "is_agent": is_agent,
+            **({"ui_hint": ui_hint} if ui_hint else {}),
         }
     return {key: value for key, value in payload.items() if key != "arguments"}
 

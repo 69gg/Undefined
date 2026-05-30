@@ -13,6 +13,7 @@
         chatHistoryHasMore: false,
         chatHistoryLoading: false,
         streamingMessageId: null,
+        activeChatMessageId: null,
         chatReconnectTimer: null,
         toolBlocks: new Map(),
         probeTimer: null,
@@ -466,6 +467,7 @@
         const item = document.createElement("div");
         item.className = `runtime-chat-item ${role}`;
         if (options.id) item.dataset.messageId = options.id;
+        if (options.jobId) item.dataset.jobId = options.jobId;
         item.innerHTML = `<div class="runtime-chat-role">${role === "user" ? "You" : "AI"}</div><div class="${contentClass}">${renderChatContent(content, isBot)}</div>`;
         if (options.prepend) {
             log.insertBefore(item, log.firstChild);
@@ -490,22 +492,55 @@
         contentEl.innerHTML = renderChatContent(content, isBot);
     }
 
-    function ensureStreamingMessage() {
-        if (runtimeState.streamingMessageId) {
+    function currentChatJobId() {
+        return runtimeState.activeJobId ? String(runtimeState.activeJobId) : "";
+    }
+
+    function findActiveChatMessage(jobId = "") {
+        const byJob = String(jobId || "").trim();
+        if (byJob) {
+            const existingForJob = document.querySelector(
+                `[data-job-id="${CSS.escape(byJob)}"]`,
+            );
+            if (existingForJob) return existingForJob;
+        }
+        if (runtimeState.activeChatMessageId) {
             const existing = document.querySelector(
-                `[data-message-id="${runtimeState.streamingMessageId}"]`,
+                `[data-message-id="${CSS.escape(runtimeState.activeChatMessageId)}"]`,
             );
             if (existing) return existing;
         }
+        if (runtimeState.streamingMessageId) {
+            const existing = document.querySelector(
+                `[data-message-id="${CSS.escape(runtimeState.streamingMessageId)}"]`,
+            );
+            if (existing) return existing;
+        }
+        return null;
+    }
+
+    function ensureStreamingMessage(jobId = "") {
+        const resolvedJobId = String(jobId || currentChatJobId()).trim();
+        const existing = findActiveChatMessage(resolvedJobId);
+        if (existing) {
+            if (resolvedJobId) existing.dataset.jobId = resolvedJobId;
+            runtimeState.activeChatMessageId =
+                existing.dataset.messageId || null;
+            return existing;
+        }
         const id = `stream-${Date.now()}`;
         runtimeState.streamingMessageId = id;
-        const item = appendChatMessage("bot", "", { id });
+        runtimeState.activeChatMessageId = id;
+        const item = appendChatMessage("bot", "", {
+            id,
+            jobId: resolvedJobId || null,
+        });
         if (item) item.classList.add("streaming");
         return item;
     }
 
-    function appendTokenDelta(delta) {
-        const item = ensureStreamingMessage();
+    function appendTokenDelta(delta, jobId = "") {
+        const item = ensureStreamingMessage(jobId);
         if (!item) return;
         const current = item.dataset.rawContent || "";
         const next = current + String(delta || "");
@@ -517,20 +552,46 @@
     function finishStreamingMessage() {
         if (!runtimeState.streamingMessageId) return;
         const item = document.querySelector(
-            `[data-message-id="${runtimeState.streamingMessageId}"]`,
+            `[data-message-id="${CSS.escape(runtimeState.streamingMessageId)}"]`,
         );
         if (item) item.classList.remove("streaming");
         runtimeState.streamingMessageId = null;
     }
 
-    function renderToolBlock(block) {
-        const label = block.isAgent ? t("runtime.agent") : t("runtime.tool");
-        const statusLabel =
-            block.status === "done"
-                ? t("runtime.done")
+    function finalizeActiveChatMessage() {
+        finishStreamingMessage();
+        runtimeState.activeChatMessageId = null;
+    }
+
+    function toolStatusLabel(block) {
+        if (block.uiHint === "webchat_private_send") {
+            return block.status === "done"
+                ? t("runtime.sent")
                 : block.status === "error"
                   ? t("runtime.error")
-                  : t("runtime.running");
+                  : t("runtime.sending");
+        }
+        if (block.uiHint === "webchat_end" && block.status === "done") {
+            return t("runtime.ended");
+        }
+        if (block.status === "done") return t("runtime.done");
+        if (block.status === "error") return t("runtime.error");
+        return t("runtime.running");
+    }
+
+    function toolDisplayLabel(block) {
+        if (block.uiHint === "webchat_private_send") {
+            return t("runtime.message");
+        }
+        if (block.uiHint === "webchat_end") {
+            return t("runtime.end");
+        }
+        return block.isAgent ? t("runtime.agent") : t("runtime.tool");
+    }
+
+    function renderToolBlock(block) {
+        const label = toolDisplayLabel(block);
+        const statusLabel = toolStatusLabel(block);
         const args = block.argumentsPreview
             ? `<pre>${escapeHtml(block.argumentsPreview)}</pre>`
             : "";
@@ -538,8 +599,11 @@
             ? `<div class="runtime-tool-result">${escapeHtml(block.resultPreview)}</div>`
             : "";
         const openAttr = block.status === "running" ? " open" : "";
+        const hintClass = block.uiHint
+            ? ` ${escapeHtml(String(block.uiHint).replace(/_/g, "-"))}`
+            : "";
         return (
-            `<details class="runtime-tool-block ${escapeHtml(block.status)}"${openAttr}>` +
+            `<details class="runtime-tool-block ${escapeHtml(block.status)}${hintClass}"${openAttr}>` +
             `<summary><span>${escapeHtml(label)}</span><code>${escapeHtml(block.name || "--")}</code><em>${escapeHtml(statusLabel)}</em></summary>` +
             args +
             result +
@@ -547,14 +611,33 @@
         );
     }
 
-    function upsertToolBlock(payload, status) {
+    function upsertToolBlock(payload, status, jobId = "") {
+        const hasArgumentsDelta =
+            payload && Object.hasOwn(payload, "arguments_delta");
         const key =
             String(
                 payload && payload.tool_call_id ? payload.tool_call_id : "",
             ) ||
             String(payload && payload.name ? payload.name : "") ||
+            String(
+                payload && payload.index !== undefined
+                    ? `tool-index-${payload.index}`
+                    : "",
+            ) ||
             `tool-${runtimeState.toolBlocks.size + 1}`;
         const previous = runtimeState.toolBlocks.get(key) || {};
+        const previousUiHint = String(previous.uiHint || "");
+        const nextUiHint = String(
+            (payload && payload.ui_hint) || previousUiHint,
+        );
+        const previousArguments = String(previous.argumentsPreview || "");
+        const nextArguments = hasArgumentsDelta
+            ? `${previousArguments}${String(payload.arguments_delta || "")}`
+            : String(
+                  (payload && payload.arguments_preview) ||
+                      previous.argumentsPreview ||
+                      "",
+              );
         const block = {
             ...previous,
             name: String((payload && payload.name) || previous.name || ""),
@@ -570,19 +653,20 @@
                         ? "error"
                         : "done"
                     : "running",
-            argumentsPreview: String(
-                (payload && payload.arguments_preview) ||
-                    previous.argumentsPreview ||
-                    "",
-            ),
-            resultPreview: String(
-                (payload && payload.result_preview) ||
-                    previous.resultPreview ||
-                    "",
-            ),
+            argumentsPreview: nextArguments,
+            resultPreview:
+                nextUiHint === "webchat_private_send" ||
+                nextUiHint === "webchat_end"
+                    ? ""
+                    : String(
+                          (payload && payload.result_preview) ||
+                              previous.resultPreview ||
+                              "",
+                      ),
+            uiHint: nextUiHint,
         };
         runtimeState.toolBlocks.set(key, block);
-        const item = ensureStreamingMessage();
+        const item = ensureStreamingMessage(jobId);
         if (!item) return;
         const toolsEl = item.querySelector(".runtime-chat-tools");
         if (toolsEl) {
@@ -605,6 +689,7 @@
         if (!log) return;
         log.innerHTML = "";
         runtimeState.streamingMessageId = null;
+        runtimeState.activeChatMessageId = null;
         runtimeState.toolBlocks.clear();
     }
 
@@ -1438,23 +1523,33 @@
                 runtimeState.lastEventSeq,
                 seq,
             );
+        const eventJobId =
+            payload && payload.job_id ? String(payload.job_id) : "";
         if (event === "meta") {
             if (payload && payload.job_id) {
                 runtimeState.activeJobId = String(payload.job_id);
+                const existing = findActiveChatMessage(
+                    runtimeState.activeJobId,
+                );
+                if (existing) existing.dataset.jobId = runtimeState.activeJobId;
             }
             return;
         }
         if (event === "token_delta") {
-            appendTokenDelta(payload && payload.delta ? payload.delta : "");
+            appendTokenDelta(
+                payload && payload.delta ? payload.delta : "",
+                eventJobId,
+            );
             return;
         }
         if (
+            event === "tool_delta" ||
             event === "tool_start" ||
             event === "tool_end" ||
             event === "agent_start" ||
             event === "agent_end"
         ) {
-            upsertToolBlock(payload || {}, event);
+            upsertToolBlock(payload || {}, event, eventJobId);
             return;
         }
         if (event === "message") {
@@ -1464,19 +1559,12 @@
                     : "",
             ).trim();
             if (!content) return;
-            const streaming = runtimeState.streamingMessageId
-                ? document.querySelector(
-                      `[data-message-id="${runtimeState.streamingMessageId}"]`,
-                  )
-                : null;
-            if (streaming && !(streaming.dataset.rawContent || "").trim()) {
-                streaming.dataset.rawContent = content;
-                updateChatMessage(streaming, content, "bot");
-                finishStreamingMessage();
-            } else {
-                finishStreamingMessage();
-                appendChatMessage("bot", content);
-            }
+            const item = ensureStreamingMessage(eventJobId);
+            if (!item) return;
+            item.dataset.rawContent = content;
+            updateChatMessage(item, content, "bot");
+            finishStreamingMessage();
+            scrollChatToBottom();
             return;
         }
         if (event === "done") {
@@ -1486,13 +1574,13 @@
                 runtimeState.streamingMessageId &&
                 !(
                     document.querySelector(
-                        `[data-message-id="${runtimeState.streamingMessageId}"]`,
+                        `[data-message-id="${CSS.escape(runtimeState.streamingMessageId)}"]`,
                     )?.dataset.rawContent || ""
                 ).trim()
             ) {
                 appendTokenDelta(String(payload.reply));
             }
-            finishStreamingMessage();
+            finalizeActiveChatMessage();
             runtimeState.activeJobId = null;
             runtimeState.chatBusy = false;
             runtimeState.chatHistoryLoaded = true;
@@ -1500,7 +1588,7 @@
             return;
         }
         if (event === "error") {
-            finishStreamingMessage();
+            finalizeActiveChatMessage();
             runtimeState.activeJobId = null;
             runtimeState.chatBusy = false;
             setButtonLoading(get("btnRuntimeChatSend"), false);
@@ -1640,6 +1728,7 @@
         setButtonLoading(button, true);
         runtimeState.toolBlocks.clear();
         runtimeState.streamingMessageId = null;
+        runtimeState.activeChatMessageId = null;
         runtimeState.lastEventSeq = 0;
         appendChatMessage("user", message);
         input.value = "";

@@ -243,6 +243,7 @@ curl http://127.0.0.1:8788/openapi.json
   - `event: error`：任务失败或取消。
   - 在长时间无内容时会发送 `: keep-alive` 注释帧，防止中间层空闲断连。
   - SSE 帧包含 `id: <seq>`，客户端可用 `after=<seq>` 续接 job 事件。
+  - 工具事件 payload 可能带 `ui_hint`。当前用于 WebChat 展示降噪：`webchat_private_send` 表示同一 WebChat 私聊回复已通过 `message` 事件展示，工具块只需显示发送状态；`webchat_end` 表示 `end` 成功结束，工具块可隐藏重复的成功结果。
 
 行为约定：
 
