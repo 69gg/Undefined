@@ -254,9 +254,51 @@ curl http://127.0.0.1:8788/openapi.json
 
 - `GET /api/v1/chat/history?limit=50&before=<cursor>`
 - 用于分页读取虚拟私聊 `system#42` 的历史记录。默认返回最新一页，响应包含 `items/has_more/next_before/total`。
+- 对于由 WebChat job 产生的回复，Bot 历史项可能包含 `webchat` 展示元数据：
+
+```json
+{
+  "role": "bot",
+  "content": "最终回复文本，可为空",
+  "timestamp": "2026-05-30 12:00:00",
+  "webchat": {
+    "display_only": true,
+    "job_id": "9c1...",
+    "mode": "chat",
+    "status": "done",
+    "events": [
+      {
+        "seq": 2,
+        "event": "tool_start",
+        "payload": {
+          "job_id": "9c1...",
+          "tool_call_id": "call_1",
+          "name": "search",
+          "arguments_preview": "{\"q\":\"test\"}",
+          "is_agent": false
+        }
+      },
+      {
+        "seq": 3,
+        "event": "tool_end",
+        "payload": {
+          "job_id": "9c1...",
+          "tool_call_id": "call_1",
+          "name": "search",
+          "ok": true,
+          "result_preview": "摘要",
+          "is_agent": false
+        }
+      }
+    ]
+  }
+}
+```
+
+`webchat.events` 只用于 WebUI 恢复工具/Agent 展示块，不作为 AI 后续对话上下文注入。若一次 job 没有正文但有工具事件，历史 API 仍会返回该 Bot 项，`content` 为空字符串。
 - `DELETE /api/v1/chat/history`
 - 仅清空 `system#42` 聊天历史 JSON 和内存历史，不删除长期记忆、认知记忆或 profile。
-- 如果存在运行中的 WebChat job，返回 `409`，避免旧任务继续写回已清空的历史。
+- 如果存在运行中或正在收尾落盘的 WebChat job，返回 `409`，避免旧任务继续写回已清空的历史。
 
 ### WebUI AI Chat Jobs
 

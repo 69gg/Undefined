@@ -601,28 +601,26 @@
         );
     }
 
-    function upsertToolBlock(payload, status, jobId = "") {
-        const key =
+    function toolBlockKey(payload, blocks) {
+        return (
             String(
                 payload && payload.tool_call_id ? payload.tool_call_id : "",
             ) ||
             String(payload && payload.name ? payload.name : "") ||
-            `tool-${runtimeState.toolBlocks.size + 1}`;
-        if (
-            !runtimeState.toolBlocks.has(key) &&
-            payload &&
-            payload.tool_call_id
-        ) {
+            `tool-${blocks.size + 1}`
+        );
+    }
+
+    function reduceToolBlock(blocks, payload, status) {
+        const key = toolBlockKey(payload, blocks);
+        if (!blocks.has(key) && payload && payload.tool_call_id) {
             const nameKey = String(payload.name || "");
-            if (nameKey && runtimeState.toolBlocks.has(nameKey)) {
-                runtimeState.toolBlocks.set(
-                    key,
-                    runtimeState.toolBlocks.get(nameKey),
-                );
-                runtimeState.toolBlocks.delete(nameKey);
+            if (nameKey && blocks.has(nameKey)) {
+                blocks.set(key, blocks.get(nameKey));
+                blocks.delete(nameKey);
             }
         }
-        const previous = runtimeState.toolBlocks.get(key) || {};
+        const previous = blocks.get(key) || {};
         const previousUiHint = String(previous.uiHint || "");
         const nextUiHint = String(
             (payload && payload.ui_hint) || previousUiHint,
@@ -659,23 +657,70 @@
                       ),
             uiHint: nextUiHint,
         };
-        runtimeState.toolBlocks.set(key, block);
+        blocks.set(key, block);
+        return block;
+    }
+
+    function renderToolBlocks(blocks) {
+        return Array.from(blocks.values()).map(renderToolBlock).join("");
+    }
+
+    function attachToolBlocks(item, blocks) {
+        if (!item || !blocks || blocks.size === 0) return;
+        let toolsEl = item.querySelector(".runtime-chat-tools");
+        if (!toolsEl) {
+            toolsEl = document.createElement("div");
+            toolsEl.className = "runtime-chat-tools";
+            item.appendChild(toolsEl);
+        }
+        toolsEl.innerHTML = renderToolBlocks(blocks);
+    }
+
+    function upsertToolBlock(payload, status, jobId = "") {
+        reduceToolBlock(runtimeState.toolBlocks, payload, status);
         const item = ensureStreamingMessage(jobId);
         if (!item) return;
-        const toolsEl = item.querySelector(".runtime-chat-tools");
-        if (toolsEl) {
-            toolsEl.innerHTML = Array.from(runtimeState.toolBlocks.values())
-                .map(renderToolBlock)
-                .join("");
-            return;
-        }
-        const container = document.createElement("div");
-        container.className = "runtime-chat-tools";
-        container.innerHTML = Array.from(runtimeState.toolBlocks.values())
-            .map(renderToolBlock)
-            .join("");
-        item.appendChild(container);
+        attachToolBlocks(item, runtimeState.toolBlocks);
         scrollChatToBottom();
+    }
+
+    function historyWebchatEvents(item) {
+        const webchat = item && item.webchat;
+        const events =
+            webchat && Array.isArray(webchat.events) ? webchat.events : [];
+        return events.filter((entry) => {
+            const event = entry && String(entry.event || "");
+            return (
+                event === "tool_start" ||
+                event === "tool_end" ||
+                event === "agent_start" ||
+                event === "agent_end"
+            );
+        });
+    }
+
+    function renderHistoryToolBlocks(item) {
+        const events = historyWebchatEvents(item);
+        if (!events.length) return null;
+        const blocks = new Map();
+        events.forEach((entry) => {
+            reduceToolBlock(blocks, entry.payload || {}, entry.event);
+        });
+        return blocks;
+    }
+
+    function appendHistoryChatItem(item, options = {}) {
+        const role = item && item.role === "bot" ? "bot" : "user";
+        const content = String((item && item.content) || "").trim();
+        const blocks = role === "bot" ? renderHistoryToolBlocks(item) : null;
+        if (!content && (!blocks || blocks.size === 0)) return null;
+        const message = appendChatMessage(role, content, options);
+        if (!message) return null;
+        if (!content) message.classList.add("tool-only");
+        if (blocks && blocks.size > 0) {
+            attachToolBlocks(message, blocks);
+        }
+        return message;
     }
 
     function clearChatMessages() {
@@ -1443,10 +1488,7 @@
         clearChatMessages();
         const items = data && Array.isArray(data.items) ? data.items : [];
         items.forEach((item) => {
-            const role = item && item.role === "bot" ? "bot" : "user";
-            const content = String((item && item.content) || "").trim();
-            if (!content) return;
-            appendChatMessage(role, content, { scroll: false });
+            appendHistoryChatItem(item, { scroll: false });
         });
         runtimeState.chatHistoryCursor =
             data && data.next_before !== undefined ? data.next_before : null;
@@ -1484,11 +1526,7 @@
             }
             const items = data && Array.isArray(data.items) ? data.items : [];
             for (let idx = items.length - 1; idx >= 0; idx -= 1) {
-                const item = items[idx];
-                const role = item && item.role === "bot" ? "bot" : "user";
-                const content = String((item && item.content) || "").trim();
-                if (!content) continue;
-                appendChatMessage(role, content, {
+                appendHistoryChatItem(items[idx], {
                     prepend: true,
                     scroll: false,
                 });

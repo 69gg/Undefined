@@ -226,3 +226,104 @@ async def test_chat_job_cancel_unknown_returns_404() -> None:
 
     assert response.status == 404
     assert payload["error"] == "Job not found"
+
+
+@pytest.mark.asyncio
+async def test_chat_job_persists_webchat_lifecycle_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    history_calls: list[dict[str, Any]] = []
+
+    class _History:
+        async def add_private_message(self, **kwargs: Any) -> None:
+            history_calls.append(dict(kwargs))
+
+        async def flush_pending_saves(self) -> None:
+            return None
+
+    async def _fake_render_message_with_pic_placeholders(
+        message: str,
+        *,
+        registry: Any,
+        scope_key: str,
+        strict: bool,
+    ) -> Any:
+        _ = registry, scope_key, strict
+        return SimpleNamespace(
+            delivery_text=f"rendered {message}",
+            history_text=f"history {message}",
+            attachments=[],
+        )
+
+    async def _fake_run_webui_chat(
+        _ctx: Any,
+        *,
+        text: str,
+        send_output: Any,
+        webchat_event_callback: Any = None,
+    ) -> str:
+        assert text == "hello"
+        assert webchat_event_callback is not None
+        await webchat_event_callback("token_delta", {"delta": "ignored"})
+        await webchat_event_callback(
+            "tool_start",
+            {
+                "tool_call_id": "call_1",
+                "name": "messages.send_private_message",
+                "api_name": "messages.send_private_message",
+                "arguments": {"target_id": 42, "message": "secret"},
+            },
+        )
+        await webchat_event_callback(
+            "tool_end",
+            {
+                "tool_call_id": "call_1",
+                "name": "messages.send_private_message",
+                "api_name": "messages.send_private_message",
+                "ok": True,
+                "result": "已发送",
+            },
+        )
+        await send_output(42, "final")
+        return "chat"
+
+    context = _context()
+    context.history_manager = _History()
+    monkeypatch.setattr(
+        runtime_api_chat,
+        "render_message_with_pic_placeholders",
+        _fake_render_message_with_pic_placeholders,
+    )
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+
+    response = await server._chat_job_create_handler(
+        cast(
+            web.Request, cast(Any, _DummyRequest(_json={"message": "hello"}, query={}))
+        )
+    )
+    job_id = str(json.loads(response.text or "{}")["job_id"])
+    detail_request = cast(
+        web.Request,
+        cast(Any, _DummyRequest(match_info={"job_id": job_id}, query={})),
+    )
+    for _ in range(20):
+        detail_response = await server._chat_job_detail_handler(detail_request)
+        detail_payload = json.loads(detail_response.text or "{}")
+        if detail_payload["history_finalized"] is True:
+            break
+        await asyncio.sleep(0.01)
+
+    assert len(history_calls) == 1
+    call = history_calls[0]
+    assert call["user_id"] == 42
+    assert call["text_content"] == "history final"
+    webchat = call["webchat"]
+    assert webchat["display_only"] is True
+    assert webchat["job_id"] == job_id
+    assert [event["event"] for event in webchat["events"]] == [
+        "tool_start",
+        "tool_end",
+    ]
+    assert webchat["events"][0]["payload"]["arguments_preview"] == ""
+    assert webchat["events"][1]["payload"]["result_preview"] == ""

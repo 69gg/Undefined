@@ -428,6 +428,7 @@ class MessageHistoryManager:
         user_name: str = "",
         message_id: int | None = None,
         attachments: list[dict[str, str]] | None = None,
+        webchat: dict[str, Any] | None = None,
     ) -> None:
         """异步保存私聊消息到历史记录"""
         await self._ensure_initialized()
@@ -456,6 +457,8 @@ class MessageHistoryManager:
                 record["message_id"] = message_id
             if attachments:
                 record["attachments"] = attachments
+            if isinstance(webchat, dict):
+                record["webchat"] = webchat
 
             self._private_message_history[user_id_str].append(record)
 

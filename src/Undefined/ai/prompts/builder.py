@@ -33,6 +33,18 @@ from Undefined.ai.prompts.system_context import (
 logger = logging.getLogger(__name__)
 
 
+def _is_display_only_history_record(msg: dict[str, Any]) -> bool:
+    if str(msg.get("message", "") or "").strip():
+        return False
+    webchat = msg.get("webchat")
+    if not isinstance(webchat, dict):
+        return False
+    events = webchat.get("events")
+    return (
+        bool(webchat.get("display_only")) and isinstance(events, list) and bool(events)
+    )
+
+
 class PromptBuilder:
     """Prompt 构建器。
 
@@ -570,6 +582,9 @@ class PromptBuilder:
                 recent_limit,
             )
             recent_msgs = drop_current_message_if_duplicated(recent_msgs, question)
+            recent_msgs = [
+                msg for msg in recent_msgs if not _is_display_only_history_record(msg)
+            ]
             context_lines: list[str] = [format_message_xml(msg) for msg in recent_msgs]
 
             formatted_context = "\n---\n".join(context_lines)

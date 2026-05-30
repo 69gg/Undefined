@@ -156,7 +156,10 @@ async def test_runtime_chat_stream_renders_each_message_once(
         ),
         command_dispatcher=SimpleNamespace(),
         queue_manager=SimpleNamespace(snapshot=lambda: {}),
-        history_manager=SimpleNamespace(add_private_message=AsyncMock()),
+        history_manager=SimpleNamespace(
+            add_private_message=AsyncMock(),
+            flush_pending_saves=AsyncMock(),
+        ),
     )
     server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
 
@@ -192,6 +195,7 @@ async def test_runtime_chat_stream_renders_each_message_once(
     assert "rendered stream reply" in payload
     assert "event: done" in payload
     assert response.eof_written is True
+    context.history_manager.add_private_message.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -231,7 +235,10 @@ async def test_runtime_chat_stream_uses_webchat_lifecycle_events_only(
         ),
         command_dispatcher=SimpleNamespace(),
         queue_manager=SimpleNamespace(snapshot=lambda: {}),
-        history_manager=SimpleNamespace(add_private_message=AsyncMock()),
+        history_manager=SimpleNamespace(
+            add_private_message=AsyncMock(),
+            flush_pending_saves=AsyncMock(),
+        ),
     )
     server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
 

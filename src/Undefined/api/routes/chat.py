@@ -51,6 +51,9 @@ _WEBCHAT_SEND_MESSAGE_TOOLS = frozenset(
         "send_private_message",
     }
 )
+_WEBCHAT_LIFECYCLE_EVENTS = frozenset(
+    {"tool_start", "tool_end", "agent_start", "agent_end"}
+)
 
 
 @dataclass
@@ -69,10 +72,16 @@ class ChatJob:
     status: str = "queued"
     mode: str = "chat"
     outputs: list[str] = field(default_factory=list)
+    history_outputs: list[str] = field(default_factory=list)
+    history_attachments: list[dict[str, str]] = field(default_factory=list)
+    webchat_events: list[ChatJobEvent] = field(default_factory=list)
     events: list[ChatJobEvent] = field(default_factory=list)
     next_seq: int = 1
     task: asyncio.Task[None] | None = None
     error: str = ""
+    history_finalized: bool = False
+    cancel_finalizer_scheduled: bool = False
+    history_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     done: asyncio.Event = field(default_factory=asyncio.Event)
     changed: asyncio.Condition = field(default_factory=asyncio.Condition)
 
@@ -87,6 +96,7 @@ class ChatJob:
             "error": self.error or None,
             "reply": "\n\n".join(self.outputs).strip(),
             "messages": list(self.outputs),
+            "history_finalized": self.history_finalized,
         }
 
 
@@ -127,14 +137,33 @@ class ChatJobManager:
             candidates = [
                 job
                 for job in self._jobs.values()
-                if job.status in {"queued", "running"}
+                if self._job_blocks_history_mutation(job)
             ]
         if not candidates:
             return None
         return max(candidates, key=lambda item: item.created_at)
 
     async def has_running_job(self) -> bool:
-        return await self.get_active_job() is not None
+        async with self._lock:
+            return any(
+                self._job_blocks_history_mutation(job) for job in self._jobs.values()
+            )
+
+    def _job_blocks_history_mutation(self, job: ChatJob) -> bool:
+        if job.status in {"queued", "running"}:
+            return True
+        return not job.done.is_set() or not job.history_finalized
+
+    async def clear_history_when_idle(self) -> int | None:
+        async with self._lock:
+            if any(
+                self._job_blocks_history_mutation(job) for job in self._jobs.values()
+            ):
+                return None
+            clearer = getattr(self._ctx.history_manager, "clear_private_history", None)
+            if not callable(clearer):
+                raise RuntimeError("History manager not ready")
+            return int(await clearer(_VIRTUAL_USER_ID) or 0)
 
     async def cancel_job(self, job_id: str) -> ChatJob | None:
         job = await self.get_job(job_id)
@@ -146,6 +175,7 @@ class ChatJobManager:
         job.updated_at = time.time()
         if job.task is not None and not job.task.done():
             job.task.cancel()
+            self._schedule_cancel_finalizer(job)
         if not any(
             event.event == "error" and event.payload.get("error") == "cancelled"
             for event in job.events
@@ -155,8 +185,37 @@ class ChatJobManager:
                 "error",
                 {"error": "cancelled", "job_id": job.job_id},
             )
-        job.done.set()
+        if job.task is None or job.task.done():
+            job.history_finalized = True
+            job.done.set()
         return job
+
+    def _schedule_cancel_finalizer(self, job: ChatJob) -> None:
+        if job.cancel_finalizer_scheduled:
+            return
+        if job.task is None:
+            return
+        job.cancel_finalizer_scheduled = True
+        loop = asyncio.get_running_loop()
+
+        def _on_done(_task: asyncio.Task[None]) -> None:
+            loop.create_task(
+                self._complete_cancelled_job(job),
+                name=f"webchat-cancel-finalize:{job.job_id}",
+            )
+
+        job.task.add_done_callback(_on_done)
+
+    async def _complete_cancelled_job(self, job: ChatJob) -> None:
+        try:
+            await self._finalize_job_history(job)
+        except Exception as exc:
+            logger.exception(
+                "[RuntimeAPI] cancelled chat job history finalize failed: %s", exc
+            )
+            job.history_finalized = True
+        finally:
+            job.done.set()
 
     async def events_after(self, job: ChatJob, after: int) -> list[ChatJobEvent]:
         async with job.changed:
@@ -204,13 +263,8 @@ class ChatJobManager:
                 return
             outputs.append(rendered.delivery_text)
             job.outputs.append(rendered.delivery_text)
-            await self._ctx.history_manager.add_private_message(
-                user_id=_VIRTUAL_USER_ID,
-                text_content=rendered.history_text,
-                display_name="Bot",
-                user_name="Bot",
-                attachments=rendered.attachments,
-            )
+            job.history_outputs.append(rendered.history_text)
+            job.history_attachments.extend(rendered.attachments)
             await self._append_event(
                 job,
                 "message",
@@ -265,22 +319,61 @@ class ChatJobManager:
                 {"error": str(exc), "job_id": job.job_id},
             )
         finally:
+            try:
+                await self._finalize_job_history(job)
+            except Exception as exc:
+                logger.exception(
+                    "[RuntimeAPI] chat job history finalize failed: %s", exc
+                )
+                job.history_finalized = True
             job.done.set()
 
     async def _append_event(
         self, job: ChatJob, event: str, payload: dict[str, Any]
-    ) -> None:
+    ) -> ChatJobEvent:
         async with job.changed:
-            normalized_event = str(payload.pop("_event", event) or event)
+            payload_copy = dict(payload)
+            normalized_event = str(payload_copy.pop("_event", event) or event)
             item = ChatJobEvent(
-                seq=job.next_seq, event=normalized_event, payload=payload
+                seq=job.next_seq, event=normalized_event, payload=payload_copy
             )
             job.next_seq += 1
             job.updated_at = time.time()
             job.events.append(item)
             if len(job.events) > _CHAT_JOB_EVENT_BUFFER_LIMIT:
                 job.events = job.events[-_CHAT_JOB_EVENT_BUFFER_LIMIT:]
+            if item.event in _WEBCHAT_LIFECYCLE_EVENTS:
+                job.webchat_events.append(item)
+                if len(job.webchat_events) > _CHAT_JOB_EVENT_BUFFER_LIMIT:
+                    job.webchat_events = job.webchat_events[
+                        -_CHAT_JOB_EVENT_BUFFER_LIMIT:
+                    ]
             job.changed.notify_all()
+            return item
+
+    async def _finalize_job_history(self, job: ChatJob) -> None:
+        async with job.history_lock:
+            if job.history_finalized:
+                return
+            text_content = "\n\n".join(job.history_outputs).strip()
+            webchat = _build_webchat_history_payload(job)
+            if text_content or webchat["events"]:
+                await self._ctx.history_manager.add_private_message(
+                    user_id=_VIRTUAL_USER_ID,
+                    text_content=text_content,
+                    display_name="Bot",
+                    user_name="Bot",
+                    attachments=job.history_attachments or None,
+                    webchat=webchat,
+                )
+                flusher = getattr(
+                    self._ctx.history_manager, "flush_pending_saves", None
+                )
+                if callable(flusher):
+                    maybe_awaitable = flusher()
+                    if inspect.isawaitable(maybe_awaitable):
+                        await maybe_awaitable
+            job.history_finalized = True
 
 
 def _preview(value: Any, limit: int = _PREVIEW_LIMIT) -> str:
@@ -374,6 +467,63 @@ def _sanitize_webchat_event_payload(
     return {key: value for key, value in payload.items() if key != "arguments"}
 
 
+def _build_webchat_history_payload(job: ChatJob) -> dict[str, Any]:
+    return {
+        "display_only": True,
+        "job_id": job.job_id,
+        "mode": job.mode,
+        "status": job.status,
+        "events": [
+            {
+                "seq": item.seq,
+                "event": item.event,
+                "payload": dict(item.payload),
+            }
+            for item in job.webchat_events
+        ],
+    }
+
+
+def _webchat_history_events(webchat: Any) -> list[dict[str, Any]]:
+    if not isinstance(webchat, dict):
+        return []
+    raw_events = webchat.get("events")
+    if not isinstance(raw_events, list):
+        return []
+    events: list[dict[str, Any]] = []
+    for item in raw_events:
+        if not isinstance(item, dict):
+            continue
+        event = str(item.get("event", "") or "").strip()
+        if event not in _WEBCHAT_LIFECYCLE_EVENTS:
+            continue
+        payload = item.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+        seq_raw = item.get("seq", 0)
+        try:
+            seq = max(0, int(seq_raw))
+        except (TypeError, ValueError):
+            seq = 0
+        events.append({"seq": seq, "event": event, "payload": dict(payload)})
+    return events
+
+
+def _is_webchat_display_only_record(item: dict[str, Any]) -> bool:
+    if str(item.get("message", "") or "").strip():
+        return False
+    webchat = item.get("webchat")
+    if not isinstance(webchat, dict):
+        return False
+    return bool(webchat.get("display_only")) and bool(_webchat_history_events(webchat))
+
+
+def _filter_webchat_display_only_records(
+    records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [item for item in records if not _is_webchat_display_only_record(item)]
+
+
 async def _write_sse_event(response: web.StreamResponse, item: ChatJobEvent) -> None:
     await response.write(_sse_event(item.event, item.payload, item.seq))
 
@@ -412,15 +562,26 @@ def _parse_after(request: web.Request) -> int:
 
 def _history_record_to_item(item: dict[str, Any]) -> dict[str, Any] | None:
     content = str(item.get("message", "")).strip()
-    if not content:
+    webchat = item.get("webchat")
+    webchat_events = _webchat_history_events(webchat)
+    if not content and not webchat_events:
         return None
     display_name = str(item.get("display_name", "")).strip().lower()
     role = "bot" if display_name == "bot" else "user"
-    return {
+    mapped: dict[str, Any] = {
         "role": role,
         "content": content,
         "timestamp": str(item.get("timestamp", "") or "").strip(),
     }
+    if isinstance(webchat, dict) and webchat_events:
+        mapped["webchat"] = {
+            "display_only": bool(webchat.get("display_only")),
+            "job_id": str(webchat.get("job_id", "") or "").strip(),
+            "mode": str(webchat.get("mode", "") or "").strip(),
+            "status": str(webchat.get("status", "") or "").strip(),
+            "events": webchat_events,
+        }
+    return mapped
 
 
 async def run_webui_chat(
@@ -490,7 +651,7 @@ async def run_webui_chat(
     async def _get_recent_cb(
         chat_id: str, msg_type: str, start: int, end: int
     ) -> list[dict[str, Any]]:
-        return await get_recent_messages_prefer_local(
+        recent_messages = await get_recent_messages_prefer_local(
             chat_id=chat_id,
             msg_type=msg_type,
             start=start,
@@ -500,6 +661,7 @@ async def run_webui_chat(
             bot_qq=cfg.bot_qq,
             attachment_registry=getattr(ctx.ai, "attachment_registry", None),
         )
+        return _filter_webchat_display_only_records(recent_messages)
 
     async with RequestContext(
         request_type="private",
@@ -617,17 +779,19 @@ async def chat_history_clear_handler(
     """Clear WebUI virtual private chat history only."""
 
     _ = request
-    if await job_manager.has_running_job():
-        return _json_error("Chat job is still running", status=409)
-    clearer = getattr(ctx.history_manager, "clear_private_history", None)
-    if not callable(clearer):
+    if not hasattr(ctx.history_manager, "clear_private_history"):
         return _json_error("History manager not ready", status=503)
-    cleared = await clearer(_VIRTUAL_USER_ID)
+    try:
+        cleared = await job_manager.clear_history_when_idle()
+    except RuntimeError:
+        return _json_error("History manager not ready", status=503)
+    if cleared is None:
+        return _json_error("Chat job is still running", status=409)
     return web.json_response(
         {
             "success": True,
             "virtual_user_id": _VIRTUAL_USER_ID,
-            "cleared": int(cleared or 0),
+            "cleared": cleared,
         }
     )
 

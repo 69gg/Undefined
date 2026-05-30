@@ -33,3 +33,22 @@ def test_webchat_frontend_handles_tool_lifecycle_and_webchat_hints() -> None:
     assert 'block.uiHint === "webchat_private_send"' in source
     assert 'block.uiHint === "webchat_end"' in source
     assert 'nextUiHint === "webchat_private_send"' in source
+
+
+def test_webchat_frontend_restores_history_tool_blocks_without_stream_state() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+
+    assert "function appendHistoryChatItem" in source
+    assert "function renderHistoryToolBlocks" in source
+    assert "function reduceToolBlock" in source
+    assert 'message.classList.add("tool-only")' in source
+    assert "appendHistoryChatItem(item, { scroll: false })" in source
+    assert "appendHistoryChatItem(items[idx], {" in source
+
+    history_helper = source.split("function appendHistoryChatItem", 1)[1].split(
+        "function clearChatMessages", 1
+    )[0]
+    assert "applyChatEvent(" not in history_helper
+    assert "upsertToolBlock(" not in history_helper
+    assert "ensureStreamingMessage(" not in history_helper
+    assert "data-job-id" not in history_helper

@@ -640,6 +640,9 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+.runtime-chat-item.tool-only .runtime-chat-content {
+  display: none;
+}
 .runtime-chat-content.markdown {
   white-space: normal;
 }
@@ -810,6 +813,9 @@
   display: grid;
   gap: 8px;
   margin-top: 10px;
+}
+.runtime-chat-item.tool-only .runtime-chat-tools {
+  margin-top: 0;
 }
 .runtime-tool-block {
   border: 1px solid var(--border-color);

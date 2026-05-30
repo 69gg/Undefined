@@ -15,7 +15,7 @@ from Undefined.api.routes import chat as runtime_api_chat
 
 class _DummyHistoryManager:
     def __init__(self) -> None:
-        self.records = [
+        self.records: list[dict[str, Any]] = [
             {
                 "display_name": "system",
                 "message": "你好",
@@ -102,6 +102,85 @@ async def test_runtime_chat_history_endpoint_returns_role_mapped_items() -> None
     assert payload["items"][0]["content"] == "你好"
     assert payload["items"][1]["role"] == "bot"
     assert payload["items"][1]["content"] == "你好，我在。"
+
+
+@pytest.mark.asyncio
+async def test_runtime_chat_history_endpoint_returns_webchat_metadata_only_item() -> (
+    None
+):
+    history = _DummyHistoryManager()
+    history.records = [
+        {
+            "display_name": "Bot",
+            "message": "",
+            "timestamp": "2026-02-25 22:00:02",
+            "webchat": {
+                "display_only": True,
+                "job_id": "job_1",
+                "mode": "chat",
+                "status": "done",
+                "events": [
+                    {
+                        "seq": 2,
+                        "event": "tool_start",
+                        "payload": {
+                            "job_id": "job_1",
+                            "tool_call_id": "call_1",
+                            "name": "search",
+                            "arguments_preview": '{"q":"test"}',
+                            "is_agent": False,
+                        },
+                    },
+                    {
+                        "seq": 3,
+                        "event": "tool_end",
+                        "payload": {
+                            "job_id": "job_1",
+                            "tool_call_id": "call_1",
+                            "name": "search",
+                            "ok": True,
+                            "result_preview": "ok",
+                            "is_agent": False,
+                        },
+                    },
+                ],
+            },
+        }
+    ]
+    context = RuntimeAPIContext(
+        config_getter=lambda: SimpleNamespace(
+            api=SimpleNamespace(
+                enabled=True,
+                host="127.0.0.1",
+                port=8788,
+                auth_key="changeme",
+                openapi_enabled=True,
+            ),
+            superadmin_qq=10001,
+            bot_qq=20002,
+        ),
+        onebot=SimpleNamespace(connection_status=lambda: {}),
+        ai=SimpleNamespace(memory_storage=SimpleNamespace(count=lambda: 0)),
+        command_dispatcher=SimpleNamespace(parse_command=lambda _text: None),
+        queue_manager=SimpleNamespace(snapshot=lambda: {}),
+        history_manager=history,
+    )
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+
+    response = await server._chat_history_handler(
+        cast(web.Request, cast(Any, SimpleNamespace(query={"limit": "1"})))
+    )
+    payload = json.loads(response.text or "{}")
+
+    assert payload["count"] == 1
+    item = payload["items"][0]
+    assert item["role"] == "bot"
+    assert item["content"] == ""
+    assert item["webchat"]["job_id"] == "job_1"
+    assert [event["event"] for event in item["webchat"]["events"]] == [
+        "tool_start",
+        "tool_end",
+    ]
 
 
 @pytest.mark.asyncio
@@ -228,3 +307,65 @@ async def test_runtime_chat_history_clear_returns_409_for_running_job(
 
     assert response.status == 409
     assert payload["error"] == "Chat job is still running"
+
+
+@pytest.mark.asyncio
+async def test_runtime_chat_history_clear_returns_409_until_history_finalized() -> None:
+    history = _DummyHistoryManager()
+    context = RuntimeAPIContext(
+        config_getter=lambda: SimpleNamespace(
+            api=SimpleNamespace(
+                enabled=True,
+                host="127.0.0.1",
+                port=8788,
+                auth_key="changeme",
+                openapi_enabled=True,
+            ),
+            superadmin_qq=10001,
+            bot_qq=20002,
+        ),
+        onebot=SimpleNamespace(connection_status=lambda: {}),
+        ai=SimpleNamespace(
+            attachment_registry=object(),
+            memory_storage=SimpleNamespace(count=lambda: 0),
+        ),
+        command_dispatcher=SimpleNamespace(),
+        queue_manager=SimpleNamespace(snapshot=lambda: {}),
+        history_manager=SimpleNamespace(
+            add_private_message=AsyncMock(),
+            clear_private_history=history.clear_private_history,
+        ),
+    )
+    manager = runtime_api_chat.ChatJobManager(context)
+    job = runtime_api_chat.ChatJob(
+        job_id="job_finalizing",
+        text="hello",
+        created_at=1.0,
+        updated_at=1.0,
+        status="done",
+        history_finalized=False,
+    )
+    manager._jobs[job.job_id] = job
+
+    response = await runtime_api_chat.chat_history_clear_handler(
+        context,
+        manager,
+        cast(web.Request, cast(Any, SimpleNamespace(query={}))),
+    )
+    payload = json.loads(response.text or "{}")
+
+    assert response.status == 409
+    assert payload["error"] == "Chat job is still running"
+    assert history.records
+
+    job.history_finalized = True
+    job.done.set()
+    response = await runtime_api_chat.chat_history_clear_handler(
+        context,
+        manager,
+        cast(web.Request, cast(Any, SimpleNamespace(query={}))),
+    )
+    payload = json.loads(response.text or "{}")
+
+    assert response.status == 200
+    assert payload["cleared"] == 2
