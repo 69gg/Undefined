@@ -417,6 +417,19 @@ class AgentToolRegistry(BaseRegistry):
                 # 构造被调用方上下文，避免复用调用方身份与历史。
                 callee_context = context.copy()
                 callee_context["agent_name"] = target_agent_name
+                parent_call_id = str(context.get("webchat_parent_call_id") or "")
+                if parent_call_id:
+                    callee_context["webchat_parent_call_id"] = parent_call_id
+                try:
+                    callee_context["webchat_depth"] = max(
+                        0, int(context.get("webchat_depth", 0) or 0)
+                    )
+                except (TypeError, ValueError):
+                    callee_context["webchat_depth"] = 0
+                agent_path = context.get("webchat_agent_path")
+                callee_context["webchat_agent_path"] = (
+                    list(agent_path) if isinstance(agent_path, list) else []
+                )
 
                 agent_histories = context.get("agent_histories")
                 if not isinstance(agent_histories, dict):

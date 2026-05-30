@@ -244,7 +244,9 @@ curl http://127.0.0.1:8788/openapi.json
   - SSE 帧包含 `id: <seq>`，客户端可用 `after=<seq>` 续接 job 事件。
   - `stage` 是实时 UI 状态事件，不写入 `webchat.events` 历史；刷新后只恢复已落盘的工具 / Agent / 正文时序。
   - WebChat SSE 不发布模型 token 级文本增量，也不发布工具参数增量；正文以 `message` 事件展示，工具只按生命周期事件展示。
-  - 工具结束事件 payload 会尽量带 `duration_ms`，用于 WebUI 在工具块状态后显示本次调用耗时；`done` / `error` payload 会带 `duration_ms` 表示整轮 job 总耗时。总耗时从 job 创建开始计，到 `done`/`error`/`cancelled` 收尾为止。
+  - 工具结束事件 payload 会尽量带 `duration_ms`，用于 WebUI 在工具块状态后显示本次调用耗时；并发工具按实际完成时间发布结束事件，LLM tool message 回填仍保持模型要求的原始顺序。`done` / `error` payload 会带 `duration_ms` 表示整轮 job 总耗时。总耗时从 job 创建开始计，到 `done`/`error`/`cancelled` 收尾为止。
+  - 工具 / Agent 事件 payload 由后端补齐调用链字段：`webchat_call_id`、`parent_webchat_call_id`、`depth`、`agent_path`。Agent 内部工具或子 Agent 调用会以父子关系嵌套，前端只按这些字段展示。
+  - 工具 / Agent 事件 payload 由后端补齐 `status`，取值通常为 `running`、`done`、`error`、`cancelled`。如果 job 失败或取消时仍有未闭合调用，历史 metadata 会在统一落盘阶段补齐失败 / 取消终态，避免刷新后继续显示为运行中。
   - WebUI 展开工具 / Agent 调用块时，会按输入 / 输出分区展示脱敏截断后的 `arguments_preview` 和 `result_preview`；结构化预览会渲染为带颜色的键值字段。
   - 工具事件 payload 可能带 `ui_hint`。当前用于 WebChat 展示降噪：`webchat_private_send` 表示同一 WebChat 私聊回复已通过 `message` 事件展示，工具块只需显示发送状态；`webchat_end` 表示 `end` 成功结束，工具块可隐藏重复的成功结果。
 
@@ -273,6 +275,61 @@ curl http://127.0.0.1:8788/openapi.json
     "created_at": 1780123200.0,
     "finished_at": 1780123201.5,
     "duration_ms": 1500,
+    "timeline": [
+      {
+        "type": "call",
+        "seq": 2,
+        "call": {
+          "webchat_call_id": "call_agent",
+          "name": "web_agent",
+          "is_agent": true,
+          "status": "done",
+          "duration_ms": 900,
+          "children": [
+            {
+              "webchat_call_id": "call_agent/call_search",
+              "parent_webchat_call_id": "call_agent",
+              "name": "search",
+              "is_agent": false,
+              "status": "done",
+              "result_preview": "摘要",
+              "duration_ms": 420,
+              "children": []
+            }
+          ]
+        }
+      },
+      {
+        "type": "message",
+        "seq": 4,
+        "content": "中间回复文本",
+        "elapsed_ms": 860
+      }
+    ],
+    "calls": [
+      {
+        "webchat_call_id": "call_agent",
+        "parent_webchat_call_id": "",
+        "tool_call_id": "call_agent",
+        "name": "web_agent",
+        "is_agent": true,
+        "status": "done",
+        "duration_ms": 900,
+        "children": [
+          {
+            "webchat_call_id": "call_agent/call_search",
+            "parent_webchat_call_id": "call_agent",
+            "tool_call_id": "call_search",
+            "name": "search",
+            "is_agent": false,
+            "status": "done",
+            "result_preview": "摘要",
+            "duration_ms": 420,
+            "children": []
+          }
+        ]
+      }
+    ],
     "events": [
       {
         "seq": 2,
@@ -311,7 +368,7 @@ curl http://127.0.0.1:8788/openapi.json
 }
 ```
 
-`webchat.events` 只用于 WebUI 按事件时序恢复同一 AI 气泡里的工具 / Agent 展示块和正文节点，不作为 AI 后续对话上下文注入。若一次 job 没有正文但有工具事件，历史 API 仍会返回该 Bot 项，`content` 为空字符串。
+`webchat.timeline` 是后端生成的权威历史展示序列，按 `seq` 混排顶层工具 / Agent 调用节点与正文消息，前端刷新后优先按它忠实渲染同一 AI 气泡。`webchat.calls` 是后端由生命周期事件汇总出的调用树，包含每个工具 / Agent 的输入预览、输出预览、状态、耗时和 `children`，用于恢复嵌套展示。`webchat.events` 保留原始生命周期 / 正文事件，供兼容旧历史与诊断使用，不作为 AI 后续对话上下文注入。若一次 job 没有正文但有工具事件，历史 API 仍会返回该 Bot 项，`content` 为空字符串。
 - `DELETE /api/v1/chat/history`
 - 仅清空 `system#42` 聊天历史 JSON 和内存历史，不删除长期记忆、认知记忆或 profile。
 - 如果存在运行中或正在收尾落盘的 WebChat job，返回 `409`，避免旧任务继续写回已清空的历史。

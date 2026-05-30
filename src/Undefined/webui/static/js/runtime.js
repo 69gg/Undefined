@@ -651,6 +651,7 @@
         }
         if (block.status === "done") return t("runtime.done");
         if (block.status === "error") return t("runtime.error");
+        if (block.status === "cancelled") return t("runtime.cancelled");
         return t("runtime.running");
     }
 
@@ -789,6 +790,12 @@
             block.resultPreview,
             { markdown: true },
         );
+        const children = Array.isArray(block.children)
+            ? block.children.map((child) => renderToolBlock(child)).join("")
+            : "";
+        const childHtml = children
+            ? `<div class="runtime-tool-children">${children}</div>`
+            : "";
         const openAttr = block.status === "running" ? " open" : "";
         const hintClass = block.uiHint
             ? ` ${escapeHtml(String(block.uiHint).replace(/_/g, "-"))}`
@@ -798,6 +805,7 @@
             `<summary><span>${escapeHtml(label)}</span><code>${escapeHtml(block.name || "--")}</code><em>${escapeHtml(metaLabel)}</em></summary>` +
             args +
             result +
+            childHtml +
             `</details>`
         );
     }
@@ -805,11 +813,52 @@
     function toolBlockKey(payload, blocks) {
         return (
             String(
+                payload && payload.webchat_call_id
+                    ? payload.webchat_call_id
+                    : "",
+            ) ||
+            String(
                 payload && payload.tool_call_id ? payload.tool_call_id : "",
             ) ||
             String(payload && payload.name ? payload.name : "") ||
             `tool-${blocks.size + 1}`
         );
+    }
+
+    function normalizeToolCallNode(node) {
+        if (!node || typeof node !== "object") return null;
+        const children = Array.isArray(node.children)
+            ? node.children.map(normalizeToolCallNode).filter(Boolean)
+            : [];
+        return {
+            name: String(node.name || ""),
+            isAgent: !!node.is_agent,
+            status: String(node.status || "done"),
+            argumentsPreview: String(node.arguments_preview || ""),
+            resultPreview: String(node.result_preview || ""),
+            uiHint: String(node.ui_hint || ""),
+            durationMs:
+                node.duration_ms !== undefined
+                    ? Number(node.duration_ms)
+                    : undefined,
+            children,
+        };
+    }
+
+    function normalizeHistoryTimelineNode(node) {
+        if (!node || typeof node !== "object") return null;
+        const type = String(node.type || "").trim();
+        if (type === "message") {
+            return {
+                type,
+                content: String(node.content || ""),
+            };
+        }
+        if (type === "call") {
+            const call = normalizeToolCallNode(node.call);
+            return call ? { type, call } : null;
+        }
+        return null;
     }
 
     function reduceToolBlock(blocks, payload, status) {
@@ -826,6 +875,7 @@
         const nextUiHint = String(
             (payload && payload.ui_hint) || previousUiHint,
         );
+        const nextStatus = String((payload && payload.status) || "").trim();
         const nextArguments = String(
             (payload && payload.arguments_preview) ||
                 previous.argumentsPreview ||
@@ -841,11 +891,12 @@
                 status === "agent_end"
             ),
             status:
-                status === "tool_end" || status === "agent_end"
+                nextStatus ||
+                (status === "tool_end" || status === "agent_end"
                     ? payload && payload.ok === false
                         ? "error"
                         : "done"
-                    : "running",
+                    : "running"),
             argumentsPreview: nextArguments,
             resultPreview:
                 nextUiHint === "webchat_private_send" ||
@@ -861,9 +912,28 @@
                 payload && payload.duration_ms !== undefined
                     ? Number(payload.duration_ms)
                     : previous.durationMs,
+            parentWebchatCallId: String(
+                (payload && payload.parent_webchat_call_id) ||
+                    previous.parentWebchatCallId ||
+                    "",
+            ),
+            children: Array.isArray(previous.children) ? previous.children : [],
         };
         blocks.set(key, block);
         return block;
+    }
+
+    function topLevelToolKey(blocks, key) {
+        let currentKey = String(key || "").trim();
+        const seen = new Set();
+        while (currentKey && blocks.has(currentKey) && !seen.has(currentKey)) {
+            seen.add(currentKey);
+            const block = blocks.get(currentKey);
+            const parentKey = String(block.parentWebchatCallId || "").trim();
+            if (!parentKey || !blocks.has(parentKey)) return currentKey;
+            currentKey = parentKey;
+        }
+        return currentKey || String(key || "");
     }
 
     function timelineToolKey(payload, blocks) {
@@ -876,6 +946,32 @@
         const block = reduceToolBlock(blocks, payload, status);
         const timeline = ensureTimelineNodeContainer(item);
         if (!timeline) return null;
+        const parentKey = String(
+            (payload && payload.parent_webchat_call_id) || "",
+        ).trim();
+        if (parentKey && blocks.has(parentKey)) {
+            const parent = blocks.get(parentKey);
+            const siblings = Array.isArray(parent.children)
+                ? parent.children.filter((child) => child !== block)
+                : [];
+            parent.children = [...siblings, block];
+            const parentNode = timeline.querySelector(
+                `[data-tool-key="${CSS.escape(parentKey)}"]`,
+            );
+            if (parentNode) {
+                parentNode.innerHTML = renderToolBlock(parent);
+                return parentNode;
+            }
+            const rootKey = topLevelToolKey(blocks, parentKey);
+            const root = blocks.get(rootKey);
+            const rootNode = timeline.querySelector(
+                `[data-tool-key="${CSS.escape(rootKey)}"]`,
+            );
+            if (root && rootNode) {
+                rootNode.innerHTML = renderToolBlock(root);
+                return rootNode;
+            }
+        }
         let node = timeline.querySelector(
             `[data-tool-key="${CSS.escape(key)}"]`,
         );
@@ -915,6 +1011,65 @@
     function renderHistoryTimeline(item, message) {
         const events = historyWebchatEvents(item);
         if (!message || !events.length) return false;
+        const calls =
+            item && item.webchat && Array.isArray(item.webchat.calls)
+                ? item.webchat.calls
+                : [];
+        const timelineItems =
+            item && item.webchat && Array.isArray(item.webchat.timeline)
+                ? item.webchat.timeline
+                : [];
+        if (timelineItems.length) {
+            const timeline = ensureTimelineNodeContainer(message);
+            if (timeline) {
+                timelineItems
+                    .map(normalizeHistoryTimelineNode)
+                    .filter(Boolean)
+                    .forEach((entry, index) => {
+                        if (entry.type === "message") {
+                            appendTimelineMessage(
+                                message,
+                                entry.content,
+                                "bot",
+                            );
+                            return;
+                        }
+                        if (entry.type !== "call" || !entry.call) return;
+                        const node = document.createElement("div");
+                        node.className = "runtime-chat-tools";
+                        node.dataset.toolKey = `history-call-${index}`;
+                        node.innerHTML = renderToolBlock(entry.call);
+                        timeline.appendChild(node);
+                    });
+            }
+            return true;
+        }
+        if (calls.length) {
+            const timeline = ensureTimelineNodeContainer(message);
+            if (timeline) {
+                calls
+                    .map(normalizeToolCallNode)
+                    .filter(Boolean)
+                    .forEach((block, index) => {
+                        const node = document.createElement("div");
+                        node.className = "runtime-chat-tools";
+                        node.dataset.toolKey = `history-call-${index}`;
+                        node.innerHTML = renderToolBlock(block);
+                        timeline.appendChild(node);
+                    });
+            }
+            events
+                .filter((entry) => entry.event === "message")
+                .forEach((entry) => {
+                    appendTimelineMessage(
+                        message,
+                        entry.payload &&
+                            (entry.payload.content ?? entry.payload.message),
+                        "bot",
+                    );
+                });
+            return true;
+        }
         const blocks = new Map();
         events.forEach((entry) => {
             if (entry.event === "message") {

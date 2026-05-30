@@ -884,6 +884,9 @@
 .runtime-tool-block.error summary em {
   color: var(--error);
 }
+.runtime-tool-block.cancelled summary em {
+  color: var(--warning);
+}
 .runtime-tool-preview {
   border-top: 1px solid var(--border-color);
   padding: 8px 10px 10px;
@@ -966,6 +969,16 @@
 }
 .runtime-tool-preview-body .runtime-chat-file-card {
   max-width: min(340px, 100%);
+}
+.runtime-tool-children {
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px 10px;
+  border-top: 1px dashed var(--border-color);
+  background: color-mix(in srgb, var(--bg-app) 80%, var(--bg-card));
+}
+.runtime-tool-children .runtime-tool-block {
+  background: var(--bg-card);
 }
 @keyframes runtime-chat-enter {
   from {

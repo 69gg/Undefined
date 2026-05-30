@@ -22,6 +22,24 @@ from Undefined.utils.tool_calls import parse_tool_arguments
 logger = logging.getLogger(__name__)
 
 
+def _webchat_agent_path(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).strip()]
+
+
+def _webchat_depth(value: Any) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _webchat_call_id(parent_call_id: str, call_id: str, fallback: str) -> str:
+    local_id = str(call_id or fallback or "tool").strip() or "tool"
+    return f"{parent_call_id}/{local_id}" if parent_call_id else local_id
+
+
 class ClientAskLoopMixin(ClientQueueMixin):
     """``ask()`` 多轮工具调用主循环。"""
 
@@ -141,6 +159,9 @@ class ClientAskLoopMixin(ClientQueueMixin):
         )
         tool_context.setdefault("end_summary_storage", self._end_summary_storage)
         tool_context.setdefault("end_summaries", self._prompt_builder.end_summaries)
+        tool_context.setdefault("webchat_parent_call_id", "")
+        tool_context.setdefault("webchat_depth", 0)
+        tool_context.setdefault("webchat_agent_path", [])
         tool_context.setdefault(
             "send_private_message_callback", self._send_private_message_callback
         )
@@ -412,12 +433,13 @@ class ClientAskLoopMixin(ClientQueueMixin):
                     assistant_message["reasoning_content"] = reasoning_content
                 messages.append(assistant_message)
 
-                tool_tasks = []
+                tool_tasks: list[asyncio.Task[Any]] = []
                 tool_call_ids = []
                 tool_api_names: list[str] = []
                 tool_internal_names: list[str] = []
                 end_tool_call: dict[str, Any] | None = None
                 end_tool_args: dict[str, Any] = {}
+                end_webchat_event_base: dict[str, Any] = {}
                 tool_results: list[Any] = []
 
                 # 逐个处理模型返回的 tool_call
@@ -475,6 +497,25 @@ class ClientAskLoopMixin(ClientQueueMixin):
 
                     if not isinstance(function_args, dict):
                         function_args = {}
+                    is_agent_call = internal_function_name in agent_tool_names
+                    webchat_parent_call_id = str(
+                        tool_context.get("webchat_parent_call_id") or ""
+                    ).strip()
+                    webchat_depth = _webchat_depth(tool_context.get("webchat_depth"))
+                    webchat_agent_path = _webchat_agent_path(
+                        tool_context.get("webchat_agent_path")
+                    )
+                    webchat_call_id = _webchat_call_id(
+                        webchat_parent_call_id,
+                        call_id,
+                        internal_function_name,
+                    )
+                    webchat_event_base: dict[str, Any] = {
+                        "webchat_call_id": webchat_call_id,
+                        "parent_webchat_call_id": webchat_parent_call_id,
+                        "depth": webchat_depth,
+                        "agent_path": webchat_agent_path,
+                    }
                     if webchat_event_callback is not None:
                         await webchat_event_callback(
                             "tool_start",
@@ -483,7 +524,8 @@ class ClientAskLoopMixin(ClientQueueMixin):
                                 "name": internal_function_name,
                                 "api_name": api_function_name,
                                 "arguments": function_args,
-                                "is_agent": internal_function_name in agent_tool_names,
+                                "is_agent": is_agent_call,
+                                **webchat_event_base,
                             },
                         )
 
@@ -497,14 +539,76 @@ class ClientAskLoopMixin(ClientQueueMixin):
                             )
                         end_tool_call = tool_call
                         end_tool_args = function_args
+                        end_webchat_event_base = webchat_event_base
                         continue
 
                     tool_call_ids.append(call_id)
                     tool_api_names.append(str(api_function_name))
                     tool_internal_names.append(str(internal_function_name))
+                    call_context = tool_context.copy()
+                    if is_agent_call:
+                        call_context["webchat_parent_call_id"] = webchat_call_id
+                        call_context["webchat_depth"] = webchat_depth + 1
+                        call_context["webchat_agent_path"] = [
+                            *webchat_agent_path,
+                            internal_function_name,
+                        ]
+
+                    async def _execute_tool_with_webchat_event(
+                        *,
+                        call_id: str,
+                        api_name: str,
+                        internal_name: str,
+                        args: dict[str, Any],
+                        context: dict[str, Any],
+                        webchat_event_base: dict[str, Any],
+                        is_agent_call: bool,
+                    ) -> Any:
+                        try:
+                            result = await self.tool_manager.execute_tool(
+                                internal_name, args, context
+                            )
+                        except Exception as exc:
+                            if webchat_event_callback is not None:
+                                await webchat_event_callback(
+                                    "tool_end",
+                                    {
+                                        "tool_call_id": call_id,
+                                        "name": internal_name,
+                                        "api_name": api_name,
+                                        "ok": False,
+                                        "result": f"执行失败: {str(exc)}",
+                                        "is_agent": is_agent_call,
+                                        **webchat_event_base,
+                                    },
+                                )
+                            raise
+                        if webchat_event_callback is not None:
+                            await webchat_event_callback(
+                                "tool_end",
+                                {
+                                    "tool_call_id": call_id,
+                                    "name": internal_name,
+                                    "api_name": api_name,
+                                    "ok": True,
+                                    "result": str(result),
+                                    "is_agent": is_agent_call,
+                                    **webchat_event_base,
+                                },
+                            )
+                        return result
+
                     tool_tasks.append(
-                        self.tool_manager.execute_tool(
-                            str(internal_function_name), function_args, tool_context
+                        asyncio.create_task(
+                            _execute_tool_with_webchat_event(
+                                call_id=call_id,
+                                api_name=str(api_function_name),
+                                internal_name=str(internal_function_name),
+                                args=function_args,
+                                context=call_context,
+                                webchat_event_base=webchat_event_base,
+                                is_agent_call=is_agent_call,
+                            )
                         )
                     )
 
@@ -550,19 +654,6 @@ class ClientAskLoopMixin(ClientQueueMixin):
                                     f"[工具响应体] {internal_fname} (ID={call_id})",
                                     content_str,
                                 )
-                        if webchat_event_callback is not None:
-                            await webchat_event_callback(
-                                "tool_end",
-                                {
-                                    "tool_call_id": call_id,
-                                    "name": internal_fname,
-                                    "api_name": api_fname,
-                                    "ok": not isinstance(tool_result, Exception),
-                                    "result": content_str,
-                                    "is_agent": internal_fname in agent_tool_names,
-                                },
-                            )
-
                         messages.append(
                             {
                                 "role": "tool",
@@ -609,6 +700,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
                                     "ok": False,
                                     "result": END_CO_CALL_REJECT_CONTENT,
                                     "is_agent": False,
+                                    **end_webchat_event_base,
                                 },
                             )
                         messages.append(
@@ -647,6 +739,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
                                     "ok": end_ok,
                                     "result": end_result,
                                     "is_agent": False,
+                                    **end_webchat_event_base,
                                 },
                             )
                         messages.append(

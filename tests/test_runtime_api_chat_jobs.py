@@ -317,19 +317,52 @@ async def test_chat_job_persists_webchat_lifecycle_history(
             "tool_start",
             {
                 "tool_call_id": "call_1",
-                "name": "messages.send_private_message",
-                "api_name": "messages.send_private_message",
-                "arguments": {"target_id": 42, "message": "secret"},
+                "webchat_call_id": "agent_1",
+                "name": "web_agent",
+                "api_name": "web_agent",
+                "arguments": {"prompt": "search"},
+                "is_agent": True,
+            },
+        )
+        await webchat_event_callback(
+            "tool_start",
+            {
+                "tool_call_id": "call_1_1",
+                "webchat_call_id": "agent_1/search_1",
+                "parent_webchat_call_id": "agent_1",
+                "name": "search",
+                "api_name": "search",
+                "arguments": {"q": "test"},
+                "is_agent": False,
+                "depth": 1,
+                "agent_path": ["web_agent"],
+            },
+        )
+        await webchat_event_callback(
+            "tool_end",
+            {
+                "tool_call_id": "call_1_1",
+                "webchat_call_id": "agent_1/search_1",
+                "parent_webchat_call_id": "agent_1",
+                "name": "search",
+                "api_name": "search",
+                "ok": True,
+                "result": "nested result",
+                "is_agent": False,
+                "depth": 1,
+                "agent_path": ["web_agent"],
             },
         )
         await webchat_event_callback(
             "tool_end",
             {
                 "tool_call_id": "call_1",
-                "name": "messages.send_private_message",
-                "api_name": "messages.send_private_message",
+                "webchat_call_id": "agent_1",
+                "name": "web_agent",
+                "api_name": "web_agent",
                 "ok": True,
-                "result": "已发送",
+                "result": "agent result",
+                "is_agent": True,
             },
         )
         await send_output(42, "final")
@@ -372,11 +405,91 @@ async def test_chat_job_persists_webchat_lifecycle_history(
     assert isinstance(webchat["duration_ms"], int)
     assert webchat["finished_at"] is not None
     assert [event["event"] for event in webchat["events"]] == [
+        "agent_start",
         "tool_start",
         "tool_end",
+        "agent_end",
         "message",
     ]
-    assert webchat["events"][0]["payload"]["arguments_preview"] == ""
-    assert webchat["events"][1]["payload"]["result_preview"] == ""
-    assert "duration_ms" in webchat["events"][1]["payload"]
-    assert webchat["events"][2]["payload"]["content"] == "rendered final"
+    assert webchat["events"][0]["payload"]["webchat_call_id"] == "agent_1"
+    assert webchat["events"][1]["payload"]["parent_webchat_call_id"] == "agent_1"
+    assert webchat["events"][2]["payload"]["result_preview"] == "nested result"
+    assert "duration_ms" in webchat["events"][2]["payload"]
+    assert webchat["events"][3]["payload"]["result_preview"] == "agent result"
+    assert webchat["events"][4]["payload"]["content"] == "rendered final"
+    assert len(webchat["calls"]) == 1
+    assert webchat["calls"][0]["webchat_call_id"] == "agent_1"
+    assert webchat["calls"][0]["is_agent"] is True
+    assert webchat["calls"][0]["children"][0]["webchat_call_id"] == "agent_1/search_1"
+    assert webchat["calls"][0]["children"][0]["result_preview"] == "nested result"
+    assert [item["type"] for item in webchat["timeline"]] == ["call", "message"]
+    assert webchat["timeline"][0]["call"]["webchat_call_id"] == "agent_1"
+    assert webchat["timeline"][0]["call"]["children"][0]["name"] == "search"
+    assert webchat["timeline"][1]["content"] == "rendered final"
+
+
+@pytest.mark.asyncio
+async def test_chat_job_finalizes_unclosed_webchat_calls_as_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    history_calls: list[dict[str, Any]] = []
+
+    class _History:
+        async def add_private_message(self, **kwargs: Any) -> None:
+            history_calls.append(dict(kwargs))
+
+    async def _fake_run_webui_chat(
+        _ctx: Any,
+        *,
+        text: str,
+        send_output: Any,
+        webchat_event_callback: Any = None,
+    ) -> str:
+        _ = send_output
+        assert text == "hello"
+        assert webchat_event_callback is not None
+        await webchat_event_callback(
+            "tool_start",
+            {
+                "tool_call_id": "call_1",
+                "webchat_call_id": "call_1",
+                "name": "search",
+                "api_name": "search",
+                "arguments": {"q": "test"},
+                "is_agent": False,
+            },
+        )
+        raise RuntimeError("boom")
+
+    context = _context()
+    context.history_manager = _History()
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+
+    response = await server._chat_job_create_handler(
+        cast(
+            web.Request, cast(Any, _DummyRequest(_json={"message": "hello"}, query={}))
+        )
+    )
+    job_id = str(json.loads(response.text or "{}")["job_id"])
+    detail_request = cast(
+        web.Request,
+        cast(Any, _DummyRequest(match_info={"job_id": job_id}, query={})),
+    )
+    for _ in range(20):
+        detail_response = await server._chat_job_detail_handler(detail_request)
+        detail_payload = json.loads(detail_response.text or "{}")
+        if detail_payload["history_finalized"] is True:
+            break
+        await asyncio.sleep(0.01)
+
+    assert len(history_calls) == 1
+    webchat = history_calls[0]["webchat"]
+    assert [event["event"] for event in webchat["events"]] == [
+        "tool_start",
+        "tool_end",
+    ]
+    assert webchat["events"][1]["payload"]["ok"] is False
+    assert webchat["events"][1]["payload"]["status"] == "error"
+    assert webchat["calls"][0]["status"] == "error"
+    assert webchat["timeline"][0]["call"]["status"] == "error"

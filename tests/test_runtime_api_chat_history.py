@@ -119,6 +119,30 @@ async def test_runtime_chat_history_endpoint_returns_webchat_metadata_only_item(
                 "job_id": "job_1",
                 "mode": "chat",
                 "status": "done",
+                "calls": [
+                    {
+                        "webchat_call_id": "call_1",
+                        "name": "search",
+                        "is_agent": False,
+                        "status": "done",
+                        "result_preview": "ok",
+                        "children": [],
+                    }
+                ],
+                "timeline": [
+                    {
+                        "type": "call",
+                        "seq": 2,
+                        "call": {
+                            "webchat_call_id": "call_1",
+                            "name": "search",
+                            "is_agent": False,
+                            "status": "done",
+                            "result_preview": "ok",
+                            "children": [],
+                        },
+                    }
+                ],
                 "events": [
                     {
                         "seq": 2,
@@ -181,6 +205,10 @@ async def test_runtime_chat_history_endpoint_returns_webchat_metadata_only_item(
         "tool_start",
         "tool_end",
     ]
+    assert item["webchat"]["calls"][0]["webchat_call_id"] == "call_1"
+    assert item["webchat"]["calls"][0]["result_preview"] == "ok"
+    assert item["webchat"]["timeline"][0]["type"] == "call"
+    assert item["webchat"]["timeline"][0]["call"]["webchat_call_id"] == "call_1"
 
 
 @pytest.mark.asyncio

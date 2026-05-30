@@ -65,7 +65,11 @@ def test_webchat_frontend_restores_history_tool_blocks_without_stream_state() ->
     assert "function appendHistoryChatItem" in source
     assert "function renderHistoryTimeline" in source
     assert "function reduceToolBlock" in source
+    assert "function normalizeToolCallNode" in source
+    assert "function normalizeHistoryTimelineNode" in source
     assert 'entry.event === "message"' in source
+    assert "item.webchat.calls" in source
+    assert "item.webchat.timeline" in source
     assert 'message.classList.add("tool-only")' in source
     assert "appendHistoryChatItem(item, { scroll: false })" in source
     assert "appendHistoryChatItem(items[idx], {" in source
@@ -91,6 +95,22 @@ def test_webchat_frontend_renders_chat_as_event_timeline() -> None:
     assert 'appendTimelineMessage(item, content, "bot")' in message_branch
     assert 'updateChatMessage(item, content, "bot")' not in message_branch
     assert "timeline.appendChild(node)" in timeline_helper
+    assert "parent_webchat_call_id" in timeline_helper
+    assert "parent.children" in timeline_helper
+    assert "topLevelToolKey(blocks, parentKey)" in timeline_helper
+    assert "runtime-tool-children" in RUNTIME_CSS.read_text(encoding="utf-8")
+
+
+def test_webchat_frontend_prefers_backend_history_timeline() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    history_timeline_branch = source.split("if (timelineItems.length)", 1)[1].split(
+        "if (calls.length)", 1
+    )[0]
+
+    assert 'entry.type === "message"' in history_timeline_branch
+    assert 'entry.type !== "call"' in history_timeline_branch
+    assert "renderToolBlock(entry.call)" in history_timeline_branch
+    assert "reduceToolBlock(" not in history_timeline_branch
 
 
 def test_webchat_frontend_renders_tool_duration() -> None:
@@ -131,10 +151,11 @@ def test_webchat_tool_previews_render_structured_input_output() -> None:
 def test_webchat_tool_error_status_uses_error_color() -> None:
     css = RUNTIME_CSS.read_text(encoding="utf-8")
     error_block = css.split(".runtime-tool-block.error summary em", 1)[1].split(
-        ".runtime-tool-block pre", 1
+        ".runtime-tool-preview", 1
     )[0]
 
     assert "color: var(--error);" in error_block
+    assert ".runtime-tool-block.cancelled summary em" in error_block
     assert "var(--danger)" not in error_block
 
 

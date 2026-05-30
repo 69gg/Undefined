@@ -504,6 +504,42 @@ def _stage_elapsed_ms(job: ChatJob, now: float | None = None) -> int:
 
 def _webchat_tool_event_key(payload: dict[str, Any]) -> str:
     return (
+        str(payload.get("webchat_call_id") or "").strip()
+        or str(payload.get("tool_call_id") or "").strip()
+        or str(payload.get("name") or "").strip()
+        or str(payload.get("api_name") or "").strip()
+        or "tool"
+    )
+
+
+def _webchat_payload_lineage(payload: dict[str, Any]) -> dict[str, Any]:
+    call_id = (
+        str(payload.get("webchat_call_id") or "").strip()
+        or str(payload.get("tool_call_id") or "").strip()
+        or str(payload.get("name") or "").strip()
+        or "tool"
+    )
+    parent_call_id = str(payload.get("parent_webchat_call_id") or "").strip()
+    try:
+        depth = max(0, int(payload.get("depth", 0) or 0))
+    except (TypeError, ValueError):
+        depth = 0
+    raw_path = payload.get("agent_path")
+    agent_path = (
+        [str(item) for item in raw_path if str(item).strip()]
+        if isinstance(raw_path, list)
+        else []
+    )
+    return {
+        "webchat_call_id": call_id,
+        "parent_webchat_call_id": parent_call_id,
+        "depth": depth,
+        "agent_path": agent_path,
+    }
+
+
+def _legacy_webchat_tool_event_key(payload: dict[str, Any]) -> str:
+    return (
         str(payload.get("tool_call_id") or "").strip()
         or str(payload.get("name") or "").strip()
         or str(payload.get("api_name") or "").strip()
@@ -571,10 +607,12 @@ def _sanitize_webchat_event_payload(
             "tool_call_id": str(payload.get("tool_call_id") or ""),
             "name": name,
             "api_name": api_name,
+            "status": "running",
             "arguments_preview": ""
             if ui_hint == "webchat_private_send"
             else _preview(arguments),
             "is_agent": is_agent,
+            **_webchat_payload_lineage(payload),
             **({"ui_hint": ui_hint} if ui_hint else {}),
         }
     if event in {"tool_end", "agent_end"}:
@@ -596,16 +634,19 @@ def _sanitize_webchat_event_payload(
             "name": name,
             "api_name": api_name,
             "ok": bool(payload.get("ok", True)),
+            "status": "error" if payload.get("ok") is False else "done",
             "result_preview": ""
             if ui_hint in {"webchat_private_send", "webchat_end"}
             else _preview(result),
             "is_agent": is_agent,
+            **_webchat_payload_lineage(payload),
             **({"ui_hint": ui_hint} if ui_hint else {}),
         }
     return {key: value for key, value in payload.items() if key != "arguments"}
 
 
 def _build_webchat_history_payload(job: ChatJob) -> dict[str, Any]:
+    events = _finalize_webchat_history_events(job)
     return {
         "display_only": True,
         "job_id": job.job_id,
@@ -614,15 +655,223 @@ def _build_webchat_history_payload(job: ChatJob) -> dict[str, Any]:
         "created_at": job.created_at,
         "finished_at": job.finished_at,
         "duration_ms": job.duration_ms,
-        "events": [
-            {
-                "seq": item.seq,
-                "event": item.event,
-                "payload": dict(item.payload),
-            }
-            for item in job.webchat_events
-        ],
+        "events": events,
+        "calls": _build_webchat_call_tree(events),
+        "timeline": _build_webchat_timeline(events),
     }
+
+
+def _finalize_webchat_history_events(job: ChatJob) -> list[dict[str, Any]]:
+    events = [
+        {
+            "seq": item.seq,
+            "event": item.event,
+            "payload": dict(item.payload),
+        }
+        for item in job.webchat_events
+    ]
+    if job.status == "done":
+        return events
+    started: dict[str, dict[str, Any]] = {}
+    closed: set[str] = set()
+    for item in events:
+        event = str(item.get("event") or "")
+        if event not in _WEBCHAT_LIFECYCLE_EVENTS:
+            continue
+        call_id = _webchat_event_call_id(item)
+        if not call_id:
+            continue
+        payload = item.get("payload")
+        payload_dict = payload if isinstance(payload, dict) else {}
+        if event in {"tool_start", "agent_start"}:
+            started[call_id] = dict(payload_dict)
+            continue
+        if event in {"tool_end", "agent_end"}:
+            closed.add(call_id)
+    unfinished = [call_id for call_id in started if call_id not in closed]
+    if not unfinished:
+        return events
+    reason = "cancelled" if job.status == "cancelled" else "interrupted"
+    finished_at = job.finished_at or time.time()
+    max_seq = 0
+    for item in events:
+        seq_raw = item.get("seq", 0)
+        if not isinstance(seq_raw, str | bytes | int | float):
+            continue
+        try:
+            max_seq = max(max_seq, int(seq_raw))
+        except (TypeError, ValueError):
+            continue
+    next_seq = max_seq + 1
+    for call_id in unfinished:
+        start_payload = started[call_id]
+        started_at = start_payload.get("started_at")
+        duration_ms = None
+        if isinstance(started_at, int | float):
+            duration_ms = max(0, int((finished_at - float(started_at)) * 1000))
+        events.append(
+            {
+                "seq": next_seq,
+                "event": "agent_end" if start_payload.get("is_agent") else "tool_end",
+                "payload": {
+                    "tool_call_id": str(start_payload.get("tool_call_id") or ""),
+                    "name": str(start_payload.get("name") or ""),
+                    "api_name": str(start_payload.get("api_name") or ""),
+                    "ok": False,
+                    "status": "cancelled" if reason == "cancelled" else "error",
+                    "result_preview": reason,
+                    "is_agent": bool(start_payload.get("is_agent")),
+                    "webchat_call_id": call_id,
+                    "parent_webchat_call_id": str(
+                        start_payload.get("parent_webchat_call_id") or ""
+                    ),
+                    "depth": start_payload.get("depth", 0),
+                    "agent_path": start_payload.get("agent_path")
+                    if isinstance(start_payload.get("agent_path"), list)
+                    else [],
+                    "duration_ms": duration_ms,
+                    "elapsed_ms": _job_elapsed_ms(job, finished_at),
+                    "job_id": job.job_id,
+                },
+            }
+        )
+        next_seq += 1
+    return events
+
+
+def _call_preview_node(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "webchat_call_id": str(payload.get("webchat_call_id") or "").strip(),
+        "parent_webchat_call_id": str(
+            payload.get("parent_webchat_call_id") or ""
+        ).strip(),
+        "tool_call_id": str(payload.get("tool_call_id") or "").strip(),
+        "name": str(payload.get("name") or "").strip(),
+        "api_name": str(payload.get("api_name") or "").strip(),
+        "is_agent": bool(payload.get("is_agent")),
+        "status": str(payload.get("status") or "running"),
+        "ok": None,
+        "arguments_preview": str(payload.get("arguments_preview") or ""),
+        "result_preview": "",
+        "ui_hint": str(payload.get("ui_hint") or "").strip(),
+        "duration_ms": payload.get("duration_ms"),
+        "elapsed_ms": payload.get("elapsed_ms"),
+        "started_at": payload.get("started_at"),
+        "depth": payload.get("depth", 0),
+        "agent_path": payload.get("agent_path")
+        if isinstance(payload.get("agent_path"), list)
+        else [],
+        "children": [],
+    }
+
+
+def _webchat_event_call_id(event: dict[str, Any]) -> str:
+    payload = event.get("payload")
+    if not isinstance(payload, dict):
+        return ""
+    call_id = str(payload.get("webchat_call_id") or "").strip()
+    return call_id or _legacy_webchat_tool_event_key(payload)
+
+
+def _build_webchat_call_graph(
+    events: list[dict[str, Any]],
+) -> tuple[dict[str, dict[str, Any]], list[str], list[dict[str, Any]]]:
+    nodes: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for item in events:
+        event = str(item.get("event") or "")
+        if event not in _WEBCHAT_LIFECYCLE_EVENTS:
+            continue
+        payload = item.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+        call_id = _webchat_event_call_id(item)
+        if not call_id:
+            continue
+        node = nodes.get(call_id)
+        if node is None:
+            node = _call_preview_node({**payload, "webchat_call_id": call_id})
+            nodes[call_id] = node
+            order.append(call_id)
+        if event in {"tool_start", "agent_start"}:
+            node.update(_call_preview_node({**payload, "webchat_call_id": call_id}))
+            node["status"] = "running"
+            continue
+        if event in {"tool_end", "agent_end"}:
+            node.update(
+                {
+                    "status": str(
+                        payload.get("status")
+                        or ("error" if payload.get("ok") is False else "done")
+                    ),
+                    "ok": bool(payload.get("ok", True)),
+                    "result_preview": str(payload.get("result_preview") or ""),
+                    "duration_ms": payload.get("duration_ms"),
+                    "elapsed_ms": payload.get("elapsed_ms"),
+                    "ui_hint": str(payload.get("ui_hint") or node.get("ui_hint") or ""),
+                    "is_agent": bool(payload.get("is_agent") or node.get("is_agent")),
+                }
+            )
+
+    for call_id in order:
+        nodes[call_id]["children"] = []
+    roots: list[dict[str, Any]] = []
+    for call_id in order:
+        node = nodes[call_id]
+        parent_id = str(node.get("parent_webchat_call_id") or "").strip()
+        parent = nodes.get(parent_id)
+        if parent is not None and parent is not node:
+            parent.setdefault("children", []).append(node)
+        else:
+            roots.append(node)
+    return nodes, order, roots
+
+
+def _build_webchat_call_tree(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    _nodes, _order, roots = _build_webchat_call_graph(events)
+    return roots
+
+
+def _build_webchat_timeline(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    nodes, _order, _roots = _build_webchat_call_graph(events)
+    emitted_calls: set[str] = set()
+    timeline: list[dict[str, Any]] = []
+    for item in events:
+        event = str(item.get("event") or "")
+        seq_raw = item.get("seq", 0)
+        try:
+            seq = max(0, int(seq_raw))
+        except (TypeError, ValueError):
+            seq = 0
+        payload = item.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+        if event == "message":
+            content = str(payload.get("content") or payload.get("message") or "")
+            if content:
+                timeline.append(
+                    {
+                        "type": "message",
+                        "seq": seq,
+                        "content": content,
+                        "elapsed_ms": payload.get("elapsed_ms"),
+                    }
+                )
+            continue
+        if event not in _WEBCHAT_LIFECYCLE_EVENTS:
+            continue
+        call_id = _webchat_event_call_id(item)
+        if not call_id or call_id in emitted_calls:
+            continue
+        node = nodes.get(call_id)
+        if node is None:
+            continue
+        parent_id = str(node.get("parent_webchat_call_id") or "").strip()
+        if parent_id and parent_id in nodes:
+            continue
+        emitted_calls.add(call_id)
+        timeline.append({"type": "call", "seq": seq, "call": node})
+    return timeline
 
 
 def _webchat_history_events(webchat: Any) -> list[dict[str, Any]]:
@@ -648,6 +897,24 @@ def _webchat_history_events(webchat: Any) -> list[dict[str, Any]]:
             seq = 0
         events.append({"seq": seq, "event": event, "payload": dict(payload)})
     return events
+
+
+def _webchat_history_calls(webchat: Any) -> list[dict[str, Any]]:
+    if not isinstance(webchat, dict):
+        return []
+    raw_calls = webchat.get("calls")
+    if isinstance(raw_calls, list):
+        return [item for item in raw_calls if isinstance(item, dict)]
+    return _build_webchat_call_tree(_webchat_history_events(webchat))
+
+
+def _webchat_history_timeline(webchat: Any) -> list[dict[str, Any]]:
+    if not isinstance(webchat, dict):
+        return []
+    raw_timeline = webchat.get("timeline")
+    if isinstance(raw_timeline, list):
+        return [item for item in raw_timeline if isinstance(item, dict)]
+    return _build_webchat_timeline(_webchat_history_events(webchat))
 
 
 def _is_webchat_display_only_record(item: dict[str, Any]) -> bool:
@@ -715,6 +982,8 @@ def _history_record_to_item(item: dict[str, Any]) -> dict[str, Any] | None:
         "timestamp": str(item.get("timestamp", "") or "").strip(),
     }
     if isinstance(webchat, dict) and webchat_events:
+        webchat_calls = _webchat_history_calls(webchat)
+        webchat_timeline = _webchat_history_timeline(webchat)
         mapped["webchat"] = {
             "display_only": bool(webchat.get("display_only")),
             "job_id": str(webchat.get("job_id", "") or "").strip(),
@@ -724,6 +993,8 @@ def _history_record_to_item(item: dict[str, Any]) -> dict[str, Any] | None:
             "finished_at": webchat.get("finished_at"),
             "duration_ms": webchat.get("duration_ms"),
             "events": webchat_events,
+            "calls": webchat_calls,
+            "timeline": webchat_timeline,
         }
     return mapped
 
