@@ -101,22 +101,29 @@ def test_webchat_frontend_renders_tool_duration() -> None:
     assert "statusLabel} · ${durationLabel}" in source
 
 
-def test_webchat_tool_previews_render_input_output_and_json() -> None:
+def test_webchat_tool_previews_render_structured_input_output() -> None:
     source = RUNTIME_JS.read_text(encoding="utf-8")
     css = RUNTIME_CSS.read_text(encoding="utf-8")
     i18n = I18N_JS.read_text(encoding="utf-8")
 
     assert "function formatToolPreview" in source
     assert "JSON.parse(text)" in source
-    assert "JSON.stringify(parsed, null, 2)" in source
+    assert "function renderStructuredToolValue" in source
     assert "function renderToolPreviewSection" in source
     assert '"runtime.tool_input"' in source
     assert '"runtime.tool_output"' in source
+    assert "runtime-tool-structured-row" in source
+    assert "runtime-tool-key" in source
+    assert "runtime-tool-value" in source
     assert "renderChatContent(preview.text, !!options.markdown)" in source
 
     assert ".runtime-tool-preview" in css
     assert ".runtime-tool-preview-label" in css
-    assert ".runtime-tool-preview-body.is-json" in css
+    assert ".runtime-tool-preview-body.is-structured" in css
+    assert ".runtime-tool-key" in css
+    assert ".runtime-tool-value.string" in css
+    assert ".runtime-tool-value.number" in css
+    assert ".runtime-tool-value.boolean" in css
     assert "runtime.tool_input" in i18n
     assert "runtime.tool_output" in i18n
 

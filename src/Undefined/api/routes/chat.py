@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import logging
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -511,7 +512,10 @@ def _webchat_tool_event_key(payload: dict[str, Any]) -> str:
 
 
 def _preview(value: Any, limit: int = _PREVIEW_LIMIT) -> str:
-    text = str(value or "")
+    if isinstance(value, dict | list):
+        text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    else:
+        text = str(value or "")
     compact = " ".join(text.split())
     if len(compact) <= limit:
         return compact

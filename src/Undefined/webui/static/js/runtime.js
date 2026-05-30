@@ -657,35 +657,108 @@
 
     function formatToolPreview(raw) {
         const text = String(raw || "").trim();
-        if (!text) return { text: "", isJson: false };
+        if (!text) return { text: "", isStructured: false, value: null };
         try {
             const parsed = JSON.parse(text);
             return {
-                text: JSON.stringify(parsed, null, 2),
-                isJson: parsed !== null && typeof parsed === "object",
+                text,
+                isStructured: parsed !== null && typeof parsed === "object",
+                value: parsed,
             };
         } catch (_error) {
-            return { text, isJson: false };
+            try {
+                const normalized = text
+                    .replace(
+                        /([{,]\s*)'([^'\\]*(?:\\.[^'\\]*)*)'\s*:/g,
+                        '$1"$2":',
+                    )
+                    .replace(
+                        /:\s*'([^'\\]*(?:\\.[^'\\]*)*)'(?=\s*[,}])/g,
+                        ':"$1"',
+                    )
+                    .replace(
+                        /([\[,]\s*)'([^'\\]*(?:\\.[^'\\]*)*)'(?=\s*[\],])/g,
+                        '$1"$2"',
+                    )
+                    .replace(/\bNone\b/g, "null")
+                    .replace(/\bTrue\b/g, "true")
+                    .replace(/\bFalse\b/g, "false");
+                const parsed = JSON.parse(normalized);
+                return {
+                    text,
+                    isStructured: parsed !== null && typeof parsed === "object",
+                    value: parsed,
+                };
+            } catch (_compatError) {
+                return { text, isStructured: false, value: null };
+            }
         }
+    }
+
+    function renderStructuredToolValue(value) {
+        if (Array.isArray(value)) {
+            if (!value.length) {
+                return `<span class="runtime-tool-value muted">[]</span>`;
+            }
+            return (
+                `<div class="runtime-tool-structured-list">` +
+                value
+                    .map(
+                        (item, index) =>
+                            `<div class="runtime-tool-structured-row">` +
+                            `<span class="runtime-tool-key">${index}</span>` +
+                            `<div class="runtime-tool-value">${renderStructuredToolValue(item)}</div>` +
+                            `</div>`,
+                    )
+                    .join("") +
+                `</div>`
+            );
+        }
+        if (value && typeof value === "object") {
+            const entries = Object.entries(value);
+            if (!entries.length) {
+                return `<span class="runtime-tool-value muted">{}</span>`;
+            }
+            return (
+                `<div class="runtime-tool-structured-list">` +
+                entries
+                    .map(
+                        ([key, item]) =>
+                            `<div class="runtime-tool-structured-row">` +
+                            `<span class="runtime-tool-key">${escapeHtml(key)}</span>` +
+                            `<div class="runtime-tool-value">${renderStructuredToolValue(item)}</div>` +
+                            `</div>`,
+                    )
+                    .join("") +
+                `</div>`
+            );
+        }
+        if (typeof value === "boolean") {
+            return `<span class="runtime-tool-value boolean">${value ? "true" : "false"}</span>`;
+        }
+        if (typeof value === "number") {
+            return `<span class="runtime-tool-value number">${escapeHtml(value)}</span>`;
+        }
+        if (value === null || value === undefined) {
+            return `<span class="runtime-tool-value muted">null</span>`;
+        }
+        return `<span class="runtime-tool-value string">${renderChatContent(String(value), false)}</span>`;
     }
 
     function renderToolPreviewSection(labelKey, raw, options = {}) {
         const preview = formatToolPreview(raw);
         if (!preview.text) return "";
         const label = t(labelKey);
-        const bodyClass = preview.isJson
-            ? "runtime-tool-preview-body is-json"
+        const bodyClass = preview.isStructured
+            ? "runtime-tool-preview-body is-structured"
             : "runtime-tool-preview-body";
-        const body = preview.isJson
-            ? `<pre>${escapeHtml(preview.text)}</pre>`
+        const body = preview.isStructured
+            ? `<div class="${bodyClass}">${renderStructuredToolValue(preview.value)}</div>`
             : `<div class="${bodyClass}">${renderChatContent(preview.text, !!options.markdown)}</div>`;
-        const bodyHtml = preview.isJson
-            ? `<div class="${bodyClass}">${body}</div>`
-            : body;
         return (
             `<div class="runtime-tool-preview">` +
             `<div class="runtime-tool-preview-label">${escapeHtml(label)}</div>` +
-            bodyHtml +
+            body +
             `</div>`
         );
     }

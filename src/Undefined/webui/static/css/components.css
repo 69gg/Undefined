@@ -910,23 +910,56 @@
 .runtime-tool-preview-body > *:last-child {
   margin-bottom: 0;
 }
-.runtime-tool-preview-body pre {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.runtime-tool-preview-body.is-json {
+.runtime-tool-preview-body.is-structured {
   padding: 8px 10px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--bg-card) 70%, var(--bg-app));
+  white-space: normal;
+}
+.runtime-tool-structured-list {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.runtime-tool-structured-list .runtime-tool-structured-list {
+  margin-top: 5px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border-color);
+}
+.runtime-tool-structured-row {
+  display: grid;
+  grid-template-columns: minmax(80px, max-content) minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+}
+.runtime-tool-key {
+  min-width: 0;
+  color: var(--accent-color);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.runtime-tool-value {
+  min-width: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.runtime-tool-value.string {
+  color: var(--text-primary);
+}
+.runtime-tool-value.number {
+  color: var(--warning);
+  font-family: var(--font-mono);
+}
+.runtime-tool-value.boolean {
+  color: var(--success);
+  font-family: var(--font-mono);
+}
+.runtime-tool-value.muted {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
 }
 .runtime-tool-preview-body .runtime-chat-image {
   max-width: min(420px, 100%);

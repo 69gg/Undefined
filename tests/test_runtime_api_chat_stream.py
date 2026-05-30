@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -98,6 +99,11 @@ def test_sanitize_webchat_event_payload_keeps_group_send_message_details() -> No
 
     assert "ui_hint" not in payload
     assert "群聊消息" in payload["arguments_preview"]
+    assert json.loads(payload["arguments_preview"]) == {
+        "target_type": "group",
+        "target_id": 10001,
+        "message": "群聊消息",
+    }
 
 
 def test_sanitize_webchat_event_payload_compacts_successful_end_tool() -> None:
