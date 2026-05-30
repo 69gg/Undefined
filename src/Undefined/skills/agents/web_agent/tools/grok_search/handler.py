@@ -1,9 +1,38 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_grok_content(result: Any) -> str:
+    payload = result
+    if isinstance(result, str):
+        text = result.strip()
+        if not text:
+            return result
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return result
+    if not isinstance(payload, dict):
+        return str(result)
+
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return str(result)
+    first = choices[0]
+    if not isinstance(first, dict):
+        return str(result)
+    message = first.get("message")
+    if not isinstance(message, dict):
+        return str(result)
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    return str(result)
 
 
 async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
@@ -52,4 +81,4 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         logger.exception("[grok_search] 搜索失败: %s", exc)
         return "Grok 搜索失败，请稍后重试"
 
-    return str(result)
+    return _extract_grok_content(result)

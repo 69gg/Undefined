@@ -1098,18 +1098,6 @@
             clearTimeout(runtimeState.toolCollapseTimers.get(timerKey));
             runtimeState.toolCollapseTimers.delete(timerKey);
         }
-        const durationMs = Number(block.durationMs);
-        const startedAt = Number(block.localStartedAtMs);
-        const finishedAt = Number(block.finishedAtMs);
-        const elapsedMs = Number.isFinite(durationMs)
-            ? Math.max(0, durationMs)
-            : Number.isFinite(startedAt) && Number.isFinite(finishedAt)
-              ? Math.max(0, finishedAt - startedAt)
-              : 0;
-        const delayMs = Math.max(
-            0,
-            TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS - elapsedMs,
-        );
         const collapse = () => {
             runtimeState.toolCollapseTimers.delete(timerKey);
             const latest = blocks.get(timerKey);
@@ -1117,13 +1105,9 @@
             latest.autoOpen = false;
             redrawToolTimelineNode(item, blocks, timerKey);
         };
-        if (delayMs <= 0) {
-            collapse();
-            return;
-        }
         runtimeState.toolCollapseTimers.set(
             timerKey,
-            setTimeout(collapse, delayMs),
+            setTimeout(collapse, TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS),
         );
     }
 

@@ -54,7 +54,7 @@ async def test_grok_search_returns_disabled_when_switch_is_off() -> None:
 
 
 @pytest.mark.asyncio
-async def test_grok_search_returns_raw_result() -> None:
+async def test_grok_search_returns_message_content_from_dict_response() -> None:
     ai_client = SimpleNamespace(
         submit_queued_llm_call=AsyncMock(
             return_value={
@@ -98,6 +98,7 @@ async def test_grok_search_returns_raw_result() -> None:
     )
 
     assert "这里是搜索结果摘要。" in result
+    assert "choices" not in result
     assert "参考链接:" not in result
     ai_client.submit_queued_llm_call.assert_awaited_once()
     kwargs = ai_client.submit_queued_llm_call.await_args.kwargs
@@ -112,6 +113,72 @@ async def test_grok_search_returns_raw_result() -> None:
             ),
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_grok_search_returns_message_content_from_json_string_response() -> None:
+    ai_client = SimpleNamespace(
+        submit_queued_llm_call=AsyncMock(
+            return_value=json.dumps(
+                {
+                    "id": "chatcmpl-test",
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "index": 0,
+                            "message": {"content": "JSON 字符串里的搜索摘要。"},
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            )
+        )
+    )
+    grok_model = SimpleNamespace(
+        api_url="https://grok.example/v1",
+        api_key="sk-grok",
+        model_name="grok-4-search",
+        max_tokens=4096,
+    )
+
+    result = await grok_handler.execute(
+        {"search_request": "请搜索一个测试主题并返回摘要。"},
+        {
+            "runtime_config": SimpleNamespace(
+                grok_search_enabled=True,
+                grok_model=grok_model,
+            ),
+            "ai_client": ai_client,
+        },
+    )
+
+    assert result == "JSON 字符串里的搜索摘要。"
+
+
+@pytest.mark.asyncio
+async def test_grok_search_returns_original_text_when_json_parse_fails() -> None:
+    ai_client = SimpleNamespace(
+        submit_queued_llm_call=AsyncMock(return_value="{not valid json")
+    )
+    grok_model = SimpleNamespace(
+        api_url="https://grok.example/v1",
+        api_key="sk-grok",
+        model_name="grok-4-search",
+        max_tokens=4096,
+    )
+
+    result = await grok_handler.execute(
+        {"search_request": "请搜索一个测试主题并返回摘要。"},
+        {
+            "runtime_config": SimpleNamespace(
+                grok_search_enabled=True,
+                grok_model=grok_model,
+            ),
+            "ai_client": ai_client,
+        },
+    )
+
+    assert result == "{not valid json"
 
 
 @pytest.mark.asyncio

@@ -180,11 +180,10 @@ def test_webchat_tool_blocks_auto_collapse_after_minimum_visible_time() -> None:
     collapse_helper = source.split("function scheduleToolAutoCollapse", 1)[1].split(
         "function upsertTimelineToolBlock", 1
     )[0]
-    assert "const durationMs = Number(block.durationMs)" in collapse_helper
-    assert "TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS - elapsedMs" in collapse_helper
     assert "latest.autoOpen = false" in collapse_helper
     assert "redrawToolTimelineNode(item, blocks, timerKey)" in collapse_helper
-    assert "setTimeout(collapse, delayMs)" in collapse_helper
+    assert "setTimeout(collapse, TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS)" in collapse_helper
+    assert "TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS -" not in collapse_helper
     clear_helper = source.split("function clearToolCollapseTimers", 1)[1].split(
         "function finishStreamingMessage", 1
     )[0]
