@@ -138,6 +138,22 @@ def test_webchat_tool_error_status_uses_error_color() -> None:
     assert "var(--danger)" not in error_block
 
 
+def test_webchat_send_scrolls_to_bottom_after_layout_updates() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    helper = source.split("function scrollChatToBottomSoon", 1)[1].split(
+        "function updateChatMessage", 1
+    )[0]
+    send_helper = source.split("async function sendChatMessage", 1)[1].split(
+        "async function handleChatImagePicked", 1
+    )[0]
+
+    assert "requestAnimationFrame(scrollChatToBottom)" in helper
+    assert "setTimeout(scrollChatToBottom, 0)" in helper
+    assert 'appendChatMessage("user", message)' in send_helper
+    assert 'input.value = ""' in send_helper
+    assert "scrollChatToBottomSoon()" in send_helper
+
+
 def test_webchat_layout_keeps_input_at_bottom_and_log_scrollable() -> None:
     app_css = APP_CSS.read_text(encoding="utf-8")
     responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")

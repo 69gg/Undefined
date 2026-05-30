@@ -498,6 +498,15 @@
         log.scrollTop = log.scrollHeight;
     }
 
+    function scrollChatToBottomSoon() {
+        scrollChatToBottom();
+        if (typeof requestAnimationFrame === "function") {
+            requestAnimationFrame(scrollChatToBottom);
+            return;
+        }
+        setTimeout(scrollChatToBottom, 0);
+    }
+
     function updateChatMessage(item, content, role = "bot") {
         if (!item) return;
         const contentEl = item.querySelector(".runtime-chat-content");
@@ -1992,6 +2001,7 @@
         runtimeState.lastEventSeq = 0;
         appendChatMessage("user", message);
         input.value = "";
+        scrollChatToBottomSoon();
 
         try {
             const res = await api("/api/runtime/chat/jobs", {
