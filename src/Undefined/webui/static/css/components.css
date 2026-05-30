@@ -588,17 +588,6 @@
   align-content: start;
   gap: 10px;
 }
-.chat-workspace-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border-color);
-}
-.chat-workspace-head .muted-sm {
-  margin-bottom: 0;
-}
 .runtime-chat-load-more {
   min-height: 20px;
   color: var(--text-tertiary);
