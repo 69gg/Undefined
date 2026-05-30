@@ -5,6 +5,9 @@ from pathlib import Path
 
 RUNTIME_JS = Path("src/Undefined/webui/static/js/runtime.js")
 RUNTIME_CSS = Path("src/Undefined/webui/static/css/components.css")
+MAIN_JS = Path("src/Undefined/webui/static/js/main.js")
+APP_CSS = Path("src/Undefined/webui/static/css/app.css")
+RESPONSIVE_CSS = Path("src/Undefined/webui/static/css/responsive.css")
 I18N_JS = Path("src/Undefined/webui/static/js/i18n.js")
 
 
@@ -96,3 +99,45 @@ def test_webchat_frontend_renders_tool_duration() -> None:
     assert "block.durationMs" in source
     assert "payload.duration_ms" in source
     assert "statusLabel} · ${durationLabel}" in source
+
+
+def test_webchat_layout_keeps_input_at_bottom_and_log_scrollable() -> None:
+    app_css = APP_CSS.read_text(encoding="utf-8")
+    responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
+    main_js = MAIN_JS.read_text(encoding="utf-8")
+
+    assert ".main-content.chat-layout {" in app_css
+    assert "display: flex;" in app_css
+    assert "height: 100dvh;" in app_css
+    assert "overflow: hidden;" in app_css
+    assert "#appContent" in app_css
+    assert "grid-template-rows: auto minmax(0, 1fr);" in app_css
+    assert "#tab-chat.active" in app_css
+    assert "grid-template-rows: auto minmax(0, 1fr);" in app_css
+
+    chat_card_block = app_css.split(
+        ".main-content.chat-layout #tab-chat .chat-runtime-card", 1
+    )[1].split(".main-content.chat-layout #tab-chat .runtime-chat-log", 1)[0]
+    assert "grid-template-rows: auto minmax(0, 1fr) auto;" in chat_card_block
+    assert "min-height: 0;" in chat_card_block
+
+    log_block = app_css.split(
+        ".main-content.chat-layout #tab-chat .runtime-chat-log", 1
+    )[1].split(".main-content.chat-layout #tab-chat .runtime-chat-input", 1)[0]
+    assert "overflow-y: auto;" in log_block
+    assert "overscroll-behavior: contain;" in log_block
+
+    input_row_block = app_css.split(
+        ".main-content.chat-layout #tab-chat .runtime-chat-input-row", 1
+    )[1].split(".main-content.chat-layout #tab-chat .runtime-chat-content", 1)[0]
+    assert "position: relative;" in input_row_block
+    assert "position: sticky;" not in input_row_block
+    assert "position: fixed;" not in input_row_block
+    assert "var(--bg-main)" not in input_row_block
+
+    assert ".main-content.chat-layout" in responsive_css
+    assert "height: 100dvh;" in responsive_css
+    assert "function syncMainContentLayout()" in main_js
+    assert (
+        'appContent.style.display = state.tab === "chat" ? "grid" : "block";' in main_js
+    )
