@@ -756,10 +756,12 @@
 
                 <!-- Tab Chat -->
                 <section id="tab-chat" class="tab-content">
-                    <div class="header">
-                        <div>
-                            <h1 class="page-title" data-i18n="chat.title">智能对话</h1>
-                            <p class="page-subtitle" data-i18n="chat.subtitle">虚拟私聊 system#42。</p>
+                    <div class="header runtime-chat-header">
+                        <div class="runtime-chat-title">
+                            <h1 class="page-title runtime-chat-page-title">
+                                <span data-i18n="chat.title">智能对话</span>
+                                <span class="runtime-chat-title-meta" data-i18n="chat.subtitle">虚拟私聊 system#42。该会话由 WebUI 发起，权限为 superadmin；私聊里可直接使用 /命令。</span>
+                            </h1>
                         </div>
                         <div class="runtime-chat-header-actions">
                             <label class="toggle-wrapper runtime-chat-auto-scroll-toggle">

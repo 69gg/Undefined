@@ -185,7 +185,32 @@ body.is-mobile-drawer-open {
   overflow: hidden;
 }
 .main-content.chat-layout #tab-chat > .header {
-  margin-bottom: 16px;
+  margin-bottom: 10px;
+}
+.runtime-chat-header {
+  align-items: center;
+  gap: 16px;
+}
+.runtime-chat-title {
+  min-width: 0;
+}
+.runtime-chat-page-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  margin-bottom: 0;
+}
+.runtime-chat-title-meta {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .main-content.chat-layout #tab-chat .chat-runtime-card {
   display: grid;

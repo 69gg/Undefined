@@ -63,7 +63,37 @@
     padding: 14px 16px max(12px, env(safe-area-inset-bottom));
   }
   .main-content.chat-layout #tab-chat > .header {
-    margin-bottom: 12px;
+    margin-bottom: 8px;
+  }
+  .main-content.chat-layout #tab-chat .runtime-chat-header {
+    gap: 10px;
+  }
+  .runtime-chat-page-title {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .runtime-chat-title-meta {
+    max-width: 100%;
+    font-size: 12px;
+    line-height: 1.35;
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .runtime-chat-header-actions {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+  }
+  .runtime-chat-auto-scroll-toggle {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  #btnRuntimeChatClear {
+    flex: 0 0 auto;
+    padding-inline: 12px;
   }
   .header {
     margin-bottom: 24px;
@@ -288,11 +318,19 @@
     font-size: 18px;
   }
   .runtime-tool-block summary {
-    grid-template-columns: auto minmax(0, 1fr) minmax(52px, auto);
+    grid-template-columns: auto minmax(0, 1fr) minmax(46px, auto);
+    gap: 6px;
+  }
+  .runtime-tool-block summary .runtime-tool-title {
+    gap: 5px;
+  }
+  .runtime-tool-block summary .runtime-tool-duration {
+    padding-inline: 5px;
+    font-size: 10px;
   }
   .runtime-tool-block summary .runtime-tool-status {
     justify-self: end;
-    max-width: 32vw;
+    max-width: 30vw;
   }
   .runtime-tool-block summary .runtime-tool-kind {
     display: none;
@@ -327,6 +365,24 @@
     width: 100vw;
     padding-left: 16px;
     padding-right: 16px;
+  }
+  .runtime-chat-header-actions {
+    gap: 6px;
+  }
+  .runtime-chat-auto-scroll-toggle {
+    font-size: 11px;
+    padding-inline: 8px;
+  }
+  .runtime-chat-auto-scroll-toggle .toggle-track {
+    width: 34px;
+    height: 20px;
+  }
+  .runtime-chat-auto-scroll-toggle .toggle-handle {
+    width: 16px;
+    height: 16px;
+  }
+  .runtime-chat-auto-scroll-toggle .toggle-input:checked + .toggle-track .toggle-handle {
+    transform: translateX(14px);
   }
   .search-group {
     flex-direction: column;

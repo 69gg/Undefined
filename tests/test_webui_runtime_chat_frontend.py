@@ -60,7 +60,7 @@ def test_webchat_frontend_renders_live_stage_after_ai_label() -> None:
     assert "runtime.chat_stage_waiting_model" in i18n
     assert "runtime.chat_stage_searching_cognitive_memory" in i18n
     assert ".runtime-chat-stage" in css
-    assert "runtime-chat-stage-pulse" in css
+    assert "runtime-chat-stage-pulse" not in css
     assert "is-final" in css
 
 
@@ -165,18 +165,29 @@ def test_webchat_frontend_renders_nested_tool_timeline() -> None:
     assert ".runtime-tool-block summary::before" in css
 
 
-def test_webchat_frontend_renders_agent_stage_timeline() -> None:
+def test_webchat_frontend_updates_agent_stage_summary_without_timeline_noise() -> None:
     source = RUNTIME_JS.read_text(encoding="utf-8")
     css = RUNTIME_CSS.read_text(encoding="utf-8")
 
     assert 'event === "agent_stage"' in source
     assert "function upsertAgentStageBlock" in source
     assert "function reduceAgentStageBlock" in source
-    assert 'entry.type === "stage"' in source
     assert "currentStage" in source
     assert "current_stage_elapsed_ms" in source
-    assert "runtime-tool-stage" in source
-    assert ".runtime-tool-stage" in css
+    render_helper = source.split("function renderToolTimelineItem", 1)[1].split(
+        "function toolBlockKey", 1
+    )[0]
+    reduce_helper = source.split("function reduceAgentStageBlock", 1)[1].split(
+        "function agentStageRenderSignature", 1
+    )[0]
+
+    assert 'entry.type === "stage"' in render_helper
+    assert 'return "";' in render_helper
+    assert 'type: "stage"' not in reduce_helper
+    assert "function agentStageRenderSignature" in source
+    assert "previousSignature === agentStageRenderSignature(block)" in source
+    assert "runtime-tool-stage" not in source
+    assert ".runtime-tool-stage" not in css
 
 
 def test_webchat_frontend_polls_job_events_incrementally() -> None:
@@ -217,21 +228,28 @@ def test_webchat_tool_summary_uses_compact_single_line_order() -> None:
     )[0]
 
     assert "runtime-tool-name" in render_helper
+    assert "runtime-tool-duration" in render_helper
     assert "runtime-tool-status" in render_helper
     assert "runtime-tool-kind" in render_helper
     assert (
         render_helper.index("runtime-tool-name")
+        < render_helper.index("runtime-tool-duration")
         < render_helper.index("runtime-tool-status")
         < render_helper.index("runtime-tool-kind")
     )
     assert "grid-template-columns: auto minmax(0, 1fr) auto auto;" in summary_css
-    assert "min-height: 34px;" in summary_css
-    assert "padding: 4px 10px 4px 13px;" in summary_css
+    assert "min-height: 32px;" in summary_css
+    assert "padding: 3px 10px 3px 13px;" in summary_css
     assert "line-height: 1.2;" in summary_css
     name_css = css.split(".runtime-tool-block summary .runtime-tool-name", 1)[1].split(
-        ".runtime-tool-block summary .runtime-tool-status", 1
+        ".runtime-tool-block summary .runtime-tool-duration", 1
     )[0]
+    duration_css = css.split(".runtime-tool-block summary .runtime-tool-duration", 1)[
+        1
+    ].split(".runtime-tool-block summary .runtime-tool-status", 1)[0]
     assert "font-weight: 650;" in name_css
+    assert "font-family: var(--font-mono);" in duration_css
+    assert "white-space: nowrap;" in duration_css
 
 
 def test_webchat_tool_blocks_auto_collapse_after_minimum_visible_time() -> None:
@@ -282,7 +300,9 @@ def test_webchat_frontend_renders_tool_duration() -> None:
 
     assert "block.durationMs" in source
     assert "payload.duration_ms" in source
-    assert "statusLabel} · ${durationLabel}" in source
+    assert "runtime-tool-duration" in source
+    assert "formatDurationMs(block.durationMs)" in source
+    assert "statusLabel} · ${durationLabel}" not in source
 
 
 def test_webchat_tool_previews_render_structured_input_output() -> None:
@@ -326,15 +346,33 @@ def test_webchat_frontend_escapes_markdown_html_and_unsafe_links() -> None:
     assert "renderer: createSafeMarkedRenderer()" in source
 
 
-def test_webchat_tool_error_status_uses_error_color() -> None:
+def test_webchat_tool_status_colors_drive_left_bar_and_status_text() -> None:
     css = RUNTIME_CSS.read_text(encoding="utf-8")
-    error_block = css.split(
+    running_block = css.split(".runtime-tool-block.running {", 1)[1].split(
+        ".runtime-tool-block.done", 1
+    )[0]
+    done_block = css.split(".runtime-tool-block.done {", 1)[1].split(
+        ".runtime-tool-block.error", 1
+    )[0]
+    error_accent_block = css.split(".runtime-tool-block.error {", 1)[1].split(
+        ".runtime-tool-block.cancelled", 1
+    )[0]
+    pseudo_block = css.split(".runtime-tool-block::before", 1)[1].split(
+        ".runtime-tool-block.is-agent", 1
+    )[0]
+    status_block = css.split(
         ".runtime-tool-block.error summary .runtime-tool-status", 1
     )[1].split(".runtime-tool-preview", 1)[0]
 
-    assert "color: var(--error);" in error_block
-    assert ".runtime-tool-block.cancelled summary .runtime-tool-status" in error_block
-    assert "var(--danger)" not in error_block
+    assert "--tool-accent: color-mix(in srgb, var(--warning)" in running_block
+    assert "--tool-accent: var(--success);" in done_block
+    assert "--tool-accent: var(--error);" in error_accent_block
+    assert "background: var(--tool-accent);" in pseudo_block
+    assert ".runtime-tool-block.running summary .runtime-tool-status" in css
+    assert ".runtime-tool-block.done summary .runtime-tool-status" in css
+    assert "color: var(--error);" in status_block
+    assert ".runtime-tool-block.cancelled summary .runtime-tool-status" in status_block
+    assert "var(--danger)" not in status_block
 
 
 def test_webchat_send_scrolls_to_bottom_after_layout_updates() -> None:
@@ -390,6 +428,19 @@ def test_webchat_layout_keeps_input_at_bottom_and_log_scrollable() -> None:
     assert "position: fixed;" not in input_row_block
     assert "var(--bg-main)" not in input_row_block
 
+    chat_header_block = app_css.split(".runtime-chat-header {", 1)[1].split(
+        ".runtime-chat-title", 1
+    )[0]
+    title_meta_block = app_css.split(".runtime-chat-title-meta", 1)[1].split(
+        ".main-content.chat-layout #tab-chat .chat-runtime-card", 1
+    )[0]
+    mobile_header_block = responsive_css.split(".runtime-chat-header-actions", 1)[
+        1
+    ].split(".runtime-chat-auto-scroll-toggle", 1)[0]
+
+    assert "align-items: center;" in chat_header_block
+    assert "white-space: nowrap;" in title_meta_block
+    assert "justify-content: space-between;" in mobile_header_block
     assert ".main-content.chat-layout" in responsive_css
     assert "height: 100dvh;" in responsive_css
     assert "function syncMainContentLayout()" in main_js
@@ -399,6 +450,9 @@ def test_webchat_layout_keeps_input_at_bottom_and_log_scrollable() -> None:
     assert 'role="log"' in template
     assert 'aria-live="polite"' in template
     assert 'data-i18n-aria-label="runtime.chat_log_label"' in template
+    assert 'class="header runtime-chat-header"' in template
+    assert "runtime-chat-title-meta" in template
+    assert "该会话由 WebUI 发起" in template
 
 
 def test_webchat_mobile_tool_rows_have_overflow_guards() -> None:
@@ -419,6 +473,7 @@ def test_webchat_mobile_tool_rows_have_overflow_guards() -> None:
     assert "text-overflow: ellipsis;" in status_css
     assert "overflow: hidden;" in kind_css
     assert "grid-template-columns: minmax(64px, min(34%, 180px))" in structured_css
+    assert ".runtime-tool-block summary .runtime-tool-duration" in responsive_css
     assert ".runtime-tool-block summary .runtime-tool-kind" in responsive_css
     assert "display: none;" in responsive_css
-    assert "max-width: 32vw;" in responsive_css
+    assert "max-width: 30vw;" in responsive_css

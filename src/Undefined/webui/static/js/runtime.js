@@ -502,8 +502,8 @@
 
     function formatDurationMs(value) {
         const ms = Number(value);
-        if (!Number.isFinite(ms) || ms < 0) return "";
-        if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+        if (!Number.isFinite(ms) || ms <= 0) return "";
+        if (ms < 1000) return `${Math.max(1, Math.round(ms))}ms`;
         const seconds = ms / 1000;
         if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
         const minutes = Math.floor(seconds / 60);
@@ -881,22 +881,21 @@
         const label = toolDisplayLabel(block);
         const statusLabel = toolStatusLabel(block);
         const durationLabel = formatDurationMs(block.durationMs);
-        const baseMetaLabel = durationLabel
-            ? `${statusLabel} · ${durationLabel}`
-            : statusLabel;
         const stageLabel = block.currentStage
             ? chatStageLabel(block.currentStage)
             : "";
-        const stageDuration = formatDurationMs(block.currentStageElapsedMs);
         const showLiveAgentStage =
             block.isAgent &&
             stageLabel &&
             !["done", "error", "cancelled"].includes(block.status);
-        const metaLabel = showLiveAgentStage
-            ? stageDuration
-                ? `${stageLabel} · ${stageDuration}`
-                : stageLabel
-            : baseMetaLabel;
+        const metaLabel = showLiveAgentStage ? stageLabel : statusLabel;
+        const titleHtml =
+            `<span class="runtime-tool-title">` +
+            `<code class="runtime-tool-name">${escapeHtml(block.name || "--")}</code>` +
+            (durationLabel
+                ? `<span class="runtime-tool-duration">${escapeHtml(durationLabel)}</span>`
+                : "") +
+            `</span>`;
         const args = renderToolPreviewSection(
             "runtime.tool_input",
             block.argumentsPreview,
@@ -925,7 +924,7 @@
         const kindClass = block.isAgent ? " is-agent" : " is-tool";
         return (
             `<details class="runtime-tool-block ${escapeHtml(block.status)}${kindClass}${hintClass}"${openAttr}>` +
-            `<summary><code class="runtime-tool-name">${escapeHtml(block.name || "--")}</code><em class="runtime-tool-status">${escapeHtml(metaLabel)}</em><span class="runtime-tool-kind">${escapeHtml(label)}</span></summary>` +
+            `<summary><span class="runtime-tool-summary-main">${titleHtml}</span><em class="runtime-tool-status">${escapeHtml(metaLabel)}</em><span class="runtime-tool-kind">${escapeHtml(label)}</span></summary>` +
             args +
             childHtml +
             result +
@@ -941,13 +940,7 @@
             return `<div class="runtime-tool-message">${renderChatContent(content, true)}</div>`;
         }
         if (entry.type === "stage") {
-            const stage = String(entry.stage || "").trim();
-            if (!stage) return "";
-            const label = chatStageLabel(stage);
-            const detail = String(entry.detail || "").trim();
-            const duration = formatDurationMs(entry.stageElapsedMs);
-            const meta = duration ? `${label} · ${duration}` : label;
-            return `<div class="runtime-tool-stage" title="${escapeHtml(detail || label)}"><span>${escapeHtml(meta)}</span></div>`;
+            return "";
         }
         if (entry.type === "call" && entry.call) {
             return renderToolBlock(entry.call);
@@ -1227,21 +1220,22 @@
             children: Array.isArray(previous.children) ? previous.children : [],
             timeline: Array.isArray(previous.timeline) ? previous.timeline : [],
         };
-        if (stage && !(payload && payload.transient)) {
-            appendToolTimelineEntry(block, {
-                type: "stage",
-                seq,
-                stage,
-                detail: block.currentStageDetail,
-                elapsedMs:
-                    payload && payload.elapsed_ms !== undefined
-                        ? Number(payload.elapsed_ms)
-                        : undefined,
-                stageElapsedMs: block.currentStageElapsedMs,
-            });
-        }
         blocks.set(key, block);
         return block;
+    }
+
+    function agentStageRenderSignature(block) {
+        if (!block) return "";
+        return [
+            block.webchatCallId,
+            block.parentWebchatCallId,
+            block.name,
+            block.status,
+            block.currentStage,
+            block.currentStageDetail,
+        ]
+            .map((value) => String(value || ""))
+            .join("\u001f");
     }
 
     function redrawToolTimelineNode(item, blocks, key) {
@@ -1369,7 +1363,14 @@
         if (!item) return;
         const blocks = runtimeState.toolBlocks;
         const key = timelineToolKey(payload, blocks);
+        const previousSignature = agentStageRenderSignature(blocks.get(key));
         const block = reduceAgentStageBlock(blocks, payload, seq);
+        if (
+            previousSignature &&
+            previousSignature === agentStageRenderSignature(block)
+        ) {
+            return;
+        }
         const parentKey = String(block.parentWebchatCallId || "").trim();
         const timeline = ensureTimelineNodeContainer(item);
         if (!timeline) return;
