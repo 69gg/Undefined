@@ -6,6 +6,7 @@ from Undefined.attachments import (
     render_message_with_pic_placeholders,
     scope_from_context,
 )
+from Undefined.utils.message_turn import mark_message_sent_this_turn
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 message,
                 **send_kwargs,
             )
-            context["message_sent_this_turn"] = True
+            mark_message_sent_this_turn(context)
             await dispatch_pending_file_sends(
                 rendered,
                 sender=sender,
@@ -136,7 +137,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if send_private_message_callback:
         try:
             await send_private_message_callback(user_id, message, reply_to=reply_to_id)
-            context["message_sent_this_turn"] = True
+            mark_message_sent_this_turn(context)
             return f"私聊消息已发送给用户 {user_id}"
         except Exception as e:
             logger.exception(

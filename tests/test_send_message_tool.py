@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from Undefined.attachments import AttachmentRecord, AttachmentRegistry
+from Undefined.context import RequestContext
 from Undefined.skills.toolsets.messages.send_message.handler import execute
+from Undefined.utils.coerce import was_message_sent
 
 
 def _build_runtime_config() -> Any:
@@ -107,6 +109,31 @@ async def test_send_message_private_callback_passes_reply_to() -> None:
         30003, "hello private", reply_to=65432
     )
     assert context["message_sent_this_turn"] is True
+
+
+@pytest.mark.asyncio
+async def test_send_message_marks_request_context_when_context_is_copied() -> None:
+    send_message_callback = AsyncMock()
+    context: dict[str, Any] = {
+        "request_type": "group",
+        "group_id": 10001,
+        "sender_id": 20002,
+        "request_id": "req-request-context",
+        "runtime_config": _build_runtime_config(),
+        "send_message_callback": send_message_callback,
+    }
+
+    async with RequestContext(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+    ) as req_ctx:
+        result = await execute({"message": "hello"}, dict(context))
+
+        assert result == "消息已发送"
+        assert was_message_sent(req_ctx) is True
+
+    assert "message_sent_this_turn" not in context
 
 
 @pytest.mark.asyncio

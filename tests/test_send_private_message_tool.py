@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from Undefined.context import RequestContext
 from Undefined.skills.toolsets.messages.send_private_message.handler import execute
+from Undefined.utils.coerce import was_message_sent
 
 
 def _build_runtime_config() -> Any:
@@ -38,6 +40,27 @@ async def test_send_private_message_callback_passes_reply_to() -> None:
         12345, "hello direct private", reply_to=88888
     )
     assert context["message_sent_this_turn"] is True
+
+
+@pytest.mark.asyncio
+async def test_send_private_message_marks_request_context_when_context_is_copied() -> (
+    None
+):
+    send_private_message_callback = AsyncMock()
+    context: dict[str, Any] = {
+        "user_id": 12345,
+        "request_id": "req-private-context",
+        "runtime_config": _build_runtime_config(),
+        "send_private_message_callback": send_private_message_callback,
+    }
+
+    async with RequestContext(request_type="private", user_id=12345) as req_ctx:
+        result = await execute({"message": "hello direct private"}, dict(context))
+
+        assert result == "私聊消息已发送给用户 12345"
+        assert was_message_sent(req_ctx) is True
+
+    assert "message_sent_this_turn" not in context
 
 
 @pytest.mark.asyncio

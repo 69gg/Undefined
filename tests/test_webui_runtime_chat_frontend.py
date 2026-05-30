@@ -93,10 +93,15 @@ def test_webchat_frontend_renders_chat_as_event_timeline() -> None:
     )[0]
 
     assert 'appendTimelineMessage(item, content, "bot")' in message_branch
+    assert "appendNestedTimelineMessage(" in message_branch
     assert 'updateChatMessage(item, content, "bot")' not in message_branch
     assert "timeline.appendChild(node)" in timeline_helper
     assert "parent_webchat_call_id" in timeline_helper
     assert "parent.children" in timeline_helper
+    assert (
+        'appendToolTimelineEntry(parent, { type: "call", call: block })'
+        in timeline_helper
+    )
     assert "topLevelToolKey(blocks, parentKey)" in timeline_helper
     assert "runtime-tool-children" in RUNTIME_CSS.read_text(encoding="utf-8")
 
@@ -111,6 +116,42 @@ def test_webchat_frontend_prefers_backend_history_timeline() -> None:
     assert 'entry.type !== "call"' in history_timeline_branch
     assert "renderToolBlock(entry.call)" in history_timeline_branch
     assert "reduceToolBlock(" not in history_timeline_branch
+
+
+def test_webchat_frontend_renders_nested_tool_timeline() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    css = RUNTIME_CSS.read_text(encoding="utf-8")
+
+    assert "function renderToolTimelineItem" in source
+    assert "function appendNestedTimelineMessage" in source
+    assert "function appendToolTimelineEntry" in source
+    assert "block.timeline" in source
+    assert "renderToolTimelineItem" in source
+    assert "runtime-tool-message" in source
+    nested_message_helper = source.split("function appendNestedTimelineMessage", 1)[
+        1
+    ].split("function upsertToolBlock", 1)[0]
+    assert "payload.parent_webchat_call_id" in nested_message_helper
+    assert 'type: "message"' in nested_message_helper
+    assert "redrawToolTimelineNode(item, blocks, parentKey)" in nested_message_helper
+    assert "runtime-tool-reveal" in css
+    assert ".runtime-tool-block::before" in css
+    assert ".runtime-tool-block summary::before" in css
+
+
+def test_webchat_auto_scroll_toggle_controls_stream_scroll() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    template = Path("src/Undefined/webui/templates/index.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert "runtimeChatAutoScroll" in template
+    assert "runtime.chat_auto_scroll" in template
+    assert "CHAT_AUTO_SCROLL_STORAGE_KEY" in source
+    assert "readChatAutoScrollPreference()" in source
+    assert "setChatAutoScroll(autoScrollToggle.checked)" in source
+    assert "if (!runtimeState.chatAutoScroll) return;" in source
+    assert "forceScrollChatToBottom()" in source
 
 
 def test_webchat_frontend_renders_tool_duration() -> None:
@@ -172,7 +213,7 @@ def test_webchat_send_scrolls_to_bottom_after_layout_updates() -> None:
     assert "setTimeout(scrollChatToBottom, 0)" in helper
     assert 'appendChatMessage("user", message)' in send_helper
     assert 'input.value = ""' in send_helper
-    assert "scrollChatToBottomSoon()" in send_helper
+    assert "forceScrollChatToBottom()" in send_helper
 
 
 def test_webchat_layout_keeps_input_at_bottom_and_log_scrollable() -> None:

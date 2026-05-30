@@ -12,6 +12,7 @@
         chatHistoryCursor: null,
         chatHistoryHasMore: false,
         chatHistoryLoading: false,
+        chatAutoScroll: true,
         streamingMessageId: null,
         activeChatMessageId: null,
         chatReconnectTimer: null,
@@ -25,6 +26,7 @@
         },
     };
     const RUNTIME_DISABLED_ERROR = "Runtime API disabled";
+    const CHAT_AUTO_SCROLL_STORAGE_KEY = "undefined_webchat_auto_scroll";
 
     function i18nFormat(key, params = {}) {
         let text = t(key);
@@ -493,12 +495,20 @@
     }
 
     function scrollChatToBottom() {
+        if (!runtimeState.chatAutoScroll) return;
         const log = get("runtimeChatLog");
         if (!log) return;
-        log.scrollTop = log.scrollHeight;
+        log.scrollTo({ top: log.scrollHeight, behavior: "smooth" });
+    }
+
+    function forceScrollChatToBottom() {
+        const log = get("runtimeChatLog");
+        if (!log) return;
+        log.scrollTo({ top: log.scrollHeight, behavior: "smooth" });
     }
 
     function scrollChatToBottomSoon() {
+        if (!runtimeState.chatAutoScroll) return;
         scrollChatToBottom();
         if (typeof requestAnimationFrame === "function") {
             requestAnimationFrame(scrollChatToBottom);
@@ -575,6 +585,14 @@
         return container;
     }
 
+    function appendRawChatContent(item, content) {
+        const text = String(content || "").trim();
+        if (!item || !text) return;
+        item.dataset.rawContent = [item.dataset.rawContent || "", text]
+            .filter(Boolean)
+            .join("\n\n");
+    }
+
     function appendTimelineMessage(item, content, role = "bot") {
         const text = String(content || "").trim();
         if (!item || !text) return null;
@@ -587,10 +605,43 @@
             : "runtime-chat-content";
         node.innerHTML = renderChatContent(text, isBot);
         timeline.appendChild(node);
-        item.dataset.rawContent = [item.dataset.rawContent || "", text]
-            .filter(Boolean)
-            .join("\n\n");
+        appendRawChatContent(item, text);
         return node;
+    }
+
+    function readChatAutoScrollPreference() {
+        try {
+            const value = window.localStorage.getItem(
+                CHAT_AUTO_SCROLL_STORAGE_KEY,
+            );
+            return value === null ? true : value !== "false";
+        } catch (_error) {
+            return true;
+        }
+    }
+
+    function writeChatAutoScrollPreference(enabled) {
+        try {
+            window.localStorage.setItem(
+                CHAT_AUTO_SCROLL_STORAGE_KEY,
+                enabled ? "true" : "false",
+            );
+        } catch (_error) {
+            // ignore storage failures in hardened browsers/private mode
+        }
+    }
+
+    function syncChatAutoScrollToggle() {
+        const input = get("runtimeChatAutoScroll");
+        if (!input) return;
+        input.checked = runtimeState.chatAutoScroll;
+    }
+
+    function setChatAutoScroll(enabled, { persist = true } = {}) {
+        runtimeState.chatAutoScroll = !!enabled;
+        syncChatAutoScrollToggle();
+        if (persist) writeChatAutoScrollPreference(runtimeState.chatAutoScroll);
+        if (runtimeState.chatAutoScroll) scrollChatToBottomSoon();
     }
 
     function finishStreamingMessage() {
@@ -790,24 +841,43 @@
             block.resultPreview,
             { markdown: true },
         );
-        const children = Array.isArray(block.children)
-            ? block.children.map((child) => renderToolBlock(child)).join("")
+        const timeline = Array.isArray(block.timeline)
+            ? block.timeline.map(renderToolTimelineItem).join("")
             : "";
-        const childHtml = children
-            ? `<div class="runtime-tool-children">${children}</div>`
+        const children =
+            !timeline && Array.isArray(block.children)
+                ? block.children.map((child) => renderToolBlock(child)).join("")
+                : "";
+        const childContent = timeline || children;
+        const childHtml = childContent
+            ? `<div class="runtime-tool-children">${childContent}</div>`
             : "";
         const openAttr = block.status === "running" ? " open" : "";
         const hintClass = block.uiHint
             ? ` ${escapeHtml(String(block.uiHint).replace(/_/g, "-"))}`
             : "";
+        const kindClass = block.isAgent ? " is-agent" : " is-tool";
         return (
-            `<details class="runtime-tool-block ${escapeHtml(block.status)}${hintClass}"${openAttr}>` +
+            `<details class="runtime-tool-block ${escapeHtml(block.status)}${kindClass}${hintClass}"${openAttr}>` +
             `<summary><span>${escapeHtml(label)}</span><code>${escapeHtml(block.name || "--")}</code><em>${escapeHtml(metaLabel)}</em></summary>` +
             args +
-            result +
             childHtml +
+            result +
             `</details>`
         );
+    }
+
+    function renderToolTimelineItem(entry) {
+        if (!entry || typeof entry !== "object") return "";
+        if (entry.type === "message") {
+            const content = String(entry.content || "").trim();
+            if (!content) return "";
+            return `<div class="runtime-tool-message">${renderChatContent(content, true)}</div>`;
+        }
+        if (entry.type === "call" && entry.call) {
+            return renderToolBlock(entry.call);
+        }
+        return "";
     }
 
     function toolBlockKey(payload, blocks) {
@@ -830,6 +900,9 @@
         const children = Array.isArray(node.children)
             ? node.children.map(normalizeToolCallNode).filter(Boolean)
             : [];
+        const timeline = Array.isArray(node.timeline)
+            ? node.timeline.map(normalizeHistoryTimelineNode).filter(Boolean)
+            : [];
         return {
             name: String(node.name || ""),
             isAgent: !!node.is_agent,
@@ -842,6 +915,7 @@
                     ? Number(node.duration_ms)
                     : undefined,
             children,
+            timeline,
         };
     }
 
@@ -883,6 +957,7 @@
         );
         const block = {
             ...previous,
+            webchatCallId: key,
             name: String((payload && payload.name) || previous.name || ""),
             isAgent: !!(
                 (payload && payload.is_agent) ||
@@ -918,6 +993,7 @@
                     "",
             ),
             children: Array.isArray(previous.children) ? previous.children : [],
+            timeline: Array.isArray(previous.timeline) ? previous.timeline : [],
         };
         blocks.set(key, block);
         return block;
@@ -940,6 +1016,52 @@
         return toolBlockKey(payload, blocks);
     }
 
+    function toolCallIdentity(block) {
+        if (!block) return "";
+        return String(block.webchatCallId || block.name || "").trim();
+    }
+
+    function appendToolTimelineEntry(parent, entry) {
+        if (!parent || !entry) return;
+        const timeline = Array.isArray(parent.timeline) ? parent.timeline : [];
+        if (entry.type === "call" && entry.call) {
+            const identity = toolCallIdentity(entry.call);
+            const existingIndex = timeline.findIndex(
+                (item) =>
+                    item.type === "call" &&
+                    toolCallIdentity(item.call) === identity,
+            );
+            if (existingIndex >= 0) {
+                timeline[existingIndex] = entry;
+            } else {
+                timeline.push(entry);
+            }
+            parent.timeline = timeline;
+            return;
+        }
+        timeline.push(entry);
+        parent.timeline = timeline;
+    }
+
+    function redrawToolTimelineNode(item, blocks, key) {
+        const timeline = ensureTimelineNodeContainer(item);
+        if (!timeline) return null;
+        const rootKey = topLevelToolKey(blocks, key);
+        const root = blocks.get(rootKey);
+        if (!root) return null;
+        let node = timeline.querySelector(
+            `[data-tool-key="${CSS.escape(rootKey)}"]`,
+        );
+        if (!node) {
+            node = document.createElement("div");
+            node.className = "runtime-chat-tools";
+            node.dataset.toolKey = rootKey;
+            timeline.appendChild(node);
+        }
+        node.innerHTML = renderToolBlock(root);
+        return node;
+    }
+
     function upsertTimelineToolBlock(item, blocks, payload, status) {
         if (!item) return null;
         const key = timelineToolKey(payload, blocks);
@@ -951,10 +1073,14 @@
         ).trim();
         if (parentKey && blocks.has(parentKey)) {
             const parent = blocks.get(parentKey);
+            const blockIdentity = toolCallIdentity(block);
             const siblings = Array.isArray(parent.children)
-                ? parent.children.filter((child) => child !== block)
+                ? parent.children.filter(
+                      (child) => toolCallIdentity(child) !== blockIdentity,
+                  )
                 : [];
             parent.children = [...siblings, block];
+            appendToolTimelineEntry(parent, { type: "call", call: block });
             const parentNode = timeline.querySelector(
                 `[data-tool-key="${CSS.escape(parentKey)}"]`,
             );
@@ -985,11 +1111,26 @@
         return node;
     }
 
+    function appendNestedTimelineMessage(item, blocks, payload, content) {
+        const parentKey = String(
+            (payload && payload.parent_webchat_call_id) || "",
+        ).trim();
+        if (!parentKey || !blocks.has(parentKey)) return false;
+        const parent = blocks.get(parentKey);
+        appendToolTimelineEntry(parent, {
+            type: "message",
+            content,
+        });
+        redrawToolTimelineNode(item, blocks, parentKey);
+        appendRawChatContent(item, content);
+        return true;
+    }
+
     function upsertToolBlock(payload, status, jobId = "") {
         const item = ensureStreamingMessage(jobId);
         if (!item) return;
         upsertTimelineToolBlock(item, runtimeState.toolBlocks, payload, status);
-        scrollChatToBottom();
+        scrollChatToBottomSoon();
     }
 
     function historyWebchatEvents(item) {
@@ -1885,7 +2026,7 @@
         runtimeState.chatHistoryHasMore = !!(data && data.has_more);
         runtimeState.chatHistoryLoaded = true;
         runtimeState.chatHistoryLoading = false;
-        scrollChatToBottom();
+        forceScrollChatToBottom();
         await resumeActiveChatJob();
     }
 
@@ -1981,9 +2122,15 @@
             if (!content) return;
             const item = ensureStreamingMessage(eventJobId);
             if (!item) return;
-            appendTimelineMessage(item, content, "bot");
+            const nested = appendNestedTimelineMessage(
+                item,
+                runtimeState.toolBlocks,
+                payload || {},
+                content,
+            );
+            if (!nested) appendTimelineMessage(item, content, "bot");
             finishStreamingMessage();
-            scrollChatToBottom();
+            scrollChatToBottomSoon();
             return;
         }
         if (event === "done") {
@@ -2001,7 +2148,7 @@
                 if (item) {
                     const content = String(payload.reply);
                     appendTimelineMessage(item, content, "bot");
-                    scrollChatToBottom();
+                    scrollChatToBottomSoon();
                 }
             }
             finalizeActiveChatMessage();
@@ -2156,7 +2303,7 @@
         runtimeState.lastEventSeq = 0;
         appendChatMessage("user", message);
         input.value = "";
-        scrollChatToBottomSoon();
+        forceScrollChatToBottom();
 
         try {
             const res = await api("/api/runtime/chat/jobs", {
@@ -2350,6 +2497,16 @@
         const clearChatBtn = get("btnRuntimeChatClear");
         if (clearChatBtn)
             clearChatBtn.addEventListener("click", clearChatHistory);
+
+        setChatAutoScroll(readChatAutoScrollPreference(), {
+            persist: false,
+        });
+        const autoScrollToggle = get("runtimeChatAutoScroll");
+        if (autoScrollToggle) {
+            autoScrollToggle.addEventListener("change", () => {
+                setChatAutoScroll(autoScrollToggle.checked);
+            });
+        }
 
         const chatLog = get("runtimeChatLog");
         if (chatLog) {

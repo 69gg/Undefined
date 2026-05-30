@@ -16,6 +16,7 @@ from Undefined.utils.http_download import (
     parse_content_length,
     probe_remote_file,
 )
+from Undefined.utils.message_turn import mark_message_sent_this_turn
 
 logger = logging.getLogger(__name__)
 
@@ -495,7 +496,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 file_size=downloaded_size,
             )
 
-        context["message_sent_this_turn"] = True
+        mark_message_sent_this_turn(context)
         logger.info(
             "[URL文件发送] 成功: request_id=%s target_type=%s target_id=%s file=%s size=%sB url=%s",
             request_id,

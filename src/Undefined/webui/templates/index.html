@@ -761,7 +761,14 @@
                             <h1 class="page-title" data-i18n="chat.title">智能对话</h1>
                             <p class="page-subtitle" data-i18n="chat.subtitle">虚拟私聊 system#42。</p>
                         </div>
-                        <button id="btnRuntimeChatClear" class="btn ghost" type="button" data-i18n="runtime.chat_clear">清空历史</button>
+                        <div class="runtime-chat-header-actions">
+                            <label class="toggle-wrapper runtime-chat-auto-scroll-toggle">
+                                <span data-i18n="runtime.chat_auto_scroll">自动滚动</span>
+                                <input id="runtimeChatAutoScroll" type="checkbox" class="toggle-input" checked>
+                                <span class="toggle-track"><span class="toggle-handle"></span></span>
+                            </label>
+                            <button id="btnRuntimeChatClear" class="btn ghost" type="button" data-i18n="runtime.chat_clear">清空历史</button>
+                        </div>
                     </div>
 
                     <div class="runtime-card chat-runtime-card">

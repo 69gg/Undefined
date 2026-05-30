@@ -353,6 +353,7 @@ async def test_chat_job_persists_webchat_lifecycle_history(
                 "agent_path": ["web_agent"],
             },
         )
+        await send_output(42, "final")
         await webchat_event_callback(
             "tool_end",
             {
@@ -365,7 +366,6 @@ async def test_chat_job_persists_webchat_lifecycle_history(
                 "is_agent": True,
             },
         )
-        await send_output(42, "final")
         return "chat"
 
     context = _context()
@@ -408,24 +408,30 @@ async def test_chat_job_persists_webchat_lifecycle_history(
         "agent_start",
         "tool_start",
         "tool_end",
-        "agent_end",
         "message",
+        "agent_end",
     ]
     assert webchat["events"][0]["payload"]["webchat_call_id"] == "agent_1"
     assert webchat["events"][1]["payload"]["parent_webchat_call_id"] == "agent_1"
     assert webchat["events"][2]["payload"]["result_preview"] == "nested result"
     assert "duration_ms" in webchat["events"][2]["payload"]
-    assert webchat["events"][3]["payload"]["result_preview"] == "agent result"
-    assert webchat["events"][4]["payload"]["content"] == "rendered final"
+    assert webchat["events"][3]["payload"]["content"] == "rendered final"
+    assert webchat["events"][3]["payload"]["parent_webchat_call_id"] == "agent_1"
+    assert webchat["events"][4]["payload"]["result_preview"] == "agent result"
     assert len(webchat["calls"]) == 1
     assert webchat["calls"][0]["webchat_call_id"] == "agent_1"
     assert webchat["calls"][0]["is_agent"] is True
     assert webchat["calls"][0]["children"][0]["webchat_call_id"] == "agent_1/search_1"
     assert webchat["calls"][0]["children"][0]["result_preview"] == "nested result"
-    assert [item["type"] for item in webchat["timeline"]] == ["call", "message"]
+    assert [item["type"] for item in webchat["timeline"]] == ["call"]
     assert webchat["timeline"][0]["call"]["webchat_call_id"] == "agent_1"
     assert webchat["timeline"][0]["call"]["children"][0]["name"] == "search"
-    assert webchat["timeline"][1]["content"] == "rendered final"
+    assert [item["type"] for item in webchat["calls"][0]["timeline"]] == [
+        "call",
+        "message",
+    ]
+    assert webchat["calls"][0]["timeline"][0]["call"]["name"] == "search"
+    assert webchat["calls"][0]["timeline"][1]["content"] == "rendered final"
 
 
 @pytest.mark.asyncio

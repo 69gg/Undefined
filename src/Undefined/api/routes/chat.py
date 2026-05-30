@@ -315,6 +315,7 @@ class ChatJobManager:
                     "content": rendered.delivery_text,
                     "job_id": job.job_id,
                     "elapsed_ms": _job_elapsed_ms(job, now),
+                    "parent_webchat_call_id": _current_webchat_agent_call_id(job),
                 },
             )
 
@@ -500,6 +501,29 @@ def _stage_elapsed_ms(job: ChatJob, now: float | None = None) -> int:
         return 0
     measured_at = time.time() if now is None else now
     return max(0, int((measured_at - job.current_stage_started_at) * 1000))
+
+
+def _current_webchat_agent_call_id(job: ChatJob) -> str:
+    open_calls: list[tuple[str, bool]] = []
+    for item in job.webchat_events:
+        if item.event not in _WEBCHAT_LIFECYCLE_EVENTS:
+            continue
+        payload = item.payload
+        call_id = _webchat_tool_event_key(payload)
+        if not call_id:
+            continue
+        if item.event in {"tool_start", "agent_start"}:
+            open_calls.append((call_id, bool(payload.get("is_agent"))))
+            continue
+        if item.event in {"tool_end", "agent_end"}:
+            for index in range(len(open_calls) - 1, -1, -1):
+                if open_calls[index][0] == call_id:
+                    open_calls.pop(index)
+                    break
+    for call_id, is_agent in reversed(open_calls):
+        if is_agent:
+            return call_id
+    return ""
 
 
 def _webchat_tool_event_key(payload: dict[str, Any]) -> str:
@@ -762,6 +786,7 @@ def _call_preview_node(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(payload.get("agent_path"), list)
         else [],
         "children": [],
+        "timeline": [],
     }
 
 
@@ -824,6 +849,7 @@ def _build_webchat_call_graph(
             parent.setdefault("children", []).append(node)
         else:
             roots.append(node)
+    _populate_webchat_node_timelines(nodes, events)
     return nodes, order, roots
 
 
@@ -832,31 +858,88 @@ def _build_webchat_call_tree(events: list[dict[str, Any]]) -> list[dict[str, Any
     return roots
 
 
+def _webchat_event_seq(event: dict[str, Any]) -> int:
+    seq_raw = event.get("seq", 0)
+    try:
+        return max(0, int(seq_raw))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _webchat_message_timeline_item(
+    *,
+    event: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    content = str(payload.get("content") or payload.get("message") or "")
+    if not content:
+        return None
+    return {
+        "type": "message",
+        "seq": _webchat_event_seq(event),
+        "content": content,
+        "elapsed_ms": payload.get("elapsed_ms"),
+    }
+
+
+def _populate_webchat_node_timelines(
+    nodes: dict[str, dict[str, Any]],
+    events: list[dict[str, Any]],
+) -> None:
+    emitted_child_calls: set[str] = set()
+    for node in nodes.values():
+        node["timeline"] = []
+    for item in events:
+        event = str(item.get("event") or "")
+        payload = item.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+        if event == "message":
+            parent_id = str(payload.get("parent_webchat_call_id") or "").strip()
+            parent = nodes.get(parent_id)
+            if parent is None:
+                continue
+            message_item = _webchat_message_timeline_item(event=item, payload=payload)
+            if message_item is not None:
+                parent.setdefault("timeline", []).append(message_item)
+            continue
+        if event not in _WEBCHAT_LIFECYCLE_EVENTS:
+            continue
+        call_id = _webchat_event_call_id(item)
+        if not call_id or call_id in emitted_child_calls:
+            continue
+        call_node = nodes.get(call_id)
+        if call_node is None:
+            continue
+        parent_id = str(call_node.get("parent_webchat_call_id") or "").strip()
+        call_parent = nodes.get(parent_id)
+        if call_parent is None:
+            continue
+        emitted_child_calls.add(call_id)
+        call_parent.setdefault("timeline", []).append(
+            {"type": "call", "seq": _webchat_event_seq(item), "call": call_node}
+        )
+    for node in nodes.values():
+        timeline = node.get("timeline")
+        if isinstance(timeline, list):
+            timeline.sort(key=lambda entry: int(entry.get("seq", 0) or 0))
+
+
 def _build_webchat_timeline(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     nodes, _order, _roots = _build_webchat_call_graph(events)
     emitted_calls: set[str] = set()
     timeline: list[dict[str, Any]] = []
     for item in events:
         event = str(item.get("event") or "")
-        seq_raw = item.get("seq", 0)
-        try:
-            seq = max(0, int(seq_raw))
-        except (TypeError, ValueError):
-            seq = 0
         payload = item.get("payload")
         if not isinstance(payload, dict):
             payload = {}
         if event == "message":
-            content = str(payload.get("content") or payload.get("message") or "")
-            if content:
-                timeline.append(
-                    {
-                        "type": "message",
-                        "seq": seq,
-                        "content": content,
-                        "elapsed_ms": payload.get("elapsed_ms"),
-                    }
-                )
+            if str(payload.get("parent_webchat_call_id") or "").strip():
+                continue
+            message_item = _webchat_message_timeline_item(event=item, payload=payload)
+            if message_item is not None:
+                timeline.append(message_item)
             continue
         if event not in _WEBCHAT_LIFECYCLE_EVENTS:
             continue
@@ -870,7 +953,7 @@ def _build_webchat_timeline(events: list[dict[str, Any]]) -> list[dict[str, Any]
         if parent_id and parent_id in nodes:
             continue
         emitted_calls.add(call_id)
-        timeline.append({"type": "call", "seq": seq, "call": node})
+        timeline.append({"type": "call", "seq": _webchat_event_seq(item), "call": node})
     return timeline
 
 

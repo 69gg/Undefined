@@ -263,6 +263,7 @@ const I18N = {
         "runtime.cognitive_profile_get": "按实体查看侧写",
         "runtime.fetch": "获取",
         "runtime.chat_placeholder": "输入消息，或直接 /help 这样的命令",
+        "runtime.chat_auto_scroll": "自动滚动到底部",
         "runtime.chat_clear": "清空历史",
         "runtime.chat_clear_confirm":
             "确定清空 WebUI 虚拟私聊 system#42 的聊天历史吗？长期记忆和认知记忆不会受影响。",
@@ -624,6 +625,7 @@ const I18N = {
         "runtime.cognitive_profile_get": "Get Profile by Entity",
         "runtime.fetch": "Fetch",
         "runtime.chat_placeholder": "Type a message, or run /help directly",
+        "runtime.chat_auto_scroll": "Auto-scroll",
         "runtime.chat_clear": "Clear History",
         "runtime.chat_clear_confirm":
             "Clear the WebUI virtual private chat history for system#42? Long-term and cognitive memory are not affected.",

@@ -7,6 +7,7 @@ import pytest
 
 from Undefined.context import RequestContext
 from Undefined.skills.tools.end.handler import execute
+from Undefined.utils.message_turn import mark_message_sent_this_turn
 
 
 @pytest.mark.asyncio
@@ -58,6 +59,21 @@ async def test_end_accepts_message_sent_flag_from_request_context_string_true() 
 
     assert result == "对话已结束"
     assert context["conversation_ended"] is True
+
+
+@pytest.mark.asyncio
+async def test_end_accepts_message_sent_flag_from_copied_tool_context() -> None:
+    send_context: dict[str, Any] = {"request_id": "req-send-copy"}
+    end_context: dict[str, Any] = {"request_id": "req-end-copy"}
+
+    async with RequestContext(request_type="private", user_id=42):
+        mark_message_sent_this_turn(send_context)
+        result = await execute({"memo": "已发送消息"}, end_context)
+
+    assert send_context["message_sent_this_turn"] is True
+    assert "message_sent_this_turn" not in end_context
+    assert result == "对话已结束"
+    assert end_context["conversation_ended"] is True
 
 
 class _FakeHistoryManager:

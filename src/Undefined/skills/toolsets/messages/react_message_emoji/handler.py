@@ -6,6 +6,7 @@ from collections import OrderedDict
 from typing import Any, Dict, Literal
 
 from Undefined.context import RequestContext
+from Undefined.utils.message_turn import mark_message_sent_this_turn
 from Undefined.utils.qq_emoji import resolve_emoji_id_by_alias, search_emoji_aliases
 
 logger = logging.getLogger(__name__)
@@ -156,10 +157,7 @@ def _resolve_onebot_client(context: Dict[str, Any]) -> Any | None:
 
 
 def _mark_action_sent(context: Dict[str, Any]) -> None:
-    context["message_sent_this_turn"] = True
-    ctx = RequestContext.current()
-    if ctx is not None:
-        ctx.set_resource("message_sent_this_turn", True)
+    mark_message_sent_this_turn(context)
 
 
 def _get_seen_ops(context: Dict[str, Any]) -> set[str]:
