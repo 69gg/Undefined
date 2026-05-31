@@ -533,6 +533,19 @@
         });
     }
 
+    function forceScrollChatToBottomSoon() {
+        forceScrollChatToBottom();
+        if (typeof requestAnimationFrame === "function") {
+            requestAnimationFrame(() => {
+                forceScrollChatToBottom();
+                requestAnimationFrame(forceScrollChatToBottom);
+            });
+        } else {
+            setTimeout(forceScrollChatToBottom, 0);
+        }
+        setTimeout(forceScrollChatToBottom, 80);
+    }
+
     function scrollChatToBottomSoon() {
         if (!runtimeState.chatAutoScroll) return;
         scrollChatToBottom();
@@ -3033,7 +3046,7 @@
         runtimeState.lastEventSeq = 0;
         appendChatMessage("user", message);
         input.value = "";
-        forceScrollChatToBottom();
+        forceScrollChatToBottomSoon();
 
         try {
             const res = await api("/api/runtime/chat/jobs", {
@@ -3049,6 +3062,7 @@
                 throw new Error("missing job_id");
             }
             ensureStreamingMessage();
+            forceScrollChatToBottomSoon();
             await attachChatJob(jobId, 0);
         } catch (error) {
             runtimeState.chatBusy = false;

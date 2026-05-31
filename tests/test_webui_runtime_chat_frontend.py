@@ -415,6 +415,9 @@ def test_webchat_tool_status_colors_drive_left_bar_and_status_text() -> None:
 
 def test_webchat_send_scrolls_to_bottom_after_layout_updates() -> None:
     source = RUNTIME_JS.read_text(encoding="utf-8")
+    force_helper = source.split("function forceScrollChatToBottomSoon", 1)[1].split(
+        "function scrollChatToBottomSoon", 1
+    )[0]
     helper = source.split("function scrollChatToBottomSoon", 1)[1].split(
         "function updateChatMessage", 1
     )[0]
@@ -422,11 +425,15 @@ def test_webchat_send_scrolls_to_bottom_after_layout_updates() -> None:
         "async function handleChatImagePicked", 1
     )[0]
 
+    assert "requestAnimationFrame(() =>" in force_helper
+    assert "requestAnimationFrame(forceScrollChatToBottom)" in force_helper
+    assert "setTimeout(forceScrollChatToBottom, 80)" in force_helper
     assert "requestAnimationFrame(scrollChatToBottom)" in helper
     assert "setTimeout(scrollChatToBottom, 0)" in helper
     assert 'appendChatMessage("user", message)' in send_helper
     assert 'input.value = ""' in send_helper
-    assert "forceScrollChatToBottom()" in send_helper
+    assert "forceScrollChatToBottomSoon()" in send_helper
+    assert "ensureStreamingMessage()" in send_helper
 
 
 def test_webchat_layout_keeps_input_at_bottom_and_log_scrollable() -> None:
