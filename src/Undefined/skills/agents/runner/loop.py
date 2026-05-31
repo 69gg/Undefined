@@ -10,6 +10,9 @@ from Undefined.skills.agents.runner.context import prepare_agent_run
 from Undefined.skills.agents.runner.tools import execute_assistant_tool_calls
 
 
+DEFAULT_AGENT_MAX_ITERATIONS = 1000
+
+
 def _webchat_agent_path(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -61,7 +64,7 @@ async def run_agent_with_tools(
     context: dict[str, Any],
     agent_dir: Path,
     logger: logging.Logger,
-    max_iterations: int = 20,
+    max_iterations: int = DEFAULT_AGENT_MAX_ITERATIONS,
     tool_error_prefix: str = "错误",
 ) -> str:
     """执行通用 Agent 循环。

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from Undefined.config.models import AgentModelConfig
+from Undefined.skills.agents.runner import DEFAULT_AGENT_MAX_ITERATIONS
 from Undefined.skills.agents.summary_agent.handler import (
     _build_user_content,
     execute as summary_agent_execute,
@@ -47,7 +48,7 @@ async def test_summary_agent_normal_execution() -> None:
     assert "消息总结助手" in call_kwargs["default_prompt"]
     assert call_kwargs["context"] is context
     assert isinstance(call_kwargs["agent_dir"], Path)
-    assert call_kwargs["max_iterations"] == 10
+    assert call_kwargs["max_iterations"] == DEFAULT_AGENT_MAX_ITERATIONS
     assert call_kwargs["tool_error_prefix"] == "错误"
 
 
