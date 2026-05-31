@@ -288,9 +288,9 @@
 
   .runtime-chat-file-card { max-width: 100%; }
   .runtime-chat-content.markdown table {
-    display: block;
-    overflow-x: auto;
-    white-space: nowrap;
+    display: table;
+    overflow-x: visible;
+    white-space: normal;
   }
   .runtime-chat-input-row {
     --chat-attachment-gap: 6px;

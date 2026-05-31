@@ -483,6 +483,29 @@ def test_webchat_frontend_highlights_markdown_code_blocks() -> None:
     assert ".runtime-code-action.primary" in css
     assert ".runtime-code-block.is-collapsed .runtime-code-body" in css
     assert ".runtime-code-block.is-collapsed .runtime-code-body::after" in css
+    content_css = css.split(".runtime-chat-content {", 1)[1].split(
+        ".runtime-chat-timeline",
+        1,
+    )[0]
+    table_css = css.split(".runtime-chat-content.markdown table", 1)[1].split(
+        ".runtime-chat-content.markdown th",
+        1,
+    )[0]
+    pre_css = css.split(".runtime-chat-content.markdown pre {", 1)[1].split(
+        ".runtime-chat-content.markdown pre code",
+        1,
+    )[0]
+    code_css = css.split(".runtime-chat-content.markdown pre code {", 1)[1].split(
+        ".runtime-chat-content.markdown pre code.hljs",
+        1,
+    )[0]
+    assert "max-width: 100%;" in content_css
+    assert "overflow-wrap: anywhere;" in content_css
+    assert "table-layout: fixed;" in table_css
+    assert "overflow-x: hidden;" in pre_css
+    assert "white-space: pre-wrap;" in pre_css
+    assert "white-space: pre-wrap;" in code_css
+    assert "overflow-wrap: anywhere;" in code_css
     collapsed_css = css.split(
         ".runtime-code-block.is-collapsed .runtime-code-body",
         1,
@@ -988,6 +1011,46 @@ def test_webchat_mobile_tool_rows_have_overflow_guards() -> None:
     assert "overflow: hidden;" in kind_css
     assert "grid-template-columns: minmax(64px, min(34%, 180px))" in structured_css
     assert ".runtime-tool-block summary .runtime-tool-duration" in responsive_css
+
+
+def test_webchat_content_wraps_long_code_and_markdown_without_horizontal_scroll() -> (
+    None
+):
+    css = RUNTIME_CSS.read_text(encoding="utf-8")
+    responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
+
+    log_css = css.split(".runtime-chat-log {", 1)[1].split(
+        ".runtime-chat-load-more",
+        1,
+    )[0]
+    item_css = css.split(".runtime-chat-item {", 1)[1].split(
+        ".runtime-chat-item.user",
+        1,
+    )[0]
+    code_block_css = css.split(".runtime-code-block {", 1)[1].split(
+        ".runtime-code-toolbar",
+        1,
+    )[0]
+    inline_code_css = css.split(".runtime-chat-content code {", 1)[1].split(
+        ".runtime-chat-image",
+        1,
+    )[0]
+    mobile_table_css = responsive_css.split(
+        ".runtime-chat-content.markdown table",
+        1,
+    )[1].split(".runtime-chat-input-row", 1)[0]
+
+    assert "min-width: 0;" in log_css
+    assert "overflow-x: hidden;" in log_css
+    assert "min-width: 0;" in item_css
+    assert "max-width: 100%;" in item_css
+    assert "min-width: 0;" in code_block_css
+    assert "max-width: 100%;" in code_block_css
+    assert "white-space: normal;" in inline_code_css
+    assert "overflow-wrap: anywhere;" in inline_code_css
+    assert "display: table;" in mobile_table_css
+    assert "overflow-x: visible;" in mobile_table_css
+    assert "white-space: normal;" in mobile_table_css
     assert ".runtime-tool-block summary .runtime-tool-kind" in responsive_css
     assert "display: none;" in responsive_css
     assert "max-width: 30vw;" in responsive_css

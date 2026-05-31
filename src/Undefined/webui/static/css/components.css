@@ -605,8 +605,10 @@
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   background: var(--bg-app);
+  min-width: 0;
   min-height: 220px;
   max-height: 420px;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 12px;
   margin-bottom: 12px;
@@ -621,6 +623,8 @@
   text-align: center;
 }
 .runtime-chat-item {
+  min-width: 0;
+  max-width: 100%;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   padding: 12px 14px;
@@ -721,20 +725,29 @@
   opacity: 0.85;
 }
 .runtime-chat-content {
+  min-width: 0;
+  max-width: 100%;
   font-size: 15px;
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .runtime-chat-timeline {
   display: grid;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
 }
 .runtime-chat-item.tool-only .runtime-chat-content {
   display: none;
 }
 .runtime-chat-content.markdown {
   white-space: normal;
+}
+.runtime-chat-content.markdown > * {
+  min-width: 0;
+  max-width: 100%;
 }
 .runtime-chat-content.markdown > *:first-child { margin-top: 0; }
 .runtime-chat-content.markdown > *:last-child { margin-bottom: 0; }
@@ -764,6 +777,9 @@
   color: var(--text-secondary);
 }
 .runtime-chat-content.markdown table {
+  width: 100%;
+  max-width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   margin: 0.5em 0;
   font-size: 13px;
@@ -772,6 +788,8 @@
 .runtime-chat-content.markdown td {
   border: 1px solid var(--border-color);
   padding: 4px 8px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .runtime-chat-content.markdown th {
   background: var(--bg-app);
@@ -782,6 +800,8 @@
   text-decoration: underline;
 }
 .runtime-code-block {
+  min-width: 0;
+  max-width: 100%;
   margin: 0.5em 0;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
@@ -861,22 +881,29 @@
   display: none;
 }
 .runtime-chat-content.markdown pre {
+  max-width: 100%;
   margin: 0;
   padding: 10px 12px;
   border: 0;
   border-radius: 0;
   background: transparent;
-  overflow-x: auto;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .runtime-chat-content.markdown pre code {
   display: block;
+  min-width: 0;
+  max-width: 100%;
   padding: 0;
   border: none;
   background: none;
   border-radius: 0;
   font-size: 12.5px;
   line-height: 1.5;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .runtime-chat-content.markdown pre code.hljs,
 .runtime-chat-content.markdown code.hljs {
@@ -995,12 +1022,15 @@
 }
 .runtime-chat-content code {
   display: inline-block;
+  max-width: 100%;
   padding: 2px 6px;
   border-radius: 6px;
   border: 1px solid var(--border-color);
   background: var(--bg-app);
   font-family: var(--font-mono);
   font-size: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .runtime-chat-image {
   display: block;
@@ -1450,6 +1480,8 @@
 }
 .runtime-tool-block {
   --tool-accent: var(--accent-color);
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--bg-app) 92%, var(--bg-card));
@@ -1597,6 +1629,8 @@
   color: var(--warning);
 }
 .runtime-tool-preview {
+  min-width: 0;
+  max-width: 100%;
   border-top: 1px solid var(--border-color);
   padding: 8px 10px 10px;
   animation: runtime-tool-reveal 0.18s ease-out;
@@ -1611,6 +1645,8 @@
   font-weight: 600;
 }
 .runtime-tool-preview-body {
+  min-width: 0;
+  max-width: 100%;
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.5;
@@ -1696,6 +1732,8 @@
   background: var(--bg-card);
 }
 .runtime-tool-message {
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid color-mix(in srgb, var(--tool-accent) 18%, var(--border-color));
   border-left: 3px solid color-mix(in srgb, var(--tool-accent) 48%, var(--border-color));
   border-radius: var(--radius-sm);
