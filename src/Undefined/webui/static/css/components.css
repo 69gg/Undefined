@@ -749,12 +749,79 @@
   color: var(--accent);
   text-decoration: underline;
 }
-.runtime-chat-content.markdown pre {
+.runtime-code-block {
   margin: 0.5em 0;
-  padding: 10px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   background: color-mix(in srgb, var(--bg-app) 88%, var(--bg-deep));
+  overflow: hidden;
+}
+.runtime-code-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  padding: 5px 8px 5px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  background: color-mix(in srgb, var(--bg-card) 58%, transparent);
+}
+.runtime-code-language {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.runtime-code-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.runtime-code-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease,
+    transform 0.16s ease;
+}
+.runtime-code-action:hover,
+.runtime-code-action:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border-color));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text-primary);
+}
+.runtime-code-action.primary {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+.runtime-code-action.primary:hover,
+.runtime-code-action.primary:focus-visible {
+  background: var(--accent);
+  color: #fff;
+}
+.runtime-chat-content.markdown pre {
+  margin: 0;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   overflow-x: auto;
 }
 .runtime-chat-content.markdown pre code {

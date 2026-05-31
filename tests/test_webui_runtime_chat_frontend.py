@@ -425,14 +425,30 @@ def test_webchat_frontend_highlights_markdown_code_blocks() -> None:
     assert "hljs.highlightAuto(code).value" in source
     assert "renderer.code" in source
     assert "runtime-code-block" in source
+    assert "runtime-code-toolbar" in source
+    assert "runtime-code-action" in source
+    assert "data-code-copy" in source
+    assert "data-code-run-html" in source
+    assert "function isRunnableHtmlCode" in source
+    assert "function copyCodeBlock" in source
+    assert "function runHtmlCodeBlock" in source
+    assert "navigator.clipboard.writeText" in source
+    assert 'document.execCommand("copy")' in source
+    assert 'chatLog.addEventListener("click"' in source
     assert "highlightCodeBlock(codeText, normalizedLanguage)" in source
     assert "language-${escapeHtml(normalizedLanguage)}" in source
+    assert 'runtime.copy_code": "复制"' in I18N_JS.read_text(encoding="utf-8")
+    assert 'runtime.run_html": "运行"' in I18N_JS.read_text(encoding="utf-8")
     assert "/static/js/vendor/highlight.min.js" in template
     assert "/static/css/highlight-github.min.css" in template
     assert Path("src/Undefined/webui/static/js/vendor/highlight.min.js").is_file()
     assert Path("src/Undefined/webui/static/js/vendor/highlightjs.LICENSE").is_file()
     assert Path("src/Undefined/webui/static/css/highlight-github.min.css").is_file()
 
+    assert ".runtime-code-toolbar" in css
+    assert ".runtime-code-language" in css
+    assert ".runtime-code-action" in css
+    assert ".runtime-code-action.primary" in css
     assert ".runtime-chat-content.markdown pre code.hljs" in css
     assert ".runtime-code-block .hljs-keyword" in css
     assert ".runtime-code-block .hljs-string" in css

@@ -2237,6 +2237,23 @@
         }
     }
 
+    function isRunnableHtmlCode(code, language) {
+        const lang = normalizeCodeLanguage(language);
+        if (["html", "xml", "xhtml"].includes(lang)) return true;
+        const raw = String(code || "").trim();
+        if (!raw) return false;
+        return (
+            /^<!doctype\s+html\b/i.test(raw) ||
+            /^<html\b/i.test(raw) ||
+            (/<(style|script)\b/i.test(raw) && /<\/(style|script)>/i.test(raw))
+        );
+    }
+
+    function codeBlockLanguageLabel(language) {
+        const lang = normalizeCodeLanguage(language);
+        return lang === "text" ? "code" : lang;
+    }
+
     function createSafeMarkedRenderer() {
         if (typeof marked === "undefined" || !marked.Renderer) return null;
         const renderer = new marked.Renderer();
@@ -2251,15 +2268,28 @@
                     ? token.lang
                     : legacyLanguage;
             const normalizedLanguage = normalizeCodeLanguage(language);
+            const encodedCode = encodeURIComponent(codeText);
+            const canRunHtml = isRunnableHtmlCode(codeText, normalizedLanguage);
             const languageClass =
                 normalizedLanguage && normalizedLanguage !== "text"
                     ? ` language-${escapeHtml(normalizedLanguage)}`
                     : "";
             return (
-                `<pre class="runtime-code-block" data-language="${escapeHtml(normalizedLanguage)}">` +
+                `<div class="runtime-code-block" data-language="${escapeHtml(normalizedLanguage)}" data-code="${escapeHtml(encodedCode)}">` +
+                `<div class="runtime-code-toolbar">` +
+                `<span class="runtime-code-language">${escapeHtml(codeBlockLanguageLabel(normalizedLanguage))}</span>` +
+                `<span class="runtime-code-actions">` +
+                `<button class="runtime-code-action" type="button" data-code-copy>${escapeHtml(t("runtime.copy_code"))}</button>` +
+                (canRunHtml
+                    ? `<button class="runtime-code-action primary" type="button" data-code-run-html>${escapeHtml(t("runtime.run_html"))}</button>`
+                    : "") +
+                `</span>` +
+                `</div>` +
+                `<pre>` +
                 `<code class="${languageClass.trim()}">` +
                 `${highlightCodeBlock(codeText, normalizedLanguage)}` +
-                `</code></pre>`
+                `</code></pre>` +
+                `</div>`
             );
         };
         renderer.link = ({ href, title, tokens }) => {
@@ -2359,6 +2389,71 @@
         }
 
         return html || escapeHtml(text);
+    }
+
+    function decodeCodeBlockPayload(block) {
+        const encoded = String((block && block.dataset.code) || "");
+        if (!encoded) return "";
+        try {
+            return decodeURIComponent(encoded);
+        } catch (_error) {
+            return "";
+        }
+    }
+
+    async function copyTextToClipboard(text) {
+        const value = String(text || "");
+        if (!value) return false;
+        if (
+            navigator.clipboard &&
+            typeof navigator.clipboard.writeText === "function"
+        ) {
+            try {
+                await navigator.clipboard.writeText(value);
+                return true;
+            } catch (_error) {
+                // fall through to textarea fallback
+            }
+        }
+        const textarea = document.createElement("textarea");
+        textarea.value = value;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.top = "-1000px";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        let ok = false;
+        try {
+            ok = document.execCommand("copy");
+        } catch (_error) {
+            ok = false;
+        } finally {
+            textarea.remove();
+        }
+        return ok;
+    }
+
+    async function copyCodeBlock(block) {
+        const text = decodeCodeBlockPayload(block);
+        const ok = await copyTextToClipboard(text);
+        showToast(
+            ok ? t("runtime.code_copied") : t("runtime.copy_failed"),
+            ok ? "success" : "error",
+            1800,
+        );
+    }
+
+    function runHtmlCodeBlock(block) {
+        const code = decodeCodeBlockPayload(block);
+        if (!code) return;
+        if (typeof openHtmlRunner === "function") {
+            openHtmlRunner(code, {
+                language: String((block && block.dataset.language) || "html"),
+            });
+            return;
+        }
+        showToast(t("runtime.run_html"), "info", 1200);
     }
 
     function readFileAsDataUrl(file) {
@@ -3564,6 +3659,21 @@
             chatLog.addEventListener("scroll", () => {
                 if (chatLog.scrollTop <= 32) {
                     loadOlderChatHistory();
+                }
+            });
+            chatLog.addEventListener("click", (event) => {
+                const target = event.target;
+                if (!(target instanceof Element)) return;
+                const copyButton = target.closest("[data-code-copy]");
+                if (copyButton) {
+                    const block = copyButton.closest(".runtime-code-block");
+                    if (block) copyCodeBlock(block);
+                    return;
+                }
+                const runButton = target.closest("[data-code-run-html]");
+                if (runButton) {
+                    const block = runButton.closest(".runtime-code-block");
+                    if (block) runHtmlCodeBlock(block);
                 }
             });
         }
