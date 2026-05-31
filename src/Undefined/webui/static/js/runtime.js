@@ -12,6 +12,7 @@
         chatHistoryCursor: null,
         chatHistoryHasMore: false,
         chatHistoryLoading: false,
+        chatTopLoadSuppressedUntil: 0,
         chatAutoScroll: true,
         streamingMessageId: null,
         activeChatMessageId: null,
@@ -44,6 +45,7 @@
     const CHAT_AUTO_SCROLL_STORAGE_KEY = "undefined_webchat_auto_scroll";
     const CHAT_POLL_INTERVAL_MS = 500;
     const CHAT_CLOCK_INTERVAL_MS = 500;
+    const CHAT_TOP_LOAD_SUPPRESS_MS = 900;
     const TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS = 2000;
     const ACTIVE_JOB_RESUME_MAX_ATTEMPTS = 20;
     const CHAT_INLINE_IMAGE_MAX_BYTES = 12 * 1024 * 1024;
@@ -560,6 +562,7 @@
         if (!runtimeState.chatAutoScroll) return;
         const log = get("runtimeChatLog");
         if (!log) return;
+        suppressChatTopHistoryLoad();
         log.scrollTo({
             top: log.scrollHeight,
             behavior: chatScrollBehavior(),
@@ -569,13 +572,26 @@
     function forceScrollChatToBottom() {
         const log = get("runtimeChatLog");
         if (!log) return;
+        suppressChatTopHistoryLoad();
         log.scrollTo({
             top: log.scrollHeight,
             behavior: chatScrollBehavior(),
         });
     }
 
+    function suppressChatTopHistoryLoad() {
+        runtimeState.chatTopLoadSuppressedUntil = Math.max(
+            runtimeState.chatTopLoadSuppressedUntil || 0,
+            Date.now() + CHAT_TOP_LOAD_SUPPRESS_MS,
+        );
+    }
+
+    function isChatTopHistoryLoadSuppressed() {
+        return Date.now() < (runtimeState.chatTopLoadSuppressedUntil || 0);
+    }
+
     function forceScrollChatToBottomSoon() {
+        suppressChatTopHistoryLoad();
         forceScrollChatToBottom();
         if (typeof requestAnimationFrame === "function") {
             requestAnimationFrame(() => {
@@ -586,6 +602,8 @@
             setTimeout(forceScrollChatToBottom, 0);
         }
         setTimeout(forceScrollChatToBottom, 80);
+        setTimeout(forceScrollChatToBottom, 260);
+        setTimeout(forceScrollChatToBottom, 700);
     }
 
     function scrollChatToBottomSoon() {
@@ -3742,7 +3760,8 @@
         if (
             !log ||
             runtimeState.chatHistoryLoading ||
-            !runtimeState.chatHistoryHasMore
+            !runtimeState.chatHistoryHasMore ||
+            isChatTopHistoryLoadSuppressed()
         )
             return;
         runtimeState.chatHistoryLoading = true;
@@ -4313,6 +4332,7 @@
         const chatLog = get("runtimeChatLog");
         if (chatLog) {
             chatLog.addEventListener("scroll", () => {
+                if (isChatTopHistoryLoadSuppressed()) return;
                 if (chatLog.scrollTop <= 32) {
                     loadOlderChatHistory();
                 }

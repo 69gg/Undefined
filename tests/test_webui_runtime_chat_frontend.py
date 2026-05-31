@@ -335,6 +335,10 @@ def test_webchat_tab_activation_forces_bottom_scroll_after_history_load() -> Non
     assert "forceScrollChatToBottom();" not in load_helper
     assert "loadChatHistory().catch" in chat_branch
     assert "forceScrollChatToBottomSoon()" in chat_branch
+    assert "CHAT_TOP_LOAD_SUPPRESS_MS = 900" in source
+    assert "suppressChatTopHistoryLoad()" in source
+    assert "isChatTopHistoryLoadSuppressed()" in source
+    assert "chatTopLoadSuppressedUntil" in source
 
 
 def test_webchat_frontend_renders_tool_duration() -> None:
