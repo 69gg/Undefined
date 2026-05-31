@@ -5,6 +5,7 @@ from pathlib import Path
 
 RUNTIME_JS = Path("src/Undefined/webui/static/js/runtime.js")
 RUNTIME_CSS = Path("src/Undefined/webui/static/css/components.css")
+WEBUI_TEMPLATE = Path("src/Undefined/webui/templates/index.html")
 MAIN_JS = Path("src/Undefined/webui/static/js/main.js")
 APP_CSS = Path("src/Undefined/webui/static/css/app.css")
 RESPONSIVE_CSS = Path("src/Undefined/webui/static/css/responsive.css")
@@ -375,23 +376,30 @@ def test_webchat_frontend_sanitizes_markdown_html_and_unsafe_links() -> None:
 def test_webchat_frontend_highlights_markdown_code_blocks() -> None:
     source = RUNTIME_JS.read_text(encoding="utf-8")
     css = RUNTIME_CSS.read_text(encoding="utf-8")
+    template = WEBUI_TEMPLATE.read_text(encoding="utf-8")
 
     assert "function highlightCodeBlock" in source
-    assert "function highlightJsonCode" in source
-    assert "function highlightGenericCode" in source
+    assert 'typeof hljs === "undefined"' in source
+    assert "hljs.getLanguage(lang)" in source
+    assert "hljs.highlight(code, {" in source
+    assert "hljs.highlightAuto(code).value" in source
     assert "renderer.code" in source
     assert "runtime-code-block" in source
-    assert "runtime-code-token" in source
     assert "highlightCodeBlock(codeText, normalizedLanguage)" in source
-    assert "escapeHtml(code.slice" in source
     assert "language-${escapeHtml(normalizedLanguage)}" in source
+    assert "/static/js/vendor/highlight.min.js" in template
+    assert "/static/css/highlight-github.min.css" in template
+    assert Path("src/Undefined/webui/static/js/vendor/highlight.min.js").is_file()
+    assert Path("src/Undefined/webui/static/js/vendor/highlightjs.LICENSE").is_file()
+    assert Path("src/Undefined/webui/static/css/highlight-github.min.css").is_file()
 
-    assert ".runtime-code-block .runtime-code-token.keyword" in css
-    assert ".runtime-code-block .runtime-code-token.string" in css
-    assert ".runtime-code-block .runtime-code-token.comment" in css
-    assert ".runtime-code-block .runtime-code-token.number" in css
-    assert ".runtime-code-block .runtime-code-token.function" in css
-    assert ".runtime-code-block .runtime-code-token.property" in css
+    assert ".runtime-chat-content.markdown pre code.hljs" in css
+    assert ".runtime-code-block .hljs-keyword" in css
+    assert ".runtime-code-block .hljs-string" in css
+    assert ".runtime-code-block .hljs-comment" in css
+    assert ".runtime-code-block .hljs-number" in css
+    assert ".runtime-code-block .hljs-title.function_" in css
+    assert ".runtime-code-block .hljs-property" in css
     assert '[data-theme="dark"] .runtime-code-block' in css
 
 
