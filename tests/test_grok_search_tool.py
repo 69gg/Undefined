@@ -42,10 +42,15 @@ def test_grok_search_schema_requires_natural_language_search_request() -> None:
     assert parameters["required"] == ["search_request"]
     assert "search_request" in parameters["properties"]
     assert (
-        "自然语言完整叙述搜索要求"
+        "自然语言详细说明搜索内容和回答要求"
         in parameters["properties"]["search_request"]["description"]
     )
     assert "不要只给关键词" in schema["function"]["description"]
+    assert "不要主动把范围写死" in schema["function"]["description"]
+    assert (
+        "不要主动添加用户未要求的硬性范围"
+        in parameters["properties"]["search_request"]["description"]
+    )
 
 
 @pytest.mark.asyncio
