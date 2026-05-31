@@ -681,6 +681,19 @@ def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
         "max-height: calc(100dvh - 24px - env(safe-area-inset-bottom));"
         in responsive_css
     )
+    responsive_toolbar_css = responsive_css.split(
+        ".runtime-html-runner-toolbar",
+        1,
+    )[1].split(".runtime-html-runner-title", 1)[0]
+    responsive_title_css = responsive_css.split(".runtime-html-runner-title", 1)[
+        1
+    ].split(".runtime-html-runner-meta", 1)[0]
+    responsive_meta_css = responsive_css.split(".runtime-html-runner-meta", 1)[1].split(
+        ".runtime-html-runner-actions", 1
+    )[0]
+    assert "flex-wrap: wrap;" in responsive_toolbar_css
+    assert "flex: 1 1 min(160px, 100%);" in responsive_title_css
+    assert "max-width: min(62vw, 260px);" in responsive_meta_css
     assert "runtime.html_ready" in i18n
     assert "runtime.pick_html" in i18n
 
@@ -887,6 +900,14 @@ def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:
         )[1]
         .split(".runtime-chat-attachment", 1)[0]
     )
+    mobile_input_row_block = (
+        RESPONSIVE_CSS.read_text(encoding="utf-8")
+        .split(
+            ".runtime-chat-input-row",
+            1,
+        )[1]
+        .split(".runtime-chat-references", 1)[0]
+    )
     assert "--chat-attachment-rail-width: 0px;" in input_row_block
     assert "--chat-attachment-card-width: 132px;" in input_row_block
     assert "--chat-attachment-gap: 8px;" in input_row_block
@@ -900,6 +921,13 @@ def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:
     assert "overflow-x: auto;" in attachments_block
     assert "overflow-y: hidden;" in attachments_block
     assert "scrollbar-width: none;" in attachments_block
+    assert "display: grid;" in mobile_input_row_block
+    assert (
+        'grid-template-areas:\n      "references references"\n      "attachments attachments"\n      "input actions";'
+        in mobile_input_row_block
+    )
+    assert "column-gap: 7px;" in mobile_input_row_block
+    assert "row-gap: 0;" in mobile_input_row_block
     assert "flex-basis: 0;" in hidden_block
     assert "width: 0;" in hidden_block
     assert "max-width: 0;" in hidden_block
@@ -916,9 +944,9 @@ def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:
     assert "height: 22px;" in compressed_remove_block
     assert "font-weight: 700;" in compressed_remove_block
     assert ".runtime-chat-attachment-preview.is-missing-thumb::before" in css
-    assert (
-        "width: min(var(--chat-attachment-rail-width), 36vw);" in responsive_attachments
-    )
+    assert "grid-area: attachments;" in responsive_attachments
+    assert "width: 100%;" in responsive_attachments
+    assert "max-width: 100%;" in responsive_attachments
     assert ".runtime-chat-attachment-thumb" in css
     assert ".runtime-chat-attachment-preview" in css
     assert ".runtime-chat-attachment-remove" in css
@@ -1051,6 +1079,17 @@ def test_webchat_content_wraps_long_code_and_markdown_without_horizontal_scroll(
     assert "display: table;" in mobile_table_css
     assert "overflow-x: visible;" in mobile_table_css
     assert "white-space: normal;" in mobile_table_css
+    mobile_code_toolbar_css = responsive_css.split(".runtime-code-toolbar", 1)[1].split(
+        ".runtime-code-actions", 1
+    )[0]
+    mobile_code_action_css = responsive_css.split(".runtime-code-action", 1)[1].split(
+        ".runtime-chat-input-row",
+        1,
+    )[0]
+    assert "min-height: 32px;" in mobile_code_toolbar_css
+    assert "padding: 4px 6px 4px 9px;" in mobile_code_toolbar_css
+    assert "min-height: 24px;" in mobile_code_action_css
+    assert "font-size: 11px;" in mobile_code_action_css
     assert ".runtime-tool-block summary .runtime-tool-kind" in responsive_css
     assert "display: none;" in responsive_css
     assert "max-width: 30vw;" in responsive_css

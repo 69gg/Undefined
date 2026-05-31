@@ -292,16 +292,44 @@
     overflow-x: visible;
     white-space: normal;
   }
+  .runtime-code-toolbar {
+    gap: 6px;
+    min-height: 32px;
+    padding: 4px 6px 4px 9px;
+  }
+  .runtime-code-actions {
+    gap: 4px;
+  }
+  .runtime-code-action {
+    min-height: 24px;
+    padding-inline: 7px;
+    font-size: 11px;
+  }
   .runtime-chat-input-row {
     --chat-attachment-gap: 6px;
-    align-items: center;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "references references"
+      "attachments attachments"
+      "input actions";
+    align-items: end;
+    column-gap: 7px;
+    row-gap: 0;
     min-width: 0;
   }
   .runtime-chat-references {
-    flex-basis: min(180px, 28vw);
-    max-width: min(180px, 28vw);
+    grid-area: references;
+    align-self: stretch;
+    width: 100%;
+    max-width: 100%;
+    height: 46px;
+    margin-right: 0;
+    margin-bottom: 7px;
   }
+  .runtime-chat-references[hidden] { display: none; }
   .runtime-chat-reference {
+    flex-basis: min(220px, 78vw);
     min-width: 132px;
     grid-template-columns: 20px minmax(0, 1fr) 24px;
     padding-inline: 5px;
@@ -312,20 +340,36 @@
     font-size: 19px;
   }
   .runtime-chat-input-row > .runtime-chat-input {
-    min-width: 92px;
+    grid-area: input;
+    min-width: 0;
+    width: 100%;
+    margin-right: 0;
   }
   .runtime-chat-attachments {
-    flex-basis: min(var(--chat-attachment-rail-width), 36vw);
-    width: min(var(--chat-attachment-rail-width), 36vw);
-    max-width: min(var(--chat-attachment-rail-width), 36vw);
+    grid-area: attachments;
+    align-self: stretch;
+    width: 100%;
+    max-width: 100%;
+    height: 48px;
+    margin-right: 0;
+    margin-bottom: 7px;
+  }
+  .runtime-chat-attachments[hidden] { display: none; }
+  .runtime-chat-input-row.has-attachments .runtime-chat-attachments {
+    margin-right: 0;
   }
   .runtime-chat-attachment {
+    flex-basis: min(var(--chat-attachment-card-width), 72vw);
     min-width: 34px;
   }
   .runtime-chat-input-row.is-attachment-rail-full .runtime-chat-attachment {
     min-width: 30px;
   }
-  .runtime-chat-actions { justify-content: flex-start; }
+  .runtime-chat-actions {
+    grid-area: actions;
+    align-self: end;
+    justify-content: flex-end;
+  }
   .main-content.chat-layout #tab-chat .runtime-chat-log {
     padding: 12px;
   }
@@ -387,16 +431,19 @@
   }
   .runtime-html-runner-toolbar {
     align-items: flex-start;
+    flex-wrap: wrap;
     padding: 8px 9px 8px 11px;
   }
   .runtime-html-runner-title {
     display: grid;
     gap: 3px;
+    flex: 1 1 min(160px, 100%);
   }
   .runtime-html-runner-meta {
-    max-width: 36vw;
+    max-width: min(62vw, 260px);
   }
   .runtime-html-runner-actions {
+    margin-left: auto;
     gap: 4px;
   }
   .runtime-html-runner-btn {
