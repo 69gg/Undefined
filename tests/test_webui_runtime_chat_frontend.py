@@ -11,6 +11,8 @@ API_JS = Path("src/Undefined/webui/static/js/api.js")
 APP_CSS = Path("src/Undefined/webui/static/css/app.css")
 RESPONSIVE_CSS = Path("src/Undefined/webui/static/css/responsive.css")
 I18N_JS = Path("src/Undefined/webui/static/js/i18n.js")
+WEBUI_APP_PY = Path("src/Undefined/webui/app.py")
+TAURI_CONF = Path("apps/undefined-console/src-tauri/tauri.conf.json")
 
 
 def test_webchat_frontend_reuses_job_message_for_final_message() -> None:
@@ -24,6 +26,16 @@ def test_webchat_frontend_reuses_job_message_for_final_message() -> None:
 
     assert "ensureStreamingMessage(eventJobId)" in message_branch
     assert 'appendChatMessage("bot", content)' not in message_branch
+
+
+def test_webchat_html_preview_csp_allows_inline_scripts_without_eval() -> None:
+    webui_app = WEBUI_APP_PY.read_text(encoding="utf-8")
+    tauri_conf = TAURI_CONF.read_text(encoding="utf-8")
+
+    assert "\"script-src 'self' 'unsafe-inline'; \"" in webui_app
+    assert "script-src 'self' 'unsafe-inline';" in tauri_conf
+    assert "unsafe-eval" not in webui_app
+    assert "unsafe-eval" not in tauri_conf
 
 
 def test_webchat_frontend_handles_tool_lifecycle_and_webchat_hints() -> None:
