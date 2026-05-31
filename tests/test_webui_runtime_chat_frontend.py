@@ -485,6 +485,13 @@ def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
     assert "function handleHtmlRunnerPicked" in source
     assert "frame.srcdoc = injectHtmlRunnerPicker(html)" in source
     assert 'parent.postMessage({ type: "webui-html-picked", html }, "*")' in source
+    assert "data-webui-html-picker-overlay" in source
+    assert "data-webui-html-picker-label" in source
+    assert "data-webui-html-picking" in source
+    assert "document.elementsFromPoint" in source
+    assert "candidateFromPoint(event.clientX, event.clientY)" in source
+    assert "requestAnimationFrame(() =>" in source
+    assert "elementLabel(element)" in source
     assert "event.source !== frame.contentWindow" in source
     assert 'data.type !== "webui-html-picked"' in source
     assert "btnRuntimeHtmlClose" in source

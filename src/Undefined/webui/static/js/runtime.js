@@ -2678,34 +2678,112 @@
 (() => {
   let active = false;
   let selected = null;
+  let rafId = 0;
+  const overlay = document.createElement("div");
+  const label = document.createElement("div");
   const style = document.createElement("style");
-  style.textContent = "[data-webui-html-pick-hover]{outline:2px solid #d97757!important;outline-offset:2px!important;cursor:crosshair!important;}";
+  style.textContent = [
+    "html[data-webui-html-picking],html[data-webui-html-picking] *{cursor:crosshair!important;}",
+    "[data-webui-html-picker-overlay]{position:fixed;z-index:2147483646;pointer-events:none;border:2px solid #d97757;background:rgba(217,119,87,.12);box-shadow:0 0 0 99999px rgba(15,23,42,.08);border-radius:2px;display:none;}",
+    "[data-webui-html-picker-label]{position:fixed;z-index:2147483647;pointer-events:none;max-width:min(360px,calc(100vw - 16px));padding:3px 6px;border-radius:4px;background:#d97757;color:#fff;font:11px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:none;box-shadow:0 6px 18px rgba(15,23,42,.22);}",
+  ].join("");
+  overlay.setAttribute("data-webui-html-picker-overlay", "1");
+  label.setAttribute("data-webui-html-picker-label", "1");
   document.documentElement.appendChild(style);
+  function mount() {
+    if (!document.body) return;
+    if (!overlay.parentNode) document.body.appendChild(overlay);
+    if (!label.parentNode) document.body.appendChild(label);
+  }
+  function elementLabel(element) {
+    if (!element || !element.tagName) return "";
+    let text = element.tagName.toLowerCase();
+    if (element.id) text += "#" + element.id;
+    if (element.classList && element.classList.length) {
+      text += "." + Array.from(element.classList).slice(0, 3).join(".");
+    }
+    const rect = element.getBoundingClientRect();
+    text += " " + Math.round(rect.width) + "×" + Math.round(rect.height);
+    return text;
+  }
   function clear() {
-    if (selected) selected.removeAttribute("data-webui-html-pick-hover");
     selected = null;
+    overlay.style.display = "none";
+    label.style.display = "none";
+  }
+  function candidateFromPoint(x, y) {
+    const elements = document.elementsFromPoint
+      ? document.elementsFromPoint(x, y)
+      : [document.elementFromPoint(x, y)];
+    return (elements || []).find((element) => {
+      if (!element || element === overlay || element === label) return false;
+      if (element === document.documentElement || element === document.body) return false;
+      return element.nodeType === Node.ELEMENT_NODE;
+    }) || document.body || document.documentElement;
+  }
+  function draw(element) {
+    mount();
+    if (!element) {
+      clear();
+      return;
+    }
+    const rect = element.getBoundingClientRect();
+    if (!rect.width && !rect.height) {
+      clear();
+      return;
+    }
+    selected = element;
+    overlay.style.display = "block";
+    overlay.style.left = Math.max(0, rect.left) + "px";
+    overlay.style.top = Math.max(0, rect.top) + "px";
+    overlay.style.width = Math.max(0, rect.width) + "px";
+    overlay.style.height = Math.max(0, rect.height) + "px";
+    const labelText = elementLabel(element);
+    label.textContent = labelText;
+    label.style.display = labelText ? "block" : "none";
+    const labelTop = rect.top >= 24 ? rect.top - 24 : rect.bottom + 4;
+    label.style.left = Math.min(Math.max(8, rect.left), window.innerWidth - 16) + "px";
+    label.style.top = Math.min(Math.max(8, labelTop), window.innerHeight - 24) + "px";
+  }
+  function scheduleDraw(element) {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(() => {
+      rafId = 0;
+      draw(element);
+    });
+  }
+  function setActive(nextActive) {
+    active = !!nextActive;
+    document.documentElement.toggleAttribute("data-webui-html-picking", active);
+    if (!active) clear();
+    else mount();
   }
   window.addEventListener("message", (event) => {
     if (!event.data || event.data.type !== "webui-html-pick") return;
-    active = !!event.data.active;
-    if (!active) clear();
+    setActive(event.data.active);
   });
-  document.addEventListener("mouseover", (event) => {
+  document.addEventListener("mousemove", (event) => {
     if (!active) return;
-    clear();
-    selected = event.target;
-    if (selected && selected.setAttribute) selected.setAttribute("data-webui-html-pick-hover", "1");
+    scheduleDraw(candidateFromPoint(event.clientX, event.clientY));
   }, true);
   document.addEventListener("click", (event) => {
     if (!active) return;
     event.preventDefault();
     event.stopPropagation();
-    const target = event.target;
+    const target = selected || candidateFromPoint(event.clientX, event.clientY);
     const html = target && target.outerHTML ? target.outerHTML : "";
     parent.postMessage({ type: "webui-html-picked", html }, "*");
-    active = false;
-    clear();
+    setActive(false);
   }, true);
+  document.addEventListener("mouseleave", () => {
+    if (active) clear();
+  }, true);
+  window.addEventListener("scroll", () => {
+    if (active && selected) scheduleDraw(selected);
+  }, true);
+  window.addEventListener("resize", () => {
+    if (active && selected) scheduleDraw(selected);
+  });
 })();
 <\/script>`;
     }
