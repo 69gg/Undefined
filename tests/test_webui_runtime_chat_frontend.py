@@ -526,6 +526,7 @@ def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
     assert "function clampHtmlRunnerPosition" in source
     assert "function setHtmlRunnerRect" in source
     assert "function setHtmlRunnerSize" in source
+    assert "function clearHtmlRunnerInteraction" in source
     assert "function ensureHtmlRunnerInitialRect" in source
     assert "function startHtmlRunnerResize" in source
     assert "function moveHtmlRunnerResize" in source
@@ -537,6 +538,7 @@ def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
     assert "function openHtmlRunner" in source
     assert "function closeHtmlRunner" in source
     assert "function handleHtmlRunnerPicked" in source
+    assert "clearHtmlRunnerInteraction()" in source
     assert "ensureHtmlRunnerInitialRect(runner)" in source
     assert "frame.srcdoc = injectHtmlRunnerPicker(html)" in source
     assert (
@@ -571,6 +573,10 @@ def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
     assert "startHtmlRunnerDrag" in source
     assert "moveHtmlRunnerDrag" in source
     assert "stopHtmlRunnerDrag" in source
+    assert '"lostpointercapture"' in source
+    assert 'window.addEventListener("pointerup"' in source
+    assert 'window.addEventListener("pointercancel"' in source
+    assert 'window.addEventListener("blur"' in source
     assert "setHtmlRunnerRect(rect.left, rect.top, rect.width, rect.height)" in source
     assert 'window.addEventListener("resize", clampVisibleHtmlRunner)' in source
     assert "setPointerCapture(pointerId)" in source

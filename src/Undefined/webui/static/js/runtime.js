@@ -2926,6 +2926,20 @@
         setHtmlRunnerRect(rect.left, rect.top, width, height);
     }
 
+    function clearHtmlRunnerInteraction(pointerId = null) {
+        const runner = get("runtimeHtmlRunner");
+        const resize = runtimeState.htmlRunnerResize;
+        const drag = runtimeState.htmlRunnerDrag;
+        if (pointerId === null || (resize && resize.pointerId === pointerId)) {
+            runtimeState.htmlRunnerResize = null;
+            if (runner) runner.classList.remove("is-resizing");
+        }
+        if (pointerId === null || (drag && drag.pointerId === pointerId)) {
+            runtimeState.htmlRunnerDrag = null;
+            if (runner) runner.classList.remove("is-dragging");
+        }
+    }
+
     function ensureHtmlRunnerInitialRect(runner) {
         if (!runner || (runner.style.left && runner.style.top)) return;
         const initialWidth = Math.min(
@@ -2955,6 +2969,7 @@
         runtimeState.htmlRunnerPickMode = false;
         runner.hidden = false;
         runner.classList.remove("is-picking");
+        clearHtmlRunnerInteraction();
         ensureHtmlRunnerInitialRect(runner);
         const button = get("btnRuntimeHtmlPick");
         if (button) {
@@ -2972,6 +2987,7 @@
     function closeHtmlRunner() {
         const runner = get("runtimeHtmlRunner");
         const frame = get("runtimeHtmlRunnerFrame");
+        clearHtmlRunnerInteraction();
         if (runner) runner.hidden = true;
         if (frame) frame.srcdoc = "";
         runtimeState.htmlRunnerSource = "";
@@ -3025,13 +3041,11 @@
     function stopHtmlRunnerResize(event) {
         const state = runtimeState.htmlRunnerResize;
         if (!state || state.pointerId !== event.pointerId) return;
-        const runner = get("runtimeHtmlRunner");
-        if (runner) runner.classList.remove("is-resizing");
         const handle = event.currentTarget;
         if (handle && typeof handle.releasePointerCapture === "function") {
             handle.releasePointerCapture(state.pointerId);
         }
-        runtimeState.htmlRunnerResize = null;
+        clearHtmlRunnerInteraction(state.pointerId);
     }
 
     function startHtmlRunnerDrag(event) {
@@ -3073,13 +3087,11 @@
     function stopHtmlRunnerDrag(event) {
         const state = runtimeState.htmlRunnerDrag;
         if (!state || state.pointerId !== event.pointerId) return;
-        const runner = get("runtimeHtmlRunner");
-        if (runner) runner.classList.remove("is-dragging");
         const handle = event.currentTarget;
         if (handle && typeof handle.releasePointerCapture === "function") {
             handle.releasePointerCapture(state.pointerId);
         }
-        runtimeState.htmlRunnerDrag = null;
+        clearHtmlRunnerInteraction(state.pointerId);
     }
 
     function clampVisibleHtmlRunner() {
@@ -4413,6 +4425,10 @@
                 "pointercancel",
                 stopHtmlRunnerDrag,
             );
+            htmlRunnerToolbar.addEventListener(
+                "lostpointercapture",
+                stopHtmlRunnerDrag,
+            );
         }
         const htmlRunnerFrame = get("runtimeHtmlRunnerFrame");
         if (htmlRunnerFrame) {
@@ -4438,7 +4454,20 @@
                 "pointercancel",
                 stopHtmlRunnerResize,
             );
+            htmlRunnerResize.addEventListener(
+                "lostpointercapture",
+                stopHtmlRunnerResize,
+            );
         }
+        window.addEventListener("pointerup", (event) => {
+            clearHtmlRunnerInteraction(event.pointerId);
+        });
+        window.addEventListener("pointercancel", (event) => {
+            clearHtmlRunnerInteraction(event.pointerId);
+        });
+        window.addEventListener("blur", () => {
+            clearHtmlRunnerInteraction();
+        });
         window.addEventListener("message", (event) => {
             const frame = get("runtimeHtmlRunnerFrame");
             if (!frame || event.source !== frame.contentWindow) return;
