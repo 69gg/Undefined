@@ -1825,6 +1825,8 @@
 
     const SAFE_HTML_TAGS = new Set([
         "a",
+        "article",
+        "aside",
         "b",
         "blockquote",
         "br",
@@ -1834,6 +1836,8 @@
         "details",
         "div",
         "em",
+        "footer",
+        "header",
         "h1",
         "h2",
         "h3",
@@ -1845,11 +1849,14 @@
         "img",
         "kbd",
         "li",
+        "main",
+        "nav",
         "mark",
         "ol",
         "p",
         "pre",
         "s",
+        "section",
         "small",
         "span",
         "strong",
@@ -1870,6 +1877,7 @@
         "canvas",
         "embed",
         "form",
+        "head",
         "iframe",
         "input",
         "link",
@@ -1880,7 +1888,26 @@
         "style",
         "svg",
         "template",
+        "title",
         "video",
+    ]);
+    const STANDALONE_HTML_ROOT_TAGS = new Set([
+        "article",
+        "aside",
+        "blockquote",
+        "body",
+        "details",
+        "div",
+        "footer",
+        "header",
+        "html",
+        "main",
+        "nav",
+        "ol",
+        "p",
+        "section",
+        "table",
+        "ul",
     ]);
 
     function sanitizeIntegerAttribute(element, name, min, max) {
@@ -1970,6 +1997,19 @@
         template.innerHTML = raw;
         [...template.content.childNodes].forEach(sanitizeHtmlNode);
         return template.innerHTML;
+    }
+
+    function looksLikeStandaloneHtml(text) {
+        const raw = String(text || "").trim();
+        if (!raw || !raw.includes("<") || !raw.includes(">")) return false;
+        if (/^```/.test(raw)) return false;
+        if (/^<!doctype\s+html\b/i.test(raw)) return true;
+        const firstTag = raw.match(/^<([a-z][a-z0-9-]*)\b[^>]*>/i);
+        if (!firstTag) return false;
+        const tag = firstTag[1].toLowerCase();
+        if (tag === "html" || tag === "body") return true;
+        if (!STANDALONE_HTML_ROOT_TAGS.has(tag)) return false;
+        return new RegExp(`</${tag}>\\s*$`, "i").test(raw);
     }
 
     const CODE_LANGUAGE_ALIASES = {
@@ -2110,7 +2150,13 @@
         });
 
         let html;
-        if (useMarkdown && typeof marked !== "undefined" && marked.parse) {
+        if (useMarkdown && looksLikeStandaloneHtml(processed)) {
+            html = sanitizeHtmlSnippet(processed);
+        } else if (
+            useMarkdown &&
+            typeof marked !== "undefined" &&
+            marked.parse
+        ) {
             try {
                 html = marked.parse(processed, {
                     breaks: true,

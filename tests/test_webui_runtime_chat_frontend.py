@@ -373,6 +373,26 @@ def test_webchat_frontend_sanitizes_markdown_html_and_unsafe_links() -> None:
     assert "renderer: createSafeMarkedRenderer()" in source
 
 
+def test_webchat_frontend_renders_standalone_html_without_markdown_code_blocks() -> (
+    None
+):
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    render_helper = source.split("function renderChatContent", 1)[1].split(
+        "function readFileAsDataUrl", 1
+    )[0]
+    sanitizer_section = source.split("const SAFE_HTML_TAGS", 1)[1].split(
+        "const CODE_LANGUAGE_ALIASES", 1
+    )[0]
+
+    assert "function looksLikeStandaloneHtml" in source
+    assert "STANDALONE_HTML_ROOT_TAGS" in source
+    assert "looksLikeStandaloneHtml(processed)" in render_helper
+    assert "html = sanitizeHtmlSnippet(processed)" in render_helper
+    assert '"head"' in sanitizer_section
+    assert '"title"' in sanitizer_section
+    assert '"style"' in sanitizer_section
+
+
 def test_webchat_frontend_highlights_markdown_code_blocks() -> None:
     source = RUNTIME_JS.read_text(encoding="utf-8")
     css = RUNTIME_CSS.read_text(encoding="utf-8")
