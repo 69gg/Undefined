@@ -306,6 +306,25 @@ def test_webchat_auto_scroll_toggle_controls_stream_scroll() -> None:
     assert ".toggle-input { display: none;" not in css
 
 
+def test_webchat_tab_activation_forces_bottom_scroll_after_history_load() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    load_helper = source.split("async function loadChatHistory", 1)[1].split(
+        "async function loadOlderChatHistory", 1
+    )[0]
+    tab_helper = source.split("function onTabActivated", 1)[1].split(
+        "window.RuntimeController", 1
+    )[0]
+    chat_branch = tab_helper.split('if (tab === "chat")', 1)[1].split(
+        "return;",
+        1,
+    )[0]
+
+    assert "forceScrollChatToBottomSoon()" in load_helper
+    assert "forceScrollChatToBottom();" not in load_helper
+    assert "loadChatHistory().catch" in chat_branch
+    assert "forceScrollChatToBottomSoon()" in chat_branch
+
+
 def test_webchat_frontend_renders_tool_duration() -> None:
     source = RUNTIME_JS.read_text(encoding="utf-8")
 

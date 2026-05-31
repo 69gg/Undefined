@@ -2909,7 +2909,7 @@
         runtimeState.chatHistoryHasMore = !!(data && data.has_more);
         runtimeState.chatHistoryLoaded = true;
         runtimeState.chatHistoryLoading = false;
-        forceScrollChatToBottom();
+        forceScrollChatToBottomSoon();
         await resumeActiveChatJob();
     }
 
@@ -3579,6 +3579,7 @@
                 );
                 resumeActiveChatJob().catch(() => {});
             });
+            forceScrollChatToBottomSoon();
             window.addEventListener(
                 "online",
                 () => {
