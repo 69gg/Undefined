@@ -39,6 +39,14 @@
     const TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS = 2000;
     const ACTIVE_JOB_RESUME_MAX_ATTEMPTS = 20;
     const CHAT_INLINE_IMAGE_MAX_BYTES = 12 * 1024 * 1024;
+    const CHAT_ATTACHMENT_RAIL_BASE_WIDTH = 72;
+    const CHAT_ATTACHMENT_RAIL_STEP_WIDTH = 56;
+    const CHAT_ATTACHMENT_RAIL_MAX_WIDTH = 240;
+    const CHAT_ATTACHMENT_CARD_MAX_WIDTH = 132;
+    const CHAT_ATTACHMENT_CARD_MIN_WIDTH = 36;
+    const CHAT_ATTACHMENT_GAP_WIDTH = 6;
+    const CHAT_ATTACHMENT_COMPRESSED_GAP_WIDTH = 4;
+    const CHAT_ATTACHMENT_COMPRESSED_COUNT = 5;
 
     function prefersReducedMotion() {
         return (
@@ -1800,12 +1808,66 @@
     function renderPendingChatAttachments() {
         const container = get("runtimeChatAttachments");
         if (!container) return;
+        const inputRow = container.closest(".runtime-chat-input-row");
         if (!runtimeState.chatAttachments.length) {
             container.hidden = true;
             container.innerHTML = "";
+            if (inputRow) {
+                inputRow.classList.remove(
+                    "has-attachments",
+                    "is-attachment-rail-full",
+                    "is-attachment-compressed",
+                );
+                inputRow.style.setProperty(
+                    "--chat-attachment-rail-width",
+                    "0px",
+                );
+                inputRow.style.setProperty(
+                    "--chat-attachment-card-width",
+                    `${CHAT_ATTACHMENT_CARD_MAX_WIDTH}px`,
+                );
+            }
             return;
         }
         container.hidden = false;
+        if (inputRow) {
+            const count = runtimeState.chatAttachments.length;
+            const width = Math.min(
+                CHAT_ATTACHMENT_RAIL_MAX_WIDTH,
+                CHAT_ATTACHMENT_RAIL_BASE_WIDTH +
+                    count * CHAT_ATTACHMENT_RAIL_STEP_WIDTH,
+            );
+            const gapWidth =
+                count >= CHAT_ATTACHMENT_COMPRESSED_COUNT
+                    ? CHAT_ATTACHMENT_COMPRESSED_GAP_WIDTH
+                    : CHAT_ATTACHMENT_GAP_WIDTH;
+            const cardWidth = Math.max(
+                CHAT_ATTACHMENT_CARD_MIN_WIDTH,
+                Math.min(
+                    CHAT_ATTACHMENT_CARD_MAX_WIDTH,
+                    Math.floor(
+                        (width - Math.max(0, count - 1) * gapWidth) / count,
+                    ),
+                ),
+            );
+            inputRow.classList.toggle("has-attachments", count > 0);
+            inputRow.classList.toggle(
+                "is-attachment-rail-full",
+                width >= CHAT_ATTACHMENT_RAIL_MAX_WIDTH,
+            );
+            inputRow.classList.toggle(
+                "is-attachment-compressed",
+                count >= CHAT_ATTACHMENT_COMPRESSED_COUNT,
+            );
+            inputRow.style.setProperty(
+                "--chat-attachment-rail-width",
+                `${width}px`,
+            );
+            inputRow.style.setProperty(
+                "--chat-attachment-card-width",
+                `${cardWidth}px`,
+            );
+        }
         container.innerHTML = runtimeState.chatAttachments
             .map((item) => {
                 const kindLabel =

@@ -947,38 +947,114 @@
   color: #fff;
 }
 .runtime-chat-input-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(156px, 240px) auto;
+  --chat-attachment-rail-width: 0px;
+  --chat-attachment-card-width: 132px;
+  --chat-attachment-gap: 8px;
+  display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 0;
+  min-width: 0;
+}
+.runtime-chat-input-row > .runtime-chat-input {
+  flex: 1 1 auto;
+  min-width: min(100%, 260px);
+  margin-right: var(--chat-attachment-gap);
+  transition:
+    flex 0.24s ease,
+    flex-basis 0.22s ease,
+    width 0.22s ease,
+    margin-right 0.22s ease;
 }
 .runtime-chat-attachments {
-  align-self: stretch;
+  flex: 0 0 var(--chat-attachment-rail-width);
   display: flex;
-  flex-direction: column;
+  align-self: stretch;
+  flex-direction: row;
   gap: 6px;
+  width: var(--chat-attachment-rail-width);
   height: 54px;
   min-width: 0;
-  overflow-y: auto;
+  max-width: var(--chat-attachment-rail-width);
+  overflow-x: auto;
+  overflow-y: hidden;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  opacity: 1;
+  scrollbar-width: none;
+  transform: translateX(0);
+  transition:
+    flex-basis 0.22s ease,
+    width 0.22s ease,
+    max-width 0.22s ease,
+    margin-right 0.22s ease,
+    opacity 0.18s ease,
+    transform 0.22s ease;
+}
+.runtime-chat-attachments::-webkit-scrollbar {
+  display: none;
+}
+.runtime-chat-input-row.has-attachments .runtime-chat-attachments {
+  margin-right: var(--chat-attachment-gap);
 }
 .runtime-chat-attachments[hidden] {
   display: flex;
-  visibility: hidden;
+  flex-basis: 0;
+  width: 0;
+  max-width: 0;
+  margin-right: 0;
+  opacity: 0;
   pointer-events: none;
+  transform: translateX(8px);
+  visibility: hidden;
 }
 .runtime-chat-attachment {
   display: inline-grid;
   grid-template-columns: 34px minmax(0, 1fr) auto;
   align-items: center;
   gap: 7px;
+  flex: 0 0 var(--chat-attachment-card-width);
+  min-width: 42px;
+  max-width: var(--chat-attachment-card-width);
+  position: relative;
   min-height: 44px;
   padding: 5px 7px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--bg-card) 72%, var(--bg-app));
   color: var(--text-primary);
+  overflow: hidden;
+  animation: runtime-chat-attachment-in 0.2s ease both;
+  transition:
+    flex-basis 0.2s ease,
+    grid-template-columns 0.18s ease,
+    max-width 0.2s ease,
+    min-width 0.2s ease,
+    padding 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+.runtime-chat-attachment:hover {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border-color));
+  background: color-mix(in srgb, var(--bg-card) 84%, var(--accent-subtle));
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+}
+.runtime-chat-input-row.has-attachments .runtime-chat-attachment {
+  min-width: 0;
+}
+.runtime-chat-input-row.is-attachment-rail-full .runtime-chat-attachment {
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  padding-inline: 6px;
+}
+.runtime-chat-input-row.is-attachment-compressed .runtime-chat-attachments {
+  gap: 4px;
+}
+.runtime-chat-input-row.is-attachment-compressed .runtime-chat-attachment {
+  min-width: 32px;
+  grid-template-columns: minmax(24px, 1fr);
+  justify-items: center;
+  gap: 0;
+  padding: 4px;
 }
 .runtime-chat-attachment-preview {
   display: inline-flex;
@@ -990,6 +1066,10 @@
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
+  transition:
+    width 0.18s ease,
+    height 0.18s ease,
+    border-radius 0.18s ease;
 }
 .runtime-chat-attachment-thumb {
   width: 100%;
@@ -1009,6 +1089,9 @@
   display: grid;
   min-width: 0;
   gap: 1px;
+  transition:
+    opacity 0.18s ease,
+    max-width 0.18s ease;
 }
 .runtime-chat-attachment-name {
   overflow: hidden;
@@ -1036,10 +1119,45 @@
   background: transparent;
   color: var(--text-tertiary);
   cursor: pointer;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease,
+    transform 0.16s ease;
 }
 .runtime-chat-attachment-remove:hover {
   background: color-mix(in srgb, var(--error) 12%, transparent);
   color: var(--error);
+  transform: scale(1.04);
+}
+.runtime-chat-input-row.is-attachment-compressed .runtime-chat-attachment-preview {
+  width: 30px;
+  height: 30px;
+}
+.runtime-chat-input-row.is-attachment-compressed .runtime-chat-attachment-main {
+  width: 0;
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+}
+.runtime-chat-input-row.is-attachment-compressed .runtime-chat-attachment-remove {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 16px;
+  height: 16px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--bg-card) 88%, transparent);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.16);
+}
+@keyframes runtime-chat-attachment-in {
+  from {
+    opacity: 0;
+    transform: translateX(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
 }
 .runtime-chat-actions {
   display: flex;

@@ -513,6 +513,18 @@ def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:
     assert "URL.createObjectURL(file)" in source
     assert "URL.revokeObjectURL" in source
     assert "runtime-chat-attachment-thumb" in source
+    assert "CHAT_ATTACHMENT_RAIL_BASE_WIDTH" in source
+    assert "CHAT_ATTACHMENT_RAIL_STEP_WIDTH" in source
+    assert "CHAT_ATTACHMENT_RAIL_MAX_WIDTH" in source
+    assert "CHAT_ATTACHMENT_CARD_MAX_WIDTH" in source
+    assert "CHAT_ATTACHMENT_CARD_MIN_WIDTH" in source
+    assert "CHAT_ATTACHMENT_COMPRESSED_COUNT" in source
+    assert "Math.min(\n                CHAT_ATTACHMENT_RAIL_MAX_WIDTH" in source
+    assert '"--chat-attachment-rail-width"' in source
+    assert '"--chat-attachment-card-width"' in source
+    assert '"is-attachment-rail-full"' in source
+    assert '"is-attachment-compressed"' in source
+    assert "Math.floor(\n                        (width - Math.max" in source
     assert 'api("/api/runtime/chat/files"' in source
     assert "event.clipboardData && event.clipboardData.files" in source
     assert 'addChatFiles(files, { source: "paste" })' in source
@@ -533,13 +545,60 @@ def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:
     assert 'id="runtimeChatFileInput" type="file" multiple hidden' in template
     assert 'data-i18n="runtime.attach_file"' in template
     assert ".runtime-chat-attachments" in css
+    input_row_block = css.split(".runtime-chat-input-row {", 1)[1].split(
+        ".runtime-chat-input-row > .runtime-chat-input",
+        1,
+    )[0]
+    input_block = css.split(
+        ".runtime-chat-input-row > .runtime-chat-input",
+        1,
+    )[1].split(".runtime-chat-attachments", 1)[0]
     attachments_block = css.split(".runtime-chat-attachments {", 1)[1].split(
         ".runtime-chat-attachments[hidden]",
         1,
     )[0]
+    hidden_block = css.split(".runtime-chat-attachments[hidden]", 1)[1].split(
+        ".runtime-chat-attachment {",
+        1,
+    )[0]
+    compressed_block = css.split(
+        ".runtime-chat-input-row.is-attachment-compressed .runtime-chat-attachment",
+        1,
+    )[1].split(".runtime-chat-attachment-preview", 1)[0]
+    responsive_attachments = (
+        RESPONSIVE_CSS.read_text(encoding="utf-8")
+        .split(
+            ".runtime-chat-attachments",
+            1,
+        )[1]
+        .split(".runtime-chat-attachment", 1)[0]
+    )
+    assert "--chat-attachment-rail-width: 0px;" in input_row_block
+    assert "--chat-attachment-card-width: 132px;" in input_row_block
+    assert "--chat-attachment-gap: 8px;" in input_row_block
+    assert "display: flex;" in input_row_block
+    assert "flex: 1 1 auto;" in input_block
+    assert "min-width: min(100%, 260px);" in input_block
     assert "height: 54px;" in attachments_block
-    assert "overflow-y: auto;" in attachments_block
-    assert "flex-direction: column;" in attachments_block
+    assert "flex: 0 0 var(--chat-attachment-rail-width);" in attachments_block
+    assert "width: var(--chat-attachment-rail-width);" in attachments_block
+    assert "max-width: var(--chat-attachment-rail-width);" in attachments_block
+    assert "overflow-x: auto;" in attachments_block
+    assert "overflow-y: hidden;" in attachments_block
+    assert "scrollbar-width: none;" in attachments_block
+    assert "flex-basis: 0;" in hidden_block
+    assert "width: 0;" in hidden_block
+    assert "max-width: 0;" in hidden_block
+    attachment_block = css.split(".runtime-chat-attachment {", 1)[1].split(
+        ".runtime-chat-attachment:hover",
+        1,
+    )[0]
+    assert "flex: 0 0 var(--chat-attachment-card-width);" in attachment_block
+    assert "max-width: var(--chat-attachment-card-width);" in attachment_block
+    assert "grid-template-columns: minmax(24px, 1fr);" in compressed_block
+    assert (
+        "width: min(var(--chat-attachment-rail-width), 36vw);" in responsive_attachments
+    )
     assert ".runtime-chat-attachment-thumb" in css
     assert ".runtime-chat-attachment-preview" in css
     assert ".runtime-chat-attachment-remove" in css
