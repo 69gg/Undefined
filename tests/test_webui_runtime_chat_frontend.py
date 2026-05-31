@@ -347,14 +347,25 @@ def test_webchat_tool_previews_render_structured_input_output() -> None:
     assert "runtime.tool_output" in i18n
 
 
-def test_webchat_frontend_escapes_markdown_html_and_unsafe_links() -> None:
+def test_webchat_frontend_sanitizes_markdown_html_and_unsafe_links() -> None:
     source = RUNTIME_JS.read_text(encoding="utf-8")
     render_helper = source.split("function createSafeMarkedRenderer", 1)[1].split(
         "function renderChatContent", 1
     )[0]
+    sanitizer_helper = source.split("function sanitizeHtmlSnippet", 1)[0].split(
+        "function isSafeRenderedImageUrl", 1
+    )[1]
 
     assert "renderer.html" in render_helper
-    assert 'escapeHtml(text || "")' in render_helper
+    assert 'sanitizeHtmlSnippet(text || "")' in render_helper
+    assert "SAFE_HTML_TAGS" in sanitizer_helper
+    assert "DROP_HTML_TAGS" in sanitizer_helper
+    assert 'name.startsWith("on")' in sanitizer_helper
+    assert 'name === "style"' in sanitizer_helper
+    assert "isSafeRenderedUrl(attr.value)" in sanitizer_helper
+    assert "isSafeRenderedImageUrl(attr.value)" in sanitizer_helper
+    assert 'element.setAttribute("rel", "noreferrer")' in sanitizer_helper
+    assert 'element.setAttribute("loading", "lazy")' in sanitizer_helper
     assert "isSafeRenderedUrl(href)" in render_helper
     assert 'rel="noreferrer"' in render_helper
     assert "renderer.image" in render_helper

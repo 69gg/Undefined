@@ -1812,6 +1812,166 @@
         }
     }
 
+    function isSafeRenderedImageUrl(url) {
+        const text = String(url || "").trim();
+        if (!text) return false;
+        try {
+            const parsed = new URL(text, window.location.origin);
+            return ["http:", "https:"].includes(parsed.protocol);
+        } catch (_error) {
+            return false;
+        }
+    }
+
+    const SAFE_HTML_TAGS = new Set([
+        "a",
+        "b",
+        "blockquote",
+        "br",
+        "caption",
+        "code",
+        "del",
+        "details",
+        "div",
+        "em",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+        "i",
+        "img",
+        "kbd",
+        "li",
+        "mark",
+        "ol",
+        "p",
+        "pre",
+        "s",
+        "small",
+        "span",
+        "strong",
+        "sub",
+        "summary",
+        "sup",
+        "table",
+        "tbody",
+        "td",
+        "tfoot",
+        "th",
+        "thead",
+        "tr",
+        "u",
+        "ul",
+    ]);
+    const DROP_HTML_TAGS = new Set([
+        "canvas",
+        "embed",
+        "form",
+        "iframe",
+        "input",
+        "link",
+        "math",
+        "meta",
+        "object",
+        "script",
+        "style",
+        "svg",
+        "template",
+        "video",
+    ]);
+
+    function sanitizeIntegerAttribute(element, name, min, max) {
+        const value = Number.parseInt(element.getAttribute(name) || "", 10);
+        if (!Number.isFinite(value) || value < min || value > max) {
+            element.removeAttribute(name);
+            return;
+        }
+        element.setAttribute(name, String(value));
+    }
+
+    function sanitizeHtmlElement(element) {
+        const tag = element.tagName.toLowerCase();
+        [...element.attributes].forEach((attr) => {
+            const name = attr.name.toLowerCase();
+            if (name.startsWith("on") || name === "style") {
+                element.removeAttribute(attr.name);
+                return;
+            }
+            if (name === "href" && tag === "a") {
+                if (!isSafeRenderedUrl(attr.value)) {
+                    element.removeAttribute(attr.name);
+                    return;
+                }
+                element.setAttribute("rel", "noreferrer");
+                return;
+            }
+            if (name === "src" && tag === "img") {
+                if (!isSafeRenderedImageUrl(attr.value)) {
+                    element.remove();
+                    return;
+                }
+                element.classList.add("runtime-chat-image");
+                element.setAttribute("loading", "lazy");
+                return;
+            }
+            if (["alt", "title"].includes(name)) return;
+            if (
+                ["th", "td"].includes(tag) &&
+                ["colspan", "rowspan"].includes(name)
+            ) {
+                sanitizeIntegerAttribute(element, name, 1, 20);
+                return;
+            }
+            if (tag === "ol" && name === "start") {
+                sanitizeIntegerAttribute(element, name, 1, 9999);
+                return;
+            }
+            element.removeAttribute(attr.name);
+        });
+    }
+
+    function sanitizeHtmlNode(node) {
+        if (node.nodeType === Node.TEXT_NODE) return;
+        if (node.nodeType !== Node.ELEMENT_NODE) {
+            node.remove();
+            return;
+        }
+        const element = node;
+        const tag = element.tagName.toLowerCase();
+        if (DROP_HTML_TAGS.has(tag)) {
+            element.remove();
+            return;
+        }
+        if (!SAFE_HTML_TAGS.has(tag)) {
+            [...element.childNodes].forEach(sanitizeHtmlNode);
+            const parent = element.parentNode;
+            if (!parent) {
+                element.remove();
+                return;
+            }
+            while (element.firstChild) {
+                parent.insertBefore(element.firstChild, element);
+            }
+            element.remove();
+            return;
+        }
+        sanitizeHtmlElement(element);
+        [...element.childNodes].forEach(sanitizeHtmlNode);
+    }
+
+    function sanitizeHtmlSnippet(html) {
+        const raw = String(html || "");
+        if (!raw.trim() || typeof document === "undefined")
+            return escapeHtml(raw);
+        const template = document.createElement("template");
+        template.innerHTML = raw;
+        [...template.content.childNodes].forEach(sanitizeHtmlNode);
+        return template.innerHTML;
+    }
+
     const CODE_LANGUAGE_ALIASES = {
         cjs: "javascript",
         htm: "html",
@@ -1983,7 +2143,7 @@
     function createSafeMarkedRenderer() {
         if (typeof marked === "undefined" || !marked.Renderer) return null;
         const renderer = new marked.Renderer();
-        renderer.html = ({ text }) => escapeHtml(text || "");
+        renderer.html = ({ text }) => sanitizeHtmlSnippet(text || "");
         renderer.code = (token, legacyLanguage) => {
             const codeText =
                 token && typeof token === "object"
