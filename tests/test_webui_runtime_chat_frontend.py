@@ -510,6 +510,9 @@ def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:
     assert "async function uploadChatFile" in source
     assert "async function buildChatMessageWithAttachments" in source
     assert "CHAT_INLINE_IMAGE_MAX_BYTES" in source
+    assert "URL.createObjectURL(file)" in source
+    assert "URL.revokeObjectURL" in source
+    assert "runtime-chat-attachment-thumb" in source
     assert 'api("/api/runtime/chat/files"' in source
     assert "event.clipboardData && event.clipboardData.files" in source
     assert 'addChatFiles(files, { source: "paste" })' in source
@@ -520,9 +523,25 @@ def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:
         ]
     )
     assert 'id="runtimeChatAttachments"' in template
+    input_row = template.split('class="runtime-chat-input-row"', 1)[1].split(
+        "</div>",
+        1,
+    )[0]
+    assert input_row.index('id="runtimeChatInput"') < input_row.index(
+        'id="runtimeChatAttachments"'
+    )
     assert 'id="runtimeChatFileInput" type="file" multiple hidden' in template
     assert 'data-i18n="runtime.attach_file"' in template
     assert ".runtime-chat-attachments" in css
+    attachments_block = css.split(".runtime-chat-attachments {", 1)[1].split(
+        ".runtime-chat-attachments[hidden]",
+        1,
+    )[0]
+    assert "height: 54px;" in attachments_block
+    assert "overflow-y: auto;" in attachments_block
+    assert "flex-direction: column;" in attachments_block
+    assert ".runtime-chat-attachment-thumb" in css
+    assert ".runtime-chat-attachment-preview" in css
     assert ".runtime-chat-attachment-remove" in css
     assert "runtime.attach_file" in i18n
     assert "runtime.attachment_added" in i18n

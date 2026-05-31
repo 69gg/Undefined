@@ -1812,9 +1812,12 @@
                     item.kind === "image"
                         ? t("runtime.attachment_kind_image")
                         : t("runtime.attachment_kind_file");
+                const preview = item.previewUrl
+                    ? `<img class="runtime-chat-attachment-thumb" src="${escapeHtml(item.previewUrl)}" alt="" loading="lazy" />`
+                    : `<span class="runtime-chat-attachment-file" aria-hidden="true">FILE</span>`;
                 return (
                     `<div class="runtime-chat-attachment" data-attachment-id="${escapeHtml(item.id)}">` +
-                    `<span class="runtime-chat-attachment-icon" aria-hidden="true">${item.kind === "image" ? "IMG" : "FILE"}</span>` +
+                    `<span class="runtime-chat-attachment-preview">${preview}</span>` +
                     `<span class="runtime-chat-attachment-main">` +
                     `<span class="runtime-chat-attachment-name">${escapeHtml(item.name)}</span>` +
                     `<span class="runtime-chat-attachment-meta">${escapeHtml(kindLabel)}${item.sizeLabel ? ` · ${escapeHtml(item.sizeLabel)}` : ""}</span>` +
@@ -1831,6 +1834,12 @@
                     const id = String(
                         button.getAttribute("data-attachment-remove") || "",
                     );
+                    const removed = runtimeState.chatAttachments.find(
+                        (item) => item.id === id,
+                    );
+                    if (removed && removed.previewUrl) {
+                        URL.revokeObjectURL(removed.previewUrl);
+                    }
                     runtimeState.chatAttachments =
                         runtimeState.chatAttachments.filter(
                             (item) => item.id !== id,
@@ -1847,11 +1856,13 @@
         for (const file of selected) {
             const name = formatAttachmentName(file);
             const size = Number(file.size || 0);
+            const kind = fileKind(file);
             added.push({
                 id: `att-${Date.now()}-${runtimeState.chatAttachmentSeq++}`,
                 file,
-                kind: fileKind(file),
+                kind,
                 name,
+                previewUrl: kind === "image" ? URL.createObjectURL(file) : "",
                 size,
                 sizeLabel: formatFileSize(size),
                 source,
@@ -1872,6 +1883,9 @@
     }
 
     function clearChatAttachments() {
+        runtimeState.chatAttachments.forEach((item) => {
+            if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+        });
         runtimeState.chatAttachments = [];
         renderPendingChatAttachments();
     }

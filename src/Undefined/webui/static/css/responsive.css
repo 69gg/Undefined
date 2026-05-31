@@ -297,7 +297,8 @@
     align-items: stretch;
   }
   .runtime-chat-attachments {
-    max-height: 118px;
+    height: 72px;
+    max-height: 72px;
     overflow-y: auto;
   }
   .runtime-chat-attachment {
