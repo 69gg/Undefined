@@ -24,6 +24,10 @@
         toolCollapseTimers: new Map(),
         chatAttachments: [],
         chatAttachmentSeq: 0,
+        chatReferences: [],
+        chatReferenceSeq: 0,
+        pendingSelectionReference: null,
+        selectionQuoteButton: null,
         htmlRunnerSource: "",
         htmlRunnerPickMode: false,
         probeTimer: null,
@@ -49,6 +53,8 @@
     const CHAT_ATTACHMENT_GAP_WIDTH = 6;
     const CHAT_ATTACHMENT_COMPRESSED_GAP_WIDTH = 4;
     const CHAT_ATTACHMENT_COMPRESSED_COUNT = 5;
+    const CHAT_REFERENCE_MAX_CHARS = 4000;
+    const CHAT_REFERENCE_PREVIEW_CHARS = 180;
 
     function prefersReducedMotion() {
         return (
@@ -507,6 +513,17 @@
             ? `<span class="runtime-chat-role-label">AI</span><span class="runtime-chat-stage" hidden></span>`
             : `<span class="runtime-chat-role-label">You</span>`;
         item.innerHTML = `<div class="runtime-chat-role">${roleHtml}</div><div class="${contentClass}">${renderChatContent(content, isBot)}</div>`;
+        if (isBot) {
+            const roleEl = item.querySelector(".runtime-chat-role");
+            if (roleEl) {
+                const quoteButton = document.createElement("button");
+                quoteButton.className = "runtime-chat-quote-btn";
+                quoteButton.type = "button";
+                quoteButton.dataset.quoteMessage = "1";
+                quoteButton.textContent = t("runtime.quote");
+                roleEl.appendChild(quoteButton);
+            }
+        }
         if (options.prepend) {
             log.insertBefore(item, log.firstChild);
         } else {
@@ -525,6 +542,12 @@
         const minutes = Math.floor(seconds / 60);
         const remainder = Math.floor(seconds % 60);
         return `${minutes}m ${remainder}s`;
+    }
+
+    function messageQuoteSourceLabel(type) {
+        if (type === "html") return t("runtime.reference_html");
+        if (type === "selection") return t("runtime.reference_selection");
+        return t("runtime.reference_message");
     }
 
     function scrollChatToBottom() {
@@ -1954,6 +1977,185 @@
         renderPendingChatAttachments();
     }
 
+    function normalizeReferenceText(text) {
+        return String(text || "")
+            .replace(/\r\n?/g, "\n")
+            .replace(/\n{4,}/g, "\n\n\n")
+            .trim();
+    }
+
+    function truncateReferenceText(text, maxChars = CHAT_REFERENCE_MAX_CHARS) {
+        const value = normalizeReferenceText(text);
+        if (value.length <= maxChars) return value;
+        return `${value.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+    }
+
+    function referencePreview(text) {
+        const value = normalizeReferenceText(text).replace(/\s+/g, " ");
+        if (value.length <= CHAT_REFERENCE_PREVIEW_CHARS) return value;
+        return `${value.slice(0, CHAT_REFERENCE_PREVIEW_CHARS - 1).trimEnd()}…`;
+    }
+
+    function renderPendingChatReferences() {
+        const container = get("runtimeChatReferences");
+        if (!container) return;
+        if (!runtimeState.chatReferences.length) {
+            container.hidden = true;
+            container.innerHTML = "";
+            return;
+        }
+        container.hidden = false;
+        container.innerHTML = runtimeState.chatReferences
+            .map((item) => {
+                const label = messageQuoteSourceLabel(item.type);
+                const preview = referencePreview(item.text);
+                return (
+                    `<div class="runtime-chat-reference" data-reference-id="${escapeHtml(item.id)}">` +
+                    `<span class="runtime-chat-reference-mark">“</span>` +
+                    `<span class="runtime-chat-reference-main">` +
+                    `<span class="runtime-chat-reference-label">${escapeHtml(label)}</span>` +
+                    `<span class="runtime-chat-reference-text">${escapeHtml(preview)}</span>` +
+                    `</span>` +
+                    `<button class="runtime-chat-reference-remove" type="button" data-reference-remove="${escapeHtml(item.id)}" aria-label="${escapeHtml(t("runtime.remove_reference"))}">×</button>` +
+                    `</div>`
+                );
+            })
+            .join("");
+        container
+            .querySelectorAll("[data-reference-remove]")
+            .forEach((button) => {
+                button.addEventListener("click", () => {
+                    const id = String(
+                        button.getAttribute("data-reference-remove") || "",
+                    );
+                    runtimeState.chatReferences =
+                        runtimeState.chatReferences.filter(
+                            (item) => item.id !== id,
+                        );
+                    renderPendingChatReferences();
+                });
+            });
+    }
+
+    function addChatReference({ type = "message", text = "" } = {}) {
+        const value = truncateReferenceText(text);
+        if (!value) return false;
+        runtimeState.chatReferences.push({
+            id: `ref-${Date.now()}-${runtimeState.chatReferenceSeq++}`,
+            type,
+            text: value,
+        });
+        renderPendingChatReferences();
+        showToast(t("runtime.reference_added"), "success", 1600);
+        const input = get("runtimeChatInput");
+        if (input) input.focus();
+        return true;
+    }
+
+    function clearChatReferences() {
+        runtimeState.chatReferences = [];
+        renderPendingChatReferences();
+    }
+
+    function formatChatReferencesAsMarkdown(references) {
+        const items = Array.isArray(references) ? references : [];
+        if (!items.length) return "";
+        return items
+            .map((item) => {
+                const label = messageQuoteSourceLabel(item.type);
+                const lines = normalizeReferenceText(item.text).split("\n");
+                return [`> ${label}:`, ...lines.map((line) => `> ${line}`)]
+                    .join("\n")
+                    .trim();
+            })
+            .filter(Boolean)
+            .join("\n\n");
+    }
+
+    function buildChatMessageWithReferences(message, references) {
+        const quote = formatChatReferencesAsMarkdown(references);
+        const body = String(message || "").trim();
+        return [quote, body].filter(Boolean).join("\n\n").trim();
+    }
+
+    function chatMessageTextForQuote(item) {
+        if (!item) return "";
+        const raw = String(item.dataset.rawContent || "").trim();
+        if (raw) return raw;
+        const content = item.querySelector(".runtime-chat-content");
+        if (content) return normalizeReferenceText(content.innerText || "");
+        const timeline = item.querySelector(".runtime-chat-timeline");
+        return timeline ? normalizeReferenceText(timeline.innerText || "") : "";
+    }
+
+    function hideSelectionQuoteButton() {
+        if (runtimeState.selectionQuoteButton) {
+            runtimeState.selectionQuoteButton.hidden = true;
+        }
+        runtimeState.pendingSelectionReference = null;
+    }
+
+    function ensureSelectionQuoteButton() {
+        if (runtimeState.selectionQuoteButton) {
+            return runtimeState.selectionQuoteButton;
+        }
+        const button = document.createElement("button");
+        button.className = "runtime-chat-selection-quote";
+        button.type = "button";
+        button.textContent = t("runtime.quote_selection");
+        button.hidden = true;
+        button.addEventListener("click", () => {
+            const text = runtimeState.pendingSelectionReference;
+            if (text) addChatReference({ type: "selection", text });
+            hideSelectionQuoteButton();
+        });
+        document.body.appendChild(button);
+        runtimeState.selectionQuoteButton = button;
+        return button;
+    }
+
+    function maybeShowSelectionQuoteButton() {
+        const selection = window.getSelection ? window.getSelection() : null;
+        const text = normalizeReferenceText(
+            selection ? selection.toString() : "",
+        );
+        if (!selection || !text) {
+            hideSelectionQuoteButton();
+            return;
+        }
+        const log = get("runtimeChatLog");
+        const anchorNode = selection.anchorNode;
+        const focusNode = selection.focusNode;
+        const anchorElement =
+            anchorNode && anchorNode.nodeType === Node.ELEMENT_NODE
+                ? anchorNode
+                : anchorNode && anchorNode.parentElement;
+        const focusElement =
+            focusNode && focusNode.nodeType === Node.ELEMENT_NODE
+                ? focusNode
+                : focusNode && focusNode.parentElement;
+        const anchorMessage =
+            anchorElement && anchorElement.closest(".runtime-chat-item.bot");
+        const focusMessage =
+            focusElement && focusElement.closest(".runtime-chat-item.bot");
+        if (!log || !anchorMessage || anchorMessage !== focusMessage) {
+            hideSelectionQuoteButton();
+            return;
+        }
+        const range = selection.rangeCount ? selection.getRangeAt(0) : null;
+        if (!range) {
+            hideSelectionQuoteButton();
+            return;
+        }
+        const rect = range.getBoundingClientRect();
+        const button = ensureSelectionQuoteButton();
+        runtimeState.pendingSelectionReference = text;
+        button.textContent = t("runtime.quote_selection");
+        button.hidden = false;
+        button.style.left = `${Math.max(12, Math.min(rect.left + rect.width / 2, window.innerWidth - 12))}px`;
+        button.style.top = `${Math.max(12, rect.top - 38)}px`;
+    }
+
     function renderFileCard(attrs) {
         const fileId = escapeHtml(String(attrs.id || "").trim());
         const name = escapeHtml(String(attrs.name || "file").trim());
@@ -2581,7 +2783,7 @@
         const picked = String(html || "").trim();
         if (!picked) return;
         setHtmlRunnerPickMode(false);
-        showToast(t("runtime.html_pick_hint"), "success", 1200);
+        addChatReference({ type: "html", text: picked });
     }
 
     function readFileAsDataUrl(file) {
@@ -2637,8 +2839,16 @@
         return `[CQ:file,id=${id},name=${name},size=${size}]`;
     }
 
-    async function buildChatMessageWithAttachments(message, attachments) {
-        const parts = [String(message || "").trim()].filter(Boolean);
+    async function buildChatMessageWithAttachments(
+        message,
+        attachments,
+        references = runtimeState.chatReferences,
+    ) {
+        const quotedMessage = buildChatMessageWithReferences(
+            message,
+            references,
+        );
+        const parts = [quotedMessage].filter(Boolean);
         for (const item of attachments || []) {
             const segment = await attachmentToMessageSegment(item);
             if (segment) parts.push(segment);
@@ -3565,7 +3775,8 @@
         if (!input) return;
         const message = (input.value || "").trim();
         const attachments = [...runtimeState.chatAttachments];
-        if (!message && !attachments.length) return;
+        const references = [...runtimeState.chatReferences];
+        if (!message && !attachments.length && !references.length) return;
 
         runtimeState.chatBusy = true;
         setButtonLoading(button, true);
@@ -3574,6 +3785,7 @@
             const outboundMessage = await buildChatMessageWithAttachments(
                 message,
                 attachments,
+                references,
             );
             if (!outboundMessage) {
                 throw new Error("message is required");
@@ -3588,6 +3800,7 @@
             appendChatMessage("user", outboundMessage);
             input.value = "";
             clearChatAttachments();
+            clearChatReferences();
             forceScrollChatToBottomSoon();
 
             const res = await api("/api/runtime/chat/jobs", {
@@ -3802,7 +4015,20 @@
                 if (runButton) {
                     const block = runButton.closest(".runtime-code-block");
                     if (block) runHtmlCodeBlock(block);
+                    return;
                 }
+                const quoteButton = target.closest("[data-quote-message]");
+                if (quoteButton) {
+                    const item = quoteButton.closest(".runtime-chat-item.bot");
+                    const text = chatMessageTextForQuote(item);
+                    if (text) addChatReference({ type: "message", text });
+                }
+            });
+            chatLog.addEventListener("mouseup", () => {
+                setTimeout(maybeShowSelectionQuoteButton, 0);
+            });
+            chatLog.addEventListener("keyup", () => {
+                setTimeout(maybeShowSelectionQuoteButton, 0);
             });
         }
 
@@ -3817,6 +4043,7 @@
 
         const chatInput = get("runtimeChatInput");
         if (chatInput) {
+            chatInput.addEventListener("focus", hideSelectionQuoteButton);
             chatInput.addEventListener("keydown", (event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();

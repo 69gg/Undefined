@@ -297,6 +297,20 @@
     align-items: center;
     min-width: 0;
   }
+  .runtime-chat-references {
+    flex-basis: min(180px, 28vw);
+    max-width: min(180px, 28vw);
+  }
+  .runtime-chat-reference {
+    min-width: 132px;
+    grid-template-columns: 20px minmax(0, 1fr) 24px;
+    padding-inline: 5px;
+  }
+  .runtime-chat-reference-mark {
+    width: 20px;
+    height: 34px;
+    font-size: 19px;
+  }
   .runtime-chat-input-row > .runtime-chat-input {
     min-width: 92px;
   }

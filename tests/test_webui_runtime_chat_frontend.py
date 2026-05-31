@@ -504,6 +504,65 @@ def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
     assert "runtime.pick_html" in i18n
 
 
+def test_webchat_references_are_prepended_as_markdown_quotes() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    css = RUNTIME_CSS.read_text(encoding="utf-8")
+    responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
+    template = WEBUI_TEMPLATE.read_text(encoding="utf-8")
+    i18n = I18N_JS.read_text(encoding="utf-8")
+
+    assert "chatReferences: []" in source
+    assert "chatReferenceSeq" in source
+    assert "function addChatReference" in source
+    assert "function renderPendingChatReferences" in source
+    assert "function formatChatReferencesAsMarkdown" in source
+    assert "function buildChatMessageWithReferences" in source
+    assert "function chatMessageTextForQuote" in source
+    assert "[`> ${label}:`, ...lines.map((line) => `> ${line}`)]" in source
+    assert (
+        "buildChatMessageWithReferences(\n            message,\n            references"
+        in source
+    )
+    assert "clearChatReferences()" in source
+    assert 'addChatReference({ type: "html", text: picked })' in source
+    assert 'addChatReference({ type: "message", text })' in source
+    assert 'addChatReference({ type: "selection", text })' in source
+    assert "runtimeState.chatReferences =" in source
+    assert "runtimeState.chatReferences.filter" in source
+    assert 'api("/api/runtime/chat/files"' in source
+
+    send_helper = source.split("async function sendChatMessage", 1)[1].split(
+        "function handleChatFilesPicked",
+        1,
+    )[0]
+    assert "const references = [...runtimeState.chatReferences]" in send_helper
+    assert (
+        "if (!message && !attachments.length && !references.length) return"
+        in send_helper
+    )
+    assert "clearChatReferences()" in send_helper
+
+    assert 'id="runtimeChatReferences"' in template
+    input_row = template.split('class="runtime-chat-input-row"', 1)[1].split(
+        'class="runtime-chat-actions"',
+        1,
+    )[0]
+    assert input_row.index('id="runtimeChatInput"') < input_row.index(
+        'id="runtimeChatReferences"'
+    )
+
+    assert ".runtime-chat-references" in css
+    assert ".runtime-chat-reference" in css
+    assert ".runtime-chat-reference-remove" in css
+    assert ".runtime-chat-quote-btn" in css
+    assert ".runtime-chat-selection-quote" in css
+    assert "@keyframes runtime-chat-selection-quote-in" in css
+    assert ".runtime-chat-references" in responsive_css
+    assert "runtime.reference_added" in i18n
+    assert "runtime.reference_html" in i18n
+    assert "runtime.quote_selection" in i18n
+
+
 def test_webchat_tool_status_colors_drive_left_bar_and_status_text() -> None:
     css = RUNTIME_CSS.read_text(encoding="utf-8")
     running_block = css.split(".runtime-tool-block.running {", 1)[1].split(
@@ -599,7 +658,7 @@ def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:
     )
     assert 'id="runtimeChatAttachments"' in template
     input_row = template.split('class="runtime-chat-input-row"', 1)[1].split(
-        "</div>",
+        'class="runtime-chat-actions"',
         1,
     )[0]
     assert input_row.index('id="runtimeChatInput"') < input_row.index(
