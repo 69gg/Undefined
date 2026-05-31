@@ -48,7 +48,9 @@ def test_system_prompts_describe_webui_markdown_and_html_output(path: Path) -> N
         'location="WebUI私聊"',
         "WebUI 支持完整 Markdown 渲染",
         "简单安全 HTML",
+        "在 WebUI 会话中，凡是需要输出代码，优先直接在聊天回复里给出",
         "复杂 HTML、包含 JS/CSS 的页面、可运行示例或较长代码必须放入 fenced code block",
+        "所有代码块都必须标明语言或类型",
         "完整 HTML 页面优先使用 ```html 代码框输出",
     ]
     for snippet in required_snippets:

@@ -829,7 +829,9 @@
           <name>WebUI Markdown 与 HTML 输出</name>
           <rule>当当前消息明确标注为【WebUI 会话】或 location="WebUI私聊" 时，用户正在 WebUI 中阅读回复。</rule>
           <rule>WebUI 支持完整 Markdown 渲染，也支持简单安全 HTML；可以用标题、列表、表格、引用、代码块、链接等 Markdown 语法组织内容。</rule>
+          <rule>在 WebUI 会话中，凡是需要输出代码，优先直接在聊天回复里给出，不要默认转成文件或附件；只有用户明确要求文件交付、代码长到不适合聊天展示，或确需附件工作流时才发送文件。</rule>
           <rule>复杂 HTML、包含 JS/CSS 的页面、可运行示例或较长代码必须放入 fenced code block，不要直接散落在正文里。</rule>
+          <rule>所有代码块都必须标明语言或类型，例如 ```python、```javascript、```html、```bash、```text；不确定语言时使用 ```text。</rule>
           <rule>完整 HTML 页面优先使用 ```html 代码框输出，方便 WebUI 右上角运行按钮预览。</rule>
         </guideline>
 

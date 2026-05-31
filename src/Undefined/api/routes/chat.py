@@ -1676,6 +1676,7 @@ async def run_webui_chat(
 会话身份：虚拟用户 system(42)。
 权限等级：superadmin（你可按最高管理权限处理）。
 WebUI 支持完整 Markdown 渲染和简单安全 HTML。复杂 HTML、包含 JS/CSS 的页面、可运行示例或较长代码必须放进 fenced code block；完整 HTML 页面请优先使用 ```html 代码框，方便 WebUI 的运行按钮预览。
+需要输出代码时，优先在当前聊天消息中直接给出，不要为了普通代码片段调用文件生成或文件发送工具；只有用户明确要求文件交付、内容长到不适合聊天展示，或确需附件工作流时才使用文件。所有代码都必须使用 fenced code block，并始终标明语言或类型，例如 ```python、```javascript、```html、```bash、```text；不确定语言时使用 ```text。
 请正常进行私聊对话；如果需要结束会话，调用 end 工具。"""
     virtual_sender = _WebUIVirtualSender(
         _VIRTUAL_USER_ID, send_output, onebot=ctx.onebot

@@ -156,6 +156,10 @@ async def test_run_webui_chat_prompt_describes_webui_markdown_html_output(
         in prompt
     )
     assert "完整 HTML 页面请优先使用 ```html 代码框" in prompt
+    assert "优先在当前聊天消息中直接给出" in prompt
+    assert "不要为了普通代码片段调用文件生成或文件发送工具" in prompt
+    assert "始终标明语言或类型" in prompt
+    assert "不确定语言时使用 ```text" in prompt
 
 
 @pytest.mark.asyncio
