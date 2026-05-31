@@ -171,10 +171,13 @@ async def test_ai_ask_webchat_events_include_stage_and_tool_lifecycle() -> None:
         ),
     )
 
+    seen_tool_context: dict[str, Any] = {}
+
     async def _execute_tool(
         name: str, args: dict[str, Any], ctx: dict[str, Any]
     ) -> str:
         _ = args
+        seen_tool_context.update(ctx)
         if name == "end":
             ctx["conversation_ended"] = True
             return "对话已结束"
@@ -287,6 +290,8 @@ async def test_ai_ask_webchat_events_include_stage_and_tool_lifecycle() -> None:
     assert lifecycle_payloads[1]["result"] == "tool result"
     assert lifecycle_payloads[2]["name"] == "end"
     assert lifecycle_payloads[3]["result"] == "对话已结束"
+    assert callable(seen_tool_context.get("render_html_to_image"))
+    assert callable(seen_tool_context.get("render_markdown_to_html"))
 
 
 @pytest.mark.asyncio

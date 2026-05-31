@@ -15,6 +15,7 @@ from Undefined.ai.client.setup import (
 from Undefined.ai.transports.openai_transport import RESPONSES_OUTPUT_ITEMS_KEY
 from Undefined.ai.tooling import END_CO_CALL_REJECT_CONTENT
 from Undefined.context import RequestContext
+from Undefined.render import render_html_to_image, render_markdown_to_html
 from Undefined.services.message_summary_fetch import fetch_session_messages
 from Undefined.utils.logging import log_debug_json, redact_string
 from Undefined.utils.tool_calls import parse_tool_arguments
@@ -196,6 +197,8 @@ class ClientAskLoopMixin(ClientQueueMixin):
         tool_context.setdefault("history_manager", history_manager)
         tool_context.setdefault("onebot_client", onebot_client)
         tool_context.setdefault("scheduler", scheduler)
+        tool_context.setdefault("render_html_to_image", render_html_to_image)
+        tool_context.setdefault("render_markdown_to_html", render_markdown_to_html)
         tool_context.setdefault("send_image_callback", self._send_image_callback)
         tool_context.setdefault(
             "attachment_registry",
