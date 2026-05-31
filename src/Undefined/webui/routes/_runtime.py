@@ -27,6 +27,7 @@ _ALLOWED_CHAT_IMAGE_EXTENSIONS = {
     ".webp",
     ".bmp",
 }
+_WEBUI_FILE_UPLOAD_NAME_MAX_LENGTH = 128
 
 
 def _runtime_base_url() -> str:
@@ -121,6 +122,21 @@ def _resolve_chat_image_path(raw_path: str) -> Path | None:
     if path.stat().st_size > _MAX_CHAT_IMAGE_SIZE:
         return None
     return path
+
+
+def _sanitize_upload_display_name(raw_name: str) -> str:
+    name = Path(str(raw_name or "").strip() or "attachment").name or "attachment"
+    if len(name) > _WEBUI_FILE_UPLOAD_NAME_MAX_LENGTH:
+        suffix = "".join(Path(name).suffixes[-2:]) or Path(name).suffix
+        suffix = suffix if len(suffix) <= 16 else ""
+        name = f"attachment{suffix}"
+    return name
+
+
+def _random_upload_filename(display_name: str) -> str:
+    suffix = "".join(Path(display_name).suffixes[-2:]) or Path(display_name).suffix
+    suffix = suffix if len(suffix) <= 16 else ""
+    return f"file_{uuid.uuid4().hex[:16]}{suffix}"
 
 
 async def _proxy_runtime(
@@ -589,9 +605,8 @@ async def runtime_chat_file_upload_handler(request: web.Request) -> Response:
     if field is None or getattr(field_any, "name", None) != "file":
         return web.json_response({"error": "file field is required"}, status=400)
 
-    raw_name = (
-        Path(str(getattr(field_any, "filename", "") or "attachment")).name
-        or "attachment"
+    raw_name = _sanitize_upload_display_name(
+        str(getattr(field_any, "filename", "") or "attachment")
     )
     file_id = uuid.uuid4().hex
     dest_dir = (Path.cwd() / WEBUI_FILE_CACHE_DIR / file_id).resolve()
@@ -599,7 +614,7 @@ async def runtime_chat_file_upload_handler(request: web.Request) -> Response:
     if cache_root not in dest_dir.parents and dest_dir != cache_root:
         return web.json_response({"error": "Invalid file path"}, status=400)
     dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / raw_name
+    dest = dest_dir / _random_upload_filename(raw_name)
     cfg = get_config(strict=False)
     max_size_mb = max(1, int(getattr(cfg, "messages_send_url_file_max_size_mb", 100)))
     max_size_bytes = max_size_mb * 1024 * 1024

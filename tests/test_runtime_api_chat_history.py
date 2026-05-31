@@ -105,6 +105,59 @@ async def test_runtime_chat_history_endpoint_returns_role_mapped_items() -> None
 
 
 @pytest.mark.asyncio
+async def test_runtime_chat_history_endpoint_returns_attachment_refs() -> None:
+    history = _DummyHistoryManager()
+    history.records = [
+        {
+            "display_name": "Bot",
+            "message": "[图片 uid=pic_abc123 name=image_1.png]",
+            "timestamp": "2026-02-25 22:00:02",
+            "attachments": [
+                {
+                    "uid": "pic_abc123",
+                    "kind": "image",
+                    "media_type": "image",
+                    "display_name": "image_1.png",
+                    "source_kind": "base64_image",
+                }
+            ],
+        }
+    ]
+    context = RuntimeAPIContext(
+        config_getter=lambda: SimpleNamespace(
+            api=SimpleNamespace(
+                enabled=True,
+                host="127.0.0.1",
+                port=8788,
+                auth_key="changeme",
+                openapi_enabled=True,
+            ),
+            superadmin_qq=10001,
+            bot_qq=20002,
+        ),
+        onebot=SimpleNamespace(connection_status=lambda: {}),
+        ai=SimpleNamespace(
+            memory_storage=SimpleNamespace(count=lambda: 0),
+            attachment_registry=None,
+        ),
+        command_dispatcher=SimpleNamespace(parse_command=lambda _text: None),
+        queue_manager=SimpleNamespace(snapshot=lambda: {}),
+        history_manager=history,
+    )
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+
+    response = await server._chat_history_handler(
+        cast(web.Request, cast(Any, SimpleNamespace(query={"limit": "1"})))
+    )
+    payload = json.loads(response.text or "{}")
+
+    attachment = payload["items"][0]["attachments"][0]
+    assert attachment["uid"] == "pic_abc123"
+    assert attachment["media_type"] == "image"
+    assert attachment["display_name"] == "image_1.png"
+
+
+@pytest.mark.asyncio
 async def test_runtime_chat_history_endpoint_returns_webchat_metadata_only_item() -> (
     None
 ):

@@ -10,6 +10,7 @@ import re
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 import time
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
@@ -1474,11 +1475,21 @@ def _parse_after(request: web.Request) -> int:
         return 0
 
 
-def _history_record_to_item(item: dict[str, Any]) -> dict[str, Any] | None:
+async def _history_record_to_item(
+    item: dict[str, Any],
+    *,
+    attachment_registry: Any | None = None,
+    scope_key: str | None = None,
+) -> dict[str, Any] | None:
     content = str(item.get("message", "")).strip()
     webchat = item.get("webchat")
     webchat_events = _webchat_history_events(webchat)
-    if not content and not webchat_events:
+    attachments = await _history_attachments(
+        item.get("attachments"),
+        attachment_registry=attachment_registry,
+        scope_key=scope_key,
+    )
+    if not content and not webchat_events and not attachments:
         return None
     display_name = str(item.get("display_name", "")).strip().lower()
     role = "bot" if display_name == "bot" else "user"
@@ -1487,6 +1498,8 @@ def _history_record_to_item(item: dict[str, Any]) -> dict[str, Any] | None:
         "content": content,
         "timestamp": str(item.get("timestamp", "") or "").strip(),
     }
+    if attachments:
+        mapped["attachments"] = attachments
     if isinstance(webchat, dict) and webchat_events:
         webchat_calls = _webchat_history_calls(webchat)
         webchat_timeline = _webchat_history_timeline(webchat)
@@ -1503,6 +1516,93 @@ def _history_record_to_item(item: dict[str, Any]) -> dict[str, Any] | None:
             "timeline": webchat_timeline,
         }
     return mapped
+
+
+async def _history_attachments(
+    raw: Any,
+    *,
+    attachment_registry: Any | None = None,
+    scope_key: str | None = None,
+) -> list[dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    attachments: list[dict[str, str]] = []
+    if attachment_registry is not None:
+        load = getattr(attachment_registry, "load", None)
+        if callable(load):
+            with suppress(Exception):
+                await load()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        uid = str(item.get("uid", "") or "").strip()
+        if not uid:
+            continue
+        media_type = str(item.get("media_type") or item.get("kind") or "file").strip()
+        kind = str(item.get("kind") or media_type or "file").strip()
+        ref: dict[str, str] = {
+            "uid": uid,
+            "kind": kind or "file",
+            "media_type": media_type or kind or "file",
+            "display_name": str(item.get("display_name", "") or ""),
+        }
+        for key in ("source_kind", "source_ref", "semantic_kind", "description"):
+            value = str(item.get(key, "") or "").strip()
+            if value:
+                ref[key] = value
+        resolved = await _resolve_history_attachment(
+            uid,
+            attachment_registry=attachment_registry,
+            scope_key=scope_key,
+        )
+        if resolved is not None:
+            ref.update(_history_attachment_render_fields(resolved))
+        attachments.append(ref)
+    return attachments
+
+
+async def _resolve_history_attachment(
+    uid: str,
+    *,
+    attachment_registry: Any | None,
+    scope_key: str | None,
+) -> Any | None:
+    if attachment_registry is None:
+        return None
+    try:
+        resolve_async = getattr(attachment_registry, "resolve_async", None)
+        if callable(resolve_async):
+            return await resolve_async(uid, scope_key)
+        resolve = getattr(attachment_registry, "resolve", None)
+        if callable(resolve):
+            return resolve(uid, scope_key)
+    except Exception as exc:
+        logger.debug(
+            "[RuntimeAPI] resolve history attachment failed uid=%s err=%s", uid, exc
+        )
+    return None
+
+
+def _history_attachment_render_fields(record: Any) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    source_ref = str(getattr(record, "source_ref", "") or "").strip()
+    if source_ref:
+        fields["source_ref"] = source_ref
+    local_path = str(getattr(record, "local_path", "") or "").strip()
+    media_type = str(getattr(record, "media_type", "") or "").strip().lower()
+    if media_type == "image":
+        if local_path:
+            try:
+                path = Path(local_path)
+                if path.is_file():
+                    fields["render_source"] = path.resolve().as_uri()
+            except OSError:
+                pass
+        if "render_source" not in fields and source_ref:
+            fields["render_source"] = source_ref
+    if source_ref.isalnum():
+        fields["file_id"] = source_ref
+    return fields
 
 
 async def run_webui_chat(
@@ -1686,7 +1786,15 @@ async def chat_history_handler(
     items: list[dict[str, Any]] = []
     for record in records:
         if isinstance(record, dict):
-            mapped = _history_record_to_item(record)
+            mapped = await _history_record_to_item(
+                record,
+                attachment_registry=getattr(ctx.ai, "attachment_registry", None),
+                scope_key=build_attachment_scope(
+                    user_id=_VIRTUAL_USER_ID,
+                    request_type="private",
+                    webui_session=True,
+                ),
+            )
             if mapped is not None:
                 items.append(mapped)
 

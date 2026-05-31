@@ -459,7 +459,12 @@ async def test_runtime_chat_file_upload_handler_caches_authenticated_file(
     assert str(payload["id"]).isalnum()
     assert payload["name"] == "note.txt"
     assert payload["size"] == 11
-    cached_file = tmp_path / WEBUI_FILE_CACHE_DIR / str(payload["id"]) / "note.txt"
+    cached_dir = tmp_path / WEBUI_FILE_CACHE_DIR / str(payload["id"])
+    cached_files = list(cached_dir.iterdir())
+    assert len(cached_files) == 1
+    cached_file = cached_files[0]
+    assert cached_file.name != "note.txt"
+    assert cached_file.name.startswith("file_")
     assert cached_file.read_bytes() == b"hello world"
 
 

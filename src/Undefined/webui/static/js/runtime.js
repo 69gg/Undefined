@@ -708,6 +708,35 @@
         return node;
     }
 
+    function renderHistoryAttachment(item) {
+        if (!item || typeof item !== "object") return "";
+        const mediaType = String(item.media_type || item.kind || "").trim();
+        if (mediaType === "image") {
+            const source = String(
+                item.render_source || item.source_ref || "",
+            ).trim();
+            if (!source) return "";
+            return `<img class="runtime-chat-image" src="${escapeHtml(source)}" alt="image" loading="lazy" />`;
+        }
+        const fileId = String(
+            item.file_id || item.source_ref || item.uid || "",
+        ).trim();
+        if (!fileId) return "";
+        return renderFileCard({
+            id: fileId,
+            name: item.display_name || item.name || fileId,
+            size: item.size,
+        });
+    }
+
+    function buildAttachmentMarkup(attachments) {
+        const items = Array.isArray(attachments) ? attachments : [];
+        return items
+            .map((item) => renderHistoryAttachment(item))
+            .filter(Boolean)
+            .join("");
+    }
+
     function readChatAutoScrollPreference() {
         try {
             const value = window.localStorage.getItem(
@@ -1755,9 +1784,12 @@
     function appendHistoryChatItem(item, options = {}) {
         const role = item && item.role === "bot" ? "bot" : "user";
         const content = String((item && item.content) || "").trim();
+        const attachmentMarkup = buildAttachmentMarkup(
+            item && item.attachments,
+        );
         const hasTimeline =
             role === "bot" && historyWebchatEvents(item).length > 0;
-        if (!content && !hasTimeline) return null;
+        if (!content && !hasTimeline && !attachmentMarkup) return null;
         const message = appendChatMessage(role, content, options);
         if (!message) return null;
         if (hasTimeline) {
@@ -1766,6 +1798,12 @@
             renderHistoryTimeline(item, message);
             if (!message.dataset.rawContent && content) {
                 appendTimelineMessage(message, content, role);
+            }
+        }
+        if (attachmentMarkup) {
+            const contentEl = message.querySelector(".runtime-chat-content");
+            if (contentEl) {
+                contentEl.insertAdjacentHTML("beforeend", attachmentMarkup);
             }
         }
         const webchat = item && item.webchat;
@@ -1777,7 +1815,7 @@
                 final: true,
             });
         }
-        if (!content && !message.dataset.rawContent) {
+        if (!content && !attachmentMarkup && !message.dataset.rawContent) {
             message.classList.add("tool-only");
         }
         return message;
