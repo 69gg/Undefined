@@ -30,6 +30,7 @@
         selectionQuoteButton: null,
         htmlRunnerSource: "",
         htmlRunnerPickMode: false,
+        htmlRunnerResize: null,
         probeTimer: null,
         queryBusy: {
             memory: false,
@@ -56,6 +57,9 @@
     const CHAT_REFERENCE_MAX_CHARS = 4000;
     const CHAT_REFERENCE_PREVIEW_CHARS = 180;
     const CODE_COLLAPSE_LINE_THRESHOLD = 8;
+    const HTML_RUNNER_MIN_WIDTH = 360;
+    const HTML_RUNNER_MIN_HEIGHT = 280;
+    const HTML_RUNNER_VIEWPORT_MARGIN = 12;
 
     function prefersReducedMotion() {
         return (
@@ -2795,7 +2799,7 @@
     if (!active) return;
     scheduleDraw(candidateFromPoint(event.clientX, event.clientY));
   }, true);
-  document.addEventListener("click", (event) => {
+  document.addEventListener("pointerdown", (event) => {
     if (!active) return;
     event.preventDefault();
     event.stopPropagation();
@@ -2804,6 +2808,10 @@
     parent.postMessage({ type: "webui-html-picked", html }, "*");
     setActive(false);
   }, true);
+  window.addEventListener("load", () => {
+    parent.postMessage({ type: "webui-html-picker-ready" }, "*");
+  });
+  parent.postMessage({ type: "webui-html-picker-ready" }, "*");
   document.addEventListener("mouseleave", () => {
     if (active) clear();
   }, true);
@@ -2825,10 +2833,22 @@
         return `${html}${script}`;
     }
 
+    function syncHtmlRunnerPickModeToFrame() {
+        const frame = get("runtimeHtmlRunnerFrame");
+        if (frame && frame.contentWindow) {
+            frame.contentWindow.postMessage(
+                {
+                    type: "webui-html-pick",
+                    active: !!runtimeState.htmlRunnerPickMode,
+                },
+                "*",
+            );
+        }
+    }
+
     function setHtmlRunnerPickMode(active) {
         runtimeState.htmlRunnerPickMode = !!active;
         const runner = get("runtimeHtmlRunner");
-        const frame = get("runtimeHtmlRunnerFrame");
         const button = get("btnRuntimeHtmlPick");
         if (runner) runner.classList.toggle("is-picking", !!active);
         if (button) {
@@ -2838,13 +2858,34 @@
             button.classList.toggle("is-active", !!active);
             button.setAttribute("aria-pressed", active ? "true" : "false");
         }
-        if (frame && frame.contentWindow) {
-            frame.contentWindow.postMessage(
-                { type: "webui-html-pick", active: !!active },
-                "*",
-            );
-        }
+        syncHtmlRunnerPickModeToFrame();
         if (active) showToast(t("runtime.html_pick_hint"), "info", 1800);
+    }
+
+    function clampHtmlRunnerSize(width, height) {
+        const maxWidth = Math.max(
+            HTML_RUNNER_MIN_WIDTH,
+            window.innerWidth - HTML_RUNNER_VIEWPORT_MARGIN * 2,
+        );
+        const maxHeight = Math.max(
+            HTML_RUNNER_MIN_HEIGHT,
+            window.innerHeight - HTML_RUNNER_VIEWPORT_MARGIN * 2,
+        );
+        return {
+            width: Math.min(Math.max(width, HTML_RUNNER_MIN_WIDTH), maxWidth),
+            height: Math.min(
+                Math.max(height, HTML_RUNNER_MIN_HEIGHT),
+                maxHeight,
+            ),
+        };
+    }
+
+    function setHtmlRunnerSize(width, height) {
+        const runner = get("runtimeHtmlRunner");
+        if (!runner) return;
+        const size = clampHtmlRunnerSize(Number(width), Number(height));
+        runner.style.width = `${size.width}px`;
+        runner.style.height = `${size.height}px`;
     }
 
     function openHtmlRunner(source, options = {}) {
@@ -2866,6 +2907,10 @@
         }
         if (meta) {
             meta.textContent = String(options.language || "html").toUpperCase();
+        }
+        if (!runner.style.width || !runner.style.height) {
+            const rect = runner.getBoundingClientRect();
+            setHtmlRunnerSize(rect.width || 760, rect.height || 320);
         }
         frame.srcdoc = injectHtmlRunnerPicker(html);
         showToast(t("runtime.html_ready"), "success", 1200);
@@ -2891,6 +2936,48 @@
         if (!picked) return;
         setHtmlRunnerPickMode(false);
         addChatReference({ type: "html", text: picked });
+    }
+
+    function startHtmlRunnerResize(event) {
+        const runner = get("runtimeHtmlRunner");
+        if (!runner) return;
+        event.preventDefault();
+        const pointerId = event.pointerId;
+        const rect = runner.getBoundingClientRect();
+        runtimeState.htmlRunnerResize = {
+            pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            startWidth: rect.width,
+            startHeight: rect.height,
+        };
+        runner.classList.add("is-resizing");
+        const handle = event.currentTarget;
+        if (handle && typeof handle.setPointerCapture === "function") {
+            handle.setPointerCapture(pointerId);
+        }
+    }
+
+    function moveHtmlRunnerResize(event) {
+        const state = runtimeState.htmlRunnerResize;
+        if (!state || state.pointerId !== event.pointerId) return;
+        event.preventDefault();
+        setHtmlRunnerSize(
+            state.startWidth + event.clientX - state.startX,
+            state.startHeight + event.clientY - state.startY,
+        );
+    }
+
+    function stopHtmlRunnerResize(event) {
+        const state = runtimeState.htmlRunnerResize;
+        if (!state || state.pointerId !== event.pointerId) return;
+        const runner = get("runtimeHtmlRunner");
+        if (runner) runner.classList.remove("is-resizing");
+        const handle = event.currentTarget;
+        if (handle && typeof handle.releasePointerCapture === "function") {
+            handle.releasePointerCapture(state.pointerId);
+        }
+        runtimeState.htmlRunnerResize = null;
     }
 
     function readFileAsDataUrl(file) {
@@ -4200,11 +4287,41 @@
                 setHtmlRunnerPickMode(!runtimeState.htmlRunnerPickMode);
             });
         }
+        const htmlRunnerFrame = get("runtimeHtmlRunnerFrame");
+        if (htmlRunnerFrame) {
+            htmlRunnerFrame.addEventListener("load", () => {
+                syncHtmlRunnerPickModeToFrame();
+            });
+        }
+        const htmlRunnerResize = get("runtimeHtmlRunnerResize");
+        if (htmlRunnerResize) {
+            htmlRunnerResize.addEventListener(
+                "pointerdown",
+                startHtmlRunnerResize,
+            );
+            htmlRunnerResize.addEventListener(
+                "pointermove",
+                moveHtmlRunnerResize,
+            );
+            htmlRunnerResize.addEventListener(
+                "pointerup",
+                stopHtmlRunnerResize,
+            );
+            htmlRunnerResize.addEventListener(
+                "pointercancel",
+                stopHtmlRunnerResize,
+            );
+        }
         window.addEventListener("message", (event) => {
             const frame = get("runtimeHtmlRunnerFrame");
             if (!frame || event.source !== frame.contentWindow) return;
             const data = event.data;
-            if (!data || data.type !== "webui-html-picked") return;
+            if (!data) return;
+            if (data.type === "webui-html-picker-ready") {
+                syncHtmlRunnerPickModeToFrame();
+                return;
+            }
+            if (data.type !== "webui-html-picked") return;
             handleHtmlRunnerPicked(data.html);
         });
     }

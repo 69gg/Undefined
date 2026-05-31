@@ -1722,8 +1722,7 @@
   max-height: calc(100dvh - 32px - env(safe-area-inset-bottom));
   min-width: 360px;
   min-height: 280px;
-  resize: both;
-  overflow: auto;
+  overflow: visible;
   pointer-events: auto;
 }
 .runtime-html-runner[hidden] {
@@ -1740,7 +1739,16 @@
   border-radius: var(--radius-md);
   background: var(--bg-card);
   box-shadow: 0 18px 56px rgba(15, 23, 42, 0.2);
+  position: relative;
   animation: runtime-html-runner-in 0.2s ease-out;
+}
+.runtime-html-runner.is-resizing,
+.runtime-html-runner.is-resizing * {
+  cursor: nwse-resize !important;
+  user-select: none;
+}
+.runtime-html-runner.is-resizing .runtime-html-runner-frame {
+  pointer-events: none;
 }
 .runtime-html-runner-toolbar {
   display: flex;
@@ -1797,6 +1805,28 @@
   min-height: 220px;
   border: 0;
   background: #fff;
+}
+.runtime-html-runner-resize {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border-color) 68%, transparent);
+  border-radius: 6px;
+  background:
+    linear-gradient(135deg, transparent 45%, color-mix(in srgb, var(--text-tertiary) 65%, transparent) 46%, transparent 52%),
+    linear-gradient(135deg, transparent 62%, color-mix(in srgb, var(--text-tertiary) 65%, transparent) 63%, transparent 70%),
+    color-mix(in srgb, var(--bg-card) 88%, transparent);
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.18);
+  cursor: nwse-resize;
+  opacity: 0.86;
+}
+.runtime-html-runner-resize:hover,
+.runtime-html-runner-resize:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border-color));
+  opacity: 1;
 }
 .runtime-html-runner.is-picking .runtime-html-runner-panel {
   border-color: color-mix(in srgb, var(--accent) 54%, var(--border-color));
