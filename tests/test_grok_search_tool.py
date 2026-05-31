@@ -41,6 +41,7 @@ def test_grok_search_schema_requires_natural_language_search_request() -> None:
 
     assert parameters["required"] == ["search_request"]
     assert "search_request" in parameters["properties"]
+    assert "query" not in parameters["properties"]
     assert (
         "自然语言详细说明搜索内容和回答要求"
         in parameters["properties"]["search_request"]["description"]
@@ -54,11 +55,34 @@ def test_grok_search_schema_requires_natural_language_search_request() -> None:
 
 
 @pytest.mark.asyncio
+async def test_grok_search_requires_search_request() -> None:
+    ai_client = SimpleNamespace(submit_queued_llm_call=AsyncMock())
+
+    result = await grok_handler.execute(
+        {},
+        {
+            "runtime_config": SimpleNamespace(
+                grok_search_enabled=True,
+                grok_model=SimpleNamespace(
+                    api_url="https://grok.example/v1",
+                    api_key="sk-grok",
+                    model_name="grok-4-search",
+                ),
+            ),
+            "ai_client": ai_client,
+        },
+    )
+
+    assert result == "请用 search_request 提供完整的自然语言搜索要求。"
+    ai_client.submit_queued_llm_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_grok_search_returns_disabled_when_switch_is_off() -> None:
     ai_client = SimpleNamespace(submit_queued_llm_call=AsyncMock())
 
     result = await grok_handler.execute(
-        {"query": "latest inference model releases"},
+        {"search_request": "latest inference model releases"},
         {
             "runtime_config": SimpleNamespace(
                 grok_search_enabled=False,
@@ -201,34 +225,6 @@ async def test_grok_search_returns_original_text_when_json_parse_fails() -> None
     )
 
     assert result == "{not valid json"
-
-
-@pytest.mark.asyncio
-async def test_grok_search_keeps_legacy_query_fallback() -> None:
-    ai_client = SimpleNamespace(submit_queued_llm_call=AsyncMock(return_value="ok"))
-    grok_model = SimpleNamespace(
-        api_url="https://grok.example/v1",
-        api_key="sk-grok",
-        model_name="grok-4-search",
-        max_tokens=4096,
-    )
-
-    result = await grok_handler.execute(
-        {"query": "请搜索 grok search 工具兼容旧 query 字段的测试资料"},
-        {
-            "runtime_config": SimpleNamespace(
-                grok_search_enabled=True,
-                grok_model=grok_model,
-            ),
-            "ai_client": ai_client,
-        },
-    )
-
-    assert result == "ok"
-    kwargs = ai_client.submit_queued_llm_call.await_args.kwargs
-    assert kwargs["messages"][1]["content"] == (
-        "请搜索 grok search 工具兼容旧 query 字段的测试资料"
-    )
 
 
 def test_runner_filters_grok_search_for_web_agent_when_disabled() -> None:

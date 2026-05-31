@@ -51,8 +51,8 @@ def _build_grok_search_system_prompt(now: datetime | None = None) -> str:
 
 
 async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
-    query = str(args.get("search_request") or args.get("query") or "").strip()
-    if not query:
+    search_request = str(args.get("search_request") or "").strip()
+    if not search_request:
         return "请用 search_request 提供完整的自然语言搜索要求。"
 
     runtime_config = context.get("runtime_config")
@@ -85,7 +85,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
     messages = [
         {"role": "system", "content": _build_grok_search_system_prompt()},
-        {"role": "user", "content": query},
+        {"role": "user", "content": search_request},
     ]
 
     try:

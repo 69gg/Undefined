@@ -9,10 +9,6 @@
                 "search_request": {
                     "type": "string",
                     "description": "用自然语言详细说明搜索内容和回答要求。把用户真正想查的主题、背景、重点、需要核实或比较的问题说清楚；不要只写关键词，也不要主动添加用户未要求的硬性范围。若用户给了时间、地区、来源、排除项或格式等要求，再一并写入。"
-                },
-                "query": {
-                    "type": "string",
-                    "description": "兼容旧字段。新调用请优先使用 search_request。"
                 }
             },
             "required": ["search_request"]
