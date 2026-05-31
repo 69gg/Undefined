@@ -22,6 +22,8 @@
         activeJobResumeAttempts: 0,
         toolBlocks: new Map(),
         toolCollapseTimers: new Map(),
+        chatAttachments: [],
+        chatAttachmentSeq: 0,
         probeTimer: null,
         queryBusy: {
             memory: false,
@@ -36,6 +38,7 @@
     const CHAT_CLOCK_INTERVAL_MS = 500;
     const TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS = 2000;
     const ACTIVE_JOB_RESUME_MAX_ATTEMPTS = 20;
+    const CHAT_INLINE_IMAGE_MAX_BYTES = 12 * 1024 * 1024;
 
     function prefersReducedMotion() {
         return (
@@ -1783,6 +1786,96 @@
         return (n / 1024 / 1024).toFixed(2) + "MB";
     }
 
+    function fileKind(file) {
+        const type = String((file && file.type) || "").toLowerCase();
+        return type.startsWith("image/") ? "image" : "file";
+    }
+
+    function formatAttachmentName(file) {
+        return (
+            String((file && file.name) || "attachment").trim() || "attachment"
+        );
+    }
+
+    function renderPendingChatAttachments() {
+        const container = get("runtimeChatAttachments");
+        if (!container) return;
+        if (!runtimeState.chatAttachments.length) {
+            container.hidden = true;
+            container.innerHTML = "";
+            return;
+        }
+        container.hidden = false;
+        container.innerHTML = runtimeState.chatAttachments
+            .map((item) => {
+                const kindLabel =
+                    item.kind === "image"
+                        ? t("runtime.attachment_kind_image")
+                        : t("runtime.attachment_kind_file");
+                return (
+                    `<div class="runtime-chat-attachment" data-attachment-id="${escapeHtml(item.id)}">` +
+                    `<span class="runtime-chat-attachment-icon" aria-hidden="true">${item.kind === "image" ? "IMG" : "FILE"}</span>` +
+                    `<span class="runtime-chat-attachment-main">` +
+                    `<span class="runtime-chat-attachment-name">${escapeHtml(item.name)}</span>` +
+                    `<span class="runtime-chat-attachment-meta">${escapeHtml(kindLabel)}${item.sizeLabel ? ` · ${escapeHtml(item.sizeLabel)}` : ""}</span>` +
+                    `</span>` +
+                    `<button class="runtime-chat-attachment-remove" type="button" data-attachment-remove="${escapeHtml(item.id)}" aria-label="${escapeHtml(t("runtime.remove_attachment"))}">×</button>` +
+                    `</div>`
+                );
+            })
+            .join("");
+        container
+            .querySelectorAll("[data-attachment-remove]")
+            .forEach((button) => {
+                button.addEventListener("click", () => {
+                    const id = String(
+                        button.getAttribute("data-attachment-remove") || "",
+                    );
+                    runtimeState.chatAttachments =
+                        runtimeState.chatAttachments.filter(
+                            (item) => item.id !== id,
+                        );
+                    renderPendingChatAttachments();
+                });
+            });
+    }
+
+    function addChatFiles(files, { source = "picker" } = {}) {
+        const selected = Array.from(files || []).filter(Boolean);
+        if (!selected.length) return 0;
+        const added = [];
+        for (const file of selected) {
+            const name = formatAttachmentName(file);
+            const size = Number(file.size || 0);
+            added.push({
+                id: `att-${Date.now()}-${runtimeState.chatAttachmentSeq++}`,
+                file,
+                kind: fileKind(file),
+                name,
+                size,
+                sizeLabel: formatFileSize(size),
+                source,
+            });
+        }
+        runtimeState.chatAttachments.push(...added);
+        renderPendingChatAttachments();
+        const messageKey =
+            added.length === 1
+                ? "runtime.attachment_added"
+                : "runtime.attachments_added";
+        showToast(
+            i18nFormat(messageKey, { count: added.length }),
+            "success",
+            1800,
+        );
+        return added.length;
+    }
+
+    function clearChatAttachments() {
+        runtimeState.chatAttachments = [];
+        renderPendingChatAttachments();
+    }
+
     function renderFileCard(attrs) {
         const fileId = escapeHtml(String(attrs.id || "").trim());
         const name = escapeHtml(String(attrs.name || "file").trim());
@@ -2207,6 +2300,51 @@
         } catch (_error) {
             return null;
         }
+    }
+
+    async function uploadChatFile(file) {
+        const form = new FormData();
+        form.append("file", file, formatAttachmentName(file));
+        const res = await api("/api/runtime/chat/files", {
+            method: "POST",
+            body: form,
+        });
+        const data = await parseJsonSafe(res);
+        if (!res.ok || (data && data.error)) {
+            throw new Error(buildRequestError(res, data));
+        }
+        if (!data || !data.id) {
+            throw new Error("missing file id");
+        }
+        return data;
+    }
+
+    async function attachmentToMessageSegment(item) {
+        const file = item && item.file;
+        if (!file) return "";
+        if (
+            item.kind === "image" &&
+            Number(file.size || 0) <= CHAT_INLINE_IMAGE_MAX_BYTES
+        ) {
+            const dataUrl = await readFileAsDataUrl(file);
+            const base64 = String(dataUrl).split(",", 2)[1] || "";
+            if (!base64) return "";
+            return `[CQ:image,file=base64://${base64}]`;
+        }
+        const uploaded = await uploadChatFile(file);
+        const id = String(uploaded.id || "");
+        const name = String(uploaded.name || item.name || "file");
+        const size = Number(uploaded.size || item.size || 0);
+        return `[CQ:file,id=${id},name=${name},size=${size}]`;
+    }
+
+    async function buildChatMessageWithAttachments(message, attachments) {
+        const parts = [String(message || "").trim()].filter(Boolean);
+        for (const item of attachments || []) {
+            const segment = await attachmentToMessageSegment(item);
+            if (segment) parts.push(segment);
+        }
+        return parts.join("\n").trim();
     }
 
     async function fetchJsonOrThrow(path) {
@@ -3127,25 +3265,35 @@
         const button = get("btnRuntimeChatSend");
         if (!input) return;
         const message = (input.value || "").trim();
-        if (!message) return;
+        const attachments = [...runtimeState.chatAttachments];
+        if (!message && !attachments.length) return;
 
         runtimeState.chatBusy = true;
         setButtonLoading(button, true);
-        clearToolCollapseTimers();
-        stopChatPolling();
-        stopChatClock();
-        runtimeState.toolBlocks.clear();
-        runtimeState.streamingMessageId = null;
-        runtimeState.activeChatMessageId = null;
-        runtimeState.lastEventSeq = 0;
-        appendChatMessage("user", message);
-        input.value = "";
-        forceScrollChatToBottomSoon();
 
         try {
+            const outboundMessage = await buildChatMessageWithAttachments(
+                message,
+                attachments,
+            );
+            if (!outboundMessage) {
+                throw new Error("message is required");
+            }
+            clearToolCollapseTimers();
+            stopChatPolling();
+            stopChatClock();
+            runtimeState.toolBlocks.clear();
+            runtimeState.streamingMessageId = null;
+            runtimeState.activeChatMessageId = null;
+            runtimeState.lastEventSeq = 0;
+            appendChatMessage("user", outboundMessage);
+            input.value = "";
+            clearChatAttachments();
+            forceScrollChatToBottomSoon();
+
             const res = await api("/api/runtime/chat/jobs", {
                 method: "POST",
-                body: JSON.stringify({ message }),
+                body: JSON.stringify({ message: outboundMessage }),
             });
             const data = await parseJsonSafe(res);
             if (!res.ok || (data && data.error)) {
@@ -3169,25 +3317,14 @@
         }
     }
 
-    async function handleChatImagePicked(event) {
+    function handleChatFilesPicked(event) {
         const input = event && event.target ? event.target : null;
         const files = input && input.files ? Array.from(input.files) : [];
         const chatInput = get("runtimeChatInput");
         if (!chatInput || files.length === 0) return;
 
         try {
-            for (const file of files) {
-                if (!file || !String(file.type || "").startsWith("image/"))
-                    continue;
-                const dataUrl = await readFileAsDataUrl(file);
-                const base64 = String(dataUrl).split(",", 2)[1] || "";
-                if (!base64) continue;
-                if (chatInput.value && !chatInput.value.endsWith("\n")) {
-                    chatInput.value += "\n";
-                }
-                chatInput.value += `[CQ:image,file=base64://${base64}]`;
-            }
-            showToast(t("runtime.image_added"), "success", 1800);
+            addChatFiles(files, { source: "picker" });
             chatInput.focus();
         } catch (error) {
             showToast(
@@ -3355,13 +3492,13 @@
             });
         }
 
-        const imageBtn = get("btnRuntimeChatImage");
-        const imageInput = get("runtimeChatImageInput");
-        if (imageBtn && imageInput) {
-            imageBtn.addEventListener("click", () => {
-                imageInput.click();
+        const attachBtn = get("btnRuntimeChatImage");
+        const fileInput = get("runtimeChatFileInput");
+        if (attachBtn && fileInput) {
+            attachBtn.addEventListener("click", () => {
+                fileInput.click();
             });
-            imageInput.addEventListener("change", handleChatImagePicked);
+            fileInput.addEventListener("change", handleChatFilesPicked);
         }
 
         const chatInput = get("runtimeChatInput");
@@ -3371,6 +3508,31 @@
                     event.preventDefault();
                     sendChatMessage();
                 }
+            });
+            chatInput.addEventListener("paste", (event) => {
+                const files =
+                    event.clipboardData && event.clipboardData.files
+                        ? Array.from(event.clipboardData.files)
+                        : [];
+                if (!files.length) return;
+                event.preventDefault();
+                addChatFiles(files, { source: "paste" });
+            });
+        }
+        const inputRow = document.querySelector(".runtime-chat-input-row");
+        if (inputRow) {
+            inputRow.addEventListener("dragover", (event) => {
+                event.preventDefault();
+            });
+            inputRow.addEventListener("drop", (event) => {
+                const files =
+                    event.dataTransfer && event.dataTransfer.files
+                        ? Array.from(event.dataTransfer.files)
+                        : [];
+                if (!files.length) return;
+                event.preventDefault();
+                addChatFiles(files, { source: "drop" });
+                if (chatInput) chatInput.focus();
             });
         }
     }

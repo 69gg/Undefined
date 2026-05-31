@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -26,11 +27,39 @@ from Undefined.webui.routes._shared import (
     SESSION_STORE_APP_KEY,
     SETTINGS_APP_KEY,
 )
+from Undefined.utils.paths import WEBUI_FILE_CACHE_DIR
 
 
 class DummyRequest(SimpleNamespace):
     async def json(self) -> dict[str, object]:
         return dict(getattr(self, "_json", {}))
+
+
+class DummyMultipartField:
+    def __init__(self, chunks: list[bytes], *, filename: str = "file.bin") -> None:
+        self.name = "file"
+        self.filename = filename
+        self._chunks = list(chunks)
+
+    async def read_chunk(self) -> bytes:
+        if not self._chunks:
+            return b""
+        return self._chunks.pop(0)
+
+
+class DummyMultipartRequest(DummyRequest):
+    def __init__(self, field: DummyMultipartField | None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._field = field
+
+    async def multipart(self) -> object:
+        field = self._field
+
+        class _Reader:
+            async def next(self) -> DummyMultipartField | None:
+                return field
+
+        return _Reader()
 
 
 def _request(
@@ -360,6 +389,7 @@ def test_create_app_registers_management_routes() -> None:
     assert ("GET", "/api/v1/management/runtime/chat/jobs/{job_id}/events") in routes
     assert ("POST", "/api/v1/management/runtime/chat/jobs/{job_id}/cancel") in routes
     assert ("DELETE", "/api/v1/management/runtime/chat/history") in routes
+    assert ("POST", "/api/v1/management/runtime/chat/files") in routes
 
 
 async def test_index_handler_applies_launcher_mode_and_initial_view() -> None:
@@ -399,6 +429,59 @@ async def test_index_handler_renders_mobile_shell_and_action_toggles() -> None:
     assert 'id="mobileNavFooter"' in payload_text
     assert 'id="configMobileActionsToggle"' in payload_text
     assert 'id="logsMobileActionsToggle"' in payload_text
+
+
+async def test_runtime_chat_file_upload_handler_caches_authenticated_file(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(_runtime, "check_auth", lambda _request: True)
+    monkeypatch.chdir(tmp_path)
+    field = DummyMultipartField([b"hello", b" world"], filename="../note.txt")
+    request = DummyMultipartRequest(
+        field,
+        headers={},
+        cookies={},
+        query={},
+        app={},
+        remote="127.0.0.1",
+        scheme="http",
+        host="127.0.0.1:8787",
+        transport=None,
+    )
+
+    response = await _runtime.runtime_chat_file_upload_handler(
+        cast(web.Request, cast(Any, request))
+    )
+    payload = _json_payload(response)
+
+    assert cast(web.Response, response).status == 200
+    assert isinstance(payload["id"], str)
+    assert str(payload["id"]).isalnum()
+    assert payload["name"] == "note.txt"
+    assert payload["size"] == 11
+    cached_file = tmp_path / WEBUI_FILE_CACHE_DIR / str(payload["id"]) / "note.txt"
+    assert cached_file.read_bytes() == b"hello world"
+
+
+async def test_runtime_chat_file_upload_handler_requires_auth(monkeypatch: Any) -> None:
+    monkeypatch.setattr(_runtime, "check_auth", lambda _request: False)
+    request = DummyMultipartRequest(
+        None,
+        headers={},
+        cookies={},
+        query={},
+        app={},
+        remote="127.0.0.1",
+        scheme="http",
+        host="127.0.0.1:8787",
+        transport=None,
+    )
+
+    response = await _runtime.runtime_chat_file_upload_handler(
+        cast(web.Request, cast(Any, request))
+    )
+
+    assert cast(web.Response, response).status == 401
 
 
 def test_webui_cors_only_allows_trusted_origins(monkeypatch: Any) -> None:

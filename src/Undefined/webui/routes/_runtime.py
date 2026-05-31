@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
+import uuid
 from collections.abc import Mapping
-from urllib.parse import quote as _url_quote
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+from urllib.parse import quote as _url_quote
 
 from aiohttp import ClientSession, ClientTimeout, web
 from aiohttp.web_response import Response
@@ -567,6 +569,66 @@ async def runtime_chat_file_handler(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(
         path=target,
         headers={"Content-Disposition": disposition},
+    )
+
+
+@routes.post("/api/v1/management/runtime/chat/files")
+@routes.post("/api/runtime/chat/files")
+async def runtime_chat_file_upload_handler(request: web.Request) -> Response:
+    """缓存 WebChat 待发送附件，发送时通过 CQ:file id 引用。"""
+    if not check_auth(request):
+        return _unauthorized()
+
+    try:
+        reader = await request.multipart()
+        field = await reader.next()
+    except Exception:
+        return web.json_response({"error": "Invalid multipart body"}, status=400)
+
+    field_any = cast(Any, field)
+    if field is None or getattr(field_any, "name", None) != "file":
+        return web.json_response({"error": "file field is required"}, status=400)
+
+    raw_name = (
+        Path(str(getattr(field_any, "filename", "") or "attachment")).name
+        or "attachment"
+    )
+    file_id = uuid.uuid4().hex
+    dest_dir = (Path.cwd() / WEBUI_FILE_CACHE_DIR / file_id).resolve()
+    cache_root = (Path.cwd() / WEBUI_FILE_CACHE_DIR).resolve()
+    if cache_root not in dest_dir.parents and dest_dir != cache_root:
+        return web.json_response({"error": "Invalid file path"}, status=400)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / raw_name
+    cfg = get_config(strict=False)
+    max_size_mb = max(1, int(getattr(cfg, "messages_send_url_file_max_size_mb", 100)))
+    max_size_bytes = max_size_mb * 1024 * 1024
+
+    size = 0
+    try:
+        with dest.open("wb") as fp:
+            while True:
+                chunk = await field_any.read_chunk()
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > max_size_bytes:
+                    shutil.rmtree(dest_dir, ignore_errors=True)
+                    return web.json_response(
+                        {"error": "file too large", "max_size": max_size_bytes},
+                        status=413,
+                    )
+                fp.write(chunk)
+    except Exception:
+        shutil.rmtree(dest_dir, ignore_errors=True)
+        raise
+
+    return web.json_response(
+        {
+            "id": file_id,
+            "name": raw_name,
+            "size": size,
+        }
     )
 
 

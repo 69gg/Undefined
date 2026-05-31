@@ -296,6 +296,13 @@
     grid-template-columns: 1fr;
     align-items: stretch;
   }
+  .runtime-chat-attachments {
+    max-height: 118px;
+    overflow-y: auto;
+  }
+  .runtime-chat-attachment {
+    max-width: 100%;
+  }
   .runtime-chat-actions { justify-content: flex-start; }
   .main-content.chat-layout #tab-chat .runtime-chat-log {
     padding: 12px;

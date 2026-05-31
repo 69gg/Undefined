@@ -952,6 +952,78 @@
   align-items: center;
   gap: 8px;
 }
+.runtime-chat-attachments {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.runtime-chat-attachments[hidden] {
+  display: none;
+}
+.runtime-chat-attachment {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  max-width: min(280px, 100%);
+  min-height: 34px;
+  padding: 5px 7px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-card) 72%, var(--bg-app));
+  color: var(--text-primary);
+}
+.runtime-chat-attachment-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 22px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+.runtime-chat-attachment-main {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+.runtime-chat-attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+.runtime-chat-attachment-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+.runtime-chat-attachment-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.runtime-chat-attachment-remove:hover {
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  color: var(--error);
+}
 .runtime-chat-actions {
   display: flex;
   align-items: center;

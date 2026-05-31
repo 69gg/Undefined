@@ -375,6 +375,7 @@ curl http://127.0.0.1:8788/openapi.json
 ### WebUI AI Chat Jobs
 
 - `POST /api/v1/chat/jobs`：创建后台 job，Body 为 `{"message":"..."}`。
+- WebChat 前端粘贴或选择的附件会先被合并进 `message`：小图片使用 `CQ:image,file=base64://...`，普通文件使用 WebUI 管理代理的 `/api/runtime/chat/files` 缓存后生成 `CQ:file,id=...`；Runtime 侧沿用 `register_message_attachments()` 注册到 `webui` 附件作用域。
 - `GET /api/v1/chat/jobs/active`：返回当前运行中的 WebChat job（没有则为 `null`）。
 - `GET /api/v1/chat/jobs/{job_id}`：查询 job 状态、最后事件序号和已汇总输出。
 - `GET /api/v1/chat/jobs/{job_id}/events?after=<seq>`：查询 `seq` 之后的增量事件，默认返回 JSON。
@@ -654,6 +655,7 @@ WebUI 不直接在前端暴露 `auth_key`，而是通过后端代理访问主进
 - `GET /api/runtime/chat/history`
 - `DELETE /api/runtime/chat/history`
 - `POST /api/runtime/chat/jobs`
+- `POST /api/runtime/chat/files`
 - `GET /api/runtime/chat/jobs/active`
 - `GET /api/runtime/chat/jobs/{job_id}`
 - `GET /api/runtime/chat/jobs/{job_id}/events`
@@ -663,7 +665,7 @@ WebUI 不直接在前端暴露 `auth_key`，而是通过后端代理访问主进
 - `POST /api/runtime/tools/invoke`
 
 WebUI 后端会自动从 `config.toml` 读取 `[api].auth_key` 并注入 Header。
-`/api/runtime/chat/jobs/{job_id}/events` 默认代理 JSON 增量查询；显式请求 `Accept: text/event-stream` 时会透传 SSE keep-alive，聊天代理超时按当前聊天模型队列预算计算。
+`/api/runtime/chat/files` 接收已登录 WebUI 发起的 `multipart/form-data`，字段名为 `file`，将待发送文件缓存到 WebUI 文件缓存目录并返回 `{id,name,size}`；随后前端把它作为 `CQ:file,id=<id>,name=<name>,size=<size>` 合并进同一条 WebChat job 消息。`/api/runtime/chat/jobs/{job_id}/events` 默认代理 JSON 增量查询；显式请求 `Accept: text/event-stream` 时会透传 SSE keep-alive，聊天代理超时按当前聊天模型队列预算计算。
 
 ## 7. 故障排查
 

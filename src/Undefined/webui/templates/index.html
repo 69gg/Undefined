@@ -778,14 +778,15 @@
                         <div id="runtimeChatLoadMore" class="runtime-chat-load-more" aria-live="polite"></div>
                         <div id="runtimeChatLog" class="runtime-chat-log" role="log" aria-live="polite" aria-relevant="additions text" data-i18n-aria-label="runtime.chat_log_label" aria-label="聊天消息"></div>
                         <div class="runtime-chat-input-row">
+                            <div id="runtimeChatAttachments" class="runtime-chat-attachments" hidden></div>
                             <textarea id="runtimeChatInput" class="form-control runtime-chat-input"
                                 data-i18n-placeholder="runtime.chat_placeholder"
                                 placeholder="输入消息，或直接 /help 这样的命令"></textarea>
                             <div class="runtime-chat-actions">
-                                <input id="runtimeChatImageInput" type="file" accept="image/*" hidden />
+                                <input id="runtimeChatFileInput" type="file" multiple hidden />
                                 <button id="btnRuntimeChatImage" class="btn runtime-chat-action-btn runtime-chat-action-btn-image" type="button">
                                     <span class="runtime-chat-action-icon" aria-hidden="true">+</span>
-                                    <span class="sr-only" data-i18n="runtime.image">图片</span>
+                                    <span class="sr-only" data-i18n="runtime.attach_file">附加文件</span>
                                 </button>
                                 <button id="btnRuntimeChatSend" class="btn primary runtime-chat-action-btn runtime-chat-action-btn-send" type="button">
                                     <span class="runtime-chat-action-icon" aria-hidden="true">⏎</span>

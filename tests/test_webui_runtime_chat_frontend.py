@@ -7,6 +7,7 @@ RUNTIME_JS = Path("src/Undefined/webui/static/js/runtime.js")
 RUNTIME_CSS = Path("src/Undefined/webui/static/css/components.css")
 WEBUI_TEMPLATE = Path("src/Undefined/webui/templates/index.html")
 MAIN_JS = Path("src/Undefined/webui/static/js/main.js")
+API_JS = Path("src/Undefined/webui/static/js/api.js")
 APP_CSS = Path("src/Undefined/webui/static/css/app.css")
 RESPONSIVE_CSS = Path("src/Undefined/webui/static/css/responsive.css")
 I18N_JS = Path("src/Undefined/webui/static/js/i18n.js")
@@ -461,7 +462,7 @@ def test_webchat_send_scrolls_to_bottom_after_layout_updates() -> None:
         "function updateChatMessage", 1
     )[0]
     send_helper = source.split("async function sendChatMessage", 1)[1].split(
-        "async function handleChatImagePicked", 1
+        "function handleChatFilesPicked", 1
     )[0]
 
     assert "requestAnimationFrame(() =>" in force_helper
@@ -469,10 +470,45 @@ def test_webchat_send_scrolls_to_bottom_after_layout_updates() -> None:
     assert "setTimeout(forceScrollChatToBottom, 80)" in force_helper
     assert "requestAnimationFrame(scrollChatToBottom)" in helper
     assert "setTimeout(scrollChatToBottom, 0)" in helper
-    assert 'appendChatMessage("user", message)' in send_helper
+    assert "buildChatMessageWithAttachments(" in send_helper
+    assert 'appendChatMessage("user", outboundMessage)' in send_helper
     assert 'input.value = ""' in send_helper
+    assert "clearChatAttachments()" in send_helper
     assert "forceScrollChatToBottomSoon()" in send_helper
     assert "ensureStreamingMessage()" in send_helper
+
+
+def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    css = RUNTIME_CSS.read_text(encoding="utf-8")
+    template = WEBUI_TEMPLATE.read_text(encoding="utf-8")
+    i18n = I18N_JS.read_text(encoding="utf-8")
+    api_source = API_JS.read_text(encoding="utf-8")
+
+    assert "chatAttachments: []" in source
+    assert "function addChatFiles" in source
+    assert "function renderPendingChatAttachments" in source
+    assert "async function uploadChatFile" in source
+    assert "async function buildChatMessageWithAttachments" in source
+    assert "CHAT_INLINE_IMAGE_MAX_BYTES" in source
+    assert 'api("/api/runtime/chat/files"' in source
+    assert "event.clipboardData && event.clipboardData.files" in source
+    assert 'addChatFiles(files, { source: "paste" })' in source
+    assert (
+        "sendChatMessage()"
+        not in source.split('chatInput.addEventListener("paste"', 1)[1].split("});", 1)[
+            0
+        ]
+    )
+    assert 'id="runtimeChatAttachments"' in template
+    assert 'id="runtimeChatFileInput" type="file" multiple hidden' in template
+    assert 'data-i18n="runtime.attach_file"' in template
+    assert ".runtime-chat-attachments" in css
+    assert ".runtime-chat-attachment-remove" in css
+    assert "runtime.attach_file" in i18n
+    assert "runtime.attachment_added" in i18n
+    assert "body instanceof FormData" in api_source
+    assert "!isNativeBody" in api_source
 
 
 def test_webchat_layout_keeps_input_at_bottom_and_log_scrollable() -> None:
