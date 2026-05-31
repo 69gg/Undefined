@@ -1541,6 +1541,90 @@
 .runtime-tool-message > *:last-child {
   margin-bottom: 0;
 }
+.runtime-html-runner {
+  position: fixed;
+  right: clamp(16px, 3vw, 36px);
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 118;
+  width: min(760px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.runtime-html-runner[hidden] {
+  display: none;
+}
+.runtime-html-runner-panel {
+  display: grid;
+  grid-template-rows: auto minmax(220px, 46vh);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  box-shadow: 0 18px 56px rgba(15, 23, 42, 0.2);
+  pointer-events: auto;
+  animation: runtime-html-runner-in 0.2s ease-out;
+}
+.runtime-html-runner-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 10px 8px 14px;
+  border-bottom: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-app) 64%, var(--bg-card));
+}
+.runtime-html-runner-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 650;
+}
+.runtime-html-runner-meta {
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.runtime-html-runner-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.runtime-html-runner-btn {
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.runtime-html-runner-btn.is-active {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-color));
+  background: var(--accent-subtle);
+  color: var(--accent-color);
+}
+.runtime-html-runner-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 220px;
+  border: 0;
+  background: #fff;
+}
+.runtime-html-runner.is-picking .runtime-html-runner-panel {
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border-color));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent),
+    0 18px 56px rgba(15, 23, 42, 0.22);
+}
 @keyframes runtime-chat-enter {
   from {
     opacity: 0;
@@ -1561,6 +1645,16 @@
     transform: translateY(0);
   }
 }
+@keyframes runtime-html-runner-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
 @keyframes runtime-chat-cursor {
   0%,
   45% {
@@ -1576,7 +1670,8 @@
   .runtime-chat-item.streaming .runtime-chat-content::after,
   .runtime-tool-preview,
   .runtime-tool-children,
-  .runtime-tool-message {
+  .runtime-tool-message,
+  .runtime-html-runner-panel {
     animation: none;
   }
   .runtime-tool-block,

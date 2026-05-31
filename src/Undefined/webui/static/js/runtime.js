@@ -24,6 +24,8 @@
         toolCollapseTimers: new Map(),
         chatAttachments: [],
         chatAttachmentSeq: 0,
+        htmlRunnerSource: "",
+        htmlRunnerPickMode: false,
         probeTimer: null,
         queryBusy: {
             memory: false,
@@ -2456,6 +2458,132 @@
         showToast(t("runtime.run_html"), "info", 1200);
     }
 
+    function buildHtmlRunnerDocument(source) {
+        const raw = String(source || "").trim();
+        if (!raw) return "";
+        if (/^<!doctype\s+html\b/i.test(raw) || /^<html\b/i.test(raw)) {
+            return raw;
+        }
+        return (
+            `<!doctype html><html><head><meta charset="utf-8">` +
+            `<meta name="viewport" content="width=device-width, initial-scale=1">` +
+            `</head><body>${raw}</body></html>`
+        );
+    }
+
+    function htmlRunnerPickerScript() {
+        return `<script>
+(() => {
+  let active = false;
+  let selected = null;
+  const style = document.createElement("style");
+  style.textContent = "[data-webui-html-pick-hover]{outline:2px solid #d97757!important;outline-offset:2px!important;cursor:crosshair!important;}";
+  document.documentElement.appendChild(style);
+  function clear() {
+    if (selected) selected.removeAttribute("data-webui-html-pick-hover");
+    selected = null;
+  }
+  window.addEventListener("message", (event) => {
+    if (!event.data || event.data.type !== "webui-html-pick") return;
+    active = !!event.data.active;
+    if (!active) clear();
+  });
+  document.addEventListener("mouseover", (event) => {
+    if (!active) return;
+    clear();
+    selected = event.target;
+    if (selected && selected.setAttribute) selected.setAttribute("data-webui-html-pick-hover", "1");
+  }, true);
+  document.addEventListener("click", (event) => {
+    if (!active) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const target = event.target;
+    const html = target && target.outerHTML ? target.outerHTML : "";
+    parent.postMessage({ type: "webui-html-picked", html }, "*");
+    active = false;
+    clear();
+  }, true);
+})();
+<\/script>`;
+    }
+
+    function injectHtmlRunnerPicker(html) {
+        const script = htmlRunnerPickerScript();
+        if (/<\/body>/i.test(html)) {
+            return html.replace(/<\/body>/i, `${script}</body>`);
+        }
+        return `${html}${script}`;
+    }
+
+    function setHtmlRunnerPickMode(active) {
+        runtimeState.htmlRunnerPickMode = !!active;
+        const runner = get("runtimeHtmlRunner");
+        const frame = get("runtimeHtmlRunnerFrame");
+        const button = get("btnRuntimeHtmlPick");
+        if (runner) runner.classList.toggle("is-picking", !!active);
+        if (button) {
+            button.textContent = active
+                ? t("runtime.picking_html")
+                : t("runtime.pick_html");
+            button.classList.toggle("is-active", !!active);
+            button.setAttribute("aria-pressed", active ? "true" : "false");
+        }
+        if (frame && frame.contentWindow) {
+            frame.contentWindow.postMessage(
+                { type: "webui-html-pick", active: !!active },
+                "*",
+            );
+        }
+        if (active) showToast(t("runtime.html_pick_hint"), "info", 1800);
+    }
+
+    function openHtmlRunner(source, options = {}) {
+        const runner = get("runtimeHtmlRunner");
+        const frame = get("runtimeHtmlRunnerFrame");
+        const meta = get("runtimeHtmlRunnerMeta");
+        if (!runner || !frame) return;
+        const html = buildHtmlRunnerDocument(source);
+        if (!html) return;
+        runtimeState.htmlRunnerSource = String(source || "");
+        runtimeState.htmlRunnerPickMode = false;
+        runner.hidden = false;
+        runner.classList.remove("is-picking");
+        const button = get("btnRuntimeHtmlPick");
+        if (button) {
+            button.textContent = t("runtime.pick_html");
+            button.classList.remove("is-active");
+            button.setAttribute("aria-pressed", "false");
+        }
+        if (meta) {
+            meta.textContent = String(options.language || "html").toUpperCase();
+        }
+        frame.srcdoc = injectHtmlRunnerPicker(html);
+        showToast(t("runtime.html_ready"), "success", 1200);
+    }
+
+    function closeHtmlRunner() {
+        const runner = get("runtimeHtmlRunner");
+        const frame = get("runtimeHtmlRunnerFrame");
+        if (runner) runner.hidden = true;
+        if (frame) frame.srcdoc = "";
+        runtimeState.htmlRunnerSource = "";
+        runtimeState.htmlRunnerPickMode = false;
+        const button = get("btnRuntimeHtmlPick");
+        if (button) {
+            button.textContent = t("runtime.pick_html");
+            button.classList.remove("is-active");
+            button.setAttribute("aria-pressed", "false");
+        }
+    }
+
+    function handleHtmlRunnerPicked(html) {
+        const picked = String(html || "").trim();
+        if (!picked) return;
+        setHtmlRunnerPickMode(false);
+        showToast(t("runtime.html_pick_hint"), "success", 1200);
+    }
+
     function readFileAsDataUrl(file) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -3721,6 +3849,24 @@
                 if (chatInput) chatInput.focus();
             });
         }
+
+        const htmlRunnerClose = get("btnRuntimeHtmlClose");
+        if (htmlRunnerClose) {
+            htmlRunnerClose.addEventListener("click", closeHtmlRunner);
+        }
+        const htmlRunnerPick = get("btnRuntimeHtmlPick");
+        if (htmlRunnerPick) {
+            htmlRunnerPick.addEventListener("click", () => {
+                setHtmlRunnerPickMode(!runtimeState.htmlRunnerPickMode);
+            });
+        }
+        window.addEventListener("message", (event) => {
+            const frame = get("runtimeHtmlRunnerFrame");
+            if (!frame || event.source !== frame.contentWindow) return;
+            const data = event.data;
+            if (!data || data.type !== "webui-html-picked") return;
+            handleHtmlRunnerPicked(data.html);
+        });
     }
 
     const PROBE_REFRESH_INTERVAL = 5000;

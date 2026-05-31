@@ -795,6 +795,21 @@
                             </div>
                         </div>
                     </div>
+                    <div id="runtimeHtmlRunner" class="runtime-html-runner" hidden>
+                        <div class="runtime-html-runner-panel" role="dialog" aria-modal="false" data-i18n-aria-label="runtime.html_runner" aria-label="HTML 运行预览">
+                            <div class="runtime-html-runner-toolbar">
+                                <div class="runtime-html-runner-title">
+                                    <span data-i18n="runtime.html_runner">HTML 预览</span>
+                                    <span id="runtimeHtmlRunnerMeta" class="runtime-html-runner-meta">HTML</span>
+                                </div>
+                                <div class="runtime-html-runner-actions">
+                                    <button id="btnRuntimeHtmlPick" class="btn ghost runtime-html-runner-btn" type="button" data-i18n="runtime.pick_html">选择</button>
+                                    <button id="btnRuntimeHtmlClose" class="btn ghost runtime-html-runner-btn" type="button" data-i18n="runtime.close">关闭</button>
+                                </div>
+                            </div>
+                            <iframe id="runtimeHtmlRunnerFrame" class="runtime-html-runner-frame" sandbox="allow-scripts allow-forms allow-modals" title="HTML preview"></iframe>
+                        </div>
+                    </div>
                 </section>
 
                 <!-- Tab About -->

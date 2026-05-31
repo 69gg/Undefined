@@ -459,6 +459,51 @@ def test_webchat_frontend_highlights_markdown_code_blocks() -> None:
     assert '[data-theme="dark"] .runtime-code-block' in css
 
 
+def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    css = RUNTIME_CSS.read_text(encoding="utf-8")
+    responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
+    template = WEBUI_TEMPLATE.read_text(encoding="utf-8")
+    i18n = I18N_JS.read_text(encoding="utf-8")
+
+    assert 'id="runtimeHtmlRunner"' in template
+    assert 'id="runtimeHtmlRunnerFrame"' in template
+    assert 'sandbox="allow-scripts allow-forms allow-modals"' in template
+    assert "allow-same-origin" not in template
+    assert 'id="btnRuntimeHtmlPick"' in template
+    assert 'id="btnRuntimeHtmlClose"' in template
+    assert "runtime.html_runner" in template
+
+    assert "htmlRunnerSource" in source
+    assert "htmlRunnerPickMode" in source
+    assert "function buildHtmlRunnerDocument" in source
+    assert "function htmlRunnerPickerScript" in source
+    assert "function injectHtmlRunnerPicker" in source
+    assert "function setHtmlRunnerPickMode" in source
+    assert "function openHtmlRunner" in source
+    assert "function closeHtmlRunner" in source
+    assert "function handleHtmlRunnerPicked" in source
+    assert "frame.srcdoc = injectHtmlRunnerPicker(html)" in source
+    assert 'parent.postMessage({ type: "webui-html-picked", html }, "*")' in source
+    assert "event.source !== frame.contentWindow" in source
+    assert 'data.type !== "webui-html-picked"' in source
+    assert "btnRuntimeHtmlClose" in source
+    assert "btnRuntimeHtmlPick" in source
+    assert "setHtmlRunnerPickMode(!runtimeState.htmlRunnerPickMode)" in source
+    assert 'button.setAttribute("aria-pressed", active ? "true" : "false")' in source
+
+    assert ".runtime-html-runner" in css
+    assert ".runtime-html-runner-panel" in css
+    assert ".runtime-html-runner-toolbar" in css
+    assert ".runtime-html-runner-frame" in css
+    assert ".runtime-html-runner-btn.is-active" in css
+    assert ".runtime-html-runner.is-picking .runtime-html-runner-panel" in css
+    assert "@keyframes runtime-html-runner-in" in css
+    assert ".runtime-html-runner" in responsive_css
+    assert "runtime.html_ready" in i18n
+    assert "runtime.pick_html" in i18n
+
+
 def test_webchat_tool_status_colors_drive_left_bar_and_status_text() -> None:
     css = RUNTIME_CSS.read_text(encoding="utf-8")
     running_block = css.split(".runtime-tool-block.running {", 1)[1].split(

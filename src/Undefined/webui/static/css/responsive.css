@@ -359,6 +359,32 @@
     padding-left: 8px;
     padding-right: 6px;
   }
+  .runtime-html-runner {
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    width: calc(100vw - 24px);
+  }
+  .runtime-html-runner-panel {
+    grid-template-rows: auto minmax(220px, 52vh);
+    border-radius: var(--radius-sm);
+  }
+  .runtime-html-runner-toolbar {
+    align-items: flex-start;
+    padding: 8px 9px 8px 11px;
+  }
+  .runtime-html-runner-title {
+    display: grid;
+    gap: 3px;
+  }
+  .runtime-html-runner-meta {
+    max-width: 36vw;
+  }
+  .runtime-html-runner-actions {
+    gap: 4px;
+  }
+  .runtime-html-runner-btn {
+    padding-inline: 8px;
+  }
 }
 
 @media (max-width: 480px) {
