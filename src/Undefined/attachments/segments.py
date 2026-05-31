@@ -369,11 +369,8 @@ async def register_message_attachments(
             try:
                 if type_ == "image":
                     raw_source = str(data.get("file") or data.get("url") or "").strip()
-                    display_name = display_name_from_source(
-                        raw_source,
-                        f"image_{index + 1}.png",
-                    )
                     if raw_source.startswith("base64://"):
+                        display_name = f"image_{index + 1}.png"
                         payload = raw_source[len("base64://") :].strip()
                         content = base64.b64decode(payload)
                         record = await registry.register_bytes(
@@ -390,6 +387,7 @@ async def register_message_attachments(
                         )
                         ref = record.prompt_ref()
                     elif is_data_url(raw_source):
+                        display_name = f"image_{index + 1}.png"
                         record = await registry.register_data_url(
                             scope_key,
                             raw_source,
@@ -404,6 +402,10 @@ async def register_message_attachments(
                         )
                         ref = record.prompt_ref()
                     else:
+                        display_name = display_name_from_source(
+                            raw_source,
+                            f"image_{index + 1}.png",
+                        )
                         resolved_source = raw_source
                         if raw_source and resolve_image_url is not None:
                             try:
