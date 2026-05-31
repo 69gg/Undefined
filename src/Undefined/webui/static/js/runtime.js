@@ -55,6 +55,7 @@
     const CHAT_ATTACHMENT_COMPRESSED_COUNT = 5;
     const CHAT_REFERENCE_MAX_CHARS = 4000;
     const CHAT_REFERENCE_PREVIEW_CHARS = 180;
+    const CODE_COLLAPSE_LINE_THRESHOLD = 8;
 
     function prefersReducedMotion() {
         return (
@@ -2458,6 +2459,11 @@
         return lang === "text" ? "code" : lang;
     }
 
+    function shouldCollapseCodeBlock(code) {
+        const lines = String(code || "").split(/\r?\n/).length;
+        return lines > CODE_COLLAPSE_LINE_THRESHOLD;
+    }
+
     function createSafeMarkedRenderer() {
         if (typeof marked === "undefined" || !marked.Renderer) return null;
         const renderer = new marked.Renderer();
@@ -2478,18 +2484,23 @@
                 normalizedLanguage && normalizedLanguage !== "text"
                     ? ` language-${escapeHtml(normalizedLanguage)}`
                     : "";
+            const isCollapsible = shouldCollapseCodeBlock(codeText);
+            const collapsedClass = isCollapsible ? " is-collapsed" : "";
             return (
-                `<div class="runtime-code-block" data-language="${escapeHtml(normalizedLanguage)}" data-code="${escapeHtml(encodedCode)}">` +
+                `<div class="runtime-code-block${collapsedClass}" data-language="${escapeHtml(normalizedLanguage)}" data-code="${escapeHtml(encodedCode)}">` +
                 `<div class="runtime-code-toolbar">` +
                 `<span class="runtime-code-language">${escapeHtml(codeBlockLanguageLabel(normalizedLanguage))}</span>` +
                 `<span class="runtime-code-actions">` +
+                (isCollapsible
+                    ? `<button class="runtime-code-action" type="button" data-code-toggle data-collapsed-label="${escapeHtml(t("runtime.expand_code"))}" data-expanded-label="${escapeHtml(t("runtime.collapse_code"))}">${escapeHtml(t("runtime.expand_code"))}</button>`
+                    : "") +
                 `<button class="runtime-code-action" type="button" data-code-copy>${escapeHtml(t("runtime.copy_code"))}</button>` +
                 (canRunHtml
                     ? `<button class="runtime-code-action primary" type="button" data-code-run-html>${escapeHtml(t("runtime.run_html"))}</button>`
                     : "") +
                 `</span>` +
                 `</div>` +
-                `<pre>` +
+                `<pre class="runtime-code-body">` +
                 `<code class="${languageClass.trim()}">` +
                 `${highlightCodeBlock(codeText, normalizedLanguage)}` +
                 `</code></pre>` +
@@ -2658,6 +2669,24 @@
             return;
         }
         showToast(t("runtime.run_html"), "info", 1200);
+    }
+
+    function toggleCodeBlock(block) {
+        if (!block) return;
+        const nextCollapsed = !block.classList.contains("is-collapsed");
+        block.classList.toggle("is-collapsed", nextCollapsed);
+        const button = block.querySelector("[data-code-toggle]");
+        if (button) {
+            button.textContent = nextCollapsed
+                ? button.getAttribute("data-collapsed-label") ||
+                  t("runtime.expand_code")
+                : button.getAttribute("data-expanded-label") ||
+                  t("runtime.collapse_code");
+            button.setAttribute(
+                "aria-expanded",
+                nextCollapsed ? "false" : "true",
+            );
+        }
     }
 
     function buildHtmlRunnerDocument(source) {
@@ -4083,6 +4112,12 @@
             chatLog.addEventListener("click", (event) => {
                 const target = event.target;
                 if (!(target instanceof Element)) return;
+                const toggleButton = target.closest("[data-code-toggle]");
+                if (toggleButton) {
+                    const block = toggleButton.closest(".runtime-code-block");
+                    if (block) toggleCodeBlock(block);
+                    return;
+                }
                 const copyButton = target.closest("[data-code-copy]");
                 if (copyButton) {
                     const block = copyButton.closest(".runtime-code-block");

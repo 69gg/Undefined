@@ -427,6 +427,12 @@ def test_webchat_frontend_highlights_markdown_code_blocks() -> None:
     assert "runtime-code-block" in source
     assert "runtime-code-toolbar" in source
     assert "runtime-code-action" in source
+    assert "CODE_COLLAPSE_LINE_THRESHOLD = 8" in source
+    assert "function shouldCollapseCodeBlock" in source
+    assert "function toggleCodeBlock" in source
+    assert "data-code-toggle" in source
+    assert "runtime.expand_code" in source
+    assert "runtime.collapse_code" in source
     assert "data-code-copy" in source
     assert "data-code-run-html" in source
     assert "function isRunnableHtmlCode" in source
@@ -435,10 +441,13 @@ def test_webchat_frontend_highlights_markdown_code_blocks() -> None:
     assert "navigator.clipboard.writeText" in source
     assert 'document.execCommand("copy")' in source
     assert 'chatLog.addEventListener("click"' in source
+    assert 'target.closest("[data-code-toggle]")' in source
     assert "highlightCodeBlock(codeText, normalizedLanguage)" in source
     assert "language-${escapeHtml(normalizedLanguage)}" in source
     assert 'runtime.copy_code": "复制"' in I18N_JS.read_text(encoding="utf-8")
     assert 'runtime.run_html": "运行"' in I18N_JS.read_text(encoding="utf-8")
+    assert 'runtime.expand_code": "展开"' in I18N_JS.read_text(encoding="utf-8")
+    assert 'runtime.collapse_code": "折叠"' in I18N_JS.read_text(encoding="utf-8")
     assert "/static/js/vendor/highlight.min.js" in template
     assert "/static/css/highlight-github.min.css" in template
     assert Path("src/Undefined/webui/static/js/vendor/highlight.min.js").is_file()
@@ -446,9 +455,18 @@ def test_webchat_frontend_highlights_markdown_code_blocks() -> None:
     assert Path("src/Undefined/webui/static/css/highlight-github.min.css").is_file()
 
     assert ".runtime-code-toolbar" in css
+    assert (
+        "position: sticky;"
+        in css.split(".runtime-code-toolbar", 1)[1].split(
+            ".runtime-code-language",
+            1,
+        )[0]
+    )
     assert ".runtime-code-language" in css
     assert ".runtime-code-action" in css
     assert ".runtime-code-action.primary" in css
+    assert ".runtime-code-block.is-collapsed .runtime-code-body" in css
+    assert ".runtime-code-block.is-collapsed .runtime-code-body::after" in css
     assert ".runtime-chat-content.markdown pre code.hljs" in css
     assert ".runtime-code-block .hljs-keyword" in css
     assert ".runtime-code-block .hljs-string" in css
@@ -484,6 +502,13 @@ def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
     assert "function closeHtmlRunner" in source
     assert "function handleHtmlRunnerPicked" in source
     assert "frame.srcdoc = injectHtmlRunnerPicker(html)" in source
+    assert (
+        "sanitizeHtmlSnippet"
+        not in source.split(
+            "function buildHtmlRunnerDocument",
+            1,
+        )[1].split("function htmlRunnerPickerScript", 1)[0]
+    )
     assert 'parent.postMessage({ type: "webui-html-picked", html }, "*")' in source
     assert "data-webui-html-picker-overlay" in source
     assert "data-webui-html-picker-label" in source
@@ -503,10 +528,28 @@ def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
     assert ".runtime-html-runner-panel" in css
     assert ".runtime-html-runner-toolbar" in css
     assert ".runtime-html-runner-frame" in css
+    runner_css = css.split(".runtime-html-runner {", 1)[1].split(
+        ".runtime-html-runner[hidden]",
+        1,
+    )[0]
+    runner_panel_css = css.split(".runtime-html-runner-panel {", 1)[1].split(
+        ".runtime-html-runner-toolbar",
+        1,
+    )[0]
+    assert "resize: both;" in runner_css
+    assert "overflow: auto;" in runner_css
+    assert "pointer-events: auto;" in runner_css
+    assert "grid-template-rows: auto minmax(0, 1fr);" in runner_panel_css
+    assert "width: 100%;" in runner_panel_css
+    assert "height: 100%;" in runner_panel_css
     assert ".runtime-html-runner-btn.is-active" in css
     assert ".runtime-html-runner.is-picking .runtime-html-runner-panel" in css
     assert "@keyframes runtime-html-runner-in" in css
     assert ".runtime-html-runner" in responsive_css
+    assert (
+        "max-height: calc(100dvh - 24px - env(safe-area-inset-bottom));"
+        in responsive_css
+    )
     assert "runtime.html_ready" in i18n
     assert "runtime.pick_html" in i18n
 
