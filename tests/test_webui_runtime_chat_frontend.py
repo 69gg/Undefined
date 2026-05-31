@@ -511,20 +511,33 @@ def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
     assert "htmlRunnerSource" in source
     assert "htmlRunnerPickMode" in source
     assert "htmlRunnerResize" in source
+    assert "htmlRunnerDrag" in source
     assert "HTML_RUNNER_MIN_WIDTH = 360" in source
     assert "HTML_RUNNER_MIN_HEIGHT = 280" in source
+    assert "const minWidth = Math.min(HTML_RUNNER_MIN_WIDTH, viewportWidth)" in source
+    assert (
+        "const minHeight = Math.min(HTML_RUNNER_MIN_HEIGHT, viewportHeight)" in source
+    )
     assert "function buildHtmlRunnerDocument" in source
     assert "function htmlRunnerPickerScript" in source
     assert "function injectHtmlRunnerPicker" in source
     assert "function syncHtmlRunnerPickModeToFrame" in source
     assert "function setHtmlRunnerPickMode" in source
+    assert "function clampHtmlRunnerPosition" in source
+    assert "function setHtmlRunnerRect" in source
     assert "function setHtmlRunnerSize" in source
+    assert "function ensureHtmlRunnerInitialRect" in source
     assert "function startHtmlRunnerResize" in source
     assert "function moveHtmlRunnerResize" in source
     assert "function stopHtmlRunnerResize" in source
+    assert "function startHtmlRunnerDrag" in source
+    assert "function moveHtmlRunnerDrag" in source
+    assert "function stopHtmlRunnerDrag" in source
+    assert "function clampVisibleHtmlRunner" in source
     assert "function openHtmlRunner" in source
     assert "function closeHtmlRunner" in source
     assert "function handleHtmlRunnerPicked" in source
+    assert "ensureHtmlRunnerInitialRect(runner)" in source
     assert "frame.srcdoc = injectHtmlRunnerPicker(html)" in source
     assert (
         "sanitizeHtmlSnippet"
@@ -549,11 +562,17 @@ def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
     assert "btnRuntimeHtmlClose" in source
     assert "btnRuntimeHtmlPick" in source
     assert "runtimeHtmlRunnerResize" in source
+    assert ".runtime-html-runner-toolbar" in source
     assert "setHtmlRunnerPickMode(!runtimeState.htmlRunnerPickMode)" in source
     assert "syncHtmlRunnerPickModeToFrame()" in source
     assert "startHtmlRunnerResize" in source
     assert "moveHtmlRunnerResize" in source
     assert "stopHtmlRunnerResize" in source
+    assert "startHtmlRunnerDrag" in source
+    assert "moveHtmlRunnerDrag" in source
+    assert "stopHtmlRunnerDrag" in source
+    assert "setHtmlRunnerRect(rect.left, rect.top, rect.width, rect.height)" in source
+    assert 'window.addEventListener("resize", clampVisibleHtmlRunner)' in source
     assert "setPointerCapture(pointerId)" in source
     assert "releasePointerCapture(state.pointerId)" in source
     assert 'button.setAttribute("aria-pressed", active ? "true" : "false")' in source
@@ -571,13 +590,17 @@ def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
         1,
     )[0]
     assert "resize: both;" not in runner_css
+    assert "right:" not in runner_css
+    assert "bottom:" not in runner_css
     assert "overflow: visible;" in runner_css
     assert "pointer-events: auto;" in runner_css
+    assert "height: 360px;" in runner_css
     assert "grid-template-rows: auto minmax(0, 1fr);" in runner_panel_css
     assert "width: 100%;" in runner_panel_css
     assert "height: 100%;" in runner_panel_css
     assert ".runtime-html-runner-resize" in css
     assert ".runtime-html-runner.is-resizing" in css
+    assert ".runtime-html-runner.is-dragging" in css
     assert (
         "pointer-events: none;"
         in css.split(
@@ -585,10 +608,30 @@ def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
             1,
         )[1].split(".runtime-html-runner-toolbar", 1)[0]
     )
+    assert (
+        "pointer-events: none;"
+        in css.split(
+            ".runtime-html-runner.is-dragging .runtime-html-runner-frame",
+            1,
+        )[1].split(".runtime-html-runner-toolbar", 1)[0]
+    )
+    toolbar_css = css.split(".runtime-html-runner-toolbar {", 1)[1].split(
+        ".runtime-html-runner-actions",
+        1,
+    )[0]
+    assert "cursor: move;" in toolbar_css
+    assert "touch-action: none;" in toolbar_css
+    assert ".runtime-html-runner-actions,\n.runtime-html-runner-actions *" in css
+    assert ".runtime-html-runner-actions button" in css
     assert ".runtime-html-runner-btn.is-active" in css
     assert ".runtime-html-runner.is-picking .runtime-html-runner-panel" in css
     assert "@keyframes runtime-html-runner-in" in css
     assert ".runtime-html-runner" in responsive_css
+    responsive_runner_css = responsive_css.split(".runtime-html-runner {", 1)[1].split(
+        ".runtime-html-runner-panel", 1
+    )[0]
+    assert "right:" not in responsive_runner_css
+    assert "bottom:" not in responsive_runner_css
     assert (
         "max-height: calc(100dvh - 24px - env(safe-area-inset-bottom));"
         in responsive_css

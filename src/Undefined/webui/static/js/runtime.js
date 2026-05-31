@@ -31,6 +31,7 @@
         htmlRunnerSource: "",
         htmlRunnerPickMode: false,
         htmlRunnerResize: null,
+        htmlRunnerDrag: null,
         probeTimer: null,
         queryBusy: {
             memory: false,
@@ -2863,29 +2864,84 @@
     }
 
     function clampHtmlRunnerSize(width, height) {
-        const maxWidth = Math.max(
-            HTML_RUNNER_MIN_WIDTH,
+        const viewportWidth = Math.max(
+            0,
             window.innerWidth - HTML_RUNNER_VIEWPORT_MARGIN * 2,
         );
-        const maxHeight = Math.max(
-            HTML_RUNNER_MIN_HEIGHT,
+        const viewportHeight = Math.max(
+            0,
             window.innerHeight - HTML_RUNNER_VIEWPORT_MARGIN * 2,
         );
+        const minWidth = Math.min(HTML_RUNNER_MIN_WIDTH, viewportWidth);
+        const minHeight = Math.min(HTML_RUNNER_MIN_HEIGHT, viewportHeight);
+        const maxWidth = Math.max(minWidth, viewportWidth);
+        const maxHeight = Math.max(minHeight, viewportHeight);
         return {
-            width: Math.min(Math.max(width, HTML_RUNNER_MIN_WIDTH), maxWidth),
-            height: Math.min(
-                Math.max(height, HTML_RUNNER_MIN_HEIGHT),
-                maxHeight,
+            width: Math.min(Math.max(width, minWidth), maxWidth),
+            height: Math.min(Math.max(height, minHeight), maxHeight),
+        };
+    }
+
+    function clampHtmlRunnerPosition(left, top, width, height) {
+        const maxLeft = Math.max(
+            HTML_RUNNER_VIEWPORT_MARGIN,
+            window.innerWidth - width - HTML_RUNNER_VIEWPORT_MARGIN,
+        );
+        const maxTop = Math.max(
+            HTML_RUNNER_VIEWPORT_MARGIN,
+            window.innerHeight - height - HTML_RUNNER_VIEWPORT_MARGIN,
+        );
+        return {
+            left: Math.min(
+                Math.max(Number(left), HTML_RUNNER_VIEWPORT_MARGIN),
+                maxLeft,
+            ),
+            top: Math.min(
+                Math.max(Number(top), HTML_RUNNER_VIEWPORT_MARGIN),
+                maxTop,
             ),
         };
+    }
+
+    function setHtmlRunnerRect(left, top, width, height) {
+        const runner = get("runtimeHtmlRunner");
+        if (!runner) return;
+        const size = clampHtmlRunnerSize(Number(width), Number(height));
+        const position = clampHtmlRunnerPosition(
+            Number(left),
+            Number(top),
+            size.width,
+            size.height,
+        );
+        runner.style.left = `${position.left}px`;
+        runner.style.top = `${position.top}px`;
+        runner.style.width = `${size.width}px`;
+        runner.style.height = `${size.height}px`;
     }
 
     function setHtmlRunnerSize(width, height) {
         const runner = get("runtimeHtmlRunner");
         if (!runner) return;
-        const size = clampHtmlRunnerSize(Number(width), Number(height));
-        runner.style.width = `${size.width}px`;
-        runner.style.height = `${size.height}px`;
+        const rect = runner.getBoundingClientRect();
+        setHtmlRunnerRect(rect.left, rect.top, width, height);
+    }
+
+    function ensureHtmlRunnerInitialRect(runner) {
+        if (!runner || (runner.style.left && runner.style.top)) return;
+        const initialWidth = Math.min(
+            760,
+            window.innerWidth - HTML_RUNNER_VIEWPORT_MARGIN * 2,
+        );
+        const initialHeight = Math.min(
+            360,
+            window.innerHeight - HTML_RUNNER_VIEWPORT_MARGIN * 2,
+        );
+        setHtmlRunnerRect(
+            window.innerWidth - initialWidth - 32,
+            window.innerHeight - initialHeight - 32,
+            initialWidth,
+            initialHeight,
+        );
     }
 
     function openHtmlRunner(source, options = {}) {
@@ -2899,6 +2955,7 @@
         runtimeState.htmlRunnerPickMode = false;
         runner.hidden = false;
         runner.classList.remove("is-picking");
+        ensureHtmlRunnerInitialRect(runner);
         const button = get("btnRuntimeHtmlPick");
         if (button) {
             button.textContent = t("runtime.pick_html");
@@ -2907,10 +2964,6 @@
         }
         if (meta) {
             meta.textContent = String(options.language || "html").toUpperCase();
-        }
-        if (!runner.style.width || !runner.style.height) {
-            const rect = runner.getBoundingClientRect();
-            setHtmlRunnerSize(rect.width || 760, rect.height || 320);
         }
         frame.srcdoc = injectHtmlRunnerPicker(html);
         showToast(t("runtime.html_ready"), "success", 1200);
@@ -2942,6 +2995,7 @@
         const runner = get("runtimeHtmlRunner");
         if (!runner) return;
         event.preventDefault();
+        event.stopPropagation();
         const pointerId = event.pointerId;
         const rect = runner.getBoundingClientRect();
         runtimeState.htmlRunnerResize = {
@@ -2978,6 +3032,61 @@
             handle.releasePointerCapture(state.pointerId);
         }
         runtimeState.htmlRunnerResize = null;
+    }
+
+    function startHtmlRunnerDrag(event) {
+        const target = event.target;
+        if (target instanceof Element && target.closest("button")) return;
+        const runner = get("runtimeHtmlRunner");
+        if (!runner) return;
+        event.preventDefault();
+        const pointerId = event.pointerId;
+        const rect = runner.getBoundingClientRect();
+        runtimeState.htmlRunnerDrag = {
+            pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            startLeft: rect.left,
+            startTop: rect.top,
+            startWidth: rect.width,
+            startHeight: rect.height,
+        };
+        runner.classList.add("is-dragging");
+        const handle = event.currentTarget;
+        if (handle && typeof handle.setPointerCapture === "function") {
+            handle.setPointerCapture(pointerId);
+        }
+    }
+
+    function moveHtmlRunnerDrag(event) {
+        const state = runtimeState.htmlRunnerDrag;
+        if (!state || state.pointerId !== event.pointerId) return;
+        event.preventDefault();
+        setHtmlRunnerRect(
+            state.startLeft + event.clientX - state.startX,
+            state.startTop + event.clientY - state.startY,
+            state.startWidth,
+            state.startHeight,
+        );
+    }
+
+    function stopHtmlRunnerDrag(event) {
+        const state = runtimeState.htmlRunnerDrag;
+        if (!state || state.pointerId !== event.pointerId) return;
+        const runner = get("runtimeHtmlRunner");
+        if (runner) runner.classList.remove("is-dragging");
+        const handle = event.currentTarget;
+        if (handle && typeof handle.releasePointerCapture === "function") {
+            handle.releasePointerCapture(state.pointerId);
+        }
+        runtimeState.htmlRunnerDrag = null;
+    }
+
+    function clampVisibleHtmlRunner() {
+        const runner = get("runtimeHtmlRunner");
+        if (!runner || runner.hidden) return;
+        const rect = runner.getBoundingClientRect();
+        setHtmlRunnerRect(rect.left, rect.top, rect.width, rect.height);
     }
 
     function readFileAsDataUrl(file) {
@@ -4287,6 +4396,24 @@
                 setHtmlRunnerPickMode(!runtimeState.htmlRunnerPickMode);
             });
         }
+        const htmlRunnerToolbar = document.querySelector(
+            ".runtime-html-runner-toolbar",
+        );
+        if (htmlRunnerToolbar) {
+            htmlRunnerToolbar.addEventListener(
+                "pointerdown",
+                startHtmlRunnerDrag,
+            );
+            htmlRunnerToolbar.addEventListener(
+                "pointermove",
+                moveHtmlRunnerDrag,
+            );
+            htmlRunnerToolbar.addEventListener("pointerup", stopHtmlRunnerDrag);
+            htmlRunnerToolbar.addEventListener(
+                "pointercancel",
+                stopHtmlRunnerDrag,
+            );
+        }
         const htmlRunnerFrame = get("runtimeHtmlRunnerFrame");
         if (htmlRunnerFrame) {
             htmlRunnerFrame.addEventListener("load", () => {
@@ -4324,6 +4451,7 @@
             if (data.type !== "webui-html-picked") return;
             handleHtmlRunnerPicked(data.html);
         });
+        window.addEventListener("resize", clampVisibleHtmlRunner);
     }
 
     const PROBE_REFRESH_INTERVAL = 5000;

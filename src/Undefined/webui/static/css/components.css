@@ -1714,10 +1714,9 @@
 }
 .runtime-html-runner {
   position: fixed;
-  right: clamp(16px, 3vw, 36px);
-  bottom: calc(16px + env(safe-area-inset-bottom));
   z-index: 118;
   width: min(760px, calc(100vw - 32px));
+  height: 360px;
   max-width: calc(100vw - 32px);
   max-height: calc(100dvh - 32px - env(safe-area-inset-bottom));
   min-width: 360px;
@@ -1750,6 +1749,14 @@
 .runtime-html-runner.is-resizing .runtime-html-runner-frame {
   pointer-events: none;
 }
+.runtime-html-runner.is-dragging,
+.runtime-html-runner.is-dragging * {
+  cursor: move !important;
+  user-select: none;
+}
+.runtime-html-runner.is-dragging .runtime-html-runner-frame {
+  pointer-events: none;
+}
 .runtime-html-runner-toolbar {
   display: flex;
   align-items: center;
@@ -1760,6 +1767,15 @@
   padding: 8px 10px 8px 14px;
   border-bottom: 1px solid var(--border-color);
   background: color-mix(in srgb, var(--bg-app) 64%, var(--bg-card));
+  cursor: move;
+  touch-action: none;
+}
+.runtime-html-runner-actions,
+.runtime-html-runner-actions * {
+  cursor: auto;
+}
+.runtime-html-runner-actions button {
+  cursor: pointer;
 }
 .runtime-html-runner-title {
   display: inline-flex;
