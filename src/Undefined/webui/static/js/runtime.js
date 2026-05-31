@@ -506,11 +506,22 @@
         );
     }
 
+    function hasMarkdownBlockquote(content) {
+        return String(content || "")
+            .split(/\r?\n/)
+            .some((line) => /^\s*>/.test(line));
+    }
+
+    function shouldRenderChatMarkdown(role, content) {
+        return role !== "user" || hasMarkdownBlockquote(content);
+    }
+
     function appendChatMessage(role, content, options = {}) {
         const log = get("runtimeChatLog");
         if (!log) return null;
         const isBot = role !== "user";
-        const contentClass = isBot
+        const useMarkdown = shouldRenderChatMarkdown(role, content);
+        const contentClass = useMarkdown
             ? "runtime-chat-content markdown"
             : "runtime-chat-content";
         const item = document.createElement("div");
@@ -520,7 +531,7 @@
         const roleHtml = isBot
             ? `<span class="runtime-chat-role-label">AI</span><span class="runtime-chat-stage" hidden></span>`
             : `<span class="runtime-chat-role-label">You</span>`;
-        item.innerHTML = `<div class="runtime-chat-role">${roleHtml}</div><div class="${contentClass}">${renderChatContent(content, isBot)}</div>`;
+        item.innerHTML = `<div class="runtime-chat-role">${roleHtml}</div><div class="${contentClass}">${renderChatContent(content, useMarkdown)}</div>`;
         if (isBot) {
             const roleEl = item.querySelector(".runtime-chat-role");
             if (roleEl) {
@@ -620,8 +631,9 @@
         if (!item) return;
         const contentEl = item.querySelector(".runtime-chat-content");
         if (!contentEl) return;
-        const isBot = role !== "user";
-        contentEl.innerHTML = renderChatContent(content, isBot);
+        const useMarkdown = shouldRenderChatMarkdown(role, content);
+        contentEl.classList.toggle("markdown", useMarkdown);
+        contentEl.innerHTML = renderChatContent(content, useMarkdown);
     }
 
     function currentChatJobId() {
@@ -698,11 +710,11 @@
         const timeline = ensureTimelineNodeContainer(item);
         if (!timeline) return null;
         const node = document.createElement("div");
-        const isBot = role !== "user";
-        node.className = isBot
+        const useMarkdown = shouldRenderChatMarkdown(role, text);
+        node.className = useMarkdown
             ? "runtime-chat-content markdown"
             : "runtime-chat-content";
-        node.innerHTML = renderChatContent(text, isBot);
+        node.innerHTML = renderChatContent(text, useMarkdown);
         timeline.appendChild(node);
         appendRawChatContent(item, text);
         return node;
@@ -891,7 +903,10 @@
             ? baseMs
             : baseMs + Math.max(0, monotonicNowMs() - receivedAtMs);
         const duration = formatDurationMs(elapsedMs);
-        stageEl.textContent = duration ? `${label} · ${duration}` : label;
+        const nextText = duration ? `${label} · ${duration}` : label;
+        if (stageEl.textContent !== nextText) {
+            stageEl.textContent = nextText;
+        }
     }
 
     function toolStatusLabel(block) {
@@ -1075,7 +1090,7 @@
         const kindClass = block.isAgent ? " is-agent" : " is-tool";
         return (
             `<details class="runtime-tool-block ${escapeHtml(block.status)}${kindClass}${hintClass}"${openAttr}>` +
-            `<summary><span class="runtime-tool-summary-main">${titleHtml}</span><em class="runtime-tool-status">${escapeHtml(metaLabel)}</em><span class="runtime-tool-kind">${escapeHtml(label)}</span></summary>` +
+            `<summary><span class="runtime-tool-summary-main">${titleHtml}</span><em class="runtime-tool-status" data-tool-status-for="${escapeHtml(callId)}">${escapeHtml(metaLabel)}</em><span class="runtime-tool-kind">${escapeHtml(label)}</span></summary>` +
             args +
             childHtml +
             result +
@@ -1215,8 +1230,13 @@
         const durationLabel = formatDurationMs(runningDurationMs(block));
         const selector = `[data-tool-duration-for="${CSS.escape(identity)}"]`;
         document.querySelectorAll(selector).forEach((node) => {
-            node.textContent = durationLabel;
-            node.hidden = !durationLabel;
+            if (node.textContent !== durationLabel) {
+                node.textContent = durationLabel;
+            }
+            const nextHidden = !durationLabel;
+            if (node.hidden !== nextHidden) {
+                node.hidden = nextHidden;
+            }
         });
     }
 
@@ -1380,6 +1400,40 @@
             .join("\u001f");
     }
 
+    function updateToolMetaDisplay(block) {
+        if (!block) return;
+        const identity = toolCallIdentity(block);
+        if (!identity) return;
+        updateToolDurationDisplay(block);
+        const statusLabel = toolStatusLabel(block);
+        const stageLabel = block.currentStage
+            ? chatStageLabel(block.currentStage)
+            : "";
+        const showLiveAgentStage =
+            block.isAgent &&
+            stageLabel &&
+            !["done", "error", "cancelled"].includes(block.status);
+        const metaLabel = showLiveAgentStage ? stageLabel : statusLabel;
+        const selector = `[data-tool-status-for="${CSS.escape(identity)}"]`;
+        document.querySelectorAll(selector).forEach((node) => {
+            if (node.textContent !== metaLabel) {
+                node.textContent = metaLabel;
+            }
+        });
+    }
+
+    function renderToolNodeIfChanged(node, block) {
+        if (!node || !block) return null;
+        const nextSignature = toolRenderSignature(block);
+        if (node.dataset.renderSignature === nextSignature) {
+            updateToolMetaDisplay(block);
+            return node;
+        }
+        node.innerHTML = renderToolBlock(block);
+        node.dataset.renderSignature = nextSignature;
+        return node;
+    }
+
     function appendToolTimelineEntry(parent, entry) {
         if (!parent || !entry) return;
         const timeline = Array.isArray(parent.timeline) ? parent.timeline : [];
@@ -1495,8 +1549,7 @@
             node.dataset.toolKey = rootKey;
             timeline.appendChild(node);
         }
-        node.innerHTML = renderToolBlock(root);
-        return node;
+        return renderToolNodeIfChanged(node, root);
     }
 
     function scheduleToolAutoCollapse(item, blocks, key, block) {
@@ -1534,6 +1587,7 @@
         ).trim();
         if (parentKey && blocks.has(parentKey)) {
             const parent = blocks.get(parentKey);
+            const previousParentSignature = toolRenderSignature(parent);
             const blockIdentity = toolCallIdentity(block);
             const siblings = Array.isArray(parent.children)
                 ? parent.children.filter(
@@ -1542,20 +1596,20 @@
                 : [];
             parent.children = [...siblings, block];
             appendToolTimelineEntry(parent, { type: "call", call: block });
+            const nextParentSignature = toolRenderSignature(parent);
             const parentNode = timeline.querySelector(
                 `[data-tool-key="${CSS.escape(parentKey)}"]`,
             );
             if (parentNode) {
-                const nextSignature = toolRenderSignature(parent);
                 if (
                     status === "tool_snapshot" &&
-                    previousSignature &&
-                    previousSignature === nextSignature
+                    previousParentSignature === nextParentSignature
                 ) {
-                    updateToolDurationDisplay(block);
+                    updateToolMetaDisplay(block);
+                    updateToolMetaDisplay(parent);
                     return parentNode;
                 }
-                parentNode.innerHTML = renderToolBlock(parent);
+                renderToolNodeIfChanged(parentNode, parent);
                 if (isToolLifecycleEnd(status)) {
                     scheduleToolAutoCollapse(item, blocks, key, block);
                 }
@@ -1567,16 +1621,19 @@
                 `[data-tool-key="${CSS.escape(rootKey)}"]`,
             );
             if (root && rootNode) {
-                const nextSignature = toolRenderSignature(root);
+                const previousRootSignature =
+                    rootNode.dataset.renderSignature ||
+                    toolRenderSignature(root);
+                const nextRootSignature = toolRenderSignature(root);
                 if (
                     status === "tool_snapshot" &&
-                    previousSignature &&
-                    previousSignature === nextSignature
+                    previousRootSignature === nextRootSignature
                 ) {
-                    updateToolDurationDisplay(block);
+                    updateToolMetaDisplay(block);
+                    updateToolMetaDisplay(root);
                     return rootNode;
                 }
-                rootNode.innerHTML = renderToolBlock(root);
+                renderToolNodeIfChanged(rootNode, root);
                 if (isToolLifecycleEnd(status)) {
                     scheduleToolAutoCollapse(item, blocks, key, block);
                 }
@@ -1595,11 +1652,11 @@
         if (status === "tool_snapshot" && previousSignature) {
             const nextSignature = toolRenderSignature(block);
             if (previousSignature === nextSignature) {
-                updateToolDurationDisplay(block);
+                updateToolMetaDisplay(block);
                 return node;
             }
         }
-        node.innerHTML = renderToolBlock(block);
+        renderToolNodeIfChanged(node, block);
         if (isToolLifecycleEnd(status)) {
             scheduleToolAutoCollapse(item, blocks, key, block);
         }
@@ -1657,6 +1714,7 @@
         if (!timeline) return;
         if (parentKey && blocks.has(parentKey)) {
             const parent = blocks.get(parentKey);
+            const previousParentSignature = toolRenderSignature(parent);
             const blockIdentity = toolCallIdentity(block);
             const siblings = Array.isArray(parent.children)
                 ? parent.children.filter(
@@ -1665,7 +1723,13 @@
                 : [];
             parent.children = [...siblings, block];
             appendToolTimelineEntry(parent, { type: "call", call: block });
-            redrawToolTimelineNode(item, blocks, parentKey);
+            const nextParentSignature = toolRenderSignature(parent);
+            if (previousParentSignature === nextParentSignature) {
+                updateToolMetaDisplay(block);
+                updateToolMetaDisplay(parent);
+            } else {
+                redrawToolTimelineNode(item, blocks, parentKey);
+            }
         } else {
             let node = timeline.querySelector(
                 `[data-tool-key="${CSS.escape(key)}"]`,
@@ -1676,7 +1740,7 @@
                 node.dataset.toolKey = key;
                 timeline.appendChild(node);
             }
-            node.innerHTML = renderToolBlock(block);
+            renderToolNodeIfChanged(node, block);
         }
         scrollChatToBottomSoon();
     }
@@ -2566,6 +2630,19 @@
                 `${highlightCodeBlock(codeText, normalizedLanguage)}` +
                 `</code></pre>` +
                 `</div>`
+            );
+        };
+        renderer.blockquote = ({ tokens }) => {
+            const parser = renderer.parser || marked.Parser;
+            const body =
+                parser && typeof parser.parse === "function"
+                    ? parser.parse(tokens || [])
+                    : "";
+            return (
+                `<details class="runtime-quote-block">` +
+                `<summary><span>${escapeHtml(t("runtime.quote"))}</span></summary>` +
+                `<div class="runtime-quote-body">${body}</div>` +
+                `</details>`
             );
         };
         renderer.link = ({ href, title, tokens }) => {

@@ -147,6 +147,10 @@ def test_webchat_frontend_renders_chat_as_event_timeline() -> None:
     )
     assert "topLevelToolKey(blocks, parentKey)" in timeline_helper
     assert "runtime-tool-children" in RUNTIME_CSS.read_text(encoding="utf-8")
+    assert "function renderToolNodeIfChanged" in source
+    assert "node.dataset.renderSignature === nextSignature" in source
+    assert "updateToolMetaDisplay(block)" in source
+    assert "data-tool-status-for" in source
 
 
 def test_webchat_frontend_prefers_backend_history_timeline() -> None:
@@ -180,6 +184,33 @@ def test_webchat_frontend_renders_nested_tool_timeline() -> None:
     assert "runtime-tool-reveal" in css
     assert ".runtime-tool-block::before" in css
     assert ".runtime-tool-block summary::before" in css
+
+
+def test_webchat_tool_snapshots_do_not_rerender_unchanged_blocks() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    live_update_helper = source.split("function upsertTimelineToolBlock", 1)[1].split(
+        "function appendNestedTimelineMessage", 1
+    )[0]
+    agent_stage_helper = source.split("function upsertAgentStageBlock", 1)[1].split(
+        "function historyWebchatEvents",
+        1,
+    )[0]
+    history_helper = source.split("function renderHistoryTimeline", 1)[1].split(
+        "function appendHistoryChatItem",
+        1,
+    )[0]
+
+    assert "previousParentSignature === nextParentSignature" in live_update_helper
+    assert "previousRootSignature === nextRootSignature" in live_update_helper
+    assert 'status === "tool_snapshot"' in live_update_helper
+    assert "renderToolNodeIfChanged(parentNode, parent)" in live_update_helper
+    assert "renderToolNodeIfChanged(rootNode, root)" in live_update_helper
+    assert "renderToolNodeIfChanged(node, block)" in live_update_helper
+    assert "previousParentSignature === nextParentSignature" in agent_stage_helper
+    assert "renderToolNodeIfChanged(node, block)" in agent_stage_helper
+    assert "node.innerHTML = renderToolBlock" not in live_update_helper
+    assert "node.innerHTML = renderToolBlock" not in agent_stage_helper
+    assert "node.innerHTML = renderToolBlock" in history_helper
 
 
 def test_webchat_frontend_updates_agent_stage_summary_without_timeline_noise() -> None:
@@ -407,6 +438,40 @@ def test_webchat_frontend_sanitizes_markdown_html_and_unsafe_links() -> None:
     assert 'rel="noreferrer"' in render_helper
     assert "renderer.image" in render_helper
     assert "renderer: createSafeMarkedRenderer()" in source
+
+
+def test_webchat_markdown_quotes_render_as_collapsible_scroll_blocks() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    css = RUNTIME_CSS.read_text(encoding="utf-8")
+    renderer_helper = source.split("function createSafeMarkedRenderer", 1)[1].split(
+        "renderer.link",
+        1,
+    )[0]
+    append_helper = source.split("function appendChatMessage", 1)[1].split(
+        "function formatDurationMs",
+        1,
+    )[0]
+    update_helper = source.split("function updateChatMessage", 1)[1].split(
+        "function currentChatJobId",
+        1,
+    )[0]
+    quote_css = css.split(".runtime-quote-block", 1)[1].split(
+        ".runtime-chat-content.markdown table",
+        1,
+    )[0]
+
+    assert "function hasMarkdownBlockquote" in source
+    assert "function shouldRenderChatMarkdown" in source
+    assert 'role !== "user" || hasMarkdownBlockquote(content)' in source
+    assert "renderer.blockquote = ({ tokens }) =>" in renderer_helper
+    assert '<details class="runtime-quote-block">' in renderer_helper
+    assert '<div class="runtime-quote-body">' in renderer_helper
+    assert "shouldRenderChatMarkdown(role, content)" in append_helper
+    assert "renderChatContent(content, useMarkdown)" in append_helper
+    assert 'contentEl.classList.toggle("markdown", useMarkdown)' in update_helper
+    assert "max-height: min(28vh, 220px);" in quote_css
+    assert "overflow: auto;" in quote_css
+    assert ".runtime-quote-block[open] summary::before" in css
 
 
 def test_webchat_frontend_renders_standalone_html_without_markdown_code_blocks() -> (
