@@ -852,25 +852,13 @@
   color: #fff;
 }
 .runtime-code-block.is-collapsed .runtime-code-body {
-  max-height: 9.2em;
-  overflow: hidden;
+  height: 9.2em;
+  overflow: auto;
   position: relative;
+  scrollbar-gutter: stable;
 }
 .runtime-code-block.is-collapsed .runtime-code-body::after {
-  content: "";
-  position: sticky;
-  display: block;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 2.4em;
-  margin-top: -2.4em;
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    color-mix(in srgb, var(--bg-app) 92%, var(--bg-deep))
-  );
-  pointer-events: none;
+  display: none;
 }
 .runtime-chat-content.markdown pre {
   margin: 0;

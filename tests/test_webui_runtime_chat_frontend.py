@@ -467,6 +467,21 @@ def test_webchat_frontend_highlights_markdown_code_blocks() -> None:
     assert ".runtime-code-action.primary" in css
     assert ".runtime-code-block.is-collapsed .runtime-code-body" in css
     assert ".runtime-code-block.is-collapsed .runtime-code-body::after" in css
+    collapsed_css = css.split(
+        ".runtime-code-block.is-collapsed .runtime-code-body",
+        1,
+    )[1].split(
+        ".runtime-code-block.is-collapsed .runtime-code-body::after",
+        1,
+    )[0]
+    collapsed_after_css = css.split(
+        ".runtime-code-block.is-collapsed .runtime-code-body::after",
+        1,
+    )[1].split(".runtime-chat-content.markdown pre", 1)[0]
+    assert "height: 9.2em;" in collapsed_css
+    assert "overflow: auto;" in collapsed_css
+    assert "scrollbar-gutter: stable;" in collapsed_css
+    assert "display: none;" in collapsed_after_css
     assert ".runtime-chat-content.markdown pre code.hljs" in css
     assert ".runtime-code-block .hljs-keyword" in css
     assert ".runtime-code-block .hljs-string" in css
