@@ -1575,6 +1575,7 @@ async def run_webui_chat(
 这是一条来自 WebUI 控制台的会话请求。
 会话身份：虚拟用户 system(42)。
 权限等级：superadmin（你可按最高管理权限处理）。
+WebUI 支持完整 Markdown 渲染和简单安全 HTML。复杂 HTML、包含 JS/CSS 的页面、可运行示例或较长代码必须放进 fenced code block；完整 HTML 页面请优先使用 ```html 代码框，方便 WebUI 的运行按钮预览。
 请正常进行私聊对话；如果需要结束会话，调用 end 工具。"""
     virtual_sender = _WebUIVirtualSender(
         _VIRTUAL_USER_ID, send_output, onebot=ctx.onebot

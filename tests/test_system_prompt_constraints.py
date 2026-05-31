@@ -40,6 +40,22 @@ def test_naga_prompt_requires_scope_before_naga_analysis() -> None:
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_describe_webui_markdown_and_html_output(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    required_snippets = [
+        "WebUI Markdown 与 HTML 输出",
+        'location="WebUI私聊"',
+        "WebUI 支持完整 Markdown 渲染",
+        "简单安全 HTML",
+        "复杂 HTML、包含 JS/CSS 的页面、可运行示例或较长代码必须放入 fenced code block",
+        "完整 HTML 页面优先使用 ```html 代码框输出",
+    ]
+    for snippet in required_snippets:
+        assert snippet in text
+
+
+@pytest.mark.parametrize("path", PROMPT_PATHS)
 def test_system_prompts_define_persona_nicknames_and_ownership_bounds(
     path: Path,
 ) -> None:

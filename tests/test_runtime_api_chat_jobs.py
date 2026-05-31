@@ -110,6 +110,55 @@ def _decode_sse(writes: list[bytes]) -> list[dict[str, Any]]:
 
 
 @pytest.mark.asyncio
+async def test_run_webui_chat_prompt_describes_webui_markdown_html_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, str] = {}
+
+    class _AI:
+        attachment_registry: object = object()
+        memory_storage: Any = SimpleNamespace(count=lambda: 0)
+        runtime_config: Any = SimpleNamespace()
+
+        async def ask(self, question: str, **_kwargs: Any) -> str:
+            captured["question"] = question
+            return ""
+
+    context = _context()
+    context.ai = _AI()
+    context.onebot = SimpleNamespace(
+        get_image=AsyncMock(return_value=None),
+        get_forward_msg=AsyncMock(return_value=[]),
+    )
+    context.command_dispatcher = SimpleNamespace(parse_command=lambda _text: None)
+
+    async def _fake_register_message_attachments(**_kwargs: Any) -> Any:
+        return SimpleNamespace(normalized_text="hello", attachments=[])
+
+    monkeypatch.setattr(
+        runtime_api_chat,
+        "register_message_attachments",
+        _fake_register_message_attachments,
+    )
+
+    mode = await runtime_api_chat.run_webui_chat(
+        context,
+        text="hello",
+        send_output=AsyncMock(),
+    )
+
+    assert mode == "chat"
+    prompt = captured["question"]
+    assert "【WebUI 会话】" in prompt
+    assert "WebUI 支持完整 Markdown 渲染和简单安全 HTML" in prompt
+    assert (
+        "复杂 HTML、包含 JS/CSS 的页面、可运行示例或较长代码必须放进 fenced code block"
+        in prompt
+    )
+    assert "完整 HTML 页面请优先使用 ```html 代码框" in prompt
+
+
+@pytest.mark.asyncio
 async def test_chat_job_events_after_reconnect_and_disconnect_does_not_cancel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
