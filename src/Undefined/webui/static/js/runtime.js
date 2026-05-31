@@ -1875,8 +1875,8 @@
                         ? t("runtime.attachment_kind_image")
                         : t("runtime.attachment_kind_file");
                 const preview = item.previewUrl
-                    ? `<img class="runtime-chat-attachment-thumb" src="${escapeHtml(item.previewUrl)}" alt="" loading="lazy" />`
-                    : `<span class="runtime-chat-attachment-file" aria-hidden="true">FILE</span>`;
+                    ? `<img class="runtime-chat-attachment-thumb" src="${escapeHtml(item.previewUrl)}" alt="" loading="lazy" onerror="this.closest('.runtime-chat-attachment-preview')?.classList.add('is-missing-thumb'); this.remove();" />`
+                    : `<span class="runtime-chat-attachment-file" aria-hidden="true">${item.kind === "image" ? "IMG" : "FILE"}</span>`;
                 return (
                     `<div class="runtime-chat-attachment" data-attachment-id="${escapeHtml(item.id)}">` +
                     `<span class="runtime-chat-attachment-preview">${preview}</span>` +

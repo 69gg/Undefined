@@ -513,6 +513,8 @@ def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:
     assert "URL.createObjectURL(file)" in source
     assert "URL.revokeObjectURL" in source
     assert "runtime-chat-attachment-thumb" in source
+    assert "is-missing-thumb" in source
+    assert 'item.kind === "image" ? "IMG" : "FILE"' in source
     assert "CHAT_ATTACHMENT_RAIL_BASE_WIDTH" in source
     assert "CHAT_ATTACHMENT_RAIL_STEP_WIDTH" in source
     assert "CHAT_ATTACHMENT_RAIL_MAX_WIDTH" in source
@@ -565,6 +567,17 @@ def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:
         ".runtime-chat-input-row.is-attachment-compressed .runtime-chat-attachment",
         1,
     )[1].split(".runtime-chat-attachment-preview", 1)[0]
+    compressed_preview_block = css.split(
+        ".runtime-chat-input-row.is-attachment-compressed .runtime-chat-attachment-preview",
+        1,
+    )[1].split(
+        ".runtime-chat-input-row.is-attachment-compressed .runtime-chat-attachment-main",
+        1,
+    )[0]
+    compressed_remove_block = css.split(
+        ".runtime-chat-input-row.is-attachment-compressed .runtime-chat-attachment-remove",
+        1,
+    )[1].split("@keyframes runtime-chat-attachment-in", 1)[0]
     responsive_attachments = (
         RESPONSIVE_CSS.read_text(encoding="utf-8")
         .split(
@@ -596,6 +609,12 @@ def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:
     assert "flex: 0 0 var(--chat-attachment-card-width);" in attachment_block
     assert "max-width: var(--chat-attachment-card-width);" in attachment_block
     assert "grid-template-columns: minmax(24px, 1fr);" in compressed_block
+    assert "width: 100%;" in compressed_preview_block
+    assert "height: 38px;" in compressed_preview_block
+    assert "width: 22px;" in compressed_remove_block
+    assert "height: 22px;" in compressed_remove_block
+    assert "font-weight: 700;" in compressed_remove_block
+    assert ".runtime-chat-attachment-preview.is-missing-thumb::before" in css
     assert (
         "width: min(var(--chat-attachment-rail-width), 36vw);" in responsive_attachments
     )

@@ -1054,7 +1054,7 @@
   grid-template-columns: minmax(24px, 1fr);
   justify-items: center;
   gap: 0;
-  padding: 4px;
+  padding: 3px;
 }
 .runtime-chat-attachment-preview {
   display: inline-flex;
@@ -1076,6 +1076,12 @@
   height: 100%;
   object-fit: cover;
   display: block;
+}
+.runtime-chat-attachment-preview.is-missing-thumb::before {
+  content: "IMG";
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
 }
 .runtime-chat-attachment-file {
   display: inline-flex;
@@ -1130,8 +1136,9 @@
   transform: scale(1.04);
 }
 .runtime-chat-input-row.is-attachment-compressed .runtime-chat-attachment-preview {
-  width: 30px;
-  height: 30px;
+  width: 100%;
+  height: 38px;
+  border-radius: calc(var(--radius-sm) - 1px);
 }
 .runtime-chat-input-row.is-attachment-compressed .runtime-chat-attachment-main {
   width: 0;
@@ -1141,13 +1148,23 @@
 }
 .runtime-chat-input-row.is-attachment-compressed .runtime-chat-attachment-remove {
   position: absolute;
-  top: 1px;
-  right: 1px;
-  width: 16px;
-  height: 16px;
-  font-size: 12px;
-  background: color-mix(in srgb, var(--bg-card) 88%, transparent);
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.16);
+  top: 3px;
+  right: 3px;
+  width: 22px;
+  height: 22px;
+  border: 1px solid color-mix(in srgb, var(--bg-card) 88%, var(--border-color));
+  font-size: 15px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--bg-card) 92%, transparent);
+  color: var(--text-primary);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.22);
+  opacity: 0.92;
+}
+.runtime-chat-input-row.is-attachment-compressed .runtime-chat-attachment-remove:hover,
+.runtime-chat-input-row.is-attachment-compressed .runtime-chat-attachment-remove:focus-visible {
+  background: color-mix(in srgb, var(--error) 16%, var(--bg-card));
+  color: var(--error);
+  opacity: 1;
 }
 @keyframes runtime-chat-attachment-in {
   from {
