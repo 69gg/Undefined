@@ -30,7 +30,9 @@
 
 `res/prompts/undefined.xml`、`res/prompts/undefined_nagaagent.xml` 与 `res/IMPORTANT/each.md` 均按"当前输入批次"适配：有【连续消息说明】时整批当前 `<message>` 都属于本轮输入；没有连续说明时，当前输入批次退化为最后一条消息。防幽灵任务规则仍然生效，但它只隔离当前输入批次之外的历史消息；「催促/在吗」不等于新任务，历史同类或语义等价操作不得自动重跑（与 each.md 硬性熔断一致）。
 
-`end.memo` / `end.observations` 也按同一语义适配：当前输入批次包含多条连续消息时，短期 memo 要概括整批处理结果，认知 observations 要覆盖整批消息中值得留存的信息；后台史官收到的 `source_message` 会按时间顺序列出本批所有 `<message>`，不会只取最后一条。
+Prompt 构建顺序按缓存命中友好设计：固定系统提示词、运行环境配置、Skills 元数据和强制规则尽量放在前面；会频繁变化的 memory / cognitive / end 摘要 / history / 当前时间 / 当前输入批次放在后面。`system_prompt_as_user=true` 时，系统块会合并进首条 user，但合并后的文本仍保留这个顺序，且当前输入批次仍在最后。
+
+`end.memo` / `end.observations` 也按同一语义适配：当前输入批次包含多条连续消息时，短期 memo 要概括整批处理结果，认知 observations 要覆盖整批消息中有价值的新观察；这些观察不要求与 bot 相关，也不要求长期稳定，但只能来自当前输入批次。历史消息、认知记忆、侧写和最近消息参考只用于消歧，不能作为 observations 的新事实来源。后台史官收到的 `source_message` 会按时间顺序列出本批所有 `<message>`，不会只取最后一条。
 
 > **重要**：当前主提示词按 MessageBatcher 默认开启设计。`[message_batcher].enabled = true` 是推荐和默认配置；如果关闭 batcher，连续补充/修正会退化为逐条独立 AI 调用，提示词中的"当前输入批次"语义可能不再覆盖这些连续消息，需要单独调整提示词或接受旧版逐条触发行为。
 

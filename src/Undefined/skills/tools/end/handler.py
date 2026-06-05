@@ -7,6 +7,7 @@ import logging
 import re
 
 from Undefined.context import RequestContext
+from Undefined.ai.prompts.current_input import drop_current_input_batch_if_duplicated
 from Undefined.utils.coerce import coerce_truthy, is_truthy, safe_int, was_message_sent
 from Undefined.utils.xml import format_message_xml
 
@@ -151,7 +152,7 @@ def _extract_current_input_batch_from_question(question: str, *, max_len: int) -
 
 
 def _build_historian_recent_messages(
-    context: Dict[str, Any], *, recent_k: int
+    context: Dict[str, Any], *, recent_k: int, current_question: str
 ) -> list[str]:
     """Build XML-formatted recent messages for historian context.
 
@@ -188,6 +189,15 @@ def _build_historian_recent_messages(
 
     if not isinstance(recent, list):
         return []
+    recent, dropped = drop_current_input_batch_if_duplicated(
+        recent,
+        current_question,
+    )
+    if dropped:
+        logger.info(
+            "[end工具] 史官最近消息剔除当前输入批次重复消息: count=%s",
+            dropped,
+        )
 
     lines: list[str] = []
     for msg in recent:
@@ -212,7 +222,11 @@ def _inject_historian_reference_context(context: Dict[str, Any]) -> None:
             current_question, max_source_len
         )
 
-    recent_lines = _build_historian_recent_messages(context, recent_k=recent_k)
+    recent_lines = _build_historian_recent_messages(
+        context,
+        recent_k=recent_k,
+        current_question=current_question,
+    )
     if recent_lines:
         context["historian_recent_messages"] = recent_lines
 

@@ -140,7 +140,10 @@ def test_system_prompts_tell_end_to_record_whole_current_input_batch(
 
     assert "memo / observations 必须覆盖整个【当前输入批次】" in text
     assert "不要只根据最后一条消息记录" in text
-    assert "end.observations 必须覆盖整批消息中值得留存的信息" in text
+    assert "end.observations 必须覆盖整批消息中有价值的信息" in text
+    assert "不要求与 bot 相关，也不要求长期稳定" in text
+    assert "当前批次中有价值即可记录" in text
+    assert "不能作为 observations 的新事实来源" in text
     assert "系统会围绕当前输入批次自动检索相关内容" in text
     assert "何时应该填写 memo" in text
     assert "何时应该填写 summary" not in text
@@ -156,8 +159,12 @@ def test_end_tool_schema_mentions_current_input_batch() -> None:
     observations = properties["observations"]
 
     assert "当前输入批次" in function["description"]
+    assert "不要求与 bot 相关" in function["description"]
+    assert "不要求长期稳定" in function["description"]
     assert "必须覆盖整批消息内容" in observations["description"]
     assert "不能只记录最后一条" in observations["description"]
+    assert "当前批次中有价值即可记录" in observations["description"]
+    assert "禁止从其中摘取新事实写入 observations" in observations["description"]
     assert "summary" not in properties
     assert "action_summary" not in properties
     assert "new_info" not in properties
@@ -167,9 +174,23 @@ def test_historian_prompts_reference_current_input_batch_source() -> None:
     rewrite = Path("res/prompts/historian_rewrite.md").read_text(encoding="utf-8")
     merge = Path("res/prompts/historian_profile_merge.md").read_text(encoding="utf-8")
 
-    assert "当前输入批次提取到的一条新记忆" in rewrite
+    assert "当前输入批次提取到的一条有价值新观察" in rewrite
+    assert "最近消息参考只能消歧，禁止作为新事实来源" in rewrite
     assert "当前输入批次原文（触发本轮；连续消息会按时间顺序列出多条）" in rewrite
     assert "当前输入批次原文" in merge
+    assert "禁止作为本轮新事实来源" in merge
+
+
+@pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_do_not_treat_you_ai_bot_as_automatic_mention(
+    path: Path,
+) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    assert "不要先入为主把「你」「AI」「bot」「机器人」当作在叫 Undefined" in text
+    assert "泛称不是触发词" in text
+    assert "无法确认指向 Undefined 时默认不回复" in text
+    assert "「你」「AI」「bot」「机器人」不是自动触发" in text
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)

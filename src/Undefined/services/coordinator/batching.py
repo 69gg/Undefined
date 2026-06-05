@@ -85,6 +85,21 @@ class BatchingMixin:
         body += _GROUP_STRATEGY_FOOTER if not is_private else _PRIVATE_STRATEGY_FOOTER
         return body
 
+    @staticmethod
+    def _collect_message_ids(items: list[BufferedMessage]) -> list[str]:
+        """Collect all known message IDs from a grouped request."""
+        message_ids: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            if item.trigger_message_id is None:
+                continue
+            message_id = str(item.trigger_message_id).strip()
+            if not message_id or message_id in seen:
+                continue
+            seen.add(message_id)
+            message_ids.append(message_id)
+        return message_ids
+
     async def _dispatch_grouped_request(self, items: list[BufferedMessage]) -> None:
         """根据一组 BufferedMessage 决定优先级、构造 prompt 并入队。
 
@@ -95,6 +110,7 @@ class BatchingMixin:
         first = items[0]
         last = items[-1]
         full_question = self._build_grouped_prompt(items)
+        message_ids = self._collect_message_ids(items)
         any_poke = any(it.is_poke for it in items)
         any_at_bot = any(it.is_at_bot for it in items)
 
@@ -107,6 +123,7 @@ class BatchingMixin:
                 "text": last.text,
                 "full_question": full_question,
                 "trigger_message_id": last.trigger_message_id,
+                "message_ids": message_ids,
                 "batched_count": len(items),
             }
             if first.batch_token is not None:
@@ -145,6 +162,7 @@ class BatchingMixin:
             "full_question": full_question,
             "is_at_bot": any_at_bot,
             "trigger_message_id": last.trigger_message_id,
+            "message_ids": message_ids,
             "batched_count": len(items),
         }
         if first.batch_token is not None:
