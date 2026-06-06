@@ -750,7 +750,6 @@ async def generate_webchat_title(ai: Any, question: str, answer: str) -> str:
             messages=messages,
             tools=None,
             call_type="webchat_title",
-            max_tokens=80,
         )
         from Undefined.ai.parsing import extract_choices_content
 
@@ -762,7 +761,6 @@ async def generate_webchat_title(ai: Any, question: str, answer: str) -> str:
             messages=messages,
             tools=None,
             call_type="webchat_title",
-            max_tokens=80,
         )
         from Undefined.ai.parsing import extract_choices_content
 

@@ -89,6 +89,7 @@ def test_webchat_frontend_has_conversation_sidebar() -> None:
 
     assert "runtimeChatConversations" in template
     assert "btnRuntimeChatNew" in template
+    assert "btnRuntimeChatClear" not in template
     assert "runtimeChatCurrentTitle" in template
     assert 'id="runtimeChatConversationDrawerToggle"' in template
     assert "runtime-chat-sidebar-tab" in template
@@ -110,6 +111,12 @@ def test_webchat_frontend_has_conversation_sidebar() -> None:
     assert ".runtime-chat-sidebar:focus-within" in app_css
     assert "transform: translateX(0);" in app_css
     assert ".runtime-chat-sidebar-tab" in app_css
+    assert "runtime-chat-conversation-created" in app_css
+    assert ".runtime-chat-conversation.is-new" in app_css
+    assert "recentlyCreatedConversationId" in source
+    assert 'showToast(t("runtime.chat_conversation_created")' in source
+    assert '"runtime.chat_conversation_created"' in i18n
+    assert 'get("btnRuntimeChatClear")' not in source
     assert "chatConversationDrawerOpen: false" in source
     assert "function setChatConversationDrawerOpen" in source
     assert "function canToggleChatConversationDrawer" in source

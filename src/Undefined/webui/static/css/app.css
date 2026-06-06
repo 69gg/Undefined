@@ -344,6 +344,9 @@ body.is-mobile-drawer-open {
   background: color-mix(in srgb, var(--bg-card) 72%, transparent);
   color: var(--text-primary);
 }
+.runtime-chat-conversation.is-new {
+  animation: runtime-chat-conversation-created 1.2s ease-out;
+}
 .runtime-chat-conversation.running .runtime-chat-conversation-title::after {
   content: "";
   display: inline-block;
@@ -462,6 +465,21 @@ body.is-mobile-drawer-open {
 }
 .main-content.chat-layout #tab-chat .runtime-chat-content {
   font-size: 15.5px;
+}
+
+@keyframes runtime-chat-conversation-created {
+  0% {
+    background: color-mix(in srgb, var(--accent-subtle) 78%, var(--bg-card));
+    border-color: rgba(217, 119, 87, 0.56);
+  }
+  60% {
+    background: color-mix(in srgb, var(--accent-subtle) 38%, var(--bg-card));
+    border-color: rgba(217, 119, 87, 0.34);
+  }
+  100% {
+    background: transparent;
+    border-color: transparent;
+  }
 }
 
 .header { margin-bottom: 32px; display: flex; justify-content: space-between; align-items: flex-end; }

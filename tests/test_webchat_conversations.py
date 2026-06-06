@@ -211,6 +211,7 @@ async def test_webchat_title_generation_uses_chat_model_not_summary_model() -> N
     submit_kwargs = captured["submit_kwargs"]
     assert submit_kwargs["model_config"] is selected_config
     assert submit_kwargs["call_type"] == "webchat_title"
+    assert "max_tokens" not in submit_kwargs
 
 
 @pytest.mark.asyncio

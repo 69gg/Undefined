@@ -11,6 +11,7 @@
         chatConversations: [],
         currentChatConversationId: "",
         activeJobConversationId: "",
+        recentlyCreatedConversationId: "",
         chatHistoryLoaded: false,
         activeJobId: null,
         lastEventSeq: 0,
@@ -3948,10 +3949,12 @@
                 const id = String(item.id || "");
                 const active = id && id === activeId;
                 const running = !!item.is_running;
+                const newlyCreated =
+                    id && id === runtimeState.recentlyCreatedConversationId;
                 const title = chatConversationTitle(item);
                 const updated = String(item.updated_at || "").replace("T", " ");
                 return (
-                    `<div class="runtime-chat-conversation${active ? " active" : ""}${running ? " running" : ""}" data-conversation-id="${escapeHtml(id)}">` +
+                    `<div class="runtime-chat-conversation${active ? " active" : ""}${running ? " running" : ""}${newlyCreated ? " is-new" : ""}" data-conversation-id="${escapeHtml(id)}">` +
                     `<button class="runtime-chat-conversation-main" type="button" data-conversation-select="${escapeHtml(id)}">` +
                     `<span class="runtime-chat-conversation-title">${escapeHtml(title)}</span>` +
                     `<span class="runtime-chat-conversation-meta">${escapeHtml(running ? t("runtime.running") : updated)}</span>` +
@@ -4059,12 +4062,23 @@
                 (item) => String(item.id) !== String(conversation.id),
             ),
         ];
+        runtimeState.recentlyCreatedConversationId = String(conversation.id);
         if (switchTo) {
             await switchChatConversation(String(conversation.id));
             setChatConversationDrawerOpen(false);
         } else {
             renderChatConversationList();
         }
+        showToast(t("runtime.chat_conversation_created"), "success", 1800);
+        window.setTimeout(() => {
+            if (
+                runtimeState.recentlyCreatedConversationId ===
+                String(conversation.id)
+            ) {
+                runtimeState.recentlyCreatedConversationId = "";
+                renderChatConversationList();
+            }
+        }, 1300);
         return conversation;
     }
 
@@ -4591,8 +4605,6 @@
             return;
         }
         if (!window.confirm(t("runtime.chat_clear_confirm"))) return;
-        const button = get("btnRuntimeChatClear");
-        setButtonLoading(button, true);
         try {
             const res = await api(chatUrl("/api/runtime/chat/history"), {
                 method: "DELETE",
@@ -4614,8 +4626,6 @@
                 "error",
                 5000,
             );
-        } finally {
-            setButtonLoading(button, false);
         }
     }
 
@@ -4852,10 +4862,6 @@
                 });
             });
         }
-
-        const clearChatBtn = get("btnRuntimeChatClear");
-        if (clearChatBtn)
-            clearChatBtn.addEventListener("click", clearChatHistory);
 
         const conversationDrawerToggle = get(
             "runtimeChatConversationDrawerToggle",

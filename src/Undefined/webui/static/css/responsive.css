@@ -168,10 +168,6 @@
     flex: 1 1 auto;
     min-width: 0;
   }
-  #btnRuntimeChatClear {
-    flex: 0 0 auto;
-    padding-inline: 12px;
-  }
   .header {
     margin-bottom: 24px;
     gap: 14px;
