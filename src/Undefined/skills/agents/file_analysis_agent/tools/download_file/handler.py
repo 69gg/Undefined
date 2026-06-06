@@ -374,5 +374,3 @@ async def _download_from_attachment_record(
             exc,
         )
         return "错误：附件文件读取失败"
-
-    return f"错误：无法从附件 UID {getattr(record, 'uid', '')} 解析到可下载文件"
