@@ -839,11 +839,13 @@ Prompt caching 补充：
 | `url` | `127.0.0.1` | WebUI 监听地址 |
 | `port` | `8787` | WebUI 端口（1..65535） |
 | `password` | `changeme` | WebUI 登录密码 |
+| `autostart_bot` | `false` | WebUI 启动时是否自动启动机器人进程 |
 
 关键行为：
 - 默认密码 `changeme` 禁止登录，必须先修改。
-- 未配置或为空时，会回退默认密码并标记为“默认密码模式”。
-- `webui.url/port/password` 修改需重启 WebUI 进程（机器人主进程中也属于重启生效类）。
+- 未配置或为空时，会回退默认密码并标记为”默认密码模式”。
+- `webui.url/port/password/autostart_bot` 修改需重启 WebUI 进程（机器人主进程中也属于重启生效类）。
+- `autostart_bot=true` 时，运行 `uv run Undefined-webui` 会自动拉起 bot 进程，无需手动点击启动按钮；与 WebUI 更新重启后的自动恢复机制（`pending_bot_autostart` marker）互不冲突。
 
 ---
 
@@ -1027,6 +1029,7 @@ Prompt caching 补充：
 - `webui.url`
 - `webui.port`
 - `webui.password`
+- `webui.autostart_bot`
 - `api.*`（`enabled/host/port/auth_key/openapi_enabled`）
 - `memes.blob_dir`
 - `memes.preview_dir`

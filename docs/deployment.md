@@ -89,6 +89,17 @@ uv run Undefined-webui
 >
 > WebUI 功能详见 [WebUI 使用指南](webui-guide.md)。
 
+#### 自动启动选项
+
+若希望 WebUI 启动后自动拉起机器人进程，可在 `config.toml` 中设置：
+
+```toml
+[webui]
+autostart_bot = true
+```
+
+这样运行 `uv run Undefined-webui` 时会自动启动 bot，无需手动操作。默认为 `false`。
+
 ### 6. 跨平台与资源路径（重要）
 
 - **资源读取**：运行时会优先从运行目录加载同名 `res/...` / `img/...`（便于覆盖），若不存在再使用安装包自带资源；并提供仓库结构兜底查找，因此从任意目录启动也能正常加载提示词与资源文案。
@@ -149,6 +160,7 @@ Undefined-webui
 >
 > - 选择 `Undefined`：直接在终端运行机器人，修改 `config.toml` 后重启生效（或依赖热重载能力）。
 > - 选择 `Undefined-webui`：启动后访问 WebUI（默认 `http://127.0.0.1:8787`，密码默认 `changeme`；**首次启动必须修改默认密码，默认密码不可登录**；可在 `config.toml` 的 `[webui]` 中修改），在 WebUI 中在线编辑/校验配置，并通过 WebUI 启动/停止机器人进程。
+> - 若希望 `Undefined-webui` 启动后自动拉起机器人进程，可在 `config.toml` 的 `[webui]` 中设置 `autostart_bot = true`（默认 `false`）。
 
 > `Undefined-webui` 会在检测到当前目录缺少 `config.toml` 时，自动从 `config.toml.example` 生成一份，便于直接在 WebUI 中修改。
 > 提示：资源文件已随包发布，支持在非项目根目录启动；如需自定义内容，请参考上方源码部署的自定义指南。

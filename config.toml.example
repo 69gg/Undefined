@@ -1234,6 +1234,9 @@ port = 8787
 # zh: WebUI 密码（首次启动必须修改默认值；默认密码无法登录）。
 # en: WebUI password (must be changed on first run; default password cannot be used to log in).
 password = "changeme"
+# zh: WebUI 启动时是否自动启动机器人进程。
+# en: Auto-start bot when WebUI starts.
+autostart_bot = false
 
 # zh: 主进程 Runtime API（供 WebUI/外部系统读取探针、记忆检索、AI Chat 使用）。
 # en: Runtime API in the main process (for WebUI/external integrations: probes, memory queries, AI chat).

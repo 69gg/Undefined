@@ -225,17 +225,29 @@ async def on_startup(app: web.Application) -> None:
     get_config_manager().start_hot_reload()
     logger.info("[WebUI] 后台任务已启动（热重载）")
 
+    bot = app[BOT_APP_KEY]
+
+    # 1. 优先检查自动恢复标记（现有逻辑）
     # If we restarted WebUI after an update and the bot was previously running,
     # auto-start it again.
     try:
         marker = Path("data/cache/pending_bot_autostart")
         if marker.exists():
             marker.unlink(missing_ok=True)
-            bot = app[BOT_APP_KEY]
             await bot.start()
             logger.info("[WebUI] 检测到自动恢复标记，已尝试启动机器人进程")
+            return  # 已启动，跳过后续检查
     except Exception:
         logger.debug("[WebUI] 自动恢复机器人进程失败", exc_info=True)
+
+    # 2. 检查配置项（新增逻辑）
+    try:
+        settings = app[SETTINGS_APP_KEY]
+        if settings.autostart_bot:
+            await bot.start()
+            logger.info("[WebUI] 配置 autostart_bot=true，已自动启动机器人进程")
+    except Exception:
+        logger.debug("[WebUI] 自动启动机器人进程失败", exc_info=True)
 
 
 async def on_shutdown(app: web.Application) -> None:

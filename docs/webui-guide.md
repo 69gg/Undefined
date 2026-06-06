@@ -19,6 +19,7 @@ uv run Undefined-webui
 url = "127.0.0.1"      # 监听地址
 port = 8787             # 端口
 password = "changeme"   # 密码（必须在首次登录时修改）
+autostart_bot = false   # 启动 WebUI 时是否自动启动 Bot（默认 false）
 ```
 
 > 如需远程访问，将 `url` 改为 `0.0.0.0` 或实际 IP。
@@ -139,6 +140,21 @@ WebUI 首页（Landing Page）提供 Bot 的启停控制：
 - **状态指示**：实时显示 Bot 运行状态。
 
 首页还会检测是否有可用更新（基于 Git），并提供更新 + 重启功能。
+
+### 自动启动 Bot
+
+若希望 WebUI 启动后自动拉起 bot 进程，可在 `config.toml` 中配置：
+
+```toml
+[webui]
+autostart_bot = true
+```
+
+启用后，`uv run Undefined-webui` 会自动启动机器人，无需手动点击"启动 Bot"按钮。默认为 `false`。
+
+**注意**：
+- 该配置仅在 WebUI 启动时生效，运行时修改需重启 WebUI 才能应用。
+- 与 WebUI 更新重启后的自动恢复机制（`pending_bot_autostart` marker）互不冲突，自动恢复优先级更高。
 
 ---
 
