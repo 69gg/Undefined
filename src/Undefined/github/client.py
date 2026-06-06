@@ -112,7 +112,7 @@ def _parse_repo_info(
         stars=_as_int(payload.get("stargazers_count")),
         forks=_as_int(payload.get("forks_count")),
         open_issues=_as_int(payload.get("open_issues_count")),
-        watchers=_as_int(payload.get("watchers_count")),
+        watchers=_as_optional_int(payload.get("subscribers_count")),
         subscribers=_as_optional_int(payload.get("subscribers_count")),
         contributors=contributor_count,
         language=_as_str(payload.get("language")),
