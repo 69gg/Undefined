@@ -5,6 +5,10 @@ from typing import Any, Callable, cast
 
 import pytest
 
+from Undefined.cognitive.chroma_scheduler import (
+    CHROMA_PRIORITY_FOREGROUND,
+    CHROMA_PRIORITY_FOREGROUND_CRITICAL,
+)
 from Undefined.cognitive.service import CognitiveService
 
 
@@ -21,7 +25,9 @@ class _FakeVectorStore:
     def __init__(self) -> None:
         self.last_event_kwargs: dict[str, Any] | None = None
         self.last_profile_kwargs: dict[str, Any] | None = None
-        self.last_upsert_profile: tuple[str, str, dict[str, Any]] | None = None
+        self.last_upsert_profile: (
+            tuple[str, str, dict[str, Any], dict[str, Any]] | None
+        ) = None
         self.event_calls: list[dict[str, Any]] = []
         self.event_resolver: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = (
             None
@@ -51,8 +57,9 @@ class _FakeVectorStore:
         profile_id: str,
         document: str,
         metadata: dict[str, Any],
+        **kwargs: Any,
     ) -> None:
-        self.last_upsert_profile = (profile_id, document, metadata)
+        self.last_upsert_profile = (profile_id, document, metadata, dict(kwargs))
 
 
 class _FakeProfileStorage:
@@ -179,6 +186,10 @@ async def test_search_events_uses_reranker_when_cognitive_rerank_enabled() -> No
 
     assert vector_store.last_event_kwargs is not None
     assert vector_store.last_event_kwargs.get("reranker") is reranker
+    assert (
+        vector_store.last_event_kwargs.get("priority")
+        == CHROMA_PRIORITY_FOREGROUND_CRITICAL
+    )
 
 
 @pytest.mark.asyncio
@@ -205,6 +216,10 @@ async def test_search_events_skips_reranker_when_cognitive_rerank_disabled() -> 
 
     assert vector_store.last_event_kwargs is not None
     assert vector_store.last_event_kwargs.get("reranker") is None
+    assert (
+        vector_store.last_event_kwargs.get("priority")
+        == CHROMA_PRIORITY_FOREGROUND_CRITICAL
+    )
 
 
 @pytest.mark.asyncio
@@ -226,6 +241,10 @@ async def test_search_profiles_skips_reranker_when_cognitive_rerank_disabled() -
 
     assert vector_store.last_profile_kwargs is not None
     assert vector_store.last_profile_kwargs.get("reranker") is None
+    assert (
+        vector_store.last_profile_kwargs.get("priority")
+        == CHROMA_PRIORITY_FOREGROUND_CRITICAL
+    )
 
 
 @pytest.mark.asyncio
@@ -249,6 +268,10 @@ async def test_search_profiles_handles_none_top_k_and_empty_entity_type() -> Non
     assert vector_store.last_profile_kwargs is not None
     assert vector_store.last_profile_kwargs.get("top_k") == 8
     assert vector_store.last_profile_kwargs.get("where") is None
+    assert (
+        vector_store.last_profile_kwargs.get("priority")
+        == CHROMA_PRIORITY_FOREGROUND_CRITICAL
+    )
 
 
 @pytest.mark.asyncio
@@ -277,6 +300,10 @@ async def test_search_events_uses_runtime_reranker_when_enabled() -> None:
     assert runtime.ensure_reranker_calls == 1
     assert vector_store.last_event_kwargs is not None
     assert vector_store.last_event_kwargs.get("reranker") is runtime._reranker
+    assert (
+        vector_store.last_event_kwargs.get("priority")
+        == CHROMA_PRIORITY_FOREGROUND_CRITICAL
+    )
 
 
 @pytest.mark.asyncio
@@ -305,6 +332,10 @@ async def test_search_events_does_not_touch_runtime_reranker_when_disabled() -> 
     assert runtime.ensure_reranker_calls == 0
     assert vector_store.last_event_kwargs is not None
     assert vector_store.last_event_kwargs.get("reranker") is None
+    assert (
+        vector_store.last_event_kwargs.get("priority")
+        == CHROMA_PRIORITY_FOREGROUND_CRITICAL
+    )
 
 
 @pytest.mark.asyncio
@@ -364,6 +395,7 @@ async def test_build_context_group_mode_uses_group_scope_with_boost() -> None:
     assert len(vector_store.event_calls) == 1
     assert vector_store.event_calls[0].get("where") == {"request_type": "group"}
     assert vector_store.event_calls[0].get("top_k") == 4
+    assert vector_store.event_calls[0].get("priority") == CHROMA_PRIORITY_FOREGROUND
     assert "当前群事件" in context
     assert "跨群事件" in context
     assert context.index("当前群事件") < context.index("跨群事件")
@@ -433,6 +465,10 @@ async def test_build_context_private_mode_queries_groups_and_current_private() -
     assert len(vector_store.event_calls) == 2
     where_clauses = [call.get("where") for call in vector_store.event_calls]
     assert {"request_type": "group"} in where_clauses
+    assert all(
+        call.get("priority") == CHROMA_PRIORITY_FOREGROUND
+        for call in vector_store.event_calls
+    )
     assert any(
         isinstance(where, dict)
         and isinstance(where.get("$and"), list)
@@ -518,6 +554,10 @@ async def test_build_context_private_mode_reuses_single_query_embedding() -> Non
     assert len(vector_store.event_calls) == 2
     assert vector_store.event_calls[0].get("query_embedding") == [0.12, 0.34]
     assert vector_store.event_calls[1].get("query_embedding") == [0.12, 0.34]
+    assert all(
+        call.get("priority") == CHROMA_PRIORITY_FOREGROUND
+        for call in vector_store.event_calls
+    )
 
 
 @pytest.mark.asyncio
@@ -621,11 +661,12 @@ updated_at: "2026-04-01T00:00:00"
     assert "name: 新昵称" in profile_storage.last_write[2]
     assert "nickname: 新昵称" in profile_storage.last_write[2]
     assert vector_store.last_upsert_profile is not None
-    profile_id, document, metadata = vector_store.last_upsert_profile
+    profile_id, document, metadata, kwargs = vector_store.last_upsert_profile
     assert profile_id == "user:12345"
     assert "昵称: 新昵称" in document
     assert metadata["name"] == "新昵称"
     assert metadata["nickname"] == "新昵称"
+    assert kwargs.get("priority") == CHROMA_PRIORITY_FOREGROUND
 
 
 @pytest.mark.asyncio

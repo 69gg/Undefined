@@ -472,7 +472,10 @@ class ModelRequester:
                 log_debug_json(logger, "[API请求体]", request_body)
 
             try:
-                raw_result = await self._request_with_openai(model_config, request_body)
+                raw_result = await self._request_with_openai(
+                    model_config,
+                    request_body,
+                )
             except APIStatusError as exc:
                 # Responses 续轮失败：自动切换 stateless replay 重发全量 input
                 if (
@@ -507,7 +510,8 @@ class ModelRequester:
                             logger, "[API请求体][stateless replay]", request_body
                         )
                     raw_result = await self._request_with_openai(
-                        model_config, request_body
+                        model_config,
+                        request_body,
                     )
                 else:
                     raise
@@ -666,7 +670,9 @@ class ModelRequester:
             )
 
     async def _request_with_openai(
-        self, model_config: ModelConfig, request_body: dict[str, Any]
+        self,
+        model_config: ModelConfig,
+        request_body: dict[str, Any],
     ) -> dict[str, Any]:
         client = self._get_openai_client_for_model(model_config)
         if bool(getattr(model_config, "stream_enabled", False)):
@@ -710,7 +716,10 @@ class ModelRequester:
         stream_body = dict(request_body)
         stream_body["stream"] = True
         if api_mode == API_MODE_RESPONSES:
-            return await self._stream_responses_request(client, stream_body)
+            return await self._stream_responses_request(
+                client,
+                stream_body,
+            )
         ensure_chat_stream_usage_options(stream_body)
         return await self._stream_chat_completions_request(
             # client, stream_body, model_config
@@ -735,14 +744,17 @@ class ModelRequester:
         )
         chunks: list[dict[str, Any]] = []
         async for chunk in response:
-            chunks.append(self._response_to_dict(chunk))
+            chunk_dict = self._response_to_dict(chunk)
+            chunks.append(chunk_dict)
         return aggregate_chat_completions_stream(
             chunks,
             reasoning_replay=reasoning_replay,
         )
 
     async def _stream_responses_request(
-        self, client: AsyncOpenAI, request_body: dict[str, Any]
+        self,
+        client: AsyncOpenAI,
+        request_body: dict[str, Any],
     ) -> dict[str, Any]:
         params, extra_body = split_responses_params(request_body)
         if extra_body:
@@ -751,7 +763,8 @@ class ModelRequester:
 
         events: list[dict[str, Any]] = []
         async for event in stream:
-            events.append(self._response_to_dict(event))
+            event_dict = self._response_to_dict(event)
+            events.append(event_dict)
         return aggregate_responses_stream(events)
 
     async def embed(

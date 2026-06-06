@@ -205,9 +205,12 @@ def _build_chat_response_payload(mode: str, outputs: list[str]) -> dict[str, Any
     }
 
 
-def _sse_event(event: str, payload: dict[str, Any]) -> bytes:
+def _sse_event(
+    event: str, payload: dict[str, Any], event_id: int | str | None = None
+) -> bytes:
     data = json.dumps(payload, ensure_ascii=False)
-    return f"event: {event}\ndata: {data}\n\n".encode("utf-8")
+    id_line = f"id: {event_id}\n" if event_id is not None else ""
+    return f"{id_line}event: {event}\ndata: {data}\n\n".encode("utf-8")
 
 
 def _mask_url(url: str) -> str:

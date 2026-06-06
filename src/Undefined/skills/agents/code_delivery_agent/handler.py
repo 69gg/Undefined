@@ -99,7 +99,10 @@ async def _run_agent_with_retry(
     agent_dir: Path,
 ) -> str:
     """执行 agent。"""
-    from Undefined.skills.agents.runner import run_agent_with_tools
+    from Undefined.skills.agents.runner import (
+        DEFAULT_AGENT_MAX_ITERATIONS,
+        run_agent_with_tools,
+    )
 
     return await run_agent_with_tools(
         agent_name="code_delivery_agent",
@@ -110,7 +113,7 @@ async def _run_agent_with_retry(
         context=context,
         agent_dir=agent_dir,
         logger=logger,
-        max_iterations=50,
+        max_iterations=DEFAULT_AGENT_MAX_ITERATIONS,
         tool_error_prefix="错误",
     )
 

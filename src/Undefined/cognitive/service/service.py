@@ -9,6 +9,10 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable, cast
 
 from Undefined.context import RequestContext
+from Undefined.cognitive.chroma_scheduler import (
+    CHROMA_PRIORITY_FOREGROUND,
+    CHROMA_PRIORITY_FOREGROUND_CRITICAL,
+)
 from Undefined.utils.coerce import safe_float
 from Undefined.cognitive.service.helpers import (
     _build_profile_vector_payload,
@@ -23,6 +27,7 @@ from Undefined.cognitive.service.helpers import (
     _resolve_auto_request_type,
     _serialize_profile_markdown,
 )
+from Undefined.cognitive.vector_store_compat import call_vector_store_method
 
 if TYPE_CHECKING:
     from Undefined.knowledge.runtime import RetrievalRuntime
@@ -46,6 +51,11 @@ class CognitiveService:
         self._profile_storage = profile_storage
         self._reranker = reranker
         self._retrieval_runtime = retrieval_runtime
+
+    async def stop(self) -> None:
+        stop = getattr(self._vector_store, "stop", None)
+        if callable(stop):
+            await stop()
 
     def _base_reranker(self) -> Any:
         if self._retrieval_runtime is not None:
@@ -138,10 +148,12 @@ class CognitiveService:
             tags=_normalize_profile_tags(frontmatter.get("tags")),
             summary=summary,
         )
-        await self._vector_store.upsert_profile(
+        await call_vector_store_method(
+            self._vector_store.upsert_profile,
             f"{normalized_entity_type}:{normalized_entity_id}",
             profile_doc,
             profile_metadata,
+            priority=CHROMA_PRIORITY_FOREGROUND,
         )
         logger.info(
             "[认知服务] 已刷新侧写展示名: entity_type=%s entity_id=%s old=%s new=%s",
@@ -270,8 +282,10 @@ class CognitiveService:
         uid_values = self._uid_candidates(user_id, sender_id)
 
         if request_type == "group":
-            group_events: list[dict[str, Any]] = await self._vector_store.query_events(
+            group_events = await call_vector_store_method(
+                self._vector_store.query_events,
                 query,
+                priority=CHROMA_PRIORITY_FOREGROUND,
                 top_k=scoped_top_k,
                 where={"request_type": "group"},
                 **common_kwargs,
@@ -296,8 +310,10 @@ class CognitiveService:
             return merged
 
         if request_type == "private":
-            group_task = self._vector_store.query_events(
+            group_task = call_vector_store_method(
+                self._vector_store.query_events,
                 query,
+                priority=CHROMA_PRIORITY_FOREGROUND,
                 top_k=scoped_top_k,
                 where={"request_type": "group"},
                 **common_kwargs,
@@ -312,8 +328,10 @@ class CognitiveService:
                         {"$or": uid_clauses},
                     ]
                 }
-                private_task = self._vector_store.query_events(
+                private_task = call_vector_store_method(
+                    self._vector_store.query_events,
                     query,
+                    priority=CHROMA_PRIORITY_FOREGROUND,
                     top_k=scoped_top_k,
                     where=private_where,
                     **common_kwargs,
@@ -356,8 +374,10 @@ class CognitiveService:
                 "$or": [{"user_id": value} for value in uid_values]
                 + [{"sender_id": value} for value in uid_values]
             }
-        events: list[dict[str, Any]] = await self._vector_store.query_events(
+        events = await call_vector_store_method(
+            self._vector_store.query_events,
             query,
+            priority=CHROMA_PRIORITY_FOREGROUND,
             top_k=safe_top_k,
             where=where,
             **common_kwargs,
@@ -369,7 +389,7 @@ class CognitiveService:
             len(events),
             safe_top_k,
         )
-        return events
+        return cast(list[dict[str, Any]], events)
 
     async def enqueue_job(
         self,
@@ -678,8 +698,10 @@ class CognitiveService:
             time_from_epoch,
             time_to_epoch,
         )
-        results: list[dict[str, Any]] = await self._vector_store.query_events(
+        results = await call_vector_store_method(
+            self._vector_store.query_events,
             query,
+            priority=CHROMA_PRIORITY_FOREGROUND_CRITICAL,
             top_k=top_k,
             where=where or None,
             reranker=self._current_reranker(),
@@ -696,7 +718,7 @@ class CognitiveService:
             query_embedding=await self._prepare_query_embedding(query),
         )
         logger.info("[认知服务] 搜索事件完成: count=%s", len(results))
-        return results
+        return cast(list[dict[str, Any]], results)
 
     async def get_profile(self, entity_type: str, entity_id: str) -> str | None:
         logger.info(
@@ -739,8 +761,10 @@ class CognitiveService:
             top_k,
             where or {},
         )
-        results: list[dict[str, Any]] = await self._vector_store.query_profiles(
+        results = await call_vector_store_method(
+            self._vector_store.query_profiles,
             query,
+            priority=CHROMA_PRIORITY_FOREGROUND_CRITICAL,
             top_k=top_k,
             where=where,
             reranker=self._current_reranker(),
@@ -748,4 +772,4 @@ class CognitiveService:
             query_embedding=await self._prepare_query_embedding(query),
         )
         logger.info("[认知服务] 搜索侧写完成: count=%s", len(results))
-        return results
+        return cast(list[dict[str, Any]], results)

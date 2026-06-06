@@ -33,6 +33,18 @@ from Undefined.ai.prompts.system_context import (
 logger = logging.getLogger(__name__)
 
 
+def _is_display_only_history_record(msg: dict[str, Any]) -> bool:
+    if str(msg.get("message", "") or "").strip():
+        return False
+    webchat = msg.get("webchat")
+    if not isinstance(webchat, dict):
+        return False
+    events = webchat.get("events")
+    return (
+        bool(webchat.get("display_only")) and isinstance(events, list) and bool(events)
+    )
+
+
 class PromptBuilder:
     """Prompt 构建器。
 
@@ -122,6 +134,19 @@ class PromptBuilder:
         async with aiofiles.open(system_prompt_path, "r", encoding="utf-8") as f:
             return await f.read()
 
+    @staticmethod
+    def _format_current_input_batch(question: str) -> str:
+        """Format the only live user input block for this turn."""
+        return (
+            "【当前输入批次】\n"
+            "<current_input_batch>\n"
+            f"{question}\n"
+            "</current_input_batch>\n\n"
+            "注意：以上才是本轮正在发生、允许你回应和写入 end.observations 的当前输入。"
+            "历史消息、认知记忆、侧写、短期行动记录和系统说明都只是只读背景，"
+            "只能用于消歧、防重复和理解上下文，不能作为 end.observations 的新事实来源。"
+        )
+
     async def build_messages(
         self,
         question: str,
@@ -141,6 +166,22 @@ class PromptBuilder:
         返回:
             构建好的消息列表 (role/content 结构)
         """
+        webchat_event_callback = (
+            extra_context.get("webchat_event_callback")
+            if isinstance(extra_context, dict)
+            else None
+        )
+        if not callable(webchat_event_callback):
+            webchat_event_callback = None
+
+        async def emit_webchat_stage(stage: str, detail: Any | None = None) -> None:
+            if webchat_event_callback is None:
+                return
+            payload: dict[str, Any] = {"stage": stage}
+            if detail is not None:
+                payload["detail"] = detail
+            await webchat_event_callback("stage", payload)
+
         system_prompt = await self._load_system_prompt()
         logger.debug(
             "[Prompt] system_prompt_len=%s path=%s",
@@ -277,9 +318,10 @@ class PromptBuilder:
             )
 
         deferred_messages: list[dict[str, Any]] = []
-        # 长期记忆 / 认知 / end 摘要 / 历史等延迟注入块（排在主 system 之后）
+        # 缓存友好：固定/低频系统块排在前面；按轮变化的记忆、认知、摘要、历史延迟注入。
 
         if self._memory_storage:
+            await emit_webchat_stage("checking_long_term_memory")
             memories = self._memory_storage.get_all()
             if memories:
                 memory_lines = [f"- {mem.fact}" for mem in memories]
@@ -367,6 +409,7 @@ class PromptBuilder:
                 resolved_user_id or "",
                 resolved_sender_id or "",
             )
+            await emit_webchat_stage("searching_cognitive_memory")
             cognitive_context = await self._cognitive_service.build_context(
                 query=cognitive_query,
                 group_id=resolved_group_id,
@@ -462,6 +505,7 @@ class PromptBuilder:
                 )
 
         if get_recent_messages_callback:
+            await emit_webchat_stage("loading_chat_history")
             await self._inject_recent_messages(
                 deferred_messages, get_recent_messages_callback, extra_context, question
             )
@@ -477,7 +521,9 @@ class PromptBuilder:
             }
         )
 
-        messages.append({"role": "user", "content": f"【当前消息】\n{question}"})
+        messages.append(
+            {"role": "user", "content": self._format_current_input_batch(question)}
+        )
         logger.debug(
             "[Prompt] messages_ready=%s question_len=%s",
             len(messages),
@@ -570,6 +616,9 @@ class PromptBuilder:
                 recent_limit,
             )
             recent_msgs = drop_current_message_if_duplicated(recent_msgs, question)
+            recent_msgs = [
+                msg for msg in recent_msgs if not _is_display_only_history_record(msg)
+            ]
             context_lines: list[str] = [format_message_xml(msg) for msg in recent_msgs]
 
             formatted_context = "\n---\n".join(context_lines)
@@ -577,11 +626,15 @@ class PromptBuilder:
             if formatted_context:
                 messages.append(
                     {
-                        "role": "user",
+                        "role": "system",
                         "content": (
-                            "【历史消息存档】\n"
-                            f"{formatted_context}\n\n"
-                            "注意：以上是之前的聊天记录，用于提供背景信息。每个消息之间使用 --- 分隔。接下来的用户消息才是当前正在发生的对话。"
+                            "【历史消息存档】（只读上下文）\n"
+                            "以下是之前的聊天记录，仅用于背景理解、实体消歧和防重复检查。"
+                            "它们不属于当前输入批次，不是新请求，也不能作为 end.observations 的新事实来源。\n"
+                            '<history_archive readonly="true">\n'
+                            f"{formatted_context}\n"
+                            "</history_archive>\n\n"
+                            "注意：每个历史消息之间使用 --- 分隔；后续单独的当前输入块才是本轮正在发生的对话。"
                         ),
                     }
                 )

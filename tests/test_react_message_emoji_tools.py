@@ -16,6 +16,7 @@ from Undefined.skills.toolsets.messages.lookup_emoji_id.handler import (
 from Undefined.skills.toolsets.messages.react_message_emoji.handler import (
     execute as react_message_emoji_execute,
 )
+from Undefined.utils.message_turn import mark_message_sent_this_turn
 
 
 def _runtime_config() -> Any:
@@ -25,6 +26,10 @@ def _runtime_config() -> Any:
     )
 
 
+def _tool_context(**values: Any) -> dict[str, Any]:
+    return {"mark_message_sent_this_turn": mark_message_sent_this_turn, **values}
+
+
 @pytest.mark.asyncio
 async def test_react_message_emoji_uses_trigger_message_id_and_alias() -> None:
     onebot_client = SimpleNamespace(
@@ -32,15 +37,15 @@ async def test_react_message_emoji_uses_trigger_message_id_and_alias() -> None:
         fetch_emoji_like=AsyncMock(return_value={"emoji_likes": []}),
         set_msg_emoji_like=AsyncMock(return_value={}),
     )
-    context: dict[str, Any] = {
-        "request_type": "group",
-        "group_id": 1001,
-        "sender_id": 2002,
-        "request_id": "req-react-1",
-        "trigger_message_id": 5555,
-        "runtime_config": _runtime_config(),
-        "onebot_client": onebot_client,
-    }
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=1001,
+        sender_id=2002,
+        request_id="req-react-1",
+        trigger_message_id=5555,
+        runtime_config=_runtime_config(),
+        onebot_client=onebot_client,
+    )
 
     result = await react_message_emoji_execute({"emoji": "👍"}, context)
 
@@ -58,14 +63,14 @@ async def test_react_message_emoji_skip_when_already_set() -> None:
         ),
         set_msg_emoji_like=AsyncMock(return_value={}),
     )
-    context: dict[str, Any] = {
-        "request_type": "group",
-        "group_id": 1001,
-        "request_id": "req-react-2",
-        "trigger_message_id": 6666,
-        "runtime_config": _runtime_config(),
-        "onebot_client": onebot_client,
-    }
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=1001,
+        request_id="req-react-2",
+        trigger_message_id=6666,
+        runtime_config=_runtime_config(),
+        onebot_client=onebot_client,
+    )
 
     result = await react_message_emoji_execute({"emoji_id": 76}, context)
 
@@ -80,14 +85,14 @@ async def test_react_message_emoji_reject_cross_session_by_default() -> None:
         fetch_emoji_like=AsyncMock(return_value={}),
         set_msg_emoji_like=AsyncMock(return_value={}),
     )
-    context: dict[str, Any] = {
-        "request_type": "group",
-        "group_id": 1001,
-        "request_id": "req-react-3",
-        "trigger_message_id": 7777,
-        "runtime_config": _runtime_config(),
-        "onebot_client": onebot_client,
-    }
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=1001,
+        request_id="req-react-3",
+        trigger_message_id=7777,
+        runtime_config=_runtime_config(),
+        onebot_client=onebot_client,
+    )
 
     result = await react_message_emoji_execute({"emoji_id": 76}, context)
 
@@ -106,14 +111,14 @@ async def test_react_message_emoji_dedup_parallel_same_operation() -> None:
         fetch_emoji_like=AsyncMock(return_value={"emoji_likes": []}),
         set_msg_emoji_like=AsyncMock(side_effect=delayed_set),
     )
-    context: dict[str, Any] = {
-        "request_type": "group",
-        "group_id": 1001,
-        "request_id": "req-react-4",
-        "trigger_message_id": 8888,
-        "runtime_config": _runtime_config(),
-        "onebot_client": onebot_client,
-    }
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=1001,
+        request_id="req-react-4",
+        trigger_message_id=8888,
+        runtime_config=_runtime_config(),
+        onebot_client=onebot_client,
+    )
 
     result_1, result_2 = await asyncio.gather(
         react_message_emoji_execute({"emoji_id": 76}, context),

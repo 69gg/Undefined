@@ -8,7 +8,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from Undefined.attachments import AttachmentRecord, AttachmentRegistry
+from Undefined.context import RequestContext
 from Undefined.skills.toolsets.messages.send_message.handler import execute
+from Undefined.utils.coerce import was_message_sent
+from Undefined.utils.message_turn import mark_message_sent_this_turn
 
 
 def _build_runtime_config() -> Any:
@@ -16,6 +19,10 @@ def _build_runtime_config() -> Any:
         is_group_allowed=lambda _gid: True,
         is_private_allowed=lambda _uid: True,
     )
+
+
+def _tool_context(**values: Any) -> dict[str, Any]:
+    return {"mark_message_sent_this_turn": mark_message_sent_this_turn, **values}
 
 
 @pytest.mark.asyncio
@@ -26,15 +33,15 @@ async def test_send_message_private_passes_context_group_as_preferred_temp_group
         send_group_message=AsyncMock(),
         send_private_message=AsyncMock(),
     )
-    context: dict[str, Any] = {
-        "request_type": "group",
-        "group_id": 10001,
-        "user_id": 20002,
-        "sender_id": 20002,
-        "request_id": "req-1",
-        "runtime_config": _build_runtime_config(),
-        "sender": sender,
-    }
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=10001,
+        user_id=20002,
+        sender_id=20002,
+        request_id="req-1",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+    )
 
     result = await execute(
         {
@@ -60,14 +67,14 @@ async def test_send_message_private_passes_context_group_as_preferred_temp_group
 @pytest.mark.asyncio
 async def test_send_message_group_callback_passes_reply_to() -> None:
     send_message_callback = AsyncMock()
-    context: dict[str, Any] = {
-        "request_type": "group",
-        "group_id": 10001,
-        "sender_id": 20002,
-        "request_id": "req-2",
-        "runtime_config": _build_runtime_config(),
-        "send_message_callback": send_message_callback,
-    }
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+        request_id="req-2",
+        runtime_config=_build_runtime_config(),
+        send_message_callback=send_message_callback,
+    )
 
     result = await execute(
         {
@@ -85,14 +92,14 @@ async def test_send_message_group_callback_passes_reply_to() -> None:
 @pytest.mark.asyncio
 async def test_send_message_private_callback_passes_reply_to() -> None:
     send_private_message_callback = AsyncMock()
-    context: dict[str, Any] = {
-        "request_type": "private",
-        "user_id": 30003,
-        "sender_id": 30003,
-        "request_id": "req-3",
-        "runtime_config": _build_runtime_config(),
-        "send_private_message_callback": send_private_message_callback,
-    }
+    context: dict[str, Any] = _tool_context(
+        request_type="private",
+        user_id=30003,
+        sender_id=30003,
+        request_id="req-3",
+        runtime_config=_build_runtime_config(),
+        send_private_message_callback=send_private_message_callback,
+    )
 
     result = await execute(
         {
@@ -110,20 +117,45 @@ async def test_send_message_private_callback_passes_reply_to() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_message_marks_request_context_when_context_is_copied() -> None:
+    send_message_callback = AsyncMock()
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+        request_id="req-request-context",
+        runtime_config=_build_runtime_config(),
+        send_message_callback=send_message_callback,
+    )
+
+    async with RequestContext(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+    ) as req_ctx:
+        result = await execute({"message": "hello"}, dict(context))
+
+        assert result == "消息已发送"
+        assert was_message_sent(req_ctx) is True
+
+    assert "message_sent_this_turn" not in context
+
+
+@pytest.mark.asyncio
 async def test_send_message_does_not_implicitly_use_trigger_message_id() -> None:
     sender = SimpleNamespace(
         send_group_message=AsyncMock(),
         send_private_message=AsyncMock(),
     )
-    context: dict[str, Any] = {
-        "request_type": "group",
-        "group_id": 10001,
-        "sender_id": 20002,
-        "trigger_message_id": 99999,
-        "request_id": "req-4",
-        "runtime_config": _build_runtime_config(),
-        "sender": sender,
-    }
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+        trigger_message_id=99999,
+        request_id="req-4",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+    )
 
     result = await execute(
         {
@@ -147,14 +179,14 @@ async def test_send_message_returns_sent_message_id_when_available() -> None:
         send_group_message=AsyncMock(return_value=77777),
         send_private_message=AsyncMock(),
     )
-    context: dict[str, Any] = {
-        "request_type": "group",
-        "group_id": 10001,
-        "sender_id": 20002,
-        "request_id": "req-5",
-        "runtime_config": _build_runtime_config(),
-        "sender": sender,
-    }
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+        request_id="req-5",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+    )
 
     result = await execute(
         {
@@ -183,15 +215,15 @@ async def test_send_message_renders_pic_uid_before_sending(tmp_path: Path) -> No
         display_name="demo.png",
         source_kind="test",
     )
-    context: dict[str, Any] = {
-        "request_type": "group",
-        "group_id": 10001,
-        "sender_id": 20002,
-        "request_id": "req-6",
-        "runtime_config": _build_runtime_config(),
-        "sender": sender,
-        "attachment_registry": registry,
-    }
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+        request_id="req-6",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+        attachment_registry=registry,
+    )
 
     result = await execute(
         {
@@ -236,16 +268,16 @@ async def test_send_message_renders_webui_scoped_pic_uid_before_sending(
         display_name="webui.png",
         source_kind="test",
     )
-    context: dict[str, Any] = {
-        "request_type": "private",
-        "user_id": 42,
-        "sender_id": 10001,
-        "request_id": "req-webui-1",
-        "runtime_config": _build_runtime_config(),
-        "sender": sender,
-        "attachment_registry": registry,
-        "webui_session": True,
-    }
+    context: dict[str, Any] = _tool_context(
+        request_type="private",
+        user_id=42,
+        sender_id=10001,
+        request_id="req-webui-1",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+        attachment_registry=registry,
+        webui_session=True,
+    )
 
     result = await execute(
         {
@@ -307,15 +339,15 @@ async def test_send_message_passes_meme_attachments_for_global_meme_uid(
             else None
         )
     )
-    context: dict[str, Any] = {
-        "request_type": "group",
-        "group_id": 10001,
-        "sender_id": 20002,
-        "request_id": "req-meme-1",
-        "runtime_config": _build_runtime_config(),
-        "sender": sender,
-        "attachment_registry": registry,
-    }
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+        request_id="req-meme-1",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+        attachment_registry=registry,
+    )
 
     result = await execute(
         {

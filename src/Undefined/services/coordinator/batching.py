@@ -7,6 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from Undefined.services.coordinator.group import _GROUP_STRATEGY_FOOTER
+from Undefined.services.coordinator.message_ids import collect_message_ids
 from Undefined.services.coordinator.private import _PRIVATE_STRATEGY_FOOTER
 from Undefined.services.message_batcher import BufferedMessage
 
@@ -95,6 +96,7 @@ class BatchingMixin:
         first = items[0]
         last = items[-1]
         full_question = self._build_grouped_prompt(items)
+        message_ids = collect_message_ids(items)
         any_poke = any(it.is_poke for it in items)
         any_at_bot = any(it.is_at_bot for it in items)
 
@@ -107,6 +109,7 @@ class BatchingMixin:
                 "text": last.text,
                 "full_question": full_question,
                 "trigger_message_id": last.trigger_message_id,
+                "message_ids": message_ids,
                 "batched_count": len(items),
             }
             if first.batch_token is not None:
@@ -145,6 +148,7 @@ class BatchingMixin:
             "full_question": full_question,
             "is_at_bot": any_at_bot,
             "trigger_message_id": last.trigger_message_id,
+            "message_ids": message_ids,
             "batched_count": len(items),
         }
         if first.batch_token is not None:

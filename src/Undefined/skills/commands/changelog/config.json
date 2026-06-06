@@ -12,5 +12,25 @@
   "show_in_help": true,
   "order": 15,
   "allow_in_private": true,
-  "aliases": ["cl"]
+  "aliases": ["cl"],
+  "subcommands": {
+    "list": {
+      "description": "按新到旧列出版本号与标题",
+      "args": "[数量]"
+    },
+    "show": {
+      "description": "展示指定版本的完整变更详情",
+      "args": "<版本号>"
+    },
+    "latest": {
+      "description": "展示最新版本的完整变更详情"
+    }
+  },
+  "inference": {
+    "default": "list",
+    "rules": [
+      { "pattern": "^\\d+$", "subcommand": "list" },
+      { "pattern": "^[vV]?\\d+(?:\\.\\d+){1,3}(?:[-+][A-Za-z0-9._-]+)?$", "subcommand": "show" }
+    ]
+  }
 }

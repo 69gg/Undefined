@@ -9,6 +9,8 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Dict, Literal, cast
 
+from Undefined.utils.message_turn import mark_message_sent_this_turn
+
 logger = logging.getLogger(__name__)
 
 TargetType = Literal["group", "private"]
@@ -442,7 +444,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 file_size=file_size,
             )
 
-        context["message_sent_this_turn"] = True
+        mark_message_sent_this_turn(context)
         logger.info(
             "[发送文本文件] 成功: request_id=%s target_type=%s target_id=%s file=%s size=%sB",
             request_id,

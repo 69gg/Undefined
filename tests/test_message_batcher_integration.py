@@ -99,6 +99,8 @@ async def test_two_group_messages_merge_into_single_request() -> None:
     request_data = await_args.args[0]
     assert request_data["batched_count"] == 2
     assert request_data["text"] == "改成狗"  # last 文本
+    assert request_data["trigger_message_id"] == 2
+    assert request_data["message_ids"] == ["1", "2"]
     assert "帮我画一只猫" in request_data["full_question"]
     assert "改成狗" in request_data["full_question"]
     assert "【连续消息说明】" in request_data["full_question"]
@@ -139,6 +141,7 @@ async def test_first_at_bot_routes_batch_to_mention_lane() -> None:
     req = await_args.args[0]
     assert req["batched_count"] == 2
     assert req["is_at_bot"] is True
+    assert req["message_ids"] == []
     assert "(用户 @ 了你)" in req["full_question"]
 
 
@@ -178,6 +181,7 @@ async def test_at_bot_arriving_with_buffer_bypasses_immediately() -> None:
     assert mention_await is not None
     mention_req = mention_await.args[0]
     assert mention_req["batched_count"] == 1
+    assert mention_req["message_ids"] == []
 
     # 普通桶仍未发车
     cast(AsyncMock, qm.add_group_normal_request).assert_not_called()
@@ -226,6 +230,8 @@ async def test_private_consecutive_merge() -> None:
     assert await_args is not None
     req = await_args.args[0]
     assert req["batched_count"] == 2
+    assert req["trigger_message_id"] == 11
+    assert req["message_ids"] == ["10", "11"]
     assert "第一条" in req["full_question"]
     assert "第二条" in req["full_question"]
 
@@ -273,6 +279,7 @@ async def test_superadmin_batched_routes_to_superadmin_lane() -> None:
     assert await_args is not None
     req = await_args.args[0]
     assert req["batched_count"] == 2
+    assert req["message_ids"] == []
 
 
 @pytest.mark.asyncio

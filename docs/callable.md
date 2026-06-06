@@ -64,7 +64,7 @@ skills/agents/web_agent/callable.json
 
 - **自调用保护**：Agent 不会将自己注册为可调用工具
 - **上下文隔离**：每次调用有独立上下文，历史记录按 Agent 分组保存
-- **迭代限制**：受 `max_iterations`（默认 20）约束，防止无限递归
+- **迭代限制**：受 `max_iterations`（默认 1000）约束，防止无限递归
 
 ## 主工具共享（tools/）
 

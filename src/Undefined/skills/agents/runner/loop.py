@@ -8,6 +8,40 @@ from typing import Any
 from Undefined.ai.transports.openai_transport import RESPONSES_OUTPUT_ITEMS_KEY
 from Undefined.skills.agents.runner.context import prepare_agent_run
 from Undefined.skills.agents.runner.tools import execute_assistant_tool_calls
+from Undefined.skills.agents.runner.webchat_utils import (
+    webchat_agent_path,
+    webchat_depth,
+)
+
+
+DEFAULT_AGENT_MAX_ITERATIONS = 1000
+
+
+async def _emit_webchat_agent_stage(
+    context: dict[str, Any],
+    agent_name: str,
+    stage: str,
+    detail: Any | None = None,
+) -> None:
+    callback = context.get("webchat_event_callback")
+    if not callable(callback):
+        return
+    call_id = str(context.get("webchat_parent_call_id") or "").strip()
+    if not call_id:
+        return
+    parent_call_id = str(context.get("webchat_call_parent_id") or "").strip()
+    payload: dict[str, Any] = {
+        "webchat_call_id": call_id,
+        "parent_webchat_call_id": parent_call_id,
+        "agent_name": agent_name,
+        "name": agent_name,
+        "stage": stage,
+        "depth": webchat_depth(context.get("webchat_depth")),
+        "agent_path": webchat_agent_path(context.get("webchat_agent_path")),
+    }
+    if detail is not None:
+        payload["detail"] = detail
+    await callback("agent_stage", payload)
 
 
 # Agent 主循环：LLM 决策 → 工具执行 → 结果回填
@@ -21,7 +55,7 @@ async def run_agent_with_tools(
     context: dict[str, Any],
     agent_dir: Path,
     logger: logging.Logger,
-    max_iterations: int = 20,
+    max_iterations: int = DEFAULT_AGENT_MAX_ITERATIONS,
     tool_error_prefix: str = "错误",
 ) -> str:
     """执行通用 Agent 循环。
@@ -50,6 +84,7 @@ async def run_agent_with_tools(
     if isinstance(prepared, str):
         return prepared
 
+    await _emit_webchat_agent_stage(context, agent_name, "context_ready")
     messages = prepared.messages
     transport_state: dict[str, Any] | None = None
     pre_tool_failure_count = 0
@@ -62,6 +97,12 @@ async def run_agent_with_tools(
         message_checkpoint_len = len(messages)
         transport_state_checkpoint = transport_state
         try:
+            await _emit_webchat_agent_stage(
+                context,
+                agent_name,
+                "waiting_model",
+                f"iteration={iteration} model={prepared.agent_config.model_name}",
+            )
             # 通过队列提交 LLM 请求（含 tools 与 transport 多轮状态）
             result = await prepared.ai_client.submit_queued_llm_call(
                 model_config=prepared.agent_config,
@@ -118,8 +159,12 @@ async def run_agent_with_tools(
 
             # 无工具调用即视为最终回复
             if not tool_calls:
+                await _emit_webchat_agent_stage(context, agent_name, "done")
                 return content
 
+            await _emit_webchat_agent_stage(
+                context, agent_name, "preparing_tools", len(tool_calls)
+            )
             # 将 assistant 消息（含 tool_calls）追加到对话历史
             assistant_message: dict[str, Any] = {
                 "role": "assistant",
@@ -138,6 +183,21 @@ async def run_agent_with_tools(
             messages.append(assistant_message)
 
             # 并发执行 tool_calls，结果以 role=tool 消息回填
+            tool_names = [
+                str(
+                    (tool_call.get("function") or {}).get("name")
+                    if isinstance(tool_call, dict)
+                    and isinstance(tool_call.get("function"), dict)
+                    else ""
+                )
+                for tool_call in tool_calls
+            ]
+            await _emit_webchat_agent_stage(
+                context,
+                agent_name,
+                "waiting_tools",
+                ", ".join(name for name in tool_names if name),
+            )
             tool_execution_started = await execute_assistant_tool_calls(
                 agent_name=agent_name,
                 tool_calls=tool_calls,
@@ -169,6 +229,9 @@ async def run_agent_with_tools(
                     iteration,
                     exc,
                 )
+                await _emit_webchat_agent_stage(
+                    context, agent_name, "retrying_model", str(exc)
+                )
                 continue
             logger.exception(
                 "[Agent:%s] 执行失败，已静默抑制: lane=%s iteration=%s error=%s",
@@ -179,4 +242,5 @@ async def run_agent_with_tools(
             )
             return ""
 
+    await _emit_webchat_agent_stage(context, agent_name, "done")
     return "达到最大迭代次数"

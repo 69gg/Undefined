@@ -13,6 +13,9 @@ def test_parse_cognitive_historian_reference_limits() -> None:
                     "auto_current_group_boost": 1.3,
                     "auto_current_private_boost": 1.6,
                 },
+                "vector_store": {
+                    "scheduler_foreground_burst": 5,
+                },
                 "historian": {
                     "recent_messages_inject_k": 21,
                     "recent_message_line_max_len": 333,
@@ -29,6 +32,7 @@ def test_parse_cognitive_historian_reference_limits() -> None:
     assert cfg.auto_current_group_boost == 1.3
     assert cfg.auto_current_private_boost == 1.6
     assert cfg.enable_rerank is False
+    assert cfg.vector_store_scheduler_foreground_burst == 5
 
 
 def test_parse_cognitive_historian_reference_limits_defaults() -> None:
@@ -41,3 +45,12 @@ def test_parse_cognitive_historian_reference_limits_defaults() -> None:
     assert cfg.auto_current_group_boost == 1.15
     assert cfg.auto_current_private_boost == 1.25
     assert cfg.enable_rerank is True
+    assert cfg.vector_store_scheduler_foreground_burst == 8
+
+
+def test_parse_cognitive_vector_store_scheduler_burst_clamps_to_positive() -> None:
+    cfg = _parse_cognitive_config(
+        {"cognitive": {"vector_store": {"scheduler_foreground_burst": 0}}}
+    )
+
+    assert cfg.vector_store_scheduler_foreground_burst == 1

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -11,18 +12,54 @@ from Undefined.changelog import ChangelogEntry
 from Undefined.webui import app as webui_app
 from Undefined.webui.app import create_app
 from Undefined.webui.core import SessionStore
-from Undefined.webui.routes import _auth, _config, _index, _memes, _shared, _system
+from Undefined.webui.routes import (
+    _auth,
+    _config,
+    _index,
+    _memes,
+    _runtime,
+    _shared,
+    _system,
+)
 from Undefined.webui.routes._shared import (
     REDIRECT_TO_CONFIG_ONCE_APP_KEY,
     SESSION_COOKIE,
     SESSION_STORE_APP_KEY,
     SETTINGS_APP_KEY,
 )
+from Undefined.utils.paths import WEBUI_FILE_CACHE_DIR
 
 
 class DummyRequest(SimpleNamespace):
     async def json(self) -> dict[str, object]:
         return dict(getattr(self, "_json", {}))
+
+
+class DummyMultipartField:
+    def __init__(self, chunks: list[bytes], *, filename: str = "file.bin") -> None:
+        self.name = "file"
+        self.filename = filename
+        self._chunks = list(chunks)
+
+    async def read_chunk(self) -> bytes:
+        if not self._chunks:
+            return b""
+        return self._chunks.pop(0)
+
+
+class DummyMultipartRequest(DummyRequest):
+    def __init__(self, field: DummyMultipartField | None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._field = field
+
+    async def multipart(self) -> object:
+        field = self._field
+
+        class _Reader:
+            async def next(self) -> DummyMultipartField | None:
+                return field
+
+        return _Reader()
 
 
 def _request(
@@ -346,6 +383,13 @@ def test_create_app_registers_management_routes() -> None:
     assert ("GET", "/api/v1/management/runtime/meta") in routes
     assert ("POST", "/api/v1/management/config/validate") in routes
     assert ("POST", "/api/v1/management/bot/start") in routes
+    assert ("POST", "/api/v1/management/runtime/chat/jobs") in routes
+    assert ("GET", "/api/v1/management/runtime/chat/jobs/active") in routes
+    assert ("GET", "/api/v1/management/runtime/chat/jobs/{job_id}") in routes
+    assert ("GET", "/api/v1/management/runtime/chat/jobs/{job_id}/events") in routes
+    assert ("POST", "/api/v1/management/runtime/chat/jobs/{job_id}/cancel") in routes
+    assert ("DELETE", "/api/v1/management/runtime/chat/history") in routes
+    assert ("POST", "/api/v1/management/runtime/chat/files") in routes
 
 
 async def test_index_handler_applies_launcher_mode_and_initial_view() -> None:
@@ -385,6 +429,64 @@ async def test_index_handler_renders_mobile_shell_and_action_toggles() -> None:
     assert 'id="mobileNavFooter"' in payload_text
     assert 'id="configMobileActionsToggle"' in payload_text
     assert 'id="logsMobileActionsToggle"' in payload_text
+
+
+async def test_runtime_chat_file_upload_handler_caches_authenticated_file(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(_runtime, "check_auth", lambda _request: True)
+    monkeypatch.chdir(tmp_path)
+    field = DummyMultipartField([b"hello", b" world"], filename="../note.txt")
+    request = DummyMultipartRequest(
+        field,
+        headers={},
+        cookies={},
+        query={},
+        app={},
+        remote="127.0.0.1",
+        scheme="http",
+        host="127.0.0.1:8787",
+        transport=None,
+    )
+
+    response = await _runtime.runtime_chat_file_upload_handler(
+        cast(web.Request, cast(Any, request))
+    )
+    payload = _json_payload(response)
+
+    assert cast(web.Response, response).status == 200
+    assert isinstance(payload["id"], str)
+    assert str(payload["id"]).isalnum()
+    assert payload["name"] == "note.txt"
+    assert payload["size"] == 11
+    cached_dir = tmp_path / WEBUI_FILE_CACHE_DIR / str(payload["id"])
+    cached_files = list(cached_dir.iterdir())
+    assert len(cached_files) == 1
+    cached_file = cached_files[0]
+    assert cached_file.name != "note.txt"
+    assert cached_file.name.startswith("file_")
+    assert cached_file.read_bytes() == b"hello world"
+
+
+async def test_runtime_chat_file_upload_handler_requires_auth(monkeypatch: Any) -> None:
+    monkeypatch.setattr(_runtime, "check_auth", lambda _request: False)
+    request = DummyMultipartRequest(
+        None,
+        headers={},
+        cookies={},
+        query={},
+        app={},
+        remote="127.0.0.1",
+        scheme="http",
+        host="127.0.0.1:8787",
+        transport=None,
+    )
+
+    response = await _runtime.runtime_chat_file_upload_handler(
+        cast(web.Request, cast(Any, request))
+    )
+
+    assert cast(web.Response, response).status == 401
 
 
 def test_webui_cors_only_allows_trusted_origins(monkeypatch: Any) -> None:
@@ -530,3 +632,163 @@ async def test_management_meme_blob_handler_url_encodes_uid(
 
     assert payload["ok"] is True
     assert captured["path"] == "/api/v1/memes/pic%20a%2Fb%3F/blob"
+
+
+async def test_runtime_chat_job_proxy_routes_require_management_auth() -> None:
+    request = cast(
+        web.Request,
+        cast(
+            Any,
+            SimpleNamespace(
+                headers={},
+                cookies={},
+                query={},
+                match_info={"job_id": "job_1"},
+                app=_request().app,
+            ),
+        ),
+    )
+
+    handlers = [
+        _runtime.runtime_chat_conversations_handler,
+        _runtime.runtime_chat_conversation_create_handler,
+        _runtime.runtime_chat_conversation_update_handler,
+        _runtime.runtime_chat_conversation_delete_handler,
+        _runtime.runtime_chat_history_clear_handler,
+        _runtime.runtime_chat_job_create_handler,
+        _runtime.runtime_chat_job_active_handler,
+        _runtime.runtime_chat_job_detail_handler,
+        _runtime.runtime_chat_job_events_handler,
+        _runtime.runtime_chat_job_cancel_handler,
+    ]
+    for handler in handlers:
+        response = await handler(request)
+        assert cast(web.Response, response).status == 401
+
+
+async def test_runtime_chat_job_proxy_json_injects_runtime_api_key(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _fake_proxy_runtime(**kwargs: Any) -> web.Response:
+        captured.update(kwargs)
+        return web.json_response({"ok": True})
+
+    monkeypatch.setattr(_runtime, "_proxy_runtime", _fake_proxy_runtime)
+    monkeypatch.setattr(_runtime, "check_auth", lambda _request: True)
+    request = cast(
+        web.Request,
+        cast(
+            Any,
+            SimpleNamespace(
+                headers={"Accept": "application/json"},
+                cookies={},
+                query={"after": "7", "format": "json"},
+                match_info={"job_id": "job /secret"},
+                app=_request().app,
+            ),
+        ),
+    )
+
+    response = await _runtime.runtime_chat_job_events_handler(request)
+    payload = _json_payload(response)
+
+    assert payload["ok"] is True
+    assert captured["method"] == "GET"
+    assert captured["path"] == "/api/v1/chat/jobs/job%20%2Fsecret/events"
+    assert captured["params"]["after"] == "7"
+    assert captured["timeout_seconds"] == 20.0
+
+
+async def test_runtime_chat_job_proxy_sse_uses_stream_proxy(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _fake_proxy_runtime_stream(
+        request: web.Request,
+        **kwargs: Any,
+    ) -> web.Response:
+        captured["accept"] = request.headers.get("Accept")
+        captured.update(kwargs)
+        return web.json_response({"stream": True})
+
+    monkeypatch.setattr(_runtime, "_proxy_runtime_stream", _fake_proxy_runtime_stream)
+    monkeypatch.setattr(_runtime, "check_auth", lambda _request: True)
+    monkeypatch.setattr(_runtime, "_chat_proxy_timeout_seconds", lambda: 123.0)
+    request = cast(
+        web.Request,
+        cast(
+            Any,
+            SimpleNamespace(
+                headers={"Accept": "text/event-stream"},
+                cookies={},
+                query={"after": "0"},
+                match_info={"job_id": "job_1"},
+                app=_request().app,
+            ),
+        ),
+    )
+
+    response = await _runtime.runtime_chat_job_events_handler(request)
+    payload = _json_payload(response)
+
+    assert payload["stream"] is True
+    assert captured["method"] == "GET"
+    assert captured["path"] == "/api/v1/chat/jobs/job_1/events"
+    assert captured["params"]["after"] == "0"
+    assert captured["timeout_seconds"] == 123.0
+    assert captured["accept"] == "text/event-stream"
+
+
+async def test_proxy_runtime_injects_runtime_api_key(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+
+    class _FakeResponse:
+        status = 200
+        headers = {"Content-Type": "application/json"}
+        content_type = "application/json"
+        charset = "utf-8"
+
+        async def __aenter__(self) -> _FakeResponse:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def text(self) -> str:
+            return '{"ok": true}'
+
+    class _FakeSession:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            _ = args, kwargs
+
+        async def __aenter__(self) -> _FakeSession:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def request(self, **kwargs: Any) -> _FakeResponse:
+            captured.update(kwargs)
+            return _FakeResponse()
+
+    monkeypatch.setattr(
+        _runtime,
+        "get_config",
+        lambda strict=False: SimpleNamespace(
+            api=SimpleNamespace(
+                enabled=True,
+                loopback_url="http://127.0.0.1:8788",
+                auth_key="runtime-secret",
+            )
+        ),
+    )
+    monkeypatch.setattr(_runtime, "ClientSession", _FakeSession)
+
+    response = await _runtime._proxy_runtime(method="GET", path="/api/v1/chat/jobs")
+    payload = _json_payload(response)
+
+    assert payload["ok"] is True
+    assert captured["headers"] == {"X-Undefined-API-Key": "runtime-secret"}

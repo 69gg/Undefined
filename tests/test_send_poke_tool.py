@@ -8,6 +8,7 @@ import pytest
 
 from Undefined.context import RequestContext
 from Undefined.skills.toolsets.messages.send_poke.handler import execute
+from Undefined.utils.message_turn import mark_message_sent_this_turn
 
 
 def _build_runtime_config() -> Any:
@@ -16,6 +17,10 @@ def _build_runtime_config() -> Any:
         is_group_allowed=lambda _gid: True,
         is_private_allowed=lambda _uid: True,
     )
+
+
+def _tool_context(**values: Any) -> dict[str, Any]:
+    return {"mark_message_sent_this_turn": mark_message_sent_this_turn, **values}
 
 
 @pytest.mark.asyncio
@@ -28,16 +33,16 @@ async def test_send_poke_group_default_target_writes_group_history() -> None:
         send_group_poke=AsyncMock(),
         send_private_poke=AsyncMock(),
     )
-    context: dict[str, Any] = {
-        "request_type": "group",
-        "group_id": 10001,
-        "user_id": 20002,
-        "sender_id": 20002,
-        "request_id": "req-1",
-        "runtime_config": _build_runtime_config(),
-        "history_manager": history_manager,
-        "sender": sender,
-    }
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=10001,
+        user_id=20002,
+        sender_id=20002,
+        request_id="req-1",
+        runtime_config=_build_runtime_config(),
+        history_manager=history_manager,
+        sender=sender,
+    )
 
     result = await execute({}, context)
 
@@ -61,15 +66,15 @@ async def test_send_poke_private_default_target_writes_private_history() -> None
         add_private_message=AsyncMock(),
     )
     onebot_client = SimpleNamespace(send_private_poke=AsyncMock())
-    context: dict[str, Any] = {
-        "request_type": "private",
-        "user_id": 30003,
-        "sender_id": 30003,
-        "request_id": "req-2",
-        "runtime_config": _build_runtime_config(),
-        "history_manager": history_manager,
-        "onebot_client": onebot_client,
-    }
+    context: dict[str, Any] = _tool_context(
+        request_type="private",
+        user_id=30003,
+        sender_id=30003,
+        request_id="req-2",
+        runtime_config=_build_runtime_config(),
+        history_manager=history_manager,
+        onebot_client=onebot_client,
+    )
 
     result = await execute({}, context)
 
@@ -92,15 +97,15 @@ async def test_send_poke_explicit_group_and_target_user() -> None:
         add_private_message=AsyncMock(),
     )
     onebot_client = SimpleNamespace(send_group_poke=AsyncMock())
-    context: dict[str, Any] = {
-        "request_type": "private",
-        "user_id": 40004,
-        "sender_id": 40004,
-        "request_id": "req-3",
-        "runtime_config": _build_runtime_config(),
-        "history_manager": history_manager,
-        "onebot_client": onebot_client,
-    }
+    context: dict[str, Any] = _tool_context(
+        request_type="private",
+        user_id=40004,
+        sender_id=40004,
+        request_id="req-3",
+        runtime_config=_build_runtime_config(),
+        history_manager=history_manager,
+        onebot_client=onebot_client,
+    )
 
     result = await execute(
         {"target_type": "group", "target_id": 88888, "target_user_id": 99999},
@@ -123,10 +128,10 @@ async def test_send_poke_infers_from_request_context_when_context_missing() -> N
         send_group_poke=AsyncMock(),
         send_private_poke=AsyncMock(),
     )
-    context: dict[str, Any] = {
-        "sender": sender,
-        "runtime_config": _build_runtime_config(),
-    }
+    context: dict[str, Any] = _tool_context(
+        sender=sender,
+        runtime_config=_build_runtime_config(),
+    )
 
     async with RequestContext(
         request_type="group",
@@ -147,19 +152,19 @@ async def test_send_poke_group_blacklist_message() -> None:
         send_group_poke=AsyncMock(),
         send_private_poke=AsyncMock(),
     )
-    context: dict[str, Any] = {
-        "request_type": "group",
-        "group_id": 10001,
-        "sender_id": 20002,
-        "request_id": "req-blacklist-1",
-        "runtime_config": SimpleNamespace(
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+        request_id="req-blacklist-1",
+        runtime_config=SimpleNamespace(
             bot_qq=123456,
             is_group_allowed=lambda _gid: False,
             is_private_allowed=lambda _uid: True,
             group_access_denied_reason=lambda _gid: "blacklist",
         ),
-        "sender": sender,
-    }
+        sender=sender,
+    )
 
     result = await execute({}, context)
 

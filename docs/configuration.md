@@ -385,6 +385,7 @@ Prompt caching 补充：
 
 用途：
 - 仅供 `web_agent` 内的 `grok_search` 子工具使用。
+- 工具调用该模型时会注入专用 system prompt：以服务端当前时间作为“今天 / 最新 / 最近”的基准，要求先搜索、使用多组搜索查询或多个搜索工具、禁止编造，并在结果中给出来源。
 
 默认：
 - `max_tokens=8192`
@@ -880,6 +881,7 @@ Prompt caching 补充：
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `path` | `data/cognitive/chromadb` | Chroma 存储目录 |
+| `scheduler_foreground_burst` | `8` | Chroma 前台连续处理上限；达到后若有维护/后台任务，会让出一次执行机会。需重启 |
 
 ### 4.24.3 `[cognitive.query]`
 
