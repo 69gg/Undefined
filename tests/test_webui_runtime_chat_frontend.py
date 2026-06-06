@@ -158,6 +158,56 @@ def test_webchat_frontend_sends_conversation_id_with_history_and_jobs() -> None:
     assert "jobConversationId !== currentChatConversationId()" in source
 
 
+def test_webchat_frontend_resumes_backend_job_after_refresh_or_reconnect() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    history_helper = source.split("async function loadChatHistory", 1)[1].split(
+        "async function loadOlderChatHistory",
+        1,
+    )[0]
+    conversation_helper = source.split(
+        "async function loadChatConversations",
+        1,
+    )[1].split("async function createChatConversation", 1)[0]
+    resume_helper = source.split("async function resumeActiveChatJob", 1)[1].split(
+        "async function clearChatHistory",
+        1,
+    )[0]
+
+    assert "{ resumeActiveJob = true }" in history_helper
+    assert "if (runtimeState.chatHistoryLoaded && !force)" in history_helper
+    assert "await resumeActiveChatJob();" in history_helper
+    assert "const localJobId = runtimeState.activeJobId" in resume_helper
+    assert 'chatUrl("/api/runtime/chat/jobs/active")' in resume_helper
+    assert "attachChatJob(jobId, runtimeState.lastEventSeq)" in resume_helper
+    assert "runtimeState.activeJobId) return" not in resume_helper
+    assert "await loadChatHistory(true, { resumeActiveJob: false })" in resume_helper
+    assert "runtimeState.chatBusy = false" in resume_helper
+    assert "const previousJobId = runtimeState.activeJobId" in conversation_helper
+    assert 'const nextJobId = String(activeJob.job_id || "")' in conversation_helper
+    assert "previousJobId !== nextJobId" in conversation_helper
+    assert "localJobId !== jobId" in resume_helper
+    assert "runtimeState.lastEventSeq = 0" in conversation_helper
+    assert "clearToolCollapseTimers()" in conversation_helper
+    assert 'window.addEventListener(\n                "online"' in source
+
+
+def test_webchat_frontend_lazy_load_preserves_scroll_offset() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    older_helper = source.split("async function loadOlderChatHistory", 1)[1].split(
+        "function applyChatEvent",
+        1,
+    )[0]
+
+    assert "const previousHeight = log.scrollHeight" in older_helper
+    assert "const previousTop = log.scrollTop" in older_helper
+    assert "appendHistoryChatItem(items[idx], {" in older_helper
+    assert "prepend: true" in older_helper
+    assert (
+        "log.scrollTop = previousTop + (log.scrollHeight - previousHeight)"
+        in older_helper
+    )
+
+
 def test_webchat_frontend_keeps_final_duration_after_done() -> None:
     source = RUNTIME_JS.read_text(encoding="utf-8")
 

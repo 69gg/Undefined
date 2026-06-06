@@ -271,7 +271,7 @@ curl http://127.0.0.1:8788/openapi.json
 ### WebUI AI Chat 历史记录
 
 - `GET /api/v1/chat/history?conversation_id=<id>&limit=50&before=<cursor>`
-- 用于分页读取指定 WebChat 会话的虚拟私聊 `system#42` 历史记录。默认返回最新一页，响应包含 `conversation_id/items/has_more/next_before/total`。不传 `conversation_id` 时兼容读取默认会话。
+- 用于分页读取指定 WebChat 会话的虚拟私聊 `system#42` 历史记录。默认返回最新一页，响应包含 `conversation_id/items/has_more/next_before/total`；客户端继续加载更早历史时把上次返回的 `next_before` 作为 `before` 传回。不传 `conversation_id` 时兼容读取默认会话。
 - 对于由 WebChat job 产生的回复，Bot 历史项可能包含 `webchat` 展示元数据：
 
 ```json
@@ -392,7 +392,7 @@ curl http://127.0.0.1:8788/openapi.json
 - WebChat 前端引用 AI 消息、选中文本或 HTML 预览中点选的元素时，不新增后端端点，也不写入单独附件；发送前会把待引用内容转换成 Markdown blockquote 并拼接到 `message` 前面，例如 `> 引用 AI:` / `> 引用 HTML 片段:`。后端只接收最终 `message` 字符串。
 - `GET /api/v1/chat/jobs/active?conversation_id=<id>`：返回当前运行中的 WebChat job（没有则为 `null`）。不传时返回任意当前 WebChat job；传入时只在该 job 属于对应会话时返回。
 - `GET /api/v1/chat/jobs/{job_id}`：查询 job 状态、最后事件序号和已汇总输出。
-- `GET /api/v1/chat/jobs/{job_id}/events?after=<seq>`：查询 `seq` 之后的增量事件，默认返回 JSON。
+- `GET /api/v1/chat/jobs/{job_id}/events?after=<seq>&conversation_id=<id>`：查询 `seq` 之后的增量事件，默认返回 JSON。`conversation_id` 可选；传入时必须与 job 所属会话一致，否则返回 `404`，用于刷新、断线或换客户端后避免跨会话误续接。
 - `GET /api/v1/chat/jobs/{job_id}/events?after=<seq>&format=json` 或请求头 `Accept: application/json`：显式查询 JSON。响应包含：
 
 ```json

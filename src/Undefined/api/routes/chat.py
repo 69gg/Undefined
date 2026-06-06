@@ -2462,6 +2462,9 @@ async def chat_job_events_handler(
     job = await job_manager.get_job(job_id)
     if job is None:
         return _json_error("Job not found", status=404)
+    requested_conversation_id = _query_conversation_id(request)
+    if requested_conversation_id and requested_conversation_id != job.conversation_id:
+        return _json_error("Job not found", status=404)
     after = _parse_after(request)
     accept_header = str(request.headers.get("Accept", "") or "").strip().lower()
     wants_sse = "text/event-stream" in accept_header

@@ -519,6 +519,46 @@ async def test_chat_job_events_json_returns_incremental_events_and_live_stage(
 
 
 @pytest.mark.asyncio
+async def test_chat_job_events_reject_wrong_conversation_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = asyncio.Event()
+
+    async def _fake_run_webui_chat(_ctx: Any, **_kwargs: Any) -> str:
+        await release.wait()
+        return "chat"
+
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    conversation = (
+        await server._chat_job_manager.conversation_store.create_conversation()
+    )
+    conversation_id = str(conversation["id"])
+    job = await server._chat_job_manager.create_job("hello", conversation_id)
+
+    request = cast(
+        web.Request,
+        cast(
+            Any,
+            _DummyRequest(
+                match_info={"job_id": job.job_id},
+                query={"after": "0", "format": "json", "conversation_id": "other"},
+                headers={"Accept": "application/json"},
+                transport=_DummyTransport(),
+            ),
+        ),
+    )
+
+    response = cast(web.Response, await server._chat_job_events_handler(request))
+    payload = json.loads(response.text or "{}")
+
+    assert response.status == 404
+    assert payload["error"] == "Job not found"
+    release.set()
+    await server._chat_job_manager.cancel_job(job.job_id)
+
+
+@pytest.mark.asyncio
 async def test_chat_job_persists_webchat_lifecycle_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

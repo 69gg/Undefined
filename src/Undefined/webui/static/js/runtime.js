@@ -4017,7 +4017,18 @@
                     ? data.active_job
                     : null;
             if (activeJob && activeJob.conversation_id) {
-                runtimeState.activeJobId = String(activeJob.job_id || "");
+                const previousJobId = runtimeState.activeJobId
+                    ? String(runtimeState.activeJobId)
+                    : "";
+                const nextJobId = String(activeJob.job_id || "");
+                if (nextJobId && previousJobId !== nextJobId) {
+                    runtimeState.lastEventSeq = 0;
+                    runtimeState.streamingMessageId = null;
+                    runtimeState.activeChatMessageId = null;
+                    runtimeState.toolBlocks.clear();
+                    clearToolCollapseTimers();
+                }
+                runtimeState.activeJobId = nextJobId;
                 runtimeState.chatBusy = true;
                 runtimeState.activeJobConversationId = String(
                     activeJob.conversation_id,
@@ -4207,12 +4218,20 @@
         setChatConversationDrawerOpen(false);
     }
 
-    async function loadChatHistory(force = false) {
+    async function loadChatHistory(
+        force = false,
+        { resumeActiveJob = true } = {},
+    ) {
         if (!currentChatConversationId()) {
             await loadChatConversations();
         }
         if (!currentChatConversationId()) return;
-        if (runtimeState.chatHistoryLoaded && !force) return;
+        if (runtimeState.chatHistoryLoaded && !force) {
+            if (resumeActiveJob) {
+                await resumeActiveChatJob();
+            }
+            return;
+        }
         runtimeState.chatHistoryLoading = true;
         const res = await api(
             chatUrl("/api/runtime/chat/history", { limit: 50 }),
@@ -4234,7 +4253,9 @@
         runtimeState.chatHistoryLoaded = true;
         runtimeState.chatHistoryLoading = false;
         forceScrollChatToBottomSoon();
-        await resumeActiveChatJob();
+        if (resumeActiveJob) {
+            await resumeActiveChatJob();
+        }
     }
 
     async function loadOlderChatHistory() {
@@ -4250,6 +4271,7 @@
         const loader = get("runtimeChatLoadMore");
         if (loader) loader.textContent = t("runtime.chat_loading_more");
         const previousHeight = log.scrollHeight;
+        const previousTop = log.scrollTop;
         const before = runtimeState.chatHistoryCursor;
         try {
             const res = await api(
@@ -4274,7 +4296,7 @@
                     ? data.next_before
                     : null;
             runtimeState.chatHistoryHasMore = !!(data && data.has_more);
-            log.scrollTop = log.scrollHeight - previousHeight;
+            log.scrollTop = previousTop + (log.scrollHeight - previousHeight);
         } catch (error) {
             showToast(
                 `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
@@ -4550,7 +4572,19 @@
     }
 
     async function resumeActiveChatJob() {
-        if (runtimeState.activeJobId) return;
+        const localJobId = runtimeState.activeJobId
+            ? String(runtimeState.activeJobId)
+            : "";
+        const localConversationId = String(
+            runtimeState.activeJobConversationId || "",
+        );
+        if (
+            localJobId &&
+            localConversationId &&
+            localConversationId !== currentChatConversationId()
+        ) {
+            return;
+        }
         try {
             const data = await fetchJsonOrThrow(
                 chatUrl("/api/runtime/chat/jobs/active"),
@@ -4559,10 +4593,31 @@
             if (!job || !job.job_id) {
                 stopActiveJobResumeTimer();
                 runtimeState.activeJobResumeAttempts = 0;
+                if (localJobId) {
+                    stopChatPolling();
+                    stopChatClock();
+                    runtimeState.activeJobId = null;
+                    runtimeState.activeJobConversationId = "";
+                    runtimeState.chatBusy = false;
+                    setButtonLoading(get("btnRuntimeChatSend"), false);
+                    syncChatBusyControls();
+                    await loadChatHistory(true, { resumeActiveJob: false });
+                    loadChatConversations({ selectFirst: false }).catch(
+                        () => {},
+                    );
+                }
                 return;
             }
             stopActiveJobResumeTimer();
             runtimeState.activeJobResumeAttempts = 0;
+            const jobId = String(job.job_id);
+            if (localJobId !== jobId) {
+                runtimeState.lastEventSeq = 0;
+                runtimeState.streamingMessageId = null;
+                runtimeState.activeChatMessageId = null;
+                runtimeState.toolBlocks.clear();
+                clearToolCollapseTimers();
+            }
             if (job.conversation_id) {
                 runtimeState.currentChatConversationId = String(
                     job.conversation_id,
@@ -4572,14 +4627,10 @@
                 );
                 renderChatConversationList();
             }
-            runtimeState.activeJobId = String(job.job_id);
-            ensureStreamingMessage(runtimeState.activeJobId);
-            attachChatJob(
-                runtimeState.activeJobId,
-                runtimeState.lastEventSeq,
-            ).catch(() => {});
+            runtimeState.activeJobId = jobId;
+            ensureStreamingMessage(jobId);
+            attachChatJob(jobId, runtimeState.lastEventSeq).catch(() => {});
         } catch (_error) {
-            if (runtimeState.activeJobId) return;
             runtimeState.activeJobResumeAttempts += 1;
             if (
                 runtimeState.activeJobResumeAttempts >
