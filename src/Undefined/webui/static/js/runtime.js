@@ -12,6 +12,15 @@
         currentChatConversationId: "",
         activeJobConversationId: "",
         recentlyCreatedConversationId: "",
+        chatCommandsLoaded: false,
+        chatCommandsLoading: false,
+        chatCommandsLoadedAt: 0,
+        chatCommands: [],
+        chatCommandsError: "",
+        chatCommandPaletteOpen: false,
+        chatCommandMatches: [],
+        chatCommandActiveIndex: 0,
+        chatCommandContext: null,
         chatHistoryLoaded: false,
         activeJobId: null,
         lastEventSeq: 0,
@@ -66,6 +75,8 @@
     const CHAT_ATTACHMENT_COMPRESSED_COUNT = 5;
     const CHAT_REFERENCE_MAX_CHARS = 4000;
     const CHAT_REFERENCE_PREVIEW_CHARS = 180;
+    const CHAT_COMMAND_CACHE_MS = 30000;
+    const CHAT_COMMAND_MAX_MATCHES = 8;
     const CODE_COLLAPSE_LINE_THRESHOLD = 8;
     const HTML_RUNNER_MIN_WIDTH = 360;
     const HTML_RUNNER_MIN_HEIGHT = 280;
@@ -3920,6 +3931,368 @@
         }
     }
 
+    function normalizeChatCommandText(value) {
+        return String(value || "")
+            .trim()
+            .replace(/^\/+/, "")
+            .toLowerCase();
+    }
+
+    function commandSearchText(command) {
+        const parts = [
+            command && command.name,
+            command && command.trigger,
+            command && command.description,
+            command && command.usage,
+            ...((command && command.aliases) || []),
+            ...((command && command.alias_triggers) || []),
+        ];
+        return parts.map((item) => String(item || "").toLowerCase()).join(" ");
+    }
+
+    function commandMatchesQuery(command, query) {
+        const normalized = normalizeChatCommandText(query);
+        if (!normalized) return true;
+        const name = String((command && command.name) || "").toLowerCase();
+        const aliases = Array.isArray(command && command.aliases)
+            ? command.aliases
+            : [];
+        if (name.startsWith(normalized)) return true;
+        if (
+            aliases.some((alias) =>
+                String(alias || "")
+                    .toLowerCase()
+                    .startsWith(normalized),
+            )
+        ) {
+            return true;
+        }
+        return commandSearchText(command).includes(normalized);
+    }
+
+    function subcommandMatchesQuery(subcommand, query) {
+        const normalized = normalizeChatCommandText(query);
+        if (!normalized) return true;
+        const name = String(
+            (subcommand && subcommand.name) || "",
+        ).toLowerCase();
+        const haystack = [
+            subcommand && subcommand.name,
+            subcommand && subcommand.trigger,
+            subcommand && subcommand.description,
+            subcommand && subcommand.args,
+            subcommand && subcommand.usage,
+        ]
+            .map((item) => String(item || "").toLowerCase())
+            .join(" ");
+        return name.startsWith(normalized) || haystack.includes(normalized);
+    }
+
+    function buildChatCommandContext(input) {
+        const value = String((input && input.value) || "");
+        const cursor =
+            input && typeof input.selectionStart === "number"
+                ? input.selectionStart
+                : value.length;
+        const beforeCursor = value.slice(0, cursor);
+        if (!beforeCursor.startsWith("/")) return null;
+        if (beforeCursor.includes("\n")) return null;
+        const afterCursor = value.slice(cursor);
+        if (afterCursor.includes("\n")) return null;
+        const leadingLine = value.split(/\r?\n/, 1)[0] || value;
+        if (leadingLine !== value) return null;
+        const tokens = beforeCursor.split(/\s+/);
+        const tokenCount = tokens.filter((token) => token.length > 0).length;
+        if (tokenCount > 2) return null;
+        const commandToken = tokens[0] || "";
+        const commandQuery = normalizeChatCommandText(commandToken);
+        const hasCommandBoundary =
+            /\s$/.test(beforeCursor) || tokens.length > 1;
+        const subcommandQuery =
+            hasCommandBoundary && tokens.length > 1
+                ? normalizeChatCommandText(tokens[tokens.length - 1] || "")
+                : "";
+        return {
+            value,
+            cursor,
+            commandToken,
+            commandQuery,
+            subcommandQuery,
+            hasCommandBoundary,
+            tokenCount,
+            mode: hasCommandBoundary ? "subcommand" : "command",
+        };
+    }
+
+    function findChatCommandByNameOrAlias(name) {
+        const normalized = normalizeChatCommandText(name);
+        if (!normalized) return null;
+        return (
+            runtimeState.chatCommands.find((command) => {
+                if (
+                    String((command && command.name) || "").toLowerCase() ===
+                    normalized
+                ) {
+                    return true;
+                }
+                const aliases = Array.isArray(command && command.aliases)
+                    ? command.aliases
+                    : [];
+                return aliases.some(
+                    (alias) => String(alias || "").toLowerCase() === normalized,
+                );
+            }) || null
+        );
+    }
+
+    async function loadChatCommands({ force = false } = {}) {
+        const now = Date.now();
+        if (
+            !force &&
+            runtimeState.chatCommandsLoaded &&
+            now - runtimeState.chatCommandsLoadedAt < CHAT_COMMAND_CACHE_MS
+        ) {
+            return runtimeState.chatCommands;
+        }
+        if (runtimeState.chatCommandsLoading) return runtimeState.chatCommands;
+        runtimeState.chatCommandsLoading = true;
+        try {
+            const data = await fetchJsonOrThrow(
+                "/api/runtime/commands?scope=webui",
+            );
+            runtimeState.chatCommands = Array.isArray(data.commands)
+                ? data.commands
+                : [];
+            runtimeState.chatCommandsLoaded = true;
+            runtimeState.chatCommandsLoadedAt = Date.now();
+            runtimeState.chatCommandsError = "";
+        } catch (error) {
+            runtimeState.chatCommandsError = appendRuntimeApiHint(
+                error.message || error,
+            );
+            throw error;
+        } finally {
+            runtimeState.chatCommandsLoading = false;
+        }
+        return runtimeState.chatCommands;
+    }
+
+    function currentChatCommandMatches(context) {
+        if (!context) return [];
+        if (context.mode === "subcommand") {
+            const command = findChatCommandByNameOrAlias(context.commandQuery);
+            const subcommands = Array.isArray(command && command.subcommands)
+                ? command.subcommands
+                : [];
+            if (!command || !subcommands.length) {
+                return [];
+            }
+            return subcommands
+                .filter((item) =>
+                    subcommandMatchesQuery(item, context.subcommandQuery),
+                )
+                .slice(0, CHAT_COMMAND_MAX_MATCHES)
+                .map((item) => ({
+                    type: "subcommand",
+                    command,
+                    subcommand: item,
+                }));
+        }
+        return runtimeState.chatCommands
+            .filter((item) => commandMatchesQuery(item, context.commandQuery))
+            .slice(0, CHAT_COMMAND_MAX_MATCHES)
+            .map((item) => ({ type: "command", command: item }));
+    }
+
+    function commandPaletteItemLabel(match) {
+        if (!match) return "";
+        if (match.type === "subcommand") {
+            return `/${match.command.name} ${match.subcommand.name}`;
+        }
+        return `/${match.command.name}`;
+    }
+
+    function commandPaletteItemDescription(match) {
+        if (!match) return "";
+        if (match.type === "subcommand") {
+            return String(match.subcommand.description || "").trim();
+        }
+        return String(match.command.description || "").trim();
+    }
+
+    function commandPaletteItemUsage(match) {
+        if (!match) return "";
+        if (match.type === "subcommand") {
+            return String(
+                match.subcommand.usage || match.subcommand.trigger || "",
+            ).trim();
+        }
+        return String(
+            match.command.usage || match.command.trigger || "",
+        ).trim();
+    }
+
+    function commandPaletteItemMeta(match) {
+        if (!match || match.type !== "command") return "";
+        const aliases = Array.isArray(match.command.aliases)
+            ? match.command.aliases
+            : [];
+        const subcommands = Array.isArray(match.command.subcommands)
+            ? match.command.subcommands
+            : [];
+        const parts = [];
+        if (aliases.length)
+            parts.push(aliases.map((item) => `/${item}`).join(", "));
+        if (subcommands.length) {
+            parts.push(
+                i18nFormat("runtime.chat_command_subcommands", {
+                    count: subcommands.length,
+                }),
+            );
+        }
+        return parts.join(" · ");
+    }
+
+    function renderChatCommandPalette() {
+        const palette = get("runtimeChatCommandPalette");
+        if (!palette) return;
+        const matches = runtimeState.chatCommandMatches;
+        palette.classList.toggle(
+            "is-open",
+            runtimeState.chatCommandPaletteOpen,
+        );
+        if (!runtimeState.chatCommandPaletteOpen) {
+            palette.hidden = true;
+            palette.innerHTML = "";
+            return;
+        }
+        palette.hidden = false;
+        if (runtimeState.chatCommandsLoading && !matches.length) {
+            palette.innerHTML = `<div class="runtime-chat-command-empty">${escapeHtml(t("common.loading"))}</div>`;
+            return;
+        }
+        if (runtimeState.chatCommandsError && !matches.length) {
+            palette.innerHTML = `<div class="runtime-chat-command-empty">${escapeHtml(runtimeState.chatCommandsError)}</div>`;
+            return;
+        }
+        if (!matches.length) {
+            palette.innerHTML = `<div class="runtime-chat-command-empty">${escapeHtml(t("runtime.chat_command_empty"))}</div>`;
+            return;
+        }
+        const hint =
+            runtimeState.chatCommandContext &&
+            runtimeState.chatCommandContext.mode === "subcommand"
+                ? t("runtime.chat_command_hint_subcommand")
+                : t("runtime.chat_command_hint");
+        palette.innerHTML =
+            `<div class="runtime-chat-command-head">${escapeHtml(hint)}</div>` +
+            matches
+                .map((match, index) => {
+                    const active =
+                        index === runtimeState.chatCommandActiveIndex
+                            ? " active"
+                            : "";
+                    const label = commandPaletteItemLabel(match);
+                    const description = commandPaletteItemDescription(match);
+                    const usage = commandPaletteItemUsage(match);
+                    const meta = commandPaletteItemMeta(match);
+                    return (
+                        `<button class="runtime-chat-command-item${active}" type="button" role="option" data-command-match-index="${index}" aria-selected="${active ? "true" : "false"}">` +
+                        `<span class="runtime-chat-command-main">` +
+                        `<span class="runtime-chat-command-name">${escapeHtml(label)}</span>` +
+                        `<span class="runtime-chat-command-desc">${escapeHtml(description || usage)}</span>` +
+                        `</span>` +
+                        `<span class="runtime-chat-command-side">` +
+                        `<code>${escapeHtml(usage || label)}</code>` +
+                        `${meta ? `<span>${escapeHtml(meta)}</span>` : ""}` +
+                        `</span>` +
+                        `</button>`
+                    );
+                })
+                .join("");
+    }
+
+    function openChatCommandPalette() {
+        runtimeState.chatCommandPaletteOpen = true;
+        renderChatCommandPalette();
+    }
+
+    function closeChatCommandPalette() {
+        runtimeState.chatCommandPaletteOpen = false;
+        runtimeState.chatCommandMatches = [];
+        runtimeState.chatCommandActiveIndex = 0;
+        runtimeState.chatCommandContext = null;
+        renderChatCommandPalette();
+    }
+
+    async function updateChatCommandPalette({ forceLoad = false } = {}) {
+        const input = get("runtimeChatInput");
+        const context = buildChatCommandContext(input);
+        if (!context) {
+            closeChatCommandPalette();
+            return;
+        }
+        runtimeState.chatCommandContext = context;
+        openChatCommandPalette();
+        try {
+            await loadChatCommands({ force: forceLoad });
+        } catch (_error) {
+            runtimeState.chatCommandMatches = [];
+            runtimeState.chatCommandActiveIndex = 0;
+            renderChatCommandPalette();
+            return;
+        }
+        runtimeState.chatCommandMatches = currentChatCommandMatches(context);
+        runtimeState.chatCommandActiveIndex = Math.min(
+            runtimeState.chatCommandActiveIndex,
+            Math.max(0, runtimeState.chatCommandMatches.length - 1),
+        );
+        renderChatCommandPalette();
+    }
+
+    function replaceChatCommandInput(match) {
+        const input = get("runtimeChatInput");
+        const context =
+            runtimeState.chatCommandContext || buildChatCommandContext(input);
+        if (!input || !context || !match) return;
+        let nextValue = "";
+        if (match.type === "subcommand") {
+            nextValue = `/${match.command.name} ${match.subcommand.name}`;
+        } else {
+            nextValue = `/${match.command.name}`;
+        }
+        const usage = commandPaletteItemUsage(match);
+        const usageSuffix = usage.replace(nextValue, "").trim();
+        if (usageSuffix) nextValue = `${nextValue} `;
+        input.value = nextValue;
+        const cursor = input.value.length;
+        input.setSelectionRange(cursor, cursor);
+        input.focus();
+        closeChatCommandPalette();
+    }
+
+    function chooseActiveChatCommandMatch() {
+        const matches = runtimeState.chatCommandMatches;
+        if (!matches.length) return false;
+        const index = Math.min(
+            Math.max(runtimeState.chatCommandActiveIndex, 0),
+            matches.length - 1,
+        );
+        replaceChatCommandInput(matches[index]);
+        return true;
+    }
+
+    function moveChatCommandActive(delta) {
+        const matches = runtimeState.chatCommandMatches;
+        if (!matches.length) return false;
+        const next =
+            (runtimeState.chatCommandActiveIndex + delta + matches.length) %
+            matches.length;
+        runtimeState.chatCommandActiveIndex = next;
+        renderChatCommandPalette();
+        return true;
+    }
+
     function chatConversationTitle(item) {
         return (
             String(item && item.title ? item.title : "").trim() ||
@@ -4189,6 +4562,7 @@
         runtimeState.toolBlocks.clear();
         clearToolCollapseTimers();
         hideSelectionQuoteButton();
+        closeChatCommandPalette();
         clearChatAttachments();
         clearChatReferences();
         const input = get("runtimeChatInput");
@@ -4738,6 +5112,7 @@
             runtimeState.lastEventSeq = 0;
             appendChatMessage("user", outboundMessage);
             input.value = "";
+            closeChatCommandPalette();
             clearChatAttachments();
             clearChatReferences();
             forceScrollChatToBottomSoon();
@@ -4960,6 +5335,50 @@
 
         const chatLog = get("runtimeChatLog");
         const conversationList = get("runtimeChatConversations");
+        const commandPalette = get("runtimeChatCommandPalette");
+        if (commandPalette) {
+            commandPalette.addEventListener("pointerdown", (event) => {
+                event.preventDefault();
+            });
+            commandPalette.addEventListener("click", (event) => {
+                const target = event.target;
+                if (!(target instanceof Element)) return;
+                const item = target.closest("[data-command-match-index]");
+                if (!item) return;
+                const index = Number.parseInt(
+                    item.getAttribute("data-command-match-index") || "-1",
+                    10,
+                );
+                if (
+                    !Number.isFinite(index) ||
+                    index < 0 ||
+                    index >= runtimeState.chatCommandMatches.length
+                ) {
+                    return;
+                }
+                runtimeState.chatCommandActiveIndex = index;
+                replaceChatCommandInput(runtimeState.chatCommandMatches[index]);
+            });
+            commandPalette.addEventListener("mousemove", (event) => {
+                const target = event.target;
+                if (!(target instanceof Element)) return;
+                const item = target.closest("[data-command-match-index]");
+                if (!item) return;
+                const index = Number.parseInt(
+                    item.getAttribute("data-command-match-index") || "-1",
+                    10,
+                );
+                if (
+                    Number.isFinite(index) &&
+                    index >= 0 &&
+                    index < runtimeState.chatCommandMatches.length &&
+                    runtimeState.chatCommandActiveIndex !== index
+                ) {
+                    runtimeState.chatCommandActiveIndex = index;
+                    renderChatCommandPalette();
+                }
+            });
+        }
         if (conversationList) {
             conversationList.addEventListener("click", (event) => {
                 const target = event.target;
@@ -5064,12 +5483,63 @@
 
         const chatInput = get("runtimeChatInput");
         if (chatInput) {
-            chatInput.addEventListener("focus", hideSelectionQuoteButton);
+            chatInput.addEventListener("focus", () => {
+                hideSelectionQuoteButton();
+                updateChatCommandPalette().catch(() => {});
+            });
             chatInput.addEventListener("keydown", (event) => {
+                if (runtimeState.chatCommandPaletteOpen) {
+                    if (event.key === "ArrowDown") {
+                        if (moveChatCommandActive(1)) event.preventDefault();
+                        return;
+                    }
+                    if (event.key === "ArrowUp") {
+                        if (moveChatCommandActive(-1)) event.preventDefault();
+                        return;
+                    }
+                    if (event.key === "Escape") {
+                        closeChatCommandPalette();
+                        event.preventDefault();
+                        return;
+                    }
+                    if (event.key === "Tab") {
+                        if (chooseActiveChatCommandMatch()) {
+                            event.preventDefault();
+                        }
+                        return;
+                    }
+                    if (event.key === "Enter" && !event.shiftKey) {
+                        if (chooseActiveChatCommandMatch()) {
+                            event.preventDefault();
+                            return;
+                        }
+                    }
+                }
                 if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
                     sendChatMessage();
                 }
+            });
+            chatInput.addEventListener("input", () => {
+                runtimeState.chatCommandActiveIndex = 0;
+                updateChatCommandPalette().catch(() => {});
+            });
+            chatInput.addEventListener("keyup", (event) => {
+                if (
+                    [
+                        "ArrowLeft",
+                        "ArrowRight",
+                        "Home",
+                        "End",
+                        "Backspace",
+                        "Delete",
+                    ].includes(event.key)
+                ) {
+                    updateChatCommandPalette().catch(() => {});
+                }
+            });
+            chatInput.addEventListener("blur", () => {
+                window.setTimeout(closeChatCommandPalette, 120);
             });
             chatInput.addEventListener("paste", (event) => {
                 const files =

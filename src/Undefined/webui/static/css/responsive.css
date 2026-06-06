@@ -391,6 +391,19 @@
     row-gap: 0;
     min-width: 0;
   }
+  .runtime-chat-command-palette {
+    max-height: min(310px, 42vh);
+    padding: 6px;
+  }
+  .runtime-chat-command-item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+    min-height: 64px;
+    padding: 9px;
+  }
+  .runtime-chat-command-side {
+    justify-items: start;
+  }
   .runtime-chat-references {
     grid-area: references;
     align-self: stretch;

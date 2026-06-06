@@ -24,7 +24,17 @@ from ._helpers import (
     _AUTH_HEADER,
 )
 from ._naga_state import NagaState
-from .routes import chat, cognitive, health, memes, memory, naga, system, tools
+from .routes import (
+    chat,
+    cognitive,
+    commands,
+    health,
+    memes,
+    memory,
+    naga,
+    system,
+    tools,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +142,11 @@ class RuntimeAPIServer:
                 web.get(
                     "/api/v1/cognitive/profile/{entity_type}/{entity_id}",
                     self._cognitive_profile_handler,
+                ),
+                web.get("/api/v1/commands", self._commands_list_handler),
+                web.get(
+                    "/api/v1/commands/{command_name}",
+                    self._command_detail_handler,
                 ),
                 web.get(
                     "/api/v1/chat/conversations",
@@ -269,6 +284,13 @@ class RuntimeAPIServer:
 
     async def _cognitive_profile_handler(self, request: web.Request) -> Response:
         return await cognitive.cognitive_profile_handler(self._ctx, request)
+
+    # Commands
+    async def _commands_list_handler(self, request: web.Request) -> Response:
+        return await commands.commands_list_handler(self._ctx, request)
+
+    async def _command_detail_handler(self, request: web.Request) -> Response:
+        return await commands.command_detail_handler(self._ctx, request)
 
     # Chat
     async def _run_webui_chat(

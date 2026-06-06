@@ -85,6 +85,25 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
         "/api/v1/cognitive/profile/{entity_type}/{entity_id}": {
             "get": {"summary": "Get a profile by entity type/id"}
         },
+        "/api/v1/commands": {
+            "get": {
+                "summary": "List slash command metadata",
+                "description": (
+                    "Returns slash commands, aliases, subcommands, usage, "
+                    "permission and WebUI/private/group availability. "
+                    "Use scope=webui for the WebChat virtual private session."
+                ),
+            }
+        },
+        "/api/v1/commands/{command_name}": {
+            "get": {
+                "summary": "Get slash command metadata by name or alias",
+                "description": (
+                    "Returns one canonical slash command with aliases, "
+                    "subcommands, usage and availability metadata."
+                ),
+            }
+        },
         "/api/v1/chat": {
             "post": {
                 "summary": "WebUI special private chat",

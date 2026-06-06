@@ -142,6 +142,62 @@ def test_webchat_frontend_has_conversation_sidebar() -> None:
     assert "runtime.chat_new_conversation" in i18n
 
 
+def test_webchat_frontend_has_slash_command_palette() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    template = WEBUI_TEMPLATE.read_text(encoding="utf-8")
+    css = RUNTIME_CSS.read_text(encoding="utf-8")
+    responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
+    i18n = I18N_JS.read_text(encoding="utf-8")
+
+    assert 'id="runtimeChatCommandPalette"' in template
+    input_row = template.split('class="runtime-chat-input-row"', 1)[1].split(
+        'id="runtimeChatReferences"',
+        1,
+    )[0]
+    assert input_row.index('id="runtimeChatCommandPalette"') < input_row.index(
+        'id="runtimeChatInput"'
+    )
+
+    assert "chatCommandsLoaded" in source
+    assert "CHAT_COMMAND_CACHE_MS" in source
+    assert "CHAT_COMMAND_MAX_MATCHES" in source
+    assert '"/api/runtime/commands?scope=webui"' in source
+    assert "function buildChatCommandContext" in source
+    assert 'if (!beforeCursor.startsWith("/")) return null' in source
+    assert "if (tokenCount > 2) return null" in source
+    assert 'mode: hasCommandBoundary ? "subcommand" : "command"' in source
+    assert "function currentChatCommandMatches" in source
+    assert "findChatCommandByNameOrAlias(context.commandQuery)" in source
+    assert (
+        "if (!command || !subcommands.length) {\n                return [];" in source
+    )
+    assert "function replaceChatCommandInput" in source
+    assert "chooseActiveChatCommandMatch()" in source
+    assert 'event.key === "ArrowDown"' in source
+    assert 'event.key === "ArrowUp"' in source
+    assert 'event.key === "Tab"' in source
+    assert 'event.key === "Escape"' in source
+    assert "data-command-match-index" in source
+    assert "closeChatCommandPalette()" in source
+
+    assert ".runtime-chat-command-palette" in css
+    palette_block = css.split(".runtime-chat-command-palette {", 1)[1].split(
+        ".runtime-chat-command-palette.is-open",
+        1,
+    )[0]
+    assert "position: absolute;" in palette_block
+    assert "bottom: calc(100% + 10px);" in palette_block
+    assert "max-height: min(360px, 46vh);" in palette_block
+    assert ".runtime-chat-command-item" in css
+    assert ".runtime-chat-command-side code" in css
+    assert ".runtime-chat-command-palette" in responsive_css
+    assert "grid-template-columns: minmax(0, 1fr);" in responsive_css
+    assert "runtime.chat_command_hint" in i18n
+    assert "runtime.chat_command_hint_subcommand" in i18n
+    assert "runtime.chat_command_empty" in i18n
+    assert "runtime.chat_command_subcommands" in i18n
+
+
 def test_webchat_frontend_sends_conversation_id_with_history_and_jobs() -> None:
     source = RUNTIME_JS.read_text(encoding="utf-8")
 

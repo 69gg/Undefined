@@ -399,6 +399,33 @@ async def runtime_cognitive_profile_handler(request: web.Request) -> Response:
     )
 
 
+@routes.get("/api/v1/management/runtime/commands")
+@routes.get("/api/runtime/commands")
+async def runtime_commands_list_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    return await _proxy_runtime(
+        method="GET",
+        path="/api/v1/commands",
+        params=request.query,
+    )
+
+
+@routes.get("/api/v1/management/runtime/commands/{command_name}")
+@routes.get("/api/runtime/commands/{command_name}")
+async def runtime_command_detail_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    command_name = _url_quote(
+        str(request.match_info.get("command_name", "")).strip(), safe=""
+    )
+    return await _proxy_runtime(
+        method="GET",
+        path=f"/api/v1/commands/{command_name}",
+        params=request.query,
+    )
+
+
 @routes.post("/api/v1/management/runtime/chat")
 @routes.post("/api/runtime/chat")
 async def runtime_chat_handler(request: web.Request) -> web.StreamResponse:

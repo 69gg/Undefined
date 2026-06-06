@@ -219,6 +219,21 @@ curl http://127.0.0.1:8788/openapi.json
 
 说明：这些接口仅在 `cognitive.enabled = true` 时可用，否则返回错误。
 
+### 斜杠命令元数据
+
+- `GET /api/v1/commands`
+- `GET /api/v1/commands/{command_name}`
+
+查询参数：
+
+- `scope`：`webui` / `private` / `group`，默认 `webui`。`webui` 会按 WebChat 虚拟私聊的实际执行路径过滤：身份仍是 `system#42`，权限主体使用配置中的 `superadmin_qq`。
+- `q`：按命令名、别名、描述、用法和子命令过滤（可选）。
+- `include_hidden`：是否包含 `show_in_help=false` 的命令，默认 `false`。
+- `include_unavailable`：是否返回当前 scope / 权限下不可用的命令，并在 `unavailable_reason` 标明原因，默认 `false`。
+- `sender_id` / `user_id` / `group_id`：当 `scope=private` 或 `scope=group` 时可指定用于权限和可见性策略判断的身份。
+
+响应包含 `commands[]`。命令项提供 `name`、`trigger`、`description`、`usage`、`example`、`permission`、`allow_in_private`、`aliases`、`alias_triggers`、`subcommands[]`、`inference`、`available` 和 `unavailable_reason`；子命令项提供 `name`、`trigger`、`description`、`args`、`usage`、`permission`、`allow_in_private`、`available` 和 `unavailable_reason`。WebUI 的 `/` 补全面板使用 `GET /api/v1/commands?scope=webui`，因此展示结果与 WebChat 实际命令分发保持一致。
+
 ### WebUI AI Chat（特殊私聊）
 
 - `POST /api/v1/chat`
@@ -665,6 +680,8 @@ WebUI 不直接在前端暴露 `auth_key`，而是通过后端代理访问主进
 - `GET /api/runtime/cognitive/events`
 - `GET /api/runtime/cognitive/profiles`
 - `GET /api/runtime/cognitive/profile/{entity_type}/{entity_id}`
+- `GET /api/runtime/commands`
+- `GET /api/runtime/commands/{command_name}`
 - `GET /api/runtime/chat/conversations`
 - `POST /api/runtime/chat/conversations`
 - `PATCH /api/runtime/chat/conversations/{conversation_id}`
@@ -683,6 +700,7 @@ WebUI 不直接在前端暴露 `auth_key`，而是通过后端代理访问主进
 - `POST /api/runtime/tools/invoke`
 
 WebUI 后端会自动从 `config.toml` 读取 `[api].auth_key` 并注入 Header。
+`/api/runtime/commands` 代理斜杠命令 REST 资源，WebChat 输入框的 `/` 补全默认请求 `scope=webui`。
 `/api/runtime/chat/conversations` 代理 WebChat 多对话管理；`/api/runtime/chat`、`/api/runtime/chat/history`、`/api/runtime/chat/jobs` 和 `/api/runtime/chat/jobs/active` 会透传 `conversation_id`。`/api/runtime/chat/files` 接收已登录 WebUI 发起的 `multipart/form-data`，字段名为 `file`，将待发送文件缓存到 WebUI 文件缓存目录并返回 `{id,name,size}`；随后前端把它作为 `CQ:file,id=<id>,name=<name>,size=<size>` 合并进同一条 WebChat job 消息。WebChat 引用功能只在前端把引用内容格式化为 Markdown `>` 引用块并合并进 `message`，不经过文件缓存代理。`/api/runtime/chat/jobs/{job_id}/events` 默认代理 JSON 增量查询；显式请求 `Accept: text/event-stream` 时会透传 SSE keep-alive，聊天代理超时按当前聊天模型队列预算计算。
 
 ## 7. 故障排查
