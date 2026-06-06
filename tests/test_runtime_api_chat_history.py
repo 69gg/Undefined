@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock
 
 import pytest
 from aiohttp import web
@@ -431,7 +430,11 @@ async def test_runtime_chat_history_clear_clears_only_when_no_active_job() -> No
 
     assert payload["success"] is True
     assert payload["cleared"] == 2
-    assert history.records
+    conversation = await server._chat_job_manager.conversation_store.get_conversation(
+        str(payload["conversation_id"])
+    )
+    assert conversation is not None
+    assert conversation["messages"] == []
 
 
 @pytest.mark.asyncio
@@ -463,10 +466,7 @@ async def test_runtime_chat_history_clear_returns_409_for_running_job(
         ),
         command_dispatcher=SimpleNamespace(),
         queue_manager=SimpleNamespace(snapshot=lambda: {}),
-        history_manager=SimpleNamespace(
-            add_private_message=AsyncMock(),
-            clear_private_history=history.clear_private_history,
-        ),
+        history_manager=history,
     )
     monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
     server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
@@ -507,10 +507,7 @@ async def test_runtime_chat_history_clear_returns_409_until_history_finalized() 
         ),
         command_dispatcher=SimpleNamespace(),
         queue_manager=SimpleNamespace(snapshot=lambda: {}),
-        history_manager=SimpleNamespace(
-            add_private_message=AsyncMock(),
-            clear_private_history=history.clear_private_history,
-        ),
+        history_manager=history,
     )
     manager = runtime_api_chat.ChatJobManager(context)
     job = runtime_api_chat.ChatJob(
@@ -544,4 +541,10 @@ async def test_runtime_chat_history_clear_returns_409_until_history_finalized() 
     payload = json.loads(response.text or "{}")
 
     assert response.status == 200
-    assert payload["cleared"] == 0
+    assert payload["success"] is True
+    assert payload["cleared"] == 2
+    conversation = await manager.conversation_store.get_conversation(
+        str(payload["conversation_id"])
+    )
+    assert conversation is not None
+    assert conversation["messages"] == []

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shutil
 import uuid
 from collections.abc import Mapping
 from pathlib import Path
@@ -14,6 +13,7 @@ from aiohttp.web_response import Response
 
 from Undefined.ai.queue_budget import compute_queued_llm_timeout_seconds
 from Undefined.config import get_config
+from Undefined.utils import io as async_io
 from Undefined.utils.paths import CACHE_DIR, WEBUI_FILE_CACHE_DIR
 from ._shared import check_auth, routes
 
@@ -717,29 +717,29 @@ async def runtime_chat_file_upload_handler(request: web.Request) -> Response:
     cache_root = (Path.cwd() / WEBUI_FILE_CACHE_DIR).resolve()
     if cache_root not in dest_dir.parents and dest_dir != cache_root:
         return web.json_response({"error": "Invalid file path"}, status=400)
-    dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / _random_upload_filename(raw_name)
     cfg = get_config(strict=False)
     max_size_mb = max(1, int(getattr(cfg, "messages_send_url_file_max_size_mb", 100)))
     max_size_bytes = max_size_mb * 1024 * 1024
 
     size = 0
+    chunks = bytearray()
     try:
-        with dest.open("wb") as fp:
-            while True:
-                chunk = await field_any.read_chunk()
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > max_size_bytes:
-                    shutil.rmtree(dest_dir, ignore_errors=True)
-                    return web.json_response(
-                        {"error": "file too large", "max_size": max_size_bytes},
-                        status=413,
-                    )
-                fp.write(chunk)
+        while True:
+            chunk = await field_any.read_chunk()
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > max_size_bytes:
+                await async_io.delete_tree(dest_dir)
+                return web.json_response(
+                    {"error": "file too large", "max_size": max_size_bytes},
+                    status=413,
+                )
+            chunks.extend(chunk)
+        await async_io.write_bytes(dest, bytes(chunks), use_lock=False)
     except Exception:
-        shutil.rmtree(dest_dir, ignore_errors=True)
+        await async_io.delete_tree(dest_dir)
         raise
 
     return web.json_response(

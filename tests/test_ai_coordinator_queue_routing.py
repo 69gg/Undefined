@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -229,11 +230,16 @@ async def test_execute_auto_reply_send_msg_cb_passes_history_message(
     captured_resources: dict[str, Any] = {}
 
     async def _fake_ask(*_args: Any, **kwargs: Any) -> str:
-        captured_extra_context.update(kwargs.get("extra_context", {}))
+        extra_context = cast(dict[str, Any], kwargs.get("extra_context", {}))
+        captured_extra_context.update(extra_context)
         current_context = RequestContext.current()
         assert current_context is not None
         captured_resources.update(current_context.get_resources())
-        await kwargs["send_message_callback"]("hello group")
+        send_message_callback = cast(
+            Callable[[str], Awaitable[None]],
+            kwargs["send_message_callback"],
+        )
+        await send_message_callback("hello group")
         return ""
 
     coordinator.config = SimpleNamespace(bot_qq=10000)

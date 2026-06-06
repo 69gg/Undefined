@@ -8,22 +8,13 @@ from typing import Any
 from Undefined.ai.transports.openai_transport import RESPONSES_OUTPUT_ITEMS_KEY
 from Undefined.skills.agents.runner.context import prepare_agent_run
 from Undefined.skills.agents.runner.tools import execute_assistant_tool_calls
+from Undefined.skills.agents.runner.webchat_utils import (
+    webchat_agent_path,
+    webchat_depth,
+)
 
 
 DEFAULT_AGENT_MAX_ITERATIONS = 1000
-
-
-def _webchat_agent_path(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value if str(item).strip()]
-
-
-def _webchat_depth(value: Any) -> int:
-    try:
-        return max(0, int(value))
-    except (TypeError, ValueError):
-        return 0
 
 
 async def _emit_webchat_agent_stage(
@@ -45,8 +36,8 @@ async def _emit_webchat_agent_stage(
         "agent_name": agent_name,
         "name": agent_name,
         "stage": stage,
-        "depth": _webchat_depth(context.get("webchat_depth")),
-        "agent_path": _webchat_agent_path(context.get("webchat_agent_path")),
+        "depth": webchat_depth(context.get("webchat_depth")),
+        "agent_path": webchat_agent_path(context.get("webchat_agent_path")),
     }
     if detail is not None:
         payload["detail"] = detail

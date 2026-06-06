@@ -365,7 +365,8 @@ async def commands_list_handler(
     ctx: RuntimeAPIContext, request: web.Request
 ) -> Response:
     payload = _build_commands_payload(ctx, request)
-    assert payload is not None
+    if payload is None:
+        return _json_error("Missing or invalid commands payload", status=400)
     logger.info(
         "[RuntimeAPI][Commands] 列出命令: scope=%s count=%s",
         payload.get("scope"),

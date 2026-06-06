@@ -44,6 +44,7 @@ from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
 from Undefined.services.queue_manager import QUEUE_LANE_SUPERADMIN
 from Undefined.utils.common import message_to_segments
+from Undefined.utils import io as async_io
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
 
 logger = logging.getLogger(__name__)
@@ -1767,7 +1768,7 @@ async def _history_attachments(
             scope_key=scope_key,
         )
         if resolved is not None:
-            ref.update(_history_attachment_render_fields(resolved))
+            ref.update(await _history_attachment_render_fields(resolved))
         attachments.append(ref)
     return attachments
 
@@ -1794,7 +1795,7 @@ async def _resolve_history_attachment(
     return None
 
 
-def _history_attachment_render_fields(record: Any) -> dict[str, str]:
+async def _history_attachment_render_fields(record: Any) -> dict[str, str]:
     fields: dict[str, str] = {}
     source_ref = str(getattr(record, "source_ref", "") or "").strip()
     if source_ref:
@@ -1805,7 +1806,7 @@ def _history_attachment_render_fields(record: Any) -> dict[str, str]:
         if local_path:
             try:
                 path = Path(local_path)
-                if path.is_file():
+                if await async_io.is_file(path):
                     fields["render_source"] = path.resolve().as_uri()
             except OSError:
                 pass

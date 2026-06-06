@@ -17,7 +17,10 @@ from Undefined.ai.tooling import END_CO_CALL_REJECT_CONTENT
 from Undefined.context import RequestContext
 from Undefined.render import render_html_to_image, render_markdown_to_html
 from Undefined.services.message_summary_fetch import fetch_session_messages
+from Undefined.attachments import scope_from_context
 from Undefined.utils.logging import log_debug_json, redact_string
+from Undefined.utils.message_turn import mark_message_sent_this_turn
+from Undefined.utils.paths import DOWNLOAD_CACHE_DIR, ensure_dir
 from Undefined.utils.tool_calls import parse_tool_arguments
 
 logger = logging.getLogger(__name__)
@@ -39,6 +42,19 @@ def _webchat_depth(value: Any) -> int:
 def _webchat_call_id(parent_call_id: str, call_id: str, fallback: str) -> str:
     local_id = str(call_id or fallback or "tool").strip() or "tool"
     return f"{parent_call_id}/{local_id}" if parent_call_id else local_id
+
+
+async def _emit_webchat_event_safely(
+    callback: Callable[[str, dict[str, Any]], Awaitable[None]] | None,
+    event: str,
+    payload: dict[str, Any],
+) -> None:
+    if callback is None:
+        return
+    try:
+        await callback(event, payload)
+    except Exception:
+        logger.exception("[WebChat事件] 回调发送失败: event=%s", event)
 
 
 class ClientAskLoopMixin(ClientQueueMixin):
@@ -101,12 +117,14 @@ class ClientAskLoopMixin(ClientQueueMixin):
             webchat_event_callback = None
 
         async def emit_webchat_stage(stage: str, detail: Any | None = None) -> None:
-            if webchat_event_callback is None:
-                return
             payload: dict[str, Any] = {"stage": stage}
             if detail is not None:
                 payload["detail"] = detail
-            await webchat_event_callback("stage", payload)
+            await _emit_webchat_event_safely(
+                webchat_event_callback,
+                "stage",
+                payload,
+            )
 
         # ===== 阶段二：构建 LLM messages 与 OpenAI tools schema =====
         await emit_webchat_stage("building_context")
@@ -203,6 +221,13 @@ class ClientAskLoopMixin(ClientQueueMixin):
         tool_context.setdefault(
             "attachment_registry",
             getattr(self, "attachment_registry", None),
+        )
+        tool_context.setdefault("get_scope_from_context", scope_from_context)
+        tool_context.setdefault("download_cache_dir", DOWNLOAD_CACHE_DIR)
+        tool_context.setdefault("ensure_dir_fn", ensure_dir)
+        tool_context.setdefault(
+            "mark_message_sent_this_turn",
+            mark_message_sent_this_turn,
         )
         tool_context.setdefault("memory_storage", self.memory_storage)
         tool_context.setdefault("knowledge_manager", self._knowledge_manager)
@@ -519,18 +544,18 @@ class ClientAskLoopMixin(ClientQueueMixin):
                         "depth": webchat_depth,
                         "agent_path": webchat_agent_path,
                     }
-                    if webchat_event_callback is not None:
-                        await webchat_event_callback(
-                            "tool_start",
-                            {
-                                "tool_call_id": call_id,
-                                "name": internal_function_name,
-                                "api_name": api_function_name,
-                                "arguments": function_args,
-                                "is_agent": is_agent_call,
-                                **webchat_event_base,
-                            },
-                        )
+                    await _emit_webchat_event_safely(
+                        webchat_event_callback,
+                        "tool_start",
+                        {
+                            "tool_call_id": call_id,
+                            "name": internal_function_name,
+                            "api_name": api_function_name,
+                            "arguments": function_args,
+                            "is_agent": is_agent_call,
+                            **webchat_event_base,
+                        },
+                    )
 
                     # 检测 end 工具，暂存后统一处理
                     if internal_function_name == "end":
@@ -573,33 +598,33 @@ class ClientAskLoopMixin(ClientQueueMixin):
                                 internal_name, args, context
                             )
                         except Exception as exc:
-                            if webchat_event_callback is not None:
-                                await webchat_event_callback(
-                                    "tool_end",
-                                    {
-                                        "tool_call_id": call_id,
-                                        "name": internal_name,
-                                        "api_name": api_name,
-                                        "ok": False,
-                                        "result": f"执行失败: {str(exc)}",
-                                        "is_agent": is_agent_call,
-                                        **webchat_event_base,
-                                    },
-                                )
-                            raise
-                        if webchat_event_callback is not None:
-                            await webchat_event_callback(
+                            await _emit_webchat_event_safely(
+                                webchat_event_callback,
                                 "tool_end",
                                 {
                                     "tool_call_id": call_id,
                                     "name": internal_name,
                                     "api_name": api_name,
-                                    "ok": True,
-                                    "result": str(result),
+                                    "ok": False,
+                                    "result": f"执行失败: {str(exc)}",
                                     "is_agent": is_agent_call,
                                     **webchat_event_base,
                                 },
                             )
+                            raise
+                        await _emit_webchat_event_safely(
+                            webchat_event_callback,
+                            "tool_end",
+                            {
+                                "tool_call_id": call_id,
+                                "name": internal_name,
+                                "api_name": api_name,
+                                "ok": True,
+                                "result": str(result),
+                                "is_agent": is_agent_call,
+                                **webchat_event_base,
+                            },
+                        )
                         return result
 
                     tool_tasks.append(

@@ -2976,9 +2976,34 @@
         );
     }
 
-    function htmlRunnerPickerScript() {
+    function createHtmlRunnerNonce() {
+        if (
+            window.crypto &&
+            typeof window.crypto.getRandomValues === "function"
+        ) {
+            const bytes = new Uint8Array(16);
+            window.crypto.getRandomValues(bytes);
+            return Array.from(bytes, (byte) =>
+                byte.toString(16).padStart(2, "0"),
+            ).join("");
+        }
+        return String(Date.now()) + Math.random().toString(16).slice(2);
+    }
+
+    function htmlRunnerCspMeta(nonce) {
+        const safeNonce = escapeHtml(String(nonce || ""));
+        return (
+            `<meta http-equiv="Content-Security-Policy" ` +
+            `content="default-src 'none'; script-src 'nonce-${safeNonce}'; ` +
+            `style-src 'unsafe-inline'; img-src data: blob:; font-src data:; ` +
+            `connect-src 'none'; form-action 'none'; base-uri 'none'">`
+        );
+    }
+
+    function htmlRunnerPickerScript(nonce) {
         const confirmHint = JSON.stringify(t("runtime.html_pick_confirm_hint"));
-        return `<script>
+        const nonceAttr = escapeHtml(String(nonce || ""));
+        return `<script nonce="${nonceAttr}">
 (() => {
   let active = false;
   let selected = null;
@@ -3106,12 +3131,25 @@
 <\/script>`;
     }
 
-    function injectHtmlRunnerPicker(html) {
-        const script = htmlRunnerPickerScript();
-        if (/<\/body>/i.test(html)) {
-            return html.replace(/<\/body>/i, `${script}</body>`);
+    function injectHtmlRunnerSecurity(html) {
+        const nonce = createHtmlRunnerNonce();
+        const csp = htmlRunnerCspMeta(nonce);
+        const script = htmlRunnerPickerScript(nonce);
+        let secured = String(html || "");
+        if (/<head\b[^>]*>/i.test(secured)) {
+            secured = secured.replace(/<head\b[^>]*>/i, (match) => match + csp);
+        } else if (/<html\b[^>]*>/i.test(secured)) {
+            secured = secured.replace(
+                /<html\b[^>]*>/i,
+                (match) => `${match}<head>${csp}</head>`,
+            );
+        } else {
+            secured = `${csp}${secured}`;
         }
-        return `${html}${script}`;
+        if (/<\/body>/i.test(secured)) {
+            return secured.replace(/<\/body>/i, `${script}</body>`);
+        }
+        return `${secured}${script}`;
     }
 
     function syncHtmlRunnerPickModeToFrame() {
@@ -3260,7 +3298,7 @@
         if (meta) {
             meta.textContent = String(options.language || "html").toUpperCase();
         }
-        frame.srcdoc = injectHtmlRunnerPicker(html);
+        frame.srcdoc = injectHtmlRunnerSecurity(html);
         showToast(t("runtime.html_ready"), "success", 1200);
     }
 

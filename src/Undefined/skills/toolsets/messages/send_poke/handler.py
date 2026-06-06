@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Dict, Literal, cast
 
 from Undefined.context import RequestContext
-from Undefined.utils.message_turn import mark_message_sent_this_turn
+from Undefined.skills.toolsets.messages.context_utils import mark_message_sent
 
 logger = logging.getLogger(__name__)
 
@@ -211,7 +211,7 @@ def _resolve_onebot_client(context: Dict[str, Any]) -> Any | None:
 
 
 def _mark_action_sent(context: Dict[str, Any]) -> None:
-    mark_message_sent_this_turn(context)
+    mark_message_sent(context)
 
 
 def _resolve_bot_qq(context: Dict[str, Any]) -> int:

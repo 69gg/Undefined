@@ -16,8 +16,8 @@
         rel="stylesheet">
     <link rel="stylesheet" href="/static/css/highlight-github.min.css">
     <link rel="stylesheet" href="/static/css/style.css">
-    <script id="initial-state" type="application/json">__INITIAL_STATE__</script>
-    <script id="initial-view" type="application/json">__INITIAL_VIEW__</script>
+    <script id="initial-state" type="application/json" nonce="__CSP_NONCE__">__INITIAL_STATE__</script>
+    <script id="initial-view" type="application/json" nonce="__CSP_NONCE__">__INITIAL_VIEW__</script>
 </head>
 
 <body>
@@ -781,6 +781,7 @@
                                 class="runtime-chat-sidebar-tab"
                                 type="button"
                                 aria-expanded="false"
+                                aria-controls="runtimeChatConversationDrawerPanel"
                                 data-i18n-aria-label="runtime.chat_conversations"
                                 aria-label="对话"
                             >
@@ -833,7 +834,7 @@
                                     <button id="btnRuntimeHtmlClose" class="btn ghost runtime-html-runner-btn" type="button" data-i18n="runtime.close">关闭</button>
                                 </div>
                             </div>
-                            <iframe id="runtimeHtmlRunnerFrame" class="runtime-html-runner-frame" sandbox="allow-scripts allow-forms allow-modals" title="HTML preview"></iframe>
+                            <iframe id="runtimeHtmlRunnerFrame" class="runtime-html-runner-frame" sandbox="allow-scripts" title="HTML preview"></iframe>
                             <button id="runtimeHtmlRunnerResize" class="runtime-html-runner-resize" type="button" aria-label="调整 HTML 预览大小"></button>
                         </div>
                     </div>

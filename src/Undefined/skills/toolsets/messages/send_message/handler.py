@@ -6,9 +6,9 @@ from Undefined.attachments import (
     render_message_with_pic_placeholders,
     scope_from_context,
 )
-from Undefined.utils.message_turn import mark_message_sent_this_turn
 from Undefined.utils.message_targets import TargetType, parse_positive_int
 from Undefined.utils.message_targets import resolve_message_target
+from Undefined.skills.toolsets.messages.context_utils import mark_message_sent
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +169,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                     message,
                     **send_kwargs,
                 )
-            mark_message_sent_this_turn(context)
+            mark_message_sent(context)
             await dispatch_pending_file_sends(
                 rendered,
                 sender=sender,
@@ -193,7 +193,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         if send_message_callback and _is_current_group_target(context, target_id):
             try:
                 await send_message_callback(message, reply_to=reply_to_id)
-                mark_message_sent_this_turn(context)
+                mark_message_sent(context)
                 return "消息已发送"
             except Exception as e:
                 logger.exception(
@@ -216,7 +216,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             await send_private_message_callback(
                 target_id, message, reply_to=reply_to_id
             )
-            mark_message_sent_this_turn(context)
+            mark_message_sent(context)
             return "消息已发送"
         except Exception as e:
             logger.exception(
@@ -230,7 +230,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if send_message_callback and _is_current_private_target(context, target_id):
         try:
             await send_message_callback(message, reply_to=reply_to_id)
-            mark_message_sent_this_turn(context)
+            mark_message_sent(context)
             return "消息已发送"
         except Exception as e:
             logger.exception(

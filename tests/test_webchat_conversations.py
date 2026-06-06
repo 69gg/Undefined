@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -48,7 +49,11 @@ def _context(history: Any | None = None) -> RuntimeAPIContext:
             superadmin_qq=10001,
             bot_qq=20002,
         ),
-        onebot=SimpleNamespace(connection_status=lambda: {}),
+        onebot=SimpleNamespace(
+            connection_status=lambda: {},
+            get_image=AsyncMock(return_value=None),
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
         ai=SimpleNamespace(
             attachment_registry=object(),
             memory_storage=SimpleNamespace(count=lambda: 0),
@@ -59,22 +64,81 @@ def _context(history: Any | None = None) -> RuntimeAPIContext:
     )
 
 
-def test_webchat_runtime_has_detailed_flow_logs() -> None:
-    route_source = Path("src/Undefined/api/routes/chat.py").read_text(encoding="utf-8")
-    store_source = Path("src/Undefined/api/webchat_store.py").read_text(
-        encoding="utf-8"
-    )
+@pytest.mark.asyncio
+async def test_webchat_runtime_has_detailed_flow_logs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.chdir(tmp_path)
 
-    assert "[RuntimeAPI][WebChat] 创建 job" in route_source
-    assert "[RuntimeAPI][WebChat] job 开始" in route_source
-    assert "[RuntimeAPI][WebChat] 输入附件注册完成" in route_source
-    assert "[RuntimeAPI][WebChat] 调用 AI" in route_source
-    assert "[RuntimeAPI][WebChat] job 历史落盘" in route_source
-    assert "[RuntimeAPI][WebChat] 查询 job 事件" in route_source
-    assert "[RuntimeAPI][WebChat] 调度标题生成" in route_source
-    assert "[WebChat] 追加消息" in store_source
-    assert "[WebChat] 会话存储加载完成" in store_source
-    assert "[WebChat] 生成会话标题" in store_source
+    async def _fake_ask(
+        *_args: Any,
+        send_message_callback: Any,
+        **_kwargs: Any,
+    ) -> str:
+        await send_message_callback("AI 已处理")
+        return ""
+
+    async def _fake_generate_title(_ai: Any, question: str, answer: str) -> str:
+        _ = question, answer
+        return "生成标题"
+
+    ai = SimpleNamespace(
+        ask=_fake_ask,
+        attachment_registry=None,
+        memory_storage=SimpleNamespace(count=lambda: 0),
+        runtime_config=SimpleNamespace(),
+    )
+    context = _context(history=SimpleNamespace(get_recent_private=lambda *_args: []))
+    context.ai = ai
+    monkeypatch.setattr(
+        runtime_api_chat, "generate_webchat_title", _fake_generate_title
+    )
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+
+    with caplog.at_level(logging.INFO):
+        create_response = await server._chat_job_create_handler(
+            cast(
+                web.Request,
+                cast(Any, _JsonRequest(query={}, _json={"message": "请回答"})),
+            )
+        )
+        create_payload = json.loads(create_response.text or "{}")
+        job_id = str(create_payload["job_id"])
+        job = await server._chat_job_manager.get_job(job_id)
+        assert job is not None
+        await job.done.wait()
+
+        events_response = await server._chat_job_events_handler(
+            cast(
+                web.Request,
+                cast(
+                    Any,
+                    SimpleNamespace(
+                        query={},
+                        headers={},
+                        match_info={"job_id": job_id},
+                    ),
+                ),
+            )
+        )
+        assert events_response.status == 200
+        title_task = server._chat_job_manager.conversation_store._title_tasks[
+            job.conversation_id
+        ]
+        await title_task
+
+    log_text = caplog.text
+    assert "[RuntimeAPI][WebChat] 创建 job" in log_text
+    assert "[RuntimeAPI][WebChat] job 开始" in log_text
+    assert "[RuntimeAPI][WebChat] 输入附件注册完成" in log_text
+    assert "[RuntimeAPI][WebChat] 调用 AI" in log_text
+    assert "[RuntimeAPI][WebChat] job 历史落盘" in log_text
+    assert "[RuntimeAPI][WebChat] 调度标题生成" in log_text
+    assert "[RuntimeAPI][WebChat] 标题生成完成" in log_text
+    assert "[WebChat] 会话存储加载完成" in log_text
+    assert "[WebChat] 追加消息" in log_text
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from Undefined.services.coordinator.group import _GROUP_STRATEGY_FOOTER
+from Undefined.services.coordinator.message_ids import collect_message_ids
 from Undefined.services.coordinator.private import _PRIVATE_STRATEGY_FOOTER
 from Undefined.services.message_batcher import BufferedMessage
 
@@ -87,18 +88,7 @@ class BatchingMixin:
 
     @staticmethod
     def _collect_message_ids(items: list[BufferedMessage]) -> list[str]:
-        """Collect all known message IDs from a grouped request."""
-        message_ids: list[str] = []
-        seen: set[str] = set()
-        for item in items:
-            if item.trigger_message_id is None:
-                continue
-            message_id = str(item.trigger_message_id).strip()
-            if not message_id or message_id in seen:
-                continue
-            seen.add(message_id)
-            message_ids.append(message_id)
-        return message_ids
+        return collect_message_ids(items)
 
     async def _dispatch_grouped_request(self, items: list[BufferedMessage]) -> None:
         """根据一组 BufferedMessage 决定优先级、构造 prompt 并入队。

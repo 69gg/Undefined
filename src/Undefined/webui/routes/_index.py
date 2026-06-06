@@ -67,6 +67,7 @@ async def index_handler(request: web.Request) -> Response:
     initial_state_json = json.dumps(initial_state).replace("</", "<\\/")
     html = html.replace("__INITIAL_STATE__", initial_state_json)
     html = html.replace("__INITIAL_VIEW__", json.dumps(initial_view))
+    html = html.replace("__CSP_NONCE__", str(request.get("csp_nonce") or ""))
     response = web.Response(text=html, content_type="text/html")
     if query_lang in {"zh", "en"}:
         response.set_cookie(

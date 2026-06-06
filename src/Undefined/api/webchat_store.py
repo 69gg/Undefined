@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import inspect
 import logging
@@ -23,17 +24,17 @@ from Undefined.utils.xml import escape_xml_attr, escape_xml_text
 
 logger = logging.getLogger(__name__)
 
-WEBCHAT_VIRTUAL_USER_ID = 42
-WEBCHAT_VIRTUAL_USER_NAME = "system"
-DEFAULT_WEBCHAT_CONVERSATION_ID = "legacy-system-42"
-_DEFAULT_TITLE = "新对话"
-_TEMP_TITLE_CHARS = 18
-_MIGRATION_VERSION = 1
-_TITLE_STATUS_GENERATED = "generated"
-_TITLE_STATUS_MANUAL = "manual"
-_TITLE_STATUS_PENDING = "pending"
-_TITLE_STATUS_TEMPORARY = "temporary"
-_TITLE_STATUS_FAILED = "failed"
+WEBCHAT_VIRTUAL_USER_ID: int = 42
+WEBCHAT_VIRTUAL_USER_NAME: str = "system"
+DEFAULT_WEBCHAT_CONVERSATION_ID: str = "legacy-system-42"
+_DEFAULT_TITLE: str = "新对话"
+_TEMP_TITLE_CHARS: int = 18
+_MIGRATION_VERSION: int = 1
+_TITLE_STATUS_GENERATED: str = "generated"
+_TITLE_STATUS_MANUAL: str = "manual"
+_TITLE_STATUS_PENDING: str = "pending"
+_TITLE_STATUS_TEMPORARY: str = "temporary"
+_TITLE_STATUS_FAILED: str = "failed"
 _JsonT = TypeVar("_JsonT")
 
 
@@ -585,8 +586,6 @@ def _now_iso() -> str:
 
 
 def _copy_json(value: _JsonT) -> _JsonT:
-    import copy
-
     return copy.deepcopy(value)
 
 

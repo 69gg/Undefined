@@ -1,11 +1,10 @@
 import uuid
+import asyncio
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Callable, Dict, cast
 import logging
 import httpx
 import aiofiles
-
-from Undefined.attachments import scope_from_context
 
 logger = logging.getLogger(__name__)
 
@@ -112,12 +111,24 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "错误：文件源不能为空"
 
     task_uuid: str = uuid.uuid4().hex[:16]
-    from Undefined.utils.paths import DOWNLOAD_CACHE_DIR, ensure_dir
 
-    temp_dir: Path = ensure_dir(DOWNLOAD_CACHE_DIR / task_uuid)
+    download_cache_dir_raw = context.get("download_cache_dir")
+    ensure_dir_fn = context.get("ensure_dir_fn")
+    if download_cache_dir_raw is None or not callable(ensure_dir_fn):
+        return "错误：download_file 缺少下载缓存目录上下文依赖"
+
+    download_cache_dir = Path(download_cache_dir_raw)
+    temp_dir: Path = cast(Callable[[Path], Path], ensure_dir_fn)(
+        download_cache_dir / task_uuid
+    )
 
     attachment_registry = context.get("attachment_registry")
-    scope_key = scope_from_context(context)
+    scope_key = str(context.get("scope_key") or "").strip() or None
+    if scope_key is None:
+        get_scope_from_context = context.get("get_scope_from_context")
+        if callable(get_scope_from_context):
+            scope_key_raw = get_scope_from_context(context)
+            scope_key = str(scope_key_raw or "").strip() or None
     if attachment_registry and scope_key:
         try:
             load = getattr(attachment_registry, "load", None)
@@ -280,17 +291,26 @@ async def _download_from_attachment_record(
         if ensure_local_file is not None:
             record = await ensure_local_file(record)
 
+        source_ref = str(getattr(record, "source_ref", "") or "").strip()
         local_path_raw = str(getattr(record, "local_path", "") or "").strip()
         if not _can_treat_as_local_path(local_path_raw):
+            if _is_http_url(source_ref):
+                return await _download_from_url(
+                    source_ref, temp_dir, max_size_mb, task_uuid
+                )
             return f"错误：无法从附件 UID {getattr(record, 'uid', '')} 解析到可下载文件"
 
         local_path = Path(
             local_path_raw[7:] if _is_file_uri(local_path_raw) else local_path_raw
         )
-        if not local_path.is_file():
+        if not await asyncio.to_thread(local_path.is_file):
+            if _is_http_url(source_ref):
+                return await _download_from_url(
+                    source_ref, temp_dir, max_size_mb, task_uuid
+                )
             return f"错误：附件 UID 本地文件不存在：{getattr(record, 'uid', '')}"
 
-        size = local_path.stat().st_size
+        size = await asyncio.to_thread(lambda: local_path.stat().st_size)
         if size > max_size_bytes:
             return (
                 f"错误：文件大小 ({size / 1024 / 1024:.2f}MB) "

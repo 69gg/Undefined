@@ -8,20 +8,11 @@ from typing import Any
 from Undefined.ai.tooling import END_CO_CALL_REJECT_CONTENT
 from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
 from Undefined.skills.agents.agent_tool_registry import AgentToolRegistry
+from Undefined.skills.agents.runner.webchat_utils import (
+    webchat_agent_path,
+    webchat_depth,
+)
 from Undefined.utils.tool_calls import parse_tool_arguments
-
-
-def _webchat_agent_path(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value if str(item).strip()]
-
-
-def _webchat_depth(value: Any) -> int:
-    try:
-        return max(0, int(value))
-    except (TypeError, ValueError):
-        return 0
 
 
 def _webchat_call_id(parent_call_id: str, call_id: str, fallback: str) -> str:
@@ -87,8 +78,8 @@ async def execute_assistant_tool_calls(
     end_webchat_event_base: dict[str, Any] = {}
     tool_execution_started = False
     parent_call_id = str(context.get("webchat_parent_call_id") or "").strip()
-    depth = _webchat_depth(context.get("webchat_depth"))
-    agent_path = _webchat_agent_path(context.get("webchat_agent_path"))
+    depth = webchat_depth(context.get("webchat_depth"))
+    agent_path = webchat_agent_path(context.get("webchat_agent_path"))
     callable_agent_names: set[str] = getattr(
         tool_registry, "_callable_agent_tool_names", set()
     )

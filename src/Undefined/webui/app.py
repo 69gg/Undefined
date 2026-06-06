@@ -1,6 +1,7 @@
 import asyncio
 import gzip as _gzip_mod
 import logging
+import secrets
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -33,7 +34,7 @@ logger = logging.getLogger("Undefined.webui")
 
 CSP_POLICY = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline'; "
+    "script-src 'self' 'nonce-{nonce}'; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' https://fonts.gstatic.com data:; "
     "img-src 'self' data:; "
@@ -41,6 +42,11 @@ CSP_POLICY = (
     "base-uri 'self'; "
     "frame-ancestors 'none'"
 )
+
+
+def _build_csp_policy(nonce: str) -> str:
+    return CSP_POLICY.format(nonce=nonce)
+
 
 # ── gzip 压缩 ──
 
@@ -180,11 +186,13 @@ async def security_headers_middleware(
     request: web.Request,
     handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
 ) -> web.StreamResponse:
+    csp_nonce = secrets.token_urlsafe(16)
+    request["csp_nonce"] = csp_nonce
     try:
         response = await handler(request)
     except web.HTTPException as exc:
         response = exc
-    response.headers.setdefault("Content-Security-Policy", CSP_POLICY)
+    response.headers.setdefault("Content-Security-Policy", _build_csp_policy(csp_nonce))
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "no-referrer")

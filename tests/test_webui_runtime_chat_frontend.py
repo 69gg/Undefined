@@ -1,22 +1,32 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
+from typing import Final
+
+from Undefined.utils import io as async_io
 
 
-RUNTIME_JS = Path("src/Undefined/webui/static/js/runtime.js")
-RUNTIME_CSS = Path("src/Undefined/webui/static/css/components.css")
-WEBUI_TEMPLATE = Path("src/Undefined/webui/templates/index.html")
-MAIN_JS = Path("src/Undefined/webui/static/js/main.js")
-API_JS = Path("src/Undefined/webui/static/js/api.js")
-APP_CSS = Path("src/Undefined/webui/static/css/app.css")
-RESPONSIVE_CSS = Path("src/Undefined/webui/static/css/responsive.css")
-I18N_JS = Path("src/Undefined/webui/static/js/i18n.js")
-WEBUI_APP_PY = Path("src/Undefined/webui/app.py")
-TAURI_CONF = Path("apps/undefined-console/src-tauri/tauri.conf.json")
+RUNTIME_JS: Final[Path] = Path("src/Undefined/webui/static/js/runtime.js")
+RUNTIME_CSS: Final[Path] = Path("src/Undefined/webui/static/css/components.css")
+WEBUI_TEMPLATE: Final[Path] = Path("src/Undefined/webui/templates/index.html")
+MAIN_JS: Final[Path] = Path("src/Undefined/webui/static/js/main.js")
+API_JS: Final[Path] = Path("src/Undefined/webui/static/js/api.js")
+APP_CSS: Final[Path] = Path("src/Undefined/webui/static/css/app.css")
+RESPONSIVE_CSS: Final[Path] = Path("src/Undefined/webui/static/css/responsive.css")
+I18N_JS: Final[Path] = Path("src/Undefined/webui/static/js/i18n.js")
+WEBUI_APP_PY: Final[Path] = Path("src/Undefined/webui/app.py")
+TAURI_CONF: Final[Path] = Path("apps/undefined-console/src-tauri/tauri.conf.json")
+
+
+def _read_source(path: Path) -> str:
+    text = asyncio.run(async_io.read_text(path))
+    assert text is not None
+    return text
 
 
 def test_webchat_frontend_reuses_job_message_for_final_message() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
 
     assert "activeChatMessageId" in source
     assert 'if (event === "message")' in source
@@ -29,17 +39,21 @@ def test_webchat_frontend_reuses_job_message_for_final_message() -> None:
 
 
 def test_webchat_html_preview_csp_allows_inline_scripts_without_eval() -> None:
-    webui_app = WEBUI_APP_PY.read_text(encoding="utf-8")
-    tauri_conf = TAURI_CONF.read_text(encoding="utf-8")
+    webui_app = _read_source(WEBUI_APP_PY)
+    tauri_conf = _read_source(TAURI_CONF)
 
-    assert "\"script-src 'self' 'unsafe-inline'; \"" in webui_app
-    assert "script-src 'self' 'unsafe-inline';" in tauri_conf
+    assert "\"script-src 'self' 'nonce-{nonce}'; \"" in webui_app
+    assert "script-src 'self';" in tauri_conf
+    assert "script-src 'self' 'unsafe-inline'" not in webui_app
+    assert "script-src 'self' 'unsafe-inline'" not in tauri_conf
+    assert "__CSP_NONCE__" in _read_source(WEBUI_TEMPLATE)
+    assert "htmlRunnerCspMeta" in _read_source(RUNTIME_JS)
     assert "unsafe-eval" not in webui_app
     assert "unsafe-eval" not in tauri_conf
 
 
 def test_webchat_frontend_handles_tool_lifecycle_and_webchat_hints() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
 
     assert 'event === "token_delta"' not in source
     assert 'event === "tool_delta"' not in source
@@ -59,9 +73,9 @@ def test_webchat_frontend_handles_tool_lifecycle_and_webchat_hints() -> None:
 
 
 def test_webchat_frontend_renders_live_stage_after_ai_label() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
-    css = RUNTIME_CSS.read_text(encoding="utf-8")
-    i18n = I18N_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
+    css = _read_source(RUNTIME_CSS)
+    i18n = _read_source(I18N_JS)
 
     assert 'runtime-chat-role-label">AI' in source
     assert "runtime-chat-stage" in source
@@ -81,11 +95,11 @@ def test_webchat_frontend_renders_live_stage_after_ai_label() -> None:
 
 
 def test_webchat_frontend_has_conversation_sidebar() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
-    template = WEBUI_TEMPLATE.read_text(encoding="utf-8")
-    app_css = APP_CSS.read_text(encoding="utf-8")
-    responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
-    i18n = I18N_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
+    template = _read_source(WEBUI_TEMPLATE)
+    app_css = _read_source(APP_CSS)
+    responsive_css = _read_source(RESPONSIVE_CSS)
+    i18n = _read_source(I18N_JS)
 
     assert "runtimeChatConversations" in template
     assert "btnRuntimeChatNew" in template
@@ -143,11 +157,11 @@ def test_webchat_frontend_has_conversation_sidebar() -> None:
 
 
 def test_webchat_frontend_has_slash_command_palette() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
-    template = WEBUI_TEMPLATE.read_text(encoding="utf-8")
-    css = RUNTIME_CSS.read_text(encoding="utf-8")
-    responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
-    i18n = I18N_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
+    template = _read_source(WEBUI_TEMPLATE)
+    css = _read_source(RUNTIME_CSS)
+    responsive_css = _read_source(RESPONSIVE_CSS)
+    i18n = _read_source(I18N_JS)
 
     assert 'id="runtimeChatCommandPalette"' in template
     input_row = template.split('class="runtime-chat-input-row"', 1)[1].split(
@@ -225,7 +239,7 @@ def test_webchat_frontend_has_slash_command_palette() -> None:
 
 
 def test_webchat_frontend_sends_conversation_id_with_history_and_jobs() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
 
     assert "currentChatConversationId" in source
     assert 'chatUrl("/api/runtime/chat/history"' in source
@@ -241,7 +255,7 @@ def test_webchat_frontend_sends_conversation_id_with_history_and_jobs() -> None:
 
 
 def test_webchat_frontend_resumes_backend_job_after_refresh_or_reconnect() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
     history_helper = source.split("async function loadChatHistory", 1)[1].split(
         "async function loadOlderChatHistory",
         1,
@@ -274,7 +288,7 @@ def test_webchat_frontend_resumes_backend_job_after_refresh_or_reconnect() -> No
 
 
 def test_webchat_frontend_lazy_load_preserves_scroll_offset() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
     older_helper = source.split("async function loadOlderChatHistory", 1)[1].split(
         "function applyChatEvent",
         1,
@@ -291,7 +305,7 @@ def test_webchat_frontend_lazy_load_preserves_scroll_offset() -> None:
 
 
 def test_webchat_frontend_keeps_final_duration_after_done() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
 
     done_branch = source.split('if (event === "done")', 1)[1].split(
         'if (event === "error")', 1
@@ -312,7 +326,7 @@ def test_webchat_frontend_keeps_final_duration_after_done() -> None:
 
 
 def test_webchat_frontend_restores_history_tool_blocks_without_stream_state() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
 
     assert "function appendHistoryChatItem" in source
     assert "function renderHistoryTimeline" in source
@@ -336,7 +350,7 @@ def test_webchat_frontend_restores_history_tool_blocks_without_stream_state() ->
 
 
 def test_webchat_frontend_renders_chat_as_event_timeline() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
     message_branch = source.split('if (event === "message")', 1)[1].split(
         'if (event === "done")', 1
     )[0]
@@ -355,7 +369,7 @@ def test_webchat_frontend_renders_chat_as_event_timeline() -> None:
         in timeline_helper
     )
     assert "topLevelToolKey(blocks, parentKey)" in timeline_helper
-    assert "runtime-tool-children" in RUNTIME_CSS.read_text(encoding="utf-8")
+    assert "runtime-tool-children" in _read_source(RUNTIME_CSS)
     assert "function renderToolNodeIfChanged" in source
     assert "node.dataset.renderSignature === nextSignature" in source
     assert "updateToolMetaDisplay(block)" in source
@@ -363,7 +377,7 @@ def test_webchat_frontend_renders_chat_as_event_timeline() -> None:
 
 
 def test_webchat_frontend_prefers_backend_history_timeline() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
     history_timeline_branch = source.split("if (timelineItems.length)", 1)[1].split(
         "if (calls.length)", 1
     )[0]
@@ -375,8 +389,8 @@ def test_webchat_frontend_prefers_backend_history_timeline() -> None:
 
 
 def test_webchat_frontend_renders_nested_tool_timeline() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
-    css = RUNTIME_CSS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
+    css = _read_source(RUNTIME_CSS)
 
     assert "function renderToolTimelineItem" in source
     assert "function appendNestedTimelineMessage" in source
@@ -396,7 +410,7 @@ def test_webchat_frontend_renders_nested_tool_timeline() -> None:
 
 
 def test_webchat_tool_snapshots_do_not_rerender_unchanged_blocks() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
     live_update_helper = source.split("function upsertTimelineToolBlock", 1)[1].split(
         "function appendNestedTimelineMessage", 1
     )[0]
@@ -423,8 +437,8 @@ def test_webchat_tool_snapshots_do_not_rerender_unchanged_blocks() -> None:
 
 
 def test_webchat_frontend_updates_agent_stage_summary_without_timeline_noise() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
-    css = RUNTIME_CSS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
+    css = _read_source(RUNTIME_CSS)
 
     assert 'event === "agent_stage"' in source
     assert "function upsertAgentStageBlock" in source
@@ -449,7 +463,7 @@ def test_webchat_frontend_updates_agent_stage_summary_without_timeline_noise() -
 
 
 def test_webchat_frontend_polls_job_events_incrementally() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
 
     assert "function pollChatJob" in source
     assert "CHAT_POLL_INTERVAL_MS = 500" in source
@@ -467,7 +481,7 @@ def test_webchat_frontend_polls_job_events_incrementally() -> None:
 
 
 def test_webchat_frontend_retries_active_job_resume_after_refresh_failure() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
     resume_helper = source.split("async function resumeActiveChatJob", 1)[1].split(
         "async function clearChatHistory", 1
     )[0]
@@ -481,8 +495,8 @@ def test_webchat_frontend_retries_active_job_resume_after_refresh_failure() -> N
 
 
 def test_webchat_tool_summary_uses_compact_single_line_order() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
-    css = RUNTIME_CSS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
+    css = _read_source(RUNTIME_CSS)
     render_helper = source.split("function renderToolBlock", 1)[1].split(
         "function renderToolTimelineItem", 1
     )[0]
@@ -516,7 +530,7 @@ def test_webchat_tool_summary_uses_compact_single_line_order() -> None:
 
 
 def test_webchat_tool_blocks_auto_collapse_after_minimum_visible_time() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
     assert "TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS = 2000" in source
     assert "runtimeState.toolCollapseTimers" in source
     assert "function scheduleToolAutoCollapse" in source
@@ -547,11 +561,9 @@ def test_webchat_tool_blocks_auto_collapse_after_minimum_visible_time() -> None:
 
 
 def test_webchat_auto_scroll_toggle_controls_stream_scroll() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
-    template = Path("src/Undefined/webui/templates/index.html").read_text(
-        encoding="utf-8"
-    )
-    css = RUNTIME_CSS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
+    template = _read_source(WEBUI_TEMPLATE)
+    css = _read_source(RUNTIME_CSS)
 
     assert "runtimeChatAutoScroll" in template
     assert "runtime.chat_auto_scroll" in template
@@ -568,7 +580,7 @@ def test_webchat_auto_scroll_toggle_controls_stream_scroll() -> None:
 
 
 def test_webchat_tab_activation_forces_bottom_scroll_after_history_load() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
     load_helper = source.split("async function loadChatHistory", 1)[1].split(
         "async function loadOlderChatHistory", 1
     )[0]
@@ -592,7 +604,7 @@ def test_webchat_tab_activation_forces_bottom_scroll_after_history_load() -> Non
 
 
 def test_webchat_frontend_renders_tool_duration() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
 
     assert "block.durationMs" in source
     assert "payload.duration_ms" in source
@@ -608,9 +620,9 @@ def test_webchat_frontend_renders_tool_duration() -> None:
 
 
 def test_webchat_tool_previews_render_structured_input_output() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
-    css = RUNTIME_CSS.read_text(encoding="utf-8")
-    i18n = I18N_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
+    css = _read_source(RUNTIME_CSS)
+    i18n = _read_source(I18N_JS)
 
     assert "function formatToolPreview" in source
     assert "JSON.parse(text)" in source
@@ -635,7 +647,7 @@ def test_webchat_tool_previews_render_structured_input_output() -> None:
 
 
 def test_webchat_frontend_sanitizes_markdown_html_and_unsafe_links() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
     render_helper = source.split("function createSafeMarkedRenderer", 1)[1].split(
         "function renderChatContent", 1
     )[0]
@@ -660,11 +672,11 @@ def test_webchat_frontend_sanitizes_markdown_html_and_unsafe_links() -> None:
 
 
 def test_webchat_frontend_has_clickable_image_viewer() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
-    template = WEBUI_TEMPLATE.read_text(encoding="utf-8")
-    css = RUNTIME_CSS.read_text(encoding="utf-8")
-    responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
-    i18n = I18N_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
+    template = _read_source(WEBUI_TEMPLATE)
+    css = _read_source(RUNTIME_CSS)
+    responsive_css = _read_source(RESPONSIVE_CSS)
+    i18n = _read_source(I18N_JS)
 
     assert 'id="runtimeChatImageViewer"' in template
     assert 'id="runtimeChatImageViewerImage"' in template
@@ -688,8 +700,8 @@ def test_webchat_frontend_has_clickable_image_viewer() -> None:
 
 
 def test_webchat_markdown_quotes_render_as_collapsible_scroll_blocks() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
-    css = RUNTIME_CSS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
+    css = _read_source(RUNTIME_CSS)
     renderer_helper = source.split("function createSafeMarkedRenderer", 1)[1].split(
         "renderer.link",
         1,
@@ -724,7 +736,7 @@ def test_webchat_markdown_quotes_render_as_collapsible_scroll_blocks() -> None:
 def test_webchat_frontend_renders_standalone_html_without_markdown_code_blocks() -> (
     None
 ):
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
     render_helper = source.split("function renderChatContent", 1)[1].split(
         "function readFileAsDataUrl", 1
     )[0]
@@ -742,9 +754,9 @@ def test_webchat_frontend_renders_standalone_html_without_markdown_code_blocks()
 
 
 def test_webchat_frontend_highlights_markdown_code_blocks() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
-    css = RUNTIME_CSS.read_text(encoding="utf-8")
-    template = WEBUI_TEMPLATE.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
+    css = _read_source(RUNTIME_CSS)
+    template = _read_source(WEBUI_TEMPLATE)
 
     assert "function highlightCodeBlock" in source
     assert 'typeof hljs === "undefined"' in source
@@ -772,10 +784,10 @@ def test_webchat_frontend_highlights_markdown_code_blocks() -> None:
     assert 'target.closest("[data-code-toggle]")' in source
     assert "highlightCodeBlock(codeText, normalizedLanguage)" in source
     assert "language-${escapeHtml(normalizedLanguage)}" in source
-    assert 'runtime.copy_code": "复制"' in I18N_JS.read_text(encoding="utf-8")
-    assert 'runtime.run_html": "运行"' in I18N_JS.read_text(encoding="utf-8")
-    assert 'runtime.expand_code": "展开"' in I18N_JS.read_text(encoding="utf-8")
-    assert 'runtime.collapse_code": "折叠"' in I18N_JS.read_text(encoding="utf-8")
+    assert 'runtime.copy_code": "复制"' in _read_source(I18N_JS)
+    assert 'runtime.run_html": "运行"' in _read_source(I18N_JS)
+    assert 'runtime.expand_code": "展开"' in _read_source(I18N_JS)
+    assert 'runtime.collapse_code": "折叠"' in _read_source(I18N_JS)
     assert "/static/js/vendor/highlight.min.js" in template
     assert "/static/css/highlight-github.min.css" in template
     assert Path("src/Undefined/webui/static/js/vendor/highlight.min.js").is_file()
@@ -844,15 +856,17 @@ def test_webchat_frontend_highlights_markdown_code_blocks() -> None:
 
 
 def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
-    css = RUNTIME_CSS.read_text(encoding="utf-8")
-    responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
-    template = WEBUI_TEMPLATE.read_text(encoding="utf-8")
-    i18n = I18N_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
+    css = _read_source(RUNTIME_CSS)
+    responsive_css = _read_source(RESPONSIVE_CSS)
+    template = _read_source(WEBUI_TEMPLATE)
+    i18n = _read_source(I18N_JS)
 
     assert 'id="runtimeHtmlRunner"' in template
     assert 'id="runtimeHtmlRunnerFrame"' in template
-    assert 'sandbox="allow-scripts allow-forms allow-modals"' in template
+    assert 'sandbox="allow-scripts"' in template
+    assert "allow-forms" not in template
+    assert "allow-modals" not in template
     assert "allow-same-origin" not in template
     assert 'id="btnRuntimeHtmlPick"' in template
     assert 'id="btnRuntimeHtmlClose"' in template
@@ -871,7 +885,7 @@ def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
     )
     assert "function buildHtmlRunnerDocument" in source
     assert "function htmlRunnerPickerScript" in source
-    assert "function injectHtmlRunnerPicker" in source
+    assert "function injectHtmlRunnerSecurity" in source
     assert "function syncHtmlRunnerPickModeToFrame" in source
     assert "function setHtmlRunnerPickMode" in source
     assert "function clampHtmlRunnerPosition" in source
@@ -903,7 +917,7 @@ def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
     assert "return;\n    }\n    const target = locked;" in source
     assert "clearHtmlRunnerInteraction()" in source
     assert "ensureHtmlRunnerInitialRect(runner)" in source
-    assert "frame.srcdoc = injectHtmlRunnerPicker(html)" in source
+    assert "frame.srcdoc = injectHtmlRunnerSecurity(html)" in source
     assert (
         "sanitizeHtmlSnippet"
         not in source.split(
@@ -1024,11 +1038,11 @@ def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
 
 
 def test_webchat_references_are_prepended_as_markdown_quotes() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
-    css = RUNTIME_CSS.read_text(encoding="utf-8")
-    responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
-    template = WEBUI_TEMPLATE.read_text(encoding="utf-8")
-    i18n = I18N_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
+    css = _read_source(RUNTIME_CSS)
+    responsive_css = _read_source(RESPONSIVE_CSS)
+    template = _read_source(WEBUI_TEMPLATE)
+    i18n = _read_source(I18N_JS)
 
     assert "chatReferences: []" in source
     assert "chatReferenceSeq" in source
@@ -1083,7 +1097,7 @@ def test_webchat_references_are_prepended_as_markdown_quotes() -> None:
 
 
 def test_webchat_tool_status_colors_drive_left_bar_and_status_text() -> None:
-    css = RUNTIME_CSS.read_text(encoding="utf-8")
+    css = _read_source(RUNTIME_CSS)
     running_block = css.split(".runtime-tool-block.running {", 1)[1].split(
         ".runtime-tool-block.done", 1
     )[0]
@@ -1112,7 +1126,7 @@ def test_webchat_tool_status_colors_drive_left_bar_and_status_text() -> None:
 
 
 def test_webchat_send_scrolls_to_bottom_after_layout_updates() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
     force_helper = source.split("function forceScrollChatToBottomSoon", 1)[1].split(
         "function scrollChatToBottomSoon", 1
     )[0]
@@ -1137,11 +1151,11 @@ def test_webchat_send_scrolls_to_bottom_after_layout_updates() -> None:
 
 
 def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:
-    source = RUNTIME_JS.read_text(encoding="utf-8")
-    css = RUNTIME_CSS.read_text(encoding="utf-8")
-    template = WEBUI_TEMPLATE.read_text(encoding="utf-8")
-    i18n = I18N_JS.read_text(encoding="utf-8")
-    api_source = API_JS.read_text(encoding="utf-8")
+    source = _read_source(RUNTIME_JS)
+    css = _read_source(RUNTIME_CSS)
+    template = _read_source(WEBUI_TEMPLATE)
+    i18n = _read_source(I18N_JS)
+    api_source = _read_source(API_JS)
 
     assert "chatAttachments: []" in source
     assert "function addChatFiles" in source
@@ -1218,7 +1232,7 @@ def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:
         1,
     )[1].split("@keyframes runtime-chat-attachment-in", 1)[0]
     responsive_attachments = (
-        RESPONSIVE_CSS.read_text(encoding="utf-8")
+        _read_source(RESPONSIVE_CSS)
         .split(
             ".runtime-chat-attachments",
             1,
@@ -1226,7 +1240,7 @@ def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:
         .split(".runtime-chat-attachment", 1)[0]
     )
     mobile_input_row_block = (
-        RESPONSIVE_CSS.read_text(encoding="utf-8")
+        _read_source(RESPONSIVE_CSS)
         .split(
             ".runtime-chat-input-row",
             1,
@@ -1282,12 +1296,10 @@ def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:
 
 
 def test_webchat_layout_keeps_input_at_bottom_and_log_scrollable() -> None:
-    app_css = APP_CSS.read_text(encoding="utf-8")
-    responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
-    main_js = MAIN_JS.read_text(encoding="utf-8")
-    template = Path("src/Undefined/webui/templates/index.html").read_text(
-        encoding="utf-8"
-    )
+    app_css = _read_source(APP_CSS)
+    responsive_css = _read_source(RESPONSIVE_CSS)
+    main_js = _read_source(MAIN_JS)
+    template = _read_source(WEBUI_TEMPLATE)
 
     assert ".main-content.chat-layout {" in app_css
     assert "display: flex;" in app_css
@@ -1346,8 +1358,8 @@ def test_webchat_layout_keeps_input_at_bottom_and_log_scrollable() -> None:
 
 
 def test_webchat_mobile_tool_rows_have_overflow_guards() -> None:
-    css = RUNTIME_CSS.read_text(encoding="utf-8")
-    responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
+    css = _read_source(RUNTIME_CSS)
+    responsive_css = _read_source(RESPONSIVE_CSS)
 
     status_css = css.split(".runtime-tool-block summary .runtime-tool-status", 1)[
         1
@@ -1369,8 +1381,8 @@ def test_webchat_mobile_tool_rows_have_overflow_guards() -> None:
 def test_webchat_content_wraps_long_code_and_markdown_without_horizontal_scroll() -> (
     None
 ):
-    css = RUNTIME_CSS.read_text(encoding="utf-8")
-    responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
+    css = _read_source(RUNTIME_CSS)
+    responsive_css = _read_source(RESPONSIVE_CSS)
 
     log_css = css.split(".runtime-chat-log {", 1)[1].split(
         ".runtime-chat-load-more",

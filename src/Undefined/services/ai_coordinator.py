@@ -22,6 +22,7 @@ from Undefined.services.message_batcher import (
     MessageBatcher,
     make_scope,
 )
+from Undefined.services.coordinator.message_ids import collect_message_ids
 from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.sender import MessageSender
 from Undefined.utils.scheduler import TaskScheduler
@@ -925,18 +926,7 @@ class AICoordinator:
 
     @staticmethod
     def _collect_message_ids(items: list[BufferedMessage]) -> list[str]:
-        """Collect all known message IDs from a grouped request."""
-        message_ids: list[str] = []
-        seen: set[str] = set()
-        for item in items:
-            if item.trigger_message_id is None:
-                continue
-            message_id = str(item.trigger_message_id).strip()
-            if not message_id or message_id in seen:
-                continue
-            seen.add(message_id)
-            message_ids.append(message_id)
-        return message_ids
+        return collect_message_ids(items)
 
     async def _dispatch_grouped_request(self, items: list[BufferedMessage]) -> None:
         """根据一组 BufferedMessage 决定优先级、构造 prompt 并入队。

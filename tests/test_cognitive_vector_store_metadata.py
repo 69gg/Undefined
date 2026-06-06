@@ -90,20 +90,24 @@ async def test_query_retries_transient_chroma_internal_error() -> None:
             }
 
     store = CognitiveVectorStore.__new__(CognitiveVectorStore)
-    store._chroma_scheduler = ChromaOperationScheduler()
+    scheduler = ChromaOperationScheduler()
+    store._chroma_scheduler = scheduler
     fake_collection = _FakeCollection()
     store._events = cast(Any, fake_collection)
     store._profiles = cast(Any, object())
 
-    results = await store._query(
-        fake_collection,
-        "测试查询",
-        1,
-        None,
-        None,
-        1,
-        query_embedding=[0.11, 0.22, 0.33],
-    )
+    try:
+        results = await store._query(
+            fake_collection,
+            "测试查询",
+            1,
+            None,
+            None,
+            1,
+            query_embedding=[0.11, 0.22, 0.33],
+        )
+    finally:
+        await scheduler.stop()
 
     assert fake_collection.calls == 3
     assert results == [
