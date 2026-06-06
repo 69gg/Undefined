@@ -285,7 +285,13 @@ const I18N = {
         "runtime.chat_running": "已有对话正在运行，请稍候。",
         "runtime.chat_command_hint": "选择命令，Enter/Tab 填入",
         "runtime.chat_command_hint_subcommand": "选择子命令，Enter/Tab 填入",
+        "runtime.chat_command_loading": "正在加载可用命令...",
         "runtime.chat_command_empty": "未找到匹配命令",
+        "runtime.chat_command_unknown_command":
+            "继续输入完整命令，或从候选命令中选择",
+        "runtime.chat_command_subcommand_empty": "未找到匹配子命令",
+        "runtime.chat_command_no_subcommands":
+            "{command} 没有子命令，可直接发送或继续输入参数",
         "runtime.chat_command_subcommands": "{count} 个子命令",
         "runtime.chat_stage_received": "已接收",
         "runtime.chat_stage_processing": "处理中",
@@ -688,7 +694,13 @@ const I18N = {
         "runtime.chat_command_hint": "Choose a command, Enter/Tab to insert",
         "runtime.chat_command_hint_subcommand":
             "Choose a subcommand, Enter/Tab to insert",
+        "runtime.chat_command_loading": "Loading available commands...",
         "runtime.chat_command_empty": "No matching command",
+        "runtime.chat_command_unknown_command":
+            "Keep typing the full command, or choose from command matches",
+        "runtime.chat_command_subcommand_empty": "No matching subcommand",
+        "runtime.chat_command_no_subcommands":
+            "{command} has no subcommands. Send it directly or keep typing arguments.",
         "runtime.chat_command_subcommands": "{count} subcommands",
         "runtime.chat_stage_received": "Received",
         "runtime.chat_stage_processing": "Processing",

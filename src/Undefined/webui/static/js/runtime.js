@@ -4097,12 +4097,20 @@
 
     function currentChatCommandMatches(context) {
         if (!context) return [];
+        const commandMatchesForQuery = (query) =>
+            runtimeState.chatCommands
+                .filter((item) => commandMatchesQuery(item, query))
+                .slice(0, CHAT_COMMAND_MAX_MATCHES)
+                .map((item) => ({ type: "command", command: item }));
         if (context.mode === "subcommand") {
             const command = findChatCommandByNameOrAlias(context.commandQuery);
             const subcommands = Array.isArray(command && command.subcommands)
                 ? command.subcommands
                 : [];
-            if (!command || !subcommands.length) {
+            if (!command) {
+                return commandMatchesForQuery(context.commandQuery);
+            }
+            if (!subcommands.length) {
                 return [];
             }
             return subcommands
@@ -4120,10 +4128,7 @@
                     ),
                 }));
         }
-        return runtimeState.chatCommands
-            .filter((item) => commandMatchesQuery(item, context.commandQuery))
-            .slice(0, CHAT_COMMAND_MAX_MATCHES)
-            .map((item) => ({ type: "command", command: item }));
+        return commandMatchesForQuery(context.commandQuery);
     }
 
     function commandPaletteItemLabel(match) {
@@ -4176,6 +4181,30 @@
         return parts.join(" · ");
     }
 
+    function chatCommandPaletteEmptyMessage() {
+        const context = runtimeState.chatCommandContext;
+        if (!context || context.mode !== "subcommand") {
+            return t("runtime.chat_command_empty");
+        }
+        const command = findChatCommandByNameOrAlias(context.commandQuery);
+        if (!command) {
+            return t("runtime.chat_command_unknown_command");
+        }
+        const subcommands = Array.isArray(command.subcommands)
+            ? command.subcommands
+            : [];
+        if (!subcommands.length) {
+            const commandName = chatCommandDisplayName(
+                command,
+                context.commandQuery,
+            );
+            return i18nFormat("runtime.chat_command_no_subcommands", {
+                command: `/${commandName}`,
+            });
+        }
+        return t("runtime.chat_command_subcommand_empty");
+    }
+
     function renderChatCommandPalette() {
         const palette = get("runtimeChatCommandPalette");
         if (!palette) return;
@@ -4190,8 +4219,13 @@
             return;
         }
         palette.hidden = false;
-        if (runtimeState.chatCommandsLoading && !matches.length) {
-            palette.innerHTML = `<div class="runtime-chat-command-empty">${escapeHtml(t("common.loading"))}</div>`;
+        if (
+            !matches.length &&
+            (runtimeState.chatCommandsLoading ||
+                (!runtimeState.chatCommandsLoaded &&
+                    !runtimeState.chatCommandsError))
+        ) {
+            palette.innerHTML = `<div class="runtime-chat-command-empty">${escapeHtml(t("runtime.chat_command_loading"))}</div>`;
             return;
         }
         if (runtimeState.chatCommandsError && !matches.length) {
@@ -4199,7 +4233,7 @@
             return;
         }
         if (!matches.length) {
-            palette.innerHTML = `<div class="runtime-chat-command-empty">${escapeHtml(t("runtime.chat_command_empty"))}</div>`;
+            palette.innerHTML = `<div class="runtime-chat-command-empty">${escapeHtml(chatCommandPaletteEmptyMessage())}</div>`;
             return;
         }
         const hint =

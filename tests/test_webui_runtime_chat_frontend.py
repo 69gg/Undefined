@@ -168,12 +168,20 @@ def test_webchat_frontend_has_slash_command_palette() -> None:
     assert 'mode: hasCommandBoundary ? "subcommand" : "command"' in source
     assert "function currentChatCommandMatches" in source
     assert "findChatCommandByNameOrAlias(context.commandQuery)" in source
+    assert "commandMatchesForQuery(context.commandQuery)" in source
     assert "function chatCommandDisplayName" in source
     assert "typedCommandName: chatCommandDisplayName(" in source
     assert "const commandName = match.typedCommandName || match.command.name" in source
     assert (
-        "if (!command || !subcommands.length) {\n                return [];" in source
+        "if (!command) {\n                return commandMatchesForQuery(context.commandQuery);"
+        in source
     )
+    assert "function chatCommandPaletteEmptyMessage" in source
+    assert "!runtimeState.chatCommandsLoaded" in source
+    assert "runtime.chat_command_loading" in source
+    assert "runtime.chat_command_unknown_command" in source
+    assert "runtime.chat_command_subcommand_empty" in source
+    assert "runtime.chat_command_no_subcommands" in source
     assert "function replaceChatCommandInput" in source
     assert "chooseActiveChatCommandMatch()" in source
     assert 'event.key === "ArrowDown"' in source
@@ -197,7 +205,11 @@ def test_webchat_frontend_has_slash_command_palette() -> None:
     assert "grid-template-columns: minmax(0, 1fr);" in responsive_css
     assert "runtime.chat_command_hint" in i18n
     assert "runtime.chat_command_hint_subcommand" in i18n
+    assert "runtime.chat_command_loading" in i18n
     assert "runtime.chat_command_empty" in i18n
+    assert "runtime.chat_command_unknown_command" in i18n
+    assert "runtime.chat_command_subcommand_empty" in i18n
+    assert "runtime.chat_command_no_subcommands" in i18n
     assert "runtime.chat_command_subcommands" in i18n
 
 
