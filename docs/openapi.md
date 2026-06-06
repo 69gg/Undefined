@@ -254,7 +254,7 @@ curl http://127.0.0.1:8788/openapi.json
 
 | 字段 | 说明 |
 |---|---|
-| `task_id` | 可选；不传时自动生成。只允许字母、数字、`_`、`.`、`:`、`-`，最长 96 字符 |
+| `task_id` | 创建时可选；不传时自动生成。新建 ID 只允许字母、数字、`_`、`.`、`:`、`-`，最长 96 字符；已有历史任务即使 ID 含中文，也可继续通过详情、更新和删除接口管理 |
 | `task_name` | 可选的可读名称 |
 | `cron_expression` | 标准 5 段 crontab 表达式；也兼容字段名 `cron` |
 | `target_type` | `group` 或 `private`，默认 `group` |
@@ -302,6 +302,7 @@ curl http://127.0.0.1:8788/openapi.json
 
 说明：
 - `tool_name`、`tools`、`self_instruction` 互斥；显式传 `mode` 时也必须与对应字段一致。
+- 历史任务如果保存为单个 `scheduler.call_self` 工具调用，列表和详情会按 `self_instruction` 模式返回，并从 `prompt` 回填 `self_instruction`。
 - `tool_args` 必须是 JSON 对象；`tools` 必须是非空数组，最多 20 项。
 - 所有 `/api/v1/schedules*` 路由都遵循 Runtime API 的 `X-Undefined-API-Key` 鉴权。
 

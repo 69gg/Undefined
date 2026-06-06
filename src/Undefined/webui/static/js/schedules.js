@@ -49,7 +49,29 @@
         return payload.detail ? `${base}: ${payload.detail}` : base;
     }
 
+    function singleSelfTool(task) {
+        return (
+            Array.isArray(task.tools) &&
+            task.tools.length === 1 &&
+            task.tools[0] &&
+            task.tools[0].tool_name === SELF_TOOL_NAME
+        );
+    }
+
+    function selfInstructionOfTask(task) {
+        const explicit = String(task.self_instruction || "").trim();
+        if (explicit) return explicit;
+        if (task.tool_name === SELF_TOOL_NAME && task.tool_args) {
+            return String(task.tool_args.prompt || "").trim();
+        }
+        if (singleSelfTool(task) && task.tools[0].tool_args) {
+            return String(task.tools[0].tool_args.prompt || "").trim();
+        }
+        return "";
+    }
+
     function modeOfTask(task) {
+        if (singleSelfTool(task)) return "self_instruction";
         if (task.mode === "multi" || task.mode === "self_instruction") {
             return task.mode;
         }
@@ -256,11 +278,7 @@
                 source.tool_name === SELF_TOOL_NAME
                     ? ""
                     : source.tool_name || "",
-            scheduleSelfInstruction:
-                source.self_instruction ||
-                (source.tool_name === SELF_TOOL_NAME && source.tool_args
-                    ? source.tool_args.prompt || ""
-                    : ""),
+            scheduleSelfInstruction: selfInstructionOfTask(source),
         };
         Object.entries(fields).forEach(([id, value]) => {
             const el = get(id);

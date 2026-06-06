@@ -160,6 +160,39 @@ async def test_runtime_schedule_list_preserves_single_item_multi_mode() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_schedule_list_marks_single_self_tool_as_self_instruction() -> (
+    None
+):
+    scheduler = _FakeScheduler()
+    scheduler.tasks["task_self_tool"] = {
+        "task_id": "task_self_tool",
+        "task_name": "single self tool",
+        "tool_name": SELF_CALL_TOOL_NAME,
+        "tool_args": {"prompt": "请检查提醒事项。"},
+        "tools": [
+            {
+                "tool_name": SELF_CALL_TOOL_NAME,
+                "tool_args": {"prompt": "请检查提醒事项。"},
+            }
+        ],
+        "execution_mode": "serial",
+        "cron": "0 9 * * *",
+        "target_id": None,
+        "target_type": "group",
+    }
+    server = RuntimeAPIServer(_context(scheduler), host="127.0.0.1", port=8788)
+
+    response = await server._schedules_list_handler(
+        cast(web.Request, cast(Any, SimpleNamespace()))
+    )
+    payload = _payload(response)
+
+    item = cast(list[dict[str, Any]], payload["items"])[0]
+    assert item["mode"] == "self_instruction"
+    assert item["self_instruction"] == "请检查提醒事项。"
+
+
+@pytest.mark.asyncio
 async def test_runtime_schedule_create_supports_self_instruction() -> None:
     scheduler = _FakeScheduler()
     server = RuntimeAPIServer(_context(scheduler), host="127.0.0.1", port=8788)
@@ -268,6 +301,37 @@ async def test_runtime_schedule_update_can_clear_target_and_max_runs() -> None:
     assert payload["task"]["target_id"] is None
     assert payload["task"]["max_executions"] is None
     assert payload["task"]["target_type"] == "private"
+
+
+@pytest.mark.asyncio
+async def test_runtime_schedule_update_accepts_existing_legacy_unicode_task_id() -> (
+    None
+):
+    scheduler = _FakeScheduler()
+    task_id = "task_每天早上8点发一张表情包_8d18"
+    scheduler.tasks[task_id] = {
+        "task_id": task_id,
+        "task_name": "旧任务",
+        "tool_name": "get_current_time",
+        "tool_args": {},
+        "cron": "0 8 * * *",
+        "target_id": 1067860266,
+        "target_type": "group",
+    }
+    server = RuntimeAPIServer(_context(scheduler), host="127.0.0.1", port=8788)
+    request = _JsonRequest(
+        _json={"task_name": "每天早上8点发一张表情包"},
+        match_info={"task_id": task_id},
+    )
+
+    response = await server._schedule_update_handler(
+        cast(web.Request, cast(Any, request))
+    )
+    payload = _payload(response)
+
+    assert response.status == 200
+    assert payload["ok"] is True
+    assert scheduler.update_calls[0]["task_id"] == task_id
 
 
 @pytest.mark.asyncio

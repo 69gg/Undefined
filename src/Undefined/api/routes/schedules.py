@@ -16,6 +16,7 @@ from Undefined.api._helpers import _json_error
 from Undefined.utils.scheduler import SELF_CALL_TOOL_NAME
 
 _TASK_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,96}$")
+_LEGACY_TASK_ID_MAX_LENGTH = 256
 _MAX_TEXT_LENGTH = 16_000
 _MAX_TOOLS = 20
 _TARGET_TYPES = frozenset({"group", "private"})
@@ -53,6 +54,17 @@ def _parse_task_id(value: Any) -> str:
     task_id = _clean_text(value, field="task_id", max_length=96)
     if not task_id or _TASK_ID_RE.fullmatch(task_id) is None:
         raise SchedulePayloadError("task_id contains unsupported characters")
+    return task_id
+
+
+def _parse_existing_task_id(value: Any) -> str:
+    task_id = _clean_text(
+        value,
+        field="task_id",
+        max_length=_LEGACY_TASK_ID_MAX_LENGTH,
+    )
+    if not task_id:
+        raise SchedulePayloadError("task_id is required")
     return task_id
 
 
@@ -298,6 +310,8 @@ def _next_run_time_iso(ctx: RuntimeAPIContext, task_id: str) -> str | None:
 def _schedule_task_mode(task: dict[str, Any]) -> str:
     tools = task.get("tools")
     if isinstance(tools, list) and tools:
+        if len(tools) == 1 and tools[0].get("tool_name") == SELF_CALL_TOOL_NAME:
+            return "self_instruction"
         return "multi"
     if task.get("self_instruction") or task.get("tool_name") == SELF_CALL_TOOL_NAME:
         return "self_instruction"
@@ -314,6 +328,18 @@ def serialize_schedule_task(
     task["mode"] = _schedule_task_mode(task)
     task["next_run_time"] = _next_run_time_iso(ctx, task_id)
     tool_args = task.get("tool_args")
+    tools = task.get("tools")
+    if (
+        not task.get("self_instruction")
+        and isinstance(tools, list)
+        and len(tools) == 1
+        and isinstance(tools[0], dict)
+        and tools[0].get("tool_name") == SELF_CALL_TOOL_NAME
+        and isinstance(tools[0].get("tool_args"), dict)
+    ):
+        prompt = str(tools[0]["tool_args"].get("prompt", "")).strip()
+        if prompt:
+            task["self_instruction"] = prompt
     if (
         task.get("tool_name") == SELF_CALL_TOOL_NAME
         and not task.get("self_instruction")
@@ -365,7 +391,7 @@ async def schedule_detail_handler(
     if scheduler is None:
         return _scheduler_unavailable()
     try:
-        task_id = _parse_task_id(request.match_info.get("task_id", ""))
+        task_id = _parse_existing_task_id(request.match_info.get("task_id", ""))
     except SchedulePayloadError as exc:
         return _json_error(str(exc), status=400)
     task_info = scheduler.list_tasks().get(task_id)
@@ -426,7 +452,7 @@ async def schedule_update_handler(
     if scheduler is None:
         return _scheduler_unavailable()
     try:
-        task_id = _parse_task_id(request.match_info.get("task_id", ""))
+        task_id = _parse_existing_task_id(request.match_info.get("task_id", ""))
         body = await request.json()
         normalized, provided = _normalize_schedule_payload(body, partial=True)
     except SchedulePayloadError as exc:
@@ -475,7 +501,7 @@ async def schedule_delete_handler(
     if scheduler is None:
         return _scheduler_unavailable()
     try:
-        task_id = _parse_task_id(request.match_info.get("task_id", ""))
+        task_id = _parse_existing_task_id(request.match_info.get("task_id", ""))
     except SchedulePayloadError as exc:
         return _json_error(str(exc), status=400)
     if task_id not in scheduler.list_tasks():
