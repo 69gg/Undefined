@@ -109,8 +109,10 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
                 "summary": "WebUI special private chat",
                 "description": (
                     "POST JSON {message, stream?, conversation_id?}. "
-                    "stream=false runs synchronously; stream=true creates a "
-                    "WebChat job and streams lifecycle events as SSE."
+                    "stream=false waits for an internal WebChat job and "
+                    "returns JSON; stream=true uses the same WebChat job "
+                    "lifecycle and streams events as SSE. WebChat jobs are "
+                    "process-local single-flight while running or finalizing."
                 ),
             }
         },

@@ -486,6 +486,87 @@ async def test_runtime_chat_history_clear_returns_409_for_running_job(
 
 
 @pytest.mark.asyncio
+async def test_runtime_chat_non_stream_blocks_history_clear_until_done(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _fake_run_webui_chat(_ctx: Any, *, text: str, send_output: Any) -> str:
+        assert text == "hello"
+        started.set()
+        await release.wait()
+        await send_output(42, "done")
+        return "chat"
+
+    async def _fake_render_message_with_pic_placeholders(
+        message: str,
+        *,
+        registry: Any,
+        scope_key: str,
+        strict: bool,
+    ) -> Any:
+        _ = registry, scope_key, strict
+        return SimpleNamespace(
+            delivery_text=message,
+            history_text=message,
+            attachments=[],
+        )
+
+    history = _DummyHistoryManager()
+    context = RuntimeAPIContext(
+        config_getter=lambda: SimpleNamespace(
+            api=SimpleNamespace(
+                enabled=True,
+                host="127.0.0.1",
+                port=8788,
+                auth_key="changeme",
+                openapi_enabled=True,
+            ),
+            superadmin_qq=10001,
+            bot_qq=20002,
+        ),
+        onebot=SimpleNamespace(connection_status=lambda: {}),
+        ai=SimpleNamespace(
+            attachment_registry=object(),
+            memory_storage=SimpleNamespace(count=lambda: 0),
+        ),
+        command_dispatcher=SimpleNamespace(),
+        queue_manager=SimpleNamespace(snapshot=lambda: {}),
+        history_manager=history,
+    )
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+    monkeypatch.setattr(
+        runtime_api_chat,
+        "render_message_with_pic_placeholders",
+        _fake_render_message_with_pic_placeholders,
+    )
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+    chat_request = cast(
+        web.Request,
+        cast(Any, _JsonRequest(query={}, _json={"message": "hello"})),
+    )
+    chat_task = asyncio.create_task(server._chat_handler(chat_request))
+    await asyncio.wait_for(started.wait(), timeout=1)
+
+    clear_response = await server._chat_history_clear_handler(
+        cast(web.Request, cast(Any, SimpleNamespace(query={})))
+    )
+    clear_payload = json.loads(clear_response.text or "{}")
+
+    assert clear_response.status == 409
+    assert clear_payload["error"] == "Chat job is still running"
+
+    release.set()
+    chat_response = await asyncio.wait_for(chat_task, timeout=1)
+    chat_payload = json.loads(cast(web.Response, chat_response).text or "{}")
+
+    assert chat_response.status == 200
+    assert chat_payload["reply"] == "done"
+    assert chat_payload["messages"] == ["done"]
+
+
+@pytest.mark.asyncio
 async def test_runtime_chat_history_clear_returns_409_until_history_finalized() -> None:
     history = _DummyHistoryManager()
     context = RuntimeAPIContext(

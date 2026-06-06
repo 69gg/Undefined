@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -229,6 +230,72 @@ async def test_webchat_title_generation_uses_first_question_and_answer(
     assert updated is not None
     assert updated["title"] == "首问首答标题"
     assert updated["title_status"] == "generated"
+
+
+@pytest.mark.asyncio
+async def test_webchat_title_generation_concurrent_schedule_starts_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    context = _context(history=SimpleNamespace(get_recent_private=lambda *_args: []))
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def _fake_generate_title(_ai: Any, question: str, answer: str) -> str:
+        nonlocal calls
+        assert question == "并发问题"
+        assert answer == "并发回答"
+        calls += 1
+        started.set()
+        await release.wait()
+        return "并发标题"
+
+    monkeypatch.setattr(
+        runtime_api_chat, "generate_webchat_title", _fake_generate_title
+    )
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+    create_response = await server._chat_conversation_create_handler(
+        cast(web.Request, cast(Any, _JsonRequest(query={}, _json={})))
+    )
+    conversation_id = str(
+        json.loads(create_response.text or "{}")["conversation"]["id"]
+    )
+    await server._chat_job_manager.conversation_store.append_message(
+        conversation_id,
+        role="user",
+        text_content="并发问题",
+        display_name="system",
+        user_name="system",
+    )
+    await server._chat_job_manager.conversation_store.append_message(
+        conversation_id,
+        role="bot",
+        text_content="并发回答",
+        display_name="Bot",
+        user_name="Bot",
+    )
+
+    await asyncio.gather(
+        server._chat_job_manager.maybe_schedule_title_generation(conversation_id),
+        server._chat_job_manager.maybe_schedule_title_generation(conversation_id),
+    )
+    await asyncio.wait_for(started.wait(), timeout=1)
+    assert calls == 1
+    assert len(server._chat_job_manager.conversation_store._title_tasks) == 1
+
+    release.set()
+    task = server._chat_job_manager.conversation_store._title_tasks[conversation_id]
+    await task
+    updated = await server._chat_job_manager.conversation_store.get_conversation(
+        conversation_id
+    )
+
+    assert updated is not None
+    assert updated["title"] == "并发标题"
+    assert updated["title_status"] == "generated"
+    assert calls == 1
 
 
 @pytest.mark.asyncio

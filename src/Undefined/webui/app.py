@@ -10,6 +10,7 @@ from aiohttp import web
 
 from Undefined.config import load_webui_settings, get_config_manager, get_config
 from Undefined.utils.cors import is_allowed_cors_origin, normalize_origin
+from Undefined.utils import io as async_io
 from .core import BotProcessController, SessionStore
 from .routes import routes
 from .routes._shared import (
@@ -233,17 +234,29 @@ async def on_startup(app: web.Application) -> None:
     get_config_manager().start_hot_reload()
     logger.info("[WebUI] 后台任务已启动（热重载）")
 
+    bot = app[BOT_APP_KEY]
+
+    # 1. 优先检查自动恢复标记（现有逻辑）
     # If we restarted WebUI after an update and the bot was previously running,
     # auto-start it again.
     try:
         marker = Path("data/cache/pending_bot_autostart")
-        if marker.exists():
-            marker.unlink(missing_ok=True)
-            bot = app[BOT_APP_KEY]
+        if await async_io.exists(marker):
+            await async_io.delete_file(marker)
             await bot.start()
             logger.info("[WebUI] 检测到自动恢复标记，已尝试启动机器人进程")
+            return  # 已启动，跳过后续检查
     except Exception:
         logger.debug("[WebUI] 自动恢复机器人进程失败", exc_info=True)
+
+    # 2. 检查配置项（新增逻辑）
+    try:
+        settings = app[SETTINGS_APP_KEY]
+        if settings.autostart_bot:
+            await bot.start()
+            logger.info("[WebUI] 配置 autostart_bot=true，已自动启动机器人进程")
+    except Exception:
+        logger.debug("[WebUI] 自动启动机器人进程失败", exc_info=True)
 
 
 async def on_shutdown(app: web.Application) -> None:

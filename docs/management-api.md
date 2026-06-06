@@ -246,6 +246,7 @@ GET /api/v1/management/runtime/commands?scope=webui&q=help
   - `GET runtime/chat/jobs/active`：`conversation_id` 可选。
 - 校验：
   - Runtime 会检查 `conversation_id` 是否存在。
+  - `POST runtime/chat` 在 `stream=false` 时也会创建并等待 Runtime WebChat job，运行期间受同一套全局 job 互斥保护。
   - 删除历史时，如果仍有运行中或收尾落盘中的 job，会透传 `409`。
 - 响应：
   - `200` / `202`：聊天结果、历史页、job 快照或 active job。

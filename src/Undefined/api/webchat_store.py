@@ -107,6 +107,14 @@ class WebChatConversationStore:
     def adapter(self, conversation_id: str) -> WebChatHistoryAdapter:
         return WebChatHistoryAdapter(self, conversation_id)
 
+    async def stop(self) -> None:
+        tasks = [task for task in self._title_tasks.values() if not task.done()]
+        self._title_tasks.clear()
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def ensure_ready(self, legacy_history_manager: Any | None = None) -> None:
         async with self._global_lock:
             if not self._loaded:
@@ -425,11 +433,12 @@ class WebChatConversationStore:
 
     def register_title_task(
         self, conversation_id: str, task: asyncio.Task[None]
-    ) -> None:
+    ) -> bool:
         conv_id = _normalize_conversation_id(conversation_id)
         previous = self._title_tasks.get(conv_id)
         if previous is not None and not previous.done():
-            return
+            task.cancel()
+            return False
         self._title_tasks[conv_id] = task
 
         def _cleanup(done_task: asyncio.Task[None]) -> None:
@@ -437,6 +446,7 @@ class WebChatConversationStore:
                 self._title_tasks.pop(conv_id, None)
 
         task.add_done_callback(_cleanup)
+        return True
 
     def title_task_running(self, conversation_id: str) -> bool:
         task = self._title_tasks.get(_normalize_conversation_id(conversation_id))

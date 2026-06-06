@@ -78,6 +78,8 @@ async def test_get_public_repo_info_parses_repo_and_contributor_count(
     assert info.stars == 1234
     assert info.forks == 56
     assert info.open_issues == 7
+    assert info.watchers == 89
+    assert info.subscribers == 89
     assert info.contributors == 42
     assert info.topics == ("bot", "onebot")
 

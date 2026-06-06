@@ -256,8 +256,8 @@ curl http://127.0.0.1:8788/openapi.json
 }
 ```
 
-- `stream = false` 保持同步响应。
-- 当 `stream = true` 时，Runtime 会创建 WebChat job。旧接口仍可返回 SSE，但 WebUI 默认使用 job 查询接口续接事件。
+- `stream = false` 返回同步 JSON，但后端同样会创建 WebChat job 并等待其完成；运行期间会占用 WebChat 全局 job 互斥，删除会话、清空历史和启动其他 WebChat job 会返回 `409`。
+- 当 `stream = true` 时，Runtime 会创建 WebChat job 并通过旧接口返回 SSE；WebUI 默认使用 job 查询接口续接事件。
 - `conversation_id` 可选；不传时使用兼容默认会话 `legacy-system-42`，传入不存在的会话 ID 时返回 `404`。
 #### Event types
 
@@ -424,6 +424,7 @@ curl http://127.0.0.1:8788/openapi.json
 ### WebUI AI Chat Jobs
 
 - `POST /api/v1/chat/jobs`：创建后台 job，Body 为 `{"message":"...","conversation_id":"..."}`，`conversation_id` 可选。
+- WebChat job 在当前 Runtime 进程内全局单飞；如果已有任意 WebChat job 正在运行或收尾落盘，创建新 job 返回 `409`。兼容的非流式 `POST /api/v1/chat` 也走同一套 job 互斥，只是等待完成后返回同步结果。
 - WebChat 前端粘贴或选择的附件会先被合并进 `message`：小图片使用 `CQ:image,file=base64://...`，普通文件使用 WebUI 管理代理的 `/api/runtime/chat/files` 缓存后生成 `CQ:file,id=...`；Runtime 侧沿用 `register_message_attachments()` 注册到 `webui` 附件作用域。
 - WebChat 前端引用 AI 消息、选中文本或 HTML 预览中点选的元素时，不新增后端端点，也不写入单独附件；发送前会把待引用内容转换成 Markdown blockquote 并拼接到 `message` 前面，例如 `> 引用 AI:` / `> 引用 HTML 片段:`。后端只接收最终 `message` 字符串。
 - `GET /api/v1/chat/jobs/active?conversation_id=<id>`：返回当前运行中的 WebChat job（没有则为 `null`）。不传时返回任意当前 WebChat job；传入时只在该 job 属于对应会话时返回。
