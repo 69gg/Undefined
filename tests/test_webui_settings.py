@@ -1,4 +1,8 @@
-"""Tests for WebUI settings loading."""
+"""Tests for WebUI settings loading.
+
+This module tests the load_webui_settings function to ensure proper
+parsing of the autostart_bot configuration field from config.toml.
+"""
 
 from __future__ import annotations
 

@@ -10,6 +10,7 @@ from aiohttp import web
 
 from Undefined.config import load_webui_settings, get_config_manager, get_config
 from Undefined.utils.cors import is_allowed_cors_origin, normalize_origin
+from Undefined.utils import io as async_io
 from .core import BotProcessController, SessionStore
 from .routes import routes
 from .routes._shared import (
@@ -240,8 +241,8 @@ async def on_startup(app: web.Application) -> None:
     # auto-start it again.
     try:
         marker = Path("data/cache/pending_bot_autostart")
-        if marker.exists():
-            marker.unlink(missing_ok=True)
+        if await async_io.exists(marker):
+            await async_io.delete_file(marker)
             await bot.start()
             logger.info("[WebUI] 检测到自动恢复标记，已尝试启动机器人进程")
             return  # 已启动，跳过后续检查

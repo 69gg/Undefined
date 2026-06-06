@@ -1,4 +1,8 @@
-"""Tests for WebUI bot autostart functionality."""
+"""Tests for WebUI bot autostart functionality.
+
+This module tests the on_startup hook to ensure proper autostart behavior
+based on the autostart_bot configuration and pending_bot_autostart marker.
+"""
 
 from __future__ import annotations
 
