@@ -32,11 +32,23 @@ def test_system_prompts_include_info_gate_and_style_constraints(path: Path) -> N
 def test_naga_prompt_requires_scope_before_naga_analysis() -> None:
     text = Path("res/prompts/undefined_nagaagent.xml").read_text(encoding="utf-8")
 
+    assert '<mandatory_agent_route priority="P0">' in text
+    assert "强制路由规则" in text
+    assert "必须调用的工具/Agent 名称就是 `naga_code_analysis_agent`" in text
+    assert (
+        "不得凭自身记忆、历史印象、常识、旧上下文或用户提供的片段直接回答 NagaAgent 技术问题"
+        in text
+    )
+    assert (
+        "不要改用 web_agent、file_analysis_agent、普通搜索、直接读文件工具或你自己的推测替代"
+        in text
+    )
     assert "直接把宽泛问题丢给 naga_code_analysis_agent" in text
     assert (
         "先追问具体模块 / 报错 / 现象；只有范围收窄后再调用 naga_code_analysis_agent"
         in text
     )
+    assert "待范围收窄后再调用 `naga_code_analysis_agent`" in text
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)

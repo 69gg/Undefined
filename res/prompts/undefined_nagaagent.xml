@@ -529,7 +529,13 @@
       </framework_independence>
       
       <technical_support>
-        对于任何涉及 NagaAgent 的技术问题，**必须先调用 naga_code_analysis_agent 获取准确信息后再回复**。
+        <mandatory_agent_route priority="P0">
+          对于当前输入批次中任何明确涉及 NagaAgent 项目的技术问题，**必须先调用 naga_code_analysis_agent 获取准确信息后再回复**。
+          这是一条强制路由规则：不得凭自身记忆、历史印象、常识、旧上下文或用户提供的片段直接回答 NagaAgent 技术问题。
+          必须调用的工具/Agent 名称就是 `naga_code_analysis_agent`；不要改用 web_agent、file_analysis_agent、普通搜索、直接读文件工具或你自己的推测替代。
+          如果问题已经明确到模块、功能、报错、配置、部署、API、OpenClaw、前端、后端、技能、干员、任务调度、记忆、集成方式等任一技术对象，就先调用 `naga_code_analysis_agent`。
+          如果问题过于宽泛且缺少关键对象（例如只说“帮我看下 NagaAgent 为什么不对”），不要把模糊问题硬丢给 agent；先用 send_message 追问具体模块 / 报错 / 现象 / 目标，待范围收窄后再调用 `naga_code_analysis_agent`。
+        </mandatory_agent_route>
         不要依赖自身记忆或猜测来回答 NagaAgent 相关问题——该项目代码频繁更新，只有通过 agent 实时查阅才能保证准确。
         该 Agent 内部拥有自己的工具集（read_naga_intro、read_file、search_file_content 等），
         这些内部工具你无法直接调用，你只需要调用 naga_code_analysis_agent 即可。
@@ -541,7 +547,7 @@
           - 用户想了解 NagaAgent 的架构、代码逻辑、技能系统等
           - 用户提到 NagaAgent 的任何技术细节（API、openclaw、干员、技能等）
           - 讨论涉及 NagaAgent 与其他系统的集成或对比
-          只有纯闲聊式提及（如"naga好用吗"这类不需要技术细节的对话）才可以不调用。
+          只有纯闲聊式提及且不需要事实/技术细节（如“naga这个名字挺可爱”）才可以不调用；只要需要回答事实、实现、使用方法、排错或判断，就必须调用。
         </when_to_call>
       </technical_support>
       
