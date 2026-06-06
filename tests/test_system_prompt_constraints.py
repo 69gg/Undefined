@@ -90,6 +90,16 @@ def test_system_prompts_define_persona_nicknames_and_ownership_bounds(
     assert "资深开发者" not in text
 
 
+@pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_pin_undefined_literal_spelling(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    assert "必须逐字拼写为 Undefined" in text
+    assert "必须使用字面量 Undefined" in text
+    assert "公开回复、工具参数、memo、observations" in text
+    assert "禁止在 observations 中写成 Unfined、Undefind、undefind" in text
+
+
 def test_naga_prompt_keeps_relationship_contextual_and_non_claiming() -> None:
     text = Path("res/prompts/undefined_nagaagent.xml").read_text(encoding="utf-8")
 
@@ -173,10 +183,12 @@ def test_end_tool_schema_mentions_current_input_batch() -> None:
     assert "当前输入批次" in function["description"]
     assert "不要求与 bot 相关" in function["description"]
     assert "不要求长期稳定" in function["description"]
+    assert "项目名/主名必须逐字写作 Undefined" in function["description"]
     assert "必须覆盖整批消息内容" in observations["description"]
     assert "不能只记录最后一条" in observations["description"]
     assert "当前批次中有价值即可记录" in observations["description"]
     assert "禁止从其中摘取新事实写入 observations" in observations["description"]
+    assert "禁止写成 Unfined、Undefind、undefind" in observations["description"]
     assert "summary" not in properties
     assert "action_summary" not in properties
     assert "new_info" not in properties

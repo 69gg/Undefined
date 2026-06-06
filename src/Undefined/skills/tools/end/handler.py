@@ -34,6 +34,8 @@ _MIN_HISTORIAN_LINES = 0
 _MAX_HISTORIAN_LINES = 50
 _MIN_HISTORIAN_LINE_LEN = 16
 _MAX_HISTORIAN_LINE_LEN = 1000
+_CANONICAL_PROJECT_NAME = "Undefined"
+_PROJECT_NAME_MISSPELLINGS = ("Unfined", "Undefind", "undefind")
 
 
 def _parse_force_flag(value: Any) -> tuple[bool, bool]:
@@ -53,6 +55,13 @@ def _clip_text(value: Any, max_len: int) -> str:
     if len(text) <= max_len:
         return text
     return text[: max_len - 3].rstrip() + "..."
+
+
+def _normalize_project_name_spelling(text: str) -> str:
+    normalized = str(text or "")
+    for misspelling in _PROJECT_NAME_MISSPELLINGS:
+        normalized = normalized.replace(misspelling, _CANONICAL_PROJECT_NAME)
+    return normalized
 
 
 def _clamp_int(value: int, min_value: int, max_value: int) -> int:
@@ -257,13 +266,23 @@ def _build_location(context: Dict[str, Any]) -> EndSummaryLocation | None:
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     memo_raw = args.get("memo", "")
-    memo = memo_raw.strip() if isinstance(memo_raw, str) else ""
+    memo = (
+        _normalize_project_name_spelling(memo_raw.strip())
+        if isinstance(memo_raw, str)
+        else ""
+    )
     observations_raw = args.get("observations", [])
     if isinstance(observations_raw, str):
-        observations = [observations_raw.strip()] if observations_raw.strip() else []
+        observations = (
+            [_normalize_project_name_spelling(observations_raw.strip())]
+            if observations_raw.strip()
+            else []
+        )
     elif isinstance(observations_raw, list):
         observations = [
-            str(item).strip() for item in observations_raw if str(item).strip()
+            _normalize_project_name_spelling(str(item).strip())
+            for item in observations_raw
+            if str(item).strip()
         ]
     else:
         observations = []

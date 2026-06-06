@@ -96,6 +96,8 @@ class _FakeCognitiveService:
     def __init__(self) -> None:
         self.last_context: dict[str, Any] | None = None
         self.last_force: bool | None = None
+        self.last_memo = ""
+        self.last_observations: list[str] = []
 
     async def enqueue_job(
         self,
@@ -107,6 +109,8 @@ class _FakeCognitiveService:
     ) -> str:
         self.last_context = dict(context)
         self.last_force = bool(force)
+        self.last_memo = memo
+        self.last_observations = list(observations)
         return "job-test"
 
 
@@ -131,6 +135,36 @@ async def test_end_ignores_removed_legacy_param_names() -> None:
     assert result == "对话已结束"
     assert context["conversation_ended"] is True
     assert cognitive_service.last_context is None
+
+
+@pytest.mark.asyncio
+async def test_end_normalizes_undefined_project_name_misspellings() -> None:
+    cognitive_service = _FakeCognitiveService()
+    context: dict[str, Any] = {
+        "request_id": "req-normalize-project-name",
+        "cognitive_service": cognitive_service,
+    }
+
+    result = await execute(
+        {
+            "memo": "已解释 Unfined 的记忆架构",
+            "observations": [
+                "QQ号42（昵称system）在 WebUI 询问 Unfined 是否了解自身记忆架构",
+                "QQ号42（昵称system）提到 Undefind 的分层架构",
+                "QQ号42（昵称system）继续讨论 undefind",
+            ],
+            "force": True,
+        },
+        context,
+    )
+
+    assert result == "对话已结束"
+    assert cognitive_service.last_memo == "已解释 Undefined 的记忆架构"
+    assert cognitive_service.last_observations == [
+        "QQ号42（昵称system）在 WebUI 询问 Undefined 是否了解自身记忆架构",
+        "QQ号42（昵称system）提到 Undefined 的分层架构",
+        "QQ号42（昵称system）继续讨论 Undefined",
+    ]
 
 
 @pytest.mark.asyncio
