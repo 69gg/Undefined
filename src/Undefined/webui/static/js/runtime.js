@@ -44,6 +44,7 @@
         chatReferenceSeq: 0,
         pendingSelectionReference: null,
         selectionQuoteButton: null,
+        imageViewerPreviousFocus: null,
         chatConversationDrawerOpen: false,
         htmlRunnerSource: "",
         htmlRunnerPickMode: false,
@@ -779,7 +780,10 @@
                 item.render_source || item.source_ref || "",
             ).trim();
             if (!source) return "";
-            return `<img class="runtime-chat-image" src="${escapeHtml(source)}" alt="image" loading="lazy" />`;
+            return chatImageMarkup(
+                source,
+                item.display_name || item.name || "",
+            );
         }
         const fileId = String(
             item.file_id || item.source_ref || item.uid || "",
@@ -2011,6 +2015,14 @@
         return "";
     }
 
+    function chatImageMarkup(source, alt = "") {
+        const src = String(source || "").trim();
+        if (!src) return "";
+        const label =
+            String(alt || "").trim() || t("runtime.image_preview") || "image";
+        return `<img class="runtime-chat-image" src="${escapeHtml(src)}" alt="${escapeHtml(label)}" title="${escapeHtml(t("runtime.open_image_preview"))}" loading="lazy" data-chat-image-preview="1" />`;
+    }
+
     function formatFileSize(bytes) {
         const n = Number(bytes);
         if (!Number.isFinite(n) || n <= 0) return "";
@@ -2515,6 +2527,8 @@
                 }
                 element.classList.add("runtime-chat-image");
                 element.setAttribute("loading", "lazy");
+                element.setAttribute("data-chat-image-preview", "1");
+                element.setAttribute("title", t("runtime.open_image_preview"));
                 return;
             }
             if (["alt", "title"].includes(name)) return;
@@ -2767,9 +2781,7 @@
             const src = resolveCqImageSource(attrs);
             if (src) {
                 const idx = images.length;
-                images.push(
-                    `<img class="runtime-chat-image" src="${escapeHtml(src)}" alt="image" loading="lazy" />`,
-                );
+                images.push(chatImageMarkup(src));
                 return `CQIMGPH${idx}CQIMGPH`;
             }
             return match;
@@ -2816,6 +2828,56 @@
         }
 
         return html || escapeHtml(text);
+    }
+
+    function openChatImageViewer(image) {
+        if (!image) return;
+        const source = String(
+            image.currentSrc || image.getAttribute("src") || "",
+        ).trim();
+        if (!source) return;
+        const viewer = get("runtimeChatImageViewer");
+        const viewerImage = get("runtimeChatImageViewerImage");
+        const caption = get("runtimeChatImageViewerCaption");
+        const closeButton = get("btnRuntimeChatImageViewerClose");
+        if (!viewer || !viewerImage) return;
+        const alt = String(image.getAttribute("alt") || "").trim();
+        runtimeState.imageViewerPreviousFocus =
+            document.activeElement instanceof HTMLElement
+                ? document.activeElement
+                : null;
+        viewerImage.src = source;
+        viewerImage.alt = alt || t("runtime.image_preview");
+        if (caption) {
+            caption.textContent =
+                alt && alt !== "image" ? alt : t("runtime.image_preview");
+        }
+        viewer.hidden = false;
+        viewer.classList.add("is-open");
+        viewer.setAttribute("aria-hidden", "false");
+        if (closeButton) closeButton.focus({ preventScroll: true });
+    }
+
+    function closeChatImageViewer() {
+        const viewer = get("runtimeChatImageViewer");
+        const viewerImage = get("runtimeChatImageViewerImage");
+        if (!viewer) return;
+        viewer.classList.remove("is-open");
+        viewer.hidden = true;
+        viewer.setAttribute("aria-hidden", "true");
+        if (viewerImage) {
+            viewerImage.removeAttribute("src");
+            viewerImage.alt = "";
+        }
+        const previousFocus = runtimeState.imageViewerPreviousFocus;
+        runtimeState.imageViewerPreviousFocus = null;
+        if (
+            previousFocus &&
+            typeof previousFocus.focus === "function" &&
+            document.contains(previousFocus)
+        ) {
+            previousFocus.focus({ preventScroll: true });
+        }
     }
 
     function decodeCodeBlockPayload(block) {
@@ -4181,28 +4243,112 @@
         return parts.join(" · ");
     }
 
-    function chatCommandPaletteEmptyMessage() {
+    function commandTextWithTypedTrigger(command, typedName, text) {
+        const raw = String(text || "").trim();
+        if (!raw || !command) return raw;
+        const canonicalName = String(command.name || "").trim();
+        const displayName = chatCommandDisplayName(command, typedName);
+        if (!canonicalName || !displayName) return raw;
+        const canonicalTrigger = `/${canonicalName}`;
+        const displayTrigger = `/${displayName}`;
+        if (
+            raw === canonicalTrigger ||
+            raw.startsWith(`${canonicalTrigger} `)
+        ) {
+            return `${displayTrigger}${raw.slice(canonicalTrigger.length)}`;
+        }
+        return raw;
+    }
+
+    function commandAliasText(command) {
+        const aliases = Array.isArray(command && command.aliases)
+            ? command.aliases
+            : [];
+        return aliases
+            .map((item) => String(item || "").trim())
+            .filter(Boolean)
+            .map((item) => `/${item}`)
+            .join(", ");
+    }
+
+    function renderChatCommandNoSubcommandsHelp(command, context) {
+        const typedCommandName = chatCommandDisplayName(
+            command,
+            context.commandQuery,
+        );
+        const label = `/${typedCommandName || command.name}`;
+        const description = String(command.description || "").trim();
+        const usage = commandTextWithTypedTrigger(
+            command,
+            typedCommandName,
+            command.usage || command.trigger || label,
+        );
+        const example = commandTextWithTypedTrigger(
+            command,
+            typedCommandName,
+            command.example || "",
+        );
+        const aliases = commandAliasText(command);
+        const rows = [
+            usage
+                ? [
+                      t("runtime.command_usage"),
+                      `<code>${escapeHtml(usage)}</code>`,
+                  ]
+                : null,
+            example
+                ? [
+                      t("runtime.command_example"),
+                      `<code>${escapeHtml(example)}</code>`,
+                  ]
+                : null,
+            aliases
+                ? [
+                      t("runtime.command_aliases"),
+                      `<span>${escapeHtml(aliases)}</span>`,
+                  ]
+                : null,
+        ].filter(Boolean);
+        return (
+            `<div class="runtime-chat-command-help">` +
+            `<div class="runtime-chat-command-help-head">` +
+            `<span class="runtime-chat-command-help-name">${escapeHtml(label)}</span>` +
+            `<span class="runtime-chat-command-help-kicker">${escapeHtml(t("runtime.command_help"))}</span>` +
+            `</div>` +
+            (description
+                ? `<div class="runtime-chat-command-help-desc">${escapeHtml(description)}</div>`
+                : "") +
+            (rows.length
+                ? `<div class="runtime-chat-command-help-grid">` +
+                  rows
+                      .map(
+                          ([name, value]) =>
+                              `<span>${escapeHtml(name)}</span><span>${value}</span>`,
+                      )
+                      .join("") +
+                  `</div>`
+                : "") +
+            `<div class="runtime-chat-command-help-note">${escapeHtml(t("runtime.command_no_subcommands_note"))}</div>` +
+            `</div>`
+        );
+    }
+
+    function chatCommandPaletteEmptyHtml() {
         const context = runtimeState.chatCommandContext;
         if (!context || context.mode !== "subcommand") {
-            return t("runtime.chat_command_empty");
+            return `<div class="runtime-chat-command-empty">${escapeHtml(t("runtime.chat_command_empty"))}</div>`;
         }
         const command = findChatCommandByNameOrAlias(context.commandQuery);
         if (!command) {
-            return t("runtime.chat_command_unknown_command");
+            return `<div class="runtime-chat-command-empty">${escapeHtml(t("runtime.chat_command_unknown_command"))}</div>`;
         }
         const subcommands = Array.isArray(command.subcommands)
             ? command.subcommands
             : [];
         if (!subcommands.length) {
-            const commandName = chatCommandDisplayName(
-                command,
-                context.commandQuery,
-            );
-            return i18nFormat("runtime.chat_command_no_subcommands", {
-                command: `/${commandName}`,
-            });
+            return renderChatCommandNoSubcommandsHelp(command, context);
         }
-        return t("runtime.chat_command_subcommand_empty");
+        return `<div class="runtime-chat-command-empty">${escapeHtml(t("runtime.chat_command_subcommand_empty"))}</div>`;
     }
 
     function renderChatCommandPalette() {
@@ -4233,7 +4379,7 @@
             return;
         }
         if (!matches.length) {
-            palette.innerHTML = `<div class="runtime-chat-command-empty">${escapeHtml(chatCommandPaletteEmptyMessage())}</div>`;
+            palette.innerHTML = chatCommandPaletteEmptyHtml();
             return;
         }
         const hint =
@@ -5497,6 +5643,14 @@
             chatLog.addEventListener("click", (event) => {
                 const target = event.target;
                 if (!(target instanceof Element)) return;
+                const chatImage = target.closest(
+                    ".runtime-chat-image[data-chat-image-preview]",
+                );
+                if (chatImage) {
+                    event.preventDefault();
+                    openChatImageViewer(chatImage);
+                    return;
+                }
                 const toggleButton = target.closest("[data-code-toggle]");
                 if (toggleButton) {
                     const block = toggleButton.closest(".runtime-code-block");
@@ -5527,6 +5681,20 @@
             });
             chatLog.addEventListener("keyup", () => {
                 setTimeout(maybeShowSelectionQuoteButton, 0);
+            });
+        }
+
+        const imageViewer = get("runtimeChatImageViewer");
+        if (imageViewer) {
+            imageViewer.addEventListener("click", (event) => {
+                const target = event.target;
+                if (!(target instanceof Element)) return;
+                if (
+                    target.closest("[data-chat-image-viewer-close]") ||
+                    !target.closest(".runtime-chat-image-viewer-figure")
+                ) {
+                    closeChatImageViewer();
+                }
             });
         }
 
@@ -5695,6 +5863,12 @@
         });
         window.addEventListener("blur", () => {
             clearHtmlRunnerInteraction();
+        });
+        window.addEventListener("keydown", (event) => {
+            if (event.key === "Escape" && imageViewer && !imageViewer.hidden) {
+                event.preventDefault();
+                closeChatImageViewer();
+            }
         });
         window.addEventListener("message", (event) => {
             const frame = get("runtimeHtmlRunnerFrame");

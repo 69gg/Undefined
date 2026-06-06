@@ -404,6 +404,36 @@
   .runtime-chat-command-side {
     justify-items: start;
   }
+  .runtime-chat-command-help {
+    padding: 9px;
+  }
+  .runtime-chat-command-help-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .runtime-chat-command-help-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+  .runtime-chat-command-help-grid > span:nth-child(even) {
+    margin-bottom: 5px;
+  }
+  .runtime-chat-image-viewer {
+    padding: 14px;
+  }
+  .runtime-chat-image-viewer-figure,
+  .runtime-chat-image-viewer-image,
+  .runtime-chat-image-viewer-caption {
+    max-width: calc(100vw - 28px);
+  }
+  .runtime-chat-image-viewer-image {
+    max-height: calc(100dvh - 86px);
+  }
+  .runtime-chat-image-viewer-close {
+    top: max(10px, env(safe-area-inset-top));
+    right: max(10px, env(safe-area-inset-right));
+  }
   .runtime-chat-references {
     grid-area: references;
     align-self: stretch;

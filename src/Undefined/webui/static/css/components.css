@@ -1097,6 +1097,16 @@
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   margin: 6px 0;
+  cursor: zoom-in;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+}
+.runtime-chat-image:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-color));
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+  transform: translateY(-1px);
 }
 .runtime-chat-file-card {
   display: flex;
@@ -1263,6 +1273,67 @@
   color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: 11px;
+}
+.runtime-chat-command-help {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border-color));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-card));
+  color: var(--text-primary);
+}
+.runtime-chat-command-help-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.runtime-chat-command-help-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent-color);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+}
+.runtime-chat-command-help-kicker {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 650;
+}
+.runtime-chat-command-help-desc {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.runtime-chat-command-help-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 5px 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.runtime-chat-command-help-grid > span:nth-child(odd) {
+  color: var(--text-tertiary);
+}
+.runtime-chat-command-help-grid code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 2px 6px;
+  border-radius: calc(var(--radius-sm) - 1px);
+  background: color-mix(in srgb, var(--bg-app) 78%, transparent);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.runtime-chat-command-help-note {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.45;
 }
 .runtime-chat-references {
   flex: 0 0 min(260px, 28%);
@@ -1886,6 +1957,80 @@
 .runtime-tool-preview-body .runtime-chat-file-card {
   max-width: min(340px, 100%);
 }
+.runtime-chat-image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 260;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: color-mix(in srgb, #020617 78%, transparent);
+  backdrop-filter: blur(7px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+.runtime-chat-image-viewer.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.runtime-chat-image-viewer[hidden] {
+  display: none;
+}
+.runtime-chat-image-viewer-figure {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  max-width: min(1120px, calc(100vw - 56px));
+  max-height: calc(100dvh - 56px);
+  margin: 0;
+}
+.runtime-chat-image-viewer-image {
+  display: block;
+  max-width: min(1120px, calc(100vw - 56px));
+  max-height: calc(100dvh - 104px);
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  background: #020617;
+  box-shadow: 0 24px 70px rgba(2, 6, 23, 0.46);
+  animation: runtime-chat-image-viewer-in 0.18s ease-out;
+}
+.runtime-chat-image-viewer-caption {
+  max-width: min(720px, calc(100vw - 56px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 12px;
+}
+.runtime-chat-image-viewer-close {
+  position: fixed;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-sm);
+  background: rgba(15, 23, 42, 0.68);
+  color: #fff;
+  cursor: pointer;
+  font-size: 24px;
+  line-height: 1;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    transform 0.16s ease;
+}
+.runtime-chat-image-viewer-close:hover,
+.runtime-chat-image-viewer-close:focus-visible {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(15, 23, 42, 0.9);
+  transform: translateY(-1px);
+}
 .runtime-tool-children {
   display: grid;
   gap: 8px;
@@ -2084,6 +2229,16 @@
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+@keyframes runtime-chat-image-viewer-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 @keyframes runtime-chat-selection-quote-in {

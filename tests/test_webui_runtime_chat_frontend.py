@@ -176,12 +176,19 @@ def test_webchat_frontend_has_slash_command_palette() -> None:
         "if (!command) {\n                return commandMatchesForQuery(context.commandQuery);"
         in source
     )
-    assert "function chatCommandPaletteEmptyMessage" in source
+    assert "function renderChatCommandNoSubcommandsHelp" in source
+    assert "function chatCommandPaletteEmptyHtml" in source
+    assert "commandTextWithTypedTrigger" in source
+    assert "commandAliasText" in source
     assert "!runtimeState.chatCommandsLoaded" in source
     assert "runtime.chat_command_loading" in source
     assert "runtime.chat_command_unknown_command" in source
     assert "runtime.chat_command_subcommand_empty" in source
-    assert "runtime.chat_command_no_subcommands" in source
+    assert "runtime.command_no_subcommands_note" in source
+    assert "runtime.command_usage" in source
+    assert "runtime.command_example" in source
+    assert "runtime.command_aliases" in source
+    assert "runtime-chat-command-help" in source
     assert "function replaceChatCommandInput" in source
     assert "chooseActiveChatCommandMatch()" in source
     assert 'event.key === "ArrowDown"' in source
@@ -209,8 +216,12 @@ def test_webchat_frontend_has_slash_command_palette() -> None:
     assert "runtime.chat_command_empty" in i18n
     assert "runtime.chat_command_unknown_command" in i18n
     assert "runtime.chat_command_subcommand_empty" in i18n
-    assert "runtime.chat_command_no_subcommands" in i18n
     assert "runtime.chat_command_subcommands" in i18n
+    assert "runtime.command_help" in i18n
+    assert "runtime.command_usage" in i18n
+    assert "runtime.command_example" in i18n
+    assert "runtime.command_aliases" in i18n
+    assert "runtime.command_no_subcommands_note" in i18n
 
 
 def test_webchat_frontend_sends_conversation_id_with_history_and_jobs() -> None:
@@ -646,6 +657,34 @@ def test_webchat_frontend_sanitizes_markdown_html_and_unsafe_links() -> None:
     assert 'rel="noreferrer"' in render_helper
     assert "renderer.image" in render_helper
     assert "renderer: createSafeMarkedRenderer()" in source
+
+
+def test_webchat_frontend_has_clickable_image_viewer() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    template = WEBUI_TEMPLATE.read_text(encoding="utf-8")
+    css = RUNTIME_CSS.read_text(encoding="utf-8")
+    responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
+    i18n = I18N_JS.read_text(encoding="utf-8")
+
+    assert 'id="runtimeChatImageViewer"' in template
+    assert 'id="runtimeChatImageViewerImage"' in template
+    assert "data-chat-image-viewer-close" in template
+    assert "function chatImageMarkup" in source
+    assert 'data-chat-image-preview="1"' in source
+    assert "function openChatImageViewer" in source
+    assert "function closeChatImageViewer" in source
+    assert "runtimeState.imageViewerPreviousFocus" in source
+    assert '".runtime-chat-image[data-chat-image-preview]"' in source
+    assert 'event.key === "Escape"' in source
+    assert 'target.closest(".runtime-chat-image-viewer-figure")' in source
+    assert "runtime.open_image_preview" in i18n
+    assert "runtime.image_preview" in i18n
+    assert ".runtime-chat-image-viewer" in css
+    assert ".runtime-chat-image-viewer.is-open" in css
+    assert ".runtime-chat-image-viewer-close" in css
+    assert "cursor: zoom-in;" in css
+    assert "@keyframes runtime-chat-image-viewer-in" in css
+    assert ".runtime-chat-image-viewer" in responsive_css
 
 
 def test_webchat_markdown_quotes_render_as_collapsible_scroll_blocks() -> None:

@@ -290,9 +290,13 @@ const I18N = {
         "runtime.chat_command_unknown_command":
             "继续输入完整命令，或从候选命令中选择",
         "runtime.chat_command_subcommand_empty": "未找到匹配子命令",
-        "runtime.chat_command_no_subcommands":
-            "{command} 没有子命令，可直接发送或继续输入参数",
         "runtime.chat_command_subcommands": "{count} 个子命令",
+        "runtime.command_help": "命令帮助",
+        "runtime.command_usage": "用法",
+        "runtime.command_example": "示例",
+        "runtime.command_aliases": "别名",
+        "runtime.command_no_subcommands_note":
+            "该命令没有子命令，可按上方用法补充参数后发送。",
         "runtime.chat_stage_received": "已接收",
         "runtime.chat_stage_processing": "处理中",
         "runtime.chat_stage_recording_history": "记录历史",
@@ -352,6 +356,8 @@ const I18N = {
         "runtime.html_pick_hint": "第一次点击预览范围，第二次点击确认",
         "runtime.html_pick_confirm_hint": "再次点击确认",
         "runtime.close": "关闭",
+        "runtime.image_preview": "图片预览",
+        "runtime.open_image_preview": "点击放大查看",
         "runtime.download": "下载",
         "runtime.send": "发送",
         "runtime.total": "共 {count} 条",
@@ -699,9 +705,13 @@ const I18N = {
         "runtime.chat_command_unknown_command":
             "Keep typing the full command, or choose from command matches",
         "runtime.chat_command_subcommand_empty": "No matching subcommand",
-        "runtime.chat_command_no_subcommands":
-            "{command} has no subcommands. Send it directly or keep typing arguments.",
         "runtime.chat_command_subcommands": "{count} subcommands",
+        "runtime.command_help": "Command help",
+        "runtime.command_usage": "Usage",
+        "runtime.command_example": "Example",
+        "runtime.command_aliases": "Aliases",
+        "runtime.command_no_subcommands_note":
+            "This command has no subcommands. Add arguments using the usage above, then send.",
         "runtime.chat_stage_received": "Received",
         "runtime.chat_stage_processing": "Processing",
         "runtime.chat_stage_recording_history": "Recording history",
@@ -762,6 +772,8 @@ const I18N = {
             "Click once to preview, click again to confirm",
         "runtime.html_pick_confirm_hint": "Click again to confirm",
         "runtime.close": "Close",
+        "runtime.image_preview": "Image preview",
+        "runtime.open_image_preview": "Click to enlarge",
         "runtime.download": "Download",
         "runtime.send": "Send",
         "runtime.total": "{count} items",
