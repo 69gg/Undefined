@@ -174,6 +174,24 @@ def test_system_prompts_tell_end_to_record_whole_current_input_batch(
     assert "summary 应该是对未来有帮助的信息" not in text
 
 
+@pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_encourage_active_memory_lookup(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    required_snippets = [
+        "记忆查阅要主动",
+        "不要凭印象回答；先查看已注入的记忆，必要时主动调用 cognitive.*",
+        "涉及用户偏好、身份、习惯、长期计划、承诺待办、群规、群氛围",
+        "优先调用 cognitive.search_events 或 cognitive.get_profile 查证",
+        "检索词要围绕当前输入批次、目标用户 QQ 号、群号和关键对象组织",
+        "如果当前问题需要修改、删除或核对 memory.* 置顶备忘，先调用 memory.list",
+        "不要凭印象编造 UUID 或假设备忘不存在",
+        "不要机械地每轮都查",
+    ]
+    for snippet in required_snippets:
+        assert snippet in text
+
+
 def test_end_tool_schema_mentions_current_input_batch() -> None:
     schema = json.loads(
         Path("src/Undefined/skills/tools/end/config.json").read_text(encoding="utf-8")
