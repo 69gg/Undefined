@@ -18,6 +18,7 @@ from Undefined.context import RequestContext
 from Undefined.render import render_html_to_image, render_markdown_to_html
 from Undefined.services.message_summary_fetch import fetch_session_messages
 from Undefined.attachments import scope_from_context
+from Undefined.utils.io import write_bytes
 from Undefined.utils.logging import log_debug_json, redact_string
 from Undefined.utils.message_turn import mark_message_sent_this_turn
 from Undefined.utils.paths import DOWNLOAD_CACHE_DIR, ensure_dir
@@ -225,6 +226,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
         tool_context.setdefault("get_scope_from_context", scope_from_context)
         tool_context.setdefault("download_cache_dir", DOWNLOAD_CACHE_DIR)
         tool_context.setdefault("ensure_dir_fn", ensure_dir)
+        tool_context.setdefault("write_bytes_fn", write_bytes)
         tool_context.setdefault(
             "mark_message_sent_this_turn",
             mark_message_sent_this_turn,

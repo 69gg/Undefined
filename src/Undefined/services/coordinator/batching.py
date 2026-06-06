@@ -86,10 +86,6 @@ class BatchingMixin:
         body += _GROUP_STRATEGY_FOOTER if not is_private else _PRIVATE_STRATEGY_FOOTER
         return body
 
-    @staticmethod
-    def _collect_message_ids(items: list[BufferedMessage]) -> list[str]:
-        return collect_message_ids(items)
-
     async def _dispatch_grouped_request(self, items: list[BufferedMessage]) -> None:
         """根据一组 BufferedMessage 决定优先级、构造 prompt 并入队。
 
@@ -100,7 +96,7 @@ class BatchingMixin:
         first = items[0]
         last = items[-1]
         full_question = self._build_grouped_prompt(items)
-        message_ids = self._collect_message_ids(items)
+        message_ids = collect_message_ids(items)
         any_poke = any(it.is_poke for it in items)
         any_at_bot = any(it.is_at_bot for it in items)
 

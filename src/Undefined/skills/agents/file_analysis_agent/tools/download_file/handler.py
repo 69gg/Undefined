@@ -1,10 +1,11 @@
-import uuid
 import asyncio
-from pathlib import Path
-from typing import Any, Callable, Dict, cast
 import logging
-import httpx
+import uuid
+from pathlib import Path
+from typing import Any, Callable, Dict, Protocol, cast
+
 import aiofiles
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,12 @@ SIZE_LIMITS = {
 
 DEFAULT_SIZE_LIMIT = 100 * 1024 * 1024
 _MAX_PATH_SOURCE_LENGTH = 4096
+
+
+class WriteBytesFn(Protocol):
+    async def __call__(
+        self, file_path: str | Path, content: bytes, use_lock: bool = True
+    ) -> None: ...
 
 
 def _safe_download_filename(
@@ -84,14 +91,11 @@ def _can_treat_as_local_path(value: str) -> bool:
 async def _copy_file_to_temp(
     source: Path,
     target: Path,
+    write_bytes_fn: WriteBytesFn,
 ) -> None:
     async with aiofiles.open(source, "rb") as src:
-        async with aiofiles.open(target, "wb") as dst:
-            while True:
-                chunk = await src.read(1024 * 1024)
-                if not chunk:
-                    break
-                await dst.write(chunk)
+        content = await src.read()
+    await write_bytes_fn(target, content, use_lock=False)
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
@@ -116,6 +120,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     ensure_dir_fn = context.get("ensure_dir_fn")
     if download_cache_dir_raw is None or not callable(ensure_dir_fn):
         return "错误：download_file 缺少下载缓存目录上下文依赖"
+    write_bytes_fn = context.get("write_bytes_fn")
+    if not callable(write_bytes_fn):
+        return "错误：download_file 缺少原子文件写入上下文依赖"
+    write_bytes = cast(WriteBytesFn, write_bytes_fn)
 
     download_cache_dir = Path(download_cache_dir_raw)
     temp_dir: Path = cast(Callable[[Path], Path], ensure_dir_fn)(
@@ -149,18 +157,35 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 temp_dir=temp_dir,
                 max_size_mb=max_size_mb,
                 task_uuid=task_uuid,
+                write_bytes_fn=write_bytes,
             )
 
     is_url: bool = _is_http_url(file_source)
 
     if is_url:
-        return await _download_from_url(file_source, temp_dir, max_size_mb, task_uuid)
+        return await _download_from_url(
+            file_source,
+            temp_dir,
+            max_size_mb,
+            task_uuid,
+            write_bytes,
+        )
     else:
-        return await _download_from_file_id(file_source, temp_dir, context, task_uuid)
+        return await _download_from_file_id(
+            file_source,
+            temp_dir,
+            context,
+            task_uuid,
+            write_bytes,
+        )
 
 
 async def _download_from_url(
-    url: str, temp_dir: Path, max_size_mb: float, task_uuid: str
+    url: str,
+    temp_dir: Path,
+    max_size_mb: float,
+    task_uuid: str,
+    write_bytes_fn: WriteBytesFn,
 ) -> str:
     """从 Web URL 进行下载，包含大小预检"""
     max_size_bytes: int = int(max_size_mb * 1024 * 1024)
@@ -190,8 +215,7 @@ async def _download_from_url(
                 task_uuid=task_uuid,
             )
             file_path = temp_dir / filename
-            async with aiofiles.open(file_path, "wb") as f:
-                await f.write(response.content)
+            await write_bytes_fn(file_path, response.content, use_lock=False)
 
             logger.info(f"文件已保存到: {file_path}")
             return str(file_path)
@@ -206,7 +230,11 @@ async def _download_from_url(
 
 
 async def _download_from_file_id(
-    file_id: str, temp_dir: Path, context: Dict[str, Any], task_uuid: str
+    file_id: str,
+    temp_dir: Path,
+    context: Dict[str, Any],
+    task_uuid: str,
+    write_bytes_fn: WriteBytesFn,
 ) -> str:
     """从 OneBot file_id 进行下载或解析"""
     get_image_url_callback = context.get("get_image_url_callback")
@@ -236,8 +264,7 @@ async def _download_from_file_id(
                     task_uuid=task_uuid,
                 )
                 file_path = temp_dir / filename
-                async with aiofiles.open(file_path, "wb") as f:
-                    await f.write(response.content)
+                await write_bytes_fn(file_path, response.content, use_lock=False)
 
                 logger.info(f"文件已保存到: {file_path}")
                 return str(file_path)
@@ -259,8 +286,7 @@ async def _download_from_file_id(
                 task_uuid=task_uuid,
             )
             file_path = temp_dir / filename
-            async with aiofiles.open(file_path, "wb") as f:
-                await f.write(content)
+            await write_bytes_fn(file_path, content, use_lock=False)
 
             logger.info(f"本地文件已复制到: {file_path}")
             return str(file_path)
@@ -284,6 +310,7 @@ async def _download_from_attachment_record(
     temp_dir: Path,
     max_size_mb: float,
     task_uuid: str,
+    write_bytes_fn: WriteBytesFn,
 ) -> str:
     max_size_bytes: int = int(max_size_mb * 1024 * 1024)
     try:
@@ -296,7 +323,11 @@ async def _download_from_attachment_record(
         if not _can_treat_as_local_path(local_path_raw):
             if _is_http_url(source_ref):
                 return await _download_from_url(
-                    source_ref, temp_dir, max_size_mb, task_uuid
+                    source_ref,
+                    temp_dir,
+                    max_size_mb,
+                    task_uuid,
+                    write_bytes_fn,
                 )
             return f"错误：无法从附件 UID {getattr(record, 'uid', '')} 解析到可下载文件"
 
@@ -306,7 +337,11 @@ async def _download_from_attachment_record(
         if not await asyncio.to_thread(local_path.is_file):
             if _is_http_url(source_ref):
                 return await _download_from_url(
-                    source_ref, temp_dir, max_size_mb, task_uuid
+                    source_ref,
+                    temp_dir,
+                    max_size_mb,
+                    task_uuid,
+                    write_bytes_fn,
                 )
             return f"错误：附件 UID 本地文件不存在：{getattr(record, 'uid', '')}"
 
@@ -325,7 +360,11 @@ async def _download_from_attachment_record(
             task_uuid=task_uuid,
         )
         target = temp_dir / filename
-        await _copy_file_to_temp(local_path, target)
+        await _copy_file_to_temp(
+            local_path,
+            target,
+            write_bytes_fn,
+        )
         logger.info("附件 UID 已通过注册表复制到: %s", target)
         return str(target)
     except OSError as exc:

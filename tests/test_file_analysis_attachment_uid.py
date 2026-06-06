@@ -9,6 +9,7 @@ from Undefined.attachments import AttachmentRegistry, scope_from_context
 from Undefined.skills.agents.file_analysis_agent.tools.download_file import (
     handler as download_file_handler,
 )
+from Undefined.utils.io import write_bytes
 from Undefined.utils.paths import ensure_dir
 
 
@@ -23,6 +24,7 @@ def _download_context(
         "get_scope_from_context": scope_from_context,
         "download_cache_dir": tmp_path / "downloads",
         "ensure_dir_fn": ensure_dir,
+        "write_bytes_fn": write_bytes,
     }
 
 
@@ -92,8 +94,9 @@ async def test_download_file_redownloads_url_backed_attachment_uid(
         temp_dir: Path,
         max_size_mb: float,
         task_uuid: str,
+        write_bytes_fn: object,
     ) -> str:
-        _ = max_size_mb, task_uuid
+        _ = max_size_mb, task_uuid, write_bytes_fn
         captured_url["url"] = url
         target = temp_dir / "file_from_source_ref.txt"
         target.write_bytes(b"https://example.com/demo.txt")
