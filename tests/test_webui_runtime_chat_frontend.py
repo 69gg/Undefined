@@ -84,17 +84,54 @@ def test_webchat_frontend_has_conversation_sidebar() -> None:
     source = RUNTIME_JS.read_text(encoding="utf-8")
     template = WEBUI_TEMPLATE.read_text(encoding="utf-8")
     app_css = APP_CSS.read_text(encoding="utf-8")
+    responsive_css = RESPONSIVE_CSS.read_text(encoding="utf-8")
     i18n = I18N_JS.read_text(encoding="utf-8")
 
     assert "runtimeChatConversations" in template
     assert "btnRuntimeChatNew" in template
     assert "runtimeChatCurrentTitle" in template
+    assert 'id="runtimeChatConversationDrawerToggle"' in template
+    assert "runtime-chat-sidebar-tab" in template
+    assert "runtime-chat-sidebar-panel" in template
     assert "loadChatConversations" in source
     assert "switchChatConversation" in source
     assert "renameChatConversation" in source
     assert "deleteChatConversation" in source
     assert "/api/runtime/chat/conversations" in source
     assert ".runtime-chat-sidebar" in app_css
+    sidebar_block = app_css.split(".runtime-chat-sidebar {", 1)[1].split(
+        ".runtime-chat-sidebar:hover", 1
+    )[0]
+    assert "position: absolute;" in sidebar_block
+    assert "right: 0;" in sidebar_block
+    assert "transform: translateX(calc(100% - 36px));" in sidebar_block
+    assert "transition:" in sidebar_block
+    assert ".runtime-chat-sidebar:hover" in app_css
+    assert ".runtime-chat-sidebar:focus-within" in app_css
+    assert "transform: translateX(0);" in app_css
+    assert ".runtime-chat-sidebar-tab" in app_css
+    assert "chatConversationDrawerOpen: false" in source
+    assert "function setChatConversationDrawerOpen" in source
+    assert "function canToggleChatConversationDrawer" in source
+    assert "window.innerWidth <= 768" in source
+    assert "runtimeChatConversationDrawerToggle" in source
+    assert 'toggle.setAttribute(\n                "aria-expanded",' in source
+    mobile_sidebar_block = responsive_css.split(".runtime-chat-sidebar {", 1)[1].split(
+        ".runtime-chat-sidebar-panel", 1
+    )[0]
+    assert "position: static;" in mobile_sidebar_block
+    assert "transform: none;" in mobile_sidebar_block
+    mobile_panel_block = responsive_css.split(".runtime-chat-sidebar-panel {", 1)[
+        1
+    ].split(".runtime-chat-sidebar.is-open .runtime-chat-sidebar-panel", 1)[0]
+    assert "display: none;" in mobile_panel_block
+    assert ".runtime-chat-sidebar.is-open .runtime-chat-sidebar-panel" in responsive_css
+    assert "display: block;" in responsive_css
+    mobile_tab_block = responsive_css.split(".runtime-chat-sidebar-tab {", 1)[1].split(
+        ".runtime-chat-sidebar-tab::after", 1
+    )[0]
+    assert "display: flex;" in mobile_tab_block
+    assert "width: 100%;" in mobile_tab_block
     assert "runtime.chat_new_conversation" in i18n
 
 
@@ -676,6 +713,18 @@ def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
     assert "function openHtmlRunner" in source
     assert "function closeHtmlRunner" in source
     assert "function handleHtmlRunnerPicked" in source
+    assert (
+        'const confirmHint = JSON.stringify(t("runtime.html_pick_confirm_hint"))'
+        in source
+    )
+    assert "let locked = null;" in source
+    assert "if (locked) return;" in source
+    assert "if (!locked) {" in source
+    assert (
+        "locked = selected || candidateFromPoint(event.clientX, event.clientY)"
+        in source
+    )
+    assert "return;\n    }\n    const target = locked;" in source
     assert "clearHtmlRunnerInteraction()" in source
     assert "ensureHtmlRunnerInitialRect(runner)" in source
     assert "frame.srcdoc = injectHtmlRunnerPicker(html)" in source
@@ -795,6 +844,7 @@ def test_webchat_html_runner_runs_code_in_sandboxed_preview() -> None:
     assert "max-width: min(62vw, 260px);" in responsive_meta_css
     assert "runtime.html_ready" in i18n
     assert "runtime.pick_html" in i18n
+    assert "runtime.html_pick_confirm_hint" in i18n
 
 
 def test_webchat_references_are_prepended_as_markdown_quotes() -> None:

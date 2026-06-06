@@ -34,6 +34,7 @@
         chatReferenceSeq: 0,
         pendingSelectionReference: null,
         selectionQuoteButton: null,
+        chatConversationDrawerOpen: false,
         htmlRunnerSource: "",
         htmlRunnerPickMode: false,
         htmlRunnerResize: null,
@@ -2879,11 +2880,14 @@
     }
 
     function htmlRunnerPickerScript() {
+        const confirmHint = JSON.stringify(t("runtime.html_pick_confirm_hint"));
         return `<script>
 (() => {
   let active = false;
   let selected = null;
+  let locked = null;
   let rafId = 0;
+  const confirmHint = ${confirmHint};
   const overlay = document.createElement("div");
   const label = document.createElement("div");
   const style = document.createElement("style");
@@ -2913,6 +2917,7 @@
   }
   function clear() {
     selected = null;
+    locked = null;
     overlay.style.display = "none";
     label.style.display = "none";
   }
@@ -2944,7 +2949,8 @@
     overlay.style.width = Math.max(0, rect.width) + "px";
     overlay.style.height = Math.max(0, rect.height) + "px";
     const labelText = elementLabel(element);
-    label.textContent = labelText;
+    const suffix = locked === element && confirmHint ? " · " + confirmHint : "";
+    label.textContent = labelText + suffix;
     label.style.display = labelText ? "block" : "none";
     const labelTop = rect.top >= 24 ? rect.top - 24 : rect.bottom + 4;
     label.style.left = Math.min(Math.max(8, rect.left), window.innerWidth - 16) + "px";
@@ -2969,13 +2975,19 @@
   });
   document.addEventListener("mousemove", (event) => {
     if (!active) return;
+    if (locked) return;
     scheduleDraw(candidateFromPoint(event.clientX, event.clientY));
   }, true);
   document.addEventListener("pointerdown", (event) => {
     if (!active) return;
     event.preventDefault();
     event.stopPropagation();
-    const target = selected || candidateFromPoint(event.clientX, event.clientY);
+    if (!locked) {
+      locked = selected || candidateFromPoint(event.clientX, event.clientY);
+      scheduleDraw(locked);
+      return;
+    }
+    const target = locked;
     const html = target && target.outerHTML ? target.outerHTML : "";
     parent.postMessage({ type: "webui-html-picked", html }, "*");
     setActive(false);
@@ -2985,7 +2997,7 @@
   });
   parent.postMessage({ type: "webui-html-picker-ready" }, "*");
   document.addEventListener("mouseleave", () => {
-    if (active) clear();
+    if (active && !locked) clear();
   }, true);
   window.addEventListener("scroll", () => {
     if (active && selected) scheduleDraw(selected);
@@ -3953,6 +3965,28 @@
         updateCurrentConversationTitle();
     }
 
+    function setChatConversationDrawerOpen(open) {
+        runtimeState.chatConversationDrawerOpen = !!open;
+        const drawer = document.querySelector(".runtime-chat-sidebar");
+        const toggle = get("runtimeChatConversationDrawerToggle");
+        if (drawer) {
+            drawer.classList.toggle(
+                "is-open",
+                runtimeState.chatConversationDrawerOpen,
+            );
+        }
+        if (toggle) {
+            toggle.setAttribute(
+                "aria-expanded",
+                runtimeState.chatConversationDrawerOpen ? "true" : "false",
+            );
+        }
+    }
+
+    function canToggleChatConversationDrawer() {
+        return window.innerWidth <= 768;
+    }
+
     function syncChatBusyControls() {
         const sendButton = get("btnRuntimeChatSend");
         if (sendButton) {
@@ -4027,6 +4061,7 @@
         ];
         if (switchTo) {
             await switchChatConversation(String(conversation.id));
+            setChatConversationDrawerOpen(false);
         } else {
             renderChatConversationList();
         }
@@ -4091,6 +4126,7 @@
         } else {
             renderChatConversationList();
         }
+        setChatConversationDrawerOpen(false);
     }
 
     function resetChatConversationState() {
@@ -4113,7 +4149,11 @@
 
     async function switchChatConversation(conversationId) {
         const id = String(conversationId || "").trim();
-        if (!id || id === currentChatConversationId()) return;
+        if (!id) return;
+        if (id === currentChatConversationId()) {
+            setChatConversationDrawerOpen(false);
+            return;
+        }
         if (
             runtimeState.activeJobId &&
             runtimeState.activeJobConversationId !== id
@@ -4124,6 +4164,7 @@
             renderChatConversationList();
             await loadChatHistory(true);
             syncChatBusyControls();
+            setChatConversationDrawerOpen(false);
             return;
         }
         stopChatPolling();
@@ -4149,6 +4190,7 @@
             ).catch(() => {});
         }
         syncChatBusyControls();
+        setChatConversationDrawerOpen(false);
     }
 
     async function loadChatHistory(force = false) {
@@ -4815,6 +4857,17 @@
         if (clearChatBtn)
             clearChatBtn.addEventListener("click", clearChatHistory);
 
+        const conversationDrawerToggle = get(
+            "runtimeChatConversationDrawerToggle",
+        );
+        if (conversationDrawerToggle) {
+            conversationDrawerToggle.addEventListener("click", () => {
+                if (!canToggleChatConversationDrawer()) return;
+                const shouldOpen = !runtimeState.chatConversationDrawerOpen;
+                setChatConversationDrawerOpen(shouldOpen);
+            });
+        }
+
         setChatAutoScroll(readChatAutoScrollPreference(), {
             persist: false,
         });
@@ -5048,6 +5101,11 @@
             handleHtmlRunnerPicked(data.html);
         });
         window.addEventListener("resize", clampVisibleHtmlRunner);
+        window.addEventListener("resize", () => {
+            if (window.innerWidth > 768) {
+                setChatConversationDrawerOpen(false);
+            }
+        });
     }
 
     const PROBE_REFRESH_INTERVAL = 5000;

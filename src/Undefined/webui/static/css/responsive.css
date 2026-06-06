@@ -71,11 +71,66 @@
   .runtime-chat-shell {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
+    padding-right: 0;
   }
   .runtime-chat-sidebar {
+    position: static;
+    width: auto;
+    transform: none;
+    transition: none;
     padding: 0 0 8px;
     border-right: 0;
     border-bottom: 1px solid var(--border-color);
+  }
+  .runtime-chat-sidebar-panel {
+    display: none;
+    height: auto;
+    padding: 8px 0 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+  .runtime-chat-sidebar.is-open .runtime-chat-sidebar-panel {
+    display: block;
+  }
+  .runtime-chat-sidebar-head {
+    display: flex;
+    min-height: 0;
+    margin-bottom: 7px;
+    padding-inline: 2px;
+  }
+  .runtime-chat-sidebar-tab {
+    position: static;
+    display: flex;
+    place-items: initial;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    box-shadow: none;
+  }
+  .runtime-chat-sidebar-tab::after {
+    position: static;
+    right: auto;
+    bottom: auto;
+    flex: 0 0 auto;
+    transform: rotate(-135deg);
+  }
+  .runtime-chat-sidebar.is-open .runtime-chat-sidebar-tab::after {
+    transform: rotate(45deg);
+  }
+  .runtime-chat-sidebar-tab-label {
+    writing-mode: horizontal-tb;
+    font-size: 13px;
+  }
+  .runtime-chat-sidebar:not(.is-open) {
+    padding-bottom: 8px;
   }
   .runtime-chat-conversations {
     flex-direction: row;

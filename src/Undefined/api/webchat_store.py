@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +20,8 @@ from Undefined.utils.paths import (
     ensure_dir,
 )
 from Undefined.utils.xml import escape_xml_attr, escape_xml_text
+
+logger = logging.getLogger(__name__)
 
 WEBCHAT_VIRTUAL_USER_ID = 42
 WEBCHAT_VIRTUAL_USER_NAME = "system"
@@ -166,6 +169,11 @@ class WebChatConversationStore:
                 return _copy_json(existing)
             self._cache[conv_id] = conv
             await self._save_conversation_locked(conv)
+            logger.info(
+                "[WebChat] 创建会话: conversation_id=%s title_source=%s",
+                conv_id,
+                conv["title_source"],
+            )
             return _copy_json(conv)
 
     async def rename_conversation(
@@ -183,6 +191,11 @@ class WebChatConversationStore:
             conv["updated_at"] = _now_iso()
             conv["title_updated_at"] = conv["updated_at"]
             await self._save_conversation_locked(conv)
+            logger.info(
+                "[WebChat] 重命名会话: conversation_id=%s title_len=%s",
+                conv_id,
+                len(clean_title),
+            )
             return _copy_json(conv)
 
     async def delete_conversation(self, conversation_id: str) -> bool:
@@ -196,6 +209,11 @@ class WebChatConversationStore:
             task = self._title_tasks.pop(conv_id, None)
             if task is not None:
                 task.cancel()
+            logger.info(
+                "[WebChat] 删除会话: conversation_id=%s existed=%s",
+                conv_id,
+                existed,
+            )
             return existed
 
     async def clear_conversation(self, conversation_id: str) -> int:
@@ -209,6 +227,11 @@ class WebChatConversationStore:
             conv["title_source"] = "temporary"
             conv["title_status"] = _TITLE_STATUS_TEMPORARY
             await self._save_conversation_locked(conv)
+            logger.info(
+                "[WebChat] 清空会话: conversation_id=%s previous_messages=%s",
+                conv_id,
+                previous,
+            )
             return previous
 
     async def append_message(
@@ -248,6 +271,15 @@ class WebChatConversationStore:
             if normalized_role == "user":
                 self._maybe_apply_temporary_title_locked(conv, record["message"])
             await self._save_conversation_locked(conv)
+            logger.info(
+                "[WebChat] 追加消息: conversation_id=%s role=%s text_len=%s attachments=%s webchat_events=%s total_messages=%s",
+                conv_id,
+                normalized_role,
+                len(record["message"]),
+                len(attachments or []),
+                len(webchat.get("events", []) if isinstance(webchat, dict) else []),
+                len(_messages(conv)),
+            )
             return _copy_json(record)
 
     async def get_history_page(
@@ -334,6 +366,12 @@ class WebChatConversationStore:
             conv["title_basis_hash"] = _title_basis_hash(*first_pair)
             conv["title_requested_at"] = _now_iso()
             await self._save_conversation_locked(conv)
+            logger.info(
+                "[WebChat] 标题生成排队: conversation_id=%s question_len=%s answer_len=%s",
+                conv_id,
+                len(first_pair[0]),
+                len(first_pair[1]),
+            )
             return True
 
     async def apply_generated_title(
@@ -362,6 +400,11 @@ class WebChatConversationStore:
             conv["title_updated_at"] = _now_iso()
             conv["updated_at"] = conv["title_updated_at"]
             await self._save_conversation_locked(conv)
+            logger.info(
+                "[WebChat] 应用生成标题: conversation_id=%s title_len=%s",
+                conv_id,
+                len(clean_title),
+            )
             return True
 
     async def mark_title_failed(self, conversation_id: str, basis_hash: str) -> None:
@@ -377,6 +420,7 @@ class WebChatConversationStore:
             conv["title_status"] = _TITLE_STATUS_FAILED
             conv["title_failed_at"] = _now_iso()
             await self._save_conversation_locked(conv)
+            logger.info("[WebChat] 标题生成失败: conversation_id=%s", conv_id)
 
     def register_title_task(
         self, conversation_id: str, task: asyncio.Task[None]
@@ -415,6 +459,11 @@ class WebChatConversationStore:
                 continue
             conv = _normalize_conversation(raw, path.stem)
             self._cache[str(conv["id"])] = conv
+        logger.info(
+            "[WebChat] 会话存储加载完成: count=%s dir=%s",
+            len(self._cache),
+            WEBCHAT_CONVERSATIONS_DIR,
+        )
 
     async def _migrate_legacy_once(self, legacy_history_manager: Any | None) -> None:
         if WEBCHAT_MIGRATION_MARKER_FILE.exists():
@@ -461,6 +510,11 @@ class WebChatConversationStore:
                     "count": migrated_count,
                 },
                 use_lock=True,
+            )
+            logger.info(
+                "[WebChat] 旧历史迁移完成: migrated_count=%s marker=%s",
+                migrated_count,
+                WEBCHAT_MIGRATION_MARKER_FILE,
             )
 
     def _get_lock(self, conversation_id: str) -> asyncio.Lock:
@@ -655,12 +709,40 @@ def build_webchat_title_prompt(question: str, answer: str) -> list[dict[str, str
     return [{"role": "user", "content": content}]
 
 
+def _resolve_webchat_title_chat_model(ai: Any) -> Any | None:
+    chat_config = getattr(ai, "chat_config", None)
+    if chat_config is None:
+        runtime_config = getattr(ai, "runtime_config", None)
+        chat_config = getattr(runtime_config, "chat_model", None)
+    if chat_config is None:
+        return None
+    selector = getattr(ai, "model_selector", None)
+    select_chat_config = getattr(selector, "select_chat_config", None)
+    if callable(select_chat_config):
+        runtime_config = getattr(ai, "runtime_config", None)
+        global_enabled = bool(
+            getattr(runtime_config, "model_pool_enabled", True)
+            if runtime_config is not None
+            else True
+        )
+        return select_chat_config(
+            chat_config,
+            group_id=0,
+            user_id=WEBCHAT_VIRTUAL_USER_ID,
+            global_enabled=global_enabled,
+        )
+    return chat_config
+
+
 async def generate_webchat_title(ai: Any, question: str, answer: str) -> str:
     messages = build_webchat_title_prompt(question, answer)
-    model_config = None
-    resolver = getattr(ai, "_resolve_summary_model_for_requests", None)
-    if callable(resolver):
-        model_config = resolver()
+    model_config = _resolve_webchat_title_chat_model(ai)
+    logger.info(
+        "[WebChat] 生成会话标题: model=%s question_len=%s answer_len=%s",
+        getattr(model_config, "model_name", "<none>"),
+        len(question),
+        len(answer),
+    )
     submit = getattr(ai, "submit_background_llm_call", None)
     if callable(submit) and model_config is not None:
         result = await submit(
@@ -670,7 +752,7 @@ async def generate_webchat_title(ai: Any, question: str, answer: str) -> str:
             call_type="webchat_title",
             max_tokens=80,
         )
-        from Undefined.ai.llm.parsers import extract_choices_content
+        from Undefined.ai.parsing import extract_choices_content
 
         return _sanitize_title(extract_choices_content(result))
     request_model = getattr(ai, "request_model", None)
@@ -682,11 +764,12 @@ async def generate_webchat_title(ai: Any, question: str, answer: str) -> str:
             call_type="webchat_title",
             max_tokens=80,
         )
-        from Undefined.ai.llm.parsers import extract_choices_content
+        from Undefined.ai.parsing import extract_choices_content
 
         return _sanitize_title(extract_choices_content(result))
     generate_title = getattr(ai, "generate_title", None)
     if callable(generate_title):
+        logger.info("[WebChat] 会话标题生成回退到 generate_title")
         maybe = generate_title(f"用户首问：{question}\nAI首答：{answer}")
         result_text = await maybe if inspect.isawaitable(maybe) else maybe
         return _sanitize_title(result_text)

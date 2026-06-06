@@ -777,7 +777,22 @@
 
                     <div class="runtime-chat-shell">
                         <aside class="runtime-chat-sidebar" data-i18n-aria-label="runtime.chat_conversations" aria-label="对话">
-                            <div id="runtimeChatConversations" class="runtime-chat-conversations"></div>
+                            <button
+                                id="runtimeChatConversationDrawerToggle"
+                                class="runtime-chat-sidebar-tab"
+                                type="button"
+                                aria-expanded="false"
+                                data-i18n-aria-label="runtime.chat_conversations"
+                                aria-label="对话"
+                            >
+                                <span class="runtime-chat-sidebar-tab-label" data-i18n="runtime.chat_conversations">对话</span>
+                            </button>
+                            <div class="runtime-chat-sidebar-panel" id="runtimeChatConversationDrawerPanel">
+                                <div class="runtime-chat-sidebar-head">
+                                    <span data-i18n="runtime.chat_conversations">对话</span>
+                                </div>
+                                <div id="runtimeChatConversations" class="runtime-chat-conversations"></div>
+                            </div>
                         </aside>
                         <div class="runtime-card chat-runtime-card">
                             <div class="runtime-chat-conversation-head">

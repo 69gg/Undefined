@@ -11,7 +11,11 @@ from aiohttp import web
 
 from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
 from Undefined.api.routes import chat as runtime_api_chat
-from Undefined.api.webchat_store import DEFAULT_WEBCHAT_CONVERSATION_ID
+from Undefined.api.webchat_store import (
+    DEFAULT_WEBCHAT_CONVERSATION_ID,
+    WEBCHAT_VIRTUAL_USER_ID,
+    generate_webchat_title,
+)
 
 
 class _JsonRequest(SimpleNamespace):
@@ -53,6 +57,24 @@ def _context(history: Any | None = None) -> RuntimeAPIContext:
         queue_manager=SimpleNamespace(snapshot=lambda: {}),
         history_manager=history or _History(),
     )
+
+
+def test_webchat_runtime_has_detailed_flow_logs() -> None:
+    route_source = Path("src/Undefined/api/routes/chat.py").read_text(encoding="utf-8")
+    store_source = Path("src/Undefined/api/webchat_store.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "[RuntimeAPI][WebChat] 创建 job" in route_source
+    assert "[RuntimeAPI][WebChat] job 开始" in route_source
+    assert "[RuntimeAPI][WebChat] 输入附件注册完成" in route_source
+    assert "[RuntimeAPI][WebChat] 调用 AI" in route_source
+    assert "[RuntimeAPI][WebChat] job 历史落盘" in route_source
+    assert "[RuntimeAPI][WebChat] 查询 job 事件" in route_source
+    assert "[RuntimeAPI][WebChat] 调度标题生成" in route_source
+    assert "[WebChat] 追加消息" in store_source
+    assert "[WebChat] 会话存储加载完成" in store_source
+    assert "[WebChat] 生成会话标题" in store_source
 
 
 @pytest.mark.asyncio
@@ -143,6 +165,52 @@ async def test_webchat_title_generation_uses_first_question_and_answer(
     assert updated is not None
     assert updated["title"] == "首问首答标题"
     assert updated["title_status"] == "generated"
+
+
+@pytest.mark.asyncio
+async def test_webchat_title_generation_uses_chat_model_not_summary_model() -> None:
+    chat_config = SimpleNamespace(model_name="chat-model")
+    selected_config = SimpleNamespace(model_name="selected-chat-model")
+    captured: dict[str, Any] = {}
+
+    def _select_chat_config(
+        primary: Any,
+        *,
+        group_id: int,
+        user_id: int,
+        global_enabled: bool,
+    ) -> Any:
+        captured["primary"] = primary
+        captured["group_id"] = group_id
+        captured["user_id"] = user_id
+        captured["global_enabled"] = global_enabled
+        return selected_config
+
+    async def _submit_background_llm_call(**kwargs: Any) -> dict[str, Any]:
+        captured["submit_kwargs"] = kwargs
+        return {"choices": [{"message": {"content": "  聊天模型标题  "}}]}
+
+    def _summary_resolver() -> Any:
+        raise AssertionError("summary model resolver should not be used")
+
+    ai = SimpleNamespace(
+        chat_config=chat_config,
+        runtime_config=SimpleNamespace(model_pool_enabled=True),
+        model_selector=SimpleNamespace(select_chat_config=_select_chat_config),
+        submit_background_llm_call=_submit_background_llm_call,
+        _resolve_summary_model_for_requests=_summary_resolver,
+    )
+
+    title = await generate_webchat_title(ai, "首问", "首答")
+
+    assert title == "聊天模型标题"
+    assert captured["primary"] is chat_config
+    assert captured["group_id"] == 0
+    assert captured["user_id"] == WEBCHAT_VIRTUAL_USER_ID
+    assert captured["global_enabled"] is True
+    submit_kwargs = captured["submit_kwargs"]
+    assert submit_kwargs["model_config"] is selected_config
+    assert submit_kwargs["call_type"] == "webchat_title"
 
 
 @pytest.mark.asyncio

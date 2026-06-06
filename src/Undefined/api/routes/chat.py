@@ -318,6 +318,12 @@ class ChatJobManager:
             ):
                 raise RuntimeError("Chat job is still running")
             self._jobs[job.job_id] = job
+        logger.info(
+            "[RuntimeAPI][WebChat] 创建 job: job_id=%s conversation_id=%s text_len=%s",
+            job.job_id,
+            job.conversation_id,
+            len(text),
+        )
         await self._append_event(
             job,
             "meta",
@@ -380,6 +386,10 @@ class ChatJobManager:
             if any(
                 self._job_blocks_history_mutation(job) for job in self._jobs.values()
             ):
+                logger.info(
+                    "[RuntimeAPI][WebChat] 清空历史被拒绝，存在运行中 job: conversation_id=%s",
+                    resolved_conversation_id,
+                )
                 return None
             return int(
                 await self.conversation_store.clear_conversation(
@@ -394,6 +404,12 @@ class ChatJobManager:
             return None
         if job.status in {"done", "error", "cancelled"}:
             return job
+        logger.info(
+            "[RuntimeAPI][WebChat] 取消 job: job_id=%s conversation_id=%s status=%s",
+            job.job_id,
+            job.conversation_id,
+            job.status,
+        )
         job.status = "cancelled"
         self._mark_job_finished(job)
         if job.task is not None and not job.task.done():
@@ -492,6 +508,13 @@ class ChatJobManager:
         event_time = time.time()
         output_event = str(event_payload.get("_event", event) or event)
         tool_key = _webchat_tool_event_key(event_payload)
+        logger.debug(
+            "[RuntimeAPI][WebChat] 生命周期事件: job_id=%s conversation_id=%s event=%s tool_key=%s",
+            job.job_id,
+            job.conversation_id,
+            output_event,
+            tool_key,
+        )
         async with job.changed:
             if output_event in {"tool_start", "agent_start"}:
                 job.tool_started_at[tool_key] = event_time
@@ -533,6 +556,12 @@ class ChatJobManager:
     async def _run_job(self, job: ChatJob) -> None:
         job.status = "running"
         job.updated_at = time.time()
+        logger.info(
+            "[RuntimeAPI][WebChat] job 开始: job_id=%s conversation_id=%s text_len=%s",
+            job.job_id,
+            job.conversation_id,
+            len(job.text),
+        )
         outputs: list[str] = []
         webui_scope_key = build_attachment_scope(
             user_id=_VIRTUAL_USER_ID,
@@ -558,6 +587,13 @@ class ChatJobManager:
             job.outputs.append(rendered.delivery_text)
             job.history_outputs.append(rendered.history_text)
             job.history_attachments.extend(rendered.attachments)
+            logger.info(
+                "[RuntimeAPI][WebChat] job 输出消息: job_id=%s conversation_id=%s delivery_len=%s attachments=%s",
+                job.job_id,
+                job.conversation_id,
+                len(rendered.delivery_text),
+                len(rendered.attachments),
+            )
             now = time.time()
             await self._append_event(
                 job,
@@ -601,6 +637,14 @@ class ChatJobManager:
             job.mode = mode
             job.status = "done"
             self._mark_job_finished(job)
+            logger.info(
+                "[RuntimeAPI][WebChat] job 完成: job_id=%s conversation_id=%s mode=%s duration_ms=%s outputs=%s",
+                job.job_id,
+                job.conversation_id,
+                mode,
+                job.duration_ms,
+                len(outputs),
+            )
             done_payload = _build_chat_response_payload(mode, outputs)
             done_payload.update(
                 {
@@ -618,6 +662,12 @@ class ChatJobManager:
         except asyncio.CancelledError:
             job.status = "cancelled"
             self._mark_job_finished(job)
+            logger.info(
+                "[RuntimeAPI][WebChat] job 已取消: job_id=%s conversation_id=%s duration_ms=%s",
+                job.job_id,
+                job.conversation_id,
+                job.duration_ms,
+            )
             if not any(
                 event.event == "error" and event.payload.get("error") == "cancelled"
                 for event in job.events
@@ -719,6 +769,11 @@ class ChatJobManager:
     async def _finalize_job_history(self, job: ChatJob) -> None:
         async with job.history_lock:
             if job.history_finalized:
+                logger.debug(
+                    "[RuntimeAPI][WebChat] job 历史已落盘，跳过: job_id=%s conversation_id=%s",
+                    job.job_id,
+                    job.conversation_id,
+                )
                 return
             text_content = "\n\n".join(job.history_outputs).strip()
             webchat = _build_webchat_history_payload(job)
@@ -732,21 +787,53 @@ class ChatJobManager:
                     attachments=job.history_attachments or None,
                     webchat=webchat,
                 )
+                logger.info(
+                    "[RuntimeAPI][WebChat] job 历史落盘: job_id=%s conversation_id=%s text_len=%s events=%s attachments=%s",
+                    job.job_id,
+                    job.conversation_id,
+                    len(text_content),
+                    len(webchat["events"]),
+                    len(job.history_attachments),
+                )
+            else:
+                logger.info(
+                    "[RuntimeAPI][WebChat] job 无需落盘 bot 历史: job_id=%s conversation_id=%s",
+                    job.job_id,
+                    job.conversation_id,
+                )
             job.history_finalized = True
 
     async def maybe_schedule_title_generation(self, conversation_id: str) -> None:
         async with self._title_schedule_lock:
             if self.conversation_store.title_task_running(conversation_id):
+                logger.debug(
+                    "[RuntimeAPI][WebChat] 标题生成任务已存在: conversation_id=%s",
+                    conversation_id,
+                )
                 return
             first_pair = await self.conversation_store.first_question_answer(
                 conversation_id
             )
             if first_pair is None:
+                logger.debug(
+                    "[RuntimeAPI][WebChat] 标题生成跳过，缺少首问首答: conversation_id=%s",
+                    conversation_id,
+                )
                 return
             if not await self.conversation_store.mark_title_pending(conversation_id):
+                logger.debug(
+                    "[RuntimeAPI][WebChat] 标题生成跳过，状态不允许: conversation_id=%s",
+                    conversation_id,
+                )
                 return
             question, answer = first_pair
             basis_hash = webchat_title_basis_hash(question, answer)
+            logger.info(
+                "[RuntimeAPI][WebChat] 调度标题生成: conversation_id=%s question_len=%s answer_len=%s",
+                conversation_id,
+                len(question),
+                len(answer),
+            )
 
         async def _run_title() -> None:
             try:
@@ -756,6 +843,11 @@ class ChatJobManager:
                         conversation_id,
                         title=title,
                         basis_hash=basis_hash,
+                    )
+                    logger.info(
+                        "[RuntimeAPI][WebChat] 标题生成完成: conversation_id=%s title_len=%s",
+                        conversation_id,
+                        len(title),
                     )
                     return
             except asyncio.CancelledError:
@@ -1752,6 +1844,11 @@ async def run_webui_chat(
     )
     store = conversation_store or WebChatConversationStore()
     await store.ensure_ready(ctx.history_manager)
+    logger.info(
+        "[RuntimeAPI][WebChat] 开始处理输入: conversation_id=%s text_len=%s",
+        resolved_conversation_id,
+        len(text),
+    )
     if conversation_id:
         existing_conversation = await store.get_conversation(resolved_conversation_id)
         if existing_conversation is None:
@@ -1773,6 +1870,12 @@ async def run_webui_chat(
         get_forward_messages=ctx.onebot.get_forward_msg,
     )
     normalized_text = registered_input.normalized_text or text
+    logger.info(
+        "[RuntimeAPI][WebChat] 输入附件注册完成: conversation_id=%s normalized_len=%s attachments=%s",
+        resolved_conversation_id,
+        len(normalized_text),
+        len(registered_input.attachments),
+    )
     await emit_stage("recording_history")
     await store.append_message(
         resolved_conversation_id,
@@ -1785,6 +1888,11 @@ async def run_webui_chat(
 
     command = ctx.command_dispatcher.parse_command(normalized_text)
     if command:
+        logger.info(
+            "[RuntimeAPI][WebChat] 分发私聊命令: conversation_id=%s command=%s",
+            resolved_conversation_id,
+            getattr(command, "name", ""),
+        )
         await emit_stage("running_command")
         await ctx.command_dispatcher.dispatch_private(
             user_id=_VIRTUAL_USER_ID,
@@ -1794,6 +1902,10 @@ async def run_webui_chat(
             is_webui_session=True,
         )
         await emit_stage("command_done")
+        logger.info(
+            "[RuntimeAPI][WebChat] 私聊命令完成: conversation_id=%s",
+            resolved_conversation_id,
+        )
         return "command"
 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1866,6 +1978,11 @@ WebUI 支持完整 Markdown 渲染和简单安全 HTML。复杂 HTML、包含 JS
         rctx.set_resource("webui_permission", "superadmin")
 
         await emit_stage("asking_ai")
+        logger.info(
+            "[RuntimeAPI][WebChat] 调用 AI: conversation_id=%s prompt_len=%s",
+            resolved_conversation_id,
+            len(full_question),
+        )
         result = await ctx.ai.ask(
             full_question,
             send_message_callback=send_message_callback,
@@ -1892,6 +2009,11 @@ WebUI 支持完整 Markdown 渲染和简单安全 HTML。复杂 HTML、包含 JS
     if final_reply:
         await send_output(_VIRTUAL_USER_ID, final_reply)
 
+    logger.info(
+        "[RuntimeAPI][WebChat] AI 调用结束: conversation_id=%s final_reply_len=%s",
+        resolved_conversation_id,
+        len(final_reply),
+    )
     return "chat"
 
 
@@ -1914,6 +2036,11 @@ async def chat_conversations_handler(
             item["is_running"] = bool(
                 active_job is not None and active_job.conversation_id == conversation_id
             )
+    logger.info(
+        "[RuntimeAPI][WebChat] 查询会话列表: count=%s active_job=%s",
+        len(conversations),
+        active_job.job_id if active_job is not None else "",
+    )
     return web.json_response(
         {
             "conversations": conversations,
@@ -1937,6 +2064,11 @@ async def chat_conversation_create_handler(
     title = str(body.get("title", "") or "").strip()
     conversation = await job_manager.conversation_store.create_conversation(
         title=title or None,
+    )
+    logger.info(
+        "[RuntimeAPI][WebChat] API 新建会话: conversation_id=%s title_len=%s",
+        conversation.get("id", ""),
+        len(str(conversation.get("title", "") or "")),
     )
     return web.json_response({"conversation": conversation}, status=201)
 
@@ -1962,6 +2094,11 @@ async def chat_conversation_update_handler(
         return _json_error("Conversation not found", status=404)
     except ValueError as exc:
         return _json_error(str(exc), status=400)
+    logger.info(
+        "[RuntimeAPI][WebChat] API 重命名会话: conversation_id=%s title_len=%s",
+        conversation_id,
+        len(title),
+    )
     return web.json_response({"conversation": conversation})
 
 
@@ -1977,6 +2114,10 @@ async def chat_conversation_delete_handler(
     existed = await job_manager.conversation_store.delete_conversation(conversation_id)
     if not existed:
         return _json_error("Conversation not found", status=404)
+    logger.info(
+        "[RuntimeAPI][WebChat] API 删除会话: conversation_id=%s",
+        conversation_id,
+    )
     return web.json_response({"success": True, "conversation_id": conversation_id})
 
 
@@ -2015,6 +2156,14 @@ async def chat_history_handler(
             if mapped is not None:
                 items.append(mapped)
     await job_manager.maybe_schedule_title_generation(conversation_id)
+    logger.info(
+        "[RuntimeAPI][WebChat] 查询历史: conversation_id=%s returned=%s total=%s has_more=%s before=%s",
+        conversation_id,
+        len(items),
+        page.total,
+        page.has_more,
+        before,
+    )
 
     return web.json_response(
         {
@@ -2052,6 +2201,11 @@ async def chat_history_clear_handler(
         return _json_error("History manager not ready", status=503)
     if cleared is None:
         return _json_error("Chat job is still running", status=409)
+    logger.info(
+        "[RuntimeAPI][WebChat] API 清空历史: conversation_id=%s cleared=%s",
+        conversation_id,
+        cleared,
+    )
     return web.json_response(
         {
             "success": True,
@@ -2087,6 +2241,12 @@ async def chat_handler(
         return _json_error("Conversation not found", status=404)
 
     stream = _to_bool(body.get("stream"))
+    logger.info(
+        "[RuntimeAPI][WebChat] 收到聊天请求: conversation_id=%s stream=%s text_len=%s",
+        conversation_id,
+        stream,
+        len(text),
+    )
     if not stream:
         outputs: list[str] = []
         webui_scope_key = build_attachment_scope(
@@ -2132,6 +2292,12 @@ async def chat_handler(
             return _json_error("Chat failed", status=502)
         payload = _build_chat_response_payload(mode, outputs)
         payload["conversation_id"] = conversation_id
+        logger.info(
+            "[RuntimeAPI][WebChat] 非流式聊天完成: conversation_id=%s mode=%s outputs=%s",
+            conversation_id,
+            mode,
+            len(outputs),
+        )
         return web.json_response(payload)
 
     try:
@@ -2140,6 +2306,11 @@ async def chat_handler(
         return _json_error("Conversation not found", status=404)
     except RuntimeError:
         return _json_error("Chat job is still running", status=409)
+    logger.info(
+        "[RuntimeAPI][WebChat] SSE 聊天 job 已创建: job_id=%s conversation_id=%s",
+        job.job_id,
+        conversation_id,
+    )
     response = web.StreamResponse(
         status=200,
         reason="OK",
@@ -2223,6 +2394,12 @@ async def chat_job_create_handler(
         return _json_error("Conversation not found", status=404)
     except RuntimeError:
         return _json_error("Chat job is still running", status=409)
+    logger.info(
+        "[RuntimeAPI][WebChat] API 创建后台 job: job_id=%s conversation_id=%s text_len=%s",
+        job.job_id,
+        conversation_id,
+        len(text),
+    )
     return web.json_response(await job_manager.snapshot(job), status=202)
 
 
@@ -2235,6 +2412,11 @@ async def chat_job_active_handler(
     raw_conversation_id = _query_conversation_id(request)
     job = await job_manager.get_active_job(raw_conversation_id or None)
     snapshot = await job_manager.snapshot(job) if job is not None else None
+    logger.debug(
+        "[RuntimeAPI][WebChat] 查询 active job: conversation_id=%s job_id=%s",
+        raw_conversation_id,
+        job.job_id if job is not None else "",
+    )
     return web.json_response({"job": snapshot})
 
 
@@ -2261,6 +2443,12 @@ async def chat_job_cancel_handler(
     job = await job_manager.cancel_job(job_id)
     if job is None:
         return _json_error("Job not found", status=404)
+    logger.info(
+        "[RuntimeAPI][WebChat] API 取消 job: job_id=%s conversation_id=%s status=%s",
+        job.job_id,
+        job.conversation_id,
+        job.status,
+    )
     return web.json_response(await job_manager.snapshot(job))
 
 
@@ -2284,6 +2472,15 @@ async def chat_job_events_handler(
     if wants_json:
         events, snapshot, live_events = await job_manager.events_after_with_snapshot(
             job, after
+        )
+        logger.debug(
+            "[RuntimeAPI][WebChat] 查询 job 事件: job_id=%s conversation_id=%s after=%s events=%s live_events=%s status=%s",
+            job.job_id,
+            job.conversation_id,
+            after,
+            len(events),
+            len(live_events),
+            job.status,
         )
         return web.json_response(
             {
