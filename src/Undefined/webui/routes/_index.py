@@ -1,4 +1,5 @@
 import json
+from typing import Any, cast
 
 from aiohttp import web
 from aiohttp.web_response import Response
@@ -10,6 +11,13 @@ from ._shared import (
     get_settings,
     routes,
 )
+
+
+def _request_mapping_value(request: web.Request, key: str) -> Any:
+    getter = getattr(request, "get", None)
+    if callable(getter):
+        return getter(key)
+    return cast(Any, request).__dict__.get(key)
 
 
 @routes.get("/")
@@ -67,7 +75,12 @@ async def index_handler(request: web.Request) -> Response:
     initial_state_json = json.dumps(initial_state).replace("</", "<\\/")
     html = html.replace("__INITIAL_STATE__", initial_state_json)
     html = html.replace("__INITIAL_VIEW__", json.dumps(initial_view))
-    html = html.replace("__CSP_NONCE__", str(request.get("csp_nonce") or ""))
+    csp_nonce = str(_request_mapping_value(request, "csp_nonce") or "").strip()
+    if csp_nonce:
+        html = html.replace("__CSP_NONCE__", csp_nonce)
+    else:
+        html = html.replace(' nonce="__CSP_NONCE__"', "")
+        html = html.replace("__CSP_NONCE__", "")
     response = web.Response(text=html, content_type="text/html")
     if query_lang in {"zh", "en"}:
         response.set_cookie(

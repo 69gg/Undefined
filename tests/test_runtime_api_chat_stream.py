@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -10,6 +11,11 @@ from aiohttp import web
 
 from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
 from Undefined.api.routes import chat as runtime_api_chat
+
+
+@pytest.fixture(autouse=True)
+def _isolate_webchat_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
 
 
 class _DummyTransport:
@@ -268,7 +274,14 @@ async def test_runtime_chat_stream_renders_each_message_once(
     assert "rendered stream reply" in payload
     assert "event: done" in payload
     assert response.eof_written is True
-    context.history_manager.add_private_message.assert_awaited_once()
+    context.history_manager.add_private_message.assert_not_awaited()
+    conversation = await server._chat_job_manager.conversation_store.get_conversation(
+        "legacy-system-42"
+    )
+    assert conversation is not None
+    messages = conversation.get("messages")
+    assert isinstance(messages, list)
+    assert [item["message"] for item in messages] == ["rendered history reply"]
 
 
 @pytest.mark.asyncio
