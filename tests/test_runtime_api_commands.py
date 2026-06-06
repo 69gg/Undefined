@@ -74,6 +74,37 @@ def _context(registry: CommandRegistry) -> RuntimeAPIContext:
 
 
 @pytest.mark.asyncio
+async def test_commands_api_exposes_changelog_alias_subcommands() -> None:
+    commands_dir = Path("src/Undefined/skills/commands")
+    registry = CommandRegistry(commands_dir)
+    registry.load_commands()
+    server = RuntimeAPIServer(_context(registry), host="127.0.0.1", port=8788)
+
+    response = await server._command_detail_handler(
+        cast(
+            web.Request,
+            cast(
+                Any,
+                SimpleNamespace(
+                    query={"scope": "webui"},
+                    match_info={"command_name": "cl"},
+                ),
+            ),
+        )
+    )
+    payload = json.loads(response.text or "{}")
+    command = payload["command"]
+
+    assert command["name"] == "changelog"
+    assert command["aliases"] == ["cl"]
+    subcommands = {item["name"]: item for item in command["subcommands"]}
+    assert set(subcommands) == {"latest", "list", "show"}
+    assert subcommands["list"]["usage"] == "/changelog list [数量]"
+    assert subcommands["show"]["usage"] == "/changelog show <版本号>"
+    assert subcommands["latest"]["usage"] == "/changelog latest"
+
+
+@pytest.mark.asyncio
 async def test_commands_api_lists_webui_available_commands_and_subcommands(
     tmp_path: Path,
 ) -> None:

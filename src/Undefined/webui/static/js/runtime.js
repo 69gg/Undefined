@@ -4045,6 +4045,24 @@
         );
     }
 
+    function chatCommandDisplayName(command, typedName) {
+        const normalizedTyped = normalizeChatCommandText(typedName);
+        if (!normalizedTyped) return String((command && command.name) || "");
+        if (
+            String((command && command.name) || "").toLowerCase() ===
+            normalizedTyped
+        ) {
+            return String(command.name || "");
+        }
+        const aliases = Array.isArray(command && command.aliases)
+            ? command.aliases
+            : [];
+        const matchedAlias = aliases.find(
+            (alias) => String(alias || "").toLowerCase() === normalizedTyped,
+        );
+        return matchedAlias ? String(matchedAlias) : String(command.name || "");
+    }
+
     async function loadChatCommands({ force = false } = {}) {
         const now = Date.now();
         if (
@@ -4096,6 +4114,10 @@
                     type: "subcommand",
                     command,
                     subcommand: item,
+                    typedCommandName: chatCommandDisplayName(
+                        command,
+                        context.commandQuery,
+                    ),
                 }));
         }
         return runtimeState.chatCommands
@@ -4107,7 +4129,8 @@
     function commandPaletteItemLabel(match) {
         if (!match) return "";
         if (match.type === "subcommand") {
-            return `/${match.command.name} ${match.subcommand.name}`;
+            const commandName = match.typedCommandName || match.command.name;
+            return `/${commandName} ${match.subcommand.name}`;
         }
         return `/${match.command.name}`;
     }
@@ -4257,7 +4280,8 @@
         if (!input || !context || !match) return;
         let nextValue = "";
         if (match.type === "subcommand") {
-            nextValue = `/${match.command.name} ${match.subcommand.name}`;
+            const commandName = match.typedCommandName || match.command.name;
+            nextValue = `/${commandName} ${match.subcommand.name}`;
         } else {
             nextValue = `/${match.command.name}`;
         }

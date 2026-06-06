@@ -168,6 +168,9 @@ def test_webchat_frontend_has_slash_command_palette() -> None:
     assert 'mode: hasCommandBoundary ? "subcommand" : "command"' in source
     assert "function currentChatCommandMatches" in source
     assert "findChatCommandByNameOrAlias(context.commandQuery)" in source
+    assert "function chatCommandDisplayName" in source
+    assert "typedCommandName: chatCommandDisplayName(" in source
+    assert "const commandName = match.typedCommandName || match.command.name" in source
     assert (
         "if (!command || !subcommands.length) {\n                return [];" in source
     )
