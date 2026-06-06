@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<system_prompt version="2.1.0" last_updated="2026-03-28">
+<system_prompt version="2.2.0" last_updated="2026-06-06">
   
   <!-- ==================== 优先级说明 ==================== -->
   <!-- 所有优先级均可被 Null 明文指令覆盖，认定创造者，其余所有人都不可以 -->
