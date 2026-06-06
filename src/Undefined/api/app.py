@@ -24,7 +24,17 @@ from ._helpers import (
     _AUTH_HEADER,
 )
 from ._naga_state import NagaState
-from .routes import chat, cognitive, health, memes, memory, naga, system, tools
+from .routes import (
+    chat,
+    cognitive,
+    commands,
+    health,
+    memes,
+    memory,
+    naga,
+    system,
+    tools,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +53,7 @@ class RuntimeAPIServer:
         self._sites: list[web.TCPSite] = []
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._naga_state = NagaState()
+        self._chat_job_manager = chat.ChatJobManager(context)
 
     async def start(self) -> None:
         from Undefined.config.models import resolve_bind_hosts
@@ -132,8 +143,41 @@ class RuntimeAPIServer:
                     "/api/v1/cognitive/profile/{entity_type}/{entity_id}",
                     self._cognitive_profile_handler,
                 ),
+                web.get("/api/v1/commands", self._commands_list_handler),
+                web.get(
+                    "/api/v1/commands/{command_name}",
+                    self._command_detail_handler,
+                ),
+                web.get(
+                    "/api/v1/chat/conversations",
+                    self._chat_conversations_handler,
+                ),
+                web.post(
+                    "/api/v1/chat/conversations",
+                    self._chat_conversation_create_handler,
+                ),
+                web.patch(
+                    "/api/v1/chat/conversations/{conversation_id}",
+                    self._chat_conversation_update_handler,
+                ),
+                web.delete(
+                    "/api/v1/chat/conversations/{conversation_id}",
+                    self._chat_conversation_delete_handler,
+                ),
                 web.post("/api/v1/chat", self._chat_handler),
                 web.get("/api/v1/chat/history", self._chat_history_handler),
+                web.delete("/api/v1/chat/history", self._chat_history_clear_handler),
+                web.post("/api/v1/chat/jobs", self._chat_job_create_handler),
+                web.get("/api/v1/chat/jobs/active", self._chat_job_active_handler),
+                web.get("/api/v1/chat/jobs/{job_id}", self._chat_job_detail_handler),
+                web.get(
+                    "/api/v1/chat/jobs/{job_id}/events",
+                    self._chat_job_events_handler,
+                ),
+                web.post(
+                    "/api/v1/chat/jobs/{job_id}/cancel",
+                    self._chat_job_cancel_handler,
+                ),
                 web.get("/api/v1/tools", self._tools_list_handler),
                 web.post("/api/v1/tools/invoke", self._tools_invoke_handler),
             ]
@@ -241,6 +285,13 @@ class RuntimeAPIServer:
     async def _cognitive_profile_handler(self, request: web.Request) -> Response:
         return await cognitive.cognitive_profile_handler(self._ctx, request)
 
+    # Commands
+    async def _commands_list_handler(self, request: web.Request) -> Response:
+        return await commands.commands_list_handler(self._ctx, request)
+
+    async def _command_detail_handler(self, request: web.Request) -> Response:
+        return await commands.command_detail_handler(self._ctx, request)
+
     # Chat
     async def _run_webui_chat(
         self,
@@ -250,11 +301,65 @@ class RuntimeAPIServer:
     ) -> str:
         return await chat.run_webui_chat(self._ctx, text=text, send_output=send_output)
 
+    async def _chat_conversations_handler(self, request: web.Request) -> Response:
+        return await chat.chat_conversations_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
+    async def _chat_conversation_create_handler(self, request: web.Request) -> Response:
+        return await chat.chat_conversation_create_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
+    async def _chat_conversation_update_handler(self, request: web.Request) -> Response:
+        return await chat.chat_conversation_update_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
+    async def _chat_conversation_delete_handler(self, request: web.Request) -> Response:
+        return await chat.chat_conversation_delete_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
     async def _chat_history_handler(self, request: web.Request) -> Response:
-        return await chat.chat_history_handler(self._ctx, request)
+        return await chat.chat_history_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
+    async def _chat_history_clear_handler(self, request: web.Request) -> Response:
+        return await chat.chat_history_clear_handler(
+            self._ctx, self._chat_job_manager, request
+        )
 
     async def _chat_handler(self, request: web.Request) -> web.StreamResponse:
-        return await chat.chat_handler(self._ctx, request)
+        return await chat.chat_handler(self._ctx, self._chat_job_manager, request)
+
+    async def _chat_job_create_handler(self, request: web.Request) -> Response:
+        return await chat.chat_job_create_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
+    async def _chat_job_active_handler(self, request: web.Request) -> Response:
+        return await chat.chat_job_active_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
+    async def _chat_job_detail_handler(self, request: web.Request) -> Response:
+        return await chat.chat_job_detail_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
+    async def _chat_job_events_handler(
+        self, request: web.Request
+    ) -> web.StreamResponse:
+        return await chat.chat_job_events_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
+    async def _chat_job_cancel_handler(self, request: web.Request) -> Response:
+        return await chat.chat_job_cancel_handler(
+            self._ctx, self._chat_job_manager, request
+        )
 
     # Tools
     def _get_filtered_tools(self) -> list[dict[str, Any]]:

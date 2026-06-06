@@ -46,6 +46,17 @@ def _parse_cognitive_config(data: dict[str, Any]) -> CognitiveConfig:
             vs.get("path") if isinstance(vs, dict) else None,
             "data/cognitive/chromadb",
         ),
+        vector_store_scheduler_foreground_burst=max(
+            1,
+            _coerce_int(
+                (
+                    vs.get("scheduler_foreground_burst")
+                    if isinstance(vs, dict)
+                    else None
+                ),
+                8,
+            ),
+        ),
         queue_path=_coerce_str(
             que.get("path") if isinstance(que, dict) else None,
             "data/cognitive/queues",

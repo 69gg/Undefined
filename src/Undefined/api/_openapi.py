@@ -85,17 +85,65 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
         "/api/v1/cognitive/profile/{entity_type}/{entity_id}": {
             "get": {"summary": "Get a profile by entity type/id"}
         },
+        "/api/v1/commands": {
+            "get": {
+                "summary": "List slash command metadata",
+                "description": (
+                    "Returns slash commands, aliases, subcommands, usage, "
+                    "permission and WebUI/private/group availability. "
+                    "Use scope=webui for the WebChat virtual private session."
+                ),
+            }
+        },
+        "/api/v1/commands/{command_name}": {
+            "get": {
+                "summary": "Get slash command metadata by name or alias",
+                "description": (
+                    "Returns one canonical slash command with aliases, "
+                    "subcommands, usage and availability metadata."
+                ),
+            }
+        },
         "/api/v1/chat": {
             "post": {
                 "summary": "WebUI special private chat",
                 "description": (
-                    "POST JSON {message, stream?}. "
-                    "When stream=true, response is SSE with keep-alive comments."
+                    "POST JSON {message, stream?, conversation_id?}. "
+                    "stream=false runs synchronously; stream=true creates a "
+                    "WebChat job and streams lifecycle events as SSE."
                 ),
             }
         },
+        "/api/v1/chat/conversations": {
+            "get": {"summary": "List WebChat conversations"},
+            "post": {"summary": "Create a WebChat conversation"},
+        },
+        "/api/v1/chat/conversations/{conversation_id}": {
+            "patch": {"summary": "Rename a WebChat conversation"},
+            "delete": {"summary": "Delete a WebChat conversation"},
+        },
         "/api/v1/chat/history": {
-            "get": {"summary": "Get virtual private chat history for WebUI"}
+            "get": {"summary": "Get paged WebChat conversation history"},
+            "delete": {"summary": "Clear a WebChat conversation history"},
+        },
+        "/api/v1/chat/jobs": {"post": {"summary": "Create a WebUI chat job"}},
+        "/api/v1/chat/jobs/active": {
+            "get": {"summary": "Get the active WebUI chat job"}
+        },
+        "/api/v1/chat/jobs/{job_id}": {
+            "get": {"summary": "Get a WebUI chat job by id"}
+        },
+        "/api/v1/chat/jobs/{job_id}/events": {
+            "get": {
+                "summary": "Subscribe to or query WebUI chat job events",
+                "description": (
+                    "Returns SSE by default. With Accept: application/json or "
+                    "format=json, returns a JSON snapshot with events after seq."
+                ),
+            }
+        },
+        "/api/v1/chat/jobs/{job_id}/cancel": {
+            "post": {"summary": "Cancel a WebUI chat job"}
         },
         "/api/v1/tools": {
             "get": {

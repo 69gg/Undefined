@@ -45,6 +45,22 @@ function renderAboutChangelogEntry(entry) {
     container.appendChild(list);
 }
 
+function syncMainContentLayout() {
+    const mainContent = document.querySelector(".main-content");
+    if (mainContent) {
+        mainContent.classList.toggle("chat-layout", state.tab === "chat");
+    }
+
+    const appContent = get("appContent");
+    if (appContent && state.authenticated) {
+        if (state.view === "app") {
+            appContent.style.display = state.tab === "chat" ? "grid" : "block";
+        } else {
+            appContent.style.display = "none";
+        }
+    }
+}
+
 function renderAboutChangelog(payload) {
     aboutChangelogPayload = payload;
     const select = get("about-changelog-select");
@@ -119,7 +135,6 @@ function refreshUI() {
 
     if (state.view === "app") {
         if (state.authenticated) {
-            get("appContent").style.display = "block";
             if (!state.configLoaded) loadConfig();
             if (
                 window.RuntimeController &&
@@ -143,10 +158,7 @@ function refreshUI() {
 
     if (!state.authenticated) state.mobileDrawerOpen = false;
 
-    const mainContent = document.querySelector(".main-content");
-    if (mainContent) {
-        mainContent.classList.toggle("chat-layout", state.tab === "chat");
-    }
+    syncMainContentLayout();
 
     if (initialState && initialState.version)
         get("about-version-display").innerText = initialState.version;
@@ -172,10 +184,7 @@ function switchTab(tab) {
     abortPendingRequests(); // Cancel pending requests from previous tab
     state.tab = tab;
     state.mobileDrawerOpen = false;
-    const mainContent = document.querySelector(".main-content");
-    if (mainContent) {
-        mainContent.classList.toggle("chat-layout", tab === "chat");
-    }
+    syncMainContentLayout();
     document.querySelectorAll(".nav-item").forEach((el) => {
         el.classList.toggle("active", el.getAttribute("data-tab") === tab);
     });

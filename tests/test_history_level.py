@@ -88,6 +88,48 @@ async def test_add_group_message_without_level_stores_empty_level(
 
 
 @pytest.mark.asyncio
+async def test_add_private_message_stores_webchat_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = MessageHistoryManager.__new__(MessageHistoryManager)
+    manager._private_message_history = {}
+    manager._max_records = 10000
+    manager._initialized = asyncio.Event()
+    manager._initialized.set()
+    manager._private_locks = {}
+
+    saved_data: dict[str, list[dict[str, object]]] = {}
+
+    async def fake_save(data: list[dict[str, object]], path: str) -> None:
+        saved_data[path] = data
+
+    monkeypatch.setattr(manager, "_save_history_to_file", fake_save)
+
+    webchat: dict[str, object] = {
+        "display_only": True,
+        "job_id": "job_1",
+        "events": [
+            {
+                "seq": 2,
+                "event": "tool_end",
+                "payload": {"tool_call_id": "call_1"},
+            }
+        ],
+    }
+    await manager.add_private_message(
+        user_id=42,
+        text_content="",
+        display_name="Bot",
+        webchat=webchat,
+    )
+    await manager.flush_pending_saves()
+
+    record = manager._private_message_history["42"][0]
+    assert record["message"] == ""
+    assert record["webchat"] == webchat
+
+
+@pytest.mark.asyncio
 async def test_history_save_failure_keeps_pending_snapshot(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

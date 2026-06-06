@@ -6,6 +6,7 @@ from typing import Any, cast
 
 import pytest
 
+from Undefined.ai.llm.sanitize import prepare_chat_completion_messages
 from Undefined.ai.prompts import PromptBuilder
 from Undefined.end_summary_storage import EndSummaryRecord
 from Undefined.memory import Memory
@@ -144,7 +145,7 @@ async def test_build_messages_places_each_rules_before_dynamic_context(
         "summary": "【短期行动记录（最近 1 条，带时间）】",
         "history": "【历史消息存档】",
         "time": "【当前时间】",
-        "current": "【当前消息】",
+        "current": "【当前输入批次】",
     }
     positions = {
         name: next(
@@ -174,7 +175,81 @@ async def test_build_messages_places_each_rules_before_dynamic_context(
 
 
 @pytest.mark.asyncio
-async def test_build_messages_keeps_current_message_as_last_item(
+async def test_build_messages_keeps_cache_friendly_static_before_dynamic_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    builder = _make_builder()
+
+    async def _fake_load_system_prompt() -> str:
+        return "系统提示词"
+
+    async def _fake_load_each_rules() -> str:
+        return "固定规则"
+
+    monkeypatch.setattr(builder, "_load_system_prompt", _fake_load_system_prompt)
+    monkeypatch.setattr(builder, "_load_each_rules", _fake_load_each_rules)
+
+    async def _fake_recent_messages(
+        chat_id: str, msg_type: str, start: int, end: int
+    ) -> list[dict[str, Any]]:
+        _ = chat_id, msg_type, start, end
+        return [
+            {
+                "type": "group",
+                "display_name": "测试用户",
+                "user_id": "10001",
+                "chat_id": "20001",
+                "chat_name": "研发群",
+                "timestamp": "2026-04-03 10:01:00",
+                "message": "上一条消息",
+                "attachments": [],
+                "role": "member",
+                "title": "",
+            }
+        ]
+
+    messages = await builder.build_messages(
+        '<message sender="测试用户" sender_id="10001" group_id="20001" time="2026-04-03 10:02:00">\n<content>继续看缓存问题</content>\n</message>',
+        get_recent_messages_callback=_fake_recent_messages,
+        extra_context={
+            "group_id": 20001,
+            "sender_id": 10001,
+            "sender_name": "测试用户",
+            "group_name": "研发群",
+            "request_type": "group",
+        },
+    )
+
+    labels = [
+        "系统提示词",
+        "【当前运行环境配置】",
+        "【可用的 Anthropic Skills】",
+        "【强制规则 - 必须在进行任何操作前仔细阅读并严格遵守】",
+        "【memory.* 手动长期记忆（可编辑）】",
+        "【认知记忆上下文】",
+        "【短期行动记录（最近 1 条，带时间）】",
+        "【历史消息存档】",
+        "【当前时间】",
+        "【当前输入批次】",
+    ]
+    positions = [
+        next(
+            idx
+            for idx, message in enumerate(messages)
+            if label in str(message.get("content", ""))
+        )
+        for label in labels
+    ]
+
+    assert positions == sorted(positions)
+    assert messages[-2]["role"] == "system"
+    assert "【当前时间】" in str(messages[-2].get("content", ""))
+    assert messages[-1]["role"] == "user"
+    assert "【当前输入批次】" in str(messages[-1].get("content", ""))
+
+
+@pytest.mark.asyncio
+async def test_build_messages_keeps_current_input_batch_as_last_item(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     builder = PromptBuilder(
@@ -194,7 +269,84 @@ async def test_build_messages_keeps_current_message_as_last_item(
 
     messages = await builder.build_messages("直接提问：缓存是否命中？")
 
-    assert messages[-1] == {
-        "role": "user",
-        "content": "【当前消息】\n直接提问：缓存是否命中？",
-    }
+    assert messages[-1]["role"] == "user"
+    current_content = str(messages[-1].get("content", ""))
+    assert current_content.startswith("【当前输入批次】\n<current_input_batch>\n")
+    assert "直接提问：缓存是否命中？" in current_content
+    assert "</current_input_batch>" in current_content
+    assert "允许你回应和写入 end.observations 的当前输入" in current_content
+    assert "不能作为 end.observations 的新事实来源" in current_content
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_as_user_keeps_current_batch_and_readonly_history_markers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    builder = PromptBuilder(
+        bot_qq=0,
+        memory_storage=None,
+        end_summary_storage=cast(Any, _FakeEndSummaryStorage()),
+    )
+
+    async def _fake_load_system_prompt() -> str:
+        return "系统提示词"
+
+    async def _fake_load_each_rules() -> str:
+        return "固定规则"
+
+    monkeypatch.setattr(builder, "_load_system_prompt", _fake_load_system_prompt)
+    monkeypatch.setattr(builder, "_load_each_rules", _fake_load_each_rules)
+
+    async def _fake_recent_messages(
+        chat_id: str, msg_type: str, start: int, end: int
+    ) -> list[dict[str, Any]]:
+        _ = chat_id, msg_type, start, end
+        return [
+            {
+                "type": "group",
+                "display_name": "测试用户",
+                "user_id": "10001",
+                "chat_id": "20001",
+                "chat_name": "研发群",
+                "timestamp": "2026-04-03 10:01:00",
+                "message": "只读历史消息",
+                "attachments": [],
+                "role": "member",
+                "title": "",
+            }
+        ]
+
+    messages = await builder.build_messages(
+        '<message sender="测试用户" sender_id="10001" group_id="20001" time="2026-04-03 10:02:00">\n<content>这次缓存为什么没命中？</content>\n</message>',
+        get_recent_messages_callback=_fake_recent_messages,
+        extra_context={
+            "group_id": 20001,
+            "sender_id": 10001,
+            "sender_name": "测试用户",
+            "group_name": "研发群",
+            "request_type": "group",
+        },
+    )
+
+    cfg: Any = SimpleNamespace(
+        reasoning_content_replay=False,
+        system_prompt_as_user=True,
+    )
+    outbound = prepare_chat_completion_messages(cfg, messages)
+
+    assert outbound
+    assert all(
+        str(message.get("role", "")).lower() not in {"system", "developer"}
+        for message in outbound
+    )
+    assert outbound[0]["role"] == "user"
+    merged_content = str(outbound[0].get("content", ""))
+    assert "【历史消息存档】（只读上下文）" in merged_content
+    assert '<history_archive readonly="true">' in merged_content
+    assert "【当前输入批次】" in merged_content
+    assert "<current_input_batch>" in merged_content
+    assert "这次缓存为什么没命中？" in merged_content
+    assert "不能作为 end.observations 的新事实来源" in merged_content
+    assert merged_content.index("【历史消息存档】") < merged_content.index(
+        "【当前输入批次】"
+    )

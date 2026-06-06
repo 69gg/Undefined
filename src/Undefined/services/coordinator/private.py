@@ -118,6 +118,11 @@ class PrivateReplyMixin:
         sender_name = str(request.get("sender_name") or "未知用户")
         full_question = request["full_question"]
         trigger_message_id = request.get("trigger_message_id")
+        message_ids = [
+            str(item).strip()
+            for item in request.get("message_ids", [])
+            if str(item).strip()
+        ]
         batcher_scope: str | None = make_scope(user_id=user_id)
 
         async with RequestContext(
@@ -178,6 +183,8 @@ class PrivateReplyMixin:
                     ctx.set_resource(key, value)
             if trigger_message_id is not None:
                 ctx.set_resource("trigger_message_id", trigger_message_id)
+            if message_ids:
+                ctx.set_resource("message_ids", list(message_ids))
             if request.get("_queue_lane"):
                 ctx.set_resource("queue_lane", request.get("_queue_lane"))
             logger.debug(
@@ -216,6 +223,12 @@ class PrivateReplyMixin:
                             "is_private_chat": True,
                             "sender_name": sender_name,
                             "selected_model_name": request.get("selected_model_name"),
+                            "message_ids": list(message_ids),
+                            "batched_count": int(request.get("batched_count", 1) or 1),
+                            "current_input_is_batched": int(
+                                request.get("batched_count", 1) or 1
+                            )
+                            > 1,
                         },
                     )
                 finally:

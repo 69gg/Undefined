@@ -22,6 +22,7 @@ from Undefined.services.message_batcher import (
     MessageBatcher,
     make_scope,
 )
+from Undefined.services.coordinator.message_ids import collect_message_ids
 from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.sender import MessageSender
 from Undefined.utils.scheduler import TaskScheduler
@@ -50,6 +51,8 @@ _GROUP_STRATEGY_FOOTER = """
  3. 如果问题明确涉及某个项目/代码/部署细节（用户明确点名或上下文明确指向） → 【酌情回复，必要时先查证再回答】
  4. 其他技术问题 → 【酌情回复，直接按用户提到的对象回答，不要引入无关的项目名/工具名作背景】
  5. 先判断当前输入批次（无连续消息说明时就是最后一条消息）是不是在对你说：
+    - 先看 sender_id、@/reply、前后文对话对象和当前群聊环境；不要先入为主把"你"、"AI"、"bot"、"机器人"当作在叫 Undefined
+    - 泛称或讨论其他 AI/bot/机器人时不算叫你；无法确认指向 Undefined 时默认不回复
     - 如果明显是在和别人说话 → 【不要回复】
     - 如果你不能确定是不是在和你说话 → 【默认不回复】
     - 只有明确在和你说，或多人公开讨论且对话明显开放时，才进入下一步
@@ -302,6 +305,11 @@ class AICoordinator:
         group_name = str(request.get("group_name") or "未知群聊")
         full_question = request["full_question"]
         trigger_message_id = request.get("trigger_message_id")
+        message_ids = [
+            str(item).strip()
+            for item in request.get("message_ids", [])
+            if str(item).strip()
+        ]
         # 用于向 batcher 注册 inflight 任务（仅当本请求源自合并桶时生效）
         batcher_scope: str | None = make_scope(group_id=group_id) if group_id else None
 
@@ -368,6 +376,8 @@ class AICoordinator:
                     ctx.set_resource(key, value)
             if trigger_message_id is not None:
                 ctx.set_resource("trigger_message_id", trigger_message_id)
+            if message_ids:
+                ctx.set_resource("message_ids", list(message_ids))
             if request.get("_queue_lane"):
                 ctx.set_resource("queue_lane", request.get("_queue_lane"))
             logger.debug(
@@ -410,6 +420,12 @@ class AICoordinator:
                             "is_at_bot": bool(request.get("is_at_bot", False)),
                             "sender_name": sender_name,
                             "group_name": group_name,
+                            "message_ids": list(message_ids),
+                            "batched_count": int(request.get("batched_count", 1) or 1),
+                            "current_input_is_batched": int(
+                                request.get("batched_count", 1) or 1
+                            )
+                            > 1,
                         },
                     )
                 finally:
@@ -438,6 +454,11 @@ class AICoordinator:
         sender_name = str(request.get("sender_name") or "未知用户")
         full_question = request["full_question"]
         trigger_message_id = request.get("trigger_message_id")
+        message_ids = [
+            str(item).strip()
+            for item in request.get("message_ids", [])
+            if str(item).strip()
+        ]
         batcher_scope: str | None = make_scope(user_id=user_id)
 
         async with RequestContext(
@@ -498,6 +519,8 @@ class AICoordinator:
                     ctx.set_resource(key, value)
             if trigger_message_id is not None:
                 ctx.set_resource("trigger_message_id", trigger_message_id)
+            if message_ids:
+                ctx.set_resource("message_ids", list(message_ids))
             if request.get("_queue_lane"):
                 ctx.set_resource("queue_lane", request.get("_queue_lane"))
             logger.debug(
@@ -536,6 +559,12 @@ class AICoordinator:
                             "is_private_chat": True,
                             "sender_name": sender_name,
                             "selected_model_name": request.get("selected_model_name"),
+                            "message_ids": list(message_ids),
+                            "batched_count": int(request.get("batched_count", 1) or 1),
+                            "current_input_is_batched": int(
+                                request.get("batched_count", 1) or 1
+                            )
+                            > 1,
                         },
                     )
                 finally:
@@ -895,6 +924,10 @@ class AICoordinator:
         body += _GROUP_STRATEGY_FOOTER if not is_private else _PRIVATE_STRATEGY_FOOTER
         return body
 
+    @staticmethod
+    def _collect_message_ids(items: list[BufferedMessage]) -> list[str]:
+        return collect_message_ids(items)
+
     async def _dispatch_grouped_request(self, items: list[BufferedMessage]) -> None:
         """根据一组 BufferedMessage 决定优先级、构造 prompt 并入队。
 
@@ -905,6 +938,7 @@ class AICoordinator:
         first = items[0]
         last = items[-1]
         full_question = self._build_grouped_prompt(items)
+        message_ids = self._collect_message_ids(items)
         any_poke = any(it.is_poke for it in items)
         any_at_bot = any(it.is_at_bot for it in items)
 
@@ -917,6 +951,7 @@ class AICoordinator:
                 "text": last.text,
                 "full_question": full_question,
                 "trigger_message_id": last.trigger_message_id,
+                "message_ids": message_ids,
                 "batched_count": len(items),
             }
             if first.batch_token is not None:
@@ -954,6 +989,7 @@ class AICoordinator:
             "full_question": full_question,
             "is_at_bot": any_at_bot,
             "trigger_message_id": last.trigger_message_id,
+            "message_ids": message_ids,
             "batched_count": len(items),
         }
         if first.batch_token is not None:
@@ -1021,32 +1057,7 @@ class AICoordinator:
         return f"""{prefix}<message{message_id_attr} sender="{safe_name}" sender_id="{safe_uid}" group_id="{safe_gid}" group_name="{safe_gname}" location="{safe_loc}" role="{safe_role}" title="{safe_title}"{level_attr} time="{safe_time}">
  <content>{safe_text}</content>{attachment_xml}
  </message>
-
- 【回复策略 - 更克制，纯表情包才前置检索】
- 1. 如果用户 @ 了你或拍了拍你 → 【必须回复】
- 2. 如果消息中明确提到了你（根据上下文判断用户是否在叫你或维持对话流） → 【必须回复】
- 3. 如果问题明确涉及某个项目/代码/部署细节（用户明确点名或上下文明确指向） → 【酌情回复，必要时先查证再回答】
- 4. 其他技术问题 → 【酌情回复，直接按用户提到的对象回答，不要引入无关的项目名/工具名作背景】
- 5. 先判断当前输入批次（无连续消息说明时就是最后一条消息）是不是在对你说：
-    - 如果明显是在和别人说话 → 【不要回复】
-    - 如果你不能确定是不是在和你说话 → 【默认不回复】
-    - 只有明确在和你说，或多人公开讨论且对话明显开放时，才进入下一步
-  6. 群聊里的主动参与只保留给公开、开放的技术或项目讨论：
-    - 只在多人公开讨论代码、AI、开发工具、项目进展、技术 bug 等，且不是别人之间定向交流时，才可以【极低频参与】
-    - 默认更倾向不参与；不要长篇大论，一两句点到为止；如果别人已经在深入讨论且不需要你，保持沉默
-    - 轻松互动、玩梗、吐槽本身不构成参与许可；只有在你已经决定要回复，且本轮明确是纯表情包/纯反应图时，才优先考虑表情包表达
-  7. 对于已经决定要回复的场景（包括被@、被拍一拍、轻量答疑，以及少量符合条件的主动参与）：
-    - 只有明确纯表情包回复才先检索表情包，再用 memes.send_meme_by_uid 单独发一条图片消息
-    - 其他需要文字承接、解释、答疑、推进任务、确认操作或表达具体态度的场景，第一轮必须优先把必要文字回复做好并调用 send_message
-    - 如果确实还想补表情包，把 memes.search_memes 和 memes.send_meme_by_uid 放到文字发送后的后续响应轮次，不要阻塞首条文字回复
-    - 不要发送任何敷衍消息（如'懒得掺和'、'哦'等）；不想回复就直接调用 end
-    - 严肃、任务型、高信息密度场景少发表情包，避免打断信息传递
-    - 绝不要刷屏、绝不要每条都回
-  8. 对于本来就会回复的场景（私聊、被拍一拍、被@、轻量答疑）：
-    - 如果表情包能自然增强语气、缓和语气或让表达更像真人，也只能作为后续可选补充
-    - 但不要为了发表情包而牺牲信息传递；信息密度优先时仍以文字为主
- 
- 简单说：像个极度安静的群友。主动插话只留给公开、开放的技术或项目讨论；明显对别人说或拿不准时就闭嘴。已经决定要回复时，除非明确是纯表情包回复，否则先把文字回复做好，表情包最后再搜。"""
+{_GROUP_STRATEGY_FOOTER}"""
 
     async def _send_image(self, tid: int, mtype: str, path: str) -> None:
         """发送图片或语音消息到群聊或私聊"""

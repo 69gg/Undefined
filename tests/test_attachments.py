@@ -547,9 +547,43 @@ async def test_register_message_attachments_normalizes_webui_base64_image(
 
     assert len(result.attachments) == 1
     uid = result.attachments[0]["uid"]
+    record = registry.resolve(uid, "webui")
     assert uid.startswith("pic_")
+    assert record is not None
+    assert record.display_name == "image_2.png"
+    assert len(record.display_name) < 64
     assert uid in result.normalized_text
     assert "这张图" in result.normalized_text
+
+
+@pytest.mark.asyncio
+async def test_register_message_attachments_uses_short_data_url_image_name(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    payload = base64.b64encode(_PNG_BYTES).decode("ascii")
+
+    result = await register_message_attachments(
+        registry=registry,
+        segments=[
+            {
+                "type": "image",
+                "data": {"file": f"data:image/png;base64,{payload}"},
+            }
+        ],
+        scope_key="webui",
+    )
+
+    uid = result.attachments[0]["uid"]
+    record = registry.resolve(uid, "webui")
+
+    assert record is not None
+    assert record.display_name == "image_1.png"
+    assert record.source_kind == "data_url_image"
+    assert len(record.display_name) < 64
 
 
 @pytest.mark.asyncio

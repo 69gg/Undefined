@@ -1289,6 +1289,9 @@ bot_name = "Undefined"
 # zh: ChromaDB 向量数据库存储路径。
 # en: ChromaDB vector store path.
 path = "data/cognitive/chromadb"
+# zh: ChromaDB 前台连续处理上限；达到后若有后台/维护任务，会让出一次执行机会。
+# en: Max consecutive foreground Chroma operations before one maintenance/background slot is allowed.
+scheduler_foreground_burst = 8
 
 [cognitive.query]
 # zh: 自动注入上下文时的召回条数。

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
 
+from Undefined.context import RequestContext
 from Undefined.services.ai_coordinator import AICoordinator
 from Undefined.services.coordinator import group as coordinator_group_module
 
@@ -224,9 +226,20 @@ async def test_execute_auto_reply_send_msg_cb_passes_history_message(
 ) -> None:
     coordinator: Any = object.__new__(AICoordinator)
     sender = SimpleNamespace(send_group_message=AsyncMock())
+    captured_extra_context: dict[str, Any] = {}
+    captured_resources: dict[str, Any] = {}
 
     async def _fake_ask(*_args: Any, **kwargs: Any) -> str:
-        await kwargs["send_message_callback"]("hello group")
+        extra_context = cast(dict[str, Any], kwargs.get("extra_context", {}))
+        captured_extra_context.update(extra_context)
+        current_context = RequestContext.current()
+        assert current_context is not None
+        captured_resources.update(current_context.get_resources())
+        send_message_callback = cast(
+            Callable[[str], Awaitable[None]],
+            kwargs["send_message_callback"],
+        )
+        await send_message_callback("hello group")
         return ""
 
     coordinator.config = SimpleNamespace(bot_qq=10000)
@@ -257,6 +270,8 @@ async def test_execute_auto_reply_send_msg_cb_passes_history_message(
             "sender_name": "member",
             "group_name": "测试群",
             "full_question": "prompt",
+            "message_ids": ["101", "102"],
+            "batched_count": 2,
         }
     )
 
@@ -266,3 +281,7 @@ async def test_execute_auto_reply_send_msg_cb_passes_history_message(
         reply_to=None,
         history_message="hello group",
     )
+    assert captured_extra_context["message_ids"] == ["101", "102"]
+    assert captured_extra_context["batched_count"] == 2
+    assert captured_extra_context["current_input_is_batched"] is True
+    assert captured_resources["message_ids"] == ["101", "102"]

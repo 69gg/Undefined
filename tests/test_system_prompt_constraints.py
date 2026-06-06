@@ -32,11 +32,43 @@ def test_system_prompts_include_info_gate_and_style_constraints(path: Path) -> N
 def test_naga_prompt_requires_scope_before_naga_analysis() -> None:
     text = Path("res/prompts/undefined_nagaagent.xml").read_text(encoding="utf-8")
 
+    assert '<mandatory_agent_route priority="P0">' in text
+    assert "强制路由规则" in text
+    assert "必须调用的工具/Agent 名称就是 `naga_code_analysis_agent`" in text
+    assert (
+        "不得凭自身记忆、历史印象、常识、旧上下文或用户提供的片段直接回答 NagaAgent 技术问题"
+        in text
+    )
+    assert (
+        "不要改用 web_agent、file_analysis_agent、普通搜索、直接读文件工具或你自己的推测替代"
+        in text
+    )
     assert "直接把宽泛问题丢给 naga_code_analysis_agent" in text
     assert (
         "先追问具体模块 / 报错 / 现象；只有范围收窄后再调用 naga_code_analysis_agent"
         in text
     )
+    assert "待范围收窄后再调用 `naga_code_analysis_agent`" in text
+
+
+@pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_describe_webui_markdown_and_html_output(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    required_snippets = [
+        "WebUI Markdown 与 HTML 输出",
+        'location="WebUI私聊"',
+        "WebUI 私聊的身份视角固定为系统虚拟用户 system#42",
+        "权限视角固定为 superadmin",
+        "WebUI 支持完整 Markdown 渲染",
+        "简单安全 HTML",
+        "在 WebUI 会话中，凡是需要输出代码，优先直接在聊天回复里给出",
+        "复杂 HTML、包含 JS/CSS 的页面、可运行示例或较长代码必须放入 fenced code block",
+        "所有代码块都必须标明语言或类型",
+        "完整 HTML 页面优先使用 ```html 代码框输出",
+    ]
+    for snippet in required_snippets:
+        assert snippet in text
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)
@@ -58,6 +90,16 @@ def test_system_prompts_define_persona_nicknames_and_ownership_bounds(
     assert "不要说自己是任何项目的开发者、维护者或成员" in text
     assert "活在数字空间里的自由开发者" not in text
     assert "资深开发者" not in text
+
+
+@pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_pin_undefined_literal_spelling(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    assert "必须逐字拼写为 Undefined" in text
+    assert "必须使用字面量 Undefined" in text
+    assert "公开回复、工具参数、memo、observations" in text
+    assert "禁止在 observations 中写成 Unfined、Undefind、undefind" in text
 
 
 def test_naga_prompt_keeps_relationship_contextual_and_non_claiming() -> None:
@@ -122,7 +164,10 @@ def test_system_prompts_tell_end_to_record_whole_current_input_batch(
 
     assert "memo / observations 必须覆盖整个【当前输入批次】" in text
     assert "不要只根据最后一条消息记录" in text
-    assert "end.observations 必须覆盖整批消息中值得留存的信息" in text
+    assert "end.observations 必须覆盖整批消息中有价值的信息" in text
+    assert "不要求与 bot 相关，也不要求长期稳定" in text
+    assert "当前批次中有价值即可记录" in text
+    assert "不能作为 observations 的新事实来源" in text
     assert "系统会围绕当前输入批次自动检索相关内容" in text
     assert "何时应该填写 memo" in text
     assert "何时应该填写 summary" not in text
@@ -138,8 +183,14 @@ def test_end_tool_schema_mentions_current_input_batch() -> None:
     observations = properties["observations"]
 
     assert "当前输入批次" in function["description"]
+    assert "不要求与 bot 相关" in function["description"]
+    assert "不要求长期稳定" in function["description"]
+    assert "项目名/主名必须逐字写作 Undefined" in function["description"]
     assert "必须覆盖整批消息内容" in observations["description"]
     assert "不能只记录最后一条" in observations["description"]
+    assert "当前批次中有价值即可记录" in observations["description"]
+    assert "禁止从其中摘取新事实写入 observations" in observations["description"]
+    assert "禁止写成 Unfined、Undefind、undefind" in observations["description"]
     assert "summary" not in properties
     assert "action_summary" not in properties
     assert "new_info" not in properties
@@ -149,9 +200,23 @@ def test_historian_prompts_reference_current_input_batch_source() -> None:
     rewrite = Path("res/prompts/historian_rewrite.md").read_text(encoding="utf-8")
     merge = Path("res/prompts/historian_profile_merge.md").read_text(encoding="utf-8")
 
-    assert "当前输入批次提取到的一条新记忆" in rewrite
+    assert "当前输入批次提取到的一条有价值新观察" in rewrite
+    assert "最近消息参考只能消歧，禁止作为新事实来源" in rewrite
     assert "当前输入批次原文（触发本轮；连续消息会按时间顺序列出多条）" in rewrite
     assert "当前输入批次原文" in merge
+    assert "禁止作为本轮新事实来源" in merge
+
+
+@pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_do_not_treat_you_ai_bot_as_automatic_mention(
+    path: Path,
+) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    assert "不要先入为主把「你」「AI」「bot」「机器人」当作在叫 Undefined" in text
+    assert "泛称不是触发词" in text
+    assert "无法确认指向 Undefined 时默认不回复" in text
+    assert "「你」「AI」「bot」「机器人」不是自动触发" in text
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)
