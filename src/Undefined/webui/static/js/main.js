@@ -148,6 +148,12 @@ function refreshUI() {
             ) {
                 window.MemesController.onTabActivated(state.tab);
             }
+            if (
+                window.SchedulesController &&
+                typeof window.SchedulesController.onTabActivated === "function"
+            ) {
+                window.SchedulesController.onTabActivated(state.tab);
+            }
         } else {
             get("appContent").style.display = "none";
             state.configLoaded = false;
@@ -223,6 +229,12 @@ function switchTab(tab) {
         typeof window.MemesController.onTabActivated === "function"
     ) {
         window.MemesController.onTabActivated(tab);
+    }
+    if (
+        window.SchedulesController &&
+        typeof window.SchedulesController.onTabActivated === "function"
+    ) {
+        window.SchedulesController.onTabActivated(tab);
     }
     if (tab === "about") {
         maybeLoadAboutChangelog();
@@ -342,10 +354,16 @@ const _cmdCommands = [
         keys: "6",
     },
     {
+        id: "schedules",
+        label: () => t("cmd.tab_schedules"),
+        action: () => switchTab("schedules"),
+        keys: "7",
+    },
+    {
         id: "cognitive",
         label: () => t("cmd.tab_cognitive"),
         action: () => switchTab("cognitive"),
-        keys: "7",
+        keys: "8",
     },
     {
         id: "refresh",
@@ -484,6 +502,12 @@ async function init() {
         typeof window.MemesController.init === "function"
     ) {
         window.MemesController.init();
+    }
+    if (
+        window.SchedulesController &&
+        typeof window.SchedulesController.init === "function"
+    ) {
+        window.SchedulesController.init();
     }
 
     document.querySelectorAll('[data-action="toggle-lang"]').forEach((btn) => {

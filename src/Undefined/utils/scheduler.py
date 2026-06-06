@@ -198,8 +198,12 @@ class TaskScheduler:
         cron_expression: str | None = None,
         tool_name: str | None = None,
         tool_args: dict[str, Any] | None = None,
+        target_id: int | None = None,
+        target_id_provided: bool = False,
+        target_type: str | None = None,
         task_name: str | None = None,
         max_executions: int | None = None,
+        max_executions_provided: bool = False,
         tools: list[dict[str, Any]] | None = None,
         execution_mode: str | None = None,
         self_instruction: str | None = None,
@@ -211,8 +215,12 @@ class TaskScheduler:
             cron_expression: 新的 crontab 表达式
             tool_name: 新的工具名称（单工具模式）
             tool_args: 新的工具参数（单工具模式）
+            target_id: 新的发送目标 ID
+            target_id_provided: 是否显式更新发送目标 ID（允许清空）
+            target_type: 新的发送目标类型
             task_name: 新的任务名称
             max_executions: 新的最大执行次数
+            max_executions_provided: 是否显式更新最大执行次数（允许清空）
             tools: 新的多工具调用列表（多工具模式）
             execution_mode: 新的执行模式（"serial" 或 "parallel"）
             self_instruction: 新的面向未来自己的指令文本（可选）
@@ -249,10 +257,16 @@ class TaskScheduler:
                     if prompt:
                         task_info["self_instruction"] = prompt
 
+            if target_id is not None or target_id_provided or target_type is not None:
+                if target_id is not None or target_id_provided:
+                    task_info["target_id"] = target_id
+                if target_type is not None:
+                    task_info["target_type"] = target_type
+
             if task_name is not None:
                 task_info["task_name"] = task_name
 
-            if max_executions is not None:
+            if max_executions is not None or max_executions_provided:
                 task_info["max_executions"] = max_executions
 
             if tools is not None:
@@ -293,6 +307,18 @@ class TaskScheduler:
                 task_info["context_id"] = new_context_id
                 if old_context_id and old_context_id != new_context_id:
                     await self._delete_context_snapshot(old_context_id)
+
+            job = self.scheduler.get_job(task_id)
+            if job is not None:
+                job.modify(
+                    args=[
+                        task_id,
+                        task_info.get("tool_name", ""),
+                        task_info.get("tool_args", {}),
+                        task_info.get("target_id"),
+                        task_info.get("target_type", "group"),
+                    ]
+                )
 
             # 持久化保存
             await self.storage.save_all(self.tasks)

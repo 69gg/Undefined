@@ -105,6 +105,7 @@ curl http://127.0.0.1:8788/openapi.json
 | `message_batcher` | `object` | 消息合并器快照（`config` 含 `enabled`/`window_seconds`/`pre_send_seconds`/`speculative_enabled`/`strategy`/`max_window_seconds`/`max_messages_per_batch`/`group_enabled`/`private_enabled`/`allow_cancel_after_send`/`shutdown`；`pending_buckets` 当前缓冲桶数；`buckets[]` 列出每个桶的 `scope`/`sender_id`/`count`/`elapsed_seconds`/`phase`（`typing`/`speculating`/`finalizing`）/`has_inflight`/`has_speculative_dispatch`） |
 | `memory` | `object` | 长期记忆（`count`：条数） |
 | `cognitive` | `object` | 认知服务（`enabled`、`queue`） |
+| `scheduler` | `object` | 定时任务调度摘要（`available`、`count`、`running`） |
 | `api` | `object` | Runtime API 配置（`enabled`、`host`、`port`、`openapi_enabled`） |
 | `skills` | `object` | 技能统计，包含 `tools`、`toolsets`、`agents`、`pipelines`、`commands`、`anthropic_skills` 子对象 |
 | `models` | `object` | 模型配置；聊天类模型包含 `model_name`、脱敏 `api_url`、`api_mode`、`thinking_enabled`、`thinking_tool_call_compat`、`reasoning_content_replay`、`system_prompt_as_user`、`responses_tool_choice_compat`、`responses_force_stateless_replay`、`prompt_cache_enabled`、`reasoning_enabled`、`reasoning_effort` |
@@ -208,6 +209,101 @@ curl http://127.0.0.1:8788/openapi.json
 - 表情包库条目使用统一图片 `uid`，与普通图片 `<attachment uid="..."/>` 语义一致。
 - 入库文本和向量索引只使用纯文本 `description + tags + aliases`，不依赖 OCR。
 - 后台重跑分析使用两阶段 LLM 管线：先判定，再描述。
+
+### 定时任务
+
+- `GET /api/v1/schedules`
+- `POST /api/v1/schedules`
+- `GET /api/v1/schedules/{task_id}`
+- `PATCH /api/v1/schedules/{task_id}`
+- `DELETE /api/v1/schedules/{task_id}`
+
+`GET /api/v1/schedules` 返回：
+
+```json
+{
+  "count": 1,
+  "items": [
+    {
+      "task_id": "task_daily_report",
+      "task_name": "每日摘要",
+      "mode": "self_instruction",
+      "cron": "0 9 * * *",
+      "target_type": "group",
+      "target_id": 123456,
+      "tool_name": "scheduler.call_self",
+      "tool_args": { "prompt": "总结昨天群里的待办。" },
+      "self_instruction": "总结昨天群里的待办。",
+      "max_executions": null,
+      "current_executions": 0,
+      "next_run_time": "2026-06-07T09:00:00+08:00"
+    }
+  ]
+}
+```
+
+创建和更新任务使用相同的 JSON 字段；`PATCH` 只提交需要修改的字段即可。`mode` 支持：
+
+| mode | 必填字段 | 说明 |
+|---|---|---|
+| `single` | `tool_name`、`tool_args` | 定时调用单个工具 |
+| `multi` | `tools`、`execution_mode` | 定时串行或并行调用多个工具 |
+| `self_instruction` | `self_instruction` | 在触发时唤醒 AI 自身执行自然语言指令 |
+
+通用字段：
+
+| 字段 | 说明 |
+|---|---|
+| `task_id` | 可选；不传时自动生成。只允许字母、数字、`_`、`.`、`:`、`-`，最长 96 字符 |
+| `task_name` | 可选的可读名称 |
+| `cron_expression` | 标准 5 段 crontab 表达式；也兼容字段名 `cron` |
+| `target_type` | `group` 或 `private`，默认 `group` |
+| `target_id` | 可选的发送目标 ID；`PATCH` 时传 `null` 可清空 |
+| `max_executions` | 可选的最大执行次数；`PATCH` 时传 `null` 可清空 |
+
+创建“自我督办”任务：
+
+```json
+{
+  "task_id": "task_daily_review",
+  "task_name": "每日复盘",
+  "cron_expression": "0 9 * * *",
+  "mode": "self_instruction",
+  "self_instruction": "请总结昨天的待办，并提醒我今天优先处理前三项。",
+  "target_type": "private",
+  "target_id": 12345678
+}
+```
+
+创建单工具任务：
+
+```json
+{
+  "cron_expression": "*/30 * * * *",
+  "mode": "single",
+  "tool_name": "get_current_time",
+  "tool_args": { "format": "iso" }
+}
+```
+
+创建多工具任务：
+
+```json
+{
+  "cron_expression": "0 8 * * 1",
+  "mode": "multi",
+  "execution_mode": "serial",
+  "tools": [
+    { "tool_name": "get_current_time", "tool_args": {} },
+    { "tool_name": "scheduler.call_self", "tool_args": { "prompt": "生成本周计划。" } }
+  ]
+}
+```
+
+说明：
+- `tool_name`、`tools`、`self_instruction` 互斥；显式传 `mode` 时也必须与对应字段一致。
+- `tool_args` 必须是 JSON 对象；`tools` 必须是非空数组，最多 20 项。
+- 所有 `/api/v1/schedules*` 路由都遵循 Runtime API 的 `X-Undefined-API-Key` 鉴权。
 
 ### 认知记忆检索 / 侧写
 
@@ -763,6 +859,11 @@ WebUI 不直接在前端暴露 `auth_key`，而是通过后端代理访问主进
 - `GET /api/runtime/probes/internal`
 - `GET /api/runtime/probes/external`
 - `GET /api/runtime/memory`
+- `GET /api/runtime/schedules`
+- `POST /api/runtime/schedules`
+- `GET /api/runtime/schedules/{task_id}`
+- `PATCH /api/runtime/schedules/{task_id}`
+- `DELETE /api/runtime/schedules/{task_id}`
 - `GET /api/runtime/cognitive/events`
 - `GET /api/runtime/cognitive/profiles`
 - `GET /api/runtime/cognitive/profile/{entity_type}/{entity_id}`
@@ -787,7 +888,7 @@ WebUI 不直接在前端暴露 `auth_key`，而是通过后端代理访问主进
 
 ### Auth / Header 注入
 
-WebUI 后端会自动从 `config.toml` 读取 `[api].auth_key` 并注入 `X-Undefined-API-Key`，前端只持有 WebUI 登录态，不直接暴露 Runtime API 密钥。
+WebUI 后端会先校验 WebUI 登录态，再自动从 `config.toml` 读取 `[api].auth_key` 并注入 `X-Undefined-API-Key`，前端只持有 WebUI 登录态，不直接暴露 Runtime API 密钥。
 
 ### Command Proxy
 

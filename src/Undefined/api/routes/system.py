@@ -29,6 +29,7 @@ from Undefined.api._probes import (
     _probe_ws_endpoint,
     _skipped_probe,
 )
+from Undefined.api.routes.schedules import build_schedules_summary
 
 logger = logging.getLogger(__name__)
 
@@ -265,6 +266,7 @@ async def internal_probe_handler(
             "enabled": bool(ctx.cognitive_service and ctx.cognitive_service.enabled),
             "queue": cognitive_queue_snapshot,
         },
+        "scheduler": build_schedules_summary(ctx),
         "api": {
             "enabled": bool(cfg.api.enabled),
             "host": cfg.api.host,

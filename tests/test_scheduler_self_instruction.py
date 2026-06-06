@@ -165,3 +165,60 @@ async def test_task_scheduler_execute_self_call_invokes_ai_and_sends_result() ->
     assert ask_call.kwargs["extra_context"]["scheduled_task_id"] == "task_self_abc"
     assert ask_call.kwargs["extra_context"]["scheduled_task_name"] == "future-review"
     assert sent_messages == ["未来指令已执行"]
+
+
+@pytest.mark.asyncio
+async def test_task_scheduler_update_task_refreshes_job_args() -> None:
+    ai = SimpleNamespace(
+        ask=AsyncMock(),
+        memory_storage=SimpleNamespace(),
+        runtime_config=SimpleNamespace(),
+    )
+    sender = SimpleNamespace(
+        send_group_message=AsyncMock(),
+        send_private_message=AsyncMock(),
+    )
+    onebot = SimpleNamespace(
+        send_like=AsyncMock(),
+        get_image=AsyncMock(return_value=None),
+        get_forward_msg=AsyncMock(return_value=[]),
+    )
+    scheduler = TaskScheduler(
+        ai,
+        sender,
+        onebot,
+        SimpleNamespace(),
+        task_storage=cast(Any, _DummyTaskStorage()),
+    )
+
+    try:
+        created = await scheduler.add_task(
+            task_id="task_edit_args",
+            tool_name="get_current_time",
+            tool_args={"format": "iso"},
+            cron_expression="0 9 * * *",
+            target_id=10001,
+            target_type="group",
+        )
+        updated = await scheduler.update_task(
+            task_id="task_edit_args",
+            tool_name="messages.send_message",
+            tool_args={"message": "updated"},
+            target_id=None,
+            target_id_provided=True,
+            target_type="private",
+        )
+        job = scheduler.scheduler.get_job("task_edit_args")
+    finally:
+        scheduler.scheduler.shutdown(wait=False)
+
+    assert created is True
+    assert updated is True
+    assert job is not None
+    assert list(job.args) == [
+        "task_edit_args",
+        "messages.send_message",
+        {"message": "updated"},
+        None,
+        "private",
+    ]
