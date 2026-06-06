@@ -650,6 +650,10 @@ async def test_runtime_chat_job_proxy_routes_require_management_auth() -> None:
     )
 
     handlers = [
+        _runtime.runtime_chat_conversations_handler,
+        _runtime.runtime_chat_conversation_create_handler,
+        _runtime.runtime_chat_conversation_update_handler,
+        _runtime.runtime_chat_conversation_delete_handler,
         _runtime.runtime_chat_history_clear_handler,
         _runtime.runtime_chat_job_create_handler,
         _runtime.runtime_chat_job_active_handler,

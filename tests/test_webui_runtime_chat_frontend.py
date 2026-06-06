@@ -78,7 +78,40 @@ def test_webchat_frontend_renders_live_stage_after_ai_label() -> None:
     assert "runtime.chat_stage_searching_cognitive_memory" in i18n
     assert ".runtime-chat-stage" in css
     assert "runtime-chat-stage-pulse" not in css
-    assert "is-final" in css
+
+
+def test_webchat_frontend_has_conversation_sidebar() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+    template = WEBUI_TEMPLATE.read_text(encoding="utf-8")
+    app_css = APP_CSS.read_text(encoding="utf-8")
+    i18n = I18N_JS.read_text(encoding="utf-8")
+
+    assert "runtimeChatConversations" in template
+    assert "btnRuntimeChatNew" in template
+    assert "runtimeChatCurrentTitle" in template
+    assert "loadChatConversations" in source
+    assert "switchChatConversation" in source
+    assert "renameChatConversation" in source
+    assert "deleteChatConversation" in source
+    assert "/api/runtime/chat/conversations" in source
+    assert ".runtime-chat-sidebar" in app_css
+    assert "runtime.chat_new_conversation" in i18n
+
+
+def test_webchat_frontend_sends_conversation_id_with_history_and_jobs() -> None:
+    source = RUNTIME_JS.read_text(encoding="utf-8")
+
+    assert "currentChatConversationId" in source
+    assert 'chatUrl("/api/runtime/chat/history"' in source
+    assert 'chatUrl("/api/runtime/chat/jobs/active"' in source
+    assert "runtimeChatJobEventsUrls" in source
+    assert "conversation_id: currentChatConversationId()" in source
+    assert "activeJobConversationId" in source
+    assert (
+        "runtimeState.activeJobConversationId || currentChatConversationId()" in source
+    )
+    assert "eventConversationId === currentChatConversationId()" in source
+    assert "jobConversationId !== currentChatConversationId()" in source
 
 
 def test_webchat_frontend_keeps_final_duration_after_done() -> None:
@@ -364,7 +397,8 @@ def test_webchat_tab_activation_forces_bottom_scroll_after_history_load() -> Non
 
     assert "forceScrollChatToBottomSoon()" in load_helper
     assert "forceScrollChatToBottom();" not in load_helper
-    assert "loadChatHistory().catch" in chat_branch
+    assert "loadChatConversations()" in chat_branch
+    assert ".then(() => loadChatHistory())" in chat_branch
     assert "forceScrollChatToBottomSoon()" in chat_branch
     assert "CHAT_TOP_LOAD_SUPPRESS_MS = 900" in source
     assert "suppressChatTopHistoryLoad()" in source
@@ -1041,7 +1075,7 @@ def test_webchat_layout_keeps_input_at_bottom_and_log_scrollable() -> None:
     chat_card_block = app_css.split(
         ".main-content.chat-layout #tab-chat .chat-runtime-card", 1
     )[1].split(".main-content.chat-layout #tab-chat .runtime-chat-log", 1)[0]
-    assert "grid-template-rows: auto minmax(0, 1fr) auto;" in chat_card_block
+    assert "grid-template-rows: auto auto minmax(0, 1fr) auto;" in chat_card_block
     assert "min-height: 0;" in chat_card_block
 
     log_block = app_css.split(

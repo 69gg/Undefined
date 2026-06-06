@@ -89,15 +89,23 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
             "post": {
                 "summary": "WebUI special private chat",
                 "description": (
-                    "POST JSON {message, stream?}. "
+                    "POST JSON {message, stream?, conversation_id?}. "
                     "stream=false runs synchronously; stream=true creates a "
                     "WebChat job and streams lifecycle events as SSE."
                 ),
             }
         },
+        "/api/v1/chat/conversations": {
+            "get": {"summary": "List WebChat conversations"},
+            "post": {"summary": "Create a WebChat conversation"},
+        },
+        "/api/v1/chat/conversations/{conversation_id}": {
+            "patch": {"summary": "Rename a WebChat conversation"},
+            "delete": {"summary": "Delete a WebChat conversation"},
+        },
         "/api/v1/chat/history": {
-            "get": {"summary": "Get paged virtual private chat history for WebUI"},
-            "delete": {"summary": "Clear WebUI virtual private chat history"},
+            "get": {"summary": "Get paged WebChat conversation history"},
+            "delete": {"summary": "Clear a WebChat conversation history"},
         },
         "/api/v1/chat/jobs": {"post": {"summary": "Create a WebUI chat job"}},
         "/api/v1/chat/jobs/active": {

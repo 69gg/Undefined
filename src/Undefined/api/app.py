@@ -133,6 +133,22 @@ class RuntimeAPIServer:
                     "/api/v1/cognitive/profile/{entity_type}/{entity_id}",
                     self._cognitive_profile_handler,
                 ),
+                web.get(
+                    "/api/v1/chat/conversations",
+                    self._chat_conversations_handler,
+                ),
+                web.post(
+                    "/api/v1/chat/conversations",
+                    self._chat_conversation_create_handler,
+                ),
+                web.patch(
+                    "/api/v1/chat/conversations/{conversation_id}",
+                    self._chat_conversation_update_handler,
+                ),
+                web.delete(
+                    "/api/v1/chat/conversations/{conversation_id}",
+                    self._chat_conversation_delete_handler,
+                ),
                 web.post("/api/v1/chat", self._chat_handler),
                 web.get("/api/v1/chat/history", self._chat_history_handler),
                 web.delete("/api/v1/chat/history", self._chat_history_clear_handler),
@@ -263,8 +279,30 @@ class RuntimeAPIServer:
     ) -> str:
         return await chat.run_webui_chat(self._ctx, text=text, send_output=send_output)
 
+    async def _chat_conversations_handler(self, request: web.Request) -> Response:
+        return await chat.chat_conversations_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
+    async def _chat_conversation_create_handler(self, request: web.Request) -> Response:
+        return await chat.chat_conversation_create_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
+    async def _chat_conversation_update_handler(self, request: web.Request) -> Response:
+        return await chat.chat_conversation_update_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
+    async def _chat_conversation_delete_handler(self, request: web.Request) -> Response:
+        return await chat.chat_conversation_delete_handler(
+            self._ctx, self._chat_job_manager, request
+        )
+
     async def _chat_history_handler(self, request: web.Request) -> Response:
-        return await chat.chat_history_handler(self._ctx, request)
+        return await chat.chat_history_handler(
+            self._ctx, self._chat_job_manager, request
+        )
 
     async def _chat_history_clear_handler(self, request: web.Request) -> Response:
         return await chat.chat_history_clear_handler(

@@ -412,9 +412,12 @@ async def runtime_chat_handler(request: web.Request) -> web.StreamResponse:
     message = str(body.get("message", "") or "").strip()
     if not message:
         return web.json_response({"error": "message is required"}, status=400)
+    conversation_id = str(body.get("conversation_id", "") or "").strip()
 
     stream = _to_bool(body.get("stream"))
     payload: dict[str, Any] = {"message": message}
+    if conversation_id:
+        payload["conversation_id"] = conversation_id
     if stream:
         payload["stream"] = True
         return await _proxy_runtime_stream(
@@ -430,6 +433,71 @@ async def runtime_chat_handler(request: web.Request) -> web.StreamResponse:
         path="/api/v1/chat",
         payload=payload,
         timeout_seconds=_chat_proxy_timeout_seconds(),
+    )
+
+
+@routes.get("/api/v1/management/runtime/chat/conversations")
+@routes.get("/api/runtime/chat/conversations")
+async def runtime_chat_conversations_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    return await _proxy_runtime(
+        method="GET",
+        path="/api/v1/chat/conversations",
+        params=request.query,
+    )
+
+
+@routes.post("/api/v1/management/runtime/chat/conversations")
+@routes.post("/api/runtime/chat/conversations")
+async def runtime_chat_conversation_create_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    payload: dict[str, Any] = {}
+    title = str(body.get("title", "") or "").strip()
+    if title:
+        payload["title"] = title
+    return await _proxy_runtime(
+        method="POST",
+        path="/api/v1/chat/conversations",
+        payload=payload,
+    )
+
+
+@routes.patch("/api/v1/management/runtime/chat/conversations/{conversation_id}")
+@routes.patch("/api/runtime/chat/conversations/{conversation_id}")
+async def runtime_chat_conversation_update_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    conversation_id = _url_quote(
+        str(request.match_info.get("conversation_id", "")).strip(), safe=""
+    )
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+    return await _proxy_runtime(
+        method="PATCH",
+        path=f"/api/v1/chat/conversations/{conversation_id}",
+        payload={"title": str(body.get("title", "") or "").strip()},
+    )
+
+
+@routes.delete("/api/v1/management/runtime/chat/conversations/{conversation_id}")
+@routes.delete("/api/runtime/chat/conversations/{conversation_id}")
+async def runtime_chat_conversation_delete_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    conversation_id = _url_quote(
+        str(request.match_info.get("conversation_id", "")).strip(), safe=""
+    )
+    return await _proxy_runtime(
+        method="DELETE",
+        path=f"/api/v1/chat/conversations/{conversation_id}",
     )
 
 
@@ -453,6 +521,7 @@ async def runtime_chat_history_clear_handler(request: web.Request) -> Response:
     return await _proxy_runtime(
         method="DELETE",
         path="/api/v1/chat/history",
+        params=request.query,
     )
 
 
@@ -468,10 +537,14 @@ async def runtime_chat_job_create_handler(request: web.Request) -> Response:
     message = str(body.get("message", "") or "").strip()
     if not message:
         return web.json_response({"error": "message is required"}, status=400)
+    payload: dict[str, Any] = {"message": message}
+    conversation_id = str(body.get("conversation_id", "") or "").strip()
+    if conversation_id:
+        payload["conversation_id"] = conversation_id
     return await _proxy_runtime(
         method="POST",
         path="/api/v1/chat/jobs",
-        payload={"message": message},
+        payload=payload,
         timeout_seconds=20.0,
     )
 
@@ -481,7 +554,11 @@ async def runtime_chat_job_create_handler(request: web.Request) -> Response:
 async def runtime_chat_job_active_handler(request: web.Request) -> Response:
     if not check_auth(request):
         return _unauthorized()
-    return await _proxy_runtime(method="GET", path="/api/v1/chat/jobs/active")
+    return await _proxy_runtime(
+        method="GET",
+        path="/api/v1/chat/jobs/active",
+        params=request.query,
+    )
 
 
 @routes.get("/api/v1/management/runtime/chat/jobs/{job_id}")

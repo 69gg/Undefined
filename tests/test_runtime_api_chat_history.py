@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -11,6 +12,11 @@ from aiohttp import web
 
 from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
 from Undefined.api.routes import chat as runtime_api_chat
+
+
+@pytest.fixture(autouse=True)
+def _isolate_webchat_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
 
 
 class _DummyHistoryManager:
@@ -425,7 +431,7 @@ async def test_runtime_chat_history_clear_clears_only_when_no_active_job() -> No
 
     assert payload["success"] is True
     assert payload["cleared"] == 2
-    assert history.records == []
+    assert history.records
 
 
 @pytest.mark.asyncio
@@ -538,4 +544,4 @@ async def test_runtime_chat_history_clear_returns_409_until_history_finalized() 
     payload = json.loads(response.text or "{}")
 
     assert response.status == 200
-    assert payload["cleared"] == 2
+    assert payload["cleared"] == 0

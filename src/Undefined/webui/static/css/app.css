@@ -212,9 +212,122 @@ body.is-mobile-drawer-open {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.runtime-chat-shell {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+.runtime-chat-sidebar {
+  min-height: 0;
+  padding: 8px 10px 0 0;
+  border-right: 1px solid var(--border-color);
+  overflow: hidden;
+}
+.runtime-chat-conversations {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: 100%;
+  overflow-y: auto;
+  padding: 0 10px 10px 0;
+}
+.runtime-chat-conversation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px 28px;
+  align-items: center;
+  gap: 2px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+}
+.runtime-chat-conversation.active {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+.runtime-chat-conversation.running .runtime-chat-conversation-title::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  vertical-align: middle;
+}
+.runtime-chat-conversation-main {
+  min-width: 0;
+  padding: 9px 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.runtime-chat-conversation-main:hover,
+.runtime-chat-conversation-rename:hover,
+.runtime-chat-conversation-delete:hover {
+  color: var(--text-primary);
+}
+.runtime-chat-conversation-title,
+.runtime-chat-conversation-meta {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runtime-chat-conversation-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.runtime-chat-conversation-meta {
+  margin-top: 2px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+.runtime-chat-conversation-rename,
+.runtime-chat-conversation-delete {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.runtime-chat-conversation-empty {
+  padding: 12px 8px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+.runtime-chat-conversation-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--border-color);
+}
+.runtime-chat-current-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 700;
+}
+.runtime-chat-current-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
 .main-content.chat-layout #tab-chat .chat-runtime-card {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   height: auto;
   min-height: 0;
   max-width: 100%;

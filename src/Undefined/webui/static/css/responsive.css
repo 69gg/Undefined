@@ -68,6 +68,28 @@
   .main-content.chat-layout #tab-chat .runtime-chat-header {
     gap: 10px;
   }
+  .runtime-chat-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .runtime-chat-sidebar {
+    padding: 0 0 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-color);
+  }
+  .runtime-chat-conversations {
+    flex-direction: row;
+    height: auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 0 6px;
+  }
+  .runtime-chat-conversation {
+    flex: 0 0 min(220px, 72vw);
+  }
+  .runtime-chat-conversation-head {
+    padding: 7px 12px;
+  }
   .runtime-chat-page-title {
     align-items: flex-start;
     flex-direction: column;

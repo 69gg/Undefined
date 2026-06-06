@@ -5,6 +5,7 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 
 DATA_DIR = Path("data")
+HISTORY_DIR = DATA_DIR / "history"
 CACHE_DIR = DATA_DIR / "cache"
 RENDER_CACHE_DIR = CACHE_DIR / "render"
 IMAGE_CACHE_DIR = CACHE_DIR / "images"
@@ -14,6 +15,9 @@ TEXT_FILE_CACHE_DIR = CACHE_DIR / "text_files"
 URL_FILE_CACHE_DIR = CACHE_DIR / "url_files"
 WEBUI_FILE_CACHE_DIR = CACHE_DIR / "webui_files"
 ATTACHMENT_REGISTRY_FILE = DATA_DIR / "attachment_registry.json"
+WEBCHAT_DIR = DATA_DIR / "webchat"
+WEBCHAT_CONVERSATIONS_DIR = WEBCHAT_DIR / "conversations"
+WEBCHAT_MIGRATION_MARKER_FILE = WEBCHAT_DIR / "legacy_private_42_migrated.json"
 
 
 def ensure_dir(path: Path) -> Path:

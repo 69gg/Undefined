@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -11,6 +12,11 @@ from aiohttp import web
 
 from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
 from Undefined.api.routes import chat as runtime_api_chat
+
+
+@pytest.fixture(autouse=True)
+def _isolate_webchat_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
 
 
 class _DummyTransport:
@@ -80,6 +86,17 @@ def _context() -> RuntimeAPIContext:
         queue_manager=SimpleNamespace(snapshot=lambda: {}),
         history_manager=SimpleNamespace(add_private_message=AsyncMock()),
     )
+
+
+async def _last_webchat_record(server: RuntimeAPIServer) -> dict[str, Any]:
+    conversation = await server._chat_job_manager.conversation_store.get_conversation(
+        "legacy-system-42"
+    )
+    assert conversation is not None
+    messages = conversation.get("messages")
+    assert isinstance(messages, list)
+    assert messages
+    return cast(dict[str, Any], messages[-1])
 
 
 def _decode_sse(writes: list[bytes]) -> list[dict[str, Any]]:
@@ -632,10 +649,10 @@ async def test_chat_job_persists_webchat_lifecycle_history(
             break
         await asyncio.sleep(0.01)
 
-    assert len(history_calls) == 1
-    call = history_calls[0]
-    assert call["user_id"] == 42
-    assert call["text_content"] == "history final"
+    assert history_calls == []
+    call = await _last_webchat_record(server)
+    assert call["user_id"] == "42"
+    assert call["message"] == "history final"
     webchat = call["webchat"]
     assert webchat["display_only"] is True
     assert webchat["job_id"] == job_id
@@ -733,8 +750,8 @@ async def test_chat_job_finalizes_unclosed_webchat_calls_as_error(
             break
         await asyncio.sleep(0.01)
 
-    assert len(history_calls) == 1
-    webchat = history_calls[0]["webchat"]
+    assert history_calls == []
+    webchat = (await _last_webchat_record(server))["webchat"]
     assert [event["event"] for event in webchat["events"]] == [
         "tool_start",
         "tool_end",
@@ -811,7 +828,8 @@ async def test_chat_job_history_persists_redacted_webchat_previews(
             break
         await asyncio.sleep(0.01)
 
-    webchat = history_calls[0]["webchat"]
+    assert history_calls == []
+    webchat = (await _last_webchat_record(server))["webchat"]
     dumped = json.dumps(webchat, ensure_ascii=False)
     assert "sk-history-secret" not in dumped
     assert "auth-history-secret" not in dumped

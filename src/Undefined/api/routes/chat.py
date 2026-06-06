@@ -27,6 +27,13 @@ from Undefined.api._helpers import (
     _sse_event,
     _to_bool,
 )
+from Undefined.api.webchat_store import (
+    DEFAULT_WEBCHAT_CONVERSATION_ID,
+    WebChatConversationStore,
+    format_webchat_message_xml,
+    generate_webchat_title,
+    webchat_title_basis_hash,
+)
 from Undefined.attachments import (
     attachment_refs_to_xml,
     build_attachment_scope,
@@ -38,11 +45,11 @@ from Undefined.context_resource_registry import collect_context_resources
 from Undefined.services.queue_manager import QUEUE_LANE_SUPERADMIN
 from Undefined.utils.common import message_to_segments
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
-from Undefined.utils.xml import escape_xml_attr, escape_xml_text
 
 logger = logging.getLogger(__name__)
 
 _VIRTUAL_USER_NAME = "system"
+_DEFAULT_CONVERSATION_ID = DEFAULT_WEBCHAT_CONVERSATION_ID
 _CHAT_SSE_KEEPALIVE_SECONDS = 10.0
 _CHAT_STAGE_REFRESH_SECONDS = 1.0
 _CHAT_JOB_EVENT_BUFFER_LIMIT = 1000
@@ -126,6 +133,7 @@ class ChatJob:
     text: str
     created_at: float
     updated_at: float
+    conversation_id: str = _DEFAULT_CONVERSATION_ID
     status: str = "queued"
     mode: str = "chat"
     finished_at: float | None = None
@@ -158,6 +166,7 @@ class ChatJob:
         stage_elapsed_ms = _stage_elapsed_ms(self, now)
         return {
             "job_id": self.job_id,
+            "conversation_id": self.conversation_id,
             "status": self.status,
             "mode": self.mode,
             "created_at": self.created_at,
@@ -277,22 +286,44 @@ class ChatJobManager:
         self._ctx = ctx
         self._jobs: dict[str, ChatJob] = {}
         self._lock = asyncio.Lock()
+        self._title_schedule_lock = asyncio.Lock()
+        self.conversation_store = WebChatConversationStore()
 
-    async def create_job(self, text: str) -> ChatJob:
+    async def create_job(
+        self, text: str, conversation_id: str | None = None
+    ) -> ChatJob:
+        await self.conversation_store.ensure_ready(self._ctx.history_manager)
+        requested_conversation_id = str(conversation_id or "").strip()
+        resolved_conversation_id = requested_conversation_id or _DEFAULT_CONVERSATION_ID
+        conversation = await self.conversation_store.get_conversation(
+            resolved_conversation_id
+        )
+        if conversation is None:
+            if requested_conversation_id:
+                raise KeyError(resolved_conversation_id)
+            conversation = await self.conversation_store.ensure_default_conversation()
+            resolved_conversation_id = str(conversation["id"])
         now = time.time()
         job = ChatJob(
             job_id=uuid4().hex,
             text=text,
             created_at=now,
             updated_at=now,
+            conversation_id=resolved_conversation_id,
         )
         async with self._lock:
+            if any(
+                self._job_blocks_history_mutation(existing)
+                for existing in self._jobs.values()
+            ):
+                raise RuntimeError("Chat job is still running")
             self._jobs[job.job_id] = job
         await self._append_event(
             job,
             "meta",
             {
                 "job_id": job.job_id,
+                "conversation_id": job.conversation_id,
                 "virtual_user_id": _VIRTUAL_USER_ID,
                 "permission": "superadmin",
             },
@@ -305,12 +336,18 @@ class ChatJobManager:
         async with self._lock:
             return self._jobs.get(job_id)
 
-    async def get_active_job(self) -> ChatJob | None:
+    async def get_active_job(
+        self, conversation_id: str | None = None
+    ) -> ChatJob | None:
         async with self._lock:
             candidates = [
                 job
                 for job in self._jobs.values()
                 if self._job_blocks_history_mutation(job)
+                and (
+                    not conversation_id
+                    or job.conversation_id == str(conversation_id).strip()
+                )
             ]
         if not candidates:
             return None
@@ -331,16 +368,25 @@ class ChatJobManager:
             return True
         return not job.done.is_set() or not job.history_finalized
 
-    async def clear_history_when_idle(self) -> int | None:
+    async def clear_history_when_idle(
+        self, conversation_id: str | None = None
+    ) -> int | None:
+        await self.conversation_store.ensure_ready(self._ctx.history_manager)
+        resolved_conversation_id = (
+            str(conversation_id or _DEFAULT_CONVERSATION_ID).strip()
+            or _DEFAULT_CONVERSATION_ID
+        )
         async with self._lock:
             if any(
                 self._job_blocks_history_mutation(job) for job in self._jobs.values()
             ):
                 return None
-            clearer = getattr(self._ctx.history_manager, "clear_private_history", None)
-            if not callable(clearer):
-                raise RuntimeError("History manager not ready")
-            return int(await clearer(_VIRTUAL_USER_ID) or 0)
+            return int(
+                await self.conversation_store.clear_conversation(
+                    resolved_conversation_id
+                )
+                or 0
+            )
 
     async def cancel_job(self, job_id: str) -> ChatJob | None:
         job = await self.get_job(job_id)
@@ -546,6 +592,10 @@ class ChatJobManager:
             }
             if "webchat_event_callback" in inspect.signature(run_webui_chat).parameters:
                 run_kwargs["webchat_event_callback"] = _webchat_event_callback
+            if "conversation_store" in inspect.signature(run_webui_chat).parameters:
+                run_kwargs["conversation_store"] = self.conversation_store
+            if "conversation_id" in inspect.signature(run_webui_chat).parameters:
+                run_kwargs["conversation_id"] = job.conversation_id
             await self._append_stage(job, "processing")
             mode = await run_webui_chat(self._ctx, **run_kwargs)
             job.mode = mode
@@ -598,6 +648,7 @@ class ChatJobManager:
         finally:
             try:
                 await self._finalize_job_history(job)
+                await self.maybe_schedule_title_generation(job.conversation_id)
             except Exception as exc:
                 logger.exception(
                     "[RuntimeAPI] chat job history finalize failed: %s", exc
@@ -616,6 +667,7 @@ class ChatJobManager:
     ) -> ChatJobEvent:
         payload_copy = dict(payload)
         normalized_event = str(payload_copy.pop("_event", event) or event)
+        payload_copy.setdefault("conversation_id", job.conversation_id)
         item = ChatJobEvent(
             seq=job.next_seq, event=normalized_event, payload=payload_copy
         )
@@ -644,6 +696,7 @@ class ChatJobManager:
         now = time.time()
         payload: dict[str, Any] = {
             "job_id": job.job_id,
+            "conversation_id": job.conversation_id,
             "stage": stage_key,
             "started_at": now,
             "elapsed_ms": _job_elapsed_ms(job, now),
@@ -670,22 +723,51 @@ class ChatJobManager:
             text_content = "\n\n".join(job.history_outputs).strip()
             webchat = _build_webchat_history_payload(job)
             if text_content or webchat["events"]:
-                await self._ctx.history_manager.add_private_message(
-                    user_id=_VIRTUAL_USER_ID,
+                await self.conversation_store.append_message(
+                    job.conversation_id,
+                    role="bot",
                     text_content=text_content,
                     display_name="Bot",
                     user_name="Bot",
                     attachments=job.history_attachments or None,
                     webchat=webchat,
                 )
-                flusher = getattr(
-                    self._ctx.history_manager, "flush_pending_saves", None
-                )
-                if callable(flusher):
-                    maybe_awaitable = flusher()
-                    if inspect.isawaitable(maybe_awaitable):
-                        await maybe_awaitable
             job.history_finalized = True
+
+    async def maybe_schedule_title_generation(self, conversation_id: str) -> None:
+        async with self._title_schedule_lock:
+            if self.conversation_store.title_task_running(conversation_id):
+                return
+            first_pair = await self.conversation_store.first_question_answer(
+                conversation_id
+            )
+            if first_pair is None:
+                return
+            if not await self.conversation_store.mark_title_pending(conversation_id):
+                return
+            question, answer = first_pair
+            basis_hash = webchat_title_basis_hash(question, answer)
+
+        async def _run_title() -> None:
+            try:
+                title = await generate_webchat_title(self._ctx.ai, question, answer)
+                if title:
+                    await self.conversation_store.apply_generated_title(
+                        conversation_id,
+                        title=title,
+                        basis_hash=basis_hash,
+                    )
+                    return
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("[RuntimeAPI] webchat title generation failed: %s", exc)
+            await self.conversation_store.mark_title_failed(conversation_id, basis_hash)
+
+        task = asyncio.create_task(
+            _run_title(), name=f"webchat-title:{conversation_id}"
+        )
+        self.conversation_store.register_title_task(conversation_id, task)
 
 
 def _job_elapsed_ms(job: ChatJob, now: float | None = None) -> int:
@@ -1005,6 +1087,7 @@ def _build_webchat_history_payload(job: ChatJob) -> dict[str, Any]:
     return {
         "display_only": True,
         "job_id": job.job_id,
+        "conversation_id": job.conversation_id,
         "mode": job.mode,
         "status": job.status,
         "created_at": job.created_at,
@@ -1475,6 +1558,42 @@ def _parse_after(request: web.Request) -> int:
         return 0
 
 
+def _query_conversation_id(request: web.Request) -> str:
+    return str(request.query.get("conversation_id", "") or "").strip()
+
+
+def _body_conversation_id(body: dict[str, Any]) -> str:
+    return str(body.get("conversation_id", "") or "").strip()
+
+
+async def _resolve_conversation_id(
+    ctx: RuntimeAPIContext,
+    job_manager: ChatJobManager,
+    *,
+    raw_conversation_id: str = "",
+    create_default: bool = True,
+) -> str:
+    await job_manager.conversation_store.ensure_ready(ctx.history_manager)
+    conversation_id = str(raw_conversation_id or "").strip()
+    if conversation_id:
+        conversation = await job_manager.conversation_store.get_conversation(
+            conversation_id
+        )
+        if conversation is None:
+            raise KeyError(conversation_id)
+        return str(conversation["id"])
+    if not create_default:
+        return ""
+    conversation = await job_manager.conversation_store.get_conversation(
+        _DEFAULT_CONVERSATION_ID
+    )
+    if conversation is None:
+        conversation = (
+            await job_manager.conversation_store.ensure_default_conversation()
+        )
+    return str(conversation["id"])
+
+
 async def _history_record_to_item(
     item: dict[str, Any],
     *,
@@ -1612,6 +1731,8 @@ async def run_webui_chat(
     send_output: Callable[[int, str], Awaitable[None]],
     webchat_event_callback: Callable[[str, dict[str, Any]], Awaitable[None]]
     | None = None,
+    conversation_store: WebChatConversationStore | None = None,
+    conversation_id: str | None = None,
 ) -> str:
     """Execute a single WebUI chat turn (command dispatch or AI ask)."""
 
@@ -1625,6 +1746,19 @@ async def run_webui_chat(
 
     cfg = ctx.config_getter()
     permission_sender_id = int(cfg.superadmin_qq)
+    resolved_conversation_id = (
+        str(conversation_id or _DEFAULT_CONVERSATION_ID).strip()
+        or _DEFAULT_CONVERSATION_ID
+    )
+    store = conversation_store or WebChatConversationStore()
+    await store.ensure_ready(ctx.history_manager)
+    if conversation_id:
+        existing_conversation = await store.get_conversation(resolved_conversation_id)
+        if existing_conversation is None:
+            raise KeyError(resolved_conversation_id)
+    elif resolved_conversation_id == _DEFAULT_CONVERSATION_ID:
+        await store.ensure_default_conversation()
+    history_adapter = store.adapter(resolved_conversation_id)
     webui_scope_key = build_attachment_scope(
         user_id=_VIRTUAL_USER_ID,
         request_type="private",
@@ -1640,8 +1774,9 @@ async def run_webui_chat(
     )
     normalized_text = registered_input.normalized_text or text
     await emit_stage("recording_history")
-    await ctx.history_manager.add_private_message(
-        user_id=_VIRTUAL_USER_ID,
+    await store.append_message(
+        resolved_conversation_id,
+        role="user",
         text_content=normalized_text,
         display_name=_VIRTUAL_USER_NAME,
         user_name=_VIRTUAL_USER_NAME,
@@ -1667,9 +1802,10 @@ async def run_webui_chat(
         if registered_input.attachments
         else ""
     )
-    full_question = f"""<message sender="{escape_xml_attr(_VIRTUAL_USER_NAME)}" sender_id="{escape_xml_attr(_VIRTUAL_USER_ID)}" location="WebUI私聊" time="{escape_xml_attr(current_time)}">
- <content>{escape_xml_text(normalized_text)}</content>{attachment_xml}
- </message>
+    message_xml = format_webchat_message_xml(
+        normalized_text, attachment_xml, current_time
+    )
+    full_question = f"""{message_xml}
 
 【WebUI 会话】
 这是一条来自 WebUI 控制台的会话请求。
@@ -1691,7 +1827,7 @@ WebUI 支持完整 Markdown 渲染和简单安全 HTML。复杂 HTML、包含 JS
             start=start,
             end=end,
             onebot_client=ctx.onebot,
-            history_manager=ctx.history_manager,
+            history_manager=history_adapter,
             bot_qq=cfg.bot_qq,
             attachment_registry=getattr(ctx.ai, "attachment_registry", None),
         )
@@ -1706,7 +1842,7 @@ WebUI 支持完整 Markdown 渲染和简单安全 HTML。复杂 HTML、包含 JS
         memory_storage = ctx.ai.memory_storage  # noqa: F841
         runtime_config = ctx.ai.runtime_config  # noqa: F841
         sender = virtual_sender  # noqa: F841
-        history_manager = ctx.history_manager  # noqa: F841
+        history_manager = history_adapter  # noqa: F841
         onebot_client = ctx.onebot  # noqa: F841
         scheduler = ctx.scheduler  # noqa: F841
 
@@ -1747,6 +1883,7 @@ WebUI 支持完整 Markdown 渲染和简单安全 HTML。复杂 HTML、包含 JS
                 "sender_name": _VIRTUAL_USER_NAME,
                 "webui_session": True,
                 "webui_permission": "superadmin",
+                "webchat_conversation_id": resolved_conversation_id,
                 "webchat_event_callback": webchat_event_callback,
             },
         )
@@ -1758,34 +1895,113 @@ WebUI 支持完整 Markdown 渲染和简单安全 HTML。复杂 HTML、包含 JS
     return "chat"
 
 
+async def chat_conversations_handler(
+    ctx: RuntimeAPIContext,
+    job_manager: ChatJobManager,
+    request: web.Request,
+) -> Response:
+    _ = request
+    await job_manager.conversation_store.ensure_ready(ctx.history_manager)
+    conversations = await job_manager.conversation_store.list_conversations()
+    active_job = await job_manager.get_active_job()
+    active_snapshot = (
+        await job_manager.snapshot(active_job) if active_job is not None else None
+    )
+    for item in conversations:
+        conversation_id = str(item.get("id") or "")
+        if conversation_id:
+            await job_manager.maybe_schedule_title_generation(conversation_id)
+            item["is_running"] = bool(
+                active_job is not None and active_job.conversation_id == conversation_id
+            )
+    return web.json_response(
+        {
+            "conversations": conversations,
+            "active_job": active_snapshot,
+            "default_conversation_id": _DEFAULT_CONVERSATION_ID,
+            "virtual_user_id": _VIRTUAL_USER_ID,
+        }
+    )
+
+
+async def chat_conversation_create_handler(
+    ctx: RuntimeAPIContext,
+    job_manager: ChatJobManager,
+    request: web.Request,
+) -> Response:
+    await job_manager.conversation_store.ensure_ready(ctx.history_manager)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    title = str(body.get("title", "") or "").strip()
+    conversation = await job_manager.conversation_store.create_conversation(
+        title=title or None,
+    )
+    return web.json_response({"conversation": conversation}, status=201)
+
+
+async def chat_conversation_update_handler(
+    ctx: RuntimeAPIContext,
+    job_manager: ChatJobManager,
+    request: web.Request,
+) -> Response:
+    await job_manager.conversation_store.ensure_ready(ctx.history_manager)
+    conversation_id = str(request.match_info.get("conversation_id", "") or "").strip()
+    try:
+        body = await request.json()
+    except Exception:
+        return _json_error("Invalid JSON", status=400)
+    title = str(body.get("title", "") or "").strip()
+    try:
+        conversation = await job_manager.conversation_store.rename_conversation(
+            conversation_id,
+            title,
+        )
+    except KeyError:
+        return _json_error("Conversation not found", status=404)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
+    return web.json_response({"conversation": conversation})
+
+
+async def chat_conversation_delete_handler(
+    ctx: RuntimeAPIContext,
+    job_manager: ChatJobManager,
+    request: web.Request,
+) -> Response:
+    await job_manager.conversation_store.ensure_ready(ctx.history_manager)
+    conversation_id = str(request.match_info.get("conversation_id", "") or "").strip()
+    if await job_manager.has_running_job():
+        return _json_error("Chat job is still running", status=409)
+    existed = await job_manager.conversation_store.delete_conversation(conversation_id)
+    if not existed:
+        return _json_error("Conversation not found", status=404)
+    return web.json_response({"success": True, "conversation_id": conversation_id})
+
+
 async def chat_history_handler(
-    ctx: RuntimeAPIContext, request: web.Request
+    ctx: RuntimeAPIContext, job_manager: ChatJobManager, request: web.Request
 ) -> Response:
     """Return recent WebUI chat history."""
 
     limit = _parse_limit(request, default=50, maximum=500)
     before = _parse_before(request)
-
-    page_getter = getattr(ctx.history_manager, "get_private_page", None)
-    recent_getter = getattr(ctx.history_manager, "get_recent_private", None)
-    if not callable(page_getter) and not callable(recent_getter):
-        return _json_error("History manager not ready", status=503)
-
-    if callable(page_getter):
-        records, has_more, next_before, total = page_getter(
-            _VIRTUAL_USER_ID,
+    try:
+        conversation_id = await _resolve_conversation_id(
+            ctx,
+            job_manager,
+            raw_conversation_id=_query_conversation_id(request),
+        )
+        page = await job_manager.conversation_store.get_history_page(
+            conversation_id,
             limit=limit,
             before=before,
         )
-    elif callable(recent_getter):
-        records = recent_getter(_VIRTUAL_USER_ID, limit)
-        has_more = False
-        next_before = None
-        total = len(records)
-    else:
-        return _json_error("History manager not ready", status=503)
+    except KeyError:
+        return _json_error("Conversation not found", status=404)
     items: list[dict[str, Any]] = []
-    for record in records:
+    for record in page.records:
         if isinstance(record, dict):
             mapped = await _history_record_to_item(
                 record,
@@ -1798,18 +2014,20 @@ async def chat_history_handler(
             )
             if mapped is not None:
                 items.append(mapped)
+    await job_manager.maybe_schedule_title_generation(conversation_id)
 
     return web.json_response(
         {
+            "conversation_id": conversation_id,
             "virtual_user_id": _VIRTUAL_USER_ID,
             "permission": "superadmin",
             "count": len(items),
             "items": items,
             "limit": limit,
             "before": before,
-            "has_more": has_more,
-            "next_before": next_before,
-            "total": total,
+            "has_more": page.has_more,
+            "next_before": page.next_before,
+            "total": page.total,
         }
     )
 
@@ -1821,11 +2039,15 @@ async def chat_history_clear_handler(
 ) -> Response:
     """Clear WebUI virtual private chat history only."""
 
-    _ = request
-    if not hasattr(ctx.history_manager, "clear_private_history"):
-        return _json_error("History manager not ready", status=503)
     try:
-        cleared = await job_manager.clear_history_when_idle()
+        conversation_id = await _resolve_conversation_id(
+            ctx,
+            job_manager,
+            raw_conversation_id=_query_conversation_id(request),
+        )
+        cleared = await job_manager.clear_history_when_idle(conversation_id)
+    except KeyError:
+        return _json_error("Conversation not found", status=404)
     except RuntimeError:
         return _json_error("History manager not ready", status=503)
     if cleared is None:
@@ -1833,6 +2055,7 @@ async def chat_history_clear_handler(
     return web.json_response(
         {
             "success": True,
+            "conversation_id": conversation_id,
             "virtual_user_id": _VIRTUAL_USER_ID,
             "cleared": cleared,
         }
@@ -1854,6 +2077,14 @@ async def chat_handler(
     text = str(body.get("message", "") or "").strip()
     if not text:
         return _json_error("message is required", status=400)
+    try:
+        conversation_id = await _resolve_conversation_id(
+            ctx,
+            job_manager,
+            raw_conversation_id=_body_conversation_id(body),
+        )
+    except KeyError:
+        return _json_error("Conversation not found", status=404)
 
     stream = _to_bool(body.get("stream"))
     if not stream:
@@ -1878,8 +2109,9 @@ async def chat_handler(
             if not rendered.delivery_text.strip():
                 return
             outputs.append(rendered.delivery_text)
-            await ctx.history_manager.add_private_message(
-                user_id=_VIRTUAL_USER_ID,
+            await job_manager.conversation_store.append_message(
+                conversation_id,
+                role="bot",
                 text_content=rendered.history_text,
                 display_name="Bot",
                 user_name="Bot",
@@ -1888,13 +2120,26 @@ async def chat_handler(
 
         try:
             mode = await run_webui_chat(
-                ctx, text=text, send_output=_capture_private_message
+                ctx,
+                text=text,
+                send_output=_capture_private_message,
+                conversation_store=job_manager.conversation_store,
+                conversation_id=conversation_id,
             )
+            await job_manager.maybe_schedule_title_generation(conversation_id)
         except Exception as exc:
             logger.exception("[RuntimeAPI] chat failed: %s", exc)
             return _json_error("Chat failed", status=502)
-        return web.json_response(_build_chat_response_payload(mode, outputs))
+        payload = _build_chat_response_payload(mode, outputs)
+        payload["conversation_id"] = conversation_id
+        return web.json_response(payload)
 
+    try:
+        job = await job_manager.create_job(text, conversation_id)
+    except KeyError:
+        return _json_error("Conversation not found", status=404)
+    except RuntimeError:
+        return _json_error("Chat job is still running", status=409)
     response = web.StreamResponse(
         status=200,
         reason="OK",
@@ -1905,7 +2150,6 @@ async def chat_handler(
         },
     )
     await response.prepare(request)
-    job = await job_manager.create_job(text)
     after = 0
     try:
         while True:
@@ -1961,7 +2205,6 @@ async def chat_job_create_handler(
     job_manager: ChatJobManager,
     request: web.Request,
 ) -> Response:
-    _ = ctx
     try:
         body = await request.json()
     except Exception:
@@ -1969,7 +2212,17 @@ async def chat_job_create_handler(
     text = str(body.get("message", "") or "").strip()
     if not text:
         return _json_error("message is required", status=400)
-    job = await job_manager.create_job(text)
+    try:
+        conversation_id = await _resolve_conversation_id(
+            ctx,
+            job_manager,
+            raw_conversation_id=_body_conversation_id(body),
+        )
+        job = await job_manager.create_job(text, conversation_id)
+    except KeyError:
+        return _json_error("Conversation not found", status=404)
+    except RuntimeError:
+        return _json_error("Chat job is still running", status=409)
     return web.json_response(await job_manager.snapshot(job), status=202)
 
 
@@ -1978,8 +2231,9 @@ async def chat_job_active_handler(
     job_manager: ChatJobManager,
     request: web.Request,
 ) -> Response:
-    _ = ctx, request
-    job = await job_manager.get_active_job()
+    _ = ctx
+    raw_conversation_id = _query_conversation_id(request)
+    job = await job_manager.get_active_job(raw_conversation_id or None)
     snapshot = await job_manager.snapshot(job) if job is not None else None
     return web.json_response({"job": snapshot})
 

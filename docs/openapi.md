@@ -227,12 +227,14 @@ curl http://127.0.0.1:8788/openapi.json
 ```json
 {
   "message": "你好",
+  "conversation_id": "legacy-system-42",
   "stream": false
 }
 ```
 
 - `stream = false` 保持同步响应。
 - 当 `stream = true` 时，Runtime 会创建 WebChat job。旧接口仍可返回 SSE，但 WebUI 默认使用 job 查询接口续接事件。
+- `conversation_id` 可选；不传时使用兼容默认会话 `legacy-system-42`，传入不存在的会话 ID 时返回 `404`。
 - WebChat job 事件格式：
   - `meta`：会话元信息。
   - `stage`：顶层 AI 当前处理阶段，用于 WebUI 在 `AI` 标签后实时显示状态和总已用时；payload 形如 `{"job_id":"...","stage":"waiting_model","elapsed_ms":1234,"detail":"..."}`。阶段和计时由 Runtime job 统一计算，客户端只展示 payload。
@@ -251,14 +253,25 @@ curl http://127.0.0.1:8788/openapi.json
 
 行为约定：
 
-- 会话固定虚拟用户：`system`（`id = 42`）。
+- AI 视角固定虚拟私聊身份：`system`（`id = 42`）。多对话只隔离 WebChat 历史文件和前端列表，不改变 `RequestContext`、`sender_id`、`user_id`、权限或 AI 看到的用户身份。
 - 权限视角：`superadmin`。
 - 如果输入以 `/` 开头，按私聊命令分发执行（遵循命令 `allow_in_private` 开放策略）。
+- WebChat 会话持久化在 `data/webchat/conversations/<conversation_id>.json`，一个会话一个 JSON 文件。删除会话会删除对应 JSON；不会写入单个全局 conversations JSON。
+- 首次加载会自动把旧版 `data/history/private_42.json` 或运行中的旧历史管理器记录迁移到 `legacy-system-42`，并写入 `data/webchat/legacy_private_42_migrated.json` 迁移标记。只要标记存在就不会重复迁移；即使删除迁移出的会话，也不会再次从旧文件恢复。
+
+### WebUI AI Chat Conversations
+
+- `GET /api/v1/chat/conversations`：列出 WebChat 会话，响应包含 `conversations`、`active_job`、`default_conversation_id` 和 `virtual_user_id`。
+- `POST /api/v1/chat/conversations`：新建会话，Body 可选 `{"title":"..."}`。不传标题时先使用临时标题。
+- `PATCH /api/v1/chat/conversations/{conversation_id}`：重命名会话，Body 为 `{"title":"..."}`。手动标题会标记为 `manual`，后续不会被自动标题覆盖。
+- `DELETE /api/v1/chat/conversations/{conversation_id}`：删除会话 JSON。若任意 WebChat job 仍在运行或收尾落盘，返回 `409`。
+
+会话标题由后端维护。第一条用户消息写入后会先用首问前若干字符作为临时标题；当该会话同时具备首问和首答时，后端会调标题生成模型用“首问 + 首答”生成正式标题。标题生成带状态和内容哈希校验，避免并发回复、手动重命名或历史变化时把旧标题写回新内容。
 
 ### WebUI AI Chat 历史记录
 
-- `GET /api/v1/chat/history?limit=50&before=<cursor>`
-- 用于分页读取虚拟私聊 `system#42` 的历史记录。默认返回最新一页，响应包含 `items/has_more/next_before/total`。
+- `GET /api/v1/chat/history?conversation_id=<id>&limit=50&before=<cursor>`
+- 用于分页读取指定 WebChat 会话的虚拟私聊 `system#42` 历史记录。默认返回最新一页，响应包含 `conversation_id/items/has_more/next_before/total`。不传 `conversation_id` 时兼容读取默认会话。
 - 对于由 WebChat job 产生的回复，Bot 历史项可能包含 `webchat` 展示元数据：
 
 ```json
@@ -368,16 +381,16 @@ curl http://127.0.0.1:8788/openapi.json
 ```
 
 `webchat.timeline` 是后端生成的权威历史展示序列，按 `seq` 混排顶层工具 / Agent 调用节点与正文消息，前端刷新后优先按它忠实渲染同一 AI 气泡。`webchat.calls` 是后端由生命周期事件汇总出的调用树，包含每个工具 / Agent 的输入预览、输出预览、状态、耗时、`children` 和节点内 `timeline`；节点内 `timeline` 用于恢复 Agent 内部“子工具 / 子 Agent / 正文”的真实时序，Agent 阶段只恢复为摘要行状态。`webchat.events` 保留原始生命周期 / 正文事件，供兼容旧历史与诊断使用，不作为 AI 后续对话上下文注入。若一次 job 没有正文但有工具事件，历史 API 仍会返回该 Bot 项，`content` 为空字符串。
-- `DELETE /api/v1/chat/history`
-- 仅清空 `system#42` 聊天历史 JSON 和内存历史，不删除长期记忆、认知记忆或 profile。
+- `DELETE /api/v1/chat/history?conversation_id=<id>`
+- 仅清空指定 WebChat 会话的 `system#42` 聊天历史，不删除长期记忆、认知记忆、profile 或其他 WebChat 会话。
 - 如果存在运行中或正在收尾落盘的 WebChat job，返回 `409`，避免旧任务继续写回已清空的历史。
 
 ### WebUI AI Chat Jobs
 
-- `POST /api/v1/chat/jobs`：创建后台 job，Body 为 `{"message":"..."}`。
+- `POST /api/v1/chat/jobs`：创建后台 job，Body 为 `{"message":"...","conversation_id":"..."}`，`conversation_id` 可选。
 - WebChat 前端粘贴或选择的附件会先被合并进 `message`：小图片使用 `CQ:image,file=base64://...`，普通文件使用 WebUI 管理代理的 `/api/runtime/chat/files` 缓存后生成 `CQ:file,id=...`；Runtime 侧沿用 `register_message_attachments()` 注册到 `webui` 附件作用域。
 - WebChat 前端引用 AI 消息、选中文本或 HTML 预览中点选的元素时，不新增后端端点，也不写入单独附件；发送前会把待引用内容转换成 Markdown blockquote 并拼接到 `message` 前面，例如 `> 引用 AI:` / `> 引用 HTML 片段:`。后端只接收最终 `message` 字符串。
-- `GET /api/v1/chat/jobs/active`：返回当前运行中的 WebChat job（没有则为 `null`）。
+- `GET /api/v1/chat/jobs/active?conversation_id=<id>`：返回当前运行中的 WebChat job（没有则为 `null`）。不传时返回任意当前 WebChat job；传入时只在该 job 属于对应会话时返回。
 - `GET /api/v1/chat/jobs/{job_id}`：查询 job 状态、最后事件序号和已汇总输出。
 - `GET /api/v1/chat/jobs/{job_id}/events?after=<seq>`：查询 `seq` 之后的增量事件，默认返回 JSON。
 - `GET /api/v1/chat/jobs/{job_id}/events?after=<seq>&format=json` 或请求头 `Accept: application/json`：显式查询 JSON。响应包含：
@@ -652,6 +665,10 @@ WebUI 不直接在前端暴露 `auth_key`，而是通过后端代理访问主进
 - `GET /api/runtime/cognitive/events`
 - `GET /api/runtime/cognitive/profiles`
 - `GET /api/runtime/cognitive/profile/{entity_type}/{entity_id}`
+- `GET /api/runtime/chat/conversations`
+- `POST /api/runtime/chat/conversations`
+- `PATCH /api/runtime/chat/conversations/{conversation_id}`
+- `DELETE /api/runtime/chat/conversations/{conversation_id}`
 - `POST /api/runtime/chat`
 - `GET /api/runtime/chat/history`
 - `DELETE /api/runtime/chat/history`
@@ -666,7 +683,7 @@ WebUI 不直接在前端暴露 `auth_key`，而是通过后端代理访问主进
 - `POST /api/runtime/tools/invoke`
 
 WebUI 后端会自动从 `config.toml` 读取 `[api].auth_key` 并注入 Header。
-`/api/runtime/chat/files` 接收已登录 WebUI 发起的 `multipart/form-data`，字段名为 `file`，将待发送文件缓存到 WebUI 文件缓存目录并返回 `{id,name,size}`；随后前端把它作为 `CQ:file,id=<id>,name=<name>,size=<size>` 合并进同一条 WebChat job 消息。WebChat 引用功能只在前端把引用内容格式化为 Markdown `>` 引用块并合并进 `message`，不经过文件缓存代理。`/api/runtime/chat/jobs/{job_id}/events` 默认代理 JSON 增量查询；显式请求 `Accept: text/event-stream` 时会透传 SSE keep-alive，聊天代理超时按当前聊天模型队列预算计算。
+`/api/runtime/chat/conversations` 代理 WebChat 多对话管理；`/api/runtime/chat`、`/api/runtime/chat/history`、`/api/runtime/chat/jobs` 和 `/api/runtime/chat/jobs/active` 会透传 `conversation_id`。`/api/runtime/chat/files` 接收已登录 WebUI 发起的 `multipart/form-data`，字段名为 `file`，将待发送文件缓存到 WebUI 文件缓存目录并返回 `{id,name,size}`；随后前端把它作为 `CQ:file,id=<id>,name=<name>,size=<size>` 合并进同一条 WebChat job 消息。WebChat 引用功能只在前端把引用内容格式化为 Markdown `>` 引用块并合并进 `message`，不经过文件缓存代理。`/api/runtime/chat/jobs/{job_id}/events` 默认代理 JSON 增量查询；显式请求 `Accept: text/event-stream` 时会透传 SSE keep-alive，聊天代理超时按当前聊天模型队列预算计算。
 
 ## 7. 故障排查
 
