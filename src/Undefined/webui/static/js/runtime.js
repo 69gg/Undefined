@@ -1422,19 +1422,42 @@
 
     function toolRenderSignature(block) {
         if (!block) return "";
+        const childSignature = Array.isArray(block.children)
+            ? block.children.map(toolRenderSignature).join("\u001e")
+            : "";
+        const timelineSignature = Array.isArray(block.timeline)
+            ? block.timeline
+                  .map((entry) => {
+                      if (!entry || typeof entry !== "object") return "";
+                      if (entry.type === "call") {
+                          return `call:${toolRenderSignature(entry.call)}`;
+                      }
+                      if (entry.type === "message") {
+                          return `message:${String(entry.content || "")}`;
+                      }
+                      if (entry.type === "stage") {
+                          return ["stage", entry.seq, entry.stage, entry.detail]
+                              .map((value) => String(value || ""))
+                              .join(":");
+                      }
+                      return String(entry.type || "");
+                  })
+                  .join("\u001e")
+            : "";
         return [
             block.webchatCallId,
             block.parentWebchatCallId,
             block.name,
             block.isAgent,
             block.status,
+            block.autoOpen,
             block.argumentsPreview,
             block.resultPreview,
             block.uiHint,
             block.currentStage,
             block.currentStageDetail,
-            Array.isArray(block.children) ? block.children.length : 0,
-            Array.isArray(block.timeline) ? block.timeline.length : 0,
+            childSignature,
+            timelineSignature,
         ]
             .map((value) => String(value || ""))
             .join("\u001f");

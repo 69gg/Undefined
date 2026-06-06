@@ -58,6 +58,8 @@ def test_system_prompts_describe_webui_markdown_and_html_output(path: Path) -> N
     required_snippets = [
         "WebUI Markdown 与 HTML 输出",
         'location="WebUI私聊"',
+        "WebUI 私聊的身份视角固定为系统虚拟用户 system#42",
+        "权限视角固定为 superadmin",
         "WebUI 支持完整 Markdown 渲染",
         "简单安全 HTML",
         "在 WebUI 会话中，凡是需要输出代码，优先直接在聊天回复里给出",

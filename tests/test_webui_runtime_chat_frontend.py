@@ -442,6 +442,15 @@ def test_webchat_tool_blocks_auto_collapse_after_minimum_visible_time() -> None:
     assert "autoOpen: isStart || isSnapshot ? true : !!previous.autoOpen" in source
     assert "localStartedAtMs: isStart" in source
     assert "finishedAtMs: isEnd" in source
+    signature_helper = source.split("function toolRenderSignature", 1)[1].split(
+        "function updateToolMetaDisplay",
+        1,
+    )[0]
+    assert "block.autoOpen" in signature_helper
+    assert "const childSignature" in signature_helper
+    assert "block.children.map(toolRenderSignature)" in signature_helper
+    assert "const timelineSignature" in signature_helper
+    assert "`call:${toolRenderSignature(entry.call)}`" in signature_helper
     collapse_helper = source.split("function scheduleToolAutoCollapse", 1)[1].split(
         "function upsertTimelineToolBlock", 1
     )[0]
