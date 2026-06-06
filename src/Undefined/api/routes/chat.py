@@ -339,6 +339,25 @@ class ChatJobManager:
         job.task = asyncio.create_task(self._run_job(job), name=f"webchat:{job.job_id}")
         return job
 
+    async def stop(self) -> None:
+        async with self._lock:
+            jobs = list(self._jobs.values())
+        for job in jobs:
+            if self._job_blocks_history_mutation(job):
+                await self.cancel_job(job.job_id)
+        tasks: list[asyncio.Task[None]] = []
+        for job in jobs:
+            task = job.task
+            if task is not None and not task.done():
+                tasks.append(task)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        for job in jobs:
+            if not job.done.is_set():
+                with suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(job.done.wait(), timeout=5.0)
+        await self.conversation_store.stop()
+
     async def get_job(self, job_id: str) -> ChatJob | None:
         async with self._lock:
             return self._jobs.get(job_id)
@@ -411,27 +430,19 @@ class ChatJobManager:
             job.conversation_id,
             job.status,
         )
-        job.status = "cancelled"
-        self._mark_job_finished(job)
+        async with job.changed:
+            job.status = "cancelled"
+            self._mark_job_finished(job)
+            job.changed.notify_all()
         if job.task is not None and not job.task.done():
             job.task.cancel()
             self._schedule_cancel_finalizer(job)
-        if not any(
-            event.event == "error" and event.payload.get("error") == "cancelled"
-            for event in job.events
-        ):
-            await self._append_event(
-                job,
-                "error",
-                {
-                    "error": "cancelled",
-                    "job_id": job.job_id,
-                    "duration_ms": job.duration_ms,
-                },
-            )
+        await self._append_cancelled_event_once(job)
         if job.task is None or job.task.done():
-            job.history_finalized = True
-            job.done.set()
+            async with job.changed:
+                job.history_finalized = True
+                job.done.set()
+                job.changed.notify_all()
         return job
 
     def _schedule_cancel_finalizer(self, job: ChatJob) -> None:
@@ -459,7 +470,9 @@ class ChatJobManager:
             )
             job.history_finalized = True
         finally:
-            job.done.set()
+            async with job.changed:
+                job.done.set()
+                job.changed.notify_all()
 
     async def events_after(self, job: ChatJob, after: int) -> list[ChatJobEvent]:
         async with job.changed:
@@ -669,19 +682,7 @@ class ChatJobManager:
                 job.conversation_id,
                 job.duration_ms,
             )
-            if not any(
-                event.event == "error" and event.payload.get("error") == "cancelled"
-                for event in job.events
-            ):
-                await self._append_event(
-                    job,
-                    "error",
-                    {
-                        "error": "cancelled",
-                        "job_id": job.job_id,
-                        "duration_ms": job.duration_ms,
-                    },
-                )
+            await self._append_cancelled_event_once(job)
         except Exception as exc:
             logger.exception("[RuntimeAPI] chat job failed: %s", exc)
             job.status = "error"
@@ -705,13 +706,32 @@ class ChatJobManager:
                     "[RuntimeAPI] chat job history finalize failed: %s", exc
                 )
                 job.history_finalized = True
-            job.done.set()
+            async with job.changed:
+                job.done.set()
+                job.changed.notify_all()
 
     async def _append_event(
         self, job: ChatJob, event: str, payload: dict[str, Any]
     ) -> ChatJobEvent:
         async with job.changed:
             return self._append_event_locked(job, event, payload)
+
+    async def _append_cancelled_event_once(self, job: ChatJob) -> None:
+        async with job.changed:
+            if any(
+                event.event == "error" and event.payload.get("error") == "cancelled"
+                for event in job.events
+            ):
+                return
+            self._append_event_locked(
+                job,
+                "error",
+                {
+                    "error": "cancelled",
+                    "job_id": job.job_id,
+                    "duration_ms": job.duration_ms,
+                },
+            )
 
     def _append_event_locked(
         self, job: ChatJob, event: str, payload: dict[str, Any]
@@ -836,31 +856,35 @@ class ChatJobManager:
                 len(answer),
             )
 
-        async def _run_title() -> None:
-            try:
-                title = await generate_webchat_title(self._ctx.ai, question, answer)
-                if title:
-                    await self.conversation_store.apply_generated_title(
-                        conversation_id,
-                        title=title,
-                        basis_hash=basis_hash,
+            async def _run_title() -> None:
+                try:
+                    title = await generate_webchat_title(self._ctx.ai, question, answer)
+                    if title:
+                        await self.conversation_store.apply_generated_title(
+                            conversation_id,
+                            title=title,
+                            basis_hash=basis_hash,
+                        )
+                        logger.info(
+                            "[RuntimeAPI][WebChat] 标题生成完成: conversation_id=%s title_len=%s",
+                            conversation_id,
+                            len(title),
+                        )
+                        return
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.warning(
+                        "[RuntimeAPI] webchat title generation failed: %s", exc
                     )
-                    logger.info(
-                        "[RuntimeAPI][WebChat] 标题生成完成: conversation_id=%s title_len=%s",
-                        conversation_id,
-                        len(title),
-                    )
-                    return
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.warning("[RuntimeAPI] webchat title generation failed: %s", exc)
-            await self.conversation_store.mark_title_failed(conversation_id, basis_hash)
+                await self.conversation_store.mark_title_failed(
+                    conversation_id, basis_hash
+                )
 
-        task = asyncio.create_task(
-            _run_title(), name=f"webchat-title:{conversation_id}"
-        )
-        self.conversation_store.register_title_task(conversation_id, task)
+            task = asyncio.create_task(
+                _run_title(), name=f"webchat-title:{conversation_id}"
+            )
+            self.conversation_store.register_title_task(conversation_id, task)
 
 
 def _job_elapsed_ms(job: ChatJob, now: float | None = None) -> int:
@@ -2249,50 +2273,31 @@ async def chat_handler(
         len(text),
     )
     if not stream:
-        outputs: list[str] = []
-        webui_scope_key = build_attachment_scope(
-            user_id=_VIRTUAL_USER_ID,
-            request_type="private",
-            webui_session=True,
-        )
-
-        async def _capture_private_message(user_id: int, message: str) -> None:
-            _ = user_id
-            content = str(message or "").strip()
-            if not content:
-                return
-            rendered = await render_message_with_pic_placeholders(
-                content,
-                registry=ctx.ai.attachment_registry,
-                scope_key=webui_scope_key,
-                strict=False,
-            )
-            if not rendered.delivery_text.strip():
-                return
-            outputs.append(rendered.delivery_text)
-            await job_manager.conversation_store.append_message(
-                conversation_id,
-                role="bot",
-                text_content=rendered.history_text,
-                display_name="Bot",
-                user_name="Bot",
-                attachments=rendered.attachments,
-            )
-
         try:
-            mode = await run_webui_chat(
-                ctx,
-                text=text,
-                send_output=_capture_private_message,
-                conversation_store=job_manager.conversation_store,
-                conversation_id=conversation_id,
-            )
-            await job_manager.maybe_schedule_title_generation(conversation_id)
-        except Exception as exc:
-            logger.exception("[RuntimeAPI] chat failed: %s", exc)
+            job = await job_manager.create_job(text, conversation_id)
+        except KeyError:
+            return _json_error("Conversation not found", status=404)
+        except RuntimeError:
+            return _json_error("Chat job is still running", status=409)
+        try:
+            await job.done.wait()
+        except asyncio.CancelledError:
+            await job_manager.cancel_job(job.job_id)
+            raise
+        snapshot = await job_manager.snapshot(job)
+        if job.status == "cancelled":
+            return _json_error("Chat cancelled", status=409)
+        if job.status == "error":
+            logger.error("[RuntimeAPI] chat failed: %s", job.error)
             return _json_error("Chat failed", status=502)
+        outputs = [
+            str(item) for item in snapshot.get("messages", []) if str(item).strip()
+        ]
+        mode = str(snapshot.get("mode") or job.mode or "chat")
         payload = _build_chat_response_payload(mode, outputs)
         payload["conversation_id"] = conversation_id
+        payload["job_id"] = job.job_id
+        payload["duration_ms"] = job.duration_ms
         logger.info(
             "[RuntimeAPI][WebChat] 非流式聊天完成: conversation_id=%s mode=%s outputs=%s",
             conversation_id,

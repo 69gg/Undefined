@@ -306,6 +306,56 @@ async def test_chat_job_cancel_unknown_returns_404() -> None:
 
 
 @pytest.mark.asyncio
+async def test_chat_job_cancelled_error_event_is_appended_once() -> None:
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    manager = server._chat_job_manager
+    job = runtime_api_chat.ChatJob(
+        job_id="job-cancel",
+        text="hello",
+        created_at=0.0,
+        updated_at=0.0,
+    )
+
+    await asyncio.gather(*(manager._append_cancelled_event_once(job) for _ in range(8)))
+
+    cancelled_events = [
+        event
+        for event in job.events
+        if event.event == "error" and event.payload.get("error") == "cancelled"
+    ]
+    assert len(cancelled_events) == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_api_stop_cancels_running_webchat_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def _fake_run_webui_chat(_ctx: Any, **_kwargs: Any) -> str:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        return "chat"
+
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    job = await server._chat_job_manager.create_job("hello")
+    await asyncio.wait_for(started.wait(), timeout=1)
+
+    await server.stop()
+
+    assert cancelled.is_set()
+    assert job.status == "cancelled"
+    assert job.done.is_set()
+    assert job.history_finalized is True
+
+
+@pytest.mark.asyncio
 async def test_chat_job_events_refreshes_stage_without_advancing_seq(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

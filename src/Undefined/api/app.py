@@ -69,6 +69,8 @@ class RuntimeAPIServer:
         logger.info("[RuntimeAPI] 已启动: %s", cfg.api.display_url)
 
     async def stop(self) -> None:
+        await self._chat_job_manager.stop()
+
         for task in self._background_tasks:
             task.cancel()
         if self._background_tasks:
