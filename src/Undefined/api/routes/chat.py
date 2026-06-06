@@ -54,6 +54,7 @@ _DEFAULT_CONVERSATION_ID = DEFAULT_WEBCHAT_CONVERSATION_ID
 _CHAT_SSE_KEEPALIVE_SECONDS = 10.0
 _CHAT_STAGE_REFRESH_SECONDS = 1.0
 _CHAT_JOB_EVENT_BUFFER_LIMIT = 1000
+SHUTDOWN_TASK_TIMEOUT = 5.0
 _PREVIEW_LIMIT = 800
 _WEBCHAT_SEND_MESSAGE_TOOLS = frozenset(
     {
@@ -351,7 +352,21 @@ class ChatJobManager:
             if task is not None and not task.done():
                 tasks.append(task)
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            task_wait = asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(task_wait),
+                    timeout=SHUTDOWN_TASK_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "[RuntimeAPI][WebChat] stop 等待 job task 超时，重新取消未完成任务: tasks=%s",
+                    len(tasks),
+                )
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await task_wait
         for job in jobs:
             if not job.done.is_set():
                 with suppress(asyncio.TimeoutError):
