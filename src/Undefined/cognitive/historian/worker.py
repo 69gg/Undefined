@@ -870,9 +870,7 @@ class HistorianWorker:
                     raw_tags = tc_args.get("tags", [])
                     up_tags: list[str] = []
                     if isinstance(raw_tags, list):
-                        up_tags = [str(t).strip() for t in raw_tags if str(t).strip()][
-                            :10
-                        ]
+                        up_tags = [str(t).strip() for t in raw_tags if str(t).strip()]
 
                     llm_name = str(tc_args.get("name", "")).strip()
                     is_target = up_et == entity_type and up_eid == entity_id

@@ -67,8 +67,7 @@ _PROFILE_TOOL = {
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "maxItems": 10,
-                    "description": "身份级标签（角色/核心领域），最多 10 个，不写话题",
+                    "description": "身份级标签（角色/核心领域），不写话题",
                 },
                 "summary": {"type": "string", "description": "侧写正文（Markdown）"},
             },
