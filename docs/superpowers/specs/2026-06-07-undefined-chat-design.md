@@ -438,3 +438,16 @@ Release workflow 增加 Undefined Chat 打包：
 - 桌面和 Android 都符合原生导航习惯。
 - WebUI WebChat 不回退。
 - CI 和 release 均包含 Undefined Chat。
+
+## PoC 结果记录
+
+PoC 执行计划见 [2026-06-07-undefined-chat-poc.md](../plans/2026-06-07-undefined-chat-poc.md)。
+
+后续需要补齐并归档以下验证结果：
+
+- 桌面 Stronghold/keyring 保存、读取、解锁失败和降级确认结果。
+- Linux Secret Service/keyutils 可用性、不可用环境表现和降级流程结果。
+- Android secure storage、SSE、background lifecycle、HTML preview 的设备验证结果。
+- Streaming upload 是否持续避免 JS Blob、base64 和 IPC 全量传输。
+- SSE 大型事件、断线重连和 `Last-Event-ID`/`seq` 续接结果。
+- 阻塞项、规格调整和继续完整产品实现前必须修订的设计结论。
