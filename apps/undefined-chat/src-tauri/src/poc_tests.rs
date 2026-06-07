@@ -3,7 +3,10 @@ use crate::runtime_client::{job_events_url, runtime_health_from_body_result, Utf
 use crate::secret::{
     classify_secret_storage, derive_stronghold_key, supports_system_keyring_target,
 };
-use crate::upload::{attachment_file_name, attachments_url};
+use crate::upload::{
+    attachment_file_name, attachments_url, open_regular_attachment_file,
+    upload_attachment_streaming, UploadAttachmentInput,
+};
 
 #[test]
 fn normalize_runtime_url_removes_trailing_slashes() {
@@ -78,6 +81,29 @@ fn attachment_file_name_uses_file_name_or_fallback() {
         attachment_file_name(std::path::Path::new("/")),
         "attachment"
     );
+}
+
+#[tokio::test]
+async fn open_regular_attachment_file_rejects_directory() {
+    let err = open_regular_attachment_file(std::path::Path::new("."), ".")
+        .await
+        .unwrap_err();
+
+    assert!(err.contains("not a regular file"));
+}
+
+#[tokio::test]
+async fn upload_rejects_non_regular_path_without_leaking_api_key() {
+    let err = upload_attachment_streaming(UploadAttachmentInput {
+        runtime_url: "http://127.0.0.1:8788".to_string(),
+        api_key: "secret-api-key".to_string(),
+        file_path: ".".to_string(),
+    })
+    .await
+    .unwrap_err();
+
+    assert!(err.contains("not a regular file"));
+    assert!(!err.contains("secret-api-key"));
 }
 
 #[test]

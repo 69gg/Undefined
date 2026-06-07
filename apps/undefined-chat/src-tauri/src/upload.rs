@@ -33,26 +33,34 @@ pub(crate) fn attachment_file_name(path: &Path) -> String {
         .to_string()
 }
 
+pub(crate) async fn open_regular_attachment_file(
+    path: &Path,
+    display_path: &str,
+) -> Result<File, String> {
+    let file = File::open(path)
+        .await
+        .map_err(|err| format!("attachment file open failed: {err}"))?;
+    let metadata = file
+        .metadata()
+        .await
+        .map_err(|err| format!("attachment file metadata failed: {err}"))?;
+    if !metadata.is_file() {
+        return Err(format!(
+            "attachment path is not a regular file: {display_path}"
+        ));
+    }
+
+    Ok(file)
+}
+
 #[tauri::command]
 pub async fn upload_attachment_streaming(
     input: UploadAttachmentInput,
 ) -> Result<UploadAttachmentResult, String> {
     let url = attachments_url(&input.runtime_url)?;
     let path = Path::new(&input.file_path);
-    let metadata = tokio::fs::metadata(path)
-        .await
-        .map_err(|err| format!("attachment file metadata failed: {err}"))?;
-    if !metadata.is_file() {
-        return Err(format!(
-            "attachment path is not a regular file: {}",
-            input.file_path
-        ));
-    }
-
-    let file = File::open(path)
-        .await
-        .map_err(|err| format!("attachment file open failed: {err}"))?;
-    let stream = ReaderStream::new(file);
+    let file = open_regular_attachment_file(path, &input.file_path).await?;
+    let stream = ReaderStream::with_capacity(file, 256 * 1024);
     let part =
         multipart::Part::stream(Body::wrap_stream(stream)).file_name(attachment_file_name(path));
     let form = multipart::Form::new().part("file", part);
