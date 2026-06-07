@@ -30,7 +30,7 @@
 - `runtime_url`
 - `X-Undefined-API-Key`
 
-API Key 首期使用普通本地保存，不宣称安全存储。设置页必须明确提示该取舍。连接 URL、主题、语言、草稿、自动滚动等 UI 偏好也保存在本地。
+API Key 首期使用 `tauri-plugin-stronghold` 加密保存。Stronghold vault 的密码派生策略必须在 Tauri 原生层实现，不把 vault password 硬编码进前端 bundle。若目标平台或运行环境无法使用 Stronghold，必须让用户明确确认后才允许降级到普通本地保存，并在设置页持续显示风险提示。连接 URL、主题、语言、草稿、自动滚动等 UI 偏好保存在普通本地配置中。
 
 Runtime 请求通过 Tauri 原生层集中封装：React 调用本地命令，Tauri 根据当前单连接配置拼接 URL、添加 API Key、执行 HTTP 请求。这样可以把请求权限限制在用户配置的 Runtime origin 上，避免前端散落拼接认证头和过宽 HTTP allowlist。
 
@@ -82,7 +82,9 @@ Runtime 负责：
 - `GET /api/v1/chat/attachments/{attachment_id}`：下载文件。
 - `GET /api/v1/chat/attachments/{attachment_id}/preview`：返回预览资源，例如图片缩略图；没有预览资源时返回明确的 404/415 错误。
 
-客户端可以在待发送区显示本地临时预览，但 canonical 附件表达只来自 Runtime 返回的 attachment id/schema。
+Runtime 必须通过能力端点或上传端点错误响应暴露当前最大上传大小，例如 `max_upload_size_bytes`。该值来自 Runtime 配置，客户端不得硬编码上传上限。客户端可以在待发送区显示本地临时预览，但 canonical 附件表达只来自 Runtime 返回的 attachment id/schema。
+
+Tauri 原生层上传文件时必须使用 streaming 方式把本地文件 pipe 到 HTTP 请求，不允许为了上传而把大文件一次性读入 JS Blob、base64 字符串或 IPC payload。客户端在上传前按 Runtime 暴露的大小上限做本地拦截，并正确展示 Runtime 的 `413`、超时和连接中断错误。
 
 ### 按会话并发 job
 
@@ -94,7 +96,7 @@ WebChat job 管理从全局互斥改为按 `conversation_id` 互斥：
 - `GET /api/v1/chat/jobs/active?conversation_id=<id>` 返回目标会话的 active job。
 - 不传 `conversation_id` 时返回 `jobs` 数组；为了兼容旧前端，可同时保留 `job` 字段为第一个 active job 或 `null`，但 Undefined Chat 只依赖 `jobs`。
 
-事件续接继续使用 `job_id + seq`，客户端只渲染 Runtime 返回的事件和快照，不自行推断最终状态。
+事件流首选 Server-Sent Events。`GET /api/v1/chat/jobs/{job_id}/events` 在 `Accept: text/event-stream` 时返回 SSE，事件 `id` 使用 Runtime 的递增 `seq`；客户端重连时使用 `Last-Event-ID` 或显式 `after=<seq>` 续接。JSON 事件查询仅作为后台、恢复、兼容或 SSE 不可用时的 fallback。客户端只渲染 Runtime 返回的事件和快照，不自行推断最终状态。
 
 ### 历史与事件 schema
 
@@ -114,14 +116,20 @@ WebChat job 管理从全局互斥改为按 `conversation_id` 互斥：
 
 - `stage`
 - `message`
+- `message_delta`，当 Runtime 支持正文增量时使用；客户端必须能同时处理增量和最终 `message`。
 - `tool_start` / `tool_end`
 - `agent_start` / `agent_end`
+- `requires_action`，为未来 Human-in-the-loop 手动干预预留。
 - `done`
 - `error`
 - 当前工具/Agent 快照
 - Runtime 计算的耗时字段
 
 客户端不从正文中反推工具状态，不根据本地计时覆盖 Runtime 快照。
+
+### Human-in-the-loop 扩展点
+
+首期不实现高危操作审批工作流，但 Runtime job schema 预留 `waiting_input` 状态和 `requires_action` 事件。未来如果工具或 Agent 需要用户授权、补充参数或确认高危操作，Runtime 负责生成结构化 action payload、暂停目标会话 job，并保持该会话输入区锁定；其他会话继续运行。客户端只渲染 Runtime 返回的 action，并把用户选择提交回 Runtime 的后续端点，不在本地保存未提交的业务状态。
 
 ## 客户端数据流
 
@@ -132,7 +140,7 @@ WebChat job 管理从全局互斥改为按 `conversation_id` 互斥：
 3. 拉取会话列表。
 4. 拉取 active jobs。
 5. 加载当前会话历史。
-6. 对运行中 job 使用 `job_id + seq` 轮询事件。
+6. 对运行中 job 使用 SSE 订阅事件，并用 `job_id + seq` 续接。
 
 发送：
 
@@ -141,13 +149,13 @@ WebChat job 管理从全局互斥改为按 `conversation_id` 互斥：
 3. 客户端提交结构化 message payload。
 4. Runtime 返回 job 快照。
 5. 目标会话输入区锁定，其他会话不锁定。
-6. 客户端轮询事件并渲染 Runtime 状态。
+6. 客户端订阅 SSE 事件并渲染 Runtime 状态；SSE 不可用时降级为 JSON 事件查询。
 
 断线恢复：
 
 1. UI 显示连接异常或重连中。
 2. 恢复后重新拉会话、active jobs、当前历史。
-3. 对仍运行的 job 从已知 seq 续接。
+3. 对仍运行的 job 从已知 seq 通过 SSE 或 JSON fallback 续接。
 4. 如果 Runtime 重启导致 job 消失，客户端刷新历史并结束本地运行态展示。
 
 ## UI 与交互
@@ -219,7 +227,7 @@ Android：
 Tauri 层负责：
 
 - 单连接配置本地保存。
-- API Key 普通本地保存。
+- API Key Stronghold 加密保存；不可用时经用户确认后降级。
 - 系统通知。
 - 桌面托盘和隐藏窗口常驻。
 - Android 后台尽力续接。
@@ -254,9 +262,10 @@ Tauri 层负责：
 
 ## 安全边界
 
-- API Key 普通本地保存，设置页明确提示风险。
+- API Key 首选 Stronghold 加密保存；只有在 Stronghold 不可用且用户明确确认时才允许普通本地保存，设置页必须持续提示降级风险。
 - 聊天内 HTML 经过白名单净化。
 - HTML 运行预览隔离执行，不暴露 API Key，不开放 Tauri IPC，不允许访问本地文件或 app 能力。
+- HTML 预览窗口或页面必须注入严格 CSP meta。默认策略禁止外部网络、禁止表单提交、禁止对象加载、禁止父页面访问；允许的脚本、样式和资源范围必须最小化，并明确禁止 `unsafe-eval`。
 - 附件下载文件名和路径必须清洗，禁止路径穿越。
 - 危险协议、事件属性和危险样式必须被剥离。
 - Runtime 预览字段会脱敏，但不作为权限边界；工具实现仍应避免输出完整凭证。
@@ -267,10 +276,13 @@ Tauri 层负责：
 
 - Runtime 结构化发送 payload。
 - Runtime 附件上传、下载、预览。
+- 上传大小上限、413、超时和 streaming 上传路径。
 - 附件注册和历史返回 schema。
 - 引用归一化。
 - 按会话并发 job。
 - 同会话 409。
+- SSE 事件流、`Last-Event-ID` / `seq` 续接和 JSON fallback。
+- `waiting_input` / `requires_action` schema 预留。
 - 删除和清空会话阻塞。
 - history/event schema。
 - OpenAPI 文档同步。
@@ -280,13 +292,15 @@ Tauri 层负责：
 
 - Runtime client。
 - 启动恢复和断线恢复。
-- 事件合并和快照渲染。
+- SSE 事件合并、断线续接、JSON fallback 和快照渲染。
 - 会话列表运行态。
 - 同会话输入区锁定。
 - 命令补全。
 - 附件上传 payload。
+- 文件大小拦截、上传超时和 streaming 上传错误展示。
 - 引用 payload。
 - Markdown/HTML/代码块渲染。
+- HTML 预览 CSP 和 IPC 隔离。
 - 工具/Agent 调用树展示。
 - 通知触发条件。
 
@@ -319,7 +333,8 @@ Tauri 层负责：
 - Undefined Chat 和 WebUI WebChat 都是 Runtime WebChat 客户端。
 - Runtime 是唯一真源。
 - Undefined Chat 直连 Runtime API。
-- API Key 首期为普通本地保存。
+- API Key 首期使用 Stronghold 加密保存；降级保存需要用户确认并提示风险。
+- SSE 是运行中 job 的首选事件通道，JSON 查询是恢复和兼容 fallback。
 - Android 后台通知能力是尽力而为，重新打开恢复是硬保证。
 
 ## CI 与发版
