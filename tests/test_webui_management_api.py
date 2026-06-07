@@ -381,6 +381,11 @@ def test_create_app_registers_management_routes() -> None:
     assert ("GET", "/api/v1/management/probes/bootstrap") in routes
     assert ("GET", "/api/v1/management/changelog") in routes
     assert ("GET", "/api/v1/management/runtime/meta") in routes
+    assert ("GET", "/api/v1/management/runtime/schedules") in routes
+    assert ("POST", "/api/v1/management/runtime/schedules") in routes
+    assert ("GET", "/api/v1/management/runtime/schedules/{task_id}") in routes
+    assert ("PATCH", "/api/v1/management/runtime/schedules/{task_id}") in routes
+    assert ("DELETE", "/api/v1/management/runtime/schedules/{task_id}") in routes
     assert ("POST", "/api/v1/management/config/validate") in routes
     assert ("POST", "/api/v1/management/bot/start") in routes
     assert ("POST", "/api/v1/management/runtime/chat/jobs") in routes
@@ -487,6 +492,18 @@ async def test_runtime_chat_file_upload_handler_requires_auth(monkeypatch: Any) 
     )
 
     assert cast(web.Response, response).status == 401
+
+
+async def test_index_handler_renders_schedules_tab() -> None:
+    request = _request(query={"view": "app", "tab": "schedules"})
+
+    response = await _index.index_handler(cast(web.Request, cast(Any, request)))
+    payload_text = cast(web.Response, response).text
+
+    assert payload_text is not None
+    assert 'id="tab-schedules"' in payload_text
+    assert 'data-tab="schedules"' in payload_text
+    assert '<script src="/static/js/schedules.js"></script>' in payload_text
 
 
 def test_webui_cors_only_allows_trusted_origins(monkeypatch: Any) -> None:
@@ -632,6 +649,133 @@ async def test_management_meme_blob_handler_url_encodes_uid(
 
     assert payload["ok"] is True
     assert captured["path"] == "/api/v1/memes/pic%20a%2Fb%3F/blob"
+
+
+async def test_management_schedule_create_requires_auth(
+    monkeypatch: Any,
+) -> None:
+    called = False
+
+    async def _fake_proxy_runtime(**_kwargs: Any) -> web.Response:
+        nonlocal called
+        called = True
+        return web.json_response({"ok": True})
+
+    monkeypatch.setattr(_runtime, "check_auth", lambda _request: False)
+    monkeypatch.setattr(_runtime, "_proxy_runtime", _fake_proxy_runtime)
+
+    response = await _runtime.runtime_schedules_create_handler(
+        cast(web.Request, cast(Any, _request(json_body={"task_id": "task_demo"})))
+    )
+    payload = _json_payload(response)
+
+    assert cast(web.Response, response).status == 401
+    assert payload["error"] == "Unauthorized"
+    assert called is False
+
+
+async def test_management_schedule_update_returns_400_on_invalid_json(
+    monkeypatch: Any,
+) -> None:
+    class _BadJsonRequest(SimpleNamespace):
+        async def json(self) -> dict[str, object]:
+            raise json.JSONDecodeError("bad", "x", 0)
+
+    monkeypatch.setattr(_runtime, "check_auth", lambda _request: True)
+    request = cast(
+        web.Request,
+        cast(
+            Any,
+            _BadJsonRequest(
+                headers={},
+                cookies={},
+                query={},
+                match_info={"task_id": "task_demo"},
+                app=_request().app,
+            ),
+        ),
+    )
+
+    response = await _runtime.runtime_schedule_update_handler(request)
+    payload = _json_payload(response)
+
+    assert cast(web.Response, response).status == 400
+    assert payload["error"] == "Invalid JSON payload"
+
+
+async def test_management_schedule_detail_url_encodes_task_id(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, str] = {}
+
+    async def _fake_proxy_runtime(**kwargs: Any) -> web.Response:
+        captured["method"] = str(kwargs["method"])
+        captured["path"] = str(kwargs["path"])
+        return web.json_response({"ok": True})
+
+    monkeypatch.setattr(_runtime, "check_auth", lambda _request: True)
+    monkeypatch.setattr(_runtime, "_proxy_runtime", _fake_proxy_runtime)
+
+    request = cast(
+        web.Request,
+        cast(
+            Any,
+            SimpleNamespace(
+                headers={},
+                cookies={},
+                query={},
+                match_info={"task_id": "task a/b?"},
+                app=_request().app,
+            ),
+        ),
+    )
+
+    response = await _runtime.runtime_schedule_detail_handler(request)
+    payload = _json_payload(response)
+
+    assert payload["ok"] is True
+    assert captured == {
+        "method": "GET",
+        "path": "/api/v1/schedules/task%20a%2Fb%3F",
+    }
+
+
+async def test_management_schedule_create_proxies_json_payload(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _fake_proxy_runtime(**kwargs: Any) -> web.Response:
+        captured.update(kwargs)
+        return web.json_response({"ok": True}, status=201)
+
+    monkeypatch.setattr(_runtime, "check_auth", lambda _request: True)
+    monkeypatch.setattr(_runtime, "_proxy_runtime", _fake_proxy_runtime)
+
+    response = await _runtime.runtime_schedules_create_handler(
+        cast(
+            web.Request,
+            cast(
+                Any,
+                _request(
+                    json_body={
+                        "task_id": "task_demo",
+                        "cron_expression": "0 9 * * *",
+                    }
+                ),
+            ),
+        )
+    )
+    payload = _json_payload(response)
+
+    assert cast(web.Response, response).status == 201
+    assert payload["ok"] is True
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/api/v1/schedules"
+    assert captured["payload"] == {
+        "task_id": "task_demo",
+        "cron_expression": "0 9 * * *",
+    }
 
 
 async def test_runtime_chat_job_proxy_routes_require_management_auth() -> None:

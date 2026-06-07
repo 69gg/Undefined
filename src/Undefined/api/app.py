@@ -32,6 +32,7 @@ from .routes import (
     memes,
     memory,
     naga,
+    schedules,
     system,
     tools,
 )
@@ -135,6 +136,20 @@ class RuntimeAPIServer:
                 web.post(
                     "/api/v1/memes/{uid}/reindex",
                     self._meme_reindex_handler,
+                ),
+                web.get("/api/v1/schedules", self._schedules_list_handler),
+                web.post("/api/v1/schedules", self._schedules_create_handler),
+                web.get(
+                    "/api/v1/schedules/{task_id}",
+                    self._schedule_detail_handler,
+                ),
+                web.patch(
+                    "/api/v1/schedules/{task_id}",
+                    self._schedule_update_handler,
+                ),
+                web.delete(
+                    "/api/v1/schedules/{task_id}",
+                    self._schedule_delete_handler,
                 ),
                 web.get("/api/v1/cognitive/events", self._cognitive_events_handler),
                 web.get(
@@ -276,6 +291,22 @@ class RuntimeAPIServer:
 
     async def _meme_reindex_handler(self, request: web.Request) -> Response:
         return await memes.meme_reindex_handler(self._ctx, request)
+
+    # Schedules
+    async def _schedules_list_handler(self, request: web.Request) -> Response:
+        return await schedules.schedules_list_handler(self._ctx, request)
+
+    async def _schedules_create_handler(self, request: web.Request) -> Response:
+        return await schedules.schedules_create_handler(self._ctx, request)
+
+    async def _schedule_detail_handler(self, request: web.Request) -> Response:
+        return await schedules.schedule_detail_handler(self._ctx, request)
+
+    async def _schedule_update_handler(self, request: web.Request) -> Response:
+        return await schedules.schedule_update_handler(self._ctx, request)
+
+    async def _schedule_delete_handler(self, request: web.Request) -> Response:
+        return await schedules.schedule_delete_handler(self._ctx, request)
 
     # Cognitive
     async def _cognitive_events_handler(self, request: web.Request) -> Response:

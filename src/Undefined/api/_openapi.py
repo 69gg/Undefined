@@ -38,7 +38,7 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
                 "description": (
                     "Returns system info (version, Python, platform, uptime), "
                     "OneBot connection status, request queue snapshot, "
-                    "memory count, cognitive service status, API config, "
+                    "memory count, cognitive service status, scheduler summary, API config, "
                     "skill statistics (tools/toolsets/agents/pipelines/commands/anthropic_skills), "
                     "and model configuration (names, masked URLs, thinking flags)."
                 ),
@@ -77,6 +77,15 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
         },
         "/api/v1/memes/{uid}/reindex": {
             "post": {"summary": "Queue a meme reindex job"}
+        },
+        "/api/v1/schedules": {
+            "get": {"summary": "List scheduled tasks"},
+            "post": {"summary": "Create a scheduled task"},
+        },
+        "/api/v1/schedules/{task_id}": {
+            "get": {"summary": "Get a scheduled task"},
+            "patch": {"summary": "Update a scheduled task"},
+            "delete": {"summary": "Delete a scheduled task"},
         },
         "/api/v1/cognitive/events": {
             "get": {"summary": "Search cognitive event memories"}

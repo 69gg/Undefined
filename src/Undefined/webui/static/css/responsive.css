@@ -188,6 +188,34 @@
     margin-bottom: 20px;
   }
   .overview-grid, .runtime-grid { grid-template-columns: 1fr; gap: 18px; }
+  .schedule-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .schedule-workspace {
+    grid-template-columns: 1fr;
+  }
+  .schedule-list-pane {
+    position: static;
+  }
+  .schedule-list {
+    max-height: 360px;
+  }
+  .schedule-editor {
+    padding: 18px;
+  }
+  .schedule-editor-grid {
+    grid-template-columns: 1fr;
+  }
+  .schedule-mode-row {
+    grid-template-columns: 1fr;
+  }
+  .schedule-editor-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .schedule-editor-footer .toolbar {
+    flex-direction: row;
+  }
   .form-grid {
     column-count: 1;
     column-width: auto;
@@ -615,6 +643,27 @@
     width: 100%;
   }
   .logs-toolbar .toolbar-group-primary {
+    grid-template-columns: 1fr;
+  }
+  .schedule-summary-grid {
+    grid-template-columns: 1fr;
+  }
+  .schedule-summary-item {
+    padding: 12px 14px;
+  }
+  .schedule-editor-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .schedule-editor-footer .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .schedule-editor-footer .toolbar .btn {
+    width: 100%;
+  }
+  .schedule-list-meta {
+    display: grid;
     grid-template-columns: 1fr;
   }
   .log-viewer { height: 52vh; }
