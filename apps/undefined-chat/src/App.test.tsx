@@ -31,6 +31,7 @@ describe("App", () => {
 		const runtimeInput = screen.getByLabelText(
 			"Runtime URL",
 		) as HTMLInputElement;
+		const apiKeyInput = screen.getByLabelText("API Key") as HTMLInputElement;
 
 		expect(
 			screen.getByRole("heading", {
@@ -38,6 +39,8 @@ describe("App", () => {
 			}),
 		).toBeTruthy();
 		expect(runtimeInput.value).toBe("http://127.0.0.1:8788");
+		expect(apiKeyInput.type).toBe("password");
+		expect(apiKeyInput.autocomplete).toBe("off");
 		expect(screen.getByText("待连接")).toBeTruthy();
 	});
 
@@ -129,16 +132,44 @@ describe("App", () => {
 		expect(await screen.findByText("API Key 已保存")).toBeTruthy();
 	});
 
-	test("loads a saved API key into the input", async () => {
-		mockLoadRuntimeApiKey.mockResolvedValue("saved-api-key");
+	test("round-trips a saved API key back into the input", async () => {
+		let storedApiKey = "";
+		mockSaveRuntimeApiKey.mockImplementation(async (apiKey: string) => {
+			storedApiKey = apiKey;
+		});
+		mockLoadRuntimeApiKey.mockImplementation(async () => storedApiKey);
 
 		render(<App />);
 		const apiKeyInput = screen.getByLabelText("API Key") as HTMLInputElement;
+		await userEvent.type(apiKeyInput, "saved-api-key");
+		await userEvent.click(screen.getByRole("button", { name: "保存 API Key" }));
+		await userEvent.clear(apiKeyInput);
+		await userEvent.type(apiKeyInput, "changed-api-key");
 		await userEvent.click(screen.getByRole("button", { name: "读取 API Key" }));
 
+		expect(mockSaveRuntimeApiKey).toHaveBeenCalledWith("saved-api-key");
 		expect(mockLoadRuntimeApiKey).toHaveBeenCalledOnce();
 		expect(await screen.findByText("API Key 已读取")).toBeTruthy();
 		expect(apiKeyInput.value).toBe("saved-api-key");
+	});
+
+	test("clears stale storage messages when probing runtime", async () => {
+		mockSaveRuntimeApiKey.mockResolvedValue();
+		mockProbeRuntime.mockResolvedValue({
+			ok: false,
+			status: 503,
+			body: "offline",
+		});
+
+		render(<App />);
+		await userEvent.type(screen.getByLabelText("API Key"), "test-api-key");
+		await userEvent.click(screen.getByRole("button", { name: "保存 API Key" }));
+		expect(await screen.findByText("API Key 已保存")).toBeTruthy();
+
+		await userEvent.click(screen.getByRole("button", { name: "测试连接" }));
+
+		expect(await screen.findByText("连接断开")).toBeTruthy();
+		expect(screen.queryByText("API Key 已保存")).toBeNull();
 	});
 
 	test("shows when no API key has been saved", async () => {

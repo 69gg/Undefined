@@ -37,6 +37,7 @@ export function App() {
 
 	async function runSecretProbe(): Promise<void> {
 		setError("");
+		setStorageMessage("");
 		setSecretStatus(null);
 		try {
 			const result = await probeSecretStorage();
@@ -48,6 +49,7 @@ export function App() {
 
 	async function runRuntimeProbe(): Promise<void> {
 		setError("");
+		setStorageMessage("");
 		setRuntimeHealth(null);
 		setConnectionState("connecting");
 		try {
@@ -130,6 +132,8 @@ export function App() {
 				<div className="row">
 					<input
 						id="api-key"
+						type="password"
+						autoComplete="off"
 						value={apiKey}
 						onChange={(event) => setApiKey(event.currentTarget.value)}
 					/>
