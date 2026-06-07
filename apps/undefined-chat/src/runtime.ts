@@ -34,6 +34,11 @@ export type UploadAttachmentInput = {
 	filePath: string;
 };
 
+export type HtmlPreviewInput = {
+	title: string;
+	html: string;
+};
+
 export type UploadAttachmentResult = {
 	status: number;
 	body: string;
@@ -59,4 +64,8 @@ export async function uploadAttachmentStreaming(
 	return await invoke<UploadAttachmentResult>("upload_attachment_streaming", {
 		input,
 	});
+}
+
+export async function openHtmlPreview(input: HtmlPreviewInput): Promise<void> {
+	await invoke("open_html_preview", { input });
 }

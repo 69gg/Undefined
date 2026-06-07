@@ -1,4 +1,5 @@
 pub mod config;
+mod preview;
 mod runtime_client;
 mod secret;
 mod upload;
@@ -14,6 +15,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             runtime_client::probe_runtime,
             runtime_client::start_job_event_stream,
+            preview::open_html_preview,
             secret::probe_secret_storage,
             secret::ensure_vault_password,
             upload::upload_attachment_streaming,

@@ -1,4 +1,5 @@
 use crate::config::normalize_runtime_url;
+use crate::preview::preview_document;
 use crate::runtime_client::{job_events_url, runtime_health_from_body_result, Utf8ChunkDecoder};
 use crate::secret::{
     classify_secret_storage, derive_stronghold_key, supports_system_keyring_target,
@@ -69,6 +70,35 @@ fn attachments_url_rejects_query_and_fragment() {
 
     let fragment_err = attachments_url("http://127.0.0.1:8788#runtime").unwrap_err();
     assert!(fragment_err.contains("runtime_url must not include a fragment"));
+}
+
+#[test]
+fn html_preview_csp_blocks_network_and_eval() {
+    let document = preview_document("Report", "<p>Hello</p>");
+
+    assert!(document.contains("default-src 'none'"));
+    assert!(document.contains("connect-src 'none'"));
+    assert!(document.contains("form-action 'none'"));
+    assert!(document.contains("object-src 'none'"));
+    assert!(document.contains("base-uri 'none'"));
+    assert!(document.contains("frame-ancestors 'none'"));
+    assert!(document.contains("img-src data: blob:"));
+    assert!(document.contains("media-src data: blob:"));
+    assert!(document.contains("style-src 'unsafe-inline'"));
+    assert!(!document.contains("unsafe-eval"));
+}
+
+#[test]
+fn html_preview_escapes_title() {
+    let document = preview_document("A&B <C>", "<p>Hello</p>");
+    let title = document
+        .split_once("<title>")
+        .and_then(|(_, rest)| rest.split_once("</title>"))
+        .map(|(value, _)| value)
+        .expect("preview document should include a title element");
+
+    assert_eq!(title, "A&amp;B &lt;C&gt;");
+    assert!(!title.contains("<C>"));
 }
 
 #[test]
