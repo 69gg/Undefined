@@ -11,6 +11,12 @@ pub fn normalize_runtime_url(raw: &str) -> Result<String, String> {
         "http" | "https" => {}
         scheme => return Err(format!("unsupported runtime_url scheme: {scheme}")),
     }
+    if parsed.query().is_some() {
+        return Err("runtime_url must not include a query".to_string());
+    }
+    if parsed.fragment().is_some() {
+        return Err("runtime_url must not include a fragment".to_string());
+    }
 
     let mut normalized = parsed.to_string();
     while normalized.ends_with('/') {
