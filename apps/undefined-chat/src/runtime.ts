@@ -28,6 +28,17 @@ export type StartJobEventStreamInput = {
 	afterSeq: number;
 };
 
+export type UploadAttachmentInput = {
+	runtimeUrl: string;
+	apiKey: string;
+	filePath: string;
+};
+
+export type UploadAttachmentResult = {
+	status: number;
+	body: string;
+};
+
 export async function probeSecretStorage(): Promise<SecretStatus> {
 	return await invoke<SecretStatus>("probe_secret_storage");
 }
@@ -40,4 +51,12 @@ export async function startJobEventStream(
 	input: StartJobEventStreamInput,
 ): Promise<void> {
 	await invoke("start_job_event_stream", { input });
+}
+
+export async function uploadAttachmentStreaming(
+	input: UploadAttachmentInput,
+): Promise<UploadAttachmentResult> {
+	return await invoke<UploadAttachmentResult>("upload_attachment_streaming", {
+		input,
+	});
 }

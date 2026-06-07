@@ -1,6 +1,7 @@
 pub mod config;
 mod runtime_client;
 mod secret;
+mod upload;
 
 #[cfg(test)]
 mod poc_tests;
@@ -15,6 +16,7 @@ pub fn run() {
             runtime_client::start_job_event_stream,
             secret::probe_secret_storage,
             secret::ensure_vault_password,
+            upload::upload_attachment_streaming,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Undefined Chat app");

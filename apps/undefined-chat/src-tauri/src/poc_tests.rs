@@ -3,6 +3,7 @@ use crate::runtime_client::{job_events_url, runtime_health_from_body_result, Utf
 use crate::secret::{
     classify_secret_storage, derive_stronghold_key, supports_system_keyring_target,
 };
+use crate::upload::{attachment_file_name, attachments_url};
 
 #[test]
 fn normalize_runtime_url_removes_trailing_slashes() {
@@ -49,6 +50,33 @@ fn job_events_url_encodes_job_id_path_segment() {
     assert_eq!(
         value,
         "http://127.0.0.1:8788/api/v1/chat/jobs/job%20%2Fsecret/events?after=7"
+    );
+}
+
+#[test]
+fn attachments_url_uses_normalized_runtime_base() {
+    let value = attachments_url("http://127.0.0.1:8788///").unwrap();
+    assert_eq!(value, "http://127.0.0.1:8788/api/v1/chat/attachments");
+}
+
+#[test]
+fn attachments_url_rejects_query_and_fragment() {
+    let query_err = attachments_url("http://127.0.0.1:8788?debug=true").unwrap_err();
+    assert!(query_err.contains("runtime_url must not include a query"));
+
+    let fragment_err = attachments_url("http://127.0.0.1:8788#runtime").unwrap_err();
+    assert!(fragment_err.contains("runtime_url must not include a fragment"));
+}
+
+#[test]
+fn attachment_file_name_uses_file_name_or_fallback() {
+    assert_eq!(
+        attachment_file_name(std::path::Path::new("/tmp/report.txt")),
+        "report.txt"
+    );
+    assert_eq!(
+        attachment_file_name(std::path::Path::new("/")),
+        "attachment"
     );
 }
 
