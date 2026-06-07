@@ -1,0 +1,42 @@
+{
+	"name": "undefined-chat",
+	"private": true,
+	"version": "3.5.1",
+	"type": "module",
+	"scripts": {
+		"tauri": "tauri",
+		"dev": "vite --host 0.0.0.0 --port 1430",
+		"lint": "biome check src package.json tsconfig.json vite.config.ts src-tauri/tauri.conf.json src-tauri/capabilities/default.json",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"tauri:fmt:check": "cargo fmt --manifest-path src-tauri/Cargo.toml --all --check",
+		"tauri:check": "cargo check --manifest-path src-tauri/Cargo.toml",
+		"check": "npm run lint && npm run typecheck && npm run test && npm run tauri:fmt:check && npm run tauri:check",
+		"build": "npm run typecheck && vite build",
+		"preview": "vite preview --host 0.0.0.0 --port 4183",
+		"tauri:dev": "tauri dev",
+		"tauri:build": "tauri build",
+		"tauri:android:init": "tauri android init --ci",
+		"tauri:android": "tauri android build",
+		"tauri:android:debug": "tauri android build --debug"
+	},
+	"dependencies": {
+		"@tauri-apps/api": "^2.3.0",
+		"@tauri-apps/plugin-stronghold": "^2.3.0",
+		"react": "^19.0.0",
+		"react-dom": "^19.0.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^1.9.4",
+		"@tauri-apps/cli": "^2.3.1",
+		"@vitejs/plugin-react": "^4.3.4",
+		"@testing-library/react": "^16.2.0",
+		"@testing-library/user-event": "^14.6.1",
+		"@types/react": "^19.0.8",
+		"@types/react-dom": "^19.0.3",
+		"jsdom": "^26.0.0",
+		"typescript": "^5.7.3",
+		"vite": "^6.2.1",
+		"vitest": "^3.0.8"
+	}
+}
