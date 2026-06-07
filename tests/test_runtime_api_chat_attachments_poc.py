@@ -6,9 +6,11 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 from aiohttp import FormData, web
+from aiohttp.web_response import Response
 from aiohttp.test_utils import TestClient, TestServer, make_mocked_request
 import pytest
 
+from Undefined.api import RuntimeAPIServer
 from Undefined.api._context import RuntimeAPIContext
 from Undefined.api.routes import chat
 
@@ -21,6 +23,42 @@ class _DummyConfig:
 def _ctx(*, max_size_mb: int | None = 7) -> RuntimeAPIContext:
     return RuntimeAPIContext(
         config_getter=lambda: _DummyConfig(max_size_mb),
+        ai=SimpleNamespace(),
+        onebot=SimpleNamespace(),
+        scheduler=None,
+        command_dispatcher=SimpleNamespace(),
+        queue_manager=SimpleNamespace(),
+        history_manager=None,
+        naga_store=None,
+    )
+
+
+def _json(response: Response) -> Any:
+    text = response.text
+    assert text is not None
+    return json.loads(text)
+
+
+def _openapi_request() -> web.Request:
+    return cast(
+        web.Request,
+        cast(
+            Any,
+            SimpleNamespace(
+                query={},
+                remote="127.0.0.1",
+                scheme="http",
+                host="127.0.0.1:8788",
+            ),
+        ),
+    )
+
+
+def _openapi_ctx() -> RuntimeAPIContext:
+    return RuntimeAPIContext(
+        config_getter=lambda: SimpleNamespace(
+            api=SimpleNamespace(openapi_enabled=True),
+        ),
         ai=SimpleNamespace(),
         onebot=SimpleNamespace(),
         scheduler=None,
@@ -118,6 +156,20 @@ async def test_chat_attachment_capabilities_clamps_explicit_zero_limit() -> None
     assert payload_text is not None
     payload = json.loads(payload_text)
     assert payload["max_upload_size_bytes"] == 1048576
+
+
+@pytest.mark.asyncio
+async def test_openapi_spec_includes_chat_attachment_poc_paths() -> None:
+    server = RuntimeAPIServer(_openapi_ctx(), host="127.0.0.1", port=8788)
+
+    response = await server._openapi_handler(_openapi_request())
+
+    spec = _json(response)
+    paths = spec["paths"]
+    assert "/api/v1/chat/attachments/capabilities" in paths
+    assert "get" in paths["/api/v1/chat/attachments/capabilities"]
+    assert "/api/v1/chat/attachments" in paths
+    assert "post" in paths["/api/v1/chat/attachments"]
 
 
 @pytest.mark.asyncio

@@ -137,6 +137,24 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
             "get": {"summary": "Get paged WebChat conversation history"},
             "delete": {"summary": "Clear a WebChat conversation history"},
         },
+        "/api/v1/chat/attachments/capabilities": {
+            "get": {
+                "summary": "Get WebChat attachment upload capabilities",
+                "description": (
+                    "Returns the Runtime attachment PoC upload limit and multipart "
+                    "field name."
+                ),
+            }
+        },
+        "/api/v1/chat/attachments": {
+            "post": {
+                "summary": "Upload a WebChat attachment PoC",
+                "description": (
+                    "Accepts multipart/form-data with a file field, validates size, "
+                    "and returns discard-only attachment metadata."
+                ),
+            }
+        },
         "/api/v1/chat/jobs": {"post": {"summary": "Create a WebUI chat job"}},
         "/api/v1/chat/jobs/active": {
             "get": {"summary": "Get the active WebUI chat job"}
