@@ -53,6 +53,7 @@ config.local.json
 dist/
 apps/**/dist/
 .cache/
+.superpowers/
 apps/**/src-tauri/target/
 apps/**/src-tauri/gen/
 apps/**/src-tauri/.cargo/
