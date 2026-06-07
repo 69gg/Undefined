@@ -34,6 +34,7 @@ export function App() {
 
 	async function runSecretProbe(): Promise<void> {
 		setError("");
+		setSecretStatus(null);
 		try {
 			const result = await probeSecretStorage();
 			setSecretStatus(result);

@@ -90,4 +90,23 @@ describe("App", () => {
 		expect(mockProbeSecretStorage).toHaveBeenCalledOnce();
 		expect(await screen.findByText("Error: command unavailable")).toBeTruthy();
 	});
+
+	test("clears stale secret storage results when a later probe fails", async () => {
+		mockProbeSecretStorage
+			.mockResolvedValueOnce({
+				available: true,
+				degraded: false,
+				detail: "stronghold ready",
+			})
+			.mockRejectedValueOnce(new Error("stronghold locked"));
+
+		render(<App />);
+		await userEvent.click(screen.getByRole("button", { name: "探测" }));
+		expect(await screen.findByText(/stronghold ready/)).toBeTruthy();
+
+		await userEvent.click(screen.getByRole("button", { name: "探测" }));
+
+		expect(await screen.findByText("Error: stronghold locked")).toBeTruthy();
+		expect(screen.queryByText(/stronghold ready/)).toBeNull();
+	});
 });
