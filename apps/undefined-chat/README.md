@@ -30,3 +30,22 @@ PoC 默认连接 `http://127.0.0.1:8788`。Runtime API 必须配置并接受 `X-
 - Linux keyring depends on Secret Service/keyutils availability。
 - Android background behavior only after `npm run tauri:android:init` and device testing。
 - PoC does not implement full production chat UI。
+
+## Android smoke checklist
+
+Run after desktop PoC checks pass:
+
+```bash
+npm run tauri:android:init
+npm run tauri:android:debug -- --apk
+```
+
+On a device or emulator:
+
+- Open the app and verify the main screen renders.
+- Probe secret storage and record whether secure storage is available.
+- Connect to Runtime over LAN and verify `/health`.
+- Start an SSE stream against a known running job and verify events arrive.
+- Upload a file larger than 25 MB and confirm the process does not freeze the UI.
+- Open HTML preview and verify it uses the dedicated Android page/window surface.
+- Background the app during a running job and record whether events resume after reopening.
