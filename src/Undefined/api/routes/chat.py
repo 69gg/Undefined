@@ -1041,7 +1041,8 @@ def _preview_existing_text(raw: Any, limit: int = _PREVIEW_LIMIT) -> str:
 
 def _chat_attachment_max_upload_size_bytes(ctx: RuntimeAPIContext) -> int:
     cfg = ctx.config_getter()
-    max_size_mb = int(getattr(cfg, "messages_send_url_file_max_size_mb", 100) or 100)
+    raw_max_size_mb = getattr(cfg, "messages_send_url_file_max_size_mb", None)
+    max_size_mb = 100 if raw_max_size_mb is None else int(raw_max_size_mb)
     return max(1, max_size_mb) * 1024 * 1024
 
 
