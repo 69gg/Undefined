@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import logging
+import mimetypes
 import re
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -56,6 +57,8 @@ _CHAT_STAGE_REFRESH_SECONDS = 1.0
 _CHAT_JOB_EVENT_BUFFER_LIMIT = 1000
 SHUTDOWN_TASK_TIMEOUT = 5.0
 _PREVIEW_LIMIT = 800
+_CHAT_ATTACHMENT_MAX_NAME_LENGTH = 128
+_CHAT_ATTACHMENT_UPLOAD_FIELD = "file"
 _WEBCHAT_SEND_MESSAGE_TOOLS = frozenset(
     {
         "messages.send_message",
@@ -1034,6 +1037,21 @@ def _preview_existing_text(raw: Any, limit: int = _PREVIEW_LIMIT) -> str:
     with suppress(json.JSONDecodeError, TypeError, ValueError):
         return _preview(json.loads(text), limit)
     return _preview(text, limit)
+
+
+def _chat_attachment_max_upload_size_bytes(ctx: RuntimeAPIContext) -> int:
+    cfg = ctx.config_getter()
+    max_size_mb = int(getattr(cfg, "messages_send_url_file_max_size_mb", 100) or 100)
+    return max(1, max_size_mb) * 1024 * 1024
+
+
+def _sanitize_chat_attachment_name(raw_name: str) -> str:
+    name = Path(str(raw_name or "").strip() or "attachment").name or "attachment"
+    if len(name) <= _CHAT_ATTACHMENT_MAX_NAME_LENGTH:
+        return name
+    suffix = "".join(Path(name).suffixes[-2:]) or Path(name).suffix
+    suffix = suffix if len(suffix) <= 16 else ""
+    return f"attachment{suffix}"
 
 
 def _normalize_sensitive_key(key: Any) -> str:
@@ -2055,6 +2073,66 @@ WebUI 支持完整 Markdown 渲染和简单安全 HTML。复杂 HTML、包含 JS
         len(final_reply),
     )
     return "chat"
+
+
+async def chat_attachment_capabilities_handler(
+    ctx: RuntimeAPIContext,
+    request: web.Request,
+) -> Response:
+    _ = request
+    return web.json_response(
+        {
+            "max_upload_size_bytes": _chat_attachment_max_upload_size_bytes(ctx),
+            "multipart_field": _CHAT_ATTACHMENT_UPLOAD_FIELD,
+        }
+    )
+
+
+async def chat_attachment_upload_handler(
+    ctx: RuntimeAPIContext,
+    request: web.Request,
+) -> Response:
+    max_size = _chat_attachment_max_upload_size_bytes(ctx)
+    try:
+        reader = await request.multipart()
+    except Exception:
+        return _json_error("multipart request required", status=400)
+
+    field = await reader.next()
+    field_any: Any = field
+    if field is None or getattr(field_any, "name", "") != _CHAT_ATTACHMENT_UPLOAD_FIELD:
+        return _json_error("file field is required", status=400)
+
+    display_name = _sanitize_chat_attachment_name(
+        str(getattr(field_any, "filename", "") or "attachment")
+    )
+    total_size = 0
+    while True:
+        chunk = await field_any.read_chunk(size=1024 * 256)
+        if not chunk:
+            break
+        total_size += len(chunk)
+        if total_size > max_size:
+            return web.json_response(
+                {"error": "file too large", "max_upload_size_bytes": max_size},
+                status=413,
+            )
+
+    media_type = mimetypes.guess_type(display_name)[0] or "application/octet-stream"
+    attachment_id = uuid4().hex
+    return web.json_response(
+        {
+            "attachment": {
+                "id": attachment_id,
+                "name": display_name,
+                "size": total_size,
+                "media_type": media_type,
+                "kind": "image" if media_type.startswith("image/") else "file",
+                "poc_discarded": True,
+            }
+        },
+        status=201,
+    )
 
 
 async def chat_conversations_handler(
