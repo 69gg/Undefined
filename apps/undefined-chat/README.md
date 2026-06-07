@@ -27,7 +27,7 @@ PoC 默认连接 `http://127.0.0.1:8788`。Runtime API 必须配置并接受 `X-
 
 ## Platform Notes
 
-- Linux keyring depends on Secret Service/keyutils availability。
+- Linux keyring in this PoC depends on Secret Service availability。
 - Android background behavior only after `npm run tauri:android:init` and device testing。
 - PoC does not implement full production chat UI。
 
