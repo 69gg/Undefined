@@ -48,6 +48,25 @@ describe("App", () => {
 		expect(screen.getByText(/"status": 200/)).toBeTruthy();
 	});
 
+	test("clears stale runtime results when a later probe fails", async () => {
+		mockProbeRuntime
+			.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				body: "ok",
+			})
+			.mockRejectedValueOnce(new Error("runtime offline"));
+
+		render(<App />);
+		await userEvent.click(screen.getByRole("button", { name: "测试连接" }));
+		expect(await screen.findByText(/"status": 200/)).toBeTruthy();
+
+		await userEvent.click(screen.getByRole("button", { name: "测试连接" }));
+
+		expect(await screen.findByText("Error: runtime offline")).toBeTruthy();
+		expect(screen.queryByText(/"status": 200/)).toBeNull();
+	});
+
 	test("shows secret storage probe results", async () => {
 		mockProbeSecretStorage.mockResolvedValue({
 			available: true,
@@ -60,5 +79,15 @@ describe("App", () => {
 
 		expect(mockProbeSecretStorage).toHaveBeenCalledOnce();
 		expect(screen.getByText(/stronghold ready/)).toBeTruthy();
+	});
+
+	test("shows secret storage probe errors", async () => {
+		mockProbeSecretStorage.mockRejectedValue(new Error("command unavailable"));
+
+		render(<App />);
+		await userEvent.click(screen.getByRole("button", { name: "探测" }));
+
+		expect(mockProbeSecretStorage).toHaveBeenCalledOnce();
+		expect(await screen.findByText("Error: command unavailable")).toBeTruthy();
 	});
 });

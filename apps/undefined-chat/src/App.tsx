@@ -34,18 +34,24 @@ export function App() {
 
 	async function runSecretProbe(): Promise<void> {
 		setError("");
-		const result = await probeSecretStorage();
-		setSecretStatus(result);
+		try {
+			const result = await probeSecretStorage();
+			setSecretStatus(result);
+		} catch (err) {
+			setError(String(err));
+		}
 	}
 
 	async function runRuntimeProbe(): Promise<void> {
 		setError("");
+		setRuntimeHealth(null);
 		setConnectionState("connecting");
 		try {
 			const result = await probeRuntime(runtimeUrl);
 			setRuntimeHealth(result);
 			setConnectionState(result.ok ? "connected" : "disconnected");
 		} catch (err) {
+			setRuntimeHealth(null);
 			setConnectionState("disconnected");
 			setError(String(err));
 		}
