@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 import time
 from typing import Any, Awaitable, Callable
+from urllib.parse import unquote
 from uuid import uuid4
 
 from aiohttp import web
@@ -1047,7 +1048,14 @@ def _chat_attachment_max_upload_size_bytes(ctx: RuntimeAPIContext) -> int:
 
 
 def _sanitize_chat_attachment_name(raw_name: str) -> str:
-    name = Path(str(raw_name or "").strip() or "attachment").name or "attachment"
+    raw_text = unquote(str(raw_name or "").strip() or "attachment")
+    without_controls = "".join(
+        char for char in raw_text if ord(char) >= 32 and ord(char) != 127
+    )
+    name = (
+        Path(without_controls.replace("\\", "/").strip() or "attachment").name
+        or "attachment"
+    )
     if len(name) <= _CHAT_ATTACHMENT_MAX_NAME_LENGTH:
         return name
     suffix = "".join(Path(name).suffixes[-2:]) or Path(name).suffix
@@ -2099,25 +2107,39 @@ async def chat_attachment_upload_handler(
     except Exception:
         return _json_error("multipart request required", status=400)
 
-    field = await reader.next()
-    field_any: Any = field
-    if field is None or getattr(field_any, "name", "") != _CHAT_ATTACHMENT_UPLOAD_FIELD:
+    field_any: Any | None = None
+    try:
+        while True:
+            field = await reader.next()
+            if field is None:
+                break
+            current_field: Any = field
+            if getattr(current_field, "name", "") == _CHAT_ATTACHMENT_UPLOAD_FIELD:
+                field_any = current_field
+                break
+    except Exception:
+        return _json_error("multipart request required", status=400)
+
+    if field_any is None:
         return _json_error("file field is required", status=400)
 
     display_name = _sanitize_chat_attachment_name(
         str(getattr(field_any, "filename", "") or "attachment")
     )
     total_size = 0
-    while True:
-        chunk = await field_any.read_chunk(size=1024 * 256)
-        if not chunk:
-            break
-        total_size += len(chunk)
-        if total_size > max_size:
-            return web.json_response(
-                {"error": "file too large", "max_upload_size_bytes": max_size},
-                status=413,
-            )
+    try:
+        while True:
+            chunk = await field_any.read_chunk(size=1024 * 256)
+            if not chunk:
+                break
+            total_size += len(chunk)
+            if total_size > max_size:
+                return web.json_response(
+                    {"error": "file too large", "max_upload_size_bytes": max_size},
+                    status=413,
+                )
+    except Exception:
+        return _json_error("multipart request required", status=400)
 
     media_type = mimetypes.guess_type(display_name)[0] or "application/octet-stream"
     attachment_id = uuid4().hex
