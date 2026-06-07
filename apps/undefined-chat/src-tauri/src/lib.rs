@@ -1,4 +1,5 @@
 pub mod config;
+mod runtime_client;
 mod secret;
 
 #[cfg(test)]
@@ -10,6 +11,8 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_stronghold::Builder::new(secret::derive_stronghold_key).build())
         .invoke_handler(tauri::generate_handler![
+            runtime_client::probe_runtime,
+            runtime_client::start_job_event_stream,
             secret::probe_secret_storage,
             secret::ensure_vault_password,
         ])
