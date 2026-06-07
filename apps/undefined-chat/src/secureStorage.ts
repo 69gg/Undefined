@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { appDataDir } from "@tauri-apps/api/path";
+import { appDataDir, join } from "@tauri-apps/api/path";
 import { type Client, Stronghold } from "@tauri-apps/plugin-stronghold";
 
 const CLIENT_NAME = "undefined-chat";
@@ -9,8 +9,10 @@ async function loadClient(): Promise<{
 	stronghold: Stronghold;
 	client: Client;
 }> {
+	// PoC-only trusted renderer boundary: production should move API key
+	// save/load into Rust commands so the renderer never sees this vault password.
 	const vaultPassword = await invoke<string>("ensure_vault_password");
-	const vaultPath = `${await appDataDir()}/undefined-chat.vault.hold`;
+	const vaultPath = await join(await appDataDir(), "undefined-chat.vault.hold");
 	const stronghold = await Stronghold.load(vaultPath, vaultPassword);
 	try {
 		return { stronghold, client: await stronghold.loadClient(CLIENT_NAME) };

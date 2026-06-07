@@ -1,5 +1,7 @@
 use crate::config::normalize_runtime_url;
-use crate::secret::{classify_secret_storage, derive_stronghold_key};
+use crate::secret::{
+    classify_secret_storage, derive_stronghold_key, supports_system_keyring_target,
+};
 
 #[test]
 fn normalize_runtime_url_removes_trailing_slashes() {
@@ -26,4 +28,17 @@ fn stronghold_key_derivation_returns_32_bytes() {
     let derived = derive_stronghold_key("vault-password");
     assert_eq!(derived.len(), 32);
     assert_ne!(derived, b"vault-password".to_vec());
+}
+
+#[test]
+fn system_keyring_guard_allows_supported_desktop_targets() {
+    assert!(supports_system_keyring_target("linux"));
+    assert!(supports_system_keyring_target("macos"));
+    assert!(supports_system_keyring_target("windows"));
+}
+
+#[test]
+fn system_keyring_guard_rejects_mobile_targets_for_this_poc() {
+    assert!(!supports_system_keyring_target("android"));
+    assert!(!supports_system_keyring_target("ios"));
 }
