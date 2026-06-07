@@ -94,18 +94,26 @@ fn html_preview_csp_blocks_network_and_eval() {
 }
 
 #[test]
-fn html_preview_navigation_guard_blocks_external_targets() {
+fn html_preview_navigation_guard_allows_only_initial_data_url() {
+    let initial_url = build_preview_data_url("Report", "<p>Hello</p>").unwrap();
+
+    assert!(preview_navigation_allowed(&initial_url, &initial_url));
     assert!(preview_navigation_allowed(
-        &url::Url::parse("data:text/html;charset=utf-8,%3Cp%3Eok%3C%2Fp%3E").unwrap()
-    ));
-    assert!(preview_navigation_allowed(
-        &url::Url::parse("about:blank").unwrap()
+        &url::Url::parse("about:blank").unwrap(),
+        &initial_url
     ));
     assert!(!preview_navigation_allowed(
-        &url::Url::parse("https://example.com").unwrap()
+        &url::Url::parse("data:text/html;charset=utf-8,%3Cscript%3Ealert(1)%3C%2Fscript%3E")
+            .unwrap(),
+        &initial_url
     ));
     assert!(!preview_navigation_allowed(
-        &url::Url::parse("file:///tmp/preview.html").unwrap()
+        &url::Url::parse("https://example.com").unwrap(),
+        &initial_url
+    ));
+    assert!(!preview_navigation_allowed(
+        &url::Url::parse("file:///tmp/preview.html").unwrap(),
+        &initial_url
     ));
 }
 
