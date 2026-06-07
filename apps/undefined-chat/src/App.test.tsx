@@ -3,14 +3,22 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
 import { probeRuntime, probeSecretStorage } from "./runtime";
+import { loadRuntimeApiKey, saveRuntimeApiKey } from "./secureStorage";
 
 vi.mock("./runtime", () => ({
 	probeRuntime: vi.fn(),
 	probeSecretStorage: vi.fn(),
 }));
 
+vi.mock("./secureStorage", () => ({
+	loadRuntimeApiKey: vi.fn(),
+	saveRuntimeApiKey: vi.fn(),
+}));
+
 const mockProbeRuntime = vi.mocked(probeRuntime);
 const mockProbeSecretStorage = vi.mocked(probeSecretStorage);
+const mockLoadRuntimeApiKey = vi.mocked(loadRuntimeApiKey);
+const mockSaveRuntimeApiKey = vi.mocked(saveRuntimeApiKey);
 
 describe("App", () => {
 	beforeEach(() => {
@@ -108,5 +116,55 @@ describe("App", () => {
 
 		expect(await screen.findByText("Error: stronghold locked")).toBeTruthy();
 		expect(screen.queryByText(/stronghold ready/)).toBeNull();
+	});
+
+	test("saves the API key through secure storage", async () => {
+		mockSaveRuntimeApiKey.mockResolvedValue();
+
+		render(<App />);
+		await userEvent.type(screen.getByLabelText("API Key"), "test-api-key");
+		await userEvent.click(screen.getByRole("button", { name: "保存 API Key" }));
+
+		expect(mockSaveRuntimeApiKey).toHaveBeenCalledWith("test-api-key");
+		expect(await screen.findByText("API Key 已保存")).toBeTruthy();
+	});
+
+	test("loads a saved API key into the input", async () => {
+		mockLoadRuntimeApiKey.mockResolvedValue("saved-api-key");
+
+		render(<App />);
+		const apiKeyInput = screen.getByLabelText("API Key") as HTMLInputElement;
+		await userEvent.click(screen.getByRole("button", { name: "读取 API Key" }));
+
+		expect(mockLoadRuntimeApiKey).toHaveBeenCalledOnce();
+		expect(await screen.findByText("API Key 已读取")).toBeTruthy();
+		expect(apiKeyInput.value).toBe("saved-api-key");
+	});
+
+	test("shows when no API key has been saved", async () => {
+		mockLoadRuntimeApiKey.mockResolvedValue(null);
+
+		render(<App />);
+		await userEvent.click(screen.getByRole("button", { name: "读取 API Key" }));
+
+		expect(mockLoadRuntimeApiKey).toHaveBeenCalledOnce();
+		expect(await screen.findByText("没有已保存的 API Key")).toBeTruthy();
+	});
+
+	test("clears stale storage messages when storage fails", async () => {
+		mockSaveRuntimeApiKey.mockResolvedValue();
+		mockLoadRuntimeApiKey.mockRejectedValue(new Error("secure storage locked"));
+
+		render(<App />);
+		await userEvent.type(screen.getByLabelText("API Key"), "test-api-key");
+		await userEvent.click(screen.getByRole("button", { name: "保存 API Key" }));
+		expect(await screen.findByText("API Key 已保存")).toBeTruthy();
+
+		await userEvent.click(screen.getByRole("button", { name: "读取 API Key" }));
+
+		expect(
+			await screen.findByText("Error: secure storage locked"),
+		).toBeTruthy();
+		expect(screen.queryByText("API Key 已保存")).toBeNull();
 	});
 });

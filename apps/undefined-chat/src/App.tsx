@@ -6,6 +6,7 @@ import {
 	probeRuntime,
 	probeSecretStorage,
 } from "./runtime";
+import { loadRuntimeApiKey, saveRuntimeApiKey } from "./secureStorage";
 
 const defaultRuntimeUrl = "http://127.0.0.1:8788";
 
@@ -30,6 +31,8 @@ export function App() {
 	const [runtimeHealth, setRuntimeHealth] = useState<RuntimeHealth | null>(
 		null,
 	);
+	const [apiKey, setApiKey] = useState("");
+	const [storageMessage, setStorageMessage] = useState("");
 	const [error, setError] = useState("");
 
 	async function runSecretProbe(): Promise<void> {
@@ -54,6 +57,33 @@ export function App() {
 		} catch (err) {
 			setRuntimeHealth(null);
 			setConnectionState("disconnected");
+			setError(String(err));
+		}
+	}
+
+	async function saveApiKey(): Promise<void> {
+		setError("");
+		setStorageMessage("");
+		try {
+			await saveRuntimeApiKey(apiKey);
+			setStorageMessage("API Key 已保存");
+		} catch (err) {
+			setError(String(err));
+		}
+	}
+
+	async function loadApiKey(): Promise<void> {
+		setError("");
+		setStorageMessage("");
+		try {
+			const storedApiKey = await loadRuntimeApiKey();
+			if (storedApiKey) {
+				setApiKey(storedApiKey);
+				setStorageMessage("API Key 已读取");
+			} else {
+				setStorageMessage("没有已保存的 API Key");
+			}
+		} catch (err) {
 			setError(String(err));
 		}
 	}
@@ -96,6 +126,21 @@ export function App() {
 				) : (
 					<p>尚未探测 Stronghold/keyring 状态。</p>
 				)}
+				<label htmlFor="api-key">API Key</label>
+				<div className="row">
+					<input
+						id="api-key"
+						value={apiKey}
+						onChange={(event) => setApiKey(event.currentTarget.value)}
+					/>
+					<button type="button" onClick={saveApiKey}>
+						保存 API Key
+					</button>
+					<button type="button" onClick={loadApiKey}>
+						读取 API Key
+					</button>
+				</div>
+				{storageMessage ? <p>{storageMessage}</p> : null}
 			</section>
 			{error ? <section className="error">{error}</section> : null}
 		</main>
