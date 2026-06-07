@@ -30,7 +30,17 @@
 - `runtime_url`
 - `X-Undefined-API-Key`
 
-API Key 首期使用 `tauri-plugin-stronghold` 加密保存。Stronghold vault 的密码派生策略必须在 Tauri 原生层实现，不把 vault password 硬编码进前端 bundle。若目标平台或运行环境无法使用 Stronghold，必须让用户明确确认后才允许降级到普通本地保存，并在设置页持续显示风险提示。连接 URL、主题、语言、草稿、自动滚动等 UI 偏好保存在普通本地配置中。
+API Key 首期使用 `tauri-plugin-stronghold` 加密保存。Stronghold vault 的主密码由 Tauri 原生层生成或派生，不把 vault password 硬编码进前端 bundle。
+
+桌面端使用 Rust `keyring` 库把 Stronghold vault 主密码静默保存到系统级凭据管理器：
+
+- macOS 使用 Keychain。
+- Windows 使用 Credential Manager。
+- Linux 优先使用 Secret Service API；在没有 Secret Service 的精简桌面、不同 Window Manager 或 headless 环境中，可按 `keyring` 后端能力使用 keyutils 等原生后端。
+
+如果系统 keyring 不可用、解锁失败或用户拒绝授权，客户端必须进入显式解锁/恢复流程；只有用户明确确认后才允许降级到普通本地保存，并在设置页持续显示风险提示。连接 URL、主题、语言、草稿、自动滚动等 UI 偏好保存在普通本地配置中。
+
+Android 不套用桌面 keyring 语义。Android 端必须使用 Tauri/Stronghold 可用的移动端安全存储策略保存或派生 vault 主密码；若目标运行环境无法安全静默保存，则进入显式解锁/恢复流程，降级保存同样必须经用户确认。
 
 Runtime 请求通过 Tauri 原生层集中封装：React 调用本地命令，Tauri 根据当前单连接配置拼接 URL、添加 API Key、执行 HTTP 请求。这样可以把请求权限限制在用户配置的 Runtime origin 上，避免前端散落拼接认证头和过宽 HTTP allowlist。
 
@@ -227,7 +237,7 @@ Android：
 Tauri 层负责：
 
 - 单连接配置本地保存。
-- API Key Stronghold 加密保存；不可用时经用户确认后降级。
+- API Key Stronghold 加密保存；桌面端通过系统 keyring 保存 Stronghold vault 主密码；不可用时进入显式解锁/恢复流程，降级保存必须经用户确认。
 - 系统通知。
 - 桌面托盘和隐藏窗口常驻。
 - Android 后台尽力续接。
@@ -262,7 +272,8 @@ Tauri 层负责：
 
 ## 安全边界
 
-- API Key 首选 Stronghold 加密保存；只有在 Stronghold 不可用且用户明确确认时才允许普通本地保存，设置页必须持续提示降级风险。
+- API Key 首选 Stronghold 加密保存。桌面端 Stronghold vault 主密码必须存放在系统 keyring 中，不能硬编码或写入普通配置；Linux 上需处理 Secret Service 不存在或不可解锁的环境。只有在 Stronghold/keyring 不可用且用户明确确认时才允许普通本地保存，设置页必须持续提示降级风险。
+- Android 端 vault 主密码不能写入普通配置；安全静默保存不可用时必须走显式解锁/恢复流程或用户确认的降级流程。
 - 聊天内 HTML 经过白名单净化。
 - HTML 运行预览隔离执行，不暴露 API Key，不开放 Tauri IPC，不允许访问本地文件或 app 能力。
 - HTML 预览窗口或页面必须注入严格 CSP meta。默认策略禁止外部网络、禁止表单提交、禁止对象加载、禁止父页面访问；允许的脚本、样式和资源范围必须最小化，并明确禁止 `unsafe-eval`。
@@ -293,6 +304,7 @@ Tauri 层负责：
 - Runtime client。
 - 启动恢复和断线恢复。
 - SSE 事件合并、断线续接、JSON fallback 和快照渲染。
+- Stronghold + 系统 keyring 的保存、读取、解锁失败和降级确认流程；Android 安全存储不可用时的显式解锁/恢复流程。
 - 会话列表运行态。
 - 同会话输入区锁定。
 - 命令补全。
@@ -333,7 +345,7 @@ Tauri 层负责：
 - Undefined Chat 和 WebUI WebChat 都是 Runtime WebChat 客户端。
 - Runtime 是唯一真源。
 - Undefined Chat 直连 Runtime API。
-- API Key 首期使用 Stronghold 加密保存；降级保存需要用户确认并提示风险。
+- API Key 首期使用 Stronghold 加密保存；桌面端通过系统 keyring 保存 Stronghold vault 主密码；Linux 需要说明 Secret Service/keyutils 可用性与降级流程。
 - SSE 是运行中 job 的首选事件通道，JSON 查询是恢复和兼容 fallback。
 - Android 后台通知能力是尽力而为，重新打开恢复是硬保证。
 
