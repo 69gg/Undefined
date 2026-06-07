@@ -1,5 +1,7 @@
 use crate::config::normalize_runtime_url;
-use crate::preview::preview_document;
+use crate::preview::{
+    build_preview_data_url, preview_document, preview_navigation_allowed, MAX_PREVIEW_HTML_BYTES,
+};
 use crate::runtime_client::{job_events_url, runtime_health_from_body_result, Utf8ChunkDecoder};
 use crate::secret::{
     classify_secret_storage, derive_stronghold_key, supports_system_keyring_target,
@@ -82,10 +84,37 @@ fn html_preview_csp_blocks_network_and_eval() {
     assert!(document.contains("object-src 'none'"));
     assert!(document.contains("base-uri 'none'"));
     assert!(document.contains("frame-ancestors 'none'"));
+    assert!(document.contains("navigate-to 'none'"));
     assert!(document.contains("img-src data: blob:"));
     assert!(document.contains("media-src data: blob:"));
     assert!(document.contains("style-src 'unsafe-inline'"));
+    assert!(document.contains("script-src 'none'"));
+    assert!(!document.contains("script-src 'unsafe-inline'"));
     assert!(!document.contains("unsafe-eval"));
+}
+
+#[test]
+fn html_preview_navigation_guard_blocks_external_targets() {
+    assert!(preview_navigation_allowed(
+        &url::Url::parse("data:text/html;charset=utf-8,%3Cp%3Eok%3C%2Fp%3E").unwrap()
+    ));
+    assert!(preview_navigation_allowed(
+        &url::Url::parse("about:blank").unwrap()
+    ));
+    assert!(!preview_navigation_allowed(
+        &url::Url::parse("https://example.com").unwrap()
+    ));
+    assert!(!preview_navigation_allowed(
+        &url::Url::parse("file:///tmp/preview.html").unwrap()
+    ));
+}
+
+#[test]
+fn html_preview_rejects_oversized_html() {
+    let html = "a".repeat(MAX_PREVIEW_HTML_BYTES + 1);
+    let err = build_preview_data_url("Too large", &html).unwrap_err();
+
+    assert!(err.contains("html preview content is too large"));
 }
 
 #[test]
