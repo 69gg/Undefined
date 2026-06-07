@@ -44,6 +44,23 @@ Android 不套用桌面 keyring 语义。Android 端必须使用 Tauri/Stronghol
 
 Runtime 请求通过 Tauri 原生层集中封装：React 调用本地命令，Tauri 根据当前单连接配置拼接 URL、添加 API Key、执行 HTTP 请求。这样可以把请求权限限制在用户配置的 Runtime origin 上，避免前端散落拼接认证头和过宽 HTTP allowlist。
 
+## 关键 PoC 与风险验证
+
+正式实现前必须先做 focused PoC，不直接进入完整产品开发。PoC 顺序：
+
+1. 桌面核心流：Tauri 原生 HTTP 封装、Stronghold + keyring 保存/读取、Runtime 连接、SSE 事件流、HTML 预览窗口 CSP、streaming 文件上传。
+2. Android 核心流：Stronghold/移动端安全存储策略、SSE 长连接稳定性、后台生命周期、HTML 预览页面 CSP、文件选择与 streaming 上传。
+
+PoC 验收标准：
+
+- API Key 能加密保存和恢复，keyring/安全存储不可用时能进入明确的解锁或降级流程。
+- SSE 能处理大型事件流、断线重连和 `Last-Event-ID`/`seq` 续接。
+- 大文件上传不通过 JS Blob、base64 或 IPC 全量进内存。
+- 后台/最小化期间能在平台允许范围内继续续接运行中 job。
+- HTML 预览窗口/页面的 CSP 和 IPC 隔离可被测试验证。
+
+PoC 结论必须写入实现计划或后续设计补充；若关键路径在 Android 或 Linux 环境不可行，先调整规格再继续实现。
+
 ## Runtime API 契约
 
 现有 WebChat 能力应提升为 Runtime 正式契约。现有会话、历史、job、事件和命令接口继续保留，并补齐以下能力。
@@ -95,6 +112,8 @@ Runtime 负责：
 Runtime 必须通过能力端点或上传端点错误响应暴露当前最大上传大小，例如 `max_upload_size_bytes`。该值来自 Runtime 配置，客户端不得硬编码上传上限。客户端可以在待发送区显示本地临时预览，但 canonical 附件表达只来自 Runtime 返回的 attachment id/schema。
 
 Tauri 原生层上传文件时必须使用 streaming 方式把本地文件 pipe 到 HTTP 请求，不允许为了上传而把大文件一次性读入 JS Blob、base64 字符串或 IPC payload。客户端在上传前按 Runtime 暴露的大小上限做本地拦截，并正确展示 Runtime 的 `413`、超时和连接中断错误。
+
+附件上传失败、超时或用户取消时，客户端必须清理本地临时预览、撤销 object URL、移除未绑定到 Runtime attachment id 的待发送项。已经上传成功但后续发送失败的附件是否保留在待发送区，以 Runtime 返回的 attachment id 和客户端草稿状态为准。
 
 ### 按会话并发 job
 
@@ -168,6 +187,17 @@ WebChat job 管理从全局互斥改为按 `conversation_id` 互斥：
 3. 对仍运行的 job 从已知 seq 通过 SSE 或 JSON fallback 续接。
 4. 如果 Runtime 重启导致 job 消失，客户端刷新历史并结束本地运行态展示。
 
+连接与事件状态必须显式建模，至少区分：
+
+- `connecting`：正在建立 Runtime 连接。
+- `connected`：Runtime 可达，无运行中事件订阅。
+- `streaming`：SSE 正常接收运行中 job 事件。
+- `resuming`：断线后正在用 `job_id + seq` 续接。
+- `json_fallback`：SSE 不可用，已降级为 JSON 事件查询。
+- `disconnected`：连接完全断开，需要用户检查 Runtime URL/API Key/网络。
+
+这些状态只描述客户端连接层，不替代 Runtime job 状态。会话列表和聊天页必须用不同视觉状态区分“正在续接”“已降级 JSON 查询”“连接完全断开”。
+
 ## UI 与交互
 
 信息架构采用 Chat-first。
@@ -227,7 +257,7 @@ Android：
 - `runtime-client`：Runtime HTTP、认证、错误类型、重试封装。
 - `chat-store`：当前 UI 选择、active job 快照、事件游标、草稿和偏好；不保存历史真源。
 - `conversation-list`：会话列表和每个会话的运行态。
-- `message-timeline`：按 Runtime history/timeline schema 渲染消息、附件和调用摘要。
+- `message-timeline`：按 Runtime history/timeline schema 渲染消息、附件和调用摘要。必须支持虚拟列表或等价窗口化渲染，确保几千条历史、密集工具调用和大量附件不会导致首屏卡死。
 - `message-composer`：文本输入、附件选择、引用选择、斜杠命令补全，提交结构化 payload。
 - `rendering`：Markdown、安全 HTML、代码块、预览、复制、折叠。
 - `native`：Tauri 设置存储、通知、托盘、窗口、文件选择和下载保存。
@@ -238,6 +268,7 @@ Tauri 层负责：
 
 - 单连接配置本地保存。
 - API Key Stronghold 加密保存；桌面端通过系统 keyring 保存 Stronghold vault 主密码；不可用时进入显式解锁/恢复流程，降级保存必须经用户确认。
+- 首次启动时探测系统 keyring/安全存储可用性，尤其是 Linux Secret Service/keyutils；不可用时在设置页给出明确原因和下一步选择。
 - 系统通知。
 - 桌面托盘和隐藏窗口常驻。
 - Android 后台尽力续接。
@@ -259,6 +290,7 @@ Tauri 层负责：
 
 - Runtime 不可达。
 - API Key 缺失或无效。
+- 系统 keyring/安全存储不可用或解锁失败。
 - 401 / 403。
 - 会话不存在。
 - 同会话 job 运行中返回 409。
@@ -288,6 +320,7 @@ Tauri 层负责：
 - Runtime 结构化发送 payload。
 - Runtime 附件上传、下载、预览。
 - 上传大小上限、413、超时和 streaming 上传路径。
+- 附件上传失败、取消和超时后的本地临时预览清理。
 - 附件注册和历史返回 schema。
 - 引用归一化。
 - 按会话并发 job。
@@ -305,6 +338,8 @@ Tauri 层负责：
 - 启动恢复和断线恢复。
 - SSE 事件合并、断线续接、JSON fallback 和快照渲染。
 - Stronghold + 系统 keyring 的保存、读取、解锁失败和降级确认流程；Android 安全存储不可用时的显式解锁/恢复流程。
+- 连接状态机：`connecting`、`streaming`、`resuming`、`json_fallback`、`disconnected`。
+- 大规模历史虚拟列表渲染。
 - 会话列表运行态。
 - 同会话输入区锁定。
 - 命令补全。
@@ -345,6 +380,8 @@ Tauri 层负责：
 - Undefined Chat 和 WebUI WebChat 都是 Runtime WebChat 客户端。
 - Runtime 是唯一真源。
 - Undefined Chat 直连 Runtime API。
+- `docs/undefined-chat.md` 必须包含 “Undefined Chat vs WebUI WebChat” 能力对照表，明确 Undefined Chat 是官方原生优先客户端，WebUI WebChat 是轻量 Web 客户端。
+- 草稿仅保存在当前设备本地，不进入 Runtime，也不会跨客户端同步。
 - API Key 首期使用 Stronghold 加密保存；桌面端通过系统 keyring 保存 Stronghold vault 主密码；Linux 需要说明 Secret Service/keyutils 可用性与降级流程。
 - SSE 是运行中 job 的首选事件通道，JSON 查询是恢复和兼容 fallback。
 - Android 后台通知能力是尽力而为，重新打开恢复是硬保证。
@@ -388,6 +425,8 @@ Release workflow 增加 Undefined Chat 打包：
 
 `scripts/release_notes.py validate` 也必须把 Undefined Chat 加入版本一致性校验。`scripts/README.md` 同步更新校验范围。
 
+长期维护方向：版本同步目标应从散落在脚本里的硬编码路径逐步演进为集中清单或 workspace 风格配置，减少新增 app 后漏改 `package.json`、Tauri 配置、Cargo 文件和 lock 文件的风险。
+
 ## 验收标准
 
 - 同一个 Runtime 可被多个 Undefined Chat 客户端连接，所有会话、历史、active jobs 和事件续接保持一致。
@@ -395,6 +434,7 @@ Release workflow 增加 Undefined Chat 打包：
 - 同一会话运行中不能再次发送。
 - 客户端关闭、刷新、换设备后重新连接，能从 Runtime 恢复状态。
 - 完整消息能力可用。
+- 关键 PoC 结论已记录，且没有未处理的 Tauri Android、Stronghold/keyring、streaming upload、SSE 或 HTML CSP 阻塞项。
 - 桌面和 Android 都符合原生导航习惯。
 - WebUI WebChat 不回退。
 - CI 和 release 均包含 Undefined Chat。
