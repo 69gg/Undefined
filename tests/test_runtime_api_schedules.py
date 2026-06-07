@@ -9,6 +9,7 @@ import pytest
 from aiohttp import web
 
 from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
+from Undefined.api.routes.schedules import build_schedules_summary
 from Undefined.utils.scheduler import SELF_CALL_TOOL_NAME
 
 
@@ -74,6 +75,8 @@ class _FakeScheduler:
         if kwargs.get("tool_name") is not None:
             task["tool_name"] = kwargs.get("tool_name")
             task["tool_args"] = kwargs.get("tool_args", {})
+        elif kwargs.get("tool_args") is not None:
+            task["tool_args"] = kwargs.get("tool_args")
         return True
 
     async def remove_task(self, task_id: str) -> bool:
@@ -82,7 +85,7 @@ class _FakeScheduler:
         return True
 
 
-def _context(scheduler: _FakeScheduler) -> RuntimeAPIContext:
+def _context(scheduler: Any | None) -> RuntimeAPIContext:
     return RuntimeAPIContext(
         config_getter=lambda: SimpleNamespace(
             api=SimpleNamespace(
@@ -105,6 +108,24 @@ def _context(scheduler: _FakeScheduler) -> RuntimeAPIContext:
 def _payload(response: web.Response) -> dict[str, Any]:
     assert response.text is not None
     return cast(dict[str, Any], json.loads(response.text))
+
+
+def test_build_schedules_summary_includes_running_when_unavailable() -> None:
+    assert build_schedules_summary(_context(None)) == {
+        "available": False,
+        "count": 0,
+        "running": False,
+    }
+
+
+def test_build_schedules_summary_includes_running_when_list_tasks_missing() -> None:
+    context = _context(SimpleNamespace(scheduler=SimpleNamespace(running=True)))
+
+    assert build_schedules_summary(context) == {
+        "available": False,
+        "count": 0,
+        "running": False,
+    }
 
 
 @pytest.mark.asyncio
@@ -270,6 +291,29 @@ async def test_runtime_schedule_create_rejects_conflicting_mode_fields() -> None
 
 
 @pytest.mark.asyncio
+async def test_runtime_schedule_create_rejects_explicit_empty_task_id() -> None:
+    scheduler = _FakeScheduler()
+    server = RuntimeAPIServer(_context(scheduler), host="127.0.0.1", port=8788)
+    request = _JsonRequest(
+        _json={
+            "task_id": "",
+            "cron_expression": "0 9 * * *",
+            "mode": "single",
+            "tool_name": "get_current_time",
+        }
+    )
+
+    response = await server._schedules_create_handler(
+        cast(web.Request, cast(Any, request))
+    )
+    payload = _payload(response)
+
+    assert response.status == 400
+    assert payload["error"] == "task_id is required"
+    assert scheduler.add_calls == []
+
+
+@pytest.mark.asyncio
 async def test_runtime_schedule_update_can_clear_target_and_max_runs() -> None:
     scheduler = _FakeScheduler()
     scheduler.tasks["task_daily"] = {
@@ -301,6 +345,37 @@ async def test_runtime_schedule_update_can_clear_target_and_max_runs() -> None:
     assert payload["task"]["target_id"] is None
     assert payload["task"]["max_executions"] is None
     assert payload["task"]["target_type"] == "private"
+
+
+@pytest.mark.asyncio
+async def test_runtime_schedule_update_can_patch_single_tool_args_alone() -> None:
+    scheduler = _FakeScheduler()
+    scheduler.tasks["task_daily"] = {
+        "task_id": "task_daily",
+        "tool_name": "messages.send_message",
+        "tool_args": {"message": "旧内容"},
+        "cron": "0 9 * * *",
+        "target_id": 10001,
+        "target_type": "group",
+    }
+    server = RuntimeAPIServer(_context(scheduler), host="127.0.0.1", port=8788)
+    request = _JsonRequest(
+        _json={"tool_args": {"message": "新内容"}},
+        match_info={"task_id": "task_daily"},
+    )
+
+    response = await server._schedule_update_handler(
+        cast(web.Request, cast(Any, request))
+    )
+    payload = _payload(response)
+
+    assert response.status == 200
+    assert payload["ok"] is True
+    update_call = scheduler.update_calls[0]
+    assert update_call["tool_name"] is None
+    assert update_call["tool_args"] == {"message": "新内容"}
+    assert payload["task"]["tool_name"] == "messages.send_message"
+    assert payload["task"]["tool_args"] == {"message": "新内容"}
 
 
 @pytest.mark.asyncio

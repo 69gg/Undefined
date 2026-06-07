@@ -291,6 +291,14 @@ def _normalize_schedule_payload(
         normalized["execution_mode"] = _parse_execution_mode(body.get("execution_mode"))
         provided.add("execution_mode")
 
+    if mode is None and "tool_args" in body:
+        normalized["tool_args"] = _parse_json_object(
+            body.get("tool_args", {}),
+            field="tool_args",
+            default={},
+        )
+        provided.add("tool_args")
+
     return normalized, provided
 
 
@@ -354,10 +362,10 @@ def serialize_schedule_task(
 def build_schedules_summary(ctx: RuntimeAPIContext) -> dict[str, Any]:
     scheduler = ctx.scheduler
     if scheduler is None:
-        return {"available": False, "count": 0}
+        return {"available": False, "count": 0, "running": False}
     list_tasks = getattr(scheduler, "list_tasks", None)
     if not callable(list_tasks):
-        return {"available": False, "count": 0}
+        return {"available": False, "count": 0, "running": False}
     tasks = list_tasks()
     return {
         "available": True,
@@ -410,6 +418,16 @@ async def schedules_create_handler(
         body = await request.json()
         normalized, _provided = _normalize_schedule_payload(body, partial=False)
         raw_task_id = body.get("task_id") if isinstance(body, dict) else None
+        if (
+            isinstance(body, dict)
+            and "task_id" in body
+            and not _clean_text(
+                raw_task_id,
+                field="task_id",
+                max_length=96,
+            )
+        ):
+            raise SchedulePayloadError("task_id is required")
         task_id = (
             _parse_task_id(raw_task_id)
             if raw_task_id
