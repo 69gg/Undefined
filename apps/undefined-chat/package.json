@@ -16,12 +16,15 @@
 		"preview": "vite preview --host 0.0.0.0 --port 4183",
 		"tauri:dev": "tauri dev",
 		"tauri:build": "tauri build",
-		"tauri:android:init": "tauri android init --ci",
+		"tauri:android:init": "tauri android init --ci && python3 ../../scripts/prepare_tauri_android.py .",
+		"tauri:android:prepare": "python3 ../../scripts/prepare_tauri_android.py .",
+		"tauri:android:prepare:check": "python3 ../../scripts/prepare_tauri_android.py . --check",
 		"tauri:android": "tauri android build",
 		"tauri:android:debug": "tauri android build --debug"
 	},
 	"dependencies": {
 		"@tauri-apps/api": "^2.3.0",
+		"@tauri-apps/plugin-dialog": "^2.7.1",
 		"@tauri-apps/plugin-stronghold": "^2.3.0",
 		"react": "^19.0.0",
 		"react-dom": "^19.0.0"

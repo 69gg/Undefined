@@ -394,6 +394,19 @@ def test_create_app_registers_management_routes() -> None:
     assert ("GET", "/api/v1/management/runtime/chat/jobs/{job_id}/events") in routes
     assert ("POST", "/api/v1/management/runtime/chat/jobs/{job_id}/cancel") in routes
     assert ("DELETE", "/api/v1/management/runtime/chat/history") in routes
+    assert (
+        "GET",
+        "/api/v1/management/runtime/chat/attachments/capabilities",
+    ) in routes
+    assert ("POST", "/api/v1/management/runtime/chat/attachments") in routes
+    assert (
+        "GET",
+        "/api/v1/management/runtime/chat/attachments/{attachment_id}",
+    ) in routes
+    assert (
+        "GET",
+        "/api/v1/management/runtime/chat/attachments/{attachment_id}/preview",
+    ) in routes
     assert ("POST", "/api/v1/management/runtime/chat/files") in routes
 
 
@@ -843,6 +856,172 @@ async def test_runtime_chat_job_proxy_json_injects_runtime_api_key(
     assert captured["path"] == "/api/v1/chat/jobs/job%20%2Fsecret/events"
     assert captured["params"]["after"] == "7"
     assert captured["timeout_seconds"] == 20.0
+
+
+async def test_runtime_chat_job_proxy_preserves_structured_message(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _fake_proxy_runtime(**kwargs: Any) -> web.Response:
+        captured.update(kwargs)
+        return web.json_response({"job_id": "job-1"})
+
+    monkeypatch.setattr(_runtime, "_proxy_runtime", _fake_proxy_runtime)
+    monkeypatch.setattr(_runtime, "check_auth", lambda _request: True)
+    request = _request(
+        json_body={
+            "conversation_id": "conv-1",
+            "message": {
+                "text": "分析附件",
+                "attachment_ids": ["att-1"],
+                "references": [{"message_id": "msg-1", "quote": "引用"}],
+            },
+        }
+    )
+
+    response = await _runtime.runtime_chat_job_create_handler(
+        cast(web.Request, cast(Any, request))
+    )
+    payload = _json_payload(response)
+
+    assert payload["job_id"] == "job-1"
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/api/v1/chat/jobs"
+    assert captured["payload"] == {
+        "conversation_id": "conv-1",
+        "message": {
+            "text": "分析附件",
+            "attachment_ids": ["att-1"],
+            "references": [{"message_id": "msg-1", "quote": "引用"}],
+        },
+    }
+
+
+async def test_runtime_chat_attachment_capabilities_proxy(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _fake_proxy_runtime(**kwargs: Any) -> web.Response:
+        captured.update(kwargs)
+        return web.json_response({"multipart_field": "file"})
+
+    monkeypatch.setattr(_runtime, "_proxy_runtime", _fake_proxy_runtime)
+    monkeypatch.setattr(_runtime, "check_auth", lambda _request: True)
+    request = _request()
+
+    response = await _runtime.runtime_chat_attachment_capabilities_handler(
+        cast(web.Request, cast(Any, request))
+    )
+    payload = _json_payload(response)
+
+    assert payload["multipart_field"] == "file"
+    assert captured["method"] == "GET"
+    assert captured["path"] == "/api/v1/chat/attachments/capabilities"
+
+
+async def test_runtime_chat_attachment_upload_proxy(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _fake_proxy_runtime_multipart_file(
+        request: web.Request,
+        **kwargs: Any,
+    ) -> web.Response:
+        captured["request"] = request
+        captured.update(kwargs)
+        return web.json_response({"attachment": {"id": "att-1"}}, status=201)
+
+    monkeypatch.setattr(
+        _runtime,
+        "_proxy_runtime_multipart_file",
+        _fake_proxy_runtime_multipart_file,
+    )
+    monkeypatch.setattr(_runtime, "check_auth", lambda _request: True)
+    request = DummyMultipartRequest(DummyMultipartField([b"data"]))
+
+    response = await _runtime.runtime_chat_attachment_upload_handler(
+        cast(web.Request, cast(Any, request))
+    )
+    payload = _json_payload(response)
+
+    assert cast(web.Response, response).status == 201
+    assert cast(dict[str, object], payload["attachment"])["id"] == "att-1"
+    assert captured["path"] == "/api/v1/chat/attachments"
+    assert captured["request"] is request
+
+
+async def test_runtime_chat_attachment_download_and_preview_proxy(
+    monkeypatch: Any,
+) -> None:
+    captured: list[dict[str, Any]] = []
+
+    async def _fake_proxy_runtime_binary(**kwargs: Any) -> web.Response:
+        captured.append(dict(kwargs))
+        return web.Response(body=b"PNG", content_type="image/png")
+
+    monkeypatch.setattr(_runtime, "_proxy_runtime_binary", _fake_proxy_runtime_binary)
+    monkeypatch.setattr(_runtime, "check_auth", lambda _request: True)
+    download_request = cast(
+        web.Request,
+        cast(
+            Any,
+            SimpleNamespace(
+                headers={},
+                cookies={},
+                query={},
+                match_info={"attachment_id": "att /1"},
+                app=_request().app,
+            ),
+        ),
+    )
+    preview_request = cast(
+        web.Request,
+        cast(
+            Any,
+            SimpleNamespace(
+                headers={},
+                cookies={},
+                query={},
+                match_info={"attachment_id": "att /1"},
+                app=_request().app,
+            ),
+        ),
+    )
+
+    download_response = await _runtime.runtime_chat_attachment_download_handler(
+        download_request
+    )
+    preview_response = await _runtime.runtime_chat_attachment_preview_handler(
+        preview_request
+    )
+
+    assert cast(web.Response, download_response).body == b"PNG"
+    assert cast(web.Response, preview_response).body == b"PNG"
+    assert captured == [
+        {
+            "method": "GET",
+            "path": "/api/v1/chat/attachments/att%20%2F1",
+            "timeout_seconds": 60.0,
+        },
+        {
+            "method": "GET",
+            "path": "/api/v1/chat/attachments/att%20%2F1/preview",
+            "timeout_seconds": 60.0,
+        },
+    ]
+
+
+def test_management_api_docs_describe_native_chat_contract() -> None:
+    docs_path = Path(__file__).resolve().parents[1] / "docs" / "management-api.md"
+    text = docs_path.read_text(encoding="utf-8")
+
+    assert "全局 job 互斥" not in text
+    assert "CQ:file" not in text
+    assert "attachment_ids" in text
+    assert "同一会话" in text
 
 
 async def test_runtime_chat_job_proxy_sse_uses_stream_proxy(

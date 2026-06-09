@@ -2,7 +2,6 @@
 set -euo pipefail
 
 TAG_NAME="${1:-}"
-TAG_VERSION="${TAG_NAME#v}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -11,23 +10,17 @@ NC='\033[0m'
 
 cd "$(git rev-parse --show-toplevel)"
 
-get_pyproject_version() {
-  grep -E '^version = ' pyproject.toml | sed -E 's/version = "([^"]+)"/\1/'
-}
-
-get_init_version() {
-  grep -E '^__version__' src/Undefined/__init__.py | sed -E "s/__version__ = '([^']+)'/\1/" | sed -E 's/__version__ = "([^"]+)"/\1/'
-}
-
-PYPROJECT_VERSION=$(get_pyproject_version)
-INIT_VERSION=$(get_init_version)
-
-if [ "$TAG_VERSION" != "$PYPROJECT_VERSION" ] || [ "$TAG_VERSION" != "$INIT_VERSION" ]; then
-  echo -e "${RED}❌ Tag 版本与仓库版本号不一致${NC}"
-  echo -e "tag: ${YELLOW}$TAG_VERSION${NC}"
-  echo -e "pyproject.toml: ${YELLOW}$PYPROJECT_VERSION${NC}"
-  echo -e "src/Undefined/__init__.py: ${YELLOW}$INIT_VERSION${NC}"
+if [ -z "$TAG_NAME" ]; then
+  echo -e "${RED}❌ 缺少 tag 名称${NC}"
   exit 1
 fi
 
-echo -e "${GREEN}✅ 版本检查通过: $TAG_VERSION${NC}"
+if ! command -v uv >/dev/null 2>&1; then
+  echo -e "${RED}❌ 未找到 uv，请先安装 uv${NC}"
+  exit 1
+fi
+
+echo -e "${YELLOW}🔖 校验 release 版本一致性: $TAG_NAME${NC}"
+uv run python scripts/release_notes.py validate --tag "$TAG_NAME"
+
+echo -e "${GREEN}✅ 版本检查通过: ${TAG_NAME#v}${NC}"

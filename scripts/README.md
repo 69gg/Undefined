@@ -80,4 +80,48 @@ python3 scripts/release_notes.py notes --tag v3.4.0 --output release_notes.md
 - `apps/undefined-console/package-lock.json`
 - `apps/undefined-console/src-tauri/Cargo.toml`
 - `apps/undefined-console/src-tauri/tauri.conf.json`
+- `apps/undefined-console/src-tauri/Cargo.lock` 根包版本
+- `apps/undefined-chat/package.json`
+- `apps/undefined-chat/package-lock.json`
+- `apps/undefined-chat/src-tauri/Cargo.toml`
+- `apps/undefined-chat/src-tauri/tauri.conf.json`
+- `apps/undefined-chat/src-tauri/Cargo.lock` 根包版本
 - `CHANGELOG.md` 最新版本条目
+
+### bump_version.py — 同步项目版本号
+
+统一以 `pyproject.toml` 的主版本为源，更新 Python 包、Console 和 Chat 的版本文件。
+
+```bash
+uv run python scripts/bump_version.py 3.6.0
+uv run python scripts/bump_version.py 3.6.0 --dry-run
+uv run python scripts/bump_version.py 3.6.0 --commit
+```
+
+同步范围：
+
+- `pyproject.toml`
+- `src/Undefined/__init__.py`
+- `apps/undefined-console/package.json`
+- `apps/undefined-console/package-lock.json`
+- `apps/undefined-console/src-tauri/Cargo.toml`
+- `apps/undefined-console/src-tauri/tauri.conf.json`
+- `apps/undefined-console/src-tauri/Cargo.lock`
+- `apps/undefined-chat/package.json`
+- `apps/undefined-chat/package-lock.json`
+- `apps/undefined-chat/src-tauri/Cargo.toml`
+- `apps/undefined-chat/src-tauri/tauri.conf.json`
+- `apps/undefined-chat/src-tauri/Cargo.lock`
+
+非 dry-run 时脚本还会执行 `uv sync`，并分别在 Console / Chat 下执行 `npm install --package-lock-only` 与 `cargo update --workspace`，保证 lock 文件和 manifest 不漂移。
+
+### prepare_tauri_android.py — 生成后 Android 修补
+
+Tauri 的 `src-tauri/gen/` 是生成目录，不提交到仓库。Undefined Chat 需要移动端 HTML 预览使用独立 Android Activity，因此 Chat 的 `npm run tauri:android:init` 会在生成后运行：
+
+```bash
+python3 ../../scripts/prepare_tauri_android.py .
+python3 ../../scripts/prepare_tauri_android.py . --check
+```
+
+脚本只对 `apps/undefined-chat` 生效，会向生成的 Android app 注入 `HtmlPreviewActivity.kt` 并在 `AndroidManifest.xml` 中声明 `android:exported="false"`。Console 保持 no-op。

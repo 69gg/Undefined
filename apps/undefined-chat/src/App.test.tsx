@@ -1,201 +1,281 @@
-import { render, screen } from "@testing-library/react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
-import { probeRuntime, probeSecretStorage } from "./runtime";
-import { loadRuntimeApiKey, saveRuntimeApiKey } from "./secureStorage";
+import { createTauriRuntimeClient } from "./runtime-client/tauri";
+import { conversation, historyItem, runtimeClientStub } from "./test-fixtures";
 
-vi.mock("./runtime", () => ({
-	probeRuntime: vi.fn(),
-	probeSecretStorage: vi.fn(),
+vi.mock("./runtime-client/tauri", () => ({
+	createTauriRuntimeClient: vi.fn(),
 }));
 
-vi.mock("./secureStorage", () => ({
-	loadRuntimeApiKey: vi.fn(),
-	saveRuntimeApiKey: vi.fn(),
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+	open: vi.fn(),
 }));
-
-const mockProbeRuntime = vi.mocked(probeRuntime);
-const mockProbeSecretStorage = vi.mocked(probeSecretStorage);
-const mockLoadRuntimeApiKey = vi.mocked(loadRuntimeApiKey);
-const mockSaveRuntimeApiKey = vi.mocked(saveRuntimeApiKey);
 
 describe("App", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
 	});
 
-	test("renders the default runtime connection state", () => {
-		render(<App />);
-
-		const runtimeInput = screen.getByLabelText(
-			"Runtime URL",
-		) as HTMLInputElement;
-		const apiKeyInput = screen.getByLabelText("API Key") as HTMLInputElement;
-
-		expect(
-			screen.getByRole("heading", {
-				name: "原生优先 WebChat 客户端验证",
+	test("boots into a Chinese chat-first workspace", async () => {
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(
+			runtimeClientStub({
+				listConversations: vi.fn(async () => ({
+					conversations: [
+						conversation({ id: "default", title: "默认会话" }),
+						conversation({ id: "ops", title: "运维排障", messageCount: 4 }),
+					],
+					activeJob: null,
+					defaultConversationId: "default",
+					virtualUserId: "webchat",
+				})),
+				getHistory: vi.fn(async () => ({
+					conversationId: "default",
+					virtualUserId: "webchat",
+					permission: "superadmin",
+					count: 1,
+					items: [
+						historyItem({
+							messageId: "msg-1",
+							content: "今天需要做什么？",
+						}),
+					],
+					limit: 50,
+					before: null,
+					hasMore: false,
+					nextBefore: null,
+					total: 1,
+				})),
 			}),
-		).toBeTruthy();
-		expect(runtimeInput.value).toBe("http://127.0.0.1:8788");
-		expect(apiKeyInput.type).toBe("password");
-		expect(apiKeyInput.autocomplete).toBe("off");
-		expect(screen.getByText("待连接")).toBeTruthy();
-	});
-
-	test("shows runtime probe results", async () => {
-		mockProbeRuntime.mockResolvedValue({
-			ok: true,
-			status: 200,
-			body: "ok",
-		});
+		);
 
 		render(<App />);
-		await userEvent.click(screen.getByRole("button", { name: "测试连接" }));
-
-		expect(mockProbeRuntime).toHaveBeenCalledWith("http://127.0.0.1:8788");
-		expect(await screen.findByText("已连接")).toBeTruthy();
-		expect(screen.getByText(/"status": 200/)).toBeTruthy();
-	});
-
-	test("clears stale runtime results when a later probe fails", async () => {
-		mockProbeRuntime
-			.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				body: "ok",
-			})
-			.mockRejectedValueOnce(new Error("runtime offline"));
-
-		render(<App />);
-		await userEvent.click(screen.getByRole("button", { name: "测试连接" }));
-		expect(await screen.findByText(/"status": 200/)).toBeTruthy();
-
-		await userEvent.click(screen.getByRole("button", { name: "测试连接" }));
-
-		expect(await screen.findByText("Error: runtime offline")).toBeTruthy();
-		expect(screen.queryByText(/"status": 200/)).toBeNull();
-	});
-
-	test("shows secret storage probe results", async () => {
-		mockProbeSecretStorage.mockResolvedValue({
-			available: true,
-			degraded: false,
-			detail: "stronghold ready",
-		});
-
-		render(<App />);
-		await userEvent.click(screen.getByRole("button", { name: "探测" }));
-
-		expect(mockProbeSecretStorage).toHaveBeenCalledOnce();
-		expect(screen.getByText(/stronghold ready/)).toBeTruthy();
-	});
-
-	test("shows secret storage probe errors", async () => {
-		mockProbeSecretStorage.mockRejectedValue(new Error("command unavailable"));
-
-		render(<App />);
-		await userEvent.click(screen.getByRole("button", { name: "探测" }));
-
-		expect(mockProbeSecretStorage).toHaveBeenCalledOnce();
-		expect(await screen.findByText("Error: command unavailable")).toBeTruthy();
-	});
-
-	test("clears stale secret storage results when a later probe fails", async () => {
-		mockProbeSecretStorage
-			.mockResolvedValueOnce({
-				available: true,
-				degraded: false,
-				detail: "stronghold ready",
-			})
-			.mockRejectedValueOnce(new Error("stronghold locked"));
-
-		render(<App />);
-		await userEvent.click(screen.getByRole("button", { name: "探测" }));
-		expect(await screen.findByText(/stronghold ready/)).toBeTruthy();
-
-		await userEvent.click(screen.getByRole("button", { name: "探测" }));
-
-		expect(await screen.findByText("Error: stronghold locked")).toBeTruthy();
-		expect(screen.queryByText(/stronghold ready/)).toBeNull();
-	});
-
-	test("saves the API key through secure storage", async () => {
-		mockSaveRuntimeApiKey.mockResolvedValue();
-
-		render(<App />);
-		await userEvent.type(screen.getByLabelText("API Key"), "test-api-key");
-		await userEvent.click(screen.getByRole("button", { name: "保存 API Key" }));
-
-		expect(mockSaveRuntimeApiKey).toHaveBeenCalledWith("test-api-key");
-		expect(await screen.findByText("API Key 已保存")).toBeTruthy();
-	});
-
-	test("round-trips a saved API key back into the input", async () => {
-		let storedApiKey = "";
-		mockSaveRuntimeApiKey.mockImplementation(async (apiKey: string) => {
-			storedApiKey = apiKey;
-		});
-		mockLoadRuntimeApiKey.mockImplementation(async () => storedApiKey);
-
-		render(<App />);
-		const apiKeyInput = screen.getByLabelText("API Key") as HTMLInputElement;
-		await userEvent.type(apiKeyInput, "saved-api-key");
-		await userEvent.click(screen.getByRole("button", { name: "保存 API Key" }));
-		await userEvent.clear(apiKeyInput);
-		await userEvent.type(apiKeyInput, "changed-api-key");
-		await userEvent.click(screen.getByRole("button", { name: "读取 API Key" }));
-
-		expect(mockSaveRuntimeApiKey).toHaveBeenCalledWith("saved-api-key");
-		expect(mockLoadRuntimeApiKey).toHaveBeenCalledOnce();
-		expect(await screen.findByText("API Key 已读取")).toBeTruthy();
-		expect(apiKeyInput.value).toBe("saved-api-key");
-	});
-
-	test("clears stale storage messages when probing runtime", async () => {
-		mockSaveRuntimeApiKey.mockResolvedValue();
-		mockProbeRuntime.mockResolvedValue({
-			ok: false,
-			status: 503,
-			body: "offline",
-		});
-
-		render(<App />);
-		await userEvent.type(screen.getByLabelText("API Key"), "test-api-key");
-		await userEvent.click(screen.getByRole("button", { name: "保存 API Key" }));
-		expect(await screen.findByText("API Key 已保存")).toBeTruthy();
-
-		await userEvent.click(screen.getByRole("button", { name: "测试连接" }));
-
-		expect(await screen.findByText("连接断开")).toBeTruthy();
-		expect(screen.queryByText("API Key 已保存")).toBeNull();
-	});
-
-	test("shows when no API key has been saved", async () => {
-		mockLoadRuntimeApiKey.mockResolvedValue(null);
-
-		render(<App />);
-		await userEvent.click(screen.getByRole("button", { name: "读取 API Key" }));
-
-		expect(mockLoadRuntimeApiKey).toHaveBeenCalledOnce();
-		expect(await screen.findByText("没有已保存的 API Key")).toBeTruthy();
-	});
-
-	test("clears stale storage messages when storage fails", async () => {
-		mockSaveRuntimeApiKey.mockResolvedValue();
-		mockLoadRuntimeApiKey.mockRejectedValue(new Error("secure storage locked"));
-
-		render(<App />);
-		await userEvent.type(screen.getByLabelText("API Key"), "test-api-key");
-		await userEvent.click(screen.getByRole("button", { name: "保存 API Key" }));
-		expect(await screen.findByText("API Key 已保存")).toBeTruthy();
-
-		await userEvent.click(screen.getByRole("button", { name: "读取 API Key" }));
 
 		expect(
-			await screen.findByText("Error: secure storage locked"),
+			await screen.findByRole("navigation", { name: "会话" }),
 		).toBeTruthy();
-		expect(screen.queryByText("API Key 已保存")).toBeNull();
+		expect(screen.getByRole("log", { name: "消息" })).toBeTruthy();
+		expect(screen.getByLabelText("消息输入")).toBeTruthy();
+		expect(screen.getByText("今天需要做什么？")).toBeTruthy();
+		expect(screen.queryByText(/PoC/)).toBeNull();
+		expect(screen.queryByText("原生优先 WebChat 客户端验证")).toBeNull();
+	});
+
+	test("keeps different conversations independently selectable", async () => {
+		const client = runtimeClientStub({
+			listConversations: vi.fn(async () => ({
+				conversations: [
+					conversation({ id: "default", title: "默认会话" }),
+					conversation({ id: "ops", title: "运维排障", messageCount: 4 }),
+				],
+				activeJob: null,
+				defaultConversationId: "default",
+				virtualUserId: "webchat",
+			})),
+			getHistory: vi
+				.fn()
+				.mockResolvedValueOnce({
+					conversationId: "default",
+					virtualUserId: "webchat",
+					permission: "superadmin",
+					count: 1,
+					items: [
+						historyItem({
+							messageId: "default-msg",
+							content: "默认消息",
+						}),
+					],
+					limit: 50,
+					before: null,
+					hasMore: false,
+					nextBefore: null,
+					total: 1,
+				})
+				.mockResolvedValueOnce({
+					conversationId: "ops",
+					virtualUserId: "webchat",
+					permission: "superadmin",
+					count: 1,
+					items: [
+						historyItem({
+							messageId: "ops-msg",
+							content: "运维消息",
+						}),
+					],
+					limit: 50,
+					before: null,
+					hasMore: false,
+					nextBefore: null,
+					total: 1,
+				}),
+		});
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+
+		render(<App />);
+		await screen.findByText("默认消息");
+		await userEvent.click(screen.getByRole("button", { name: /运维排障/ }));
+
+		expect(await screen.findByText("运维消息")).toBeTruthy();
+		expect(client.getHistory).toHaveBeenLastCalledWith({
+			conversationId: "ops",
+			limit: 50,
+		});
+	});
+
+	test("saves initial Runtime config and API key before reconnecting", async () => {
+		const client = runtimeClientStub({
+			getRuntimeConfig: vi
+				.fn()
+				.mockResolvedValueOnce(null)
+				.mockResolvedValueOnce({
+					runtimeUrl: "http://127.0.0.1:8788",
+					hasApiKey: true,
+				}),
+		});
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+
+		render(<App />);
+		expect(await screen.findByText("保存并连接")).toBeTruthy();
+
+		await userEvent.clear(screen.getByLabelText("Runtime URL"));
+		await userEvent.type(
+			screen.getByLabelText("Runtime URL"),
+			"http://127.0.0.1:8788",
+		);
+		await userEvent.type(screen.getByLabelText("API Key"), "sk-test");
+		await userEvent.click(screen.getByRole("button", { name: "保存并连接" }));
+
+		expect(client.saveRuntimeConfig).toHaveBeenCalledWith(
+			"http://127.0.0.1:8788",
+		);
+		expect(client.saveApiKey).toHaveBeenCalledWith("sk-test");
+		expect(await screen.findByRole("log", { name: "消息" })).toBeTruthy();
+	});
+
+	test("requires an explicit opt-in before confirming insecure API key storage fallback", async () => {
+		const client = runtimeClientStub({
+			getRuntimeConfig: vi
+				.fn()
+				.mockResolvedValueOnce(null)
+				.mockResolvedValueOnce({
+					runtimeUrl: "http://127.0.0.1:8788",
+					hasApiKey: true,
+				}),
+		});
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+
+		render(<App />);
+		expect(await screen.findByText("保存并连接")).toBeTruthy();
+
+		await userEvent.clear(screen.getByLabelText("Runtime URL"));
+		await userEvent.type(
+			screen.getByLabelText("Runtime URL"),
+			"http://127.0.0.1:8788",
+		);
+		await userEvent.type(screen.getByLabelText("API Key"), "sk-test");
+		await userEvent.click(screen.getByLabelText("允许不安全存储降级"));
+		await userEvent.click(screen.getByRole("button", { name: "保存并连接" }));
+
+		expect(client.confirmInsecureStorageFallback).toHaveBeenCalledOnce();
+		expect(client.saveApiKey).toHaveBeenCalledWith("sk-test");
+	});
+
+	test("creates conversations from the rail action", async () => {
+		const client = runtimeClientStub();
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+
+		render(<App />);
+		await screen.findByRole("navigation", { name: "会话" });
+		await userEvent.click(screen.getByRole("button", { name: "新建" }));
+
+		expect(client.createConversation).toHaveBeenCalledOnce();
+		expect(await screen.findByRole("button", { name: /新会话/ })).toBeTruthy();
+	});
+
+	test("uses the native file picker when adding attachments", async () => {
+		vi.mocked(open).mockResolvedValue("/tmp/trace.log");
+		const promptSpy = vi
+			.spyOn(window, "prompt")
+			.mockImplementation(() => "/tmp/legacy.log");
+		const client = runtimeClientStub();
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+
+		render(<App />);
+		await screen.findByRole("navigation", { name: "会话" });
+		await userEvent.click(screen.getByRole("button", { name: "添加附件" }));
+
+		expect(open).toHaveBeenCalledWith({
+			multiple: false,
+			directory: false,
+			title: "选择附件",
+			pickerMode: "document",
+			fileAccessMode: "copy",
+		});
+		expect(promptSpy).not.toHaveBeenCalled();
+		await waitFor(() => {
+			expect(client.uploadAttachment).toHaveBeenCalledWith({
+				filePath: "/tmp/trace.log",
+			});
+		});
+	});
+
+	test("uses native attachment bridges for timeline actions", async () => {
+		const client = runtimeClientStub({
+			getHistory: vi.fn(async () => ({
+				conversationId: "default",
+				virtualUserId: "webchat",
+				permission: "superadmin",
+				count: 1,
+				items: [
+					historyItem({
+						messageId: "msg-attachment",
+						role: "bot",
+						content: "附件已生成",
+						attachments: [
+							{
+								id: "att-1",
+								name: "report.png",
+								size: 2048,
+								mediaType: "image/png",
+								kind: "image",
+								downloadUrl: "/api/v1/chat/attachments/att-1",
+								previewUrl: "/api/v1/chat/attachments/att-1/preview",
+								discarded: false,
+							},
+						],
+					}),
+				],
+				limit: 50,
+				before: null,
+				hasMore: false,
+				nextBefore: null,
+				total: 1,
+			})),
+		});
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+		vi.spyOn(window, "alert").mockImplementation(() => undefined);
+		vi.spyOn(window, "open").mockImplementation(() => null);
+		vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:preview");
+
+		render(<App />);
+		await screen.findByText("report.png");
+
+		await userEvent.click(screen.getByRole("button", { name: "预览" }));
+		await userEvent.click(screen.getByRole("button", { name: "保存" }));
+
+		expect(client.previewAttachment).toHaveBeenCalledWith({
+			attachmentId: "att-1",
+		});
+		expect(client.saveAttachment).toHaveBeenCalledWith({
+			attachmentId: "att-1",
+			fileName: "report.png",
+		});
+		expect(window.open).toHaveBeenCalledWith(
+			"blob:preview",
+			"_blank",
+			"noopener,noreferrer",
+		);
 	});
 });

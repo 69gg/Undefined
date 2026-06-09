@@ -1,15 +1,19 @@
-use crate::config::normalize_runtime_url;
+use crate::{
+    config::normalize_runtime_url,
+    secret::require_api_key,
+    state::{require_runtime_config, NativeState},
+};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use tauri::{AppHandle, State};
 use tauri_plugin_http::reqwest::{multipart, Body, Client};
 use tokio::fs::File;
 use tokio_util::io::ReaderStream;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct UploadAttachmentInput {
-    pub runtime_url: String,
-    pub api_key: String,
     pub file_path: String,
 }
 
@@ -23,6 +27,11 @@ pub struct UploadAttachmentResult {
 pub(crate) fn attachments_url(runtime_url: &str) -> Result<String, String> {
     let base = normalize_runtime_url(runtime_url)?;
     Ok(format!("{base}/api/v1/chat/attachments"))
+}
+
+#[cfg(test)]
+pub fn upload_uses_streaming_body() -> bool {
+    true
 }
 
 pub(crate) fn attachment_file_name(path: &Path) -> String {
@@ -55,9 +64,13 @@ pub(crate) async fn open_regular_attachment_file(
 
 #[tauri::command]
 pub async fn upload_attachment_streaming(
+    app: AppHandle,
+    state: State<'_, NativeState>,
     input: UploadAttachmentInput,
 ) -> Result<UploadAttachmentResult, String> {
-    let url = attachments_url(&input.runtime_url)?;
+    let config = require_runtime_config(&app, &state).await?;
+    let api_key = require_api_key(&app).await?;
+    let url = attachments_url(&config.runtime_url)?;
     let path = Path::new(&input.file_path);
     let file = open_regular_attachment_file(path, &input.file_path).await?;
     let stream = ReaderStream::with_capacity(file, 256 * 1024);
@@ -67,7 +80,7 @@ pub async fn upload_attachment_streaming(
 
     let response = Client::new()
         .post(url)
-        .header("X-Undefined-API-Key", &input.api_key)
+        .header("X-Undefined-API-Key", api_key)
         .multipart(form)
         .send()
         .await

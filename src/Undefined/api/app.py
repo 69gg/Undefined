@@ -192,6 +192,14 @@ class RuntimeAPIServer:
                     "/api/v1/chat/attachments",
                     self._chat_attachment_upload_handler,
                 ),
+                web.get(
+                    "/api/v1/chat/attachments/{attachment_id}",
+                    self._chat_attachment_download_handler,
+                ),
+                web.get(
+                    "/api/v1/chat/attachments/{attachment_id}/preview",
+                    self._chat_attachment_preview_handler,
+                ),
                 web.post("/api/v1/chat/jobs", self._chat_job_create_handler),
                 web.get("/api/v1/chat/jobs/active", self._chat_job_active_handler),
                 web.get("/api/v1/chat/jobs/{job_id}", self._chat_job_detail_handler),
@@ -379,6 +387,16 @@ class RuntimeAPIServer:
 
     async def _chat_attachment_upload_handler(self, request: web.Request) -> Response:
         return await chat.chat_attachment_upload_handler(self._ctx, request)
+
+    async def _chat_attachment_download_handler(
+        self, request: web.Request
+    ) -> web.StreamResponse:
+        return await chat.chat_attachment_download_handler(self._ctx, request)
+
+    async def _chat_attachment_preview_handler(
+        self, request: web.Request
+    ) -> web.StreamResponse:
+        return await chat.chat_attachment_preview_handler(self._ctx, request)
 
     async def _chat_handler(self, request: web.Request) -> web.StreamResponse:
         return await chat.chat_handler(self._ctx, self._chat_job_manager, request)

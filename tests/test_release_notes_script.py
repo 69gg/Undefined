@@ -85,6 +85,7 @@ def _write_release_project(
 ) -> None:
     (root / "src" / "Undefined").mkdir(parents=True)
     (root / "apps" / "undefined-console" / "src-tauri").mkdir(parents=True)
+    (root / "apps" / "undefined-chat" / "src-tauri").mkdir(parents=True)
     (root / "pyproject.toml").write_text(
         f'[project]\nname = "Undefined-bot"\nversion = "{build_version}"\n',
         encoding="utf-8",
@@ -93,22 +94,34 @@ def _write_release_project(
         f'__version__ = "{build_version}"\n',
         encoding="utf-8",
     )
-    (root / "apps" / "undefined-console" / "package.json").write_text(
-        f'{{"version":"{build_version}"}}\n',
-        encoding="utf-8",
-    )
-    (root / "apps" / "undefined-console" / "package-lock.json").write_text(
-        f'{{"version":"{build_version}","packages":{{"":{{"version":"{build_version}"}}}}}}\n',
-        encoding="utf-8",
-    )
-    (root / "apps" / "undefined-console" / "src-tauri" / "Cargo.toml").write_text(
-        f'[package]\nname = "undefined-console"\nversion = "{build_version}"\n',
-        encoding="utf-8",
-    )
-    (root / "apps" / "undefined-console" / "src-tauri" / "tauri.conf.json").write_text(
-        f'{{"version":"{build_version}"}}\n',
-        encoding="utf-8",
-    )
+    for app_dir, cargo_package in (
+        ("undefined-console", "undefined_console"),
+        ("undefined-chat", "undefined_chat"),
+    ):
+        app_root = root / "apps" / app_dir
+        tauri_root = app_root / "src-tauri"
+        app_root.mkdir(parents=True, exist_ok=True)
+        tauri_root.mkdir(parents=True, exist_ok=True)
+        (app_root / "package.json").write_text(
+            f'{{"version":"{build_version}"}}\n',
+            encoding="utf-8",
+        )
+        (app_root / "package-lock.json").write_text(
+            f'{{"version":"{build_version}","packages":{{"":{{"version":"{build_version}"}}}}}}\n',
+            encoding="utf-8",
+        )
+        (tauri_root / "Cargo.toml").write_text(
+            f'[package]\nname = "{cargo_package}"\nversion = "{build_version}"\n',
+            encoding="utf-8",
+        )
+        (tauri_root / "tauri.conf.json").write_text(
+            f'{{"version":"{build_version}"}}\n',
+            encoding="utf-8",
+        )
+        (tauri_root / "Cargo.lock").write_text(
+            f'version = 3\n\n[[package]]\nname = "{cargo_package}"\nversion = "{build_version}"\n',
+            encoding="utf-8",
+        )
     (root / "CHANGELOG.md").write_text(
         f"""
 ## {changelog_version} 测试版本
@@ -137,7 +150,17 @@ def test_validate_release_versions_accepts_matching_project(tmp_path: Path) -> N
         "pyproject.toml",
         "src/Undefined/__init__.py",
         "apps/undefined-console/package.json",
+        "apps/undefined-console/package-lock.json",
+        'apps/undefined-console/package-lock.json packages[""]',
         "apps/undefined-console/src-tauri/Cargo.toml",
+        "apps/undefined-console/src-tauri/tauri.conf.json",
+        "apps/undefined-console/src-tauri/Cargo.lock undefined_console",
+        "apps/undefined-chat/package.json",
+        "apps/undefined-chat/package-lock.json",
+        'apps/undefined-chat/package-lock.json packages[""]',
+        "apps/undefined-chat/src-tauri/Cargo.toml",
+        "apps/undefined-chat/src-tauri/tauri.conf.json",
+        "apps/undefined-chat/src-tauri/Cargo.lock undefined_chat",
     }
 
 
@@ -164,6 +187,61 @@ def test_validate_release_versions_rejects_app_manifest_mismatch(
     with pytest.raises(
         release_notes.ReleaseValidationError, match="package.json=1.2.4"
     ):
+        release_notes.validate_release_versions(
+            tag_name="v1.2.3", project_root=tmp_path
+        )
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "replacement", "match"),
+    [
+        (
+            "apps/undefined-chat/package.json",
+            '{"version":"1.2.4"}\n',
+            "apps/undefined-chat/package.json=1.2.4",
+        ),
+        (
+            "apps/undefined-chat/package-lock.json",
+            '{"version":"1.2.4","packages":{"":{"version":"1.2.3"}}}\n',
+            "apps/undefined-chat/package-lock.json=1.2.4",
+        ),
+        (
+            "apps/undefined-chat/package-lock.json",
+            '{"version":"1.2.3","packages":{"":{"version":"1.2.4"}}}\n',
+            'apps/undefined-chat/package-lock.json packages\\[""\\]=1.2.4',
+        ),
+        (
+            "apps/undefined-chat/src-tauri/Cargo.toml",
+            '[package]\nname = "undefined_chat"\nversion = "1.2.4"\n',
+            "apps/undefined-chat/src-tauri/Cargo.toml=1.2.4",
+        ),
+        (
+            "apps/undefined-chat/src-tauri/tauri.conf.json",
+            '{"version":"1.2.4"}\n',
+            "apps/undefined-chat/src-tauri/tauri.conf.json=1.2.4",
+        ),
+        (
+            "apps/undefined-chat/src-tauri/Cargo.lock",
+            'version = 3\n\n[[package]]\nname = "undefined_chat"\nversion = "1.2.4"\n',
+            "apps/undefined-chat/src-tauri/Cargo.lock undefined_chat=1.2.4",
+        ),
+        (
+            "apps/undefined-console/src-tauri/Cargo.lock",
+            'version = 3\n\n[[package]]\nname = "undefined_console"\nversion = "1.2.4"\n',
+            "apps/undefined-console/src-tauri/Cargo.lock undefined_console=1.2.4",
+        ),
+    ],
+)
+def test_validate_release_versions_rejects_native_app_version_mismatch(
+    tmp_path: Path,
+    relative_path: str,
+    replacement: str,
+    match: str,
+) -> None:
+    _write_release_project(tmp_path)
+    (tmp_path / relative_path).write_text(replacement, encoding="utf-8")
+
+    with pytest.raises(release_notes.ReleaseValidationError, match=match):
         release_notes.validate_release_versions(
             tag_name="v1.2.3", project_root=tmp_path
         )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -13,6 +14,11 @@ import pytest
 from Undefined.api import RuntimeAPIServer
 from Undefined.api._context import RuntimeAPIContext
 from Undefined.api.routes import chat
+
+
+@pytest.fixture(autouse=True)
+def _isolate_webchat_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
 
 
 class _DummyConfig:
@@ -159,7 +165,7 @@ async def test_chat_attachment_capabilities_clamps_explicit_zero_limit() -> None
 
 
 @pytest.mark.asyncio
-async def test_openapi_spec_includes_chat_attachment_poc_paths() -> None:
+async def test_openapi_spec_includes_chat_attachment_paths() -> None:
     server = RuntimeAPIServer(_openapi_ctx(), host="127.0.0.1", port=8788)
 
     response = await server._openapi_handler(_openapi_request())
@@ -170,6 +176,39 @@ async def test_openapi_spec_includes_chat_attachment_poc_paths() -> None:
     assert "get" in paths["/api/v1/chat/attachments/capabilities"]
     assert "/api/v1/chat/attachments" in paths
     assert "post" in paths["/api/v1/chat/attachments"]
+    assert "/api/v1/chat/attachments/{attachment_id}" in paths
+    assert "get" in paths["/api/v1/chat/attachments/{attachment_id}"]
+    assert "/api/v1/chat/attachments/{attachment_id}/preview" in paths
+    assert "get" in paths["/api/v1/chat/attachments/{attachment_id}/preview"]
+
+
+@pytest.mark.asyncio
+async def test_openapi_spec_documents_native_chat_contract() -> None:
+    server = RuntimeAPIServer(_openapi_ctx(), host="127.0.0.1", port=8788)
+
+    response = await server._openapi_handler(_openapi_request())
+
+    spec = _json(response)
+    serialized = json.dumps(spec, ensure_ascii=False)
+    assert "process-local single-flight" not in serialized
+    assert "CQ:file" not in serialized
+    assert "per-conversation single-flight" in serialized
+    assert "attachment_ids" in serialized
+    assert "requires_action" in serialized
+    assert "jobs[]" in serialized
+
+
+def test_openapi_markdown_documents_native_chat_contract() -> None:
+    docs_path = Path(__file__).resolve().parents[1] / "docs" / "openapi.md"
+    text = docs_path.read_text(encoding="utf-8")
+
+    assert "全局单飞" not in text
+    assert "全局 job 互斥" not in text
+    assert "CQ:file" not in text
+    assert "attachment_ids" in text
+    assert "requires_action" in text
+    assert "jobs[]" in text
+    assert "同一会话" in text
 
 
 @pytest.mark.asyncio
@@ -200,7 +239,100 @@ async def test_chat_attachment_upload_accepts_image_multipart() -> None:
     assert attachment["size"] == 8
     assert attachment["media_type"] == "image/png"
     assert attachment["kind"] == "image"
-    assert attachment["poc_discarded"] is True
+    assert attachment["discarded"] is False
+    assert "poc_discarded" not in attachment
+    assert attachment["download_url"].startswith("/api/v1/chat/attachments/")
+    assert attachment["preview_url"].endswith("/preview")
+
+
+@pytest.mark.asyncio
+async def test_chat_attachment_upload_downloads_exact_bytes_and_previews_image() -> (
+    None
+):
+    app = web.Application()
+    ctx = _ctx()
+
+    async def _upload(request: web.Request) -> web.Response:
+        return await chat.chat_attachment_upload_handler(ctx, request)
+
+    async def _download(request: web.Request) -> web.StreamResponse:
+        return await chat.chat_attachment_download_handler(ctx, request)
+
+    async def _preview(request: web.Request) -> web.StreamResponse:
+        return await chat.chat_attachment_preview_handler(ctx, request)
+
+    app.router.add_post("/api/v1/chat/attachments", _upload)
+    app.router.add_get("/api/v1/chat/attachments/{attachment_id}", _download)
+    app.router.add_get("/api/v1/chat/attachments/{attachment_id}/preview", _preview)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        data = FormData()
+        image_bytes = b"\x89PNG\r\n\x1a\n"
+        data.add_field(
+            "file",
+            image_bytes,
+            filename='..\\evil"/photo.png',
+            content_type="application/octet-stream",
+        )
+        upload_response = await client.post("/api/v1/chat/attachments", data=data)
+        upload_payload = cast(dict[str, Any], await upload_response.json())
+        attachment = upload_payload["attachment"]
+
+        download_response = await client.get(
+            f"/api/v1/chat/attachments/{attachment['id']}"
+        )
+        preview_response = await client.get(
+            f"/api/v1/chat/attachments/{attachment['id']}/preview"
+        )
+
+        assert download_response.status == 200
+        assert await download_response.read() == image_bytes
+        assert "filename=" in download_response.headers["Content-Disposition"]
+        assert "evil" not in download_response.headers["Content-Disposition"]
+        assert preview_response.status == 200
+        assert await preview_response.read() == image_bytes
+        assert preview_response.headers["Content-Type"].startswith("image/png")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_chat_attachment_preview_rejects_non_image_file() -> None:
+    app = web.Application()
+    ctx = _ctx()
+
+    async def _upload(request: web.Request) -> web.Response:
+        return await chat.chat_attachment_upload_handler(ctx, request)
+
+    async def _preview(request: web.Request) -> web.StreamResponse:
+        return await chat.chat_attachment_preview_handler(ctx, request)
+
+    app.router.add_post("/api/v1/chat/attachments", _upload)
+    app.router.add_get("/api/v1/chat/attachments/{attachment_id}/preview", _preview)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        data = FormData()
+        data.add_field(
+            "file",
+            b"plain text",
+            filename="note.txt",
+            content_type="text/plain",
+        )
+        upload_response = await client.post("/api/v1/chat/attachments", data=data)
+        upload_payload = cast(dict[str, Any], await upload_response.json())
+        attachment = upload_payload["attachment"]
+
+        preview_response = await client.get(
+            f"/api/v1/chat/attachments/{attachment['id']}/preview"
+        )
+        payload = cast(dict[str, Any], await preview_response.json())
+
+        assert preview_response.status == 415
+        assert "preview" in payload["error"].lower()
+    finally:
+        await client.close()
 
 
 @pytest.mark.asyncio

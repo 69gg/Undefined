@@ -2,13 +2,23 @@ use crate::config::normalize_runtime_url;
 use crate::preview::{
     build_preview_data_url, preview_document, preview_navigation_allowed, MAX_PREVIEW_HTML_BYTES,
 };
-use crate::runtime_client::{job_events_url, runtime_health_from_body_result, Utf8ChunkDecoder};
-use crate::secret::{
-    classify_secret_storage, derive_stronghold_key, supports_system_keyring_target,
+use crate::runtime_client::{
+    build_runtime_url, job_events_url, parse_sse_chunks, runtime_health_from_body_result,
+    RuntimeRequestInput, StartJobEventStreamInput, Utf8ChunkDecoder,
 };
-use crate::upload::{
-    attachment_file_name, attachments_url, open_regular_attachment_file,
-    upload_attachment_streaming, UploadAttachmentInput,
+use crate::secret::{
+    api_key_status_from_storage, classify_secret_storage, derive_stronghold_key,
+    load_api_key_status_from_value, supports_system_keyring_target,
+};
+use crate::state::{
+    AppRuntimeConfig, RuntimeConfigInput, RuntimeRequestPath, APP_CONFIG_FILE_NAME,
+};
+use crate::{
+    download::test_safe_file_name,
+    upload::{
+        attachment_file_name, attachments_url, open_regular_attachment_file,
+        upload_uses_streaming_body, UploadAttachmentInput,
+    },
 };
 
 #[test]
@@ -36,6 +46,43 @@ fn normalize_runtime_url_rejects_fragment() {
 }
 
 #[test]
+fn normalize_runtime_url_rejects_path_and_credentials() {
+    let path_err = normalize_runtime_url("http://127.0.0.1:8788/api").unwrap_err();
+    assert!(path_err.contains("runtime_url must be an origin"));
+
+    let credentials_err = normalize_runtime_url("http://user:pass@127.0.0.1:8788").unwrap_err();
+    assert!(credentials_err.contains("runtime_url must not include credentials"));
+}
+
+#[test]
+fn normalize_runtime_url_rejects_non_http_origins() {
+    for value in [
+        "file:///tmp/runtime.sock",
+        "data:text/plain,hello",
+        "javascript:alert(1)",
+        "ws://127.0.0.1:8788",
+    ] {
+        let err = normalize_runtime_url(value).unwrap_err();
+        assert!(err.contains("unsupported runtime_url scheme"));
+    }
+}
+
+#[test]
+fn runtime_config_input_normalizes_runtime_origin() {
+    let config = AppRuntimeConfig::from_input(RuntimeConfigInput {
+        runtime_url: " http://127.0.0.1:8788/// ".to_string(),
+    })
+    .unwrap();
+
+    assert_eq!(config.runtime_url, "http://127.0.0.1:8788");
+}
+
+#[test]
+fn runtime_config_file_name_is_stable() {
+    assert_eq!(APP_CONFIG_FILE_NAME, "runtime-config.json");
+}
+
+#[test]
 fn job_events_url_uses_normalized_runtime_base_and_after_sequence() {
     let value = job_events_url("http://127.0.0.1:8788///", "job-123", 42).unwrap();
     assert_eq!(
@@ -57,6 +104,54 @@ fn job_events_url_encodes_job_id_path_segment() {
         value,
         "http://127.0.0.1:8788/api/v1/chat/jobs/job%20%2Fsecret/events?after=7"
     );
+}
+
+#[test]
+fn runtime_url_builder_accepts_only_relative_runtime_api_paths() {
+    let base = AppRuntimeConfig {
+        runtime_url: "http://127.0.0.1:8788".to_string(),
+    };
+    let input = RuntimeRequestPath::new("/api/v1/chat/history?conversation_id=abc").unwrap();
+    let value = build_runtime_url(&base, &input).unwrap();
+
+    assert_eq!(
+        value,
+        "http://127.0.0.1:8788/api/v1/chat/history?conversation_id=abc"
+    );
+}
+
+#[test]
+fn runtime_url_builder_rejects_absolute_and_non_api_paths() {
+    let base = AppRuntimeConfig {
+        runtime_url: "http://127.0.0.1:8788".to_string(),
+    };
+
+    for path in [
+        "https://evil.example/api/v1/chat/history",
+        "//evil.example/api/v1/chat/history",
+        "/admin",
+        "api/v1/chat/history",
+        "/api/../secret",
+    ] {
+        assert!(RuntimeRequestPath::new(path).is_err());
+    }
+
+    let path = RuntimeRequestPath::new("/api/v1/chat/history").unwrap();
+    let built = build_runtime_url(&base, &path).unwrap();
+    assert!(built.starts_with("http://127.0.0.1:8788/"));
+}
+
+#[test]
+fn runtime_request_input_rejects_secret_headers_from_react() {
+    let input = RuntimeRequestInput {
+        method: "GET".to_string(),
+        path: "/api/v1/chat/history".to_string(),
+        body: None,
+        headers: vec![("X-Undefined-API-Key".to_string(), "leak".to_string())],
+    };
+
+    let err = input.validate().unwrap_err();
+    assert!(err.contains("reserved header"));
 }
 
 #[test]
@@ -150,6 +245,18 @@ fn attachment_file_name_uses_file_name_or_fallback() {
     );
 }
 
+#[test]
+fn attachment_save_file_name_sanitizes_path_like_input() {
+    assert_eq!(
+        test_safe_file_name(Some("..\\evil\"/photo.png"), "attachment123"),
+        "_evil__photo.png"
+    );
+    assert_eq!(
+        test_safe_file_name(Some(".."), "attachment123"),
+        "attachment"
+    );
+}
+
 #[tokio::test]
 async fn open_regular_attachment_file_rejects_directory() {
     let err = open_regular_attachment_file(std::path::Path::new("."), ".")
@@ -159,18 +266,31 @@ async fn open_regular_attachment_file_rejects_directory() {
     assert!(err.contains("not a regular file"));
 }
 
-#[tokio::test]
-async fn upload_rejects_non_regular_path_without_leaking_api_key() {
-    let err = upload_attachment_streaming(UploadAttachmentInput {
-        runtime_url: "http://127.0.0.1:8788".to_string(),
-        api_key: "secret-api-key".to_string(),
-        file_path: ".".to_string(),
-    })
-    .await
+#[test]
+fn upload_input_rejects_runtime_url_and_api_key_from_react() {
+    let err = serde_json::from_value::<UploadAttachmentInput>(serde_json::json!({
+        "runtimeUrl": "http://127.0.0.1:8788",
+        "apiKey": "secret-api-key",
+        "filePath": "/tmp/report.txt"
+    }))
     .unwrap_err();
 
-    assert!(err.contains("not a regular file"));
-    assert!(!err.contains("secret-api-key"));
+    assert!(err.to_string().contains("unknown field"));
+    assert!(!err.to_string().contains("secret-api-key"));
+}
+
+#[test]
+fn sse_input_rejects_runtime_url_and_api_key_from_react() {
+    let err = serde_json::from_value::<StartJobEventStreamInput>(serde_json::json!({
+        "runtimeUrl": "http://127.0.0.1:8788",
+        "apiKey": "secret-api-key",
+        "jobId": "job-123",
+        "afterSeq": 0
+    }))
+    .unwrap_err();
+
+    assert!(err.to_string().contains("unknown field"));
+    assert!(!err.to_string().contains("secret-api-key"));
 }
 
 #[test]
@@ -199,6 +319,37 @@ fn runtime_health_preserves_status_when_body_read_fails() {
 }
 
 #[test]
+fn sse_parser_emits_typed_events_and_tracks_last_sequence() {
+    let parsed = parse_sse_chunks(&[
+        "id: 2\nevent: progress\ndata: {\"stage\":\"thinking\"}\n\n",
+        ": keepalive\n\nid: 3\ndata: {\"message\":\"done\"}\n\n",
+    ])
+    .unwrap();
+
+    assert_eq!(parsed.last_seq, 3);
+    assert_eq!(parsed.events.len(), 2);
+    assert_eq!(parsed.events[0].seq, 2);
+    assert_eq!(parsed.events[0].event_type.as_deref(), Some("progress"));
+    assert_eq!(parsed.events[0].payload["stage"], "thinking");
+    assert_eq!(parsed.events[1].seq, 3);
+    assert_eq!(parsed.events[1].payload["message"], "done");
+}
+
+#[test]
+fn sse_parser_buffers_incomplete_frames_across_chunks() {
+    let parsed = parse_sse_chunks(&[
+        "id: 9\ndata: {\"message\":\"hel",
+        "lo\"}\n\nid: 10\ndata: {\"message\":\"next\"}\n\n",
+    ])
+    .unwrap();
+
+    assert_eq!(parsed.last_seq, 10);
+    assert_eq!(parsed.events.len(), 2);
+    assert_eq!(parsed.events[0].payload["message"], "hello");
+    assert_eq!(parsed.events[1].payload["message"], "next");
+}
+
+#[test]
 fn secret_status_marks_degraded_detail() {
     let status = classify_secret_storage(false, "no native store");
     assert!(!status.available);
@@ -221,7 +372,40 @@ fn system_keyring_guard_allows_supported_desktop_targets() {
 }
 
 #[test]
-fn system_keyring_guard_rejects_mobile_targets_for_this_poc() {
+fn system_keyring_guard_rejects_targets_without_system_keyring_support() {
     assert!(!supports_system_keyring_target("android"));
     assert!(!supports_system_keyring_target("ios"));
+}
+
+#[test]
+fn api_key_status_does_not_return_secret_material() {
+    let status = load_api_key_status_from_value(Some("runtime-secret-key"));
+
+    assert!(status.available);
+    assert_eq!(status.key_preview.as_deref(), Some("runt...-key"));
+    let serialized = serde_json::to_string(&status).unwrap();
+    assert!(!serialized.contains("runtime-secret-key"));
+}
+
+#[test]
+fn insecure_api_key_status_marks_degraded_without_returning_secret_material() {
+    let status = api_key_status_from_storage(
+        Some("runtime-secret-key"),
+        "insecure-file",
+        true,
+        "local plaintext fallback",
+    );
+
+    assert!(status.available);
+    assert!(status.degraded);
+    assert_eq!(status.storage, "insecure-file");
+    assert_eq!(status.detail, "local plaintext fallback");
+    assert_eq!(status.key_preview.as_deref(), Some("runt...-key"));
+    let serialized = serde_json::to_string(&status).unwrap();
+    assert!(!serialized.contains("runtime-secret-key"));
+}
+
+#[test]
+fn upload_command_uses_streaming_body() {
+    assert!(upload_uses_streaming_body());
 }

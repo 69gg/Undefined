@@ -120,8 +120,9 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
                     "POST JSON {message, stream?, conversation_id?}. "
                     "stream=false waits for an internal WebChat job and "
                     "returns JSON; stream=true uses the same WebChat job "
-                    "lifecycle and streams events as SSE. WebChat jobs are "
-                    "process-local single-flight while running or finalizing."
+                    "lifecycle and streams events as SSE. WebChat jobs use "
+                    "per-conversation single-flight while running or finalizing; "
+                    "different conversations may run concurrently."
                 ),
             }
         },
@@ -141,23 +142,47 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
             "get": {
                 "summary": "Get WebChat attachment upload capabilities",
                 "description": (
-                    "Returns the Runtime attachment PoC upload limit and multipart "
-                    "field name."
+                    "Returns the Runtime WebChat attachment upload limit and "
+                    "multipart field name."
                 ),
             }
         },
         "/api/v1/chat/attachments": {
             "post": {
-                "summary": "Upload a WebChat attachment PoC",
+                "summary": "Upload a WebChat attachment",
                 "description": (
                     "Accepts multipart/form-data with a file field, validates size, "
-                    "and returns discard-only attachment metadata."
+                    "persists the attachment, and returns Runtime attachment metadata."
                 ),
             }
         },
-        "/api/v1/chat/jobs": {"post": {"summary": "Create a WebUI chat job"}},
+        "/api/v1/chat/attachments/{attachment_id}": {
+            "get": {"summary": "Download a WebChat attachment"}
+        },
+        "/api/v1/chat/attachments/{attachment_id}/preview": {
+            "get": {"summary": "Get a WebChat attachment preview"}
+        },
+        "/api/v1/chat/jobs": {
+            "post": {
+                "summary": "Create a WebUI chat job",
+                "description": (
+                    "Accepts legacy {message: string} or structured "
+                    "{message: {text, attachment_ids, references}}. "
+                    "Uploaded attachments are referenced by attachment_ids; "
+                    "the client must not inline local file content. "
+                    "The job event stream may include requires_action for "
+                    "future human-in-the-loop workflows."
+                ),
+            }
+        },
         "/api/v1/chat/jobs/active": {
-            "get": {"summary": "Get the active WebUI chat job"}
+            "get": {
+                "summary": "List active WebUI chat jobs",
+                "description": (
+                    "Returns a compatible job field plus jobs[] for all active "
+                    "WebChat jobs. conversation_id filters to one conversation."
+                ),
+            }
         },
         "/api/v1/chat/jobs/{job_id}": {
             "get": {"summary": "Get a WebUI chat job by id"}

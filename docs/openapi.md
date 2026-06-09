@@ -1,13 +1,13 @@
 # Runtime API / OpenAPI 指南
 
-本文档说明 Undefined 主进程暴露的 Runtime API（含 OpenAPI 文档），以及 WebUI / App 如何通过 Management API 代理安全调用。
+本文档说明 Undefined 主进程暴露的 Runtime API（含 OpenAPI 文档），以及 WebUI / App 如何通过 Management API 代理或原生客户端安全调用。
 
 > 职责边界：
 >
 > - **Management API**：配置、日志、Bot 启停、bootstrap probe、远程管理入口
 > - **Runtime API**：主进程运行态能力（探针、记忆、认知、AI Chat、表情包库）
 >
-> 如果你想看控制面接口，请同时参考 [Management API 文档](management-api.md)。
+> 如果你想看控制面接口，请同时参考 [Management API 文档](management-api.md)。如果你要接入原生聊天客户端，请参考 [Undefined Chat](undefined-chat.md)。
 
 ## 1. 配置项
 
@@ -340,6 +340,8 @@ curl http://127.0.0.1:8788/openapi.json
 - [WebUI AI Chat Jobs](#webui-ai-chat-jobs)
 - [Schemas / Appendix](#schemas--appendix)
 
+Undefined Chat 使用同一组 Runtime Chat 端点作为权威合同。客户端可以直接访问 Runtime API，并由 Tauri 负责 API Key 注入、安全存储、SSE 订阅、JSON fallback、上传下载和 HTML 预览隔离；不能把本地草稿或前端缓存视为会话/历史真源。
+
 ### WebUI AI Chat（特殊私聊）
 
 - `POST /api/v1/chat`
@@ -353,7 +355,7 @@ curl http://127.0.0.1:8788/openapi.json
 }
 ```
 
-- `stream = false` 返回同步 JSON，但后端同样会创建 WebChat job 并等待其完成；运行期间会占用 WebChat 全局 job 互斥，删除会话、清空历史和启动其他 WebChat job 会返回 `409`。
+- `stream = false` 返回同步 JSON，但后端同样会创建 WebChat job 并等待其完成；同一会话运行中或收尾落盘时再次发送会返回 `409`，不同会话可以并发运行。
 - 当 `stream = true` 时，Runtime 会创建 WebChat job 并通过旧接口返回 SSE；WebUI 默认使用 job 查询接口续接事件。
 - `conversation_id` 可选；不传时使用兼容默认会话 `legacy-system-42`，传入不存在的会话 ID 时返回 `404`。
 #### Event types
@@ -363,6 +365,7 @@ curl http://127.0.0.1:8788/openapi.json
 - `agent_stage`：某个 Agent 内部当前阶段，payload 包含 `webchat_call_id`、`stage`、`stage_elapsed_ms`、`elapsed_ms`、`agent_name`。运行中查询可能返回 `transient=true` 的当前快照；这类快照不写入历史。
 - `tool_start` / `tool_end`：工具开始与结束。
 - `agent_start` / `agent_end`：Agent 调用开始与结束。
+- `requires_action`：预留给未来 Human-in-the-loop 授权、补充参数或确认动作；payload 会做敏感字段遮蔽，并保留在 job events 与 history `webchat.events` 中。
 - `message`：AI/命令最终输出片段。
 - `done`：最终汇总（与非流式 JSON 结构一致）。
 - `error`：任务失败或取消。
@@ -392,7 +395,7 @@ curl http://127.0.0.1:8788/openapi.json
 - `GET /api/v1/chat/conversations`：列出 WebChat 会话，响应包含 `conversations`、`active_job`、`default_conversation_id` 和 `virtual_user_id`。
 - `POST /api/v1/chat/conversations`：新建会话，Body 可选 `{"title":"..."}`。不传标题时先使用临时标题。
 - `PATCH /api/v1/chat/conversations/{conversation_id}`：重命名会话，Body 为 `{"title":"..."}`。手动标题会标记为 `manual`，后续不会被自动标题覆盖。
-- `DELETE /api/v1/chat/conversations/{conversation_id}`：删除会话 JSON。若任意 WebChat job 仍在运行或收尾落盘，返回 `409`。
+- `DELETE /api/v1/chat/conversations/{conversation_id}`：删除会话 JSON。若目标会话存在运行中或收尾落盘的 WebChat job，返回 `409`。
 
 会话标题由后端维护。第一条用户消息写入后会先用首问前若干字符作为临时标题；当该会话同时具备首问和首答时，后端会调标题生成模型用“首问 + 首答”生成正式标题。标题生成带状态和内容哈希校验，避免并发回复、手动重命名或历史变化时把旧标题写回新内容。
 
@@ -516,15 +519,15 @@ curl http://127.0.0.1:8788/openapi.json
 `webchat.timeline` 是后端生成的权威历史展示序列，按 `seq` 混排顶层工具 / Agent 调用节点与正文消息，前端刷新后优先按它忠实渲染同一 AI 气泡。`webchat.calls` 是后端由生命周期事件汇总出的调用树，包含每个工具 / Agent 的输入预览、输出预览、状态、耗时、`children` 和节点内 `timeline`；节点内 `timeline` 用于恢复 Agent 内部“子工具 / 子 Agent / 正文”的真实时序，Agent 阶段只恢复为摘要行状态。`webchat.events` 保留原始生命周期 / 正文事件，供兼容旧历史与诊断使用，不作为 AI 后续对话上下文注入。若一次 job 没有正文但有工具事件，历史 API 仍会返回该 Bot 项，`content` 为空字符串。
 - `DELETE /api/v1/chat/history?conversation_id=<id>`
 - 仅清空指定 WebChat 会话的 `system#42` 聊天历史，不删除长期记忆、认知记忆、profile 或其他 WebChat 会话。
-- 如果存在运行中或正在收尾落盘的 WebChat job，返回 `409`，避免旧任务继续写回已清空的历史。
+- 如果目标会话存在运行中或正在收尾落盘的 WebChat job，返回 `409`，避免旧任务继续写回已清空的历史。
 
 ### WebUI AI Chat Jobs
 
-- `POST /api/v1/chat/jobs`：创建后台 job，Body 为 `{"message":"...","conversation_id":"..."}`，`conversation_id` 可选。
-- WebChat job 在当前 Runtime 进程内全局单飞；如果已有任意 WebChat job 正在运行或收尾落盘，创建新 job 返回 `409`。兼容的非流式 `POST /api/v1/chat` 也走同一套 job 互斥，只是等待完成后返回同步结果。
-- WebChat 前端粘贴或选择的附件会先被合并进 `message`：小图片使用 `CQ:image,file=base64://...`，普通文件使用 WebUI 管理代理的 `/api/runtime/chat/files` 缓存后生成 `CQ:file,id=...`；Runtime 侧沿用 `register_message_attachments()` 注册到 `webui` 附件作用域。
-- WebChat 前端引用 AI 消息、选中文本或 HTML 预览中点选的元素时，不新增后端端点，也不写入单独附件；发送前会把待引用内容转换成 Markdown blockquote 并拼接到 `message` 前面，例如 `> 引用 AI:` / `> 引用 HTML 片段:`。后端只接收最终 `message` 字符串。
-- `GET /api/v1/chat/jobs/active?conversation_id=<id>`：返回当前运行中的 WebChat job（没有则为 `null`）。不传时返回任意当前 WebChat job；传入时只在该 job 属于对应会话时返回。
+- `POST /api/v1/chat/jobs`：创建后台 job。兼容旧 Body `{"message":"...","conversation_id":"..."}`，也支持结构化 Body `{"message":{"text":"...","attachment_ids":["..."],"references":[{"message_id":"...","quote":"..."}]},"conversation_id":"..."}`；`conversation_id` 可选。
+- WebChat job 在同一会话内 single-flight；如果目标会话已有 job 正在运行或收尾落盘，创建新 job 返回 `409`。不同会话可以并发运行。兼容的非流式 `POST /api/v1/chat` 也走同一套会话级 job 锁，只是等待完成后返回同步结果。
+- 附件先通过 `POST /api/v1/chat/attachments` 以 multipart 上传并由 Runtime 返回附件 metadata；发送消息时只传 Runtime 生成的 `attachment_ids`。客户端不应把本地文件内容、下载 URL 或临时缓存路径拼入 `message.text`。
+- 引用内容通过结构化 `references` 提交。Runtime 负责把引用写入历史 metadata，并按需要生成 AI 可见上下文；客户端不把引用块拼接进最终历史作为真源。
+- `GET /api/v1/chat/jobs/active?conversation_id=<id>`：返回兼容字段 `job` 和 active `jobs[]`。不传时 `jobs[]` 包含所有运行中 WebChat job，`job` 为最新 active job；传入 `conversation_id` 时只返回目标会话的 active job。
 - `GET /api/v1/chat/jobs/{job_id}`：查询 job 状态、最后事件序号和已汇总输出。
 - `GET /api/v1/chat/jobs/{job_id}/events?after=<seq>&conversation_id=<id>`：查询 `seq` 之后的增量事件，默认返回 JSON。`conversation_id` 可选；传入时必须与 job 所属会话一致，否则返回 `404`，用于刷新、断线或换客户端后避免跨会话误续接。
 - `GET /api/v1/chat/jobs/{job_id}/events?after=<seq>&format=json` 或请求头 `Accept: application/json`：显式查询 JSON。响应包含：
@@ -877,12 +880,16 @@ WebUI 不直接在前端暴露 `auth_key`，而是通过后端代理访问主进
 - `POST /api/runtime/chat`
 - `GET /api/runtime/chat/history`
 - `DELETE /api/runtime/chat/history`
+- `GET /api/runtime/chat/attachments/capabilities`
+- `POST /api/runtime/chat/attachments`
+- `GET /api/runtime/chat/attachments/{attachment_id}`
+- `GET /api/runtime/chat/attachments/{attachment_id}/preview`
 - `POST /api/runtime/chat/jobs`
-- `POST /api/runtime/chat/files`
 - `GET /api/runtime/chat/jobs/active`
 - `GET /api/runtime/chat/jobs/{job_id}`
 - `GET /api/runtime/chat/jobs/{job_id}/events`
 - `POST /api/runtime/chat/jobs/{job_id}/cancel`
+- `POST /api/runtime/chat/files`（旧 WebUI 浏览器文件缓存兼容路径，新客户端使用 `chat/attachments`）
 - `GET /api/runtime/openapi`
 - `GET /api/runtime/tools`
 - `POST /api/runtime/tools/invoke`
@@ -905,25 +912,18 @@ WebUI 后端会先校验 WebUI 登录态，再自动从 `config.toml` 读取 `[a
 - `GET/POST/PATCH/DELETE /api/runtime/chat/conversations...` 管理会话 JSON。
 - `/api/runtime/chat`、`/api/runtime/chat/history`、`/api/runtime/chat/jobs` 和 `/api/runtime/chat/jobs/active` 会透传 `conversation_id`。
 - 不传 `conversation_id` 时使用 Runtime 默认兼容会话。
-- 删除会话或清空历史时，运行中或收尾落盘中的 WebChat job 会导致 `409`。
+- 删除会话或清空历史时，目标会话运行中或收尾落盘中的 WebChat job 会导致 `409`。
 
 ### File Uploads
 
-`/api/runtime/chat/files` 接收已登录 WebUI 发起的文件上传。
+Undefined Chat 原生客户端直接使用 Runtime 附件端点；WebUI 代理层应优先透传这些端点：
 
-- Content-Type：`multipart/form-data`
-- 字段名：`file`
-- 行为：缓存到 WebUI 文件缓存目录。
-- 响应：`{ "id": "...", "name": "...", "size": 123 }`
+- `GET /api/runtime/chat/attachments/capabilities`
+- `POST /api/runtime/chat/attachments`
+- `GET /api/runtime/chat/attachments/{attachment_id}`
+- `GET /api/runtime/chat/attachments/{attachment_id}/preview`
 
-前端随后把返回值合并进同一条 WebChat job 消息：
-
-```js
-const uploaded = { id: "abc123", name: "report.pdf", size: 2048 };
-const cq = `CQ:file,id=${uploaded.id},name=${uploaded.name},size=${uploaded.size}`;
-```
-
-WebChat 引用功能只在前端把引用内容格式化为 Markdown `>` 引用块并合并进 `message`，不经过文件缓存代理。
+上传使用 `multipart/form-data`，字段名为 `file`。Runtime 返回 `attachment.id`、`name`、`size`、`media_type`、`kind`、`download_url` 和可选 `preview_url`；发送消息时把这些 id 放进结构化 `message.attachment_ids`。引用内容放进结构化 `message.references`，由 Runtime 写入历史 metadata。
 
 ### Event / Query Behavior
 

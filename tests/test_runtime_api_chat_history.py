@@ -105,8 +105,47 @@ async def test_runtime_chat_history_endpoint_returns_role_mapped_items() -> None
     assert payload["count"] == 2
     assert payload["items"][0]["role"] == "user"
     assert payload["items"][0]["content"] == "你好"
+    assert isinstance(payload["items"][0]["message_id"], str)
+    assert payload["items"][0]["message_id"]
     assert payload["items"][1]["role"] == "bot"
     assert payload["items"][1]["content"] == "你好，我在。"
+    assert isinstance(payload["items"][1]["message_id"], str)
+    assert payload["items"][1]["message_id"]
+    assert payload["items"][0]["message_id"] != payload["items"][1]["message_id"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_chat_history_endpoint_returns_stable_message_ids() -> None:
+    history = _DummyHistoryManager()
+    context = RuntimeAPIContext(
+        config_getter=lambda: SimpleNamespace(
+            api=SimpleNamespace(
+                enabled=True,
+                host="127.0.0.1",
+                port=8788,
+                auth_key="changeme",
+                openapi_enabled=True,
+            ),
+            superadmin_qq=10001,
+            bot_qq=20002,
+        ),
+        onebot=SimpleNamespace(connection_status=lambda: {}),
+        ai=SimpleNamespace(memory_storage=SimpleNamespace(count=lambda: 0)),
+        command_dispatcher=SimpleNamespace(parse_command=lambda _text: None),
+        queue_manager=SimpleNamespace(snapshot=lambda: {}),
+        history_manager=history,
+    )
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+    request = cast(web.Request, cast(Any, SimpleNamespace(query={"limit": "2"})))
+
+    first_response = await server._chat_history_handler(request)
+    second_response = await server._chat_history_handler(request)
+
+    first_payload = json.loads(first_response.text or "{}")
+    second_payload = json.loads(second_response.text or "{}")
+    assert [item["message_id"] for item in first_payload["items"]] == [
+        item["message_id"] for item in second_payload["items"]
+    ]
 
 
 @pytest.mark.asyncio

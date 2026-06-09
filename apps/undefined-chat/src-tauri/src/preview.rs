@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use tauri::{webview::NewWindowResponse, AppHandle, WebviewUrl, WebviewWindowBuilder};
+use tauri::{webview::NewWindowResponse, AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use url::Url;
 use uuid::Uuid;
 
@@ -75,13 +75,21 @@ pub async fn open_html_preview(app: AppHandle, input: HtmlPreviewInput) -> Resul
     let url = build_preview_data_url(&input.title, &input.html)?;
     let initial_url = url.clone();
     let label = format!("html-preview-{}", Uuid::new_v4());
+    let main_window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is not available for html preview".to_string())?;
 
-    WebviewWindowBuilder::new(&app, label, WebviewUrl::CustomProtocol(url))
+    let builder = WebviewWindowBuilder::new(&main_window, label, WebviewUrl::CustomProtocol(url))
         .title(input.title)
         .inner_size(900.0, 700.0)
         .resizable(true)
         .on_navigation(move |url| preview_navigation_allowed(url, &initial_url))
-        .on_new_window(|_, _| NewWindowResponse::Deny)
+        .on_new_window(|_, _| NewWindowResponse::Deny);
+
+    #[cfg(target_os = "android")]
+    let builder = builder.activity_name("HtmlPreviewActivity");
+
+    builder
         .build()
         .map_err(|err| format!("html preview window open failed: {err}"))?;
 

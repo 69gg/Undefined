@@ -1,0 +1,90 @@
+# Undefined Chat
+
+Undefined Chat 是 `apps/undefined-chat/` 下的原生优先 WebChat 客户端。它面向桌面端和 Android，直接连接 Runtime API，把会话、历史、任务、附件和事件都交给 Runtime 作为真源；Tauri 只负责本地连接配置、API Key 保管、上传下载桥接、事件订阅和平台隔离能力。
+
+## Undefined Chat vs WebUI WebChat
+
+| 能力 | Undefined Chat | WebUI WebChat |
+|---|---|---|
+| 入口 | 独立 Tauri + React App | `uv run Undefined-webui` 内置聊天页 |
+| 主要目标 | 原生聊天工作台，适合长期挂起、桌面/移动端使用 | 管理控制台内的聊天与调试入口 |
+| 真源 | Runtime API | Runtime API，经 WebUI 后端代理 |
+| 本地状态 | 只保存连接设置、API Key 状态、当前选择、草稿和 UI 游标 | 浏览器本地偏好和 UI 状态 |
+| 会话/历史 | 从 Runtime 拉取，不在本地复制为权威数据 | 从 Runtime 拉取，不在浏览器复制为权威数据 |
+| 事件续接 | SSE 优先，失败或平台不稳定时使用 JSON polling fallback | JSON polling 为主，SSE 保留兼容 |
+| 附件 | Tauri 以流式方式上传/下载，避免把大文件完整塞进前端内存 | WebUI 后端代理上传，再交给 Runtime |
+| 密钥保管 | 系统 keyring / Stronghold，Linux 可显式降级到不安全本地存储 | WebUI 登录态，Runtime `auth_key` 只在后端注入 |
+| HTML 预览 | Tauri 隔离窗口/页面，执行环境受专用 CSP 约束 | 浏览器 iframe sandbox + WebUI CSP |
+| Android | 需要处理前后台、页面恢复、事件重连和上传不中断 | 依赖移动浏览器或 WebView 行为 |
+
+## Runtime 是唯一真源
+
+Undefined Chat 不持久化权威聊天数据。以下内容都以 Runtime 返回为准：
+
+- `GET /api/v1/chat/conversations` 的会话列表
+- `GET /api/v1/chat/history` 的历史页
+- `GET /api/v1/chat/jobs/active` 的运行中任务
+- `GET /api/v1/chat/jobs/{job_id}/events` 的事件序列
+- Runtime 附件 API 返回的附件元数据、下载 URL 和预览 URL
+
+本地只允许保存 UI 相关状态，例如当前选中的会话、每个会话的未发送草稿、事件游标、窗口布局、连接档案和是否允许不安全存储降级。刷新、重启或换端之后，客户端必须重新从 Runtime 恢复会话和任务状态。
+
+## 连接与事件
+
+连接配置包含 Runtime origin 和 API Key 状态。Runtime 请求必须由 Tauri 命令拼接到已配置 origin 下，避免 React 传入任意 URL 后绕过目标主机限制。
+
+事件策略：
+
+- 默认使用 SSE 订阅 job events，保持低延迟。
+- SSE 断开、平台暂停、网络切换或 Android 生命周期恢复后，使用 `job_id + seq` 调用 JSON events fallback 补齐遗漏事件。
+- JSON fallback 不改变 Runtime 合同，只是同一事件流的拉取方式。
+- 客户端渲染时应按 Runtime `seq` 去重，不能把本地收到顺序当作权威顺序。
+
+## 安全存储
+
+API Key 不应暴露给 React 状态树或日志。Tauri 负责保存、读取和删除密钥：
+
+- 首选系统安全存储或 Stronghold。
+- macOS 使用系统钥匙串，Windows 使用系统凭据存储。
+- Linux 依赖 Secret Service/keyring；无可用 keyring 时，必须让用户显式确认后才允许降级。
+- 降级模式只适合本机开发或受控环境，文档和 UI 都应标明风险。
+
+## 附件与大文件上传
+
+Undefined Chat 的附件上传由 Tauri 从文件句柄流式读取并转发到 Runtime，React 只持有文件选择结果和上传状态。这样可以避免大文件占满前端内存，也能让桌面端和 Android 在上传过程中继续响应 UI。
+
+客户端应先读取 Runtime 能力端点提供的上传大小限制；超过限制时在本地阻止或让 Runtime 返回明确错误。下载和预览同样通过 Tauri 受控命令处理，不能让 React 任意读取本地路径。
+
+## HTML Preview CSP
+
+聊天中的 HTML 预览需要隔离执行。Undefined Chat 使用独立预览页面/窗口承载 HTML，预览环境应具备单独 CSP：
+
+- 禁止访问主应用 DOM、Tauri IPC 和本地文件系统。
+- 禁止脚本执行、`unsafe-eval` 和外部网络连接。
+- 关闭预览或切换会话时销毁对应执行上下文。
+
+普通消息渲染仍应先净化 HTML；只有“运行/预览 HTML”动作才进入隔离预览环境。
+
+## Android 生命周期
+
+Android 上需要按生命周期处理连接和任务恢复：
+
+- App 进入后台后，SSE 可能被系统暂停或断开。
+- 回到前台时先刷新 Runtime health、会话列表、当前 history 页和 active jobs。
+- 对仍在运行的 job，以最后已处理 `seq` 调用 JSON fallback 补齐事件，再尝试恢复 SSE。
+- 上传大文件时应提示用户保持 App 前台；如系统中断上传，客户端应展示失败状态并允许重新上传。
+- 本地草稿在前后台切换和进程重建后可恢复，但不能替代 Runtime 历史。
+
+## 版本、CI 与 Release
+
+Undefined Chat 的版本必须与 `pyproject.toml` 主版本一致。`scripts/bump_version.py <version>` 会同步更新：
+
+- `apps/undefined-chat/package.json`
+- `apps/undefined-chat/package-lock.json`
+- `apps/undefined-chat/src-tauri/Cargo.toml`
+- `apps/undefined-chat/src-tauri/tauri.conf.json`
+- `apps/undefined-chat/src-tauri/Cargo.lock`
+
+Release 校验由 `scripts/release_notes.py validate --tag vX.Y.Z` 执行，会同时检查 Console 与 Chat 的 manifest 和 lock 文件。CI 会对 `apps/undefined-chat` 执行 `npm run check`；正式发布时产物使用 `Undefined-Chat-*` 前缀，与 `Undefined-Console-*` 区分。
+
+Android release job 会先运行 `npm run tauri:android:init`。对 Undefined Chat，该命令会在 Tauri 生成 `src-tauri/gen/android` 后执行 `scripts/prepare_tauri_android.py`，注入 HTML preview 专用的 `HtmlPreviewActivity` 并用 `tauri:android:prepare:check` 校验生成工程。
