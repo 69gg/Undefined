@@ -1,0 +1,493 @@
+name: Manual Native Artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Branch, tag, or SHA to build. Leave empty to use the selected workflow ref."
+        required: false
+        type: string
+      product:
+        description: "Native app product to build."
+        required: true
+        default: chat
+        type: choice
+        options:
+          - chat
+          - console
+          - all
+      build_desktop:
+        description: "Build desktop installers."
+        required: true
+        default: true
+        type: boolean
+      desktop_platform:
+        description: "Desktop platform to build."
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - linux
+          - windows
+          - macos
+      build_android_debug:
+        description: "Build unsigned/debug Android APK artifacts."
+        required: true
+        default: true
+        type: boolean
+      android_abi:
+        description: "Android ABI to build."
+        required: true
+        default: arm64-v8a
+        type: choice
+        options:
+          - arm64-v8a
+          - armeabi-v7a
+          - x86
+          - x86_64
+          - all
+
+run-name: Manual native artifacts for ${{ inputs.product }} from ${{ inputs.source_ref || github.ref_name }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manual-native-artifacts-${{ github.run_id }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22"
+  ANDROID_NDK_VERSION: "27.2.12479018"
+
+jobs:
+  build-desktop:
+    name: Desktop ${{ matrix.product }} ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    if: ${{ inputs.build_desktop }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - product: console
+            app_dir: apps/undefined-console
+            artifact_prefix: Undefined-Console
+            os: ubuntu-latest
+            platform: linux
+            label: linux-x64
+            bundles: appimage,deb
+            rust_target: ""
+          - product: console
+            app_dir: apps/undefined-console
+            artifact_prefix: Undefined-Console
+            os: windows-latest
+            platform: windows
+            label: windows-x64
+            bundles: nsis,msi
+            rust_target: ""
+          - product: console
+            app_dir: apps/undefined-console
+            artifact_prefix: Undefined-Console
+            os: macos-15
+            platform: macos
+            label: macos-x64
+            bundles: dmg
+            rust_target: x86_64-apple-darwin
+          - product: console
+            app_dir: apps/undefined-console
+            artifact_prefix: Undefined-Console
+            os: macos-15
+            platform: macos
+            label: macos-arm64
+            bundles: dmg
+            rust_target: ""
+          - product: chat
+            app_dir: apps/undefined-chat
+            artifact_prefix: Undefined-Chat
+            os: ubuntu-latest
+            platform: linux
+            label: linux-x64
+            bundles: appimage,deb
+            rust_target: ""
+          - product: chat
+            app_dir: apps/undefined-chat
+            artifact_prefix: Undefined-Chat
+            os: windows-latest
+            platform: windows
+            label: windows-x64
+            bundles: nsis,msi
+            rust_target: ""
+          - product: chat
+            app_dir: apps/undefined-chat
+            artifact_prefix: Undefined-Chat
+            os: macos-15
+            platform: macos
+            label: macos-x64
+            bundles: dmg
+            rust_target: x86_64-apple-darwin
+          - product: chat
+            app_dir: apps/undefined-chat
+            artifact_prefix: Undefined-Chat
+            os: macos-15
+            platform: macos
+            label: macos-arm64
+            bundles: dmg
+            rust_target: ""
+    steps:
+      - name: Decide whether to build this desktop target
+        id: select
+        shell: bash
+        run: |
+          selected=true
+          if [ "${{ inputs.product }}" != "all" ] && [ "${{ inputs.product }}" != "${{ matrix.product }}" ]; then
+            selected=false
+          fi
+          if [ "${{ inputs.desktop_platform }}" != "all" ] && [ "${{ inputs.desktop_platform }}" != "${{ matrix.platform }}" ]; then
+            selected=false
+          fi
+          echo "selected=$selected" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout code
+        if: steps.select.outputs.selected == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
+
+      - name: Resolve artifact suffix
+        if: steps.select.outputs.selected == 'true'
+        id: artifact
+        shell: bash
+        run: |
+          short_sha="$(git rev-parse --short HEAD)"
+          ref_name="${{ inputs.source_ref || github.ref_name }}"
+          safe_ref="$(printf '%s' "$ref_name" | tr '/: ' '---' | tr -cd '[:alnum:]._-' | cut -c1-80)"
+          echo "suffix=${safe_ref}-${short_sha}-run${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        if: steps.select.outputs.selected == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: ${{ matrix.app_dir }}/package-lock.json
+
+      - name: Cache node_modules
+        if: steps.select.outputs.selected == 'true'
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: ${{ matrix.app_dir }}/node_modules
+          key: ${{ runner.os }}-manual-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+
+      - name: Install Rust toolchain
+        if: steps.select.outputs.selected == 'true' && matrix.rust_target == ''
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust toolchain with target
+        if: steps.select.outputs.selected == 'true' && matrix.rust_target != ''
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Cache cargo registry and target
+        if: steps.select.outputs.selected == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: manual-${{ matrix.product }}-${{ matrix.label }}
+          workspaces: |
+            ${{ matrix.app_dir }}/src-tauri -> target
+
+      - name: Install Linux system dependencies
+        if: steps.select.outputs.selected == 'true' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install app dependencies
+        if: steps.select.outputs.selected == 'true' && steps.cache-node-modules.outputs.cache-hit != 'true'
+        working-directory: ${{ matrix.app_dir }}
+        run: npm ci
+
+      - name: Build Tauri bundles
+        if: steps.select.outputs.selected == 'true'
+        working-directory: ${{ matrix.app_dir }}
+        shell: bash
+        run: |
+          TAURI_ARGS="--ci --bundles ${{ matrix.bundles }}"
+          if [ -n "${{ matrix.rust_target }}" ]; then
+            TAURI_ARGS="$TAURI_ARGS --target ${{ matrix.rust_target }}"
+          fi
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            NO_STRIP=true npm run tauri:build -- $TAURI_ARGS
+          else
+            npm run tauri:build -- $TAURI_ARGS
+          fi
+
+      - name: Collect desktop artifacts
+        if: steps.select.outputs.selected == 'true'
+        shell: bash
+        env:
+          APP_DIR: ${{ matrix.app_dir }}
+          ARTIFACT_PREFIX: ${{ matrix.artifact_prefix }}
+          LABEL: ${{ matrix.label }}
+          RUST_TARGET: ${{ matrix.rust_target }}
+          SUFFIX: ${{ steps.artifact.outputs.suffix }}
+        run: |
+          copy_single_match() {
+            local search_root="$1"
+            local pattern="$2"
+            local destination="$3"
+            local matches=()
+            while IFS= read -r line; do
+              matches+=("$line")
+            done < <(find "$search_root" -type f -name "$pattern" | sort)
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "Expected exactly one match for $pattern under $search_root, found ${#matches[@]}" >&2
+              printf 'Matches:\n%s\n' "${matches[*]}" >&2
+              exit 1
+            fi
+            cp "${matches[0]}" "$destination"
+          }
+
+          if [ -n "$RUST_TARGET" ]; then
+            BUNDLE_ROOT="$APP_DIR/src-tauri/target/$RUST_TARGET/release/bundle"
+          else
+            BUNDLE_ROOT="$APP_DIR/src-tauri/target/release/bundle"
+          fi
+
+          mkdir -p manual-artifacts
+          case "$LABEL" in
+            linux-x64)
+              copy_single_match "$BUNDLE_ROOT" '*.AppImage' "manual-artifacts/${ARTIFACT_PREFIX}-${SUFFIX}-${LABEL}.AppImage"
+              copy_single_match "$BUNDLE_ROOT" '*.deb' "manual-artifacts/${ARTIFACT_PREFIX}-${SUFFIX}-${LABEL}.deb"
+              ;;
+            windows-x64)
+              copy_single_match "$BUNDLE_ROOT" '*.exe' "manual-artifacts/${ARTIFACT_PREFIX}-${SUFFIX}-${LABEL}-setup.exe"
+              copy_single_match "$BUNDLE_ROOT" '*.msi' "manual-artifacts/${ARTIFACT_PREFIX}-${SUFFIX}-${LABEL}.msi"
+              ;;
+            macos-x64|macos-arm64)
+              copy_single_match "$BUNDLE_ROOT" '*.dmg' "manual-artifacts/${ARTIFACT_PREFIX}-${SUFFIX}-${LABEL}.dmg"
+              ;;
+          esac
+
+      - name: Upload desktop artifacts
+        if: steps.select.outputs.selected == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-${{ matrix.product }}-${{ matrix.label }}
+          path: manual-artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+
+  build-android-debug:
+    name: Android debug ${{ matrix.product }} ${{ matrix.abi_label }}
+    runs-on: ubuntu-latest
+    if: ${{ inputs.build_android_debug }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - product: console
+            app_dir: apps/undefined-console
+            artifact_prefix: Undefined-Console
+            abi_label: arm64-v8a
+            tauri_target: aarch64
+            rust_target: aarch64-linux-android
+          - product: console
+            app_dir: apps/undefined-console
+            artifact_prefix: Undefined-Console
+            abi_label: armeabi-v7a
+            tauri_target: armv7
+            rust_target: armv7-linux-androideabi
+          - product: console
+            app_dir: apps/undefined-console
+            artifact_prefix: Undefined-Console
+            abi_label: x86
+            tauri_target: i686
+            rust_target: i686-linux-android
+          - product: console
+            app_dir: apps/undefined-console
+            artifact_prefix: Undefined-Console
+            abi_label: x86_64
+            tauri_target: x86_64
+            rust_target: x86_64-linux-android
+          - product: chat
+            app_dir: apps/undefined-chat
+            artifact_prefix: Undefined-Chat
+            abi_label: arm64-v8a
+            tauri_target: aarch64
+            rust_target: aarch64-linux-android
+          - product: chat
+            app_dir: apps/undefined-chat
+            artifact_prefix: Undefined-Chat
+            abi_label: armeabi-v7a
+            tauri_target: armv7
+            rust_target: armv7-linux-androideabi
+          - product: chat
+            app_dir: apps/undefined-chat
+            artifact_prefix: Undefined-Chat
+            abi_label: x86
+            tauri_target: i686
+            rust_target: i686-linux-android
+          - product: chat
+            app_dir: apps/undefined-chat
+            artifact_prefix: Undefined-Chat
+            abi_label: x86_64
+            tauri_target: x86_64
+            rust_target: x86_64-linux-android
+    steps:
+      - name: Decide whether to build this Android target
+        id: select
+        shell: bash
+        run: |
+          selected=true
+          if [ "${{ inputs.product }}" != "all" ] && [ "${{ inputs.product }}" != "${{ matrix.product }}" ]; then
+            selected=false
+          fi
+          if [ "${{ inputs.android_abi }}" != "all" ] && [ "${{ inputs.android_abi }}" != "${{ matrix.abi_label }}" ]; then
+            selected=false
+          fi
+          echo "selected=$selected" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout code
+        if: steps.select.outputs.selected == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
+
+      - name: Resolve artifact suffix
+        if: steps.select.outputs.selected == 'true'
+        id: artifact
+        shell: bash
+        run: |
+          short_sha="$(git rev-parse --short HEAD)"
+          ref_name="${{ inputs.source_ref || github.ref_name }}"
+          safe_ref="$(printf '%s' "$ref_name" | tr '/: ' '---' | tr -cd '[:alnum:]._-' | cut -c1-80)"
+          echo "suffix=${safe_ref}-${short_sha}-run${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        if: steps.select.outputs.selected == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: ${{ matrix.app_dir }}/package-lock.json
+
+      - name: Cache node_modules
+        if: steps.select.outputs.selected == 'true'
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: ${{ matrix.app_dir }}/node_modules
+          key: ${{ runner.os }}-manual-android-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+
+      - name: Install Rust toolchain
+        if: steps.select.outputs.selected == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Cache cargo registry and target
+        if: steps.select.outputs.selected == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: manual-${{ matrix.product }}-android-${{ matrix.abi_label }}
+          workspaces: |
+            ${{ matrix.app_dir }}/src-tauri -> target
+
+      - name: Setup Java 17
+        if: steps.select.outputs.selected == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        if: steps.select.outputs.selected == 'true'
+        uses: android-actions/setup-android@v3
+
+      - name: Ensure Android platform packages
+        if: steps.select.outputs.selected == 'true'
+        run: sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;${{ env.ANDROID_NDK_VERSION }}"
+
+      - name: Configure Android NDK
+        if: steps.select.outputs.selected == 'true'
+        run: |
+          NDK_HOME="$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}"
+          if [ ! -d "$NDK_HOME" ]; then
+            echo "Expected Android NDK at $NDK_HOME" >&2
+            exit 1
+          fi
+          echo "NDK_HOME=$NDK_HOME" >> "$GITHUB_ENV"
+
+      - name: Cache Gradle
+        if: steps.select.outputs.selected == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-manual-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-manual-gradle-
+            ${{ runner.os }}-gradle-
+
+      - name: Install app dependencies
+        if: steps.select.outputs.selected == 'true' && steps.cache-node-modules.outputs.cache-hit != 'true'
+        working-directory: ${{ matrix.app_dir }}
+        run: npm ci
+
+      - name: Initialize Android project for CI
+        if: steps.select.outputs.selected == 'true'
+        working-directory: ${{ matrix.app_dir }}
+        run: npm run tauri:android:init
+
+      - name: Verify Chat Android native patches
+        if: steps.select.outputs.selected == 'true' && matrix.product == 'chat'
+        working-directory: ${{ matrix.app_dir }}
+        run: npm run tauri:android:prepare:check
+
+      - name: Build Android debug APK
+        if: steps.select.outputs.selected == 'true'
+        working-directory: ${{ matrix.app_dir }}
+        run: npm run tauri:android:debug -- --ci --apk --target ${{ matrix.tauri_target }}
+
+      - name: Collect Android debug artifacts
+        if: steps.select.outputs.selected == 'true'
+        shell: bash
+        env:
+          APP_DIR: ${{ matrix.app_dir }}
+          ARTIFACT_PREFIX: ${{ matrix.artifact_prefix }}
+          ABI_LABEL: ${{ matrix.abi_label }}
+          SUFFIX: ${{ steps.artifact.outputs.suffix }}
+        run: |
+          mkdir -p manual-artifacts
+          matches=()
+          while IFS= read -r line; do
+            matches+=("$line")
+          done < <(find "$APP_DIR/src-tauri" -type f -name '*.apk' ! -name '*-unsigned.apk' | sort)
+
+          if [ "${#matches[@]}" -lt 1 ]; then
+            echo "Expected at least one Android APK under $APP_DIR/src-tauri" >&2
+            exit 1
+          fi
+
+          for apk in "${matches[@]}"; do
+            apk_name="$(basename "$apk")"
+            cp "$apk" "manual-artifacts/${ARTIFACT_PREFIX}-${SUFFIX}-android-${ABI_LABEL}-${apk_name}"
+          done
+
+      - name: Upload Android debug artifacts
+        if: steps.select.outputs.selected == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-android-debug-${{ matrix.product }}-${{ matrix.abi_label }}
+          path: manual-artifacts/*
+          if-no-files-found: error
+          retention-days: 14
