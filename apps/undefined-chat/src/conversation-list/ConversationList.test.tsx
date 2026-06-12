@@ -33,6 +33,9 @@ describe("ConversationList", () => {
 				selectedConversationId="default"
 				onCreate={vi.fn()}
 				onSelect={onSelect}
+				isCollapsed={false}
+				onToggleCollapse={vi.fn()}
+				onOpenSettings={vi.fn()}
 			/>,
 		);
 

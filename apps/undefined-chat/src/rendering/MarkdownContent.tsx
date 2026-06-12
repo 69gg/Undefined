@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { marked } from "marked";
+import { useMemo, useState } from "react";
 
 export type HtmlPreviewRequest = {
 	title: string;
@@ -36,41 +37,81 @@ function splitSegments(content: string): Segment[] {
 	return segments.length > 0 ? segments : [{ type: "text", value: content }];
 }
 
-function renderInline(text: string): ReactNode[] {
-	const nodes: ReactNode[] = [];
-	const pattern = /(`[^`]+`|\*\*[^*]+\*\*)/g;
-	let cursor = 0;
-	for (const match of text.matchAll(pattern)) {
-		const index = match.index ?? 0;
-		if (index > cursor) {
-			nodes.push(text.slice(cursor, index));
-		}
-		const value = match[0];
-		if (value.startsWith("**")) {
-			nodes.push(<strong key={`${index}-strong`}>{value.slice(2, -2)}</strong>);
-		} else {
-			nodes.push(<code key={`${index}-code`}>{value.slice(1, -1)}</code>);
-		}
-		cursor = index + value.length;
-	}
-	if (cursor < text.length) {
-		nodes.push(text.slice(cursor));
-	}
-	return nodes;
-}
+// 选项配置 marked，使其解析换行和符合 GFM 标准
+marked.setOptions({
+	gfm: true,
+	breaks: true,
+});
 
 function TextBlock({ value }: { value: string }) {
+	const htmlContent = useMemo(() => {
+		try {
+			// marked.parse 返回 string
+			return marked.parse(value) as string;
+		} catch (err) {
+			console.error("Markdown parse error:", err);
+			return value;
+		}
+	}, [value]);
+
 	return (
-		<>
-			{value
-				.split(/\n{2,}/)
-				.filter((paragraph) => paragraph.trim().length > 0)
-				.map((paragraph, index) => (
-					<p key={`${index}-${paragraph.slice(0, 12)}`}>
-						{renderInline(paragraph)}
-					</p>
-				))}
-		</>
+		<div
+			className="markdown-body"
+			// biome-ignore lint/security/noDangerouslySetInnerHtml: trust marked output for rendering messages
+			dangerouslySetInnerHTML={{ __html: htmlContent }}
+		/>
+	);
+}
+
+function CodeBlock({
+	language,
+	value,
+	onPreviewHtml,
+}: {
+	language: string;
+	value: string;
+	onPreviewHtml: (input: HtmlPreviewRequest) => void;
+}) {
+	const [copied, setCopied] = useState(false);
+	const isHtml = ["html", "htm"].includes(language);
+
+	async function handleCopy() {
+		try {
+			await navigator.clipboard.writeText(value);
+			setCopied(true);
+			setTimeout(() => setCopied(false), 2000);
+		} catch (err) {
+			console.error("Failed to copy code:", err);
+		}
+	}
+
+	return (
+		<figure className="code-block">
+			<figcaption>
+				<span>{language || "code"}</span>
+				<div style={{ display: "flex", gap: "8px" }}>
+					{isHtml ? (
+						<button
+							type="button"
+							onClick={() =>
+								onPreviewHtml({
+									title: "HTML 预览",
+									html: value.trim(),
+								})
+							}
+						>
+							预览 HTML
+						</button>
+					) : null}
+					<button type="button" onClick={handleCopy}>
+						{copied ? "已复制" : "复制"}
+					</button>
+				</div>
+			</figcaption>
+			<pre>
+				<code>{value.trim()}</code>
+			</pre>
+		</figure>
 	);
 }
 
@@ -78,43 +119,26 @@ export function MarkdownContent({
 	content,
 	onPreviewHtml,
 }: MarkdownContentProps) {
+	const segments = useMemo(() => splitSegments(content), [content]);
+
 	return (
 		<div className="message-markdown">
-			{splitSegments(content).map((segment, index) => {
+			{segments.map((segment, index) => {
 				if (segment.type === "text") {
 					return (
 						<TextBlock
-							key={`${index}-text-${segment.value.slice(0, 12)}`}
+							key={`${index}-text-${segment.value.slice(0, 16)}`}
 							value={segment.value}
 						/>
 					);
 				}
-				const isHtml = ["html", "htm"].includes(segment.language);
 				return (
-					<figure
-						className="code-block"
-						key={`${index}-code-${segment.value.slice(0, 12)}`}
-					>
-						<figcaption>
-							<span>{segment.language || "text"}</span>
-							{isHtml ? (
-								<button
-									type="button"
-									onClick={() =>
-										onPreviewHtml({
-											title: "HTML 预览",
-											html: segment.value.trim(),
-										})
-									}
-								>
-									预览 HTML
-								</button>
-							) : null}
-						</figcaption>
-						<pre>
-							<code>{segment.value.trim()}</code>
-						</pre>
-					</figure>
+					<CodeBlock
+						key={`${index}-code-${segment.value.slice(0, 16)}`}
+						language={segment.language}
+						value={segment.value}
+						onPreviewHtml={onPreviewHtml}
+					/>
 				);
 			})}
 		</div>

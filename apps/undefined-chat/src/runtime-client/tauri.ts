@@ -1,5 +1,26 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke as originalInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+
+function invoke<T>(cmd: string, args?: unknown): Promise<T> {
+	if (
+		typeof window === "undefined" ||
+		!("__TAURI_INTERNALS__" in (window as unknown as Record<string, unknown>))
+	) {
+		const isTest =
+			typeof globalThis !== "undefined" &&
+			(globalThis as unknown as Record<string, { env?: { NODE_ENV?: string } }>)
+				?.process?.env?.NODE_ENV === "test";
+		if (!isTest) {
+			throw new Error(
+				"请使用 Tauri 启动客户端（在终端运行 npm run tauri:dev）。当前运行在普通浏览器中，无法调用底层 Rust 原生接口。",
+			);
+		}
+	}
+	return args === undefined
+		? originalInvoke(cmd)
+		: // biome-ignore lint/suspicious/noExplicitAny: match original invoke args signature
+			originalInvoke(cmd, args as any);
+}
 import type {
 	ActiveJobsResponse,
 	AgentStageSnapshot,
