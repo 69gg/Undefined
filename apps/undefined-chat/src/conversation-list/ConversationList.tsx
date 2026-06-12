@@ -1,4 +1,5 @@
 import type { Conversation } from "../runtime-client/types";
+import { ThemeToggle } from "../theme/ThemeToggle";
 
 export type ConversationListProps = {
 	conversations: Conversation[];
@@ -21,9 +22,12 @@ export function ConversationList({
 		<nav aria-label="会话" className="conversation-list">
 			<header className="rail-header">
 				<h1>Undefined Chat</h1>
-				<button className="ghost-button" type="button" onClick={onCreate}>
-					新建
-				</button>
+				<div style={{ display: "flex", gap: "8px" }}>
+					<ThemeToggle />
+					<button className="ghost-button" type="button" onClick={onCreate}>
+						新建
+					</button>
+				</div>
 			</header>
 			<div className="conversation-scroll">
 				{conversations.map((conversation) => (

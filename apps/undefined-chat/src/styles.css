@@ -1,6 +1,53 @@
+/* ========================================
+   CSS Variables - Light Mode (Default)
+   ======================================== */
+
 :root {
-	color: #1f252b;
-	background: #f3f5f6;
+	/* 主色调 - 莫兰迪青蓝 */
+	--primary: #6b9bb8;
+	--primary-hover: #5a8ca8;
+	--primary-subtle: #e8f2f7;
+
+	/* 背景色 */
+	--bg-app: #f5f7f9;
+	--bg-sidebar: #eceff2;
+	--bg-workspace: #fafbfc;
+	--bg-surface: #ffffff;
+	--bg-surface-hover: #f8f9fa;
+
+	/* 消息气泡 */
+	--bg-message-bot: #ffffff;
+	--bg-message-user: #e3eff8;
+
+	/* 文字色 */
+	--text-primary: #2c3e50;
+	--text-secondary: #5a6c7d;
+	--text-tertiary: #8997a5;
+
+	/* 边框色 */
+	--border-primary: #d4dce4;
+	--border-subtle: #e8ecf0;
+	--border-message: #dfe6ec;
+
+	/* 状态色 */
+	--status-success: #7eb69c;
+	--status-success-bg: #e8f4ee;
+	--status-error: #c17b7b;
+	--status-error-text: #9b3a3a;
+	--status-warning: #d4a574;
+
+	/* 代码块 */
+	--bg-code: #2d3e4f;
+	--text-code: #d8e3ed;
+	--border-code: #3d4e5f;
+
+	/* 输入焦点 */
+	--focus-border: #6b9bb8;
+	--focus-ring: rgba(107, 155, 184, 0.2);
+
+	/* 字体设置 */
+	color: var(--text-primary);
+	background: var(--bg-app);
 	font-family:
 		Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
 		"Microsoft YaHei", sans-serif;
@@ -8,6 +55,103 @@
 	font-synthesis: none;
 	text-rendering: optimizeLegibility;
 	-webkit-font-smoothing: antialiased;
+}
+
+/* ========================================
+   CSS Variables - Dark Mode
+   ======================================== */
+
+:root[data-theme="dark"] {
+	/* 主色调 - 明亮青蓝 */
+	--primary: #7ba8c3;
+	--primary-hover: #8db5cc;
+	--primary-subtle: #1e3440;
+
+	/* 背景色 */
+	--bg-app: #0f1419;
+	--bg-sidebar: #151c23;
+	--bg-workspace: #1a2129;
+	--bg-surface: #1f2831;
+	--bg-surface-hover: #252d37;
+
+	/* 消息气泡 */
+	--bg-message-bot: #1f2831;
+	--bg-message-user: #1e3440;
+
+	/* 文字色 */
+	--text-primary: #e2e8f0;
+	--text-secondary: #a8b5c7;
+	--text-tertiary: #6b7a8e;
+
+	/* 边框色 */
+	--border-primary: #2d3945;
+	--border-subtle: #252d37;
+	--border-message: #2a3441;
+
+	/* 状态色 */
+	--status-success: #8dc4a3;
+	--status-success-bg: #1a2e24;
+	--status-error: #cf8f8f;
+	--status-error-text: #cf8f8f;
+	--status-warning: #e4b583;
+
+	/* 代码块 */
+	--bg-code: #0d1117;
+	--text-code: #c9d6e2;
+	--border-code: #1a2129;
+
+	/* 输入焦点 */
+	--focus-border: #7ba8c3;
+	--focus-ring: rgba(123, 168, 195, 0.25);
+
+	color: var(--text-primary);
+	background: var(--bg-app);
+}
+
+/* ========================================
+   System Preference - Auto Dark Mode
+   ======================================== */
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme]) {
+		/* 同暗色模式变量 */
+		--primary: #7ba8c3;
+		--primary-hover: #8db5cc;
+		--primary-subtle: #1e3440;
+
+		--bg-app: #0f1419;
+		--bg-sidebar: #151c23;
+		--bg-workspace: #1a2129;
+		--bg-surface: #1f2831;
+		--bg-surface-hover: #252d37;
+
+		--bg-message-bot: #1f2831;
+		--bg-message-user: #1e3440;
+
+		--text-primary: #e2e8f0;
+		--text-secondary: #a8b5c7;
+		--text-tertiary: #6b7a8e;
+
+		--border-primary: #2d3945;
+		--border-subtle: #252d37;
+		--border-message: #2a3441;
+
+		--status-success: #8dc4a3;
+		--status-success-bg: #1a2e24;
+		--status-error: #cf8f8f;
+		--status-error-text: #cf8f8f;
+		--status-warning: #e4b583;
+
+		--bg-code: #0d1117;
+		--text-code: #c9d6e2;
+		--border-code: #1a2129;
+
+		--focus-border: #7ba8c3;
+		--focus-ring: rgba(123, 168, 195, 0.25);
+
+		color: var(--text-primary);
+		background: var(--bg-app);
+	}
 }
 
 * {
@@ -44,19 +188,21 @@ a {
 	grid-template-columns: 292px minmax(0, 1fr);
 	min-height: 100vh;
 	min-height: 100svh;
-	background: #f3f5f6;
-	color: #1f252b;
+	background: var(--bg-app);
+	color: var(--text-primary);
+	transition: background-color 0.2s, color 0.2s;
 }
 
 .conversation-list {
 	display: flex;
 	flex-direction: column;
 	min-height: 0;
-	border-right: 1px solid #d7dde2;
-	background: #eef1f3;
+	border-right: 1px solid var(--border-primary);
+	background: var(--bg-sidebar);
 	padding:
 		max(14px, env(safe-area-inset-top)) 12px
 		max(12px, env(safe-area-inset-bottom));
+	transition: background-color 0.2s, border-color 0.2s;
 }
 
 .rail-header,
@@ -88,10 +234,16 @@ a {
 
 .ghost-button,
 .icon-button {
-	border: 1px solid #c9d1d8;
-	background: #fff;
-	color: #1f252b;
+	border: 1px solid var(--border-primary);
+	background: var(--bg-surface);
+	color: var(--text-primary);
 	border-radius: 6px;
+	transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.ghost-button:hover:not(:disabled),
+.icon-button:hover:not(:disabled) {
+	background: var(--bg-surface-hover);
 }
 
 .ghost-button {
@@ -112,13 +264,14 @@ a {
 	padding: 10px;
 	border-radius: 7px;
 	background: transparent;
-	color: #27313a;
+	color: var(--text-primary);
 	text-align: left;
+	transition: background-color 0.2s, color 0.2s;
 }
 
 .conversation-item:hover,
 .conversation-item[aria-current="page"] {
-	background: #fff;
+	background: var(--bg-surface);
 }
 
 .conversation-title-row {
@@ -135,18 +288,19 @@ a {
 }
 
 .conversation-meta {
-	color: #66717c;
+	color: var(--text-secondary);
 	font-size: 0.78rem;
 }
 
 .running-dot {
 	flex: 0 0 auto;
 	border-radius: 999px;
-	background: #e6f3ee;
-	color: #18704c;
+	background: var(--status-success-bg);
+	color: var(--status-success);
 	padding: 2px 7px;
 	font-size: 0.72rem;
 	font-weight: 650;
+	transition: background-color 0.2s, color 0.2s;
 }
 
 .chat-workspace {
@@ -155,28 +309,31 @@ a {
 	min-width: 0;
 	min-height: 100vh;
 	min-height: 100svh;
-	background: #fbfcfc;
+	background: var(--bg-workspace);
+	transition: background-color 0.2s;
 }
 
 .chat-topbar {
 	justify-content: space-between;
 	gap: 16px;
 	min-height: 58px;
-	border-bottom: 1px solid #dfe4e8;
+	border-bottom: 1px solid var(--border-primary);
 	padding:
 		max(10px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
 		10px 18px;
-	background: rgba(251, 252, 252, 0.94);
+	background: color-mix(in srgb, var(--bg-workspace) 94%, transparent);
 	backdrop-filter: blur(12px);
+	transition: background-color 0.2s, border-color 0.2s;
 }
 
 .mobile-rail-button {
 	display: none;
-	border: 1px solid #c9d1d8;
+	border: 1px solid var(--border-primary);
 	border-radius: 6px;
-	background: #fff;
-	color: #1f252b;
+	background: var(--bg-surface);
+	color: var(--text-primary);
 	padding: 7px 10px;
+	transition: background-color 0.2s, border-color 0.2s, color 0.2s;
 }
 
 .chat-title-block {
@@ -198,7 +355,7 @@ a {
 .job-status span,
 .composer-note,
 .setup-panel p {
-	color: #65707a;
+	color: var(--text-secondary);
 	font-size: 0.78rem;
 }
 
@@ -237,7 +394,8 @@ a {
 	justify-content: space-between;
 	gap: 16px;
 	padding: 10px 18px;
-	border-bottom: 1px solid #edf0f2;
+	border-bottom: 1px solid var(--border-subtle);
+	transition: border-color 0.2s;
 }
 
 .timeline-header > div:first-child,
@@ -255,7 +413,7 @@ a {
 
 .empty-state {
 	margin: 0;
-	color: #66717c;
+	color: var(--text-secondary);
 }
 
 .message-row {
@@ -279,22 +437,23 @@ a {
 .message-row-user .message-bubble {
 	grid-column: 1;
 	grid-row: 1;
-	background: #eef6ff;
-	border-color: #d5e6f7;
+	background: var(--bg-message-user);
+	border-color: var(--border-message);
 }
 
 .message-author {
 	padding-top: 9px;
-	color: #66717c;
+	color: var(--text-secondary);
 	font-size: 0.78rem;
 }
 
 .message-bubble {
 	min-width: 0;
-	border: 1px solid #e2e6ea;
+	border: 1px solid var(--border-message);
 	border-radius: 8px;
-	background: #fff;
+	background: var(--bg-message-bot);
 	padding: 11px 13px;
+	transition: background-color 0.2s, border-color 0.2s;
 }
 
 .message-markdown p {
@@ -308,19 +467,21 @@ a {
 }
 
 .message-markdown code {
-	border: 1px solid #d8dde2;
+	border: 1px solid var(--border-subtle);
 	border-radius: 5px;
-	background: #f5f7f8;
+	background: var(--bg-surface-hover);
 	padding: 1px 5px;
+	transition: background-color 0.2s, border-color 0.2s;
 }
 
 .code-block {
 	margin: 8px 0 0;
 	overflow: hidden;
-	border: 1px solid #d9dee3;
+	border: 1px solid var(--border-code);
 	border-radius: 8px;
-	background: #101316;
-	color: #dbe4ea;
+	background: var(--bg-code);
+	color: var(--text-code);
+	transition: background-color 0.2s, border-color 0.2s, color 0.2s;
 }
 
 .code-block figcaption {
@@ -329,16 +490,21 @@ a {
 	align-items: center;
 	gap: 10px;
 	padding: 8px 10px;
-	border-bottom: 1px solid #26313a;
-	color: #a9b5bf;
+	border-bottom: 1px solid var(--border-code);
+	color: var(--text-tertiary);
 	font-size: 0.78rem;
 }
 
 .code-block figcaption button {
 	border-radius: 5px;
-	background: #e9eef2;
-	color: #17202a;
+	background: var(--bg-surface);
+	color: var(--text-primary);
 	padding: 5px 8px;
+	transition: background-color 0.2s, color 0.2s;
+}
+
+.code-block figcaption button:hover:not(:disabled) {
+	background: var(--bg-surface-hover);
 }
 
 .code-block pre {
@@ -356,9 +522,9 @@ a {
 
 .reference-stack blockquote {
 	margin: 0 0 8px;
-	border-left: 3px solid #a8b2bc;
+	border-left: 3px solid var(--text-tertiary);
 	padding-left: 9px;
-	color: #59636d;
+	color: var(--text-secondary);
 }
 
 .attachment-list {
@@ -373,14 +539,15 @@ a {
 	display: flex;
 	justify-content: space-between;
 	gap: 10px;
-	border: 1px solid #dbe1e6;
+	border: 1px solid var(--border-subtle);
 	border-radius: 7px;
 	padding: 7px 9px;
+	transition: border-color 0.2s;
 }
 
 .attachment-list span,
 .event-item span:first-child {
-	color: #66717c;
+	color: var(--text-secondary);
 	font-size: 0.78rem;
 }
 
@@ -398,11 +565,12 @@ a {
 
 .runtime-pill {
 	gap: 8px;
-	border: 1px solid #d9e1e7;
+	border: 1px solid var(--border-subtle);
 	border-radius: 999px;
-	background: #f7f9fa;
+	background: var(--bg-surface-hover);
 	padding: 5px 9px;
 	font-size: 0.8rem;
+	transition: background-color 0.2s, border-color 0.2s;
 }
 
 .event-list {
@@ -414,21 +582,23 @@ a {
 
 .event-item {
 	gap: 10px;
-	border-left: 2px solid #cbd5dd;
+	border-left: 2px solid var(--border-primary);
 	padding: 5px 8px;
-	color: #38434d;
+	color: var(--text-primary);
+	transition: border-color 0.2s, color 0.2s;
 }
 
 .event-error {
-	border-left-color: #cf3f34;
-	color: #9b2c25;
+	border-left-color: var(--status-error);
+	color: var(--status-error-text);
 }
 
 .composer {
-	border-top: 1px solid #dfe4e8;
-	background: #fbfcfc;
+	border-top: 1px solid var(--border-primary);
+	background: var(--bg-workspace);
 	padding: 10px max(18px, env(safe-area-inset-right))
 		max(12px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+	transition: background-color 0.2s, border-color 0.2s;
 }
 
 .composer-input-row {
@@ -450,25 +620,31 @@ a {
 	min-width: 0;
 	min-height: 54px;
 	max-height: 160px;
-	border: 1px solid #c9d1d8;
+	border: 1px solid var(--border-primary);
 	border-radius: 8px;
-	background: #fff;
-	color: #1f252b;
+	background: var(--bg-surface);
+	color: var(--text-primary);
 	padding: 9px 10px;
 	line-height: 1.45;
+	transition: background-color 0.2s, border-color 0.2s, color 0.2s;
 }
 
 .composer textarea:focus {
-	border-color: #3374c2;
-	outline: 2px solid rgba(51, 116, 194, 0.16);
+	border-color: var(--focus-border);
+	outline: 2px solid var(--focus-ring);
 }
 
 .composer button[type="submit"] {
 	align-self: flex-end;
 	border-radius: 7px;
-	background: #255f99;
+	background: var(--primary);
 	color: #fff;
 	padding: 9px 15px;
+	transition: background-color 0.2s;
+}
+
+.composer button[type="submit"]:hover:not(:disabled) {
+	background: var(--primary-hover);
 }
 
 .composer-references,
@@ -488,16 +664,17 @@ a {
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
-	border: 1px solid #d8dde2;
+	border: 1px solid var(--border-subtle);
 	border-radius: 999px;
-	background: #fff;
+	background: var(--bg-surface);
 	padding: 4px 7px;
+	transition: background-color 0.2s, border-color 0.2s;
 }
 
 .composer-chip button,
 .composer-attachments button {
 	background: transparent;
-	color: #59636d;
+	color: var(--text-secondary);
 	padding: 0 3px;
 }
 
@@ -512,17 +689,19 @@ a {
 .composer-attachments li {
 	justify-content: space-between;
 	gap: 8px;
-	border: 1px solid #d8dde2;
+	border: 1px solid var(--border-subtle);
 	border-radius: 7px;
-	background: #fff;
+	background: var(--bg-surface);
 	padding: 6px 8px;
+	transition: background-color 0.2s, border-color 0.2s;
 }
 
 .command-suggestions {
-	border: 1px solid #d8dde2;
+	border: 1px solid var(--border-subtle);
 	border-radius: 8px;
-	background: #fff;
+	background: var(--bg-surface);
 	padding: 5px;
+	transition: background-color 0.2s, border-color 0.2s;
 }
 
 .command-suggestions li {
@@ -543,7 +722,9 @@ a {
 }
 
 .app-error {
-	color: #b42318;
+	max-width: 920px;
+	margin: 8px auto 0;
+	color: var(--status-error-text);
 }
 
 @media (max-width: 760px) {

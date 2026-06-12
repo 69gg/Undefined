@@ -12,8 +12,10 @@ import { MessageComposer } from "./message-composer/MessageComposer";
 import { MessageTimeline } from "./message-timeline/MessageTimeline";
 import { createTauriRuntimeClient } from "./runtime-client/tauri";
 import type { Attachment } from "./runtime-client/types";
+import { useTheme } from "./theme/use-theme";
 
 export function App() {
+	const { effectiveTheme } = useTheme();
 	const client = useMemo(() => createTauriRuntimeClient(), []);
 	const store = useMemo(() => createChatStore({ client }), [client]);
 	const state = useSyncExternalStore(
@@ -47,6 +49,11 @@ export function App() {
 	useEffect(() => {
 		void store.bootstrap();
 	}, [store]);
+
+	// 应用主题到 DOM
+	useEffect(() => {
+		document.documentElement.dataset.theme = effectiveTheme;
+	}, [effectiveTheme]);
 
 	async function handleSetupSubmit(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
