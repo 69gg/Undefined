@@ -104,6 +104,63 @@ describe("MessageComposer", () => {
 		expect(onDraftChange).toHaveBeenLastCalledWith("/conv new ");
 	});
 
+	test("回车选中带子命令的主命令后立即展示其子命令", async () => {
+		render(
+			<MessageComposer
+				attachmentQueue={[]}
+				commandSuggestions={[
+					commandInfo({ name: "help", description: "显示帮助" }),
+					commandInfo({
+						name: "conv",
+						trigger: "/conv",
+						description: "管理会话",
+						usage: "/conv <子命令>",
+						subcommands: [
+							subcommandInfo({
+								name: "new",
+								trigger: "/conv new",
+								usage: "/conv new [标题]",
+								description: "新建会话",
+							}),
+							subcommandInfo({
+								name: "list",
+								trigger: "/conv list",
+								usage: "/conv list",
+								args: "",
+								description: "列出会话",
+							}),
+						],
+					}),
+				]}
+				disabled={false}
+				draft=""
+				references={[]}
+				onAddAttachment={vi.fn()}
+				onClearAttachment={vi.fn()}
+				onClearReference={vi.fn()}
+				onDraftChange={vi.fn()}
+				onSend={vi.fn()}
+			/>,
+		);
+
+		const editor = screen.getByLabelText("消息输入");
+		await userEvent.type(editor, "/conv");
+		// 命令模式：仅命中 /conv（用命令名 span 精确定位，避免与右侧用法 code 重复命中）
+		const nameSelector = ".runtime-chat-command-name";
+		expect(
+			screen.getByText("/conv", { selector: nameSelector }),
+		).toBeInTheDocument();
+
+		// 回车选中主命令后，面板保持打开并展示其子命令
+		await userEvent.keyboard("{Enter}");
+		expect(
+			await screen.findByText("/conv new", { selector: nameSelector }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByText("/conv list", { selector: nameSelector }),
+		).toBeInTheDocument();
+	});
+
 	test("renders attachment queue and references with clear actions", async () => {
 		const onClearAttachment = vi.fn();
 		const onClearReference = vi.fn();

@@ -70,18 +70,55 @@ export function MessageTimeline({
 	const visibleItems = items.slice(-WINDOW_SIZE);
 	const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
 	const timelineRef = useRef<HTMLDivElement>(null);
+	// 是否贴附底部：用户向上滚动查看历史时暂停自动滚动（智能暂停）
+	const stickToBottomRef = useRef(true);
 
 	const isCurrentlyThinking = isJobRunning(activeJob);
 	const hasEventsOrActiveJob = Boolean(activeJob || events.length > 0);
 
-	// 自动滚动到底部
-	// biome-ignore lint/correctness/useExhaustiveDependencies: 作为触发器使用
-	useEffect(() => {
+	function handleTimelineScroll(): void {
 		const el = timelineRef.current;
-		if (el) {
+		if (!el) return;
+		stickToBottomRef.current =
+			el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+	}
+
+	// 自动滚动到底部：覆盖新消息、流式回复增长、工具块/事件更新、思考展开等撑高情形；
+	// 仅在贴附底部时滚动（智能暂停），并用双 rAF 等待布局与图片等异步撑高后再滚，确保彻底到底。
+	const lastItemId = visibleItems[visibleItems.length - 1]?.messageId;
+	const streamSignature = activeJob
+		? [
+				activeJob.jobId,
+				activeJob.reply.length,
+				activeJob.currentStage,
+				activeJob.currentStageDetail,
+				activeJob.currentToolCalls.length,
+				activeJob.currentAgentStages.length,
+			].join(":")
+		: "";
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 下列信号仅作为滚动触发器
+	useEffect(() => {
+		if (!stickToBottomRef.current) return;
+		const el = timelineRef.current;
+		if (!el) return;
+		let raf2 = 0;
+		const raf1 = requestAnimationFrame(() => {
 			el.scrollTop = el.scrollHeight;
-		}
-	}, [visibleItems.length, activeJob?.jobId]);
+			raf2 = requestAnimationFrame(() => {
+				el.scrollTop = el.scrollHeight;
+			});
+		});
+		return () => {
+			cancelAnimationFrame(raf1);
+			cancelAnimationFrame(raf2);
+		};
+	}, [
+		visibleItems.length,
+		lastItemId,
+		streamSignature,
+		events.length,
+		isThinkingExpanded,
+	]);
 
 	const shortcuts = [
 		{
@@ -174,7 +211,13 @@ export function MessageTimeline({
 
 	return (
 		<section className="timeline-shell">
-			<div aria-label="消息" className="timeline" role="log" ref={timelineRef}>
+			<div
+				aria-label="消息"
+				className="timeline"
+				onScroll={handleTimelineScroll}
+				role="log"
+				ref={timelineRef}
+			>
 				{visibleItems.length === 0 && !activeJob ? (
 					<div className="welcome-container">
 						<div className="welcome-logo">

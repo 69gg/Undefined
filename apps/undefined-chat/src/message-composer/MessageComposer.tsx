@@ -46,7 +46,7 @@ export function MessageComposer({
 	const [value, setValue] = useState(draft);
 	const [selectionStart, setSelectionStart] = useState(draft.length);
 	const [activeIndex, setActiveIndex] = useState(0);
-	// 记录被 Esc 关闭时的输入值；继续输入（value 改变）后自动恢复
+	// 面板被关闭时（Esc 或选中候选）记录当时输入值；输入变化后自动重开
 	const [escDismissedValue, setEscDismissedValue] = useState<string | null>(
 		null,
 	);
@@ -78,6 +78,14 @@ export function MessageComposer({
 	);
 	const paletteOpen = commandContext !== null && value !== escDismissedValue;
 
+	// 输入离开命令上下文（清空/键入普通文本）后清除关闭哨兵，
+	// 使再次输入 "/" 能立即重开，避免"重输相同值仍被判为已关闭"
+	useEffect(() => {
+		if (commandContext === null && escDismissedValue !== null) {
+			setEscDismissedValue(null);
+		}
+	}, [commandContext, escDismissedValue]);
+
 	// 子命令模式下命令存在但无子命令 → 展示帮助卡片
 	const helpCommand = useMemo<CommandInfo | null>(() => {
 		if (!commandContext || commandContext.mode !== "subcommand") return null;
@@ -102,6 +110,9 @@ export function MessageComposer({
 
 	function update(nextValue: string): void {
 		setValue(nextValue);
+		// 默认光标置于末尾（输入/补全的常见情形），使命令上下文随输入立即刷新，
+		// 不依赖 onChange 时可能尚未同步的 DOM selectionStart；真实光标移动由 keyup/select 校正
+		setSelectionStart(nextValue.length);
 		onDraftChange(nextValue);
 	}
 
@@ -119,14 +130,16 @@ export function MessageComposer({
 		const next = buildReplacement(match);
 		update(next);
 		setActiveIndex(0);
-		// 选择后关闭面板（对齐 WebUI），用户继续输入（value 变化）会自动重开
-		setEscDismissedValue(next);
+		// 选中"有子命令的主命令"后保持面板打开以展示其子命令；
+		// 选中子命令或无子命令的命令则选完即收（对齐 WebUI 的关闭行为）
+		const revealSubcommands =
+			match.type === "command" && match.command.subcommands.length > 0;
+		setEscDismissedValue(revealSubcommands ? null : next);
 		requestAnimationFrame(() => {
 			const el = textareaRef.current;
 			if (el) {
 				el.focus();
 				el.setSelectionRange(next.length, next.length);
-				setSelectionStart(next.length);
 			}
 		});
 	}
@@ -261,7 +274,6 @@ export function MessageComposer({
 						disabled={disabled}
 						onChange={(event) => {
 							update(event.currentTarget.value);
-							syncCursor(event.currentTarget);
 							setActiveIndex(0);
 						}}
 						onKeyDown={handleKeyDown}

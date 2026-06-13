@@ -316,6 +316,7 @@ export function App() {
 
 				{/* 消息时间线 */}
 				<MessageTimeline
+					key={selectedConversationId ?? "none"}
 					activeJob={activeJob}
 					connectionState={state.connectionState}
 					events={activeEvents}
