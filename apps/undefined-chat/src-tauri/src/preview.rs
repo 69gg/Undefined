@@ -80,12 +80,27 @@ pub(crate) fn build_preview_data_url(title: &str, html: &str) -> Result<Url, Str
 
 #[tauri::command]
 pub async fn open_html_preview(app: AppHandle, input: HtmlPreviewInput) -> Result<(), String> {
-    // 构建 data URL
-    let url = build_preview_data_url(&input.title, &input.html)?;
-    let initial_url = url.clone();
+    use std::fs;
+    use std::path::PathBuf;
+
     let label = format!("html-preview-{}", Uuid::new_v4());
 
-    // 尝试获取主窗口 - 支持多种可能的标签
+    // 写入临时 HTML 文件
+    let temp_dir = app
+        .path()
+        .temp_dir()
+        .map_err(|e| format!("Failed to get temp dir: {}", e))?;
+    let html_file = temp_dir.join(format!("{}.html", label));
+
+    let document = preview_document(&input.title, &input.html);
+    fs::write(&html_file, document).map_err(|e| format!("Failed to write HTML file: {}", e))?;
+
+    // 转换为 file:// URL
+    let file_url = format!("file://{}", html_file.display());
+    let url = Url::parse(&file_url).map_err(|e| format!("Failed to parse file URL: {}", e))?;
+    let initial_url = url.clone();
+
+    // 尝试获取主窗口
     let main_window = app
         .get_webview_window("main")
         .or_else(|| app.webview_windows().into_values().next())
@@ -94,9 +109,9 @@ pub async fn open_html_preview(app: AppHandle, input: HtmlPreviewInput) -> Resul
     eprintln!("[preview] Creating HTML preview window: {}", label);
     eprintln!("[preview] Title: {}", input.title);
     eprintln!("[preview] HTML size: {} bytes", input.html.len());
-    eprintln!("[preview] Data URL size: {} bytes", url.as_str().len());
+    eprintln!("[preview] File URL: {}", file_url);
 
-    let builder = WebviewWindowBuilder::new(&main_window, label, WebviewUrl::CustomProtocol(url))
+    let builder = WebviewWindowBuilder::new(&main_window, label, WebviewUrl::External(url))
         .title(input.title)
         .inner_size(900.0, 700.0)
         .resizable(true)
