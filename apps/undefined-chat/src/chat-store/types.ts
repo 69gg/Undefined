@@ -176,6 +176,7 @@ export type ChatAction =
 	  }
 	// 历史记录
 	| { type: "history/loading"; conversationId: string }
+	| { type: "history/error"; conversationId: string; error: string }
 	| {
 			type: "history/set";
 			conversationId: string;

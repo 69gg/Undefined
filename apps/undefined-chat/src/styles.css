@@ -456,6 +456,33 @@ a:hover {
 	font-size: 0.875rem;
 }
 
+.timeline-error {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 16px;
+	max-width: 560px;
+	margin: 40px auto;
+	padding: 28px 24px;
+	background: var(--bg-surface);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-md);
+	box-shadow: var(--shadow-sm);
+}
+
+.timeline-error-text {
+	margin: 0;
+	text-align: center;
+	color: var(--status-error-text);
+	font-size: 0.875rem;
+	line-height: 1.5;
+}
+
+.timeline-error .ghost-button {
+	margin-top: 4px;
+}
+
 /* 二次确认弹窗 */
 .confirm-dialog-overlay {
 	position: fixed;

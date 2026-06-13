@@ -23,6 +23,10 @@ export type MessageTimelineProps = {
 	events: ChatEvent[];
 	/** 选中会话的历史尚未加载或加载中：显示加载态而非欢迎页 */
 	historyLoading?: boolean;
+	/** 历史加载失败的错误信息（单会话级，非全局致命） */
+	historyError?: string | null;
+	/** 重试加载当前会话历史 */
+	onRetryHistory?: () => void;
 	items: HistoryItem[];
 	onPreviewHtml: (input: HtmlPreviewRequest) => void;
 	onPreviewAttachment: (attachment: Attachment) => void;
@@ -61,6 +65,8 @@ export function MessageTimeline({
 	activeJob,
 	events,
 	historyLoading,
+	historyError,
+	onRetryHistory,
 	items,
 	onPreviewAttachment,
 	onPreviewHtml,
@@ -221,7 +227,20 @@ export function MessageTimeline({
 				role="log"
 				ref={timelineRef}
 			>
-				{historyLoading && visibleItems.length === 0 && !activeJob ? (
+				{historyError && visibleItems.length === 0 && !activeJob ? (
+					<div className="timeline-error">
+						<p className="timeline-error-text">{historyError}</p>
+						{onRetryHistory ? (
+							<button
+								className="ghost-button"
+								onClick={onRetryHistory}
+								type="button"
+							>
+								重试
+							</button>
+						) : null}
+					</div>
+				) : historyLoading && visibleItems.length === 0 && !activeJob ? (
 					<div className="timeline-loading">
 						<span aria-hidden="true" className="timeline-spinner" />
 						<p>正在加载会话…</p>

@@ -41,7 +41,7 @@ export function App() {
 		: null;
 
 	const selectedConversationId =
-		state.selectedConversationId ?? state.conversations[0]?.id ?? null;
+		state.selectedConversationId || state.conversations[0]?.id || null;
 	const selectedHistoryState = selectedConversationId
 		? state.historyByConversation[selectedConversationId]
 		: undefined;
@@ -50,6 +50,7 @@ export function App() {
 	const historyLoading =
 		selectedConversationId !== null &&
 		(selectedHistoryState === undefined || selectedHistoryState.loading);
+	const historyError = selectedHistoryState?.error ?? null;
 	const activeJob = selectedConversationId
 		? (state.activeJobsByConversation[selectedConversationId] ?? null)
 		: null;
@@ -342,6 +343,14 @@ export function App() {
 					connectionState={state.connectionState}
 					events={activeEvents}
 					historyLoading={historyLoading}
+					historyError={historyError}
+					onRetryHistory={
+						selectedConversationId
+							? () => {
+									void store.reloadHistory(selectedConversationId);
+								}
+							: undefined
+					}
 					items={selectedHistory}
 					onPreviewAttachment={(attachment) => {
 						void previewAttachment(attachment);

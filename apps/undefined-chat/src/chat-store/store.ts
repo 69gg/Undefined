@@ -37,6 +37,7 @@ export type ChatStore = {
 	clearReference: (conversationId: string, messageId: string) => void;
 	clearAttachment: (conversationId: string, attachmentId: string) => void;
 	loadMoreHistory: (conversationId: string) => Promise<void>;
+	reloadHistory: (conversationId: string) => Promise<void>;
 	applyRuntimeEvents: (jobId: string, events: ChatEvent[]) => void;
 	handleRuntimeEvent: (event: RuntimeSseEvent) => void;
 	handleRuntimeStatus: (status: RuntimeSseStatus) => void;
@@ -174,6 +175,23 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 						total: existing?.total ?? 0,
 						loading: true,
 						error: null,
+					},
+				},
+			};
+		}
+		case "history/error": {
+			const existing = state.historyByConversation[action.conversationId];
+			return {
+				...state,
+				historyByConversation: {
+					...state.historyByConversation,
+					[action.conversationId]: {
+						items: existing?.items ?? [],
+						hasMore: existing?.hasMore ?? false,
+						nextBefore: existing?.nextBefore ?? null,
+						total: existing?.total ?? 0,
+						loading: false,
+						error: action.error,
 					},
 				},
 			};
@@ -542,18 +560,27 @@ export function createChatStore({
 
 	async function loadHistory(conversationId: string): Promise<void> {
 		dispatch({ type: "history/loading", conversationId });
-		const history = await client.getHistory({
-			conversationId,
-			limit: HISTORY_LIMIT,
-		});
-		dispatch({
-			type: "history/set",
-			conversationId,
-			items: history.items,
-			hasMore: history.hasMore,
-			nextBefore: history.nextBefore,
-			total: history.total,
-		});
+		try {
+			const history = await client.getHistory({
+				conversationId,
+				limit: HISTORY_LIMIT,
+			});
+			dispatch({
+				type: "history/set",
+				conversationId,
+				items: history.items,
+				hasMore: history.hasMore,
+				nextBefore: history.nextBefore,
+				total: history.total,
+			});
+		} catch (err) {
+			// 单会话历史加载失败降级为会话级错误，不升级为全局致命错误
+			dispatch({
+				type: "history/error",
+				conversationId,
+				error: errorMessage(err),
+			});
+		}
 	}
 
 	async function startStreamForJob(job: ChatJob): Promise<void> {
@@ -637,8 +664,16 @@ export function createChatStore({
 					client.getActiveJobs(),
 					client.listCommands(),
 				]);
+			// 仅选取真实存在于会话列表中的会话：defaultConversationId 是后端常量
+			// （legacy-system-42），未必对应已存在的会话，盲目用它会触发 getHistory 404
+			const conversationIds = new Set(
+				conversationsResponse.conversations.map((item) => item.id),
+			);
+			const preferredDefault = conversationsResponse.defaultConversationId;
 			const selected =
-				conversationsResponse.defaultConversationId ||
+				(preferredDefault && conversationIds.has(preferredDefault)
+					? preferredDefault
+					: "") ||
 				conversationsResponse.conversations[0]?.id ||
 				activeJobs.jobs[0]?.conversationId ||
 				"";
@@ -954,6 +989,7 @@ export function createChatStore({
 		clearReference,
 		clearAttachment,
 		loadMoreHistory,
+		reloadHistory: loadHistory,
 		applyRuntimeEvents,
 		handleRuntimeEvent,
 		handleRuntimeStatus,
