@@ -160,8 +160,11 @@ describe("E2E: Message Sending", () => {
 
 		const input = screen.getByLabelText("消息输入") as HTMLTextAreaElement;
 
-		// 输入多行文本
-		await userEvent.type(input, "第一行{Shift>}{Enter}{/Shift}第二行");
+		// 输入多行文本（Shift+Enter 由组件内部处理，测试直接模拟结果）
+		await userEvent.type(input, "第一行");
+		// 模拟 Shift+Enter（实际按键）
+		await userEvent.keyboard("{Shift>}{Enter}{/Shift}");
+		await userEvent.type(input, "第二行");
 
 		expect(input.value).toContain("第一行\n第二行");
 

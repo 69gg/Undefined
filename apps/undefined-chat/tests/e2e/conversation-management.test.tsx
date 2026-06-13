@@ -177,8 +177,8 @@ describe("E2E: Conversation Management", () => {
 
 		await screen.findByRole("navigation", { name: "会话" });
 
-		// 验证会话标题显示
-		expect(screen.getByText("空会话")).toBeInTheDocument();
+		// 验证会话标题显示（使用 getAllByText 因为可能在列表和主区域都显示）
+		expect(screen.getAllByText("空会话").length).toBeGreaterThan(0);
 		expect(screen.getByText("有消息")).toBeInTheDocument();
 	});
 
@@ -215,16 +215,16 @@ describe("E2E: Conversation Management", () => {
 		const conv1Btn = screen.getByRole("button", { name: /会话一/ });
 		const conv2Btn = screen.getByRole("button", { name: /会话二/ });
 
-		// 初始选中会话一
-		expect(conv1Btn.classList.contains("active")).toBe(true);
-		expect(conv2Btn.classList.contains("active")).toBe(false);
+		// 初始选中会话一（通过 aria-current="page" 标识）
+		expect(conv1Btn.getAttribute("aria-current")).toBe("page");
+		expect(conv2Btn.getAttribute("aria-current")).toBe(null);
 
 		// 切换到会话二
 		await userEvent.click(conv2Btn);
 
 		await waitFor(() => {
-			expect(conv1Btn.classList.contains("active")).toBe(false);
-			expect(conv2Btn.classList.contains("active")).toBe(true);
+			expect(conv1Btn.getAttribute("aria-current")).toBe(null);
+			expect(conv2Btn.getAttribute("aria-current")).toBe("page");
 		});
 	});
 

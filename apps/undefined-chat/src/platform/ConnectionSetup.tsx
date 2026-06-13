@@ -146,10 +146,12 @@ export function ConnectionSetup({
 						<span className="label-text">Runtime URL</span>
 						<input
 							autoComplete="url"
-							onChange={(event) => setUrl(event.currentTarget.value)}
+							onChange={(event) => {
+								setUrl(event.currentTarget.value);
+								setError(null);
+							}}
 							placeholder="http://192.168.1.100:8788"
-							required
-							type="url"
+							type="text"
 							value={url}
 						/>
 					</label>
@@ -158,15 +160,17 @@ export function ConnectionSetup({
 						<span className="label-text">API Key</span>
 						<input
 							autoComplete="current-password"
-							onChange={(event) => setApiKey(event.currentTarget.value)}
+							onChange={(event) => {
+								setApiKey(event.currentTarget.value);
+								setError(null);
+							}}
 							placeholder="请输入 API Key"
-							required
 							type="password"
 							value={apiKey}
 						/>
 					</label>
 
-					{error ? <p className="setup-error">{error}</p> : null}
+					{error && <p className="setup-error">{error}</p>}
 
 					<button className="connect-button" type="submit">
 						连接

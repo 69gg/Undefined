@@ -184,16 +184,22 @@ describe("E2E: Connection Setup Flow", () => {
 		// 等待应用加载完成
 		await screen.findByRole("navigation", { name: "会话" });
 
-		// 点击设置按钮
-		const settingsBtn = screen.getByRole("button", { name: "设置" });
+		// 点击设置按钮（使用更具体的选择器）
+		const settingsBtn = screen
+			.getAllByTitle("配置 Runtime")
+			.find((el) => el.tagName === "BUTTON") as HTMLElement;
+		expect(settingsBtn).toBeDefined();
 		await userEvent.click(settingsBtn);
 
 		// 配置面板应该打开，标题不同
 		expect(await screen.findByText("Runtime 配置")).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "保存并连接" })).toBeInTheDocument();
 
-		// 应该有关闭按钮
-		const closeBtn = screen.getByRole("button", { name: "关闭" });
+		// 应该有关闭按钮（按 title 查找）
+		const closeBtn = screen
+			.getAllByTitle("关闭")
+			.find((el) => el.tagName === "BUTTON") as HTMLElement;
+		expect(closeBtn).toBeDefined();
 		await userEvent.click(closeBtn);
 
 		// 面板关闭
@@ -215,8 +221,12 @@ describe("E2E: Connection Setup Flow", () => {
 
 		await screen.findByRole("navigation", { name: "会话" });
 
-		// 打开设置
-		await userEvent.click(screen.getByRole("button", { name: "设置" }));
+		// 打开设置（使用更具体的选择器）
+		const settingsBtn = screen
+			.getAllByTitle("配置 Runtime")
+			.find((el) => el.tagName === "BUTTON") as HTMLElement;
+		expect(settingsBtn).toBeDefined();
+		await userEvent.click(settingsBtn);
 
 		const keyInput = (await screen.findByLabelText(
 			"API Key",

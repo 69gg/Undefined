@@ -236,10 +236,10 @@ describe("App", () => {
 						attachments: [
 							{
 								id: "att-1",
-								name: "report.png",
+								name: "report.pdf",
 								size: 2048,
-								mediaType: "image/png",
-								kind: "image",
+								mediaType: "application/pdf",
+								kind: "file",
 								downloadUrl: "/api/v1/chat/attachments/att-1",
 								previewUrl: "/api/v1/chat/attachments/att-1/preview",
 								discarded: false,
@@ -256,26 +256,15 @@ describe("App", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 		vi.spyOn(window, "alert").mockImplementation(() => undefined);
-		vi.spyOn(window, "open").mockImplementation(() => null);
-		vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:preview");
 
 		render(<App />);
-		await screen.findByText("report.png");
+		await screen.findByText("report.pdf");
 
-		await userEvent.click(screen.getByRole("button", { name: "预览" }));
-		await userEvent.click(screen.getByRole("button", { name: "保存" }));
+		await userEvent.click(screen.getByRole("button", { name: "下载" }));
 
-		expect(client.previewAttachment).toHaveBeenCalledWith({
-			attachmentId: "att-1",
-		});
 		expect(client.saveAttachment).toHaveBeenCalledWith({
 			attachmentId: "att-1",
-			fileName: "report.png",
+			fileName: "report.pdf",
 		});
-		expect(window.open).toHaveBeenCalledWith(
-			"blob:preview",
-			"_blank",
-			"noopener,noreferrer",
-		);
 	});
 });

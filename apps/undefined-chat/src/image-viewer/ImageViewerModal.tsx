@@ -74,7 +74,10 @@ export function ImageViewerModal({
 			/>
 			<button
 				className="image-viewer-close-button"
-				onClick={onClose}
+				onClick={(e) => {
+					e.stopPropagation();
+					onClose();
+				}}
 				type="button"
 				aria-label="关闭"
 			>

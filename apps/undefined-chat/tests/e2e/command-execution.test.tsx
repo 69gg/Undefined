@@ -22,9 +22,9 @@ describe("E2E: Command Execution", () => {
 		const client = runtimeClientStub({
 			listCommands: vi.fn(async () => ({
 				commands: [
-					{ name: "/help", description: "显示帮助信息" },
-					{ name: "/clear", description: "清空会话历史" },
-					{ name: "/model", description: "切换模型" },
+					{ name: "help", description: "显示帮助信息" },
+					{ name: "clear", description: "清空会话历史" },
+					{ name: "model", description: "切换模型" },
 				],
 			})),
 		});
@@ -47,10 +47,10 @@ describe("E2E: Command Execution", () => {
 		const client = runtimeClientStub({
 			listCommands: vi.fn(async () => ({
 				commands: [
-					{ name: "/help", description: "显示帮助信息" },
-					{ name: "/history", description: "查看历史记录" },
-					{ name: "/model", description: "切换模型" },
-					{ name: "/clear", description: "清空会话" },
+					{ name: "help", description: "显示帮助信息" },
+					{ name: "history", description: "查看历史记录" },
+					{ name: "model", description: "切换模型" },
+					{ name: "clear", description: "清空会话" },
 				],
 			})),
 		});
@@ -74,9 +74,9 @@ describe("E2E: Command Execution", () => {
 		const client = runtimeClientStub({
 			listCommands: vi.fn(async () => ({
 				commands: [
-					{ name: "/help", description: "显示帮助" },
-					{ name: "/history", description: "历史记录" },
-					{ name: "/model", description: "切换模型" },
+					{ name: "help", description: "显示帮助" },
+					{ name: "history", description: "历史记录" },
+					{ name: "model", description: "切换模型" },
 				],
 			})),
 		});
@@ -95,15 +95,17 @@ describe("E2E: Command Execution", () => {
 		await userEvent.keyboard("{ArrowDown}");
 		await userEvent.keyboard("{ArrowDown}");
 
-		// 验证导航状态（通过 CSS 类或 aria-selected）
-		const modelItem = screen.getByText("/model").closest("button");
-		expect(modelItem?.classList.contains("active")).toBe(true);
+		// 验证导航状态（通过 aria-selected）
+		const modelItem = screen
+			.getByText("/model")
+			.closest('[role="option"]') as HTMLElement;
+		expect(modelItem?.getAttribute("aria-selected")).toBe("true");
 	});
 
 	test("选择命令后填充到输入框", async () => {
 		const client = runtimeClientStub({
 			listCommands: vi.fn(async () => ({
-				commands: [{ name: "/help", description: "显示帮助" }],
+				commands: [{ name: "help", description: "显示帮助" }],
 			})),
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
@@ -118,8 +120,8 @@ describe("E2E: Command Execution", () => {
 		const helpCmd = await screen.findByText("/help");
 		await userEvent.click(helpCmd);
 
-		// 命令应该被填充到输入框
-		expect(input.value).toBe("/help");
+		// 命令应该被填充到输入框（带空格便于继续输入）
+		expect(input.value).toBe("/help ");
 
 		// 命令面板应该关闭
 		await waitFor(() => {
@@ -131,8 +133,8 @@ describe("E2E: Command Execution", () => {
 		const client = runtimeClientStub({
 			listCommands: vi.fn(async () => ({
 				commands: [
-					{ name: "/help", description: "显示帮助" },
-					{ name: "/clear", description: "清空会话" },
+					{ name: "help", description: "显示帮助" },
+					{ name: "clear", description: "清空会话" },
 				],
 			})),
 		});
@@ -153,14 +155,14 @@ describe("E2E: Command Execution", () => {
 		// 按 Enter 选择
 		await userEvent.keyboard("{Enter}");
 
-		// 应该填充第二个命令
-		expect(input.value).toBe("/clear");
+		// 应该填充第二个命令（带空格）
+		expect(input.value).toBe("/clear ");
 	});
 
 	test("Escape 键关闭命令面板", async () => {
 		const client = runtimeClientStub({
 			listCommands: vi.fn(async () => ({
-				commands: [{ name: "/help", description: "显示帮助" }],
+				commands: [{ name: "help", description: "显示帮助" }],
 			})),
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
@@ -177,16 +179,16 @@ describe("E2E: Command Execution", () => {
 		// 按 Escape 关闭
 		await userEvent.keyboard("{Escape}");
 
-		// 命令面板应该关闭
+		// 命令面板应该关闭（只检查描述文本）
 		await waitFor(() => {
-			expect(screen.queryByText("/help")).not.toBeInTheDocument();
+			expect(screen.queryByText("显示帮助")).not.toBeInTheDocument();
 		});
 	});
 
 	test("删除斜杠后关闭命令面板", async () => {
 		const client = runtimeClientStub({
 			listCommands: vi.fn(async () => ({
-				commands: [{ name: "/help", description: "显示帮助" }],
+				commands: [{ name: "help", description: "显示帮助" }],
 			})),
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
@@ -213,8 +215,8 @@ describe("E2E: Command Execution", () => {
 		const client = runtimeClientStub({
 			listCommands: vi.fn(async () => ({
 				commands: [
-					{ name: "/help", description: "显示帮助" },
-					{ name: "/clear", description: "清空会话" },
+					{ name: "help", description: "显示帮助" },
+					{ name: "clear", description: "清空会话" },
 				],
 			})),
 		});
@@ -237,7 +239,7 @@ describe("E2E: Command Execution", () => {
 	test("发送命令消息", async () => {
 		const client = runtimeClientStub({
 			listCommands: vi.fn(async () => ({
-				commands: [{ name: "/help", description: "显示帮助" }],
+				commands: [{ name: "help", description: "显示帮助" }],
 			})),
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
@@ -252,7 +254,7 @@ describe("E2E: Command Execution", () => {
 		const helpCmd = await screen.findByText("/help");
 		await userEvent.click(helpCmd);
 
-		// 发送命令
+		// 发送命令（选择后输入框是 "/help "，发送时会 trim）
 		const sendBtn = screen.getByRole("button", { name: "发送" });
 		await userEvent.click(sendBtn);
 
@@ -281,7 +283,7 @@ describe("E2E: Command Execution", () => {
 				virtualUserId: "webchat",
 			})),
 			listCommands: vi.fn(async () => ({
-				commands: [{ name: "/help", description: "显示帮助" }],
+				commands: [{ name: "help", description: "显示帮助" }],
 			})),
 			getHistory: vi.fn(async ({ conversationId }) => ({
 				conversationId,
