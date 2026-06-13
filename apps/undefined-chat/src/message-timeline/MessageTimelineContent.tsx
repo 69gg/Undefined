@@ -108,7 +108,16 @@ function RenderToolCall({ call }: { call: HistoryToolCall }) {
 	const status = call.status || "done";
 	const kindClass = call.is_agent ? " is-agent" : " is-tool";
 	const kindLabel = call.is_agent ? "Agent" : "工具";
-	const meta = statusLabel(status);
+
+	// Agent 运行中时显示当前阶段，否则显示状态
+	const showLiveStage =
+		call.is_agent &&
+		call.current_stage &&
+		!["done", "error", "cancelled"].includes(status);
+	const meta =
+		showLiveStage && call.current_stage
+			? call.current_stage.replace(/_/g, " ")
+			: statusLabel(status);
 
 	const childTimeline = Array.isArray(call.timeline)
 		? call.timeline.filter(
