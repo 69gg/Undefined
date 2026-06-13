@@ -80,7 +80,11 @@ def _context() -> RuntimeAPIContext:
             superadmin_qq=10001,
             bot_qq=20002,
         ),
-        onebot=SimpleNamespace(connection_status=lambda: {}),
+        onebot=SimpleNamespace(
+            connection_status=lambda: {},
+            get_image=lambda uid: None,
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
         ai=SimpleNamespace(
             attachment_registry=object(),
             memory_storage=SimpleNamespace(count=lambda: 0),
@@ -221,20 +225,6 @@ async def test_chat_job_events_after_reconnect_and_disconnect_does_not_cancel(
     release = asyncio.Event()
     cancelled = False
 
-    async def _fake_render_message_with_pic_placeholders(
-        message: str,
-        *,
-        registry: Any,
-        scope_key: str,
-        strict: bool,
-    ) -> Any:
-        _ = registry, scope_key, strict
-        return SimpleNamespace(
-            delivery_text=f"rendered {message}",
-            history_text=f"history {message}",
-            attachments=[],
-        )
-
     async def _fake_run_webui_chat(_ctx: Any, *, text: str, send_output: Any) -> str:
         nonlocal cancelled
         assert text == "hello"
@@ -248,11 +238,6 @@ async def test_chat_job_events_after_reconnect_and_disconnect_does_not_cancel(
             cancelled = True
             raise
 
-    monkeypatch.setattr(
-        runtime_api_chat,
-        "render_message_with_pic_placeholders",
-        _fake_render_message_with_pic_placeholders,
-    )
     monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
     monkeypatch.setattr(web, "StreamResponse", _DummyStreamResponse)
 
@@ -321,7 +306,7 @@ async def test_chat_job_events_after_reconnect_and_disconnect_does_not_cancel(
         "done",
     ]
     message_events = [event for event in second_events if event["event"] == "message"]
-    assert message_events[0]["payload"]["content"] == "rendered second"
+    assert message_events[0]["payload"]["content"] == "second"
 
 
 @pytest.mark.asyncio
@@ -1109,20 +1094,6 @@ async def test_chat_job_persists_webchat_lifecycle_history(
         async def flush_pending_saves(self) -> None:
             return None
 
-    async def _fake_render_message_with_pic_placeholders(
-        message: str,
-        *,
-        registry: Any,
-        scope_key: str,
-        strict: bool,
-    ) -> Any:
-        _ = registry, scope_key, strict
-        return SimpleNamespace(
-            delivery_text=f"rendered {message}",
-            history_text=f"history {message}",
-            attachments=[],
-        )
-
     async def _fake_run_webui_chat(
         _ctx: Any,
         *,
@@ -1202,11 +1173,6 @@ async def test_chat_job_persists_webchat_lifecycle_history(
 
     context = _context()
     context.history_manager = _History()
-    monkeypatch.setattr(
-        runtime_api_chat,
-        "render_message_with_pic_placeholders",
-        _fake_render_message_with_pic_placeholders,
-    )
     monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
     server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
 
@@ -1230,7 +1196,7 @@ async def test_chat_job_persists_webchat_lifecycle_history(
     assert history_calls == []
     call = await _last_webchat_record(server)
     assert call["user_id"] == "42"
-    assert call["message"] == "history final"
+    assert call["message"] == "final"
     webchat = call["webchat"]
     assert webchat["display_only"] is True
     assert webchat["job_id"] == job_id
@@ -1251,7 +1217,7 @@ async def test_chat_job_persists_webchat_lifecycle_history(
     assert webchat["events"][2]["payload"]["parent_webchat_call_id"] == "agent_1"
     assert webchat["events"][3]["payload"]["result_preview"] == "nested result"
     assert "duration_ms" in webchat["events"][3]["payload"]
-    assert webchat["events"][4]["payload"]["content"] == "rendered final"
+    assert webchat["events"][4]["payload"]["content"] == "final"
     assert webchat["events"][4]["payload"]["parent_webchat_call_id"] == "agent_1"
     assert webchat["events"][5]["payload"]["result_preview"] == "agent result"
     assert len(webchat["calls"]) == 1
@@ -1270,7 +1236,7 @@ async def test_chat_job_persists_webchat_lifecycle_history(
     ]
     assert webchat["calls"][0]["timeline"][0]["stage"] == "waiting_model"
     assert webchat["calls"][0]["timeline"][1]["call"]["name"] == "search"
-    assert webchat["calls"][0]["timeline"][2]["content"] == "rendered final"
+    assert webchat["calls"][0]["timeline"][2]["content"] == "final"
 
 
 @pytest.mark.asyncio

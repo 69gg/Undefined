@@ -1,8 +1,12 @@
+import { useState } from "react";
+import type { ToolBlock as ToolBlockType } from "../chat-store/types";
 import {
 	type HtmlPreviewRequest,
 	MarkdownContent,
 } from "../rendering/MarkdownContent";
 import type { Attachment } from "../runtime-client/types";
+import { ImagePreview } from "./ImagePreview";
+import { ToolBlock } from "./ToolBlock";
 import "./ToolBlock.css";
 
 type HistoryToolCall = {
@@ -33,33 +37,12 @@ export type MessageTimelineContentProps = {
 	attachments?: Attachment[];
 	runtimeUrl?: string;
 	onPreviewHtml: (input: HtmlPreviewRequest) => void;
+	/**
+	 * 外部图片点击回调。提供时点击图片交由外部处理（如全局图片查看器）；
+	 * 未提供时由本组件内置的 ImagePreview 本地预览。
+	 */
 	onImageClick?: (src: string, alt: string) => void;
 };
-
-function formatDurationMs(ms: number | undefined): string {
-	if (ms === undefined || ms <= 0) return "";
-	if (ms < 1000) return `${Math.round(ms)}ms`;
-	const seconds = ms / 1000;
-	if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
-	const minutes = Math.floor(seconds / 60);
-	const remainder = Math.floor(seconds % 60);
-	return `${minutes}m ${remainder}s`;
-}
-
-function statusLabel(status: string): string {
-	switch (status) {
-		case "done":
-			return "完成";
-		case "error":
-			return "失败";
-		case "cancelled":
-			return "已取消";
-		case "running":
-			return "运行中";
-		default:
-			return status;
-	}
-}
 
 function isToolCall(node: unknown): node is HistoryToolCall {
 	return (
@@ -92,88 +75,77 @@ export function hasRenderableTimeline(
 	);
 }
 
-/** 工具块内部的子时间线条目（轻量纯文本展示，对齐 webui runtime-tool-message） */
-function RenderNestedEntry({ entry }: { entry: HistoryTimelineEntry }) {
-	if (entry.type === "call" && isToolCall(entry.call)) {
-		return <RenderToolCall call={entry.call} />;
-	}
-	if (entry.type === "message" && entry.content?.trim()) {
-		return <div className="runtime-tool-message">{entry.content}</div>;
-	}
-	return null;
-}
-
-function RenderToolCall({ call }: { call: HistoryToolCall }) {
-	const duration = formatDurationMs(call.duration_ms);
+/**
+ * 将 HistoryToolCall 转换为 ToolBlock 组件所需的格式
+ */
+function convertHistoryToolCallToToolBlock(
+	call: HistoryToolCall,
+	index: number,
+): ToolBlockType {
 	const status = call.status || "done";
-	const kindClass = call.is_agent ? " is-agent" : " is-tool";
-	const kindLabel = call.is_agent ? "Agent" : "工具";
+	const mappedStatus: ToolBlockType["status"] =
+		status === "error" ? "error" : status === "running" ? "running" : "done";
 
-	// Agent 运行中时显示当前阶段，否则显示状态
-	const showLiveStage =
-		call.is_agent &&
-		call.current_stage &&
-		!["done", "error", "cancelled"].includes(status);
-	const meta =
-		showLiveStage && call.current_stage
-			? call.current_stage.replace(/_/g, " ")
-			: statusLabel(status);
+	// 构建 timeline 条目
+	const timeline: ToolBlockType["timeline"] = [];
+	const now = Date.now();
 
-	const childTimeline = Array.isArray(call.timeline)
-		? call.timeline.filter(
-				(e): e is HistoryTimelineEntry => e !== null && typeof e === "object",
-			)
-		: [];
-	const childCalls = Array.isArray(call.children)
-		? call.children.filter(isToolCall)
-		: [];
+	if (call.arguments_preview) {
+		timeline.push({
+			type: "input",
+			timestamp: now,
+			content: call.arguments_preview,
+		});
+	}
 
-	const nestedContent: HistoryTimelineEntry[] =
-		childTimeline.length > 0
-			? childTimeline
-			: childCalls.map((c) => ({ type: "call", call: c }));
+	if (call.result_preview) {
+		timeline.push({
+			type: "output",
+			timestamp: now,
+			content: call.result_preview,
+		});
+	}
 
-	return (
-		<details className={`runtime-tool-block ${status}${kindClass}`}>
-			<summary>
-				<span className="runtime-tool-summary-main">
-					<span className="runtime-tool-title">
-						<code className="runtime-tool-name">{call.name || "--"}</code>
-						{duration && (
-							<span className="runtime-tool-duration">{duration}</span>
-						)}
-					</span>
-				</span>
-				<em className="runtime-tool-status">{meta}</em>
-				<span className="runtime-tool-kind">{kindLabel}</span>
-			</summary>
+	// 转换子工具调用（优先从 timeline 中提取，兼容旧的 children 字段）
+	const children = new Map<string, ToolBlockType>();
 
-			{call.arguments_preview && (
-				<div className="runtime-tool-preview">
-					<div className="runtime-tool-preview-label">输入</div>
-					<pre className="runtime-tool-preview-body">
-						{call.arguments_preview}
-					</pre>
-				</div>
-			)}
+	// 从 timeline 中提取子调用（新格式）
+	if (Array.isArray(call.timeline)) {
+		const childCalls = call.timeline.filter(
+			(e): e is HistoryTimelineEntry & { call: HistoryToolCall } =>
+				e.type === "call" && isToolCall(e.call),
+		);
 
-			{nestedContent.length > 0 && (
-				<div className="runtime-tool-children">
-					{nestedContent.map((entry, idx) => (
-						// biome-ignore lint/suspicious/noArrayIndexKey: 历史记录只读不变
-						<RenderNestedEntry key={idx} entry={entry} />
-					))}
-				</div>
-			)}
+		childCalls.forEach((entry, idx) => {
+			const childBlock = convertHistoryToolCallToToolBlock(entry.call, idx);
+			children.set(childBlock.webchatCallId, childBlock);
+		});
+	}
 
-			{call.result_preview && (
-				<div className="runtime-tool-preview">
-					<div className="runtime-tool-preview-label">输出</div>
-					<pre className="runtime-tool-preview-body">{call.result_preview}</pre>
-				</div>
-			)}
-		</details>
-	);
+	// 兼容旧格式：直接的 children 数组
+	if (Array.isArray(call.children)) {
+		call.children.forEach((child, idx) => {
+			const childBlock = convertHistoryToolCallToToolBlock(child, idx);
+			children.set(childBlock.webchatCallId, childBlock);
+		});
+	}
+
+	// 计算时间戳
+	const startTime = now - (call.duration_ms || 0);
+	const endTime = mappedStatus === "running" ? undefined : now;
+
+	// 如果是 Agent，显示 "Agent" 而不是工具名
+	const displayName = call.is_agent ? "Agent" : call.name || "--";
+
+	return {
+		webchatCallId: `history-${index}-${call.name}`,
+		toolName: displayName,
+		status: mappedStatus,
+		children,
+		timeline,
+		startTime,
+		endTime,
+	};
 }
 
 /**
@@ -193,13 +165,25 @@ export function MessageTimelineContent({
 		(e) => e.type === "message" && Boolean(e.content?.trim()),
 	);
 
+	// 本地图片预览状态：仅在外部未提供 onImageClick 时启用
+	const [previewImage, setPreviewImage] = useState<{
+		src: string;
+		alt: string;
+	} | null>(null);
+
+	// 统一的图片点击处理：优先外部回调，否则走本地预览
+	const handleImageClick =
+		onImageClick ??
+		((src: string, alt: string) => setPreviewImage({ src, alt }));
+
 	return (
 		<div className="message-timeline-content">
 			{entries.map((entry, idx) => {
 				if (entry.type === "call" && isToolCall(entry.call)) {
+					const toolBlock = convertHistoryToolCallToToolBlock(entry.call, idx);
 					return (
 						// biome-ignore lint/suspicious/noArrayIndexKey: 历史记录只读不变
-						<RenderToolCall key={idx} call={entry.call} />
+						<ToolBlock key={idx} {...toolBlock} />
 					);
 				}
 				if (entry.type === "message" && entry.content?.trim()) {
@@ -211,7 +195,7 @@ export function MessageTimelineContent({
 							onPreviewHtml={onPreviewHtml}
 							attachments={attachments}
 							runtimeUrl={runtimeUrl}
-							onImageClick={onImageClick}
+							onImageClick={handleImageClick}
 						/>
 					);
 				}
@@ -225,9 +209,17 @@ export function MessageTimelineContent({
 					onPreviewHtml={onPreviewHtml}
 					attachments={attachments}
 					runtimeUrl={runtimeUrl}
-					onImageClick={onImageClick}
+					onImageClick={handleImageClick}
 				/>
 			) : null}
+
+			{/* 内置图片预览：仅外部未接管时由本地 state 驱动 */}
+			<ImagePreview
+				src={previewImage?.src ?? ""}
+				alt={previewImage?.alt ?? ""}
+				open={previewImage !== null}
+				onClose={() => setPreviewImage(null)}
+			/>
 		</div>
 	);
 }

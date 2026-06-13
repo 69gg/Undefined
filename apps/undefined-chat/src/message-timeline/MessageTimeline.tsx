@@ -12,6 +12,8 @@ import type {
 	ToolCallSnapshot,
 } from "../runtime-client/types";
 import { AttachmentCard } from "./AttachmentCard";
+import { ChatStageLabel } from "./ChatStageLabel";
+import { MessageQuoteButton } from "./MessageQuoteButton";
 import {
 	MessageTimelineContent,
 	hasRenderableTimeline,
@@ -31,7 +33,7 @@ export type MessageTimelineProps = {
 	onPreviewAttachment: (attachment: Attachment) => void;
 	onSaveAttachment: (attachment: Attachment) => void;
 	onShortcutClick?: (prompt: string) => void;
-	onAddReference?: (messageId: string, quote: string) => void;
+	onAddReference?: (messageId: string) => void;
 	onOpenImage?: (src: string, alt: string) => void;
 	runtimeUrl?: string;
 };
@@ -339,7 +341,7 @@ export function MessageTimeline({
 
 				{visibleItems.map((item) => (
 					<article
-						className={`message-row message-row-${item.role}`}
+						className={`message-row message-row-${item.role} runtime-chat-item`}
 						data-testid="message-row"
 						key={item.messageId}
 					>
@@ -445,15 +447,10 @@ export function MessageTimeline({
 										: ""}
 								</span>
 								{onAddReference && item.role === "bot" ? (
-									<button
-										className="ghost-button"
-										onClick={() => onAddReference(item.messageId, item.content)}
-										style={{ padding: "2px 8px", fontSize: "0.7rem" }}
-										title="引用这条消息"
-										type="button"
-									>
-										引用
-									</button>
+									<MessageQuoteButton
+										messageId={item.messageId}
+										onQuote={onAddReference}
+									/>
 								) : null}
 							</div>
 						</div>
@@ -485,6 +482,12 @@ export function MessageTimeline({
 
 						{/* 消息气泡 */}
 						<div className="message-bubble">
+							<ChatStageLabel
+								stage={activeJob.currentStage}
+								stageDetail={activeJob.currentStageDetail ?? null}
+								startedAt={activeJob.currentStageStartedAt ?? null}
+								finalState={activeJob.status === "done"}
+							/>
 							<MessageTimelineContent
 								timeline={buildStreamingTimeline(activeJob)}
 								fallbackContent={activeJob.reply || "思考中..."}

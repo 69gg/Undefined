@@ -1,4 +1,5 @@
 import type React from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ToolBlock as ToolBlockType } from "../chat-store/types";
 import "./ToolBlock.css";
 
@@ -77,14 +78,44 @@ export function ToolBlock({
 	startTime,
 	endTime,
 }: ToolBlockProps) {
+	const [isOpen, setIsOpen] = useState(status === "running");
+	const [userInteracted, setUserInteracted] = useState(false);
+	const collapseTimerRef = useRef<number | null>(null);
+
+	useEffect(() => {
+		if (collapseTimerRef.current !== null) {
+			clearTimeout(collapseTimerRef.current);
+			collapseTimerRef.current = null;
+		}
+
+		if ((status === "done" || status === "error") && !userInteracted) {
+			collapseTimerRef.current = window.setTimeout(() => {
+				setIsOpen(false);
+			}, 2000);
+		}
+
+		return () => {
+			if (collapseTimerRef.current !== null) {
+				clearTimeout(collapseTimerRef.current);
+			}
+		};
+	}, [status, userInteracted]);
+
+	const handleToggle = () => {
+		setUserInteracted(true);
+		setIsOpen((prev) => !prev);
+	};
+
 	const duration = formatDuration(startTime, endTime);
 	const statusText = getStatusText(status);
 	const childrenArray = Array.from(children.values());
 
 	return (
 		<details
+			open={isOpen}
 			className={`runtime-tool-block is-tool ${status}`}
 			data-call-id={webchatCallId}
+			onToggle={handleToggle}
 		>
 			<summary>
 				<div className="runtime-tool-summary-main">

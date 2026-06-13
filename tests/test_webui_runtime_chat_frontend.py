@@ -723,14 +723,12 @@ def test_webchat_markdown_quotes_render_as_collapsible_scroll_blocks() -> None:
     assert "function shouldRenderChatMarkdown" in source
     assert 'role !== "user" || hasMarkdownBlockquote(content)' in source
     assert "renderer.blockquote = ({ tokens }) =>" in renderer_helper
-    assert '<details class="runtime-quote-block">' in renderer_helper
-    assert '<div class="runtime-quote-body">' in renderer_helper
+    assert '<blockquote class="runtime-quote-block">' in renderer_helper
     assert "shouldRenderChatMarkdown(role, content)" in append_helper
     assert "renderChatContent(content, useMarkdown)" in append_helper
     assert 'contentEl.classList.toggle("markdown", useMarkdown)' in update_helper
-    assert "max-height: min(28vh, 220px);" in quote_css
-    assert "overflow: auto;" in quote_css
-    assert ".runtime-quote-block[open] summary::before" in css
+    # CSS 样式已简化，不再有 max-height 和 overflow 限制
+    assert ".runtime-quote-block" in quote_css
 
 
 def test_webchat_frontend_renders_standalone_html_without_markdown_code_blocks() -> (

@@ -923,6 +923,43 @@ a:hover {
 	justify-content: flex-end;
 }
 
+/* ========================================
+   消息引用按钮（从 WebUI runtime-chat 迁移）
+   悬浮显示：默认 opacity:0，消息行 hover 或聚焦时显现
+   ======================================== */
+.runtime-chat-quote-btn {
+	display: inline-flex;
+	align-items: center;
+	min-height: 22px;
+	padding: 1px 7px;
+	border: 1px solid transparent;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--text-tertiary);
+	font-size: 11px;
+	line-height: 1;
+	letter-spacing: 0;
+	text-transform: none;
+	cursor: pointer;
+	opacity: 0;
+	transform: translateY(-1px);
+	transition:
+		opacity 0.16s ease,
+		color 0.16s ease,
+		background 0.16s ease,
+		border-color 0.16s ease;
+}
+.runtime-chat-item:hover .runtime-chat-quote-btn,
+.runtime-chat-quote-btn:focus-visible {
+	opacity: 1;
+}
+.runtime-chat-quote-btn:hover,
+.runtime-chat-quote-btn:focus-visible {
+	border-color: color-mix(in srgb, var(--accent) 28%, var(--border-color));
+	background: color-mix(in srgb, var(--accent) 9%, transparent);
+	color: var(--accent-color);
+}
+
 /* 流式气泡样式 */
 .message-row.streaming .message-bubble {
 	opacity: 0.95;
@@ -1665,7 +1702,11 @@ a:hover {
 	background: color-mix(in srgb, var(--bg-app) 92%, var(--bg-card));
 	overflow: hidden;
 	position: relative;
-	transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+	transition:
+		border-color 0.18s ease,
+		background 0.18s ease,
+		transform 0.18s ease,
+		box-shadow 0.18s ease;
 }
 
 .runtime-tool-block::before {
@@ -1696,6 +1737,10 @@ a:hover {
 
 .runtime-tool-block.error {
 	--tool-accent: var(--error);
+}
+
+.runtime-tool-block.cancelled {
+	--tool-accent: var(--warning);
 }
 
 .runtime-tool-block:hover {
@@ -1829,6 +1874,228 @@ a:hover {
 	font-family: var(--font-mono);
 	font-size: 11px;
 	text-transform: uppercase;
+}
+
+.runtime-code-actions {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	flex: 0 0 auto;
+}
+
+.runtime-code-action {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 26px;
+	padding: 0 9px;
+	border: 1px solid transparent;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--text-secondary);
+	font-size: 12px;
+	line-height: 1;
+	cursor: pointer;
+	transition:
+		background 0.16s ease,
+		border-color 0.16s ease,
+		color 0.16s ease,
+		transform 0.16s ease;
+}
+
+.runtime-code-action:hover,
+.runtime-code-action:focus-visible {
+	border-color: color-mix(in srgb, var(--accent) 28%, var(--border-color));
+	background: color-mix(in srgb, var(--accent) 10%, transparent);
+	color: var(--text-primary);
+}
+
+.runtime-code-action.primary {
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+	color: var(--accent);
+}
+
+.runtime-code-action.primary:hover,
+.runtime-code-action.primary:focus-visible {
+	background: var(--accent);
+	color: #fff;
+}
+
+.runtime-code-body {
+	position: relative;
+}
+
+/* 默认折叠：限制高度约 3-4 行 */
+.runtime-code-block.is-collapsed .runtime-code-body {
+	max-height: 9.2em;
+	overflow-y: auto;
+	overflow-x: hidden;
+	scrollbar-gutter: stable;
+}
+
+.runtime-code-body pre {
+	max-width: 100%;
+	margin: 0;
+	padding: 10px 14px;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	overflow-x: hidden;
+	white-space: pre-wrap;
+	word-wrap: break-word;
+	font-family: var(--font-mono);
+	font-size: 12.5px;
+	line-height: 1.5;
+}
+
+.runtime-code-body pre code {
+	display: block;
+	min-width: 0;
+	max-width: 100%;
+	padding: 0;
+	border: none;
+	background: none;
+	border-radius: 0;
+	white-space: pre-wrap;
+	word-wrap: break-word;
+	color: var(--text-primary);
+}
+
+.runtime-code-body pre code.hljs {
+	padding: 0;
+	background: transparent;
+	color: var(--text-primary);
+}
+
+/* ============ 语法高亮颜色（浅色主题）============ */
+.runtime-code-block .hljs-keyword,
+.runtime-code-block .hljs-doctag,
+.runtime-code-block .hljs-template-tag,
+.runtime-code-block .hljs-type {
+	color: #9b3fb5;
+	font-weight: 600;
+}
+
+.runtime-code-block .hljs-string,
+.runtime-code-block .hljs-regexp,
+.runtime-code-block .hljs-meta .hljs-string {
+	color: #246f4f;
+}
+
+.runtime-code-block .hljs-comment,
+.runtime-code-block .hljs-quote {
+	color: var(--text-tertiary);
+	font-style: italic;
+}
+
+.runtime-code-block .hljs-number,
+.runtime-code-block .hljs-literal,
+.runtime-code-block .hljs-variable,
+.runtime-code-block .hljs-attribute,
+.runtime-code-block .hljs-symbol {
+	color: #b45f2b;
+}
+
+.runtime-code-block .hljs-title,
+.runtime-code-block .hljs-title.function_,
+.runtime-code-block .hljs-title.class_,
+.runtime-code-block .hljs-section {
+	color: #1f6fb2;
+	font-weight: 600;
+}
+
+.runtime-code-block .hljs-operator,
+.runtime-code-block .hljs-punctuation,
+.runtime-code-block .hljs-meta {
+	color: #8a6350;
+}
+
+.runtime-code-block .hljs-property,
+.runtime-code-block .hljs-attr,
+.runtime-code-block .hljs-selector-attr,
+.runtime-code-block .hljs-selector-class,
+.runtime-code-block .hljs-selector-id {
+	color: #b25577;
+}
+
+.runtime-code-block .hljs-name,
+.runtime-code-block .hljs-selector-tag,
+.runtime-code-block .hljs-built_in {
+	color: #22735a;
+}
+
+.runtime-code-block .hljs-addition {
+	color: #1d7f45;
+	background: color-mix(in srgb, #1d7f45 12%, transparent);
+}
+
+.runtime-code-block .hljs-deletion {
+	color: #b31d28;
+	background: color-mix(in srgb, #b31d28 10%, transparent);
+}
+
+/* ============ 语法高亮颜色（深色主题）============ */
+[data-theme="dark"] .runtime-code-block .hljs-keyword,
+[data-theme="dark"] .runtime-code-block .hljs-doctag,
+[data-theme="dark"] .runtime-code-block .hljs-template-tag,
+[data-theme="dark"] .runtime-code-block .hljs-type {
+	color: #c792ea;
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-string,
+[data-theme="dark"] .runtime-code-block .hljs-regexp,
+[data-theme="dark"] .runtime-code-block .hljs-meta .hljs-string {
+	color: #89d39a;
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-comment,
+[data-theme="dark"] .runtime-code-block .hljs-quote {
+	color: #7f8a91;
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-number,
+[data-theme="dark"] .runtime-code-block .hljs-literal,
+[data-theme="dark"] .runtime-code-block .hljs-variable,
+[data-theme="dark"] .runtime-code-block .hljs-attribute,
+[data-theme="dark"] .runtime-code-block .hljs-symbol {
+	color: #f2b86d;
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-title,
+[data-theme="dark"] .runtime-code-block .hljs-title.function_,
+[data-theme="dark"] .runtime-code-block .hljs-title.class_,
+[data-theme="dark"] .runtime-code-block .hljs-section {
+	color: #82b8ff;
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-operator,
+[data-theme="dark"] .runtime-code-block .hljs-punctuation,
+[data-theme="dark"] .runtime-code-block .hljs-meta {
+	color: #c6a58d;
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-property,
+[data-theme="dark"] .runtime-code-block .hljs-attr,
+[data-theme="dark"] .runtime-code-block .hljs-selector-attr,
+[data-theme="dark"] .runtime-code-block .hljs-selector-class,
+[data-theme="dark"] .runtime-code-block .hljs-selector-id {
+	color: #f08bad;
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-name,
+[data-theme="dark"] .runtime-code-block .hljs-selector-tag,
+[data-theme="dark"] .runtime-code-block .hljs-built_in {
+	color: #7fd6b4;
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-addition {
+	color: #89d39a;
+	background: color-mix(in srgb, #89d39a 13%, transparent);
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-deletion {
+	color: #ff8d8d;
+	background: color-mix(in srgb, #ff8d8d 12%, transparent);
 }
 
 /* Runtime Chat Input */
@@ -2320,12 +2587,15 @@ a:hover {
 	cursor: default;
 }
 
-.runtime-image-viewer img {
+.runtime-image-viewer img,
+.runtime-image-viewer-image {
+	display: block;
 	max-width: min(1120px, calc(100vw - 56px));
 	max-height: calc(100dvh - 104px);
 	object-fit: contain;
 	animation: zoomIn 0.3s ease;
 	border-radius: var(--radius-sm);
+	background: #020617;
 	box-shadow: 0 24px 70px rgba(2, 6, 23, 0.46);
 }
 
@@ -2339,7 +2609,8 @@ a:hover {
 	text-align: center;
 }
 
-.image-viewer-close-button {
+.image-viewer-close-button,
+.runtime-image-viewer-close {
 	position: fixed;
 	top: max(16px, env(safe-area-inset-top));
 	right: max(16px, env(safe-area-inset-right));
@@ -2354,16 +2625,20 @@ a:hover {
 	align-items: center;
 	justify-content: center;
 	cursor: pointer;
+	font-size: 20px;
+	line-height: 1;
 	transition: all 0.2s;
 	z-index: 10000;
 }
 
-.image-viewer-close-button:hover {
+.image-viewer-close-button:hover,
+.runtime-image-viewer-close:hover {
 	background: rgba(255, 255, 255, 0.25);
 	transform: scale(1.1);
 }
 
-.image-viewer-close-button:active {
+.image-viewer-close-button:active,
+.runtime-image-viewer-close:active {
 	transform: scale(0.95);
 }
 
@@ -2385,4 +2660,44 @@ a:hover {
 		opacity: 1;
 		transform: scale(1);
 	}
+}
+
+/* ========================================
+   Runtime Chat Stage (from webui components.css)
+   ======================================== */
+.runtime-chat-stage {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	max-width: min(260px, 100%);
+	padding: 2px 8px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+	color: var(--accent);
+	font-size: 11px;
+	line-height: 1.25;
+	letter-spacing: 0;
+	text-transform: none;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.runtime-chat-stage[hidden] {
+	display: none;
+}
+
+.runtime-chat-stage.is-final {
+	background: color-mix(in srgb, var(--success) 12%, transparent);
+	color: var(--success);
+}
+
+.runtime-chat-stage::before {
+	content: "";
+	width: 5px;
+	height: 5px;
+	flex: 0 0 auto;
+	border-radius: 999px;
+	background: currentColor;
+	opacity: 0.85;
 }

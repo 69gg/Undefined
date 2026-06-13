@@ -107,7 +107,7 @@ describe("MessageTimelineContent", () => {
 			/>,
 		);
 
-		expect(screen.getByText("web_agent")).toBeTruthy();
+		expect(screen.getByText("Agent")).toBeTruthy();
 		expect(screen.getByText("search")).toBeTruthy();
 	});
 });

@@ -358,12 +358,12 @@ export function App() {
 						void saveAttachment(attachment);
 					}}
 					onShortcutClick={handleShortcutClick}
-					onAddReference={(messageId, quote) => {
+					onAddReference={(messageId) => {
 						if (selectedConversationId) {
-							store.addReference(selectedConversationId, {
+							store.addReferenceFromMessageId(
+								selectedConversationId,
 								messageId,
-								quote,
-							});
+							);
 						}
 					}}
 					onOpenImage={openImage}

@@ -35,6 +35,10 @@ export type ChatStore = {
 		filePath: string,
 	) => Promise<void>;
 	addReference: (conversationId: string, reference: MessageReference) => void;
+	addReferenceFromMessageId: (
+		conversationId: string,
+		messageId: string,
+	) => void;
 	clearReference: (conversationId: string, messageId: string) => void;
 	clearAttachment: (conversationId: string, attachmentId: string) => void;
 	loadMoreHistory: (conversationId: string) => Promise<void>;
@@ -926,6 +930,25 @@ export function createChatStore({
 		});
 	}
 
+	function addReferenceFromMessageId(
+		conversationId: string,
+		messageId: string,
+	): void {
+		const historyState = state.historyByConversation[conversationId];
+		if (!historyState) {
+			return;
+		}
+		const message = historyState.items.find(
+			(item) => item.messageId === messageId,
+		);
+		if (!message) {
+			return;
+		}
+		// 截取前 100 个字符作为引用预览
+		const quote = message.content.slice(0, 100);
+		addReference(conversationId, { messageId, quote });
+	}
+
 	function clearReference(conversationId: string, messageId: string): void {
 		dispatch({
 			type: "references/set",
@@ -1041,6 +1064,7 @@ export function createChatStore({
 		sendSelectedMessage,
 		addAttachmentPath,
 		addReference,
+		addReferenceFromMessageId,
 		clearReference,
 		clearAttachment,
 		loadMoreHistory,
