@@ -302,7 +302,7 @@ describe("createTauriRuntimeClient", () => {
 			input: {
 				method: "DELETE",
 				path: "/api/v1/chat/conversations/conv-delete",
-				body: {},
+				body: null,
 				headers: [],
 			},
 		});
