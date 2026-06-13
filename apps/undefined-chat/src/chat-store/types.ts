@@ -185,6 +185,12 @@ export type ChatAction =
 			nextBefore: number | null;
 			total: number;
 	  }
+	// 乐观渲染：发送时立即插入用户消息
+	| {
+			type: "message/optimisticUser";
+			conversationId: string;
+			item: HistoryItem;
+	  }
 	// 会话管理
 	| { type: "conversation/select"; conversationId: string }
 	| { type: "conversation/upsert"; conversation: Conversation }

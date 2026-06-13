@@ -85,6 +85,23 @@ export function MessageTimeline({
 	const isCurrentlyThinking = isJobRunning(activeJob);
 	const hasEventsOrActiveJob = Boolean(activeJob || events.length > 0);
 
+	// 实时用时：运行中每 200ms 刷新，完成后显示最终用时
+	const [nowMs, setNowMs] = useState(() => Date.now());
+	useEffect(() => {
+		if (!isCurrentlyThinking) return;
+		const timer = setInterval(() => setNowMs(Date.now()), 200);
+		return () => clearInterval(timer);
+	}, [isCurrentlyThinking]);
+	const elapsedMs = activeJob
+		? isCurrentlyThinking
+			? Math.max(0, nowMs - activeJob.createdAt * 1000)
+			: (activeJob.durationMs ?? activeJob.elapsedMs)
+		: 0;
+	const elapsedLabel =
+		elapsedMs >= 1000
+			? `${(elapsedMs / 1000).toFixed(1)}s`
+			: `${Math.round(elapsedMs)}ms`;
+
 	function handleTimelineScroll(): void {
 		const el = timelineRef.current;
 		if (!el) return;
@@ -463,6 +480,17 @@ export function MessageTimeline({
 									{activeJob?.currentStage
 										? ` (${activeJob.currentStage})`
 										: ""}
+									{elapsedMs > 0 ? (
+										<span
+											style={{
+												marginLeft: "6px",
+												opacity: 0.7,
+												fontSize: "0.9em",
+											}}
+										>
+											· {elapsedLabel}
+										</span>
+									) : null}
 								</span>
 								{activeJob?.currentStageDetail ? (
 									<span style={{ marginLeft: "4px" }}>

@@ -334,4 +334,51 @@ describe("chat store", () => {
 		});
 		expect(state.historyByConversation.c1?.loading).toBe(false);
 	});
+
+	test("sendSelectedMessage 立即乐观显示用户消息并清空草稿、出现 AI 任务", async () => {
+		const client = runtimeClientStub();
+		const store = createChatStore({ client });
+		await store.bootstrap();
+
+		store.updateDraft("default", "你好，实时显示");
+		await store.sendSelectedMessage();
+
+		const state = store.getSnapshot();
+		const items = state.historyByConversation.default?.items ?? [];
+		// 用户消息立即出现在历史中（乐观渲染）
+		expect(
+			items.some(
+				(item) => item.role === "user" && item.content === "你好，实时显示",
+			),
+		).toBe(true);
+		// 草稿被清空
+		expect(state.draftsByConversation.default).toBe("");
+		// 出现进行中的 AI 任务（驱动实时任务框）
+		expect(state.activeJobsByConversation.default).toBeDefined();
+		expect(client.sendMessage).toHaveBeenCalledWith({
+			conversationId: "default",
+			message: { text: "你好，实时显示", attachmentIds: [], references: [] },
+		});
+	});
+
+	test("sendSelectedMessage 发送失败时回滚乐观消息并恢复草稿", async () => {
+		const client = runtimeClientStub({
+			sendMessage: vi.fn(async () => {
+				throw new Error("发送失败");
+			}),
+		});
+		const store = createChatStore({ client });
+		await store.bootstrap();
+
+		store.updateDraft("default", "会失败的消息");
+		await store.sendSelectedMessage();
+
+		const state = store.getSnapshot();
+		const items = state.historyByConversation.default?.items ?? [];
+		// 乐观消息已移除
+		expect(items.some((item) => item.content === "会失败的消息")).toBe(false);
+		// 草稿恢复
+		expect(state.draftsByConversation.default).toBe("会失败的消息");
+		expect(state.sendError).toBe("发送失败");
+	});
 });

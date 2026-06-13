@@ -1,4 +1,5 @@
 import type {
+	HistoryItem,
 	RuntimeClient,
 	RuntimeSseEvent,
 	RuntimeSseStatus,
@@ -211,6 +212,23 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 					},
 				},
 			};
+		case "message/optimisticUser": {
+			const existing = state.historyByConversation[action.conversationId];
+			return {
+				...state,
+				historyByConversation: {
+					...state.historyByConversation,
+					[action.conversationId]: {
+						items: [...(existing?.items ?? []), action.item],
+						hasMore: existing?.hasMore ?? false,
+						nextBefore: existing?.nextBefore ?? null,
+						total: (existing?.total ?? 0) + 1,
+						loading: false,
+						error: null,
+					},
+				},
+			};
+		}
 		case "conversation/select":
 			return {
 				...state,
@@ -782,6 +800,29 @@ export function createChatStore({
 		if (!text && attachmentIds.length === 0) {
 			return;
 		}
+
+		// 立即插入乐观用户消息并清空草稿/附件/引用（不等后端响应）
+		const optimisticMessageId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+		const optimisticTimestamp = new Date().toISOString();
+		// 附件留空：上传附件的多媒体元信息（mediaType/previewUrl）此刻不全，
+		// 待任务完成重载历史后随真实记录显示，避免乐观渲染出错误的附件卡片
+		const optimisticItem: HistoryItem = {
+			messageId: optimisticMessageId,
+			role: "user",
+			content: text,
+			timestamp: optimisticTimestamp,
+			attachments: [],
+			references,
+		};
+		dispatch({
+			type: "message/optimisticUser",
+			conversationId,
+			item: optimisticItem,
+		});
+		dispatch({ type: "draft/set", conversationId, draft: "" });
+		dispatch({ type: "attachments/set", conversationId, attachments: [] });
+		dispatch({ type: "references/set", conversationId, references: [] });
+
 		const input: SendMessageInput = {
 			conversationId,
 			message: {
@@ -794,12 +835,26 @@ export function createChatStore({
 			dispatch({ type: "send/error", error: null });
 			const job = await client.sendMessage(input);
 			dispatch({ type: "job/upsert", job });
-			dispatch({ type: "draft/set", conversationId, draft: "" });
-			dispatch({ type: "attachments/set", conversationId, attachments: [] });
-			dispatch({ type: "references/set", conversationId, references: [] });
 			dispatch({ type: "connection/set", connectionState: "streaming" });
 			await startStreamForJob(job);
 		} catch (err) {
+			// 发送失败：移除乐观用户消息并恢复草稿/附件/引用
+			const currentHistory = state.historyByConversation[conversationId];
+			if (currentHistory) {
+				dispatch({
+					type: "history/set",
+					conversationId,
+					items: currentHistory.items.filter(
+						(item) => item.messageId !== optimisticMessageId,
+					),
+					hasMore: currentHistory.hasMore,
+					nextBefore: currentHistory.nextBefore,
+					total: Math.max(0, currentHistory.total - 1),
+				});
+			}
+			dispatch({ type: "draft/set", conversationId, draft: text });
+			dispatch({ type: "attachments/set", conversationId, attachments });
+			dispatch({ type: "references/set", conversationId, references });
 			dispatch({ type: "send/error", error: errorMessage(err) });
 		}
 	}
