@@ -558,19 +558,20 @@ a:hover {
 .timeline {
 	flex: 1;
 	overflow-y: auto;
-	padding: 24px 20px;
+	overflow-x: hidden;
+	padding: 0;
 	display: flex;
 	flex-direction: column;
-	gap: 24px;
-	scrollbar-gutter: stable;
+	gap: 0;
 }
 
+/* 隐藏滚动条 */
 .timeline::-webkit-scrollbar {
-	width: 8px;
+	display: none;
 }
-.timeline::-webkit-scrollbar-thumb {
-	background: var(--border-primary);
-	border-radius: 4px;
+.timeline {
+	scrollbar-width: none; /* Firefox */
+	-ms-overflow-style: none; /* IE and Edge */
 }
 
 /* ========================================
@@ -657,17 +658,38 @@ a:hover {
 /* ========================================
    Message Bubble Rendering
    ======================================== */
+/* ChatGPT 风格全宽消息 */
 .message-row {
 	display: flex;
 	gap: 16px;
-	max-width: 800px;
 	width: 100%;
-	margin: 0 auto;
+	padding: 24px 20px;
 	animation: fadeInUp 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* 用户消息浅色背景 */
 .message-row-user {
+	background: var(--bg-surface);
 	flex-direction: row-reverse;
+}
+
+/* Bot 消息默认背景 */
+.message-row-bot {
+	background: var(--bg-app);
+}
+
+/* 消息内容容器 - 居中限制最大宽度 */
+.message-row {
+	justify-content: center;
+}
+
+.message-row > .avatar-wrapper {
+	flex-shrink: 0;
+}
+
+.message-row > .message-bubble {
+	flex: 1;
+	max-width: 800px;
 }
 
 .avatar-wrapper {
@@ -679,25 +701,24 @@ a:hover {
 	box-shadow: var(--shadow-sm);
 }
 
+/* 去掉消息气泡样式，改为透明背景 */
 .message-bubble {
-	max-width: calc(100% - 80px);
-	background: var(--bg-message-bot);
-	border: 1px solid var(--border-message);
-	border-radius: 16px;
-	border-top-left-radius: 4px;
-	padding: 14px 18px;
-	box-shadow: var(--shadow-sm);
+	flex: 1;
+	background: transparent;
+	border: none;
+	border-radius: 0;
+	padding: 0;
+	box-shadow: none;
 	line-height: 1.6;
-	transition: background-color 0.2s, border-color 0.2s;
+	transition: none;
 	display: flex;
 	flex-direction: column;
 }
 
 .message-row-user .message-bubble {
-	background: var(--bg-message-user);
-	border-color: transparent;
-	border-radius: 16px;
-	border-top-right-radius: 4px;
+	background: transparent;
+	border: none;
+	border-radius: 0;
 }
 
 .message-meta {
