@@ -21,6 +21,8 @@ export type MessageTimelineProps = {
 	activeJob: ChatJob | null;
 	connectionState: ConnectionState;
 	events: ChatEvent[];
+	/** 选中会话的历史尚未加载或加载中：显示加载态而非欢迎页 */
+	historyLoading?: boolean;
 	items: HistoryItem[];
 	onPreviewHtml: (input: HtmlPreviewRequest) => void;
 	onPreviewAttachment: (attachment: Attachment) => void;
@@ -58,6 +60,7 @@ function eventLabel(event: ChatEvent): string {
 export function MessageTimeline({
 	activeJob,
 	events,
+	historyLoading,
 	items,
 	onPreviewAttachment,
 	onPreviewHtml,
@@ -218,7 +221,12 @@ export function MessageTimeline({
 				role="log"
 				ref={timelineRef}
 			>
-				{visibleItems.length === 0 && !activeJob ? (
+				{historyLoading && visibleItems.length === 0 && !activeJob ? (
+					<div className="timeline-loading">
+						<span aria-hidden="true" className="timeline-spinner" />
+						<p>正在加载会话…</p>
+					</div>
+				) : visibleItems.length === 0 && !activeJob ? (
 					<div className="welcome-container">
 						<div className="welcome-logo">
 							<svg

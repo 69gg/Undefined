@@ -7,6 +7,7 @@ import {
 	useSyncExternalStore,
 } from "react";
 import { createChatStore, isJobRunning } from "./chat-store/store";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ConversationList } from "./conversation-list/ConversationList";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { ImageViewerModal } from "./image-viewer/ImageViewerModal";
@@ -32,13 +33,23 @@ export function App() {
 	const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 	const [isMobileSidebarActive, setIsMobileSidebarActive] = useState(false);
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+	const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 	const isMobile = useMediaQuery("(max-width: 768px)");
+
+	const pendingDeleteConversation = pendingDeleteId
+		? (state.conversations.find((item) => item.id === pendingDeleteId) ?? null)
+		: null;
 
 	const selectedConversationId =
 		state.selectedConversationId ?? state.conversations[0]?.id ?? null;
-	const selectedHistory = selectedConversationId
-		? (state.historyByConversation[selectedConversationId]?.items ?? [])
-		: [];
+	const selectedHistoryState = selectedConversationId
+		? state.historyByConversation[selectedConversationId]
+		: undefined;
+	const selectedHistory = selectedHistoryState?.items ?? [];
+	// 历史尚未加载或加载中（区分"加载中"与"空会话/欢迎页"）
+	const historyLoading =
+		selectedConversationId !== null &&
+		(selectedHistoryState === undefined || selectedHistoryState.loading);
 	const activeJob = selectedConversationId
 		? (state.activeJobsByConversation[selectedConversationId] ?? null)
 		: null;
@@ -167,10 +178,12 @@ export function App() {
 			{/* 侧边栏 */}
 			<ConversationList
 				conversations={state.conversations}
+				creating={state.creatingConversation}
 				isCollapsed={isSidebarCollapsed}
 				onCreate={() => {
 					void store.createConversation();
 				}}
+				onDelete={(conversationId) => setPendingDeleteId(conversationId)}
 				onOpenSettings={() => setIsSettingsOpen(true)}
 				onSelect={(conversationId) => {
 					void store.selectConversation(conversationId);
@@ -320,6 +333,7 @@ export function App() {
 					activeJob={activeJob}
 					connectionState={state.connectionState}
 					events={activeEvents}
+					historyLoading={historyLoading}
 					items={selectedHistory}
 					onPreviewAttachment={(attachment) => {
 						void previewAttachment(attachment);
@@ -393,6 +407,26 @@ export function App() {
 			</section>
 
 			<ImageViewerModal imageViewer={state.imageViewer} onClose={closeImage} />
+
+			<ConfirmDialog
+				cancelLabel="取消"
+				confirmLabel="删除"
+				danger
+				message={
+					pendingDeleteConversation
+						? `确定删除会话「${pendingDeleteConversation.title}」？该操作不可恢复。`
+						: ""
+				}
+				onCancel={() => setPendingDeleteId(null)}
+				onConfirm={() => {
+					if (pendingDeleteId) {
+						void store.deleteConversation(pendingDeleteId);
+					}
+					setPendingDeleteId(null);
+				}}
+				open={pendingDeleteConversation !== null}
+				title="删除会话"
+			/>
 		</main>
 	);
 }

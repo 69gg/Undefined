@@ -267,4 +267,71 @@ describe("chat store", () => {
 			limit: 50,
 		});
 	});
+
+	test("deleteConversation removes the conversation and selects the next one", async () => {
+		const client = runtimeClientStub({
+			listConversations: vi.fn(async () => ({
+				conversations: [
+					conversation({ id: "default", title: "默认会话" }),
+					conversation({ id: "ops", title: "运维" }),
+				],
+				activeJob: null,
+				defaultConversationId: "default",
+				virtualUserId: "webchat",
+			})),
+		});
+		const store = createChatStore({ client });
+		await store.bootstrap();
+		expect(store.getSnapshot().selectedConversationId).toBe("default");
+
+		await store.deleteConversation("default");
+
+		expect(client.deleteConversation).toHaveBeenCalledWith("default");
+		const state = store.getSnapshot();
+		expect(state.conversations.map((item) => item.id)).toEqual(["ops"]);
+		expect(state.selectedConversationId).toBe("ops");
+		expect(state.historyByConversation.default).toBeUndefined();
+	});
+
+	test("createConversation toggles creatingConversation around the request", async () => {
+		let resolveCreate!: (value: ReturnType<typeof conversation>) => void;
+		const client = runtimeClientStub({
+			createConversation: vi.fn(
+				() =>
+					new Promise<ReturnType<typeof conversation>>((resolve) => {
+						resolveCreate = resolve;
+					}),
+			),
+		});
+		const store = createChatStore({ client });
+		await store.bootstrap();
+
+		const pending = store.createConversation();
+		expect(store.getSnapshot().creatingConversation).toBe(true);
+
+		resolveCreate(
+			conversation({ id: "new", title: "新会话", messageCount: 0 }),
+		);
+		await pending;
+		expect(store.getSnapshot().creatingConversation).toBe(false);
+		expect(store.getSnapshot().selectedConversationId).toBe("new");
+	});
+
+	test("history/loading then history/set toggles the loading flag", () => {
+		let state = createInitialChatState();
+		state = chatReducer(state, {
+			type: "history/loading",
+			conversationId: "c1",
+		});
+		expect(state.historyByConversation.c1?.loading).toBe(true);
+		state = chatReducer(state, {
+			type: "history/set",
+			conversationId: "c1",
+			items: [],
+			hasMore: false,
+			nextBefore: null,
+			total: 0,
+		});
+		expect(state.historyByConversation.c1?.loading).toBe(false);
+	});
 });

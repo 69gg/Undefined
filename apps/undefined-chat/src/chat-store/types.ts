@@ -105,6 +105,8 @@ export type ChatState = {
 	conversations: Conversation[];
 	selectedConversationId: string | null;
 	historyByConversation: Record<string, ConversationHistoryState>;
+	/** 是否正在新建会话（用于"正在新建"提示） */
+	creatingConversation: boolean;
 
 	// 任务与事件流
 	activeJobsByConversation: Record<string, ChatJob>;
@@ -173,6 +175,7 @@ export type ChatAction =
 			runtimeConfig?: RuntimeConfig | null;
 	  }
 	// 历史记录
+	| { type: "history/loading"; conversationId: string }
 	| {
 			type: "history/set";
 			conversationId: string;
@@ -184,6 +187,12 @@ export type ChatAction =
 	// 会话管理
 	| { type: "conversation/select"; conversationId: string }
 	| { type: "conversation/upsert"; conversation: Conversation }
+	| {
+			type: "conversation/remove";
+			conversationId: string;
+			nextSelectedId: string | null;
+	  }
+	| { type: "conversation/creating"; creating: boolean }
 	// 输入状态
 	| { type: "draft/set"; conversationId: string; draft: string }
 	| { type: "send/error"; error: string | null }

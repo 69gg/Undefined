@@ -5,7 +5,10 @@ export type ConversationListProps = {
 	conversations: Conversation[];
 	selectedConversationId: string | null;
 	onCreate: () => void;
+	onDelete: (conversationId: string) => void;
 	onSelect: (conversationId: string) => void;
+	/** 是否正在新建会话（新建按钮显示加载态） */
+	creating: boolean;
 	isCollapsed: boolean;
 	onToggleCollapse: () => void;
 	onOpenSettings: () => void;
@@ -19,7 +22,9 @@ export function ConversationList({
 	conversations,
 	selectedConversationId,
 	onCreate,
+	onDelete,
 	onSelect,
+	creating,
 	isCollapsed,
 	onToggleCollapse,
 	onOpenSettings,
@@ -57,49 +62,77 @@ export function ConversationList({
 			{/* 新建会话大按钮 */}
 			<button
 				className="ghost-button new-chat-btn"
+				disabled={creating}
 				onClick={onCreate}
 				type="button"
 			>
-				<svg
-					aria-hidden="true"
-					fill="none"
-					height="16"
-					stroke="currentColor"
-					strokeLinecap="round"
-					strokeLinejoin="round"
-					strokeWidth="2.5"
-					viewBox="0 0 24 24"
-					width="16"
-				>
-					<title>新建</title>
-					<line x1="12" x2="12" y1="5" y2="19" />
-					<line x1="5" x2="19" y1="12" y2="12" />
-				</svg>
-				新建
+				{creating ? (
+					<span aria-hidden="true" className="btn-spinner" />
+				) : (
+					<svg
+						aria-hidden="true"
+						fill="none"
+						height="16"
+						stroke="currentColor"
+						strokeLinecap="round"
+						strokeLinejoin="round"
+						strokeWidth="2.5"
+						viewBox="0 0 24 24"
+						width="16"
+					>
+						<title>新建</title>
+						<line x1="12" x2="12" y1="5" y2="19" />
+						<line x1="5" x2="19" y1="12" y2="12" />
+					</svg>
+				)}
+				{creating ? "正在新建…" : "新建"}
 			</button>
 
 			{/* 滚动会话列表 */}
 			<div className="conversation-scroll">
 				{conversations.map((conversation) => (
-					<button
-						aria-current={
-							conversation.id === selectedConversationId ? "page" : undefined
-						}
-						className="conversation-item"
-						key={conversation.id}
-						onClick={() => onSelect(conversation.id)}
-						type="button"
-					>
-						<span className="conversation-title-row">
-							<span className="conversation-title">{conversation.title}</span>
-							{conversation.isRunning ? (
-								<span className="running-dot">运行中</span>
-							) : null}
-						</span>
-						<span className="conversation-meta">
-							<span>{messageCountLabel(conversation.messageCount)}</span>
-						</span>
-					</button>
+					<div className="conversation-item-wrap" key={conversation.id}>
+						<button
+							aria-current={
+								conversation.id === selectedConversationId ? "page" : undefined
+							}
+							className="conversation-item"
+							onClick={() => onSelect(conversation.id)}
+							type="button"
+						>
+							<span className="conversation-title-row">
+								<span className="conversation-title">{conversation.title}</span>
+								{conversation.isRunning ? (
+									<span className="running-dot">运行中</span>
+								) : null}
+							</span>
+							<span className="conversation-meta">
+								<span>{messageCountLabel(conversation.messageCount)}</span>
+							</span>
+						</button>
+						<button
+							aria-label="删除会话"
+							className="conversation-delete"
+							onClick={() => onDelete(conversation.id)}
+							title={`删除会话「${conversation.title}」`}
+							type="button"
+						>
+							<svg
+								aria-hidden="true"
+								fill="none"
+								height="15"
+								stroke="currentColor"
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								strokeWidth="2"
+								viewBox="0 0 24 24"
+								width="15"
+							>
+								<polyline points="3 6 5 6 21 6" />
+								<path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+							</svg>
+						</button>
+					</div>
 				))}
 			</div>
 

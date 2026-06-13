@@ -25,6 +25,7 @@ export type {
 export type ChatStore = {
 	bootstrap: () => Promise<void>;
 	createConversation: (title?: string) => Promise<void>;
+	deleteConversation: (conversationId: string) => Promise<void>;
 	selectConversation: (conversationId: string) => Promise<void>;
 	updateDraft: (conversationId: string, draft: string) => void;
 	sendSelectedMessage: () => Promise<void>;
@@ -56,6 +57,7 @@ export function createInitialChatState(): ChatState {
 		conversations: [],
 		selectedConversationId: null,
 		historyByConversation: {},
+		creatingConversation: false,
 		activeJobsByConversation: {},
 		eventsByJob: {},
 		eventCursorByJob: {},
@@ -159,6 +161,23 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 				runtimeConfig: action.runtimeConfig ?? state.runtimeConfig,
 				error: action.error,
 			};
+		case "history/loading": {
+			const existing = state.historyByConversation[action.conversationId];
+			return {
+				...state,
+				historyByConversation: {
+					...state.historyByConversation,
+					[action.conversationId]: {
+						items: existing?.items ?? [],
+						hasMore: existing?.hasMore ?? false,
+						nextBefore: existing?.nextBefore ?? null,
+						total: existing?.total ?? 0,
+						loading: true,
+						error: null,
+					},
+				},
+			};
+		}
 		case "history/set":
 			return {
 				...state,
@@ -194,6 +213,37 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 					: [action.conversation, ...state.conversations],
 				selectedConversationId: action.conversation.id,
 				settings: { ...state.settings, mobilePanel: "chat" },
+			};
+		}
+		case "conversation/creating":
+			return { ...state, creatingConversation: action.creating };
+		case "conversation/remove": {
+			const conversations = state.conversations.filter(
+				(item) => item.id !== action.conversationId,
+			);
+			const historyByConversation = { ...state.historyByConversation };
+			delete historyByConversation[action.conversationId];
+			const draftsByConversation = { ...state.draftsByConversation };
+			delete draftsByConversation[action.conversationId];
+			const attachmentsByConversation = {
+				...state.attachmentsByConversation,
+			};
+			delete attachmentsByConversation[action.conversationId];
+			const referencesByConversation = {
+				...state.referencesByConversation,
+			};
+			delete referencesByConversation[action.conversationId];
+			return {
+				...state,
+				conversations,
+				historyByConversation,
+				draftsByConversation,
+				attachmentsByConversation,
+				referencesByConversation,
+				selectedConversationId:
+					state.selectedConversationId === action.conversationId
+						? action.nextSelectedId
+						: state.selectedConversationId,
 			};
 		}
 		case "draft/set":
@@ -491,6 +541,7 @@ export function createChatStore({
 	}
 
 	async function loadHistory(conversationId: string): Promise<void> {
+		dispatch({ type: "history/loading", conversationId });
 		const history = await client.getHistory({
 			conversationId,
 			limit: HISTORY_LIMIT,
@@ -620,10 +671,34 @@ export function createChatStore({
 	}
 
 	async function createConversation(title?: string): Promise<void> {
+		dispatch({ type: "conversation/creating", creating: true });
 		try {
 			const conversation = await client.createConversation(title);
 			dispatch({ type: "conversation/upsert", conversation });
 			await loadHistory(conversation.id);
+		} catch (err) {
+			dispatch({ type: "send/error", error: errorMessage(err) });
+		} finally {
+			dispatch({ type: "conversation/creating", creating: false });
+		}
+	}
+
+	async function deleteConversation(conversationId: string): Promise<void> {
+		const wasSelected = state.selectedConversationId === conversationId;
+		const nextSelectedId = wasSelected
+			? (state.conversations.find((item) => item.id !== conversationId)?.id ??
+				null)
+			: state.selectedConversationId;
+		try {
+			await client.deleteConversation(conversationId);
+			dispatch({ type: "conversation/remove", conversationId, nextSelectedId });
+			if (
+				wasSelected &&
+				nextSelectedId &&
+				!state.historyByConversation[nextSelectedId]
+			) {
+				await loadHistory(nextSelectedId);
+			}
 		} catch (err) {
 			dispatch({ type: "send/error", error: errorMessage(err) });
 		}
@@ -870,6 +945,7 @@ export function createChatStore({
 	return {
 		bootstrap,
 		createConversation,
+		deleteConversation,
 		selectConversation,
 		updateDraft,
 		sendSelectedMessage,

@@ -42,6 +42,8 @@ Undefined Chat 在 v3.5.2 版本完成全面重写，采用莫兰迪橙色系（
 - **消息自动滚动**：流式回复增长、工具块/事件更新、图片异步撑高时持续贴底（双 rAF 等布局完成，确保彻底到底）；用户上滚查看历史时智能暂停，回到底部恢复；切换会话回到底部。
 - **对话区去除 emoji**：消息头像改为圆圈内首字母（机器人 `U` / 用户 `你`），欢迎页快捷卡片改用描边 SVG 图标，整体观感更克制。
 - **移动端响应式**：侧栏抽屉随窗口宽度实时切换（`useMediaQuery` + `matchMedia`，响应缩放/旋屏），输入区与 lightbox 适配 `env(safe-area-inset-*)` 安全区。
+- **会话管理**：会话项悬停显示删除按钮，删除走二次确认弹窗（`ConfirmDialog`）；新建会话期间按钮显示"正在新建…"加载态；点击会话且历史尚未加载时显示加载态而非欢迎页（区分"加载中"与"空会话"）。
+- **图片统一走 UID**：webchat 命令输出中的内联图片（如 `/stats` 的 base64 图表、`file://` 渲染图）在输出环节即注册为附件、替换为 `<attachment uid/>`，客户端按 UID 经 `/api/v1/chat/attachments/{uid}/preview` 拉取渲染。历史不再存储 base64（避免整段 base64 进入后续 LLM prompt 导致 token 超限），Runtime API 也不再返回 base64；图片统一 `loading="lazy"` + `decoding="async"` 懒加载。QQ 投递路径不受影响。
 
 ## 配色系统
 

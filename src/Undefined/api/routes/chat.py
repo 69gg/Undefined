@@ -43,7 +43,6 @@ from Undefined.attachments import (
     attachment_refs_to_xml,
     build_attachment_scope,
     register_message_attachments,
-    render_message_with_pic_placeholders,
 )
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
@@ -61,6 +60,70 @@ _CHAT_SSE_KEEPALIVE_SECONDS = 10.0
 _CHAT_STAGE_REFRESH_SECONDS = 1.0
 _CHAT_JOB_EVENT_BUFFER_LIMIT = 1000
 SHUTDOWN_TASK_TIMEOUT = 5.0
+
+# register_message_attachments 产出的可读占位（如 ``[图片 uid=pic_xxx name=foo]``）
+_WEBCHAT_BRACKET_REF_PATTERN = re.compile(r"\[[^\]]*?\buid=(?P<uid>[^\s\]]+)[^\]]*?\]")
+# 文本中所有 <attachment.../> / <pic.../> 引用
+_WEBCHAT_ATTACHMENT_TAG_PATTERN = re.compile(
+    r"<(?:attachment|pic)\s+[^>]*?\buid=[\"']?(?P<uid>[^\"'\s/>]+)[\"']?[^>]*?/?>",
+    re.IGNORECASE,
+)
+
+
+async def _normalize_webchat_output(
+    content: str,
+    *,
+    registry: Any,
+    scope_key: str | None,
+    resolve_image_url: Callable[[str], Awaitable[str | None]] | None,
+    get_forward_messages: Callable[[str], Awaitable[list[dict[str, Any]]]] | None,
+) -> tuple[str, list[dict[str, str]]]:
+    """归一化 webchat 命令输出中的内联媒体，统一为 ``<attachment uid/>``。
+
+    命令输出可能包含原始 ``[CQ:image,file=base64://...]`` / ``file://`` 图片。
+    若原样写入历史，会把整段 base64 喂给后续 LLM（导致 token 爆炸），也让 API
+    返回 base64。这里先把内联媒体注册为附件、转成 ``<attachment uid/>`` 占位，
+    客户端再按 UID 经 ``/api/v1/chat/attachments/{uid}/preview`` 拉取渲染。
+
+    Args:
+        content: 命令输出原文。
+        registry: 附件注册表。
+        scope_key: 当前 webchat 会话作用域键。
+        resolve_image_url: 将 ``file`` 字段解析为可下载 URL 的回调。
+        get_forward_messages: 拉取合并转发子消息的回调。
+
+    Returns:
+        ``(归一化文本, 附件引用列表)``；附件为 :meth:`AttachmentRecord.prompt_ref` 字典。
+    """
+    if registry is None or not scope_key or not content.strip():
+        return content, []
+    segments = message_to_segments(content)
+    registered = await register_message_attachments(
+        registry=registry,
+        segments=segments,
+        scope_key=scope_key,
+        resolve_image_url=resolve_image_url,
+        get_forward_messages=get_forward_messages,
+    )
+    text = registered.normalized_text or content
+    # ``[图片 uid=X name=Y]`` / ``[文件 uid=X]`` → ``<attachment uid="X"/>``
+    text = _WEBCHAT_BRACKET_REF_PATTERN.sub(
+        lambda match: f'<attachment uid="{match.group("uid")}"/>', text
+    )
+    # 收集文中所有附件引用（含技能预先注册、已是 <attachment>/<pic> 标签的）
+    attachments: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for match in _WEBCHAT_ATTACHMENT_TAG_PATTERN.finditer(text):
+        uid = str(match.group("uid") or "").strip()
+        if not uid or uid in seen:
+            continue
+        seen.add(uid)
+        record = await registry.resolve_async(uid, scope_key)
+        if record is not None:
+            attachments.append(record.prompt_ref())
+    return text, attachments
+
+
 _PREVIEW_LIMIT = 800
 _CHAT_ATTACHMENT_MAX_NAME_LENGTH = 128
 _CHAT_ATTACHMENT_UPLOAD_FIELD = "file"
@@ -683,31 +746,41 @@ class ChatJobManager:
             if not content:
                 return
             await self._append_stage(job, "sending_message")
-            rendered = await render_message_with_pic_placeholders(
+            # 将输出中的内联媒体（[CQ:image,file=base64://…]、file:// 等）注册为附件并
+            # 统一为 <attachment uid/>，避免把 base64/本地路径写入历史或喂给后续 LLM；
+            # 客户端按 UID 经 /api/v1/chat/attachments/{uid}/preview 拉取渲染。
+            output_text, output_attachments = await _normalize_webchat_output(
                 content,
                 registry=self._ctx.ai.attachment_registry,
                 scope_key=webui_scope_key,
-                strict=False,
+                resolve_image_url=self._ctx.onebot.get_image,
+                get_forward_messages=self._ctx.onebot.get_forward_msg,
             )
-            if not rendered.delivery_text.strip():
+            if not output_text.strip() and not output_attachments:
                 return
-            outputs.append(rendered.delivery_text)
-            job.outputs.append(rendered.delivery_text)
-            job.history_outputs.append(rendered.history_text)
-            job.history_attachments.extend(rendered.attachments)
+            outputs.append(output_text)
+            job.outputs.append(output_text)
+            job.history_outputs.append(output_text)
+            job.history_attachments.extend(output_attachments)
             logger.info(
-                "[RuntimeAPI][WebChat] job 输出消息: job_id=%s conversation_id=%s delivery_len=%s attachments=%s",
+                "[RuntimeAPI][WebChat] job 输出消息: job_id=%s conversation_id=%s text_len=%s attachments=%s",
                 job.job_id,
                 job.conversation_id,
-                len(rendered.delivery_text),
-                len(rendered.attachments),
+                len(output_text),
+                len(output_attachments),
             )
             now = time.time()
             await self._append_event(
                 job,
                 "message",
                 {
-                    "content": rendered.delivery_text,
+                    "content": output_text,
+                    "attachments": [
+                        _chat_attachment_response_metadata(
+                            {**ref, "id": str(ref.get("uid") or "")}
+                        )
+                        for ref in output_attachments
+                    ],
                     "job_id": job.job_id,
                     "elapsed_ms": _job_elapsed_ms(job, now),
                     "parent_webchat_call_id": _current_webchat_agent_call_id(job),

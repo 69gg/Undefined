@@ -76,6 +76,7 @@ export function AttachmentCard({
 					alt={attachment.name}
 					className="runtime-chat-image"
 					loading="lazy"
+					decoding="async"
 					src={attachment.previewUrl}
 					style={{
 						maxWidth: "100%",

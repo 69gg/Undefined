@@ -381,6 +381,165 @@ a:hover {
 	border-radius: 0 4px 4px 0;
 }
 
+/* 会话项容器：悬停显示删除按钮 */
+.conversation-item-wrap {
+	position: relative;
+}
+
+.conversation-delete {
+	position: absolute;
+	top: 50%;
+	right: 8px;
+	transform: translateY(-50%);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border: none;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--text-tertiary);
+	opacity: 0;
+	transition: opacity 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.conversation-item-wrap:hover .conversation-delete,
+.conversation-delete:focus-visible {
+	opacity: 1;
+}
+
+.conversation-delete:hover {
+	background: color-mix(in srgb, var(--error) 14%, transparent);
+	color: var(--error);
+}
+
+/* 按钮内联加载指示 */
+.btn-spinner {
+	display: inline-block;
+	width: 14px;
+	height: 14px;
+	border: 2px solid color-mix(in srgb, currentColor 35%, transparent);
+	border-top-color: currentColor;
+	border-radius: 50%;
+	animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* 历史加载态 */
+.timeline-loading {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 14px;
+	min-height: 280px;
+	color: var(--text-tertiary);
+}
+
+.timeline-spinner {
+	width: 28px;
+	height: 28px;
+	border: 3px solid var(--border-primary);
+	border-top-color: var(--primary);
+	border-radius: 50%;
+	animation: spin 0.8s linear infinite;
+}
+
+.timeline-loading p {
+	margin: 0;
+	font-size: 0.875rem;
+}
+
+/* 二次确认弹窗 */
+.confirm-dialog-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 10000;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 24px;
+	background: color-mix(in srgb, #020617 62%, transparent);
+	backdrop-filter: blur(4px);
+	animation: fadeIn 0.16s ease;
+}
+
+.confirm-dialog {
+	width: min(400px, 100%);
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 22px;
+	border-radius: 14px;
+	background: var(--bg-surface);
+	border: 1px solid var(--border-primary);
+	box-shadow: var(--shadow-lg);
+	animation: slideUpFadeIn 0.18s ease-out;
+}
+
+.confirm-dialog-title {
+	margin: 0;
+	font-size: 1.05rem;
+	font-weight: 650;
+	color: var(--text-primary);
+}
+
+.confirm-dialog-message {
+	margin: 0;
+	font-size: 0.9rem;
+	line-height: 1.6;
+	color: var(--text-secondary);
+}
+
+.confirm-dialog-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 10px;
+	margin-top: 4px;
+}
+
+.primary-button,
+.danger-button {
+	padding: 8px 16px;
+	border-radius: 8px;
+	font-weight: 600;
+	border: 1px solid transparent;
+	transition: filter 0.16s ease, background 0.16s ease;
+}
+
+.primary-button {
+	background: var(--primary);
+	color: #ffffff;
+	border-color: var(--primary);
+}
+
+.primary-button:hover {
+	background: var(--primary-hover);
+}
+
+.danger-button {
+	background: var(--error);
+	color: #ffffff;
+	border-color: var(--error);
+}
+
+.danger-button:hover {
+	filter: brightness(0.94);
+}
+
+/* 触摸端无悬停：删除按钮常驻可见 */
+@media (max-width: 768px) {
+	.conversation-delete {
+		opacity: 0.55;
+	}
+}
+
 .conversation-title-row {
 	display: flex;
 	align-items: center;

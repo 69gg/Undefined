@@ -134,7 +134,7 @@ export function renderAttachmentPlaceholders(
 					? `${runtimeUrl}/api/runtime/attachments/${encodeURIComponent(uid)}/preview`
 					: "");
 
-			const imgTag = `<img class="runtime-chat-image" src="${escapeHtml(src)}" alt="${escapeHtml(attachment.name)}" loading="lazy" data-attachment-id="${escapeHtml(uid)}" />`;
+			const imgTag = `<img class="runtime-chat-image" src="${escapeHtml(src)}" alt="${escapeHtml(attachment.name)}" loading="lazy" decoding="async" data-attachment-id="${escapeHtml(uid)}" />`;
 			result = result.replace(new RegExp(placeholder, "g"), imgTag);
 		} else {
 			result = result.replace(new RegExp(placeholder, "g"), "");
@@ -143,7 +143,7 @@ export function renderAttachmentPlaceholders(
 
 	// 处理 CQ 图片占位符
 	for (const img of inlineImages) {
-		const imgTag = `<img class="runtime-chat-image" src="${escapeHtml(img.src)}" alt="image" loading="lazy" />`;
+		const imgTag = `<img class="runtime-chat-image" src="${escapeHtml(img.src)}" alt="image" loading="lazy" decoding="async" />`;
 		result = result.replace(new RegExp(img.placeholder, "g"), imgTag);
 	}
 
