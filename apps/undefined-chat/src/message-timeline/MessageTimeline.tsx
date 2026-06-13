@@ -6,10 +6,10 @@ import {
 } from "../rendering/MarkdownContent";
 import type {
 	Attachment,
-	ChatEvent,
 	ChatJob,
 	ConnectionState,
 	HistoryItem,
+	ToolCallSnapshot,
 } from "../runtime-client/types";
 import { AttachmentCard } from "./AttachmentCard";
 import {
@@ -20,7 +20,6 @@ import {
 export type MessageTimelineProps = {
 	activeJob: ChatJob | null;
 	connectionState: ConnectionState;
-	events: ChatEvent[];
 	/** 选中会话的历史尚未加载或加载中：显示加载态而非欢迎页 */
 	historyLoading?: boolean;
 	/** 历史加载失败的错误信息（单会话级，非全局致命） */
@@ -39,31 +38,63 @@ export type MessageTimelineProps = {
 
 const WINDOW_SIZE = 64;
 
-function eventLabel(event: ChatEvent): string {
-	const payload = event.payload;
-	if (typeof payload.error === "string") {
-		return payload.error;
+type HistoryToolCall = {
+	name: string;
+	is_agent?: boolean;
+	status: string;
+	arguments_preview?: string;
+	result_preview?: string;
+	ui_hint?: string;
+	duration_ms?: number;
+	current_stage?: string;
+	children?: HistoryToolCall[];
+	timeline?: unknown[];
+};
+
+type HistoryTimelineEntry = {
+	type: string;
+	content?: string;
+	stage?: string;
+	detail?: string;
+	call?: HistoryToolCall;
+};
+
+function convertToolCallSnapshot(snap: ToolCallSnapshot): HistoryToolCall {
+	return {
+		name: snap.name,
+		is_agent: snap.isAgent,
+		status: snap.status,
+		arguments_preview: snap.argumentsPreview,
+		result_preview: snap.resultPreview,
+		ui_hint: snap.uiHint,
+		duration_ms: snap.durationMs ?? snap.elapsedMs ?? undefined,
+		current_stage: snap.currentStage,
+		children: snap.children?.map(convertToolCallSnapshot),
+		timeline: snap.timeline,
+	};
+}
+
+function buildStreamingTimeline(job: ChatJob): HistoryTimelineEntry[] {
+	const timeline: HistoryTimelineEntry[] = [];
+
+	// 有文本时先输出文本
+	if (job.reply.trim()) {
+		timeline.push({ type: "message", content: job.reply });
 	}
-	const name =
-		typeof payload.name === "string"
-			? payload.name
-			: typeof payload.agent_name === "string"
-				? payload.agent_name
-				: typeof payload.stage === "string"
-					? payload.stage
-					: event.event;
-	const detail =
-		typeof payload.result_preview === "string"
-			? payload.result_preview
-			: typeof payload.detail === "string"
-				? payload.detail
-				: "";
-	return detail ? `${name} ${detail}` : name;
+
+	// 输出所有工具调用
+	for (const toolCall of job.currentToolCalls) {
+		timeline.push({
+			type: "call",
+			call: convertToolCallSnapshot(toolCall),
+		});
+	}
+
+	return timeline;
 }
 
 export function MessageTimeline({
 	activeJob,
-	events,
 	historyLoading,
 	historyError,
 	onRetryHistory,
@@ -77,13 +108,11 @@ export function MessageTimeline({
 	runtimeUrl,
 }: MessageTimelineProps) {
 	const visibleItems = items.slice(-WINDOW_SIZE);
-	const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
 	const timelineRef = useRef<HTMLDivElement>(null);
 	// 是否贴附底部：用户向上滚动查看历史时暂停自动滚动（智能暂停）
 	const stickToBottomRef = useRef(true);
 
 	const isCurrentlyThinking = isJobRunning(activeJob);
-	const hasEventsOrActiveJob = Boolean(activeJob || events.length > 0);
 
 	// 实时用时：运行中每 200ms 刷新，完成后显示最终用时
 	const [nowMs, setNowMs] = useState(() => Date.now());
@@ -138,13 +167,7 @@ export function MessageTimeline({
 			cancelAnimationFrame(raf1);
 			cancelAnimationFrame(raf2);
 		};
-	}, [
-		visibleItems.length,
-		lastItemId,
-		streamSignature,
-		events.length,
-		isThinkingExpanded,
-	]);
+	}, [visibleItems.length, lastItemId, streamSignature]);
 
 	const shortcuts = [
 		{
@@ -437,139 +460,47 @@ export function MessageTimeline({
 					</article>
 				))}
 
-				{/* 思考中...折叠手风琴 */}
-				{hasEventsOrActiveJob ? (
-					<div
-						className={`thinking-box ${isThinkingExpanded ? "expanded" : ""}`}
-						style={{ animation: "fadeInUp 0.3s ease" }}
+				{/* 流式 bot 气泡：activeJob 存在且运行中时立即显示 */}
+				{activeJob && isCurrentlyThinking ? (
+					<article
+						className="message-row message-row-bot streaming"
+						data-testid="streaming-message"
+						key={`streaming-${activeJob.jobId}`}
 					>
-						<button
-							className="thinking-header"
-							onClick={() => setIsThinkingExpanded(!isThinkingExpanded)}
-							type="button"
+						{/* 头像 */}
+						<div
+							className="avatar-wrapper avatar-bot"
 							style={{
-								width: "100%",
-								border: "none",
-								outline: "none",
-								boxShadow: "none",
-								background: "transparent",
-								cursor: "pointer",
-								padding: 0,
+								background: "var(--primary)",
+								color: "#ffffff",
+								display: "flex",
+								alignItems: "center",
+								justifyContent: "center",
+								fontWeight: "600",
+								fontSize: "0.85rem",
 							}}
 						>
-							<div className="thinking-title-block">
-								{isCurrentlyThinking ? (
-									<div className="thinking-dot-spinner" />
-								) : (
-									<svg
-										fill="none"
-										height="14"
-										stroke="var(--status-success)"
-										strokeLinecap="round"
-										strokeLinejoin="round"
-										strokeWidth="2.5"
-										viewBox="0 0 24 24"
-										width="14"
-									>
-										<title>完成</title>
-										<polyline points="20 6 9 17 4 12" />
-									</svg>
-								)}
-								<span>
-									{isCurrentlyThinking ? "思考中..." : "思考完成"}
-									{activeJob?.currentStage
-										? ` (${activeJob.currentStage})`
-										: ""}
-									{elapsedMs > 0 ? (
-										<span
-											style={{
-												marginLeft: "6px",
-												opacity: 0.7,
-												fontSize: "0.9em",
-											}}
-										>
-											· {elapsedLabel}
-										</span>
-									) : null}
-								</span>
-								{activeJob?.currentStageDetail ? (
-									<span style={{ marginLeft: "4px" }}>
-										{activeJob.currentStageDetail}
-									</span>
-								) : null}
-							</div>
-							<svg
-								className="thinking-chevron"
-								fill="none"
-								height="16"
-								stroke="currentColor"
-								strokeLinecap="round"
-								strokeLinejoin="round"
-								strokeWidth="2"
-								viewBox="0 0 24 24"
-								width="16"
-							>
-								<title>展开/收起</title>
-								<polyline points="6 9 12 15 18 9" />
-							</svg>
-						</button>
-
-						<div className="thinking-content">
-							{/* 工具/Agent子状态指示器 */}
-							{(activeJob?.currentToolCalls &&
-								activeJob.currentToolCalls.length > 0) ||
-							(activeJob?.currentAgentStages &&
-								activeJob.currentAgentStages.length > 0) ? (
-								<div
-									className="runtime-timeline"
-									style={{
-										display: "flex",
-										gap: "6px",
-										marginBottom: "12px",
-										flexWrap: "wrap",
-									}}
-								>
-									{activeJob?.currentToolCalls?.map((call) => (
-										<div className="runtime-pill" key={call.id}>
-											<span style={{ fontWeight: "600" }}>{call.name}</span>
-											<span style={{ opacity: 0.7, fontSize: "0.75rem" }}>
-												{call.status}
-											</span>
-										</div>
-									))}
-									{activeJob?.currentAgentStages?.map((stage) => (
-										<div className="runtime-pill" key={stage.id}>
-											<span style={{ fontWeight: "600" }}>{stage.name}</span>
-											<span style={{ opacity: 0.7, fontSize: "0.75rem" }}>
-												{stage.stage}
-											</span>
-										</div>
-									))}
-								</div>
-							) : null}
-
-							{/* 事件流详细输出 */}
-							{events.length > 0 ? (
-								<ol className="event-list">
-									{events.map((event) => (
-										<li
-											className={`event-item event-${event.event}`}
-											key={event.seq}
-										>
-											<span className="event-type-badge">{event.event}</span>
-											<span>{eventLabel(event)}</span>
-										</li>
-									))}
-								</ol>
-							) : (
-								<div
-									style={{ color: "var(--text-tertiary)", fontSize: "0.8rem" }}
-								>
-									无运行日志
-								</div>
-							)}
+							U
 						</div>
-					</div>
+
+						{/* 消息气泡 */}
+						<div className="message-bubble">
+							<MessageTimelineContent
+								timeline={buildStreamingTimeline(activeJob)}
+								fallbackContent={activeJob.reply || "思考中..."}
+								attachments={[]}
+								runtimeUrl={runtimeUrl}
+								onPreviewHtml={onPreviewHtml}
+								onImageClick={onOpenImage}
+							/>
+
+							<div className="message-meta">
+								<span>
+									Undefined{elapsedMs > 0 ? ` · ${elapsedLabel}` : ""}
+								</span>
+							</div>
+						</div>
+					</article>
 				) : null}
 			</div>
 		</section>

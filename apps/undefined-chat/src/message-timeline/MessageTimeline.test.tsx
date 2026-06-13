@@ -1,14 +1,15 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
-import { event, historyItem, job } from "../test-fixtures";
+import { historyItem, job } from "../test-fixtures";
 import { MessageTimeline } from "./MessageTimeline";
 
 describe("MessageTimeline", () => {
-	test("renders text, code, attachments, references, tool and agent timeline entries, job status, and errors", async () => {
+	test("renders text, code, attachments, references, and streaming bot message with tool calls", async () => {
 		const onPreviewHtml = vi.fn();
 		const activeJob = job({
 			jobId: "job-1",
+			reply: "正在处理您的请求...",
 			currentStage: "tool_call",
 			currentStageDetail: "正在调用工具",
 			currentToolCalls: [
@@ -17,47 +18,17 @@ describe("MessageTimeline", () => {
 					name: "group.get_member_info",
 					status: "running",
 					elapsedMs: 800,
+					argumentsPreview: '{"user_id": "12345"}',
+					resultPreview: "昵称：小明",
 				},
 			],
-			currentAgentStages: [
-				{
-					id: "agent-1",
-					name: "planner",
-					stage: "thinking",
-					status: "running",
-					elapsedMs: 600,
-				},
-			],
+			currentAgentStages: [],
 		});
 
 		render(
 			<MessageTimeline
 				activeJob={activeJob}
 				connectionState="streaming"
-				events={[
-					event({
-						seq: 2,
-						event: "tool_result",
-						payload: {
-							name: "group.get_member_info",
-							result_preview: "昵称：小明",
-						},
-					}),
-					event({
-						seq: 3,
-						event: "agent_stage",
-						payload: {
-							agent_name: "planner",
-							stage: "thinking",
-							detail: "拆解任务",
-						},
-					}),
-					event({
-						seq: 4,
-						event: "error",
-						payload: { error: "工具调用失败" },
-					}),
-				]}
 				items={[
 					historyItem({
 						messageId: "u-1",
@@ -76,9 +47,9 @@ describe("MessageTimeline", () => {
 								size: 2048,
 								mediaType: "image/png",
 								kind: "image",
+								discarded: false,
 								downloadUrl: "/download/report.png",
 								previewUrl: "/preview/report.png",
-								discarded: false,
 							},
 						],
 						references: [
@@ -95,13 +66,17 @@ describe("MessageTimeline", () => {
 			/>,
 		);
 
+		// 历史消息内容
 		expect(screen.getByText("参考这条消息")).toBeTruthy();
 		expect(screen.getByAltText("report.png")).toBeTruthy();
 		expect(screen.getByText(/引用/)).toBeTruthy();
+
+		// 流式 bot 消息
+		expect(screen.getByTestId("streaming-message")).toBeTruthy();
+		expect(screen.getByText("正在处理您的请求...")).toBeTruthy();
 		expect(screen.getByText("group.get_member_info")).toBeTruthy();
-		expect(screen.getByText("planner")).toBeTruthy();
-		expect(screen.getByText("正在调用工具")).toBeTruthy();
-		expect(screen.getByText("工具调用失败")).toBeTruthy();
+
+		// HTML 预览不在流式消息中渲染
 		expect(screen.queryByRole("heading", { name: "报告" })).toBeNull();
 
 		await userEvent.click(screen.getByRole("button", { name: "预览 HTML" }));
@@ -125,7 +100,6 @@ describe("MessageTimeline", () => {
 			<MessageTimeline
 				activeJob={null}
 				connectionState="connected"
-				events={[]}
 				items={manyItems}
 				onPreviewAttachment={vi.fn()}
 				onPreviewHtml={vi.fn()}

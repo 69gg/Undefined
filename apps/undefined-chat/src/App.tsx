@@ -54,9 +54,6 @@ export function App() {
 	const activeJob = selectedConversationId
 		? (state.activeJobsByConversation[selectedConversationId] ?? null)
 		: null;
-	const activeEvents = activeJob
-		? (state.eventsByJob[activeJob.jobId] ?? [])
-		: [];
 
 	const [setupRuntimeUrl, setSetupRuntimeUrl] = useState(
 		state.runtimeConfig?.runtimeUrl ?? "http://127.0.0.1:8788",
@@ -341,7 +338,6 @@ export function App() {
 					key={selectedConversationId ?? "none"}
 					activeJob={activeJob}
 					connectionState={state.connectionState}
-					events={activeEvents}
 					historyLoading={historyLoading}
 					historyError={historyError}
 					onRetryHistory={

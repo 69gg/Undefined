@@ -227,7 +227,24 @@ function normalizeToolCall(value: unknown): ToolCallSnapshot {
 		name: text(raw.name) || text(raw.api_name) || text(raw.apiName, "tool"),
 		status: text(raw.status, "running"),
 		elapsedMs: nullableNumber(field(raw, "elapsedMs", "elapsed_ms")),
+		durationMs: nullableNumber(field(raw, "durationMs", "duration_ms")),
 		detail: text(raw.detail) || text(raw.result_preview) || undefined,
+		argumentsPreview:
+			text(raw.argumentsPreview) ||
+			text(raw.arguments_preview) ||
+			text(raw.input) ||
+			undefined,
+		resultPreview:
+			text(raw.resultPreview) ||
+			text(raw.result_preview) ||
+			text(raw.output) ||
+			undefined,
+		uiHint: text(raw.uiHint) || text(raw.ui_hint) || undefined,
+		currentStage:
+			text(raw.currentStage) || text(raw.current_stage) || undefined,
+		isAgent: bool(raw.isAgent) || bool(raw.is_agent) || undefined,
+		children: arrayRecords(raw.children).map(normalizeToolCall),
+		timeline: Array.isArray(raw.timeline) ? raw.timeline : undefined,
 	};
 }
 

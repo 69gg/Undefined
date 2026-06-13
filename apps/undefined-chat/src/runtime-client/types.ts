@@ -82,7 +82,15 @@ export type ToolCallSnapshot = {
 	name: string;
 	status: string;
 	elapsedMs: number | null;
+	durationMs?: number | null;
 	detail?: string;
+	argumentsPreview?: string;
+	resultPreview?: string;
+	uiHint?: string;
+	currentStage?: string;
+	isAgent?: boolean;
+	children?: ToolCallSnapshot[];
+	timeline?: unknown[];
 };
 
 export type AgentStageSnapshot = {

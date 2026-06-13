@@ -923,6 +923,12 @@ a:hover {
 	justify-content: flex-end;
 }
 
+/* 流式气泡样式 */
+.message-row.streaming .message-bubble {
+	opacity: 0.95;
+	animation: fadeInUp 0.2s ease-out;
+}
+
 /* ========================================
    Markdown & Typographical Styling
    ======================================== */
