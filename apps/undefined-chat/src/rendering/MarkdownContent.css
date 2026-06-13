@@ -112,7 +112,7 @@
 	overflow-y: auto;
 	white-space: pre-wrap;
 	word-wrap: break-word;
-	max-height: 400px;
+	max-height: 200px; /* 降低高度限制，更早折叠 */
 }
 
 .markdown-body blockquote code {
