@@ -3,8 +3,7 @@ use tauri::{webview::NewWindowResponse, AppHandle, Manager, WebviewUrl, WebviewW
 use url::Url;
 use uuid::Uuid;
 
-pub(crate) const MAX_PREVIEW_HTML_BYTES: usize = 1024 * 1024;
-
+// CSP 策略：禁止脚本和网络连接，允许内联样式和本地资源
 const PREVIEW_CSP: &str = concat!(
     "default-src 'self' data: blob:; ",
     "connect-src 'none'; ",
@@ -43,11 +42,16 @@ pub(crate) fn preview_document(title: &str, html: &str) -> String {
             "<meta charset=\"utf-8\">",
             "<meta http-equiv=\"Content-Security-Policy\" content=\"{}\">",
             "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+            "<meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\">",
             "<title>{}</title>",
             "<style>",
-            "body {{ margin: 0; padding: 16px; font-family: system-ui, -apple-system, sans-serif; background: white; color: black; }}",
+            "* {{ box-sizing: border-box; }}",
+            "body {{ margin: 0; padding: 16px; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; background: white; color: black; line-height: 1.5; }}",
             "body.empty {{ display: flex; align-items: center; justify-content: center; min-height: 100vh; }}",
             "body.empty::before {{ content: '内容为空或加载失败'; color: #999; }}",
+            "img {{ max-width: 100%; height: auto; }}",
+            "table {{ border-collapse: collapse; width: 100%; }}",
+            "pre {{ overflow-x: auto; }}",
             "</style>",
             "</head>",
             "<body class=\"{}\">{}</body>",
@@ -64,6 +68,12 @@ pub(crate) fn preview_navigation_allowed(url: &Url, initial_url: &Url) -> bool {
     url == initial_url || url.as_str() == "about:blank"
 }
 
+// 保留用于测试，即使在运行时未使用
+#[allow(dead_code)]
+pub(crate) const MAX_PREVIEW_HTML_BYTES: usize = 1024 * 1024;
+
+// 保留用于测试和未来可能的 data URL 回退
+#[allow(dead_code)]
 pub(crate) fn build_preview_data_url(title: &str, html: &str) -> Result<Url, String> {
     if title.len().saturating_add(html.len()) > MAX_PREVIEW_HTML_BYTES {
         return Err(format!(
@@ -81,7 +91,6 @@ pub(crate) fn build_preview_data_url(title: &str, html: &str) -> Result<Url, Str
 #[tauri::command]
 pub async fn open_html_preview(app: AppHandle, input: HtmlPreviewInput) -> Result<(), String> {
     use std::fs;
-    use std::path::PathBuf;
 
     let label = format!("html-preview-{}", Uuid::new_v4());
 
