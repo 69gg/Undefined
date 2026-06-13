@@ -3,6 +3,11 @@ import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import type { Attachment } from "../runtime-client/types";
+import {
+	extractAttachmentTags,
+	renderAttachmentPlaceholders,
+} from "./AttachmentProcessor";
 import { CodeBlock } from "./CodeBlock";
 import "./MarkdownContent.css";
 
@@ -14,6 +19,9 @@ export type HtmlPreviewRequest = {
 export type MarkdownContentProps = {
 	content: string;
 	onPreviewHtml: (input: HtmlPreviewRequest) => void;
+	attachments?: Attachment[];
+	runtimeUrl?: string;
+	onImageClick?: (src: string, alt: string) => void;
 };
 
 type Segment =
@@ -45,9 +53,10 @@ function splitSegments(content: string): Segment[] {
 type TextBlockProps = {
 	value: string;
 	onPreviewHtml: (input: HtmlPreviewRequest) => void;
+	onImageClick?: (src: string, alt: string) => void;
 };
 
-function TextBlock({ value, onPreviewHtml }: TextBlockProps) {
+function TextBlock({ value, onPreviewHtml, onImageClick }: TextBlockProps) {
 	const components = useMemo<Components>(
 		() => ({
 			// 自定义链接渲染：添加 target="_blank" 和安全属性
@@ -56,14 +65,31 @@ function TextBlock({ value, onPreviewHtml }: TextBlockProps) {
 					{children}
 				</a>
 			),
-			// 自定义图片渲染：支持点击预览（未来扩展）
+			// 自定义图片渲染：支持点击预览
 			// biome-ignore lint/a11y/useAltText: alt is passed from markdown content
 			img: ({ src, alt, ...props }) => (
 				<img
 					src={src}
 					alt={alt || ""}
 					loading="lazy"
-					style={{ maxWidth: "100%", height: "auto" }}
+					style={{
+						maxWidth: "100%",
+						height: "auto",
+						borderRadius: "8px",
+						cursor: onImageClick ? "pointer" : "default",
+					}}
+					onClick={() => {
+						if (onImageClick && src) {
+							onImageClick(src, alt || "");
+						}
+					}}
+					onKeyDown={(e) => {
+						if (onImageClick && src && (e.key === "Enter" || e.key === " ")) {
+							onImageClick(src, alt || "");
+						}
+					}}
+					role={onImageClick ? "button" : undefined}
+					tabIndex={onImageClick ? 0 : undefined}
 					{...props}
 				/>
 			),
@@ -98,7 +124,7 @@ function TextBlock({ value, onPreviewHtml }: TextBlockProps) {
 				);
 			},
 		}),
-		[onPreviewHtml],
+		[onPreviewHtml, onImageClick],
 	);
 
 	return (
@@ -116,18 +142,84 @@ function TextBlock({ value, onPreviewHtml }: TextBlockProps) {
 export function MarkdownContent({
 	content,
 	onPreviewHtml,
+	attachments = [],
+	runtimeUrl,
+	onImageClick,
 }: MarkdownContentProps) {
-	const segments = useMemo(() => splitSegments(content), [content]);
+	// 提取附件标签并替换为占位符
+	const { cleanContent, attachmentUids, inlineImages } = useMemo(
+		() => extractAttachmentTags(content, runtimeUrl),
+		[content, runtimeUrl],
+	);
+
+	const segments = useMemo(() => splitSegments(cleanContent), [cleanContent]);
+
+	// 处理后渲染附件占位符
+	const processedSegments = useMemo(() => {
+		return segments.map((segment) => {
+			if (segment.type === "text") {
+				const processed = renderAttachmentPlaceholders(
+					segment.value,
+					attachmentUids,
+					inlineImages,
+					attachments,
+					runtimeUrl,
+				);
+				return { ...segment, value: processed };
+			}
+			return segment;
+		});
+	}, [segments, attachmentUids, inlineImages, attachments, runtimeUrl]);
 
 	return (
 		<div className="message-markdown">
-			{segments.map((segment, index) => {
+			{processedSegments.map((segment, index) => {
 				if (segment.type === "text") {
+					// 如果包含附件 HTML，使用 dangerouslySetInnerHTML
+					if (segment.value.includes("runtime-chat-image")) {
+						return (
+							<div
+								key={`${index}-text-${segment.value.slice(0, 16)}`}
+								className="markdown-body"
+								// biome-ignore lint/security/noDangerouslySetInnerHtml: 由 renderAttachmentPlaceholders 生成的安全 HTML
+								dangerouslySetInnerHTML={{ __html: segment.value }}
+								onClick={(e) => {
+									const target = e.target as HTMLElement;
+									if (
+										target.tagName === "IMG" &&
+										target.classList.contains("runtime-chat-image")
+									) {
+										const src = target.getAttribute("src");
+										const alt = target.getAttribute("alt");
+										if (onImageClick && src) {
+											onImageClick(src, alt || "");
+										}
+									}
+								}}
+								onKeyDown={(e) => {
+									const target = e.target as HTMLElement;
+									if (
+										target.tagName === "IMG" &&
+										target.classList.contains("runtime-chat-image") &&
+										(e.key === "Enter" || e.key === " ")
+									) {
+										const src = target.getAttribute("src");
+										const alt = target.getAttribute("alt");
+										if (onImageClick && src) {
+											onImageClick(src, alt || "");
+										}
+									}
+								}}
+								role="presentation"
+							/>
+						);
+					}
 					return (
 						<TextBlock
 							key={`${index}-text-${segment.value.slice(0, 16)}`}
 							value={segment.value}
 							onPreviewHtml={onPreviewHtml}
+							onImageClick={onImageClick}
 						/>
 					);
 				}

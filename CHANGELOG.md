@@ -1,10 +1,10 @@
-## v3.5.2 Undefined Chat 莫兰迪青蓝色系重写与功能对等
+## v3.5.2 Undefined Chat 莫兰迪橙色系重写与功能对等
 
-本版本完成 Undefined Chat 原生聊天客户端的全面重写，从暖橙色系重新设计为莫兰迪青蓝色系（Morandi Teal-Blue），与 WebUI 保持视觉一致性，100% 移植 WebUI webchat 的所有核心功能，并针对桌面和 Android 平台进行原生优化。
+本版本完成 Undefined Chat 原生聊天客户端的全面重写，采用莫兰迪橙色系（Morandi Orange）设计，与 WebUI 保持视觉一致性，100% 移植 WebUI webchat 的所有核心功能，并针对桌面和 Android 平台进行原生优化。
 
 ### Undefined Chat 重写
 
-- 统一配色系统。采用莫兰迪青蓝色系设计，浅色模式主色 `#5b9aa0`、深色模式主色 `#6ba8ae`，与 WebUI 视觉语言完全一致；重写所有组件样式，支持浅色/深色模式切换，自动跟随系统主题。
+- 统一配色系统。采用莫兰迪橙色系设计，浅色/深色模式主色 `#d97757`，与 WebUI 视觉语言完全一致；重写所有组件样式，支持浅色/深色模式切换，自动跟随系统主题。
 - 100% 功能对等。完整移植 WebUI webchat 的会话管理、消息历史分页（cursor-based）、Markdown 渲染（表格、引用、列表）、代码高亮（highlight.js）、图片内联（< 12MB）、附件上传/下载、工具调用块（层级展示）、事件流（SSE + JSON fallback）、命令面板、消息引用、HTML 预览、图片查看器、代码块折叠（> 8 行）、自动滚动控制、国际化（中英文）等所有核心功能。
 - 原生平台优化。桌面端支持完整快捷键（Ctrl/Cmd+K、Ctrl/Cmd+N、Ctrl/Cmd+Enter）、HTML 预览使用独立窗口；Android 支持后台生命周期恢复、连接配置页、HTML 预览使用独立 Activity；所有平台使用系统凭据管理器安全存储 API Key（macOS Keychain / Windows Credential Manager / Linux Secret Service）。
 - 代码重构与可维护性提升。重写所有 React 组件、状态管理和样式文件，统一命名规范，提升代码可读性和可维护性；优化性能，减少不必要的重渲染；完善类型定义，提升类型安全。

@@ -154,6 +154,16 @@
 	font-size: 11px;
 }
 
+.runtime-tool-block summary .runtime-tool-kind {
+	min-width: 44px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	text-align: right;
+	white-space: nowrap;
+	color: var(--text-secondary);
+	font-size: 11px;
+}
+
 .runtime-tool-block.running summary .runtime-tool-status {
 	color: var(--warning);
 }
@@ -289,5 +299,40 @@
 }
 
 .runtime-tool-children .runtime-tool-block:last-child {
+	margin-bottom: 0;
+}
+
+/* ========================================
+   统一消息时间线（正文 + 工具块按序穿插）
+   ======================================== */
+.message-timeline-content {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	min-width: 0;
+	max-width: 100%;
+}
+
+/* 工具块内部的子消息（轻量纯文本展示） */
+.runtime-tool-message {
+	min-width: 0;
+	max-width: 100%;
+	border: 1px solid color-mix(in srgb, var(--tool-accent, var(--accent-color)) 18%, var(--border-color));
+	border-left: 3px solid color-mix(in srgb, var(--tool-accent, var(--accent-color)) 48%, var(--border-color));
+	border-radius: var(--radius-sm);
+	padding: 8px 10px;
+	background: color-mix(in srgb, var(--bg-card) 72%, var(--bg-app));
+	color: var(--text-secondary);
+	font-size: 12.5px;
+	line-height: 1.5;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.runtime-tool-message > *:first-child {
+	margin-top: 0;
+}
+
+.runtime-tool-message > *:last-child {
 	margin-bottom: 0;
 }

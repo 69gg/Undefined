@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isJobRunning } from "../chat-store/store";
 import {
 	type HtmlPreviewRequest,
@@ -12,6 +12,10 @@ import type {
 	HistoryItem,
 } from "../runtime-client/types";
 import { AttachmentCard } from "./AttachmentCard";
+import {
+	MessageTimelineContent,
+	hasRenderableTimeline,
+} from "./MessageTimelineContent";
 
 export type MessageTimelineProps = {
 	activeJob: ChatJob | null;
@@ -24,6 +28,7 @@ export type MessageTimelineProps = {
 	onShortcutClick?: (prompt: string) => void;
 	onAddReference?: (messageId: string, quote: string) => void;
 	onOpenImage?: (src: string, alt: string) => void;
+	runtimeUrl?: string;
 };
 
 const WINDOW_SIZE = 64;
@@ -60,12 +65,23 @@ export function MessageTimeline({
 	onShortcutClick,
 	onAddReference,
 	onOpenImage,
+	runtimeUrl,
 }: MessageTimelineProps) {
 	const visibleItems = items.slice(-WINDOW_SIZE);
 	const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
+	const timelineRef = useRef<HTMLDivElement>(null);
 
 	const isCurrentlyThinking = isJobRunning(activeJob);
 	const hasEventsOrActiveJob = Boolean(activeJob || events.length > 0);
+
+	// 自动滚动到底部
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 作为触发器使用
+	useEffect(() => {
+		const el = timelineRef.current;
+		if (el) {
+			el.scrollTop = el.scrollHeight;
+		}
+	}, [visibleItems.length, activeJob?.jobId]);
 
 	const shortcuts = [
 		{
@@ -96,7 +112,7 @@ export function MessageTimeline({
 
 	return (
 		<section className="timeline-shell">
-			<div aria-label="消息" className="timeline" role="log">
+			<div aria-label="消息" className="timeline" role="log" ref={timelineRef}>
 				{visibleItems.length === 0 && !activeJob ? (
 					<div className="welcome-container">
 						<div className="welcome-logo">
@@ -186,10 +202,32 @@ export function MessageTimeline({
 								</div>
 							) : null}
 
-							<MarkdownContent
-								content={item.content}
-								onPreviewHtml={onPreviewHtml}
-							/>
+							{(() => {
+								const timeline = item.webchat?.timeline;
+								// bot 消息含工具调用/分段文本时，按统一时间线渲染（正文与工具块按序穿插，避免正文重复）
+								if (item.role === "bot" && hasRenderableTimeline(timeline)) {
+									return (
+										<MessageTimelineContent
+											timeline={timeline ?? []}
+											fallbackContent={item.content}
+											attachments={item.attachments}
+											runtimeUrl={runtimeUrl}
+											onPreviewHtml={onPreviewHtml}
+											onImageClick={onOpenImage}
+										/>
+									);
+								}
+								// 普通消息：直接渲染正文
+								return (
+									<MarkdownContent
+										content={item.content}
+										onPreviewHtml={onPreviewHtml}
+										attachments={item.attachments}
+										runtimeUrl={runtimeUrl}
+										onImageClick={onOpenImage}
+									/>
+								);
+							})()}
 
 							{item.attachments.length > 0 ? (
 								<div

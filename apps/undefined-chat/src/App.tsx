@@ -336,6 +336,7 @@ export function App() {
 						}
 					}}
 					onOpenImage={openImage}
+					runtimeUrl={state.runtimeConfig?.runtimeUrl}
 				/>
 
 				{/* 输入框 */}

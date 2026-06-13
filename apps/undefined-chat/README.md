@@ -6,7 +6,7 @@ Undefined Chat 是独立原生优先 WebChat 客户端，位于 `apps/undefined-
 
 ## ✨ 功能特性
 
-Undefined Chat 基于莫兰迪青蓝色系（Morandi Teal-Blue）设计，与 WebUI 保持视觉一致性，100% 移植 WebUI webchat 的所有核心功能，并针对原生平台进行优化。
+Undefined Chat 基于莫兰迪橙色系（Morandi Orange）设计，与 WebUI 保持视觉一致性，100% 移植 WebUI webchat 的所有核心功能，并针对原生平台进行优化。
 
 ### P0 核心功能
 

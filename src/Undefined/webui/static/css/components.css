@@ -984,59 +984,19 @@
   min-width: 0;
   max-width: 100%;
   margin: 0.5em 0;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  padding: 0.3em 0.9em;
+  border-left: 3px solid color-mix(in srgb, var(--accent) 60%, var(--border-color));
   background: color-mix(in srgb, var(--bg-app) 86%, var(--bg-card));
-  overflow: hidden;
-}
-.runtime-quote-block summary {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 32px;
-  padding: 4px 10px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 650;
-  cursor: pointer;
-  list-style: none;
-  background: color-mix(in srgb, var(--bg-card) 62%, transparent);
-}
-.runtime-quote-block summary::-webkit-details-marker {
-  display: none;
-}
-.runtime-quote-block summary::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: rotate(-45deg);
-  transition: transform 0.16s ease;
-  opacity: 0.72;
-}
-.runtime-quote-block[open] summary::before {
-  transform: rotate(45deg);
-}
-.runtime-quote-body {
-  max-height: min(28vh, 220px);
-  padding: 8px 10px;
-  overflow: auto;
-  scrollbar-gutter: stable;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.55;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.runtime-quote-body > *:first-child {
+.runtime-quote-block > *:first-child {
   margin-top: 0;
 }
-.runtime-quote-body > *:last-child {
+.runtime-quote-block > *:last-child {
   margin-bottom: 0;
 }
 .runtime-chat-content.markdown table {

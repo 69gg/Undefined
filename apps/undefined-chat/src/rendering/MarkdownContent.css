@@ -106,13 +106,11 @@
 	margin-bottom: 0;
 }
 
-/* 引用块内的代码块应用换行和折叠 */
+/* 引用块内的代码块自动换行，不折叠/限高 */
 .markdown-body blockquote pre {
 	overflow-x: hidden;
-	overflow-y: auto;
 	white-space: pre-wrap;
 	word-wrap: break-word;
-	max-height: 200px; /* 降低高度限制，更早折叠 */
 }
 
 .markdown-body blockquote code {

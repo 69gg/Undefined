@@ -2726,12 +2726,7 @@
                 parser && typeof parser.parse === "function"
                     ? parser.parse(tokens || [])
                     : "";
-            return (
-                `<details class="runtime-quote-block">` +
-                `<summary><span>${escapeHtml(t("runtime.quote"))}</span></summary>` +
-                `<div class="runtime-quote-body">${body}</div>` +
-                `</details>`
-            );
+            return `<blockquote class="runtime-quote-block">${body}</blockquote>`;
         };
         renderer.link = ({ href, title, tokens }) => {
             const parser = renderer.parser || marked.Parser;
