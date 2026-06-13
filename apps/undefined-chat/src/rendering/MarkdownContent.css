@@ -95,6 +95,7 @@
 	border-left: 3px solid var(--border-color, #d1d5db);
 	color: var(--text-secondary, #6b7280);
 	background: var(--bg-subtle, #f9fafb);
+	overflow: hidden; /* 防止内容溢出 */
 }
 
 .markdown-body blockquote > *:first-child {
@@ -103,6 +104,20 @@
 
 .markdown-body blockquote > *:last-child {
 	margin-bottom: 0;
+}
+
+/* 引用块内的代码块应用换行和折叠 */
+.markdown-body blockquote pre {
+	overflow-x: hidden;
+	overflow-y: auto;
+	white-space: pre-wrap;
+	word-wrap: break-word;
+	max-height: 400px;
+}
+
+.markdown-body blockquote code {
+	white-space: pre-wrap;
+	word-wrap: break-word;
 }
 
 /* 表格 */
