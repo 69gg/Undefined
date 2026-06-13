@@ -50,6 +50,7 @@ import type {
 	RuntimeSseEvent,
 	RuntimeSseStatus,
 	SendMessageInput,
+	SubcommandInfo,
 	ToolCallSnapshot,
 	UploadAttachmentInput,
 } from "./types";
@@ -344,11 +345,31 @@ function normalizeHistoryItem(value: unknown): HistoryItem {
 	};
 }
 
-function normalizeCommand(value: unknown): CommandInfo {
+function normalizeSubcommand(value: unknown): SubcommandInfo {
 	const raw = record(value);
 	return {
 		name: text(raw.name),
+		trigger: text(raw.trigger),
 		description: text(raw.description),
+		args: text(raw.args),
+		usage: text(raw.usage),
+		available: bool(raw.available, true),
+	};
+}
+
+function normalizeCommand(value: unknown): CommandInfo {
+	const raw = record(value);
+	const name = text(raw.name);
+	return {
+		name,
+		trigger: text(raw.trigger) || `/${name}`,
+		description: text(raw.description),
+		usage: text(raw.usage),
+		example: text(raw.example),
+		aliases: arrayStrings(raw.aliases),
+		aliasTriggers: arrayStrings(field(raw, "aliasTriggers", "alias_triggers")),
+		subcommands: arrayRecords(raw.subcommands).map(normalizeSubcommand),
+		available: bool(raw.available, true),
 	};
 }
 

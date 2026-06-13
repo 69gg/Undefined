@@ -408,4 +408,67 @@ describe("createTauriRuntimeClient", () => {
 			cursor: null,
 		});
 	});
+
+	test("normalizes commands with subcommands and snake_case alias triggers", async () => {
+		vi.mocked(invoke).mockResolvedValueOnce({
+			status: 200,
+			ok: true,
+			body: {
+				commands: [
+					{
+						name: "conv",
+						trigger: "/conv",
+						description: "管理会话",
+						usage: "/conv <子命令>",
+						example: "/conv new 调试",
+						aliases: ["c"],
+						alias_triggers: ["/c"],
+						available: true,
+						subcommands: [
+							{
+								name: "new",
+								trigger: "/conv new",
+								description: "新建会话",
+								args: "[标题]",
+								usage: "/conv new [标题]",
+								available: true,
+							},
+						],
+					},
+					{
+						// 缺省字段应回退：无 trigger → /name、无 available → true
+						name: "ping",
+						description: "测试连通",
+					},
+				],
+			},
+		});
+
+		const client = createTauriRuntimeClient();
+		const response = await client.listCommands();
+
+		expect(invoke).toHaveBeenCalledWith("list_commands");
+
+		const conv = response.commands[0];
+		expect(conv).toMatchObject({
+			name: "conv",
+			trigger: "/conv",
+			aliases: ["c"],
+			aliasTriggers: ["/c"],
+			available: true,
+		});
+		expect(conv?.subcommands[0]).toMatchObject({
+			name: "new",
+			trigger: "/conv new",
+			args: "[标题]",
+			usage: "/conv new [标题]",
+			available: true,
+		});
+
+		const ping = response.commands[1];
+		expect(ping?.trigger).toBe("/ping");
+		expect(ping?.available).toBe(true);
+		expect(ping?.subcommands).toEqual([]);
+		expect(ping?.aliasTriggers).toEqual([]);
+	});
 });

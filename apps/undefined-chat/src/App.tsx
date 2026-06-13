@@ -8,6 +8,8 @@ import {
 } from "react";
 import { createChatStore, isJobRunning } from "./chat-store/store";
 import { ConversationList } from "./conversation-list/ConversationList";
+import { useMediaQuery } from "./hooks/useMediaQuery";
+import { ImageViewerModal } from "./image-viewer/ImageViewerModal";
 import { useImageViewer } from "./image-viewer/useImageViewer";
 import { MessageComposer } from "./message-composer/MessageComposer";
 import { MessageTimeline } from "./message-timeline/MessageTimeline";
@@ -19,7 +21,7 @@ export function App() {
 	const { effectiveTheme } = useTheme();
 	const client = useMemo(() => createTauriRuntimeClient(), []);
 	const store = useMemo(() => createChatStore({ client }), [client]);
-	const { openImage } = useImageViewer(store);
+	const { openImage, closeImage } = useImageViewer(store);
 	const state = useSyncExternalStore(
 		store.subscribe,
 		store.getSnapshot,
@@ -30,6 +32,7 @@ export function App() {
 	const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 	const [isMobileSidebarActive, setIsMobileSidebarActive] = useState(false);
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+	const isMobile = useMediaQuery("(max-width: 768px)");
 
 	const selectedConversationId =
 		state.selectedConversationId ?? state.conversations[0]?.id ?? null;
@@ -183,11 +186,11 @@ export function App() {
 				<header className="chat-topbar">
 					<div className="topbar-left">
 						{/* 侧边栏折叠时的展示按钮，或移动端的菜单按钮 */}
-						{isSidebarCollapsed || window.innerWidth <= 768 ? (
+						{isSidebarCollapsed || isMobile ? (
 							<button
 								className="icon-button"
 								onClick={() => {
-									if (window.innerWidth <= 768) {
+									if (isMobile) {
 										setIsMobileSidebarActive(true);
 									} else {
 										setIsSidebarCollapsed(false);
@@ -387,6 +390,8 @@ export function App() {
 					<p className="app-error">{state.sendError}</p>
 				) : null}
 			</section>
+
+			<ImageViewerModal imageViewer={state.imageViewer} onClose={closeImage} />
 		</main>
 	);
 }

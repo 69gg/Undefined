@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
+import { commandInfo, subcommandInfo } from "../test-fixtures";
 import { MessageComposer } from "./MessageComposer";
 
 describe("MessageComposer", () => {
@@ -12,14 +13,13 @@ describe("MessageComposer", () => {
 			<MessageComposer
 				attachmentQueue={[]}
 				commandSuggestions={[
-					{
-						name: "help",
-						description: "显示帮助",
-					},
-					{
+					commandInfo({ name: "help", description: "显示帮助" }),
+					commandInfo({
 						name: "version",
+						trigger: "/version",
 						description: "显示版本",
-					},
+						usage: "/version",
+					}),
 				]}
 				disabled={false}
 				draft=""
@@ -35,9 +35,11 @@ describe("MessageComposer", () => {
 		const editor = screen.getByLabelText("消息输入");
 		await userEvent.type(editor, "/he");
 
-		// commandSuggestions 是根据名称过滤的，使用 name 而不是显示的 /name
-		expect(screen.getByText("help")).toBeTruthy();
-		expect(screen.getByText("显示帮助")).toBeTruthy();
+		// 命令面板展示 /help（matchLabel 带前导斜杠）及其描述
+		expect(screen.getByText("显示帮助")).toBeInTheDocument();
+		const options = screen.getAllByRole("option");
+		expect(options).toHaveLength(1);
+		expect(options[0]).toHaveTextContent("/help");
 
 		await userEvent.type(editor, "{Shift>}{Enter}{/Shift}");
 		expect(onDraftChange).toHaveBeenLastCalledWith("/he\n");
@@ -46,6 +48,60 @@ describe("MessageComposer", () => {
 		await userEvent.clear(editor);
 		await userEvent.type(editor, "hello{Enter}");
 		expect(onSend).toHaveBeenCalledOnce();
+	});
+
+	test("进入带子命令的命令时展示子命令提示，Tab 补全当前项", async () => {
+		const onDraftChange = vi.fn();
+
+		render(
+			<MessageComposer
+				attachmentQueue={[]}
+				commandSuggestions={[
+					commandInfo({ name: "help", description: "显示帮助" }),
+					commandInfo({
+						name: "conv",
+						trigger: "/conv",
+						description: "管理会话",
+						usage: "/conv <子命令>",
+						subcommands: [
+							subcommandInfo({
+								name: "new",
+								trigger: "/conv new",
+								usage: "/conv new [标题]",
+								description: "新建会话",
+							}),
+							subcommandInfo({
+								name: "list",
+								trigger: "/conv list",
+								usage: "/conv list",
+								args: "",
+								description: "列出会话",
+							}),
+						],
+					}),
+				]}
+				disabled={false}
+				draft=""
+				references={[]}
+				onAddAttachment={vi.fn()}
+				onClearAttachment={vi.fn()}
+				onClearReference={vi.fn()}
+				onDraftChange={onDraftChange}
+				onSend={vi.fn()}
+			/>,
+		);
+
+		const editor = screen.getByLabelText("消息输入");
+		await userEvent.type(editor, "/conv ");
+
+		expect(screen.getByText("选择子命令")).toBeInTheDocument();
+		const options = screen.getAllByRole("option");
+		expect(options[0]).toHaveTextContent("/conv new");
+		expect(options[1]).toHaveTextContent("/conv list");
+
+		// Tab 补全到当前选中的子命令（带参数 → 末尾补空格）
+		await userEvent.keyboard("{Tab}");
+		expect(onDraftChange).toHaveBeenLastCalledWith("/conv new ");
 	});
 
 	test("renders attachment queue and references with clear actions", async () => {

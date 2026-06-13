@@ -1,238 +1,124 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
 import { describe, expect, test, vi } from "vitest";
-import type { CommandInfo } from "../runtime-client/types";
+import { commandInfo, subcommandInfo } from "../test-fixtures";
 import { CommandPalette } from "./CommandPalette";
+import { buildCommandContext, computeMatches } from "./command-context";
+
+const help = commandInfo({
+	name: "help",
+	description: "显示帮助",
+	usage: "/help",
+	aliases: ["h"],
+	aliasTriggers: ["/h"],
+});
+const conv = commandInfo({
+	name: "conv",
+	trigger: "/conv",
+	description: "管理会话",
+	usage: "/conv <子命令>",
+	subcommands: [
+		subcommandInfo({
+			name: "new",
+			trigger: "/conv new",
+			usage: "/conv new [标题]",
+			description: "新建会话",
+		}),
+		subcommandInfo({
+			name: "list",
+			trigger: "/conv list",
+			usage: "/conv list",
+			args: "",
+			description: "列出会话",
+		}),
+	],
+});
+const clear = commandInfo({
+	name: "clear",
+	trigger: "/clear",
+	description: "清空会话",
+	usage: "/clear",
+});
+const commands = [help, conv, clear];
+
+// 借助纯函数生成与运行时一致的候选项
+const commandMatches = computeMatches(commands, buildCommandContext("/", 1));
+const subMatches = computeMatches(commands, buildCommandContext("/conv ", 6));
+
+function renderPalette(
+	props: Partial<ComponentProps<typeof CommandPalette>> = {},
+) {
+	return render(
+		<CommandPalette
+			open
+			matches={commandMatches}
+			activeIndex={0}
+			mode="command"
+			helpCommand={null}
+			onSelect={vi.fn()}
+			{...props}
+		/>,
+	);
+}
 
 describe("CommandPalette", () => {
-	const mockCommands: CommandInfo[] = [
-		{ name: "help", description: "显示帮助信息" },
-		{ name: "version", description: "显示版本号" },
-		{ name: "history", description: "查看历史记录" },
-		{ name: "clear", description: "清空会话" },
-	];
-
-	test("renders nothing when closed", () => {
-		const { container } = render(
-			<CommandPalette
-				open={false}
-				query=""
-				commands={mockCommands}
-				activeIndex={0}
-				onSelect={vi.fn()}
-				onClose={vi.fn()}
-				onNavigate={vi.fn()}
-			/>,
-		);
-
+	test("关闭时不渲染", () => {
+		const { container } = renderPalette({ open: false });
 		expect(container.firstChild).toBeNull();
 	});
 
-	test("renders nothing when no matches", () => {
-		const { container } = render(
-			<CommandPalette
-				open={true}
-				query="xyz"
-				commands={mockCommands}
-				activeIndex={0}
-				onSelect={vi.fn()}
-				onClose={vi.fn()}
-				onNavigate={vi.fn()}
-			/>,
-		);
-
+	test("无候选且无帮助命令时不渲染", () => {
+		const { container } = renderPalette({ matches: [], helpCommand: null });
 		expect(container.firstChild).toBeNull();
 	});
 
-	test("renders all commands when query is empty", () => {
-		render(
-			<CommandPalette
-				open={true}
-				query=""
-				commands={mockCommands}
-				activeIndex={0}
-				onSelect={vi.fn()}
-				onClose={vi.fn()}
-				onNavigate={vi.fn()}
-			/>,
-		);
-
-		expect(screen.getByText("/help")).toBeInTheDocument();
-		expect(screen.getByText("/version")).toBeInTheDocument();
-		expect(screen.getByText("/history")).toBeInTheDocument();
-		expect(screen.getByText("/clear")).toBeInTheDocument();
+	test("渲染命令候选并显示命令模式提示", () => {
+		renderPalette();
+		const options = screen.getAllByRole("option");
+		expect(options).toHaveLength(3);
+		expect(options[0]).toHaveTextContent("/help");
+		expect(options[1]).toHaveTextContent("/conv");
+		expect(options[2]).toHaveTextContent("/clear");
+		expect(screen.getByText("输入以筛选命令")).toBeInTheDocument();
 	});
 
-	test("filters commands by query", () => {
-		render(
-			<CommandPalette
-				open={true}
-				query="he"
-				commands={mockCommands}
-				activeIndex={0}
-				onSelect={vi.fn()}
-				onClose={vi.fn()}
-				onNavigate={vi.fn()}
-			/>,
-		);
-
-		expect(screen.getByText("/help")).toBeInTheDocument();
-		expect(screen.queryByText("/version")).not.toBeInTheDocument();
+	test("高亮当前选中项", () => {
+		renderPalette({ activeIndex: 1 });
+		const options = screen.getAllByRole("option");
+		expect(options[0]).not.toHaveClass("active");
+		expect(options[1]).toHaveClass("active");
 	});
 
-	test("highlights active item", () => {
-		render(
-			<CommandPalette
-				open={true}
-				query=""
-				commands={mockCommands}
-				activeIndex={1}
-				onSelect={vi.fn()}
-				onClose={vi.fn()}
-				onNavigate={vi.fn()}
-			/>,
-		);
-
-		const items = screen.getAllByRole("option");
-		expect(items[0]).not.toHaveClass("active");
-		expect(items[1]).toHaveClass("active");
-	});
-
-	test("calls onSelect when clicking an item", async () => {
+	test("点击候选项回传对应 match", async () => {
 		const onSelect = vi.fn();
-
-		render(
-			<CommandPalette
-				open={true}
-				query=""
-				commands={mockCommands}
-				activeIndex={0}
-				onSelect={onSelect}
-				onClose={vi.fn()}
-				onNavigate={vi.fn()}
-			/>,
-		);
-
-		await userEvent.click(screen.getByText("/help"));
-		expect(onSelect).toHaveBeenCalledWith(mockCommands[0]);
+		renderPalette({ onSelect });
+		await userEvent.click(screen.getAllByRole("option")[1]);
+		expect(onSelect).toHaveBeenCalledWith(commandMatches[1]);
 	});
 
-	test("calls onNavigate on ArrowUp/ArrowDown", async () => {
-		const onNavigate = vi.fn();
-
-		render(
-			<CommandPalette
-				open={true}
-				query=""
-				commands={mockCommands}
-				activeIndex={0}
-				onSelect={vi.fn()}
-				onClose={vi.fn()}
-				onNavigate={onNavigate}
-			/>,
-		);
-
-		const palette = screen.getByRole("listbox");
-		palette.focus();
-
-		await userEvent.keyboard("{ArrowDown}");
-		expect(onNavigate).toHaveBeenCalledWith(1);
-
-		await userEvent.keyboard("{ArrowUp}");
-		expect(onNavigate).toHaveBeenCalledWith(-1);
+	test("子命令模式渲染子命令候选与提示", () => {
+		renderPalette({ matches: subMatches, mode: "subcommand" });
+		const options = screen.getAllByRole("option");
+		expect(options[0]).toHaveTextContent("/conv new");
+		expect(options[1]).toHaveTextContent("/conv list");
+		expect(screen.getByText("选择子命令")).toBeInTheDocument();
 	});
 
-	test("calls onSelect on Enter", async () => {
-		const onSelect = vi.fn();
-
-		render(
-			<CommandPalette
-				open={true}
-				query=""
-				commands={mockCommands}
-				activeIndex={0}
-				onSelect={onSelect}
-				onClose={vi.fn()}
-				onNavigate={vi.fn()}
-			/>,
-		);
-
-		const palette = screen.getByRole("listbox");
-		palette.focus();
-
-		await userEvent.keyboard("{Enter}");
-		expect(onSelect).toHaveBeenCalledWith(mockCommands[0]);
-	});
-
-	test("calls onClose on Escape", async () => {
-		const onClose = vi.fn();
-
-		render(
-			<CommandPalette
-				open={true}
-				query=""
-				commands={mockCommands}
-				activeIndex={0}
-				onSelect={vi.fn()}
-				onClose={onClose}
-				onNavigate={vi.fn()}
-			/>,
-		);
-
-		const palette = screen.getByRole("listbox");
-		palette.focus();
-
-		await userEvent.keyboard("{Escape}");
-		expect(onClose).toHaveBeenCalledOnce();
-	});
-
-	test("sorts commands by score", () => {
-		const commands: CommandInfo[] = [
-			{ name: "test", description: "完全匹配" },
-			{ name: "testing", description: "前缀匹配" },
-			{ name: "attest", description: "包含匹配" },
-		];
-
-		render(
-			<CommandPalette
-				open={true}
-				query="test"
-				commands={commands}
-				activeIndex={0}
-				onSelect={vi.fn()}
-				onClose={vi.fn()}
-				onNavigate={vi.fn()}
-			/>,
-		);
-
-		const items = screen.getAllByRole("option");
-		// 完全匹配应该排第一
-		expect(items[0]).toHaveTextContent("/test");
-		// 前缀匹配应该排第二
-		expect(items[1]).toHaveTextContent("/testing");
-		// 包含匹配应该排第三
-		expect(items[2]).toHaveTextContent("/attest");
-	});
-
-	test("limits results to MAX_MATCHES (8)", () => {
-		const manyCommands: CommandInfo[] = Array.from({ length: 15 }, (_, i) => ({
-			name: `cmd${i}`,
-			description: `命令 ${i}`,
-		}));
-
-		render(
-			<CommandPalette
-				open={true}
-				query=""
-				commands={manyCommands}
-				activeIndex={0}
-				onSelect={vi.fn()}
-				onClose={vi.fn()}
-				onNavigate={vi.fn()}
-			/>,
-		);
-
-		const items = screen.getAllByRole("option");
-		expect(items).toHaveLength(8);
+	test("命令无子命令时渲染帮助卡片", () => {
+		const { container } = renderPalette({
+			matches: [],
+			mode: "subcommand",
+			helpCommand: help,
+		});
+		expect(screen.queryAllByRole("option")).toHaveLength(0);
+		expect(screen.getByText("命令帮助")).toBeInTheDocument();
+		expect(screen.getByText("显示帮助")).toBeInTheDocument();
+		expect(
+			screen.getByText("该命令没有子命令，直接发送即可。"),
+		).toBeInTheDocument();
+		expect(
+			container.querySelector(".runtime-chat-command-help-name")?.textContent,
+		).toBe("/help");
 	});
 });

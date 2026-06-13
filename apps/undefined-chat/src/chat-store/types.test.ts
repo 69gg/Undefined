@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { commandInfo } from "../test-fixtures";
 import { chatReducer, createInitialChatState } from "./store";
 import type { ChatState, ToolBlock } from "./types";
 
@@ -77,9 +78,9 @@ describe("chat-store types extension", () => {
 		let state = createInitialChatState();
 		// 添加一些命令用于导航测试
 		state.commands = [
-			{ name: "help", description: "帮助" },
-			{ name: "search", description: "搜索" },
-			{ name: "clear", description: "清除" },
+			commandInfo({ name: "help", description: "帮助" }),
+			commandInfo({ name: "search", description: "搜索" }),
+			commandInfo({ name: "clear", description: "清除" }),
 		];
 
 		// 打开命令面板

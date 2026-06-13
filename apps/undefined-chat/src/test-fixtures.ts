@@ -5,11 +5,44 @@ import type {
 	AttachmentPreviewResult,
 	ChatEvent,
 	ChatJob,
+	CommandInfo,
 	Conversation,
 	EventStreamSubscription,
 	HistoryItem,
 	RuntimeClient,
+	SubcommandInfo,
 } from "./runtime-client/types";
+
+export function subcommandInfo(
+	overrides: Partial<SubcommandInfo> = {},
+): SubcommandInfo {
+	return {
+		name: "new",
+		trigger: "/conv new",
+		description: "新建会话",
+		args: "[标题]",
+		usage: "/conv new [标题]",
+		available: true,
+		...overrides,
+	};
+}
+
+export function commandInfo(overrides: Partial<CommandInfo> = {}): CommandInfo {
+	// trigger / usage / example 默认按 name 派生，避免遗漏导致搜索文本被默认值污染
+	const name = overrides.name ?? "help";
+	return {
+		name,
+		trigger: `/${name}`,
+		description: "显示帮助",
+		usage: `/${name}`,
+		example: `/${name}`,
+		aliases: [],
+		aliasTriggers: [],
+		subcommands: [],
+		available: true,
+		...overrides,
+	};
+}
 
 export function conversation(
 	overrides: Partial<Conversation> = {},
@@ -180,8 +213,43 @@ export function runtimeClientStub(
 		listCommands: vi.fn(async () => ({
 			commands: [
 				{
-					name: "/help",
+					name: "help",
+					trigger: "/help",
 					description: "显示帮助",
+					usage: "/help",
+					example: "/help",
+					aliases: ["h"],
+					aliasTriggers: ["/h"],
+					subcommands: [],
+					available: true,
+				},
+				{
+					name: "conv",
+					trigger: "/conv",
+					description: "管理会话",
+					usage: "/conv <子命令>",
+					example: "/conv new 调试",
+					aliases: [],
+					aliasTriggers: [],
+					available: true,
+					subcommands: [
+						{
+							name: "new",
+							trigger: "/conv new",
+							description: "新建会话",
+							args: "[标题]",
+							usage: "/conv new [标题]",
+							available: true,
+						},
+						{
+							name: "list",
+							trigger: "/conv list",
+							description: "列出会话",
+							args: "",
+							usage: "/conv list",
+							available: true,
+						},
+					],
 				},
 			],
 		})),

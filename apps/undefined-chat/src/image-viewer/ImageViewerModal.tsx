@@ -66,12 +66,18 @@ export function ImageViewerModal({
 			aria-modal="true"
 			aria-label="图片查看器"
 		>
-			<img
-				src={imageViewer.src}
-				alt={imageViewer.alt}
+			<figure
+				className="runtime-image-viewer-figure"
 				onClick={(e) => e.stopPropagation()}
 				onKeyDown={(e) => e.stopPropagation()}
-			/>
+			>
+				<img src={imageViewer.src} alt={imageViewer.alt} />
+				{imageViewer.alt ? (
+					<figcaption className="runtime-image-viewer-caption">
+						{imageViewer.alt}
+					</figcaption>
+				) : null}
+			</figure>
 			<button
 				className="image-viewer-close-button"
 				onClick={(e) => {

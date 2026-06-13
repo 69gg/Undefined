@@ -85,25 +85,87 @@ export function MessageTimeline({
 
 	const shortcuts = [
 		{
-			icon: "🔍",
+			icon: (
+				<svg
+					aria-hidden="true"
+					fill="none"
+					height="20"
+					stroke="currentColor"
+					strokeLinecap="round"
+					strokeLinejoin="round"
+					strokeWidth="2"
+					viewBox="0 0 24 24"
+					width="20"
+				>
+					<circle cx="11" cy="11" r="8" />
+					<line x1="21" x2="16.65" y1="21" y2="16.65" />
+				</svg>
+			),
 			title: "今日新闻",
 			desc: "获取最新时事与突发热点",
 			prompt: "/search 搜索今日国内国际新闻热点",
 		},
 		{
-			icon: "❄️",
+			icon: (
+				<svg
+					aria-hidden="true"
+					fill="none"
+					height="20"
+					stroke="currentColor"
+					strokeLinecap="round"
+					strokeLinejoin="round"
+					strokeWidth="2"
+					viewBox="0 0 24 24"
+					width="20"
+				>
+					<circle cx="12" cy="12" r="10" />
+					<path d="M8 14s1.5 2 4 2 4-2 4-2" />
+					<line x1="9" x2="9.01" y1="9" y2="9" />
+					<line x1="15" x2="15.01" y1="9" y2="9" />
+				</svg>
+			),
 			title: "讲冷笑话",
 			desc: "来个冷笑话轻松幽默一下",
 			prompt: "给我讲个有创意的冷笑话吧",
 		},
 		{
-			icon: "📝",
+			icon: (
+				<svg
+					aria-hidden="true"
+					fill="none"
+					height="20"
+					stroke="currentColor"
+					strokeLinecap="round"
+					strokeLinejoin="round"
+					strokeWidth="2"
+					viewBox="0 0 24 24"
+					width="20"
+				>
+					<path d="M12 20h9" />
+					<path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+				</svg>
+			),
 			title: "文章润色",
 			desc: "帮你改进文章段落的措辞",
 			prompt: "请帮我润色以下这段文字，使其读起来更加专业、优雅：\n",
 		},
 		{
-			icon: "💻",
+			icon: (
+				<svg
+					aria-hidden="true"
+					fill="none"
+					height="20"
+					stroke="currentColor"
+					strokeLinecap="round"
+					strokeLinejoin="round"
+					strokeWidth="2"
+					viewBox="0 0 24 24"
+					width="20"
+				>
+					<polyline points="16 18 22 12 16 6" />
+					<polyline points="8 6 2 12 8 18" />
+				</svg>
+			),
 			title: "代码解释",
 			desc: "分析特定代码并给出优化方案",
 			prompt: "请帮我详细分析和解释以下这段代码：\n```python\n\n```",
@@ -187,7 +249,7 @@ export function MessageTimeline({
 								fontSize: "0.85rem",
 							}}
 						>
-							{item.role === "bot" ? "🤖" : "👤"}
+							{item.role === "bot" ? "U" : "你"}
 						</div>
 
 						{/* 消息气泡 */}

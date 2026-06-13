@@ -73,7 +73,11 @@ describe("chat store", () => {
 		expect(state.selectedConversationId).toBe("default");
 		expect(state.activeJobsByConversation.default?.jobId).toBe("job-running");
 		expect(state.historyByConversation.default?.items).toHaveLength(2);
-		expect(state.commands[0]?.name).toBe("/help");
+		expect(state.commands[0]?.name).toBe("help");
+		expect(state.commands[1]?.subcommands.map((item) => item.name)).toEqual([
+			"new",
+			"list",
+		]);
 		expect(client.getHistory).toHaveBeenCalledWith({
 			conversationId: "default",
 			limit: 50,

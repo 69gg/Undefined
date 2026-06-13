@@ -157,7 +157,7 @@
 @keyframes fadeInUp {
 	from {
 		opacity: 0;
-		transform: translateY(12px);
+		transform: translateY(8px);
 	}
 	to {
 		opacity: 1;
@@ -641,7 +641,10 @@ a:hover {
 }
 
 .shortcut-card .icon {
-	font-size: 1.4rem;
+	display: inline-flex;
+	align-items: center;
+	margin-bottom: 2px;
+	color: var(--primary);
 }
 
 .shortcut-card .title {
@@ -664,7 +667,7 @@ a:hover {
 	gap: 16px;
 	width: 100%;
 	padding: 24px 20px;
-	animation: fadeInUp 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+	animation: fadeInUp 0.2s ease-out;
 }
 
 /* 用户消息浅色背景 */
@@ -979,7 +982,7 @@ a:hover {
    Floating Input Composer
    ======================================== */
 .composer-wrapper {
-	padding: 0 20px 24px 20px;
+	padding: 0 20px max(24px, env(safe-area-inset-bottom)) 20px;
 	background: transparent;
 	position: relative;
 	z-index: 4;
@@ -1374,7 +1377,7 @@ a:hover {
 	}
 
 	.composer-wrapper {
-		padding: 0 10px 16px 10px;
+		padding: 0 10px max(16px, env(safe-area-inset-bottom)) 10px;
 	}
 }
 
@@ -1661,27 +1664,39 @@ a:hover {
    ======================================== */
 .runtime-chat-command-palette {
 	position: absolute;
-	bottom: calc(100% + 8px);
+	bottom: calc(100% + 10px);
 	left: 0;
 	right: 0;
+	z-index: 50;
+	display: grid;
+	gap: 4px;
+	max-height: min(360px, 46vh);
+	padding: 8px;
 	background: var(--bg-surface);
 	border: 1px solid var(--border-primary);
 	border-radius: var(--radius-sm);
 	box-shadow: var(--shadow-lg);
-	max-height: 320px;
 	overflow-y: auto;
-	z-index: 50;
-	animation: slideUpFadeIn 200ms cubic-bezier(0.4, 0, 0.2, 1);
+	animation: slideUpFadeIn 0.18s ease-out;
+}
+
+.runtime-chat-command-head {
+	padding: 4px 8px 2px;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--text-tertiary);
 }
 
 @keyframes slideUpFadeIn {
 	from {
 		opacity: 0;
-		transform: translateY(10px);
+		transform: translateY(8px) scale(0.99);
 	}
 	to {
 		opacity: 1;
-		transform: translateY(0);
+		transform: translateY(0) scale(1);
 	}
 }
 
@@ -1695,14 +1710,21 @@ a:hover {
 }
 
 .runtime-chat-command-item {
-	display: flex;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(140px, 38%);
 	align-items: center;
-	justify-content: space-between;
 	gap: 12px;
-	padding: 10px 14px;
+	width: 100%;
+	min-height: 56px;
+	padding: 8px 10px;
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
 	cursor: pointer;
-	transition: background 150ms ease, transform 100ms ease;
-	border-bottom: 1px solid transparent;
+	transition: border-color 0.14s ease, background 0.14s ease, transform 0.14s ease;
 }
 
 .runtime-chat-command-item:hover {
@@ -1710,16 +1732,12 @@ a:hover {
 }
 
 .runtime-chat-command-item.active {
-	background: var(--primary-subtle);
-	border-bottom-color: var(--border-subtle);
-}
-
-.runtime-chat-command-item:active {
-	transform: scale(0.98);
+	border-color: color-mix(in srgb, var(--accent) 26%, var(--border-primary));
+	background: color-mix(in srgb, var(--accent) 8%, transparent);
+	transform: translateX(2px);
 }
 
 .runtime-chat-command-main {
-	flex: 1;
 	min-width: 0;
 	display: flex;
 	flex-direction: column;
@@ -1744,15 +1762,106 @@ a:hover {
 }
 
 .runtime-chat-command-side {
-	flex-shrink: 0;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 4px;
+	text-align: right;
 }
 
 .runtime-chat-command-side code {
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 	font-size: 11px;
+	font-family: var(--font-mono);
 	padding: 2px 6px;
 	border-radius: 4px;
 	background: var(--bg-app);
 	border: 1px solid var(--border-subtle);
+	color: var(--text-tertiary);
+}
+
+.runtime-chat-command-meta {
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 10px;
+	color: var(--text-tertiary);
+}
+
+/* 无子命令时的帮助卡片 */
+.runtime-chat-command-help {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 12px 14px;
+}
+
+.runtime-chat-command-help-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.runtime-chat-command-help-name {
+	font-size: 14px;
+	font-weight: 600;
+	font-family: var(--font-mono);
+	color: var(--primary);
+}
+
+.runtime-chat-command-help-kicker {
+	font-size: 10px;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--text-tertiary);
+}
+
+.runtime-chat-command-help-desc {
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--text-secondary);
+}
+
+.runtime-chat-command-help-grid {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.runtime-chat-command-help-row {
+	display: grid;
+	grid-template-columns: 48px minmax(0, 1fr);
+	align-items: center;
+	gap: 10px;
+}
+
+.runtime-chat-command-help-key {
+	font-size: 11px;
+	color: var(--text-tertiary);
+}
+
+.runtime-chat-command-help-val {
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 11px;
+	font-family: var(--font-mono);
+	padding: 2px 6px;
+	border-radius: 4px;
+	background: var(--bg-app);
+	border: 1px solid var(--border-subtle);
+	color: var(--text-secondary);
+}
+
+.runtime-chat-command-help-note {
+	font-size: 11px;
 	color: var(--text-tertiary);
 }
 
@@ -1997,29 +2106,51 @@ a:hover {
 .runtime-image-viewer {
 	position: fixed;
 	inset: 0;
-	background: rgba(0, 0, 0, 0.9);
 	z-index: 9999;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	cursor: pointer;
-	animation: fadeIn 0.2s ease;
+	padding: 28px;
+	background: color-mix(in srgb, #020617 78%, transparent);
+	backdrop-filter: blur(7px);
+	cursor: zoom-out;
+	animation: fadeIn 0.18s ease;
+}
+
+.runtime-image-viewer-figure {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 10px;
+	margin: 0;
+	max-width: min(1120px, calc(100vw - 56px));
+	max-height: calc(100dvh - 56px);
+	cursor: default;
 }
 
 .runtime-image-viewer img {
-	max-width: 90vw;
-	max-height: 90vh;
+	max-width: min(1120px, calc(100vw - 56px));
+	max-height: calc(100dvh - 104px);
 	object-fit: contain;
-	cursor: default;
 	animation: zoomIn 0.3s ease;
-	border-radius: 8px;
-	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+	border-radius: var(--radius-sm);
+	box-shadow: 0 24px 70px rgba(2, 6, 23, 0.46);
+}
+
+.runtime-image-viewer-caption {
+	max-width: min(720px, calc(100vw - 56px));
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: rgba(255, 255, 255, 0.78);
+	font-size: 12px;
+	text-align: center;
 }
 
 .image-viewer-close-button {
-	position: absolute;
-	top: 20px;
-	right: 20px;
+	position: fixed;
+	top: max(16px, env(safe-area-inset-top));
+	right: max(16px, env(safe-area-inset-right));
 	width: 44px;
 	height: 44px;
 	border-radius: 50%;

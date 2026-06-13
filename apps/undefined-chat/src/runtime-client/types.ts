@@ -124,9 +124,26 @@ export type ChatEvent = {
 	payload: Record<string, unknown>;
 };
 
-export type CommandInfo = {
+export type SubcommandInfo = {
 	name: string;
+	trigger: string;
 	description: string;
+	args: string;
+	usage: string;
+	available: boolean;
+};
+
+export type CommandInfo = {
+	/** 裸命令名，不含前导 "/"（渲染时按需补 "/"） */
+	name: string;
+	trigger: string;
+	description: string;
+	usage: string;
+	example: string;
+	aliases: string[];
+	aliasTriggers: string[];
+	subcommands: SubcommandInfo[];
+	available: boolean;
 };
 
 export type SendMessageInput = {

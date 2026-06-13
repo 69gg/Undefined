@@ -3,6 +3,13 @@ import type { AttachmentDraft } from "../chat-store/store";
 import type { CommandInfo, MessageReference } from "../runtime-client/types";
 import { CommandPalette } from "./CommandPalette";
 import { ReferenceChips } from "./ReferenceChips";
+import {
+	type CommandMatch,
+	buildCommandContext,
+	buildReplacement,
+	computeMatches,
+	findCommandByNameOrAlias,
+} from "./command-context";
 
 export type MessageComposerProps = {
 	attachmentQueue: AttachmentDraft[];
@@ -37,8 +44,12 @@ export function MessageComposer({
 	onSend,
 }: MessageComposerProps) {
 	const [value, setValue] = useState(draft);
-	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-	const [commandPaletteActiveIndex, setCommandPaletteActiveIndex] = useState(0);
+	const [selectionStart, setSelectionStart] = useState(draft.length);
+	const [activeIndex, setActiveIndex] = useState(0);
+	// 记录被 Esc 关闭时的输入值；继续输入（value 改变）后自动恢复
+	const [escDismissedValue, setEscDismissedValue] = useState<string | null>(
+		null,
+	);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 
 	// 同步外部草稿
@@ -56,34 +67,33 @@ export function MessageComposer({
 		}
 	}, [value]);
 
-	// 命令面板查询文本
-	const commandQuery = useMemo(() => {
-		if (!value.startsWith("/")) {
-			return "";
-		}
-		// 提取 / 后到第一个空格前的内容
-		const match = value.match(/^\/(\S*)/);
-		return match ? match[1] : "";
-	}, [value]);
+	// 解析命令上下文与候选项（单一数据源，供展示与键盘逻辑共用）
+	const commandContext = useMemo(
+		() => buildCommandContext(value, selectionStart),
+		[value, selectionStart],
+	);
+	const commandMatches = useMemo(
+		() => computeMatches(commandSuggestions, commandContext),
+		[commandSuggestions, commandContext],
+	);
+	const paletteOpen = commandContext !== null && value !== escDismissedValue;
 
-	// 监听输入变化，决定是否打开命令面板
-	useEffect(() => {
-		if (value.startsWith("/") && !value.includes(" ")) {
-			setCommandPaletteOpen(true);
-			setCommandPaletteActiveIndex(0);
-		} else {
-			setCommandPaletteOpen(false);
-		}
-	}, [value]);
-
-	const filteredCommands = useMemo(() => {
-		if (!value.startsWith("/")) {
-			return [];
-		}
-		return commandSuggestions.filter((command) =>
-			command.name.toLowerCase().startsWith(value.toLowerCase()),
+	// 子命令模式下命令存在但无子命令 → 展示帮助卡片
+	const helpCommand = useMemo<CommandInfo | null>(() => {
+		if (!commandContext || commandContext.mode !== "subcommand") return null;
+		if (commandMatches.length > 0) return null;
+		const command = findCommandByNameOrAlias(
+			commandSuggestions,
+			commandContext.commandQuery,
 		);
-	}, [commandSuggestions, value]);
+		return command && command.subcommands.length === 0 ? command : null;
+	}, [commandContext, commandMatches, commandSuggestions]);
+
+	const paletteHasContent = commandMatches.length > 0 || helpCommand !== null;
+	const clampedActiveIndex = Math.min(
+		activeIndex,
+		Math.max(0, commandMatches.length - 1),
+	);
 
 	const hasReadyAttachment = attachmentQueue.some(
 		(attachment) => attachment.status === "ready",
@@ -95,30 +105,72 @@ export function MessageComposer({
 		onDraftChange(nextValue);
 	}
 
+	function syncCursor(el: HTMLTextAreaElement): void {
+		setSelectionStart(el.selectionStart ?? el.value.length);
+	}
+
+	function moveActive(delta: number): void {
+		const len = commandMatches.length;
+		if (len === 0) return;
+		setActiveIndex((prev) => (prev + delta + len) % len);
+	}
+
+	function selectMatch(match: CommandMatch): void {
+		const next = buildReplacement(match);
+		update(next);
+		setActiveIndex(0);
+		// 选择后关闭面板（对齐 WebUI），用户继续输入（value 变化）会自动重开
+		setEscDismissedValue(next);
+		requestAnimationFrame(() => {
+			const el = textareaRef.current;
+			if (el) {
+				el.focus();
+				el.setSelectionRange(next.length, next.length);
+				setSelectionStart(next.length);
+			}
+		});
+	}
+
+	function chooseActive(): void {
+		const match = commandMatches[clampedActiveIndex];
+		if (match) selectMatch(match);
+	}
+
+	function dismissPalette(): void {
+		setEscDismissedValue(value);
+	}
+
 	function handleKeyDown(
 		event: React.KeyboardEvent<HTMLTextAreaElement>,
 	): void {
-		// 命令面板打开时，拦截导航键
-		if (commandPaletteOpen) {
-			if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-				event.preventDefault();
-				handleCommandPaletteNavigate(event.key === "ArrowUp" ? -1 : 1);
-				return;
-			}
-			if (event.key === "Enter" && !event.shiftKey) {
-				event.preventDefault();
-				const matches = commandSuggestions.filter((cmd) =>
-					cmd.name.toLowerCase().includes(commandQuery.toLowerCase()),
-				);
-				if (matches[commandPaletteActiveIndex]) {
-					handleCommandSelect(matches[commandPaletteActiveIndex]);
-				}
-				return;
-			}
+		// 命令面板打开时拦截导航/补全/关闭键
+		if (paletteOpen && paletteHasContent) {
 			if (event.key === "Escape") {
 				event.preventDefault();
-				setCommandPaletteOpen(false);
+				dismissPalette();
 				return;
+			}
+			if (commandMatches.length > 0) {
+				if (event.key === "ArrowDown") {
+					event.preventDefault();
+					moveActive(1);
+					return;
+				}
+				if (event.key === "ArrowUp") {
+					event.preventDefault();
+					moveActive(-1);
+					return;
+				}
+				if (event.key === "Tab") {
+					event.preventDefault();
+					chooseActive();
+					return;
+				}
+				if (event.key === "Enter" && !event.shiftKey) {
+					event.preventDefault();
+					chooseActive();
+					return;
+				}
 			}
 		}
 
@@ -135,6 +187,7 @@ export function MessageComposer({
 			requestAnimationFrame(() => {
 				target.selectionStart = start + 1;
 				target.selectionEnd = start + 1;
+				setSelectionStart(start + 1);
 			});
 			return;
 		}
@@ -142,29 +195,6 @@ export function MessageComposer({
 		if (canSend) {
 			onSend();
 		}
-	}
-
-	function handleCommandSelect(command: CommandInfo): void {
-		update(`/${command.name} `);
-		setCommandPaletteOpen(false);
-		textareaRef.current?.focus();
-	}
-
-	function handleCommandPaletteNavigate(delta: number): void {
-		const matches = commandSuggestions.filter((cmd) =>
-			cmd.name.toLowerCase().includes(commandQuery.toLowerCase()),
-		);
-		const maxIndex = Math.min(matches.length - 1, 7); // MAX_MATCHES - 1
-		setCommandPaletteActiveIndex((prev) => {
-			const next = prev + delta;
-			if (next < 0) {
-				return maxIndex;
-			}
-			if (next > maxIndex) {
-				return 0;
-			}
-			return next;
-		});
 	}
 
 	return (
@@ -229,8 +259,14 @@ export function MessageComposer({
 					<textarea
 						aria-label="消息输入"
 						disabled={disabled}
-						onChange={(event) => update(event.currentTarget.value)}
+						onChange={(event) => {
+							update(event.currentTarget.value);
+							syncCursor(event.currentTarget);
+							setActiveIndex(0);
+						}}
 						onKeyDown={handleKeyDown}
+						onKeyUp={(event) => syncCursor(event.currentTarget)}
+						onSelect={(event) => syncCursor(event.currentTarget)}
 						placeholder="给 Undefined 发送消息..."
 						ref={textareaRef}
 						rows={1}
@@ -257,35 +293,13 @@ export function MessageComposer({
 
 				{/* 命令面板 */}
 				<CommandPalette
-					open={commandPaletteOpen}
-					query={commandQuery}
-					commands={commandSuggestions}
-					activeIndex={commandPaletteActiveIndex}
-					onSelect={handleCommandSelect}
-					onClose={() => setCommandPaletteOpen(false)}
-					onNavigate={handleCommandPaletteNavigate}
+					open={paletteOpen}
+					matches={commandMatches}
+					activeIndex={clampedActiveIndex}
+					mode={commandContext?.mode ?? "command"}
+					helpCommand={helpCommand}
+					onSelect={selectMatch}
 				/>
-
-				{/* 联想词建议（保持向后兼容） */}
-				{filteredCommands.length > 0 && !commandPaletteOpen ? (
-					<ul aria-label="命令建议" className="command-suggestions">
-						{filteredCommands.map((command) => (
-							<li
-								key={command.name}
-								onClick={() => update(`${command.name} `)}
-								onKeyDown={(e) => {
-									if (e.key === "Enter") {
-										update(`${command.name} `);
-									}
-								}}
-								role="presentation"
-							>
-								<span>{command.name}</span>
-								<span>{command.description}</span>
-							</li>
-						))}
-					</ul>
-				) : null}
 			</form>
 			{disabled ? <p className="composer-note">当前会话仍在运行</p> : null}
 		</div>

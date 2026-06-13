@@ -1,133 +1,130 @@
+import { useEffect, useRef } from "react";
 import type { CommandInfo } from "../runtime-client/types";
+import {
+	type CommandMatch,
+	matchDescription,
+	matchKey,
+	matchLabel,
+	matchMeta,
+	matchUsage,
+} from "./command-context";
 
 export type CommandPaletteProps = {
 	open: boolean;
-	query: string;
-	commands: CommandInfo[];
+	matches: CommandMatch[];
 	activeIndex: number;
-	onSelect: (command: CommandInfo) => void;
-	onClose: () => void;
-	onNavigate: (delta: number) => void;
+	mode: "command" | "subcommand";
+	/** 子命令模式下命令存在但无子命令时，传入该命令以渲染帮助卡片 */
+	helpCommand: CommandInfo | null;
+	onSelect: (match: CommandMatch) => void;
 };
 
-const MAX_MATCHES = 8;
-
-function normalizeQuery(text: string): string {
-	return text.toLowerCase().trim();
-}
-
-function matchCommand(command: CommandInfo, query: string): boolean {
-	const normalizedQuery = normalizeQuery(query);
-	if (!normalizedQuery) {
-		return true;
+function CommandHelpCard({ command }: { command: CommandInfo }) {
+	const rows: Array<[string, string]> = [];
+	if (command.usage) rows.push(["用法", command.usage]);
+	if (command.example) rows.push(["示例", command.example]);
+	if (command.aliases.length > 0) {
+		rows.push(["别名", command.aliases.map((alias) => `/${alias}`).join(", ")]);
 	}
-	return command.name.toLowerCase().includes(normalizedQuery);
-}
-
-function scoreCommand(command: CommandInfo, query: string): number {
-	const normalizedQuery = normalizeQuery(query);
-	if (!normalizedQuery) {
-		return 0;
-	}
-	const name = command.name.toLowerCase();
-	// 完全匹配
-	if (name === normalizedQuery) {
-		return 100;
-	}
-	// 前缀匹配
-	if (name.startsWith(normalizedQuery)) {
-		return 50;
-	}
-	// 包含匹配
-	return 10;
+	return (
+		<div className="runtime-chat-command-help">
+			<div className="runtime-chat-command-help-head">
+				<span className="runtime-chat-command-help-name">/{command.name}</span>
+				<span className="runtime-chat-command-help-kicker">命令帮助</span>
+			</div>
+			{command.description ? (
+				<div className="runtime-chat-command-help-desc">
+					{command.description}
+				</div>
+			) : null}
+			{rows.length > 0 ? (
+				<div className="runtime-chat-command-help-grid">
+					{rows.map(([key, val]) => (
+						<div className="runtime-chat-command-help-row" key={key}>
+							<span className="runtime-chat-command-help-key">{key}</span>
+							<code className="runtime-chat-command-help-val">{val}</code>
+						</div>
+					))}
+				</div>
+			) : null}
+			<div className="runtime-chat-command-help-note">
+				该命令没有子命令，直接发送即可。
+			</div>
+		</div>
+	);
 }
 
 export function CommandPalette({
 	open,
-	query,
-	commands,
+	matches,
 	activeIndex,
+	mode,
+	helpCommand,
 	onSelect,
-	onClose,
-	onNavigate,
 }: CommandPaletteProps) {
-	// 过滤和排序命令
-	const normalizedQuery = normalizeQuery(query);
-	const matches = commands
-		.filter((cmd) => matchCommand(cmd, query))
-		.map((cmd, originalIndex) => ({
-			cmd,
-			score: scoreCommand(cmd, query),
-			originalIndex,
-		}))
-		.sort((a, b) => {
-			// query 为空时保持原始顺序
-			if (!normalizedQuery) {
-				return a.originalIndex - b.originalIndex;
-			}
-			// 先按分数降序
-			if (b.score !== a.score) {
-				return b.score - a.score;
-			}
-			// 分数相同按名称字母顺序
-			return a.cmd.name.localeCompare(b.cmd.name);
-		})
-		.slice(0, MAX_MATCHES)
-		.map((item) => item.cmd);
+	const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-	// 键盘事件处理
-	function handleKeyDown(event: React.KeyboardEvent): void {
-		if (event.key === "ArrowUp") {
-			event.preventDefault();
-			onNavigate(-1);
-		} else if (event.key === "ArrowDown") {
-			event.preventDefault();
-			onNavigate(1);
-		} else if (event.key === "Enter") {
-			event.preventDefault();
-			if (matches[activeIndex]) {
-				onSelect(matches[activeIndex]);
-			}
-		} else if (event.key === "Escape") {
-			event.preventDefault();
-			onClose();
-		}
-	}
+	// 键盘导航时让选中项滚动进可视区
+	useEffect(() => {
+		itemRefs.current[activeIndex]?.scrollIntoView({ block: "nearest" });
+	}, [activeIndex]);
 
-	if (!open || matches.length === 0) {
+	if (!open) {
 		return null;
 	}
 
+	// 子命令模式下命令无子命令：展示帮助卡片
+	if (matches.length === 0) {
+		if (helpCommand) {
+			return (
+				<div className="runtime-chat-command-palette is-open">
+					<CommandHelpCard command={helpCommand} />
+				</div>
+			);
+		}
+		return null;
+	}
+
+	const headText = mode === "subcommand" ? "选择子命令" : "输入以筛选命令";
+
 	return (
 		<div
-			className={`runtime-chat-command-palette ${open ? "is-open" : ""}`}
-			onKeyDown={handleKeyDown}
+			className="runtime-chat-command-palette is-open"
 			role="listbox"
 			tabIndex={-1}
 		>
-			{matches.map((cmd, index) => (
-				<div
-					key={cmd.name}
-					className={`runtime-chat-command-item ${index === activeIndex ? "active" : ""}`}
-					onClick={() => onSelect(cmd)}
-					onKeyDown={(e) => {
-						if (e.key === "Enter") {
-							onSelect(cmd);
-						}
-					}}
-					role="option"
-					aria-selected={index === activeIndex}
-					tabIndex={0}
-				>
-					<div className="runtime-chat-command-main">
-						<div className="runtime-chat-command-name">/{cmd.name}</div>
-						<div className="runtime-chat-command-desc">{cmd.description}</div>
-					</div>
-					<div className="runtime-chat-command-side">
-						<code>{cmd.name}</code>
-					</div>
-				</div>
-			))}
+			<div className="runtime-chat-command-head">{headText}</div>
+			{matches.map((match, index) => {
+				const meta = matchMeta(match);
+				return (
+					<button
+						type="button"
+						key={matchKey(match)}
+						ref={(el) => {
+							itemRefs.current[index] = el;
+						}}
+						className={`runtime-chat-command-item ${index === activeIndex ? "active" : ""}`}
+						role="option"
+						aria-selected={index === activeIndex}
+						onClick={() => onSelect(match)}
+					>
+						<span className="runtime-chat-command-main">
+							<span className="runtime-chat-command-name">
+								{matchLabel(match)}
+							</span>
+							<span className="runtime-chat-command-desc">
+								{matchDescription(match)}
+							</span>
+						</span>
+						<span className="runtime-chat-command-side">
+							<code>{matchUsage(match)}</code>
+							{meta ? (
+								<span className="runtime-chat-command-meta">{meta}</span>
+							) : null}
+						</span>
+					</button>
+				);
+			})}
 		</div>
 	);
 }
