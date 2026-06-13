@@ -6,16 +6,16 @@ use uuid::Uuid;
 pub(crate) const MAX_PREVIEW_HTML_BYTES: usize = 1024 * 1024;
 
 const PREVIEW_CSP: &str = concat!(
-    "default-src 'none'; ",
+    "default-src 'self' data: blob:; ",
     "connect-src 'none'; ",
     "form-action 'none'; ",
     "object-src 'none'; ",
-    "base-uri 'none'; ",
+    "base-uri 'self'; ",
     "frame-ancestors 'none'; ",
-    "navigate-to 'none'; ",
-    "img-src data: blob:; ",
-    "media-src data: blob:; ",
-    "style-src 'unsafe-inline'; ",
+    "img-src data: blob: 'self'; ",
+    "media-src data: blob: 'self'; ",
+    "style-src 'unsafe-inline' 'self'; ",
+    "font-src data: 'self'; ",
     "script-src 'none'"
 );
 
@@ -44,11 +44,19 @@ pub(crate) fn preview_document(title: &str, html: &str) -> String {
             "<meta http-equiv=\"Content-Security-Policy\" content=\"{}\">",
             "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
             "<title>{}</title>",
+            "<style>",
+            "body {{ margin: 0; padding: 16px; font-family: system-ui, -apple-system, sans-serif; background: white; color: black; }}",
+            "body.empty {{ display: flex; align-items: center; justify-content: center; min-height: 100vh; }}",
+            "body.empty::before {{ content: '内容为空或加载失败'; color: #999; }}",
+            "</style>",
             "</head>",
-            "<body>{}</body>",
+            "<body class=\"{}\">{}</body>",
             "</html>"
         ),
-        PREVIEW_CSP, escaped_title, html
+        PREVIEW_CSP,
+        escaped_title,
+        if html.trim().is_empty() { "empty" } else { "" },
+        html
     )
 }
 
@@ -72,12 +80,21 @@ pub(crate) fn build_preview_data_url(title: &str, html: &str) -> Result<Url, Str
 
 #[tauri::command]
 pub async fn open_html_preview(app: AppHandle, input: HtmlPreviewInput) -> Result<(), String> {
+    // 构建 data URL
     let url = build_preview_data_url(&input.title, &input.html)?;
     let initial_url = url.clone();
     let label = format!("html-preview-{}", Uuid::new_v4());
+
+    // 尝试获取主窗口 - 支持多种可能的标签
     let main_window = app
         .get_webview_window("main")
-        .ok_or_else(|| "main window is not available for html preview".to_string())?;
+        .or_else(|| app.webview_windows().into_values().next())
+        .ok_or_else(|| "no parent window is available for html preview".to_string())?;
+
+    eprintln!("[preview] Creating HTML preview window: {}", label);
+    eprintln!("[preview] Title: {}", input.title);
+    eprintln!("[preview] HTML size: {} bytes", input.html.len());
+    eprintln!("[preview] Data URL size: {} bytes", url.as_str().len());
 
     let builder = WebviewWindowBuilder::new(&main_window, label, WebviewUrl::CustomProtocol(url))
         .title(input.title)
@@ -89,9 +106,14 @@ pub async fn open_html_preview(app: AppHandle, input: HtmlPreviewInput) -> Resul
     #[cfg(target_os = "android")]
     let builder = builder.activity_name("HtmlPreviewActivity");
 
-    builder
+    let window = builder
         .build()
         .map_err(|err| format!("html preview window open failed: {err}"))?;
+
+    eprintln!(
+        "[preview] Window created successfully: {:?}",
+        window.label()
+    );
 
     Ok(())
 }
@@ -117,8 +139,9 @@ mod tests {
         assert!(doc.contains("<!doctype html>"));
         assert!(doc.contains("<html>"));
         assert!(doc.contains("<head>"));
-        assert!(doc.contains("<body>"));
+        assert!(doc.contains("<body"));
         assert!(doc.contains("</html>"));
+        assert!(doc.contains("<style>"));
     }
 
     #[test]
@@ -131,7 +154,8 @@ mod tests {
     #[test]
     fn test_preview_document_preserves_html_content() {
         let doc = preview_document("Page", "<h1>Hello</h1>");
-        assert!(doc.contains("<body><h1>Hello</h1></body>"));
+        assert!(doc.contains("<h1>Hello</h1>"));
+        assert!(doc.contains("<body"));
     }
 
     #[test]
@@ -216,5 +240,25 @@ mod tests {
     fn test_csp_blocks_connections() {
         // CSP should block network connections
         assert!(PREVIEW_CSP.contains("connect-src 'none'"));
+    }
+
+    #[test]
+    fn test_preview_document_empty_content() {
+        let doc = preview_document("Empty Test", "");
+        assert!(doc.contains("class=\"empty\""));
+        assert!(doc.contains("<style>"));
+    }
+
+    #[test]
+    fn test_preview_document_whitespace_only() {
+        let doc = preview_document("Whitespace", "   \n\t  ");
+        assert!(doc.contains("class=\"empty\""));
+    }
+
+    #[test]
+    fn test_preview_document_non_empty_content() {
+        let doc = preview_document("Test", "<p>Hello</p>");
+        assert!(!doc.contains("class=\"empty\""));
+        assert!(doc.contains("<p>Hello</p>"));
     }
 }

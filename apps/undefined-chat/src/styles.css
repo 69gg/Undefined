@@ -973,7 +973,8 @@ a:hover {
 	border-radius: 20px;
 	box-shadow: var(--shadow-md);
 	transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-	overflow: hidden;
+	overflow: visible;
+	position: relative;
 }
 
 .composer:focus-within {
@@ -1632,6 +1633,106 @@ a:hover {
 .runtime-chat-input:focus {
 	border-color: var(--accent-color);
 	box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.1);
+}
+
+/* ========================================
+   Runtime Chat Command Palette
+   ======================================== */
+.runtime-chat-command-palette {
+	position: absolute;
+	bottom: calc(100% + 8px);
+	left: 0;
+	right: 0;
+	background: var(--bg-surface);
+	border: 1px solid var(--border-primary);
+	border-radius: var(--radius-sm);
+	box-shadow: var(--shadow-lg);
+	max-height: 320px;
+	overflow-y: auto;
+	z-index: 50;
+	animation: slideUpFadeIn 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes slideUpFadeIn {
+	from {
+		opacity: 0;
+		transform: translateY(10px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.runtime-chat-command-palette::-webkit-scrollbar {
+	width: 6px;
+}
+
+.runtime-chat-command-palette::-webkit-scrollbar-thumb {
+	background: var(--border-primary);
+	border-radius: 3px;
+}
+
+.runtime-chat-command-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 10px 14px;
+	cursor: pointer;
+	transition: background 150ms ease, transform 100ms ease;
+	border-bottom: 1px solid transparent;
+}
+
+.runtime-chat-command-item:hover {
+	background: var(--bg-surface-hover);
+}
+
+.runtime-chat-command-item.active {
+	background: var(--primary-subtle);
+	border-bottom-color: var(--border-subtle);
+}
+
+.runtime-chat-command-item:active {
+	transform: scale(0.98);
+}
+
+.runtime-chat-command-main {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.runtime-chat-command-name {
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--primary);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.runtime-chat-command-desc {
+	font-size: 12px;
+	color: var(--text-secondary);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.runtime-chat-command-side {
+	flex-shrink: 0;
+}
+
+.runtime-chat-command-side code {
+	font-size: 11px;
+	padding: 2px 6px;
+	border-radius: 4px;
+	background: var(--bg-app);
+	border: 1px solid var(--border-subtle);
+	color: var(--text-tertiary);
 }
 
 /* Runtime Images */

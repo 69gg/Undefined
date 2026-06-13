@@ -42,7 +42,12 @@ function splitSegments(content: string): Segment[] {
 	return segments.length > 0 ? segments : [{ type: "text", value: content }];
 }
 
-function TextBlock({ value }: { value: string }) {
+type TextBlockProps = {
+	value: string;
+	onPreviewHtml: (input: HtmlPreviewRequest) => void;
+};
+
+function TextBlock({ value, onPreviewHtml }: TextBlockProps) {
 	const components = useMemo<Components>(
 		() => ({
 			// 自定义链接渲染：添加 target="_blank" 和安全属性
@@ -68,8 +73,32 @@ function TextBlock({ value }: { value: string }) {
 					<table {...props}>{children}</table>
 				</div>
 			),
+			// 自定义代码块渲染：应用折叠逻辑
+			code: ({ className, children, ...props }) => {
+				const match = /language-(\w+)/.exec(className || "");
+				const codeString = String(children).replace(/\n$/, "");
+
+				// 检查是否为代码块（有 language- 前缀且有换行符）
+				if (match && codeString.includes("\n")) {
+					return (
+						<CodeBlock
+							code={codeString}
+							language={match[1]}
+							collapsible={true}
+							maxLines={8}
+							onPreviewHtml={onPreviewHtml}
+						/>
+					);
+				}
+
+				return (
+					<code className={className} {...props}>
+						{children}
+					</code>
+				);
+			},
 		}),
-		[],
+		[onPreviewHtml],
 	);
 
 	return (
@@ -98,6 +127,7 @@ export function MarkdownContent({
 						<TextBlock
 							key={`${index}-text-${segment.value.slice(0, 16)}`}
 							value={segment.value}
+							onPreviewHtml={onPreviewHtml}
 						/>
 					);
 				}
