@@ -287,4 +287,125 @@ describe("createTauriRuntimeClient", () => {
 		expect(unlistenEvent).toHaveBeenCalledOnce();
 		expect(unlistenStatus).toHaveBeenCalledOnce();
 	});
+
+	test("deletes a conversation through the runtime request bridge", async () => {
+		vi.mocked(invoke).mockResolvedValueOnce({
+			status: 204,
+			ok: true,
+			body: {},
+		});
+
+		const client = createTauriRuntimeClient();
+		await client.deleteConversation("conv-delete");
+
+		expect(invoke).toHaveBeenCalledWith("runtime_request", {
+			input: {
+				method: "DELETE",
+				path: "/api/v1/chat/conversations/conv-delete",
+				body: {},
+				headers: [],
+			},
+		});
+	});
+
+	test("fetches history page with cursor support", async () => {
+		vi.mocked(invoke).mockResolvedValueOnce({
+			status: 200,
+			ok: true,
+			body: {
+				conversation_id: "default",
+				virtual_user_id: "webchat",
+				permission: "superadmin",
+				count: 2,
+				items: [
+					{
+						message_id: "msg-2",
+						role: "bot",
+						content: "响应内容",
+						timestamp: "2026-06-08T10:02:00+08:00",
+						attachments: [],
+						references: [],
+					},
+					{
+						message_id: "msg-1",
+						role: "user",
+						content: "用户请求",
+						timestamp: "2026-06-08T10:01:00+08:00",
+						attachments: [],
+						references: [],
+					},
+				],
+				limit: 50,
+				before: 1770000060,
+				has_more: true,
+				next_before: 1770000030,
+				total: 120,
+			},
+		});
+
+		const client = createTauriRuntimeClient();
+		const response = await client.getHistoryPage("default", 1770000060, 50);
+
+		expect(invoke).toHaveBeenCalledWith("get_history", {
+			input: {
+				conversationId: "default",
+				limit: 50,
+				before: 1770000060,
+			},
+		});
+		expect(response).toMatchObject({
+			conversationId: "default",
+			count: 2,
+			hasMore: true,
+			nextBefore: 1770000030,
+			cursor: 1770000030,
+			total: 120,
+		});
+		expect(response.items).toHaveLength(2);
+		expect(response.items[0]?.messageId).toBe("msg-2");
+	});
+
+	test("fetches history page without cursor (first page)", async () => {
+		vi.mocked(invoke).mockResolvedValueOnce({
+			status: 200,
+			ok: true,
+			body: {
+				conversation_id: "default",
+				virtual_user_id: "webchat",
+				permission: "superadmin",
+				count: 1,
+				items: [
+					{
+						message_id: "msg-latest",
+						role: "bot",
+						content: "最新消息",
+						timestamp: "2026-06-08T10:05:00+08:00",
+						attachments: [],
+						references: [],
+					},
+				],
+				limit: 50,
+				before: null,
+				has_more: false,
+				next_before: null,
+				total: 1,
+			},
+		});
+
+		const client = createTauriRuntimeClient();
+		const response = await client.getHistoryPage("default");
+
+		expect(invoke).toHaveBeenCalledWith("get_history", {
+			input: {
+				conversationId: "default",
+				limit: 50,
+			},
+		});
+		expect(response).toMatchObject({
+			conversationId: "default",
+			count: 1,
+			hasMore: false,
+			cursor: null,
+		});
+	});
 });

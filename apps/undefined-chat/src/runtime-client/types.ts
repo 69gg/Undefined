@@ -187,6 +187,25 @@ export type CommandsResponse = {
 	commands: CommandInfo[];
 };
 
+export type DeleteConversationResponse = {
+	success: boolean;
+	conversationId: string;
+};
+
+export type HistoryPageResponse = {
+	conversationId: string;
+	virtualUserId: string;
+	permission: string;
+	count: number;
+	items: HistoryItem[];
+	limit: number;
+	before: number | null;
+	hasMore: boolean;
+	nextBefore: number | null;
+	cursor: number | null;
+	total: number;
+};
+
 export type JobEventsJsonResponse = {
 	job: ChatJob;
 	after: number;
@@ -239,11 +258,17 @@ export type RuntimeClient = {
 	probeRuntime: () => Promise<RuntimeHealth>;
 	listConversations: () => Promise<ConversationsResponse>;
 	createConversation: (title?: string) => Promise<Conversation>;
+	deleteConversation: (conversationId: string) => Promise<void>;
 	getHistory: (input: {
 		conversationId: string;
 		limit: number;
 		before?: number | null;
 	}) => Promise<HistoryResponse>;
+	getHistoryPage: (
+		conversationId: string,
+		before?: number | null,
+		limit?: number,
+	) => Promise<HistoryPageResponse>;
 	getActiveJobs: (input?: {
 		conversationId?: string | null;
 	}) => Promise<ActiveJobsResponse>;

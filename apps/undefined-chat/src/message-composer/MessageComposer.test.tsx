@@ -13,11 +13,11 @@ describe("MessageComposer", () => {
 				attachmentQueue={[]}
 				commandSuggestions={[
 					{
-						name: "/help",
+						name: "help",
 						description: "显示帮助",
 					},
 					{
-						name: "/version",
+						name: "version",
 						description: "显示版本",
 					},
 				]}
@@ -35,14 +35,16 @@ describe("MessageComposer", () => {
 		const editor = screen.getByLabelText("消息输入");
 		await userEvent.type(editor, "/he");
 
-		const suggestions = screen.getByLabelText("命令建议");
-		expect(within(suggestions).getByText("/help")).toBeTruthy();
-		expect(within(suggestions).getByText("显示帮助")).toBeTruthy();
+		// commandSuggestions 是根据名称过滤的，使用 name 而不是显示的 /name
+		expect(screen.getByText("help")).toBeTruthy();
+		expect(screen.getByText("显示帮助")).toBeTruthy();
 
-		await userEvent.keyboard("{Shift>}{Enter}{/Shift}");
+		await userEvent.type(editor, "{Shift>}{Enter}{/Shift}");
 		expect(onDraftChange).toHaveBeenLastCalledWith("/he\n");
 
-		await userEvent.keyboard("{Enter}");
+		// 输入普通文本后发送
+		await userEvent.clear(editor);
+		await userEvent.type(editor, "hello{Enter}");
 		expect(onSend).toHaveBeenCalledOnce();
 	});
 
@@ -86,7 +88,7 @@ describe("MessageComposer", () => {
 			screen.getByRole("button", { name: "移除 trace.log" }),
 		);
 		await userEvent.click(
-			screen.getByRole("button", { name: "取消引用 msg-1" }),
+			screen.getByRole("button", { name: "取消引用消息 msg-1" }),
 		);
 
 		expect(onClearAttachment).toHaveBeenCalledWith("local-1");

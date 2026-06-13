@@ -11,6 +11,7 @@ import type {
 	ConnectionState,
 	HistoryItem,
 } from "../runtime-client/types";
+import { AttachmentCard } from "./AttachmentCard";
 
 export type MessageTimelineProps = {
 	activeJob: ChatJob | null;
@@ -21,6 +22,8 @@ export type MessageTimelineProps = {
 	onPreviewAttachment: (attachment: Attachment) => void;
 	onSaveAttachment: (attachment: Attachment) => void;
 	onShortcutClick?: (prompt: string) => void;
+	onAddReference?: (messageId: string, quote: string) => void;
+	onOpenImage?: (src: string, alt: string) => void;
 };
 
 const WINDOW_SIZE = 64;
@@ -47,19 +50,6 @@ function eventLabel(event: ChatEvent): string {
 	return detail ? `${name} ${detail}` : name;
 }
 
-function formatAttachmentSize(size: number): string {
-	if (size <= 0) {
-		return "";
-	}
-	if (size < 1024) {
-		return `${size} B`;
-	}
-	if (size < 1024 * 1024) {
-		return `${Math.round(size / 102.4) / 10} KB`;
-	}
-	return `${Math.round(size / 1024 / 102.4) / 10} MB`;
-}
-
 export function MessageTimeline({
 	activeJob,
 	events,
@@ -68,6 +58,8 @@ export function MessageTimeline({
 	onPreviewHtml,
 	onSaveAttachment,
 	onShortcutClick,
+	onAddReference,
+	onOpenImage,
 }: MessageTimelineProps) {
 	const visibleItems = items.slice(-WINDOW_SIZE);
 	const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
@@ -200,45 +192,36 @@ export function MessageTimeline({
 							/>
 
 							{item.attachments.length > 0 ? (
-								<ul aria-label="附件" className="attachment-list">
+								<div
+									className="attachment-list"
+									style={{
+										display: "flex",
+										flexDirection: "column",
+										gap: "8px",
+										marginTop: "12px",
+									}}
+								>
 									{item.attachments.map((attachment) => (
-										<li key={attachment.id || attachment.name}>
-											<span style={{ fontWeight: "550" }}>
-												{attachment.name}
-											</span>
-											<span style={{ fontSize: "0.75rem", opacity: 0.8 }}>
-												{formatAttachmentSize(attachment.size)}
-											</span>
-											<div
-												className="attachment-actions"
-												style={{
-													display: "flex",
-													gap: "8px",
-													marginTop: "4px",
-												}}
-											>
-												{attachment.previewUrl ? (
-													<button
-														className="ghost-button"
-														style={{ padding: "4px 8px", fontSize: "0.75rem" }}
-														type="button"
-														onClick={() => onPreviewAttachment(attachment)}
-													>
-														预览
-													</button>
-												) : null}
-												<button
-													className="ghost-button"
-													style={{ padding: "4px 8px", fontSize: "0.75rem" }}
-													type="button"
-													onClick={() => onSaveAttachment(attachment)}
-												>
-													保存
-												</button>
-											</div>
-										</li>
+										<AttachmentCard
+											key={attachment.id || attachment.name}
+											attachment={attachment}
+											onPreview={(att) => {
+												if (
+													onOpenImage &&
+													att.mediaType?.startsWith("image/")
+												) {
+													onOpenImage(
+														att.previewUrl || att.downloadUrl || "",
+														att.name,
+													);
+												} else {
+													onPreviewAttachment(att);
+												}
+											}}
+											onDownload={onSaveAttachment}
+										/>
 									))}
-								</ul>
+								</div>
 							) : null}
 
 							<div className="message-meta">
@@ -251,6 +234,17 @@ export function MessageTimeline({
 											})
 										: ""}
 								</span>
+								{onAddReference && item.role === "bot" ? (
+									<button
+										className="ghost-button"
+										onClick={() => onAddReference(item.messageId, item.content)}
+										style={{ padding: "2px 8px", fontSize: "0.7rem" }}
+										title="引用这条消息"
+										type="button"
+									>
+										引用
+									</button>
+								) : null}
 							</div>
 						</div>
 					</article>

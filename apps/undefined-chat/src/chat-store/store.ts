@@ -1,104 +1,26 @@
 import type {
-	ChatEvent,
-	ChatJob,
-	CommandInfo,
-	ConnectionState,
-	Conversation,
-	HistoryItem,
-	MessageReference,
 	RuntimeClient,
-	RuntimeConfig,
-	RuntimeHealth,
 	RuntimeSseEvent,
 	RuntimeSseStatus,
 	SendMessageInput,
 } from "../runtime-client/types";
+import type {
+	ChatAction,
+	ChatEvent,
+	ChatJob,
+	ChatState,
+	MessageReference,
+} from "./types";
 
-export type AttachmentDraft = {
-	id: string;
-	name: string;
-	size: number;
-	status: "queued" | "uploading" | "ready" | "error";
-	attachmentId: string | null;
-	error?: string;
-};
-
-export type ConversationHistoryState = {
-	items: HistoryItem[];
-	hasMore: boolean;
-	nextBefore: number | null;
-	total: number;
-	loading: boolean;
-	error: string | null;
-};
-
-export type ChatState = {
-	connectionState: ConnectionState;
-	runtimeConfig: RuntimeConfig | null;
-	health: RuntimeHealth | null;
-	conversations: Conversation[];
-	selectedConversationId: string | null;
-	historyByConversation: Record<string, ConversationHistoryState>;
-	activeJobsByConversation: Record<string, ChatJob>;
-	eventsByJob: Record<string, ChatEvent[]>;
-	eventCursorByJob: Record<string, number>;
-	jobConversationById: Record<string, string>;
-	draftsByConversation: Record<string, string>;
-	attachmentsByConversation: Record<string, AttachmentDraft[]>;
-	referencesByConversation: Record<string, MessageReference[]>;
-	commands: CommandInfo[];
-	settings: {
-		locale: "zh-CN" | "en";
-		mobilePanel: "chat" | "conversations" | "settings";
-	};
-	bootstrapping: boolean;
-	error: string | null;
-	sendError: string | null;
-};
-
-export type ChatAction =
-	| { type: "connection/set"; connectionState: ConnectionState }
-	| { type: "bootstrap/start" }
-	| {
-			type: "bootstrap/success";
-			runtimeConfig: RuntimeConfig;
-			health: RuntimeHealth;
-			conversations: Conversation[];
-			selectedConversationId: string;
-			activeJobs: ChatJob[];
-			commands: CommandInfo[];
-	  }
-	| {
-			type: "bootstrap/error";
-			error: string;
-			runtimeConfig?: RuntimeConfig | null;
-	  }
-	| {
-			type: "history/set";
-			conversationId: string;
-			items: HistoryItem[];
-			hasMore: boolean;
-			nextBefore: number | null;
-			total: number;
-	  }
-	| { type: "conversation/select"; conversationId: string }
-	| { type: "conversation/upsert"; conversation: Conversation }
-	| { type: "draft/set"; conversationId: string; draft: string }
-	| { type: "send/error"; error: string | null }
-	| { type: "job/upsert"; job: ChatJob }
-	| { type: "job/remove"; conversationId: string; jobId: string }
-	| { type: "events/apply"; jobId: string; events: ChatEvent[] }
-	| {
-			type: "attachments/set";
-			conversationId: string;
-			attachments: AttachmentDraft[];
-	  }
-	| {
-			type: "references/set";
-			conversationId: string;
-			references: MessageReference[];
-	  }
-	| { type: "mobile-panel/set"; panel: "chat" | "conversations" | "settings" };
+export type {
+	AttachmentDraft,
+	ChatAction,
+	ChatEvent,
+	ChatJob,
+	ChatState,
+	MessageReference,
+	ToolBlock,
+} from "./types";
 
 export type ChatStore = {
 	bootstrap: () => Promise<void>;
@@ -113,9 +35,11 @@ export type ChatStore = {
 	addReference: (conversationId: string, reference: MessageReference) => void;
 	clearReference: (conversationId: string, messageId: string) => void;
 	clearAttachment: (conversationId: string, attachmentId: string) => void;
+	loadMoreHistory: (conversationId: string) => Promise<void>;
 	applyRuntimeEvents: (jobId: string, events: ChatEvent[]) => void;
 	handleRuntimeEvent: (event: RuntimeSseEvent) => void;
 	handleRuntimeStatus: (status: RuntimeSseStatus) => void;
+	dispatch: (action: ChatAction) => void;
 	getSnapshot: () => ChatState;
 	subscribe: (listener: () => void) => () => void;
 };
@@ -136,10 +60,19 @@ export function createInitialChatState(): ChatState {
 		eventsByJob: {},
 		eventCursorByJob: {},
 		jobConversationById: {},
+		toolBlocksByJob: {},
 		draftsByConversation: {},
 		attachmentsByConversation: {},
 		referencesByConversation: {},
 		commands: [],
+		commandPaletteOpen: false,
+		commandPaletteQuery: "",
+		commandPaletteActiveIndex: 0,
+		imageViewer: null,
+		htmlPreview: null,
+		autoScrollEnabled: true,
+		topLoadSuppressedUntil: 0,
+		platform: null,
 		settings: {
 			locale: "zh-CN",
 			mobilePanel: "chat",
@@ -363,6 +296,97 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 			return {
 				...state,
 				settings: { ...state.settings, mobilePanel: action.panel },
+			};
+		case "toolBlock/upsert": {
+			const blockMap = state.toolBlocksByJob[action.jobId] || new Map();
+			const updatedMap = new Map(blockMap);
+			updatedMap.set(action.toolBlock.webchatCallId, action.toolBlock);
+			return {
+				...state,
+				toolBlocksByJob: {
+					...state.toolBlocksByJob,
+					[action.jobId]: updatedMap,
+				},
+			};
+		}
+		case "toolBlock/clear": {
+			const { [action.jobId]: _, ...remaining } = state.toolBlocksByJob;
+			return {
+				...state,
+				toolBlocksByJob: remaining,
+			};
+		}
+		case "commandPalette/open":
+			return {
+				...state,
+				commandPaletteOpen: true,
+				commandPaletteQuery: action.query ?? "",
+				commandPaletteActiveIndex: 0,
+			};
+		case "commandPalette/close":
+			return {
+				...state,
+				commandPaletteOpen: false,
+				commandPaletteQuery: "",
+				commandPaletteActiveIndex: 0,
+			};
+		case "commandPalette/setQuery":
+			return {
+				...state,
+				commandPaletteQuery: action.query,
+				commandPaletteActiveIndex: 0,
+			};
+		case "commandPalette/navigate": {
+			const commandCount = state.commands.length;
+			if (commandCount === 0) {
+				return state;
+			}
+			const nextIndex = state.commandPaletteActiveIndex + action.delta;
+			return {
+				...state,
+				commandPaletteActiveIndex: Math.max(
+					0,
+					Math.min(nextIndex, commandCount - 1),
+				),
+			};
+		}
+		case "imageViewer/open":
+			return {
+				...state,
+				imageViewer: {
+					open: true,
+					src: action.src,
+					alt: action.alt,
+				},
+			};
+		case "imageViewer/close":
+			return {
+				...state,
+				imageViewer: null,
+			};
+		case "htmlPreview/open":
+			return {
+				...state,
+				htmlPreview: {
+					open: true,
+					source: action.source,
+					windowId: action.windowId,
+				},
+			};
+		case "htmlPreview/close":
+			return {
+				...state,
+				htmlPreview: null,
+			};
+		case "autoScroll/set":
+			return {
+				...state,
+				autoScrollEnabled: action.enabled,
+			};
+		case "platform/set":
+			return {
+				...state,
+				platform: action.platform,
 			};
 		default:
 			return state;
@@ -806,6 +830,43 @@ export function createChatStore({
 		}
 	}
 
+	async function loadMoreHistory(conversationId: string): Promise<void> {
+		const historyState = state.historyByConversation[conversationId];
+		if (!historyState || !historyState.hasMore || historyState.loading) {
+			return;
+		}
+
+		dispatch({
+			type: "history/set",
+			conversationId,
+			items: historyState.items,
+			hasMore: historyState.hasMore,
+			nextBefore: historyState.nextBefore,
+			total: historyState.total,
+		});
+
+		try {
+			const response = await client.getHistoryPage(
+				conversationId,
+				historyState.nextBefore ?? undefined,
+				HISTORY_LIMIT,
+			);
+
+			const newItems = [...response.items.reverse(), ...historyState.items];
+
+			dispatch({
+				type: "history/set",
+				conversationId,
+				items: newItems,
+				hasMore: response.hasMore,
+				nextBefore: response.nextBefore,
+				total: response.total,
+			});
+		} catch (error) {
+			console.error("Failed to load more history:", error);
+		}
+	}
+
 	return {
 		bootstrap,
 		createConversation,
@@ -816,9 +877,11 @@ export function createChatStore({
 		addReference,
 		clearReference,
 		clearAttachment,
+		loadMoreHistory,
 		applyRuntimeEvents,
 		handleRuntimeEvent,
 		handleRuntimeStatus,
+		dispatch,
 		getSnapshot: () => state,
 		subscribe(listener) {
 			listeners.add(listener);

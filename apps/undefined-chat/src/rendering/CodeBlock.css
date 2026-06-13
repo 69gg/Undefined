@@ -1,0 +1,304 @@
+/* 代码块样式 - 参考 webui components.css 1065-1233 行 */
+
+.runtime-code-block {
+	min-width: 0;
+	max-width: 100%;
+	margin: 0.5em 0;
+	border-radius: 6px;
+	border: 1px solid var(--border-color, #d1d5db);
+	background: color-mix(
+		in srgb,
+		var(--bg-app, #f9fafb) 88%,
+		var(--bg-deep, #111827)
+	);
+	overflow: hidden;
+}
+
+.runtime-code-toolbar {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	min-height: 34px;
+	padding: 5px 8px 5px 12px;
+	border-bottom: 1px solid
+		color-mix(in srgb, var(--border-color, #d1d5db) 72%, transparent);
+	background: color-mix(in srgb, var(--bg-card, #f3f4f6) 58%, transparent);
+}
+
+.runtime-code-language {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--text-tertiary, #9ca3af);
+	font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas,
+		"Courier New", monospace;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+.runtime-code-actions {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	flex: 0 0 auto;
+}
+
+.runtime-code-action {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 26px;
+	padding: 0 9px;
+	border: 1px solid transparent;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--text-secondary, #6b7280);
+	font-size: 12px;
+	line-height: 1;
+	cursor: pointer;
+	transition:
+		background 0.16s ease,
+		border-color 0.16s ease,
+		color 0.16s ease,
+		transform 0.16s ease;
+}
+
+.runtime-code-action:hover,
+.runtime-code-action:focus-visible {
+	border-color: color-mix(
+		in srgb,
+		var(--accent, #2563eb) 28%,
+		var(--border-color, #d1d5db)
+	);
+	background: color-mix(in srgb, var(--accent, #2563eb) 10%, transparent);
+	color: var(--text-primary, #1a1a1a);
+}
+
+.runtime-code-action.primary {
+	background: color-mix(in srgb, var(--accent, #2563eb) 12%, transparent);
+	color: var(--accent, #2563eb);
+}
+
+.runtime-code-action.primary:hover,
+.runtime-code-action.primary:focus-visible {
+	background: var(--accent, #2563eb);
+	color: #fff;
+}
+
+.runtime-code-body {
+	position: relative;
+}
+
+/* 折叠状态 */
+.runtime-code-block.is-collapsed .runtime-code-body {
+	max-height: 9.2em;
+	overflow: hidden;
+	position: relative;
+}
+
+.runtime-code-block.is-collapsed .runtime-code-body::after {
+	content: "";
+	position: absolute;
+	bottom: 0;
+	left: 0;
+	right: 0;
+	height: 3em;
+	background: linear-gradient(
+		to bottom,
+		transparent,
+		var(--bg-code, #ffffff) 90%
+	);
+	pointer-events: none;
+}
+
+.runtime-code-body pre {
+	max-width: 100%;
+	margin: 0;
+	padding: 10px 12px;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	overflow-x: auto;
+	white-space: pre;
+	font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas,
+		"Courier New", monospace;
+	font-size: 12.5px;
+	line-height: 1.5;
+}
+
+.runtime-code-body pre code {
+	display: block;
+	min-width: 0;
+	max-width: 100%;
+	padding: 0;
+	border: none;
+	background: none;
+	border-radius: 0;
+	white-space: pre;
+	color: var(--text-primary, #1a1a1a);
+}
+
+.runtime-code-body pre code.hljs {
+	padding: 0;
+	background: transparent;
+	color: var(--text-primary, #1a1a1a);
+}
+
+/* ============ 语法高亮颜色（浅色主题）============ */
+.runtime-code-block .hljs-keyword,
+.runtime-code-block .hljs-doctag,
+.runtime-code-block .hljs-template-tag,
+.runtime-code-block .hljs-type {
+	color: #9b3fb5;
+	font-weight: 600;
+}
+
+.runtime-code-block .hljs-string,
+.runtime-code-block .hljs-regexp,
+.runtime-code-block .hljs-meta .hljs-string {
+	color: #246f4f;
+}
+
+.runtime-code-block .hljs-comment,
+.runtime-code-block .hljs-quote {
+	color: var(--text-tertiary, #9ca3af);
+	font-style: italic;
+}
+
+.runtime-code-block .hljs-number,
+.runtime-code-block .hljs-literal,
+.runtime-code-block .hljs-variable,
+.runtime-code-block .hljs-attribute,
+.runtime-code-block .hljs-symbol {
+	color: #b45f2b;
+}
+
+.runtime-code-block .hljs-title,
+.runtime-code-block .hljs-title.function_,
+.runtime-code-block .hljs-title.class_,
+.runtime-code-block .hljs-section {
+	color: #1f6fb2;
+	font-weight: 600;
+}
+
+.runtime-code-block .hljs-operator,
+.runtime-code-block .hljs-punctuation,
+.runtime-code-block .hljs-meta {
+	color: #8a6350;
+}
+
+.runtime-code-block .hljs-property,
+.runtime-code-block .hljs-attr,
+.runtime-code-block .hljs-selector-attr,
+.runtime-code-block .hljs-selector-class,
+.runtime-code-block .hljs-selector-id {
+	color: #b25577;
+}
+
+.runtime-code-block .hljs-name,
+.runtime-code-block .hljs-selector-tag,
+.runtime-code-block .hljs-built_in {
+	color: #22735a;
+}
+
+.runtime-code-block .hljs-addition {
+	color: #1d7f45;
+	background: color-mix(in srgb, #1d7f45 12%, transparent);
+}
+
+.runtime-code-block .hljs-deletion {
+	color: #b31d28;
+	background: color-mix(in srgb, #b31d28 10%, transparent);
+}
+
+/* ============ 语法高亮颜色（深色主题）============ */
+@media (prefers-color-scheme: dark) {
+	.runtime-code-block {
+		background: color-mix(in srgb, var(--bg-app, #0d1117) 88%, #000);
+	}
+
+	.runtime-code-body pre code.hljs,
+	.runtime-code-body pre code {
+		color: var(--text-primary, #e5e7eb);
+	}
+
+	.runtime-code-block.is-collapsed .runtime-code-body::after {
+		background: linear-gradient(
+			to bottom,
+			transparent,
+			var(--bg-code, #0d1117) 90%
+		);
+	}
+
+	.runtime-code-block .hljs-keyword,
+	.runtime-code-block .hljs-doctag,
+	.runtime-code-block .hljs-template-tag,
+	.runtime-code-block .hljs-type {
+		color: #da7dd8;
+		font-weight: 600;
+	}
+
+	.runtime-code-block .hljs-string,
+	.runtime-code-block .hljs-regexp,
+	.runtime-code-block .hljs-meta .hljs-string {
+		color: #56c288;
+	}
+
+	.runtime-code-block .hljs-comment,
+	.runtime-code-block .hljs-quote {
+		color: var(--text-tertiary, #6b7280);
+		font-style: italic;
+	}
+
+	.runtime-code-block .hljs-number,
+	.runtime-code-block .hljs-literal,
+	.runtime-code-block .hljs-variable,
+	.runtime-code-block .hljs-attribute,
+	.runtime-code-block .hljs-symbol {
+		color: #e9a774;
+	}
+
+	.runtime-code-block .hljs-title,
+	.runtime-code-block .hljs-title.function_,
+	.runtime-code-block .hljs-title.class_,
+	.runtime-code-block .hljs-section {
+		color: #69b7ee;
+		font-weight: 600;
+	}
+
+	.runtime-code-block .hljs-operator,
+	.runtime-code-block .hljs-punctuation,
+	.runtime-code-block .hljs-meta {
+		color: #d0a694;
+	}
+
+	.runtime-code-block .hljs-property,
+	.runtime-code-block .hljs-attr,
+	.runtime-code-block .hljs-selector-attr,
+	.runtime-code-block .hljs-selector-class,
+	.runtime-code-block .hljs-selector-id {
+		color: #e695b8;
+	}
+
+	.runtime-code-block .hljs-name,
+	.runtime-code-block .hljs-selector-tag,
+	.runtime-code-block .hljs-built_in {
+		color: #50bf96;
+	}
+
+	.runtime-code-block .hljs-addition {
+		color: #5ec972;
+		background: color-mix(in srgb, #5ec972 12%, transparent);
+	}
+
+	.runtime-code-block .hljs-deletion {
+		color: #e57373;
+		background: color-mix(in srgb, #e57373 10%, transparent);
+	}
+}

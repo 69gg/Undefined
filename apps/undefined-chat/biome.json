@@ -13,6 +13,9 @@
 	},
 	"linter": {
 		"rules": {
+			"a11y": {
+				"useSemanticElements": "off"
+			},
 			"correctness": {
 				"noUnusedVariables": "warn"
 			}

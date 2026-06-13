@@ -1,5 +1,10 @@
-import { marked } from "marked";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
+import { CodeBlock } from "./CodeBlock";
+import "./MarkdownContent.css";
 
 export type HtmlPreviewRequest = {
 	title: string;
@@ -37,81 +42,45 @@ function splitSegments(content: string): Segment[] {
 	return segments.length > 0 ? segments : [{ type: "text", value: content }];
 }
 
-// 选项配置 marked，使其解析换行和符合 GFM 标准
-marked.setOptions({
-	gfm: true,
-	breaks: true,
-});
-
 function TextBlock({ value }: { value: string }) {
-	const htmlContent = useMemo(() => {
-		try {
-			// marked.parse 返回 string
-			return marked.parse(value) as string;
-		} catch (err) {
-			console.error("Markdown parse error:", err);
-			return value;
-		}
-	}, [value]);
-
-	return (
-		<div
-			className="markdown-body"
-			// biome-ignore lint/security/noDangerouslySetInnerHtml: trust marked output for rendering messages
-			dangerouslySetInnerHTML={{ __html: htmlContent }}
-		/>
-	);
-}
-
-function CodeBlock({
-	language,
-	value,
-	onPreviewHtml,
-}: {
-	language: string;
-	value: string;
-	onPreviewHtml: (input: HtmlPreviewRequest) => void;
-}) {
-	const [copied, setCopied] = useState(false);
-	const isHtml = ["html", "htm"].includes(language);
-
-	async function handleCopy() {
-		try {
-			await navigator.clipboard.writeText(value);
-			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
-		} catch (err) {
-			console.error("Failed to copy code:", err);
-		}
-	}
-
-	return (
-		<figure className="code-block">
-			<figcaption>
-				<span>{language || "code"}</span>
-				<div style={{ display: "flex", gap: "8px" }}>
-					{isHtml ? (
-						<button
-							type="button"
-							onClick={() =>
-								onPreviewHtml({
-									title: "HTML 预览",
-									html: value.trim(),
-								})
-							}
-						>
-							预览 HTML
-						</button>
-					) : null}
-					<button type="button" onClick={handleCopy}>
-						{copied ? "已复制" : "复制"}
-					</button>
+	const components = useMemo<Components>(
+		() => ({
+			// 自定义链接渲染：添加 target="_blank" 和安全属性
+			a: ({ href, children, ...props }) => (
+				<a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+					{children}
+				</a>
+			),
+			// 自定义图片渲染：支持点击预览（未来扩展）
+			// biome-ignore lint/a11y/useAltText: alt is passed from markdown content
+			img: ({ src, alt, ...props }) => (
+				<img
+					src={src}
+					alt={alt || ""}
+					loading="lazy"
+					style={{ maxWidth: "100%", height: "auto" }}
+					{...props}
+				/>
+			),
+			// 自定义表格渲染
+			table: ({ children, ...props }) => (
+				<div style={{ overflowX: "auto" }}>
+					<table {...props}>{children}</table>
 				</div>
-			</figcaption>
-			<pre>
-				<code>{value.trim()}</code>
-			</pre>
-		</figure>
+			),
+		}),
+		[],
+	);
+
+	return (
+		<div className="markdown-body">
+			<ReactMarkdown
+				remarkPlugins={[remarkGfm, remarkBreaks]}
+				components={components}
+			>
+				{value}
+			</ReactMarkdown>
+		</div>
 	);
 }
 
@@ -135,8 +104,10 @@ export function MarkdownContent({
 				return (
 					<CodeBlock
 						key={`${index}-code-${segment.value.slice(0, 16)}`}
+						code={segment.value}
 						language={segment.language}
-						value={segment.value}
+						collapsible={true}
+						maxLines={8}
 						onPreviewHtml={onPreviewHtml}
 					/>
 				);

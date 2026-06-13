@@ -31,10 +31,13 @@ uv run pytest tests/test_xxx.py
 uv run pytest tests/test_xxx.py::test_func -v
 uv build --wheel                # 校验打包与资源包含
 
-# 前端 / 桌面端（仅改动 apps/undefined-console/ 或 webui/static/js/ 时需要）
+# 前端 / 桌面端（仅改动 apps/undefined-console/ 或 apps/undefined-chat/ 或 webui/static/js/ 时需要）
 cd apps/undefined-console && npm ci && npm run check
 cd apps/undefined-console && npm run dev
 cd apps/undefined-console && npm run tauri:dev
+
+cd apps/undefined-chat && npm ci && npm run check
+cd apps/undefined-chat && npm run tauri:dev
 
 # Git hooks 安装
 bash scripts/install_git_hooks.sh
@@ -48,8 +51,8 @@ bash scripts/install_git_hooks.sh
 - **异步 IO**：磁盘读写必须走 `utils/io.py`（`asyncio.to_thread` + 跨平台文件锁 + 原子写入），禁止在事件循环中直接阻塞 IO
 - **Python 版本**：`>=3.11, <3.14`（推荐 3.12）
 - **测试**：pytest + pytest-asyncio，`asyncio_mode = "auto"`
-- **前端格式化**：`src/Undefined/webui/static/js/` 由根目录 `biome.json` 管理；`apps/undefined-console/` 走 Biome + TypeScript + Cargo 检查
-- **版本号同步**：发布版本时优先使用 `uv run python scripts/bump_version.py <version>`，统一同步 Python 包、console 与 Tauri 版本号
+- **前端格式化**：`src/Undefined/webui/static/js/` 由根目录 `biome.json` 管理；`apps/undefined-console/` 和 `apps/undefined-chat/` 走 Biome + TypeScript + Cargo 检查
+- **版本号同步**：发布版本时优先使用 `uv run python scripts/bump_version.py <version>`，统一同步 Python 包、console、chat 与 Tauri 版本号
 - **Git hooks**：优先通过 `scripts/install_git_hooks.sh` 安装，不要手动维护 `core.hooksPath`
 
 ## 架构分层
@@ -162,3 +165,5 @@ Management / Runtime 请求 → webui/app.py 或 api/app.py → routes/*
 ## 跨平台控制台
 
 `apps/undefined-console/` 是基于 Tauri v2 + TypeScript + Vite 的管理客户端，支持 Windows / macOS / Linux / Android，连接同一套 Management API 与 Runtime API。
+
+`apps/undefined-chat/` 是原生优先的 WebChat 客户端，基于 Tauri v2 + React，直接连接 Runtime API，面向长期挂起、桌面/移动端聊天使用场景。采用莫兰迪青蓝色系（Morandi Teal-Blue）设计，与 WebUI 保持视觉一致性，100% 移植 WebUI webchat 的所有核心功能。详见 [docs/undefined-chat.md](docs/undefined-chat.md)。

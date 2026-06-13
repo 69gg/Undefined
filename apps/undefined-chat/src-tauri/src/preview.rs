@@ -95,3 +95,126 @@ pub async fn open_html_preview(app: AppHandle, input: HtmlPreviewInput) -> Resul
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_escape_html_text() {
+        assert_eq!(escape_html_text("hello"), "hello");
+        assert_eq!(escape_html_text("<script>"), "&lt;script&gt;");
+        assert_eq!(escape_html_text("a & b"), "a &amp; b");
+        assert_eq!(
+            escape_html_text("<div>a & b</div>"),
+            "&lt;div&gt;a &amp; b&lt;/div&gt;"
+        );
+    }
+
+    #[test]
+    fn test_preview_document_structure() {
+        let doc = preview_document("Test", "<p>content</p>");
+        assert!(doc.contains("<!doctype html>"));
+        assert!(doc.contains("<html>"));
+        assert!(doc.contains("<head>"));
+        assert!(doc.contains("<body>"));
+        assert!(doc.contains("</html>"));
+    }
+
+    #[test]
+    fn test_preview_document_escapes_title() {
+        let doc = preview_document("<script>alert('xss')</script>", "<p>safe</p>");
+        assert!(doc.contains("&lt;script&gt;"));
+        assert!(!doc.contains("<script>alert"));
+    }
+
+    #[test]
+    fn test_preview_document_preserves_html_content() {
+        let doc = preview_document("Page", "<h1>Hello</h1>");
+        assert!(doc.contains("<body><h1>Hello</h1></body>"));
+    }
+
+    #[test]
+    fn test_preview_document_includes_csp() {
+        let doc = preview_document("Test", "<p>test</p>");
+        assert!(doc.contains("Content-Security-Policy"));
+        assert!(doc.contains(PREVIEW_CSP));
+    }
+
+    #[test]
+    fn test_preview_document_includes_viewport() {
+        let doc = preview_document("Test", "<p>test</p>");
+        assert!(doc.contains("width=device-width, initial-scale=1"));
+    }
+
+    #[test]
+    fn test_build_preview_data_url_success() {
+        let result = build_preview_data_url("Test", "<p>Hello</p>");
+        assert!(result.is_ok());
+        let url = result.unwrap();
+        assert_eq!(url.scheme(), "data");
+        assert!(url.as_str().contains("text/html"));
+        assert!(url.as_str().contains("charset=utf-8"));
+    }
+
+    #[test]
+    fn test_build_preview_data_url_size_limit() {
+        let large_html = "x".repeat(MAX_PREVIEW_HTML_BYTES + 1);
+        let result = build_preview_data_url("Test", &large_html);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("too large"));
+    }
+
+    #[test]
+    fn test_build_preview_data_url_encoding() {
+        let result = build_preview_data_url("Test & Title", "<p>Test & Content</p>");
+        assert!(result.is_ok());
+        let url = result.unwrap();
+        // URL should be percent-encoded
+        assert!(url.as_str().contains("%26")); // & becomes %26
+    }
+
+    #[test]
+    fn test_preview_navigation_allowed_initial() {
+        let initial = Url::parse("data:text/html,test").unwrap();
+        assert!(preview_navigation_allowed(&initial, &initial));
+    }
+
+    #[test]
+    fn test_preview_navigation_allowed_about_blank() {
+        let initial = Url::parse("data:text/html,test").unwrap();
+        let about_blank = Url::parse("about:blank").unwrap();
+        assert!(preview_navigation_allowed(&about_blank, &initial));
+    }
+
+    #[test]
+    fn test_preview_navigation_blocked_different_url() {
+        let initial = Url::parse("data:text/html,test").unwrap();
+        let different = Url::parse("https://example.com").unwrap();
+        assert!(!preview_navigation_allowed(&different, &initial));
+    }
+
+    #[test]
+    fn test_csp_blocks_scripts() {
+        // CSP should include script-src 'none'
+        assert!(PREVIEW_CSP.contains("script-src 'none'"));
+    }
+
+    #[test]
+    fn test_csp_allows_inline_styles() {
+        // CSP should allow inline styles
+        assert!(PREVIEW_CSP.contains("style-src 'unsafe-inline'"));
+    }
+
+    #[test]
+    fn test_csp_allows_data_images() {
+        // CSP should allow data: URIs for images
+        assert!(PREVIEW_CSP.contains("img-src data:"));
+    }
+
+    #[test]
+    fn test_csp_blocks_connections() {
+        // CSP should block network connections
+        assert!(PREVIEW_CSP.contains("connect-src 'none'"));
+    }
+}

@@ -8,6 +8,7 @@ import {
 } from "react";
 import { createChatStore, isJobRunning } from "./chat-store/store";
 import { ConversationList } from "./conversation-list/ConversationList";
+import { useImageViewer } from "./image-viewer/useImageViewer";
 import { MessageComposer } from "./message-composer/MessageComposer";
 import { MessageTimeline } from "./message-timeline/MessageTimeline";
 import { createTauriRuntimeClient } from "./runtime-client/tauri";
@@ -18,6 +19,7 @@ export function App() {
 	const { effectiveTheme } = useTheme();
 	const client = useMemo(() => createTauriRuntimeClient(), []);
 	const store = useMemo(() => createChatStore({ client }), [client]);
+	const { openImage } = useImageViewer(store);
 	const state = useSyncExternalStore(
 		store.subscribe,
 		store.getSnapshot,
@@ -325,6 +327,15 @@ export function App() {
 						void saveAttachment(attachment);
 					}}
 					onShortcutClick={handleShortcutClick}
+					onAddReference={(messageId, quote) => {
+						if (selectedConversationId) {
+							store.addReference(selectedConversationId, {
+								messageId,
+								quote,
+							});
+						}
+					}}
+					onOpenImage={openImage}
 				/>
 
 				{/* 输入框 */}

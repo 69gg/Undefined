@@ -96,7 +96,7 @@ describe("MessageTimeline", () => {
 		);
 
 		expect(screen.getByText("参考这条消息")).toBeTruthy();
-		expect(screen.getByText("report.png")).toBeTruthy();
+		expect(screen.getByAltText("report.png")).toBeTruthy();
 		expect(screen.getByText(/引用/)).toBeTruthy();
 		expect(screen.getByText("group.get_member_info")).toBeTruthy();
 		expect(screen.getByText("planner")).toBeTruthy();

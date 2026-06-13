@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AttachmentDraft } from "../chat-store/store";
 import type { CommandInfo, MessageReference } from "../runtime-client/types";
+import { CommandPalette } from "./CommandPalette";
+import { ReferenceChips } from "./ReferenceChips";
 
 export type MessageComposerProps = {
 	attachmentQueue: AttachmentDraft[];
@@ -35,6 +37,8 @@ export function MessageComposer({
 	onSend,
 }: MessageComposerProps) {
 	const [value, setValue] = useState(draft);
+	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+	const [commandPaletteActiveIndex, setCommandPaletteActiveIndex] = useState(0);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 
 	// 同步外部草稿
@@ -49,6 +53,26 @@ export function MessageComposer({
 		if (textarea) {
 			textarea.style.height = "auto";
 			textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+		}
+	}, [value]);
+
+	// 命令面板查询文本
+	const commandQuery = useMemo(() => {
+		if (!value.startsWith("/")) {
+			return "";
+		}
+		// 提取 / 后到第一个空格前的内容
+		const match = value.match(/^\/(\S*)/);
+		return match ? match[1] : "";
+	}, [value]);
+
+	// 监听输入变化，决定是否打开命令面板
+	useEffect(() => {
+		if (value.startsWith("/") && !value.includes(" ")) {
+			setCommandPaletteOpen(true);
+			setCommandPaletteActiveIndex(0);
+		} else {
+			setCommandPaletteOpen(false);
 		}
 	}, [value]);
 
@@ -74,6 +98,30 @@ export function MessageComposer({
 	function handleKeyDown(
 		event: React.KeyboardEvent<HTMLTextAreaElement>,
 	): void {
+		// 命令面板打开时，拦截导航键
+		if (commandPaletteOpen) {
+			if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+				event.preventDefault();
+				handleCommandPaletteNavigate(event.key === "ArrowUp" ? -1 : 1);
+				return;
+			}
+			if (event.key === "Enter" && !event.shiftKey) {
+				event.preventDefault();
+				const matches = commandSuggestions.filter((cmd) =>
+					cmd.name.toLowerCase().includes(commandQuery.toLowerCase()),
+				);
+				if (matches[commandPaletteActiveIndex]) {
+					handleCommandSelect(matches[commandPaletteActiveIndex]);
+				}
+				return;
+			}
+			if (event.key === "Escape") {
+				event.preventDefault();
+				setCommandPaletteOpen(false);
+				return;
+			}
+		}
+
 		if (event.key !== "Enter") {
 			return;
 		}
@@ -96,6 +144,29 @@ export function MessageComposer({
 		}
 	}
 
+	function handleCommandSelect(command: CommandInfo): void {
+		update(`/${command.name} `);
+		setCommandPaletteOpen(false);
+		textareaRef.current?.focus();
+	}
+
+	function handleCommandPaletteNavigate(delta: number): void {
+		const matches = commandSuggestions.filter((cmd) =>
+			cmd.name.toLowerCase().includes(commandQuery.toLowerCase()),
+		);
+		const maxIndex = Math.min(matches.length - 1, 7); // MAX_MATCHES - 1
+		setCommandPaletteActiveIndex((prev) => {
+			const next = prev + delta;
+			if (next < 0) {
+				return maxIndex;
+			}
+			if (next > maxIndex) {
+				return 0;
+			}
+			return next;
+		});
+	}
+
 	return (
 		<div className="composer-wrapper">
 			<form
@@ -108,22 +179,7 @@ export function MessageComposer({
 				}}
 			>
 				{/* 引用消息 */}
-				{references.length > 0 ? (
-					<div className="composer-references">
-						{references.map((reference) => (
-							<span className="composer-chip" key={reference.messageId}>
-								<span>{reference.quote}</span>
-								<button
-									aria-label={`取消引用 ${reference.messageId}`}
-									onClick={() => onClearReference(reference.messageId)}
-									type="button"
-								>
-									×
-								</button>
-							</span>
-						))}
-					</div>
-				) : null}
+				<ReferenceChips references={references} onClear={onClearReference} />
 
 				{/* 附件队列 */}
 				{attachmentQueue.length > 0 ? (
@@ -199,8 +255,19 @@ export function MessageComposer({
 					</button>
 				</div>
 
-				{/* 联想词建议 */}
-				{filteredCommands.length > 0 ? (
+				{/* 命令面板 */}
+				<CommandPalette
+					open={commandPaletteOpen}
+					query={commandQuery}
+					commands={commandSuggestions}
+					activeIndex={commandPaletteActiveIndex}
+					onSelect={handleCommandSelect}
+					onClose={() => setCommandPaletteOpen(false)}
+					onNavigate={handleCommandPaletteNavigate}
+				/>
+
+				{/* 联想词建议（保持向后兼容） */}
+				{filteredCommands.length > 0 && !commandPaletteOpen ? (
 					<ul aria-label="命令建议" className="command-suggestions">
 						{filteredCommands.map((command) => (
 							<li

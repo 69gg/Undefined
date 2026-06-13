@@ -145,6 +145,7 @@ export function runtimeClientStub(
 				messageCount: 0,
 			}),
 		),
+		deleteConversation: vi.fn(async () => undefined),
 		getHistory: vi.fn(async () => ({
 			conversationId: "default",
 			virtualUserId: "webchat",
@@ -155,6 +156,19 @@ export function runtimeClientStub(
 			before: null,
 			hasMore: false,
 			nextBefore: null,
+			total: 0,
+		})),
+		getHistoryPage: vi.fn(async () => ({
+			conversationId: "default",
+			virtualUserId: "webchat",
+			permission: "superadmin",
+			count: 0,
+			items: [],
+			limit: 50,
+			before: null,
+			hasMore: false,
+			nextBefore: null,
+			cursor: null,
 			total: 0,
 		})),
 		getActiveJobs: vi.fn(async () => ({

@@ -1,0 +1,293 @@
+/* ToolBlock 组件样式 - 从 webui components.css 迁移 */
+
+.runtime-tool-block {
+	--tool-accent: var(--accent-color);
+	min-width: 0;
+	max-width: 100%;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-sm);
+	background: color-mix(in srgb, var(--bg-app) 92%, var(--bg-card));
+	overflow: hidden;
+	position: relative;
+	transition:
+		border-color 0.18s ease,
+		background 0.18s ease,
+		transform 0.18s ease,
+		box-shadow 0.18s ease;
+	margin: 0.5em 0;
+}
+
+.runtime-tool-block::before {
+	content: "";
+	position: absolute;
+	inset: 0 auto 0 0;
+	width: 3px;
+	background: var(--tool-accent);
+	opacity: 0.65;
+}
+
+.runtime-tool-block.is-tool {
+	--tool-accent: color-mix(in srgb, var(--success) 76%, var(--accent-color));
+}
+
+.runtime-tool-block.running {
+	--tool-accent: color-mix(in srgb, var(--warning) 82%, var(--accent-color));
+}
+
+.runtime-tool-block.running::after {
+	content: "";
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 2px;
+	background: linear-gradient(
+		90deg,
+		transparent,
+		var(--tool-accent),
+		transparent
+	);
+	animation: loading-bar 1.5s ease-in-out infinite;
+}
+
+@keyframes loading-bar {
+	0% {
+		transform: translateX(-100%);
+	}
+	100% {
+		transform: translateX(100%);
+	}
+}
+
+.runtime-tool-block.done {
+	--tool-accent: var(--success);
+}
+
+.runtime-tool-block.error {
+	--tool-accent: var(--error);
+}
+
+.runtime-tool-block:hover {
+	border-color: color-mix(in srgb, var(--tool-accent) 38%, var(--border-color));
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.runtime-tool-block summary {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto auto;
+	align-items: center;
+	gap: 8px;
+	cursor: pointer;
+	min-height: 32px;
+	padding: 3px 10px 3px 13px;
+	font-size: 12px;
+	line-height: 1.2;
+	color: var(--text-secondary);
+	list-style: none;
+}
+
+.runtime-tool-block summary::-webkit-details-marker {
+	display: none;
+}
+
+.runtime-tool-block summary::before {
+	content: "";
+	width: 6px;
+	height: 6px;
+	border-right: 1.5px solid currentColor;
+	border-bottom: 1.5px solid currentColor;
+	transform: rotate(-45deg);
+	transition: transform 0.18s ease;
+	opacity: 0.7;
+}
+
+.runtime-tool-block[open] summary::before {
+	transform: rotate(45deg);
+}
+
+.runtime-tool-block summary .runtime-tool-summary-main {
+	min-width: 0;
+	overflow: hidden;
+}
+
+.runtime-tool-block summary .runtime-tool-title {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 7px;
+	min-width: 0;
+	max-width: 100%;
+	vertical-align: middle;
+}
+
+.runtime-tool-block summary .runtime-tool-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	border: 0;
+	background: transparent;
+	padding: 0;
+	color: var(--text-primary);
+	font-size: 12px;
+	font-weight: 650;
+}
+
+.runtime-tool-block summary .runtime-tool-duration {
+	flex: 0 0 auto;
+	padding: 1px 6px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--tool-accent) 10%, transparent);
+	color: color-mix(in srgb, var(--tool-accent) 84%, var(--text-primary));
+	font-family: var(--font-mono);
+	font-size: 10.5px;
+	line-height: 1.4;
+	white-space: nowrap;
+}
+
+.runtime-tool-block summary .runtime-tool-status {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-style: normal;
+	white-space: nowrap;
+	color: var(--text-tertiary);
+	font-size: 11px;
+}
+
+.runtime-tool-block.running summary .runtime-tool-status {
+	color: var(--warning);
+}
+
+.runtime-tool-block.done summary .runtime-tool-status {
+	color: var(--success);
+}
+
+.runtime-tool-block.error summary .runtime-tool-status {
+	color: var(--error);
+}
+
+.runtime-tool-preview {
+	min-width: 0;
+	max-width: 100%;
+	border-top: 1px solid var(--border-color);
+	padding: 8px 10px 10px;
+	animation: tool-reveal 0.18s ease-out;
+}
+
+@keyframes tool-reveal {
+	from {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.runtime-tool-preview + .runtime-tool-preview {
+	border-top-style: dashed;
+}
+
+.runtime-tool-preview-label {
+	margin-bottom: 6px;
+	color: var(--text-tertiary);
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+}
+
+.runtime-tool-preview-body {
+	min-width: 0;
+	max-width: 100%;
+	color: var(--text-secondary);
+	font-size: 12px;
+	line-height: 1.5;
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: min(34vh, 260px);
+	overflow: auto;
+}
+
+.runtime-tool-preview-body > *:first-child {
+	margin-top: 0;
+}
+
+.runtime-tool-preview-body > *:last-child {
+	margin-bottom: 0;
+}
+
+/* 时间线条目样式 */
+.timeline-entry {
+	display: grid;
+	grid-template-columns: auto auto 1fr;
+	gap: 8px;
+	padding: 6px 0;
+	border-bottom: 1px solid color-mix(in srgb, var(--border-color) 40%, transparent);
+}
+
+.timeline-entry:last-child {
+	border-bottom: none;
+}
+
+.timeline-time {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	color: var(--text-tertiary);
+	white-space: nowrap;
+}
+
+.timeline-label {
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	padding: 0 6px;
+	border-radius: 4px;
+	white-space: nowrap;
+}
+
+.timeline-entry-input .timeline-label {
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+	color: var(--accent);
+}
+
+.timeline-entry-output .timeline-label {
+	background: color-mix(in srgb, var(--success) 12%, transparent);
+	color: var(--success);
+}
+
+.timeline-entry-error .timeline-label {
+	background: color-mix(in srgb, var(--error) 12%, transparent);
+	color: var(--error);
+}
+
+.timeline-content {
+	grid-column: 3;
+	margin: 0;
+	padding: 4px 8px;
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--bg-card) 70%, var(--bg-app));
+	font-family: var(--font-mono);
+	font-size: 11px;
+	line-height: 1.4;
+	overflow-wrap: anywhere;
+}
+
+/* 嵌套工具块 */
+.runtime-tool-children {
+	border-top: 1px solid var(--border-color);
+	padding: 8px;
+	background: color-mix(in srgb, var(--bg-app) 50%, transparent);
+}
+
+.runtime-tool-children .runtime-tool-block {
+	margin: 6px 0;
+}
+
+.runtime-tool-children .runtime-tool-block:first-child {
+	margin-top: 0;
+}
+
+.runtime-tool-children .runtime-tool-block:last-child {
+	margin-bottom: 0;
+}

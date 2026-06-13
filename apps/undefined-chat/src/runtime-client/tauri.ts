@@ -38,6 +38,7 @@ import type {
 	ConversationsResponse,
 	EventStreamSubscription,
 	HistoryItem,
+	HistoryPageResponse,
 	HistoryResponse,
 	HistoryWebchat,
 	HtmlPreviewInput,
@@ -490,6 +491,34 @@ export function createTauriRuntimeClient(): RuntimeClient {
 			};
 		},
 
+		async getHistoryPage(
+			conversationId: string,
+			before?: number | null,
+			limit = 50,
+		): Promise<HistoryPageResponse> {
+			const input = {
+				conversationId,
+				limit,
+				...(before !== undefined && before !== null ? { before } : {}),
+			};
+			const raw = record(
+				unwrapRuntimeBody(await invoke("get_history", { input })),
+			);
+			return {
+				conversationId: text(field(raw, "conversationId", "conversation_id")),
+				virtualUserId: text(field(raw, "virtualUserId", "virtual_user_id")),
+				permission: text(raw.permission),
+				count: numberValue(raw.count),
+				items: arrayRecords(raw.items).map(normalizeHistoryItem),
+				limit: numberValue(raw.limit, limit),
+				before: nullableNumber(raw.before),
+				hasMore: bool(field(raw, "hasMore", "has_more")),
+				nextBefore: nullableNumber(field(raw, "nextBefore", "next_before")),
+				cursor: nullableNumber(field(raw, "nextBefore", "next_before")),
+				total: numberValue(raw.total),
+			};
+		},
+
 		async getActiveJobs(input = {}): Promise<ActiveJobsResponse> {
 			const raw = record(
 				unwrapRuntimeBody(await invoke("get_active_jobs", { input })),
@@ -536,6 +565,17 @@ export function createTauriRuntimeClient(): RuntimeClient {
 				throw new Error("Runtime response did not include a conversation");
 			}
 			return conversation;
+		},
+
+		async deleteConversation(conversationId: string): Promise<void> {
+			await invoke("runtime_request", {
+				input: {
+					method: "DELETE",
+					path: `/api/v1/chat/conversations/${conversationId}`,
+					body: {},
+					headers: [],
+				},
+			});
 		},
 
 		async cancelJob(jobId: string): Promise<ChatJob> {
