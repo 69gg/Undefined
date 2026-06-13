@@ -158,7 +158,15 @@ export function App() {
 	function handleShortcutClick(prompt: string) {
 		if (selectedConversationId) {
 			store.updateDraft(selectedConversationId, prompt);
+			return;
 		}
+		// 尚无会话：先自动创建再把示例填入草稿
+		void store.createConversation().then(() => {
+			const conversationId = store.getSnapshot().selectedConversationId;
+			if (conversationId) {
+				store.updateDraft(conversationId, prompt);
+			}
+		});
 	}
 
 	const showModal = needsSetup || isSettingsOpen;

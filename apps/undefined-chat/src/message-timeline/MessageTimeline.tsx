@@ -143,7 +143,7 @@ export function MessageTimeline({
 			),
 			title: "今日新闻",
 			desc: "获取最新时事与突发热点",
-			prompt: "/search 搜索今日国内国际新闻热点",
+			prompt: "搜索今日国内国际新闻热点",
 		},
 		{
 			icon: (
