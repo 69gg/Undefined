@@ -996,15 +996,63 @@ export function createChatStore({
 
 	function applyRuntimeEvents(jobId: string, events: ChatEvent[]): void {
 		dispatch({ type: "events/apply", jobId, events });
-		const doneEvent = events.find((item) =>
-			["done", "error", "cancelled"].includes(item.event),
-		);
 		const conversationId =
 			state.jobConversationById[jobId] ||
 			events
 				.map((item) => item.payload.conversation_id)
 				.find((item): item is string => typeof item === "string") ||
 			"";
+
+		// 消费 stage/message 事件更新 activeJob（对齐 WebUI applyChatEventsPayload）
+		const activeJob =
+			conversationId && state.activeJobsByConversation[conversationId];
+		if (activeJob && activeJob.jobId === jobId) {
+			let updatedJob = activeJob;
+			for (const event of events) {
+				if (event.event === "stage" && event.payload) {
+					// stage 事件：更新 currentStage/Detail/StartedAt（对齐 WebUI setChatStage）
+					const stage = String(event.payload.stage ?? "").trim();
+					const detail = String(event.payload.detail ?? "").trim() || null;
+					const startedAt =
+						typeof event.payload.started_at === "number"
+							? event.payload.started_at
+							: null;
+					const elapsedMs =
+						typeof event.payload.elapsed_ms === "number"
+							? event.payload.elapsed_ms
+							: null;
+					if (stage) {
+						updatedJob = {
+							...updatedJob,
+							currentStage: stage,
+							currentStageDetail: detail,
+							currentStageStartedAt: startedAt,
+							currentStageElapsedMs: elapsedMs,
+						};
+					}
+				} else if (event.event === "message" && event.payload) {
+					// message 事件：追加文本到 reply（对齐 WebUI appendTimelineMessage）
+					const content = String(
+						event.payload.content ?? event.payload.message ?? "",
+					);
+					if (content) {
+						updatedJob = {
+							...updatedJob,
+							reply: updatedJob.reply + content,
+						};
+					}
+				}
+				// tool_call/agent_stage 等事件当前已由 job/upsert 完整更新，此处不重复处理
+			}
+			if (updatedJob !== activeJob) {
+				dispatch({ type: "job/upsert", job: updatedJob });
+			}
+		}
+
+		// 终态事件：清理 job 并重载历史
+		const doneEvent = events.find((item) =>
+			["done", "error", "cancelled"].includes(item.event),
+		);
 		if (doneEvent && conversationId) {
 			stopFallbackPolling(jobId);
 			const subscriptionId = subscriptionsByJob.get(jobId);
