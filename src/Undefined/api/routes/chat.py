@@ -2194,6 +2194,10 @@ async def _history_attachments(
         )
         if resolved is not None:
             ref.update(await _history_attachment_render_fields(resolved))
+        # 补充 preview_url / download_url，供客户端渲染附件卡片
+        ref["download_url"] = f"/api/v1/chat/attachments/{uid}"
+        if media_type.startswith("image/"):
+            ref["preview_url"] = f"/api/v1/chat/attachments/{uid}/preview"
         attachments.append(ref)
     return attachments
 
