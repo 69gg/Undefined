@@ -294,6 +294,49 @@ describe("chat store", () => {
 		]);
 	});
 
+	test("applyRuntimeEvents dedupes events by seq (no duplicate accumulation on fallback/reconnect)", async () => {
+		const runningJob = job({ jobId: "job-1", conversationId: "default" });
+		const client = runtimeClientStub({
+			getActiveJobs: vi.fn(async () => ({
+				job: runningJob,
+				jobs: [runningJob],
+			})),
+		});
+		const store = createChatStore({ client });
+		await store.bootstrap();
+
+		// 第一次：处理 message seq 1
+		store.applyRuntimeEvents("job-1", [
+			event({
+				seq: 1,
+				event: "message",
+				payload: { job_id: "job-1", content: "你好" },
+			}),
+		]);
+		// 第二次（模拟 JSON fallback / SSE 重连重发）：含已处理的 seq 1 + 新 seq 2
+		store.applyRuntimeEvents("job-1", [
+			event({
+				seq: 1,
+				event: "message",
+				payload: { job_id: "job-1", content: "你好" },
+			}),
+			event({
+				seq: 2,
+				event: "message",
+				payload: { job_id: "job-1", content: "世界" },
+			}),
+		]);
+
+		const state = store.getSnapshot();
+		const activeJob = state.activeJobsByConversation.default;
+		// seq 1 不重复累积；currentTimeline 与 reply 仅各含一次
+		expect(activeJob?.currentTimeline).toEqual([
+			{ type: "message", seq: 1, content: "你好" },
+			{ type: "message", seq: 2, content: "世界" },
+		]);
+		expect(activeJob?.reply).toBe("你好世界");
+	});
+
 	test("continues JSON fallback polling until an SSE-broken job reaches terminal state", async () => {
 		vi.useFakeTimers();
 		const runningJob = job({ jobId: "job-1", conversationId: "default" });

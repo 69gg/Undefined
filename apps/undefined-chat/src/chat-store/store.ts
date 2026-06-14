@@ -1042,6 +1042,9 @@ export function createChatStore({
 	}
 
 	function applyRuntimeEvents(jobId: string, events: ChatEvent[]): void {
+		// 记录旧 cursor：for 循环只处理新事件（seq > 旧 cursor），对齐 events/apply 的去重，
+		// 防止 SSE 重连 / JSON fallback 重发已处理事件导致 reply/currentTimeline 重复累积（消息显示两次）
+		const prevCursor = state.eventCursorByJob[jobId] ?? 0;
 		dispatch({ type: "events/apply", jobId, events });
 		const conversationId =
 			state.jobConversationById[jobId] ||
@@ -1055,7 +1058,8 @@ export function createChatStore({
 			conversationId && state.activeJobsByConversation[conversationId];
 		if (activeJob && activeJob.jobId === jobId) {
 			let updatedJob = activeJob;
-			for (const event of events) {
+			const newEvents = events.filter((item) => item.seq > prevCursor);
+			for (const event of newEvents) {
 				if (event.event === "stage" && event.payload) {
 					// stage 事件：更新 currentStage/Detail/StartedAt（对齐 WebUI setChatStage）
 					const stage = String(event.payload.stage ?? "").trim();
