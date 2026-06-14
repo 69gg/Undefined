@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { ToolBlock as ToolBlockType } from "../chat-store/types";
 import { getChatStageLabel } from "../i18n/zh-CN";
 import "./ToolBlock.css";
@@ -92,19 +92,30 @@ export function ToolBlock({
 	startTime,
 	endTime,
 }: ToolBlockProps) {
-	const [isOpen, setIsOpen] = useState(status === "running");
-	const [userInteracted, setUserInteracted] = useState(false);
+	const detailsRef = useRef<HTMLDetailsElement>(null);
+	const userInteractedRef = useRef(false);
 	const collapseTimerRef = useRef<number | null>(null);
 
+	// 初始展开：running 时 open=true（对齐 WebUI autoOpen: isStart ? true）
+	useEffect(() => {
+		if (detailsRef.current && status === "running") {
+			detailsRef.current.open = true;
+		}
+	}, [status]);
+
+	// 自动折叠：done/error 后 2s 直接操作 DOM（对齐 WebUI scheduleToolAutoCollapse）
 	useEffect(() => {
 		if (collapseTimerRef.current !== null) {
 			clearTimeout(collapseTimerRef.current);
 			collapseTimerRef.current = null;
 		}
 
-		if ((status === "done" || status === "error") && !userInteracted) {
+		if (
+			(status === "done" || status === "error") &&
+			!userInteractedRef.current
+		) {
 			collapseTimerRef.current = window.setTimeout(() => {
-				setIsOpen(false);
+				if (detailsRef.current) detailsRef.current.open = false;
 			}, 2000);
 		}
 
@@ -113,11 +124,12 @@ export function ToolBlock({
 				clearTimeout(collapseTimerRef.current);
 			}
 		};
-	}, [status, userInteracted]);
+	}, [status]);
 
+	// 用户手动 toggle：仅记录交互（阻止后续自动折叠），绝不翻转 state
+	// （翻转会与折叠 timer 的 open 变化形成 toggle→onToggle→toggle 无限循环 = 闪烁）
 	const handleToggle = () => {
-		setUserInteracted(true);
-		setIsOpen((prev) => !prev);
+		userInteractedRef.current = true;
 	};
 
 	const duration = formatDuration(startTime, endTime);
@@ -136,7 +148,7 @@ export function ToolBlock({
 
 	return (
 		<details
-			open={isOpen}
+			ref={detailsRef}
 			className={`runtime-tool-block ${status}${kindClass}${hintClass}`}
 			data-call-id={webchatCallId}
 			onToggle={handleToggle}
