@@ -3,36 +3,20 @@ import type { Attachment } from "../runtime-client/types";
 type ExtractResult = {
 	cleanContent: string;
 	attachmentUids: string[];
-	inlineImages: { placeholder: string; src: string }[];
 };
 
 /**
- * 解析 CQ 属性字符串 "key1=value1,key2=value2"
+ * 解析消息内容中的附件标签 `<attachment uid="..."/>` / `<pic uid="..."/>`，
+ * 替换为占位符并收集 UID。
+ *
+ * 图片在 Runtime API 输出环节已统一注册为附件并改写为 `<attachment uid/>`
+ * （后端 `segment_text` 重建文本，不会残留 `[CQ:image]`/`[CQ:file]` 等 CQ 码），
+ * 故客户端只需处理 UID 附件标签。
  */
-function parseCqAttributes(attrStr: string): Record<string, string> {
-	const attrs: Record<string, string> = {};
-	for (const pair of attrStr.split(",")) {
-		const eqIdx = pair.indexOf("=");
-		if (eqIdx > 0) {
-			attrs[pair.slice(0, eqIdx).trim()] = pair.slice(eqIdx + 1).trim();
-		}
-	}
-	return attrs;
-}
-
-/**
- * 解析消息内容中的各类图片/附件标签
- * 支持 <attachment uid="..."/>, <pic uid="..."/>, [CQ:image,...], [CQ:file,...]
- */
-export function extractAttachmentTags(
-	content: string,
-	runtimeUrl?: string,
-): ExtractResult {
+export function extractAttachmentTags(content: string): ExtractResult {
 	const uids: string[] = [];
-	const inlineImages: { placeholder: string; src: string }[] = [];
 	let processed = content;
 
-	// 1. 处理 <attachment uid="..."/> 和 <pic uid="..."/>
 	const attachmentPattern =
 		/<(?:attachment|pic)\s+uid=["']([^"']+)["']\s*\/?\s*>/gi;
 	processed = processed.replace(attachmentPattern, (_match, uid) => {
@@ -40,62 +24,40 @@ export function extractAttachmentTags(
 		return `ATTACHMENT_PLACEHOLDER_${uids.length - 1}`;
 	});
 
-	// 2. 处理 [CQ:image,...] 码
-	const imagePattern = /\[CQ:image,([^\]]+)\]/g;
-	processed = processed.replace(imagePattern, (_match, attrStr) => {
-		const attrs = parseCqAttributes(attrStr);
-		const src = resolveCQImageUrl(attrs.url || attrs.file || "", runtimeUrl);
-		if (src) {
-			const placeholder = `CQ_IMAGE_PLACEHOLDER_${inlineImages.length}`;
-			inlineImages.push({ placeholder, src });
-			return placeholder;
-		}
-		return _match;
-	});
-
-	// 3. 处理 [CQ:file,...] 码 — 直接移除（已由 attachments 展示）
-	processed = processed.replace(/\[CQ:file,[^\]]+\]/g, "");
-
-	return { cleanContent: processed, attachmentUids: uids, inlineImages };
+	return { cleanContent: processed, attachmentUids: uids };
 }
 
 /**
- * 将 CQ 图片码中的 URL 转换为可访问的地址
+ * 将后端返回的附件 URL 解析为可直接访问的地址。
+ *
+ * Runtime API 返回的是相对路径（如 `/api/v1/chat/attachments/<uid>/preview`）。
+ * undefined-chat 是独立 Tauri 应用，前端与 Runtime 不同源，相对路径会被解析到
+ * `tauri://localhost` 而加载失败，因此根路径需补上 `runtimeUrl` 前缀。
+ * 绝对地址（http/https/data:/blob:/协议相对）原样返回，避免重复前缀。
  */
-export function resolveCQImageUrl(
-	url: string,
+export function resolveAttachmentUrl(
+	url: string | null | undefined,
 	runtimeUrl?: string,
-): string | null {
-	const trimmed = url.trim();
-	if (!trimmed) return null;
-
-	if (trimmed.startsWith("base64://")) {
-		const payload = trimmed.slice("base64://".length).trim();
-		return payload ? `data:image/png;base64,${payload}` : null;
-	}
-
-	if (trimmed.startsWith("file://")) {
-		const localPath = trimmed.slice("file://".length).trim();
-		const base = runtimeUrl || "";
-		return localPath
-			? `${base}/api/runtime/chat/image?path=${encodeURIComponent(localPath)}`
-			: null;
-	}
-
-	if (trimmed.startsWith("/") || /^[A-Za-z]:[\\/]/.test(trimmed)) {
-		const base = runtimeUrl || "";
-		return `${base}/api/runtime/chat/image?path=${encodeURIComponent(trimmed)}`;
-	}
+): string {
+	const trimmed = (url ?? "").trim();
+	if (!trimmed) return "";
 
 	if (
 		trimmed.startsWith("http://") ||
 		trimmed.startsWith("https://") ||
-		trimmed.startsWith("data:image/")
+		trimmed.startsWith("data:") ||
+		trimmed.startsWith("blob:") ||
+		trimmed.startsWith("//")
 	) {
 		return trimmed;
 	}
 
-	return null;
+	if (trimmed.startsWith("/")) {
+		const base = (runtimeUrl ?? "").replace(/\/+$/, "");
+		return base ? `${base}${trimmed}` : trimmed;
+	}
+
+	return trimmed;
 }
 
 /**
@@ -109,42 +71,32 @@ export function findAttachmentByUid(
 }
 
 /**
- * 渲染附件和内联图片占位符为实际 HTML 内容
+ * 渲染附件占位符为实际 HTML 内容
  */
 export function renderAttachmentPlaceholders(
 	html: string,
 	attachmentUids: string[],
-	inlineImages: { placeholder: string; src: string }[],
 	attachments: Attachment[],
 	runtimeUrl?: string,
 ): string {
 	let result = html;
 
-	// 处理附件标签占位符
 	for (let i = 0; i < attachmentUids.length; i++) {
 		const uid = attachmentUids[i];
 		const attachment = findAttachmentByUid(attachments, uid);
 		const placeholder = `ATTACHMENT_PLACEHOLDER_${i}`;
 
 		if (attachment?.mediaType?.startsWith("image/")) {
-			const src =
-				attachment.previewUrl ||
-				attachment.downloadUrl ||
-				(runtimeUrl
-					? `${runtimeUrl}/api/runtime/attachments/${encodeURIComponent(uid)}/preview`
-					: "");
+			const src = resolveAttachmentUrl(
+				attachment.previewUrl || attachment.downloadUrl,
+				runtimeUrl,
+			);
 
 			const imgTag = `<img class="runtime-chat-image" src="${escapeHtml(src)}" alt="${escapeHtml(attachment.name)}" loading="lazy" decoding="async" data-attachment-id="${escapeHtml(uid)}" />`;
 			result = result.replace(new RegExp(placeholder, "g"), imgTag);
 		} else {
 			result = result.replace(new RegExp(placeholder, "g"), "");
 		}
-	}
-
-	// 处理 CQ 图片占位符
-	for (const img of inlineImages) {
-		const imgTag = `<img class="runtime-chat-image" src="${escapeHtml(img.src)}" alt="image" loading="lazy" decoding="async" />`;
-		result = result.replace(new RegExp(img.placeholder, "g"), imgTag);
 	}
 
 	return result;

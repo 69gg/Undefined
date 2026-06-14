@@ -1,3 +1,4 @@
+import { resolveAttachmentUrl } from "../rendering/AttachmentProcessor";
 import type { Attachment } from "../runtime-client/types";
 import { formatFileSize } from "../utils/file-size";
 
@@ -5,6 +6,8 @@ export type AttachmentCardProps = {
 	attachment: Attachment;
 	onPreview?: (attachment: Attachment) => void;
 	onDownload?: (attachment: Attachment) => void;
+	/** Runtime 地址，用于把后端返回的相对预览 URL 解析为绝对地址（非同源 Tauri 客户端必需） */
+	runtimeUrl?: string;
 };
 
 /**
@@ -52,9 +55,12 @@ export function AttachmentCard({
 	attachment,
 	onPreview,
 	onDownload,
+	runtimeUrl,
 }: AttachmentCardProps) {
 	const isImage = isImageAttachment(attachment);
 	const shouldInline = shouldInlineImage(attachment);
+	// 仅解析实际渲染的 src；gating 仍判断原始 previewUrl，避免空 runtimeUrl 时误降级为文件卡片
+	const previewSrc = resolveAttachmentUrl(attachment.previewUrl, runtimeUrl);
 
 	// 内联图片显示
 	if (shouldInline && attachment.previewUrl) {
@@ -77,7 +83,7 @@ export function AttachmentCard({
 					className="runtime-chat-image"
 					loading="lazy"
 					decoding="async"
-					src={attachment.previewUrl}
+					src={previewSrc}
 					style={{
 						maxWidth: "100%",
 						height: "auto",
@@ -127,7 +133,7 @@ export function AttachmentCard({
 					<img
 						alt=""
 						className="runtime-chat-attachment-thumb"
-						src={attachment.previewUrl}
+						src={previewSrc}
 						style={{
 							width: "100%",
 							height: "100%",

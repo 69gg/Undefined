@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { isJobRunning } from "../chat-store/store";
+import { resolveAttachmentUrl } from "../rendering/AttachmentProcessor";
 import {
 	type HtmlPreviewRequest,
 	MarkdownContent,
@@ -498,7 +499,10 @@ export function MessageTimeline({
 														att.mediaType?.startsWith("image/")
 													) {
 														onOpenImage(
-															att.previewUrl || att.downloadUrl || "",
+															resolveAttachmentUrl(
+																att.previewUrl || att.downloadUrl,
+																runtimeUrl,
+															),
 															att.name,
 														);
 													} else {
@@ -506,6 +510,7 @@ export function MessageTimeline({
 													}
 												}}
 												onDownload={onSaveAttachment}
+												runtimeUrl={runtimeUrl}
 											/>
 										))
 									: null}

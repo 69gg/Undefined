@@ -51,6 +51,43 @@ describe("AttachmentCard", () => {
 			expect(img).toHaveAttribute("loading", "lazy");
 		});
 
+		it("相对 previewUrl + runtimeUrl 应解析为绝对地址", () => {
+			render(
+				<AttachmentCard
+					attachment={{
+						...mockImageAttachment,
+						previewUrl: "/api/v1/chat/attachments/img-1/preview",
+					}}
+					onPreview={vi.fn()}
+					runtimeUrl="http://127.0.0.1:8788"
+				/>,
+			);
+
+			const img = screen.getByRole("img", { name: mockImageAttachment.name });
+			expect(img).toHaveAttribute(
+				"src",
+				"http://127.0.0.1:8788/api/v1/chat/attachments/img-1/preview",
+			);
+		});
+
+		it("相对 previewUrl 无 runtimeUrl 时原样渲染（降级）", () => {
+			render(
+				<AttachmentCard
+					attachment={{
+						...mockImageAttachment,
+						previewUrl: "/api/v1/chat/attachments/img-1/preview",
+					}}
+					onPreview={vi.fn()}
+				/>,
+			);
+
+			const img = screen.getByRole("img", { name: mockImageAttachment.name });
+			expect(img).toHaveAttribute(
+				"src",
+				"/api/v1/chat/attachments/img-1/preview",
+			);
+		});
+
 		it("点击内联图片应该触发预览", async () => {
 			const user = userEvent.setup();
 			const onPreview = vi.fn();

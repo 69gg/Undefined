@@ -148,9 +148,9 @@ export function MarkdownContent({
 	onImageClick,
 }: MarkdownContentProps) {
 	// 提取附件标签并替换为占位符
-	const { cleanContent, attachmentUids, inlineImages } = useMemo(
-		() => extractAttachmentTags(content, runtimeUrl),
-		[content, runtimeUrl],
+	const { cleanContent, attachmentUids } = useMemo(
+		() => extractAttachmentTags(content),
+		[content],
 	);
 
 	const segments = useMemo(() => splitSegments(cleanContent), [cleanContent]);
@@ -162,7 +162,6 @@ export function MarkdownContent({
 				const processed = renderAttachmentPlaceholders(
 					segment.value,
 					attachmentUids,
-					inlineImages,
 					attachments,
 					runtimeUrl,
 				);
@@ -170,7 +169,7 @@ export function MarkdownContent({
 			}
 			return segment;
 		});
-	}, [segments, attachmentUids, inlineImages, attachments, runtimeUrl]);
+	}, [segments, attachmentUids, attachments, runtimeUrl]);
 
 	return (
 		<div className="message-markdown">

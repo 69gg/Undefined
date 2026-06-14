@@ -119,4 +119,45 @@ describe("MessageTimeline", () => {
 			80,
 		);
 	});
+
+	test("点击附件图片以绝对 URL 打开查看器", async () => {
+		const onOpenImage = vi.fn();
+		render(
+			<MessageTimeline
+				activeJob={null}
+				connectionState="connected"
+				items={[
+					historyItem({
+						messageId: "b-img",
+						role: "bot",
+						content: "看图",
+						attachments: [
+							{
+								id: "img-1",
+								name: "chart.png",
+								size: 2048,
+								mediaType: "image/png",
+								kind: "image",
+								downloadUrl: "/api/v1/chat/attachments/img-1",
+								previewUrl: "/api/v1/chat/attachments/img-1/preview",
+								discarded: false,
+							},
+						],
+					}),
+				]}
+				onPreviewAttachment={vi.fn()}
+				onPreviewHtml={vi.fn()}
+				onSaveAttachment={vi.fn()}
+				onOpenImage={onOpenImage}
+				runtimeUrl="http://127.0.0.1:8788"
+			/>,
+		);
+
+		await userEvent.click(screen.getByAltText("chart.png"));
+
+		expect(onOpenImage).toHaveBeenCalledWith(
+			"http://127.0.0.1:8788/api/v1/chat/attachments/img-1/preview",
+			"chart.png",
+		);
+	});
 });
