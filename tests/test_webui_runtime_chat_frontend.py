@@ -358,7 +358,8 @@ def test_webchat_frontend_renders_chat_as_event_timeline() -> None:
         "function upsertToolBlock", 1
     )[0]
 
-    assert 'appendTimelineMessage(item, content, "bot")' in message_branch
+    assert 'appendTimelineMessage(item, content, "bot", {' in message_branch
+    assert "attachments: payload && payload.attachments" in message_branch
     assert "appendNestedTimelineMessage(" in message_branch
     assert 'updateChatMessage(item, content, "bot")' not in message_branch
     assert "timeline.appendChild(node)" in timeline_helper
@@ -668,6 +669,7 @@ def test_webchat_frontend_sanitizes_markdown_html_and_unsafe_links() -> None:
     assert "isSafeRenderedUrl(href)" in render_helper
     assert 'rel="noreferrer"' in render_helper
     assert "renderer.image" in render_helper
+    assert "chatImageMarkup(href, label)" in render_helper
     assert "renderer: createSafeMarkedRenderer()" in source
 
 
@@ -699,6 +701,20 @@ def test_webchat_frontend_has_clickable_image_viewer() -> None:
     assert ".runtime-chat-image-viewer" in responsive_css
 
 
+def test_webchat_markdown_images_render_as_clickable_preview_images() -> None:
+    source = _read_source(RUNTIME_JS)
+    renderer_helper = source.split("function createSafeMarkedRenderer", 1)[1].split(
+        "return renderer;",
+        1,
+    )[0]
+
+    assert "renderer.image" in renderer_helper
+    assert "isSafeRenderedImageUrl(href)" in renderer_helper
+    assert "chatImageMarkup(href, label)" in renderer_helper
+    assert "escapeHtml(label)" in renderer_helper
+    assert 'renderer.image = ({ text }) => escapeHtml(text || "")' not in source
+
+
 def test_webchat_markdown_quotes_render_as_collapsible_scroll_blocks() -> None:
     source = _read_source(RUNTIME_JS)
     css = _read_source(RUNTIME_CSS)
@@ -725,7 +741,8 @@ def test_webchat_markdown_quotes_render_as_collapsible_scroll_blocks() -> None:
     assert "renderer.blockquote = ({ tokens }) =>" in renderer_helper
     assert '<blockquote class="runtime-quote-block">' in renderer_helper
     assert "shouldRenderChatMarkdown(role, content)" in append_helper
-    assert "renderChatContent(content, useMarkdown)" in append_helper
+    assert "renderChatContent(" in append_helper
+    assert "chatRenderOptions(options.attachments)" in append_helper
     assert 'contentEl.classList.toggle("markdown", useMarkdown)' in update_helper
     # CSS 样式已简化，不再有 max-height 和 overflow 限制
     assert ".runtime-quote-block" in quote_css
@@ -1433,15 +1450,23 @@ def test_webchat_content_wraps_long_code_and_markdown_without_horizontal_scroll(
 def test_webchat_inlines_attachment_images_and_dedupes_card() -> None:
     source = _read_source(RUNTIME_JS)
 
-    # 正文 <attachment uid/> 内联为图片：复用 CQ image 渲染（file:// → /api/runtime/chat/image）
-    assert "function inlineAttachmentImages(" in source
-    assert "[CQ:image,file=" in source
+    assert "function attachmentPreviewUrl(" in source
+    assert "/api/runtime/chat/attachments/" in source
+    assert "/api/v1/runtime/chat/attachments/" not in source
+    assert "attachmentPreviewUrl(trimmedUid, attachment)" in source
 
-    # appendHistoryChatItem 用 inlineAttachmentImages 处理正文，避免标签残留
+    # appendHistoryChatItem 把附件元数据传入统一内容渲染入口，避免标签残留
     history_item_fn = source.split("function appendHistoryChatItem(", 1)[1].split(
         "\n    function ", 1
     )[0]
-    assert "inlineAttachmentImages(" in history_item_fn
+    assert "attachments: item && item.attachments" in history_item_fn
+
+    # 实时消息事件也传入 payload.attachments，避免必须刷新历史后才显示图片
+    message_event_fn = source.split('if (event === "message")', 1)[1].split(
+        'if (event === "done")',
+        1,
+    )[0]
+    assert "attachments: payload && payload.attachments" in message_event_fn
 
     # 附件区按非图片过滤，避免与正文内联图重复
     assert "function attachmentIsImage(" in source

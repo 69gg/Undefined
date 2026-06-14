@@ -568,6 +568,10 @@
         return role !== "user" || hasMarkdownBlockquote(content);
     }
 
+    function chatRenderOptions(attachments) {
+        return { attachments };
+    }
+
     function appendChatMessage(role, content, options = {}) {
         const log = get("runtimeChatLog");
         if (!log) return null;
@@ -583,7 +587,12 @@
         const roleHtml = isBot
             ? `<span class="runtime-chat-role-label">AI</span><span class="runtime-chat-stage" hidden></span>`
             : `<span class="runtime-chat-role-label">You</span>`;
-        item.innerHTML = `<div class="runtime-chat-role">${roleHtml}</div><div class="${contentClass}">${renderChatContent(content, useMarkdown)}</div>`;
+        const contentHtml = renderChatContent(
+            content,
+            useMarkdown,
+            chatRenderOptions(options.attachments),
+        );
+        item.innerHTML = `<div class="runtime-chat-role">${roleHtml}</div><div class="${contentClass}">${contentHtml}</div>`;
         if (isBot) {
             const roleEl = item.querySelector(".runtime-chat-role");
             if (roleEl) {
@@ -679,13 +688,17 @@
         setTimeout(scrollChatToBottom, 0);
     }
 
-    function updateChatMessage(item, content, role = "bot") {
+    function updateChatMessage(item, content, role = "bot", options = {}) {
         if (!item) return;
         const contentEl = item.querySelector(".runtime-chat-content");
         if (!contentEl) return;
         const useMarkdown = shouldRenderChatMarkdown(role, content);
         contentEl.classList.toggle("markdown", useMarkdown);
-        contentEl.innerHTML = renderChatContent(content, useMarkdown);
+        contentEl.innerHTML = renderChatContent(
+            content,
+            useMarkdown,
+            chatRenderOptions(options.attachments),
+        );
     }
 
     function currentChatJobId() {
@@ -756,7 +769,7 @@
             .join("\n\n");
     }
 
-    function appendTimelineMessage(item, content, role = "bot") {
+    function appendTimelineMessage(item, content, role = "bot", options = {}) {
         const text = String(content || "").trim();
         if (!item || !text) return null;
         const timeline = ensureTimelineNodeContainer(item);
@@ -766,7 +779,11 @@
         node.className = useMarkdown
             ? "runtime-chat-content markdown"
             : "runtime-chat-content";
-        node.innerHTML = renderChatContent(text, useMarkdown);
+        node.innerHTML = renderChatContent(
+            text,
+            useMarkdown,
+            chatRenderOptions(options.attachments),
+        );
         timeline.appendChild(node);
         appendRawChatContent(item, text);
         return node;
@@ -774,11 +791,8 @@
 
     function renderHistoryAttachment(item) {
         if (!item || typeof item !== "object") return "";
-        const mediaType = String(item.media_type || item.kind || "").trim();
-        if (mediaType === "image") {
-            const source = String(
-                item.render_source || item.source_ref || "",
-            ).trim();
+        if (attachmentIsImage(item)) {
+            const source = attachmentPreviewUrl(item.uid || "", item);
             if (!source) return "";
             return chatImageMarkup(
                 source,
@@ -806,34 +820,33 @@
         );
     }
 
-    // 把正文里的 <attachment uid/> / <pic uid/> 标签按附件元数据替换为内联图片
-    // （复用 CQ image 渲染：file:// 经 resolveCqImageSource 走 /api/runtime/chat/image）。
-    // 图片内联展示、避免与附件区重复；非图片或缺 source 的标签直接移除。
-    function inlineAttachmentImages(content, attachments) {
-        const text = String(content || "");
-        const list = Array.isArray(attachments) ? attachments : [];
-        if (!list.length) {
-            // 无附件元数据时仍移除残留标签，避免原始 <attachment uid/> 文本外泄
-            return text.replace(
-                /<(?:attachment|pic)\s+uid=["'][^"']+["']\s*\/?\s*>/gi,
-                "",
-            );
-        }
-        const map = new Map();
-        for (const item of list) {
-            if (item && item.uid) map.set(String(item.uid).trim(), item);
-        }
-        return text.replace(
-            /<(?:attachment|pic)\s+uid=["']([^"']+)["']\s*\/?\s*>/gi,
-            (_match, uid) => {
-                const item = map.get(String(uid).trim());
-                if (!item || !attachmentIsImage(item)) return "";
-                const source = String(
-                    item.render_source || item.source_ref || "",
-                ).trim();
-                return source ? `[CQ:image,file=${source}]` : "";
-            },
+    function attachmentPreviewUrl(uid, item = null) {
+        const cleanUid = String(uid || (item && item.uid) || "").trim();
+        const previewUrl = String((item && item.preview_url) || "").trim();
+        const previewMatch = previewUrl.match(
+            /\/api\/v1\/chat\/attachments\/([^/?#]+)\/preview(?:[?#].*)?$/,
         );
+        if (previewMatch) {
+            return `/api/runtime/chat/attachments/${previewMatch[1]}/preview`;
+        }
+        if (previewUrl) return previewUrl;
+        const sourceRef = String((item && item.source_ref) || "").trim();
+        const sourceMatch = sourceRef.match(
+            /\/api\/v1\/chat\/attachments\/([^/?#]+)(?:[?#].*)?$/,
+        );
+        if (sourceMatch) {
+            return `/api/runtime/chat/attachments/${sourceMatch[1]}/preview`;
+        }
+        if (
+            sourceRef.startsWith("http://") ||
+            sourceRef.startsWith("https://") ||
+            sourceRef.startsWith("data:image/")
+        ) {
+            return sourceRef;
+        }
+        return cleanUid
+            ? `/api/runtime/chat/attachments/${encodeURIComponent(cleanUid)}/preview`
+            : "";
     }
 
     function buildAttachmentMarkup(attachments) {
@@ -1201,7 +1214,12 @@
         if (entry.type === "message") {
             const content = String(entry.content || "").trim();
             if (!content) return "";
-            return `<div class="runtime-tool-message">${renderChatContent(content, true)}</div>`;
+            const contentHtml = renderChatContent(
+                content,
+                true,
+                chatRenderOptions(entry.attachments),
+            );
+            return `<div class="runtime-tool-message">${contentHtml}</div>`;
         }
         if (entry.type === "stage") {
             return "";
@@ -1491,7 +1509,13 @@
                           return `call:${toolRenderSignature(entry.call)}`;
                       }
                       if (entry.type === "message") {
-                          return `message:${String(entry.content || "")}`;
+                          return [
+                              "message",
+                              entry.content,
+                              JSON.stringify(entry.attachments || []),
+                          ]
+                              .map((value) => String(value || ""))
+                              .join(":");
                       }
                       if (entry.type === "stage") {
                           return ["stage", entry.seq, entry.stage, entry.detail]
@@ -1793,6 +1817,7 @@
         appendToolTimelineEntry(parent, {
             type: "message",
             content,
+            attachments: payload && payload.attachments,
         });
         redrawToolTimelineNode(item, blocks, parentKey);
         appendRawChatContent(item, content);
@@ -1941,6 +1966,10 @@
                         entry.payload &&
                             (entry.payload.content ?? entry.payload.message),
                         "bot",
+                        {
+                            attachments:
+                                entry.payload && entry.payload.attachments,
+                        },
                     );
                 });
             return true;
@@ -1953,6 +1982,9 @@
                     entry.payload &&
                         (entry.payload.content ?? entry.payload.message),
                     "bot",
+                    {
+                        attachments: entry.payload && entry.payload.attachments,
+                    },
                 );
                 return;
             }
@@ -1968,24 +2000,26 @@
 
     function appendHistoryChatItem(item, options = {}) {
         const role = item && item.role === "bot" ? "bot" : "user";
-        const content = inlineAttachmentImages(
-            String((item && item.content) || "").trim(),
-            item && item.attachments,
-        );
+        const content = String((item && item.content) || "").trim();
         const attachmentMarkup = buildAttachmentMarkup(
             item && item.attachments,
         );
         const hasTimeline =
             role === "bot" && historyWebchatEvents(item).length > 0;
         if (!content && !hasTimeline && !attachmentMarkup) return null;
-        const message = appendChatMessage(role, content, options);
+        const message = appendChatMessage(role, content, {
+            ...options,
+            attachments: item && item.attachments,
+        });
         if (!message) return null;
         if (hasTimeline) {
             const contentEl = message.querySelector(".runtime-chat-content");
             if (contentEl) contentEl.innerHTML = "";
             renderHistoryTimeline(item, message);
             if (!message.dataset.rawContent && content) {
-                appendTimelineMessage(message, content, role);
+                appendTimelineMessage(message, content, role, {
+                    attachments: item && item.attachments,
+                });
             }
         }
         if (attachmentMarkup) {
@@ -2066,7 +2100,7 @@
         if (!src) return "";
         const label =
             String(alt || "").trim() || t("runtime.image_preview") || "image";
-        return `<img class="runtime-chat-image" src="${escapeHtml(src)}" alt="${escapeHtml(label)}" title="${escapeHtml(t("runtime.open_image_preview"))}" loading="lazy" data-chat-image-preview="1" />`;
+        return `<img class="runtime-chat-image" src="${escapeHtml(src)}" alt="${escapeHtml(label)}" title="${escapeHtml(t("runtime.open_image_preview"))}" loading="lazy" decoding="async" data-chat-image-preview="1" />`;
     }
 
     function formatFileSize(bytes) {
@@ -2797,27 +2831,50 @@
                 `${label}</a>`
             );
         };
-        renderer.image = ({ text }) => escapeHtml(text || "");
+        renderer.image = (tokenOrHref, title, text) => {
+            const token =
+                tokenOrHref && typeof tokenOrHref === "object"
+                    ? tokenOrHref
+                    : { href: tokenOrHref, title, text };
+            const href = String(token.href || "").trim();
+            const label = String(token.text || "").trim();
+            return isSafeRenderedImageUrl(href)
+                ? chatImageMarkup(href, label)
+                : escapeHtml(label);
+        };
         return renderer;
     }
 
-    function renderChatContent(content, useMarkdown) {
+    function renderChatContent(content, useMarkdown, options = {}) {
         const text = String(content || "");
+        const attachments = Array.isArray(options.attachments)
+            ? options.attachments
+            : [];
+        const attachmentByUid = new Map();
+        attachments.forEach((item) => {
+            const uid = String((item && item.uid) || "").trim();
+            if (uid) attachmentByUid.set(uid, item);
+        });
 
-        // Extract <attachment uid="..."/> tags into placeholders (unified entry point for all paths)
-        // Only process image attachments (uid starts with pic_), remove file attachments
         const attachmentPattern =
             /<(?:attachment|pic)\s+uid=["']([^"']+)["']\s*\/?\s*>/gi;
         const attachmentPlaceholders = [];
         const step0 = text.replace(attachmentPattern, (_match, uid) => {
             const trimmedUid = String(uid || "").trim();
-            // Only process image attachments (pic_ prefix)
-            if (!trimmedUid.startsWith("pic_")) {
-                return ""; // Remove non-image attachment tags
-            }
+            const attachment = attachmentByUid.get(trimmedUid) || null;
+            if (attachment && !attachmentIsImage(attachment)) return "";
+            if (!attachment && !trimmedUid.startsWith("pic_")) return "";
+            const source = attachmentPreviewUrl(trimmedUid, attachment);
+            if (!source) return "";
             const idx = attachmentPlaceholders.length;
-            const previewUrl = `/api/v1/runtime/chat/attachments/${encodeURIComponent(trimmedUid)}/preview`;
-            attachmentPlaceholders.push(chatImageMarkup(previewUrl, ""));
+            attachmentPlaceholders.push(
+                chatImageMarkup(
+                    source,
+                    (attachment &&
+                        (attachment.display_name || attachment.name)) ||
+                        "",
+                ),
+            );
             return `ATTACHPH${idx}ATTACHPH`;
         });
 
@@ -5090,7 +5147,11 @@
                 payload || {},
                 content,
             );
-            if (!nested) appendTimelineMessage(item, content, "bot");
+            if (!nested) {
+                appendTimelineMessage(item, content, "bot", {
+                    attachments: payload && payload.attachments,
+                });
+            }
             finishStreamingMessage();
             scrollChatToBottomSoon();
             return;
@@ -5110,7 +5171,9 @@
                 const item = ensureStreamingMessage(eventJobId);
                 if (item) {
                     const content = String(payload.reply);
-                    appendTimelineMessage(item, content, "bot");
+                    appendTimelineMessage(item, content, "bot", {
+                        attachments: payload && payload.attachments,
+                    });
                     scrollChatToBottomSoon();
                 }
             }

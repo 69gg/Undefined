@@ -325,6 +325,8 @@ Content-Type: multipart/form-data
 
 `runtime/chat/files` 仍保留为旧 WebUI 浏览器文件缓存兼容路径；新客户端和新 WebChat 功能应使用 `runtime/chat/attachments`。
 
+WebUI 内嵌聊天渲染 `<attachment uid="..."/>` / `<pic uid="..."/>` 图片时会把 Runtime 返回的 `/api/v1/chat/attachments/{uid}/preview` 规整为 Management 代理路径 `/api/runtime/chat/attachments/{uid}/preview`，浏览器不直接请求 Runtime API。普通 Markdown 图片（如 `![Image #1](https://...)`）仍由前端安全 renderer 输出可点击预览的 `<img>`，不走附件代理。
+
 ### `runtime/chat/jobs/{job_id}/events`
 
 按 `conversation_id + job_id + seq` 续接 WebChat job 事件，支持 JSON 增量查询和兼容 SSE。
