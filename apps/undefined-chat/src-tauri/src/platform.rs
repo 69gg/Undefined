@@ -8,20 +8,29 @@ pub struct PlatformInfo {
     pub arch: String,
     pub debug: bool,
     pub supports_system_keyring: bool,
+    pub supports_secure_api_key_storage: bool,
     pub supports_sse: bool,
     pub supports_html_preview: bool,
 }
 
-#[tauri::command]
-pub fn get_platform_info() -> PlatformInfo {
-    let os = std::env::consts::OS.to_string();
+pub(crate) fn platform_info_for_target(os: &str, family: &str, arch: &str) -> PlatformInfo {
     PlatformInfo {
-        supports_system_keyring: crate::secret::supports_system_keyring_target(&os),
-        os,
-        family: std::env::consts::FAMILY.to_string(),
-        arch: std::env::consts::ARCH.to_string(),
+        supports_system_keyring: crate::secret::supports_system_keyring_target(os),
+        supports_secure_api_key_storage: crate::secret::supports_secure_api_key_target(os),
+        os: os.to_string(),
+        family: family.to_string(),
+        arch: arch.to_string(),
         debug: cfg!(debug_assertions),
         supports_sse: true,
         supports_html_preview: true,
     }
+}
+
+#[tauri::command]
+pub fn get_platform_info() -> PlatformInfo {
+    platform_info_for_target(
+        std::env::consts::OS,
+        std::env::consts::FAMILY,
+        std::env::consts::ARCH,
+    )
 }

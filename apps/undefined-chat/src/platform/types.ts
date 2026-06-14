@@ -7,6 +7,7 @@ export interface PlatformInfo {
 	arch: string;
 	debug: boolean;
 	supportsSystemKeyring: boolean;
+	supportsSecureApiKeyStorage: boolean;
 	supportsSse: boolean;
 	supportsHtmlPreview: boolean;
 }
@@ -20,6 +21,7 @@ export const DEFAULT_PLATFORM_INFO: PlatformInfo = {
 	arch: "unknown",
 	debug: false,
 	supportsSystemKeyring: false,
+	supportsSecureApiKeyStorage: false,
 	supportsSse: true,
 	supportsHtmlPreview: false,
 };

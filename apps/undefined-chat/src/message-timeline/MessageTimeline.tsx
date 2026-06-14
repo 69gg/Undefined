@@ -45,8 +45,6 @@ export type MessageTimelineProps = {
 };
 
 const WINDOW_SIZE = 64;
-const PAGED_WINDOW_SIZE = 240;
-
 type HistoryToolCall = {
 	id?: string;
 	name: string;
@@ -157,9 +155,7 @@ export function MessageTimeline({
 	onOpenImage,
 	onCancelJob,
 }: MessageTimelineProps) {
-	const visibleItems = items.slice(
-		-(onLoadMoreHistory ? PAGED_WINDOW_SIZE : WINDOW_SIZE),
-	);
+	const visibleItems = onLoadMoreHistory ? items : items.slice(-WINDOW_SIZE);
 	const timelineRef = useRef<HTMLDivElement>(null);
 	// 是否贴附底部：用户向上滚动查看历史时暂停自动滚动（智能暂停）
 	const stickToBottomRef = useRef(true);

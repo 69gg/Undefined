@@ -22,6 +22,7 @@ import { AttachmentImageProvider } from "./rendering/AttachmentImageContext";
 import { createTauriRuntimeClient } from "./runtime-client/tauri";
 import type { Attachment } from "./runtime-client/types";
 import { useTheme } from "./theme/use-theme";
+import { isImageAttachment } from "./utils/attachment";
 
 const CONVERSATION_SIDEBAR_ID = "conversation-sidebar";
 
@@ -48,6 +49,7 @@ export function App() {
 	} | null>(null);
 	const mobileMenuButtonRef = useRef<HTMLButtonElement | null>(null);
 	const previousMobileFocusRef = useRef<HTMLElement | null>(null);
+	const previewImageUrlRef = useRef<string | null>(null);
 	const isMobile = useMediaQuery("(max-width: 768px)");
 
 	const pendingDeleteConversation = pendingDeleteId
@@ -151,7 +153,16 @@ export function App() {
 				type: result.mediaType ?? attachment.mediaType,
 			});
 			const url = URL.createObjectURL(blob);
+			if (isImageAttachment(attachment)) {
+				if (previewImageUrlRef.current) {
+					URL.revokeObjectURL(previewImageUrlRef.current);
+				}
+				previewImageUrlRef.current = url;
+				openImage(url, attachment.name);
+				return;
+			}
 			window.open(url, "_blank", "noopener,noreferrer");
+			window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 		} catch (err) {
 			window.alert(err instanceof Error ? err.message : String(err));
 		}
@@ -239,6 +250,23 @@ export function App() {
 		window.alert("引用消息不在当前会话历史中");
 	}
 
+	const closeImageViewer = useCallback((): void => {
+		closeImage();
+		if (previewImageUrlRef.current) {
+			URL.revokeObjectURL(previewImageUrlRef.current);
+			previewImageUrlRef.current = null;
+		}
+	}, [closeImage]);
+
+	useEffect(() => {
+		return () => {
+			if (previewImageUrlRef.current) {
+				URL.revokeObjectURL(previewImageUrlRef.current);
+				previewImageUrlRef.current = null;
+			}
+		};
+	}, []);
+
 	useEffect(() => {
 		if (!isMobile || !isMobileSidebarActive) {
 			return;
@@ -292,21 +320,43 @@ export function App() {
 	}, []);
 
 	useEffect(() => {
+		const modalBlocksShortcuts =
+			Boolean(state.imageViewer?.open) || showModal || pendingDeleteId !== null;
 		keybindingManager.clear();
 		keybindingManager.register("Ctrl+N", () => {
+			if (modalBlocksShortcuts) {
+				return;
+			}
 			void store.createConversation();
 			closeMobileSidebar();
 		});
 		keybindingManager.register("Ctrl+/", () => {
+			if (modalBlocksShortcuts) {
+				return;
+			}
 			if (isMobile) {
 				setIsMobileSidebarActive((value) => !value);
 				return;
 			}
 			setIsSidebarCollapsed((value) => !value);
 		});
-		keybindingManager.register("Ctrl+K", () => requestComposerFocus(true));
-		keybindingManager.register("Ctrl+,", () => setIsSettingsOpen(true));
+		keybindingManager.register("Ctrl+K", () => {
+			if (modalBlocksShortcuts) {
+				return;
+			}
+			requestComposerFocus(true);
+		});
+		keybindingManager.register("Ctrl+,", () => {
+			if (modalBlocksShortcuts) {
+				return;
+			}
+			setIsSettingsOpen(true);
+		});
 		keybindingManager.register("Escape", () => {
+			if (state.imageViewer?.open) {
+				closeImageViewer();
+				return;
+			}
 			if (pendingDeleteId) {
 				setPendingDeleteId(null);
 				return;
@@ -326,6 +376,7 @@ export function App() {
 		};
 	}, [
 		closeMobileSidebar,
+		closeImageViewer,
 		isMobile,
 		isMobileSidebarActive,
 		isSettingsOpen,
@@ -333,6 +384,8 @@ export function App() {
 		needsSetup,
 		pendingDeleteId,
 		requestComposerFocus,
+		showModal,
+		state.imageViewer?.open,
 		store,
 	]);
 
@@ -357,7 +410,9 @@ export function App() {
 					isCollapsed={!isMobile && isSidebarCollapsed}
 					isMobileActive={isMobileSidebarActive}
 					onCreate={() => {
-						void store.createConversation();
+						void store.createConversation().finally(() => {
+							closeMobileSidebar();
+						});
 					}}
 					onDelete={(conversationId) => setPendingDeleteId(conversationId)}
 					onRename={(conversationId) => {
@@ -635,7 +690,7 @@ export function App() {
 
 				<ImageViewerModal
 					imageViewer={state.imageViewer}
-					onClose={closeImage}
+					onClose={closeImageViewer}
 				/>
 
 				<ConfirmDialog

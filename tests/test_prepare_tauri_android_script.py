@@ -63,7 +63,7 @@ def _write_app(root: Path, *, name: str = "undefined-chat") -> Path:
     return app_dir
 
 
-def test_prepare_tauri_android_adds_chat_preview_activity(tmp_path: Path) -> None:
+def test_prepare_tauri_android_adds_chat_android_native_files(tmp_path: Path) -> None:
     app_dir = _write_app(tmp_path)
 
     changed = prepare_tauri_android.prepare_tauri_android(app_dir)
@@ -82,6 +82,7 @@ def test_prepare_tauri_android_adds_chat_preview_activity(tmp_path: Path) -> Non
         / "chat"
         / "HtmlPreviewActivity.kt"
     )
+    secret_plugin_path = activity_path.parent / "SecretPlugin.kt"
     manifest_path = (
         app_dir
         / "src-tauri"
@@ -92,10 +93,19 @@ def test_prepare_tauri_android_adds_chat_preview_activity(tmp_path: Path) -> Non
         / "main"
         / "AndroidManifest.xml"
     )
-    assert set(changed) == {activity_path, manifest_path}
+    assert set(changed) == {activity_path, secret_plugin_path, manifest_path}
     assert activity_path.read_text(encoding="utf-8") == (
         "package com.undefined.chat\n\nclass HtmlPreviewActivity : TauriActivity()\n"
     )
+    secret_plugin = secret_plugin_path.read_text(encoding="utf-8")
+    assert "class SecretPlugin" in secret_plugin
+    assert "@InvokeArg" in secret_plugin
+    assert "invoke.parseArgs(SecretPayload::class.java)" in secret_plugin
+    assert "invoke.parseArgs(SetSecretPayload::class.java)" in secret_plugin
+    assert "invoke.getString" not in secret_plugin
+    assert ".commit()" in secret_plugin
+    assert "AndroidKeyStore" in secret_plugin
+    assert "AES/GCM/NoPadding" in secret_plugin
     manifest = manifest_path.read_text(encoding="utf-8")
     assert 'android:name="com.undefined.chat.HtmlPreviewActivity"' in manifest
     assert 'android:exported="false"' in manifest
@@ -127,7 +137,7 @@ def test_prepare_tauri_android_check_reports_missing_patch(tmp_path: Path) -> No
 
     changed = prepare_tauri_android.prepare_tauri_android(app_dir, dry_run=True)
 
-    assert len(changed) == 2
+    assert len(changed) == 3
     assert not changed[0].exists()
 
 

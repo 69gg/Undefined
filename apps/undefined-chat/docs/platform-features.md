@@ -48,9 +48,11 @@ jsdom 测试覆盖抽屉打开/关闭、ARIA 状态和 Escape 行为；软键盘
 
 ## 安全存储
 
-`supports_system_keyring_target` 当前只支持 `linux`、`macos`、`windows`。Android/iOS 会返回不支持系统 keyring；保存 API Key 时只能在用户显式确认后写入不安全本地文件降级。
+`supports_system_keyring_target` 当前支持 `linux`、`macos`、`windows` 和 `ios`。iOS 通过 `keyring` 的 `apple-native` backend 使用系统 Keychain；Android 通过生成工程注入的 `SecretPlugin` 使用 Android Keystore + AES-GCM 保存 API Key。
 
-文档和 UI 不应宣称移动端安全存储已完整闭环，除非后续接入平台安全存储实现并补设备验证。
+`get_platform_info` 区分 `supportsSystemKeyring` 和 `supportsSecureApiKeyStorage`：Android 的系统 keyring 能力仍为 false，但安全 API Key 存储能力为 true。
+
+只有平台安全存储不可用且用户显式确认时，才允许降级写入不安全本地文件。Android Keystore 写入、重启后读取和删除仍需要真实设备 smoke 覆盖。
 
 ## 测试
 

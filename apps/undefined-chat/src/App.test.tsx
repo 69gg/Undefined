@@ -235,6 +235,41 @@ describe("App", () => {
 		window.dispatchEvent(new Event("resize"));
 	});
 
+	test("closes the mobile conversation drawer after creating a conversation", async () => {
+		const originalInnerWidth = window.innerWidth;
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			value: 390,
+		});
+		window.dispatchEvent(new Event("resize"));
+		const client = runtimeClientStub();
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+
+		render(<App />);
+		await screen.findByRole("navigation", { name: "会话" });
+		const menuButton = screen.getByRole("button", { name: "打开会话列表" });
+		await userEvent.click(menuButton);
+		expect(screen.getByRole("navigation", { name: "会话" })).toHaveClass(
+			"active",
+		);
+
+		await userEvent.click(screen.getByRole("button", { name: "新建" }));
+
+		await waitFor(() => {
+			expect(menuButton).toHaveAttribute("aria-expanded", "false");
+		});
+		expect(screen.getByRole("navigation", { name: "会话" })).not.toHaveClass(
+			"active",
+		);
+		expect(client.createConversation).toHaveBeenCalledOnce();
+
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			value: originalInnerWidth,
+		});
+		window.dispatchEvent(new Event("resize"));
+	});
+
 	test("registers desktop shortcuts for new chat and command mode", async () => {
 		const client = runtimeClientStub();
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
@@ -250,6 +285,37 @@ describe("App", () => {
 		await waitFor(() => {
 			expect(editor).toHaveFocus();
 		});
+	});
+
+	test("registers desktop shortcuts for settings and sidebar visibility", async () => {
+		const client = runtimeClientStub();
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+
+		render(<App />);
+		await screen.findByRole("navigation", { name: "会话" });
+
+		fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+		expect(
+			await screen.findByRole("heading", { name: "Runtime 配置" }),
+		).toBeTruthy();
+
+		fireEvent.keyDown(window, { key: "Escape" });
+		await waitFor(() => {
+			expect(
+				screen.queryByRole("heading", { name: "Runtime 配置" }),
+			).toBeNull();
+		});
+
+		fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+		expect(screen.getByRole("navigation", { name: "会话" })).toHaveClass(
+			"collapsed",
+		);
+		expect(screen.getByRole("button", { name: "展开菜单" })).toBeTruthy();
+
+		fireEvent.keyDown(window, { key: "/", ctrlKey: true });
+		expect(screen.getByRole("navigation", { name: "会话" })).not.toHaveClass(
+			"collapsed",
+		);
 	});
 
 	test("jumps from a reference chip to the loaded source message", async () => {
@@ -384,5 +450,67 @@ describe("App", () => {
 			attachmentId: "att-1",
 			fileName: "report.pdf",
 		});
+	});
+
+	test("opens image attachment previews in the in-app viewer and releases blob URLs", async () => {
+		const createObjectUrlSpy = vi
+			.spyOn(URL, "createObjectURL")
+			.mockReturnValue("blob:preview-att-1");
+		const revokeObjectUrlSpy = vi.spyOn(URL, "revokeObjectURL");
+		const client = runtimeClientStub({
+			getHistory: vi.fn(async () => ({
+				conversationId: "default",
+				virtualUserId: "webchat",
+				permission: "superadmin",
+				count: 1,
+				items: [
+					historyItem({
+						messageId: "msg-image",
+						role: "bot",
+						content: "图片已生成",
+						attachments: [
+							{
+								id: "att-1",
+								name: "large.png",
+								size: 20 * 1024 * 1024,
+								mediaType: "image/png",
+								kind: "image",
+								downloadUrl: "/api/v1/chat/attachments/att-1",
+								previewUrl: "/api/v1/chat/attachments/att-1/preview",
+								discarded: false,
+							},
+						],
+					}),
+				],
+				limit: 50,
+				before: null,
+				hasMore: false,
+				nextBefore: null,
+				total: 1,
+			})),
+		});
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+
+		render(<App />);
+		await screen.findByText("large.png");
+		await userEvent.click(screen.getByRole("button", { name: "预览" }));
+
+		expect(client.previewAttachment).toHaveBeenCalledWith({
+			attachmentId: "att-1",
+		});
+		expect(createObjectUrlSpy).toHaveBeenCalled();
+		const viewer = await screen.findByRole("dialog", { name: "图片查看器" });
+		expect(
+			within(viewer).getByRole("img", { name: "large.png" }),
+		).toHaveAttribute("src", "blob:preview-att-1");
+
+		fireEvent.keyDown(window, { key: "n", ctrlKey: true });
+		expect(client.createConversation).not.toHaveBeenCalled();
+
+		fireEvent.keyDown(window, { key: "Escape" });
+		await waitFor(() => {
+			expect(screen.queryByRole("dialog", { name: "图片查看器" })).toBeNull();
+		});
+		expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:preview-att-1");
 	});
 });

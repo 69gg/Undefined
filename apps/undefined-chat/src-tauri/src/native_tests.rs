@@ -1,4 +1,6 @@
 use crate::config::normalize_runtime_url;
+use crate::mobile_secret::android_secret_plugin_identifier;
+use crate::platform::platform_info_for_target;
 use crate::preview::{
     build_preview_data_url, preview_document, preview_document_checked, preview_navigation_allowed,
     MAX_PREVIEW_HTML_BYTES,
@@ -9,7 +11,8 @@ use crate::runtime_client::{
 };
 use crate::secret::{
     api_key_status_from_storage, classify_secret_storage, derive_stronghold_key,
-    load_api_key_status_from_value, supports_system_keyring_target,
+    empty_api_key_status_for_target, load_api_key_status_from_value,
+    supports_secure_api_key_target, supports_system_keyring_target,
 };
 use crate::state::{
     AppRuntimeConfig, RuntimeConfigInput, RuntimeRequestPath, APP_CONFIG_FILE_NAME,
@@ -394,9 +397,35 @@ fn system_keyring_guard_allows_supported_desktop_targets() {
 }
 
 #[test]
-fn system_keyring_guard_rejects_targets_without_system_keyring_support() {
+fn system_keyring_guard_allows_ios_keychain_target() {
+    assert!(supports_system_keyring_target("ios"));
+}
+
+#[test]
+fn system_keyring_guard_rejects_android_without_secure_storage_support() {
     assert!(!supports_system_keyring_target("android"));
-    assert!(!supports_system_keyring_target("ios"));
+}
+
+#[test]
+fn secure_api_key_target_includes_android_secure_store() {
+    assert!(supports_secure_api_key_target("android"));
+    assert!(supports_secure_api_key_target("ios"));
+    assert!(supports_secure_api_key_target("linux"));
+}
+
+#[test]
+fn android_secret_plugin_identifier_uses_app_identifier() {
+    assert_eq!(
+        android_secret_plugin_identifier("com.example.custom"),
+        "com.example.custom"
+    );
+}
+
+#[test]
+fn platform_info_keeps_system_keyring_and_secure_api_key_storage_separate() {
+    let platform = platform_info_for_target("android", "unix", "aarch64");
+    assert!(!platform.supports_system_keyring);
+    assert!(platform.supports_secure_api_key_storage);
 }
 
 #[test]
@@ -407,6 +436,14 @@ fn api_key_status_does_not_return_secret_material() {
     assert_eq!(status.key_preview.as_deref(), Some("runt...-key"));
     let serialized = serde_json::to_string(&status).unwrap();
     assert!(!serialized.contains("runtime-secret-key"));
+}
+
+#[test]
+fn empty_api_key_status_uses_android_secure_store_label_on_android() {
+    let status = empty_api_key_status_for_target("android");
+    assert!(!status.available);
+    assert!(!status.degraded);
+    assert_eq!(status.storage, "android-secure-store");
 }
 
 #[test]

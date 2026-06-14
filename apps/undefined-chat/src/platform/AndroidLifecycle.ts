@@ -5,7 +5,7 @@ import type { ChatStore } from "../chat-store/store";
 /**
  * Android 生命周期管理
  * - 监听应用暂停/恢复事件
- * - 恢复时重新连接并补齐事件
+ * - 恢复时重新 bootstrap 并恢复 Runtime 事件订阅
  */
 export function setupAndroidLifecycle(store: ChatStore): () => void {
 	const unlisteners: Array<() => void> = [];
@@ -41,8 +41,8 @@ export function setupAndroidLifecycle(store: ChatStore): () => void {
 					`[Lifecycle] Reconnected, ${activeJobs.length} active jobs found`,
 				);
 
-				// 每个活跃任务可能在暂停期间产生了新事件
-				// bootstrap 会自动重新订阅事件流，补齐遗漏的事件
+				// bootstrap 会重新订阅事件流；断线期间的事件补齐仍由
+				// store 内部的 SSE error/closed fallback 处理。
 				if (activeJobs.length > 0) {
 					console.log(
 						"[Lifecycle] Event streams will be resumed automatically",

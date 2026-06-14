@@ -1,4 +1,10 @@
-import { render, screen, within } from "@testing-library/react";
+import {
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+	within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -163,6 +169,68 @@ describe("MessageTimeline", () => {
 		await userEvent.click(screen.getByRole("button", { name: "加载更早消息" }));
 
 		expect(onLoadMoreHistory).toHaveBeenCalledOnce();
+	});
+
+	test("renders every loaded message when history pagination is connected", () => {
+		const manyItems = Array.from({ length: 260 }, (_, index) =>
+			historyItem({
+				messageId: `msg-${index}`,
+				content: `已加载消息 ${index}`,
+			}),
+		);
+
+		renderTimeline(
+			<MessageTimeline
+				activeJob={null}
+				connectionState="connected"
+				hasMoreHistory={false}
+				items={manyItems}
+				onLoadMoreHistory={vi.fn()}
+				onPreviewAttachment={vi.fn()}
+				onPreviewHtml={vi.fn()}
+				onSaveAttachment={vi.fn()}
+			/>,
+		);
+
+		const timeline = screen.getByRole("log", { name: "消息" });
+		expect(within(timeline).getByText("已加载消息 0")).toBeTruthy();
+		expect(within(timeline).getByText("已加载消息 259")).toBeTruthy();
+		expect(within(timeline).getAllByTestId("message-row")).toHaveLength(260);
+	});
+
+	test("loads more history automatically when scrolled near the top", async () => {
+		const onLoadMoreHistory = vi.fn(async () => undefined);
+		renderTimeline(
+			<MessageTimeline
+				activeJob={null}
+				connectionState="connected"
+				hasMoreHistory
+				items={[
+					historyItem({ messageId: "msg-1", content: "已加载消息 1" }),
+					historyItem({ messageId: "msg-2", content: "已加载消息 2" }),
+				]}
+				onLoadMoreHistory={onLoadMoreHistory}
+				onPreviewAttachment={vi.fn()}
+				onPreviewHtml={vi.fn()}
+				onSaveAttachment={vi.fn()}
+			/>,
+		);
+
+		const timeline = screen.getByRole("log", { name: "消息" });
+		Object.defineProperty(timeline, "scrollHeight", {
+			configurable: true,
+			value: 1000,
+		});
+		Object.defineProperty(timeline, "clientHeight", {
+			configurable: true,
+			value: 400,
+		});
+		timeline.scrollTop = 24;
+		fireEvent.scroll(timeline);
+
+		await waitFor(() => {
+			expect(onLoadMoreHistory).toHaveBeenCalledOnce();
+		});
 	});
 
 	test("keeps scroll position anchored after loading older history", async () => {

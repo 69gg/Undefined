@@ -1,4 +1,7 @@
-use crate::state::{remove_file_if_exists, write_json_file, NativeState};
+use crate::{
+    mobile_secret,
+    state::{remove_file_if_exists, write_json_file, NativeState},
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -67,7 +70,12 @@ pub fn derive_stronghold_key(password: &str) -> Vec<u8> {
 }
 
 pub fn supports_system_keyring_target(target_os: &str) -> bool {
-    matches!(target_os, "linux" | "macos" | "windows")
+    matches!(target_os, "linux" | "macos" | "windows" | "ios")
+}
+
+pub fn supports_secure_api_key_target(target_os: &str) -> bool {
+    supports_system_keyring_target(target_os)
+        || mobile_secret::supports_android_secure_store_target(target_os)
 }
 
 fn insecure_api_key_file_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -103,7 +111,15 @@ fn api_key_entry() -> Result<keyring::Entry, String> {
 }
 
 #[tauri::command]
-pub fn probe_secret_storage() -> SecretStatus {
+pub async fn probe_secret_storage(app: AppHandle) -> SecretStatus {
+    if mobile_secret::supports_android_secure_store_target(std::env::consts::OS) {
+        return match mobile_secret::is_available(&app).await {
+            Ok(true) => classify_secret_storage(true, "Android secure storage available"),
+            Ok(false) => classify_secret_storage(false, "Android secure storage unavailable"),
+            Err(err) => classify_secret_storage(false, &err),
+        };
+    }
+
     match vault_entry() {
         Ok(entry) => match entry.get_password() {
             Ok(_) => classify_secret_storage(true, "system keyring available"),
@@ -221,9 +237,58 @@ pub fn load_api_key_status_from_value(value: Option<&str>) -> ApiKeyStatus {
     )
 }
 
+pub(crate) fn empty_api_key_status_for_target(target_os: &str) -> ApiKeyStatus {
+    api_key_status_from_storage(
+        None,
+        if mobile_secret::supports_android_secure_store_target(target_os) {
+            "android-secure-store"
+        } else {
+            "system-keyring"
+        },
+        false,
+        "Runtime API key is not saved",
+    )
+}
+
 pub(crate) async fn load_api_key_with_storage(
     app: &AppHandle,
 ) -> Result<Option<StoredApiKey>, String> {
+    if mobile_secret::supports_android_secure_store_target(std::env::consts::OS) {
+        match mobile_secret::get_secret(app, API_KEY_USER).await {
+            Ok(Some(value)) => {
+                return Ok(Some(StoredApiKey {
+                    value,
+                    storage: "android-secure-store",
+                    degraded: false,
+                    detail: "Runtime API key saved in Android secure storage".to_string(),
+                }));
+            }
+            Ok(None) => {
+                return Ok(read_insecure_api_key(app).await?.map(|value| StoredApiKey {
+                    value,
+                    storage: "insecure-file",
+                    degraded: true,
+                    detail: "Runtime API key loaded from explicitly confirmed insecure fallback"
+                        .to_string(),
+                }));
+            }
+            Err(err) => {
+                let fallback = read_insecure_api_key(app).await?;
+                if let Some(value) = fallback {
+                    return Ok(Some(StoredApiKey {
+                        value,
+                        storage: "insecure-file",
+                        degraded: true,
+                        detail: format!(
+                            "Runtime API key loaded from insecure fallback after Android secure storage read failed: {err}"
+                        ),
+                    }));
+                }
+                return Err(err);
+            }
+        }
+    }
+
     match api_key_entry() {
         Ok(entry) => match entry.get_password() {
             Ok(value) => Ok(Some(StoredApiKey {
@@ -298,6 +363,36 @@ pub async fn save_api_key(
     }
 
     match api_key_entry() {
+        Err(_) if mobile_secret::supports_android_secure_store_target(std::env::consts::OS) => {
+            match mobile_secret::set_secret(&app, API_KEY_USER, trimmed).await {
+                Ok(()) => {
+                    let _ = delete_insecure_api_key(&app).await;
+                    Ok(api_key_status_from_storage(
+                        Some(trimmed),
+                        "android-secure-store",
+                        false,
+                        "Runtime API key saved in Android secure storage",
+                    ))
+                }
+                Err(err) => {
+                    if state.insecure_storage_confirmed()? {
+                        write_insecure_api_key(&app, trimmed).await?;
+                        Ok(api_key_status_from_storage(
+                            Some(trimmed),
+                            "insecure-file",
+                            true,
+                            &format!(
+                                "Runtime API key saved to explicitly confirmed insecure fallback after Android secure storage write failed: {err}"
+                            ),
+                        ))
+                    } else {
+                        Err(format!(
+                            "{err}; explicitly confirm insecure storage fallback to save a local plaintext API key"
+                        ))
+                    }
+                }
+            }
+        }
         Ok(entry) => match entry.set_password(trimmed) {
             Ok(()) => {
                 let _ = delete_insecure_api_key(&app).await;
@@ -350,7 +445,7 @@ pub async fn load_api_key_status(app: AppHandle) -> Result<ApiKeyStatus, String>
             stored.degraded,
             &stored.detail,
         )),
-        Ok(None) => Ok(load_api_key_status_from_value(None)),
+        Ok(None) => Ok(empty_api_key_status_for_target(std::env::consts::OS)),
         Err(err) => Ok(api_key_status_from_storage(
             None,
             "system-keyring",
@@ -362,14 +457,32 @@ pub async fn load_api_key_status(app: AppHandle) -> Result<ApiKeyStatus, String>
 
 #[tauri::command]
 pub async fn delete_api_key(app: AppHandle) -> Result<ApiKeyStatus, String> {
+    let mut delete_errors = Vec::new();
+    if let Err(err) = mobile_secret::delete_secret(&app, API_KEY_USER).await {
+        delete_errors.push(err);
+    }
     if let Ok(entry) = api_key_entry() {
         match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => {}
-            Err(err) => return Err(format!("keyring delete failed: {err}")),
+            Err(err) => delete_errors.push(format!("keyring delete failed: {err}")),
         }
     }
-    delete_insecure_api_key(&app).await?;
-    Ok(load_api_key_status_from_value(None))
+    if let Err(err) = delete_insecure_api_key(&app).await {
+        delete_errors.push(err);
+    }
+    if delete_errors.is_empty() {
+        Ok(empty_api_key_status_for_target(std::env::consts::OS))
+    } else {
+        Ok(api_key_status_from_storage(
+            None,
+            "unknown",
+            true,
+            &format!(
+                "API key delete completed with storage errors: {}",
+                delete_errors.join("; ")
+            ),
+        ))
+    }
 }
 
 #[tauri::command]

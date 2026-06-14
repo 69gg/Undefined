@@ -91,7 +91,6 @@ Rust 测试覆盖：
 - 标题转义。
 - 1 MB 限制。
 - 初始 URL/`about:blank` 导航守卫。
-- Windows/空格/非 ASCII 路径通过 `Url::from_file_path` 的构造路径。
 - 临时文件识别和残留清理 helper。
 
-真实 Tauri smoke 仍需要覆盖窗口打开、关闭清理和 Android Activity。
+真实 Tauri smoke 仍需要覆盖窗口打开、关闭清理、Windows/空格/非 ASCII 路径和 Android Activity。

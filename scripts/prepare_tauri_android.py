@@ -11,6 +11,7 @@ from typing import Any
 
 CHAT_APP_NAME = "undefined-chat"
 CHAT_PREVIEW_ACTIVITY = "HtmlPreviewActivity"
+CHAT_SECRET_PLUGIN = "SecretPlugin"
 MAIN_ACTIVITY_FILE = "MainActivity.kt"
 
 
@@ -85,6 +86,155 @@ def _activity_source(package_name: str) -> str:
     )
 
 
+def _secret_plugin_source(package_name: str) -> str:
+    return f"""package {package_name}
+
+import android.app.Activity
+import android.content.Context
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
+import app.tauri.annotation.Command
+import app.tauri.annotation.InvokeArg
+import app.tauri.annotation.TauriPlugin
+import app.tauri.plugin.Invoke
+import app.tauri.plugin.JSObject
+import app.tauri.plugin.Plugin
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
+
+@InvokeArg
+internal class SecretPayload {{
+    lateinit var key: String
+}}
+
+@InvokeArg
+internal class SetSecretPayload {{
+    lateinit var key: String
+    lateinit var value: String
+}}
+
+@TauriPlugin
+class {CHAT_SECRET_PLUGIN}(private val activity: Activity) : Plugin(activity) {{
+    private val prefs by lazy {{
+        activity.getSharedPreferences("undefined_chat_secure_secrets", Context.MODE_PRIVATE)
+    }}
+
+    @Command
+    fun isAvailable(invoke: Invoke) {{
+        try {{
+            ensureKey()
+            val ret = JSObject()
+            ret.put("available", true)
+            invoke.resolve(ret)
+        }} catch (error: Exception) {{
+            invoke.reject("Android secure storage unavailable: ${{error.message}}")
+        }}
+    }}
+
+    @Command
+    fun getSecret(invoke: Invoke) {{
+        val args = invoke.parseArgs(SecretPayload::class.java)
+        if (args.key.isBlank()) {{
+            invoke.reject("key is required")
+            return
+        }}
+        try {{
+            val stored = prefs.getString(args.key, null)
+            val value = if (stored == null) null else decrypt(stored)
+            val ret = JSObject()
+            ret.put("value", value)
+            invoke.resolve(ret)
+        }} catch (error: Exception) {{
+            invoke.reject("Android secure storage read failed: ${{error.message}}")
+        }}
+    }}
+
+    @Command
+    fun setSecret(invoke: Invoke) {{
+        val args = invoke.parseArgs(SetSecretPayload::class.java)
+        if (args.key.isBlank()) {{
+            invoke.reject("key is required")
+            return
+        }}
+        if (args.value.isBlank()) {{
+            invoke.reject("value is required")
+            return
+        }}
+        try {{
+            if (!prefs.edit().putString(args.key, encrypt(args.value)).commit()) {{
+                invoke.reject("Android secure storage write failed")
+                return
+            }}
+            invoke.resolve(JSObject())
+        }} catch (error: Exception) {{
+            invoke.reject("Android secure storage write failed: ${{error.message}}")
+        }}
+    }}
+
+    @Command
+    fun deleteSecret(invoke: Invoke) {{
+        val args = invoke.parseArgs(SecretPayload::class.java)
+        if (args.key.isBlank()) {{
+            invoke.reject("key is required")
+            return
+        }}
+        if (!prefs.edit().remove(args.key).commit()) {{
+            invoke.reject("Android secure storage delete failed")
+            return
+        }}
+        invoke.resolve(JSObject())
+    }}
+
+    private fun ensureKey(): SecretKey {{
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply {{ load(null) }}
+        keyStore.getKey(KEY_ALIAS, null)?.let {{ return it as SecretKey }}
+
+        val keyGenerator = KeyGenerator.getInstance(
+            KeyProperties.KEY_ALGORITHM_AES,
+            "AndroidKeyStore",
+        )
+        val spec = KeyGenParameterSpec.Builder(
+            KEY_ALIAS,
+            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+        )
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setRandomizedEncryptionRequired(true)
+            .build()
+        keyGenerator.init(spec)
+        return keyGenerator.generateKey()
+    }}
+
+    private fun encrypt(value: String): String {{
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, ensureKey())
+        val ciphertext = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+        return listOf(cipher.iv, ciphertext)
+            .joinToString(":") {{ Base64.encodeToString(it, Base64.NO_WRAP) }}
+    }}
+
+    private fun decrypt(stored: String): String {{
+        val parts = stored.split(":", limit = 2)
+        require(parts.size == 2) {{ "invalid encrypted secret payload" }}
+        val iv = Base64.decode(parts[0], Base64.NO_WRAP)
+        val ciphertext = Base64.decode(parts[1], Base64.NO_WRAP)
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.DECRYPT_MODE, ensureKey(), GCMParameterSpec(128, iv))
+        return String(cipher.doFinal(ciphertext), Charsets.UTF_8)
+    }}
+
+    private companion object {{
+        const val KEY_ALIAS = "undefined_chat_runtime_api_key"
+        const val TRANSFORMATION = "AES/GCM/NoPadding"
+    }}
+}}
+"""
+
+
 def _write_activity(package_dir: Path, package_name: str, dry_run: bool) -> Path | None:
     activity_path = package_dir / f"{CHAT_PREVIEW_ACTIVITY}.kt"
     expected = _activity_source(package_name)
@@ -94,6 +244,19 @@ def _write_activity(package_dir: Path, package_name: str, dry_run: bool) -> Path
         package_dir.mkdir(parents=True, exist_ok=True)
         activity_path.write_text(expected, encoding="utf-8")
     return activity_path
+
+
+def _write_secret_plugin(
+    package_dir: Path, package_name: str, dry_run: bool
+) -> Path | None:
+    plugin_path = package_dir / f"{CHAT_SECRET_PLUGIN}.kt"
+    expected = _secret_plugin_source(package_name)
+    if plugin_path.exists() and plugin_path.read_text(encoding="utf-8") == expected:
+        return None
+    if not dry_run:
+        package_dir.mkdir(parents=True, exist_ok=True)
+        plugin_path.write_text(expected, encoding="utf-8")
+    return plugin_path
 
 
 def _activity_declared(manifest_text: str, package_name: str) -> bool:
@@ -153,6 +316,9 @@ def prepare_tauri_android(app_dir: Path, *, dry_run: bool = False) -> list[Path]
     activity_path = _write_activity(package_dir, package_name, dry_run)
     if activity_path is not None:
         changed.append(activity_path)
+    secret_plugin_path = _write_secret_plugin(package_dir, package_name, dry_run)
+    if secret_plugin_path is not None:
+        changed.append(secret_plugin_path)
     patched_manifest = _patch_manifest(manifest_path, package_name, dry_run)
     if patched_manifest is not None:
         changed.append(patched_manifest)

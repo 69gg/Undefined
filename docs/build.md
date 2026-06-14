@@ -199,7 +199,7 @@ npm run tauri:build:no-strip -- --bundles deb
 npm run tauri:android:init
 ```
 
-Undefined Chat 的 `tauri:android:init` 会在 Tauri 生成 `src-tauri/gen/android` 后自动运行 `scripts/prepare_tauri_android.py`，向生成工程注入移动端 HTML 预览使用的 `HtmlPreviewActivity`。`src-tauri/gen/` 仍是生成目录，不提交到仓库。
+Undefined Chat 的 `tauri:android:init` 会在 Tauri 生成 `src-tauri/gen/android` 后自动运行 `scripts/prepare_tauri_android.py`，向生成工程注入移动端 HTML 预览使用的 `HtmlPreviewActivity` 和 Android Keystore 安全存储使用的 `SecretPlugin`。`src-tauri/gen/` 仍是生成目录，不提交到仓库。
 
 构建 Android：
 
@@ -398,7 +398,7 @@ npm run check  # Biome、TypeScript、unit/jsdom integration tests、cargo fmt/c
 
 ```bash
 npm run tauri:android:init
-npm run tauri:android:prepare:check  # Undefined Chat 检查生成工程已包含 HtmlPreviewActivity
+npm run tauri:android:prepare:check  # Undefined Chat 检查生成工程已包含 HtmlPreviewActivity/SecretPlugin
 npm run tauri:android:debug -- --apk
 ```
 

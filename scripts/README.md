@@ -117,11 +117,11 @@ uv run python scripts/bump_version.py 3.6.0 --commit
 
 ### prepare_tauri_android.py — 生成后 Android 修补
 
-Tauri 的 `src-tauri/gen/` 是生成目录，不提交到仓库。Undefined Chat 需要移动端 HTML 预览使用独立 Android Activity，因此 Chat 的 `npm run tauri:android:init` 会在生成后运行：
+Tauri 的 `src-tauri/gen/` 是生成目录，不提交到仓库。Undefined Chat 需要移动端 HTML 预览使用独立 Android Activity，并需要 Android Keystore 安全存储插件，因此 Chat 的 `npm run tauri:android:init` 会在生成后运行：
 
 ```bash
 python3 ../../scripts/prepare_tauri_android.py .
 python3 ../../scripts/prepare_tauri_android.py . --check
 ```
 
-脚本只对 `apps/undefined-chat` 生效，会向生成的 Android app 注入 `HtmlPreviewActivity.kt` 并在 `AndroidManifest.xml` 中声明 `android:exported="false"`。Console 保持 no-op。
+脚本只对 `apps/undefined-chat` 生效，会向生成的 Android app 注入 `HtmlPreviewActivity.kt`、`SecretPlugin.kt`，并在 `AndroidManifest.xml` 中声明预览 Activity 的 `android:exported="false"`。Console 保持 no-op。

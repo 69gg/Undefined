@@ -1,5 +1,6 @@
 pub mod config;
 mod download;
+mod mobile_secret;
 mod platform;
 mod preview;
 mod runtime_client;
@@ -18,6 +19,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_stronghold::Builder::new(secret::derive_stronghold_key).build())
+        .plugin(mobile_secret::init())
         .invoke_handler(tauri::generate_handler![
             state::get_runtime_config,
             state::save_runtime_config,

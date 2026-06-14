@@ -102,6 +102,7 @@ function getFallbackPlatformInfo(): PlatformInfo {
 		arch: "unknown",
 		debug: false,
 		supportsSystemKeyring: false,
+		supportsSecureApiKeyStorage: false,
 		supportsSse: true,
 		supportsHtmlPreview: false,
 	};

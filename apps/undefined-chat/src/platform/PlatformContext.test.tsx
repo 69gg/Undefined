@@ -40,6 +40,7 @@ describe("PlatformContext", () => {
 			arch: "x86_64",
 			debug: false,
 			supportsSystemKeyring: true,
+			supportsSecureApiKeyStorage: true,
 			supportsSse: true,
 			supportsHtmlPreview: true,
 		};
@@ -98,6 +99,47 @@ describe("PlatformContext", () => {
 		});
 	});
 
+	it("区分系统密钥链和安全 API Key 存储能力", async () => {
+		const mockPlatform: PlatformInfo = {
+			os: "android",
+			family: "unix",
+			arch: "aarch64",
+			debug: false,
+			supportsSystemKeyring: false,
+			supportsSecureApiKeyStorage: true,
+			supportsSse: true,
+			supportsHtmlPreview: true,
+		};
+		vi.mocked(invoke).mockResolvedValueOnce(mockPlatform);
+
+		function TestComponent() {
+			const platform = usePlatform();
+			return (
+				<div>
+					<div data-testid="supports-keyring">
+						{String(platform.supportsSystemKeyring)}
+					</div>
+					<div data-testid="supports-secure-api-key">
+						{String(platform.supportsSecureApiKeyStorage)}
+					</div>
+				</div>
+			);
+		}
+
+		render(
+			<PlatformProvider>
+				<TestComponent />
+			</PlatformProvider>,
+		);
+
+		await waitFor(() => {
+			expect(screen.getByTestId("supports-secure-api-key")).toHaveTextContent(
+				"true",
+			);
+		});
+		expect(screen.getByTestId("supports-keyring")).toHaveTextContent("false");
+	});
+
 	it("处理 Tauri 调用错误", async () => {
 		const consoleWarnSpy = vi
 			.spyOn(console, "warn")
@@ -132,6 +174,7 @@ describe("平台判断工具函数", () => {
 				arch: "aarch64",
 				debug: false,
 				supportsSystemKeyring: false,
+				supportsSecureApiKeyStorage: false,
 				supportsSse: true,
 				supportsHtmlPreview: false,
 			}),
@@ -144,6 +187,7 @@ describe("平台判断工具函数", () => {
 				arch: "x86_64",
 				debug: false,
 				supportsSystemKeyring: true,
+				supportsSecureApiKeyStorage: true,
 				supportsSse: true,
 				supportsHtmlPreview: true,
 			}),
@@ -158,6 +202,7 @@ describe("平台判断工具函数", () => {
 				arch: "x86_64",
 				debug: false,
 				supportsSystemKeyring: true,
+				supportsSecureApiKeyStorage: true,
 				supportsSse: true,
 				supportsHtmlPreview: true,
 			}),
@@ -170,6 +215,7 @@ describe("平台判断工具函数", () => {
 				arch: "aarch64",
 				debug: false,
 				supportsSystemKeyring: true,
+				supportsSecureApiKeyStorage: true,
 				supportsSse: true,
 				supportsHtmlPreview: true,
 			}),
@@ -182,6 +228,7 @@ describe("平台判断工具函数", () => {
 				arch: "x86_64",
 				debug: false,
 				supportsSystemKeyring: true,
+				supportsSecureApiKeyStorage: true,
 				supportsSse: true,
 				supportsHtmlPreview: true,
 			}),
@@ -194,6 +241,7 @@ describe("平台判断工具函数", () => {
 				arch: "aarch64",
 				debug: false,
 				supportsSystemKeyring: false,
+				supportsSecureApiKeyStorage: false,
 				supportsSse: true,
 				supportsHtmlPreview: false,
 			}),
@@ -208,6 +256,7 @@ describe("平台判断工具函数", () => {
 				arch: "aarch64",
 				debug: false,
 				supportsSystemKeyring: false,
+				supportsSecureApiKeyStorage: false,
 				supportsSse: true,
 				supportsHtmlPreview: false,
 			}),
@@ -220,6 +269,7 @@ describe("平台判断工具函数", () => {
 				arch: "aarch64",
 				debug: false,
 				supportsSystemKeyring: true,
+				supportsSecureApiKeyStorage: true,
 				supportsSse: true,
 				supportsHtmlPreview: false,
 			}),
@@ -232,6 +282,7 @@ describe("平台判断工具函数", () => {
 				arch: "x86_64",
 				debug: false,
 				supportsSystemKeyring: true,
+				supportsSecureApiKeyStorage: true,
 				supportsSse: true,
 				supportsHtmlPreview: true,
 			}),

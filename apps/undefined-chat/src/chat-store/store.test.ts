@@ -85,6 +85,44 @@ describe("chat store", () => {
 		});
 	});
 
+	test("rebuilds native SSE subscriptions when bootstrapping again", async () => {
+		const activeJob = job({ jobId: "job-running", conversationId: "default" });
+		const unlistenRuntimeSse = vi.fn();
+		const client = runtimeClientStub({
+			getActiveJobs: vi.fn(async () => ({
+				job: activeJob,
+				jobs: [activeJob],
+			})),
+			startJobEventStream: vi
+				.fn()
+				.mockResolvedValueOnce({
+					subscriptionId: "job-sub-old",
+					jobId: "job-running",
+					afterSeq: 0,
+				})
+				.mockResolvedValueOnce({
+					subscriptionId: "job-sub-new",
+					jobId: "job-running",
+					afterSeq: 0,
+				}),
+			stopJobEventStream: vi.fn(async () => undefined),
+			listenRuntimeSse: vi.fn(async () => unlistenRuntimeSse),
+		});
+		const store = createChatStore({ client });
+
+		await store.bootstrap();
+		await store.bootstrap();
+
+		expect(unlistenRuntimeSse).toHaveBeenCalledOnce();
+		expect(client.stopJobEventStream).toHaveBeenCalledWith("job-sub-old");
+		expect(client.startJobEventStream).toHaveBeenCalledTimes(2);
+		expect(client.startJobEventStream).toHaveBeenLastCalledWith({
+			jobId: "job-running",
+			afterSeq: activeJob.lastSeq,
+			conversationId: "default",
+		});
+	});
+
 	test("blocks send only for the selected conversation when that conversation is running", async () => {
 		const opsJob = job({ jobId: "job-ops", conversationId: "ops" });
 		const client = runtimeClientStub({

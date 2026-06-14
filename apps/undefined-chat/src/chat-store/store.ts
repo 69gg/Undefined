@@ -632,6 +632,19 @@ export function createChatStore({
 		emit();
 	}
 
+	function clearNativeSubscriptions(): void {
+		unlistenRuntimeSse?.();
+		unlistenRuntimeSse = null;
+		for (const subscriptionId of subscriptionsByJob.values()) {
+			void client.stopJobEventStream(subscriptionId);
+		}
+		subscriptionsByJob.clear();
+		for (const timer of fallbackTimersByJob.values()) {
+			clearTimeout(timer);
+		}
+		fallbackTimersByJob.clear();
+	}
+
 	async function loadHistory(conversationId: string): Promise<void> {
 		dispatch({ type: "history/loading", conversationId });
 		try {
@@ -760,7 +773,7 @@ export function createChatStore({
 				activeJobs: activeJobs.jobs,
 				commands: commands.commands,
 			});
-			unlistenRuntimeSse?.();
+			clearNativeSubscriptions();
 			unlistenRuntimeSse = await client.listenRuntimeSse(
 				handleRuntimeEvent,
 				handleRuntimeStatus,
