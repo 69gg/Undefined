@@ -102,6 +102,14 @@ export type AgentStageSnapshot = {
 	detail?: string;
 };
 
+/**
+ * 流式时间线条目（对齐 WebUI appendTimelineMessage / upsertTimelineToolBlock 的 append 顺序）。
+ * 按事件到达顺序记录 message 文本段与顶层 tool call，保证流式过程中文字与工具块按真实时间交错显示。
+ */
+export type StreamingTimelineItem =
+	| { type: "message"; seq: number; content: string }
+	| { type: "call"; seq: number; callId: string };
+
 export type ChatJob = {
 	jobId: string;
 	conversationId: string;
@@ -122,6 +130,8 @@ export type ChatJob = {
 	messages: string[];
 	currentAgentStages: AgentStageSnapshot[];
 	currentToolCalls: ToolCallSnapshot[];
+	/** 流式时间线：按事件到达顺序的 message 段 + 顶层 call（对齐 WebUI append 顺序） */
+	currentTimeline: StreamingTimelineItem[];
 	historyFinalized: boolean;
 	waitingInput: unknown | null;
 };

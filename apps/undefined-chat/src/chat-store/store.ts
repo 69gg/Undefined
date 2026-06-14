@@ -1086,6 +1086,10 @@ export function createChatStore({
 						updatedJob = {
 							...updatedJob,
 							reply: updatedJob.reply + content,
+							currentTimeline: [
+								...updatedJob.currentTimeline,
+								{ type: "message", seq: event.seq, content },
+							],
 						};
 					}
 				} else if (
@@ -1143,6 +1147,23 @@ export function createChatStore({
 								}),
 							),
 						};
+						// 顶层 tool_start/agent_start 首次进入主时间线（对齐 WebUI append 顺序；
+						// 嵌套子工具在父块 children 内，由 ToolBlock 递归渲染，不进主时间线）
+						if (
+							isStart &&
+							!parentCallId &&
+							!updatedJob.currentTimeline.some(
+								(it) => it.type === "call" && it.callId === callId,
+							)
+						) {
+							updatedJob = {
+								...updatedJob,
+								currentTimeline: [
+									...updatedJob.currentTimeline,
+									{ type: "call", seq: event.seq, callId },
+								],
+							};
+						}
 					}
 				} else if (event.event === "agent_stage") {
 					// agent 阶段：更新 agent 块 currentStage（对齐 WebUI upsertAgentStageBlock）

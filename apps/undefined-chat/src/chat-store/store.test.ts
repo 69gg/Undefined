@@ -241,6 +241,59 @@ describe("chat store", () => {
 		expect(activeJob?.currentToolCalls[0]?.resultPreview).toBe("搜索结果");
 	});
 
+	test("applyRuntimeEvents maintains currentTimeline in event-arrival order (message/call interleaved)", async () => {
+		const runningJob = job({ jobId: "job-1", conversationId: "default" });
+		const client = runtimeClientStub({
+			getActiveJobs: vi.fn(async () => ({
+				job: runningJob,
+				jobs: [runningJob],
+			})),
+		});
+		const store = createChatStore({ client });
+		await store.bootstrap();
+
+		store.applyRuntimeEvents("job-1", [
+			event({
+				seq: 1,
+				event: "message",
+				payload: { job_id: "job-1", content: "先说一句" },
+			}),
+			event({
+				seq: 2,
+				event: "tool_start",
+				payload: {
+					job_id: "job-1",
+					webchat_call_id: "call-1",
+					name: "search",
+				},
+			}),
+			event({
+				seq: 3,
+				event: "message",
+				payload: { job_id: "job-1", content: "再说一句" },
+			}),
+			event({
+				seq: 4,
+				event: "tool_end",
+				payload: {
+					job_id: "job-1",
+					webchat_call_id: "call-1",
+					ok: true,
+					result_preview: "结果",
+				},
+			}),
+		]);
+
+		const state = store.getSnapshot();
+		const activeJob = state.activeJobsByConversation.default;
+		// currentTimeline 按事件到达顺序交错：message → call → message（tool_end 不再 push）
+		expect(activeJob?.currentTimeline).toEqual([
+			{ type: "message", seq: 1, content: "先说一句" },
+			{ type: "call", seq: 2, callId: "call-1" },
+			{ type: "message", seq: 3, content: "再说一句" },
+		]);
+	});
+
 	test("continues JSON fallback polling until an SSE-broken job reaches terminal state", async () => {
 		vi.useFakeTimers();
 		const runningJob = job({ jobId: "job-1", conversationId: "default" });

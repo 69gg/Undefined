@@ -95,6 +95,7 @@ export function job(overrides: Partial<ChatJob> = {}): ChatJob {
 		currentAgentStages: [],
 		currentToolCalls: [],
 		historyFinalized: false,
+		currentTimeline: [],
 		waitingInput: null,
 		...overrides,
 	};

@@ -79,21 +79,34 @@ function convertToolCallSnapshot(snap: ToolCallSnapshot): HistoryToolCall {
 }
 
 function buildStreamingTimeline(job: ChatJob): HistoryTimelineEntry[] {
+	// 优先用 currentTimeline：按事件到达顺序，message 段与 call 交错（对齐 WebUI append 顺序）
+	if (job.currentTimeline.length > 0) {
+		const entries: HistoryTimelineEntry[] = [];
+		for (const item of job.currentTimeline) {
+			if (item.type === "message") {
+				entries.push({ type: "message", content: item.content });
+			} else {
+				const snap = job.currentToolCalls.find(
+					(s) => s.id === item.callId || (!s.id && s.name === item.callId),
+				);
+				if (snap) {
+					entries.push({ type: "call", call: convertToolCallSnapshot(snap) });
+				}
+			}
+		}
+		return entries;
+	}
+	// 回退（无 currentTimeline，如旧数据）
 	const timeline: HistoryTimelineEntry[] = [];
-
-	// 有文本时先输出文本
 	if (job.reply.trim()) {
 		timeline.push({ type: "message", content: job.reply });
 	}
-
-	// 输出所有工具调用
 	for (const toolCall of job.currentToolCalls) {
 		timeline.push({
 			type: "call",
 			call: convertToolCallSnapshot(toolCall),
 		});
 	}
-
 	return timeline;
 }
 

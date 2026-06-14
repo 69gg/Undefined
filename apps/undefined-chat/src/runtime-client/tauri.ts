@@ -302,6 +302,7 @@ function normalizeJob(value: unknown): ChatJob | null {
 			field(raw, "currentToolCalls", "current_tool_calls"),
 		).map(normalizeToolCall),
 		historyFinalized: bool(field(raw, "historyFinalized", "history_finalized")),
+		currentTimeline: [],
 		waitingInput: field(raw, "waitingInput", "waiting_input") ?? null,
 	};
 }
