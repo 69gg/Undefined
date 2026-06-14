@@ -434,3 +434,113 @@ async def test_chat_attachment_upload_returns_400_when_read_chunk_fails() -> Non
     assert response.status == 400
     assert response.text is not None
     assert "multipart" in response.text.lower()
+
+
+class _FakeRegistry:
+    """最小附件注册表桩，用于 preview/download 的 registry fallback 测试。"""
+
+    def __init__(self, record: Any) -> None:
+        self._record = record
+
+    async def load(self) -> None:
+        return None
+
+    async def resolve_async(self, uid: str, scope_key: str | None) -> Any:
+        # 模拟 AttachmentRegistry 的 scope 校验：仅放行 webui 作用域
+        if uid == self._record.uid and scope_key == "webui":
+            return self._record
+        return None
+
+
+def _ctx_with_registry(registry: Any) -> RuntimeAPIContext:
+    ctx = _ctx()
+    ctx.ai = SimpleNamespace(attachment_registry=registry)
+    return ctx
+
+
+def test_normalize_chat_media_type() -> None:
+    # 已是 MIME（含 /）原样返回
+    assert chat._normalize_chat_media_type("image/png", "x.png") == "image/png"
+    # 粗分类 "image" 按文件名扩展名推断为真正 MIME
+    assert chat._normalize_chat_media_type("image", "help_list.png") == "image/png"
+    assert chat._normalize_chat_media_type("image", "photo.jpg") == "image/jpeg"
+    assert chat._normalize_chat_media_type("", "note.txt") == "text/plain"
+    # 无扩展名 / 未知扩展名 → 兜底
+    assert chat._normalize_chat_media_type("", "") == "application/octet-stream"
+    assert (
+        chat._normalize_chat_media_type("file", "data.unknownext")
+        == "application/octet-stream"
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_attachment_preview_and_download_fall_back_to_registry(
+    tmp_path: Path,
+) -> None:
+    blob = tmp_path / "pic_source.png"
+    image_bytes = b"\x89PNG\r\n\x1a\n"
+    blob.write_bytes(image_bytes)
+    record = SimpleNamespace(
+        uid="pic_help1234",
+        local_path=str(blob),
+        mime_type="image/png",
+        media_type="image",  # 粗分类，非 MIME（模拟 AttachmentRegistry 记录）
+        display_name="help_list.png",
+        kind="image",
+        scope_key="webui",
+    )
+    ctx = _ctx_with_registry(_FakeRegistry(record))
+
+    app = web.Application()
+
+    async def _download(request: web.Request) -> web.StreamResponse:
+        return await chat.chat_attachment_download_handler(ctx, request)
+
+    async def _preview(request: web.Request) -> web.StreamResponse:
+        return await chat.chat_attachment_preview_handler(ctx, request)
+
+    app.router.add_get("/api/v1/chat/attachments/{attachment_id}", _download)
+    app.router.add_get("/api/v1/chat/attachments/{attachment_id}/preview", _preview)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        download_response = await client.get("/api/v1/chat/attachments/pic_help1234")
+        preview_response = await client.get(
+            "/api/v1/chat/attachments/pic_help1234/preview"
+        )
+
+        assert download_response.status == 200
+        assert await download_response.read() == image_bytes
+        assert preview_response.status == 200
+        assert await preview_response.read() == image_bytes
+        assert preview_response.headers["Content-Type"].startswith("image/png")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_chat_attachment_preview_404_when_uid_missing_everywhere() -> None:
+    record = SimpleNamespace(
+        uid="pic_other999",
+        local_path="",
+        mime_type="image/png",
+        media_type="image",
+        display_name="x.png",
+        kind="image",
+        scope_key="webui",
+    )
+    ctx = _ctx_with_registry(_FakeRegistry(record))
+
+    app = web.Application()
+
+    async def _preview(request: web.Request) -> web.StreamResponse:
+        return await chat.chat_attachment_preview_handler(ctx, request)
+
+    app.router.add_get("/api/v1/chat/attachments/{attachment_id}/preview", _preview)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        response = await client.get("/api/v1/chat/attachments/pic_missing01/preview")
+        assert response.status == 404
+    finally:
+        await client.close()

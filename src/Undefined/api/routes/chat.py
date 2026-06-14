@@ -1219,9 +1219,82 @@ def _valid_chat_attachment_id(raw: Any) -> str:
     return attachment_id
 
 
+def _normalize_chat_media_type(raw_media_type: Any, display_name: str = "") -> str:
+    """将附件 ``media_type`` 规范为 MIME 类型。
+
+    AttachmentRegistry 的 ``media_type`` 是粗分类（``image``/``file`` 等，见
+    ``registry.register_bytes``），并非 MIME；真正的 MIME 存在独立的 ``mime_type``
+    字段。这里统一规范：已是 MIME（含 ``/``）原样返回；否则按文件名扩展名推断；
+    兜底 ``application/octet-stream``。
+    """
+    text_value = str(raw_media_type or "").strip().lower()
+    if "/" in text_value:
+        return text_value
+    guessed = mimetypes.guess_type(str(display_name or ""))[0]
+    return guessed or "application/octet-stream"
+
+
+async def _resolve_registry_attachment(ctx: RuntimeAPIContext, uid: str) -> Any | None:
+    """webchat 上传存储未命中时，按 webui 作用域解析全局附件注册表。
+
+    命令/AI 输出的图片注册在 ``AttachmentRegistry``（非 webchat 上传存储）。
+    固定 ``scope_key="webui"``，``resolve_async`` 内置 scope 校验，不会跨作用域
+    读到 QQ 群/私聊附件。
+    """
+    registry = getattr(getattr(ctx, "ai", None), "attachment_registry", None)
+    if registry is None:
+        return None
+    scope_key = build_attachment_scope(
+        user_id=_VIRTUAL_USER_ID, request_type="private", webui_session=True
+    )
+    load = getattr(registry, "load", None)
+    if callable(load):
+        with suppress(Exception):
+            await load()
+    try:
+        return await registry.resolve_async(uid, scope_key)
+    except Exception as exc:
+        logger.debug(
+            "[RuntimeAPI] registry attachment resolve failed uid=%s err=%s", uid, exc
+        )
+        return None
+
+
+def _registry_attachment_metadata(record: Any) -> dict[str, Any] | None:
+    """将 AttachmentRegistry 记录转为 chat 附件 metadata（含本地 blob 路径）。"""
+    local_path = str(getattr(record, "local_path", "") or "").strip()
+    uid = str(getattr(record, "uid", "") or "").strip()
+    if not local_path or not uid:
+        return None
+    display_name = str(getattr(record, "display_name", "") or "") or "attachment"
+    mime_type = str(getattr(record, "mime_type", "") or "").strip().lower()
+    media_type = (
+        mime_type
+        if "/" in mime_type
+        else _normalize_chat_media_type(getattr(record, "media_type", ""), display_name)
+    )
+    kind = str(getattr(record, "kind", "") or "").strip() or (
+        "image" if media_type.startswith("image/") else "file"
+    )
+    metadata: dict[str, Any] = {
+        "id": uid,
+        "uid": uid,
+        "name": display_name,
+        "display_name": display_name,
+        "media_type": media_type,
+        "kind": kind,
+        "download_url": f"/api/v1/chat/attachments/{uid}",
+        "_blob_path": local_path,
+    }
+    if media_type.startswith("image/"):
+        metadata["preview_url"] = f"/api/v1/chat/attachments/{uid}/preview"
+    return metadata
+
+
 def _chat_attachment_response_metadata(raw: dict[str, Any]) -> dict[str, Any]:
     attachment_id = str(raw.get("id") or "").strip()
-    media_type = str(raw.get("media_type") or "application/octet-stream").strip()
+    display_name = str(raw.get("display_name") or raw.get("name") or "attachment")
+    media_type = _normalize_chat_media_type(raw.get("media_type"), display_name)
     kind = str(raw.get("kind") or "").strip() or (
         "image" if media_type.startswith("image/") else "file"
     )
@@ -1229,7 +1302,7 @@ def _chat_attachment_response_metadata(raw: dict[str, Any]) -> dict[str, Any]:
         "id": attachment_id,
         "uid": attachment_id,
         "name": str(raw.get("name") or "attachment"),
-        "display_name": str(raw.get("display_name") or raw.get("name") or "attachment"),
+        "display_name": display_name,
         "size": int(raw.get("size") or 0),
         "media_type": media_type,
         "kind": kind,
@@ -1245,26 +1318,38 @@ def _chat_attachment_response_metadata(raw: dict[str, Any]) -> dict[str, Any]:
     return metadata
 
 
-async def _load_chat_attachment_metadata(attachment_id: str) -> dict[str, Any] | None:
+async def _load_chat_attachment_metadata(
+    attachment_id: str, *, ctx: RuntimeAPIContext | None = None
+) -> dict[str, Any] | None:
     clean_id = _valid_chat_attachment_id(attachment_id)
     if not clean_id:
         return None
+    # 1) webchat 上传存储
     raw = await async_io.read_json(_chat_attachment_meta_path(clean_id), use_lock=True)
-    if not isinstance(raw, dict):
-        return None
-    raw["id"] = clean_id
-    return _chat_attachment_response_metadata(raw)
+    if isinstance(raw, dict):
+        raw["id"] = clean_id
+        metadata = _chat_attachment_response_metadata(raw)
+        metadata["_blob_path"] = str(_chat_attachment_blob_path(clean_id))
+        return metadata
+    # 2) fallback 到全局附件注册表（命令/AI 输出图片注册在此，非 webchat 上传存储）
+    if ctx is not None:
+        record = await _resolve_registry_attachment(ctx, clean_id)
+        if record is not None:
+            return _registry_attachment_metadata(record)
+    return None
 
 
 async def _load_chat_attachment_from_request(
     request: web.Request,
+    *,
+    ctx: RuntimeAPIContext | None = None,
 ) -> dict[str, Any] | None:
     attachment_id = _valid_chat_attachment_id(
         request.match_info.get("attachment_id", "")
     )
     if not attachment_id:
         return None
-    return await _load_chat_attachment_metadata(attachment_id)
+    return await _load_chat_attachment_metadata(attachment_id, ctx=ctx)
 
 
 def _content_disposition_attachment(display_name: str) -> str:
@@ -2175,13 +2260,17 @@ async def _history_attachments(
         uid = str(item.get("uid", "") or "").strip()
         if not uid:
             continue
-        media_type = str(item.get("media_type") or item.get("kind") or "file").strip()
-        kind = str(item.get("kind") or media_type or "file").strip()
+        display_name = str(item.get("display_name", "") or "")
+        raw_media_type = str(
+            item.get("media_type") or item.get("kind") or "file"
+        ).strip()
+        kind = str(item.get("kind") or raw_media_type or "file").strip()
+        media_type = _normalize_chat_media_type(raw_media_type, display_name)
         ref: dict[str, str] = {
             "uid": uid,
             "kind": kind or "file",
-            "media_type": media_type or kind or "file",
-            "display_name": str(item.get("display_name", "") or ""),
+            "media_type": media_type,
+            "display_name": display_name,
         }
         for key in ("source_kind", "source_ref", "semantic_kind", "description"):
             value = str(item.get(key, "") or "").strip()
@@ -2553,11 +2642,15 @@ async def chat_attachment_download_handler(
     ctx: RuntimeAPIContext,
     request: web.Request,
 ) -> web.StreamResponse:
-    _ = ctx
-    metadata = await _load_chat_attachment_from_request(request)
+    metadata = await _load_chat_attachment_from_request(request, ctx=ctx)
     if metadata is None:
         return _json_error("Attachment not found", status=404)
-    blob_path = _chat_attachment_blob_path(str(metadata["id"]))
+    blob_path = Path(
+        str(
+            metadata.get("_blob_path")
+            or _chat_attachment_blob_path(str(metadata["id"]))
+        )
+    )
     if not await async_io.is_file(blob_path):
         return _json_error("Attachment not found", status=404)
     headers = {
@@ -2576,14 +2669,20 @@ async def chat_attachment_preview_handler(
     ctx: RuntimeAPIContext,
     request: web.Request,
 ) -> web.StreamResponse:
-    _ = ctx
-    metadata = await _load_chat_attachment_from_request(request)
+    metadata = await _load_chat_attachment_from_request(request, ctx=ctx)
     if metadata is None:
         return _json_error("Attachment not found", status=404)
-    media_type = str(metadata.get("media_type") or "").lower()
+    media_type = _normalize_chat_media_type(
+        metadata.get("media_type"), str(metadata.get("name") or "")
+    )
     if not media_type.startswith("image/"):
         return _json_error("Attachment preview is not available", status=415)
-    blob_path = _chat_attachment_blob_path(str(metadata["id"]))
+    blob_path = Path(
+        str(
+            metadata.get("_blob_path")
+            or _chat_attachment_blob_path(str(metadata["id"]))
+        )
+    )
     if not await async_io.is_file(blob_path):
         return _json_error("Attachment not found", status=404)
     return web.FileResponse(

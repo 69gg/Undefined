@@ -210,8 +210,12 @@ async def test_runtime_chat_history_endpoint_returns_attachment_refs() -> None:
 
     attachment = payload["items"][0]["attachments"][0]
     assert attachment["uid"] == "pic_abc123"
-    assert attachment["media_type"] == "image"
+    # media_type 规范为真正 MIME（原存储为粗分类 "image"）
+    assert attachment["media_type"] == "image/png"
     assert attachment["display_name"] == "image_1.png"
+    # 历史附件补充 preview_url/download_url，供客户端渲染缩略图
+    assert attachment["preview_url"] == "/api/v1/chat/attachments/pic_abc123/preview"
+    assert attachment["download_url"] == "/api/v1/chat/attachments/pic_abc123"
 
 
 @pytest.mark.asyncio
