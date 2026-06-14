@@ -1056,7 +1056,7 @@
                         ':"$1"',
                     )
                     .replace(
-                        /([\[,]\s*)'([^'\\]*(?:\\.[^'\\]*)*)'(?=\s*[\],])/g,
+                        /([[,]\s*)'([^'\\]*(?:\\.[^'\\]*)*)'(?=\s*[\],])/g,
                         '$1"$2"',
                     )
                     .replace(/\bNone\b/g, "null")
@@ -1593,7 +1593,7 @@
         parent.timeline = timeline;
     }
 
-    function reduceAgentStageBlock(blocks, payload, seq = 0) {
+    function reduceAgentStageBlock(blocks, payload, _seq = 0) {
         const key = toolBlockKey(payload, blocks);
         const previous = blocks.get(key) || {};
         const parentCandidate = String(
@@ -2804,10 +2804,27 @@
     function renderChatContent(content, useMarkdown) {
         const text = String(content || "");
 
+        // Extract <attachment uid="..."/> tags into placeholders (unified entry point for all paths)
+        // Only process image attachments (uid starts with pic_), remove file attachments
+        const attachmentPattern =
+            /<(?:attachment|pic)\s+uid=["']([^"']+)["']\s*\/?\s*>/gi;
+        const attachmentPlaceholders = [];
+        const step0 = text.replace(attachmentPattern, (_match, uid) => {
+            const trimmedUid = String(uid || "").trim();
+            // Only process image attachments (pic_ prefix)
+            if (!trimmedUid.startsWith("pic_")) {
+                return ""; // Remove non-image attachment tags
+            }
+            const idx = attachmentPlaceholders.length;
+            const previewUrl = `/api/v1/runtime/chat/attachments/${encodeURIComponent(trimmedUid)}/preview`;
+            attachmentPlaceholders.push(chatImageMarkup(previewUrl, ""));
+            return `ATTACHPH${idx}ATTACHPH`;
+        });
+
         // Extract CQ file codes into placeholders
         const filePattern = /\[CQ:file,([^\]]+)\]/g;
         const filePlaceholders = [];
-        const step1 = text.replace(filePattern, (match, attrStr) => {
+        const step1 = step0.replace(filePattern, (_match, attrStr) => {
             const attrs = parseCqAttributes(attrStr);
             const idx = filePlaceholders.length;
             filePlaceholders.push(renderFileCard(attrs));
@@ -2865,6 +2882,13 @@
             html = html.replace(
                 new RegExp(`CQFILEPH${i}CQFILEPH`, "g"),
                 filePlaceholders[i],
+            );
+        }
+        // Restore attachment image placeholders
+        for (let i = 0; i < attachmentPlaceholders.length; i++) {
+            html = html.replace(
+                new RegExp(`ATTACHPH${i}ATTACHPH`, "g"),
+                attachmentPlaceholders[i],
             );
         }
 
@@ -3169,7 +3193,7 @@
     if (active && selected) scheduleDraw(selected);
   });
 })();
-<\/script>`;
+</script>`;
     }
 
     function injectHtmlRunnerSecurity(html) {
@@ -5503,7 +5527,9 @@
             });
         };
         const bindEnterMany = (ids, handler) => {
-            ids.forEach((id) => bindEnter(id, handler));
+            for (const id of ids) {
+                bindEnter(id, handler);
+            }
         };
 
         const probeRefresh = get("btnProbeRefresh");
