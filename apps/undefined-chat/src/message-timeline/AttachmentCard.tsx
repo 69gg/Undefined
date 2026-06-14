@@ -1,5 +1,6 @@
 import { AttachmentImage } from "../rendering/AttachmentImage";
 import type { Attachment } from "../runtime-client/types";
+import { isImageAttachment } from "../utils/attachment";
 import { getFileIcon } from "../utils/file-icon";
 import { formatFileSize } from "../utils/file-size";
 
@@ -11,15 +12,6 @@ export type AttachmentCardProps = {
 	/** 内联图片点击放大，回传已加载的 blob URL */
 	onOpenImage?: (src: string, alt: string) => void;
 };
-
-/**
- * 判断是否为图片附件
- */
-function isImageAttachment(attachment: Attachment): boolean {
-	return (
-		attachment.kind === "image" || attachment.mediaType.startsWith("image/")
-	);
-}
 
 /**
  * 判断是否应该内联显示图片（小于 12MB）

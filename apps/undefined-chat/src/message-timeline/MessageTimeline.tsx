@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { isJobRunning } from "../chat-store/store";
+import { extractAttachmentTags } from "../rendering/AttachmentProcessor";
 import {
 	type HtmlPreviewRequest,
 	MarkdownContent,
@@ -11,6 +12,7 @@ import type {
 	HistoryItem,
 	ToolCallSnapshot,
 } from "../runtime-client/types";
+import { isImageAttachment } from "../utils/attachment";
 import { AttachmentCard } from "./AttachmentCard";
 import { ChatStageLabel } from "./ChatStageLabel";
 import { MessageQuoteButton } from "./MessageQuoteButton";
@@ -483,8 +485,21 @@ export function MessageTimeline({
 										/>
 									);
 								})()}
-								{item.attachments.length > 0
-									? item.attachments.map((attachment) => (
+								{(() => {
+									// 正文已内联渲染的图片 uid（避免与附件区重复）；
+									// 未在正文引用的图片（如用户上传）仍在附件区展示。
+									const inlinedUids = new Set(
+										extractAttachmentTags(item.content).attachmentUids,
+									);
+									return item.attachments
+										.filter(
+											(attachment) =>
+												!(
+													isImageAttachment(attachment) &&
+													inlinedUids.has(attachment.id)
+												),
+										)
+										.map((attachment) => (
 											<AttachmentCard
 												attachment={attachment}
 												key={attachment.id || attachment.name}
@@ -492,8 +507,8 @@ export function MessageTimeline({
 												onDownload={onSaveAttachment}
 												onOpenImage={onOpenImage}
 											/>
-										))
-									: null}
+										));
+								})()}
 							</div>
 						</article>
 					);

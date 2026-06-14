@@ -1428,3 +1428,24 @@ def test_webchat_content_wraps_long_code_and_markdown_without_horizontal_scroll(
     assert ".runtime-tool-block summary .runtime-tool-kind" in responsive_css
     assert "display: none;" in responsive_css
     assert "max-width: 30vw;" in responsive_css
+
+
+def test_webchat_inlines_attachment_images_and_dedupes_card() -> None:
+    source = _read_source(RUNTIME_JS)
+
+    # 正文 <attachment uid/> 内联为图片：复用 CQ image 渲染（file:// → /api/runtime/chat/image）
+    assert "function inlineAttachmentImages(" in source
+    assert "[CQ:image,file=" in source
+
+    # appendHistoryChatItem 用 inlineAttachmentImages 处理正文，避免标签残留
+    history_item_fn = source.split("function appendHistoryChatItem(", 1)[1].split(
+        "\n    function ", 1
+    )[0]
+    assert "inlineAttachmentImages(" in history_item_fn
+
+    # 附件区按非图片过滤，避免与正文内联图重复
+    assert "function attachmentIsImage(" in source
+    build_markup_fn = source.split("function buildAttachmentMarkup(", 1)[1].split(
+        "\n    function ", 1
+    )[0]
+    assert "attachmentIsImage" in build_markup_fn

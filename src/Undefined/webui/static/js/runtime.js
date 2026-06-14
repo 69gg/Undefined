@@ -796,8 +796,51 @@
         });
     }
 
+    function attachmentIsImage(item) {
+        return !!(
+            item &&
+            (item.kind === "image" ||
+                String(item.media_type || "")
+                    .trim()
+                    .startsWith("image/"))
+        );
+    }
+
+    // 把正文里的 <attachment uid/> / <pic uid/> 标签按附件元数据替换为内联图片
+    // （复用 CQ image 渲染：file:// 经 resolveCqImageSource 走 /api/runtime/chat/image）。
+    // 图片内联展示、避免与附件区重复；非图片或缺 source 的标签直接移除。
+    function inlineAttachmentImages(content, attachments) {
+        const text = String(content || "");
+        const list = Array.isArray(attachments) ? attachments : [];
+        if (!list.length) {
+            // 无附件元数据时仍移除残留标签，避免原始 <attachment uid/> 文本外泄
+            return text.replace(
+                /<(?:attachment|pic)\s+uid=["'][^"']+["']\s*\/?\s*>/gi,
+                "",
+            );
+        }
+        const map = new Map();
+        for (const item of list) {
+            if (item && item.uid) map.set(String(item.uid).trim(), item);
+        }
+        return text.replace(
+            /<(?:attachment|pic)\s+uid=["']([^"']+)["']\s*\/?\s*>/gi,
+            (_match, uid) => {
+                const item = map.get(String(uid).trim());
+                if (!item || !attachmentIsImage(item)) return "";
+                const source = String(
+                    item.render_source || item.source_ref || "",
+                ).trim();
+                return source ? `[CQ:image,file=${source}]` : "";
+            },
+        );
+    }
+
     function buildAttachmentMarkup(attachments) {
-        const items = Array.isArray(attachments) ? attachments : [];
+        // 图片已在正文内联渲染，附件区只保留非图片文件，避免重复
+        const items = (Array.isArray(attachments) ? attachments : []).filter(
+            (item) => !attachmentIsImage(item),
+        );
         return items
             .map((item) => renderHistoryAttachment(item))
             .filter(Boolean)
@@ -1925,7 +1968,10 @@
 
     function appendHistoryChatItem(item, options = {}) {
         const role = item && item.role === "bot" ? "bot" : "user";
-        const content = String((item && item.content) || "").trim();
+        const content = inlineAttachmentImages(
+            String((item && item.content) || "").trim(),
+            item && item.attachments,
+        );
         const attachmentMarkup = buildAttachmentMarkup(
             item && item.attachments,
         );

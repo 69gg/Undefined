@@ -177,4 +177,74 @@ describe("MessageTimeline", () => {
 			"chart.png",
 		);
 	});
+
+	test("正文 <attachment uid/> 引用的图片只内联渲染，不在附件区重复", async () => {
+		renderTimeline(
+			<MessageTimeline
+				activeJob={null}
+				connectionState="connected"
+				items={[
+					historyItem({
+						messageId: "b-inline",
+						role: "bot",
+						content: '看图<attachment uid="img-1"/>',
+						attachments: [
+							{
+								id: "img-1",
+								name: "chart.png",
+								size: 2048,
+								mediaType: "image/png",
+								kind: "image",
+								downloadUrl: "/api/v1/chat/attachments/img-1",
+								previewUrl: "/api/v1/chat/attachments/img-1/preview",
+								discarded: false,
+							},
+						],
+					}),
+				]}
+				onPreviewAttachment={vi.fn()}
+				onPreviewHtml={vi.fn()}
+				onSaveAttachment={vi.fn()}
+			/>,
+		);
+
+		// 正文已内联该图，附件区被过滤，全局只应有一个对应图片
+		const imgs = await screen.findAllByAltText("chart.png");
+		expect(imgs).toHaveLength(1);
+	});
+
+	test("未被正文引用的图片（如上传）仍在附件区展示", async () => {
+		renderTimeline(
+			<MessageTimeline
+				activeJob={null}
+				connectionState="connected"
+				items={[
+					historyItem({
+						messageId: "u-upload",
+						role: "user",
+						content: "看我的图",
+						attachments: [
+							{
+								id: "img-2",
+								name: "photo.png",
+								size: 2048,
+								mediaType: "image/png",
+								kind: "image",
+								downloadUrl: "/api/v1/chat/attachments/img-2",
+								previewUrl: "/api/v1/chat/attachments/img-2/preview",
+								discarded: false,
+							},
+						],
+					}),
+				]}
+				onPreviewAttachment={vi.fn()}
+				onPreviewHtml={vi.fn()}
+				onSaveAttachment={vi.fn()}
+			/>,
+		);
+
+		// content 未引用该 uid，附件区保留展示
+		const imgs = await screen.findAllByAltText("photo.png");
+		expect(imgs).toHaveLength(1);
+	});
 });
