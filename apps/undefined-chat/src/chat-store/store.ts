@@ -84,7 +84,6 @@ export function createInitialChatState(): ChatState {
 		imageViewer: null,
 		htmlPreview: null,
 		autoScrollEnabled: true,
-		lastSentMessageId: null,
 		topLoadSuppressedUntil: 0,
 		platform: null,
 		settings: {
@@ -226,7 +225,6 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 			const existing = state.historyByConversation[action.conversationId];
 			return {
 				...state,
-				lastSentMessageId: action.item.messageId,
 				historyByConversation: {
 					...state.historyByConversation,
 					[action.conversationId]: {
