@@ -1,8 +1,38 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import type { Attachment } from "../runtime-client/types";
+import { AttachmentImageProvider } from "../rendering/AttachmentImageContext";
+import type {
+	Attachment,
+	AttachmentPreviewResult,
+} from "../runtime-client/types";
 import { AttachmentCard } from "./AttachmentCard";
+
+function imageResult(): AttachmentPreviewResult {
+	return {
+		status: 200,
+		ok: true,
+		mediaType: "image/png",
+		bytes: [137, 80, 78, 71],
+		body: null,
+	};
+}
+
+function renderWithProvider(
+	ui: ReactNode,
+	previewImpl?: () => Promise<AttachmentPreviewResult>,
+) {
+	const previewAttachment = vi.fn(previewImpl ?? (async () => imageResult()));
+	return {
+		previewAttachment,
+		...render(
+			<AttachmentImageProvider client={{ previewAttachment }}>
+				{ui}
+			</AttachmentImageProvider>,
+		),
+	};
+}
 
 describe("AttachmentCard", () => {
 	const mockImageAttachment: Attachment = {
@@ -39,73 +69,50 @@ describe("AttachmentCard", () => {
 	};
 
 	describe("图片附件", () => {
-		it("小图片应该内联显示", () => {
-			render(
-				<AttachmentCard attachment={mockImageAttachment} onPreview={vi.fn()} />,
-			);
+		it("小图片内联显示为 blob 图片", async () => {
+			renderWithProvider(<AttachmentCard attachment={mockImageAttachment} />);
 
-			const img = screen.getByRole("img", { name: mockImageAttachment.name });
-			expect(img).toBeInTheDocument();
+			const img = await screen.findByAltText("test-image.png");
 			expect(img).toHaveClass("runtime-chat-image");
-			expect(img).toHaveAttribute("src", mockImageAttachment.previewUrl);
+			expect(img.getAttribute("src")).toMatch(/^blob:/);
 			expect(img).toHaveAttribute("loading", "lazy");
 		});
 
-		it("相对 previewUrl + runtimeUrl 应解析为绝对地址", () => {
-			render(
-				<AttachmentCard
-					attachment={{
-						...mockImageAttachment,
-						previewUrl: "/api/v1/chat/attachments/img-1/preview",
-					}}
-					onPreview={vi.fn()}
-					runtimeUrl="http://127.0.0.1:8788"
-				/>,
-			);
-
-			const img = screen.getByRole("img", { name: mockImageAttachment.name });
-			expect(img).toHaveAttribute(
-				"src",
-				"http://127.0.0.1:8788/api/v1/chat/attachments/img-1/preview",
-			);
-		});
-
-		it("相对 previewUrl 无 runtimeUrl 时原样渲染（降级）", () => {
-			render(
-				<AttachmentCard
-					attachment={{
-						...mockImageAttachment,
-						previewUrl: "/api/v1/chat/attachments/img-1/preview",
-					}}
-					onPreview={vi.fn()}
-				/>,
-			);
-
-			const img = screen.getByRole("img", { name: mockImageAttachment.name });
-			expect(img).toHaveAttribute(
-				"src",
-				"/api/v1/chat/attachments/img-1/preview",
-			);
-		});
-
-		it("点击内联图片应该触发预览", async () => {
-			const user = userEvent.setup();
-			const onPreview = vi.fn();
-			render(
+		it("点击内联图片回传 blob URL 给 onOpenImage", async () => {
+			const onOpenImage = vi.fn();
+			renderWithProvider(
 				<AttachmentCard
 					attachment={mockImageAttachment}
-					onPreview={onPreview}
+					onOpenImage={onOpenImage}
 				/>,
 			);
 
-			const button = screen.getByRole("button");
-			await user.click(button);
+			const img = await screen.findByAltText("test-image.png");
+			fireEvent.click(img);
 
-			expect(onPreview).toHaveBeenCalledWith(mockImageAttachment);
+			expect(onOpenImage).toHaveBeenCalledWith(
+				expect.stringMatching(/^blob:/),
+				"test-image.png",
+			);
 		});
 
-		it("大图片应该显示为文件卡片", () => {
-			render(
+		it("图片加载失败时降级为文件图标", async () => {
+			renderWithProvider(
+				<AttachmentCard attachment={mockImageAttachment} />,
+				async () => ({
+					status: 415,
+					ok: false,
+					mediaType: null,
+					bytes: [],
+					body: "x",
+				}),
+			);
+
+			expect(await screen.findByText("IMG")).toBeInTheDocument();
+		});
+
+		it("大图片（>12MB）显示为文件卡片", () => {
+			renderWithProvider(
 				<AttachmentCard
 					attachment={mockLargeImageAttachment}
 					onPreview={vi.fn()}
@@ -117,23 +124,26 @@ describe("AttachmentCard", () => {
 			expect(screen.getByRole("button", { name: "预览" })).toBeInTheDocument();
 		});
 
-		it("大图片应该显示缩略图", () => {
-			render(
+		it("大图片文件卡片缩略图以 blob 渲染", async () => {
+			const { container } = renderWithProvider(
 				<AttachmentCard
 					attachment={mockLargeImageAttachment}
 					onPreview={vi.fn()}
 				/>,
 			);
 
-			const thumb = screen.getByAltText("");
-			expect(thumb).toHaveClass("runtime-chat-attachment-thumb");
-			expect(thumb).toHaveAttribute("src", mockLargeImageAttachment.previewUrl);
+			const thumb = await waitFor(() => {
+				const el = container.querySelector("img.runtime-chat-attachment-thumb");
+				if (!el) throw new Error("thumbnail not loaded");
+				return el;
+			});
+			expect(thumb.getAttribute("src")).toMatch(/^blob:/);
 		});
 	});
 
 	describe("文件附件", () => {
 		it("应该显示文件卡片布局", () => {
-			render(
+			renderWithProvider(
 				<AttachmentCard attachment={mockFileAttachment} onDownload={vi.fn()} />,
 			);
 
@@ -145,64 +155,37 @@ describe("AttachmentCard", () => {
 		it("点击下载按钮应该触发下载回调", async () => {
 			const user = userEvent.setup();
 			const onDownload = vi.fn();
-			render(
+			renderWithProvider(
 				<AttachmentCard
 					attachment={mockFileAttachment}
 					onDownload={onDownload}
 				/>,
 			);
 
-			const downloadButton = screen.getByRole("button", { name: "下载" });
-			await user.click(downloadButton);
+			await user.click(screen.getByRole("button", { name: "下载" }));
 
 			expect(onDownload).toHaveBeenCalledWith(mockFileAttachment);
-		});
-
-		it("应该显示正确的文件图标", () => {
-			const testCases: Array<{
-				mediaType: string;
-				expectedIcon: string;
-			}> = [
-				{ mediaType: "image/png", expectedIcon: "IMG" },
-				{ mediaType: "video/mp4", expectedIcon: "VID" },
-				{ mediaType: "audio/mp3", expectedIcon: "AUD" },
-				{ mediaType: "text/plain", expectedIcon: "TXT" },
-				{ mediaType: "application/pdf", expectedIcon: "PDF" },
-				{ mediaType: "application/zip", expectedIcon: "ZIP" },
-				{ mediaType: "application/json", expectedIcon: "DAT" },
-				{ mediaType: "application/octet-stream", expectedIcon: "FILE" },
-			];
-
-			for (const { mediaType, expectedIcon } of testCases) {
-				const { unmount } = render(
-					<AttachmentCard
-						attachment={{ ...mockFileAttachment, mediaType, previewUrl: null }}
-					/>,
-				);
-				expect(screen.getByText(expectedIcon)).toBeInTheDocument();
-				unmount();
-			}
 		});
 	});
 
 	describe("可选回调", () => {
-		it("没有 onPreview 时内联图片不应该可点击", () => {
-			render(<AttachmentCard attachment={mockImageAttachment} />);
+		it("没有 onOpenImage 时内联图片不可点击（非 button 角色）", async () => {
+			renderWithProvider(<AttachmentCard attachment={mockImageAttachment} />);
 
-			const wrapper = screen.getByRole("button");
-			expect(wrapper).toHaveStyle({ cursor: "default" });
+			const img = await screen.findByAltText("test-image.png");
+			expect(img).not.toHaveAttribute("role", "button");
 		});
 
-		it("没有 onDownload 时不应该显示下载按钮", () => {
-			render(<AttachmentCard attachment={mockFileAttachment} />);
+		it("没有 onDownload 时不显示下载按钮", () => {
+			renderWithProvider(<AttachmentCard attachment={mockFileAttachment} />);
 
 			expect(
 				screen.queryByRole("button", { name: "下载" }),
 			).not.toBeInTheDocument();
 		});
 
-		it("图片文件卡片没有 onPreview 时不应该显示预览按钮", () => {
-			render(
+		it("图片文件卡片没有 onPreview 时不显示预览按钮", () => {
+			renderWithProvider(
 				<AttachmentCard
 					attachment={mockLargeImageAttachment}
 					onDownload={vi.fn()}
@@ -217,18 +200,8 @@ describe("AttachmentCard", () => {
 	});
 
 	describe("边界情况", () => {
-		it("没有预览 URL 的图片应该显示图标", () => {
-			const noPreviewImage: Attachment = {
-				...mockImageAttachment,
-				previewUrl: null,
-			};
-			render(<AttachmentCard attachment={noPreviewImage} />);
-
-			expect(screen.getByText("IMG")).toBeInTheDocument();
-		});
-
 		it("0 字节文件应该正确显示", () => {
-			render(
+			renderWithProvider(
 				<AttachmentCard
 					attachment={{ ...mockFileAttachment, size: 0 }}
 					onDownload={vi.fn()}
@@ -240,7 +213,7 @@ describe("AttachmentCard", () => {
 
 		it("超长文件名应该被截断", () => {
 			const longName = `${"a".repeat(200)}.pdf`;
-			render(
+			renderWithProvider(
 				<AttachmentCard
 					attachment={{ ...mockFileAttachment, name: longName }}
 					onDownload={vi.fn()}

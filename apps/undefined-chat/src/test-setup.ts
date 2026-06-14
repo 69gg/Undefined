@@ -44,3 +44,11 @@ if (!window.matchMedia) {
 		},
 	});
 }
+
+// jsdom 未实现 URL.createObjectURL/revokeObjectURL：图片附件经 blob URL 渲染需要它们，
+// 提供轻量 mock（返回唯一 blob: URL，revoke 为 no-op）。
+if (!URL.createObjectURL) {
+	let blobUrlCounter = 0;
+	URL.createObjectURL = vi.fn(() => `blob:mock-${++blobUrlCounter}`);
+	URL.revokeObjectURL = vi.fn();
+}

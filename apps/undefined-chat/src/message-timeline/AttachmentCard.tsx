@@ -1,33 +1,16 @@
-import { resolveAttachmentUrl } from "../rendering/AttachmentProcessor";
+import { AttachmentImage } from "../rendering/AttachmentImage";
 import type { Attachment } from "../runtime-client/types";
+import { getFileIcon } from "../utils/file-icon";
 import { formatFileSize } from "../utils/file-size";
 
 export type AttachmentCardProps = {
 	attachment: Attachment;
+	/** 文件卡片「预览」按钮：在新窗口打开（内联图片走 onOpenImage 放大） */
 	onPreview?: (attachment: Attachment) => void;
 	onDownload?: (attachment: Attachment) => void;
-	/** Runtime 地址，用于把后端返回的相对预览 URL 解析为绝对地址（非同源 Tauri 客户端必需） */
-	runtimeUrl?: string;
+	/** 内联图片点击放大，回传已加载的 blob URL */
+	onOpenImage?: (src: string, alt: string) => void;
 };
-
-/**
- * 根据 MIME 类型返回文件图标文本
- */
-function getFileIcon(mediaType: string): string {
-	if (mediaType.startsWith("image/")) return "IMG";
-	if (mediaType.startsWith("video/")) return "VID";
-	if (mediaType.startsWith("audio/")) return "AUD";
-	if (mediaType.startsWith("text/")) return "TXT";
-	if (mediaType.includes("pdf")) return "PDF";
-	if (mediaType.includes("zip") || mediaType.includes("tar")) return "ZIP";
-	if (
-		mediaType.includes("json") ||
-		mediaType.includes("xml") ||
-		mediaType.includes("yaml")
-	)
-		return "DAT";
-	return "FILE";
-}
 
 /**
  * 判断是否为图片附件
@@ -48,51 +31,35 @@ function shouldInlineImage(attachment: Attachment): boolean {
 
 /**
  * 附件卡片组件：渲染图片或文件附件
- * - 图片 < 12MB：内联显示缩略图，点击预览
+ * - 图片 < 12MB：内联显示缩略图（经 Tauri 带 auth 拉取转 blob），点击放大
  * - 文件：显示图标 + 文件名 + 大小 + 下载按钮
  */
 export function AttachmentCard({
 	attachment,
 	onPreview,
 	onDownload,
-	runtimeUrl,
+	onOpenImage,
 }: AttachmentCardProps) {
 	const isImage = isImageAttachment(attachment);
 	const shouldInline = shouldInlineImage(attachment);
-	// 仅解析实际渲染的 src；gating 仍判断原始 previewUrl，避免空 runtimeUrl 时误降级为文件卡片
-	const previewSrc = resolveAttachmentUrl(attachment.previewUrl, runtimeUrl);
 
-	// 内联图片显示
-	if (shouldInline && attachment.previewUrl) {
+	// 内联图片显示（blob 渲染，加载失败由 AttachmentImage 降级为图标）
+	if (shouldInline) {
 		return (
-			<button
-				className="runtime-chat-image-wrapper"
-				onClick={() => onPreview?.(attachment)}
+			<AttachmentImage
+				uid={attachment.id}
+				alt={attachment.name}
+				mediaType={attachment.mediaType}
+				className="runtime-chat-image"
 				style={{
-					border: "none",
-					background: "transparent",
-					padding: 0,
-					cursor: onPreview ? "pointer" : "default",
+					maxWidth: "100%",
+					height: "auto",
+					borderRadius: "8px",
+					border: "1px solid var(--border-color)",
 					display: "block",
 				}}
-				title={attachment.name}
-				type="button"
-			>
-				<img
-					alt={attachment.name}
-					className="runtime-chat-image"
-					loading="lazy"
-					decoding="async"
-					src={previewSrc}
-					style={{
-						maxWidth: "100%",
-						height: "auto",
-						borderRadius: "8px",
-						border: "1px solid var(--border-color)",
-						display: "block",
-					}}
-				/>
-			</button>
+				onOpenImage={onOpenImage}
+			/>
 		);
 	}
 
@@ -129,11 +96,12 @@ export function AttachmentCard({
 					overflow: "hidden",
 				}}
 			>
-				{isImage && attachment.previewUrl ? (
-					<img
+				{isImage ? (
+					<AttachmentImage
+						uid={attachment.id}
 						alt=""
+						mediaType={attachment.mediaType}
 						className="runtime-chat-attachment-thumb"
-						src={previewSrc}
 						style={{
 							width: "100%",
 							height: "100%",
@@ -187,7 +155,7 @@ export function AttachmentCard({
 				className="attachment-actions"
 				style={{ display: "flex", gap: "6px", flexShrink: 0 }}
 			>
-				{isImage && attachment.previewUrl && onPreview ? (
+				{isImage && onPreview ? (
 					<button
 						className="ghost-button"
 						onClick={() => onPreview(attachment)}

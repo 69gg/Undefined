@@ -1,8 +1,25 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { describe, expect, test, vi } from "vitest";
+import { AttachmentImageProvider } from "../rendering/AttachmentImageContext";
 import { historyItem, job } from "../test-fixtures";
 import { MessageTimeline } from "./MessageTimeline";
+
+function renderTimeline(ui: ReactNode) {
+	const previewAttachment = vi.fn(async () => ({
+		status: 200,
+		ok: true,
+		mediaType: "image/png",
+		bytes: [137, 80, 78, 71],
+		body: null,
+	}));
+	return render(
+		<AttachmentImageProvider client={{ previewAttachment }}>
+			{ui}
+		</AttachmentImageProvider>,
+	);
+}
 
 describe("MessageTimeline", () => {
 	test("renders text, code, attachments, references, and streaming bot message with tool calls", async () => {
@@ -25,7 +42,7 @@ describe("MessageTimeline", () => {
 			currentAgentStages: [],
 		});
 
-		render(
+		renderTimeline(
 			<MessageTimeline
 				activeJob={activeJob}
 				connectionState="streaming"
@@ -70,7 +87,8 @@ describe("MessageTimeline", () => {
 		expect(screen.getAllByText("参考这条消息").length).toBeGreaterThanOrEqual(
 			1,
 		);
-		expect(screen.getByAltText("report.png")).toBeTruthy();
+		// 附件图片经 blob 异步加载后渲染
+		expect(await screen.findByAltText("report.png")).toBeTruthy();
 		// 引用块（runtime-quote-block，对齐 WebUI 结构）
 		const quoteBlock = document.querySelector(".runtime-quote-block");
 		expect(quoteBlock).toBeTruthy();
@@ -101,7 +119,7 @@ describe("MessageTimeline", () => {
 			}),
 		);
 
-		render(
+		renderTimeline(
 			<MessageTimeline
 				activeJob={null}
 				connectionState="connected"
@@ -120,9 +138,9 @@ describe("MessageTimeline", () => {
 		);
 	});
 
-	test("点击附件图片以绝对 URL 打开查看器", async () => {
+	test("点击附件图片以已加载的 blob URL 打开查看器", async () => {
 		const onOpenImage = vi.fn();
-		render(
+		renderTimeline(
 			<MessageTimeline
 				activeJob={null}
 				connectionState="connected"
@@ -149,14 +167,13 @@ describe("MessageTimeline", () => {
 				onPreviewHtml={vi.fn()}
 				onSaveAttachment={vi.fn()}
 				onOpenImage={onOpenImage}
-				runtimeUrl="http://127.0.0.1:8788"
 			/>,
 		);
 
-		await userEvent.click(screen.getByAltText("chart.png"));
+		await userEvent.click(await screen.findByAltText("chart.png"));
 
 		expect(onOpenImage).toHaveBeenCalledWith(
-			"http://127.0.0.1:8788/api/v1/chat/attachments/img-1/preview",
+			expect.stringMatching(/^blob:/),
 			"chart.png",
 		);
 	});

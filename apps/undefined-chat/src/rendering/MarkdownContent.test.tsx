@@ -1,6 +1,9 @@
 import { render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
+import type { Attachment } from "../runtime-client/types";
+import { AttachmentImageProvider } from "./AttachmentImageContext";
 import { MarkdownContent } from "./MarkdownContent";
 
 describe("MarkdownContent", () => {
@@ -279,5 +282,83 @@ print("Hello")
 		expect(img).toBeInTheDocument();
 		expect(img).toHaveAttribute("src", "https://example.com/image.png");
 		expect(img).toHaveAttribute("loading", "lazy");
+	});
+
+	describe("正文附件图片（<attachment uid/>）", () => {
+		const imageAttachment: Attachment = {
+			id: "pic_1",
+			name: "chart.png",
+			size: 2048,
+			mediaType: "image/png",
+			kind: "image",
+			downloadUrl: null,
+			previewUrl: null,
+			discarded: false,
+		};
+
+		function renderWithImageProvider(ui: ReactNode) {
+			const previewAttachment = vi.fn(async () => ({
+				status: 200,
+				ok: true,
+				mediaType: "image/png",
+				bytes: [137, 80, 78, 71],
+				body: null,
+			}));
+			return render(
+				<AttachmentImageProvider client={{ previewAttachment }}>
+					{ui}
+				</AttachmentImageProvider>,
+			);
+		}
+
+		it("<attachment uid/> 渲染为 blob 图片，与文字共存", async () => {
+			renderWithImageProvider(
+				<MarkdownContent
+					content='看图<attachment uid="pic_1"/>'
+					attachments={[imageAttachment]}
+					onPreviewHtml={mockOnPreviewHtml}
+				/>,
+			);
+
+			const img = await screen.findByAltText("chart.png");
+			expect(img.getAttribute("src")).toMatch(/^blob:/);
+			expect(screen.getByText("看图")).toBeInTheDocument();
+		});
+
+		it("非图片附件占位符被移除", () => {
+			const fileAttachment: Attachment = {
+				...imageAttachment,
+				id: "file_1",
+				name: "doc.pdf",
+				mediaType: "application/pdf",
+				kind: "file",
+			};
+			renderWithImageProvider(
+				<MarkdownContent
+					content='文件<attachment uid="file_1"/>结束'
+					attachments={[fileAttachment]}
+					onPreviewHtml={mockOnPreviewHtml}
+				/>,
+			);
+
+			expect(screen.queryByRole("img")).toBeNull();
+			expect(screen.getByText("文件")).toBeInTheDocument();
+			expect(screen.getByText("结束")).toBeInTheDocument();
+			expect(screen.queryByText(/ATTACHMENT_PLACEHOLDER/)).toBeNull();
+		});
+
+		it("文字与图片混排保持顺序", async () => {
+			renderWithImageProvider(
+				<MarkdownContent
+					content='前文<attachment uid="pic_1"/>后文'
+					attachments={[imageAttachment]}
+					onPreviewHtml={mockOnPreviewHtml}
+				/>,
+			);
+
+			await screen.findByAltText("chart.png");
+			expect(screen.getByText("前文")).toBeInTheDocument();
+			expect(screen.getByText("后文")).toBeInTheDocument();
+		});
 	});
 });

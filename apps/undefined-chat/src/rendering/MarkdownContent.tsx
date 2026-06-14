@@ -1,12 +1,13 @@
-import { useMemo } from "react";
+import { Fragment, type ReactNode, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import type { Attachment } from "../runtime-client/types";
+import { AttachmentImage } from "./AttachmentImage";
 import {
 	extractAttachmentTags,
-	renderAttachmentPlaceholders,
+	findAttachmentByUid,
 } from "./AttachmentProcessor";
 import { CodeBlock } from "./CodeBlock";
 import "./MarkdownContent.css";
@@ -20,7 +21,6 @@ export type MarkdownContentProps = {
 	content: string;
 	onPreviewHtml: (input: HtmlPreviewRequest) => void;
 	attachments?: Attachment[];
-	runtimeUrl?: string;
 	onImageClick?: (src: string, alt: string) => void;
 };
 
@@ -65,7 +65,7 @@ function TextBlock({ value, onPreviewHtml, onImageClick }: TextBlockProps) {
 					{children}
 				</a>
 			),
-			// 自定义图片渲染：支持点击预览
+			// 自定义图片渲染：Markdown ![](url) 外链图，支持点击预览
 			// biome-ignore lint/a11y/useAltText: alt is passed from markdown content
 			img: ({ src, alt, ...props }) => (
 				<img
@@ -140,14 +140,68 @@ function TextBlock({ value, onPreviewHtml, onImageClick }: TextBlockProps) {
 	);
 }
 
+const PLACEHOLDER_SPLIT = /(ATTACHMENT_PLACEHOLDER_\d+)/;
+const PLACEHOLDER_MATCH = /^ATTACHMENT_PLACEHOLDER_(\d+)$/;
+
+/**
+ * 将含附件占位符的文字段渲染为「文字块 + 内联附件图片」交错序列。
+ * 图片附件渲染为 {@link AttachmentImage}（经 Tauri 带 auth 拉取转 blob）；
+ * 非图片附件移除（由附件区展示）；纯文字仍走 {@link TextBlock}（含 Markdown）。
+ */
+function renderTextWithAttachments(
+	value: string,
+	keyPrefix: string,
+	attachmentUids: string[],
+	attachments: Attachment[],
+	onPreviewHtml: (input: HtmlPreviewRequest) => void,
+	onImageClick?: (src: string, alt: string) => void,
+): ReactNode[] {
+	const nodes: ReactNode[] = [];
+	value.split(PLACEHOLDER_SPLIT).forEach((part, idx) => {
+		const match = PLACEHOLDER_MATCH.exec(part);
+		if (match) {
+			const uid = attachmentUids[Number(match[1])];
+			const attachment = uid ? findAttachmentByUid(attachments, uid) : null;
+			if (
+				attachment &&
+				(attachment.kind === "image" ||
+					attachment.mediaType.startsWith("image/"))
+			) {
+				nodes.push(
+					<AttachmentImage
+						// biome-ignore lint/suspicious/noArrayIndexKey: 静态只读消息片段，不增删重排
+						key={`${keyPrefix}-img-${idx}`}
+						uid={attachment.id}
+						alt={attachment.name}
+						mediaType={attachment.mediaType}
+						className="runtime-chat-image"
+						onOpenImage={onImageClick}
+					/>,
+				);
+			}
+			return;
+		}
+		if (!part.trim()) return;
+		nodes.push(
+			<TextBlock
+				// biome-ignore lint/suspicious/noArrayIndexKey: 静态只读消息片段，不增删重排
+				key={`${keyPrefix}-text-${idx}`}
+				value={part}
+				onPreviewHtml={onPreviewHtml}
+				onImageClick={onImageClick}
+			/>,
+		);
+	});
+	return nodes;
+}
+
 export function MarkdownContent({
 	content,
 	onPreviewHtml,
 	attachments = [],
-	runtimeUrl,
 	onImageClick,
 }: MarkdownContentProps) {
-	// 提取附件标签并替换为占位符
+	// 提取附件标签并替换为占位符（占位符以空行包裹，作为独立块级元素）
 	const { cleanContent, attachmentUids } = useMemo(
 		() => extractAttachmentTags(content),
 		[content],
@@ -155,83 +209,32 @@ export function MarkdownContent({
 
 	const segments = useMemo(() => splitSegments(cleanContent), [cleanContent]);
 
-	// 处理后渲染附件占位符
-	const processedSegments = useMemo(() => {
-		return segments.map((segment) => {
-			if (segment.type === "text") {
-				const processed = renderAttachmentPlaceholders(
-					segment.value,
-					attachmentUids,
-					attachments,
-					runtimeUrl,
-				);
-				return { ...segment, value: processed };
-			}
-			return segment;
-		});
-	}, [segments, attachmentUids, attachments, runtimeUrl]);
-
 	return (
 		<div className="message-markdown">
-			{processedSegments.map((segment, index) => {
-				if (segment.type === "text") {
-					// 如果包含附件 HTML，使用 dangerouslySetInnerHTML
-					if (segment.value.includes("runtime-chat-image")) {
-						return (
-							<div
-								key={`${index}-text-${segment.value.slice(0, 16)}`}
-								className="markdown-body"
-								// biome-ignore lint/security/noDangerouslySetInnerHtml: 由 renderAttachmentPlaceholders 生成的安全 HTML
-								dangerouslySetInnerHTML={{ __html: segment.value }}
-								onClick={(e) => {
-									const target = e.target as HTMLElement;
-									if (
-										target.tagName === "IMG" &&
-										target.classList.contains("runtime-chat-image")
-									) {
-										const src = target.getAttribute("src");
-										const alt = target.getAttribute("alt");
-										if (onImageClick && src) {
-											onImageClick(src, alt || "");
-										}
-									}
-								}}
-								onKeyDown={(e) => {
-									const target = e.target as HTMLElement;
-									if (
-										target.tagName === "IMG" &&
-										target.classList.contains("runtime-chat-image") &&
-										(e.key === "Enter" || e.key === " ")
-									) {
-										const src = target.getAttribute("src");
-										const alt = target.getAttribute("alt");
-										if (onImageClick && src) {
-											onImageClick(src, alt || "");
-										}
-									}
-								}}
-								role="presentation"
-							/>
-						);
-					}
+			{segments.map((segment, index) => {
+				if (segment.type === "code") {
 					return (
-						<TextBlock
-							key={`${index}-text-${segment.value.slice(0, 16)}`}
-							value={segment.value}
+						<CodeBlock
+							key={`${index}-code-${segment.value.slice(0, 16)}`}
+							code={segment.value}
+							language={segment.language}
+							collapsible={true}
+							maxLines={8}
 							onPreviewHtml={onPreviewHtml}
-							onImageClick={onImageClick}
 						/>
 					);
 				}
 				return (
-					<CodeBlock
-						key={`${index}-code-${segment.value.slice(0, 16)}`}
-						code={segment.value}
-						language={segment.language}
-						collapsible={true}
-						maxLines={8}
-						onPreviewHtml={onPreviewHtml}
-					/>
+					<Fragment key={`${index}-text-${segment.value.slice(0, 16)}`}>
+						{renderTextWithAttachments(
+							segment.value,
+							String(index),
+							attachmentUids,
+							attachments,
+							onPreviewHtml,
+							onImageClick,
+						)}
+					</Fragment>
 				);
 			})}
 		</div>

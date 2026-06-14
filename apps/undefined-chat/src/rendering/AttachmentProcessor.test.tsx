@@ -2,90 +2,49 @@ import { describe, expect, it } from "vitest";
 import type { Attachment } from "../runtime-client/types";
 import {
 	extractAttachmentTags,
-	renderAttachmentPlaceholders,
-	resolveAttachmentUrl,
+	findAttachmentByUid,
 } from "./AttachmentProcessor";
 
-describe("resolveAttachmentUrl", () => {
-	it("相对路径 + runtimeUrl → 补上前缀", () => {
-		expect(
-			resolveAttachmentUrl(
-				"/api/v1/chat/attachments/img-1/preview",
-				"http://127.0.0.1:8788",
-			),
-		).toBe("http://127.0.0.1:8788/api/v1/chat/attachments/img-1/preview");
-	});
-
-	it("runtimeUrl 带尾斜杠时不产生双斜杠", () => {
-		expect(
-			resolveAttachmentUrl(
-				"/api/v1/chat/attachments/img-1/preview",
-				"http://127.0.0.1:8788/",
-			),
-		).toBe("http://127.0.0.1:8788/api/v1/chat/attachments/img-1/preview");
-	});
-
-	it("相对路径但无 runtimeUrl → 原样返回（降级）", () => {
-		expect(resolveAttachmentUrl("/api/v1/chat/attachments/img-1/preview")).toBe(
-			"/api/v1/chat/attachments/img-1/preview",
+describe("extractAttachmentTags", () => {
+	it("提取 <attachment uid/> 为占位符并收集 UID（占位符以空行包裹）", () => {
+		const { cleanContent, attachmentUids } = extractAttachmentTags(
+			'看图<attachment uid="pic_1"/>结束',
 		);
+		expect(attachmentUids).toEqual(["pic_1"]);
+		expect(cleanContent).toContain("\n\nATTACHMENT_PLACEHOLDER_0\n\n");
 	});
 
-	it("http/https 绝对地址 → 原样返回（不重复前缀）", () => {
-		expect(
-			resolveAttachmentUrl("http://example.com/x.png", "http://127.0.0.1:8788"),
-		).toBe("http://example.com/x.png");
-		expect(
-			resolveAttachmentUrl(
-				"https://example.com/x.png",
-				"http://127.0.0.1:8788",
-			),
-		).toBe("https://example.com/x.png");
-	});
-
-	it("data:/blob:/协议相对 → 原样返回", () => {
-		expect(resolveAttachmentUrl("data:image/png;base64,AAAA")).toBe(
-			"data:image/png;base64,AAAA",
+	it("兼容 <pic uid/> 旧标签与多附件，序号与 UID 顺序对应", () => {
+		const { attachmentUids } = extractAttachmentTags(
+			'<attachment uid="pic_1"/><pic uid="pic_2"/>',
 		);
-		expect(resolveAttachmentUrl("blob:abc-123")).toBe("blob:abc-123");
-		expect(
-			resolveAttachmentUrl("//cdn.example.com/x.png", "http://127.0.0.1:8788"),
-		).toBe("//cdn.example.com/x.png");
+		expect(attachmentUids).toEqual(["pic_1", "pic_2"]);
 	});
 
-	it("空/null/undefined/空白 → 空字符串", () => {
-		expect(resolveAttachmentUrl("")).toBe("");
-		expect(resolveAttachmentUrl(null)).toBe("");
-		expect(resolveAttachmentUrl(undefined)).toBe("");
-		expect(resolveAttachmentUrl("   ")).toBe("");
+	it("无附件标签时原样返回", () => {
+		const { cleanContent, attachmentUids } = extractAttachmentTags("纯文本");
+		expect(cleanContent).toBe("纯文本");
+		expect(attachmentUids).toEqual([]);
 	});
 });
 
-describe("renderAttachmentPlaceholders", () => {
-	const imageAttachment: Attachment = {
-		id: "img-1",
-		name: "chart.png",
-		size: 2048,
+describe("findAttachmentByUid", () => {
+	const att: Attachment = {
+		id: "pic_1",
+		name: "x.png",
+		size: 1,
 		mediaType: "image/png",
 		kind: "image",
-		downloadUrl: "/api/v1/chat/attachments/img-1",
-		previewUrl: "/api/v1/chat/attachments/img-1/preview",
+		downloadUrl: null,
+		previewUrl: null,
 		discarded: false,
 	};
 
-	it("正文 <attachment uid/> 图片以绝对 URL 渲染，且不含失效的旧端点", () => {
-		const content = '<attachment uid="img-1"/>';
-		const { cleanContent, attachmentUids } = extractAttachmentTags(content);
-		const html = renderAttachmentPlaceholders(
-			cleanContent,
-			attachmentUids,
-			[imageAttachment],
-			"http://127.0.0.1:8788",
-		);
-		expect(html).toContain(
-			'src="http://127.0.0.1:8788/api/v1/chat/attachments/img-1/preview"',
-		);
-		// 旧的、Runtime API 不存在的 fallback 端点不应再出现
-		expect(html).not.toContain("/api/runtime/attachments/");
+	it("按 UID 命中返回附件", () => {
+		expect(findAttachmentByUid([att], "pic_1")).toBe(att);
+	});
+
+	it("未命中返回 null", () => {
+		expect(findAttachmentByUid([att], "nope")).toBeNull();
 	});
 });

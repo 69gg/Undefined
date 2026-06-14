@@ -36,7 +36,6 @@ export type MessageTimelineContentProps = {
 	/** 完整正文，timeline 中无任何顶层 message 文本时作为兜底渲染 */
 	fallbackContent?: string;
 	attachments?: Attachment[];
-	runtimeUrl?: string;
 	onPreviewHtml: (input: HtmlPreviewRequest) => void;
 	/**
 	 * 外部图片点击回调。提供时点击图片交由外部处理（如全局图片查看器）；
@@ -139,7 +138,6 @@ export function MessageTimelineContent({
 	timeline,
 	fallbackContent,
 	attachments = [],
-	runtimeUrl,
 	onPreviewHtml,
 	onImageClick,
 }: MessageTimelineContentProps) {
@@ -177,7 +175,6 @@ export function MessageTimelineContent({
 							content={entry.content}
 							onPreviewHtml={onPreviewHtml}
 							attachments={attachments}
-							runtimeUrl={runtimeUrl}
 							onImageClick={handleImageClick}
 						/>
 					);
@@ -191,7 +188,6 @@ export function MessageTimelineContent({
 					content={fallbackContent}
 					onPreviewHtml={onPreviewHtml}
 					attachments={attachments}
-					runtimeUrl={runtimeUrl}
 					onImageClick={handleImageClick}
 				/>
 			) : null}

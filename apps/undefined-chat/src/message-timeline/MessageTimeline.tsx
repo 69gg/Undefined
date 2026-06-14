@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import { isJobRunning } from "../chat-store/store";
-import { resolveAttachmentUrl } from "../rendering/AttachmentProcessor";
 import {
 	type HtmlPreviewRequest,
 	MarkdownContent,
@@ -36,7 +35,6 @@ export type MessageTimelineProps = {
 	onShortcutClick?: (prompt: string) => void;
 	onAddReference?: (messageId: string) => void;
 	onOpenImage?: (src: string, alt: string) => void;
-	runtimeUrl?: string;
 };
 
 const WINDOW_SIZE = 64;
@@ -147,7 +145,6 @@ export function MessageTimeline({
 	onShortcutClick,
 	onAddReference,
 	onOpenImage,
-	runtimeUrl,
 }: MessageTimelineProps) {
 	const visibleItems = items.slice(-WINDOW_SIZE);
 	const timelineRef = useRef<HTMLDivElement>(null);
@@ -471,7 +468,6 @@ export function MessageTimeline({
 												timeline={timeline ?? []}
 												fallbackContent={item.content}
 												attachments={item.attachments}
-												runtimeUrl={runtimeUrl}
 												onPreviewHtml={onPreviewHtml}
 												onImageClick={onOpenImage}
 											/>
@@ -483,7 +479,6 @@ export function MessageTimeline({
 											content={item.content}
 											onPreviewHtml={onPreviewHtml}
 											attachments={item.attachments}
-											runtimeUrl={runtimeUrl}
 											onImageClick={onOpenImage}
 										/>
 									);
@@ -493,24 +488,9 @@ export function MessageTimeline({
 											<AttachmentCard
 												attachment={attachment}
 												key={attachment.id || attachment.name}
-												onPreview={(att) => {
-													if (
-														onOpenImage &&
-														att.mediaType?.startsWith("image/")
-													) {
-														onOpenImage(
-															resolveAttachmentUrl(
-																att.previewUrl || att.downloadUrl,
-																runtimeUrl,
-															),
-															att.name,
-														);
-													} else {
-														onPreviewAttachment(att);
-													}
-												}}
+												onPreview={onPreviewAttachment}
 												onDownload={onSaveAttachment}
-												runtimeUrl={runtimeUrl}
+												onOpenImage={onOpenImage}
 											/>
 										))
 									: null}
@@ -546,7 +526,6 @@ export function MessageTimeline({
 								timeline={buildStreamingTimeline(activeJob)}
 								fallbackContent={activeJob.reply || ""}
 								attachments={[]}
-								runtimeUrl={runtimeUrl}
 								onPreviewHtml={onPreviewHtml}
 								onImageClick={onOpenImage}
 							/>
