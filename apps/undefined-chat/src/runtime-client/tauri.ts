@@ -617,6 +617,25 @@ export function createTauriRuntimeClient(): RuntimeClient {
 			});
 		},
 
+		async renameConversation(
+			conversationId: string,
+			title: string,
+		): Promise<{ ok: boolean }> {
+			const raw = record(
+				unwrapRuntimeBody(
+					await invoke("runtime_request", {
+						input: {
+							method: "PATCH",
+							path: `/api/v1/chat/conversations/${conversationId}`,
+							body: { title },
+							headers: [],
+						},
+					}),
+				),
+			);
+			return { ok: bool(raw.ok, true) };
+		},
+
 		async cancelJob(jobId: string): Promise<ChatJob> {
 			return requireJob(
 				unwrapRuntimeBody(await invoke("cancel_job", { input: { jobId } })),

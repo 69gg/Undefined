@@ -6,6 +6,7 @@ export type ConversationListProps = {
 	selectedConversationId: string | null;
 	onCreate: () => void;
 	onDelete: (conversationId: string) => void;
+	onRename: (conversationId: string) => void;
 	onSelect: (conversationId: string) => void;
 	/** 是否正在新建会话（新建按钮显示加载态） */
 	creating: boolean;
@@ -23,6 +24,7 @@ export function ConversationList({
 	selectedConversationId,
 	onCreate,
 	onDelete,
+	onRename,
 	onSelect,
 	creating,
 	isCollapsed,
@@ -109,6 +111,28 @@ export function ConversationList({
 							<span className="conversation-meta">
 								<span>{messageCountLabel(conversation.messageCount)}</span>
 							</span>
+						</button>
+						<button
+							aria-label="重命名会话"
+							className="conversation-rename"
+							onClick={() => onRename(conversation.id)}
+							title={`重命名会话「${conversation.title}」`}
+							type="button"
+						>
+							<svg
+								aria-hidden="true"
+								fill="none"
+								height="15"
+								stroke="currentColor"
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								strokeWidth="2"
+								viewBox="0 0 24 24"
+								width="15"
+							>
+								<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+								<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+							</svg>
 						</button>
 						<button
 							aria-label="删除会话"

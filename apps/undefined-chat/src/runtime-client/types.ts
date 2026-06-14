@@ -284,6 +284,10 @@ export type RuntimeClient = {
 	listConversations: () => Promise<ConversationsResponse>;
 	createConversation: (title?: string) => Promise<Conversation>;
 	deleteConversation: (conversationId: string) => Promise<void>;
+	renameConversation: (
+		conversationId: string,
+		title: string,
+	) => Promise<{ ok: boolean }>;
 	getHistory: (input: {
 		conversationId: string;
 		limit: number;

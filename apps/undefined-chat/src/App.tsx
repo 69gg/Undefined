@@ -190,6 +190,20 @@ export function App() {
 					void store.createConversation();
 				}}
 				onDelete={(conversationId) => setPendingDeleteId(conversationId)}
+				onRename={(conversationId) => {
+					const conversation = state.conversations.find(
+						(item) => item.id === conversationId,
+					);
+					if (!conversation) return;
+
+					const newTitle = window.prompt(
+						"请输入新的会话名称：",
+						conversation.title,
+					);
+					if (newTitle?.trim() && newTitle.trim() !== conversation.title) {
+						void store.renameConversation(conversationId, newTitle.trim());
+					}
+				}}
 				onOpenSettings={() => setIsSettingsOpen(true)}
 				onSelect={(conversationId) => {
 					void store.selectConversation(conversationId);

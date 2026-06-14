@@ -179,6 +179,7 @@ export function runtimeClientStub(
 			}),
 		),
 		deleteConversation: vi.fn(async () => undefined),
+		renameConversation: vi.fn(async () => ({ ok: true })),
 		getHistory: vi.fn(async () => ({
 			conversationId: "default",
 			virtualUserId: "webchat",

@@ -404,14 +404,42 @@ a:hover {
 	transition: opacity 0.16s ease, background 0.16s ease, color 0.16s ease;
 }
 
+.conversation-rename {
+	position: absolute;
+	top: 50%;
+	right: 40px;
+	transform: translateY(-50%);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border: none;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--text-tertiary);
+	opacity: 0;
+	transition: opacity 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
 .conversation-item-wrap:hover .conversation-delete,
 .conversation-delete:focus-visible {
+	opacity: 1;
+}
+
+.conversation-item-wrap:hover .conversation-rename,
+.conversation-rename:focus-visible {
 	opacity: 1;
 }
 
 .conversation-delete:hover {
 	background: color-mix(in srgb, var(--error) 14%, transparent);
 	color: var(--error);
+}
+
+.conversation-rename:hover {
+	background: color-mix(in srgb, var(--primary) 14%, transparent);
+	color: var(--primary);
 }
 
 /* 按钮内联加载指示 */
@@ -563,6 +591,9 @@ a:hover {
 /* 触摸端无悬停：删除按钮常驻可见 */
 @media (max-width: 768px) {
 	.conversation-delete {
+		opacity: 0.55;
+	}
+	.conversation-rename {
 		opacity: 0.55;
 	}
 }

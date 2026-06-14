@@ -27,6 +27,10 @@ export type ChatStore = {
 	bootstrap: () => Promise<void>;
 	createConversation: (title?: string) => Promise<void>;
 	deleteConversation: (conversationId: string) => Promise<void>;
+	renameConversation: (
+		conversationId: string,
+		newTitle: string,
+	) => Promise<void>;
 	selectConversation: (conversationId: string) => Promise<void>;
 	updateDraft: (conversationId: string, draft: string) => void;
 	sendSelectedMessage: () => Promise<void>;
@@ -761,6 +765,27 @@ export function createChatStore({
 		}
 	}
 
+	async function renameConversation(
+		conversationId: string,
+		newTitle: string,
+	): Promise<void> {
+		try {
+			await client.renameConversation(conversationId, newTitle);
+			// 更新本地 state 中的会话标题
+			const conversation = state.conversations.find(
+				(item) => item.id === conversationId,
+			);
+			if (conversation) {
+				dispatch({
+					type: "conversation/upsert",
+					conversation: { ...conversation, title: newTitle },
+				});
+			}
+		} catch (err) {
+			dispatch({ type: "send/error", error: errorMessage(err) });
+		}
+	}
+
 	async function selectConversation(conversationId: string): Promise<void> {
 		if (state.selectedConversationId === conversationId) {
 			return;
@@ -1059,6 +1084,7 @@ export function createChatStore({
 		bootstrap,
 		createConversation,
 		deleteConversation,
+		renameConversation,
 		selectConversation,
 		updateDraft,
 		sendSelectedMessage,
