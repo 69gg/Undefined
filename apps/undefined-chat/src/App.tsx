@@ -362,6 +362,7 @@ export function App() {
 							: undefined
 					}
 					items={selectedHistory}
+					lastSentMessageId={state.lastSentMessageId}
 					onPreviewAttachment={(attachment) => {
 						void previewAttachment(attachment);
 					}}

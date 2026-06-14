@@ -140,6 +140,8 @@ export type ChatState = {
 
 	// UI 状态
 	autoScrollEnabled: boolean;
+	/** 最近一次发送的用户消息 ID（乐观渲染），用于发送后滚动定位到该消息顶部 */
+	lastSentMessageId: string | null;
 	topLoadSuppressedUntil: number;
 
 	// 平台信息

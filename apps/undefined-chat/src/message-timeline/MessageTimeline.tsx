@@ -29,6 +29,8 @@ export type MessageTimelineProps = {
 	/** 重试加载当前会话历史 */
 	onRetryHistory?: () => void;
 	items: HistoryItem[];
+	/** 最近发送的消息 ID：发送后滚动定位到该消息顶部 */
+	lastSentMessageId?: string | null;
 	onPreviewHtml: (input: HtmlPreviewRequest) => void;
 	onPreviewAttachment: (attachment: Attachment) => void;
 	onSaveAttachment: (attachment: Attachment) => void;
@@ -140,6 +142,7 @@ export function MessageTimeline({
 	historyError,
 	onRetryHistory,
 	items,
+	lastSentMessageId,
 	onPreviewAttachment,
 	onPreviewHtml,
 	onSaveAttachment,
@@ -152,19 +155,53 @@ export function MessageTimeline({
 	const timelineRef = useRef<HTMLDivElement>(null);
 	// 是否贴附底部：用户向上滚动查看历史时暂停自动滚动（智能暂停）
 	const stickToBottomRef = useRef(true);
+	// 程序化滚动标志：避免程序化滚动（发送滚顶/工具滚底）触发 handleTimelineScroll 重置 stickToBottom
+	const isProgrammaticScrollRef = useRef(false);
 
 	const isCurrentlyThinking = isJobRunning(activeJob);
 
+	function scrollToBottom(): void {
+		const el = timelineRef.current;
+		if (!el) return;
+		isProgrammaticScrollRef.current = true;
+		el.scrollTop = el.scrollHeight;
+		requestAnimationFrame(() => {
+			isProgrammaticScrollRef.current = false;
+		});
+	}
+
+	function scrollToMessageTop(messageId: string): void {
+		const node = timelineRef.current?.querySelector(
+			`[data-message-id="${CSS.escape(messageId)}"]`,
+		);
+		if (!node) return;
+		isProgrammaticScrollRef.current = true;
+		node.scrollIntoView({ block: "start" });
+		requestAnimationFrame(() => {
+			isProgrammaticScrollRef.current = false;
+		});
+	}
+
 	function handleTimelineScroll(): void {
+		if (isProgrammaticScrollRef.current) return; // 程序化滚动不更新 stickToBottom
 		const el = timelineRef.current;
 		if (!el) return;
 		stickToBottomRef.current =
 			el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 	}
 
-	// 自动滚动到底部：覆盖新消息、流式回复增长、工具块/事件更新、思考展开等撑高情形；
-	// 仅在贴附底部时滚动（智能暂停），并用双 rAF 等待布局与图片等异步撑高后再滚，确保彻底到底。
-	const lastItemId = visibleItems[visibleItems.length - 1]?.messageId;
+	// 发送消息后滚动到该消息顶部（用户消息在视口顶，下方留给 AI 回复）
+	// biome-ignore lint/correctness/useExhaustiveDependencies: lastSentMessageId 作为发送信号
+	useEffect(() => {
+		if (!lastSentMessageId) return;
+		stickToBottomRef.current = false; // 发送后不贴底：回复文本增长不立即覆盖用户消息
+		const raf = requestAnimationFrame(() =>
+			scrollToMessageTop(lastSentMessageId),
+		);
+		return () => cancelAnimationFrame(raf);
+	}, [lastSentMessageId]);
+
+	// 流式滚动：新工具调用强制滚底 + 恢复跟随，其他变化贴底跟随
 	const streamSignature = activeJob
 		? [
 				activeJob.jobId,
@@ -175,23 +212,35 @@ export function MessageTimeline({
 				activeJob.currentAgentStages.length,
 			].join(":")
 		: "";
-	// biome-ignore lint/correctness/useExhaustiveDependencies: 下列信号仅作为滚动触发器
+	const prevSigRef = useRef<{ jobId: string | null; toolCount: number }>({
+		jobId: null,
+		toolCount: 0,
+	});
+	// biome-ignore lint/correctness/useExhaustiveDependencies: streamSignature + activeJob 作为流式信号
 	useEffect(() => {
-		if (!stickToBottomRef.current) return;
-		const el = timelineRef.current;
-		if (!el) return;
-		let raf2 = 0;
-		const raf1 = requestAnimationFrame(() => {
-			el.scrollTop = el.scrollHeight;
-			raf2 = requestAnimationFrame(() => {
-				el.scrollTop = el.scrollHeight;
-			});
+		if (!activeJob) return;
+		const jobId = activeJob.jobId;
+		const toolCount = activeJob.currentToolCalls.length;
+		const prev = prevSigRef.current;
+		if (jobId !== prev.jobId) {
+			// 新 job：重置基线，不滚（等发送滚顶）
+			prev.jobId = jobId;
+			prev.toolCount = toolCount;
+			return;
+		}
+		const raf = requestAnimationFrame(() => {
+			if (toolCount > prev.toolCount) {
+				// 新工具调用：强制滚底 + 恢复跟随
+				stickToBottomRef.current = true;
+				scrollToBottom();
+			} else if (stickToBottomRef.current) {
+				// 文本/阶段变化：贴底跟随
+				scrollToBottom();
+			}
+			prev.toolCount = toolCount;
 		});
-		return () => {
-			cancelAnimationFrame(raf1);
-			cancelAnimationFrame(raf2);
-		};
-	}, [visibleItems.length, lastItemId, streamSignature]);
+		return () => cancelAnimationFrame(raf);
+	}, [streamSignature, activeJob]);
 
 	const shortcuts = [
 		{

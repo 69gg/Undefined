@@ -294,6 +294,30 @@ describe("chat store", () => {
 		]);
 	});
 
+	test("message/optimisticUser sets lastSentMessageId", async () => {
+		const client = runtimeClientStub();
+		const store = createChatStore({ client });
+		await store.bootstrap();
+
+		const state = store.getSnapshot();
+		expect(state.lastSentMessageId).toBeNull();
+
+		// 通过 sendSelectedMessage 间接触发（需 mock client.sendMessage）
+		client.sendMessage = vi.fn(async () =>
+			job({ jobId: "job-1", conversationId: "default" }),
+		);
+		store.updateDraft("default", "测试");
+		await store.sendSelectedMessage();
+
+		const updated = store.getSnapshot();
+		expect(updated.lastSentMessageId).toBeTruthy();
+		expect(
+			updated.historyByConversation.default?.items.some(
+				(item) => item.messageId === updated.lastSentMessageId,
+			),
+		).toBe(true);
+	});
+
 	test("applyRuntimeEvents dedupes events by seq (no duplicate accumulation on fallback/reconnect)", async () => {
 		const runningJob = job({ jobId: "job-1", conversationId: "default" });
 		const client = runtimeClientStub({
