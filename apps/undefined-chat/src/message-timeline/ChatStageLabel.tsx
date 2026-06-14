@@ -104,8 +104,9 @@ export function ChatStageLabel({
 
 	return (
 		<span
-			className={`chat-stage-label${finalState ? " is-final" : ""}`}
+			className={`runtime-chat-stage${finalState ? " is-final" : ""}`}
 			title={title}
+			hidden={!stage}
 		>
 			{displayText}
 		</span>

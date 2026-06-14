@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { isJobRunning } from "../chat-store/store";
 import {
 	type HtmlPreviewRequest,
@@ -115,23 +115,6 @@ export function MessageTimeline({
 	const stickToBottomRef = useRef(true);
 
 	const isCurrentlyThinking = isJobRunning(activeJob);
-
-	// 实时用时：运行中每 200ms 刷新，完成后显示最终用时
-	const [nowMs, setNowMs] = useState(() => Date.now());
-	useEffect(() => {
-		if (!isCurrentlyThinking) return;
-		const timer = setInterval(() => setNowMs(Date.now()), 200);
-		return () => clearInterval(timer);
-	}, [isCurrentlyThinking]);
-	const elapsedMs = activeJob
-		? isCurrentlyThinking
-			? Math.max(0, nowMs - activeJob.createdAt * 1000)
-			: (activeJob.durationMs ?? activeJob.elapsedMs)
-		: 0;
-	const elapsedLabel =
-		elapsedMs >= 1000
-			? `${(elapsedMs / 1000).toFixed(1)}s`
-			: `${Math.round(elapsedMs)}ms`;
 
 	function handleTimelineScroll(): void {
 		const el = timelineRef.current;
@@ -460,34 +443,26 @@ export function MessageTimeline({
 				{/* 流式 bot 气泡：activeJob 存在且运行中时立即显示 */}
 				{activeJob && isCurrentlyThinking ? (
 					<article
-						className="message-row message-row-bot streaming"
+						className="runtime-chat-item bot streaming"
 						data-testid="streaming-message"
 						key={`streaming-${activeJob.jobId}`}
 					>
-						{/* 头像 */}
-						<div
-							className="avatar-wrapper avatar-bot"
-							style={{
-								background: "var(--primary)",
-								color: "#ffffff",
-								display: "flex",
-								alignItems: "center",
-								justifyContent: "center",
-								fontWeight: "600",
-								fontSize: "0.85rem",
-							}}
-						>
-							U
-						</div>
-
-						{/* 消息气泡 */}
-						<div className="message-bubble">
+						<div className="runtime-chat-role">
+							<span className="runtime-chat-role-label">AI</span>
 							<ChatStageLabel
 								stage={activeJob.currentStage}
 								stageDetail={activeJob.currentStageDetail ?? null}
 								startedAt={activeJob.currentStageStartedAt ?? null}
 								finalState={activeJob.status === "done"}
 							/>
+							{onAddReference ? (
+								<MessageQuoteButton
+									messageId={activeJob.jobId}
+									onQuote={onAddReference}
+								/>
+							) : null}
+						</div>
+						<div className="runtime-chat-content markdown">
 							<MessageTimelineContent
 								timeline={buildStreamingTimeline(activeJob)}
 								fallbackContent={activeJob.reply || "思考中..."}
@@ -496,12 +471,6 @@ export function MessageTimeline({
 								onPreviewHtml={onPreviewHtml}
 								onImageClick={onOpenImage}
 							/>
-
-							<div className="message-meta">
-								<span>
-									Undefined{elapsedMs > 0 ? ` · ${elapsedLabel}` : ""}
-								</span>
-							</div>
 						</div>
 					</article>
 				) : null}

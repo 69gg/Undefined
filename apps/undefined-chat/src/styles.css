@@ -1691,6 +1691,13 @@ a:hover {
 	flex-wrap: wrap;
 }
 
+.runtime-chat-role-label {
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 1px;
+	color: var(--text-tertiary);
+}
+
 .runtime-chat-content {
 	min-width: 0;
 	max-width: 100%;
