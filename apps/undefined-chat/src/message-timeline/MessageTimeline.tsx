@@ -95,6 +95,30 @@ function buildStreamingTimeline(job: ChatJob): HistoryTimelineEntry[] {
 	return timeline;
 }
 
+/**
+ * 格式化消息时间戳为 "HH:MM"。HistoryItem.timestamp 为 string，
+ * 兼容 Unix 秒/毫秒数字字符串与 ISO 字符串。
+ * WebUI 无显式时间戳元素，此函数仅用于保留用户要求的轻量时间戳。
+ */
+function formatMessageTime(timestamp: string): string {
+	if (!timestamp) return "";
+	const trimmed = timestamp.trim();
+	// 纯数字字符串：Unix 时间戳（秒或毫秒）
+	if (/^\d+$/.test(trimmed)) {
+		const n = Number(trimmed);
+		const ms = n > 1e12 ? n : n * 1000;
+		const d = new Date(ms);
+		return Number.isNaN(d.getTime())
+			? ""
+			: d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+	}
+	// ISO 字符串
+	const d = new Date(timestamp);
+	return Number.isNaN(d.getTime())
+		? ""
+		: d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 export function MessageTimeline({
 	activeJob,
 	historyLoading,
@@ -322,123 +346,109 @@ export function MessageTimeline({
 					</div>
 				) : null}
 
-				{visibleItems.map((item) => (
-					<article
-						className={`message-row message-row-${item.role} runtime-chat-item`}
-						data-testid="message-row"
-						key={item.messageId}
-					>
-						{/* 头像 */}
-						<div
-							className={`avatar-wrapper avatar-${item.role}`}
-							style={{
-								background:
-									item.role === "bot"
-										? "var(--primary)"
-										: "var(--primary-subtle)",
-								color: item.role === "bot" ? "#ffffff" : "var(--primary)",
-								display: "flex",
-								alignItems: "center",
-								justifyContent: "center",
-								fontWeight: "600",
-								fontSize: "0.85rem",
-							}}
+				{visibleItems.map((item) => {
+					const isBot = item.role === "bot";
+					const durationMs = item.webchat?.durationMs ?? null;
+					const hasDuration =
+						typeof durationMs === "number" &&
+						Number.isFinite(durationMs) &&
+						durationMs >= 0;
+					const timeText = formatMessageTime(item.timestamp);
+					return (
+						<article
+							className={`runtime-chat-item ${item.role}`}
+							data-message-id={item.messageId}
+							data-testid="message-row"
+							key={item.messageId}
 						>
-							{item.role === "bot" ? "U" : "你"}
-						</div>
-
-						{/* 消息气泡 */}
-						<div className="message-bubble">
-							{item.references.length > 0 ? (
-								<div className="reference-stack">
-									{item.references.map((reference) => (
-										<blockquote key={reference.messageId}>
-											引用 {reference.quote}
-										</blockquote>
-									))}
-								</div>
-							) : null}
-
-							{(() => {
-								const timeline = item.webchat?.timeline;
-								// bot 消息含工具调用/分段文本时，按统一时间线渲染（正文与工具块按序穿插，避免正文重复）
-								if (item.role === "bot" && hasRenderableTimeline(timeline)) {
-									return (
-										<MessageTimelineContent
-											timeline={timeline ?? []}
-											fallbackContent={item.content}
-											attachments={item.attachments}
-											runtimeUrl={runtimeUrl}
-											onPreviewHtml={onPreviewHtml}
-											onImageClick={onOpenImage}
-										/>
-									);
-								}
-								// 普通消息：直接渲染正文
-								return (
-									<MarkdownContent
-										content={item.content}
-										onPreviewHtml={onPreviewHtml}
-										attachments={item.attachments}
-										runtimeUrl={runtimeUrl}
-										onImageClick={onOpenImage}
-									/>
-								);
-							})()}
-
-							{item.attachments.length > 0 ? (
-								<div
-									className="attachment-list"
-									style={{
-										display: "flex",
-										flexDirection: "column",
-										gap: "8px",
-										marginTop: "12px",
-									}}
-								>
-									{item.attachments.map((attachment) => (
-										<AttachmentCard
-											key={attachment.id || attachment.name}
-											attachment={attachment}
-											onPreview={(att) => {
-												if (
-													onOpenImage &&
-													att.mediaType?.startsWith("image/")
-												) {
-													onOpenImage(
-														att.previewUrl || att.downloadUrl || "",
-														att.name,
-													);
-												} else {
-													onPreviewAttachment(att);
-												}
-											}}
-											onDownload={onSaveAttachment}
-										/>
-									))}
-								</div>
-							) : null}
-
-							<div className="message-meta">
-								<span>
-									{item.role === "bot" ? "Undefined" : "你"}{" "}
-									{typeof item.timestamp === "number"
-										? new Date(item.timestamp * 1000).toLocaleTimeString([], {
-												hour: "2-digit",
-												minute: "2-digit",
-											})
-										: ""}
+							<div className="runtime-chat-role">
+								<span className="runtime-chat-role-label">
+									{isBot ? "AI" : "You"}
 								</span>
-								{onAddReference && item.role === "bot" ? (
+								{isBot && hasDuration ? (
+									<ChatStageLabel
+										stage="done"
+										stageDetail={null}
+										startedAt={null}
+										finalState
+										elapsedMsOverride={durationMs}
+									/>
+								) : null}
+								{onAddReference && isBot ? (
 									<MessageQuoteButton
 										messageId={item.messageId}
 										onQuote={onAddReference}
 									/>
 								) : null}
+								{timeText ? (
+									<span className="runtime-chat-time">{timeText}</span>
+								) : null}
 							</div>
-						</div>
-					</article>
-				))}
+							<div
+								className={`runtime-chat-content${isBot ? " markdown" : ""}`}
+							>
+								{item.references.length > 0
+									? item.references.map((reference) => (
+											<blockquote
+												className="runtime-quote-block"
+												key={reference.messageId}
+											>
+												{reference.quote}
+											</blockquote>
+										))
+									: null}
+								{(() => {
+									const timeline = item.webchat?.timeline;
+									// bot 消息含工具调用/分段文本时，按统一时间线渲染（正文与工具块按序穿插，避免正文重复）
+									if (isBot && hasRenderableTimeline(timeline)) {
+										return (
+											<MessageTimelineContent
+												timeline={timeline ?? []}
+												fallbackContent={item.content}
+												attachments={item.attachments}
+												runtimeUrl={runtimeUrl}
+												onPreviewHtml={onPreviewHtml}
+												onImageClick={onOpenImage}
+											/>
+										);
+									}
+									// 普通消息：直接渲染正文
+									return (
+										<MarkdownContent
+											content={item.content}
+											onPreviewHtml={onPreviewHtml}
+											attachments={item.attachments}
+											runtimeUrl={runtimeUrl}
+											onImageClick={onOpenImage}
+										/>
+									);
+								})()}
+								{item.attachments.length > 0
+									? item.attachments.map((attachment) => (
+											<AttachmentCard
+												attachment={attachment}
+												key={attachment.id || attachment.name}
+												onPreview={(att) => {
+													if (
+														onOpenImage &&
+														att.mediaType?.startsWith("image/")
+													) {
+														onOpenImage(
+															att.previewUrl || att.downloadUrl || "",
+															att.name,
+														);
+													} else {
+														onPreviewAttachment(att);
+													}
+												}}
+												onDownload={onSaveAttachment}
+											/>
+										))
+									: null}
+							</div>
+						</article>
+					);
+				})}
 
 				{/* 流式 bot 气泡：activeJob 存在且运行中时立即显示 */}
 				{activeJob && isCurrentlyThinking ? (
@@ -465,7 +475,7 @@ export function MessageTimeline({
 						<div className="runtime-chat-content markdown">
 							<MessageTimelineContent
 								timeline={buildStreamingTimeline(activeJob)}
-								fallbackContent={activeJob.reply || "思考中..."}
+								fallbackContent={activeJob.reply || ""}
 								attachments={[]}
 								runtimeUrl={runtimeUrl}
 								onPreviewHtml={onPreviewHtml}

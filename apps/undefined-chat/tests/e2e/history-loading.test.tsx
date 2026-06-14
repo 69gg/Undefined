@@ -323,7 +323,7 @@ describe("E2E: History Loading", () => {
 		await screen.findByText("用户消息");
 		await screen.findByText("机器人回复");
 
-		// 验证消息元素包含角色信息（通过 CSS 类 message-row-${role}）
+		// 验证消息元素包含角色信息（runtime-chat-item ${role}，对齐 WebUI 结构）
 		const messages = screen.getAllByRole("article");
 		expect(messages.length).toBeGreaterThanOrEqual(2);
 
@@ -331,11 +331,12 @@ describe("E2E: History Loading", () => {
 		const botMsg = messages.find((el) => el.textContent?.includes("机器人回复"));
 
 		expect(
-			userMsg?.classList.contains("message-row-user") ||
-				userMsg?.dataset.role === "user",
+			userMsg?.classList.contains("runtime-chat-item") &&
+				userMsg?.classList.contains("user"),
 		).toBe(true);
 		expect(
-			botMsg?.classList.contains("message-row-bot") || botMsg?.dataset.role === "bot",
+			botMsg?.classList.contains("runtime-chat-item") &&
+				botMsg?.classList.contains("bot"),
 		).toBe(true);
 	});
 });

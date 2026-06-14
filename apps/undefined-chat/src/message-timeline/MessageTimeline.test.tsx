@@ -66,10 +66,15 @@ describe("MessageTimeline", () => {
 			/>,
 		);
 
-		// 历史消息内容
-		expect(screen.getByText("参考这条消息")).toBeTruthy();
+		// 历史消息内容（user 正文 + bot 引用块均含该文本）
+		expect(screen.getAllByText("参考这条消息").length).toBeGreaterThanOrEqual(
+			1,
+		);
 		expect(screen.getByAltText("report.png")).toBeTruthy();
-		expect(screen.getByText(/引用/)).toBeTruthy();
+		// 引用块（runtime-quote-block，对齐 WebUI 结构）
+		const quoteBlock = document.querySelector(".runtime-quote-block");
+		expect(quoteBlock).toBeTruthy();
+		expect(quoteBlock?.textContent).toContain("参考这条消息");
 
 		// 流式 bot 消息
 		expect(screen.getByTestId("streaming-message")).toBeTruthy();

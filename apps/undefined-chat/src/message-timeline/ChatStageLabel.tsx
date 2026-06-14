@@ -2,14 +2,16 @@ import { useEffect, useState } from "react";
 import { getChatStageLabel } from "../i18n/zh-CN";
 
 export type ChatStageLabelProps = {
-	/** 阶段标识（如 "waiting_model"、"building_context"） */
+	/** 阶段标识（如 "waiting_model"、"building_context"、"done"） */
 	stage: string | null;
 	/** 阶段详细信息（可选） */
 	stageDetail: string | null;
-	/** 阶段开始时间戳（秒） */
+	/** 阶段开始时间戳（秒）；仅 finalState=false 且未提供 elapsedMsOverride 时用于实时计算 */
 	startedAt: number | null;
-	/** 是否为最终状态（true 时显示固定用时，false 时实时计算） */
+	/** 是否为最终状态（true 时显示固定用时并添加 "is-final" 样式类） */
 	finalState: boolean;
+	/** 固定用时（毫秒）；finalState=true 时直接使用，对齐 WebUI setChatStage 的 baseMs 机制（历史/已完成消息的"完成 · 用时"） */
+	elapsedMsOverride?: number;
 };
 
 /**
@@ -37,21 +39,21 @@ function formatDurationMs(ms: number): string {
 }
 
 /**
- * 聊天阶段标签组件
+ * 聊天阶段标签组件（对齐 WebUI runtime.js 的 setChatStage / updateChatStageDisplay）
  *
- * 显示当前 AI 任务的阶段和实时用时，格式为"阶段 · 用时"。
- * - `finalState=false` 时会每 500ms 自动更新用时
- * - `finalState=true` 时显示固定的最终用时，添加 "is-final" 样式类
+ * 显示当前 AI 任务的阶段和用时，格式为"阶段 · 用时"。
+ * - `finalState=false` 且无 `elapsedMsOverride`：从 `startedAt` 实时计算用时，每 500ms 更新（流式阶段）
+ * - `finalState=true` 且提供 `elapsedMsOverride`：显示固定用时，添加 "is-final" 样式类（完成/历史消息）
  *
- * @example
+ * @example 流式阶段（实时）
  * ```tsx
- * <ChatStageLabel
- *   stage="waiting_model"
- *   stageDetail="Claude Opus 4.8"
- *   startedAt={1718234567}
- *   finalState={false}
- * />
+ * <ChatStageLabel stage="waiting_model" stageDetail="Claude Opus 4.8" startedAt={1718234567} finalState={false} />
  * // 渲染为: "等待模型 · 3.2s" (实时更新)
+ * ```
+ * @example 历史/完成消息（固定用时）
+ * ```tsx
+ * <ChatStageLabel stage="done" stageDetail={null} startedAt={null} finalState elapsedMsOverride={2300} />
+ * // 渲染为: "完成 · 2.3s" (is-final 样式)
  * ```
  */
 export function ChatStageLabel({
@@ -59,6 +61,7 @@ export function ChatStageLabel({
 	stageDetail,
 	startedAt,
 	finalState,
+	elapsedMsOverride,
 }: ChatStageLabelProps) {
 	// 实时时钟：从 store 读取 chatClockNow（当前使用本地 Date.now()）
 	// TODO: 集成 store 的全局 chatClockNow 以统一所有用时显示的更新频率
@@ -88,7 +91,15 @@ export function ChatStageLabel({
 
 	// 计算用时（毫秒）
 	let elapsedMs = 0;
-	if (startedAt !== null && typeof startedAt === "number" && !finalState) {
+	if (finalState && typeof elapsedMsOverride === "number") {
+		// 历史/完成消息：固定用时（对齐 WebUI setChatStage 的 baseMs）
+		elapsedMs = elapsedMsOverride;
+	} else if (
+		!finalState &&
+		startedAt !== null &&
+		typeof startedAt === "number"
+	) {
+		// 流式阶段：实时计算
 		const startMs = startedAt * 1000;
 		elapsedMs = Math.max(0, chatClockNow - startMs);
 	}

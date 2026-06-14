@@ -165,6 +165,18 @@
 	}
 }
 
+/* 流式光标闪烁（对齐 WebUI runtime-chat-cursor） */
+@keyframes runtime-chat-cursor {
+	0%,
+	50% {
+		opacity: 1;
+	}
+	51%,
+	100% {
+		opacity: 0;
+	}
+}
+
 @keyframes pulse-shimmer {
 	0% {
 		opacity: 0.65;
@@ -878,81 +890,8 @@ a:hover {
 /* ========================================
    Message Bubble Rendering
    ======================================== */
-/* ChatGPT 风格全宽消息 */
-.message-row {
-	display: flex;
-	gap: 16px;
-	width: 100%;
-	padding: 24px 20px;
-	animation: fadeInUp 0.2s ease-out;
-}
-
-/* 用户消息浅色背景 */
-.message-row-user {
-	background: var(--bg-surface);
-	flex-direction: row-reverse;
-}
-
-/* Bot 消息默认背景 */
-.message-row-bot {
-	background: var(--bg-app);
-}
-
-/* 消息内容容器 - 居中限制最大宽度 */
-.message-row {
-	justify-content: center;
-}
-
-.message-row > .avatar-wrapper {
-	flex-shrink: 0;
-}
-
-.message-row > .message-bubble {
-	flex: 1;
-	max-width: 800px;
-}
-
-.avatar-wrapper {
-	flex-shrink: 0;
-	width: 36px;
-	height: 36px;
-	border-radius: 50%;
-	overflow: hidden;
-	box-shadow: var(--shadow-sm);
-}
-
-/* 去掉消息气泡样式，改为透明背景 */
-.message-bubble {
-	flex: 1;
-	background: transparent;
-	border: none;
-	border-radius: 0;
-	padding: 0;
-	box-shadow: none;
-	line-height: 1.6;
-	transition: none;
-	display: flex;
-	flex-direction: column;
-}
-
-.message-row-user .message-bubble {
-	background: transparent;
-	border: none;
-	border-radius: 0;
-}
-
-.message-meta {
-	font-size: 0.75rem;
-	color: var(--text-tertiary);
-	margin-top: 6px;
-	display: flex;
-	align-items: center;
-	gap: 8px;
-}
-
-.message-row-user .message-meta {
-	justify-content: flex-end;
-}
+/* 历史消息已迁移至 Runtime Chat Components（runtime-chat-item），对齐 WebUI webchat。
+   原 ChatGPT 风格的 message-row / avatar-wrapper / message-bubble / message-meta 已移除。 */
 
 /* ========================================
    消息引用按钮（从 WebUI runtime-chat 迁移）
@@ -989,12 +928,6 @@ a:hover {
 	border-color: color-mix(in srgb, var(--accent) 28%, var(--border-color));
 	background: color-mix(in srgb, var(--accent) 9%, transparent);
 	color: var(--accent-color);
-}
-
-/* 流式气泡样式 */
-.message-row.streaming .message-bubble {
-	opacity: 0.95;
-	animation: fadeInUp 0.2s ease-out;
 }
 
 /* ========================================
@@ -1622,16 +1555,6 @@ a:hover {
 		padding: 16px 14px;
 	}
 
-	.message-row {
-		gap: 10px;
-	}
-
-	.message-bubble {
-		max-width: calc(100% - 46px);
-		padding: 10px 14px;
-		border-radius: 12px;
-	}
-
 	.shortcut-grid {
 		grid-template-columns: 1fr;
 	}
@@ -1678,6 +1601,18 @@ a:hover {
 	border-color: var(--border-color);
 }
 
+/* 流式光标（对齐 WebUI runtime.js：streaming 时内容末尾的闪烁竖线，替代"思考中..."占位符） */
+.runtime-chat-item.streaming .runtime-chat-content::after {
+	content: "";
+	display: inline-block;
+	width: 7px;
+	height: 1.1em;
+	margin-left: 4px;
+	vertical-align: -0.15em;
+	background: var(--accent);
+	animation: runtime-chat-cursor 0.9s steps(2, start) infinite;
+}
+
 .runtime-chat-role {
 	font-size: 11px;
 	text-transform: uppercase;
@@ -1710,6 +1645,78 @@ a:hover {
 
 .runtime-chat-content.markdown {
 	white-space: normal;
+}
+
+.runtime-chat-content.markdown > * {
+	min-width: 0;
+	max-width: 100%;
+}
+
+.runtime-chat-content.markdown > *:first-child {
+	margin-top: 0;
+}
+
+.runtime-chat-content.markdown > *:last-child {
+	margin-bottom: 0;
+}
+
+.runtime-chat-content.markdown p {
+	margin: 0.4em 0;
+}
+
+.runtime-chat-content.markdown h1,
+.runtime-chat-content.markdown h2,
+.runtime-chat-content.markdown h3,
+.runtime-chat-content.markdown h4 {
+	margin: 0.6em 0 0.3em;
+	line-height: 1.3;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.runtime-chat-content.markdown h1 {
+	font-size: 1.25em;
+}
+
+.runtime-chat-content.markdown h2 {
+	font-size: 1.15em;
+}
+
+.runtime-chat-content.markdown h3 {
+	font-size: 1.05em;
+}
+
+.runtime-chat-content.markdown ul,
+.runtime-chat-content.markdown ol {
+	margin: 0.4em 0;
+	padding-left: 1.5em;
+}
+
+.runtime-chat-content.markdown li {
+	margin: 0.15em 0;
+}
+
+.runtime-chat-content.markdown blockquote {
+	margin: 0.4em 0;
+	padding: 0.3em 0.8em;
+	border-left: 3px solid var(--border-color);
+	color: var(--text-secondary);
+}
+
+.runtime-chat-content.markdown table {
+	width: 100%;
+	max-width: 100%;
+	table-layout: fixed;
+	border-collapse: collapse;
+	margin: 0.5em 0;
+	font-size: 13px;
+}
+
+.runtime-chat-content.markdown th,
+.runtime-chat-content.markdown td {
+	border: 1px solid var(--border-color);
+	padding: 4px 8px;
+	overflow-wrap: anywhere;
 }
 
 .runtime-chat-content code {
@@ -2738,4 +2745,14 @@ a:hover {
 	border-radius: 999px;
 	background: currentColor;
 	opacity: 0.85;
+}
+
+/* 消息时间戳（用户要求保留；WebUI 无此元素，置于 role 行末尾，小号灰色） */
+.runtime-chat-time {
+	margin-left: auto;
+	font-size: 11px;
+	color: var(--text-tertiary);
+	letter-spacing: 0;
+	text-transform: none;
+	white-space: nowrap;
 }
