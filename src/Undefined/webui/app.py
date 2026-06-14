@@ -197,6 +197,10 @@ async def security_headers_middleware(
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
+    # 静态资源（runtime.js / css 等）URL 无版本号：强制浏览器每次按 ETag 重新校验，
+    # 避免改动前端后用户因强缓存看不到更新（内容未变命中 ETag 仍返回 304，开销极小）。
+    if request.path.startswith("/static"):
+        response.headers["Cache-Control"] = "no-cache"
     return response
 
 

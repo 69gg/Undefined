@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 from aiohttp import web
+from aiohttp.test_utils import make_mocked_request
 
 from Undefined.api import _helpers as runtime_api_helpers
 from Undefined.changelog import ChangelogEntry
@@ -1115,3 +1116,24 @@ async def test_proxy_runtime_injects_runtime_api_key(monkeypatch: Any) -> None:
 
     assert payload["ok"] is True
     assert captured["headers"] == {"X-Undefined-API-Key": "runtime-secret"}
+
+
+async def test_static_assets_get_no_cache_revalidation_header() -> None:
+    async def _handler(_request: web.Request) -> web.StreamResponse:
+        return web.Response(text="asset")
+
+    request = make_mocked_request("GET", "/static/js/runtime.js")
+    response = await webui_app.security_headers_middleware(request, _handler)
+
+    # 静态资源强制按 ETag 重新校验，避免前端更新后被强缓存挡住
+    assert response.headers["Cache-Control"] == "no-cache"
+
+
+async def test_non_static_responses_have_no_explicit_cache_control() -> None:
+    async def _handler(_request: web.Request) -> web.StreamResponse:
+        return web.Response(text="page")
+
+    request = make_mocked_request("GET", "/api/v1/management/health")
+    response = await webui_app.security_headers_middleware(request, _handler)
+
+    assert "Cache-Control" not in response.headers
