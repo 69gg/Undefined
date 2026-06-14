@@ -30,33 +30,13 @@
 	--tool-accent: color-mix(in srgb, var(--success) 76%, var(--accent-color));
 }
 
+.runtime-tool-block.is-agent {
+	--tool-accent: var(--accent-color);
+	background: color-mix(in srgb, var(--bg-card) 60%, var(--bg-app));
+}
+
 .runtime-tool-block.running {
 	--tool-accent: color-mix(in srgb, var(--warning) 82%, var(--accent-color));
-}
-
-.runtime-tool-block.running::after {
-	content: "";
-	position: absolute;
-	top: 0;
-	left: 0;
-	right: 0;
-	height: 2px;
-	background: linear-gradient(
-		90deg,
-		transparent,
-		var(--tool-accent),
-		transparent
-	);
-	animation: loading-bar 1.5s ease-in-out infinite;
-}
-
-@keyframes loading-bar {
-	0% {
-		transform: translateX(-100%);
-	}
-	100% {
-		transform: translateX(100%);
-	}
 }
 
 .runtime-tool-block.done {
@@ -65,6 +45,10 @@
 
 .runtime-tool-block.error {
 	--tool-accent: var(--error);
+}
+
+.runtime-tool-block.cancelled {
+	--tool-accent: var(--warning);
 }
 
 .runtime-tool-block:hover {

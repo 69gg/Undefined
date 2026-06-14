@@ -50,6 +50,12 @@ export type ToolBlock = {
 	webchatCallId: string;
 	toolName: string;
 	status: ToolBlockStatus;
+	isAgent?: boolean;
+	uiHint?: string;
+	argumentsPreview?: string;
+	resultPreview?: string;
+	currentStage?: string;
+	stageDetail?: string;
 	children: Map<string, ToolBlock>;
 	timeline: TimelineEntry[];
 	startTime: number;

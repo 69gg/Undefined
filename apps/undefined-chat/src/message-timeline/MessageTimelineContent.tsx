@@ -10,6 +10,7 @@ import { ToolBlock } from "./ToolBlock";
 import "./ToolBlock.css";
 
 type HistoryToolCall = {
+	id?: string;
 	name: string;
 	is_agent?: boolean;
 	status: string;
@@ -86,26 +87,6 @@ function convertHistoryToolCallToToolBlock(
 	const mappedStatus: ToolBlockType["status"] =
 		status === "error" ? "error" : status === "running" ? "running" : "done";
 
-	// 构建 timeline 条目
-	const timeline: ToolBlockType["timeline"] = [];
-	const now = Date.now();
-
-	if (call.arguments_preview) {
-		timeline.push({
-			type: "input",
-			timestamp: now,
-			content: call.arguments_preview,
-		});
-	}
-
-	if (call.result_preview) {
-		timeline.push({
-			type: "output",
-			timestamp: now,
-			content: call.result_preview,
-		});
-	}
-
 	// 转换子工具调用（优先从 timeline 中提取，兼容旧的 children 字段）
 	const children = new Map<string, ToolBlockType>();
 
@@ -130,19 +111,21 @@ function convertHistoryToolCallToToolBlock(
 		});
 	}
 
-	// 计算时间戳
+	const now = Date.now();
 	const startTime = now - (call.duration_ms || 0);
 	const endTime = mappedStatus === "running" ? undefined : now;
 
-	// 如果是 Agent，显示 "Agent" 而不是工具名
-	const displayName = call.is_agent ? "Agent" : call.name || "--";
-
 	return {
-		webchatCallId: `history-${index}-${call.name}`,
-		toolName: displayName,
+		webchatCallId: call.id || `call-${index}-${call.name}`,
+		toolName: call.name || "--",
 		status: mappedStatus,
+		isAgent: call.is_agent,
+		uiHint: call.ui_hint,
+		argumentsPreview: call.arguments_preview,
+		resultPreview: call.result_preview,
+		currentStage: call.current_stage,
 		children,
-		timeline,
+		timeline: [],
 		startTime,
 		endTime,
 	};

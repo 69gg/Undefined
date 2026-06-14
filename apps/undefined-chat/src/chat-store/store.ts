@@ -4,6 +4,7 @@ import type {
 	RuntimeSseEvent,
 	RuntimeSseStatus,
 	SendMessageInput,
+	ToolCallSnapshot,
 } from "../runtime-client/types";
 import type {
 	ChatAction,
@@ -562,6 +563,52 @@ function chatEventFromRuntimeEvent(event: RuntimeSseEvent): ChatEvent {
 	};
 }
 
+/**
+ * 按 callId 在工具调用列表（含嵌套 children）中 upsert 一个 ToolCallSnapshot。
+ * 对齐 WebUI upsertTimelineToolBlock 的 key 策略（webchat_call_id || tool_call_id）。
+ * 有 parentCallId 时在匹配父块的 children 里递归 upsert；否则在顶层 upsert。
+ */
+function upsertToolCall(
+	list: ToolCallSnapshot[],
+	callId: string,
+	parentCallId: string | undefined,
+	patch: (existing: ToolCallSnapshot | undefined) => ToolCallSnapshot,
+): ToolCallSnapshot[] {
+	const matches = (item: ToolCallSnapshot, id: string): boolean =>
+		item.id === id || (!item.id && item.name === id);
+
+	if (parentCallId) {
+		return list.map((item) => {
+			if (matches(item, parentCallId)) {
+				return {
+					...item,
+					children: upsertToolCall(
+						item.children ?? [],
+						callId,
+						undefined,
+						patch,
+					),
+				};
+			}
+			if (item.children && item.children.length > 0) {
+				return {
+					...item,
+					children: upsertToolCall(item.children, callId, parentCallId, patch),
+				};
+			}
+			return item;
+		});
+	}
+
+	const idx = list.findIndex((item) => matches(item, callId));
+	if (idx >= 0) {
+		const next = list.slice();
+		next[idx] = patch(list[idx]);
+		return next;
+	}
+	return [...list, patch(undefined)];
+}
+
 export function createChatStore({
 	client,
 }: {
@@ -1041,8 +1088,98 @@ export function createChatStore({
 							reply: updatedJob.reply + content,
 						};
 					}
+				} else if (
+					event.event === "tool_start" ||
+					event.event === "agent_start" ||
+					event.event === "tool_end" ||
+					event.event === "agent_end"
+				) {
+					// tool/agent 生命周期：upsert 工具块（对齐 WebUI upsertToolBlock）
+					const payload = event.payload ?? {};
+					const callId = String(
+						payload.webchat_call_id ||
+							payload.tool_call_id ||
+							payload.name ||
+							"",
+					);
+					if (callId) {
+						const parentCallId =
+							String(payload.parent_webchat_call_id || "") || undefined;
+						const isStart =
+							event.event === "tool_start" || event.event === "agent_start";
+						updatedJob = {
+							...updatedJob,
+							currentToolCalls: upsertToolCall(
+								updatedJob.currentToolCalls,
+								callId,
+								parentCallId,
+								(existing) => ({
+									id: callId,
+									name: String(payload.name || existing?.name || ""),
+									status: isStart
+										? "running"
+										: payload.ok === false
+											? "error"
+											: "done",
+									isAgent:
+										Boolean(payload.is_agent) || existing?.isAgent || false,
+									argumentsPreview: isStart
+										? String(payload.arguments_preview ?? "")
+										: (existing?.argumentsPreview ?? ""),
+									resultPreview: !isStart
+										? String(payload.result_preview ?? "")
+										: (existing?.resultPreview ?? ""),
+									uiHint:
+										String(payload.ui_hint ?? existing?.uiHint ?? "") ||
+										undefined,
+									currentStage: existing?.currentStage,
+									elapsedMs: existing?.elapsedMs ?? null,
+									durationMs:
+										!isStart && typeof payload.duration_ms === "number"
+											? payload.duration_ms
+											: (existing?.durationMs ?? null),
+									children: existing?.children ?? [],
+									timeline: existing?.timeline,
+								}),
+							),
+						};
+					}
+				} else if (event.event === "agent_stage") {
+					// agent 阶段：更新 agent 块 currentStage（对齐 WebUI upsertAgentStageBlock）
+					const payload = event.payload ?? {};
+					const callId = String(payload.webchat_call_id || payload.name || "");
+					if (callId) {
+						const parentCallId =
+							String(payload.parent_webchat_call_id || "") || undefined;
+						updatedJob = {
+							...updatedJob,
+							currentToolCalls: upsertToolCall(
+								updatedJob.currentToolCalls,
+								callId,
+								parentCallId,
+								(existing) => ({
+									id: callId,
+									name: String(
+										payload.agent_name || payload.name || existing?.name || "",
+									),
+									status: String(
+										payload.status || existing?.status || "running",
+									),
+									isAgent: true,
+									currentStage:
+										String(payload.stage || "") || existing?.currentStage,
+									argumentsPreview: existing?.argumentsPreview,
+									resultPreview: existing?.resultPreview,
+									uiHint: existing?.uiHint,
+									elapsedMs: existing?.elapsedMs ?? null,
+									durationMs: existing?.durationMs ?? null,
+									children: existing?.children ?? [],
+									timeline: existing?.timeline,
+								}),
+							),
+						};
+					}
 				}
-				// tool_call/agent_stage 等事件当前已由 job/upsert 完整更新，此处不重复处理
 			}
 			if (updatedJob !== activeJob) {
 				dispatch({ type: "job/upsert", job: updatedJob });

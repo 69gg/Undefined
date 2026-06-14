@@ -41,6 +41,7 @@ export type MessageTimelineProps = {
 const WINDOW_SIZE = 64;
 
 type HistoryToolCall = {
+	id?: string;
 	name: string;
 	is_agent?: boolean;
 	status: string;
@@ -63,6 +64,7 @@ type HistoryTimelineEntry = {
 
 function convertToolCallSnapshot(snap: ToolCallSnapshot): HistoryToolCall {
 	return {
+		id: snap.id,
 		name: snap.name,
 		is_agent: snap.isAgent,
 		status: snap.status,

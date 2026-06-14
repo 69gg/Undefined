@@ -1,12 +1,16 @@
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import type { ToolBlock as ToolBlockType } from "../chat-store/types";
+import { getChatStageLabel } from "../i18n/zh-CN";
 import "./ToolBlock.css";
 
 export type ToolBlockProps = ToolBlockType;
 
 function formatDuration(startTime: number, endTime?: number): string {
 	const duration = endTime ? endTime - startTime : Date.now() - startTime;
+	if (!Number.isFinite(duration) || duration <= 0) {
+		return "";
+	}
 	if (duration < 1000) {
 		return `${Math.round(duration)}ms`;
 	}
@@ -69,10 +73,20 @@ function renderTimelineEntry(
 	}
 }
 
+/**
+ * 工具调用块（对齐 WebUI renderToolBlock，runtime.js:1100-1142）
+ * - running 时显示，tool_end 后变 done/error，2s 后自动折叠
+ * - agent 运行中显示阶段标签（metaLabel），对齐 WebUI
+ */
 export function ToolBlock({
 	webchatCallId,
 	toolName,
 	status,
+	isAgent,
+	uiHint,
+	argumentsPreview,
+	resultPreview,
+	currentStage,
 	children,
 	timeline,
 	startTime,
@@ -110,39 +124,70 @@ export function ToolBlock({
 	const statusText = getStatusText(status);
 	const childrenArray = Array.from(children.values());
 
+	// agent 运行中且有阶段时，显示阶段标签（对齐 WebUI metaLabel）
+	const showLiveAgentStage =
+		isAgent && Boolean(currentStage) && status === "running";
+	const metaLabel = showLiveAgentStage
+		? getChatStageLabel(currentStage ?? "")
+		: statusText;
+	const hintClass = uiHint ? ` ${uiHint.replace(/_/g, "-")}` : "";
+	const kindClass = isAgent ? " is-agent" : " is-tool";
+	const kindLabel = isAgent ? "Agent" : "Tool";
+
 	return (
 		<details
 			open={isOpen}
-			className={`runtime-tool-block is-tool ${status}`}
+			className={`runtime-tool-block ${status}${kindClass}${hintClass}`}
 			data-call-id={webchatCallId}
 			onToggle={handleToggle}
 		>
 			<summary>
-				<div className="runtime-tool-summary-main">
-					<div className="runtime-tool-title">
-						<span className="runtime-tool-name">{toolName}</span>
-					</div>
-				</div>
-				<span className="runtime-tool-duration">{duration}</span>
-				<span className="runtime-tool-status">{statusText}</span>
+				<span className="runtime-tool-summary-main">
+					<span className="runtime-tool-title">
+						<code className="runtime-tool-name">{toolName}</code>
+						<span
+							className="runtime-tool-duration"
+							data-tool-duration-for={webchatCallId}
+							hidden={!duration}
+						>
+							{duration}
+						</span>
+					</span>
+				</span>
+				<em
+					className="runtime-tool-status"
+					data-tool-status-for={webchatCallId}
+				>
+					{metaLabel}
+				</em>
+				<span className="runtime-tool-kind">{kindLabel}</span>
 			</summary>
 
-			{timeline.length > 0 && (
+			{argumentsPreview ? (
 				<div className="runtime-tool-preview">
-					<div className="runtime-tool-preview-label">时间线</div>
+					<div className="runtime-tool-preview-label">输入</div>
 					<div className="runtime-tool-preview-body">
-						{timeline.map((entry, index) => renderTimelineEntry(entry, index))}
+						<pre>{argumentsPreview}</pre>
 					</div>
 				</div>
-			)}
+			) : null}
+			{resultPreview ? (
+				<div className="runtime-tool-preview">
+					<div className="runtime-tool-preview-label">输出</div>
+					<div className="runtime-tool-preview-body is-structured">
+						<pre>{resultPreview}</pre>
+					</div>
+				</div>
+			) : null}
 
-			{childrenArray.length > 0 && (
+			{childrenArray.length > 0 || timeline.length > 0 ? (
 				<div className="runtime-tool-children">
+					{timeline.map((entry, index) => renderTimelineEntry(entry, index))}
 					{childrenArray.map((child) => (
 						<ToolBlock key={child.webchatCallId} {...child} />
 					))}
 				</div>
-			)}
+			) : null}
 		</details>
 	);
 }

@@ -195,6 +195,52 @@ describe("chat store", () => {
 		]);
 	});
 
+	test("applyRuntimeEvents consumes tool_start/tool_end to update currentToolCalls in real time", async () => {
+		const runningJob = job({ jobId: "job-1", conversationId: "default" });
+		const client = runtimeClientStub({
+			getActiveJobs: vi.fn(async () => ({
+				job: runningJob,
+				jobs: [runningJob],
+			})),
+		});
+		const store = createChatStore({ client });
+		await store.bootstrap();
+
+		store.applyRuntimeEvents("job-1", [
+			event({
+				seq: 1,
+				event: "tool_start",
+				payload: {
+					job_id: "job-1",
+					webchat_call_id: "call-1",
+					name: "search",
+					arguments_preview: '{"q":"新闻"}',
+				},
+			}),
+			event({
+				seq: 2,
+				event: "tool_end",
+				payload: {
+					job_id: "job-1",
+					webchat_call_id: "call-1",
+					ok: true,
+					result_preview: "搜索结果",
+				},
+			}),
+		]);
+
+		const state = store.getSnapshot();
+		const activeJob = state.activeJobsByConversation.default;
+		expect(activeJob).toBeTruthy();
+		expect(activeJob?.currentToolCalls).toHaveLength(1);
+		expect(activeJob?.currentToolCalls[0]?.name).toBe("search");
+		expect(activeJob?.currentToolCalls[0]?.status).toBe("done");
+		expect(activeJob?.currentToolCalls[0]?.argumentsPreview).toBe(
+			'{"q":"新闻"}',
+		);
+		expect(activeJob?.currentToolCalls[0]?.resultPreview).toBe("搜索结果");
+	});
+
 	test("continues JSON fallback polling until an SSE-broken job reaches terminal state", async () => {
 		vi.useFakeTimers();
 		const runningJob = job({ jobId: "job-1", conversationId: "default" });
