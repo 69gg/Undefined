@@ -157,6 +157,8 @@ export function MessageTimeline({
 	const stickToBottomRef = useRef(true);
 	// 程序化滚动标志：避免程序化滚动（发送滚顶/工具滚底）触发 handleTimelineScroll 重置 stickToBottom
 	const isProgrammaticScrollRef = useRef(false);
+	// 历史加载状态：用于检测"加载完成"时刻（true → false）触发滚底
+	const prevHistoryLoadingRef = useRef(false);
 
 	const isCurrentlyThinking = isJobRunning(activeJob);
 
@@ -241,6 +243,20 @@ export function MessageTimeline({
 		});
 		return () => cancelAnimationFrame(raf);
 	}, [streamSignature, activeJob]);
+
+	// 初次加载历史/切换会话完成：滚到底部（监听 historyLoading 从 true → false）
+	// biome-ignore lint/correctness/useExhaustiveDependencies: historyLoading 作为加载完成信号
+	useEffect(() => {
+		const prev = prevHistoryLoadingRef.current;
+		const current = Boolean(historyLoading);
+		prevHistoryLoadingRef.current = current;
+		if (prev && !current && visibleItems.length > 0) {
+			// 历史加载完成：滚底 + 恢复跟随
+			stickToBottomRef.current = true;
+			const raf = requestAnimationFrame(scrollToBottom);
+			return () => cancelAnimationFrame(raf);
+		}
+	}, [historyLoading]);
 
 	const shortcuts = [
 		{
