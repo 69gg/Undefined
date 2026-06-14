@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { commandInfo, subcommandInfo } from "../test-fixtures";
@@ -164,6 +164,7 @@ describe("MessageComposer", () => {
 	test("renders attachment queue and references with clear actions", async () => {
 		const onClearAttachment = vi.fn();
 		const onClearReference = vi.fn();
+		const onJumpReference = vi.fn();
 
 		render(
 			<MessageComposer
@@ -188,6 +189,7 @@ describe("MessageComposer", () => {
 				onAddAttachment={vi.fn()}
 				onClearAttachment={onClearAttachment}
 				onClearReference={onClearReference}
+				onJumpReference={onJumpReference}
 				onDraftChange={vi.fn()}
 				onSend={vi.fn()}
 			/>,
@@ -196,6 +198,9 @@ describe("MessageComposer", () => {
 		const attachments = screen.getByLabelText("附件队列");
 		expect(within(attachments).getByText("trace.log")).toBeTruthy();
 		expect(screen.getByText("错误堆栈")).toBeTruthy();
+
+		await userEvent.click(screen.getByRole("button", { name: "错误堆栈" }));
+		expect(onJumpReference).toHaveBeenCalledWith("msg-1");
 
 		await userEvent.click(
 			screen.getByRole("button", { name: "移除 trace.log" }),
@@ -206,6 +211,47 @@ describe("MessageComposer", () => {
 
 		expect(onClearAttachment).toHaveBeenCalledWith("local-1");
 		expect(onClearReference).toHaveBeenCalledWith("msg-1");
+	});
+
+	test("focusRequest focuses the editor and opens command mode", async () => {
+		const onDraftChange = vi.fn();
+		const { rerender } = render(
+			<MessageComposer
+				attachmentQueue={[]}
+				commandSuggestions={[commandInfo({ name: "help" })]}
+				disabled={false}
+				draft=""
+				focusRequest={null}
+				references={[]}
+				onAddAttachment={vi.fn()}
+				onClearAttachment={vi.fn()}
+				onClearReference={vi.fn()}
+				onDraftChange={onDraftChange}
+				onSend={vi.fn()}
+			/>,
+		);
+
+		rerender(
+			<MessageComposer
+				attachmentQueue={[]}
+				commandSuggestions={[commandInfo({ name: "help" })]}
+				disabled={false}
+				draft=""
+				focusRequest={{ id: 1, commandMode: true }}
+				references={[]}
+				onAddAttachment={vi.fn()}
+				onClearAttachment={vi.fn()}
+				onClearReference={vi.fn()}
+				onDraftChange={onDraftChange}
+				onSend={vi.fn()}
+			/>,
+		);
+
+		const editor = await screen.findByDisplayValue("/");
+		await waitFor(() => {
+			expect(editor).toHaveFocus();
+		});
+		expect(onDraftChange).toHaveBeenCalledWith("/");
 	});
 
 	test("disables sending for a running current conversation", () => {

@@ -49,6 +49,7 @@
 	/* 输入焦点 */
 	--focus-border: #d97757;
 	--focus-ring: rgba(217, 119, 87, 0.2);
+	--keyboard-inset: 0px;
 
 	/* 阴影效果（webui 配色） */
 	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -225,6 +226,16 @@ button {
 button:disabled {
 	cursor: not-allowed;
 	opacity: 0.5;
+}
+
+button:focus-visible,
+a:focus-visible,
+textarea:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+	outline: 2px solid var(--focus-border);
+	outline-offset: 2px;
+	box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 a {
@@ -408,6 +419,8 @@ a:hover {
 	justify-content: center;
 	width: 28px;
 	height: 28px;
+	min-width: 28px;
+	min-height: 28px;
 	border: none;
 	border-radius: 8px;
 	background: transparent;
@@ -426,6 +439,8 @@ a:hover {
 	justify-content: center;
 	width: 28px;
 	height: 28px;
+	min-width: 28px;
+	min-height: 28px;
 	border: none;
 	border-radius: 8px;
 	background: transparent;
@@ -523,6 +538,12 @@ a:hover {
 	margin-top: 4px;
 }
 
+.timeline-load-more {
+	display: flex;
+	justify-content: center;
+	padding: 8px 0 14px;
+}
+
 /* 二次确认弹窗 */
 .confirm-dialog-overlay {
 	position: fixed;
@@ -604,9 +625,14 @@ a:hover {
 @media (max-width: 768px) {
 	.conversation-delete {
 		opacity: 0.55;
+		width: 36px;
+		height: 36px;
 	}
 	.conversation-rename {
 		opacity: 0.55;
+		width: 36px;
+		height: 36px;
+		right: 48px;
 	}
 }
 
@@ -901,6 +927,7 @@ a:hover {
 	display: inline-flex;
 	align-items: center;
 	min-height: 22px;
+	min-width: 44px;
 	padding: 1px 7px;
 	border: 1px solid transparent;
 	border-radius: 999px;
@@ -928,6 +955,25 @@ a:hover {
 	border-color: color-mix(in srgb, var(--accent) 28%, var(--border-color));
 	background: color-mix(in srgb, var(--accent) 9%, transparent);
 	color: var(--accent-color);
+}
+.runtime-chat-quote-btn.is-visible {
+	opacity: 1;
+}
+
+.message-jump-highlight {
+	animation: messageJumpHighlight 1.6s ease;
+}
+
+@keyframes messageJumpHighlight {
+	0%,
+	100% {
+		box-shadow: var(--shadow-sm);
+	}
+	20%,
+	70% {
+		box-shadow: 0 0 0 3px var(--focus-ring), var(--shadow-md);
+		border-color: var(--primary);
+	}
 }
 
 /* ========================================
@@ -1175,7 +1221,7 @@ a:hover {
    Floating Input Composer
    ======================================== */
 .composer-wrapper {
-	padding: 0 20px max(24px, env(safe-area-inset-bottom)) 20px;
+	padding: 0 20px calc(max(24px, env(safe-area-inset-bottom)) + var(--keyboard-inset)) 20px;
 	background: transparent;
 	position: relative;
 	z-index: 4;
@@ -1283,6 +1329,36 @@ a:hover {
 	transition: color 0.2s;
 }
 
+.composer-chip .chip-preview {
+	display: block;
+	min-width: 0;
+	max-width: min(420px, 62vw);
+	padding: 0;
+	border: 0;
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-secondary);
+	font-size: inherit;
+	line-height: inherit;
+	text-align: left;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.composer-chip .chip-preview:disabled {
+	cursor: default;
+	opacity: 1;
+}
+
+.composer-chip .chip-clear {
+	min-width: 28px;
+	min-height: 28px;
+	align-items: center;
+	justify-content: center;
+}
+
 .composer-chip button:hover {
 	color: var(--status-error);
 }
@@ -1299,6 +1375,8 @@ a:hover {
 .composer .icon-button {
 	width: 38px;
 	height: 38px;
+	min-width: 38px;
+	min-height: 38px;
 	border-radius: 50%;
 	flex-shrink: 0;
 	border: 1px solid transparent;
@@ -1328,6 +1406,8 @@ a:hover {
 .composer button[type="submit"] {
 	width: 38px;
 	height: 38px;
+	min-width: 38px;
+	min-height: 38px;
 	border-radius: 50%;
 	background: var(--primary);
 	color: #ffffff;
@@ -1512,7 +1592,7 @@ a:hover {
 		left: 0;
 		top: 0;
 		bottom: 0;
-		width: 280px;
+		width: min(86vw, 320px);
 		transform: translateX(-100%);
 		opacity: 0;
 		pointer-events: none;
@@ -1544,8 +1624,8 @@ a:hover {
 
 	.mobile-header-btn {
 		display: inline-flex;
-		width: 36px;
-		height: 36px;
+		width: 44px;
+		height: 44px;
 		border-radius: 8px;
 		border: 1px solid var(--border-primary);
 		background: var(--bg-surface);
@@ -1560,7 +1640,25 @@ a:hover {
 	}
 
 	.composer-wrapper {
-		padding: 0 10px max(16px, env(safe-area-inset-bottom)) 10px;
+		padding: 0 10px calc(max(16px, env(safe-area-inset-bottom)) + var(--keyboard-inset)) 10px;
+	}
+
+	.conversation-delete,
+	.conversation-rename,
+	.composer .icon-button,
+	.composer button[type="submit"],
+	.composer-chip .chip-clear,
+	.runtime-chat-quote-btn {
+		min-width: 44px;
+		min-height: 44px;
+	}
+
+	.conversation-delete {
+		right: 6px;
+	}
+
+	.conversation-rename {
+		right: 52px;
 	}
 }
 
@@ -2621,6 +2719,15 @@ a:hover {
 	animation: fadeIn 0.18s ease;
 }
 
+.runtime-image-viewer-stage {
+	max-width: calc(100vw - 56px);
+	max-height: calc(100dvh - 128px);
+	overflow: auto;
+	padding: 8px;
+	cursor: default;
+	touch-action: pan-x pan-y pinch-zoom;
+}
+
 .runtime-image-viewer-figure {
 	display: flex;
 	flex-direction: column;
@@ -2630,6 +2737,7 @@ a:hover {
 	max-width: min(1120px, calc(100vw - 56px));
 	max-height: calc(100dvh - 56px);
 	cursor: default;
+	transform-origin: center center;
 }
 
 .runtime-image-viewer img,
@@ -2652,6 +2760,37 @@ a:hover {
 	color: rgba(255, 255, 255, 0.78);
 	font-size: 12px;
 	text-align: center;
+}
+
+.runtime-image-viewer-toolbar {
+	position: fixed;
+	left: 50%;
+	bottom: max(16px, env(safe-area-inset-bottom));
+	transform: translateX(-50%);
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px;
+	border-radius: 999px;
+	background: rgba(15, 23, 42, 0.58);
+	backdrop-filter: blur(10px);
+	border: 1px solid rgba(255, 255, 255, 0.18);
+	z-index: 10000;
+}
+
+.runtime-image-viewer-toolbar button {
+	width: 44px;
+	height: 44px;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, 0.14);
+	color: #ffffff;
+	font-size: 14px;
+	font-weight: 700;
+}
+
+.runtime-image-viewer-toolbar button:hover,
+.runtime-image-viewer-toolbar button:focus-visible {
+	background: rgba(255, 255, 255, 0.24);
 }
 
 .image-viewer-close-button,

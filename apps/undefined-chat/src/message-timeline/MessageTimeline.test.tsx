@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { AttachmentImageProvider } from "../rendering/AttachmentImageContext";
 import { historyItem, job } from "../test-fixtures";
 import { MessageTimeline } from "./MessageTimeline";
@@ -22,6 +22,10 @@ function renderTimeline(ui: ReactNode) {
 }
 
 describe("MessageTimeline", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
 	test("renders text, code, attachments, references, and streaming bot message with tool calls", async () => {
 		const onPreviewHtml = vi.fn();
 		const activeJob = job({
@@ -136,6 +140,78 @@ describe("MessageTimeline", () => {
 		expect(within(timeline).getAllByTestId("message-row").length).toBeLessThan(
 			80,
 		);
+	});
+
+	test("renders load-more control and invokes history pagination", async () => {
+		const onLoadMoreHistory = vi.fn(async () => undefined);
+		renderTimeline(
+			<MessageTimeline
+				activeJob={null}
+				connectionState="connected"
+				hasMoreHistory
+				items={[
+					historyItem({ messageId: "msg-1", content: "已加载消息 1" }),
+					historyItem({ messageId: "msg-2", content: "已加载消息 2" }),
+				]}
+				onLoadMoreHistory={onLoadMoreHistory}
+				onPreviewAttachment={vi.fn()}
+				onPreviewHtml={vi.fn()}
+				onSaveAttachment={vi.fn()}
+			/>,
+		);
+
+		await userEvent.click(screen.getByRole("button", { name: "加载更早消息" }));
+
+		expect(onLoadMoreHistory).toHaveBeenCalledOnce();
+	});
+
+	test("keeps scroll position anchored after loading older history", async () => {
+		const rafCallbacks: FrameRequestCallback[] = [];
+		vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+			rafCallbacks.push(callback);
+			return rafCallbacks.length;
+		});
+		const onLoadMoreHistory = vi.fn(async () => undefined);
+		renderTimeline(
+			<MessageTimeline
+				activeJob={null}
+				connectionState="connected"
+				hasMoreHistory
+				items={[
+					historyItem({ messageId: "msg-1", content: "已加载消息 1" }),
+					historyItem({ messageId: "msg-2", content: "已加载消息 2" }),
+				]}
+				onLoadMoreHistory={onLoadMoreHistory}
+				onPreviewAttachment={vi.fn()}
+				onPreviewHtml={vi.fn()}
+				onSaveAttachment={vi.fn()}
+			/>,
+		);
+
+		const timeline = screen.getByRole("log", { name: "消息" });
+		Object.defineProperty(timeline, "scrollHeight", {
+			configurable: true,
+			value: 1000,
+		});
+		Object.defineProperty(timeline, "clientHeight", {
+			configurable: true,
+			value: 400,
+		});
+		timeline.scrollTop = 20;
+
+		await userEvent.click(screen.getByRole("button", { name: "加载更早消息" }));
+
+		Object.defineProperty(timeline, "scrollHeight", {
+			configurable: true,
+			value: 1400,
+		});
+		await Promise.resolve();
+		for (const callback of rafCallbacks.splice(0)) {
+			callback(0);
+		}
+
+		expect(timeline.scrollTop).toBe(420);
+		expect(onLoadMoreHistory).toHaveBeenCalledOnce();
 	});
 
 	test("点击附件图片以已加载的 blob URL 打开查看器", async () => {

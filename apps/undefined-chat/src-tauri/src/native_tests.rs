@@ -1,6 +1,7 @@
 use crate::config::normalize_runtime_url;
 use crate::preview::{
-    build_preview_data_url, preview_document, preview_navigation_allowed, MAX_PREVIEW_HTML_BYTES,
+    build_preview_data_url, preview_document, preview_document_checked, preview_navigation_allowed,
+    MAX_PREVIEW_HTML_BYTES,
 };
 use crate::runtime_client::{
     build_runtime_url, job_events_url, parse_sse_chunks, runtime_health_from_body_result,
@@ -16,7 +17,7 @@ use crate::state::{
 use crate::{
     download::test_safe_file_name,
     upload::{
-        attachment_file_name, attachments_url, open_regular_attachment_file,
+        attachment_file_name, attachments_url, parse_file_path, requires_regular_file_check,
         upload_uses_streaming_body, UploadAttachmentInput,
     },
 };
@@ -189,7 +190,7 @@ fn html_preview_csp_blocks_network_and_eval() {
 }
 
 #[test]
-fn html_preview_navigation_guard_allows_only_initial_data_url() {
+fn html_preview_navigation_guard_allows_only_initial_url() {
     let initial_url = build_preview_data_url("Report", "<p>Hello</p>").unwrap();
 
     assert!(preview_navigation_allowed(&initial_url, &initial_url));
@@ -206,9 +207,14 @@ fn html_preview_navigation_guard_allows_only_initial_data_url() {
         &url::Url::parse("https://example.com").unwrap(),
         &initial_url
     ));
+    let initial_file_url = url::Url::parse("file:///tmp/html-preview-safe.html").unwrap();
+    assert!(preview_navigation_allowed(
+        &initial_file_url,
+        &initial_file_url
+    ));
     assert!(!preview_navigation_allowed(
-        &url::Url::parse("file:///tmp/preview.html").unwrap(),
-        &initial_url
+        &url::Url::parse("file:///tmp/other-preview.html").unwrap(),
+        &initial_file_url
     ));
 }
 
@@ -217,6 +223,8 @@ fn html_preview_rejects_oversized_html() {
     let html = "a".repeat(MAX_PREVIEW_HTML_BYTES + 1);
     let err = build_preview_data_url("Too large", &html).unwrap_err();
 
+    assert!(err.contains("html preview content is too large"));
+    let err = preview_document_checked("Too large", &html).unwrap_err();
     assert!(err.contains("html preview content is too large"));
 }
 
@@ -257,13 +265,27 @@ fn attachment_save_file_name_sanitizes_path_like_input() {
     );
 }
 
-#[tokio::test]
-async fn open_regular_attachment_file_rejects_directory() {
-    let err = open_regular_attachment_file(std::path::Path::new("."), ".")
-        .await
-        .unwrap_err();
+#[test]
+fn upload_file_path_parser_keeps_android_content_uri_as_url() {
+    let path = parse_file_path("content://media/external/images/media/42").unwrap();
+    assert!(path.as_path().is_none());
+    assert_eq!(path.to_string(), "content://media/external/images/media/42");
+}
 
-    assert!(err.contains("not a regular file"));
+#[test]
+fn upload_file_path_parser_accepts_file_uri_and_plain_path() {
+    let file_uri = parse_file_path("file:///tmp/report.txt").unwrap();
+    assert!(file_uri.as_path().is_none());
+    assert_eq!(
+        file_uri.clone().into_path().unwrap(),
+        std::path::PathBuf::from("/tmp/report.txt")
+    );
+
+    let plain_path = parse_file_path("/tmp/report.txt").unwrap();
+    assert_eq!(
+        plain_path.as_path(),
+        Some(std::path::Path::new("/tmp/report.txt"))
+    );
 }
 
 #[test]
@@ -403,6 +425,15 @@ fn insecure_api_key_status_marks_degraded_without_returning_secret_material() {
     assert_eq!(status.key_preview.as_deref(), Some("runt...-key"));
     let serialized = serde_json::to_string(&status).unwrap();
     assert!(!serialized.contains("runtime-secret-key"));
+}
+
+#[test]
+fn upload_skips_regular_file_metadata_check_for_android_content_uri() {
+    let content_uri = parse_file_path("content://media/external/images/media/42").unwrap();
+    assert!(!requires_regular_file_check(&content_uri));
+
+    let plain_path = parse_file_path("/tmp/report.txt").unwrap();
+    assert!(requires_regular_file_check(&plain_path));
 }
 
 #[test]

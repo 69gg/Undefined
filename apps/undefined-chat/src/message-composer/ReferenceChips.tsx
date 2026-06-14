@@ -3,6 +3,7 @@ import type { MessageReference } from "../runtime-client/types";
 export type ReferenceChipsProps = {
 	references: MessageReference[];
 	onClear: (messageId: string) => void;
+	onJump?: (messageId: string) => void;
 };
 
 function truncateText(text: string, maxLength: number): string {
@@ -12,7 +13,11 @@ function truncateText(text: string, maxLength: number): string {
 	return `${text.slice(0, maxLength)}...`;
 }
 
-export function ReferenceChips({ references, onClear }: ReferenceChipsProps) {
+export function ReferenceChips({
+	references,
+	onClear,
+	onJump,
+}: ReferenceChipsProps) {
 	if (references.length === 0) {
 		return null;
 	}
@@ -22,10 +27,17 @@ export function ReferenceChips({ references, onClear }: ReferenceChipsProps) {
 			{references.map((reference) => (
 				<span className="composer-chip" key={reference.messageId}>
 					<span className="chip-icon">↩</span>
-					<span className="chip-preview">
-						{truncateText(reference.quote, 180)}
-					</span>
 					<button
+						className="chip-preview"
+						onClick={() => onJump?.(reference.messageId)}
+						type="button"
+						disabled={!onJump}
+						title="跳转到引用消息"
+					>
+						{truncateText(reference.quote, 180)}
+					</button>
+					<button
+						className="chip-clear"
 						aria-label={`取消引用消息 ${reference.messageId}`}
 						onClick={() => onClear(reference.messageId)}
 						type="button"

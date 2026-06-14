@@ -1,21 +1,25 @@
 use serde::Deserialize;
-use tauri::{webview::NewWindowResponse, AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use std::path::{Path, PathBuf};
+use tauri::{
+    webview::NewWindowResponse, AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+};
 use url::Url;
 use uuid::Uuid;
 
 // CSP 策略：禁止脚本和网络连接，允许内联样式和本地资源
 const PREVIEW_CSP: &str = concat!(
-    "default-src 'self' data: blob:; ",
+    "default-src 'none'; ",
     "connect-src 'none'; ",
     "form-action 'none'; ",
     "object-src 'none'; ",
-    "base-uri 'self'; ",
+    "base-uri 'none'; ",
     "frame-ancestors 'none'; ",
-    "img-src data: blob: 'self'; ",
-    "media-src data: blob: 'self'; ",
-    "style-src 'unsafe-inline' 'self'; ",
-    "font-src data: 'self'; ",
-    "script-src 'none'"
+    "navigate-to 'none'; ",
+    "img-src data: blob:; ",
+    "media-src data: blob:; ",
+    "style-src 'unsafe-inline'; ",
+    "font-src data:; ",
+    "script-src 'none';"
 );
 
 #[derive(Debug, Clone, Deserialize)]
@@ -68,21 +72,80 @@ pub(crate) fn preview_navigation_allowed(url: &Url, initial_url: &Url) -> bool {
     url == initial_url || url.as_str() == "about:blank"
 }
 
-// 保留用于测试，即使在运行时未使用
-#[allow(dead_code)]
 pub(crate) const MAX_PREVIEW_HTML_BYTES: usize = 1024 * 1024;
+const PREVIEW_TEMP_PREFIX: &str = "html-preview-";
+const PREVIEW_TEMP_EXTENSION: &str = "html";
 
-// 保留用于测试和未来可能的 data URL 回退
-#[allow(dead_code)]
-pub(crate) fn build_preview_data_url(title: &str, html: &str) -> Result<Url, String> {
+pub(crate) fn validate_preview_input(title: &str, html: &str) -> Result<(), String> {
     if title.len().saturating_add(html.len()) > MAX_PREVIEW_HTML_BYTES {
         return Err(format!(
             "html preview content is too large; max {MAX_PREVIEW_HTML_BYTES} bytes"
         ));
     }
+    Ok(())
+}
 
+pub(crate) fn preview_document_checked(title: &str, html: &str) -> Result<String, String> {
+    validate_preview_input(title, html)?;
     // This renders Runtime/tool HTML as-is. It is containment, not sanitization.
-    let document = preview_document(title, html);
+    Ok(preview_document(title, html))
+}
+
+pub(crate) fn is_preview_temp_file(path: &Path) -> bool {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    path.extension().and_then(|ext| ext.to_str()) == Some(PREVIEW_TEMP_EXTENSION)
+        && file_name.starts_with(PREVIEW_TEMP_PREFIX)
+}
+
+fn remove_preview_temp_file(path: &Path) {
+    if !is_preview_temp_file(path) {
+        return;
+    }
+    if let Err(err) = std::fs::remove_file(path) {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            eprintln!("[preview] Failed to remove temp file {path:?}: {err}");
+        }
+    }
+}
+
+pub(crate) fn cleanup_preview_temp_files(temp_dir: &Path) -> Result<usize, String> {
+    let entries = match std::fs::read_dir(temp_dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(err) => return Err(format!("Failed to scan temp dir: {err}")),
+    };
+
+    let mut removed = 0;
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("Failed to read temp dir entry: {err}"))?;
+        let path = entry.path();
+        if !is_preview_temp_file(&path) {
+            continue;
+        }
+        match std::fs::remove_file(&path) {
+            Ok(()) => removed += 1,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                return Err(format!(
+                    "Failed to remove temp preview file {path:?}: {err}"
+                ))
+            }
+        }
+    }
+
+    Ok(removed)
+}
+
+pub(crate) fn preview_temp_path(temp_dir: &Path, label: &str) -> PathBuf {
+    temp_dir.join(format!("{label}.{PREVIEW_TEMP_EXTENSION}"))
+}
+
+// 保留用于测试和未来可能的 data URL 回退
+#[allow(dead_code)]
+pub(crate) fn build_preview_data_url(title: &str, html: &str) -> Result<Url, String> {
+    let document = preview_document_checked(title, html)?;
     let encoded_document = urlencoding::encode(&document);
     Url::parse(&format!("data:text/html;charset=utf-8,{encoded_document}"))
         .map_err(|err| format!("html preview URL build failed: {err}"))
@@ -92,6 +155,7 @@ pub(crate) fn build_preview_data_url(title: &str, html: &str) -> Result<Url, Str
 pub async fn open_html_preview(app: AppHandle, input: HtmlPreviewInput) -> Result<(), String> {
     use std::fs;
 
+    let document = preview_document_checked(&input.title, &input.html)?;
     let label = format!("html-preview-{}", Uuid::new_v4());
 
     // 写入临时 HTML 文件
@@ -99,14 +163,15 @@ pub async fn open_html_preview(app: AppHandle, input: HtmlPreviewInput) -> Resul
         .path()
         .temp_dir()
         .map_err(|e| format!("Failed to get temp dir: {}", e))?;
-    let html_file = temp_dir.join(format!("{}.html", label));
+    if let Err(err) = cleanup_preview_temp_files(&temp_dir) {
+        eprintln!("[preview] Failed to clean stale preview files: {err}");
+    }
+    let html_file = preview_temp_path(&temp_dir, &label);
 
-    let document = preview_document(&input.title, &input.html);
     fs::write(&html_file, document).map_err(|e| format!("Failed to write HTML file: {}", e))?;
 
-    // 转换为 file:// URL
-    let file_url = format!("file://{}", html_file.display());
-    let url = Url::parse(&file_url).map_err(|e| format!("Failed to parse file URL: {}", e))?;
+    let url = Url::from_file_path(&html_file)
+        .map_err(|_| format!("Failed to convert HTML preview path to file URL: {html_file:?}"))?;
     let initial_url = url.clone();
 
     // 尝试获取主窗口
@@ -118,7 +183,7 @@ pub async fn open_html_preview(app: AppHandle, input: HtmlPreviewInput) -> Resul
     eprintln!("[preview] Creating HTML preview window: {}", label);
     eprintln!("[preview] Title: {}", input.title);
     eprintln!("[preview] HTML size: {} bytes", input.html.len());
-    eprintln!("[preview] File URL: {}", file_url);
+    eprintln!("[preview] File URL: {}", url);
 
     let builder = WebviewWindowBuilder::new(&main_window, label, WebviewUrl::External(url))
         .title(input.title)
@@ -133,6 +198,15 @@ pub async fn open_html_preview(app: AppHandle, input: HtmlPreviewInput) -> Resul
     let window = builder
         .build()
         .map_err(|err| format!("html preview window open failed: {err}"))?;
+    let html_file_for_cleanup = html_file.clone();
+    window.on_window_event(move |event| {
+        if matches!(
+            event,
+            WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed
+        ) {
+            remove_preview_temp_file(&html_file_for_cleanup);
+        }
+    });
 
     eprintln!(
         "[preview] Window created successfully: {:?}",
@@ -193,6 +267,48 @@ mod tests {
     fn test_preview_document_includes_viewport() {
         let doc = preview_document("Test", "<p>test</p>");
         assert!(doc.contains("width=device-width, initial-scale=1"));
+    }
+
+    #[test]
+    fn test_preview_document_checked_rejects_oversized_input() {
+        let large_html = "x".repeat(MAX_PREVIEW_HTML_BYTES + 1);
+        let result = preview_document_checked("Test", &large_html);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("too large"));
+    }
+
+    #[test]
+    fn test_preview_temp_file_detection() {
+        assert!(is_preview_temp_file(std::path::Path::new(
+            "/tmp/html-preview-abc.html"
+        )));
+        assert!(!is_preview_temp_file(std::path::Path::new(
+            "/tmp/not-preview.html"
+        )));
+        assert!(!is_preview_temp_file(std::path::Path::new(
+            "/tmp/html-preview-abc.txt"
+        )));
+    }
+
+    #[test]
+    fn test_cleanup_preview_temp_files_only_removes_preview_html() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "undefined-chat-preview-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let preview_file = temp_dir.join("html-preview-old.html");
+        let other_file = temp_dir.join("html-preview-old.txt");
+        std::fs::write(&preview_file, "preview").unwrap();
+        std::fs::write(&other_file, "other").unwrap();
+
+        let removed = cleanup_preview_temp_files(&temp_dir).unwrap();
+
+        assert_eq!(removed, 1);
+        assert!(!preview_file.exists());
+        assert!(other_file.exists());
+        std::fs::remove_file(other_file).unwrap();
+        std::fs::remove_dir(temp_dir).unwrap();
     }
 
     #[test]

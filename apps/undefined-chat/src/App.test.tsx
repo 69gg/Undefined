@@ -1,5 +1,11 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { render, screen, waitFor } from "@testing-library/react";
+import {
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+	within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
@@ -192,6 +198,118 @@ describe("App", () => {
 
 		expect(client.createConversation).toHaveBeenCalledOnce();
 		expect(await screen.findByRole("button", { name: /新会话/ })).toBeTruthy();
+	});
+
+	test("opens and closes the mobile conversation drawer with accessible state", async () => {
+		const originalInnerWidth = window.innerWidth;
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			value: 390,
+		});
+		window.dispatchEvent(new Event("resize"));
+		const client = runtimeClientStub();
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+
+		render(<App />);
+		await screen.findByRole("navigation", { name: "会话" });
+		const menuButton = screen.getByRole("button", { name: "打开会话列表" });
+		expect(menuButton).toHaveAttribute("aria-expanded", "false");
+
+		await userEvent.click(menuButton);
+
+		expect(menuButton).toHaveAttribute("aria-expanded", "true");
+		expect(screen.getByRole("navigation", { name: "会话" })).toHaveClass(
+			"active",
+		);
+
+		fireEvent.keyDown(window, { key: "Escape" });
+
+		await waitFor(() => {
+			expect(menuButton).toHaveAttribute("aria-expanded", "false");
+		});
+
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			value: originalInnerWidth,
+		});
+		window.dispatchEvent(new Event("resize"));
+	});
+
+	test("registers desktop shortcuts for new chat and command mode", async () => {
+		const client = runtimeClientStub();
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+
+		render(<App />);
+		await screen.findByRole("navigation", { name: "会话" });
+
+		fireEvent.keyDown(window, { key: "n", ctrlKey: true });
+		expect(client.createConversation).toHaveBeenCalledOnce();
+
+		fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+		const editor = await screen.findByDisplayValue("/");
+		await waitFor(() => {
+			expect(editor).toHaveFocus();
+		});
+	});
+
+	test("jumps from a reference chip to the loaded source message", async () => {
+		const scrollIntoView = vi.fn();
+		const originalScrollIntoView = Element.prototype.scrollIntoView;
+		Element.prototype.scrollIntoView = scrollIntoView;
+		const client = runtimeClientStub({
+			getHistory: vi.fn(async () => ({
+				conversationId: "default",
+				virtualUserId: "webchat",
+				permission: "superadmin",
+				count: 2,
+				items: [
+					historyItem({
+						messageId: "source-msg",
+						role: "bot",
+						content: "源消息内容",
+					}),
+					historyItem({
+						messageId: "reply-msg",
+						role: "bot",
+						content: "回复消息",
+						references: [
+							{
+								messageId: "source-msg",
+								quote: "源消息内容",
+							},
+						],
+					}),
+				],
+				limit: 50,
+				before: null,
+				hasMore: false,
+				nextBefore: null,
+				total: 2,
+			})),
+		});
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+
+		render(<App />);
+		await screen.findByText("回复消息");
+		const sourceMessage = document.querySelector(
+			'[data-message-id="source-msg"]',
+		);
+		expect(sourceMessage).toBeTruthy();
+		await userEvent.click(
+			within(sourceMessage as HTMLElement).getByRole("button", {
+				name: "引用",
+			}),
+		);
+		await userEvent.click(screen.getByRole("button", { name: "源消息内容" }));
+
+		expect(scrollIntoView).toHaveBeenCalledWith({
+			block: "center",
+			behavior: "smooth",
+		});
+		expect(
+			document.querySelector('[data-message-id="source-msg"]'),
+		).toHaveClass("message-jump-highlight");
+		Element.prototype.scrollIntoView = originalScrollIntoView;
 	});
 
 	test("uses the native file picker when adding attachments", async () => {

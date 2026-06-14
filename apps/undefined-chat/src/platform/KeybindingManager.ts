@@ -65,17 +65,15 @@ export class KeybindingManager {
 	 * 处理键盘按下事件
 	 */
 	private handleKeyDown(event: KeyboardEvent): void {
-		// 忽略输入框内的快捷键（除了 Escape）
-		if (
-			event.key !== "Escape" &&
-			(event.target instanceof HTMLInputElement ||
-				event.target instanceof HTMLTextAreaElement)
-		) {
+		const key = this.normalizeKey(event);
+		const handler = this.bindings.get(key);
+		const isTextInput =
+			event.target instanceof HTMLInputElement ||
+			event.target instanceof HTMLTextAreaElement;
+		if (isTextInput && key !== "Escape" && !handler) {
 			return;
 		}
 
-		const key = this.normalizeKey(event);
-		const handler = this.bindings.get(key);
 		if (handler) {
 			event.preventDefault();
 			event.stopPropagation();

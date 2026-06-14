@@ -35,6 +35,7 @@ export type ChatStore = {
 	selectConversation: (conversationId: string) => Promise<void>;
 	updateDraft: (conversationId: string, draft: string) => void;
 	sendSelectedMessage: () => Promise<void>;
+	cancelJob: (jobId: string) => Promise<void>;
 	addAttachmentPath: (
 		conversationId: string,
 		filePath: string,
@@ -847,6 +848,16 @@ export function createChatStore({
 		dispatch({ type: "draft/set", conversationId, draft });
 	}
 
+	function latestEventSeq(jobId: string): number {
+		const cursor = state.eventCursorByJob[jobId] ?? 0;
+		const events = state.eventsByJob[jobId] ?? [];
+		const lastEventSeq = events.reduce(
+			(maxSeq, item) => Math.max(maxSeq, item.seq),
+			0,
+		);
+		return Math.max(cursor, lastEventSeq);
+	}
+
 	async function sendSelectedMessage(): Promise<void> {
 		const conversationId = selectedConversation(state);
 		if (!conversationId) {
@@ -931,6 +942,26 @@ export function createChatStore({
 			dispatch({ type: "draft/set", conversationId, draft: text });
 			dispatch({ type: "attachments/set", conversationId, attachments });
 			dispatch({ type: "references/set", conversationId, references });
+			dispatch({ type: "send/error", error: errorMessage(err) });
+		}
+	}
+
+	async function cancelJob(jobId: string): Promise<void> {
+		const conversationId = state.jobConversationById[jobId];
+		try {
+			const cancelled = await client.cancelJob(jobId);
+			dispatch({ type: "job/upsert", job: cancelled });
+			applyRuntimeEvents(jobId, [
+				{
+					seq: Math.max(latestEventSeq(jobId), cancelled.lastSeq) + 1,
+					event: "cancelled",
+					payload: {
+						job_id: jobId,
+						conversation_id: cancelled.conversationId || conversationId,
+					},
+				},
+			]);
+		} catch (err) {
 			dispatch({ type: "send/error", error: errorMessage(err) });
 		}
 	}
@@ -1259,14 +1290,7 @@ export function createChatStore({
 			return;
 		}
 
-		dispatch({
-			type: "history/set",
-			conversationId,
-			items: historyState.items,
-			hasMore: historyState.hasMore,
-			nextBefore: historyState.nextBefore,
-			total: historyState.total,
-		});
+		dispatch({ type: "history/loading", conversationId });
 
 		try {
 			const response = await client.getHistoryPage(
@@ -1275,7 +1299,7 @@ export function createChatStore({
 				HISTORY_LIMIT,
 			);
 
-			const newItems = [...response.items.reverse(), ...historyState.items];
+			const newItems = [...response.items, ...historyState.items];
 
 			dispatch({
 				type: "history/set",
@@ -1286,7 +1310,11 @@ export function createChatStore({
 				total: response.total,
 			});
 		} catch (error) {
-			console.error("Failed to load more history:", error);
+			dispatch({
+				type: "history/error",
+				conversationId,
+				error: errorMessage(error),
+			});
 		}
 	}
 
@@ -1298,6 +1326,7 @@ export function createChatStore({
 		selectConversation,
 		updateDraft,
 		sendSelectedMessage,
+		cancelJob,
 		addAttachmentPath,
 		addReference,
 		addReferenceFromMessageId,

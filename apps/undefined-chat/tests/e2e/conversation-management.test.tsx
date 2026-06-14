@@ -263,19 +263,21 @@ describe("E2E: Conversation Management", () => {
 
 		render(<App />);
 
-		await screen.findByRole("navigation", { name: "会话" });
+		const nav = await screen.findByRole("navigation", { name: "会话" });
 
 		// 打开移动端菜单
-		const menuBtn = screen.getByRole("button", { name: "展开菜单" });
+		const menuBtn = screen.getByRole("button", { name: "打开会话列表" });
 		await userEvent.click(menuBtn);
+		expect(nav.classList.contains("active")).toBe(true);
 
 		// 选择会话二
 		await userEvent.click(screen.getByRole("button", { name: /会话二/ }));
 
-		// 侧边栏应该自动关闭（通过检查 overlay 不再 active）
+		// 侧边栏应该自动关闭（overlay 和侧栏本体都不再 active）
 		const overlay = document.querySelector(".sidebar-overlay");
 		await waitFor(() => {
 			expect(overlay?.classList.contains("active")).toBe(false);
+			expect(nav.classList.contains("active")).toBe(false);
 		});
 
 		// 恢复窗口宽度

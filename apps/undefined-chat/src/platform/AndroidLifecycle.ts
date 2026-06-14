@@ -1,3 +1,4 @@
+import { TauriEvent } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ChatStore } from "../chat-store/store";
 
@@ -12,7 +13,7 @@ export function setupAndroidLifecycle(store: ChatStore): () => void {
 
 	// 监听应用暂停事件
 	appWindow
-		.listen<string>("android-pause", () => {
+		.listen<string>(TauriEvent.WINDOW_SUSPENDED, () => {
 			console.log("[Lifecycle] App paused");
 			// 可以在这里保存状态或清理资源
 		})
@@ -25,7 +26,7 @@ export function setupAndroidLifecycle(store: ChatStore): () => void {
 
 	// 监听应用恢复事件
 	appWindow
-		.listen<string>("android-resume", async () => {
+		.listen<string>(TauriEvent.WINDOW_RESUMED, async () => {
 			console.log("[Lifecycle] App resumed, re-bootstrapping...");
 
 			try {

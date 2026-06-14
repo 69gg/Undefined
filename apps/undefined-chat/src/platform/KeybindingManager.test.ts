@@ -106,12 +106,31 @@ describe("KeybindingManager", () => {
 			expect(comboHandler).toHaveBeenCalledTimes(1);
 		});
 
-		it("应该忽略输入框内的快捷键（除了 Escape）", () => {
+		it("应该在输入框内触发已注册的组合快捷键", () => {
 			const input = document.createElement("input");
 			document.body.appendChild(input);
 
 			const event = new KeyboardEvent("keydown", {
 				key: "n",
+				ctrlKey: true,
+				bubbles: true,
+			});
+			Object.defineProperty(event, "target", {
+				value: input,
+				writable: false,
+			});
+			window.dispatchEvent(event);
+			expect(handler).toHaveBeenCalledOnce();
+
+			document.body.removeChild(input);
+		});
+
+		it("应该忽略输入框内未注册的组合快捷键", () => {
+			const input = document.createElement("input");
+			document.body.appendChild(input);
+
+			const event = new KeyboardEvent("keydown", {
+				key: "m",
 				ctrlKey: true,
 				bubbles: true,
 			});

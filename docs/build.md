@@ -386,12 +386,12 @@ uv build
 ```bash
 cd apps/undefined-console
 npm install
-npm run check  # 代码检查（lint + typecheck + cargo check）
+npm run check  # 代码检查与测试（lint/typecheck/test/cargo fmt/check/test，具体以 package.json 为准）
 # 注意：npm run tauri:build 会自动执行 npm run build，无需手动构建前端
 
 cd ../undefined-chat
 npm install
-npm run check
+npm run check  # Biome、TypeScript、unit/jsdom integration tests、cargo fmt/check/test
 ```
 
 如果本次改动涉及 Android 构建链：

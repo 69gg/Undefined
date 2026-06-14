@@ -1,7 +1,33 @@
 import { describe, expect, it, vi } from "vitest";
-import { isAndroid } from "./AndroidLifecycle";
+import { isAndroid, setupAndroidLifecycle } from "./AndroidLifecycle";
+
+const listeners = new Map<string, () => void | Promise<void>>();
+const unlisten = vi.fn();
+
+vi.mock("@tauri-apps/api/window", () => ({
+	getCurrentWindow: () => ({
+		listen: vi.fn(
+			async (event: string, callback: () => void | Promise<void>) => {
+				listeners.set(event, callback);
+				return unlisten;
+			},
+		),
+	}),
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+	TauriEvent: {
+		WINDOW_RESUMED: "tauri://resumed",
+		WINDOW_SUSPENDED: "tauri://suspended",
+	},
+}));
 
 describe("AndroidLifecycle", () => {
+	beforeEach(() => {
+		listeners.clear();
+		unlisten.mockClear();
+	});
+
 	describe("isAndroid", () => {
 		it("detects Android platform from user agent", () => {
 			const originalUserAgent = navigator.userAgent;
@@ -43,20 +69,28 @@ describe("AndroidLifecycle", () => {
 	});
 
 	describe("setupAndroidLifecycle", () => {
-		it("returns cleanup function", () => {
-			// Mock store with minimal required interface
+		it("re-bootstraps on android resume and cleans listeners", async () => {
 			const mockStore = {
-				bootstrap: vi.fn(),
+				bootstrap: vi.fn(async () => undefined),
 				getSnapshot: vi.fn(() => ({
 					activeJobsByConversation: {},
 					eventCursorByJob: {},
 				})),
 			};
 
-			// Note: Full testing requires Tauri environment
-			// This test verifies the store interface contract
-			expect(mockStore.bootstrap).toBeDefined();
-			expect(mockStore.getSnapshot).toBeDefined();
+			const cleanup = setupAndroidLifecycle(
+				mockStore as unknown as Parameters<typeof setupAndroidLifecycle>[0],
+			);
+			await vi.waitFor(() => {
+				expect(listeners.has("tauri://suspended")).toBe(true);
+				expect(listeners.has("tauri://resumed")).toBe(true);
+			});
+
+			await listeners.get("tauri://resumed")?.();
+
+			expect(mockStore.bootstrap).toHaveBeenCalledOnce();
+			cleanup();
+			expect(unlisten).toHaveBeenCalledTimes(2);
 		});
 	});
 });

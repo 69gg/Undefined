@@ -28,8 +28,12 @@ export type MessageTimelineProps = {
 	historyLoading?: boolean;
 	/** 历史加载失败的错误信息（单会话级，非全局致命） */
 	historyError?: string | null;
+	/** 当前会话是否还有更早的历史可加载 */
+	hasMoreHistory?: boolean;
 	/** 重试加载当前会话历史 */
 	onRetryHistory?: () => void;
+	/** 加载更早历史；提供时渲染所有已加载消息，避免旧页被窗口化裁掉 */
+	onLoadMoreHistory?: () => Promise<void> | void;
 	items: HistoryItem[];
 	onPreviewHtml: (input: HtmlPreviewRequest) => void;
 	onPreviewAttachment: (attachment: Attachment) => void;
@@ -37,9 +41,11 @@ export type MessageTimelineProps = {
 	onShortcutClick?: (prompt: string) => void;
 	onAddReference?: (messageId: string) => void;
 	onOpenImage?: (src: string, alt: string) => void;
+	onCancelJob?: (jobId: string) => void;
 };
 
 const WINDOW_SIZE = 64;
+const PAGED_WINDOW_SIZE = 240;
 
 type HistoryToolCall = {
 	id?: string;
@@ -139,7 +145,9 @@ export function MessageTimeline({
 	activeJob,
 	historyLoading,
 	historyError,
+	hasMoreHistory = false,
 	onRetryHistory,
+	onLoadMoreHistory,
 	items,
 	onPreviewAttachment,
 	onPreviewHtml,
@@ -147,8 +155,11 @@ export function MessageTimeline({
 	onShortcutClick,
 	onAddReference,
 	onOpenImage,
+	onCancelJob,
 }: MessageTimelineProps) {
-	const visibleItems = items.slice(-WINDOW_SIZE);
+	const visibleItems = items.slice(
+		-(onLoadMoreHistory ? PAGED_WINDOW_SIZE : WINDOW_SIZE),
+	);
 	const timelineRef = useRef<HTMLDivElement>(null);
 	// 是否贴附底部：用户向上滚动查看历史时暂停自动滚动（智能暂停）
 	const stickToBottomRef = useRef(true);
@@ -156,8 +167,31 @@ export function MessageTimeline({
 	const isProgrammaticScrollRef = useRef(false);
 	// 历史加载状态：用于检测"加载完成"时刻（true → false）触发滚底
 	const prevHistoryLoadingRef = useRef(false);
+	const loadingMoreRef = useRef(false);
 
 	const isCurrentlyThinking = isJobRunning(activeJob);
+
+	async function loadMoreHistory(): Promise<void> {
+		if (!hasMoreHistory || historyLoading || !onLoadMoreHistory) {
+			return;
+		}
+		const el = timelineRef.current;
+		const previousScrollHeight = el?.scrollHeight ?? 0;
+		const previousScrollTop = el?.scrollTop ?? 0;
+		loadingMoreRef.current = true;
+		try {
+			await onLoadMoreHistory();
+		} finally {
+			requestAnimationFrame(() => {
+				const nextEl = timelineRef.current;
+				if (nextEl) {
+					nextEl.scrollTop =
+						nextEl.scrollHeight - previousScrollHeight + previousScrollTop;
+				}
+				loadingMoreRef.current = false;
+			});
+		}
+	}
 
 	function scrollToBottom(): void {
 		const el = timelineRef.current;
@@ -175,6 +209,14 @@ export function MessageTimeline({
 		if (!el) return;
 		stickToBottomRef.current =
 			el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+		if (
+			el.scrollTop < 72 &&
+			hasMoreHistory &&
+			!historyLoading &&
+			!loadingMoreRef.current
+		) {
+			void loadMoreHistory();
+		}
 	}
 
 	// 流式滚动：新工具调用/文本变化时滚底（发送后也由此滚底，无需单独"发送滚顶"）
@@ -225,6 +267,9 @@ export function MessageTimeline({
 		const current = Boolean(historyLoading);
 		prevHistoryLoadingRef.current = current;
 		if (prev && !current && visibleItems.length > 0) {
+			if (loadingMoreRef.current) {
+				return;
+			}
 			// 历史加载完成：滚底 + 恢复跟随
 			stickToBottomRef.current = true;
 			const raf = requestAnimationFrame(scrollToBottom);
@@ -410,6 +455,21 @@ export function MessageTimeline({
 					</div>
 				) : null}
 
+				{visibleItems.length > 0 && (hasMoreHistory || historyLoading) ? (
+					<div className="timeline-load-more">
+						<button
+							className="ghost-button"
+							disabled={!hasMoreHistory || Boolean(historyLoading)}
+							onClick={() => {
+								void loadMoreHistory();
+							}}
+							type="button"
+						>
+							{historyLoading ? "正在加载更早消息…" : "加载更早消息"}
+						</button>
+					</div>
+				) : null}
+
 				{visibleItems.map((item) => {
 					const isBot = item.role === "bot";
 					const durationMs = item.webchat?.durationMs ?? null;
@@ -529,6 +589,15 @@ export function MessageTimeline({
 								startedAt={activeJob.currentStageStartedAt ?? null}
 								finalState={activeJob.status === "done"}
 							/>
+							{onCancelJob ? (
+								<button
+									className="runtime-chat-quote-btn is-visible"
+									onClick={() => onCancelJob(activeJob.jobId)}
+									type="button"
+								>
+									取消
+								</button>
+							) : null}
 							{onAddReference ? (
 								<MessageQuoteButton
 									messageId={activeJob.jobId}

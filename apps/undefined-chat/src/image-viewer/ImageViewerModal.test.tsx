@@ -138,4 +138,43 @@ describe("ImageViewerModal", () => {
 		expect(dialog).toHaveAttribute("aria-modal", "true");
 		expect(dialog).toHaveAttribute("aria-label", "图片查看器");
 	});
+
+	it("支持缩放、旋转和重置", async () => {
+		const user = userEvent.setup();
+		render(
+			<ImageViewerModal
+				imageViewer={{
+					open: true,
+					src: "https://example.com/image.jpg",
+					alt: "测试图片",
+				}}
+				onClose={vi.fn()}
+			/>,
+		);
+
+		const img = screen.getByRole("img");
+		await user.click(screen.getByRole("button", { name: "放大" }));
+		expect(img).toHaveStyle({ transform: "scale(1.25) rotate(0deg)" });
+
+		await user.click(screen.getByRole("button", { name: "旋转" }));
+		expect(img).toHaveStyle({ transform: "scale(1.25) rotate(90deg)" });
+
+		await user.click(screen.getByRole("button", { name: "重置" }));
+		expect(img).toHaveStyle({ transform: "scale(1) rotate(0deg)" });
+	});
+
+	it("渲染可滚动查看区域以支持放大后查看图片边缘", () => {
+		render(
+			<ImageViewerModal
+				imageViewer={{
+					open: true,
+					src: "https://example.com/image.jpg",
+					alt: "测试图片",
+				}}
+				onClose={vi.fn()}
+			/>,
+		);
+
+		expect(document.querySelector(".runtime-image-viewer-stage")).toBeTruthy();
+	});
 });

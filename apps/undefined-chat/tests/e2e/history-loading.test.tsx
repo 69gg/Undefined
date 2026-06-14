@@ -117,9 +117,7 @@ describe("E2E: History Loading", () => {
 
 	test("支持分页加载更多历史", async () => {
 		const client = runtimeClientStub({
-			getHistory: vi
-				.fn()
-				.mockResolvedValueOnce({
+			getHistory: vi.fn(async () => ({
 					conversationId: "default",
 					virtualUserId: "webchat",
 					permission: "superadmin",
@@ -133,8 +131,8 @@ describe("E2E: History Loading", () => {
 					hasMore: true,
 					nextBefore: 1000,
 					total: 4,
-				})
-				.mockResolvedValueOnce({
+			})),
+			getHistoryPage: vi.fn(async () => ({
 					conversationId: "default",
 					virtualUserId: "webchat",
 					permission: "superadmin",
@@ -147,8 +145,9 @@ describe("E2E: History Loading", () => {
 					before: 1000,
 					hasMore: false,
 					nextBefore: null,
+					cursor: null,
 					total: 4,
-				}),
+			})),
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
@@ -158,13 +157,15 @@ describe("E2E: History Loading", () => {
 		await screen.findByText("消息3");
 		expect(screen.getByText("消息4")).toBeInTheDocument();
 
-		// 注意：当前实现可能没有"加载更多"按钮，跳过该测试或标记为待实现
-		// 直接验证第二次调用不会自动触发
 		expect(client.getHistory).toHaveBeenCalledTimes(1);
 
-		// TODO: 实现加载更多功能后启用此部分
-		// expect(await screen.findByText("消息1")).toBeInTheDocument();
-		// expect(screen.getByText("消息2")).toBeInTheDocument();
+		await userEvent.click(
+			screen.getByRole("button", { name: "加载更早消息" }),
+		);
+
+		expect(await screen.findByText("消息1")).toBeInTheDocument();
+		expect(screen.getByText("消息2")).toBeInTheDocument();
+		expect(client.getHistoryPage).toHaveBeenCalledWith("default", 1000, 50);
 	});
 
 	test("没有更多历史时隐藏加载按钮", async () => {

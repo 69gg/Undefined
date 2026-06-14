@@ -94,6 +94,30 @@ describe("ReferenceChips", () => {
 		expect(onClear).toHaveBeenCalledWith("msg-1");
 	});
 
+	it("点击引用主体时调用 onJump", async () => {
+		const user = userEvent.setup();
+		const onJump = vi.fn();
+		const references: MessageReference[] = [
+			{
+				messageId: "msg-1",
+				quote: "测试引用",
+			},
+		];
+
+		render(
+			<ReferenceChips
+				references={references}
+				onClear={vi.fn()}
+				onJump={onJump}
+			/>,
+		);
+
+		await user.click(screen.getByRole("button", { name: "测试引用" }));
+
+		expect(onJump).toHaveBeenCalledOnce();
+		expect(onJump).toHaveBeenCalledWith("msg-1");
+	});
+
 	it("每个引用芯片有正确的清除按钮", async () => {
 		const user = userEvent.setup();
 		const onClear = vi.fn();

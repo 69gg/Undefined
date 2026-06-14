@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ImageViewerState } from "../chat-store/types";
 
 export type ImageViewerModalProps = {
@@ -11,6 +11,15 @@ export function ImageViewerModal({
 	onClose,
 }: ImageViewerModalProps) {
 	const previousActiveElementRef = useRef<HTMLElement | null>(null);
+	const [zoom, setZoom] = useState(1);
+	const [rotation, setRotation] = useState(0);
+
+	useEffect(() => {
+		if (imageViewer?.open) {
+			setZoom(1);
+			setRotation(0);
+		}
+	}, [imageViewer?.open]);
 
 	// 焦点管理：打开时保存，关闭时恢复
 	useEffect(() => {
@@ -66,18 +75,65 @@ export function ImageViewerModal({
 			aria-modal="true"
 			aria-label="图片查看器"
 		>
-			<figure
-				className="runtime-image-viewer-figure"
+			<div
+				className="runtime-image-viewer-stage"
 				onClick={(e) => e.stopPropagation()}
 				onKeyDown={(e) => e.stopPropagation()}
 			>
-				<img src={imageViewer.src} alt={imageViewer.alt} />
-				{imageViewer.alt ? (
-					<figcaption className="runtime-image-viewer-caption">
-						{imageViewer.alt}
-					</figcaption>
-				) : null}
-			</figure>
+				<figure className="runtime-image-viewer-figure">
+					<img
+						src={imageViewer.src}
+						alt={imageViewer.alt}
+						style={{ transform: `scale(${zoom}) rotate(${rotation}deg)` }}
+					/>
+					{imageViewer.alt ? (
+						<figcaption className="runtime-image-viewer-caption">
+							{imageViewer.alt}
+						</figcaption>
+					) : null}
+				</figure>
+			</div>
+			<div
+				className="runtime-image-viewer-toolbar"
+				onClick={(e) => e.stopPropagation()}
+				onKeyDown={(e) => e.stopPropagation()}
+			>
+				<button
+					onClick={() => setZoom((value) => Math.max(0.25, value - 0.25))}
+					type="button"
+					aria-label="缩小"
+					title="缩小"
+				>
+					-
+				</button>
+				<button
+					onClick={() => setZoom((value) => Math.min(4, value + 0.25))}
+					type="button"
+					aria-label="放大"
+					title="放大"
+				>
+					+
+				</button>
+				<button
+					onClick={() => setRotation((value) => (value + 90) % 360)}
+					type="button"
+					aria-label="旋转"
+					title="旋转"
+				>
+					R
+				</button>
+				<button
+					onClick={() => {
+						setZoom(1);
+						setRotation(0);
+					}}
+					type="button"
+					aria-label="重置"
+					title="重置"
+				>
+					1:1
+				</button>
+			</div>
 			<button
 				className="image-viewer-close-button"
 				onClick={(e) => {

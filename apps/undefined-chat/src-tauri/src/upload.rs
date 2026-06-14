@@ -5,7 +5,8 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
+use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
 use tauri_plugin_http::reqwest::{multipart, Body, Client};
 use tokio::fs::File;
 use tokio_util::io::ReaderStream;
@@ -42,21 +43,44 @@ pub(crate) fn attachment_file_name(path: &Path) -> String {
         .to_string()
 }
 
+pub(crate) fn attachment_file_name_from_input(app: &AppHandle, input: &str) -> String {
+    app.path()
+        .file_name(input)
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| attachment_file_name(Path::new(input)))
+}
+
+pub(crate) fn parse_file_path(input: &str) -> Result<FilePath, String> {
+    input
+        .parse::<FilePath>()
+        .map_err(|err| format!("attachment path parse failed: {err}"))
+}
+
+pub(crate) fn requires_regular_file_check(path: &FilePath) -> bool {
+    path.clone().into_path().is_ok()
+}
+
 pub(crate) async fn open_regular_attachment_file(
-    path: &Path,
+    app: &AppHandle,
+    file_path: FilePath,
     display_path: &str,
-) -> Result<File, String> {
-    let file = File::open(path)
-        .await
+) -> Result<std::fs::File, String> {
+    let mut open_options = OpenOptions::new();
+    open_options.read(true);
+    let should_check_regular_file = requires_regular_file_check(&file_path);
+    let file = app
+        .fs()
+        .open(file_path, open_options)
         .map_err(|err| format!("attachment file open failed: {err}"))?;
-    let metadata = file
-        .metadata()
-        .await
-        .map_err(|err| format!("attachment file metadata failed: {err}"))?;
-    if !metadata.is_file() {
-        return Err(format!(
-            "attachment path is not a regular file: {display_path}"
-        ));
+    if should_check_regular_file {
+        let metadata = file
+            .metadata()
+            .map_err(|err| format!("attachment file metadata failed: {err}"))?;
+        if !metadata.is_file() {
+            return Err(format!(
+                "attachment path is not a regular file: {display_path}"
+            ));
+        }
     }
 
     Ok(file)
@@ -71,11 +95,12 @@ pub async fn upload_attachment_streaming(
     let config = require_runtime_config(&app, &state).await?;
     let api_key = require_api_key(&app).await?;
     let url = attachments_url(&config.runtime_url)?;
-    let path = Path::new(&input.file_path);
-    let file = open_regular_attachment_file(path, &input.file_path).await?;
+    let file_path = parse_file_path(&input.file_path)?;
+    let file = open_regular_attachment_file(&app, file_path, &input.file_path).await?;
+    let file = File::from_std(file);
     let stream = ReaderStream::with_capacity(file, 256 * 1024);
-    let part =
-        multipart::Part::stream(Body::wrap_stream(stream)).file_name(attachment_file_name(path));
+    let part = multipart::Part::stream(Body::wrap_stream(stream))
+        .file_name(attachment_file_name_from_input(&app, &input.file_path));
     let form = multipart::Form::new().part("file", part);
 
     let response = Client::new()

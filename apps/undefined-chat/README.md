@@ -1,53 +1,36 @@
 # Undefined Chat
 
-Undefined Chat 是独立原生优先 WebChat 客户端，位于 `apps/undefined-chat/`。它直接连接 Runtime API；会话、历史、任务、附件和事件都以 Runtime 为真源，本地只保存连接配置、API Key 状态、草稿和 UI 游标。
+Undefined Chat 是 `apps/undefined-chat/` 下的 Tauri v2 + React 19 原生聊天客户端。它直接连接 Runtime API；会话、历史、任务、附件和事件以 Runtime 为真源，本地只保存连接配置、API Key 状态、草稿和 UI 游标。
 
 完整产品说明见 [docs/undefined-chat.md](../../docs/undefined-chat.md)。
 
-## ✨ 功能特性
+## 当前能力
 
-Undefined Chat 基于莫兰迪橙色系（Morandi Orange）设计，与 WebUI 保持视觉一致性，100% 移植 WebUI webchat 的所有核心功能，并针对原生平台进行优化。
+- 会话管理：创建、删除、重命名、切换会话。当前没有置顶字段/API。
+- 消息历史：初始加载、cursor-based 加载更早消息、滚动锚点保持和长历史窗口化渲染。
+- 消息渲染：Markdown、表格、任务列表、引用块、代码高亮、代码块复制/HTML 预览。
+- 附件：系统文件选择器、上传状态队列、Tauri 流式上传、下载和预览。当前显示上传中/成功/失败状态，不显示百分比进度。
+- 图片：正文 `<attachment uid/>` 内联图、附件缩略图、blob 缓存、全屏查看、缩放、旋转和可滚动查看区域。
+- 命令：斜杠命令、子命令提示、方向键导航、Tab/Enter 补全。
+- 引用：引用 bot 消息、发送引用、引用芯片跳转当前已加载源消息；源消息不在当前页时会尝试加载更早历史。
+- 事件：SSE 优先，断开时 JSON fallback。
+- 快捷键：Ctrl/Cmd+N 新会话，Ctrl/Cmd+K 聚焦输入并打开命令模式，Ctrl/Cmd+/ 切换侧栏，Ctrl/Cmd+, 打开设置，Escape 关闭当前弹层/抽屉。
 
-### P0 核心功能
+## 平台状态
 
-- ✅ **会话管理**：创建、删除、切换、置顶会话
-- ✅ **消息历史分页**：cursor-based 无限滚动加载
-- ✅ **Markdown 完整渲染**：表格、引用、列表、任务列表
-- ✅ **代码高亮**：highlight.js 支持多语言语法高亮
-- ✅ **图片内联展示**：< 12MB 自动内联，> 12MB 预览链接
-- ✅ **附件上传/下载**：队列管理、进度显示、流式传输
-- ✅ **工具调用块**：层级展示、折叠/展开、执行结果
-- ✅ **事件流**：SSE 优先 + JSON polling fallback
+桌面端：
 
-### P1 重要功能
+- HTML 预览使用独立窗口、临时 file URL、严格 CSP、导航守卫和临时文件清理。
+- API Key 优先保存在系统凭据管理器/Stronghold。Linux 依赖 Secret Service；不可用时必须显式确认不安全文件降级。
+- Tauri fs/http 插件仅由 Rust commands 内部使用；前端 JS 没有直接读取本地文件或发起带密钥请求的权限。
 
-- ✅ **命令面板**：斜杠命令自动补全、参数提示
-- ✅ **消息引用/回复**：引用芯片、跳转源消息
-- ✅ **图片查看器**：全屏查看、缩放、旋转
-- ✅ **HTML 预览**：桌面独立窗口 / Android Activity 隔离
-- ✅ **代码块折叠**：> 8 行自动折叠，可展开/复制
-- ✅ **自动滚动控制**：用户上滑时暂停，下滑恢复
-- ✅ **国际化**：中英文界面切换
+Android：
 
-### 原生平台特性
+- 文件选择器返回的 `content://` URI 通过 Tauri fs plugin 打开，上传链路仍需要真机/模拟器 smoke 覆盖。
+- 生命周期监听使用 Tauri `tauri://suspended` / `tauri://resumed` 事件；恢复前台时重新 bootstrap 并恢复 Runtime 订阅。逐 job 主动补齐仍依赖 store 的 SSE 断线 fallback 行为。
+- Android/iOS 当前不支持系统 keyring，保存 API Key 需要用户显式接受不安全存储降级，或后续接入平台安全存储。
 
-- 🔐 **安全存储**：API Key 保存在系统凭据管理器（macOS Keychain / Windows Credential Manager / Linux Secret Service）
-- ⌨️ **桌面快捷键**：Ctrl/Cmd+K 命令面板、Ctrl/Cmd+N 新会话、Ctrl/Cmd+Enter 发送
-- 📱 **Android 生命周期**：后台恢复、连接配置页、原生 Activity
-- 🪟 **独立窗口**：HTML 预览使用隔离窗口，严格 CSP 防护
-
-## 核心路径
-
-- Tauri v2 + React app scaffold。
-- Runtime health 与受保护 Runtime 请求通过 Tauri commands 发起。
-- API Key 使用 Stronghold/keyring 保存，Linux keyring 不可用时需要显式确认降级。
-- Runtime job events 以 SSE 优先，必要时回退到 JSON polling。
-- 附件通过系统文件选择器进入上传队列，并从 Tauri 文件句柄流式转发。
-- HTML preview 使用隔离页面/窗口和严格 CSP；桌面端打开独立窗口，移动端打开独立页面/窗口 surface。
-
-## 🚀 快速开始
-
-在 `apps/undefined-chat` 下运行：
+## 快速开始
 
 ```bash
 npm install
@@ -55,42 +38,9 @@ npm run check
 npm run tauri:dev
 ```
 
-### Runtime 要求
+`npm run check` 当前包含 Biome、TypeScript、unit/jsdom integration tests、cargo fmt、cargo check 和 cargo test。
 
-默认连接 `http://127.0.0.1:8788`。Runtime API 必须启用，并接受 `X-Undefined-API-Key`。React 不直接持有 API Key；受保护路径由 Tauri 命令注入鉴权头。
-
-### 依赖项
-
-- **Tauri v2**：跨平台原生应用框架
-- **React 18**：UI 框架
-- **TypeScript**：类型安全
-- **Vite**：构建工具
-- **highlight.js**：代码高亮
-- **DOMPurify**：HTML 净化
-- **marked**：Markdown 解析
-- **Rust**：Tauri 后端（需要 rustc 1.75+）
-
-## 📱 平台支持
-
-### 桌面端（Windows / macOS / Linux）
-
-- ⌨️ 完整快捷键支持（Ctrl/Cmd+K、Ctrl/Cmd+N、Ctrl/Cmd+Enter 等）
-- 🪟 HTML 预览使用独立窗口，严格 CSP 隔离
-- 🔐 系统凭据管理器安全存储 API Key
-- 📋 系统剪贴板集成
-
-### Android
-
-- 📱 原生 Activity 体验
-- 🔌 连接配置页，支持 LAN 连接
-- 🔄 后台生命周期恢复（恢复前台后自动刷新 active jobs 并补齐事件）
-- 🖼️ HTML 预览使用独立 Activity 隔离
-- ⚠️ 需要在真实设备或模拟器上验证
-
-### 平台特殊说明
-
-- **Linux keyring**：依赖 Secret Service；不可用时需要用户显式确认后降级到本地存储
-- **Release 产物**：使用 `Undefined-Chat-*` 命名，与 `pyproject.toml` 主版本同步
+Runtime 默认连接 `http://127.0.0.1:8788`，受保护请求由 Tauri Rust command 注入 `X-Undefined-API-Key`。React 侧不直接持有 API Key。
 
 ## Android smoke checklist
 
@@ -104,12 +54,11 @@ npm run tauri:android:debug -- --apk
 
 `tauri:android:init` 会在 Tauri 生成 Android 工程后运行仓库脚本，注入 HTML preview 专用的 `HtmlPreviewActivity`。`src-tauri/gen/` 是生成目录，不需要提交。
 
-On a device or emulator:
+真机或模拟器至少验证：
 
-- Open the app and verify the main screen renders.
-- Probe secret storage and record whether secure storage is available.
-- Connect to Runtime over LAN and verify `/health`.
-- Start an SSE stream against a known running job and verify events arrive.
-- Upload a large file and confirm the process does not freeze the UI.
-- Open HTML preview and verify it uses the dedicated Android page/window surface.
-- Background the app during a running job and record whether events resume after reopening.
+- 主界面渲染、移动端会话抽屉、软键盘弹出时输入区和命令面板不被遮挡。
+- Runtime LAN 连接、`/health`、发送消息、SSE/JSON fallback。
+- 后台运行中 job，回到前台后历史和 active jobs 能恢复。
+- 系统相册、Downloads、云盘 provider 返回的 `content://` 文件可以上传。
+- HTML 预览 Activity 打开、关闭后不会残留可见窗口或暴露外部导航。
+- 安全存储状态；Android 当前应明确显示或记录不支持系统 keyring。

@@ -15,6 +15,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(state::NativeState::default())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_stronghold::Builder::new(secret::derive_stronghold_key).build())
         .invoke_handler(tauri::generate_handler![

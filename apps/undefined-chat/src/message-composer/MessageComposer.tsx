@@ -16,10 +16,12 @@ export type MessageComposerProps = {
 	commandSuggestions: CommandInfo[];
 	disabled: boolean;
 	draft: string;
+	focusRequest?: { id: number; commandMode: boolean } | null;
 	references: MessageReference[];
 	onAddAttachment: () => void;
 	onClearAttachment: (attachmentId: string) => void;
 	onClearReference: (messageId: string) => void;
+	onJumpReference?: (messageId: string) => void;
 	onDraftChange: (draft: string) => void;
 	onSend: () => void;
 };
@@ -36,10 +38,12 @@ export function MessageComposer({
 	commandSuggestions,
 	disabled,
 	draft,
+	focusRequest,
 	references,
 	onAddAttachment,
 	onClearAttachment,
 	onClearReference,
+	onJumpReference,
 	onDraftChange,
 	onSend,
 }: MessageComposerProps) {
@@ -51,11 +55,40 @@ export function MessageComposer({
 		null,
 	);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
+	const valueRef = useRef(value);
+
+	useEffect(() => {
+		valueRef.current = value;
+	}, [value]);
 
 	// 同步外部草稿
 	useEffect(() => {
 		setValue(draft);
 	}, [draft]);
+
+	useEffect(() => {
+		if (!focusRequest) {
+			return;
+		}
+		const currentValue = valueRef.current;
+		const nextValue =
+			focusRequest.commandMode && !currentValue.startsWith("/")
+				? "/"
+				: currentValue;
+		if (nextValue !== currentValue) {
+			update(nextValue);
+			setEscDismissedValue(null);
+		}
+		requestAnimationFrame(() => {
+			const textarea = textareaRef.current;
+			if (!textarea) {
+				return;
+			}
+			textarea.focus();
+			textarea.setSelectionRange(nextValue.length, nextValue.length);
+			setSelectionStart(nextValue.length);
+		});
+	}, [focusRequest]);
 
 	// 输入框高度自适应
 	// biome-ignore lint/correctness/useExhaustiveDependencies: update height on value change
@@ -222,7 +255,11 @@ export function MessageComposer({
 				}}
 			>
 				{/* 引用消息 */}
-				<ReferenceChips references={references} onClear={onClearReference} />
+				<ReferenceChips
+					references={references}
+					onClear={onClearReference}
+					onJump={onJumpReference}
+				/>
 
 				{/* 附件队列 */}
 				{attachmentQueue.length > 0 ? (

@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
+import type { HistoryPageResponse } from "../runtime-client/types";
 import {
 	conversation,
 	event,
@@ -410,6 +411,36 @@ describe("chat store", () => {
 		});
 	});
 
+	test("cancelJob cancels the active job, clears it, and reloads history", async () => {
+		const runningJob = job({ jobId: "job-1", conversationId: "default" });
+		const cancelledJob = job({
+			jobId: "job-1",
+			conversationId: "default",
+			status: "cancelled",
+			lastSeq: 4,
+		});
+		const client = runtimeClientStub({
+			getActiveJobs: vi.fn(async () => ({
+				job: runningJob,
+				jobs: [runningJob],
+			})),
+			cancelJob: vi.fn(async () => cancelledJob),
+		});
+		const store = createChatStore({ client });
+		await store.bootstrap();
+
+		await store.cancelJob("job-1");
+
+		expect(client.cancelJob).toHaveBeenCalledWith("job-1");
+		expect(
+			store.getSnapshot().activeJobsByConversation.default,
+		).toBeUndefined();
+		expect(client.getHistory).toHaveBeenLastCalledWith({
+			conversationId: "default",
+			limit: 50,
+		});
+	});
+
 	test("deleteConversation removes the conversation and selects the next one", async () => {
 		const client = runtimeClientStub({
 			listConversations: vi.fn(async () => ({
@@ -475,6 +506,71 @@ describe("chat store", () => {
 			total: 0,
 		});
 		expect(state.historyByConversation.c1?.loading).toBe(false);
+	});
+
+	test("loadMoreHistory prepends older items and toggles loading state", async () => {
+		let resolvePage!: (value: HistoryPageResponse) => void;
+		const client = runtimeClientStub({
+			getHistory: vi.fn(async () => ({
+				conversationId: "default",
+				virtualUserId: "webchat",
+				permission: "superadmin",
+				count: 2,
+				items: [
+					historyItem({ messageId: "msg-3", content: "消息3" }),
+					historyItem({ messageId: "msg-4", content: "消息4" }),
+				],
+				limit: 50,
+				before: null,
+				hasMore: true,
+				nextBefore: 1000,
+				total: 4,
+			})),
+			getHistoryPage: vi.fn(
+				() =>
+					new Promise<HistoryPageResponse>((resolve) => {
+						resolvePage = resolve;
+					}),
+			),
+		});
+		const store = createChatStore({ client });
+		await store.bootstrap();
+
+		const pending = store.loadMoreHistory("default");
+		expect(store.getSnapshot().historyByConversation.default?.loading).toBe(
+			true,
+		);
+
+		resolvePage({
+			conversationId: "default",
+			virtualUserId: "webchat",
+			permission: "superadmin",
+			count: 2,
+			items: [
+				historyItem({ messageId: "msg-1", content: "消息1" }),
+				historyItem({ messageId: "msg-2", content: "消息2" }),
+			],
+			limit: 50,
+			before: 1000,
+			hasMore: false,
+			nextBefore: null,
+			cursor: null,
+			total: 4,
+		});
+		await pending;
+
+		expect(client.getHistoryPage).toHaveBeenCalledWith("default", 1000, 50);
+		expect(
+			store
+				.getSnapshot()
+				.historyByConversation.default?.items.map((item) => item.content),
+		).toEqual(["消息1", "消息2", "消息3", "消息4"]);
+		expect(store.getSnapshot().historyByConversation.default?.loading).toBe(
+			false,
+		);
+		expect(store.getSnapshot().historyByConversation.default?.hasMore).toBe(
+			false,
+		);
 	});
 
 	test("sendSelectedMessage 立即乐观显示用户消息并清空草稿、出现 AI 任务", async () => {

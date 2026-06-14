@@ -2,6 +2,7 @@ import type { Conversation } from "../runtime-client/types";
 import { ThemeToggle } from "../theme/ThemeToggle";
 
 export type ConversationListProps = {
+	id?: string;
 	conversations: Conversation[];
 	selectedConversationId: string | null;
 	onCreate: () => void;
@@ -13,6 +14,7 @@ export type ConversationListProps = {
 	isCollapsed: boolean;
 	onToggleCollapse: () => void;
 	onOpenSettings: () => void;
+	isMobileActive?: boolean;
 };
 
 function messageCountLabel(count: number): string {
@@ -20,6 +22,7 @@ function messageCountLabel(count: number): string {
 }
 
 export function ConversationList({
+	id,
 	conversations,
 	selectedConversationId,
 	onCreate,
@@ -30,11 +33,13 @@ export function ConversationList({
 	isCollapsed,
 	onToggleCollapse,
 	onOpenSettings,
+	isMobileActive = false,
 }: ConversationListProps) {
 	return (
 		<nav
+			id={id}
 			aria-label="会话"
-			className={`conversation-list ${isCollapsed ? "collapsed" : ""}`}
+			className={`conversation-list ${isCollapsed ? "collapsed" : ""} ${isMobileActive ? "active" : ""}`}
 		>
 			<header className="rail-header">
 				<h1>Undefined</h1>
