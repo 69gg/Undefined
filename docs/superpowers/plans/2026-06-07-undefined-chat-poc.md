@@ -1,5 +1,7 @@
 # Undefined Chat PoC Implementation Plan
 
+> 状态：已实现并归档（point-in-time 文档）。本计划记录 Phase 0 PoC 的历史执行步骤，后续完整产品计划见 [2026-06-08-undefined-chat-full.md](2026-06-08-undefined-chat-full.md)，最新实现以 [docs/undefined-chat.md](../../undefined-chat.md) 与 `apps/undefined-chat` 代码为准（2026-06）。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a focused Undefined Chat proof of concept that validates the risky Runtime/Tauri/React paths before full product implementation.

@@ -1,4 +1,5 @@
 import { type CSSProperties, useEffect, useState } from "react";
+import { useTranslation } from "../i18n";
 import { getFileIcon } from "../utils/file-icon";
 import { useAttachmentImage } from "./AttachmentImageContext";
 
@@ -33,6 +34,7 @@ export function AttachmentImage({
 	onOpenImage,
 }: AttachmentImageProps) {
 	const { loadAttachmentBlob } = useAttachmentImage();
+	const { t } = useTranslation();
 	const [state, setState] = useState<LoadState>({ status: "loading" });
 
 	useEffect(() => {
@@ -59,7 +61,7 @@ export function AttachmentImage({
 				className={className}
 				style={style}
 				aria-busy="true"
-				aria-label={alt || "图片加载中"}
+				aria-label={alt || t("image.loading")}
 			/>
 		);
 	}
@@ -69,8 +71,8 @@ export function AttachmentImage({
 			<div
 				className={className}
 				style={style}
-				title={alt || "图片加载失败"}
-				aria-label={alt || "图片加载失败"}
+				title={alt || t("image.loadFailed")}
+				aria-label={alt || t("image.loadFailed")}
 			>
 				{getFileIcon(mediaType ?? "image/")}
 			</div>

@@ -1,13 +1,22 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LOCALE_STORAGE_KEY, LanguageProvider } from "../i18n";
 import { CodeBlock } from "./CodeBlock";
+
+// CodeBlock 内部使用 useTranslation，需置于 LanguageProvider 下
+function renderCodeBlock(node: ReactElement) {
+	return render(<LanguageProvider>{node}</LanguageProvider>);
+}
 
 describe("CodeBlock", () => {
 	// Mock clipboard API
 	const mockWriteText = vi.fn();
 
 	beforeEach(() => {
+		// 固定为简体中文，使断言不受测试环境 navigator.language 影响
+		window.localStorage.setItem(LOCALE_STORAGE_KEY, "zh-CN");
 		// Mock clipboard API
 		Object.defineProperty(navigator, "clipboard", {
 			value: {
@@ -25,7 +34,7 @@ describe("CodeBlock", () => {
 
 	it("应该渲染代码块", () => {
 		const code = 'console.log("Hello, World!");';
-		render(<CodeBlock code={code} language="javascript" />);
+		renderCodeBlock(<CodeBlock code={code} language="javascript" />);
 
 		// 检查语言标签
 		expect(screen.getByText(/javascript/i)).toBeInTheDocument();
@@ -37,7 +46,7 @@ describe("CodeBlock", () => {
 
 	it("应该自动检测语言", () => {
 		const code = 'print("Hello, World!")';
-		render(<CodeBlock code={code} />);
+		renderCodeBlock(<CodeBlock code={code} />);
 
 		// highlight.js 应该自动检测语言
 		const languageLabel = screen.getByText(/python|stylus|plaintext/i);
@@ -48,7 +57,7 @@ describe("CodeBlock", () => {
 		const code = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join(
 			"\n",
 		);
-		render(<CodeBlock code={code} maxLines={8} collapsible={true} />);
+		renderCodeBlock(<CodeBlock code={code} maxLines={8} collapsible={true} />);
 
 		expect(screen.getByText("展开")).toBeInTheDocument();
 	});
@@ -57,7 +66,7 @@ describe("CodeBlock", () => {
 		const code = Array.from({ length: 5 }, (_, i) => `line ${i + 1}`).join(
 			"\n",
 		);
-		render(<CodeBlock code={code} maxLines={8} collapsible={true} />);
+		renderCodeBlock(<CodeBlock code={code} maxLines={8} collapsible={true} />);
 
 		expect(screen.queryByText("展开")).not.toBeInTheDocument();
 		expect(screen.queryByText("折叠")).not.toBeInTheDocument();
@@ -67,7 +76,7 @@ describe("CodeBlock", () => {
 		const code = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join(
 			"\n",
 		);
-		render(<CodeBlock code={code} maxLines={8} collapsible={false} />);
+		renderCodeBlock(<CodeBlock code={code} maxLines={8} collapsible={false} />);
 
 		expect(screen.queryByText("展开")).not.toBeInTheDocument();
 		expect(screen.queryByText("折叠")).not.toBeInTheDocument();
@@ -78,7 +87,7 @@ describe("CodeBlock", () => {
 		const code = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join(
 			"\n",
 		);
-		const { container } = render(
+		const { container } = renderCodeBlock(
 			<CodeBlock code={code} maxLines={8} collapsible={true} />,
 		);
 
@@ -102,7 +111,7 @@ describe("CodeBlock", () => {
 	it("应该复制代码到剪贴板", async () => {
 		const code = 'console.log("test");';
 
-		render(<CodeBlock code={code} language="javascript" />);
+		renderCodeBlock(<CodeBlock code={code} language="javascript" />);
 
 		const copyButton = screen.getByText("复制");
 
@@ -133,7 +142,7 @@ describe("CodeBlock", () => {
 	it("应该为 HTML 代码显示预览按钮", () => {
 		const code = "<div>Hello</div>";
 		const onPreviewHtml = vi.fn();
-		render(
+		renderCodeBlock(
 			<CodeBlock code={code} language="html" onPreviewHtml={onPreviewHtml} />,
 		);
 
@@ -144,7 +153,7 @@ describe("CodeBlock", () => {
 		const user = userEvent.setup();
 		const code = "<div>Hello</div>";
 		const onPreviewHtml = vi.fn();
-		render(
+		renderCodeBlock(
 			<CodeBlock code={code} language="html" onPreviewHtml={onPreviewHtml} />,
 		);
 
@@ -160,7 +169,7 @@ describe("CodeBlock", () => {
 	it("应该为非 HTML 代码不显示预览按钮", () => {
 		const code = 'console.log("test");';
 		const onPreviewHtml = vi.fn();
-		render(
+		renderCodeBlock(
 			<CodeBlock
 				code={code}
 				language="javascript"
@@ -175,13 +184,15 @@ describe("CodeBlock", () => {
 		const code = "some invalid code that might break highlighting";
 		// 不应该抛出错误
 		expect(() => {
-			render(<CodeBlock code={code} language="invalid-language-xyz" />);
+			renderCodeBlock(
+				<CodeBlock code={code} language="invalid-language-xyz" />,
+			);
 		}).not.toThrow();
 	});
 
 	it("应该正确渲染空代码", () => {
 		const code = "";
-		render(<CodeBlock code={code} language="javascript" />);
+		renderCodeBlock(<CodeBlock code={code} language="javascript" />);
 
 		const languageLabel = screen.getByText(/javascript/i);
 		expect(languageLabel).toBeInTheDocument();
@@ -189,7 +200,7 @@ describe("CodeBlock", () => {
 
 	it("应该处理包含特殊字符的代码", () => {
 		const code = "const str = \"<script>alert('XSS')</script>\";";
-		render(<CodeBlock code={code} language="javascript" />);
+		renderCodeBlock(<CodeBlock code={code} language="javascript" />);
 
 		const codeElement = document.querySelector("code");
 		expect(codeElement?.textContent).toContain("const str");

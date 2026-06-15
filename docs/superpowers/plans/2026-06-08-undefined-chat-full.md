@@ -1,5 +1,7 @@
 # Undefined Chat Full Product Implementation Plan
 
+> 状态：已实现并归档（point-in-time 文档）。本计划记录将 PoC 推进为完整产品的历史步骤；其后又经历了一轮原生优先重写与平台/移动端打磨（i18n 中英双语、平台抽象层、移动端适配、HTML 对齐基线等）。最新实现以 [docs/undefined-chat.md](../../undefined-chat.md) 与 `apps/undefined-chat` 代码为准（2026-06）。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn `apps/undefined-chat` from the Phase 0 PoC into the complete native-first WebChat client backed by Runtime as the only source of truth.

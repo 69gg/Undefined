@@ -1,8 +1,15 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 import { describe, expect, it } from "vitest";
 import type { ToolBlock as ToolBlockType } from "../chat-store/types";
+import { renderWithProviders } from "../test-utils";
 import { ToolBlock } from "./ToolBlock";
+
+/** 在固定 zh-CN i18n 上下文中渲染（ToolBlock 内部使用 useTranslation）。 */
+function renderToolBlock(ui: ReactElement) {
+	return renderWithProviders(ui);
+}
 
 describe("ToolBlock", () => {
 	it("renders tool name and status", () => {
@@ -16,7 +23,7 @@ describe("ToolBlock", () => {
 			endTime: Date.now(),
 		};
 
-		render(<ToolBlock {...toolBlock} />);
+		renderToolBlock(<ToolBlock {...toolBlock} />);
 
 		expect(screen.getByText("test_tool")).toBeInTheDocument();
 		expect(screen.getByText("完成")).toBeInTheDocument();
@@ -32,7 +39,7 @@ describe("ToolBlock", () => {
 			startTime: Date.now() - 500,
 		};
 
-		const { container } = render(<ToolBlock {...toolBlock} />);
+		const { container } = renderToolBlock(<ToolBlock {...toolBlock} />);
 
 		expect(screen.getByText("运行中")).toBeInTheDocument();
 		const details = container.querySelector(".runtime-tool-block");
@@ -50,7 +57,7 @@ describe("ToolBlock", () => {
 			endTime: Date.now(),
 		};
 
-		const { container } = render(<ToolBlock {...toolBlock} />);
+		const { container } = renderToolBlock(<ToolBlock {...toolBlock} />);
 
 		expect(screen.getByText("失败")).toBeInTheDocument();
 		const details = container.querySelector(".runtime-tool-block");
@@ -71,7 +78,7 @@ describe("ToolBlock", () => {
 			endTime,
 		};
 
-		render(<ToolBlock {...toolBlock} />);
+		renderToolBlock(<ToolBlock {...toolBlock} />);
 
 		// Should display duration in seconds
 		const durationElement = screen.getByText(/1\.[0-9]s/);
@@ -97,7 +104,7 @@ describe("ToolBlock", () => {
 			endTime: Date.now(),
 		};
 
-		const { container } = render(<ToolBlock {...toolBlock} />);
+		const { container } = renderToolBlock(<ToolBlock {...toolBlock} />);
 
 		const details = container.querySelector("details");
 		expect(details).not.toHaveAttribute("open");
@@ -137,7 +144,7 @@ describe("ToolBlock", () => {
 			endTime: Date.now(),
 		};
 
-		render(<ToolBlock {...toolBlock} />);
+		renderToolBlock(<ToolBlock {...toolBlock} />);
 
 		expect(screen.getByText("input content")).toBeInTheDocument();
 		expect(screen.getByText("output content")).toBeInTheDocument();
@@ -165,7 +172,7 @@ describe("ToolBlock", () => {
 			endTime: Date.now(),
 		};
 
-		render(<ToolBlock {...parentBlock} />);
+		renderToolBlock(<ToolBlock {...parentBlock} />);
 
 		expect(screen.getByText("parent_tool")).toBeInTheDocument();
 		expect(screen.getByText("child_tool")).toBeInTheDocument();
@@ -203,7 +210,7 @@ describe("ToolBlock", () => {
 			startTime: Date.now() - 1000,
 		};
 
-		render(<ToolBlock {...parentBlock} />);
+		renderToolBlock(<ToolBlock {...parentBlock} />);
 
 		expect(screen.getByText("parent_tool")).toBeInTheDocument();
 		expect(screen.getByText("child_tool_1")).toBeInTheDocument();
@@ -221,7 +228,7 @@ describe("ToolBlock", () => {
 			endTime: Date.now(),
 		};
 
-		const { container } = render(<ToolBlock {...toolBlock} />);
+		const { container } = renderToolBlock(<ToolBlock {...toolBlock} />);
 
 		expect(
 			container.querySelector(".runtime-tool-preview"),
@@ -239,10 +246,69 @@ describe("ToolBlock", () => {
 			endTime: Date.now(),
 		};
 
-		const { container } = render(<ToolBlock {...toolBlock} />);
+		const { container } = renderToolBlock(<ToolBlock {...toolBlock} />);
 
 		expect(
 			container.querySelector(".runtime-tool-children"),
 		).not.toBeInTheDocument();
+	});
+
+	it("结构化渲染可解析为 JSON 的工具结果", () => {
+		const toolBlock: ToolBlockType = {
+			webchatCallId: "call-json",
+			toolName: "json_tool",
+			status: "done",
+			resultPreview: '{"name":"小明","age":18}',
+			children: new Map(),
+			timeline: [],
+			startTime: Date.now() - 1000,
+			endTime: Date.now(),
+		};
+
+		const { container } = renderToolBlock(<ToolBlock {...toolBlock} />);
+
+		// 结构化展示：key-value 列表，而非整段 JSON 字符串
+		expect(container.querySelector(".runtime-tool-json-object")).toBeTruthy();
+		expect(screen.getByText("name")).toBeInTheDocument();
+		expect(screen.getByText("小明")).toBeInTheDocument();
+		expect(screen.getByText("age")).toBeInTheDocument();
+	});
+
+	it("非 JSON 的工具结果回退为 <pre> 纯文本", () => {
+		const toolBlock: ToolBlockType = {
+			webchatCallId: "call-text",
+			toolName: "text_tool",
+			status: "done",
+			resultPreview: "这是一段纯文本结果",
+			children: new Map(),
+			timeline: [],
+			startTime: Date.now() - 1000,
+			endTime: Date.now(),
+		};
+
+		const { container } = renderToolBlock(<ToolBlock {...toolBlock} />);
+
+		expect(container.querySelector(".runtime-tool-json")).toBeNull();
+		expect(screen.getByText("这是一段纯文本结果")).toBeInTheDocument();
+	});
+
+	it("agent 运行中在阶段标签后展示 stageDetail", () => {
+		const toolBlock: ToolBlockType = {
+			webchatCallId: "call-agent",
+			toolName: "web_agent",
+			status: "running",
+			isAgent: true,
+			currentStage: "waiting_model",
+			stageDetail: "Claude Opus 4.8",
+			children: new Map(),
+			timeline: [],
+			startTime: Date.now() - 500,
+		};
+
+		renderToolBlock(<ToolBlock {...toolBlock} />);
+
+		// "等待模型 · Claude Opus 4.8"（zh-CN 阶段标签 + detail）
+		expect(screen.getByText(/Claude Opus 4\.8/)).toBeInTheDocument();
+		expect(screen.getByText(/等待模型/)).toBeInTheDocument();
 	});
 });

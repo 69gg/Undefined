@@ -9,20 +9,37 @@ use tauri::{
 use url::Url;
 use uuid::Uuid;
 
-// CSP 策略：禁止脚本和网络连接，允许内联样式和本地资源
+// CSP 策略：与 WebUI HTML 预览基线对齐——放开内联脚本以支持图表/动画等工具产物，
+// 但通过运行时真正生效的指令维持隔离：禁止一切外联（connect-src 'none'），禁止表单提交、
+// 插件对象、base 改写，仅允许 data:/blob: 内联资源与内联样式。
+//
+// 安全说明：放开 script-src 后，预览窗口可执行任意脚本，但其无法访问 Tauri IPC/invoke。
+// IPC 隔离的唯一屏障是 capability 缺失：预览窗口 label 形如 `html-preview-*`，不匹配
+// `capabilities/default.json`（`main-capability`，仅 `windows: ["main"]`）；在 Tauri v2 ACL 模型下
+// 未匹配任何 capability 的 webview 完全没有 IPC 访问权（permission 缺失）。
+// 注意：底层 `__TAURI_INTERNALS__` 无论 `withGlobalTauri` 取值都会注入，并非 IPC 隔离的依据；
+// `withGlobalTauri` 未启用仅移除便利全局 `window.__TAURI__`，命令调用仍然只由 capability 把关。
+// connect-src 'none' 进一步阻断脚本外联，防止内容外泄。
+// 导航防护不依赖 CSP，而由 Rust 侧 on_navigation 守卫（`preview_navigation_allowed`）提供；
+// 防嵌入由窗口隔离（预览为独立 OS 窗口而非 iframe）与 on_new_window Deny 覆盖。
+// 详见 `open_html_preview` 注释与 native_tests 中的隔离断言。
 const PREVIEW_CSP: &str = concat!(
     "default-src 'none'; ",
     "connect-src 'none'; ",
     "form-action 'none'; ",
     "object-src 'none'; ",
     "base-uri 'none'; ",
+    // frame-ancestors 通过 <meta http-equiv> 交付时被浏览器忽略（仅 HTTP 响应头有效）。
+    // 预览为独立 OS 窗口而非 iframe，防嵌入实际由窗口隔离 + on_new_window Deny 覆盖；
+    // 保留此指令以便未来若改为 header 交付时即可生效。
     "frame-ancestors 'none'; ",
-    "navigate-to 'none'; ",
+    // 注：曾用的 `navigate-to 'none'` 已移除——该指令已从 CSP 规范删除、浏览器从不实现，
+    // 是零防护的死指令。导航防护改由上文所述的 on_navigation 守卫提供。
     "img-src data: blob:; ",
     "media-src data: blob:; ",
     "style-src 'unsafe-inline'; ",
     "font-src data:; ",
-    "script-src 'none';"
+    "script-src 'unsafe-inline';"
 );
 
 #[derive(Debug, Clone, Deserialize)]
@@ -76,7 +93,11 @@ pub(crate) fn preview_navigation_allowed(url: &Url, initial_url: &Url) -> bool {
 }
 
 pub(crate) const MAX_PREVIEW_HTML_BYTES: usize = 1024 * 1024;
-const PREVIEW_TEMP_PREFIX: &str = "html-preview-";
+/// 预览窗口的 label 前缀（label 形如 `html-preview-{uuid}`）。
+/// 该前缀同时用作临时文件名前缀，并且是 IPC 隔离的安全锚点：
+/// `capabilities/default.json` 仅授权 `windows: ["main"]`，此前缀的窗口不匹配任何 capability。
+pub(crate) const PREVIEW_WINDOW_LABEL_PREFIX: &str = "html-preview-";
+const PREVIEW_TEMP_PREFIX: &str = PREVIEW_WINDOW_LABEL_PREFIX;
 const PREVIEW_TEMP_EXTENSION: &str = "html";
 const PREVIEW_TEMP_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
@@ -107,11 +128,9 @@ fn remove_preview_temp_file(path: &Path) {
     if !is_preview_temp_file(path) {
         return;
     }
-    if let Err(err) = std::fs::remove_file(path) {
-        if err.kind() != std::io::ErrorKind::NotFound {
-            eprintln!("[preview] Failed to remove temp file {path:?}: {err}");
-        }
-    }
+    // 临时文件清理失败是非致命的：TTL 过期扫描（cleanup_stale_preview_temp_files）会作为兜底，
+    // 这里静默忽略以避免生产环境 stderr 噪音，且不暴露临时路径。
+    let _ = std::fs::remove_file(path);
 }
 
 struct PreviewTempFile {
@@ -215,16 +234,15 @@ pub async fn open_html_preview(app: AppHandle, input: HtmlPreviewInput) -> Resul
     use std::fs;
 
     let document = preview_document_checked(&input.title, &input.html)?;
-    let label = format!("html-preview-{}", Uuid::new_v4());
+    let label = format!("{PREVIEW_WINDOW_LABEL_PREFIX}{}", Uuid::new_v4());
 
     // 写入临时 HTML 文件
     let temp_dir = app
         .path()
         .temp_dir()
         .map_err(|e| format!("Failed to get temp dir: {}", e))?;
-    if let Err(err) = cleanup_stale_preview_temp_files(&temp_dir) {
-        eprintln!("[preview] Failed to clean stale preview files: {err}");
-    }
+    // 过期临时文件清理失败不影响本次预览：非致命，静默忽略（下次预览会再次尝试清理）。
+    let _ = cleanup_stale_preview_temp_files(&temp_dir);
     let html_file = preview_temp_path(&temp_dir, &label);
 
     fs::write(&html_file, document).map_err(|e| format!("Failed to write HTML file: {}", e))?;
@@ -244,11 +262,12 @@ pub async fn open_html_preview(app: AppHandle, input: HtmlPreviewInput) -> Resul
         .or_else(|| app.webview_windows().into_values().next())
         .ok_or_else(|| "no parent window is available for html preview".to_string())?;
 
-    eprintln!("[preview] Creating HTML preview window: {}", label);
-    eprintln!("[preview] Title: {}", input.title);
-    eprintln!("[preview] HTML size: {} bytes", input.html.len());
-    eprintln!("[preview] File URL: {}", url);
-
+    // 安全：预览窗口加载外部 file:// URL，label 形如 `html-preview-*`，不匹配任何 capability
+    // （`capabilities/default.json` 即 `main-capability`，仅授权 `windows: ["main"]`），因此该
+    // webview 没有任何 Tauri IPC/invoke 权限——这正是 IPC 隔离的唯一屏障，即便 CSP 放开脚本，
+    // 也因 capability 缺失而无法回调 Rust 命令或读取主窗口数据。
+    // （`withGlobalTauri` 未启用只是移除便利全局 `window.__TAURI__`；底层 `__TAURI_INTERNALS__`
+    // 无论如何都会注入，故隔离不能寄托于此。导航防护由下方 on_navigation 守卫提供。）
     let builder = WebviewWindowBuilder::new(&main_window, label, WebviewUrl::External(url))
         .title(input.title)
         .inner_size(900.0, 700.0)
@@ -271,11 +290,6 @@ pub async fn open_html_preview(app: AppHandle, input: HtmlPreviewInput) -> Resul
             remove_preview_temp_file(&html_file_for_cleanup);
         }
     });
-
-    eprintln!(
-        "[preview] Window created successfully: {:?}",
-        window.label()
-    );
 
     Ok(())
 }
@@ -488,9 +502,100 @@ mod tests {
     }
 
     #[test]
-    fn test_csp_blocks_scripts() {
-        // CSP should include script-src 'none'
-        assert!(PREVIEW_CSP.contains("script-src 'none'"));
+    fn test_csp_allows_inline_scripts_but_blocks_eval() {
+        // 与 WebUI 基线对齐：放开内联脚本以支持图表/动画，但不放开 eval。
+        assert!(PREVIEW_CSP.contains("script-src 'unsafe-inline'"));
+        assert!(!PREVIEW_CSP.contains("unsafe-eval"));
+        assert!(!PREVIEW_CSP.contains("script-src 'none'"));
+    }
+
+    #[test]
+    fn test_csp_keeps_isolation_directives() {
+        // 仅断言运行时真正生效的隔离指令：即便放开脚本，外联/表单/插件对象/base 改写仍被禁止。
+        assert!(PREVIEW_CSP.contains("default-src 'none'"));
+        assert!(PREVIEW_CSP.contains("connect-src 'none'"));
+        assert!(PREVIEW_CSP.contains("form-action 'none'"));
+        assert!(PREVIEW_CSP.contains("object-src 'none'"));
+        assert!(PREVIEW_CSP.contains("base-uri 'none'"));
+        assert!(PREVIEW_CSP.contains("img-src data: blob:"));
+        assert!(PREVIEW_CSP.contains("script-src 'unsafe-inline'"));
+        assert!(!PREVIEW_CSP.contains("unsafe-eval"));
+        // 已从规范移除、浏览器从不实现的死指令不得再充当隔离证据。
+        assert!(!PREVIEW_CSP.contains("navigate-to"));
+        // 导航防护的真实证据是 on_navigation 守卫单测（见 test_preview_navigation_*）。
+    }
+
+    /// 安全回归：预览窗口（label `html-preview-*`）必须无法访问 Tauri IPC/invoke。
+    ///
+    /// Tauri v2 ACL 模型：未匹配任何 capability 的 webview 完全没有 IPC 访问权。
+    /// 本测试核对 `capabilities/default.json` 把权限限定到 `windows: ["main"]`，
+    /// 且没有任何 capability 用通配/前缀覆盖到预览窗口的 label，从而保证脚本即便被放开
+    /// 也无法回调 Rust 命令。若有人误把 capability 放宽到 `*` 或 `html-preview-*`，本测试会失败。
+    #[test]
+    fn test_preview_window_has_no_ipc_capability() {
+        use serde_json::Value;
+
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let capabilities_dir = std::path::Path::new(manifest_dir).join("capabilities");
+        let entries =
+            std::fs::read_dir(&capabilities_dir).expect("capabilities directory should exist");
+
+        // 模拟一个真实的预览窗口 label，逐个 capability 校验其 windows 作用域不会命中。
+        let preview_label = format!("{PREVIEW_WINDOW_LABEL_PREFIX}deadbeef");
+        let mut checked_any = false;
+
+        for entry in entries {
+            let path = entry.unwrap().path();
+            let is_capability = matches!(
+                path.extension().and_then(|ext| ext.to_str()),
+                Some("json") | Some("toml")
+            );
+            if !is_capability {
+                continue;
+            }
+            // 仅解析 JSON 形式（本项目使用 JSON capability）。
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let raw = std::fs::read_to_string(&path).unwrap();
+            let value: Value = serde_json::from_str(&raw).unwrap();
+            let windows = value
+                .get("windows")
+                .and_then(Value::as_array)
+                .expect("capability must explicitly scope windows (never default to all)");
+
+            for pattern in windows {
+                let pattern = pattern.as_str().expect("window pattern must be a string");
+                // 绝不允许全局通配把权限授予所有窗口。
+                assert_ne!(
+                    pattern, "*",
+                    "capability {path:?} must not grant permissions to all windows"
+                );
+                // 预览窗口 label 不得被任何 capability 的 windows 作用域命中。
+                assert!(
+                    !window_pattern_matches(pattern, &preview_label),
+                    "capability {path:?} pattern {pattern:?} must not cover preview window {preview_label:?}"
+                );
+            }
+            checked_any = true;
+        }
+
+        assert!(
+            checked_any,
+            "expected at least one JSON capability to validate IPC isolation"
+        );
+    }
+
+    /// 近似 Tauri 的 window label glob 匹配（`*` 通配单段/多段）。
+    /// 用于测试断言：仅需覆盖精确匹配与简单前缀通配两种现实形态。
+    fn window_pattern_matches(pattern: &str, label: &str) -> bool {
+        if pattern == "*" {
+            return true;
+        }
+        if let Some(prefix) = pattern.strip_suffix('*') {
+            return label.starts_with(prefix);
+        }
+        pattern == label
     }
 
     #[test]

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AttachmentDraft } from "../chat-store/store";
+import { useTranslation } from "../i18n";
 import type { CommandInfo, MessageReference } from "../runtime-client/types";
 import { CommandPalette } from "./CommandPalette";
 import { ReferenceChips } from "./ReferenceChips";
@@ -47,6 +48,7 @@ export function MessageComposer({
 	onDraftChange,
 	onSend,
 }: MessageComposerProps) {
+	const { t } = useTranslation();
 	const [value, setValue] = useState(draft);
 	const [selectionStart, setSelectionStart] = useState(draft.length);
 	const [activeIndex, setActiveIndex] = useState(0);
@@ -189,6 +191,11 @@ export function MessageComposer({
 	function handleKeyDown(
 		event: React.KeyboardEvent<HTMLTextAreaElement>,
 	): void {
+		// 输入法合成中（如中文拼音选词）的按键交给 IME 处理，
+		// 避免回车确认候选词被误判为发送 / 命令补全
+		if (event.nativeEvent.isComposing) {
+			return;
+		}
 		// 命令面板打开时拦截导航/补全/关闭键
 		if (paletteOpen && paletteHasContent) {
 			if (event.key === "Escape") {
@@ -263,7 +270,10 @@ export function MessageComposer({
 
 				{/* 附件队列 */}
 				{attachmentQueue.length > 0 ? (
-					<ul aria-label="附件队列" className="composer-attachments">
+					<ul
+						aria-label={t("composer.attachmentQueue")}
+						className="composer-attachments"
+					>
 						{attachmentQueue.map((attachment) => (
 							<li key={attachment.id}>
 								<span style={{ fontWeight: "600" }}>{attachment.name}</span>
@@ -271,7 +281,9 @@ export function MessageComposer({
 									{fileSize(attachment.size)}
 								</span>
 								<button
-									aria-label={`移除 ${attachment.name}`}
+									aria-label={t("composer.removeAttachment", {
+										name: attachment.name,
+									})}
 									onClick={() => onClearAttachment(attachment.id)}
 									type="button"
 								>
@@ -285,10 +297,10 @@ export function MessageComposer({
 				{/* 输入控制行 */}
 				<div className="composer-input-row">
 					<button
-						aria-label="添加附件"
+						aria-label={t("composer.addAttachment")}
 						className="icon-button"
 						onClick={onAddAttachment}
-						title="添加文件"
+						title={t("composer.addFile")}
 						type="button"
 					>
 						<svg
@@ -301,13 +313,13 @@ export function MessageComposer({
 							viewBox="0 0 24 24"
 							width="18"
 						>
-							<title>添加附件</title>
+							<title>{t("composer.addAttachment")}</title>
 							<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
 						</svg>
 					</button>
 
 					<textarea
-						aria-label="消息输入"
+						aria-label={t("composer.messageInput")}
 						disabled={disabled}
 						onChange={(event) => {
 							update(event.currentTarget.value);
@@ -316,13 +328,13 @@ export function MessageComposer({
 						onKeyDown={handleKeyDown}
 						onKeyUp={(event) => syncCursor(event.currentTarget)}
 						onSelect={(event) => syncCursor(event.currentTarget)}
-						placeholder="给 Undefined 发送消息..."
+						placeholder={t("composer.placeholder")}
 						ref={textareaRef}
 						rows={1}
 						value={value}
 					/>
 
-					<button disabled={!canSend} title="发送" type="submit">
+					<button disabled={!canSend} title={t("composer.send")} type="submit">
 						<svg
 							fill="none"
 							height="16"
@@ -333,7 +345,7 @@ export function MessageComposer({
 							viewBox="0 0 24 24"
 							width="16"
 						>
-							<title>发送</title>
+							<title>{t("composer.send")}</title>
 							<line x1="22" x2="11" y1="2" y2="13" />
 							<polygon points="22 2 15 22 11 13 2 9 22 2" />
 						</svg>
@@ -347,10 +359,13 @@ export function MessageComposer({
 					activeIndex={clampedActiveIndex}
 					mode={commandContext?.mode ?? "command"}
 					helpCommand={helpCommand}
+					hasCommands={commandSuggestions.length > 0}
 					onSelect={selectMatch}
 				/>
 			</form>
-			{disabled ? <p className="composer-note">当前会话仍在运行</p> : null}
+			{disabled ? (
+				<p className="composer-note">{t("composer.running")}</p>
+			) : null}
 		</div>
 	);
 }

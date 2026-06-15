@@ -1,5 +1,6 @@
 import { invoke as originalInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { t } from "../i18n";
 
 function invoke<T>(cmd: string, args?: unknown): Promise<T> {
 	if (
@@ -11,9 +12,8 @@ function invoke<T>(cmd: string, args?: unknown): Promise<T> {
 			(globalThis as unknown as Record<string, { env?: { NODE_ENV?: string } }>)
 				?.process?.env?.NODE_ENV === "test";
 		if (!isTest) {
-			throw new Error(
-				"请使用 Tauri 启动客户端（在终端运行 npm run tauri:dev）。当前运行在普通浏览器中，无法调用底层 Rust 原生接口。",
-			);
+			// 环境级错误（运行在普通浏览器中）：用模块级 t（固定 defaultLocale）渲染
+			throw new Error(t("runtime.tauriRequired"));
 		}
 	}
 	return args === undefined
@@ -311,7 +311,8 @@ function normalizeConversation(value: unknown): Conversation {
 	const raw = record(value);
 	return {
 		id: text(raw.id),
-		title: text(raw.title, "默认会话"),
+		// 标题缺省交由 UI 兜底（空串时显示 app.topbar.defaultConversation）
+		title: text(raw.title, ""),
 		titleSource: text(field(raw, "titleSource", "title_source")),
 		titleStatus: text(field(raw, "titleStatus", "title_status")),
 		createdAt: text(field(raw, "createdAt", "created_at")),

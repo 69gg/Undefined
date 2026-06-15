@@ -1,13 +1,22 @@
-import { render, screen } from "@testing-library/react";
+import { render as baseRender, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { LOCALE_STORAGE_KEY, LanguageProvider } from "../i18n";
 import type { MarkdownContentProps } from "./MarkdownContent";
 import { MarkdownContent } from "./MarkdownContent";
+
+// MarkdownContent 内部经 CodeBlock 使用 useTranslation，需置于 LanguageProvider 下
+function render(node: ReactNode) {
+	return baseRender(<LanguageProvider>{node}</LanguageProvider>);
+}
 
 describe("HTML Preview", () => {
 	let onPreviewHtml: MarkdownContentProps["onPreviewHtml"];
 
 	beforeEach(() => {
+		// 固定为简体中文，使断言不受测试环境 navigator.language 影响
+		window.localStorage.setItem(LOCALE_STORAGE_KEY, "zh-CN");
 		onPreviewHtml = vi.fn();
 	});
 

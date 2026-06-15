@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "../../src/App";
@@ -8,6 +8,7 @@ import {
 	historyItem,
 	runtimeClientStub,
 } from "../../src/test-fixtures";
+import { renderWithProviders } from "../../src/test-utils";
 
 vi.mock("../../src/runtime-client/tauri", () => ({
 	createTauriRuntimeClient: vi.fn(),
@@ -49,7 +50,7 @@ describe("E2E: History Loading", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		// 验证历史消息加载
 		expect(await screen.findByText("第一条消息")).toBeInTheDocument();
@@ -96,7 +97,7 @@ describe("E2E: History Loading", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByText("早上的消息");
 
@@ -151,7 +152,7 @@ describe("E2E: History Loading", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		// 等待初始加载
 		await screen.findByText("消息3");
@@ -188,7 +189,7 @@ describe("E2E: History Loading", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByText("消息1");
 
@@ -215,7 +216,7 @@ describe("E2E: History Loading", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByRole("navigation", { name: "会话" });
 
@@ -268,7 +269,7 @@ describe("E2E: History Loading", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		// 加载会话一
 		await screen.findByText("会话一消息");
@@ -293,7 +294,7 @@ describe("E2E: History Loading", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		// 应该显示错误信息
 		expect(await screen.findByText(/网络连接超时/)).toBeInTheDocument();
@@ -319,7 +320,7 @@ describe("E2E: History Loading", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByText("用户消息");
 		await screen.findByText("机器人回复");

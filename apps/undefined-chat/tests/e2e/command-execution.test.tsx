@@ -1,9 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "../../src/App";
 import { createTauriRuntimeClient } from "../../src/runtime-client/tauri";
 import { commandInfo, runtimeClientStub } from "../../src/test-fixtures";
+import { renderWithProviders } from "../../src/test-utils";
 
 vi.mock("../../src/runtime-client/tauri", () => ({
 	createTauriRuntimeClient: vi.fn(),
@@ -40,7 +41,7 @@ describe("E2E: Command Execution", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByRole("navigation", { name: "会话" });
 
@@ -66,7 +67,7 @@ describe("E2E: Command Execution", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByRole("navigation", { name: "会话" });
 
@@ -92,7 +93,7 @@ describe("E2E: Command Execution", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByRole("navigation", { name: "会话" });
 
@@ -120,7 +121,7 @@ describe("E2E: Command Execution", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByRole("navigation", { name: "会话" });
 
@@ -150,7 +151,7 @@ describe("E2E: Command Execution", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByRole("navigation", { name: "会话" });
 
@@ -177,7 +178,7 @@ describe("E2E: Command Execution", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByRole("navigation", { name: "会话" });
 
@@ -203,7 +204,7 @@ describe("E2E: Command Execution", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByRole("navigation", { name: "会话" });
 
@@ -232,7 +233,7 @@ describe("E2E: Command Execution", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByRole("navigation", { name: "会话" });
 
@@ -254,7 +255,7 @@ describe("E2E: Command Execution", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByRole("navigation", { name: "会话" });
 
@@ -310,7 +311,7 @@ describe("E2E: Command Execution", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByRole("navigation", { name: "会话" });
 

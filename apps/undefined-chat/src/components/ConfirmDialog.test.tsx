@@ -1,11 +1,12 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
+import { renderWithProviders } from "../test-utils";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 describe("ConfirmDialog", () => {
 	test("关闭时不渲染", () => {
-		const { container } = render(
+		const { container } = renderWithProviders(
 			<ConfirmDialog
 				open={false}
 				title="删除会话"
@@ -20,7 +21,7 @@ describe("ConfirmDialog", () => {
 	test("确认与取消触发对应回调", async () => {
 		const onConfirm = vi.fn();
 		const onCancel = vi.fn();
-		render(
+		renderWithProviders(
 			<ConfirmDialog
 				open
 				title="删除会话"

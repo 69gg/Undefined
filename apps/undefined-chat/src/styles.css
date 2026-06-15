@@ -270,7 +270,9 @@ a:hover {
 	flex-direction: column;
 	background: var(--bg-sidebar);
 	border-right: 1px solid var(--border-primary);
-	padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom)) 14px;
+	/* 左侧贴屏，补 safe-area-inset-left 覆盖横屏刘海/圆角 */
+	padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom))
+		max(14px, env(safe-area-inset-left));
 	transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
 		transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
 		padding 0.3s cubic-bezier(0.4, 0, 0.2, 1),
@@ -727,7 +729,9 @@ a:hover {
 	gap: 16px;
 	min-height: 56px;
 	border-bottom: 1px solid var(--border-primary);
-	padding: max(8px, env(safe-area-inset-top)) 20px 8px 20px;
+	/* 左右补 safe-area 覆盖横屏刘海/圆角，避免标题与按钮被遮挡 */
+	padding: max(8px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) 8px
+		max(20px, env(safe-area-inset-left));
 	background: color-mix(in srgb, var(--bg-workspace) 85%, transparent);
 	backdrop-filter: blur(16px);
 	-webkit-backdrop-filter: blur(16px);
@@ -818,6 +822,9 @@ a:hover {
 	display: flex;
 	flex-direction: column;
 	gap: 0;
+	/* 软键盘弹起时，滚动锚点预留键盘高度 + 输入区净空，
+	   保证 scrollIntoView 能把最后一条消息带到键盘上方而非被遮挡 */
+	scroll-padding-bottom: calc(var(--keyboard-inset) + 16px);
 }
 
 /* 隐藏滚动条 */
@@ -1221,7 +1228,10 @@ a:hover {
    Floating Input Composer
    ======================================== */
 .composer-wrapper {
-	padding: 0 20px calc(max(24px, env(safe-area-inset-bottom)) + var(--keyboard-inset)) 20px;
+	/* 底部叠加软键盘高度；左右补 safe-area 覆盖横屏刘海/圆角 */
+	padding: 0 max(20px, env(safe-area-inset-right))
+		calc(max(24px, env(safe-area-inset-bottom)) + var(--keyboard-inset))
+		max(20px, env(safe-area-inset-left));
 	background: transparent;
 	position: relative;
 	z-index: 4;
@@ -1582,7 +1592,11 @@ a:hover {
 	display: none;
 }
 
-@media (max-width: 768px) {
+/* 移动式抽屉布局触发条件（OR 逻辑，逗号分隔）：
+   1. max-width:768px           —— 竖屏手机 / 窄窗口
+   2. 横屏且高度受限              —— 横屏手机（宽度常 >768px，但纵向空间不足以容纳常驻侧栏）
+   命中任一即走抽屉布局，消除“横屏 >768px 退桌面常驻侧栏”问题。 */
+@media (max-width: 768px), (orientation: landscape) and (max-height: 480px) {
 	.chat-app {
 		flex-direction: column;
 	}
@@ -1640,9 +1654,63 @@ a:hover {
 	}
 
 	.composer-wrapper {
-		padding: 0 10px calc(max(16px, env(safe-area-inset-bottom)) + var(--keyboard-inset)) 10px;
+		padding: 0 max(10px, env(safe-area-inset-right))
+			calc(max(16px, env(safe-area-inset-bottom)) + var(--keyboard-inset))
+			max(10px, env(safe-area-inset-left));
 	}
 
+	.conversation-delete {
+		right: 6px;
+	}
+
+	.conversation-rename {
+		right: 52px;
+	}
+}
+
+/* 横屏手机专属微调：纵向空间稀缺，抽屉收窄、垂直 padding 压缩；
+   抽屉左侧仍受基础 .conversation-list 的 safe-area-inset-left 保护 */
+@media (orientation: landscape) and (max-height: 480px) and (pointer: coarse) {
+	.conversation-list {
+		width: min(60vw, 300px);
+	}
+
+	.chat-topbar {
+		min-height: 48px;
+	}
+
+	.timeline {
+		padding: 10px 14px;
+		/* 横屏时键盘占据大量高度，时间线滚动锚点额外预留净空 */
+		scroll-padding-bottom: calc(var(--keyboard-inset) + 12px);
+	}
+
+	.welcome-container {
+		padding: 20px;
+		gap: 16px;
+	}
+}
+
+/* 平板竖屏（约 768–1024）：宽度足以保留常驻侧栏，但收窄以让出聊天区。
+   仅在触摸设备且竖屏时收窄，避免影响桌面同尺寸窗口的手感。 */
+@media (min-width: 769px) and (max-width: 1024px) and (orientation: portrait) and (pointer: coarse) {
+	.conversation-list {
+		width: 248px;
+	}
+}
+
+/* ========================================
+   触控目标尺寸（WCAG 2.5.5 / 平台触控规范 ≥44px）
+   以 pointer:coarse 为触发条件，覆盖所有触摸设备：
+   竖屏手机、横屏手机（>768px）、平板，与视口断点解耦，
+   不再受“仅 max-width:768px 内生效”的限制。
+   仅补齐基础态不足 44px 的可点元素；本身达标者
+   （.mobile-header-btn / .runtime-chat-command-item /
+    .thinking-header / .conversation-item / .config-item /
+    图片查看器控件）不重复声明。
+   ======================================== */
+@media (pointer: coarse) {
+	/* 方形图标按钮：宽高同时拉满，保持圆形/方形比例 */
 	.conversation-delete,
 	.conversation-rename,
 	.composer .icon-button,
@@ -1653,12 +1721,16 @@ a:hover {
 		min-height: 44px;
 	}
 
-	.conversation-delete {
-		right: 6px;
+	/* 带文字的横向按钮 / 列表项：仅保证可点高度，不强制方形 */
+	.runtime-code-action,
+	.code-block figcaption button {
+		min-height: 44px;
 	}
 
-	.conversation-rename {
-		right: 52px;
+	/* 命令联想项是 flex 行，补 align-items 让单行文字垂直居中 */
+	.command-suggestions li {
+		min-height: 44px;
+		align-items: center;
 	}
 }
 

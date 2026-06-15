@@ -25,7 +25,11 @@ export type {
 } from "./types";
 
 export type ChatStore = {
-	bootstrap: () => Promise<void>;
+	bootstrap: (opts?: {
+		preserveSelectionId?: string;
+		resuming?: boolean;
+	}) => Promise<void>;
+	refreshCommandsIfStale: () => Promise<void>;
 	createConversation: (title?: string) => Promise<void>;
 	deleteConversation: (conversationId: string) => Promise<void>;
 	renameConversation: (
@@ -45,6 +49,10 @@ export type ChatStore = {
 		conversationId: string,
 		messageId: string,
 	) => void;
+	addReferenceFromSelection: (
+		conversationId: string,
+		selectedText: string,
+	) => void;
 	clearReference: (conversationId: string, messageId: string) => void;
 	clearAttachment: (conversationId: string, attachmentId: string) => void;
 	loadMoreHistory: (conversationId: string) => Promise<void>;
@@ -58,8 +66,40 @@ export type ChatStore = {
 };
 
 const HISTORY_LIMIT = 50;
-const JSON_FALLBACK_POLL_MS = 1000;
+/** JSON 轮询退避：初始间隔 / 退避系数 / 上限（指数退避，恢复成功后重置） */
+const JSON_FALLBACK_BASE_MS = 1000;
+const JSON_FALLBACK_BACKOFF_FACTOR = 1.6;
+const JSON_FALLBACK_MAX_MS = 8000;
 const TERMINAL_EVENTS = new Set(["done", "error", "cancelled"]);
+/** 命令列表刷新 TTL：窗口聚焦时若距上次拉取超过该时长则重新拉取，使热重载的新命令可见 */
+const COMMANDS_REFRESH_TTL_MS = 60_000;
+
+const AUTO_SCROLL_STORAGE_KEY = "undefined_chat_auto_scroll";
+
+/** 从 localStorage 读取自动滚动偏好，缺省为开启（与历史行为一致） */
+function readStoredAutoScroll(): boolean {
+	if (typeof window === "undefined") {
+		return true;
+	}
+	try {
+		const stored = window.localStorage.getItem(AUTO_SCROLL_STORAGE_KEY);
+		return stored === null ? true : stored === "true";
+	} catch {
+		return true;
+	}
+}
+
+/** 持久化自动滚动偏好到 localStorage（失败静默忽略，如隐私模式） */
+function persistAutoScroll(enabled: boolean): void {
+	if (typeof window === "undefined") {
+		return;
+	}
+	try {
+		window.localStorage.setItem(AUTO_SCROLL_STORAGE_KEY, String(enabled));
+	} catch {
+		// 忽略存储异常（隐私模式 / 配额）
+	}
+}
 
 export function createInitialChatState(): ChatState {
 	return {
@@ -84,11 +124,9 @@ export function createInitialChatState(): ChatState {
 		commandPaletteActiveIndex: 0,
 		imageViewer: null,
 		htmlPreview: null,
-		autoScrollEnabled: true,
-		topLoadSuppressedUntil: 0,
+		autoScrollEnabled: readStoredAutoScroll(),
 		platform: null,
 		settings: {
-			locale: "zh-CN",
 			mobilePanel: "chat",
 		},
 		bootstrapping: false,
@@ -302,6 +340,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 			};
 		case "send/error":
 			return { ...state, sendError: action.error };
+		case "commands/set":
+			return { ...state, commands: action.commands };
 		case "job/upsert": {
 			const activeJobs = { ...state.activeJobsByConversation };
 			const jobConversations = {
@@ -501,6 +541,17 @@ function fileNameFromPath(filePath: string): string {
 	return filePath.split(/[\\/]/).filter(Boolean).pop() || "attachment";
 }
 
+/** 引用预览长度上限（字符）。长引用截断以避免请求体过大。 */
+const REFERENCE_QUOTE_MAX = 4000;
+
+/**
+ * 归一化引用预览文本：合并连续空白/换行为单个空格并裁剪首尾，再按上限截断。
+ * 用于消息引用与划词引用，保证预览紧凑且长度可控。
+ */
+function normalizeQuote(raw: string): string {
+	return raw.replace(/\s+/g, " ").trim().slice(0, REFERENCE_QUOTE_MAX);
+}
+
 function normalizeRawSseEvent(
 	eventName: string,
 	eventId: number | null,
@@ -619,7 +670,15 @@ export function createChatStore({
 	const listeners = new Set<() => void>();
 	const subscriptionsByJob = new Map<string, string>();
 	const fallbackTimersByJob = new Map<string, ReturnType<typeof setTimeout>>();
+	/** 每个 job 当前的 JSON 轮询退避间隔（ms），随连续失败指数增长、成功后重置 */
+	const fallbackBackoffByJob = new Map<string, number>();
 	let unlistenRuntimeSse: (() => void) | null = null;
+	/** bootstrap 重入保护：已在进行中的 bootstrap promise，避免并发重入导致 SSE 监听泄漏 */
+	let inFlightBootstrap: Promise<void> | null = null;
+	/** 发送 in-flight 锁：从点击到 job 建立期间阻止重复发送，防止重复乐观消息 */
+	let sendInFlight = false;
+	/** 上次成功拉取命令列表的时间戳，用于窗口聚焦时按 TTL 刷新 */
+	let lastCommandsFetchedAt = 0;
 
 	function emit(): void {
 		for (const listener of listeners) {
@@ -629,6 +688,10 @@ export function createChatStore({
 
 	function dispatch(action: ChatAction): void {
 		state = chatReducer(state, action);
+		// 自动滚动偏好在状态更新后持久化（reducer 保持纯函数，副作用集中在此）
+		if (action.type === "autoScroll/set") {
+			persistAutoScroll(action.enabled);
+		}
 		emit();
 	}
 
@@ -690,21 +753,37 @@ export function createChatStore({
 			clearTimeout(timer);
 			fallbackTimersByJob.delete(jobId);
 		}
+		fallbackBackoffByJob.delete(jobId);
 	}
 
-	function scheduleFallbackPolling(jobId: string): void {
+	/** 计算并推进某个 job 的下一次轮询退避间隔（指数增长，封顶 JSON_FALLBACK_MAX_MS） */
+	function nextFallbackDelay(jobId: string): number {
+		const current = fallbackBackoffByJob.get(jobId) ?? JSON_FALLBACK_BASE_MS;
+		const next = Math.min(
+			Math.round(current * JSON_FALLBACK_BACKOFF_FACTOR),
+			JSON_FALLBACK_MAX_MS,
+		);
+		fallbackBackoffByJob.set(jobId, next);
+		return current;
+	}
+
+	function scheduleFallbackPolling(jobId: string, delayMs?: number): void {
 		if (fallbackTimersByJob.has(jobId)) {
 			return;
 		}
 		const timer = setTimeout(() => {
 			fallbackTimersByJob.delete(jobId);
 			fetchJobEventsFallback(jobId);
-		}, JSON_FALLBACK_POLL_MS);
+		}, delayMs ?? JSON_FALLBACK_BASE_MS);
 		fallbackTimersByJob.set(jobId, timer);
 	}
 
 	function fetchJobEventsFallback(jobId: string): void {
-		stopFallbackPolling(jobId);
+		const timer = fallbackTimersByJob.get(jobId);
+		if (timer) {
+			clearTimeout(timer);
+			fallbackTimersByJob.delete(jobId);
+		}
 		dispatch({ type: "connection/set", connectionState: "json_fallback" });
 		void client
 			.fetchJobEventsJson({
@@ -713,33 +792,55 @@ export function createChatStore({
 				conversationId: state.jobConversationById[jobId],
 			})
 			.then((response) => {
+				// 拉取成功：重置退避间隔
+				fallbackBackoffByJob.delete(jobId);
 				dispatch({ type: "job/upsert", job: response.job });
 				applyRuntimeEvents(jobId, response.events);
 				const hasTerminalEvent = response.events.some((item) =>
 					TERMINAL_EVENTS.has(item.event),
 				);
 				if (isJobRunning(response.job)) {
-					scheduleFallbackPolling(jobId);
+					scheduleFallbackPolling(jobId, JSON_FALLBACK_BASE_MS);
 				} else if (!hasTerminalEvent && response.job.conversationId) {
 					void loadHistory(response.job.conversationId);
 					dispatch({ type: "connection/set", connectionState: "connected" });
 				}
 			})
 			.catch(() => {
-				stopFallbackPolling(jobId);
-				dispatch({ type: "connection/set", connectionState: "disconnected" });
+				// 单次失败不直接放弃：仅当该 job 仍是活跃任务时按指数退避继续重试，
+				// 否则停止轮询。连接状态保持 json_fallback（仍在尝试），而非直接 disconnected。
+				const conversationId = state.jobConversationById[jobId];
+				const stillActive =
+					conversationId != null &&
+					state.activeJobsByConversation[conversationId]?.jobId === jobId;
+				if (stillActive) {
+					scheduleFallbackPolling(jobId, nextFallbackDelay(jobId));
+				} else {
+					stopFallbackPolling(jobId);
+					dispatch({
+						type: "connection/set",
+						connectionState: "disconnected",
+					});
+				}
 			});
 	}
 
-	async function bootstrap(): Promise<void> {
+	async function runBootstrap(
+		preserveSelectionId?: string,
+		resuming = false,
+	): Promise<void> {
 		dispatch({ type: "bootstrap/start" });
+		// Android 切后台返回等续接场景：标记为 resuming，连接成功后由后续状态覆盖
+		if (resuming) {
+			dispatch({ type: "connection/set", connectionState: "resuming" });
+		}
 		try {
 			const runtimeConfig = await client.getRuntimeConfig();
 			if (!runtimeConfig?.runtimeUrl || !runtimeConfig.hasApiKey) {
 				dispatch({
 					type: "bootstrap/error",
 					runtimeConfig,
-					error: "请先配置 Runtime URL 和 API Key",
+					error: "error.needConfig",
 				});
 				return;
 			}
@@ -751,13 +852,19 @@ export function createChatStore({
 					client.getActiveJobs(),
 					client.listCommands(),
 				]);
+			lastCommandsFetchedAt = Date.now();
 			// 仅选取真实存在于会话列表中的会话：defaultConversationId 是后端常量
 			// （legacy-system-42），未必对应已存在的会话，盲目用它会触发 getHistory 404
 			const conversationIds = new Set(
 				conversationsResponse.conversations.map((item) => item.id),
 			);
 			const preferredDefault = conversationsResponse.defaultConversationId;
+			// Android 切后台返回等场景：若传入的当前选中会话仍存在，优先保留，
+			// 避免用后端默认值重算导致丢失用户正在查看的会话
 			const selected =
+				(preserveSelectionId && conversationIds.has(preserveSelectionId)
+					? preserveSelectionId
+					: "") ||
 				(preferredDefault && conversationIds.has(preferredDefault)
 					? preferredDefault
 					: "") ||
@@ -789,6 +896,44 @@ export function createChatStore({
 			}
 		} catch (err) {
 			dispatch({ type: "bootstrap/error", error: errorMessage(err) });
+		}
+	}
+
+	async function bootstrap(opts?: {
+		preserveSelectionId?: string;
+		resuming?: boolean;
+	}): Promise<void> {
+		// 重入保护：App 挂载与 Android resume 可能并发触发 bootstrap，
+		// 复用进行中的 promise，避免重复 clearNativeSubscriptions / listenRuntimeSse 造成监听泄漏
+		if (inFlightBootstrap) {
+			return inFlightBootstrap;
+		}
+		const run = runBootstrap(opts?.preserveSelectionId, opts?.resuming).finally(
+			() => {
+				inFlightBootstrap = null;
+			},
+		);
+		inFlightBootstrap = run;
+		return run;
+	}
+
+	/**
+	 * 刷新命令列表：窗口聚焦时若距上次拉取超过 TTL 则重新拉取，
+	 * 使 Skills 热重载新增的命令可见。未连接或未配置时跳过。
+	 */
+	async function refreshCommandsIfStale(): Promise<void> {
+		if (!state.runtimeConfig?.hasApiKey || state.bootstrapping) {
+			return;
+		}
+		if (Date.now() - lastCommandsFetchedAt < COMMANDS_REFRESH_TTL_MS) {
+			return;
+		}
+		try {
+			const commands = await client.listCommands();
+			lastCommandsFetchedAt = Date.now();
+			dispatch({ type: "commands/set", commands: commands.commands });
+		} catch {
+			// 刷新失败静默忽略：保留现有命令列表，不影响主流程
 		}
 	}
 
@@ -872,13 +1017,18 @@ export function createChatStore({
 	}
 
 	async function sendSelectedMessage(): Promise<void> {
+		// in-flight 锁：从点击到 job 建立期间阻止重复发送，
+		// 避免快速双击重复插入乐观消息 / 重复请求后端
+		if (sendInFlight) {
+			return;
+		}
 		const conversationId = selectedConversation(state);
 		if (!conversationId) {
-			dispatch({ type: "send/error", error: "没有可用会话" });
+			dispatch({ type: "send/error", error: "error.noConversation" });
 			return;
 		}
 		if (isJobRunning(state.activeJobsByConversation[conversationId])) {
-			dispatch({ type: "send/error", error: "当前会话仍在运行" });
+			dispatch({ type: "send/error", error: "error.conversationRunning" });
 			return;
 		}
 		const text = (state.draftsByConversation[conversationId] ?? "").trim();
@@ -886,11 +1036,11 @@ export function createChatStore({
 		if (
 			attachments.some((item) => ["queued", "uploading"].includes(item.status))
 		) {
-			dispatch({ type: "send/error", error: "附件仍在上传" });
+			dispatch({ type: "send/error", error: "error.attachmentsUploading" });
 			return;
 		}
 		if (attachments.some((item) => item.status === "error")) {
-			dispatch({ type: "send/error", error: "请先移除上传失败的附件" });
+			dispatch({ type: "send/error", error: "error.attachmentsFailed" });
 			return;
 		}
 		const attachmentIds = attachments
@@ -900,6 +1050,8 @@ export function createChatStore({
 		if (!text && attachmentIds.length === 0) {
 			return;
 		}
+
+		sendInFlight = true;
 
 		// 立即插入乐观用户消息并清空草稿/附件/引用（不等后端响应）
 		const optimisticMessageId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
@@ -956,6 +1108,8 @@ export function createChatStore({
 			dispatch({ type: "attachments/set", conversationId, attachments });
 			dispatch({ type: "references/set", conversationId, references });
 			dispatch({ type: "send/error", error: errorMessage(err) });
+		} finally {
+			sendInFlight = false;
 		}
 	}
 
@@ -1060,9 +1214,27 @@ export function createChatStore({
 		if (!message) {
 			return;
 		}
-		// 截取前 100 个字符作为引用预览
-		const quote = message.content.slice(0, 100);
-		addReference(conversationId, { messageId, quote });
+		// 归一化空白并截断到上限作为引用预览
+		const quote = normalizeQuote(message.content);
+		addReference(conversationId, { messageId, quote, kind: "message" });
+	}
+
+	/**
+	 * 划词引用：用选中文本构造 selection 类型引用。
+	 * messageId 为本地合成 id（不指向真实历史消息），quote 为归一化后的选中文本。
+	 */
+	function addReferenceFromSelection(
+		conversationId: string,
+		selectedText: string,
+	): void {
+		const quote = normalizeQuote(selectedText);
+		if (!quote) {
+			return;
+		}
+		const messageId = `selection-${Date.now()}-${Math.random()
+			.toString(36)
+			.slice(2, 11)}`;
+		addReference(conversationId, { messageId, quote, kind: "selection" });
 	}
 
 	function clearReference(conversationId: string, messageId: string): void {
@@ -1237,6 +1409,9 @@ export function createChatStore({
 									isAgent: true,
 									currentStage:
 										String(payload.stage || "") || existing?.currentStage,
+									// stage 明细（如当前模型名）：供工具块展示 stageDetail
+									detail:
+										String(payload.detail ?? "").trim() || existing?.detail,
 									argumentsPreview: existing?.argumentsPreview,
 									resultPreview: existing?.resultPreview,
 									uiHint: existing?.uiHint,
@@ -1333,6 +1508,7 @@ export function createChatStore({
 
 	return {
 		bootstrap,
+		refreshCommandsIfStale,
 		createConversation,
 		deleteConversation,
 		renameConversation,
@@ -1343,6 +1519,7 @@ export function createChatStore({
 		addAttachmentPath,
 		addReference,
 		addReferenceFromMessageId,
+		addReferenceFromSelection,
 		clearReference,
 		clearAttachment,
 		loadMoreHistory,

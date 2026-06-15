@@ -1,3 +1,4 @@
+import { useTranslation } from "../i18n";
 import { AttachmentImage } from "../rendering/AttachmentImage";
 import type { Attachment } from "../runtime-client/types";
 import { isImageAttachment } from "../utils/attachment";
@@ -32,6 +33,7 @@ export function AttachmentCard({
 	onDownload,
 	onOpenImage,
 }: AttachmentCardProps) {
+	const { t } = useTranslation();
 	const isImage = isImageAttachment(attachment);
 	const shouldInline = shouldInlineImage(attachment);
 
@@ -152,10 +154,10 @@ export function AttachmentCard({
 						className="ghost-button"
 						onClick={() => onPreview(attachment)}
 						style={{ padding: "6px 12px", fontSize: "12px" }}
-						title="预览"
+						title={t("attachment.preview")}
 						type="button"
 					>
-						预览
+						{t("attachment.preview")}
 					</button>
 				) : null}
 				{onDownload ? (
@@ -163,10 +165,10 @@ export function AttachmentCard({
 						className="ghost-button"
 						onClick={() => onDownload(attachment)}
 						style={{ padding: "6px 12px", fontSize: "12px" }}
-						title="下载"
+						title={t("attachment.download")}
 						type="button"
 					>
-						下载
+						{t("attachment.download")}
 					</button>
 				) : null}
 			</div>

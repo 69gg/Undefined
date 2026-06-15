@@ -1,8 +1,26 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+	within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, test, vi } from "vitest";
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+import { LOCALE_STORAGE_KEY, LanguageProvider } from "../i18n";
 import { commandInfo, subcommandInfo } from "../test-fixtures";
 import { MessageComposer } from "./MessageComposer";
+
+// 固定为简体中文，使断言不受测试环境 navigator.language 影响
+beforeEach(() => {
+	window.localStorage.setItem(LOCALE_STORAGE_KEY, "zh-CN");
+});
+
+// MessageComposer 内部使用 useTranslation，需置于 LanguageProvider 下
+function withProvider(node: ReactNode): ReactNode {
+	return <LanguageProvider>{node}</LanguageProvider>;
+}
 
 describe("MessageComposer", () => {
 	test("sends on Enter, inserts newline with Shift+Enter, and shows command suggestions", async () => {
@@ -10,26 +28,28 @@ describe("MessageComposer", () => {
 		const onSend = vi.fn();
 
 		render(
-			<MessageComposer
-				attachmentQueue={[]}
-				commandSuggestions={[
-					commandInfo({ name: "help", description: "显示帮助" }),
-					commandInfo({
-						name: "version",
-						trigger: "/version",
-						description: "显示版本",
-						usage: "/version",
-					}),
-				]}
-				disabled={false}
-				draft=""
-				references={[]}
-				onAddAttachment={vi.fn()}
-				onClearAttachment={vi.fn()}
-				onClearReference={vi.fn()}
-				onDraftChange={onDraftChange}
-				onSend={onSend}
-			/>,
+			withProvider(
+				<MessageComposer
+					attachmentQueue={[]}
+					commandSuggestions={[
+						commandInfo({ name: "help", description: "显示帮助" }),
+						commandInfo({
+							name: "version",
+							trigger: "/version",
+							description: "显示版本",
+							usage: "/version",
+						}),
+					]}
+					disabled={false}
+					draft=""
+					references={[]}
+					onAddAttachment={vi.fn()}
+					onClearAttachment={vi.fn()}
+					onClearReference={vi.fn()}
+					onDraftChange={onDraftChange}
+					onSend={onSend}
+				/>,
+			),
 		);
 
 		const editor = screen.getByLabelText("消息输入");
@@ -54,41 +74,43 @@ describe("MessageComposer", () => {
 		const onDraftChange = vi.fn();
 
 		render(
-			<MessageComposer
-				attachmentQueue={[]}
-				commandSuggestions={[
-					commandInfo({ name: "help", description: "显示帮助" }),
-					commandInfo({
-						name: "conv",
-						trigger: "/conv",
-						description: "管理会话",
-						usage: "/conv <子命令>",
-						subcommands: [
-							subcommandInfo({
-								name: "new",
-								trigger: "/conv new",
-								usage: "/conv new [标题]",
-								description: "新建会话",
-							}),
-							subcommandInfo({
-								name: "list",
-								trigger: "/conv list",
-								usage: "/conv list",
-								args: "",
-								description: "列出会话",
-							}),
-						],
-					}),
-				]}
-				disabled={false}
-				draft=""
-				references={[]}
-				onAddAttachment={vi.fn()}
-				onClearAttachment={vi.fn()}
-				onClearReference={vi.fn()}
-				onDraftChange={onDraftChange}
-				onSend={vi.fn()}
-			/>,
+			withProvider(
+				<MessageComposer
+					attachmentQueue={[]}
+					commandSuggestions={[
+						commandInfo({ name: "help", description: "显示帮助" }),
+						commandInfo({
+							name: "conv",
+							trigger: "/conv",
+							description: "管理会话",
+							usage: "/conv <子命令>",
+							subcommands: [
+								subcommandInfo({
+									name: "new",
+									trigger: "/conv new",
+									usage: "/conv new [标题]",
+									description: "新建会话",
+								}),
+								subcommandInfo({
+									name: "list",
+									trigger: "/conv list",
+									usage: "/conv list",
+									args: "",
+									description: "列出会话",
+								}),
+							],
+						}),
+					]}
+					disabled={false}
+					draft=""
+					references={[]}
+					onAddAttachment={vi.fn()}
+					onClearAttachment={vi.fn()}
+					onClearReference={vi.fn()}
+					onDraftChange={onDraftChange}
+					onSend={vi.fn()}
+				/>,
+			),
 		);
 
 		const editor = screen.getByLabelText("消息输入");
@@ -106,41 +128,43 @@ describe("MessageComposer", () => {
 
 	test("回车选中带子命令的主命令后立即展示其子命令", async () => {
 		render(
-			<MessageComposer
-				attachmentQueue={[]}
-				commandSuggestions={[
-					commandInfo({ name: "help", description: "显示帮助" }),
-					commandInfo({
-						name: "conv",
-						trigger: "/conv",
-						description: "管理会话",
-						usage: "/conv <子命令>",
-						subcommands: [
-							subcommandInfo({
-								name: "new",
-								trigger: "/conv new",
-								usage: "/conv new [标题]",
-								description: "新建会话",
-							}),
-							subcommandInfo({
-								name: "list",
-								trigger: "/conv list",
-								usage: "/conv list",
-								args: "",
-								description: "列出会话",
-							}),
-						],
-					}),
-				]}
-				disabled={false}
-				draft=""
-				references={[]}
-				onAddAttachment={vi.fn()}
-				onClearAttachment={vi.fn()}
-				onClearReference={vi.fn()}
-				onDraftChange={vi.fn()}
-				onSend={vi.fn()}
-			/>,
+			withProvider(
+				<MessageComposer
+					attachmentQueue={[]}
+					commandSuggestions={[
+						commandInfo({ name: "help", description: "显示帮助" }),
+						commandInfo({
+							name: "conv",
+							trigger: "/conv",
+							description: "管理会话",
+							usage: "/conv <子命令>",
+							subcommands: [
+								subcommandInfo({
+									name: "new",
+									trigger: "/conv new",
+									usage: "/conv new [标题]",
+									description: "新建会话",
+								}),
+								subcommandInfo({
+									name: "list",
+									trigger: "/conv list",
+									usage: "/conv list",
+									args: "",
+									description: "列出会话",
+								}),
+							],
+						}),
+					]}
+					disabled={false}
+					draft=""
+					references={[]}
+					onAddAttachment={vi.fn()}
+					onClearAttachment={vi.fn()}
+					onClearReference={vi.fn()}
+					onDraftChange={vi.fn()}
+					onSend={vi.fn()}
+				/>,
+			),
 		);
 
 		const editor = screen.getByLabelText("消息输入");
@@ -161,38 +185,70 @@ describe("MessageComposer", () => {
 		).toBeInTheDocument();
 	});
 
+	test("IME 合成中的回车不触发发送", async () => {
+		const onSend = vi.fn();
+
+		render(
+			withProvider(
+				<MessageComposer
+					attachmentQueue={[]}
+					commandSuggestions={[]}
+					disabled={false}
+					draft="你好"
+					references={[]}
+					onAddAttachment={vi.fn()}
+					onClearAttachment={vi.fn()}
+					onClearReference={vi.fn()}
+					onDraftChange={vi.fn()}
+					onSend={onSend}
+				/>,
+			),
+		);
+
+		const editor = screen.getByLabelText("消息输入");
+		// 模拟输入法合成期间的回车（isComposing=true）：应被守卫拦截，不发送
+		fireEvent.keyDown(editor, { key: "Enter", isComposing: true });
+		expect(onSend).not.toHaveBeenCalled();
+
+		// 合成结束后的普通回车正常发送
+		fireEvent.keyDown(editor, { key: "Enter" });
+		expect(onSend).toHaveBeenCalledOnce();
+	});
+
 	test("renders attachment queue and references with clear actions", async () => {
 		const onClearAttachment = vi.fn();
 		const onClearReference = vi.fn();
 		const onJumpReference = vi.fn();
 
 		render(
-			<MessageComposer
-				attachmentQueue={[
-					{
-						id: "local-1",
-						name: "trace.log",
-						size: 1024,
-						status: "ready",
-						attachmentId: "att-1",
-					},
-				]}
-				commandSuggestions={[]}
-				disabled={false}
-				draft="请分析"
-				references={[
-					{
-						messageId: "msg-1",
-						quote: "错误堆栈",
-					},
-				]}
-				onAddAttachment={vi.fn()}
-				onClearAttachment={onClearAttachment}
-				onClearReference={onClearReference}
-				onJumpReference={onJumpReference}
-				onDraftChange={vi.fn()}
-				onSend={vi.fn()}
-			/>,
+			withProvider(
+				<MessageComposer
+					attachmentQueue={[
+						{
+							id: "local-1",
+							name: "trace.log",
+							size: 1024,
+							status: "ready",
+							attachmentId: "att-1",
+						},
+					]}
+					commandSuggestions={[]}
+					disabled={false}
+					draft="请分析"
+					references={[
+						{
+							messageId: "msg-1",
+							quote: "错误堆栈",
+						},
+					]}
+					onAddAttachment={vi.fn()}
+					onClearAttachment={onClearAttachment}
+					onClearReference={onClearReference}
+					onJumpReference={onJumpReference}
+					onDraftChange={vi.fn()}
+					onSend={vi.fn()}
+				/>,
+			),
 		);
 
 		const attachments = screen.getByLabelText("附件队列");
@@ -216,35 +272,39 @@ describe("MessageComposer", () => {
 	test("focusRequest focuses the editor and opens command mode", async () => {
 		const onDraftChange = vi.fn();
 		const { rerender } = render(
-			<MessageComposer
-				attachmentQueue={[]}
-				commandSuggestions={[commandInfo({ name: "help" })]}
-				disabled={false}
-				draft=""
-				focusRequest={null}
-				references={[]}
-				onAddAttachment={vi.fn()}
-				onClearAttachment={vi.fn()}
-				onClearReference={vi.fn()}
-				onDraftChange={onDraftChange}
-				onSend={vi.fn()}
-			/>,
+			withProvider(
+				<MessageComposer
+					attachmentQueue={[]}
+					commandSuggestions={[commandInfo({ name: "help" })]}
+					disabled={false}
+					draft=""
+					focusRequest={null}
+					references={[]}
+					onAddAttachment={vi.fn()}
+					onClearAttachment={vi.fn()}
+					onClearReference={vi.fn()}
+					onDraftChange={onDraftChange}
+					onSend={vi.fn()}
+				/>,
+			),
 		);
 
 		rerender(
-			<MessageComposer
-				attachmentQueue={[]}
-				commandSuggestions={[commandInfo({ name: "help" })]}
-				disabled={false}
-				draft=""
-				focusRequest={{ id: 1, commandMode: true }}
-				references={[]}
-				onAddAttachment={vi.fn()}
-				onClearAttachment={vi.fn()}
-				onClearReference={vi.fn()}
-				onDraftChange={onDraftChange}
-				onSend={vi.fn()}
-			/>,
+			withProvider(
+				<MessageComposer
+					attachmentQueue={[]}
+					commandSuggestions={[commandInfo({ name: "help" })]}
+					disabled={false}
+					draft=""
+					focusRequest={{ id: 1, commandMode: true }}
+					references={[]}
+					onAddAttachment={vi.fn()}
+					onClearAttachment={vi.fn()}
+					onClearReference={vi.fn()}
+					onDraftChange={onDraftChange}
+					onSend={vi.fn()}
+				/>,
+			),
 		);
 
 		const editor = await screen.findByDisplayValue("/");
@@ -256,18 +316,20 @@ describe("MessageComposer", () => {
 
 	test("disables sending for a running current conversation", () => {
 		render(
-			<MessageComposer
-				attachmentQueue={[]}
-				commandSuggestions={[]}
-				disabled={true}
-				draft="不能发送"
-				references={[]}
-				onAddAttachment={vi.fn()}
-				onClearAttachment={vi.fn()}
-				onClearReference={vi.fn()}
-				onDraftChange={vi.fn()}
-				onSend={vi.fn()}
-			/>,
+			withProvider(
+				<MessageComposer
+					attachmentQueue={[]}
+					commandSuggestions={[]}
+					disabled={true}
+					draft="不能发送"
+					references={[]}
+					onAddAttachment={vi.fn()}
+					onClearAttachment={vi.fn()}
+					onClearReference={vi.fn()}
+					onDraftChange={vi.fn()}
+					onSend={vi.fn()}
+				/>,
+			),
 		);
 
 		expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();

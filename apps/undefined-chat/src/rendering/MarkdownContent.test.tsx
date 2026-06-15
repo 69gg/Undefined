@@ -1,13 +1,24 @@
-import { render, screen } from "@testing-library/react";
+import { render as baseRender, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
+import { LOCALE_STORAGE_KEY, LanguageProvider } from "../i18n";
 import type { Attachment } from "../runtime-client/types";
 import { AttachmentImageProvider } from "./AttachmentImageContext";
 import { MarkdownContent } from "./MarkdownContent";
 
+// MarkdownContent 内部经 CodeBlock / AttachmentImage 使用 useTranslation，需置于 Provider 下
+function render(node: ReactNode) {
+	return baseRender(<LanguageProvider>{node}</LanguageProvider>);
+}
+
 describe("MarkdownContent", () => {
 	const mockOnPreviewHtml = vi.fn();
+
+	// 固定为简体中文，使断言不受测试环境 navigator.language 影响
+	beforeEach(() => {
+		window.localStorage.setItem(LOCALE_STORAGE_KEY, "zh-CN");
+	});
 
 	it("渲染基本文本", () => {
 		render(

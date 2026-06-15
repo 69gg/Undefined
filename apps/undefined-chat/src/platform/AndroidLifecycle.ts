@@ -30,8 +30,14 @@ export function setupAndroidLifecycle(store: ChatStore): () => void {
 			console.log("[Lifecycle] App resumed, re-bootstrapping...");
 
 			try {
-				// 重新初始化连接
-				await store.bootstrap();
+				// 重新初始化连接：保留当前选中会话，避免切后台返回后丢失正在查看的会话；
+				// 标记为续接（resuming）以反映真实连接状态
+				const previousSelection =
+					store.getSnapshot().selectedConversationId ?? undefined;
+				await store.bootstrap({
+					preserveSelectionId: previousSelection,
+					resuming: true,
+				});
 
 				// 获取当前活跃任务
 				const state = store.getSnapshot();

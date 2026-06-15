@@ -6,7 +6,7 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager, State};
-use tauri_plugin_http::reqwest::{Client, Response};
+use tauri_plugin_http::reqwest::Response;
 use tokio::io::AsyncWriteExt;
 
 const MAX_PREVIEW_BYTES: usize = 10 * 1024 * 1024;
@@ -109,7 +109,8 @@ async fn attachment_response(
     let api_key = require_api_key(app).await?;
     let path = attachment_path(attachment_id, preview)?;
     let url = format!("{}{}", config.runtime_url, path.as_str());
-    Client::new()
+    state
+        .http_client()?
         .get(url)
         .header("X-Undefined-API-Key", api_key)
         .send()

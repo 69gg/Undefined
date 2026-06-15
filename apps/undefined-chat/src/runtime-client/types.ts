@@ -52,6 +52,12 @@ export type Attachment = {
 export type MessageReference = {
 	messageId: string;
 	quote: string;
+	/**
+	 * 引用来源：
+	 * - 缺省 / "message"：引用整条历史消息（messageId 指向真实消息）
+	 * - "selection"：划词引用，messageId 为本地生成的合成 id，quote 为选中文本
+	 */
+	kind?: "message" | "selection";
 };
 
 export type HistoryWebchat = {

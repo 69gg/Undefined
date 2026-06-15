@@ -1,6 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import {
-	type FormEvent,
+	type ReactNode,
 	useCallback,
 	useEffect,
 	useMemo,
@@ -12,12 +12,21 @@ import { createChatStore, isJobRunning } from "./chat-store/store";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ConversationList } from "./conversation-list/ConversationList";
 import { useMediaQuery } from "./hooks/useMediaQuery";
+import { useTranslation } from "./i18n";
 import { ImageViewerModal } from "./image-viewer/ImageViewerModal";
 import { useImageViewer } from "./image-viewer/useImageViewer";
 import { MessageComposer } from "./message-composer/MessageComposer";
 import { MessageTimeline } from "./message-timeline/MessageTimeline";
-import { isAndroid, setupAndroidLifecycle } from "./platform/AndroidLifecycle";
+import { setupAndroidLifecycle } from "./platform/AndroidLifecycle";
+import { ConnectionSetup } from "./platform/ConnectionSetup";
+import { DesktopLayout } from "./platform/DesktopLayout";
 import { KeybindingManager } from "./platform/KeybindingManager";
+import {
+	isAndroidPlatform,
+	isDesktopPlatform,
+	isMobilePlatform,
+	usePlatform,
+} from "./platform/PlatformContext";
 import { AttachmentImageProvider } from "./rendering/AttachmentImageContext";
 import { createTauriRuntimeClient } from "./runtime-client/tauri";
 import type { Attachment } from "./runtime-client/types";
@@ -25,8 +34,13 @@ import { useTheme } from "./theme/use-theme";
 import { isImageAttachment } from "./utils/attachment";
 
 const CONVERSATION_SIDEBAR_ID = "conversation-sidebar";
+/** 焦点可聚焦元素选择器（用于移动端抽屉焦点陷阱与初始聚焦） */
+const FOCUSABLE_SELECTOR =
+	"button, [href], input, textarea, select, [tabindex]:not([tabindex='-1'])";
 
 export function App() {
+	const { t } = useTranslation();
+	const platform = usePlatform();
 	const { effectiveTheme } = useTheme();
 	const client = useMemo(() => createTauriRuntimeClient(), []);
 	const store = useMemo(() => createChatStore({ client }), [client]);
@@ -50,7 +64,9 @@ export function App() {
 	const mobileMenuButtonRef = useRef<HTMLButtonElement | null>(null);
 	const previousMobileFocusRef = useRef<HTMLElement | null>(null);
 	const previewImageUrlRef = useRef<string | null>(null);
-	const isMobile = useMediaQuery("(max-width: 768px)");
+	// 窄视口或真实移动平台均视为移动端：解决平板/移动设备横屏（>768px）被误判为桌面
+	const isNarrowViewport = useMediaQuery("(max-width: 768px)");
+	const isMobile = isNarrowViewport || isMobilePlatform(platform);
 
 	const pendingDeleteConversation = pendingDeleteId
 		? (state.conversations.find((item) => item.id === pendingDeleteId) ?? null)
@@ -71,52 +87,55 @@ export function App() {
 		? (state.activeJobsByConversation[selectedConversationId] ?? null)
 		: null;
 
-	const [setupRuntimeUrl, setSetupRuntimeUrl] = useState(
-		state.runtimeConfig?.runtimeUrl ?? "http://127.0.0.1:8788",
-	);
-	const [setupApiKey, setSetupApiKey] = useState("");
-	const [allowInsecureStorageFallback, setAllowInsecureStorageFallback] =
-		useState(false);
 	const [setupError, setSetupError] = useState<string | null>(null);
 
 	const needsSetup =
-		Boolean(state.error?.includes("请先配置")) ||
-		!state.runtimeConfig?.runtimeUrl ||
-		!state.runtimeConfig.hasApiKey;
+		!state.runtimeConfig?.runtimeUrl || !state.runtimeConfig.hasApiKey;
 
 	useEffect(() => {
+		// 首次挂载：不传 preserveSelectionId，走后端默认选中逻辑
 		void store.bootstrap();
 	}, [store]);
 
 	useEffect(() => {
-		if (!isAndroid()) {
+		// 以真实平台为准启用 Android 生命周期（替代旧的 UA 判定）
+		if (!isAndroidPlatform(platform)) {
 			return undefined;
 		}
 		return setupAndroidLifecycle(store);
-	}, [store]);
+	}, [store, platform]);
 
 	// 应用主题到 DOM
 	useEffect(() => {
 		document.documentElement.dataset.theme = effectiveTheme;
 	}, [effectiveTheme]);
 
-	// 当需要配置时，同步当前 URL
+	// 窗口聚焦时按 TTL 刷新命令列表，使 Skills 热重载新增命令可见
 	useEffect(() => {
-		if (state.runtimeConfig?.runtimeUrl) {
-			setSetupRuntimeUrl(state.runtimeConfig.runtimeUrl);
-		}
-	}, [state.runtimeConfig?.runtimeUrl]);
+		const onFocus = (): void => {
+			void store.refreshCommandsIfStale();
+		};
+		window.addEventListener("focus", onFocus);
+		return () => {
+			window.removeEventListener("focus", onFocus);
+		};
+	}, [store]);
 
-	async function handleSetupSubmit(event: FormEvent<HTMLFormElement>) {
-		event.preventDefault();
+	async function handleConnect(
+		url: string,
+		apiKey: string,
+		allowInsecure: boolean,
+	): Promise<void> {
 		setSetupError(null);
 		try {
-			await client.saveRuntimeConfig(setupRuntimeUrl);
-			if (allowInsecureStorageFallback) {
+			await client.saveRuntimeConfig(url);
+			if (allowInsecure) {
 				await client.confirmInsecureStorageFallback();
 			}
-			await client.saveApiKey(setupApiKey);
-			setSetupApiKey("");
+			// settings 模式下密钥留空表示沿用原密钥，仅在有输入时保存
+			if (apiKey) {
+				await client.saveApiKey(apiKey);
+			}
 			setIsSettingsOpen(false);
 			await store.bootstrap();
 		} catch (err) {
@@ -131,10 +150,14 @@ export function App() {
 				fileName: attachment.name,
 			});
 			if (!result.ok) {
-				window.alert(result.body ?? "附件保存失败");
+				window.alert(result.body ?? t("attachment.saveFailed"));
 				return;
 			}
-			window.alert(`已保存 ${result.savedFileName ?? attachment.name}`);
+			window.alert(
+				t("attachment.saved", {
+					name: result.savedFileName ?? attachment.name,
+				}),
+			);
 		} catch (err) {
 			window.alert(err instanceof Error ? err.message : String(err));
 		}
@@ -146,7 +169,7 @@ export function App() {
 				attachmentId: attachment.id,
 			});
 			if (!result.ok || result.bytes.length === 0) {
-				window.alert(result.body ?? "附件无法预览");
+				window.alert(result.body ?? t("attachment.previewFailed"));
 				return;
 			}
 			const blob = new Blob([new Uint8Array(result.bytes)], {
@@ -173,7 +196,7 @@ export function App() {
 			const selected = await open({
 				multiple: false,
 				directory: false,
-				title: "选择附件",
+				title: t("attachment.pickerTitle"),
 				pickerMode: "document",
 				fileAccessMode: "copy",
 			});
@@ -241,13 +264,13 @@ export function App() {
 			void store.loadMoreHistory(selectedConversationId).then(() => {
 				requestAnimationFrame(() => {
 					if (!jumpToLoadedMessage(messageId)) {
-						window.alert("引用消息暂未加载，请继续加载更早消息后重试");
+						window.alert(t("reference.notLoaded"));
 					}
 				});
 			});
 			return;
 		}
-		window.alert("引用消息不在当前会话历史中");
+		window.alert(t("reference.notInHistory"));
 	}
 
 	const closeImageViewer = useCallback((): void => {
@@ -273,11 +296,53 @@ export function App() {
 		}
 		requestAnimationFrame(() => {
 			const sidebar = document.getElementById(CONVERSATION_SIDEBAR_ID);
-			const firstControl = sidebar?.querySelector<HTMLElement>(
-				"button, [href], input, textarea, select, [tabindex]:not([tabindex='-1'])",
-			);
+			const firstControl =
+				sidebar?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
 			firstControl?.focus();
 		});
+	}, [isMobile, isMobileSidebarActive]);
+
+	// 移动端抽屉打开时的焦点陷阱：Tab / Shift+Tab 循环限制在 #conversation-sidebar 内
+	// 配合 P-misc 给抽屉容器加的 role="dialog" aria-modal="true"
+	useEffect(() => {
+		if (!isMobile || !isMobileSidebarActive) {
+			return undefined;
+		}
+		const handleKeyDown = (event: KeyboardEvent): void => {
+			if (event.key !== "Tab") {
+				return;
+			}
+			const sidebar = document.getElementById(CONVERSATION_SIDEBAR_ID);
+			if (!sidebar) {
+				return;
+			}
+			const focusable = Array.from(
+				sidebar.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+			).filter(
+				(element) =>
+					!element.hasAttribute("disabled") && element.offsetParent !== null,
+			);
+			if (focusable.length === 0) {
+				return;
+			}
+			const first = focusable[0];
+			const last = focusable[focusable.length - 1];
+			const active = document.activeElement as HTMLElement | null;
+			// 焦点已离开抽屉（或在边界）时，循环回到另一端
+			if (event.shiftKey) {
+				if (active === first || !sidebar.contains(active)) {
+					event.preventDefault();
+					last?.focus();
+				}
+			} else if (active === last || !sidebar.contains(active)) {
+				event.preventDefault();
+				first?.focus();
+			}
+		};
+		document.addEventListener("keydown", handleKeyDown, true);
+		return () => {
+			document.removeEventListener("keydown", handleKeyDown, true);
+		};
 	}, [isMobile, isMobileSidebarActive]);
 
 	useEffect(() => {
@@ -422,7 +487,7 @@ export function App() {
 						if (!conversation) return;
 
 						const newTitle = window.prompt(
-							"请输入新的会话名称：",
+							t("conversation.renamePrompt"),
 							conversation.title,
 						);
 						if (newTitle?.trim() && newTitle.trim() !== conversation.title) {
@@ -447,245 +512,218 @@ export function App() {
 					selectedConversationId={selectedConversationId}
 				/>
 
-				{/* 主工作区 */}
+				{/* 主工作区（桌面端用 DesktopLayout 透明包裹，预留平台增强位） */}
 				<section
 					className="chat-workspace"
 					aria-hidden={isMobile && isMobileSidebarActive ? true : undefined}
-					aria-label="聊天"
+					aria-label={t("app.workspace.aria")}
 				>
-					{/* 顶栏 */}
-					<header className="chat-topbar">
-						<div className="topbar-left">
-							{/* 侧边栏折叠时的展示按钮，或移动端的菜单按钮 */}
-							{isSidebarCollapsed || isMobile ? (
-								<button
-									ref={mobileMenuButtonRef}
-									aria-controls={isMobile ? CONVERSATION_SIDEBAR_ID : undefined}
-									aria-expanded={isMobile ? isMobileSidebarActive : undefined}
-									aria-label={isMobile ? "打开会话列表" : "展开菜单"}
-									className="icon-button"
-									onClick={() => {
-										if (isMobile) {
-											openMobileSidebar();
-										} else {
-											setIsSidebarCollapsed(false);
+					<WorkspaceLayout isDesktop={isDesktopPlatform(platform)}>
+						{/* 顶栏 */}
+						<header className="chat-topbar">
+							<div className="topbar-left">
+								{/* 侧边栏折叠时的展示按钮，或移动端的菜单按钮 */}
+								{isSidebarCollapsed || isMobile ? (
+									<button
+										ref={mobileMenuButtonRef}
+										aria-controls={
+											isMobile ? CONVERSATION_SIDEBAR_ID : undefined
 										}
-									}}
-									title="展开菜单"
-									type="button"
-								>
-									<svg
-										fill="none"
-										height="16"
-										stroke="currentColor"
-										strokeLinecap="round"
-										strokeLinejoin="round"
-										strokeWidth="2"
-										viewBox="0 0 24 24"
-										width="16"
+										aria-expanded={isMobile ? isMobileSidebarActive : undefined}
+										aria-label={
+											isMobile
+												? t("app.topbar.openConversations")
+												: t("app.topbar.expandMenu")
+										}
+										className="icon-button"
+										onClick={() => {
+											if (isMobile) {
+												openMobileSidebar();
+											} else {
+												setIsSidebarCollapsed(false);
+											}
+										}}
+										title={t("app.topbar.expandMenu")}
+										type="button"
 									>
-										<title>展开菜单</title>
-										<line x1="3" x2="21" y1="12" y2="12" />
-										<line x1="3" x2="21" y1="6" y2="6" />
-										<line x1="3" x2="21" y1="18" y2="18" />
-									</svg>
-								</button>
-							) : null}
+										<svg
+											fill="none"
+											height="16"
+											stroke="currentColor"
+											strokeLinecap="round"
+											strokeLinejoin="round"
+											strokeWidth="2"
+											viewBox="0 0 24 24"
+											width="16"
+										>
+											<title>{t("app.topbar.expandMenu")}</title>
+											<line x1="3" x2="21" y1="12" y2="12" />
+											<line x1="3" x2="21" y1="6" y2="6" />
+											<line x1="3" x2="21" y1="18" y2="18" />
+										</svg>
+									</button>
+								) : null}
 
-							<div className="chat-title-block">
-								<strong>
-									{state.conversations.find(
-										(item) => item.id === selectedConversationId,
-									)?.title ?? "默认会话"}
-								</strong>
-								<div style={{ display: "flex", gap: "6px", marginTop: "2px" }}>
-									<span className={`connection-pill ${state.connectionState}`}>
-										{connectionStateLabel(state.connectionState)}
-									</span>
+								<div className="chat-title-block">
+									<strong>
+										{state.conversations.find(
+											(item) => item.id === selectedConversationId,
+										)?.title || t("app.topbar.defaultConversation")}
+									</strong>
+									<div
+										style={{ display: "flex", gap: "6px", marginTop: "2px" }}
+									>
+										<span
+											className={`connection-pill ${state.connectionState}`}
+										>
+											{t(`app.connection.${state.connectionState}`)}
+										</span>
+									</div>
 								</div>
 							</div>
-						</div>
 
-						<div className="runtime-indicator">
-							<span>{state.runtimeConfig?.runtimeUrl ?? "Runtime"}</span>
-						</div>
-					</header>
+							<div className="runtime-indicator">
+								<span>{state.runtimeConfig?.runtimeUrl ?? "Runtime"}</span>
+							</div>
+						</header>
 
-					{/* 模态框 / 配置面板 */}
-					{showModal ? (
-						<div className="setup-panel-container">
-							<form className="setup-panel" onSubmit={handleSetupSubmit}>
-								<div
-									style={{
-										display: "flex",
-										justifyContent: "space-between",
-										alignItems: "center",
-									}}
-								>
-									<h3>{needsSetup ? "连接到 Runtime" : "Runtime 配置"}</h3>
-									{!needsSetup ? (
-										<button
-											className="icon-button"
-											onClick={() => setIsSettingsOpen(false)}
-											style={{
-												border: "none",
-												boxShadow: "none",
-												fontSize: "1.2rem",
-											}}
-											title="关闭"
-											type="button"
-										>
-											×
-										</button>
-									) : null}
-								</div>
-								<label>
-									<span>Runtime URL</span>
-									<input
-										autoComplete="url"
-										onChange={(event) =>
-											setSetupRuntimeUrl(event.currentTarget.value)
-										}
-										required
-										type="url"
-										value={setupRuntimeUrl}
-									/>
-								</label>
-								<label>
-									<span>API Key</span>
-									<input
-										autoComplete="current-password"
-										onChange={(event) =>
-											setSetupApiKey(event.currentTarget.value)
-										}
-										placeholder={needsSetup ? "请输入 API Key" : "••••••••"}
-										required={needsSetup}
-										type="password"
-										value={setupApiKey}
-									/>
-								</label>
-								<label className="setup-checkbox">
-									<input
-										checked={allowInsecureStorageFallback}
-										onChange={(event) =>
-											setAllowInsecureStorageFallback(
-												event.currentTarget.checked,
-											)
-										}
-										type="checkbox"
-									/>
-									<span>允许不安全存储降级</span>
-								</label>
-								<button type="submit">保存并连接</button>
-								<p>
-									密钥优先保存在系统凭据管理器；勾选后仅在不可用时写入本地明文降级。
-								</p>
-								{setupError ? (
-									<strong style={{ color: "var(--status-error-text)" }}>
-										{setupError}
-									</strong>
+						{/* 模态框 / 配置面板：统一 ConnectionSetup（首次连接 / 运行期修改两种模式） */}
+						{showModal ? (
+							<ConnectionSetup
+								mode={needsSetup ? "setup" : "settings"}
+								currentUrl={state.runtimeConfig?.runtimeUrl}
+								onConnect={(url, apiKey, allowInsecure) => {
+									void handleConnect(url, apiKey, allowInsecure);
+								}}
+								onClose={
+									needsSetup ? undefined : () => setIsSettingsOpen(false)
+								}
+								error={setupError}
+							>
+								{/* settings 模式下附带自动滚动偏好开关 */}
+								{!needsSetup ? (
+									<label className="setup-checkbox">
+										<input
+											checked={state.autoScrollEnabled}
+											onChange={(event) =>
+												store.dispatch({
+													type: "autoScroll/set",
+													enabled: event.currentTarget.checked,
+												})
+											}
+											type="checkbox"
+										/>
+										<span>{t("settings.autoScroll")}</span>
+									</label>
 								) : null}
-							</form>
-						</div>
-					) : state.error ? (
-						<p className="app-error">{state.error}</p>
-					) : null}
+							</ConnectionSetup>
+						) : state.error ? (
+							<p className="app-error">{t(state.error)}</p>
+						) : null}
 
-					{/* 消息时间线 */}
-					<MessageTimeline
-						key={selectedConversationId ?? "none"}
-						activeJob={activeJob}
-						connectionState={state.connectionState}
-						historyLoading={historyLoading}
-						historyError={historyError}
-						hasMoreHistory={selectedHistoryState?.hasMore ?? false}
-						onRetryHistory={
-							selectedConversationId
-								? () => {
-										void store.reloadHistory(selectedConversationId);
-									}
-								: undefined
-						}
-						onLoadMoreHistory={
-							selectedConversationId
-								? () => store.loadMoreHistory(selectedConversationId)
-								: undefined
-						}
-						items={selectedHistory}
-						onPreviewAttachment={(attachment) => {
-							void previewAttachment(attachment);
-						}}
-						onPreviewHtml={(input) => {
-							void client.openHtmlPreview(input);
-						}}
-						onSaveAttachment={(attachment) => {
-							void saveAttachment(attachment);
-						}}
-						onShortcutClick={handleShortcutClick}
-						onAddReference={(messageId) => {
-							if (selectedConversationId) {
-								store.addReferenceFromMessageId(
-									selectedConversationId,
-									messageId,
-								);
+						{/* 消息时间线 */}
+						<MessageTimeline
+							key={selectedConversationId ?? "none"}
+							activeJob={activeJob}
+							autoScrollEnabled={state.autoScrollEnabled}
+							connectionState={state.connectionState}
+							historyLoading={historyLoading}
+							historyError={historyError}
+							hasMoreHistory={selectedHistoryState?.hasMore ?? false}
+							onRetryHistory={
+								selectedConversationId
+									? () => {
+											void store.reloadHistory(selectedConversationId);
+										}
+									: undefined
 							}
-						}}
-						onOpenImage={openImage}
-						onCancelJob={(jobId) => {
-							void store.cancelJob(jobId);
-						}}
-					/>
+							onLoadMoreHistory={
+								selectedConversationId
+									? () => store.loadMoreHistory(selectedConversationId)
+									: undefined
+							}
+							items={selectedHistory}
+							onPreviewAttachment={(attachment) => {
+								void previewAttachment(attachment);
+							}}
+							onPreviewHtml={(input) => {
+								void client.openHtmlPreview(input);
+							}}
+							onSaveAttachment={(attachment) => {
+								void saveAttachment(attachment);
+							}}
+							onShortcutClick={handleShortcutClick}
+							onAddReference={(messageId) => {
+								if (selectedConversationId) {
+									store.addReferenceFromMessageId(
+										selectedConversationId,
+										messageId,
+									);
+								}
+							}}
+							onAddSelectionReference={(text) => {
+								if (selectedConversationId) {
+									store.addReferenceFromSelection(selectedConversationId, text);
+								}
+							}}
+							onOpenImage={openImage}
+							onCancelJob={(jobId) => {
+								void store.cancelJob(jobId);
+							}}
+						/>
 
-					{/* 输入框 */}
-					<MessageComposer
-						attachmentQueue={
-							selectedConversationId
-								? (state.attachmentsByConversation[selectedConversationId] ??
-									[])
-								: []
-						}
-						commandSuggestions={state.commands}
-						disabled={isJobRunning(activeJob)}
-						draft={
-							selectedConversationId
-								? (state.draftsByConversation[selectedConversationId] ?? "")
-								: ""
-						}
-						references={
-							selectedConversationId
-								? (state.referencesByConversation[selectedConversationId] ?? [])
-								: []
-						}
-						focusRequest={composerFocusRequest}
-						onAddAttachment={() => {
-							if (!selectedConversationId) {
-								return;
+						{/* 输入框 */}
+						<MessageComposer
+							attachmentQueue={
+								selectedConversationId
+									? (state.attachmentsByConversation[selectedConversationId] ??
+										[])
+									: []
 							}
-							void addAttachment(selectedConversationId);
-						}}
-						onClearAttachment={(attachmentId) => {
-							if (selectedConversationId) {
-								store.clearAttachment(selectedConversationId, attachmentId);
+							commandSuggestions={state.commands}
+							disabled={isJobRunning(activeJob)}
+							draft={
+								selectedConversationId
+									? (state.draftsByConversation[selectedConversationId] ?? "")
+									: ""
 							}
-						}}
-						onClearReference={(messageId) => {
-							if (selectedConversationId) {
-								store.clearReference(selectedConversationId, messageId);
+							references={
+								selectedConversationId
+									? (state.referencesByConversation[selectedConversationId] ??
+										[])
+									: []
 							}
-						}}
-						onJumpReference={handleJumpReference}
-						onDraftChange={(draft) => {
-							if (selectedConversationId) {
-								store.updateDraft(selectedConversationId, draft);
-							}
-						}}
-						onSend={() => {
-							void store.sendSelectedMessage();
-						}}
-					/>
-					{state.sendError ? (
-						<p className="app-error">{state.sendError}</p>
-					) : null}
+							focusRequest={composerFocusRequest}
+							onAddAttachment={() => {
+								if (!selectedConversationId) {
+									return;
+								}
+								void addAttachment(selectedConversationId);
+							}}
+							onClearAttachment={(attachmentId) => {
+								if (selectedConversationId) {
+									store.clearAttachment(selectedConversationId, attachmentId);
+								}
+							}}
+							onClearReference={(messageId) => {
+								if (selectedConversationId) {
+									store.clearReference(selectedConversationId, messageId);
+								}
+							}}
+							onJumpReference={handleJumpReference}
+							onDraftChange={(draft) => {
+								if (selectedConversationId) {
+									store.updateDraft(selectedConversationId, draft);
+								}
+							}}
+							onSend={() => {
+								void store.sendSelectedMessage();
+							}}
+						/>
+						{state.sendError ? (
+							<p className="app-error">{t(state.sendError)}</p>
+						) : null}
+					</WorkspaceLayout>
 				</section>
 
 				<ImageViewerModal
@@ -694,12 +732,14 @@ export function App() {
 				/>
 
 				<ConfirmDialog
-					cancelLabel="取消"
-					confirmLabel="删除"
+					cancelLabel={t("dialog.cancel")}
+					confirmLabel={t("dialog.delete")}
 					danger
 					message={
 						pendingDeleteConversation
-							? `确定删除会话「${pendingDeleteConversation.title}」？该操作不可恢复。`
+							? t("dialog.deleteConversationMessage", {
+									title: pendingDeleteConversation.title,
+								})
 							: ""
 					}
 					onCancel={() => setPendingDeleteId(null)}
@@ -710,22 +750,27 @@ export function App() {
 						setPendingDeleteId(null);
 					}}
 					open={pendingDeleteConversation !== null}
-					title="删除会话"
+					title={t("dialog.deleteConversationTitle")}
 				/>
 			</main>
 		</AttachmentImageProvider>
 	);
 }
 
-function connectionStateLabel(state: string): string {
-	const labels: Record<string, string> = {
-		idle: "待连接",
-		connecting: "正在连接",
-		connected: "已连接",
-		streaming: "事件流",
-		resuming: "正在续接",
-		json_fallback: "JSON 轮询",
-		disconnected: "连接断开",
-	};
-	return labels[state] ?? state;
+/**
+ * 主工作区布局包装：桌面平台用 DesktopLayout（透明 display:contents 包装，
+ * 预留自定义标题栏 / 原生菜单等增强位），其它平台直接渲染子节点。
+ */
+function WorkspaceLayout({
+	isDesktop,
+	children,
+}: {
+	isDesktop: boolean;
+	children: ReactNode;
+}) {
+	return isDesktop ? (
+		<DesktopLayout>{children}</DesktopLayout>
+	) : (
+		<>{children}</>
+	);
 }

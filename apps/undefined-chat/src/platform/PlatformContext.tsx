@@ -58,7 +58,12 @@ export function usePlatform(): PlatformInfo {
 async function detectPlatform(): Promise<PlatformInfo> {
 	try {
 		const info = await invoke<PlatformInfo>("get_platform_info");
-		return info;
+		// 校验返回值：非对象 / 缺少 os（如非 Tauri 环境 invoke 解析为 undefined）时回退，
+		// 避免下游 isDesktopPlatform(platform.os) 读取 undefined 崩溃
+		if (info && typeof info.os === "string") {
+			return info;
+		}
+		return getFallbackPlatformInfo();
 	} catch (error) {
 		console.warn("Failed to invoke get_platform_info, using fallback:", error);
 		return getFallbackPlatformInfo();

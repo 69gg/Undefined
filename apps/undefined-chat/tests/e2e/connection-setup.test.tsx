@@ -1,9 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "../../src/App";
 import { createTauriRuntimeClient } from "../../src/runtime-client/tauri";
 import { runtimeClientStub } from "../../src/test-fixtures";
+import { renderWithProviders } from "../../src/test-utils";
 
 vi.mock("../../src/runtime-client/tauri", () => ({
 	createTauriRuntimeClient: vi.fn(),
@@ -24,7 +25,7 @@ describe("E2E: Connection Setup Flow", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		expect(await screen.findByText("连接到 Runtime")).toBeInTheDocument();
 		expect(screen.getByLabelText("Runtime URL")).toBeInTheDocument();
@@ -38,7 +39,7 @@ describe("E2E: Connection Setup Flow", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		const urlInput = (await screen.findByLabelText(
 			"Runtime URL",
@@ -58,7 +59,7 @@ describe("E2E: Connection Setup Flow", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		const urlInput = await screen.findByLabelText("Runtime URL");
 		const keyInput = screen.getByLabelText("API Key");
@@ -92,7 +93,7 @@ describe("E2E: Connection Setup Flow", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		const keyInput = await screen.findByLabelText("API Key");
 		const connectBtn = screen.getByRole("button", { name: "保存并连接" });
@@ -126,7 +127,7 @@ describe("E2E: Connection Setup Flow", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByText("连接到 Runtime");
 
@@ -156,7 +157,7 @@ describe("E2E: Connection Setup Flow", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		const urlInput = await screen.findByLabelText("Runtime URL");
 		const keyInput = screen.getByLabelText("API Key");
@@ -179,7 +180,7 @@ describe("E2E: Connection Setup Flow", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		// 等待应用加载完成
 		await screen.findByRole("navigation", { name: "会话" });
@@ -217,7 +218,7 @@ describe("E2E: Connection Setup Flow", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByRole("navigation", { name: "会话" });
 

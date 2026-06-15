@@ -1,3 +1,4 @@
+import { useTranslation } from "../i18n";
 import type { MessageReference } from "../runtime-client/types";
 
 export type ReferenceChipsProps = {
@@ -18,6 +19,7 @@ export function ReferenceChips({
 	onClear,
 	onJump,
 }: ReferenceChipsProps) {
+	const { t } = useTranslation();
 	if (references.length === 0) {
 		return null;
 	}
@@ -32,13 +34,13 @@ export function ReferenceChips({
 						onClick={() => onJump?.(reference.messageId)}
 						type="button"
 						disabled={!onJump}
-						title="跳转到引用消息"
+						title={t("reference.jump")}
 					>
 						{truncateText(reference.quote, 180)}
 					</button>
 					<button
 						className="chip-clear"
-						aria-label={`取消引用消息 ${reference.messageId}`}
+						aria-label={t("reference.cancel", { id: reference.messageId })}
 						onClick={() => onClear(reference.messageId)}
 						type="button"
 					>

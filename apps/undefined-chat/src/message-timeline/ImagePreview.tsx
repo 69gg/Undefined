@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useTranslation } from "../i18n";
 
 export type ImagePreviewProps = {
 	src: string;
@@ -8,6 +9,7 @@ export type ImagePreviewProps = {
 };
 
 export function ImagePreview({ src, alt, open, onClose }: ImagePreviewProps) {
+	const { t } = useTranslation();
 	// ESC 键关闭
 	useEffect(() => {
 		if (!open) return;
@@ -51,7 +53,7 @@ export function ImagePreview({ src, alt, open, onClose }: ImagePreviewProps) {
 				type="button"
 				className="runtime-image-viewer-close"
 				onClick={onClose}
-				aria-label="关闭图片预览"
+				aria-label={t("imagePreview.close")}
 			>
 				✕
 			</button>

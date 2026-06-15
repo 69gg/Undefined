@@ -21,7 +21,6 @@ describe("chat-store types extension", () => {
 
 		// UI 状态
 		expect(state.autoScrollEnabled).toBe(true);
-		expect(state.topLoadSuppressedUntil).toBe(0);
 
 		// 平台信息
 		expect(state.platform).toBeNull();

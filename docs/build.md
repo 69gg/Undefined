@@ -391,7 +391,7 @@ npm run check  # 代码检查与测试（lint/typecheck/test/cargo fmt/check/tes
 
 cd ../undefined-chat
 npm install
-npm run check  # Biome、TypeScript、unit/jsdom integration tests、cargo fmt/check/test
+npm run check  # Biome、TypeScript、unit + e2e（jsdom）测试、cargo fmt/check/test
 ```
 
 如果本次改动涉及 Android 构建链：

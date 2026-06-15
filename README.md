@@ -44,7 +44,7 @@
 - **Management-first WebUI**：继续保留 `uv run Undefined-webui` 一键入口；即使 `config.toml` 缺失或未配完，也能先进入管理态补配置、看日志、校验并启动 Bot。
 - **远程管理 + 多端客户端**：浏览器版 WebUI、跨平台 Console（管理客户端）和原生优先 Undefined Chat（聊天客户端）共享同一套 Management / Runtime 服务，支持远程管理，并覆盖 `Windows / macOS / Linux / Android` 发布链路。
   - **Undefined Console**：基于 Tauri v2 的管理客户端，完整管理功能
-  - **Undefined Chat**：基于 Tauri v2 + React 的原生聊天客户端，采用莫兰迪橙色系设计，100% 移植 WebUI webchat 功能，支持桌面快捷键、系统凭据存储、独立 HTML 预览窗口
+  - **Undefined Chat**：基于 Tauri v2 + React 19 的原生优先聊天客户端，采用莫兰迪橙色系设计，移植 WebUI webchat 的核心聊天能力并做原生增强：中英双语运行时切换（i18n）、平台抽象层（按真实平台区分桌面/移动布局）、桌面快捷键、系统凭据存储、HTML 正文 sanitize 内联渲染 + 独立预览窗口隔离运行、Android（非 iOS）横屏/平板适配。iOS 暂不作为发布平台
 - **Management API + Runtime API 分层**：配置、日志、Bot 启停和管理探针由 Management API 提供；主进程 Runtime API 则专注探针、记忆只读查询、认知侧写检索和 WebUI AI Chat；内部探针的技能统计覆盖可调用工具、工具集、Agent、自动处理管线、斜杠命令与 Anthropic Skills。详见 [docs/management-api.md](docs/management-api.md) 与 [docs/openapi.md](docs/openapi.md)。
 - **多模型池**：支持配置多个 AI 模型，可轮询、随机选择或用户指定；支持多模型并发比较，选择最佳结果继续对话。详见 [多模型功能文档](docs/multi-model.md)。
 - **本地知识库**：将纯文本文件向量化存入 ChromaDB，AI 可通过关键词搜索或语义搜索查询领域知识；支持增量嵌入与自动扫描。详见 [知识库文档](docs/knowledge.md)。

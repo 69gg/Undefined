@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { LOCALE_STORAGE_KEY, LanguageProvider } from "../i18n";
 import type { AttachmentPreviewResult } from "../runtime-client/types";
 import { AttachmentImage } from "./AttachmentImage";
 import { AttachmentImageProvider } from "./AttachmentImageContext";
@@ -23,14 +24,21 @@ function renderWithProvider(
 	return {
 		previewAttachment,
 		...render(
-			<AttachmentImageProvider client={{ previewAttachment }}>
-				{ui}
-			</AttachmentImageProvider>,
+			<LanguageProvider>
+				<AttachmentImageProvider client={{ previewAttachment }}>
+					{ui}
+				</AttachmentImageProvider>
+			</LanguageProvider>,
 		),
 	};
 }
 
 describe("AttachmentImage", () => {
+	// 固定为简体中文，使断言不受测试环境 navigator.language 影响
+	beforeEach(() => {
+		window.localStorage.setItem(LOCALE_STORAGE_KEY, "zh-CN");
+	});
+
 	it("加载成功显示 img（blob src）", async () => {
 		renderWithProvider(<AttachmentImage uid="pic_1" alt="chart.png" />);
 

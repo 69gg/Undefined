@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -7,6 +7,7 @@ import type {
 	Attachment,
 	AttachmentPreviewResult,
 } from "../runtime-client/types";
+import { renderWithProviders } from "../test-utils";
 import { AttachmentCard } from "./AttachmentCard";
 
 function imageResult(): AttachmentPreviewResult {
@@ -26,7 +27,7 @@ function renderWithProvider(
 	const previewAttachment = vi.fn(previewImpl ?? (async () => imageResult()));
 	return {
 		previewAttachment,
-		...render(
+		...renderWithProviders(
 			<AttachmentImageProvider client={{ previewAttachment }}>
 				{ui}
 			</AttachmentImageProvider>,

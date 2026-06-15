@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ImageViewerState } from "../chat-store/types";
+import { useTranslation } from "../i18n";
 
 export type ImageViewerModalProps = {
 	imageViewer: ImageViewerState | null;
@@ -10,6 +11,7 @@ export function ImageViewerModal({
 	imageViewer,
 	onClose,
 }: ImageViewerModalProps) {
+	const { t } = useTranslation();
 	const previousActiveElementRef = useRef<HTMLElement | null>(null);
 	const [zoom, setZoom] = useState(1);
 	const [rotation, setRotation] = useState(0);
@@ -73,7 +75,7 @@ export function ImageViewerModal({
 			}}
 			role="dialog"
 			aria-modal="true"
-			aria-label="图片查看器"
+			aria-label={t("imageViewer.label")}
 		>
 			<div
 				className="runtime-image-viewer-stage"
@@ -101,24 +103,24 @@ export function ImageViewerModal({
 				<button
 					onClick={() => setZoom((value) => Math.max(0.25, value - 0.25))}
 					type="button"
-					aria-label="缩小"
-					title="缩小"
+					aria-label={t("imageViewer.zoomOut")}
+					title={t("imageViewer.zoomOut")}
 				>
 					-
 				</button>
 				<button
 					onClick={() => setZoom((value) => Math.min(4, value + 0.25))}
 					type="button"
-					aria-label="放大"
-					title="放大"
+					aria-label={t("imageViewer.zoomIn")}
+					title={t("imageViewer.zoomIn")}
 				>
 					+
 				</button>
 				<button
 					onClick={() => setRotation((value) => (value + 90) % 360)}
 					type="button"
-					aria-label="旋转"
-					title="旋转"
+					aria-label={t("imageViewer.rotate")}
+					title={t("imageViewer.rotate")}
 				>
 					R
 				</button>
@@ -128,8 +130,8 @@ export function ImageViewerModal({
 						setRotation(0);
 					}}
 					type="button"
-					aria-label="重置"
-					title="重置"
+					aria-label={t("imageViewer.reset")}
+					title={t("imageViewer.reset")}
 				>
 					1:1
 				</button>
@@ -141,7 +143,7 @@ export function ImageViewerModal({
 					onClose();
 				}}
 				type="button"
-				aria-label="关闭"
+				aria-label={t("imageViewer.close")}
 			>
 				<svg
 					width="24"
@@ -153,7 +155,7 @@ export function ImageViewerModal({
 					strokeLinecap="round"
 					strokeLinejoin="round"
 				>
-					<title>关闭</title>
+					<title>{t("imageViewer.close")}</title>
 					<line x1="18" y1="6" x2="6" y2="18" />
 					<line x1="6" y1="6" x2="18" y2="18" />
 				</svg>

@@ -1,7 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { conversation } from "../test-fixtures";
+import { renderWithProviders } from "../test-utils";
 import { ConversationList } from "./ConversationList";
 
 const baseConversations = [
@@ -29,7 +30,7 @@ describe("ConversationList", () => {
 	test("renders multiple running states and selects conversations", async () => {
 		const onSelect = vi.fn();
 
-		render(
+		renderWithProviders(
 			<ConversationList
 				conversations={baseConversations}
 				creating={false}
@@ -56,7 +57,7 @@ describe("ConversationList", () => {
 	test("每个会话项有删除按钮，点击触发 onDelete", async () => {
 		const onDelete = vi.fn();
 
-		render(
+		renderWithProviders(
 			<ConversationList
 				conversations={baseConversations}
 				creating={false}
@@ -79,7 +80,7 @@ describe("ConversationList", () => {
 	});
 
 	test("正在新建时按钮显示加载态并禁用", () => {
-		render(
+		renderWithProviders(
 			<ConversationList
 				conversations={baseConversations}
 				creating={true}

@@ -140,14 +140,12 @@ export type ChatState = {
 
 	// UI 状态
 	autoScrollEnabled: boolean;
-	topLoadSuppressedUntil: number;
 
 	// 平台信息
 	platform: PlatformInfo | null;
 
 	// 设置
 	settings: {
-		locale: "zh-CN" | "en";
 		mobilePanel: "chat" | "conversations" | "settings";
 	};
 
@@ -227,6 +225,8 @@ export type ChatAction =
 			conversationId: string;
 			references: MessageReference[];
 	  }
+	// 命令列表刷新（窗口聚焦时按 TTL 重新拉取，使热重载新命令可见）
+	| { type: "commands/set"; commands: CommandInfo[] }
 	// 命令面板
 	| { type: "commandPalette/open"; query?: string }
 	| { type: "commandPalette/close" }
@@ -240,18 +240,6 @@ export type ChatAction =
 	| { type: "htmlPreview/close" }
 	// 自动滚动
 	| { type: "autoScroll/set"; enabled: boolean }
-	// 历史加载
-	| { type: "history/loadStart"; conversationId: string }
-	| {
-			type: "history/loadSuccess";
-			conversationId: string;
-			items: HistoryItem[];
-			hasMore: boolean;
-			nextBefore: number | null;
-			total: number;
-	  }
-	| { type: "history/loadError"; conversationId: string; error: string }
-	| { type: "history/suppressTopLoad"; until: number }
 	// 平台信息
 	| { type: "platform/set"; platform: PlatformInfo }
 	// 移动端面板

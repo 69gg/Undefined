@@ -1,9 +1,16 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { describe, expect, test, vi } from "vitest";
+import { renderWithProviders } from "../test-utils";
 import {
 	MessageTimelineContent,
 	hasRenderableTimeline,
 } from "./MessageTimelineContent";
+
+/** MessageTimelineContent 内部经 ToolBlock 使用 useTranslation，需 LanguageProvider。 */
+function renderContent(ui: ReactElement) {
+	return renderWithProviders(ui);
+}
 
 describe("hasRenderableTimeline", () => {
 	test("returns false for empty or undefined timeline", () => {
@@ -34,7 +41,7 @@ describe("hasRenderableTimeline", () => {
 
 describe("MessageTimelineContent", () => {
 	test("renders message text and tool calls in order without duplicating content", () => {
-		render(
+		renderContent(
 			<MessageTimelineContent
 				timeline={[
 					{ type: "message", seq: 1, content: "第一段回答内容" },
@@ -64,7 +71,7 @@ describe("MessageTimelineContent", () => {
 	});
 
 	test("falls back to full-text content when timeline has no message entries", () => {
-		render(
+		renderContent(
 			<MessageTimelineContent
 				timeline={[
 					{
@@ -83,7 +90,7 @@ describe("MessageTimelineContent", () => {
 	});
 
 	test("renders nested child calls inside a tool block", () => {
-		render(
+		renderContent(
 			<MessageTimelineContent
 				timeline={[
 					{

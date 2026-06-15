@@ -3,9 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Mutex, OnceLock},
 };
 use tauri::{async_runtime::JoinHandle, AppHandle, Manager, State};
+use tauri_plugin_http::reqwest::Client;
 use uuid::Uuid;
 
 pub const APP_CONFIG_FILE_NAME: &str = "runtime-config.json";
@@ -95,9 +96,31 @@ pub struct NativeState {
     runtime_config: Mutex<Option<AppRuntimeConfig>>,
     insecure_storage_confirmed: Mutex<bool>,
     subscriptions: Mutex<HashMap<String, EventStreamSubscription>>,
+    /// 共享的 reqwest 客户端，懒初始化后被上传/下载/Runtime 请求复用，
+    /// 复用底层连接池与 TLS 配置，避免每次请求都新建 Client。
+    http_client: OnceLock<Client>,
 }
 
 impl NativeState {
+    /// 获取共享的 reqwest 客户端（首次调用时构建，之后复用）。
+    ///
+    /// 使用 `Client::builder().build()` 而非 `Client::new()` 以便在 TLS/后端初始化失败时
+    /// 返回错误而不是 panic。SSE 流式（`start_job_event_stream`）同样复用该 Client，
+    /// reqwest 的 `bytes_stream()` 不依赖独占 Client，连接池共享不影响长连接流。
+    pub(crate) fn http_client(&self) -> Result<&Client, String> {
+        if let Some(client) = self.http_client.get() {
+            return Ok(client);
+        }
+        let client = Client::builder()
+            .build()
+            .map_err(|err| format!("HTTP client init failed: {err}"))?;
+        // 并发首次调用时可能有竞态，set 失败说明已被其他线程初始化，直接读回即可。
+        let _ = self.http_client.set(client);
+        self.http_client
+            .get()
+            .ok_or_else(|| "HTTP client unavailable after initialization".to_string())
+    }
+
     pub(crate) fn set_runtime_config_cache(
         &self,
         config: Option<AppRuntimeConfig>,

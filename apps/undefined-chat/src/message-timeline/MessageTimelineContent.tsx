@@ -19,6 +19,7 @@ type HistoryToolCall = {
 	ui_hint?: string;
 	duration_ms?: number;
 	current_stage?: string;
+	current_stage_detail?: string;
 	children?: HistoryToolCall[];
 	timeline?: HistoryTimelineEntry[];
 };
@@ -123,6 +124,7 @@ function convertHistoryToolCallToToolBlock(
 		argumentsPreview: call.arguments_preview,
 		resultPreview: call.result_preview,
 		currentStage: call.current_stage,
+		stageDetail: call.current_stage_detail,
 		children,
 		timeline: [],
 		startTime,

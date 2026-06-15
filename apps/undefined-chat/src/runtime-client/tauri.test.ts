@@ -115,6 +115,26 @@ describe("createTauriRuntimeClient", () => {
 		});
 	});
 
+	test("defaults a missing conversation title to an empty string for UI fallback", async () => {
+		// 标题缺省不再硬编码中文：归一化为空串，由 UI 兜底显示本地化默认标题
+		vi.mocked(invoke).mockResolvedValueOnce({
+			status: 201,
+			ok: true,
+			body: {
+				conversation: {
+					id: "conv-untitled",
+					message_count: 0,
+					is_running: false,
+				},
+			},
+		});
+
+		const client = createTauriRuntimeClient();
+		const response = await client.createConversation();
+
+		expect(response.title).toBe("");
+	});
+
 	test("maps structured messages to the Runtime API payload contract", async () => {
 		vi.mocked(invoke).mockResolvedValueOnce({
 			status: 202,

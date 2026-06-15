@@ -1,12 +1,24 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { LOCALE_STORAGE_KEY, LanguageProvider } from "../i18n";
 import type { MessageReference } from "../runtime-client/types";
 import { ReferenceChips } from "./ReferenceChips";
 
+// 固定为简体中文，使断言不受测试环境 navigator.language 影响
+beforeEach(() => {
+	window.localStorage.setItem(LOCALE_STORAGE_KEY, "zh-CN");
+});
+
+// ReferenceChips 内部使用 useTranslation，需置于 LanguageProvider 下
+function renderChips(node: ReactNode) {
+	return render(<LanguageProvider>{node}</LanguageProvider>);
+}
+
 describe("ReferenceChips", () => {
 	it("不渲染任何内容当引用列表为空", () => {
-		const { container } = render(
+		const { container } = renderChips(
 			<ReferenceChips references={[]} onClear={vi.fn()} />,
 		);
 		expect(container.firstChild).toBeNull();
@@ -20,7 +32,7 @@ describe("ReferenceChips", () => {
 			},
 		];
 
-		render(<ReferenceChips references={references} onClear={vi.fn()} />);
+		renderChips(<ReferenceChips references={references} onClear={vi.fn()} />);
 
 		expect(screen.getByText("这是一条引用的消息内容")).toBeInTheDocument();
 		expect(screen.getByText("↩")).toBeInTheDocument();
@@ -38,7 +50,7 @@ describe("ReferenceChips", () => {
 			},
 		];
 
-		render(<ReferenceChips references={references} onClear={vi.fn()} />);
+		renderChips(<ReferenceChips references={references} onClear={vi.fn()} />);
 
 		expect(screen.getByText("第一条引用")).toBeInTheDocument();
 		expect(screen.getByText("第二条引用")).toBeInTheDocument();
@@ -53,7 +65,7 @@ describe("ReferenceChips", () => {
 			},
 		];
 
-		render(<ReferenceChips references={references} onClear={vi.fn()} />);
+		renderChips(<ReferenceChips references={references} onClear={vi.fn()} />);
 
 		const truncatedText = `${"a".repeat(180)}...`;
 		expect(screen.getByText(truncatedText)).toBeInTheDocument();
@@ -68,7 +80,7 @@ describe("ReferenceChips", () => {
 			},
 		];
 
-		render(<ReferenceChips references={references} onClear={vi.fn()} />);
+		renderChips(<ReferenceChips references={references} onClear={vi.fn()} />);
 
 		expect(screen.getByText(shortText)).toBeInTheDocument();
 	});
@@ -83,7 +95,7 @@ describe("ReferenceChips", () => {
 			},
 		];
 
-		render(<ReferenceChips references={references} onClear={onClear} />);
+		renderChips(<ReferenceChips references={references} onClear={onClear} />);
 
 		const clearButton = screen.getByRole("button", {
 			name: /取消引用消息 msg-1/i,
@@ -104,7 +116,7 @@ describe("ReferenceChips", () => {
 			},
 		];
 
-		render(
+		renderChips(
 			<ReferenceChips
 				references={references}
 				onClear={vi.fn()}
@@ -132,7 +144,7 @@ describe("ReferenceChips", () => {
 			},
 		];
 
-		render(<ReferenceChips references={references} onClear={onClear} />);
+		renderChips(<ReferenceChips references={references} onClear={onClear} />);
 
 		const clearButton1 = screen.getByRole("button", {
 			name: /取消引用消息 msg-1/i,
@@ -155,7 +167,7 @@ describe("ReferenceChips", () => {
 			},
 		];
 
-		render(<ReferenceChips references={references} onClear={vi.fn()} />);
+		renderChips(<ReferenceChips references={references} onClear={vi.fn()} />);
 
 		const clearButton = screen.getByRole("button", {
 			name: /取消引用消息 msg-1/i,

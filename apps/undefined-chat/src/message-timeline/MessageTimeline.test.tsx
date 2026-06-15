@@ -1,15 +1,11 @@
-import {
-	fireEvent,
-	render,
-	screen,
-	waitFor,
-	within,
-} from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { AttachmentImageProvider } from "../rendering/AttachmentImageContext";
+import type { ChatEvent } from "../runtime-client/types";
 import { historyItem, job } from "../test-fixtures";
+import { renderWithProviders } from "../test-utils";
 import { MessageTimeline } from "./MessageTimeline";
 
 function renderTimeline(ui: ReactNode) {
@@ -20,7 +16,7 @@ function renderTimeline(ui: ReactNode) {
 		bytes: [137, 80, 78, 71],
 		body: null,
 	}));
-	return render(
+	return renderWithProviders(
 		<AttachmentImageProvider client={{ previewAttachment }}>
 			{ui}
 		</AttachmentImageProvider>,
@@ -171,7 +167,7 @@ describe("MessageTimeline", () => {
 		expect(onLoadMoreHistory).toHaveBeenCalledOnce();
 	});
 
-	test("renders every loaded message when history pagination is connected", () => {
+	test("windows large histories even when pagination is connected", () => {
 		const manyItems = Array.from({ length: 260 }, (_, index) =>
 			historyItem({
 				messageId: `msg-${index}`,
@@ -193,9 +189,43 @@ describe("MessageTimeline", () => {
 		);
 
 		const timeline = screen.getByRole("log", { name: "消息" });
-		expect(within(timeline).getByText("已加载消息 0")).toBeTruthy();
+		// 始终窗口化：即使提供了 onLoadMoreHistory，初始也只渲染最近一窗，最新消息可见、最早被裁。
+		expect(within(timeline).queryByText("已加载消息 0")).toBeNull();
 		expect(within(timeline).getByText("已加载消息 259")).toBeTruthy();
-		expect(within(timeline).getAllByTestId("message-row")).toHaveLength(260);
+		expect(within(timeline).getAllByTestId("message-row").length).toBeLessThan(
+			80,
+		);
+	});
+
+	test("expands the window to reveal earlier locally-loaded messages", async () => {
+		const manyItems = Array.from({ length: 200 }, (_, index) =>
+			historyItem({
+				messageId: `msg-${index}`,
+				content: `已加载消息 ${index}`,
+			}),
+		);
+
+		renderTimeline(
+			<MessageTimeline
+				activeJob={null}
+				connectionState="connected"
+				hasMoreHistory={false}
+				items={manyItems}
+				onLoadMoreHistory={vi.fn()}
+				onPreviewAttachment={vi.fn()}
+				onPreviewHtml={vi.fn()}
+				onSaveAttachment={vi.fn()}
+			/>,
+		);
+
+		const timeline = screen.getByRole("log", { name: "消息" });
+		const initialRows = within(timeline).getAllByTestId("message-row").length;
+		// 本地仍有未展开的更早消息：显示"加载更早消息"且不调用后端
+		const loadMore = screen.getByRole("button", { name: "加载更早消息" });
+		await userEvent.click(loadMore);
+		expect(
+			within(timeline).getAllByTestId("message-row").length,
+		).toBeGreaterThan(initialRows);
 	});
 
 	test("loads more history automatically when scrolled near the top", async () => {
@@ -390,5 +420,139 @@ describe("MessageTimeline", () => {
 		// content 未引用该 uid，附件区保留展示
 		const imgs = await screen.findAllByAltText("photo.png");
 		expect(imgs).toHaveLength(1);
+	});
+
+	test("timeline 缺失时从 calls 回退重建工具块", () => {
+		const item = historyItem({
+			messageId: "b-calls",
+			role: "bot",
+			content: "调用了工具",
+		});
+		item.webchat = {
+			displayOnly: true,
+			jobId: "job-x",
+			mode: "chat",
+			status: "done",
+			createdAt: null,
+			finishedAt: null,
+			durationMs: 1200,
+			events: [],
+			timeline: [],
+			calls: [
+				{
+					webchat_call_id: "c1",
+					name: "group.get_member_info",
+					is_agent: false,
+					status: "done",
+					arguments_preview: '{"user_id":"123"}',
+					result_preview: "ok",
+					children: [],
+					timeline: [],
+				},
+			],
+		};
+
+		renderTimeline(
+			<MessageTimeline
+				activeJob={null}
+				connectionState="connected"
+				items={[item]}
+				onPreviewAttachment={vi.fn()}
+				onPreviewHtml={vi.fn()}
+				onSaveAttachment={vi.fn()}
+			/>,
+		);
+
+		expect(screen.getByText("group.get_member_info")).toBeTruthy();
+	});
+
+	test("timeline 与 calls 缺失时从 events 回退重建工具块", () => {
+		const item = historyItem({
+			messageId: "b-events",
+			role: "bot",
+			content: "事件回放",
+		});
+		item.webchat = {
+			displayOnly: true,
+			jobId: "job-y",
+			mode: "chat",
+			status: "done",
+			createdAt: null,
+			finishedAt: null,
+			durationMs: 800,
+			calls: [],
+			timeline: [],
+			events: [
+				{
+					seq: 1,
+					event: "tool_start",
+					payload: {
+						webchat_call_id: "e1",
+						name: "web.search",
+						arguments_preview: '{"q":"hi"}',
+					},
+				},
+				{
+					seq: 2,
+					event: "tool_end",
+					payload: {
+						webchat_call_id: "e1",
+						status: "done",
+						result_preview: "结果",
+						duration_ms: 500,
+					},
+				},
+			] as unknown as ChatEvent[],
+		};
+
+		renderTimeline(
+			<MessageTimeline
+				activeJob={null}
+				connectionState="connected"
+				items={[item]}
+				onPreviewAttachment={vi.fn()}
+				onPreviewHtml={vi.fn()}
+				onSaveAttachment={vi.fn()}
+			/>,
+		);
+
+		expect(screen.getByText("web.search")).toBeTruthy();
+	});
+
+	test("划词引用：选中正文文本后点击浮层调用 onAddSelectionReference", async () => {
+		const onAddSelectionReference = vi.fn();
+		renderTimeline(
+			<MessageTimeline
+				activeJob={null}
+				connectionState="connected"
+				items={[
+					historyItem({
+						messageId: "b-sel",
+						role: "bot",
+						content: "可被划词引用的正文",
+					}),
+				]}
+				onAddSelectionReference={onAddSelectionReference}
+				onPreviewAttachment={vi.fn()}
+				onPreviewHtml={vi.fn()}
+				onSaveAttachment={vi.fn()}
+			/>,
+		);
+
+		const timeline = screen.getByRole("log", { name: "消息" });
+		const target = screen.getByText("可被划词引用的正文");
+		// 模拟一个落在时间线内的非空文本选区
+		const range = document.createRange();
+		range.selectNodeContents(target);
+		const selection = window.getSelection();
+		selection?.removeAllRanges();
+		selection?.addRange(range);
+
+		fireEvent.mouseUp(timeline);
+
+		const quoteButton = await screen.findByRole("button", { name: "引用" });
+		await userEvent.click(quoteButton);
+
+		expect(onAddSelectionReference).toHaveBeenCalledWith("可被划词引用的正文");
 	});
 });

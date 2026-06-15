@@ -159,7 +159,7 @@ describe("chat store", () => {
 		await store.sendSelectedMessage();
 
 		expect(client.sendMessage).toHaveBeenCalledTimes(1);
-		expect(store.getSnapshot().sendError).toBe("当前会话仍在运行");
+		expect(store.getSnapshot().sendError).toBe("error.conversationRunning");
 	});
 
 	test("handles connection states through reducer actions", () => {
@@ -656,5 +656,51 @@ describe("chat store", () => {
 		// 草稿恢复
 		expect(state.draftsByConversation.default).toBe("会失败的消息");
 		expect(state.sendError).toBe("发送失败");
+	});
+
+	test("addReferenceFromSelection 追加一条 kind=selection 的引用", async () => {
+		const client = runtimeClientStub();
+		const store = createChatStore({ client });
+		await store.bootstrap();
+
+		store.addReferenceFromSelection("default", "选中的内容");
+
+		const references =
+			store.getSnapshot().referencesByConversation.default ?? [];
+		expect(references).toHaveLength(1);
+		expect(references[0]?.kind).toBe("selection");
+		expect(references[0]?.quote).toBe("选中的内容");
+		// messageId 为本地合成 id（不指向真实历史消息）
+		expect(references[0]?.messageId).toMatch(/^selection-/);
+	});
+
+	test("addReferenceFromSelection 对选中文本做空白归一化", async () => {
+		const client = runtimeClientStub();
+		const store = createChatStore({ client });
+		await store.bootstrap();
+
+		store.addReferenceFromSelection(
+			"default",
+			"  多行\n带   空白\t的   选区  ",
+		);
+
+		const references =
+			store.getSnapshot().referencesByConversation.default ?? [];
+		expect(references).toHaveLength(1);
+		// 连续空白/换行合并为单个空格并裁剪首尾
+		expect(references[0]?.quote).toBe("多行 带 空白 的 选区");
+	});
+
+	test("addReferenceFromSelection 选区为空或纯空白时不追加引用", async () => {
+		const client = runtimeClientStub();
+		const store = createChatStore({ client });
+		await store.bootstrap();
+
+		store.addReferenceFromSelection("default", "");
+		store.addReferenceFromSelection("default", "   \n\t  ");
+
+		expect(
+			store.getSnapshot().referencesByConversation.default,
+		).toBeUndefined();
 	});
 });

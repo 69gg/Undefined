@@ -48,7 +48,7 @@ jsdom 测试覆盖抽屉打开/关闭、ARIA 状态和 Escape 行为；软键盘
 
 ## 安全存储
 
-`supports_system_keyring_target` 当前支持 `linux`、`macos`、`windows` 和 `ios`。iOS 通过 `keyring` 的 `apple-native` backend 使用系统 Keychain；Android 通过生成工程注入的 `SecretPlugin` 使用 Android Keystore + AES-GCM 保存 API Key。
+`supports_system_keyring_target` 在代码层支持 `linux`、`macos`、`windows` 和 `ios`。其中 iOS 仅 `keyring` 库的 `apple-native` backend 在代码层兼容系统 Keychain，未纳入构建/发布（无 iOS 工程/CI/真机路径），不是受支持的发布平台。Android 通过生成工程注入的 `SecretPlugin` 使用 Android Keystore + AES-GCM 保存 API Key：密钥在 AndroidKeyStore 中生成且不可导出，加密后的密文存放在 `MODE_PRIVATE` 的 SharedPreferences 中。
 
 `get_platform_info` 区分 `supportsSystemKeyring` 和 `supportsSecureApiKeyStorage`：Android 的系统 keyring 能力仍为 false，但安全 API Key 存储能力为 true。
 

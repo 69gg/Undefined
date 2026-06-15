@@ -384,13 +384,14 @@ fn header_pair(name: &str, value: &str) -> Result<(HeaderName, HeaderValue), Str
 }
 
 pub(crate) async fn send_runtime_request(
+    client: &Client,
     config: &AppRuntimeConfig,
     api_key: &str,
     input: RuntimeRequestInput,
 ) -> Result<RuntimeResponse, String> {
     let (method, path) = input.validate()?;
     let url = build_runtime_url(config, &path)?;
-    let mut request = Client::new()
+    let mut request = client
         .request(method.clone(), url)
         .header("X-Undefined-API-Key", api_key);
 
@@ -424,7 +425,7 @@ async fn request_json_command(
 ) -> Result<RuntimeResponse, String> {
     let config = require_runtime_config(app, state).await?;
     let api_key = require_api_key(app).await?;
-    send_runtime_request(&config, &api_key, input).await
+    send_runtime_request(state.http_client()?, &config, &api_key, input).await
 }
 
 #[tauri::command]
@@ -443,7 +444,8 @@ pub async fn probe_runtime(
 ) -> Result<RuntimeHealth, String> {
     let config = require_runtime_config(&app, &state).await?;
     let url = format!("{}/health", config.runtime_url);
-    let response = Client::new()
+    let response = state
+        .http_client()?
         .get(url)
         .send()
         .await
@@ -657,6 +659,9 @@ pub async fn start_job_event_stream(
 ) -> Result<StartJobEventStreamResult, String> {
     let config = require_runtime_config(&app, &state).await?;
     let api_key = require_api_key(&app).await?;
+    // 复用共享 Client（reqwest Client 内部为 Arc，clone 廉价）；SSE 长连接流通过 bytes_stream
+    // 独立持有 Response，不会阻塞连接池中其他请求。
+    let client = state.http_client()?.clone();
     let subscription_id = Uuid::new_v4().to_string();
     let job_id = input.job_id.clone();
     let after_seq = input.after_seq;
@@ -666,6 +671,7 @@ pub async fn start_job_event_stream(
 
     let handle = async_runtime::spawn(async move {
         let result = run_sse_subscription(
+            client,
             app_for_task.clone(),
             subscription_id_for_task.clone(),
             job_id_for_task.clone(),
@@ -711,6 +717,7 @@ pub fn stop_job_event_stream(
 }
 
 async fn run_sse_subscription(
+    client: Client,
     app: AppHandle,
     subscription_id: String,
     job_id: String,
@@ -719,7 +726,7 @@ async fn run_sse_subscription(
     after_seq: u64,
 ) -> Result<(), String> {
     let url = job_events_url(&config.runtime_url, &job_id, after_seq)?;
-    let response = Client::new()
+    let response = client
         .get(url)
         .header("X-Undefined-API-Key", api_key)
         .header(header::ACCEPT, "text/event-stream")

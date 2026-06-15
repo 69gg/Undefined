@@ -4,6 +4,8 @@
 
 ## 测试文件
 
+当前 6 个文件、共 50 个用例：
+
 ```text
 tests/e2e/
 ├── connection-setup.test.tsx        # Runtime 配置与 API Key 表单
@@ -13,6 +15,8 @@ tests/e2e/
 ├── command-execution.test.tsx       # 斜杠命令和键盘补全
 └── history-loading.test.tsx         # 历史加载和分页
 ```
+
+所有文件统一通过 `src/test-utils.tsx` 的 `renderWithProviders(<App />)` 挂载，由全局 `src/test-setup.ts` 锁定 `zh-CN` 区域（jsdom 默认 `navigator.language=en-US` 会让 `LanguageProvider` 回退到 en）。
 
 ## 运行
 
@@ -53,8 +57,10 @@ jsdom 不能覆盖：
 
 ## 编写建议
 
+- 统一用 `src/test-utils.tsx` 的 `renderWithProviders(<App />)` 挂载，不要自行拼装 Provider 树或单独设置区域。
+- 区域默认锁定 `zh-CN`（由全局 `src/test-setup.ts` 设置），断言中文文案；需要验证英文时在用例内显式切换。
 - 优先使用 `getByRole`、`getByLabelText` 等语义查询。
-- 使用 `runtimeClientStub` mock Runtime 行为，避免测试依赖网络。
+- 使用 `src/test-fixtures.ts` 的 `runtimeClientStub` mock Runtime 行为，避免测试依赖网络。
 - 使用 `await screen.findBy...` 或 `waitFor` 等待异步状态。
 - 测试文件中 `beforeEach` 调用 `vi.resetAllMocks()`。
 - 对滚动、blob URL、matchMedia、Tauri dialog 等 jsdom 缺失能力，优先在 `src/test-setup.ts` 提供集中 mock。

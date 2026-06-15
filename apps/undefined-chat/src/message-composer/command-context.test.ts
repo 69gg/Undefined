@@ -243,11 +243,13 @@ describe("matchLabel / matchUsage / matchMeta", () => {
 		expect(matchUsage(noUsage)).toBe("/ping");
 	});
 
-	test("matchMeta：命令显示别名与子命令数，子命令为空", () => {
-		expect(matchMeta(convMatch)).toBe("/c · 3 个子命令");
-		expect(matchMeta(helpMatch)).toBe("/h");
-		expect(matchMeta(clearMatch)).toBe("");
-		expect(matchMeta(newMatch)).toBe("");
+	test("matchMeta：返回结构化别名与子命令数，子命令为 null", () => {
+		// 命令返回结构化数据（别名语言无关、子命令数交由 UI 本地化渲染）
+		expect(matchMeta(convMatch)).toEqual({ aliases: "/c", subcommandCount: 3 });
+		expect(matchMeta(helpMatch)).toEqual({ aliases: "/h", subcommandCount: 0 });
+		expect(matchMeta(clearMatch)).toEqual({ aliases: "", subcommandCount: 0 });
+		// 子命令无元信息
+		expect(matchMeta(newMatch)).toBeNull();
 	});
 });
 

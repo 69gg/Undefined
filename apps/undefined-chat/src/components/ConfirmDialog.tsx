@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useTranslation } from "../i18n";
 
 export type ConfirmDialogProps = {
 	open: boolean;
@@ -20,12 +21,17 @@ export function ConfirmDialog({
 	open,
 	title,
 	message,
-	confirmLabel = "确定",
-	cancelLabel = "取消",
+	confirmLabel,
+	cancelLabel,
 	danger = false,
 	onConfirm,
 	onCancel,
 }: ConfirmDialogProps) {
+	const { t } = useTranslation();
+	// hook 不能用于参数默认值，故在组件内回退到默认文案
+	const resolvedConfirmLabel = confirmLabel ?? t("dialog.confirm");
+	const resolvedCancelLabel = cancelLabel ?? t("dialog.cancel");
+
 	useEffect(() => {
 		if (!open) return;
 		const handleKeyDown = (event: KeyboardEvent): void => {
@@ -59,14 +65,14 @@ export function ConfirmDialog({
 				<p className="confirm-dialog-message">{message}</p>
 				<div className="confirm-dialog-actions">
 					<button className="ghost-button" onClick={onCancel} type="button">
-						{cancelLabel}
+						{resolvedCancelLabel}
 					</button>
 					<button
 						className={danger ? "danger-button" : "primary-button"}
 						onClick={onConfirm}
 						type="button"
 					>
-						{confirmLabel}
+						{resolvedConfirmLabel}
 					</button>
 				</div>
 			</div>

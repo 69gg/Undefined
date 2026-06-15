@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { LanguageProvider } from "./i18n";
 import { PlatformProvider } from "./platform/PlatformContext";
 import "./styles.css";
 
@@ -13,7 +14,9 @@ if (!root) {
 createRoot(root).render(
 	<StrictMode>
 		<PlatformProvider>
-			<App />
+			<LanguageProvider>
+				<App />
+			</LanguageProvider>
 		</PlatformProvider>
 	</StrictMode>,
 );

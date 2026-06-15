@@ -3,20 +3,22 @@
  * 显示月亮（亮色模式）或太阳（暗色模式）图标
  */
 
+import { useTranslation } from "../i18n";
 import { useTheme } from "./use-theme";
 
 export function ThemeToggle() {
 	const { effectiveTheme, toggleTheme } = useTheme();
+	const { t } = useTranslation();
+	const toggleLabel =
+		effectiveTheme === "light" ? t("theme.toDark") : t("theme.toLight");
 
 	return (
 		<button
 			type="button"
 			className="icon-button theme-toggle"
 			onClick={toggleTheme}
-			aria-label={
-				effectiveTheme === "light" ? "切换到暗色模式" : "切换到亮色模式"
-			}
-			title={effectiveTheme === "light" ? "切换到暗色模式" : "切换到亮色模式"}
+			aria-label={toggleLabel}
+			title={toggleLabel}
 		>
 			{effectiveTheme === "light" ? (
 				// 月亮图标（亮色模式下显示）
@@ -30,9 +32,9 @@ export function ThemeToggle() {
 					strokeLinecap="round"
 					strokeLinejoin="round"
 					role="img"
-					aria-label="月亮图标"
+					aria-label={t("theme.moonIcon")}
 				>
-					<title>切换到暗色模式</title>
+					<title>{t("theme.toDark")}</title>
 					<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
 				</svg>
 			) : (
@@ -47,9 +49,9 @@ export function ThemeToggle() {
 					strokeLinecap="round"
 					strokeLinejoin="round"
 					role="img"
-					aria-label="太阳图标"
+					aria-label={t("theme.sunIcon")}
 				>
-					<title>切换到亮色模式</title>
+					<title>{t("theme.toLight")}</title>
 					<circle cx="12" cy="12" r="5" />
 					<line x1="12" y1="1" x2="12" y2="3" />
 					<line x1="12" y1="21" x2="12" y2="23" />

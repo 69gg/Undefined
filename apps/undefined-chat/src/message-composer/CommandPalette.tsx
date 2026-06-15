@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useTranslation } from "../i18n";
 import type { CommandInfo } from "../runtime-client/types";
 import {
 	type CommandMatch,
@@ -16,21 +17,29 @@ export type CommandPaletteProps = {
 	mode: "command" | "subcommand";
 	/** 子命令模式下命令存在但无子命令时，传入该命令以渲染帮助卡片 */
 	helpCommand: CommandInfo | null;
+	/** 是否已加载到任何命令；为 false 时面板提示命令尚不可用，而非静默无匹配 */
+	hasCommands: boolean;
 	onSelect: (match: CommandMatch) => void;
 };
 
 function CommandHelpCard({ command }: { command: CommandInfo }) {
+	const { t } = useTranslation();
 	const rows: Array<[string, string]> = [];
-	if (command.usage) rows.push(["用法", command.usage]);
-	if (command.example) rows.push(["示例", command.example]);
+	if (command.usage) rows.push([t("command.usage"), command.usage]);
+	if (command.example) rows.push([t("command.example"), command.example]);
 	if (command.aliases.length > 0) {
-		rows.push(["别名", command.aliases.map((alias) => `/${alias}`).join(", ")]);
+		rows.push([
+			t("command.aliases"),
+			command.aliases.map((alias) => `/${alias}`).join(", "),
+		]);
 	}
 	return (
 		<div className="runtime-chat-command-help">
 			<div className="runtime-chat-command-help-head">
 				<span className="runtime-chat-command-help-name">/{command.name}</span>
-				<span className="runtime-chat-command-help-kicker">命令帮助</span>
+				<span className="runtime-chat-command-help-kicker">
+					{t("command.help")}
+				</span>
 			</div>
 			{command.description ? (
 				<div className="runtime-chat-command-help-desc">
@@ -48,7 +57,7 @@ function CommandHelpCard({ command }: { command: CommandInfo }) {
 				</div>
 			) : null}
 			<div className="runtime-chat-command-help-note">
-				该命令没有子命令，直接发送即可。
+				{t("command.noSubcommands")}
 			</div>
 		</div>
 	);
@@ -60,8 +69,10 @@ export function CommandPalette({
 	activeIndex,
 	mode,
 	helpCommand,
+	hasCommands,
 	onSelect,
 }: CommandPaletteProps) {
+	const { t } = useTranslation();
 	const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
 	// 键盘导航时让选中项滚动进可视区
@@ -73,8 +84,9 @@ export function CommandPalette({
 		return null;
 	}
 
-	// 子命令模式下命令无子命令：展示帮助卡片
+	// 无候选项：区分并给出明确空态反馈，避免面板静默消失让用户误以为坏掉
 	if (matches.length === 0) {
+		// 子命令模式下命令存在但无子命令：展示帮助卡片
 		if (helpCommand) {
 			return (
 				<div className="runtime-chat-command-palette is-open">
@@ -82,10 +94,27 @@ export function CommandPalette({
 				</div>
 			);
 		}
-		return null;
+		// 命令尚未加载 / 暂不可用（如连接初期 listCommands 未返回）
+		// 与“已加载但筛选无结果”区分开
+		let emptyText: string;
+		if (!hasCommands) {
+			emptyText = t("command.unavailable");
+		} else if (mode === "subcommand") {
+			emptyText = t("command.noSubcommandMatch");
+		} else {
+			emptyText = t("command.noMatch");
+		}
+		return (
+			<div className="runtime-chat-command-palette is-open">
+				<div className="runtime-chat-command-head" role="status">
+					{emptyText}
+				</div>
+			</div>
+		);
 	}
 
-	const headText = mode === "subcommand" ? "选择子命令" : "输入以筛选命令";
+	const headText =
+		mode === "subcommand" ? t("command.selectSubcommand") : t("command.filter");
 
 	return (
 		<div
@@ -96,6 +125,19 @@ export function CommandPalette({
 			<div className="runtime-chat-command-head">{headText}</div>
 			{matches.map((match, index) => {
 				const meta = matchMeta(match);
+				// 组装本地化元信息：别名（语言无关）在前、子命令数（本地化）在后，" · " 连接
+				const metaParts: string[] = [];
+				if (meta) {
+					if (meta.aliases) {
+						metaParts.push(meta.aliases);
+					}
+					if (meta.subcommandCount > 0) {
+						metaParts.push(
+							t("command.subcommandCount", { count: meta.subcommandCount }),
+						);
+					}
+				}
+				const metaText = metaParts.join(" · ");
 				return (
 					<button
 						type="button"
@@ -118,8 +160,8 @@ export function CommandPalette({
 						</span>
 						<span className="runtime-chat-command-side">
 							<code>{matchUsage(match)}</code>
-							{meta ? (
-								<span className="runtime-chat-command-meta">{meta}</span>
+							{metaText ? (
+								<span className="runtime-chat-command-meta">{metaText}</span>
 							) : null}
 						</span>
 					</button>

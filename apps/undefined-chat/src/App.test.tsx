@@ -7,8 +7,10 @@ import {
 	within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
+import { LOCALE_STORAGE_KEY, LanguageProvider } from "./i18n";
 import { createTauriRuntimeClient } from "./runtime-client/tauri";
 import { conversation, historyItem, runtimeClientStub } from "./test-fixtures";
 
@@ -20,9 +22,26 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 	open: vi.fn(),
 }));
 
+/**
+ * App 依赖 LanguageProvider；平台上下文走默认值（DEFAULT_PLATFORM_INFO，
+ * os="unknown" → 非移动/桌面/Android），由测试用 innerWidth 控制移动布局。
+ */
+function renderApp(ui: ReactElement = <App />) {
+	return render(<LanguageProvider>{ui}</LanguageProvider>);
+}
+
 describe("App", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
+		localStorage.clear();
+		// 固定 locale 为 zh-CN，断言依赖简体中文文案
+		localStorage.setItem(LOCALE_STORAGE_KEY, "zh-CN");
+		// 复位视口宽度，避免移动端用例失败时残留 innerWidth 污染后续用例
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			value: 1280,
+		});
+		window.dispatchEvent(new Event("resize"));
 	});
 
 	test("boots into a Chinese chat-first workspace", async () => {
@@ -57,7 +76,7 @@ describe("App", () => {
 			}),
 		);
 
-		render(<App />);
+		renderApp();
 
 		expect(
 			await screen.findByRole("navigation", { name: "会话" }),
@@ -119,7 +138,7 @@ describe("App", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderApp();
 		await screen.findByText("默认消息");
 		await userEvent.click(screen.getByRole("button", { name: /运维排障/ }));
 
@@ -142,7 +161,7 @@ describe("App", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderApp();
 		expect(await screen.findByText("保存并连接")).toBeTruthy();
 
 		await userEvent.clear(screen.getByLabelText("Runtime URL"));
@@ -172,7 +191,7 @@ describe("App", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderApp();
 		expect(await screen.findByText("保存并连接")).toBeTruthy();
 
 		await userEvent.clear(screen.getByLabelText("Runtime URL"));
@@ -192,7 +211,7 @@ describe("App", () => {
 		const client = runtimeClientStub();
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderApp();
 		await screen.findByRole("navigation", { name: "会话" });
 		await userEvent.click(screen.getByRole("button", { name: "新建" }));
 
@@ -210,7 +229,7 @@ describe("App", () => {
 		const client = runtimeClientStub();
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderApp();
 		await screen.findByRole("navigation", { name: "会话" });
 		const menuButton = screen.getByRole("button", { name: "打开会话列表" });
 		expect(menuButton).toHaveAttribute("aria-expanded", "false");
@@ -218,9 +237,10 @@ describe("App", () => {
 		await userEvent.click(menuButton);
 
 		expect(menuButton).toHaveAttribute("aria-expanded", "true");
-		expect(screen.getByRole("navigation", { name: "会话" })).toHaveClass(
-			"active",
-		);
+		// 移动端抽屉激活时容器为 role="dialog" aria-modal（无障碍语义）
+		const drawer = screen.getByRole("dialog", { name: "会话" });
+		expect(drawer).toHaveClass("active");
+		expect(drawer).toHaveAttribute("aria-modal", "true");
 
 		fireEvent.keyDown(window, { key: "Escape" });
 
@@ -245,19 +265,19 @@ describe("App", () => {
 		const client = runtimeClientStub();
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderApp();
 		await screen.findByRole("navigation", { name: "会话" });
 		const menuButton = screen.getByRole("button", { name: "打开会话列表" });
 		await userEvent.click(menuButton);
-		expect(screen.getByRole("navigation", { name: "会话" })).toHaveClass(
-			"active",
-		);
+		// 抽屉激活时为 dialog
+		expect(screen.getByRole("dialog", { name: "会话" })).toHaveClass("active");
 
 		await userEvent.click(screen.getByRole("button", { name: "新建" }));
 
 		await waitFor(() => {
 			expect(menuButton).toHaveAttribute("aria-expanded", "false");
 		});
+		// 抽屉关闭后恢复为 navigation 且无 active
 		expect(screen.getByRole("navigation", { name: "会话" })).not.toHaveClass(
 			"active",
 		);
@@ -274,7 +294,7 @@ describe("App", () => {
 		const client = runtimeClientStub();
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderApp();
 		await screen.findByRole("navigation", { name: "会话" });
 
 		fireEvent.keyDown(window, { key: "n", ctrlKey: true });
@@ -291,7 +311,7 @@ describe("App", () => {
 		const client = runtimeClientStub();
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderApp();
 		await screen.findByRole("navigation", { name: "会话" });
 
 		fireEvent.keyDown(window, { key: ",", ctrlKey: true });
@@ -355,7 +375,7 @@ describe("App", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderApp();
 		await screen.findByText("回复消息");
 		const sourceMessage = document.querySelector(
 			'[data-message-id="source-msg"]',
@@ -386,7 +406,7 @@ describe("App", () => {
 		const client = runtimeClientStub();
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderApp();
 		await screen.findByRole("navigation", { name: "会话" });
 		await userEvent.click(screen.getByRole("button", { name: "添加附件" }));
 
@@ -441,7 +461,7 @@ describe("App", () => {
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 		vi.spyOn(window, "alert").mockImplementation(() => undefined);
 
-		render(<App />);
+		renderApp();
 		await screen.findByText("report.pdf");
 
 		await userEvent.click(screen.getByRole("button", { name: "下载" }));
@@ -491,7 +511,7 @@ describe("App", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderApp();
 		await screen.findByText("large.png");
 		await userEvent.click(screen.getByRole("button", { name: "预览" }));
 

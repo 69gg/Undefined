@@ -1,10 +1,16 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+import { LOCALE_STORAGE_KEY, LanguageProvider } from "../i18n";
 import { commandInfo, subcommandInfo } from "../test-fixtures";
 import { CommandPalette } from "./CommandPalette";
 import { buildCommandContext, computeMatches } from "./command-context";
+
+// 固定为简体中文，使断言不受测试环境 navigator.language 影响
+beforeEach(() => {
+	window.localStorage.setItem(LOCALE_STORAGE_KEY, "zh-CN");
+});
 
 const help = commandInfo({
 	name: "help",
@@ -50,15 +56,18 @@ function renderPalette(
 	props: Partial<ComponentProps<typeof CommandPalette>> = {},
 ) {
 	return render(
-		<CommandPalette
-			open
-			matches={commandMatches}
-			activeIndex={0}
-			mode="command"
-			helpCommand={null}
-			onSelect={vi.fn()}
-			{...props}
-		/>,
+		<LanguageProvider>
+			<CommandPalette
+				open
+				matches={commandMatches}
+				activeIndex={0}
+				mode="command"
+				helpCommand={null}
+				hasCommands
+				onSelect={vi.fn()}
+				{...props}
+			/>
+		</LanguageProvider>,
 	);
 }
 
@@ -68,9 +77,22 @@ describe("CommandPalette", () => {
 		expect(container.firstChild).toBeNull();
 	});
 
-	test("无候选且无帮助命令时不渲染", () => {
+	test("命令模式无匹配时展示空态提示而非静默消失", () => {
 		const { container } = renderPalette({ matches: [], helpCommand: null });
-		expect(container.firstChild).toBeNull();
+		// 面板仍渲染（提供反馈），且带 role=status 的空态文案
+		expect(container.firstChild).not.toBeNull();
+		expect(screen.getByRole("status")).toBeInTheDocument();
+		expect(screen.queryAllByRole("option")).toHaveLength(0);
+	});
+
+	test("子命令模式无匹配且无帮助命令时展示空态提示", () => {
+		renderPalette({ matches: [], helpCommand: null, mode: "subcommand" });
+		expect(screen.getByRole("status")).toBeInTheDocument();
+	});
+
+	test("命令尚未加载时提示命令暂不可用", () => {
+		renderPalette({ matches: [], helpCommand: null, hasCommands: false });
+		expect(screen.getByRole("status")).toBeInTheDocument();
 	});
 
 	test("渲染命令候选并显示命令模式提示", () => {

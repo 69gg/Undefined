@@ -1,6 +1,8 @@
 use crate::config::normalize_runtime_url;
 use crate::mobile_secret::android_secret_plugin_identifier;
-use crate::platform::platform_info_for_target;
+use crate::platform::{
+    platform_info_for_target, supports_html_preview_target, supports_sse_target,
+};
 use crate::preview::{
     build_preview_data_url, preview_document, preview_document_checked, preview_navigation_allowed,
     MAX_PREVIEW_HTML_BYTES,
@@ -174,7 +176,9 @@ fn attachments_url_rejects_query_and_fragment() {
 }
 
 #[test]
-fn html_preview_csp_blocks_network_and_eval() {
+fn html_preview_csp_allows_inline_scripts_but_keeps_isolation() {
+    // 与 WebUI 基线对齐：放开内联脚本（图表/动画），但维持外联与提交隔离、禁止 eval。
+    // 仅断言运行时真正生效的隔离指令，不把已被移除/在 meta 交付下被忽略的指令当作隔离证据。
     let document = preview_document("Report", "<p>Hello</p>");
 
     assert!(document.contains("default-src 'none'"));
@@ -182,14 +186,18 @@ fn html_preview_csp_blocks_network_and_eval() {
     assert!(document.contains("form-action 'none'"));
     assert!(document.contains("object-src 'none'"));
     assert!(document.contains("base-uri 'none'"));
-    assert!(document.contains("frame-ancestors 'none'"));
-    assert!(document.contains("navigate-to 'none'"));
     assert!(document.contains("img-src data: blob:"));
     assert!(document.contains("media-src data: blob:"));
     assert!(document.contains("style-src 'unsafe-inline'"));
-    assert!(document.contains("script-src 'none'"));
-    assert!(!document.contains("script-src 'unsafe-inline'"));
+    // 放开内联脚本以支持工具产物中的图表/动画。
+    assert!(document.contains("script-src 'unsafe-inline'"));
+    // 仍禁止 eval，且不存在残留的 script-src 'none'。
     assert!(!document.contains("unsafe-eval"));
+    assert!(!document.contains("script-src 'none'"));
+    // 已从 CSP 规范移除、浏览器从不实现的死指令不得再充当隔离证据。
+    assert!(!document.contains("navigate-to"));
+    // 导航防护的真实证据是 on_navigation 守卫单测（见
+    // html_preview_navigation_guard_allows_only_initial_url），而非任何 CSP 指令。
 }
 
 #[test]
@@ -426,6 +434,41 @@ fn platform_info_keeps_system_keyring_and_secure_api_key_storage_separate() {
     let platform = platform_info_for_target("android", "unix", "aarch64");
     assert!(!platform.supports_system_keyring);
     assert!(platform.supports_secure_api_key_storage);
+}
+
+#[test]
+fn html_preview_support_covers_desktop_and_android_but_not_ios() {
+    // 桌面端与 Android（HtmlPreviewActivity）支持原生 HTML 预览窗口。
+    for os in ["windows", "macos", "linux", "android"] {
+        assert!(
+            supports_html_preview_target(os),
+            "{os} should support html preview"
+        );
+    }
+    // iOS 缺少承载预览窗口的 Activity，诚实降级为不支持。
+    assert!(!supports_html_preview_target("ios"));
+}
+
+#[test]
+fn sse_support_is_available_on_every_platform() {
+    for os in ["windows", "macos", "linux", "android", "ios"] {
+        assert!(supports_sse_target(os), "{os} should support SSE");
+    }
+}
+
+#[test]
+fn platform_info_reports_real_html_preview_and_sse_capabilities() {
+    let ios = platform_info_for_target("ios", "unix", "aarch64");
+    assert!(!ios.supports_html_preview);
+    assert!(ios.supports_sse);
+
+    let android = platform_info_for_target("android", "unix", "aarch64");
+    assert!(android.supports_html_preview);
+    assert!(android.supports_sse);
+
+    let desktop = platform_info_for_target("linux", "unix", "x86_64");
+    assert!(desktop.supports_html_preview);
+    assert!(desktop.supports_sse);
 }
 
 #[test]

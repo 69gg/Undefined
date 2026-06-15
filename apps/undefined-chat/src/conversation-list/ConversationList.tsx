@@ -1,3 +1,5 @@
+import { useTranslation } from "../i18n";
+import { LanguageToggle } from "../i18n/LanguageToggle";
 import type { Conversation } from "../runtime-client/types";
 import { ThemeToggle } from "../theme/ThemeToggle";
 
@@ -17,10 +19,6 @@ export type ConversationListProps = {
 	isMobileActive?: boolean;
 };
 
-function messageCountLabel(count: number): string {
-	return `${count} 条消息`;
-}
-
 export function ConversationList({
 	id,
 	conversations,
@@ -35,18 +33,23 @@ export function ConversationList({
 	onOpenSettings,
 	isMobileActive = false,
 }: ConversationListProps) {
+	const { t } = useTranslation();
+	const navLabel = t("conversation.nav");
+
 	return (
 		<nav
 			id={id}
-			aria-label="会话"
+			aria-label={navLabel}
 			className={`conversation-list ${isCollapsed ? "collapsed" : ""} ${isMobileActive ? "active" : ""}`}
+			role={isMobileActive ? "dialog" : undefined}
+			aria-modal={isMobileActive ? true : undefined}
 		>
 			<header className="rail-header">
 				<h1>Undefined</h1>
 				<button
 					className="icon-button"
 					onClick={onToggleCollapse}
-					title="折叠侧边栏"
+					title={t("conversation.collapseSidebar")}
 					type="button"
 				>
 					<svg
@@ -59,7 +62,7 @@ export function ConversationList({
 						viewBox="0 0 24 24"
 						width="16"
 					>
-						<title>折叠侧边栏</title>
+						<title>{t("conversation.collapseSidebar")}</title>
 						<rect height="18" rx="2" ry="2" width="18" x="3" y="3" />
 						<line x1="9" x2="9" y1="3" y2="21" />
 					</svg>
@@ -87,12 +90,12 @@ export function ConversationList({
 						viewBox="0 0 24 24"
 						width="16"
 					>
-						<title>新建</title>
+						<title>{t("conversation.create")}</title>
 						<line x1="12" x2="12" y1="5" y2="19" />
 						<line x1="5" x2="19" y1="12" y2="12" />
 					</svg>
 				)}
-				{creating ? "正在新建…" : "新建"}
+				{creating ? t("conversation.creating") : t("conversation.create")}
 			</button>
 
 			{/* 滚动会话列表 */}
@@ -108,20 +111,30 @@ export function ConversationList({
 							type="button"
 						>
 							<span className="conversation-title-row">
-								<span className="conversation-title">{conversation.title}</span>
+								<span className="conversation-title">
+									{conversation.title || t("app.topbar.defaultConversation")}
+								</span>
 								{conversation.isRunning ? (
-									<span className="running-dot">运行中</span>
+									<span className="running-dot">
+										{t("conversation.running")}
+									</span>
 								) : null}
 							</span>
 							<span className="conversation-meta">
-								<span>{messageCountLabel(conversation.messageCount)}</span>
+								<span>
+									{t("conversation.messageCount", {
+										count: conversation.messageCount,
+									})}
+								</span>
 							</span>
 						</button>
 						<button
-							aria-label="重命名会话"
+							aria-label={t("conversation.rename")}
 							className="conversation-rename"
 							onClick={() => onRename(conversation.id)}
-							title={`重命名会话「${conversation.title}」`}
+							title={t("conversation.renameTitle", {
+								title: conversation.title,
+							})}
 							type="button"
 						>
 							<svg
@@ -140,10 +153,12 @@ export function ConversationList({
 							</svg>
 						</button>
 						<button
-							aria-label="删除会话"
+							aria-label={t("conversation.delete")}
 							className="conversation-delete"
 							onClick={() => onDelete(conversation.id)}
-							title={`删除会话「${conversation.title}」`}
+							title={t("conversation.deleteTitle", {
+								title: conversation.title,
+							})}
 							type="button"
 						>
 							<svg
@@ -170,14 +185,17 @@ export function ConversationList({
 				<div className="sidebar-footer-row">
 					<div className="user-badge">
 						<div className="user-avatar">UD</div>
-						<span style={{ fontSize: "0.85rem", fontWeight: "600" }}>用户</span>
+						<span style={{ fontSize: "0.85rem", fontWeight: "600" }}>
+							{t("conversation.user")}
+						</span>
 					</div>
 					<div style={{ display: "flex", gap: "8px" }}>
 						<ThemeToggle />
+						<LanguageToggle />
 						<button
 							className="icon-button"
 							onClick={onOpenSettings}
-							title="配置 Runtime"
+							title={t("conversation.configRuntime")}
 							type="button"
 						>
 							<svg
@@ -190,7 +208,7 @@ export function ConversationList({
 								viewBox="0 0 24 24"
 								width="16"
 							>
-								<title>配置 Runtime</title>
+								<title>{t("conversation.configRuntime")}</title>
 								<circle cx="12" cy="12" r="3" />
 								<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
 							</svg>

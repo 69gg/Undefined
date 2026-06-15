@@ -207,19 +207,26 @@ export function matchUsage(match: CommandMatch): string {
 }
 
 /**
- * 右侧附加元信息（对齐 WebUI commandPaletteItemMeta）：仅命令显示，
- * 形如 “/h · 2 个子命令”（别名在前、子命令数在后，" · " 连接）；子命令无元信息。
+ * 右侧附加元信息的结构化数据（对齐 WebUI commandPaletteItemMeta）：仅命令有元信息，
+ * 子命令为 null。别名（如 "/h"）与子命令数量分开返回，子命令数的本地化文案由 UI 用
+ * `t("command.subcommandCount", { count })` 渲染，纯函数不拼接语言相关文案。
  */
-export function matchMeta(match: CommandMatch): string {
-	if (match.type !== "command") return "";
-	const parts: string[] = [];
-	if (match.command.aliases.length > 0) {
-		parts.push(match.command.aliases.map((alias) => `/${alias}`).join(", "));
-	}
-	if (match.command.subcommands.length > 0) {
-		parts.push(`${match.command.subcommands.length} 个子命令`);
-	}
-	return parts.join(" · ");
+export type CommandMeta = {
+	/** 别名展示文本（如 "/h, /he"）；无别名时为空串 */
+	aliases: string;
+	/** 子命令数量；为 0 时不展示子命令元信息 */
+	subcommandCount: number;
+};
+
+export function matchMeta(match: CommandMatch): CommandMeta | null {
+	if (match.type !== "command") return null;
+	return {
+		aliases:
+			match.command.aliases.length > 0
+				? match.command.aliases.map((alias) => `/${alias}`).join(", ")
+				: "",
+		subcommandCount: match.command.subcommands.length,
+	};
 }
 
 /** 选中候选项后回填到输入框的文本；带参数用法时追加空格便于继续输入 */

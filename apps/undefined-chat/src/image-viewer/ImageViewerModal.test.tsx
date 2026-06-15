@@ -1,18 +1,19 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { renderWithProviders } from "../test-utils";
 import { ImageViewerModal } from "./ImageViewerModal";
 
 describe("ImageViewerModal", () => {
 	it("当 imageViewer 为 null 时不渲染", () => {
-		const { container } = render(
+		const { container } = renderWithProviders(
 			<ImageViewerModal imageViewer={null} onClose={vi.fn()} />,
 		);
 		expect(container.firstChild).toBeNull();
 	});
 
 	it("当 imageViewer.open 为 false 时不渲染", () => {
-		const { container } = render(
+		const { container } = renderWithProviders(
 			<ImageViewerModal
 				imageViewer={{ open: false, src: "", alt: "" }}
 				onClose={vi.fn()}
@@ -22,7 +23,7 @@ describe("ImageViewerModal", () => {
 	});
 
 	it("当 imageViewer.open 为 true 时渲染图片", () => {
-		render(
+		renderWithProviders(
 			<ImageViewerModal
 				imageViewer={{
 					open: true,
@@ -43,7 +44,7 @@ describe("ImageViewerModal", () => {
 		const user = userEvent.setup();
 		const onClose = vi.fn();
 
-		render(
+		renderWithProviders(
 			<ImageViewerModal
 				imageViewer={{
 					open: true,
@@ -64,7 +65,7 @@ describe("ImageViewerModal", () => {
 		const user = userEvent.setup();
 		const onClose = vi.fn();
 
-		render(
+		renderWithProviders(
 			<ImageViewerModal
 				imageViewer={{
 					open: true,
@@ -85,7 +86,7 @@ describe("ImageViewerModal", () => {
 		const user = userEvent.setup();
 		const onClose = vi.fn();
 
-		render(
+		renderWithProviders(
 			<ImageViewerModal
 				imageViewer={{
 					open: true,
@@ -106,7 +107,7 @@ describe("ImageViewerModal", () => {
 		const user = userEvent.setup();
 		const onClose = vi.fn();
 
-		render(
+		renderWithProviders(
 			<ImageViewerModal
 				imageViewer={{
 					open: true,
@@ -123,7 +124,7 @@ describe("ImageViewerModal", () => {
 	});
 
 	it("应该有正确的可访问性属性", () => {
-		render(
+		renderWithProviders(
 			<ImageViewerModal
 				imageViewer={{
 					open: true,
@@ -141,7 +142,7 @@ describe("ImageViewerModal", () => {
 
 	it("支持缩放、旋转和重置", async () => {
 		const user = userEvent.setup();
-		render(
+		renderWithProviders(
 			<ImageViewerModal
 				imageViewer={{
 					open: true,
@@ -164,7 +165,7 @@ describe("ImageViewerModal", () => {
 	});
 
 	it("渲染可滚动查看区域以支持放大后查看图片边缘", () => {
-		render(
+		renderWithProviders(
 			<ImageViewerModal
 				imageViewer={{
 					open: true,

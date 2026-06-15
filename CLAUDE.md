@@ -166,4 +166,4 @@ Management / Runtime 请求 → webui/app.py 或 api/app.py → routes/*
 
 `apps/undefined-console/` 是基于 Tauri v2 + TypeScript + Vite 的管理客户端，支持 Windows / macOS / Linux / Android，连接同一套 Management API 与 Runtime API。
 
-`apps/undefined-chat/` 是原生优先的 WebChat 客户端，基于 Tauri v2 + React，直接连接 Runtime API，面向长期挂起、桌面/移动端聊天使用场景。采用莫兰迪橙色系（Morandi Orange）设计，与 WebUI 保持视觉一致性，100% 移植 WebUI webchat 的所有核心功能。详见 [docs/undefined-chat.md](docs/undefined-chat.md)。
+`apps/undefined-chat/` 是原生优先的 WebChat 客户端，基于 Tauri v2 + React，直接连接 Runtime API，面向长期挂起、桌面/移动端聊天使用场景。采用莫兰迪橙色系（Morandi Orange）设计，与 WebUI 保持视觉一致性。它移植 WebUI webchat 的核心聊天功能，并在事件流（SSE 优先 + JSON fallback 双通道）、桌面快捷键、图片查看（缩放/旋转/全屏）、安全存储（系统 keyring / Android Keystore）等方面做了原生增强；HTML 采用 sanitize 内联渲染 + 独立预览窗口隔离运行的双层策略。详见 [docs/undefined-chat.md](docs/undefined-chat.md)。

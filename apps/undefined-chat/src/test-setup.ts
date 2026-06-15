@@ -1,5 +1,17 @@
 import "@testing-library/jest-dom/vitest";
-import { vi } from "vitest";
+import { beforeEach, vi } from "vitest";
+import { LOCALE_STORAGE_KEY } from "./i18n";
+
+// 全局锁定 zh-CN：jsdom 默认 navigator.language=en-US 会让 LanguageProvider 回退到 en，
+// 破坏现有中文文案断言。每个测试前显式写入 localStorage，确保默认中文；
+// 需要测试英文的用例可在测试内自行覆盖（setLocale 或写入 localStorage）。
+beforeEach(() => {
+	try {
+		window.localStorage.setItem(LOCALE_STORAGE_KEY, "zh-CN");
+	} catch {
+		// localStorage 不可用时忽略
+	}
+});
 
 // Mock Tauri API
 vi.mock("@tauri-apps/api/core", () => ({

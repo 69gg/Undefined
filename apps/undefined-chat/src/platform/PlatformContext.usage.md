@@ -41,15 +41,18 @@ function MyComponent() {
 
 ```typescript
 interface PlatformInfo {
-  os: string;                      // 操作系统: "windows" | "macos" | "linux" | "android" | "ios" | "unknown"
-  family: string;                  // 系统家族: "windows" | "unix" | "unknown"
-  arch: string;                    // 架构: "x86_64" | "aarch64" | "unknown"
-  debug: boolean;                  // 是否为调试构建
-  supportsSystemKeyring: boolean;  // 是否支持系统密钥链
-  supportsSse: boolean;            // 是否支持 SSE 流式传输
-  supportsHtmlPreview: boolean;    // 是否支持 HTML 预览
+  os: string;                          // 操作系统: "windows" | "macos" | "linux" | "android" | "ios" | "unknown"
+  family: string;                      // 系统家族: "windows" | "unix" | "unknown"
+  arch: string;                        // 架构: "x86_64" | "aarch64" | "unknown"
+  debug: boolean;                      // 是否为调试构建
+  supportsSystemKeyring: boolean;      // 是否支持系统密钥链
+  supportsSecureApiKeyStorage: boolean; // 是否支持安全的 API Key 存储
+  supportsSse: boolean;                // 是否支持 SSE 流式传输
+  supportsHtmlPreview: boolean;        // 是否支持 HTML 预览
 }
 ```
+
+> 类型定义与默认值见 `src/platform/types.ts`（`PlatformInfo` / `DEFAULT_PLATFORM_INFO`），与 Rust 后端 `PlatformInfo` 对应。
 
 ## 条件渲染示例
 
@@ -140,6 +143,8 @@ function ChatLayout() {
 }
 ```
 
+> 上例为模式示意。实际 `App.tsx` 的移动端判定取「真实移动平台 ∨ 窄视口断点」（`isNarrowViewport || isMobilePlatform(platform)`），以避免平板/移动设备横屏（>768px）被误判为桌面，详见上文「在 App.tsx 中的实际应用」。
+
 ## 工具函数
 
 ### isAndroidPlatform
@@ -189,39 +194,74 @@ if (isMobilePlatform(platform)) {
 
 ## 在 App.tsx 中的实际应用
 
+`src/App.tsx` 已实际接入平台抽象层：`usePlatform()` 驱动真实平台判定，移动端布局取「真实移动平台 ∨ 窄视口断点」，桌面端用 `DesktopLayout` 包装工作区，Android 生命周期按真实平台启用。
+
 ```tsx
-import { usePlatform, isDesktopPlatform } from "./platform/PlatformContext";
+import { useMediaQuery } from "./hooks/useMediaQuery";
+import { DesktopLayout } from "./platform/DesktopLayout";
+import {
+  isAndroidPlatform,
+  isDesktopPlatform,
+  isMobilePlatform,
+  usePlatform,
+} from "./platform/PlatformContext";
 
 function App() {
   const platform = usePlatform();
-  
-  // 桌面端显示窗口控制按钮
-  const showWindowControls = isDesktopPlatform(platform);
-  
-  // 移动端调整布局
-  const isMobile = window.innerWidth <= 768 || platform.os === "android";
-  
+
+  // 窄视口或真实移动平台均视为移动端：
+  // 解决平板/移动设备横屏（>768px）被误判为桌面
+  const isNarrowViewport = useMediaQuery("(max-width: 768px)");
+  const isMobile = isNarrowViewport || isMobilePlatform(platform);
+
+  // 以真实平台为准启用 Android 生命周期（替代旧的 UA 判定）
+  useEffect(() => {
+    if (!isAndroidPlatform(platform)) {
+      return undefined;
+    }
+    return setupAndroidLifecycle(store);
+  }, [store, platform]);
+
   return (
     <main className="chat-app">
-      {showWindowControls && <WindowControls />}
-      
-      <Sidebar collapsed={isMobile} />
-      
-      <ChatWorkspace>
-        {/* Android 显示简化版工具栏 */}
-        {platform.os === "android" ? (
-          <MobileToolbar />
-        ) : (
-          <DesktopToolbar />
-        )}
-        
-        <MessageTimeline />
-        <MessageComposer />
-      </ChatWorkspace>
+      <ConversationList isMobileActive={/* ... */} /* ... */ />
+
+      <section className="chat-workspace">
+        {/* 桌面平台用 DesktopLayout 透明包裹，预留平台增强位 */}
+        <WorkspaceLayout isDesktop={isDesktopPlatform(platform)}>
+          <header className="chat-topbar">{/* ... */}</header>
+          <MessageTimeline />
+          <MessageComposer />
+        </WorkspaceLayout>
+      </section>
     </main>
   );
 }
+
+/**
+ * 桌面平台用 DesktopLayout（display:contents 透明包装，预留自定义标题栏/原生菜单），
+ * 其它平台直接渲染子节点。
+ */
+function WorkspaceLayout({ isDesktop, children }: {
+  isDesktop: boolean;
+  children: ReactNode;
+}) {
+  return isDesktop ? <DesktopLayout>{children}</DesktopLayout> : <>{children}</>;
+}
 ```
+
+### DesktopLayout
+
+桌面平台下包裹工作区的语义组件（`src/platform/DesktopLayout.tsx`）。当前以 `display: contents` 作透明包装——自身盒子从布局中消失，子元素直接参与 `.chat-workspace` 的 flex 列布局，不破坏现有布局，同时为自定义标题栏（`data-tauri-drag-region`）、原生菜单栏等桌面增强预留挂载点（`enableCustomTitleBar` 开关）。
+
+### ConnectionSetup
+
+统一的连接 / 配置组件（`src/platform/ConnectionSetup.tsx`），替代了早期内联的 setup 面板。支持两种模式：
+
+- `mode="setup"`：首次连接，需填写 Runtime URL + API Key，无关闭按钮；
+- `mode="settings"`：运行期修改配置，API Key 留空表示沿用原值，可关闭，并可通过 `children` 附加额外设置项（如自动滚动开关）。
+
+内置最近使用的 Runtime 历史（localStorage，最多 5 条）、URL 必填与格式校验、全文案 i18n；持久化逻辑（保存配置→保存密钥→bootstrap）由调用方在 `onConnect` 中完成。`App.tsx` 据 `needsSetup` 在 `setup` / `settings` 间切换。
 
 ## 测试
 
@@ -250,5 +290,5 @@ it("组件根据平台信息渲染", () => {
 
 1. **必须包装 PlatformProvider**：使用 `usePlatform` 的组件必须在 `PlatformProvider` 内部
 2. **异步检测**：平台信息是异步获取的，初始渲染时使用默认值
-3. **响应式设计**：结合 CSS 媒体查询和平台检测实现最佳跨平台体验
+3. **响应式设计**：`App.tsx` 已结合视口媒体查询（`useMediaQuery`）与平台检测（`isMobilePlatform`）判定移动端，两者取并集
 4. **性能考虑**：平台信息在应用启动时检测一次，后续读取无性能开销

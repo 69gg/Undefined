@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { renderWithProviders } from "../test-utils";
 import { ThemeToggle } from "./ThemeToggle";
 import * as useThemeModule from "./use-theme";
 
@@ -24,7 +25,7 @@ describe("ThemeToggle", () => {
 			toggleTheme: mockToggleTheme,
 		});
 
-		render(<ThemeToggle />);
+		renderWithProviders(<ThemeToggle />);
 
 		expect(screen.getByLabelText("切换到暗色模式")).toBeInTheDocument();
 		expect(screen.getByLabelText("月亮图标")).toBeInTheDocument();
@@ -38,7 +39,7 @@ describe("ThemeToggle", () => {
 			toggleTheme: mockToggleTheme,
 		});
 
-		render(<ThemeToggle />);
+		renderWithProviders(<ThemeToggle />);
 
 		expect(screen.getByLabelText("切换到亮色模式")).toBeInTheDocument();
 		expect(screen.getByLabelText("太阳图标")).toBeInTheDocument();
@@ -52,7 +53,7 @@ describe("ThemeToggle", () => {
 			toggleTheme: mockToggleTheme,
 		});
 
-		render(<ThemeToggle />);
+		renderWithProviders(<ThemeToggle />);
 
 		const button = screen.getByRole("button");
 		await userEvent.click(button);
@@ -68,7 +69,7 @@ describe("ThemeToggle", () => {
 			toggleTheme: mockToggleTheme,
 		});
 
-		render(<ThemeToggle />);
+		renderWithProviders(<ThemeToggle />);
 
 		const button = screen.getByRole("button");
 		expect(button).toHaveAttribute("type", "button");
@@ -84,7 +85,7 @@ describe("ThemeToggle", () => {
 			toggleTheme: mockToggleTheme,
 		});
 
-		const { rerender } = render(<ThemeToggle />);
+		const { rerender } = renderWithProviders(<ThemeToggle />);
 		expect(screen.getByLabelText("月亮图标")).toBeInTheDocument();
 
 		// 模拟主题切换

@@ -1,7 +1,9 @@
 # Undefined Chat 独立 App 设计规格
 
 日期：2026-06-07
-状态：设计已确认，等待实现计划
+状态：设计已确认并已实现（point-in-time 设计文档）。PoC 与完整产品均已落地，并经历一轮原生优先重写与平台/移动端打磨；最新实现以 [docs/undefined-chat.md](../../undefined-chat.md) 与 `apps/undefined-chat` 代码为准（2026-06）。
+
+> 最终实现要点（与下文设计选项的对应）：i18n 首期即提供完整中英双语切换；HTML 采用「正文 sanitize 内联 + 预览窗口/页面隔离运行脚本（IPC 隔离依赖 capability 缺失）」；桌面端凭据走系统 keyring，Linux 含 Secret Service 降级，Android 走移动端安全存储策略；发布矩阵覆盖 Windows / macOS / Linux / Android，iOS 当前不在发布矩阵内（iOS 为诚实降级处理）。下文“PoC 结果记录”为当时预留的归档清单，相关验证已随实现落地。
 
 ## 目标
 

@@ -1,17 +1,3 @@
-## v3.5.2 Undefined Chat 莫兰迪橙色系重写与功能对等
-
-本版本完成 Undefined Chat 原生聊天客户端的全面重写，采用莫兰迪橙色系（Morandi Orange）设计，与 WebUI 保持视觉一致性，100% 移植 WebUI webchat 的所有核心功能，并针对桌面和 Android 平台进行原生优化。
-
-### Undefined Chat 重写
-
-- 统一配色系统。采用莫兰迪橙色系设计，浅色/深色模式主色 `#d97757`，与 WebUI 视觉语言完全一致；重写所有组件样式，支持浅色/深色模式切换，自动跟随系统主题。
-- 100% 功能对等。完整移植 WebUI webchat 的会话管理、消息历史分页（cursor-based）、Markdown 渲染（表格、引用、列表）、代码高亮（highlight.js）、图片内联（< 12MB）、附件上传/下载、工具调用块（层级展示）、事件流（SSE + JSON fallback）、命令面板、消息引用、HTML 预览、图片查看器、代码块折叠（> 8 行）、自动滚动控制、国际化（中英文）等所有核心功能。
-- 原生平台优化。桌面端支持完整快捷键（Ctrl/Cmd+K、Ctrl/Cmd+N、Ctrl/Cmd+Enter）、HTML 预览使用独立窗口；Android 支持后台生命周期恢复、连接配置页、HTML 预览使用独立 Activity；所有平台使用系统凭据管理器安全存储 API Key（macOS Keychain / Windows Credential Manager / Linux Secret Service）。
-- 代码重构与可维护性提升。重写所有 React 组件、状态管理和样式文件，统一命名规范，提升代码可读性和可维护性；优化性能，减少不必要的重渲染；完善类型定义，提升类型安全。
-- 文档完善。更新 `apps/undefined-chat/README.md` 添加功能特性、依赖项、平台支持章节；更新 `docs/undefined-chat.md` 添加设计重写说明、功能对比表、配色系统说明；更新 `CLAUDE.md` 添加 undefined-chat 说明与开发命令。
-
----
-
 ## v3.5.1 安全回复、群聊边界与配置表单优化
 
 本版本聚焦三个实际使用中的细节问题：一是群聊里只出现「你/我/他」等人称时，Undefined 更容易误判成在和自己说话；二是面对 prompt 注入或强行改人设的消息时，防御性回复有时过于模板化、攻击性过强，甚至在生成失败时仍会发送兜底脏话；三是 WebUI 配置页对枚举型字段的输入约束不足，容易让用户手填出不合法或不直观的配置值。v3.5.1 因此收紧对话归属判断，强化人设自洽与防注入边界，并把更多配置项改为下拉选择，降低误配置概率。

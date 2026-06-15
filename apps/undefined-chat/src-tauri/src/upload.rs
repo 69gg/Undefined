@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
-use tauri_plugin_http::reqwest::{multipart, Body, Client};
+use tauri_plugin_http::reqwest::{multipart, Body};
 use tokio::fs::File;
 use tokio_util::io::ReaderStream;
 
@@ -103,7 +103,8 @@ pub async fn upload_attachment_streaming(
         .file_name(attachment_file_name_from_input(&app, &input.file_path));
     let form = multipart::Form::new().part("file", part);
 
-    let response = Client::new()
+    let response = state
+        .http_client()?
         .post(url)
         .header("X-Undefined-API-Key", api_key)
         .multipart(form)

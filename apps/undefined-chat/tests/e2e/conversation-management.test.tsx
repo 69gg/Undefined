@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "../../src/App";
@@ -8,6 +8,7 @@ import {
 	historyItem,
 	runtimeClientStub,
 } from "../../src/test-fixtures";
+import { renderWithProviders } from "../../src/test-utils";
 
 vi.mock("../../src/runtime-client/tauri", () => ({
 	createTauriRuntimeClient: vi.fn(),
@@ -62,7 +63,7 @@ describe("E2E: Conversation Management", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByRole("navigation", { name: "会话" });
 
@@ -136,7 +137,7 @@ describe("E2E: Conversation Management", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		// 等待初始会话加载
 		expect(await screen.findByText("消息1")).toBeInTheDocument();
@@ -173,7 +174,7 @@ describe("E2E: Conversation Management", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByRole("navigation", { name: "会话" });
 
@@ -208,7 +209,7 @@ describe("E2E: Conversation Management", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByRole("navigation", { name: "会话" });
 
@@ -261,7 +262,7 @@ describe("E2E: Conversation Management", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		const nav = await screen.findByRole("navigation", { name: "会话" });
 
@@ -302,7 +303,7 @@ describe("E2E: Conversation Management", () => {
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
-		render(<App />);
+		renderWithProviders(<App />);
 
 		await screen.findByRole("navigation", { name: "会话" });
 

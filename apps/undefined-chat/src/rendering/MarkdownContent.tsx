@@ -10,6 +10,7 @@ import {
 	findAttachmentByUid,
 } from "./AttachmentProcessor";
 import { CodeBlock } from "./CodeBlock";
+import { markdownRehypePlugins } from "./sanitize";
 import "./MarkdownContent.css";
 
 export type HtmlPreviewRequest = {
@@ -132,6 +133,9 @@ function TextBlock({ value, onPreviewHtml, onImageClick }: TextBlockProps) {
 		<div className="markdown-body">
 			<ReactMarkdown
 				remarkPlugins={[remarkGfm, remarkBreaks]}
+				// rehype-raw 解析正文原始 HTML，rehype-sanitize 紧随其后按白名单清洗，
+				// 顺序不可调换：先解析再清洗，确保脚本/事件/危险协议被剥离。
+				rehypePlugins={markdownRehypePlugins}
 				components={components}
 			>
 				{value}

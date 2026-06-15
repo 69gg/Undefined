@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isJobRunning } from "../chat-store/store";
+import { useTranslation } from "../i18n";
 import { extractAttachmentTags } from "../rendering/AttachmentProcessor";
 import {
 	type HtmlPreviewRequest,
@@ -34,12 +35,22 @@ export type MessageTimelineProps = {
 	onRetryHistory?: () => void;
 	/** 加载更早历史；提供时渲染所有已加载消息，避免旧页被窗口化裁掉 */
 	onLoadMoreHistory?: () => Promise<void> | void;
+	/**
+	 * 是否启用自动滚动到底部。false 时流式/历史加载完成均不自动滚底，
+	 * 尊重用户上滑查看历史的意图（跨分区契约 1：由 App 传入）。默认 true。
+	 */
+	autoScrollEnabled?: boolean;
 	items: HistoryItem[];
 	onPreviewHtml: (input: HtmlPreviewRequest) => void;
 	onPreviewAttachment: (attachment: Attachment) => void;
 	onSaveAttachment: (attachment: Attachment) => void;
 	onShortcutClick?: (prompt: string) => void;
 	onAddReference?: (messageId: string) => void;
+	/**
+	 * 划词引用回调（跨分区契约 2）：用户在消息正文区选中文本并点击"引用"浮层时触发，
+	 * App 端转调 store.addReferenceFromSelection(conversationId, text)。
+	 */
+	onAddSelectionReference?: (text: string) => void;
 	onOpenImage?: (src: string, alt: string) => void;
 	onCancelJob?: (jobId: string) => void;
 };
@@ -55,6 +66,7 @@ type HistoryToolCall = {
 	ui_hint?: string;
 	duration_ms?: number;
 	current_stage?: string;
+	current_stage_detail?: string;
 	children?: HistoryToolCall[];
 	timeline?: unknown[];
 };
@@ -116,6 +128,169 @@ function buildStreamingTimeline(job: ChatJob): HistoryTimelineEntry[] {
 }
 
 /**
+ * 历史 webchat 记录的原始事件条目（对齐后端 _finalize_webchat_history_events）。
+ * 仅在 timeline 缺失需从 calls/events 回退重建时使用。
+ */
+type HistoryEvent = {
+	seq?: number;
+	event?: string;
+	payload?: {
+		content?: string;
+		message?: string;
+		name?: string;
+		api_name?: string;
+		is_agent?: boolean;
+		status?: string;
+		ok?: boolean;
+		arguments_preview?: string;
+		result_preview?: string;
+		ui_hint?: string;
+		duration_ms?: number;
+		current_stage?: string;
+		current_stage_detail?: string;
+		webchat_call_id?: string;
+		parent_webchat_call_id?: string;
+	};
+};
+
+/**
+ * 后端 calls 树节点（_call_preview_node）以 webchat_call_id 标识、含 current_stage_detail，
+ * 统一归一化为 MessageTimelineContent 可消费的 HistoryToolCall（id/current_stage_detail 兼容）。
+ */
+function normalizeCallNode(node: Record<string, unknown>): HistoryToolCall {
+	const children = Array.isArray(node.children)
+		? (node.children as Record<string, unknown>[]).map(normalizeCallNode)
+		: undefined;
+	return {
+		id: String(node.webchat_call_id ?? node.id ?? "") || undefined,
+		name: String(node.name ?? "--"),
+		is_agent: Boolean(node.is_agent),
+		status: String(node.status ?? "done"),
+		arguments_preview: node.arguments_preview
+			? String(node.arguments_preview)
+			: undefined,
+		result_preview: node.result_preview
+			? String(node.result_preview)
+			: undefined,
+		ui_hint: node.ui_hint ? String(node.ui_hint) : undefined,
+		duration_ms:
+			typeof node.duration_ms === "number" ? node.duration_ms : undefined,
+		current_stage: node.current_stage ? String(node.current_stage) : undefined,
+		current_stage_detail: node.current_stage_detail
+			? String(node.current_stage_detail)
+			: undefined,
+		children,
+		timeline: Array.isArray(node.timeline) ? node.timeline : undefined,
+	};
+}
+
+/**
+ * 从原始 events 重建顶层时间线：顺序提取顶层 message 文本与 tool/agent 调用。
+ * 简化处理——仅重建顶层（parent 为空）的 call/message，子调用经 tool_end 的
+ * result_preview/status 落到对应节点；不深挖嵌套层级（calls 缺失通常意味着旧/简单记录）。
+ */
+function buildTimelineFromEvents(
+	events: HistoryEvent[],
+): HistoryTimelineEntry[] {
+	const entries: HistoryTimelineEntry[] = [];
+	const callIndexById = new Map<string, number>();
+	for (const item of events) {
+		const event = String(item.event ?? "");
+		const payload = item.payload ?? {};
+		if (event === "message") {
+			if (String(payload.parent_webchat_call_id ?? "").trim()) {
+				continue; // 仅顶层文本
+			}
+			const content = String(payload.content ?? payload.message ?? "");
+			if (content.trim()) {
+				entries.push({ type: "message", content });
+			}
+			continue;
+		}
+		if (event === "tool_start" || event === "agent_start") {
+			if (String(payload.parent_webchat_call_id ?? "").trim()) {
+				continue; // 仅重建顶层调用
+			}
+			const callId = String(payload.webchat_call_id ?? "");
+			const call: HistoryToolCall = {
+				id: callId || undefined,
+				name: String(payload.name ?? payload.api_name ?? "--"),
+				is_agent: Boolean(payload.is_agent),
+				status: "running",
+				arguments_preview: payload.arguments_preview,
+				ui_hint: payload.ui_hint,
+				current_stage: payload.current_stage,
+				current_stage_detail: payload.current_stage_detail,
+			};
+			if (callId) {
+				callIndexById.set(callId, entries.length);
+			}
+			entries.push({ type: "call", call });
+			continue;
+		}
+		if (event === "tool_end" || event === "agent_end") {
+			const callId = String(payload.webchat_call_id ?? "");
+			const index = callId ? callIndexById.get(callId) : undefined;
+			if (index === undefined) {
+				continue;
+			}
+			const existing = entries[index]?.call;
+			if (!existing) {
+				continue;
+			}
+			existing.status = String(
+				payload.status ?? (payload.ok === false ? "error" : "done"),
+			);
+			if (payload.result_preview) {
+				existing.result_preview = String(payload.result_preview);
+			}
+			if (typeof payload.duration_ms === "number") {
+				existing.duration_ms = payload.duration_ms;
+			}
+			if (payload.ui_hint) {
+				existing.ui_hint = String(payload.ui_hint);
+			}
+		}
+	}
+	return entries;
+}
+
+/**
+ * 历史 bot 消息的可渲染时间线，按可用性回退：
+ * 1. webchat.timeline（首选，后端已交错好的完整时间线）；
+ * 2. webchat.calls（仅有调用树时，逐根节点包成 call 条目，正文走 fallbackContent 兜底）；
+ * 3. webchat.events（最原始，重建顶层 message + call）。
+ * 三者皆空时返回 null，由调用方走普通正文渲染。
+ */
+function buildHistoryTimeline(
+	webchat: HistoryItem["webchat"],
+): unknown[] | null {
+	if (!webchat) {
+		return null;
+	}
+	if (hasRenderableTimeline(webchat.timeline)) {
+		return webchat.timeline ?? null;
+	}
+	const calls = Array.isArray(webchat.calls) ? webchat.calls : [];
+	if (calls.length > 0) {
+		return calls.map((node) => ({
+			type: "call",
+			call: normalizeCallNode(node as Record<string, unknown>),
+		}));
+	}
+	const events = Array.isArray(webchat.events)
+		? (webchat.events as HistoryEvent[])
+		: [];
+	if (events.length > 0) {
+		const rebuilt = buildTimelineFromEvents(events);
+		if (rebuilt.some((entry) => entry.type === "call")) {
+			return rebuilt;
+		}
+	}
+	return null;
+}
+
+/**
  * 格式化消息时间戳为 "HH:MM"。HistoryItem.timestamp 为 string，
  * 兼容 Unix 秒/毫秒数字字符串与 ISO 字符串。
  * WebUI 无显式时间戳元素，此函数仅用于保留用户要求的轻量时间戳。
@@ -146,16 +321,23 @@ export function MessageTimeline({
 	hasMoreHistory = false,
 	onRetryHistory,
 	onLoadMoreHistory,
+	autoScrollEnabled = true,
 	items,
 	onPreviewAttachment,
 	onPreviewHtml,
 	onSaveAttachment,
 	onShortcutClick,
 	onAddReference,
+	onAddSelectionReference,
 	onOpenImage,
 	onCancelJob,
 }: MessageTimelineProps) {
-	const visibleItems = onLoadMoreHistory ? items : items.slice(-WINDOW_SIZE);
+	const { t } = useTranslation();
+	// 始终窗口化：仅渲染最近 visibleCount 条已加载消息，避免长历史全量渲染卡顿。
+	// 用户上滑/点击加载更早时同时增大 visibleCount 展开更多本地已加载项。
+	const [visibleCount, setVisibleCount] = useState(WINDOW_SIZE);
+	const visibleItems =
+		items.length > visibleCount ? items.slice(-visibleCount) : items;
 	const timelineRef = useRef<HTMLDivElement>(null);
 	// 是否贴附底部：用户向上滚动查看历史时暂停自动滚动（智能暂停）
 	const stickToBottomRef = useRef(true);
@@ -166,8 +348,34 @@ export function MessageTimeline({
 	const loadingMoreRef = useRef(false);
 
 	const isCurrentlyThinking = isJobRunning(activeJob);
+	// 本地是否还有已加载但被窗口裁掉、未展示的更早消息
+	const hasHiddenLocalItems = items.length > visibleItems.length;
+	// 加载更早控件可用：本地有未展开项，或后端还有更早历史
+	const canLoadMore = hasHiddenLocalItems || hasMoreHistory;
+
+	// 锚定滚动位置：在 mutate（展开 visibleCount / 拉取后端）前后保持顶部锚点不跳动
+	function withScrollAnchor(mutate: () => void): void {
+		const el = timelineRef.current;
+		const previousScrollHeight = el?.scrollHeight ?? 0;
+		const previousScrollTop = el?.scrollTop ?? 0;
+		mutate();
+		requestAnimationFrame(() => {
+			const nextEl = timelineRef.current;
+			if (nextEl) {
+				nextEl.scrollTop =
+					nextEl.scrollHeight - previousScrollHeight + previousScrollTop;
+			}
+		});
+	}
 
 	async function loadMoreHistory(): Promise<void> {
+		// 优先展开本地已加载项（无需访问后端）
+		if (hasHiddenLocalItems) {
+			withScrollAnchor(() => {
+				setVisibleCount((count) => count + WINDOW_SIZE);
+			});
+			return;
+		}
 		if (!hasMoreHistory || historyLoading || !onLoadMoreHistory) {
 			return;
 		}
@@ -179,6 +387,8 @@ export function MessageTimeline({
 			await onLoadMoreHistory();
 		} finally {
 			requestAnimationFrame(() => {
+				// 拉取到的更早消息已 prepend 到 items，同步扩大窗口让其可见
+				setVisibleCount((count) => count + WINDOW_SIZE);
 				const nextEl = timelineRef.current;
 				if (nextEl) {
 					nextEl.scrollTop =
@@ -200,6 +410,10 @@ export function MessageTimeline({
 	}
 
 	function handleTimelineScroll(): void {
+		// 滚动后选区浮层位置失效（fixed 视口坐标），随滚动关闭
+		if (selectionRef) {
+			setSelectionRef(null);
+		}
 		if (isProgrammaticScrollRef.current) return; // 程序化滚动不更新 stickToBottom
 		const el = timelineRef.current;
 		if (!el) return;
@@ -207,7 +421,7 @@ export function MessageTimeline({
 			el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 		if (
 			el.scrollTop < 72 &&
-			hasMoreHistory &&
+			canLoadMore &&
 			!historyLoading &&
 			!loadingMoreRef.current
 		) {
@@ -242,6 +456,11 @@ export function MessageTimeline({
 			prev.jobId = jobId;
 			prev.toolCount = toolCount;
 		}
+		// 尊重外部自动滚动开关（契约 1）：关闭时仅更新基线，不自动滚底
+		if (!autoScrollEnabled) {
+			prev.toolCount = toolCount;
+			return;
+		}
 		const raf = requestAnimationFrame(() => {
 			if (isNewJob || toolCount > prev.toolCount) {
 				// 新 job 或新工具调用：强制滚底 + 恢复跟随
@@ -254,7 +473,7 @@ export function MessageTimeline({
 			prev.toolCount = toolCount;
 		});
 		return () => cancelAnimationFrame(raf);
-	}, [streamSignature, activeJob]);
+	}, [streamSignature, activeJob, autoScrollEnabled]);
 
 	// 初次加载历史/切换会话完成：滚到底部（监听 historyLoading 从 true → false）
 	// biome-ignore lint/correctness/useExhaustiveDependencies: historyLoading 作为加载完成信号
@@ -263,7 +482,7 @@ export function MessageTimeline({
 		const current = Boolean(historyLoading);
 		prevHistoryLoadingRef.current = current;
 		if (prev && !current && visibleItems.length > 0) {
-			if (loadingMoreRef.current) {
+			if (loadingMoreRef.current || !autoScrollEnabled) {
 				return;
 			}
 			// 历史加载完成：滚底 + 恢复跟随
@@ -276,15 +495,17 @@ export function MessageTimeline({
 	// 切换会话：滚到底部（覆盖"点击进入有缓存的对话"场景，此时 historyLoading 无 true→false 转换）
 	// biome-ignore lint/correctness/useExhaustiveDependencies: key 作为切换信号（MessageTimeline 用 key={conversationId}）
 	useEffect(() => {
-		if (visibleItems.length > 0) {
+		if (visibleItems.length > 0 && autoScrollEnabled) {
 			stickToBottomRef.current = true;
 			const raf = requestAnimationFrame(scrollToBottom);
 			return () => cancelAnimationFrame(raf);
 		}
 	}, []);
 
+	// 快捷模板：稳定 id 作 React key（不随 locale 变化），title/desc/prompt 走 i18n
 	const shortcuts = [
 		{
+			id: "shortcut.news",
 			icon: (
 				<svg
 					aria-hidden="true"
@@ -301,11 +522,12 @@ export function MessageTimeline({
 					<line x1="21" x2="16.65" y1="21" y2="16.65" />
 				</svg>
 			),
-			title: "今日新闻",
-			desc: "获取最新时事与突发热点",
-			prompt: "搜索今日国内国际新闻热点",
+			title: t("shortcut.news.title"),
+			desc: t("shortcut.news.desc"),
+			prompt: t("shortcut.news.prompt"),
 		},
 		{
+			id: "shortcut.joke",
 			icon: (
 				<svg
 					aria-hidden="true"
@@ -324,11 +546,12 @@ export function MessageTimeline({
 					<line x1="15" x2="15.01" y1="9" y2="9" />
 				</svg>
 			),
-			title: "讲冷笑话",
-			desc: "来个冷笑话轻松幽默一下",
-			prompt: "给我讲个有创意的冷笑话吧",
+			title: t("shortcut.joke.title"),
+			desc: t("shortcut.joke.desc"),
+			prompt: t("shortcut.joke.prompt"),
 		},
 		{
+			id: "shortcut.polish",
 			icon: (
 				<svg
 					aria-hidden="true"
@@ -345,11 +568,12 @@ export function MessageTimeline({
 					<path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
 				</svg>
 			),
-			title: "文章润色",
-			desc: "帮你改进文章段落的措辞",
-			prompt: "请帮我润色以下这段文字，使其读起来更加专业、优雅：\n",
+			title: t("shortcut.polish.title"),
+			desc: t("shortcut.polish.desc"),
+			prompt: t("shortcut.polish.prompt"),
 		},
 		{
+			id: "shortcut.code",
 			icon: (
 				<svg
 					aria-hidden="true"
@@ -366,18 +590,69 @@ export function MessageTimeline({
 					<polyline points="8 6 2 12 8 18" />
 				</svg>
 			),
-			title: "代码解释",
-			desc: "分析特定代码并给出优化方案",
-			prompt: "请帮我详细分析和解释以下这段代码：\n```python\n\n```",
+			title: t("shortcut.code.title"),
+			desc: t("shortcut.code.desc"),
+			prompt: t("shortcut.code.prompt"),
 		},
 	];
+
+	// 划词引用浮层（契约 2）：选中正文文本时显示"引用"按钮，点击回传选区文本。
+	// 仅在 App 提供 onAddSelectionReference 时启用。
+	const [selectionRef, setSelectionRef] = useState<{
+		text: string;
+		top: number;
+		left: number;
+	} | null>(null);
+
+	function clearSelectionRef(): void {
+		setSelectionRef(null);
+	}
+
+	function handleSelectionPointerUp(): void {
+		if (!onAddSelectionReference) {
+			return;
+		}
+		const selection = window.getSelection();
+		const text = selection?.toString().trim() ?? "";
+		const container = timelineRef.current;
+		if (!selection || selection.rangeCount === 0 || !text || !container) {
+			clearSelectionRef();
+			return;
+		}
+		const range = selection.getRangeAt(0);
+		// 选区必须落在时间线容器内（避免选到输入框/侧栏等区域）
+		if (!container.contains(range.commonAncestorContainer)) {
+			clearSelectionRef();
+			return;
+		}
+		// 视口坐标 + position:fixed，不依赖容器是否为定位上下文（CSS 归 WF1/其他分区）。
+		// getBoundingClientRect 在部分环境（如 jsdom）未实现，缺失时退化为左上角定位。
+		const rect =
+			typeof range.getBoundingClientRect === "function"
+				? range.getBoundingClientRect()
+				: null;
+		setSelectionRef({
+			text,
+			top: rect?.top ?? 0, // 浮层显示在选区上方
+			left: (rect?.left ?? 0) + (rect?.width ?? 0) / 2,
+		});
+	}
+
+	function confirmSelectionRef(): void {
+		if (selectionRef) {
+			onAddSelectionReference?.(selectionRef.text);
+		}
+		window.getSelection()?.removeAllRanges();
+		clearSelectionRef();
+	}
 
 	return (
 		<section className="timeline-shell">
 			<div
-				aria-label="消息"
+				aria-label={t("timeline.label")}
 				className="timeline"
 				onScroll={handleTimelineScroll}
+				onMouseUp={handleSelectionPointerUp}
 				role="log"
 				ref={timelineRef}
 			>
@@ -390,14 +665,14 @@ export function MessageTimeline({
 								onClick={onRetryHistory}
 								type="button"
 							>
-								重试
+								{t("timeline.retry")}
 							</button>
 						) : null}
 					</div>
 				) : historyLoading && visibleItems.length === 0 && !activeJob ? (
 					<div className="timeline-loading">
 						<span aria-hidden="true" className="timeline-spinner" />
-						<p>正在加载会话…</p>
+						<p>{t("timeline.loadingConversation")}</p>
 					</div>
 				) : visibleItems.length === 0 && !activeJob ? (
 					<div className="welcome-container">
@@ -418,14 +693,14 @@ export function MessageTimeline({
 							</svg>
 						</div>
 						<div className="welcome-header">
-							<h2>您好，我是 Undefined</h2>
-							<p>今天想让我帮您做些什么？你可以输入指令或选择下方模板：</p>
+							<h2>{t("timeline.welcomeTitle")}</h2>
+							<p>{t("timeline.welcomeSubtitle")}</p>
 						</div>
 						<div className="shortcut-grid">
 							{shortcuts.map((card) => (
 								<button
 									className="shortcut-card"
-									key={card.title}
+									key={card.id}
 									onClick={() => onShortcutClick?.(card.prompt)}
 									type="button"
 								>
@@ -447,21 +722,23 @@ export function MessageTimeline({
 							fontSize: "0.9rem",
 						}}
 					>
-						当前会话无消息记录
+						{t("timeline.noMessages")}
 					</div>
 				) : null}
 
-				{visibleItems.length > 0 && (hasMoreHistory || historyLoading) ? (
+				{visibleItems.length > 0 && (canLoadMore || historyLoading) ? (
 					<div className="timeline-load-more">
 						<button
 							className="ghost-button"
-							disabled={!hasMoreHistory || Boolean(historyLoading)}
+							disabled={!canLoadMore || Boolean(historyLoading)}
 							onClick={() => {
 								void loadMoreHistory();
 							}}
 							type="button"
 						>
-							{historyLoading ? "正在加载更早消息…" : "加载更早消息"}
+							{historyLoading
+								? t("timeline.loadingEarlier")
+								: t("timeline.loadMoreEarlier")}
 						</button>
 					</div>
 				) : null}
@@ -483,7 +760,7 @@ export function MessageTimeline({
 						>
 							<div className="runtime-chat-role">
 								<span className="runtime-chat-role-label">
-									{isBot ? "AI" : "You"}
+									{isBot ? t("timeline.roleAi") : t("timeline.roleYou")}
 								</span>
 								{isBot && hasDuration ? (
 									<ChatStageLabel
@@ -518,12 +795,15 @@ export function MessageTimeline({
 										))
 									: null}
 								{(() => {
-									const timeline = item.webchat?.timeline;
-									// bot 消息含工具调用/分段文本时，按统一时间线渲染（正文与工具块按序穿插，避免正文重复）
-									if (isBot && hasRenderableTimeline(timeline)) {
+									// bot 消息含工具调用/分段文本时，按统一时间线渲染（正文与工具块按序穿插，避免正文重复）。
+									// timeline 缺失时回退 calls/events 重建（buildHistoryTimeline 内部已按优先级处理）。
+									const timeline = isBot
+										? buildHistoryTimeline(item.webchat)
+										: null;
+									if (timeline) {
 										return (
 											<MessageTimelineContent
-												timeline={timeline ?? []}
+												timeline={timeline}
 												fallbackContent={item.content}
 												attachments={item.attachments}
 												onPreviewHtml={onPreviewHtml}
@@ -578,7 +858,9 @@ export function MessageTimeline({
 						key={`streaming-${activeJob.jobId}`}
 					>
 						<div className="runtime-chat-role">
-							<span className="runtime-chat-role-label">AI</span>
+							<span className="runtime-chat-role-label">
+								{t("timeline.roleAi")}
+							</span>
 							<ChatStageLabel
 								stage={activeJob.currentStage}
 								stageDetail={activeJob.currentStageDetail ?? null}
@@ -591,7 +873,7 @@ export function MessageTimeline({
 									onClick={() => onCancelJob(activeJob.jobId)}
 									type="button"
 								>
-									取消
+									{t("timeline.cancel")}
 								</button>
 							) : null}
 							{onAddReference ? (
@@ -613,6 +895,28 @@ export function MessageTimeline({
 					</article>
 				) : null}
 			</div>
+
+			{/* 划词引用浮层（契约 2）：选中正文文本后浮现的"引用"按钮 */}
+			{selectionRef ? (
+				<button
+					className="timeline-selection-quote"
+					onMouseDown={(e) => {
+						// 阻止默认行为，避免点击按钮时清空当前文本选区
+						e.preventDefault();
+					}}
+					onClick={confirmSelectionRef}
+					style={{
+						position: "fixed",
+						top: Math.max(8, selectionRef.top - 40),
+						left: selectionRef.left,
+						transform: "translateX(-50%)",
+						zIndex: 30,
+					}}
+					type="button"
+				>
+					{t("quote.button")}
+				</button>
+			) : null}
 		</section>
 	);
 }

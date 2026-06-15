@@ -1,5 +1,6 @@
 import hljs from "highlight.js";
 import { useMemo, useState } from "react";
+import { useTranslation } from "../i18n";
 import "./CodeBlock.css";
 
 export type CodeBlockProps = {
@@ -26,6 +27,7 @@ export function CodeBlock({
 	maxLines = 8,
 	onPreviewHtml,
 }: CodeBlockProps) {
+	const { t } = useTranslation();
 	const [isCollapsed, setIsCollapsed] = useState(false);
 	const [copied, setCopied] = useState(false);
 
@@ -109,7 +111,7 @@ export function CodeBlock({
 							className="runtime-code-action"
 							onClick={toggleCollapse}
 						>
-							{isCollapsed ? "展开" : "折叠"}
+							{isCollapsed ? t("code.expand") : t("code.collapse")}
 						</button>
 					)}
 					{isHtml && onPreviewHtml && (
@@ -118,12 +120,12 @@ export function CodeBlock({
 							className="runtime-code-action"
 							onClick={() =>
 								onPreviewHtml({
-									title: "HTML 预览",
+									title: t("code.htmlPreviewTitle"),
 									html: code.trim(),
 								})
 							}
 						>
-							预览 HTML
+							{t("code.previewHtml")}
 						</button>
 					)}
 					<button
@@ -131,7 +133,7 @@ export function CodeBlock({
 						className="runtime-code-action primary"
 						onClick={handleCopy}
 					>
-						{copied ? "已复制" : "复制"}
+						{copied ? t("code.copied") : t("code.copy")}
 					</button>
 				</div>
 			</div>

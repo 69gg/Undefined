@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useChatClock } from "../hooks/useChatClock";
+import { useTranslation } from "../i18n";
 import { getChatStageLabel } from "../i18n/zh-CN";
 
 export type ChatStageLabelProps = {
@@ -63,28 +64,18 @@ export function ChatStageLabel({
 	finalState,
 	elapsedMsOverride,
 }: ChatStageLabelProps) {
-	// 实时时钟：从 store 读取 chatClockNow（当前使用本地 Date.now()）
-	// TODO: 集成 store 的全局 chatClockNow 以统一所有用时显示的更新频率
-	const [chatClockNow, setChatClockNow] = useState(() => Date.now());
-
-	// 非最终状态时定期更新时钟（500ms 间隔）
-	useEffect(() => {
-		if (finalState) return;
-
-		const timer = setInterval(() => {
-			setChatClockNow(Date.now());
-		}, 500);
-
-		return () => clearInterval(timer);
-	}, [finalState]);
+	const { locale } = useTranslation();
+	// 统一全局时钟：非最终状态时随 useChatClock 每 500ms 推进，复用同一时钟源，
+	// 消除组件各自维护的重复 setInterval。
+	const chatClockNow = useChatClock(!finalState);
 
 	// 如果没有阶段信息，不渲染
 	if (!stage) {
 		return null;
 	}
 
-	// 获取本地化的阶段标签
-	const label = getChatStageLabel(stage);
+	// 获取本地化的阶段标签（跟随语言切换）
+	const label = getChatStageLabel(stage, locale);
 	if (!label) {
 		return null;
 	}

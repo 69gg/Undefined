@@ -5,6 +5,8 @@ Undefined 当前包含两个 Tauri App：
 - `apps/undefined-console/`：跨平台管理 Console，定位为远程 WebUI 连接器 / 启动器。
 - `apps/undefined-chat/`：原生优先 WebChat 客户端，直接连接 Runtime API。完整说明见 [Undefined Chat](undefined-chat.md)。
 
+> 本文第 2–10 节描述的是 **Console** 的连接器 / 启动器定位（不再维护平行后台、轻量打开远程 WebUI）。**Undefined Chat 不同**：它是直连 Runtime API 的原生聊天客户端，自带会话/历史/附件/工具调用渲染、中英双语、HTML 内联渲染与独立预览窗口、移动端适配等完整能力，详见 [Undefined Chat](undefined-chat.md)，不要把下文 Console 的“尽量轻”原则套用到 Chat。
+
 Undefined Console 定位为：
 
 - 保存多个远程连接档案
