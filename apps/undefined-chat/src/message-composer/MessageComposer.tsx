@@ -24,6 +24,7 @@ export type MessageComposerProps = {
 	onClearReference: (messageId: string) => void;
 	onJumpReference?: (messageId: string) => void;
 	onDraftChange: (draft: string) => void;
+	onRequestScrollToBottom?: () => void;
 	onSend: () => void;
 };
 
@@ -46,6 +47,7 @@ export function MessageComposer({
 	onClearReference,
 	onJumpReference,
 	onDraftChange,
+	onRequestScrollToBottom,
 	onSend,
 }: MessageComposerProps) {
 	const { t } = useTranslation();
@@ -188,6 +190,10 @@ export function MessageComposer({
 		setEscDismissedValue(value);
 	}
 
+	function requestScrollToBottom(): void {
+		onRequestScrollToBottom?.();
+	}
+
 	function handleKeyDown(
 		event: React.KeyboardEvent<HTMLTextAreaElement>,
 	): void {
@@ -246,6 +252,7 @@ export function MessageComposer({
 		}
 		event.preventDefault();
 		if (canSend) {
+			requestScrollToBottom();
 			onSend();
 		}
 	}
@@ -257,6 +264,7 @@ export function MessageComposer({
 				onSubmit={(event) => {
 					event.preventDefault();
 					if (canSend) {
+						requestScrollToBottom();
 						onSend();
 					}
 				}}
@@ -325,6 +333,7 @@ export function MessageComposer({
 							update(event.currentTarget.value);
 							setActiveIndex(0);
 						}}
+						onFocus={requestScrollToBottom}
 						onKeyDown={handleKeyDown}
 						onKeyUp={(event) => syncCursor(event.currentTarget)}
 						onSelect={(event) => syncCursor(event.currentTarget)}

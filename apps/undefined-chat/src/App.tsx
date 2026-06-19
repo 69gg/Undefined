@@ -61,6 +61,7 @@ export function App() {
 		id: number;
 		commandMode: boolean;
 	} | null>(null);
+	const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
 	const mobileMenuButtonRef = useRef<HTMLButtonElement | null>(null);
 	const previousMobileFocusRef = useRef<HTMLElement | null>(null);
 	const previewImageUrlRef = useRef<string | null>(null);
@@ -239,6 +240,10 @@ export function App() {
 			id: (request?.id ?? 0) + 1,
 			commandMode,
 		}));
+	}, []);
+
+	const requestTimelineScrollToBottom = useCallback((): void => {
+		setScrollToBottomSignal((signal) => signal + 1);
 	}, []);
 
 	function jumpToLoadedMessage(messageId: string): boolean {
@@ -626,6 +631,7 @@ export function App() {
 							key={selectedConversationId ?? "none"}
 							activeJob={activeJob}
 							autoScrollEnabled={state.autoScrollEnabled}
+							scrollToBottomSignal={scrollToBottomSignal}
 							connectionState={state.connectionState}
 							historyLoading={historyLoading}
 							historyError={historyError}
@@ -716,6 +722,7 @@ export function App() {
 									store.updateDraft(selectedConversationId, draft);
 								}
 							}}
+							onRequestScrollToBottom={requestTimelineScrollToBottom}
 							onSend={() => {
 								void store.sendSelectedMessage();
 							}}

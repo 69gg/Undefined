@@ -25,6 +25,7 @@ function renderTimeline(ui: ReactNode) {
 
 describe("MessageTimeline", () => {
 	afterEach(() => {
+		vi.useRealTimers();
 		vi.restoreAllMocks();
 	});
 
@@ -310,6 +311,76 @@ describe("MessageTimeline", () => {
 
 		expect(timeline.scrollTop).toBe(420);
 		expect(onLoadMoreHistory).toHaveBeenCalledOnce();
+	});
+
+	test("scrolls to bottom when an external signal changes", () => {
+		vi.useFakeTimers();
+		const rafCallbacks: FrameRequestCallback[] = [];
+		vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+			rafCallbacks.push(callback);
+			return rafCallbacks.length;
+		});
+		const { rerender } = renderTimeline(
+			<MessageTimeline
+				activeJob={null}
+				connectionState="connected"
+				items={[historyItem({ messageId: "msg-1", content: "已加载消息" })]}
+				onPreviewAttachment={vi.fn()}
+				onPreviewHtml={vi.fn()}
+				onSaveAttachment={vi.fn()}
+				scrollToBottomSignal={0}
+			/>,
+		);
+		const timeline = screen.getByRole("log", { name: "消息" });
+		Object.defineProperty(timeline, "scrollHeight", {
+			configurable: true,
+			value: 1800,
+		});
+		timeline.scrollTop = 120;
+
+		rerender(
+			<AttachmentImageProvider
+				client={{
+					previewAttachment: vi.fn(async () => ({
+						status: 200,
+						ok: true,
+						mediaType: "image/png",
+						bytes: [137, 80, 78, 71],
+						body: null,
+					})),
+				}}
+			>
+				<MessageTimeline
+					activeJob={null}
+					connectionState="connected"
+					items={[historyItem({ messageId: "msg-1", content: "已加载消息" })]}
+					onPreviewAttachment={vi.fn()}
+					onPreviewHtml={vi.fn()}
+					onSaveAttachment={vi.fn()}
+					scrollToBottomSignal={1}
+				/>
+			</AttachmentImageProvider>,
+		);
+
+		expect(timeline.scrollTop).toBe(1800);
+		Object.defineProperty(timeline, "scrollHeight", {
+			configurable: true,
+			value: 2200,
+		});
+		for (const callback of rafCallbacks.splice(0)) {
+			callback(0);
+		}
+		for (const callback of rafCallbacks.splice(0)) {
+			callback(0);
+		}
+		expect(timeline.scrollTop).toBe(2200);
+		Object.defineProperty(timeline, "scrollHeight", {
+			configurable: true,
+			value: 2400,
+		});
+		vi.advanceTimersByTime(280);
+		expect(timeline.scrollTop).toBe(2400);
+		vi.useRealTimers();
 	});
 
 	test("点击附件图片以已加载的 blob URL 打开查看器", async () => {

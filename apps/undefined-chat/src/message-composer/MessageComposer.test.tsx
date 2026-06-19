@@ -215,6 +215,65 @@ describe("MessageComposer", () => {
 		expect(onSend).toHaveBeenCalledOnce();
 	});
 
+	test("requests timeline bottom scroll on focus and send", () => {
+		const onRequestScrollToBottom = vi.fn();
+		const onSend = vi.fn();
+
+		render(
+			withProvider(
+				<MessageComposer
+					attachmentQueue={[]}
+					commandSuggestions={[]}
+					disabled={false}
+					draft="你好"
+					references={[]}
+					onAddAttachment={vi.fn()}
+					onClearAttachment={vi.fn()}
+					onClearReference={vi.fn()}
+					onDraftChange={vi.fn()}
+					onRequestScrollToBottom={onRequestScrollToBottom}
+					onSend={onSend}
+				/>,
+			),
+		);
+
+		const editor = screen.getByLabelText("消息输入");
+		fireEvent.focus(editor);
+		expect(onRequestScrollToBottom).toHaveBeenCalledOnce();
+
+		fireEvent.keyDown(editor, { key: "Enter" });
+		expect(onRequestScrollToBottom).toHaveBeenCalledTimes(2);
+		expect(onSend).toHaveBeenCalledOnce();
+	});
+
+	test("requests timeline bottom scroll on submit button send", async () => {
+		const onRequestScrollToBottom = vi.fn();
+		const onSend = vi.fn();
+
+		render(
+			withProvider(
+				<MessageComposer
+					attachmentQueue={[]}
+					commandSuggestions={[]}
+					disabled={false}
+					draft="你好"
+					references={[]}
+					onAddAttachment={vi.fn()}
+					onClearAttachment={vi.fn()}
+					onClearReference={vi.fn()}
+					onDraftChange={vi.fn()}
+					onRequestScrollToBottom={onRequestScrollToBottom}
+					onSend={onSend}
+				/>,
+			),
+		);
+
+		await userEvent.click(screen.getByRole("button", { name: "发送" }));
+
+		expect(onRequestScrollToBottom).toHaveBeenCalledOnce();
+		expect(onSend).toHaveBeenCalledOnce();
+	});
+
 	test("renders attachment queue and references with clear actions", async () => {
 		const onClearAttachment = vi.fn();
 		const onClearReference = vi.fn();

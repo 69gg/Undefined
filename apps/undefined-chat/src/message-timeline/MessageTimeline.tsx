@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { isJobRunning } from "../chat-store/store";
 import { useTranslation } from "../i18n";
 import { extractAttachmentTags } from "../rendering/AttachmentProcessor";
@@ -40,6 +40,11 @@ export type MessageTimelineProps = {
 	 * 尊重用户上滑查看历史的意图（跨分区契约 1：由 App 传入）。默认 true。
 	 */
 	autoScrollEnabled?: boolean;
+	/**
+	 * 外部显式请求滚到底部的信号值。用于输入框聚焦、发送消息等用户主动动作；
+	 * 与 autoScrollEnabled 区分，避免把手动动作误判为被动流式跟随。
+	 */
+	scrollToBottomSignal?: number;
 	items: HistoryItem[];
 	onPreviewHtml: (input: HtmlPreviewRequest) => void;
 	onPreviewAttachment: (attachment: Attachment) => void;
@@ -322,6 +327,7 @@ export function MessageTimeline({
 	onRetryHistory,
 	onLoadMoreHistory,
 	autoScrollEnabled = true,
+	scrollToBottomSignal,
 	items,
 	onPreviewAttachment,
 	onPreviewHtml,
@@ -399,7 +405,7 @@ export function MessageTimeline({
 		}
 	}
 
-	function scrollToBottom(): void {
+	const scrollToBottom = useCallback((): void => {
 		const el = timelineRef.current;
 		if (!el) return;
 		isProgrammaticScrollRef.current = true;
@@ -407,7 +413,32 @@ export function MessageTimeline({
 		requestAnimationFrame(() => {
 			isProgrammaticScrollRef.current = false;
 		});
-	}
+	}, []);
+
+	const scheduleScrollToBottom = useCallback((): (() => void) => {
+		const frameIds: number[] = [];
+		const timeoutIds: number[] = [];
+		const run = (): void => {
+			scrollToBottom();
+		};
+		run();
+		frameIds.push(
+			requestAnimationFrame(() => {
+				run();
+				frameIds.push(requestAnimationFrame(run));
+			}),
+		);
+		timeoutIds.push(window.setTimeout(run, 120));
+		timeoutIds.push(window.setTimeout(run, 280));
+		return () => {
+			for (const frameId of frameIds) {
+				cancelAnimationFrame(frameId);
+			}
+			for (const timeoutId of timeoutIds) {
+				window.clearTimeout(timeoutId);
+			}
+		};
+	}, [scrollToBottom]);
 
 	function handleTimelineScroll(): void {
 		// 滚动后选区浮层位置失效（fixed 视口坐标），随滚动关闭
@@ -474,6 +505,19 @@ export function MessageTimeline({
 		});
 		return () => cancelAnimationFrame(raf);
 	}, [streamSignature, activeJob, autoScrollEnabled]);
+
+	const prevScrollToBottomSignalRef = useRef(scrollToBottomSignal);
+	useEffect(() => {
+		if (scrollToBottomSignal === undefined) {
+			return;
+		}
+		if (prevScrollToBottomSignalRef.current === scrollToBottomSignal) {
+			return;
+		}
+		prevScrollToBottomSignalRef.current = scrollToBottomSignal;
+		stickToBottomRef.current = true;
+		return scheduleScrollToBottom();
+	}, [scrollToBottomSignal, scheduleScrollToBottom]);
 
 	// 初次加载历史/切换会话完成：滚到底部（监听 historyLoading 从 true → false）
 	// biome-ignore lint/correctness/useExhaustiveDependencies: historyLoading 作为加载完成信号
