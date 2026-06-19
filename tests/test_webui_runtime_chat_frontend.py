@@ -1084,8 +1084,10 @@ def test_webchat_references_are_prepended_as_markdown_quotes() -> None:
         1,
     )[0]
     assert "const references = [...runtimeState.chatReferences]" in send_helper
+    assert "const outboundAttachments = retryMessage ? [] : attachments" in send_helper
+    assert "const outboundReferences = retryMessage ? [] : references" in send_helper
     assert (
-        "if (!message && !attachments.length && !references.length) return"
+        "!message &&\n            !outboundAttachments.length &&\n            !outboundReferences.length"
         in send_helper
     )
     assert "clearChatReferences()" in send_helper
@@ -1163,6 +1165,61 @@ def test_webchat_send_scrolls_to_bottom_after_layout_updates() -> None:
     assert "clearChatAttachments()" in send_helper
     assert "forceScrollChatToBottomSoon()" in send_helper
     assert "ensureStreamingMessage()" in send_helper
+
+
+def test_webchat_frontend_cancel_and_retry_controls() -> None:
+    source = _read_source(RUNTIME_JS)
+    css = _read_source(RUNTIME_CSS)
+    i18n = _read_source(I18N_JS)
+
+    assert "chatCancelBusy: false" in source
+    assert "runtime-chat-cancel-btn" in source
+    assert "runtime-chat-retry-btn" in source
+    assert "data-cancel-job" in source
+    assert "data-retry-message" in source
+    assert "function cancelActiveChatJob" in source
+    assert (
+        "/api/runtime/chat/jobs/${encodeURIComponent(resolvedJobId)}/cancel" in source
+    )
+    assert (
+        'method: "POST"'
+        in source.split("function cancelActiveChatJob", 1)[1].split(
+            "async function sendChatMessage",
+            1,
+        )[0]
+    )
+    assert "function retryChatMessage" in source
+    assert "sendChatMessage({ retryMessage: message })" in source
+    assert "function syncChatMessageActions" in source
+    assert "function syncActiveCancelButtons" in source
+    assert "function syncChatRetryButtons" in source
+    assert "function hasBotReplyAfter" in source
+    assert "function removeEmptyChatMessage" in source
+    assert "removeEmptyChatMessage(item)" in source
+    assert 'message === "cancelled"' in source
+    assert 'showToast(t("runtime.chat_cancelled")' in source
+    assert "button.dataset.cancelJob = activeJobId" in source
+    assert "item === lastItem" in source
+    assert "!hasBotReplyAfter(item)" in source
+    assert "item.dataset.retryContent" in source
+    assert "const outboundAttachments = retryMessage ? [] : attachments" in source
+    assert "const outboundReferences = retryMessage ? [] : references" in source
+
+    chat_click_block = source.split('chatLog.addEventListener("click"', 1)[1].split(
+        'chatLog.addEventListener("mouseup"',
+        1,
+    )[0]
+    assert "[data-cancel-job]" in chat_click_block
+    assert "cancelActiveChatJob(jobId)" in chat_click_block
+    assert "[data-retry-message]" in chat_click_block
+    assert "retryChatMessage(item)" in chat_click_block
+
+    assert ".runtime-chat-cancel-btn" in css
+    assert ".runtime-chat-retry-btn" in css
+    assert ".runtime-chat-quote-btn.is-visible" in css
+    assert "runtime.cancel" in i18n
+    assert "runtime.retry" in i18n
+    assert "runtime.chat_cancelled" in i18n
 
 
 def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:

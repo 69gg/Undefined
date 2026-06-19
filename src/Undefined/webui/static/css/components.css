@@ -895,6 +895,28 @@
   background: color-mix(in srgb, var(--accent) 9%, transparent);
   color: var(--accent-color);
 }
+.runtime-chat-quote-btn.is-visible {
+  opacity: 1;
+}
+.runtime-chat-cancel-btn {
+  border-color: color-mix(in srgb, var(--error) 22%, transparent);
+  color: var(--error);
+}
+.runtime-chat-cancel-btn:hover,
+.runtime-chat-cancel-btn:focus-visible {
+  border-color: color-mix(in srgb, var(--error) 42%, var(--border-color));
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+  color: var(--error);
+}
+.runtime-chat-cancel-btn:disabled,
+.runtime-chat-retry-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.runtime-chat-retry-btn {
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent-color);
+}
 .runtime-chat-stage {
   display: inline-flex;
   align-items: center;
