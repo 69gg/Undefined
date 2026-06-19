@@ -178,7 +178,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ matrix.app_dir }}/node_modules
-          key: ${{ runner.os }}-manual-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-manual-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-manual-node-modules-${{ matrix.product }}-
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-
 
       - name: Install Rust toolchain
         if: steps.select.outputs.selected == 'true' && matrix.rust_target == ''
@@ -194,7 +198,7 @@ jobs:
         if: steps.select.outputs.selected == 'true'
         uses: Swatinem/rust-cache@v2
         with:
-          key: manual-${{ matrix.product }}-${{ matrix.label }}
+          key: manual-desktop-${{ matrix.product }}-${{ matrix.label }}-${{ hashFiles(format('{0}/src-tauri/Cargo.lock', matrix.app_dir), format('{0}/package-lock.json', matrix.app_dir)) }}
           workspaces: |
             ${{ matrix.app_dir }}/src-tauri -> target
 
@@ -385,7 +389,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ matrix.app_dir }}/node_modules
-          key: ${{ runner.os }}-manual-android-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-manual-android-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-manual-android-node-modules-${{ matrix.product }}-
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-
 
       - name: Install Rust toolchain
         if: steps.select.outputs.selected == 'true'
@@ -397,7 +405,7 @@ jobs:
         if: steps.select.outputs.selected == 'true'
         uses: Swatinem/rust-cache@v2
         with:
-          key: manual-${{ matrix.product }}-android-${{ matrix.abi_label }}
+          key: manual-android-${{ matrix.product }}-${{ matrix.abi_label }}-${{ hashFiles(format('{0}/src-tauri/Cargo.lock', matrix.app_dir), format('{0}/package-lock.json', matrix.app_dir)) }}
           workspaces: |
             ${{ matrix.app_dir }}/src-tauri -> target
 

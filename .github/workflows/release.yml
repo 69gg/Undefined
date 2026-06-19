@@ -113,7 +113,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ matrix.app_dir }}/node_modules
-          key: ${{ runner.os }}-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -121,6 +124,7 @@ jobs:
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
         with:
+          key: verify-${{ matrix.product }}-${{ hashFiles(format('{0}/src-tauri/Cargo.lock', matrix.app_dir), format('{0}/package-lock.json', matrix.app_dir)) }}
           workspaces: |
             ${{ matrix.app_dir }}/src-tauri -> target
 
@@ -226,7 +230,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ matrix.app_dir }}/node_modules
-          key: ${{ runner.os }}-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-
 
       - name: Install Rust toolchain
         if: matrix.rust_target == ''
@@ -241,7 +248,7 @@ jobs:
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.product }}-${{ matrix.label }}
+          key: desktop-${{ matrix.product }}-${{ matrix.label }}-${{ hashFiles(format('{0}/src-tauri/Cargo.lock', matrix.app_dir), format('{0}/package-lock.json', matrix.app_dir)) }}
           workspaces: |
             ${{ matrix.app_dir }}/src-tauri -> target
 
@@ -403,7 +410,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ matrix.app_dir }}/node_modules
-          key: ${{ runner.os }}-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -413,7 +423,7 @@ jobs:
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.product }}-android-${{ matrix.abi_label }}
+          key: android-${{ matrix.product }}-${{ matrix.abi_label }}-${{ hashFiles(format('{0}/src-tauri/Cargo.lock', matrix.app_dir), format('{0}/package-lock.json', matrix.app_dir)) }}
           workspaces: |
             ${{ matrix.app_dir }}/src-tauri -> target
 

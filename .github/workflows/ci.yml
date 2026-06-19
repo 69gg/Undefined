@@ -7,6 +7,9 @@ on:
   pull_request:
     branches: [ "main", "develop" ]
 
+env:
+  NODE_VERSION: "22"
+
 jobs:
   quality-check:
     runs-on: ubuntu-latest
@@ -76,7 +79,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
           cache-dependency-path: ${{ matrix.app_dir }}/package-lock.json
 
@@ -85,7 +88,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ matrix.app_dir }}/node_modules
-          key: ${{ runner.os }}-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -93,6 +99,7 @@ jobs:
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
         with:
+          key: ci-${{ matrix.product }}-${{ hashFiles(format('{0}/src-tauri/Cargo.lock', matrix.app_dir), format('{0}/package-lock.json', matrix.app_dir)) }}
           workspaces: |
             ${{ matrix.app_dir }}/src-tauri -> target
 
