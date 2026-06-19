@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -125,20 +125,19 @@ describe("AttachmentCard", () => {
 			expect(screen.getByRole("button", { name: "预览" })).toBeInTheDocument();
 		});
 
-		it("大图片文件卡片缩略图以 blob 渲染", async () => {
-			const { container } = renderWithProvider(
+		it("大图片文件卡片不拉取原图作为缩略图", () => {
+			const { container, previewAttachment } = renderWithProvider(
 				<AttachmentCard
 					attachment={mockLargeImageAttachment}
 					onPreview={vi.fn()}
 				/>,
 			);
 
-			const thumb = await waitFor(() => {
-				const el = container.querySelector("img.runtime-chat-attachment-thumb");
-				if (!el) throw new Error("thumbnail not loaded");
-				return el;
-			});
-			expect(thumb.getAttribute("src")).toMatch(/^blob:/);
+			expect(screen.getByText("IMG")).toBeInTheDocument();
+			expect(
+				container.querySelector("img.runtime-chat-attachment-thumb"),
+			).not.toBeInTheDocument();
+			expect(previewAttachment).not.toHaveBeenCalled();
 		});
 	});
 

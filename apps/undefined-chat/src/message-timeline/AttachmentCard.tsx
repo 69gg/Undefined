@@ -72,7 +72,7 @@ export function AttachmentCard({
 				transition: "border-color 0.18s ease, background 0.18s ease",
 			}}
 		>
-			{/* 文件图标或图片缩略图 */}
+			{/* 文件图标。大图不拉取原图缩略图，避免列表渲染触发大文件下载。 */}
 			<div
 				className="runtime-chat-attachment-preview"
 				style={{
@@ -90,22 +90,7 @@ export function AttachmentCard({
 					overflow: "hidden",
 				}}
 			>
-				{isImage ? (
-					<AttachmentImage
-						uid={attachment.id}
-						alt=""
-						mediaType={attachment.mediaType}
-						className="runtime-chat-attachment-thumb"
-						style={{
-							width: "100%",
-							height: "100%",
-							objectFit: "cover",
-							display: "block",
-						}}
-					/>
-				) : (
-					<span>{getFileIcon(attachment.mediaType)}</span>
-				)}
+				<span>{getFileIcon(attachment.mediaType)}</span>
 			</div>
 
 			{/* 文件信息 */}

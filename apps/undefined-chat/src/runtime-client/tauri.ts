@@ -609,14 +609,16 @@ export function createTauriRuntimeClient(): RuntimeClient {
 
 		async deleteConversation(conversationId: string): Promise<void> {
 			// DELETE 不带请求体：Tauri runtime 桥接层仅允许 POST/PATCH 携带 body
-			await invoke("runtime_request", {
-				input: {
-					method: "DELETE",
-					path: `/api/v1/chat/conversations/${conversationId}`,
-					body: null,
-					headers: [],
-				},
-			});
+			unwrapRuntimeBody(
+				await invoke("runtime_request", {
+					input: {
+						method: "DELETE",
+						path: `/api/v1/chat/conversations/${conversationId}`,
+						body: null,
+						headers: [],
+					},
+				}),
+			);
 		},
 
 		async renameConversation(

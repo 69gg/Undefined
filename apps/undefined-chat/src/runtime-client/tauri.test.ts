@@ -328,6 +328,20 @@ describe("createTauriRuntimeClient", () => {
 		});
 	});
 
+	test("deleteConversation rejects failed runtime request responses", async () => {
+		vi.mocked(invoke).mockResolvedValueOnce({
+			status: 409,
+			ok: false,
+			body: { error: "conversation has an active job" },
+		});
+
+		const client = createTauriRuntimeClient();
+
+		await expect(client.deleteConversation("conv-busy")).rejects.toThrow(
+			"conversation has an active job",
+		);
+	});
+
 	test("fetches history page with cursor support", async () => {
 		vi.mocked(invoke).mockResolvedValueOnce({
 			status: 200,
