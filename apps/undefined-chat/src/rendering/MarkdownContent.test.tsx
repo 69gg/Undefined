@@ -358,6 +358,34 @@ print("Hello")
 			expect(screen.queryByText(/ATTACHMENT_PLACEHOLDER/)).toBeNull();
 		});
 
+		it("未知 pic_ 附件标签 fallback 为图片预览", async () => {
+			const { container } = renderWithImageProvider(
+				<MarkdownContent
+					content='看图<attachment uid="pic_missing"/>'
+					attachments={[]}
+					onPreviewHtml={mockOnPreviewHtml}
+				/>,
+			);
+
+			const img = await screen.findByRole("img", { name: "图片预览" });
+			expect(img.getAttribute("src")).toMatch(/^blob:/);
+			expect(container.textContent).toContain("看图");
+		});
+
+		it("未知非 pic_ 附件标签被移除", () => {
+			const { container } = renderWithImageProvider(
+				<MarkdownContent
+					content='文件<attachment uid="file_missing"/>结束'
+					attachments={[]}
+					onPreviewHtml={mockOnPreviewHtml}
+				/>,
+			);
+
+			expect(container.querySelector(".runtime-chat-image")).toBeNull();
+			expect(screen.getByText("文件")).toBeInTheDocument();
+			expect(screen.getByText("结束")).toBeInTheDocument();
+		});
+
 		it("文字与图片混排保持顺序", async () => {
 			renderWithImageProvider(
 				<MarkdownContent

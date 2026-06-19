@@ -5,18 +5,18 @@
 ## 功能特性
 
 - ✅ **可折叠展开** - 使用 `<details>` 元素实现原生折叠/展开（running 自动展开，done/error 后 2s 自动折叠，用户交互后不再自动折叠）
-- ✅ **状态指示** - 支持 running / done / error 三种状态，带视觉反馈
+- ✅ **状态指示** - 支持 running / done / error / cancelled 状态，带视觉反馈
 - ✅ **时间线展示** - 显示工具执行的输入、输出、错误历史
 - ✅ **嵌套渲染** - 支持递归渲染子工具调用
 - ✅ **实时计时** - 运行中通过统一时钟 `useChatClock` 每 500ms 刷新用时，结束后定格；自动格式化（ms/s/m）
 - ✅ **Agent 阶段明细** - Agent 运行中在状态位展示阶段标签（`currentStage`），并可附加阶段明细 `stageDetail`（如模型名/子步骤）
-- ✅ **结构化结果** - 工具结果为合法 JSON 对象/数组时以 key-value / 列表结构化渲染，否则回退 `<pre>` 纯文本
+- ✅ **WebUI 一致预览** - 输入按纯文本展示；输出支持 JSON/Python 风格结构化、Markdown 渲染和附件图片预览
 - ✅ **深浅模式** - 完全适配项目的 Morandi 配色主题
 
 ## 类型定义
 
 ```typescript
-export type ToolBlockStatus = "running" | "done" | "error";
+export type ToolBlockStatus = "running" | "done" | "error" | "cancelled";
 
 export type ToolBlock = {
   webchatCallId: string;            // 唯一标识
@@ -25,7 +25,7 @@ export type ToolBlock = {
   isAgent?: boolean;                // 是否为 Agent（决定 kind 标签与阶段展示）
   uiHint?: string;                  // UI 提示，附加为容器修饰类名
   argumentsPreview?: string;        // 输入参数预览
-  resultPreview?: string;           // 结果预览（JSON 时结构化渲染）
+  resultPreview?: string;           // 结果预览（结构化/Markdown/附件图片）
   currentStage?: string;            // Agent 当前阶段（运行中展示标签）
   stageDetail?: string;             // 阶段明细（如模型名/子步骤）
   children: Map<string, ToolBlock>; // 嵌套子工具
@@ -119,14 +119,15 @@ const toolBlocks = useStore(state => state.toolBlocksByJob[jobId]);
 │ 输入                                │
 │   {"query": "..."}                  │ ← argumentsPreview (<pre>)
 ├─────────────────────────────────────┤
-│ 输出                                │
-│   key: value  ...                   │ ← resultPreview (JSON 结构化，否则 <pre>)
 ├─────────────────────────────────────┤
 │ 时间线 + 嵌套子工具 (递归渲染)      │
 │ 12:34:56 [输入] {"query": "..."}    │
 │   ┌───────────────────────────┐    │
 │   │ ▶ child_tool    500ms ... │    │
 │   └───────────────────────────┘    │
+├─────────────────────────────────────┤
+│ 输出                                │
+│   key: value  ...                   │ ← resultPreview (结构化/Markdown/附件图片)
 └─────────────────────────────────────┘
 ```
 
@@ -143,10 +144,10 @@ const toolBlocks = useStore(state => state.toolBlocksByJob[jobId]);
 - `.runtime-tool-preview` - 输入/输出预览容器
   - `.runtime-tool-preview-label` / `.runtime-tool-preview-body` - 预览标题 / 内容
   - `.runtime-tool-preview-body.is-structured` - 结构化结果内容容器
-- `.runtime-tool-json` - 结构化结果根
-  - `.runtime-tool-json-object` / `.runtime-tool-json-array` - 对象 / 数组
-  - `.runtime-tool-json-row` / `.runtime-tool-json-item` - 对象行 / 数组项
-  - `.runtime-tool-json-key` / `.runtime-tool-json-value` - 键 / 值
+- `.runtime-tool-structured-list` - WebUI 同名结构化结果根
+  - `.runtime-tool-structured-row` - 结构化结果行
+  - `.runtime-tool-key` / `.runtime-tool-value` - 键 / 值
+  - `.runtime-tool-value.string` / `.number` / `.boolean` / `.muted` - 标量类型修饰类
 - `.runtime-tool-children` - 嵌套子工具与时间线容器
 - `.timeline-entry` - 时间线条目
   - `.timeline-entry-input` / `.timeline-entry-output` / `.timeline-entry-error`
@@ -160,7 +161,7 @@ const toolBlocks = useStore(state => state.toolBlocksByJob[jobId]);
 - 时间线渲染（input / output / error）
 - 嵌套子工具递归渲染（单个 / 多个）
 - 空状态处理（无时间线、无子工具）
-- 结果结构化：可解析 JSON 走 `StructuredResult`，非 JSON 回退 `<pre>`
+- 结果预览：JSON/Python 风格结构化、非结构化 Markdown、附件图片标签 fallback
 - Agent 运行中在阶段标签后展示 `stageDetail`
 
 ## 文件结构

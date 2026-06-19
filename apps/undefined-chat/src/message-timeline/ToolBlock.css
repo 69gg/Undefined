@@ -148,6 +148,17 @@
 	font-size: 11px;
 }
 
+.runtime-tool-block.webchat-private-send,
+.runtime-tool-block.webchat-end {
+	background: color-mix(in srgb, var(--bg-app) 72%, var(--bg-card));
+}
+
+.runtime-tool-block.webchat-private-send summary,
+.runtime-tool-block.webchat-end summary {
+	min-height: 32px;
+	padding-block: 3px;
+}
+
 .runtime-tool-block.running summary .runtime-tool-status {
 	color: var(--warning);
 }
@@ -160,23 +171,16 @@
 	color: var(--error);
 }
 
+.runtime-tool-block.cancelled summary .runtime-tool-status {
+	color: var(--warning);
+}
+
 .runtime-tool-preview {
 	min-width: 0;
 	max-width: 100%;
 	border-top: 1px solid var(--border-color);
 	padding: 8px 10px 10px;
-	animation: tool-reveal 0.18s ease-out;
-}
-
-@keyframes tool-reveal {
-	from {
-		opacity: 0;
-		transform: translateY(-4px);
-	}
-	to {
-		opacity: 1;
-		transform: translateY(0);
-	}
+	animation: runtime-tool-reveal 0.18s ease-out;
 }
 
 .runtime-tool-preview + .runtime-tool-preview {
@@ -188,7 +192,6 @@
 	color: var(--text-tertiary);
 	font-size: 11px;
 	font-weight: 600;
-	text-transform: uppercase;
 }
 
 .runtime-tool-preview-body {
@@ -211,10 +214,79 @@
 	margin-bottom: 0;
 }
 
+.runtime-tool-preview-body.is-structured {
+	padding: 8px 10px;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-sm);
+	background: color-mix(in srgb, var(--bg-card) 70%, var(--bg-app));
+	white-space: normal;
+}
+
+.runtime-tool-structured-list {
+	display: grid;
+	gap: 6px;
+	min-width: 0;
+}
+
+.runtime-tool-structured-list .runtime-tool-structured-list {
+	margin-top: 5px;
+	padding-left: 10px;
+	border-left: 1px solid var(--border-color);
+}
+
+.runtime-tool-structured-row {
+	display: grid;
+	grid-template-columns: minmax(64px, min(34%, 180px)) minmax(0, 1fr);
+	align-items: start;
+	gap: 8px;
+	min-width: 0;
+}
+
+.runtime-tool-key {
+	min-width: 0;
+	color: var(--accent-color);
+	font-family: var(--font-mono);
+	font-size: 11px;
+	overflow-wrap: anywhere;
+}
+
+.runtime-tool-value {
+	min-width: 0;
+	color: var(--text-secondary);
+	overflow-wrap: anywhere;
+}
+
+.runtime-tool-value.string {
+	color: var(--text-primary);
+}
+
+.runtime-tool-value.number {
+	color: var(--warning);
+	font-family: var(--font-mono);
+}
+
+.runtime-tool-value.boolean {
+	color: var(--success);
+	font-family: var(--font-mono);
+}
+
+.runtime-tool-value.muted {
+	color: var(--text-tertiary);
+	font-family: var(--font-mono);
+}
+
+.runtime-tool-preview-body .runtime-chat-image {
+	max-width: min(420px, 100%);
+}
+
+.runtime-tool-preview-body .runtime-chat-file-card {
+	max-width: min(340px, 100%);
+}
+
 /* 时间线条目样式 */
 .timeline-entry {
 	display: grid;
-	grid-template-columns: auto auto 1fr;
+	grid-template-columns: auto 1fr;
 	gap: 8px;
 	padding: 6px 0;
 	border-bottom: 1px solid color-mix(in srgb, var(--border-color) 40%, transparent);
@@ -222,13 +294,6 @@
 
 .timeline-entry:last-child {
 	border-bottom: none;
-}
-
-.timeline-time {
-	font-family: var(--font-mono);
-	font-size: 10px;
-	color: var(--text-tertiary);
-	white-space: nowrap;
 }
 
 .timeline-label {
@@ -256,7 +321,7 @@
 }
 
 .timeline-content {
-	grid-column: 3;
+	grid-column: 2;
 	margin: 0;
 	padding: 4px 8px;
 	border-radius: 4px;
@@ -269,21 +334,18 @@
 
 /* 嵌套工具块 */
 .runtime-tool-children {
-	border-top: 1px solid var(--border-color);
-	padding: 8px;
-	background: color-mix(in srgb, var(--bg-app) 50%, transparent);
+	display: grid;
+	gap: 8px;
+	margin-left: 10px;
+	padding: 8px 10px 10px 12px;
+	border-top: 1px dashed var(--border-color);
+	border-left: 1px solid color-mix(in srgb, var(--tool-accent) 30%, var(--border-color));
+	background: color-mix(in srgb, var(--bg-app) 84%, var(--bg-card));
+	animation: runtime-tool-reveal 0.18s ease-out;
 }
 
 .runtime-tool-children .runtime-tool-block {
-	margin: 6px 0;
-}
-
-.runtime-tool-children .runtime-tool-block:first-child {
-	margin-top: 0;
-}
-
-.runtime-tool-children .runtime-tool-block:last-child {
-	margin-bottom: 0;
+	background: var(--bg-card);
 }
 
 /* ========================================
@@ -311,6 +373,7 @@
 	line-height: 1.5;
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
+	animation: runtime-tool-reveal 0.18s ease-out;
 }
 
 .runtime-tool-message > *:first-child {
@@ -319,4 +382,28 @@
 
 .runtime-tool-message > *:last-child {
 	margin-bottom: 0;
+}
+
+@keyframes runtime-tool-reveal {
+	from {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.runtime-tool-preview,
+	.runtime-tool-children,
+	.runtime-tool-message {
+		animation: none;
+	}
+
+	.runtime-tool-block,
+	.runtime-tool-block summary::before {
+		transition: none;
+	}
 }

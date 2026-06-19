@@ -3,7 +3,9 @@ import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import { useTranslation } from "../i18n";
 import type { Attachment } from "../runtime-client/types";
+import { isImageAttachment } from "../utils/attachment";
 import { AttachmentImage } from "./AttachmentImage";
 import {
 	extractAttachmentTags,
@@ -159,6 +161,7 @@ function renderTextWithAttachments(
 	attachments: Attachment[],
 	onPreviewHtml: (input: HtmlPreviewRequest) => void,
 	onImageClick?: (src: string, alt: string) => void,
+	fallbackImageAlt = "image",
 ): ReactNode[] {
 	const nodes: ReactNode[] = [];
 	value.split(PLACEHOLDER_SPLIT).forEach((part, idx) => {
@@ -166,18 +169,17 @@ function renderTextWithAttachments(
 		if (match) {
 			const uid = attachmentUids[Number(match[1])];
 			const attachment = uid ? findAttachmentByUid(attachments, uid) : null;
-			if (
-				attachment &&
-				(attachment.kind === "image" ||
-					attachment.mediaType.startsWith("image/"))
-			) {
+			if (attachment && !isImageAttachment(attachment)) {
+				return;
+			}
+			if (attachment || uid?.startsWith("pic_")) {
 				nodes.push(
 					<AttachmentImage
 						// biome-ignore lint/suspicious/noArrayIndexKey: 静态只读消息片段，不增删重排
 						key={`${keyPrefix}-img-${idx}`}
-						uid={attachment.id}
-						alt={attachment.name}
-						mediaType={attachment.mediaType}
+						uid={attachment?.id ?? uid}
+						alt={attachment?.name ?? fallbackImageAlt}
+						mediaType={attachment?.mediaType ?? "image/"}
 						className="runtime-chat-image"
 						onOpenImage={onImageClick}
 					/>,
@@ -205,6 +207,7 @@ export function MarkdownContent({
 	attachments = [],
 	onImageClick,
 }: MarkdownContentProps) {
+	const { t } = useTranslation();
 	// 提取附件标签并替换为占位符（占位符以空行包裹，作为独立块级元素）
 	const { cleanContent, attachmentUids } = useMemo(
 		() => extractAttachmentTags(content),
@@ -237,6 +240,7 @@ export function MarkdownContent({
 							attachments,
 							onPreviewHtml,
 							onImageClick,
+							t("image.preview"),
 						)}
 					</Fragment>
 				);

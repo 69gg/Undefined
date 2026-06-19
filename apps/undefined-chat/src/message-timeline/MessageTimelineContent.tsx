@@ -85,7 +85,13 @@ function convertHistoryToolCallToToolBlock(
 ): ToolBlockType {
 	const status = call.status || "done";
 	const mappedStatus: ToolBlockType["status"] =
-		status === "error" ? "error" : status === "running" ? "running" : "done";
+		status === "error"
+			? "error"
+			: status === "running"
+				? "running"
+				: status === "cancelled"
+					? "cancelled"
+					: "done";
 
 	// 转换子工具调用（优先从 timeline 中提取，兼容旧的 children 字段）
 	const children = new Map<string, ToolBlockType>();
@@ -165,8 +171,13 @@ export function MessageTimelineContent({
 				if (entry.type === "call" && isToolCall(entry.call)) {
 					const toolBlock = convertHistoryToolCallToToolBlock(entry.call, idx);
 					return (
-						// biome-ignore lint/suspicious/noArrayIndexKey: 历史记录只读不变
-						<ToolBlock key={idx} {...toolBlock} />
+						<ToolBlock
+							key={toolBlock.webchatCallId}
+							{...toolBlock}
+							attachments={attachments}
+							onPreviewHtml={onPreviewHtml}
+							onImageClick={handleImageClick}
+						/>
 					);
 				}
 				if (entry.type === "message" && entry.content?.trim()) {

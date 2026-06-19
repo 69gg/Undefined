@@ -39,7 +39,7 @@ export type ConversationHistoryState = {
 // 工具块系统
 // ============================================================================
 
-export type ToolBlockStatus = "running" | "done" | "error";
+export type ToolBlockStatus = "running" | "done" | "error" | "cancelled";
 
 export type TimelineEntry =
 	| { type: "input"; timestamp: number; content: string }

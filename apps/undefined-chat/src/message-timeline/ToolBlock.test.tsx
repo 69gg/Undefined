@@ -1,14 +1,41 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ToolBlock as ToolBlockType } from "../chat-store/types";
+import { AttachmentImageProvider } from "../rendering/AttachmentImageContext";
+import type {
+	Attachment,
+	AttachmentPreviewResult,
+} from "../runtime-client/types";
 import { renderWithProviders } from "../test-utils";
 import { ToolBlock } from "./ToolBlock";
 
 /** 在固定 zh-CN i18n 上下文中渲染（ToolBlock 内部使用 useTranslation）。 */
 function renderToolBlock(ui: ReactElement) {
 	return renderWithProviders(ui);
+}
+
+function imagePreviewResult(): AttachmentPreviewResult {
+	return {
+		status: 200,
+		ok: true,
+		mediaType: "image/png",
+		bytes: [137, 80, 78, 71],
+		body: null,
+	};
+}
+
+function renderToolBlockWithAttachmentProvider(ui: ReactElement) {
+	const previewAttachment = vi.fn(async () => imagePreviewResult());
+	return {
+		previewAttachment,
+		...renderWithProviders(
+			<AttachmentImageProvider client={{ previewAttachment }}>
+				{ui}
+			</AttachmentImageProvider>,
+		),
+	};
 }
 
 describe("ToolBlock", () => {
@@ -62,6 +89,24 @@ describe("ToolBlock", () => {
 		expect(screen.getByText("失败")).toBeInTheDocument();
 		const details = container.querySelector(".runtime-tool-block");
 		expect(details).toHaveClass("error");
+	});
+
+	it("displays cancelled status with correct styling", () => {
+		const toolBlock: ToolBlockType = {
+			webchatCallId: "call-cancelled",
+			toolName: "cancelled_tool",
+			status: "cancelled",
+			children: new Map(),
+			timeline: [],
+			startTime: Date.now() - 2000,
+			endTime: Date.now(),
+		};
+
+		const { container } = renderToolBlock(<ToolBlock {...toolBlock} />);
+
+		expect(screen.getByText("已取消")).toBeInTheDocument();
+		const details = container.querySelector(".runtime-tool-block");
+		expect(details).toHaveClass("cancelled");
 	});
 
 	it("formats duration correctly", () => {
@@ -267,14 +312,109 @@ describe("ToolBlock", () => {
 
 		const { container } = renderToolBlock(<ToolBlock {...toolBlock} />);
 
-		// 结构化展示：key-value 列表，而非整段 JSON 字符串
-		expect(container.querySelector(".runtime-tool-json-object")).toBeTruthy();
+		// 结构化展示：对齐 WebUI 的 runtime-tool-structured-* 类名
+		expect(
+			container.querySelector(".runtime-tool-structured-list"),
+		).toBeTruthy();
 		expect(screen.getByText("name")).toBeInTheDocument();
 		expect(screen.getByText("小明")).toBeInTheDocument();
 		expect(screen.getByText("age")).toBeInTheDocument();
 	});
 
-	it("非 JSON 的工具结果回退为 <pre> 纯文本", () => {
+	it("兼容 Python 风格工具预览并按 WebUI 结构化类名渲染", () => {
+		const toolBlock: ToolBlockType = {
+			webchatCallId: "call-pythonish",
+			toolName: "pythonish_tool",
+			status: "done",
+			resultPreview: "{'ok': True, 'items': [None, 'done']}",
+			children: new Map(),
+			timeline: [],
+			startTime: Date.now() - 1000,
+			endTime: Date.now(),
+		};
+
+		const { container } = renderToolBlock(<ToolBlock {...toolBlock} />);
+
+		expect(
+			container.querySelector(".runtime-tool-structured-list"),
+		).toBeTruthy();
+		expect(screen.getByText("ok")).toBeInTheDocument();
+		expect(screen.getByText("true")).toHaveClass("boolean");
+		expect(screen.getByText("null")).toHaveClass("muted");
+	});
+
+	it("非结构化工具输出按 Markdown 渲染", () => {
+		const toolBlock: ToolBlockType = {
+			webchatCallId: "call-markdown",
+			toolName: "markdown_tool",
+			status: "done",
+			resultPreview: "**加粗结果**",
+			children: new Map(),
+			timeline: [],
+			startTime: Date.now() - 1000,
+			endTime: Date.now(),
+		};
+
+		renderToolBlock(<ToolBlock {...toolBlock} />);
+
+		expect(screen.getByText("加粗结果").closest("strong")).toBeInTheDocument();
+	});
+
+	it("工具输出附件标签复用 MarkdownContent 图片预览链路", async () => {
+		const imageAttachment: Attachment = {
+			id: "pic_tool",
+			name: "tool.png",
+			size: 2048,
+			mediaType: "image/png",
+			kind: "image",
+			downloadUrl: null,
+			previewUrl: null,
+			discarded: false,
+		};
+		const toolBlock: ToolBlockType = {
+			webchatCallId: "call-image",
+			toolName: "image_tool",
+			status: "done",
+			resultPreview: '结果<attachment uid="pic_tool"/>',
+			children: new Map(),
+			timeline: [],
+			startTime: Date.now() - 1000,
+			endTime: Date.now(),
+		};
+
+		const { previewAttachment } = renderToolBlockWithAttachmentProvider(
+			<ToolBlock {...toolBlock} attachments={[imageAttachment]} />,
+		);
+
+		expect(await screen.findByAltText("tool.png")).toBeInTheDocument();
+		expect(previewAttachment).toHaveBeenCalledWith({
+			attachmentId: "pic_tool",
+		});
+	});
+
+	it("未知 pic_ 附件标签按 WebUI 规则 fallback 为图片预览", async () => {
+		const toolBlock: ToolBlockType = {
+			webchatCallId: "call-pic-fallback",
+			toolName: "image_tool",
+			status: "done",
+			resultPreview: '<attachment uid="pic_missing"/>',
+			children: new Map(),
+			timeline: [],
+			startTime: Date.now() - 1000,
+			endTime: Date.now(),
+		};
+
+		const { previewAttachment } = renderToolBlockWithAttachmentProvider(
+			<ToolBlock {...toolBlock} />,
+		);
+
+		expect(await screen.findByRole("img")).toBeInTheDocument();
+		expect(previewAttachment).toHaveBeenCalledWith({
+			attachmentId: "pic_missing",
+		});
+	});
+
+	it("非 JSON 的工具结果回退为普通预览文本", () => {
 		const toolBlock: ToolBlockType = {
 			webchatCallId: "call-text",
 			toolName: "text_tool",
@@ -288,7 +428,7 @@ describe("ToolBlock", () => {
 
 		const { container } = renderToolBlock(<ToolBlock {...toolBlock} />);
 
-		expect(container.querySelector(".runtime-tool-json")).toBeNull();
+		expect(container.querySelector(".runtime-tool-structured-list")).toBeNull();
 		expect(screen.getByText("这是一段纯文本结果")).toBeInTheDocument();
 	});
 

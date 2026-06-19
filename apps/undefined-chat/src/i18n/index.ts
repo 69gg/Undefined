@@ -154,6 +154,7 @@ export type TranslationKey =
 	| "tool.statusRunning"
 	| "tool.statusDone"
 	| "tool.statusError"
+	| "tool.statusCancelled"
 	| "tool.input"
 	| "tool.output"
 	| "tool.error"
@@ -171,6 +172,7 @@ export type TranslationKey =
 	| "imageViewer.reset"
 	| "imageViewer.close"
 	| "imagePreview.close"
+	| "image.preview"
 	| "image.loading"
 	| "image.loadFailed"
 	// 代码块
@@ -313,6 +315,7 @@ export const dictionaries: Record<Locale, TranslationDictionary> = {
 		"tool.statusRunning": "运行中",
 		"tool.statusDone": "完成",
 		"tool.statusError": "失败",
+		"tool.statusCancelled": "已取消",
 		"tool.input": "输入",
 		"tool.output": "输出",
 		"tool.error": "错误",
@@ -327,6 +330,7 @@ export const dictionaries: Record<Locale, TranslationDictionary> = {
 		"imageViewer.reset": "重置",
 		"imageViewer.close": "关闭",
 		"imagePreview.close": "关闭图片预览",
+		"image.preview": "图片预览",
 		"image.loading": "图片加载中",
 		"image.loadFailed": "图片加载失败",
 		"code.expand": "展开",
@@ -466,6 +470,7 @@ export const dictionaries: Record<Locale, TranslationDictionary> = {
 		"tool.statusRunning": "Running",
 		"tool.statusDone": "Done",
 		"tool.statusError": "Failed",
+		"tool.statusCancelled": "Cancelled",
 		"tool.input": "Input",
 		"tool.output": "Output",
 		"tool.error": "Error",
@@ -480,6 +485,7 @@ export const dictionaries: Record<Locale, TranslationDictionary> = {
 		"imageViewer.reset": "Reset",
 		"imageViewer.close": "Close",
 		"imagePreview.close": "Close image preview",
+		"image.preview": "Image preview",
 		"image.loading": "Loading image",
 		"image.loadFailed": "Failed to load image",
 		"code.expand": "Expand",

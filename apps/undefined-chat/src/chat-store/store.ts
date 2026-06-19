@@ -1344,7 +1344,9 @@ export function createChatStore({
 										? "running"
 										: payload.ok === false
 											? "error"
-											: "done",
+											: String(payload.status ?? "") === "cancelled"
+												? "cancelled"
+												: "done",
 									isAgent:
 										Boolean(payload.is_agent) || existing?.isAgent || false,
 									argumentsPreview: isStart

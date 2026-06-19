@@ -4,9 +4,20 @@ import type { ToolBlock as ToolBlockType } from "../chat-store/types";
 import { useChatClock } from "../hooks/useChatClock";
 import { type TranslateFn, useTranslation } from "../i18n";
 import { getChatStageLabel } from "../i18n/zh-CN";
+import {
+	type HtmlPreviewRequest,
+	MarkdownContent,
+} from "../rendering/MarkdownContent";
+import type { Attachment } from "../runtime-client/types";
 import "./ToolBlock.css";
 
-export type ToolBlockProps = ToolBlockType;
+const noopPreviewHtml = (_input: HtmlPreviewRequest): void => {};
+
+export type ToolBlockProps = ToolBlockType & {
+	attachments?: Attachment[];
+	onPreviewHtml?: (input: HtmlPreviewRequest) => void;
+	onImageClick?: (src: string, alt: string) => void;
+};
 
 function formatDuration(
 	startTime: number,
@@ -37,31 +48,150 @@ function getStatusText(
 			return t("tool.statusDone");
 		case "error":
 			return t("tool.statusError");
+		case "cancelled":
+			return t("tool.statusCancelled");
 		default:
 			return status;
 	}
 }
 
-/**
- * 尝试将工具结果预览解析为 JSON。仅当文本是合法 JSON 对象/数组时返回解析值，
- * 否则返回 null 以回退为纯文本展示。
- */
-function tryParseJson(text: string): unknown {
+type ToolPreview = {
+	text: string;
+	isStructured: boolean;
+	value: unknown;
+};
+
+function parseStructuredPreview(text: string): unknown {
 	const trimmed = text.trim();
 	if (!trimmed) {
-		return null;
-	}
-	const first = trimmed[0];
-	// 只对对象/数组尝试解析，避免把裸数字/字符串/布尔当作"结构化结果"。
-	if (first !== "{" && first !== "[") {
 		return null;
 	}
 	try {
 		const parsed: unknown = JSON.parse(trimmed);
 		return parsed !== null && typeof parsed === "object" ? parsed : null;
 	} catch {
+		const normalized = trimmed
+			.replace(/([{,]\s*)'([^'\\]*(?:\\.[^'\\]*)*)'\s*:/g, '$1"$2":')
+			.replace(/:\s*'([^'\\]*(?:\\.[^'\\]*)*)'(?=\s*[,}])/g, ':"$1"')
+			.replace(/([[,]\s*)'([^'\\]*(?:\\.[^'\\]*)*)'(?=\s*[\],])/g, '$1"$2"')
+			.replace(/\bNone\b/g, "null")
+			.replace(/\bTrue\b/g, "true")
+			.replace(/\bFalse\b/g, "false");
+		try {
+			const parsed: unknown = JSON.parse(normalized);
+			return parsed !== null && typeof parsed === "object" ? parsed : null;
+		} catch {
+			return null;
+		}
+	}
+}
+
+function formatToolPreview(raw: string | undefined): ToolPreview {
+	const text = String(raw || "").trim();
+	if (!text) {
+		return { text: "", isStructured: false, value: null };
+	}
+	const value = parseStructuredPreview(text);
+	return { text, isStructured: value !== null, value };
+}
+
+function renderStructuredToolValue(value: unknown): React.ReactElement {
+	if (Array.isArray(value)) {
+		if (value.length === 0) {
+			return <span className="runtime-tool-value muted">[]</span>;
+		}
+		return (
+			<div className="runtime-tool-structured-list">
+				{value.map((item, index) => (
+					// biome-ignore lint/suspicious/noArrayIndexKey: 只读结果，顺序稳定
+					<div className="runtime-tool-structured-row" key={index}>
+						<span className="runtime-tool-key">{index}</span>
+						<div className="runtime-tool-value">
+							{renderStructuredToolValue(item)}
+						</div>
+					</div>
+				))}
+			</div>
+		);
+	}
+	if (value !== null && typeof value === "object") {
+		const entries = Object.entries(value as Record<string, unknown>);
+		if (entries.length === 0) {
+			return <span className="runtime-tool-value muted">{"{}"}</span>;
+		}
+		return (
+			<div className="runtime-tool-structured-list">
+				{entries.map(([key, item]) => (
+					<div className="runtime-tool-structured-row" key={key}>
+						<span className="runtime-tool-key">{key}</span>
+						<div className="runtime-tool-value">
+							{renderStructuredToolValue(item)}
+						</div>
+					</div>
+				))}
+			</div>
+		);
+	}
+	if (typeof value === "boolean") {
+		return (
+			<span className="runtime-tool-value boolean">
+				{value ? "true" : "false"}
+			</span>
+		);
+	}
+	if (typeof value === "number") {
+		return <span className="runtime-tool-value number">{String(value)}</span>;
+	}
+	if (value === null || value === undefined) {
+		return <span className="runtime-tool-value muted">null</span>;
+	}
+	return <span className="runtime-tool-value string">{String(value)}</span>;
+}
+
+function renderPreviewSection({
+	label,
+	raw,
+	markdown,
+	attachments,
+	onPreviewHtml,
+	onImageClick,
+}: {
+	label: string;
+	raw: string | undefined;
+	markdown: boolean;
+	attachments: Attachment[];
+	onPreviewHtml: (input: HtmlPreviewRequest) => void;
+	onImageClick?: (src: string, alt: string) => void;
+}): React.ReactElement | null {
+	const preview = formatToolPreview(raw);
+	if (!preview.text) {
 		return null;
 	}
+	return (
+		<div className="runtime-tool-preview">
+			<div className="runtime-tool-preview-label">{label}</div>
+			<div
+				className={
+					preview.isStructured
+						? "runtime-tool-preview-body is-structured"
+						: "runtime-tool-preview-body"
+				}
+			>
+				{preview.isStructured ? (
+					renderStructuredToolValue(preview.value)
+				) : markdown ? (
+					<MarkdownContent
+						content={preview.text}
+						onPreviewHtml={onPreviewHtml}
+						attachments={attachments}
+						onImageClick={onImageClick}
+					/>
+				) : (
+					preview.text
+				)}
+			</div>
+		</div>
+	);
 }
 
 function renderTimelineEntry(
@@ -69,100 +199,30 @@ function renderTimelineEntry(
 	index: number,
 	t: TranslateFn,
 ): React.ReactElement {
-	const time = new Date(entry.timestamp).toLocaleTimeString([], {
-		hour: "2-digit",
-		minute: "2-digit",
-		second: "2-digit",
-	});
-
-	switch (entry.type) {
-		case "input":
-			return (
-				<div className="timeline-entry timeline-entry-input" key={index}>
-					<span className="timeline-time">{time}</span>
-					<span className="timeline-label">{t("tool.input")}</span>
-					<pre className="timeline-content">{entry.content}</pre>
-				</div>
-			);
-		case "output":
-			return (
-				<div className="timeline-entry timeline-entry-output" key={index}>
-					<span className="timeline-time">{time}</span>
-					<span className="timeline-label">{t("tool.output")}</span>
-					<pre className="timeline-content">{entry.content}</pre>
-				</div>
-			);
-		case "error":
-			return (
-				<div className="timeline-entry timeline-entry-error" key={index}>
-					<span className="timeline-time">{time}</span>
-					<span className="timeline-label">{t("tool.error")}</span>
-					<pre className="timeline-content">{entry.message}</pre>
-				</div>
-			);
-		default:
-			return <div key={index} />;
-	}
-}
-
-/**
- * 将单个 JSON 标量值渲染为字符串。
- */
-function formatScalar(value: unknown): string {
-	if (value === null) {
-		return "null";
-	}
-	if (typeof value === "string") {
-		return value;
-	}
-	return JSON.stringify(value);
-}
-
-/**
- * 结构化展示工具结果：对象渲染为 key-value 列表，数组渲染为带序号的项，
- * 嵌套对象/数组缩进递归。仅在 resultPreview 为合法 JSON 对象/数组时启用。
- */
-function StructuredResult({ value }: { value: unknown }): React.ReactElement {
-	if (Array.isArray(value)) {
-		return (
-			<ul className="runtime-tool-json runtime-tool-json-array">
-				{value.map((item, index) => (
-					// biome-ignore lint/suspicious/noArrayIndexKey: 只读结果，顺序稳定
-					<li className="runtime-tool-json-item" key={index}>
-						{item !== null && typeof item === "object" ? (
-							<StructuredResult value={item} />
-						) : (
-							<span className="runtime-tool-json-value">
-								{formatScalar(item)}
-							</span>
-						)}
-					</li>
-				))}
-			</ul>
-		);
-	}
-	const entries = Object.entries(value as Record<string, unknown>);
+	const content = entry.type === "error" ? entry.message : entry.content;
+	const label =
+		entry.type === "input"
+			? t("tool.input")
+			: entry.type === "output"
+				? t("tool.output")
+				: t("tool.error");
+	const className =
+		entry.type === "input"
+			? "timeline-entry timeline-entry-input"
+			: entry.type === "output"
+				? "timeline-entry timeline-entry-output"
+				: "timeline-entry timeline-entry-error";
 	return (
-		<dl className="runtime-tool-json runtime-tool-json-object">
-			{entries.map(([key, item]) => (
-				<div className="runtime-tool-json-row" key={key}>
-					<dt className="runtime-tool-json-key">{key}</dt>
-					<dd className="runtime-tool-json-value">
-						{item !== null && typeof item === "object" ? (
-							<StructuredResult value={item} />
-						) : (
-							formatScalar(item)
-						)}
-					</dd>
-				</div>
-			))}
-		</dl>
+		<div className={className} key={index}>
+			<span className="timeline-label">{label}</span>
+			<div className="timeline-content">{content}</div>
+		</div>
 	);
 }
 
 /**
  * 工具调用块（对齐 WebUI renderToolBlock，runtime.js:1100-1142）
- * - running 时显示，tool_end 后变 done/error，2s 后自动折叠
+ * - running 时显示，tool_end 后变 done/error/cancelled，2s 后自动折叠
  * - agent 运行中显示阶段标签（metaLabel），对齐 WebUI
  */
 export function ToolBlock({
@@ -179,6 +239,9 @@ export function ToolBlock({
 	timeline,
 	startTime,
 	endTime,
+	attachments = [],
+	onPreviewHtml = noopPreviewHtml,
+	onImageClick,
 }: ToolBlockProps) {
 	const { t, locale } = useTranslation();
 	const detailsRef = useRef<HTMLDetailsElement>(null);
@@ -192,7 +255,7 @@ export function ToolBlock({
 		}
 	}, [status]);
 
-	// 自动折叠：done/error 后 2s 直接操作 DOM（对齐 WebUI scheduleToolAutoCollapse）
+	// 自动折叠：终态后 2s 直接操作 DOM（对齐 WebUI scheduleToolAutoCollapse）
 	useEffect(() => {
 		if (collapseTimerRef.current !== null) {
 			clearTimeout(collapseTimerRef.current);
@@ -200,7 +263,7 @@ export function ToolBlock({
 		}
 
 		if (
-			(status === "done" || status === "error") &&
+			(status === "done" || status === "error" || status === "cancelled") &&
 			!userInteractedRef.current
 		) {
 			collapseTimerRef.current = window.setTimeout(() => {
@@ -245,6 +308,22 @@ export function ToolBlock({
 	const hintClass = uiHint ? ` ${uiHint.replace(/_/g, "-")}` : "";
 	const kindClass = isAgent ? " is-agent" : " is-tool";
 	const kindLabel = isAgent ? "Agent" : "Tool";
+	const argsPreview = renderPreviewSection({
+		label: t("tool.input"),
+		raw: argumentsPreview,
+		markdown: false,
+		attachments,
+		onPreviewHtml,
+		onImageClick,
+	});
+	const resultPreviewNode = renderPreviewSection({
+		label: t("tool.output"),
+		raw: resultPreview,
+		markdown: true,
+		attachments,
+		onPreviewHtml,
+		onImageClick,
+	});
 
 	return (
 		<details
@@ -276,43 +355,24 @@ export function ToolBlock({
 				<span className="runtime-tool-kind">{kindLabel}</span>
 			</summary>
 
-			{argumentsPreview ? (
-				<div className="runtime-tool-preview">
-					<div className="runtime-tool-preview-label">{t("tool.input")}</div>
-					<div className="runtime-tool-preview-body">
-						<pre>{argumentsPreview}</pre>
-					</div>
-				</div>
-			) : null}
-			{resultPreview
-				? (() => {
-						// 可解析为 JSON 对象/数组时结构化展示，否则回退 <pre>
-						const parsed = tryParseJson(resultPreview);
-						return (
-							<div className="runtime-tool-preview">
-								<div className="runtime-tool-preview-label">
-									{t("tool.output")}
-								</div>
-								<div className="runtime-tool-preview-body is-structured">
-									{parsed !== null ? (
-										<StructuredResult value={parsed} />
-									) : (
-										<pre>{resultPreview}</pre>
-									)}
-								</div>
-							</div>
-						);
-					})()
-				: null}
+			{argsPreview}
 
 			{childrenArray.length > 0 || timeline.length > 0 ? (
 				<div className="runtime-tool-children">
 					{timeline.map((entry, index) => renderTimelineEntry(entry, index, t))}
 					{childrenArray.map((child) => (
-						<ToolBlock key={child.webchatCallId} {...child} />
+						<ToolBlock
+							key={child.webchatCallId}
+							{...child}
+							attachments={attachments}
+							onPreviewHtml={onPreviewHtml}
+							onImageClick={onImageClick}
+						/>
 					))}
 				</div>
 			) : null}
+
+			{resultPreviewNode}
 		</details>
 	);
 }
