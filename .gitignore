@@ -58,6 +58,12 @@ apps/**/src-tauri/target/
 apps/**/src-tauri/gen/
 apps/**/src-tauri/.cargo/
 
+# Android signing secrets and local SDK config
+*.jks
+*.keystore
+keystore.properties
+local.properties
+
 # MCP 配置
 config/mcp.json
 

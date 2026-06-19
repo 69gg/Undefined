@@ -4,6 +4,35 @@
 
 ## 脚本列表
 
+### [`build_native_apps.py`](build_native_apps.py) — 本地原生 App 构建
+
+统一编排本机可构建的 Console / Chat 原生产物。脚本不会自动安装系统依赖、Android SDK 包或 Rust target；`check` 子命令只报告缺口并给出修复提示。
+
+```bash
+# 查看将要执行的本地构建矩阵
+uv run python scripts/build_native_apps.py list --product all --targets all --android-abi all
+
+# 检查 Android arm64 debug APK 构建环境
+uv run python scripts/build_native_apps.py check --targets android --android-abi arm64-v8a
+
+# 构建 Chat arm64 debug APK
+uv run python scripts/build_native_apps.py build --product chat --targets android --android-abi arm64-v8a
+
+# 构建 Console + Chat 的 Linux deb
+uv run python scripts/build_native_apps.py build --product all --targets desktop --desktop-bundles deb
+```
+
+常用参数：
+
+- `--product chat|console|all`：选择 App，默认 `chat`。
+- `--targets android|desktop|all`：选择本机目标，默认 `android`。
+- `--android-abi arm64-v8a|armeabi-v7a|x86|x86_64|all`：选择 Android ABI，默认 `arm64-v8a`。
+- `--desktop-bundles deb|appimage|all`：Linux 桌面包类型，默认 `deb`。
+- `--android-init auto|always|skip`：Android 生成工程初始化策略，默认 `auto`。
+- `--output-dir PATH`：产物收集目录，默认 `dist/native/<short-sha>/`。
+- `--dry-run`：只打印命令，不执行。
+- `--no-install-deps`：不在缺少 `node_modules/.bin/tauri` 时自动执行 `npm ci`。
+
 ### [`sync_config_template.py`](sync_config_template.py) — 同步配置模板与注释
 
 保留当前 `config.toml` 已有配置值，同时把 `config.toml.example` 中新增的配置项、默认空表和双语注释同步回来。

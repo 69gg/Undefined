@@ -193,6 +193,15 @@ npm run tauri:build:no-strip -- --bundles deb
 
 ### Android 初始化与构建
 
+推荐使用仓库脚本统一检查环境、初始化生成工程、构建并收集产物：
+
+```bash
+uv run python scripts/build_native_apps.py check --targets android --android-abi arm64-v8a
+uv run python scripts/build_native_apps.py build --product chat --targets android --android-abi arm64-v8a
+```
+
+脚本只构建当前机器本地可构建的目标，不会自动安装 Android SDK、NDK 或 Rust target。缺少依赖时，`check` 和 `build` 会报告需要补齐的命令。
+
 首次或 CI 环境中，先初始化 Android 项目：
 
 ```bash
@@ -395,6 +404,13 @@ npm run check  # Biome、TypeScript、unit + e2e（jsdom）测试、cargo fmt/ch
 ```
 
 如果本次改动涉及 Android 构建链：
+
+```bash
+uv run python scripts/build_native_apps.py check --targets android --android-abi arm64-v8a
+uv run python scripts/build_native_apps.py build --product chat --targets android --android-abi arm64-v8a
+```
+
+如需排查底层 Tauri Android 命令，可继续直接运行：
 
 ```bash
 npm run tauri:android:init
