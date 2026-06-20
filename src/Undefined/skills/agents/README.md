@@ -271,9 +271,15 @@ mv skills/tools/my_tool skills/agents/my_agent/tools/
 - **子工具**：`read_file`, `analyze_code`, `analyze_pdf`, `analyze_docx`, `analyze_xlsx`
 
 ### naga_code_analysis_agent（NagaAgent 代码分析助手）
-- **功能**：专门用于分析 NagaAgent 框架及当前项目的源码
-- **适用场景**：深入分析 NagaAgent 架构、项目代码审查
-- **子工具**：`read_file`, `search_code`, `analyze_structure`
+- **功能**：专门用于分析 NagaAgent 框架源码
+- **适用场景**：深入分析 NagaAgent 架构、模块实现、代码线索
+- **子工具**：`read_file`, `list_directory`, `glob`, `search_file_content`, `read_naga_intro`
+
+### undefined_self_code_agent（Undefined 自身代码查阅助手）
+- **功能**：只读查阅 Undefined 当前仓库的源码、测试、文档、资源、脚本、配置示例和 App 实现
+- **适用场景**：解释 Undefined 自身实现、定位模块、核对配置示例、查看测试覆盖
+- **访问范围**：`src/`, `scripts/`, `tests/`, `res/`, `docs/`, `apps/`, `README.md`, `CHANGELOG.md`, `ARCHITECTURE.md`, `config.toml.example`
+- **子工具**：`read_file`, `list_directory`, `glob`, `search_file_content`
 
 ### info_agent（信息查询助手）
 - **功能**：查询天气、热搜、历史、WHOIS、B 站信息、arXiv 检索等

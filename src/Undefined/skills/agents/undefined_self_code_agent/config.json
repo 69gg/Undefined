@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "undefined_self_code_agent",
+        "description": "Undefined 自身代码查阅助手，用于只读查询当前 Undefined 仓库的源码、测试、文档、资源、脚本与 App 实现细节。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "需要查阅 Undefined 自身代码或文档的具体问题"
+                }
+            },
+            "required": ["prompt"]
+        }
+    }
+}

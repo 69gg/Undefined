@@ -1,0 +1,29 @@
+{
+    "type": "function",
+    "function": {
+        "name": "read_file",
+        "description": "读取 Undefined 仓库允许范围内的文本文件。路径必须是仓库相对路径。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "文件路径，例如 src/Undefined/ai/client/setup.py 或 README.md"
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "description": "最大返回字符数，默认 60000，范围 1000-200000"
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "可选：起始行号，从 1 开始"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "可选：读取行数，默认 200，范围 1-2000"
+                }
+            },
+            "required": ["file_path"]
+        }
+    }
+}
