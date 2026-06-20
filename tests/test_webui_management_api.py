@@ -919,6 +919,38 @@ async def test_runtime_chat_job_proxy_preserves_structured_message(
     }
 
 
+async def test_runtime_chat_job_proxy_forwards_retry_reuse_flag(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _fake_proxy_runtime(**kwargs: Any) -> web.Response:
+        captured.update(kwargs)
+        return web.json_response({"job_id": "job-retry"})
+
+    monkeypatch.setattr(_runtime, "_proxy_runtime", _fake_proxy_runtime)
+    monkeypatch.setattr(_runtime, "check_auth", lambda _request: True)
+    request = _request(
+        json_body={
+            "conversation_id": "conv-1",
+            "message": "重新生成",
+            "reuse_previous_user_message": True,
+        }
+    )
+
+    response = await _runtime.runtime_chat_job_create_handler(
+        cast(web.Request, cast(Any, request))
+    )
+    payload = _json_payload(response)
+
+    assert payload["job_id"] == "job-retry"
+    assert captured["payload"] == {
+        "conversation_id": "conv-1",
+        "message": "重新生成",
+        "reuse_previous_user_message": True,
+    }
+
+
 async def test_runtime_chat_attachment_capabilities_proxy(
     monkeypatch: Any,
 ) -> None:
@@ -1147,6 +1179,16 @@ async def test_static_assets_get_no_cache_revalidation_header() -> None:
 
     # 静态资源强制按 ETag 重新校验，避免前端更新后被强缓存挡住
     assert response.headers["Cache-Control"] == "no-cache"
+
+
+async def test_security_headers_csp_allows_blob_image_previews() -> None:
+    async def _handler(_request: web.Request) -> web.StreamResponse:
+        return web.Response(text="page")
+
+    request = make_mocked_request("GET", "/")
+    response = await webui_app.security_headers_middleware(request, _handler)
+
+    assert "img-src 'self' data: blob:;" in response.headers["Content-Security-Policy"]
 
 
 async def test_non_static_responses_have_no_explicit_cache_control() -> None:

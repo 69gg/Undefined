@@ -824,6 +824,8 @@ async def runtime_chat_job_create_handler(request: web.Request) -> Response:
     conversation_id = str(body.get("conversation_id", "") or "").strip()
     if conversation_id:
         payload["conversation_id"] = conversation_id
+    if _to_bool(body.get("reuse_previous_user_message")):
+        payload["reuse_previous_user_message"] = True
     return await _proxy_runtime(
         method="POST",
         path="/api/v1/chat/jobs",
