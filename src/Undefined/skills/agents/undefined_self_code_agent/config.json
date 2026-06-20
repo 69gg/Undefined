@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "undefined_self_code_agent",
-        "description": "Undefined 自身代码查阅助手，用于只读查询当前 Undefined 仓库的源码、测试、文档、资源、脚本与 App 实现细节。",
+        "description": "Undefined 自身代码查阅助手，用于只读查询当前 Undefined 仓库的源码、测试、文档、资源、脚本与 App 实现细节；不包含 code/NagaAgent 子模块，不写代码、不运行命令。",
         "parameters": {
             "type": "object",
             "properties": {

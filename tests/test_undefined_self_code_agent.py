@@ -102,6 +102,19 @@ def test_agent_registry_loads_description_from_intro() -> None:
     assert "undefined_self_code_agent" in schema
     assert "Undefined 自身代码查阅助手" in schema["undefined_self_code_agent"]
     assert "只读查阅" in schema["undefined_self_code_agent"]
+    assert (
+        "`code/NagaAgent/` 是 NagaAgent 子模块" in schema["undefined_self_code_agent"]
+    )
+
+
+def test_prompt_and_intro_exclude_naga_submodule() -> None:
+    prompt = (AGENT_DIR / "prompt.md").read_text("utf-8")
+    intro = (AGENT_DIR / "intro.md").read_text("utf-8")
+
+    assert "`code/NagaAgent/` 是 NagaAgent 子模块" in prompt
+    assert "永远不属于 Undefined 自身代码查阅范围" in prompt
+    assert "`code/NagaAgent/` 是 NagaAgent 子模块" in intro
+    assert "不属于 Undefined 自身代码查阅范围" in intro
 
 
 @pytest.mark.asyncio

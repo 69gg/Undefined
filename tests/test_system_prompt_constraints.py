@@ -40,7 +40,13 @@ def test_naga_prompt_requires_scope_before_naga_analysis() -> None:
         in text
     )
     assert (
-        "不要改用 web_agent、file_analysis_agent、普通搜索、直接读文件工具或你自己的推测替代"
+        "不要改用 web_agent、file_analysis_agent、undefined_self_code_agent、普通搜索、直接读文件工具或你自己的推测替代"
+        in text
+    )
+    assert "不要用 undefined_self_code_agent 查 `code/NagaAgent/`" in text
+    assert "`code/NagaAgent/` 是 NagaAgent 子模块" in text
+    assert (
+        "如果问题同时比较 Undefined 与 NagaAgent：Undefined 侧调用 `undefined_self_code_agent`，NagaAgent 侧调用 `naga_code_analysis_agent`"
         in text
     )
     assert "直接把宽泛问题丢给 naga_code_analysis_agent" in text
@@ -60,7 +66,42 @@ def test_system_prompts_route_undefined_self_code_questions(path: Path) -> None:
         "需要查阅 Undefined 自身源码、测试、文档、资源、脚本、配置示例或 App 实现"
         in text
     )
-    assert "仅可只读查阅 Undefined 自身代码，不能写代码或执行命令" in text
+    assert "undefined_self_code_agent 仅可只读查阅 Undefined 自身代码" in text
+    assert "不能写代码、执行命令或读取 `code/NagaAgent/`" in text
+
+
+@pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_define_code_project_routing_matrix(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    required_snippets = [
+        "代码/项目问题路由矩阵",
+        "查 Undefined 当前仓库源码、测试、文档、资源、脚本、配置示例或 App 实现 → undefined_self_code_agent",
+        "写代码、改代码、执行验证、打包交付 → code_delivery_agent",
+        "用户上传文件、截图、外部文件或外部代码片段解析 → file_analysis_agent",
+        "undefined_self_code_agent 只查 Undefined 自身允许范围",
+        "不包含 `code/NagaAgent/`",
+        "也不能写代码、改代码或运行命令",
+    ]
+    for snippet in required_snippets:
+        assert snippet in text
+
+
+def test_default_prompt_does_not_force_naga_agent_route() -> None:
+    text = Path("res/prompts/undefined.xml").read_text(encoding="utf-8")
+
+    assert "必须先调用 naga_code_analysis_agent" not in text
+    assert (
+        "查 NagaAgent 项目或 `code/NagaAgent/` → naga_code_analysis_agent" not in text
+    )
+
+
+def test_naga_prompt_routes_naga_code_separately_from_undefined_self_code() -> None:
+    text = Path("res/prompts/undefined_nagaagent.xml").read_text(encoding="utf-8")
+
+    assert "查 NagaAgent 项目或 `code/NagaAgent/` → naga_code_analysis_agent" in text
+    assert "naga_code_analysis_agent 只负责 NagaAgent 项目" in text
+    assert "undefined_self_code_agent 仅可只读查阅 Undefined 自身代码" in text
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)

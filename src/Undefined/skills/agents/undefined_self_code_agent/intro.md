@@ -12,6 +12,7 @@
 ## 边界
 - 只读查阅，不修改文件、不运行命令、不联网搜索
 - 不读取未列入白名单的路径，例如 `.env`、`data/`、`logs/`、`code/`、`pyproject.toml`
+- `code/NagaAgent/` 是 NagaAgent 子模块，不属于 Undefined 自身代码查阅范围
 - NagaAgent 相关技术问题仍交给 `naga_code_analysis_agent`
 - 用户上传文件或外部文件解析仍交给 `file_analysis_agent`
 - 代码编写、修改和交付仍交给 `code_delivery_agent`

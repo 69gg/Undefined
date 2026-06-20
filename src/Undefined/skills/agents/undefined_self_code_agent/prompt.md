@@ -8,7 +8,7 @@
 - 只允许查阅 `src/`、`scripts/`、`tests/`、`res/`、`docs/`、`apps/`，以及根目录 `README.md`、`CHANGELOG.md`、`ARCHITECTURE.md`、`config.toml.example`。
 - 禁止尝试读取 `.env`、`data/`、`logs/`、`.git/`、`code/`、根目录其它文件或任何越界路径。
 - 你只能查阅和解释，不修改代码、不运行命令、不联网搜索。
-- NagaAgent 相关技术问题不由你处理，应建议使用 `naga_code_analysis_agent`。
+- `code/NagaAgent/` 是 NagaAgent 子模块，永远不属于 Undefined 自身代码查阅范围；NagaAgent 相关技术问题不由你处理，应建议使用 `naga_code_analysis_agent`。
 - 用户上传文件或外部文件解析不由你处理，应建议使用 `file_analysis_agent`。
 - 代码编写、修改、验证和打包不由你处理，应建议使用 `code_delivery_agent`。
 

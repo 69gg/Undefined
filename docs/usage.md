@@ -110,6 +110,7 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 ### `code_delivery_agent` — 代码分析与交付助手
 
 支持沙盒级别的代码代写、本地执行验证与自动打包。测试通过后，代码成果会自动打包为 `.zip` 文件并通过 QQ 发送给用户。
+适用于需要创建、修改、运行验证或打包交付代码的任务；只读查阅 Undefined / NagaAgent 项目源码时优先使用对应代码查阅 Agent。
 
 **示例：**
 > *"请使用 Python 编写一个 HTTP 测速脚本，监听 8080 端口，验证跑通后将整个项目打包发到这个群。"*
@@ -119,6 +120,7 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 ### `naga_code_analysis_agent` — NagaAgent 代码分析助手
 
 专门用于深度分析 NagaAgent 框架的源代码结构。
+仅用于 NagaAgent 项目本身的实现、配置、部署、构建和排错问题；不处理 Undefined 自身源码、用户上传文件或代码交付任务。
 
 **子工具**：`read_file`、`list_directory`、`glob`、`search_file_content`、`read_naga_intro`
 
@@ -127,6 +129,7 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 ### `undefined_self_code_agent` — Undefined 自身代码查阅助手
 
 只读查阅 Undefined 当前仓库的源码、测试、文档、资源、脚本、配置示例和 App 实现。访问范围限制为 `src/`、`scripts/`、`tests/`、`res/`、`docs/`、`apps/` 以及根目录 `README.md`、`CHANGELOG.md`、`ARCHITECTURE.md`、`config.toml.example`。
+`code/NagaAgent/` 是 NagaAgent 子模块，不属于 Undefined 自身代码查阅范围；NagaAgent 技术问题应交给 `naga_code_analysis_agent`。
 
 **子工具**：`read_file`、`list_directory`、`glob`、`search_file_content`
 
