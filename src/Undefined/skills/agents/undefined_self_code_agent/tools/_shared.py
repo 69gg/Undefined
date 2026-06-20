@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import fnmatch
 import re
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
+
+from Undefined.utils import io as async_io
 
 
 ALLOWED_DIRECTORIES: tuple[str, ...] = (
@@ -162,32 +165,85 @@ def resolve_search_root(
     return resolve_allowed_path(path_value, context, allow_root=True)
 
 
-def iter_allowed_files(repo_root: Path, root: Path | None = None) -> Iterable[Path]:
-    """遍历允许范围内的文件。"""
+def _iter_allowed_roots(repo_root: Path, root: Path | None = None) -> list[Path]:
+    """返回允许范围内的扫描根。"""
 
     base = (root or repo_root).resolve()
-    roots: list[Path]
     if base == repo_root.resolve():
         roots = [repo_root / name for name in ALLOWED_DIRECTORIES]
         roots.extend(repo_root / name for name in ALLOWED_ROOT_FILES)
-    else:
-        roots = [base]
+        return roots
+    return [base]
 
-    for item in roots:
-        if not item.exists():
+
+async def iter_allowed_files(
+    repo_root: Path,
+    root: Path | None = None,
+) -> AsyncIterator[Path]:
+    """异步遍历允许范围内的文件。"""
+
+    for item in _iter_allowed_roots(repo_root, root):
+        if not await async_io.exists(item):
             continue
-        if item.is_file():
+        if await async_io.is_file(item):
             if is_allowed_path(item, repo_root):
                 yield item
             continue
-        if not item.is_dir() or not is_allowed_path(item, repo_root):
+        if not await async_io.is_dir(item) or not is_allowed_path(item, repo_root):
             continue
-        for path in item.rglob("*"):
-            if not path.is_file():
+        async for path in async_io.iter_rglob_files(item):
+            if is_allowed_path(path, repo_root):
+                yield path
+
+
+def collect_allowed_glob_matches(
+    repo_root: Path,
+    search_root: Path,
+    pattern: str,
+    max_results: int,
+) -> list[str]:
+    """按 glob 收集允许范围内的文件路径。调用方需用 asyncio.to_thread 包装。"""
+
+    roots: list[Path]
+    if search_root.resolve() == repo_root.resolve():
+        roots = [repo_root.resolve()]
+    else:
+        roots = [search_root.resolve()]
+
+    matches: list[str] = []
+    seen: set[str] = set()
+    for root in roots:
+        for candidate in root.glob(pattern):
+            if not candidate.is_file():
                 continue
-            if not is_allowed_path(path, repo_root):
+            if not is_allowed_path(candidate, repo_root):
                 continue
-            yield path
+            rel = format_relative(candidate, repo_root)
+            if rel in seen:
+                continue
+            seen.add(rel)
+            matches.append(rel)
+            if len(matches) >= max_results:
+                return sorted(matches)
+    return sorted(matches)
+
+
+async def list_allowed_directory_entries(
+    repo_root: Path,
+    directory: Path,
+) -> list[tuple[str, bool]]:
+    """异步列出允许目录项，返回 (relative_path, is_dir)。"""
+
+    entries = sorted(
+        await async_io.list_directory_entries(directory),
+        key=lambda item: (not item[1], item[0].name.lower()),
+    )
+    result: list[tuple[str, bool]] = []
+    for entry, is_dir in entries:
+        if not is_allowed_path(entry, repo_root):
+            continue
+        result.append((format_relative(entry, repo_root), is_dir))
+    return result
 
 
 def is_probably_text(raw: bytes) -> bool:

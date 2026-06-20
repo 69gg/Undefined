@@ -7,10 +7,10 @@ from Undefined.skills.agents.undefined_self_code_agent.tools._shared import (
     ALLOWED_ROOT_FILES,
     allowed_roots_text,
     clamp_int,
-    format_relative,
-    is_allowed_path,
+    list_allowed_directory_entries,
     resolve_allowed_path,
 )
+from Undefined.utils import io as async_io
 
 
 async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
@@ -32,21 +32,19 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         lines.extend(f"📄 {name}" for name in ALLOWED_ROOT_FILES)
         return "\n".join(lines)
 
-    if not resolved.path.exists():
+    if not await async_io.exists(resolved.path):
         return f"目录不存在: {path_arg}"
-    if not resolved.path.is_dir():
+    if not await async_io.is_dir(resolved.path):
         return f"错误：{path_arg} 不是目录"
 
-    entries = sorted(
-        resolved.path.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower())
+    entries = await list_allowed_directory_entries(
+        resolved.repo_root,
+        resolved.path,
     )
     visible: list[str] = []
-    for entry in entries:
-        if not is_allowed_path(entry, resolved.repo_root):
-            continue
-        rel = format_relative(entry, resolved.repo_root)
-        icon = "📁" if entry.is_dir() else "📄"
-        suffix = "/" if entry.is_dir() else ""
+    for rel, is_dir in entries:
+        icon = "📁" if is_dir else "📄"
+        suffix = "/" if is_dir else ""
         visible.append(f"{icon} {rel}{suffix}")
         if len(visible) >= max_entries:
             break
@@ -54,9 +52,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     if not visible:
         return f"{resolved.rel_path or '.'}: 无可列出的允许内容"
 
-    total_visible = len(
-        [entry for entry in entries if is_allowed_path(entry, resolved.repo_root)]
-    )
+    total_visible = len(entries)
     if total_visible > len(visible):
         visible.append(f"... 还有 {total_visible - len(visible)} 项")
     return "\n".join(visible)

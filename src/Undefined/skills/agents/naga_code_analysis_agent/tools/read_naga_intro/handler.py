@@ -3,7 +3,7 @@ from typing import Any, Dict
 # NagaAgent 项目介绍内容（直接嵌入以保证稳定性）
 NAGA_INTRO_CONTENT = """
 ## 项目概览
-- 当前子模块指针：`eb71318`（`v4.0.0-beta-779-geb71318`，README 标识版本 5.1.0）。
+- README 标识版本 5.1.0。
 - 后端：Python 3.11 + FastAPI + OpenAI/Anthropic/LiteLLM 兼容调用 + Pydantic。
 - 前端：Vue 3 + TypeScript + Vite + Electron，入口在 `frontend/`。
 - 统一入口：`main.py`，负责启动后台任务、API Server、MCP Server、Agent Server、TTS 等服务。
@@ -84,17 +84,14 @@ pip install -r requirements.txt
 - `api.api_format` 支持 `openai` 与 `anthropic`，默认示例为 DeepSeek OpenAI-compatible API。
 - 默认优先使用 `uv run ...` 运行命令。
 
-## 启动命令
-```bash
-cd frontend/
-npm run dev
-# 前端 Electron 主进程会调用 backend 模块拉起根目录 main.py
-```
-- 也可开发调试时直接运行 `python main.py`，或分别运行 `python apiserver/start_server.py api` / `uvicorn agentserver.agent_server:app --host 0.0.0.0 --port 8001`。
+## 启动相关
+- 服务统一入口在 `main.py`。
+- 前端 Electron 主进程会通过 `frontend/electron/modules/backend.ts` 拉起后端。
+- API 与 Agent Server 可从 `apiserver/`、`agentserver/` 下的入口文件继续追踪。
 
 ## 打包相关
-- 跨平台构建入口：`python build.py`。
-- Windows 构建脚本：`python scripts/build-win.py`。
+- 跨平台构建入口文件：`build.py`。
+- Windows 构建脚本位于 `scripts/`。
 - 详细流程见：`build.md`、`docs/build-windows.md`。
 """
 

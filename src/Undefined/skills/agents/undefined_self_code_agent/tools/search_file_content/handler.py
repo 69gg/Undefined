@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any
@@ -16,6 +17,7 @@ from Undefined.skills.agents.undefined_self_code_agent.tools._shared import (
     resolve_search_root,
     trim_line,
 )
+from Undefined.utils import io as async_io
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     except ValueError as exc:
         return f"错误：{exc}"
 
-    if not resolved.path.exists():
+    if not await async_io.exists(resolved.path):
         return f"路径不存在: {path_arg or '.'}"
 
     try:
@@ -54,16 +56,14 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
     matches: list[str] = []
     try:
-        files = (
-            [resolved.path]
-            if resolved.path.is_file()
-            else list(iter_allowed_files(resolved.repo_root, resolved.path))
-        )
-        for file_path in files:
+        async for file_path in iter_allowed_files(resolved.repo_root, resolved.path):
             if not path_matches_include(file_path, resolved.repo_root, include):
                 continue
             try:
-                text, _truncated, _size = read_text_file(file_path)
+                text, _truncated, _size = await asyncio.to_thread(
+                    read_text_file,
+                    file_path,
+                )
             except (OSError, UnicodeError):
                 continue
             rel = format_relative(file_path, resolved.repo_root)

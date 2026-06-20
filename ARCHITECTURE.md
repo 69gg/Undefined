@@ -117,7 +117,7 @@ graph TB
             A_Web["web_agent<br/>网络搜索助手<br/>(3个工具 + MCP)<br/>• web_search<br/>• crawl_webpage<br/>• Playwright MCP"]
             A_File["file_analysis_agent<br/>文件分析助手<br/>(14个工具)<br/>• extract_* (PDF/Word/Excel/PPT)<br/>• analyze_code<br/>• analyze_multimodal"]
             A_Naga["naga_code_analysis_agent<br/>NagaAgent 代码分析<br/>(7个工具)<br/>• read_file / glob<br/>• search_file_content"]
-            A_Self["undefined_self_code_agent<br/>Undefined 自身代码查阅<br/>(4个工具)<br/>• read_file / glob<br/>• search_file_content"]
+            A_Self["undefined_self_code_agent<br/>Undefined 自身代码查阅<br/>(4个工具)<br/>• read_file / list_directory<br/>• glob / search_file_content"]
             A_Entertainment["entertainment_agent<br/>娱乐助手<br/>(9个工具)<br/>• ai_draw_one<br/>• horoscope<br/>• video_random_recommend"]
             A_Code["code_delivery_agent<br/>代码交付助手<br/>(13个工具)<br/>• Docker 容器隔离<br/>• Git 仓库克隆<br/>• 代码编写验证<br/>• 打包上传"]
         end

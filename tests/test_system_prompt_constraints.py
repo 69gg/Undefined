@@ -60,7 +60,7 @@ def test_system_prompts_route_undefined_self_code_questions(path: Path) -> None:
         "需要查阅 Undefined 自身源码、测试、文档、资源、脚本、配置示例或 App 实现"
         in text
     )
-    assert "只能只读查阅 Undefined 自身代码，不能写代码或执行命令" in text
+    assert "仅可只读查阅 Undefined 自身代码，不能写代码或执行命令" in text
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)

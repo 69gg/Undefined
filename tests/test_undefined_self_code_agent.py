@@ -19,6 +19,7 @@ from Undefined.skills.agents.undefined_self_code_agent.tools.read_file import (
 from Undefined.skills.agents.undefined_self_code_agent.tools.search_file_content import (
     handler as search_handler,
 )
+from Undefined.utils import io as async_io
 
 
 AGENT_DIR = (
@@ -31,7 +32,7 @@ AGENT_DIR = (
 )
 
 
-def _make_repo(tmp_path: Path) -> Path:
+async def _make_repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     (root / "src" / "Undefined").mkdir(parents=True)
     (root / "scripts").mkdir()
@@ -43,32 +44,37 @@ def _make_repo(tmp_path: Path) -> Path:
     (root / "logs").mkdir()
     (root / "code" / "NagaAgent").mkdir(parents=True)
 
-    (root / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
-    (root / "README.md").write_text("# Undefined\n", encoding="utf-8")
-    (root / "CHANGELOG.md").write_text("## Unreleased\n", encoding="utf-8")
-    (root / "ARCHITECTURE.md").write_text("AgentRegistry\n", encoding="utf-8")
-    (root / "config.toml.example").write_text(
-        "[models.agent]\nmodel_name = 'x'\n", encoding="utf-8"
+    await async_io.write_text(root / "pyproject.toml", "[project]\nname='x'\n")
+    await async_io.write_text(root / "README.md", "# Undefined\n")
+    await async_io.write_text(root / "CHANGELOG.md", "## Unreleased\n")
+    await async_io.write_text(root / "ARCHITECTURE.md", "AgentRegistry\n")
+    await async_io.write_text(
+        root / "config.toml.example",
+        "[models.agent]\nmodel_name = 'x'\n",
     )
-    (root / "src" / "Undefined" / "main.py").write_text(
-        "def run() -> None:\n    print('Undefined')\n", encoding="utf-8"
+    await async_io.write_text(
+        root / "src" / "Undefined" / "main.py",
+        "def run() -> None:\n    print('Undefined')\n",
     )
-    (root / "src" / "Undefined" / ".hidden.py").write_text(
-        "hidden = True\n", encoding="utf-8"
+    await async_io.write_text(
+        root / "src" / "Undefined" / ".hidden.py",
+        "hidden = True\n",
     )
-    (root / "scripts" / "tool.py").write_text("print('tool')\n", encoding="utf-8")
-    (root / "tests" / "test_main.py").write_text(
-        "def test_main() -> None:\n    assert True\n", encoding="utf-8"
+    await async_io.write_text(root / "scripts" / "tool.py", "print('tool')\n")
+    await async_io.write_text(
+        root / "tests" / "test_main.py",
+        "def test_main() -> None:\n    assert True\n",
     )
-    (root / "res" / "prompt.txt").write_text("prompt\n", encoding="utf-8")
-    (root / "docs" / "usage.md").write_text("usage docs\n", encoding="utf-8")
-    (root / "apps" / "undefined-chat" / "src" / "App.tsx").write_text(
-        "export const App = () => 'chat';\n", encoding="utf-8"
+    await async_io.write_text(root / "res" / "prompt.txt", "prompt\n")
+    await async_io.write_text(root / "docs" / "usage.md", "usage docs\n")
+    await async_io.write_text(
+        root / "apps" / "undefined-chat" / "src" / "App.tsx",
+        "export const App = () => 'chat';\n",
     )
-    (root / "data" / "secret.txt").write_text("secret\n", encoding="utf-8")
-    (root / "logs" / "run.log").write_text("log\n", encoding="utf-8")
-    (root / "code" / "NagaAgent" / "main.py").write_text("naga\n", encoding="utf-8")
-    (root / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
+    await async_io.write_text(root / "data" / "secret.txt", "secret\n")
+    await async_io.write_text(root / "logs" / "run.log", "log\n")
+    await async_io.write_text(root / "code" / "NagaAgent" / "main.py", "naga\n")
+    await async_io.write_text(root / ".env", "TOKEN=secret\n")
     return root
 
 
@@ -100,7 +106,7 @@ def test_agent_registry_loads_description_from_intro() -> None:
 
 @pytest.mark.asyncio
 async def test_read_file_allows_allowed_paths(tmp_path: Path) -> None:
-    root = _make_repo(tmp_path)
+    root = await _make_repo(tmp_path)
 
     result = await read_handler.execute(
         {"file_path": "src/Undefined/main.py"},
@@ -113,7 +119,7 @@ async def test_read_file_allows_allowed_paths(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_read_file_allows_config_example_root_file(tmp_path: Path) -> None:
-    root = _make_repo(tmp_path)
+    root = await _make_repo(tmp_path)
 
     result = await read_handler.execute(
         {"file_path": "config.toml.example"},
@@ -137,7 +143,7 @@ async def test_read_file_allows_config_example_root_file(tmp_path: Path) -> None
     ],
 )
 async def test_read_file_rejects_disallowed_paths(tmp_path: Path, path: str) -> None:
-    root = _make_repo(tmp_path)
+    root = await _make_repo(tmp_path)
 
     result = await read_handler.execute({"file_path": path}, _context(root))
 
@@ -147,7 +153,7 @@ async def test_read_file_rejects_disallowed_paths(tmp_path: Path, path: str) -> 
 
 @pytest.mark.asyncio
 async def test_list_directory_root_only_lists_allowed_scope(tmp_path: Path) -> None:
-    root = _make_repo(tmp_path)
+    root = await _make_repo(tmp_path)
 
     result = await list_handler.execute({}, _context(root))
 
@@ -159,7 +165,7 @@ async def test_list_directory_root_only_lists_allowed_scope(tmp_path: Path) -> N
 
 @pytest.mark.asyncio
 async def test_glob_only_returns_allowed_files(tmp_path: Path) -> None:
-    root = _make_repo(tmp_path)
+    root = await _make_repo(tmp_path)
 
     result = await glob_handler.execute({"pattern": "**/*.py"}, _context(root))
 
@@ -171,7 +177,7 @@ async def test_glob_only_returns_allowed_files(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_search_only_returns_allowed_files(tmp_path: Path) -> None:
-    root = _make_repo(tmp_path)
+    root = await _make_repo(tmp_path)
 
     result = await search_handler.execute(
         {"pattern": "secret", "case_sensitive": False},
@@ -185,7 +191,7 @@ async def test_search_only_returns_allowed_files(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_search_can_find_allowed_content(tmp_path: Path) -> None:
-    root = _make_repo(tmp_path)
+    root = await _make_repo(tmp_path)
 
     result = await search_handler.execute(
         {"pattern": "Undefined", "path": "src", "include": "*.py"},
@@ -197,9 +203,9 @@ async def test_search_can_find_allowed_content(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_binary_file_is_rejected(tmp_path: Path) -> None:
-    root = _make_repo(tmp_path)
+    root = await _make_repo(tmp_path)
     binary = root / "src" / "Undefined" / "asset.bin"
-    binary.write_bytes(b"\x00\x01\x02")
+    await async_io.write_bytes(binary, b"\x00\x01\x02")
 
     result = await read_handler.execute(
         {"file_path": "src/Undefined/asset.bin"},
@@ -207,3 +213,18 @@ async def test_binary_file_is_rejected(tmp_path: Path) -> None:
     )
 
     assert "不是可读取的文本文件" in result
+
+
+@pytest.mark.asyncio
+async def test_read_file_empty_line_window_has_valid_header(tmp_path: Path) -> None:
+    root = await _make_repo(tmp_path)
+    empty_path = root / "src" / "Undefined" / "empty.py"
+    await async_io.write_text(empty_path, "")
+
+    result = await read_handler.execute(
+        {"file_path": "src/Undefined/empty.py", "offset": 1, "limit": 10},
+        _context(root),
+    )
+
+    assert "行 0-0/0（空文件）" in result
+    assert "行 1-0/0" not in result

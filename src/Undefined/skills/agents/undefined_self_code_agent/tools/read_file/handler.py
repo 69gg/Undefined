@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -11,6 +12,7 @@ from Undefined.skills.agents.undefined_self_code_agent.tools._shared import (
     read_text_file,
     resolve_allowed_path,
 )
+from Undefined.utils import io as async_io
 
 logger = logging.getLogger(__name__)
 
@@ -29,13 +31,15 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     except ValueError as exc:
         return f"错误：{exc}"
 
-    if not resolved.path.exists():
+    if not await async_io.exists(resolved.path):
         return f"文件不存在: {file_path}"
-    if not resolved.path.is_file():
+    if not await async_io.is_file(resolved.path):
         return f"错误：{file_path} 不是文件"
 
     try:
-        content, truncated_bytes, size = read_text_file(resolved.path)
+        content, truncated_bytes, size = await asyncio.to_thread(
+            read_text_file, resolved.path
+        )
     except UnicodeError:
         return f"错误：{resolved.rel_path} 不是可读取的文本文件"
     except OSError as exc:
@@ -56,7 +60,10 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         selected = lines[start_idx : start_idx + limit]
         end_line = start_idx + len(selected)
         body = "\n".join(selected)
-        range_header = f"{header}\n行 {offset}-{end_line}/{total_lines}"
+        if total_lines == 0 or not selected:
+            range_header = f"{header}\n行 0-0/0（空文件）"
+        else:
+            range_header = f"{header}\n行 {offset}-{end_line}/{total_lines}"
         if truncated_bytes:
             range_header += "\n提示：文件因大小限制只读取了前一部分字节"
         return f"{range_header}\n{body}"
