@@ -897,7 +897,7 @@ Prompt caching 补充：
 | `auto_scope_candidate_multiplier` | `2` | 自动注入时每个作用域候选扩展倍数（候选数≈`auto_top_k * multiplier`） |
 | `auto_current_group_boost` | `1.15` | 群聊自动检索时，当前群命中额外加权系数 |
 | `auto_current_private_boost` | `1.25` | 私聊自动检索时，当前私聊命中额外加权系数 |
-| `enable_rerank` | `true` | 认知检索是否启用 rerank |
+| `enable_rerank` | `true` | 认知检索是否启用 rerank；自动注入的多消息批次会先逐条召回，再用整批 query 做最终重排 |
 | `recent_end_summaries_inject_k` | `30` | 最近 end 摘要注入条数，`0` 禁用 |
 | `time_decay_enabled` | `true` | 是否启用时间衰减加权 |
 | `time_decay_half_life_days_auto` | `14.0` | 自动注入场景半衰期 |

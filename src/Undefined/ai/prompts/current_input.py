@@ -75,6 +75,18 @@ def build_current_input_query_text(question: str) -> tuple[str, bool]:
     return str(question or "").strip(), False
 
 
+def build_current_input_per_message_query_texts(
+    question: str,
+) -> tuple[list[str], bool]:
+    """Return one query text per current ``<message>`` block."""
+    signatures = extract_current_message_signatures(question)
+    contents = [sig.content for sig in signatures if sig.content]
+    if contents:
+        return contents, True
+    fallback = str(question or "").strip()
+    return ([fallback] if fallback else []), False
+
+
 def _history_msg_matches_signature(
     msg: dict[str, Any], signature: CurrentMessageSignature
 ) -> bool:
@@ -122,6 +134,7 @@ def drop_current_input_batch_if_duplicated(
 
 __all__ = [
     "CurrentMessageSignature",
+    "build_current_input_per_message_query_texts",
     "build_current_input_query_text",
     "drop_current_input_batch_if_duplicated",
     "extract_current_message_signature",

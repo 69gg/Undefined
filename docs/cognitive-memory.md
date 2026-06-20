@@ -198,8 +198,8 @@ MMR_score = λ × relevance(doc, query) − (1 − λ) × max_similarity(doc, se
 
 说明：
 
-- 该规则影响自动注入路径下的语义召回与 rerank（两者使用同一 query）。
-- 同一轮自动检索会复用同一个 query embedding；短时间内的相同 query 还会命中本地短 TTL 缓存，避免 group/private 多作用域场景重复向量化。
+- 单条消息/纯文本仍按一个 query 检索；同 sender 短窗口批次包含多条消息时，会对每条消息分别召回候选，合并去重后再用整批消息合并文本做最终 rerank。
+- 多消息批次中，每条消息 query 会各自生成 query embedding；同一条消息 query 在 group/private 多作用域查询间复用该 embedding。短时间内的相同 query 仍会命中本地短 TTL 缓存。
 - 手动工具 `cognitive.search_events` / `cognitive.search_profiles` 仍使用调用方显式传入的 `query`。
 
 ### 自动注入场景的跨会话检索与加权
@@ -208,7 +208,7 @@ MMR_score = λ × relevance(doc, query) − (1 − λ) × max_similarity(doc, se
 
 - 群聊：检索所有群聊事件（`request_type=group`），并对当前群命中做额外加权。
 - 私聊：检索所有群聊事件 + 当前私聊事件（`request_type=private` 且 `user_id/sender_id` 命中），并对当前私聊命中做额外加权。
-- 最终结果会做去重并按融合分数排序后截断到 `auto_top_k`。
+- 最终结果会做去重；多消息批次启用认知 rerank 且模型可用时，用整批 query 对合并候选重排后截断到 `auto_top_k`，否则按融合分数排序截断。
 
 可调参数（`[cognitive.query]`）：
 
