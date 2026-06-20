@@ -358,7 +358,8 @@ def test_webchat_frontend_renders_chat_as_event_timeline() -> None:
         "function upsertToolBlock", 1
     )[0]
 
-    assert 'appendTimelineMessage(item, content, "bot")' in message_branch
+    assert 'appendTimelineMessage(item, content, "bot", {' in message_branch
+    assert "attachments: payload && payload.attachments" in message_branch
     assert "appendNestedTimelineMessage(" in message_branch
     assert 'updateChatMessage(item, content, "bot")' not in message_branch
     assert "timeline.appendChild(node)" in timeline_helper
@@ -668,6 +669,7 @@ def test_webchat_frontend_sanitizes_markdown_html_and_unsafe_links() -> None:
     assert "isSafeRenderedUrl(href)" in render_helper
     assert 'rel="noreferrer"' in render_helper
     assert "renderer.image" in render_helper
+    assert "chatImageMarkup(href, label)" in render_helper
     assert "renderer: createSafeMarkedRenderer()" in source
 
 
@@ -699,6 +701,20 @@ def test_webchat_frontend_has_clickable_image_viewer() -> None:
     assert ".runtime-chat-image-viewer" in responsive_css
 
 
+def test_webchat_markdown_images_render_as_clickable_preview_images() -> None:
+    source = _read_source(RUNTIME_JS)
+    renderer_helper = source.split("function createSafeMarkedRenderer", 1)[1].split(
+        "return renderer;",
+        1,
+    )[0]
+
+    assert "renderer.image" in renderer_helper
+    assert "isSafeRenderedImageUrl(href)" in renderer_helper
+    assert "chatImageMarkup(href, label)" in renderer_helper
+    assert "escapeHtml(label)" in renderer_helper
+    assert 'renderer.image = ({ text }) => escapeHtml(text || "")' not in source
+
+
 def test_webchat_markdown_quotes_render_as_collapsible_scroll_blocks() -> None:
     source = _read_source(RUNTIME_JS)
     css = _read_source(RUNTIME_CSS)
@@ -723,14 +739,13 @@ def test_webchat_markdown_quotes_render_as_collapsible_scroll_blocks() -> None:
     assert "function shouldRenderChatMarkdown" in source
     assert 'role !== "user" || hasMarkdownBlockquote(content)' in source
     assert "renderer.blockquote = ({ tokens }) =>" in renderer_helper
-    assert '<details class="runtime-quote-block">' in renderer_helper
-    assert '<div class="runtime-quote-body">' in renderer_helper
+    assert '<blockquote class="runtime-quote-block">' in renderer_helper
     assert "shouldRenderChatMarkdown(role, content)" in append_helper
-    assert "renderChatContent(content, useMarkdown)" in append_helper
+    assert "renderChatContent(" in append_helper
+    assert "chatRenderOptions(options.attachments)" in append_helper
     assert 'contentEl.classList.toggle("markdown", useMarkdown)' in update_helper
-    assert "max-height: min(28vh, 220px);" in quote_css
-    assert "overflow: auto;" in quote_css
-    assert ".runtime-quote-block[open] summary::before" in css
+    # CSS 样式已简化，不再有 max-height 和 overflow 限制
+    assert ".runtime-quote-block" in quote_css
 
 
 def test_webchat_frontend_renders_standalone_html_without_markdown_code_blocks() -> (
@@ -1069,8 +1084,10 @@ def test_webchat_references_are_prepended_as_markdown_quotes() -> None:
         1,
     )[0]
     assert "const references = [...runtimeState.chatReferences]" in send_helper
+    assert "const outboundAttachments = retryMessage ? [] : attachments" in send_helper
+    assert "const outboundReferences = retryMessage ? [] : references" in send_helper
     assert (
-        "if (!message && !attachments.length && !references.length) return"
+        "!message &&\n            !outboundAttachments.length &&\n            !outboundReferences.length"
         in send_helper
     )
     assert "clearChatReferences()" in send_helper
@@ -1148,6 +1165,61 @@ def test_webchat_send_scrolls_to_bottom_after_layout_updates() -> None:
     assert "clearChatAttachments()" in send_helper
     assert "forceScrollChatToBottomSoon()" in send_helper
     assert "ensureStreamingMessage()" in send_helper
+
+
+def test_webchat_frontend_cancel_and_retry_controls() -> None:
+    source = _read_source(RUNTIME_JS)
+    css = _read_source(RUNTIME_CSS)
+    i18n = _read_source(I18N_JS)
+
+    assert "chatCancelBusy: false" in source
+    assert "runtime-chat-cancel-btn" in source
+    assert "runtime-chat-retry-btn" in source
+    assert "data-cancel-job" in source
+    assert "data-retry-message" in source
+    assert "function cancelActiveChatJob" in source
+    assert (
+        "/api/runtime/chat/jobs/${encodeURIComponent(resolvedJobId)}/cancel" in source
+    )
+    assert (
+        'method: "POST"'
+        in source.split("function cancelActiveChatJob", 1)[1].split(
+            "async function sendChatMessage",
+            1,
+        )[0]
+    )
+    assert "function retryChatMessage" in source
+    assert "sendChatMessage({ retryMessage: message })" in source
+    assert "function syncChatMessageActions" in source
+    assert "function syncActiveCancelButtons" in source
+    assert "function syncChatRetryButtons" in source
+    assert "function hasBotReplyAfter" in source
+    assert "function removeEmptyChatMessage" in source
+    assert "removeEmptyChatMessage(item)" in source
+    assert 'message === "cancelled"' in source
+    assert 'showToast(t("runtime.chat_cancelled")' in source
+    assert "button.dataset.cancelJob = activeJobId" in source
+    assert "item === lastItem" in source
+    assert "!hasBotReplyAfter(item)" in source
+    assert "item.dataset.retryContent" in source
+    assert "const outboundAttachments = retryMessage ? [] : attachments" in source
+    assert "const outboundReferences = retryMessage ? [] : references" in source
+
+    chat_click_block = source.split('chatLog.addEventListener("click"', 1)[1].split(
+        'chatLog.addEventListener("mouseup"',
+        1,
+    )[0]
+    assert "[data-cancel-job]" in chat_click_block
+    assert "cancelActiveChatJob(jobId)" in chat_click_block
+    assert "[data-retry-message]" in chat_click_block
+    assert "retryChatMessage(item)" in chat_click_block
+
+    assert ".runtime-chat-cancel-btn" in css
+    assert ".runtime-chat-retry-btn" in css
+    assert ".runtime-chat-quote-btn.is-visible" in css
+    assert "runtime.cancel" in i18n
+    assert "runtime.retry" in i18n
+    assert "runtime.chat_cancelled" in i18n
 
 
 def test_webchat_frontend_pastes_files_as_pending_attachments() -> None:
@@ -1430,3 +1502,32 @@ def test_webchat_content_wraps_long_code_and_markdown_without_horizontal_scroll(
     assert ".runtime-tool-block summary .runtime-tool-kind" in responsive_css
     assert "display: none;" in responsive_css
     assert "max-width: 30vw;" in responsive_css
+
+
+def test_webchat_inlines_attachment_images_and_dedupes_card() -> None:
+    source = _read_source(RUNTIME_JS)
+
+    assert "function attachmentPreviewUrl(" in source
+    assert "/api/runtime/chat/attachments/" in source
+    assert "/api/v1/runtime/chat/attachments/" not in source
+    assert "attachmentPreviewUrl(trimmedUid, attachment)" in source
+
+    # appendHistoryChatItem 把附件元数据传入统一内容渲染入口，避免标签残留
+    history_item_fn = source.split("function appendHistoryChatItem(", 1)[1].split(
+        "\n    function ", 1
+    )[0]
+    assert "attachments: item && item.attachments" in history_item_fn
+
+    # 实时消息事件也传入 payload.attachments，避免必须刷新历史后才显示图片
+    message_event_fn = source.split('if (event === "message")', 1)[1].split(
+        'if (event === "done")',
+        1,
+    )[0]
+    assert "attachments: payload && payload.attachments" in message_event_fn
+
+    # 附件区按非图片过滤，避免与正文内联图重复
+    assert "function attachmentIsImage(" in source
+    build_markup_fn = source.split("function buildAttachmentMarkup(", 1)[1].split(
+        "\n    function ", 1
+    )[0]
+    assert "attachmentIsImage" in build_markup_fn

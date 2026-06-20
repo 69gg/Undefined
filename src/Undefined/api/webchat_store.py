@@ -252,6 +252,7 @@ class WebChatConversationStore:
         display_name: str,
         user_name: str,
         attachments: list[dict[str, str]] | None = None,
+        references: list[dict[str, Any]] | None = None,
         webchat: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         conv_id = _normalize_conversation_id(conversation_id)
@@ -260,6 +261,7 @@ class WebChatConversationStore:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             normalized_role = "bot" if role == "bot" else "user"
             record: dict[str, Any] = {
+                "message_id": f"msg_{uuid4().hex}",
                 "type": "private",
                 "chat_id": str(WEBCHAT_VIRTUAL_USER_ID),
                 "chat_name": WEBCHAT_VIRTUAL_USER_NAME,
@@ -273,6 +275,8 @@ class WebChatConversationStore:
                 record["chat_name"] = "Bot"
             if attachments:
                 record["attachments"] = attachments
+            if references:
+                record["references"] = references
             if isinstance(webchat, dict):
                 record["webchat"] = webchat
             _messages(conv).append(record)
@@ -498,8 +502,12 @@ class WebChatConversationStore:
                 async with self._get_lock(conv_id):
                     cached = self._require_conversation_locked(conv_id)
                     cached["messages"] = [
-                        _normalize_history_record(item)
-                        for item in legacy_records
+                        _normalize_history_record(
+                            item,
+                            conversation_id=conv_id,
+                            index=index,
+                        )
+                        for index, item in enumerate(legacy_records)
                         if isinstance(item, dict)
                     ]
                     migrated_count = len(cached["messages"])
@@ -619,16 +627,28 @@ def _normalize_conversation(raw: dict[str, Any], fallback_id: str) -> dict[str, 
     conv["updated_at"] = str(conv.get("updated_at") or conv["created_at"])
     conv["virtual_user_id"] = WEBCHAT_VIRTUAL_USER_ID
     conv["virtual_user_name"] = WEBCHAT_VIRTUAL_USER_NAME
+    conversation_id = str(conv["id"])
     conv["messages"] = [
-        _normalize_history_record(item)
-        for item in conv.get("messages", [])
+        _normalize_history_record(item, conversation_id=conversation_id, index=index)
+        for index, item in enumerate(conv.get("messages", []))
         if isinstance(item, dict)
     ]
     return conv
 
 
-def _normalize_history_record(record: dict[str, Any]) -> dict[str, Any]:
+def _normalize_history_record(
+    record: dict[str, Any],
+    *,
+    conversation_id: str,
+    index: int,
+) -> dict[str, Any]:
     item = dict(record)
+    item["message_id"] = _normalize_message_id(
+        item.get("message_id"),
+        conversation_id=conversation_id,
+        index=index,
+        record=item,
+    )
     item["type"] = "private"
     item["chat_id"] = str(WEBCHAT_VIRTUAL_USER_ID)
     item["user_id"] = str(WEBCHAT_VIRTUAL_USER_ID)
@@ -638,7 +658,38 @@ def _normalize_history_record(record: dict[str, Any]) -> dict[str, Any]:
     item["message"] = str(item.get("message", item.get("content", "")) or "")
     attachments = item.get("attachments")
     item["attachments"] = attachments if isinstance(attachments, list) else []
+    references = item.get("references")
+    if isinstance(references, list):
+        item["references"] = [ref for ref in references if isinstance(ref, dict)]
+    else:
+        item.pop("references", None)
     return item
+
+
+def _normalize_message_id(
+    raw: Any,
+    *,
+    conversation_id: str,
+    index: int,
+    record: dict[str, Any],
+) -> str:
+    text = str(raw or "").strip()
+    if text:
+        allowed = "".join(ch for ch in text if ch.isalnum() or ch in {"-", "_"})
+        if allowed:
+            return allowed[:96]
+    role = _record_role(record)
+    basis = "\n".join(
+        [
+            conversation_id,
+            str(index),
+            role,
+            str(record.get("timestamp") or ""),
+            str(record.get("message", record.get("content", "")) or ""),
+        ]
+    )
+    digest = hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
+    return f"msg_legacy_{digest}"
 
 
 def _legacy_records_from_manager(history_manager: Any | None) -> list[dict[str, Any]]:

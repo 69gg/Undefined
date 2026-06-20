@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from aiohttp import web
@@ -80,7 +81,11 @@ async def test_runtime_chat_history_endpoint_returns_role_mapped_items() -> None
             superadmin_qq=10001,
             bot_qq=20002,
         ),
-        onebot=SimpleNamespace(connection_status=lambda: {}),
+        onebot=SimpleNamespace(
+            connection_status=lambda: {},
+            get_image=lambda uid: None,
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
         ai=SimpleNamespace(memory_storage=SimpleNamespace(count=lambda: 0)),
         command_dispatcher=SimpleNamespace(parse_command=lambda _text: None),
         queue_manager=SimpleNamespace(snapshot=lambda: {}),
@@ -105,8 +110,51 @@ async def test_runtime_chat_history_endpoint_returns_role_mapped_items() -> None
     assert payload["count"] == 2
     assert payload["items"][0]["role"] == "user"
     assert payload["items"][0]["content"] == "你好"
+    assert isinstance(payload["items"][0]["message_id"], str)
+    assert payload["items"][0]["message_id"]
     assert payload["items"][1]["role"] == "bot"
     assert payload["items"][1]["content"] == "你好，我在。"
+    assert isinstance(payload["items"][1]["message_id"], str)
+    assert payload["items"][1]["message_id"]
+    assert payload["items"][0]["message_id"] != payload["items"][1]["message_id"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_chat_history_endpoint_returns_stable_message_ids() -> None:
+    history = _DummyHistoryManager()
+    context = RuntimeAPIContext(
+        config_getter=lambda: SimpleNamespace(
+            api=SimpleNamespace(
+                enabled=True,
+                host="127.0.0.1",
+                port=8788,
+                auth_key="changeme",
+                openapi_enabled=True,
+            ),
+            superadmin_qq=10001,
+            bot_qq=20002,
+        ),
+        onebot=SimpleNamespace(
+            connection_status=lambda: {},
+            get_image=lambda uid: None,
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
+        ai=SimpleNamespace(memory_storage=SimpleNamespace(count=lambda: 0)),
+        command_dispatcher=SimpleNamespace(parse_command=lambda _text: None),
+        queue_manager=SimpleNamespace(snapshot=lambda: {}),
+        history_manager=history,
+    )
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+    request = cast(web.Request, cast(Any, SimpleNamespace(query={"limit": "2"})))
+
+    first_response = await server._chat_history_handler(request)
+    second_response = await server._chat_history_handler(request)
+
+    first_payload = json.loads(first_response.text or "{}")
+    second_payload = json.loads(second_response.text or "{}")
+    assert [item["message_id"] for item in first_payload["items"]] == [
+        item["message_id"] for item in second_payload["items"]
+    ]
 
 
 @pytest.mark.asyncio
@@ -140,7 +188,11 @@ async def test_runtime_chat_history_endpoint_returns_attachment_refs() -> None:
             superadmin_qq=10001,
             bot_qq=20002,
         ),
-        onebot=SimpleNamespace(connection_status=lambda: {}),
+        onebot=SimpleNamespace(
+            connection_status=lambda: {},
+            get_image=lambda uid: None,
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
         ai=SimpleNamespace(
             memory_storage=SimpleNamespace(count=lambda: 0),
             attachment_registry=None,
@@ -158,8 +210,12 @@ async def test_runtime_chat_history_endpoint_returns_attachment_refs() -> None:
 
     attachment = payload["items"][0]["attachments"][0]
     assert attachment["uid"] == "pic_abc123"
-    assert attachment["media_type"] == "image"
+    # media_type 规范为真正 MIME（原存储为粗分类 "image"）
+    assert attachment["media_type"] == "image/png"
     assert attachment["display_name"] == "image_1.png"
+    # 历史附件补充 preview_url/download_url，供客户端渲染缩略图
+    assert attachment["preview_url"] == "/api/v1/chat/attachments/pic_abc123/preview"
+    assert attachment["download_url"] == "/api/v1/chat/attachments/pic_abc123"
 
 
 @pytest.mark.asyncio
@@ -241,7 +297,11 @@ async def test_runtime_chat_history_endpoint_returns_webchat_metadata_only_item(
             superadmin_qq=10001,
             bot_qq=20002,
         ),
-        onebot=SimpleNamespace(connection_status=lambda: {}),
+        onebot=SimpleNamespace(
+            connection_status=lambda: {},
+            get_image=lambda uid: None,
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
         ai=SimpleNamespace(memory_storage=SimpleNamespace(count=lambda: 0)),
         command_dispatcher=SimpleNamespace(parse_command=lambda _text: None),
         queue_manager=SimpleNamespace(snapshot=lambda: {}),
@@ -337,7 +397,11 @@ async def test_runtime_chat_history_endpoint_redacts_legacy_webchat_metadata() -
             superadmin_qq=10001,
             bot_qq=20002,
         ),
-        onebot=SimpleNamespace(connection_status=lambda: {}),
+        onebot=SimpleNamespace(
+            connection_status=lambda: {},
+            get_image=lambda uid: None,
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
         ai=SimpleNamespace(memory_storage=SimpleNamespace(count=lambda: 0)),
         command_dispatcher=SimpleNamespace(parse_command=lambda _text: None),
         queue_manager=SimpleNamespace(snapshot=lambda: {}),
@@ -377,7 +441,11 @@ async def test_runtime_chat_history_endpoint_supports_before_pagination() -> Non
             superadmin_qq=10001,
             bot_qq=20002,
         ),
-        onebot=SimpleNamespace(connection_status=lambda: {}),
+        onebot=SimpleNamespace(
+            connection_status=lambda: {},
+            get_image=lambda uid: None,
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
         ai=SimpleNamespace(memory_storage=SimpleNamespace(count=lambda: 0)),
         command_dispatcher=SimpleNamespace(parse_command=lambda _text: None),
         queue_manager=SimpleNamespace(snapshot=lambda: {}),
@@ -413,7 +481,11 @@ async def test_runtime_chat_history_clear_clears_only_when_no_active_job() -> No
             superadmin_qq=10001,
             bot_qq=20002,
         ),
-        onebot=SimpleNamespace(connection_status=lambda: {}),
+        onebot=SimpleNamespace(
+            connection_status=lambda: {},
+            get_image=lambda uid: None,
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
         ai=SimpleNamespace(
             attachment_registry=object(),
             memory_storage=SimpleNamespace(count=lambda: 0),
@@ -459,7 +531,11 @@ async def test_runtime_chat_history_clear_returns_409_for_running_job(
             superadmin_qq=10001,
             bot_qq=20002,
         ),
-        onebot=SimpleNamespace(connection_status=lambda: {}),
+        onebot=SimpleNamespace(
+            connection_status=lambda: {},
+            get_image=lambda uid: None,
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
         ai=SimpleNamespace(
             attachment_registry=object(),
             memory_storage=SimpleNamespace(count=lambda: 0),
@@ -499,20 +575,6 @@ async def test_runtime_chat_non_stream_blocks_history_clear_until_done(
         await send_output(42, "done")
         return "chat"
 
-    async def _fake_render_message_with_pic_placeholders(
-        message: str,
-        *,
-        registry: Any,
-        scope_key: str,
-        strict: bool,
-    ) -> Any:
-        _ = registry, scope_key, strict
-        return SimpleNamespace(
-            delivery_text=message,
-            history_text=message,
-            attachments=[],
-        )
-
     history = _DummyHistoryManager()
     context = RuntimeAPIContext(
         config_getter=lambda: SimpleNamespace(
@@ -526,7 +588,11 @@ async def test_runtime_chat_non_stream_blocks_history_clear_until_done(
             superadmin_qq=10001,
             bot_qq=20002,
         ),
-        onebot=SimpleNamespace(connection_status=lambda: {}),
+        onebot=SimpleNamespace(
+            connection_status=lambda: {},
+            get_image=lambda uid: None,
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
         ai=SimpleNamespace(
             attachment_registry=object(),
             memory_storage=SimpleNamespace(count=lambda: 0),
@@ -536,11 +602,6 @@ async def test_runtime_chat_non_stream_blocks_history_clear_until_done(
         history_manager=history,
     )
     monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
-    monkeypatch.setattr(
-        runtime_api_chat,
-        "render_message_with_pic_placeholders",
-        _fake_render_message_with_pic_placeholders,
-    )
     server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
     chat_request = cast(
         web.Request,
@@ -581,7 +642,11 @@ async def test_runtime_chat_history_clear_returns_409_until_history_finalized() 
             superadmin_qq=10001,
             bot_qq=20002,
         ),
-        onebot=SimpleNamespace(connection_status=lambda: {}),
+        onebot=SimpleNamespace(
+            connection_status=lambda: {},
+            get_image=lambda uid: None,
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
         ai=SimpleNamespace(
             attachment_registry=object(),
             memory_storage=SimpleNamespace(count=lambda: 0),

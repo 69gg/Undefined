@@ -1,0 +1,31 @@
+[package]
+name = "undefined_chat"
+version = "3.5.1"
+description = "Undefined native chat client"
+authors = ["Undefined contributors"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0.2", features = [] }
+
+[dependencies]
+futures-util = "0.3"
+keyring = { version = "3", features = ["apple-native", "crypto-rust", "sync-secret-service", "windows-native"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tauri = { version = "2.2.5", features = ["webview-data-url"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-http = { version = "2", features = ["stream", "multipart"] }
+tauri-plugin-stronghold = "2"
+tokio = { version = "1", features = ["fs", "io-util"] }
+tokio-util = { version = "0.7", features = ["io"] }
+url = "2"
+urlencoding = "2"
+uuid = { version = "1", features = ["v4"] }

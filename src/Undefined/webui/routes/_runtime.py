@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote as _url_quote
 
-from aiohttp import ClientSession, ClientTimeout, web
+from aiohttp import ClientSession, ClientTimeout, FormData, web
 from aiohttp.web_response import Response
 
 from Undefined.ai.queue_budget import compute_queued_llm_timeout_seconds
@@ -139,6 +139,20 @@ def _random_upload_filename(display_name: str) -> str:
     return f"file_{uuid.uuid4().hex[:16]}{suffix}"
 
 
+def _chat_message_payload(body: Mapping[str, Any]) -> Any | None:
+    raw_message = body.get("message")
+    if isinstance(raw_message, str):
+        text = raw_message.strip()
+        return text or None
+    if isinstance(raw_message, Mapping):
+        text = str(raw_message.get("text") or "").strip()
+        attachment_ids = raw_message.get("attachment_ids")
+        has_attachments = isinstance(attachment_ids, list) and bool(attachment_ids)
+        if text or has_attachments:
+            return dict(raw_message)
+    return None
+
+
 async def _proxy_runtime(
     *,
     method: str,
@@ -167,6 +181,119 @@ async def _proxy_runtime(
                 text = await resp.text()
                 content_type = (resp.headers.get("Content-Type") or "").lower()
                 if "application/json" in content_type:
+                    try:
+                        data = json.loads(text) if text else {}
+                    except json.JSONDecodeError:
+                        data = {"raw": text}
+                    return web.json_response(data, status=resp.status)
+                return web.Response(
+                    status=resp.status,
+                    text=text,
+                    content_type=resp.content_type,
+                    charset=resp.charset,
+                )
+    except (OSError, asyncio.TimeoutError) as exc:
+        return web.json_response(
+            {"error": "Runtime API unreachable", "detail": str(exc)},
+            status=502,
+        )
+
+
+async def _proxy_runtime_binary(
+    *,
+    method: str,
+    path: str,
+    params: Mapping[str, str] | None = None,
+    timeout_seconds: float | None = 20.0,
+) -> Response:
+    cfg = get_config(strict=False)
+    if not cfg.api.enabled:
+        return _runtime_disabled()
+
+    url = f"{_runtime_base_url()}{path}"
+    timeout = ClientTimeout(total=timeout_seconds)
+    headers = {_AUTH_HEADER: str(cfg.api.auth_key or "")}
+
+    try:
+        async with ClientSession(timeout=timeout) as session:
+            async with session.request(
+                method=method,
+                url=url,
+                params=params,
+                headers=headers,
+            ) as resp:
+                body = await resp.read()
+                response_headers: dict[str, str] = {}
+                disposition = resp.headers.get("Content-Disposition")
+                if disposition:
+                    response_headers["Content-Disposition"] = disposition
+                return web.Response(
+                    status=resp.status,
+                    body=body,
+                    headers=response_headers,
+                    content_type=resp.content_type,
+                )
+    except (OSError, asyncio.TimeoutError) as exc:
+        return web.json_response(
+            {"error": "Runtime API unreachable", "detail": str(exc)},
+            status=502,
+        )
+
+
+async def _proxy_runtime_multipart_file(
+    request: web.Request,
+    *,
+    path: str,
+    timeout_seconds: float | None = 60.0,
+) -> Response:
+    cfg = get_config(strict=False)
+    if not cfg.api.enabled:
+        return _runtime_disabled()
+
+    try:
+        reader = await request.multipart()
+        field = await reader.next()
+    except Exception:
+        return web.json_response({"error": "Invalid multipart body"}, status=400)
+
+    field_any = cast(Any, field)
+    if field is None or getattr(field_any, "name", None) != "file":
+        return web.json_response({"error": "file field is required"}, status=400)
+
+    filename = _sanitize_upload_display_name(
+        str(getattr(field_any, "filename", "") or "attachment")
+    )
+    content_type = str(getattr(field_any, "content_type", "") or "").strip()
+    if not content_type:
+        headers = getattr(field_any, "headers", {})
+        content_type = str(headers.get("Content-Type", "") or "").strip()
+    if not content_type:
+        content_type = "application/octet-stream"
+
+    body = bytearray()
+    while True:
+        chunk = await field_any.read_chunk()
+        if not chunk:
+            break
+        body.extend(chunk)
+
+    url = f"{_runtime_base_url()}{path}"
+    timeout = ClientTimeout(total=timeout_seconds)
+    headers = {_AUTH_HEADER: str(cfg.api.auth_key or "")}
+    form = FormData()
+    form.add_field(
+        "file",
+        bytes(body),
+        filename=filename,
+        content_type=content_type,
+    )
+
+    try:
+        async with ClientSession(timeout=timeout) as session:
+            async with session.post(url, data=form, headers=headers) as resp:
+                text = await resp.text()
+                content_type_header = (resp.headers.get("Content-Type") or "").lower()
+                if "application/json" in content_type_header:
                     try:
                         data = json.loads(text) if text else {}
                     except json.JSONDecodeError:
@@ -625,6 +752,62 @@ async def runtime_chat_history_clear_handler(request: web.Request) -> Response:
     )
 
 
+@routes.get("/api/v1/management/runtime/chat/attachments/capabilities")
+@routes.get("/api/runtime/chat/attachments/capabilities")
+async def runtime_chat_attachment_capabilities_handler(
+    request: web.Request,
+) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    return await _proxy_runtime(
+        method="GET",
+        path="/api/v1/chat/attachments/capabilities",
+        timeout_seconds=20.0,
+    )
+
+
+@routes.post("/api/v1/management/runtime/chat/attachments")
+@routes.post("/api/runtime/chat/attachments")
+async def runtime_chat_attachment_upload_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    return await _proxy_runtime_multipart_file(
+        request,
+        path="/api/v1/chat/attachments",
+        timeout_seconds=60.0,
+    )
+
+
+@routes.get("/api/v1/management/runtime/chat/attachments/{attachment_id}")
+@routes.get("/api/runtime/chat/attachments/{attachment_id}")
+async def runtime_chat_attachment_download_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    attachment_id = _url_quote(
+        str(request.match_info.get("attachment_id", "")).strip(), safe=""
+    )
+    return await _proxy_runtime_binary(
+        method="GET",
+        path=f"/api/v1/chat/attachments/{attachment_id}",
+        timeout_seconds=60.0,
+    )
+
+
+@routes.get("/api/v1/management/runtime/chat/attachments/{attachment_id}/preview")
+@routes.get("/api/runtime/chat/attachments/{attachment_id}/preview")
+async def runtime_chat_attachment_preview_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    attachment_id = _url_quote(
+        str(request.match_info.get("attachment_id", "")).strip(), safe=""
+    )
+    return await _proxy_runtime_binary(
+        method="GET",
+        path=f"/api/v1/chat/attachments/{attachment_id}/preview",
+        timeout_seconds=60.0,
+    )
+
+
 @routes.post("/api/v1/management/runtime/chat/jobs")
 @routes.post("/api/runtime/chat/jobs")
 async def runtime_chat_job_create_handler(request: web.Request) -> Response:
@@ -634,8 +817,8 @@ async def runtime_chat_job_create_handler(request: web.Request) -> Response:
         body = await request.json()
     except Exception:
         return web.json_response({"error": "Invalid JSON"}, status=400)
-    message = str(body.get("message", "") or "").strip()
-    if not message:
+    message = _chat_message_payload(body)
+    if message is None:
         return web.json_response({"error": "message is required"}, status=400)
     payload: dict[str, Any] = {"message": message}
     conversation_id = str(body.get("conversation_id", "") or "").strip()
@@ -768,7 +951,7 @@ async def runtime_chat_file_handler(request: web.Request) -> web.StreamResponse:
 @routes.post("/api/v1/management/runtime/chat/files")
 @routes.post("/api/runtime/chat/files")
 async def runtime_chat_file_upload_handler(request: web.Request) -> Response:
-    """缓存 WebChat 待发送附件，发送时通过 CQ:file id 引用。"""
+    """旧 WebUI 浏览器文件缓存；新客户端使用 Runtime attachment id。"""
     if not check_auth(request):
         return _unauthorized()
 

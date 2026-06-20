@@ -15,9 +15,15 @@ from typing import Any, cast
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_SCRIPTS_DIR = _PROJECT_ROOT / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
 _SRC_DIR = _PROJECT_ROOT / "src"
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
+
+from release_apps import NATIVE_APPS, NativeApp  # noqa: E402
 
 from Undefined.changelog import (  # noqa: E402
     ChangelogEntry,
@@ -120,8 +126,7 @@ def _read_json_version(project_root: Path, relative_path: str) -> str:
     return _require_non_empty_string(data.get("version"), f"{relative_path} version")
 
 
-def _read_package_lock_root_version(project_root: Path) -> str:
-    relative_path = "apps/undefined-console/package-lock.json"
+def _read_package_lock_root_version(project_root: Path, relative_path: str) -> str:
     data = _read_json_file(project_root / relative_path)
     packages = data.get("packages")
     if not isinstance(packages, dict):
@@ -134,8 +139,7 @@ def _read_package_lock_root_version(project_root: Path) -> str:
     )
 
 
-def _read_cargo_version(project_root: Path) -> str:
-    relative_path = "apps/undefined-console/src-tauri/Cargo.toml"
+def _read_cargo_manifest_version(project_root: Path, relative_path: str) -> str:
     path = project_root / relative_path
     data = tomllib.loads(_read_required_text(path))
     package = data.get("package")
@@ -146,31 +150,71 @@ def _read_cargo_version(project_root: Path) -> str:
     )
 
 
+def _read_cargo_lock_root_version(
+    project_root: Path,
+    relative_path: str,
+    package_name: str,
+) -> str:
+    data = tomllib.loads(_read_required_text(project_root / relative_path))
+    packages = data.get("package")
+    if not isinstance(packages, list):
+        raise ReleaseValidationError(f"{relative_path} is missing package entries")
+    for package in packages:
+        if isinstance(package, dict) and package.get("name") == package_name:
+            return _require_non_empty_string(
+                package.get("version"),
+                f"{relative_path} {package_name}.version",
+            )
+    raise ReleaseValidationError(f"{relative_path} is missing {package_name}")
+
+
+def _read_native_app_version_sources(
+    project_root: Path,
+    app: NativeApp,
+) -> tuple[VersionSource, ...]:
+    return (
+        VersionSource(
+            app.package_json,
+            _read_json_version(project_root, app.package_json),
+        ),
+        VersionSource(
+            app.package_lock,
+            _read_json_version(project_root, app.package_lock),
+        ),
+        VersionSource(
+            f'{app.package_lock} packages[""]',
+            _read_package_lock_root_version(project_root, app.package_lock),
+        ),
+        VersionSource(
+            app.cargo_toml,
+            _read_cargo_manifest_version(project_root, app.cargo_toml),
+        ),
+        VersionSource(
+            app.tauri_conf,
+            _read_json_version(project_root, app.tauri_conf),
+        ),
+        VersionSource(
+            f"{app.cargo_lock} {app.cargo_package}",
+            _read_cargo_lock_root_version(
+                project_root,
+                app.cargo_lock,
+                app.cargo_package,
+            ),
+        ),
+    )
+
+
 def read_build_version_sources(
     project_root: Path = _PROJECT_ROOT,
 ) -> tuple[VersionSource, ...]:
     root = project_root.resolve()
-    return (
+    sources: list[VersionSource] = [
         VersionSource("pyproject.toml", _read_pyproject_version(root)),
         VersionSource("src/Undefined/__init__.py", _read_init_version(root)),
-        VersionSource(
-            "apps/undefined-console/package.json",
-            _read_json_version(root, "apps/undefined-console/package.json"),
-        ),
-        VersionSource(
-            'apps/undefined-console/package-lock.json packages[""]',
-            _read_package_lock_root_version(root),
-        ),
-        VersionSource(
-            "apps/undefined-console/src-tauri/Cargo.toml", _read_cargo_version(root)
-        ),
-        VersionSource(
-            "apps/undefined-console/src-tauri/tauri.conf.json",
-            _read_json_version(
-                root, "apps/undefined-console/src-tauri/tauri.conf.json"
-            ),
-        ),
-    )
+    ]
+    for app in NATIVE_APPS:
+        sources.extend(_read_native_app_version_sources(root, app))
+    return tuple(sources)
 
 
 def read_latest_changelog_entry(project_root: Path = _PROJECT_ROOT) -> ChangelogEntry:

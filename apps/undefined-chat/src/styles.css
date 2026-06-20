@@ -1,0 +1,2969 @@
+/* ========================================
+   CSS Variables - Morandi Orange Theme (Default)
+   ======================================== */
+:root {
+	/* 主色调 - 莫兰迪橙色（从 webui 迁移） */
+	--primary: #d97757;
+	--primary-hover: #c56545;
+	--primary-subtle: #fbeee9;
+
+	/* 背景色（webui 配色） */
+	--bg-app: #f9f5f1;
+	--bg-sidebar: #f0ebe4;
+	--bg-workspace: #f9f5f1;
+	--bg-surface: #ffffff;
+	--bg-surface-hover: #efe6d8;
+	--bg-card: #ffffff;
+	--bg-input: #ffffff;
+	--bg-deep: #efe6d8;
+	--bg-glow: #fff7ec;
+
+	/* 消息气泡 */
+	--bg-message-bot: #ffffff;
+	--bg-message-user: #fbeee9;
+
+	/* 文字色（webui 配色） */
+	--text-primary: #3d3935;
+	--text-secondary: #6e675f;
+	--text-tertiary: #9e968c;
+
+	/* 边框色（webui 配色） */
+	--border-primary: #e6e0d8;
+	--border-subtle: #e6e0d8;
+	--border-message: #e6e0d8;
+	--border-color: #e6e0d8;
+	--border-focus: #d97757;
+
+	/* 状态色（webui 配色） */
+	--status-success: #4a7c59;
+	--status-success-bg: rgba(74, 124, 89, 0.12);
+	--status-error: #c94040;
+	--status-error-text: #c94040;
+	--status-warning: #cc8925;
+
+	/* 代码块 */
+	--bg-code: #1e1e1a;
+	--text-code: #e0dbd1;
+	--border-code: #3d3935;
+
+	/* 输入焦点 */
+	--focus-border: #d97757;
+	--focus-ring: rgba(217, 119, 87, 0.2);
+	--keyboard-inset: 0px;
+
+	/* 阴影效果（webui 配色） */
+	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+	--shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+	--shadow-lg: 0 24px 60px rgba(31, 27, 22, 0.12);
+
+	/* webui 兼容变量 */
+	--accent-color: #d97757;
+	--accent-hover: #c56545;
+	--accent-subtle: #fbeee9;
+	--accent: #d97757;
+	--success: #4a7c59;
+	--warning: #cc8925;
+	--error: #c94040;
+
+	/* 字体设置（webui 配色） */
+	--font-serif: "IBM Plex Serif", "Times New Roman", serif;
+	--font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+	--font-mono: "IBM Plex Mono", "Menlo", monospace;
+
+	--radius-sm: 8px;
+	--radius-md: 14px;
+	--radius-lg: 24px;
+
+	color: var(--text-primary);
+	background: var(--bg-app);
+	font-family: var(--font-sans), "Microsoft YaHei", sans-serif;
+	font-size: 15px;
+	font-synthesis: none;
+	text-rendering: optimizeLegibility;
+	-webkit-font-smoothing: antialiased;
+}
+
+/* ========================================
+   CSS Variables - Morandi Dark Theme
+   ======================================== */
+[data-theme="dark"] {
+	/* 主色调 */
+	--primary: #d97757;
+	--primary-hover: #c56545;
+	--primary-subtle: #2d1f1c;
+
+	/* 背景色（webui dark 配色） */
+	--bg-app: #0f1112;
+	--bg-sidebar: #161b1f;
+	--bg-workspace: #0f1112;
+	--bg-surface: #171c1f;
+	--bg-surface-hover: #14181a;
+	--bg-card: #171c1f;
+	--bg-input: #12171a;
+	--bg-deep: #14181a;
+	--bg-glow: #1b2125;
+
+	/* 消息气泡 */
+	--bg-message-bot: #171c1f;
+	--bg-message-user: #2d1f1c;
+
+	/* 文字色（webui dark 配色） */
+	--text-primary: #f4efe7;
+	--text-secondary: #b2a79b;
+	--text-tertiary: #6d6256;
+
+	/* 边框色（webui dark 配色） */
+	--border-primary: #2b3439;
+	--border-subtle: #2b3439;
+	--border-message: #2b3439;
+	--border-color: #2b3439;
+
+	/* 状态色 */
+	--status-success: #4a7c59;
+	--status-success-bg: rgba(74, 124, 89, 0.12);
+	--status-error: #c94040;
+	--status-error-text: #c94040;
+	--status-warning: #cc8925;
+
+	/* 代码块 */
+	--bg-code: #0e1418;
+	--text-code: #cfd8dc;
+	--border-code: #2b3439;
+
+	/* 输入焦点 */
+	--focus-border: #d97757;
+	--focus-ring: rgba(217, 119, 87, 0.25);
+
+	/* 阴影效果 */
+	--shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
+	--shadow-md: 0 4px 20px rgba(0, 0, 0, 0.3);
+	--shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.45);
+
+	/* webui 兼容变量 */
+	--accent-color: #d97757;
+	--accent-hover: #c56545;
+	--accent-subtle: #2d1f1c;
+	--accent: #d97757;
+	--success: #4a7c59;
+	--warning: #cc8925;
+	--error: #c94040;
+
+	color: var(--text-primary);
+	background: var(--bg-app);
+}
+
+/* ========================================
+   Animations
+   ======================================== */
+@keyframes fadeInUp {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+/* 流式光标闪烁（对齐 WebUI runtime-chat-cursor） */
+@keyframes runtime-chat-cursor {
+	0%,
+	50% {
+		opacity: 1;
+	}
+	51%,
+	100% {
+		opacity: 0;
+	}
+}
+
+@keyframes pulse-shimmer {
+	0% {
+		opacity: 0.65;
+	}
+	50% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0.65;
+	}
+}
+
+@keyframes rotate-spinner {
+	100% {
+		transform: rotate(360deg);
+	}
+}
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	min-width: 320px;
+	min-height: 100vh;
+	overflow: hidden;
+}
+
+button,
+textarea,
+input {
+	font: inherit;
+}
+
+button {
+	border: 0;
+	cursor: pointer;
+	outline: none;
+	background: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+button:disabled {
+	cursor: not-allowed;
+	opacity: 0.5;
+}
+
+button:focus-visible,
+a:focus-visible,
+textarea:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+	outline: 2px solid var(--focus-border);
+	outline-offset: 2px;
+	box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+a {
+	color: var(--primary);
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+/* ========================================
+   Main Layout Structure
+   ======================================== */
+.chat-app {
+	display: flex;
+	width: 100vw;
+	height: 100vh;
+	height: 100svh;
+	background: var(--bg-app);
+	color: var(--text-primary);
+	transition: background-color 0.3s, color 0.3s;
+	position: relative;
+	overflow: hidden;
+}
+
+/* 侧边栏 */
+.conversation-list {
+	width: 280px;
+	flex-shrink: 0;
+	display: flex;
+	flex-direction: column;
+	background: var(--bg-sidebar);
+	border-right: 1px solid var(--border-primary);
+	/* 左侧贴屏，补 safe-area-inset-left 覆盖横屏刘海/圆角 */
+	padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom))
+		max(14px, env(safe-area-inset-left));
+	transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+		transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+		padding 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+		opacity 0.2s;
+	position: relative;
+	z-index: 10;
+}
+
+/* 折叠后的侧边栏 */
+.conversation-list.collapsed {
+	width: 0;
+	padding-left: 0;
+	padding-right: 0;
+	border-right: 0px solid transparent;
+	opacity: 0;
+	pointer-events: none;
+	transform: translateX(-30px);
+}
+
+.rail-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	margin-bottom: 16px;
+	height: 40px;
+}
+
+.rail-header h1 {
+	margin: 0;
+	font-size: 1.15rem;
+	font-weight: 700;
+	color: var(--primary);
+	letter-spacing: -0.5px;
+}
+
+.ghost-button,
+.icon-button {
+	border: 1px solid var(--border-primary);
+	background: var(--bg-surface);
+	color: var(--text-primary);
+	border-radius: 8px;
+	transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+	box-shadow: var(--shadow-sm);
+}
+
+.ghost-button:hover:not(:disabled),
+.icon-button:hover:not(:disabled) {
+	background: var(--bg-surface-hover);
+	border-color: var(--primary);
+	color: var(--primary);
+}
+
+.ghost-button {
+	padding: 8px 14px;
+	font-weight: 550;
+	gap: 6px;
+}
+
+/* 左侧新建会话按钮设计 */
+.new-chat-btn {
+	width: 100%;
+	justify-content: center;
+	margin-bottom: 16px;
+	background: var(--primary);
+	color: #ffffff;
+	border-color: var(--primary);
+	box-shadow: var(--shadow-sm);
+	font-weight: 600;
+}
+
+.new-chat-btn:hover:not(:disabled) {
+	background: var(--primary-hover);
+	color: #ffffff;
+	border-color: var(--primary-hover);
+	transform: translateY(-1px);
+	box-shadow: 0 4px 12px rgba(95, 141, 158, 0.2);
+}
+
+.conversation-scroll {
+	flex: 1;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding-right: 2px;
+	margin-right: -6px;
+}
+
+.conversation-scroll::-webkit-scrollbar {
+	width: 5px;
+}
+.conversation-scroll::-webkit-scrollbar-thumb {
+	background: var(--border-primary);
+	border-radius: 99px;
+}
+
+.conversation-item {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	gap: 4px;
+	padding: 12px 14px;
+	border-radius: 10px;
+	background: transparent;
+	color: var(--text-primary);
+	text-align: left;
+	transition: all 0.2s;
+	border: 1px solid transparent;
+	position: relative;
+}
+
+.conversation-item:hover {
+	background: var(--bg-surface-hover);
+}
+
+.conversation-item[aria-current="page"] {
+	background: var(--bg-surface);
+	border-color: var(--border-primary);
+	box-shadow: var(--shadow-sm);
+}
+
+.conversation-item[aria-current="page"]::before {
+	content: "";
+	position: absolute;
+	left: 0;
+	top: 12px;
+	bottom: 12px;
+	width: 3px;
+	background: var(--primary);
+	border-radius: 0 4px 4px 0;
+}
+
+/* 会话项容器：悬停显示删除按钮 */
+.conversation-item-wrap {
+	position: relative;
+}
+
+.conversation-delete {
+	position: absolute;
+	top: 50%;
+	right: 8px;
+	transform: translateY(-50%);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	min-width: 28px;
+	min-height: 28px;
+	border: none;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--text-tertiary);
+	opacity: 0;
+	transition: opacity 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.conversation-rename {
+	position: absolute;
+	top: 50%;
+	right: 40px;
+	transform: translateY(-50%);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	min-width: 28px;
+	min-height: 28px;
+	border: none;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--text-tertiary);
+	opacity: 0;
+	transition: opacity 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.conversation-item-wrap:hover .conversation-delete,
+.conversation-delete:focus-visible {
+	opacity: 1;
+}
+
+.conversation-item-wrap:hover .conversation-rename,
+.conversation-rename:focus-visible {
+	opacity: 1;
+}
+
+.conversation-delete:hover {
+	background: color-mix(in srgb, var(--error) 14%, transparent);
+	color: var(--error);
+}
+
+.conversation-rename:hover {
+	background: color-mix(in srgb, var(--primary) 14%, transparent);
+	color: var(--primary);
+}
+
+/* 按钮内联加载指示 */
+.btn-spinner {
+	display: inline-block;
+	width: 14px;
+	height: 14px;
+	border: 2px solid color-mix(in srgb, currentColor 35%, transparent);
+	border-top-color: currentColor;
+	border-radius: 50%;
+	animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* 历史加载态 */
+.timeline-loading {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 14px;
+	min-height: 280px;
+	color: var(--text-tertiary);
+}
+
+.timeline-spinner {
+	width: 28px;
+	height: 28px;
+	border: 3px solid var(--border-primary);
+	border-top-color: var(--primary);
+	border-radius: 50%;
+	animation: spin 0.8s linear infinite;
+}
+
+.timeline-loading p {
+	margin: 0;
+	font-size: 0.875rem;
+}
+
+.timeline-error {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 16px;
+	max-width: 560px;
+	margin: 40px auto;
+	padding: 28px 24px;
+	background: var(--bg-surface);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-md);
+	box-shadow: var(--shadow-sm);
+}
+
+.timeline-error-text {
+	margin: 0;
+	text-align: center;
+	color: var(--status-error-text);
+	font-size: 0.875rem;
+	line-height: 1.5;
+}
+
+.timeline-error .ghost-button {
+	margin-top: 4px;
+}
+
+.timeline-load-more {
+	display: flex;
+	justify-content: center;
+	padding: 8px 0 14px;
+}
+
+/* 二次确认弹窗 */
+.confirm-dialog-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 10000;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 24px;
+	background: color-mix(in srgb, #020617 62%, transparent);
+	backdrop-filter: blur(4px);
+	animation: fadeIn 0.16s ease;
+}
+
+.confirm-dialog {
+	width: min(400px, 100%);
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 22px;
+	border-radius: 14px;
+	background: var(--bg-surface);
+	border: 1px solid var(--border-primary);
+	box-shadow: var(--shadow-lg);
+	animation: slideUpFadeIn 0.18s ease-out;
+}
+
+.confirm-dialog-title {
+	margin: 0;
+	font-size: 1.05rem;
+	font-weight: 650;
+	color: var(--text-primary);
+}
+
+.confirm-dialog-message {
+	margin: 0;
+	font-size: 0.9rem;
+	line-height: 1.6;
+	color: var(--text-secondary);
+}
+
+.confirm-dialog-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 10px;
+	margin-top: 4px;
+}
+
+.primary-button,
+.danger-button {
+	padding: 8px 16px;
+	border-radius: 8px;
+	font-weight: 600;
+	border: 1px solid transparent;
+	transition: filter 0.16s ease, background 0.16s ease;
+}
+
+.primary-button {
+	background: var(--primary);
+	color: #ffffff;
+	border-color: var(--primary);
+}
+
+.primary-button:hover {
+	background: var(--primary-hover);
+}
+
+.danger-button {
+	background: var(--error);
+	color: #ffffff;
+	border-color: var(--error);
+}
+
+.danger-button:hover {
+	filter: brightness(0.94);
+}
+
+/* 触摸端无悬停：删除按钮常驻可见 */
+@media (max-width: 768px) {
+	.conversation-delete {
+		opacity: 0.55;
+		width: 36px;
+		height: 36px;
+	}
+	.conversation-rename {
+		opacity: 0.55;
+		width: 36px;
+		height: 36px;
+		right: 48px;
+	}
+}
+
+.conversation-title-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	min-width: 0;
+}
+
+.conversation-title {
+	overflow: hidden;
+	font-weight: 600;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	flex: 1;
+}
+
+.conversation-meta {
+	color: var(--text-tertiary);
+	font-size: 0.75rem;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.running-dot {
+	flex-shrink: 0;
+	border-radius: 99px;
+	background: var(--status-success-bg);
+	color: var(--status-success);
+	padding: 1px 6px;
+	font-size: 0.7rem;
+	font-weight: 600;
+	animation: pulse-shimmer 2s infinite ease-in-out;
+}
+
+/* 侧边栏底部面板 */
+.sidebar-footer {
+	margin-top: auto;
+	padding-top: 14px;
+	border-top: 1px solid var(--border-primary);
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.sidebar-footer-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.user-badge {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.user-avatar {
+	width: 30px;
+	height: 30px;
+	border-radius: 50%;
+	background: var(--primary-subtle);
+	color: var(--primary);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-weight: bold;
+}
+
+/* ========================================
+   Workspace Area
+   ======================================== */
+.chat-workspace {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	height: 100%;
+	background: var(--bg-workspace);
+	transition: background-color 0.3s;
+	position: relative;
+}
+
+/* 顶栏 */
+.chat-topbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	min-height: 56px;
+	border-bottom: 1px solid var(--border-primary);
+	/* 左右补 safe-area 覆盖横屏刘海/圆角，避免标题与按钮被遮挡 */
+	padding: max(8px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) 8px
+		max(20px, env(safe-area-inset-left));
+	background: color-mix(in srgb, var(--bg-workspace) 85%, transparent);
+	backdrop-filter: blur(16px);
+	-webkit-backdrop-filter: blur(16px);
+	z-index: 5;
+	transition: background-color 0.3s, border-color 0.3s;
+}
+
+.topbar-left {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	min-width: 0;
+}
+
+.chat-title-block {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.chat-title-block strong {
+	font-size: 0.95rem;
+	font-weight: 650;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.connection-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 2px 8px;
+	border-radius: 99px;
+	font-size: 0.72rem;
+	font-weight: 600;
+	background: var(--bg-surface);
+	border: 1px solid var(--border-subtle);
+}
+
+.connection-pill::before {
+	content: "";
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	display: inline-block;
+}
+
+.connection-pill.connected::before { background: var(--status-success); }
+.connection-pill.connecting::before,
+.connection-pill.resuming::before {
+	background: var(--status-warning);
+	animation: pulse-shimmer 1.5s infinite;
+}
+.connection-pill.disconnected::before { background: var(--status-error); }
+.connection-pill.streaming::before,
+.connection-pill.json_fallback::before {
+	background: var(--primary);
+	animation: pulse-shimmer 1s infinite;
+}
+
+.runtime-indicator {
+	font-size: 0.75rem;
+	color: var(--text-tertiary);
+	border: 1px solid var(--border-subtle);
+	border-radius: 6px;
+	padding: 4px 8px;
+	background: var(--bg-surface);
+	max-width: 200px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* 消息流框架 */
+.timeline-shell {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+}
+
+.timeline {
+	flex: 1;
+	overflow-y: auto;
+	overflow-x: hidden;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	/* 软键盘弹起时，滚动锚点预留键盘高度 + 输入区净空，
+	   保证 scrollIntoView 能把最后一条消息带到键盘上方而非被遮挡 */
+	scroll-padding-bottom: calc(var(--keyboard-inset) + 16px);
+}
+
+/* 隐藏滚动条 */
+.timeline::-webkit-scrollbar {
+	display: none;
+}
+.timeline {
+	scrollbar-width: none; /* Firefox */
+	-ms-overflow-style: none; /* IE and Edge */
+}
+
+/* ========================================
+   Empty State (ChatGPT Welcoming Page)
+   ======================================== */
+.welcome-container {
+	max-width: 680px;
+	margin: auto;
+	text-align: center;
+	padding: 40px 20px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 28px;
+	animation: fadeInUp 0.5s ease;
+}
+
+.welcome-logo {
+	width: 72px;
+	height: 72px;
+	border-radius: 22px;
+	background: linear-gradient(135deg, var(--primary) 0%, #a4c3d2 100%);
+	color: #ffffff;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-shadow: var(--shadow-lg);
+}
+
+.welcome-header h2 {
+	margin: 0 0 8px;
+	font-size: 1.8rem;
+	font-weight: 700;
+	letter-spacing: -0.5px;
+}
+
+.welcome-header p {
+	margin: 0;
+	color: var(--text-secondary);
+	font-size: 1rem;
+}
+
+.shortcut-grid {
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: 12px;
+	width: 100%;
+}
+
+.shortcut-card {
+	background: var(--bg-surface);
+	border: 1px solid var(--border-primary);
+	border-radius: 12px;
+	padding: 16px;
+	text-align: left;
+	transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+	box-shadow: var(--shadow-sm);
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.shortcut-card:hover {
+	transform: translateY(-2px);
+	border-color: var(--primary);
+	box-shadow: var(--shadow-md);
+}
+
+.shortcut-card .icon {
+	display: inline-flex;
+	align-items: center;
+	margin-bottom: 2px;
+	color: var(--primary);
+}
+
+.shortcut-card .title {
+	font-weight: 600;
+	color: var(--text-primary);
+	font-size: 0.9rem;
+}
+
+.shortcut-card .desc {
+	font-size: 0.8rem;
+	color: var(--text-secondary);
+}
+
+/* ========================================
+   Message Bubble Rendering
+   ======================================== */
+/* 历史消息已迁移至 Runtime Chat Components（runtime-chat-item），对齐 WebUI webchat。
+   原 ChatGPT 风格的 message-row / avatar-wrapper / message-bubble / message-meta 已移除。 */
+
+/* ========================================
+   消息引用按钮（从 WebUI runtime-chat 迁移）
+   悬浮显示：默认 opacity:0，消息行 hover 或聚焦时显现
+   ======================================== */
+.runtime-chat-quote-btn {
+	display: inline-flex;
+	align-items: center;
+	min-height: 22px;
+	min-width: 44px;
+	padding: 1px 7px;
+	border: 1px solid transparent;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--text-tertiary);
+	font-size: 11px;
+	line-height: 1;
+	letter-spacing: 0;
+	text-transform: none;
+	cursor: pointer;
+	opacity: 0;
+	transform: translateY(-1px);
+	transition:
+		opacity 0.16s ease,
+		color 0.16s ease,
+		background 0.16s ease,
+		border-color 0.16s ease;
+}
+.runtime-chat-item:hover .runtime-chat-quote-btn,
+.runtime-chat-quote-btn:focus-visible {
+	opacity: 1;
+}
+.runtime-chat-quote-btn:hover,
+.runtime-chat-quote-btn:focus-visible {
+	border-color: color-mix(in srgb, var(--accent) 28%, var(--border-color));
+	background: color-mix(in srgb, var(--accent) 9%, transparent);
+	color: var(--accent-color);
+}
+.runtime-chat-quote-btn.is-visible {
+	opacity: 1;
+}
+
+.message-jump-highlight {
+	animation: messageJumpHighlight 1.6s ease;
+}
+
+@keyframes messageJumpHighlight {
+	0%,
+	100% {
+		box-shadow: var(--shadow-sm);
+	}
+	20%,
+	70% {
+		box-shadow: 0 0 0 3px var(--focus-ring), var(--shadow-md);
+		border-color: var(--primary);
+	}
+}
+
+/* ========================================
+   Markdown & Typographical Styling
+   ======================================== */
+.message-markdown {
+	word-break: break-word;
+}
+
+.message-markdown h1,
+.message-markdown h2,
+.message-markdown h3,
+.message-markdown h4 {
+	margin: 16px 0 8px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.message-markdown h1 { font-size: 1.4rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 4px; }
+.message-markdown h2 { font-size: 1.2rem; }
+.message-markdown h3 { font-size: 1.05rem; }
+
+.message-markdown p {
+	margin: 0 0 10px;
+}
+
+.message-markdown p:last-child {
+	margin-bottom: 0;
+}
+
+.message-markdown code {
+	font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco, Consolas, monospace;
+	font-size: 0.88em;
+	padding: 2px 6px;
+	border-radius: 5px;
+	background: var(--bg-surface-hover);
+	border: 1px solid var(--border-subtle);
+	color: var(--primary-hover);
+}
+
+.message-markdown blockquote {
+	margin: 10px 0;
+	border-left: 3.5px solid var(--primary);
+	padding-left: 12px;
+	color: var(--text-secondary);
+	background: var(--bg-app);
+	border-radius: 0 6px 6px 0;
+	padding-top: 4px;
+	padding-bottom: 4px;
+}
+
+.message-markdown ul,
+.message-markdown ol {
+	margin: 0 0 10px;
+	padding-left: 20px;
+}
+
+.message-markdown li {
+	margin-bottom: 4px;
+}
+
+.message-markdown table {
+	border-collapse: collapse;
+	width: 100%;
+	margin: 12px 0;
+	font-size: 0.9rem;
+}
+
+.message-markdown th,
+.message-markdown td {
+	border: 1px solid var(--border-primary);
+	padding: 8px 12px;
+	text-align: left;
+}
+
+.message-markdown th {
+	background: var(--bg-surface-hover);
+	font-weight: 600;
+}
+
+/* ========================================
+   Code Block (ChatGPT style)
+   ======================================== */
+.code-block {
+	margin: 14px 0;
+	overflow: hidden;
+	border-radius: 10px;
+	border: 1px solid var(--border-code);
+	background: var(--bg-code);
+	color: var(--text-code);
+	box-shadow: var(--shadow-sm);
+}
+
+.code-block figcaption {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 6px 14px;
+	background: color-mix(in srgb, var(--bg-code) 85%, #ffffff 15%);
+	border-bottom: 1px solid var(--border-code);
+	color: var(--text-tertiary);
+	font-size: 0.78rem;
+	font-weight: 600;
+}
+
+.code-block figcaption button {
+	border-radius: 5px;
+	background: transparent;
+	border: 1px solid var(--border-code);
+	color: var(--text-code);
+	padding: 4px 8px;
+	font-size: 0.75rem;
+	transition: all 0.2s;
+}
+
+.code-block figcaption button:hover {
+	background: rgba(255, 255, 255, 0.08);
+	color: #ffffff;
+}
+
+.code-block pre {
+	overflow-x: auto;
+	margin: 0;
+	padding: 14px;
+}
+
+.code-block code {
+	font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco, Consolas, monospace;
+	font-size: 0.88rem;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	padding: 0;
+	word-break: normal;
+}
+
+/* ========================================
+   Thinking Box & Event Drawer
+   ======================================== */
+.thinking-box {
+	background: var(--bg-surface);
+	border: 1px solid var(--border-primary);
+	border-radius: 10px;
+	margin: 12px auto;
+	max-width: 800px;
+	width: 100%;
+	overflow: hidden;
+	box-shadow: var(--shadow-sm);
+}
+
+.thinking-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 10px 14px;
+	cursor: pointer;
+	background: var(--bg-app);
+	user-select: none;
+	transition: background-color 0.2s;
+}
+
+.thinking-header:hover {
+	background: var(--bg-surface-hover);
+}
+
+.thinking-title-block {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.thinking-dot-spinner {
+	width: 14px;
+	height: 14px;
+	border: 2px solid var(--primary-subtle);
+	border-top-color: var(--primary);
+	border-radius: 50%;
+	animation: rotate-spinner 0.8s linear infinite;
+}
+
+.thinking-header span {
+	font-weight: 600;
+	font-size: 0.82rem;
+	color: var(--primary);
+}
+
+.thinking-chevron {
+	transition: transform 0.25s ease;
+	color: var(--text-tertiary);
+}
+
+.thinking-box.expanded .thinking-chevron {
+	transform: rotate(180deg);
+}
+
+.thinking-content {
+	border-top: 1px solid var(--border-primary);
+	max-height: 250px;
+	overflow-y: auto;
+	padding: 12px 14px;
+	background: var(--bg-surface);
+	display: none;
+}
+
+.thinking-box.expanded .thinking-content {
+	display: block;
+}
+
+/* Event List */
+.event-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 0;
+	margin: 0;
+	list-style: none;
+}
+
+.event-item {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	font-size: 0.8rem;
+	line-height: 1.4;
+	color: var(--text-secondary);
+	padding: 4px 6px;
+	border-left: 2.5px solid var(--border-primary);
+}
+
+.event-item.event-error {
+	border-left-color: var(--status-error);
+	color: var(--status-error-text);
+}
+
+.event-type-badge {
+	font-weight: 600;
+	color: var(--primary);
+	font-size: 0.72rem;
+	padding: 1px 4px;
+	border-radius: 4px;
+	background: var(--primary-subtle);
+}
+
+/* ========================================
+   Floating Input Composer
+   ======================================== */
+.composer-wrapper {
+	/* 底部叠加软键盘高度；左右补 safe-area 覆盖横屏刘海/圆角 */
+	padding: 0 max(20px, env(safe-area-inset-right))
+		calc(max(24px, env(safe-area-inset-bottom)) + var(--keyboard-inset))
+		max(20px, env(safe-area-inset-left));
+	background: transparent;
+	position: relative;
+	z-index: 4;
+}
+
+.composer {
+	max-width: 800px;
+	width: 100%;
+	margin: 0 auto;
+	background: var(--bg-surface);
+	border: 1px solid var(--border-primary);
+	border-radius: 20px;
+	box-shadow: var(--shadow-md);
+	transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+	overflow: visible;
+	position: relative;
+}
+
+.composer:focus-within {
+	border-color: var(--focus-border);
+	box-shadow: var(--shadow-lg), 0 0 0 3px var(--focus-ring);
+}
+
+/* 输入框内部的附件区 */
+.composer-attachments {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	padding: 12px 14px 4px;
+	margin: 0;
+	list-style: none;
+	border-bottom: 1px solid var(--border-subtle);
+	background: var(--bg-app);
+}
+
+.composer-attachments li {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	background: var(--bg-surface);
+	border: 1px solid var(--border-primary);
+	border-radius: 10px;
+	padding: 6px 10px;
+	font-size: 0.78rem;
+	box-shadow: var(--shadow-sm);
+	animation: fadeInUp 0.2s ease;
+}
+
+.composer-attachments li button {
+	color: var(--text-tertiary);
+	font-size: 1rem;
+	line-height: 1;
+	padding: 0 2px;
+}
+
+.composer-attachments li button:hover {
+	color: var(--status-error);
+}
+
+/* 引用区 */
+.composer-references {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	padding: 10px 14px 4px;
+	background: var(--bg-app);
+	border-bottom: 1px solid var(--border-subtle);
+}
+
+.composer-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	background: var(--bg-surface);
+	border: 1px solid var(--border-primary);
+	border-radius: 10px;
+	padding: 4px 10px;
+	font-size: 0.78rem;
+	max-width: 100%;
+	animation: fadeInUp 0.2s ease;
+}
+
+.composer-chip .chip-icon {
+	color: var(--primary);
+	font-size: 0.9rem;
+	flex-shrink: 0;
+	line-height: 1;
+}
+
+.composer-chip .chip-preview {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--text-secondary);
+}
+
+.composer-chip button {
+	color: var(--text-tertiary);
+	font-size: 1.1rem;
+	line-height: 1;
+	padding: 0 2px;
+	flex-shrink: 0;
+	transition: color 0.2s;
+}
+
+.composer-chip .chip-preview {
+	display: block;
+	min-width: 0;
+	max-width: min(420px, 62vw);
+	padding: 0;
+	border: 0;
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-secondary);
+	font-size: inherit;
+	line-height: inherit;
+	text-align: left;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.composer-chip .chip-preview:disabled {
+	cursor: default;
+	opacity: 1;
+}
+
+.composer-chip .chip-clear {
+	min-width: 28px;
+	min-height: 28px;
+	align-items: center;
+	justify-content: center;
+}
+
+.composer-chip button:hover {
+	color: var(--status-error);
+}
+
+/* 输入核心行 */
+.composer-input-row {
+	display: flex;
+	align-items: flex-end;
+	gap: 8px;
+	padding: 10px 12px;
+	position: relative;
+}
+
+.composer .icon-button {
+	width: 38px;
+	height: 38px;
+	min-width: 38px;
+	min-height: 38px;
+	border-radius: 50%;
+	flex-shrink: 0;
+	border: 1px solid transparent;
+	box-shadow: none;
+	color: var(--text-secondary);
+	background: transparent;
+}
+
+.composer .icon-button:hover {
+	background: var(--bg-surface-hover);
+	color: var(--primary);
+}
+
+.composer textarea {
+	flex: 1;
+	border: none;
+	background: transparent;
+	color: var(--text-primary);
+	padding: 8px 6px;
+	resize: none;
+	max-height: 160px;
+	min-height: 38px;
+	line-height: 1.5;
+	outline: none;
+}
+
+.composer button[type="submit"] {
+	width: 38px;
+	height: 38px;
+	min-width: 38px;
+	min-height: 38px;
+	border-radius: 50%;
+	background: var(--primary);
+	color: #ffffff;
+	flex-shrink: 0;
+	transition: background-color 0.2s, transform 0.15s;
+}
+
+.composer button[type="submit"]:hover:not(:disabled) {
+	background: var(--primary-hover);
+	transform: scale(1.05);
+}
+
+.composer button[type="submit"]:active:not(:disabled) {
+	transform: scale(0.95);
+}
+
+/* 命令自动联想区 */
+.command-suggestions {
+	background: var(--bg-surface);
+	border-top: 1px solid var(--border-subtle);
+	margin: 0;
+	padding: 6px;
+	list-style: none;
+	max-height: 200px;
+	overflow-y: auto;
+}
+
+.command-suggestions li {
+	display: flex;
+	justify-content: space-between;
+	padding: 8px 12px;
+	border-radius: 8px;
+	cursor: pointer;
+	transition: background-color 0.2s;
+}
+
+.command-suggestions li:hover {
+	background: var(--bg-surface-hover);
+}
+
+.command-suggestions li span:first-child {
+	font-weight: 600;
+	color: var(--primary);
+}
+
+.command-suggestions li span:last-child {
+	color: var(--text-secondary);
+	font-size: 0.8rem;
+}
+
+/* 提示信息 */
+.composer-note {
+	text-align: center;
+	font-size: 0.72rem;
+	color: var(--text-tertiary);
+	margin-top: 6px;
+}
+
+/* ========================================
+   Setup Modal & App Level Error
+   ======================================== */
+.setup-panel-container {
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 0;
+	bottom: 0;
+	background: rgba(0, 0, 0, 0.45);
+	backdrop-filter: blur(8px);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 100;
+	animation: fadeInUp 0.3s ease;
+}
+
+.setup-panel {
+	background: var(--bg-surface);
+	border: 1px solid var(--border-primary);
+	border-radius: 16px;
+	padding: 24px;
+	max-width: 420px;
+	width: 90%;
+	box-shadow: var(--shadow-lg);
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.setup-panel h3 {
+	margin: 0;
+	font-size: 1.25rem;
+	font-weight: 700;
+	color: var(--primary);
+}
+
+.setup-panel label {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.setup-panel label span {
+	font-size: 0.8rem;
+	font-weight: 600;
+	color: var(--text-secondary);
+}
+
+.setup-panel input[type="url"],
+.setup-panel input[type="password"] {
+	border: 1px solid var(--border-primary);
+	background: var(--bg-workspace);
+	color: var(--text-primary);
+	padding: 8px 12px;
+	border-radius: 8px;
+	outline: none;
+	transition: all 0.2s;
+}
+
+.setup-panel input:focus {
+	border-color: var(--focus-border);
+	box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.setup-checkbox {
+	flex-direction: row !important;
+	align-items: center;
+	gap: 8px;
+	cursor: pointer;
+}
+
+.setup-checkbox input {
+	width: 16px;
+	height: 16px;
+}
+
+.setup-panel button[type="submit"] {
+	background: var(--primary);
+	color: #ffffff;
+	border-radius: 8px;
+	padding: 10px;
+	font-weight: 600;
+	transition: background-color 0.2s;
+}
+
+.setup-panel button[type="submit"]:hover {
+	background: var(--primary-hover);
+}
+
+.setup-panel p {
+	margin: 0;
+	font-size: 0.72rem;
+	color: var(--text-tertiary);
+	line-height: 1.4;
+}
+
+.app-error {
+	background: var(--status-error-text);
+	color: #ffffff;
+	padding: 8px 12px;
+	border-radius: 8px;
+	font-size: 0.8rem;
+	margin: 8px auto 0;
+	max-width: 800px;
+	width: calc(100% - 40px);
+}
+
+/* ========================================
+   Mobile Styles / Responsive Settings
+   ======================================== */
+.mobile-header-btn {
+	display: none;
+}
+
+/* 移动式抽屉布局触发条件（OR 逻辑，逗号分隔）：
+   1. max-width:768px           —— 竖屏手机 / 窄窗口
+   2. 横屏且高度受限              —— 横屏手机（宽度常 >768px，但纵向空间不足以容纳常驻侧栏）
+   命中任一即走抽屉布局，消除“横屏 >768px 退桌面常驻侧栏”问题。 */
+@media (max-width: 768px), (orientation: landscape) and (max-height: 480px) {
+	.chat-app {
+		flex-direction: column;
+	}
+
+	.conversation-list {
+		position: absolute;
+		left: 0;
+		top: 0;
+		bottom: 0;
+		width: min(86vw, 320px);
+		transform: translateX(-100%);
+		opacity: 0;
+		pointer-events: none;
+		box-shadow: var(--shadow-lg);
+	}
+
+	.conversation-list.active {
+		transform: translateX(0);
+		opacity: 1;
+		pointer-events: auto;
+	}
+
+	/* 移动端菜单背景遮罩 */
+	.sidebar-overlay {
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.4);
+		backdrop-filter: blur(4px);
+		z-index: 8;
+		display: none;
+	}
+
+	.sidebar-overlay.active {
+		display: block;
+	}
+
+	.mobile-header-btn {
+		display: inline-flex;
+		width: 44px;
+		height: 44px;
+		border-radius: 8px;
+		border: 1px solid var(--border-primary);
+		background: var(--bg-surface);
+	}
+
+	.timeline {
+		padding: 16px 14px;
+	}
+
+	.shortcut-grid {
+		grid-template-columns: 1fr;
+	}
+
+	.composer-wrapper {
+		padding: 0 max(10px, env(safe-area-inset-right))
+			calc(max(16px, env(safe-area-inset-bottom)) + var(--keyboard-inset))
+			max(10px, env(safe-area-inset-left));
+	}
+
+	.conversation-delete {
+		right: 6px;
+	}
+
+	.conversation-rename {
+		right: 52px;
+	}
+}
+
+/* 横屏手机专属微调：纵向空间稀缺，抽屉收窄、垂直 padding 压缩；
+   抽屉左侧仍受基础 .conversation-list 的 safe-area-inset-left 保护 */
+@media (orientation: landscape) and (max-height: 480px) and (pointer: coarse) {
+	.conversation-list {
+		width: min(60vw, 300px);
+	}
+
+	.chat-topbar {
+		min-height: 48px;
+	}
+
+	.timeline {
+		padding: 10px 14px;
+		/* 横屏时键盘占据大量高度，时间线滚动锚点额外预留净空 */
+		scroll-padding-bottom: calc(var(--keyboard-inset) + 12px);
+	}
+
+	.welcome-container {
+		padding: 20px;
+		gap: 16px;
+	}
+}
+
+/* 平板竖屏（约 768–1024）：宽度足以保留常驻侧栏，但收窄以让出聊天区。
+   仅在触摸设备且竖屏时收窄，避免影响桌面同尺寸窗口的手感。 */
+@media (min-width: 769px) and (max-width: 1024px) and (orientation: portrait) and (pointer: coarse) {
+	.conversation-list {
+		width: 248px;
+	}
+}
+
+/* ========================================
+   触控目标尺寸（WCAG 2.5.5 / 平台触控规范 ≥44px）
+   以 pointer:coarse 为触发条件，覆盖所有触摸设备：
+   竖屏手机、横屏手机（>768px）、平板，与视口断点解耦，
+   不再受“仅 max-width:768px 内生效”的限制。
+   仅补齐基础态不足 44px 的可点元素；本身达标者
+   （.mobile-header-btn / .runtime-chat-command-item /
+    .thinking-header / .conversation-item / .config-item /
+    图片查看器控件）不重复声明。
+   ======================================== */
+@media (pointer: coarse) {
+	/* 方形图标按钮：宽高同时拉满，保持圆形/方形比例 */
+	.conversation-delete,
+	.conversation-rename,
+	.composer .icon-button,
+	.composer button[type="submit"],
+	.composer-chip .chip-clear,
+	.runtime-chat-quote-btn {
+		min-width: 44px;
+		min-height: 44px;
+	}
+
+	/* 带文字的横向按钮 / 列表项：仅保证可点高度，不强制方形 */
+	.runtime-code-action,
+	.code-block figcaption button {
+		min-height: 44px;
+	}
+
+	/* 命令联想项是 flex 行，补 align-items 让单行文字垂直居中 */
+	.command-suggestions li {
+		min-height: 44px;
+		align-items: center;
+	}
+}
+
+/* ========================================
+   Runtime Chat Components (from webui)
+   ======================================== */
+.runtime-chat-log {
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-sm);
+	background: var(--bg-app);
+	min-width: 0;
+	min-height: 220px;
+	max-height: 420px;
+	overflow-x: hidden;
+	overflow-y: auto;
+	padding: 12px;
+	margin-bottom: 12px;
+	display: grid;
+	align-content: start;
+	gap: 10px;
+}
+
+.runtime-chat-item {
+	min-width: 0;
+	max-width: 100%;
+	border-radius: var(--radius-sm);
+	border: 1px solid var(--border-color);
+	padding: 12px 14px;
+	background: var(--bg-card);
+	animation: fadeInUp 0.18s ease-out;
+}
+
+.runtime-chat-item.user {
+	border-color: rgba(217, 119, 87, 0.35);
+}
+
+.runtime-chat-item.bot {
+	border-color: var(--border-color);
+}
+
+/* 流式光标（对齐 WebUI runtime.js：streaming 时内容末尾的闪烁竖线，替代"思考中..."占位符） */
+.runtime-chat-item.streaming .runtime-chat-content::after {
+	content: "";
+	display: inline-block;
+	width: 7px;
+	height: 1.1em;
+	margin-left: 4px;
+	vertical-align: -0.15em;
+	background: var(--accent);
+	animation: runtime-chat-cursor 0.9s steps(2, start) infinite;
+}
+
+.runtime-chat-role {
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 1px;
+	color: var(--text-tertiary);
+	margin-bottom: 6px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 18px;
+	flex-wrap: wrap;
+}
+
+.runtime-chat-role-label {
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 1px;
+	color: var(--text-tertiary);
+}
+
+.runtime-chat-content {
+	min-width: 0;
+	max-width: 100%;
+	font-size: 15px;
+	line-height: 1.6;
+	white-space: pre-wrap;
+	word-break: break-word;
+	overflow-wrap: anywhere;
+}
+
+.runtime-chat-content.markdown {
+	white-space: normal;
+}
+
+.runtime-chat-content.markdown > * {
+	min-width: 0;
+	max-width: 100%;
+}
+
+.runtime-chat-content.markdown > *:first-child {
+	margin-top: 0;
+}
+
+.runtime-chat-content.markdown > *:last-child {
+	margin-bottom: 0;
+}
+
+.runtime-chat-content.markdown p {
+	margin: 0.4em 0;
+}
+
+.runtime-chat-content.markdown h1,
+.runtime-chat-content.markdown h2,
+.runtime-chat-content.markdown h3,
+.runtime-chat-content.markdown h4 {
+	margin: 0.6em 0 0.3em;
+	line-height: 1.3;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.runtime-chat-content.markdown h1 {
+	font-size: 1.25em;
+}
+
+.runtime-chat-content.markdown h2 {
+	font-size: 1.15em;
+}
+
+.runtime-chat-content.markdown h3 {
+	font-size: 1.05em;
+}
+
+.runtime-chat-content.markdown ul,
+.runtime-chat-content.markdown ol {
+	margin: 0.4em 0;
+	padding-left: 1.5em;
+}
+
+.runtime-chat-content.markdown li {
+	margin: 0.15em 0;
+}
+
+.runtime-chat-content.markdown blockquote {
+	margin: 0.4em 0;
+	padding: 0.3em 0.8em;
+	border-left: 3px solid var(--border-color);
+	color: var(--text-secondary);
+}
+
+.runtime-chat-content.markdown table {
+	width: 100%;
+	max-width: 100%;
+	table-layout: fixed;
+	border-collapse: collapse;
+	margin: 0.5em 0;
+	font-size: 13px;
+}
+
+.runtime-chat-content.markdown th,
+.runtime-chat-content.markdown td {
+	border: 1px solid var(--border-color);
+	padding: 4px 8px;
+	overflow-wrap: anywhere;
+}
+
+.runtime-chat-content code {
+	display: inline-block;
+	max-width: 100%;
+	padding: 2px 6px;
+	border-radius: 6px;
+	border: 1px solid var(--border-color);
+	background: var(--bg-app);
+	font-family: var(--font-mono);
+	font-size: 12px;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
+/* Runtime Tool Components */
+.runtime-chat-tools {
+	display: grid;
+	gap: 8px;
+}
+
+.runtime-tool-block {
+	--tool-accent: var(--accent-color);
+	min-width: 0;
+	max-width: 100%;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-sm);
+	background: color-mix(in srgb, var(--bg-app) 92%, var(--bg-card));
+	overflow: hidden;
+	position: relative;
+	transition:
+		border-color 0.18s ease,
+		background 0.18s ease,
+		transform 0.18s ease,
+		box-shadow 0.18s ease;
+}
+
+.runtime-tool-block::before {
+	content: "";
+	position: absolute;
+	inset: 0 auto 0 0;
+	width: 3px;
+	background: var(--tool-accent);
+	opacity: 0.65;
+}
+
+.runtime-tool-block.is-agent {
+	--tool-accent: var(--accent-color);
+	background: color-mix(in srgb, var(--bg-card) 60%, var(--bg-app));
+}
+
+.runtime-tool-block.is-tool {
+	--tool-accent: color-mix(in srgb, var(--success) 76%, var(--accent-color));
+}
+
+.runtime-tool-block.running {
+	--tool-accent: color-mix(in srgb, var(--warning) 82%, var(--accent-color));
+}
+
+.runtime-tool-block.done {
+	--tool-accent: var(--success);
+}
+
+.runtime-tool-block.error {
+	--tool-accent: var(--error);
+}
+
+.runtime-tool-block.cancelled {
+	--tool-accent: var(--warning);
+}
+
+.runtime-tool-block:hover {
+	border-color: color-mix(in srgb, var(--tool-accent) 38%, var(--border-color));
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.runtime-tool-block summary {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto auto;
+	align-items: center;
+	gap: 8px;
+	cursor: pointer;
+	min-height: 32px;
+	padding: 3px 10px 3px 13px;
+	font-size: 12px;
+	line-height: 1.2;
+	color: var(--text-secondary);
+	list-style: none;
+}
+
+.runtime-tool-block summary::-webkit-details-marker {
+	display: none;
+}
+
+.runtime-tool-block summary::before {
+	content: "";
+	width: 6px;
+	height: 6px;
+	border-right: 1.5px solid currentColor;
+	border-bottom: 1.5px solid currentColor;
+	transform: rotate(-45deg);
+	transition: transform 0.18s ease;
+	opacity: 0.7;
+}
+
+.runtime-tool-block[open] summary::before {
+	transform: rotate(45deg);
+}
+
+.runtime-tool-block summary .runtime-tool-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--text-primary);
+	font-size: 12px;
+	font-weight: 650;
+}
+
+.runtime-tool-block summary .runtime-tool-status {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-style: normal;
+	white-space: nowrap;
+	color: var(--text-tertiary);
+}
+
+.runtime-tool-block.running summary .runtime-tool-status {
+	color: var(--warning);
+}
+
+.runtime-tool-block.done summary .runtime-tool-status {
+	color: var(--success);
+}
+
+.runtime-tool-block.error summary .runtime-tool-status {
+	color: var(--error);
+}
+
+.runtime-tool-preview {
+	min-width: 0;
+	max-width: 100%;
+	border-top: 1px solid var(--border-color);
+	padding: 8px 10px 10px;
+	animation: fadeInUp 0.18s ease-out;
+}
+
+.runtime-tool-preview-label {
+	margin-bottom: 6px;
+	color: var(--text-tertiary);
+	font-size: 11px;
+	font-weight: 600;
+}
+
+.runtime-tool-preview-body {
+	min-width: 0;
+	max-width: 100%;
+	color: var(--text-secondary);
+	font-size: 12px;
+	line-height: 1.5;
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: min(34vh, 260px);
+	overflow: auto;
+}
+
+.runtime-tool-preview-body.is-structured {
+	padding: 8px 10px;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-sm);
+	background: color-mix(in srgb, var(--bg-card) 70%, var(--bg-app));
+	white-space: normal;
+}
+
+/* Code blocks in runtime */
+.runtime-code-block {
+	min-width: 0;
+	max-width: 100%;
+	margin: 0.5em 0;
+	border-radius: var(--radius-sm);
+	border: 1px solid var(--border-color);
+	background: color-mix(in srgb, var(--bg-app) 88%, var(--bg-deep));
+	overflow: hidden;
+}
+
+.runtime-code-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	min-height: 34px;
+	padding: 5px 8px 5px 12px;
+	border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+	background: color-mix(in srgb, var(--bg-card) 58%, transparent);
+}
+
+.runtime-code-language {
+	color: var(--text-tertiary);
+	font-family: var(--font-mono);
+	font-size: 11px;
+	text-transform: uppercase;
+}
+
+.runtime-code-actions {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	flex: 0 0 auto;
+}
+
+.runtime-code-action {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 26px;
+	padding: 0 9px;
+	border: 1px solid transparent;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--text-secondary);
+	font-size: 12px;
+	line-height: 1;
+	cursor: pointer;
+	transition:
+		background 0.16s ease,
+		border-color 0.16s ease,
+		color 0.16s ease,
+		transform 0.16s ease;
+}
+
+.runtime-code-action:hover,
+.runtime-code-action:focus-visible {
+	border-color: color-mix(in srgb, var(--accent) 28%, var(--border-color));
+	background: color-mix(in srgb, var(--accent) 10%, transparent);
+	color: var(--text-primary);
+}
+
+.runtime-code-action.primary {
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+	color: var(--accent);
+}
+
+.runtime-code-action.primary:hover,
+.runtime-code-action.primary:focus-visible {
+	background: var(--accent);
+	color: #fff;
+}
+
+.runtime-code-body {
+	position: relative;
+}
+
+/* 默认折叠：限制高度约 3-4 行 */
+.runtime-code-block.is-collapsed .runtime-code-body {
+	max-height: 9.2em;
+	overflow-y: auto;
+	overflow-x: hidden;
+	scrollbar-gutter: stable;
+}
+
+.runtime-code-body pre {
+	max-width: 100%;
+	margin: 0;
+	padding: 10px 14px;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	overflow-x: hidden;
+	white-space: pre-wrap;
+	word-wrap: break-word;
+	font-family: var(--font-mono);
+	font-size: 12.5px;
+	line-height: 1.5;
+}
+
+.runtime-code-body pre code {
+	display: block;
+	min-width: 0;
+	max-width: 100%;
+	padding: 0;
+	border: none;
+	background: none;
+	border-radius: 0;
+	white-space: pre-wrap;
+	word-wrap: break-word;
+	color: var(--text-primary);
+}
+
+.runtime-code-body pre code.hljs {
+	padding: 0;
+	background: transparent;
+	color: var(--text-primary);
+}
+
+/* ============ 语法高亮颜色（浅色主题）============ */
+.runtime-code-block .hljs-keyword,
+.runtime-code-block .hljs-doctag,
+.runtime-code-block .hljs-template-tag,
+.runtime-code-block .hljs-type {
+	color: #9b3fb5;
+	font-weight: 600;
+}
+
+.runtime-code-block .hljs-string,
+.runtime-code-block .hljs-regexp,
+.runtime-code-block .hljs-meta .hljs-string {
+	color: #246f4f;
+}
+
+.runtime-code-block .hljs-comment,
+.runtime-code-block .hljs-quote {
+	color: var(--text-tertiary);
+	font-style: italic;
+}
+
+.runtime-code-block .hljs-number,
+.runtime-code-block .hljs-literal,
+.runtime-code-block .hljs-variable,
+.runtime-code-block .hljs-attribute,
+.runtime-code-block .hljs-symbol {
+	color: #b45f2b;
+}
+
+.runtime-code-block .hljs-title,
+.runtime-code-block .hljs-title.function_,
+.runtime-code-block .hljs-title.class_,
+.runtime-code-block .hljs-section {
+	color: #1f6fb2;
+	font-weight: 600;
+}
+
+.runtime-code-block .hljs-operator,
+.runtime-code-block .hljs-punctuation,
+.runtime-code-block .hljs-meta {
+	color: #8a6350;
+}
+
+.runtime-code-block .hljs-property,
+.runtime-code-block .hljs-attr,
+.runtime-code-block .hljs-selector-attr,
+.runtime-code-block .hljs-selector-class,
+.runtime-code-block .hljs-selector-id {
+	color: #b25577;
+}
+
+.runtime-code-block .hljs-name,
+.runtime-code-block .hljs-selector-tag,
+.runtime-code-block .hljs-built_in {
+	color: #22735a;
+}
+
+.runtime-code-block .hljs-addition {
+	color: #1d7f45;
+	background: color-mix(in srgb, #1d7f45 12%, transparent);
+}
+
+.runtime-code-block .hljs-deletion {
+	color: #b31d28;
+	background: color-mix(in srgb, #b31d28 10%, transparent);
+}
+
+/* ============ 语法高亮颜色（深色主题）============ */
+[data-theme="dark"] .runtime-code-block .hljs-keyword,
+[data-theme="dark"] .runtime-code-block .hljs-doctag,
+[data-theme="dark"] .runtime-code-block .hljs-template-tag,
+[data-theme="dark"] .runtime-code-block .hljs-type {
+	color: #c792ea;
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-string,
+[data-theme="dark"] .runtime-code-block .hljs-regexp,
+[data-theme="dark"] .runtime-code-block .hljs-meta .hljs-string {
+	color: #89d39a;
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-comment,
+[data-theme="dark"] .runtime-code-block .hljs-quote {
+	color: #7f8a91;
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-number,
+[data-theme="dark"] .runtime-code-block .hljs-literal,
+[data-theme="dark"] .runtime-code-block .hljs-variable,
+[data-theme="dark"] .runtime-code-block .hljs-attribute,
+[data-theme="dark"] .runtime-code-block .hljs-symbol {
+	color: #f2b86d;
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-title,
+[data-theme="dark"] .runtime-code-block .hljs-title.function_,
+[data-theme="dark"] .runtime-code-block .hljs-title.class_,
+[data-theme="dark"] .runtime-code-block .hljs-section {
+	color: #82b8ff;
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-operator,
+[data-theme="dark"] .runtime-code-block .hljs-punctuation,
+[data-theme="dark"] .runtime-code-block .hljs-meta {
+	color: #c6a58d;
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-property,
+[data-theme="dark"] .runtime-code-block .hljs-attr,
+[data-theme="dark"] .runtime-code-block .hljs-selector-attr,
+[data-theme="dark"] .runtime-code-block .hljs-selector-class,
+[data-theme="dark"] .runtime-code-block .hljs-selector-id {
+	color: #f08bad;
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-name,
+[data-theme="dark"] .runtime-code-block .hljs-selector-tag,
+[data-theme="dark"] .runtime-code-block .hljs-built_in {
+	color: #7fd6b4;
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-addition {
+	color: #89d39a;
+	background: color-mix(in srgb, #89d39a 13%, transparent);
+}
+
+[data-theme="dark"] .runtime-code-block .hljs-deletion {
+	color: #ff8d8d;
+	background: color-mix(in srgb, #ff8d8d 12%, transparent);
+}
+
+/* Runtime Chat Input */
+.runtime-chat-input {
+	min-height: 88px;
+	resize: vertical;
+	line-height: 1.5;
+	width: 100%;
+	padding: 10px 14px;
+	border-radius: var(--radius-sm);
+	border: 1px solid var(--border-color);
+	background: var(--bg-input);
+	color: var(--text-primary);
+	font-size: 14px;
+	outline: none;
+}
+
+.runtime-chat-input:focus {
+	border-color: var(--accent-color);
+	box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.1);
+}
+
+/* ========================================
+   Runtime Chat Command Palette
+   ======================================== */
+.runtime-chat-command-palette {
+	position: absolute;
+	bottom: calc(100% + 10px);
+	left: 0;
+	right: 0;
+	z-index: 50;
+	display: grid;
+	gap: 4px;
+	max-height: min(360px, 46vh);
+	padding: 8px;
+	background: var(--bg-surface);
+	border: 1px solid var(--border-primary);
+	border-radius: var(--radius-sm);
+	box-shadow: var(--shadow-lg);
+	overflow-y: auto;
+	animation: slideUpFadeIn 0.18s ease-out;
+}
+
+.runtime-chat-command-head {
+	padding: 4px 8px 2px;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--text-tertiary);
+}
+
+@keyframes slideUpFadeIn {
+	from {
+		opacity: 0;
+		transform: translateY(8px) scale(0.99);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
+}
+
+.runtime-chat-command-palette::-webkit-scrollbar {
+	width: 6px;
+}
+
+.runtime-chat-command-palette::-webkit-scrollbar-thumb {
+	background: var(--border-primary);
+	border-radius: 3px;
+}
+
+.runtime-chat-command-item {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(140px, 38%);
+	align-items: center;
+	gap: 12px;
+	width: 100%;
+	min-height: 56px;
+	padding: 8px 10px;
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+	transition: border-color 0.14s ease, background 0.14s ease, transform 0.14s ease;
+}
+
+.runtime-chat-command-item:hover {
+	background: var(--bg-surface-hover);
+}
+
+.runtime-chat-command-item.active {
+	border-color: color-mix(in srgb, var(--accent) 26%, var(--border-primary));
+	background: color-mix(in srgb, var(--accent) 8%, transparent);
+	transform: translateX(2px);
+}
+
+.runtime-chat-command-main {
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.runtime-chat-command-name {
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--primary);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.runtime-chat-command-desc {
+	font-size: 12px;
+	color: var(--text-secondary);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.runtime-chat-command-side {
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 4px;
+	text-align: right;
+}
+
+.runtime-chat-command-side code {
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 11px;
+	font-family: var(--font-mono);
+	padding: 2px 6px;
+	border-radius: 4px;
+	background: var(--bg-app);
+	border: 1px solid var(--border-subtle);
+	color: var(--text-tertiary);
+}
+
+.runtime-chat-command-meta {
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 10px;
+	color: var(--text-tertiary);
+}
+
+/* 无子命令时的帮助卡片 */
+.runtime-chat-command-help {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 12px 14px;
+}
+
+.runtime-chat-command-help-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.runtime-chat-command-help-name {
+	font-size: 14px;
+	font-weight: 600;
+	font-family: var(--font-mono);
+	color: var(--primary);
+}
+
+.runtime-chat-command-help-kicker {
+	font-size: 10px;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--text-tertiary);
+}
+
+.runtime-chat-command-help-desc {
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--text-secondary);
+}
+
+.runtime-chat-command-help-grid {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.runtime-chat-command-help-row {
+	display: grid;
+	grid-template-columns: 48px minmax(0, 1fr);
+	align-items: center;
+	gap: 10px;
+}
+
+.runtime-chat-command-help-key {
+	font-size: 11px;
+	color: var(--text-tertiary);
+}
+
+.runtime-chat-command-help-val {
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 11px;
+	font-family: var(--font-mono);
+	padding: 2px 6px;
+	border-radius: 4px;
+	background: var(--bg-app);
+	border: 1px solid var(--border-subtle);
+	color: var(--text-secondary);
+}
+
+.runtime-chat-command-help-note {
+	font-size: 11px;
+	color: var(--text-tertiary);
+}
+
+/* Runtime Images */
+.runtime-chat-image {
+	display: block;
+	max-width: min(720px, 100%);
+	border-radius: var(--radius-sm);
+	border: 1px solid var(--border-color);
+	margin: 6px 0;
+	cursor: zoom-in;
+	transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.runtime-chat-image:hover {
+	border-color: color-mix(in srgb, var(--accent) 42%, var(--border-color));
+	box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+	transform: translateY(-1px);
+}
+
+/* Runtime File Cards */
+.runtime-chat-file-card {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 14px;
+	margin: 6px 0;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-sm);
+	background: var(--bg-app);
+	max-width: 360px;
+}
+
+.runtime-chat-file-name {
+	font-size: 13px;
+	font-weight: 500;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.runtime-chat-file-size {
+	font-size: 11px;
+	color: var(--text-tertiary);
+	margin-top: 2px;
+}
+
+/* ========================================
+   Connection Setup (Android)
+   ======================================== */
+.connection-setup-container {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 100vh;
+	padding: 24px;
+	background: var(--bg-app);
+}
+
+.connection-setup {
+	width: 100%;
+	max-width: 480px;
+	background: var(--bg-surface);
+	border: 1px solid var(--border-primary);
+	border-radius: var(--radius-md);
+	padding: 32px;
+	box-shadow: var(--shadow-lg);
+	animation: fadeInUp 0.3s ease-out;
+}
+
+.setup-header {
+	text-align: center;
+	margin-bottom: 32px;
+}
+
+.setup-logo {
+	color: var(--primary);
+	margin: 0 auto 16px;
+}
+
+.setup-header h2 {
+	margin: 0 0 8px;
+	font-size: 24px;
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.setup-header p {
+	margin: 0;
+	font-size: 14px;
+	color: var(--text-secondary);
+}
+
+.recent-configs {
+	margin-bottom: 24px;
+}
+
+.recent-configs h3 {
+	margin: 0 0 12px;
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--text-secondary);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+
+.config-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.config-item {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	width: 100%;
+	padding: 12px 16px;
+	background: var(--bg-surface-hover);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-sm);
+	font-size: 14px;
+	color: var(--text-primary);
+	text-align: left;
+	cursor: pointer;
+	transition: all 0.2s;
+}
+
+.config-item:hover {
+	background: var(--bg-deep);
+	border-color: var(--primary);
+	transform: translateX(4px);
+}
+
+.config-item svg {
+	flex-shrink: 0;
+	color: var(--text-tertiary);
+}
+
+.config-item span {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.connection-setup form {
+	display: flex;
+	flex-direction: column;
+	gap: 20px;
+}
+
+.connection-setup label {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.label-text {
+	font-size: 14px;
+	font-weight: 500;
+	color: var(--text-primary);
+}
+
+.connection-setup input[type="url"],
+.connection-setup input[type="password"] {
+	width: 100%;
+	padding: 12px 16px;
+	background: var(--bg-input);
+	border: 1px solid var(--border-primary);
+	border-radius: var(--radius-sm);
+	font-size: 15px;
+	color: var(--text-primary);
+	transition: all 0.2s;
+}
+
+.connection-setup input:focus {
+	outline: none;
+	border-color: var(--focus-border);
+	box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.setup-error {
+	margin: 0;
+	padding: 12px 16px;
+	background: var(--status-error-bg);
+	border: 1px solid var(--status-error);
+	border-radius: var(--radius-sm);
+	font-size: 14px;
+	color: var(--status-error-text);
+}
+
+.connect-button {
+	width: 100%;
+	padding: 14px 24px;
+	background: var(--primary);
+	border: none;
+	border-radius: var(--radius-sm);
+	font-size: 16px;
+	font-weight: 600;
+	color: white;
+	cursor: pointer;
+	transition: all 0.2s;
+}
+
+.connect-button:hover {
+	background: var(--primary-hover);
+	transform: translateY(-1px);
+	box-shadow: var(--shadow-md);
+}
+
+.connect-button:active {
+	transform: translateY(0);
+}
+
+.setup-hint {
+	display: flex;
+	gap: 12px;
+	padding: 16px;
+	background: var(--bg-glow);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-sm);
+	margin-top: 8px;
+}
+
+.setup-hint svg {
+	flex-shrink: 0;
+	color: var(--primary);
+	margin-top: 2px;
+}
+
+.setup-hint p {
+	margin: 0;
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--text-secondary);
+}
+
+/* ========================================
+   Image Viewer Modal
+   ======================================== */
+.runtime-image-viewer {
+	position: fixed;
+	inset: 0;
+	z-index: 9999;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 28px;
+	background: color-mix(in srgb, #020617 78%, transparent);
+	backdrop-filter: blur(7px);
+	cursor: zoom-out;
+	animation: fadeIn 0.18s ease;
+}
+
+.runtime-image-viewer-stage {
+	max-width: calc(100vw - 56px);
+	max-height: calc(100dvh - 128px);
+	overflow: auto;
+	padding: 8px;
+	cursor: default;
+	touch-action: pan-x pan-y pinch-zoom;
+}
+
+.runtime-image-viewer-figure {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 10px;
+	margin: 0;
+	max-width: min(1120px, calc(100vw - 56px));
+	max-height: calc(100dvh - 56px);
+	cursor: default;
+	transform-origin: center center;
+}
+
+.runtime-image-viewer img,
+.runtime-image-viewer-image {
+	display: block;
+	max-width: min(1120px, calc(100vw - 56px));
+	max-height: calc(100dvh - 104px);
+	object-fit: contain;
+	animation: zoomIn 0.3s ease;
+	border-radius: var(--radius-sm);
+	background: #020617;
+	box-shadow: 0 24px 70px rgba(2, 6, 23, 0.46);
+}
+
+.runtime-image-viewer-caption {
+	max-width: min(720px, calc(100vw - 56px));
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: rgba(255, 255, 255, 0.78);
+	font-size: 12px;
+	text-align: center;
+}
+
+.runtime-image-viewer-toolbar {
+	position: fixed;
+	left: 50%;
+	bottom: max(16px, env(safe-area-inset-bottom));
+	transform: translateX(-50%);
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px;
+	border-radius: 999px;
+	background: rgba(15, 23, 42, 0.58);
+	backdrop-filter: blur(10px);
+	border: 1px solid rgba(255, 255, 255, 0.18);
+	z-index: 10000;
+}
+
+.runtime-image-viewer-toolbar button {
+	width: 44px;
+	height: 44px;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, 0.14);
+	color: #ffffff;
+	font-size: 14px;
+	font-weight: 700;
+}
+
+.runtime-image-viewer-toolbar button:hover,
+.runtime-image-viewer-toolbar button:focus-visible {
+	background: rgba(255, 255, 255, 0.24);
+}
+
+.image-viewer-close-button,
+.runtime-image-viewer-close {
+	position: fixed;
+	top: max(16px, env(safe-area-inset-top));
+	right: max(16px, env(safe-area-inset-right));
+	width: 44px;
+	height: 44px;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, 0.15);
+	backdrop-filter: blur(10px);
+	border: 1px solid rgba(255, 255, 255, 0.2);
+	color: #ffffff;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	font-size: 20px;
+	line-height: 1;
+	transition: all 0.2s;
+	z-index: 10000;
+}
+
+.image-viewer-close-button:hover,
+.runtime-image-viewer-close:hover {
+	background: rgba(255, 255, 255, 0.25);
+	transform: scale(1.1);
+}
+
+.image-viewer-close-button:active,
+.runtime-image-viewer-close:active {
+	transform: scale(0.95);
+}
+
+@keyframes fadeIn {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes zoomIn {
+	from {
+		opacity: 0;
+		transform: scale(0.9);
+	}
+	to {
+		opacity: 1;
+		transform: scale(1);
+	}
+}
+
+/* ========================================
+   Runtime Chat Stage (from webui components.css)
+   ======================================== */
+.runtime-chat-stage {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	max-width: min(260px, 100%);
+	padding: 2px 8px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+	color: var(--accent);
+	font-size: 11px;
+	line-height: 1.25;
+	letter-spacing: 0;
+	text-transform: none;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.runtime-chat-stage[hidden] {
+	display: none;
+}
+
+.runtime-chat-stage.is-final {
+	background: color-mix(in srgb, var(--success) 12%, transparent);
+	color: var(--success);
+}
+
+.runtime-chat-stage::before {
+	content: "";
+	width: 5px;
+	height: 5px;
+	flex: 0 0 auto;
+	border-radius: 999px;
+	background: currentColor;
+	opacity: 0.85;
+}
+
+/* 消息时间戳（用户要求保留；WebUI 无此元素，置于 role 行末尾，小号灰色） */
+.runtime-chat-time {
+	margin-left: auto;
+	font-size: 11px;
+	color: var(--text-tertiary);
+	letter-spacing: 0;
+	text-transform: none;
+	white-space: nowrap;
+}

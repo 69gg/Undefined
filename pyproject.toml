@@ -109,7 +109,7 @@ include = [
 python_version = "3.12"
 strict = true
 ignore_missing_imports = true
-exclude = ["^code/"]
+exclude = ["^code/", "^apps/.*/src-tauri/target/"]
 
 [tool.ruff]
 exclude = ["code"]

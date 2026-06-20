@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,8 @@ from aiohttp import web
 
 from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
 from Undefined.api.routes import chat as runtime_api_chat
+from Undefined.utils import io as async_io
+from Undefined.utils.paths import ensure_dir
 
 
 @pytest.fixture(autouse=True)
@@ -77,7 +80,11 @@ def _context() -> RuntimeAPIContext:
             superadmin_qq=10001,
             bot_qq=20002,
         ),
-        onebot=SimpleNamespace(connection_status=lambda: {}),
+        onebot=SimpleNamespace(
+            connection_status=lambda: {},
+            get_image=lambda uid: None,
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
         ai=SimpleNamespace(
             attachment_registry=object(),
             memory_storage=SimpleNamespace(count=lambda: 0),
@@ -97,6 +104,37 @@ async def _last_webchat_record(server: RuntimeAPIServer) -> dict[str, Any]:
     assert isinstance(messages, list)
     assert messages
     return cast(dict[str, Any], messages[-1])
+
+
+async def _store_runtime_attachment(
+    attachment_id: str = "attachment123",
+    *,
+    name: str = "note.txt",
+    content: bytes = b"runtime attachment",
+) -> dict[str, Any]:
+    ensure_dir(runtime_api_chat._CHAT_ATTACHMENT_BLOB_DIR)
+    ensure_dir(runtime_api_chat._CHAT_ATTACHMENT_META_DIR)
+    await asyncio.to_thread(
+        runtime_api_chat._chat_attachment_blob_path(attachment_id).write_bytes,
+        content,
+    )
+    metadata = runtime_api_chat._chat_attachment_response_metadata(
+        {
+            "id": attachment_id,
+            "name": name,
+            "size": len(content),
+            "media_type": "text/plain",
+            "kind": "file",
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "created_at": "2026-06-08T10:00:00",
+        }
+    )
+    await async_io.write_json(
+        runtime_api_chat._chat_attachment_meta_path(attachment_id),
+        metadata,
+        use_lock=True,
+    )
+    return metadata
 
 
 def _decode_sse(writes: list[bytes]) -> list[dict[str, Any]]:
@@ -187,20 +225,6 @@ async def test_chat_job_events_after_reconnect_and_disconnect_does_not_cancel(
     release = asyncio.Event()
     cancelled = False
 
-    async def _fake_render_message_with_pic_placeholders(
-        message: str,
-        *,
-        registry: Any,
-        scope_key: str,
-        strict: bool,
-    ) -> Any:
-        _ = registry, scope_key, strict
-        return SimpleNamespace(
-            delivery_text=f"rendered {message}",
-            history_text=f"history {message}",
-            attachments=[],
-        )
-
     async def _fake_run_webui_chat(_ctx: Any, *, text: str, send_output: Any) -> str:
         nonlocal cancelled
         assert text == "hello"
@@ -214,11 +238,6 @@ async def test_chat_job_events_after_reconnect_and_disconnect_does_not_cancel(
             cancelled = True
             raise
 
-    monkeypatch.setattr(
-        runtime_api_chat,
-        "render_message_with_pic_placeholders",
-        _fake_render_message_with_pic_placeholders,
-    )
     monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
     monkeypatch.setattr(web, "StreamResponse", _DummyStreamResponse)
 
@@ -287,7 +306,7 @@ async def test_chat_job_events_after_reconnect_and_disconnect_does_not_cancel(
         "done",
     ]
     message_events = [event for event in second_events if event["event"] == "message"]
-    assert message_events[0]["payload"]["content"] == "rendered second"
+    assert message_events[0]["payload"]["content"] == "second"
 
 
 @pytest.mark.asyncio
@@ -303,6 +322,421 @@ async def test_chat_job_cancel_unknown_returns_404() -> None:
 
     assert response.status == 404
     assert payload["error"] == "Job not found"
+
+
+@pytest.mark.asyncio
+async def test_chat_jobs_are_concurrent_across_conversations_and_single_flight_per_conversation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = asyncio.Event()
+
+    async def _fake_run_webui_chat(_ctx: Any, **_kwargs: Any) -> str:
+        await release.wait()
+        return "chat"
+
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    first = await server._chat_job_manager.conversation_store.create_conversation(
+        title="first"
+    )
+    second = await server._chat_job_manager.conversation_store.create_conversation(
+        title="second"
+    )
+
+    first_response = await server._chat_job_create_handler(
+        cast(
+            web.Request,
+            cast(
+                Any,
+                _DummyRequest(
+                    query={},
+                    _json={
+                        "conversation_id": first["id"],
+                        "message": "first message",
+                    },
+                ),
+            ),
+        )
+    )
+    second_response = await server._chat_job_create_handler(
+        cast(
+            web.Request,
+            cast(
+                Any,
+                _DummyRequest(
+                    query={},
+                    _json={
+                        "conversation_id": second["id"],
+                        "message": "second message",
+                    },
+                ),
+            ),
+        )
+    )
+    duplicate_response = await server._chat_job_create_handler(
+        cast(
+            web.Request,
+            cast(
+                Any,
+                _DummyRequest(
+                    query={},
+                    _json={
+                        "conversation_id": first["id"],
+                        "message": "duplicate message",
+                    },
+                ),
+            ),
+        )
+    )
+
+    assert first_response.status == 202
+    assert second_response.status == 202
+    assert duplicate_response.status == 409
+
+    release.set()
+    await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_chat_job_active_returns_jobs_array_and_compatible_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = asyncio.Event()
+
+    async def _fake_run_webui_chat(_ctx: Any, **_kwargs: Any) -> str:
+        await release.wait()
+        return "chat"
+
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    first = await server._chat_job_manager.conversation_store.create_conversation()
+    second = await server._chat_job_manager.conversation_store.create_conversation()
+    first_job = await server._chat_job_manager.create_job("first", str(first["id"]))
+    second_job = await server._chat_job_manager.create_job("second", str(second["id"]))
+
+    response = await server._chat_job_active_handler(
+        cast(web.Request, cast(Any, _DummyRequest(query={})))
+    )
+    payload = json.loads(response.text or "{}")
+    filtered_response = await server._chat_job_active_handler(
+        cast(
+            web.Request,
+            cast(
+                Any,
+                _DummyRequest(query={"conversation_id": str(second["id"])}),
+            ),
+        )
+    )
+    filtered_payload = json.loads(filtered_response.text or "{}")
+
+    assert {item["job_id"] for item in payload["jobs"]} == {
+        first_job.job_id,
+        second_job.job_id,
+    }
+    assert payload["job"]["job_id"] == second_job.job_id
+    assert [item["job_id"] for item in filtered_payload["jobs"]] == [second_job.job_id]
+    assert filtered_payload["job"]["job_id"] == second_job.job_id
+    release.set()
+    await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_chat_conversations_active_job_compatible_field_uses_latest_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = asyncio.Event()
+
+    async def _fake_run_webui_chat(_ctx: Any, **_kwargs: Any) -> str:
+        await release.wait()
+        return "chat"
+
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    first = await server._chat_job_manager.conversation_store.create_conversation()
+    second = await server._chat_job_manager.conversation_store.create_conversation()
+    first_job = await server._chat_job_manager.create_job("first", str(first["id"]))
+    second_job = await server._chat_job_manager.create_job("second", str(second["id"]))
+
+    response = await server._chat_conversations_handler(
+        cast(web.Request, cast(Any, _DummyRequest(query={})))
+    )
+    payload = json.loads(response.text or "{}")
+
+    assert payload["active_job"]["job_id"] == second_job.job_id
+    assert payload["active_job"]["job_id"] != first_job.job_id
+    release.set()
+    await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_chat_job_create_accepts_structured_message_and_persists_references(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_text: list[str] = []
+
+    async def _fake_run_webui_chat(_ctx: Any, *, text: str, **_kwargs: Any) -> str:
+        captured_text.append(text)
+        return "chat"
+
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    conversation = (
+        await server._chat_job_manager.conversation_store.create_conversation(
+            title="structured"
+        )
+    )
+    await server._chat_job_manager.conversation_store.append_message(
+        str(conversation["id"]),
+        role="bot",
+        text_content="可以引用的回复",
+        display_name="Bot",
+        user_name="Bot",
+    )
+    history_page = await server._chat_job_manager.conversation_store.get_history_page(
+        str(conversation["id"]), limit=1, before=None
+    )
+    source_message_id = str(history_page.records[0]["message_id"])
+
+    response = await server._chat_job_create_handler(
+        cast(
+            web.Request,
+            cast(
+                Any,
+                _DummyRequest(
+                    query={},
+                    _json={
+                        "conversation_id": str(conversation["id"]),
+                        "message": {
+                            "text": "请解释这段",
+                            "references": [
+                                {
+                                    "kind": "message",
+                                    "source_message_id": source_message_id,
+                                    "selected_text": "引用片段",
+                                }
+                            ],
+                        },
+                    },
+                ),
+            ),
+        )
+    )
+    payload = json.loads(response.text or "{}")
+
+    assert response.status == 202
+    assert payload["waiting_input"] is None
+    detail_request = cast(
+        web.Request,
+        cast(Any, _DummyRequest(match_info={"job_id": payload["job_id"]}, query={})),
+    )
+    for _ in range(20):
+        detail_response = await server._chat_job_detail_handler(detail_request)
+        detail_payload = json.loads(detail_response.text or "{}")
+        if detail_payload["status"] == "done":
+            break
+        await asyncio.sleep(0.01)
+    assert captured_text == [
+        f"> 引用 message:{source_message_id}\n> 引用片段\n\n请解释这段"
+    ]
+    request_history = (
+        await server._chat_job_manager.conversation_store.get_history_page(
+            str(conversation["id"]), limit=1, before=None
+        )
+    )
+    record = request_history.records[0]
+    assert record["message"] == captured_text[0]
+    assert record["references"][0]["source_message_id"] == source_message_id
+
+
+@pytest.mark.asyncio
+async def test_chat_job_create_structured_attachment_is_not_duplicated_in_prompt_or_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _fake_run_webui_chat(
+        _ctx: Any,
+        *,
+        text: str,
+        input_attachments: list[dict[str, str]],
+        record_input_history: bool,
+        **_kwargs: Any,
+    ) -> str:
+        captured["text"] = text
+        captured["input_attachments"] = input_attachments
+        captured["record_input_history"] = record_input_history
+        return "chat"
+
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    conversation = (
+        await server._chat_job_manager.conversation_store.create_conversation(
+            title="attachment"
+        )
+    )
+    attachment = await _store_runtime_attachment()
+
+    response = await server._chat_job_create_handler(
+        cast(
+            web.Request,
+            cast(
+                Any,
+                _DummyRequest(
+                    query={},
+                    _json={
+                        "conversation_id": str(conversation["id"]),
+                        "message": {
+                            "text": "请分析附件",
+                            "attachment_ids": [attachment["id"]],
+                        },
+                    },
+                ),
+            ),
+        )
+    )
+    payload = json.loads(response.text or "{}")
+
+    assert response.status == 202
+    detail_request = cast(
+        web.Request,
+        cast(Any, _DummyRequest(match_info={"job_id": payload["job_id"]}, query={})),
+    )
+    for _ in range(20):
+        detail_response = await server._chat_job_detail_handler(detail_request)
+        detail_payload = json.loads(detail_response.text or "{}")
+        if detail_payload["status"] == "done":
+            break
+        await asyncio.sleep(0.01)
+
+    assert captured["text"] == "请分析附件"
+    assert "<attachment" not in captured["text"]
+    assert captured["input_attachments"][0]["uid"] == attachment["id"]
+    assert captured["record_input_history"] is False
+    request_history = (
+        await server._chat_job_manager.conversation_store.get_history_page(
+            str(conversation["id"]), limit=1, before=None
+        )
+    )
+    record = request_history.records[0]
+    assert record["message"] == "请分析附件"
+    assert "<attachment" not in record["message"]
+    assert record["attachments"][0]["uid"] == attachment["id"]
+
+
+@pytest.mark.asyncio
+async def test_requires_action_event_is_preserved_for_runtime_stream_and_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_run_webui_chat(
+        _ctx: Any,
+        *,
+        webchat_event_callback: Any,
+        **_kwargs: Any,
+    ) -> str:
+        await webchat_event_callback(
+            "requires_action",
+            {
+                "action_id": "approval-1",
+                "kind": "confirm",
+                "detail": "需要确认",
+                "secret": "should-redact",
+            },
+        )
+        return "chat"
+
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    job = await server._chat_job_manager.create_job("需要人工确认")
+
+    detail_request = cast(
+        web.Request,
+        cast(Any, _DummyRequest(match_info={"job_id": job.job_id}, query={})),
+    )
+    for _ in range(20):
+        detail_response = await server._chat_job_detail_handler(detail_request)
+        detail_payload = json.loads(detail_response.text or "{}")
+        if detail_payload["status"] == "done":
+            break
+        await asyncio.sleep(0.01)
+
+    events_request = cast(
+        web.Request,
+        cast(
+            Any,
+            _DummyRequest(
+                match_info={"job_id": job.job_id},
+                query={"after": "0", "format": "json"},
+                headers={"Accept": "application/json"},
+            ),
+        ),
+    )
+    events_response = cast(
+        web.Response, await server._chat_job_events_handler(events_request)
+    )
+    events_payload = json.loads(events_response.text or "{}")
+    requires_action = [
+        item for item in events_payload["events"] if item["event"] == "requires_action"
+    ]
+
+    assert requires_action
+    assert requires_action[0]["payload"]["action_id"] == "approval-1"
+    assert requires_action[0]["payload"]["secret"] == "[redacted]"
+    request_history = (
+        await server._chat_job_manager.conversation_store.get_history_page(
+            job.conversation_id, limit=1, before=None
+        )
+    )
+    webchat_events = request_history.records[0]["webchat"]["events"]
+    assert any(item["event"] == "requires_action" for item in webchat_events)
+
+
+@pytest.mark.asyncio
+async def test_chat_job_create_rejects_empty_structured_message() -> None:
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+
+    response = await server._chat_job_create_handler(
+        cast(
+            web.Request,
+            cast(
+                Any,
+                _DummyRequest(
+                    query={},
+                    _json={"message": {"text": "  ", "attachment_ids": []}},
+                ),
+            ),
+        )
+    )
+    payload = json.loads(response.text or "{}")
+
+    assert response.status == 400
+    assert payload["error"] == "message is required"
+
+
+@pytest.mark.asyncio
+async def test_chat_job_create_rejects_unknown_structured_attachment() -> None:
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+
+    response = await server._chat_job_create_handler(
+        cast(
+            web.Request,
+            cast(
+                Any,
+                _DummyRequest(
+                    query={},
+                    _json={
+                        "message": {
+                            "text": "hello",
+                            "attachment_ids": ["missing-attachment"],
+                        }
+                    },
+                ),
+            ),
+        )
+    )
+    payload = json.loads(response.text or "{}")
+
+    assert response.status == 404
+    assert payload["error"] == "Attachment not found"
 
 
 @pytest.mark.asyncio
@@ -660,20 +1094,6 @@ async def test_chat_job_persists_webchat_lifecycle_history(
         async def flush_pending_saves(self) -> None:
             return None
 
-    async def _fake_render_message_with_pic_placeholders(
-        message: str,
-        *,
-        registry: Any,
-        scope_key: str,
-        strict: bool,
-    ) -> Any:
-        _ = registry, scope_key, strict
-        return SimpleNamespace(
-            delivery_text=f"rendered {message}",
-            history_text=f"history {message}",
-            attachments=[],
-        )
-
     async def _fake_run_webui_chat(
         _ctx: Any,
         *,
@@ -753,11 +1173,6 @@ async def test_chat_job_persists_webchat_lifecycle_history(
 
     context = _context()
     context.history_manager = _History()
-    monkeypatch.setattr(
-        runtime_api_chat,
-        "render_message_with_pic_placeholders",
-        _fake_render_message_with_pic_placeholders,
-    )
     monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
     server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
 
@@ -781,7 +1196,7 @@ async def test_chat_job_persists_webchat_lifecycle_history(
     assert history_calls == []
     call = await _last_webchat_record(server)
     assert call["user_id"] == "42"
-    assert call["message"] == "history final"
+    assert call["message"] == "final"
     webchat = call["webchat"]
     assert webchat["display_only"] is True
     assert webchat["job_id"] == job_id
@@ -802,7 +1217,7 @@ async def test_chat_job_persists_webchat_lifecycle_history(
     assert webchat["events"][2]["payload"]["parent_webchat_call_id"] == "agent_1"
     assert webchat["events"][3]["payload"]["result_preview"] == "nested result"
     assert "duration_ms" in webchat["events"][3]["payload"]
-    assert webchat["events"][4]["payload"]["content"] == "rendered final"
+    assert webchat["events"][4]["payload"]["content"] == "final"
     assert webchat["events"][4]["payload"]["parent_webchat_call_id"] == "agent_1"
     assert webchat["events"][5]["payload"]["result_preview"] == "agent result"
     assert len(webchat["calls"]) == 1
@@ -821,7 +1236,7 @@ async def test_chat_job_persists_webchat_lifecycle_history(
     ]
     assert webchat["calls"][0]["timeline"][0]["stage"] == "waiting_model"
     assert webchat["calls"][0]["timeline"][1]["call"]["name"] == "search"
-    assert webchat["calls"][0]["timeline"][2]["content"] == "rendered final"
+    assert webchat["calls"][0]["timeline"][2]["content"] == "final"
 
 
 @pytest.mark.asyncio

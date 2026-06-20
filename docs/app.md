@@ -1,6 +1,13 @@
 # 跨平台 App 与远程管理
 
-Undefined 当前的跨平台 App（`apps/undefined-console/`）定位为：
+Undefined 当前包含两个 Tauri App：
+
+- `apps/undefined-console/`：跨平台管理 Console，定位为远程 WebUI 连接器 / 启动器。
+- `apps/undefined-chat/`：原生优先 WebChat 客户端，直接连接 Runtime API。完整说明见 [Undefined Chat](undefined-chat.md)。
+
+> 本文第 2–10 节描述的是 **Console** 的连接器 / 启动器定位（不再维护平行后台、轻量打开远程 WebUI）。**Undefined Chat 不同**：它是直连 Runtime API 的原生聊天客户端，自带会话/历史/附件/工具调用渲染、中英双语、HTML 内联渲染与独立预览窗口、移动端适配等完整能力，详见 [Undefined Chat](undefined-chat.md)，不要把下文 Console 的“尽量轻”原则套用到 Chat。
+
+Undefined Console 定位为：
 
 - 保存多个远程连接档案
 - 对 Management API / Runtime API 做基础连通性探测
@@ -121,16 +128,17 @@ Android 端仍然走同一套连接模型，但 UI 目标是：
 每次 `v*` tag 发布时，Release workflow 计划同步上传：
 
 - Python：`wheel` + `sdist`
-- Windows：`.exe` + `.msi`
-- Linux：`.AppImage` + `.deb`
-- macOS：`.dmg`（Intel / Apple Silicon）
-- Android：`.apk`
+- Console：`Undefined-Console-*` 桌面端和 Android 产物
+- Chat：`Undefined-Chat-*` 桌面端和 Android 产物
+
+两个 App 的版本都必须与 `pyproject.toml` 主版本一致。使用 `uv run python scripts/bump_version.py <version>` 统一更新版本；pre-tag 和 Release workflow 会校验 Console / Chat 的 `package.json`、`package-lock.json`、`Cargo.toml`、`tauri.conf.json` 和 `Cargo.lock`。
 
 ## 9. 本地开发
 
 App 位于：
 
 - `apps/undefined-console/`
+- `apps/undefined-chat/`
 
 常用命令：
 
@@ -143,6 +151,17 @@ npm run tauri:build
 npm run tauri:build:no-strip
 npm run tauri:android:init
 npm run tauri:android -- --apk
+```
+
+Undefined Chat 使用同一套命令：
+
+```bash
+cd apps/undefined-chat
+npm install
+npm run check
+npm run tauri:dev
+npm run tauri:android:init
+npm run tauri:android:prepare:check
 ```
 
 ### 典型本地调试流程

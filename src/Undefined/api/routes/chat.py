@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import json
 import logging
+import mimetypes
+import os
 import re
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -13,8 +16,10 @@ from datetime import datetime
 from pathlib import Path
 import time
 from typing import Any, Awaitable, Callable
+from urllib.parse import unquote
 from uuid import uuid4
 
+import aiofiles
 from aiohttp import web
 from aiohttp.web_response import Response
 
@@ -38,13 +43,13 @@ from Undefined.attachments import (
     attachment_refs_to_xml,
     build_attachment_scope,
     register_message_attachments,
-    render_message_with_pic_placeholders,
 )
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
 from Undefined.services.queue_manager import QUEUE_LANE_SUPERADMIN
 from Undefined.utils.common import message_to_segments
 from Undefined.utils import io as async_io
+from Undefined.utils.paths import WEBCHAT_DIR, ensure_dir
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
 
 logger = logging.getLogger(__name__)
@@ -55,7 +60,78 @@ _CHAT_SSE_KEEPALIVE_SECONDS = 10.0
 _CHAT_STAGE_REFRESH_SECONDS = 1.0
 _CHAT_JOB_EVENT_BUFFER_LIMIT = 1000
 SHUTDOWN_TASK_TIMEOUT = 5.0
+
+# register_message_attachments 产出的可读占位（如 ``[图片 uid=pic_xxx name=foo]``）
+_WEBCHAT_BRACKET_REF_PATTERN = re.compile(r"\[[^\]]*?\buid=(?P<uid>[^\s\]]+)[^\]]*?\]")
+# 文本中所有 <attachment.../> / <pic.../> 引用
+_WEBCHAT_ATTACHMENT_TAG_PATTERN = re.compile(
+    r"<(?:attachment|pic)\s+[^>]*?\buid=[\"']?(?P<uid>[^\"'\s/>]+)[\"']?[^>]*?/?>",
+    re.IGNORECASE,
+)
+
+
+async def _normalize_webchat_output(
+    content: str,
+    *,
+    registry: Any,
+    scope_key: str | None,
+    resolve_image_url: Callable[[str], Awaitable[str | None]] | None,
+    get_forward_messages: Callable[[str], Awaitable[list[dict[str, Any]]]] | None,
+) -> tuple[str, list[dict[str, str]]]:
+    """归一化 webchat 命令输出中的内联媒体，统一为 ``<attachment uid/>``。
+
+    命令输出可能包含原始 ``[CQ:image,file=base64://...]`` / ``file://`` 图片。
+    若原样写入历史，会把整段 base64 喂给后续 LLM（导致 token 爆炸），也让 API
+    返回 base64。这里先把内联媒体注册为附件、转成 ``<attachment uid/>`` 占位，
+    客户端再按 UID 经 ``/api/v1/chat/attachments/{uid}/preview`` 拉取渲染。
+
+    Args:
+        content: 命令输出原文。
+        registry: 附件注册表。
+        scope_key: 当前 webchat 会话作用域键。
+        resolve_image_url: 将 ``file`` 字段解析为可下载 URL 的回调。
+        get_forward_messages: 拉取合并转发子消息的回调。
+
+    Returns:
+        ``(归一化文本, 附件引用列表)``；附件为 :meth:`AttachmentRecord.prompt_ref` 字典。
+    """
+    if registry is None or not scope_key or not content.strip():
+        return content, []
+    segments = message_to_segments(content)
+    registered = await register_message_attachments(
+        registry=registry,
+        segments=segments,
+        scope_key=scope_key,
+        resolve_image_url=resolve_image_url,
+        get_forward_messages=get_forward_messages,
+    )
+    text = registered.normalized_text or content
+    # ``[图片 uid=X name=Y]`` / ``[文件 uid=X]`` → ``<attachment uid="X"/>``
+    text = _WEBCHAT_BRACKET_REF_PATTERN.sub(
+        lambda match: f'<attachment uid="{match.group("uid")}"/>', text
+    )
+    # 收集文中所有附件引用（含技能预先注册、已是 <attachment>/<pic> 标签的）
+    attachments: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for match in _WEBCHAT_ATTACHMENT_TAG_PATTERN.finditer(text):
+        uid = str(match.group("uid") or "").strip()
+        if not uid or uid in seen:
+            continue
+        seen.add(uid)
+        record = await registry.resolve_async(uid, scope_key)
+        if record is not None:
+            attachments.append(record.prompt_ref())
+    return text, attachments
+
+
 _PREVIEW_LIMIT = 800
+_CHAT_ATTACHMENT_MAX_NAME_LENGTH = 128
+_CHAT_ATTACHMENT_UPLOAD_FIELD = "file"
+_CHAT_ATTACHMENT_CHUNK_SIZE = 1024 * 256
+_CHAT_ATTACHMENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,96}$")
+_CHAT_ATTACHMENT_STORAGE_DIR = WEBCHAT_DIR / "attachments"
+_CHAT_ATTACHMENT_BLOB_DIR = _CHAT_ATTACHMENT_STORAGE_DIR / "blobs"
+_CHAT_ATTACHMENT_META_DIR = _CHAT_ATTACHMENT_STORAGE_DIR / "metadata"
 _WEBCHAT_SEND_MESSAGE_TOOLS = frozenset(
     {
         "messages.send_message",
@@ -68,8 +144,12 @@ _WEBCHAT_LIFECYCLE_EVENTS = frozenset(
     {"tool_start", "tool_end", "agent_start", "agent_end"}
 )
 _WEBCHAT_AGENT_STAGE_EVENTS = frozenset({"agent_stage"})
+_WEBCHAT_ACTION_EVENTS = frozenset({"requires_action"})
 _WEBCHAT_HISTORY_EVENTS = (
-    _WEBCHAT_LIFECYCLE_EVENTS | _WEBCHAT_AGENT_STAGE_EVENTS | frozenset({"message"})
+    _WEBCHAT_LIFECYCLE_EVENTS
+    | _WEBCHAT_AGENT_STAGE_EVENTS
+    | _WEBCHAT_ACTION_EVENTS
+    | frozenset({"message"})
 )
 _WEBCHAT_STAGE_EVENTS = frozenset({"stage"})
 _REDACTED_PREVIEW_VALUE = "[redacted]"
@@ -129,6 +209,17 @@ class ChatJobEvent:
     payload: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class StructuredChatMessage:
+    text: str
+    attachments: list[dict[str, str]]
+    references: list[dict[str, Any]]
+
+
+class ChatAttachmentNotFoundError(LookupError):
+    """Raised when a structured WebChat payload references a missing attachment."""
+
+
 @dataclass
 class ChatJob:
     job_id: str
@@ -146,6 +237,8 @@ class ChatJob:
     outputs: list[str] = field(default_factory=list)
     history_outputs: list[str] = field(default_factory=list)
     history_attachments: list[dict[str, str]] = field(default_factory=list)
+    user_history_attachments: list[dict[str, str]] = field(default_factory=list)
+    user_history_references: list[dict[str, Any]] = field(default_factory=list)
     webchat_events: list[ChatJobEvent] = field(default_factory=list)
     events: list[ChatJobEvent] = field(default_factory=list)
     next_seq: int = 1
@@ -161,6 +254,7 @@ class ChatJob:
     agent_current_stage: dict[str, str] = field(default_factory=dict)
     agent_stage_started_at: dict[str, float] = field(default_factory=dict)
     agent_stage_payloads: dict[str, dict[str, Any]] = field(default_factory=dict)
+    user_history_pre_recorded: bool = False
 
     def snapshot(self) -> dict[str, Any]:
         now = time.time()
@@ -187,6 +281,7 @@ class ChatJob:
             "current_agent_stages": self.current_agent_stage_snapshots(now),
             "current_tool_calls": self.current_tool_call_snapshots(now),
             "history_finalized": self.history_finalized,
+            "waiting_input": None,
         }
 
     def current_stage_event(self) -> ChatJobEvent | None:
@@ -292,7 +387,13 @@ class ChatJobManager:
         self.conversation_store = WebChatConversationStore()
 
     async def create_job(
-        self, text: str, conversation_id: str | None = None
+        self,
+        text: str,
+        conversation_id: str | None = None,
+        *,
+        user_history_attachments: list[dict[str, str]] | None = None,
+        user_history_references: list[dict[str, Any]] | None = None,
+        pre_record_user_history: bool = False,
     ) -> ChatJob:
         await self.conversation_store.ensure_ready(self._ctx.history_manager)
         requested_conversation_id = str(conversation_id or "").strip()
@@ -312,14 +413,28 @@ class ChatJobManager:
             created_at=now,
             updated_at=now,
             conversation_id=resolved_conversation_id,
+            user_history_attachments=list(user_history_attachments or []),
+            user_history_references=list(user_history_references or []),
+            user_history_pre_recorded=pre_record_user_history,
         )
         async with self._lock:
             if any(
                 self._job_blocks_history_mutation(existing)
                 for existing in self._jobs.values()
+                if existing.conversation_id == resolved_conversation_id
             ):
                 raise RuntimeError("Chat job is still running")
             self._jobs[job.job_id] = job
+        if pre_record_user_history:
+            await self.conversation_store.append_message(
+                resolved_conversation_id,
+                role="user",
+                text_content=text,
+                display_name=_VIRTUAL_USER_NAME,
+                user_name=_VIRTUAL_USER_NAME,
+                attachments=job.user_history_attachments or None,
+                references=job.user_history_references or None,
+            )
         logger.info(
             "[RuntimeAPI][WebChat] 创建 job: job_id=%s conversation_id=%s text_len=%s",
             job.job_id,
@@ -380,28 +495,41 @@ class ChatJobManager:
     async def get_active_job(
         self, conversation_id: str | None = None
     ) -> ChatJob | None:
+        candidates = await self.get_active_jobs(conversation_id)
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: item.created_at)
+
+    async def get_active_jobs(
+        self, conversation_id: str | None = None
+    ) -> list[ChatJob]:
+        resolved_conversation_id = str(conversation_id or "").strip()
         async with self._lock:
             candidates = [
                 job
                 for job in self._jobs.values()
                 if self._job_blocks_history_mutation(job)
                 and (
-                    not conversation_id
-                    or job.conversation_id == str(conversation_id).strip()
+                    not resolved_conversation_id
+                    or job.conversation_id == resolved_conversation_id
                 )
             ]
-        if not candidates:
-            return None
-        return max(candidates, key=lambda item: item.created_at)
+        return sorted(candidates, key=lambda item: item.created_at)
 
     async def snapshot(self, job: ChatJob) -> dict[str, Any]:
         async with job.changed:
             return job.snapshot()
 
-    async def has_running_job(self) -> bool:
+    async def has_running_job(self, conversation_id: str | None = None) -> bool:
+        resolved_conversation_id = str(conversation_id or "").strip()
         async with self._lock:
             return any(
-                self._job_blocks_history_mutation(job) for job in self._jobs.values()
+                self._job_blocks_history_mutation(job)
+                and (
+                    not resolved_conversation_id
+                    or job.conversation_id == resolved_conversation_id
+                )
+                for job in self._jobs.values()
             )
 
     def _job_blocks_history_mutation(self, job: ChatJob) -> bool:
@@ -419,7 +547,9 @@ class ChatJobManager:
         )
         async with self._lock:
             if any(
-                self._job_blocks_history_mutation(job) for job in self._jobs.values()
+                self._job_blocks_history_mutation(job)
+                and job.conversation_id == resolved_conversation_id
+                for job in self._jobs.values()
             ):
                 logger.info(
                     "[RuntimeAPI][WebChat] 清空历史被拒绝，存在运行中 job: conversation_id=%s",
@@ -565,6 +695,18 @@ class ChatJobManager:
             event_payload["job_id"] = job.job_id
             return self._append_event_locked(job, event, event_payload)
 
+    async def append_action_event(
+        self, job: ChatJob, event: str, payload: dict[str, Any]
+    ) -> ChatJobEvent | None:
+        if event not in _WEBCHAT_ACTION_EVENTS:
+            return None
+        event_time = time.time()
+        event_payload = _sanitize_webchat_event_payload(event, payload)
+        event_payload["elapsed_ms"] = _job_elapsed_ms(job, event_time)
+        event_payload["job_id"] = job.job_id
+        async with job.changed:
+            return self._append_event_locked(job, event, event_payload)
+
     async def wait_for_events_after(
         self,
         job: ChatJob,
@@ -604,31 +746,41 @@ class ChatJobManager:
             if not content:
                 return
             await self._append_stage(job, "sending_message")
-            rendered = await render_message_with_pic_placeholders(
+            # 将输出中的内联媒体（[CQ:image,file=base64://…]、file:// 等）注册为附件并
+            # 统一为 <attachment uid/>，避免把 base64/本地路径写入历史或喂给后续 LLM；
+            # 客户端按 UID 经 /api/v1/chat/attachments/{uid}/preview 拉取渲染。
+            output_text, output_attachments = await _normalize_webchat_output(
                 content,
                 registry=self._ctx.ai.attachment_registry,
                 scope_key=webui_scope_key,
-                strict=False,
+                resolve_image_url=self._ctx.onebot.get_image,
+                get_forward_messages=self._ctx.onebot.get_forward_msg,
             )
-            if not rendered.delivery_text.strip():
+            if not output_text.strip() and not output_attachments:
                 return
-            outputs.append(rendered.delivery_text)
-            job.outputs.append(rendered.delivery_text)
-            job.history_outputs.append(rendered.history_text)
-            job.history_attachments.extend(rendered.attachments)
+            outputs.append(output_text)
+            job.outputs.append(output_text)
+            job.history_outputs.append(output_text)
+            job.history_attachments.extend(output_attachments)
             logger.info(
-                "[RuntimeAPI][WebChat] job 输出消息: job_id=%s conversation_id=%s delivery_len=%s attachments=%s",
+                "[RuntimeAPI][WebChat] job 输出消息: job_id=%s conversation_id=%s text_len=%s attachments=%s",
                 job.job_id,
                 job.conversation_id,
-                len(rendered.delivery_text),
-                len(rendered.attachments),
+                len(output_text),
+                len(output_attachments),
             )
             now = time.time()
             await self._append_event(
                 job,
                 "message",
                 {
-                    "content": rendered.delivery_text,
+                    "content": output_text,
+                    "attachments": [
+                        _chat_attachment_response_metadata(
+                            {**ref, "id": str(ref.get("uid") or "")}
+                        )
+                        for ref in output_attachments
+                    ],
                     "job_id": job.job_id,
                     "elapsed_ms": _job_elapsed_ms(job, now),
                     "parent_webchat_call_id": _current_webchat_agent_call_id(job),
@@ -646,6 +798,9 @@ class ChatJobManager:
             if event in _WEBCHAT_AGENT_STAGE_EVENTS:
                 await self.update_agent_stage(job, payload)
                 return
+            if event in _WEBCHAT_ACTION_EVENTS:
+                await self.append_action_event(job, event, payload)
+                return
             if event not in _WEBCHAT_LIFECYCLE_EVENTS:
                 return
             await self.append_lifecycle_event(job, event, payload)
@@ -661,6 +816,12 @@ class ChatJobManager:
                 run_kwargs["conversation_store"] = self.conversation_store
             if "conversation_id" in inspect.signature(run_webui_chat).parameters:
                 run_kwargs["conversation_id"] = job.conversation_id
+            if "input_attachments" in inspect.signature(run_webui_chat).parameters:
+                run_kwargs["input_attachments"] = job.user_history_attachments
+            if "input_references" in inspect.signature(run_webui_chat).parameters:
+                run_kwargs["input_references"] = job.user_history_references
+            if "record_input_history" in inspect.signature(run_webui_chat).parameters:
+                run_kwargs["record_input_history"] = not job.user_history_pre_recorded
             await self._append_stage(job, "processing")
             mode = await run_webui_chat(self._ctx, **run_kwargs)
             job.mode = mode
@@ -1036,6 +1197,188 @@ def _preview_existing_text(raw: Any, limit: int = _PREVIEW_LIMIT) -> str:
     return _preview(text, limit)
 
 
+def _chat_attachment_max_upload_size_bytes(ctx: RuntimeAPIContext) -> int:
+    cfg = ctx.config_getter()
+    raw_max_size_mb = getattr(cfg, "messages_send_url_file_max_size_mb", None)
+    max_size_mb = 100 if raw_max_size_mb is None else int(raw_max_size_mb)
+    return max(1, max_size_mb) * 1024 * 1024
+
+
+def _chat_attachment_blob_path(attachment_id: str) -> Path:
+    return _CHAT_ATTACHMENT_BLOB_DIR / attachment_id
+
+
+def _chat_attachment_meta_path(attachment_id: str) -> Path:
+    return _CHAT_ATTACHMENT_META_DIR / f"{attachment_id}.json"
+
+
+def _valid_chat_attachment_id(raw: Any) -> str:
+    attachment_id = str(raw or "").strip()
+    if not _CHAT_ATTACHMENT_ID_PATTERN.fullmatch(attachment_id):
+        return ""
+    return attachment_id
+
+
+def _normalize_chat_media_type(raw_media_type: Any, display_name: str = "") -> str:
+    """将附件 ``media_type`` 规范为 MIME 类型。
+
+    AttachmentRegistry 的 ``media_type`` 是粗分类（``image``/``file`` 等，见
+    ``registry.register_bytes``），并非 MIME；真正的 MIME 存在独立的 ``mime_type``
+    字段。这里统一规范：已是 MIME（含 ``/``）原样返回；否则按文件名扩展名推断；
+    兜底 ``application/octet-stream``。
+    """
+    text_value = str(raw_media_type or "").strip().lower()
+    if "/" in text_value:
+        return text_value
+    guessed = mimetypes.guess_type(str(display_name or ""))[0]
+    return guessed or "application/octet-stream"
+
+
+async def _resolve_registry_attachment(ctx: RuntimeAPIContext, uid: str) -> Any | None:
+    """webchat 上传存储未命中时，按 webui 作用域解析全局附件注册表。
+
+    命令/AI 输出的图片注册在 ``AttachmentRegistry``（非 webchat 上传存储）。
+    固定 ``scope_key="webui"``，``resolve_async`` 内置 scope 校验，不会跨作用域
+    读到 QQ 群/私聊附件。
+    """
+    registry = getattr(getattr(ctx, "ai", None), "attachment_registry", None)
+    if registry is None:
+        return None
+    scope_key = build_attachment_scope(
+        user_id=_VIRTUAL_USER_ID, request_type="private", webui_session=True
+    )
+    load = getattr(registry, "load", None)
+    if callable(load):
+        with suppress(Exception):
+            await load()
+    try:
+        return await registry.resolve_async(uid, scope_key)
+    except Exception as exc:
+        logger.debug(
+            "[RuntimeAPI] registry attachment resolve failed uid=%s err=%s", uid, exc
+        )
+        return None
+
+
+def _registry_attachment_metadata(record: Any) -> dict[str, Any] | None:
+    """将 AttachmentRegistry 记录转为 chat 附件 metadata（含本地 blob 路径）。"""
+    local_path = str(getattr(record, "local_path", "") or "").strip()
+    uid = str(getattr(record, "uid", "") or "").strip()
+    if not local_path or not uid:
+        return None
+    display_name = str(getattr(record, "display_name", "") or "") or "attachment"
+    mime_type = str(getattr(record, "mime_type", "") or "").strip().lower()
+    media_type = (
+        mime_type
+        if "/" in mime_type
+        else _normalize_chat_media_type(getattr(record, "media_type", ""), display_name)
+    )
+    kind = str(getattr(record, "kind", "") or "").strip() or (
+        "image" if media_type.startswith("image/") else "file"
+    )
+    metadata: dict[str, Any] = {
+        "id": uid,
+        "uid": uid,
+        "name": display_name,
+        "display_name": display_name,
+        "media_type": media_type,
+        "kind": kind,
+        "download_url": f"/api/v1/chat/attachments/{uid}",
+        "_blob_path": local_path,
+    }
+    if media_type.startswith("image/"):
+        metadata["preview_url"] = f"/api/v1/chat/attachments/{uid}/preview"
+    return metadata
+
+
+def _chat_attachment_response_metadata(raw: dict[str, Any]) -> dict[str, Any]:
+    attachment_id = str(raw.get("id") or "").strip()
+    display_name = str(raw.get("display_name") or raw.get("name") or "attachment")
+    media_type = _normalize_chat_media_type(raw.get("media_type"), display_name)
+    kind = str(raw.get("kind") or "").strip() or (
+        "image" if media_type.startswith("image/") else "file"
+    )
+    metadata: dict[str, Any] = {
+        "id": attachment_id,
+        "uid": attachment_id,
+        "name": str(raw.get("name") or "attachment"),
+        "display_name": display_name,
+        "size": int(raw.get("size") or 0),
+        "media_type": media_type,
+        "kind": kind,
+        "sha256": str(raw.get("sha256") or ""),
+        "created_at": str(raw.get("created_at") or ""),
+        "download_url": f"/api/v1/chat/attachments/{attachment_id}",
+        "discarded": False,
+        "source_kind": "runtime_webchat_attachment",
+        "source_ref": f"/api/v1/chat/attachments/{attachment_id}",
+    }
+    if media_type.startswith("image/"):
+        metadata["preview_url"] = f"/api/v1/chat/attachments/{attachment_id}/preview"
+    return metadata
+
+
+async def _load_chat_attachment_metadata(
+    attachment_id: str, *, ctx: RuntimeAPIContext | None = None
+) -> dict[str, Any] | None:
+    clean_id = _valid_chat_attachment_id(attachment_id)
+    if not clean_id:
+        return None
+    # 1) webchat 上传存储
+    raw = await async_io.read_json(_chat_attachment_meta_path(clean_id), use_lock=True)
+    if isinstance(raw, dict):
+        raw["id"] = clean_id
+        metadata = _chat_attachment_response_metadata(raw)
+        metadata["_blob_path"] = str(_chat_attachment_blob_path(clean_id))
+        return metadata
+    # 2) fallback 到全局附件注册表（命令/AI 输出图片注册在此，非 webchat 上传存储）
+    if ctx is not None:
+        record = await _resolve_registry_attachment(ctx, clean_id)
+        if record is not None:
+            return _registry_attachment_metadata(record)
+    return None
+
+
+async def _load_chat_attachment_from_request(
+    request: web.Request,
+    *,
+    ctx: RuntimeAPIContext | None = None,
+) -> dict[str, Any] | None:
+    attachment_id = _valid_chat_attachment_id(
+        request.match_info.get("attachment_id", "")
+    )
+    if not attachment_id:
+        return None
+    return await _load_chat_attachment_metadata(attachment_id, ctx=ctx)
+
+
+def _content_disposition_attachment(display_name: str) -> str:
+    clean_name = _sanitize_chat_attachment_name(display_name)
+    ascii_name = "".join(
+        char if 32 <= ord(char) < 127 and char not in {'"', "\\", ";"} else "_"
+        for char in clean_name
+    ).strip("_")
+    if not ascii_name:
+        ascii_name = "attachment"
+    return f'attachment; filename="{ascii_name}"'
+
+
+def _sanitize_chat_attachment_name(raw_name: str) -> str:
+    raw_text = unquote(str(raw_name or "").strip() or "attachment")
+    without_controls = "".join(
+        char for char in raw_text if ord(char) >= 32 and ord(char) != 127
+    )
+    name = (
+        Path(without_controls.replace("\\", "/").strip() or "attachment").name
+        or "attachment"
+    )
+    if len(name) <= _CHAT_ATTACHMENT_MAX_NAME_LENGTH:
+        return name
+    suffix = "".join(Path(name).suffixes[-2:]) or Path(name).suffix
+    suffix = suffix if len(suffix) <= 16 else ""
+    return f"attachment{suffix}"
+
+
 def _normalize_sensitive_key(key: Any) -> str:
     return re.sub(r"[^a-z0-9]", "", str(key or "").lower())
 
@@ -1211,6 +1554,12 @@ def _sanitize_webchat_event_payload(
             "is_agent": True,
             **_webchat_payload_lineage(payload),
         }
+    if event in _WEBCHAT_ACTION_EVENTS:
+        clean_payload = {
+            str(key): value for key, value in payload.items() if key != "arguments"
+        }
+        redacted_payload = _redact_preview_value(clean_payload)
+        return redacted_payload if isinstance(redacted_payload, dict) else {}
     return {key: value for key, value in payload.items() if key != "arguments"}
 
 
@@ -1698,6 +2047,102 @@ def _body_conversation_id(body: dict[str, Any]) -> str:
     return str(body.get("conversation_id", "") or "").strip()
 
 
+def _is_structured_chat_message(raw: Any) -> bool:
+    return isinstance(raw, dict)
+
+
+async def _parse_chat_job_message(
+    body: dict[str, Any],
+    *,
+    conversation_id: str,
+) -> StructuredChatMessage:
+    raw_message = body.get("message")
+    if not isinstance(raw_message, dict):
+        return StructuredChatMessage(
+            text=str(raw_message or "").strip(),
+            attachments=[],
+            references=[],
+        )
+    text = str(raw_message.get("text") or "").strip()
+    references = _normalize_chat_references(raw_message.get("references"))
+    attachments = await _normalize_chat_attachment_ids(
+        raw_message.get("attachment_ids")
+    )
+    reference_prefix = _references_to_prompt_text(references)
+    parts = [part for part in [reference_prefix, text] if part]
+    return StructuredChatMessage(
+        text="\n\n".join(parts).strip(),
+        attachments=attachments,
+        references=references,
+    )
+
+
+def _normalize_chat_references(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    references: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        source_message_id = str(item.get("source_message_id") or "").strip()
+        selected_text = str(item.get("selected_text") or "").strip()
+        kind = str(item.get("kind") or "message").strip() or "message"
+        if not source_message_id and not selected_text:
+            continue
+        references.append(
+            {
+                "kind": kind,
+                "source_message_id": source_message_id,
+                "selected_text": selected_text,
+            }
+        )
+    return references
+
+
+def _references_to_prompt_text(references: list[dict[str, Any]]) -> str:
+    blocks: list[str] = []
+    for item in references:
+        source_message_id = str(item.get("source_message_id") or "").strip()
+        selected_text = str(item.get("selected_text") or "").strip()
+        header = (
+            f"> 引用 message:{source_message_id}" if source_message_id else "> 引用"
+        )
+        if selected_text:
+            quote_lines = "\n".join(f"> {line}" for line in selected_text.splitlines())
+            blocks.append(f"{header}\n{quote_lines}")
+        else:
+            blocks.append(header)
+    return "\n\n".join(blocks).strip()
+
+
+async def _normalize_chat_attachment_ids(raw: Any) -> list[dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    attachments: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for raw_id in raw:
+        attachment_id = _valid_chat_attachment_id(raw_id)
+        if not attachment_id or attachment_id in seen:
+            continue
+        metadata = await _load_chat_attachment_metadata(attachment_id)
+        if metadata is None:
+            raise ChatAttachmentNotFoundError(attachment_id)
+        seen.add(attachment_id)
+        ref: dict[str, str] = {
+            "uid": attachment_id,
+            "kind": str(metadata.get("kind") or "file"),
+            "media_type": str(metadata.get("media_type") or "application/octet-stream"),
+            "display_name": str(metadata.get("name") or "attachment"),
+            "source_kind": "runtime_webchat_attachment",
+            "source_ref": str(metadata.get("download_url") or ""),
+        }
+        preview_url = str(metadata.get("preview_url") or "").strip()
+        if preview_url:
+            ref["render_source"] = preview_url
+        attachments.append(ref)
+    return attachments
+
+
 async def _resolve_conversation_id(
     ctx: RuntimeAPIContext,
     job_manager: ChatJobManager,
@@ -1745,12 +2190,16 @@ async def _history_record_to_item(
     display_name = str(item.get("display_name", "")).strip().lower()
     role = "bot" if display_name == "bot" else "user"
     mapped: dict[str, Any] = {
+        "message_id": str(item.get("message_id") or "").strip(),
         "role": role,
         "content": content,
         "timestamp": str(item.get("timestamp", "") or "").strip(),
     }
     if attachments:
         mapped["attachments"] = attachments
+    references = _history_references(item.get("references"))
+    if references:
+        mapped["references"] = references
     if isinstance(webchat, dict) and webchat_events:
         webchat_calls = _webchat_history_calls(webchat)
         webchat_timeline = _webchat_history_timeline(webchat)
@@ -1767,6 +2216,28 @@ async def _history_record_to_item(
             "timeline": webchat_timeline,
         }
     return mapped
+
+
+def _history_references(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    references: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "message").strip() or "message"
+        source_message_id = str(item.get("source_message_id") or "").strip()
+        selected_text = str(item.get("selected_text") or "").strip()
+        if not source_message_id and not selected_text:
+            continue
+        references.append(
+            {
+                "kind": kind,
+                "source_message_id": source_message_id,
+                "selected_text": selected_text,
+            }
+        )
+    return references
 
 
 async def _history_attachments(
@@ -1789,13 +2260,17 @@ async def _history_attachments(
         uid = str(item.get("uid", "") or "").strip()
         if not uid:
             continue
-        media_type = str(item.get("media_type") or item.get("kind") or "file").strip()
-        kind = str(item.get("kind") or media_type or "file").strip()
+        display_name = str(item.get("display_name", "") or "")
+        raw_media_type = str(
+            item.get("media_type") or item.get("kind") or "file"
+        ).strip()
+        kind = str(item.get("kind") or raw_media_type or "file").strip()
+        media_type = _normalize_chat_media_type(raw_media_type, display_name)
         ref: dict[str, str] = {
             "uid": uid,
             "kind": kind or "file",
-            "media_type": media_type or kind or "file",
-            "display_name": str(item.get("display_name", "") or ""),
+            "media_type": media_type,
+            "display_name": display_name,
         }
         for key in ("source_kind", "source_ref", "semantic_kind", "description"):
             value = str(item.get(key, "") or "").strip()
@@ -1808,6 +2283,10 @@ async def _history_attachments(
         )
         if resolved is not None:
             ref.update(await _history_attachment_render_fields(resolved))
+        # 补充 preview_url / download_url，供客户端渲染附件卡片
+        ref["download_url"] = f"/api/v1/chat/attachments/{uid}"
+        if media_type.startswith("image/"):
+            ref["preview_url"] = f"/api/v1/chat/attachments/{uid}/preview"
         attachments.append(ref)
     return attachments
 
@@ -1865,6 +2344,9 @@ async def run_webui_chat(
     | None = None,
     conversation_store: WebChatConversationStore | None = None,
     conversation_id: str | None = None,
+    input_attachments: list[dict[str, str]] | None = None,
+    input_references: list[dict[str, Any]] | None = None,
+    record_input_history: bool = True,
 ) -> str:
     """Execute a single WebUI chat turn (command dispatch or AI ask)."""
 
@@ -1910,21 +2392,28 @@ async def run_webui_chat(
         get_forward_messages=ctx.onebot.get_forward_msg,
     )
     normalized_text = registered_input.normalized_text or text
+    all_input_attachments = [
+        *registered_input.attachments,
+        *list(input_attachments or []),
+    ]
+    normalized_references = list(input_references or [])
     logger.info(
         "[RuntimeAPI][WebChat] 输入附件注册完成: conversation_id=%s normalized_len=%s attachments=%s",
         resolved_conversation_id,
         len(normalized_text),
-        len(registered_input.attachments),
+        len(all_input_attachments),
     )
-    await emit_stage("recording_history")
-    await store.append_message(
-        resolved_conversation_id,
-        role="user",
-        text_content=normalized_text,
-        display_name=_VIRTUAL_USER_NAME,
-        user_name=_VIRTUAL_USER_NAME,
-        attachments=registered_input.attachments,
-    )
+    if record_input_history:
+        await emit_stage("recording_history")
+        await store.append_message(
+            resolved_conversation_id,
+            role="user",
+            text_content=normalized_text,
+            display_name=_VIRTUAL_USER_NAME,
+            user_name=_VIRTUAL_USER_NAME,
+            attachments=all_input_attachments,
+            references=normalized_references or None,
+        )
 
     command = ctx.command_dispatcher.parse_command(normalized_text)
     if command:
@@ -1950,8 +2439,8 @@ async def run_webui_chat(
 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     attachment_xml = (
-        f"\n{attachment_refs_to_xml(registered_input.attachments)}"
-        if registered_input.attachments
+        f"\n{attachment_refs_to_xml(all_input_attachments)}"
+        if all_input_attachments
         else ""
     )
     message_xml = format_webchat_message_xml(
@@ -2057,6 +2546,152 @@ WebUI 支持完整 Markdown 渲染和简单安全 HTML。复杂 HTML、包含 JS
     return "chat"
 
 
+async def chat_attachment_capabilities_handler(
+    ctx: RuntimeAPIContext,
+    request: web.Request,
+) -> Response:
+    _ = request
+    return web.json_response(
+        {
+            "max_upload_size_bytes": _chat_attachment_max_upload_size_bytes(ctx),
+            "multipart_field": _CHAT_ATTACHMENT_UPLOAD_FIELD,
+        }
+    )
+
+
+async def chat_attachment_upload_handler(
+    ctx: RuntimeAPIContext,
+    request: web.Request,
+) -> Response:
+    max_size = _chat_attachment_max_upload_size_bytes(ctx)
+    try:
+        reader = await request.multipart()
+    except Exception:
+        return _json_error("multipart request required", status=400)
+
+    field_any: Any | None = None
+    try:
+        while True:
+            field = await reader.next()
+            if field is None:
+                break
+            current_field: Any = field
+            if getattr(current_field, "name", "") == _CHAT_ATTACHMENT_UPLOAD_FIELD:
+                field_any = current_field
+                break
+    except Exception:
+        return _json_error("multipart request required", status=400)
+
+    if field_any is None:
+        return _json_error("file field is required", status=400)
+
+    display_name = _sanitize_chat_attachment_name(
+        str(getattr(field_any, "filename", "") or "attachment")
+    )
+    media_type = mimetypes.guess_type(display_name)[0] or "application/octet-stream"
+    attachment_id = uuid4().hex
+    ensure_dir(_CHAT_ATTACHMENT_BLOB_DIR)
+    ensure_dir(_CHAT_ATTACHMENT_META_DIR)
+    blob_path = _chat_attachment_blob_path(attachment_id)
+    temp_path = blob_path.with_name(f".{attachment_id}.uploading")
+    total_size = 0
+    digest = hashlib.sha256()
+    try:
+        async with aiofiles.open(temp_path, "wb") as file_handle:
+            while True:
+                chunk = await field_any.read_chunk(size=_CHAT_ATTACHMENT_CHUNK_SIZE)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > max_size:
+                    with suppress(OSError):
+                        await asyncio.to_thread(temp_path.unlink)
+                    return web.json_response(
+                        {"error": "file too large", "max_upload_size_bytes": max_size},
+                        status=413,
+                    )
+                digest.update(chunk)
+                await file_handle.write(chunk)
+        await asyncio.to_thread(os.replace, temp_path, blob_path)
+    except Exception:
+        with suppress(OSError):
+            await asyncio.to_thread(temp_path.unlink)
+        return _json_error("multipart request required", status=400)
+
+    metadata = _chat_attachment_response_metadata(
+        {
+            "id": attachment_id,
+            "name": display_name,
+            "size": total_size,
+            "media_type": media_type,
+            "kind": "image" if media_type.startswith("image/") else "file",
+            "sha256": digest.hexdigest(),
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
+    await async_io.write_json(
+        _chat_attachment_meta_path(attachment_id), metadata, use_lock=True
+    )
+    return web.json_response(
+        {"attachment": metadata},
+        status=201,
+    )
+
+
+async def chat_attachment_download_handler(
+    ctx: RuntimeAPIContext,
+    request: web.Request,
+) -> web.StreamResponse:
+    metadata = await _load_chat_attachment_from_request(request, ctx=ctx)
+    if metadata is None:
+        return _json_error("Attachment not found", status=404)
+    blob_path = Path(
+        str(
+            metadata.get("_blob_path")
+            or _chat_attachment_blob_path(str(metadata["id"]))
+        )
+    )
+    if not await async_io.is_file(blob_path):
+        return _json_error("Attachment not found", status=404)
+    headers = {
+        "Content-Disposition": _content_disposition_attachment(
+            str(metadata.get("name") or "attachment")
+        )
+    }
+    return web.FileResponse(
+        path=blob_path,
+        headers=headers,
+        chunk_size=_CHAT_ATTACHMENT_CHUNK_SIZE,
+    )
+
+
+async def chat_attachment_preview_handler(
+    ctx: RuntimeAPIContext,
+    request: web.Request,
+) -> web.StreamResponse:
+    metadata = await _load_chat_attachment_from_request(request, ctx=ctx)
+    if metadata is None:
+        return _json_error("Attachment not found", status=404)
+    media_type = _normalize_chat_media_type(
+        metadata.get("media_type"), str(metadata.get("name") or "")
+    )
+    if not media_type.startswith("image/"):
+        return _json_error("Attachment preview is not available", status=415)
+    blob_path = Path(
+        str(
+            metadata.get("_blob_path")
+            or _chat_attachment_blob_path(str(metadata["id"]))
+        )
+    )
+    if not await async_io.is_file(blob_path):
+        return _json_error("Attachment not found", status=404)
+    return web.FileResponse(
+        path=blob_path,
+        headers={"Content-Type": media_type},
+        chunk_size=_CHAT_ATTACHMENT_CHUNK_SIZE,
+    )
+
+
 async def chat_conversations_handler(
     ctx: RuntimeAPIContext,
     job_manager: ChatJobManager,
@@ -2065,17 +2700,17 @@ async def chat_conversations_handler(
     _ = request
     await job_manager.conversation_store.ensure_ready(ctx.history_manager)
     conversations = await job_manager.conversation_store.list_conversations()
-    active_job = await job_manager.get_active_job()
+    active_jobs = await job_manager.get_active_jobs()
+    active_job = active_jobs[-1] if active_jobs else None
     active_snapshot = (
         await job_manager.snapshot(active_job) if active_job is not None else None
     )
+    running_conversation_ids = {job.conversation_id for job in active_jobs}
     for item in conversations:
         conversation_id = str(item.get("id") or "")
         if conversation_id:
             await job_manager.maybe_schedule_title_generation(conversation_id)
-            item["is_running"] = bool(
-                active_job is not None and active_job.conversation_id == conversation_id
-            )
+            item["is_running"] = conversation_id in running_conversation_ids
     logger.info(
         "[RuntimeAPI][WebChat] 查询会话列表: count=%s active_job=%s",
         len(conversations),
@@ -2149,7 +2784,7 @@ async def chat_conversation_delete_handler(
 ) -> Response:
     await job_manager.conversation_store.ensure_ready(ctx.history_manager)
     conversation_id = str(request.match_info.get("conversation_id", "") or "").strip()
-    if await job_manager.has_running_job():
+    if await job_manager.has_running_job(conversation_id):
         return _json_error("Chat job is still running", status=409)
     existed = await job_manager.conversation_store.delete_conversation(conversation_id)
     if not existed:
@@ -2401,25 +3036,35 @@ async def chat_job_create_handler(
         body = await request.json()
     except Exception:
         return _json_error("Invalid JSON", status=400)
-    text = str(body.get("message", "") or "").strip()
-    if not text:
-        return _json_error("message is required", status=400)
     try:
         conversation_id = await _resolve_conversation_id(
             ctx,
             job_manager,
             raw_conversation_id=_body_conversation_id(body),
         )
-        job = await job_manager.create_job(text, conversation_id)
+        message = await _parse_chat_job_message(body, conversation_id=conversation_id)
+        if not message.text and not message.attachments:
+            return _json_error("message is required", status=400)
+        job = await job_manager.create_job(
+            message.text,
+            conversation_id,
+            user_history_attachments=message.attachments,
+            user_history_references=message.references,
+            pre_record_user_history=_is_structured_chat_message(body.get("message")),
+        )
     except KeyError:
         return _json_error("Conversation not found", status=404)
+    except ChatAttachmentNotFoundError:
+        return _json_error("Attachment not found", status=404)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
     except RuntimeError:
         return _json_error("Chat job is still running", status=409)
     logger.info(
         "[RuntimeAPI][WebChat] API 创建后台 job: job_id=%s conversation_id=%s text_len=%s",
         job.job_id,
         conversation_id,
-        len(text),
+        len(message.text),
     )
     return web.json_response(await job_manager.snapshot(job), status=202)
 
@@ -2431,14 +3076,16 @@ async def chat_job_active_handler(
 ) -> Response:
     _ = ctx
     raw_conversation_id = _query_conversation_id(request)
-    job = await job_manager.get_active_job(raw_conversation_id or None)
+    jobs = await job_manager.get_active_jobs(raw_conversation_id or None)
+    job = jobs[-1] if jobs else None
     snapshot = await job_manager.snapshot(job) if job is not None else None
+    snapshots = [await job_manager.snapshot(item) for item in jobs]
     logger.debug(
         "[RuntimeAPI][WebChat] 查询 active job: conversation_id=%s job_id=%s",
         raw_conversation_id,
         job.job_id if job is not None else "",
     )
-    return web.json_response({"job": snapshot})
+    return web.json_response({"job": snapshot, "jobs": snapshots})
 
 
 async def chat_job_detail_handler(

@@ -23,6 +23,7 @@
         chatCommandContext: null,
         chatHistoryLoaded: false,
         activeJobId: null,
+        chatCancelBusy: false,
         lastEventSeq: 0,
         chatHistoryCursor: null,
         chatHistoryHasMore: false,
@@ -568,6 +569,10 @@
         return role !== "user" || hasMarkdownBlockquote(content);
     }
 
+    function chatRenderOptions(attachments) {
+        return { attachments };
+    }
+
     function appendChatMessage(role, content, options = {}) {
         const log = get("runtimeChatLog");
         if (!log) return null;
@@ -583,16 +588,45 @@
         const roleHtml = isBot
             ? `<span class="runtime-chat-role-label">AI</span><span class="runtime-chat-stage" hidden></span>`
             : `<span class="runtime-chat-role-label">You</span>`;
-        item.innerHTML = `<div class="runtime-chat-role">${roleHtml}</div><div class="${contentClass}">${renderChatContent(content, useMarkdown)}</div>`;
+        const contentHtml = renderChatContent(
+            content,
+            useMarkdown,
+            chatRenderOptions(options.attachments),
+        );
+        item.innerHTML = `<div class="runtime-chat-role">${roleHtml}</div><div class="${contentClass}">${contentHtml}</div>`;
+        if (!isBot) {
+            item.dataset.retryContent = String(content || "").trim();
+        }
         if (isBot) {
             const roleEl = item.querySelector(".runtime-chat-role");
             if (roleEl) {
+                const cancelButton = document.createElement("button");
+                cancelButton.className =
+                    "runtime-chat-quote-btn runtime-chat-cancel-btn";
+                cancelButton.type = "button";
+                cancelButton.dataset.cancelJob = "";
+                cancelButton.textContent = t("runtime.cancel");
+                cancelButton.hidden = true;
+                roleEl.appendChild(cancelButton);
+
                 const quoteButton = document.createElement("button");
                 quoteButton.className = "runtime-chat-quote-btn";
                 quoteButton.type = "button";
                 quoteButton.dataset.quoteMessage = "1";
                 quoteButton.textContent = t("runtime.quote");
                 roleEl.appendChild(quoteButton);
+            }
+        } else {
+            const roleEl = item.querySelector(".runtime-chat-role");
+            if (roleEl) {
+                const retryButton = document.createElement("button");
+                retryButton.className =
+                    "runtime-chat-quote-btn runtime-chat-retry-btn";
+                retryButton.type = "button";
+                retryButton.dataset.retryMessage = "1";
+                retryButton.textContent = t("runtime.retry");
+                retryButton.hidden = true;
+                roleEl.appendChild(retryButton);
             }
         }
         if (options.prepend) {
@@ -601,6 +635,7 @@
             log.appendChild(item);
             if (options.scroll !== false) scrollChatToBottom();
         }
+        syncChatMessageActions();
         return item;
     }
 
@@ -679,13 +714,17 @@
         setTimeout(scrollChatToBottom, 0);
     }
 
-    function updateChatMessage(item, content, role = "bot") {
+    function updateChatMessage(item, content, role = "bot", options = {}) {
         if (!item) return;
         const contentEl = item.querySelector(".runtime-chat-content");
         if (!contentEl) return;
         const useMarkdown = shouldRenderChatMarkdown(role, content);
         contentEl.classList.toggle("markdown", useMarkdown);
-        contentEl.innerHTML = renderChatContent(content, useMarkdown);
+        contentEl.innerHTML = renderChatContent(
+            content,
+            useMarkdown,
+            chatRenderOptions(options.attachments),
+        );
     }
 
     function currentChatJobId() {
@@ -722,6 +761,7 @@
             if (resolvedJobId) existing.dataset.jobId = resolvedJobId;
             runtimeState.activeChatMessageId =
                 existing.dataset.messageId || null;
+            syncChatMessageActions();
             return existing;
         }
         const id = `stream-${Date.now()}`;
@@ -732,6 +772,7 @@
             jobId: resolvedJobId || null,
         });
         if (item) item.classList.add("streaming");
+        syncChatMessageActions();
         return item;
     }
 
@@ -756,7 +797,7 @@
             .join("\n\n");
     }
 
-    function appendTimelineMessage(item, content, role = "bot") {
+    function appendTimelineMessage(item, content, role = "bot", options = {}) {
         const text = String(content || "").trim();
         if (!item || !text) return null;
         const timeline = ensureTimelineNodeContainer(item);
@@ -766,7 +807,11 @@
         node.className = useMarkdown
             ? "runtime-chat-content markdown"
             : "runtime-chat-content";
-        node.innerHTML = renderChatContent(text, useMarkdown);
+        node.innerHTML = renderChatContent(
+            text,
+            useMarkdown,
+            chatRenderOptions(options.attachments),
+        );
         timeline.appendChild(node);
         appendRawChatContent(item, text);
         return node;
@@ -774,11 +819,8 @@
 
     function renderHistoryAttachment(item) {
         if (!item || typeof item !== "object") return "";
-        const mediaType = String(item.media_type || item.kind || "").trim();
-        if (mediaType === "image") {
-            const source = String(
-                item.render_source || item.source_ref || "",
-            ).trim();
+        if (attachmentIsImage(item)) {
+            const source = attachmentPreviewUrl(item.uid || "", item);
             if (!source) return "";
             return chatImageMarkup(
                 source,
@@ -796,8 +838,50 @@
         });
     }
 
+    function attachmentIsImage(item) {
+        return !!(
+            item &&
+            (item.kind === "image" ||
+                String(item.media_type || "")
+                    .trim()
+                    .startsWith("image/"))
+        );
+    }
+
+    function attachmentPreviewUrl(uid, item = null) {
+        const cleanUid = String(uid || (item && item.uid) || "").trim();
+        const previewUrl = String((item && item.preview_url) || "").trim();
+        const previewMatch = previewUrl.match(
+            /\/api\/v1\/chat\/attachments\/([^/?#]+)\/preview(?:[?#].*)?$/,
+        );
+        if (previewMatch) {
+            return `/api/runtime/chat/attachments/${previewMatch[1]}/preview`;
+        }
+        if (previewUrl) return previewUrl;
+        const sourceRef = String((item && item.source_ref) || "").trim();
+        const sourceMatch = sourceRef.match(
+            /\/api\/v1\/chat\/attachments\/([^/?#]+)(?:[?#].*)?$/,
+        );
+        if (sourceMatch) {
+            return `/api/runtime/chat/attachments/${sourceMatch[1]}/preview`;
+        }
+        if (
+            sourceRef.startsWith("http://") ||
+            sourceRef.startsWith("https://") ||
+            sourceRef.startsWith("data:image/")
+        ) {
+            return sourceRef;
+        }
+        return cleanUid
+            ? `/api/runtime/chat/attachments/${encodeURIComponent(cleanUid)}/preview`
+            : "";
+    }
+
     function buildAttachmentMarkup(attachments) {
-        const items = Array.isArray(attachments) ? attachments : [];
+        // 图片已在正文内联渲染，附件区只保留非图片文件，避免重复
+        const items = (Array.isArray(attachments) ? attachments : []).filter(
+            (item) => !attachmentIsImage(item),
+        );
         return items
             .map((item) => renderHistoryAttachment(item))
             .filter(Boolean)
@@ -890,6 +974,7 @@
         );
         if (item) item.classList.remove("streaming");
         runtimeState.streamingMessageId = null;
+        syncChatMessageActions();
     }
 
     function finalizeActiveChatMessage(payload = null) {
@@ -909,6 +994,7 @@
         finishStreamingMessage();
         runtimeState.activeChatMessageId = null;
         stopChatClock();
+        syncChatMessageActions();
     }
 
     function chatStageLabel(stage) {
@@ -1013,7 +1099,7 @@
                         ':"$1"',
                     )
                     .replace(
-                        /([\[,]\s*)'([^'\\]*(?:\\.[^'\\]*)*)'(?=\s*[\],])/g,
+                        /([[,]\s*)'([^'\\]*(?:\\.[^'\\]*)*)'(?=\s*[\],])/g,
                         '$1"$2"',
                     )
                     .replace(/\bNone\b/g, "null")
@@ -1158,7 +1244,12 @@
         if (entry.type === "message") {
             const content = String(entry.content || "").trim();
             if (!content) return "";
-            return `<div class="runtime-tool-message">${renderChatContent(content, true)}</div>`;
+            const contentHtml = renderChatContent(
+                content,
+                true,
+                chatRenderOptions(entry.attachments),
+            );
+            return `<div class="runtime-tool-message">${contentHtml}</div>`;
         }
         if (entry.type === "stage") {
             return "";
@@ -1448,7 +1539,13 @@
                           return `call:${toolRenderSignature(entry.call)}`;
                       }
                       if (entry.type === "message") {
-                          return `message:${String(entry.content || "")}`;
+                          return [
+                              "message",
+                              entry.content,
+                              JSON.stringify(entry.attachments || []),
+                          ]
+                              .map((value) => String(value || ""))
+                              .join(":");
                       }
                       if (entry.type === "stage") {
                           return ["stage", entry.seq, entry.stage, entry.detail]
@@ -1550,7 +1647,7 @@
         parent.timeline = timeline;
     }
 
-    function reduceAgentStageBlock(blocks, payload, seq = 0) {
+    function reduceAgentStageBlock(blocks, payload, _seq = 0) {
         const key = toolBlockKey(payload, blocks);
         const previous = blocks.get(key) || {};
         const parentCandidate = String(
@@ -1750,6 +1847,7 @@
         appendToolTimelineEntry(parent, {
             type: "message",
             content,
+            attachments: payload && payload.attachments,
         });
         redrawToolTimelineNode(item, blocks, parentKey);
         appendRawChatContent(item, content);
@@ -1898,6 +1996,10 @@
                         entry.payload &&
                             (entry.payload.content ?? entry.payload.message),
                         "bot",
+                        {
+                            attachments:
+                                entry.payload && entry.payload.attachments,
+                        },
                     );
                 });
             return true;
@@ -1910,6 +2012,9 @@
                     entry.payload &&
                         (entry.payload.content ?? entry.payload.message),
                     "bot",
+                    {
+                        attachments: entry.payload && entry.payload.attachments,
+                    },
                 );
                 return;
             }
@@ -1932,14 +2037,19 @@
         const hasTimeline =
             role === "bot" && historyWebchatEvents(item).length > 0;
         if (!content && !hasTimeline && !attachmentMarkup) return null;
-        const message = appendChatMessage(role, content, options);
+        const message = appendChatMessage(role, content, {
+            ...options,
+            attachments: item && item.attachments,
+        });
         if (!message) return null;
         if (hasTimeline) {
             const contentEl = message.querySelector(".runtime-chat-content");
             if (contentEl) contentEl.innerHTML = "";
             renderHistoryTimeline(item, message);
             if (!message.dataset.rawContent && content) {
-                appendTimelineMessage(message, content, role);
+                appendTimelineMessage(message, content, role, {
+                    attachments: item && item.attachments,
+                });
             }
         }
         if (attachmentMarkup) {
@@ -1972,6 +2082,93 @@
         runtimeState.activeChatMessageId = null;
         runtimeState.toolBlocks.clear();
         stopChatClock();
+        syncChatMessageActions();
+    }
+
+    function chatMessageHasBody(item) {
+        if (!item) return false;
+        const raw = String(item.dataset.rawContent || "").trim();
+        if (raw) return true;
+        const timeline = item.querySelector(".runtime-chat-timeline");
+        if (timeline && timeline.children.length > 0) return true;
+        const content = item.querySelector(".runtime-chat-content");
+        if (content && String(content.textContent || "").trim()) return true;
+        return !!item.querySelector(
+            ".runtime-chat-image, .runtime-chat-file-card, .runtime-chat-tools",
+        );
+    }
+
+    function removeEmptyChatMessage(item) {
+        if (!item || chatMessageHasBody(item)) return false;
+        item.remove();
+        return true;
+    }
+
+    function lastChatItem() {
+        const log = get("runtimeChatLog");
+        if (!log) return null;
+        const items = [...log.querySelectorAll(".runtime-chat-item")];
+        return items.length ? items[items.length - 1] : null;
+    }
+
+    function hasBotReplyAfter(item) {
+        let node = item ? item.nextElementSibling : null;
+        while (node) {
+            if (
+                node.classList &&
+                node.classList.contains("runtime-chat-item")
+            ) {
+                if (
+                    node.classList.contains("bot") &&
+                    chatMessageHasBody(node)
+                ) {
+                    return true;
+                }
+                if (node.classList.contains("user")) return false;
+            }
+            node = node.nextElementSibling;
+        }
+        return false;
+    }
+
+    function syncActiveCancelButtons() {
+        const activeJobId = currentChatJobId();
+        document.querySelectorAll("[data-cancel-job]").forEach((button) => {
+            button.hidden = true;
+            button.disabled = true;
+            button.classList.remove("is-visible");
+            button.dataset.cancelJob = "";
+        });
+        if (!activeJobId) return;
+        const item = findActiveChatMessage(activeJobId);
+        const button = item && item.querySelector("[data-cancel-job]");
+        if (!button) return;
+        button.hidden = false;
+        button.disabled = runtimeState.chatCancelBusy;
+        button.classList.add("is-visible");
+        button.dataset.cancelJob = activeJobId;
+    }
+
+    function syncChatRetryButtons() {
+        const busy = !!(runtimeState.chatBusy || runtimeState.activeJobId);
+        const lastItem = lastChatItem();
+        document.querySelectorAll("[data-retry-message]").forEach((button) => {
+            const item = button.closest(".runtime-chat-item.user");
+            const canRetry =
+                !busy &&
+                item &&
+                item === lastItem &&
+                !hasBotReplyAfter(item) &&
+                String(item.dataset.retryContent || "").trim();
+            button.hidden = !canRetry;
+            button.disabled = !canRetry;
+            button.classList.toggle("is-visible", !!canRetry);
+        });
+    }
+
+    function syncChatMessageActions() {
+        syncActiveCancelButtons();
+        syncChatRetryButtons();
     }
 
     function parseCqAttributes(raw) {
@@ -2020,7 +2217,7 @@
         if (!src) return "";
         const label =
             String(alt || "").trim() || t("runtime.image_preview") || "image";
-        return `<img class="runtime-chat-image" src="${escapeHtml(src)}" alt="${escapeHtml(label)}" title="${escapeHtml(t("runtime.open_image_preview"))}" loading="lazy" data-chat-image-preview="1" />`;
+        return `<img class="runtime-chat-image" src="${escapeHtml(src)}" alt="${escapeHtml(label)}" title="${escapeHtml(t("runtime.open_image_preview"))}" loading="lazy" decoding="async" data-chat-image-preview="1" />`;
     }
 
     function formatFileSize(bytes) {
@@ -2726,12 +2923,7 @@
                 parser && typeof parser.parse === "function"
                     ? parser.parse(tokens || [])
                     : "";
-            return (
-                `<details class="runtime-quote-block">` +
-                `<summary><span>${escapeHtml(t("runtime.quote"))}</span></summary>` +
-                `<div class="runtime-quote-body">${body}</div>` +
-                `</details>`
-            );
+            return `<blockquote class="runtime-quote-block">${body}</blockquote>`;
         };
         renderer.link = ({ href, title, tokens }) => {
             const parser = renderer.parser || marked.Parser;
@@ -2756,17 +2948,57 @@
                 `${label}</a>`
             );
         };
-        renderer.image = ({ text }) => escapeHtml(text || "");
+        renderer.image = (tokenOrHref, title, text) => {
+            const token =
+                tokenOrHref && typeof tokenOrHref === "object"
+                    ? tokenOrHref
+                    : { href: tokenOrHref, title, text };
+            const href = String(token.href || "").trim();
+            const label = String(token.text || "").trim();
+            return isSafeRenderedImageUrl(href)
+                ? chatImageMarkup(href, label)
+                : escapeHtml(label);
+        };
         return renderer;
     }
 
-    function renderChatContent(content, useMarkdown) {
+    function renderChatContent(content, useMarkdown, options = {}) {
         const text = String(content || "");
+        const attachments = Array.isArray(options.attachments)
+            ? options.attachments
+            : [];
+        const attachmentByUid = new Map();
+        attachments.forEach((item) => {
+            const uid = String((item && item.uid) || "").trim();
+            if (uid) attachmentByUid.set(uid, item);
+        });
+
+        const attachmentPattern =
+            /<(?:attachment|pic)\s+uid=["']([^"']+)["']\s*\/?\s*>/gi;
+        const attachmentPlaceholders = [];
+        const step0 = text.replace(attachmentPattern, (_match, uid) => {
+            const trimmedUid = String(uid || "").trim();
+            const attachment = attachmentByUid.get(trimmedUid) || null;
+            if (attachment && !attachmentIsImage(attachment)) return "";
+            if (!attachment && !trimmedUid.startsWith("pic_")) return "";
+            const source = attachmentPreviewUrl(trimmedUid, attachment);
+            if (!source) return "";
+            const idx = attachmentPlaceholders.length;
+            attachmentPlaceholders.push(
+                chatImageMarkup(
+                    source,
+                    (attachment &&
+                        (attachment.display_name || attachment.name)) ||
+                        "",
+                ),
+            );
+            return `ATTACHPH${idx}ATTACHPH`;
+        });
 
         // Extract CQ file codes into placeholders
         const filePattern = /\[CQ:file,([^\]]+)\]/g;
         const filePlaceholders = [];
-        const step1 = text.replace(filePattern, (match, attrStr) => {
+        const step1 = step0.replace(filePattern, (_match, attrStr) => {
             const attrs = parseCqAttributes(attrStr);
             const idx = filePlaceholders.length;
             filePlaceholders.push(renderFileCard(attrs));
@@ -2824,6 +3056,13 @@
             html = html.replace(
                 new RegExp(`CQFILEPH${i}CQFILEPH`, "g"),
                 filePlaceholders[i],
+            );
+        }
+        // Restore attachment image placeholders
+        for (let i = 0; i < attachmentPlaceholders.length; i++) {
+            html = html.replace(
+                new RegExp(`ATTACHPH${i}ATTACHPH`, "g"),
+                attachmentPlaceholders[i],
             );
         }
 
@@ -3128,7 +3367,7 @@
     if (active && selected) scheduleDraw(selected);
   });
 })();
-<\/script>`;
+</script>`;
     }
 
     function injectHtmlRunnerSecurity(html) {
@@ -4638,6 +4877,7 @@
                 runtimeState.chatBusy ? "true" : "false",
             );
         }
+        syncChatMessageActions();
     }
 
     async function loadChatConversations({ selectFirst = true } = {}) {
@@ -4987,6 +5227,7 @@
                 runtimeState.chatBusy = false;
                 setButtonLoading(get("btnRuntimeChatSend"), false);
                 syncChatBusyControls();
+                syncChatMessageActions();
                 loadChatConversations({ selectFirst: false }).catch(() => {});
             }
             return;
@@ -5025,7 +5266,11 @@
                 payload || {},
                 content,
             );
-            if (!nested) appendTimelineMessage(item, content, "bot");
+            if (!nested) {
+                appendTimelineMessage(item, content, "bot", {
+                    attachments: payload && payload.attachments,
+                });
+            }
             finishStreamingMessage();
             scrollChatToBottomSoon();
             return;
@@ -5045,7 +5290,9 @@
                 const item = ensureStreamingMessage(eventJobId);
                 if (item) {
                     const content = String(payload.reply);
-                    appendTimelineMessage(item, content, "bot");
+                    appendTimelineMessage(item, content, "bot", {
+                        attachments: payload && payload.attachments,
+                    });
                     scrollChatToBottomSoon();
                 }
             }
@@ -5056,27 +5303,35 @@
             runtimeState.chatHistoryLoaded = true;
             setButtonLoading(get("btnRuntimeChatSend"), false);
             syncChatBusyControls();
+            syncChatMessageActions();
             loadChatConversations({ selectFirst: false }).catch(() => {});
             return;
         }
         if (event === "error") {
             stopChatPolling();
+            const item = findActiveChatMessage(eventJobId);
             finalizeActiveChatMessage();
+            removeEmptyChatMessage(item);
             runtimeState.activeJobId = null;
             runtimeState.activeJobConversationId = "";
             runtimeState.chatBusy = false;
             setButtonLoading(get("btnRuntimeChatSend"), false);
             syncChatBusyControls();
+            syncChatMessageActions();
             const message = String(
                 payload && (payload.error || payload.message)
                     ? payload.error || payload.message
                     : "stream error",
             );
-            showToast(
-                `${t("runtime.failed")}: ${appendRuntimeApiHint(message)}`,
-                "error",
-                5000,
-            );
+            if (message === "cancelled") {
+                showToast(t("runtime.chat_cancelled"), "warning", 1800);
+            } else {
+                showToast(
+                    `${t("runtime.failed")}: ${appendRuntimeApiHint(message)}`,
+                    "error",
+                    5000,
+                );
+            }
         }
     }
 
@@ -5319,28 +5574,76 @@
         }
     }
 
-    async function sendChatMessage() {
+    async function cancelActiveChatJob(jobId = currentChatJobId()) {
+        const resolvedJobId = String(jobId || "").trim();
+        if (!resolvedJobId || runtimeState.chatCancelBusy) return;
+        runtimeState.chatCancelBusy = true;
+        syncChatMessageActions();
+        try {
+            const data = await fetchJsonOrThrow(
+                `/api/runtime/chat/jobs/${encodeURIComponent(resolvedJobId)}/cancel`,
+                { method: "POST" },
+            );
+            applyChatJobSnapshot(data || {}, resolvedJobId);
+            if (runtimeState.activeJobId === resolvedJobId) {
+                applyChatEvent(
+                    "error",
+                    {
+                        error: "cancelled",
+                        job_id: resolvedJobId,
+                        conversation_id:
+                            (data && data.conversation_id) ||
+                            runtimeState.activeJobConversationId ||
+                            currentChatConversationId(),
+                        duration_ms: data && data.duration_ms,
+                    },
+                    Number(data && data.last_seq ? data.last_seq : 0),
+                );
+            }
+        } catch (error) {
+            showToast(
+                `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
+                "error",
+                5000,
+            );
+        } finally {
+            runtimeState.chatCancelBusy = false;
+            syncChatMessageActions();
+        }
+    }
+
+    async function sendChatMessage(options = {}) {
         if (runtimeState.chatBusy) return;
         const input = get("runtimeChatInput");
         const button = get("btnRuntimeChatSend");
-        if (!input) return;
+        const retryMessage = String(options.retryMessage || "").trim();
+        if (!input && !retryMessage) return;
         if (!currentChatConversationId()) {
             await createChatConversation({ switchTo: true });
         }
         if (!currentChatConversationId()) return;
-        const message = (input.value || "").trim();
+        const message =
+            retryMessage || String((input && input.value) || "").trim();
         const attachments = [...runtimeState.chatAttachments];
         const references = [...runtimeState.chatReferences];
-        if (!message && !attachments.length && !references.length) return;
+        const outboundAttachments = retryMessage ? [] : attachments;
+        const outboundReferences = retryMessage ? [] : references;
+        if (
+            !message &&
+            !outboundAttachments.length &&
+            !outboundReferences.length
+        )
+            return;
 
         runtimeState.chatBusy = true;
         setButtonLoading(button, true);
+        syncChatBusyControls();
 
         try {
             const outboundMessage = await buildChatMessageWithAttachments(
                 message,
-                attachments,
-                references,
+                outboundAttachments,
+                outboundReferences,
             );
             if (!outboundMessage) {
                 throw new Error("message is required");
@@ -5353,10 +5656,12 @@
             runtimeState.activeChatMessageId = null;
             runtimeState.lastEventSeq = 0;
             appendChatMessage("user", outboundMessage);
-            input.value = "";
-            closeChatCommandPalette();
-            clearChatAttachments();
-            clearChatReferences();
+            if (!retryMessage && input) {
+                input.value = "";
+                closeChatCommandPalette();
+                clearChatAttachments();
+                clearChatReferences();
+            }
             forceScrollChatToBottomSoon();
 
             const res = await api("/api/runtime/chat/jobs", {
@@ -5387,6 +5692,20 @@
                 5000,
             );
         }
+    }
+
+    function retryChatMessage(item) {
+        const message = String(
+            (item && item.dataset.retryContent) || "",
+        ).trim();
+        if (!message) return;
+        sendChatMessage({ retryMessage: message }).catch((error) => {
+            showToast(
+                `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
+                "error",
+                5000,
+            );
+        });
     }
 
     function handleChatFilesPicked(event) {
@@ -5462,7 +5781,9 @@
             });
         };
         const bindEnterMany = (ids, handler) => {
-            ids.forEach((id) => bindEnter(id, handler));
+            for (const id of ids) {
+                bindEnter(id, handler);
+            }
         };
 
         const probeRefresh = get("btnProbeRefresh");
@@ -5712,6 +6033,20 @@
                     const item = quoteButton.closest(".runtime-chat-item.bot");
                     const text = chatMessageTextForQuote(item);
                     if (text) addChatReference({ type: "message", text });
+                    return;
+                }
+                const cancelButton = target.closest("[data-cancel-job]");
+                if (cancelButton) {
+                    const jobId = String(
+                        cancelButton.getAttribute("data-cancel-job") || "",
+                    ).trim();
+                    cancelActiveChatJob(jobId).catch(() => {});
+                    return;
+                }
+                const retryButton = target.closest("[data-retry-message]");
+                if (retryButton) {
+                    const item = retryButton.closest(".runtime-chat-item.user");
+                    retryChatMessage(item);
                 }
             });
             chatLog.addEventListener("mouseup", () => {
