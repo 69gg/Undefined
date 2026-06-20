@@ -176,6 +176,41 @@ async def test_glob_only_returns_allowed_files(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_glob_handles_allowed_root_files(tmp_path: Path) -> None:
+    root = await _make_repo(tmp_path)
+
+    result = await glob_handler.execute({"pattern": "*.md"}, _context(root))
+
+    assert "README.md" in result
+    assert "CHANGELOG.md" in result
+
+
+@pytest.mark.asyncio
+async def test_glob_handles_recursive_pattern_for_allowed_root_files(
+    tmp_path: Path,
+) -> None:
+    root = await _make_repo(tmp_path)
+
+    result = await glob_handler.execute({"pattern": "**/*.md"}, _context(root))
+
+    assert "README.md" in result
+    assert "docs/usage.md" in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pattern", ["../*.py", "/tmp/*.py", "src/../*.py"])
+async def test_glob_rejects_traversal_patterns(
+    tmp_path: Path,
+    pattern: str,
+) -> None:
+    root = await _make_repo(tmp_path)
+
+    result = await glob_handler.execute({"pattern": pattern}, _context(root))
+
+    assert "glob 模式无效" in result
+
+
+@pytest.mark.asyncio
 async def test_search_only_returns_allowed_files(tmp_path: Path) -> None:
     root = await _make_repo(tmp_path)
 

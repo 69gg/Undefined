@@ -8,9 +8,10 @@ from Undefined.skills.agents.undefined_self_code_agent.tools._shared import (
     allowed_roots_text,
     clamp_int,
     list_allowed_directory_entries,
+    path_exists,
+    path_is_dir,
     resolve_allowed_path,
 )
-from Undefined.utils import io as async_io
 
 
 async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
@@ -32,9 +33,9 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         lines.extend(f"📄 {name}" for name in ALLOWED_ROOT_FILES)
         return "\n".join(lines)
 
-    if not await async_io.exists(resolved.path):
+    if not await path_exists(resolved.path):
         return f"目录不存在: {path_arg}"
-    if not await async_io.is_dir(resolved.path):
+    if not await path_is_dir(resolved.path):
         return f"错误：{path_arg} 不是目录"
 
     entries = await list_allowed_directory_entries(

@@ -8,9 +8,9 @@ from Undefined.skills.agents.undefined_self_code_agent.tools._shared import (
     allowed_roots_text,
     clamp_int,
     collect_allowed_glob_matches,
+    path_exists,
     resolve_search_root,
 )
-from Undefined.utils import io as async_io
 
 
 async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
@@ -29,7 +29,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     except ValueError as exc:
         return f"错误：{exc}"
 
-    if not await async_io.exists(resolved.path):
+    if not await path_exists(resolved.path):
         return f"路径不存在: {base_path or '.'}"
 
     try:

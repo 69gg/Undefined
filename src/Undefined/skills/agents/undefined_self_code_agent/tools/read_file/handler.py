@@ -9,10 +9,11 @@ from Undefined.skills.agents.undefined_self_code_agent.tools._shared import (
     DEFAULT_MAX_CHARS,
     allowed_roots_text,
     clamp_int,
+    path_exists,
+    path_is_file,
     read_text_file,
     resolve_allowed_path,
 )
-from Undefined.utils import io as async_io
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +32,9 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     except ValueError as exc:
         return f"错误：{exc}"
 
-    if not await async_io.exists(resolved.path):
+    if not await path_exists(resolved.path):
         return f"文件不存在: {file_path}"
-    if not await async_io.is_file(resolved.path):
+    if not await path_is_file(resolved.path):
         return f"错误：{file_path} 不是文件"
 
     try:

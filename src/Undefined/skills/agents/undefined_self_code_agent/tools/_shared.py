@@ -4,7 +4,7 @@ import fnmatch
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from Undefined.utils import io as async_io
@@ -176,6 +176,24 @@ def _iter_allowed_roots(repo_root: Path, root: Path | None = None) -> list[Path]
     return [base]
 
 
+async def path_exists(path: Path) -> bool:
+    """异步检查路径是否存在。"""
+
+    return await async_io.exists(path)
+
+
+async def path_is_file(path: Path) -> bool:
+    """异步检查路径是否为普通文件。"""
+
+    return await async_io.is_file(path)
+
+
+async def path_is_dir(path: Path) -> bool:
+    """异步检查路径是否为目录。"""
+
+    return await async_io.is_dir(path)
+
+
 async def iter_allowed_files(
     repo_root: Path,
     root: Path | None = None,
@@ -183,17 +201,68 @@ async def iter_allowed_files(
     """异步遍历允许范围内的文件。"""
 
     for item in _iter_allowed_roots(repo_root, root):
-        if not await async_io.exists(item):
+        if not await path_exists(item):
             continue
-        if await async_io.is_file(item):
+        if await path_is_file(item):
             if is_allowed_path(item, repo_root):
                 yield item
             continue
-        if not await async_io.is_dir(item) or not is_allowed_path(item, repo_root):
+        if not await path_is_dir(item) or not is_allowed_path(item, repo_root):
             continue
         async for path in async_io.iter_rglob_files(item):
             if is_allowed_path(path, repo_root):
                 yield path
+
+
+def _normalize_glob_pattern(pattern: str) -> str:
+    normalized = pattern.strip().replace("\\", "/")
+    if not normalized:
+        raise ValueError("glob 模式不能为空")
+    if (
+        PurePosixPath(normalized).is_absolute()
+        or PureWindowsPath(pattern).is_absolute()
+    ):
+        raise ValueError("glob 模式不能是绝对路径")
+    if ".." in normalized.split("/"):
+        raise ValueError("glob 模式不能包含 ..")
+    return normalized
+
+
+def _has_glob_magic(value: str) -> bool:
+    return any(char in value for char in "*?[")
+
+
+def _root_file_matches(pattern: str, rel_path: str) -> bool:
+    if pattern.startswith("**/"):
+        return _root_file_matches(pattern[3:], rel_path)
+    return PurePosixPath(rel_path).match(pattern) or fnmatch.fnmatchcase(
+        rel_path,
+        pattern,
+    )
+
+
+def _iter_constrained_glob_roots(
+    repo_root: Path,
+    search_root: Path,
+    pattern: str,
+) -> list[tuple[Path, str]]:
+    if search_root.resolve() != repo_root.resolve():
+        return [(search_root.resolve(), pattern)]
+
+    first, separator, remainder = pattern.partition("/")
+    if not separator:
+        return []
+    if first == "**":
+        return [(repo_root / name, pattern) for name in ALLOWED_DIRECTORIES]
+    if first in ALLOWED_DIRECTORIES:
+        return [(repo_root / first, remainder or "*")]
+    if _has_glob_magic(first):
+        return [
+            (repo_root / name, remainder or "*")
+            for name in ALLOWED_DIRECTORIES
+            if fnmatch.fnmatchcase(name, first)
+        ]
+    return []
 
 
 def collect_allowed_glob_matches(
@@ -204,26 +273,45 @@ def collect_allowed_glob_matches(
 ) -> list[str]:
     """按 glob 收集允许范围内的文件路径。调用方需用 asyncio.to_thread 包装。"""
 
-    roots: list[Path]
-    if search_root.resolve() == repo_root.resolve():
-        roots = [repo_root.resolve()]
-    else:
-        roots = [search_root.resolve()]
+    pattern = _normalize_glob_pattern(pattern)
 
     matches: list[str] = []
     seen: set[str] = set()
-    for root in roots:
-        for candidate in root.glob(pattern):
+
+    def add_match(candidate: Path) -> bool:
+        rel = format_relative(candidate, repo_root)
+        if rel in seen:
+            return False
+        seen.add(rel)
+        matches.append(rel)
+        return len(matches) >= max_results
+
+    if search_root.resolve() == repo_root.resolve():
+        for name in ALLOWED_ROOT_FILES:
+            candidate = repo_root / name
+            if not candidate.is_file() or not _root_file_matches(pattern, name):
+                continue
+            if add_match(candidate):
+                return sorted(matches)
+    elif search_root.is_file():
+        rel = format_relative(search_root, repo_root)
+        if is_allowed_path(search_root, repo_root) and _root_file_matches(pattern, rel):
+            add_match(search_root)
+        return sorted(matches)
+
+    for root, root_pattern in _iter_constrained_glob_roots(
+        repo_root,
+        search_root,
+        pattern,
+    ):
+        if not root.exists() or not root.is_dir():
+            continue
+        for candidate in root.glob(root_pattern):
             if not candidate.is_file():
                 continue
             if not is_allowed_path(candidate, repo_root):
                 continue
-            rel = format_relative(candidate, repo_root)
-            if rel in seen:
-                continue
-            seen.add(rel)
-            matches.append(rel)
-            if len(matches) >= max_results:
+            if add_match(candidate):
                 return sorted(matches)
     return sorted(matches)
 

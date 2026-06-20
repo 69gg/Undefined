@@ -13,11 +13,11 @@ from Undefined.skills.agents.undefined_self_code_agent.tools._shared import (
     format_relative,
     iter_allowed_files,
     path_matches_include,
+    path_exists,
     read_text_file,
     resolve_search_root,
     trim_line,
 )
-from Undefined.utils import io as async_io
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     except ValueError as exc:
         return f"错误：{exc}"
 
-    if not await async_io.exists(resolved.path):
+    if not await path_exists(resolved.path):
         return f"路径不存在: {path_arg or '.'}"
 
     try:
