@@ -1,3 +1,18 @@
+## v3.6.0 原生 Chat、WebChat 多会话与运行时管理增强
+
+本版本把 Undefined 的“管理控制台内聊天”扩展为一套更完整的跨端聊天与运行时管理体系：一边新增面向桌面端和 Android 的原生 Chat 客户端，一边把 WebUI WebChat 升级为可长期使用的多会话工作台；底层则补齐 Runtime / Management API、任务续接、附件、命令、定时任务和发布构建能力。围绕这些入口，v3.6.0 也整理了 Agent 路由、认知记忆、附件标签和工程验证，让 WebUI、原生客户端和 QQ 侧共享更一致的运行时语义。
+
+- 建立原生 Chat 产品线。新增 `apps/undefined-chat/`，以 Runtime 作为会话、历史、任务、附件和事件真源，提供多会话、历史分页、Markdown / HTML 渲染、代码高亮、附件上传下载、图片预览、命令面板、消息引用、主题、i18n、快捷键与移动端布局；桌面端和 Android 侧同步接入受控请求、密钥保存、文件上传、生命周期恢复和 HTML 预览等原生能力。
+- 升级 WebUI WebChat 的长期使用体验。WebChat 从单一调试入口升级为多会话聊天工作台，支持持久化会话、旧历史迁移、标题生成、后台 job、事件续接、任务取消、重试复用、工具 / Agent timeline 回放、附件与引用体验，以及更完整的 Markdown、代码块、安全 HTML 和图片展示能力。
+- 补齐 Runtime 与 Management API 的客户端合同。Runtime 新增聊天会话、后台任务、附件、命令元数据和定时任务等接口；Management API 对这些运行态能力提供统一代理，使 WebUI、桌面端和 Android 客户端可以只连接一个管理入口，并安全复用后端注入的 Runtime 鉴权。
+- 扩展运行时管理能力。WebUI 新增 Schedules 页，可管理单工具、多工具和 AI 自我督办任务；日志读取、Runtime 探针、OpenAPI、配置摘要和 WebUI 文案同步覆盖新的聊天、命令、附件、定时任务与原生客户端能力，`[webui].autostart_bot` 也可用于启动 WebUI 后自动拉起 Bot。
+- 整理 Agent 路由与项目自查能力。新增 `undefined_self_code_agent`，用于只读查询 Undefined 当前仓库允许范围内的源码、测试、文档、资源、脚本和 App 实现；提示词同步明确 Undefined / NagaAgent / 文件分析 / 代码交付的职责边界，减少项目问题被错误路由或凭记忆回答。
+- 加固认知记忆、附件和消息边界。认知向量库新增优先级调度，当前输入批次解析覆盖全部 `<message>` 并避免把本轮消息重复当作历史；`end.observations` 改为只记录当前批次新事实，并按 QQ 号、群号或 WebUI/system 会话稳定归档；附件占位统一为 `<attachment uid="..."/>`，WebChat 输出中的 CQ 图片、base64、file URL 和合并转发附件会先注册再写入历史，降低上下文污染和重复回复风险。
+- 修复和优化若干日常稳定性问题。GitHub 自动卡片增加 API 重试并修正 watchers 展示，WebUI 日志尾部读取上限提升到 10000 行，WebChat 取消 / 重试流程避免重复消息，消息发送状态通过统一上下文回调标记，提示词进一步收紧“你 / AI / bot / 机器人”等泛称导致的误触发。
+- 收敛构建、发布、文档与测试。新增 native app 构建、Android 准备和 release app 元数据脚本；CI 与 Release workflow 覆盖 Console / Chat 的桌面端和 Android 矩阵，并校验所有版本源与最新 changelog 一致；新增 `docs/undefined-chat.md`、Chat README、平台能力与 HTML 预览文档，补充 Runtime Chat、WebUI Chat、原生 Chat、定时任务、代码自查 Agent、Chroma 调度器和构建脚本等测试。
+
+---
+
 ## v3.5.1 安全回复、群聊边界与配置表单优化
 
 本版本聚焦三个实际使用中的细节问题：一是群聊里只出现「你/我/他」等人称时，Undefined 更容易误判成在和自己说话；二是面对 prompt 注入或强行改人设的消息时，防御性回复有时过于模板化、攻击性过强，甚至在生成失败时仍会发送兜底脏话；三是 WebUI 配置页对枚举型字段的输入约束不足，容易让用户手填出不合法或不直观的配置值。v3.5.1 因此收紧对话归属判断，强化人设自洽与防注入边界，并把更多配置项改为下拉选择，降低误配置概率。
