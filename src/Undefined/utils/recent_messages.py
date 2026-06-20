@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, cast
+from typing import Any, Pattern, cast
 
 from Undefined.attachments import build_attachment_scope
 from Undefined.onebot import get_message_content, parse_message_time
@@ -13,7 +13,7 @@ from Undefined.utils.message_utils import fetch_group_messages
 
 logger = logging.getLogger(__name__)
 
-_HISTORY_IMAGE_UID_RE = re.compile(
+_HISTORY_IMAGE_UID_RE: Pattern[str] = re.compile(
     r"(?:\[图片\s+uid=(?P<bracket_uid>pic_[^\s\]]+)|"
     r"<attachment\s+uid=(?P<quote>[\"'])(?P<tag_uid>pic_[^\"']+)(?P=quote)\s*/?>)",
     re.IGNORECASE,

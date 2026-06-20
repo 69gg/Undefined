@@ -107,7 +107,7 @@ def _group_event(
     }
 
 
-_PNG_BYTES = (
+_PNG_BYTES: bytes = (
     b"\x89PNG\r\n\x1a\n"
     b"\x00\x00\x00\rIHDR"
     b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00"
@@ -216,6 +216,22 @@ async def test_repeat_skips_attachment_when_registry_missing() -> None:
 
     assert results[-1] is False
     handler.sender.send_group_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_repeat_releases_group_lock_before_sending() -> None:
+    handler = _build_handler(repeat_enabled=True)
+    observed_locked: list[bool] = []
+
+    async def _send_group_message(group_id: int, _text: str, **_kwargs: Any) -> None:
+        observed_locked.append(handler._get_repeat_lock(group_id).locked())
+
+    handler.sender.send_group_message = AsyncMock(side_effect=_send_group_message)
+
+    for uid in [20001, 20002, 20003]:
+        await handler._maybe_trigger_repeat(30001, uid, "hello")
+
+    assert observed_locked == [False]
 
 
 # ── 不触发：3条相同消息来自同一人 ──

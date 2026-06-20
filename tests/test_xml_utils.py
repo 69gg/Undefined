@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from typing import cast
+
 from Undefined.utils.xml import (
     escape_xml_attr,
     escape_xml_text,
@@ -123,6 +126,18 @@ class TestAttachmentTagPreservation:
 
         assert "<attachment" not in result
         assert "&lt;attachment" in result
+
+    def test_ignores_non_mapping_attachment_entries(self) -> None:
+        attachments = cast(
+            Sequence[Mapping[str, str]],
+            [{"uid": "pic_abc123"}, "not-a-mapping"],
+        )
+        result = escape_xml_text_preserving_attachment_tags(
+            '看图 <attachment uid="pic_abc123"/>',
+            attachments,
+        )
+
+        assert '<attachment uid="pic_abc123"/>' in result
 
     def test_format_message_xml_preserves_known_inline_attachment(self) -> None:
         result = format_message_xml(

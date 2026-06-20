@@ -32,7 +32,7 @@ def escape_xml_text_preserving_attachment_tags(
     allowed_uids = {
         str(item.get("uid", "") or "").strip()
         for item in (attachments or [])
-        if str(item.get("uid", "") or "").strip()
+        if isinstance(item, Mapping) and str(item.get("uid", "") or "").strip()
     }
     if not allowed_uids:
         return escape_xml_text(value)

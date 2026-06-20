@@ -137,6 +137,8 @@ class RepeatMixin:
 
         n = self.config.repeat_threshold
         frozen_attachments = self._freeze_repeat_attachments(attachments)
+        reply_text = ""
+        reply_attachments: list[dict[str, str]] = []
         async with self._get_repeat_lock(group_id):
             counter = self._repeat_counter.setdefault(group_id, [])
             counter.append((text, sender_id, frozen_attachments))
@@ -178,61 +180,60 @@ class RepeatMixin:
             self._repeat_counter[group_id] = []
             self._record_repeat_cooldown(group_id, texts[0])
             reply_attachments = self._unfreeze_repeat_attachments(last_n[-1][2])
-            logger.info(
-                "[复读] 触发复读: group=%s text=%s",
-                group_id,
-                redact_string(reply_text)[:50],
-            )
-            delivery_text = reply_text
-            history_text = reply_text
-            history_attachments = reply_attachments
-            rendered = None
-            if reply_attachments:
-                registry = getattr(self.sender, "attachment_registry", None)
-                if registry is None:
-                    logger.warning(
-                        "[复读] 附件注册表不可用，跳过附件复读发送: group=%s text=%s",
-                        group_id,
-                        redact_string(reply_text)[:50],
-                    )
-                    return False
-                scope_key = build_attachment_scope(
-                    group_id=group_id,
-                    request_type="group",
+
+        logger.info(
+            "[复读] 触发复读: group=%s text=%s",
+            group_id,
+            redact_string(reply_text)[:50],
+        )
+        delivery_text = reply_text
+        history_text = reply_text
+        history_attachments = reply_attachments
+        rendered = None
+        if reply_attachments:
+            registry = getattr(self.sender, "attachment_registry", None)
+            if registry is None:
+                logger.warning(
+                    "[复读] 附件注册表不可用，跳过附件复读发送: group=%s text=%s",
+                    group_id,
+                    redact_string(reply_text)[:50],
                 )
-                try:
-                    rendered = await render_message_with_attachments(
-                        reply_text,
-                        registry=registry,
-                        scope_key=scope_key,
-                        strict=False,
-                    )
-                    delivery_text = rendered.delivery_text
-                    history_text = rendered.history_text
-                    history_attachments = (
-                        list(rendered.attachments) or reply_attachments
-                    )
-                except Exception:
-                    logger.warning(
-                        "[复读] 图片/附件渲染失败，跳过本次复读发送: group=%s text=%s",
-                        group_id,
-                        redact_string(reply_text)[:50],
-                        exc_info=True,
-                    )
-                    return False
-            await self.sender.send_group_message(
-                group_id,
-                delivery_text,
-                history_prefix=REPEAT_REPLY_HISTORY_PREFIX,
-                history_message=history_text,
-                attachments=history_attachments,
+                return False
+            scope_key = build_attachment_scope(
+                group_id=group_id,
+                request_type="group",
             )
-            if rendered is not None:
-                await dispatch_pending_file_sends(
-                    rendered,
-                    sender=self.sender,
-                    target_type="group",
-                    target_id=group_id,
-                    registry=getattr(self.sender, "attachment_registry", None),
+            try:
+                rendered = await render_message_with_attachments(
+                    reply_text,
+                    registry=registry,
+                    scope_key=scope_key,
+                    strict=False,
                 )
-            return True
+                delivery_text = rendered.delivery_text
+                history_text = rendered.history_text
+                history_attachments = list(rendered.attachments) or reply_attachments
+            except Exception:
+                logger.warning(
+                    "[复读] 图片/附件渲染失败，跳过本次复读发送: group=%s text=%s",
+                    group_id,
+                    redact_string(reply_text)[:50],
+                    exc_info=True,
+                )
+                return False
+        await self.sender.send_group_message(
+            group_id,
+            delivery_text,
+            history_prefix=REPEAT_REPLY_HISTORY_PREFIX,
+            history_message=history_text,
+            attachments=history_attachments,
+        )
+        if rendered is not None:
+            await dispatch_pending_file_sends(
+                rendered,
+                sender=self.sender,
+                target_type="group",
+                target_id=group_id,
+                registry=getattr(self.sender, "attachment_registry", None),
+            )
+        return True
