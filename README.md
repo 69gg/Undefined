@@ -160,7 +160,7 @@ set_config(cfg)  # opt-in 注入全局单例；CLI 启动链不会调用
 
 # 自动扫描 skills/：tools + toolsets（end / group.* / cognitive.* …）
 tools = ToolRegistry()
-# 自动扫描 skills/agents/：web_agent、code_delivery_agent …
+# 自动扫描 skills/agents/：web_agent、undefined_self_code_agent、code_delivery_agent …
 agents = AgentRegistry()
 
 async def main() -> None:

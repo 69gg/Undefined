@@ -118,9 +118,17 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 
 ### `naga_code_analysis_agent` — NagaAgent 代码分析助手
 
-专门用于深度分析 NagaAgent 框架及本项目的源代码结构。
+专门用于深度分析 NagaAgent 框架的源代码结构。
 
-**子工具**：`read_file`、`search_code`、`analyze_structure`
+**子工具**：`read_file`、`list_directory`、`glob`、`search_file_content`、`read_naga_intro`
+
+---
+
+### `undefined_self_code_agent` — Undefined 自身代码查阅助手
+
+只读查阅 Undefined 当前仓库的源码、测试、文档、资源、脚本、配置示例和 App 实现。访问范围限制为 `src/`、`scripts/`、`tests/`、`res/`、`docs/`、`apps/` 以及根目录 `README.md`、`CHANGELOG.md`、`ARCHITECTURE.md`、`config.toml.example`。
+
+**子工具**：`read_file`、`list_directory`、`glob`、`search_file_content`
 
 ---
 

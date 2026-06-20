@@ -7,6 +7,7 @@ import os
 import shutil
 import tempfile
 import time
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any, Optional
 
@@ -183,6 +184,29 @@ async def is_file(file_path: Path | str) -> bool:
 async def is_dir(file_path: Path | str) -> bool:
     """异步检查路径是否为目录。"""
     return await asyncio.to_thread(Path(file_path).is_dir)
+
+
+def _list_directory_entries_sync(directory: Path) -> list[tuple[Path, bool]]:
+    return [(entry, entry.is_dir()) for entry in directory.iterdir()]
+
+
+async def list_directory_entries(directory: Path | str) -> list[tuple[Path, bool]]:
+    """异步列出目录项及其目录标记。"""
+    return await asyncio.to_thread(_list_directory_entries_sync, Path(directory))
+
+
+def _next_rglob_file(iterator: Iterator[Path]) -> Path | None:
+    for path in iterator:
+        if path.is_file():
+            return path
+    return None
+
+
+async def iter_rglob_files(directory: Path | str) -> AsyncIterator[Path]:
+    """异步递归遍历目录下的普通文件。"""
+    iterator = Path(directory).rglob("*")
+    while path := await asyncio.to_thread(_next_rglob_file, iterator):
+        yield path
 
 
 async def delete_file(file_path: Path | str) -> bool:
