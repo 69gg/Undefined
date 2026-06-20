@@ -235,10 +235,96 @@ class CognitiveService:
         )
         return [item[6] for item in scored_items[:safe_top_k]]
 
+    @staticmethod
+    def _merge_event_candidates(
+        scoped_results: list[tuple[list[dict[str, Any]], float]],
+        *,
+        current_group_id: str = "",
+        current_group_boost: float = 1.0,
+    ) -> list[dict[str, Any]]:
+        candidate_count = sum(len(events) for events, _ in scoped_results)
+        if candidate_count <= 0:
+            return []
+        return CognitiveService._merge_weighted_events(
+            scoped_results,
+            top_k=candidate_count,
+            current_group_id=current_group_id,
+            current_group_boost=current_group_boost,
+        )
+
+    @staticmethod
+    async def _rerank_events(
+        *,
+        reranker: Any,
+        query: str,
+        events: list[dict[str, Any]],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        safe_top_k = max(1, int(top_k))
+        if not reranker or not events:
+            return events[:safe_top_k]
+
+        rerank_started = time.perf_counter()
+        try:
+            reranked = await reranker.rerank(
+                query,
+                [str(event.get("document", "")) for event in events],
+                top_n=safe_top_k,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[认知服务] 自动检索最终重排失败，回退融合排序: candidates=%s top_k=%s err=%s",
+                len(events),
+                safe_top_k,
+                exc,
+            )
+            return events[:safe_top_k]
+
+        ranked_events: list[dict[str, Any]] = []
+        for item in reranked[:safe_top_k]:
+            index = int(safe_float(item.get("index"), default=-1))
+            if index < 0 or index >= len(events):
+                continue
+            event = dict(events[index])
+            event["rerank_score"] = safe_float(item.get("relevance_score"), default=0.0)
+            ranked_events.append(event)
+
+        if not ranked_events:
+            logger.warning(
+                "[认知服务] 自动检索最终重排结果为空，回退融合排序: candidates=%s top_k=%s",
+                len(events),
+                safe_top_k,
+            )
+            return events[:safe_top_k]
+
+        logger.info(
+            "[认知服务] 自动检索最终重排完成: candidates=%s final=%s query_len=%s duration=%.3fs",
+            len(events),
+            len(ranked_events),
+            len(query or ""),
+            time.perf_counter() - rerank_started,
+        )
+        return ranked_events
+
+    @staticmethod
+    def _normalize_recall_queries(
+        query: str, recall_queries: list[str] | None
+    ) -> list[str]:
+        normalized: list[str] = []
+        for raw_query in recall_queries or []:
+            text = str(raw_query or "").strip()
+            if text:
+                normalized.append(text)
+        if normalized:
+            return normalized
+        fallback = str(query or "").strip()
+        return [fallback] if fallback else []
+
     async def _query_events_for_auto_context(
         self,
         *,
         query: str,
+        recall_queries: list[str] | None = None,
         request_type: str,
         group_id: str,
         user_id: str,
@@ -263,9 +349,20 @@ class CognitiveService:
         )
         if current_private_boost <= 0:
             current_private_boost = 1.25
-        query_embedding = await self._prepare_query_embedding(query)
+        normalized_recall_queries = self._normalize_recall_queries(
+            query, recall_queries
+        )
+        if not normalized_recall_queries:
+            return []
+        configured_reranker = self._current_reranker()
+        final_reranker = (
+            configured_reranker if len(normalized_recall_queries) > 1 else None
+        )
+        query_level_reranker = (
+            None if len(normalized_recall_queries) > 1 else configured_reranker
+        )
         common_kwargs: dict[str, Any] = {
-            "reranker": self._current_reranker(),
+            "reranker": query_level_reranker,
             "candidate_multiplier": config.rerank_candidate_multiplier,
             "time_decay_enabled": bool(getattr(config, "time_decay_enabled", True)),
             "time_decay_half_life_days": float(
@@ -277,91 +374,125 @@ class CognitiveService:
             ),
             "apply_mmr": True,
         }
-        if query_embedding is not None:
-            common_kwargs["query_embedding"] = query_embedding
         uid_values = self._uid_candidates(user_id, sender_id)
 
         if request_type == "group":
-            group_events = await call_vector_store_method(
-                self._vector_store.query_events,
-                query,
-                priority=CHROMA_PRIORITY_FOREGROUND,
-                top_k=scoped_top_k,
-                where={"request_type": "group"},
-                **common_kwargs,
-            )
+            scoped_results: list[tuple[list[dict[str, Any]], float]] = []
+            for recall_query in normalized_recall_queries:
+                query_embedding = await self._prepare_query_embedding(recall_query)
+                query_kwargs = dict(common_kwargs)
+                if query_embedding is not None:
+                    query_kwargs["query_embedding"] = query_embedding
+                group_events = await call_vector_store_method(
+                    self._vector_store.query_events,
+                    recall_query,
+                    priority=CHROMA_PRIORITY_FOREGROUND,
+                    top_k=scoped_top_k,
+                    where={"request_type": "group"},
+                    **query_kwargs,
+                )
+                scoped_results.append((group_events, 1.0))
             merge_started = time.perf_counter()
-            merged = self._merge_weighted_events(
-                [(group_events, 1.0)],
-                top_k=safe_top_k,
+            candidates = self._merge_event_candidates(
+                scoped_results,
                 current_group_id=group_id,
                 current_group_boost=current_group_boost,
             )
+            merged = await self._rerank_events(
+                reranker=final_reranker,
+                query=query,
+                events=candidates,
+                top_k=safe_top_k,
+            )
             merge_duration = time.perf_counter() - merge_started
             logger.info(
-                "[认知服务] 自动检索（群聊）: group_candidates=%s merged=%s top_k=%s scope_multiplier=%s current_group_boost=%.2f merge=%.3fs",
-                len(group_events),
+                "[认知服务] 自动检索（群聊）: recall_queries=%s group_candidates=%s merged=%s top_k=%s scope_multiplier=%s current_group_boost=%.2f final_rerank=%s merge=%.3fs",
+                len(normalized_recall_queries),
+                len(candidates),
                 len(merged),
                 safe_top_k,
                 scope_candidate_multiplier,
                 current_group_boost,
+                bool(final_reranker),
                 merge_duration,
             )
             return merged
 
         if request_type == "private":
-            group_task = call_vector_store_method(
-                self._vector_store.query_events,
-                query,
-                priority=CHROMA_PRIORITY_FOREGROUND,
-                top_k=scoped_top_k,
-                where={"request_type": "group"},
-                **common_kwargs,
-            )
+            scoped_results = []
+            private_where: dict[str, Any] | None = None
             if uid_values:
                 uid_clauses = [{"user_id": value} for value in uid_values] + [
                     {"sender_id": value} for value in uid_values
                 ]
-                private_where: dict[str, Any] = {
+                private_where = {
                     "$and": [
                         {"request_type": "private"},
                         {"$or": uid_clauses},
                     ]
                 }
-                private_task = call_vector_store_method(
+
+            for recall_query in normalized_recall_queries:
+                query_embedding = await self._prepare_query_embedding(recall_query)
+                query_kwargs = dict(common_kwargs)
+                if query_embedding is not None:
+                    query_kwargs["query_embedding"] = query_embedding
+                group_task = call_vector_store_method(
                     self._vector_store.query_events,
-                    query,
+                    recall_query,
                     priority=CHROMA_PRIORITY_FOREGROUND,
                     top_k=scoped_top_k,
-                    where=private_where,
-                    **common_kwargs,
+                    where={"request_type": "group"},
+                    **query_kwargs,
                 )
-                group_events_raw, private_events_raw = await asyncio.gather(
-                    group_task, private_task
-                )
-                group_events = cast(list[dict[str, Any]], group_events_raw)
-                private_events = cast(list[dict[str, Any]], private_events_raw)
-            else:
-                group_events = cast(list[dict[str, Any]], await group_task)
-                private_events = []
+                if private_where is not None:
+                    private_task = call_vector_store_method(
+                        self._vector_store.query_events,
+                        recall_query,
+                        priority=CHROMA_PRIORITY_FOREGROUND,
+                        top_k=scoped_top_k,
+                        where=private_where,
+                        **query_kwargs,
+                    )
+                    group_events_raw, private_events_raw = await asyncio.gather(
+                        group_task, private_task
+                    )
+                    group_events = cast(list[dict[str, Any]], group_events_raw)
+                    private_events = cast(list[dict[str, Any]], private_events_raw)
+                else:
+                    group_events = cast(list[dict[str, Any]], await group_task)
+                    private_events = []
+                scoped_results.append((group_events, 1.0))
+                scoped_results.append((private_events, current_private_boost))
             merge_started = time.perf_counter()
-            merged = self._merge_weighted_events(
-                [
-                    (group_events, 1.0),
-                    (private_events, current_private_boost),
-                ],
+            candidates = self._merge_event_candidates(scoped_results)
+            merged = await self._rerank_events(
+                reranker=final_reranker,
+                query=query,
+                events=candidates,
                 top_k=safe_top_k,
             )
             merge_duration = time.perf_counter() - merge_started
+            group_candidate_count = sum(
+                len(events) for events, weight in scoped_results if weight == 1.0
+            )
+            private_candidate_count = sum(
+                len(events)
+                for events, weight in scoped_results
+                if weight == current_private_boost
+            )
             logger.info(
-                "[认知服务] 自动检索（私聊）: group_candidates=%s private_candidates=%s merged=%s top_k=%s scope_multiplier=%s private_boost=%.2f uid_candidates=%s merge=%.3fs",
-                len(group_events),
-                len(private_events),
+                "[认知服务] 自动检索（私聊）: recall_queries=%s group_candidates=%s private_candidates=%s candidates=%s merged=%s top_k=%s scope_multiplier=%s private_boost=%.2f uid_candidates=%s final_rerank=%s merge=%.3fs",
+                len(normalized_recall_queries),
+                group_candidate_count,
+                private_candidate_count,
+                len(candidates),
                 len(merged),
                 safe_top_k,
                 scope_candidate_multiplier,
                 current_private_boost,
                 uid_values,
+                bool(final_reranker),
                 merge_duration,
             )
             return merged
@@ -374,22 +505,39 @@ class CognitiveService:
                 "$or": [{"user_id": value} for value in uid_values]
                 + [{"sender_id": value} for value in uid_values]
             }
-        events = await call_vector_store_method(
-            self._vector_store.query_events,
-            query,
-            priority=CHROMA_PRIORITY_FOREGROUND,
+        scoped_results = []
+        for recall_query in normalized_recall_queries:
+            query_embedding = await self._prepare_query_embedding(recall_query)
+            query_kwargs = dict(common_kwargs)
+            if query_embedding is not None:
+                query_kwargs["query_embedding"] = query_embedding
+            events = await call_vector_store_method(
+                self._vector_store.query_events,
+                recall_query,
+                priority=CHROMA_PRIORITY_FOREGROUND,
+                top_k=scoped_top_k,
+                where=where,
+                **query_kwargs,
+            )
+            scoped_results.append((events, 1.0))
+        candidates = self._merge_event_candidates(scoped_results)
+        merged = await self._rerank_events(
+            reranker=final_reranker,
+            query=query,
+            events=candidates,
             top_k=safe_top_k,
-            where=where,
-            **common_kwargs,
         )
         logger.info(
-            "[认知服务] 自动检索（兜底）: mode=%s where=%s count=%s top_k=%s",
+            "[认知服务] 自动检索（兜底）: mode=%s recall_queries=%s where=%s candidates=%s merged=%s top_k=%s final_rerank=%s",
             request_type or "unknown",
+            len(normalized_recall_queries),
             where or {},
-            len(events),
+            len(candidates),
+            len(merged),
             safe_top_k,
+            bool(final_reranker),
         )
-        return cast(list[dict[str, Any]], events)
+        return merged
 
     async def enqueue_job(
         self,
@@ -548,6 +696,7 @@ class CognitiveService:
         sender_name: str | None = None,
         group_name: str | None = None,
         request_type: str | None = None,
+        recall_queries: list[str] | None = None,
     ) -> str:
         config = self._config_getter()
         safe_group_id = str(group_id or "").strip()
@@ -598,6 +747,7 @@ class CognitiveService:
         try:
             events = await self._query_events_for_auto_context(
                 query=query,
+                recall_queries=recall_queries,
                 request_type=safe_request_type,
                 group_id=safe_group_id,
                 user_id=safe_user_id,

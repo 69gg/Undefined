@@ -120,6 +120,24 @@ def attachment_refs_to_text(attachments: Sequence[Mapping[str, str]]) -> str:
     return " ".join(parts)
 
 
+def attachment_ref_to_tag(attachment: Mapping[str, str]) -> str:
+    """将单个附件引用序列化为 AI 可复用的统一内联标签。"""
+    uid = str(attachment.get("uid", "") or "").strip()
+    if not uid:
+        return ""
+    return f'<attachment uid="{escape_xml_attr(uid)}"/>'
+
+
+def attachment_refs_to_tags(
+    attachments: Sequence[Mapping[str, str]],
+    *,
+    separator: str = " ",
+) -> str:
+    """将附件引用列表转为 ``<attachment uid="..."/>`` 内联标签串。"""
+    tags = [tag for item in attachments if (tag := attachment_ref_to_tag(item))]
+    return separator.join(tags)
+
+
 def attachment_refs_to_xml(
     attachments: Sequence[Mapping[str, str]],
     *,
@@ -163,10 +181,15 @@ def attachment_refs_to_xml(
 def append_attachment_text(
     base_text: str, attachments: Sequence[Mapping[str, str]]
 ) -> str:
-    """在基础文本后追加附件占位摘要行。"""
-    attachment_text = attachment_refs_to_text(attachments)
-    if not attachment_text:
+    """在基础文本后追加统一附件标签行。"""
+    missing_tags = [
+        tag
+        for item in attachments
+        if (tag := attachment_ref_to_tag(item)) and tag not in base_text
+    ]
+    if not missing_tags:
         return base_text
+    attachment_text = " ".join(missing_tags)
     if not base_text.strip():
         return attachment_text
     return f"{base_text}\n附件: {attachment_text}"
@@ -232,15 +255,9 @@ def segment_text(
         forward_id = str(data.get("id") or data.get("resid") or "").strip()
         return f"[合并转发: {forward_id}]" if forward_id else "[合并转发]"
     if ref is not None:
-        label = _MEDIA_LABELS.get(
-            str(ref.get("media_type") or ref.get("kind") or type_).strip(), "附件"
-        )
-        uid = str(ref.get("uid", "") or "").strip()
-        name = str(ref.get("display_name", "") or "").strip()
-        if uid and name:
-            return f"[{label} uid={uid} name={name}]"
-        if uid:
-            return f"[{label} uid={uid}]"
+        tag = attachment_ref_to_tag(ref)
+        if tag:
+            return tag
     label = _MEDIA_LABELS.get(type_, "附件")
     raw = str(data.get("file") or data.get("url") or data.get("id") or "").strip()
     return f"[{label}: {raw}]" if raw else f"[{label}]"

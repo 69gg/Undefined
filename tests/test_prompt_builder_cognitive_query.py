@@ -1,5 +1,6 @@
 from typing import Any, cast
 
+from Undefined.ai.prompts.cognitive import build_cognitive_per_message_queries
 from Undefined.ai.prompts.cognitive import drop_current_message_if_duplicated
 from Undefined.ai.prompts import PromptBuilder
 
@@ -67,6 +68,34 @@ def test_build_cognitive_query_uses_all_messages_in_current_batch() -> None:
     assert "群:研发讨论群" in query
     assert "连续消息说明" not in query
     assert "回复策略" not in query
+    assert enhanced is True
+
+
+def test_build_cognitive_per_message_queries_uses_each_current_message() -> None:
+    question = """<message message_id="101" sender="测试用户" sender_id="10001" group_id="20001" time="2026-02-24 12:00:00">
+<content>我周三要发版</content>
+</message>
+<message message_id="102" sender="测试用户" sender_id="10001" group_id="20001" time="2026-02-24 12:00:02">
+<content>补充：是后端服务发版</content>
+</message>
+
+【连续消息说明】以上 2 条 <message> 是同一用户连续发送的消息
+【回复策略】
+你可以选择不回复"""
+    queries, enhanced = build_cognitive_per_message_queries(
+        question,
+        extra_context={
+            "group_id": 20001,
+            "sender_name": "测试用户",
+            "group_name": "研发讨论群",
+            "is_at_bot": False,
+        },
+    )
+
+    assert queries == [
+        "我周三要发版\n语境: 会话:群聊; 发送者:测试用户; 群:研发讨论群",
+        "补充：是后端服务发版\n语境: 会话:群聊; 发送者:测试用户; 群:研发讨论群",
+    ]
     assert enhanced is True
 
 

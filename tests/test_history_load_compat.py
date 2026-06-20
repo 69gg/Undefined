@@ -177,3 +177,67 @@ async def test_recent_messages_lazily_backfills_meme_attachments(
             "description": "无语猫猫表情包",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_recent_messages_lazily_backfills_meme_attachments_from_attachment_tag(
+    tmp_path: Path,
+) -> None:
+    history_messages: list[dict[str, object]] = [
+        {
+            "type": "group",
+            "chat_id": "30001",
+            "chat_name": "群30001",
+            "user_id": "10000",
+            "display_name": "Bot",
+            "timestamp": "2026-04-11 12:00:00",
+            "message": '<attachment uid="pic_global01"/>',
+        }
+    ]
+
+    class _DummyHistoryManager:
+        def get_recent(
+            self, _chat_id: str, _msg_type: str, _start: int, _end: int
+        ) -> list[dict[str, object]]:
+            return history_messages
+
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    registry.set_global_image_resolver(
+        lambda uid: (
+            AttachmentRecord(
+                uid=uid,
+                scope_key="",
+                kind="image",
+                media_type="image",
+                display_name="meme.png",
+                source_kind="meme_library",
+                source_ref="file:///tmp/meme.png",
+                local_path=None,
+                mime_type="image/png",
+                sha256="deadbeef",
+                created_at="2026-04-11T12:00:00",
+                segment_data={},
+                semantic_kind="meme",
+                description="无语猫猫表情包",
+            )
+            if uid == "pic_global01"
+            else None
+        )
+    )
+
+    recent_messages = await get_recent_messages_prefer_local(
+        chat_id="30001",
+        msg_type="group",
+        start=0,
+        end=10,
+        onebot_client=None,
+        history_manager=_DummyHistoryManager(),
+        bot_qq=10000,
+        attachment_registry=registry,
+    )
+
+    assert recent_messages[0]["attachments"][0]["uid"] == "pic_global01"
+    assert recent_messages[0]["attachments"][0]["description"] == "无语猫猫表情包"

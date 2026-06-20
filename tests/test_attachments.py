@@ -13,6 +13,7 @@ import pytest
 from Undefined.attachments import (
     AttachmentRecord,
     AttachmentRegistry,
+    append_attachment_text,
     attachment_refs_to_xml,
     register_message_attachments,
     render_message_with_pic_placeholders,
@@ -135,6 +136,23 @@ def test_attachment_refs_to_xml_includes_url_reference_source() -> None:
     )
 
     assert 'source_ref="https://example.com/big.zip"' in xml
+
+
+def test_append_attachment_text_uses_unified_attachment_tags() -> None:
+    result = append_attachment_text(
+        "看这张",
+        [
+            {
+                "uid": "pic_demo",
+                "kind": "image",
+                "media_type": "image",
+                "display_name": "demo.png",
+            }
+        ],
+    )
+
+    assert result == '看这张\n附件: <attachment uid="pic_demo"/>'
+    assert "[图片 uid=" not in result
 
 
 @pytest.mark.asyncio
@@ -552,7 +570,8 @@ async def test_register_message_attachments_normalizes_webui_base64_image(
     assert record is not None
     assert record.display_name == "image_2.png"
     assert len(record.display_name) < 64
-    assert uid in result.normalized_text
+    assert f'<attachment uid="{uid}"/>' in result.normalized_text
+    assert "[图片 uid=" not in result.normalized_text
     assert "这张图" in result.normalized_text
 
 
@@ -584,6 +603,7 @@ async def test_register_message_attachments_uses_short_data_url_image_name(
     assert record.display_name == "image_1.png"
     assert record.source_kind == "data_url_image"
     assert len(record.display_name) < 64
+    assert result.normalized_text == f'<attachment uid="{uid}"/>'
 
 
 @pytest.mark.asyncio

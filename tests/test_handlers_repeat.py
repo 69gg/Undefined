@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 
+from Undefined.attachments import AttachmentRegistry
 from Undefined.handlers import (
     MessageHandler,
     REPEAT_REPLY_HISTORY_PREFIX,
@@ -105,6 +107,17 @@ def _group_event(
     }
 
 
+_PNG_BYTES: bytes = (
+    b"\x89PNG\r\n\x1a\n"
+    b"\x00\x00\x00\rIHDR"
+    b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00"
+    b"\x90wS\xde"
+    b"\x00\x00\x00\x0cIDATx\x9cc``\x00\x00\x00\x02\x00\x01"
+    b"\x0b\xe7\x02\x9d"
+    b"\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
 # ── 基础：复读未启用时不触发 ──
 
 
@@ -138,6 +151,87 @@ async def test_repeat_triggers_on_3_identical_from_different_senders() -> None:
     handler.pipeline_registry.run.assert_not_called()
     handler.ai_coordinator.handle_auto_reply.assert_not_called()
     handler._bot_nickname_cache.get_nicknames.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_repeat_renders_image_attachment_instead_of_sending_uid_text(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    record = await registry.register_bytes(
+        "group:30001",
+        _PNG_BYTES,
+        kind="image",
+        display_name="repeat.png",
+        source_kind="test",
+    )
+    handler = _build_handler(repeat_enabled=True)
+    handler.sender.attachment_registry = registry
+    attachment_ref = record.prompt_ref()
+    text = f'<attachment uid="{record.uid}"/>'
+
+    for uid in [20001, 20002, 20003]:
+        triggered = await handler._maybe_trigger_repeat(
+            30001,
+            uid,
+            text,
+            attachments=[attachment_ref],
+        )
+
+    assert triggered is True
+    handler.sender.send_group_message.assert_called_once()
+    call = handler.sender.send_group_message.call_args
+    assert call.args[0] == 30001
+    assert "[CQ:image,file=file://" in call.args[1]
+    assert "<attachment" not in call.args[1]
+    assert "[图片 uid=" not in call.args[1]
+    assert call.kwargs["history_prefix"] == REPEAT_REPLY_HISTORY_PREFIX
+    assert call.kwargs["history_message"] == f"[图片 uid={record.uid} name=repeat.png]"
+    assert call.kwargs["attachments"][0]["uid"] == record.uid
+
+
+@pytest.mark.asyncio
+async def test_repeat_skips_attachment_when_registry_missing() -> None:
+    handler = _build_handler(repeat_enabled=True)
+    text = '<attachment uid="pic_missing_registry"/>'
+    attachment_ref = {
+        "uid": "pic_missing_registry",
+        "kind": "image",
+        "media_type": "image",
+        "display_name": "missing.png",
+    }
+
+    results = [
+        await handler._maybe_trigger_repeat(
+            30001,
+            uid,
+            text,
+            attachments=[attachment_ref],
+        )
+        for uid in [20001, 20002, 20003]
+    ]
+
+    assert results[-1] is False
+    handler.sender.send_group_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_repeat_releases_group_lock_before_sending() -> None:
+    handler = _build_handler(repeat_enabled=True)
+    observed_locked: list[bool] = []
+
+    async def _send_group_message(group_id: int, _text: str, **_kwargs: Any) -> None:
+        observed_locked.append(handler._get_repeat_lock(group_id).locked())
+
+    handler.sender.send_group_message = AsyncMock(side_effect=_send_group_message)
+
+    for uid in [20001, 20002, 20003]:
+        await handler._maybe_trigger_repeat(30001, uid, "hello")
+
+    assert observed_locked == [False]
 
 
 # ── 不触发：3条相同消息来自同一人 ──

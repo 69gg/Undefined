@@ -22,6 +22,7 @@ from Undefined.utils.logging import log_debug_json
 from Undefined.utils.resources import read_text_resource
 from Undefined.utils.xml import format_message_xml
 from Undefined.ai.prompts.cognitive import (
+    build_cognitive_per_message_queries,
     build_cognitive_query,
     drop_current_message_if_duplicated,
 )
@@ -399,11 +400,16 @@ class PromptBuilder:
             cognitive_query, query_enhanced = build_cognitive_query(
                 question, extra_context
             )
+            recall_queries, recall_queries_enhanced = (
+                build_cognitive_per_message_queries(question, extra_context)
+            )
             logger.info(
-                "[AI会话] 开始自动检索认知记忆: raw_query_len=%s effective_query_len=%s query_enhanced=%s type=%s group=%s user=%s sender=%s",
+                "[AI会话] 开始自动检索认知记忆: raw_query_len=%s effective_query_len=%s recall_queries=%s query_enhanced=%s recall_enhanced=%s type=%s group=%s user=%s sender=%s",
                 len(question),
                 len(cognitive_query),
+                len(recall_queries),
                 query_enhanced,
+                recall_queries_enhanced,
                 resolved_request_type or "",
                 resolved_group_id or "",
                 resolved_user_id or "",
@@ -412,6 +418,7 @@ class PromptBuilder:
             await emit_webchat_stage("searching_cognitive_memory")
             cognitive_context = await self._cognitive_service.build_context(
                 query=cognitive_query,
+                recall_queries=recall_queries,
                 group_id=resolved_group_id,
                 user_id=resolved_user_id,
                 sender_id=resolved_sender_id,
