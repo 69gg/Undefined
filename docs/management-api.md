@@ -148,6 +148,8 @@ Management API 兼容两套鉴权：
 - `GET /api/v1/management/logs/files`
 - `GET /api/v1/management/logs/stream`
 
+`logs` 与 `logs/stream` 支持 `lines` 查询参数，默认返回最近 1000 行，范围 `1..10000`。
+
 ### 系统信息
 
 - `GET /api/v1/management/system`

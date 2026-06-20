@@ -1,3 +1,5 @@
+const LOG_TAIL_LINES = 1000;
+
 async function fetchLogs(force = false) {
     if (!force && !shouldFetch("logs")) return;
     const container = get("logContainer");
@@ -12,7 +14,7 @@ async function fetchLogs(force = false) {
     }
     try {
         const params = new URLSearchParams({
-            lines: "200",
+            lines: String(LOG_TAIL_LINES),
             type: state.logType,
         });
         if (state.logFile) params.set("file", state.logFile);
@@ -175,7 +177,10 @@ function startLogStream() {
         return false;
     if (!state.logStreamEnabled) return false;
     state.logStreamFailed = false;
-    const params = new URLSearchParams({ lines: "200", type: state.logType });
+    const params = new URLSearchParams({
+        lines: String(LOG_TAIL_LINES),
+        type: state.logType,
+    });
     const stream = new EventSource(`/api/logs/stream?${params.toString()}`);
     state.logStream = stream;
     stream.onmessage = (event) => {

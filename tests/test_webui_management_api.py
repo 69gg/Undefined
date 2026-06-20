@@ -17,6 +17,7 @@ from Undefined.webui.routes import (
     _auth,
     _config,
     _index,
+    _logs,
     _memes,
     _runtime,
     _shared,
@@ -409,6 +410,25 @@ def test_create_app_registers_management_routes() -> None:
         "/api/v1/management/runtime/chat/attachments/{attachment_id}/preview",
     ) in routes
     assert ("POST", "/api/v1/management/runtime/chat/files") in routes
+
+
+def test_management_logs_line_limit_clamps_to_larger_cap() -> None:
+    assert (
+        _logs._parse_log_lines(cast(web.Request, cast(Any, _request())))
+        == _logs.DEFAULT_LOG_TAIL_LINES
+    )
+    assert (
+        _logs._parse_log_lines(
+            cast(web.Request, cast(Any, _request(query={"lines": "50000"})))
+        )
+        == _logs.MAX_LOG_TAIL_LINES
+    )
+    assert (
+        _logs._parse_log_lines(
+            cast(web.Request, cast(Any, _request(query={"lines": "bad"})))
+        )
+        == _logs.DEFAULT_LOG_TAIL_LINES
+    )
 
 
 async def test_index_handler_applies_launcher_mode_and_initial_view() -> None:

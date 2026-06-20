@@ -11,6 +11,9 @@ from Undefined.config.loader import CONFIG_PATH
 from ._shared import routes, check_auth
 from ..utils import tail_file
 
+DEFAULT_LOG_TAIL_LINES: int = 1000
+MAX_LOG_TAIL_LINES: int = 10000
+
 
 def _resolve_log_path() -> Path:
     log_path = Path("logs/bot.log")
@@ -77,12 +80,21 @@ def _resolve_any_log_file(log_dir: Path, file_name: str | None) -> Path | None:
     return next((p for p in _list_all_log_files(log_dir) if p.name == file_name), None)
 
 
+def _parse_log_lines(request: web.Request) -> int:
+    raw_value = str(request.query.get("lines", DEFAULT_LOG_TAIL_LINES)).strip()
+    try:
+        lines = int(raw_value)
+    except ValueError:
+        lines = DEFAULT_LOG_TAIL_LINES
+    return max(1, min(lines, MAX_LOG_TAIL_LINES))
+
+
 @routes.get("/api/v1/management/logs")
 @routes.get("/api/logs")
 async def logs_handler(request: web.Request) -> Response:
     if not check_auth(request):
         return web.json_response({"error": "Unauthorized"}, status=401)
-    lines = max(1, min(int(request.query.get("lines", "200")), 2000))
+    lines = _parse_log_lines(request)
     log_type = request.query.get("type", "bot")
     file_name = request.query.get("file")
     if log_type == "webui":
@@ -145,7 +157,7 @@ async def logs_files_handler(request: web.Request) -> Response:
 async def logs_stream_handler(request: web.Request) -> web.StreamResponse:
     if not check_auth(request):
         return web.json_response({"error": "Unauthorized"}, status=401)
-    lines = max(1, min(int(request.query.get("lines", "200")), 2000))
+    lines = _parse_log_lines(request)
     log_type = request.query.get("type", "bot")
     if log_type == "all":
         return web.json_response(

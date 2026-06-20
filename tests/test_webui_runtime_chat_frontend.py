@@ -12,6 +12,7 @@ RUNTIME_CSS: Final[Path] = Path("src/Undefined/webui/static/css/components.css")
 WEBUI_TEMPLATE: Final[Path] = Path("src/Undefined/webui/templates/index.html")
 MAIN_JS: Final[Path] = Path("src/Undefined/webui/static/js/main.js")
 API_JS: Final[Path] = Path("src/Undefined/webui/static/js/api.js")
+LOG_VIEW_JS: Final[Path] = Path("src/Undefined/webui/static/js/log-view.js")
 APP_CSS: Final[Path] = Path("src/Undefined/webui/static/css/app.css")
 RESPONSIVE_CSS: Final[Path] = Path("src/Undefined/webui/static/css/responsive.css")
 I18N_JS: Final[Path] = Path("src/Undefined/webui/static/js/i18n.js")
@@ -302,6 +303,14 @@ def test_webchat_frontend_lazy_load_preserves_scroll_offset() -> None:
         "log.scrollTop = previousTop + (log.scrollHeight - previousHeight)"
         in older_helper
     )
+
+
+def test_webui_logs_fetch_more_tail_lines_by_default() -> None:
+    source = _read_source(LOG_VIEW_JS)
+
+    assert "const LOG_TAIL_LINES = 1000;" in source
+    assert 'lines: "200"' not in source
+    assert "lines: String(LOG_TAIL_LINES)" in source
 
 
 def test_webchat_frontend_keeps_final_duration_after_done() -> None:
