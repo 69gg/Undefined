@@ -183,13 +183,24 @@ class AutoExtractMixin:
         target_type: str,
     ) -> None:
         """处理 GitHub 仓库自动提取和发送。"""
+        from Undefined.github.client import (
+            DEFAULT_REQUEST_RETRIES,
+            DEFAULT_REQUEST_TIMEOUT_SECONDS,
+        )
         from Undefined.github.sender import send_github_repo_card
 
         max_items = max(
             1, int(getattr(self.config, "github_auto_extract_max_items", 3))
         )
         request_timeout = float(
-            getattr(self.config, "github_request_timeout_seconds", 10.0)
+            getattr(
+                self.config,
+                "github_request_timeout_seconds",
+                DEFAULT_REQUEST_TIMEOUT_SECONDS,
+            )
+        )
+        request_retries = int(
+            getattr(self.config, "github_request_retries", DEFAULT_REQUEST_RETRIES)
         )
 
         for repo_id in repo_ids[:max_items]:
@@ -200,6 +211,7 @@ class AutoExtractMixin:
                     target_type=target_type,  # type: ignore[arg-type]
                     target_id=target_id,
                     request_timeout=request_timeout,
+                    request_retries=request_retries,
                     context={
                         "request_id": (
                             f"github_auto_extract:{target_type}:{target_id}:{repo_id}"
@@ -214,10 +226,11 @@ class AutoExtractMixin:
                     result,
                 )
             except Exception as exc:
-                logger.info(
-                    "[GitHub] 自动提取跳过 %s → %s:%s: %s",
+                logger.exception(
+                    "[GitHub] 自动提取跳过 %s → %s:%s: exc_type=%s exc=%r",
                     repo_id,
                     target_type,
                     target_id,
+                    type(exc).__name__,
                     exc,
                 )

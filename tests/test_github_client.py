@@ -49,13 +49,15 @@ async def test_get_public_repo_info_parses_repo_and_contributor_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
+    request_kwargs: list[dict[str, Any]] = []
 
     async def fake_request_with_retry(
         _method: str,
         url: str,
-        **_kwargs: Any,
+        **kwargs: Any,
     ) -> _FakeResponse:
         calls.append(url)
+        request_kwargs.append(kwargs)
         if url.endswith("/contributors"):
             return _FakeResponse(
                 [{"login": "alice"}],
@@ -67,11 +69,22 @@ async def test_get_public_repo_info_parses_repo_and_contributor_count(
 
     monkeypatch.setattr(client_module, "request_with_retry", fake_request_with_retry)
 
-    info = await client_module.get_public_repo_info("69gg/Undefined")
+    info = await client_module.get_public_repo_info(
+        "69gg/Undefined",
+        request_timeout=17.0,
+        request_retries=3,
+        context={"request_id": "github-test"},
+    )
 
     assert calls == [
         "https://api.github.com/repos/69gg/Undefined",
         "https://api.github.com/repos/69gg/Undefined/contributors",
+    ]
+    assert [item["timeout"] for item in request_kwargs] == [17.0, 17.0]
+    assert [item["retries"] for item in request_kwargs] == [3, 3]
+    assert [item["context"] for item in request_kwargs] == [
+        {"request_id": "github-test"},
+        {"request_id": "github-test"},
     ]
     assert info.repo_id == "69gg/Undefined"
     assert info.owner_login == "69gg"
@@ -101,3 +114,33 @@ async def test_get_public_repo_info_rejects_private_repo(
 
     with pytest.raises(ValueError, match="仅支持 public"):
         await client_module.get_public_repo_info("69gg/Undefined")
+
+
+@pytest.mark.asyncio
+async def test_get_public_repo_info_uses_default_retry_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request_kwargs: list[dict[str, Any]] = []
+
+    async def fake_request_with_retry(
+        _method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> _FakeResponse:
+        request_kwargs.append(kwargs)
+        if url.endswith("/contributors"):
+            return _FakeResponse([{"login": "alice"}])
+        return _FakeResponse(_repo_payload())
+
+    monkeypatch.setattr(client_module, "request_with_retry", fake_request_with_retry)
+
+    await client_module.get_public_repo_info("69gg/Undefined")
+
+    assert [item["timeout"] for item in request_kwargs] == [
+        client_module.DEFAULT_REQUEST_TIMEOUT_SECONDS,
+        client_module.DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    ]
+    assert [item["retries"] for item in request_kwargs] == [
+        client_module.DEFAULT_REQUEST_RETRIES,
+        client_module.DEFAULT_REQUEST_RETRIES,
+    ]

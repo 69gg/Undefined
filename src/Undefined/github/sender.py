@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 import uuid
 
-from Undefined.github.client import get_public_repo_info
+from Undefined.github.client import (
+    DEFAULT_REQUEST_RETRIES,
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    get_public_repo_info,
+)
 from Undefined.github.models import GitHubRepoInfo
 from Undefined.render import render_html_to_image
 from Undefined.skills.http_config import get_request_proxy
@@ -318,13 +322,15 @@ async def send_github_repo_card(
     sender: "MessageSender",
     target_type: Literal["group", "private"],
     target_id: int,
-    request_timeout: float = 10.0,
+    request_timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    request_retries: int = DEFAULT_REQUEST_RETRIES,
     context: dict[str, object] | None = None,
 ) -> str:
     """获取 public 仓库信息并发送图片卡片。"""
     info = await get_public_repo_info(
         repo_id,
         request_timeout=request_timeout,
+        request_retries=request_retries,
         context=context,
     )
     output_dir = ensure_dir(RENDER_CACHE_DIR / "github")

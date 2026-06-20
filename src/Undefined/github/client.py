@@ -15,6 +15,8 @@ _HEADERS = {
     "User-Agent": "Undefined-bot/3.x (https://github.com/69gg/Undefined)",
     "X-GitHub-Api-Version": "2022-11-28",
 }
+DEFAULT_REQUEST_TIMEOUT_SECONDS: float = 10.0
+DEFAULT_REQUEST_RETRIES: int = 2
 
 
 def _as_str(value: object) -> str:
@@ -81,6 +83,7 @@ async def _fetch_contributor_count(
     repo_id: str,
     *,
     request_timeout: float,
+    request_retries: int,
     context: dict[str, object] | None,
 ) -> int | None:
     response = await request_with_retry(
@@ -88,10 +91,10 @@ async def _fetch_contributor_count(
         f"{_API_BASE_URL}/repos/{repo_id}/contributors",
         params={"per_page": 1},
         headers=_HEADERS,
-        default_timeout=request_timeout,
+        timeout=request_timeout,
         follow_redirects=True,
         context=context,
-        retries=0,
+        retries=request_retries,
     )
     return _parse_contributor_count(response.headers.get("link", ""), response.json())
 
@@ -130,7 +133,8 @@ def _parse_repo_info(
 async def get_public_repo_info(
     repo_id: str,
     *,
-    request_timeout: float = 10.0,
+    request_timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    request_retries: int = DEFAULT_REQUEST_RETRIES,
     context: dict[str, object] | None = None,
 ) -> GitHubRepoInfo:
     """获取 public GitHub 仓库信息。"""
@@ -142,10 +146,10 @@ async def get_public_repo_info(
         "GET",
         f"{_API_BASE_URL}/repos/{normalized}",
         headers=_HEADERS,
-        default_timeout=request_timeout,
+        timeout=request_timeout,
         follow_redirects=True,
         context=context,
-        retries=0,
+        retries=request_retries,
     )
     payload = response.json()
     if not isinstance(payload, dict):
@@ -158,6 +162,7 @@ async def get_public_repo_info(
         contributor_count = await _fetch_contributor_count(
             normalized,
             request_timeout=request_timeout,
+            request_retries=request_retries,
             context=context,
         )
     except Exception:

@@ -28,6 +28,7 @@ def test_github_config_clamps_invalid_values(tmp_path: Path) -> None:
             "[github]\n"
             "auto_extract_enabled = true\n"
             "request_timeout_seconds = 99\n"
+            "request_retries = 99\n"
             "auto_extract_group_ids = [123456]\n"
             "auto_extract_private_ids = [20003]\n"
             "auto_extract_max_items = 99\n"
@@ -36,9 +37,19 @@ def test_github_config_clamps_invalid_values(tmp_path: Path) -> None:
 
     assert config.github_auto_extract_enabled is True
     assert config.github_request_timeout_seconds == 60.0
+    assert config.github_request_retries == 5
     assert config.github_auto_extract_group_ids == [123456]
     assert config.github_auto_extract_private_ids == [20003]
     assert config.github_auto_extract_max_items == 10
+
+
+def test_github_config_retries_fallbacks(tmp_path: Path) -> None:
+    config = _load_config(
+        tmp_path,
+        ("[github]\nrequest_retries = -1\n"),
+    )
+
+    assert config.github_request_retries == 0
 
 
 def test_github_auto_extract_allowlist_follows_global_access_when_empty(
