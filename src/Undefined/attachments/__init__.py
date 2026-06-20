@@ -17,8 +17,10 @@ from Undefined.attachments.render import (
     render_message_with_pic_placeholders,
 )
 from Undefined.attachments.segments import (
+    attachment_ref_to_tag,
     append_attachment_text,
     attachment_refs_to_text,
+    attachment_refs_to_tags,
     attachment_refs_to_xml,
     build_attachment_scope,
     register_message_attachments,
@@ -31,8 +33,10 @@ __all__ = [
     "AttachmentRenderError",
     "RegisteredMessageAttachments",
     "RenderedRichMessage",
+    "attachment_ref_to_tag",
     "append_attachment_text",
     "attachment_refs_to_text",
+    "attachment_refs_to_tags",
     "attachment_refs_to_xml",
     "build_attachment_scope",
     "dispatch_pending_file_sends",

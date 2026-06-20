@@ -18,6 +18,7 @@ from Undefined.attachments import (
     build_attachment_scope,
     register_message_attachments,
 )
+from Undefined.attachments.models import RegisteredMessageAttachments
 from Undefined.ai import AIClient
 from Undefined.config import Config
 from Undefined.faq import FAQStorage
@@ -55,6 +56,18 @@ KEYWORD_REPLY_HISTORY_PREFIX = "[系统关键词自动回复] "
 
 def _is_private_model_pool_control_text(text: str) -> bool:
     return bool(ModelPoolService.is_private_control_text(text))
+
+
+def _coerce_registered_attachments(value: Any) -> RegisteredMessageAttachments:
+    """兼容测试替身：将旧的附件列表返回值转为注册结果对象。"""
+    if isinstance(value, RegisteredMessageAttachments):
+        return value
+    if isinstance(value, list):
+        return RegisteredMessageAttachments(
+            attachments=[item for item in value if isinstance(item, dict)],
+            normalized_text="",
+        )
+    return RegisteredMessageAttachments(attachments=[], normalized_text="")
 
 
 class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
@@ -130,7 +143,9 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         self._pipelines_initialized = False
         self._pipelines_init_lock = asyncio.Lock()
 
-        self._repeat_counter: dict[int, list[tuple[str, int]]] = {}
+        self._repeat_counter: dict[
+            int, list[tuple[str, int, tuple[tuple[str, str], ...]]]
+        ] = {}
         self._repeat_locks: dict[int, asyncio.Lock] = {}
         self._repeat_cooldown: dict[int, dict[str, float]] = {}
 
@@ -235,20 +250,20 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         group_id: int | None = None,
         user_id: int | None = None,
         request_type: str,
-    ) -> list[dict[str, str]]:
+    ) -> RegisteredMessageAttachments:
         scope_key = build_attachment_scope(
             group_id=group_id,
             user_id=user_id,
             request_type=request_type,
         )
         if not scope_key:
-            return []
+            return RegisteredMessageAttachments(attachments=[], normalized_text="")
         ai_client = getattr(self, "ai", None)
         attachment_registry = (
             getattr(ai_client, "attachment_registry", None) if ai_client else None
         )
         if attachment_registry is None:
-            return []
+            return RegisteredMessageAttachments(attachments=[], normalized_text="")
         onebot = getattr(self, "onebot", None)
         resolve_image_url = getattr(onebot, "get_image", None) if onebot else None
         result = await register_message_attachments(
@@ -263,7 +278,10 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         attachments = result.attachments
         # 命中表情库时为 AI 上下文补充 [表情包] 描述
         attachments = await self._annotate_meme_descriptions(attachments, scope_key)
-        return attachments
+        return RegisteredMessageAttachments(
+            attachments=attachments,
+            normalized_text=result.normalized_text,
+        )
 
     def _schedule_meme_ingest(
         self,
@@ -432,7 +450,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
                 logger.warning("获取用户昵称失败: %s", exc)
 
         text = handlers_module.extract_text(private_message_content, self.config.bot_qq)
-        private_attachments, parsed_content_raw = await asyncio.gather(
+        private_registered_raw, parsed_content_raw = await asyncio.gather(
             self._collect_message_attachments(
                 private_message_content,
                 user_id=private_sender_id,
@@ -445,6 +463,8 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
                 self.onebot.get_forward_msg,
             ),
         )
+        private_registered = _coerce_registered_attachments(private_registered_raw)
+        private_attachments = private_registered.attachments
         safe_text = redact_string(text)
         logger.info(
             "[私聊消息] 发送者=%s 昵称=%s 内容=%s",
@@ -459,7 +479,10 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             sender_name=resolved_private_name,
         )
 
-        parsed_content = append_attachment_text(parsed_content_raw, private_attachments)
+        parsed_content_base = private_registered.normalized_text or parsed_content_raw
+        parsed_content = append_attachment_text(
+            parsed_content_base, private_attachments
+        )
         safe_parsed = redact_string(parsed_content)
         logger.debug(
             "[历史记录] 保存私聊: user=%s content=%s...",
@@ -530,7 +553,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
 
         await self.ai_coordinator.handle_private_reply(
             private_sender_id,
-            text,
+            parsed_content_base,
             private_message_content,
             attachments=private_attachments,
             sender_name=user_name,
@@ -578,7 +601,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
                 logger.warning(f"获取群聊名失败: {e}")
             return ""
 
-        group_attachments, group_name, parsed_content_raw = await asyncio.gather(
+        group_registered_raw, group_name, parsed_content_raw = await asyncio.gather(
             self._collect_message_attachments(
                 message_content,
                 group_id=group_id,
@@ -592,6 +615,8 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
                 self.onebot.get_forward_msg,
             ),
         )
+        group_registered = _coerce_registered_attachments(group_registered_raw)
+        group_attachments = group_registered.attachments
 
         resolved_group_sender_name = (sender_card or sender_nickname or "").strip()
         self._schedule_profile_display_name_refresh(
@@ -602,7 +627,8 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             group_name=str(group_name or "").strip(),
         )
 
-        parsed_content = append_attachment_text(parsed_content_raw, group_attachments)
+        parsed_content_base = group_registered.normalized_text or parsed_content_raw
+        parsed_content = append_attachment_text(parsed_content_base, group_attachments)
         safe_parsed = redact_string(parsed_content)
         logger.debug(
             f"[历史记录] 保存群聊: group={group_id}, sender={sender_id}, content={safe_parsed[:50]}..."
@@ -623,7 +649,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
 
         # 机器人发言计入复读计数，防止 bot 复读自身
         if sender_id == self.config.bot_qq:
-            await self._append_bot_repeat_counter(group_id, text)
+            await self._append_bot_repeat_counter(group_id, parsed_content_base)
             return
 
         self._schedule_meme_ingest(
@@ -680,7 +706,12 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
                 return
 
         # 复读命中则跳过管线与 AI 自动回复
-        if await self._maybe_trigger_repeat(group_id, sender_id, text):
+        if await self._maybe_trigger_repeat(
+            group_id,
+            sender_id,
+            parsed_content_base,
+            attachments=group_attachments,
+        ):
             return
 
         await self._run_pipelines(
@@ -694,7 +725,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         await self.ai_coordinator.handle_auto_reply(
             group_id,
             sender_id,
-            normalized_text,
+            normalized_text if not group_attachments else parsed_content_base,
             message_content,
             attachments=group_attachments,
             sender_name=display_name,

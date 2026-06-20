@@ -13,7 +13,11 @@ from Undefined.utils.message_utils import fetch_group_messages
 
 logger = logging.getLogger(__name__)
 
-_HISTORY_IMAGE_UID_RE = re.compile(r"\[图片\s+uid=(?P<uid>pic_[^\s\]]+)")
+_HISTORY_IMAGE_UID_RE = re.compile(
+    r"(?:\[图片\s+uid=(?P<bracket_uid>pic_[^\s\]]+)|"
+    r"<attachment\s+uid=(?P<quote>[\"'])(?P<tag_uid>pic_[^\"']+)(?P=quote)\s*/?>)",
+    re.IGNORECASE,
+)
 
 
 def _normalize_int(value: Any, default: int) -> int:
@@ -218,7 +222,9 @@ async def _augment_local_messages_with_meme_attachments(
             text = str(message.get("message", "") or "")
             seen_uids: set[str] = set()
             for match in _HISTORY_IMAGE_UID_RE.finditer(text):
-                uid = str(match.group("uid") or "").strip()
+                uid = str(
+                    match.group("bracket_uid") or match.group("tag_uid") or ""
+                ).strip()
                 if not uid or uid in seen_uids:
                     continue
                 seen_uids.add(uid)

@@ -61,7 +61,7 @@ _CHAT_STAGE_REFRESH_SECONDS = 1.0
 _CHAT_JOB_EVENT_BUFFER_LIMIT = 1000
 SHUTDOWN_TASK_TIMEOUT = 5.0
 
-# register_message_attachments 产出的可读占位（如 ``[图片 uid=pic_xxx name=foo]``）
+# 兼容旧 register_message_attachments 产出的可读占位（如 ``[图片 uid=pic_xxx name=foo]``）
 _WEBCHAT_BRACKET_REF_PATTERN = re.compile(r"\[[^\]]*?\buid=(?P<uid>[^\s\]]+)[^\]]*?\]")
 # 文本中所有 <attachment.../> / <pic.../> 引用
 _WEBCHAT_ATTACHMENT_TAG_PATTERN = re.compile(

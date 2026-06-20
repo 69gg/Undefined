@@ -20,7 +20,10 @@ from Undefined.context_resource_registry import collect_context_resources
 from Undefined.render import render_html_to_image, render_markdown_to_html
 from Undefined.services.message_batcher import BufferedMessage, make_scope
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
-from Undefined.utils.xml import escape_xml_attr, escape_xml_text
+from Undefined.utils.xml import (
+    escape_xml_attr,
+    escape_xml_text_preserving_attachment_tags,
+)
 
 if TYPE_CHECKING:
     from Undefined.config import Config
@@ -278,7 +281,10 @@ class PrivateReplyMixin:
         safe_name = escape_xml_attr(item.sender_name or "未知用户")
         safe_uid = escape_xml_attr(item.sender_id)
         safe_time = escape_xml_attr(time_str)
-        safe_text = escape_xml_text(item.text)
+        safe_text = escape_xml_text_preserving_attachment_tags(
+            item.text,
+            item.attachments,
+        )
         message_id_attr = ""
         if item.trigger_message_id is not None:
             message_id_attr = (

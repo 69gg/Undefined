@@ -14,6 +14,11 @@ if TYPE_CHECKING:
     from Undefined.config import Config
     from Undefined.utils.sender import MessageSender
 
+from Undefined.attachments import (
+    build_attachment_scope,
+    dispatch_pending_file_sends,
+    render_message_with_attachments,
+)
 from Undefined.utils.logging import redact_string
 
 logger = logging.getLogger(__name__)
@@ -27,7 +32,7 @@ class RepeatMixin:
     if TYPE_CHECKING:
         config: Config
         sender: MessageSender
-        _repeat_counter: dict[int, list[tuple[str, int]]]
+        _repeat_counter: dict[int, list[tuple[str, int, tuple[tuple[str, str], ...]]]]
         _repeat_locks: dict[int, asyncio.Lock]
         _repeat_cooldown: dict[int, dict[str, float]]
 
@@ -77,25 +82,64 @@ class RepeatMixin:
             return
         async with self._get_repeat_lock(group_id):
             counter = self._repeat_counter.setdefault(group_id, [])
-            counter.append((text, self.config.bot_qq))
+            counter.append((text, self.config.bot_qq, ()))
             n = self.config.repeat_threshold
             if len(counter) > n:
                 self._repeat_counter[group_id] = counter[-n:]
+
+    @staticmethod
+    def _freeze_repeat_attachments(
+        attachments: list[dict[str, str]] | None,
+    ) -> tuple[tuple[str, str], ...]:
+        """构建稳定、可比较且可恢复的附件引用快照。"""
+        if not attachments:
+            return ()
+        frozen_items: list[tuple[str, str]] = []
+        seen_uids: set[str] = set()
+        for item in attachments:
+            uid = str(item.get("uid", "") or "").strip()
+            if not uid or uid in seen_uids:
+                continue
+            seen_uids.add(uid)
+            for key, value in sorted(item.items()):
+                text = str(value or "").strip()
+                if text:
+                    frozen_items.append((f"{uid}\x00{key}", text))
+        return tuple(frozen_items)
+
+    @staticmethod
+    def _unfreeze_repeat_attachments(
+        frozen: tuple[tuple[str, str], ...],
+    ) -> list[dict[str, str]]:
+        restored: dict[str, dict[str, str]] = {}
+        order: list[str] = []
+        for compound_key, value in frozen:
+            uid, separator, key = compound_key.partition("\x00")
+            if not separator or not uid or not key:
+                continue
+            if uid not in restored:
+                restored[uid] = {"uid": uid}
+                order.append(uid)
+            restored[uid][key] = value
+        return [restored[uid] for uid in order]
 
     async def _maybe_trigger_repeat(
         self,
         group_id: int,
         sender_id: int,
         text: str,
+        *,
+        attachments: list[dict[str, str]] | None = None,
     ) -> bool:
         """尝试触发群聊复读；若已发送复读消息则返回 True。"""
         if not self.config.repeat_enabled or not text:
             return False
 
         n = self.config.repeat_threshold
+        frozen_attachments = self._freeze_repeat_attachments(attachments)
         async with self._get_repeat_lock(group_id):
             counter = self._repeat_counter.setdefault(group_id, [])
-            counter.append((text, sender_id))
+            counter.append((text, sender_id, frozen_attachments))
             if len(counter) > n:
                 self._repeat_counter[group_id] = counter[-n:]
                 counter = self._repeat_counter[group_id]
@@ -104,8 +148,8 @@ class RepeatMixin:
                 return False
 
             last_n = counter[-n:]
-            texts = [t for t, _ in last_n]
-            senders = [s for _, s in last_n]
+            texts = [t for t, _s, _a in last_n]
+            senders = [s for _t, s, _a in last_n]
             # 连续 n 条文本相同且来自 n 个不同发送者，且 bot 未参与
             if not (
                 len(set(texts)) == 1
@@ -133,14 +177,62 @@ class RepeatMixin:
 
             self._repeat_counter[group_id] = []
             self._record_repeat_cooldown(group_id, texts[0])
+            reply_attachments = self._unfreeze_repeat_attachments(last_n[-1][2])
             logger.info(
                 "[复读] 触发复读: group=%s text=%s",
                 group_id,
                 redact_string(reply_text)[:50],
             )
+            delivery_text = reply_text
+            history_text = reply_text
+            history_attachments = reply_attachments
+            rendered = None
+            if reply_attachments:
+                registry = getattr(self.sender, "attachment_registry", None)
+                if registry is None:
+                    logger.warning(
+                        "[复读] 附件注册表不可用，跳过附件复读发送: group=%s text=%s",
+                        group_id,
+                        redact_string(reply_text)[:50],
+                    )
+                    return False
+                scope_key = build_attachment_scope(
+                    group_id=group_id,
+                    request_type="group",
+                )
+                try:
+                    rendered = await render_message_with_attachments(
+                        reply_text,
+                        registry=registry,
+                        scope_key=scope_key,
+                        strict=False,
+                    )
+                    delivery_text = rendered.delivery_text
+                    history_text = rendered.history_text
+                    history_attachments = (
+                        list(rendered.attachments) or reply_attachments
+                    )
+                except Exception:
+                    logger.warning(
+                        "[复读] 图片/附件渲染失败，跳过本次复读发送: group=%s text=%s",
+                        group_id,
+                        redact_string(reply_text)[:50],
+                        exc_info=True,
+                    )
+                    return False
             await self.sender.send_group_message(
                 group_id,
-                reply_text,
+                delivery_text,
                 history_prefix=REPEAT_REPLY_HISTORY_PREFIX,
+                history_message=history_text,
+                attachments=history_attachments,
             )
+            if rendered is not None:
+                await dispatch_pending_file_sends(
+                    rendered,
+                    sender=self.sender,
+                    target_type="group",
+                    target_id=group_id,
+                    registry=getattr(self.sender, "attachment_registry", None),
+                )
             return True

@@ -551,6 +551,8 @@ Prompt caching 补充：
 | `repeat_cooldown_minutes` | `60` | 复读冷却时间（分钟）。同一内容被复读后，在冷却期内不再重复复读。？和 ? 视为等价。0 = 无冷却 | 整数，≥ 0 |
 | `inverted_question_enabled` | `false` | 倒问号（复读触发时若消息为问号则发送 ¿） | 布尔 |
 
+复读支持图片等已登记附件：当连续相同内容是 `<attachment uid="..."/>` 图片引用时，系统会先渲染成真实图片消息再发送，不会把 UID 占位字符串直接发到群里。
+
 兼容：历史字段 `[core].keyword_reply_enabled` 仍可读取，建议迁移到 `[easter_egg]`。
 
 ---
