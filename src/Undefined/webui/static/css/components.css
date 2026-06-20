@@ -885,6 +885,9 @@
     background 0.16s ease,
     border-color 0.16s ease;
 }
+.runtime-chat-quote-btn[hidden] {
+  display: none;
+}
 .runtime-chat-item:hover .runtime-chat-quote-btn,
 .runtime-chat-quote-btn:focus-visible {
   opacity: 1;

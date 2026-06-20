@@ -5655,7 +5655,9 @@
             runtimeState.streamingMessageId = null;
             runtimeState.activeChatMessageId = null;
             runtimeState.lastEventSeq = 0;
-            appendChatMessage("user", outboundMessage);
+            if (!retryMessage) {
+                appendChatMessage("user", outboundMessage);
+            }
             if (!retryMessage && input) {
                 input.value = "";
                 closeChatCommandPalette();
@@ -5669,6 +5671,7 @@
                 body: JSON.stringify({
                     message: outboundMessage,
                     conversation_id: currentChatConversationId(),
+                    reuse_previous_user_message: !!retryMessage,
                 }),
             });
             const data = await parseJsonSafe(res);

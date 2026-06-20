@@ -170,6 +170,9 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
                     "{message: {text, attachment_ids, references}}. "
                     "Uploaded attachments are referenced by attachment_ids; "
                     "the client must not inline local file content. "
+                    "For retrying the last visible text-only user message, "
+                    "reuse_previous_user_message=true reuses the existing "
+                    "history record after validating the tail message. "
                     "The job event stream may include requires_action for "
                     "future human-in-the-loop workflows."
                 ),

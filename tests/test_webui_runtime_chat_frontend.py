@@ -1169,7 +1169,10 @@ def test_webchat_send_scrolls_to_bottom_after_layout_updates() -> None:
     assert "requestAnimationFrame(scrollChatToBottom)" in helper
     assert "setTimeout(scrollChatToBottom, 0)" in helper
     assert "buildChatMessageWithAttachments(" in send_helper
-    assert 'appendChatMessage("user", outboundMessage)' in send_helper
+    assert (
+        'if (!retryMessage) {\n                appendChatMessage("user", outboundMessage);\n            }'
+        in send_helper
+    )
     assert 'input.value = ""' in send_helper
     assert "clearChatAttachments()" in send_helper
     assert "forceScrollChatToBottomSoon()" in send_helper
@@ -1213,6 +1216,7 @@ def test_webchat_frontend_cancel_and_retry_controls() -> None:
     assert "item.dataset.retryContent" in source
     assert "const outboundAttachments = retryMessage ? [] : attachments" in source
     assert "const outboundReferences = retryMessage ? [] : references" in source
+    assert "reuse_previous_user_message: !!retryMessage" in source
 
     chat_click_block = source.split('chatLog.addEventListener("click"', 1)[1].split(
         'chatLog.addEventListener("mouseup"',
@@ -1225,6 +1229,7 @@ def test_webchat_frontend_cancel_and_retry_controls() -> None:
 
     assert ".runtime-chat-cancel-btn" in css
     assert ".runtime-chat-retry-btn" in css
+    assert ".runtime-chat-quote-btn[hidden]" in css
     assert ".runtime-chat-quote-btn.is-visible" in css
     assert "runtime.cancel" in i18n
     assert "runtime.retry" in i18n

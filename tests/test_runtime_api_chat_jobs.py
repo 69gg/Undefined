@@ -624,6 +624,150 @@ async def test_chat_job_create_structured_attachment_is_not_duplicated_in_prompt
 
 
 @pytest.mark.asyncio
+async def test_chat_job_create_reuse_previous_user_message_skips_duplicate_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _fake_run_webui_chat(
+        _ctx: Any,
+        *,
+        text: str,
+        record_input_history: bool,
+        **_kwargs: Any,
+    ) -> str:
+        captured["text"] = text
+        captured["record_input_history"] = record_input_history
+        return "chat"
+
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", _fake_run_webui_chat)
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    conversation = (
+        await server._chat_job_manager.conversation_store.create_conversation(
+            title="retry"
+        )
+    )
+    await server._chat_job_manager.conversation_store.append_message(
+        str(conversation["id"]),
+        role="user",
+        text_content="搜索今日国内国际新闻热点",
+        display_name="system",
+        user_name="system",
+    )
+    await server._chat_job_manager.conversation_store.append_message(
+        str(conversation["id"]),
+        role="bot",
+        text_content="",
+        display_name="Bot",
+        user_name="Bot",
+        webchat={
+            "display_only": True,
+            "events": [
+                {
+                    "seq": 1,
+                    "event": "message",
+                    "payload": {"content": ""},
+                }
+            ],
+        },
+    )
+
+    response = await server._chat_job_create_handler(
+        cast(
+            web.Request,
+            cast(
+                Any,
+                _DummyRequest(
+                    query={},
+                    _json={
+                        "conversation_id": str(conversation["id"]),
+                        "message": {
+                            "text": "搜索今日国内国际新闻热点",
+                        },
+                        "reuse_previous_user_message": True,
+                    },
+                ),
+            ),
+        )
+    )
+    payload = json.loads(response.text or "{}")
+
+    assert response.status == 202
+    detail_request = cast(
+        web.Request,
+        cast(Any, _DummyRequest(match_info={"job_id": payload["job_id"]}, query={})),
+    )
+    for _ in range(20):
+        detail_response = await server._chat_job_detail_handler(detail_request)
+        detail_payload = json.loads(detail_response.text or "{}")
+        if detail_payload["status"] == "done":
+            break
+        await asyncio.sleep(0.01)
+
+    assert captured["text"] == "搜索今日国内国际新闻热点"
+    assert captured["record_input_history"] is False
+    history_page = await server._chat_job_manager.conversation_store.get_history_page(
+        str(conversation["id"]),
+        limit=20,
+        before=None,
+    )
+    user_records = [
+        record
+        for record in history_page.records
+        if str(record.get("display_name", "")).lower() != "bot"
+        and str(record.get("message", "")).strip()
+    ]
+    assert [record["message"] for record in user_records] == [
+        "搜索今日国内国际新闻热点"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chat_job_create_reuse_previous_user_message_requires_matching_tail() -> (
+    None
+):
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    conversation = (
+        await server._chat_job_manager.conversation_store.create_conversation(
+            title="retry mismatch"
+        )
+    )
+    await server._chat_job_manager.conversation_store.append_message(
+        str(conversation["id"]),
+        role="user",
+        text_content="上一条",
+        display_name="system",
+        user_name="system",
+    )
+
+    response = await server._chat_job_create_handler(
+        cast(
+            web.Request,
+            cast(
+                Any,
+                _DummyRequest(
+                    query={},
+                    _json={
+                        "conversation_id": str(conversation["id"]),
+                        "message": {
+                            "text": "另一条",
+                        },
+                        "reuse_previous_user_message": True,
+                    },
+                ),
+            ),
+        )
+    )
+
+    assert response.status == 400
+    payload = json.loads(response.text or "{}")
+    assert (
+        payload["error"]
+        == "reuse_previous_user_message requires a matching last user message"
+    )
+
+
+@pytest.mark.asyncio
 async def test_requires_action_event_is_preserved_for_runtime_stream_and_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

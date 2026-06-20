@@ -394,6 +394,7 @@ class ChatJobManager:
         user_history_attachments: list[dict[str, str]] | None = None,
         user_history_references: list[dict[str, Any]] | None = None,
         pre_record_user_history: bool = False,
+        reuse_previous_user_history: bool = False,
     ) -> ChatJob:
         await self.conversation_store.ensure_ready(self._ctx.history_manager)
         requested_conversation_id = str(conversation_id or "").strip()
@@ -415,7 +416,8 @@ class ChatJobManager:
             conversation_id=resolved_conversation_id,
             user_history_attachments=list(user_history_attachments or []),
             user_history_references=list(user_history_references or []),
-            user_history_pre_recorded=pre_record_user_history,
+            user_history_pre_recorded=pre_record_user_history
+            or reuse_previous_user_history,
         )
         async with self._lock:
             if any(
@@ -2143,6 +2145,32 @@ async def _normalize_chat_attachment_ids(raw: Any) -> list[dict[str, str]]:
     return attachments
 
 
+async def _last_visible_user_message_matches(
+    job_manager: ChatJobManager,
+    conversation_id: str,
+    text: str,
+) -> bool:
+    page = await job_manager.conversation_store.get_history_page(
+        conversation_id,
+        limit=20,
+        before=None,
+    )
+    expected = str(text or "").strip()
+    if not expected:
+        return False
+    for record in reversed(page.records):
+        if not isinstance(record, dict):
+            continue
+        if _is_webchat_display_only_record(record):
+            continue
+        content = str(record.get("message", "") or "").strip()
+        if not content:
+            continue
+        display_name = str(record.get("display_name", "") or "").strip().lower()
+        return display_name != "bot" and content == expected
+    return False
+
+
 async def _resolve_conversation_id(
     ctx: RuntimeAPIContext,
     job_manager: ChatJobManager,
@@ -3045,12 +3073,31 @@ async def chat_job_create_handler(
         message = await _parse_chat_job_message(body, conversation_id=conversation_id)
         if not message.text and not message.attachments:
             return _json_error("message is required", status=400)
+        reuse_previous_user_message = _to_bool(body.get("reuse_previous_user_message"))
+        if reuse_previous_user_message and (
+            message.attachments or message.references or not message.text
+        ):
+            return _json_error(
+                "reuse_previous_user_message only supports text-only messages",
+                status=400,
+            )
+        if reuse_previous_user_message and not await _last_visible_user_message_matches(
+            job_manager,
+            conversation_id,
+            message.text,
+        ):
+            return _json_error(
+                "reuse_previous_user_message requires a matching last user message",
+                status=400,
+            )
         job = await job_manager.create_job(
             message.text,
             conversation_id,
             user_history_attachments=message.attachments,
             user_history_references=message.references,
-            pre_record_user_history=_is_structured_chat_message(body.get("message")),
+            pre_record_user_history=_is_structured_chat_message(body.get("message"))
+            and not reuse_previous_user_message,
+            reuse_previous_user_history=reuse_previous_user_message,
         )
     except KeyError:
         return _json_error("Conversation not found", status=404)
