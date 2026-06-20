@@ -10,6 +10,7 @@ from Undefined.ai.prompts.constants import (
     COGNITIVE_QUERY_SHORT_THRESHOLD,
 )
 from Undefined.ai.prompts.current_input import (
+    build_current_input_per_message_query_texts,
     build_current_input_query_text,
     drop_current_input_batch_if_duplicated,
     extract_current_message_signature,
@@ -40,6 +41,13 @@ def build_cognitive_query(
         return base_query, False
 
     # 短消息检索质量差，追加轻量会话语境提升向量召回
+    context_suffix = _cognitive_context_suffix(extra_context)
+    if not context_suffix:
+        return base_query, False
+    return f"{base_query}\n{context_suffix}", True
+
+
+def _cognitive_context_suffix(extra_context: dict[str, Any] | None) -> str:
     context_parts: list[str] = []
     if extra_context:
         if bool(extra_context.get("is_private_chat", False)):
@@ -62,8 +70,36 @@ def build_cognitive_query(
             context_parts.append(f"群:{group_name}")
 
     if not context_parts:
-        return base_query, False
-    return f"{base_query}\n语境: {'; '.join(context_parts)}", True
+        return ""
+    return f"语境: {'; '.join(context_parts)}"
+
+
+def build_cognitive_per_message_queries(
+    question: str, extra_context: dict[str, Any] | None = None
+) -> tuple[list[str], bool]:
+    """构建逐条认知记忆召回 query，短消息时分别追加少量会话语境。"""
+    question_text = str(question or "").strip()
+    base_queries, from_current_messages = build_current_input_per_message_query_texts(
+        question_text
+    )
+    if not base_queries:
+        return [], False
+    if not from_current_messages:
+        return base_queries, False
+
+    context_suffix = _cognitive_context_suffix(extra_context)
+    if not context_suffix:
+        return base_queries, False
+
+    enhanced = False
+    queries: list[str] = []
+    for base_query in base_queries:
+        if len(base_query) <= COGNITIVE_QUERY_SHORT_THRESHOLD:
+            queries.append(f"{base_query}\n{context_suffix}")
+            enhanced = True
+        else:
+            queries.append(base_query)
+    return queries, enhanced
 
 
 def drop_current_message_if_duplicated(
@@ -80,6 +116,7 @@ def drop_current_message_if_duplicated(
 
 
 __all__ = [
+    "build_cognitive_per_message_queries",
     "build_cognitive_query",
     "drop_current_message_if_duplicated",
     "extract_current_message_signature",

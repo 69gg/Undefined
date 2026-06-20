@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import html
+import re
 from typing import Any, Callable, Sequence, Mapping
 
 from xml.sax.saxutils import escape
+
+
+_INLINE_ATTACHMENT_TAG_RE = re.compile(
+    r"<attachment\s+uid=(?P<quote>[\"'])(?P<uid>[^\"']+)(?P=quote)\s*/?>",
+    re.IGNORECASE,
+)
 
 
 def escape_xml_text(value: str) -> str:
@@ -14,6 +22,33 @@ def escape_xml_text(value: str) -> str:
 def escape_xml_attr(value: object) -> str:
     text = "" if value is None else str(value)
     return escape(text, {'"': "&quot;", "'": "&apos;"})
+
+
+def escape_xml_text_preserving_attachment_tags(
+    value: str,
+    attachments: Sequence[Mapping[str, str]] | None = None,
+) -> str:
+    """Escape XML text while preserving known ``<attachment uid="..."/>`` tags."""
+    allowed_uids = {
+        str(item.get("uid", "") or "").strip()
+        for item in (attachments or [])
+        if isinstance(item, Mapping) and str(item.get("uid", "") or "").strip()
+    }
+    if not allowed_uids:
+        return escape_xml_text(value)
+
+    text = str(value or "")
+    parts: list[str] = []
+    last_index = 0
+    for match in _INLINE_ATTACHMENT_TAG_RE.finditer(text):
+        uid = html.unescape(str(match.group("uid") or "").strip())
+        if uid not in allowed_uids:
+            continue
+        parts.append(escape_xml_text(text[last_index : match.start()]))
+        parts.append(f'<attachment uid="{escape_xml_attr(uid)}"/>')
+        last_index = match.end()
+    parts.append(escape_xml_text(text[last_index:]))
+    return "".join(parts)
 
 
 def _message_location(msg_type: str, chat_name: str) -> str:
@@ -55,7 +90,7 @@ def format_message_xml(
     safe_role = escape_xml_attr(role)
     safe_title = escape_xml_attr(title)
     safe_time = escape_xml_attr(timestamp)
-    safe_text = escape_xml_text(text)
+    safe_text = escape_xml_text_preserving_attachment_tags(text, attachments)
     safe_location = escape_xml_attr(_message_location(msg_type_val, chat_name))
 
     msg_id_attr = ""

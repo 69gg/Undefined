@@ -30,6 +30,17 @@ class _FakeCognitiveService:
         return "【认知记忆上下文】\n用户最近在排查缓存命中问题。"
 
 
+class _RecordingCognitiveService:
+    enabled = True
+
+    def __init__(self) -> None:
+        self.last_kwargs: dict[str, Any] | None = None
+
+    async def build_context(self, **kwargs: Any) -> str:
+        self.last_kwargs = dict(kwargs)
+        return "【认知记忆上下文】\n用户最近在排查缓存命中问题。"
+
+
 @dataclass
 class _FakeAnthropicSkill:
     name: str
@@ -88,6 +99,37 @@ def _make_builder() -> PromptBuilder:
         runtime_config_getter=lambda: runtime_config,
         anthropic_skill_registry=cast(Any, _FakeAnthropicSkillRegistry()),
         cognitive_service=cast(Any, _FakeCognitiveService()),
+    )
+
+
+def _make_builder_with_cognitive_service(cognitive_service: Any) -> PromptBuilder:
+    runtime_config = SimpleNamespace(
+        keyword_reply_enabled=False,
+        repeat_enabled=False,
+        inverted_question_enabled=False,
+        knowledge_enabled=False,
+        grok_search_enabled=False,
+        chat_model=SimpleNamespace(
+            model_name="gpt-test",
+            pool=SimpleNamespace(enabled=False),
+            thinking_enabled=False,
+            reasoning_enabled=False,
+        ),
+        vision_model=None,
+        agent_model=None,
+        embedding_model=None,
+        security_model=None,
+        grok_model=None,
+        cognitive=SimpleNamespace(enabled=True, recent_end_summaries_inject_k=0),
+        memes=None,
+    )
+    return PromptBuilder(
+        bot_qq=0,
+        memory_storage=None,
+        end_summary_storage=cast(Any, _FakeEndSummaryStorage()),
+        runtime_config_getter=lambda: runtime_config,
+        anthropic_skill_registry=cast(Any, None),
+        cognitive_service=cast(Any, cognitive_service),
     )
 
 
@@ -172,6 +214,48 @@ async def test_build_messages_places_each_rules_before_dynamic_context(
         "- 表情包库: 已启用（默认检索=hybrid，GIF=允许，入库上限=500KB）"
         in runtime_config_message
     )
+
+
+@pytest.mark.asyncio
+async def test_build_messages_passes_per_message_recall_queries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cognitive_service = _RecordingCognitiveService()
+    builder = _make_builder_with_cognitive_service(cognitive_service)
+
+    async def _fake_load_system_prompt() -> str:
+        return "系统提示词"
+
+    async def _fake_load_each_rules() -> str:
+        return ""
+
+    monkeypatch.setattr(builder, "_load_system_prompt", _fake_load_system_prompt)
+    monkeypatch.setattr(builder, "_load_each_rules", _fake_load_each_rules)
+
+    await builder.build_messages(
+        """<message message_id="101" sender="测试用户" sender_id="10001" group_id="20001" time="2026-04-03 10:02:00">
+<content>我周三要发版</content>
+</message>
+<message message_id="102" sender="测试用户" sender_id="10001" group_id="20001" time="2026-04-03 10:02:02">
+<content>补充：是后端服务发版</content>
+</message>""",
+        extra_context={
+            "group_id": 20001,
+            "sender_id": 10001,
+            "sender_name": "测试用户",
+            "group_name": "研发群",
+            "request_type": "group",
+        },
+    )
+
+    assert cognitive_service.last_kwargs is not None
+    assert cognitive_service.last_kwargs["query"].startswith(
+        "我周三要发版\n补充：是后端服务发版\n语境: "
+    )
+    assert cognitive_service.last_kwargs["recall_queries"] == [
+        "我周三要发版\n语境: 会话:群聊; 发送者:测试用户; 群:研发群",
+        "补充：是后端服务发版\n语境: 会话:群聊; 发送者:测试用户; 群:研发群",
+    ]
 
 
 @pytest.mark.asyncio

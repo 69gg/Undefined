@@ -551,6 +551,8 @@ Prompt caching 补充：
 | `repeat_cooldown_minutes` | `60` | 复读冷却时间（分钟）。同一内容被复读后，在冷却期内不再重复复读。？和 ? 视为等价。0 = 无冷却 | 整数，≥ 0 |
 | `inverted_question_enabled` | `false` | 倒问号（复读触发时若消息为问号则发送 ¿） | 布尔 |
 
+复读支持图片等已登记附件：当连续相同内容是 `<attachment uid="..."/>` 图片引用时，系统会先渲染成真实图片消息再发送，不会把 UID 占位字符串直接发到群里。
+
 兼容：历史字段 `[core].keyword_reply_enabled` 仍可读取，建议迁移到 `[easter_egg]`。
 
 ---
@@ -895,7 +897,7 @@ Prompt caching 补充：
 | `auto_scope_candidate_multiplier` | `2` | 自动注入时每个作用域候选扩展倍数（候选数≈`auto_top_k * multiplier`） |
 | `auto_current_group_boost` | `1.15` | 群聊自动检索时，当前群命中额外加权系数 |
 | `auto_current_private_boost` | `1.25` | 私聊自动检索时，当前私聊命中额外加权系数 |
-| `enable_rerank` | `true` | 认知检索是否启用 rerank |
+| `enable_rerank` | `true` | 认知检索是否启用 rerank；自动注入的多消息批次会先逐条召回，再用整批 query 做最终重排 |
 | `recent_end_summaries_inject_k` | `30` | 最近 end 摘要注入条数，`0` 禁用 |
 | `time_decay_enabled` | `true` | 是否启用时间衰减加权 |
 | `time_decay_half_life_days_auto` | `14.0` | 自动注入场景半衰期 |
