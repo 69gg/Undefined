@@ -14,9 +14,10 @@
     <link
         href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:wght@400;500;600&family=Inter:wght@400;500;600&display=swap"
         rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/highlight-github.min.css">
     <link rel="stylesheet" href="/static/css/style.css">
-    <script id="initial-state" type="application/json">__INITIAL_STATE__</script>
-    <script id="initial-view" type="application/json">__INITIAL_VIEW__</script>
+    <script id="initial-state" type="application/json" nonce="__CSP_NONCE__">__INITIAL_STATE__</script>
+    <script id="initial-view" type="application/json" nonce="__CSP_NONCE__">__INITIAL_VIEW__</script>
 </head>
 
 <body>
@@ -54,6 +55,8 @@
                         data-i18n="landing.memory">记忆检索</button>
                     <button class="btn ghost" data-action="open-app" data-tab="memes"
                         data-i18n="landing.memes">表情包库</button>
+                    <button class="btn ghost" data-action="open-app" data-tab="schedules"
+                        data-i18n="landing.schedules">定时任务</button>
                     <button class="btn ghost" data-action="open-app" data-tab="chat"
                         data-i18n="landing.chat">智能对话</button>
                     <button class="btn ghost" data-action="open-app" data-tab="about"
@@ -135,6 +138,9 @@
                 </li>
                 <li class="nav-item" data-tab="memes" data-i18n="tabs.memes" role="button" tabindex="0">
                     表情包库
+                </li>
+                <li class="nav-item" data-tab="schedules" data-i18n="tabs.schedules" role="button" tabindex="0">
+                    定时任务
                 </li>
                 <li class="nav-item" data-tab="chat" data-i18n="tabs.chat" role="button" tabindex="0">
                     智能对话
@@ -233,6 +239,7 @@
                             <button class="nav-item" data-tab="probes" data-i18n="tabs.probes">探针诊断</button>
                             <button class="nav-item" data-tab="memory" data-i18n="tabs.memory">记忆检索</button>
                             <button class="nav-item" data-tab="memes" data-i18n="tabs.memes">表情包库</button>
+                            <button class="nav-item" data-tab="schedules" data-i18n="tabs.schedules">定时任务</button>
                             <button class="nav-item" data-tab="chat" data-i18n="tabs.chat">智能对话</button>
                             <button class="nav-item" data-tab="about" data-i18n="tabs.about">About</button>
                         </div>
@@ -754,34 +761,227 @@
                     </div>
                 </section>
 
-                <!-- Tab Chat -->
-                <section id="tab-chat" class="tab-content">
+                <!-- Tab Schedules -->
+                <section id="tab-schedules" class="tab-content">
                     <div class="header">
                         <div>
-                            <h1 class="page-title" data-i18n="chat.title">智能对话</h1>
-                            <p class="page-subtitle" data-i18n="chat.subtitle">虚拟私聊 system#42。</p>
+                            <h1 class="page-title" data-i18n="schedules.title">定时任务</h1>
+                            <p class="page-subtitle" data-i18n="schedules.subtitle">查看、创建和编辑运行中的调度任务。</p>
+                        </div>
+                        <div class="toolbar">
+                            <button id="btnSchedulesRefresh" class="btn" type="button" data-i18n="schedules.refresh">刷新</button>
+                            <button id="btnSchedulesNew" class="btn primary" type="button" data-i18n="schedules.new">新建任务</button>
                         </div>
                     </div>
 
-                    <div class="card runtime-card chat-runtime-card">
-                        <div class="card-title" data-i18n="runtime.chat_title">AI Chat（虚拟私聊 system#42）</div>
-                        <p class="muted-sm" data-i18n="runtime.chat_hint">该会话由 WebUI 发起，权限为 superadmin；私聊里可直接使用 /命令。</p>
-                        <div id="runtimeChatLog" class="runtime-chat-log"></div>
-                        <div class="runtime-chat-input-row">
-                            <textarea id="runtimeChatInput" class="form-control runtime-chat-input"
-                                data-i18n-placeholder="runtime.chat_placeholder"
-                                placeholder="输入消息，或直接 /help 这样的命令"></textarea>
-                            <div class="runtime-chat-actions">
-                                <input id="runtimeChatImageInput" type="file" accept="image/*" hidden />
-                                <button id="btnRuntimeChatImage" class="btn runtime-chat-action-btn runtime-chat-action-btn-image" type="button">
-                                    <span class="runtime-chat-action-icon" aria-hidden="true">+</span>
-                                    <span class="sr-only" data-i18n="runtime.image">图片</span>
-                                </button>
-                                <button id="btnRuntimeChatSend" class="btn primary runtime-chat-action-btn runtime-chat-action-btn-send" type="button">
-                                    <span class="runtime-chat-action-icon" aria-hidden="true">⏎</span>
-                                    <span class="sr-only" data-i18n="runtime.send">发送</span>
-                                </button>
+                    <div class="schedule-summary-grid">
+                        <div class="schedule-summary-item">
+                            <span class="schedule-summary-label" data-i18n="schedules.total">总任务</span>
+                            <span id="scheduleStatTotal" class="schedule-summary-value">--</span>
+                        </div>
+                        <div class="schedule-summary-item">
+                            <span class="schedule-summary-label" data-i18n="schedules.self_count">自我督办</span>
+                            <span id="scheduleStatSelf" class="schedule-summary-value">--</span>
+                        </div>
+                        <div class="schedule-summary-item">
+                            <span class="schedule-summary-label" data-i18n="schedules.multi_count">多工具</span>
+                            <span id="scheduleStatMulti" class="schedule-summary-value">--</span>
+                        </div>
+                        <div class="schedule-summary-item">
+                            <span class="schedule-summary-label" data-i18n="schedules.limited_count">有限次数</span>
+                            <span id="scheduleStatLimited" class="schedule-summary-value">--</span>
+                        </div>
+                    </div>
+
+                    <div id="scheduleStatus" class="log-meta"></div>
+                    <div class="schedule-workspace">
+                        <div class="schedule-pane schedule-list-pane">
+                            <div class="schedule-list-toolbar">
+                                <input id="scheduleSearchInput" type="search" class="form-control form-control-sm"
+                                    data-i18n-placeholder="schedules.search_placeholder" placeholder="搜索任务..." />
                             </div>
+                            <div id="scheduleList" class="schedule-list"></div>
+                        </div>
+
+                        <form id="scheduleEditor" class="schedule-pane schedule-editor" autocomplete="off">
+                            <div class="schedule-editor-head">
+                                <div>
+                                    <div id="scheduleEditorModeLabel" class="card-title" data-i18n="schedules.editor_new">新建任务</div>
+                                    <div id="scheduleEditorTaskId" class="muted-sm">--</div>
+                                </div>
+                                <span id="scheduleEditorBadge" class="runtime-tag">--</span>
+                            </div>
+
+                            <div class="form-fields schedule-editor-grid">
+                                <div class="form-group">
+                                    <label class="form-label" for="scheduleTaskId" data-i18n="schedules.task_id">任务 ID</label>
+                                    <input id="scheduleTaskId" type="text" class="form-control" placeholder="task_daily_report" />
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="scheduleTaskName" data-i18n="schedules.task_name">任务名称</label>
+                                    <input id="scheduleTaskName" type="text" class="form-control" />
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="scheduleCron" data-i18n="schedules.cron">Crontab</label>
+                                    <input id="scheduleCron" type="text" class="form-control" placeholder="0 9 * * *" />
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="scheduleMaxExecutions" data-i18n="schedules.max_executions">最大执行次数</label>
+                                    <input id="scheduleMaxExecutions" type="number" min="1" step="1" class="form-control" />
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="scheduleTargetType" data-i18n="schedules.target_type">目标类型</label>
+                                    <select id="scheduleTargetType" class="form-control">
+                                        <option value="group" data-i18n="schedules.target_group">群聊</option>
+                                        <option value="private" data-i18n="schedules.target_private">私聊</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="scheduleTargetId" data-i18n="schedules.target_id">目标 ID</label>
+                                    <input id="scheduleTargetId" type="number" min="1" step="1" class="form-control" />
+                                </div>
+                            </div>
+
+                            <div class="schedule-mode-row" role="radiogroup" aria-label="Schedule mode">
+                                <label class="schedule-mode-option">
+                                    <input type="radio" name="scheduleMode" value="single" checked />
+                                    <span data-i18n="schedules.mode_single">单工具</span>
+                                </label>
+                                <label class="schedule-mode-option">
+                                    <input type="radio" name="scheduleMode" value="multi" />
+                                    <span data-i18n="schedules.mode_multi">多工具</span>
+                                </label>
+                                <label class="schedule-mode-option">
+                                    <input type="radio" name="scheduleMode" value="self_instruction" />
+                                    <span data-i18n="schedules.mode_self">自我督办</span>
+                                </label>
+                            </div>
+
+                            <div id="scheduleSingleFields" class="schedule-mode-fields">
+                                <div class="form-group">
+                                    <label class="form-label" for="scheduleToolName" data-i18n="schedules.tool_name">工具名称</label>
+                                    <input id="scheduleToolName" type="text" class="form-control" placeholder="messages.send_message" />
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="scheduleToolArgs" data-i18n="schedules.tool_args">工具参数 JSON</label>
+                                    <textarea id="scheduleToolArgs" class="form-control form-textarea schedule-json-area" spellcheck="false">{}</textarea>
+                                </div>
+                            </div>
+
+                            <div id="scheduleMultiFields" class="schedule-mode-fields" style="display:none;">
+                                <div class="form-group">
+                                    <label class="form-label" for="scheduleExecutionMode" data-i18n="schedules.execution_mode">执行模式</label>
+                                    <select id="scheduleExecutionMode" class="form-control">
+                                        <option value="serial" data-i18n="schedules.execution_serial">串行</option>
+                                        <option value="parallel" data-i18n="schedules.execution_parallel">并行</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="scheduleToolsJson" data-i18n="schedules.tools_json">工具列表 JSON</label>
+                                    <textarea id="scheduleToolsJson" class="form-control form-textarea schedule-json-area" spellcheck="false">[]</textarea>
+                                </div>
+                            </div>
+
+                            <div id="scheduleSelfFields" class="schedule-mode-fields" style="display:none;">
+                                <div class="form-group">
+                                    <label class="form-label" for="scheduleSelfInstruction" data-i18n="schedules.self_instruction">未来指令</label>
+                                    <textarea id="scheduleSelfInstruction" class="form-control form-textarea" rows="5"></textarea>
+                                </div>
+                            </div>
+
+                            <div class="schedule-editor-footer">
+                                <div id="scheduleEditorStatus" class="status-msg"></div>
+                                <div class="toolbar">
+                                    <button id="btnScheduleReset" class="btn ghost" type="button" data-i18n="schedules.reset">重置</button>
+                                    <button id="btnScheduleDelete" class="btn danger" type="button" data-i18n="schedules.delete">删除</button>
+                                    <button id="btnScheduleSave" class="btn primary" type="submit" data-i18n="schedules.save">保存</button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </section>
+
+                <!-- Tab Chat -->
+                <section id="tab-chat" class="tab-content">
+                    <div class="header runtime-chat-header">
+                        <div class="runtime-chat-title">
+                            <h1 class="page-title runtime-chat-page-title">
+                                <span data-i18n="chat.title">智能对话</span>
+                                <span class="runtime-chat-title-meta" data-i18n="chat.subtitle">虚拟私聊 system#42。该会话由 WebUI 发起，权限为 superadmin；私聊里可直接使用 /命令。</span>
+                            </h1>
+                        </div>
+                        <div class="runtime-chat-header-actions">
+                            <button id="btnRuntimeChatNew" class="btn ghost" type="button" data-i18n="runtime.chat_new_conversation">新建对话</button>
+                            <label class="toggle-wrapper runtime-chat-auto-scroll-toggle">
+                                <span data-i18n="runtime.chat_auto_scroll">自动滚动</span>
+                                <input id="runtimeChatAutoScroll" type="checkbox" class="toggle-input" checked>
+                                <span class="toggle-track"><span class="toggle-handle"></span></span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="runtime-chat-shell">
+                        <aside class="runtime-chat-sidebar" data-i18n-aria-label="runtime.chat_conversations" aria-label="对话">
+                            <button
+                                id="runtimeChatConversationDrawerToggle"
+                                class="runtime-chat-sidebar-tab"
+                                type="button"
+                                aria-expanded="false"
+                                aria-controls="runtimeChatConversationDrawerPanel"
+                                data-i18n-aria-label="runtime.chat_conversations"
+                                aria-label="对话"
+                            >
+                                <span class="runtime-chat-sidebar-tab-label" data-i18n="runtime.chat_conversations">对话</span>
+                            </button>
+                            <div class="runtime-chat-sidebar-panel" id="runtimeChatConversationDrawerPanel">
+                                <div class="runtime-chat-sidebar-head">
+                                    <span data-i18n="runtime.chat_conversations">对话</span>
+                                </div>
+                                <div id="runtimeChatConversations" class="runtime-chat-conversations"></div>
+                            </div>
+                        </aside>
+                        <div class="runtime-card chat-runtime-card">
+                            <div class="runtime-chat-conversation-head">
+                                <div id="runtimeChatCurrentTitle" class="runtime-chat-current-title">新对话</div>
+                                <div id="runtimeChatCurrentMeta" class="runtime-chat-current-meta"></div>
+                            </div>
+                            <div id="runtimeChatLoadMore" class="runtime-chat-load-more" aria-live="polite"></div>
+                            <div id="runtimeChatLog" class="runtime-chat-log" role="log" aria-live="polite" aria-relevant="additions text" data-i18n-aria-label="runtime.chat_log_label" aria-label="聊天消息"></div>
+                            <div class="runtime-chat-input-row">
+                                <div id="runtimeChatCommandPalette" class="runtime-chat-command-palette" role="listbox" aria-label="斜杠命令" hidden></div>
+                                <textarea id="runtimeChatInput" class="form-control runtime-chat-input"
+                                    data-i18n-placeholder="runtime.chat_placeholder"
+                                    placeholder="输入消息，或直接 /help 这样的命令"></textarea>
+                                <div id="runtimeChatReferences" class="runtime-chat-references" hidden></div>
+                                <div id="runtimeChatAttachments" class="runtime-chat-attachments" hidden></div>
+                                <div class="runtime-chat-actions">
+                                    <input id="runtimeChatFileInput" type="file" multiple hidden />
+                                    <button id="btnRuntimeChatImage" class="btn runtime-chat-action-btn runtime-chat-action-btn-image" type="button">
+                                        <span class="runtime-chat-action-icon" aria-hidden="true">+</span>
+                                        <span class="sr-only" data-i18n="runtime.attach_file">附加文件</span>
+                                    </button>
+                                    <button id="btnRuntimeChatSend" class="btn primary runtime-chat-action-btn runtime-chat-action-btn-send" type="button">
+                                        <span class="runtime-chat-action-icon" aria-hidden="true">⏎</span>
+                                        <span class="sr-only" data-i18n="runtime.send">发送</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="runtimeHtmlRunner" class="runtime-html-runner" hidden>
+                        <div class="runtime-html-runner-panel" role="dialog" aria-modal="false" data-i18n-aria-label="runtime.html_runner" aria-label="HTML 运行预览">
+                            <div class="runtime-html-runner-toolbar">
+                                <div class="runtime-html-runner-title">
+                                    <span data-i18n="runtime.html_runner">HTML 预览</span>
+                                    <span id="runtimeHtmlRunnerMeta" class="runtime-html-runner-meta">HTML</span>
+                                </div>
+                                <div class="runtime-html-runner-actions">
+                                    <button id="btnRuntimeHtmlPick" class="btn ghost runtime-html-runner-btn" type="button" data-i18n="runtime.pick_html">选择</button>
+                                    <button id="btnRuntimeHtmlClose" class="btn ghost runtime-html-runner-btn" type="button" data-i18n="runtime.close">关闭</button>
+                                </div>
+                            </div>
+                            <iframe id="runtimeHtmlRunnerFrame" class="runtime-html-runner-frame" sandbox="allow-scripts" title="HTML preview"></iframe>
+                            <button id="runtimeHtmlRunnerResize" class="runtime-html-runner-resize" type="button" aria-label="调整 HTML 预览大小"></button>
                         </div>
                     </div>
                 </section>
@@ -834,10 +1034,18 @@
                     <div id="cmdPaletteList" class="cmd-palette-list"></div>
                 </div>
             </div>
+            <div id="runtimeChatImageViewer" class="runtime-chat-image-viewer" role="dialog" aria-modal="true" aria-hidden="true" data-i18n-aria-label="runtime.image_preview" aria-label="图片预览" hidden>
+                <button id="btnRuntimeChatImageViewerClose" class="runtime-chat-image-viewer-close" type="button" data-chat-image-viewer-close data-i18n-aria-label="runtime.close" aria-label="关闭">×</button>
+                <figure class="runtime-chat-image-viewer-figure">
+                    <img id="runtimeChatImageViewerImage" class="runtime-chat-image-viewer-image" alt="" />
+                    <figcaption id="runtimeChatImageViewerCaption" class="runtime-chat-image-viewer-caption"></figcaption>
+                </figure>
+            </div>
         </main>
     </div>
 
     <script src="/static/js/vendor/marked.min.js"></script>
+    <script src="/static/js/vendor/highlight.min.js"></script>
     <script src="/static/js/logs.js"></script>
     <script src="/static/js/i18n.js"></script>
     <script src="/static/js/state.js"></script>
@@ -847,6 +1055,7 @@
     <script src="/static/js/bot.js"></script>
     <script src="/static/js/runtime.js"></script>
     <script src="/static/js/memes.js"></script>
+    <script src="/static/js/schedules.js"></script>
     <script src="/static/js/config-form.js"></script>
     <script src="/static/js/log-view.js"></script>
     <script src="/static/js/main.js"></script>

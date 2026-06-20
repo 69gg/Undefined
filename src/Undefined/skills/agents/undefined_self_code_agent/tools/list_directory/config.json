@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "list_directory",
+        "description": "列出 Undefined 仓库允许范围内的目录内容。空路径列出允许访问的顶层范围。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "目录路径，仓库相对路径；为空时列出允许访问范围"
+                },
+                "max_entries": {
+                    "type": "integer",
+                    "description": "最大返回条目数，默认 120，范围 1-500"
+                }
+            },
+            "required": []
+        }
+    }
+}

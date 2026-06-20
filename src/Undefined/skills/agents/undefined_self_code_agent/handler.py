@@ -1,0 +1,29 @@
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Any
+
+from Undefined.skills.agents.runner import (
+    DEFAULT_AGENT_MAX_ITERATIONS,
+    run_agent_with_tools,
+)
+
+logger = logging.getLogger(__name__)
+
+
+async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
+    """执行 undefined_self_code_agent。"""
+
+    user_prompt = str(args.get("prompt", "")).strip()
+    return await run_agent_with_tools(
+        agent_name="undefined_self_code_agent",
+        user_content=user_prompt,
+        empty_user_content_message="请提供要查阅的 Undefined 代码问题",
+        default_prompt="你是 Undefined 项目的只读代码查阅助手。",
+        context=context,
+        agent_dir=Path(__file__).parent,
+        logger=logger,
+        max_iterations=DEFAULT_AGENT_MAX_ITERATIONS,
+        tool_error_prefix="错误",
+    )

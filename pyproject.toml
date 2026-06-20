@@ -1,6 +1,6 @@
 [project]
 name = "Undefined-bot"
-version = "3.5.1"
+version = "3.6.0"
 description = "QQ bot platform with cognitive memory architecture and multi-agent Skills, via OneBot V11."
 readme = "README.md"
 authors = [
@@ -109,7 +109,7 @@ include = [
 python_version = "3.12"
 strict = true
 ignore_missing_imports = true
-exclude = ["^code/"]
+exclude = ["^code/", "^apps/.*/src-tauri/target/"]
 
 [tool.ruff]
 exclude = ["code"]

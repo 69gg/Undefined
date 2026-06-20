@@ -5,12 +5,15 @@
 - Python 包构建（`wheel` / `sdist`）
 - `Undefined-webui` 管理控制台的本地开发与验证
 - 跨平台连接器 `apps/undefined-console/` 的桌面端 / Android 构建
+- 原生优先聊天客户端 `apps/undefined-chat/` 的桌面端 / Android 构建
+- 手动 GitHub Actions artifact 构建
 - GitHub Release 工作流的发布矩阵
 
 > 约定：
 >
 > - 浏览器版管理入口仍然是 `uv run Undefined-webui`
-> - 桌面端 / Android App 是额外的连接器 / 容器，不替代 `Undefined-webui`
+> - 桌面端 / Android Console 是额外的连接器 / 容器，不替代 `Undefined-webui`
+> - Undefined Chat 是 Runtime API 的原生聊天客户端，Runtime 仍是会话、历史、任务、附件和事件真源
 > - Release 工作流默认覆盖 `Windows / macOS / Linux / Android`，不包含 `iOS`
 
 ## 1. 环境准备
@@ -40,7 +43,7 @@ uv run playwright install
 
 ### Node.js / Rust / Tauri
 
-如果需要构建跨平台控制台，请额外准备：
+如果需要构建跨平台 Console 或 Chat，请额外准备：
 
 - Node.js：建议 `22`
 - Rust stable
@@ -107,7 +110,7 @@ uv run pytest tests/test_webui_management_api.py -q
 uv run ruff check src/Undefined/webui
 ```
 
-## 4. 跨平台控制台 App
+## 4. 跨平台 App
 
 当前 App 的职责不是维护一套长期独立的第二后台，而是：
 
@@ -117,16 +120,29 @@ uv run ruff check src/Undefined/webui
 - 自动尝试登录后打开真正的远程 WebUI
 - 退出 WebUI 后回到主界面
 
-跨平台客户端位于：
+跨平台 Console 位于：
 
 ```text
 apps/undefined-console/
+```
+
+Undefined Chat 位于：
+
+```text
+apps/undefined-chat/
 ```
 
 ### 安装依赖
 
 ```bash
 cd apps/undefined-console
+npm install
+```
+
+Chat 使用同样的安装方式：
+
+```bash
+cd apps/undefined-chat
 npm install
 ```
 
@@ -177,11 +193,22 @@ npm run tauri:build:no-strip -- --bundles deb
 
 ### Android 初始化与构建
 
+推荐使用仓库脚本统一检查环境、初始化生成工程、构建并收集产物：
+
+```bash
+uv run python scripts/build_native_apps.py check --targets android --android-abi arm64-v8a
+uv run python scripts/build_native_apps.py build --product chat --targets android --android-abi arm64-v8a
+```
+
+脚本只构建当前机器本地可构建的目标，不会自动安装 Android SDK、NDK 或 Rust target。缺少依赖时，`check` 和 `build` 会报告需要补齐的命令。
+
 首次或 CI 环境中，先初始化 Android 项目：
 
 ```bash
 npm run tauri:android:init
 ```
+
+Undefined Chat 的 `tauri:android:init` 会在 Tauri 生成 `src-tauri/gen/android` 后自动运行 `scripts/prepare_tauri_android.py`，向生成工程注入移动端 HTML 预览使用的 `HtmlPreviewActivity` 和 Android Keystore 安全存储使用的 `SecretPlugin`。`src-tauri/gen/` 仍是生成目录，不提交到仓库。
 
 构建 Android：
 
@@ -231,7 +258,7 @@ sudo apt-get install -y \
 - Android NDK
 - Rust Android targets
 
-CI 当前会优先保证每个 release 至少产出一个可安装 APK；如果后续接入正式签名，可再升级为签名 release APK / AAB。
+Release workflow 会分别为 Console 和 Chat 构建 `arm64-v8a`、`armeabi-v7a`、`x86`、`x86_64` 的签名 release APK。发布环境必须配置 `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS` 和 `ANDROID_KEY_PASSWORD`；缺少任一 secret 时 Android 发布任务会失败。
 
 ## 6. Git Hook 集成
 
@@ -251,7 +278,7 @@ bash scripts/install_git_hooks.sh
 安装后：
 
 - `pre-commit` 会继续执行 Python 的 `ruff + mypy`
-- 当提交里包含 `apps/undefined-console/`、`src/Undefined/webui/static/js/`、`biome.json`、CI workflow 相关改动时，还会额外执行：
+- 当提交里包含 `apps/undefined-console/`、`apps/undefined-chat/`、`src/Undefined/webui/static/js/`、`biome.json`、CI workflow 相关改动时，还会额外执行对应 App 的：
   - `Biome` 检查
   - `TypeScript` 类型检查
   - `cargo fmt --check`
@@ -261,6 +288,8 @@ bash scripts/install_git_hooks.sh
 
 ```bash
 cd apps/undefined-console
+npm install
+cd ../undefined-chat
 npm install
 ```
 
@@ -279,12 +308,48 @@ npm install
 工作流主要阶段：
 
 1. `verify-python`：校验 tag、构建版本和 `CHANGELOG.md` 最新版本一致，并执行 `ruff`、`mypy`、`pytest`、`uv build`。
-2. `build-tauri-desktop`：构建 Linux `.AppImage` / `.deb`、Windows `.exe` / `.msi`、macOS x64 `.dmg` 和 macOS arm64 `.dmg`。
-3. `build-tauri-android`：构建 Android 通用 `.apk`。
-4. `publish-release`：汇总所有产物并上传 GitHub Release；Release notes 从 `CHANGELOG.md` 最新版本条目生成，不读取 tag 注释。
-5. `publish-pypi`：发布 Python 包到 PyPI。
+2. `verify-native-app`：分别对 Console 和 Chat 执行 `npm run check`。
+3. `build-tauri-desktop`：分别构建 Console / Chat 的 Linux `.AppImage` / `.deb`、Windows `.exe` / `.msi`、macOS x64 `.dmg` 和 macOS arm64 `.dmg`。
+4. `build-tauri-android`：分别构建 Console / Chat 的 Android `.apk`。
+5. `publish-release`：汇总所有产物并上传 GitHub Release；Release notes 从 `CHANGELOG.md` 最新版本条目生成，不读取 tag 注释。
+6. `publish-pypi`：发布 Python 包到 PyPI。
 
-## 8. Release 产物矩阵
+## 8. 手动 Artifact 工作流
+
+如果只想让 GitHub Actions 编译一次原生 App 并从 workflow run 页面手动下载产物，不创建 GitHub Release，也不发布 PyPI，可以使用：
+
+```text
+.github/workflows/manual-native-artifacts.yml
+```
+
+触发方式：
+
+- `workflow_dispatch`
+
+默认输入会构建 `Undefined Chat`：
+
+- 桌面端：Linux `.AppImage` / `.deb`、Windows `.exe` / `.msi`、macOS x64 / arm64 `.dmg`
+- Android：`arm64-v8a` debug APK
+
+可选输入：
+
+- `source_ref`：要构建的分支、tag 或 SHA；留空时使用 Actions 页面选择的 ref。
+- `product`：`chat`、`console` 或 `all`。
+- `build_desktop`：是否构建桌面端。
+- `desktop_platform`：`all`、`linux`、`windows` 或 `macos`。
+- `build_android_debug`：是否构建 Android debug APK。
+- `android_abi`：`arm64-v8a`、`armeabi-v7a`、`x86`、`x86_64` 或 `all`。
+
+手动 artifact 工作流的边界：
+
+- 不调用 `gh release create`。
+- 不发布 Python 包到 PyPI。
+- Android 只构建 debug APK，不需要配置 release keystore secrets。
+- artifacts 通过 `actions/upload-artifact` 上传到 workflow run，默认保留 14 天。
+
+注意：GitHub 的 `workflow_dispatch` 手动入口通常要求 workflow 文件已存在于默认分支。若该文件只存在于 feature 分支，Actions 页面可能不会显示这个手动 workflow；将该 workflow 文件合入默认分支后，可在运行时通过 `source_ref` 指向任意待构建分支，例如 `feature/chat-app`。
+
+## 9. Release 产物矩阵
 
 每次正式 Release 计划上传：
 
@@ -292,20 +357,27 @@ npm install
   - `wheel`
   - `sdist`
 - Windows
-  - `.exe`
-  - `.msi`
+  - `Undefined-Console-*-windows-x64-setup.exe`
+  - `Undefined-Console-*-windows-x64.msi`
+  - `Undefined-Chat-*-windows-x64-setup.exe`
+  - `Undefined-Chat-*-windows-x64.msi`
 - Linux
-  - `.AppImage`
-  - `.deb`
+  - `Undefined-Console-*-linux-x64.AppImage`
+  - `Undefined-Console-*-linux-x64.deb`
+  - `Undefined-Chat-*-linux-x64.AppImage`
+  - `Undefined-Chat-*-linux-x64.deb`
 - macOS
-  - Intel `.dmg`
-  - Apple Silicon `.dmg`
+  - `Undefined-Console-*-macos-x64.dmg`
+  - `Undefined-Console-*-macos-arm64.dmg`
+  - `Undefined-Chat-*-macos-x64.dmg`
+  - `Undefined-Chat-*-macos-arm64.dmg`
 - Android
-  - `.apk`
+  - `Undefined-Console-*-android-*-release.apk`
+  - `Undefined-Chat-*-android-*-release.apk`
 
 `iOS` 当前不在发布矩阵内。
 
-## 9. 推荐的本地构建顺序
+## 10. 推荐的本地构建顺序
 
 如果你准备发布一个版本，建议本地先按以下顺序自检：
 
@@ -323,20 +395,32 @@ uv build
 ```bash
 cd apps/undefined-console
 npm install
-npm run check  # 代码检查（lint + typecheck + cargo check）
+npm run check  # 代码检查与测试（lint/typecheck/test/cargo fmt/check/test，具体以 package.json 为准）
 # 注意：npm run tauri:build 会自动执行 npm run build，无需手动构建前端
+
+cd ../undefined-chat
+npm install
+npm run check  # Biome、TypeScript、unit + e2e（jsdom）测试、cargo fmt/check/test
 ```
 
 如果本次改动涉及 Android 构建链：
 
 ```bash
+uv run python scripts/build_native_apps.py check --targets android --android-abi arm64-v8a
+uv run python scripts/build_native_apps.py build --product chat --targets android --android-abi arm64-v8a
+```
+
+如需排查底层 Tauri Android 命令，可继续直接运行：
+
+```bash
 npm run tauri:android:init
+npm run tauri:android:prepare:check  # Undefined Chat 检查生成工程已包含 HtmlPreviewActivity/SecretPlugin
 npm run tauri:android:debug -- --apk
 ```
 
-## 10. 常见建议
+## 11. 常见建议
 
 - 日常开发和首次部署，优先验证 `uv run Undefined-webui` 全流程是否顺畅。
 - 改动管理接口时，优先补 `tests/test_webui_management_api.py`。
-- 改动发布矩阵时，务必同步更新 `README.md` 与本文件。
-- 改动 App 构建脚本时，注意同时检查 `apps/undefined-console/package.json` 与 `.github/workflows/release.yml`。
+- 改动发布矩阵时，务必同步更新 `README.md`、[Undefined Chat](undefined-chat.md) 与本文件。
+- 改动 App 构建脚本时，注意同时检查 `apps/undefined-console/package.json`、`apps/undefined-chat/package.json` 与 `.github/workflows/release.yml`。

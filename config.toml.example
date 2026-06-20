@@ -1160,6 +1160,9 @@ auto_extract_enabled = false
 # zh: GitHub API 请求超时（秒）。<=0 回退 10，>60 截断到 60。
 # en: GitHub API request timeout (seconds). <=0 falls back to 10, >60 is clamped to 60.
 request_timeout_seconds = 10.0
+# zh: GitHub API 请求重试次数。仅重试网络/超时异常和 429/5xx 状态码；<0 回退 0，>5 截断到 5。
+# en: GitHub API retry count. Retries only network/timeout errors and 429/5xx statuses; <0 falls back to 0, >5 is clamped to 5.
+request_retries = 2
 # zh: 自动提取功能的群聊白名单（空=跟随全局 access.allowed_group_ids）。
 # en: Group allowlist for auto-extraction (empty = follow global access.allowed_group_ids).
 auto_extract_group_ids = []
@@ -1234,6 +1237,9 @@ port = 8787
 # zh: WebUI 密码（首次启动必须修改默认值；默认密码无法登录）。
 # en: WebUI password (must be changed on first run; default password cannot be used to log in).
 password = "changeme"
+# zh: WebUI 启动时是否自动启动机器人进程。
+# en: Auto-start bot when WebUI starts.
+autostart_bot = false
 
 # zh: 主进程 Runtime API（供 WebUI/外部系统读取探针、记忆检索、AI Chat 使用）。
 # en: Runtime API in the main process (for WebUI/external integrations: probes, memory queries, AI chat).
@@ -1286,6 +1292,9 @@ bot_name = "Undefined"
 # zh: ChromaDB 向量数据库存储路径。
 # en: ChromaDB vector store path.
 path = "data/cognitive/chromadb"
+# zh: ChromaDB 前台连续处理上限；达到后若有后台/维护任务，会让出一次执行机会。
+# en: Max consecutive foreground Chroma operations before one maintenance/background slot is allowed.
+scheduler_foreground_burst = 8
 
 [cognitive.query]
 # zh: 自动注入上下文时的召回条数。

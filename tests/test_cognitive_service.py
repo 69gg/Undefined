@@ -5,6 +5,10 @@ from typing import Any, Callable, cast
 
 import pytest
 
+from Undefined.cognitive.chroma_scheduler import (
+    CHROMA_PRIORITY_FOREGROUND,
+    CHROMA_PRIORITY_FOREGROUND_CRITICAL,
+)
 from Undefined.cognitive.service import CognitiveService
 
 
@@ -21,7 +25,9 @@ class _FakeVectorStore:
     def __init__(self) -> None:
         self.last_event_kwargs: dict[str, Any] | None = None
         self.last_profile_kwargs: dict[str, Any] | None = None
-        self.last_upsert_profile: tuple[str, str, dict[str, Any]] | None = None
+        self.last_upsert_profile: (
+            tuple[str, str, dict[str, Any], dict[str, Any]] | None
+        ) = None
         self.event_calls: list[dict[str, Any]] = []
         self.event_resolver: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = (
             None
@@ -29,11 +35,11 @@ class _FakeVectorStore:
 
     async def query_events(
         self,
-        _query: str,
+        query: str,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         self.last_event_kwargs = dict(kwargs)
-        self.event_calls.append(dict(kwargs))
+        self.event_calls.append({"query": query, **dict(kwargs)})
         if self.event_resolver is not None:
             return self.event_resolver(kwargs)
         return []
@@ -51,8 +57,9 @@ class _FakeVectorStore:
         profile_id: str,
         document: str,
         metadata: dict[str, Any],
+        **kwargs: Any,
     ) -> None:
-        self.last_upsert_profile = (profile_id, document, metadata)
+        self.last_upsert_profile = (profile_id, document, metadata, dict(kwargs))
 
 
 class _FakeProfileStorage:
@@ -85,6 +92,24 @@ class _FakeRetrievalRuntime:
     def ensure_reranker(self) -> object | None:
         self.ensure_reranker_calls += 1
         return self._reranker
+
+
+class _FakeReranker:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def rerank(
+        self, query: str, documents: list[str], top_n: int | None = None
+    ) -> list[dict[str, Any]]:
+        self.calls.append({"query": query, "documents": documents, "top_n": top_n})
+        return [
+            {
+                "index": index,
+                "document": documents[index],
+                "relevance_score": float(len(documents) - index),
+            }
+            for index in range(len(documents) - 1, -1, -1)
+        ]
 
 
 @pytest.mark.asyncio
@@ -179,6 +204,10 @@ async def test_search_events_uses_reranker_when_cognitive_rerank_enabled() -> No
 
     assert vector_store.last_event_kwargs is not None
     assert vector_store.last_event_kwargs.get("reranker") is reranker
+    assert (
+        vector_store.last_event_kwargs.get("priority")
+        == CHROMA_PRIORITY_FOREGROUND_CRITICAL
+    )
 
 
 @pytest.mark.asyncio
@@ -205,6 +234,10 @@ async def test_search_events_skips_reranker_when_cognitive_rerank_disabled() -> 
 
     assert vector_store.last_event_kwargs is not None
     assert vector_store.last_event_kwargs.get("reranker") is None
+    assert (
+        vector_store.last_event_kwargs.get("priority")
+        == CHROMA_PRIORITY_FOREGROUND_CRITICAL
+    )
 
 
 @pytest.mark.asyncio
@@ -226,6 +259,10 @@ async def test_search_profiles_skips_reranker_when_cognitive_rerank_disabled() -
 
     assert vector_store.last_profile_kwargs is not None
     assert vector_store.last_profile_kwargs.get("reranker") is None
+    assert (
+        vector_store.last_profile_kwargs.get("priority")
+        == CHROMA_PRIORITY_FOREGROUND_CRITICAL
+    )
 
 
 @pytest.mark.asyncio
@@ -249,6 +286,10 @@ async def test_search_profiles_handles_none_top_k_and_empty_entity_type() -> Non
     assert vector_store.last_profile_kwargs is not None
     assert vector_store.last_profile_kwargs.get("top_k") == 8
     assert vector_store.last_profile_kwargs.get("where") is None
+    assert (
+        vector_store.last_profile_kwargs.get("priority")
+        == CHROMA_PRIORITY_FOREGROUND_CRITICAL
+    )
 
 
 @pytest.mark.asyncio
@@ -277,6 +318,10 @@ async def test_search_events_uses_runtime_reranker_when_enabled() -> None:
     assert runtime.ensure_reranker_calls == 1
     assert vector_store.last_event_kwargs is not None
     assert vector_store.last_event_kwargs.get("reranker") is runtime._reranker
+    assert (
+        vector_store.last_event_kwargs.get("priority")
+        == CHROMA_PRIORITY_FOREGROUND_CRITICAL
+    )
 
 
 @pytest.mark.asyncio
@@ -305,6 +350,10 @@ async def test_search_events_does_not_touch_runtime_reranker_when_disabled() -> 
     assert runtime.ensure_reranker_calls == 0
     assert vector_store.last_event_kwargs is not None
     assert vector_store.last_event_kwargs.get("reranker") is None
+    assert (
+        vector_store.last_event_kwargs.get("priority")
+        == CHROMA_PRIORITY_FOREGROUND_CRITICAL
+    )
 
 
 @pytest.mark.asyncio
@@ -364,6 +413,7 @@ async def test_build_context_group_mode_uses_group_scope_with_boost() -> None:
     assert len(vector_store.event_calls) == 1
     assert vector_store.event_calls[0].get("where") == {"request_type": "group"}
     assert vector_store.event_calls[0].get("top_k") == 4
+    assert vector_store.event_calls[0].get("priority") == CHROMA_PRIORITY_FOREGROUND
     assert "当前群事件" in context
     assert "跨群事件" in context
     assert context.index("当前群事件") < context.index("跨群事件")
@@ -433,6 +483,10 @@ async def test_build_context_private_mode_queries_groups_and_current_private() -
     assert len(vector_store.event_calls) == 2
     where_clauses = [call.get("where") for call in vector_store.event_calls]
     assert {"request_type": "group"} in where_clauses
+    assert all(
+        call.get("priority") == CHROMA_PRIORITY_FOREGROUND
+        for call in vector_store.event_calls
+    )
     assert any(
         isinstance(where, dict)
         and isinstance(where.get("$and"), list)
@@ -518,6 +572,144 @@ async def test_build_context_private_mode_reuses_single_query_embedding() -> Non
     assert len(vector_store.event_calls) == 2
     assert vector_store.event_calls[0].get("query_embedding") == [0.12, 0.34]
     assert vector_store.event_calls[1].get("query_embedding") == [0.12, 0.34]
+    assert all(
+        call.get("priority") == CHROMA_PRIORITY_FOREGROUND
+        for call in vector_store.event_calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_build_context_batch_queries_each_message_then_reranks_batch() -> None:
+    vector_store = _FakeVectorStore()
+    reranker = _FakeReranker()
+
+    def _resolve_events(kwargs: dict[str, Any]) -> list[dict[str, Any]]:
+        query = str(vector_store.event_calls[-1].get("query", ""))
+        if "周三" in query:
+            return [
+                {
+                    "document": "发版时间相关记忆",
+                    "metadata": {
+                        "timestamp_local": "2026-02-24 10:00:00",
+                        "group_id": "1001",
+                        "request_type": "group",
+                    },
+                    "distance": 0.20,
+                },
+                {
+                    "document": "重复记忆",
+                    "metadata": {
+                        "timestamp_local": "2026-02-24 10:01:00",
+                        "group_id": "1001",
+                        "request_type": "group",
+                    },
+                    "distance": 0.35,
+                },
+            ]
+        if "后端服务" in query:
+            return [
+                {
+                    "document": "后端服务相关记忆",
+                    "metadata": {
+                        "timestamp_local": "2026-02-24 10:02:00",
+                        "group_id": "1001",
+                        "request_type": "group",
+                    },
+                    "distance": 0.25,
+                },
+                {
+                    "document": "重复记忆",
+                    "metadata": {
+                        "timestamp_local": "2026-02-24 10:01:00",
+                        "group_id": "1001",
+                        "request_type": "group",
+                    },
+                    "distance": 0.35,
+                },
+            ]
+        return []
+
+    vector_store.event_resolver = _resolve_events
+    service = CognitiveService(
+        config_getter=lambda: SimpleNamespace(
+            enabled=True,
+            enable_rerank=True,
+            auto_top_k=2,
+            auto_scope_candidate_multiplier=2,
+            auto_current_group_boost=1.15,
+            rerank_candidate_multiplier=3,
+            time_decay_enabled=True,
+            time_decay_half_life_days_auto=14.0,
+            time_decay_boost=0.2,
+            time_decay_min_similarity=0.35,
+        ),
+        vector_store=vector_store,
+        job_queue=_FakeJobQueue(),
+        profile_storage=_FakeProfileStorage(),
+        reranker=reranker,
+    )
+
+    context = await service.build_context(
+        query="我周三要发版\n补充：是后端服务发版",
+        recall_queries=["我周三要发版", "补充：是后端服务发版"],
+        group_id="1001",
+        user_id="3001",
+        sender_id="3001",
+        request_type="group",
+    )
+
+    assert [call.get("query") for call in vector_store.event_calls] == [
+        "我周三要发版",
+        "补充：是后端服务发版",
+    ]
+    assert all(call.get("reranker") is None for call in vector_store.event_calls)
+    assert len(reranker.calls) == 1
+    assert reranker.calls[0] == {
+        "query": "我周三要发版\n补充：是后端服务发版",
+        "documents": ["发版时间相关记忆", "后端服务相关记忆", "重复记忆"],
+        "top_n": 2,
+    }
+    assert "重复记忆" in context
+    assert "后端服务相关记忆" in context
+    assert "发版时间相关记忆" not in context
+    assert context.index("重复记忆") < context.index("后端服务相关记忆")
+
+
+@pytest.mark.asyncio
+async def test_build_context_single_query_keeps_query_level_reranker() -> None:
+    vector_store = _FakeVectorStore()
+    reranker = _FakeReranker()
+    service = CognitiveService(
+        config_getter=lambda: SimpleNamespace(
+            enabled=True,
+            enable_rerank=True,
+            auto_top_k=2,
+            auto_scope_candidate_multiplier=2,
+            auto_current_group_boost=1.15,
+            rerank_candidate_multiplier=3,
+            time_decay_enabled=True,
+            time_decay_half_life_days_auto=14.0,
+            time_decay_boost=0.2,
+            time_decay_min_similarity=0.35,
+        ),
+        vector_store=vector_store,
+        job_queue=_FakeJobQueue(),
+        profile_storage=_FakeProfileStorage(),
+        reranker=reranker,
+    )
+
+    await service.build_context(
+        query="单条消息",
+        recall_queries=["单条消息"],
+        group_id="1001",
+        user_id="3001",
+        sender_id="3001",
+        request_type="group",
+    )
+
+    assert len(vector_store.event_calls) == 1
+    assert vector_store.event_calls[0].get("reranker") is reranker
+    assert reranker.calls == []
 
 
 @pytest.mark.asyncio
@@ -525,9 +717,10 @@ async def test_build_context_downgrades_to_empty_when_auto_event_query_fails() -
     class _FailingVectorStore(_FakeVectorStore):
         async def query_events(
             self,
-            _query: str,
+            query: str,
             **kwargs: Any,
         ) -> list[dict[str, Any]]:
+            _ = query
             self.last_event_kwargs = dict(kwargs)
             raise RuntimeError("chroma transient failure")
 
@@ -621,11 +814,12 @@ updated_at: "2026-04-01T00:00:00"
     assert "name: 新昵称" in profile_storage.last_write[2]
     assert "nickname: 新昵称" in profile_storage.last_write[2]
     assert vector_store.last_upsert_profile is not None
-    profile_id, document, metadata = vector_store.last_upsert_profile
+    profile_id, document, metadata, kwargs = vector_store.last_upsert_profile
     assert profile_id == "user:12345"
     assert "昵称: 新昵称" in document
     assert metadata["name"] == "新昵称"
     assert metadata["nickname"] == "新昵称"
+    assert kwargs.get("priority") == CHROMA_PRIORITY_FOREGROUND
 
 
 @pytest.mark.asyncio

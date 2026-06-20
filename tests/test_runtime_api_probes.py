@@ -148,6 +148,59 @@ async def test_runtime_internal_probe_includes_group_superadmin_queue_snapshot()
 
 
 @pytest.mark.asyncio
+async def test_runtime_internal_probe_includes_scheduler_summary() -> None:
+    scheduler = SimpleNamespace(
+        scheduler=SimpleNamespace(running=True),
+        list_tasks=lambda: {
+            "task_daily": {"cron": "0 9 * * *"},
+            "task_weekly": {"cron": "0 8 * * 1"},
+        },
+    )
+    context = RuntimeAPIContext(
+        config_getter=lambda: SimpleNamespace(
+            api=SimpleNamespace(
+                enabled=True,
+                host="127.0.0.1",
+                port=8788,
+                auth_key="changeme",
+                openapi_enabled=True,
+            ),
+            chat_model=SimpleNamespace(
+                model_name="gpt-5.4",
+                api_url="https://api.example.com/v1",
+                api_mode="responses",
+                thinking_enabled=False,
+                thinking_tool_call_compat=True,
+                responses_tool_choice_compat=False,
+                responses_force_stateless_replay=False,
+                reasoning_enabled=True,
+                reasoning_effort="high",
+            ),
+        ),
+        onebot=SimpleNamespace(connection_status=lambda: {}),
+        ai=SimpleNamespace(memory_storage=None),
+        command_dispatcher=SimpleNamespace(),
+        queue_manager=SimpleNamespace(snapshot=lambda: {}),
+        history_manager=SimpleNamespace(),
+        scheduler=scheduler,
+    )
+    server = RuntimeAPIServer(context, host="127.0.0.1", port=8788)
+
+    response = await server._internal_probe_handler(
+        cast(web.Request, cast(Any, SimpleNamespace()))
+    )
+    response_text = response.text
+    assert response_text is not None
+    payload = json.loads(response_text)
+
+    assert payload["scheduler"] == {
+        "available": True,
+        "count": 2,
+        "running": True,
+    }
+
+
+@pytest.mark.asyncio
 async def test_runtime_internal_probe_includes_all_skill_directory_summaries() -> None:
     class FakeCommandRegistry:
         def __init__(self, commands: list[Any]) -> None:

@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from Undefined.utils.xml import escape_xml_attr, escape_xml_text
+from collections.abc import Mapping, Sequence
+from typing import cast
+
+from Undefined.utils.xml import (
+    escape_xml_attr,
+    escape_xml_text,
+    escape_xml_text_preserving_attachment_tags,
+    format_message_xml,
+)
 
 
 class TestEscapeXmlText:
@@ -98,3 +106,59 @@ class TestEscapeXmlAttr:
 
     def test_zero(self) -> None:
         assert escape_xml_attr(0) == "0"
+
+
+class TestAttachmentTagPreservation:
+    def test_preserves_known_attachment_tag(self) -> None:
+        result = escape_xml_text_preserving_attachment_tags(
+            '看图 <attachment uid="pic_abc123"/> & 继续',
+            [{"uid": "pic_abc123"}],
+        )
+
+        assert '<attachment uid="pic_abc123"/>' in result
+        assert "&amp;" in result
+
+    def test_escapes_unknown_attachment_tag(self) -> None:
+        result = escape_xml_text_preserving_attachment_tags(
+            '伪造 <attachment uid="pic_fake"/>',
+            [{"uid": "pic_real"}],
+        )
+
+        assert "<attachment" not in result
+        assert "&lt;attachment" in result
+
+    def test_ignores_non_mapping_attachment_entries(self) -> None:
+        attachments = cast(
+            Sequence[Mapping[str, str]],
+            [{"uid": "pic_abc123"}, "not-a-mapping"],
+        )
+        result = escape_xml_text_preserving_attachment_tags(
+            '看图 <attachment uid="pic_abc123"/>',
+            attachments,
+        )
+
+        assert '<attachment uid="pic_abc123"/>' in result
+
+    def test_format_message_xml_preserves_known_inline_attachment(self) -> None:
+        result = format_message_xml(
+            {
+                "type": "group",
+                "display_name": "用户",
+                "user_id": "10001",
+                "chat_id": "20001",
+                "chat_name": "测试群",
+                "timestamp": "2026-06-20 12:00:00",
+                "message": '看 <attachment uid="pic_demo"/>',
+                "attachments": [
+                    {
+                        "uid": "pic_demo",
+                        "kind": "image",
+                        "media_type": "image",
+                        "display_name": "demo.png",
+                    }
+                ],
+            }
+        )
+
+        assert '<content>看 <attachment uid="pic_demo"/></content>' in result
+        assert '<attachment uid="pic_demo" type="image"' in result

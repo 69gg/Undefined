@@ -385,6 +385,7 @@ Prompt caching 补充：
 
 用途：
 - 仅供 `web_agent` 内的 `grok_search` 子工具使用。
+- 工具调用该模型时会注入专用 system prompt：以服务端当前时间作为“今天 / 最新 / 最近”的基准，要求先搜索、使用多组搜索查询或多个搜索工具、禁止编造，并在结果中给出来源。
 
 默认：
 - `max_tokens=8192`
@@ -549,6 +550,8 @@ Prompt caching 补充：
 | `repeat_threshold` | `3` | 触发复读所需的连续相同消息条数（来自不同发送者） | 整数，2–20 |
 | `repeat_cooldown_minutes` | `60` | 复读冷却时间（分钟）。同一内容被复读后，在冷却期内不再重复复读。？和 ? 视为等价。0 = 无冷却 | 整数，≥ 0 |
 | `inverted_question_enabled` | `false` | 倒问号（复读触发时若消息为问号则发送 ¿） | 布尔 |
+
+复读支持图片等已登记附件：当连续相同内容是 `<attachment uid="..."/>` 图片引用时，系统会先渲染成真实图片消息再发送，不会把 UID 占位字符串直接发到群里。
 
 兼容：历史字段 `[core].keyword_reply_enabled` 仍可读取，建议迁移到 `[easter_egg]`。
 
@@ -789,7 +792,8 @@ Prompt caching 补充：
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
 | `auto_extract_enabled` | `false` | 是否自动提取 GitHub 仓库链接或 `owner/repo` 仓库 ID | |
-| `request_timeout_seconds` | `10.0` | GitHub API 请求超时（秒） | `<=0` 回退 `10`，`>60` 截断到 `60` |
+| `request_timeout_seconds` | `10.0` | GitHub API 请求超时（秒），作为显式超时传入，不被 `[network].request_timeout_seconds` 覆盖 | `<=0` 回退 `10`，`>60` 截断到 `60` |
+| `request_retries` | `2` | GitHub API 请求重试次数，仅重试网络/超时异常和 `429`/`5xx` 状态码 | `<0` 回退 `0`，`>5` 截断到 `5` |
 | `auto_extract_group_ids` | `[]` | 功能级群白名单 | 空时跟随全局 access |
 | `auto_extract_private_ids` | `[]` | 功能级私聊白名单 | 空时跟随全局 access |
 | `auto_extract_max_items` | `3` | 单条消息最多自动处理几个仓库 | `<=0` 回退 `3`，`>10` 截断到 `10` |
@@ -799,6 +803,7 @@ Prompt caching 补充：
 - 裸 `owner/repo` 会作为 GitHub 仓库 ID 尝试一次 public API 请求；失败时只记录日志，不向会话发送错误消息。
 - 仅支持 public 仓库。卡片渲染为图片，包含仓库 ID、作者头像、简介、stars、forks、issues、contributors、watchers、语言、许可证、默认分支和更新时间等信息。
 - GitHub API 请求默认复用全局 `[proxy]` 代理设置。
+- 自动提取失败日志会记录异常类型、`repr(exc)` 和堆栈，便于定位代理连接失败等 `str(exc)` 为空的异常。
 
 自动提取调度说明：
 - 斜杠命令优先级高于自动处理管线；命中命令后直接分发并结束本轮后续处理，不会触发自动提取或 AI 自动回复。命令输入和命令输出会写入历史，供后续 AI 轮次读取。
@@ -839,11 +844,13 @@ Prompt caching 补充：
 | `url` | `127.0.0.1` | WebUI 监听地址 |
 | `port` | `8787` | WebUI 端口（1..65535） |
 | `password` | `changeme` | WebUI 登录密码 |
+| `autostart_bot` | `false` | WebUI 启动时是否自动启动机器人进程 |
 
 关键行为：
 - 默认密码 `changeme` 禁止登录，必须先修改。
-- 未配置或为空时，会回退默认密码并标记为“默认密码模式”。
-- `webui.url/port/password` 修改需重启 WebUI 进程（机器人主进程中也属于重启生效类）。
+- 未配置或为空时，会回退默认密码并标记为”默认密码模式”。
+- `webui.url/port/password/autostart_bot` 修改需重启 WebUI 进程（机器人主进程中也属于重启生效类）。
+- `autostart_bot=true` 时，运行 `uv run Undefined-webui` 会自动拉起 bot 进程，无需手动点击启动按钮；与 WebUI 更新重启后的自动恢复机制（`pending_bot_autostart` marker）互不冲突。
 
 ---
 
@@ -880,6 +887,7 @@ Prompt caching 补充：
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `path` | `data/cognitive/chromadb` | Chroma 存储目录 |
+| `scheduler_foreground_burst` | `8` | Chroma 前台连续处理上限；达到后若有维护/后台任务，会让出一次执行机会。需重启 |
 
 ### 4.24.3 `[cognitive.query]`
 
@@ -889,7 +897,7 @@ Prompt caching 补充：
 | `auto_scope_candidate_multiplier` | `2` | 自动注入时每个作用域候选扩展倍数（候选数≈`auto_top_k * multiplier`） |
 | `auto_current_group_boost` | `1.15` | 群聊自动检索时，当前群命中额外加权系数 |
 | `auto_current_private_boost` | `1.25` | 私聊自动检索时，当前私聊命中额外加权系数 |
-| `enable_rerank` | `true` | 认知检索是否启用 rerank |
+| `enable_rerank` | `true` | 认知检索是否启用 rerank；自动注入的多消息批次会先逐条召回，再用整批 query 做最终重排 |
 | `recent_end_summaries_inject_k` | `30` | 最近 end 摘要注入条数，`0` 禁用 |
 | `time_decay_enabled` | `true` | 是否启用时间衰减加权 |
 | `time_decay_half_life_days_auto` | `14.0` | 自动注入场景半衰期 |
@@ -1027,6 +1035,7 @@ Prompt caching 补充：
 - `webui.url`
 - `webui.port`
 - `webui.password`
+- `webui.autostart_bot`
 - `api.*`（`enabled/host/port/auth_key/openapi_enabled`）
 - `memes.blob_dir`
 - `memes.preview_dir`

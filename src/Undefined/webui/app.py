@@ -1,6 +1,7 @@
 import asyncio
 import gzip as _gzip_mod
 import logging
+import secrets
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from aiohttp import web
 
 from Undefined.config import load_webui_settings, get_config_manager, get_config
 from Undefined.utils.cors import is_allowed_cors_origin, normalize_origin
+from Undefined.utils import io as async_io
 from .core import BotProcessController, SessionStore
 from .routes import routes
 from .routes._shared import (
@@ -33,14 +35,19 @@ logger = logging.getLogger("Undefined.webui")
 
 CSP_POLICY = (
     "default-src 'self'; "
-    "script-src 'self'; "
+    "script-src 'self' 'nonce-{nonce}'; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' https://fonts.gstatic.com data:; "
-    "img-src 'self' data:; "
+    "img-src 'self' data: blob:; "
     "connect-src 'self'; "
     "base-uri 'self'; "
     "frame-ancestors 'none'"
 )
+
+
+def _build_csp_policy(nonce: str) -> str:
+    return CSP_POLICY.format(nonce=nonce)
+
 
 # ── gzip 压缩 ──
 
@@ -180,14 +187,20 @@ async def security_headers_middleware(
     request: web.Request,
     handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
 ) -> web.StreamResponse:
+    csp_nonce = secrets.token_urlsafe(16)
+    request["csp_nonce"] = csp_nonce
     try:
         response = await handler(request)
     except web.HTTPException as exc:
         response = exc
-    response.headers.setdefault("Content-Security-Policy", CSP_POLICY)
+    response.headers.setdefault("Content-Security-Policy", _build_csp_policy(csp_nonce))
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
+    # 静态资源（runtime.js / css 等）URL 无版本号：强制浏览器每次按 ETag 重新校验，
+    # 避免改动前端后用户因强缓存看不到更新（内容未变命中 ETag 仍返回 304，开销极小）。
+    if request.path.startswith("/static"):
+        response.headers["Cache-Control"] = "no-cache"
     return response
 
 
@@ -225,17 +238,29 @@ async def on_startup(app: web.Application) -> None:
     get_config_manager().start_hot_reload()
     logger.info("[WebUI] 后台任务已启动（热重载）")
 
+    bot = app[BOT_APP_KEY]
+
+    # 1. 优先检查自动恢复标记（现有逻辑）
     # If we restarted WebUI after an update and the bot was previously running,
     # auto-start it again.
     try:
         marker = Path("data/cache/pending_bot_autostart")
-        if marker.exists():
-            marker.unlink(missing_ok=True)
-            bot = app[BOT_APP_KEY]
+        if await async_io.exists(marker):
+            await async_io.delete_file(marker)
             await bot.start()
             logger.info("[WebUI] 检测到自动恢复标记，已尝试启动机器人进程")
+            return  # 已启动，跳过后续检查
     except Exception:
         logger.debug("[WebUI] 自动恢复机器人进程失败", exc_info=True)
+
+    # 2. 检查配置项（新增逻辑）
+    try:
+        settings = app[SETTINGS_APP_KEY]
+        if settings.autostart_bot:
+            await bot.start()
+            logger.info("[WebUI] 配置 autostart_bot=true，已自动启动机器人进程")
+    except Exception:
+        logger.debug("[WebUI] 自动启动机器人进程失败", exc_info=True)
 
 
 async def on_shutdown(app: web.Application) -> None:

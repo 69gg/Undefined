@@ -59,8 +59,15 @@ function shouldRetryCandidate(res) {
 
 async function requestOnce(path, options = {}) {
     const headers = { ...(options.headers || {}) };
+    const body = options.body;
+    const isNativeBody =
+        (typeof FormData !== "undefined" && body instanceof FormData) ||
+        (typeof Blob !== "undefined" && body instanceof Blob) ||
+        (typeof URLSearchParams !== "undefined" &&
+            body instanceof URLSearchParams);
     const needsJson =
-        options.body &&
+        body &&
+        !isNativeBody &&
         !headers["Content-Type"] &&
         ["POST", "PATCH", "PUT", "DELETE"].includes(
             String(options.method || "").toUpperCase(),

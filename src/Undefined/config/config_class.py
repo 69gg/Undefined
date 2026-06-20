@@ -129,6 +129,7 @@ class Config:
     webui_url: str
     webui_port: int
     webui_password: str
+    webui_autostart_bot: bool
     api: APIConfig
     # Code Delivery Agent
     code_delivery_enabled: bool
@@ -188,6 +189,7 @@ class Config:
     # GitHub 仓库自动提取
     github_auto_extract_enabled: bool
     github_request_timeout_seconds: float
+    github_request_retries: int
     github_auto_extract_group_ids: list[int]
     github_auto_extract_private_ids: list[int]
     github_auto_extract_max_items: int

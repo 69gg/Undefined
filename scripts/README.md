@@ -4,6 +4,35 @@
 
 ## 脚本列表
 
+### [`build_native_apps.py`](build_native_apps.py) — 本地原生 App 构建
+
+统一编排本机可构建的 Console / Chat 原生产物。脚本不会自动安装系统依赖、Android SDK 包或 Rust target；`check` 子命令只报告缺口并给出修复提示。
+
+```bash
+# 查看将要执行的本地构建矩阵
+uv run python scripts/build_native_apps.py list --product all --targets all --android-abi all
+
+# 检查 Android arm64 debug APK 构建环境
+uv run python scripts/build_native_apps.py check --targets android --android-abi arm64-v8a
+
+# 构建 Chat arm64 debug APK
+uv run python scripts/build_native_apps.py build --product chat --targets android --android-abi arm64-v8a
+
+# 构建 Console + Chat 的 Linux deb
+uv run python scripts/build_native_apps.py build --product all --targets desktop --desktop-bundles deb
+```
+
+常用参数：
+
+- `--product chat|console|all`：选择 App，默认 `chat`。
+- `--targets android|desktop|all`：选择本机目标，默认 `android`。
+- `--android-abi arm64-v8a|armeabi-v7a|x86|x86_64|all`：选择 Android ABI，默认 `arm64-v8a`。
+- `--desktop-bundles deb|appimage|all`：Linux 桌面包类型，默认 `deb`。
+- `--android-init auto|always|skip`：Android 生成工程初始化策略，默认 `auto`。
+- `--output-dir PATH`：产物收集目录，默认 `dist/native/<short-sha>/`。
+- `--dry-run`：只打印命令，不执行。
+- `--no-install-deps`：不在缺少 `node_modules/.bin/tauri` 时自动执行 `npm ci`。
+
 ### [`sync_config_template.py`](sync_config_template.py) — 同步配置模板与注释
 
 保留当前 `config.toml` 已有配置值，同时把 `config.toml.example` 中新增的配置项、默认空表和双语注释同步回来。
@@ -80,4 +109,48 @@ python3 scripts/release_notes.py notes --tag v3.4.0 --output release_notes.md
 - `apps/undefined-console/package-lock.json`
 - `apps/undefined-console/src-tauri/Cargo.toml`
 - `apps/undefined-console/src-tauri/tauri.conf.json`
+- `apps/undefined-console/src-tauri/Cargo.lock` 根包版本
+- `apps/undefined-chat/package.json`
+- `apps/undefined-chat/package-lock.json`
+- `apps/undefined-chat/src-tauri/Cargo.toml`
+- `apps/undefined-chat/src-tauri/tauri.conf.json`
+- `apps/undefined-chat/src-tauri/Cargo.lock` 根包版本
 - `CHANGELOG.md` 最新版本条目
+
+### bump_version.py — 同步项目版本号
+
+统一以 `pyproject.toml` 的主版本为源，更新 Python 包、Console 和 Chat 的版本文件。
+
+```bash
+uv run python scripts/bump_version.py 3.6.0
+uv run python scripts/bump_version.py 3.6.0 --dry-run
+uv run python scripts/bump_version.py 3.6.0 --commit
+```
+
+同步范围：
+
+- `pyproject.toml`
+- `src/Undefined/__init__.py`
+- `apps/undefined-console/package.json`
+- `apps/undefined-console/package-lock.json`
+- `apps/undefined-console/src-tauri/Cargo.toml`
+- `apps/undefined-console/src-tauri/tauri.conf.json`
+- `apps/undefined-console/src-tauri/Cargo.lock`
+- `apps/undefined-chat/package.json`
+- `apps/undefined-chat/package-lock.json`
+- `apps/undefined-chat/src-tauri/Cargo.toml`
+- `apps/undefined-chat/src-tauri/tauri.conf.json`
+- `apps/undefined-chat/src-tauri/Cargo.lock`
+
+非 dry-run 时脚本还会执行 `uv sync`，并分别在 Console / Chat 下执行 `npm install --package-lock-only` 与 `cargo update --workspace`，保证 lock 文件和 manifest 不漂移。
+
+### prepare_tauri_android.py — 生成后 Android 修补
+
+Tauri 的 `src-tauri/gen/` 是生成目录，不提交到仓库。Undefined Chat 需要移动端 HTML 预览使用独立 Android Activity，并需要 Android Keystore 安全存储插件，因此 Chat 的 `npm run tauri:android:init` 会在生成后运行：
+
+```bash
+python3 ../../scripts/prepare_tauri_android.py .
+python3 ../../scripts/prepare_tauri_android.py . --check
+```
+
+脚本只对 `apps/undefined-chat` 生效，会向生成的 Android app 注入 `HtmlPreviewActivity.kt`、`SecretPlugin.kt`，并在 `AndroidManifest.xml` 中声明预览 Activity 的 `android:exported="false"`。Console 保持 no-op。

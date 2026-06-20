@@ -11,7 +11,9 @@
 补充：本 Agent 的目录遍历/内容搜索工具为纯 Python 实现，可在 Windows/macOS/Linux 上使用（不依赖 `find`/`grep` 等外部命令）。
 
 ## 边界
-- **仅限 NagaAgent 项目**，通用代码分析请用 `file_analysis_agent`
+- **仅限 NagaAgent 项目**，不回答 Undefined 自身源码问题
+- 用户上传/外部文件解析请用 `file_analysis_agent`
+- 代码编写、修改、执行验证和打包交付请用 `code_delivery_agent`
 - 不进行外部联网搜索
 
 ## 输入偏好

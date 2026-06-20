@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 
 import Undefined.handlers as handlers_module
 from Undefined.handlers import MessageHandler
+import Undefined.github.sender as github_sender_module
 from Undefined.skills.pipelines import PipelineRegistry
 
 
@@ -76,3 +79,54 @@ async def test_private_message_runs_github_auto_extract_before_ai_reply(
     handler.ai_coordinator.model_pool.handle_private_message.assert_not_called()
     handler.command_dispatcher.parse_command.assert_called_once_with("69gg/Undefined")
     handler.ai_coordinator.handle_private_reply.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_github_auto_extract_logs_exception_type_and_repr(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    sender_calls: list[dict[str, Any]] = []
+
+    async def fake_send_github_repo_card(**kwargs: Any) -> str:
+        sender_calls.append(kwargs)
+        raise httpx.ConnectError("")
+
+    monkeypatch.setattr(
+        github_sender_module,
+        "send_github_repo_card",
+        fake_send_github_repo_card,
+    )
+
+    handler: Any = MessageHandler.__new__(MessageHandler)
+    handler.config = SimpleNamespace(
+        github_auto_extract_max_items=3,
+        github_request_timeout_seconds=11.0,
+        github_request_retries=4,
+    )
+    handler.sender = SimpleNamespace()
+
+    with caplog.at_level(logging.ERROR, logger="Undefined.handlers.auto_extract"):
+        await handler._handle_github_extract(
+            target_id=1067860266,
+            repo_ids=["69gg/Undefined"],
+            target_type="group",
+        )
+
+    log_text = caplog.text
+    assert "自动提取跳过 69gg/Undefined" in log_text
+    assert "exc_type=ConnectError" in log_text
+    assert "ConnectError('')" in log_text
+    assert sender_calls == [
+        {
+            "repo_id": "69gg/Undefined",
+            "sender": handler.sender,
+            "target_type": "group",
+            "target_id": 1067860266,
+            "request_timeout": 11.0,
+            "request_retries": 4,
+            "context": {
+                "request_id": "github_auto_extract:group:1067860266:69gg/Undefined"
+            },
+        }
+    ]

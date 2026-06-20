@@ -36,7 +36,7 @@ uv run ruff check . --exclude "code/" --force-exclude
 echo -e "${YELLOW}📝 Python: mypy${NC}"
 uv run mypy . --exclude "code/"
 
-if printf '%s\n' "$STAGED" | grep -Eq '^(apps/undefined-console/|src/Undefined/webui/static/js/|biome\.json$|\.github/workflows/(ci|release)\.yml$)'; then
+if printf '%s\n' "$STAGED" | grep -Eq '^(apps/undefined-console/|apps/undefined-chat/|src/Undefined/webui/static/js/|biome\.json$|\.github/workflows/(ci|release)\.yml$)'; then
   echo -e "${YELLOW}📝 检测到 JS/Tauri 相关改动，运行前端与 Tauri 检查...${NC}"
 
   if ! command -v npm >/dev/null 2>&1; then
@@ -44,12 +44,21 @@ if printf '%s\n' "$STAGED" | grep -Eq '^(apps/undefined-console/|src/Undefined/w
     exit 1
   fi
 
-  if [ ! -x "apps/undefined-console/node_modules/.bin/biome" ]; then
-    echo -e "${RED}❌ 缺少 apps/undefined-console/node_modules，请先运行 cd apps/undefined-console && npm install${NC}"
-    exit 1
+  APP_CHECKS=()
+  if printf '%s\n' "$STAGED" | grep -Eq '^(apps/undefined-console/|src/Undefined/webui/static/js/|biome\.json$|\.github/workflows/(ci|release)\.yml$)'; then
+    APP_CHECKS+=("apps/undefined-console")
+  fi
+  if printf '%s\n' "$STAGED" | grep -Eq '^(apps/undefined-chat/|\.github/workflows/(ci|release)\.yml$)'; then
+    APP_CHECKS+=("apps/undefined-chat")
   fi
 
-  npm --prefix apps/undefined-console run check
+  for app_dir in "${APP_CHECKS[@]}"; do
+    if [ ! -x "$app_dir/node_modules/.bin/biome" ]; then
+      echo -e "${RED}❌ 缺少 $app_dir/node_modules，请先运行 cd $app_dir && npm install${NC}"
+      exit 1
+    fi
+    npm --prefix "$app_dir" run check
+  done
 fi
 
 echo -e "${GREEN}✅ pre-commit 检查通过${NC}"

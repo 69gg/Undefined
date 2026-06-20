@@ -5,7 +5,10 @@ from pathlib import Path
 from typing import Any
 
 from Undefined.arxiv.parser import normalize_arxiv_id
-from Undefined.skills.agents.runner import run_agent_with_tools
+from Undefined.skills.agents.runner import (
+    DEFAULT_AGENT_MAX_ITERATIONS,
+    run_agent_with_tools,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,6 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         context=context,
         agent_dir=Path(__file__).parent,
         logger=logger,
-        max_iterations=15,
+        max_iterations=DEFAULT_AGENT_MAX_ITERATIONS,
         tool_error_prefix="错误",
     )

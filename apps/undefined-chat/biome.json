@@ -1,0 +1,24 @@
+{
+    "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+    "files": {
+        "include": [
+            "src/**/*.ts",
+            "src/**/*.tsx",
+            "package.json",
+            "tsconfig.json",
+            "vite.config.ts",
+            "src-tauri/tauri.conf.json",
+            "src-tauri/capabilities/**/*.json"
+        ]
+    },
+    "linter": {
+        "rules": {
+            "a11y": {
+                "useSemanticElements": "off"
+            },
+            "correctness": {
+                "noUnusedVariables": "warn"
+            }
+        }
+    }
+}

@@ -1,0 +1,409 @@
+/* ToolBlock 组件样式 - 从 webui components.css 迁移 */
+
+.runtime-tool-block {
+	--tool-accent: var(--accent-color);
+	min-width: 0;
+	max-width: 100%;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-sm);
+	background: color-mix(in srgb, var(--bg-app) 92%, var(--bg-card));
+	overflow: hidden;
+	position: relative;
+	transition:
+		border-color 0.18s ease,
+		background 0.18s ease,
+		transform 0.18s ease,
+		box-shadow 0.18s ease;
+	margin: 0.5em 0;
+}
+
+.runtime-tool-block::before {
+	content: "";
+	position: absolute;
+	inset: 0 auto 0 0;
+	width: 3px;
+	background: var(--tool-accent);
+	opacity: 0.65;
+}
+
+.runtime-tool-block.is-tool {
+	--tool-accent: color-mix(in srgb, var(--success) 76%, var(--accent-color));
+}
+
+.runtime-tool-block.is-agent {
+	--tool-accent: var(--accent-color);
+	background: color-mix(in srgb, var(--bg-card) 60%, var(--bg-app));
+}
+
+.runtime-tool-block.running {
+	--tool-accent: color-mix(in srgb, var(--warning) 82%, var(--accent-color));
+}
+
+.runtime-tool-block.done {
+	--tool-accent: var(--success);
+}
+
+.runtime-tool-block.error {
+	--tool-accent: var(--error);
+}
+
+.runtime-tool-block.cancelled {
+	--tool-accent: var(--warning);
+}
+
+.runtime-tool-block:hover {
+	border-color: color-mix(in srgb, var(--tool-accent) 38%, var(--border-color));
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.runtime-tool-block summary {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto auto;
+	align-items: center;
+	gap: 8px;
+	cursor: pointer;
+	min-height: 32px;
+	padding: 3px 10px 3px 13px;
+	font-size: 12px;
+	line-height: 1.2;
+	color: var(--text-secondary);
+	list-style: none;
+}
+
+.runtime-tool-block summary::-webkit-details-marker {
+	display: none;
+}
+
+.runtime-tool-block summary::before {
+	content: "";
+	width: 6px;
+	height: 6px;
+	border-right: 1.5px solid currentColor;
+	border-bottom: 1.5px solid currentColor;
+	transform: rotate(-45deg);
+	transition: transform 0.18s ease;
+	opacity: 0.7;
+}
+
+.runtime-tool-block[open] summary::before {
+	transform: rotate(45deg);
+}
+
+.runtime-tool-block summary .runtime-tool-summary-main {
+	min-width: 0;
+	overflow: hidden;
+}
+
+.runtime-tool-block summary .runtime-tool-title {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 7px;
+	min-width: 0;
+	max-width: 100%;
+	vertical-align: middle;
+}
+
+.runtime-tool-block summary .runtime-tool-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	border: 0;
+	background: transparent;
+	padding: 0;
+	color: var(--text-primary);
+	font-size: 12px;
+	font-weight: 650;
+}
+
+.runtime-tool-block summary .runtime-tool-duration {
+	flex: 0 0 auto;
+	padding: 1px 6px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--tool-accent) 10%, transparent);
+	color: color-mix(in srgb, var(--tool-accent) 84%, var(--text-primary));
+	font-family: var(--font-mono);
+	font-size: 10.5px;
+	line-height: 1.4;
+	white-space: nowrap;
+}
+
+.runtime-tool-block summary .runtime-tool-status {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-style: normal;
+	white-space: nowrap;
+	color: var(--text-tertiary);
+	font-size: 11px;
+}
+
+.runtime-tool-block summary .runtime-tool-kind {
+	min-width: 44px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	text-align: right;
+	white-space: nowrap;
+	color: var(--text-secondary);
+	font-size: 11px;
+}
+
+.runtime-tool-block.webchat-private-send,
+.runtime-tool-block.webchat-end {
+	background: color-mix(in srgb, var(--bg-app) 72%, var(--bg-card));
+}
+
+.runtime-tool-block.webchat-private-send summary,
+.runtime-tool-block.webchat-end summary {
+	min-height: 32px;
+	padding-block: 3px;
+}
+
+.runtime-tool-block.running summary .runtime-tool-status {
+	color: var(--warning);
+}
+
+.runtime-tool-block.done summary .runtime-tool-status {
+	color: var(--success);
+}
+
+.runtime-tool-block.error summary .runtime-tool-status {
+	color: var(--error);
+}
+
+.runtime-tool-block.cancelled summary .runtime-tool-status {
+	color: var(--warning);
+}
+
+.runtime-tool-preview {
+	min-width: 0;
+	max-width: 100%;
+	border-top: 1px solid var(--border-color);
+	padding: 8px 10px 10px;
+	animation: runtime-tool-reveal 0.18s ease-out;
+}
+
+.runtime-tool-preview + .runtime-tool-preview {
+	border-top-style: dashed;
+}
+
+.runtime-tool-preview-label {
+	margin-bottom: 6px;
+	color: var(--text-tertiary);
+	font-size: 11px;
+	font-weight: 600;
+}
+
+.runtime-tool-preview-body {
+	min-width: 0;
+	max-width: 100%;
+	color: var(--text-secondary);
+	font-size: 12px;
+	line-height: 1.5;
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: min(34vh, 260px);
+	overflow: auto;
+}
+
+.runtime-tool-preview-body > *:first-child {
+	margin-top: 0;
+}
+
+.runtime-tool-preview-body > *:last-child {
+	margin-bottom: 0;
+}
+
+.runtime-tool-preview-body.is-structured {
+	padding: 8px 10px;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-sm);
+	background: color-mix(in srgb, var(--bg-card) 70%, var(--bg-app));
+	white-space: normal;
+}
+
+.runtime-tool-structured-list {
+	display: grid;
+	gap: 6px;
+	min-width: 0;
+}
+
+.runtime-tool-structured-list .runtime-tool-structured-list {
+	margin-top: 5px;
+	padding-left: 10px;
+	border-left: 1px solid var(--border-color);
+}
+
+.runtime-tool-structured-row {
+	display: grid;
+	grid-template-columns: minmax(64px, min(34%, 180px)) minmax(0, 1fr);
+	align-items: start;
+	gap: 8px;
+	min-width: 0;
+}
+
+.runtime-tool-key {
+	min-width: 0;
+	color: var(--accent-color);
+	font-family: var(--font-mono);
+	font-size: 11px;
+	overflow-wrap: anywhere;
+}
+
+.runtime-tool-value {
+	min-width: 0;
+	color: var(--text-secondary);
+	overflow-wrap: anywhere;
+}
+
+.runtime-tool-value.string {
+	color: var(--text-primary);
+}
+
+.runtime-tool-value.number {
+	color: var(--warning);
+	font-family: var(--font-mono);
+}
+
+.runtime-tool-value.boolean {
+	color: var(--success);
+	font-family: var(--font-mono);
+}
+
+.runtime-tool-value.muted {
+	color: var(--text-tertiary);
+	font-family: var(--font-mono);
+}
+
+.runtime-tool-preview-body .runtime-chat-image {
+	max-width: min(420px, 100%);
+}
+
+.runtime-tool-preview-body .runtime-chat-file-card {
+	max-width: min(340px, 100%);
+}
+
+/* 时间线条目样式 */
+.timeline-entry {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 8px;
+	padding: 6px 0;
+	border-bottom: 1px solid color-mix(in srgb, var(--border-color) 40%, transparent);
+}
+
+.timeline-entry:last-child {
+	border-bottom: none;
+}
+
+.timeline-label {
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	padding: 0 6px;
+	border-radius: 4px;
+	white-space: nowrap;
+}
+
+.timeline-entry-input .timeline-label {
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+	color: var(--accent);
+}
+
+.timeline-entry-output .timeline-label {
+	background: color-mix(in srgb, var(--success) 12%, transparent);
+	color: var(--success);
+}
+
+.timeline-entry-error .timeline-label {
+	background: color-mix(in srgb, var(--error) 12%, transparent);
+	color: var(--error);
+}
+
+.timeline-content {
+	grid-column: 2;
+	margin: 0;
+	padding: 4px 8px;
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--bg-card) 70%, var(--bg-app));
+	font-family: var(--font-mono);
+	font-size: 11px;
+	line-height: 1.4;
+	overflow-wrap: anywhere;
+}
+
+/* 嵌套工具块 */
+.runtime-tool-children {
+	display: grid;
+	gap: 8px;
+	margin-left: 10px;
+	padding: 8px 10px 10px 12px;
+	border-top: 1px dashed var(--border-color);
+	border-left: 1px solid color-mix(in srgb, var(--tool-accent) 30%, var(--border-color));
+	background: color-mix(in srgb, var(--bg-app) 84%, var(--bg-card));
+	animation: runtime-tool-reveal 0.18s ease-out;
+}
+
+.runtime-tool-children .runtime-tool-block {
+	background: var(--bg-card);
+}
+
+/* ========================================
+   统一消息时间线（正文 + 工具块按序穿插）
+   ======================================== */
+.message-timeline-content {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	min-width: 0;
+	max-width: 100%;
+}
+
+/* 工具块内部的子消息（轻量纯文本展示） */
+.runtime-tool-message {
+	min-width: 0;
+	max-width: 100%;
+	border: 1px solid color-mix(in srgb, var(--tool-accent, var(--accent-color)) 18%, var(--border-color));
+	border-left: 3px solid color-mix(in srgb, var(--tool-accent, var(--accent-color)) 48%, var(--border-color));
+	border-radius: var(--radius-sm);
+	padding: 8px 10px;
+	background: color-mix(in srgb, var(--bg-card) 72%, var(--bg-app));
+	color: var(--text-secondary);
+	font-size: 12.5px;
+	line-height: 1.5;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	animation: runtime-tool-reveal 0.18s ease-out;
+}
+
+.runtime-tool-message > *:first-child {
+	margin-top: 0;
+}
+
+.runtime-tool-message > *:last-child {
+	margin-bottom: 0;
+}
+
+@keyframes runtime-tool-reveal {
+	from {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.runtime-tool-preview,
+	.runtime-tool-children,
+	.runtime-tool-message {
+		animation: none;
+	}
+
+	.runtime-tool-block,
+	.runtime-tool-block summary::before {
+		transition: none;
+	}
+}

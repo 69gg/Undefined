@@ -38,7 +38,7 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
                 "description": (
                     "Returns system info (version, Python, platform, uptime), "
                     "OneBot connection status, request queue snapshot, "
-                    "memory count, cognitive service status, API config, "
+                    "memory count, cognitive service status, scheduler summary, API config, "
                     "skill statistics (tools/toolsets/agents/pipelines/commands/anthropic_skills), "
                     "and model configuration (names, masked URLs, thinking flags)."
                 ),
@@ -78,6 +78,15 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
         "/api/v1/memes/{uid}/reindex": {
             "post": {"summary": "Queue a meme reindex job"}
         },
+        "/api/v1/schedules": {
+            "get": {"summary": "List scheduled tasks"},
+            "post": {"summary": "Create a scheduled task"},
+        },
+        "/api/v1/schedules/{task_id}": {
+            "get": {"summary": "Get a scheduled task"},
+            "patch": {"summary": "Update a scheduled task"},
+            "delete": {"summary": "Delete a scheduled task"},
+        },
         "/api/v1/cognitive/events": {
             "get": {"summary": "Search cognitive event memories"}
         },
@@ -85,17 +94,113 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
         "/api/v1/cognitive/profile/{entity_type}/{entity_id}": {
             "get": {"summary": "Get a profile by entity type/id"}
         },
+        "/api/v1/commands": {
+            "get": {
+                "summary": "List slash command metadata",
+                "description": (
+                    "Returns slash commands, aliases, subcommands, usage, "
+                    "permission and WebUI/private/group availability. "
+                    "Use scope=webui for the WebChat virtual private session."
+                ),
+            }
+        },
+        "/api/v1/commands/{command_name}": {
+            "get": {
+                "summary": "Get slash command metadata by name or alias",
+                "description": (
+                    "Returns one canonical slash command with aliases, "
+                    "subcommands, usage and availability metadata."
+                ),
+            }
+        },
         "/api/v1/chat": {
             "post": {
                 "summary": "WebUI special private chat",
                 "description": (
-                    "POST JSON {message, stream?}. "
-                    "When stream=true, response is SSE with keep-alive comments."
+                    "POST JSON {message, stream?, conversation_id?}. "
+                    "stream=false waits for an internal WebChat job and "
+                    "returns JSON; stream=true uses the same WebChat job "
+                    "lifecycle and streams events as SSE. WebChat jobs use "
+                    "per-conversation single-flight while running or finalizing; "
+                    "different conversations may run concurrently."
                 ),
             }
         },
+        "/api/v1/chat/conversations": {
+            "get": {"summary": "List WebChat conversations"},
+            "post": {"summary": "Create a WebChat conversation"},
+        },
+        "/api/v1/chat/conversations/{conversation_id}": {
+            "patch": {"summary": "Rename a WebChat conversation"},
+            "delete": {"summary": "Delete a WebChat conversation"},
+        },
         "/api/v1/chat/history": {
-            "get": {"summary": "Get virtual private chat history for WebUI"}
+            "get": {"summary": "Get paged WebChat conversation history"},
+            "delete": {"summary": "Clear a WebChat conversation history"},
+        },
+        "/api/v1/chat/attachments/capabilities": {
+            "get": {
+                "summary": "Get WebChat attachment upload capabilities",
+                "description": (
+                    "Returns the Runtime WebChat attachment upload limit and "
+                    "multipart field name."
+                ),
+            }
+        },
+        "/api/v1/chat/attachments": {
+            "post": {
+                "summary": "Upload a WebChat attachment",
+                "description": (
+                    "Accepts multipart/form-data with a file field, validates size, "
+                    "persists the attachment, and returns Runtime attachment metadata."
+                ),
+            }
+        },
+        "/api/v1/chat/attachments/{attachment_id}": {
+            "get": {"summary": "Download a WebChat attachment"}
+        },
+        "/api/v1/chat/attachments/{attachment_id}/preview": {
+            "get": {"summary": "Get a WebChat attachment preview"}
+        },
+        "/api/v1/chat/jobs": {
+            "post": {
+                "summary": "Create a WebUI chat job",
+                "description": (
+                    "Accepts legacy {message: string} or structured "
+                    "{message: {text, attachment_ids, references}}. "
+                    "Uploaded attachments are referenced by attachment_ids; "
+                    "the client must not inline local file content. "
+                    "For retrying the last visible text-only user message, "
+                    "reuse_previous_user_message=true reuses the existing "
+                    "history record after validating the tail message. "
+                    "The job event stream may include requires_action for "
+                    "future human-in-the-loop workflows."
+                ),
+            }
+        },
+        "/api/v1/chat/jobs/active": {
+            "get": {
+                "summary": "List active WebUI chat jobs",
+                "description": (
+                    "Returns a compatible job field plus jobs[] for all active "
+                    "WebChat jobs. conversation_id filters to one conversation."
+                ),
+            }
+        },
+        "/api/v1/chat/jobs/{job_id}": {
+            "get": {"summary": "Get a WebUI chat job by id"}
+        },
+        "/api/v1/chat/jobs/{job_id}/events": {
+            "get": {
+                "summary": "Subscribe to or query WebUI chat job events",
+                "description": (
+                    "Returns SSE by default. With Accept: application/json or "
+                    "format=json, returns a JSON snapshot with events after seq."
+                ),
+            }
+        },
+        "/api/v1/chat/jobs/{job_id}/cancel": {
+            "post": {"summary": "Cancel a WebUI chat job"}
         },
         "/api/v1/tools": {
             "get": {

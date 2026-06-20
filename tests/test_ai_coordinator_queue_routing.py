@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
 
+from Undefined.context import RequestContext
 from Undefined.services.ai_coordinator import AICoordinator
+from Undefined.services.message_batcher import BufferedMessage
 from Undefined.services.coordinator import group as coordinator_group_module
 
 
@@ -218,15 +221,55 @@ def test_build_prompt_limits_proactive_participation_to_technical_contexts() -> 
     assert "普通闲聊、玩梗、吐槽、轻松互动：" not in prompt
 
 
+def test_format_group_message_segment_preserves_known_attachment_tag() -> None:
+    coordinator: Any = object.__new__(AICoordinator)
+    item = BufferedMessage(
+        scope="group:12345",
+        sender_id=20001,
+        text='看图 <attachment uid="pic_demo"/> <attachment uid="pic_fake"/>',
+        message_content=[],
+        attachments=[
+            {
+                "uid": "pic_demo",
+                "kind": "image",
+                "media_type": "image",
+                "display_name": "demo.png",
+            }
+        ],
+        sender_name="member",
+        arrival_time=1_700_000_000,
+        is_private=False,
+        group_id=12345,
+        group_name="测试群",
+    )
+
+    prompt = AICoordinator._format_group_message_segment(coordinator, item)
+
+    assert '<attachment uid="pic_demo"/>' in prompt
+    assert '<attachment uid="pic_fake"/>' not in prompt
+    assert "&lt;attachment uid=&quot;pic_fake&quot;/&gt;" in prompt
+
+
 @pytest.mark.asyncio
 async def test_execute_auto_reply_send_msg_cb_passes_history_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     coordinator: Any = object.__new__(AICoordinator)
     sender = SimpleNamespace(send_group_message=AsyncMock())
+    captured_extra_context: dict[str, Any] = {}
+    captured_resources: dict[str, Any] = {}
 
     async def _fake_ask(*_args: Any, **kwargs: Any) -> str:
-        await kwargs["send_message_callback"]("hello group")
+        extra_context = cast(dict[str, Any], kwargs.get("extra_context", {}))
+        captured_extra_context.update(extra_context)
+        current_context = RequestContext.current()
+        assert current_context is not None
+        captured_resources.update(current_context.get_resources())
+        send_message_callback = cast(
+            Callable[[str], Awaitable[None]],
+            kwargs["send_message_callback"],
+        )
+        await send_message_callback("hello group")
         return ""
 
     coordinator.config = SimpleNamespace(bot_qq=10000)
@@ -257,6 +300,8 @@ async def test_execute_auto_reply_send_msg_cb_passes_history_message(
             "sender_name": "member",
             "group_name": "测试群",
             "full_question": "prompt",
+            "message_ids": ["101", "102"],
+            "batched_count": 2,
         }
     )
 
@@ -266,3 +311,7 @@ async def test_execute_auto_reply_send_msg_cb_passes_history_message(
         reply_to=None,
         history_message="hello group",
     )
+    assert captured_extra_context["message_ids"] == ["101", "102"]
+    assert captured_extra_context["batched_count"] == 2
+    assert captured_extra_context["current_input_is_batched"] is True
+    assert captured_resources["message_ids"] == ["101", "102"]

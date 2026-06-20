@@ -7,6 +7,7 @@ import logging
 import re
 
 from Undefined.context import RequestContext
+from Undefined.ai.prompts.current_input import drop_current_input_batch_if_duplicated
 from Undefined.utils.coerce import coerce_truthy, is_truthy, safe_int, was_message_sent
 from Undefined.utils.xml import format_message_xml
 
@@ -33,6 +34,8 @@ _MIN_HISTORIAN_LINES = 0
 _MAX_HISTORIAN_LINES = 50
 _MIN_HISTORIAN_LINE_LEN = 16
 _MAX_HISTORIAN_LINE_LEN = 1000
+_CANONICAL_PROJECT_NAME = "Undefined"
+_PROJECT_NAME_MISSPELLINGS = ("Unfined", "Undefind", "undefind")
 
 
 def _parse_force_flag(value: Any) -> tuple[bool, bool]:
@@ -52,6 +55,13 @@ def _clip_text(value: Any, max_len: int) -> str:
     if len(text) <= max_len:
         return text
     return text[: max_len - 3].rstrip() + "..."
+
+
+def _normalize_project_name_spelling(text: str) -> str:
+    normalized = str(text or "")
+    for misspelling in _PROJECT_NAME_MISSPELLINGS:
+        normalized = normalized.replace(misspelling, _CANONICAL_PROJECT_NAME)
+    return normalized
 
 
 def _clamp_int(value: int, min_value: int, max_value: int) -> int:
@@ -151,7 +161,7 @@ def _extract_current_input_batch_from_question(question: str, *, max_len: int) -
 
 
 def _build_historian_recent_messages(
-    context: Dict[str, Any], *, recent_k: int
+    context: Dict[str, Any], *, recent_k: int, current_question: str
 ) -> list[str]:
     """Build XML-formatted recent messages for historian context.
 
@@ -188,6 +198,15 @@ def _build_historian_recent_messages(
 
     if not isinstance(recent, list):
         return []
+    recent, dropped = drop_current_input_batch_if_duplicated(
+        recent,
+        current_question,
+    )
+    if dropped:
+        logger.info(
+            "[end工具] 史官最近消息剔除当前输入批次重复消息: count=%s",
+            dropped,
+        )
 
     lines: list[str] = []
     for msg in recent:
@@ -212,7 +231,11 @@ def _inject_historian_reference_context(context: Dict[str, Any]) -> None:
             current_question, max_source_len
         )
 
-    recent_lines = _build_historian_recent_messages(context, recent_k=recent_k)
+    recent_lines = _build_historian_recent_messages(
+        context,
+        recent_k=recent_k,
+        current_question=current_question,
+    )
     if recent_lines:
         context["historian_recent_messages"] = recent_lines
 
@@ -243,13 +266,23 @@ def _build_location(context: Dict[str, Any]) -> EndSummaryLocation | None:
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     memo_raw = args.get("memo", "")
-    memo = memo_raw.strip() if isinstance(memo_raw, str) else ""
+    memo = (
+        _normalize_project_name_spelling(memo_raw.strip())
+        if isinstance(memo_raw, str)
+        else ""
+    )
     observations_raw = args.get("observations", [])
     if isinstance(observations_raw, str):
-        observations = [observations_raw.strip()] if observations_raw.strip() else []
+        observations = (
+            [_normalize_project_name_spelling(observations_raw.strip())]
+            if observations_raw.strip()
+            else []
+        )
     elif isinstance(observations_raw, list):
         observations = [
-            str(item).strip() for item in observations_raw if str(item).strip()
+            _normalize_project_name_spelling(str(item).strip())
+            for item in observations_raw
+            if str(item).strip()
         ]
     else:
         observations = []

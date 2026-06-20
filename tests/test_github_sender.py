@@ -59,10 +59,9 @@ async def test_send_github_repo_card_renders_and_sends_image(
         assert proxy is None
         Path(output_path).write_bytes(b"png")
 
+    get_public_repo_info_mock = AsyncMock(return_value=_repo_info())
     monkeypatch.setattr(
-        sender_module,
-        "get_public_repo_info",
-        AsyncMock(return_value=_repo_info()),
+        sender_module, "get_public_repo_info", get_public_repo_info_mock
     )
     monkeypatch.setattr(
         sender_module, "render_html_to_image", fake_render_html_to_image
@@ -80,9 +79,18 @@ async def test_send_github_repo_card_renders_and_sends_image(
         sender=sender,
         target_type="group",
         target_id=10001,
+        request_timeout=18.0,
+        request_retries=4,
+        context={"request_id": "sender-test"},
     )
 
     assert result == "已发送 GitHub 仓库卡片: 69gg/Undefined"
+    get_public_repo_info_mock.assert_awaited_once_with(
+        "69gg/Undefined",
+        request_timeout=18.0,
+        request_retries=4,
+        context={"request_id": "sender-test"},
+    )
     assert "69gg/Undefined" in rendered_html[0]
     assert "QQ bot platform" in rendered_html[0]
     assert "1,234" in rendered_html[0]

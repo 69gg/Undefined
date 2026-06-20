@@ -1,10 +1,14 @@
 name: CI Code Quality
 
 on:
+  workflow_dispatch:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "develop" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "develop" ]
+
+env:
+  NODE_VERSION: "22"
 
 jobs:
   quality-check:
@@ -57,8 +61,17 @@ jobs:
         run: |
           uv run python -c "import glob, zipfile; whl=glob.glob('dist/*.whl')[0]; z=zipfile.ZipFile(whl); names=set(z.namelist()); required={'config.toml.example','res/prompts/undefined.xml','img/xlwy.jpg'}; missing=sorted([p for p in required if p not in names]); assert not missing, f'missing in wheel: {missing}'"
 
-  console-quality-check:
+  native-app-quality-check:
+    name: Native app quality (${{ matrix.app_dir }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - product: console
+            app_dir: apps/undefined-console
+          - product: chat
+            app_dir: apps/undefined-chat
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -66,16 +79,19 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
-          cache-dependency-path: apps/undefined-console/package-lock.json
+          cache-dependency-path: ${{ matrix.app_dir }}/package-lock.json
 
       - name: Cache node_modules
         id: cache-node-modules
         uses: actions/cache@v4
         with:
-          path: apps/undefined-console/node_modules
-          key: ${{ runner.os }}-node-modules-${{ hashFiles('apps/undefined-console/package-lock.json') }}
+          path: ${{ matrix.app_dir }}/node_modules
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -83,8 +99,9 @@ jobs:
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
         with:
+          key: ci-${{ matrix.product }}-${{ hashFiles(format('{0}/src-tauri/Cargo.lock', matrix.app_dir), format('{0}/package-lock.json', matrix.app_dir)) }}
           workspaces: |
-            apps/undefined-console/src-tauri -> target
+            ${{ matrix.app_dir }}/src-tauri -> target
 
       - name: Install Linux system dependencies
         run: |
@@ -98,9 +115,9 @@ jobs:
 
       - name: Install app dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
-        working-directory: apps/undefined-console
+        working-directory: ${{ matrix.app_dir }}
         run: npm ci
 
-      - name: Run console checks
-        working-directory: apps/undefined-console
+      - name: Run native app checks
+        working-directory: ${{ matrix.app_dir }}
         run: npm run check

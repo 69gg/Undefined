@@ -19,6 +19,13 @@ from ..coercers import (
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_GITHUB_REQUEST_TIMEOUT_SECONDS: float = 10.0
+_DEFAULT_GITHUB_REQUEST_RETRIES: int = 2
+_MAX_GITHUB_REQUEST_TIMEOUT_SECONDS: float = 60.0
+_MAX_GITHUB_REQUEST_RETRIES: int = 5
+_DEFAULT_GITHUB_AUTO_EXTRACT_MAX_ITEMS: int = 3
+_MAX_GITHUB_AUTO_EXTRACT_MAX_ITEMS: int = 10
+
 
 def load_integrations(
     data: dict[str, Any], *, config_path: Optional[Path] = None
@@ -109,12 +116,21 @@ def load_integrations(
         _get_value(data, ("github", "auto_extract_enabled"), None), False
     )
     github_request_timeout_seconds = _coerce_float(
-        _get_value(data, ("github", "request_timeout_seconds"), None), 10.0
+        _get_value(data, ("github", "request_timeout_seconds"), None),
+        _DEFAULT_GITHUB_REQUEST_TIMEOUT_SECONDS,
     )
     if github_request_timeout_seconds <= 0:
-        github_request_timeout_seconds = 10.0
-    if github_request_timeout_seconds > 60.0:
-        github_request_timeout_seconds = 60.0
+        github_request_timeout_seconds = _DEFAULT_GITHUB_REQUEST_TIMEOUT_SECONDS
+    if github_request_timeout_seconds > _MAX_GITHUB_REQUEST_TIMEOUT_SECONDS:
+        github_request_timeout_seconds = _MAX_GITHUB_REQUEST_TIMEOUT_SECONDS
+    github_request_retries = _coerce_int(
+        _get_value(data, ("github", "request_retries"), None),
+        _DEFAULT_GITHUB_REQUEST_RETRIES,
+    )
+    if github_request_retries < 0:
+        github_request_retries = 0
+    if github_request_retries > _MAX_GITHUB_REQUEST_RETRIES:
+        github_request_retries = _MAX_GITHUB_REQUEST_RETRIES
     github_auto_extract_group_ids = _coerce_int_list(
         _get_value(data, ("github", "auto_extract_group_ids"), None)
     )
@@ -122,12 +138,13 @@ def load_integrations(
         _get_value(data, ("github", "auto_extract_private_ids"), None)
     )
     github_auto_extract_max_items = _coerce_int(
-        _get_value(data, ("github", "auto_extract_max_items"), None), 3
+        _get_value(data, ("github", "auto_extract_max_items"), None),
+        _DEFAULT_GITHUB_AUTO_EXTRACT_MAX_ITEMS,
     )
     if github_auto_extract_max_items <= 0:
-        github_auto_extract_max_items = 3
-    if github_auto_extract_max_items > 10:
-        github_auto_extract_max_items = 10
+        github_auto_extract_max_items = _DEFAULT_GITHUB_AUTO_EXTRACT_MAX_ITEMS
+    if github_auto_extract_max_items > _MAX_GITHUB_AUTO_EXTRACT_MAX_ITEMS:
+        github_auto_extract_max_items = _MAX_GITHUB_AUTO_EXTRACT_MAX_ITEMS
 
     # Code Delivery Agent 配置
     code_delivery_enabled = _coerce_bool(
@@ -251,6 +268,7 @@ def load_integrations(
         "arxiv_summary_preview_chars": arxiv_summary_preview_chars,
         "github_auto_extract_enabled": github_auto_extract_enabled,
         "github_request_timeout_seconds": github_request_timeout_seconds,
+        "github_request_retries": github_request_retries,
         "github_auto_extract_group_ids": github_auto_extract_group_ids,
         "github_auto_extract_private_ids": github_auto_extract_private_ids,
         "github_auto_extract_max_items": github_auto_extract_max_items,

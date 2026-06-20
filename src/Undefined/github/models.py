@@ -19,7 +19,7 @@ class GitHubRepoInfo:
     stars: int
     forks: int
     open_issues: int
-    watchers: int
+    watchers: int | None
     subscribers: int | None
     contributors: int | None
     language: str

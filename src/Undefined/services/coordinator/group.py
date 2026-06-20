@@ -15,7 +15,10 @@ from Undefined.context_resource_registry import collect_context_resources
 from Undefined.render import render_html_to_image, render_markdown_to_html
 from Undefined.services.message_batcher import BufferedMessage, make_scope
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
-from Undefined.utils.xml import escape_xml_attr, escape_xml_text
+from Undefined.utils.xml import (
+    escape_xml_attr,
+    escape_xml_text_preserving_attachment_tags,
+)
 
 if TYPE_CHECKING:
     from Undefined.config import Config
@@ -36,6 +39,8 @@ _GROUP_STRATEGY_FOOTER = """
  3. 如果问题明确涉及某个项目/代码/部署细节（用户明确点名或上下文明确指向） → 【酌情回复，必要时先查证再回答】
  4. 其他技术问题 → 【酌情回复，直接按用户提到的对象回答，不要引入无关的项目名/工具名作背景】
  5. 先判断当前输入批次（无连续消息说明时就是最后一条消息）是不是在对你说：
+    - 先看 sender_id、@/reply、前后文对话对象和当前群聊环境；不要先入为主把"你"、"AI"、"bot"、"机器人"当作在叫 Undefined
+    - 泛称或讨论其他 AI/bot/机器人时不算叫你；无法确认指向 Undefined 时默认不回复
     - 如果明显是在和别人说话 → 【不要回复】
     - 如果你不能确定是不是在和你说话 → 【默认不回复】
     - 只有明确在和你说，或多人公开讨论且对话明显开放时，才进入下一步
@@ -165,6 +170,11 @@ class GroupReplyMixin:
         group_name = str(request.get("group_name") or "未知群聊")
         full_question = request["full_question"]
         trigger_message_id = request.get("trigger_message_id")
+        message_ids = [
+            str(item).strip()
+            for item in request.get("message_ids", [])
+            if str(item).strip()
+        ]
         # 用于向 batcher 注册 inflight 任务（仅当本请求源自合并桶时生效）
         batcher_scope: str | None = make_scope(group_id=group_id) if group_id else None
 
@@ -231,6 +241,8 @@ class GroupReplyMixin:
                     ctx.set_resource(key, value)
             if trigger_message_id is not None:
                 ctx.set_resource("trigger_message_id", trigger_message_id)
+            if message_ids:
+                ctx.set_resource("message_ids", list(message_ids))
             if request.get("_queue_lane"):
                 ctx.set_resource("queue_lane", request.get("_queue_lane"))
             logger.debug(
@@ -273,6 +285,12 @@ class GroupReplyMixin:
                             "is_at_bot": bool(request.get("is_at_bot", False)),
                             "sender_name": sender_name,
                             "group_name": group_name,
+                            "message_ids": list(message_ids),
+                            "batched_count": int(request.get("batched_count", 1) or 1),
+                            "current_input_is_batched": int(
+                                request.get("batched_count", 1) or 1
+                            )
+                            > 1,
                         },
                     )
                 finally:
@@ -343,7 +361,10 @@ class GroupReplyMixin:
         safe_role = escape_xml_attr(item.sender_role or "member")
         safe_title = escape_xml_attr(item.sender_title or "")
         safe_time = escape_xml_attr(time_str)
-        safe_text = escape_xml_text(item.text)
+        safe_text = escape_xml_text_preserving_attachment_tags(
+            item.text,
+            item.attachments,
+        )
         message_id_attr = ""
         if item.trigger_message_id is not None:
             message_id_attr = (
@@ -393,7 +414,7 @@ class GroupReplyMixin:
         safe_role = escape_xml_attr(role)
         safe_title = escape_xml_attr(title)
         safe_time = escape_xml_attr(time_str)
-        safe_text = escape_xml_text(text)
+        safe_text = escape_xml_text_preserving_attachment_tags(text, attachments)
         message_id_attr = ""
         if message_id is not None:
             message_id_attr = f' message_id="{escape_xml_attr(message_id)}"'

@@ -9,6 +9,11 @@ from datetime import datetime
 from typing import Any, Callable
 
 from Undefined.ai.transports.openai_transport import RESPONSES_OUTPUT_ITEMS_KEY
+from Undefined.cognitive.chroma_scheduler import (
+    CHROMA_PRIORITY_BACKGROUND,
+    CHROMA_PRIORITY_MAINTENANCE,
+)
+from Undefined.cognitive.vector_store_compat import call_vector_store_method
 from Undefined.utils.tool_calls import extract_required_tool_call_arguments
 
 from Undefined.cognitive.historian.helpers import (
@@ -212,7 +217,13 @@ class HistorianWorker:
                     **base_metadata,
                     "has_observations": True,
                 }
-                await self._vector_store.upsert_event(event_id, canonical, meta)
+                await call_vector_store_method(
+                    self._vector_store.upsert_event,
+                    event_id,
+                    canonical,
+                    meta,
+                    priority=CHROMA_PRIORITY_BACKGROUND,
+                )
                 canonicals.append(canonical)
                 logger.info(
                     "[史官] 任务 %s 事件入库完成(%s/%s): len=%s",
@@ -516,10 +527,12 @@ class HistorianWorker:
             profile_metadata["group_name"] = effective_name
             profile_metadata["group_id"] = entity_id
 
-        await self._vector_store.upsert_profile(
+        await call_vector_store_method(
+            self._vector_store.upsert_profile,
             f"{entity_type}:{entity_id}",
             profile_doc,
             profile_metadata,
+            priority=CHROMA_PRIORITY_BACKGROUND,
         )
         logger.info(
             "[史官] 任务 %s 侧写向量入库完成: profile_id=%s perspective=%s",
@@ -560,15 +573,19 @@ class HistorianWorker:
         query_embedding_value = query_embedding
         if query_embedding_value is None:
             query_embedding_value = await self._prepare_query_embedding(query_text)
-        sender_query = self._vector_store.query_events(
+        sender_query = call_vector_store_method(
+            self._vector_store.query_events,
             query_text,
+            priority=CHROMA_PRIORITY_MAINTENANCE,
             top_k=safe_top_k,
             where={"sender_id": entity_id},
             apply_mmr=True,
             query_embedding=query_embedding_value,
         )
-        user_query = self._vector_store.query_events(
+        user_query = call_vector_store_method(
+            self._vector_store.query_events,
             query_text,
+            priority=CHROMA_PRIORITY_MAINTENANCE,
             top_k=safe_top_k,
             where={"user_id": entity_id},
             apply_mmr=True,
@@ -631,8 +648,10 @@ class HistorianWorker:
         )
         query_embedding = await self._prepare_query_embedding(observations_text)
         if entity_type == "group":
-            historical_events = await self._vector_store.query_events(
+            historical_events = await call_vector_store_method(
+                self._vector_store.query_events,
                 observations_text,
+                priority=CHROMA_PRIORITY_MAINTENANCE,
                 top_k=8,
                 where={"group_id": entity_id},
                 apply_mmr=True,
@@ -851,9 +870,7 @@ class HistorianWorker:
                     raw_tags = tc_args.get("tags", [])
                     up_tags: list[str] = []
                     if isinstance(raw_tags, list):
-                        up_tags = [str(t).strip() for t in raw_tags if str(t).strip()][
-                            :10
-                        ]
+                        up_tags = [str(t).strip() for t in raw_tags if str(t).strip()]
 
                     llm_name = str(tc_args.get("name", "")).strip()
                     is_target = up_et == entity_type and up_eid == entity_id

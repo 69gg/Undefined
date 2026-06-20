@@ -16,7 +16,7 @@ concurrency:
 env:
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "22"
-  APP_DIR: apps/undefined-console
+  ANDROID_NDK_VERSION: "27.2.12479018"
 
 jobs:
   verify-python:
@@ -85,10 +85,18 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  verify-console:
-    name: Verify console app
+  verify-native-app:
+    name: Verify ${{ matrix.product }} app
     runs-on: ubuntu-latest
     environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - product: console
+            app_dir: apps/undefined-console
+          - product: chat
+            app_dir: apps/undefined-chat
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -98,14 +106,17 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
-          cache-dependency-path: ${{ env.APP_DIR }}/package-lock.json
+          cache-dependency-path: ${{ matrix.app_dir }}/package-lock.json
 
       - name: Cache node_modules
         id: cache-node-modules
         uses: actions/cache@v4
         with:
-          path: ${{ env.APP_DIR }}/node_modules
-          key: ${{ runner.os }}-node-modules-${{ hashFiles('apps/undefined-console/package-lock.json') }}
+          path: ${{ matrix.app_dir }}/node_modules
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -113,8 +124,9 @@ jobs:
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
         with:
+          key: verify-${{ matrix.product }}-${{ hashFiles(format('{0}/src-tauri/Cargo.lock', matrix.app_dir), format('{0}/package-lock.json', matrix.app_dir)) }}
           workspaces: |
-            apps/undefined-console/src-tauri -> target
+            ${{ matrix.app_dir }}/src-tauri -> target
 
       - name: Install Linux system dependencies
         run: |
@@ -128,37 +140,80 @@ jobs:
 
       - name: Install app dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
-        working-directory: ${{ env.APP_DIR }}
+        working-directory: ${{ matrix.app_dir }}
         run: npm ci
 
-      - name: Run console checks
-        working-directory: ${{ env.APP_DIR }}
+      - name: Run native app checks
+        working-directory: ${{ matrix.app_dir }}
         run: npm run check
 
   build-tauri-desktop:
-    name: Build Tauri desktop (${{ matrix.label }})
+    name: Build Tauri desktop (${{ matrix.product }} ${{ matrix.label }})
     runs-on: ${{ matrix.os }}
     environment: release
     needs:
       - verify-python
-      - verify-console
+      - verify-native-app
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - product: console
+            app_dir: apps/undefined-console
+            artifact_prefix: Undefined-Console
+            os: ubuntu-latest
             label: linux-x64
             bundles: appimage,deb
-          - os: windows-latest
+            rust_target: ""
+          - product: console
+            app_dir: apps/undefined-console
+            artifact_prefix: Undefined-Console
+            os: windows-latest
             label: windows-x64
             bundles: nsis,msi
-          - os: macos-15
+            rust_target: ""
+          - product: console
+            app_dir: apps/undefined-console
+            artifact_prefix: Undefined-Console
+            os: macos-15
             label: macos-x64
             bundles: dmg
-            rust-target: x86_64-apple-darwin
-          - os: macos-15
+            rust_target: x86_64-apple-darwin
+          - product: console
+            app_dir: apps/undefined-console
+            artifact_prefix: Undefined-Console
+            os: macos-15
             label: macos-arm64
             bundles: dmg
+            rust_target: ""
+          - product: chat
+            app_dir: apps/undefined-chat
+            artifact_prefix: Undefined-Chat
+            os: ubuntu-latest
+            label: linux-x64
+            bundles: appimage,deb
+            rust_target: ""
+          - product: chat
+            app_dir: apps/undefined-chat
+            artifact_prefix: Undefined-Chat
+            os: windows-latest
+            label: windows-x64
+            bundles: nsis,msi
+            rust_target: ""
+          - product: chat
+            app_dir: apps/undefined-chat
+            artifact_prefix: Undefined-Chat
+            os: macos-15
+            label: macos-x64
+            bundles: dmg
+            rust_target: x86_64-apple-darwin
+          - product: chat
+            app_dir: apps/undefined-chat
+            artifact_prefix: Undefined-Chat
+            os: macos-15
+            label: macos-arm64
+            bundles: dmg
+            rust_target: ""
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -168,26 +223,34 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
-          cache-dependency-path: ${{ env.APP_DIR }}/package-lock.json
+          cache-dependency-path: ${{ matrix.app_dir }}/package-lock.json
 
       - name: Cache node_modules
         id: cache-node-modules
         uses: actions/cache@v4
         with:
-          path: ${{ env.APP_DIR }}/node_modules
-          key: ${{ runner.os }}-node-modules-${{ hashFiles('apps/undefined-console/package-lock.json') }}
+          path: ${{ matrix.app_dir }}/node_modules
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-
 
       - name: Install Rust toolchain
+        if: matrix.rust_target == ''
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust toolchain with target
+        if: matrix.rust_target != ''
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.rust-target }}
+          targets: ${{ matrix.rust_target }}
 
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.label }}
+          key: desktop-${{ matrix.product }}-${{ matrix.label }}-${{ hashFiles(format('{0}/src-tauri/Cargo.lock', matrix.app_dir), format('{0}/package-lock.json', matrix.app_dir)) }}
           workspaces: |
-            apps/undefined-console/src-tauri -> target
+            ${{ matrix.app_dir }}/src-tauri -> target
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
@@ -202,16 +265,16 @@ jobs:
 
       - name: Install app dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
-        working-directory: ${{ env.APP_DIR }}
+        working-directory: ${{ matrix.app_dir }}
         run: npm ci
 
       - name: Build Tauri bundles
-        working-directory: ${{ env.APP_DIR }}
+        working-directory: ${{ matrix.app_dir }}
         shell: bash
         run: |
           TAURI_ARGS="--ci --bundles ${{ matrix.bundles }}"
-          if [ -n "${{ matrix.rust-target }}" ]; then
-            TAURI_ARGS="$TAURI_ARGS --target ${{ matrix.rust-target }}"
+          if [ -n "${{ matrix.rust_target }}" ]; then
+            TAURI_ARGS="$TAURI_ARGS --target ${{ matrix.rust_target }}"
           fi
           if [ "${{ runner.os }}" = "Linux" ]; then
             NO_STRIP=true npm run tauri:build -- $TAURI_ARGS
@@ -224,7 +287,9 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
           LABEL: ${{ matrix.label }}
-          RUST_TARGET: ${{ matrix.rust-target }}
+          APP_DIR: ${{ matrix.app_dir }}
+          ARTIFACT_PREFIX: ${{ matrix.artifact_prefix }}
+          RUST_TARGET: ${{ matrix.rust_target }}
         run: |
           copy_single_match() {
             local search_root="$1"
@@ -251,46 +316,82 @@ jobs:
           mkdir -p release-artifacts
           case "$LABEL" in
             linux-x64)
-              copy_single_match "$BUNDLE_ROOT" '*.AppImage' "release-artifacts/Undefined-Console-${TAG}-${LABEL}.AppImage"
-              copy_single_match "$BUNDLE_ROOT" '*.deb' "release-artifacts/Undefined-Console-${TAG}-${LABEL}.deb"
+              copy_single_match "$BUNDLE_ROOT" '*.AppImage' "release-artifacts/${ARTIFACT_PREFIX}-${TAG}-${LABEL}.AppImage"
+              copy_single_match "$BUNDLE_ROOT" '*.deb' "release-artifacts/${ARTIFACT_PREFIX}-${TAG}-${LABEL}.deb"
               ;;
             windows-x64)
-              copy_single_match "$BUNDLE_ROOT" '*.exe' "release-artifacts/Undefined-Console-${TAG}-${LABEL}-setup.exe"
-              copy_single_match "$BUNDLE_ROOT" '*.msi' "release-artifacts/Undefined-Console-${TAG}-${LABEL}.msi"
+              copy_single_match "$BUNDLE_ROOT" '*.exe' "release-artifacts/${ARTIFACT_PREFIX}-${TAG}-${LABEL}-setup.exe"
+              copy_single_match "$BUNDLE_ROOT" '*.msi' "release-artifacts/${ARTIFACT_PREFIX}-${TAG}-${LABEL}.msi"
               ;;
             macos-x64|macos-arm64)
-              copy_single_match "$BUNDLE_ROOT" '*.dmg' "release-artifacts/Undefined-Console-${TAG}-${LABEL}.dmg"
+              copy_single_match "$BUNDLE_ROOT" '*.dmg' "release-artifacts/${ARTIFACT_PREFIX}-${TAG}-${LABEL}.dmg"
               ;;
           esac
 
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tauri-${{ matrix.label }}
+          name: tauri-${{ matrix.product }}-${{ matrix.label }}
           path: release-artifacts/*
           if-no-files-found: error
 
   build-tauri-android:
-    name: Build Tauri Android (${{ matrix.abi_label }})
+    name: Build Tauri Android (${{ matrix.product }} ${{ matrix.abi_label }})
     runs-on: ubuntu-latest
     environment: release
     needs:
       - verify-python
-      - verify-console
+      - verify-native-app
     strategy:
       fail-fast: false
       matrix:
         include:
-          - abi_label: arm64-v8a
+          - product: console
+            app_dir: apps/undefined-console
+            artifact_prefix: Undefined-Console
+            abi_label: arm64-v8a
             tauri_target: aarch64
             rust_target: aarch64-linux-android
-          - abi_label: armeabi-v7a
+          - product: console
+            app_dir: apps/undefined-console
+            artifact_prefix: Undefined-Console
+            abi_label: armeabi-v7a
             tauri_target: armv7
             rust_target: armv7-linux-androideabi
-          - abi_label: x86
+          - product: console
+            app_dir: apps/undefined-console
+            artifact_prefix: Undefined-Console
+            abi_label: x86
             tauri_target: i686
             rust_target: i686-linux-android
-          - abi_label: x86_64
+          - product: console
+            app_dir: apps/undefined-console
+            artifact_prefix: Undefined-Console
+            abi_label: x86_64
+            tauri_target: x86_64
+            rust_target: x86_64-linux-android
+          - product: chat
+            app_dir: apps/undefined-chat
+            artifact_prefix: Undefined-Chat
+            abi_label: arm64-v8a
+            tauri_target: aarch64
+            rust_target: aarch64-linux-android
+          - product: chat
+            app_dir: apps/undefined-chat
+            artifact_prefix: Undefined-Chat
+            abi_label: armeabi-v7a
+            tauri_target: armv7
+            rust_target: armv7-linux-androideabi
+          - product: chat
+            app_dir: apps/undefined-chat
+            artifact_prefix: Undefined-Chat
+            abi_label: x86
+            tauri_target: i686
+            rust_target: i686-linux-android
+          - product: chat
+            app_dir: apps/undefined-chat
+            artifact_prefix: Undefined-Chat
+            abi_label: x86_64
             tauri_target: x86_64
             rust_target: x86_64-linux-android
     steps:
@@ -302,14 +403,17 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
-          cache-dependency-path: ${{ env.APP_DIR }}/package-lock.json
+          cache-dependency-path: ${{ matrix.app_dir }}/package-lock.json
 
       - name: Cache node_modules
         id: cache-node-modules
         uses: actions/cache@v4
         with:
-          path: ${{ env.APP_DIR }}/node_modules
-          key: ${{ runner.os }}-node-modules-${{ hashFiles('apps/undefined-console/package-lock.json') }}
+          path: ${{ matrix.app_dir }}/node_modules
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-${{ hashFiles(format('{0}/package-lock.json', matrix.app_dir)) }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-${{ matrix.product }}-
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-node-modules-
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -319,9 +423,9 @@ jobs:
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
         with:
-          key: android-${{ matrix.abi_label }}
+          key: android-${{ matrix.product }}-${{ matrix.abi_label }}-${{ hashFiles(format('{0}/src-tauri/Cargo.lock', matrix.app_dir), format('{0}/package-lock.json', matrix.app_dir)) }}
           workspaces: |
-            apps/undefined-console/src-tauri -> target
+            ${{ matrix.app_dir }}/src-tauri -> target
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -333,7 +437,16 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Ensure Android platform packages
-        run: sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+        run: sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;${{ env.ANDROID_NDK_VERSION }}"
+
+      - name: Configure Android NDK
+        run: |
+          NDK_HOME="$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}"
+          if [ ! -d "$NDK_HOME" ]; then
+            echo "Expected Android NDK at $NDK_HOME" >&2
+            exit 1
+          fi
+          echo "NDK_HOME=$NDK_HOME" >> "$GITHUB_ENV"
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -347,12 +460,17 @@ jobs:
 
       - name: Install app dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
-        working-directory: ${{ env.APP_DIR }}
+        working-directory: ${{ matrix.app_dir }}
         run: npm ci
 
       - name: Initialize Android project for CI
-        working-directory: ${{ env.APP_DIR }}
+        working-directory: ${{ matrix.app_dir }}
         run: npm run tauri:android:init
+
+      - name: Verify Chat Android native patches
+        if: matrix.product == 'chat'
+        working-directory: ${{ matrix.app_dir }}
+        run: npm run tauri:android:prepare:check
 
       - name: Validate Android signing secrets
         env:
@@ -373,15 +491,16 @@ jobs:
           fi
 
       - name: Configure Android release signing
-        working-directory: ${{ env.APP_DIR }}
+        working-directory: ${{ matrix.app_dir }}
         env:
+          APP_PRODUCT: ${{ matrix.product }}
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         shell: bash
         run: |
-          KEYSTORE_PATH="$RUNNER_TEMP/undefined-console-release.jks"
+          KEYSTORE_PATH="$RUNNER_TEMP/undefined-${APP_PRODUCT}-release.jks"
           KEYSTORE_PROPERTIES_PATH="src-tauri/gen/android/keystore.properties"
           APP_GRADLE_PATH=$(find "src-tauri/gen/android" -type f \( -path '*/app/build.gradle.kts' -o -path '*/app/build.gradle' \) | sort | head -n 1)
 
@@ -487,7 +606,7 @@ jobs:
           PY
 
       - name: Build Android release APK
-        working-directory: ${{ env.APP_DIR }}
+        working-directory: ${{ matrix.app_dir }}
         run: npm run tauri:android -- --ci --apk --target ${{ matrix.tauri_target }}
 
       - name: Collect Android release artifact
@@ -495,6 +614,8 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
           ABI_LABEL: ${{ matrix.abi_label }}
+          APP_DIR: ${{ matrix.app_dir }}
+          ARTIFACT_PREFIX: ${{ matrix.artifact_prefix }}
         run: |
           copy_single_match() {
             local search_root="$1"
@@ -513,12 +634,12 @@ jobs:
           }
 
           mkdir -p release-artifacts
-          copy_single_match "$APP_DIR/src-tauri" '*.apk' "release-artifacts/Undefined-Console-${TAG}-android-${ABI_LABEL}-release.apk"
+          copy_single_match "$APP_DIR/src-tauri" '*.apk' "release-artifacts/${ARTIFACT_PREFIX}-${TAG}-android-${ABI_LABEL}-release.apk"
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tauri-android-${{ matrix.abi_label }}
+          name: tauri-android-${{ matrix.product }}-${{ matrix.abi_label }}
           path: release-artifacts/*
           if-no-files-found: error
 

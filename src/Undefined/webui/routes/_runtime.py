@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from collections.abc import Mapping
-from urllib.parse import quote as _url_quote
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+from urllib.parse import quote as _url_quote
 
-from aiohttp import ClientSession, ClientTimeout, web
+from aiohttp import ClientSession, ClientTimeout, FormData, web
 from aiohttp.web_response import Response
 
 from Undefined.ai.queue_budget import compute_queued_llm_timeout_seconds
 from Undefined.config import get_config
+from Undefined.utils import io as async_io
 from Undefined.utils.paths import CACHE_DIR, WEBUI_FILE_CACHE_DIR
 from ._shared import check_auth, routes
 
@@ -25,6 +27,7 @@ _ALLOWED_CHAT_IMAGE_EXTENSIONS = {
     ".webp",
     ".bmp",
 }
+_WEBUI_FILE_UPLOAD_NAME_MAX_LENGTH = 128
 
 
 def _runtime_base_url() -> str:
@@ -121,6 +124,35 @@ def _resolve_chat_image_path(raw_path: str) -> Path | None:
     return path
 
 
+def _sanitize_upload_display_name(raw_name: str) -> str:
+    name = Path(str(raw_name or "").strip() or "attachment").name or "attachment"
+    if len(name) > _WEBUI_FILE_UPLOAD_NAME_MAX_LENGTH:
+        suffix = "".join(Path(name).suffixes[-2:]) or Path(name).suffix
+        suffix = suffix if len(suffix) <= 16 else ""
+        name = f"attachment{suffix}"
+    return name
+
+
+def _random_upload_filename(display_name: str) -> str:
+    suffix = "".join(Path(display_name).suffixes[-2:]) or Path(display_name).suffix
+    suffix = suffix if len(suffix) <= 16 else ""
+    return f"file_{uuid.uuid4().hex[:16]}{suffix}"
+
+
+def _chat_message_payload(body: Mapping[str, Any]) -> Any | None:
+    raw_message = body.get("message")
+    if isinstance(raw_message, str):
+        text = raw_message.strip()
+        return text or None
+    if isinstance(raw_message, Mapping):
+        text = str(raw_message.get("text") or "").strip()
+        attachment_ids = raw_message.get("attachment_ids")
+        has_attachments = isinstance(attachment_ids, list) and bool(attachment_ids)
+        if text or has_attachments:
+            return dict(raw_message)
+    return None
+
+
 async def _proxy_runtime(
     *,
     method: str,
@@ -167,12 +199,126 @@ async def _proxy_runtime(
         )
 
 
+async def _proxy_runtime_binary(
+    *,
+    method: str,
+    path: str,
+    params: Mapping[str, str] | None = None,
+    timeout_seconds: float | None = 20.0,
+) -> Response:
+    cfg = get_config(strict=False)
+    if not cfg.api.enabled:
+        return _runtime_disabled()
+
+    url = f"{_runtime_base_url()}{path}"
+    timeout = ClientTimeout(total=timeout_seconds)
+    headers = {_AUTH_HEADER: str(cfg.api.auth_key or "")}
+
+    try:
+        async with ClientSession(timeout=timeout) as session:
+            async with session.request(
+                method=method,
+                url=url,
+                params=params,
+                headers=headers,
+            ) as resp:
+                body = await resp.read()
+                response_headers: dict[str, str] = {}
+                disposition = resp.headers.get("Content-Disposition")
+                if disposition:
+                    response_headers["Content-Disposition"] = disposition
+                return web.Response(
+                    status=resp.status,
+                    body=body,
+                    headers=response_headers,
+                    content_type=resp.content_type,
+                )
+    except (OSError, asyncio.TimeoutError) as exc:
+        return web.json_response(
+            {"error": "Runtime API unreachable", "detail": str(exc)},
+            status=502,
+        )
+
+
+async def _proxy_runtime_multipart_file(
+    request: web.Request,
+    *,
+    path: str,
+    timeout_seconds: float | None = 60.0,
+) -> Response:
+    cfg = get_config(strict=False)
+    if not cfg.api.enabled:
+        return _runtime_disabled()
+
+    try:
+        reader = await request.multipart()
+        field = await reader.next()
+    except Exception:
+        return web.json_response({"error": "Invalid multipart body"}, status=400)
+
+    field_any = cast(Any, field)
+    if field is None or getattr(field_any, "name", None) != "file":
+        return web.json_response({"error": "file field is required"}, status=400)
+
+    filename = _sanitize_upload_display_name(
+        str(getattr(field_any, "filename", "") or "attachment")
+    )
+    content_type = str(getattr(field_any, "content_type", "") or "").strip()
+    if not content_type:
+        headers = getattr(field_any, "headers", {})
+        content_type = str(headers.get("Content-Type", "") or "").strip()
+    if not content_type:
+        content_type = "application/octet-stream"
+
+    body = bytearray()
+    while True:
+        chunk = await field_any.read_chunk()
+        if not chunk:
+            break
+        body.extend(chunk)
+
+    url = f"{_runtime_base_url()}{path}"
+    timeout = ClientTimeout(total=timeout_seconds)
+    headers = {_AUTH_HEADER: str(cfg.api.auth_key or "")}
+    form = FormData()
+    form.add_field(
+        "file",
+        bytes(body),
+        filename=filename,
+        content_type=content_type,
+    )
+
+    try:
+        async with ClientSession(timeout=timeout) as session:
+            async with session.post(url, data=form, headers=headers) as resp:
+                text = await resp.text()
+                content_type_header = (resp.headers.get("Content-Type") or "").lower()
+                if "application/json" in content_type_header:
+                    try:
+                        data = json.loads(text) if text else {}
+                    except json.JSONDecodeError:
+                        data = {"raw": text}
+                    return web.json_response(data, status=resp.status)
+                return web.Response(
+                    status=resp.status,
+                    text=text,
+                    content_type=resp.content_type,
+                    charset=resp.charset,
+                )
+    except (OSError, asyncio.TimeoutError) as exc:
+        return web.json_response(
+            {"error": "Runtime API unreachable", "detail": str(exc)},
+            status=502,
+        )
+
+
 async def _proxy_runtime_stream(
     request: web.Request,
     *,
     method: str,
     path: str,
     payload: dict[str, Any] | None = None,
+    params: Mapping[str, str] | None = None,
     timeout_seconds: float | None = None,
 ) -> web.StreamResponse:
     cfg = get_config(strict=False)
@@ -193,6 +339,7 @@ async def _proxy_runtime_stream(
             async with session.request(
                 method=method,
                 url=url,
+                params=params,
                 json=payload,
                 headers=headers,
             ) as upstream:
@@ -342,6 +489,79 @@ async def runtime_memory_delete_handler(request: web.Request) -> Response:
     )
 
 
+@routes.get("/api/v1/management/runtime/schedules")
+@routes.get("/api/runtime/schedules")
+async def runtime_schedules_list_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    return await _proxy_runtime(
+        method="GET",
+        path="/api/v1/schedules",
+        timeout_seconds=20.0,
+    )
+
+
+@routes.post("/api/v1/management/runtime/schedules")
+@routes.post("/api/runtime/schedules")
+async def runtime_schedules_create_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return web.json_response({"error": "Invalid JSON payload"}, status=400)
+    return await _proxy_runtime(
+        method="POST",
+        path="/api/v1/schedules",
+        payload=payload,
+        timeout_seconds=30.0,
+    )
+
+
+@routes.get("/api/v1/management/runtime/schedules/{task_id}")
+@routes.get("/api/runtime/schedules/{task_id}")
+async def runtime_schedule_detail_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    task_id = _url_quote(str(request.match_info.get("task_id", "")).strip(), safe="")
+    return await _proxy_runtime(
+        method="GET",
+        path=f"/api/v1/schedules/{task_id}",
+        timeout_seconds=20.0,
+    )
+
+
+@routes.patch("/api/v1/management/runtime/schedules/{task_id}")
+@routes.patch("/api/runtime/schedules/{task_id}")
+async def runtime_schedule_update_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    task_id = _url_quote(str(request.match_info.get("task_id", "")).strip(), safe="")
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return web.json_response({"error": "Invalid JSON payload"}, status=400)
+    return await _proxy_runtime(
+        method="PATCH",
+        path=f"/api/v1/schedules/{task_id}",
+        payload=payload,
+        timeout_seconds=30.0,
+    )
+
+
+@routes.delete("/api/v1/management/runtime/schedules/{task_id}")
+@routes.delete("/api/runtime/schedules/{task_id}")
+async def runtime_schedule_delete_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    task_id = _url_quote(str(request.match_info.get("task_id", "")).strip(), safe="")
+    return await _proxy_runtime(
+        method="DELETE",
+        path=f"/api/v1/schedules/{task_id}",
+        timeout_seconds=30.0,
+    )
+
+
 @routes.get("/api/v1/management/runtime/cognitive/events")
 @routes.get("/api/runtime/cognitive/events")
 async def runtime_cognitive_events_handler(request: web.Request) -> Response:
@@ -379,6 +599,33 @@ async def runtime_cognitive_profile_handler(request: web.Request) -> Response:
     )
 
 
+@routes.get("/api/v1/management/runtime/commands")
+@routes.get("/api/runtime/commands")
+async def runtime_commands_list_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    return await _proxy_runtime(
+        method="GET",
+        path="/api/v1/commands",
+        params=request.query,
+    )
+
+
+@routes.get("/api/v1/management/runtime/commands/{command_name}")
+@routes.get("/api/runtime/commands/{command_name}")
+async def runtime_command_detail_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    command_name = _url_quote(
+        str(request.match_info.get("command_name", "")).strip(), safe=""
+    )
+    return await _proxy_runtime(
+        method="GET",
+        path=f"/api/v1/commands/{command_name}",
+        params=request.query,
+    )
+
+
 @routes.post("/api/v1/management/runtime/chat")
 @routes.post("/api/runtime/chat")
 async def runtime_chat_handler(request: web.Request) -> web.StreamResponse:
@@ -392,9 +639,12 @@ async def runtime_chat_handler(request: web.Request) -> web.StreamResponse:
     message = str(body.get("message", "") or "").strip()
     if not message:
         return web.json_response({"error": "message is required"}, status=400)
+    conversation_id = str(body.get("conversation_id", "") or "").strip()
 
     stream = _to_bool(body.get("stream"))
     payload: dict[str, Any] = {"message": message}
+    if conversation_id:
+        payload["conversation_id"] = conversation_id
     if stream:
         payload["stream"] = True
         return await _proxy_runtime_stream(
@@ -413,6 +663,71 @@ async def runtime_chat_handler(request: web.Request) -> web.StreamResponse:
     )
 
 
+@routes.get("/api/v1/management/runtime/chat/conversations")
+@routes.get("/api/runtime/chat/conversations")
+async def runtime_chat_conversations_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    return await _proxy_runtime(
+        method="GET",
+        path="/api/v1/chat/conversations",
+        params=request.query,
+    )
+
+
+@routes.post("/api/v1/management/runtime/chat/conversations")
+@routes.post("/api/runtime/chat/conversations")
+async def runtime_chat_conversation_create_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    payload: dict[str, Any] = {}
+    title = str(body.get("title", "") or "").strip()
+    if title:
+        payload["title"] = title
+    return await _proxy_runtime(
+        method="POST",
+        path="/api/v1/chat/conversations",
+        payload=payload,
+    )
+
+
+@routes.patch("/api/v1/management/runtime/chat/conversations/{conversation_id}")
+@routes.patch("/api/runtime/chat/conversations/{conversation_id}")
+async def runtime_chat_conversation_update_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    conversation_id = _url_quote(
+        str(request.match_info.get("conversation_id", "")).strip(), safe=""
+    )
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+    return await _proxy_runtime(
+        method="PATCH",
+        path=f"/api/v1/chat/conversations/{conversation_id}",
+        payload={"title": str(body.get("title", "") or "").strip()},
+    )
+
+
+@routes.delete("/api/v1/management/runtime/chat/conversations/{conversation_id}")
+@routes.delete("/api/runtime/chat/conversations/{conversation_id}")
+async def runtime_chat_conversation_delete_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    conversation_id = _url_quote(
+        str(request.match_info.get("conversation_id", "")).strip(), safe=""
+    )
+    return await _proxy_runtime(
+        method="DELETE",
+        path=f"/api/v1/chat/conversations/{conversation_id}",
+    )
+
+
 @routes.get("/api/v1/management/runtime/chat/history")
 @routes.get("/api/runtime/chat/history")
 async def runtime_chat_history_handler(request: web.Request) -> Response:
@@ -422,6 +737,161 @@ async def runtime_chat_history_handler(request: web.Request) -> Response:
         method="GET",
         path="/api/v1/chat/history",
         params=request.query,
+    )
+
+
+@routes.delete("/api/v1/management/runtime/chat/history")
+@routes.delete("/api/runtime/chat/history")
+async def runtime_chat_history_clear_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    return await _proxy_runtime(
+        method="DELETE",
+        path="/api/v1/chat/history",
+        params=request.query,
+    )
+
+
+@routes.get("/api/v1/management/runtime/chat/attachments/capabilities")
+@routes.get("/api/runtime/chat/attachments/capabilities")
+async def runtime_chat_attachment_capabilities_handler(
+    request: web.Request,
+) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    return await _proxy_runtime(
+        method="GET",
+        path="/api/v1/chat/attachments/capabilities",
+        timeout_seconds=20.0,
+    )
+
+
+@routes.post("/api/v1/management/runtime/chat/attachments")
+@routes.post("/api/runtime/chat/attachments")
+async def runtime_chat_attachment_upload_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    return await _proxy_runtime_multipart_file(
+        request,
+        path="/api/v1/chat/attachments",
+        timeout_seconds=60.0,
+    )
+
+
+@routes.get("/api/v1/management/runtime/chat/attachments/{attachment_id}")
+@routes.get("/api/runtime/chat/attachments/{attachment_id}")
+async def runtime_chat_attachment_download_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    attachment_id = _url_quote(
+        str(request.match_info.get("attachment_id", "")).strip(), safe=""
+    )
+    return await _proxy_runtime_binary(
+        method="GET",
+        path=f"/api/v1/chat/attachments/{attachment_id}",
+        timeout_seconds=60.0,
+    )
+
+
+@routes.get("/api/v1/management/runtime/chat/attachments/{attachment_id}/preview")
+@routes.get("/api/runtime/chat/attachments/{attachment_id}/preview")
+async def runtime_chat_attachment_preview_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    attachment_id = _url_quote(
+        str(request.match_info.get("attachment_id", "")).strip(), safe=""
+    )
+    return await _proxy_runtime_binary(
+        method="GET",
+        path=f"/api/v1/chat/attachments/{attachment_id}/preview",
+        timeout_seconds=60.0,
+    )
+
+
+@routes.post("/api/v1/management/runtime/chat/jobs")
+@routes.post("/api/runtime/chat/jobs")
+async def runtime_chat_job_create_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+    message = _chat_message_payload(body)
+    if message is None:
+        return web.json_response({"error": "message is required"}, status=400)
+    payload: dict[str, Any] = {"message": message}
+    conversation_id = str(body.get("conversation_id", "") or "").strip()
+    if conversation_id:
+        payload["conversation_id"] = conversation_id
+    if _to_bool(body.get("reuse_previous_user_message")):
+        payload["reuse_previous_user_message"] = True
+    return await _proxy_runtime(
+        method="POST",
+        path="/api/v1/chat/jobs",
+        payload=payload,
+        timeout_seconds=20.0,
+    )
+
+
+@routes.get("/api/v1/management/runtime/chat/jobs/active")
+@routes.get("/api/runtime/chat/jobs/active")
+async def runtime_chat_job_active_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    return await _proxy_runtime(
+        method="GET",
+        path="/api/v1/chat/jobs/active",
+        params=request.query,
+    )
+
+
+@routes.get("/api/v1/management/runtime/chat/jobs/{job_id}")
+@routes.get("/api/runtime/chat/jobs/{job_id}")
+async def runtime_chat_job_detail_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    job_id = _url_quote(str(request.match_info.get("job_id", "")).strip(), safe="")
+    return await _proxy_runtime(method="GET", path=f"/api/v1/chat/jobs/{job_id}")
+
+
+@routes.get("/api/v1/management/runtime/chat/jobs/{job_id}/events")
+@routes.get("/api/runtime/chat/jobs/{job_id}/events")
+async def runtime_chat_job_events_handler(request: web.Request) -> web.StreamResponse:
+    if not check_auth(request):
+        return _unauthorized()
+    job_id = _url_quote(str(request.match_info.get("job_id", "")).strip(), safe="")
+    wants_json = (
+        str(request.query.get("format", "") or "").strip().lower() == "json"
+        or "application/json"
+        in str(request.headers.get("Accept", "") or "").strip().lower()
+    )
+    if wants_json:
+        return await _proxy_runtime(
+            method="GET",
+            path=f"/api/v1/chat/jobs/{job_id}/events",
+            params=request.query,
+            timeout_seconds=20.0,
+        )
+    return await _proxy_runtime_stream(
+        request,
+        method="GET",
+        path=f"/api/v1/chat/jobs/{job_id}/events",
+        params=request.query,
+        timeout_seconds=_chat_proxy_timeout_seconds(),
+    )
+
+
+@routes.post("/api/v1/management/runtime/chat/jobs/{job_id}/cancel")
+@routes.post("/api/runtime/chat/jobs/{job_id}/cancel")
+async def runtime_chat_job_cancel_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    job_id = _url_quote(str(request.match_info.get("job_id", "")).strip(), safe="")
+    return await _proxy_runtime(
+        method="POST",
+        path=f"/api/v1/chat/jobs/{job_id}/cancel",
+        timeout_seconds=20.0,
     )
 
 
@@ -477,6 +947,65 @@ async def runtime_chat_file_handler(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(
         path=target,
         headers={"Content-Disposition": disposition},
+    )
+
+
+@routes.post("/api/v1/management/runtime/chat/files")
+@routes.post("/api/runtime/chat/files")
+async def runtime_chat_file_upload_handler(request: web.Request) -> Response:
+    """旧 WebUI 浏览器文件缓存；新客户端使用 Runtime attachment id。"""
+    if not check_auth(request):
+        return _unauthorized()
+
+    try:
+        reader = await request.multipart()
+        field = await reader.next()
+    except Exception:
+        return web.json_response({"error": "Invalid multipart body"}, status=400)
+
+    field_any = cast(Any, field)
+    if field is None or getattr(field_any, "name", None) != "file":
+        return web.json_response({"error": "file field is required"}, status=400)
+
+    raw_name = _sanitize_upload_display_name(
+        str(getattr(field_any, "filename", "") or "attachment")
+    )
+    file_id = uuid.uuid4().hex
+    dest_dir = (Path.cwd() / WEBUI_FILE_CACHE_DIR / file_id).resolve()
+    cache_root = (Path.cwd() / WEBUI_FILE_CACHE_DIR).resolve()
+    if cache_root not in dest_dir.parents and dest_dir != cache_root:
+        return web.json_response({"error": "Invalid file path"}, status=400)
+    dest = dest_dir / _random_upload_filename(raw_name)
+    cfg = get_config(strict=False)
+    max_size_mb = max(1, int(getattr(cfg, "messages_send_url_file_max_size_mb", 100)))
+    max_size_bytes = max_size_mb * 1024 * 1024
+
+    size = 0
+    chunks = bytearray()
+    try:
+        while True:
+            chunk = await field_any.read_chunk()
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > max_size_bytes:
+                await async_io.delete_tree(dest_dir)
+                return web.json_response(
+                    {"error": "file too large", "max_size": max_size_bytes},
+                    status=413,
+                )
+            chunks.extend(chunk)
+        await async_io.write_bytes(dest, bytes(chunks), use_lock=False)
+    except Exception:
+        await async_io.delete_tree(dest_dir)
+        raise
+
+    return web.json_response(
+        {
+            "id": file_id,
+            "name": raw_name,
+            "size": size,
+        }
     )
 
 

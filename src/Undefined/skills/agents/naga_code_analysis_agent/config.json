@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "naga_code_analysis_agent",
-        "description": "NagaAgent代码分析助手，提供针对NagaAgent项目的文件读取、目录浏览、内容搜索、文件匹配等功能，用于理解和分析代码库。",
+        "description": "NagaAgent代码分析助手，提供针对NagaAgent项目的文件读取、目录浏览、内容搜索、文件匹配等功能；仅用于 NagaAgent 项目，不负责 Undefined 自身源码、用户上传文件或代码交付任务。",
         "parameters": {
             "type": "object",
             "properties": {

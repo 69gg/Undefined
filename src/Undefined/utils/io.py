@@ -4,8 +4,10 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import tempfile
 import time
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any, Optional
 
@@ -174,6 +176,39 @@ async def exists(file_path: Path | str) -> bool:
     return await asyncio.to_thread(Path(file_path).exists)
 
 
+async def is_file(file_path: Path | str) -> bool:
+    """异步检查路径是否为普通文件。"""
+    return await asyncio.to_thread(Path(file_path).is_file)
+
+
+async def is_dir(file_path: Path | str) -> bool:
+    """异步检查路径是否为目录。"""
+    return await asyncio.to_thread(Path(file_path).is_dir)
+
+
+def _list_directory_entries_sync(directory: Path) -> list[tuple[Path, bool]]:
+    return [(entry, entry.is_dir()) for entry in directory.iterdir()]
+
+
+async def list_directory_entries(directory: Path | str) -> list[tuple[Path, bool]]:
+    """异步列出目录项及其目录标记。"""
+    return await asyncio.to_thread(_list_directory_entries_sync, Path(directory))
+
+
+def _next_rglob_file(iterator: Iterator[Path]) -> Path | None:
+    for path in iterator:
+        if path.is_file():
+            return path
+    return None
+
+
+async def iter_rglob_files(directory: Path | str) -> AsyncIterator[Path]:
+    """异步递归遍历目录下的普通文件。"""
+    iterator = Path(directory).rglob("*")
+    while path := await asyncio.to_thread(_next_rglob_file, iterator):
+        yield path
+
+
 async def delete_file(file_path: Path | str) -> bool:
     """异步删除指定文件
 
@@ -190,6 +225,19 @@ async def delete_file(file_path: Path | str) -> bool:
             p.unlink()
             return True
         return False
+
+    return await asyncio.to_thread(sync_delete)
+
+
+async def delete_tree(dir_path: Path | str) -> bool:
+    """异步删除目录树，目录不存在则返回 False。"""
+    p = Path(dir_path)
+
+    def sync_delete() -> bool:
+        if not p.exists():
+            return False
+        shutil.rmtree(p)
+        return True
 
     return await asyncio.to_thread(sync_delete)
 
@@ -239,6 +287,33 @@ def _read_bytes_sync(target: Path, use_lock: bool) -> bytes:
     return target.read_bytes()
 
 
+def _write_bytes_sync(target: Path, content: bytes, use_lock: bool) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    def atomic_write() -> None:
+        tmp_path: Path | None = None
+        try:
+            fd, tmp_name = tempfile.mkstemp(
+                prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent)
+            )
+            tmp_path = Path(tmp_name)
+            with os.fdopen(fd, "wb") as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_name, target)
+        finally:
+            if tmp_path is not None and tmp_path.exists():
+                tmp_path.unlink()
+
+    if use_lock:
+        lock_path = target.with_name(f"{target.name}.lock")
+        with FileLock(lock_path, shared=False):
+            atomic_write()
+    else:
+        atomic_write()
+
+
 async def write_text(
     file_path: str | Path, content: str, use_lock: bool = True
 ) -> None:
@@ -257,3 +332,11 @@ async def read_bytes(file_path: str | Path, use_lock: bool = False) -> bytes:
     """异步读取二进制文件"""
     target = Path(file_path)
     return await asyncio.to_thread(_read_bytes_sync, target, use_lock)
+
+
+async def write_bytes(
+    file_path: str | Path, content: bytes, use_lock: bool = True
+) -> None:
+    """原子写入二进制文件"""
+    target = Path(file_path)
+    await asyncio.to_thread(_write_bytes_sync, target, content, use_lock)

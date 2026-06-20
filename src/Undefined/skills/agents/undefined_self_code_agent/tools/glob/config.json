@@ -1,0 +1,25 @@
+{
+    "type": "function",
+    "function": {
+        "name": "glob",
+        "description": "在 Undefined 仓库允许范围内按 glob 查找文件。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "glob 模式，例如 **/*.py、src/Undefined/**/*.py、docs/*.md"
+                },
+                "base_path": {
+                    "type": "string",
+                    "description": "可选搜索根目录，仓库相对路径"
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "最大返回结果数，默认 100，范围 1-500"
+                }
+            },
+            "required": ["pattern"]
+        }
+    }
+}
