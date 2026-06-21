@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ import fitz
 from Undefined.skills.agents.file_analysis_agent.tools.analyze_multimodal import (
     handler as analyze_multimodal_handler,
 )
+from Undefined.utils import io as async_io
 from Undefined.utils.paths import ensure_dir
 
 logger = logging.getLogger(__name__)
@@ -81,20 +83,26 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         return "错误：file_path 不能为空"
 
     path = Path(file_path)
-    if not path.exists():
+    if not await async_io.exists(path):
         return f"错误：文件不存在 {file_path}"
-    if not path.is_file():
+    if not await async_io.is_file(path):
         return f"错误：{file_path} 不是文件"
 
     temp_root_raw = context.get("download_cache_dir")
     if temp_root_raw:
-        output_dir = ensure_dir(Path(temp_root_raw) / "pdf_pages" / uuid4().hex[:16])
+        output_dir = await asyncio.to_thread(
+            ensure_dir,
+            Path(temp_root_raw) / "pdf_pages" / uuid4().hex[:16],
+        )
     else:
-        output_dir = ensure_dir(path.parent / ".pdf_pages" / uuid4().hex[:16])
+        output_dir = await asyncio.to_thread(
+            ensure_dir,
+            path.parent / ".pdf_pages" / uuid4().hex[:16],
+        )
 
     rendered_paths: list[Path] = []
     try:
-        doc = fitz.open(str(path))
+        doc = await asyncio.to_thread(fitz.open, str(path))
         try:
             page_count = len(doc)
             pages, error = _parse_page_range(page_range, page_count)
@@ -106,7 +114,12 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
                 f"{', '.join(str(page) for page in pages)}"
             ]
             for page_number in pages:
-                rendered = _render_page_to_png(doc, page_number, output_dir)
+                rendered = await asyncio.to_thread(
+                    _render_page_to_png,
+                    doc,
+                    page_number,
+                    output_dir,
+                )
                 rendered_paths.append(rendered)
                 page_prompt = prompt or "请描述这一页 PDF 的视觉内容。"
                 analysis = await analyze_multimodal_handler.execute(
@@ -127,14 +140,15 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         return "PDF 页面视觉分析失败，文件可能已损坏、加密或无法渲染"
     finally:
         for rendered in rendered_paths:
-            try:
-                rendered.unlink(missing_ok=True)
-            except OSError:
-                pass
-        try:
-            output_dir.rmdir()
-            parent = output_dir.parent
-            if parent.name == "pdf_pages" and not any(parent.iterdir()):
-                parent.rmdir()
-        except OSError:
-            pass
+            await async_io.delete_file(rendered)
+        await async_io.delete_tree(output_dir)
+        parent = output_dir.parent
+        if parent.name == "pdf_pages":
+            await asyncio.to_thread(_delete_empty_dir, parent)
+
+
+def _delete_empty_dir(path: Path) -> None:
+    try:
+        path.rmdir()
+    except OSError:
+        pass

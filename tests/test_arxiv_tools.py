@@ -15,6 +15,7 @@ from Undefined.skills.agents.info_agent.tools.arxiv_search import (
     handler as arxiv_search,
 )
 from Undefined.skills.tools.arxiv_paper import handler as arxiv_paper
+from Undefined.utils import io
 
 
 @pytest.mark.asyncio
@@ -57,7 +58,7 @@ async def test_arxiv_paper_tool_uid_mode_registers_pdf(
     tmp_path: Path,
 ) -> None:
     pdf_path = tmp_path / "paper.pdf"
-    pdf_path.write_bytes(b"%PDF-1.4")
+    await io.write_bytes(pdf_path, b"%PDF-1.4")
     registry = AttachmentRegistry(
         registry_path=tmp_path / "attachment_registry.json",
         cache_dir=tmp_path / "attachments",
@@ -89,7 +90,9 @@ async def test_arxiv_paper_tool_uid_mode_registers_pdf(
     ) -> tuple[PaperDownloadResult, Path]:
         _ = max_file_size_mb, context
         return (
-            PaperDownloadResult(pdf_path, pdf_path.stat().st_size, "downloaded"),
+            PaperDownloadResult(
+                pdf_path, await io.get_file_size(pdf_path), "downloaded"
+            ),
             tmp_path,
         )
 
@@ -118,7 +121,7 @@ async def test_arxiv_paper_tool_uid_mode_registers_pdf(
     record = registry.resolve(uid, "private:12345")
     assert record is not None
     assert record.display_name == "paper.pdf"
-    assert Path(record.local_path or "").read_bytes() == b"%PDF-1.4"
+    assert await io.read_bytes(Path(record.local_path or "")) == b"%PDF-1.4"
     cleanup_mock.assert_awaited_once_with(tmp_path)
 
 

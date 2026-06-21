@@ -159,7 +159,7 @@ class TestAgentCallEasterEgg:
 
 
 def test_file_analysis_agent_can_see_shared_media_fetch_tools() -> None:
-    tools_dir = (
+    tools_dir: Path = (
         Path(__file__).resolve().parent.parent
         / "src"
         / "Undefined"
@@ -168,12 +168,12 @@ def test_file_analysis_agent_can_see_shared_media_fetch_tools() -> None:
         / "file_analysis_agent"
         / "tools"
     )
-    registry = AgentToolRegistry(
+    registry: AgentToolRegistry = AgentToolRegistry(
         tools_dir,
         current_agent_name="file_analysis_agent",
         is_main_agent=False,
     )
-    names = {
+    names: set[str] = {
         schema["function"]["name"]
         for schema in registry.get_tools_schema()
         if "function" in schema
@@ -184,7 +184,7 @@ def test_file_analysis_agent_can_see_shared_media_fetch_tools() -> None:
 
 
 def test_other_agents_cannot_see_file_analysis_media_fetch_tools() -> None:
-    tools_dir = (
+    tools_dir: Path = (
         Path(__file__).resolve().parent.parent
         / "src"
         / "Undefined"
@@ -193,12 +193,12 @@ def test_other_agents_cannot_see_file_analysis_media_fetch_tools() -> None:
         / "info_agent"
         / "tools"
     )
-    registry = AgentToolRegistry(
+    registry: AgentToolRegistry = AgentToolRegistry(
         tools_dir,
         current_agent_name="info_agent",
         is_main_agent=False,
     )
-    names = {
+    names: set[str] = {
         schema["function"]["name"]
         for schema in registry.get_tools_schema()
         if "function" in schema

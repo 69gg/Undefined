@@ -16,6 +16,7 @@ from Undefined.bilibili.downloader import (
 )
 from Undefined.bilibili.models import DanmakuItem
 from Undefined.bilibili.parser import normalize_to_bvid
+from Undefined.utils.io import get_file_size
 
 if TYPE_CHECKING:
     from Undefined.bilibili.downloader import VideoInfo
@@ -310,7 +311,7 @@ async def send_bilibili_video(
             )
             info_prefix = f"({video_status})"
         else:
-            file_size_mb = video_path.stat().st_size / 1024 / 1024
+            file_size_mb = await get_file_size(video_path) / 1024 / 1024
             max_size = max_file_size if max_file_size > 0 else float("inf")
 
             if file_size_mb > max_size:
@@ -331,7 +332,7 @@ async def send_bilibili_video(
                         max_duration=max_duration,
                     )
                     if video_path is not None:
-                        file_size_mb = video_path.stat().st_size / 1024 / 1024
+                        file_size_mb = await get_file_size(video_path) / 1024 / 1024
 
                 if video_path is not None and file_size_mb is not None:
                     if file_size_mb > max_size:
@@ -463,7 +464,7 @@ async def fetch_bilibili_video_attachment(
         if video_path is None:
             return f"视频时长 {_format_duration(video_info.duration)} 超过限制，未下载视频文件"
 
-        file_size_mb = video_path.stat().st_size / 1024 / 1024
+        file_size_mb = await get_file_size(video_path) / 1024 / 1024
         max_size = max_file_size if max_file_size > 0 else float("inf")
 
         if file_size_mb > max_size:
@@ -485,7 +486,7 @@ async def fetch_bilibili_video_attachment(
                 )
                 if video_path is None:
                     return "降级后仍未下载到视频文件"
-                file_size_mb = video_path.stat().st_size / 1024 / 1024
+                file_size_mb = await get_file_size(video_path) / 1024 / 1024
 
             if file_size_mb > max_size:
                 return f"视频文件 {file_size_mb:.1f}MB 超过限制，未注册附件"
