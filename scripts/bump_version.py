@@ -68,6 +68,30 @@ def _update_text_file(
     return _write_if_changed(path, new_text, dry_run)
 
 
+def _update_json_string_field(
+    path: Path,
+    field: str,
+    value: str,
+    dry_run: bool,
+) -> bool:
+    text = path.read_text(encoding="utf-8")
+    data = cast(dict[str, Any], json.loads(text))
+    old_value = data.get(field)
+    if not isinstance(old_value, str):
+        raise ValueError(f"{path} 缺少字符串字段 {field}")
+    if old_value == value:
+        return False
+
+    field_pattern = re.compile(
+        rf'^(\s*"{re.escape(field)}"\s*:\s*)"[^"]*"',
+        re.MULTILINE,
+    )
+    new_text, count = field_pattern.subn(rf'\g<1>"{value}"', text, count=1)
+    if count == 0:
+        raise ValueError(f"{path} 未匹配到 {field} 字段")
+    return _write_if_changed(path, new_text, dry_run)
+
+
 def _update_json_version(path: Path, version: str, dry_run: bool) -> bool:
     data = cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
     old_version = data.get("version")
@@ -159,7 +183,7 @@ def _update_native_app_versions(
     updates: tuple[tuple[Path, bool], ...] = (
         (
             package_json,
-            _update_json_version(package_json, version, dry_run),
+            _update_json_string_field(package_json, "version", version, dry_run),
         ),
         (
             package_lock,
@@ -171,7 +195,7 @@ def _update_native_app_versions(
         ),
         (
             tauri_conf,
-            _update_json_version(tauri_conf, version, dry_run),
+            _update_json_string_field(tauri_conf, "version", version, dry_run),
         ),
         (
             cargo_lock,
