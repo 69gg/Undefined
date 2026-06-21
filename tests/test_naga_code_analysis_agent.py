@@ -24,13 +24,14 @@ def test_prompt_and_intro_define_naga_only_scope() -> None:
     prompt = (AGENT_DIR / "prompt.md").read_text("utf-8")
     intro = (AGENT_DIR / "intro.md").read_text("utf-8")
 
-    assert "分析第一步：调用read_naga_intro工具" in prompt
-    assert "非 NagaAgent 技术问题要说明越界并返回给主 AI 重新路由" in prompt
+    assert "`read_naga_intro` 提供 NagaAgent 当前结构索引" in prompt
+    assert "如果问题越界，简明说明原因并建议正确 agent" in prompt
     assert "不回答 Undefined 自身源码问题" in prompt
-    assert "不承担代码编写、修改、执行验证或打包交付任务" in prompt
-    assert "**仅限 NagaAgent 项目**，不回答 Undefined 自身源码问题" in intro
-    assert "用户上传/外部文件解析请用 `file_analysis_agent`" in intro
-    assert "代码编写、修改、执行验证和打包交付请用 `code_delivery_agent`" in intro
+    assert "不承担代码编写、修改、执行验证或打包交付" in prompt
+    assert "仅用于回答 **NagaAgent 项目**" in intro
+    assert "Undefined 自身源码问题，交给 `undefined_self_code_agent`" in intro
+    assert "用户上传/外部文件解析，交给 `file_analysis_agent`" in intro
+    assert "代码编写、修改、执行验证和打包交付，交给 `code_delivery_agent`" in intro
 
 
 def test_config_description_defines_naga_only_scope() -> None:

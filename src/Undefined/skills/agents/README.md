@@ -260,33 +260,57 @@ mv skills/tools/my_tool skills/agents/my_agent/tools/
 ## 现有 Agents
 
 ### web_agent（网络搜索助手）
-- **功能**：网页搜索和网页内容获取
-- **适用场景**：获取互联网最新信息、搜索新闻、爬取网页内容
-- **子工具**：`grok_search`, `web_search`, `crawl_webpage`
+- **功能**：联网搜索、网页阅读、来源核验和最新信息获取。
+- **适用场景**：新闻/公告/资料搜索、指定 URL 摘要、多来源对比、时效性问题核验。
+- **不适用**：天气、金价、热搜、Whois、B 站、arXiv 检索等结构化查询；用户附件或文件解析。
+- **子工具**：`grok_search`, `web_search`, `crawl_webpage`。
 - **grok_search 参数**：优先使用 `search_request`，用自然语言完整叙述搜索要求，不要只传关键词。
 
 ### file_analysis_agent（文件分析助手）
-- **功能**：分析代码、PDF、Docx、Xlsx 等多种格式文件
-- **适用场景**：代码分析、文档解析、文件内容提取
-- **子工具**：`read_file`, `analyze_code`, `analyze_pdf`, `analyze_docx`, `analyze_xlsx`
+- **功能**：分析用户提供的附件、内部 UID、URL 或 legacy file_id，提取文件内容。
+- **适用场景**：PDF/Word/Excel/PPT/文本/代码/压缩包解析，图片、音频、视频等多模态内容识别。
+- **不适用**：没有文件来源的开放式搜索、需要联网查资料的问题、执行文件或安全鉴定。
+- **子工具**：`download_file`, `detect_file_type`, `read_text_file`, `extract_pdf`, `extract_docx`, `extract_xlsx`, `extract_pptx`, `extract_archive`, `analyze_code`, `analyze_multimodal`, `cleanup_temp`。
 
 ### naga_code_analysis_agent（NagaAgent 代码分析助手）
-- **功能**：专门用于分析 NagaAgent 框架源码
-- **适用场景**：深入分析 NagaAgent 架构、模块实现、代码线索
-- **子工具**：`read_file`, `list_directory`, `glob`, `search_file_content`, `read_naga_intro`
+- **功能**：只读分析 NagaAgent 项目的结构、源码、配置、构建、部署和实现细节。
+- **适用场景**：追踪 NagaAgent 模块实现、目录结构、配置项、报错线索和项目内文档。
+- **不适用**：Undefined 自身源码、用户上传文件、代码编写修改、执行验证或外部联网搜索。
+- **子工具**：`read_file`, `list_directory`, `glob`, `search_file_content`, `read_naga_intro`。
 
 ### undefined_self_code_agent（Undefined 自身代码查阅助手）
-- **功能**：只读查阅 Undefined 当前仓库的源码、测试、文档、资源、脚本、配置示例和 App 实现
-- **适用场景**：解释 Undefined 自身实现、定位模块、核对配置示例、查看测试覆盖
-- **访问范围**：`src/`, `scripts/`, `tests/`, `res/`, `docs/`, `apps/`, `README.md`, `CHANGELOG.md`, `ARCHITECTURE.md`, `config.toml.example`
-- **子工具**：`read_file`, `list_directory`, `glob`, `search_file_content`
+- **功能**：只读查阅 Undefined 当前仓库的源码、测试、文档、资源、脚本、配置示例和 App 实现。
+- **适用场景**：解释 Undefined 自身实现、定位模块、核对配置示例、查看测试覆盖。
+- **访问范围**：`src/`, `scripts/`, `tests/`, `res/`, `docs/`, `apps/`, `README.md`, `CHANGELOG.md`, `ARCHITECTURE.md`, `config.toml.example`。
+- **不适用**：写代码、改文件、运行命令、验证打包、NagaAgent 子模块、用户上传文件解析。
+- **子工具**：`read_file`, `list_directory`, `glob`, `search_file_content`。
 
 ### info_agent（信息查询助手）
-- **功能**：查询天气、热搜、历史、WHOIS、B 站信息、arXiv 检索等
-- **适用场景**：天气查询、热点榜单、域名查询、B 站视频和 UP 主信息查询、论文搜索
-- **子工具**：`weather_query`, `*hot`, `whois`, `bilibili_search`, `bilibili_user_info`, `arxiv_search`
+- **功能**：调用结构化工具完成参数明确的信息查询。
+- **适用场景**：天气、金价、热搜、历史、Whois、网络诊断、测速、编码/哈希、B 站、QQ 等级、arXiv 检索。
+- **不适用**：开放式网页搜索、网页阅读、来源核验、文件解析或长篇研究。
+- **子工具**：`weather_query`, `gold_price`, `baiduhot`, `weibohot`, `douyinhot`, `history`, `whois`, `net_check`, `speed`, `tcping`, `base64`, `hash`, `bilibili_search`, `bilibili_user_info`, `qq_level_query`, `arxiv_search`。
 
 ### entertainment_agent（娱乐助手）
-- **功能**：运势、小说、创意内容与随机视频推荐等娱乐功能
-- **适用场景**：查看运势、获取休闲内容、随机刷视频
-- **子工具**：`horoscope`, `novel_search`, `ai_draw_one`, `video_random_recommend`
+- **功能**：轻松互动、趣味内容和休闲创作。
+- **适用场景**：AI 绘画、参考图生图、星座运势、趣味占卜、随机内容、Minecraft 皮肤/头像渲染、小说搜索、表情包或反应图需求。
+- **不适用**：严肃专业建议、事实核验、新闻资料搜索、文件内容解析。
+- **子工具**：`ai_draw_one`, `horoscope`, `minecraft_skin`, `renjian`, `wenchang_dijun`。
+
+### summary_agent（消息总结助手）
+- **功能**：按条数或时间范围拉取聊天记录并生成客观总结。
+- **适用场景**：总结最近 N 条消息、过去一段时间的讨论、指定主题的结论、待办、参与者贡献和链接资源。
+- **不适用**：实时监控、情绪评判、未来预测、脱离聊天记录的推测；`/summary` 与 `/sum` 斜杠命令由命令层直连 summary 模型。
+- **子工具**：`fetch_messages`。
+
+### arxiv_analysis_agent（arXiv 论文深度分析助手）
+- **功能**：根据 arXiv ID 或 URL 获取论文元数据和 PDF 内容，并进行学术分析。
+- **适用场景**：分析论文背景、方法、实验、创新点、局限性、贡献和用户指定重点。
+- **不适用**：arXiv 关键词检索、非 arXiv 论文或用户上传 PDF 分析、没有论文依据的泛泛学术问答。
+- **子工具**：`fetch_paper`, `read_paper_pages`。
+
+### code_delivery_agent（代码交付助手）
+- **功能**：把代码需求实现为可交付的文件或工程。
+- **适用场景**：单文件脚本/配置/文档交付，多文件工程创建、修改、调试、测试和打包，从空目录或 Git 仓库开始。
+- **不适用**：只读源码讲解、用户上传文件解析、单纯资料调研。
+- **子工具**：`init_docker`, `read`, `write`, `copy`, `delete`, `tree`, `glob`, `grep`, `diff`, `run_bash_command`, `todo`, `end`。
