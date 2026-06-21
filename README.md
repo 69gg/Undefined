@@ -43,6 +43,7 @@
 - **远程管理 + 多端客户端**：浏览器版 WebUI、跨平台 Console（管理客户端）和原生优先 Undefined Chat（聊天客户端）共享同一套 Management / Runtime 服务，支持远程管理，并覆盖 `Windows / macOS / Linux / Android` 发布链路。
   - **Undefined Console**：基于 Tauri v2 的管理客户端，完整管理功能
   - **Undefined Chat**：基于 Tauri v2 + React 19 的原生优先聊天客户端，采用莫兰迪橙色系设计，移植 WebUI webchat 的核心聊天能力并做原生增强：中英双语运行时切换（i18n）、平台抽象层（按真实平台区分桌面/移动布局）、桌面快捷键、系统凭据存储、HTML 正文 sanitize 内联渲染 + 独立预览窗口隔离运行、Android（非 iOS）横屏/平板适配。iOS 暂不作为发布平台
+- **Undefined Chat 跨平台原生对话 App**：`apps/undefined-chat/` 提供独立 Tauri v2 + React 19 原生聊天工作台，直连 Runtime API，并以 Runtime 作为会话、历史、任务、附件和事件真源；桌面端支持快捷键、独立 HTML 预览窗口和系统凭据存储，Android 端支持移动布局、生命周期恢复、流式附件上传和 Keystore 安全存储。详见 [Undefined Chat](docs/undefined-chat.md)。
 - **Management API + Runtime API 分层**：配置、日志、Bot 启停和管理探针由 Management API 提供；主进程 Runtime API 则专注探针、记忆只读查询、认知侧写检索和 WebUI AI Chat；内部探针的技能统计覆盖可调用工具、工具集、Agent、自动处理管线、斜杠命令与 Anthropic Skills。详见 [docs/management-api.md](docs/management-api.md) 与 [docs/openapi.md](docs/openapi.md)。
 - **多模型池**：支持配置多个 AI 模型，可轮询、随机选择或用户指定；支持多模型并发比较，选择最佳结果继续对话。详见 [多模型功能文档](docs/multi-model.md)。
 - **本地知识库**：将纯文本文件向量化存入 ChromaDB，AI 可通过关键词搜索或语义搜索查询领域知识；支持增量嵌入与自动扫描。详见 [知识库文档](docs/knowledge.md)。
@@ -51,6 +52,7 @@
 - **版本变更可查询**：仓库根目录维护 `CHANGELOG.md`，并提供 `/changelog` 命令在运行时查看最近版本和单版本摘要。
 - **并行工具执行**：无论是主 AI 还是子 Agent，均支持 `asyncio` 并发工具调用，大幅提升多任务处理速度（如同时读取多个文件或搜索多个关键词）。
 - **智能 Agent 矩阵**：内置多个专业 Agent，分工协作处理复杂任务。
+- **Undefined 自身代码查阅 Agent**：内置 `undefined_self_code_agent`，可只读查询当前 Undefined 仓库的源码、测试、文档、资源、脚本、配置示例和 App 实现细节；访问范围受白名单约束，不写代码、不运行命令，并与 NagaAgent 代码分析职责分离。
 - **callable.json 共享机制**：通过简单的配置文件（`callable.json`）即可让 Agent 互相调用、将 `skills/tools/` 或 `skills/toolsets/` 下的工具按白名单暴露给 Agent，支持细粒度访问控制，实现复杂的多 Agent 协作场景。
 - **Agent 自我介绍自动生成**：启动时按 Agent 代码/配置 hash 生成 `intro.generated.md`（第一人称、结构化），与 `intro.md` 合并后作为描述；减少手动维护，保持能力说明与实现同步，有助于精准调度。
 - **请求上下文管理**：基于 Python `contextvars` 的统一请求上下文系统，自动 UUID 追踪，零竞态条件，完全的并发隔离。
