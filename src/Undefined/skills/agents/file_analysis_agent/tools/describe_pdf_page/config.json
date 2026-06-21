@@ -1,0 +1,29 @@
+{
+    "type": "function",
+    "function": {
+        "name": "describe_pdf_page",
+        "description": "将 PDF 指定页码范围逐页渲染为图片，并使用多模态模型描述页面视觉内容。适合扫描版 PDF、图表、版式、截图式论文页或用户要求查看具体页码的场景。单次最多 5 页。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "本地 PDF 文件路径"
+                },
+                "page_range": {
+                    "type": "string",
+                    "description": "1-based 页码范围，支持单页、连续范围和混合范围，例如 \"3\"、\"3-5\"、\"3,5,8-10\"。单次最多 5 页"
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "额外的页面分析指令，例如“重点描述图表结论”或“提取该页所有可见文字”"
+                },
+                "force_analyze": {
+                    "type": "boolean",
+                    "description": "设为 true 时跳过多模态历史记录缓存，强制重新分析。默认为 false"
+                }
+            },
+            "required": ["file_path", "page_range"]
+        }
+    }
+}

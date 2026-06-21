@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import Undefined.bilibili.sender as bilibili_sender
+from Undefined.attachments import AttachmentRegistry
 from Undefined.bilibili.models import DanmakuItem, VideoStats
 
 
@@ -89,4 +90,46 @@ async def test_send_bilibili_video_records_history_for_video_message(
     history_message = call.kwargs["history_message"]
     assert history_message.startswith("[Bilibili] 「测试视频」")
     assert "BV1xx411c7mD" in history_message
+    cleanup_mock.assert_called_once_with(video_path)
+
+
+@pytest.mark.asyncio
+async def test_fetch_bilibili_video_attachment_registers_uid(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"video bytes")
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+
+    monkeypatch.setattr(
+        bilibili_sender,
+        "normalize_to_bvid",
+        AsyncMock(return_value="BV1xx411c7mD"),
+    )
+    monkeypatch.setattr(
+        bilibili_sender,
+        "download_video",
+        AsyncMock(return_value=(video_path, _video_info(), 80)),
+    )
+    cleanup_mock = MagicMock()
+    monkeypatch.setattr(bilibili_sender, "cleanup_file", cleanup_mock)
+
+    result = await bilibili_sender.fetch_bilibili_video_attachment(
+        "BV1xx411c7mD",
+        attachment_registry=registry,
+        scope_key="group:123456",
+        max_file_size=100,
+    )
+
+    assert "测试视频" in result
+    assert '<attachment uid="file_' in result
+    uid = result.split('<attachment uid="', 1)[1].split('"', 1)[0]
+    record = registry.resolve(uid, "group:123456")
+    assert record is not None
+    assert record.display_name == "video.mp4"
+    assert Path(record.local_path or "").read_bytes() == b"video bytes"
     cleanup_mock.assert_called_once_with(video_path)

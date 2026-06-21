@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "arxiv_paper",
-        "description": "下载并发送 arXiv 论文到群聊或私聊。支持 arXiv ID、arXiv: 前缀或 arXiv 链接。",
+        "description": "下载 arXiv 论文 PDF。默认发送到群聊或私聊；也可设置 output_mode=uid 只注册为附件 UID 供文件分析使用。支持 arXiv ID、arXiv: 前缀或 arXiv 链接。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -18,6 +18,11 @@
                 "target_id": {
                     "type": "integer",
                     "description": "可选。目标会话 ID"
+                },
+                "output_mode": {
+                    "type": "string",
+                    "enum": ["send", "uid"],
+                    "description": "输出模式：send（默认，发送论文信息和 PDF）或 uid（仅下载并注册 PDF 附件 UID，不发送消息）"
                 }
             },
             "required": ["paper_id"]

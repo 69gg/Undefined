@@ -156,3 +156,53 @@ class TestAgentCallEasterEgg:
                     False,
                 )
             ]
+
+
+def test_file_analysis_agent_can_see_shared_media_fetch_tools() -> None:
+    tools_dir: Path = (
+        Path(__file__).resolve().parent.parent
+        / "src"
+        / "Undefined"
+        / "skills"
+        / "agents"
+        / "file_analysis_agent"
+        / "tools"
+    )
+    registry: AgentToolRegistry = AgentToolRegistry(
+        tools_dir,
+        current_agent_name="file_analysis_agent",
+        is_main_agent=False,
+    )
+    names: set[str] = {
+        schema["function"]["name"]
+        for schema in registry.get_tools_schema()
+        if "function" in schema
+    }
+
+    assert "arxiv_paper" in names
+    assert "bilibili_video" in names
+
+
+def test_other_agents_cannot_see_file_analysis_media_fetch_tools() -> None:
+    tools_dir: Path = (
+        Path(__file__).resolve().parent.parent
+        / "src"
+        / "Undefined"
+        / "skills"
+        / "agents"
+        / "info_agent"
+        / "tools"
+    )
+    registry: AgentToolRegistry = AgentToolRegistry(
+        tools_dir,
+        current_agent_name="info_agent",
+        is_main_agent=False,
+    )
+    names: set[str] = {
+        schema["function"]["name"]
+        for schema in registry.get_tools_schema()
+        if "function" in schema
+    }
+
+    assert "arxiv_paper" not in names
+    assert "bilibili_video" not in names

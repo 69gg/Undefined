@@ -65,8 +65,15 @@ def _write_bump_project(root: Path, *, version: str = "1.2.3") -> None:
             encoding="utf-8",
         )
         (tauri_root / "tauri.conf.json").write_text(
-            json.dumps({"productName": app_dir, "version": version}, indent="\t")
-            + "\n",
+            (
+                "{\n"
+                f'\t"productName": "{app_dir}",\n'
+                f'\t"version": "{version}",\n'
+                '\t"bundle": {\n'
+                '\t\t"targets": ["appimage", "deb", "dmg", "msi", "nsis"]\n'
+                "\t}\n"
+                "}\n"
+            ),
             encoding="utf-8",
         )
         (tauri_root / "Cargo.lock").write_text(
@@ -166,6 +173,9 @@ def test_bump_project_versions_updates_console_and_chat_manifests_and_locks(
             encoding="utf-8"
         )
         assert _json_version(tauri_root / "tauri.conf.json") == "2.0.0"
+        assert '\t\t"targets": ["appimage", "deb", "dmg", "msi", "nsis"]' in (
+            tauri_root / "tauri.conf.json"
+        ).read_text(encoding="utf-8")
         assert (
             _cargo_lock_root_version(tauri_root / "Cargo.lock", cargo_package)
             == "2.0.0"

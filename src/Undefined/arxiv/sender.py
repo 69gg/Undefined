@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 import time
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from Undefined.arxiv.client import get_paper_info
 from Undefined.arxiv.downloader import cleanup_download_path, download_paper_pdf
@@ -144,6 +145,43 @@ async def _send_file_message(
         await sender.send_private_file(target_id, file_path, file_name)
 
 
+def _build_uid_message(info: PaperInfo, uid: str, file_name: str) -> str:
+    title = info.title or f"arXiv:{info.paper_id}"
+    lines = [
+        f"已获取 arXiv 论文 PDF：{title}",
+        f"ID: {info.paper_id}",
+        f'PDF: <attachment uid="{uid}"/>',
+    ]
+    if file_name:
+        lines.append(f"文件名: {file_name}")
+    if info.abs_url:
+        lines.append(info.abs_url)
+    return "\n".join(lines)
+
+
+async def _register_pdf_attachment(
+    *,
+    attachment_registry: Any,
+    scope_key: str,
+    pdf_path: Path,
+    info: PaperInfo,
+) -> str:
+    record = await attachment_registry.register_local_file(
+        scope_key,
+        pdf_path,
+        kind="file",
+        display_name=pdf_path.name,
+        source_kind="arxiv_paper",
+        source_ref=info.pdf_url or _build_pdf_url(info.paper_id),
+        segment_data={
+            "paper_id": info.paper_id,
+            "abs_url": info.abs_url,
+            "pdf_url": info.pdf_url or _build_pdf_url(info.paper_id),
+        },
+    )
+    return _build_uid_message(info, str(record.uid), pdf_path.name)
+
+
 async def _send_arxiv_paper_once(
     *,
     paper_id: str,
@@ -201,6 +239,60 @@ async def _send_arxiv_paper_once(
             if metadata_ready:
                 return f"已发送论文信息：{info.paper_id}（PDF 上传失败已跳过）"
             return f"已发送论文最小信息：{info.paper_id}（PDF 上传失败已跳过）"
+    finally:
+        await cleanup_download_path(task_dir)
+
+
+async def fetch_arxiv_paper_attachment(
+    *,
+    paper_id: str,
+    attachment_registry: Any,
+    scope_key: str,
+    max_file_size: int,
+    author_preview_limit: int,
+    summary_preview_chars: int,
+    context: dict[str, object] | None = None,
+) -> str:
+    """下载 arXiv PDF 并注册为附件 UID，不发送消息。"""
+    normalized = normalize_arxiv_id(paper_id)
+    if normalized is None:
+        return f"无法解析 arXiv 标识: {paper_id}"
+
+    if attachment_registry is None:
+        return "缺少必要的运行时组件（attachment_registry）"
+    if not str(scope_key or "").strip():
+        return "无法确定附件作用域，不能注册 arXiv PDF"
+
+    info: PaperInfo
+    metadata_ready = True
+    try:
+        info = await get_paper_info(normalized, context=context)
+    except Exception:
+        metadata_ready = False
+        info = _minimal_paper_info(normalized)
+        logger.exception("[arXiv] 获取论文元信息失败: paper=%s", normalized)
+
+    download_result, task_dir = await download_paper_pdf(
+        info,
+        max_file_size_mb=max_file_size,
+        context=context,
+    )
+    try:
+        if download_result.path is None:
+            info_message = _build_info_message(
+                info,
+                author_preview_limit=author_preview_limit,
+                summary_preview_chars=summary_preview_chars,
+            )
+            if metadata_ready:
+                return f"未能下载 PDF，已获取论文信息：\n{info_message}"
+            return f"未能下载 PDF，已获取论文最小信息：\n{info_message}"
+        return await _register_pdf_attachment(
+            attachment_registry=attachment_registry,
+            scope_key=scope_key,
+            pdf_path=download_result.path,
+            info=info,
+        )
     finally:
         await cleanup_download_path(task_dir)
 

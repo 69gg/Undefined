@@ -143,6 +143,7 @@ uv run python scripts/bump_version.py 3.6.0 --commit
 - `apps/undefined-chat/src-tauri/Cargo.lock`
 
 非 dry-run 时脚本还会执行 `uv sync`，并分别在 Console / Chat 下执行 `npm install --package-lock-only` 与 `cargo update --workspace`，保证 lock 文件和 manifest 不漂移。
+脚本更新 JSON manifest 时只替换顶层 `version` 字段，保留现有格式，避免 Tauri 配置与 Biome 格式化规则漂移。
 
 ### prepare_tauri_android.py — 生成后 Android 修补
 

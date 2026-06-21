@@ -60,8 +60,8 @@
 - **MCP 协议支持**：支持通过 MCP (Model Context Protocol) 连接外部工具和数据源，扩展 AI 能力。
 - **Agent 私有 MCP**：可为单个 agent 提供独立 MCP 配置，按调用即时加载并释放，工具仅对该 agent 可见。
 - **Anthropic Skills**：支持 Anthropic Agent Skills（SKILL.md 格式），遵循 agentskills.io 开放标准，提供领域知识注入能力。
-- **Bilibili 视频提取**：自动检测消息中的 B 站视频链接/BV 号/小程序分享，下载 1080p 视频并通过 QQ 发送；同时提供 AI 工具调用入口。
-- **arXiv 论文提取与搜索**：自动检测消息中的 arXiv 链接/标识并发送论文信息与 PDF；同时提供 `arxiv_paper` 发送工具和 `arxiv_search` 检索工具。
+- **Bilibili 视频提取与分析**：自动检测消息中的 B 站视频链接/BV 号/小程序分享，下载视频并通过 QQ 合并转发；`bilibili_video` 也可只返回附件 UID，供 `file_analysis_agent` 做视频内容分析。
+- **arXiv 论文提取、搜索与分析**：自动检测消息中的 arXiv 链接/标识并发送论文信息与 PDF；`arxiv_paper` 也可只返回 PDF 附件 UID，供 `file_analysis_agent` 做文本提取或指定页视觉分析；`arxiv_search` 负责论文检索。
 - **GitHub 仓库卡片**：自动检测 GitHub 仓库链接或 `owner/repo` 仓库 ID，获取 public 仓库信息并发送简洁图片卡片，展示头像、简介、stars、forks、issues、contributors 等概览。
 - **自动处理管线**：Bilibili、arXiv、GitHub 等自动提取统一运行在 `skills/pipelines` 中，斜杠命令优先级更高；命令输入/输出会写入历史，非命令消息会并行检测和处理命中管线，结果通过统一发送层写入历史并登记附件 UID 后再进入 AI 回复。远程大附件超过 `[attachments].remote_download_max_size_mb` 时只登记 URL 引用，避免无界下载和缓存膨胀。
 - **同 sender 短时消息合并**：默认开启。连续发的多条消息会合并到同一轮 AI 调用，AI 一次看到全部意图自行识别"独立请求/修正/打断"；告别"画猫→改成狗"的重复触发与回复打架。主提示词按 batcher 的"当前输入批次"语义适配，关闭该功能可能导致连续补充/修正消息与提示词不匹配，需要单独适配。可选投机预发送让用户停顿时 LLM 提前开跑、新消息可在未发出回复前取消，进一步压低响应延迟。详见 [docs/message-batching.md](docs/message-batching.md)。

@@ -3,7 +3,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal
 
-from Undefined.arxiv.sender import send_arxiv_paper
+from Undefined.attachments import scope_from_context
+from Undefined.arxiv.sender import fetch_arxiv_paper_attachment, send_arxiv_paper
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +43,9 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     if not paper_id:
         return "paper_id 不能为空"
 
-    target, error = _resolve_target(args, context)
-    if error or target is None:
-        return f"目标解析失败: {error or '参数错误'}"
-    target_type, target_id = target
-
-    sender = context.get("sender")
-    if sender is None:
-        return "缺少必要的运行时组件（sender）"
+    output_mode = str(args.get("output_mode", "send") or "send").strip().lower()
+    if output_mode not in {"send", "uid"}:
+        return "output_mode 只能是 send 或 uid"
 
     runtime_config = context.get("runtime_config")
     max_file_size = 100
@@ -63,6 +59,30 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         )
 
     try:
+        if output_mode == "uid":
+            attachment_registry = context.get("attachment_registry")
+            scope_key = str(context.get("scope_key") or "").strip()
+            if not scope_key:
+                scope_key = scope_from_context(context) or ""
+            return await fetch_arxiv_paper_attachment(
+                paper_id=paper_id,
+                attachment_registry=attachment_registry,
+                scope_key=scope_key,
+                max_file_size=max_file_size,
+                author_preview_limit=author_preview_limit,
+                summary_preview_chars=summary_preview_chars,
+                context={"request_id": context.get("request_id", "-")},
+            )
+
+        target, error = _resolve_target(args, context)
+        if error or target is None:
+            return f"目标解析失败: {error or '参数错误'}"
+        target_type, target_id = target
+
+        sender = context.get("sender")
+        if sender is None:
+            return "缺少必要的运行时组件（sender）"
+
         return await send_arxiv_paper(
             paper_id=paper_id,
             sender=sender,
