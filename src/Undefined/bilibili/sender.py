@@ -142,6 +142,27 @@ def _build_video_history_message(
     return "\n".join(lines)
 
 
+def _build_uid_message(
+    info: "VideoInfo",
+    *,
+    uid: str,
+    quality_name: str | None,
+    file_size_mb: float | None,
+    file_name: str,
+) -> str:
+    lines = [
+        f"已获取 Bilibili 视频：{info.title}",
+        f"BV: {info.bvid}",
+        f'视频: <attachment uid="{uid}"/>',
+    ]
+    if quality_name and file_size_mb is not None:
+        lines.append(f"清晰度: {quality_name} | 大小: {file_size_mb:.1f}MB")
+    if file_name:
+        lines.append(f"文件名: {file_name}")
+    lines.append(info.url)
+    return "\n".join(lines)
+
+
 def _build_danmaku_text(item: DanmakuItem) -> str:
     return f"[{_format_progress(item.progress_ms)}] {item.content}"
 
@@ -398,6 +419,107 @@ async def send_bilibili_video(
             return f"处理失败，已发送 Bilibili 信息合并转发: {exc}"
         except Exception:
             return f"视频处理失败: {exc}"
+    finally:
+        if video_path is not None:
+            cleanup_file(video_path)
+
+
+async def fetch_bilibili_video_attachment(
+    video_id: str,
+    *,
+    attachment_registry: Any,
+    scope_key: str,
+    cookie: str = "",
+    prefer_quality: int = 80,
+    max_duration: int = 0,
+    max_file_size: int = 0,
+    oversize_strategy: str = "downgrade",
+    sessdata: str = "",
+) -> str:
+    """下载 Bilibili 视频并注册为附件 UID，不发送消息。"""
+    bvid = await normalize_to_bvid(video_id)
+    if not bvid:
+        return f"无法解析视频标识: {video_id}"
+    if attachment_registry is None:
+        return "缺少必要的运行时组件（attachment_registry）"
+    if not str(scope_key or "").strip():
+        return "无法确定附件作用域，不能注册 Bilibili 视频"
+
+    if not cookie and sessdata:
+        cookie = sessdata
+
+    video_path: Path | None = None
+    video_info: VideoInfo | None = None
+    actual_qn = 0
+    file_size_mb: float | None = None
+
+    try:
+        video_path, video_info, actual_qn = await download_video(
+            bvid=bvid,
+            cookie=cookie,
+            prefer_quality=prefer_quality,
+            max_duration=max_duration,
+        )
+        if video_path is None:
+            return f"视频时长 {_format_duration(video_info.duration)} 超过限制，未下载视频文件"
+
+        file_size_mb = video_path.stat().st_size / 1024 / 1024
+        max_size = max_file_size if max_file_size > 0 else float("inf")
+
+        if file_size_mb > max_size:
+            if oversize_strategy == "downgrade" and actual_qn > 32:
+                cleanup_file(video_path)
+                video_path = None
+                lower_qn = _get_lower_quality(actual_qn)
+                logger.info(
+                    "[Bilibili] 文件 %.1fMB 超限 %dMB，UID 模式降级到 qn=%d 重试",
+                    file_size_mb,
+                    max_file_size,
+                    lower_qn,
+                )
+                video_path, video_info, actual_qn = await download_video(
+                    bvid=bvid,
+                    cookie=cookie,
+                    prefer_quality=lower_qn,
+                    max_duration=max_duration,
+                )
+                if video_path is None:
+                    return "降级后仍未下载到视频文件"
+                file_size_mb = video_path.stat().st_size / 1024 / 1024
+
+            if file_size_mb > max_size:
+                return f"视频文件 {file_size_mb:.1f}MB 超过限制，未注册附件"
+
+        quality_name = QUALITY_MAP.get(actual_qn, str(actual_qn)) if actual_qn else None
+        record = await attachment_registry.register_local_file(
+            scope_key,
+            video_path,
+            kind="file",
+            display_name=video_path.name,
+            source_kind="bilibili_video",
+            source_ref=video_info.url,
+            segment_data={
+                "bvid": video_info.bvid,
+                "url": video_info.url,
+                "title": video_info.title,
+                "quality": quality_name or "",
+            },
+        )
+        return _build_uid_message(
+            video_info,
+            uid=str(record.uid),
+            quality_name=quality_name,
+            file_size_mb=file_size_mb,
+            file_name=video_path.name,
+        )
+    except Exception as exc:
+        logger.exception("[Bilibili] UID 模式处理视频失败: %s", bvid)
+        if video_info is None:
+            try:
+                video_info = await get_video_info(bvid, cookie=cookie)
+            except Exception:
+                return f"视频处理失败：无法获取视频信息: {exc}"
+        return f"视频处理失败：{exc}"
     finally:
         if video_path is not None:
             cleanup_file(video_path)

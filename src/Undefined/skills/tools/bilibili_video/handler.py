@@ -1,7 +1,11 @@
-from typing import Any, Dict, Literal
 import logging
+from typing import Any, Dict, Literal
 
-from Undefined.bilibili.sender import send_bilibili_video
+from Undefined.attachments import scope_from_context
+from Undefined.bilibili.sender import (
+    fetch_bilibili_video_attachment,
+    send_bilibili_video,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,19 +53,15 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not video_id:
         return "video_id 不能为空"
 
-    target, error = _resolve_target(args, context)
-    if error or target is None:
-        return f"目标解析失败: {error or '参数错误'}"
-    target_type, target_id = target
+    output_mode = str(args.get("output_mode", "send") or "send").strip().lower()
+    if output_mode not in {"send", "uid"}:
+        return "output_mode 只能是 send 或 uid"
 
     runtime_config = context.get("runtime_config")
     sender = context.get("sender")
     onebot = context.get("onebot_client") or context.get("onebot")
     if not onebot and sender is not None and hasattr(sender, "onebot"):
         onebot = getattr(sender, "onebot")
-
-    if not sender or not onebot:
-        return "缺少必要的运行时组件（sender/onebot）"
 
     cookie = ""
     prefer_quality = 80
@@ -89,6 +89,30 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         danmaku_max_count = getattr(runtime_config, "bilibili_danmaku_max_count", 0)
 
     try:
+        if output_mode == "uid":
+            attachment_registry = context.get("attachment_registry")
+            scope_key = str(context.get("scope_key") or "").strip()
+            if not scope_key:
+                scope_key = scope_from_context(context) or ""
+            return await fetch_bilibili_video_attachment(
+                video_id=str(video_id),
+                attachment_registry=attachment_registry,
+                scope_key=scope_key,
+                cookie=cookie,
+                prefer_quality=prefer_quality,
+                max_duration=max_duration,
+                max_file_size=max_file_size,
+                oversize_strategy=oversize_strategy,
+            )
+
+        target, error = _resolve_target(args, context)
+        if error or target is None:
+            return f"目标解析失败: {error or '参数错误'}"
+        target_type, target_id = target
+
+        if not sender or not onebot:
+            return "缺少必要的运行时组件（sender/onebot）"
+
         result = await send_bilibili_video(
             video_id=video_id,
             sender=sender,

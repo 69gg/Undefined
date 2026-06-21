@@ -784,6 +784,7 @@ Prompt caching 补充：
 - 命中 `arxiv.org/abs/...`、`arxiv.org/pdf/...` 或 `arXiv:<id>` 时直接触发。
 - 裸新式编号仅在消息中同时出现 `arxiv` 关键词时触发，避免误判普通数字串。
 - PDF 下载或上传失败时不会额外发送失败提示，只保留论文信息消息。
+- 自动提取仍默认发送论文信息与 PDF；若用户要求分析 arXiv 论文内容，`file_analysis_agent` 会通过 `arxiv_paper(output_mode=uid)` 获取 PDF 附件 UID 后再分析。
 
 ---
 

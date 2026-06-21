@@ -2,6 +2,7 @@
 
 本版本把 Undefined 的“管理控制台内聊天”扩展为一套更完整的跨端聊天与运行时管理体系：一边新增面向桌面端和 Android 的原生 Chat 客户端，一边把 WebUI WebChat 升级为可长期使用的多会话工作台；底层则补齐 Runtime / Management API、任务续接、附件、命令、定时任务和发布构建能力。围绕这些入口，v3.6.0 也整理了 Agent 路由、认知记忆、附件标签和工程验证，让 WebUI、原生客户端和 QQ 侧共享更一致的运行时语义。
 
+- 合并 arXiv 论文分析职责到文件分析链路。移除独立 `arxiv_analysis_agent`，`file_analysis_agent` 现在可通过 `arxiv_paper(output_mode=uid)` 获取论文 PDF 附件 UID，并结合 `extract_pdf` 与 `describe_pdf_page` 完成文本和指定页视觉分析；`bilibili_video(output_mode=uid)` 同样可为视频分析提供附件 UID。
 - 建立原生 Chat 产品线。新增 `apps/undefined-chat/`，以 Runtime 作为会话、历史、任务、附件和事件真源，提供多会话、历史分页、Markdown / HTML 渲染、代码高亮、附件上传下载、图片预览、命令面板、消息引用、主题、i18n、快捷键与移动端布局；桌面端和 Android 侧同步接入受控请求、密钥保存、文件上传、生命周期恢复和 HTML 预览等原生能力。
 - 升级 WebUI WebChat 的长期使用体验。WebChat 从单一调试入口升级为多会话聊天工作台，支持持久化会话、旧历史迁移、标题生成、后台 job、事件续接、任务取消、重试复用、工具 / Agent timeline 回放、附件与引用体验，以及更完整的 Markdown、代码块、安全 HTML 和图片展示能力。
 - 补齐 Runtime 与 Management API 的客户端合同。Runtime 新增聊天会话、后台任务、附件、命令元数据和定时任务等接口；Management API 对这些运行态能力提供统一代理，使 WebUI、桌面端和 Android 客户端可以只连接一个管理入口，并安全复用后端注入的 Runtime 鉴权。

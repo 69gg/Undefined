@@ -267,10 +267,10 @@ mv skills/tools/my_tool skills/agents/my_agent/tools/
 - **grok_search 参数**：优先使用 `search_request`，用自然语言完整叙述搜索要求，不要只传关键词。
 
 ### file_analysis_agent（文件分析助手）
-- **功能**：分析用户提供的附件、内部 UID、URL 或 legacy file_id，提取文件内容。
-- **适用场景**：PDF/Word/Excel/PPT/文本/代码/压缩包解析，图片、音频、视频等多模态内容识别。
+- **功能**：分析用户提供的附件、内部 UID、URL、legacy file_id、arXiv 论文标识或 Bilibili 视频标识，提取文件内容。
+- **适用场景**：PDF/Word/Excel/PPT/文本/代码/压缩包解析，图片、音频、视频等多模态内容识别，arXiv 论文 PDF 分析，Bilibili 视频内容分析。
 - **不适用**：没有文件来源的开放式搜索、需要联网查资料的问题、执行文件或安全鉴定。
-- **子工具**：`download_file`, `detect_file_type`, `read_text_file`, `extract_pdf`, `extract_docx`, `extract_xlsx`, `extract_pptx`, `extract_archive`, `analyze_code`, `analyze_multimodal`, `cleanup_temp`。
+- **子工具**：`download_file`, `detect_file_type`, `read_text_file`, `extract_pdf`, `describe_pdf_page`, `extract_docx`, `extract_xlsx`, `extract_pptx`, `extract_archive`, `analyze_code`, `analyze_multimodal`, `cleanup_temp`；还可调用共享主工具 `arxiv_paper(output_mode=uid)` 与 `bilibili_video(output_mode=uid)` 获取待分析附件 UID。
 
 ### naga_code_analysis_agent（NagaAgent 代码分析助手）
 - **功能**：只读分析 NagaAgent 项目的结构、源码、配置、构建、部署和实现细节。
@@ -302,12 +302,6 @@ mv skills/tools/my_tool skills/agents/my_agent/tools/
 - **适用场景**：总结最近 N 条消息、过去一段时间的讨论、指定主题的结论、待办、参与者贡献和链接资源。
 - **不适用**：实时监控、情绪评判、未来预测、脱离聊天记录的推测；`/summary` 与 `/sum` 斜杠命令由命令层直连 summary 模型。
 - **子工具**：`fetch_messages`。
-
-### arxiv_analysis_agent（arXiv 论文深度分析助手）
-- **功能**：根据 arXiv ID 或 URL 获取论文元数据和 PDF 内容，并进行学术分析。
-- **适用场景**：分析论文背景、方法、实验、创新点、局限性、贡献和用户指定重点。
-- **不适用**：arXiv 关键词检索、非 arXiv 论文或用户上传 PDF 分析、没有论文依据的泛泛学术问答。
-- **子工具**：`fetch_paper`, `read_paper_pages`。
 
 ### code_delivery_agent（代码交付助手）
 - **功能**：把代码需求实现为可交付的文件或工程。

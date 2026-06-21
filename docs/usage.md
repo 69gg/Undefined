@@ -70,12 +70,14 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 
 ### `file_analysis_agent` — 文件分析助手
 
-支持对代码、PDF、Word、Excel 等多种格式文件进行解析与分析。用户只需将文件发送至对话中即可。
+支持对代码、PDF、Word、Excel 等多种格式文件进行解析与分析。用户可以直接发送文件，也可以提供附件 UID、URL、arXiv ID/URL 或 Bilibili BV/AV/URL。
 
-**子工具**：`analyze_pdf`、`analyze_docx`、`analyze_xlsx`、`analyze_code`、`read_file`
+**子工具**：`download_file`、`extract_pdf`、`describe_pdf_page`、`extract_docx`、`extract_xlsx`、`analyze_code`、`analyze_multimodal`
 
 **示例：**
 > *"请分析这份 PDF 文档，提取其中第三章的核心数据。"*
+> *"请看 arXiv:2501.01234 的第 3-5 页图表，解释实验结论。"*
+> *"分析这个 BV1xx411c7mD 视频里主要讲了什么。"*
 > *"请检查这份 Python 代码，找出其中潜在的性能瓶颈。"*
 
 ---
@@ -283,8 +285,8 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 | `get_picture` | 获取指定类型的图片（二次元、壁纸、白丝、黑丝、JK、历史上的今天等 10 余种类别） |
 | `qq_like` | 给指定 QQ 号的资料卡点赞（默认 10 次） |
 | `python_interpreter` | 在隔离的 **Docker 容器**中执行 Python 代码，支持按需安装第三方库，可在执行后自动发送生成的文件（图片、CSV 等） |
-| `bilibili_video` | 下载并发送哔哩哔哩视频（支持 BV 号、链接） |
-| `arxiv_paper` | 下载并发送 arXiv 论文 PDF（支持 arXiv ID、链接） |
+| `bilibili_video` | 下载并发送哔哩哔哩视频；也支持返回视频附件 UID 供文件分析（支持 BV 号、链接） |
+| `arxiv_paper` | 下载并发送 arXiv 论文 PDF；也支持返回 PDF 附件 UID 供文件分析（支持 arXiv ID、链接） |
 | `fetch_image_uid` | 将指定 URL 的图片下载并转换为系统内部 uid |
 | `task_progress` | 向用户发送长任务的阶段性进度通知 |
 | `changelog_query` | 查询系统内置版本更新日志 |
