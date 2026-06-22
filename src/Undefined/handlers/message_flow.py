@@ -19,6 +19,7 @@ from Undefined.attachments import (
     register_message_attachments,
 )
 from Undefined.attachments.models import RegisteredMessageAttachments
+from Undefined.attachments.segments import normalize_message_segments
 from Undefined.ai import AIClient
 from Undefined.config import Config
 from Undefined.faq import FAQStorage
@@ -52,6 +53,8 @@ from Undefined.utils.sender import MessageSender
 logger = logging.getLogger(__name__)
 
 KEYWORD_REPLY_HISTORY_PREFIX = "[系统关键词自动回复] "
+FORWARD_MEME_SCAN_MAX_DEPTH = 3
+FORWARD_MEME_SCAN_MAX_NODES = 50
 
 
 def _is_private_model_pool_control_text(text: str) -> bool:
@@ -66,8 +69,20 @@ def _coerce_registered_attachments(value: Any) -> RegisteredMessageAttachments:
         return RegisteredMessageAttachments(
             attachments=[item for item in value if isinstance(item, dict)],
             normalized_text="",
+            forward_refs=[],
         )
-    return RegisteredMessageAttachments(attachments=[], normalized_text="")
+    return RegisteredMessageAttachments(
+        attachments=[],
+        normalized_text="",
+        forward_refs=[],
+    )
+
+
+def _extract_forward_id_from_segment(segment: dict[str, Any]) -> str:
+    raw_data = segment.get("data", {})
+    data = raw_data if isinstance(raw_data, dict) else {}
+    forward_id = data.get("id") or data.get("resid") or data.get("message_id")
+    return str(forward_id).strip() if forward_id is not None else ""
 
 
 class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
@@ -257,13 +272,21 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             request_type=request_type,
         )
         if not scope_key:
-            return RegisteredMessageAttachments(attachments=[], normalized_text="")
+            return RegisteredMessageAttachments(
+                attachments=[],
+                normalized_text="",
+                forward_refs=[],
+            )
         ai_client = getattr(self, "ai", None)
         attachment_registry = (
             getattr(ai_client, "attachment_registry", None) if ai_client else None
         )
         if attachment_registry is None:
-            return RegisteredMessageAttachments(attachments=[], normalized_text="")
+            return RegisteredMessageAttachments(
+                attachments=[],
+                normalized_text="",
+                forward_refs=[],
+            )
         onebot = getattr(self, "onebot", None)
         resolve_image_url = getattr(onebot, "get_image", None) if onebot else None
         result = await register_message_attachments(
@@ -274,6 +297,8 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             get_forward_messages=getattr(onebot, "get_forward_msg", None)
             if onebot
             else None,
+            register_forward_refs=True,
+            expand_forward_attachments=False,
         )
         attachments = result.attachments
         # 命中表情库时为 AI 上下文补充 [表情包] 描述
@@ -281,6 +306,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         return RegisteredMessageAttachments(
             attachments=attachments,
             normalized_text=result.normalized_text,
+            forward_refs=result.forward_refs,
         )
 
     def _schedule_meme_ingest(
@@ -310,6 +336,146 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
                 scope_key=scope_key,
             ),
         )
+
+    def _schedule_forward_meme_scan(
+        self,
+        *,
+        message_content: list[dict[str, Any]],
+        chat_type: str,
+        chat_id: int,
+        sender_id: int,
+        message_id: int | None,
+        scope_key: str | None,
+    ) -> None:
+        if not scope_key:
+            return
+        if not any(
+            str(seg.get("type", "")).lower() == "forward" for seg in message_content
+        ):
+            return
+        meme_service = getattr(self.ai, "_meme_service", None)
+        if meme_service is None or not getattr(meme_service, "enabled", False):
+            return
+        self._spawn_background_task(
+            f"forward_meme_scan:{chat_type}:{chat_id}:{sender_id}:{message_id or 0}",
+            self._scan_forward_memes_for_ingest(
+                message_content=message_content,
+                chat_type=chat_type,
+                chat_id=chat_id,
+                sender_id=sender_id,
+                message_id=message_id,
+                scope_key=scope_key,
+            ),
+        )
+
+    async def _scan_forward_memes_for_ingest(
+        self,
+        *,
+        message_content: list[dict[str, Any]],
+        chat_type: str,
+        chat_id: int,
+        sender_id: int,
+        message_id: int | None,
+        scope_key: str,
+    ) -> None:
+        ai_client = getattr(self, "ai", None)
+        attachment_registry = (
+            getattr(ai_client, "attachment_registry", None) if ai_client else None
+        )
+        if attachment_registry is None:
+            return
+        onebot = getattr(self, "onebot", None)
+        if onebot is None:
+            return
+        get_forward_messages = getattr(onebot, "get_forward_msg", None)
+        if not callable(get_forward_messages):
+            return
+
+        collected: list[dict[str, str]] = []
+        visited: set[str] = set()
+        node_count = 0
+
+        async def _walk(segments: list[dict[str, Any]], depth: int) -> None:
+            nonlocal node_count
+            if depth > FORWARD_MEME_SCAN_MAX_DEPTH:
+                return
+            if depth > 0:
+                direct = await register_message_attachments(
+                    registry=attachment_registry,
+                    segments=segments,
+                    scope_key=scope_key,
+                    resolve_image_url=getattr(onebot, "get_image", None),
+                    get_forward_messages=None,
+                    register_forward_refs=False,
+                    expand_forward_attachments=False,
+                )
+                collected.extend(direct.attachments)
+            if depth >= FORWARD_MEME_SCAN_MAX_DEPTH:
+                return
+            for segment in segments:
+                if str(segment.get("type", "")).strip().lower() != "forward":
+                    continue
+                forward_id = _extract_forward_id_from_segment(segment)
+                if not forward_id or forward_id in visited:
+                    continue
+                visited.add(forward_id)
+                try:
+                    raw_nodes = await get_forward_messages(forward_id)
+                except Exception:
+                    logger.debug(
+                        "[memes] 合并转发表情包扫描拉取失败: id=%s",
+                        forward_id,
+                        exc_info=True,
+                    )
+                    continue
+                if isinstance(raw_nodes, dict):
+                    nodes = raw_nodes.get("messages")
+                else:
+                    nodes = raw_nodes
+                if not isinstance(nodes, list):
+                    continue
+                for node in nodes:
+                    if node_count >= FORWARD_MEME_SCAN_MAX_NODES:
+                        return
+                    if not isinstance(node, dict):
+                        continue
+                    node_count += 1
+                    raw_message = (
+                        node.get("content")
+                        or node.get("message")
+                        or node.get("raw_message")
+                    )
+                    nested_segments = [
+                        dict(item)
+                        for item in normalize_message_segments(raw_message)
+                        if isinstance(item, dict)
+                    ]
+                    if nested_segments:
+                        await _walk(nested_segments, depth + 1)
+
+        try:
+            await _walk(message_content, 0)
+            image_attachments = [
+                item
+                for item in collected
+                if str(item.get("media_type") or item.get("kind") or "") == "image"
+            ]
+            if not image_attachments:
+                return
+            annotated = await self._annotate_meme_descriptions(
+                image_attachments,
+                scope_key,
+            )
+            self._schedule_meme_ingest(
+                attachments=annotated,
+                chat_type=chat_type,
+                chat_id=chat_id,
+                sender_id=sender_id,
+                message_id=message_id,
+                scope_key=scope_key,
+            )
+        except Exception:
+            logger.warning("[memes] 合并转发表情包扫描失败", exc_info=True)
 
     async def _refresh_profile_display_names(
         self,
@@ -479,10 +645,9 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             sender_name=resolved_private_name,
         )
 
-        parsed_content_base = private_registered.normalized_text or parsed_content_raw
-        parsed_content = append_attachment_text(
-            parsed_content_base, private_attachments
-        )
+        prompt_refs = private_attachments + private_registered.forward_refs
+        ai_content_base = private_registered.normalized_text or parsed_content_raw
+        parsed_content = append_attachment_text(parsed_content_raw, private_attachments)
         safe_parsed = redact_string(parsed_content)
         logger.debug(
             "[历史记录] 保存私聊: user=%s content=%s...",
@@ -504,6 +669,17 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
 
         self._schedule_meme_ingest(
             attachments=private_attachments,
+            chat_type="private",
+            chat_id=private_sender_id,
+            sender_id=private_sender_id,
+            message_id=safe_int(trigger_message_id),
+            scope_key=build_attachment_scope(
+                user_id=private_sender_id,
+                request_type="private",
+            ),
+        )
+        self._schedule_forward_meme_scan(
+            message_content=private_message_content,
             chat_type="private",
             chat_id=private_sender_id,
             sender_id=private_sender_id,
@@ -553,9 +729,9 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
 
         await self.ai_coordinator.handle_private_reply(
             private_sender_id,
-            parsed_content_base,
+            ai_content_base,
             private_message_content,
-            attachments=private_attachments,
+            attachments=prompt_refs,
             sender_name=user_name,
             trigger_message_id=trigger_message_id,
         )
@@ -627,8 +803,9 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             group_name=str(group_name or "").strip(),
         )
 
-        parsed_content_base = group_registered.normalized_text or parsed_content_raw
-        parsed_content = append_attachment_text(parsed_content_base, group_attachments)
+        prompt_refs = group_attachments + group_registered.forward_refs
+        ai_content_base = group_registered.normalized_text or parsed_content_raw
+        parsed_content = append_attachment_text(parsed_content_raw, group_attachments)
         safe_parsed = redact_string(parsed_content)
         logger.debug(
             f"[历史记录] 保存群聊: group={group_id}, sender={sender_id}, content={safe_parsed[:50]}..."
@@ -649,11 +826,19 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
 
         # 机器人发言计入复读计数，防止 bot 复读自身
         if sender_id == self.config.bot_qq:
-            await self._append_bot_repeat_counter(group_id, parsed_content_base)
+            await self._append_bot_repeat_counter(group_id, parsed_content_raw)
             return
 
         self._schedule_meme_ingest(
             attachments=group_attachments,
+            chat_type="group",
+            chat_id=group_id,
+            sender_id=sender_id,
+            message_id=safe_int(trigger_message_id),
+            scope_key=build_attachment_scope(group_id=group_id, request_type="group"),
+        )
+        self._schedule_forward_meme_scan(
+            message_content=message_content,
             chat_type="group",
             chat_id=group_id,
             sender_id=sender_id,
@@ -709,8 +894,8 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         if await self._maybe_trigger_repeat(
             group_id,
             sender_id,
-            parsed_content_base,
-            attachments=group_attachments,
+            ai_content_base,
+            attachments=prompt_refs,
         ):
             return
 
@@ -725,9 +910,9 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         await self.ai_coordinator.handle_auto_reply(
             group_id,
             sender_id,
-            normalized_text if not group_attachments else parsed_content_base,
+            normalized_text if not prompt_refs else ai_content_base,
             message_content,
-            attachments=group_attachments,
+            attachments=prompt_refs,
             sender_name=display_name,
             group_name=group_name,
             sender_role=sender_role,

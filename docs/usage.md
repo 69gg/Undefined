@@ -184,7 +184,7 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 | `messages.send_text_file` | 将文本内容生成文件后发送 |
 | `messages.send_url_file` | 下载指定 URL 的文件后发送 |
 | `messages.send_group_sign` | 执行群签到操作 |
-| `messages.get_forward_msg` | 获取合并转发消息的内容 |
+| `messages.get_forward_msg` | 按层读取合并转发内容；支持 `<forward uid="forward_xxx"/>` 和旧合并转发 ID，可用 `offset`/`limit` 分页查看更多 |
 
 ---
 

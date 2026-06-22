@@ -9,8 +9,8 @@ from typing import Any, Callable, Sequence, Mapping
 from xml.sax.saxutils import escape
 
 
-_INLINE_ATTACHMENT_TAG_RE = re.compile(
-    r"<attachment\s+uid=(?P<quote>[\"'])(?P<uid>[^\"']+)(?P=quote)\s*/?>",
+_INLINE_PRESERVED_TAG_RE = re.compile(
+    r"<(?P<tag>attachment|forward)\s+uid=(?P<quote>[\"'])(?P<uid>[^\"']+)(?P=quote)\s*/?>",
     re.IGNORECASE,
 )
 
@@ -28,24 +28,36 @@ def escape_xml_text_preserving_attachment_tags(
     value: str,
     attachments: Sequence[Mapping[str, str]] | None = None,
 ) -> str:
-    """Escape XML text while preserving known ``<attachment uid="..."/>`` tags."""
-    allowed_uids = {
+    """Escape XML text while preserving known inline resource tags."""
+    allowed_attachment_uids = {
         str(item.get("uid", "") or "").strip()
         for item in (attachments or [])
-        if isinstance(item, Mapping) and str(item.get("uid", "") or "").strip()
+        if isinstance(item, Mapping)
+        and str(item.get("uid", "") or "").strip()
+        and (str(item.get("media_type") or item.get("kind") or "").strip() != "forward")
     }
-    if not allowed_uids:
+    allowed_forward_uids = {
+        str(item.get("uid", "") or "").strip()
+        for item in (attachments or [])
+        if isinstance(item, Mapping)
+        and str(item.get("uid", "") or "").strip()
+        and (str(item.get("media_type") or item.get("kind") or "").strip() == "forward")
+    }
+    if not allowed_attachment_uids and not allowed_forward_uids:
         return escape_xml_text(value)
 
     text = str(value or "")
     parts: list[str] = []
     last_index = 0
-    for match in _INLINE_ATTACHMENT_TAG_RE.finditer(text):
+    for match in _INLINE_PRESERVED_TAG_RE.finditer(text):
+        tag = str(match.group("tag") or "").lower()
         uid = html.unescape(str(match.group("uid") or "").strip())
-        if uid not in allowed_uids:
+        if tag == "attachment" and uid not in allowed_attachment_uids:
+            continue
+        if tag == "forward" and uid not in allowed_forward_uids:
             continue
         parts.append(escape_xml_text(text[last_index : match.start()]))
-        parts.append(f'<attachment uid="{escape_xml_attr(uid)}"/>')
+        parts.append(f'<{tag} uid="{escape_xml_attr(uid)}"/>')
         last_index = match.end()
     parts.append(escape_xml_text(text[last_index:]))
     return "".join(parts)

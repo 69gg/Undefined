@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -70,6 +70,7 @@ class RegisteredMessageAttachments:
 
     attachments: list[dict[str, str]]
     normalized_text: str
+    forward_refs: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
