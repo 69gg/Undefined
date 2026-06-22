@@ -5,6 +5,10 @@ import logging
 from typing import Any, Mapping
 
 from Undefined.attachments import build_attachment_scope, register_message_attachments
+from Undefined.attachments.forward_snapshot import (
+    load_forward_snapshot,
+    save_forward_snapshot,
+)
 from Undefined.attachments.segments import (
     forward_ref_to_tag,
     normalize_message_segments,
@@ -42,13 +46,13 @@ def _format_time(raw_time: Any) -> str:
         return str(raw_time)
 
 
-def _normalize_nodes(raw_nodes: Any) -> list[Mapping[str, Any]]:
+def _normalize_nodes(raw_nodes: Any) -> list[dict[str, Any]]:
     if isinstance(raw_nodes, list):
-        return [node for node in raw_nodes if isinstance(node, Mapping)]
+        return [dict(node) for node in raw_nodes if isinstance(node, Mapping)]
     if isinstance(raw_nodes, Mapping):
         messages = raw_nodes.get("messages")
         if isinstance(messages, list):
-            return [node for node in messages if isinstance(node, Mapping)]
+            return [dict(node) for node in messages if isinstance(node, Mapping)]
     return []
 
 
@@ -84,6 +88,50 @@ def _raw_forward_id_from_record(uid_or_id: str, context: Mapping[str, Any]) -> s
     if record is None or getattr(record, "media_type", "") != "forward":
         return ""
     return str(getattr(record, "source_ref", "") or "").strip()
+
+
+def _resolve_forward_record(
+    uid_or_id: str,
+    context: Mapping[str, Any],
+) -> tuple[str, str | None, Any | None]:
+    """解析工具入参对应的 raw forward id、scope 和注册记录。"""
+    if not uid_or_id.startswith("forward_"):
+        return uid_or_id, _resolve_scope_key(context), None
+
+    registry = context.get("attachment_registry")
+    scope_key = _resolve_scope_key(context)
+    if registry is None or not scope_key:
+        return "", scope_key, None
+    resolve = getattr(registry, "resolve", None)
+    if not callable(resolve):
+        return "", scope_key, None
+    record = resolve(uid_or_id, scope_key)
+    if record is None or getattr(record, "media_type", "") != "forward":
+        return "", scope_key, None
+    return str(getattr(record, "source_ref", "") or "").strip(), scope_key, record
+
+
+def _format_unavailable_message(
+    *,
+    message_id: str,
+    raw_forward_id: str,
+    record: Any | None,
+) -> str:
+    lines = [
+        "未能获取到合并转发消息的内容或内容为空。",
+        "这通常表示协议端当前无法回源该层合并转发，常见原因包括内层转发不可二次读取、资源过期或权限受限。",
+        f"请求 ID: {message_id}",
+        f"源 ID: {raw_forward_id}",
+    ]
+    if record is not None:
+        segment_data = getattr(record, "segment_data", {}) or {}
+        if isinstance(segment_data, Mapping) and segment_data:
+            details = ", ".join(
+                f"{key}={value}" for key, value in sorted(segment_data.items())
+            )
+            if details:
+                lines.append(f"原始字段: {details}")
+    return "\n".join(lines)
 
 
 async def _register_node_segments(
@@ -130,9 +178,11 @@ async def _register_node_segments(
         segments=segments,
         scope_key=scope_key,
         resolve_image_url=resolve_image_url,
-        get_forward_messages=None,
+        get_forward_messages=context.get("get_forward_msg_callback"),
         register_forward_refs=True,
         expand_forward_attachments=False,
+        snapshot_forward_messages=True,
+        snapshot_nested_forward_messages=True,
     )
     refs = list(result.attachments) + list(result.forward_refs)
     return result.normalized_text, refs
@@ -147,7 +197,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     if not callable(get_forward_msg_callback):
         return "错误：获取合并转发消息的回调未设置"
 
-    raw_forward_id = _raw_forward_id_from_record(message_id, context)
+    raw_forward_id, scope_key, record = _resolve_forward_record(message_id, context)
     if not raw_forward_id:
         return f"错误：合并转发 UID 不可用或不属于当前会话：{message_id}"
 
@@ -156,14 +206,59 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     # 保留参数用于向后兼容和未来扩展；当前实现默认首层，不递归展开。
     _ = _safe_int(args.get("max_depth"), 1, minimum=1, maximum=5)
 
-    try:
-        nodes = _normalize_nodes(await get_forward_msg_callback(raw_forward_id))
-    except Exception as exc:
-        logger.exception("获取合并转发消息失败: id=%s", raw_forward_id)
-        return f"获取合并转发消息失败：{exc}"
+    nodes: list[dict[str, Any]] = []
+    source_note = ""
+    if scope_key:
+        try:
+            load_nodes = await load_forward_snapshot(
+                scope_key=scope_key,
+                forward_id=raw_forward_id,
+            )
+            if load_nodes:
+                nodes = load_nodes
+                source_note = "（来自本地快照）"
+        except Exception:
+            logger.debug("读取合并转发快照失败: id=%s", raw_forward_id, exc_info=True)
 
     if not nodes:
-        return "未能获取到合并转发消息的内容或内容为空"
+        try:
+            nodes = _normalize_nodes(await get_forward_msg_callback(raw_forward_id))
+            if nodes and scope_key:
+                try:
+                    await save_forward_snapshot(
+                        scope_key=scope_key,
+                        forward_id=raw_forward_id,
+                        nodes=nodes,
+                    )
+                except Exception:
+                    logger.debug(
+                        "保存合并转发快照失败: id=%s", raw_forward_id, exc_info=True
+                    )
+        except Exception as exc:
+            logger.exception("获取合并转发消息失败: id=%s", raw_forward_id)
+            if scope_key:
+                try:
+                    nodes = await load_forward_snapshot(
+                        scope_key=scope_key,
+                        forward_id=raw_forward_id,
+                    )
+                    if nodes:
+                        source_note = "（来自本地快照，OneBot 回源失败）"
+                except Exception:
+                    logger.debug(
+                        "OneBot 失败后读取合并转发快照也失败: id=%s",
+                        raw_forward_id,
+                        exc_info=True,
+                    )
+            if not nodes:
+                return f"获取合并转发消息失败：{exc}"
+
+    if not nodes:
+        return _format_unavailable_message(
+            message_id=message_id,
+            raw_forward_id=raw_forward_id,
+            record=record,
+        )
 
     window = nodes[offset : offset + limit]
     if not window:
@@ -232,7 +327,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
     next_offset = offset + len(window)
     page_note = (
-        f"合并转发 {message_id}（源 ID: {raw_forward_id}）节点 "
+        f"合并转发 {message_id}（源 ID: {raw_forward_id}）{source_note}节点 "
         f"{offset + 1}-{next_offset}/{len(nodes)}"
     )
     if next_offset < len(nodes):
