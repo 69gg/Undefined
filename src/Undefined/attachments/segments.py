@@ -32,6 +32,7 @@ _MEDIA_LABELS = {
     "video": "视频",
     "record": "语音",
     "pic": "图片",
+    "forward": "合并转发",
 }
 _WINDOWS_ABS_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 _FORWARD_ATTACHMENT_MAX_DEPTH = 3
@@ -128,6 +129,14 @@ def attachment_ref_to_tag(attachment: Mapping[str, str]) -> str:
     return f'<attachment uid="{escape_xml_attr(uid)}"/>'
 
 
+def forward_ref_to_tag(ref: Mapping[str, str]) -> str:
+    """将合并转发引用序列化为 AI 可按需读取的内联标签。"""
+    uid = str(ref.get("uid", "") or "").strip()
+    if not uid:
+        return ""
+    return f'<forward uid="{escape_xml_attr(uid)}"/>'
+
+
 def attachment_refs_to_tags(
     attachments: Sequence[Mapping[str, str]],
     *,
@@ -153,6 +162,8 @@ def attachment_refs_to_xml(
             continue
         kind = str(item.get("kind", "") or item.get("media_type", "") or "file").strip()
         media_type = str(item.get("media_type", "") or kind or "file").strip()
+        if media_type == "forward" or kind == "forward":
+            continue
         name = str(item.get("display_name", "") or "").strip()
         attrs = [
             f'uid="{escape_xml_attr(uid)}"',
@@ -174,6 +185,8 @@ def attachment_refs_to_xml(
         if description:
             attrs.append(f'description="{escape_xml_attr(description)}"')
         lines.append(f"{indent} <attachment {' '.join(attrs)} />")
+    if len(lines) == 1:
+        return ""
     lines.append(f"{indent}</attachments>")
     return "\n".join(lines)
 
@@ -227,7 +240,7 @@ def display_name_from_source(raw_source: str, fallback: str) -> str:
 def media_kind_from_value(value: str) -> str:
     """将任意媒体类型字符串规范为 registry 支持的 kind。"""
     text = str(value or "").strip().lower()
-    if text in {"image", "file", "audio", "video", "record"}:
+    if text in {"image", "file", "audio", "video", "record", "forward"}:
         return text
     return "file"
 
@@ -252,6 +265,10 @@ def segment_text(
         reply_id = str(data.get("id") or data.get("message_id") or "").strip()
         return f"[引用: {reply_id}]" if reply_id else "[引用]"
     if type_ == "forward":
+        if ref is not None:
+            tag = forward_ref_to_tag(ref)
+            if tag:
+                return tag
         forward_id = str(data.get("id") or data.get("resid") or "").strip()
         return f"[合并转发: {forward_id}]" if forward_id else "[合并转发]"
     if ref is not None:
@@ -343,6 +360,8 @@ async def register_message_attachments(
     resolve_image_url: Callable[[str], Awaitable[str | None]] | None = None,
     get_forward_messages: Callable[[str], Awaitable[list[dict[str, Any]]]]
     | None = None,
+    register_forward_refs: bool = False,
+    expand_forward_attachments: bool = True,
 ) -> RegisteredMessageAttachments:
     """扫描消息段并将图片/文件注册到 ``AttachmentRegistry``。
 
@@ -352,11 +371,14 @@ async def register_message_attachments(
         scope_key: 会话作用域键。
         resolve_image_url: 可选，将 ``file`` 字段解析为可下载 URL。
         get_forward_messages: 可选，拉取合并转发子消息。
+        register_forward_refs: 是否将顶层合并转发注册为 ``forward_`` 引用。
+        expand_forward_attachments: 是否递归扫描合并转发内的附件。
 
     Returns:
         已注册附件引用与归一化纯文本。
     """
     attachments: list[dict[str, str]] = []
+    forward_refs: list[dict[str, str]] = []
     normalized_parts: list[str] = []
     if registry is None or not scope_key:
         for segment in segments:
@@ -518,14 +540,32 @@ async def register_message_attachments(
                         )
                         ref = record.prompt_ref()
 
-                elif (
-                    type_ == "forward"
-                    and get_forward_messages is not None
-                    and depth < _FORWARD_ATTACHMENT_MAX_DEPTH
-                ):
+                elif type_ == "forward":
                     # 合并转发递归展开，深度上限防止无限嵌套
                     forward_id = _extract_forward_id(data)
-                    if forward_id and forward_id not in visited_forward_ids:
+                    if register_forward_refs and depth == 0 and forward_id:
+                        register_forward = getattr(
+                            registry,
+                            "register_forward_reference",
+                            None,
+                        )
+                        if callable(register_forward):
+                            record = await register_forward(
+                                scope_key,
+                                forward_id,
+                                display_name=f"合并转发 {forward_id}",
+                                source_kind="onebot_forward",
+                                segment_data=segment_data_from_onebot_data(data),
+                            )
+                            ref = record.prompt_ref()
+
+                    if (
+                        expand_forward_attachments
+                        and get_forward_messages is not None
+                        and depth < _FORWARD_ATTACHMENT_MAX_DEPTH
+                        and forward_id
+                        and forward_id not in visited_forward_ids
+                    ):
                         visited_forward_ids.add(forward_id)
                         try:
                             nodes = _normalize_forward_nodes(
@@ -573,7 +613,10 @@ async def register_message_attachments(
                 )
 
             if ref is not None:
-                attachments.append(ref)
+                if str(ref.get("media_type") or "") == "forward":
+                    forward_refs.append(ref)
+                else:
+                    attachments.append(ref)
             if depth == 0:
                 normalized_parts.append(segment_text(type_, data, ref))
 
@@ -582,4 +625,5 @@ async def register_message_attachments(
     return RegisteredMessageAttachments(
         attachments=attachments,
         normalized_text="".join(normalized_parts).strip(),
+        forward_refs=forward_refs,
     )

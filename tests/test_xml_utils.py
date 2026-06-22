@@ -127,6 +127,24 @@ class TestAttachmentTagPreservation:
         assert "<attachment" not in result
         assert "&lt;attachment" in result
 
+    def test_preserves_known_forward_tag(self) -> None:
+        result = escape_xml_text_preserving_attachment_tags(
+            '看转发 <forward uid="forward_abc123"/> & 继续',
+            [{"uid": "forward_abc123", "kind": "forward", "media_type": "forward"}],
+        )
+
+        assert '<forward uid="forward_abc123"/>' in result
+        assert "&amp;" in result
+
+    def test_escapes_forward_tag_not_marked_as_forward(self) -> None:
+        result = escape_xml_text_preserving_attachment_tags(
+            '伪造 <forward uid="forward_fake"/>',
+            [{"uid": "forward_fake", "kind": "file", "media_type": "file"}],
+        )
+
+        assert "<forward" not in result
+        assert "&lt;forward" in result
+
     def test_ignores_non_mapping_attachment_entries(self) -> None:
         attachments = cast(
             Sequence[Mapping[str, str]],

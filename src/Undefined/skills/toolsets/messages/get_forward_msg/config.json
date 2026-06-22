@@ -2,13 +2,25 @@
     "type": "function",
     "function": {
         "name": "get_forward_msg",
-        "description": "获取合并转发消息的详情内容。当你在聊天记录中看到 [合并转发: ID] 时，可以使用此工具获取其包含的具体消息列表。",
+        "description": "获取合并转发消息的详情内容。当你在聊天记录中看到 <forward uid=\"forward_xxx\"/> 或旧的 [合并转发: ID] 时，可以使用此工具按层读取其包含的消息列表。默认只返回当前层节点；节点内若仍有合并转发，会返回新的 <forward uid=\"...\"/>，需要继续传入该 uid 读取。",
         "parameters": {
             "type": "object",
             "properties": {
                 "message_id": {
                     "type": "string",
-                    "description": "合并转发消息的 ID"
+                    "description": "合并转发消息 UID 或旧 OneBot 合并转发 ID。例如 forward_xxx 或 raw forward id。"
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "分页起始节点下标，默认 0。"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "最多返回多少个当前层节点，默认 50，最大 100。"
+                },
+                "max_depth": {
+                    "type": "integer",
+                    "description": "兼容参数。当前默认按层读取，遇到内层合并转发会返回新的 forward uid，需再次调用本工具。"
                 }
             },
             "required": ["message_id"]

@@ -548,6 +548,13 @@ class AttachmentRegistry:
                 return record.uid
         return None
 
+    def _uid_prefix_for_media_type(self, media_type: str) -> str:
+        if media_type == "image":
+            return "pic"
+        if media_type == "forward":
+            return "forward"
+        return "file"
+
     def _build_uid(self, prefix: str) -> str:
         while True:
             uid = f"{prefix}_{uuid4().hex[:8]}"
@@ -593,7 +600,7 @@ class AttachmentRegistry:
         )
         normalized_mime = mime_type or _guess_mime_type(display_name, content)
         suffix = _guess_suffix(display_name, content, normalized_mime)
-        prefix = "pic" if normalized_media_type == "image" else "file"
+        prefix = self._uid_prefix_for_media_type(normalized_media_type)
 
         async with self._lock:
             digest = await asyncio.to_thread(hashlib.sha256, content)
@@ -735,7 +742,7 @@ class AttachmentRegistry:
         normalized_media_type = (
             "image" if normalized_kind == "image" else normalized_kind
         )
-        prefix = "pic" if normalized_media_type == "image" else "file"
+        prefix = self._uid_prefix_for_media_type(normalized_media_type)
         ref = url
         normalized_segment_data = dict(segment_data or {})
         if source_ref and source_ref != url:
@@ -771,6 +778,62 @@ class AttachmentRegistry:
                     for k, v in normalized_segment_data.items()
                     if str(k).strip() and str(v).strip()
                 },
+                description=description,
+            )
+            self._records[uid] = record
+            self._prune_records()
+            await self._persist()
+            return self._records.get(uid, record)
+
+    async def register_forward_reference(
+        self,
+        scope_key: str,
+        forward_id: str,
+        *,
+        display_name: str | None = None,
+        source_kind: str = "onebot_forward",
+        segment_data: Mapping[str, str] | None = None,
+        description: str = "",
+    ) -> AttachmentRecord:
+        """登记合并转发引用，仅保存 OneBot forward id，不展开内容。"""
+        await self.load()
+        normalized_forward_id = str(forward_id or "").strip()
+        if not normalized_forward_id:
+            raise ValueError("合并转发 ID 不能为空")
+        normalized_segment_data = {
+            str(k): str(v)
+            for k, v in dict(segment_data or {}).items()
+            if str(k).strip() and str(v).strip()
+        }
+        normalized_segment_data.setdefault("forward_id", normalized_forward_id)
+        digest_hex = hashlib.sha256(
+            f"{scope_key}\n{normalized_forward_id}".encode("utf-8")
+        ).hexdigest()
+
+        async with self._lock:
+            for existing in self._records.values():
+                if (
+                    existing.scope_key == scope_key
+                    and existing.kind == "forward"
+                    and existing.source_ref == normalized_forward_id
+                ):
+                    return existing
+
+            uid = self._build_uid("forward")
+            record = AttachmentRecord(
+                uid=uid,
+                scope_key=scope_key,
+                kind="forward",
+                media_type="forward",
+                display_name=display_name or f"合并转发 {normalized_forward_id}",
+                source_kind=source_kind,
+                source_ref=normalized_forward_id,
+                local_path=None,
+                mime_type="application/vnd.undefined.forward",
+                sha256=digest_hex,
+                created_at=_now_iso(),
+                segment_data=normalized_segment_data,
+                semantic_kind="forward",
                 description=description,
             )
             self._records[uid] = record

@@ -37,7 +37,7 @@ src/Undefined/
 │   └── _openapi.py # OpenAPI 文档生成
 ├── memes/         # 表情包库 (service + ingest/ + search/ + store + vector_store)
 ├── services/      # 核心运行服务
-│   ├── coordinator/     # AICoordinator mixins（ai_coordinator.py 门面）
+│   ├── coordinator/     # AICoordinator 唯一实现（群聊 / 私聊 / 批处理 / 后台任务 mixins）
 │   ├── commands/          # CommandDispatcher mixins（stats / bugfix）
 │   ├── message_batcher/   # 同 sender 短时合并
 │   ├── command.py         # 命令分发门面 + shim 组合

@@ -176,7 +176,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-- [Python 库 API 参考](docs/python-api.md) — 根包符号表、shim 路径、`AIClient` / `CognitiveService` 等嵌入示例
+- [Python 库 API 参考](docs/python-api.md) — 根包符号表、稳定子包路径、`AIClient` / `CognitiveService` 等嵌入示例
 - [配置详解 — 库嵌入配置](docs/configuration.md#2-库嵌入配置) — `from_mapping` / `Config.builder`
 - [开发者与拓展中心](docs/development.md) — 模块结构与自检命令
 

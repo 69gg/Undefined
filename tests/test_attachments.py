@@ -639,6 +639,57 @@ async def test_register_message_attachments_recurses_into_forward_images(
 
 
 @pytest.mark.asyncio
+async def test_register_message_attachments_registers_forward_uid_without_expansion(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    calls = 0
+
+    async def _fake_get_forward(_forward_id: str) -> list[dict[str, object]]:
+        nonlocal calls
+        calls += 1
+        return [{"message": [{"type": "image", "data": {"file": "unused"}}]}]
+
+    result = await register_message_attachments(
+        registry=registry,
+        segments=[{"type": "forward", "data": {"id": "forward-1"}}],
+        scope_key="group:10001",
+        get_forward_messages=_fake_get_forward,
+        register_forward_refs=True,
+        expand_forward_attachments=False,
+    )
+
+    assert calls == 0
+    assert result.attachments == []
+    assert len(result.forward_refs) == 1
+    forward_ref = result.forward_refs[0]
+    assert forward_ref["uid"].startswith("forward_")
+    assert result.normalized_text == f'<forward uid="{forward_ref["uid"]}"/>'
+    record = registry.resolve(forward_ref["uid"], "group:10001")
+    assert record is not None
+    assert record.media_type == "forward"
+    assert record.source_ref == "forward-1"
+
+
+def test_attachment_refs_to_xml_skips_forward_refs() -> None:
+    xml = attachment_refs_to_xml(
+        [
+            {
+                "uid": "forward_demo",
+                "kind": "forward",
+                "media_type": "forward",
+                "display_name": "合并转发",
+            }
+        ]
+    )
+
+    assert xml == ""
+
+
+@pytest.mark.asyncio
 async def test_register_message_attachments_preserves_segment_data_for_images(
     tmp_path: Path,
 ) -> None:

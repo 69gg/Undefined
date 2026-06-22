@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -59,6 +61,8 @@ def _build_handler(
         _is_at_bot=lambda _mc: False,
     )
     handler.ai = SimpleNamespace(
+        attachment_registry=None,
+        _meme_service=None,
         _cognitive_service=None,
         memory_storage=None,
         model_pool=SimpleNamespace(
@@ -105,6 +109,17 @@ def _group_event(
         },
         "message": [{"type": "text", "data": {"text": text}}],
     }
+
+
+def _group_forward_event(
+    *,
+    group_id: int = 30001,
+    sender_id: int = 20001,
+    forward_id: str = "forward-raw",
+) -> dict[str, Any]:
+    event = _group_event(group_id=group_id, sender_id=sender_id, text="")
+    event["message"] = [{"type": "forward", "data": {"id": forward_id}}]
+    return event
 
 
 _PNG_BYTES: bytes = (
@@ -472,6 +487,86 @@ async def test_repeat_cooldown_suppresses_same_text() -> None:
 
     # 冷却抑制后消息应继续处理（到达 AI auto-reply），不应被 silently dropped
     assert handler.ai_coordinator.handle_auto_reply.call_count > 0
+
+
+@pytest.mark.asyncio
+async def test_group_forward_history_expands_but_ai_input_uses_forward_uid(
+    tmp_path: Path,
+) -> None:
+    handler = _build_handler(repeat_enabled=False)
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    handler.ai.attachment_registry = registry
+    handler.onebot.get_forward_msg = AsyncMock(
+        return_value=[
+            {
+                "sender": {"nickname": "Alice", "user_id": 123},
+                "message": [{"type": "text", "data": {"text": "展开内容"}}],
+            }
+        ]
+    )
+
+    await handler.handle_message(_group_forward_event(forward_id="forward-raw"))
+
+    history_kwargs = handler.history_manager.add_group_message.await_args.kwargs
+    assert "[合并转发展开: forward-raw]" in history_kwargs["text_content"]
+    assert "展开内容" in history_kwargs["text_content"]
+    assert "<forward uid=" not in history_kwargs["text_content"]
+
+    reply_args = handler.ai_coordinator.handle_auto_reply.await_args.args
+    assert reply_args[2].startswith('<forward uid="forward_')
+    prompt_refs = handler.ai_coordinator.handle_auto_reply.await_args.kwargs[
+        "attachments"
+    ]
+    assert prompt_refs[0]["media_type"] == "forward"
+
+
+@pytest.mark.asyncio
+async def test_forward_meme_scan_enqueues_nested_images(tmp_path: Path) -> None:
+    handler = _build_handler(repeat_enabled=False)
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    enqueue = AsyncMock()
+    handler.ai.attachment_registry = registry
+    handler.ai._meme_service = SimpleNamespace(
+        enabled=True,
+        enqueue_incoming_attachments=enqueue,
+    )
+    payload = base64.b64encode(_PNG_BYTES).decode("ascii")
+    handler.onebot.get_forward_msg = AsyncMock(
+        return_value=[
+            {
+                "message": [
+                    {"type": "text", "data": {"text": "图"}},
+                    {"type": "image", "data": {"file": f"base64://{payload}"}},
+                ]
+            }
+        ]
+    )
+
+    await handler._scan_forward_memes_for_ingest(
+        message_content=[{"type": "forward", "data": {"id": "forward-raw"}}],
+        chat_type="group",
+        chat_id=30001,
+        sender_id=20001,
+        message_id=1,
+        scope_key="group:30001",
+    )
+    tasks = list(handler._background_tasks)
+    if tasks:
+        await asyncio.gather(*tasks)
+
+    enqueue.assert_awaited_once()
+    await_args = enqueue.await_args
+    assert await_args is not None
+    kwargs = await_args.kwargs
+    assert kwargs["chat_type"] == "group"
+    assert kwargs["scope_key"] == "group:30001"
+    assert kwargs["attachments"][0]["uid"].startswith("pic_")
 
 
 @pytest.mark.asyncio

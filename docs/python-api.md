@@ -89,6 +89,7 @@ from Undefined.api.app import RuntimeAPIServer
 以下模块**不会**进入根包 re-export，也不保证跨版本兼容：
 
 - `Undefined.main`, `Undefined.webui`, `Undefined.handlers`, `Undefined.onebot`
+- `Undefined.services` 下的运行时编排模块；`AICoordinator` 的唯一内部导入路径是 `Undefined.services.coordinator`，旧路径 `Undefined.services.ai_coordinator` 已移除
 - `Undefined.config.coercers`, `Undefined.config.model_parsers`
 - `Undefined.utils.io`, `Undefined.utils.paths`
 

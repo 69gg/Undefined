@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from Undefined.config import Config
     from Undefined.onebot import OneBotClient
-    from Undefined.services.ai_coordinator import AICoordinator
+    from Undefined.services.coordinator import AICoordinator
     from Undefined.utils.history import MessageHistoryManager
 
 logger = logging.getLogger(__name__)

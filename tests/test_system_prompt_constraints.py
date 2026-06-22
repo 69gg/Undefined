@@ -304,9 +304,10 @@ def test_system_prompts_keep_proactive_participation_narrow_and_meme_post_reply(
     assert "只有当本轮回复目标明确是“纯表情包/纯反应图”" in text
     assert "不要为了“增强语气”在首轮抢先调用 `memes.search_memes`" in text
     assert "第一轮必须优先把必要文字回复做好并调用 `send_message`" in text
-    assert "如果本轮既需要文字发言又想配表情包" in text
+    assert "如果本轮既需要文字发言又适合配表情包" in text
     assert "先调用 `send_message` 发出必要文字" in text
-    assert "表情包检索可能拖慢首条回复体验" in text
-    assert "再把表情包检索和发送放到后续轮次" in text
+    assert "轻松聊天、吐槽、附和、接梗、表达情绪、被拍一拍、被 @ 后的短回应" in text
+    assert "文字发送成功后优先考虑在后续响应轮次" in text
+    assert "严肃答疑、代码排查、长任务推进、隐私/安全拒绝或信息不足追问" in text
     assert "群里有多人在公开讨论你擅长或感兴趣的话题" not in text
     assert "有人说了明显有趣/好笑的话，你有自然的回应冲动" not in text
