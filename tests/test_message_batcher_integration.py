@@ -18,7 +18,7 @@ import pytest
 
 from Undefined.config.models import MessageBatcherConfig
 from Undefined.handlers import MessageHandler
-from Undefined.services.ai_coordinator import AICoordinator
+from Undefined.services.coordinator import AICoordinator
 from Undefined.services.message_batcher import BatchDispatchToken, MessageBatcher
 
 

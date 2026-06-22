@@ -33,7 +33,7 @@ from Undefined.onebot import (
 )
 from Undefined.rate_limit import RateLimiter
 from Undefined.scheduled_task_storage import ScheduledTaskStorage
-from Undefined.services.ai_coordinator import AICoordinator
+from Undefined.services.coordinator import AICoordinator
 from Undefined.services.command import CommandDispatcher
 from Undefined.services.message_batcher import MessageBatcher, make_scope
 from Undefined.services.model_pool import ModelPoolService

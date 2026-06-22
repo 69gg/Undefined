@@ -3,7 +3,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 
-from Undefined.services.ai_coordinator import AICoordinator
+from Undefined.services.coordinator import AICoordinator
 
 
 def _make_coordinator() -> AICoordinator:

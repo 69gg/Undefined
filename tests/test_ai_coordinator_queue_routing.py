@@ -1,16 +1,23 @@
 from __future__ import annotations
 
+import importlib
 from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from Undefined.context import RequestContext
-from Undefined.services.ai_coordinator import AICoordinator
+from Undefined.services.coordinator import AICoordinator
+from Undefined.services.coordinator.background import BackgroundMixin
 from Undefined.services.message_batcher import BufferedMessage
 from Undefined.services.coordinator import group as coordinator_group_module
+
+
+def test_legacy_ai_coordinator_module_is_removed() -> None:
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("Undefined.services.ai_coordinator")
 
 
 @pytest.mark.asyncio
@@ -317,3 +324,33 @@ async def test_execute_auto_reply_send_msg_cb_passes_history_message(
     assert captured_extra_context["batched_count"] == 2
     assert captured_extra_context["current_input_is_batched"] is True
     assert captured_resources["message_ids"] == ["101", "102"]
+
+
+@pytest.mark.asyncio
+async def test_execute_queued_llm_call_coerces_max_tokens_to_int() -> None:
+    coordinator: Any = object.__new__(AICoordinator)
+    model_config = SimpleNamespace(model_name="chat-model", max_tokens="4096")
+    result = {"choices": [{"message": {"content": "ok"}}]}
+    request_model = AsyncMock(return_value=result)
+    set_llm_call_result = Mock()
+    coordinator.ai = SimpleNamespace(
+        request_model=request_model,
+        set_llm_call_result=set_llm_call_result,
+    )
+    coordinator.config = SimpleNamespace(ai_request_max_retries=0)
+
+    await BackgroundMixin._execute_queued_llm_call(
+        coordinator,
+        {
+            "request_id": "req-1",
+            "model_config": model_config,
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": "123",
+            "call_type": "test_call",
+        },
+    )
+
+    request_model.assert_awaited_once()
+    assert request_model.await_args is not None
+    assert request_model.await_args.kwargs["max_tokens"] == 123
+    set_llm_call_result.assert_called_once_with("req-1", result)

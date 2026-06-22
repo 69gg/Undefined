@@ -129,7 +129,7 @@ features.pool_enabled        ← 全局总开关（false 时完全不生效）
 | `config/loader.py` | 解析 pool 配置，字段缺省继承主模型 |
 | `ai/model_selector.py` | 纯选择逻辑：策略、偏好存储、compare 状态 |
 | `services/model_pool.py` | 私聊交互服务：`/compare`、「选X」、`select_chat_config` |
-| `services/ai_coordinator.py` | 持有 `ModelPoolService`，私聊队列投递时选模型 |
+| `services/coordinator/` | 持有 `ModelPoolService`，私聊队列投递时选模型 |
 | `handlers.py` | 私聊消息委托给 `model_pool.handle_private_message()` |
 | `skills/agents/runner.py` | Agent 执行时调用 `model_selector.select_agent_config()` |
 | `utils/queue_intervals.py` | 注册 pool 模型的队列间隔 |
