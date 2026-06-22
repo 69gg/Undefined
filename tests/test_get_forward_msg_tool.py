@@ -161,6 +161,12 @@ async def test_get_forward_msg_uses_snapshot_when_nested_forward_becomes_unavail
     assert "内层内容" in nested_result
     assert seen_ids.count("nested-forward") == 1
 
+    raw_nested_result = await execute({"message_id": "nested-forward"}, context)
+
+    assert "来自本地快照" in raw_nested_result
+    assert "内层内容" in raw_nested_result
+    assert seen_ids.count("nested-forward") == 1
+
 
 @pytest.mark.asyncio
 async def test_get_forward_msg_reports_unavailable_forward_metadata(

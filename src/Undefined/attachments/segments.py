@@ -16,7 +16,10 @@ from urllib.parse import unquote, urlsplit
 
 import httpx
 
-from Undefined.attachments.forward_snapshot import save_forward_snapshot
+from Undefined.attachments.forward_snapshot import (
+    load_forward_snapshot,
+    snapshot_forward_tree,
+)
 from Undefined.attachments.models import RegisteredMessageAttachments
 from Undefined.utils.paths import WEBUI_FILE_CACHE_DIR
 from Undefined.utils.xml import escape_xml_attr
@@ -376,8 +379,8 @@ async def register_message_attachments(
         get_forward_messages: 可选，拉取合并转发子消息。
         register_forward_refs: 是否将顶层合并转发注册为 ``forward_`` 引用。
         expand_forward_attachments: 是否递归扫描合并转发内的附件。
-        snapshot_forward_messages: 是否读取当前层合并转发并缓存内层节点快照。
-        snapshot_nested_forward_messages: 缓存当前层快照后，是否继续缓存直接内层转发。
+        snapshot_forward_messages: 是否读取合并转发并递归缓存可访问的节点快照。
+        snapshot_nested_forward_messages: 向后兼容参数；递归缓存已覆盖内层转发。
 
     Returns:
         已注册附件引用与归一化纯文本。
@@ -410,36 +413,6 @@ async def register_message_attachments(
                 exc,
             )
             return []
-
-    async def _snapshot_direct_nested_forwards(
-        nodes: Sequence[Mapping[str, Any]],
-    ) -> None:
-        if not snapshot_nested_forward_messages:
-            return
-        for node in nodes:
-            raw_message = (
-                node.get("content") or node.get("message") or node.get("raw_message")
-            )
-            nested_segments = normalize_message_segments(raw_message)
-            for nested_segment in nested_segments:
-                nested_type = str(nested_segment.get("type", "") or "").strip().lower()
-                if nested_type != "forward":
-                    continue
-                raw_nested_data = nested_segment.get("data", {})
-                nested_data = (
-                    raw_nested_data if isinstance(raw_nested_data, Mapping) else {}
-                )
-                nested_forward_id = _extract_forward_id(nested_data)
-                if not nested_forward_id or nested_forward_id in visited_forward_ids:
-                    continue
-                visited_forward_ids.add(nested_forward_id)
-                nested_nodes = await _fetch_forward_nodes(nested_forward_id)
-                if nested_nodes:
-                    await save_forward_snapshot(
-                        scope_key=scope_key,
-                        forward_id=nested_forward_id,
-                        nodes=nested_nodes,
-                    )
 
     async def _collect_from_segments(
         current_segments: Sequence[Mapping[str, Any]],
@@ -591,7 +564,7 @@ async def register_message_attachments(
                 elif type_ == "forward":
                     # 合并转发递归展开，深度上限防止无限嵌套
                     forward_id = _extract_forward_id(data)
-                    forward_nodes: list[Mapping[str, Any]] = []
+                    forward_nodes: Sequence[Mapping[str, Any]] = []
                     if register_forward_refs and depth == 0 and forward_id:
                         register_forward = getattr(
                             registry,
@@ -621,15 +594,27 @@ async def register_message_attachments(
                         )
                     )
                     if should_fetch_forward:
+                        assert get_forward_messages is not None
                         visited_forward_ids.add(forward_id)
-                        forward_nodes = await _fetch_forward_nodes(forward_id)
-                        if snapshot_forward_messages and forward_nodes:
-                            await save_forward_snapshot(
+                        if snapshot_forward_messages:
+                            try:
+                                await snapshot_forward_tree(
+                                    scope_key=scope_key,
+                                    forward_id=forward_id,
+                                    get_forward_messages=get_forward_messages,
+                                )
+                            except Exception:
+                                logger.debug(
+                                    "[AttachmentRegistry] forward snapshot failed: id=%s",
+                                    forward_id,
+                                    exc_info=True,
+                                )
+                            forward_nodes = await load_forward_snapshot(
                                 scope_key=scope_key,
                                 forward_id=forward_id,
-                                nodes=forward_nodes,
                             )
-                            await _snapshot_direct_nested_forwards(forward_nodes)
+                        else:
+                            forward_nodes = await _fetch_forward_nodes(forward_id)
 
                     if (
                         expand_forward_attachments

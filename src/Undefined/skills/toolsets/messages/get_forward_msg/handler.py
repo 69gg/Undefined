@@ -8,6 +8,7 @@ from Undefined.attachments import build_attachment_scope, register_message_attac
 from Undefined.attachments.forward_snapshot import (
     load_forward_snapshot,
     save_forward_snapshot,
+    snapshot_forward_tree,
 )
 from Undefined.attachments.segments import (
     forward_ref_to_tag,
@@ -182,7 +183,6 @@ async def _register_node_segments(
         register_forward_refs=True,
         expand_forward_attachments=False,
         snapshot_forward_messages=True,
-        snapshot_nested_forward_messages=True,
     )
     refs = list(result.attachments) + list(result.forward_refs)
     return result.normalized_text, refs
@@ -230,9 +230,23 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
                         forward_id=raw_forward_id,
                         nodes=nodes,
                     )
+                    await snapshot_forward_tree(
+                        scope_key=scope_key,
+                        forward_id=raw_forward_id,
+                        get_forward_messages=get_forward_msg_callback,
+                    )
+                    nodes = (
+                        await load_forward_snapshot(
+                            scope_key=scope_key,
+                            forward_id=raw_forward_id,
+                        )
+                        or nodes
+                    )
                 except Exception:
                     logger.debug(
-                        "保存合并转发快照失败: id=%s", raw_forward_id, exc_info=True
+                        "递归保存合并转发快照失败: id=%s",
+                        raw_forward_id,
+                        exc_info=True,
                     )
         except Exception as exc:
             logger.exception("获取合并转发消息失败: id=%s", raw_forward_id)

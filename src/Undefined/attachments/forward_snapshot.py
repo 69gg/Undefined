@@ -7,13 +7,22 @@ OneBot 协议端可能只允许在收到外层合并转发时读取内层内容�
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 import hashlib
+import logging
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Awaitable, Callable, Mapping
 
 from Undefined.utils import io
 from Undefined.utils.paths import FORWARD_SNAPSHOT_CACHE_DIR
+
+logger = logging.getLogger(__name__)
+
+_MAX_RECURSIVE_SNAPSHOT_DEPTH = 3
+_MAX_RECURSIVE_SNAPSHOT_NODES = 50
+_snapshot_locks: dict[str, asyncio.Lock] = {}
+_snapshot_inflight: dict[str, asyncio.Task[None]] = {}
 
 
 def _snapshot_key(scope_key: str, forward_id: str) -> str:
@@ -23,6 +32,15 @@ def _snapshot_key(scope_key: str, forward_id: str) -> str:
 
 def _snapshot_path(scope_key: str, forward_id: str) -> Path:
     return FORWARD_SNAPSHOT_CACHE_DIR / f"{_snapshot_key(scope_key, forward_id)}.json"
+
+
+def _snapshot_lock(scope_key: str, forward_id: str) -> asyncio.Lock:
+    key = _snapshot_key(scope_key, forward_id)
+    lock = _snapshot_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _snapshot_locks[key] = lock
+    return lock
 
 
 def _clean_json_value(value: Any) -> Any:
@@ -113,3 +131,139 @@ async def load_forward_snapshot(
     if str(raw.get("forward_id", "") or "") != normalized_forward_id:
         return []
     return normalize_forward_nodes_for_snapshot(raw.get("nodes"))
+
+
+def _extract_forward_id(data: Mapping[str, Any]) -> str:
+    forward_id = data.get("id") or data.get("resid") or data.get("message_id")
+    return str(forward_id).strip() if forward_id is not None else ""
+
+
+def _normalize_message_segments(message: Any) -> list[Mapping[str, Any]]:
+    if isinstance(message, list):
+        return [item for item in message if isinstance(item, Mapping)]
+    if isinstance(message, Mapping):
+        return [message]
+    if isinstance(message, str):
+        return [{"type": "text", "data": {"text": message}}]
+    return []
+
+
+def _iter_nested_forward_ids(nodes: list[dict[str, Any]]) -> list[str]:
+    forward_ids: list[str] = []
+    seen: set[str] = set()
+    for node in nodes:
+        raw_message = (
+            node.get("content") or node.get("message") or node.get("raw_message")
+        )
+        for segment in _normalize_message_segments(raw_message):
+            if str(segment.get("type", "") or "").strip().lower() != "forward":
+                continue
+            raw_data = segment.get("data", {})
+            data = raw_data if isinstance(raw_data, Mapping) else {}
+            forward_id = _extract_forward_id(data)
+            if forward_id and forward_id not in seen:
+                seen.add(forward_id)
+                forward_ids.append(forward_id)
+    return forward_ids
+
+
+async def snapshot_forward_tree(
+    *,
+    scope_key: str,
+    forward_id: str,
+    get_forward_messages: Callable[[str], Awaitable[Any]],
+    max_depth: int = _MAX_RECURSIVE_SNAPSHOT_DEPTH,
+    max_nodes: int = _MAX_RECURSIVE_SNAPSHOT_NODES,
+) -> None:
+    """递归抓取并保存当前可访问的合并转发树。
+
+    同一 ``scope_key + forward_id`` 在进程内会合并并发抓取，避免多个消息或
+    工具调用同时触发同一层 OneBot 请求。
+    """
+    normalized_scope = str(scope_key or "").strip()
+    normalized_forward_id = str(forward_id or "").strip()
+    if not normalized_scope or not normalized_forward_id:
+        return
+    if max_depth < 0 or max_nodes <= 0:
+        return
+
+    root_key = _snapshot_key(normalized_scope, normalized_forward_id)
+    inflight = _snapshot_inflight.get(root_key)
+    if inflight is not None and not inflight.done():
+        await asyncio.shield(inflight)
+        return
+
+    async def _run() -> None:
+        visited: set[str] = set()
+        remaining = max_nodes
+
+        async def _walk(current_forward_id: str, depth: int) -> None:
+            nonlocal remaining
+            normalized_current_id = str(current_forward_id or "").strip()
+            if not normalized_current_id:
+                return
+            if depth > max_depth or remaining <= 0:
+                return
+            if normalized_current_id in visited:
+                return
+            visited.add(normalized_current_id)
+            remaining -= 1
+
+            lock = _snapshot_lock(normalized_scope, normalized_current_id)
+            async with lock:
+                nodes: list[dict[str, Any]] = []
+                try:
+                    nodes = await load_forward_snapshot(
+                        scope_key=normalized_scope,
+                        forward_id=normalized_current_id,
+                    )
+                except Exception:
+                    logger.debug(
+                        "读取合并转发快照失败，将尝试回源: id=%s",
+                        normalized_current_id,
+                        exc_info=True,
+                    )
+                if not nodes:
+                    try:
+                        raw_nodes = await get_forward_messages(normalized_current_id)
+                    except Exception:
+                        logger.debug(
+                            "递归缓存合并转发失败: id=%s",
+                            normalized_current_id,
+                            exc_info=True,
+                        )
+                        return
+                    nodes = normalize_forward_nodes_for_snapshot(raw_nodes)
+                if not nodes:
+                    return
+                try:
+                    await save_forward_snapshot(
+                        scope_key=normalized_scope,
+                        forward_id=normalized_current_id,
+                        nodes=nodes,
+                    )
+                except Exception:
+                    logger.debug(
+                        "写入合并转发快照失败: id=%s",
+                        normalized_current_id,
+                        exc_info=True,
+                    )
+
+            if depth >= max_depth:
+                return
+            for nested_forward_id in _iter_nested_forward_ids(nodes):
+                if remaining <= 0:
+                    break
+                await _walk(nested_forward_id, depth + 1)
+
+        await _walk(normalized_forward_id, 0)
+
+    task = asyncio.create_task(_run())
+    _snapshot_inflight[root_key] = task
+
+    def _forget(done: asyncio.Task[None]) -> None:
+        if _snapshot_inflight.get(root_key) is done:
+            _snapshot_inflight.pop(root_key, None)
+
+    task.add_done_callback(_forget)
+    await asyncio.shield(task)

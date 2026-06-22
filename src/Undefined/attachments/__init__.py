@@ -13,6 +13,7 @@ from Undefined.attachments.models import (
 from Undefined.attachments.forward_snapshot import (
     load_forward_snapshot,
     save_forward_snapshot,
+    snapshot_forward_tree,
 )
 from Undefined.attachments.registry import AttachmentRegistry
 from Undefined.attachments.render import (
@@ -50,4 +51,5 @@ __all__ = [
     "render_message_with_pic_placeholders",
     "save_forward_snapshot",
     "scope_from_context",
+    "snapshot_forward_tree",
 ]
