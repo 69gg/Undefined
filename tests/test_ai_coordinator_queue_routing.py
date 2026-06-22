@@ -217,6 +217,8 @@ def test_build_prompt_limits_proactive_participation_to_technical_contexts() -> 
     assert "轻松互动、玩梗、吐槽本身不构成参与许可" in prompt
     assert "只有明确纯表情包回复才先检索表情包" in prompt
     assert "第一轮必须优先把必要文字回复做好并调用 send_message" in prompt
+    assert "文字发送成功后优先考虑在后续响应轮次补一张独立表情包" in prompt
+    assert "严肃答疑、代码排查、长任务推进、隐私/安全拒绝、信息不足追问" in prompt
     assert "默认先尝试 memes.search_memes" not in prompt
     assert "普通闲聊、玩梗、吐槽、轻松互动：" not in prompt
 
