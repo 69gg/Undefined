@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import threading
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -433,6 +434,38 @@ async def test_build_messages_places_system_info_before_current_time(
         for label in labels
     ]
     assert positions == sorted(positions)
+
+
+@pytest.mark.asyncio
+async def test_build_messages_collects_system_info_off_event_loop_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    builder = _make_builder_with_system_info()
+    event_loop_thread_id = threading.get_ident()
+    observed_thread_ids: list[int] = []
+
+    async def _fake_load_system_prompt() -> str:
+        return "系统提示词"
+
+    async def _fake_load_each_rules() -> str:
+        return ""
+
+    def _fake_build_prompt_system_info(_config: Any) -> str:
+        observed_thread_ids.append(threading.get_ident())
+        return "【当前系统信息】\n- Host: bot-host"
+
+    monkeypatch.setattr(builder, "_load_system_prompt", _fake_load_system_prompt)
+    monkeypatch.setattr(builder, "_load_each_rules", _fake_load_each_rules)
+    monkeypatch.setattr(
+        "Undefined.ai.prompts.builder.build_prompt_system_info",
+        _fake_build_prompt_system_info,
+    )
+
+    messages = await builder.build_messages("看下系统状态")
+
+    assert observed_thread_ids
+    assert all(thread_id != event_loop_thread_id for thread_id in observed_thread_ids)
+    assert any("【当前系统信息】" in str(item.get("content", "")) for item in messages)
 
 
 @pytest.mark.asyncio

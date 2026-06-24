@@ -43,11 +43,15 @@ class _FakePsutil:
     AF_INET = socket.AF_INET
     AF_INET6 = socket.AF_INET6
 
+    def __init__(self) -> None:
+        self.cpu_percent_calls = 0
+
     def cpu_count(self, logical: bool = True) -> int:
         return 16 if logical else 8
 
     def cpu_percent(self, interval: float | None = None) -> float:
         _ = interval
+        self.cpu_percent_calls += 1
         return 12.3
 
     def virtual_memory(self) -> SimpleNamespace:
@@ -108,6 +112,7 @@ def test_build_prompt_system_info_includes_enabled_sections(
 ) -> None:
     fake_psutil = _FakePsutil()
     monkeypatch.setattr(system_info, "psutil", fake_psutil)
+    monkeypatch.setattr(system_info, "_CPU_PERCENT_PRIMED", False)
     monkeypatch.setattr(
         system_info, "_build_os_line", lambda: "- OS: Linux-6; 架构: x86_64"
     )
@@ -135,6 +140,26 @@ def test_build_prompt_system_info_includes_enabled_sections(
     assert "- 进程: PID" in text
     assert "RSS 256.0 MiB" in text
     assert "- 系统启动:" in text
+    assert fake_psutil.cpu_percent_calls == 2
+
+
+def test_build_prompt_system_info_truncates_disks_using_valid_partition_count(
+    monkeypatch: Any,
+) -> None:
+    class ManyDisksPsutil(_FakePsutil):
+        def disk_partitions(self, all: bool = False) -> list[SimpleNamespace]:
+            _ = all
+            return [
+                SimpleNamespace(mountpoint=f"/mnt/disk-{index}", fstype="ext4")
+                for index in range(14)
+            ]
+
+    monkeypatch.setattr(system_info, "psutil", ManyDisksPsutil())
+
+    lines = list(system_info._iter_disk_lines(max_items=12))
+
+    assert len(lines) == 13
+    assert lines[-1] == "... 其余 2 个分区已省略"
 
 
 def test_build_prompt_system_info_respects_section_switches(

@@ -33,7 +33,7 @@ def _write_bump_project(root: Path, *, version: str = "1.2.3") -> None:
         encoding="utf-8",
     )
     (root / "src" / "Undefined" / "__init__.py").write_text(
-        f'__version__ = "{version}"\n',
+        f'__version__: str = "{version}"\n',
         encoding="utf-8",
     )
 
@@ -154,7 +154,7 @@ def test_bump_project_versions_updates_console_and_chat_manifests_and_locks(
     assert 'version = "2.0.0"' in (tmp_path / "pyproject.toml").read_text(
         encoding="utf-8"
     )
-    assert '__version__ = "2.0.0"' in (
+    assert '__version__: str = "2.0.0"' in (
         tmp_path / "src" / "Undefined" / "__init__.py"
     ).read_text(encoding="utf-8")
 

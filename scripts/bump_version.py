@@ -263,8 +263,8 @@ def bump_project_versions(
         ),
         (
             root / "src" / "Undefined" / "__init__.py",
-            r'^__version__\s*=\s*"[^"]+"',
-            f'__version__ = "{version}"',
+            r'^(__version__(?:\s*:\s*str)?\s*=\s*)"[^"]+"',
+            rf'\g<1>"{version}"',
         ),
     )
     for path, pattern, replacement in text_targets:

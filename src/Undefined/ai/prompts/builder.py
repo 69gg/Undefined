@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 from collections import deque
 from datetime import datetime
 from typing import Any, Awaitable, Callable, Literal
@@ -523,9 +524,9 @@ class PromptBuilder:
 
         if self._runtime_config_getter is not None:
             try:
-                runtime_config = self._runtime_config_getter()
-                system_info_config = getattr(runtime_config, "prompt_system_info", None)
-                system_info = build_prompt_system_info(system_info_config)
+                system_info = await asyncio.to_thread(
+                    self._build_prompt_system_info_from_runtime_config
+                )
                 if system_info:
                     messages.append({"role": "system", "content": system_info})
                     logger.debug(
@@ -552,6 +553,13 @@ class PromptBuilder:
             len(question),
         )
         return messages
+
+    def _build_prompt_system_info_from_runtime_config(self) -> str:
+        if self._runtime_config_getter is None:
+            return ""
+        runtime_config = self._runtime_config_getter()
+        system_info_config = getattr(runtime_config, "prompt_system_info", None)
+        return build_prompt_system_info(system_info_config)
 
     def _resolve_chat_scope(
         self, extra_context: dict[str, Any] | None

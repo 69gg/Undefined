@@ -19,6 +19,7 @@ except Exception:  # pragma: no cover - 仅在依赖缺失或平台导入失败�
     psutil = None
 
 _BYTES_PER_GIB = 1024**3
+_CPU_PERCENT_PRIMED = False
 
 
 def _safe_call(func: Any, *args: Any, **kwargs: Any) -> Any | None:
@@ -26,6 +27,17 @@ def _safe_call(func: Any, *args: Any, **kwargs: Any) -> Any | None:
         return func(*args, **kwargs)
     except Exception:
         return None
+
+
+def _prime_cpu_percent() -> None:
+    global _CPU_PERCENT_PRIMED
+    if _CPU_PERCENT_PRIMED or psutil is None:
+        return
+    _safe_call(psutil.cpu_percent, interval=None)
+    _CPU_PERCENT_PRIMED = True
+
+
+_prime_cpu_percent()
 
 
 def _format_bytes(value: float | int | None) -> str:
@@ -125,7 +137,7 @@ def _iter_disk_lines(max_items: int = 12) -> Iterable[str]:
     if not isinstance(partitions, list):
         return []
 
-    lines: list[str] = []
+    valid_lines: list[str] = []
     seen_mounts: set[str] = set()
     for part in partitions:
         mountpoint = str(getattr(part, "mountpoint", "") or "").strip()
@@ -139,11 +151,11 @@ def _iter_disk_lines(max_items: int = 12) -> Iterable[str]:
         total = _format_bytes(getattr(usage, "total", None))
         used = _format_bytes(getattr(usage, "used", None))
         percent = _format_percent(getattr(usage, "percent", None))
-        lines.append(f"{mountpoint} ({filesystem}): {used}/{total}, {percent}")
-        if len(lines) >= max_items:
-            break
-    if len(seen_mounts) > max_items:
-        lines.append(f"... 其余 {len(seen_mounts) - max_items} 个分区已省略")
+        valid_lines.append(f"{mountpoint} ({filesystem}): {used}/{total}, {percent}")
+    lines = valid_lines[:max_items]
+    skipped_count = max(0, len(valid_lines) - max_items)
+    if skipped_count:
+        lines.append(f"... 其余 {skipped_count} 个分区已省略")
     return lines
 
 
@@ -181,6 +193,7 @@ def _build_cpu_line() -> str:
 def _build_cpu_usage_line() -> str | None:
     if psutil is None:
         return None
+    _prime_cpu_percent()
     usage = _safe_call(psutil.cpu_percent, interval=None)
     if usage is None:
         return None
