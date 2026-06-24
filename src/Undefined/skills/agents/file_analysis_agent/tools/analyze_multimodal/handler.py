@@ -3,7 +3,82 @@ import logging
 from pathlib import Path
 from typing import Any, Dict
 
+from Undefined.attachments import scope_from_context
+
 logger = logging.getLogger(__name__)
+
+
+def _is_attachment_uid(value: str) -> bool:
+    text = value.strip()
+    return text.startswith(("pic_", "file_"))
+
+
+def _local_path_from_record(record: Any) -> Path | None:
+    local_path_raw = str(getattr(record, "local_path", "") or "").strip()
+    if not local_path_raw:
+        return None
+    local_path = (
+        local_path_raw[7:] if local_path_raw.startswith("file://") else local_path_raw
+    )
+    path = Path(local_path)
+    return path if path.is_file() else None
+
+
+def _scope_key_from_context(context: Dict[str, Any]) -> str | None:
+    scope_key = str(context.get("scope_key") or "").strip()
+    if scope_key:
+        return scope_key
+    get_scope_from_context = context.get("get_scope_from_context")
+    if callable(get_scope_from_context):
+        scope_key = str(get_scope_from_context(context) or "").strip()
+    else:
+        scope_key = str(scope_from_context(context) or "").strip()
+    return scope_key or None
+
+
+async def _resolve_attachment_uid_path(
+    file_path: str,
+    context: Dict[str, Any],
+) -> tuple[Path | None, str | None]:
+    if not _is_attachment_uid(file_path):
+        return None, None
+
+    attachment_registry = context.get("attachment_registry")
+    if attachment_registry is None:
+        return None, f"错误：无法解析附件 UID {file_path}：缺少 attachment_registry"
+
+    scope_key = _scope_key_from_context(context)
+    if not scope_key:
+        return None, f"错误：无法解析附件 UID {file_path}：缺少会话作用域"
+
+    try:
+        load = getattr(attachment_registry, "load", None)
+        if load is not None:
+            await load()
+        resolve_async = getattr(attachment_registry, "resolve_async", None)
+        if resolve_async is not None:
+            record = await resolve_async(file_path, scope_key)
+        else:
+            record = attachment_registry.resolve(file_path, scope_key)
+    except Exception:
+        logger.exception("附件 UID 解析失败: %s", file_path)
+        return None, f"错误：附件 UID 解析失败：{file_path}"
+
+    if record is None:
+        return None, f"错误：附件 UID 不存在或无权访问：{file_path}"
+
+    ensure_local_file = getattr(attachment_registry, "ensure_local_file", None)
+    if ensure_local_file is not None:
+        try:
+            record = await ensure_local_file(record)
+        except Exception:
+            logger.exception("附件 UID 本地化失败: %s", file_path)
+            return None, f"错误：附件 UID 本地化失败：{file_path}"
+
+    local_path = _local_path_from_record(record)
+    if local_path is None:
+        return None, f"错误：附件 UID 无法解析到本地文件：{file_path}"
+    return local_path, None
 
 
 def _format_result(result: dict[str, str]) -> str:
@@ -61,7 +136,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     path = Path(file_path)
 
     if not path.exists():
-        return f"错误：文件不存在 {file_path}"
+        resolved_path, error = await _resolve_attachment_uid_path(file_path, context)
+        if error:
+            return error
+        if resolved_path is None:
+            return f"错误：文件不存在 {file_path}"
+        path = resolved_path
 
     if not path.is_file():
         return f"错误：{file_path} 不是文件"

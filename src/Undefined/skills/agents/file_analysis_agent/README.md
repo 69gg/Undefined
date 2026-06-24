@@ -12,6 +12,7 @@
 运行机制：
 - 由 `AgentRegistry` 自动发现并注册
 - 通过 `prompt` 输入任务描述并调用内部工具
+- 内部附件 UID（`pic_xxx` / `file_xxx`）由工具按当前会话作用域解析；多模态分析可直接传 UID，其他解析工具先用 `download_file` 转成本地路径
 - PDF 文字提取走 `extract_pdf`；扫描版、图表、版式或指定页码范围视觉分析走 `describe_pdf_page`
 
 开发提示：
