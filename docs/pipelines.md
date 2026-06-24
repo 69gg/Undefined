@@ -6,8 +6,8 @@
 
 ## 运行顺序
 
-1. `MessageHandler` 先并行执行消息预处理：附件收集、历史文本解析、昵称或群信息读取等。图片、文件等媒体会登记为附件 UID，并在 AI 可见正文中统一写作 `<attachment uid="..."/>`；合并转发会登记为 `<forward uid="forward_xxx"/>`，不在实时 AI 输入中自动展开。
-2. 用户消息先写入历史。历史记录仍会递归展开合并转发文本，保持历史检索和旧行为兼容；实时 AI 输入只保留 forward UID，AI 需要查看时调用 `messages.get_forward_msg` 按层读取。
+1. `MessageHandler` 先并行执行消息预处理：附件收集、历史文本解析、昵称或群信息读取等。图片、文件等媒体会登记为附件 UID，并在 AI 可见正文中统一写作 `<attachment uid="..."/>`；合并转发会登记为 `<forward uid="forward_xxx"/>`，同时递归保存当前可访问的转发树快照，不在实时 AI 输入中自动展开。
+2. 用户消息先写入历史。历史记录仍会递归展开合并转发文本，保持历史检索和旧行为兼容；同一轮 prompt 会剔除当前消息的历史副本，实时 AI 输入只保留 forward UID，AI 需要查看第一层或内层内容时调用 `messages.get_forward_msg` 按层读取。
 3. 若消息命中斜杠命令，立即分发命令并结束本轮后续流程；命令输入和命令输出会写入历史，供后续 AI 轮次读取。
 4. 未命中命令时，`PipelineRegistry` 并行调用所有已注册管线的 `detect(context)`。
 5. 对所有命中的管线，并行调用对应的 `process(detection, context)`。

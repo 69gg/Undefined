@@ -90,14 +90,14 @@ def build_current_input_per_message_query_texts(
 def _history_msg_matches_signature(
     msg: dict[str, Any], signature: CurrentMessageSignature
 ) -> bool:
+    history_message_id = str(msg.get("message_id", "") or "").strip()
+    if signature.message_id and history_message_id:
+        return history_message_id == signature.message_id
+
     sig_sender_id = signature.sender_id.strip()
     sig_content = signature.content.strip()
     if not sig_sender_id or not sig_content:
         return False
-
-    history_message_id = str(msg.get("message_id", "") or "").strip()
-    if signature.message_id and history_message_id:
-        return history_message_id == signature.message_id
 
     last_sender_id = str(msg.get("user_id", "") or "").strip()
     last_content = str(msg.get("message", "") or "").strip()

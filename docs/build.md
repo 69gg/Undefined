@@ -351,6 +351,8 @@ npm install
 
 ## 9. Release 产物矩阵
 
+面向普通用户的下载选择见 [README — Release 下载速查](../README.md#release-下载速查)；本节只记录构建和发布矩阵。部署 Bot 本身不需要下载 Console / Chat 客户端安装包。
+
 每次正式 Release 计划上传：
 
 - Python

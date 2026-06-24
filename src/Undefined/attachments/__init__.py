@@ -10,6 +10,11 @@ from Undefined.attachments.models import (
     RegisteredMessageAttachments,
     RenderedRichMessage,
 )
+from Undefined.attachments.forward_snapshot import (
+    load_forward_snapshot,
+    save_forward_snapshot,
+    snapshot_forward_tree,
+)
 from Undefined.attachments.registry import AttachmentRegistry
 from Undefined.attachments.render import (
     dispatch_pending_file_sends,
@@ -40,8 +45,11 @@ __all__ = [
     "attachment_refs_to_xml",
     "build_attachment_scope",
     "dispatch_pending_file_sends",
+    "load_forward_snapshot",
     "register_message_attachments",
     "render_message_with_attachments",
     "render_message_with_pic_placeholders",
+    "save_forward_snapshot",
     "scope_from_context",
+    "snapshot_forward_tree",
 ]

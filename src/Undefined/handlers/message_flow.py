@@ -299,6 +299,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             else None,
             register_forward_refs=True,
             expand_forward_attachments=False,
+            snapshot_forward_messages=True,
         )
         attachments = result.attachments
         # 命中表情库时为 AI 上下文补充 [表情包] 描述

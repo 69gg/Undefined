@@ -16,6 +16,10 @@ from urllib.parse import unquote, urlsplit
 
 import httpx
 
+from Undefined.attachments.forward_snapshot import (
+    load_forward_snapshot,
+    snapshot_forward_tree,
+)
 from Undefined.attachments.models import RegisteredMessageAttachments
 from Undefined.utils.paths import WEBUI_FILE_CACHE_DIR
 from Undefined.utils.xml import escape_xml_attr
@@ -362,6 +366,8 @@ async def register_message_attachments(
     | None = None,
     register_forward_refs: bool = False,
     expand_forward_attachments: bool = True,
+    snapshot_forward_messages: bool = False,
+    snapshot_nested_forward_messages: bool = False,
 ) -> RegisteredMessageAttachments:
     """扫描消息段并将图片/文件注册到 ``AttachmentRegistry``。
 
@@ -373,6 +379,8 @@ async def register_message_attachments(
         get_forward_messages: 可选，拉取合并转发子消息。
         register_forward_refs: 是否将顶层合并转发注册为 ``forward_`` 引用。
         expand_forward_attachments: 是否递归扫描合并转发内的附件。
+        snapshot_forward_messages: 是否读取合并转发并递归缓存可访问的节点快照。
+        snapshot_nested_forward_messages: 向后兼容参数；递归缓存已覆盖内层转发。
 
     Returns:
         已注册附件引用与归一化纯文本。
@@ -392,6 +400,22 @@ async def register_message_attachments(
         )
 
     visited_forward_ids: set[str] = set()
+    should_snapshot_forward_messages = (
+        snapshot_forward_messages or snapshot_nested_forward_messages
+    )
+
+    async def _fetch_forward_nodes(forward_id: str) -> list[Mapping[str, Any]]:
+        if get_forward_messages is None:
+            return []
+        try:
+            return _normalize_forward_nodes(await get_forward_messages(forward_id))
+        except Exception as exc:
+            logger.debug(
+                "[AttachmentRegistry] forward resolver failed: id=%s err=%s",
+                forward_id,
+                exc,
+            )
+            return []
 
     async def _collect_from_segments(
         current_segments: Sequence[Mapping[str, Any]],
@@ -543,6 +567,7 @@ async def register_message_attachments(
                 elif type_ == "forward":
                     # 合并转发递归展开，深度上限防止无限嵌套
                     forward_id = _extract_forward_id(data)
+                    forward_nodes: Sequence[Mapping[str, Any]] = []
                     if register_forward_refs and depth == 0 and forward_id:
                         register_forward = getattr(
                             registry,
@@ -559,26 +584,56 @@ async def register_message_attachments(
                             )
                             ref = record.prompt_ref()
 
+                    should_fetch_forward = (
+                        get_forward_messages is not None
+                        and forward_id
+                        and forward_id not in visited_forward_ids
+                        and (
+                            should_snapshot_forward_messages
+                            or (
+                                expand_forward_attachments
+                                and depth < _FORWARD_ATTACHMENT_MAX_DEPTH
+                            )
+                        )
+                    )
+                    if should_fetch_forward:
+                        assert get_forward_messages is not None
+                        visited_forward_ids.add(forward_id)
+                        if should_snapshot_forward_messages:
+                            try:
+                                await snapshot_forward_tree(
+                                    scope_key=scope_key,
+                                    forward_id=forward_id,
+                                    get_forward_messages=get_forward_messages,
+                                )
+                            except Exception:
+                                logger.debug(
+                                    "[AttachmentRegistry] forward snapshot failed: id=%s",
+                                    forward_id,
+                                    exc_info=True,
+                                )
+                            forward_nodes = await load_forward_snapshot(
+                                scope_key=scope_key,
+                                forward_id=forward_id,
+                            )
+                            if not forward_nodes:
+                                forward_nodes = await _fetch_forward_nodes(forward_id)
+                        else:
+                            forward_nodes = await _fetch_forward_nodes(forward_id)
+
                     if (
                         expand_forward_attachments
                         and get_forward_messages is not None
                         and depth < _FORWARD_ATTACHMENT_MAX_DEPTH
                         and forward_id
-                        and forward_id not in visited_forward_ids
                     ):
-                        visited_forward_ids.add(forward_id)
-                        try:
-                            nodes = _normalize_forward_nodes(
-                                await get_forward_messages(forward_id)
-                            )
-                        except Exception as exc:
-                            logger.debug(
-                                "[AttachmentRegistry] forward resolver failed: id=%s err=%s",
-                                forward_id,
-                                exc,
-                            )
-                            nodes = []
-                        for node_index, node in enumerate(nodes):
+                        if not forward_nodes:
+                            if forward_id not in visited_forward_ids:
+                                visited_forward_ids.add(forward_id)
+                                forward_nodes = await _fetch_forward_nodes(forward_id)
+                        if not forward_nodes:
+                            continue
+                        for node_index, node in enumerate(forward_nodes):
                             raw_message = (
                                 node.get("content")
                                 or node.get("message")

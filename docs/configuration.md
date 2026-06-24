@@ -580,7 +580,7 @@ Prompt caching 补充：
 
 外部接收的远程图片或文件默认会先下载到附件缓存再生成 UID，避免后续 URL 失效；大文件超过阈值时，UID 仍会生成，但绑定的是 URL 引用而不是缓存文件，AI 可在上下文中看到原始 `source_ref`。如果本地缓存因总容量或时间清理被删除，但记录仍保留 URL，后续需要文件内容时会优先按 URL 回源下载。
 
-合并转发会复用同一注册表登记为 `forward_...` UID，并在实时 AI 输入中显示为 `<forward uid="..."/>`。历史记录仍保留递归展开后的文本；需要查看实时上下文里的转发内容时，AI 会调用 `messages.get_forward_msg` 按层读取，内层合并转发会继续分配新的 `forward_...` UID。
+合并转发会复用同一注册表登记为 `forward_...` UID，并在实时 AI 输入中显示为 `<forward uid="..."/>`。收到合并转发时会在预处理阶段递归保存当前可访问的转发树到 `data/cache/forward_snapshots/`，后续 `messages.get_forward_msg` 读取时优先使用本地快照；缺失时才回源 OneBot 并补写快照。历史记录仍保留递归展开后的文本，但同一轮 prompt 会按 `message_id` 剔除当前消息的历史副本，因此实时上下文只保留 UID；需要查看第一层或内层内容时，AI 会调用工具按层读取，内层合并转发会继续分配新的 `forward_...` UID。如果协议端无法二次读取内层转发，会返回明确诊断和可见原始字段。
 
 ### 4.10.2 `[message_batcher]` 同 sender 短时消息合并
 

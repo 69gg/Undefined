@@ -171,3 +171,24 @@ def test_drop_current_message_if_duplicated_removes_whole_current_batch_tail() -
     filtered = drop_current_message_if_duplicated(recent_messages, question)
 
     assert [msg["message"] for msg in filtered] == ["保留的历史消息"]
+
+
+def test_drop_current_message_if_duplicated_matches_message_id_before_content() -> None:
+    recent_messages = [
+        {
+            "type": "group",
+            "message_id": "7654205319537693084",
+            "display_name": "测试用户",
+            "user_id": "10001",
+            "chat_id": "20001",
+            "timestamp": "2026-06-22 19:35:55",
+            "message": "[合并转发展开: 7654205319537693084]\n外层第一条内容",
+        }
+    ]
+    question = """<message message_id="7654205319537693084" sender="测试用户" sender_id="10001" group_id="20001" time="2026-06-22 19:35:55">
+<content><forward uid="forward_22c794d9"/></content>
+</message>"""
+
+    filtered = drop_current_message_if_duplicated(recent_messages, question)
+
+    assert filtered == []

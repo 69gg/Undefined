@@ -10,11 +10,14 @@ from typing import Any
 import httpx
 import pytest
 
+from Undefined.attachments import forward_snapshot
+from Undefined.attachments import segments as attachment_segments
 from Undefined.attachments import (
     AttachmentRecord,
     AttachmentRegistry,
     append_attachment_text,
     attachment_refs_to_xml,
+    load_forward_snapshot,
     register_message_attachments,
     render_message_with_pic_placeholders,
 )
@@ -672,6 +675,139 @@ async def test_register_message_attachments_registers_forward_uid_without_expans
     assert record is not None
     assert record.media_type == "forward"
     assert record.source_ref == "forward-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("snapshot_forward_messages", "snapshot_nested_forward_messages"),
+    [
+        (True, False),
+        (False, True),
+    ],
+)
+async def test_register_message_attachments_snapshots_forward_tree_without_expansion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    snapshot_forward_messages: bool,
+    snapshot_nested_forward_messages: bool,
+) -> None:
+    monkeypatch.setattr(
+        forward_snapshot,
+        "FORWARD_SNAPSHOT_CACHE_DIR",
+        tmp_path / "forward_snapshots",
+    )
+    monkeypatch.setattr(forward_snapshot, "_snapshot_locks", {})
+    monkeypatch.setattr(forward_snapshot, "_snapshot_lock_users", {})
+    monkeypatch.setattr(forward_snapshot, "_snapshot_inflight", {})
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    calls: list[str] = []
+
+    async def _fake_get_forward(forward_id: str) -> list[dict[str, object]]:
+        calls.append(forward_id)
+        if forward_id == "outer-forward":
+            return [
+                {
+                    "message": [
+                        {"type": "text", "data": {"text": "外层内容"}},
+                        {"type": "forward", "data": {"id": "inner-forward"}},
+                    ]
+                }
+            ]
+        if forward_id == "inner-forward":
+            return [
+                {
+                    "message": [
+                        {"type": "text", "data": {"text": "内层内容"}},
+                    ]
+                }
+            ]
+        return []
+
+    result = await register_message_attachments(
+        registry=registry,
+        segments=[{"type": "forward", "data": {"id": "outer-forward"}}],
+        scope_key="group:10001",
+        get_forward_messages=_fake_get_forward,
+        register_forward_refs=True,
+        expand_forward_attachments=False,
+        snapshot_forward_messages=snapshot_forward_messages,
+        snapshot_nested_forward_messages=snapshot_nested_forward_messages,
+    )
+
+    assert calls == ["outer-forward", "inner-forward"]
+    assert result.attachments == []
+    assert len(result.forward_refs) == 1
+    assert result.normalized_text == f'<forward uid="{result.forward_refs[0]["uid"]}"/>'
+    assert "外层内容" not in result.normalized_text
+    assert await load_forward_snapshot(
+        scope_key="group:10001",
+        forward_id="inner-forward",
+    ) == [
+        {
+            "message": [
+                {"type": "text", "data": {"text": "内层内容"}},
+            ]
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_register_message_attachments_empty_snapshot_falls_back_to_resolver(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    encoded_image = base64.b64encode(_PNG_BYTES).decode("ascii")
+    calls: list[str] = []
+
+    async def _noop_snapshot_forward_tree(**_kwargs: Any) -> None:
+        return None
+
+    async def _empty_load_forward_snapshot(**_kwargs: Any) -> list[dict[str, Any]]:
+        return []
+
+    async def _fake_get_forward(forward_id: str) -> list[dict[str, object]]:
+        calls.append(forward_id)
+        return [
+            {
+                "message": [
+                    {
+                        "type": "image",
+                        "data": {"file": f"base64://{encoded_image}"},
+                    }
+                ]
+            }
+        ]
+
+    monkeypatch.setattr(
+        attachment_segments,
+        "snapshot_forward_tree",
+        _noop_snapshot_forward_tree,
+    )
+    monkeypatch.setattr(
+        attachment_segments,
+        "load_forward_snapshot",
+        _empty_load_forward_snapshot,
+    )
+
+    result = await register_message_attachments(
+        registry=registry,
+        segments=[{"type": "forward", "data": {"id": "outer-forward"}}],
+        scope_key="group:10001",
+        get_forward_messages=_fake_get_forward,
+        expand_forward_attachments=True,
+        snapshot_forward_messages=True,
+    )
+
+    assert calls == ["outer-forward"]
+    assert len(result.attachments) == 1
+    assert result.attachments[0]["uid"].startswith("pic_")
 
 
 def test_attachment_refs_to_xml_skips_forward_refs() -> None:

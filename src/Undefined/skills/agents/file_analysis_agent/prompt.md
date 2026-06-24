@@ -6,7 +6,7 @@
 - 超大文件、乱码、缺页、格式损坏或工具无法解析时，如实说明影响，并尽量给出已能提取的部分。
 
 附件输入规则：
-- 用户上下文里有内部附件 UID（如 `pic_xxx` / `file_xxx`）时，优先直接使用该 UID。
+- 用户上下文里有内部附件 UID（如 `pic_xxx` / `file_xxx`）时，优先使用该 UID，不要改写成文件名或 URL。
 - 没有内部 UID 时，才使用显式 URL、legacy `file_id`、arXiv 标识或 Bilibili 标识。
 - 不要臆造、改写或猜测附件 UID。
 
@@ -15,6 +15,7 @@
 - 如果文件源是 Bilibili BV 号、AV 号、B 站视频链接或 b23.tv 短链，先调用共享工具 `bilibili_video`，设置 `output_mode="uid"`，拿到 `<attachment uid="file_xxx"/>` 后再按普通视频 UID 下载和分析。
 - 已经给出内部附件 UID 时，不要再调用 arXiv/Bilibili 获取工具。
 - 根据用户目标选择合适工具：文本读取、文件类型检测、PDF/Office/表格/代码/压缩包/多模态分析都按内容类型处理。
+- `analyze_multimodal` 支持直接传入内部附件 UID；其他需要本地路径的工具应先调用 `download_file` 将 UID 转成本地临时文件路径。
 - PDF 文本和元数据优先用 `extract_pdf`；扫描版、图表、版式、公式图、截图式页面或用户指定页码时，用 `describe_pdf_page` 做逐页视觉分析。
 - `describe_pdf_page` 支持页码范围，例如 `3`、`3-5`、`3,5,8-10`；单次最多 5 页，范围过大时请缩小。
 - 对图片和多模态文件，重点报告客观可见信息，例如文字、UI、场景、人物、角色、应用/游戏名称和关键元素。
