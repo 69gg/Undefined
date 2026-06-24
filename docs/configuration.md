@@ -621,6 +621,29 @@ Prompt caching 补充：
 
 ---
 
+### 4.11.1 `[prompt.system_info]` Prompt 系统信息注入
+
+| 字段 | 默认值 | 说明 |
+|---|---:|---|
+| `enabled` | `false` | 总开关。开启后把当前运行主机的系统信息注入主模型 Prompt；默认关闭，避免升级后自动暴露本机信息给上游模型 |
+| `show_os` | `true` | 展示操作系统、版本、release 与架构 |
+| `show_runtime` | `true` | 展示 Python 与 Undefined 版本 |
+| `show_host` | `true` | 展示主机名 |
+| `show_cpu` | `true` | 展示 CPU 型号、物理核心数与逻辑核心数 |
+| `show_cpu_usage` | `true` | 展示当前 CPU 总使用率 |
+| `show_memory` | `true` | 展示内存总量、已用量与占用率 |
+| `show_swap` | `true` | 展示 Swap 总量、已用量与占用率 |
+| `show_disks` | `true` | 展示可见磁盘分区、文件系统、容量与占用率 |
+| `show_network` | `true` | 展示非回环网卡地址与网络收发累计；涉及 IP 信息，公网或共享部署可关闭 |
+| `show_process` | `true` | 展示 Bot 进程 PID、启动时间、运行时长、RSS 与进程 CPU 占用 |
+| `show_uptime` | `true` | 展示系统启动时间与系统运行时长 |
+
+采集实现优先使用 `psutil` 与 Python 标准库 `platform/socket/os/time`，目标是 Windows、macOS、Linux 跨平台可用。单项采集失败时只省略该项，不会中断 Prompt 构建。该块属于动态上下文，会放在历史/记忆之后、`【当前时间】` 之前。
+
+安全边界：不会注入 API Key、环境变量、命令行参数、完整配置文件内容、用户目录文件列表等敏感内容。主机名、网络地址、磁盘挂载点和 PID 属于运维信息，启用前请确认当前模型供应商和部署场景允许暴露这些信息。
+
+---
+
 ### 4.12 `[search]` 搜索
 
 | 字段 | 默认值 | 说明 |

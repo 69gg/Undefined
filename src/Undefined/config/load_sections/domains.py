@@ -14,6 +14,7 @@ from ..domain_parsers import (
     _parse_memes_config,
     _parse_message_batcher_config,
     _parse_naga_config,
+    _parse_prompt_system_info_config,
     _parse_render_cache_config,
 )
 from ..model_parsers import (
@@ -36,6 +37,7 @@ def load_domains(
     cognitive = _parse_cognitive_config(data)
     memes = _parse_memes_config(data)
     message_batcher = _parse_message_batcher_config(data)
+    prompt_system_info = _parse_prompt_system_info_config(data)
     render_cache = _parse_render_cache_config(data)
     naga = _parse_naga_config(data)
     models_image_gen = _parse_image_gen_model_config(data)
@@ -51,6 +53,7 @@ def load_domains(
         "cognitive": cognitive,
         "memes": memes,
         "message_batcher": message_batcher,
+        "prompt_system_info": prompt_system_info,
         "render_cache": render_cache,
         "naga": naga,
         "image_gen": image_gen,

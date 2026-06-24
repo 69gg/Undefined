@@ -30,6 +30,7 @@ from Undefined.ai.prompts.system_context import (
     build_model_config_info,
     select_system_prompt_path,
 )
+from Undefined.ai.prompts.system_info import build_prompt_system_info
 
 logger = logging.getLogger(__name__)
 
@@ -519,6 +520,20 @@ class PromptBuilder:
 
         # 记忆/认知/历史等上下文统一排在主 system 之后、当前消息之前
         messages.extend(deferred_messages)
+
+        if self._runtime_config_getter is not None:
+            try:
+                runtime_config = self._runtime_config_getter()
+                system_info_config = getattr(runtime_config, "prompt_system_info", None)
+                system_info = build_prompt_system_info(system_info_config)
+                if system_info:
+                    messages.append({"role": "system", "content": system_info})
+                    logger.debug(
+                        "[Prompt] 已注入当前系统信息，长度=%s",
+                        len(system_info),
+                    )
+            except Exception as exc:
+                logger.debug("读取当前系统信息失败: %s", exc)
 
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         messages.append(

@@ -398,6 +398,24 @@ class MessageBatcherConfig:
 
 
 @dataclass
+class PromptSystemInfoConfig:
+    """Prompt 中的运行系统信息注入配置。"""
+
+    enabled: bool = False
+    show_os: bool = True
+    show_runtime: bool = True
+    show_host: bool = True
+    show_cpu: bool = True
+    show_cpu_usage: bool = True
+    show_memory: bool = True
+    show_swap: bool = True
+    show_disks: bool = True
+    show_network: bool = True
+    show_process: bool = True
+    show_uptime: bool = True
+
+
+@dataclass
 class RenderCacheConfig:
     """HTML 渲染结果缓存配置。
 

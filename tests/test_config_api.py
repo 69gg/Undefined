@@ -209,3 +209,31 @@ browser_max_concurrency = -3
 """,
     )
     assert cfg.render_browser_max_concurrency == 0
+
+
+def test_prompt_system_info_defaults_to_disabled(tmp_path: Path) -> None:
+    cfg = _load_config(tmp_path / "config.toml", "")
+
+    assert cfg.prompt_system_info.enabled is False
+    assert cfg.prompt_system_info.show_os is True
+    assert cfg.prompt_system_info.show_network is True
+    assert cfg.prompt_system_info.show_process is True
+
+
+def test_prompt_system_info_custom_switches(tmp_path: Path) -> None:
+    cfg = _load_config(
+        tmp_path / "config.toml",
+        """
+[prompt.system_info]
+enabled = true
+show_network = false
+show_disks = false
+show_process = false
+""",
+    )
+
+    assert cfg.prompt_system_info.enabled is True
+    assert cfg.prompt_system_info.show_os is True
+    assert cfg.prompt_system_info.show_network is False
+    assert cfg.prompt_system_info.show_disks is False
+    assert cfg.prompt_system_info.show_process is False
