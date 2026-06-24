@@ -400,6 +400,9 @@ async def register_message_attachments(
         )
 
     visited_forward_ids: set[str] = set()
+    should_snapshot_forward_messages = (
+        snapshot_forward_messages or snapshot_nested_forward_messages
+    )
 
     async def _fetch_forward_nodes(forward_id: str) -> list[Mapping[str, Any]]:
         if get_forward_messages is None:
@@ -586,7 +589,7 @@ async def register_message_attachments(
                         and forward_id
                         and forward_id not in visited_forward_ids
                         and (
-                            snapshot_forward_messages
+                            should_snapshot_forward_messages
                             or (
                                 expand_forward_attachments
                                 and depth < _FORWARD_ATTACHMENT_MAX_DEPTH
@@ -596,7 +599,7 @@ async def register_message_attachments(
                     if should_fetch_forward:
                         assert get_forward_messages is not None
                         visited_forward_ids.add(forward_id)
-                        if snapshot_forward_messages:
+                        if should_snapshot_forward_messages:
                             try:
                                 await snapshot_forward_tree(
                                     scope_key=scope_key,
@@ -613,6 +616,8 @@ async def register_message_attachments(
                                 scope_key=scope_key,
                                 forward_id=forward_id,
                             )
+                            if not forward_nodes:
+                                forward_nodes = await _fetch_forward_nodes(forward_id)
                         else:
                             forward_nodes = await _fetch_forward_nodes(forward_id)
 
@@ -623,9 +628,7 @@ async def register_message_attachments(
                         and forward_id
                     ):
                         if not forward_nodes:
-                            if forward_id in visited_forward_ids:
-                                forward_nodes = []
-                            else:
+                            if forward_id not in visited_forward_ids:
                                 visited_forward_ids.add(forward_id)
                                 forward_nodes = await _fetch_forward_nodes(forward_id)
                         if not forward_nodes:

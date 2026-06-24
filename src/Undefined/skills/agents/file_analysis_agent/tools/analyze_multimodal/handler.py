@@ -3,8 +3,6 @@ import logging
 from pathlib import Path
 from typing import Any, Dict
 
-from Undefined.attachments import scope_from_context
-
 logger = logging.getLogger(__name__)
 
 
@@ -31,8 +29,6 @@ def _scope_key_from_context(context: Dict[str, Any]) -> str | None:
     get_scope_from_context = context.get("get_scope_from_context")
     if callable(get_scope_from_context):
         scope_key = str(get_scope_from_context(context) or "").strip()
-    else:
-        scope_key = str(scope_from_context(context) or "").strip()
     return scope_key or None
 
 

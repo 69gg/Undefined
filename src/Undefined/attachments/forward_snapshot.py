@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 _MAX_RECURSIVE_SNAPSHOT_DEPTH = 3
 _MAX_RECURSIVE_SNAPSHOT_NODES = 50
 _snapshot_locks: dict[str, asyncio.Lock] = {}
+_snapshot_lock_users: dict[str, int] = {}
 _snapshot_inflight: dict[str, asyncio.Task[None]] = {}
 
 
@@ -34,13 +35,24 @@ def _snapshot_path(scope_key: str, forward_id: str) -> Path:
     return FORWARD_SNAPSHOT_CACHE_DIR / f"{_snapshot_key(scope_key, forward_id)}.json"
 
 
-def _snapshot_lock(scope_key: str, forward_id: str) -> asyncio.Lock:
+def _snapshot_lock(scope_key: str, forward_id: str) -> tuple[str, asyncio.Lock]:
     key = _snapshot_key(scope_key, forward_id)
     lock = _snapshot_locks.get(key)
     if lock is None:
         lock = asyncio.Lock()
         _snapshot_locks[key] = lock
-    return lock
+    _snapshot_lock_users[key] = _snapshot_lock_users.get(key, 0) + 1
+    return key, lock
+
+
+def _release_snapshot_lock(key: str, lock: asyncio.Lock) -> None:
+    users = _snapshot_lock_users.get(key, 0) - 1
+    if users > 0:
+        _snapshot_lock_users[key] = users
+        return
+    _snapshot_lock_users.pop(key, None)
+    if _snapshot_locks.get(key) is lock and not lock.locked():
+        _snapshot_locks.pop(key, None)
 
 
 def _clean_json_value(value: Any) -> Any:
@@ -209,45 +221,50 @@ async def snapshot_forward_tree(
             visited.add(normalized_current_id)
             remaining -= 1
 
-            lock = _snapshot_lock(normalized_scope, normalized_current_id)
-            async with lock:
-                nodes: list[dict[str, Any]] = []
-                try:
-                    nodes = await load_forward_snapshot(
-                        scope_key=normalized_scope,
-                        forward_id=normalized_current_id,
-                    )
-                except Exception:
-                    logger.debug(
-                        "读取合并转发快照失败，将尝试回源: id=%s",
-                        normalized_current_id,
-                        exc_info=True,
-                    )
-                if not nodes:
+            lock_key, lock = _snapshot_lock(normalized_scope, normalized_current_id)
+            try:
+                async with lock:
+                    nodes: list[dict[str, Any]] = []
                     try:
-                        raw_nodes = await get_forward_messages(normalized_current_id)
+                        nodes = await load_forward_snapshot(
+                            scope_key=normalized_scope,
+                            forward_id=normalized_current_id,
+                        )
                     except Exception:
                         logger.debug(
-                            "递归缓存合并转发失败: id=%s",
+                            "读取合并转发快照失败，将尝试回源: id=%s",
                             normalized_current_id,
                             exc_info=True,
                         )
+                    if not nodes:
+                        try:
+                            raw_nodes = await get_forward_messages(
+                                normalized_current_id
+                            )
+                        except Exception:
+                            logger.debug(
+                                "递归缓存合并转发失败: id=%s",
+                                normalized_current_id,
+                                exc_info=True,
+                            )
+                            return
+                        nodes = normalize_forward_nodes_for_snapshot(raw_nodes)
+                    if not nodes:
                         return
-                    nodes = normalize_forward_nodes_for_snapshot(raw_nodes)
-                if not nodes:
-                    return
-                try:
-                    await save_forward_snapshot(
-                        scope_key=normalized_scope,
-                        forward_id=normalized_current_id,
-                        nodes=nodes,
-                    )
-                except Exception:
-                    logger.debug(
-                        "写入合并转发快照失败: id=%s",
-                        normalized_current_id,
-                        exc_info=True,
-                    )
+                    try:
+                        await save_forward_snapshot(
+                            scope_key=normalized_scope,
+                            forward_id=normalized_current_id,
+                            nodes=nodes,
+                        )
+                    except Exception:
+                        logger.debug(
+                            "写入合并转发快照失败: id=%s",
+                            normalized_current_id,
+                            exc_info=True,
+                        )
+            finally:
+                _release_snapshot_lock(lock_key, lock)
 
             if depth >= max_depth:
                 return

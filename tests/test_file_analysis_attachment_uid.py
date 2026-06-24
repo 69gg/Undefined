@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -235,8 +236,9 @@ async def test_analyze_multimodal_supports_internal_attachment_uid(
     assert len(ai_client.analyze_calls) == 1
     call = ai_client.analyze_calls[0]
     assert call["media_url"] != record.uid
-    assert Path(call["media_url"]).is_file()
-    assert Path(call["media_url"]).read_bytes() == b"image bytes"
+    media_path = Path(call["media_url"])
+    assert await asyncio.to_thread(media_path.is_file)
+    assert await asyncio.to_thread(media_path.read_bytes) == b"image bytes"
     assert call["media_type"] == "image"
     assert call["prompt_extra"] == "描述图片"
     assert ai_client.saved_history
