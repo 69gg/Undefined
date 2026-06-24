@@ -125,6 +125,8 @@ Android 端仍然走同一套连接模型，但 UI 目标是：
 
 ## 8. Release 产物
 
+普通用户如果只是部署 Bot，不需要下载这些 App 产物；先运行 `Undefined-webui` 即可。需要远程管理或原生聊天客户端时，再按 [README — Release 下载速查](../README.md#release-下载速查) 选择对应平台文件。
+
 每次 `v*` tag 发布时，Release workflow 计划同步上传：
 
 - Python：`wheel` + `sdist`

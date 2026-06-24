@@ -2,6 +2,8 @@
 
 提供源码部署与 pip/uv tool 安装两种方式：**源码部署是推荐的首选方式**，功能完整且经过充分测试；pip/uv tool 安装适合快速体验，但部分功能支持尚不完善。
 
+> **Release 下载提示**：如果目的是部署 QQ Bot，不需要在 GitHub Release 的 Assets 中挑客户端安装包；按本文源码部署或 pip/uv tool 安装即可。Release 中的 `Undefined-Console-*` 和 `Undefined-Chat-*` 是可选客户端，选择说明见 [README — Release 下载速查](../README.md#release-下载速查)。
+
 > **作为 Python 库嵌入**：若你不需要启动 QQ Bot CLI，而是要在自己的应用或测试中复用 Undefined 组件（配置、`AIClient`、Skills、认知记忆等），请参阅 [Python 库 API 参考](python-api.md) 与 [配置详解 — 库嵌入配置](configuration.md#2-库嵌入配置)。CLI 入口（`Undefined` / `Undefined-webui`）行为不受库嵌入 API 影响。
 
 > Python 版本要求：`3.11`~`3.13`（包含）。

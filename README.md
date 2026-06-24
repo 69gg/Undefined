@@ -29,6 +29,32 @@
 
 [点击添加官方实例QQ](https://qm.qq.com/q/cvjJoNysGA)
 
+## Release 下载速查
+
+如果只是部署和运行 QQ Bot，通常**不需要**在 GitHub Release 的 Assets 里下载任何文件。推荐按下方[快速开始](#-快速开始-源码模式)使用源码部署；只想快速体验命令行入口时，可使用 `pip install -U Undefined-bot` 或 `uv tool install Undefined-bot`。
+
+Release 里的安装包是可选组件，不是 Bot 服务本体：
+
+| 目标 | 是否需要下载 Release | 选择 |
+| --- | --- | --- |
+| 部署 / 运行 QQ Bot | 不需要 | 源码部署，启动 `uv run Undefined-webui`；或使用 `pip` / `uv tool` 安装 Python 包 |
+| 远程管理已有实例 | 可选 | `Undefined-Console-*`，用于连接 Management API 并打开远程 WebUI |
+| 使用原生聊天客户端 | 可选 | `Undefined-Chat-*`，用于连接 Runtime API 聊天 |
+| 离线安装 / 镜像缓存 Python 包 | 可选 | `undefined_bot-*.whl` 或 `undefined_bot-*.tar.gz` |
+
+平台文件选择：
+
+| 平台 | 推荐下载 |
+| --- | --- |
+| Windows x64 | `*-windows-x64-setup.exe`；批量部署或系统管理场景可选 `.msi` |
+| macOS Apple Silicon | `*-macos-arm64.dmg` |
+| macOS Intel | `*-macos-x64.dmg` |
+| Debian / Ubuntu | `*.deb` |
+| 其他 Linux x64 | `*.AppImage` |
+| Android 常见手机 / 平板 | `*-android-arm64-v8a-release.apk`；旧 32 位设备选 `armeabi-v7a`，模拟器按需选 `x86_64` / `x86` |
+
+Console 和 Chat 都需要连接到已经运行的 Undefined 服务。首次部署请先启动 `Undefined-webui`，完成配置和 Bot 启动后，再按需使用这些客户端连接。
+
 ## ⚡ 核心特性
 
 - **Skills 架构**：全新设计的技能系统，将基础工具（Tools）与智能代理（Agents）分层管理，支持自动发现与注册。
@@ -126,7 +152,7 @@ uv run Undefined-webui
 # cp config.toml.example config.toml
 ```
 
-> 浏览器是默认入口；如果你下载了 Release 中的桌面端或 Android 安装包，也可以在完成首轮密码设置后，连接到同一个 Management API 地址进行远程管理。
+> 浏览器是默认入口；如果你按上方 [Release 下载速查](#release-下载速查)下载了桌面端或 Android 安装包，也可以在完成首轮密码设置后，连接到同一个 Management API 地址进行远程管理。
 
 ---
 
