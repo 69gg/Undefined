@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import threading
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -133,6 +134,38 @@ def _make_builder_with_cognitive_service(cognitive_service: Any) -> PromptBuilde
     )
 
 
+def _make_builder_with_system_info() -> PromptBuilder:
+    runtime_config = SimpleNamespace(
+        keyword_reply_enabled=False,
+        repeat_enabled=False,
+        inverted_question_enabled=False,
+        knowledge_enabled=False,
+        grok_search_enabled=False,
+        chat_model=SimpleNamespace(
+            model_name="gpt-test",
+            pool=SimpleNamespace(enabled=False),
+            thinking_enabled=False,
+            reasoning_enabled=False,
+        ),
+        vision_model=None,
+        agent_model=None,
+        embedding_model=None,
+        security_model=None,
+        grok_model=None,
+        cognitive=SimpleNamespace(enabled=False, recent_end_summaries_inject_k=0),
+        memes=None,
+        prompt_system_info=SimpleNamespace(enabled=True),
+    )
+    return PromptBuilder(
+        bot_qq=0,
+        memory_storage=None,
+        end_summary_storage=cast(Any, _FakeEndSummaryStorage()),
+        runtime_config_getter=lambda: runtime_config,
+        anthropic_skill_registry=cast(Any, None),
+        cognitive_service=cast(Any, None),
+    )
+
+
 @pytest.mark.asyncio
 async def test_build_messages_places_each_rules_before_dynamic_context(
     monkeypatch: pytest.MonkeyPatch,
@@ -202,6 +235,10 @@ async def test_build_messages_places_each_rules_before_dynamic_context(
     assert positions["memory"] < positions["cognitive"] < positions["summary"]
     assert positions["summary"] < positions["history"] < positions["time"]
     assert positions["time"] < positions["current"]
+    assert all(
+        "【当前系统信息】" not in str(message.get("content", ""))
+        for message in messages
+    )
 
     runtime_config_message = next(
         str(message.get("content", ""))
@@ -330,6 +367,105 @@ async def test_build_messages_keeps_cache_friendly_static_before_dynamic_context
     assert "【当前时间】" in str(messages[-2].get("content", ""))
     assert messages[-1]["role"] == "user"
     assert "【当前输入批次】" in str(messages[-1].get("content", ""))
+
+
+@pytest.mark.asyncio
+async def test_build_messages_places_system_info_before_current_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    builder = _make_builder_with_system_info()
+
+    async def _fake_load_system_prompt() -> str:
+        return "系统提示词"
+
+    async def _fake_load_each_rules() -> str:
+        return "固定规则"
+
+    monkeypatch.setattr(builder, "_load_system_prompt", _fake_load_system_prompt)
+    monkeypatch.setattr(builder, "_load_each_rules", _fake_load_each_rules)
+    monkeypatch.setattr(
+        "Undefined.ai.prompts.builder.build_prompt_system_info",
+        lambda _config: "【当前系统信息】\n- Host: bot-host",
+    )
+
+    async def _fake_recent_messages(
+        chat_id: str, msg_type: str, start: int, end: int
+    ) -> list[dict[str, Any]]:
+        _ = chat_id, msg_type, start, end
+        return [
+            {
+                "type": "group",
+                "display_name": "测试用户",
+                "user_id": "10001",
+                "chat_id": "20001",
+                "chat_name": "研发群",
+                "timestamp": "2026-04-03 10:01:00",
+                "message": "上一条消息",
+                "attachments": [],
+                "role": "member",
+                "title": "",
+            }
+        ]
+
+    messages = await builder.build_messages(
+        '<message sender="测试用户" sender_id="10001" group_id="20001" time="2026-04-03 10:02:00">\n<content>看下系统状态</content>\n</message>',
+        get_recent_messages_callback=_fake_recent_messages,
+        extra_context={
+            "group_id": 20001,
+            "sender_id": 10001,
+            "sender_name": "测试用户",
+            "group_name": "研发群",
+            "request_type": "group",
+        },
+    )
+
+    labels = [
+        "【历史消息存档】",
+        "【当前系统信息】",
+        "【当前时间】",
+        "【当前输入批次】",
+    ]
+    positions = [
+        next(
+            idx
+            for idx, message in enumerate(messages)
+            if label in str(message.get("content", ""))
+        )
+        for label in labels
+    ]
+    assert positions == sorted(positions)
+
+
+@pytest.mark.asyncio
+async def test_build_messages_collects_system_info_off_event_loop_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    builder = _make_builder_with_system_info()
+    event_loop_thread_id = threading.get_ident()
+    observed_thread_ids: list[int] = []
+
+    async def _fake_load_system_prompt() -> str:
+        return "系统提示词"
+
+    async def _fake_load_each_rules() -> str:
+        return ""
+
+    def _fake_build_prompt_system_info(_config: Any) -> str:
+        observed_thread_ids.append(threading.get_ident())
+        return "【当前系统信息】\n- Host: bot-host"
+
+    monkeypatch.setattr(builder, "_load_system_prompt", _fake_load_system_prompt)
+    monkeypatch.setattr(builder, "_load_each_rules", _fake_load_each_rules)
+    monkeypatch.setattr(
+        "Undefined.ai.prompts.builder.build_prompt_system_info",
+        _fake_build_prompt_system_info,
+    )
+
+    messages = await builder.build_messages("看下系统状态")
+
+    assert observed_thread_ids
+    assert all(thread_id != event_loop_thread_id for thread_id in observed_thread_ids)
+    assert any("【当前系统信息】" in str(item.get("content", "")) for item in messages)
 
 
 @pytest.mark.asyncio

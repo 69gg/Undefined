@@ -21,6 +21,7 @@ from .models import (
     MemeConfig,
     MessageBatcherConfig,
     NagaConfig,
+    PromptSystemInfoConfig,
     RenderCacheConfig,
     RerankModelConfig,
     SecurityModelConfig,
@@ -199,6 +200,8 @@ class Config:
     memes: MemeConfig
     # 同 sender 短时多消息合并器
     message_batcher: MessageBatcherConfig
+    # Prompt 系统信息注入
+    prompt_system_info: PromptSystemInfoConfig
     # HTML 渲染结果缓存
     render_cache: RenderCacheConfig
     # Naga 集成

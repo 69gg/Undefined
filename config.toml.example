@@ -959,6 +959,46 @@ prefetch_tools = ["get_current_time"]
 # zh: 隐藏已预取的工具声明。
 # en: Hide prefetched tools from the model's tool list.
 prefetch_tools_hide = true
+
+# zh: Prompt 系统信息注入。总开关默认关闭；开启后各子项默认展示，可逐项关闭。
+# en: Prompt system information injection. The master switch is disabled by default; enabled sub-items are shown by default and can be disabled individually.
+[prompt.system_info]
+# zh: 是否把当前运行主机的系统信息注入提示词。默认关闭，避免升级后自动暴露本机信息给模型。
+# en: Inject current host system information into prompts. Disabled by default to avoid exposing host data automatically after upgrades.
+enabled = false
+# zh: 展示操作系统、版本、release 和架构。
+# en: Show operating system, version, release, and architecture.
+show_os = true
+# zh: 展示 Python 与 Undefined 版本。
+# en: Show Python and Undefined versions.
+show_runtime = true
+# zh: 展示主机名。
+# en: Show hostname.
+show_host = true
+# zh: 展示 CPU 型号与物理/逻辑核心数。
+# en: Show CPU model and physical/logical core counts.
+show_cpu = true
+# zh: 展示当前 CPU 总使用率。
+# en: Show current total CPU usage.
+show_cpu_usage = true
+# zh: 展示内存总量、已用量与占用率。
+# en: Show memory total, used amount, and usage percentage.
+show_memory = true
+# zh: 展示 Swap 总量、已用量与占用率。
+# en: Show swap total, used amount, and usage percentage.
+show_swap = true
+# zh: 展示可见磁盘分区、文件系统、容量与占用率。
+# en: Show visible disk partitions, filesystem, capacity, and usage percentage.
+show_disks = true
+# zh: 展示非回环网卡地址与网络收发累计。涉及 IP 信息，公网或共享部署可关闭。
+# en: Show non-loopback network addresses and cumulative network I/O. Disable this on public or shared deployments if IP exposure is undesirable.
+show_network = true
+# zh: 展示 Bot 进程 PID、启动时间、运行时长、RSS 与进程 CPU 占用。
+# en: Show bot process PID, start time, uptime, RSS, and process CPU usage.
+show_process = true
+# zh: 展示系统启动时间与系统运行时长。
+# en: Show system boot time and uptime.
+show_uptime = true
 # zh: 搜索服务配置。
 # en: Search service config.
 [search]

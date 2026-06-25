@@ -19,6 +19,7 @@ from .models import (
     MemeConfig,
     MessageBatcherConfig,
     NagaConfig,
+    PromptSystemInfoConfig,
     RenderCacheConfig,
 )
 
@@ -229,6 +230,28 @@ def _parse_message_batcher_config(data: dict[str, Any]) -> MessageBatcherConfig:
         allow_cancel_after_send=_coerce_bool(
             section.get("allow_cancel_after_send"), False
         ),
+    )
+
+
+def _parse_prompt_system_info_config(data: dict[str, Any]) -> PromptSystemInfoConfig:
+    prompt_raw = data.get("prompt", {})
+    prompt_section = prompt_raw if isinstance(prompt_raw, dict) else {}
+    system_info_raw = prompt_section.get("system_info", {})
+    section = system_info_raw if isinstance(system_info_raw, dict) else {}
+
+    return PromptSystemInfoConfig(
+        enabled=_coerce_bool(section.get("enabled"), False),
+        show_os=_coerce_bool(section.get("show_os"), True),
+        show_runtime=_coerce_bool(section.get("show_runtime"), True),
+        show_host=_coerce_bool(section.get("show_host"), True),
+        show_cpu=_coerce_bool(section.get("show_cpu"), True),
+        show_cpu_usage=_coerce_bool(section.get("show_cpu_usage"), True),
+        show_memory=_coerce_bool(section.get("show_memory"), True),
+        show_swap=_coerce_bool(section.get("show_swap"), True),
+        show_disks=_coerce_bool(section.get("show_disks"), True),
+        show_network=_coerce_bool(section.get("show_network"), True),
+        show_process=_coerce_bool(section.get("show_process"), True),
+        show_uptime=_coerce_bool(section.get("show_uptime"), True),
     )
 
 
