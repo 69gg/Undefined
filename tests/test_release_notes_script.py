@@ -91,7 +91,7 @@ def _write_release_project(
         encoding="utf-8",
     )
     (root / "src" / "Undefined" / "__init__.py").write_text(
-        f'__version__ = "{build_version}"\n',
+        f'__version__: str = "{build_version}"\n',
         encoding="utf-8",
     )
     for app_dir, cargo_package in (

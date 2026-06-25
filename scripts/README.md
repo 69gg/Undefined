@@ -92,6 +92,7 @@ uv run python scripts/reembed_cognitive.py -v
 ### release_notes.py — 发布版本校验与 Release notes 生成
 
 Release workflow 使用这个脚本在构建前校验版本一致性，并在发布阶段从 `CHANGELOG.md` 最新版本条目生成 GitHub Release 说明。Release notes 会先写入 changelog 自动提取内容，再用 `---` 分隔并追加 `Detailed Changes`，按上一个 tag 到当前 tag 的 commit 主题分类列出 features、bug fixes 和 maintenance/others。
+`src/Undefined/__init__.py` 中的 `__version__` 既支持普通赋值，也支持 `__version__: str = "..."` 这种带类型注解的写法。
 
 ```bash
 # 校验 tag、构建版本和 CHANGELOG 最新版本一致

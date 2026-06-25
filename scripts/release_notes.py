@@ -108,7 +108,7 @@ def _read_pyproject_version(project_root: Path) -> str:
 def _read_init_version(project_root: Path) -> str:
     path = project_root / "src" / "Undefined" / "__init__.py"
     text = _read_required_text(path)
-    match = re.search(r'__version__\s*=\s*"([^"]+)"', text)
+    match = re.search(r'__version__(?:\s*:\s*str)?\s*=\s*"([^"]+)"', text)
     if match is None:
         raise ReleaseValidationError(
             "Could not find __version__ in src/Undefined/__init__.py"
