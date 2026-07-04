@@ -12,6 +12,8 @@ import json
 import logging
 import re
 import time
+from collections.abc import AsyncIterator, Callable, Iterable
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
@@ -66,6 +68,7 @@ from Undefined.ai.transports import (
 )
 from Undefined.config import Config, EmbeddingModelConfig, RerankModelConfig, get_config
 from Undefined.context import RequestContext
+from Undefined.skills.http_config import get_configured_proxy
 from Undefined.token_usage_storage import TokenUsage, TokenUsageStorage
 from Undefined.utils.logging import log_debug_json, redact_string
 from Undefined.utils.request_params import (
@@ -80,6 +83,21 @@ __all__ = ["ModelRequester", "build_request_body", "ModelConfig"]
 _SDK_REQUEST_OPTION_FIELDS: frozenset[str] = frozenset(
     {"extra_headers", "extra_query", "extra_body", "timeout"}
 )
+
+
+def _deduplicate_http_clients(
+    clients: Iterable[httpx.AsyncClient],
+) -> list[httpx.AsyncClient]:
+    unique_clients: list[httpx.AsyncClient] = []
+    seen_ids: set[int] = set()
+    for client in clients:
+        client_id = id(client)
+        if client_id in seen_ids:
+            continue
+        seen_ids.add(client_id)
+        unique_clients.append(client)
+    return unique_clients
+
 
 _CHAT_COMPLETIONS_RESERVED_FIELDS: frozenset[str] = (
     frozenset(
@@ -292,13 +310,24 @@ class ModelRequester:
 
     def __init__(
         self,
-        http_client: httpx.AsyncClient,
+        http_client: httpx.AsyncClient | None,
         token_usage_storage: TokenUsageStorage,
+        config_getter: Callable[[], Any] | None = None,
     ) -> None:
-        self._http_client = http_client
+        self._default_http_client = http_client
+        self._compat_http_client: httpx.AsyncClient | None = None
+        self._owned_http_clients: dict[tuple[bool, str], httpx.AsyncClient] = {}
+        self._openai_client_http_clients: dict[int, httpx.AsyncClient] = {}
+        self._active_http_client_uses: dict[httpx.AsyncClient, int] = {}
+        self._retired_http_clients: set[httpx.AsyncClient] = set()
+        self._closing_http_client_tasks: dict[
+            httpx.AsyncClient, asyncio.Task[None]
+        ] = {}
         self._token_usage_storage = token_usage_storage
+        self._config_getter = config_getter
         self._openai_clients: dict[
-            tuple[str, str, tuple[tuple[str, str], ...] | None], AsyncOpenAI
+            tuple[str, str, tuple[tuple[str, str], ...] | None, bool, str],
+            AsyncOpenAI,
         ] = {}
         self._token_counters: dict[str, TokenCounter] = {}
         self._warned_legacy_api_urls: set[str] = set()
@@ -308,7 +337,20 @@ class ModelRequester:
             response_to_dict=self._response_to_dict,
             get_token_counter=self._get_token_counter,
             record_usage=self._record_usage,
+            track_openai_client_use=self._track_openai_client_use,
         )
+
+    @property
+    def _http_client(self) -> httpx.AsyncClient:
+        """Backward-compatible access for callers that still need a base client."""
+        if self._default_http_client is not None:
+            return self._default_http_client
+        if self._compat_http_client is None:
+            self._compat_http_client = httpx.AsyncClient(
+                timeout=480.0,
+                trust_env=False,
+            )
+        return self._compat_http_client
 
     async def request(
         self,
@@ -675,36 +717,37 @@ class ModelRequester:
         request_body: dict[str, Any],
     ) -> dict[str, Any]:
         client = self._get_openai_client_for_model(model_config)
-        if bool(getattr(model_config, "stream_enabled", False)):
-            try:
-                return await self._request_with_openai_streaming(
-                    # client, model_config, request_body
-                    client,
-                    model_config,
-                    request_body,
-                )
-            except Exception as exc:
-                # 上游不支持流式时，剥离 stream 字段后降级为非流式重试
-                if not should_fallback_from_stream(exc):
-                    raise
-                logger.warning(
-                    "[API流式回退] model=%s api_mode=%s reason=%s",
-                    getattr(model_config, "model_name", ""),
-                    get_api_mode(model_config),
-                    type(exc).__name__,
-                )
-                request_body = without_stream_request_fields(request_body)
-        if get_api_mode(model_config) == API_MODE_RESPONSES:
-            params, extra_body = split_responses_params(request_body)
+        async with self._track_openai_client_use(client):
+            if bool(getattr(model_config, "stream_enabled", False)):
+                try:
+                    return await self._request_with_openai_streaming(
+                        # client, model_config, request_body
+                        client,
+                        model_config,
+                        request_body,
+                    )
+                except Exception as exc:
+                    # 上游不支持流式时，剥离 stream 字段后降级为非流式重试
+                    if not should_fallback_from_stream(exc):
+                        raise
+                    logger.warning(
+                        "[API流式回退] model=%s api_mode=%s reason=%s",
+                        getattr(model_config, "model_name", ""),
+                        get_api_mode(model_config),
+                        type(exc).__name__,
+                    )
+                    request_body = without_stream_request_fields(request_body)
+            if get_api_mode(model_config) == API_MODE_RESPONSES:
+                params, extra_body = split_responses_params(request_body)
+                if extra_body:
+                    params["extra_body"] = extra_body
+                response = await client.responses.create(**params)
+                return self._response_to_dict(response)
+            params, extra_body = split_chat_completion_params(request_body)
             if extra_body:
                 params["extra_body"] = extra_body
-            response = await client.responses.create(**params)
+            response = await client.chat.completions.create(**params)
             return self._response_to_dict(response)
-        params, extra_body = split_chat_completion_params(request_body)
-        if extra_body:
-            params["extra_body"] = extra_body
-        response = await client.chat.completions.create(**params)
-        return self._response_to_dict(response)
 
     async def _request_with_openai_streaming(
         self,
@@ -806,7 +849,101 @@ class ModelRequester:
             base_url=base_url,
             api_key=model_config.api_key,
             default_query=default_query,
+            model_config=model_config,
         )
+
+    def clear_client_cache(self) -> None:
+        old_openai_clients = list(self._openai_clients.values())
+        self._openai_clients.clear()
+        for client in old_openai_clients:
+            self._openai_client_http_clients.pop(id(client), None)
+        old_clients = list(self._owned_http_clients.values())
+        self._owned_http_clients.clear()
+        self._retire_http_clients(old_clients)
+
+    async def aclose(self) -> None:
+        self._openai_clients.clear()
+        closing_tasks = list(self._closing_http_client_tasks.values())
+        if closing_tasks:
+            await asyncio.gather(*closing_tasks, return_exceptions=True)
+        old_clients = _deduplicate_http_clients(
+            [*self._owned_http_clients.values(), *self._retired_http_clients]
+        )
+        self._owned_http_clients.clear()
+        self._retired_http_clients.clear()
+        self._active_http_client_uses.clear()
+        self._openai_client_http_clients.clear()
+        self._closing_http_client_tasks.clear()
+        for client in old_clients:
+            await client.aclose()
+        if self._compat_http_client is not None:
+            await self._compat_http_client.aclose()
+            self._compat_http_client = None
+
+    def _retire_http_clients(self, clients: list[httpx.AsyncClient]) -> None:
+        if not clients:
+            return
+        self._retired_http_clients.update(clients)
+        self._schedule_retired_http_client_closes()
+
+    def _schedule_retired_http_client_closes(self) -> None:
+        idle_clients = [
+            client
+            for client in self._retired_http_clients
+            if self._active_http_client_uses.get(client, 0) <= 0
+            and client not in self._closing_http_client_tasks
+        ]
+        if not idle_clients:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        for client in idle_clients:
+            task = loop.create_task(self._close_retired_http_client(client))
+            self._closing_http_client_tasks[client] = task
+            self._background_tasks.add(task)
+
+            def _discard_close_task(
+                finished: asyncio.Task[None],
+                *,
+                http_client: httpx.AsyncClient = client,
+            ) -> None:
+                self._closing_http_client_tasks.pop(http_client, None)
+                self._background_tasks.discard(finished)
+
+            task.add_done_callback(_discard_close_task)
+
+    async def _close_retired_http_client(self, client: httpx.AsyncClient) -> None:
+        try:
+            await client.aclose()
+        except Exception as exc:
+            logger.warning("[模型客户端] 关闭退役 HTTP client 失败: %s", exc)
+        finally:
+            self._retired_http_clients.discard(client)
+            self._active_http_client_uses.pop(client, None)
+
+    @asynccontextmanager
+    async def _track_openai_client_use(
+        self, client: AsyncOpenAI
+    ) -> AsyncIterator[None]:
+        http_client = self._openai_client_http_clients.get(id(client))
+        if http_client is None:
+            yield
+            return
+        self._active_http_client_uses[http_client] = (
+            self._active_http_client_uses.get(http_client, 0) + 1
+        )
+        try:
+            yield
+        finally:
+            active_count = self._active_http_client_uses.get(http_client, 0)
+            if active_count <= 1:
+                self._active_http_client_uses.pop(http_client, None)
+            else:
+                self._active_http_client_uses[http_client] = active_count - 1
+            if http_client in self._retired_http_clients:
+                self._schedule_retired_http_client_closes()
 
     def _record_usage(
         self,
@@ -836,26 +973,60 @@ class ModelRequester:
         task.add_done_callback(self._background_tasks.discard)
 
     def _get_openai_client(
-        self, base_url: str, api_key: str, default_query: dict[str, object] | None
+        self,
+        base_url: str,
+        api_key: str,
+        default_query: dict[str, object] | None,
+        model_config: ModelConfig,
     ) -> AsyncOpenAI:
         query_key = None
         if default_query:
             query_key = tuple(
                 sorted((str(k), str(v)) for k, v in default_query.items())
             )
-        cache_key = (base_url, api_key, query_key)
+        use_proxy = bool(getattr(model_config, "use_proxy", False))
+        proxy_config: Any | None = None
+        if self._config_getter is not None:
+            try:
+                proxy_config = self._config_getter()
+            except Exception:
+                proxy_config = None
+        proxy = get_configured_proxy(
+            base_url,
+            use_proxy=use_proxy,
+            config=proxy_config,
+        )
+        proxy_key = proxy or ""
+        cache_key = (base_url, api_key, query_key, use_proxy, proxy_key)
         client = self._openai_clients.get(cache_key)
         if client is not None:
             return client
-        # 复用上层注入的 httpx client（连接池/超时等），避免每个 OpenAI client 自建连接池。
+        http_client = self._get_http_client_for_model(use_proxy, proxy)
         client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
             timeout=480.0,
             default_query=default_query,
-            http_client=self._http_client,
+            http_client=http_client,
         )
         self._openai_clients[cache_key] = client
+        self._openai_client_http_clients[id(client)] = http_client
+        return client
+
+    def _get_http_client_for_model(
+        self, use_proxy: bool, proxy: str | None
+    ) -> httpx.AsyncClient:
+        if self._default_http_client is not None and not use_proxy:
+            return self._default_http_client
+        cache_key = (use_proxy, proxy or "")
+        client = self._owned_http_clients.get(cache_key)
+        if client is not None:
+            return client
+        client_kwargs: dict[str, Any] = {"timeout": 480.0, "trust_env": False}
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        client = httpx.AsyncClient(**client_kwargs)
+        self._owned_http_clients[cache_key] = client
         return client
 
     def _response_to_dict(self, response: Any) -> dict[str, Any]:

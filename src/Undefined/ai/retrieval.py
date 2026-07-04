@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from contextlib import AbstractAsyncContextManager, nullcontext
 from typing import Any, Callable, TypeAlias
 
 from openai import NOT_GIVEN, AsyncOpenAI
@@ -21,6 +22,9 @@ _OpenAIClientGetter: TypeAlias = Callable[[_ModelConfig], AsyncOpenAI]
 _ResponseToDict: TypeAlias = Callable[[Any], dict[str, Any]]
 _TokenCounterGetter: TypeAlias = Callable[[str], TokenCounter]
 _RecordUsageCallback: TypeAlias = Callable[..., None]
+_TrackOpenAIClientUse: TypeAlias = Callable[
+    [AsyncOpenAI], AbstractAsyncContextManager[None]
+]
 
 _SDK_REQUEST_OPTION_FIELDS: frozenset[str] = frozenset(
     {"extra_headers", "extra_query", "extra_body", "timeout"}
@@ -45,11 +49,13 @@ class RetrievalRequester:
         response_to_dict: _ResponseToDict,
         get_token_counter: _TokenCounterGetter,
         record_usage: _RecordUsageCallback,
+        track_openai_client_use: _TrackOpenAIClientUse | None = None,
     ) -> None:
         self._get_openai_client = get_openai_client
         self._response_to_dict = response_to_dict
         self._get_token_counter = get_token_counter
         self._record_usage = record_usage
+        self._track_openai_client_use = track_openai_client_use
 
     def _split_request_params(
         self,
@@ -95,15 +101,16 @@ class RetrievalRequester:
             for key, value in request_params.items()
             if key not in _EMBEDDING_KNOWN_FIELDS
         }
-        response = await client.embeddings.create(
-            model=model_config.model_name,
-            input=texts,
-            dimensions=model_config.dimensions or NOT_GIVEN,  # type: ignore[arg-type]
-            extra_body=extra_body or None,
-            **method_kwargs,
-        )
-        response_dict = self._response_to_dict(response)
-        embeddings = [item.embedding for item in response.data]
+        async with self._use_openai_client(client):
+            response = await client.embeddings.create(
+                model=model_config.model_name,
+                input=texts,
+                dimensions=model_config.dimensions or NOT_GIVEN,  # type: ignore[arg-type]
+                extra_body=extra_body or None,
+                **method_kwargs,
+            )
+            response_dict = self._response_to_dict(response)
+            embeddings = [item.embedding for item in response.data]
         duration = time.perf_counter() - start_time
 
         prompt_tokens, completion_tokens, total_tokens = self._extract_usage(
@@ -167,17 +174,18 @@ class RetrievalRequester:
 
         # Some OpenAI-compatible providers return non-dict JSON payloads for rerank.
         # Use a broad cast target and normalize the payload shape ourselves.
-        response = await client.post(
-            "/rerank",
-            cast_to=object,
-            body=request_body,
-        )
-        response_dict = self._normalize_rerank_payload(response)
-        results = self._normalize_rerank_results(
-            response_dict,
-            documents=documents,
-            top_n=top_n,
-        )
+        async with self._use_openai_client(client):
+            response = await client.post(
+                "/rerank",
+                cast_to=object,
+                body=request_body,
+            )
+            response_dict = self._normalize_rerank_payload(response)
+            results = self._normalize_rerank_results(
+                response_dict,
+                documents=documents,
+                top_n=top_n,
+            )
         duration = time.perf_counter() - start_time
 
         prompt_tokens, completion_tokens, total_tokens = self._extract_usage(
@@ -208,6 +216,13 @@ class RetrievalRequester:
             len(documents),
         )
         return results
+
+    def _use_openai_client(
+        self, client: AsyncOpenAI
+    ) -> AbstractAsyncContextManager[None]:
+        if self._track_openai_client_use is None:
+            return nullcontext()
+        return self._track_openai_client_use(client)
 
     def _normalize_rerank_payload(self, response: Any) -> dict[str, Any]:
         if isinstance(response, dict):
