@@ -18,6 +18,7 @@ from ..coercers import (
     _normalize_base_url,
     _warn_env_fallback,
 )
+from ..search import normalize_search_priority
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,9 @@ logger = logging.getLogger(__name__)
 def load_network(
     data: dict[str, Any], *, config_path: Optional[Path] = None
 ) -> dict[str, Any]:
+    search_priority = normalize_search_priority(
+        _get_value(data, ("search", "priority"), "SEARCH_PRIORITY")
+    )
     searxng_url = _coerce_str(
         _get_value(data, ("search", "searxng_url"), "SEARXNG_URL"), ""
     )
@@ -35,6 +39,33 @@ def load_network(
             "GROK_SEARCH_ENABLED",
         ),
         False,
+    )
+    firecrawl_search_enabled = _coerce_bool(
+        _get_value(
+            data,
+            ("search", "firecrawl", "enabled"),
+            "FIRECRAWL_SEARCH_ENABLED",
+        ),
+        False,
+    )
+    firecrawl_api_key = _coerce_str(
+        _get_value(
+            data,
+            ("search", "firecrawl", "api_key"),
+            "FIRECRAWL_API_KEY",
+        ),
+        "",
+    )
+    firecrawl_base_url = _normalize_base_url(
+        _coerce_str(
+            _get_value(
+                data,
+                ("search", "firecrawl", "base_url"),
+                "FIRECRAWL_BASE_URL",
+            ),
+            "https://api.firecrawl.dev",
+        ),
+        "https://api.firecrawl.dev",
     )
 
     use_proxy = _coerce_bool(
@@ -143,8 +174,12 @@ def load_network(
 
     # Bilibili 配置
     return {
+        "search_priority": search_priority,
         "searxng_url": searxng_url,
         "grok_search_enabled": grok_search_enabled,
+        "firecrawl_search_enabled": firecrawl_search_enabled,
+        "firecrawl_api_key": firecrawl_api_key,
+        "firecrawl_base_url": firecrawl_base_url,
         "use_proxy": use_proxy,
         "http_proxy": http_proxy,
         "https_proxy": https_proxy,

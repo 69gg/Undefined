@@ -110,7 +110,7 @@ def _coerce_int_list(value: Any) -> list[int]:
     return []
 
 
-def _coerce_str_list(value: Any) -> list[str]:
+def coerce_str_list(value: Any) -> list[str]:
     if value is None:
         return []
     if isinstance(value, list):
@@ -118,6 +118,10 @@ def _coerce_str_list(value: Any) -> list[str]:
     if isinstance(value, str):
         return [part.strip() for part in value.split(",") if part.strip()]
     return []
+
+
+def _coerce_str_list(value: Any) -> list[str]:
+    return coerce_str_list(value)
 
 
 def _coerce_request_params(value: Any) -> dict[str, Any]:

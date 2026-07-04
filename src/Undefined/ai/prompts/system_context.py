@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from Undefined.config.search import (
+    DEFAULT_SEARCH_PRIORITY,
+    SEARCH_TOOL_FIRECRAWL,
+    SEARCH_TOOL_GROK,
+    SEARCH_TOOL_SEARXNG,
+    order_by_priority,
+)
+
 
 def select_system_prompt_path(
     *,
@@ -79,8 +87,26 @@ def build_model_config_info(runtime_config: Any) -> str:
     knowledge_enabled = bool(getattr(runtime_config, "knowledge_enabled", False))
     parts.append(f"- 知识库: {'已启用' if knowledge_enabled else '未启用'}")
 
-    grok_search_enabled = bool(getattr(runtime_config, "grok_search_enabled", False))
-    parts.append(f"- 联网搜索: {'已启用' if grok_search_enabled else '未启用'}")
+    search_priority = list(
+        getattr(runtime_config, "search_priority", []) or DEFAULT_SEARCH_PRIORITY
+    )
+    enabled_search_tools: list[str] = []
+    if bool(getattr(runtime_config, "grok_search_enabled", False)):
+        enabled_search_tools.append(SEARCH_TOOL_GROK)
+    if bool(getattr(runtime_config, "firecrawl_search_enabled", False)):
+        enabled_search_tools.append(SEARCH_TOOL_FIRECRAWL)
+    if str(getattr(runtime_config, "searxng_url", "") or "").strip():
+        enabled_search_tools.append(SEARCH_TOOL_SEARXNG)
+    ordered_enabled_search_tools = order_by_priority(
+        search_priority,
+        set(enabled_search_tools),
+    )
+    if ordered_enabled_search_tools:
+        parts.append(
+            f"- 联网搜索: 已启用（优先级={' > '.join(ordered_enabled_search_tools)}）"
+        )
+    else:
+        parts.append("- 联网搜索: 未启用")
 
     memes = getattr(runtime_config, "memes", None)
     if memes is not None:

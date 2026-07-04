@@ -58,9 +58,11 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 
 负责网页搜索和网页内容爬取，能够获取互联网上的实时最新信息。
 
-**子工具**：`grok_search`（Grok 搜索）、`web_search`（通用搜索）、`crawl_webpage`（网页内容提取）
+**子工具**：`grok_search`（Grok 搜索）、`firecrawl_search`（Firecrawl 搜索）、`web_search`（SearXNG 搜索）、`crawl_webpage`（网页内容提取）
 
 启用 `grok_search` 后，工具会在调用 Grok 模型时注入检索约束：以服务端提供的当前时间为准，先调用搜索能力，使用多组搜索查询或多个搜索工具进行交叉检索，禁止编造，并在输出中给出来源。
+
+搜索工具优先级由 `[search].priority` 配置并注入 `web_agent` 提示词；关闭的搜索工具会从工具列表中隐藏。`firecrawl_search` 支持 Firecrawl API Key，未配置 Key 时使用 keyless 搜索。
 
 **示例：**
 > *"请搜索最近三天关于 DeepSeek 的最新动态并生成摘要。"*

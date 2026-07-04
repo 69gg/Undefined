@@ -12,6 +12,7 @@ from Undefined.skills.agents.runner.webchat_utils import (
     webchat_agent_path,
     webchat_depth,
 )
+from Undefined.config.search import SEARCH_TOOL_FIRECRAWL, SEARCH_TOOL_GROK
 from Undefined.utils.tool_calls import parse_tool_arguments
 
 
@@ -37,18 +38,21 @@ def _filter_tools_for_runtime_config(
     tools: list[dict[str, Any]],
     runtime_config: Any | None,
 ) -> list[dict[str, Any]]:
-    # web_agent 在 grok 未启用时从 schema 中剔除 grok_search
+    # web_agent 在搜索服务未启用时从 schema 中剔除对应工具。
     if agent_name != "web_agent" or runtime_config is None:
-        return tools
-
-    if bool(getattr(runtime_config, "grok_search_enabled", False)):
         return tools
 
     filtered: list[dict[str, Any]] = []
     for tool in tools:
         function = tool.get("function") if isinstance(tool, dict) else None
         name = function.get("name") if isinstance(function, dict) else None
-        if name == "grok_search":
+        if name == SEARCH_TOOL_GROK and not bool(
+            getattr(runtime_config, "grok_search_enabled", False)
+        ):
+            continue
+        if name == SEARCH_TOOL_FIRECRAWL and not bool(
+            getattr(runtime_config, "firecrawl_search_enabled", False)
+        ):
             continue
         filtered.append(tool)
     return filtered
