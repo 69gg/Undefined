@@ -8,6 +8,7 @@ from typing import Any
 import aiofiles
 
 from Undefined.config.models import AgentModelConfig
+from Undefined.config.search import DEFAULT_SEARCH_PRIORITY, KNOWN_SEARCH_TOOLS
 from Undefined.skills.agents.agent_tool_registry import AgentToolRegistry
 from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
 
@@ -23,6 +24,60 @@ async def load_prompt_text(agent_dir: Path, default_prompt: str) -> str:
         async with aiofiles.open(prompt_path, "r", encoding="utf-8") as file:
             return await file.read()
     return default_prompt
+
+
+def _tool_names(tools: list[dict[str, Any]]) -> set[str]:
+    names: set[str] = set()
+    for tool in tools:
+        function = tool.get("function") if isinstance(tool, dict) else None
+        name = function.get("name") if isinstance(function, dict) else None
+        if isinstance(name, str) and name:
+            names.add(name)
+    return names
+
+
+def _build_web_agent_search_priority_prompt(
+    runtime_config: Any | None,
+    tools: list[dict[str, Any]],
+) -> str:
+    available_names = _tool_names(tools)
+    priority = list(getattr(runtime_config, "search_priority", []) or [])
+    if not priority:
+        priority = list(DEFAULT_SEARCH_PRIORITY)
+
+    ordered = [name for name in priority if name in available_names]
+    ordered.extend(
+        name
+        for name in DEFAULT_SEARCH_PRIORITY
+        if name in available_names and name not in ordered
+    )
+    if not ordered:
+        return ""
+
+    return "\n".join(
+        [
+            "【搜索工具优先级】",
+            f"- 当前可用搜索工具优先级：{' > '.join(ordered)}。",
+            "- 搜索类任务优先考虑排在前面的工具；当前一个工具不可用、不适合、结果不足或需要交叉验证时，再使用后面的工具。",
+            "- 关闭的搜索工具不会出现在可用工具列表中；不要提议或假装调用未提供的工具。",
+        ]
+    )
+
+
+def _append_web_agent_runtime_prompt(
+    agent_name: str,
+    system_prompt: str,
+    runtime_config: Any | None,
+    tools: list[dict[str, Any]],
+) -> str:
+    if agent_name != "web_agent":
+        return system_prompt
+    if not (_tool_names(tools) & KNOWN_SEARCH_TOOLS):
+        return system_prompt
+    priority_prompt = _build_web_agent_search_priority_prompt(runtime_config, tools)
+    if not priority_prompt:
+        return system_prompt
+    return f"{system_prompt.rstrip()}\n\n{priority_prompt}"
 
 
 @dataclass
@@ -92,6 +147,12 @@ async def prepare_agent_run(
             global_enabled=global_enabled,
         )
     system_prompt = await load_prompt_text(agent_dir, default_prompt)
+    system_prompt = _append_web_agent_runtime_prompt(
+        agent_name,
+        system_prompt,
+        runtime_config,
+        tools,
+    )
 
     if agent_skill_registry and agent_skill_registry.has_skills():
         skills_xml = agent_skill_registry.build_metadata_xml()

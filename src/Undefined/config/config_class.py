@@ -110,8 +110,12 @@ class Config:
     agent_intro_autogen_queue_interval: float
     agent_intro_autogen_max_tokens: int
     agent_intro_hash_path: str
+    search_priority: list[str]
     searxng_url: str
     grok_search_enabled: bool
+    firecrawl_search_enabled: bool
+    firecrawl_api_key: str
+    firecrawl_base_url: str
     use_proxy: bool
     http_proxy: str
     https_proxy: str

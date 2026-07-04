@@ -263,8 +263,9 @@ mv skills/tools/my_tool skills/agents/my_agent/tools/
 - **功能**：联网搜索、网页阅读、来源核验和最新信息获取。
 - **适用场景**：新闻/公告/资料搜索、指定 URL 摘要、多来源对比、时效性问题核验。
 - **不适用**：天气、金价、热搜、Whois、B 站、arXiv 检索等结构化查询；用户附件或文件解析。
-- **子工具**：`grok_search`, `web_search`, `crawl_webpage`。
-- **grok_search 参数**：优先使用 `search_request`，用自然语言完整叙述搜索要求，不要只传关键词。
+- **子工具**：`grok_search`, `firecrawl_search`, `web_search`, `crawl_webpage`。
+- **搜索优先级**：由 `[search].priority` 注入提示词引导，关闭的搜索工具会从 `web_agent` 工具列表中隐藏。
+- **grok_search 参数**：使用 `search_request`，用自然语言完整叙述搜索要求，不要只传关键词。
 
 ### file_analysis_agent（文件分析助手）
 - **功能**：分析用户提供的附件、内部 UID、URL、legacy file_id、arXiv 论文标识或 Bilibili 视频标识，提取文件内容。

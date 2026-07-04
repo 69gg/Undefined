@@ -32,3 +32,12 @@ def test_alternate_env_keys_documented() -> None:
 
 def test_registry_has_model_context_window_entries() -> None:
     assert ("models", "chat", "context_window_tokens") in ENV_REGISTRY
+
+
+def test_registry_has_search_firecrawl_entries() -> None:
+    assert ENV_REGISTRY[("search", "priority")] == "SEARCH_PRIORITY"
+    assert (
+        ENV_REGISTRY[("search", "firecrawl", "enabled")] == "FIRECRAWL_SEARCH_ENABLED"
+    )
+    assert ENV_REGISTRY[("search", "firecrawl", "api_key")] == "FIRECRAWL_API_KEY"
+    assert ENV_REGISTRY[("search", "firecrawl", "base_url")] == "FIRECRAWL_BASE_URL"

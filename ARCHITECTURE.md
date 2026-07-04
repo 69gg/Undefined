@@ -114,7 +114,7 @@ graph TB
         
         subgraph IntelligentAgents["智能体 Agents (skills/agents/, 7个)"]
             A_Info["info_agent<br/>信息查询助手<br/>(18个工具)<br/>• weather_query<br/>• *hot 热搜<br/>• bilibili_*<br/>• arxiv_search<br/>• whois"]
-            A_Web["web_agent<br/>网络搜索助手<br/>(3个工具 + MCP)<br/>• web_search<br/>• crawl_webpage<br/>• Playwright MCP"]
+            A_Web["web_agent<br/>网络搜索助手<br/>(4个工具 + MCP)<br/>• grok_search<br/>• firecrawl_search<br/>• web_search<br/>• crawl_webpage<br/>• Playwright MCP"]
             A_File["file_analysis_agent<br/>文件分析助手<br/>• extract_* (PDF/Word/Excel/PPT)<br/>• describe_pdf_page<br/>• analyze_code<br/>• analyze_multimodal"]
             A_Naga["naga_code_analysis_agent<br/>NagaAgent 代码分析<br/>(7个工具)<br/>• read_file / glob<br/>• search_file_content"]
             A_Self["undefined_self_code_agent<br/>Undefined 自身代码查阅<br/>(4个工具)<br/>• read_file / list_directory<br/>• glob / search_file_content"]

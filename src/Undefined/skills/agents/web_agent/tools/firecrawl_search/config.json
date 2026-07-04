@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "firecrawl_search",
+        "description": "使用 Firecrawl Search 进行网页搜索。适合需要通用网页结果、可追溯链接和快速补充检索的场景。是否优先使用取决于当前 search.priority 配置；若排在 grok_search 之后，应在 grok_search 不可用、不适合或需要补充交叉检索时使用。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "搜索查询。保留用户明确要求的时间、地区、站点、排除项和关键词，不要主动添加用户未要求的硬性范围。"
+                },
+                "num_results": {
+                    "type": "integer",
+                    "description": "返回结果数量（默认为 5，范围 1-10）"
+                }
+            },
+            "required": ["query"]
+        }
+    }
+}

@@ -648,12 +648,22 @@ Prompt caching 补充：
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
+| `priority` | `["grok_search", "firecrawl_search", "web_search"]` | `web_agent` 搜索工具优先级；关闭的工具会隐藏，开启后仅通过提示词引导选择 |
 | `searxng_url` | `""` | SearXNG 地址；为空则禁用搜索包装器 |
-| `grok_search_enabled` | `false` | 是否在 `web_agent` 中暴露 `grok_search`；启用后该工具优先于 `web_search` |
+| `grok_search_enabled` | `false` | 是否在 `web_agent` 中暴露 `grok_search`；关闭时隐藏该工具 |
+
+#### `search.firecrawl`
+
+| 字段 | 默认值 | 说明 |
+|---|---:|---|
+| `enabled` | `false` | 是否在 `web_agent` 中暴露 `firecrawl_search`；关闭时隐藏该工具 |
+| `api_key` | `""` | Firecrawl API Key；为空时使用 keyless 搜索 |
+| `base_url` | `"https://api.firecrawl.dev"` | Firecrawl API 基础地址 |
 
 补充：
 - `searxng_url` 可热更新，运行时会重建搜索客户端。
-- `grok_search_enabled` 不需要重建客户端；它只影响 `web_agent` 的工具暴露。
+- `grok_search_enabled`、`search.firecrawl.*`、`priority` 不需要重建客户端；它们影响 `web_agent` 的工具暴露和提示词优先级。
+- `firecrawl_search` 调用 Firecrawl `POST /v2/search`；配置 `api_key` 时发送 `Authorization: Bearer`，为空则走 Firecrawl keyless。
 
 ---
 
@@ -1087,6 +1097,7 @@ Prompt caching 补充：
 - `render.browser_max_concurrency` 会在当前渲染任务空闲后重建渲染并发信号量。
 - `skills.intro_autogen_*`（Agent intro 生成器配置刷新）
 - `search.searxng_url`（搜索客户端刷新）
+- `search.priority` / `search.firecrawl.*` / `search.grok_search_enabled` 会随运行时配置更新，用于后续 `web_agent` 工具暴露和提示词优先级；无需重启。
 - `skills.hot_reload*`（技能热重载任务重启）
 - `skills.hot_reload_interval/debounce`（配置热更新监听器自身重启）
 
@@ -1293,7 +1304,11 @@ Prompt caching 补充：
 
 | TOML 路径 | 环境变量 |
 |-----------|----------|
+| `search.priority` | `SEARCH_PRIORITY` |
 | `search.searxng_url` | `SEARXNG_URL` |
+| `search.firecrawl.enabled` | `FIRECRAWL_SEARCH_ENABLED` |
+| `search.firecrawl.api_key` | `FIRECRAWL_API_KEY` |
+| `search.firecrawl.base_url` | `FIRECRAWL_BASE_URL` |
 
 #### `skills`
 
