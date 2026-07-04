@@ -9,6 +9,7 @@ from Undefined.config.search import (
     SEARCH_TOOL_FIRECRAWL,
     SEARCH_TOOL_GROK,
     SEARCH_TOOL_SEARXNG,
+    order_by_priority,
 )
 
 
@@ -96,13 +97,9 @@ def build_model_config_info(runtime_config: Any) -> str:
         enabled_search_tools.append(SEARCH_TOOL_FIRECRAWL)
     if str(getattr(runtime_config, "searxng_url", "") or "").strip():
         enabled_search_tools.append(SEARCH_TOOL_SEARXNG)
-    ordered_enabled_search_tools = [
-        name for name in search_priority if name in enabled_search_tools
-    ]
-    ordered_enabled_search_tools.extend(
-        name
-        for name in enabled_search_tools
-        if name not in ordered_enabled_search_tools
+    ordered_enabled_search_tools = order_by_priority(
+        search_priority,
+        set(enabled_search_tools),
     )
     if ordered_enabled_search_tools:
         parts.append(

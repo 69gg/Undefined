@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Final
 
-from .coercers import _coerce_str_list
+from .coercers import coerce_str_list
 
 SEARCH_TOOL_GROK: Final = "grok_search"
 SEARCH_TOOL_FIRECRAWL: Final = "firecrawl_search"
@@ -21,7 +21,7 @@ KNOWN_SEARCH_TOOLS: Final[frozenset[str]] = frozenset(DEFAULT_SEARCH_PRIORITY)
 def normalize_search_priority(value: Any) -> list[str]:
     """Return a stable ordered search tool list from TOML/env input."""
 
-    raw_items = _coerce_str_list(value)
+    raw_items = coerce_str_list(value)
     normalized: list[str] = []
     for item in raw_items:
         if item not in KNOWN_SEARCH_TOOLS or item in normalized:
@@ -35,3 +35,19 @@ def normalize_search_priority(value: Any) -> list[str]:
         if item not in normalized:
             normalized.append(item)
     return normalized
+
+
+def order_by_priority(
+    priority: list[str] | tuple[str, ...],
+    available: set[str],
+) -> list[str]:
+    """Order available search tools by configured priority, then append leftovers."""
+
+    configured = list(priority or DEFAULT_SEARCH_PRIORITY)
+    ordered = [name for name in configured if name in available]
+    ordered.extend(
+        name
+        for name in DEFAULT_SEARCH_PRIORITY
+        if name in available and name not in ordered
+    )
+    return ordered

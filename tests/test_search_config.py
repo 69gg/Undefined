@@ -9,6 +9,7 @@ from Undefined.config.search import (
     SEARCH_TOOL_FIRECRAWL,
     SEARCH_TOOL_GROK,
     SEARCH_TOOL_SEARXNG,
+    order_by_priority,
 )
 
 
@@ -33,6 +34,19 @@ def test_search_config_defaults() -> None:
     assert cfg.firecrawl_search_enabled is False
     assert cfg.firecrawl_api_key == ""
     assert cfg.firecrawl_base_url == "https://api.firecrawl.dev"
+
+
+def test_order_by_priority_filters_and_appends_default_order() -> None:
+    ordered = order_by_priority(
+        [SEARCH_TOOL_SEARXNG, SEARCH_TOOL_FIRECRAWL],
+        {SEARCH_TOOL_GROK, SEARCH_TOOL_FIRECRAWL, SEARCH_TOOL_SEARXNG},
+    )
+
+    assert ordered == [
+        SEARCH_TOOL_SEARXNG,
+        SEARCH_TOOL_FIRECRAWL,
+        SEARCH_TOOL_GROK,
+    ]
 
 
 def test_search_config_loads_firecrawl_and_priority(tmp_path: Path) -> None:

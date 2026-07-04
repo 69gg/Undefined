@@ -8,7 +8,7 @@ from typing import Any
 import aiofiles
 
 from Undefined.config.models import AgentModelConfig
-from Undefined.config.search import DEFAULT_SEARCH_PRIORITY, KNOWN_SEARCH_TOOLS
+from Undefined.config.search import KNOWN_SEARCH_TOOLS, order_by_priority
 from Undefined.skills.agents.agent_tool_registry import AgentToolRegistry
 from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
 
@@ -42,15 +42,7 @@ def _build_web_agent_search_priority_prompt(
 ) -> str:
     available_names = _tool_names(tools)
     priority = list(getattr(runtime_config, "search_priority", []) or [])
-    if not priority:
-        priority = list(DEFAULT_SEARCH_PRIORITY)
-
-    ordered = [name for name in priority if name in available_names]
-    ordered.extend(
-        name
-        for name in DEFAULT_SEARCH_PRIORITY
-        if name in available_names and name not in ordered
-    )
+    ordered = order_by_priority(priority, available_names)
     if not ordered:
         return ""
 
