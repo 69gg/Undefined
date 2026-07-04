@@ -14,6 +14,7 @@ from ..coercers import (
     _coerce_float,
     _coerce_int,
     _coerce_str,
+    _get_nested,
     _get_value,
     _normalize_base_url,
     _warn_env_fallback,
@@ -40,14 +41,18 @@ def load_network(
         ),
         False,
     )
-    firecrawl_search_enabled = _coerce_bool(
-        _get_value(
-            data,
-            ("search", "firecrawl", "enabled"),
-            "FIRECRAWL_SEARCH_ENABLED",
-        ),
-        False,
+    firecrawl_enabled_value = _get_nested(
+        data,
+        ("search", "firecrawl_search_enabled"),
     )
+    if firecrawl_enabled_value is None:
+        firecrawl_enabled_value = _get_nested(data, ("search", "firecrawl", "enabled"))
+    if firecrawl_enabled_value is None:
+        env_value = os.getenv("FIRECRAWL_SEARCH_ENABLED")
+        if env_value is not None and env_value.strip():
+            _warn_env_fallback("FIRECRAWL_SEARCH_ENABLED")
+            firecrawl_enabled_value = env_value
+    firecrawl_search_enabled = _coerce_bool(firecrawl_enabled_value, False)
     firecrawl_api_key = _coerce_str(
         _get_value(
             data,

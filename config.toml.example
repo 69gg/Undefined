@@ -1011,13 +1011,13 @@ searxng_url = ""
 # zh: 是否在 web_agent 中启用 grok_search。关闭时该工具会从 web_agent 工具列表中隐藏。
 # en: Enable grok_search in web_agent. When disabled, this tool is hidden from the web_agent tool list.
 grok_search_enabled = false
+# zh: 是否在 web_agent 中启用 firecrawl_search。默认关闭；关闭时该工具会隐藏。
+# en: Enable firecrawl_search in web_agent. Disabled by default; when disabled, this tool is hidden.
+firecrawl_search_enabled = false
 
 # zh: Firecrawl 搜索服务配置。
 # en: Firecrawl search service config.
 [search.firecrawl]
-# zh: 是否在 web_agent 中启用 firecrawl_search。默认关闭；关闭时该工具会隐藏。
-# en: Enable firecrawl_search in web_agent. Disabled by default; when disabled, this tool is hidden.
-enabled = false
 # zh: Firecrawl API Key。为空时使用 Firecrawl keyless 搜索；填写后会发送 Authorization: Bearer。
 # en: Firecrawl API key. Leave empty for Firecrawl keyless search; when set, Authorization: Bearer is sent.
 api_key = ""

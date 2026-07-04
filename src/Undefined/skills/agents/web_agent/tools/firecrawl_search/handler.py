@@ -86,7 +86,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     if runtime_config is None:
         return "Firecrawl 搜索功能不可用（缺少运行时配置）"
     if not bool(getattr(runtime_config, "firecrawl_search_enabled", False)):
-        return "Firecrawl 搜索功能未启用（search.firecrawl.enabled=false）"
+        return "Firecrawl 搜索功能未启用（search.firecrawl_search_enabled=false）"
 
     base_url = _string_value(
         getattr(runtime_config, "firecrawl_base_url", "https://api.firecrawl.dev")

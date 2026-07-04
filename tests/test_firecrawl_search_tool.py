@@ -78,7 +78,7 @@ async def test_firecrawl_search_returns_disabled_when_switch_is_off() -> None:
         {"runtime_config": _runtime_config(firecrawl_search_enabled=False)},
     )
 
-    assert result == "Firecrawl 搜索功能未启用（search.firecrawl.enabled=false）"
+    assert result == "Firecrawl 搜索功能未启用（search.firecrawl_search_enabled=false）"
 
 
 @pytest.mark.asyncio

@@ -74,9 +74,9 @@ model_name = "agent"
 [search]
 priority = ["web_search", "firecrawl_search", "web_search", "unknown"]
 grok_search_enabled = true
+firecrawl_search_enabled = true
 
 [search.firecrawl]
-enabled = true
 api_key = "fc-test"
 base_url = "https://firecrawl.internal/"
 """,
@@ -94,6 +94,48 @@ base_url = "https://firecrawl.internal/"
     assert cfg.firecrawl_search_enabled is True
     assert cfg.firecrawl_api_key == "fc-test"
     assert cfg.firecrawl_base_url == "https://firecrawl.internal"
+
+
+def test_search_config_accepts_legacy_firecrawl_enabled() -> None:
+    cfg = Config.from_mapping(
+        {
+            **_MINIMAL_MAPPING,
+            "search": {"firecrawl": {"enabled": True}},
+        },
+        strict=False,
+    )
+
+    assert cfg.firecrawl_search_enabled is True
+
+
+def test_search_config_prefers_new_firecrawl_switch_over_legacy() -> None:
+    cfg = Config.from_mapping(
+        {
+            **_MINIMAL_MAPPING,
+            "search": {
+                "firecrawl_search_enabled": False,
+                "firecrawl": {"enabled": True},
+            },
+        },
+        strict=False,
+    )
+
+    assert cfg.firecrawl_search_enabled is False
+
+
+def test_search_config_prefers_legacy_firecrawl_switch_over_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FIRECRAWL_SEARCH_ENABLED", "false")
+    cfg = Config.from_mapping(
+        {
+            **_MINIMAL_MAPPING,
+            "search": {"firecrawl": {"enabled": True}},
+        },
+        strict=False,
+    )
+
+    assert cfg.firecrawl_search_enabled is True
 
 
 def test_search_config_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
