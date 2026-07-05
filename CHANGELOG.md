@@ -1,3 +1,14 @@
+## v3.6.5 Firecrawl 搜索、代理作用域与热更新连接修复
+
+本版本聚焦联网能力与出站配置治理：`web_agent` 新增 Firecrawl 搜索提供商和搜索优先级控制，代理配置从全局开关收敛为模型与功能段独立启用，并修复配置热更新时旧模型连接可能被提前关闭的问题。
+
+- 新增 Firecrawl 搜索。`web_agent` 可按 `[search].priority` 在 Grok、Firecrawl 与 SearXNG 间排序；未启用的搜索工具会从工具 schema 隐藏，Firecrawl 支持 API Key、base URL 与 keyless 模式。
+- 收敛代理配置。`[proxy]` 仅保存 `http_proxy` / `https_proxy`，是否走代理改由模型、搜索、附件、渲染、消息、Bilibili、arXiv、GitHub、Naga 和 API callback 等作用域的 `use_proxy` 独立控制。
+- 修复模型热更新连接生命周期。清理模型客户端缓存时会延迟关闭仍在使用的 HTTP client，避免流式、检索或并发请求在热更新期间被提前断开。
+- 同步配置解析、文档与测试覆盖。拆分模型配置 parser，补充 Firecrawl 开关兼容、代理环境变量映射、作用域代理与 LLM 代理回归测试。
+
+---
+
 ## v3.6.4 可选系统信息注入
 
 本版本新增了默认关闭的系统信息 Prompt 注入能力。
